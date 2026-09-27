@@ -109,5 +109,24 @@ interpret the address provenance flags alone as proof of device accessibility.
 
 ## Artifact
 
-The Phase 24 build, ISO, manifest, SHA-256, build identity, source commit,
-regression result, and QEMU serial log are recorded here after validation.
+The Phase 24 AMD64 UEFI build and ISO passed structural verification.
+
+- ISO: `dist/guideXOS-Server-v0.1.0-phase24-aida-i219-dma-fetch-amd64.iso`
+- Size: `91,293,696` bytes
+- SHA-256: `3ecf031dc5fb6f56e483e9804f6ff8ae9a166659c423cc0aa02348659e8d894f`
+- Manifest: `dist/guideXOS-Server-v0.1.0-phase24-aida-i219-dma-fetch-amd64.manifest.json`
+- Manifest build identity: `GXOS-P7-4-f49d7a994cf3-f7b5ec79-82a6-408a-b80e-25a95da25aad`
+- ESP `build-identity.txt` ID: `GXOS-P7-4-36f568003ced45fca3e3ecec620b2759`
+- Kernel SHA-256: `d2fa7d729c97572abb9fa1e88212975b282ee6c53be1df891983dac88372f146`
+- Source commit: `f49d7a994cf3c04dd1eeef58255572da448ae129`
+- Regression: Phase 11–23 chain and Phase 24 no-DMAR checks passed.
+- QEMU: all firmware, bootloader, kernel, ramdisk, desktop-ready and main-loop
+  markers observed. Serial log:
+  `out/release-iso/qemu-test-531ee355a8b6400e9e3814269698464c/serial.log`
+- QEMU serial log SHA-256:
+  `17362773601134494008fb47f419a6706c35807527e0fd9bd71c931935ba659b`
+
+The release manifest records `worktreeCleanAtPackagingStart=false` because the
+build refreshed the tracked `ESP/build-identity.txt`. Its `sourceGitCommit`
+points at the Phase 24 implementation commit above. QEMU validates bootability
+and the emulated E1000 path only; the physical AIDA_LPT result remains pending.
