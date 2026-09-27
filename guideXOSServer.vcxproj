@@ -245,6 +245,10 @@
     <ClInclude Include="kernel\core\include\kernel\architecture_detector.h" />
     <ClInclude Include="kernel\core\include\kernel\ata.h" />
     <ClInclude Include="kernel\core\include\kernel\block_device.h" />
+    <ClInclude Include="kernel\core\include\kernel\virtio_rng.h" />
+    <ClInclude Include="kernel\core\include\kernel\storage_manager.h" />
+    <ClInclude Include="kernel\core\include\kernel\partition_table.h" />
+    <ClInclude Include="kernel\core\include\kernel\disk_initialization.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop_capabilities.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop_font.h" />
@@ -512,6 +516,10 @@
     <ClCompile Include="kernel\core\architecture_detector.cpp" />
     <ClCompile Include="kernel\core\ata.cpp" />
     <ClCompile Include="kernel\core\block_device.cpp" />
+    <ClCompile Include="kernel\core\virtio_rng.cpp" />
+    <ClCompile Include="kernel\core\storage_manager.cpp" />
+    <ClCompile Include="kernel\core\partition_table.cpp" />
+    <ClCompile Include="kernel\core\disk_initialization.cpp" />
     <ClCompile Include="kernel\core\cxx_runtime.cpp" />
     <ClCompile Include="kernel\core\desktop.cpp" />
     <ClCompile Include="kernel\core\desktop_capabilities.cpp" />

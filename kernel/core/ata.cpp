@@ -446,6 +446,7 @@ static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
         memzero(&bdev, sizeof(bdev));
         bdev.active       = true;
         bdev.type         = block::BDEV_ATA_PIO;
+        bdev.bootProvenance = block::BOOT_PROVENANCE_UNKNOWN;
         bdev.driverIndex  = s_deviceCount;
         bdev.totalSectors = dev.totalSectors;
         bdev.sectorSize   = dev.sectorSize;

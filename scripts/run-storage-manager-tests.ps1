@@ -17,6 +17,7 @@ try {
         kernel/core/block_device.cpp `
         kernel/core/storage_manager.cpp `
         kernel/core/partition_table.cpp `
+        kernel/core/disk_initialization.cpp `
         kernel/core/ramdisk.cpp `
         -o $testExe
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

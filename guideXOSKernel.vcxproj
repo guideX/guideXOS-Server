@@ -208,6 +208,10 @@
     <ClInclude Include="kernel\core\include\kernel\ata.h" />
     <ClInclude Include="kernel\core\include\kernel\nvme.h" />
     <ClInclude Include="kernel\core\include\kernel\block_device.h" />
+    <ClInclude Include="kernel\core\include\kernel\virtio_rng.h" />
+    <ClInclude Include="kernel\core\include\kernel\storage_manager.h" />
+    <ClInclude Include="kernel\core\include\kernel\partition_table.h" />
+    <ClInclude Include="kernel\core\include\kernel\disk_initialization.h" />
     <ClInclude Include="kernel\core\include\kernel\fs_fat.h" />
     <ClInclude Include="kernel\core\include\kernel\fs_ext4.h" />
     <ClInclude Include="kernel\core\include\kernel\fs_ufs.h" />
@@ -296,6 +300,10 @@
     <ClCompile Include="kernel\core\ata.cpp" />
     <ClCompile Include="kernel\core\nvme.cpp" />
     <ClCompile Include="kernel\core\block_device.cpp" />
+    <ClCompile Include="kernel\core\virtio_rng.cpp" />
+    <ClCompile Include="kernel\core\storage_manager.cpp" />
+    <ClCompile Include="kernel\core\partition_table.cpp" />
+    <ClCompile Include="kernel\core\disk_initialization.cpp" />
     <ClCompile Include="kernel\core\fs_fat.cpp" />
     <ClCompile Include="kernel\core\fs_ext4.cpp" />
     <ClCompile Include="kernel\core\fs_ufs.cpp" />

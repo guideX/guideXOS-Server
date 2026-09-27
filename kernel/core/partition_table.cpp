@@ -500,6 +500,7 @@ bool parse_partition_table(uint8_t deviceIndex, PartitionTableModel& model)
     }
     const bool mbrSignature = mbrSector[MBR_SIGNATURE_OFFSET] == 0x55 &&
                               mbrSector[MBR_SIGNATURE_OFFSET + 1] == 0xAA;
+    model.mbrDiskSignature = read_u32(mbrSector + 440);
     bool mbrStructurallyValid = false;
     bool protectiveMbr = false;
     if (mbrSignature) {
@@ -525,6 +526,8 @@ bool parse_partition_table(uint8_t deviceIndex, PartitionTableModel& model)
     model.primaryGptValid = primaryValid;
     model.backupGptValid = backupValid;
     model.protectiveMbr = protectiveMbr;
+    if (primaryValid) copy_bytes(model.primaryDiskGuid, primaryHeader.diskGuid, 16);
+    if (backupValid) copy_bytes(model.backupDiskGuid, backupHeader.diskGuid, 16);
 
     if (primaryValid || backupValid || primarySignature || backupSignature || protectiveMbr) {
         model.scheme = PARTITION_SCHEME_GPT;

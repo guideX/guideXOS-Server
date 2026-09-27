@@ -241,6 +241,7 @@ static uint8_t register_ramdisk_block(uint8_t index)
     memzero(&bdev, sizeof(bdev));
     bdev.active = true;
     bdev.type = block::BDEV_RAMDISK;
+    bdev.bootProvenance = block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT;
     bdev.driverIndex = index;
     bdev.totalSectors = disk.sectorCount;
     bdev.sectorSize = disk.sectorSize;

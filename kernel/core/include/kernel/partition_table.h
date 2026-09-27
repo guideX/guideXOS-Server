@@ -77,6 +77,9 @@ struct PartitionTableModel {
     bool primaryGptValid;
     bool backupGptValid;
     bool gptCopiesAgree;
+    uint8_t primaryDiskGuid[16];
+    uint8_t backupDiskGuid[16];
+    uint32_t mbrDiskSignature;
     PartitionEntry partitions[MAX_PARSED_PARTITIONS];
 };
 

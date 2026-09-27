@@ -66,9 +66,19 @@ enum MountSafety : uint8_t {
     DEVICE_IDENTITY_UNKNOWN,
 };
 
+enum BootSafety : uint8_t {
+    BOOT_DEVICE_DEFINITELY_NOT_TARGET = 0,
+    BOOT_DEVICE_IS_TARGET,
+    BOOT_DEVICE_IDENTITY_UNKNOWN,
+};
+
 struct MountProtection {
     MountSafety safety;
     bool partitionIdentityKnown;
+};
+
+struct BootProtection {
+    BootSafety safety;
 };
 
 enum SafetyIssue : uint32_t {
@@ -83,6 +93,8 @@ enum SafetyIssue : uint32_t {
     SAFETY_ISSUE_MOUNTED = 1u << 7,
     SAFETY_ISSUE_ROOT_BACKING = 1u << 8,
     SAFETY_ISSUE_PARTITION_STATE = 1u << 9,
+    SAFETY_ISSUE_BOOT_BACKING = 1u << 10,
+    SAFETY_ISSUE_BOOT_IDENTITY_UNKNOWN = 1u << 11,
 };
 
 struct SafetyRequest {
@@ -121,6 +133,7 @@ bool target_identities_equal(const TargetIdentity& left,
 RevalidationStatus revalidate_target_identity(const TargetIdentity& snapshot);
 
 MountProtection query_mount_protection(const TargetIdentity& target);
+BootProtection query_boot_protection(const TargetIdentity& target);
 bool validate_destructive_target(const TargetIdentity& target,
                                  const SafetyRequest& request,
                                  SafetyValidation& result);

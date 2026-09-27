@@ -6099,11 +6099,20 @@ static uint32_t disk_manager_scale(uint64_t value, uint64_t total, uint32_t widt
 }
 
 DiskManagerApp::DiskManagerApp()
-    : m_diskCount(0), m_selectedDisk(0), m_refreshBtnId(-1) {
+    : m_diskCount(0), m_selectedDisk(0), m_refreshBtnId(-1),
+      m_initializeBtnId(-1), m_gptBtnId(-1), m_mbrBtnId(-1),
+      m_confirmInitializeBtnId(-1), m_cancelInitializeBtnId(-1),
+      m_initializeDialogState(INITIALIZE_DIALOG_CLOSED),
+      m_initializeScheme(storage::DEFAULT_INITIALIZE_SCHEME) {
+    memset(&m_initializePlan, 0, sizeof(m_initializePlan));
+    memset(&m_initializeResult, 0, sizeof(m_initializeResult));
+    m_initializeMessage[0] = '\0';
     strcopy(m_name, "DiskManager", app::MAX_APP_NAME);
 }
 
 DiskManagerApp::~DiskManagerApp() {
+    if (m_initializePlan.confirmationReady)
+        storage::cancel_initialize_disk(m_initializePlan);
 }
 
 bool DiskManagerApp::init() {
@@ -6126,6 +6135,17 @@ bool DiskManagerApp::init() {
     }
 
     m_refreshBtnId = addButton(10, m_window->h - 44, 90, 28, "Refresh");
+    m_initializeBtnId = addButton(108, m_window->h - 44, 140, 28,
+                                  "Initialize Disk...");
+    m_gptBtnId = addButton(10, m_window->h - 44, 140, 28,
+                           "GPT (Default)");
+    m_mbrBtnId = addButton(158, m_window->h - 44, 120, 28,
+                           "MBR (Compatibility)");
+    m_confirmInitializeBtnId = addButton(286, m_window->h - 44, 100, 28,
+                                         "Initialize");
+    m_cancelInitializeBtnId = addButton(394, m_window->h - 44, 82, 28,
+                                       "Cancel");
+    updateInitializeControls();
     scanDisks();
     m_state = app::AppState::Running;
     serial::puts("[DISKMANAGER] Init complete\n");
@@ -6133,6 +6153,9 @@ bool DiskManagerApp::init() {
 }
 
 void DiskManagerApp::shutdown() {
+    if (m_initializePlan.confirmationReady)
+        storage::cancel_initialize_disk(m_initializePlan);
+    m_initializeDialogState = INITIALIZE_DIALOG_CLOSED;
     m_state = app::AppState::Terminated;
 }
 
@@ -6186,6 +6209,30 @@ void DiskManagerApp::scanDisks() {
         e.name[nameIndex] = '\0';
 
         readPartitionTable(e);
+        if (e.state == storage::DISK_STATE_NOT_INITIALIZED) {
+            if (storage::capture_target_identity(i, e.identity)) {
+                storage::InitializeTargetValidation initValidation;
+                e.initializeStatus = storage::probe_initialize_target(
+                    e.identity, storage::DEFAULT_INITIALIZE_SCHEME, initValidation);
+                e.initializeAvailable = e.initializeStatus ==
+                    storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION;
+                if (!e.initializeAvailable &&
+                    e.initializeStatus == storage::INITIALIZE_DISK_TOO_SMALL) {
+                    const storage::InitializeDiskStatus mbrStatus =
+                        storage::probe_initialize_target(e.identity,
+                            storage::PARTITION_SCHEME_MBR, initValidation);
+                    e.initializeAvailable = mbrStatus ==
+                        storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION;
+                    if (!e.initializeAvailable) e.initializeStatus = mbrStatus;
+                }
+            } else {
+                e.initializeStatus = storage::INITIALIZE_DISK_IDENTITY_CHANGED;
+                e.initializeAvailable = false;
+            }
+        } else {
+            e.initializeStatus = storage::INITIALIZE_DISK_NOT_RAW;
+            e.initializeAvailable = false;
+        }
         ++m_diskCount;
     }
 
@@ -6194,8 +6241,11 @@ void DiskManagerApp::scanDisks() {
         memset(&e, 0, sizeof(e));
         strcopy(e.name, "No disks detected", sizeof(e.name));
         e.state = storage::DISK_STATE_UNREADABLE;
+        e.initializeStatus = storage::INITIALIZE_DISK_DEVICE_MISSING;
+        e.initializeAvailable = false;
         m_diskCount = 1;
         m_selectedDisk = 0;
+        updateInitializeControls();
         return;
     }
 
@@ -6208,6 +6258,7 @@ void DiskManagerApp::scanDisks() {
             }
         }
     }
+    updateInitializeControls();
 }
 
 void DiskManagerApp::readPartitionTable(DiskEntry& disk) {
@@ -6327,7 +6378,7 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 
     framebuffer::fill_rect(x, y, w, h, kBg);
     framebuffer::fill_rect(x, y, w, 22, kHeader);
-    appDrawText(x + 10, y + 7, "Disk Manager  [read-only]", kText);
+    appDrawText(x + 10, y + 7, "Disk Manager", kText);
 
     const uint32_t leftW = 200;
     framebuffer::fill_rect(x, y + 22, leftW, h - 22, kPanel);
@@ -6388,6 +6439,150 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     appDrawText(rx + 4, drawY, storage::disk_state_name(disk.state), kText);
     drawY += kGlyphH + 6;
 
+    if (disk.state == storage::DISK_STATE_NOT_INITIALIZED &&
+        !disk.initializeAvailable) {
+        char availability[160];
+        strcopy(availability, "Initialization unavailable: ", sizeof(availability));
+        const char* reason = storage::initialize_disk_status_name(
+            disk.initializeStatus);
+        if (disk.identity.transport == kernel::block::BDEV_NVME &&
+            disk.initializeStatus == storage::INITIALIZE_DISK_DURABILITY_UNKNOWN)
+            reason = "durable flush is not supported for this NVMe device";
+        strappend(availability, reason, sizeof(availability));
+        appDrawText(rx + 4, drawY, availability, kSubText);
+        drawY += kGlyphH + 4;
+    }
+
+    if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED) {
+        const uint32_t panelX = rx + 6;
+        const uint32_t panelY = drawY + 4;
+        const uint32_t panelW = rw > 16 ? rw - 12 : rw;
+        const uint32_t panelH = h > 150 ? h - 150 : 170;
+        framebuffer::fill_rect(panelX, panelY, panelW, panelH, 0xFF252D3B);
+        framebuffer::fill_rect(panelX, panelY, panelW, 24, 0xFF34465C);
+        appDrawText(panelX + 10, panelY + 7,
+                    m_initializeDialogState == INITIALIZE_DIALOG_RESULT
+                        ? "Initialize Disk Result" : "Initialize Disk",
+                    kText);
+        uint32_t lineY = panelY + 34;
+        const storage::TargetIdentity& displayIdentity =
+            m_initializeDialogState == INITIALIZE_DIALOG_CHOOSE_SCHEME
+                ? disk.identity : m_initializeResult.targetIdentity;
+        appDrawText(panelX + 10, lineY, "Target identity", kSubText);
+        lineY += kGlyphH + 3;
+        char line[160];
+        strcopy(line, "Device: ", sizeof(line));
+        strappend(line, displayIdentity.name, sizeof(line));
+        appDrawText(panelX + 10, lineY, line, kText);
+        lineY += kGlyphH + 3;
+        if (displayIdentity.model[0]) {
+            strcopy(line, "Model: ", sizeof(line));
+            strappend(line, displayIdentity.model, sizeof(line));
+            appDrawText(panelX + 10, lineY, line, kSubText);
+            lineY += kGlyphH + 3;
+        }
+        if (displayIdentity.serial[0]) {
+            strcopy(line, "Serial: ", sizeof(line));
+            strappend(line, displayIdentity.serial, sizeof(line));
+            appDrawText(panelX + 10, lineY, line, kSubText);
+            lineY += kGlyphH + 3;
+        }
+        strcopy(line, "Transport: ", sizeof(line));
+        const char* dialogTransport = "Block";
+        switch (displayIdentity.transport) {
+            case kernel::block::BDEV_ATA_PIO: dialogTransport = "ATA PIO"; break;
+            case kernel::block::BDEV_AHCI: dialogTransport = "AHCI"; break;
+            case kernel::block::BDEV_NVME: dialogTransport = "NVMe"; break;
+            case kernel::block::BDEV_USB_MASS: dialogTransport = "USB mass storage"; break;
+            case kernel::block::BDEV_RAMDISK: dialogTransport = "RAM disk"; break;
+            default: break;
+        }
+        strappend(line, dialogTransport, sizeof(line));
+        appDrawText(panelX + 10, lineY, line, kSubText);
+        lineY += kGlyphH + 3;
+        uint64_t dialogCapacity = 0;
+        storage::valid_geometry(displayIdentity.totalLogicalSectors,
+                                displayIdentity.logicalSectorSize, &dialogCapacity);
+        char sizeText[32];
+        formatSize(dialogCapacity, sizeText, sizeof(sizeText));
+        strcopy(line, "Capacity: ", sizeof(line));
+        strappend(line, sizeText, sizeof(line));
+        appDrawText(panelX + 10, lineY, line, kSubText);
+        lineY += kGlyphH + 3;
+        strcopy(line, "Logical sector: ", sizeof(line));
+        char sectorText[16];
+        disk_manager_u64(displayIdentity.logicalSectorSize, sectorText,
+                         sizeof(sectorText));
+        strappend(line, sectorText, sizeof(line));
+        strappend(line, " bytes", sizeof(line));
+        appDrawText(panelX + 10, lineY, line, kSubText);
+        lineY += kGlyphH + 4;
+        if (m_initializeDialogState == INITIALIZE_DIALOG_RESULT) {
+            strcopy(line, "Final state: ", sizeof(line));
+            strappend(line, storage::disk_state_name(
+                m_initializeResult.finalDetectedState), sizeof(line));
+            appDrawText(panelX + 10, lineY, line, kText);
+        } else {
+            appDrawText(panelX + 10, lineY,
+                m_initializeDialogState == INITIALIZE_DIALOG_RUNNING
+                    ? "Current state: Operation in progress"
+                    : "Current state: Not Initialized", kText);
+        }
+        lineY += kGlyphH + 4;
+
+        if (m_initializeDialogState == INITIALIZE_DIALOG_CHOOSE_SCHEME) {
+            appDrawText(panelX + 10, lineY,
+                        "GPT is selected by default and recommended.",
+                        kText);
+            lineY += kGlyphH + 5;
+            appDrawText(panelX + 10, lineY,
+                        "MBR is for compatibility. Only table metadata will be written.",
+                        kText);
+            lineY += kGlyphH + 5;
+            appDrawText(panelX + 10, lineY,
+                        "No partition or filesystem will be created.",
+                        kSubText);
+            lineY += kGlyphH + 5;
+            if (m_initializeMessage[0])
+                appDrawText(panelX + 10, lineY, m_initializeMessage, kSubText);
+        } else if (m_initializeDialogState == INITIALIZE_DIALOG_CONFIRM) {
+            strcopy(line, "Selected scheme: ", sizeof(line));
+            strappend(line, m_initializeScheme == storage::PARTITION_SCHEME_GPT
+                ? "GPT" : "MBR", sizeof(line));
+            appDrawText(panelX + 10, lineY, line, kText);
+            lineY += kGlyphH + 5;
+            appDrawText(panelX + 10, lineY,
+                        "Confirm to write the empty partition table to this disk.",
+                        kText);
+            lineY += kGlyphH + 5;
+            appDrawText(panelX + 10, lineY,
+                        "This creates an empty table only; it does not create partitions or format.",
+                        kSubText);
+            lineY += kGlyphH + 5;
+            appDrawText(panelX + 10, lineY, "Waiting for confirmation", kSubText);
+        } else if (m_initializeDialogState == INITIALIZE_DIALOG_RUNNING) {
+            appDrawText(panelX + 10, lineY,
+                        storage::initialize_disk_stage_name(m_initializeResult.stage), kText);
+        } else {
+            const bool success = m_initializeResult.status ==
+                                 storage::INITIALIZE_DISK_SUCCESS;
+            appDrawText(panelX + 10, lineY,
+                        success ? "Initialization completed" : "Initialization failed",
+                        success ? kText : 0xFFFFB0A0);
+            lineY += kGlyphH + 5;
+            appDrawText(panelX + 10, lineY, m_initializeMessage, kSubText);
+            if (m_initializeResult.rollbackAttempted) {
+                lineY += kGlyphH + 5;
+                appDrawText(panelX + 10, lineY,
+                    m_initializeResult.rollbackSucceeded
+                        ? "Original metadata was restored and verified."
+                        : "Original metadata restoration is uncertain.",
+                    m_initializeResult.rollbackSucceeded ? kSubText : 0xFFFFB0A0);
+            }
+        }
+        return;
+    }
+
     appDrawText(rx + 4, drawY, "#  Type          Name                 Start LBA       Sectors       FS", kSubText);
     drawY += kGlyphH + 4;
     framebuffer::fill_rect(rx + 4, drawY, rw > 8 ? rw - 8 : 0, 1, kPanel);
@@ -6398,7 +6593,7 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             ? "No table found; bounded raw probe is clear"
             : ((disk.state == storage::DISK_STATE_VALID_MBR ||
                 disk.state == storage::DISK_STATE_VALID_GPT)
-                ? "Validated partition table has no used entries"
+                ? "Online | 0 partitions | Unallocated space"
                 : "No validated partitions available");
         appDrawText(rx + 4, drawY, emptyText, kSubText);
         drawY += kGlyphH + 4;
@@ -6466,6 +6661,7 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 
 void DiskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {
     (void)button;
+    if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED) return;
     const uint32_t leftW = 200;
     const uint32_t listTop = 46;
     const uint32_t rowH = 28;
@@ -6474,17 +6670,149 @@ void DiskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {
         const int index = static_cast<int>((static_cast<uint32_t>(localY) - listTop) / rowH);
         if (index >= 0 && index < m_diskCount) {
             m_selectedDisk = index;
+            updateInitializeControls();
             invalidate();
         }
     }
 }
 
 void DiskManagerApp::onWidgetClick(int widgetId) {
-    if (widgetId == m_refreshBtnId) {
+    if (widgetId == m_cancelInitializeBtnId &&
+        m_initializeDialogState != INITIALIZE_DIALOG_CLOSED) {
+        if (m_initializeDialogState == INITIALIZE_DIALOG_RESULT) {
+            closeInitializeDialog();
+        } else {
+            if (m_initializePlan.confirmationReady)
+                storage::cancel_initialize_disk(m_initializePlan);
+            closeInitializeDialog();
+        }
+    } else if (widgetId == m_initializeBtnId &&
+               m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
+        if (m_selectedDisk >= 0 && m_selectedDisk < m_diskCount &&
+            m_disks[m_selectedDisk].state == storage::DISK_STATE_NOT_INITIALIZED &&
+            m_disks[m_selectedDisk].initializeAvailable) {
+            m_initializeScheme = storage::DEFAULT_INITIALIZE_SCHEME;
+            m_initializeMessage[0] = '\0';
+            memset(&m_initializeResult, 0, sizeof(m_initializeResult));
+            m_initializeResult.targetIdentity = m_disks[m_selectedDisk].identity;
+            m_initializeResult.requestedScheme = m_initializeScheme;
+            m_initializeDialogState = INITIALIZE_DIALOG_CHOOSE_SCHEME;
+            updateInitializeControls();
+            invalidate();
+        }
+    } else if (widgetId == m_gptBtnId &&
+               m_initializeDialogState == INITIALIZE_DIALOG_CHOOSE_SCHEME) {
+        beginInitializeConfirmation(storage::PARTITION_SCHEME_GPT);
+    } else if (widgetId == m_mbrBtnId &&
+               m_initializeDialogState == INITIALIZE_DIALOG_CHOOSE_SCHEME) {
+        beginInitializeConfirmation(storage::PARTITION_SCHEME_MBR);
+    } else if (widgetId == m_confirmInitializeBtnId &&
+               m_initializeDialogState == INITIALIZE_DIALOG_CONFIRM) {
+        runInitializeOperation();
+    } else if (widgetId == m_refreshBtnId &&
+               m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
         serial::puts("[DISKMANAGER] Manual refresh\n");
         scanDisks();
         invalidate();
     }
+}
+
+void DiskManagerApp::updateInitializeControls() {
+    app::Widget* refresh = getWidget(m_refreshBtnId);
+    app::Widget* initialize = getWidget(m_initializeBtnId);
+    app::Widget* gpt = getWidget(m_gptBtnId);
+    app::Widget* mbr = getWidget(m_mbrBtnId);
+    app::Widget* confirm = getWidget(m_confirmInitializeBtnId);
+    app::Widget* cancel = getWidget(m_cancelInitializeBtnId);
+    const bool dialogClosed = m_initializeDialogState == INITIALIZE_DIALOG_CLOSED;
+    const bool rawSelected = m_selectedDisk >= 0 && m_selectedDisk < m_diskCount &&
+        m_disks[m_selectedDisk].haveInfo &&
+        m_disks[m_selectedDisk].state == storage::DISK_STATE_NOT_INITIALIZED;
+
+    if (refresh) {
+        refresh->visible = dialogClosed;
+        refresh->enabled = dialogClosed;
+    }
+    if (initialize) {
+        initialize->visible = dialogClosed && rawSelected;
+        initialize->enabled = initialize->visible &&
+            m_disks[m_selectedDisk].initializeAvailable;
+    }
+    const bool choosing = m_initializeDialogState == INITIALIZE_DIALOG_CHOOSE_SCHEME;
+    const bool confirming = m_initializeDialogState == INITIALIZE_DIALOG_CONFIRM;
+    if (gpt) { gpt->visible = choosing; gpt->enabled = choosing; }
+    if (mbr) { mbr->visible = choosing; mbr->enabled = choosing; }
+    if (confirm) {
+        confirm->visible = confirming;
+        confirm->enabled = confirming && m_initializePlan.confirmationReady &&
+            storage::storage_operation_lease_is_current(
+                storage::StorageOperationLease{m_initializePlan.ownerToken});
+    }
+    const bool showCancel = m_initializeDialogState != INITIALIZE_DIALOG_CLOSED &&
+                            m_initializeDialogState != INITIALIZE_DIALOG_RUNNING;
+    if (cancel) {
+        cancel->visible = showCancel;
+        cancel->enabled = showCancel;
+        setWidgetText(m_cancelInitializeBtnId,
+            m_initializeDialogState == INITIALIZE_DIALOG_RESULT ? "Close" : "Cancel");
+    }
+}
+
+void DiskManagerApp::beginInitializeConfirmation(storage::PartitionScheme scheme) {
+    if (m_initializeDialogState != INITIALIZE_DIALOG_CHOOSE_SCHEME ||
+        m_selectedDisk < 0 || m_selectedDisk >= m_diskCount) return;
+    m_initializeScheme = scheme;
+    memset(&m_initializePlan, 0, sizeof(m_initializePlan));
+    memset(&m_initializeResult, 0, sizeof(m_initializeResult));
+
+    storage::InitializeDiskRequest request = {};
+    request.targetSnapshot = m_disks[m_selectedDisk].identity;
+    request.requestedScheme = scheme;
+    request.mbrSignaturePolicy = storage::MBR_SIGNATURE_RANDOM_NONZERO;
+    request.diskGuidSource = storage::DISK_GUID_SECURE_RANDOM;
+    request.expectedRegistryGeneration = request.targetSnapshot.registryGeneration;
+    const storage::InitializeDiskStatus status = storage::prepare_initialize_disk(
+        request, m_initializePlan, m_initializeResult);
+    if (status == storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION) {
+        m_initializeDialogState = INITIALIZE_DIALOG_CONFIRM;
+        m_initializeMessage[0] = '\0';
+    } else {
+        strcopy(m_initializeMessage,
+                m_initializeResult.diagnostic[0]
+                    ? m_initializeResult.diagnostic
+                    : storage::initialize_disk_status_name(status),
+                sizeof(m_initializeMessage));
+    }
+    updateInitializeControls();
+    invalidate();
+}
+
+void DiskManagerApp::runInitializeOperation() {
+    if (m_initializeDialogState != INITIALIZE_DIALOG_CONFIRM ||
+        !m_initializePlan.confirmationReady) return;
+    m_initializeDialogState = INITIALIZE_DIALOG_RUNNING;
+    updateInitializeControls();
+    invalidate();
+    const storage::InitializeDiskStatus status = storage::execute_initialize_disk(
+        m_initializePlan, m_initializeResult);
+    (void)status;
+    strcopy(m_initializeMessage, m_initializeResult.diagnostic,
+            sizeof(m_initializeMessage));
+    // The UI enumerates and parses again only after the storage layer has
+    // completed its parser-based read-back/rescan and released the operation.
+    scanDisks();
+    m_initializeDialogState = INITIALIZE_DIALOG_RESULT;
+    updateInitializeControls();
+    invalidate();
+}
+
+void DiskManagerApp::closeInitializeDialog() {
+    if (m_initializePlan.confirmationReady)
+        storage::cancel_initialize_disk(m_initializePlan);
+    m_initializeDialogState = INITIALIZE_DIALOG_CLOSED;
+    m_initializeMessage[0] = '\0';
+    updateInitializeControls();
+    invalidate();
 }
 
 TrashApp::TrashApp()

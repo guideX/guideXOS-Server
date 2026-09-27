@@ -218,6 +218,31 @@ MountProtection query_mount_protection(const TargetIdentity& target)
     return result;
 }
 
+BootProtection query_boot_protection(const TargetIdentity& target)
+{
+    BootProtection result;
+    result.safety = BOOT_DEVICE_IDENTITY_UNKNOWN;
+    if (revalidate_target_identity(target) != TARGET_VALID) return result;
+
+    const block::BlockDevice* device = block::get_device(target.globalIndex);
+    if (!device) return result;
+    switch (device->bootProvenance) {
+        case block::BOOT_PROVENANCE_BOOT_BACKING:
+            result.safety = BOOT_DEVICE_IS_TARGET;
+            break;
+        case block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT:
+            result.safety = BOOT_DEVICE_DEFINITELY_NOT_TARGET;
+            break;
+        case block::BOOT_PROVENANCE_UNKNOWN:
+        default:
+            result.safety = BOOT_DEVICE_IDENTITY_UNKNOWN;
+            break;
+    }
+    if (revalidate_target_identity(target) != TARGET_VALID)
+        result.safety = BOOT_DEVICE_IDENTITY_UNKNOWN;
+    return result;
+}
+
 bool validate_destructive_target(const TargetIdentity& target,
                                  const SafetyRequest& request,
                                  SafetyValidation& result)

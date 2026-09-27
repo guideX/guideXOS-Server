@@ -3,6 +3,7 @@
 #include "../kernel/core/include/kernel/block_device.h"
 #include "../kernel/core/include/kernel/partition_table.h"
 #include "../kernel/core/include/kernel/storage_manager.h"
+#include "../kernel/core/include/kernel/disk_initialization.h"
 #include "../kernel/core/include/kernel/ramdisk.h"
 #include "../kernel/core/include/kernel/vfs.h"
 
@@ -24,16 +25,25 @@ struct FakeDisk {
     std::vector<uint8_t> bytes;
     bool failReads;
     uint64_t failLba;
+    uint32_t failReadAtCall;
     bool failFlush;
+    uint32_t failFlushAtCall;
+    uint32_t failWriteAtCall1;
+    uint32_t failWriteAtCall2;
+    uint64_t corruptWriteLbaOnce;
+    bool corruptWritePending;
     uint32_t reads;
     uint32_t writes;
+    uint32_t writeAttempts;
     uint32_t flushes;
 
-    FakeDisk(uint32_t size, uint64_t count)
+    FakeDisk(uint32_t size, uint64_t count, bool allocate = true)
         : sectorSize(size), sectorCount(count), driverId(0),
-          bytes(static_cast<size_t>(size) * static_cast<size_t>(count), 0),
-          failReads(false), failLba(UINT64_MAX), failFlush(false),
-          reads(0), writes(0), flushes(0) {}
+          bytes(allocate ? static_cast<size_t>(size) * static_cast<size_t>(count) : 0, 0),
+          failReads(false), failLba(UINT64_MAX), failReadAtCall(0), failFlush(false),
+          failFlushAtCall(0), failWriteAtCall1(0), failWriteAtCall2(0),
+          corruptWriteLbaOnce(UINT64_MAX), corruptWritePending(false),
+          reads(0), writes(0), writeAttempts(0), flushes(0) {}
 };
 
 FakeDisk* g_fakeDisks[256] = {};
@@ -54,11 +64,14 @@ block::Status fake_read(uint8_t driverId, uint64_t lba, uint32_t count, void* bu
 {
     FakeDisk* disk = g_fakeDisks[driverId];
     if (!disk || !buffer || count == 0 || disk->failReads || lba == disk->failLba ||
+        (disk->failReadAtCall != 0 && disk->reads + 1 == disk->failReadAtCall) ||
         lba > disk->sectorCount || count > disk->sectorCount - lba)
         return block::BLOCK_ERR_IO;
     ++disk->reads;
     const size_t offset = static_cast<size_t>(lba * disk->sectorSize);
     const size_t bytes = static_cast<size_t>(count) * disk->sectorSize;
+    if (offset > disk->bytes.size() || bytes > disk->bytes.size() - offset)
+        return block::BLOCK_ERR_IO;
     std::memcpy(buffer, disk->bytes.data() + offset, bytes);
     return block::BLOCK_OK;
 }
@@ -69,10 +82,19 @@ block::Status fake_write(uint8_t driverId, uint64_t lba, uint32_t count,
     FakeDisk* disk = g_fakeDisks[driverId];
     if (!disk || !buffer || count == 0 || lba > disk->sectorCount ||
         count > disk->sectorCount - lba) return block::BLOCK_ERR_IO;
-    ++disk->writes;
+    ++disk->writeAttempts;
+    if (disk->writeAttempts == disk->failWriteAtCall1 ||
+        disk->writeAttempts == disk->failWriteAtCall2) return block::BLOCK_ERR_IO;
     const size_t offset = static_cast<size_t>(lba * disk->sectorSize);
     const size_t bytes = static_cast<size_t>(count) * disk->sectorSize;
+    if (offset > disk->bytes.size() || bytes > disk->bytes.size() - offset)
+        return block::BLOCK_ERR_IO;
     std::memcpy(disk->bytes.data() + offset, buffer, bytes);
+    ++disk->writes;
+    if (disk->corruptWritePending && lba == disk->corruptWriteLbaOnce) {
+        disk->bytes[offset + 16] ^= 0x01;
+        disk->corruptWritePending = false;
+    }
     return block::BLOCK_OK;
 }
 
@@ -81,20 +103,24 @@ block::Status fake_flush(uint8_t driverId)
     FakeDisk* disk = g_fakeDisks[driverId];
     if (!disk) return block::BLOCK_ERR_INVALID;
     ++disk->flushes;
-    return disk->failFlush ? block::BLOCK_ERR_IO : block::BLOCK_OK;
+    return disk->failFlush ||
+        (disk->failFlushAtCall != 0 && disk->flushes == disk->failFlushAtCall)
+        ? block::BLOCK_ERR_IO : block::BLOCK_OK;
 }
 
 uint8_t register_fake(FakeDisk& disk, bool writable = false,
                       bool withFlush = false, bool flushKnown = false,
                       bool durableCompletion = false,
                       uint16_t requiredAlignment = 0,
-                      uint32_t maxTransferBytes = 0)
+                      uint32_t maxTransferBytes = 0,
+                      block::BootProvenance boot = block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT)
 {
     disk.driverId = static_cast<uint8_t>(g_nextDriverId++);
     g_fakeDisks[disk.driverId] = &disk;
     block::BlockDevice descriptor = {};
     descriptor.active = true;
     descriptor.type = block::BDEV_ATA_PIO;
+    descriptor.bootProvenance = boot;
     descriptor.driverIndex = disk.driverId;
     descriptor.totalSectors = disk.sectorCount;
     descriptor.sectorSize = disk.sectorSize;
@@ -260,6 +286,100 @@ storage::PartitionTableModel parse_fixture(FakeDisk& disk, bool& parsed)
     parsed = storage::parse_partition_table(index, model);
     unregister_fake(index, disk);
     return model;
+}
+
+storage::InitializeDiskRequest make_initialize_request(
+    uint8_t index, storage::PartitionScheme scheme)
+{
+    storage::InitializeDiskRequest request = {};
+    storage::capture_target_identity(index, request.targetSnapshot);
+    request.requestedScheme = scheme;
+    request.mbrSignaturePolicy = storage::MBR_SIGNATURE_RANDOM_NONZERO;
+    request.diskGuidSource = storage::DISK_GUID_SECURE_RANDOM;
+    request.expectedRegistryGeneration = request.targetSnapshot.registryGeneration;
+    request.testGuidProvided = true;
+    for (uint8_t i = 0; i < 16; ++i) request.testDiskGuid[i] = i + 1;
+    request.testMbrSignatureProvided = true;
+    request.testMbrSignature = 0xA1B2C3D4u;
+    return request;
+}
+
+storage::InitializeDiskStatus probe_fake_initialize(
+    FakeDisk& disk, storage::PartitionScheme scheme,
+    bool writable = true, bool withFlush = true, bool flushKnown = true,
+    block::BootProvenance boot = block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT)
+{
+    const uint8_t index = register_fake(disk, writable, withFlush, flushKnown,
+                                        false, 0, 0, boot);
+    storage::TargetIdentity target;
+    storage::InitializeTargetValidation validation;
+    const bool captured = storage::capture_target_identity(index, target);
+    const storage::InitializeDiskStatus status = captured
+        ? storage::probe_initialize_target(target, scheme, validation)
+        : storage::INITIALIZE_DISK_DEVICE_MISSING;
+    unregister_fake(index, disk);
+    return status;
+}
+
+uint32_t read_u32(const uint8_t* p)
+{
+    return static_cast<uint32_t>(p[0]) |
+        (static_cast<uint32_t>(p[1]) << 8) |
+        (static_cast<uint32_t>(p[2]) << 16) |
+        (static_cast<uint32_t>(p[3]) << 24);
+}
+
+uint64_t read_u64(const uint8_t* p)
+{
+    return static_cast<uint64_t>(read_u32(p)) |
+        (static_cast<uint64_t>(read_u32(p + 4)) << 32);
+}
+
+bool verify_gpt_bytes(FakeDisk& disk, const storage::InitializeDiskPlan& plan)
+{
+    const uint32_t sectorSize = disk.sectorSize;
+    const uint64_t backupHeaderLba = disk.sectorCount - 1;
+    const uint64_t arrayBytes = storage::INITIALIZE_GPT_ARRAY_BYTES;
+    const uint64_t arraySectors = arrayBytes / sectorSize;
+    const uint64_t backupArrayLba = backupHeaderLba - arraySectors;
+    const uint8_t* mbr = sector(disk, 0);
+    const uint8_t* primary = sector(disk, 1);
+    const uint8_t* backup = sector(disk, backupHeaderLba);
+    const uint8_t* primaryArray = sector(disk, 2);
+    const uint8_t* backupArray = sector(disk, backupArrayLba);
+    if (mbr[510] != 0x55 || mbr[511] != 0xAA || mbr[450] != 0xEE ||
+        read_u32(mbr + 454) != 1 || read_u32(mbr + 458) != disk.sectorCount - 1)
+        return false;
+    if (std::memcmp(primary, "EFI PART", 8) != 0 ||
+        std::memcmp(backup, "EFI PART", 8) != 0) return false;
+    if (read_u64(primary + 24) != 1 || read_u64(primary + 32) != backupHeaderLba ||
+        read_u64(backup + 24) != backupHeaderLba || read_u64(backup + 32) != 1)
+        return false;
+    if (read_u64(primary + 40) != plan.firstUsableLba ||
+        read_u64(primary + 48) != plan.lastUsableLba ||
+        read_u64(backup + 40) != plan.firstUsableLba ||
+        read_u64(backup + 48) != plan.lastUsableLba) return false;
+    if (read_u64(primary + 72) != 2 || read_u64(backup + 72) != backupArrayLba ||
+        read_u32(primary + 80) != storage::INITIALIZE_GPT_ENTRY_COUNT ||
+        read_u32(primary + 84) != storage::INITIALIZE_GPT_ENTRY_SIZE)
+        return false;
+    if (std::memcmp(primary + 56, plan.diskGuid, 16) != 0 ||
+        std::memcmp(backup + 56, plan.diskGuid, 16) != 0) return false;
+    if (!std::all_of(primaryArray, primaryArray + arrayBytes,
+                     [](uint8_t byte) { return byte == 0; }) ||
+        !std::all_of(backupArray, backupArray + arrayBytes,
+                     [](uint8_t byte) { return byte == 0; })) return false;
+    if (read_u32(primary + 88) != storage::crc32(primaryArray, arrayBytes) ||
+        read_u32(backup + 88) != storage::crc32(backupArray, arrayBytes)) return false;
+    uint8_t headerCopy[4096];
+    std::memcpy(headerCopy, primary, sectorSize);
+    const uint32_t primaryHeaderCrc = read_u32(headerCopy + 16);
+    write_u32(headerCopy + 16, 0);
+    if (primaryHeaderCrc != storage::crc32(headerCopy, 92)) return false;
+    std::memcpy(headerCopy, backup, sectorSize);
+    const uint32_t backupHeaderCrc = read_u32(headerCopy + 16);
+    write_u32(headerCopy + 16, 0);
+    return backupHeaderCrc == storage::crc32(headerCopy, 92);
 }
 
 } // namespace
@@ -579,6 +699,444 @@ int main()
     check(flush.outcome == block::FLUSH_OUTCOME_SYNCHRONOUS_DURABLE &&
           flush.semanticsKnown, "explicit synchronous durability is represented");
     unregister_fake(index, synchronous);
+
+    check(storage::DEFAULT_INITIALIZE_SCHEME == storage::PARTITION_SCHEME_GPT,
+          "GPT is the default initialization scheme presented by the model");
+
+    FakeDisk synchronousInitialize(512, 4096);
+    index = register_fake(synchronousInitialize, true, false, false, true);
+    storage::InitializeDiskRequest initializeRequest = {};
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
+    storage::InitializeDiskPlan initializePlan;
+    storage::InitializeDiskResult initializeResult;
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION &&
+          storage::execute_initialize_disk(initializePlan, initializeResult) ==
+              storage::INITIALIZE_DISK_SUCCESS &&
+          initializeResult.flushOutcome == block::FLUSH_OUTCOME_SYNCHRONOUS_DURABLE &&
+          synchronousInitialize.flushes == 0,
+          "GPT initialization accepts only an explicitly synchronous-durable write model");
+    unregister_fake(index, synchronousInitialize);
+
+    FakeDisk initializeGpt512(512, 4096);
+    index = register_fake(initializeGpt512, true, true, true);
+    initializeRequest = make_initialize_request(
+        index, storage::PARTITION_SCHEME_GPT);
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION &&
+          initializePlan.confirmationReady && storage::storage_operation_active(),
+          "GPT 512-byte raw disk reaches confirmation while holding the operation lease");
+    check(storage::execute_initialize_disk(initializePlan, initializeResult) ==
+              storage::INITIALIZE_DISK_SUCCESS &&
+          initializeResult.finalDetectedState == storage::DISK_STATE_VALID_GPT &&
+          initializeResult.verificationPassed &&
+          initializeResult.flushOutcome == block::FLUSH_OUTCOME_SUPPORTED_SUCCEEDED &&
+          initializeResult.writeStagesCompleted ==
+              (storage::INITIALIZE_WRITE_BACKUP_ARRAY |
+               storage::INITIALIZE_WRITE_BACKUP_HEADER |
+               storage::INITIALIZE_WRITE_PRIMARY_ARRAY |
+               storage::INITIALIZE_WRITE_PRIMARY_HEADER |
+               storage::INITIALIZE_WRITE_PROTECTIVE_MBR) &&
+          !storage::storage_operation_active(),
+          "GPT 512-byte initialization writes, flushes, verifies, rescans, and releases the lease");
+    check(verify_gpt_bytes(initializeGpt512, initializePlan),
+          "GPT 512-byte bytes have valid PMBR, primary/backup geometry, empty arrays, and CRCs");
+    check((initializePlan.diskGuid[7] & 0xF0) == 0x40 &&
+          (initializePlan.diskGuid[8] & 0xC0) == 0x80,
+          "injected GPT GUID is emitted with UUID version and variant bits");
+    check(storage::parse_partition_table(index, model) &&
+          model.state == storage::DISK_STATE_VALID_GPT &&
+          model.primaryGptValid && model.backupGptValid && model.gptCopiesAgree &&
+          model.partitionCount == 0 &&
+          std::memcmp(model.primaryDiskGuid, initializePlan.diskGuid, 16) == 0 &&
+          std::memcmp(model.backupDiskGuid, initializePlan.diskGuid, 16) == 0,
+          "normal parser confirms both GPT copies and zero used entries after rescan");
+    unregister_fake(index, initializeGpt512);
+
+    FakeDisk initializeGpt4Kn(4096, 1024);
+    index = register_fake(initializeGpt4Kn, true, true, true);
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION &&
+          initializePlan.entryArraySectors == 4 &&
+          initializePlan.firstUsableLba == 256,
+          "GPT 4096-byte layout uses four array sectors and 1 MiB usable alignment");
+    check(storage::execute_initialize_disk(initializePlan, initializeResult) ==
+              storage::INITIALIZE_DISK_SUCCESS &&
+          initializeResult.finalDetectedState == storage::DISK_STATE_VALID_GPT &&
+          verify_gpt_bytes(initializeGpt4Kn, initializePlan),
+          "GPT initialization and independent byte checks pass on 4096-byte logical sectors");
+    unregister_fake(index, initializeGpt4Kn);
+
+    FakeDisk initializeMbr512(512, 128);
+    index = register_fake(initializeMbr512, true, true, true);
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_MBR);
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION &&
+          storage::execute_initialize_disk(initializePlan, initializeResult) ==
+              storage::INITIALIZE_DISK_SUCCESS &&
+          initializeResult.finalDetectedState == storage::DISK_STATE_VALID_MBR &&
+          initializeResult.writeStagesCompleted == storage::INITIALIZE_WRITE_MBR,
+          "MBR initializes a 512-byte raw disk as an empty valid MBR");
+    check(initializeMbr512.bytes[510] == 0x55 && initializeMbr512.bytes[511] == 0xAA &&
+          read_u32(initializeMbr512.bytes.data() + 440) == 0xA1B2C3D4u &&
+          std::all_of(initializeMbr512.bytes.begin(), initializeMbr512.bytes.begin() + 440,
+                      [](uint8_t byte) { return byte == 0; }) &&
+          std::all_of(initializeMbr512.bytes.begin() + 446,
+                      initializeMbr512.bytes.begin() + 510,
+                      [](uint8_t byte) { return byte == 0; }) &&
+          storage::parse_partition_table(index, model) &&
+          model.state == storage::DISK_STATE_VALID_MBR &&
+          model.partitionCount == 0 && model.mbrDiskSignature == 0xA1B2C3D4u,
+          "MBR signature, zero entries, and expected disk signature are verified by parser");
+    unregister_fake(index, initializeMbr512);
+
+    FakeDisk initializeMbr4Kn(4096, 64);
+    index = register_fake(initializeMbr4Kn, true, true, true);
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_MBR);
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION &&
+          storage::execute_initialize_disk(initializePlan, initializeResult) ==
+              storage::INITIALIZE_DISK_SUCCESS &&
+          initializeResult.finalDetectedState == storage::DISK_STATE_VALID_MBR &&
+          initializeMbr4Kn.bytes[510] == 0x55 && initializeMbr4Kn.bytes[511] == 0xAA,
+          "MBR initialization handles a 4096-byte logical-sector device");
+    unregister_fake(index, initializeMbr4Kn);
+
+    FakeDisk existingMbr(512, 128);
+    set_mbr_signature(existingMbr);
+    check(probe_fake_initialize(existingMbr, storage::PARTITION_SCHEME_GPT) ==
+              storage::INITIALIZE_DISK_NOT_RAW,
+          "initialization refuses an existing valid MBR");
+    FakeDisk existingGpt(512, 4096);
+    build_gpt(existingGpt);
+    check(probe_fake_initialize(existingGpt, storage::PARTITION_SCHEME_MBR) ==
+              storage::INITIALIZE_DISK_NOT_RAW,
+          "initialization refuses an existing valid GPT");
+    FakeDisk degradedGpt(512, 4096);
+    build_gpt(degradedGpt, GptFixture::PrimaryHeaderCrcBad);
+    check(probe_fake_initialize(degradedGpt, storage::PARTITION_SCHEME_GPT) ==
+              storage::INITIALIZE_DISK_NOT_RAW,
+          "initialization refuses a degraded GPT");
+    FakeDisk invalidMbr(512, 128);
+    set_mbr_signature(invalidMbr);
+    set_mbr_partition(invalidMbr, 0, 0x7F, 0x83, 8, 10);
+    check(probe_fake_initialize(invalidMbr, storage::PARTITION_SCHEME_GPT) ==
+              storage::INITIALIZE_DISK_NOT_RAW,
+          "initialization refuses an invalid partition table");
+    FakeDisk corruptGptInit(512, 4096);
+    build_gpt(corruptGptInit, GptFixture::BothArrayCrcBad);
+    check(probe_fake_initialize(corruptGptInit,
+                                storage::PARTITION_SCHEME_GPT) ==
+              storage::INITIALIZE_DISK_NOT_RAW,
+          "initialization refuses a GPT with corrupt primary and backup arrays");
+    FakeDisk unsupportedMbrInit(512, 128);
+    set_mbr_signature(unsupportedMbrInit);
+    set_mbr_partition(unsupportedMbrInit, 0, 0, 0x0F, 8, 100);
+    check(probe_fake_initialize(unsupportedMbrInit,
+                                storage::PARTITION_SCHEME_GPT) ==
+              storage::INITIALIZE_DISK_NOT_RAW,
+          "initialization refuses an unsupported extended-partition scheme");
+    FakeDisk unreadableInit(512, 128);
+    unreadableInit.failReads = true;
+    check(probe_fake_initialize(unreadableInit, storage::PARTITION_SCHEME_GPT) ==
+              storage::INITIALIZE_DISK_READ_UNAVAILABLE,
+          "initialization refuses unreadable media");
+    FakeDisk readOnlyInit(512, 128);
+    check(probe_fake_initialize(readOnlyInit, storage::PARTITION_SCHEME_GPT,
+                                false) == storage::INITIALIZE_DISK_READ_ONLY,
+          "initialization refuses a read-only target");
+    FakeDisk shortTransferInit(512, 128);
+    index = register_fake(shortTransferInit, true, true, true, false, 0, 256);
+    storage::TargetIdentity shortTransferIdentity;
+    storage::InitializeTargetValidation shortTransferValidation;
+    storage::capture_target_identity(index, shortTransferIdentity);
+    check(storage::probe_initialize_target(shortTransferIdentity,
+                                          storage::PARTITION_SCHEME_GPT,
+                                          shortTransferValidation) ==
+              storage::INITIALIZE_DISK_WRITE_UNAVAILABLE,
+          "initialization rejects a transport that cannot write one logical sector");
+    unregister_fake(index, shortTransferInit);
+    FakeDisk mountedInit(512, 128);
+    index = register_fake(mountedInit, true, true, true);
+    storage::capture_target_identity(index, snapshot);
+    vfs::set_test_mount(2, true, index, "/data");
+    storage::InitializeTargetValidation initializeValidation;
+    check(storage::probe_initialize_target(snapshot, storage::PARTITION_SCHEME_GPT,
+                                           initializeValidation) ==
+              storage::INITIALIZE_DISK_MOUNTED,
+          "initialization refuses a mounted target");
+    vfs::clear_test_mounts();
+    vfs::set_test_mount(3, true, index, "/");
+    check(storage::probe_initialize_target(snapshot, storage::PARTITION_SCHEME_GPT,
+                                           initializeValidation) ==
+              storage::INITIALIZE_DISK_ROOT_BACKING,
+          "initialization refuses the root backing device");
+    vfs::clear_test_mounts();
+    unregister_fake(index, mountedInit);
+    FakeDisk bootInit(512, 128);
+    check(probe_fake_initialize(bootInit, storage::PARTITION_SCHEME_GPT, true,
+                                true, true,
+                                block::BOOT_PROVENANCE_BOOT_BACKING) ==
+              storage::INITIALIZE_DISK_BOOT_BACKING,
+          "initialization refuses a target explicitly marked as boot backing");
+    FakeDisk unknownBootInit(512, 128);
+    check(probe_fake_initialize(unknownBootInit, storage::PARTITION_SCHEME_GPT,
+                                true, true, true,
+                                block::BOOT_PROVENANCE_UNKNOWN) ==
+              storage::INITIALIZE_DISK_BOOT_IDENTITY_UNKNOWN,
+          "initialization refuses unknown firmware boot-device identity");
+    FakeDisk unknownDurabilityInit(512, 128);
+    check(probe_fake_initialize(unknownDurabilityInit,
+                                storage::PARTITION_SCHEME_GPT,
+                                true, false, false) ==
+              storage::INITIALIZE_DISK_DURABILITY_UNKNOWN,
+          "initialization refuses unknown durability");
+    FakeDisk unsupportedSectorInit(1024, 4096);
+    check(probe_fake_initialize(unsupportedSectorInit,
+                                storage::PARTITION_SCHEME_GPT) ==
+              storage::INITIALIZE_DISK_UNSUPPORTED_SECTOR_SIZE,
+          "initialization refuses unsupported logical sector size");
+    FakeDisk tooSmallGpt(512, 512);
+    check(probe_fake_initialize(tooSmallGpt, storage::PARTITION_SCHEME_GPT) ==
+              storage::INITIALIZE_DISK_TOO_SMALL,
+          "GPT preflight rejects a disk too small for its 1 MiB usable range");
+    FakeDisk tooSmallMbr(512, 8);
+    check(probe_fake_initialize(tooSmallMbr, storage::PARTITION_SCHEME_MBR) ==
+              storage::INITIALIZE_DISK_TOO_SMALL,
+          "MBR preflight rejects a disk below its minimum sector count");
+    FakeDisk tooLargeMbr(512, 0x100000001ull, false);
+    check(probe_fake_initialize(tooLargeMbr, storage::PARTITION_SCHEME_MBR) ==
+              storage::INITIALIZE_DISK_MBR_CAPACITY_LIMIT,
+          "MBR preflight rejects capacity beyond 32-bit LBA addressability");
+    FakeDisk dirtyBackupMetadata(512, 4096);
+    sector(dirtyBackupMetadata, dirtyBackupMetadata.sectorCount - 33)[8] = 0x91;
+    check(probe_fake_initialize(dirtyBackupMetadata,
+                                storage::PARTITION_SCHEME_GPT) ==
+              storage::INITIALIZE_DISK_METADATA_NOT_CLEAR,
+          "initialization refuses nonzero metadata in an otherwise raw probe region");
+
+    FakeDisk lockDiskA(512, 4096);
+    FakeDisk lockDiskB(512, 4096);
+    const uint8_t lockIndexA = register_fake(lockDiskA, true, true, true);
+    const uint8_t lockIndexB = register_fake(lockDiskB, true, true, true);
+    storage::InitializeDiskRequest lockRequestA = make_initialize_request(
+        lockIndexA, storage::PARTITION_SCHEME_GPT);
+    storage::InitializeDiskRequest lockRequestB = make_initialize_request(
+        lockIndexB, storage::PARTITION_SCHEME_GPT);
+    storage::InitializeDiskPlan lockPlanA;
+    storage::InitializeDiskPlan lockPlanB;
+    check(storage::prepare_initialize_disk(lockRequestA, lockPlanA,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION,
+          "first initialization owns the storage operation lock through confirmation");
+    check(storage::prepare_initialize_disk(lockRequestB, lockPlanB,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_OPERATION_BUSY &&
+          storage::storage_operation_active(),
+          "operation lock rejects a competing initialization while one is active");
+    check(storage::cancel_initialize_disk(lockPlanA) &&
+          !storage::storage_operation_active(),
+          "cancel releases the confirmation-held operation lock");
+    storage::StorageOperationLease leaseA = {0};
+    storage::StorageOperationLease leaseB = {0};
+    check(storage::try_acquire_storage_operation(leaseA) ==
+              storage::STORAGE_OPERATION_LOCK_ACQUIRED,
+          "operation lock can be acquired after cancellation");
+    check(storage::try_acquire_storage_operation(leaseA) ==
+              storage::STORAGE_OPERATION_LOCK_INVALID_OWNER &&
+          storage::try_acquire_storage_operation(leaseB) ==
+              storage::STORAGE_OPERATION_LOCK_BUSY,
+          "nested and contending operation-lock acquisition are rejected");
+    storage::StorageOperationLease staleLease = leaseA;
+    check(storage::release_storage_operation(leaseA) &&
+          storage::try_acquire_storage_operation(leaseB) ==
+              storage::STORAGE_OPERATION_LOCK_ACQUIRED &&
+          !storage::release_storage_operation(staleLease) &&
+          storage::storage_operation_lease_is_current(leaseB),
+          "stale ownership token cannot release a subsequently acquired operation");
+    check(storage::release_storage_operation(leaseB) &&
+          !storage::storage_operation_active(),
+          "operation lock releases after explicit lease cleanup");
+    check(storage::try_acquire_storage_operation(leaseA) ==
+              storage::STORAGE_OPERATION_LOCK_ACQUIRED,
+          "operation lease can be acquired for an executing operation");
+    storage::StorageOperationLease copiedOwner = leaseA;
+    check(storage::begin_storage_operation_execution(leaseA) &&
+          !storage::release_storage_operation(copiedOwner) &&
+          !storage::begin_storage_operation_execution(copiedOwner) &&
+          storage::storage_operation_active(),
+          "copied owner cannot cancel or begin a second execution after commit starts");
+    check(storage::complete_storage_operation_execution(leaseA) &&
+          !storage::storage_operation_active(),
+          "executing operation releases only through its completion path");
+    unregister_fake(lockIndexA, lockDiskA);
+    unregister_fake(lockIndexB, lockDiskB);
+
+    FakeDisk replacedDisk(512, 4096);
+    index = register_fake(replacedDisk, true, true, true);
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION,
+          "identity-revalidation fixture reaches confirmation-ready state");
+    unregister_fake(index, replacedDisk);
+    FakeDisk replacementTargetDisk(512, 4096);
+    const uint8_t replacementBlockIndex = register_fake(replacementTargetDisk, true, true, true);
+    check(storage::execute_initialize_disk(initializePlan, initializeResult) ==
+              storage::INITIALIZE_DISK_REGISTRY_CHANGED &&
+          replacedDisk.writeAttempts == 0 && replacementTargetDisk.writeAttempts == 0 &&
+          !storage::storage_operation_active(),
+          "registry change and device replacement after confirmation abort before writes");
+    unregister_fake(replacementBlockIndex, replacementTargetDisk);
+
+    FakeDisk identityChangedDisk(512, 4096);
+    index = register_fake(identityChangedDisk, true, true, true);
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION,
+          "identity-change fixture reaches confirmation-ready state");
+    const_cast<block::BlockDevice*>(block::get_device(index))->serial[0] = 'X';
+    check(storage::execute_initialize_disk(initializePlan, initializeResult) ==
+              storage::INITIALIZE_DISK_IDENTITY_CHANGED &&
+          identityChangedDisk.writeAttempts == 0 &&
+          !storage::storage_operation_active(),
+          "device identity change without a generation update aborts before writes");
+    unregister_fake(index, identityChangedDisk);
+
+    FakeDisk tamperedPlanDisk(512, 4096);
+    index = register_fake(tamperedPlanDisk, true, true, true);
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION,
+          "immutable-plan fixture reaches confirmation-ready state");
+    initializePlan.entryArraySectors = UINT32_MAX;
+    check(storage::execute_initialize_disk(initializePlan, initializeResult) ==
+              storage::INITIALIZE_DISK_OPERATION_OWNERSHIP_INVALID &&
+          tamperedPlanDisk.writeAttempts == 0 &&
+          !storage::storage_operation_active(),
+          "modified confirmation plan is rejected before any metadata write");
+    unregister_fake(index, tamperedPlanDisk);
+
+    FakeDisk changedTable(512, 4096);
+    index = register_fake(changedTable, true, true, true);
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION,
+          "table-change fixture reaches confirmation-ready state");
+    sector(changedTable, 0)[100] = 0x11;
+    check(storage::execute_initialize_disk(initializePlan, initializeResult) ==
+              storage::INITIALIZE_DISK_NOT_RAW && changedTable.writeAttempts == 0,
+          "media changed after confirmation is rejected before the first write");
+    unregister_fake(index, changedTable);
+
+    FakeDisk writeFailFirst(512, 4096);
+    index = register_fake(writeFailFirst, true, true, true);
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
+    writeFailFirst.failWriteAtCall1 = 1;
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION &&
+          storage::execute_initialize_disk(initializePlan, initializeResult) ==
+              storage::INITIALIZE_DISK_IO_FAILED &&
+          initializeResult.rollbackAttempted && initializeResult.rollbackSucceeded &&
+          initializeResult.finalDetectedState == storage::DISK_STATE_NOT_INITIALIZED &&
+          !storage::storage_operation_active(),
+          "first GPT metadata write failure rolls back and releases the lock");
+    unregister_fake(index, writeFailFirst);
+
+    FakeDisk writeFailMiddle(512, 4096);
+    index = register_fake(writeFailMiddle, true, true, true);
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
+    writeFailMiddle.failWriteAtCall1 = 40;
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION &&
+          storage::execute_initialize_disk(initializePlan, initializeResult) ==
+              storage::INITIALIZE_DISK_IO_FAILED &&
+          initializeResult.rollbackAttempted && initializeResult.rollbackSucceeded &&
+          initializeResult.finalDetectedState == storage::DISK_STATE_NOT_INITIALIZED,
+          "middle GPT metadata write failure restores the bounded sector snapshot");
+    unregister_fake(index, writeFailMiddle);
+
+    FakeDisk writeFailFinal(512, 4096);
+    index = register_fake(writeFailFinal, true, true, true);
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
+    writeFailFinal.failWriteAtCall1 = 67;
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION &&
+          storage::execute_initialize_disk(initializePlan, initializeResult) ==
+              storage::INITIALIZE_DISK_IO_FAILED &&
+          initializeResult.rollbackAttempted && initializeResult.rollbackSucceeded,
+          "final protective-MBR write failure rolls back the GPT metadata");
+    unregister_fake(index, writeFailFinal);
+
+    FakeDisk flushFailAfterWrite(512, 4096);
+    index = register_fake(flushFailAfterWrite, true, true, true);
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
+    flushFailAfterWrite.failFlushAtCall = 2;
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION &&
+          storage::execute_initialize_disk(initializePlan, initializeResult) ==
+              storage::INITIALIZE_DISK_FLUSH_FAILED &&
+          initializeResult.flushOutcome == block::FLUSH_OUTCOME_FAILED &&
+          initializeResult.rollbackAttempted && initializeResult.rollbackSucceeded,
+          "post-write flush failure rejects success and verifies snapshot restoration");
+    unregister_fake(index, flushFailAfterWrite);
+
+    FakeDisk corruptVerification(512, 4096);
+    index = register_fake(corruptVerification, true, true, true);
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
+    corruptVerification.corruptWriteLbaOnce = 1;
+    corruptVerification.corruptWritePending = true;
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION &&
+          storage::execute_initialize_disk(initializePlan, initializeResult) ==
+              storage::INITIALIZE_DISK_VERIFICATION_FAILED &&
+          !initializeResult.verificationPassed && initializeResult.rollbackSucceeded &&
+          initializeResult.finalDetectedState == storage::DISK_STATE_NOT_INITIALIZED,
+          "normal-parser verification failure triggers bounded rollback");
+    unregister_fake(index, corruptVerification);
+
+    FakeDisk rollbackFail(512, 4096);
+    index = register_fake(rollbackFail, true, true, true);
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
+    rollbackFail.failWriteAtCall1 = 67;
+    rollbackFail.failWriteAtCall2 = 68;
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION &&
+          storage::execute_initialize_disk(initializePlan, initializeResult) ==
+              storage::INITIALIZE_DISK_ROLLBACK_FAILED &&
+          initializeResult.rollbackAttempted && !initializeResult.rollbackSucceeded &&
+          initializeResult.finalStateUncertain && !storage::storage_operation_active(),
+          "rollback failure is reported as uncertain while still releasing the lock");
+    unregister_fake(index, rollbackFail);
+
+    FakeDisk firstFlushFail(512, 4096);
+    index = register_fake(firstFlushFail, true, true, true);
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
+    firstFlushFail.failFlushAtCall = 1;
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION &&
+          storage::execute_initialize_disk(initializePlan, initializeResult) ==
+              storage::INITIALIZE_DISK_FLUSH_FAILED &&
+          !initializeResult.writeAttempted && firstFlushFail.writeAttempts == 0 &&
+          !storage::storage_operation_active(),
+          "pre-write flush failure rejects the operation without modifying sectors");
+    unregister_fake(index, firstFlushFail);
 
     block::init();
     ramdisk::init();

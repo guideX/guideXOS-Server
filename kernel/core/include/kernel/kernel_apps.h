@@ -14,6 +14,7 @@
 #include "kernel/vfs.h"
 #include "kernel/block_device.h"
 #include "kernel/storage_manager.h"
+#include "kernel/disk_initialization.h"
 #include "kernel/desktop.h"
 #include "kernel/image_adapter.h"
 #include "kernel/navigator_scrollbar.h"
@@ -1185,6 +1186,14 @@ private:
     static const int MAX_DISKS = 16;
     static const int MAX_PARTS = 16; // Bounded UI list; parser retains up to 128.
 
+    enum InitializeDialogState : uint8_t {
+        INITIALIZE_DIALOG_CLOSED = 0,
+        INITIALIZE_DIALOG_CHOOSE_SCHEME,
+        INITIALIZE_DIALOG_CONFIRM,
+        INITIALIZE_DIALOG_RUNNING,
+        INITIALIZE_DIALOG_RESULT,
+    };
+
     struct PartEntry {
         uint64_t startLba;
         uint64_t sectorCount;
@@ -1204,6 +1213,8 @@ private:
         bool     flushSupported;
         storage::PersistenceClass persistence;
         storage::DiskState state;
+        storage::InitializeDiskStatus initializeStatus;
+        bool initializeAvailable;
         uint16_t totalPartitionCount;
         PartEntry parts[MAX_PARTS];
         int       partCount;
@@ -1215,11 +1226,25 @@ private:
     int       m_selectedDisk;
 
     int m_refreshBtnId;
+    int m_initializeBtnId;
+    int m_gptBtnId;
+    int m_mbrBtnId;
+    int m_confirmInitializeBtnId;
+    int m_cancelInitializeBtnId;
+    InitializeDialogState m_initializeDialogState;
+    storage::PartitionScheme m_initializeScheme;
+    storage::InitializeDiskPlan m_initializePlan;
+    storage::InitializeDiskResult m_initializeResult;
+    char m_initializeMessage[128];
 
     void        scanDisks();
     void        readPartitionTable(DiskEntry& disk);
     const char* detectFs(uint8_t devIndex, uint64_t lbaStart, uint64_t sectorCount);
     void        formatSize(uint64_t bytes, char* out, int outSize) const;
+    void        updateInitializeControls();
+    void        beginInitializeConfirmation(storage::PartitionScheme scheme);
+    void        runInitializeOperation();
+    void        closeInitializeDialog();
 };
 
 class TrashApp : public app::KernelApp {

@@ -558,6 +558,7 @@ static void scan_pci_nvme()
                 memzero(&bdev, sizeof(bdev));
                 bdev.active       = true;
                 bdev.type         = block::BDEV_NVME;
+                bdev.bootProvenance = block::BOOT_PROVENANCE_UNKNOWN;
                 bdev.driverIndex  = s_deviceCount;
                 bdev.totalSectors = ndev.totalSectors;
                 bdev.sectorSize   = ndev.sectorSize;

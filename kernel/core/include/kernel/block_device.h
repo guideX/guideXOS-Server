@@ -32,6 +32,14 @@ enum DeviceType : uint8_t {
     BDEV_RAMDISK    = 5,    // In-memory block device
 };
 
+// Firmware boot-source matching must be explicit. Transport type, registry
+// index, and partition flags are not sufficient to infer this value.
+enum BootProvenance : uint8_t {
+    BOOT_PROVENANCE_UNKNOWN = 0,
+    BOOT_PROVENANCE_BOOT_BACKING,
+    BOOT_PROVENANCE_DEFINITELY_NOT_BOOT,
+};
+
 // ================================================================
 // Status codes
 // ================================================================
@@ -102,6 +110,7 @@ struct BlockDevice {
     bool          removable;
     char          model[40];
     char          serial[24];
+    BootProvenance bootProvenance;
     // Optional transport DMA limits. Zero means the registry does not declare
     // a constraint; new storage callers should use checked I/O helpers.
     uint16_t      requiredBufferAlignment;
