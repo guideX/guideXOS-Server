@@ -25,12 +25,23 @@ enum DiskManagerAction : uint8_t {
     DISK_MANAGER_ACTION_PROPERTIES,
     DISK_MANAGER_ACTION_DIAGNOSTICS,
     DISK_MANAGER_ACTION_INITIALIZE,
+    DISK_MANAGER_ACTION_CREATE_PARTITION,
     DISK_MANAGER_ACTION_COUNT,
 };
 
 inline bool disk_manager_action_is_write(DiskManagerAction action)
 {
-    return action == DISK_MANAGER_ACTION_INITIALIZE;
+    return action == DISK_MANAGER_ACTION_INITIALIZE ||
+           action == DISK_MANAGER_ACTION_CREATE_PARTITION;
+}
+
+inline bool disk_manager_create_partition_action_enabled(
+    bool hasDiskSelection, bool selectedUnallocatedRegion,
+    bool validatedUnallocatedModel, bool preflightAvailable,
+    bool dialogClosed)
+{
+    return dialogClosed && hasDiskSelection && selectedUnallocatedRegion &&
+        validatedUnallocatedModel && preflightAvailable;
 }
 
 inline bool disk_manager_action_enabled(DiskManagerAction action,
@@ -88,7 +99,8 @@ inline bool disk_manager_same_partition(const PartitionEntry& left,
         }
         return nonzero;
     }
-    return left.startLba == right.startLba &&
+    return left.partitionNumber == right.partitionNumber &&
+        left.startLba == right.startLba &&
         left.endLba == right.endLba &&
         left.mbrType == right.mbrType;
 }

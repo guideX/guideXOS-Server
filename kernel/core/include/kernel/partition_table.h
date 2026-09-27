@@ -73,6 +73,13 @@ struct PartitionTableModel {
     PartitionError error;
     uint16_t partitionCount;
     uint16_t tableEntryCount;
+    // Validated on-disk GPT array geometry. These fields are populated only
+    // from a valid primary/backup header and let bounded storage operations
+    // update the existing layout without assuming DM3's default geometry.
+    uint32_t gptEntrySize;
+    uint32_t gptEntryArraySectors;
+    uint64_t primaryGptEntryArrayLba;
+    uint64_t backupGptEntryArrayLba;
     uint64_t firstUsableLba;
     uint64_t lastUsableLba;
     bool protectiveMbr;

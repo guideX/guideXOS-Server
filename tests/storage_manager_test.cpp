@@ -4,6 +4,7 @@
 #include "../kernel/core/include/kernel/partition_table.h"
 #include "../kernel/core/include/kernel/storage_manager.h"
 #include "../kernel/core/include/kernel/disk_initialization.h"
+#include "../kernel/core/include/kernel/partition_operations.h"
 #include "../kernel/core/include/kernel/disk_manager_model.h"
 #include "../kernel/core/include/kernel/ramdisk.h"
 #include "../kernel/core/include/kernel/vfs.h"
@@ -25,6 +26,8 @@ struct FakeDisk {
     uint32_t sectorSize;
     uint64_t sectorCount;
     uint8_t driverId;
+    bool sparse;
+    std::vector<uint8_t> sparseMbr;
     std::vector<uint8_t> bytes;
     bool failReads;
     uint64_t failLba;
@@ -48,7 +51,8 @@ struct FakeDisk {
     bool removed;
 
     FakeDisk(uint32_t size, uint64_t count, bool allocate = true)
-        : sectorSize(size), sectorCount(count), driverId(0),
+        : sectorSize(size), sectorCount(count), driverId(0), sparse(!allocate),
+          sparseMbr(static_cast<size_t>(size), 0),
           bytes(allocate ? static_cast<size_t>(size) * static_cast<size_t>(count) : 0, 0),
           failReads(false), failLba(UINT64_MAX), failReadAtCall(0), failFlush(false),
           failFlushAtCall(0), failFlushStatus(block::BLOCK_ERR_IO),
@@ -88,6 +92,13 @@ block::Status fake_read(uint8_t driverId, uint64_t lba, uint32_t count, void* bu
             disk->registryIndex, disk->registrationId);
         return block::BLOCK_ERR_NO_MEDIA;
     }
+    if (disk->sparse) {
+        std::memset(buffer, 0, static_cast<size_t>(count) * disk->sectorSize);
+        if (lba == 0 && count == 1)
+            std::memcpy(buffer, disk->sparseMbr.data(), disk->sectorSize);
+        ++disk->reads;
+        return block::BLOCK_OK;
+    }
     const size_t offset = static_cast<size_t>(lba * disk->sectorSize);
     const size_t bytes = static_cast<size_t>(count) * disk->sectorSize;
     if (offset > disk->bytes.size() || bytes > disk->bytes.size() - offset)
@@ -105,6 +116,12 @@ block::Status fake_write(uint8_t driverId, uint64_t lba, uint32_t count,
     ++disk->writeAttempts;
     if (disk->writeAttempts == disk->failWriteAtCall1 ||
         disk->writeAttempts == disk->failWriteAtCall2) return block::BLOCK_ERR_IO;
+    if (disk->sparse) {
+        if (lba != 0 || count != 1) return block::BLOCK_ERR_IO;
+        std::memcpy(disk->sparseMbr.data(), buffer, disk->sectorSize);
+        ++disk->writes;
+        return block::BLOCK_OK;
+    }
     const size_t offset = static_cast<size_t>(lba * disk->sectorSize);
     const size_t bytes = static_cast<size_t>(count) * disk->sectorSize;
     if (offset > disk->bytes.size() || bytes > disk->bytes.size() - offset)
@@ -393,6 +410,182 @@ void build_empty_gpt(FakeDisk& disk)
             ? 0xFFFFFFFFu : static_cast<uint32_t>(disk.sectorCount - 1));
 }
 
+uint16_t read_u16(const uint8_t* p);
+uint32_t read_u32(const uint8_t* p);
+uint64_t read_u64(const uint8_t* p);
+
+void build_full_gpt(FakeDisk& disk)
+{
+    std::fill(disk.bytes.begin(), disk.bytes.end(), 0);
+    const uint32_t entryCount = 128;
+    const uint32_t entrySize = 128;
+    const uint64_t arrayBytes = static_cast<uint64_t>(entryCount) * entrySize;
+    const uint64_t arraySectors = arrayBytes / disk.sectorSize;
+    const uint64_t backupHeaderLba = disk.sectorCount - 1;
+    const uint64_t backupArrayLba = backupHeaderLba - arraySectors;
+    const uint64_t firstUsable = 2 + arraySectors;
+    const uint64_t lastUsable = backupArrayLba - 1;
+    std::vector<uint8_t> entries(static_cast<size_t>(arrayBytes), 0);
+    for (uint32_t i = 0; i < entryCount; ++i) {
+        uint8_t* entry = entries.data() + static_cast<size_t>(i) * entrySize;
+        entry[0] = 0x28;
+        entry[16] = static_cast<uint8_t>(i + 1);
+        entry[17] = 0x53;
+        const uint64_t start = firstUsable + i * 2;
+        write_u64(entry + 32, start);
+        write_u64(entry + 40, start);
+    }
+    const uint32_t entriesCrc = storage::crc32(entries.data(), entries.size());
+    for (uint64_t i = 0; i < arraySectors; ++i) {
+        const size_t offset = static_cast<size_t>(i * disk.sectorSize);
+        const size_t amount = entries.size() - offset < disk.sectorSize
+            ? entries.size() - offset : disk.sectorSize;
+        std::memcpy(sector(disk, 2 + i), entries.data() + offset, amount);
+        std::memcpy(sector(disk, backupArrayLba + i), entries.data() + offset, amount);
+    }
+    write_gpt_header(disk, 1, backupHeaderLba, firstUsable, lastUsable,
+                     2, entryCount, entriesCrc);
+    write_gpt_header(disk, backupHeaderLba, 1, firstUsable, lastUsable,
+                     backupArrayLba, entryCount, entriesCrc);
+    set_mbr_signature(disk);
+    set_mbr_partition(disk, 0, 0, 0xEE, 1,
+        disk.sectorCount - 1 > 0xFFFFFFFFull
+            ? 0xFFFFFFFFu : static_cast<uint32_t>(disk.sectorCount - 1));
+}
+
+bool current_regions(uint8_t index, FakeDisk& disk,
+                     storage::UnallocatedRegion* regions,
+                     uint16_t& count)
+{
+    storage::PartitionTableModel table = {};
+    return storage::parse_partition_table(index, table) &&
+        storage::compute_unallocated_regions(table, disk.sectorCount,
+            disk.sectorSize, regions, storage::MAX_UNALLOCATED_REGIONS, count);
+}
+
+storage::CreatePartitionRequest make_create_request(
+    uint8_t index, storage::PartitionScheme scheme,
+    const storage::UnallocatedRegion& region, uint64_t sizeBytes,
+    bool maximum, uint8_t guidSeed = 0x91)
+{
+    storage::CreatePartitionRequest request = {};
+    storage::capture_target_identity(index, request.targetSnapshot);
+    request.requestedScheme = scheme;
+    request.selectedRegion = region;
+    request.requestedSizeBytes = sizeBytes;
+    request.useMaximumSize = maximum;
+    request.partitionType = scheme == storage::PARTITION_SCHEME_GPT
+        ? storage::CREATE_PARTITION_GPT_BASIC_DATA
+        : storage::CREATE_PARTITION_MBR_FAT32_LBA;
+    std::strncpy(request.gptName, "New Volume", sizeof(request.gptName) - 1);
+    request.expectedRegistryGeneration = request.targetSnapshot.registryGeneration;
+    request.testGuidProvided = true;
+    for (uint8_t i = 0; i < 16; ++i)
+        request.testUniqueGuid[i] = static_cast<uint8_t>(guidSeed + i * 3);
+    return request;
+}
+
+uint32_t independent_crc32(const uint8_t* bytes, size_t length)
+{
+    uint32_t crc = 0xFFFFFFFFu;
+    for (size_t i = 0; i < length; ++i) {
+        crc ^= bytes[i];
+        for (uint8_t bit = 0; bit < 8; ++bit)
+            crc = (crc >> 1) ^ ((crc & 1u) ? 0xEDB88320u : 0u);
+    }
+    return crc ^ 0xFFFFFFFFu;
+}
+
+bool independent_verify_gpt_create(const FakeDisk& disk,
+                                   const std::vector<uint8_t>& before,
+                                   const storage::CreatePartitionResult& result,
+                                   const char* expectedName)
+{
+    static const uint8_t expectedBasicDataGuid[16] = {
+        0xA2, 0xA0, 0xD0, 0xEB, 0xE5, 0xB9, 0x33, 0x44,
+        0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26, 0x99, 0xC7
+    };
+    const uint8_t* primary = disk.bytes.data() + disk.sectorSize;
+    const uint8_t* backup = disk.bytes.data() +
+        static_cast<size_t>((disk.sectorCount - 1) * disk.sectorSize);
+    const uint32_t headerSize = read_u32(primary + 12);
+    const uint32_t entryCount = read_u32(primary + 80);
+    const uint32_t entrySize = read_u32(primary + 84);
+    const size_t arrayBytes = static_cast<size_t>(entryCount) * entrySize;
+    const uint64_t primaryLba = read_u64(primary + 72);
+    const uint64_t backupLba = read_u64(backup + 72);
+    const size_t arraySectors = (arrayBytes + disk.sectorSize - 1) /
+        disk.sectorSize;
+    const uint8_t* primaryArray = disk.bytes.data() +
+        static_cast<size_t>(primaryLba * disk.sectorSize);
+    const uint8_t* backupArray = disk.bytes.data() +
+        static_cast<size_t>(backupLba * disk.sectorSize);
+    if (headerSize < 92 || headerSize > disk.sectorSize ||
+        arrayBytes == 0 || primaryLba == 0 || backupLba == 0 ||
+        std::memcmp(primaryArray, backupArray,
+                    arraySectors * disk.sectorSize) != 0 ||
+        independent_crc32(primaryArray, arrayBytes) != read_u32(primary + 88) ||
+        independent_crc32(backupArray, arrayBytes) != read_u32(backup + 88))
+        return false;
+    std::vector<uint8_t> header(primary, primary + headerSize);
+    const uint32_t primaryHeaderCrc = read_u32(primary + 16);
+    write_u32(header.data() + 16, 0);
+    if (independent_crc32(header.data(), header.size()) != primaryHeaderCrc)
+        return false;
+    header.assign(backup, backup + read_u32(backup + 12));
+    const uint32_t backupHeaderCrc = read_u32(backup + 16);
+    write_u32(header.data() + 16, 0);
+    if (independent_crc32(header.data(), header.size()) != backupHeaderCrc)
+        return false;
+    if (std::memcmp(primary + 56, backup + 56, 16) != 0 ||
+        std::memcmp(primaryArray, backupArray, arrayBytes) != 0 ||
+        result.partitionTableSlot >= entryCount) return false;
+
+    const size_t slot = result.partitionTableSlot;
+    const uint8_t* entry = primaryArray + slot * entrySize;
+    if (std::memcmp(entry, expectedBasicDataGuid, 16) != 0 ||
+        std::memcmp(entry + 16, result.createdPartition.uniqueGuid, 16) != 0 ||
+        read_u64(entry + 32) != result.createdPartition.startLba ||
+        read_u64(entry + 40) != result.createdPartition.endLba ||
+        read_u64(entry + 48) != 0) return false;
+    for (size_t byteInArray = 0; byteInArray < arrayBytes; ++byteInArray) {
+        if (byteInArray >= slot * entrySize &&
+            byteInArray < (slot + 1) * entrySize) continue;
+        const uint64_t originalLba = primaryLba + byteInArray / disk.sectorSize;
+        const size_t originalOffset = static_cast<size_t>(originalLba * disk.sectorSize) +
+            byteInArray % disk.sectorSize;
+        const size_t currentOffset = static_cast<size_t>(primaryLba * disk.sectorSize) + byteInArray;
+        if (before[originalOffset] != disk.bytes[currentOffset]) return false;
+    }
+    if (expectedName) {
+        for (size_t i = 0; expectedName[i] && i < 36; ++i)
+            if (read_u16(entry + 56 + i * 2) !=
+                static_cast<uint8_t>(expectedName[i])) return false;
+        if (expectedName[std::min<size_t>(std::strlen(expectedName), 36)] != '\0' &&
+            std::strlen(expectedName) > 36) return false;
+    }
+    return std::memcmp(disk.bytes.data(), before.data(), disk.sectorSize) == 0;
+}
+
+bool independent_verify_mbr_create(const FakeDisk& disk,
+                                   const std::vector<uint8_t>& before,
+                                   const storage::CreatePartitionResult& result)
+{
+    const uint8_t* now = disk.bytes.data();
+    if (result.partitionTableSlot >= 4) return false;
+    const uint32_t slotOffset = 446 +
+        static_cast<uint32_t>(result.partitionTableSlot) * 16;
+    for (uint32_t i = 0; i < disk.sectorSize; ++i)
+        if (i < slotOffset || i >= slotOffset + 16)
+            if (now[i] != before[i]) return false;
+    const uint8_t* entry = now + slotOffset;
+    return entry[0] == 0 && entry[4] == 0x0C &&
+        read_u32(entry + 8) == result.createdPartition.startLba &&
+        read_u32(entry + 12) == result.createdPartition.sectorCount &&
+        now[510] == 0x55 && now[511] == 0xAA &&
+        std::memcmp(now + 440, before.data() + 440, 4) == 0;
+}
+
 storage::PartitionTableModel parse_fixture(FakeDisk& disk, bool& parsed)
 {
     const uint8_t index = register_fake(disk);
@@ -482,6 +675,12 @@ storage::InitializeDiskStatus probe_fake_initialize(
         : storage::INITIALIZE_DISK_DEVICE_MISSING;
     unregister_fake(index, disk);
     return status;
+}
+
+uint16_t read_u16(const uint8_t* p)
+{
+    return static_cast<uint16_t>(p[0]) |
+        (static_cast<uint16_t>(p[1]) << 8);
 }
 
 uint32_t read_u32(const uint8_t* p)
@@ -841,9 +1040,22 @@ int main()
     for (uint8_t action = 0; action < storage::DISK_MANAGER_ACTION_COUNT; ++action)
         if (storage::disk_manager_action_is_write(
                 static_cast<storage::DiskManagerAction>(action))) ++dm5WriteActions;
-    check(dm5WriteActions == 1 && storage::disk_manager_action_is_write(
-              storage::DISK_MANAGER_ACTION_INITIALIZE),
-          "Initialize Disk is the only DM5 contextual write action");
+    check(dm5WriteActions == 2 && storage::disk_manager_action_is_write(
+              storage::DISK_MANAGER_ACTION_INITIALIZE) &&
+          storage::disk_manager_action_is_write(
+              storage::DISK_MANAGER_ACTION_CREATE_PARTITION),
+          "Initialize Disk and contextual Create Partition are the only storage write actions");
+    check(storage::disk_manager_create_partition_action_enabled(
+              true, true, true, true, true) &&
+          !storage::disk_manager_create_partition_action_enabled(
+              true, false, true, true, true) &&
+          !storage::disk_manager_create_partition_action_enabled(
+              true, true, false, true, true) &&
+          !storage::disk_manager_create_partition_action_enabled(
+              true, true, true, false, true) &&
+          !storage::disk_manager_create_partition_action_enabled(
+              true, true, true, true, false),
+          "Create Partition is contextual to a selected validated gap and storage preflight");
     check(storage::disk_manager_action_enabled(
               storage::DISK_MANAGER_ACTION_INITIALIZE, true,
               storage::DISK_STATE_NOT_INITIALIZED, true, true) &&
@@ -924,6 +1136,10 @@ int main()
     ++mbrAfter.startLba;
     check(!storage::disk_manager_same_partition(mbrBefore, mbrAfter),
           "MBR selection clears when partition bounds change");
+    mbrAfter = mbrBefore;
+    mbrAfter.partitionNumber = 2;
+    check(!storage::disk_manager_same_partition(mbrBefore, mbrAfter),
+          "MBR selection clears when the primary table slot changes");
 
     storage::UnallocatedRegion regionBefore = {};
     regionBefore.startLba = 1000;
@@ -1855,6 +2071,748 @@ int main()
           !storage::storage_operation_active(),
           "pre-write flush failure rejects the operation without modifying sectors");
     unregister_fake(index, firstFlushFail);
+
+    {
+        FakeDisk createGpt(512, 16384);
+        build_empty_gpt(createGpt);
+        index = register_fake(createGpt, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        storage::CreatePartitionProbe probe = {};
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        check(current_regions(index, createGpt, regions, regionCount) &&
+              regionCount == 1 &&
+              storage::probe_create_partition(target,
+                  storage::PARTITION_SCHEME_GPT, regions[0], probe) ==
+                  storage::CREATE_PARTITION_READY &&
+              probe.firstAlignedLba == 2048 &&
+              probe.maximumBytes >= 1024u * 1024u,
+              "GPT create preflight derives a 1 MiB-aligned maximum from the selected gap");
+        std::vector<uint8_t> before = createGpt.bytes;
+        storage::CreatePartitionRequest request = make_create_request(index,
+            storage::PARTITION_SCHEME_GPT, regions[0], 0, true, 0xA0);
+        uint8_t expectedGuid[16];
+        for (uint8_t i = 0; i < 16; ++i)
+            expectedGuid[i] = static_cast<uint8_t>(0xA0 + i * 3);
+        expectedGuid[7] = static_cast<uint8_t>((expectedGuid[7] & 0x0F) | 0x40);
+        expectedGuid[8] = static_cast<uint8_t>((expectedGuid[8] & 0x3F) | 0x80);
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_SUCCESS &&
+              createResult.verificationPassed &&
+              std::memcmp(createResult.createdPartition.uniqueGuid,
+                          expectedGuid, sizeof(expectedGuid)) == 0 &&
+              createResult.createdPartition.startLba == 2048 &&
+              createResult.finalDetectedState == storage::DISK_STATE_VALID_GPT &&
+              createResult.finalPartitionCount == 1 &&
+              createResult.finalUnallocatedRegionCount == 1 &&
+              !storage::storage_operation_active(),
+              "GPT maximum-size creation succeeds, verifies, rescans, and releases the lease");
+        check(independent_verify_gpt_create(createGpt, before, createResult,
+                  "New Volume"),
+              "independent GPT bytes verify entry, GUID, bounds, UTF-16 name, CRCs, copy parity, and preservation");
+        unregister_fake(index, createGpt);
+    }
+
+    {
+        FakeDisk unnamedGpt(512, 8192);
+        build_empty_gpt(unnamedGpt);
+        index = register_fake(unnamedGpt, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, unnamedGpt, regions, regionCount);
+        std::vector<uint8_t> before = unnamedGpt.bytes;
+        storage::CreatePartitionRequest request = make_create_request(index,
+            storage::PARTITION_SCHEME_GPT, regions[0], 0, true, 0xA8);
+        request.gptName[0] = '\0';
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_SUCCESS &&
+              independent_verify_gpt_create(unnamedGpt, before, createResult, "") &&
+              createResult.createdPartition.name[0] == '\0',
+              "GPT partition creation accepts an intentionally empty bounded name");
+        unregister_fake(index, unnamedGpt);
+    }
+
+    {
+        FakeDisk guidCollision(512, 16384);
+        build_empty_gpt(guidCollision);
+        uint8_t* primaryHeader = sector(guidCollision, 1);
+        const uint64_t backupHeaderLba = guidCollision.sectorCount - 1;
+        const uint64_t primaryArrayLba = read_u64(primaryHeader + 72);
+        const uint32_t entryCount = read_u32(primaryHeader + 80);
+        const uint32_t entrySize = read_u32(primaryHeader + 84);
+        const size_t arrayBytes = static_cast<size_t>(entryCount) * entrySize;
+        const size_t arraySectors = (arrayBytes + guidCollision.sectorSize - 1) /
+            guidCollision.sectorSize;
+        std::vector<uint8_t> entries(arrayBytes, 0);
+        uint8_t collisionGuid[16];
+        for (uint8_t i = 0; i < 16; ++i)
+            collisionGuid[i] = static_cast<uint8_t>(0x30 + i);
+        collisionGuid[7] = static_cast<uint8_t>((collisionGuid[7] & 0x0F) | 0x40);
+        collisionGuid[8] = static_cast<uint8_t>((collisionGuid[8] & 0x3F) | 0x80);
+        std::memcpy(entries.data(), storage::GPT_TYPE_BASIC_DATA_GUID, 16);
+        std::memcpy(entries.data() + 16, collisionGuid, sizeof(collisionGuid));
+        write_u64(entries.data() + 32, 34);
+        write_u64(entries.data() + 40, 2047);
+        for (uint8_t i = 0; i < 8; ++i)
+            write_u16(entries.data() + 56 + i * 2, "Occupied"[i]);
+        const uint32_t entriesCrc = storage::crc32(entries.data(), entries.size());
+        const uint64_t backupArrayLba = read_u64(sector(guidCollision,
+            backupHeaderLba) + 72);
+        for (size_t i = 0; i < arraySectors; ++i) {
+            const size_t offset = i * guidCollision.sectorSize;
+            const size_t amount = entries.size() - offset < guidCollision.sectorSize
+                ? entries.size() - offset : guidCollision.sectorSize;
+            std::memcpy(sector(guidCollision, primaryArrayLba + i),
+                        entries.data() + offset, amount);
+            std::memcpy(sector(guidCollision, backupArrayLba + i),
+                        entries.data() + offset, amount);
+        }
+        const uint64_t firstUsable = read_u64(primaryHeader + 40);
+        const uint64_t lastUsable = read_u64(primaryHeader + 48);
+        write_gpt_header(guidCollision, 1, backupHeaderLba, firstUsable,
+            lastUsable, primaryArrayLba, entryCount, entriesCrc);
+        write_gpt_header(guidCollision, backupHeaderLba, 1, firstUsable,
+            lastUsable, backupArrayLba, entryCount, entriesCrc);
+        index = register_fake(guidCollision, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, guidCollision, regions, regionCount);
+        storage::CreatePartitionRequest request = make_create_request(index,
+            storage::PARTITION_SCHEME_GPT, regions[regionCount - 1],
+            2ull * 1024 * 1024, false, 0xB8);
+        std::memcpy(request.testUniqueGuid, collisionGuid,
+                    sizeof(request.testUniqueGuid));
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_GUID_COLLISION &&
+              guidCollision.writeAttempts == 0 &&
+              !storage::storage_operation_active(),
+              "GPT creation rejects an injected GUID already used by another entry without writing");
+        unregister_fake(index, guidCollision);
+    }
+
+    {
+        FakeDisk sequentialGpt(512, 16384);
+        build_empty_gpt(sequentialGpt);
+        index = register_fake(sequentialGpt, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, sequentialGpt, regions, regionCount);
+        std::vector<uint8_t> beforeFirst = sequentialGpt.bytes;
+        storage::CreatePartitionRequest firstRequest = make_create_request(index,
+            storage::PARTITION_SCHEME_GPT, regions[0], 4ull * 1024 * 1024,
+            false, 0xA1);
+        storage::CreatePartitionResult firstResult = {};
+        check(storage::create_partition(firstRequest, firstResult) ==
+                  storage::CREATE_PARTITION_SUCCESS &&
+              firstResult.createdPartition.startLba == 2048 &&
+              firstResult.createdPartition.sectorCount == 8192 &&
+              firstResult.createdPartition.endLba == 10239 &&
+              independent_verify_gpt_create(sequentialGpt, beforeFirst,
+                  firstResult, "New Volume"),
+              "GPT partial-gap creation stays within the requested 4 MiB and preserves entry bytes");
+        current_regions(index, sequentialGpt, regions, regionCount);
+        check(regionCount == 2 && regions[1].startLba == 10240,
+              "GPT partial creation recomputes the trailing gap from parser geometry");
+        std::vector<uint8_t> beforeSecond = sequentialGpt.bytes;
+        storage::CreatePartitionRequest secondRequest = make_create_request(index,
+            storage::PARTITION_SCHEME_GPT, regions[1], 2ull * 1024 * 1024,
+            false, 0xA2);
+        storage::CreatePartitionResult secondResult = {};
+        check(storage::create_partition(secondRequest, secondResult) ==
+                  storage::CREATE_PARTITION_SUCCESS &&
+              secondResult.createdPartition.partitionNumber == 2 &&
+              secondResult.finalPartitionCount == 2 &&
+              secondResult.finalUnallocatedRegionCount == 2 &&
+              independent_verify_gpt_create(sequentialGpt, beforeSecond,
+                  secondResult, "New Volume"),
+              "sequential GPT creation preserves the first partition and creates a second real entry");
+        storage::PartitionTableModel after = {};
+        check(storage::parse_partition_table(index, after) &&
+              after.state == storage::DISK_STATE_VALID_GPT &&
+              after.partitionCount == 2 &&
+              after.partitions[0].partitionNumber == 1 &&
+              after.partitions[1].partitionNumber == 2 &&
+              !storage::storage_operation_active(),
+              "multiple GPT creates retain on-disk slots and leave Format unavailable");
+        unregister_fake(index, sequentialGpt);
+    }
+
+    {
+        FakeDisk fourKnGpt(4096, 8192);
+        build_empty_gpt(fourKnGpt);
+        index = register_fake(fourKnGpt, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, fourKnGpt, regions, regionCount);
+        std::vector<uint8_t> before = fourKnGpt.bytes;
+        storage::CreatePartitionRequest request = make_create_request(index,
+            storage::PARTITION_SCHEME_GPT, regions[0], 3ull * 1024 * 1024,
+            false, 0xA3);
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_SUCCESS &&
+              createResult.createdPartition.startLba == 256 &&
+              createResult.createdPartition.startLba % 256 == 0 &&
+              createResult.createdPartition.sectorCount == 768 &&
+              independent_verify_gpt_create(fourKnGpt, before, createResult,
+                  "New Volume"),
+              "4096-byte GPT creation derives 1 MiB alignment as 256 sectors and verifies both copies");
+        unregister_fake(index, fourKnGpt);
+    }
+
+    {
+        FakeDisk sequentialMbr(512, 16384);
+        set_mbr_signature(sequentialMbr);
+        std::fill(sequentialMbr.bytes.begin(), sequentialMbr.bytes.begin() + 440, 0x6D);
+        write_u32(sector(sequentialMbr, 0) + 440, 0x78563412u);
+        index = register_fake(sequentialMbr, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, sequentialMbr, regions, regionCount);
+        std::vector<uint8_t> beforeFirst = sequentialMbr.bytes;
+        storage::CreatePartitionRequest firstRequest = make_create_request(index,
+            storage::PARTITION_SCHEME_MBR, regions[0], 2ull * 1024 * 1024,
+            false, 0xA4);
+        storage::CreatePartitionResult firstResult = {};
+        check(storage::create_partition(firstRequest, firstResult) ==
+                  storage::CREATE_PARTITION_SUCCESS &&
+              firstResult.createdPartition.partitionNumber == 1 &&
+              firstResult.createdPartition.startLba == 2048 &&
+              independent_verify_mbr_create(sequentialMbr, beforeFirst,
+                  firstResult),
+              "MBR creation writes an inactive FAT32-LBA entry and preserves boot code/signature");
+        current_regions(index, sequentialMbr, regions, regionCount);
+        check(regionCount == 2 && regions[1].startLba == 6144,
+              "MBR partial creation exposes its exact remaining aligned gap");
+        std::vector<uint8_t> beforeSecond = sequentialMbr.bytes;
+        storage::CreatePartitionRequest secondRequest = make_create_request(index,
+            storage::PARTITION_SCHEME_MBR, regions[1], 2ull * 1024 * 1024,
+            false, 0xA5);
+        storage::CreatePartitionResult secondResult = {};
+        check(storage::create_partition(secondRequest, secondResult) ==
+                  storage::CREATE_PARTITION_SUCCESS &&
+              secondResult.createdPartition.partitionNumber == 2 &&
+              secondResult.finalPartitionCount == 2 &&
+              independent_verify_mbr_create(sequentialMbr, beforeSecond,
+                  secondResult),
+              "second MBR creation preserves the first entry and modifies only its own slot");
+        unregister_fake(index, sequentialMbr);
+    }
+
+    {
+        FakeDisk fourKnMbr(4096, 8192);
+        set_mbr_signature(fourKnMbr);
+        index = register_fake(fourKnMbr, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, fourKnMbr, regions, regionCount);
+        std::vector<uint8_t> before = fourKnMbr.bytes;
+        storage::CreatePartitionRequest request = make_create_request(index,
+            storage::PARTITION_SCHEME_MBR, regions[0], 2ull * 1024 * 1024,
+            false, 0xA6);
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_SUCCESS &&
+              createResult.createdPartition.startLba == 256 &&
+              createResult.createdPartition.sectorCount == 512 &&
+              independent_verify_mbr_create(fourKnMbr, before, createResult),
+              "4096-byte MBR creation uses 256-sector alignment and preserves the full logical sector");
+        unregister_fake(index, fourKnMbr);
+    }
+
+    {
+        FakeDisk fullGpt(512, 16384);
+        build_full_gpt(fullGpt);
+        index = register_fake(fullGpt, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, fullGpt, regions, regionCount);
+        storage::CreatePartitionRequest request = make_create_request(index,
+            storage::PARTITION_SCHEME_GPT, regions[regionCount - 1], 0, true, 0xA7);
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_NO_GPT_ENTRY &&
+              fullGpt.writeAttempts == 0 && !storage::storage_operation_active(),
+              "full GPT entry array rejects creation without metadata writes");
+        unregister_fake(index, fullGpt);
+    }
+
+    {
+        FakeDisk fullMbr(512, 16384);
+        set_mbr_signature(fullMbr);
+        for (uint8_t slot = 0; slot < 4; ++slot)
+            set_mbr_partition(fullMbr, slot, 0, 0x0C,
+                2048u + static_cast<uint32_t>(slot) * 2048u, 1024u);
+        index = register_fake(fullMbr, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, fullMbr, regions, regionCount);
+        storage::CreatePartitionProbe probe = {};
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        check(storage::probe_create_partition(target, storage::PARTITION_SCHEME_MBR,
+                  regions[regionCount - 1], probe) ==
+                  storage::CREATE_PARTITION_NO_MBR_ENTRY &&
+              fullMbr.writeAttempts == 0,
+              "full MBR primary table rejects creation and disables the contextual action");
+        unregister_fake(index, fullMbr);
+    }
+
+    {
+        FakeDisk degraded(512, 4096);
+        build_gpt(degraded, GptFixture::PrimaryHeaderCrcBad);
+        index = register_fake(degraded, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::parse_partition_table(index, table);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        check(storage::compute_unallocated_regions(table, degraded.sectorCount,
+                  degraded.sectorSize, regions,
+                  storage::MAX_UNALLOCATED_REGIONS, regionCount),
+              "degraded GPT read-only regions remain available for inspection");
+        storage::CreatePartitionRequest request = make_create_request(index,
+            storage::PARTITION_SCHEME_GPT, regions[0], 0, true, 0xA8);
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_GPT_DEGRADED &&
+              degraded.writeAttempts == 0,
+              "degraded GPT is explicitly rejected without attempting repair or creation");
+        unregister_fake(index, degraded);
+    }
+
+    {
+        FakeDisk conflicting(512, 4096);
+        build_gpt(conflicting, GptFixture::CopiesDisagree);
+        index = register_fake(conflicting, true, true, true);
+        storage::CreatePartitionRequest request = {};
+        storage::capture_target_identity(index, request.targetSnapshot);
+        request.requestedScheme = storage::PARTITION_SCHEME_GPT;
+        request.useMaximumSize = true;
+        request.expectedRegistryGeneration = request.targetSnapshot.registryGeneration;
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_GPT_DEGRADED &&
+              conflicting.writeAttempts == 0,
+              "conflicting valid GPT copies are rejected before writes");
+        unregister_fake(index, conflicting);
+    }
+
+    {
+        FakeDisk extended(512, 16384);
+        set_mbr_signature(extended);
+        set_mbr_partition(extended, 0, 0, 0x0F, 2048, 4096);
+        index = register_fake(extended, true, true, true);
+        storage::CreatePartitionRequest request = {};
+        storage::capture_target_identity(index, request.targetSnapshot);
+        request.requestedScheme = storage::PARTITION_SCHEME_MBR;
+        request.useMaximumSize = true;
+        request.partitionType = storage::CREATE_PARTITION_MBR_FAT32_LBA;
+        request.expectedRegistryGeneration = request.targetSnapshot.registryGeneration;
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_UNSUPPORTED_SCHEME &&
+              extended.writeAttempts == 0,
+              "extended/logical MBR layouts remain unsupported");
+        unregister_fake(index, extended);
+    }
+
+    {
+        FakeDisk changedGap(512, 16384);
+        set_mbr_signature(changedGap);
+        index = register_fake(changedGap, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, changedGap, regions, regionCount);
+        storage::CreatePartitionRequest request = make_create_request(index,
+            storage::PARTITION_SCHEME_MBR, regions[0], 2ull * 1024 * 1024,
+            false, 0xA9);
+        // Simulate another writer changing the table after the row was selected.
+        set_mbr_partition(changedGap, 0, 0, 0x0C, 4096, 1024);
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_STALE_REGION &&
+              changedGap.writeAttempts == 0,
+              "selected MBR gap bounds are reparsed and stale selections abort without writes");
+        unregister_fake(index, changedGap);
+    }
+
+    {
+        FakeDisk bounds(512, 16384);
+        set_mbr_signature(bounds);
+        index = register_fake(bounds, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, bounds, regions, regionCount);
+        storage::CreatePartitionProbe probe = {};
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::probe_create_partition(target, storage::PARTITION_SCHEME_MBR,
+            regions[0], probe);
+        storage::CreatePartitionRequest overlap = make_create_request(index,
+            storage::PARTITION_SCHEME_MBR, regions[0], 2ull * 1024 * 1024,
+            false, 0xAA);
+        overlap.selectedRegion.startLba = 2048;
+        overlap.selectedRegion.endLba = 4095;
+        overlap.selectedRegion.sectorCount = 2048;
+        overlap.selectedRegion.capacityBytes = 2048ull * 512;
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(overlap, createResult) ==
+                  storage::CREATE_PARTITION_STALE_REGION && bounds.writeAttempts == 0,
+              "overlap-shaped request cannot authorize space outside the validated gap model");
+        storage::CreatePartitionRequest tooSmall = make_create_request(index,
+            storage::PARTITION_SCHEME_MBR, regions[0],
+            storage::CREATE_PARTITION_MINIMUM_BYTES - 1, false, 0xAB);
+        check(storage::create_partition(tooSmall, createResult) ==
+                  storage::CREATE_PARTITION_TOO_SMALL && bounds.writeAttempts == 0,
+              "sub-minimum partition size is rejected by the storage layer");
+        storage::CreatePartitionRequest tooLarge = make_create_request(index,
+            storage::PARTITION_SCHEME_MBR, regions[0],
+            probe.maximumBytes + 1024u * 1024u, false, 0xAC);
+        check(storage::create_partition(tooLarge, createResult) ==
+                  storage::CREATE_PARTITION_TOO_LARGE && bounds.writeAttempts == 0,
+              "requested size above the revalidated maximum is rejected without rounding up");
+        storage::CreatePartitionRequest badType = make_create_request(index,
+            storage::PARTITION_SCHEME_MBR, regions[0], 2ull * 1024 * 1024,
+            false, 0xAD);
+        badType.partitionType = storage::CREATE_PARTITION_GPT_BASIC_DATA;
+        check(storage::create_partition(badType, createResult) ==
+                  storage::CREATE_PARTITION_UNSUPPORTED_TYPE && bounds.writeAttempts == 0,
+              "unsupported partition types fail closed");
+        unregister_fake(index, bounds);
+    }
+
+    {
+        FakeDisk noAlignedSpace(512, 8192);
+        set_mbr_signature(noAlignedSpace);
+        set_mbr_partition(noAlignedSpace, 0, 0, 0x0C, 2048, 1024);
+        index = register_fake(noAlignedSpace, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, noAlignedSpace, regions, regionCount);
+        storage::CreatePartitionProbe probe = {};
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        check(storage::probe_create_partition(target, storage::PARTITION_SCHEME_MBR,
+                  regions[0], probe) == storage::CREATE_PARTITION_NO_ALIGNED_SPACE,
+              "gap too short to contain a 1 MiB-aligned partition is unavailable");
+        unregister_fake(index, noAlignedSpace);
+    }
+
+    {
+        FakeDisk mounted(512, 8192);
+        set_mbr_signature(mounted);
+        index = register_fake(mounted, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, mounted, regions, regionCount);
+        storage::CreatePartitionRequest request = make_create_request(index,
+            storage::PARTITION_SCHEME_MBR, regions[0], 2ull * 1024 * 1024,
+            false, 0xB0);
+        storage::CreatePartitionResult createResult = {};
+        vfs::set_test_mount(4, true, index, "/data");
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_MOUNTED && mounted.writeAttempts == 0,
+              "mounted disk protection is preserved for partition-table writes");
+        vfs::clear_test_mounts();
+        unregister_fake(index, mounted);
+    }
+
+    {
+        FakeDisk root(512, 8192);
+        set_mbr_signature(root);
+        index = register_fake(root, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, root, regions, regionCount);
+        storage::CreatePartitionRequest request = make_create_request(index,
+            storage::PARTITION_SCHEME_MBR, regions[0], 2ull * 1024 * 1024,
+            false, 0xB1);
+        storage::CreatePartitionResult createResult = {};
+        vfs::set_test_mount(5, true, index, "/");
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_ROOT_BACKING && root.writeAttempts == 0,
+              "root backing disk remains protected from partition-table writes");
+        vfs::clear_test_mounts();
+        unregister_fake(index, root);
+    }
+
+    {
+        FakeDisk boot(512, 8192);
+        set_mbr_signature(boot);
+        index = register_fake(boot, true, true, true, false, 0, 0,
+            block::BOOT_PROVENANCE_BOOT_BACKING);
+        storage::CreatePartitionRequest request = {};
+        storage::capture_target_identity(index, request.targetSnapshot);
+        request.requestedScheme = storage::PARTITION_SCHEME_MBR;
+        request.useMaximumSize = true;
+        request.partitionType = storage::CREATE_PARTITION_MBR_FAT32_LBA;
+        request.expectedRegistryGeneration = request.targetSnapshot.registryGeneration;
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_BOOT_BACKING && boot.writeAttempts == 0,
+              "boot device remains protected from partition-table writes");
+        unregister_fake(index, boot);
+    }
+
+    {
+        FakeDisk bootUnknown(512, 8192);
+        set_mbr_signature(bootUnknown);
+        index = register_fake(bootUnknown, true, true, true, false, 0, 0,
+            block::BOOT_PROVENANCE_UNKNOWN);
+        storage::CreatePartitionRequest request = {};
+        storage::capture_target_identity(index, request.targetSnapshot);
+        request.requestedScheme = storage::PARTITION_SCHEME_MBR;
+        request.useMaximumSize = true;
+        request.partitionType = storage::CREATE_PARTITION_MBR_FAT32_LBA;
+        request.expectedRegistryGeneration = request.targetSnapshot.registryGeneration;
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_BOOT_IDENTITY_UNKNOWN &&
+              bootUnknown.writeAttempts == 0,
+              "unknown boot provenance fails closed for partition creation");
+        unregister_fake(index, bootUnknown);
+    }
+
+    {
+        FakeDisk readOnly(512, 8192);
+        set_mbr_signature(readOnly);
+        index = register_fake(readOnly, false, true, true);
+        storage::CreatePartitionRequest request = {};
+        storage::capture_target_identity(index, request.targetSnapshot);
+        request.requestedScheme = storage::PARTITION_SCHEME_MBR;
+        request.useMaximumSize = true;
+        request.partitionType = storage::CREATE_PARTITION_MBR_FAT32_LBA;
+        request.expectedRegistryGeneration = request.targetSnapshot.registryGeneration;
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_READ_ONLY && readOnly.writeAttempts == 0,
+              "read-only disk is rejected before partition metadata writes");
+        unregister_fake(index, readOnly);
+    }
+
+    {
+        FakeDisk persistenceUnknown(512, 8192);
+        set_mbr_signature(persistenceUnknown);
+        index = register_fake(persistenceUnknown, true, false, false);
+        storage::CreatePartitionRequest request = {};
+        storage::capture_target_identity(index, request.targetSnapshot);
+        request.requestedScheme = storage::PARTITION_SCHEME_MBR;
+        request.useMaximumSize = true;
+        request.partitionType = storage::CREATE_PARTITION_MBR_FAT32_LBA;
+        request.expectedRegistryGeneration = request.targetSnapshot.registryGeneration;
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_DURABILITY_UNKNOWN &&
+              persistenceUnknown.writeAttempts == 0,
+              "unknown persistence cannot pass partition creation preflight");
+        unregister_fake(index, persistenceUnknown);
+    }
+
+    {
+        FakeDisk flushUnknown(512, 8192);
+        set_mbr_signature(flushUnknown);
+        index = register_fake(flushUnknown, true, true, false);
+        storage::CreatePartitionRequest request = {};
+        storage::capture_target_identity(index, request.targetSnapshot);
+        request.requestedScheme = storage::PARTITION_SCHEME_MBR;
+        request.useMaximumSize = true;
+        request.partitionType = storage::CREATE_PARTITION_MBR_FAT32_LBA;
+        request.expectedRegistryGeneration = request.targetSnapshot.registryGeneration;
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_DURABILITY_UNKNOWN &&
+              flushUnknown.writeAttempts == 0,
+              "unknown flush semantics reject creation before any write");
+        unregister_fake(index, flushUnknown);
+    }
+
+    {
+        FakeDisk generation(512, 8192);
+        set_mbr_signature(generation);
+        index = register_fake(generation, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, generation, regions, regionCount);
+        storage::CreatePartitionRequest request = make_create_request(index,
+            storage::PARTITION_SCHEME_MBR, regions[0], 2ull * 1024 * 1024,
+            false, 0xB2);
+        FakeDisk unrelated(512, 128);
+        const uint8_t unrelatedIndex = register_fake(unrelated);
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_REGISTRY_CHANGED &&
+              generation.writeAttempts == 0,
+              "registry generation change invalidates the captured target before writes");
+        unregister_fake(unrelatedIndex, unrelated);
+        unregister_fake(index, generation);
+    }
+
+    {
+        FakeDisk replaced(512, 8192);
+        set_mbr_signature(replaced);
+        index = register_fake(replaced, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, replaced, regions, regionCount);
+        storage::CreatePartitionRequest request = make_create_request(index,
+            storage::PARTITION_SCHEME_MBR, regions[0], 2ull * 1024 * 1024,
+            false, 0xB3);
+        unregister_fake(index, replaced);
+        FakeDisk replacement(512, 8192);
+        set_mbr_signature(replacement);
+        const uint8_t replacementIndex = register_fake(replacement, true, true, true);
+        storage::CreatePartitionResult createResult = {};
+        check(replacementIndex == index &&
+              storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_REGISTRY_CHANGED &&
+              replacement.writeAttempts == 0,
+              "slot replacement cannot redirect a stale create request to another disk");
+        unregister_fake(replacementIndex, replacement);
+    }
+
+    {
+        FakeDisk contended(512, 8192);
+        set_mbr_signature(contended);
+        index = register_fake(contended, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, contended, regions, regionCount);
+        storage::CreatePartitionRequest request = make_create_request(index,
+            storage::PARTITION_SCHEME_MBR, regions[0], 2ull * 1024 * 1024,
+            false, 0xB4);
+        storage::StorageOperationLease held = {};
+        storage::try_acquire_storage_operation(held);
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_OPERATION_BUSY &&
+              contended.writeAttempts == 0 &&
+              storage::release_storage_operation(held) &&
+              !storage::storage_operation_active(),
+              "partition creation shares operation-lock contention and does not start a second lock");
+        unregister_fake(index, contended);
+    }
+
+    {
+        FakeDisk largeMbr(512, 0x100000100ull, false);
+        largeMbr.sparseMbr[510] = 0x55;
+        largeMbr.sparseMbr[511] = 0xAA;
+        index = register_fake(largeMbr, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        check(current_regions(index, largeMbr, regions, regionCount) &&
+              regionCount == 1,
+              "sparse fake MBR exposes addressable space on media above the 32-bit LBA ceiling");
+        storage::CreatePartitionRequest request = make_create_request(index,
+            storage::PARTITION_SCHEME_MBR, regions[0], 0, true, 0xB5);
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_SUCCESS &&
+              createResult.createdPartition.startLba == 2048 &&
+              createResult.createdPartition.endLba == 0xFFFFFFFFull &&
+              createResult.createdPartition.sectorCount <= 0xFFFFFFFFull &&
+              read_u32(largeMbr.sparseMbr.data() + 446 + 8) == 2048 &&
+              read_u32(largeMbr.sparseMbr.data() + 446 + 12) ==
+                  createResult.createdPartition.sectorCount,
+              "MBR creation clips ranges and sector counts to their 32-bit on-disk limits");
+        unregister_fake(index, largeMbr);
+    }
+
+    {
+        const uint32_t failureCalls[] = {1, 17, 66};
+        const char* failureNames[] = {"first", "middle", "final"};
+        for (size_t scenario = 0; scenario < 3; ++scenario) {
+            FakeDisk failedWrite(512, 16384);
+            build_empty_gpt(failedWrite);
+            index = register_fake(failedWrite, true, true, true);
+            storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+            uint16_t regionCount = 0;
+            current_regions(index, failedWrite, regions, regionCount);
+            std::vector<uint8_t> before = failedWrite.bytes;
+            storage::CreatePartitionRequest request = make_create_request(index,
+                storage::PARTITION_SCHEME_GPT, regions[0], 0, true,
+                static_cast<uint8_t>(0xC0 + scenario));
+            failedWrite.failWriteAtCall1 = failureCalls[scenario];
+            storage::CreatePartitionResult createResult = {};
+            const storage::CreatePartitionStatus status = storage::create_partition(
+                request, createResult);
+            char label[128];
+            std::snprintf(label, sizeof(label),
+                "%s GPT metadata write failure rolls back byte-for-byte and releases the lease",
+                failureNames[scenario]);
+            check(status == storage::CREATE_PARTITION_IO_FAILED &&
+                  createResult.rollbackAttempted && createResult.rollbackSucceeded &&
+                  !createResult.finalStateUncertain && failedWrite.bytes == before &&
+                  !storage::storage_operation_active(), label);
+            unregister_fake(index, failedWrite);
+        }
+    }
+
+    {
+        FakeDisk flushFail(512, 16384);
+        build_empty_gpt(flushFail);
+        index = register_fake(flushFail, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, flushFail, regions, regionCount);
+        std::vector<uint8_t> before = flushFail.bytes;
+        storage::CreatePartitionRequest request = make_create_request(index,
+            storage::PARTITION_SCHEME_GPT, regions[0], 0, true, 0xC3);
+        flushFail.failFlushAtCall = 2;
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_FLUSH_FAILED &&
+              createResult.rollbackAttempted && createResult.rollbackSucceeded &&
+              flushFail.bytes == before && !storage::storage_operation_active(),
+              "post-write flush failure restores and verifies original GPT metadata");
+        unregister_fake(index, flushFail);
+    }
+
+    {
+        FakeDisk corruptVerification(512, 16384);
+        build_empty_gpt(corruptVerification);
+        index = register_fake(corruptVerification, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, corruptVerification, regions, regionCount);
+        std::vector<uint8_t> before = corruptVerification.bytes;
+        storage::CreatePartitionRequest request = make_create_request(index,
+            storage::PARTITION_SCHEME_GPT, regions[0], 0, true, 0xC4);
+        corruptVerification.corruptWriteLbaOnce = 2;
+        corruptVerification.corruptWritePending = true;
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_VERIFICATION_FAILED &&
+              !createResult.verificationPassed && createResult.rollbackSucceeded &&
+              corruptVerification.bytes == before,
+              "normal-parser read-back failure triggers verified GPT rollback");
+        unregister_fake(index, corruptVerification);
+    }
+
+    {
+        FakeDisk rollbackFail(512, 16384);
+        build_empty_gpt(rollbackFail);
+        index = register_fake(rollbackFail, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, rollbackFail, regions, regionCount);
+        storage::CreatePartitionRequest request = make_create_request(index,
+            storage::PARTITION_SCHEME_GPT, regions[0], 0, true, 0xC5);
+        rollbackFail.failWriteAtCall1 = 1;
+        rollbackFail.failWriteAtCall2 = 2;
+        storage::CreatePartitionResult createResult = {};
+        check(storage::create_partition(request, createResult) ==
+                  storage::CREATE_PARTITION_ROLLBACK_FAILED &&
+              createResult.rollbackAttempted && !createResult.rollbackSucceeded &&
+              createResult.finalStateUncertain &&
+              createResult.stage == storage::CREATE_PARTITION_STAGE_STATE_UNCERTAIN &&
+              !storage::storage_operation_active(),
+              "rollback failure reports uncertain state and releases the operation lease");
+        unregister_fake(index, rollbackFail);
+    }
 
     block::init();
     ramdisk::init();

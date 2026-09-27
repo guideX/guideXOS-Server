@@ -536,11 +536,27 @@ bool parse_partition_table(uint8_t deviceIndex, PartitionTableModel& model)
         if (primaryValid) {
             model.partitionCount = primaryCount;
             model.tableEntryCount = static_cast<uint16_t>(primaryHeader.entryCount);
+            model.gptEntrySize = primaryHeader.entrySize;
+            const uint64_t primaryArrayBytes =
+                static_cast<uint64_t>(primaryHeader.entryCount) *
+                primaryHeader.entrySize;
+            model.gptEntryArraySectors = static_cast<uint32_t>(
+                (primaryArrayBytes + sectorSize - 1) / sectorSize);
+            model.primaryGptEntryArrayLba = primaryHeader.entriesLba;
+            if (backupValid)
+                model.backupGptEntryArrayLba = backupHeader.entriesLba;
             model.firstUsableLba = primaryHeader.firstUsableLba;
             model.lastUsableLba = primaryHeader.lastUsableLba;
         } else if (backupValid) {
             model.partitionCount = backupCount;
             model.tableEntryCount = static_cast<uint16_t>(backupHeader.entryCount);
+            model.gptEntrySize = backupHeader.entrySize;
+            const uint64_t backupArrayBytes =
+                static_cast<uint64_t>(backupHeader.entryCount) *
+                backupHeader.entrySize;
+            model.gptEntryArraySectors = static_cast<uint32_t>(
+                (backupArrayBytes + sectorSize - 1) / sectorSize);
+            model.backupGptEntryArrayLba = backupHeader.entriesLba;
             model.firstUsableLba = backupHeader.firstUsableLba;
             model.lastUsableLba = backupHeader.lastUsableLba;
         } else {

@@ -983,7 +983,9 @@ void KernelCompositor::drawWidget(app::Widget* widget, uint32_t winX, uint32_t w
         }
         
         case app::WidgetType::TextBox:
-            fillRect(x, y, w, h, rgb(45, 45, 55));
+            fillRect(x, y, w, h, rgb((widget->bgColor >> 16) & 0xFF,
+                                    (widget->bgColor >> 8) & 0xFF,
+                                    widget->bgColor & 0xFF));
             drawRect(x, y, w, h, rgb(70, 80, 100));
             drawText(x + 4, y + (h - kGlyphH) / 2, widget->text, widget->fgColor);
             break;

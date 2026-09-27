@@ -249,6 +249,7 @@
     <ClInclude Include="kernel\core\include\kernel\storage_manager.h" />
     <ClInclude Include="kernel\core\include\kernel\partition_table.h" />
     <ClInclude Include="kernel\core\include\kernel\disk_initialization.h" />
+    <ClInclude Include="kernel\core\include\kernel\partition_operations.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop_capabilities.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop_font.h" />
@@ -520,6 +521,7 @@
     <ClCompile Include="kernel\core\storage_manager.cpp" />
     <ClCompile Include="kernel\core\partition_table.cpp" />
     <ClCompile Include="kernel\core\disk_initialization.cpp" />
+    <ClCompile Include="kernel\core\partition_operations.cpp" />
     <ClCompile Include="kernel\core\cxx_runtime.cpp" />
     <ClCompile Include="kernel\core\desktop.cpp" />
     <ClCompile Include="kernel\core\desktop_capabilities.cpp" />

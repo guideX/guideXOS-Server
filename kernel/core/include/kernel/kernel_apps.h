@@ -15,6 +15,7 @@
 #include "kernel/block_device.h"
 #include "kernel/storage_manager.h"
 #include "kernel/disk_initialization.h"
+#include "kernel/partition_operations.h"
 #include "kernel/disk_manager_model.h"
 #include "kernel/desktop.h"
 #include "kernel/image_adapter.h"
@@ -1181,6 +1182,7 @@ public:
     virtual void onMouseDown(int x, int y, uint8_t button) override;
     virtual void onMouseWheel(int x, int y, int wheelDelta) override;
     virtual void onKeyDown(uint32_t key) override;
+    virtual void onKeyChar(char c) override;
     virtual void onWidgetClick(int widgetId) override;
 
     static app::KernelApp* create() { return new DiskManagerApp(); }
@@ -1213,6 +1215,7 @@ private:
         INITIALIZE_DIALOG_CLOSED = 0,
         INITIALIZE_DIALOG_CHOOSE_SCHEME,
         INITIALIZE_DIALOG_CONFIRM,
+        INITIALIZE_DIALOG_CREATE_OPTIONS,
         INITIALIZE_DIALOG_RUNNING,
         INITIALIZE_DIALOG_RESULT,
     };
@@ -1252,6 +1255,9 @@ private:
         uint32_t mbrDiskSignature;
         storage::InitializeDiskStatus initializeStatus;
         bool initializeAvailable;
+        storage::CreatePartitionStatus createPartitionStatus;
+        bool createPartitionAvailable;
+        storage::CreatePartitionProbe createPartitionProbe;
         uint16_t totalPartitionCount;
         PartEntry parts[MAX_PARTS];
         int       partCount;
@@ -1275,10 +1281,20 @@ private:
     int m_mbrBtnId;
     int m_confirmInitializeBtnId;
     int m_cancelInitializeBtnId;
+    int m_createSizeTextBoxId;
+    int m_createNameTextBoxId;
     InitializeDialogState m_initializeDialogState;
+    bool m_dialogIsCreate;
+    bool m_createSizeEdited;
+    bool m_createNameEdited;
+    uint8_t m_createInputFocus;
+    char m_createSizeText[32];
+    char m_createNameText[64];
     storage::PartitionScheme m_initializeScheme;
     storage::InitializeDiskPlan m_initializePlan;
     storage::InitializeDiskResult m_initializeResult;
+    storage::CreatePartitionRequest m_createRequest;
+    storage::CreatePartitionResult m_createResult;
     char m_initializeMessage[128];
     char m_statusMessage[128];
     SelectedObject m_selectedObject;
@@ -1306,8 +1322,10 @@ private:
     void        readPartitionTable(DiskEntry& disk);
     const char* detectFs(uint8_t devIndex, uint64_t lbaStart, uint64_t sectorCount);
     void        formatSize(uint64_t bytes, char* out, int outSize) const;
+    void        formatSizePrecise(uint64_t bytes, char* out, int outSize) const;
     void        updateResponsiveControls(uint32_t w, uint32_t h);
     void        updateInitializeControls();
+    void        probeSelectedRegion();
     void        selectDisk(int index);
     void        selectPartition(int index);
     void        selectRegion(int index);
@@ -1318,6 +1336,9 @@ private:
                            const DiskEntry& disk);
     void        beginInitializeConfirmation(storage::PartitionScheme scheme);
     void        runInitializeOperation();
+    void        beginCreatePartitionOptions();
+    void        runCreatePartitionOperation();
+    bool        updateCreateInputWidgets();
     void        closeInitializeDialog();
 };
 
