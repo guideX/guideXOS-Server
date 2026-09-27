@@ -69,13 +69,15 @@ param(
     [switch]$Phase28OOnly,
     [switch]$Phase28POnly,
     [switch]$Phase28QOnly,
-    [switch]$Phase29COnly
+    [switch]$Phase29COnly,
+    [switch]$Phase29EManifestOnly
 )
 
 $ErrorActionPreference = "Stop"
 # Phase 27G includes the complete earlier integration chain.  The focused M
 # mode deliberately keeps only the baseline C/D route plus the M smoke so a
 # flaky optional earlier IDE repeat cannot mask the recursion proof.
+if ($Phase29EManifestOnly) { $Phase29COnly = $true }
 if ($Phase29COnly) { $Phase28QOnly = $true }
 if ($Phase28QOnly) {
     $Phase27E = $false; $Phase27F = $false; $Phase27G = $false; $Phase27H = $false
@@ -353,7 +355,7 @@ if ($Phase27Y -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
 if ($Phase27Z -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
 if (($Phase28A -or $Phase28B -or $Phase28C -or $Phase28D -or $Phase28E -or $Phase28F -or $Phase28G -or $Phase28H -or $Phase28I) -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
 if (($Phase28J -or $Phase28K) -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
-if (($Phase28L -or $Phase28M -or $Phase28N -or $Phase28OOnly -or $Phase28POnly -or $Phase28QOnly -or $Phase29COnly) -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
+if (($Phase28L -or $Phase28M -or $Phase28N -or $Phase28OOnly -or $Phase28POnly -or $Phase28QOnly -or $Phase29COnly -or $Phase29EManifestOnly) -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
 $root = Split-Path -Parent $PSScriptRoot
 $kernelDirectory = Join-Path $root "kernel"
 $espDirectory = Join-Path $root "ESP"
@@ -444,6 +446,18 @@ function Get-Phase28ZHash([string]$path, [string]$label) {
         throw "P28Z BOOT_IMAGE staging failed: required $label is missing at $path"
     }
     return (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToUpperInvariant()
+}
+
+function Get-Fnv1a64Hex([string]$path) {
+    $bytes = [System.IO.File]::ReadAllBytes($path)
+    $hash = [System.Numerics.BigInteger]::Parse('14695981039346656037')
+    $prime = [System.Numerics.BigInteger]::Parse('1099511628211')
+    $modulus = [System.Numerics.BigInteger]::Parse('18446744073709551616')
+    foreach ($byte in $bytes) {
+        $hash = $hash -bxor [System.Numerics.BigInteger]::new([long]$byte)
+        $hash = [System.Numerics.BigInteger]::Remainder($hash * $prime, $modulus)
+    }
+    return ('0x{0:X16}' -f [uint64]$hash)
 }
 
 function Assert-Phase28ZBootImage([int]$runNumber, [string]$imageRoot) {
@@ -818,7 +832,9 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
             if (Test-Path -LiteralPath $serialPath) {
                 try {
                     $serialProbe = Get-Content -LiteralPath $serialPath -Raw -ErrorAction Stop
-                    if ($serialProbe -and (($Phase29COnly -and
+                    if ($serialProbe -and (($Phase29EManifestOnly -and
+                            $serialProbe.Contains("DEVELOPER_STUDIO_PHASE28V_EVENT_DEBUG_START_REQUEST_ISSUED")) -or
+                        ($Phase29COnly -and -not $Phase29EManifestOnly -and
                             $serialProbe.Contains("P28Z APP 05 project_open_return")) -or
                         $serialProbe.Contains("[KERNEL] Entering main loop (waiting for input)..."))) {
                         $process.Kill()
@@ -2160,6 +2176,9 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 "DEVELOPER_STUDIO_PHASE28Q_PASS"
             )
         }
+        if ($Phase29EManifestOnly) {
+            $requiredMarkers += "DEVELOPER_STUDIO_PHASE28V_EVENT_DEBUG_START_REQUEST_ISSUED"
+        }
         if ($Phase29COnly -or $Phase28QOnly) {
             $requiredMarkers += @(
                 "DEVELOPER_STUDIO_PHASE29D_STARTUP_APPLICATION_CREATED",
@@ -2210,6 +2229,79 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
             if ($serial -match 'DEVELOPER_STUDIO_PHASE29D_STARTUP_REENTRY_REJECTED') {
                 $missingMarkers += "Phase29D rejected a live startup re-entry"
             }
+
+            $manifestEvidence = @($serial -split "`r?`n" | Where-Object {
+                $_ -match 'DEVELOPER_STUDIO_PHASE29E_MANIFEST path=/P28Q/app/app\.json '
+            })
+            $manifestReadEvidence = @($serial -split "`r?`n" | Where-Object {
+                $_ -match 'DEVELOPER_STUDIO_PHASE29E_MANIFEST_READ '
+            })
+            $identityIdEvidence = @($serial -split "`r?`n" | Where-Object {
+                $_ -match 'DEVELOPER_STUDIO_PHASE29E_IDENTITY project_id_expected='
+            })
+            $identityDisplayEvidence = @($serial -split "`r?`n" | Where-Object {
+                $_ -match 'DEVELOPER_STUDIO_PHASE29E_IDENTITY .*display_name_expected='
+            })
+            $identitySchemaEvidence = @($serial -split "`r?`n" | Where-Object {
+                $_ -match 'DEVELOPER_STUDIO_PHASE29E_IDENTITY schema_expected='
+            })
+            $identityEntryEvidence = @($serial -split "`r?`n" | Where-Object {
+                $_ -match 'DEVELOPER_STUDIO_PHASE29E_IDENTITY entry0_architecture_expected='
+            })
+            $identityToolchainEvidence = @($serial -split "`r?`n" | Where-Object {
+                $_ -match 'DEVELOPER_STUDIO_PHASE29E_IDENTITY entry_point_expected='
+            })
+            $identityMismatchEvidence = @($serial -split "`r?`n" | Where-Object {
+                $_ -match 'DEVELOPER_STUDIO_PHASE29E_MISMATCH '
+            })
+            if ($manifestEvidence.Count -ne 1 -or $manifestReadEvidence.Count -ne 1 -or
+                $identityIdEvidence.Count -ne 1 -or $identityDisplayEvidence.Count -ne 1 -or
+                $identitySchemaEvidence.Count -ne 1 -or $identityEntryEvidence.Count -ne 1 -or
+                $identityToolchainEvidence.Count -ne 1 -or $identityMismatchEvidence.Count -ne 1) {
+                $missingMarkers += "Phase29E manifest diagnostic count manifest=$($manifestEvidence.Count) read=$($manifestReadEvidence.Count) identity=$($identityIdEvidence.Count)/$($identityDisplayEvidence.Count)/$($identitySchemaEvidence.Count)/$($identityEntryEvidence.Count)/$($identityToolchainEvidence.Count) mismatch=$($identityMismatchEvidence.Count)"
+            } else {
+                $fixtureManifestPath = Join-Path $phase28qFixtureDirectory 'app/app.json'
+                $fixtureProjectPath = Join-Path $phase28qFixtureDirectory 'guidexos.project'
+                $fixtureManifest = Get-Content -Raw -LiteralPath $fixtureManifestPath | ConvertFrom-Json
+                $fixtureProject = Get-Content -Raw -LiteralPath $fixtureProjectPath | ConvertFrom-Json
+                $manifestBytes = (Get-Item -LiteralPath $fixtureManifestPath).Length
+                $manifestHash = Get-Fnv1a64Hex $fixtureManifestPath
+                $projectBytes = (Get-Item -LiteralPath $fixtureProjectPath).Length
+                $projectHash = Get-Fnv1a64Hex $fixtureProjectPath
+                if ($manifestEvidence[0] -notmatch 'request_id=1 request_generation=(\d+) candidate_id=\d+ candidate_generation=(\d+) candidate_project_generation=0 expected_identity_generation=(\d+) parsed_identity_generation=(\d+)') {
+                    $missingMarkers += 'Phase29E manifest request/candidate generation tuple is malformed'
+                } else {
+                    $requestGenerationValue = [uint64]$Matches[1]
+                    $candidateGenerationValue = [uint64]$Matches[2]
+                    $expectedGenerationValue = [uint64]$Matches[3]
+                    $parsedGenerationValue = [uint64]$Matches[4]
+                    if ($requestGenerationValue -eq 0 -or $requestGenerationValue -ne $candidateGenerationValue -or
+                        $requestGenerationValue -ne $expectedGenerationValue -or $requestGenerationValue -ne $parsedGenerationValue) {
+                        $missingMarkers += 'Phase29E manifest identity is not owned by the current request/candidate generation'
+                    }
+                }
+                if ($manifestReadEvidence[0] -notmatch "project_metadata_size=$projectBytes project_metadata_bytes=$projectBytes project_metadata_hash_fnv1a64=$projectHash manifest_size=$manifestBytes bytes_read=$manifestBytes content_hash_fnv1a64=$manifestHash result_code=none") {
+                    $missingMarkers += 'Phase29E manifest or project metadata bytes/hash differ from the staged fixture'
+                }
+                if ($identityIdEvidence[0] -notmatch ('project_id_expected=' + [regex]::Escape($fixtureProject.projectId) + ' app_id_parsed=' + [regex]::Escape($fixtureManifest.id)) -or
+                    $fixtureProject.projectId -ne $fixtureManifest.id) {
+                    $missingMarkers += 'Phase29E parsed app ID differs from the staged project/manifest ID'
+                }
+                if ($identityDisplayEvidence[0] -notmatch ('display_name_expected=' + [regex]::Escape($fixtureProject.displayName) + ' display_name_parsed=' + [regex]::Escape($fixtureManifest.displayName)) -or
+                    $fixtureProject.displayName -ne $fixtureManifest.displayName) {
+                    $missingMarkers += 'Phase29E parsed display name differs from the staged project/manifest display name'
+                }
+                $fixtureEntry = @($fixtureManifest.entries)[0]
+                if ($identitySchemaEvidence[0] -notmatch 'schema_expected=1 schema_parsed=1 kind_expected=NativeElf kind_parsed=NativeElf entries_expected=1 entries_parsed=1' -or
+                    $identityEntryEvidence[0] -notmatch ('entry0_architecture_expected=' + [regex]::Escape($fixtureProject.architecture) + ' entry0_architecture_parsed=' + [regex]::Escape($fixtureEntry.architecture) + ' path_expected=' + [regex]::Escape($fixtureEntry.path) + ' path_parsed=' + [regex]::Escape($fixtureEntry.path)) -or
+                    $identityToolchainEvidence[0] -notmatch ('entry_point_expected=' + [regex]::Escape($fixtureProject.entryPoint) + ' entry_point_parsed=' + [regex]::Escape($fixtureEntry.entryPoint) + ' abi_expected=' + [regex]::Escape($fixtureProject.abi) + ' abi_parsed=' + [regex]::Escape($fixtureEntry.abi) + ' runtime_expected=native-elf runtime_parsed=' + [regex]::Escape($fixtureEntry.runtime))) {
+                    $missingMarkers += 'Phase29E parsed architecture/path/entry identity differs from the staged fixture'
+                }
+                if ($identityMismatchEvidence[0] -notmatch 'field=none expected= actual= comparison=field_by_field_case_sensitive_exact_string_and_integer result=none' -or
+                    $serial -match 'DEVELOPER_STUDIO_PHASE29E_MISMATCH field=(?!none)') {
+                    $missingMarkers += 'Phase29E identity comparison reported a mismatch or an unexpected comparison result'
+                }
+            }
         }
         if ($missingMarkers.Count -ne 0) {
             if ($Phase28QOnly -and $serial -notmatch [regex]::Escape("P28Z APP 00 gx_main_entry_raw") -and
@@ -2228,7 +2320,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
             Write-Host "QEMU boot $runNumber missed required compiler/IDE markers: $($missingMarkers -join ', ')" -ForegroundColor Red
             if ($Phase28QOnly) {
                 $finalState = @($serial -split "`r?`n" |
-                    Where-Object { $_ -match '^P28Z BOOT_IMAGE |^P28Z BOOT |^P28Z APP |^P28Z PROJECT |^P28Z FS |^P28Y STARTUP |^DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_|^DEVELOPER_STUDIO_PHASE29D_STARTUP_|^DEVELOPER_STUDIO_PHASE28Q_' } |
+                    Where-Object { $_ -match '^P28Z BOOT_IMAGE |^P28Z BOOT |^P28Z APP |^P28Z PROJECT |^P28Z FS |^P28Y STARTUP |^DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_|^DEVELOPER_STUDIO_PHASE29D_STARTUP_|^DEVELOPER_STUDIO_PHASE29E_|^DEVELOPER_STUDIO_PHASE28Q_' } |
                     Select-Object -Last 24)
                 Write-Host ("P28Z FINAL_STATE boot={0} bounded_entries={1}" -f $runNumber, $finalState.Count) -ForegroundColor Yellow
                 $finalState | ForEach-Object { Write-Host $_ }
@@ -2294,8 +2386,8 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
         }
 
         Write-Host "--- QEMU bare-metal compiler proof boot $runNumber ---" -ForegroundColor Cyan
-        if ($Phase28OOnly -or $Phase28POnly -or $Phase28QOnly) {
-            $serial -split "`r?`n" | Where-Object { $_ -match "DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_|DEVELOPER_STUDIO_PHASE28O|DEVELOPER_STUDIO_PHASE28N|DEVELOPER_STUDIO_PHASE28M|phase28o|phase28n|phase28m|Phase 28O|Phase 28N|Phase 28M|P28O|P28M|DeveloperStudio|NativeElf: artifact_begin" } |
+        if ($Phase28OOnly -or $Phase28POnly -or $Phase28QOnly -or $Phase29EManifestOnly) {
+            $serial -split "`r?`n" | Where-Object { $_ -match "DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_|DEVELOPER_STUDIO_PHASE29E_|DEVELOPER_STUDIO_PHASE28O|DEVELOPER_STUDIO_PHASE28N|DEVELOPER_STUDIO_PHASE28M|phase28o|phase28n|phase28m|Phase 28O|Phase 28N|Phase 28M|P28O|P28M|DeveloperStudio|NativeElf: artifact_begin" } |
                 ForEach-Object { Write-Host $_ }
         } elseif ($Phase28NOnly) {
             $serial -split "`r?`n" | Where-Object { $_ -match "DEVELOPER_STUDIO_PHASE28N|DEVELOPER_STUDIO_PHASE28M|phase28n|phase28m|Phase 28N|Phase 28M|P28M|DeveloperStudio|NativeElf: artifact_begin" } |
@@ -3922,7 +4014,9 @@ try {
             --start-address=0x10001000 --stop-address=0x10004000 (Join-Path $evidenceDirectory "o27primary.elf")
         if ($LASTEXITCODE -ne 0) { throw "external Phase 27O ELF inspection failed" }
     }
-    if ($Phase28QOnly) {
+    if ($Phase29EManifestOnly) {
+        Write-Host "Phase 29E manifest identity validation completed across $BootCount fresh boot(s) through debugger-start issuance." -ForegroundColor Green
+    } elseif ($Phase28QOnly) {
         Write-Host "Phase 28Q native debugger pause proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
     } elseif ($Phase28OOnly) {
         Write-Host "Phase 28O debugger workspace persistence proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
@@ -4505,8 +4599,8 @@ finally {
             Copy-Item $directoryBackups[$relativeDirectory] $target -Recurse -Force
         }
     }
-    if ($Phase28LOnly -or $Phase28MOnly -or $Phase28NOnly -or $Phase28OOnly -or $Phase28POnly -or $Phase28QOnly -or $Phase29COnly) {
-        $proofLabel = if ($Phase29COnly) { "Phase 29C" } elseif ($Phase28QOnly) { "Phase 28Q" } elseif ($Phase28POnly) { "Phase 28P" } elseif ($Phase28OOnly) { "Phase 28O" } elseif ($Phase28NOnly) { "Phase 28N" } elseif ($Phase28MOnly) { "Phase 28M" } else { "Phase 28L" }
+    if ($Phase28LOnly -or $Phase28MOnly -or $Phase28NOnly -or $Phase28OOnly -or $Phase28POnly -or $Phase28QOnly -or $Phase29COnly -or $Phase29EManifestOnly) {
+        $proofLabel = if ($Phase29EManifestOnly) { "Phase 29E manifest identity" } elseif ($Phase29COnly) { "Phase 29C" } elseif ($Phase28QOnly) { "Phase 28Q" } elseif ($Phase28POnly) { "Phase 28P" } elseif ($Phase28OOnly) { "Phase 28O" } elseif ($Phase28NOnly) { "Phase 28N" } elseif ($Phase28MOnly) { "Phase 28M" } else { "Phase 28L" }
         Write-Host "$proofLabel evidence preserved at: $tempDirectory"
     } elseif (Test-Path $tempDirectory) {
         Remove-Item -LiteralPath $tempDirectory -Recurse -Force -ErrorAction SilentlyContinue
