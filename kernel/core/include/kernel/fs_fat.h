@@ -20,6 +20,7 @@
 
 #include "kernel/types.h"
 #include "kernel/block_device.h"
+#include "kernel/partition_block_view.h"
 
 namespace kernel {
 namespace fs_fat {
@@ -280,6 +281,9 @@ struct FATVolume {
     FATType  type;
     uint8_t  blockDevIndex;       // index in block::get_device()
     uint64_t partitionOffset;     // start LBA of the mounted volume within the block device
+    block::BlockEndpoint endpoint; // logical sector endpoint; partition mounts start at LBA 0
+    block::PartitionIdentity partitionIdentity;
+    bool ownsPartitionView;
 
     // FAT12/16 + FAT32 shared geometry
     uint32_t bytesPerSector;
@@ -356,6 +360,12 @@ void set_trash_trace(bool enabled, uint64_t generation = 0);
 // Attempt to mount a FAT32 or exFAT volume on a block device.
 // Returns the volume index, or 0xFF on failure.
 uint8_t mount(uint8_t blockDevIndex);
+
+// Mount a filesystem through a validated logical block endpoint. Explicit
+// partition mounts use this path so the FAT driver sees partition LBA 0 and
+// all I/O remains bounded by the endpoint. When fat32Only is true, no FAT16 or
+// exFAT fallback is attempted.
+uint8_t mount_endpoint(const block::BlockEndpoint& endpoint);
 
 #if defined(KERNEL_STORAGE_TEST)
 // Read-only adapter for deterministic formatter compatibility tests. It uses

@@ -22,6 +22,7 @@
 
 #include "kernel/types.h"
 #include "kernel/block_device.h"
+#include "kernel/partition_block_view.h"
 
 namespace kernel {
 namespace vfs {
@@ -158,10 +159,35 @@ struct MountPoint {
     char     path[VFS_MAX_PATH];      // Mount path (e.g., "/", "/mnt/usb")
     FSType   fsType;
     uint8_t  blockDevIndex;           // Block device index
+    uint64_t parentRegistrationId;     // Exact parent device incarnation
     uint8_t  fsVolumeIndex;           // FS-specific volume index
     bool     readOnly;
     bool     alias;
+    bool     partitionMount;
+    block::PartitionIdentity partitionIdentity;
+    block::PartitionViewHandle partitionView;
     char     sourcePrefix[VFS_MAX_PATH]; // Optional subdirectory inside the source FS
+};
+
+enum PartitionMountError : uint8_t {
+    PARTITION_MOUNT_OK = 0,
+    PARTITION_MOUNT_INVALID_ARGUMENT,
+    PARTITION_MOUNT_BAD_PATH,
+    PARTITION_MOUNT_PATH_OCCUPIED,
+    PARTITION_MOUNT_DEVICE_UNAVAILABLE,
+    PARTITION_MOUNT_TABLE_INVALID,
+    PARTITION_MOUNT_PARTITION_MISSING,
+    PARTITION_MOUNT_PARTITION_CHANGED,
+    PARTITION_MOUNT_ALREADY_MOUNTED,
+    PARTITION_MOUNT_VIEW_REGISTRY_FULL,
+    PARTITION_MOUNT_VFS_REGISTRY_FULL,
+    PARTITION_MOUNT_FILESYSTEM_UNRECOGNIZED,
+    PARTITION_MOUNT_FILESYSTEM_UNSUPPORTED,
+};
+
+struct PartitionMountResult {
+    uint8_t mountIndex;
+    PartitionMountError error;
 };
 
 // ================================================================
@@ -204,10 +230,24 @@ void init();
 // Returns mount index, or 0xFF on failure.
 uint8_t mount(const char* path, uint8_t blockDevIndex);
 
-// TODO: Mount a filesystem inside an MBR/GPT partition without treating the
-// whole block device as the filesystem. This is a read-only planning stub for
-// DiskManager until partition-aware VFS adapters are implemented.
+// Mount the selected FAT32 MBR/GPT partition through a bounded block view.
+// Returns mount index, or 0xFF on failure.
 uint8_t mount_partition(const char* path, uint8_t blockDevIndex, uint8_t partitionNumber);
+PartitionMountResult mount_partition_detailed(const char* path,
+                                              uint8_t blockDevIndex,
+                                              uint16_t partitionNumber,
+                                              uint64_t expectedRegistrationId = 0,
+                                              const storage::PartitionEntry* expectedPartition = nullptr);
+bool propose_partition_mount_path(uint8_t blockDevIndex,
+                                  uint16_t partitionNumber,
+                                  char* outPath, size_t outPathSize);
+bool mount_identity_valid(uint8_t mountIndex);
+const char* partition_mount_error_name(PartitionMountError error);
+#if defined(KERNEL_STORAGE_TEST)
+void test_set_mount(uint8_t index, bool active, uint8_t deviceIndex,
+                    const char* path);
+void test_clear_mounts();
+#endif
 
 // Mount with explicit filesystem type.
 uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType);

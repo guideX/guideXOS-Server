@@ -86,9 +86,19 @@ static bool is_fat_partition_type(uint8_t partType)
            partType == 0x0B || partType == 0x0C || partType == 0x0E;
 }
 
+static uint32_t read_le32(const uint8_t* bytes)
+{
+    return static_cast<uint32_t>(bytes[0]) |
+        (static_cast<uint32_t>(bytes[1]) << 8) |
+        (static_cast<uint32_t>(bytes[2]) << 16) |
+        (static_cast<uint32_t>(bytes[3]) << 24);
+}
+
 static block::Status read_volume_sector(const FATVolume& vol, uint64_t lba, void* buffer)
 {
-    s_lastIoStatus = block::read_sectors(vol.blockDevIndex, vol.partitionOffset + lba, 1, buffer);
+    if (vol.partitionOffset > UINT64_MAX - lba) return block::BLOCK_ERR_INVALID;
+    s_lastIoStatus = block::read_endpoint(vol.endpoint,
+        vol.partitionOffset + lba, 1, buffer);
     return s_lastIoStatus;
 }
 
@@ -105,7 +115,10 @@ static block::Status write_volume_sector(const FATVolume& vol, uint64_t lba, con
         serial::put_hex8(vol.blockDevIndex);
         serial::puts("\n");
     }
-    s_lastIoStatus = block::write_sectors(vol.blockDevIndex, vol.partitionOffset + lba, 1, buffer);
+    if (vol.partitionOffset > UINT64_MAX - lba)
+        return s_lastIoStatus = block::BLOCK_ERR_INVALID;
+    s_lastIoStatus = block::write_endpoint(vol.endpoint,
+        vol.partitionOffset + lba, 1, buffer);
     if (s_trashTraceActive) {
         serial::puts("TRASH_BLOCK_WRITE_LBA gen=");
         serial::put_hex64(s_trashTraceGeneration);
@@ -135,7 +148,7 @@ static block::Status write_volume_sector(const FATVolume& vol, uint64_t lba, con
 
 static block::Status flush_volume_io(const FATVolume& vol)
 {
-    s_lastIoStatus = block::flush(vol.blockDevIndex);
+    s_lastIoStatus = block::flush_endpoint(vol.endpoint);
     serial::puts("LFPASTE_FLUSH_END status=0x");
     serial::put_hex8(static_cast<uint8_t>(s_lastIoStatus));
     serial::puts("\n");
@@ -356,7 +369,10 @@ static bool chain_cycle_detected(const FATVolume& vol, uint32_t firstCluster,
 // Mount — detect FAT32 or exFAT and fill volume descriptor
 // ================================================================
 
-static bool try_mount_fat32_boot_sector(uint8_t blockDevIdx, uint64_t partitionOffset, FATVolume& vol, const uint8_t* bootSector)
+static bool try_mount_fat32_boot_sector(const block::BlockEndpoint& endpoint,
+                                        uint64_t partitionOffset,
+                                        FATVolume& vol,
+                                        const uint8_t* bootSector)
 {
     if (!bootSector) return false;
 
@@ -382,10 +398,12 @@ static bool try_mount_fat32_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
 
     // The driver addresses block logical sectors directly. The BPB byte size
     // must match that geometry or offsets would silently address the wrong bytes.
-    const block::BlockDevice* device = block::get_device(blockDevIdx);
-    if (!device || bpb->bytesPerSector != device->sectorSize) return false;
+    if (endpoint.kind == block::ENDPOINT_INVALID ||
+        bpb->bytesPerSector != endpoint.sectorSize) return false;
     if (bpb->bytesPerSector < 512 || bpb->bytesPerSector > 4096) return false;
+    if (bootSector[510] != 0x55 || bootSector[511] != 0xAA) return false;
     if (bpb->sectorsPerCluster == 0) return false;
+    if (bpb->reservedSectors == 0) return false;
     if (bpb->numFATs == 0) return false;
     if (bpb->fatSize32 == 0) {
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
@@ -403,7 +421,8 @@ static bool try_mount_fat32_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
     }
 
     vol.type              = FAT_TYPE_FAT32;
-    vol.blockDevIndex     = blockDevIdx;
+    vol.blockDevIndex     = endpoint.deviceIndex;
+    vol.endpoint          = endpoint;
     vol.partitionOffset   = partitionOffset;
     vol.bytesPerSector    = bpb->bytesPerSector;
     vol.sectorsPerCluster = bpb->sectorsPerCluster;
@@ -420,13 +439,24 @@ static bool try_mount_fat32_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
 
     if (vol.totalSectors == 0) return false;
 
-    vol.firstDataSector = vol.reservedSectors +
-                          (vol.numFATs * vol.fatSizeSectors);
+    const uint64_t firstDataSector = static_cast<uint64_t>(vol.reservedSectors) +
+        static_cast<uint64_t>(vol.numFATs) * vol.fatSizeSectors;
+    if (firstDataSector > 0xFFFFFFFFull) return false;
+    vol.firstDataSector = static_cast<uint32_t>(firstDataSector);
 
-    if (vol.totalSectors <= vol.firstDataSector) return false;
+    if (vol.totalSectors <= vol.firstDataSector ||
+        partitionOffset > endpoint.totalSectors ||
+        vol.totalSectors > endpoint.totalSectors - partitionOffset) return false;
     uint32_t dataSectors = vol.totalSectors - vol.firstDataSector;
     vol.totalDataClusters = dataSectors / vol.sectorsPerCluster;
     if (vol.totalDataClusters == 0 || !cluster_byte_count(vol, &dataSectors)) return false;
+    const uint64_t fatEntries =
+        static_cast<uint64_t>(vol.fatSizeSectors) * bpb->bytesPerSector / 4;
+    if (fatEntries < static_cast<uint64_t>(vol.totalDataClusters) + 2)
+        return false;
+    if (vol.rootCluster < 2 ||
+        static_cast<uint64_t>(vol.rootCluster) >=
+            static_cast<uint64_t>(vol.totalDataClusters) + 2) return false;
     vol.nextFreeCluster = 2;
 
     // Copy volume label
@@ -437,7 +467,10 @@ static bool try_mount_fat32_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
     return true;
 }
 
-static bool try_mount_fat16_boot_sector(uint8_t blockDevIdx, uint64_t partitionOffset, FATVolume& vol, const uint8_t* bootSector)
+static bool try_mount_fat16_boot_sector(const block::BlockEndpoint& endpoint,
+                                        uint64_t partitionOffset,
+                                        FATVolume& vol,
+                                        const uint8_t* bootSector)
 {
     if (!bootSector) return false;
 
@@ -459,8 +492,8 @@ static bool try_mount_fat16_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
     kernel::serial::putc('\n');
 #endif
 
-    const block::BlockDevice* device = block::get_device(blockDevIdx);
-    if (!device || bpb->bytesPerSector != device->sectorSize) return false;
+    if (endpoint.kind == block::ENDPOINT_INVALID ||
+        bpb->bytesPerSector != endpoint.sectorSize) return false;
     if (bpb->bytesPerSector < 512 || bpb->bytesPerSector > 4096) return false;
     if (bpb->sectorsPerCluster == 0) return false;
     if (bpb->numFATs == 0) return false;
@@ -473,7 +506,8 @@ static bool try_mount_fat16_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
     }
 
     vol.type              = FAT_TYPE_FAT16;
-    vol.blockDevIndex     = blockDevIdx;
+    vol.blockDevIndex     = endpoint.deviceIndex;
+    vol.endpoint          = endpoint;
     vol.partitionOffset   = partitionOffset;
     vol.bytesPerSector    = bpb->bytesPerSector;
     vol.sectorsPerCluster = bpb->sectorsPerCluster;
@@ -481,13 +515,17 @@ static bool try_mount_fat16_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
     vol.numFATs           = bpb->numFATs;
     vol.fatSizeSectors    = bpb->fatSize16;
     vol.rootCluster       = 0;
-    vol.rootDirFirstSector = vol.reservedSectors + (vol.numFATs * vol.fatSizeSectors);
+    const uint64_t rootDirFirstSector = static_cast<uint64_t>(vol.reservedSectors) +
+        static_cast<uint64_t>(vol.numFATs) * vol.fatSizeSectors;
+    if (rootDirFirstSector > 0xFFFFFFFFull) return false;
+    vol.rootDirFirstSector = static_cast<uint32_t>(rootDirFirstSector);
     vol.rootDirSectors     = ((static_cast<uint32_t>(bpb->rootEntryCount) * 32) + (vol.bytesPerSector - 1)) / vol.bytesPerSector;
 
     vol.totalSectors = (bpb->totalSectors32 != 0)
                        ? bpb->totalSectors32
                        : bpb->totalSectors16;
-    if (vol.totalSectors == 0) return false;
+    if (vol.totalSectors == 0 || partitionOffset > endpoint.totalSectors ||
+        vol.totalSectors > endpoint.totalSectors - partitionOffset) return false;
 
     vol.firstDataSector = vol.rootDirFirstSector + vol.rootDirSectors;
     if (vol.totalSectors <= vol.firstDataSector) return false;
@@ -504,12 +542,15 @@ static bool try_mount_fat16_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
     return true;
 }
 
-static bool try_mount_fat_boot_sector(uint8_t blockDevIdx, uint64_t partitionOffset, FATVolume& vol, const uint8_t* bootSector)
+static bool try_mount_fat_boot_sector(const block::BlockEndpoint& endpoint,
+                                      uint64_t partitionOffset,
+                                      FATVolume& vol,
+                                      const uint8_t* bootSector)
 {
-    if (try_mount_fat32_boot_sector(blockDevIdx, partitionOffset, vol, bootSector)) {
+    if (try_mount_fat32_boot_sector(endpoint, partitionOffset, vol, bootSector)) {
         return true;
     }
-    return try_mount_fat16_boot_sector(blockDevIdx, partitionOffset, vol, bootSector);
+    return try_mount_fat16_boot_sector(endpoint, partitionOffset, vol, bootSector);
 }
 
 #if defined(KERNEL_STORAGE_TEST)
@@ -517,42 +558,71 @@ bool test_probe_fat32_volume(uint8_t blockDevIndex, uint64_t partitionOffset,
                              FATVolume& out)
 {
     memzero(&out, sizeof(out));
-    const block::BlockDevice* device = block::get_device(blockDevIndex);
-    if (!device || device->sectorSize < 512 || device->sectorSize > 4096 ||
-        block::read_sectors(blockDevIndex, partitionOffset, 1, s_secBuf) !=
+    block::BlockEndpoint endpoint = {};
+    if (!block::make_device_endpoint(blockDevIndex, endpoint) ||
+        endpoint.sectorSize < 512 || endpoint.sectorSize > 4096 ||
+        block::read_endpoint(endpoint, partitionOffset, 1, s_secBuf) !=
             block::BLOCK_OK) return false;
-    return try_mount_fat32_boot_sector(blockDevIndex, partitionOffset, out,
+    return try_mount_fat32_boot_sector(endpoint, partitionOffset, out,
                                        s_secBuf);
 }
 #endif
 
 static bool try_mount_fat(uint8_t blockDevIdx, FATVolume& vol)
 {
-    block::Status st = block::read_sectors(blockDevIdx, 0, 1, s_secBuf);
+    if (!block::make_device_endpoint(blockDevIdx, vol.endpoint)) return false;
+    const block::BlockEndpoint& endpoint = vol.endpoint;
+    block::Status st = block::read_endpoint(endpoint, 0, 1, s_secBuf);
     if (st != block::BLOCK_OK) return false;
 
-    if (try_mount_fat_boot_sector(blockDevIdx, 0, vol, s_secBuf)) {
+    if (try_mount_fat_boot_sector(endpoint, 0, vol, s_secBuf)) {
         return true;
     }
 
-    // Could be an MBR with a FAT partition. Probe the primary partition table
-    // and let the boot sector at the partition start decide the actual format.
+    // Preserve the legacy whole-device mount behavior for MBR FAT media, but
+    // give the filesystem a bounded logical endpoint instead of retaining an
+    // unchecked base-LBA offset.
     if (s_secBuf[510] == 0x55 && s_secBuf[511] == 0xAA) {
+        storage::PartitionEntry candidates[4] = {};
         for (uint32_t partIndex = 0; partIndex < 4; ++partIndex) {
-            uint32_t entry = 446 + partIndex * 16;
-            uint8_t partType = s_secBuf[entry + 4];
-            if (!is_fat_partition_type(partType)) continue;
-
-            uint32_t startLBA = *reinterpret_cast<uint32_t*>(&s_secBuf[entry + 8]);
-            if (startLBA == 0) continue;
-
-            if (block::read_sectors(blockDevIdx, startLBA, 1, s_secBuf) != block::BLOCK_OK) {
+            const uint32_t entry = 446 + partIndex * 16;
+            storage::PartitionEntry& candidate = candidates[partIndex];
+            candidate.partitionNumber = static_cast<uint16_t>(partIndex + 1);
+            candidate.mbrType = s_secBuf[entry + 4];
+            candidate.startLba = read_le32(&s_secBuf[entry + 8]);
+            candidate.sectorCount = read_le32(&s_secBuf[entry + 12]);
+            if (!is_fat_partition_type(candidate.mbrType) ||
+                candidate.startLba == 0 || candidate.sectorCount == 0 ||
+                candidate.startLba > UINT64_MAX - (candidate.sectorCount - 1))
                 continue;
-            }
+            candidate.endLba = candidate.startLba + candidate.sectorCount - 1;
+        }
 
-            if (try_mount_fat_boot_sector(blockDevIdx, startLBA, vol, s_secBuf)) {
+        for (uint32_t partIndex = 0; partIndex < 4; ++partIndex) {
+            const storage::PartitionEntry& candidate = candidates[partIndex];
+            if (!candidate.mbrType) continue;
+            block::PartitionViewHandle viewHandle = {};
+            block::BlockEndpoint viewEndpoint = {};
+            block::PartitionIdentity identity = {};
+            if (!block::create_partition_view(blockDevIdx,
+                    storage::PARTITION_SCHEME_MBR, candidate,
+                    viewHandle, viewEndpoint, &identity)) continue;
+
+            memzero(&vol, sizeof(vol));
+            const bool mounted =
+                block::read_endpoint(viewEndpoint, 0, 1, s_secBuf) ==
+                    block::BLOCK_OK &&
+                try_mount_fat_boot_sector(viewEndpoint, 0, vol, s_secBuf);
+            if (mounted) {
+                vol.endpoint = viewEndpoint;
+                vol.blockDevIndex = blockDevIdx;
+                vol.partitionOffset = 0;
+                vol.partitionIdentity = identity;
+                vol.ownsPartitionView = true;
                 return true;
             }
+            block::release_partition_view(viewHandle);
+            memzero(&vol, sizeof(vol));
         }
     }
 
@@ -561,7 +631,9 @@ static bool try_mount_fat(uint8_t blockDevIdx, FATVolume& vol)
 
 static bool try_mount_exfat(uint8_t blockDevIdx, FATVolume& vol)
 {
-    block::Status st = block::read_sectors(blockDevIdx, 0, 1, s_secBuf);
+    if (!block::make_device_endpoint(blockDevIdx, vol.endpoint)) return false;
+    const block::BlockEndpoint& endpoint = vol.endpoint;
+    block::Status st = block::read_endpoint(endpoint, 0, 1, s_secBuf);
     if (st != block::BLOCK_OK) return false;
 
     const ExFAT_BootSector* bs = reinterpret_cast<const ExFAT_BootSector*>(s_secBuf);
@@ -570,11 +642,10 @@ static bool try_mount_exfat(uint8_t blockDevIdx, FATVolume& vol)
     // registered block geometry before interpreting sector-relative offsets.
     if (!str_equal(bs->fsName, "EXFAT   ", 8)) return false;
     if (bs->bootSignature != 0xAA55 || bs->bytesPerSectorShift > 12) return false;
-    const block::BlockDevice* device = block::get_device(blockDevIdx);
-    if (!device || (1u << bs->bytesPerSectorShift) != device->sectorSize) return false;
+    if ((1u << bs->bytesPerSectorShift) != endpoint.sectorSize) return false;
 
     vol.type                       = FAT_TYPE_EXFAT;
-    vol.blockDevIndex              = blockDevIdx;
+    vol.blockDevIndex              = endpoint.deviceIndex;
     vol.exfatVolumeLength          = bs->volumeLength;
     vol.exfatFatOffset             = bs->fatOffset;
     vol.exfatFatLength             = bs->fatLength;
@@ -920,6 +991,30 @@ uint8_t mount(uint8_t blockDevIndex)
     return 0xFF;
 }
 
+uint8_t mount_endpoint(const block::BlockEndpoint& endpoint)
+{
+    if (endpoint.kind == block::ENDPOINT_INVALID ||
+        endpoint.sectorSize != 512 || endpoint.totalSectors == 0 ||
+        s_volumeCount >= MAX_FAT_VOLUMES) return 0xFF;
+    uint8_t index = 0xFF;
+    for (uint8_t i = 0; i < MAX_FAT_VOLUMES; ++i) {
+        if (!s_volumes[i].mounted) { index = i; break; }
+    }
+    if (index == 0xFF) return 0xFF;
+
+    FATVolume& volume = s_volumes[index];
+    memzero(&volume, sizeof(volume));
+    volume.endpoint = endpoint;
+    volume.blockDevIndex = endpoint.deviceIndex;
+    if (block::read_endpoint(endpoint, 0, 1, s_secBuf) != block::BLOCK_OK ||
+        !try_mount_fat32_boot_sector(endpoint, 0, volume, s_secBuf)) {
+        memzero(&volume, sizeof(volume));
+        return 0xFF;
+    }
+    ++s_volumeCount;
+    return index;
+}
+
 void unmount(uint8_t volumeIndex)
 {
     if (volumeIndex >= MAX_FAT_VOLUMES) return;
@@ -931,7 +1026,15 @@ void unmount(uint8_t volumeIndex)
             s_files[i].open = false;
     }
 
+    if (s_volumes[volumeIndex].ownsPartitionView) {
+        const block::PartitionViewHandle handle = {
+            s_volumes[volumeIndex].endpoint.viewSlot,
+            s_volumes[volumeIndex].endpoint.viewGeneration };
+        block::release_partition_view(handle);
+    }
+
     s_volumes[volumeIndex].mounted = false;
+    s_volumes[volumeIndex].ownsPartitionView = false;
     if (s_volumeCount > 0) --s_volumeCount;
 }
 

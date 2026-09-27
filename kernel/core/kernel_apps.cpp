@@ -6181,6 +6181,7 @@ static const char* disk_manager_transport_name(kernel::block::DeviceType type)
 DiskManagerApp::DiskManagerApp()
     : m_diskCount(0), m_selectedDisk(0), m_refreshBtnId(-1),
       m_propertiesBtnId(-1), m_diagnosticsBtnId(-1), m_initializeBtnId(-1),
+      m_mountBtnId(-1), m_unmountBtnId(-1),
       m_gptBtnId(-1), m_mbrBtnId(-1),
       m_confirmInitializeBtnId(-1), m_cancelInitializeBtnId(-1),
       m_createSizeTextBoxId(-1), m_createNameTextBoxId(-1),
@@ -6188,6 +6189,8 @@ DiskManagerApp::DiskManagerApp()
       m_dialogIsCreate(false), m_dialogIsFormat(false), m_createSizeEdited(false),
       m_createNameEdited(false), m_createInputFocus(0),
       m_initializeScheme(storage::DEFAULT_INITIALIZE_SCHEME),
+      m_mountDialogOpen(false), m_mountDialogDeviceIndex(0xFF),
+      m_mountDialogRegistrationId(0), m_mountDialogReadOnly(true),
       m_selectedObject(SELECTED_DISK), m_detailsMode(DETAILS_PROPERTIES),
       m_keyboardPane(KEYBOARD_DISKS), m_selectedPart(-1), m_selectedRegion(-1),
       m_selectedListItem(-1), m_diskScroll(0), m_partitionScroll(0),
@@ -6201,6 +6204,8 @@ DiskManagerApp::DiskManagerApp()
     memset(&m_createResult, 0, sizeof(m_createResult));
     memset(&m_formatRequest, 0, sizeof(m_formatRequest));
     memset(&m_formatResult, 0, sizeof(m_formatResult));
+    memset(&m_mountDialogPartition, 0, sizeof(m_mountDialogPartition));
+    m_mountDialogPath[0] = '\0';
     m_createSizeText[0] = '\0';
     m_createNameText[0] = '\0';
     m_initializeMessage[0] = '\0';
@@ -6236,6 +6241,8 @@ bool DiskManagerApp::init() {
     m_propertiesBtnId = addButton(98, 0, 90, 28, "Properties");
     m_diagnosticsBtnId = addButton(194, 0, 96, 28, "Diagnostics");
     m_initializeBtnId = addButton(296, 0, 150, 28, "Initialize Disk...");
+    m_mountBtnId = addButton(452, 0, 100, 28, "Mount...");
+    m_unmountBtnId = addButton(558, 0, 90, 28, "Unmount");
     m_gptBtnId = addButton(10, 0, 140, 28,
                            "GPT (Default)");
     m_mbrBtnId = addButton(158, 0, 150, 28,
@@ -6316,9 +6323,48 @@ void DiskManagerApp::scanDisks() {
             if (e.mountCount == 0) strcopy(e.mountPath, mount->path,
                                            sizeof(e.mountPath));
             if (e.mountCount < 0xFF) ++e.mountCount;
+            if (mount->partitionMount &&
+                mount->parentRegistrationId == identity.registrationId &&
+                vfs::mount_identity_valid(mountIndex)) {
+                if (e.exactPartitionMountCount < 0xFF)
+                    ++e.exactPartitionMountCount;
+            }
         }
 
         readPartitionTable(e);
+        for (uint8_t mountIndex = 0; mountIndex < vfs::VFS_MAX_MOUNTS;
+             ++mountIndex) {
+            const vfs::MountPoint* mount = vfs::get_mount_by_index(mountIndex);
+            if (!mount || !mount->active || !mount->partitionMount ||
+                mount->blockDevIndex != i ||
+                mount->parentRegistrationId != identity.registrationId) continue;
+            for (int partIndex = 0; partIndex < e.partCount; ++partIndex) {
+                PartEntry& part = e.parts[partIndex];
+                const storage::PartitionEntry& parsed = part.parsed;
+                const block::PartitionIdentity& mounted = mount->partitionIdentity;
+                bool same = mounted.valid &&
+                    mounted.partitionNumber == parsed.partitionNumber &&
+                    mounted.startLba == parsed.startLba &&
+                    mounted.endLba == parsed.endLba &&
+                    mounted.sectorCount == parsed.sectorCount &&
+                    ((mounted.scheme == storage::PARTITION_SCHEME_GPT) == parsed.isGpt);
+                if (same && parsed.isGpt) {
+                    same = memcmp(mounted.uniqueGuid, parsed.uniqueGuid,
+                                  sizeof(mounted.uniqueGuid)) == 0;
+                } else if (same) {
+                    same = mounted.mbrType == parsed.mbrType;
+                }
+                if (!same) continue;
+                part.mounted = true;
+                part.mountIdentityValid = vfs::mount_identity_valid(mountIndex);
+                part.mountReadOnly = mount->readOnly;
+                part.mountIndex = mountIndex;
+                part.mountViewSlot = mount->partitionView.slot;
+                part.mountViewGeneration = mount->partitionView.generation;
+                strcopy(part.mountPath, mount->path, sizeof(part.mountPath));
+                break;
+            }
+        }
         if (e.state == storage::DISK_STATE_NOT_INITIALIZED) {
             storage::InitializeTargetValidation initValidation;
             e.initializeStatus = storage::probe_initialize_target(
@@ -6648,6 +6694,8 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
     app::Widget* properties = getWidget(m_propertiesBtnId);
     app::Widget* diagnostics = getWidget(m_diagnosticsBtnId);
     app::Widget* initialize = getWidget(m_initializeBtnId);
+    app::Widget* mountAction = getWidget(m_mountBtnId);
+    app::Widget* unmountAction = getWidget(m_unmountBtnId);
     app::Widget* gpt = getWidget(m_gptBtnId);
     app::Widget* mbr = getWidget(m_mbrBtnId);
     app::Widget* confirm = getWidget(m_confirmInitializeBtnId);
@@ -6659,12 +6707,16 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
         if (refresh) { refresh->x = 10; refresh->y = static_cast<int>(h) - 64; refresh->w = 78; }
         if (properties) { properties->x = 94; properties->y = static_cast<int>(h) - 64; properties->w = 92; }
         if (diagnostics) { diagnostics->x = 192; diagnostics->y = static_cast<int>(h) - 64; diagnostics->w = 102; }
-        if (initialize) { initialize->x = 10; initialize->y = rowY; initialize->w = 150; }
+        if (initialize) { initialize->x = 10; initialize->y = rowY; initialize->w = 130; }
+        if (mountAction) { mountAction->x = 146; mountAction->y = rowY; mountAction->w = 108; }
+        if (unmountAction) { unmountAction->x = 260; unmountAction->y = rowY; unmountAction->w = 92; }
     } else {
         if (refresh) { refresh->x = 10; refresh->y = rowY; refresh->w = 82; }
         if (properties) { properties->x = 98; properties->y = rowY; properties->w = 90; }
         if (diagnostics) { diagnostics->x = 194; diagnostics->y = rowY; diagnostics->w = 96; }
         if (initialize) { initialize->x = 296; initialize->y = rowY; initialize->w = 150; }
+        if (mountAction) { mountAction->x = 452; mountAction->y = rowY; mountAction->w = 100; }
+        if (unmountAction) { unmountAction->x = 558; unmountAction->y = rowY; unmountAction->w = 90; }
     }
     if (gpt) { gpt->x = 10; gpt->y = rowY; gpt->w = 140; }
     if (mbr) { mbr->x = 158; mbr->y = rowY; mbr->w = 150; }
@@ -6690,17 +6742,24 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
 }
 
 void DiskManagerApp::updateInitializeControls() {
+    storage::StorageOperationLease initializeLease = {};
+    initializeLease.ownerToken = m_initializePlan.ownerToken;
+    const bool initializeLeaseCurrent =
+        storage::storage_operation_lease_is_current(initializeLease);
     app::Widget* refresh = getWidget(m_refreshBtnId);
     app::Widget* properties = getWidget(m_propertiesBtnId);
     app::Widget* diagnostics = getWidget(m_diagnosticsBtnId);
     app::Widget* initialize = getWidget(m_initializeBtnId);
+    app::Widget* mountAction = getWidget(m_mountBtnId);
+    app::Widget* unmountAction = getWidget(m_unmountBtnId);
     app::Widget* gpt = getWidget(m_gptBtnId);
     app::Widget* mbr = getWidget(m_mbrBtnId);
     app::Widget* confirm = getWidget(m_confirmInitializeBtnId);
     app::Widget* cancel = getWidget(m_cancelInitializeBtnId);
     app::Widget* sizeInput = getWidget(m_createSizeTextBoxId);
     app::Widget* nameInput = getWidget(m_createNameTextBoxId);
-    const bool dialogClosed = m_initializeDialogState == INITIALIZE_DIALOG_CLOSED;
+    const bool dialogClosed = m_initializeDialogState == INITIALIZE_DIALOG_CLOSED &&
+        !m_mountDialogOpen;
     const bool haveSelection = m_selectedDisk >= 0 && m_selectedDisk < m_diskCount;
     const bool rawSelected = haveSelection && m_disks[m_selectedDisk].haveInfo &&
         m_disks[m_selectedDisk].state == storage::DISK_STATE_NOT_INITIALIZED;
@@ -6720,6 +6779,9 @@ void DiskManagerApp::updateInitializeControls() {
     const bool createAvailable = selectedRegion &&
         m_disks[m_selectedDisk].createPartitionAvailable;
     bool formatAvailable = false;
+    bool mountAvailable = false;
+    bool showMountAction = false;
+    bool showUnmountAction = false;
     if (haveSelection && m_selectedObject == SELECTED_PARTITION &&
         m_selectedPart >= 0 && m_selectedPart < m_disks[m_selectedDisk].partCount) {
         const DiskEntry& disk = m_disks[m_selectedDisk];
@@ -6743,7 +6805,16 @@ void DiskManagerApp::updateInitializeControls() {
             disk.capabilities.logicalSectorSize ==
                 storage::FAT32_FORMAT_SECTOR_SIZE && disk.capabilities.writable &&
             disk.mountSafety == storage::DEVICE_UNMOUNTED &&
-            disk.bootSafety == storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET;
+            disk.bootSafety == storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET &&
+            !part.mounted;
+        const bool supportedPartition = validTable && disk.haveInfo &&
+            disk.capabilities.logicalSectorSize == 512 &&
+            disk.identity.registrationId != 0 &&
+            block::registration_is_present(disk.devIndex,
+                                            disk.identity.registrationId);
+        showMountAction = strcmp(part.fsLabel, "FAT32") == 0 && !part.mounted;
+        mountAvailable = showMountAction && supportedPartition;
+        showUnmountAction = part.mounted;
     }
     if (refresh) {
         refresh->visible = dialogClosed;
@@ -6777,18 +6848,26 @@ void DiskManagerApp::updateInitializeControls() {
         setWidgetText(m_initializeBtnId, formatAvailable ? "Format..." :
             (selectedRegion ? "Create Partition..." : "Initialize Disk..."));
     }
+    if (mountAction) {
+        mountAction->visible = dialogClosed && showMountAction;
+        mountAction->enabled = mountAvailable;
+    }
+    if (unmountAction) {
+        unmountAction->visible = dialogClosed && showUnmountAction;
+        unmountAction->enabled = showUnmountAction;
+    }
     if (gpt) { gpt->visible = choosing; gpt->enabled = choosing; }
     if (mbr) { mbr->visible = choosing; mbr->enabled = choosing; }
     if (confirm) {
-        confirm->visible = confirming || createOptions || formatOptions;
-        confirm->enabled = confirming
+        confirm->visible = m_mountDialogOpen || confirming || createOptions || formatOptions;
+        confirm->enabled = m_mountDialogOpen || (confirming
             ? (m_initializePlan.confirmationReady &&
-               storage::storage_operation_lease_is_current(
-                   storage::StorageOperationLease{m_initializePlan.ownerToken}))
+               initializeLeaseCurrent)
             : (createOptions ? updateCreateInputWidgets() :
-                (formatOptions && updateFormatLabelWidget()));
+                (formatOptions && updateFormatLabelWidget())));
         setWidgetText(m_confirmInitializeBtnId,
-            formatOptions ? "Format" : (createOptions ? "Create" : "Initialize"));
+            m_mountDialogOpen ? "Mount" : (formatOptions ? "Format" :
+                (createOptions ? "Create" : "Initialize")));
     }
     if (sizeInput) {
         sizeInput->visible = createOptions;
@@ -6799,8 +6878,9 @@ void DiskManagerApp::updateInitializeControls() {
             m_createRequest.requestedScheme == storage::PARTITION_SCHEME_GPT);
         nameInput->enabled = nameInput->visible;
     }
-    const bool showCancel = m_initializeDialogState != INITIALIZE_DIALOG_CLOSED &&
-                            m_initializeDialogState != INITIALIZE_DIALOG_RUNNING;
+    const bool showCancel = m_mountDialogOpen ||
+        (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED &&
+         m_initializeDialogState != INITIALIZE_DIALOG_RUNNING);
     if (cancel) {
         cancel->visible = showCancel;
         cancel->enabled = showCancel;
@@ -6983,6 +7063,17 @@ void DiskManagerApp::activateKeyboardAction() {
 void DiskManagerApp::onKeyDown(uint32_t key) {
     const bool escape = key == 27;
     const bool enter = key == 13 || key == 32;
+    if (m_mountDialogOpen) {
+        if (escape) {
+            m_mountDialogOpen = false;
+            strcopy(m_statusMessage, "Mount canceled.", sizeof(m_statusMessage));
+            updateInitializeControls();
+            invalidate();
+        } else if (enter) {
+            confirmPartitionMount();
+        }
+        return;
+    }
     if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED) {
         if (escape) {
             closeInitializeDialog();
@@ -7076,7 +7167,7 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
 }
 
 void DiskManagerApp::onKeyChar(char c) {
-    if ((!m_dialogIsCreate && !m_dialogIsFormat) || m_initializeDialogState !=
+    if (m_mountDialogOpen || (!m_dialogIsCreate && !m_dialogIsFormat) || m_initializeDialogState !=
             INITIALIZE_DIALOG_CREATE_OPTIONS || c < 0x20 || c > 0x7E) return;
     const bool sizeField = !m_dialogIsFormat && m_createInputFocus == 0;
     char* target = sizeField ? m_createSizeText : m_createNameText;
@@ -7107,7 +7198,7 @@ void DiskManagerApp::onKeyChar(char c) {
 }
 
 void DiskManagerApp::onMouseWheel(int localX, int localY, int wheelDelta) {
-    if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED || wheelDelta == 0)
+    if (m_mountDialogOpen || m_initializeDialogState != INITIALIZE_DIALOG_CLOSED || wheelDelta == 0)
         return;
     const int amount = wheelDelta > 0 ? -3 : 3;
     if (localX < m_mapX && localY >= m_diskRowsTop &&
@@ -7136,7 +7227,7 @@ void DiskManagerApp::onMouseWheel(int localX, int localY, int wheelDelta) {
 
 void DiskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {
     (void)button;
-    if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED) return;
+    if (m_mountDialogOpen || m_initializeDialogState != INITIALIZE_DIALOG_CLOSED) return;
     if (localX < m_mapX && localY >= m_diskRowsTop &&
         localY < m_diskRowsBottom && m_diskVisibleRows > 0) {
         const int row = (localY - m_diskRowsTop) / 28;
@@ -7188,6 +7279,17 @@ void DiskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {
 }
 
 void DiskManagerApp::onWidgetClick(int widgetId) {
+    if (m_mountDialogOpen && widgetId == m_confirmInitializeBtnId) {
+        confirmPartitionMount();
+        return;
+    }
+    if (m_mountDialogOpen && widgetId == m_cancelInitializeBtnId) {
+        m_mountDialogOpen = false;
+        strcopy(m_statusMessage, "Mount canceled.", sizeof(m_statusMessage));
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
     if ((widgetId == m_createSizeTextBoxId ||
          widgetId == m_createNameTextBoxId) &&
         m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS) {
@@ -7255,6 +7357,12 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
                m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
         scanDisks();
         invalidate();
+    } else if (widgetId == m_mountBtnId &&
+               m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
+        beginMountDialog();
+    } else if (widgetId == m_unmountBtnId &&
+               m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
+        unmountSelectedPartition();
     }
 }
 
@@ -7406,19 +7514,29 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     disk_manager_draw_clipped(rightX + 4, y + 52, rightW - 8, summary, kSubText);
 
     char mountSummary[160];
-    if (disk.mountSafety == storage::DEVICE_ROOT_BACKING) {
+    if (disk.exactPartitionMountCount != 0 &&
+        disk.exactPartitionMountCount == disk.mountCount) {
+        char count[16];
+        disk_manager_u64(disk.exactPartitionMountCount, count, sizeof(count));
+        strcopy(mountSummary, "Mounted partitions: ", sizeof(mountSummary));
+        strappend(mountSummary, count, sizeof(mountSummary));
+    } else if (disk.mountSafety == storage::DEVICE_ROOT_BACKING) {
         strcopy(mountSummary, "Root backing device", sizeof(mountSummary));
         if (disk.mountPath[0]) {
             strappend(mountSummary, " mounted at ", sizeof(mountSummary));
             strappend(mountSummary, disk.mountPath, sizeof(mountSummary));
         }
-        strappend(mountSummary, " | partition mapping unknown", sizeof(mountSummary));
     } else if (disk.mountSafety == storage::DEVICE_MOUNTED) {
         strcopy(mountSummary, "Mounted at ", sizeof(mountSummary));
         strappend(mountSummary, disk.mountPath[0] ? disk.mountPath : "Unknown path",
                   sizeof(mountSummary));
-        if (disk.mountCount > 1) strappend(mountSummary, " and other paths", sizeof(mountSummary));
-        strappend(mountSummary, " | partition mapping unknown", sizeof(mountSummary));
+        if (disk.mountCount > 1) {
+            char count[16];
+            disk_manager_u64(disk.mountCount, count, sizeof(count));
+            strappend(mountSummary, " (", sizeof(mountSummary));
+            strappend(mountSummary, count, sizeof(mountSummary));
+            strappend(mountSummary, " mounts)", sizeof(mountSummary));
+        }
     } else if (disk.mountSafety == storage::DEVICE_UNMOUNTED) {
         strcopy(mountSummary, "Unmounted", sizeof(mountSummary));
     } else {
@@ -7513,7 +7631,7 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         const bool selected = index == m_selectedListItem;
         framebuffer::fill_rect(rightX + 5, y + py, rightW - 10, 15,
             selected ? kRowSel : ((row & 1) ? kRowAlt : kPanel));
-        char itemNumber[16], itemName[80], type[32], capacity[32];
+        char itemNumber[16], itemName[80], type[32], capacity[32], fsText[160];
         const char* fs = "Unknown";
         if (item.unallocated) {
             const storage::UnallocatedRegion& region = disk.regions[item.sourceIndex];
@@ -7546,6 +7664,14 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                 formatSize(capacityBytes, capacity, sizeof(capacity));
             else strcopy(capacity, "Unknown", sizeof(capacity));
             fs = part.fsLabel;
+            if (part.mounted) {
+                strcopy(fsText, part.fsLabel, sizeof(fsText));
+                strappend(fsText, part.mountIdentityValid
+                    ? " | Mounted at " : " | Identity invalid at ",
+                    sizeof(fsText));
+                strappend(fsText, part.mountPath, sizeof(fsText));
+                fs = fsText;
+            }
         }
         const uint32_t textColor = selected ? kText : kSubText;
         disk_manager_draw_clipped(rightX + 7, y + py + 4, 28, itemNumber, textColor);
@@ -8058,6 +8184,67 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         }
     }
 
+    if (m_mountDialogOpen) {
+        const uint32_t panelX = rightX + 8;
+        const uint32_t panelY = y + 82;
+        const uint32_t panelW = rightW > 24 ? rightW - 16 : rightW;
+        const uint32_t panelH = bodyBottom > 90
+            ? static_cast<uint32_t>(bodyBottom - 88) : 90;
+        framebuffer::fill_rect(panelX, panelY, panelW, panelH, 0xFF252D3B);
+        framebuffer::fill_rect(panelX, panelY, panelW, 23, 0xFF34465C);
+        disk_manager_draw_clipped(panelX + 10, panelY + 7, panelW - 20,
+                                  "Mount FAT32 Partition", kText);
+        char line[160], partitionNo[16];
+        uint32_t lineY = panelY + 34;
+        strcopy(line, "Disk: ", sizeof(line));
+        strappend(line, m_selectedDisk >= 0 && m_selectedDisk < m_diskCount &&
+            m_disks[m_selectedDisk].devIndex == m_mountDialogDeviceIndex
+                ? m_disks[m_selectedDisk].name : "Identity changed",
+            sizeof(line));
+        disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20, line, kText);
+        lineY += 18;
+        disk_manager_u64(m_mountDialogPartition.partitionNumber,
+                         partitionNo, sizeof(partitionNo));
+        strcopy(line, "Partition ", sizeof(line));
+        strappend(line, partitionNo, sizeof(line));
+        strappend(line, m_mountDialogPartition.isGpt ? " | GPT" : " | MBR primary",
+                  sizeof(line));
+        disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20, line, kText);
+        lineY += 18;
+        strcopy(line, "Filesystem: FAT32", sizeof(line));
+        disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20, line, kText);
+        lineY += 18;
+        const char* label = "(unknown)";
+        if (m_selectedDisk >= 0 && m_selectedDisk < m_diskCount &&
+            m_disks[m_selectedDisk].devIndex == m_mountDialogDeviceIndex) {
+            for (int i = 0; i < m_disks[m_selectedDisk].partCount; ++i) {
+                if (storage::disk_manager_same_partition(
+                        m_mountDialogPartition,
+                        m_disks[m_selectedDisk].parts[i].parsed)) {
+                    label = m_disks[m_selectedDisk].parts[i].volumeLabel[0]
+                        ? m_disks[m_selectedDisk].parts[i].volumeLabel : "(none)";
+                    break;
+                }
+            }
+        }
+        strcopy(line, "Volume label: ", sizeof(line));
+        strappend(line, label, sizeof(line));
+        disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20, line, kSubText);
+        lineY += 18;
+        strcopy(line, "Proposed mount point: ", sizeof(line));
+        strappend(line, m_mountDialogPath, sizeof(line));
+        disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20, line, kText);
+        lineY += 18;
+        strcopy(line, "Access: ", sizeof(line));
+        strappend(line, m_mountDialogReadOnly ? "Read Only" : "Read/Write",
+                  sizeof(line));
+        disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20, line, kText);
+        lineY += 22;
+        disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+            "Mount checks the current partition identity and never formats or repairs it.",
+            kSubText);
+    }
+
     if (m_statusMessage[0])
         disk_manager_draw_clipped(x + 10, y + (m_footerY > 16 ? m_footerY - 14 : 0),
             w > 20 ? w - 20 : 0, m_statusMessage, kSubText);
@@ -8140,11 +8327,33 @@ void DiskManagerApp::drawDetails(uint32_t x, uint32_t y, uint32_t w,
                     add(left, leftCount, "FAT32 BPB", "Unavailable or invalid");
                 }
             }
+            add(left, leftCount, "Mounted", part.mounted
+                ? (part.mountIdentityValid ? "Yes" : "Identity invalid") : "No");
+            add(left, leftCount, "Mount path", part.mounted
+                ? part.mountPath : "(not mounted)");
+            add(left, leftCount, "Mount mode", part.mounted
+                ? (part.mountReadOnly ? "Read Only" : "Read/Write") : "-"
+            );
+            add(left, leftCount, "Parent disk", disk.identity.name);
+            numberText(disk.identity.globalIndex, value, sizeof(value));
+            strappend(value, " | registration ", sizeof(value));
+            char registration[24];
+            numberText(disk.identity.registrationId, registration,
+                       sizeof(registration));
+            strappend(value, registration, sizeof(value));
+            add(right, rightCount, "Parent block identity", value);
+            if (part.mounted) {
+                char viewText[48], slotText[12], generationText[24];
+                numberText(part.mountViewSlot, slotText, sizeof(slotText));
+                numberText(part.mountViewGeneration, generationText,
+                           sizeof(generationText));
+                strcopy(viewText, "slot ", sizeof(viewText));
+                strappend(viewText, slotText, sizeof(viewText));
+                strappend(viewText, " / generation ", sizeof(viewText));
+                strappend(viewText, generationText, sizeof(viewText));
+                add(right, rightCount, "Partition view", viewText);
+            }
             add(right, rightCount, "Name", parsed.name[0] ? parsed.name : "(unnamed)");
-            add(right, rightCount, "Mount", disk.mountSafety == storage::DEVICE_UNMOUNTED
-                ? "Unmounted" : (disk.mountSafety == storage::DEVICE_MOUNTED
-                    ? "Mounted; partition mapping unknown" :
-                      "Mount protection unknown"));
             if (parsed.isGpt) {
                 disk_manager_guid_text(parsed.typeGuid, value, sizeof(value));
                 add(right, rightCount, "GPT type GUID", value);
@@ -8678,6 +8887,100 @@ void DiskManagerApp::closeInitializeDialog() {
     m_dialogIsFormat = false;
     m_createInputFocus = 0;
     m_initializeMessage[0] = '\0';
+    updateInitializeControls();
+    invalidate();
+}
+
+void DiskManagerApp::beginMountDialog() {
+    if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED ||
+        m_mountDialogOpen || m_selectedDisk < 0 || m_selectedDisk >= m_diskCount ||
+        m_selectedObject != SELECTED_PARTITION || m_selectedPart < 0 ||
+        m_selectedPart >= m_disks[m_selectedDisk].partCount) return;
+    const DiskEntry& disk = m_disks[m_selectedDisk];
+    const PartEntry& part = disk.parts[m_selectedPart];
+    if (strcmp(part.fsLabel, "FAT32") != 0 || part.mounted ||
+        disk.identity.registrationId == 0) return;
+    if (!vfs::propose_partition_mount_path(disk.devIndex,
+            part.parsed.partitionNumber, m_mountDialogPath,
+            sizeof(m_mountDialogPath))) {
+        strcopy(m_statusMessage, "No safe unused mount path is available.",
+                sizeof(m_statusMessage));
+        invalidate();
+        return;
+    }
+    m_mountDialogDeviceIndex = disk.devIndex;
+    m_mountDialogRegistrationId = disk.identity.registrationId;
+    m_mountDialogPartition = part.parsed;
+    const bool durable = disk.capabilities.persistence ==
+            storage::PERSISTENCE_SYNCHRONOUS_DURABLE ||
+        (disk.capabilities.persistence == storage::PERSISTENCE_FLUSH_REQUIRED &&
+         disk.capabilities.flushSupported &&
+         disk.capabilities.flushSemanticsKnown);
+    m_mountDialogReadOnly = !disk.capabilities.writable || !durable;
+    m_mountDialogOpen = true;
+    updateInitializeControls();
+    invalidate();
+}
+
+void DiskManagerApp::confirmPartitionMount() {
+    if (!m_mountDialogOpen) return;
+    const vfs::PartitionMountResult result = vfs::mount_partition_detailed(
+        m_mountDialogPath, m_mountDialogDeviceIndex,
+        m_mountDialogPartition.partitionNumber,
+        m_mountDialogRegistrationId, &m_mountDialogPartition);
+    char status[128];
+    if (result.error == vfs::PARTITION_MOUNT_OK) {
+        const vfs::MountPoint* mount = vfs::get_mount_by_index(result.mountIndex);
+        strcopy(status, "Mounted at ", sizeof(status));
+        strappend(status, mount ? mount->path : m_mountDialogPath,
+                  sizeof(status));
+        strappend(status, mount && mount->readOnly
+            ? " (Read Only)" : " (Read/Write)", sizeof(status));
+    } else if (result.error == vfs::PARTITION_MOUNT_FILESYSTEM_UNRECOGNIZED) {
+        strcopy(status,
+            "Mount failed: filesystem is not recognized or is invalid.",
+            sizeof(status));
+    } else {
+        strcopy(status, "Mount failed: ", sizeof(status));
+        strappend(status, vfs::partition_mount_error_name(result.error),
+                  sizeof(status));
+        strappend(status, ".", sizeof(status));
+    }
+    m_mountDialogOpen = false;
+    scanDisks();
+    strcopy(m_statusMessage, status, sizeof(m_statusMessage));
+    updateInitializeControls();
+    invalidate();
+}
+
+void DiskManagerApp::unmountSelectedPartition() {
+    if (m_selectedDisk < 0 || m_selectedDisk >= m_diskCount ||
+        m_selectedObject != SELECTED_PARTITION || m_selectedPart < 0 ||
+        m_selectedPart >= m_disks[m_selectedDisk].partCount) return;
+    const PartEntry& part = m_disks[m_selectedDisk].parts[m_selectedPart];
+    if (!part.mounted || part.mountPath[0] == '\0') return;
+    char pathCopy[128];
+    strcopy(pathCopy, part.mountPath, sizeof(pathCopy));
+    const uint8_t mountIndex = part.mountIndex;
+    const vfs::Status status = vfs::unmount(pathCopy);
+    char message[128];
+    if (status == vfs::VFS_OK) {
+        strcopy(message, "Unmounted and flushed ", sizeof(message));
+        strappend(message, pathCopy, sizeof(message));
+    } else if (status == vfs::VFS_ERR_BUSY) {
+        strcopy(message, "Unmount blocked: close files and directories first.",
+                sizeof(message));
+    } else if (status == vfs::VFS_ERR_IO &&
+               vfs::get_mount_by_index(mountIndex) == nullptr) {
+        strcopy(message,
+            "Mount cleaned up, but parent identity or flush could not be confirmed.",
+            sizeof(message));
+    } else {
+        strcopy(message, "Unmount failed: filesystem flush failed; mount remains active.",
+                sizeof(message));
+    }
+    scanDisks();
+    strcopy(m_statusMessage, message, sizeof(m_statusMessage));
     updateInitializeControls();
     invalidate();
 }

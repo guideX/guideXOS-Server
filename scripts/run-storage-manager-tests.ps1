@@ -16,12 +16,15 @@ try {
         -iquote kernel/core -iquote kernel/core/include -iquote kernel/arch/amd64/include `
         tests/storage_manager_test.cpp `
         kernel/core/block_device.cpp `
+        kernel/core/partition_block_view.cpp `
         kernel/core/storage_manager.cpp `
         kernel/core/partition_table.cpp `
         kernel/core/disk_initialization.cpp `
         kernel/core/partition_operations.cpp `
         kernel/core/fat32_formatter.cpp `
         kernel/core/fs_fat.cpp `
+        kernel/core/fs_ext4.cpp `
+        kernel/core/vfs.cpp `
         kernel/core/ramdisk.cpp `
         -o $testExe
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

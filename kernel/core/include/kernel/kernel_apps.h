@@ -1233,6 +1233,13 @@ private:
         uint32_t fatCount;
         uint64_t filesystemCapacityBytes;
         bool fat32PropertiesValid;
+        bool mounted;
+        bool mountIdentityValid;
+        bool mountReadOnly;
+        uint8_t mountIndex;
+        char mountPath[128];
+        uint8_t mountViewSlot;
+        uint64_t mountViewGeneration;
     };
 
     struct ListItem {
@@ -1249,6 +1256,7 @@ private:
         storage::MountSafety mountSafety;
         char mountPath[128];
         uint8_t mountCount;
+        uint8_t exactPartitionMountCount;
         storage::DiskState state;
         storage::PartitionScheme scheme;
         storage::PartitionError parserError;
@@ -1287,6 +1295,8 @@ private:
     int m_propertiesBtnId;
     int m_diagnosticsBtnId;
     int m_initializeBtnId;
+    int m_mountBtnId;
+    int m_unmountBtnId;
     int m_gptBtnId;
     int m_mbrBtnId;
     int m_confirmInitializeBtnId;
@@ -1308,6 +1318,12 @@ private:
     storage::CreatePartitionResult m_createResult;
     storage::Fat32FormatRequest m_formatRequest;
     storage::Fat32FormatResult m_formatResult;
+    bool m_mountDialogOpen;
+    uint8_t m_mountDialogDeviceIndex;
+    uint64_t m_mountDialogRegistrationId;
+    storage::PartitionEntry m_mountDialogPartition;
+    char m_mountDialogPath[128];
+    bool m_mountDialogReadOnly;
     char m_initializeMessage[128];
     char m_statusMessage[128];
     SelectedObject m_selectedObject;
@@ -1357,6 +1373,9 @@ private:
     void        runFormatOperation();
     bool        updateFormatLabelWidget();
     void        closeInitializeDialog();
+    void        beginMountDialog();
+    void        confirmPartitionMount();
+    void        unmountSelectedPartition();
 };
 
 class TrashApp : public app::KernelApp {

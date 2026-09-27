@@ -290,6 +290,8 @@ MountProtection query_mount_protection(const TargetIdentity& target)
         const vfs::MountPoint* mount = vfs::get_mount_by_index(i);
         if (!mount || !mount->active || mount->blockDevIndex != target.globalIndex)
             continue;
+        if (mount->partitionMount && vfs::mount_identity_valid(i))
+            result.partitionIdentityKnown = true;
         if (is_root_path(mount->path)) {
             result.safety = DEVICE_ROOT_BACKING;
             break;

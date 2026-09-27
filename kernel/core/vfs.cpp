@@ -10,6 +10,7 @@
 #include "include/kernel/block_device.h"
 #include "include/kernel/fs_fat.h"
 #include "include/kernel/fs_ext4.h"
+#include "include/kernel/partition_table.h"
 
 #if defined(__GNUC__) || defined(__clang__)
 #include "include/kernel/serial_debug.h"
@@ -27,6 +28,7 @@ static FileHandle   s_files[VFS_MAX_OPEN_FILES];
 static DirIterator  s_dirs[VFS_MAX_OPEN_FILES];
 static uint8_t      s_mountCount = 0;
 static bool         s_initialized = false;
+static storage::PartitionTableModel s_partitionTableScratch;
 
 // ================================================================
 // Helper functions
@@ -75,6 +77,85 @@ static void strcopy(char* dst, const char* src, size_t maxLen)
 }
 
 void join_path(const char* base, const char* name, char* output, size_t outputSize);
+static int strcmp(const char* s1, const char* s2);
+
+static bool partition_entry_matches_identity(
+    const storage::PartitionEntry& entry,
+    const block::PartitionIdentity& identity)
+{
+    if (entry.partitionNumber != identity.partitionNumber ||
+        entry.startLba != identity.startLba ||
+        entry.endLba != identity.endLba ||
+        entry.sectorCount != identity.sectorCount ||
+        entry.isGpt != (identity.scheme == storage::PARTITION_SCHEME_GPT))
+        return false;
+    if (identity.scheme == storage::PARTITION_SCHEME_GPT) {
+        for (size_t i = 0; i < sizeof(identity.uniqueGuid); ++i)
+            if (entry.uniqueGuid[i] != identity.uniqueGuid[i]) return false;
+        return true;
+    }
+    return identity.scheme == storage::PARTITION_SCHEME_MBR &&
+           entry.mbrType == identity.mbrType;
+}
+
+static bool same_partition_entry(const storage::PartitionEntry& left,
+                                 const storage::PartitionEntry& right)
+{
+    if (left.partitionNumber != right.partitionNumber ||
+        left.isGpt != right.isGpt || left.mbrType != right.mbrType ||
+        left.startLba != right.startLba || left.endLba != right.endLba ||
+        left.sectorCount != right.sectorCount) return false;
+    if (!left.isGpt) return true;
+    for (size_t i = 0; i < sizeof(left.uniqueGuid); ++i)
+        if (left.uniqueGuid[i] != right.uniqueGuid[i]) return false;
+    return true;
+}
+
+static bool partition_path_is_normalized(const char* path)
+{
+    if (!path || path[0] != '/' || path[1] == '\0' ||
+        strlen(path) >= VFS_MAX_PATH) return false;
+    char normalized[VFS_MAX_PATH];
+    normalize_path(path, normalized, sizeof(normalized));
+    if (strcmp(path, normalized) != 0) return false;
+    for (size_t i = 1; path[i];) {
+        if (path[i] == '/') return false;
+        size_t end = i;
+        while (path[end] && path[end] != '/') {
+            const char c = path[end];
+            const bool safe = (c >= 'a' && c <= 'z') ||
+                (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                c == '-' || c == '_' || c == '.';
+            if (!safe) return false;
+            ++end;
+        }
+        const size_t length = end - i;
+        if (length == 0 || (length == 1 && path[i] == '.') ||
+            (length == 2 && path[i] == '.' && path[i + 1] == '.')) return false;
+        i = path[end] ? end + 1 : end;
+    }
+    return true;
+}
+
+static bool find_current_partition(uint8_t deviceIndex,
+                                   uint16_t partitionNumber,
+                                   storage::PartitionTableModel& table,
+                                   storage::PartitionEntry& out)
+{
+    if (!storage::parse_partition_table(deviceIndex, table) ||
+        (table.state != storage::DISK_STATE_VALID_MBR &&
+         table.state != storage::DISK_STATE_VALID_GPT) ||
+        table.hybridMbr || table.extendedPartitionsPresent ||
+        (table.scheme != storage::PARTITION_SCHEME_MBR &&
+         table.scheme != storage::PARTITION_SCHEME_GPT)) return false;
+    for (uint16_t i = 0; i < table.partitionCount; ++i) {
+        if (table.partitions[i].partitionNumber == partitionNumber) {
+            out = table.partitions[i];
+            return true;
+        }
+    }
+    return false;
+}
 
 static int strcmp(const char* s1, const char* s2)
 {
@@ -385,13 +466,153 @@ uint8_t mount(const char* path, uint8_t blockDevIndex)
 
 uint8_t mount_partition(const char* path, uint8_t blockDevIndex, uint8_t partitionNumber)
 {
-    (void)path;
-    (void)blockDevIndex;
-    (void)partitionNumber;
-#if defined(__GNUC__) || defined(__clang__)
-    serial::puts("[VFS] mount_partition TODO: partition-aware mounting is not implemented\n");
-#endif
-    return 0xFF;
+    return mount_partition_detailed(path, blockDevIndex, partitionNumber).mountIndex;
+}
+
+static PartitionMountResult partition_mount_result(PartitionMountError error,
+                                                    uint8_t mountIndex = 0xFF)
+{
+    PartitionMountResult result = { mountIndex, error };
+    return result;
+}
+
+PartitionMountResult mount_partition_detailed(const char* path,
+                                              uint8_t blockDevIndex,
+                                              uint16_t partitionNumber,
+                                              uint64_t expectedRegistrationId,
+                                              const storage::PartitionEntry* expectedPartition)
+{
+    if (!s_initialized) init();
+    if (!path || partitionNumber == 0)
+        return partition_mount_result(PARTITION_MOUNT_INVALID_ARGUMENT);
+    if (!partition_path_is_normalized(path))
+        return partition_mount_result(PARTITION_MOUNT_BAD_PATH);
+
+    for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
+        if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0)
+            return partition_mount_result(PARTITION_MOUNT_PATH_OCCUPIED);
+    }
+    uint8_t mountSlot = 0xFF;
+    for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
+        if (!s_mounts[i].active) { mountSlot = i; break; }
+    }
+    if (mountSlot == 0xFF)
+        return partition_mount_result(PARTITION_MOUNT_VFS_REGISTRY_FULL);
+
+    block::BlockEndpoint parentEndpoint = {};
+    if (!block::make_device_endpoint(blockDevIndex, parentEndpoint))
+        return partition_mount_result(PARTITION_MOUNT_DEVICE_UNAVAILABLE);
+    if (expectedRegistrationId != 0 &&
+        parentEndpoint.registrationId != expectedRegistrationId)
+        return partition_mount_result(PARTITION_MOUNT_DEVICE_UNAVAILABLE);
+    storage::PartitionTableModel& table = s_partitionTableScratch;
+    if (!storage::parse_partition_table(blockDevIndex, table) ||
+        (table.state != storage::DISK_STATE_VALID_MBR &&
+         table.state != storage::DISK_STATE_VALID_GPT) ||
+        table.hybridMbr || table.extendedPartitionsPresent ||
+        (table.scheme != storage::PARTITION_SCHEME_MBR &&
+         table.scheme != storage::PARTITION_SCHEME_GPT))
+        return partition_mount_result(PARTITION_MOUNT_TABLE_INVALID);
+
+    storage::PartitionEntry partition = {};
+    bool found = false;
+    for (uint16_t i = 0; i < table.partitionCount; ++i) {
+        if (table.partitions[i].partitionNumber == partitionNumber) {
+            partition = table.partitions[i];
+            found = true;
+            break;
+        }
+    }
+    if (!found) return partition_mount_result(expectedPartition
+        ? PARTITION_MOUNT_PARTITION_CHANGED
+        : PARTITION_MOUNT_PARTITION_MISSING);
+    if (expectedPartition && !same_partition_entry(partition, *expectedPartition))
+        return partition_mount_result(PARTITION_MOUNT_PARTITION_CHANGED);
+    if (!block::registration_is_present(blockDevIndex,
+            parentEndpoint.registrationId))
+        return partition_mount_result(PARTITION_MOUNT_DEVICE_UNAVAILABLE);
+
+    block::PartitionViewHandle viewHandle = {};
+    block::BlockEndpoint partitionEndpoint = {};
+    block::PartitionIdentity identity = {};
+    if (!block::create_partition_view(blockDevIndex, table.scheme, partition,
+            viewHandle, partitionEndpoint, &identity)) {
+        return partition_mount_result(block::registration_is_present(
+                blockDevIndex, parentEndpoint.registrationId)
+            ? PARTITION_MOUNT_VIEW_REGISTRY_FULL
+            : PARTITION_MOUNT_DEVICE_UNAVAILABLE);
+    }
+    if (identity.parentRegistrationId != parentEndpoint.registrationId ||
+        (expectedRegistrationId != 0 &&
+         identity.parentRegistrationId != expectedRegistrationId)) {
+        block::release_partition_view(viewHandle);
+        return partition_mount_result(PARTITION_MOUNT_DEVICE_UNAVAILABLE);
+    }
+    for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
+        const MountPoint& existing = s_mounts[i];
+        if (existing.active && existing.partitionMount &&
+            block::same_partition_identity(existing.partitionIdentity, identity)) {
+            block::release_partition_view(viewHandle);
+            return partition_mount_result(PARTITION_MOUNT_ALREADY_MOUNTED);
+        }
+    }
+
+    storage::PartitionEntry current = {};
+    if (!block::registration_is_present(blockDevIndex,
+            identity.parentRegistrationId) ||
+        !find_current_partition(blockDevIndex, partitionNumber, table, current) ||
+        !partition_entry_matches_identity(current, identity) ||
+        (expectedPartition && !same_partition_entry(current, *expectedPartition))) {
+        block::release_partition_view(viewHandle);
+        return partition_mount_result(PARTITION_MOUNT_PARTITION_CHANGED);
+    }
+
+    const uint8_t fsVolume = fs_fat::mount_endpoint(partitionEndpoint);
+    if (fsVolume == 0xFF) {
+        block::release_partition_view(viewHandle);
+        return partition_mount_result(PARTITION_MOUNT_FILESYSTEM_UNRECOGNIZED);
+    }
+    const fs_fat::FATVolume* fatVolume = fs_fat::get_volume(fsVolume);
+    if (!fatVolume || fatVolume->type != fs_fat::FAT_TYPE_FAT32) {
+        fs_fat::unmount(fsVolume);
+        block::release_partition_view(viewHandle);
+        return partition_mount_result(PARTITION_MOUNT_FILESYSTEM_UNSUPPORTED);
+    }
+
+    current = storage::PartitionEntry{};
+    if (!block::registration_is_present(blockDevIndex,
+            identity.parentRegistrationId) ||
+        !find_current_partition(blockDevIndex, partitionNumber, table, current) ||
+        !partition_entry_matches_identity(current, identity) ||
+        (expectedPartition && !same_partition_entry(current, *expectedPartition))) {
+        fs_fat::unmount(fsVolume);
+        block::release_partition_view(viewHandle);
+        return partition_mount_result(PARTITION_MOUNT_PARTITION_CHANGED);
+    }
+    for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
+        if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0) {
+            fs_fat::unmount(fsVolume);
+            block::release_partition_view(viewHandle);
+            return partition_mount_result(PARTITION_MOUNT_PATH_OCCUPIED);
+        }
+    }
+
+    MountPoint& mount = s_mounts[mountSlot];
+    memzero(&mount, sizeof(mount));
+    mount.active = true;
+    strcopy(mount.path, path, sizeof(mount.path));
+    mount.fsType = FS_TYPE_FAT32;
+    mount.blockDevIndex = blockDevIndex;
+    mount.parentRegistrationId = identity.parentRegistrationId;
+    mount.fsVolumeIndex = fsVolume;
+    mount.readOnly = partitionEndpoint.readOnly ||
+        !block::endpoint_supports_durable_writes(partitionEndpoint);
+    mount.alias = false;
+    mount.partitionMount = true;
+    mount.partitionIdentity = identity;
+    mount.partitionView = viewHandle;
+    ++s_mountCount;
+    return partition_mount_result(PARTITION_MOUNT_OK, mountSlot);
 }
 
 uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
@@ -403,8 +624,9 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
     if (!path || strlen(path) == 0) {
         return 0xFF;
     }
-    const block::BlockDevice* geometry = block::get_device(blockDevIndex);
-    if (!geometry || geometry->sectorSize != 512) return 0xFF;
+    block::BlockDevice geometry = {};
+    if (!block::copy_device(blockDevIndex, geometry) ||
+        geometry.sectorSize != 512) return 0xFF;
     
     // Check if path is already mounted
     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
@@ -461,18 +683,57 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
 #endif
         return 0xFF;
     }
-    
+    if (!block::registration_is_present(blockDevIndex, geometry.registrationId)) {
+        if (fsType == FS_TYPE_FAT32 || fsType == FS_TYPE_EXFAT)
+            fs_fat::unmount(fsVolume);
+        else if (fsType == FS_TYPE_EXT2 || fsType == FS_TYPE_EXT4)
+            fs_ext4::unmount(fsVolume);
+        return 0xFF;
+    }
+
+    const fs_fat::FATVolume* fatVolume = nullptr;
+    block::PartitionViewHandle mountView = {};
+    block::PartitionIdentity mountIdentity = {};
+    bool partitionMount = false;
+    bool partitionReadOnly = false;
+    if (fsType == FS_TYPE_FAT32 || fsType == FS_TYPE_EXFAT) {
+        fatVolume = fs_fat::get_volume(fsVolume);
+        if (fatVolume && fatVolume->endpoint.kind ==
+                block::ENDPOINT_PARTITION_VIEW &&
+            fatVolume->partitionIdentity.valid) {
+            mountView.slot = fatVolume->endpoint.viewSlot;
+            mountView.generation = fatVolume->endpoint.viewGeneration;
+            mountIdentity = fatVolume->partitionIdentity;
+            if (mountIdentity.parentDeviceIndex != blockDevIndex ||
+                mountIdentity.parentRegistrationId != geometry.registrationId ||
+                !block::retain_partition_view(mountView)) {
+                fs_fat::unmount(fsVolume);
+                return 0xFF;
+            }
+            partitionMount = true;
+            partitionReadOnly = fatVolume->endpoint.readOnly ||
+                !block::endpoint_supports_durable_writes(fatVolume->endpoint);
+        }
+    }
+
     // Initialize mount point
     MountPoint& mp = s_mounts[index];
+    memzero(&mp, sizeof(mp));
     mp.active = true;
     strcopy(mp.path, path, sizeof(mp.path));
     mp.fsType = fsType;
     mp.blockDevIndex = blockDevIndex;
+    mp.parentRegistrationId = partitionMount
+        ? mountIdentity.parentRegistrationId : geometry.registrationId;
     mp.fsVolumeIndex = fsVolume;
-    const block::BlockDevice* blockDevice = block::get_device(blockDevIndex);
-    mp.readOnly = !blockDevice || !blockDevice->writeFn;
+    mp.readOnly = partitionMount ? partitionReadOnly : !geometry.writeFn;
     mp.alias = false;
     mp.sourcePrefix[0] = '\0';
+    mp.partitionMount = partitionMount;
+    if (partitionMount) {
+        mp.partitionIdentity = mountIdentity;
+        mp.partitionView = mountView;
+    }
     
     ++s_mountCount;
     
@@ -485,6 +746,107 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
 #endif
     
     return index;
+}
+
+static void append_decimal(uint64_t value, char* output, size_t capacity)
+{
+    if (!capacity) return;
+    char reverse[24];
+    size_t digits = 0;
+    do {
+        reverse[digits++] = static_cast<char>('0' + (value % 10));
+        value /= 10;
+    } while (value && digits < sizeof(reverse));
+    size_t at = 0;
+    while (digits && at + 1 < capacity) output[at++] = reverse[--digits];
+    output[at] = '\0';
+}
+
+static bool mount_path_in_use(const char* path)
+{
+    for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i)
+        if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0)
+            return true;
+    return false;
+}
+
+bool propose_partition_mount_path(uint8_t blockDevIndex,
+                                  uint16_t partitionNumber,
+                                  char* outPath, size_t outPathSize)
+{
+    if (!outPath || outPathSize == 0 || partitionNumber == 0) return false;
+    char base[VFS_MAX_PATH];
+    char diskNumber[24], partNumber[24];
+    append_decimal(blockDevIndex, diskNumber, sizeof(diskNumber));
+    append_decimal(partitionNumber, partNumber, sizeof(partNumber));
+    strcopy(base, "/mnt/disk", sizeof(base));
+    const size_t baseLength = strlen(base);
+    strcopy(base + baseLength, diskNumber, sizeof(base) - baseLength);
+    size_t at = strlen(base);
+    strcopy(base + at, "-part", sizeof(base) - at);
+    at = strlen(base);
+    strcopy(base + at, partNumber, sizeof(base) - at);
+
+    for (uint8_t suffix = 1; suffix <= VFS_MAX_MOUNTS + 1; ++suffix) {
+        char candidate[VFS_MAX_PATH];
+        strcopy(candidate, base, sizeof(candidate));
+        if (suffix > 1) {
+            char suffixText[8];
+            append_decimal(suffix, suffixText, sizeof(suffixText));
+            at = strlen(candidate);
+            strcopy(candidate + at, "-", sizeof(candidate) - at);
+            at = strlen(candidate);
+            strcopy(candidate + at, suffixText, sizeof(candidate) - at);
+        }
+        if (strlen(candidate) + 1 > outPathSize) return false;
+        if (!partition_path_is_normalized(candidate)) return false;
+        if (!mount_path_in_use(candidate)) {
+            strcopy(outPath, candidate, outPathSize);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool mount_identity_valid(uint8_t mountIndex)
+{
+    const MountPoint* mount = get_mount_by_index(mountIndex);
+    if (!mount || mount->parentRegistrationId == 0 ||
+        !block::registration_is_present(mount->blockDevIndex,
+                                        mount->parentRegistrationId))
+        return false;
+    if (!mount->partitionMount) return true;
+    if (!mount->partitionIdentity.valid ||
+        !block::partition_view_parent_valid(mount->partitionView)) return false;
+    storage::PartitionEntry current = {};
+    if (!find_current_partition(mount->blockDevIndex,
+            mount->partitionIdentity.partitionNumber,
+            s_partitionTableScratch, current)) return false;
+    return block::registration_is_present(mount->blockDevIndex,
+               mount->parentRegistrationId) &&
+        partition_entry_matches_identity(current, mount->partitionIdentity);
+}
+
+const char* partition_mount_error_name(PartitionMountError error)
+{
+    switch (error) {
+        case PARTITION_MOUNT_OK: return "Mounted";
+        case PARTITION_MOUNT_INVALID_ARGUMENT: return "Invalid mount request";
+        case PARTITION_MOUNT_BAD_PATH: return "Invalid or non-normalized mount path";
+        case PARTITION_MOUNT_PATH_OCCUPIED: return "Mount path is already in use";
+        case PARTITION_MOUNT_DEVICE_UNAVAILABLE: return "Parent disk is unavailable";
+        case PARTITION_MOUNT_TABLE_INVALID: return "Partition table is invalid or unsupported";
+        case PARTITION_MOUNT_PARTITION_MISSING: return "Partition was not found";
+        case PARTITION_MOUNT_PARTITION_CHANGED: return "Partition identity changed";
+        case PARTITION_MOUNT_ALREADY_MOUNTED: return "Partition is already mounted";
+        case PARTITION_MOUNT_VIEW_REGISTRY_FULL: return "Partition view registry is full";
+        case PARTITION_MOUNT_VFS_REGISTRY_FULL: return "VFS mount table is full";
+        case PARTITION_MOUNT_FILESYSTEM_UNRECOGNIZED:
+            return "Filesystem is not recognized or is invalid";
+        case PARTITION_MOUNT_FILESYSTEM_UNSUPPORTED:
+            return "Filesystem is not supported for partition mounting";
+        default: return "Unknown mount error";
+    }
 }
 
 uint8_t mount_alias(const char* path, const char* sourcePath)
@@ -541,15 +903,23 @@ uint8_t mount_alias(const char* path, const char* sourcePath)
 #endif
         return 0xFF;
     }
+    if (sourceMount->partitionMount &&
+        !block::retain_partition_view(sourceMount->partitionView))
+        return 0xFF;
 
     MountPoint& mp = s_mounts[index];
+    memzero(&mp, sizeof(mp));
     mp.active = true;
     strcopy(mp.path, path, sizeof(mp.path));
     mp.fsType = sourceMount->fsType;
     mp.blockDevIndex = sourceMount->blockDevIndex;
+    mp.parentRegistrationId = sourceMount->parentRegistrationId;
     mp.fsVolumeIndex = sourceMount->fsVolumeIndex;
     mp.readOnly = sourceMount->readOnly;
     mp.alias = true;
+    mp.partitionMount = sourceMount->partitionMount;
+    mp.partitionIdentity = sourceMount->partitionIdentity;
+    mp.partitionView = sourceMount->partitionView;
     strcopy(mp.sourcePrefix, sourceRelative, sizeof(mp.sourcePrefix));
 
     ++s_mountCount;
@@ -568,6 +938,7 @@ uint8_t mount_alias(const char* path, const char* sourcePath)
 Status unmount(const char* path)
 {
     if (!path) return VFS_ERR_INVALID;
+    if (strcmp(path, "/") == 0) return VFS_ERR_BUSY;
     
     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
         if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0) {
@@ -577,24 +948,53 @@ Status unmount(const char* path)
                     return VFS_ERR_BUSY;
                 }
             }
-            
-            // Unmount the filesystem
-            switch (s_mounts[i].fsType) {
-                case FS_TYPE_FAT32:
-                case FS_TYPE_EXFAT:
-                    fs_fat::unmount(s_mounts[i].fsVolumeIndex);
-                    break;
-                    
-                case FS_TYPE_EXT2:
-                case FS_TYPE_EXT4:
-                    fs_ext4::unmount(s_mounts[i].fsVolumeIndex);
-                    break;
-                    
-                default:
-                    break;
+            for (uint8_t j = 0; j < VFS_MAX_OPEN_FILES; ++j) {
+                if (s_dirs[j].active && s_dirs[j].mountIndex == i)
+                    return VFS_ERR_BUSY;
+            }
+            if (!s_mounts[i].alias) {
+                for (uint8_t j = 0; j < VFS_MAX_MOUNTS; ++j) {
+                    if (s_mounts[j].active && s_mounts[j].alias &&
+                        s_mounts[j].blockDevIndex == s_mounts[i].blockDevIndex &&
+                        s_mounts[j].fsVolumeIndex == s_mounts[i].fsVolumeIndex)
+                        return VFS_ERR_BUSY;
+                }
+            }
+
+            const bool mountIdentityValid = mount_identity_valid(i);
+            bool reportIdentityFailure = !mountIdentityValid;
+            if (!s_mounts[i].alias && !s_mounts[i].readOnly &&
+                (s_mounts[i].fsType == FS_TYPE_FAT32 ||
+                 s_mounts[i].fsType == FS_TYPE_EXFAT)) {
+                block::Status blockStatus = block::BLOCK_OK;
+                if (!fs_fat::flush(s_mounts[i].fsVolumeIndex, &blockStatus)) {
+                    if (block::registration_is_present(
+                            s_mounts[i].blockDevIndex,
+                            s_mounts[i].parentRegistrationId))
+                        return blockStatus == block::BLOCK_ERR_TIMEOUT
+                            ? VFS_ERR_IO_TIMEOUT : VFS_ERR_IO;
+                    reportIdentityFailure = true;
+                }
             }
             
-            s_mounts[i].active = false;
+            // Unmount the filesystem
+            if (!s_mounts[i].alias) {
+                switch (s_mounts[i].fsType) {
+                    case FS_TYPE_FAT32:
+                    case FS_TYPE_EXFAT:
+                        fs_fat::unmount(s_mounts[i].fsVolumeIndex);
+                        break;
+                    case FS_TYPE_EXT2:
+                    case FS_TYPE_EXT4:
+                        fs_ext4::unmount(s_mounts[i].fsVolumeIndex);
+                        break;
+                    default:
+                        break;
+                }
+            }
+            if (s_mounts[i].partitionMount)
+                block::release_partition_view(s_mounts[i].partitionView);
+            memzero(&s_mounts[i], sizeof(s_mounts[i]));
             if (s_mountCount > 0) --s_mountCount;
             
 #if defined(__GNUC__) || defined(__clang__)
@@ -603,7 +1003,7 @@ Status unmount(const char* path)
             serial::puts("'\n");
 #endif
             
-            return VFS_OK;
+            return reportIdentityFailure ? VFS_ERR_IO : VFS_OK;
         }
     }
     
@@ -632,6 +1032,47 @@ uint8_t mount_count()
 {
     return s_mountCount;
 }
+
+#if defined(KERNEL_STORAGE_TEST)
+void test_set_mount(uint8_t index, bool active, uint8_t deviceIndex,
+                    const char* path)
+{
+    if (index >= VFS_MAX_MOUNTS) return;
+    if (s_mounts[index].active && s_mountCount) --s_mountCount;
+    memzero(&s_mounts[index], sizeof(s_mounts[index]));
+    s_mounts[index].active = active;
+    s_mounts[index].blockDevIndex = deviceIndex;
+    block::BlockDevice device = {};
+    if (active && block::copy_device(deviceIndex, device))
+        s_mounts[index].parentRegistrationId = device.registrationId;
+    if (path) strcopy(s_mounts[index].path, path,
+                      sizeof(s_mounts[index].path));
+    if (active && s_mountCount < VFS_MAX_MOUNTS) ++s_mountCount;
+    s_initialized = true;
+}
+
+void test_clear_mounts()
+{
+    for (size_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
+        if (!s_mounts[i].active) continue;
+        if (!s_mounts[i].alias) {
+            if (s_mounts[i].fsType == FS_TYPE_FAT32 ||
+                s_mounts[i].fsType == FS_TYPE_EXFAT)
+                fs_fat::unmount(s_mounts[i].fsVolumeIndex);
+            else if (s_mounts[i].fsType == FS_TYPE_EXT2 ||
+                     s_mounts[i].fsType == FS_TYPE_EXT4)
+                fs_ext4::unmount(s_mounts[i].fsVolumeIndex);
+        }
+        if (s_mounts[i].partitionMount)
+            block::release_partition_view(s_mounts[i].partitionView);
+        memzero(&s_mounts[i], sizeof(s_mounts[i]));
+    }
+    memzero(s_files, sizeof(s_files));
+    memzero(s_dirs, sizeof(s_dirs));
+    s_mountCount = 0;
+    s_initialized = true;
+}
+#endif
 
 // ================================================================
 // Public API — Path Operations

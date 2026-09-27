@@ -56,6 +56,7 @@ struct FakeDisk {
     uint32_t reads;
     uint32_t writes;
     uint32_t writeAttempts;
+    std::vector<FakeWriteRecord> readLog;
     std::vector<FakeWriteRecord> writeLog;
     std::vector<size_t> flushWriteCounts;
     uint32_t flushes;
@@ -97,7 +98,9 @@ void check(bool condition, const char* label)
 block::Status fake_read(uint8_t driverId, uint64_t lba, uint32_t count, void* buffer)
 {
     FakeDisk* disk = g_fakeDisks[driverId];
-    if (!disk || !buffer || count == 0 || disk->failReads || lba == disk->failLba ||
+    if (!disk) return block::BLOCK_ERR_IO;
+    disk->readLog.push_back({lba, count});
+    if (!buffer || count == 0 || disk->failReads || lba == disk->failLba ||
         (disk->writeAttempts != 0 && lba == disk->failLbaAfterWrite) ||
         (disk->failReadAtCall != 0 && disk->reads + 1 == disk->failReadAtCall) ||
         lba > disk->sectorCount || count > disk->sectorCount - lba)
@@ -862,41 +865,11 @@ bool verify_gpt_bytes(FakeDisk& disk, const storage::InitializeDiskPlan& plan)
 
 } // namespace
 
-namespace kernel {
-namespace vfs {
-
-namespace {
-MountPoint g_testMounts[VFS_MAX_MOUNTS] = {};
-}
-
-const MountPoint* get_mount_by_index(uint8_t index)
-{
-    return index < VFS_MAX_MOUNTS ? &g_testMounts[index] : nullptr;
-}
-
-void set_test_mount(uint8_t index, bool active, uint8_t deviceIndex, const char* path)
-{
-    if (index >= VFS_MAX_MOUNTS) return;
-    std::memset(&g_testMounts[index], 0, sizeof(g_testMounts[index]));
-    g_testMounts[index].active = active;
-    g_testMounts[index].blockDevIndex = deviceIndex;
-    if (path) std::strncpy(g_testMounts[index].path, path,
-                           sizeof(g_testMounts[index].path) - 1);
-}
-
-void clear_test_mounts()
-{
-    std::memset(g_testMounts, 0, sizeof(g_testMounts));
-}
-
-} // namespace vfs
-} // namespace kernel
-
 int main()
 {
     using namespace kernel;
     block::init();
-    vfs::clear_test_mounts();
+    vfs::test_clear_mounts();
 
     check(storage::crc32("123456789", 9) == 0xCBF43926u, "CRC32 standard test vector");
     check(storage::valid_geometry(10, 512), "512-byte geometry accepted");
@@ -1373,7 +1346,7 @@ int main()
     set_mbr_signature(rootDevice);
     index = register_fake(rootDevice, true, true, true);
     check(storage::capture_target_identity(index, snapshot), "root test target captured");
-    vfs::set_test_mount(0, true, index, "/");
+    vfs::test_set_mount(0, true, index, "/");
     storage::MountProtection mount = storage::query_mount_protection(snapshot);
     check(mount.safety == storage::DEVICE_ROOT_BACKING && !mount.partitionIdentityKnown,
           "root mount protects the whole backing block device");
@@ -1384,11 +1357,11 @@ int main()
     check(!storage::validate_destructive_target(snapshot, request, validation) &&
           (validation.issues & storage::SAFETY_ISSUE_ROOT_BACKING) != 0,
           "destructive validator rejects the root backing device");
-    vfs::clear_test_mounts();
-    vfs::set_test_mount(1, true, index, "/data");
+    vfs::test_clear_mounts();
+    vfs::test_set_mount(1, true, index, "/data");
     check(storage::query_mount_protection(snapshot).safety == storage::DEVICE_MOUNTED,
           "active non-root mount protects the whole backing device");
-    vfs::clear_test_mounts();
+    vfs::test_clear_mounts();
     unregister_fake(index, rootDevice);
 
     FakeDisk flushDevice(512, 128);
@@ -1701,19 +1674,19 @@ int main()
     FakeDisk mountedInit(512, 128);
     index = register_fake(mountedInit, true, true, true);
     storage::capture_target_identity(index, snapshot);
-    vfs::set_test_mount(2, true, index, "/data");
+    vfs::test_set_mount(2, true, index, "/data");
     storage::InitializeTargetValidation initializeValidation;
     check(storage::probe_initialize_target(snapshot, storage::PARTITION_SCHEME_GPT,
                                            initializeValidation) ==
               storage::INITIALIZE_DISK_MOUNTED,
           "initialization refuses a mounted target");
-    vfs::clear_test_mounts();
-    vfs::set_test_mount(3, true, index, "/");
+    vfs::test_clear_mounts();
+    vfs::test_set_mount(3, true, index, "/");
     check(storage::probe_initialize_target(snapshot, storage::PARTITION_SCHEME_GPT,
                                            initializeValidation) ==
               storage::INITIALIZE_DISK_ROOT_BACKING,
           "initialization refuses the root backing device");
-    vfs::clear_test_mounts();
+    vfs::test_clear_mounts();
     unregister_fake(index, mountedInit);
     FakeDisk bootInit(512, 128);
     check(probe_fake_initialize(bootInit, storage::PARTITION_SCHEME_GPT, true,
@@ -2629,11 +2602,11 @@ int main()
             storage::PARTITION_SCHEME_MBR, regions[0], 2ull * 1024 * 1024,
             false, 0xB0);
         storage::CreatePartitionResult createResult = {};
-        vfs::set_test_mount(4, true, index, "/data");
+        vfs::test_set_mount(4, true, index, "/data");
         check(storage::create_partition(request, createResult) ==
                   storage::CREATE_PARTITION_MOUNTED && mounted.writeAttempts == 0,
               "mounted disk protection is preserved for partition-table writes");
-        vfs::clear_test_mounts();
+        vfs::test_clear_mounts();
         unregister_fake(index, mounted);
     }
 
@@ -2648,11 +2621,11 @@ int main()
             storage::PARTITION_SCHEME_MBR, regions[0], 2ull * 1024 * 1024,
             false, 0xB1);
         storage::CreatePartitionResult createResult = {};
-        vfs::set_test_mount(5, true, index, "/");
+        vfs::test_set_mount(5, true, index, "/");
         check(storage::create_partition(request, createResult) ==
                   storage::CREATE_PARTITION_ROOT_BACKING && root.writeAttempts == 0,
               "root backing disk remains protected from partition-table writes");
-        vfs::clear_test_mounts();
+        vfs::test_clear_mounts();
         unregister_fake(index, root);
     }
 
@@ -3392,16 +3365,16 @@ int main()
         storage::Fat32FormatRequest request = make_format_request(index,
             partition, "", 0x01020304u);
         storage::Fat32FormatResult result = {};
-        vfs::set_test_mount(6, true, index, "/");
+        vfs::test_set_mount(6, true, index, "/");
         check(storage::probe_fat32_format_partition(request, result) ==
                   storage::FAT32_FORMAT_ROOT_BACKING && policy.writeLog.empty(),
               "root-backed disk is protected from format");
-        vfs::clear_test_mounts();
-        vfs::set_test_mount(7, true, index, "/data");
+        vfs::test_clear_mounts();
+        vfs::test_set_mount(7, true, index, "/data");
         check(storage::probe_fat32_format_partition(request, result) ==
                   storage::FAT32_FORMAT_MOUNTED && policy.writeLog.empty(),
               "a device mount conservatively protects every partition");
-        vfs::clear_test_mounts();
+        vfs::test_clear_mounts();
         unregister_fake(index, policy);
 
         FakeDisk readOnly(512, 100000);
@@ -3542,6 +3515,693 @@ int main()
               "registry-generation change after selection aborts before formatter writes");
         unregister_fake(unrelatedIndex, unrelatedRegistration);
         unregister_fake(index, registryTarget);
+    }
+
+    {
+        block::init();
+        vfs::test_clear_mounts();
+        FakeDisk viewDisk(512, 16384);
+        const uint8_t index = register_fake(viewDisk, true);
+        storage::PartitionEntry partition = {};
+        partition.partitionNumber = 1;
+        partition.mbrType = 0x0C;
+        partition.startLba = 4096;
+        partition.sectorCount = 100;
+        partition.endLba = partition.startLba + partition.sectorCount - 1;
+        block::PartitionViewHandle handle = {};
+        block::BlockEndpoint endpoint = {};
+        block::PartitionIdentity identity = {};
+        const bool created = block::create_partition_view(index,
+            storage::PARTITION_SCHEME_MBR, partition, handle, endpoint,
+            &identity);
+        alignas(4096) uint8_t sector[4096] = {};
+        const bool firstRead = created &&
+            block::read_endpoint(endpoint, 0, 1, sector) == block::BLOCK_OK &&
+            viewDisk.readLog.back().lba == 4096;
+        const bool offsetRead = created &&
+            block::read_endpoint(endpoint, 10, 1, sector) == block::BLOCK_OK &&
+            viewDisk.readLog.back().lba == 4106;
+        const bool finalRead = created &&
+            block::read_endpoint(endpoint, 99, 1, sector) == block::BLOCK_OK &&
+            viewDisk.readLog.back().lba == 4195;
+        const bool multiRead = created &&
+            block::read_endpoint(endpoint, 10, 4, sector) == block::BLOCK_OK &&
+            viewDisk.readLog.back().lba == 4106 &&
+            viewDisk.readLog.back().count == 4;
+        const size_t readsBeforeReject = viewDisk.readLog.size();
+        const block::Status pastEnd = block::read_endpoint(endpoint, 100, 1,
+                                                            sector);
+        const block::Status crossingEnd = block::read_endpoint(endpoint, 98, 3,
+                                                                 sector);
+        const block::Status hugeCount = block::read_endpoint(endpoint, 1,
+            UINT32_MAX, sector);
+        const block::Status lbaOverflow = block::read_endpoint(endpoint,
+            UINT64_MAX, 1, sector);
+        const block::Status zeroCount = block::read_endpoint(endpoint, 0, 0,
+                                                              sector);
+        block::BlockEndpoint mismatchedEndpoint = endpoint;
+        ++mismatchedEndpoint.totalSectors;
+        const block::Status mismatchedGeometry = block::read_endpoint(
+            mismatchedEndpoint, 0, 1, sector);
+        check(created && identity.valid && endpoint.sectorSize == 512 &&
+              endpoint.totalSectors == 100,
+              "partition view inherits parent geometry and retains exact MBR identity");
+        check(firstRead && offsetRead && finalRead && multiRead,
+              "partition reads translate first, offset, final and multi-sector ranges");
+        check(pastEnd == block::BLOCK_ERR_INVALID &&
+              crossingEnd == block::BLOCK_ERR_INVALID &&
+              hugeCount == block::BLOCK_ERR_INVALID &&
+              lbaOverflow == block::BLOCK_ERR_INVALID &&
+              zeroCount == block::BLOCK_ERR_INVALID &&
+              mismatchedGeometry == block::BLOCK_ERR_INVALID &&
+              viewDisk.readLog.size() == readsBeforeReject,
+              "zero, overflow, one-past-end, huge, crossing and mismatched-endpoint reads fail before parent I/O");
+        std::memset(sector, 0xA5, sizeof(sector));
+        const bool firstWrite = block::write_endpoint(endpoint, 0, 1, sector) ==
+            block::BLOCK_OK && viewDisk.writeLog.back().lba == 4096;
+        const bool finalWrite = block::write_endpoint(endpoint, 99, 1, sector) ==
+            block::BLOCK_OK && viewDisk.writeLog.back().lba == 4195;
+        const bool multiWrite = block::write_endpoint(endpoint, 10, 4, sector) ==
+            block::BLOCK_OK && viewDisk.writeLog.back().lba == 4106 &&
+            viewDisk.writeLog.back().count == 4;
+        const size_t writesBeforeReject = viewDisk.writeLog.size();
+        const block::Status writePastEnd = block::write_endpoint(endpoint, 100,
+            1, sector);
+        const block::Status writeCrossingEnd = block::write_endpoint(endpoint,
+            99, 2, sector);
+        check(firstWrite && finalWrite && multiWrite,
+              "partition writes translate first, final and multi-sector requests");
+        check(writePastEnd == block::BLOCK_ERR_INVALID &&
+              writeCrossingEnd == block::BLOCK_ERR_INVALID &&
+              viewDisk.writeLog.size() == writesBeforeReject,
+              "out-of-range writes fail before parent callbacks");
+
+        viewDisk.failLba = 4195;
+        check(block::read_endpoint(endpoint, 99, 1, sector) == block::BLOCK_ERR_IO,
+              "partition view propagates parent read errors");
+        viewDisk.failLba = UINT64_MAX;
+        viewDisk.failWriteAtCall1 = viewDisk.writeAttempts + 1;
+        check(block::write_endpoint(endpoint, 0, 1, sector) == block::BLOCK_ERR_IO,
+              "partition view propagates parent write errors");
+        viewDisk.failWriteAtCall1 = 0;
+
+        block::PartitionViewHandle duplicateHandle = {};
+        block::BlockEndpoint duplicateEndpoint = {};
+        check(block::create_partition_view(index,
+                  storage::PARTITION_SCHEME_MBR, partition, duplicateHandle,
+                  duplicateEndpoint) && duplicateHandle.slot == handle.slot &&
+              duplicateHandle.generation == handle.generation,
+              "duplicate partition view reuses its bounded slot with a reference");
+        block::release_partition_view(duplicateHandle);
+        const uint8_t oldSlot = handle.slot;
+        const uint64_t oldGeneration = handle.generation;
+        block::release_partition_view(handle);
+
+        storage::PartitionEntry nextPartition = partition;
+        nextPartition.partitionNumber = 2;
+        nextPartition.startLba = 6000;
+        nextPartition.endLba = 6003;
+        nextPartition.sectorCount = 4;
+        block::PartitionViewHandle reusedHandle = {};
+        block::BlockEndpoint reusedEndpoint = {};
+        const bool reused = block::create_partition_view(index,
+            storage::PARTITION_SCHEME_MBR, nextPartition, reusedHandle,
+            reusedEndpoint);
+        const size_t readsBeforeStale = viewDisk.readLog.size();
+        check(reused && reusedHandle.slot == oldSlot &&
+              reusedHandle.generation != oldGeneration &&
+              block::read_endpoint(endpoint, 0, 1, sector) ==
+                  block::BLOCK_ERR_NO_MEDIA &&
+              viewDisk.readLog.size() == readsBeforeStale,
+              "released view handle cannot access a reused slot or redirect to another range");
+        block::release_partition_view(reusedHandle);
+
+        block::PartitionViewHandle capacityHandles[
+            block::MAX_PARTITION_BLOCK_VIEWS] = {};
+        bool capacityCreated = true;
+        for (uint8_t i = 0; i < block::MAX_PARTITION_BLOCK_VIEWS; ++i) {
+            storage::PartitionEntry entry = partition;
+            entry.partitionNumber = static_cast<uint16_t>(i + 1);
+            entry.startLba = 7000 + static_cast<uint64_t>(i) * 2;
+            entry.sectorCount = 1;
+            entry.endLba = entry.startLba;
+            block::BlockEndpoint ignored = {};
+            if (!block::create_partition_view(index,
+                    storage::PARTITION_SCHEME_MBR, entry,
+                    capacityHandles[i], ignored)) capacityCreated = false;
+        }
+        storage::PartitionEntry extra = partition;
+        extra.partitionNumber = 99;
+        extra.startLba = 7500;
+        extra.sectorCount = 1;
+        extra.endLba = extra.startLba;
+        block::PartitionViewHandle extraHandle = {};
+        block::BlockEndpoint extraEndpoint = {};
+        const bool overCapacity = block::create_partition_view(index,
+            storage::PARTITION_SCHEME_MBR, extra, extraHandle, extraEndpoint);
+        for (uint8_t i = 0; i < block::MAX_PARTITION_BLOCK_VIEWS; ++i)
+            block::release_partition_view(capacityHandles[i]);
+        check(capacityCreated && !overCapacity,
+              "partition view registry has a fixed capacity and deterministic release");
+
+        FakeDisk readOnlyDisk(512, 8192);
+        const uint8_t readOnlyIndex = register_fake(readOnlyDisk, false);
+        storage::PartitionEntry readOnlyPartition = partition;
+        readOnlyPartition.startLba = 1024;
+        readOnlyPartition.sectorCount = 10;
+        readOnlyPartition.endLba = 1033;
+        block::PartitionViewHandle readOnlyHandle = {};
+        block::BlockEndpoint readOnlyEndpoint = {};
+        const bool readOnlyView = block::create_partition_view(readOnlyIndex,
+            storage::PARTITION_SCHEME_MBR, readOnlyPartition,
+            readOnlyHandle, readOnlyEndpoint);
+        check(readOnlyView && readOnlyEndpoint.readOnly &&
+              block::read_endpoint(readOnlyEndpoint, 0, 1, sector) ==
+                  block::BLOCK_OK &&
+              block::write_endpoint(readOnlyEndpoint, 0, 1, sector) ==
+                  block::BLOCK_ERR_UNSUPPORTED && readOnlyDisk.writeLog.empty(),
+              "partition view preserves read-only parent capability");
+        block::release_partition_view(readOnlyHandle);
+        unregister_fake(readOnlyIndex, readOnlyDisk);
+
+        FakeDisk fourKnViewDisk(4096, 128);
+        const uint8_t fourKnViewIndex = register_fake(fourKnViewDisk, true);
+        storage::PartitionEntry fourKnPartition = partition;
+        fourKnPartition.startLba = 8;
+        fourKnPartition.sectorCount = 16;
+        fourKnPartition.endLba = 23;
+        block::PartitionViewHandle fourKnHandle = {};
+        block::BlockEndpoint fourKnEndpoint = {};
+        const bool fourKnView = block::create_partition_view(fourKnViewIndex,
+            storage::PARTITION_SCHEME_MBR, fourKnPartition,
+            fourKnHandle, fourKnEndpoint);
+        check(fourKnView && fourKnEndpoint.sectorSize == 4096 &&
+              block::read_endpoint(fourKnEndpoint, 15, 1, sector) ==
+                  block::BLOCK_OK && fourKnViewDisk.readLog.back().lba == 23,
+              "partition view inherits 4Kn geometry without widening FAT32 policy");
+        block::release_partition_view(fourKnHandle);
+        unregister_fake(fourKnViewIndex, fourKnViewDisk);
+        unregister_fake(index, viewDisk);
+    }
+
+    {
+        block::init();
+        vfs::test_clear_mounts();
+        fs_fat::init();
+        FakeDisk gptVfs(512, 200000);
+        build_empty_gpt(gptVfs);
+        const uint8_t index = register_fake(gptVfs, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        bool haveRegions = current_regions(index, gptVfs, regions, regionCount);
+        storage::CreatePartitionResult createA = {};
+        storage::CreatePartitionResult createB = {};
+        const uint64_t requestedBytes = 76000ull * 512ull;
+        storage::CreatePartitionRequest createRequest = make_create_request(
+            index, storage::PARTITION_SCHEME_GPT, regions[0],
+            requestedBytes, false, 0x31);
+        const storage::CreatePartitionStatus createAStatus = haveRegions
+            ? storage::create_partition(createRequest, createA)
+            : storage::CREATE_PARTITION_INVALID_REQUEST;
+        haveRegions = current_regions(index, gptVfs, regions, regionCount);
+        int secondRegion = -1;
+        for (uint16_t i = 0; i < regionCount; ++i) {
+            if (regions[i].sectorCount >= 76000) {
+                secondRegion = i;
+                break;
+            }
+        }
+        createRequest = make_create_request(index,
+            storage::PARTITION_SCHEME_GPT,
+            secondRegion >= 0 ? regions[secondRegion] : regions[0],
+            requestedBytes, false, 0x71);
+        const storage::CreatePartitionStatus createBStatus =
+            secondRegion >= 0
+                ? storage::create_partition(createRequest, createB)
+                : storage::CREATE_PARTITION_INVALID_REQUEST;
+        storage::PartitionEntry partA = createA.createdPartition;
+        storage::PartitionEntry partB = createB.createdPartition;
+        storage::Fat32FormatRequest formatA = make_format_request(
+            index, partA, "ALPHA", 0xA1B2C301u);
+        storage::Fat32FormatRequest formatB = make_format_request(
+            index, partB, "BETA", 0xA1B2C302u);
+        storage::Fat32FormatResult formatResultA = {};
+        storage::Fat32FormatResult formatResultB = {};
+        const storage::Fat32FormatStatus formatStatusA =
+            storage::format_fat32_partition(formatA, formatResultA);
+        const storage::Fat32FormatStatus formatStatusB =
+            storage::format_fat32_partition(formatB, formatResultB);
+        check(createAStatus == storage::CREATE_PARTITION_SUCCESS &&
+              createBStatus == storage::CREATE_PARTITION_SUCCESS &&
+              partA.partitionNumber == 1 && partB.partitionNumber == 2,
+              "fake GPT disk receives two independently identified FAT32 candidates");
+        check(formatStatusA == storage::FAT32_FORMAT_SUCCESS &&
+              formatStatusB == storage::FAT32_FORMAT_SUCCESS &&
+              vfs::mount_count() == 0 &&
+              independent_verify_fat32(gptVfs, partA, "ALPHA", 0xA1B2C301u) &&
+              independent_verify_fat32(gptVfs, partB, "BETA", 0xA1B2C302u),
+              "DM7 formatter creates two FAT32 filesystems and leaves them unmounted");
+
+        const uint64_t parentRegistration = createA.targetIdentity.registrationId;
+        char proposed[128] = {};
+        const bool pathProposed = vfs::propose_partition_mount_path(
+            index, partA.partitionNumber, proposed, sizeof(proposed));
+        const std::string expectedPath = "/mnt/disk" +
+            std::to_string(index) + "-part" +
+            std::to_string(partA.partitionNumber);
+        char collisionFallback[128] = {}, collisionFallbackAgain[128] = {};
+        const uint8_t temporaryMountSlot = vfs::VFS_MAX_MOUNTS - 1;
+        vfs::test_set_mount(temporaryMountSlot, true, index, proposed);
+        const bool fallbackProposed = vfs::propose_partition_mount_path(
+            index, partA.partitionNumber, collisionFallback,
+            sizeof(collisionFallback));
+        const bool fallbackRepeated = vfs::propose_partition_mount_path(
+            index, partA.partitionNumber, collisionFallbackAgain,
+            sizeof(collisionFallbackAgain));
+        vfs::test_set_mount(temporaryMountSlot, false, index, nullptr);
+        const bool pathPolicy = pathProposed && proposed == expectedPath &&
+            fallbackProposed && fallbackRepeated &&
+            std::string(collisionFallback) == expectedPath + "-2" &&
+            std::strcmp(collisionFallback, collisionFallbackAgain) == 0;
+        const vfs::PartitionMountResult mountAResult = vfs::mount_partition_detailed(
+            "/mnt/a", index, partA.partitionNumber, parentRegistration, &partA);
+        const vfs::PartitionMountResult duplicateResult =
+            vfs::mount_partition_detailed("/mnt/a-copy", index,
+                partA.partitionNumber, parentRegistration, &partA);
+        const vfs::PartitionMountResult pathCollision =
+            vfs::mount_partition_detailed("/mnt/a", index,
+                partB.partitionNumber, parentRegistration, &partB);
+        const vfs::PartitionMountResult mountBResult = vfs::mount_partition_detailed(
+            "/mnt/b", index, partB.partitionNumber, parentRegistration, &partB);
+        const uint8_t mountAIndex = vfs::mount_index_for_path("/mnt/a");
+        const vfs::MountPoint* mountA = vfs::get_mount_by_index(mountAIndex);
+        storage::TargetIdentity mountedTarget = {};
+        storage::capture_target_identity(index, mountedTarget);
+        const storage::MountProtection mountProtection =
+            storage::query_mount_protection(mountedTarget);
+        check(pathPolicy && proposed[0] == '/' && mountAResult.error ==
+                  vfs::PARTITION_MOUNT_OK && duplicateResult.error ==
+                  vfs::PARTITION_MOUNT_ALREADY_MOUNTED && pathCollision.error ==
+                  vfs::PARTITION_MOUNT_PATH_OCCUPIED && mountBResult.error ==
+                  vfs::PARTITION_MOUNT_OK && mountA && mountA->partitionMount &&
+              mountA->fsType == vfs::FS_TYPE_FAT32 &&
+              mountA->partitionIdentity.scheme == storage::PARTITION_SCHEME_GPT &&
+              mountA->partitionIdentity.parentRegistrationId == parentRegistration &&
+              mountA->partitionIdentity.partitionNumber == partA.partitionNumber &&
+              mountA->partitionIdentity.startLba == partA.startLba &&
+              mountA->partitionIdentity.endLba == partA.endLba &&
+              std::memcmp(mountA->partitionIdentity.uniqueGuid,
+                          partA.uniqueGuid, 16) == 0 &&
+              vfs::mount_identity_valid(mountAIndex) &&
+              mountProtection.safety == storage::DEVICE_MOUNTED &&
+              mountProtection.partitionIdentityKnown,
+              "VFS mounts exact GPT identity, rejects duplicates and occupied paths, and reports partition protection");
+
+        storage::Fat32FormatRequest blockedFormat = make_format_request(
+            index, partA, "NOPE", 0x01020304u);
+        storage::Fat32FormatResult blockedFormatResult = {};
+        const storage::Fat32FormatStatus blockedFormatStatus =
+            storage::probe_fat32_format_partition(blockedFormat,
+                                                   blockedFormatResult);
+        storage::UnallocatedRegion mountedRegions[
+            storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t mountedRegionCount = 0;
+        const bool foundMountedRegions = current_regions(index, gptVfs,
+            mountedRegions, mountedRegionCount);
+        storage::CreatePartitionRequest blockedCreate = make_create_request(
+            index, storage::PARTITION_SCHEME_GPT,
+            foundMountedRegions ? mountedRegions[0] : regions[0],
+            2ull * 1024ull * 1024ull, false, 0x44);
+        const uint32_t writesBeforeBlockedCreate = gptVfs.writeAttempts;
+        storage::CreatePartitionResult blockedCreateResult = {};
+        const storage::CreatePartitionStatus blockedCreateStatus =
+            storage::create_partition(blockedCreate, blockedCreateResult);
+        check(blockedFormatStatus == storage::FAT32_FORMAT_MOUNTED &&
+              blockedCreateStatus == storage::CREATE_PARTITION_MOUNTED &&
+              !blockedCreateResult.writeAttempted &&
+              gptVfs.writeAttempts == writesBeforeBlockedCreate,
+              "mounted partition makes formatting and partition-table changes fail before writes");
+
+        std::vector<uint8_t> payloadA(1537), payloadB(73);
+        for (size_t i = 0; i < payloadA.size(); ++i)
+            payloadA[i] = static_cast<uint8_t>((i * 29u + 7u) & 0xFFu);
+        for (size_t i = 0; i < payloadB.size(); ++i)
+            payloadB[i] = static_cast<uint8_t>((i * 11u + 0x51u) & 0xFFu);
+        const std::string rootA = "/mnt/a";
+        const std::string rootB = "/mnt/b";
+        const std::string dirA = rootA + "/test";
+        const std::string fileA = dirA + "/hello.txt";
+        const std::string fileB = rootB + "/second.txt";
+        const size_t partBOffset = static_cast<size_t>(partB.startLba) * 512;
+        const size_t partBEndOffset = partBOffset +
+            static_cast<size_t>(partB.sectorCount) * 512;
+        const std::vector<uint8_t> partBBefore(
+            gptVfs.bytes.begin() + partBOffset,
+            gptVfs.bytes.begin() + partBEndOffset);
+        const uint64_t backupArrayFirst = gptVfs.sectorCount - 33;
+        const std::vector<uint8_t> gptFrontBefore(gptVfs.bytes.begin(),
+            gptVfs.bytes.begin() + 34 * 512);
+        const std::vector<uint8_t> gptBackBefore(
+            gptVfs.bytes.begin() + static_cast<size_t>(backupArrayFirst) * 512,
+            gptVfs.bytes.end());
+        const std::vector<uint8_t> guardBeforeA(
+            gptVfs.bytes.begin() + static_cast<size_t>(partA.startLba - 1) * 512,
+            gptVfs.bytes.begin() + static_cast<size_t>(partA.startLba) * 512);
+        const std::vector<uint8_t> guardAfterA(
+            gptVfs.bytes.begin() + static_cast<size_t>(partA.endLba + 1) * 512,
+            gptVfs.bytes.begin() + static_cast<size_t>(partA.endLba + 2) * 512);
+        gptVfs.writeLog.clear();
+        const uint32_t flushesBeforeFiles = gptVfs.flushes;
+        const uint8_t rootIterator = vfs::opendir(rootA.c_str());
+        bool rootEnumerated = rootIterator != 0xFF;
+        if (rootIterator != 0xFF) {
+            vfs::DirEntry entry = {};
+            while (vfs::readdir(rootIterator, &entry)) { }
+            vfs::closedir(rootIterator);
+        }
+        const vfs::Status mkdirStatus = vfs::mkdir(dirA.c_str());
+        const int32_t createABytes = vfs::create_file(fileA.c_str(),
+            payloadA.data(), static_cast<uint32_t>(payloadA.size()));
+        const bool writesAStayBounded = !gptVfs.writeLog.empty() &&
+            std::all_of(gptVfs.writeLog.begin(), gptVfs.writeLog.end(),
+                [&](const FakeWriteRecord& write) {
+                    return write.count != 0 && write.lba >= partA.startLba &&
+                        write.lba <= partA.endLba &&
+                        write.count <= partA.endLba - write.lba + 1;
+                });
+        bool partitionBPreservedByA = std::equal(partBBefore.begin(),
+            partBBefore.end(), gptVfs.bytes.begin() + partBOffset);
+        check(rootEnumerated && mkdirStatus == vfs::VFS_OK &&
+              createABytes == static_cast<int32_t>(payloadA.size()) &&
+              writesAStayBounded && partitionBPreservedByA,
+              "normal VFS root enumeration, mkdir and cross-cluster create/write stay inside GPT partition A");
+
+        gptVfs.writeLog.clear();
+        const int32_t createBBytes = vfs::create_file(fileB.c_str(),
+            payloadB.data(), static_cast<uint32_t>(payloadB.size()));
+        const bool writesBStayBounded = !gptVfs.writeLog.empty() &&
+            std::all_of(gptVfs.writeLog.begin(), gptVfs.writeLog.end(),
+                [&](const FakeWriteRecord& write) {
+                    return write.count != 0 && write.lba >= partB.startLba &&
+                        write.lba <= partB.endLba &&
+                        write.count <= partB.endLba - write.lba + 1;
+                });
+        check(createBBytes == static_cast<int32_t>(payloadB.size()) &&
+              writesBStayBounded,
+              "second simultaneous VFS mount writes only into GPT partition B");
+
+        uint8_t readHandle = vfs::open(fileA.c_str(), vfs::OPEN_READ);
+        std::vector<uint8_t> readbackA(payloadA.size());
+        const int32_t bytesReadA = readHandle == 0xFF ? vfs::VFS_ERR_IO
+            : vfs::read(readHandle, readbackA.data(),
+                        static_cast<uint32_t>(readbackA.size()));
+        const bool contentAExact = bytesReadA == static_cast<int32_t>(payloadA.size()) &&
+            readbackA == payloadA;
+        const vfs::Status closeReadA = readHandle == 0xFF
+            ? vfs::VFS_ERR_INVALID : vfs::close(readHandle);
+        const uint8_t dirIterator = vfs::opendir(dirA.c_str());
+        bool directoryListedFile = false;
+        if (dirIterator != 0xFF) {
+            vfs::DirEntry entry = {};
+            while (vfs::readdir(dirIterator, &entry))
+                if (std::strcmp(entry.name, "hello.txt") == 0 ||
+                    std::strcmp(entry.name, "HELLO.TXT") == 0)
+                    directoryListedFile = true;
+            vfs::closedir(dirIterator);
+        }
+        const uint8_t busyHandle = vfs::open(fileA.c_str(), vfs::OPEN_READ);
+        const vfs::Status busyUnmount = vfs::unmount(rootA.c_str());
+        const vfs::Status closeBusyFile = busyHandle == 0xFF
+            ? vfs::VFS_ERR_INVALID : vfs::close(busyHandle);
+        const uint8_t busyDirectory = vfs::opendir(rootA.c_str());
+        const vfs::Status busyDirectoryUnmount = vfs::unmount(rootA.c_str());
+        if (busyDirectory != 0xFF) vfs::closedir(busyDirectory);
+        check(contentAExact && closeReadA == vfs::VFS_OK && directoryListedFile &&
+              busyUnmount == vfs::VFS_ERR_BUSY &&
+              closeBusyFile == vfs::VFS_OK &&
+              busyDirectoryUnmount == vfs::VFS_ERR_BUSY,
+              "VFS reopens and verifies exact file bytes and refuses unmount with files or directories open");
+
+        const bool gptMetadataUnchanged =
+            std::equal(gptFrontBefore.begin(), gptFrontBefore.end(),
+                       gptVfs.bytes.begin()) &&
+            std::equal(gptBackBefore.begin(), gptBackBefore.end(),
+                gptVfs.bytes.begin() + static_cast<size_t>(backupArrayFirst) * 512);
+        const size_t guardBeforeAOffset =
+            static_cast<size_t>(partA.startLba - 1) * 512;
+        const size_t guardAfterAOffset =
+            static_cast<size_t>(partA.endLba + 1) * 512;
+        const bool guardsUnchanged =
+            std::equal(guardBeforeA.begin(), guardBeforeA.end(),
+                       gptVfs.bytes.begin() + guardBeforeAOffset) &&
+            std::equal(guardAfterA.begin(), guardAfterA.end(),
+                       gptVfs.bytes.begin() + guardAfterAOffset);
+        const bool fatCopiesEqual = [&]() {
+            const uint8_t* boot = gptVfs.bytes.data() +
+                static_cast<size_t>(partA.startLba) * 512;
+            const uint32_t reserved = read_u16(boot + 14);
+            const uint32_t fatSectors = read_u32(boot + 36);
+            const size_t fatBytes = static_cast<size_t>(fatSectors) * 512;
+            const size_t firstFat = static_cast<size_t>(partA.startLba + reserved) * 512;
+            const size_t secondFat = firstFat + fatBytes;
+            return secondFat + fatBytes <= gptVfs.bytes.size() &&
+                std::equal(gptVfs.bytes.begin() + firstFat,
+                    gptVfs.bytes.begin() + firstFat + fatBytes,
+                    gptVfs.bytes.begin() + secondFat);
+        }();
+        check(gptMetadataUnchanged,
+              "VFS writes preserve primary and backup GPT metadata");
+        check(guardsUnchanged,
+              "VFS writes preserve both sectors adjacent to the mounted partition");
+        check(fatCopiesEqual,
+              "VFS writes keep the mirrored FAT copies equal");
+        check(gptVfs.flushes > flushesBeforeFiles &&
+              !gptVfs.flushWriteCounts.empty() &&
+              gptVfs.flushWriteCounts.back() == gptVfs.writeLog.size(),
+              "VFS FAT writes issue parent flushes after completed sector writes");
+
+        const vfs::Status unmountAStatus = vfs::unmount(rootA.c_str());
+        uint8_t readHandleB = vfs::open(fileB.c_str(), vfs::OPEN_READ);
+        std::vector<uint8_t> readbackB(payloadB.size());
+        const int32_t bytesReadB = readHandleB == 0xFF ? vfs::VFS_ERR_IO
+            : vfs::read(readHandleB, readbackB.data(),
+                        static_cast<uint32_t>(readbackB.size()));
+        const bool contentBExact = bytesReadB == static_cast<int32_t>(payloadB.size()) &&
+            readbackB == payloadB;
+        if (readHandleB != 0xFF) vfs::close(readHandleB);
+        const vfs::Status unmountBStatus = vfs::unmount(rootB.c_str());
+        check(unmountAStatus == vfs::VFS_OK && contentBExact &&
+              unmountBStatus == vfs::VFS_OK && vfs::mount_count() == 0,
+              "one partition can unmount while the other remains usable");
+
+        fs_fat::init();
+        const vfs::PartitionMountResult remountA = vfs::mount_partition_detailed(
+            "/mnt/a", index, partA.partitionNumber, parentRegistration, &partA);
+        readHandle = vfs::open(fileA.c_str(), vfs::OPEN_READ);
+        readbackA.assign(payloadA.size(), 0);
+        const int32_t remountBytes = readHandle == 0xFF ? vfs::VFS_ERR_IO
+            : vfs::read(readHandle, readbackA.data(),
+                        static_cast<uint32_t>(readbackA.size()));
+        const bool remountExact = remountA.error == vfs::PARTITION_MOUNT_OK &&
+            remountBytes == static_cast<int32_t>(payloadA.size()) &&
+            readbackA == payloadA;
+        if (readHandle != 0xFF) vfs::close(readHandle);
+        const vfs::Status remountUnmount = vfs::unmount(rootA.c_str());
+        check(remountExact && remountUnmount == vfs::VFS_OK,
+              "fresh VFS/FAT discovery after unmount reads persisted file bytes");
+        unregister_fake(index, gptVfs);
+    }
+
+    {
+        block::init();
+        vfs::test_clear_mounts();
+        fs_fat::init();
+        FakeDisk mbrVfs(512, 100000);
+        set_mbr_signature(mbrVfs);
+        const uint8_t index = register_fake(mbrVfs, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, mbrVfs, regions, regionCount);
+        storage::CreatePartitionRequest createRequest = make_create_request(
+            index, storage::PARTITION_SCHEME_MBR, regions[0],
+            76000ull * 512ull, false, 0x91);
+        storage::CreatePartitionResult createResult = {};
+        const storage::CreatePartitionStatus createStatus =
+            storage::create_partition(createRequest, createResult);
+        const storage::PartitionEntry partition = createResult.createdPartition;
+        const uint64_t parentRegistration = createRequest.targetSnapshot.registrationId;
+        const vfs::PartitionMountResult unformattedMount =
+            vfs::mount_partition_detailed("/mnt/unformatted", index,
+                partition.partitionNumber, parentRegistration, &partition);
+        storage::Fat32FormatRequest formatRequest = make_format_request(
+            index, partition, "MBRDATA", 0x77889900u);
+        storage::Fat32FormatResult formatResult = {};
+        const storage::Fat32FormatStatus formatStatus =
+            storage::format_fat32_partition(formatRequest, formatResult);
+        const size_t bootSignatureOffset =
+            static_cast<size_t>(partition.startLba) * 512 + 510;
+        const uint8_t originalBootSignature0 =
+            mbrVfs.bytes[bootSignatureOffset];
+        const uint8_t originalBootSignature1 =
+            mbrVfs.bytes[bootSignatureOffset + 1];
+        mbrVfs.bytes[bootSignatureOffset] = 0;
+        mbrVfs.bytes[bootSignatureOffset + 1] = 0;
+        const vfs::PartitionMountResult invalidBootMount =
+            vfs::mount_partition_detailed("/mnt/bad-boot", index,
+                partition.partitionNumber, parentRegistration, &partition);
+        mbrVfs.bytes[bootSignatureOffset] = originalBootSignature0;
+        mbrVfs.bytes[bootSignatureOffset + 1] = originalBootSignature1;
+        const vfs::PartitionMountResult mountResult =
+            vfs::mount_partition_detailed("/mnt/mbr", index,
+                partition.partitionNumber, parentRegistration, &partition);
+        const uint8_t mountIndex = vfs::mount_index_for_path("/mnt/mbr");
+        const vfs::MountPoint* mount = vfs::get_mount_by_index(mountIndex);
+        check(createStatus == storage::CREATE_PARTITION_SUCCESS &&
+              unformattedMount.error ==
+                  vfs::PARTITION_MOUNT_FILESYSTEM_UNRECOGNIZED &&
+              formatStatus == storage::FAT32_FORMAT_SUCCESS &&
+              invalidBootMount.error ==
+                  vfs::PARTITION_MOUNT_FILESYSTEM_UNRECOGNIZED &&
+              mountResult.error == vfs::PARTITION_MOUNT_OK && mount &&
+              mount->partitionIdentity.scheme == storage::PARTITION_SCHEME_MBR &&
+              mount->partitionIdentity.mbrType == partition.mbrType &&
+              mount->partitionIdentity.partitionNumber == partition.partitionNumber,
+              "MBR primary FAT32 mounts through the same bounded production VFS path; unformatted media is rejected");
+
+        const std::vector<uint8_t> mbrSectorBefore(
+            mbrVfs.bytes.begin(), mbrVfs.bytes.begin() + 512);
+        const size_t guardBeforeOffset =
+            static_cast<size_t>(partition.startLba - 1) * 512;
+        const size_t guardAfterOffset =
+            static_cast<size_t>(partition.endLba + 1) * 512;
+        const std::vector<uint8_t> guardBefore(
+            mbrVfs.bytes.begin() + guardBeforeOffset,
+            mbrVfs.bytes.begin() + guardBeforeOffset + 512);
+        const std::vector<uint8_t> guardAfter(
+            mbrVfs.bytes.begin() + guardAfterOffset,
+            mbrVfs.bytes.begin() + guardAfterOffset + 512);
+        std::vector<uint8_t> payload(701);
+        for (size_t i = 0; i < payload.size(); ++i)
+            payload[i] = static_cast<uint8_t>((i * 17u + 3u) & 0xFFu);
+        mbrVfs.writeLog.clear();
+        const int32_t created = vfs::create_file("/mnt/mbr/round.bin",
+            payload.data(), static_cast<uint32_t>(payload.size()));
+        uint8_t handle = vfs::open("/mnt/mbr/round.bin", vfs::OPEN_READ);
+        std::vector<uint8_t> readback(payload.size());
+        const int32_t bytesRead = handle == 0xFF ? vfs::VFS_ERR_IO
+            : vfs::read(handle, readback.data(),
+                        static_cast<uint32_t>(readback.size()));
+        if (handle != 0xFF) vfs::close(handle);
+        bool writesBounded = !mbrVfs.writeLog.empty() &&
+            std::all_of(mbrVfs.writeLog.begin(), mbrVfs.writeLog.end(),
+                [&](const FakeWriteRecord& write) {
+                    return write.count != 0 && write.lba >= partition.startLba &&
+                        write.lba <= partition.endLba &&
+                        write.count <= partition.endLba - write.lba + 1;
+                });
+        check(created == static_cast<int32_t>(payload.size()) &&
+              bytesRead == static_cast<int32_t>(payload.size()) &&
+              readback == payload,
+              "MBR FAT32 VFS file round-trip returns exact file bytes");
+        check(writesBounded,
+              "MBR FAT32 VFS file writes remain inside the selected partition");
+        check(std::equal(mbrSectorBefore.begin(), mbrSectorBefore.end(),
+                         mbrVfs.bytes.begin()),
+              "MBR FAT32 VFS file writes preserve LBA 0");
+        check(std::equal(guardBefore.begin(), guardBefore.end(),
+                         mbrVfs.bytes.begin() + guardBeforeOffset),
+              "MBR FAT32 VFS file writes preserve the preceding guard sector");
+        check(std::equal(guardAfter.begin(), guardAfter.end(),
+                         mbrVfs.bytes.begin() + guardAfterOffset),
+              "MBR FAT32 VFS file writes preserve the following guard sector");
+        mbrVfs.failFlushAtCall = mbrVfs.flushes + 1;
+        const vfs::Status failedFlushUnmount = vfs::unmount("/mnt/mbr");
+        const bool mountRetainedAfterFlushFailure =
+            vfs::get_mount_by_index(mountIndex) != nullptr;
+        mbrVfs.failFlushAtCall = 0;
+        const vfs::Status unmountAfterFlushRetry = vfs::unmount("/mnt/mbr");
+        check(failedFlushUnmount == vfs::VFS_ERR_IO &&
+              mountRetainedAfterFlushFailure &&
+              unmountAfterFlushRetry == vfs::VFS_OK,
+              "failed unmount flush keeps the MBR mount active for retry; successful flush releases it");
+
+        const uint8_t legacyMountIndex = vfs::mount("/mnt/legacy", index);
+        const vfs::MountPoint* legacyMount =
+            vfs::get_mount_by_index(legacyMountIndex);
+        mbrVfs.writeLog.clear();
+        const int32_t legacyCreate = vfs::create_file(
+            "/mnt/legacy/legacy.bin", payload.data(),
+            static_cast<uint32_t>(payload.size()));
+        const bool legacyWritesBounded = !mbrVfs.writeLog.empty() &&
+            std::all_of(mbrVfs.writeLog.begin(), mbrVfs.writeLog.end(),
+                [&](const FakeWriteRecord& write) {
+                    return write.count != 0 && write.lba >= partition.startLba &&
+                        write.lba <= partition.endLba &&
+                        write.count <= partition.endLba - write.lba + 1;
+                });
+        const bool legacyIdentityExact = legacyMount &&
+            legacyMount->partitionMount &&
+            legacyMount->partitionIdentity.partitionNumber ==
+                partition.partitionNumber &&
+            legacyMount->partitionIdentity.startLba == partition.startLba &&
+            legacyMount->partitionIdentity.endLba == partition.endLba &&
+            vfs::mount_identity_valid(legacyMountIndex);
+        const vfs::Status legacyUnmount = vfs::unmount("/mnt/legacy");
+        check(legacyMountIndex != 0xFF && legacyIdentityExact &&
+              legacyCreate == static_cast<int32_t>(payload.size()) &&
+              legacyWritesBounded && legacyUnmount == vfs::VFS_OK,
+              "legacy MBR auto-mount is represented by an exact bounded VFS partition view");
+
+        FakeDisk readOnlyDisk(512, mbrVfs.sectorCount);
+        readOnlyDisk.bytes = mbrVfs.bytes;
+        const uint8_t readOnlyIndex = register_fake(readOnlyDisk, false);
+        storage::TargetIdentity readOnlyIdentity = {};
+        storage::capture_target_identity(readOnlyIndex, readOnlyIdentity);
+        storage::PartitionTableModel readOnlyTable = {};
+        storage::PartitionEntry readOnlyPartition = {};
+        parse_first_partition(readOnlyIndex, readOnlyTable, readOnlyPartition);
+        const vfs::PartitionMountResult readOnlyMountResult =
+            vfs::mount_partition_detailed("/mnt/read-only", readOnlyIndex,
+                readOnlyPartition.partitionNumber,
+                readOnlyIdentity.registrationId, &readOnlyPartition);
+        const uint8_t readOnlyMountIndex =
+            vfs::mount_index_for_path("/mnt/read-only");
+        const vfs::MountPoint* readOnlyMount =
+            vfs::get_mount_by_index(readOnlyMountIndex);
+        const int32_t readOnlyWrite = vfs::create_file(
+            "/mnt/read-only/no.txt", payload.data(),
+            static_cast<uint32_t>(payload.size()));
+        check(readOnlyMountResult.error == vfs::PARTITION_MOUNT_OK &&
+              readOnlyMount && readOnlyMount->readOnly &&
+              readOnlyWrite == vfs::VFS_ERR_READ_ONLY &&
+              readOnlyDisk.writeLog.empty(),
+              "read-only parent creates a read-only VFS mount and blocks FAT writes");
+
+        const fs_fat::FATVolume* mountedVolume = readOnlyMount
+            ? fs_fat::get_volume(readOnlyMount->fsVolumeIndex) : nullptr;
+        const block::BlockEndpoint staleEndpoint = mountedVolume
+            ? mountedVolume->endpoint : block::BlockEndpoint{};
+        const uint8_t staleMountIndex = readOnlyMountIndex;
+        check(unregister_fake(readOnlyIndex, readOnlyDisk),
+              "parent can be removed after per-I/O pins are released");
+        FakeDisk replacement(512, mbrVfs.sectorCount);
+        replacement.bytes = mbrVfs.bytes;
+        const uint8_t replacementIndex = register_fake(replacement, true,
+                                                       true, true);
+        replacement.readLog.clear();
+        alignas(4096) uint8_t staleBuffer[4096] = {};
+        const block::Status staleIo = block::read_endpoint(staleEndpoint,
+            0, 1, staleBuffer);
+        const bool invalidMount = !vfs::mount_identity_valid(staleMountIndex);
+        const size_t replacementReads = replacement.readLog.size();
+        const vfs::Status invalidUnmount = vfs::unmount("/mnt/read-only");
+        check(replacementIndex == readOnlyIndex && staleIo ==
+                  block::BLOCK_ERR_NO_MEDIA && invalidMount &&
+              replacementReads == 0 && invalidUnmount == vfs::VFS_ERR_IO &&
+              vfs::get_mount_by_index(staleMountIndex) == nullptr,
+              "removed parent and reused slot invalidate mounted I/O without touching the replacement; cleanup remains possible");
+        unregister_fake(replacementIndex, replacement);
+        unregister_fake(index, mbrVfs);
     }
 
     block::init();
