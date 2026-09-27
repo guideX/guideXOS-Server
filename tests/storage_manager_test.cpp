@@ -6,6 +6,8 @@
 #include "../kernel/core/include/kernel/disk_initialization.h"
 #include "../kernel/core/include/kernel/ramdisk.h"
 #include "../kernel/core/include/kernel/vfs.h"
+#include "../kernel/core/include/kernel/ata.h"
+#include "../guideXOSBootLoader/guidexOSBootInfo.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -28,6 +30,7 @@ struct FakeDisk {
     uint32_t failReadAtCall;
     bool failFlush;
     uint32_t failFlushAtCall;
+    block::Status failFlushStatus;
     uint32_t failWriteAtCall1;
     uint32_t failWriteAtCall2;
     uint64_t corruptWriteLbaOnce;
@@ -36,14 +39,23 @@ struct FakeDisk {
     uint32_t writes;
     uint32_t writeAttempts;
     uint32_t flushes;
+    uint8_t registryIndex;
+    uint64_t registrationId;
+    bool removeOnVerifyRead;
+    bool removeOnFlush;
+    uint32_t removeOnFlushAt;
+    bool removed;
 
     FakeDisk(uint32_t size, uint64_t count, bool allocate = true)
         : sectorSize(size), sectorCount(count), driverId(0),
           bytes(allocate ? static_cast<size_t>(size) * static_cast<size_t>(count) : 0, 0),
           failReads(false), failLba(UINT64_MAX), failReadAtCall(0), failFlush(false),
-          failFlushAtCall(0), failWriteAtCall1(0), failWriteAtCall2(0),
+          failFlushAtCall(0), failFlushStatus(block::BLOCK_ERR_IO),
+          failWriteAtCall1(0), failWriteAtCall2(0),
           corruptWriteLbaOnce(UINT64_MAX), corruptWritePending(false),
-          reads(0), writes(0), writeAttempts(0), flushes(0) {}
+          reads(0), writes(0), writeAttempts(0), flushes(0),
+          registryIndex(0xFF), registrationId(0), removeOnVerifyRead(false), removeOnFlush(false), removeOnFlushAt(0),
+          removed(false) {}
 };
 
 FakeDisk* g_fakeDisks[256] = {};
@@ -68,6 +80,13 @@ block::Status fake_read(uint8_t driverId, uint64_t lba, uint32_t count, void* bu
         lba > disk->sectorCount || count > disk->sectorCount - lba)
         return block::BLOCK_ERR_IO;
     ++disk->reads;
+    if (disk->removeOnVerifyRead && lba == 1 &&
+        disk->bytes.size() >= disk->sectorSize * 2 &&
+        disk->bytes[disk->sectorSize] != 0) {
+        disk->removed = block::mark_device_offline(
+            disk->registryIndex, disk->registrationId);
+        return block::BLOCK_ERR_NO_MEDIA;
+    }
     const size_t offset = static_cast<size_t>(lba * disk->sectorSize);
     const size_t bytes = static_cast<size_t>(count) * disk->sectorSize;
     if (offset > disk->bytes.size() || bytes > disk->bytes.size() - offset)
@@ -103,9 +122,15 @@ block::Status fake_flush(uint8_t driverId)
     FakeDisk* disk = g_fakeDisks[driverId];
     if (!disk) return block::BLOCK_ERR_INVALID;
     ++disk->flushes;
+    if (disk->removeOnFlush &&
+        (disk->removeOnFlushAt == 0 || disk->flushes == disk->removeOnFlushAt)) {
+        disk->removed = block::mark_device_offline(
+            disk->registryIndex, disk->registrationId);
+        return block::BLOCK_ERR_NO_MEDIA;
+    }
     return disk->failFlush ||
         (disk->failFlushAtCall != 0 && disk->flushes == disk->failFlushAtCall)
-        ? block::BLOCK_ERR_IO : block::BLOCK_OK;
+        ? disk->failFlushStatus : block::BLOCK_OK;
 }
 
 uint8_t register_fake(FakeDisk& disk, bool writable = false,
@@ -113,13 +138,19 @@ uint8_t register_fake(FakeDisk& disk, bool writable = false,
                       bool durableCompletion = false,
                       uint16_t requiredAlignment = 0,
                       uint32_t maxTransferBytes = 0,
-                      block::BootProvenance boot = block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT)
+                      block::BootProvenance boot = block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT,
+                      block::DeviceType transport = block::BDEV_ATA_PIO,
+                      bool pciLocationValid = false, uint32_t pciSegment = 0,
+                      uint8_t pciBus = 0, uint8_t pciDevice = 0,
+                      uint8_t pciFunction = 0, bool ataTargetValid = false,
+                      uint8_t ataChannel = 0, uint8_t ataTarget = 0,
+                      uint32_t namespaceId = 0)
 {
     disk.driverId = static_cast<uint8_t>(g_nextDriverId++);
     g_fakeDisks[disk.driverId] = &disk;
     block::BlockDevice descriptor = {};
     descriptor.active = true;
-    descriptor.type = block::BDEV_ATA_PIO;
+    descriptor.type = transport;
     descriptor.bootProvenance = boot;
     descriptor.driverIndex = disk.driverId;
     descriptor.totalSectors = disk.sectorCount;
@@ -134,13 +165,61 @@ uint8_t register_fake(FakeDisk& disk, bool writable = false,
     descriptor.writeCompletionDurable = durableCompletion;
     descriptor.requiredBufferAlignment = requiredAlignment;
     descriptor.maxTransferBytes = maxTransferBytes;
-    return block::register_device(descriptor);
+    descriptor.pciLocationValid = pciLocationValid;
+    descriptor.pciSegment = pciSegment;
+    descriptor.pciBus = pciBus;
+    descriptor.pciDevice = pciDevice;
+    descriptor.pciFunction = pciFunction;
+    descriptor.ataTargetValid = ataTargetValid;
+    descriptor.ataChannel = ataChannel;
+    descriptor.ataTarget = ataTarget;
+    descriptor.namespaceId = namespaceId;
+    const uint8_t index = block::register_device(descriptor);
+    if (index != 0xFF) {
+        disk.registryIndex = index;
+        block::BlockDevice registered = {};
+        if (block::copy_device(index, registered))
+            disk.registrationId = registered.registrationId;
+    }
+    return index;
 }
 
-void unregister_fake(uint8_t index, FakeDisk& disk)
+bool unregister_fake(uint8_t index, FakeDisk& disk)
 {
-    block::unregister_device(index);
+    if (!block::unregister_device(index)) return false;
     g_fakeDisks[disk.driverId] = nullptr;
+    return true;
+}
+
+struct AtaFlushFakeIo {
+    uint16_t ioBase;
+    uint8_t statuses[16];
+    size_t statusCount;
+    size_t statusIndex;
+    uint16_t writePorts[8];
+    uint8_t writeValues[8];
+    size_t writeCount;
+};
+
+uint8_t fake_ata_read8(void* context, uint16_t port)
+{
+    AtaFlushFakeIo* io = static_cast<AtaFlushFakeIo*>(context);
+    if (port == static_cast<uint16_t>(io->ioBase + ata::ATA_REG_STATUS)) {
+        const size_t index = io->statusIndex < io->statusCount
+            ? io->statusIndex++ : io->statusCount - 1;
+        return io->statuses[index];
+    }
+    return 0;
+}
+
+void fake_ata_write8(void* context, uint16_t port, uint8_t value)
+{
+    AtaFlushFakeIo* io = static_cast<AtaFlushFakeIo*>(context);
+    if (io->writeCount < 8) {
+        io->writePorts[io->writeCount] = port;
+        io->writeValues[io->writeCount] = value;
+        ++io->writeCount;
+    }
 }
 
 void write_u16(uint8_t* p, uint16_t v)
@@ -302,6 +381,55 @@ storage::InitializeDiskRequest make_initialize_request(
     request.testMbrSignatureProvided = true;
     request.testMbrSignature = 0xA1B2C3D4u;
     return request;
+}
+
+guideXOS::BootSourceDescriptor make_boot_source(bool nvmePath,
+    uint32_t namespaceId = 1, uint8_t ataChannel = 0, uint8_t ataTarget = 0)
+{
+    guideXOS::BootSourceDescriptor source = {};
+    source.Version = guideXOS::GUIDEXOS_BOOT_SOURCE_VERSION;
+    source.Size = sizeof(source);
+    source.Flags = guideXOS::BOOT_SOURCE_FLAG_VALID |
+        guideXOS::BOOT_SOURCE_FLAG_DEVICE_PATH_VALID |
+        guideXOS::BOOT_SOURCE_FLAG_PCI_LOCATION_VALID;
+    source.PciSegment = 0;
+    source.PciBus = 0;
+    source.PciDevice = 5;
+    source.PciFunction = 0;
+    uint16_t offset = 0;
+    uint8_t* p = source.DevicePath;
+    p[offset++] = 0x02; p[offset++] = 0x01; write_u16(p + offset, 12); offset += 2;
+    write_u32(p + offset, 0x0A0341D0u); offset += 4;
+    write_u32(p + offset, 0); offset += 4;
+    p[offset++] = 0x01; p[offset++] = 0x01; write_u16(p + offset, 6); offset += 2;
+    p[offset++] = 0; p[offset++] = source.PciDevice;
+    if (nvmePath) {
+        p[offset++] = 0x03; p[offset++] = 0x17; write_u16(p + offset, 16); offset += 2;
+        write_u32(p + offset, namespaceId); offset += 4;
+        for (uint8_t i = 0; i < 8; ++i) p[offset++] = 0;
+    } else {
+        p[offset++] = 0x03; p[offset++] = 0x01; write_u16(p + offset, 8); offset += 2;
+        p[offset++] = ataChannel; p[offset++] = ataTarget;
+        write_u16(p + offset, 0); offset += 2;
+    }
+    p[offset++] = 0x04; p[offset++] = 0x01; write_u16(p + offset, 42); offset += 2;
+    write_u32(p + offset, 1); offset += 4;
+    write_u64(p + offset, 34); offset += 8;
+    write_u64(p + offset, 60); offset += 8;
+    for (uint8_t i = 0; i < 16; ++i) p[offset++] = static_cast<uint8_t>(i + 1);
+    p[offset++] = 1; p[offset++] = 2;
+    p[offset++] = 0x7F; p[offset++] = 0xFF; write_u16(p + offset, 4); offset += 2;
+    source.DevicePathLength = offset;
+    return source;
+}
+
+void fix_bootinfo_checksum(guideXOS::BootInfo& info)
+{
+    info.HeaderChecksum = 0;
+    const uint32_t* words = reinterpret_cast<const uint32_t*>(&info);
+    uint32_t sum = 0;
+    for (uint32_t i = 0; i < (info.Size / 4u); ++i) sum += words[i];
+    info.HeaderChecksum = 0u - sum;
 }
 
 storage::InitializeDiskStatus probe_fake_initialize(
@@ -668,7 +796,60 @@ int main()
     check(flush.outcome == block::FLUSH_OUTCOME_FAILED &&
           flush.status == block::BLOCK_ERR_IO,
           "failed flush is distinguishable from unsupported flush");
+    flushDevice.failFlush = false;
+    flushDevice.failFlushAtCall = flushDevice.flushes + 1;
+    flushDevice.failFlushStatus = block::BLOCK_ERR_TIMEOUT;
+    flush = block::flush_with_result(index);
+    check(flush.outcome == block::FLUSH_OUTCOME_FAILED &&
+          flush.status == block::BLOCK_ERR_TIMEOUT,
+          "transport flush timeout is preserved as a distinct status");
     unregister_fake(index, flushDevice);
+
+    FakeDisk unknownFlushSemantics(512, 128);
+    index = register_fake(unknownFlushSemantics, true, true, false);
+    storage::DeviceCapabilities mismatchCapabilities;
+    flush = block::flush_with_result(index);
+    check(storage::query_device_capabilities(index, mismatchCapabilities) &&
+          mismatchCapabilities.flushSupported &&
+          mismatchCapabilities.persistence == storage::PERSISTENCE_UNKNOWN &&
+          flush.outcome == block::FLUSH_OUTCOME_SUPPORTED_SUCCEEDED &&
+          !flush.semanticsKnown,
+          "a working callback without trusted semantics stays durability-unknown");
+    unregister_fake(index, unknownFlushSemantics);
+    FakeDisk staleFlushCapability(512, 128);
+    index = register_fake(staleFlushCapability, true, false, true);
+    flush = block::flush_with_result(index);
+    check(storage::query_device_capabilities(index, mismatchCapabilities) &&
+          !mismatchCapabilities.flushSupported &&
+          mismatchCapabilities.persistence == storage::PERSISTENCE_UNKNOWN &&
+          flush.outcome == block::FLUSH_OUTCOME_UNSUPPORTED_UNKNOWN,
+          "flush semantics metadata without a callback cannot claim flush support");
+    unregister_fake(index, staleFlushCapability);
+    FakeDisk contradictoryDurability(512, 128);
+    index = register_fake(contradictoryDurability, true, true, true, true);
+    flush = block::flush_with_result(index);
+    check(storage::query_device_capabilities(index, mismatchCapabilities) &&
+          mismatchCapabilities.persistence == storage::PERSISTENCE_UNKNOWN &&
+          flush.outcome == block::FLUSH_OUTCOME_SUPPORTED_SUCCEEDED &&
+          !flush.semanticsKnown,
+          "durable-write and explicit-flush metadata cannot contradict each other into eligibility");
+    unregister_fake(index, contradictoryDurability);
+
+    FakeDisk nvmeNoFlush(512, 4096);
+    index = register_fake(nvmeNoFlush, true, false, false, false, 0, 0,
+        block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT, block::BDEV_NVME);
+    storage::TargetIdentity nvmeNoFlushIdentity;
+    storage::capture_target_identity(index, nvmeNoFlushIdentity);
+    storage::InitializeTargetValidation nvmeNoFlushValidation;
+    flush = block::flush_with_result(index);
+    check(flush.outcome == block::FLUSH_OUTCOME_UNSUPPORTED_UNKNOWN &&
+          storage::query_device_capabilities(index, mismatchCapabilities) &&
+          mismatchCapabilities.persistence == storage::PERSISTENCE_UNKNOWN &&
+          storage::probe_initialize_target(nvmeNoFlushIdentity,
+              storage::PARTITION_SCHEME_GPT, nvmeNoFlushValidation) ==
+              storage::INITIALIZE_DISK_DURABILITY_UNKNOWN,
+          "NVMe without a proven Flush command remains blocked by the common preflight engine");
+    unregister_fake(index, nvmeNoFlush);
 
     FakeDisk noFlush(512, 128);
     index = register_fake(noFlush, true);
@@ -702,6 +883,55 @@ int main()
 
     check(storage::DEFAULT_INITIALIZE_SCHEME == storage::PARTITION_SCHEME_GPT,
           "GPT is the default initialization scheme presented by the model");
+
+    AtaFlushFakeIo ataIo = {};
+    ataIo.ioBase = ata::ATA_PRIMARY_IO;
+    ataIo.statuses[0] = ata::ATA_SR_DRDY;
+    ataIo.statuses[1] = ata::ATA_SR_DRDY;
+    ataIo.statusCount = 2;
+    ata::AtaFlushIoOps ataOps = { &ataIo, fake_ata_read8, fake_ata_write8 };
+    check(ata::ata_flush_command_with_io(ataIo.ioBase, ata::ATA_PRIMARY_CTRL,
+              true, true, true, ataOps, 4) == block::BLOCK_OK &&
+          ataIo.writeCount == 2 && ataIo.writeValues[0] == 0xA0 &&
+          ataIo.writeValues[1] == ata::ATA_CMD_CACHE_FLUSH_EXT,
+          "ATA flush selects the device, issues FLUSH CACHE EXT, and waits for ready completion");
+    ataIo = {};
+    ataIo.ioBase = ata::ATA_PRIMARY_IO;
+    ataIo.statuses[0] = ata::ATA_SR_DRDY;
+    ataIo.statuses[1] = ata::ATA_SR_DRDY | ata::ATA_SR_ERR;
+    ataIo.statusCount = 2;
+    ataOps.context = &ataIo;
+    check(ata::ata_flush_command_with_io(ataIo.ioBase, ata::ATA_PRIMARY_CTRL,
+              false, true, false, ataOps, 4) == block::BLOCK_ERR_IO &&
+          ataIo.writeValues[0] == 0xB0 &&
+          ataIo.writeValues[1] == ata::ATA_CMD_CACHE_FLUSH,
+          "ATA flush reports ERR after FLUSH CACHE and uses the supported opcode");
+    ataIo = {};
+    ataIo.ioBase = ata::ATA_PRIMARY_IO;
+    ataIo.statuses[0] = ata::ATA_SR_BSY;
+    ataIo.statusCount = 1;
+    ataOps.context = &ataIo;
+    check(ata::ata_flush_command_with_io(ataIo.ioBase, ata::ATA_PRIMARY_CTRL,
+              true, true, false, ataOps, 3) == block::BLOCK_ERR_TIMEOUT &&
+          ataIo.writeCount == 1,
+          "ATA flush times out before issuing a command when the device is not ready");
+    ataIo = {};
+    ataIo.ioBase = ata::ATA_PRIMARY_IO;
+    ataOps.context = &ataIo;
+    check(ata::ata_flush_command_with_io(ataIo.ioBase, ata::ATA_PRIMARY_CTRL,
+              true, false, false, ataOps, 3) == block::BLOCK_ERR_UNSUPPORTED &&
+          ataIo.writeCount == 0,
+          "ATA flush is unsupported when IDENTIFY advertises neither flush command");
+    const ata::AtaFlushSupport flushCacheOnly =
+        ata::ata_flush_support_from_identify_word83(0x5000u);
+    const ata::AtaFlushSupport flushExtOnly =
+        ata::ata_flush_support_from_identify_word83(0x6000u);
+    const ata::AtaFlushSupport invalidWord83 =
+        ata::ata_flush_support_from_identify_word83(0x9000u);
+    check(flushCacheOnly.flushCache && !flushCacheOnly.flushCacheExt &&
+          !flushExtOnly.flushCache && flushExtOnly.flushCacheExt &&
+          !invalidWord83.flushCache && !invalidWord83.flushCacheExt,
+          "ATA cache-flush support is accepted only from valid IDENTIFY word 83 bits");
 
     FakeDisk synchronousInitialize(512, 4096);
     index = register_fake(synchronousInitialize, true, false, false, true);
@@ -891,6 +1121,126 @@ int main()
                                 block::BOOT_PROVENANCE_UNKNOWN) ==
               storage::INITIALIZE_DISK_BOOT_IDENTITY_UNKNOWN,
           "initialization refuses unknown firmware boot-device identity");
+    guideXOS::BootSourceDescriptor nvmeBootPath = make_boot_source(true, 1);
+    check(storage::set_boot_source_descriptor(&nvmeBootPath),
+          "valid bounded UEFI NVMe device path is accepted");
+    FakeDisk nvmeBootDisk(512, 128);
+    const uint8_t nvmeBootIndex = register_fake(nvmeBootDisk, true, true, true,
+        false, 0, 0, block::BOOT_PROVENANCE_UNKNOWN, block::BDEV_NVME,
+        true, 0, 0, 5, 0, false, 0, 0, 1);
+    storage::TargetIdentity nvmeBootIdentity;
+    storage::capture_target_identity(nvmeBootIndex, nvmeBootIdentity);
+    check(storage::query_boot_protection(nvmeBootIdentity).safety ==
+              storage::BOOT_DEVICE_IS_TARGET,
+          "matching controller and namespace protect the whole boot disk despite a partition node");
+
+    FakeDisk nvmeOtherNamespace(512, 128);
+    const uint8_t nvmeOtherIndex = register_fake(nvmeOtherNamespace, true,
+        true, true, false, 0, 0, block::BOOT_PROVENANCE_UNKNOWN,
+        block::BDEV_NVME, true, 0, 0, 5, 0, false, 0, 0, 2);
+    storage::TargetIdentity nvmeOtherIdentity;
+    storage::capture_target_identity(nvmeOtherIndex, nvmeOtherIdentity);
+    check(storage::query_boot_protection(nvmeOtherIdentity).safety ==
+              storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET,
+          "same NVMe controller with a different namespace is definitely not the boot namespace");
+
+    FakeDisk sameCapacityOtherPci(512, 128);
+    const uint8_t otherPciIndex = register_fake(sameCapacityOtherPci, true,
+        true, true, false, 0, 0, block::BOOT_PROVENANCE_UNKNOWN,
+        block::BDEV_NVME, true, 0, 0, 6, 0, false, 0, 0, 1);
+    storage::TargetIdentity otherPciIdentity;
+    storage::capture_target_identity(otherPciIndex, otherPciIdentity);
+    check(storage::query_boot_protection(otherPciIdentity).safety ==
+              storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET,
+          "same-capacity device at a different PCI BDF is definitely not boot backing");
+
+    guideXOS::BootSourceDescriptor atapiBootPath =
+        make_boot_source(false, 0, 1, 1);
+    check(storage::set_boot_source_descriptor(&atapiBootPath),
+          "valid UEFI ATAPI path is accepted for ATA target matching");
+    FakeDisk ataBootDisk(512, 128);
+    const uint8_t ataBootIndex = register_fake(ataBootDisk, true, true, true,
+        false, 0, 0, block::BOOT_PROVENANCE_UNKNOWN, block::BDEV_ATA_PIO,
+        true, 0, 0, 5, 0, true, 1, 1);
+    storage::TargetIdentity ataBootIdentity;
+    storage::capture_target_identity(ataBootIndex, ataBootIdentity);
+    FakeDisk ataOtherTarget(512, 128);
+    const uint8_t ataOtherIndex = register_fake(ataOtherTarget, true, true, true,
+        false, 0, 0, block::BOOT_PROVENANCE_UNKNOWN, block::BDEV_ATA_PIO,
+        true, 0, 0, 5, 0, true, 1, 0);
+    storage::TargetIdentity ataOtherIdentity;
+    storage::capture_target_identity(ataOtherIndex, ataOtherIdentity);
+    storage::capture_target_identity(ataBootIndex, ataBootIdentity);
+    storage::capture_target_identity(nvmeBootIndex, nvmeBootIdentity);
+    check(storage::query_boot_protection(ataBootIdentity).safety ==
+              storage::BOOT_DEVICE_IS_TARGET &&
+          storage::query_boot_protection(ataOtherIdentity).safety ==
+              storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET,
+          "same ATA controller distinguishes the boot channel/target from another device");
+
+    storage::capture_target_identity(nvmeBootIndex, nvmeBootIdentity);
+    guideXOS::BootSourceDescriptor truncatedPath = nvmeBootPath;
+    truncatedPath.DevicePathLength = guideXOS::GUIDEXOS_BOOT_SOURCE_PATH_MAX + 1;
+    check(!storage::set_boot_source_descriptor(&truncatedPath) &&
+          storage::query_boot_protection(nvmeBootIdentity).safety ==
+              storage::BOOT_DEVICE_IDENTITY_UNKNOWN,
+          "truncated device-path provenance is rejected and remains Unknown");
+    guideXOS::BootSourceDescriptor malformedPath = nvmeBootPath;
+    malformedPath.DevicePath[2] = 0;
+    malformedPath.DevicePath[3] = 0;
+    check(!storage::set_boot_source_descriptor(&malformedPath) &&
+          storage::query_boot_protection(nvmeBootIdentity).safety ==
+              storage::BOOT_DEVICE_IDENTITY_UNKNOWN,
+          "malformed device-path provenance is rejected and remains Unknown");
+    storage::initialize_boot_source(nullptr);
+    check(storage::query_boot_protection(nvmeBootIdentity).safety ==
+              storage::BOOT_DEVICE_IDENTITY_UNKNOWN,
+          "missing BootInfo provenance does not infer DefinitelyNotBoot");
+    guideXOS::BootInfo legacyBootInfo = {};
+    legacyBootInfo.Magic = guideXOS::GUIDEXOS_BOOTINFO_MAGIC;
+    legacyBootInfo.Version = guideXOS::GUIDEXOS_BOOTINFO_LEGACY_VERSION;
+    legacyBootInfo.Size = guideXOS::GUIDEXOS_BOOTINFO_LEGACY_SIZE;
+    fix_bootinfo_checksum(legacyBootInfo);
+    check(guideXOS::guidexos_bootinfo_checksum_valid(&legacyBootInfo),
+          "legacy BootInfo v2 checksum and exact old size remain valid");
+    storage::initialize_boot_source(&legacyBootInfo);
+    check(storage::query_boot_protection(nvmeBootIdentity).safety ==
+              storage::BOOT_DEVICE_IDENTITY_UNKNOWN,
+          "legacy BootInfo without a descriptor falls back to Unknown");
+    guideXOS::BootInfo currentBootInfo = {};
+    currentBootInfo.Magic = guideXOS::GUIDEXOS_BOOTINFO_MAGIC;
+    currentBootInfo.Version = guideXOS::GUIDEXOS_BOOTINFO_VERSION;
+    currentBootInfo.Size = sizeof(currentBootInfo);
+    currentBootInfo.BootSource = nvmeBootPath;
+    fix_bootinfo_checksum(currentBootInfo);
+    check(guideXOS::guidexos_bootinfo_checksum_valid(&currentBootInfo),
+          "current BootInfo v3 checksum includes its bounded boot descriptor");
+    storage::initialize_boot_source(&currentBootInfo);
+    check(storage::query_boot_protection(nvmeBootIdentity).safety ==
+              storage::BOOT_DEVICE_IS_TARGET,
+          "kernel copies a valid BootInfo v3 descriptor before matching storage");
+    storage::set_boot_source_descriptor(&nvmeBootPath);
+
+    storage::TargetIdentity oldProvenanceIdentity = nvmeBootIdentity;
+    check(unregister_fake(nvmeBootIndex, nvmeBootDisk),
+          "boot provenance test device unregisters when no lease pins it");
+    FakeDisk reusedProvenanceSlot(512, 128);
+    const uint8_t reusedIndex = register_fake(reusedProvenanceSlot, true,
+        true, true, false, 0, 0, block::BOOT_PROVENANCE_UNKNOWN,
+        block::BDEV_NVME, true, 0, 0, 5, 0, false, 0, 0, 1);
+    storage::TargetIdentity reusedIdentity;
+    storage::capture_target_identity(reusedIndex, reusedIdentity);
+    check(reusedIndex == oldProvenanceIdentity.globalIndex &&
+          reusedIdentity.registrationId != oldProvenanceIdentity.registrationId &&
+          !storage::target_identities_equal(oldProvenanceIdentity, reusedIdentity) &&
+          storage::revalidate_target_identity(oldProvenanceIdentity) != storage::TARGET_VALID,
+          "registry slot reuse after provenance matching rejects the old registration identity");
+    unregister_fake(reusedIndex, reusedProvenanceSlot);
+    unregister_fake(nvmeOtherIndex, nvmeOtherNamespace);
+    unregister_fake(otherPciIndex, sameCapacityOtherPci);
+    unregister_fake(ataBootIndex, ataBootDisk);
+    unregister_fake(ataOtherIndex, ataOtherTarget);
+
     FakeDisk unknownDurabilityInit(512, 128);
     check(probe_fake_initialize(unknownDurabilityInit,
                                 storage::PARTITION_SCHEME_GPT,
@@ -943,8 +1293,8 @@ int main()
     check(storage::cancel_initialize_disk(lockPlanA) &&
           !storage::storage_operation_active(),
           "cancel releases the confirmation-held operation lock");
-    storage::StorageOperationLease leaseA = {0};
-    storage::StorageOperationLease leaseB = {0};
+    storage::StorageOperationLease leaseA = {};
+    storage::StorageOperationLease leaseB = {};
     check(storage::try_acquire_storage_operation(leaseA) ==
               storage::STORAGE_OPERATION_LOCK_ACQUIRED,
           "operation lock can be acquired after cancellation");
@@ -978,6 +1328,31 @@ int main()
     unregister_fake(lockIndexA, lockDiskA);
     unregister_fake(lockIndexB, lockDiskB);
 
+    FakeDisk pinnedLeaseDisk(512, 128);
+    const uint8_t pinnedLeaseIndex = register_fake(pinnedLeaseDisk, true,
+        true, true);
+    FakeDisk unrelatedLeaseDisk(512, 128);
+    const uint8_t unrelatedLeaseIndex = register_fake(unrelatedLeaseDisk);
+    storage::TargetIdentity pinnedLeaseIdentity;
+    storage::capture_target_identity(pinnedLeaseIndex, pinnedLeaseIdentity);
+    storage::StorageOperationLease pinnedLease = {};
+    const bool leaseAcquired = storage::try_acquire_storage_operation(pinnedLease) ==
+        storage::STORAGE_OPERATION_LOCK_ACQUIRED;
+    const bool targetPinned = leaseAcquired && storage::pin_storage_operation_target(
+        pinnedLease, pinnedLeaseIdentity);
+    check(targetPinned && !block::unregister_device(pinnedLeaseIndex) &&
+          block::get_device(pinnedLeaseIndex) != nullptr,
+          "an operation target cannot be unregistered or rebound while its registration is pinned");
+    FakeDisk registrationDuringLease(512, 128);
+    const uint8_t registrationDuringLeaseIndex = register_fake(registrationDuringLease);
+    check(registrationDuringLeaseIndex != 0xFF &&
+          unregister_fake(registrationDuringLeaseIndex, registrationDuringLease),
+          "unrelated registration remains possible while an operation target is pinned");
+    check(unregister_fake(unrelatedLeaseIndex, unrelatedLeaseDisk) &&
+          storage::release_storage_operation(pinnedLease) &&
+          unregister_fake(pinnedLeaseIndex, pinnedLeaseDisk),
+          "unrelated device removal remains available and target removal succeeds after lease release");
+
     FakeDisk replacedDisk(512, 4096);
     index = register_fake(replacedDisk, true, true, true);
     initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
@@ -985,7 +1360,9 @@ int main()
                                            initializeResult) ==
               storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION,
           "identity-revalidation fixture reaches confirmation-ready state");
-    unregister_fake(index, replacedDisk);
+    check(!unregister_fake(index, replacedDisk) &&
+          block::get_device(index) != nullptr,
+          "normal unregister refuses a confirmation-held target pin");
     FakeDisk replacementTargetDisk(512, 4096);
     const uint8_t replacementBlockIndex = register_fake(replacementTargetDisk, true, true, true);
     check(storage::execute_initialize_disk(initializePlan, initializeResult) ==
@@ -993,7 +1370,42 @@ int main()
           replacedDisk.writeAttempts == 0 && replacementTargetDisk.writeAttempts == 0 &&
           !storage::storage_operation_active(),
           "registry change and device replacement after confirmation abort before writes");
+    check(unregister_fake(index, replacedDisk),
+          "registry change releases the original target pin before cleanup");
     unregister_fake(replacementBlockIndex, replacementTargetDisk);
+
+    FakeDisk forcedRemovalDisk(512, 4096);
+    index = register_fake(forcedRemovalDisk, true, true, true);
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
+    storage::TargetIdentity forcedRemovalIdentity = initializeRequest.targetSnapshot;
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION,
+          "forced-removal fixture pins a confirmation-ready target");
+    check(block::mark_device_offline(index, forcedRemovalIdentity.registrationId) &&
+          block::get_device(index) == nullptr,
+          "forced disappearance marks a pinned target offline without exposing it");
+    FakeDisk whileOffline(512, 128);
+    const uint8_t whileOfflineIndex = register_fake(whileOffline);
+    check(whileOfflineIndex != index,
+          "offline pinned tombstone prevents registration slot reuse");
+    check(storage::execute_initialize_disk(initializePlan, initializeResult) ==
+              storage::INITIALIZE_DISK_REGISTRY_CHANGED &&
+          forcedRemovalDisk.writeAttempts == 0 &&
+          !storage::storage_operation_active(),
+          "forced removal after confirmation aborts before writes and releases ownership");
+    g_fakeDisks[forcedRemovalDisk.driverId] = nullptr;
+    FakeDisk reusedAfterRemoval(512, 128);
+    const uint8_t reusedAfterRemovalIndex = register_fake(reusedAfterRemoval);
+    storage::TargetIdentity reusedAfterRemovalIdentity;
+    storage::capture_target_identity(reusedAfterRemovalIndex,
+                                     reusedAfterRemovalIdentity);
+    check(reusedAfterRemovalIndex == index &&
+          reusedAfterRemovalIdentity.registrationId != forcedRemovalIdentity.registrationId &&
+          storage::revalidate_target_identity(forcedRemovalIdentity) != storage::TARGET_VALID,
+          "released offline tombstone permits slot reuse with a new incarnation identity");
+    unregister_fake(reusedAfterRemovalIndex, reusedAfterRemoval);
+    unregister_fake(whileOfflineIndex, whileOffline);
 
     FakeDisk identityChangedDisk(512, 4096);
     index = register_fake(identityChangedDisk, true, true, true);
@@ -1124,6 +1536,38 @@ int main()
           "rollback failure is reported as uncertain while still releasing the lock");
     unregister_fake(index, rollbackFail);
 
+    FakeDisk removedDuringVerify(512, 4096);
+    index = register_fake(removedDuringVerify, true, true, true);
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION,
+          "surprise-removal verification fixture reaches confirmation");
+    removedDuringVerify.removeOnVerifyRead = true;
+    check(storage::execute_initialize_disk(initializePlan, initializeResult) !=
+              storage::INITIALIZE_DISK_SUCCESS && removedDuringVerify.removed &&
+          initializeResult.finalStateUncertain &&
+          !storage::storage_operation_active() && block::get_device(index) == nullptr,
+          "removal during verification stops safely, marks state uncertain, and releases the lease");
+    g_fakeDisks[removedDuringVerify.driverId] = nullptr;
+
+    FakeDisk removedDuringFlush(512, 4096);
+    index = register_fake(removedDuringFlush, true, true, true);
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION,
+          "surprise-removal flush fixture reaches confirmation");
+    removedDuringFlush.removeOnFlush = true;
+    removedDuringFlush.removeOnFlushAt = 2;
+    const storage::InitializeDiskStatus removedFlushStatus =
+        storage::execute_initialize_disk(initializePlan, initializeResult);
+    check(removedFlushStatus != storage::INITIALIZE_DISK_SUCCESS && removedDuringFlush.removed &&
+          initializeResult.finalStateUncertain &&
+          !storage::storage_operation_active() && block::get_device(index) == nullptr,
+          "removal during flush stops further writes, reports uncertainty, and releases the lease");
+    g_fakeDisks[removedDuringFlush.driverId] = nullptr;
+
     FakeDisk firstFlushFail(512, 4096);
     index = register_fake(firstFlushFail, true, true, true);
     initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
@@ -1183,6 +1627,20 @@ int main()
     check(repeatStable && imageRead == block::BLOCK_OK && imageSector[0] == 0x5A &&
           ramdisk::disk_count() == 1,
           "32 repeated rescans preserve one live attachment and its owned backing");
+    storage::TargetIdentity ramLeaseIdentity;
+    const bool ramIdentityCaptured = storage::capture_target_identity(
+        ramBlockIndex, ramLeaseIdentity);
+    storage::StorageOperationLease ramLease = {};
+    const bool ramLeasePinned = ramIdentityCaptured &&
+        storage::try_acquire_storage_operation(ramLease) ==
+            storage::STORAGE_OPERATION_LOCK_ACQUIRED &&
+        storage::pin_storage_operation_target(ramLease, ramLeaseIdentity);
+    ramdisk::destroy(ramIndex);
+    check(ramLeasePinned && ramdisk::get_disk(ramIndex) != nullptr &&
+          block::get_device(ramBlockIndex) != nullptr && image[0] == 0x5A,
+          "RAM-disk rescan cannot free image memory while a storage lease pins it");
+    check(storage::release_storage_operation(ramLease),
+          "RAM-disk operation lease releases its registry pin");
     ramdisk::destroy(ramIndex);
     check(block::get_device(ramBlockIndex) == nullptr && ramdisk::disk_count() == 0,
           "destroy unregisters attached image and releases its owned memory");

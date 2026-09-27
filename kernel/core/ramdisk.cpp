@@ -260,6 +260,11 @@ static uint8_t finish_ramdisk_create(uint8_t index)
     if (s_nextInstanceId == 0) ++s_nextInstanceId;
     disk.instanceId = s_nextInstanceId;
     disk.blockDeviceIndex = register_ramdisk_block(index);
+    if (disk.blockDeviceIndex != 0xFF) {
+        block::BlockDevice registered = {};
+        if (block::copy_device(disk.blockDeviceIndex, registered))
+            disk.blockRegistrationId = registered.registrationId;
+    }
     if (disk.blockDeviceIndex == 0xFF) {
         disk.active = false;
         disk.data = nullptr;
@@ -364,12 +369,12 @@ void destroy(uint8_t index)
     if (!s_disks[index].active) return;
     
     RamDisk& disk = s_disks[index];
-    if (disk.blockDeviceIndex != 0xFF) {
-        const block::BlockDevice* registered = block::get_device(disk.blockDeviceIndex);
-        if (registered && registered->type == block::BDEV_RAMDISK &&
-            registered->driverIndex == index)
-            block::unregister_device(disk.blockDeviceIndex);
-    }
+    if (disk.blockDeviceIndex != 0xFF && disk.blockRegistrationId != 0 &&
+        block::registration_is_present(disk.blockDeviceIndex,
+                                       disk.blockRegistrationId) &&
+        !block::unregister_device_if_matches(disk.blockDeviceIndex,
+                                             disk.blockRegistrationId))
+        return; // A pinned operation still owns this RAM-backed memory.
     if (disk.ownsHeapMemory && disk.data) delete[] disk.data;
     disk.active = false;
     disk.data = nullptr;

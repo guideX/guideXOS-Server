@@ -16,6 +16,9 @@ enum StorageOperationLockStatus : uint8_t {
 // copies cannot release a later operation after its token has changed.
 struct StorageOperationLease {
     uint64_t ownerToken;
+    bool targetPinned;
+    uint8_t pinnedIndex;
+    uint64_t pinnedRegistrationId;
 };
 
 StorageOperationLockStatus try_acquire_storage_operation(
@@ -24,6 +27,8 @@ bool release_storage_operation(StorageOperationLease& lease);
 bool begin_storage_operation_execution(const StorageOperationLease& lease);
 bool complete_storage_operation_execution(StorageOperationLease& lease);
 bool storage_operation_lease_is_current(const StorageOperationLease& lease);
+bool pin_storage_operation_target(StorageOperationLease& lease,
+                                  const TargetIdentity& target);
 bool storage_operation_active();
 
 enum InitializeDiskStatus : uint8_t {

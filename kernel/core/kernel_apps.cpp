@@ -6168,8 +6168,9 @@ void DiskManagerApp::scanDisks() {
 
     m_diskCount = 0;
     for (uint8_t i = 0; i < kernel::block::MAX_BLOCK_DEVICES && m_diskCount < MAX_DISKS; ++i) {
-        const kernel::block::BlockDevice* dev = kernel::block::get_device(i);
-        if (!dev) continue;
+        kernel::block::BlockDevice deviceSnapshot;
+        if (!kernel::block::copy_device(i, deviceSnapshot)) continue;
+        const kernel::block::BlockDevice* dev = &deviceSnapshot;
 
         DiskEntry& e = m_disks[m_diskCount];
         memset(&e, 0, sizeof(e));
@@ -6188,6 +6189,8 @@ void DiskManagerApp::scanDisks() {
                     ? storage::PERSISTENCE_FLUSH_REQUIRED
                     : storage::PERSISTENCE_UNKNOWN));
         storage::capture_target_identity(i, e.identity);
+        e.bootSafety = storage::query_boot_protection(e.identity).safety;
+        e.mountSafety = storage::query_mount_protection(e.identity).safety;
 
         const char* typeStr = "Block";
         switch (dev->type) {
@@ -6435,6 +6438,51 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         strappend(capabilityText, "Durability unknown", sizeof(capabilityText));
     appDrawText(rx + 4, drawY, capabilityText, kSubText);
     drawY += kGlyphH + 4;
+
+    char diagnosticLine[128];
+    char diagnosticNumber[24];
+    strcopy(diagnosticLine, "Block ", sizeof(diagnosticLine));
+    disk_manager_u64(disk.identity.globalIndex, diagnosticNumber,
+                     sizeof(diagnosticNumber));
+    strappend(diagnosticLine, diagnosticNumber, sizeof(diagnosticLine));
+    strappend(diagnosticLine, " | driver ", sizeof(diagnosticLine));
+    disk_manager_u64(disk.identity.driverIndex, diagnosticNumber,
+                     sizeof(diagnosticNumber));
+    strappend(diagnosticLine, diagnosticNumber, sizeof(diagnosticLine));
+    strappend(diagnosticLine, " | generation ", sizeof(diagnosticLine));
+    disk_manager_u64(disk.identity.registryGeneration, diagnosticNumber,
+                     sizeof(diagnosticNumber));
+    strappend(diagnosticLine, diagnosticNumber, sizeof(diagnosticLine));
+    appDrawText(rx + 4, drawY, diagnosticLine, kSubText);
+    drawY += kGlyphH + 3;
+
+    const char* bootText = disk.bootSafety == storage::BOOT_DEVICE_IS_TARGET
+        ? "Boot device - protected"
+        : (disk.bootSafety == storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET
+            ? "Boot provenance: DefinitelyNotBoot"
+            : "Boot provenance: Unknown");
+    appDrawText(rx + 4, drawY, bootText, kSubText);
+    drawY += kGlyphH + 3;
+    const char* mountText = disk.mountSafety == storage::DEVICE_ROOT_BACKING
+        ? "Mount protection: backs root filesystem"
+        : (disk.mountSafety == storage::DEVICE_MOUNTED
+            ? "Mount protection: mounted"
+            : (disk.mountSafety == storage::DEVICE_UNMOUNTED
+                ? "Mount protection: unmounted" : "Mount protection: unknown"));
+    appDrawText(rx + 4, drawY, mountText, kSubText);
+    drawY += kGlyphH + 3;
+    if (disk.identity.model[0]) {
+        strcopy(diagnosticLine, "Model: ", sizeof(diagnosticLine));
+        strappend(diagnosticLine, disk.identity.model, sizeof(diagnosticLine));
+        appDrawText(rx + 4, drawY, diagnosticLine, kSubText);
+        drawY += kGlyphH + 3;
+    }
+    if (disk.identity.serial[0]) {
+        strcopy(diagnosticLine, "Serial: ", sizeof(diagnosticLine));
+        strappend(diagnosticLine, disk.identity.serial, sizeof(diagnosticLine));
+        appDrawText(rx + 4, drawY, diagnosticLine, kSubText);
+        drawY += kGlyphH + 3;
+    }
 
     appDrawText(rx + 4, drawY, storage::disk_state_name(disk.state), kText);
     drawY += kGlyphH + 6;

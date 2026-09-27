@@ -63,6 +63,70 @@ static const uint8_t ATA_CMD_WRITE_PIO_EXT = 0x34;  // WRITE SECTORS EXT (48-bit
 static const uint8_t ATA_CMD_CACHE_FLUSH   = 0xE7;
 static const uint8_t ATA_CMD_CACHE_FLUSH_EXT = 0xEA;
 
+struct AtaFlushSupport {
+    bool flushCache;
+    bool flushCacheExt;
+};
+
+static inline AtaFlushSupport ata_flush_support_from_identify_word83(uint16_t word83)
+{
+    const bool valid = (word83 & 0xC000u) == 0x4000u;
+    AtaFlushSupport support;
+    support.flushCache = valid && (word83 & (1u << 12)) != 0;
+    support.flushCacheExt = valid && (word83 & (1u << 13)) != 0;
+    return support;
+}
+
+
+// Port-I/O seam used by the PIO transport and deterministic command tests.
+struct AtaFlushIoOps {
+    void* context;
+    uint8_t (*read8)(void* context, uint16_t port);
+    void (*write8)(void* context, uint16_t port, uint8_t value);
+};
+
+static inline block::Status ata_flush_command_with_io(
+    uint16_t ioBase, uint16_t ctrlBase, bool isMaster,
+    bool flushCacheSupported, bool flushCacheExtSupported,
+    const AtaFlushIoOps& io, uint32_t pollLimit = 500000u)
+{
+    if (!flushCacheSupported && !flushCacheExtSupported)
+        return block::BLOCK_ERR_UNSUPPORTED;
+    if (!io.read8 || !io.write8 || pollLimit == 0)
+        return block::BLOCK_ERR_INVALID;
+
+    io.write8(io.context, static_cast<uint16_t>(ioBase + ATA_REG_DRIVE_HEAD),
+              isMaster ? 0xA0u : 0xB0u);
+    for (uint8_t i = 0; i < 4; ++i)
+        (void)io.read8(io.context, ctrlBase);
+
+    bool ready = false;
+    for (uint32_t i = 0; i < pollLimit; ++i) {
+        const uint8_t status = io.read8(io.context,
+            static_cast<uint16_t>(ioBase + ATA_REG_STATUS));
+        if (status == 0 || status == 0xFFu) return block::BLOCK_ERR_NO_MEDIA;
+        if (status & (ATA_SR_ERR | ATA_SR_DF)) return block::BLOCK_ERR_IO;
+        if (!(status & (ATA_SR_BSY | ATA_SR_DRQ)) && (status & ATA_SR_DRDY)) {
+            ready = true;
+            break;
+        }
+    }
+    if (!ready) return block::BLOCK_ERR_TIMEOUT;
+
+    io.write8(io.context, static_cast<uint16_t>(ioBase + ATA_REG_COMMAND),
+        flushCacheExtSupported ? ATA_CMD_CACHE_FLUSH_EXT : ATA_CMD_CACHE_FLUSH);
+
+    for (uint32_t i = 0; i < pollLimit; ++i) {
+        const uint8_t status = io.read8(io.context,
+            static_cast<uint16_t>(ioBase + ATA_REG_STATUS));
+        if (status == 0 || status == 0xFFu) return block::BLOCK_ERR_NO_MEDIA;
+        if (status & (ATA_SR_ERR | ATA_SR_DF)) return block::BLOCK_ERR_IO;
+        if (!(status & (ATA_SR_BSY | ATA_SR_DRQ)))
+            return (status & ATA_SR_DRDY) ? block::BLOCK_OK : block::BLOCK_ERR_IO;
+    }
+    return block::BLOCK_ERR_TIMEOUT;
+}
+
 // ================================================================
 // AHCI register offsets (HBA memory-mapped)
 // ================================================================

@@ -4,6 +4,8 @@
 #include "kernel/block_device.h"
 #include "kernel/partition_table.h"
 
+namespace guideXOS { struct BootInfo; struct BootSourceDescriptor; }
+
 namespace kernel {
 namespace storage {
 
@@ -42,6 +44,7 @@ struct DeviceCapabilities {
 
 struct TargetIdentity {
     uint64_t registryGeneration;
+    uint64_t registrationId;
     uint8_t globalIndex;
     block::DeviceType transport;
     uint8_t driverIndex;
@@ -134,6 +137,11 @@ RevalidationStatus revalidate_target_identity(const TargetIdentity& snapshot);
 
 MountProtection query_mount_protection(const TargetIdentity& target);
 BootProtection query_boot_protection(const TargetIdentity& target);
+// Called before storage discovery. Invalid/missing/legacy BootInfo leaves
+// provenance unknown. The setter exists for deterministic hosted tests.
+void initialize_boot_source(const guideXOS::BootInfo* bootInfo);
+bool set_boot_source_descriptor(const guideXOS::BootSourceDescriptor* source);
+const char* boot_provenance_name(block::BootProvenance provenance);
 bool validate_destructive_target(const TargetIdentity& target,
                                  const SafetyRequest& request,
                                  SafetyValidation& result);

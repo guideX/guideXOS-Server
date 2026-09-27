@@ -565,6 +565,12 @@ static void scan_pci_nvme()
                 bdev.readFn       = nvme_read_sectors;
                 bdev.writeFn      = nvme_write_sectors;
                 bdev.flushSemanticsKnown = false; // NVMe Flush is not implemented.
+                bdev.pciLocationValid = true;
+                bdev.pciSegment = 0; // This x86 PCI config path scans segment 0.
+                bdev.pciBus = static_cast<uint8_t>(bus);
+                bdev.pciDevice = dev;
+                bdev.pciFunction = func;
+                bdev.namespaceId = ndev.nsid;
                 // Current PRP1-only path is safe only for one aligned 4 KiB page.
                 bdev.requiredBufferAlignment = 4096;
                 bdev.maxTransferBytes = 4096;

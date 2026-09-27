@@ -46,6 +46,7 @@ struct RamDisk {
     bool     readOnly;          // True if writes are intentionally disabled
     bool     ownsHeapMemory;     // Owned image buffer released by destroy()
     uint8_t  blockDeviceIndex;   // Global block registry slot, or 0xFF
+    uint64_t blockRegistrationId; // Registry incarnation assigned at attach.
     uint64_t instanceId;         // Changes when a local RAM slot is reused
     char     name[32];          // Human-readable name (e.g., "ram0")
 };

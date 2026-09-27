@@ -331,28 +331,25 @@ static block::Status ata_pio_write(uint8_t devIdx,
 // Cache flush is deliberately separate from a block write. FAT commits call
 // this after data and metadata are complete, instead of paying for a device
 // cache flush after every cluster and FAT-entry update.
+static uint8_t ata_flush_read8(void*, uint16_t port)
+{
+    return arch::inb(port);
+}
+
+static void ata_flush_write8(void*, uint16_t port, uint8_t value)
+{
+    arch::outb(port, value);
+}
+
 static block::Status ata_pio_flush(uint8_t devIdx)
 {
     if (devIdx >= MAX_ATA_DEVICES || !s_devices[devIdx].active)
         return block::BLOCK_ERR_INVALID;
 
     ATADevice& dev = s_devices[devIdx];
-    if (!dev.flushCache && !dev.flushCacheExt)
-        return block::BLOCK_ERR_UNSUPPORTED;
-
-    if (!ata_wait_command_idle(dev.ioBase, 500000))
-        return block::BLOCK_ERR_IO;
-    arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_DRIVE_HEAD),
-               dev.isMaster ? 0xA0 : 0xB0);
-    delay_400ns(dev.ctrlBase);
-    arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_COMMAND),
-               dev.flushCacheExt ? ATA_CMD_CACHE_FLUSH_EXT : ATA_CMD_CACHE_FLUSH);
-    if (!ata_wait_command_idle(dev.ioBase, 500000))
-        return block::BLOCK_ERR_TIMEOUT;
-    const uint8_t status = arch::inb(static_cast<uint16_t>(dev.ioBase + ATA_REG_STATUS));
-    if (status & (ATA_SR_ERR | ATA_SR_DF)) return block::BLOCK_ERR_IO;
-
-    return block::BLOCK_OK;
+    const AtaFlushIoOps io = { nullptr, ata_flush_read8, ata_flush_write8 };
+    return ata_flush_command_with_io(dev.ioBase, dev.ctrlBase,
+        dev.isMaster != 0, dev.flushCache, dev.flushCacheExt, io);
 }
 
 // ================================================================
@@ -360,7 +357,10 @@ static block::Status ata_pio_flush(uint8_t devIdx)
 // ================================================================
 
 static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
-                          const char* prefix, uint8_t chanIdx)
+                          const char* prefix, uint8_t chanIdx,
+                          bool pciLocationValid = false,
+                          uint8_t pciBus = 0, uint8_t pciDevice = 0,
+                          uint8_t pciFunction = 0)
 {
 #if defined(__GNUC__) || defined(__clang__)
     serial::puts("[ATA] Probing channel ");
@@ -419,9 +419,11 @@ static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
         // Word 83's support bits are meaningful only when bits 15:14 mark
         // the word valid. Cache flush support is recorded per IDENTIFY data.
         const bool commandSets83Valid = (id.commandSets83 & 0xC000u) == 0x4000u;
+        const AtaFlushSupport flushSupport =
+            ata_flush_support_from_identify_word83(id.commandSets83);
         dev.lba48 = commandSets83Valid && (id.commandSets83 & (1 << 10)) != 0;
-        dev.flushCache = commandSets83Valid && (id.commandSets83 & (1 << 12)) != 0;
-        dev.flushCacheExt = commandSets83Valid && (id.commandSets83 & (1 << 13)) != 0;
+        dev.flushCache = flushSupport.flushCache;
+        dev.flushCacheExt = flushSupport.flushCacheExt;
 
         if (dev.lba48) {
             dev.totalSectors = id.lba48Sectors;
@@ -455,6 +457,14 @@ static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
         bdev.flushFn      = (dev.flushCache || dev.flushCacheExt)
             ? ata_pio_flush : nullptr;
         bdev.flushSemanticsKnown = bdev.flushFn != nullptr;
+        bdev.pciLocationValid = pciLocationValid;
+        bdev.pciSegment = 0; // Legacy PCI config mechanism addresses segment 0 only.
+        bdev.pciBus = pciBus;
+        bdev.pciDevice = pciDevice;
+        bdev.pciFunction = pciFunction;
+        bdev.ataTargetValid = true;
+        bdev.ataChannel = chanIdx;
+        bdev.ataTarget = drive;
         memcopy(bdev.name, dev.name, 6);
         memcopy(bdev.model, dev.model, sizeof(dev.model) - 1);
         memcopy(bdev.serial, dev.serial, sizeof(dev.serial) - 1);
@@ -485,11 +495,17 @@ static bool scan_pci_ide()
                 uint32_t classReg = pci_read32(static_cast<uint8_t>(bus), dev, func, 0x08);
                 uint8_t baseClass = static_cast<uint8_t>(classReg >> 24);
                 uint8_t subClass  = static_cast<uint8_t>(classReg >> 16);
+                uint8_t progIf    = static_cast<uint8_t>(classReg >> 8);
 
                 if (baseClass == 0x01 && subClass == 0x01) {
-                    // IDE controller found — use standard channel ports
-                    probe_channel(ATA_PRIMARY_IO, ATA_PRIMARY_CTRL, "pri", 0);
-                    probe_channel(ATA_SECONDARY_IO, ATA_SECONDARY_CTRL, "sec", 1);
+                    // The legacy port ranges are authoritative only for IDE
+                    // channels still in PCI compatibility mode.
+                    if ((progIf & 0x01u) == 0)
+                        probe_channel(ATA_PRIMARY_IO, ATA_PRIMARY_CTRL, "pri", 0,
+                                      true, static_cast<uint8_t>(bus), dev, func);
+                    if ((progIf & 0x04u) == 0)
+                        probe_channel(ATA_SECONDARY_IO, ATA_SECONDARY_CTRL, "sec", 1,
+                                      true, static_cast<uint8_t>(bus), dev, func);
                     found = true;
                     return found; // one IDE controller is enough for now
                 }

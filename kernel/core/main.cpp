@@ -35,6 +35,7 @@
 
 // Storage subsystem
 #include "include/kernel/block_device.h"
+#include "include/kernel/storage_manager.h"
 #include "include/kernel/ata.h"
 #include "include/kernel/nvme.h"
 #include "include/kernel/ramdisk.h"
@@ -757,6 +758,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         while(1) { }
     }
     
+    // Copy only the bounded descriptor bytes into kernel-owned storage before
+    // any transport is registered. Legacy/malformed metadata stays Unknown.
+    kernel::storage::initialize_boot_source(is_bootinfo ? bootinfo : nullptr);
+
     // Initialize framebuffer for graphics mode
     bool has_fb = false;
 #if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)

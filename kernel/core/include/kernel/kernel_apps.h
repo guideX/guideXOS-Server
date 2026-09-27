@@ -1212,6 +1212,8 @@ private:
         bool     writable;
         bool     flushSupported;
         storage::PersistenceClass persistence;
+        storage::BootSafety bootSafety;
+        storage::MountSafety mountSafety;
         storage::DiskState state;
         storage::InitializeDiskStatus initializeStatus;
         bool initializeAvailable;

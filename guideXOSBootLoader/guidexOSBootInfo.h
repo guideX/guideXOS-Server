@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #pragma pack(push, 1)
@@ -77,6 +78,51 @@ namespace guideXOS
     static const uint32_t NIC_FLAG_MAPPED = (1u << 1);
     static const uint32_t NIC_FLAG_ACTIVE = (1u << 2);
 
+    // A copied, bounded UEFI device path. It contains bytes only: firmware
+    // handles and protocol pointers never cross the handoff boundary.
+    static const uint32_t GUIDEXOS_BOOT_SOURCE_PATH_MAX = 256u;
+    static const uint16_t GUIDEXOS_BOOT_SOURCE_VERSION = 1u;
+    static const uint32_t BOOT_SOURCE_FLAG_VALID = (1u << 0);
+    static const uint32_t BOOT_SOURCE_FLAG_DEVICE_PATH_VALID = (1u << 1);
+    static const uint32_t BOOT_SOURCE_FLAG_TRUNCATED = (1u << 2);
+    static const uint32_t BOOT_SOURCE_FLAG_PCI_LOCATION_VALID = (1u << 3);
+
+    struct BootSourceDescriptor
+    {
+        uint16_t Version;
+        uint16_t Size;
+        uint32_t Flags;
+        uint16_t DevicePathLength;
+        uint16_t Reserved;
+        uint32_t PciSegment;
+        uint8_t PciBus;
+        uint8_t PciDevice;
+        uint8_t PciFunction;
+        uint8_t ReservedPci;
+        uint8_t DevicePath[GUIDEXOS_BOOT_SOURCE_PATH_MAX];
+    };
+
+    static inline bool guidexos_uefi_device_path_valid(
+        const uint8_t* bytes, uint16_t length)
+    {
+        if (!bytes || length < 4u || length > GUIDEXOS_BOOT_SOURCE_PATH_MAX)
+            return false;
+        uint32_t offset = 0;
+        while (offset + 4u <= length) {
+            const uint8_t type = bytes[offset];
+            const uint8_t subtype = bytes[offset + 1u];
+            const uint16_t nodeLength = static_cast<uint16_t>(bytes[offset + 2u]) |
+                (static_cast<uint16_t>(bytes[offset + 3u]) << 8);
+            if (nodeLength < 4u || nodeLength > length - offset) return false;
+            if (type == 0x7Fu) {
+                return subtype == 0xFFu && nodeLength == 4u &&
+                       offset + nodeLength == length;
+            }
+            offset += nodeLength;
+        }
+        return false;
+    }
+
     struct BootInfo
     {
         uint32_t Magic;
@@ -106,6 +152,9 @@ namespace guideXOS
         // NIC information (uses former Reserved space)
         NicInfo  Nic;
         uint64_t KernelPhysicalBase;
+        // Appended so the kernel can safely recognize legacy BootInfo v2,
+        // where this descriptor is absent.
+        BootSourceDescriptor BootSource;
     };
 
     static inline bool guidexos_framebuffer_descriptor_identity_matches(
@@ -207,9 +256,29 @@ namespace guideXOS
 
 namespace guideXOS
 {
-    // Magic and version constants for BootInfo v2
+    // Magic and version constants for BootInfo v2/v3.
     static const uint32_t GUIDEXOS_BOOTINFO_MAGIC   = 0x49425847; // 'GXBI'
-    static const uint16_t GUIDEXOS_BOOTINFO_VERSION = 2;
+    static const uint16_t GUIDEXOS_BOOTINFO_LEGACY_VERSION = 2;
+    static const uint16_t GUIDEXOS_BOOTINFO_VERSION = 3;
+    static const uint16_t GUIDEXOS_BOOTINFO_LEGACY_SIZE =
+        static_cast<uint16_t>(sizeof(BootInfo) - sizeof(BootSourceDescriptor));
+
+    static inline bool guidexos_boot_source_descriptor_valid(
+        const BootSourceDescriptor* source)
+    {
+        if (!source || source->Version != GUIDEXOS_BOOT_SOURCE_VERSION ||
+            source->Size != sizeof(BootSourceDescriptor) ||
+            (source->Flags & (BOOT_SOURCE_FLAG_VALID |
+                              BOOT_SOURCE_FLAG_DEVICE_PATH_VALID)) !=
+                (BOOT_SOURCE_FLAG_VALID | BOOT_SOURCE_FLAG_DEVICE_PATH_VALID) ||
+            source->DevicePathLength < 4u ||
+            source->DevicePathLength > GUIDEXOS_BOOT_SOURCE_PATH_MAX ||
+            !guidexos_uefi_device_path_valid(source->DevicePath,
+                                             source->DevicePathLength)) {
+            return false;
+        }
+        return true;
+    }
 
     // Early panic: implemented in a .cpp file, infinite loop and/or framebuffer error.
     [[noreturn]] void guidexos_early_panic(const BootInfo* bi);
@@ -218,9 +287,10 @@ namespace guideXOS
     static inline bool guidexos_bootinfo_checksum_valid(const BootInfo* bi)
     {
         if (!bi) return false;
-        if (bi->Size == 0u) return false;
+        if (bi->Size != GUIDEXOS_BOOTINFO_LEGACY_SIZE &&
+            bi->Size != sizeof(BootInfo)) return false;
         uint32_t byteCount = bi->Size & ~0x3u; // round down to multiple of 4
-        if (byteCount < sizeof(BootInfo)) return false;
+        if (byteCount < GUIDEXOS_BOOTINFO_LEGACY_SIZE) return false;
 
         const uint32_t* p = reinterpret_cast<const uint32_t*>(bi);
         uint32_t count = byteCount / 4u;
@@ -230,26 +300,22 @@ namespace guideXOS
         return (sum == 0u);
     }
 
-    // Very early, heap-less validation of BootInfo v2
+    // Very early, heap-less validation of BootInfo v2/v3.
     static inline void guidexos_validate_bootinfo_or_panic(const BootInfo* bi)
     {
         if (!bi) {
             guidexos_early_panic(nullptr);
         }
 
-        // Basic size check before trusting any other fields
-        if (bi->Size < sizeof(BootInfo)) {
-            guidexos_early_panic(nullptr);
-        }
-
-        // 1. Magic, version, size (size equality is strict for v1)
+        // 1. Magic, version, and exact known size. Legacy v2 safely has no
+        // boot-source tail, so its descriptor must never be read.
         if (bi->Magic != GUIDEXOS_BOOTINFO_MAGIC) {
             guidexos_early_panic(bi);
         }
-        if (bi->Version != GUIDEXOS_BOOTINFO_VERSION) {
-            guidexos_early_panic(bi);
-        }
-        if (bi->Size != sizeof(BootInfo)) {
+        if (!((bi->Version == GUIDEXOS_BOOTINFO_LEGACY_VERSION &&
+               bi->Size == GUIDEXOS_BOOTINFO_LEGACY_SIZE) ||
+              (bi->Version == GUIDEXOS_BOOTINFO_VERSION &&
+               bi->Size == sizeof(BootInfo)))) {
             guidexos_early_panic(bi);
         }
 

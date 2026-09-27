@@ -28,6 +28,8 @@ Forbidden:
 #include <Library/PrintLib.h>
 #include <Protocol/SimpleFileSystem.h>
 #include <Protocol/LoadedImage.h>
+#include <Protocol/DevicePath.h>
+#include <Protocol/PciRootBridgeIo.h>
 #include <Protocol/GraphicsOutput.h>
 #include <Guid/Acpi.h>
 #include <Guid/FileInfo.h>
@@ -686,6 +688,234 @@ static void ZeroBootInfo(BootInfo* bi) {
     SetMem(bi, sizeof(BootInfo), 0);
 }
 
+static bool CaptureBootSource(EFI_HANDLE imageHandle,
+                              EFI_SYSTEM_TABLE* systemTable,
+                              guideXOS::BootSourceDescriptor* output)
+{
+    if (!systemTable || !systemTable->BootServices || !output) return false;
+    SetMem(output, sizeof(*output), 0);
+    output->Version = guideXOS::GUIDEXOS_BOOT_SOURCE_VERSION;
+    output->Size = sizeof(*output);
+
+    EFI_LOADED_IMAGE_PROTOCOL* loadedImage = NULL;
+    EFI_STATUS status = systemTable->BootServices->HandleProtocol(
+        imageHandle, &gEfiLoadedImageProtocolGuid,
+        reinterpret_cast<void**>(&loadedImage));
+    if (EFI_ERROR(status) || !loadedImage || !loadedImage->DeviceHandle)
+        return false;
+
+    EFI_DEVICE_PATH_PROTOCOL* devicePath = NULL;
+    status = systemTable->BootServices->HandleProtocol(
+        loadedImage->DeviceHandle, &gEfiDevicePathProtocolGuid,
+        reinterpret_cast<void**>(&devicePath));
+    if (EFI_ERROR(status) || !devicePath) return false;
+
+    const UINT8* source = reinterpret_cast<const UINT8*>(devicePath);
+    UINT32 offset = 0u;
+    while (offset + 4u <= guideXOS::GUIDEXOS_BOOT_SOURCE_PATH_MAX) {
+        const UINT8 type = source[offset];
+        const UINT8 subtype = source[offset + 1u];
+        const UINT16 nodeLength = static_cast<UINT16>(source[offset + 2u]) |
+            (static_cast<UINT16>(source[offset + 3u]) << 8);
+        if (nodeLength < 4u ||
+            nodeLength > guideXOS::GUIDEXOS_BOOT_SOURCE_PATH_MAX - offset) {
+            output->Flags = guideXOS::BOOT_SOURCE_FLAG_TRUNCATED;
+            output->DevicePathLength = 0u;
+            return false;
+        }
+        CopyMem(output->DevicePath + offset, source + offset, nodeLength);
+        offset += nodeLength;
+        if (type == 0x7Fu) {
+            if (subtype != 0xFFu || nodeLength != 4u ||
+                !guideXOS::guidexos_uefi_device_path_valid(
+                    output->DevicePath, static_cast<UINT16>(offset))) {
+                output->Flags = 0u;
+                output->DevicePathLength = 0u;
+                return false;
+            }
+            output->DevicePathLength = static_cast<UINT16>(offset);
+            output->Flags = guideXOS::BOOT_SOURCE_FLAG_VALID |
+                            guideXOS::BOOT_SOURCE_FLAG_DEVICE_PATH_VALID;
+            return true;
+        }
+    }
+
+    output->Flags = guideXOS::BOOT_SOURCE_FLAG_TRUNCATED;
+    output->DevicePathLength = 0u;
+    return false;
+}
+
+static UINT16 BootSourceReadU16(const UINT8* p)
+{
+    return static_cast<UINT16>(p[0]) | (static_cast<UINT16>(p[1]) << 8);
+}
+
+static UINT32 BootSourceReadU32(const UINT8* p)
+{
+    return static_cast<UINT32>(p[0]) |
+        (static_cast<UINT32>(p[1]) << 8) |
+        (static_cast<UINT32>(p[2]) << 16) |
+        (static_cast<UINT32>(p[3]) << 24);
+}
+
+static UINT64 BootSourceReadU64(const UINT8* p)
+{
+    return static_cast<UINT64>(BootSourceReadU32(p)) |
+        (static_cast<UINT64>(BootSourceReadU32(p + 4)) << 32);
+}
+
+static bool BootSourceRootNodeMatches(const UINT8* path, UINT16 pathLength,
+                                      const UINT8* rootPath)
+{
+    if (!path || !rootPath || pathLength < 16u) return false;
+    // UEFI PCI paths begin with the ACPI node that identifies their root bus.
+    return path[0] == 0x02u && path[1] == 0x01u &&
+        BootSourceReadU16(path + 2) == 12u &&
+        rootPath[0] == 0x02u && rootPath[1] == 0x01u &&
+        BootSourceReadU16(rootPath + 2) == 12u &&
+        BootSourceReadU32(path + 4) == BootSourceReadU32(rootPath + 4) &&
+        BootSourceReadU32(path + 8) == BootSourceReadU32(rootPath + 8);
+}
+
+static bool BootSourceRootBusRange(EFI_SYSTEM_TABLE* systemTable,
+                                   EFI_PCI_ROOT_BRIDGE_IO_PROTOCOL* root,
+                                   UINT8* firstBus)
+{
+    if (!root || !firstBus || !root->Fields[17]) return false;
+    typedef EFI_STATUS (EFIAPI *ROOT_CONFIGURATION)(
+        EFI_PCI_ROOT_BRIDGE_IO_PROTOCOL*, VOID**);
+    ROOT_CONFIGURATION configuration = reinterpret_cast<ROOT_CONFIGURATION>(
+        root->Fields[17]);
+    VOID* resources = NULL;
+    EFI_STATUS status = configuration(root, &resources);
+    if (EFI_ERROR(status) || !resources) return false;
+
+    bool found = false;
+    const UINT8* bytes = reinterpret_cast<const UINT8*>(resources);
+    UINT32 offset = 0u;
+    while (offset < 512u) {
+        const UINT8 tag = bytes[offset];
+        if (tag == 0x79u) break; // ACPI end-tag descriptor
+        if (tag & 0x80u) {
+            if (offset + 3u > 512u) break;
+            const UINT16 length = BootSourceReadU16(bytes + offset + 1u);
+            if (length > 512u - offset - 3u) break;
+            const UINT8* descriptor = bytes + offset;
+            const UINT8 largeType = tag & 0x7Fu;
+            if ((largeType == 0x0Au && length >= 43u &&
+                 descriptor[3] == 2u) ||
+                (largeType == 0x07u && length >= 23u &&
+                 descriptor[3] == 2u) ||
+                (largeType == 0x08u && length >= 13u &&
+                 descriptor[3] == 2u)) {
+                const UINT64 minimum = largeType == 0x0Au
+                    ? BootSourceReadU64(descriptor + 14u)
+                    : (largeType == 0x07u
+                        ? BootSourceReadU32(descriptor + 10u)
+                        : BootSourceReadU16(descriptor + 8u));
+                if (minimum <= 0xFFu) {
+                    *firstBus = static_cast<UINT8>(minimum);
+                    found = true;
+                    break;
+                }
+            }
+            offset += 3u + length;
+        } else {
+            const UINT32 length = tag & 0x07u;
+            if (offset + 1u + length > 512u) break;
+            offset += 1u + length;
+        }
+    }
+    systemTable->BootServices->FreePool(resources);
+    return found;
+}
+
+static bool ResolveBootSourcePciLocation(
+    EFI_SYSTEM_TABLE* systemTable,
+    guideXOS::BootSourceDescriptor* source)
+{
+    if (!systemTable || !systemTable->BootServices || !source ||
+        !guideXOS::guidexos_boot_source_descriptor_valid(source)) return false;
+
+    UINT8 pciDevices[32];
+    UINT8 pciFunctions[32];
+    UINT32 pciCount = 0u;
+    UINT32 offset = 0u;
+    while (offset < source->DevicePathLength) {
+        const UINT8* node = source->DevicePath + offset;
+        const UINT16 length = BootSourceReadU16(node + 2u);
+        if (node[0] == 0x01u && node[1] == 0x01u) {
+            if (length != 6u || pciCount >= 32u) return false;
+            pciFunctions[pciCount] = node[4];
+            pciDevices[pciCount] = node[5];
+            ++pciCount;
+        }
+        offset += length;
+    }
+    if (pciCount == 0u) return false;
+
+    auto locateHandleBuffer = reinterpret_cast<EFI_LOCATE_HANDLE_BUFFER>(
+        systemTable->BootServices->LocateHandleBuffer);
+    if (!locateHandleBuffer) return false;
+    EFI_HANDLE* handles = NULL;
+    UINTN handleCount = 0u;
+    EFI_STATUS status = locateHandleBuffer(ByProtocol,
+        &gEfiPciRootBridgeIoProtocolGuid, NULL, &handleCount, &handles);
+    if (EFI_ERROR(status) || !handles) return false;
+
+    EFI_PCI_ROOT_BRIDGE_IO_PROTOCOL* selectedRoot = NULL;
+    UINT32 matchingRoots = 0u;
+    for (UINTN i = 0; i < handleCount; ++i) {
+        EFI_PCI_ROOT_BRIDGE_IO_PROTOCOL* candidateRoot = NULL;
+        EFI_DEVICE_PATH_PROTOCOL* candidatePath = NULL;
+        status = systemTable->BootServices->HandleProtocol(handles[i],
+            &gEfiPciRootBridgeIoProtocolGuid,
+            reinterpret_cast<VOID**>(&candidateRoot));
+        if (EFI_ERROR(status) || !candidateRoot) continue;
+        status = systemTable->BootServices->HandleProtocol(handles[i],
+            &gEfiDevicePathProtocolGuid,
+            reinterpret_cast<VOID**>(&candidatePath));
+        if (EFI_ERROR(status) || !candidatePath) continue;
+        if (BootSourceRootNodeMatches(source->DevicePath,
+                source->DevicePathLength,
+                reinterpret_cast<const UINT8*>(candidatePath))) {
+            selectedRoot = candidateRoot;
+            ++matchingRoots;
+        }
+    }
+    systemTable->BootServices->FreePool(handles);
+    if (matchingRoots != 1u || !selectedRoot) return false;
+
+    UINT8 currentBus = 0u;
+    if (!BootSourceRootBusRange(systemTable, selectedRoot, &currentBus))
+        return false;
+    typedef EFI_STATUS (EFIAPI *ROOT_PCI_ACCESS)(
+        EFI_PCI_ROOT_BRIDGE_IO_PROTOCOL*, UINT32, UINT64, UINTN, VOID*);
+    ROOT_PCI_ACCESS pciRead = reinterpret_cast<ROOT_PCI_ACCESS>(
+        selectedRoot->Fields[7]);
+    if (!pciRead) return false;
+
+    for (UINT32 i = 0u; i + 1u < pciCount; ++i) {
+        const UINT64 address = (static_cast<UINT64>(currentBus) << 24) |
+            (static_cast<UINT64>(pciDevices[i]) << 16) |
+            (static_cast<UINT64>(pciFunctions[i]) << 8) | 0x18u;
+        UINT32 buses = 0u;
+        status = pciRead(selectedRoot, 2u, address, 1u, &buses);
+        if (EFI_ERROR(status) || (buses & 0xFFu) != currentBus) return false;
+        const UINT8 secondaryBus = static_cast<UINT8>(buses >> 8);
+        const UINT8 subordinateBus = static_cast<UINT8>(buses >> 16);
+        if (secondaryBus == 0u || subordinateBus < secondaryBus) return false;
+        currentBus = secondaryBus;
+    }
+
+    source->PciSegment = selectedRoot->SegmentNumber;
+    source->PciBus = currentBus;
+    source->PciDevice = pciDevices[pciCount - 1u];
+    source->PciFunction = pciFunctions[pciCount - 1u];
+    source->Flags |= guideXOS::BOOT_SOURCE_FLAG_PCI_LOCATION_VALID;
+    return true;
+}
+
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     // Set global SystemTable pointer for uefi_shim.h functions
     gST = SystemTable;
@@ -821,6 +1051,23 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
 
     v1BootInfo->BootMode = guideXOS::BootMode::Uefi;
     // Preserve any flags already set (e.g., ramdisk valid)
+
+    // Copy firmware-owned path bytes before ExitBootServices. The kernel gets
+    // no UEFI handle or protocol pointer, and malformed/oversized paths stay
+    // explicitly invalid so storage policy fails closed.
+    if (!CaptureBootSource(ImageHandle, SystemTable, &v1BootInfo->BootSource)) {
+        Print((CONST CHAR16*)L"[BOOT] Boot-source device path unavailable or invalid; provenance remains unknown\n");
+    } else {
+        if (ResolveBootSourcePciLocation(SystemTable, &v1BootInfo->BootSource)) {
+            Print((CONST CHAR16*)L"[BOOT] Resolved PCI boot controller %u:%u:%u:%u\n",
+                v1BootInfo->BootSource.PciSegment,
+                v1BootInfo->BootSource.PciBus,
+                v1BootInfo->BootSource.PciDevice,
+                v1BootInfo->BootSource.PciFunction);
+        }
+        Print((CONST CHAR16*)L"[BOOT] Copied bounded boot-source device path (%u bytes)\n",
+            (UINT32)v1BootInfo->BootSource.DevicePathLength);
+    }
 
     // ACPI RSDP pointer (64-bit physical)
     v1BootInfo->AcpiRsdp = rsdp ? (uint64_t)(UINTN)rsdp : 0ull;

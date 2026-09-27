@@ -1,5 +1,6 @@
 #include "include/kernel/storage_manager.h"
 #include "include/kernel/vfs.h"
+#include "../../guideXOSBootLoader/guidexOSBootInfo.h"
 
 namespace kernel {
 namespace storage {
@@ -10,6 +11,76 @@ namespace {
 // preflight parser result in bounded BSS storage; callers must serialize this
 // validation path until the storage layer grows an operation lock.
 static PartitionTableModel s_validationTableScratch;
+static guideXOS::BootSourceDescriptor s_bootSource;
+static bool s_bootSourceValid = false;
+
+static uint16_t read_u16(const uint8_t* p)
+{
+    return static_cast<uint16_t>(p[0]) |
+        (static_cast<uint16_t>(p[1]) << 8);
+}
+
+static uint32_t read_u32(const uint8_t* p)
+{
+    return static_cast<uint32_t>(p[0]) |
+        (static_cast<uint32_t>(p[1]) << 8) |
+        (static_cast<uint32_t>(p[2]) << 16) |
+        (static_cast<uint32_t>(p[3]) << 24);
+}
+
+static const uint8_t* find_device_path_node(uint8_t type, uint8_t subtype,
+                                           uint16_t minLength)
+{
+    if (!s_bootSourceValid) return nullptr;
+    uint32_t offset = 0;
+    while (offset < s_bootSource.DevicePathLength) {
+        const uint8_t* node = s_bootSource.DevicePath + offset;
+        const uint16_t length = read_u16(node + 2);
+        if (node[0] == type && node[1] == subtype && length >= minLength)
+            return node;
+        offset += length;
+    }
+    return nullptr;
+}
+
+static block::BootProvenance match_boot_source(const block::BlockDevice& device)
+{
+    if (device.bootProvenance != block::BOOT_PROVENANCE_UNKNOWN)
+        return device.bootProvenance; // Explicit hosted/test or RAM-disk state.
+    if (!s_bootSourceValid ||
+        !(s_bootSource.Flags & guideXOS::BOOT_SOURCE_FLAG_PCI_LOCATION_VALID) ||
+        !device.pciLocationValid)
+        return block::BOOT_PROVENANCE_UNKNOWN;
+
+    if (device.pciSegment != s_bootSource.PciSegment ||
+        device.pciBus != s_bootSource.PciBus ||
+        device.pciDevice != s_bootSource.PciDevice ||
+        device.pciFunction != s_bootSource.PciFunction)
+        return block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT;
+
+    // Matching the controller and transport endpoint protects the whole disk:
+    // UEFI's later Hard Drive media node may name only one partition.
+    const uint8_t* nvme = find_device_path_node(0x03u, 0x17u, 16u);
+    if (nvme && device.type == block::BDEV_NVME) {
+        return read_u32(nvme + 4) == device.namespaceId
+            ? block::BOOT_PROVENANCE_BOOT_BACKING
+            : block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT;
+    }
+
+    const uint8_t* atapi = find_device_path_node(0x03u, 0x01u, 8u);
+    if (atapi && device.type == block::BDEV_ATA_PIO && device.ataTargetValid) {
+        const uint8_t channel = atapi[4];
+        const uint8_t target = atapi[5];
+        return channel == device.ataChannel && target == device.ataTarget
+            ? block::BOOT_PROVENANCE_BOOT_BACKING
+            : block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT;
+    }
+
+    // UEFI SATA paths encode HBA port and multiplier port. The legacy ATA PIO
+    // driver does not retain an authoritative mapping for these values.
+    (void)find_device_path_node(0x03u, 0x12u, 10u);
+    return block::BOOT_PROVENANCE_UNKNOWN;
+}
 
 static void copy_text(char* dst, size_t capacity, const char* src)
 {
@@ -64,8 +135,9 @@ bool checked_lba_range(uint64_t totalSectors, uint64_t lba, uint64_t count)
 
 bool query_device_capabilities(uint8_t globalIndex, DeviceCapabilities& out)
 {
-    const block::BlockDevice* dev = block::get_device(globalIndex);
-    if (!dev) return false;
+    block::BlockDevice snapshot;
+    if (!block::copy_device(globalIndex, snapshot)) return false;
+    const block::BlockDevice* dev = &snapshot;
 
     out.globalIndex = globalIndex;
     out.transport = dev->type;
@@ -87,7 +159,10 @@ bool query_device_capabilities(uint8_t globalIndex, DeviceCapabilities& out)
     if (dev->type == block::BDEV_RAMDISK) {
         out.persistence = PERSISTENCE_VOLATILE_MEMORY;
     } else if (dev->writeCompletionDurable) {
-        out.persistence = PERSISTENCE_SYNCHRONOUS_DURABLE;
+        // A device cannot simultaneously claim that each write is durable and
+        // expose an untrusted/contradictory explicit-flush contract.
+        out.persistence = dev->flushFn
+            ? PERSISTENCE_UNKNOWN : PERSISTENCE_SYNCHRONOUS_DURABLE;
     } else if (dev->flushFn) {
         out.persistence = dev->flushSemanticsKnown
             ? PERSISTENCE_FLUSH_REQUIRED : PERSISTENCE_UNKNOWN;
@@ -152,11 +227,13 @@ block::Status write_sectors_safe(uint8_t globalIndex, uint64_t lba,
 bool capture_target_identity(uint8_t globalIndex, TargetIdentity& out)
 {
     const uint64_t generation = block::registry_generation();
-    const block::BlockDevice* dev = block::get_device(globalIndex);
-    if (!dev) return false;
+    block::BlockDevice snapshotDevice;
+    if (!block::copy_device(globalIndex, snapshotDevice)) return false;
+    const block::BlockDevice* dev = &snapshotDevice;
 
     TargetIdentity snapshot;
     snapshot.registryGeneration = generation;
+    snapshot.registrationId = dev->registrationId;
     snapshot.globalIndex = globalIndex;
     snapshot.transport = dev->type;
     snapshot.driverIndex = dev->driverIndex;
@@ -174,6 +251,7 @@ bool target_identities_equal(const TargetIdentity& left,
                              const TargetIdentity& right)
 {
     return left.registryGeneration == right.registryGeneration &&
+           left.registrationId == right.registrationId &&
            left.globalIndex == right.globalIndex &&
            left.transport == right.transport &&
            left.driverIndex == right.driverIndex &&
@@ -186,7 +264,12 @@ bool target_identities_equal(const TargetIdentity& left,
 
 RevalidationStatus revalidate_target_identity(const TargetIdentity& snapshot)
 {
-    if (snapshot.registryGeneration != block::registry_generation())
+    const uint64_t currentGeneration = block::registry_generation();
+    // A saturated generation can no longer distinguish mutations. Fail
+    // closed instead of allowing equality after an integer wrap/ABA.
+    if (snapshot.registryGeneration == UINT64_MAX ||
+        currentGeneration == UINT64_MAX ||
+        snapshot.registryGeneration != currentGeneration)
         return TARGET_REGISTRY_CHANGED;
     TargetIdentity current;
     if (!capture_target_identity(snapshot.globalIndex, current))
@@ -224,9 +307,9 @@ BootProtection query_boot_protection(const TargetIdentity& target)
     result.safety = BOOT_DEVICE_IDENTITY_UNKNOWN;
     if (revalidate_target_identity(target) != TARGET_VALID) return result;
 
-    const block::BlockDevice* device = block::get_device(target.globalIndex);
-    if (!device) return result;
-    switch (device->bootProvenance) {
+    block::BlockDevice device;
+    if (!block::copy_device(target.globalIndex, device)) return result;
+    switch (match_boot_source(device)) {
         case block::BOOT_PROVENANCE_BOOT_BACKING:
             result.safety = BOOT_DEVICE_IS_TARGET;
             break;
@@ -241,6 +324,40 @@ BootProtection query_boot_protection(const TargetIdentity& target)
     if (revalidate_target_identity(target) != TARGET_VALID)
         result.safety = BOOT_DEVICE_IDENTITY_UNKNOWN;
     return result;
+}
+
+void initialize_boot_source(const guideXOS::BootInfo* bootInfo)
+{
+    s_bootSourceValid = false;
+    for (size_t i = 0; i < sizeof(s_bootSource); ++i)
+        reinterpret_cast<uint8_t*>(&s_bootSource)[i] = 0;
+    if (!bootInfo || bootInfo->Magic != guideXOS::GUIDEXOS_BOOTINFO_MAGIC ||
+        bootInfo->Version != guideXOS::GUIDEXOS_BOOTINFO_VERSION ||
+        bootInfo->Size != sizeof(guideXOS::BootInfo) ||
+        !guideXOS::guidexos_bootinfo_checksum_valid(bootInfo)) return;
+    set_boot_source_descriptor(&bootInfo->BootSource);
+}
+
+bool set_boot_source_descriptor(const guideXOS::BootSourceDescriptor* source)
+{
+    s_bootSourceValid = false;
+    for (size_t i = 0; i < sizeof(s_bootSource); ++i)
+        reinterpret_cast<uint8_t*>(&s_bootSource)[i] = 0;
+    if (!guideXOS::guidexos_boot_source_descriptor_valid(source)) return false;
+    const uint8_t* input = reinterpret_cast<const uint8_t*>(source);
+    uint8_t* output = reinterpret_cast<uint8_t*>(&s_bootSource);
+    for (size_t i = 0; i < sizeof(s_bootSource); ++i) output[i] = input[i];
+    s_bootSourceValid = true;
+    return true;
+}
+
+const char* boot_provenance_name(block::BootProvenance provenance)
+{
+    switch (provenance) {
+        case block::BOOT_PROVENANCE_BOOT_BACKING: return "DefinitelyBoot";
+        case block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT: return "DefinitelyNotBoot";
+        case block::BOOT_PROVENANCE_UNKNOWN: default: return "Unknown";
+    }
 }
 
 bool validate_destructive_target(const TargetIdentity& target,

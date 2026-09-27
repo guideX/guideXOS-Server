@@ -22,6 +22,9 @@ static uint64_t s_operationOwner = 0;
 static uint64_t s_nextOperationOwner = 0;
 static bool s_activePlanValid = false;
 static InitializeDiskPlan s_activePlan;
+static bool s_operationTargetPinned = false;
+static uint8_t s_pinnedTargetIndex = 0xFFu;
+static uint64_t s_pinnedTargetRegistrationId = 0;
 
 struct MetadataSnapshot {
     alignas(4096) uint8_t mbr[MAX_LOGICAL_SECTOR_SIZE];
@@ -806,7 +809,13 @@ StorageOperationLockStatus try_acquire_storage_operation(
     s_operationHeld = true;
     s_operationExecuting = false;
     s_activePlanValid = false;
+    s_operationTargetPinned = false;
+    s_pinnedTargetIndex = 0xFFu;
+    s_pinnedTargetRegistrationId = 0;
     lease.ownerToken = s_operationOwner;
+    lease.targetPinned = false;
+    lease.pinnedIndex = 0xFFu;
+    lease.pinnedRegistrationId = 0;
     unlock_operation_metadata();
     return STORAGE_OPERATION_LOCK_ACQUIRED;
 }
@@ -820,13 +829,23 @@ bool release_storage_operation(StorageOperationLease& lease)
         unlock_operation_metadata();
         return false;
     }
+    const bool unpin = s_operationTargetPinned;
+    const uint8_t pinnedIndex = s_pinnedTargetIndex;
+    const uint64_t registrationId = s_pinnedTargetRegistrationId;
+    s_operationTargetPinned = false;
+    s_pinnedTargetIndex = 0xFFu;
+    s_pinnedTargetRegistrationId = 0;
     s_operationHeld = false;
     s_operationExecuting = false;
     s_operationOwner = 0;
     if (s_activePlanValid && s_activePlan.ownerToken == lease.ownerToken)
         s_activePlanValid = false;
     lease.ownerToken = 0;
+    lease.targetPinned = false;
+    lease.pinnedIndex = 0xFFu;
+    lease.pinnedRegistrationId = 0;
     unlock_operation_metadata();
+    if (unpin) block::unpin_device(pinnedIndex, registrationId);
     return true;
 }
 
@@ -853,13 +872,23 @@ bool complete_storage_operation_execution(StorageOperationLease& lease)
         unlock_operation_metadata();
         return false;
     }
+    const bool unpin = s_operationTargetPinned;
+    const uint8_t pinnedIndex = s_pinnedTargetIndex;
+    const uint64_t registrationId = s_pinnedTargetRegistrationId;
+    s_operationTargetPinned = false;
+    s_pinnedTargetIndex = 0xFFu;
+    s_pinnedTargetRegistrationId = 0;
     s_operationHeld = false;
     s_operationExecuting = false;
     s_operationOwner = 0;
     if (s_activePlanValid && s_activePlan.ownerToken == lease.ownerToken)
         s_activePlanValid = false;
     lease.ownerToken = 0;
+    lease.targetPinned = false;
+    lease.pinnedIndex = 0xFFu;
+    lease.pinnedRegistrationId = 0;
     unlock_operation_metadata();
+    if (unpin) block::unpin_device(pinnedIndex, registrationId);
     return true;
 }
 
@@ -870,6 +899,32 @@ bool storage_operation_lease_is_current(const StorageOperationLease& lease)
     const bool current = s_operationHeld && s_operationOwner == lease.ownerToken;
     unlock_operation_metadata();
     return current;
+}
+
+bool pin_storage_operation_target(StorageOperationLease& lease,
+                                  const TargetIdentity& target)
+{
+    if (!storage_operation_lease_is_current(lease) ||
+        target.registrationId == 0) return false;
+    if (lease.targetPinned)
+        return lease.pinnedIndex == target.globalIndex &&
+               lease.pinnedRegistrationId == target.registrationId;
+    if (!block::pin_device(target.globalIndex, target.registrationId)) return false;
+
+    lock_operation_metadata();
+    const bool valid = s_operationHeld && s_operationOwner == lease.ownerToken &&
+        !s_operationTargetPinned;
+    if (valid) {
+        s_operationTargetPinned = true;
+        s_pinnedTargetIndex = target.globalIndex;
+        s_pinnedTargetRegistrationId = target.registrationId;
+        lease.targetPinned = true;
+        lease.pinnedIndex = target.globalIndex;
+        lease.pinnedRegistrationId = target.registrationId;
+    }
+    unlock_operation_metadata();
+    if (!valid) block::unpin_device(target.globalIndex, target.registrationId);
+    return valid;
 }
 
 bool storage_operation_active()
@@ -892,10 +947,18 @@ InitializeDiskStatus probe_initialize_target(
     const TargetIdentity& target, PartitionScheme scheme,
     InitializeTargetValidation& validation)
 {
-    StorageOperationLease lease = {0};
+    StorageOperationLease lease = {};
     if (try_acquire_storage_operation(lease) != STORAGE_OPERATION_LOCK_ACQUIRED) {
         reset_validation(validation);
         validation.status = INITIALIZE_DISK_OPERATION_BUSY;
+        return validation.status;
+    }
+    if (!pin_storage_operation_target(lease, target)) {
+        reset_validation(validation);
+        validation.status = map_identity_status(revalidate_target_identity(target));
+        if (validation.status == INITIALIZE_DISK_SUCCESS)
+            validation.status = INITIALIZE_DISK_IDENTITY_CHANGED;
+        release_storage_operation(lease);
         return validation.status;
     }
     InitializeDiskStatus status = validate_target_impl(target, scheme, lease,
@@ -946,7 +1009,7 @@ InitializeDiskStatus prepare_initialize_disk(
         return result.status;
     }
 
-    StorageOperationLease lease = {0};
+    StorageOperationLease lease = {};
     const StorageOperationLockStatus lockStatus =
         try_acquire_storage_operation(lease);
     if (lockStatus != STORAGE_OPERATION_LOCK_ACQUIRED) {
@@ -955,6 +1018,17 @@ InitializeDiskStatus prepare_initialize_disk(
             : INITIALIZE_DISK_OPERATION_OWNERSHIP_INVALID;
         result.stage = INITIALIZE_STAGE_FAILED;
         set_diagnostic(result, initialize_disk_status_name(result.status));
+        return result.status;
+    }
+
+    if (!pin_storage_operation_target(lease, request.targetSnapshot)) {
+        result.status = map_identity_status(
+            revalidate_target_identity(request.targetSnapshot));
+        if (result.status == INITIALIZE_DISK_SUCCESS)
+            result.status = INITIALIZE_DISK_IDENTITY_CHANGED;
+        result.stage = INITIALIZE_STAGE_FAILED;
+        set_diagnostic(result, initialize_disk_status_name(result.status));
+        release_storage_operation(lease);
         return result.status;
     }
 
@@ -1064,7 +1138,8 @@ InitializeDiskStatus prepare_initialize_disk(
 
 bool cancel_initialize_disk(InitializeDiskPlan& plan)
 {
-    StorageOperationLease lease = { plan.ownerToken };
+    StorageOperationLease lease = {};
+    lease.ownerToken = plan.ownerToken;
     const bool released = release_storage_operation(lease);
     if (released) {
         plan.ownerToken = 0;
@@ -1094,7 +1169,8 @@ InitializeDiskStatus execute_initialize_disk(
         }
         set_diagnostic(result, initialize_disk_status_name(result.status));
         if (haveConfirmedPlan && plan.ownerToken == confirmedPlan.ownerToken) {
-            StorageOperationLease invalidPlanLease = { confirmedPlan.ownerToken };
+            StorageOperationLease invalidPlanLease = {};
+            invalidPlanLease.ownerToken = confirmedPlan.ownerToken;
             if (release_storage_operation(invalidPlanLease)) {
                 plan.ownerToken = 0;
                 plan.confirmationReady = false;
@@ -1103,7 +1179,8 @@ InitializeDiskStatus execute_initialize_disk(
         }
         return result.status;
     }
-    StorageOperationLease lease = { plan.ownerToken };
+    StorageOperationLease lease = {};
+    lease.ownerToken = plan.ownerToken;
     if (!storage_operation_lease_is_current(lease)) {
         result.status = INITIALIZE_DISK_OPERATION_OWNERSHIP_INVALID;
         result.stage = INITIALIZE_STAGE_FAILED;
@@ -1212,7 +1289,8 @@ InitializeDiskStatus execute_initialize_disk(
     set_diagnostic(result, plan.requestedScheme == PARTITION_SCHEME_GPT
         ? "GPT initialized and verified; the disk has no partitions."
         : "MBR initialized and verified; the disk has no partitions.");
-    StorageOperationLease releaseLease = { plan.ownerToken };
+    StorageOperationLease releaseLease = {};
+    releaseLease.ownerToken = plan.ownerToken;
     complete_storage_operation_execution(releaseLease);
     plan.ownerToken = 0;
     plan.confirmationReady = false;

@@ -93,6 +93,8 @@ struct FlushReport {
 
 struct BlockDevice {
     bool          active;
+    bool          forcedOffline;
+    uint64_t      registrationId; // Assigned by the registry; never reused.
     DeviceType    type;
     uint8_t       driverIndex;    // index within the transport driver
     uint64_t      totalSectors;
@@ -111,6 +113,17 @@ struct BlockDevice {
     char          model[40];
     char          serial[24];
     BootProvenance bootProvenance;
+    // Controller/device path components are valid only when their validity
+    // flag is set. Names and registry slots are never identity evidence.
+    bool          pciLocationValid;
+    uint32_t      pciSegment;
+    uint8_t       pciBus;
+    uint8_t       pciDevice;
+    uint8_t       pciFunction;
+    bool          ataTargetValid;
+    uint8_t       ataChannel;
+    uint8_t       ataTarget;
+    uint32_t      namespaceId;
     // Optional transport DMA limits. Zero means the registry does not declare
     // a constraint; new storage callers should use checked I/O helpers.
     uint16_t      requiredBufferAlignment;
@@ -130,8 +143,22 @@ void init();
 // or 0xFF on failure.
 uint8_t register_device(const BlockDevice& dev);
 
-// Unregister a block device by global index.
-void unregister_device(uint8_t index);
+// Copy a stable descriptor snapshot while holding the registry lock.
+bool copy_device(uint8_t index, BlockDevice& out);
+
+// Refuses a normal removal while a storage operation has pinned the entry.
+bool unregister_device(uint8_t index);
+bool registration_is_present(uint8_t index, uint64_t registrationId);
+bool unregister_device_if_matches(uint8_t index, uint64_t registrationId);
+
+// Marks a device unavailable after physical removal/fatal transport failure.
+// A pinned entry remains as an offline tombstone until the last pin is released.
+bool mark_device_offline(uint8_t index, uint64_t registrationId);
+
+// Pin/unpin a specific registration. Pin identity is an opaque 64-bit
+// incarnation token, independent of a reusable global slot.
+bool pin_device(uint8_t index, uint64_t registrationId);
+void unpin_device(uint8_t index, uint64_t registrationId);
 
 // Return the number of active block devices.
 uint8_t device_count();
