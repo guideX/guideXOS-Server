@@ -306,6 +306,7 @@
     <ClCompile Include="kernel\core\partition_table.cpp" />
     <ClCompile Include="kernel\core\disk_initialization.cpp" />
     <ClCompile Include="kernel\core\partition_operations.cpp" />
+    <ClCompile Include="kernel\core\fat32_formatter.cpp" />
     <ClCompile Include="kernel\core\fs_fat.cpp" />
     <ClCompile Include="kernel\core\fs_ext4.cpp" />
     <ClCompile Include="kernel\core\fs_ufs.cpp" />

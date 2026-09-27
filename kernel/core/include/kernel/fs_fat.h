@@ -357,6 +357,14 @@ void set_trash_trace(bool enabled, uint64_t generation = 0);
 // Returns the volume index, or 0xFF on failure.
 uint8_t mount(uint8_t blockDevIndex);
 
+#if defined(KERNEL_STORAGE_TEST)
+// Read-only adapter for deterministic formatter compatibility tests. It uses
+// the production FAT32 BPB parser at an explicit partition LBA without adding
+// a mount or writing to the block device.
+bool test_probe_fat32_volume(uint8_t blockDevIndex, uint64_t partitionOffset,
+                             FATVolume& out);
+#endif
+
 // Unmount a volume.
 void unmount(uint8_t volumeIndex);
 

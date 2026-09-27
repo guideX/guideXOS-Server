@@ -16,6 +16,7 @@
 #include "kernel/storage_manager.h"
 #include "kernel/disk_initialization.h"
 #include "kernel/partition_operations.h"
+#include "kernel/fat32_formatter.h"
 #include "kernel/disk_manager_model.h"
 #include "kernel/desktop.h"
 #include "kernel/image_adapter.h"
@@ -1223,6 +1224,15 @@ private:
     struct PartEntry {
         storage::PartitionEntry parsed;
         char fsLabel[20];
+        char volumeLabel[12];
+        uint32_t volumeId;
+        uint32_t bytesPerSector;
+        uint32_t sectorsPerCluster;
+        uint32_t clusterSizeBytes;
+        uint32_t totalClusters;
+        uint32_t fatCount;
+        uint64_t filesystemCapacityBytes;
+        bool fat32PropertiesValid;
     };
 
     struct ListItem {
@@ -1285,6 +1295,7 @@ private:
     int m_createNameTextBoxId;
     InitializeDialogState m_initializeDialogState;
     bool m_dialogIsCreate;
+    bool m_dialogIsFormat;
     bool m_createSizeEdited;
     bool m_createNameEdited;
     uint8_t m_createInputFocus;
@@ -1295,6 +1306,8 @@ private:
     storage::InitializeDiskResult m_initializeResult;
     storage::CreatePartitionRequest m_createRequest;
     storage::CreatePartitionResult m_createResult;
+    storage::Fat32FormatRequest m_formatRequest;
+    storage::Fat32FormatResult m_formatResult;
     char m_initializeMessage[128];
     char m_statusMessage[128];
     SelectedObject m_selectedObject;
@@ -1320,7 +1333,8 @@ private:
 
     void        scanDisks();
     void        readPartitionTable(DiskEntry& disk);
-    const char* detectFs(uint8_t devIndex, uint64_t lbaStart, uint64_t sectorCount);
+    const char* detectFs(uint8_t devIndex, uint64_t lbaStart,
+                         uint64_t sectorCount, PartEntry& properties);
     void        formatSize(uint64_t bytes, char* out, int outSize) const;
     void        formatSizePrecise(uint64_t bytes, char* out, int outSize) const;
     void        updateResponsiveControls(uint32_t w, uint32_t h);
@@ -1339,6 +1353,9 @@ private:
     void        beginCreatePartitionOptions();
     void        runCreatePartitionOperation();
     bool        updateCreateInputWidgets();
+    void        beginFormatOptions();
+    void        runFormatOperation();
+    bool        updateFormatLabelWidget();
     void        closeInitializeDialog();
 };
 

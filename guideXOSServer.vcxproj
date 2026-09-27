@@ -522,6 +522,7 @@
     <ClCompile Include="kernel\core\partition_table.cpp" />
     <ClCompile Include="kernel\core\disk_initialization.cpp" />
     <ClCompile Include="kernel\core\partition_operations.cpp" />
+    <ClCompile Include="kernel\core\fat32_formatter.cpp" />
     <ClCompile Include="kernel\core\cxx_runtime.cpp" />
     <ClCompile Include="kernel\core\desktop.cpp" />
     <ClCompile Include="kernel\core\desktop_capabilities.cpp" />

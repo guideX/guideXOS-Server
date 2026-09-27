@@ -6080,6 +6080,30 @@ static void disk_manager_u64(uint64_t value, char* out, size_t capacity)
     out[length] = '\0';
 }
 
+static uint16_t disk_manager_read_u16(const uint8_t* input)
+{
+    return static_cast<uint16_t>(input[0]) |
+        static_cast<uint16_t>(static_cast<uint16_t>(input[1]) << 8);
+}
+
+static uint32_t disk_manager_read_u32(const uint8_t* input)
+{
+    return static_cast<uint32_t>(input[0]) |
+        (static_cast<uint32_t>(input[1]) << 8) |
+        (static_cast<uint32_t>(input[2]) << 16) |
+        (static_cast<uint32_t>(input[3]) << 24);
+}
+
+static void disk_manager_hex32(uint32_t value, char* out, size_t capacity)
+{
+    if (!out || capacity < 11) return;
+    static const char hex[] = "0123456789ABCDEF";
+    out[0] = '0'; out[1] = 'x';
+    for (uint8_t i = 0; i < 8; ++i)
+        out[2 + i] = hex[(value >> ((7 - i) * 4)) & 0x0Fu];
+    out[10] = '\0';
+}
+
 static uint32_t disk_manager_scale(uint64_t value, uint64_t total, uint32_t width)
 {
     if (total == 0 || width == 0 || value == 0) return 0;
@@ -6161,7 +6185,7 @@ DiskManagerApp::DiskManagerApp()
       m_confirmInitializeBtnId(-1), m_cancelInitializeBtnId(-1),
       m_createSizeTextBoxId(-1), m_createNameTextBoxId(-1),
       m_initializeDialogState(INITIALIZE_DIALOG_CLOSED),
-      m_dialogIsCreate(false), m_createSizeEdited(false),
+      m_dialogIsCreate(false), m_dialogIsFormat(false), m_createSizeEdited(false),
       m_createNameEdited(false), m_createInputFocus(0),
       m_initializeScheme(storage::DEFAULT_INITIALIZE_SCHEME),
       m_selectedObject(SELECTED_DISK), m_detailsMode(DETAILS_PROPERTIES),
@@ -6175,6 +6199,8 @@ DiskManagerApp::DiskManagerApp()
     memset(&m_initializeResult, 0, sizeof(m_initializeResult));
     memset(&m_createRequest, 0, sizeof(m_createRequest));
     memset(&m_createResult, 0, sizeof(m_createResult));
+    memset(&m_formatRequest, 0, sizeof(m_formatRequest));
+    memset(&m_formatResult, 0, sizeof(m_formatResult));
     m_createSizeText[0] = '\0';
     m_createNameText[0] = '\0';
     m_initializeMessage[0] = '\0';
@@ -6417,6 +6443,7 @@ void DiskManagerApp::readPartitionTable(DiskEntry& disk) {
     for (uint16_t i = 0; i < count; ++i) {
         const storage::PartitionEntry& source = table.partitions[i];
         PartEntry& target = disk.parts[disk.partCount++];
+        memset(&target, 0, sizeof(target));
         target.parsed = source;
         const bool unsupportedExtended = !source.isGpt &&
             (source.mbrType == 0x05 || source.mbrType == 0x0F ||
@@ -6426,7 +6453,7 @@ void DiskManagerApp::readPartitionTable(DiskEntry& disk) {
             continue;
         }
         strcopy(target.fsLabel, detectFs(disk.devIndex, source.startLba,
-                                        source.sectorCount),
+                                        source.sectorCount, target),
                 sizeof(target.fsLabel));
     }
 
@@ -6481,7 +6508,8 @@ void DiskManagerApp::readPartitionTable(DiskEntry& disk) {
 }
 
 const char* DiskManagerApp::detectFs(uint8_t devIndex, uint64_t lbaStart,
-                                     uint64_t sectorCount) {
+                                     uint64_t sectorCount,
+                                     PartEntry& properties) {
     if (sectorCount == 0) return "Unknown";
     storage::DeviceCapabilities caps;
     if (!storage::query_device_capabilities(devIndex, caps) || !caps.geometryValid)
@@ -6491,13 +6519,64 @@ const char* DiskManagerApp::detectFs(uint8_t devIndex, uint64_t lbaStart,
     if (storage::read_logical_sector(devIndex, lbaStart, sector, sizeof(sector)) !=
         kernel::block::BLOCK_OK) return "Unknown";
 
+    bool emptySector = true;
+    for (uint32_t i = 0; i < caps.logicalSectorSize; ++i)
+        if (sector[i] != 0) { emptySector = false; break; }
+    if (emptySector) return "Unformatted";
+
     if (sector[3] == 'E' && sector[4] == 'X' && sector[5] == 'F' &&
         sector[6] == 'A' && sector[7] == 'T') return "exFAT signature";
 
     if (sector[510] == 0x55 && sector[511] == 0xAA) {
         const uint16_t bps = static_cast<uint16_t>(sector[11]) |
                              (static_cast<uint16_t>(sector[12]) << 8);
-        if (bps == caps.logicalSectorSize && sector[13] != 0) return "FAT signature";
+        if (bps == caps.logicalSectorSize && sector[13] != 0) {
+            if (sector[82] == 'F' && sector[83] == 'A' &&
+                sector[84] == 'T' && sector[85] == '3' &&
+                sector[86] == '2' && sector[87] == ' ' &&
+                sector[88] == ' ' && sector[89] == ' ') {
+                if (caps.logicalSectorSize == storage::FAT32_FORMAT_SECTOR_SIZE) {
+                    const uint32_t reserved = disk_manager_read_u16(sector + 14);
+                    const uint32_t fatCopies = sector[16];
+                    const uint32_t totalSectors = disk_manager_read_u32(sector + 32);
+                    const uint32_t fatSectors = disk_manager_read_u32(sector + 36);
+                    const uint64_t firstData = static_cast<uint64_t>(reserved) +
+                        static_cast<uint64_t>(fatCopies) * fatSectors;
+                    const uint32_t spc = sector[13];
+                    if (bps == caps.logicalSectorSize && spc != 0 &&
+                        (spc & (spc - 1u)) == 0 && reserved != 0 &&
+                        fatCopies != 0 && fatSectors != 0 &&
+                        totalSectors != 0 && totalSectors <= sectorCount &&
+                        firstData < totalSectors) {
+                        const uint32_t clusters = static_cast<uint32_t>(
+                            (totalSectors - firstData) / spc);
+                        const uint32_t rootCluster = disk_manager_read_u32(sector + 44);
+                        if (clusters != 0 && rootCluster >= 2 &&
+                            rootCluster - 2 < clusters) {
+                            properties.volumeId = disk_manager_read_u32(sector + 67);
+                            properties.bytesPerSector = bps;
+                            properties.sectorsPerCluster = spc;
+                            properties.clusterSizeBytes = bps * spc;
+                            properties.totalClusters = clusters;
+                            properties.fatCount = fatCopies;
+                            properties.filesystemCapacityBytes =
+                                static_cast<uint64_t>(clusters) *
+                                properties.clusterSizeBytes;
+                            for (uint8_t i = 0; i < 11; ++i)
+                                properties.volumeLabel[i] =
+                                    static_cast<char>(sector[71 + i]);
+                            properties.volumeLabel[11] = '\0';
+                            for (int i = 10; i >= 0 &&
+                                    properties.volumeLabel[i] == ' '; --i)
+                                properties.volumeLabel[i] = '\0';
+                            properties.fat32PropertiesValid = true;
+                        }
+                    }
+                }
+                return "FAT32";
+            }
+            return "FAT signature";
+        }
     }
 
     const uint64_t superblockSectorOffset = 1024 / caps.logicalSectorSize;
@@ -6632,12 +6711,40 @@ void DiskManagerApp::updateInitializeControls() {
     const bool confirming = m_initializeDialogState == INITIALIZE_DIALOG_CONFIRM;
     const bool createOptions = m_dialogIsCreate &&
         m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS;
+    const bool formatOptions = m_dialogIsFormat &&
+        m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS;
     const storage::DiskState selectedState = haveSelection
         ? m_disks[m_selectedDisk].state : storage::DISK_STATE_UNREADABLE;
     const bool initializeAvailable = haveSelection && rawSelected &&
         m_disks[m_selectedDisk].initializeAvailable;
     const bool createAvailable = selectedRegion &&
         m_disks[m_selectedDisk].createPartitionAvailable;
+    bool formatAvailable = false;
+    if (haveSelection && m_selectedObject == SELECTED_PARTITION &&
+        m_selectedPart >= 0 && m_selectedPart < m_disks[m_selectedDisk].partCount) {
+        const DiskEntry& disk = m_disks[m_selectedDisk];
+        const PartEntry& part = disk.parts[m_selectedPart];
+        const bool possibleFs = strcmp(part.fsLabel, "Unformatted") == 0 ||
+            strcmp(part.fsLabel, "Unknown") == 0;
+        const bool validTable = disk.scheme == storage::PARTITION_SCHEME_GPT
+            ? disk.state == storage::DISK_STATE_VALID_GPT &&
+                disk.primaryGptValid && disk.backupGptValid && disk.gptCopiesAgree
+            : disk.scheme == storage::PARTITION_SCHEME_MBR &&
+                disk.state == storage::DISK_STATE_VALID_MBR &&
+                !disk.hybridMbr && !disk.extendedPartitionsPresent;
+        const bool durable = disk.capabilities.persistence ==
+                storage::PERSISTENCE_SYNCHRONOUS_DURABLE ||
+            (disk.capabilities.persistence == storage::PERSISTENCE_FLUSH_REQUIRED &&
+             disk.capabilities.flushSupported &&
+             disk.capabilities.flushSemanticsKnown);
+        formatAvailable = possibleFs && disk.haveInfo &&
+            validTable && durable && disk.identity.registrationId != 0 &&
+            disk.capabilities.geometryValid &&
+            disk.capabilities.logicalSectorSize ==
+                storage::FAT32_FORMAT_SECTOR_SIZE && disk.capabilities.writable &&
+            disk.mountSafety == storage::DEVICE_UNMOUNTED &&
+            disk.bootSafety == storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET;
+    }
     if (refresh) {
         refresh->visible = dialogClosed;
         refresh->enabled = storage::disk_manager_action_enabled(
@@ -6665,30 +6772,31 @@ void DiskManagerApp::updateInitializeControls() {
             haveSelection && m_disks[m_selectedDisk].unallocatedModelValid,
             createAvailable, dialogClosed);
         initialize->visible = dialogClosed &&
-            (rawSelected || enableCreate);
-        initialize->enabled = enableInitialize || enableCreate;
-        setWidgetText(m_initializeBtnId, selectedRegion
-            ? "Create Partition..." : "Initialize Disk...");
+            (rawSelected || enableCreate || formatAvailable);
+        initialize->enabled = enableInitialize || enableCreate || formatAvailable;
+        setWidgetText(m_initializeBtnId, formatAvailable ? "Format..." :
+            (selectedRegion ? "Create Partition..." : "Initialize Disk..."));
     }
     if (gpt) { gpt->visible = choosing; gpt->enabled = choosing; }
     if (mbr) { mbr->visible = choosing; mbr->enabled = choosing; }
     if (confirm) {
-        confirm->visible = confirming || createOptions;
+        confirm->visible = confirming || createOptions || formatOptions;
         confirm->enabled = confirming
             ? (m_initializePlan.confirmationReady &&
                storage::storage_operation_lease_is_current(
                    storage::StorageOperationLease{m_initializePlan.ownerToken}))
-            : (createOptions && updateCreateInputWidgets());
+            : (createOptions ? updateCreateInputWidgets() :
+                (formatOptions && updateFormatLabelWidget()));
         setWidgetText(m_confirmInitializeBtnId,
-            createOptions ? "Create" : "Initialize");
+            formatOptions ? "Format" : (createOptions ? "Create" : "Initialize"));
     }
     if (sizeInput) {
         sizeInput->visible = createOptions;
         sizeInput->enabled = createOptions;
     }
     if (nameInput) {
-        nameInput->visible = createOptions &&
-            m_createRequest.requestedScheme == storage::PARTITION_SCHEME_GPT;
+        nameInput->visible = formatOptions || (createOptions &&
+            m_createRequest.requestedScheme == storage::PARTITION_SCHEME_GPT);
         nameInput->enabled = nameInput->visible;
     }
     const bool showCancel = m_initializeDialogState != INITIALIZE_DIALOG_CLOSED &&
@@ -6880,7 +6988,8 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             closeInitializeDialog();
         } else if (m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS &&
                    key == shell::KEY_TAB) {
-            if (m_selectedDisk >= 0 && m_selectedDisk < m_diskCount &&
+            if (m_dialogIsFormat) m_createInputFocus = 1;
+            else if (m_selectedDisk >= 0 && m_selectedDisk < m_diskCount &&
                 m_disks[m_selectedDisk].scheme == storage::PARTITION_SCHEME_GPT)
                 m_createInputFocus = static_cast<uint8_t>(m_createInputFocus == 0 ? 1 : 0);
             else m_createInputFocus = 0;
@@ -6888,10 +6997,11 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             invalidate();
         } else if (m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS &&
                    (key == 8 || key == shell::KEY_DELETE)) {
-            char* target = m_createInputFocus == 0 ? m_createSizeText : m_createNameText;
-            const size_t capacity = m_createInputFocus == 0
+            const bool sizeField = !m_dialogIsFormat && m_createInputFocus == 0;
+            char* target = sizeField ? m_createSizeText : m_createNameText;
+            const size_t capacity = sizeField
                 ? sizeof(m_createSizeText) : sizeof(m_createNameText);
-            bool& edited = m_createInputFocus == 0
+            bool& edited = sizeField
                 ? m_createSizeEdited : m_createNameEdited;
             if (!edited) {
                 edited = true;
@@ -6916,7 +7026,8 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             runInitializeOperation();
         } else if (key == 13 && m_initializeDialogState ==
                    INITIALIZE_DIALOG_CREATE_OPTIONS) {
-            runCreatePartitionOperation();
+            if (m_dialogIsFormat) runFormatOperation();
+            else runCreatePartitionOperation();
         } else if (enter && m_initializeDialogState == INITIALIZE_DIALOG_RESULT) {
             closeInitializeDialog();
         }
@@ -6965,17 +7076,20 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
 }
 
 void DiskManagerApp::onKeyChar(char c) {
-    if (!m_dialogIsCreate || m_initializeDialogState !=
+    if ((!m_dialogIsCreate && !m_dialogIsFormat) || m_initializeDialogState !=
             INITIALIZE_DIALOG_CREATE_OPTIONS || c < 0x20 || c > 0x7E) return;
-    char* target = m_createInputFocus == 0 ? m_createSizeText : m_createNameText;
-    const size_t capacity = m_createInputFocus == 0
+    const bool sizeField = !m_dialogIsFormat && m_createInputFocus == 0;
+    char* target = sizeField ? m_createSizeText : m_createNameText;
+    const size_t capacity = sizeField
         ? sizeof(m_createSizeText) : sizeof(m_createNameText);
-    bool& edited = m_createInputFocus == 0 ? m_createSizeEdited : m_createNameEdited;
-    if (m_createInputFocus == 0) {
+    bool& edited = sizeField ? m_createSizeEdited : m_createNameEdited;
+    if (sizeField) {
         const bool allowed = (c >= '0' && c <= '9') || c == 'M' || c == 'm' ||
                              c == 'A' || c == 'a' || c == 'X' || c == 'x';
         if (!allowed) return;
         if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+    } else if (m_dialogIsFormat && c >= 'a' && c <= 'z') {
+        c = static_cast<char>(c - 'a' + 'A');
     }
     size_t length = 0;
     while (length + 1 < capacity && target[length]) ++length;
@@ -6983,7 +7097,8 @@ void DiskManagerApp::onKeyChar(char c) {
         edited = true;
         length = 0;
     }
-    const size_t maxLength = m_createInputFocus == 1 ? 36 : capacity - 1;
+    const size_t maxLength = m_dialogIsFormat ? 11 :
+        (m_createInputFocus == 1 ? 36 : capacity - 1);
     if (length >= maxLength || length + 1 >= capacity) return;
     target[length] = c;
     target[length + 1] = '\0';
@@ -7076,7 +7191,8 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
     if ((widgetId == m_createSizeTextBoxId ||
          widgetId == m_createNameTextBoxId) &&
         m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS) {
-        m_createInputFocus = widgetId == m_createSizeTextBoxId ? 0 : 1;
+        m_createInputFocus = !m_dialogIsFormat &&
+            widgetId == m_createSizeTextBoxId ? 0 : 1;
         updateInitializeControls();
         invalidate();
     } else if (widgetId == m_cancelInitializeBtnId &&
@@ -7089,6 +7205,15 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
             m_selectedObject == SELECTED_UNALLOCATED &&
             m_disks[m_selectedDisk].createPartitionAvailable) {
             beginCreatePartitionOptions();
+        } else if (m_selectedDisk >= 0 && m_selectedDisk < m_diskCount &&
+            m_selectedObject == SELECTED_PARTITION &&
+            m_selectedPart >= 0 &&
+            m_selectedPart < m_disks[m_selectedDisk].partCount &&
+            (strcmp(m_disks[m_selectedDisk].parts[m_selectedPart].fsLabel,
+                    "Unformatted") == 0 ||
+             strcmp(m_disks[m_selectedDisk].parts[m_selectedPart].fsLabel,
+                    "Unknown") == 0)) {
+            beginFormatOptions();
         } else if (m_selectedDisk >= 0 && m_selectedDisk < m_diskCount &&
             m_disks[m_selectedDisk].state == storage::DISK_STATE_NOT_INITIALIZED &&
             m_disks[m_selectedDisk].initializeAvailable) {
@@ -7124,7 +7249,8 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
         runInitializeOperation();
     } else if (widgetId == m_confirmInitializeBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS) {
-        runCreatePartitionOperation();
+        if (m_dialogIsFormat) runFormatOperation();
+        else runCreatePartitionOperation();
     } else if (widgetId == m_refreshBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
         scanDisks();
@@ -7513,18 +7639,23 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         framebuffer::fill_rect(panelX, panelY, panelW, panelH, 0xFF252D3B);
         framebuffer::fill_rect(panelX, panelY, panelW, 23, 0xFF34465C);
         disk_manager_draw_clipped(panelX + 10, panelY + 7, panelW - 20,
-            m_dialogIsCreate
+            m_dialogIsFormat
+                ? (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
+                    ? "Format FAT32 Result" : "Format Partition as FAT32")
+                : (m_dialogIsCreate
                 ? (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
                     ? "Create Partition Result" : "Create Partition")
                 : (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
-                    ? "Initialize Disk Result" : "Initialize Disk"),
+                    ? "Initialize Disk Result" : "Initialize Disk")),
             kText);
         uint32_t lineY = panelY + 32;
         const storage::TargetIdentity& identity =
-            (m_dialogIsCreate || m_initializeDialogState !=
+            (m_dialogIsFormat || m_dialogIsCreate || m_initializeDialogState !=
                 INITIALIZE_DIALOG_CHOOSE_SCHEME)
-                ? (m_dialogIsCreate ? m_createResult.targetIdentity
+                ? (m_dialogIsFormat ? m_formatResult.targetIdentity
+                  : (m_dialogIsCreate ? m_createResult.targetIdentity
                                     : m_initializeResult.targetIdentity)
+                  )
                 : disk.identity;
         char line[160], number[24], sizeText[32];
         strcopy(line, "Target: ", sizeof(line));
@@ -7548,7 +7679,155 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         strappend(line, " bytes", sizeof(line));
         disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20, line, kSubText);
         lineY += 17;
-        if (m_dialogIsCreate && m_initializeDialogState ==
+        if (m_dialogIsFormat) {
+            if (m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS) {
+                const storage::PartitionEntry& part = m_formatRequest.partitionSnapshot;
+                char startText[24], endText[24], partitionNo[16], capacityText[32];
+                disk_manager_u64(part.partitionNumber, partitionNo, sizeof(partitionNo));
+                strcopy(line, "Partition ", sizeof(line));
+                strappend(line, partitionNo, sizeof(line));
+                strappend(line, part.name[0] ? " | " : " | (unnamed)", sizeof(line));
+                if (part.name[0]) strappend(line, part.name, sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kText);
+                lineY += 14;
+                disk_manager_u64(part.startLba, startText, sizeof(startText));
+                disk_manager_u64(part.endLba, endText, sizeof(endText));
+                strcopy(line, "Validated range: LBA ", sizeof(line));
+                strappend(line, startText, sizeof(line));
+                strappend(line, " through ", sizeof(line));
+                strappend(line, endText, sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kSubText);
+                lineY += 14;
+                if (part.isGpt) {
+                    char partitionGuid[40];
+                    disk_manager_guid_text(part.uniqueGuid, partitionGuid,
+                        sizeof(partitionGuid));
+                    strcopy(line, "Partition GUID: ", sizeof(line));
+                    strappend(line, partitionGuid, sizeof(line));
+                } else {
+                    strcopy(line, "MBR partition entry | type 0x", sizeof(line));
+                    static const char hex[] = "0123456789ABCDEF";
+                    const size_t length = strlen(line);
+                    line[length] = hex[(part.mbrType >> 4) & 0x0F];
+                    line[length + 1] = hex[part.mbrType & 0x0F];
+                    line[length + 2] = '\0';
+                }
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kSubText);
+                lineY += 14;
+                const uint64_t bytes = part.sectorCount *
+                    storage::FAT32_FORMAT_SECTOR_SIZE;
+                formatSizePrecise(bytes, capacityText, sizeof(capacityText));
+                strcopy(line, "Capacity: ", sizeof(line));
+                strappend(line, capacityText, sizeof(line));
+                strappend(line, " | Current: ", sizeof(line));
+                strappend(line, storage::fat32_existing_state_name(
+                    m_formatResult.existingState), sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kSubText);
+                lineY += 16;
+                strcopy(line, "New filesystem: FAT32 | Cluster size: Automatic (",
+                    sizeof(line));
+                disk_manager_u64(m_formatResult.geometry.clusterSizeBytes,
+                    number, sizeof(number));
+                strappend(line, number, sizeof(line));
+                strappend(line, " bytes) | 512-byte sectors", sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kText);
+                lineY += 17;
+                lineY = panelY + 184;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "Volume label (optional, up to 11 FAT characters):", kText);
+                updateFormatLabelWidget();
+                lineY = panelY + 228;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "Formatting replaces partition metadata and root cluster data.",
+                    kSubText);
+                lineY += 14;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "Existing non-zero or recognized data is rejected at preflight.",
+                    kSubText);
+                lineY += 14;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "Confirm to write FAT32. The partition remains unmounted.", kText);
+                char normalized[11];
+                if (storage::normalize_fat32_volume_label(m_createNameText,
+                        normalized) != storage::FAT32_FORMAT_READY) {
+                    lineY += 14;
+                    disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                        "Label contains unsupported characters or is too long.",
+                        0xFFFFB0A0);
+                }
+            } else if (m_initializeDialogState == INITIALIZE_DIALOG_RUNNING) {
+                strcopy(line, "Stage: ", sizeof(line));
+                strappend(line, storage::fat32_format_stage_name(
+                    m_formatResult.stage), sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kText);
+            } else if (m_initializeDialogState == INITIALIZE_DIALOG_RESULT) {
+                const bool success = m_formatResult.status ==
+                    storage::FAT32_FORMAT_SUCCESS;
+                strcopy(line, "Final stage: ", sizeof(line));
+                strappend(line, storage::fat32_format_stage_name(
+                    m_formatResult.stage), sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, success ? kSubText : 0xFFFFB0A0);
+                lineY += 14;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    success ? "FAT32 formatting completed and verified" :
+                        "FAT32 formatting failed",
+                    success ? kText : 0xFFFFB0A0);
+                lineY += 14;
+                if (success) {
+                    char partitionNo[16], volumeId[16], clusterSize[16];
+                    disk_manager_u64(m_formatResult.partition.partitionNumber,
+                        partitionNo, sizeof(partitionNo));
+                    strcopy(line, "Partition ", sizeof(line));
+                    strappend(line, partitionNo, sizeof(line));
+                    strappend(line, " | Filesystem: FAT32", sizeof(line));
+                    disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                        line, kText);
+                    lineY += 14;
+                    disk_manager_hex32(m_formatResult.geometry.volumeId,
+                        volumeId, sizeof(volumeId));
+                    disk_manager_u64(m_formatResult.geometry.clusterSizeBytes,
+                        clusterSize, sizeof(clusterSize));
+                    strcopy(line, "Volume ID: ", sizeof(line));
+                    strappend(line, volumeId, sizeof(line));
+                    strappend(line, " | Cluster size: ", sizeof(line));
+                    strappend(line, clusterSize, sizeof(line));
+                    strappend(line, " bytes", sizeof(line));
+                    disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                        line, kSubText);
+                    lineY += 14;
+                    disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                        "Verified. Partition remains unmounted.", kSubText);
+                } else {
+                    disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                        storage::fat32_format_status_name(m_formatResult.status),
+                        0xFFFFB0A0);
+                    lineY += 14;
+                    disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                        m_initializeMessage, kSubText);
+                    if (m_formatResult.rollbackAttempted) {
+                        lineY += 14;
+                        disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                            m_formatResult.rollbackSucceeded
+                                ? "Original metadata restored and verified."
+                                : "Filesystem state uncertain; rollback failed.",
+                            m_formatResult.rollbackSucceeded ? kSubText : 0xFFFFB0A0);
+                    }
+                    if (m_formatResult.finalStateUncertain) {
+                        lineY += 14;
+                        disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                            "Do not use this partition until it is inspected.",
+                            0xFFFFB0A0);
+                    }
+                }
+            }
+        } else if (m_dialogIsCreate && m_initializeDialogState ==
                 INITIALIZE_DIALOG_CREATE_OPTIONS) {
             char lbaStart[24], lbaEnd[24], capacityText[32];
             const storage::UnallocatedRegion& region =
@@ -7725,7 +8004,8 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                 panelW - 20, "Current state: Not Initialized", kText);
             lineY += 14;
         }
-        if (m_initializeDialogState == INITIALIZE_DIALOG_CHOOSE_SCHEME) {
+        if (!m_dialogIsCreate && !m_dialogIsFormat &&
+            m_initializeDialogState == INITIALIZE_DIALOG_CHOOSE_SCHEME) {
             disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
                 "GPT is the default. MBR is offered for compatibility.", kText);
             lineY += 14;
@@ -7738,7 +8018,8 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             if (m_initializeMessage[0])
                 disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
                     m_initializeMessage, 0xFFFFB0A0);
-        } else if (m_initializeDialogState == INITIALIZE_DIALOG_CONFIRM) {
+        } else if (!m_dialogIsCreate && !m_dialogIsFormat &&
+                   m_initializeDialogState == INITIALIZE_DIALOG_CONFIRM) {
             strcopy(line, "Selected scheme: ", sizeof(line));
             strappend(line, m_initializeScheme == storage::PARTITION_SCHEME_GPT
                 ? "GPT" : "MBR", sizeof(line));
@@ -7752,12 +8033,13 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             lineY += 14;
             disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
                 "Awaiting confirmation", kSubText);
-        } else if (m_initializeDialogState == INITIALIZE_DIALOG_RUNNING) {
+        } else if (!m_dialogIsCreate && !m_dialogIsFormat &&
+                   m_initializeDialogState == INITIALIZE_DIALOG_RUNNING) {
             strcopy(line, "Stage: ", sizeof(line));
             strappend(line, storage::initialize_disk_stage_name(
                 m_initializeResult.stage), sizeof(line));
             disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20, line, kText);
-        } else {
+        } else if (!m_dialogIsCreate && !m_dialogIsFormat) {
             const bool success = m_initializeResult.status == storage::INITIALIZE_DISK_SUCCESS;
             disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
                 success ? "Initialization completed" : "Initialization failed",
@@ -7835,9 +8117,34 @@ void DiskManagerApp::drawDetails(uint32_t x, uint32_t y, uint32_t w,
             add(left, leftCount, "Filesystem", part.fsLabel);
             add(left, leftCount, "Filesystem used", "Unknown");
             add(left, leftCount, "Filesystem free", "Unknown");
+            if (strcmp(part.fsLabel, "FAT32") == 0) {
+                if (part.fat32PropertiesValid) {
+                    add(left, leftCount, "Volume label",
+                        part.volumeLabel[0] ? part.volumeLabel : "(none)");
+                    disk_manager_hex32(part.volumeId, value, sizeof(value));
+                    add(left, leftCount, "Volume ID", value);
+                    numberText(part.bytesPerSector, value, sizeof(value));
+                    add(left, leftCount, "Bytes per sector", value);
+                    numberText(part.sectorsPerCluster, value, sizeof(value));
+                    add(left, leftCount, "Sectors per cluster", value);
+                    numberText(part.clusterSizeBytes, value, sizeof(value));
+                    add(left, leftCount, "Cluster size", value);
+                    numberText(part.totalClusters, value, sizeof(value));
+                    add(left, leftCount, "Total clusters", value);
+                    numberText(part.fatCount, value, sizeof(value));
+                    add(left, leftCount, "FAT copies", value);
+                    this->formatSize(part.filesystemCapacityBytes,
+                        sizeText, sizeof(sizeText));
+                    add(left, leftCount, "Filesystem capacity", sizeText);
+                } else {
+                    add(left, leftCount, "FAT32 BPB", "Unavailable or invalid");
+                }
+            }
             add(right, rightCount, "Name", parsed.name[0] ? parsed.name : "(unnamed)");
             add(right, rightCount, "Mount", disk.mountSafety == storage::DEVICE_UNMOUNTED
-                ? "Device unmounted" : "Device-level only; partition mapping unknown");
+                ? "Unmounted" : (disk.mountSafety == storage::DEVICE_MOUNTED
+                    ? "Mounted; partition mapping unknown" :
+                      "Mount protection unknown"));
             if (parsed.isGpt) {
                 disk_manager_guid_text(parsed.typeGuid, value, sizeof(value));
                 add(right, rightCount, "GPT type GUID", value);
@@ -8141,6 +8448,7 @@ void DiskManagerApp::beginCreatePartitionOptions() {
     m_createResult.requestedScheme = disk.scheme;
     m_createResult.status = storage::CREATE_PARTITION_READY;
     m_initializeMessage[0] = '\0';
+    strcopy(m_statusMessage, "Ready", sizeof(m_statusMessage));
     m_initializeDialogState = INITIALIZE_DIALOG_CREATE_OPTIONS;
     updateInitializeControls();
     invalidate();
@@ -8260,11 +8568,114 @@ void DiskManagerApp::runCreatePartitionOperation() {
     invalidate();
 }
 
+void DiskManagerApp::beginFormatOptions() {
+    if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED ||
+        m_selectedDisk < 0 || m_selectedDisk >= m_diskCount ||
+        m_selectedObject != SELECTED_PARTITION || m_selectedPart < 0 ||
+        m_selectedPart >= m_disks[m_selectedDisk].partCount) return;
+
+    DiskEntry& disk = m_disks[m_selectedDisk];
+    const PartEntry& selected = disk.parts[m_selectedPart];
+    if ((strcmp(selected.fsLabel, "Unformatted") != 0 &&
+         strcmp(selected.fsLabel, "Unknown") != 0) || !disk.haveInfo ||
+        disk.identity.registrationId == 0) return;
+
+    memset(&m_formatRequest, 0, sizeof(m_formatRequest));
+    memset(&m_formatResult, 0, sizeof(m_formatResult));
+    m_formatRequest.targetSnapshot = disk.identity;
+    m_formatRequest.partitionScheme = disk.scheme;
+    m_formatRequest.partitionSnapshot = selected.parsed;
+    if (disk.scheme == storage::PARTITION_SCHEME_GPT)
+        memcpy(m_formatRequest.gptDiskGuid, disk.primaryDiskGuid,
+               sizeof(m_formatRequest.gptDiskGuid));
+    else
+        m_formatRequest.mbrDiskSignature = disk.mbrDiskSignature;
+    m_formatRequest.expectedRegistryGeneration =
+        disk.identity.registryGeneration;
+    m_formatResult.targetIdentity = disk.identity;
+    m_formatResult.partition = selected.parsed;
+    m_createNameText[0] = '\0';
+    m_createSizeText[0] = '\0';
+    m_createNameEdited = false;
+    m_createSizeEdited = false;
+    m_createInputFocus = 1;
+    m_dialogIsCreate = false;
+    m_dialogIsFormat = true;
+
+    const storage::Fat32FormatStatus status =
+        storage::probe_fat32_format_partition(m_formatRequest, m_formatResult);
+    if (status != storage::FAT32_FORMAT_READY) {
+        strcopy(m_statusMessage, m_formatResult.diagnostic[0]
+            ? m_formatResult.diagnostic : storage::fat32_format_status_name(status),
+            sizeof(m_statusMessage));
+        m_dialogIsFormat = false;
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
+
+    m_initializeMessage[0] = '\0';
+    m_initializeDialogState = INITIALIZE_DIALOG_CREATE_OPTIONS;
+    updateInitializeControls();
+    invalidate();
+}
+
+bool DiskManagerApp::updateFormatLabelWidget() {
+    app::Widget* nameInput = getWidget(m_createNameTextBoxId);
+    if (nameInput) {
+        setWidgetText(m_createNameTextBoxId, m_createNameText);
+        nameInput->bgColor = m_createInputFocus == 1
+            ? 0xFF34465C : 0xFF2D2D37;
+    }
+    if (!m_dialogIsFormat || m_initializeDialogState !=
+            INITIALIZE_DIALOG_CREATE_OPTIONS) return false;
+    char normalized[11];
+    if (storage::normalize_fat32_volume_label(m_createNameText,
+            normalized) != storage::FAT32_FORMAT_READY) return false;
+    strcopy(m_formatRequest.volumeLabel, m_createNameText,
+            sizeof(m_formatRequest.volumeLabel));
+    return true;
+}
+
+void DiskManagerApp::runFormatOperation() {
+    if (!m_dialogIsFormat || m_initializeDialogState !=
+            INITIALIZE_DIALOG_CREATE_OPTIONS || !updateFormatLabelWidget()) return;
+    m_initializeDialogState = INITIALIZE_DIALOG_RUNNING;
+    m_formatResult.stage = storage::FAT32_FORMAT_STAGE_VALIDATING;
+    updateInitializeControls();
+    invalidate();
+    storage::format_fat32_partition(m_formatRequest, m_formatResult);
+    strcopy(m_initializeMessage, m_formatResult.diagnostic,
+            sizeof(m_initializeMessage));
+    scanDisks();
+    if (m_formatResult.status == storage::FAT32_FORMAT_SUCCESS) {
+        for (int diskIndex = 0; diskIndex < m_diskCount; ++diskIndex) {
+            if (!storage::disk_manager_same_disk_incarnation(
+                    m_formatResult.targetIdentity, m_disks[diskIndex].identity))
+                continue;
+            for (int partIndex = 0; partIndex < m_disks[diskIndex].partCount;
+                 ++partIndex) {
+                if (!storage::disk_manager_same_partition(
+                        m_formatResult.partition,
+                        m_disks[diskIndex].parts[partIndex].parsed)) continue;
+                m_selectedDisk = diskIndex;
+                selectPartition(partIndex);
+                break;
+            }
+            break;
+        }
+    }
+    m_initializeDialogState = INITIALIZE_DIALOG_RESULT;
+    updateInitializeControls();
+    invalidate();
+}
+
 void DiskManagerApp::closeInitializeDialog() {
     if (m_initializePlan.confirmationReady)
         storage::cancel_initialize_disk(m_initializePlan);
     m_initializeDialogState = INITIALIZE_DIALOG_CLOSED;
     m_dialogIsCreate = false;
+    m_dialogIsFormat = false;
     m_createInputFocus = 0;
     m_initializeMessage[0] = '\0';
     updateInitializeControls();

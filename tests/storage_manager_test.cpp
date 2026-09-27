@@ -5,10 +5,13 @@
 #include "../kernel/core/include/kernel/storage_manager.h"
 #include "../kernel/core/include/kernel/disk_initialization.h"
 #include "../kernel/core/include/kernel/partition_operations.h"
+#include "../kernel/core/include/kernel/fat32_formatter.h"
+#include "../kernel/core/include/kernel/fs_fat.h"
 #include "../kernel/core/include/kernel/disk_manager_model.h"
 #include "../kernel/core/include/kernel/ramdisk.h"
 #include "../kernel/core/include/kernel/vfs.h"
 #include "../kernel/core/include/kernel/ata.h"
+#include "../kernel/arch/amd64/include/arch/amd64.h"
 #include "../guideXOSBootLoader/guidexOSBootInfo.h"
 
 #include <algorithm>
@@ -20,7 +23,17 @@
 
 using namespace kernel;
 
+namespace kernel { namespace arch { namespace amd64 {
+uint8_t inb(uint16_t) { return 0x20; }
+void outb(uint16_t, uint8_t) { }
+}}}
+
 namespace {
+
+struct FakeWriteRecord {
+    uint64_t lba;
+    uint32_t count;
+};
 
 struct FakeDisk {
     uint32_t sectorSize;
@@ -31,6 +44,7 @@ struct FakeDisk {
     std::vector<uint8_t> bytes;
     bool failReads;
     uint64_t failLba;
+    uint64_t failLbaAfterWrite;
     uint32_t failReadAtCall;
     bool failFlush;
     uint32_t failFlushAtCall;
@@ -42,6 +56,8 @@ struct FakeDisk {
     uint32_t reads;
     uint32_t writes;
     uint32_t writeAttempts;
+    std::vector<FakeWriteRecord> writeLog;
+    std::vector<size_t> flushWriteCounts;
     uint32_t flushes;
     uint8_t registryIndex;
     uint64_t registrationId;
@@ -54,7 +70,8 @@ struct FakeDisk {
         : sectorSize(size), sectorCount(count), driverId(0), sparse(!allocate),
           sparseMbr(static_cast<size_t>(size), 0),
           bytes(allocate ? static_cast<size_t>(size) * static_cast<size_t>(count) : 0, 0),
-          failReads(false), failLba(UINT64_MAX), failReadAtCall(0), failFlush(false),
+          failReads(false), failLba(UINT64_MAX), failLbaAfterWrite(UINT64_MAX),
+          failReadAtCall(0), failFlush(false),
           failFlushAtCall(0), failFlushStatus(block::BLOCK_ERR_IO),
           failWriteAtCall1(0), failWriteAtCall2(0),
           corruptWriteLbaOnce(UINT64_MAX), corruptWritePending(false),
@@ -81,6 +98,7 @@ block::Status fake_read(uint8_t driverId, uint64_t lba, uint32_t count, void* bu
 {
     FakeDisk* disk = g_fakeDisks[driverId];
     if (!disk || !buffer || count == 0 || disk->failReads || lba == disk->failLba ||
+        (disk->writeAttempts != 0 && lba == disk->failLbaAfterWrite) ||
         (disk->failReadAtCall != 0 && disk->reads + 1 == disk->failReadAtCall) ||
         lba > disk->sectorCount || count > disk->sectorCount - lba)
         return block::BLOCK_ERR_IO;
@@ -111,8 +129,10 @@ block::Status fake_write(uint8_t driverId, uint64_t lba, uint32_t count,
                          const void* buffer)
 {
     FakeDisk* disk = g_fakeDisks[driverId];
-    if (!disk || !buffer || count == 0 || lba > disk->sectorCount ||
-        count > disk->sectorCount - lba) return block::BLOCK_ERR_IO;
+    if (!disk || !buffer || count == 0) return block::BLOCK_ERR_IO;
+    disk->writeLog.push_back({lba, count});
+    if (lba > disk->sectorCount || count > disk->sectorCount - lba)
+        return block::BLOCK_ERR_IO;
     ++disk->writeAttempts;
     if (disk->writeAttempts == disk->failWriteAtCall1 ||
         disk->writeAttempts == disk->failWriteAtCall2) return block::BLOCK_ERR_IO;
@@ -140,6 +160,7 @@ block::Status fake_flush(uint8_t driverId)
     FakeDisk* disk = g_fakeDisks[driverId];
     if (!disk) return block::BLOCK_ERR_INVALID;
     ++disk->flushes;
+    disk->flushWriteCounts.push_back(disk->writeLog.size());
     if (disk->removeOnFlush &&
         (disk->removeOnFlushAt == 0 || disk->flushes == disk->removeOnFlushAt)) {
         disk->removed = block::mark_device_offline(
@@ -483,6 +504,101 @@ storage::CreatePartitionRequest make_create_request(
     for (uint8_t i = 0; i < 16; ++i)
         request.testUniqueGuid[i] = static_cast<uint8_t>(guidSeed + i * 3);
     return request;
+}
+
+storage::Fat32FormatRequest make_format_request(
+    uint8_t index, const storage::PartitionEntry& partition,
+    const char* label = "", uint32_t volumeId = 0x1234ABCDu)
+{
+    storage::Fat32FormatRequest request = {};
+    storage::capture_target_identity(index, request.targetSnapshot);
+    storage::PartitionTableModel table = {};
+    storage::parse_partition_table(index, table);
+    request.partitionScheme = table.scheme;
+    request.partitionSnapshot = partition;
+    std::memcpy(request.gptDiskGuid, table.primaryDiskGuid,
+                sizeof(request.gptDiskGuid));
+    request.mbrDiskSignature = table.mbrDiskSignature;
+    if (label)
+        std::strncpy(request.volumeLabel, label,
+                     sizeof(request.volumeLabel) - 1);
+    request.expectedRegistryGeneration =
+        request.targetSnapshot.registryGeneration;
+    request.testVolumeIdProvided = true;
+    request.testVolumeId = volumeId;
+    return request;
+}
+
+bool parse_first_partition(uint8_t index, storage::PartitionTableModel& table,
+                           storage::PartitionEntry& partition)
+{
+    if (!storage::parse_partition_table(index, table) ||
+        table.partitionCount == 0) return false;
+    partition = table.partitions[0];
+    return true;
+}
+
+bool independent_verify_fat32(const FakeDisk& disk,
+                              const storage::PartitionEntry& partition,
+                              const char* expectedLabel,
+                              uint32_t expectedVolumeId)
+{
+    const uint8_t* bytes = disk.bytes.data();
+    const size_t start = static_cast<size_t>(partition.startLba) * 512;
+    const uint8_t* boot = bytes + start;
+    if (read_u16(boot + 11) != 512 || boot[13] == 0 ||
+        read_u16(boot + 14) != 32 || boot[16] != 2 ||
+        read_u16(boot + 17) != 0 || read_u16(boot + 19) != 0 ||
+        read_u16(boot + 22) != 0 || read_u32(boot + 36) == 0 ||
+        read_u32(boot + 44) != 2 || read_u16(boot + 48) != 1 ||
+        read_u16(boot + 50) != 6 || read_u32(boot + 67) != expectedVolumeId ||
+        std::memcmp(boot + 82, "FAT32   ", 8) != 0 ||
+        boot[510] != 0x55 || boot[511] != 0xAA ||
+        read_u32(boot + 32) != partition.sectorCount) return false;
+    char normalized[11];
+    if (storage::normalize_fat32_volume_label(expectedLabel, normalized) !=
+            storage::FAT32_FORMAT_READY ||
+        std::memcmp(boot + 71, normalized, 11) != 0) return false;
+    const uint32_t fatSize = read_u32(boot + 36);
+    const uint32_t firstData = 32 + 2 * fatSize;
+    const uint32_t clusters =
+        (read_u32(boot + 32) - firstData) / boot[13];
+    if (clusters < storage::FAT32_FORMAT_MIN_CLUSTERS ||
+        clusters > storage::FAT32_FORMAT_MAX_CLUSTERS) return false;
+    const uint8_t* backup = bytes + start + 6 * 512;
+    if (std::memcmp(boot, backup, 512) != 0) return false;
+    const uint8_t* fsinfo = bytes + start + 1 * 512;
+    const uint8_t* backupFsinfo = bytes + start + 7 * 512;
+    if (read_u32(fsinfo) != 0x41615252u ||
+        read_u32(fsinfo + 484) != 0x61417272u ||
+        read_u32(fsinfo + 488) != clusters - 1 ||
+        read_u32(fsinfo + 492) != 3 ||
+        read_u32(fsinfo + 508) != 0xAA550000u ||
+        std::memcmp(fsinfo, backupFsinfo, 512) != 0) return false;
+    for (uint32_t copy = 0; copy < 2; ++copy) {
+        const uint8_t* fat = bytes + start +
+            static_cast<size_t>(32 + copy * fatSize) * 512;
+        if (read_u32(fat) != 0x0FFFFFF8u ||
+            read_u32(fat + 4) != 0x0FFFFFFFu ||
+            read_u32(fat + 8) != 0x0FFFFFFFu) return false;
+        for (uint32_t s = 0; s < fatSize; ++s) {
+            const uint8_t* fatSector = fat + static_cast<size_t>(s) * 512;
+            const uint8_t* otherSector = bytes + start +
+                static_cast<size_t>(32 + (1 - copy) * fatSize + s) * 512;
+            if (std::memcmp(fatSector, otherSector, 512) != 0) return false;
+            if (s > 0 && !std::all_of(fatSector, fatSector + 512,
+                                      [](uint8_t v) { return v == 0; }))
+                return false;
+        }
+    }
+    const uint8_t* root = bytes + start + static_cast<size_t>(firstData) * 512;
+    if (normalized[0] == ' ') {
+        if (root[0] != 0) return false;
+    } else if (std::memcmp(root, normalized, 11) != 0 || root[11] != 0x08 ||
+               root[32] != 0) {
+        return false;
+    }
+    return true;
 }
 
 uint32_t independent_crc32(const uint8_t* bytes, size_t length)
@@ -2812,6 +2928,620 @@ int main()
               !storage::storage_operation_active(),
               "rollback failure reports uncertain state and releases the operation lease");
         unregister_fake(index, rollbackFail);
+    }
+
+    {
+        storage::Fat32FormatGeometry smallGeometry = {};
+        check(storage::calculate_fat32_format_geometry(2048, 70000, 512,
+                  smallGeometry) == storage::FAT32_FORMAT_READY &&
+              smallGeometry.sectorsPerCluster == 1 &&
+              smallGeometry.clusterCount >= storage::FAT32_FORMAT_MIN_CLUSTERS &&
+              smallGeometry.rollbackSnapshotBytes <=
+                  storage::FAT32_FORMAT_ROLLBACK_LIMIT_BYTES,
+              "minimum supported FAT32 geometry is deterministic and rollback-bounded");
+        storage::Fat32FormatGeometry mediumGeometry = {};
+        storage::Fat32FormatGeometry largerGeometry = {};
+        check(storage::calculate_fat32_format_geometry(2048, 200000, 512,
+                  mediumGeometry) == storage::FAT32_FORMAT_READY &&
+              storage::calculate_fat32_format_geometry(2048, 400000, 512,
+                  largerGeometry) == storage::FAT32_FORMAT_READY &&
+              mediumGeometry.sectorsPerCluster == 2 &&
+              largerGeometry.sectorsPerCluster == 4 &&
+              mediumGeometry.clusterCount <= storage::FAT32_FORMAT_MAX_CLUSTERS &&
+              largerGeometry.clusterCount <= storage::FAT32_FORMAT_MAX_CLUSTERS,
+              "FAT32 cluster size grows by a deterministic power-of-two policy");
+        storage::Fat32FormatGeometry rejectedGeometry = {};
+        check(storage::calculate_fat32_format_geometry(2048, 60000, 512,
+                  rejectedGeometry) == storage::FAT32_FORMAT_TOO_SMALL,
+              "FAT32 layout rejects a volume below the minimum cluster count");
+        check(storage::calculate_fat32_format_geometry(2048, 70000, 4096,
+                  rejectedGeometry) == storage::FAT32_FORMAT_UNSUPPORTED_SECTOR_SIZE,
+              "FAT32 geometry rejects 4Kn sectors");
+        check(storage::calculate_fat32_format_geometry(2048, 10000000, 512,
+                  rejectedGeometry) == storage::FAT32_FORMAT_ROLLBACK_BUFFER_LIMIT,
+              "FAT32 geometry rejects a volume outside the bounded cluster policy");
+        check(storage::calculate_fat32_format_geometry(2048,
+                  static_cast<uint64_t>(UINT32_MAX) + 1u, 512,
+                  rejectedGeometry) == storage::FAT32_FORMAT_LAYOUT_OVERFLOW,
+              "FAT32 geometry rejects totals beyond the BPB 32-bit sector field");
+        check(storage::calculate_fat32_format_geometry(UINT64_MAX - 10u, 70000, 512,
+                  rejectedGeometry) == storage::FAT32_FORMAT_LAYOUT_OVERFLOW,
+              "FAT32 geometry rejects absolute partition end-LBA overflow");
+
+        char normalized[11];
+        check(storage::normalize_fat32_volume_label("data-01", normalized) ==
+                  storage::FAT32_FORMAT_READY &&
+              std::memcmp(normalized, "DATA-01    ", 11) == 0 &&
+              storage::normalize_fat32_volume_label("12345678901", normalized) ==
+                  storage::FAT32_FORMAT_READY &&
+              storage::normalize_fat32_volume_label("", normalized) ==
+                  storage::FAT32_FORMAT_READY && normalized[0] == ' ' &&
+              storage::normalize_fat32_volume_label("bad/name", normalized) ==
+                  storage::FAT32_FORMAT_LABEL_INVALID,
+              "FAT labels normalize case, allow blank and 11 characters, and reject separators");
+    }
+
+    {
+        FakeDisk gptCreated(512, 100000);
+        build_empty_gpt(gptCreated);
+        const uint8_t index = register_fake(gptCreated, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, gptCreated, regions, regionCount);
+        storage::CreatePartitionRequest createRequest = make_create_request(
+            index, storage::PARTITION_SCHEME_GPT, regions[0], 0, true, 0xD0);
+        storage::CreatePartitionResult createResult = {};
+        const storage::CreatePartitionStatus created =
+            storage::create_partition(createRequest, createResult);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        const bool havePartition = parse_first_partition(index, table, partition);
+        storage::Fat32FormatRequest request = make_format_request(index,
+            partition, "DATA", 0x12345678u);
+        storage::PartitionEntry expectedPartition = partition;
+        uint8_t expectedDiskGuid[16];
+        std::memcpy(expectedDiskGuid, table.primaryDiskGuid,
+                    sizeof(expectedDiskGuid));
+        const std::vector<uint8_t> before = gptCreated.bytes;
+        gptCreated.writeLog.clear();
+        gptCreated.flushWriteCounts.clear();
+        storage::Fat32FormatResult probe = {};
+        const storage::Fat32FormatStatus probed =
+            storage::probe_fat32_format_partition(request, probe);
+        const bool preflightNoWrites = gptCreated.writeLog.empty();
+        gptCreated.writeLog.clear();
+        gptCreated.flushWriteCounts.clear();
+        storage::Fat32FormatResult formatResult = {};
+        const storage::Fat32FormatStatus formatted =
+            storage::format_fat32_partition(request, formatResult);
+        bool outsidePartitionUnchanged = true;
+        const size_t partitionStart = static_cast<size_t>(partition.startLba) * 512;
+        const size_t partitionEnd = partitionStart +
+            static_cast<size_t>(partition.sectorCount) * 512;
+        for (size_t i = 0; i < gptCreated.bytes.size(); ++i) {
+            if (i < partitionStart || i >= partitionEnd) {
+                if (gptCreated.bytes[i] != before[i]) {
+                    outsidePartitionUnchanged = false;
+                    break;
+                }
+            }
+        }
+        bool writesBounded = !gptCreated.writeLog.empty();
+        for (const FakeWriteRecord& write : gptCreated.writeLog) {
+            if (write.count == 0 || write.lba < partition.startLba ||
+                write.lba > partition.endLba ||
+                write.count - 1 > partition.endLba - write.lba) {
+                writesBounded = false;
+                break;
+            }
+        }
+        const bool flushOrdering = gptCreated.flushWriteCounts.size() >= 2 &&
+            gptCreated.flushWriteCounts.back() == gptCreated.writeLog.size() &&
+            gptCreated.writeLog.back().lba == partition.startLba;
+        check(created == storage::CREATE_PARTITION_SUCCESS && havePartition &&
+              probed == storage::FAT32_FORMAT_READY &&
+              probe.existingState == storage::FAT32_EXISTING_CLEAN &&
+              preflightNoWrites,
+              "new DM6 GPT partition passes clean-format preflight without writes");
+        check(formatted == storage::FAT32_FORMAT_SUCCESS &&
+              formatResult.verificationPassed &&
+              formatResult.finalProbeState == storage::FAT32_FINAL_PROBE_FAT32 &&
+              formatResult.geometry.volumeId == 0x12345678u &&
+              formatResult.partition.startLba == partition.startLba &&
+              writesBounded && flushOrdering && outsidePartitionUnchanged,
+              "GPT FAT32 format stays in the selected extent, flushes before success, and preserves every outside byte");
+        check(independent_verify_fat32(gptCreated, partition, "DATA",
+                  0x12345678u) &&
+              formatResult.geometry.fatCount == 2 &&
+              formatResult.geometry.rootCluster == 2 &&
+              formatResult.geometry.freeClusterCount + 1 ==
+                  formatResult.geometry.clusterCount,
+              "independent byte verifier confirms BPB, FSInfo, mirrored FATs, label, ID, and empty root");
+        const uint32_t writesBeforeDriverProbe = gptCreated.writeAttempts;
+        fs_fat::FATVolume driverVolume = {};
+        check(fs_fat::test_probe_fat32_volume(index, partition.startLba,
+                  driverVolume) && driverVolume.mounted &&
+              driverVolume.type == fs_fat::FAT_TYPE_FAT32 &&
+              driverVolume.bytesPerSector == 512 &&
+              driverVolume.rootCluster == formatResult.geometry.rootCluster &&
+              std::memcmp(driverVolume.volumeLabel, "DATA       ", 11) == 0 &&
+              gptCreated.writeAttempts == writesBeforeDriverProbe,
+              "existing FAT32 BPB parser recognizes the formatted GPT partition in a read-only bounded probe");
+        check(storage::parse_partition_table(index, table) &&
+              table.state == storage::DISK_STATE_VALID_GPT &&
+              table.primaryGptValid && table.backupGptValid &&
+              table.gptCopiesAgree && table.partitionCount == 1 &&
+              std::memcmp(table.primaryDiskGuid, expectedDiskGuid, 16) == 0 &&
+              std::memcmp(table.partitions[0].uniqueGuid,
+                  expectedPartition.uniqueGuid, 16) == 0 &&
+              std::memcmp(table.partitions[0].typeGuid,
+                  expectedPartition.typeGuid, 16) == 0 &&
+              table.partitions[0].startLba == expectedPartition.startLba &&
+              table.partitions[0].sectorCount == expectedPartition.sectorCount &&
+              table.partitions[0].attributes == expectedPartition.attributes &&
+              std::strcmp(table.partitions[0].name, expectedPartition.name) == 0 &&
+              !storage::storage_operation_active(),
+              "GPT disk GUID, partition identity, type, name, bounds, and attributes remain unchanged after format");
+        unregister_fake(index, gptCreated);
+    }
+
+    {
+        FakeDisk mbrCreated(512, 100000);
+        set_mbr_signature(mbrCreated);
+        const uint8_t index = register_fake(mbrCreated, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, mbrCreated, regions, regionCount);
+        storage::CreatePartitionRequest createRequest = make_create_request(
+            index, storage::PARTITION_SCHEME_MBR, regions[0], 0, true);
+        storage::CreatePartitionResult createResult = {};
+        const bool createOk = storage::create_partition(createRequest,
+            createResult) == storage::CREATE_PARTITION_SUCCESS;
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        const bool havePartition = parse_first_partition(index, table, partition);
+        storage::Fat32FormatRequest request = make_format_request(index,
+            partition, "", 0xBEEFABCDu);
+        const std::vector<uint8_t> mbrBefore(mbrCreated.bytes.begin(),
+            mbrCreated.bytes.begin() + 512);
+        mbrCreated.writeLog.clear();
+        mbrCreated.flushWriteCounts.clear();
+        storage::Fat32FormatResult result = {};
+        const storage::Fat32FormatStatus status =
+            storage::format_fat32_partition(request, result);
+        check(createOk && havePartition && status ==
+                  storage::FAT32_FORMAT_SUCCESS &&
+              independent_verify_fat32(mbrCreated, partition, "",
+                  0xBEEFABCDu) &&
+              std::memcmp(mbrCreated.bytes.data(), mbrBefore.data(), 512) == 0 &&
+              mbrCreated.writeLog.back().lba == partition.startLba,
+              "new DM6 MBR partition formats FAT32 while preserving all of LBA0");
+        check(result.finalProbeState == storage::FAT32_FINAL_PROBE_FAT32 &&
+              !result.finalStateUncertain &&
+              storage::query_mount_protection(request.targetSnapshot).safety ==
+                  storage::DEVICE_UNMOUNTED,
+              "successful MBR format remains unmounted");
+        const uint32_t writesBeforeDriverProbe = mbrCreated.writeAttempts;
+        fs_fat::FATVolume driverVolume = {};
+        check(fs_fat::test_probe_fat32_volume(index, partition.startLba,
+                  driverVolume) && driverVolume.type == fs_fat::FAT_TYPE_FAT32 &&
+              driverVolume.partitionOffset == partition.startLba &&
+              driverVolume.rootCluster == result.geometry.rootCluster &&
+              mbrCreated.writeAttempts == writesBeforeDriverProbe,
+              "existing FAT32 BPB parser recognizes the formatted MBR partition at its bounded offset");
+        unregister_fake(index, mbrCreated);
+    }
+
+    {
+        FakeDisk adjacent(512, 100000);
+        set_mbr_signature(adjacent);
+        set_mbr_partition(adjacent, 0, 0, 0x0C, 2048, 100);
+        set_mbr_partition(adjacent, 1, 0, 0x0C, 4096, 80000);
+        set_mbr_partition(adjacent, 2, 0, 0x0C, 84096, 64);
+        std::memset(sector(adjacent, 4095), 0xA7, 512);
+        std::memset(sector(adjacent, 84096), 0x5C, 512);
+        std::memset(sector(adjacent, 2048), 0x31, 512);
+        const std::vector<uint8_t> before = adjacent.bytes;
+        const uint8_t index = register_fake(adjacent, true, true, true);
+        storage::PartitionTableModel table = {};
+        const bool parsed = storage::parse_partition_table(index, table);
+        storage::PartitionEntry partition = parsed && table.partitionCount == 3
+            ? table.partitions[1] : storage::PartitionEntry{};
+        storage::Fat32FormatRequest request = make_format_request(index,
+            partition, "ARCHIVE", 0x87654321u);
+        adjacent.writeLog.clear();
+        adjacent.flushWriteCounts.clear();
+        storage::Fat32FormatResult result = {};
+        const storage::Fat32FormatStatus status =
+            storage::format_fat32_partition(request, result);
+        bool bounded = true;
+        for (const FakeWriteRecord& write : adjacent.writeLog) {
+            if (write.lba < partition.startLba || write.lba > partition.endLba ||
+                write.count == 0 || write.count - 1 > partition.endLba - write.lba)
+                bounded = false;
+        }
+        const size_t targetStart = static_cast<size_t>(partition.startLba) * 512;
+        const size_t targetEnd = targetStart +
+            static_cast<size_t>(partition.sectorCount) * 512;
+        bool neighborsUnchanged = true;
+        for (size_t i = 0; i < adjacent.bytes.size(); ++i) {
+            if ((i < targetStart || i >= targetEnd) &&
+                adjacent.bytes[i] != before[i]) {
+                neighborsUnchanged = false;
+                break;
+            }
+        }
+        check(parsed && status == storage::FAT32_FORMAT_SUCCESS && bounded &&
+              neighborsUnchanged &&
+              std::memcmp(sector(adjacent, 4095), before.data() + 4095 * 512,
+                          512) == 0 &&
+              std::memcmp(sector(adjacent, 84096), before.data() + 84096 * 512,
+                          512) == 0 &&
+              std::memcmp(sector(adjacent, 2048), before.data() + 2048 * 512,
+                          512) == 0,
+              "before/after partitions, immediate guard sectors, and MBR remain byte-for-byte unchanged");
+        check(independent_verify_fat32(adjacent, partition, "ARCHIVE",
+                  0x87654321u) && result.verificationPassed,
+              "adjacent-partition format passes independent FAT32 structure verification");
+        unregister_fake(index, adjacent);
+    }
+
+    {
+        FakeDisk gates(512, 100000);
+        set_mbr_signature(gates);
+        set_mbr_partition(gates, 0, 0, 0x0C, 2048, 80000);
+        const uint8_t index = register_fake(gates, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        parse_first_partition(index, table, partition);
+        storage::Fat32FormatRequest request = make_format_request(index,
+            partition, "", 0x11223344u);
+        storage::Fat32FormatResult result = {};
+
+        gates.bytes[static_cast<size_t>(partition.startLba + 20) * 512 + 9] = 0xD3;
+        check(storage::probe_fat32_format_partition(request, result) ==
+                  storage::FAT32_FORMAT_AMBIGUOUS_EXISTING_DATA &&
+              result.existingState == storage::FAT32_EXISTING_AMBIGUOUS_DATA &&
+              gates.writeLog.empty(),
+              "non-zero unknown partition data is rejected without writes");
+        gates.bytes[static_cast<size_t>(partition.startLba + 20) * 512 + 9] = 0;
+
+        uint8_t* boot = sector(gates, partition.startLba);
+        write_u16(boot + 11, 512);
+        boot[13] = 1;
+        std::memcpy(boot + 82, "FAT32   ", 8);
+        boot[510] = 0x55;
+        boot[511] = 0xAA;
+        check(storage::probe_fat32_format_partition(request, result) ==
+                  storage::FAT32_FORMAT_FILESYSTEM_ALREADY_RECOGNIZED &&
+              result.existingState ==
+                  storage::FAT32_EXISTING_RECOGNIZED_FILESYSTEM &&
+              gates.writeLog.empty(),
+              "recognized existing FAT32 is rejected without writes");
+        std::memset(boot, 0, 512);
+        uint8_t* extSuper = sector(gates, partition.startLba + 2);
+        write_u16(extSuper + 56, 0xEF53);
+        check(storage::probe_fat32_format_partition(request, result) ==
+                  storage::FAT32_FORMAT_FILESYSTEM_ALREADY_RECOGNIZED &&
+              gates.writeLog.empty(),
+              "recognized non-FAT ext signature is rejected without writes");
+        std::memset(extSuper, 0, 512);
+        check(storage::probe_fat32_format_partition(request, result) ==
+                  storage::FAT32_FORMAT_READY && gates.writeLog.empty(),
+              "fully zero-filled unformatted partition is accepted without preflight writes");
+        unregister_fake(index, gates);
+    }
+
+    {
+        FakeDisk guarded(512, 100000);
+        set_mbr_signature(guarded);
+        set_mbr_partition(guarded, 0, 0, 0x0C, 2048, 80000);
+        const uint8_t index = register_fake(guarded, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        parse_first_partition(index, table, partition);
+        storage::Fat32FormatRequest request = make_format_request(index,
+            partition, "FAILSAFE", 0xCAFEBABEu);
+        storage::Fat32FormatGeometry geometry = {};
+        storage::calculate_fat32_format_geometry(partition.startLba,
+            partition.sectorCount, 512, geometry);
+        const uint32_t totalMetadataWrites = 2 * geometry.fatSizeSectors +
+            geometry.sectorsPerCluster + 4;
+        auto resetFaultState = [&]() {
+            guarded.failWriteAtCall1 = 0;
+            guarded.failWriteAtCall2 = 0;
+            guarded.failFlushAtCall = 0;
+            guarded.corruptWritePending = false;
+            guarded.writeLog.clear();
+            guarded.flushWriteCounts.clear();
+        };
+
+        const std::vector<uint8_t> before = guarded.bytes;
+        guarded.failWriteAtCall1 = guarded.writeAttempts + 1;
+        storage::Fat32FormatResult firstWriteFailure = {};
+        const storage::Fat32FormatStatus firstFailure =
+            storage::format_fat32_partition(request, firstWriteFailure);
+        check(firstFailure == storage::FAT32_FORMAT_METADATA_WRITE_FAILED &&
+              firstWriteFailure.rollbackAttempted &&
+              firstWriteFailure.rollbackSucceeded && guarded.bytes == before &&
+              !storage::storage_operation_active(),
+              "first metadata write failure restores and verifies the snapshot");
+        resetFaultState();
+
+        guarded.failWriteAtCall1 = guarded.writeAttempts + 17;
+        storage::Fat32FormatResult middleFailureResult = {};
+        const storage::Fat32FormatStatus middleFailure =
+            storage::format_fat32_partition(request, middleFailureResult);
+        check(middleFailure == storage::FAT32_FORMAT_METADATA_WRITE_FAILED &&
+              middleFailureResult.rollbackSucceeded && guarded.bytes == before,
+              "middle FAT metadata write failure restores the partition prefix");
+        resetFaultState();
+
+        guarded.failWriteAtCall1 = guarded.writeAttempts + totalMetadataWrites;
+        storage::Fat32FormatResult finalBootFailureResult = {};
+        const storage::Fat32FormatStatus finalBootFailure =
+            storage::format_fat32_partition(request, finalBootFailureResult);
+        check(finalBootFailure == storage::FAT32_FORMAT_METADATA_WRITE_FAILED &&
+              finalBootFailureResult.rollbackSucceeded && guarded.bytes == before,
+              "final primary boot-sector write failure rolls back all metadata");
+        resetFaultState();
+
+        guarded.corruptWriteLbaOnce = partition.startLba;
+        guarded.corruptWritePending = true;
+        storage::Fat32FormatResult verificationFailureResult = {};
+        const storage::Fat32FormatStatus verificationFailure =
+            storage::format_fat32_partition(request, verificationFailureResult);
+        check(verificationFailure == storage::FAT32_FORMAT_VERIFICATION_FAILED &&
+              !verificationFailureResult.verificationPassed &&
+              verificationFailureResult.rollbackSucceeded && guarded.bytes == before,
+              "byte-level verification failure restores and verifies the old partition bytes");
+        resetFaultState();
+
+        guarded.failFlushAtCall = guarded.flushes + 2;
+        storage::Fat32FormatResult flushFailureResult = {};
+        const storage::Fat32FormatStatus flushFailure =
+            storage::format_fat32_partition(request, flushFailureResult);
+        check(flushFailure == storage::FAT32_FORMAT_FLUSH_FAILED &&
+              flushFailureResult.rollbackSucceeded && guarded.bytes == before,
+              "post-write flush failure restores metadata before reporting failure");
+        resetFaultState();
+
+        guarded.failWriteAtCall1 = guarded.writeAttempts + 1;
+        guarded.failWriteAtCall2 = guarded.writeAttempts + 2;
+        storage::Fat32FormatResult rollbackFailureResult = {};
+        const storage::Fat32FormatStatus rollbackFailure =
+            storage::format_fat32_partition(request, rollbackFailureResult);
+        check(rollbackFailure == storage::FAT32_FORMAT_ROLLBACK_FAILED &&
+              rollbackFailureResult.finalStateUncertain &&
+              rollbackFailureResult.stage ==
+                  storage::FAT32_FORMAT_STAGE_STATE_UNCERTAIN &&
+              !storage::storage_operation_active(),
+              "rollback failure reports uncertain filesystem state and releases the lease");
+        resetFaultState();
+        unregister_fake(index, guarded);
+    }
+
+    {
+        FakeDisk readFailure(512, 100000);
+        set_mbr_signature(readFailure);
+        set_mbr_partition(readFailure, 0, 0, 0x0C, 2048, 80000);
+        const uint8_t index = register_fake(readFailure, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        parse_first_partition(index, table, partition);
+        storage::Fat32FormatRequest request = make_format_request(index,
+            partition, "", 0x10203040u);
+        readFailure.failLba = partition.startLba;
+        storage::Fat32FormatResult result = {};
+        check(storage::probe_fat32_format_partition(request, result) ==
+                  storage::FAT32_FORMAT_READ_UNAVAILABLE &&
+              result.existingState == storage::FAT32_EXISTING_UNREADABLE &&
+              readFailure.writeLog.empty(),
+              "unreadable partition boot sector fails preflight without writes");
+        unregister_fake(index, readFailure);
+    }
+
+    {
+        FakeDisk rescanFailure(512, 100000);
+        set_mbr_signature(rescanFailure);
+        set_mbr_partition(rescanFailure, 0, 0, 0x0C, 2048, 80000);
+        const std::vector<uint8_t> before = rescanFailure.bytes;
+        const uint8_t index = register_fake(rescanFailure, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        parse_first_partition(index, table, partition);
+        storage::Fat32FormatRequest request = make_format_request(index,
+            partition, "", 0x33445566u);
+        rescanFailure.failLbaAfterWrite = 0;
+        storage::Fat32FormatResult result = {};
+        check(storage::format_fat32_partition(request, result) ==
+                  storage::FAT32_FORMAT_RESCAN_FAILED &&
+              result.rollbackAttempted && result.rollbackSucceeded &&
+              rescanFailure.bytes == before,
+              "post-verification partition-table rescan failure restores the full snapshot");
+        unregister_fake(index, rescanFailure);
+    }
+
+    {
+        FakeDisk disappeared(512, 100000);
+        set_mbr_signature(disappeared);
+        set_mbr_partition(disappeared, 0, 0, 0x0C, 2048, 80000);
+        const uint8_t index = register_fake(disappeared, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        parse_first_partition(index, table, partition);
+        storage::Fat32FormatRequest request = make_format_request(index,
+            partition, "", 0x50607080u);
+        std::memset(sector(disappeared, 0) + 446, 0, 16);
+        storage::Fat32FormatResult result = {};
+        check(storage::probe_fat32_format_partition(request, result) ==
+                  storage::FAT32_FORMAT_PARTITION_DISAPPEARED &&
+              disappeared.writeLog.empty(),
+              "disappeared partition is rejected before formatting writes");
+        unregister_fake(index, disappeared);
+    }
+
+    {
+        FakeDisk policy(512, 100000);
+        set_mbr_signature(policy);
+        set_mbr_partition(policy, 0, 0, 0x0C, 2048, 80000);
+        const uint8_t index = register_fake(policy, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        parse_first_partition(index, table, partition);
+        storage::Fat32FormatRequest request = make_format_request(index,
+            partition, "", 0x01020304u);
+        storage::Fat32FormatResult result = {};
+        vfs::set_test_mount(6, true, index, "/");
+        check(storage::probe_fat32_format_partition(request, result) ==
+                  storage::FAT32_FORMAT_ROOT_BACKING && policy.writeLog.empty(),
+              "root-backed disk is protected from format");
+        vfs::clear_test_mounts();
+        vfs::set_test_mount(7, true, index, "/data");
+        check(storage::probe_fat32_format_partition(request, result) ==
+                  storage::FAT32_FORMAT_MOUNTED && policy.writeLog.empty(),
+              "a device mount conservatively protects every partition");
+        vfs::clear_test_mounts();
+        unregister_fake(index, policy);
+
+        FakeDisk readOnly(512, 100000);
+        set_mbr_signature(readOnly);
+        set_mbr_partition(readOnly, 0, 0, 0x0C, 2048, 80000);
+        const uint8_t readOnlyIndex = register_fake(readOnly, false, true, true);
+        parse_first_partition(readOnlyIndex, table, partition);
+        request = make_format_request(readOnlyIndex, partition);
+        check(storage::probe_fat32_format_partition(request, result) ==
+                  storage::FAT32_FORMAT_READ_ONLY && readOnly.writeLog.empty(),
+              "read-only media is rejected before the first write");
+        unregister_fake(readOnlyIndex, readOnly);
+
+        FakeDisk unknownPersistence(512, 100000);
+        set_mbr_signature(unknownPersistence);
+        set_mbr_partition(unknownPersistence, 0, 0, 0x0C, 2048, 80000);
+        const uint8_t unknownIndex = register_fake(unknownPersistence, true,
+            false, false);
+        parse_first_partition(unknownIndex, table, partition);
+        request = make_format_request(unknownIndex, partition);
+        check(storage::probe_fat32_format_partition(request, result) ==
+                  storage::FAT32_FORMAT_DURABILITY_UNKNOWN &&
+              unknownPersistence.writeLog.empty(),
+              "unknown persistence cannot pass format preflight");
+        unregister_fake(unknownIndex, unknownPersistence);
+
+        FakeDisk unknownBoot(512, 100000);
+        set_mbr_signature(unknownBoot);
+        set_mbr_partition(unknownBoot, 0, 0, 0x0C, 2048, 80000);
+        const uint8_t unknownBootIndex = register_fake(unknownBoot, true,
+            true, true, false, 0, 0, block::BOOT_PROVENANCE_UNKNOWN);
+        parse_first_partition(unknownBootIndex, table, partition);
+        request = make_format_request(unknownBootIndex, partition);
+        check(storage::probe_fat32_format_partition(request, result) ==
+                  storage::FAT32_FORMAT_BOOT_IDENTITY_UNKNOWN &&
+              unknownBoot.writeLog.empty(),
+              "unknown boot provenance remains fail-closed for formatting");
+        unregister_fake(unknownBootIndex, unknownBoot);
+
+        FakeDisk bootDisk(512, 100000);
+        set_mbr_signature(bootDisk);
+        set_mbr_partition(bootDisk, 0, 0, 0x0C, 2048, 80000);
+        const uint8_t bootIndex = register_fake(bootDisk, true, true, true,
+            false, 0, 0, block::BOOT_PROVENANCE_BOOT_BACKING);
+        parse_first_partition(bootIndex, table, partition);
+        request = make_format_request(bootIndex, partition);
+        check(storage::probe_fat32_format_partition(request, result) ==
+                  storage::FAT32_FORMAT_BOOT_BACKING && bootDisk.writeLog.empty(),
+              "boot-protected disk cannot be formatted");
+        unregister_fake(bootIndex, bootDisk);
+
+        FakeDisk changedPartition(512, 100000);
+        set_mbr_signature(changedPartition);
+        set_mbr_partition(changedPartition, 0, 0, 0x0C, 2048, 80000);
+        const uint8_t changedIndex = register_fake(changedPartition, true,
+            true, true);
+        parse_first_partition(changedIndex, table, partition);
+        request = make_format_request(changedIndex, partition);
+        set_mbr_partition(changedPartition, 0, 0, 0x0C, 4096, 80000);
+        check(storage::probe_fat32_format_partition(request, result) ==
+                  storage::FAT32_FORMAT_PARTITION_IDENTITY_CHANGED &&
+              changedPartition.writeLog.empty(),
+              "changed MBR partition bounds are rejected by stable identity revalidation");
+        unregister_fake(changedIndex, changedPartition);
+
+        FakeDisk changedIdentity(512, 100000);
+        set_mbr_signature(changedIdentity);
+        set_mbr_partition(changedIdentity, 0, 0, 0x0C, 2048, 80000);
+        const uint8_t changedIdentityIndex = register_fake(changedIdentity,
+            true, true, true);
+        parse_first_partition(changedIdentityIndex, table, partition);
+        request = make_format_request(changedIdentityIndex, partition);
+        const_cast<block::BlockDevice*>(block::get_device(
+            changedIdentityIndex))->serial[0] = 'X';
+        check(storage::probe_fat32_format_partition(request, result) ==
+                  storage::FAT32_FORMAT_IDENTITY_CHANGED &&
+              changedIdentity.writeLog.empty(),
+              "changed target identity aborts format preflight without writes");
+        unregister_fake(changedIdentityIndex, changedIdentity);
+
+        FakeDisk leaseBusy(512, 100000);
+        set_mbr_signature(leaseBusy);
+        set_mbr_partition(leaseBusy, 0, 0, 0x0C, 2048, 80000);
+        const uint8_t busyIndex = register_fake(leaseBusy, true, true, true);
+        parse_first_partition(busyIndex, table, partition);
+        request = make_format_request(busyIndex, partition);
+        storage::StorageOperationLease held = {};
+        storage::try_acquire_storage_operation(held);
+        check(storage::probe_fat32_format_partition(request, result) ==
+                  storage::FAT32_FORMAT_OPERATION_BUSY &&
+              leaseBusy.writeLog.empty() &&
+              storage::release_storage_operation(held),
+              "format preflight shares the exclusive storage-operation lease");
+        unregister_fake(busyIndex, leaseBusy);
+    }
+
+    {
+        FakeDisk fourKn(4096, 100000, false);
+        const uint8_t index = register_fake(fourKn, true, true, true);
+        storage::PartitionEntry partition = {};
+        partition.partitionNumber = 1;
+        partition.startLba = 2048;
+        partition.sectorCount = 80000;
+        partition.endLba = partition.startLba + partition.sectorCount - 1;
+        partition.mbrType = 0x0C;
+        storage::Fat32FormatRequest request = {};
+        storage::capture_target_identity(index, request.targetSnapshot);
+        request.partitionScheme = storage::PARTITION_SCHEME_MBR;
+        request.partitionSnapshot = partition;
+        request.expectedRegistryGeneration =
+            request.targetSnapshot.registryGeneration;
+        request.testVolumeIdProvided = true;
+        request.testVolumeId = 0x11112222u;
+        storage::Fat32FormatResult result = {};
+        check(storage::probe_fat32_format_partition(request, result) ==
+                  storage::FAT32_FORMAT_UNSUPPORTED_SECTOR_SIZE &&
+              fourKn.writeLog.empty(),
+              "4Kn format preflight returns the explicit 512-byte-only blocker before table or data writes");
+        unregister_fake(index, fourKn);
+    }
+
+    {
+        FakeDisk registryTarget(512, 100000);
+        set_mbr_signature(registryTarget);
+        set_mbr_partition(registryTarget, 0, 0, 0x0C, 2048, 80000);
+        const uint8_t index = register_fake(registryTarget, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        parse_first_partition(index, table, partition);
+        storage::Fat32FormatRequest request = make_format_request(index,
+            partition);
+        FakeDisk unrelatedRegistration(512, 64);
+        const uint8_t unrelatedIndex = register_fake(unrelatedRegistration);
+        storage::Fat32FormatResult result = {};
+        check(storage::probe_fat32_format_partition(request, result) ==
+                  storage::FAT32_FORMAT_REGISTRY_CHANGED &&
+              registryTarget.writeLog.empty(),
+              "registry-generation change after selection aborts before formatter writes");
+        unregister_fake(unrelatedIndex, unrelatedRegistration);
+        unregister_fake(index, registryTarget);
     }
 
     block::init();

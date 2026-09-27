@@ -12,6 +12,7 @@ try {
     & $compiler.Source `
         -std=c++17 -O2 -Wall -Wextra `
         -DKERNEL_STORAGE_TEST `
+        -I kernel/arch/amd64/include `
         -iquote kernel/core -iquote kernel/core/include -iquote kernel/arch/amd64/include `
         tests/storage_manager_test.cpp `
         kernel/core/block_device.cpp `
@@ -19,6 +20,8 @@ try {
         kernel/core/partition_table.cpp `
         kernel/core/disk_initialization.cpp `
         kernel/core/partition_operations.cpp `
+        kernel/core/fat32_formatter.cpp `
+        kernel/core/fs_fat.cpp `
         kernel/core/ramdisk.cpp `
         -o $testExe
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -512,6 +512,20 @@ static bool try_mount_fat_boot_sector(uint8_t blockDevIdx, uint64_t partitionOff
     return try_mount_fat16_boot_sector(blockDevIdx, partitionOffset, vol, bootSector);
 }
 
+#if defined(KERNEL_STORAGE_TEST)
+bool test_probe_fat32_volume(uint8_t blockDevIndex, uint64_t partitionOffset,
+                             FATVolume& out)
+{
+    memzero(&out, sizeof(out));
+    const block::BlockDevice* device = block::get_device(blockDevIndex);
+    if (!device || device->sectorSize < 512 || device->sectorSize > 4096 ||
+        block::read_sectors(blockDevIndex, partitionOffset, 1, s_secBuf) !=
+            block::BLOCK_OK) return false;
+    return try_mount_fat32_boot_sector(blockDevIndex, partitionOffset, out,
+                                       s_secBuf);
+}
+#endif
+
 static bool try_mount_fat(uint8_t blockDevIdx, FATVolume& vol)
 {
     block::Status st = block::read_sectors(blockDevIdx, 0, 1, s_secBuf);

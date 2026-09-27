@@ -282,6 +282,9 @@
     <ClInclude Include="kernel\core\include\kernel\disk_initialization.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\fat32_formatter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="kernel\core\include\kernel\ata.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1017,6 +1020,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="kernel\core\disk_initialization.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\fat32_formatter.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="kernel\core\ata.cpp">
