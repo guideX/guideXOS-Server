@@ -118,6 +118,8 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         new(236, 226, 88, 18, "Discard");
     private readonly GuideXosButton _closeCancelButton =
         new(336, 226, 88, 18, "Cancel");
+    private GuideXosDialog _persistenceDialog;
+    private GuideXosButton _persistenceOkButton;
     private readonly object[][] _sectionLeaves;
     private GuideXosControlHost _controlHost;
     private GuideXosHost _appHost;
@@ -125,6 +127,8 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     private ulong _window;
     private ManagedSettingsSnapshot _working;
     private ManagedSettingsSnapshot _applied;
+    private ManagedSettingsSnapshot _persisted;
+    private ManagedSettingsStore _settingsStore;
     private bool _syncing;
     private bool _testsRun;
     private uint _launchCount;
@@ -135,8 +139,18 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     private GuideXosDialog _activeDialog;
     private bool _resettingComposition;
     private bool _surfaceClosing;
+#if !HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
     private bool _c145TestsPassed;
+#endif
+    private bool _c146TestsPassed;
+#if HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
+    private bool _c146StoreTestsPassed;
+#endif
     private bool _c145FocusedTesting;
+    private bool _saveInProgress;
+    private bool _persistedFilePresent;
+    private bool _failNextSaveForTests;
+    private byte _pendingPersistenceMessage;
     private ManagedSettingsSnapshot _dialogWorkingSnapshot;
     private ManagedSettingsSnapshot _dialogAppliedSnapshot;
     private int _dialogViewportOffset;
@@ -217,10 +231,13 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _dirtyCloseDialog.TrySetCancelResult(GuideXosDialogResult.Cancel);
         _dirtyCloseDialog.TrySetMessage("Apply changes before closing?");
         _dirtyCloseDialog.Closed = OnDirtyCloseDialogClosed;
+
     }
 
     internal ManagedSettingsSnapshot Working => _working;
     internal ManagedSettingsSnapshot Applied => _applied;
+    internal ManagedSettingsSnapshot Persisted => _persisted;
+    internal bool PersistedFilePresent => _persistedFilePresent;
     internal bool IsDirty => !_working.Equals(_applied);
     internal GuideXosScrollView View => _view;
     internal GuideXosScrollBar ScrollBar => _scrollBar;
@@ -238,6 +255,15 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     internal GuideXosButton CloseApplyButton => _closeApplyButton;
     internal GuideXosButton CloseDiscardButton => _closeDiscardButton;
     internal GuideXosButton CloseCancelButton => _closeCancelButton;
+    internal GuideXosDialog PersistenceDialog => EnsurePersistenceDialog();
+    internal GuideXosButton PersistenceOkButton
+    {
+        get
+        {
+            EnsurePersistenceDialog();
+            return _persistenceOkButton;
+        }
+    }
     internal GuideXosGroupBox Group(int index) => _groups[index];
     internal GuideXosVerticalStack Stack(int index) => _stacks[index];
     internal object Leaf(int section, int index) => _sectionLeaves[section][index];
@@ -260,6 +286,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     internal bool PopupOpen => _menu.IsOpen || _density.IsOpen || _speed.IsOpen || _statusCombo.IsOpen;
     internal bool HasCapture => _controlHost?.HasTransientInputCapture ?? false;
     internal bool HasDragOwner => _controlHost?.HasPointerDragCapture ?? false;
+    internal bool SurfaceClosingForTests => _surfaceClosing;
     internal int InitialContentHeight => _initialContentHeight;
     internal int FinalContentHeight => _finalContentHeight;
 
@@ -269,6 +296,13 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _appHost = host;
         ++_launchCount;
         _surfaceClosing = false;
+#if HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
+        if (!_testsRun)
+        {
+            host.TryLog("C146-REGRESSION-SCOPE c128-c131=prior-c145-proof c145-dialog=historical c145-settings=covered-by-c146 result=START"u8);
+            _c146StoreTestsPassed = ManagedSettingsStoreC146Tests.Run(host);
+        }
+#endif
         if (!ResetComposition()) return GuideXosResult.InvalidArgument;
         GuideXosResult create = host.TryCreateSurface(
             "Managed Settings Center"u8, 560, 340, out _surface);
@@ -276,39 +310,71 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _window = _surface.Handle;
         if (!_testsRun)
         {
+#if HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
+            bool c146Store = _c146StoreTestsPassed;
+            _c145FocusedTesting = true;
+            bool c146Settings = GuideXosSettingsCenterC146Tests.Run(host, this);
+            _c145FocusedTesting = false;
+            host.TryLog(c146Store && c146Settings
+                ? "C146-REGRESSION-SCOPE c128-c131=prior-c145-proof c145-dialog=historical c145-settings=covered-by-c146 c146-store=PASS c146-settings=PASS result=PASS"u8
+                : "C146-REGRESSION-SCOPE c146-store-or-settings=FAIL result=FAIL"u8);
+#else
             bool c128 = GuideXosPanelLifecycleTests.Run(host);
             bool c131Api = GuideXosCheckBoxC131Tests.Run(host, _surface);
             bool c131Host = GuideXosCheckBoxC131HostTests.Run(host);
             bool c131 = c131Api && c131Host;
+            bool lowerRegressions = c128 && c131;
             bool c145Dialogs = GuideXosDialogC145Tests.Run(host, _dirtyCloseDialog);
             _c145FocusedTesting = true;
             bool c145Settings = GuideXosSettingsCenterC145Tests.Run(host, this);
             _c145FocusedTesting = false;
-            bool lowerRegressions = c128 && c131;
             host.TryLog(lowerRegressions
                 ? "C145-LOWER-REGRESSIONS c128=PASS c131=57/57 result=PASS"u8
                 : "C145-LOWER-REGRESSIONS result=FAIL"u8);
+#endif
             _testsRun = true;
+#if HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
+            _c146TestsPassed = c146Store && c146Settings;
+#else
             _c145TestsPassed = lowerRegressions && c145Dialogs && c145Settings;
+            _c146TestsPassed = true;
+#endif
+#if !HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
             if (!ResetComposition()) return GuideXosResult.InvalidArgument;
+#endif
+#if !HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
             host.TryLog(_c145TestsPassed
                 ? "C145-FOCUSED-SUITES result=PASS"u8
                 : "C145-FOCUSED-SUITES result=FAIL"u8);
+#endif
+            host.TryLog(_c146TestsPassed
+                ? "C146-FOCUSED-SUITES result=PASS"u8
+                : "C146-FOCUSED-SUITES result=FAIL"u8);
         }
 
+        bool controlsRegistered = RegisterControls();
+        HydratePersistedSettings(host);
         _initialContentHeight = _view.ContentExtent;
-        bool valid = RegisterControls() && _controlHost.RegistrationCount == 9 &&
+        bool valid = controlsRegistered && _controlHost.RegistrationCount == 9 &&
             _view.MemberCount == 21 && _view.MaximumMemberCount == ViewCapacity &&
             _groups.Length == SectionCount && _stacks.Length == SectionCount &&
-            _working.Equals(_applied) && !IsDirty && _view.Offset == 0 &&
+            _working.Equals(_applied) && _applied.Equals(_persisted) &&
+            !IsDirty && _view.Offset == 0 &&
             _view.MaximumOffset > 0 && ValidateComposition();
         host.TryLog(valid
             ? "C144-PROOF launch=PASS registration=9 hostCapacity=10 groupBoxes=4 leaves=17 viewMembers=21 stacks=4 layout=valid result=PASS"u8
             : "C144-PROOF launch=FAIL result=FAIL"u8);
+#if HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
+        host.TryLog(valid && _resetDialog.RegistrationCount == 2 &&
+            _dirtyCloseDialog.RegistrationCount == 3 && _c146TestsPassed
+            ? "C146-PROOF launch=PASS registration=9 hostCapacity=10 dialogCapacity=8 resetRegistrations=2 closeRegistrations=3 result=PASS"u8
+            : "C146-PROOF launch=FAIL result=FAIL"u8);
+#else
         host.TryLog(valid && _resetDialog.RegistrationCount == 2 &&
             _dirtyCloseDialog.RegistrationCount == 3 && _c145TestsPassed
             ? "C145-PROOF launch=PASS registration=9 hostCapacity=10 dialogCapacity=8 resetRegistrations=2 closeRegistrations=3 result=PASS"u8
             : "C145-PROOF launch=FAIL result=FAIL"u8);
+#endif
         LogGeometry(host, "initial");
         if (_launchCount > 1)
             host.TryLog(valid ? "C144-RELAUNCH close=PASS relaunch=PASS registration=9 result=PASS"u8 : "C144-RELAUNCH result=FAIL"u8);
@@ -559,13 +625,196 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         return valid;
     }
 
-    internal void ApplyWorking()
+    internal void InjectNextSaveFailureForTests() => _failNextSaveForTests = true;
+
+    internal bool ApplyForTests() => ApplyWorking();
+
+    private void HydratePersistedSettings(GuideXosHost host)
     {
-        _applied = _working;
+        _settingsStore = new ManagedSettingsStore(new ManagedSettingsVfsAccess(host));
+        ManagedSettingsLoadResult load = _settingsStore.Load();
+        ManagedSettingsSnapshot initial = load.Status == ManagedSettingsLoadStatus.Loaded
+            ? load.Snapshot
+            : ManagedSettingsSnapshot.Defaults;
+        _working = initial;
+        _applied = initial;
+        _persisted = initial;
+        _persistedFilePresent = load.Status == ManagedSettingsLoadStatus.Loaded;
+        SyncControlsFromWorking();
+
+        if (load.Status == ManagedSettingsLoadStatus.Loaded)
+        {
+            LogSettingsSnapshot("C146-LOAD source=file result=PASS "u8, initial,
+                "working=applied persisted=loaded dirty=false"u8);
+            host?.TryLog("C146-LOAD-META path=/system/apps/GXSETT.BIN version=1 size=25 readback=validated viewport=0 focus=normal result=PASS"u8);
+        }
+        else if (load.Status == ManagedSettingsLoadStatus.Missing)
+        {
+            LogSettingsSnapshot("C146-LOAD source=missing result=PASS "u8, initial,
+                "working=applied persisted=defaults dirty=false"u8);
+            host?.TryLog("C146-LOAD-META path=/system/apps/GXSETT.BIN file=missing created=false result=PASS"u8);
+        }
+        else
+        {
+            LogSettingsSnapshot("C146-LOAD source=invalid recovery=defaults "u8,
+                initial, "dirty=false"u8);
+            ShowPersistenceMessage(warning: true);
+        }
+    }
+
+    private void ShowPersistenceMessage(bool warning)
+    {
+        GuideXosDialog persistenceDialog = EnsurePersistenceDialog();
+        if (_activeDialog != null && _activeDialog.IsOpen)
+        {
+            _pendingPersistenceMessage = warning ? (byte)1 : (byte)2;
+            return;
+        }
+
+        string title = warning ? "Settings warning" : "Settings error";
+        string message = warning
+            ? "Settings could not be read. Defaults were loaded."
+            : "Settings could not be saved. Your edits remain open.";
+        if (!GuideXosMessageBox.TryConfigure(persistenceDialog,
+                GuideXosMessageBoxButtons.OK, title, message,
+                _persistenceOkButton, null, null, GuideXosDialogResult.OK) ||
+            !persistenceDialog.Open(_controlHost))
+        {
+            _appHost?.TryLog("C146-MESSAGE result=FAIL modal=unavailable"u8);
+            return;
+        }
+
+        _activeDialog = persistenceDialog;
+        LogDialogGeometry(_appHost);
+        _appHost?.TryLog(warning
+            ? "C146-RECOVERY warning=opened defaults=loaded dirty=false result=PASS"u8
+            : "C146-APPLY-FAIL messagebox=opened working=preserved applied=preserved persisted=preserved dirty=true result=PASS"u8);
+    }
+
+    private GuideXosDialog EnsurePersistenceDialog()
+    {
+        if (_persistenceDialog != null) return _persistenceDialog;
+
+        _persistenceDialog = new GuideXosDialog(112, 96, 336, 160,
+            "Settings message");
+        _persistenceOkButton = new GuideXosButton(232, 226, 96, 18, "OK");
+        _persistenceDialog.TryAddMember(_persistenceOkButton);
+        _persistenceDialog.TrySetButtonResult(_persistenceOkButton,
+            GuideXosDialogResult.OK);
+        _persistenceDialog.TrySetDefaultButton(_persistenceOkButton);
+        _persistenceDialog.TrySetCancelResult(GuideXosDialogResult.OK);
+        _persistenceDialog.Closed = OnPersistenceDialogClosed;
+        return _persistenceDialog;
+    }
+
+    private void OnPersistenceDialogClosed(GuideXosDialogResult result)
+    {
+        if (_resettingComposition) return;
+        if (_persistenceDialog != null &&
+            ReferenceEquals(_activeDialog, _persistenceDialog))
+            _activeDialog = null;
+        byte pending = _pendingPersistenceMessage;
+        _pendingPersistenceMessage = 0;
+        if (pending != 0) ShowPersistenceMessage(pending == 1);
+    }
+
+    private void LogSettingsSnapshot(ReadOnlySpan<byte> prefix,
+        ManagedSettingsSnapshot snapshot, ReadOnlySpan<byte> suffix)
+    {
+        Span<byte> stateLine = stackalloc byte[127];
+        int stateLength = 0;
+        if (!GuideXosText.Append(stateLine, ref stateLength, prefix)) return;
+        while (stateLength > 0 && stateLine[stateLength - 1] == (byte)' ')
+            stateLength--;
+        if (suffix.Length != 0 &&
+            (!GuideXosText.Append(stateLine, ref stateLength, " "u8) ||
+             !GuideXosText.Append(stateLine, ref stateLength, suffix))) return;
+
+        Span<byte> valuesLine = stackalloc byte[127];
+        int valuesLength = 0;
+        if (!GuideXosText.Append(valuesLine, ref valuesLength, "C146-VALUES "u8) ||
+            !GuideXosText.Append(valuesLine, ref valuesLength, "density="u8)) return;
+        GuideXosText.AppendUnsigned(valuesLine, ref valuesLength, (uint)snapshot.Density);
+        if (!GuideXosText.Append(valuesLine, ref valuesLength, " showStatus="u8)) return;
+        GuideXosText.AppendUnsigned(valuesLine, ref valuesLength, snapshot.ShowStatus ? 1u : 0u);
+        if (!GuideXosText.Append(valuesLine, ref valuesLength, " advanced="u8)) return;
+        GuideXosText.AppendUnsigned(valuesLine, ref valuesLength, snapshot.ShowAdvanced ? 1u : 0u);
+        if (!GuideXosText.Append(valuesLine, ref valuesLength, " inputEnabled="u8)) return;
+        GuideXosText.AppendUnsigned(valuesLine, ref valuesLength, snapshot.InputEnabled ? 1u : 0u);
+        if (!GuideXosText.Append(valuesLine, ref valuesLength, " naturalScroll="u8)) return;
+        GuideXosText.AppendUnsigned(valuesLine, ref valuesLength, snapshot.NaturalScroll ? 1u : 0u);
+        if (!GuideXosText.Append(valuesLine, ref valuesLength, " speed="u8)) return;
+        GuideXosText.AppendUnsigned(valuesLine, ref valuesLength, (uint)snapshot.ScrollSpeed);
+        if (!GuideXosText.Append(valuesLine, ref valuesLength, " keyboardTips="u8)) return;
+        GuideXosText.AppendUnsigned(valuesLine, ref valuesLength, snapshot.ShowKeyboardTips ? 1u : 0u);
+        if (!GuideXosText.Append(valuesLine, ref valuesLength, " detail="u8)) return;
+        GuideXosText.AppendUnsigned(valuesLine, ref valuesLength, (uint)snapshot.StatusDetail);
+        if (!GuideXosText.Append(valuesLine, ref valuesLength, " reportFormat="u8)) return;
+        GuideXosText.AppendUnsigned(valuesLine, ref valuesLength, (uint)snapshot.ReportFormat);
+
+        _appHost?.TryLog(stateLine[..stateLength]);
+        _appHost?.TryLog(valuesLine[..valuesLength]);
+    }
+
+    internal bool ApplyWorking()
+    {
+        if (_saveInProgress) return false;
+        if (_working.Equals(_applied) && _applied.Equals(_persisted))
+        {
+            _appHost?.TryLog("C146-SAVE no-op=true writes=0 dirty=false result=PASS"u8);
+            return true;
+        }
+
+        ManagedSettingsSnapshot candidate = _working;
+        if (!ManagedSettingsStore.IsValid(candidate))
+        {
+            ShowPersistenceMessage(warning: false);
+            return false;
+        }
+
+        _saveInProgress = true;
+        ManagedSettingsSaveStatus saveStatus;
+        try
+        {
+            if (_failNextSaveForTests)
+            {
+                _failNextSaveForTests = false;
+                saveStatus = ManagedSettingsSaveStatus.IoFailure;
+            }
+            else if (_c145FocusedTesting)
+            {
+                // The C145 focused fixture validates modal behavior without
+                // mutating the user's real settings file.
+                saveStatus = ManagedSettingsSaveStatus.Saved;
+            }
+            else
+            {
+                saveStatus = _settingsStore?.Save(candidate) ??
+                    ManagedSettingsSaveStatus.IoFailure;
+            }
+        }
+        finally
+        {
+            _saveInProgress = false;
+        }
+
+        if (saveStatus != ManagedSettingsSaveStatus.Saved)
+        {
+            _appHost?.TryLog("C146-SAVE result=FAIL working=preserved applied=preserved persisted=preserved dirty=true"u8);
+            ShowPersistenceMessage(warning: false);
+            return false;
+        }
+
+        _applied = candidate;
+        _persisted = candidate;
+        if (!_c145FocusedTesting) _persistedFilePresent = true;
         _applyButton.SetEnabled(false);
         UpdateStatusPreview();
         _controlHost?.RefreshVisibility();
         RefreshDirtyState();
+        LogSettingsSnapshot("C146-SAVE result=PASS write=verified readback=PASS "u8,
+            candidate, "dirty=false"u8);
+        return true;
     }
 
     internal void RestoreDefaults()
@@ -585,11 +834,18 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _resettingComposition = true;
         if (_resetDialog.IsOpen) _resetDialog.Close(GuideXosDialogResult.None);
         if (_dirtyCloseDialog.IsOpen) _dirtyCloseDialog.Close(GuideXosDialogResult.None);
+        if (_persistenceDialog.IsOpen) _persistenceDialog.Close(GuideXosDialogResult.None);
         _activeDialog = null;
         _resettingComposition = false;
         _syncing = true;
         _working = ManagedSettingsSnapshot.Defaults;
         _applied = _working;
+        _persisted = _working;
+        _settingsStore = null;
+        _persistedFilePresent = false;
+        _saveInProgress = false;
+        _failNextSaveForTests = false;
+        _pendingPersistenceMessage = 0;
         _view.Clear();
         _view.Reset();
         for (int section = 0; section < SectionCount; section++)
@@ -662,8 +918,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _controlHost.TryRegisterCheckBox(AdvancedToggleId, _showAdvanced, true);
         _applyButton.SetEnabled(false);
         _syncing = false;
-        UpdateStatusPreview();
-        RefreshDirtyState();
+        SyncControlsFromWorking();
         return ok && ValidateComposition();
     }
 
@@ -956,12 +1211,22 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         }
         else if (result == GuideXosDialogResult.Apply)
         {
-            ApplyWorking();
-            bool applied = _applied.Equals(_working) && !IsDirty;
-            bool closed = CloseSettingsCenter(_appHost, _surface, "apply");
-            _appHost?.TryLog(applied && closed
-                ? "C145-UNSAVED result=Apply applied=committed closed=true result=PASS"u8
-                : "C145-UNSAVED result=Apply result=FAIL"u8);
+            bool saved = ApplyWorking();
+            if (saved)
+            {
+                bool applied = _applied.Equals(_working) && !IsDirty;
+                bool closed = CloseSettingsCenter(_appHost, _surface, "apply");
+                _appHost?.TryLog(applied && closed
+                    ? "C145-UNSAVED result=Apply applied=committed closed=true result=PASS"u8
+                    : "C145-UNSAVED result=Apply result=FAIL"u8);
+            }
+            else
+            {
+                _appHost?.TryLog(IsDirty && !_surfaceClosing &&
+                    ReferenceEquals(_activeDialog, _persistenceDialog)
+                    ? "C146-UNSAVED result=Apply failed=kept-open dirty=true result=PASS"u8
+                    : "C146-UNSAVED result=Apply failed=result-invalid"u8);
+            }
         }
         else if (result == GuideXosDialogResult.Discard)
         {
@@ -1017,7 +1282,8 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         int position = 0;
         GuideXosText.Append(line, ref position, "C145-DIALOG-GEOMETRY kind="u8);
         ReadOnlySpan<byte> name = ReferenceEquals(_activeDialog, _resetDialog)
-            ? "reset"u8 : "close"u8;
+            ? "reset"u8 : ReferenceEquals(_activeDialog, _persistenceDialog)
+                ? "persistence"u8 : "close"u8;
         GuideXosText.Append(line, ref position, name);
         GuideXosText.Append(line, ref position, " bounds="u8);
         GuideXosText.AppendUnsigned(line, ref position, (uint)_activeDialog.X);
@@ -1034,7 +1300,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             AppendDialogPoint(line, ref position, " confirm="u8,
                 _resetConfirmButton.X + 4, _resetConfirmButton.Y + 4);
         }
-        else
+        else if (ReferenceEquals(_activeDialog, _dirtyCloseDialog))
         {
             AppendDialogPoint(line, ref position, " apply="u8,
                 _closeApplyButton.X + 4, _closeApplyButton.Y + 4);
@@ -1042,6 +1308,11 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
                 _closeDiscardButton.X + 4, _closeDiscardButton.Y + 4);
             AppendDialogPoint(line, ref position, " cancel="u8,
                 _closeCancelButton.X + 4, _closeCancelButton.Y + 4);
+        }
+        else
+        {
+            AppendDialogPoint(line, ref position, " ok="u8,
+                _persistenceOkButton.X + 4, _persistenceOkButton.Y + 4);
         }
         host?.TryLog(line[..position]);
     }

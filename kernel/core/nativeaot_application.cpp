@@ -105,6 +105,13 @@ constexpr int32_t kManagedFileEntryNameTooLong = -18;
 constexpr uint32_t kManagedEntryTypeRegular = 1u;
 constexpr uint32_t kManagedEntryTypeDirectory = 2u;
 constexpr const char* kManagedFileRoot = "/system/apps/";
+// C146 keeps the managed application's approved virtual path and routes only
+// this exact settings record to the writable root FAT mount. The wallpaper
+// pack mounted at /system is a boot-time RAM copy, so writes there cannot
+// survive a fresh boot. Other /system/apps paths retain their existing VFS
+// mapping and capability checks.
+constexpr const char* kManagedSettingsVirtualPath = "/system/apps/GXSETT.BIN";
+constexpr const char* kManagedSettingsBackingPath = "/GXSETT.BIN";
 constexpr uint32_t kLaunchFlagAction = 0x80000000u;
 constexpr uint32_t kLaunchFlagCapabilityProbe = 0x40000000u;
 constexpr uint32_t kLaunchFlagAbiProbe = 0x20000000u;
@@ -1580,6 +1587,20 @@ bool copyManagedFilePath(const uint8_t* path, uint32_t pathLength,
     return true;
 }
 
+const char* resolveManagedFileVfsPath(const char* validatedPath) {
+    if (!validatedPath) return nullptr;
+    uint32_t index = 0u;
+    while (kManagedSettingsVirtualPath[index] != '\0' &&
+           validatedPath[index] == kManagedSettingsVirtualPath[index]) {
+        ++index;
+    }
+    if (kManagedSettingsVirtualPath[index] == '\0' &&
+        validatedPath[index] == '\0') {
+        return kManagedSettingsBackingPath;
+    }
+    return validatedPath;
+}
+
 bool copyManagedDirectoryPath(const uint8_t* path, uint32_t pathLength,
                               char* output, uint32_t outputSize) {
     if (!path || !output || pathLength == 0u ||
@@ -1625,9 +1646,10 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedFileReadAll(
                              sizeof(validatedPath))) {
         return kManagedFileInvalidPath;
     }
+    const char* vfsPath = resolveManagedFileVfsPath(validatedPath);
 
     vfs::FileInfo info{};
-    const vfs::Status statStatus = vfs::stat(validatedPath, &info);
+    const vfs::Status statStatus = vfs::stat(vfsPath, &info);
     if (statStatus == vfs::VFS_ERR_NOT_FOUND) return kManagedFileNotFound;
     if (statStatus != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR) {
         return kManagedFileInvalidPath;
@@ -1638,7 +1660,7 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedFileReadAll(
         return kManagedFileBufferTooSmall;
     }
     if (info.size != 0u) {
-        const int32_t read = vfs::read_file(validatedPath, buffer, capacity);
+        const int32_t read = vfs::read_file(vfsPath, buffer, capacity);
         if (read < 0 || static_cast<uint64_t>(read) != info.size) {
             return kManagedFileIoFailure;
         }
@@ -1649,6 +1671,9 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedFileReadAll(
     serial::puts(" bytes=");
     serial::put_hex32(*outLength);
     serial::puts(" result=PASS\n");
+    if (vfsPath != validatedPath) {
+        serial::puts("[C146-VFS-STORE] operation=read virtual=/system/apps/GXSETT.BIN backing=/GXSETT.BIN result=PASS\n");
+    }
     return kManagedFileSuccess;
 }
 
@@ -1668,7 +1693,8 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedFileWriteAll(
         return kManagedFileInvalidPath;
     }
     if (length > kManagedFileMaxBytes) return kManagedFileTooLarge;
-    const int32_t written = vfs::write_file(validatedPath, data, length);
+    const char* vfsPath = resolveManagedFileVfsPath(validatedPath);
+    const int32_t written = vfs::write_file(vfsPath, data, length);
     if (written < 0 || static_cast<uint32_t>(written) != length) {
         return kManagedFileIoFailure;
     }
@@ -1677,6 +1703,9 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedFileWriteAll(
     serial::puts(" bytes=");
     serial::put_hex32(length);
     serial::puts(" result=PASS\n");
+    if (vfsPath != validatedPath) {
+        serial::puts("[C146-VFS-STORE] operation=write virtual=/system/apps/GXSETT.BIN backing=/GXSETT.BIN result=PASS\n");
+    }
     return kManagedFileSuccess;
 }
 
@@ -1782,8 +1811,9 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedFileStat(
                                   sizeof(validatedPath))) {
         return kManagedFileInvalidPath;
     }
+    const char* vfsPath = resolveManagedFileVfsPath(validatedPath);
     vfs::FileInfo nativeInfo{};
-    const vfs::Status status = vfs::stat(validatedPath, &nativeInfo);
+    const vfs::Status status = vfs::stat(vfsPath, &nativeInfo);
     if (status == vfs::VFS_ERR_NOT_FOUND) return kManagedFileNotFound;
     if (status != vfs::VFS_OK) return kManagedFileIoFailure;
     if (nativeInfo.type != vfs::FILE_TYPE_REGULAR &&
@@ -1803,6 +1833,9 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedFileStat(
     serial::puts(" size=");
     serial::put_hex64(info->size);
     serial::puts(" result=PASS\n");
+    if (vfsPath != validatedPath) {
+        serial::puts("[C146-VFS-STORE] operation=stat virtual=/system/apps/GXSETT.BIN backing=/GXSETT.BIN result=PASS\n");
+    }
     return kManagedFileSuccess;
 }
 

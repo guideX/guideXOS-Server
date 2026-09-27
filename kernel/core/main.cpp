@@ -1358,7 +1358,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts(" sequence=Workspace(first-launch) -> Notepad -> Status(status-after-native) -> Workspace(return-launch) -> Status(status-relaunch) -> Workspace(empty)\n");
 #endif
 
-#if defined(GXOS_NATIVEAOT_C112_REUSABLE_MANAGED_APPLICATION)
+#if defined(GXOS_NATIVEAOT_C112_REUSABLE_MANAGED_APPLICATION) && \
+    !defined(GXOS_NATIVEAOT_C146_SETTINGS_PERSISTENCE)
         const gxos::apps::BuiltInAppMetadata* c112Workspace =
             gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
         const gxos::apps::BuiltInAppMetadata* c112Status =

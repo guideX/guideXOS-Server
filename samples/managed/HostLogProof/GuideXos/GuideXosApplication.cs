@@ -38,6 +38,12 @@ public readonly struct GuideXosApplicationDescriptor
 /// </summary>
 public static unsafe class GuideXosApplicationRegistry
 {
+#if HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
+    private static readonly GuideXosApplicationDescriptor[] s_entries =
+    {
+        new(5u, "Managed Settings Center"u8, new Applications.ManagedSettingsCenter()),
+    };
+#else
     private static readonly GuideXosApplicationDescriptor[] s_entries =
     {
         new(1u, "Managed Workspace"u8, new Applications.ManagedWorkspace()),
@@ -58,6 +64,7 @@ public static unsafe class GuideXosApplicationRegistry
         new(5u, "Managed ScrollView"u8, new Applications.ManagedScrollViewDemo()),
 #endif
     };
+#endif
 
     public static bool TryFind(
         uint selector,
