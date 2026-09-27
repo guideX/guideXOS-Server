@@ -3830,7 +3830,6 @@ static Status submit_frame(const uint8_t* data, uint16_t len)
     }
     s_device.tx.descriptorPublished = true;
     s_device.tx.descriptorPublications++;
-    dma_publish_barrier();
     snapshot_tx_registers(&s_device.tx.preDoorbellRegisters);
     record_i219_hw_control_tx_snapshot(
         s_device.tx.preDoorbellRegisters, HwControlStage::BeforeRaw);
@@ -4014,6 +4013,7 @@ bool run_i219_iommu_tx_observation()
     diagnostics.noRetry = true;
     diagnostics.classification = vtd::Classification::Unavailable;
     diagnostics.failure = "TX_IOMMU_DIAGNOSTIC_UNAVAILABLE";
+    diagnostics.iommuUnavailableReason = "VT-d discovery has not run";
 
     if (!s_initialised || !s_device.active ||
         !is_i219_device(s_device.deviceId) || !s_device.mmioMapped ||
@@ -4024,25 +4024,31 @@ bool run_i219_iommu_tx_observation()
 
     const vtd::PciBdf target = { 0u, s_device.pciBus, s_device.pciSlot,
                                  s_device.pciFunc };
-    if (!vtd::discover(target)) {
-        const vtd::Audit* audit = vtd::get_audit();
-        if (audit) {
-            diagnostics.classification = audit->classification;
-            diagnostics.failure = audit->failure
-                ? audit->failure : diagnostics.failure;
-        }
-        return false;
-    }
-
+    const bool vtdDiscovered = vtd::discover(target);
     const vtd::Audit* audit = vtd::get_audit();
-    if (!audit || !audit->registersReadable) {
-        diagnostics.failure = "matching VT-d DRHD registers are unreadable";
-        return false;
+    diagnostics.dmarStatusKnown = audit &&
+        (audit->dmarTablePresent ||
+         audit->classification == vtd::Classification::NoDmar);
+    diagnostics.dmarPresent = audit && audit->dmarTablePresent;
+    diagnostics.iommuApplicable = audit && audit->dmarTablePresent &&
+        audit->matchingDrhdFound;
+    if (audit) diagnostics.classification = audit->classification;
+    if (!diagnostics.dmarPresent) {
+        diagnostics.iommuUnavailableReason = audit && audit->failure
+            ? audit->failure : "ACPI DMAR table presence is unknown";
+    } else if (!diagnostics.iommuApplicable) {
+        diagnostics.iommuUnavailableReason = audit && audit->failure
+            ? audit->failure : "no DRHD covers the I219 PCI segment/BDF";
+    } else if (!vtdDiscovered || !audit->registersReadable) {
+        diagnostics.iommuUnavailableReason = audit && audit->failure
+            ? audit->failure : "matching VT-d DRHD registers are unreadable";
+    } else {
+        diagnostics.iommuUnavailableReason = "none";
+        diagnostics.beforeVtd = audit->registers;
+        diagnostics.beforeValid = diagnostics.beforeVtd.valid;
+        diagnostics.translationEnabledBefore =
+            diagnostics.beforeVtd.translationEnabled;
     }
-    diagnostics.beforeVtd = audit->registers;
-    diagnostics.beforeValid = diagnostics.beforeVtd.valid;
-    diagnostics.translationEnabledBefore =
-        diagnostics.beforeVtd.translationEnabled;
 
     if (!tx_dma_experiment_active(s_txDmaMode) ||
         !s_txDmaRegionHandoffValid || !s_device.txRingInitialized ||
@@ -4050,12 +4056,12 @@ bool run_i219_iommu_tx_observation()
         !s_device.resetDiagnostics.rearmCompleted) {
         diagnostics.failure =
             "Phase 20 reset/rearm and constrained-low TX prerequisites are incomplete";
-        diagnostics.classification = audit->classification;
+        if (audit) diagnostics.classification = audit->classification;
         return false;
     }
     if (s_txPoisoned || s_device.tx.ringPoisoned) {
         diagnostics.failure = "TX ring is already poisoned; no retry permitted";
-        diagnostics.classification = audit->classification;
+        if (audit) diagnostics.classification = audit->classification;
         return false;
     }
 
@@ -4077,7 +4083,17 @@ bool run_i219_iommu_tx_observation()
         ? s_txPoisoned && s_device.tx.ringPoisoned
         : !s_txPoisoned;
     diagnostics.txAfter = read_tx_registers();
-    diagnostics.afterValid = vtd::capture_registers(&diagnostics.afterVtd);
+    diagnostics.afterValid = diagnostics.iommuApplicable &&
+        vtd::capture_registers(&diagnostics.afterVtd);
+    if (diagnostics.iommuApplicable && !diagnostics.afterValid) {
+        diagnostics.iommuUnavailableReason = diagnostics.attempted
+            ? "post-attempt VT-d register capture is unavailable"
+            : "TX attempt did not reach the post-attempt VT-d capture";
+    } else if (diagnostics.iommuApplicable &&
+               !diagnostics.beforeValid && diagnostics.afterValid) {
+        diagnostics.iommuUnavailableReason =
+            "pre-attempt VT-d register snapshot is unavailable";
+    }
     if (diagnostics.afterValid) {
         diagnostics.translationEnabledAfter =
             diagnostics.afterVtd.translationEnabled;
@@ -4086,7 +4102,7 @@ bool run_i219_iommu_tx_observation()
         diagnostics.faultAddress = diagnostics.afterVtd.faultAddress;
         diagnostics.sourceIdMatches = diagnostics.afterVtd.faultPresent &&
             diagnostics.afterVtd.faultSourceId == vtd::pci_source_id(target);
-        const bool faultChanged =
+        const bool faultChanged = diagnostics.beforeValid &&
             diagnostics.afterVtd.faultPresent &&
             (!diagnostics.beforeVtd.faultPresent ||
              diagnostics.afterVtd.faultSourceId !=
@@ -4136,8 +4152,16 @@ bool run_i219_iommu_tx_observation()
     } else if (diagnostics.afterValid &&
                diagnostics.translationEnabledAfter) {
         diagnostics.classification = vtd::Classification::TranslationActive;
-    } else {
+    } else if (diagnostics.afterValid) {
         diagnostics.classification = vtd::Classification::TranslationDisabled;
+    } else if (diagnostics.beforeValid &&
+               !diagnostics.translationEnabledBefore) {
+        diagnostics.classification = vtd::Classification::TranslationDisabled;
+    } else if (audit && !diagnostics.afterValid &&
+               audit->classification != vtd::Classification::Unavailable) {
+        diagnostics.classification = audit->classification;
+    } else {
+        diagnostics.classification = vtd::Classification::Unavailable;
     }
     diagnostics.failure = result == NIC_OK
         ? "none" : tx_failure_reason_name(s_device.tx.failureReason);

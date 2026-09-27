@@ -2951,6 +2951,11 @@ static void nicinfo_print_tx_dma_registers(
     const char* label, const nic::TxRegisterSnapshot& snapshot)
 {
     char hexStr[9];
+    if (!snapshot.valid) {
+        output_string(label);
+        output_string(" unavailable\n");
+        return;
+    }
     output_string(label);
     output_string(" TDBAL=0x");
     uint_hex_to_str(snapshot.tdbal, 8, hexStr);
@@ -2969,6 +2974,9 @@ static void nicinfo_print_tx_dma_registers(
     output_string(hexStr);
     output_string(" TDT=0x");
     uint_hex_to_str(snapshot.tdt, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TCTL=0x");
+    uint_hex_to_str(snapshot.tctl, 8, hexStr);
     output_string(hexStr);
     output_string(" TXDCTL=0x");
     uint_hex_to_str(snapshot.txdctl, 8, hexStr);
@@ -2995,6 +3003,32 @@ static void nicinfo_print_tx_dma_packet_prefix(
     output_string("\n");
 }
 
+static void nicinfo_print_tx_descriptor_bytes(const char* label,
+                                             uint64_t firstEight,
+                                             uint64_t secondEight)
+{
+    char hexStr[9];
+    output_string(label);
+    for (uint8_t byte = 0u; byte < 8u; ++byte) {
+        uint_hex_to_str(static_cast<uint8_t>(firstEight >> (byte * 8u)),
+                        2, hexStr);
+        output_string(hexStr);
+    }
+    for (uint8_t byte = 0u; byte < 8u; ++byte) {
+        uint_hex_to_str(static_cast<uint8_t>(secondEight >> (byte * 8u)),
+                        2, hexStr);
+        output_string(hexStr);
+    }
+    output_string("\n");
+}
+
+static bool nicinfo_dma_range_below_4g(uint64_t address, uint64_t length)
+{
+    const uint64_t addressLimit = 0x100000000ULL;
+    return length != 0u && address < addressLimit &&
+           length <= addressLimit - address;
+}
+
 static void nicinfo_print_tx_vtd_sample(
     const char* label, const vtd::VtdRegisterSnapshot& sample)
 {
@@ -3002,11 +3036,14 @@ static void nicinfo_print_tx_vtd_sample(
     char hex64Str[17];
     char numStr[16];
     output_string(label);
+    if (!sample.valid) {
+        output_string(" unavailable (no readable matching VT-d unit)\n");
+        return;
+    }
     output_string(" valid=");
     output_string(sample.valid ? "yes" : "no");
     output_string(" TES=");
-    output_string(sample.valid ? nicinfo_vtd_bool(sample.translationEnabled)
-                               : "unknown");
+    output_string(nicinfo_vtd_bool(sample.translationEnabled));
     output_string(" GCMD=0x");
     uint_hex_to_str(sample.gcmd, 8, hexStr);
     output_string(hexStr);
@@ -3017,21 +3054,19 @@ static void nicinfo_print_tx_vtd_sample(
     uint_hex64_to_str(sample.rootTableAddress, hex64Str);
     output_string(hex64Str);
     output_string(" TTM=");
-    uint_to_str(sample.valid ? vtd::root_table_mode(
-                   sample.rootTableAddress) : 0u, numStr);
-    output_string(sample.valid ? numStr : "unknown");
+    uint_to_str(vtd::root_table_mode(sample.rootTableAddress), numStr);
+    output_string(numStr);
     output_string("\n");
     output_string(label);
     output_string(" FSTS=0x");
     uint_hex_to_str(sample.faultStatus, 8, hexStr);
     output_string(hexStr);
     output_string(" PPF=");
-    output_string(sample.valid ? nicinfo_vtd_bool(sample.primaryFaultPending)
-                               : "unknown");
+    output_string(nicinfo_vtd_bool(sample.primaryFaultPending));
     output_string(" FRI=");
     uint_to_str(sample.selectedFaultRecord == vtd::VTD_INVALID_INDEX
                     ? 0u : sample.selectedFaultRecord, numStr);
-    output_string(sample.valid ? numStr : "unknown");
+    output_string(numStr);
     output_string(" fault=");
     output_string(sample.faultPresent ? "yes" : "no");
     output_string(" SID=0x");
@@ -3055,113 +3090,148 @@ static void cmd_nicinfo_tx_iommu()
     const nic::I219IommuDiagnostics& diagnostic = dev ? dev->iommu : empty;
     const nic::TxDiagnostics emptyTx = {};
     const nic::TxDiagnostics& tx = dev ? dev->tx : emptyTx;
-    const nic::TxRegisterSnapshot& before = diagnostic.txBefore;
-    const nic::TxRegisterSnapshot& after = diagnostic.txAfter;
+    const vtd::Audit* audit = vtd::get_audit();
     char numStr[16];
     char hexStr[9];
     char hex64Str[17];
+
+    const uint64_t tdba = nic::dma_address_register_value(
+        tx.preDoorbellRegisters.tdbal, tx.preDoorbellRegisters.tdbah);
+    const bool tdbaMatchesRing = tx.preDoorbellRegisters.valid &&
+        tdba == tx.descriptorRingAddress;
+    const bool ringBelow4G = nicinfo_dma_range_below_4g(
+        tx.descriptorRingAddress,
+        nic::tx_ring_length_bytes(nic::NUM_TX_DESC));
+    const bool bufferBelow4G = nicinfo_dma_range_below_4g(
+        tx.lastBufferAddress, nic::ETH_FRAME_MAX);
+    const bool ringIdentityMapped = tx.dmaRegionMappingValid &&
+        tx.descriptorRingVirtualAddress != 0u &&
+        tx.descriptorRingVirtualAddress == tx.descriptorRingAddress;
+    const bool bufferIdentityMapped = tx.dmaRegionMappingValid &&
+        tx.lastBufferVirtualAddress != 0u &&
+        tx.lastBufferVirtualAddress == tx.lastBufferAddress;
+    const bool headBeforeValid = tx.preDoorbellRegisters.valid;
+    const bool headFinalValid = diagnostic.txAfter.valid;
+    const uint32_t headBefore = tx.preDoorbellRegisters.tdh & 0xFFFFu;
+    const uint32_t headFinal = diagnostic.txAfter.tdh & 0xFFFFu;
+    const bool headMoved = headBeforeValid && headFinalValid &&
+                           headBefore != headFinal;
+    const bool doorbellReadbackMatches = tx.afterDoorbellRegisters.valid &&
+        (tx.afterDoorbellRegisters.tdt & 0xFFFFu) == (tx.tdtWritten & 0xFFFFu);
+    const bool descriptorChanged =
+        tx.lastDescriptorRaw0PreTdt != tx.lastDescriptorRaw0Final ||
+        tx.lastDescriptorRaw1PreTdt != tx.lastDescriptorRaw1Final;
+    const bool descriptorDone =
+        (tx.lastDescriptorStatus & nic::E1000_TXD_STAT_DD) != 0u;
+    const char* outcome = "INCONCLUSIVE";
+    if (!diagnostic.attempted) {
+        outcome = "NO_ATTEMPT";
+    } else if (tx.preDoorbellRegisters.valid && !tdbaMatchesRing) {
+        outcome = "A_TDBA_MISMATCH";
+    } else if (descriptorDone) {
+        outcome = "C_DESCRIPTOR_DD_SET";
+    } else if (headMoved) {
+        outcome = "HEAD_ADVANCED_DD_CLEAR";
+    } else if (tx.preDoorbellRegisters.valid && descriptorChanged) {
+        outcome = "D_DESCRIPTOR_CHANGED_HEAD_STATIONARY";
+    } else if (doorbellReadbackMatches && headBeforeValid && headFinalValid) {
+        outcome = "B_TDT_PUBLISHED_TDH_STATIONARY_DD_CLEAR";
+    }
 
     output_string("fresh-reset-rearm-required=yes valid=");
     output_string(diagnostic.freshStateValid ? "yes\n" : "no\n");
     output_string("attempt=");
     output_string(diagnostic.attempted ? "one" : "none");
     output_string(" executed=");
-    output_string(executed ? "yes\n" : "no\n");
-    output_string("result=");
+    output_string(executed ? "yes" : "no");
+    output_string(" result=");
     output_string(diagnostic.attempted
                       ? (diagnostic.result == nic::NIC_OK ? "complete" : "fail")
                       : "not-attempted");
     output_string(" no-retry=");
     output_string(diagnostic.noRetry ? "yes\n" : "no\n");
-    output_string("before-vtd-valid=");
-    output_string(diagnostic.beforeValid ? "yes" : "no");
-    output_string(" tes=");
-    output_string(diagnostic.beforeValid
-                      ? (diagnostic.translationEnabledBefore ? "yes" : "no")
-                      : "unknown");
-    output_string(" fault=");
-    output_string(diagnostic.beforeValid
-                      ? (diagnostic.beforeVtd.faultPresent ? "yes\n" : "no\n")
-                      : "unknown\n");
-    output_string("before-tx=TDBA=0x");
-    uint_hex64_to_str(nic::dma_address_register_value(
-        before.tdbal, before.tdbah), hex64Str);
-    output_string(hex64Str);
-    output_string(" TDLEN=0x");
-    uint_hex_to_str(before.tdlen, 8, hexStr);
-    output_string(hexStr);
-    output_string(" TDH/TDT=");
-    uint_to_str(before.tdh, numStr);
-    output_string(numStr);
-    output_string("/");
-    uint_to_str(before.tdt, numStr);
-    output_string(numStr);
-    output_string("\n");
-    output_string("desc-before=0x");
-    uint_hex64_to_str(diagnostic.descriptorRaw0Before, hex64Str);
-    output_string(hex64Str);
-    output_string("/0x");
-    uint_hex64_to_str(diagnostic.descriptorRaw1Before, hex64Str);
-    output_string(hex64Str);
-    output_string("\n");
-    output_string("after-vtd-valid=");
-    output_string(diagnostic.afterValid ? "yes" : "no");
-    output_string(" tes=");
-    output_string(diagnostic.afterValid
-                      ? (diagnostic.translationEnabledAfter ? "yes" : "no")
-                      : "unknown");
-    output_string(" fault=");
-    output_string(diagnostic.afterValid
-                      ? (diagnostic.afterVtd.faultPresent ? "yes\n" : "no\n")
-                      : "unknown\n");
-    output_string("after-tx=TDBA=0x");
-    uint_hex64_to_str(nic::dma_address_register_value(
-        after.tdbal, after.tdbah), hex64Str);
-    output_string(hex64Str);
-    output_string(" TDLEN=0x");
-    uint_hex_to_str(after.tdlen, 8, hexStr);
-    output_string(hexStr);
-    output_string(" TDH/TDT=");
-    uint_to_str(after.tdh, numStr);
-    output_string(numStr);
-    output_string("/");
-    uint_to_str(after.tdt, numStr);
-    output_string(numStr);
-    output_string("\n");
-    output_string("desc-after=0x");
-    uint_hex64_to_str(diagnostic.descriptorRaw0After, hex64Str);
-    output_string(hex64Str);
-    output_string("/0x");
-    uint_hex64_to_str(diagnostic.descriptorRaw1After, hex64Str);
-    output_string(hex64Str);
-    output_string(" final=0x");
-    uint_hex64_to_str(diagnostic.descriptorRaw0Final, hex64Str);
-    output_string(hex64Str);
-    output_string("/0x");
-    uint_hex64_to_str(diagnostic.descriptorRaw1Final, hex64Str);
-    output_string(hex64Str);
-    output_string("\n");
-    output_string("fault-sid=0x");
-    uint_hex_to_str(diagnostic.faultSourceId, 4, hexStr);
-    output_string(hexStr);
-    output_string(" source-match=");
-    output_string(diagnostic.sourceIdMatches ? "yes" : "no");
-    output_string(" new=");
-    output_string(diagnostic.newFault ? "yes\n" : "no\n");
-    output_string("fault-address=0x");
-    uint_hex64_to_str(diagnostic.faultAddress, hex64Str);
-    output_string(hex64Str);
-    output_string(" ring=");
-    output_string(diagnostic.ringAddressFault ? "yes" : "no");
-    output_string(" buffer=");
-    output_string(diagnostic.bufferAddressFault ? "yes\n" : "no\n");
-    output_string("classification=");
+    output_string("outcome=");
+    output_string(outcome);
+    output_string(" classification=");
     output_string(vtd::classification_name(diagnostic.classification));
     output_string(" poison-preserved=");
     output_string(diagnostic.poisonPreserved ? "yes\n" : "no\n");
     output_string("failure=");
     output_string(diagnostic.failure ? diagnostic.failure : "unknown");
     output_string("\n");
+
+    output_string("IOMMU DMAR=");
+    output_string(!diagnostic.dmarStatusKnown ? "unknown" :
+                  (diagnostic.dmarPresent ? "present" : "absent"));
+    output_string(" iommu-applicable=");
+    output_string(diagnostic.iommuApplicable ? "yes" : "no");
+    output_string(" DRHD-count=");
+    if (diagnostic.dmarStatusKnown && audit) {
+        uint_to_str(audit->drhdCount, numStr);
+        output_string(numStr);
+    } else {
+        output_string("unavailable");
+    }
+    output_string(" matching-DRHD=");
+    output_string(diagnostic.dmarStatusKnown && audit
+                      ? (audit->matchingDrhdFound ? "yes" : "no")
+                      : "unknown");
+    output_string(" DRHD-base=");
+    if (diagnostic.iommuApplicable && audit) {
+        output_string("0x");
+        uint_hex64_to_str(audit->matchingRegisterBase, hex64Str);
+        output_string(hex64Str);
+    } else {
+        output_string("none");
+    }
+    output_string(" scope=");
+    output_string(diagnostic.iommuApplicable && audit
+                      ? (audit->matchingDrhdExplicitScope ? "explicit" :
+                         (audit->matchingDrhdIncludeAll ? "include-all" : "none"))
+                      : "none");
+    output_string(" RMRR-count=");
+    if (diagnostic.dmarPresent && audit && audit->dmar.valid) {
+        uint_to_str(audit->dmar.rmrrCount, numStr);
+        output_string(numStr);
+    } else {
+        output_string("unavailable");
+    }
+    output_string(" rmrr-applicable=");
+    output_string(diagnostic.dmarPresent && audit && audit->dmar.valid
+                      ? (audit->rmrrApplicable ? "yes\n" : "no\n")
+                      : "unknown\n");
+    if (!diagnostic.iommuApplicable || !diagnostic.beforeValid ||
+        !diagnostic.afterValid) {
+        output_string("IOMMU evidence-unavailable: ");
+        output_string(diagnostic.iommuUnavailableReason
+                          ? diagnostic.iommuUnavailableReason : "reason unknown");
+        output_string("\n");
+    }
+
+    nicinfo_print_tx_dma_registers("before-TX", diagnostic.txBefore);
+    nicinfo_print_tx_descriptor_bytes("descriptor-before-TX-raw16=",
+                                      diagnostic.descriptorRaw0Before,
+                                      diagnostic.descriptorRaw1Before);
+    nicinfo_print_tx_dma_registers("pre-TDT", tx.preDoorbellRegisters);
+    output_string("TDBA == TX_RING_DMA_ADDRESS: ");
+    output_string(tdbaMatchesRing ? "YES\n" : "NO\n");
+    output_string("TDT-write=");
+    output_string(tx.publishBarrierBeforeTdt ? "once" : "not-reached");
+    output_string(" value=");
+    uint_to_str(tx.tdtWritten, numStr);
+    output_string(numStr);
+    output_string(" immediate-readback=");
+    if (tx.afterDoorbellRegisters.valid) {
+        uint_to_str(tx.afterDoorbellRegisters.tdt, numStr);
+        output_string(numStr);
+    } else {
+        output_string("unavailable");
+    }
+    output_string(" observed=");
+    output_string(doorbellReadbackMatches ? "yes\n" : "no\n");
+    nicinfo_print_tx_dma_registers("final-TX", diagnostic.txAfter);
+    output_string("publication-fence=sfence-immediately-before-TDT ");
+    output_string(tx.publishBarrierBeforeTdt ? "reached\n" : "not-reached\n");
 
     output_string("dma-region=0x");
     uint_hex64_to_str(tx.dmaRegionPhysicalBase, hex64Str);
@@ -3175,55 +3245,44 @@ static void cmd_nicinfo_tx_iommu()
     output_string(" EFI-type=");
     uint_to_str(tx.dmaRegionMemoryType, numStr);
     output_string(numStr);
-    output_string(" flags=0x");
-    uint_hex_to_str(tx.dmaRegionFlags, 8, hexStr);
-    output_string(hexStr);
-    output_string("\n");
-    output_string("dma-provenance below4G=");
-    output_string(tx.dmaRegionBelow4G ? "yes" : "no");
-    output_string(" identity=");
-    output_string(tx.dmaRegionMappingValid ? "yes" : "no");
-    output_string(" contiguous=");
-    output_string(tx.dmaRegionContiguous ? "yes" : "no");
-    output_string(" owned=");
-    output_string(tx.dmaRegionOwnershipValid ? "yes" : "no");
-    output_string(" cacheable-flag=");
-    output_string(tx.dmaRegionCacheable ? "yes\n" : "no\n");
-    output_string("efi-attributes=");
+    output_string(" EFI-attributes=");
     if (tx.dmaRegionMemoryAttributesValid) {
         output_string("0x");
         uint_hex64_to_str(tx.dmaRegionMemoryAttributes, hex64Str);
         output_string(hex64Str);
-        output_string(" UC=");
+    } else {
+        output_string("unavailable");
+    }
+    output_string("\n");
+    output_string("memory-attributes UC/WC/WT/WB=");
+    if (tx.dmaRegionMemoryAttributesValid) {
         output_string((tx.dmaRegionMemoryAttributes &
-                       nic::TX_DMA_EFI_MEMORY_UC) ? "yes" : "no");
-        output_string(" WC=");
+                       nic::TX_DMA_EFI_MEMORY_UC) ? "yes/" : "no/");
         output_string((tx.dmaRegionMemoryAttributes &
-                       nic::TX_DMA_EFI_MEMORY_WC) ? "yes" : "no");
-        output_string(" WT=");
+                       nic::TX_DMA_EFI_MEMORY_WC) ? "yes/" : "no/");
         output_string((tx.dmaRegionMemoryAttributes &
-                       nic::TX_DMA_EFI_MEMORY_WT) ? "yes" : "no");
-        output_string(" WB=");
+                       nic::TX_DMA_EFI_MEMORY_WT) ? "yes/" : "no/");
         output_string((tx.dmaRegionMemoryAttributes &
                        nic::TX_DMA_EFI_MEMORY_WB) ? "yes\n" : "no\n");
     } else {
         output_string("unavailable\n");
     }
-    output_string("cpu-map=identity RAM PWT=0 PCD=0 (loader source)\n");
-
+    output_string("DMA provenance owned/cacheable/contiguous=");
+    output_string(tx.dmaRegionOwnershipValid ? "yes/" : "no/");
+    output_string(tx.dmaRegionCacheable ? "yes/" : "no/");
+    output_string(tx.dmaRegionContiguous ? "yes\n" : "no\n");
     output_string("ring VA=0x");
     uint_hex64_to_str(tx.descriptorRingVirtualAddress, hex64Str);
     output_string(hex64Str);
-    output_string(" PA=0x");
+    output_string(" PA/DMA=0x");
     uint_hex64_to_str(tx.descriptorRingAddress, hex64Str);
     output_string(hex64Str);
-    output_string(" TDBA=0x");
-    uint_hex64_to_str(nic::dma_address_register_value(
-        tx.preDoorbellRegisters.tdbal, tx.preDoorbellRegisters.tdbah),
-        hex64Str);
-    output_string(hex64Str);
-    output_string(" TDBA-match=");
-    output_string(tx.ringAddressMatches ? "yes\n" : "no\n");
+    output_string(" below-4GiB=");
+    output_string(ringBelow4G ? "yes" : "no");
+    output_string(" physically-contiguous=");
+    output_string(tx.dmaRegionContiguous ? "yes" : "no");
+    output_string(" identity-mapped=");
+    output_string(ringIdentityMapped ? "yes\n" : "no\n");
     output_string("descriptor index=");
     uint_to_str(tx.lastDescriptor, numStr);
     output_string(numStr);
@@ -3237,65 +3296,53 @@ static void cmd_nicinfo_tx_iommu()
     output_string("buffer VA=0x");
     uint_hex64_to_str(tx.lastBufferVirtualAddress, hex64Str);
     output_string(hex64Str);
-    output_string(" PA=0x");
+    output_string(" PA/DMA=0x");
     uint_hex64_to_str(tx.lastBufferAddress, hex64Str);
     output_string(hex64Str);
-    output_string(" desc-buffer-match=");
-    output_string(tx.bufferAddressMatches ? "yes\n" : "no\n");
+    output_string(" below-4GiB=");
+    output_string(bufferBelow4G ? "yes" : "no");
+    output_string(" physically-contiguous=");
+    output_string(tx.dmaRegionContiguous ? "yes" : "no");
+    output_string(" identity-mapped=");
+    output_string(bufferIdentityMapped ? "yes\n" : "no\n");
 
-    nicinfo_print_tx_dma_registers("pre-TDT", tx.preDoorbellRegisters);
-    nicinfo_print_tx_dma_registers("post-TDT", tx.afterDoorbellRegisters);
-    output_string("publication-fence=sfence-immediately-before-TDT ");
-    output_string(tx.publishBarrierBeforeTdt ? "reached\n" : "not-reached\n");
-    output_string("descriptor-pre-TDT=0x");
-    uint_hex64_to_str(tx.lastDescriptorRaw0PreTdt, hex64Str);
-    output_string(hex64Str);
-    output_string("/0x");
-    uint_hex64_to_str(tx.lastDescriptorRaw1PreTdt, hex64Str);
-    output_string(hex64Str);
-    output_string("\n");
+    nicinfo_print_tx_descriptor_bytes("descriptor-pre-TDT=raw16:",
+                                      tx.lastDescriptorRaw0PreTdt,
+                                      tx.lastDescriptorRaw1PreTdt);
     nicinfo_print_tx_dma_packet_prefix(
-        "buffer-pre-TDT=", tx.packetFirst32BeforeTdt,
+        "buffer-pre-TDT-first32=", tx.packetFirst32BeforeTdt,
         tx.packetPrefixBeforeTdtValid);
-    output_string("descriptor-post-TDT=0x");
-    uint_hex64_to_str(tx.lastDescriptorRaw0AfterDoorbell, hex64Str);
-    output_string(hex64Str);
-    output_string("/0x");
-    uint_hex64_to_str(tx.lastDescriptorRaw1AfterDoorbell, hex64Str);
-    output_string(hex64Str);
-    const bool doorbellDescriptorDone =
-        (tx.lastDescriptorRaw1AfterDoorbell &
-         (static_cast<uint64_t>(nic::E1000_TXD_STAT_DD) << 32)) != 0u;
-    output_string(" post-TDT-DD=");
-    output_string(doorbellDescriptorDone ? "yes" : "no");
-    output_string(" final-DD=");
-    output_string((tx.lastDescriptorStatus & nic::E1000_TXD_STAT_DD)
-                      ? "yes\n" : "no\n");
+    nicinfo_print_tx_descriptor_bytes("descriptor-post-TDT=raw16:",
+                                      tx.lastDescriptorRaw0AfterDoorbell,
+                                      tx.lastDescriptorRaw1AfterDoorbell);
     nicinfo_print_tx_dma_packet_prefix(
-        "buffer-post-TDT=", tx.packetFirst32AfterTdt,
+        "buffer-post-TDT-first32=", tx.packetFirst32AfterTdt,
         tx.packetPrefixAfterTdtValid);
+    nicinfo_print_tx_descriptor_bytes("descriptor-final-raw16=",
+                                      tx.lastDescriptorRaw0Final,
+                                      tx.lastDescriptorRaw1Final);
+    output_string("descriptor-final-DD=");
+    output_string(descriptorDone ? "yes\n" : "no\n");
 
-    const vtd::Audit* audit = vtd::get_audit();
-    output_string("DMAR=");
-    output_string(audit && audit->dmarTablePresent ? "present" : "absent");
-    output_string(" DRHD-count=");
-    uint_to_str(audit ? audit->drhdCount : 0u, numStr);
-    output_string(numStr);
-    output_string(" matching=");
-    output_string(audit && audit->matchingDrhdFound ? "yes" : "no");
-    output_string(" base=0x");
-    uint_hex64_to_str(audit ? audit->matchingRegisterBase : 0u, hex64Str);
-    output_string(hex64Str);
-    output_string(" scope=");
-    output_string(audit && audit->matchingDrhdExplicitScope ? "explicit" :
-                  (audit && audit->matchingDrhdIncludeAll ? "include-all" : "none"));
-    output_string(" RMRR-count=");
-    uint_to_str(audit ? audit->dmar.rmrrCount : 0u, numStr);
-    output_string(numStr);
-    output_string(" applicable=");
-    output_string(audit && audit->rmrrApplicable ? "yes\n" : "no\n");
-    if (audit && audit->dmar.valid) {
-        for (uint8_t i = 0; i < audit->dmar.rmrrCount; ++i) {
+    if (diagnostic.afterValid) {
+        output_string("fault-comparison SID=0x");
+        uint_hex_to_str(diagnostic.faultSourceId, 4, hexStr);
+        output_string(hexStr);
+        output_string(" source-match=");
+        output_string(diagnostic.sourceIdMatches ? "yes" : "no");
+        output_string(" new=");
+        output_string(diagnostic.newFault ? "yes" : "no");
+        output_string(" address=0x");
+        uint_hex64_to_str(diagnostic.faultAddress, hex64Str);
+        output_string(hex64Str);
+        output_string(" ring/buffer=");
+        output_string(diagnostic.ringAddressFault ? "yes/" : "no/");
+        output_string(diagnostic.bufferAddressFault ? "yes\n" : "no\n");
+    } else {
+        output_string("fault-comparison unavailable; no VT-d fault registers read\n");
+    }
+    if (diagnostic.dmarPresent && audit && audit->dmar.valid) {
+        for (uint8_t i = 0u; i < audit->dmar.rmrrCount; ++i) {
             const vtd::DmarRmrr& rmrr = audit->dmar.rmrrs[i];
             output_string("rmrr[");
             uint_to_str(i, numStr);
@@ -3312,7 +3359,7 @@ static void cmd_nicinfo_tx_iommu()
     }
     nicinfo_print_tx_vtd_sample("VTd-before", diagnostic.beforeVtd);
     nicinfo_print_tx_vtd_sample("VTd-after", diagnostic.afterVtd);
-    output_string("context-entry=not-read RTADDR-is-pointer-only; active-device-context=unknown\n");
+    output_string("context-entry=not-read active-device-context=unknown\n");
 }
 
 // Exactly twelve logical lines. This is intentionally cache-only: the word

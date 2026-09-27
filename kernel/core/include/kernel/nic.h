@@ -1552,6 +1552,9 @@ struct I219IommuDiagnostics {
     bool singleAttempt;
     bool freshStateRequired;
     bool freshStateValid;
+    bool dmarStatusKnown;
+    bool dmarPresent;
+    bool iommuApplicable;
     bool beforeValid;
     bool afterValid;
     bool translationEnabledBefore;
@@ -1565,6 +1568,7 @@ struct I219IommuDiagnostics {
     Status result;
     vtd::Classification classification;
     const char* failure;
+    const char* iommuUnavailableReason;
     vtd::VtdRegisterSnapshot beforeVtd;
     vtd::VtdRegisterSnapshot afterVtd;
     TxRegisterSnapshot txBefore;

@@ -48,7 +48,7 @@ static const uint32_t NICINFO_DMA_EXPECTED_LINES = 24;
 static const uint32_t NICINFO_DMA_BRIEF_MAX_LINES = 20;
 static const uint32_t NICINFO_DMA_BRIEF_EXPECTED_LINES = 12;
 static const uint32_t NICINFO_TX_IOMMU_MAX_LINES = 64;
-static const uint32_t NICINFO_TX_IOMMU_EXPECTED_LINES = 63;
+static const uint32_t NICINFO_TX_IOMMU_EXPECTED_LINES = 47;
 static_assert(NICINFO_BRIEF_EXPECTED_LINES <= NICINFO_BRIEF_MAX_LINES,
               "nicinfo brief expected output must stay within its line bound");
 static_assert(NICINFO_TX_BRIEF_EXPECTED_LINES <= NICINFO_TX_BRIEF_MAX_LINES,
