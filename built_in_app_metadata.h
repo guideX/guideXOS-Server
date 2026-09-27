@@ -132,6 +132,13 @@ static const char* const kManagedVerticalStackAliases[] = {
 };
 #endif
 
+#if defined(GXOS_NATIVEAOT_C143_MANAGED_GROUP_BOX)
+static const char* const kManagedGroupBoxAliases[] = {
+	"GroupBox",
+	"Titled Section"
+};
+#endif
+
 static const char* const kOnScreenKeyboardAliases[] = {
 	"On Screen Keyboard"
 };
@@ -167,11 +174,14 @@ static const BuiltInAppMetadata kBuiltInAppMetadata[] = {
 	{ "com.guidexos.apps.managed.status", "Managed Status", "Managed Status", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS status application hosted in the resident NativeAOT composite image.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedStatusAliases, sizeof(detail::kManagedStatusAliases) / sizeof(detail::kManagedStatusAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 2u, kManagedNativeAotCompositeImagePath },
 	{ "com.guidexos.apps.managed.counter", "Managed Counter", "Managed Counter", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS counter application hosted in the resident NativeAOT composite image.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedCounterAliases, sizeof(detail::kManagedCounterAliases) / sizeof(detail::kManagedCounterAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 3u, kManagedNativeAotCompositeImagePath },
 	{ "com.guidexos.apps.managed.notes", "Managed Notes", "Managed Notes", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS notes application using the bounded managed file service.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedNotesAliases, sizeof(detail::kManagedNotesAliases) / sizeof(detail::kManagedNotesAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 4u, kManagedNativeAotCompositeImagePath }
-#if defined(GXOS_NATIVEAOT_C140_MANAGED_SCROLL_VIEW)
+#if defined(GXOS_NATIVEAOT_C140_MANAGED_SCROLL_VIEW) && !defined(GXOS_NATIVEAOT_C143_MANAGED_GROUP_BOX)
 ,	{ "com.guidexos.apps.managed.scrollview", "Managed ScrollView", "Managed ScrollView", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS bounded vertical ScrollView proof application.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedScrollViewAliases, sizeof(detail::kManagedScrollViewAliases) / sizeof(detail::kManagedScrollViewAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 5u, kManagedNativeAotCompositeImagePath }
 #endif
-#if defined(GXOS_NATIVEAOT_C141_MANAGED_VERTICAL_STACK) || defined(GXOS_NATIVEAOT_C142_MANAGED_VERTICAL_STACK)
+#if (defined(GXOS_NATIVEAOT_C141_MANAGED_VERTICAL_STACK) || defined(GXOS_NATIVEAOT_C142_MANAGED_VERTICAL_STACK)) && !defined(GXOS_NATIVEAOT_C143_MANAGED_GROUP_BOX)
 ,	{ "com.guidexos.apps.managed.verticalstack", "Managed Vertical Stack", "Managed Vertical Stack", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS bounded non-owning vertical stack proof application.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedVerticalStackAliases, sizeof(detail::kManagedVerticalStackAliases) / sizeof(detail::kManagedVerticalStackAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 5u, kManagedNativeAotCompositeImagePath }
+#endif
+#if defined(GXOS_NATIVEAOT_C143_MANAGED_GROUP_BOX)
+,	{ "com.guidexos.apps.managed.groupbox", "Managed GroupBox", "Managed GroupBox", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS bounded non-owning titled section proof application.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedGroupBoxAliases, sizeof(detail::kManagedGroupBoxAliases) / sizeof(detail::kManagedGroupBoxAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 5u, kManagedNativeAotCompositeImagePath }
 #endif
 };
 

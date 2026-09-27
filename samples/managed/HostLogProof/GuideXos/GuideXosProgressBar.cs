@@ -41,6 +41,7 @@ public sealed class GuideXosProgressBar : IGuideXosVerticalStackMember
     private bool _panelVisible = true;
     private GuideXosPanel _panelOwner;
     private GuideXosScrollView _scrollViewOwner;
+    private GuideXosGroupBox _groupBoxOwner;
     private GuideXosVerticalStack _verticalStackOwner;
     private uint _rejectedInputCount;
 
@@ -113,9 +114,12 @@ public sealed class GuideXosProgressBar : IGuideXosVerticalStackMember
     /// <summary>Returns floor((Value-Minimum)*cells/(Maximum-Minimum)).</summary>
     public int FilledCells => ComputeFilledCells(
         _value, _minimum, _maximum, FillCellCount);
-    public bool EffectiveVisible => _visible && _panelVisible;
+    public bool EffectiveEnabled => _groupBoxOwner == null || _groupBoxOwner.Enabled;
+    public bool EffectiveVisible => _visible && _panelVisible &&
+        (_groupBoxOwner == null || _groupBoxOwner.Visible);
     public GuideXosPanel ParentPanel => _panelOwner;
     public GuideXosScrollView ParentScrollView => _scrollViewOwner;
+    public GuideXosGroupBox ParentGroupBox => _groupBoxOwner;
     internal GuideXosVerticalStack VerticalStackOwner => _verticalStackOwner;
 
     public bool TrySetMargins(int left, int top, int right, int bottom)
@@ -214,7 +218,7 @@ public sealed class GuideXosProgressBar : IGuideXosVerticalStackMember
         return TrySetBoundsCore(x, y, width);
     }
 
-    bool IGuideXosVerticalStackMember.Visible => Visible;
+    bool IGuideXosVerticalStackMember.Visible => EffectiveVisible;
     GuideXosPanel IGuideXosVerticalStackMember.ParentPanel => _panelOwner;
     GuideXosVerticalStack IGuideXosVerticalStackMember.VerticalStackOwner =>
         _verticalStackOwner;
@@ -350,6 +354,16 @@ public sealed class GuideXosProgressBar : IGuideXosVerticalStackMember
     {
         _scrollViewOwner = null;
     }
+
+    internal bool TryAttachToGroupBox(GuideXosGroupBox groupBox)
+    {
+        if (groupBox == null || _groupBoxOwner != null || _panelOwner != null)
+            return false;
+        _groupBoxOwner = groupBox;
+        return true;
+    }
+
+    internal void DetachFromGroupBox() => _groupBoxOwner = null;
 
     private static bool IsValidRange(int minimum, int maximum)
     {

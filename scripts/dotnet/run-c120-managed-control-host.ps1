@@ -5,7 +5,7 @@ param(
     [string]$PythonExe = "",
     [int]$FreshBootCount = 3,
     [int]$TimeoutSeconds = 360,
-    [ValidateSet("C120", "C121", "C122", "C123", "C124", "C125", "C126", "C127", "C128", "C129", "C130", "C131", "C132", "C133", "C134", "C135", "C136", "C137", "C138", "C139", "C140", "C141", "C142")]
+    [ValidateSet("C120", "C121", "C122", "C123", "C124", "C125", "C126", "C127", "C128", "C129", "C130", "C131", "C132", "C133", "C134", "C135", "C136", "C137", "C138", "C139", "C140", "C141", "C142", "C143")]
     [string]$ProofPhase = "C120",
     [ValidateSet("Production", "FocusedApi", "FocusedHost")]
     [string]$C135ProofMode = "Production",
@@ -41,6 +41,7 @@ $isC137 = $ProofPhase -eq "C137"
 $isC140 = $ProofPhase -eq "C140"
 $isC141 = $ProofPhase -eq "C141"
 $isC142 = $ProofPhase -eq "C142"
+$isC143 = $ProofPhase -eq "C143"
 $isC139 = $ProofPhase -eq "C139"
 $isC138 = $ProofPhase -eq "C138" -or $isC139
 $isC135FocusedApi = $isC135 -and $C135ProofMode -eq "FocusedApi"
@@ -59,7 +60,9 @@ $startAheadBehind = if ($startUpstream) {
     (& git -C $RepoRoot rev-list --left-right --count "HEAD...$startUpstream").Trim()
 } else { "" }
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = if ($isC142) {
+    $EvidenceRoot = if ($isC143) {
+        Join-Path $RepoRoot "out\dotnet\c143-managed-groupbox"
+    } elseif ($isC142) {
         Join-Path $RepoRoot "out\dotnet\c142-stack-margin-alignment"
     } elseif ($isC141) {
         Join-Path $RepoRoot "out\dotnet\c141-managed-vertical-stack"
@@ -880,6 +883,20 @@ function Get-C142HexField([string]$Serial, [string]$Field) {
     return [Convert]::ToInt32($match.Groups[1].Value, 16)
 }
 
+function Get-C143HexField([string]$Serial, [string]$Field) {
+    $match = [regex]::Match($Serial, "(?m)^\[C143-TARGET\].*\b$Field=([0-9A-Fa-f]+)")
+    if (-not $match.Success) { throw "C143 target did not contain $Field." }
+    return [Convert]::ToInt32($match.Groups[1].Value, 16)
+}
+
+function Get-C143CurrentOffset([string]$Serial) {
+    $matches = [regex]::Matches(
+        $Serial,
+        '(?m)^\[C102-MANAGED-OUTPUT\] C143-GEOMETRY .*\boffset=(\d+) state=')
+    if ($matches.Count -eq 0) { throw "C143 geometry did not report a viewport offset." }
+    return [int]$matches[$matches.Count - 1].Groups[1].Value
+}
+
 function Invoke-C142Boot([string]$Esp, [string]$Serial, [string]$Stdout,
                           [string]$Stderr, [string]$MonitorLog, [int]$MonitorPort,
                           [string]$Qemu, [string]$Ovmf) {
@@ -975,6 +992,192 @@ function Invoke-C142Boot([string]$Esp, [string]$Serial, [string]$Stdout,
                     $markerSatisfied = $partial.Substring($start) -match $previousMarker
                 }
                 if ($markerSatisfied) {
+                    Send-C136QmpEvents $MonitorPort $command.events $MonitorLog
+                    $previousMarker = $command.marker
+                    $previousSerialLength = $partial.Length
+                    $commandIndex++
+                }
+            }
+            if ($null -ne $commandList -and -not $calibrating -and
+                    $commandIndex -ge $commandList.Count) { break }
+            $process.Refresh()
+            if ($process.HasExited) { break }
+        }
+        $timedOut = -not $process.HasExited -and (Get-Date) -ge $deadline
+    }
+    finally {
+        $process.Refresh()
+        if (-not $process.HasExited) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            Wait-Process -Id $process.Id -Timeout 5 -ErrorAction SilentlyContinue
+        }
+    }
+    $process.Refresh()
+    [pscustomobject]@{
+        serial = if (Test-Path -LiteralPath $Serial) { Get-Content -LiteralPath $Serial -Raw } else { "" }
+        serialPath = $Serial; serialSha256 = Get-Hash $Serial
+        stdoutPath = $Stdout; stderrPath = $Stderr; monitorPath = $MonitorLog
+        qemuExitCode = $process.ExitCode; monitorPort = $MonitorPort; timedOut = $timedOut
+    }
+}
+
+function Invoke-C143Boot([string]$Esp, [string]$Serial, [string]$Stdout,
+                          [string]$Stderr, [string]$MonitorLog, [int]$MonitorPort,
+                          [string]$Qemu, [string]$Ovmf) {
+    $arguments = @(
+        "-accel", "tcg,thread=single", "-machine", "pc", "-smp", "1",
+        "-drive", ("if=pflash,format=raw,readonly=on,file=" + (Quote-QemuValue $Ovmf)),
+        "-drive", ("file=fat:rw:" + (Quote-QemuValue $Esp) + ",format=raw,if=ide,index=0"),
+        "-m", "1024M", "-vga", "std", "-display", "none",
+        "-serial", ("file:" + (Quote-QemuValue $Serial)),
+        "-qmp", ("tcp:127.0.0.1:{0},server,nowait" -f $MonitorPort),
+        "-boot", "order=c", "-no-reboot", "-no-shutdown", "-rtc", "base=utc,clock=host")
+    $process = Start-Process -FilePath $Qemu -ArgumentList $arguments -WorkingDirectory $RepoRoot `
+        -RedirectStandardOutput $Stdout -RedirectStandardError $Stderr -WindowStyle Hidden -PassThru
+    $commandIndex = 0
+    $previousMarker = ""
+    $previousSerialLength = 0
+    $proofStarted = $false
+    $targetReady = $false
+    $commandList = $null
+    $calibrating = $false
+    $timedOut = $false
+    try {
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 150
+            $partial = if (Test-Path -LiteralPath $Serial) {
+                Get-Content -LiteralPath $Serial -Raw -ErrorAction SilentlyContinue
+            } else { "" }
+            if (-not $proofStarted -and $partial -match
+                    '(?m)^\[C143-PROOF\] managed-proof-started context=c143-native transport=physical-qemu result=PASS') {
+                $proofStarted = $true
+            }
+            if ($proofStarted -and -not $targetReady -and $partial -match
+                    '(?m)^\[C143-TARGET\].*result=PASS') {
+                $targetReady = $true
+            }
+            if ($proofStarted -and $targetReady -and $null -eq $commandList) {
+                $viewX = Get-C143HexField $partial "viewX"
+                $viewY = Get-C143HexField $partial "viewY"
+                $barX = Get-C143HexField $partial "scrollBarX"
+                $barY = Get-C143HexField $partial "scrollBarY"
+                $comboX = Get-C143HexField $partial "comboX"
+                $comboY = Get-C143HexField $partial "comboY"
+                $checkX = Get-C143HexField $partial "checkboxX"
+                $checkY = Get-C143HexField $partial "checkboxY"
+                $radioOneX = Get-C143HexField $partial "radioOneX"
+                $radioOneY = Get-C143HexField $partial "radioOneY"
+                $radioTwoY = Get-C143HexField $partial "radioTwoY"
+                $buttonX = Get-C143HexField $partial "buttonX"
+                $buttonY = Get-C143HexField $partial "buttonY"
+                $visibleToggleX = Get-C143HexField $partial "visibleToggleX"
+                $visibleToggleY = Get-C143HexField $partial "visibleToggleY"
+                $enabledToggleY = Get-C143HexField $partial "enabledToggleY"
+                $wheelEvents = [System.Collections.Generic.List[object]]::new()
+                for ($wheel = 0; $wheel -lt 26; $wheel++) {
+                    $wheelEvents.Add((New-C137Wheel -1))
+                }
+                $tabEvents = [System.Collections.Generic.List[object]]::new()
+                for ($tab = 0; $tab -lt 8; $tab++) {
+                    $tabEvents.Add((New-C136Key 'tab' $true))
+                    $tabEvents.Add((New-C136Key 'tab' $false))
+                }
+                $tabEvents.Add((New-C136Key 'shift' $true))
+                $tabEvents.Add((New-C136Key 'tab' $true))
+                $tabEvents.Add((New-C136Key 'tab' $false))
+                $tabEvents.Add((New-C136Key 'shift' $false))
+                $commandList = @(
+                    [pscustomobject]@{ events = (New-C136RelativeMove 1 1); marker = ''; phase = 'c143-calibration' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-COMBO open=PASS arranged=PASS capture=combo result=PASS'; phase = 'combo-open' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'combo-release' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove 0 27); marker = ''; phase = 'combo-row-move' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-COMBO commit=PASS translated-origin=PASS result=PASS'; phase = 'combo-commit' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'combo-commit-release' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove 0 -27); marker = ''; phase = 'combo-reopen-move' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-COMBO open=PASS arranged=PASS capture=combo result=PASS'; phase = 'combo-reopen' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'combo-reopen-release' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove (($visibleToggleX + 8) - $comboX) (($visibleToggleY + 9) - $comboY)); marker = ''; phase = 'group-hide-move' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-CAPTURE invalidated=cancelled owner=none result=PASS'; phase = 'group-hide-cancel-combo' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'group-hide-release' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-GROUP visible=true effective-members=restored result=PASS'; phase = 'group-show' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'group-show-release' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove ($comboX - ($visibleToggleX + 8)) ($comboY - ($visibleToggleY + 9))); marker = ''; phase = 'combo-disable-move' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-COMBO open=PASS arranged=PASS capture=combo result=PASS'; phase = 'combo-open-for-disable' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'combo-disable-open-release' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove (($visibleToggleX + 8) - $comboX) (($enabledToggleY + 9) - $comboY)); marker = ''; phase = 'group-disable-move' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-CAPTURE invalidated=cancelled owner=none result=PASS'; phase = 'group-disable-cancel-combo' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'group-disable-release' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-GROUP enabled=true own-state-preserved result=PASS'; phase = 'group-enable' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'group-enable-release' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove (($checkX + 8) - ($visibleToggleX + 8)) (($checkY + 9) - ($enabledToggleY + 9))); marker = ''; phase = 'progress-toggle-move' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-DYNAMIC hide=PASS margins=removed button=moved frame-stable=PASS result=PASS'; phase = 'progress-hide' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'progress-toggle-release' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove (($viewX + 150) - ($checkX + 8)) (($viewY + 60) - ($checkY + 9))); marker = ''; phase = 'wheel-target-move' },
+                    [pscustomobject]@{ events = $wheelEvents.ToArray(); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-WHEEL viewport=changed frame-and-members-translated=PASS result=PASS'; phase = 'wheel-scroll' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove (($radioOneX + 8) - ($viewX + 150)) (($radioTwoY - 78 + 9) - ($viewY + 60))); marker = ''; phase = 'radio-two-move' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-RADIO explicit-group=PASS selected=two result=PASS'; phase = 'radio-two' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'radio-two-release' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove 0 ($radioOneY - $radioTwoY)); marker = ''; phase = 'radio-one-move' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-RADIO explicit-group=PASS selected=one result=PASS'; phase = 'radio-one' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'radio-one-release' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove (($barX + 8) - ($radioOneX + 8)) (($barY + 39 + 1) - ($radioOneY - 78 + 9))); marker = ''; phase = 'scrollbar-move' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-DRAG press=PASS owner=scrollbar result=PASS'; phase = 'scrollbar-down' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove 0 70); marker = ''; phase = 'scrollbar-drag' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-DRAG release=PASS owner=none result=PASS'; phase = 'scrollbar-up' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove (($buttonX + 64) - ($barX + 8)) (($buttonY - 25 + 9 - 162) - ($barY + 39 + 71))); marker = ''; phase = 'translated-button-move' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-MENU open=PASS button-invoked=PASS capture=menu result=PASS'; phase = 'menu-open' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'menu-open-release' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove -54 1); marker = ''; phase = 'menu-first-item-move' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-MENU commit=PASS button-invoked=PASS result=PASS'; phase = 'menu-commit' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'menu-commit-release' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove 54 -1); marker = ''; phase = 'menu-reopen-move' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-MENU open=PASS button-invoked=PASS capture=menu result=PASS'; phase = 'menu-reopen' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'menu-reopen-release' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove (($visibleToggleX + 8) - ($buttonX + 64)) (($enabledToggleY + 9) - ($buttonY - 25 + 9 - 162))); marker = ''; phase = 'group-disable-menu-move' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-CAPTURE invalidated=cancelled owner=none result=PASS'; phase = 'group-disable-cancel-menu' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'group-disable-menu-release' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-GROUP enabled=true own-state-preserved result=PASS'; phase = 'group-enable-after-menu' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'group-enable-menu-release' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove (($barX + 8) - ($visibleToggleX + 8)) (($barY + 69) - ($enabledToggleY + 9))); marker = ''; phase = 'scrollbar-top-move' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-DRAG press=PASS owner=scrollbar result=PASS'; phase = 'scrollbar-top-down' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove 0 -70); marker = ''; phase = 'scrollbar-top-drag' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-DRAG release=PASS owner=none result=PASS'; phase = 'scrollbar-top-up' },
+                    [pscustomobject]@{ events = $tabEvents.ToArray(); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C143-FOCUS shift-tab=handled earlier-member=PASS result=PASS'; phase = 'tab-shift-tab' })
+                $calibrating = $true
+            }
+            if ($calibrating -and $commandIndex -ge 1) {
+                $start = [Math]::Min($previousSerialLength, $partial.Length)
+                $newSerial = $partial.Substring($start)
+                if ($newSerial -match '(?m)^\[C138-NATIVE-INPUT\] kind=pointer-move .*result=PASS') {
+                    $pointer = Get-C138NativePointer $partial
+                    $commandList[0].events = New-C136RelativeMove (
+                        $comboX - $pointer.x) ($comboY - $pointer.y)
+                    $commandIndex = 0
+                    $previousMarker = ''
+                    $previousSerialLength = $partial.Length
+                    $calibrating = $false
+                }
+            }
+            if ($null -ne $commandList -and $commandIndex -lt $commandList.Count) {
+                $command = $commandList[$commandIndex]
+                $markerSatisfied = [string]::IsNullOrEmpty($previousMarker)
+                if (-not $markerSatisfied) {
+                    $start = [Math]::Min($previousSerialLength, $partial.Length)
+                    $markerSatisfied = $partial.Substring($start) -match $previousMarker
+                }
+                if ($markerSatisfied) {
+                    if ($command.phase -eq 'translated-button-move') {
+                        $offset = Get-C143CurrentOffset $partial
+                        $buttonScreenY = $buttonY - 25 + 9 - $offset
+                        $command.events = New-C136RelativeMove (
+                            ($buttonX + 64) - ($barX + 8)) (
+                            $buttonScreenY - ($barY + 39 + 71))
+                    } elseif ($command.phase -eq 'group-disable-menu-move') {
+                        $command.events = New-C136RelativeMove (
+                            ($visibleToggleX + 8) - ($buttonX + 64)) (
+                            ($enabledToggleY + 9) - $buttonScreenY)
+                    }
                     Send-C136QmpEvents $MonitorPort $command.events $MonitorLog
                     $previousMarker = $command.marker
                     $previousSerialLength = $partial.Length
@@ -1347,7 +1550,7 @@ function Assert-C120Serial([string]$Serial) {
         '^\[NATIVEAOT-TLS-BRIDGE\] install=.*result=00000001',
         '^\[NATIVEAOT-HEAP\] action=initialize',
         '^\[NATIVEAOT-HEAP\] action=preserve')
-    if (-not $isC140 -and -not $isC141 -and -not $isC142 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and -not $isC136 -and -not $isC137 -and -not $isC138) {
+    if (-not $isC140 -and -not $isC141 -and -not $isC142 -and -not $isC143 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and -not $isC136 -and -not $isC137 -and -not $isC138) {
         $required += @(
             '^\[C120-APPMODEL\] catalogValid=true result=PASS',
             '^\[C120-RESULT\] outcome=PASS',
@@ -1372,7 +1575,41 @@ function Assert-C120Serial([string]$Serial) {
             '^\[C102-MANAGED-OUTPUT\] C120-TESTS cases=50 result=PASS',
             '^\[C102-MANAGED-OUTPUT\] C120-HOST tests=PASS')
     }
-    if ($isC142) {
+    if ($isC143) {
+        $required += @(
+            '^\[C143-APPMODEL\] catalogValid=true result=PASS',
+            '^\[C143-PROOF\] managed-proof-started context=c143-native transport=physical-qemu result=PASS',
+            '^\[C143-RELAUNCH\] close=PASS relaunch=PASS registration=6 result=PASS',
+            '^\[C143-TARGET\].*result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C126-RETAINED groupbox=60 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C141-TESTS core=20 visibility=10 scrollview=10 focus=10 popup=6 total=56 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C142-TESTS metadata=20 spacing=12 horizontal=12 scrollview=14 popup=10 total=68 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-TESTS core=20 composition=10 rendering=10 focus=10 popup=8 dynamic=10 total=68 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-PROOF launch=PASS registration=6 viewMembers=9 groupMembers=8 stackMembers=8 layout=valid result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-CONTENT rect=valid frame=first responsibilities=separate result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-COMBO open=PASS arranged=PASS capture=combo result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-COMBO commit=PASS translated-origin=PASS result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-RADIO explicit-group=PASS selected=two result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-RADIO explicit-group=PASS selected=one result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-CHECKBOX callback=PASS result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-DYNAMIC hide=PASS margins=removed button=moved frame-stable=PASS result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-WHEEL viewport=changed frame-and-members-translated=PASS result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-DRAG press=PASS owner=scrollbar result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-DRAG release=PASS owner=none result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-MENU open=PASS button-invoked=PASS capture=menu result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-MENU commit=PASS button-invoked=PASS result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-GROUP visible=false effective-members=hidden result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-GROUP visible=true effective-members=restored result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-GROUP enabled=false input-gated result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-GROUP enabled=true own-state-preserved result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-CAPTURE invalidated=cancelled owner=none result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-FOCUS tab=offscreen-revealed result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-FOCUS shift-tab=handled earlier-member=PASS result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C143-FINAL viewport=valid layout=valid capture=none drag=none result=PASS')
+        if ([regex]::Matches($Serial, '(?m)^\[C102-MANAGED-OUTPUT\] C143-CAPTURE invalidated=cancelled owner=none result=PASS').Count -lt 3) {
+            $required += '^\[C143-ASSERT\] expected-three-group-state-capture-cancellations=PASS'
+        }
+    } elseif ($isC142) {
         $required += @(
             '^\[C142-APPMODEL\] catalogValid=true result=PASS',
             '^\[C142-PROOF\] managed-proof-started context=c142-native transport=physical-qemu result=PASS',
@@ -1775,11 +2012,11 @@ function Assert-C120Serial([string]$Serial) {
     }
     $spaceMarker = @([regex]::Matches($Serial,
         '(?m)^\[C120-SPACE\] keydown=PASS keychar=PASS exact-once=PASS\r?$')).Count
-    if (-not $isC142 -and -not $isC140 -and -not $isC141 -and -not $isC136 -and -not $isC137 -and -not $isC138 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and $spaceMarker -ne 1) { throw "C120 expected one exact-once Space marker, got $spaceMarker." }
+    if (-not $isC143 -and -not $isC142 -and -not $isC140 -and -not $isC141 -and -not $isC136 -and -not $isC137 -and -not $isC138 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and $spaceMarker -ne 1) { throw "C120 expected one exact-once Space marker, got $spaceMarker." }
     $saveActivation = @([regex]::Matches($Serial,
         '(?m)^\[C102-MANAGED-OUTPUT\] C120-ACTIVATE control=Save result=PASS\r?$')).Count
-    if (-not $isC142 -and -not $isC140 -and -not $isC141 -and -not $isC136 -and -not $isC137 -and -not $isC138 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and $saveActivation -ne 1) { throw "C120 expected one managed Save activation, got $saveActivation." }
-    if ($Serial -match '(?m)^\[(?:C142|C141|C140|C138|C137|C136|C135|C134|C132|C131|C130|C129|C120|C121|C122|C123|C124|C125|C126|C127|C128)-[^\r\n]*FAIL|PageFault|triple.?fault|FAIL_FAST|fatal kernel failure|boot failure') {
+    if (-not $isC143 -and -not $isC142 -and -not $isC140 -and -not $isC141 -and -not $isC136 -and -not $isC137 -and -not $isC138 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and $saveActivation -ne 1) { throw "C120 expected one managed Save activation, got $saveActivation." }
+    if ($Serial -match '(?m)^\[(?:C143|C142|C141|C140|C138|C137|C136|C135|C134|C132|C131|C130|C129|C120|C121|C122|C123|C124|C125|C126|C127|C128)-[^\r\n]*FAIL|PageFault|triple.?fault|FAIL_FAST|fatal kernel failure|boot failure') {
         throw "Managed control proof serial output contains a failure or fault marker."
     }
     [pscustomobject]@{
@@ -1808,7 +2045,7 @@ if (-not $SkipManagedBuild -and -not $providedComposite) {
         "-RuntimePackOutputRoot", $runtimePackOutputRoot,
         "-UseGuideXosRuntimePack", "-ProductionApplication", "-PersistentCompositeLifecycle",
         "-AllocationMode", "Allocating", "-ManagedProjectMode",
-        $(if ($isC142) { "C142Composite" } elseif ($isC141) { "C141Composite" } elseif ($isC140) { "C140Composite" } elseif ($isC139) { "C139Composite" } elseif ($isC138) { "C138Composite" } elseif ($isC137) { "C137Composite" } elseif ($isC136) { "C136Composite" } elseif ($isC135) { "C135Composite" } elseif ($isC134) { "C134Composite" } elseif ($isC133) { "C133Composite" } elseif ($isC132) { "C132Composite" } elseif ($isC131) { "C131Composite" } elseif ($isC129) { "C129Composite" } elseif ($isC128) { "C128Composite" } elseif ($isC130 -or $isC127) { "C127Composite" } elseif ($isC126) { "C126Composite" } elseif ($isC125) { "C125Composite" } elseif ($isC124) { "C124Composite" } elseif ($isC123) { "C123Composite" } elseif ($isC122) { "C122Composite" } elseif ($isC121) { "C121Composite" } else { "C120Composite" }),
+        $(if ($isC143) { "C143Composite" } elseif ($isC142) { "C142Composite" } elseif ($isC141) { "C141Composite" } elseif ($isC140) { "C140Composite" } elseif ($isC139) { "C139Composite" } elseif ($isC138) { "C138Composite" } elseif ($isC137) { "C137Composite" } elseif ($isC136) { "C136Composite" } elseif ($isC135) { "C135Composite" } elseif ($isC134) { "C134Composite" } elseif ($isC133) { "C133Composite" } elseif ($isC132) { "C132Composite" } elseif ($isC131) { "C131Composite" } elseif ($isC129) { "C129Composite" } elseif ($isC128) { "C128Composite" } elseif ($isC130 -or $isC127) { "C127Composite" } elseif ($isC126) { "C126Composite" } elseif ($isC125) { "C125Composite" } elseif ($isC124) { "C124Composite" } elseif ($isC123) { "C123Composite" } elseif ($isC122) { "C122Composite" } elseif ($isC121) { "C121Composite" } else { "C120Composite" }),
         "-PythonExe", $PythonExe)
     if ($isC134) { $managedBuildArguments += "-IncludeC134FocusedTests" }
     if ($isC135) { $managedBuildArguments += "-IncludeC135FocusedTests" }
@@ -1828,7 +2065,10 @@ Invoke-Checked "powershell" @(
     "-C114ManagedDirectoryServices", "-C117ManagedTextArea", "-C118ManagedListBox")
 
 $kernelFlags = "-DGXOS_NATIVEAOT_PRODUCTION_APPLICATION -DGXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH -DGXOS_NATIVEAOT_C112_REUSABLE_MANAGED_APPLICATION -DGXOS_NATIVEAOT_C113_MANAGED_FILE_SERVICES -DGXOS_NATIVEAOT_C114_MANAGED_DIRECTORY_SERVICES -DGXOS_NATIVEAOT_C115_MANAGED_FILE_PICKER -DGXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT -DGXOS_NATIVEAOT_C117_MANAGED_TEXT_AREA -DGXOS_NATIVEAOT_C118_MANAGED_LIST_BOX -DGXOS_NATIVEAOT_C119_MANAGED_BUTTON -DGXOS_NATIVEAOT_C120_MANAGED_CONTROL_HOST"
-if ($isC142) {
+if ($isC143) {
+    $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL -DGXOS_NATIVEAOT_C123_MANAGED_SEPARATOR -DGXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON -DGXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR -DGXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C127_MANAGED_PANEL -DGXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE -DGXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT -DGXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX -DGXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON -DGXOS_NATIVEAOT_C133_REUSABLE_COMBOBOX -DGXOS_NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING -DGXOS_NATIVEAOT_C135_REUSABLE_POPUP_MENU -DGXOS_NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU -DGXOS_NATIVEAOT_C137_MOUSE_WHEEL_SCROLLING -DGXOS_NATIVEAOT_C138_REUSABLE_SCROLLBAR -DGXOS_NATIVEAOT_C139_SHARED_SCROLL_VIEWPORT -DGXOS_NATIVEAOT_C140_MANAGED_SCROLL_VIEW -DGXOS_NATIVEAOT_C141_MANAGED_VERTICAL_STACK -DGXOS_NATIVEAOT_C142_MANAGED_VERTICAL_STACK -DGXOS_NATIVEAOT_C143_MANAGED_GROUP_BOX"
+}
+elseif ($isC142) {
     $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL -DGXOS_NATIVEAOT_C123_MANAGED_SEPARATOR -DGXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON -DGXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR -DGXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C127_MANAGED_PANEL -DGXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE -DGXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX -DGXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON -DGXOS_NATIVEAOT_C133_REUSABLE_COMBOBOX -DGXOS_NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING -DGXOS_NATIVEAOT_C135_REUSABLE_POPUP_MENU -DGXOS_NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU -DGXOS_NATIVEAOT_C137_MOUSE_WHEEL_SCROLLING -DGXOS_NATIVEAOT_C138_REUSABLE_SCROLLBAR -DGXOS_NATIVEAOT_C142_MANAGED_VERTICAL_STACK"
 }
 elseif ($isC141) {
@@ -1936,7 +2176,9 @@ if (-not $SkipQemu) {
         foreach ($stale in @($serial, $stdout, $stderr, $monitorLog)) {
             if (Test-Path -LiteralPath $stale -PathType Leaf) { Remove-Item -LiteralPath $stale -Force }
         }
-        $boot = if ($isC142) {
+        $boot = if ($isC143) {
+            Invoke-C143Boot $esp $serial $stdout $stderr $monitorLog $monitorPort $qemu $ovmf
+        } elseif ($isC142) {
             Invoke-C142Boot $esp $serial $stdout $stderr $monitorLog $monitorPort $qemu $ovmf
         } elseif ($isC141) {
             Invoke-C141Boot $esp $serial $stdout $stderr $monitorLog $monitorPort $qemu $ovmf
@@ -1982,9 +2224,9 @@ if (-not $SkipQemu) {
 $evidenceSerial = if ($bootResults.Count -gt 0) {
     Get-Content -LiteralPath (Join-Path $EvidenceRoot "boot-01\serial.log")
 } else { @("QEMU not executed; build-only evidence.") }
-$evidenceSerial | Where-Object { $_ -match '^\[(?:C142|C141|C140|C138|C137|C136|C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C125|C124|C123|C122|C121|C120|C119|C118|C117|C116|C115)-' } |
+$evidenceSerial | Where-Object { $_ -match '^\[(?:C143|C142|C141|C140|C138|C137|C136|C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C125|C124|C123|C122|C121|C120|C119|C118|C117|C116|C115)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "managed-control-host-output.txt") -Encoding ASCII
-$evidenceSerial | Where-Object { $_ -match '^\[(?:C142|C141|C140|C138|C137|C136|C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C124|C123|C122|C121|C120)-' } |
+$evidenceSerial | Where-Object { $_ -match '^\[(?:C143|C142|C141|C140|C138|C137|C136|C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C124|C123|C122|C121|C120)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "control-host-evidence.txt") -Encoding ASCII
 $evidenceSerial | Where-Object { $_ -match '^\[(?:C116|C117|C118|C119)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "regression-evidence.txt") -Encoding ASCII
@@ -1997,12 +2239,14 @@ $sourceFiles = @(
     "kernel\core\kernel_compositor.cpp", "compositor.cpp",
     "kernel\core\ps2keyboard.cpp",
     "samples\managed\HostLogProof\GuideXos\GuideXosControlHost.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosApplication.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosRadioButton.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosRadioGroup.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosRadioButtonTests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosRadioGroupTests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosRadioButtonHostTests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosControlHostTests.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosGroupBoxC143Tests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosCheckBox.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosCheckBoxTests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosCheckBoxHostTests.cs",
@@ -2030,6 +2274,12 @@ $sourceFiles = @(
     "samples\managed\HostLogProof\GuideXos\GuideXosProgressBar.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosProgressBarTests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosGroupBox.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosPanel.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosButton.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosComboBox.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosRadioGroup.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosVerticalStack.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosScrollView.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosGroupBoxTests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosPanel.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosPanelTests.cs",
@@ -2049,12 +2299,15 @@ $sourceFiles = @(
     "samples\managed\HostLogProof\GuideXos\GuideXosVerticalStack.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosVerticalStackC141Tests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosVerticalStackC142Tests.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosGroupBoxC143Tests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosSurface.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosMouseWheelC137Tests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosFilePicker.cs",
     "samples\managed\HostLogProof\Applications\ManagedNotes.cs",
     "samples\managed\HostLogProof\Applications\ManagedScrollViewDemo.cs",
     "samples\managed\HostLogProof\Applications\ManagedVerticalStackDemo.cs",
+    "samples\managed\HostLogProof\Applications\ManagedGroupBoxDemo.cs",
+    "samples\managed\HostLogProof\Applications\ManagedGroupBoxDemo.cs",
     "samples\managed\HostLogProof\HostLogProof.csproj",
     "samples\managed\HostLogProof\NativeAbi.cs",
     "scripts\dotnet\build-managed-hostlog-proof.ps1",
@@ -2093,7 +2346,8 @@ $sourceFiles = @(
     "docs\dotnet\NATIVEAOT_C139_SHARED_SCROLL_VIEWPORT.md",
     "docs\dotnet\NATIVEAOT_C140_MANAGED_SCROLLVIEW.md",
     "docs\dotnet\NATIVEAOT_C141_MANAGED_VERTICAL_STACK_LAYOUT.md",
-    "docs\dotnet\NATIVEAOT_C142_STACK_MARGIN_ALIGNMENT.md")
+    "docs\dotnet\NATIVEAOT_C142_STACK_MARGIN_ALIGNMENT.md",
+    "docs\dotnet\NATIVEAOT_C143_MANAGED_GROUPBOX.md")
 $sourceHashes = [ordered]@{}
 foreach ($sourceFile in $sourceFiles) { $sourceHashes[$sourceFile] = Get-Hash (Join-Path $RepoRoot $sourceFile) }
 
@@ -2102,6 +2356,9 @@ $repoSubject = (& git -C $RepoRoot log -1 --format=%s).Trim()
 $repoBranch = (& git -C $RepoRoot branch --show-current).Trim()
 $repoUpstream = (& git -C $RepoRoot rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>$null).Trim()
 $aheadBehind = if ($repoUpstream) { (& git -C $RepoRoot rev-list --left-right --count "HEAD...$repoUpstream").Trim() } else { "" }
+$c143FinalOffset = if ($isC143 -and $bootResults.Count -gt 0) {
+    Get-C143CurrentOffset (Get-Content -LiteralPath (Join-Path $EvidenceRoot "boot-01\serial.log") -Raw)
+} else { $null }
 @"
 startHead=$startHead
 startSubject=$startSubject
@@ -2132,7 +2389,7 @@ $manifest = [ordered]@{
     freshBootCount = $FreshBootCount; qemuExecuted = -not $SkipQemu
     inputs = $inputs; sourceHashes = $sourceHashes; boots = @($bootResults)
     evidence = [ordered]@{ serial = "boot-01\serial.log"; managed = "managed-control-host-output.txt"; controlHost = "control-host-evidence.txt"; regressions = "regression-evidence.txt"; lifecycle = "lifecycle-evidence.txt" }
-    documentation = if ($isC142) { "docs\dotnet\NATIVEAOT_C142_STACK_MARGIN_ALIGNMENT.md" } elseif ($isC141) { "docs\dotnet\NATIVEAOT_C141_MANAGED_VERTICAL_STACK_LAYOUT.md" } elseif ($isC140) { "docs\dotnet\NATIVEAOT_C140_MANAGED_SCROLLVIEW.md" } elseif ($isC135) { "docs\dotnet\NATIVEAOT_C135_MANAGED_POPUP_MENU.md" } elseif ($isC134) { "docs\dotnet\NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING.md" } elseif ($isC132) { "docs\dotnet\NATIVEAOT_C132_MANAGED_RADIOBUTTON.md" } elseif ($isC131) { "docs\dotnet\NATIVEAOT_C131_MANAGED_CHECKBOX.md" } elseif ($isC130) { "docs\dotnet\NATIVEAOT_C130_C127_WRAPPER_STALL.md" } elseif ($isC129) { "docs\dotnet\NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT.md" } elseif ($isC128) { "docs\dotnet\NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE.md" } elseif ($isC127) { "docs\dotnet\NATIVEAOT_C127_MANAGED_PANEL.md" } elseif ($isC126) { "docs\dotnet\NATIVEAOT_C126_MANAGED_GROUP_BOX.md" } elseif ($isC125) { "docs\dotnet\NATIVEAOT_C125_MANAGED_PROGRESS_BAR.md" } elseif ($isC124) { "docs\dotnet\NATIVEAOT_C124_MANAGED_RADIO_BUTTON.md" } elseif ($isC123) { "docs\dotnet\NATIVEAOT_C123_MANAGED_SEPARATOR.md" } elseif ($isC122) { "docs\dotnet\NATIVEAOT_C122_MANAGED_LABEL.md" } elseif ($isC121) { "docs\dotnet\NATIVEAOT_C121_MANAGED_CHECKBOX.md" } else { "docs\dotnet\NATIVEAOT_C120_MANAGED_CONTROL_HOST.md" }
+    documentation = if ($isC143) { "docs\dotnet\NATIVEAOT_C143_MANAGED_GROUPBOX.md" } elseif ($isC142) { "docs\dotnet\NATIVEAOT_C142_STACK_MARGIN_ALIGNMENT.md" } elseif ($isC141) { "docs\dotnet\NATIVEAOT_C141_MANAGED_VERTICAL_STACK_LAYOUT.md" } elseif ($isC140) { "docs\dotnet\NATIVEAOT_C140_MANAGED_SCROLLVIEW.md" } elseif ($isC135) { "docs\dotnet\NATIVEAOT_C135_MANAGED_POPUP_MENU.md" } elseif ($isC134) { "docs\dotnet\NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING.md" } elseif ($isC132) { "docs\dotnet\NATIVEAOT_C132_MANAGED_RADIOBUTTON.md" } elseif ($isC131) { "docs\dotnet\NATIVEAOT_C131_MANAGED_CHECKBOX.md" } elseif ($isC130) { "docs\dotnet\NATIVEAOT_C130_C127_WRAPPER_STALL.md" } elseif ($isC129) { "docs\dotnet\NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT.md" } elseif ($isC128) { "docs\dotnet\NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE.md" } elseif ($isC127) { "docs\dotnet\NATIVEAOT_C127_MANAGED_PANEL.md" } elseif ($isC126) { "docs\dotnet\NATIVEAOT_C126_MANAGED_GROUP_BOX.md" } elseif ($isC125) { "docs\dotnet\NATIVEAOT_C125_MANAGED_PROGRESS_BAR.md" } elseif ($isC124) { "docs\dotnet\NATIVEAOT_C124_MANAGED_RADIO_BUTTON.md" } elseif ($isC123) { "docs\dotnet\NATIVEAOT_C123_MANAGED_SEPARATOR.md" } elseif ($isC122) { "docs\dotnet\NATIVEAOT_C122_MANAGED_LABEL.md" } elseif ($isC121) { "docs\dotnet\NATIVEAOT_C121_MANAGED_CHECKBOX.md" } else { "docs\dotnet\NATIVEAOT_C120_MANAGED_CONTROL_HOST.md" }
 }
 if ($isC133) {
     $manifest.notes.order = "Open, Save, Save As, Show Path, Status display ComboBox, Document; C133 replaces the Full Path/File Name radio pair with one registered non-editable ComboBox and changes registration from 8 to 7"
@@ -2201,7 +2458,50 @@ if ($isC140) {
     $manifest.notes.capture = "final pointer drag owner none; ScrollView has no transient popup lease"
     $manifest.documentation = "docs\dotnet\NATIVEAOT_C140_MANAGED_SCROLLVIEW.md"
 }
-if ($isC142) {
+if ($isC143) {
+    $manifest.hostAbi.inputTransport = "existing pointer, wheel, button, keyboard, and Shift payload transport; ABI v1/table 104 unchanged"
+    $manifest.controlHost.capacity = 8
+    $manifest.controlHost.registrationCount = 6
+    $manifest.controlHost.tests = "C143 core 20; composition 10; rendering/scroll 10; focus/lifecycle 10; popup 8; dynamic layout 10; total 68; retained C142 68, C141 56, C126 60"
+    $manifest.groupBox = [ordered]@{
+        api = "GuideXosGroupBox"
+        title = "Server Options"
+        capacity = 8
+        membership = "fixed non-owning leaf association; duplicates, overflow, unsupported containers, and second GroupBox rejected"
+        supportedMembers = "Button, CheckBox, Label, Separator, RadioButton, ProgressBar, ComboBox"
+        bounds = "local 29,100,272,270 at initial offset 0"
+        contentRectangle = "local 45,126,240,218; default content padding 8"
+        focusable = $false
+        layoutOwnership = "none; VerticalStack arranges controls"
+        clipping = "none; ScrollView owns viewport clipping and translation"
+        effectiveState = "member own visibility/enabled AND the associated GroupBox visibility/enabled"
+        radioSemantics = "explicit GuideXosRadioGroup; no implicit GroupBox grouping"
+        focusedTests = "core 20; composition 10; rendering/scroll 10; focus/lifecycle 10; popup 8; dynamic layout 10; total 68"
+    }
+    $manifest.verticalStack = [ordered]@{
+        api = "GuideXosVerticalStack"
+        capacity = 8
+        bounds = "GroupBox content rectangle"
+        membership = "same eight leaf references as GroupBox and ScrollView; geometry-only, non-owning"
+        margins = "C142 per-member margins retained"
+        alignment = "Left, Center, Right, Stretch retained"
+        visibility = "hidden members release margins, spacing, and height; explicit PerformLayout"
+    }
+    $manifest.scrollView = [ordered]@{
+        api = "GuideXosScrollView"
+        maximumMemberCount = 9
+        membership = "one non-focusable GroupBox frame plus eight direct leaf members; fixed and non-owning"
+        clipping = "shared inner viewport; frame/title and leaves translate and clip together"
+        input = "wheel, translated hit-test, Tab focus reveal, and ScrollBar drag remain ScrollView-owned"
+        initialOffset = 0
+        finalOffset = $c143FinalOffset
+        finalInvariant = "0 <= Offset <= MaximumOffset; layout valid; capture none; drag owner none"
+    }
+    $manifest.notes.order = "Managed GroupBox Server Options frame is rendered first; Label, CheckBox, ComboBox, Separator, explicit two-member RadioGroup, ProgressBar, and Button are direct ScrollView members plus GroupBox associations and one Stack reference each"
+    $manifest.notes.commands = "physical QEMU ComboBox open/commit, hide and disable cancellation of open ComboBox/Menu, CheckBox visibility relayout, 26 wheel inputs, RadioGroup switching, bottom ScrollBar drag, translated Apply button and PopupMenu, Tab/Shift+Tab, and clean transient state"
+    $manifest.notes.capture = "final ComboBox/Menu transient capture none; final ScrollBar pointer drag owner none"
+    $manifest.c143FocusedTests = [ordered]@{ core = 20; composition = 10; renderingAndScroll = 10; focusAndLifecycle = 10; popup = 8; dynamicLayout = 10; total = 68 }
+} elseif ($isC142) {
     $manifest.hostAbi.inputTransport = "existing pointer, wheel, button, keyboard, and Shift payload transport; ABI v1/table 104 unchanged"
     $manifest.controlHost.capacity = 8
     $manifest.controlHost.tests = "C142 member metadata 20; vertical spacing 12; horizontal layout 12; ScrollView integration 14; popup/control integration 10; total 68; C141 56 and C140 58/C139 54/C138 62/C137 46 retained"

@@ -59,6 +59,7 @@ public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
     private bool _panelVisible = true;
     private GuideXosPanel _panelOwner;
     private GuideXosScrollView _scrollViewOwner;
+    private GuideXosGroupBox _groupBoxOwner;
     private GuideXosVerticalStack _verticalStackOwner;
     private uint _rejectedInputCount;
     private bool _dispatchingChanged;
@@ -148,9 +149,12 @@ public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
     public bool Visible => _visible;
     public bool IsFocused => _isFocused;
     public bool IsOpen => _isOpen;
-    public bool EffectiveVisible => _visible && _panelVisible;
+    public bool EffectiveEnabled => _enabled && (_groupBoxOwner == null || _groupBoxOwner.Enabled);
+    public bool EffectiveVisible => _visible && _panelVisible &&
+        (_groupBoxOwner == null || _groupBoxOwner.Visible);
     public GuideXosPanel ParentPanel => _panelOwner;
     public GuideXosScrollView ParentScrollView => _scrollViewOwner;
+    public GuideXosGroupBox ParentGroupBox => _groupBoxOwner;
     internal GuideXosVerticalStack VerticalStackOwner => _verticalStackOwner;
     public uint RejectedInputCount => _rejectedInputCount;
 
@@ -275,7 +279,7 @@ public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
 
     public void Focus()
     {
-        if (_enabled && EffectiveVisible) _isFocused = true;
+        if (EffectiveEnabled && EffectiveVisible) _isFocused = true;
     }
 
     public void Blur()
@@ -312,7 +316,7 @@ public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
     public GuideXosComboBoxResult Open()
     {
         if (!EffectiveVisible) return GuideXosComboBoxResult.Ignored;
-        if (!_enabled) return GuideXosComboBoxResult.Disabled;
+        if (!EffectiveEnabled) return GuideXosComboBoxResult.Disabled;
         if (_itemCount == 0) return RejectOperation();
         if (_isOpen) return GuideXosComboBoxResult.Ignored;
 
@@ -331,7 +335,7 @@ public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
     public GuideXosComboBoxResult HandlePointerDown(int x, int y)
     {
         if (!EffectiveVisible) return GuideXosComboBoxResult.Ignored;
-        if (!_enabled) return GuideXosComboBoxResult.Disabled;
+        if (!EffectiveEnabled) return GuideXosComboBoxResult.Disabled;
 
         if (!_isOpen)
         {
@@ -364,7 +368,7 @@ public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
     public GuideXosComboBoxResult HandleKey(GuideXosTextInputKey key)
     {
         if (!EffectiveVisible) return GuideXosComboBoxResult.Ignored;
-        if (!_enabled) return GuideXosComboBoxResult.Disabled;
+        if (!EffectiveEnabled) return GuideXosComboBoxResult.Disabled;
         if (!_isFocused) return GuideXosComboBoxResult.Ignored;
 
         if (!_isOpen)
@@ -397,7 +401,7 @@ public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
     public GuideXosComboBoxResult HandleCharacter(char character)
     {
         if (!EffectiveVisible) return GuideXosComboBoxResult.Ignored;
-        if (!_enabled) return GuideXosComboBoxResult.Disabled;
+        if (!EffectiveEnabled) return GuideXosComboBoxResult.Disabled;
         if (!_isFocused || character != ' ')
         {
             return GuideXosComboBoxResult.Ignored;
@@ -417,7 +421,7 @@ public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
         Span<byte> line = stackalloc byte[64];
         line.Clear();
         int position = 0;
-        byte marker = !_enabled ? (byte)'x' : _isFocused ? (byte)'>' : (byte)'[';
+        byte marker = !EffectiveEnabled ? (byte)'x' : _isFocused ? (byte)'>' : (byte)'[';
         if (!AppendByte(line, ref position, marker) ||
             (marker != (byte)'[' && !AppendByte(line, ref position, (byte)'[')) ||
             !AppendByte(line, ref position, (byte)' '))
@@ -556,6 +560,17 @@ public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
         _isFocused = false;
     }
 
+    internal bool TryAttachToGroupBox(GuideXosGroupBox groupBox)
+    {
+        if (groupBox == null || _groupBoxOwner != null || _panelOwner != null)
+            return false;
+        _groupBoxOwner = groupBox;
+        _isFocused = false;
+        return true;
+    }
+
+    internal void DetachFromGroupBox() => _groupBoxOwner = null;
+
     private GuideXosComboBoxResult MoveActive(int delta)
     {
         if (_itemCount == 0) return RejectOperation();
@@ -670,7 +685,7 @@ public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
         return TrySetBoundsCore(x, y, width, height);
     }
 
-    bool IGuideXosVerticalStackMember.Visible => Visible;
+    bool IGuideXosVerticalStackMember.Visible => EffectiveVisible;
     GuideXosPanel IGuideXosVerticalStackMember.ParentPanel => _panelOwner;
     GuideXosVerticalStack IGuideXosVerticalStackMember.VerticalStackOwner =>
         _verticalStackOwner;

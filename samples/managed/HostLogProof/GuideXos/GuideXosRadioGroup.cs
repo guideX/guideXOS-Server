@@ -84,7 +84,7 @@ public sealed class GuideXosRadioGroup
 
     public bool TrySelect(GuideXosRadioButton button)
     {
-        if (!TryGetMemberIndex(button, out int index) || !button.Enabled)
+        if (!TryGetMemberIndex(button, out int index) || !button.EffectiveEnabled)
         {
             ++_rejectedOperationCount;
             return false;
@@ -94,7 +94,7 @@ public sealed class GuideXosRadioGroup
 
     public bool TrySelectIndex(int index)
     {
-        if (index < 0 || index >= _memberCount || !_members[index].Enabled)
+        if (index < 0 || index >= _memberCount || !_members[index].EffectiveEnabled)
         {
             ++_rejectedOperationCount;
             return false;
@@ -158,7 +158,7 @@ public sealed class GuideXosRadioGroup
             if (index < 0) index = _memberCount - 1;
             if (index >= _memberCount) index = 0;
             GuideXosRadioButton candidate = _members[index];
-            if (candidate.Enabled && candidate.EffectiveVisible)
+            if (candidate.EffectiveEnabled && candidate.EffectiveVisible)
             {
                 targetIndex = index;
                 return true;

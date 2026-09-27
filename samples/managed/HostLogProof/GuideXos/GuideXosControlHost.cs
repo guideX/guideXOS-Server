@@ -1208,13 +1208,13 @@ public sealed class GuideXosControlHost
         return _entries[index].Kind switch
         {
             GuideXosManagedControlKind.Button =>
-                !((GuideXosButton)_entries[index].Control).Enabled,
+                !((GuideXosButton)_entries[index].Control).EffectiveEnabled,
             GuideXosManagedControlKind.CheckBox =>
-                !((GuideXosCheckBox)_entries[index].Control).Enabled,
+                !((GuideXosCheckBox)_entries[index].Control).EffectiveEnabled,
             GuideXosManagedControlKind.RadioButton =>
-                !((GuideXosRadioButton)_entries[index].Control).Enabled,
+                !((GuideXosRadioButton)_entries[index].Control).EffectiveEnabled,
             GuideXosManagedControlKind.ComboBox =>
-                !((GuideXosComboBox)_entries[index].Control).Enabled,
+                !((GuideXosComboBox)_entries[index].Control).EffectiveEnabled,
             GuideXosManagedControlKind.PopupMenu =>
                 !((GuideXosPopupMenu)_entries[index].Control).Enabled,
             GuideXosManagedControlKind.TextArea =>
@@ -1646,8 +1646,27 @@ public sealed class GuideXosControlHost
         if (_transientCaptureIndex < 0) return;
         if (!IsOpenTransientCandidate(_transientCaptureIndex))
         {
+            if (IsTransientControlOpen(_transientCaptureIndex) &&
+                (!IsControlVisible(_transientCaptureIndex) ||
+                    IsControlDisabled(_transientCaptureIndex)))
+            {
+                CloseTransientControl(_transientCaptureIndex);
+            }
             ReleaseTransientCapture();
         }
+    }
+
+    private bool IsTransientControlOpen(int index)
+    {
+        if (index < 0 || index >= _registrationCount) return false;
+        return _entries[index].Kind switch
+        {
+            GuideXosManagedControlKind.ComboBox =>
+                ((GuideXosComboBox)_entries[index].Control).IsOpen,
+            GuideXosManagedControlKind.PopupMenu =>
+                ((GuideXosPopupMenu)_entries[index].Control).IsOpen,
+            _ => false,
+        };
     }
 
     private void ReleaseTransientCapture()

@@ -45,7 +45,9 @@ public sealed class GuideXosScrollView
     public const int MinimumSupportedHeight = 20;
     public const int MaximumSupportedHeight = 288;
     public const int DefaultMaximumMemberCount = 8;
-    public const int MaximumSupportedMemberCount = 8;
+    // Nine permits one non-focusable GroupBox frame alongside eight ordinary
+    // leaf controls without turning the viewport into a recursive container.
+    public const int MaximumSupportedMemberCount = 9;
 
     private enum MemberKind
     {
@@ -57,6 +59,7 @@ public sealed class GuideXosScrollView
         RadioButton = 5,
         ProgressBar = 6,
         ComboBox = 7,
+        GroupBox = 8,
     }
 
     private struct MemberEntry
@@ -630,6 +633,7 @@ public sealed class GuideXosScrollView
             MemberKind.RadioButton => ((GuideXosRadioButton)entry.Member).EffectiveVisible,
             MemberKind.ProgressBar => ((GuideXosProgressBar)entry.Member).EffectiveVisible,
             MemberKind.ComboBox => ((GuideXosComboBox)entry.Member).EffectiveVisible,
+            MemberKind.GroupBox => ((GuideXosGroupBox)entry.Member).Visible,
             _ => false,
         };
     }
@@ -639,10 +643,10 @@ public sealed class GuideXosScrollView
         MemberEntry entry = _members[index];
         return entry.Kind switch
         {
-            MemberKind.Button => ((GuideXosButton)entry.Member).Enabled,
-            MemberKind.CheckBox => ((GuideXosCheckBox)entry.Member).Enabled,
-            MemberKind.RadioButton => ((GuideXosRadioButton)entry.Member).Enabled,
-            MemberKind.ComboBox => ((GuideXosComboBox)entry.Member).Enabled,
+            MemberKind.Button => ((GuideXosButton)entry.Member).EffectiveEnabled,
+            MemberKind.CheckBox => ((GuideXosCheckBox)entry.Member).EffectiveEnabled,
+            MemberKind.RadioButton => ((GuideXosRadioButton)entry.Member).EffectiveEnabled,
+            MemberKind.ComboBox => ((GuideXosComboBox)entry.Member).EffectiveEnabled,
             _ => true,
         };
     }
@@ -681,6 +685,7 @@ public sealed class GuideXosScrollView
             GuideXosRadioButton => MemberKind.RadioButton,
             GuideXosProgressBar => MemberKind.ProgressBar,
             GuideXosComboBox => MemberKind.ComboBox,
+            GuideXosGroupBox => MemberKind.GroupBox,
             _ => MemberKind.None,
         };
         return kind != MemberKind.None;
@@ -712,6 +717,7 @@ public sealed class GuideXosScrollView
             MemberKind.RadioButton => ((GuideXosRadioButton)member).ParentScrollView,
             MemberKind.ProgressBar => ((GuideXosProgressBar)member).ParentScrollView,
             MemberKind.ComboBox => ((GuideXosComboBox)member).ParentScrollView,
+            MemberKind.GroupBox => ((GuideXosGroupBox)member).ParentScrollView,
             _ => null,
         };
     }
@@ -748,6 +754,10 @@ public sealed class GuideXosScrollView
             case MemberKind.ComboBox:
                 width = ((GuideXosComboBox)member).Width;
                 height = ((GuideXosComboBox)member).Height;
+                break;
+            case MemberKind.GroupBox:
+                width = ((GuideXosGroupBox)member).Width;
+                height = ((GuideXosGroupBox)member).Height;
                 break;
             default:
                 width = height = 0;
@@ -788,6 +798,10 @@ public sealed class GuideXosScrollView
                 GuideXosComboBox combo = (GuideXosComboBox)member;
                 x = combo.X; y = combo.Y; width = combo.Width; height = combo.Height;
                 break;
+            case MemberKind.GroupBox:
+                GuideXosGroupBox groupBox = (GuideXosGroupBox)member;
+                x = groupBox.X; y = groupBox.Y; width = groupBox.Width; height = groupBox.Height;
+                break;
             default:
                 x = y = width = height = 0;
                 break;
@@ -806,6 +820,7 @@ public sealed class GuideXosScrollView
             MemberKind.RadioButton => ((GuideXosRadioButton)member).TrySetScrollViewBounds(x, y, width, height),
             MemberKind.ProgressBar => ((GuideXosProgressBar)member).TrySetScrollViewBounds(x, y, width),
             MemberKind.ComboBox => ((GuideXosComboBox)member).TrySetScrollViewBounds(x, y, width, height),
+            MemberKind.GroupBox => ((GuideXosGroupBox)member).TrySetScrollViewBounds(x, y, width, height),
             _ => false,
         };
     }
@@ -821,6 +836,7 @@ public sealed class GuideXosScrollView
             MemberKind.RadioButton => ((GuideXosRadioButton)member).TryAttachToScrollView(this),
             MemberKind.ProgressBar => ((GuideXosProgressBar)member).TryAttachToScrollView(this),
             MemberKind.ComboBox => ((GuideXosComboBox)member).TryAttachToScrollView(this),
+            MemberKind.GroupBox => ((GuideXosGroupBox)member).TryAttachToScrollView(this),
             _ => false,
         };
     }
@@ -836,6 +852,7 @@ public sealed class GuideXosScrollView
             case MemberKind.RadioButton: ((GuideXosRadioButton)member).DetachFromScrollView(); break;
             case MemberKind.ProgressBar: ((GuideXosProgressBar)member).DetachFromScrollView(); break;
             case MemberKind.ComboBox: ((GuideXosComboBox)member).DetachFromScrollView(); break;
+            case MemberKind.GroupBox: ((GuideXosGroupBox)member).DetachFromScrollView(); break;
         }
     }
 
@@ -851,6 +868,7 @@ public sealed class GuideXosScrollView
             MemberKind.RadioButton => ((GuideXosRadioButton)member).Render(surface),
             MemberKind.ProgressBar => ((GuideXosProgressBar)member).Render(surface),
             MemberKind.ComboBox => ((GuideXosComboBox)member).Render(surface),
+            MemberKind.GroupBox => ((GuideXosGroupBox)member).Render(surface),
             _ => GuideXosResult.InvalidArgument,
         };
     }

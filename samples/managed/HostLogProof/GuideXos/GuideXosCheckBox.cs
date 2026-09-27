@@ -47,6 +47,7 @@ public sealed class GuideXosCheckBox : IGuideXosVerticalStackMember
     private bool _dispatchingChanged;
     private GuideXosPanel _panelOwner;
     private GuideXosScrollView _scrollViewOwner;
+    private GuideXosGroupBox _groupBoxOwner;
     private GuideXosVerticalStack _verticalStackOwner;
     private uint _rejectedInputCount;
 
@@ -130,9 +131,12 @@ public sealed class GuideXosCheckBox : IGuideXosVerticalStackMember
         get => _visible;
         set => SetVisible(value);
     }
-    public bool EffectiveVisible => _visible && _panelVisible;
+    public bool EffectiveEnabled => _enabled && (_groupBoxOwner == null || _groupBoxOwner.Enabled);
+    public bool EffectiveVisible => _visible && _panelVisible &&
+        (_groupBoxOwner == null || _groupBoxOwner.Visible);
     public GuideXosPanel ParentPanel => _panelOwner;
     public GuideXosScrollView ParentScrollView => _scrollViewOwner;
+    public GuideXosGroupBox ParentGroupBox => _groupBoxOwner;
     internal GuideXosVerticalStack VerticalStackOwner => _verticalStackOwner;
     public uint RejectedInputCount => _rejectedInputCount;
 
@@ -214,7 +218,7 @@ public sealed class GuideXosCheckBox : IGuideXosVerticalStackMember
         return TrySetBoundsCore(x, y, width, height);
     }
 
-    bool IGuideXosVerticalStackMember.Visible => Visible;
+    bool IGuideXosVerticalStackMember.Visible => EffectiveVisible;
     GuideXosPanel IGuideXosVerticalStackMember.ParentPanel => _panelOwner;
     GuideXosVerticalStack IGuideXosVerticalStackMember.VerticalStackOwner =>
         _verticalStackOwner;
@@ -309,7 +313,7 @@ public sealed class GuideXosCheckBox : IGuideXosVerticalStackMember
 
     public GuideXosCheckBoxResult Toggle()
     {
-        if (!_enabled) return GuideXosCheckBoxResult.Disabled;
+        if (!EffectiveEnabled) return GuideXosCheckBoxResult.Disabled;
         if (!_isFocused) return GuideXosCheckBoxResult.Ignored;
         SetChecked(!_checked);
         return GuideXosCheckBoxResult.Toggled;
@@ -323,7 +327,7 @@ public sealed class GuideXosCheckBox : IGuideXosVerticalStackMember
 
     public void Focus()
     {
-        if (_enabled && EffectiveVisible) _isFocused = true;
+        if (EffectiveEnabled && EffectiveVisible) _isFocused = true;
     }
 
     public void Blur()
@@ -349,7 +353,7 @@ public sealed class GuideXosCheckBox : IGuideXosVerticalStackMember
         {
             return GuideXosCheckBoxResult.Ignored;
         }
-        if (!_enabled) return GuideXosCheckBoxResult.Disabled;
+        if (!EffectiveEnabled) return GuideXosCheckBoxResult.Disabled;
 
         _isFocused = true;
         SetChecked(!_checked);
@@ -359,7 +363,7 @@ public sealed class GuideXosCheckBox : IGuideXosVerticalStackMember
     public GuideXosCheckBoxResult HandleKey(GuideXosTextInputKey key)
     {
         if (!EffectiveVisible) return GuideXosCheckBoxResult.Ignored;
-        if (!_enabled) return GuideXosCheckBoxResult.Disabled;
+        if (!EffectiveEnabled) return GuideXosCheckBoxResult.Disabled;
         if (!_isFocused) return GuideXosCheckBoxResult.Ignored;
         // Space is committed only by KeyChar, matching GuideXosButton's
         // exactly-once policy when KeyDown and KeyChar share one press.
@@ -369,7 +373,7 @@ public sealed class GuideXosCheckBox : IGuideXosVerticalStackMember
     public GuideXosCheckBoxResult HandleCharacter(char character)
     {
         if (!EffectiveVisible) return GuideXosCheckBoxResult.Ignored;
-        if (!_enabled) return GuideXosCheckBoxResult.Disabled;
+        if (!EffectiveEnabled) return GuideXosCheckBoxResult.Disabled;
         if (!_isFocused) return GuideXosCheckBoxResult.Ignored;
         if (character != ' ') return GuideXosCheckBoxResult.Ignored;
         SetChecked(!_checked);
@@ -389,7 +393,7 @@ public sealed class GuideXosCheckBox : IGuideXosVerticalStackMember
         {
             return GuideXosResult.InvalidArgument;
         }
-        if (_enabled && !_isFocused && position > 0 &&
+        if (EffectiveEnabled && !_isFocused && position > 0 &&
             line[0] == (byte)'[')
         {
             // The normal marker already opens the state box.
@@ -454,6 +458,17 @@ public sealed class GuideXosCheckBox : IGuideXosVerticalStackMember
         _scrollViewOwner = null;
         _isFocused = false;
     }
+
+    internal bool TryAttachToGroupBox(GuideXosGroupBox groupBox)
+    {
+        if (groupBox == null || _groupBoxOwner != null || _panelOwner != null)
+            return false;
+        _groupBoxOwner = groupBox;
+        _isFocused = false;
+        return true;
+    }
+
+    internal void DetachFromGroupBox() => _groupBoxOwner = null;
 
     private bool IsValidLabel(string label)
     {

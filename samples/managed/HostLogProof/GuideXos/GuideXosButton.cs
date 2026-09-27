@@ -46,6 +46,7 @@ public sealed class GuideXosButton : IGuideXosVerticalStackMember
     private bool _panelVisible = true;
     private GuideXosPanel _panelOwner;
     private GuideXosScrollView _scrollViewOwner;
+    private GuideXosGroupBox _groupBoxOwner;
     private GuideXosVerticalStack _verticalStackOwner;
     private uint _rejectedInputCount;
 
@@ -114,9 +115,12 @@ public sealed class GuideXosButton : IGuideXosVerticalStackMember
     public bool Enabled => _enabled;
     public bool IsFocused => _isFocused;
     public bool Visible => _visible;
-    public bool EffectiveVisible => _visible && _panelVisible;
+    public bool EffectiveEnabled => _enabled && (_groupBoxOwner == null || _groupBoxOwner.Enabled);
+    public bool EffectiveVisible => _visible && _panelVisible &&
+        (_groupBoxOwner == null || _groupBoxOwner.Visible);
     public GuideXosPanel ParentPanel => _panelOwner;
     public GuideXosScrollView ParentScrollView => _scrollViewOwner;
+    public GuideXosGroupBox ParentGroupBox => _groupBoxOwner;
     internal GuideXosVerticalStack VerticalStackOwner => _verticalStackOwner;
     public uint RejectedInputCount => _rejectedInputCount;
 
@@ -186,7 +190,7 @@ public sealed class GuideXosButton : IGuideXosVerticalStackMember
         return TrySetBoundsCore(x, y, width, height);
     }
 
-    bool IGuideXosVerticalStackMember.Visible => Visible;
+    bool IGuideXosVerticalStackMember.Visible => EffectiveVisible;
     GuideXosPanel IGuideXosVerticalStackMember.ParentPanel => _panelOwner;
     GuideXosVerticalStack IGuideXosVerticalStackMember.VerticalStackOwner =>
         _verticalStackOwner;
@@ -269,7 +273,7 @@ public sealed class GuideXosButton : IGuideXosVerticalStackMember
 
     public void Focus()
     {
-        if (_enabled && EffectiveVisible) _isFocused = true;
+        if (EffectiveEnabled && EffectiveVisible) _isFocused = true;
     }
 
     public void Blur()
@@ -295,7 +299,7 @@ public sealed class GuideXosButton : IGuideXosVerticalStackMember
         {
             return GuideXosButtonResult.Ignored;
         }
-        if (!_enabled) return GuideXosButtonResult.Disabled;
+        if (!EffectiveEnabled) return GuideXosButtonResult.Disabled;
 
         _isFocused = true;
         return GuideXosButtonResult.Activated;
@@ -304,7 +308,7 @@ public sealed class GuideXosButton : IGuideXosVerticalStackMember
     public GuideXosButtonResult HandleKey(GuideXosTextInputKey key)
     {
         if (!EffectiveVisible) return GuideXosButtonResult.Ignored;
-        if (!_enabled) return GuideXosButtonResult.Disabled;
+        if (!EffectiveEnabled) return GuideXosButtonResult.Disabled;
         if (!_isFocused) return GuideXosButtonResult.Ignored;
         return key == GuideXosTextInputKey.Enter
             ? GuideXosButtonResult.Activated
@@ -314,7 +318,7 @@ public sealed class GuideXosButton : IGuideXosVerticalStackMember
     public GuideXosButtonResult HandleCharacter(char character)
     {
         if (!EffectiveVisible) return GuideXosButtonResult.Ignored;
-        if (!_enabled) return GuideXosButtonResult.Disabled;
+        if (!EffectiveEnabled) return GuideXosButtonResult.Disabled;
         if (!_isFocused) return GuideXosButtonResult.Ignored;
         // Space arrives as KeyChar after KeyDown in the desktop route. It is
         // intentionally handled here only, so one physical Space activates once.
@@ -336,7 +340,7 @@ public sealed class GuideXosButton : IGuideXosVerticalStackMember
         Span<byte> line = stackalloc byte[64];
         line.Clear();
         int position = 0;
-        byte lead = !_enabled
+        byte lead = !EffectiveEnabled
             ? (byte)'x'
             : _isFocused ? (byte)'>' : (byte)'[';
         if (!AppendByte(line, ref position, lead) ||
@@ -400,6 +404,17 @@ public sealed class GuideXosButton : IGuideXosVerticalStackMember
         _scrollViewOwner = null;
         _isFocused = false;
     }
+
+    internal bool TryAttachToGroupBox(GuideXosGroupBox groupBox)
+    {
+        if (groupBox == null || _groupBoxOwner != null || _panelOwner != null)
+            return false;
+        _groupBoxOwner = groupBox;
+        _isFocused = false;
+        return true;
+    }
+
+    internal void DetachFromGroupBox() => _groupBoxOwner = null;
 
     private bool IsValidLabel(string label)
     {

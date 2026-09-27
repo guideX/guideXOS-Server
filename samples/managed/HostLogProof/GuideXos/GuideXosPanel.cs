@@ -170,6 +170,11 @@ public sealed class GuideXosPanel
             ++_rejectedInputCount;
             return GuideXosPanelResult.MembershipConflict;
         }
+        if (HasGroupBoxOwner(kind, child))
+        {
+            ++_rejectedInputCount;
+            return GuideXosPanelResult.MembershipConflict;
+        }
         if (_childCount >= _capacity)
         {
             ++_rejectedInputCount;
@@ -405,6 +410,21 @@ public sealed class GuideXosPanel
             ChildKind.ProgressBar => ((GuideXosProgressBar)child).ParentPanel,
             ChildKind.ComboBox => ((GuideXosComboBox)child).ParentPanel,
             _ => null,
+        };
+    }
+
+    private static bool HasGroupBoxOwner(ChildKind kind, object child)
+    {
+        return kind switch
+        {
+            ChildKind.Button => ((GuideXosButton)child).ParentGroupBox != null,
+            ChildKind.CheckBox => ((GuideXosCheckBox)child).ParentGroupBox != null,
+            ChildKind.Label => ((GuideXosLabel)child).ParentGroupBox != null,
+            ChildKind.Separator => ((GuideXosSeparator)child).ParentGroupBox != null,
+            ChildKind.RadioButton => ((GuideXosRadioButton)child).ParentGroupBox != null,
+            ChildKind.ProgressBar => ((GuideXosProgressBar)child).ParentGroupBox != null,
+            ChildKind.ComboBox => ((GuideXosComboBox)child).ParentGroupBox != null,
+            _ => false,
         };
     }
 

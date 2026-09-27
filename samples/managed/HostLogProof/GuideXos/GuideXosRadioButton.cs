@@ -47,6 +47,7 @@ public sealed class GuideXosRadioButton : IGuideXosVerticalStackMember
     private bool _panelVisible = true;
     private GuideXosPanel _panelOwner;
     private GuideXosScrollView _scrollViewOwner;
+    private GuideXosGroupBox _groupBoxOwner;
     private GuideXosVerticalStack _verticalStackOwner;
     private uint _rejectedInputCount;
     private GuideXosRadioGroup _group;
@@ -135,9 +136,12 @@ public sealed class GuideXosRadioButton : IGuideXosVerticalStackMember
     public bool Enabled => _enabled;
     public bool IsFocused => _isFocused;
     public bool Visible => _visible;
-    public bool EffectiveVisible => _visible && _panelVisible;
+    public bool EffectiveEnabled => _enabled && (_groupBoxOwner == null || _groupBoxOwner.Enabled);
+    public bool EffectiveVisible => _visible && _panelVisible &&
+        (_groupBoxOwner == null || _groupBoxOwner.Visible);
     public GuideXosPanel ParentPanel => _panelOwner;
     public GuideXosScrollView ParentScrollView => _scrollViewOwner;
+    public GuideXosGroupBox ParentGroupBox => _groupBoxOwner;
     internal GuideXosVerticalStack VerticalStackOwner => _verticalStackOwner;
     public uint RejectedInputCount => _rejectedInputCount;
     public GuideXosRadioGroup Group => _group;
@@ -217,7 +221,7 @@ public sealed class GuideXosRadioButton : IGuideXosVerticalStackMember
         return TrySetBoundsCore(x, y, width, height);
     }
 
-    bool IGuideXosVerticalStackMember.Visible => Visible;
+    bool IGuideXosVerticalStackMember.Visible => EffectiveVisible;
     GuideXosPanel IGuideXosVerticalStackMember.ParentPanel => _panelOwner;
     GuideXosVerticalStack IGuideXosVerticalStackMember.VerticalStackOwner =>
         _verticalStackOwner;
@@ -308,7 +312,7 @@ public sealed class GuideXosRadioButton : IGuideXosVerticalStackMember
     /// <summary>Requests selection through the group, or selects an ungrouped instance.</summary>
     public bool TrySelect()
     {
-        if (!_enabled || !EffectiveVisible) return false;
+        if (!EffectiveEnabled || !EffectiveVisible) return false;
         return _group == null ? SelectInternal() : _group.TrySelect(this);
     }
 
@@ -323,7 +327,7 @@ public sealed class GuideXosRadioButton : IGuideXosVerticalStackMember
 
     public void Focus()
     {
-        if (_enabled && EffectiveVisible) _isFocused = true;
+        if (EffectiveEnabled && EffectiveVisible) _isFocused = true;
     }
 
     public void Blur()
@@ -353,7 +357,7 @@ public sealed class GuideXosRadioButton : IGuideXosVerticalStackMember
     public GuideXosRadioButtonResult HandlePointerDown(int x, int y)
     {
         if (!ContainsPoint(x, y)) return GuideXosRadioButtonResult.Ignored;
-        if (!_enabled) return GuideXosRadioButtonResult.Disabled;
+        if (!EffectiveEnabled) return GuideXosRadioButtonResult.Disabled;
 
         _isFocused = true;
         return TrySelect()
@@ -365,7 +369,7 @@ public sealed class GuideXosRadioButton : IGuideXosVerticalStackMember
     {
         _requestedGroupIndex = -1;
         if (!EffectiveVisible) return GuideXosRadioButtonResult.Ignored;
-        if (!_enabled) return GuideXosRadioButtonResult.Disabled;
+        if (!EffectiveEnabled) return GuideXosRadioButtonResult.Disabled;
         if (!_isFocused) return GuideXosRadioButtonResult.Ignored;
 
         if (key == GuideXosTextInputKey.Left ||
@@ -392,7 +396,7 @@ public sealed class GuideXosRadioButton : IGuideXosVerticalStackMember
     public GuideXosRadioButtonResult HandleCharacter(char character)
     {
         if (!EffectiveVisible) return GuideXosRadioButtonResult.Ignored;
-        if (!_enabled) return GuideXosRadioButtonResult.Disabled;
+        if (!EffectiveEnabled) return GuideXosRadioButtonResult.Disabled;
         if (!_isFocused || character != ' ')
         {
             return GuideXosRadioButtonResult.Ignored;
@@ -409,7 +413,7 @@ public sealed class GuideXosRadioButton : IGuideXosVerticalStackMember
 
         Span<byte> line = stackalloc byte[64];
         int position = 0;
-        if (!_enabled) line[position++] = (byte)'x';
+        if (!EffectiveEnabled) line[position++] = (byte)'x';
         else if (_isFocused) line[position++] = (byte)'>';
         line[position++] = (byte)'('; 
         line[position++] = _selected ? (byte)'o' : (byte)' ';
@@ -462,6 +466,17 @@ public sealed class GuideXosRadioButton : IGuideXosVerticalStackMember
         _scrollViewOwner = null;
         _isFocused = false;
     }
+
+    internal bool TryAttachToGroupBox(GuideXosGroupBox groupBox)
+    {
+        if (groupBox == null || _groupBoxOwner != null || _panelOwner != null)
+            return false;
+        _groupBoxOwner = groupBox;
+        _isFocused = false;
+        return true;
+    }
+
+    internal void DetachFromGroupBox() => _groupBoxOwner = null;
 
     internal void AttachGroup(GuideXosRadioGroup group, int index)
     {

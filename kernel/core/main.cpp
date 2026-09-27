@@ -5415,6 +5415,68 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
         };
 
+#if defined(GXOS_NATIVEAOT_C143_MANAGED_GROUP_BOX)
+        auto runC143ManagedGroupBoxProof = [&]() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* c143GroupBox =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed GroupBox");
+        const bool c143CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c143GroupBox;
+        kernel::serial::puts("[C143-APPMODEL] catalogValid=");
+        kernel::serial::puts(c143CatalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+        const bool firstLaunch = c143CatalogValid &&
+            kernel::desktop::launch_app_with_context(
+                c143GroupBox->appId, "c143-native");
+        kernel::app::KernelWindow* firstWindow =
+            kernel::compositor::KernelCompositor::getFocusedWindow();
+        const bool closed = firstLaunch && firstWindow &&
+            kernel::compositor::KernelCompositor::requestCloseWindow(firstWindow->id);
+        const bool relaunched = closed &&
+            kernel::desktop::launch_app_with_context(
+                c143GroupBox->appId, "c143-native");
+        const bool launch = firstLaunch && closed && relaunched;
+        kernel::app::KernelWindow* window =
+            kernel::compositor::KernelCompositor::getFocusedWindow();
+        const int32_t viewX = 24;
+        const int32_t viewY = 95;
+        const int32_t viewWidth = 300;
+        const int32_t viewHeight = 120;
+        const int32_t scrollBarX = 336;
+        const int32_t scrollBarY = 95;
+        kernel::serial::puts("[C143-PROOF] managed-proof-started context=c143-native transport=physical-qemu result=");
+        kernel::serial::puts(launch ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C143-RELAUNCH] close=");
+        kernel::serial::puts(closed ? "PASS" : "FAIL");
+        kernel::serial::puts(" relaunch=");
+        kernel::serial::puts(relaunched ? "PASS" : "FAIL");
+        kernel::serial::puts(" registration=6 result=");
+        kernel::serial::puts(launch && window ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C143-TARGET] viewX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(viewX));
+        kernel::serial::puts(" viewY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(viewY));
+        kernel::serial::puts(" viewWidth=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(viewWidth));
+        kernel::serial::puts(" viewHeight=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(viewHeight));
+        kernel::serial::puts(" scrollBarX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(scrollBarX));
+        kernel::serial::puts(" scrollBarY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(scrollBarY));
+        kernel::serial::puts(" groupX=1D groupY=64 groupWidth=110 groupHeight=10E contentLeft=2D contentTop=7E contentWidth=F0 contentHeight=DA comboX=39 comboY=B6 checkboxX=31 checkboxY=9D radioOneX=3C radioOneY=E8 radioTwoY=101 buttonX=99 buttonY=133 visibleToggleX=18 visibleToggleY=2A enabledToggleY=40");
+        kernel::serial::puts(" screenViewX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window ? window->x + viewX : -1));
+        kernel::serial::puts(" screenViewY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window
+            ? window->y + kernel::compositor::TITLEBAR_HEIGHT + viewY : -1));
+        kernel::serial::puts(" result=");
+        kernel::serial::puts(launch && window ? "PASS\n" : "FAIL\n");
+        }
+        };
+        runC143ManagedGroupBoxProof();
+        return;
+#endif
+
 #if defined(GXOS_NATIVEAOT_C142_MANAGED_VERTICAL_STACK)
         auto runC142ManagedVerticalStackProof = [&]() __attribute__((noinline)) {
         {

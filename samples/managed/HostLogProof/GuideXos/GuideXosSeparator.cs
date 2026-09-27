@@ -30,6 +30,7 @@ public sealed class GuideXosSeparator : IGuideXosVerticalStackMember
     private bool _panelVisible = true;
     private GuideXosPanel _panelOwner;
     private GuideXosScrollView _scrollViewOwner;
+    private GuideXosGroupBox _groupBoxOwner;
     private GuideXosVerticalStack _verticalStackOwner;
     private uint _rejectedInputCount;
 
@@ -76,9 +77,12 @@ public sealed class GuideXosSeparator : IGuideXosVerticalStackMember
     }
     public int RenderWidth => _width / CharacterWidth;
     public bool Visible => _visible;
-    public bool EffectiveVisible => _visible && _panelVisible;
+    public bool EffectiveEnabled => _groupBoxOwner == null || _groupBoxOwner.Enabled;
+    public bool EffectiveVisible => _visible && _panelVisible &&
+        (_groupBoxOwner == null || _groupBoxOwner.Visible);
     public GuideXosPanel ParentPanel => _panelOwner;
     public GuideXosScrollView ParentScrollView => _scrollViewOwner;
+    public GuideXosGroupBox ParentGroupBox => _groupBoxOwner;
     internal GuideXosVerticalStack VerticalStackOwner => _verticalStackOwner;
     public uint RejectedInputCount => _rejectedInputCount;
 
@@ -142,7 +146,7 @@ public sealed class GuideXosSeparator : IGuideXosVerticalStackMember
         return TrySetBoundsCore(x, y, width);
     }
 
-    bool IGuideXosVerticalStackMember.Visible => Visible;
+    bool IGuideXosVerticalStackMember.Visible => EffectiveVisible;
     GuideXosPanel IGuideXosVerticalStackMember.ParentPanel => _panelOwner;
     GuideXosVerticalStack IGuideXosVerticalStackMember.VerticalStackOwner =>
         _verticalStackOwner;
@@ -272,4 +276,14 @@ public sealed class GuideXosSeparator : IGuideXosVerticalStackMember
     {
         _scrollViewOwner = null;
     }
+
+    internal bool TryAttachToGroupBox(GuideXosGroupBox groupBox)
+    {
+        if (groupBox == null || _groupBoxOwner != null || _panelOwner != null)
+            return false;
+        _groupBoxOwner = groupBox;
+        return true;
+    }
+
+    internal void DetachFromGroupBox() => _groupBoxOwner = null;
 }

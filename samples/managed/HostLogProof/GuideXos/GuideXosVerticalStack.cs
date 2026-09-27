@@ -396,13 +396,13 @@ public sealed class GuideXosVerticalStack
     {
         return member switch
         {
-            GuideXosButton button => button.Visible,
-            GuideXosCheckBox checkBox => checkBox.Visible,
-            GuideXosLabel label => label.Visible,
-            GuideXosSeparator separator => separator.Visible,
-            GuideXosRadioButton radio => radio.Visible,
-            GuideXosProgressBar progress => progress.Visible,
-            GuideXosComboBox combo => combo.Visible,
+            GuideXosButton button => button.EffectiveVisible,
+            GuideXosCheckBox checkBox => checkBox.EffectiveVisible,
+            GuideXosLabel label => label.EffectiveVisible,
+            GuideXosSeparator separator => separator.EffectiveVisible,
+            GuideXosRadioButton radio => radio.EffectiveVisible,
+            GuideXosProgressBar progress => progress.EffectiveVisible,
+            GuideXosComboBox combo => combo.EffectiveVisible,
             _ => false,
         };
     }

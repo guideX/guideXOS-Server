@@ -2,6 +2,18 @@ using System;
 
 namespace HostLogProof;
 
+public enum GuideXosGroupBoxResult
+{
+    Added = 1,
+    Removed = 2,
+    Cleared = 3,
+    Duplicate = 4,
+    CapacityReached = 5,
+    InvalidMember = 6,
+    MembershipConflict = 7,
+    NotMember = 8,
+}
+
 /// <summary>
 /// A bounded text-backed structural boundary. The box owns only its geometry,
 /// optional caption, and visibility; it does not own, focus, or route any
@@ -23,16 +35,28 @@ public sealed class GuideXosGroupBox
     public const int MaximumSupportedHeight = TextRowHeight * 16;
     public const int DefaultMaximumCaptionLength = 48;
     public const int MaximumSupportedCaptionLength = 48;
+    public const int DefaultMaximumMemberCount = 8;
+    public const int MaximumSupportedMemberCount = 8;
+    public const int DefaultContentPadding = 8;
+    public const int MaximumSupportedContentPadding = 64;
+    public const int FrameBorderWidth = CharacterWidth;
+    public const int TitleBandHeight = TextRowHeight;
     private const int CaptionLeadingColumns = 3;
     private const int CaptionTrailingColumns = 2;
 
     private readonly char[] _captionStorage;
+    private readonly object[] _members = new object[MaximumSupportedMemberCount];
+    private readonly int _capacity = DefaultMaximumMemberCount;
     private int _captionLength;
+    private int _memberCount;
+    private int _contentPadding = DefaultContentPadding;
     private int _x;
     private int _y;
     private int _width;
     private int _height;
     private bool _visible = true;
+    private bool _enabled = true;
+    private GuideXosScrollView _scrollViewOwner;
     private uint _rejectedInputCount;
 
     public GuideXosGroupBox(
@@ -62,8 +86,20 @@ public sealed class GuideXosGroupBox
     public int RenderCaptionLength => Math.Min(
         _captionLength, GetCaptionRenderCapacity());
     public string Caption => new string(_captionStorage, 0, _captionLength);
+    public string Text => Caption;
     public bool Visible => _visible;
+    public bool Enabled => _enabled;
     public bool Focusable => false;
+    public int MemberCapacity => _capacity;
+    public int MemberCount => _memberCount;
+    public int ContentPadding => _contentPadding;
+    public int ContentLeft => _x + FrameBorderWidth + _contentPadding;
+    public int ContentTop => _y + TitleBandHeight + _contentPadding;
+    public int ContentWidth => Math.Max(0,
+        _width - 2 * (FrameBorderWidth + _contentPadding));
+    public int ContentHeight => Math.Max(0,
+        _height - TitleBandHeight - TextRowHeight - 2 * _contentPadding);
+    public GuideXosScrollView ParentScrollView => _scrollViewOwner;
     public uint RejectedInputCount => _rejectedInputCount;
 
     /// <summary>
@@ -97,7 +133,109 @@ public sealed class GuideXosGroupBox
         return TrySetCaption(ReadOnlySpan<char>.Empty);
     }
 
+    public bool TrySetText(string text) => TrySetCaption(text);
+
+    public bool TrySetText(ReadOnlySpan<char> text) => TrySetCaption(text);
+
+    public bool TrySetContentPadding(int padding)
+    {
+        if (padding < 0 || padding > MaximumSupportedContentPadding)
+        {
+            ++_rejectedInputCount;
+            return false;
+        }
+        _contentPadding = padding;
+        return true;
+    }
+
+    /// <summary>Returns the current content rectangle without caching member geometry.</summary>
+    public bool TryGetContentRectangle(
+        out int x, out int y, out int width, out int height)
+    {
+        x = ContentLeft;
+        y = ContentTop;
+        width = ContentWidth;
+        height = ContentHeight;
+        return width > 0 && height > 0;
+    }
+
+    /// <summary>
+    /// Associates one supported ordinary leaf control. Membership does not set
+    /// bounds, register the control, or change its lifetime.
+    /// </summary>
+    public GuideXosGroupBoxResult TryAddMember(object member)
+    {
+        if (!IsSupportedMember(member))
+            return RejectMember(GuideXosGroupBoxResult.InvalidMember);
+        if (FindMemberIndex(member) >= 0)
+            return RejectMember(GuideXosGroupBoxResult.Duplicate);
+        if (GetMemberGroupBox(member) != null || GetMemberPanel(member) != null)
+            return RejectMember(GuideXosGroupBoxResult.MembershipConflict);
+        if (_memberCount >= _capacity)
+            return RejectMember(GuideXosGroupBoxResult.CapacityReached);
+        if (!AttachMember(member))
+            return RejectMember(GuideXosGroupBoxResult.MembershipConflict);
+        _members[_memberCount++] = member;
+        return GuideXosGroupBoxResult.Added;
+    }
+
+    /// <summary>Removes only this association; the member remains registered and alive.</summary>
+    public GuideXosGroupBoxResult TryRemoveMember(object member)
+    {
+        int index = FindMemberIndex(member);
+        if (index < 0) return RejectMember(GuideXosGroupBoxResult.NotMember);
+        DetachMember(member);
+        for (int move = index + 1; move < _memberCount; move++)
+            _members[move - 1] = _members[move];
+        _members[--_memberCount] = null;
+        return GuideXosGroupBoxResult.Removed;
+    }
+
+    public GuideXosGroupBoxResult ClearMembers()
+    {
+        if (_memberCount == 0) return GuideXosGroupBoxResult.Cleared;
+        for (int index = 0; index < _memberCount; index++)
+        {
+            DetachMember(_members[index]);
+            _members[index] = null;
+        }
+        _memberCount = 0;
+        return GuideXosGroupBoxResult.Cleared;
+    }
+
+    public object GetMember(int index) =>
+        index >= 0 && index < _memberCount ? _members[index] : null;
+
+    /// <summary>Checks live member bounds, so later Stack layout is never stale.</summary>
+    public bool ValidateMembershipGeometry(out int outsideMemberCount)
+    {
+        outsideMemberCount = 0;
+        int right = ContentLeft + ContentWidth;
+        int bottom = ContentTop + ContentHeight;
+        for (int index = 0; index < _memberCount; index++)
+        {
+            GetMemberBounds(_members[index], out int x, out int y,
+                out int width, out int height);
+            if (x < ContentLeft || y < ContentTop ||
+                x + width > right || y + height > bottom)
+                ++outsideMemberCount;
+        }
+        return outsideMemberCount == 0;
+    }
+
+    public void SetEnabled(bool enabled) => _enabled = enabled;
+
     public bool TrySetBounds(int x, int y, int width, int height)
+    {
+        if (_scrollViewOwner != null)
+        {
+            ++_rejectedInputCount;
+            return false;
+        }
+        return TrySetBoundsCore(x, y, width, height);
+    }
+
+    private bool TrySetBoundsCore(int x, int y, int width, int height)
     {
         if (x < MinimumSupportedCoordinate ||
             y < MinimumSupportedCoordinate ||
@@ -168,8 +306,23 @@ public sealed class GuideXosGroupBox
     public void Reset()
     {
         _visible = true;
+        _enabled = true;
         _rejectedInputCount = 0u;
     }
+
+    internal bool TrySetScrollViewBounds(int x, int y, int width, int height)
+    {
+        return TrySetBoundsCore(x, y, width, height);
+    }
+
+    internal bool TryAttachToScrollView(GuideXosScrollView scrollView)
+    {
+        if (scrollView == null || _scrollViewOwner != null) return false;
+        _scrollViewOwner = scrollView;
+        return true;
+    }
+
+    internal void DetachFromScrollView() => _scrollViewOwner = null;
 
     /// <summary>
     /// Renders a complete bounded text frame. The first and last text rows are
@@ -253,5 +406,89 @@ public sealed class GuideXosGroupBox
             if (caption[index] < 0x20 || caption[index] > 0x7E) return false;
         }
         return true;
+    }
+
+    private GuideXosGroupBoxResult RejectMember(GuideXosGroupBoxResult result)
+    {
+        ++_rejectedInputCount;
+        return result;
+    }
+
+    private int FindMemberIndex(object member)
+    {
+        for (int index = 0; index < _memberCount; index++)
+            if (ReferenceEquals(_members[index], member)) return index;
+        return -1;
+    }
+
+    private static bool IsSupportedMember(object member) => member is
+        GuideXosButton or GuideXosCheckBox or GuideXosLabel or
+        GuideXosSeparator or GuideXosRadioButton or GuideXosProgressBar or
+        GuideXosComboBox;
+
+    private static GuideXosGroupBox GetMemberGroupBox(object member) => member switch
+    {
+        GuideXosButton value => value.ParentGroupBox,
+        GuideXosCheckBox value => value.ParentGroupBox,
+        GuideXosLabel value => value.ParentGroupBox,
+        GuideXosSeparator value => value.ParentGroupBox,
+        GuideXosRadioButton value => value.ParentGroupBox,
+        GuideXosProgressBar value => value.ParentGroupBox,
+        GuideXosComboBox value => value.ParentGroupBox,
+        _ => null,
+    };
+
+    private static GuideXosPanel GetMemberPanel(object member) => member switch
+    {
+        GuideXosButton value => value.ParentPanel,
+        GuideXosCheckBox value => value.ParentPanel,
+        GuideXosLabel value => value.ParentPanel,
+        GuideXosSeparator value => value.ParentPanel,
+        GuideXosRadioButton value => value.ParentPanel,
+        GuideXosProgressBar value => value.ParentPanel,
+        GuideXosComboBox value => value.ParentPanel,
+        _ => null,
+    };
+
+    private bool AttachMember(object member) => member switch
+    {
+        GuideXosButton value => value.TryAttachToGroupBox(this),
+        GuideXosCheckBox value => value.TryAttachToGroupBox(this),
+        GuideXosLabel value => value.TryAttachToGroupBox(this),
+        GuideXosSeparator value => value.TryAttachToGroupBox(this),
+        GuideXosRadioButton value => value.TryAttachToGroupBox(this),
+        GuideXosProgressBar value => value.TryAttachToGroupBox(this),
+        GuideXosComboBox value => value.TryAttachToGroupBox(this),
+        _ => false,
+    };
+
+    private static void DetachMember(object member)
+    {
+        switch (member)
+        {
+            case GuideXosButton value: value.DetachFromGroupBox(); break;
+            case GuideXosCheckBox value: value.DetachFromGroupBox(); break;
+            case GuideXosLabel value: value.DetachFromGroupBox(); break;
+            case GuideXosSeparator value: value.DetachFromGroupBox(); break;
+            case GuideXosRadioButton value: value.DetachFromGroupBox(); break;
+            case GuideXosProgressBar value: value.DetachFromGroupBox(); break;
+            case GuideXosComboBox value: value.DetachFromGroupBox(); break;
+        }
+    }
+
+    private static void GetMemberBounds(object member,
+        out int x, out int y, out int width, out int height)
+    {
+        switch (member)
+        {
+            case GuideXosButton value: x = value.X; y = value.Y; width = value.Width; height = value.Height; break;
+            case GuideXosCheckBox value: x = value.X; y = value.Y; width = value.Width; height = value.Height; break;
+            case GuideXosLabel value: x = value.X; y = value.Y; width = value.Width; height = GuideXosLabel.TextRowHeight; break;
+            case GuideXosSeparator value: x = value.X; y = value.Y; width = value.Width; height = GuideXosSeparator.TextRowHeight; break;
+            case GuideXosRadioButton value: x = value.X; y = value.Y; width = value.Width; height = value.Height; break;
+            case GuideXosProgressBar value: x = value.X; y = value.Y; width = value.Width; height = GuideXosProgressBar.TextRowHeight; break;
+            case GuideXosComboBox value: x = value.X; y = value.Y; width = value.Width; height = value.Height; break;
+            default: x = y = width = height = 0; break;
+        }
     }
 }
