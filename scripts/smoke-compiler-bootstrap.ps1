@@ -842,7 +842,9 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                             ($serialProbe.Contains("DEVELOPER_STUDIO_PHASE28Q_RUNNING_PASS") -or
                              $serialProbe.Contains("DEVELOPER_STUDIO_PHASE28Q_FAILURE"))) -or
                         ($Phase29GBeginDebugReturnOnly -and
-                            ($serialProbe.Contains("DEVELOPER_STUDIO_PHASE29A_STOP_MAPPING_PASS") -or
+                            (($serialProbe.Contains("DEVELOPER_STUDIO_PHASE29D_STARTUP_SENTINEL_DECISION") -and
+                              $serialProbe -match 'DEVELOPER_STUDIO_PHASE29D_STARTUP_SENTINEL_DECISION .*fixture=absent') -or
+                             $serialProbe.Contains("DEVELOPER_STUDIO_PHASE29A_STOP_MAPPING_PASS") -or
                              $serialProbe.Contains("DEVELOPER_STUDIO_PHASE29A_STOP_MAPPING_FAIL") -or
                              $serialProbe.Contains("DEVELOPER_STUDIO_PHASE28Q_FAILURE"))) -or
                         ($Phase29COnly -and -not $Phase29EManifestOnly -and
@@ -2194,6 +2196,17 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
             )
             if ($Phase29GBeginDebugReturnOnly) {
                 $requiredMarkers += @(
+                    'DEVELOPER_STUDIO_PHASE29H_CONTEXT boundary=build_complete',
+                    'DEVELOPER_STUDIO_PHASE29D_STARTUP_SENTINEL_DECISION app=1 generation=1 fixture=present diagnostic=phase28q',
+                    'DEVELOPER_STUDIO_PHASE29H_CONTEXT boundary=symbol_read',
+                    'DEVELOPER_STUDIO_PHASE29H_SYMBOL_SNAPSHOT mapper_generation=',
+                    'DEVELOPER_STUDIO_PHASE29H_SYMBOL_ELF elf_valid=1 elf_class=2 elf_type=2 machine=62',
+                    'DEVELOPER_STUDIO_PHASE29H_SYMBOL_DWARF line_offset=',
+                    'DEVELOPER_STUDIO_PHASE29H_CONTEXT boundary=symbol_snapshot',
+                    'DEVELOPER_STUDIO_PHASE29H_CONTEXT boundary=breakpoint_mapping_read',
+                    'DEVELOPER_STUDIO_PHASE29H_CONTEXT boundary=breakpoint_mapping',
+                    'DEVELOPER_STUDIO_PHASE29H_CONTEXT boundary=debug_start_handoff_read',
+                    'DEVELOPER_STUDIO_PHASE29H_CONTEXT boundary=server_start_handoff',
                     "DEVELOPER_STUDIO_PHASE29G_SOURCE_ROOT_ASSOCIATION",
                     "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_BEGIN_ENTRY",
                     "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_SYMBOL_INITIALIZATION_ENTER",
@@ -2213,6 +2226,14 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                     "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_PRE_RETURN",
                     "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_BEGIN_DEBUG_SESSION_RETURN result=success"
                 )
+                foreach ($boundary in @('build_complete', 'symbol_read', 'symbol_snapshot',
+                    'breakpoint_mapping_read', 'breakpoint_mapping', 'debug_start_handoff_read',
+                    'server_start_handoff')) {
+                    $requiredMarkers += "DEVELOPER_STUDIO_PHASE29H_TARGET boundary=$boundary"
+                    $requiredMarkers += "DEVELOPER_STUDIO_PHASE29H_PATH boundary=$boundary part=1/"
+                    $requiredMarkers += "DEVELOPER_STUDIO_PHASE29H_SIZE boundary=$boundary"
+                    $requiredMarkers += "DEVELOPER_STUDIO_PHASE29H_HASH boundary=$boundary"
+                }
             }
             if (-not $Phase29FDebugStartOnly) {
                 $requiredMarkers += @(
@@ -2329,6 +2350,166 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
             }
 
             if ($Phase29GBeginDebugReturnOnly) {
+                $artifactBoundaries = @(
+                    'build_complete', 'symbol_read', 'symbol_snapshot',
+                    'breakpoint_mapping_read', 'breakpoint_mapping',
+                    'debug_start_handoff_read', 'server_start_handoff'
+                )
+                $artifactIdentity = $null
+                foreach ($boundary in $artifactBoundaries) {
+                    $boundaryPattern = [regex]::Escape($boundary)
+                    $contextLines = @($serial -split "`r?`n" | Where-Object {
+                        $_ -match ('DEVELOPER_STUDIO_PHASE29H_CONTEXT boundary=' + $boundaryPattern + ' ')
+                    })
+                    $targetLines = @($serial -split "`r?`n" | Where-Object {
+                        $_ -match ('DEVELOPER_STUDIO_PHASE29H_TARGET boundary=' + $boundaryPattern + ' ')
+                    })
+                    $sizeLines = @($serial -split "`r?`n" | Where-Object {
+                        $_ -match ('DEVELOPER_STUDIO_PHASE29H_SIZE boundary=' + $boundaryPattern + ' ')
+                    })
+                    $hashLines = @($serial -split "`r?`n" | Where-Object {
+                        $_ -match ('DEVELOPER_STUDIO_PHASE29H_HASH boundary=' + $boundaryPattern + ' ')
+                    })
+                    $pathLines = @($serial -split "`r?`n" | Where-Object {
+                        $_ -match ('DEVELOPER_STUDIO_PHASE29H_PATH boundary=' + $boundaryPattern + ' ')
+                    })
+                    if ($contextLines.Count -ne 1 -or $targetLines.Count -ne 1 -or
+                        $sizeLines.Count -ne 1 -or $hashLines.Count -ne 1 -or $pathLines.Count -lt 1) {
+                        $missingMarkers += "Phase29H artifact boundary $boundary counts context=$($contextLines.Count) target=$($targetLines.Count) size=$($sizeLines.Count) hash=$($hashLines.Count) path=$($pathLines.Count)"
+                        continue
+                    }
+                    $contextMatch = [regex]::Match($contextLines[0], 'project_id=([^ ]+) project_generation=(\d+) build_operation=(\d+) arch=([^ ]+)$')
+                    $targetMatch = [regex]::Match($targetLines[0], 'profile=([^ ]+)$')
+                    if (-not $contextMatch.Success -or -not $targetMatch.Success) {
+                        $missingMarkers += "Phase29H artifact boundary $boundary ownership tuple is malformed"
+                        continue
+                    }
+                    $projectId = $contextMatch.Groups[1].Value
+                    $projectGeneration = [uint64]$contextMatch.Groups[2].Value
+                    $buildOperation = [uint64]$contextMatch.Groups[3].Value
+                    $architecture = $contextMatch.Groups[4].Value
+                    $targetProfile = $targetMatch.Groups[1].Value
+                    $sizeMatch = [regex]::Match($sizeLines[0], 'expected=(\d+) observed=(\d+) result=([^ ]+)$')
+                    if (-not $sizeMatch.Success) {
+                        $missingMarkers += "Phase29H artifact boundary $boundary size tuple is malformed"
+                        continue
+                    }
+                    $expectedSize = [uint64]$sizeMatch.Groups[1].Value
+                    $observedSize = [uint64]$sizeMatch.Groups[2].Value
+                    $boundaryResult = $sizeMatch.Groups[3].Value
+                    $hashMatch = [regex]::Match($hashLines[0], 'expected=([A-Fa-f0-9-]+) observed=([A-Fa-f0-9-]+)$')
+                    if (-not $hashMatch.Success) {
+                        $missingMarkers += "Phase29H artifact boundary $boundary hash tuple is malformed"
+                        continue
+                    }
+                    $expectedHash = $hashMatch.Groups[1].Value.ToUpperInvariant()
+                    $observedHash = $hashMatch.Groups[2].Value.ToUpperInvariant()
+                    $pathByPart = @{}
+                    $pathPartCount = $null
+                    foreach ($pathLine in $pathLines) {
+                        $pathMatch = [regex]::Match($pathLine, 'part=(\d+)/(\d+) value=(.*)$')
+                        if (-not $pathMatch.Success) {
+                            $missingMarkers += "Phase29H artifact boundary $boundary path chunk is malformed"
+                            continue
+                        }
+                        $partIndex = [int]$pathMatch.Groups[1].Value
+                        $partCount = [int]$pathMatch.Groups[2].Value
+                        if ($null -ne $pathPartCount -and $partCount -ne $pathPartCount) {
+                            $missingMarkers += "Phase29H artifact boundary $boundary path chunk totals disagree"
+                        }
+                        $pathPartCount = $partCount
+                        $pathByPart[$partIndex] = $pathMatch.Groups[3].Value
+                    }
+                    if ($null -eq $pathPartCount -or $pathByPart.Count -ne $pathPartCount) {
+                        $missingMarkers += "Phase29H artifact boundary $boundary path chunks incomplete"
+                        continue
+                    }
+                    $pathParts = for ($part = 1; $part -le $pathPartCount; ++$part) { $pathByPart[$part] }
+                    $artifactPath = ($pathParts -join '')
+                    if ($artifactPath -eq '-') { $artifactPath = '' }
+                    $currentIdentity = [PSCustomObject]@{
+                        ProjectId = $projectId
+                        ProjectGeneration = $projectGeneration
+                        BuildOperation = $buildOperation
+                        Architecture = $architecture
+                        TargetProfile = $targetProfile
+                        Path = $artifactPath
+                        ExpectedSize = $expectedSize
+                        ObservedSize = $observedSize
+                        ExpectedHash = $expectedHash
+                        ObservedHash = $observedHash
+                        Result = $boundaryResult
+                    }
+                    if ($currentIdentity.ExpectedSize -eq 0 -or
+                        $currentIdentity.ExpectedSize -ne $currentIdentity.ObservedSize -or
+                        $currentIdentity.ExpectedHash -notmatch '^[A-F0-9]{64}$' -or
+                        $currentIdentity.ExpectedHash -ne $currentIdentity.ObservedHash) {
+                        $missingMarkers += "Phase29H artifact identity changed at $boundary"
+                    }
+                    if ($null -eq $artifactIdentity) {
+                        $artifactIdentity = $currentIdentity
+                    } elseif ($currentIdentity.ProjectId -ne $artifactIdentity.ProjectId -or
+                        $currentIdentity.ProjectGeneration -ne $artifactIdentity.ProjectGeneration -or
+                        $currentIdentity.BuildOperation -ne $artifactIdentity.BuildOperation -or
+                        $currentIdentity.Architecture -ne $artifactIdentity.Architecture -or
+                        $currentIdentity.TargetProfile -ne $artifactIdentity.TargetProfile -or
+                        $currentIdentity.Path -ne $artifactIdentity.Path -or
+                        $currentIdentity.ExpectedSize -ne $artifactIdentity.ExpectedSize -or
+                        $currentIdentity.ExpectedHash -ne $artifactIdentity.ExpectedHash) {
+                        $missingMarkers += "Phase29H artifact identity tuple changed at $boundary"
+                    }
+                }
+                $symbolSnapshotLines = @($serial -split "`r?`n" | Where-Object {
+                    $_ -match 'DEVELOPER_STUDIO_PHASE29H_SYMBOL_SNAPSHOT mapper_generation='
+                })
+                $symbolSnapshotMatch = if ($symbolSnapshotLines.Count -eq 1) {
+                    [regex]::Match($symbolSnapshotLines[0], 'mapper_generation=(\d+) project_generation=(\d+) build_operation=(\d+) path=([^ ]+) size=(\d+) sha256=([A-Fa-f0-9]{64})$')
+                } else { [regex]::Match('', '(?!)') }
+                if ($symbolSnapshotLines.Count -ne 1 -or -not $symbolSnapshotMatch.Success) {
+                    $missingMarkers += "Phase29H symbol snapshot identity count or format invalid count=$($symbolSnapshotLines.Count)"
+                } elseif ($null -ne $artifactIdentity -and
+                    ([uint64]$symbolSnapshotMatch.Groups[1].Value -eq 0 -or
+                     [uint64]$symbolSnapshotMatch.Groups[2].Value -ne $artifactIdentity.ProjectGeneration -or
+                     [uint64]$symbolSnapshotMatch.Groups[3].Value -ne $artifactIdentity.BuildOperation -or
+                     $symbolSnapshotMatch.Groups[4].Value -ne $artifactIdentity.Path -or
+                     [uint64]$symbolSnapshotMatch.Groups[5].Value -ne $artifactIdentity.ExpectedSize -or
+                     $symbolSnapshotMatch.Groups[6].Value.ToUpperInvariant() -ne $artifactIdentity.ExpectedHash)) {
+                    $missingMarkers += 'Phase29H parsed symbol snapshot differs from the completed artifact identity'
+                }
+                $elfResultLines = @($serial -split "`r?`n" | Where-Object {
+                    $_ -match 'DEVELOPER_STUDIO_PHASE29H_SYMBOL_ELF '
+                })
+                $dwarfResultLines = @($serial -split "`r?`n" | Where-Object {
+                    $_ -match 'DEVELOPER_STUDIO_PHASE29H_SYMBOL_DWARF '
+                })
+                $elfResultMatch = if ($elfResultLines.Count -eq 1) {
+                    [regex]::Match($elfResultLines[0], 'elf_valid=1 elf_class=2 elf_type=2 machine=62 program_headers=(\d+) section_headers=(\d+)$')
+                } else { [regex]::Match('', '(?!)') }
+                $dwarfResultMatch = if ($dwarfResultLines.Count -eq 1) {
+                    [regex]::Match($dwarfResultLines[0], 'line_offset=(\d+) line_size=(\d+) info_offset=(\d+) info_size=(\d+) abbrev_offset=(\d+) abbrev_size=(\d+) cus=(\d+) dies=(\d+)$')
+                } else { [regex]::Match('', '(?!)') }
+                if ($elfResultLines.Count -ne 1 -or -not $elfResultMatch.Success -or
+                    $dwarfResultLines.Count -ne 1 -or -not $dwarfResultMatch.Success) {
+                    $missingMarkers += "Phase29H ELF/DWARF parse evidence count or format invalid elf=$($elfResultLines.Count) dwarf=$($dwarfResultLines.Count)"
+                }
+                $sourceAssociationLines = @($serial -split "`r?`n" | Where-Object {
+                    $_ -match 'DEVELOPER_STUDIO_PHASE29G_SOURCE_ROOT_ASSOCIATION '
+                })
+                $sourceAssociationMatch = if ($sourceAssociationLines.Count -eq 1) {
+                    [regex]::Match($sourceAssociationLines[0], 'project_generation=(\d+) source_root=src build_root=/P28Q compilation_directory=- candidate=src/helper\.cpp normalized=src/helper\.cpp normalization=contained lookup=success error=none')
+                } else { [regex]::Match('', '(?!)') }
+                if ($sourceAssociationLines.Count -ne 1 -or -not $sourceAssociationMatch.Success) {
+                    $missingMarkers += "Phase29H source association count or identity invalid count=$($sourceAssociationLines.Count)"
+                } elseif ($null -ne $artifactIdentity -and
+                    [uint64]$sourceAssociationMatch.Groups[1].Value -ne $artifactIdentity.ProjectGeneration) {
+                    $missingMarkers += 'Phase29H source association project generation differs from the artifact snapshot'
+                }
+                if ($serial -match 'DEVELOPER_STUDIO_PHASE29H_ARTIFACT_MISMATCH field=(?!none)' -or
+                    $serial -match 'DEBUG_START_BREAKPOINT_MAPPING_FAILED error=artifact_changed' -or
+                    $serial -match 'DEBUG_START_SYMBOL_ARTIFACT_LOAD_FAILED error=malformed_dwarf') {
+                    $missingMarkers += 'Phase29H observed artifact identity mismatch or malformed DWARF before start'
+                }
+
                 $phase29gLines = @($serial -split "`r?`n" | Where-Object {
                     $_ -match 'DEVELOPER_STUDIO_PHASE29G_(BEGIN_DEBUG|SOURCE_ROOT_ASSOCIATION)'
                 })
