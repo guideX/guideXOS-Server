@@ -495,6 +495,20 @@ public sealed class GuideXosControlHost
         {
             return GuideXosControlHostResult.Rejected;
         }
+        if (_entries[index].Kind == GuideXosManagedControlKind.ScrollBar &&
+            !_entries[index].Focusable)
+        {
+            if (!IsControlVisible(index) || IsControlDisabled(index))
+            {
+                return IsControlDisabled(index)
+                    ? GuideXosControlHostResult.Disabled
+                    : GuideXosControlHostResult.Rejected;
+            }
+            // Pointer-only scrollbars stay out of the keyboard focus order,
+            // but still need to accept thumb and track input.
+            return RoutePointerAndCapture(index, x, y, originX, originY,
+                characterWidth, lineHeight);
+        }
         if (_entries[index].Kind == GuideXosManagedControlKind.RadioButton &&
             !((GuideXosRadioButton)_entries[index].Control).ContainsPoint(x, y))
         {

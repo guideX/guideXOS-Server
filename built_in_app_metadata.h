@@ -139,6 +139,13 @@ static const char* const kManagedGroupBoxAliases[] = {
 };
 #endif
 
+#if defined(GXOS_NATIVEAOT_C144_MANAGED_SETTINGS_CENTER)
+static const char* const kManagedSettingsCenterAliases[] = {
+	"Settings Center",
+	"Managed Settings"
+};
+#endif
+
 static const char* const kOnScreenKeyboardAliases[] = {
 	"On Screen Keyboard"
 };
@@ -180,7 +187,9 @@ static const BuiltInAppMetadata kBuiltInAppMetadata[] = {
 #if (defined(GXOS_NATIVEAOT_C141_MANAGED_VERTICAL_STACK) || defined(GXOS_NATIVEAOT_C142_MANAGED_VERTICAL_STACK)) && !defined(GXOS_NATIVEAOT_C143_MANAGED_GROUP_BOX)
 ,	{ "com.guidexos.apps.managed.verticalstack", "Managed Vertical Stack", "Managed Vertical Stack", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS bounded non-owning vertical stack proof application.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedVerticalStackAliases, sizeof(detail::kManagedVerticalStackAliases) / sizeof(detail::kManagedVerticalStackAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 5u, kManagedNativeAotCompositeImagePath }
 #endif
-#if defined(GXOS_NATIVEAOT_C143_MANAGED_GROUP_BOX)
+#if defined(GXOS_NATIVEAOT_C144_MANAGED_SETTINGS_CENTER)
+, 	{ "com.guidexos.apps.managed.settingscenter", "Managed Settings Center", "Settings Center", nullptr, nullptr, "app.settings", "Utilities", "Managed guideXOS multi-section settings application composition proof.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedSettingsCenterAliases, sizeof(detail::kManagedSettingsCenterAliases) / sizeof(detail::kManagedSettingsCenterAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 5u, kManagedNativeAotCompositeImagePath }
+#elif defined(GXOS_NATIVEAOT_C143_MANAGED_GROUP_BOX)
 ,	{ "com.guidexos.apps.managed.groupbox", "Managed GroupBox", "Managed GroupBox", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS bounded non-owning titled section proof application.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedGroupBoxAliases, sizeof(detail::kManagedGroupBoxAliases) / sizeof(detail::kManagedGroupBoxAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 5u, kManagedNativeAotCompositeImagePath }
 #endif
 };

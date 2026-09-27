@@ -45,9 +45,10 @@ public sealed class GuideXosScrollView
     public const int MinimumSupportedHeight = 20;
     public const int MaximumSupportedHeight = 288;
     public const int DefaultMaximumMemberCount = 8;
-    // Nine permits one non-focusable GroupBox frame alongside eight ordinary
-    // leaf controls without turning the viewport into a recursive container.
-    public const int MaximumSupportedMemberCount = 9;
+    // C144 keeps the direct-member model and raises only its fixed limit so a
+    // realistic bounded application can place several section frames and
+    // their leaf controls in one viewport. The default remains eight.
+    public const int MaximumSupportedMemberCount = 24;
 
     private enum MemberKind
     {
@@ -70,8 +71,7 @@ public sealed class GuideXosScrollView
         public int LogicalY;
     }
 
-    private readonly MemberEntry[] _members =
-        new MemberEntry[MaximumSupportedMemberCount];
+    private readonly MemberEntry[] _members;
     private readonly int _capacity;
     private readonly GuideXosVerticalViewport _viewport;
     private int _memberCount;
@@ -97,6 +97,7 @@ public sealed class GuideXosScrollView
         _capacity = maximumMemberCount < 1 ||
             maximumMemberCount > MaximumSupportedMemberCount
             ? DefaultMaximumMemberCount : maximumMemberCount;
+        _members = new MemberEntry[_capacity];
         _viewport = new GuideXosVerticalViewport();
         _x = MinimumSupportedCoordinate;
         _y = MinimumSupportedCoordinate;

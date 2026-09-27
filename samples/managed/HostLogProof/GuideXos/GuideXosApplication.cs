@@ -44,7 +44,9 @@ public static unsafe class GuideXosApplicationRegistry
         new(2u, "Managed Status"u8, new Applications.ManagedStatus()),
         new(3u, "Managed Counter"u8, new Applications.ManagedCounter()),
         new(4u, "Managed Notes"u8, new Applications.ManagedNotes()),
-#if HOSTLOGPROOF_C143_MANAGED_GROUP_BOX
+#if HOSTLOGPROOF_C144_MANAGED_SETTINGS_CENTER
+        new(5u, "Managed Settings Center"u8, new Applications.ManagedSettingsCenter()),
+#elif HOSTLOGPROOF_C143_MANAGED_GROUP_BOX
         new(5u, "Managed GroupBox"u8, new Applications.ManagedGroupBoxDemo()),
 #elif HOSTLOGPROOF_C142_MANAGED_VERTICAL_STACK
         new(5u, "Managed Vertical Stack"u8, new Applications.ManagedVerticalStackDemo()),

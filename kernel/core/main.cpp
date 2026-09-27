@@ -5415,6 +5415,64 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
         };
 
+#if defined(GXOS_NATIVEAOT_C144_MANAGED_SETTINGS_CENTER)
+        auto runC144ManagedSettingsCenterProof = [&]() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* settingsCenter =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Settings Center");
+        const bool catalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            settingsCenter;
+        kernel::serial::puts("[C144-APPMODEL] catalogValid=");
+        kernel::serial::puts(catalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+        const bool firstLaunch = catalogValid && kernel::desktop::launch_app_with_context(
+            settingsCenter->appId, "c144-native");
+        kernel::app::KernelWindow* firstWindow =
+            kernel::compositor::KernelCompositor::getFocusedWindow();
+        const bool closed = firstLaunch && firstWindow &&
+            kernel::compositor::KernelCompositor::requestCloseWindow(firstWindow->id);
+        const bool relaunched = closed && kernel::desktop::launch_app_with_context(
+            settingsCenter->appId, "c144-native");
+        const bool launch = firstLaunch && closed && relaunched;
+        kernel::app::KernelWindow* window =
+            kernel::compositor::KernelCompositor::getFocusedWindow();
+        constexpr int32_t viewX = 24, viewY = 86, viewWidth = 300, viewHeight = 208;
+        constexpr int32_t barX = 336, barY = 86;
+        constexpr int32_t inputEnabledX = 24, inputEnabledY = 54;
+        constexpr int32_t advancedToggleX = 280, advancedToggleY = 54;
+        constexpr int32_t optionsX = 420, optionsY = 48;
+        kernel::serial::puts("[C144-PROOF] managed-proof-started context=c144-native transport=physical-qemu result=");
+        kernel::serial::puts(launch ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C144-RELAUNCH] close=");
+        kernel::serial::puts(closed ? "PASS" : "FAIL");
+        kernel::serial::puts(" relaunch=");
+        kernel::serial::puts(relaunched ? "PASS" : "FAIL");
+        kernel::serial::puts(" registration=9 result=");
+        kernel::serial::puts(launch && window ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C144-TARGET] viewX="); kernel::serial::put_hex32(viewX);
+        kernel::serial::puts(" viewY="); kernel::serial::put_hex32(viewY);
+        kernel::serial::puts(" viewWidth="); kernel::serial::put_hex32(viewWidth);
+        kernel::serial::puts(" viewHeight="); kernel::serial::put_hex32(viewHeight);
+        kernel::serial::puts(" scrollBarX="); kernel::serial::put_hex32(barX);
+        kernel::serial::puts(" scrollBarY="); kernel::serial::put_hex32(barY);
+        kernel::serial::puts(" inputEnabledX="); kernel::serial::put_hex32(inputEnabledX);
+        kernel::serial::puts(" inputEnabledY="); kernel::serial::put_hex32(inputEnabledY);
+        kernel::serial::puts(" advancedToggleX="); kernel::serial::put_hex32(advancedToggleX);
+        kernel::serial::puts(" advancedToggleY="); kernel::serial::put_hex32(advancedToggleY);
+        kernel::serial::puts(" optionsX="); kernel::serial::put_hex32(optionsX);
+        kernel::serial::puts(" optionsY="); kernel::serial::put_hex32(optionsY);
+        kernel::serial::puts(" screenViewX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window ? window->x + viewX : -1));
+        kernel::serial::puts(" screenViewY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window
+            ? window->y + kernel::compositor::TITLEBAR_HEIGHT + viewY : -1));
+        kernel::serial::puts(" result=");
+        kernel::serial::puts(launch && window ? "PASS\n" : "FAIL\n");
+        }
+        };
+        runC144ManagedSettingsCenterProof();
+        return;
+#endif
+
 #if defined(GXOS_NATIVEAOT_C143_MANAGED_GROUP_BOX)
         auto runC143ManagedGroupBoxProof = [&]() __attribute__((noinline)) {
         {
