@@ -337,10 +337,20 @@ static block::Status ata_pio_flush(uint8_t devIdx)
         return block::BLOCK_ERR_INVALID;
 
     ATADevice& dev = s_devices[devIdx];
+    if (!dev.flushCache && !dev.flushCacheExt)
+        return block::BLOCK_ERR_UNSUPPORTED;
+
+    if (!ata_wait_command_idle(dev.ioBase, 500000))
+        return block::BLOCK_ERR_IO;
+    arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_DRIVE_HEAD),
+               dev.isMaster ? 0xA0 : 0xB0);
+    delay_400ns(dev.ctrlBase);
     arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_COMMAND),
-               dev.lba48 ? ATA_CMD_CACHE_FLUSH_EXT : ATA_CMD_CACHE_FLUSH);
-    if (!ata_wait_bsy(dev.ioBase, 500000))
+               dev.flushCacheExt ? ATA_CMD_CACHE_FLUSH_EXT : ATA_CMD_CACHE_FLUSH);
+    if (!ata_wait_command_idle(dev.ioBase, 500000))
         return block::BLOCK_ERR_TIMEOUT;
+    const uint8_t status = arch::inb(static_cast<uint16_t>(dev.ioBase + ATA_REG_STATUS));
+    if (status & (ATA_SR_ERR | ATA_SR_DF)) return block::BLOCK_ERR_IO;
 
     return block::BLOCK_OK;
 }
@@ -393,9 +403,25 @@ static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
         dev.isMaster   = isMaster ? 1 : 0;
         dev.isAHCI     = false;
         dev.sectorSize = 512;
+        if ((id.logicalSectorInfo & 0xC000u) == 0x4000u &&
+            (id.logicalSectorInfo & 0x1000u) != 0) {
+            const uint64_t logicalBytes = static_cast<uint64_t>(id.logicalSectorWords) * 2;
+            if (logicalBytes < 512 || logicalBytes > 4096 ||
+                (logicalBytes & (logicalBytes - 1)) != 0) {
+#if defined(__GNUC__) || defined(__clang__)
+                serial::puts("[ATA] Skipping device with unsupported logical sector size\n");
+#endif
+                continue;
+            }
+            dev.sectorSize = static_cast<uint32_t>(logicalBytes);
+        }
 
-        // LBA48 support: word 83 bit 10
-        dev.lba48 = (id.commandSets83 & (1 << 10)) != 0;
+        // Word 83's support bits are meaningful only when bits 15:14 mark
+        // the word valid. Cache flush support is recorded per IDENTIFY data.
+        const bool commandSets83Valid = (id.commandSets83 & 0xC000u) == 0x4000u;
+        dev.lba48 = commandSets83Valid && (id.commandSets83 & (1 << 10)) != 0;
+        dev.flushCache = commandSets83Valid && (id.commandSets83 & (1 << 12)) != 0;
+        dev.flushCacheExt = commandSets83Valid && (id.commandSets83 & (1 << 13)) != 0;
 
         if (dev.lba48) {
             dev.totalSectors = id.lba48Sectors;
@@ -425,10 +451,17 @@ static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
         bdev.sectorSize   = dev.sectorSize;
         bdev.readFn       = ata_pio_read;
         bdev.writeFn      = ata_pio_write;
-        bdev.flushFn      = ata_pio_flush;
+        bdev.flushFn      = (dev.flushCache || dev.flushCacheExt)
+            ? ata_pio_flush : nullptr;
+        bdev.flushSemanticsKnown = bdev.flushFn != nullptr;
         memcopy(bdev.name, dev.name, 6);
+        memcopy(bdev.model, dev.model, sizeof(dev.model) - 1);
+        memcopy(bdev.serial, dev.serial, sizeof(dev.serial) - 1);
 
-        block::register_device(bdev);
+        if (block::register_device(bdev) == 0xFF) {
+            memzero(&dev, sizeof(dev));
+            continue;
+        }
         ++s_deviceCount;
     }
 

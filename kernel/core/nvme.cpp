@@ -532,8 +532,9 @@ static void scan_pci_nvme()
                 IdentifyNamespace* ns = reinterpret_cast<IdentifyNamespace*>(s_identBuf);
 
                 uint8_t flbas = ns->flbas & 0x0F;
-                uint32_t sectorSize = 1u << ns->lbaFormats[flbas].lbads;
-                if (sectorSize == 0) sectorSize = 512;
+                const uint8_t lbads = ns->lbaFormats[flbas].lbads;
+                if (lbads < 9 || lbads > 12) continue;
+                const uint32_t sectorSize = 1u << lbads;
 
                 NVMeDevice& ndev = s_devices[s_deviceCount];
                 memzero(&ndev, sizeof(ndev));
@@ -562,6 +563,12 @@ static void scan_pci_nvme()
                 bdev.sectorSize   = ndev.sectorSize;
                 bdev.readFn       = nvme_read_sectors;
                 bdev.writeFn      = nvme_write_sectors;
+                bdev.flushSemanticsKnown = false; // NVMe Flush is not implemented.
+                // Current PRP1-only path is safe only for one aligned 4 KiB page.
+                bdev.requiredBufferAlignment = 4096;
+                bdev.maxTransferBytes = 4096;
+                memcopy(bdev.model, ndev.model, sizeof(ndev.model) - 1);
+                memcopy(bdev.serial, ndev.serial, sizeof(ndev.serial) - 1);
 
                 // Name: "nvme0n1"
                 bdev.name[0] = 'n'; bdev.name[1] = 'v';
@@ -570,7 +577,10 @@ static void scan_pci_nvme()
                 bdev.name[5] = 'n'; bdev.name[6] = '1';
                 bdev.name[7] = '\0';
 
-                block::register_device(bdev);
+                if (block::register_device(bdev) == 0xFF) {
+                    memzero(&ndev, sizeof(ndev));
+                    continue;
+                }
                 ++s_deviceCount;
             }
         }

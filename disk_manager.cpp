@@ -27,6 +27,7 @@
 #include "kernel/core/include/kernel/block_device.h"
 #include "kernel/core/include/kernel/ramdisk.h"
 #include "kernel/core/include/kernel/vfs.h"
+#include "kernel/core/include/kernel/storage_manager.h"
 #endif
 
 namespace gxos {
@@ -226,28 +227,23 @@ void DiskManager::refreshDisks() {
         
         DiskEntry entry;
         entry.devIndex = i;
-        entry.bytesPerSector = dev->sectorSize == 0 ? 512 : dev->sectorSize;
+        entry.bytesPerSector = dev->sectorSize;
         entry.totalSectors = dev->totalSectors;
-        entry.haveInfo = true;
+        entry.haveInfo = kernel::storage::valid_geometry(entry.totalSectors,
+            entry.bytesPerSector);
         
-        if (dev->name[0] == 'r' && dev->name[1] == 'a' && dev->name[2] == 'm') {
+        if (dev->type == kernel::block::BDEV_RAMDISK) {
             entry.transportLabel = "RAM disk";
-            entry.isSystem = false;
         } else if (dev->type == kernel::block::BDEV_ATA_PIO) {
             entry.transportLabel = "ATA";
-            entry.isSystem = true;
         } else if (dev->type == kernel::block::BDEV_AHCI) {
             entry.transportLabel = "AHCI";
-            entry.isSystem = true;
         } else if (dev->type == kernel::block::BDEV_NVME) {
             entry.transportLabel = "NVMe";
-            entry.isSystem = true;
         } else if (dev->type == kernel::block::BDEV_USB_MASS) {
             entry.transportLabel = "USB";
-            entry.isSystem = false;
         } else {
             entry.transportLabel = "unknown";
-            entry.isSystem = false;
         }
         entry.name = "Disk " + std::to_string(i) + " (" + entry.transportLabel + ")";
         
@@ -259,7 +255,6 @@ void DiskManager::refreshDisks() {
         DiskEntry sysDisk;
         sysDisk.name = "No Disks Detected";
         sysDisk.transportLabel = "unknown";
-        sysDisk.isSystem = true;
         sysDisk.devIndex = 0;
         sysDisk.haveInfo = false;
         s_disks.push_back(sysDisk);
@@ -268,21 +263,11 @@ void DiskManager::refreshDisks() {
     refreshHostImageLibrary();
 
     DiskEntry sysDisk;
-    sysDisk.name = "Disk 0 (ATA)";
-    sysDisk.transportLabel = "ATA";
-    sysDisk.isSystem = true;
+    sysDisk.name = "Host physical disks are not enumerated";
+    sysDisk.transportLabel = "host";
     sysDisk.devIndex = 0;
-    sysDisk.haveInfo = true;
-    sysDisk.bytesPerSector = 512;
-    sysDisk.totalSectors = 209715200;
-    sysDisk.parts[0].status = 0x80;
-    sysDisk.parts[0].type = 0x07;
-    sysDisk.parts[0].lbaStart = 2048;
-    sysDisk.parts[0].lbaCount = 204800000;
-    sysDisk.parts[0].fs = "NTFS";
-    sysDisk.parts[0].mountPoint = "/";
-    sysDisk.parts[0].mounted = false;
-    sysDisk.mbrStatus = MBR_VALID;
+    sysDisk.haveInfo = false;
+    sysDisk.mbrStatus = MBR_UNREADABLE;
     s_disks.push_back(sysDisk);
 
     for (size_t i = 0; i < s_hostImages.size(); ++i) {
@@ -313,27 +298,15 @@ void DiskManager::refreshDisks() {
 
 void DiskManager::probeOnce() {
 #ifndef _WIN32
-    uint8_t buffer[512];
-    kernel::block::Status status = kernel::block::read_sectors(0, 0, 1, buffer);
-    
-    if (status == kernel::block::BLOCK_OK) {
-        if (buffer[257] == 'u' && buffer[258] == 's' && buffer[259] == 't' &&
-            buffer[260] == 'a' && buffer[261] == 'r') {
-            s_detected = "TAR (initrd)";
-        }
-        else if (buffer[510] == 0x55 && buffer[511] == 0xAA) {
-            s_detected = "FAT (boot sector)";
-        }
-        else {
-            s_detected = "Unknown";
-        }
+    kernel::storage::PartitionTableModel table;
+    if (kernel::storage::parse_partition_table(0, table)) {
+        s_detected = kernel::storage::disk_state_name(table.state);
     } else {
-        s_detected = "Unknown (read error)";
+        s_detected = "Unreadable";
     }
 #else
-    s_detected = "Unknown (Windows host)";
+    s_detected = "Host physical disks are not enumerated";
 #endif
-    
     s_status = buildStatus();
 }
 
@@ -380,13 +353,11 @@ void DiskManager::refreshHostImageLibrary() {
         s_selectedHostImageIndex = 0;
     }
 #else
-    bool hadSelection = !s_hostImages.empty();
-    for (size_t i = 0; i < s_hostImages.size(); ++i) {
-        if (s_hostImages[i].data) {
-            delete[] s_hostImages[i].data;
-        }
-    }
-    s_hostImages.clear();
+    const bool hadSelection = !s_hostImages.empty();
+    std::vector<HostImageEntry> previous;
+    previous.swap(s_hostImages);
+    std::vector<bool> retained(previous.size(), false);
+    std::vector<HostImageEntry> refreshed;
 
     kernel::vfs::DirEntry entry;
     const char* searchPaths[] = { "/disks", "/" };
@@ -427,11 +398,59 @@ void DiskManager::refreshHostImageLibrary() {
             item.data = data;
             item.sizeBytes = static_cast<uint32_t>(entry.size);
             item.ramdiskIndex = 0xFF;
-            s_hostImages.push_back(item);
+            item.ramdiskBlockIndex = 0xFF;
+
+            for (size_t oldIndex = 0; oldIndex < previous.size(); ++oldIndex) {
+                HostImageEntry& old = previous[oldIndex];
+                if (old.path != item.path || !old.attached || old.ramdiskIndex == 0xFF)
+                    continue;
+                if (!kernel::ramdisk::validate_attachment_identity(
+                        old.ramdiskIndex, old.ramdiskBlockIndex,
+                        old.ramdiskIdentity)) continue;
+
+                item.attached = true;
+                item.ramdiskIndex = old.ramdiskIndex;
+                item.ramdiskBlockIndex = old.ramdiskBlockIndex;
+                item.ramdiskIdentity = old.ramdiskIdentity;
+                item.sizeBytes = old.sizeBytes;
+                if (item.data) delete[] item.data;
+                item.data = old.data; // Retain legacy caller-owned backing, when present.
+                old.data = nullptr;
+                retained[oldIndex] = true;
+                break;
+            }
+            refreshed.push_back(item);
         }
 
         kernel::vfs::closedir(dir);
     }
+
+    // An attached RAM disk remains registered even if its source file was
+    // removed. Keep its path/index row so another rescan cannot attach a
+    // duplicate or forget the live device identity.
+    for (size_t oldIndex = 0; oldIndex < previous.size(); ++oldIndex) {
+        HostImageEntry& old = previous[oldIndex];
+        if (old.attached && old.ramdiskIndex != 0xFF) {
+            if (kernel::ramdisk::validate_attachment_identity(
+                    old.ramdiskIndex, old.ramdiskBlockIndex, old.ramdiskIdentity)) {
+                if (!retained[oldIndex]) refreshed.push_back(old);
+                old.data = nullptr;
+                retained[oldIndex] = true;
+            } else {
+                const kernel::ramdisk::RamDisk* current =
+                    kernel::ramdisk::get_disk(old.ramdiskIndex);
+                if (current && current->instanceId == old.ramdiskIdentity)
+                    kernel::ramdisk::destroy(old.ramdiskIndex);
+            }
+        }
+        }
+        if (!retained[oldIndex] && old.data) {
+            delete[] old.data;
+            old.data = nullptr;
+        }
+    }
+
+    s_hostImages.swap(refreshed);
 
     if (!hadSelection) {
         s_selectedHostImageIndex = 0;
@@ -463,12 +482,16 @@ void DiskManager::attachSelectedHostImage() {
 
     HostImageEntry& image = s_hostImages[s_selectedHostImageIndex];
     if (!image.attached) {
-        image.ramdiskIndex = kernel::ramdisk::create_readonly_at(image.data, image.sizeBytes, image.displayName.c_str());
+        image.ramdiskIndex = kernel::ramdisk::create_readonly_owned(image.data, image.sizeBytes, image.displayName.c_str());
         if (image.ramdiskIndex == 0xFF) {
             s_status = "Attach failed: no RAM disk slot or image is too small.";
             return;
         }
-        image.attached = true;
+        image.data = nullptr; // RAM disk owns the image buffer until destroy().
+        const kernel::ramdisk::RamDisk* attached = kernel::ramdisk::get_disk(image.ramdiskIndex);
+        image.ramdiskBlockIndex = attached ? attached->blockDeviceIndex : 0xFF;
+        image.ramdiskIdentity = attached ? attached->instanceId : 0;
+        image.attached = attached != nullptr;
     }
 
     refreshDisks();
@@ -544,7 +567,6 @@ bool DiskManager::buildHostDiskEntryFromImage(const HostImageEntry& image, uint8
     entry = DiskEntry();
     entry.name = "Disk " + std::to_string(devIndex) + " (USB)";
     entry.transportLabel = "USB";
-    entry.isSystem = false;
     entry.isHostImage = true;
     entry.devIndex = devIndex;
     entry.haveInfo = true;
@@ -574,7 +596,6 @@ bool DiskManager::buildHostDiskEntryFromImage(const HostImageEntry& image, uint8
             if (part.type != 0 && part.lbaCount != 0) {
                 part.fs = detectFsAtLBAFromImage(image.path, part.lbaStart);
                 part.mountPoint = suggestMountPoint(entry, part, i);
-                part.mounted = false;
             }
         }
     } else {
@@ -648,51 +669,57 @@ bool DiskManager::isImgName(const char* name) {
 }
 
 void DiskManager::readMBRForEntry(DiskEntry& entry) {
-    for (int i = 0; i < 4; i++) {
-        entry.parts[i] = PartitionEntry();
-    }
+    for (int i = 0; i < 4; ++i) entry.parts[i] = PartitionEntry();
     entry.mbrStatus = MBR_UNREADABLE;
-    
+
 #ifndef _WIN32
-    uint8_t mbr[512];
-    kernel::block::Status status = kernel::block::read_sectors(entry.devIndex, 0, 1, mbr);
-    
-    if (status == kernel::block::BLOCK_OK) {
-        if (mbr[510] == 0x55 && mbr[511] == 0xAA) {
+    kernel::storage::PartitionTableModel table;
+    if (!kernel::storage::parse_partition_table(entry.devIndex, table)) {
+        entry.mbrStatus = MBR_UNREADABLE;
+        return;
+    }
+    switch (table.state) {
+        case kernel::storage::DISK_STATE_NOT_INITIALIZED:
+            entry.mbrStatus = DISK_NOT_INITIALIZED;
+            break;
+        case kernel::storage::DISK_STATE_VALID_MBR:
             entry.mbrStatus = MBR_VALID;
-            for (int i = 0; i < 4; i++) {
-                int off = 446 + i * 16;
-                entry.parts[i].status = mbr[off + 0];
-                entry.parts[i].type = mbr[off + 4];
-                entry.parts[i].lbaStart = 
-                    static_cast<uint32_t>(mbr[off + 8]) |
-                    (static_cast<uint32_t>(mbr[off + 9]) << 8) |
-                    (static_cast<uint32_t>(mbr[off + 10]) << 16) |
-                    (static_cast<uint32_t>(mbr[off + 11]) << 24);
-                entry.parts[i].lbaCount = 
-                    static_cast<uint32_t>(mbr[off + 12]) |
-                    (static_cast<uint32_t>(mbr[off + 13]) << 8) |
-                    (static_cast<uint32_t>(mbr[off + 14]) << 16) |
-                    (static_cast<uint32_t>(mbr[off + 15]) << 24);
-                
-                if (entry.parts[i].type != 0 && entry.parts[i].lbaCount != 0) {
-                    entry.parts[i].fs = detectFsAtLBA(entry.devIndex, entry.parts[i].lbaStart);
-                    entry.parts[i].mountPoint = suggestMountPoint(entry, entry.parts[i], i);
-#ifndef _WIN32
-                    const kernel::vfs::MountPoint* mount = nullptr;
-                    if (entry.parts[i].mountPoint != "unmounted") {
-                        mount = kernel::vfs::get_mount(entry.parts[i].mountPoint.c_str());
-                    }
-                    if (mount && mount->blockDevIndex == entry.devIndex && mount->fsVolumeIndex == static_cast<uint8_t>(i + 1)) {
-                        entry.parts[i].mounted = true;
-                    } else {
-                        entry.parts[i].mounted = false;
-                    }
-#endif
-                }
-            }
-        } else {
+            break;
+        case kernel::storage::DISK_STATE_VALID_GPT:
+            entry.mbrStatus = DISK_GPT_VALID;
+            break;
+        case kernel::storage::DISK_STATE_GPT_DEGRADED:
+            entry.mbrStatus = DISK_GPT_DEGRADED;
+            break;
+        case kernel::storage::DISK_STATE_UNSUPPORTED_PARTITION_SCHEME:
+            entry.mbrStatus = DISK_UNSUPPORTED;
+            break;
+        case kernel::storage::DISK_STATE_INVALID_PARTITION_TABLE:
             entry.mbrStatus = MBR_INVALID;
+            break;
+        default:
+            entry.mbrStatus = MBR_UNREADABLE;
+            return;
+    }
+
+    for (uint16_t i = 0; i < table.partitionCount && i < 4; ++i) {
+        const kernel::storage::PartitionEntry& source = table.partitions[i];
+        if (source.startLba > UINT32_MAX || source.sectorCount > UINT32_MAX) continue;
+        PartitionEntry& part = entry.parts[i];
+        part.status = source.bootable ? 0x80 : 0;
+        part.type = source.isGpt ? 0xEE : source.mbrType;
+        part.lbaStart = static_cast<uint32_t>(source.startLba);
+        part.lbaCount = static_cast<uint32_t>(source.sectorCount);
+        if (part.lbaCount != 0) {
+            if (!source.isGpt &&
+                (source.mbrType == 0x05 || source.mbrType == 0x0F ||
+                 source.mbrType == 0x85)) {
+                part.fs = "Extended (unsupported)";
+                part.mountPoint = "No suggestion";
+            } else {
+                part.fs = detectFsAtLBA(entry.devIndex, part.lbaStart, part.lbaCount);
+                part.mountPoint = suggestMountPoint(entry, part, i);
+            }
         }
     }
 #endif
@@ -706,68 +733,13 @@ DiskManager::DiskEntry* DiskManager::getSelected() {
     return &s_disks[s_selectedDiskIndex];
 }
 
-std::string DiskManager::detectFsAtLBA(uint8_t devIndex, uint32_t lbaStart) {
-    if (lbaStart == 0) return "<empty>";
-    
-#ifndef _WIN32
-    uint8_t sec[512];
-    std::memset(sec, 0, sizeof(sec));
-    kernel::block::Status status = kernel::block::read_sectors(devIndex, lbaStart, 1, sec);
-    
-    if (status == kernel::block::BLOCK_OK) {
-        if (sec[3] == 'E' && sec[4] == 'X' && sec[5] == 'F' && sec[6] == 'A' && sec[7] == 'T') {
-            return "exFAT";
-        }
-
-        if (sec[257] == 'u' && sec[258] == 's' && sec[259] == 't' &&
-            sec[260] == 'a' && sec[261] == 'r') {
-            return "TarFS";
-        }
-        
-        if (sec[510] == 0x55 && sec[511] == 0xAA) {
-            if (sec[82] == 'F' && sec[83] == 'A' && sec[84] == 'T' && sec[85] == '3' && sec[86] == '2') {
-                return "FAT32";
-            }
-            if (sec[54] == 'F' && sec[55] == 'A' && sec[56] == 'T') {
-                return "FAT";
-            }
-            uint16_t bytesPerSec = sec[11] | (sec[12] << 8);
-            uint8_t secPerClus = sec[13];
-            if ((bytesPerSec == 512 || bytesPerSec == 1024 || 
-                 bytesPerSec == 2048 || bytesPerSec == 4096) && secPerClus != 0) {
-                return "FAT";
-            }
-        }
-        
-        uint8_t sb[1024];
-        std::memset(sb, 0, sizeof(sb));
-        status = kernel::block::read_sectors(devIndex, lbaStart + 2, 2, sb);
-        if (status == kernel::block::BLOCK_OK) {
-            uint16_t magic = sb[56] | (sb[57] << 8);
-            if (magic == 0xEF53) {
-                return "EXT2/EXT4";
-            }
-        }
-    }
-#endif
-    
-    return "Unknown";
-}
-
 std::string DiskManager::fmtSize(uint64_t bytes) {
     const uint64_t KB = 1024;
     const uint64_t MB = 1024 * 1024;
     const uint64_t GB = 1024 * 1024 * 1024;
-    
-    if (bytes >= GB) {
-        return std::to_string((bytes + GB / 10) / GB) + " GB";
-    }
-    if (bytes >= MB) {
-        return std::to_string((bytes + MB / 10) / MB) + " MB";
-    }
-    if (bytes >= KB) {
-        return std::to_string((bytes + KB / 10) / KB) + " KB";
-    }
+    if (bytes >= GB) return std::to_string(bytes / GB) + " GB";
+    if (bytes >= MB) return std::to_string(bytes / MB) + " MB";
+    if (bytes >= KB) return std::to_string(bytes / KB) + " KB";
     return std::to_string(bytes) + " B";
 }
 
@@ -779,42 +751,80 @@ std::string DiskManager::fmtHexByte(uint8_t value) {
 
 std::string DiskManager::mbrStatusText(MbrStatus status) {
     switch (status) {
-        case MBR_VALID: return "valid MBR";
-        case MBR_INVALID: return "invalid MBR";
-        default: return "unreadable";
+        case MBR_VALID: return "MBR";
+        case DISK_NOT_INITIALIZED: return "Not Initialized";
+        case DISK_GPT_VALID: return "GPT";
+        case DISK_GPT_DEGRADED: return "GPT Degraded";
+        case DISK_UNSUPPORTED: return "Unsupported Partition Scheme";
+        case MBR_INVALID: return "Invalid Partition Table";
+        default: return "Unreadable";
     }
 }
 
 std::string DiskManager::partitionStatusText(const PartitionEntry& part, int partIndex) {
-    std::string text = "Healthy";
-    if (part.status == 0x80) {
-        text += " (Active";
-        if (partIndex == 0) text += ", Boot/System";
-        text += ")";
-    } else if (partIndex == 0) {
-        text += " (System candidate)";
-    }
-    return text;
+    (void)partIndex;
+    return part.status == 0x80 ? "Active MBR flag" : "Partition entry";
 }
 
-std::string DiskManager::suggestMountPoint(const DiskEntry& disk, const PartitionEntry& part, int partIndex) {
-    if (part.lbaCount == 0 || part.fs == "Unknown" || part.fs == "<empty>") {
-        return "unmounted";
-    }
-    if (part.status == 0x80 || (disk.isSystem && partIndex == 0)) {
-        return "/";
-    }
-    if (part.type == 0x83 || part.type == 0x82) {
-        return "/users";
-    }
-    if (part.type == 0x0B || part.type == 0x0C || part.type == 0x07 || part.fs == "FAT" || part.fs == "FAT32" || part.fs == "exFAT") {
-        return "/shared";
-    }
-    return "unmounted";
+std::string DiskManager::suggestMountPoint(const DiskEntry& disk,
+                                           const PartitionEntry& part,
+                                           int partIndex) {
+    (void)disk;
+    (void)partIndex;
+    if (part.lbaCount == 0 || part.fs == "Unknown" || part.fs == "<empty>")
+        return "No suggestion";
+    if (part.type == 0x83 || part.type == 0x82) return "/users (suggested)";
+    if (part.type == 0x0B || part.type == 0x0C || part.type == 0x07 ||
+        part.fs == "FAT" || part.fs == "FAT32" || part.fs == "exFAT")
+        return "/shared (suggested)";
+    return "No suggestion";
 }
 
 bool DiskManager::hit(int mx, int my, int x, int y, int w, int h) {
     return mx >= x && mx <= x + w && my >= y && my <= y + h;
+}
+
+std::string DiskManager::detectFsAtLBA(uint8_t devIndex, uint32_t lbaStart,
+                                       uint32_t sectorCount) {
+    if (lbaStart == 0 || sectorCount == 0) return "Unknown";
+
+#ifndef _WIN32
+    kernel::storage::DeviceCapabilities caps;
+    if (!kernel::storage::query_device_capabilities(devIndex, caps) ||
+        !caps.geometryValid || !caps.capacityValid ||
+        lbaStart >= caps.totalLogicalSectors ||
+        static_cast<uint64_t>(sectorCount) > caps.totalLogicalSectors - lbaStart)
+        return "Unknown";
+    alignas(4096) uint8_t sector[kernel::storage::MAX_LOGICAL_SECTOR_SIZE];
+    if (kernel::storage::read_logical_sector(devIndex, lbaStart, sector,
+            sizeof(sector)) != kernel::block::BLOCK_OK) return "Unknown";
+
+    if (sector[3] == 'E' && sector[4] == 'X' && sector[5] == 'F' &&
+        sector[6] == 'A' && sector[7] == 'T') return "exFAT";
+    if (sector[257] == 'u' && sector[258] == 's' && sector[259] == 't' &&
+        sector[260] == 'a' && sector[261] == 'r') return "TarFS";
+    if (sector[510] == 0x55 && sector[511] == 0xAA) {
+        const uint16_t bps = static_cast<uint16_t>(sector[11]) |
+                             (static_cast<uint16_t>(sector[12]) << 8);
+        if (bps == caps.logicalSectorSize && sector[13] != 0) return "FAT";
+    }
+
+    const uint64_t superblockOffset = 1024;
+    const uint64_t sectorOffset = superblockOffset / caps.logicalSectorSize;
+    const uint32_t byteOffset = static_cast<uint32_t>(superblockOffset % caps.logicalSectorSize);
+    if (sectorOffset >= sectorCount || lbaStart > UINT64_MAX - sectorOffset)
+        return "Unknown";
+    alignas(4096) uint8_t superblock[kernel::storage::MAX_LOGICAL_SECTOR_SIZE];
+    if (kernel::storage::read_logical_sector(devIndex, lbaStart + sectorOffset,
+            superblock, sizeof(superblock)) == kernel::block::BLOCK_OK) {
+        const uint16_t magic = static_cast<uint16_t>(superblock[byteOffset + 56]) |
+            (static_cast<uint16_t>(superblock[byteOffset + 57]) << 8);
+        if (magic == 0xEF53) return "EXT2/EXT4";
+    }
+#else
+    (void)devIndex;
+#endif
+    return "Unknown";
 }
 
 void DiskManager::trySetFS_Auto() {
@@ -1126,7 +1136,7 @@ void DiskManager::drawVolumesGrid(int x, int y, int w, int h) {
     DiskEntry* sel = getSelected();
     int gridY = y + HEADER_H;
     if (sel && sel->haveInfo) {
-        uint64_t totalBytes = sel->totalSectors * (sel->bytesPerSector == 0 ? 512UL : sel->bytesPerSector);
+        uint64_t totalBytes = sel->totalSectors * sel->bytesPerSector;
         std::string info = "Disk " + std::to_string(sel->devIndex) + "  " + sel->transportLabel +
             "  Sector " + std::to_string(sel->bytesPerSector) + " B" +
             "  Sectors " + std::to_string(sel->totalSectors) +
@@ -1202,9 +1212,9 @@ void DiskManager::drawVolumesGrid(int x, int y, int w, int h) {
             drawCell(cx, rowY, cw[5], ROW_H, type.c_str());
             cx += cw[5];
             
-            uint64_t capB = static_cast<uint64_t>(p.lbaCount) * 
-                           (sel->bytesPerSector == 0 ? 512UL : sel->bytesPerSector);
-            std::string cap = fmtSize(capB);
+            std::string cap = sel->bytesPerSector == 0
+                ? "Unknown" : fmtSize(static_cast<uint64_t>(p.lbaCount) *
+                                      sel->bytesPerSector);
             drawCell(cx, rowY, cw[6], ROW_H, cap.c_str());
             cx += cw[6];
             
@@ -1253,7 +1263,7 @@ void DiskManager::drawMountsSection(int x, int y, int w, int h) {
         cw[4] += w - sum;
     }
 
-    const char* headers[] = { "Device", "Partition", "Filesystem", "Suggested mount", "Mounted" };
+    const char* headers[] = { "Device", "Partition", "Filesystem", "Suggested mount", "Mount state" };
     int cx = x;
     for (int i = 0; i < 5; i++) {
         drawHeaderCell(cx, gridY, cw[i], ROW_H, headers[i]);
@@ -1271,8 +1281,8 @@ void DiskManager::drawMountsSection(int x, int y, int w, int h) {
         cx = x;
         std::string dev = std::to_string(sel->devIndex);
         std::string part = std::to_string(i + 1);
-        std::string mounted = p.mounted ? "yes" : "no";
-        std::string mp = p.mountPoint.empty() ? "unmounted" : p.mountPoint;
+        std::string mounted = "unknown";
+        std::string mp = p.mountPoint.empty() ? "No suggestion" : p.mountPoint;
 
         drawCell(cx, rowY, cw[0], ROW_H, dev.c_str());
         cx += cw[0];
@@ -1352,7 +1362,9 @@ void DiskManager::drawPartitionMap(int x, int y, int w, int h) {
             freeMsg.data.assign(freePayload.begin(), freePayload.end());
             ipc::Bus::publish("gui.input", std::move(freeMsg), false);
             if (freeW > 70) {
-                std::string freeLbl = "Unallocated " + fmtSize(freeCount * (sel->bytesPerSector == 0 ? 512UL : sel->bytesPerSector));
+                std::string freeLbl = "Unallocated";
+                if (sel->bytesPerSector != 0)
+                    freeLbl += " " + fmtSize(freeCount * sel->bytesPerSector);
                 ipc::Message lblMsg;
                 lblMsg.type = (uint32_t)MsgType::MT_DrawText;
                 std::ostringstream lblOss;
@@ -1376,9 +1388,9 @@ void DiskManager::drawPartitionMap(int x, int y, int w, int h) {
         ipc::Bus::publish("gui.input", std::move(segMsg), false);
 
         std::string lbl = "P" + std::to_string(next + 1) + " " + p.fs + " " + fmtHexByte(p.type);
-        if (p.status == 0x80) lbl += " Active";
-        if (p.status == 0x80 || (next == 0 && sel->isSystem)) lbl += " Boot/System";
-        lbl += " " + fmtSize(p.lbaCount * (sel->bytesPerSector == 0 ? 512UL : sel->bytesPerSector));
+        if (p.status == 0x80) lbl += " Active flag";
+        if (sel->bytesPerSector != 0)
+            lbl += " " + fmtSize(static_cast<uint64_t>(p.lbaCount) * sel->bytesPerSector);
         if (segW > 40) {
             ipc::Message lblMsg;
             lblMsg.type = (uint32_t)MsgType::MT_DrawText;
@@ -1407,7 +1419,9 @@ void DiskManager::drawPartitionMap(int x, int y, int w, int h) {
         freeMsg.data.assign(freePayload.begin(), freePayload.end());
         ipc::Bus::publish("gui.input", std::move(freeMsg), false);
         if (freeW > 70) {
-            std::string freeLbl = "Unallocated " + fmtSize(freeCount * (sel->bytesPerSector == 0 ? 512UL : sel->bytesPerSector));
+            std::string freeLbl = "Unallocated";
+            if (sel->bytesPerSector != 0)
+                freeLbl += " " + fmtSize(freeCount * sel->bytesPerSector);
             ipc::Message lblMsg;
             lblMsg.type = (uint32_t)MsgType::MT_DrawText;
             std::ostringstream lblOss;

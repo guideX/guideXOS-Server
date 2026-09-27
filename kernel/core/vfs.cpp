@@ -215,11 +215,16 @@ static const char* resolve_relative_path(const char* fullPath,
 // Detect filesystem type from block device
 static FSType detect_fs_type(uint8_t blockDevIndex)
 {
-    // Buffer large enough for UFS superblock detection (magic at offset 0x55C)
+    const block::BlockDevice* device = block::get_device(blockDevIndex);
+    // Current VFS/filesystem drivers use 512-byte logical-sector arithmetic.
+    // Disk Manager's independent parser supports larger sectors safely, while
+    // VFS refuses to mount them until each filesystem has a 4Kn adapter.
+    if (!device || device->sectorSize != 512) return FS_TYPE_NONE;
+    // Four 512-byte sectors cover the bounded UFS probe below.
     uint8_t buffer[2048];
     
     // Read first sector
-    if (block::read_sectors(blockDevIndex, 0, 1, buffer) != block::BLOCK_OK) {
+    if (block::read_sectors_checked(blockDevIndex, 0, 1, buffer, sizeof(buffer)) != block::BLOCK_OK) {
 #if defined(__GNUC__) || defined(__clang__)
         serial::puts("[VFS] detect_fs: Failed to read sector 0\n");
 #endif
@@ -317,7 +322,7 @@ static FSType detect_fs_type(uint8_t blockDevIndex)
     }
     
     // Check for ext2/ext4 (superblock at offset 1024)
-    if (block::read_sectors(blockDevIndex, 2, 1, buffer) == block::BLOCK_OK) {
+    if (block::read_sectors_checked(blockDevIndex, 2, 1, buffer, sizeof(buffer)) == block::BLOCK_OK) {
         // ext2/ext4 magic number at offset 56 in superblock
         if (buffer[56] == 0x53 && buffer[57] == 0xEF) {
             // Check for ext4 features
@@ -332,7 +337,7 @@ static FSType detect_fs_type(uint8_t blockDevIndex)
     // Check for UFS (various magic locations)
     // UFS superblock is at offset 8192 (sector 16), magic at offset 0x55C within superblock
     // Need to read 4 sectors (2048 bytes) to reach the magic location
-    if (block::read_sectors(blockDevIndex, 16, 4, buffer) == block::BLOCK_OK) {
+    if (block::read_sectors_checked(blockDevIndex, 16, 4, buffer, sizeof(buffer)) == block::BLOCK_OK) {
         uint32_t magic = *reinterpret_cast<uint32_t*>(&buffer[0x55C]);
         if (magic == 0x00011954 || magic == 0x54190100) {  // UFS1/UFS2
             return FS_TYPE_UFS;
@@ -398,6 +403,8 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
     if (!path || strlen(path) == 0) {
         return 0xFF;
     }
+    const block::BlockDevice* geometry = block::get_device(blockDevIndex);
+    if (!geometry || geometry->sectorSize != 512) return 0xFF;
     
     // Check if path is already mounted
     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {

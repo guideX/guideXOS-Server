@@ -44,6 +44,9 @@ struct RamDisk {
     uint32_t sectorSize;        // Bytes per sector (usually 512)
     bool     ownsMemory;        // True if we allocated the memory
     bool     readOnly;          // True if writes are intentionally disabled
+    bool     ownsHeapMemory;     // Owned image buffer released by destroy()
+    uint8_t  blockDeviceIndex;   // Global block registry slot, or 0xFF
+    uint64_t instanceId;         // Changes when a local RAM slot is reused
     char     name[32];          // Human-readable name (e.g., "ram0")
 };
 
@@ -72,6 +75,11 @@ uint8_t create_at(void* memory, size_t sizeBytes, const char* name = nullptr);
 // Returns the RAM disk index, or 0xFF on failure.
 uint8_t create_readonly_at(const void* memory, size_t sizeBytes, const char* name = nullptr);
 
+// Attach a read-only image and transfer ownership of an array allocated with
+// new[]. Ownership transfers only when creation succeeds.
+uint8_t create_readonly_owned(uint8_t* memory, size_t sizeBytes,
+                              const char* name = nullptr);
+
 // Destroy a RAM disk and free its memory (if owned).
 void destroy(uint8_t index);
 
@@ -83,6 +91,11 @@ uint8_t disk_count();
 
 // Return RAM disk info by index (nullptr if invalid).
 const RamDisk* get_disk(uint8_t index);
+
+// Verify a saved attachment still names the same live local RAM disk, global
+// block slot, and instance after a rescan or registry change.
+bool validate_attachment_identity(uint8_t index, uint8_t blockDeviceIndex,
+                                  uint64_t instanceId);
 
 // Return the raw data pointer (for direct memory access).
 // Use with caution — bypasses block device layer.

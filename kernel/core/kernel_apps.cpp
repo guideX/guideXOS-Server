@@ -6063,6 +6063,41 @@ const char* FileExplorerApp::fileType(const Entry& entry) const {
 // DiskManagerApp Implementation
 // ============================================================
 
+namespace {
+static kernel::storage::PartitionTableModel s_diskManagerTableScratch;
+
+static void disk_manager_u64(uint64_t value, char* out, size_t capacity)
+{
+    if (capacity == 0) return;
+    char reverse[24];
+    size_t digits = 0;
+    do {
+        reverse[digits++] = static_cast<char>('0' + (value % 10));
+        value /= 10;
+    } while (value != 0 && digits < sizeof(reverse));
+    size_t length = 0;
+    while (digits && length + 1 < capacity) out[length++] = reverse[--digits];
+    out[length] = '\0';
+}
+
+static uint32_t disk_manager_scale(uint64_t value, uint64_t total, uint32_t width)
+{
+    if (total == 0 || width == 0 || value == 0) return 0;
+    if (value >= total) return width;
+    uint64_t remainder = 0;
+    uint32_t pixels = 0;
+    for (uint32_t i = 0; i < width; ++i) {
+        if (remainder >= total - value) {
+            remainder -= total - value;
+            ++pixels;
+        } else {
+            remainder += value;
+        }
+    }
+    return pixels;
+}
+}
+
 DiskManagerApp::DiskManagerApp()
     : m_diskCount(0), m_selectedDisk(0), m_refreshBtnId(-1) {
     strcopy(m_name, "DiskManager", app::MAX_APP_NAME);
@@ -6091,9 +6126,7 @@ bool DiskManagerApp::init() {
     }
 
     m_refreshBtnId = addButton(10, m_window->h - 44, 90, 28, "Refresh");
-
     scanDisks();
-
     m_state = app::AppState::Running;
     serial::puts("[DISKMANAGER] Init complete\n");
     return true;
@@ -6104,269 +6137,330 @@ void DiskManagerApp::shutdown() {
 }
 
 void DiskManagerApp::scanDisks() {
-    m_diskCount = 0;
-    uint8_t total = kernel::block::device_count();
-    serial::puts("[DISKMANAGER] Scanning block devices, count=");
-    serial::put_hex8(total);
-    serial::putc('\n');
+    storage::TargetIdentity previousIdentity;
+    bool havePreviousIdentity = m_diskCount > 0 && m_selectedDisk >= 0 &&
+                               m_selectedDisk < m_diskCount &&
+                               m_disks[m_selectedDisk].haveInfo;
+    if (havePreviousIdentity) previousIdentity = m_disks[m_selectedDisk].identity;
 
-    for (uint8_t i = 0; i < total && m_diskCount < MAX_DISKS; i++) {
+    m_diskCount = 0;
+    for (uint8_t i = 0; i < kernel::block::MAX_BLOCK_DEVICES && m_diskCount < MAX_DISKS; ++i) {
         const kernel::block::BlockDevice* dev = kernel::block::get_device(i);
-        if (!dev || !dev->active) continue;
+        if (!dev) continue;
 
         DiskEntry& e = m_disks[m_diskCount];
+        memset(&e, 0, sizeof(e));
         e.devIndex = i;
         e.totalSectors = dev->totalSectors;
         e.sectorSize = dev->sectorSize;
         e.haveInfo = true;
-        e.partCount = 0;
+        e.readable = dev->readFn != nullptr;
+        e.writable = dev->writeFn != nullptr;
+        e.flushSupported = dev->flushFn != nullptr;
+        e.persistence = dev->type == kernel::block::BDEV_RAMDISK
+            ? storage::PERSISTENCE_VOLATILE_MEMORY
+            : (dev->writeCompletionDurable
+                ? storage::PERSISTENCE_SYNCHRONOUS_DURABLE
+                : (dev->flushFn && dev->flushSemanticsKnown
+                    ? storage::PERSISTENCE_FLUSH_REQUIRED
+                    : storage::PERSISTENCE_UNKNOWN));
+        storage::capture_target_identity(i, e.identity);
 
-        // Build display name from device name + type
-        const char* typeStr = "Disk";
-        if (dev->type == kernel::block::BDEV_ATA_PIO || dev->type == kernel::block::BDEV_AHCI)
-            typeStr = "System";
-        else if (dev->type == kernel::block::BDEV_NVME)
-            typeStr = "NVMe";
-        else if (dev->type == kernel::block::BDEV_USB_MASS)
-            typeStr = "USB";
+        const char* typeStr = "Block";
+        switch (dev->type) {
+            case kernel::block::BDEV_ATA_PIO: typeStr = "ATA PIO"; break;
+            case kernel::block::BDEV_AHCI: typeStr = "AHCI"; break;
+            case kernel::block::BDEV_NVME: typeStr = "NVMe"; break;
+            case kernel::block::BDEV_USB_MASS: typeStr = "USB"; break;
+            case kernel::block::BDEV_RAMDISK: typeStr = "RAM"; break;
+            default: break;
+        }
+        int nameIndex = 0;
+        for (int j = 0; dev->name[j] && nameIndex < 24; ++j)
+            e.name[nameIndex++] = dev->name[j];
+        e.name[nameIndex++] = ' ';
+        e.name[nameIndex++] = '(';
+        for (int j = 0; typeStr[j] && nameIndex < 37; ++j)
+            e.name[nameIndex++] = typeStr[j];
+        e.name[nameIndex++] = ')';
+        e.name[nameIndex] = '\0';
 
-        // name = "<dev->name> (<typeStr>)"
-        int ni = 0;
-        for (int j = 0; dev->name[j] && ni < 30; j++) e.name[ni++] = dev->name[j];
-        e.name[ni++] = ' '; e.name[ni++] = '(';
-        for (int j = 0; typeStr[j] && ni < 37; j++) e.name[ni++] = typeStr[j];
-        e.name[ni++] = ')'; e.name[ni] = '\0';
-
-        readMBR(e);
-        m_diskCount++;
+        readPartitionTable(e);
+        ++m_diskCount;
     }
 
     if (m_diskCount == 0) {
-        serial::puts("[DISKMANAGER] No block devices found\n");
         DiskEntry& e = m_disks[0];
-        strcopy(e.name, "No disks detected", 40);
-        e.devIndex = 0;
-        e.haveInfo = false;
-        e.totalSectors = 0;
-        e.sectorSize = 512;
-        e.partCount = 0;
+        memset(&e, 0, sizeof(e));
+        strcopy(e.name, "No disks detected", sizeof(e.name));
+        e.state = storage::DISK_STATE_UNREADABLE;
         m_diskCount = 1;
+        m_selectedDisk = 0;
+        return;
     }
 
-    if (m_selectedDisk >= m_diskCount) m_selectedDisk = 0;
+    m_selectedDisk = 0;
+    if (havePreviousIdentity) {
+        for (int i = 0; i < m_diskCount; ++i) {
+            if (storage::target_identities_equal(previousIdentity, m_disks[i].identity)) {
+                m_selectedDisk = i;
+                break;
+            }
+        }
+    }
 }
 
-void DiskManagerApp::readMBR(DiskEntry& disk) {
+void DiskManagerApp::readPartitionTable(DiskEntry& disk) {
     disk.partCount = 0;
-    uint8_t mbr[512];
-    kernel::block::Status st = kernel::block::read_sectors(disk.devIndex, 0, 1, mbr);
-    if (st != kernel::block::BLOCK_OK) return;
-    if (mbr[510] != 0x55 || mbr[511] != 0xAA) return;
+    disk.totalPartitionCount = 0;
+    memset(disk.parts, 0, sizeof(disk.parts));
+    disk.state = storage::DISK_STATE_UNREADABLE;
+    if (!storage::parse_partition_table(disk.devIndex, s_diskManagerTableScratch)) return;
 
-    for (int i = 0; i < MAX_PARTS; i++) {
-        int off = 446 + i * 16;
-        uint8_t type = mbr[off + 4];
-        if (type == 0) continue;
-
-        PartEntry& p = disk.parts[disk.partCount];
-        p.type     = type;
-        p.bootable = (mbr[off + 0] == 0x80);
-        p.lbaStart = (uint32_t)mbr[off + 8]  | ((uint32_t)mbr[off + 9]  << 8) |
-                     ((uint32_t)mbr[off + 10] << 16) | ((uint32_t)mbr[off + 11] << 24);
-        p.lbaCount = (uint32_t)mbr[off + 12] | ((uint32_t)mbr[off + 13] << 8) |
-                     ((uint32_t)mbr[off + 14] << 16) | ((uint32_t)mbr[off + 15] << 24);
-        const char* fs = detectFs(disk.devIndex, p.lbaStart);
-        strcopy(p.fsLabel, fs, (int)sizeof(p.fsLabel));
-        disk.partCount++;
+    const storage::PartitionTableModel& table = s_diskManagerTableScratch;
+    disk.state = table.state;
+    disk.totalPartitionCount = table.partitionCount;
+    const uint16_t count = table.partitionCount < MAX_PARTS
+        ? table.partitionCount : MAX_PARTS;
+    for (uint16_t i = 0; i < count; ++i) {
+        const storage::PartitionEntry& source = table.partitions[i];
+        PartEntry& target = disk.parts[disk.partCount++];
+        target.startLba = source.startLba;
+        target.sectorCount = source.sectorCount;
+        const bool unsupportedExtended = !source.isGpt &&
+            (source.mbrType == 0x05 || source.mbrType == 0x0F ||
+             source.mbrType == 0x85);
+        if (unsupportedExtended) {
+            strcopy(target.typeLabel, "Ext unsupported", sizeof(target.typeLabel));
+            strcopy(target.name, "", sizeof(target.name));
+            strcopy(target.fsLabel, "Not probed", sizeof(target.fsLabel));
+            continue;
+        }
+        strcopy(target.typeLabel, source.isGpt ? "GPT" : "MBR",
+                sizeof(target.typeLabel));
+        strcopy(target.name, source.name, sizeof(target.name));
+        strcopy(target.fsLabel,
+                detectFs(disk.devIndex, source.startLba, source.sectorCount),
+                sizeof(target.fsLabel));
+        if (!source.isGpt) {
+            const char hex[] = "0123456789ABCDEF";
+            const size_t length = strlen(target.typeLabel);
+            if (length + 5 < sizeof(target.typeLabel)) {
+                target.typeLabel[length] = ' ';
+                target.typeLabel[length + 1] = '0';
+                target.typeLabel[length + 2] = 'x';
+                target.typeLabel[length + 3] = hex[(source.mbrType >> 4) & 0xF];
+                target.typeLabel[length + 4] = hex[source.mbrType & 0xF];
+                target.typeLabel[length + 5] = '\0';
+            }
+        }
     }
 }
 
-const char* DiskManagerApp::detectFs(uint8_t devIndex, uint32_t lbaStart) {
-    if (lbaStart == 0) return "Unknown";
-    uint8_t sec[512];
-    kernel::block::Status st = kernel::block::read_sectors(devIndex, lbaStart, 1, sec);
-    if (st != kernel::block::BLOCK_OK) return "Unknown";
+const char* DiskManagerApp::detectFs(uint8_t devIndex, uint64_t lbaStart,
+                                     uint64_t sectorCount) {
+    if (sectorCount == 0) return "Unknown";
+    storage::DeviceCapabilities caps;
+    if (!storage::query_device_capabilities(devIndex, caps) || !caps.geometryValid)
+        return "Unknown";
 
-    // TarFS magic at offset 257
-    if (sec[257] == 'u' && sec[258] == 's' && sec[259] == 't' &&
-        sec[260] == 'a' && sec[261] == 'r') return "TarFS";
+    alignas(4096) uint8_t sector[storage::MAX_LOGICAL_SECTOR_SIZE];
+    if (storage::read_logical_sector(devIndex, lbaStart, sector, sizeof(sector)) !=
+        kernel::block::BLOCK_OK) return "Unknown";
 
-    // FAT: boot signature + sane BPB
-    if (sec[510] == 0x55 && sec[511] == 0xAA) {
-        uint16_t bps = (uint16_t)sec[11] | ((uint16_t)sec[12] << 8);
-        if ((bps == 512 || bps == 1024 || bps == 2048 || bps == 4096) && sec[13] != 0)
-            return "FAT";
+    if (sector[257] == 'u' && sector[258] == 's' && sector[259] == 't' &&
+        sector[260] == 'a' && sector[261] == 'r') return "TarFS";
+
+    if (sector[510] == 0x55 && sector[511] == 0xAA) {
+        const uint16_t bps = static_cast<uint16_t>(sector[11]) |
+                             (static_cast<uint16_t>(sector[12]) << 8);
+        if (bps == caps.logicalSectorSize && sector[13] != 0) return "FAT";
     }
 
-    // EXT2/3/4: magic at superblock offset 0x438
-    uint8_t sb[512];
-    kernel::block::Status st2 = kernel::block::read_sectors(devIndex, lbaStart + 2, 1, sb);
-    if (st2 == kernel::block::BLOCK_OK) {
-        uint16_t ext_magic = (uint16_t)sb[0x38] | ((uint16_t)sb[0x39] << 8);
-        if (ext_magic == 0xEF53) return "EXT2";
+    const uint64_t superblockSectorOffset = 1024 / caps.logicalSectorSize;
+    const uint32_t superblockByteOffset = 1024 % caps.logicalSectorSize;
+    if (superblockSectorOffset >= sectorCount ||
+        lbaStart > UINT64_MAX - superblockSectorOffset) return "Unknown";
+    if (superblockSectorOffset == 0) {
+        const uint16_t magic = static_cast<uint16_t>(sector[superblockByteOffset + 56]) |
+            (static_cast<uint16_t>(sector[superblockByteOffset + 57]) << 8);
+        if (magic == 0xEF53) return "EXT";
+    } else {
+        alignas(4096) uint8_t superblock[storage::MAX_LOGICAL_SECTOR_SIZE];
+        if (storage::read_logical_sector(devIndex, lbaStart + superblockSectorOffset,
+                                         superblock, sizeof(superblock)) ==
+            kernel::block::BLOCK_OK) {
+            const uint16_t magic = static_cast<uint16_t>(superblock[56]) |
+                (static_cast<uint16_t>(superblock[57]) << 8);
+            if (magic == 0xEF53) return "EXT";
+        }
     }
-
     return "Unknown";
 }
 
 void DiskManagerApp::formatSize(uint64_t bytes, char* out, int outSize) const {
-    // Simple size formatter: TB/GB/MB/KB/B
+    if (!out || outSize <= 0) return;
     const char* units[] = {"B", "KB", "MB", "GB", "TB"};
-    int u = 0;
-    uint64_t val = bytes;
-    while (val >= 1024 && u < 4) { val >>= 10; u++; }
-
-    // Convert to decimal string (no printf available)
-    char tmp[24];
-    int ti = 0;
-    if (val == 0) {
-        tmp[ti++] = '0';
-    } else {
-        uint64_t v = val;
-        char rev[20]; int ri = 0;
-        while (v > 0) { rev[ri++] = '0' + (int)(v % 10); v /= 10; }
-        for (int j = ri - 1; j >= 0; j--) tmp[ti++] = rev[j];
-    }
-    tmp[ti++] = ' ';
-    for (int j = 0; units[u][j] && ti < 22; j++) tmp[ti++] = units[u][j];
-    tmp[ti] = '\0';
-
-    // Copy to out
-    int i = 0;
-    while (tmp[i] && i < outSize - 1) { out[i] = tmp[i]; i++; }
-    out[i] = '\0';
+    int unit = 0;
+    uint64_t value = bytes;
+    while (value >= 1024 && unit < 4) { value >>= 10; ++unit; }
+    char digits[24];
+    disk_manager_u64(value, digits, sizeof(digits));
+    int position = 0;
+    for (int i = 0; digits[i] && position + 1 < outSize; ++i) out[position++] = digits[i];
+    if (position + 1 < outSize) out[position++] = ' ';
+    for (int i = 0; units[unit][i] && position + 1 < outSize; ++i)
+        out[position++] = units[unit][i];
+    out[position] = '\0';
 }
 
 void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
-    static const uint32_t kHeader   = 0xFF2C3E50;
-    static const uint32_t kBg       = 0xFF1E2430;
-    static const uint32_t kPanel    = 0xFF252D3B;
-    static const uint32_t kRowSel   = 0xFF2E4A6E;
-    static const uint32_t kRowAlt   = 0xFF222A36;
-    static const uint32_t kText     = 0xFFDCE3F0;
-    static const uint32_t kSubText  = 0xFF8A9AB0;
-    static const uint32_t kAccent   = 0xFF4A9ECA;
-    static const uint32_t kPartBar  = 0xFF3A7EAA;
+    static const uint32_t kHeader = 0xFF2C3E50;
+    static const uint32_t kBg = 0xFF1E2430;
+    static const uint32_t kPanel = 0xFF252D3B;
+    static const uint32_t kRowSel = 0xFF2E4A6E;
+    static const uint32_t kRowAlt = 0xFF222A36;
+    static const uint32_t kText = 0xFFDCE3F0;
+    static const uint32_t kSubText = 0xFF8A9AB0;
+    static const uint32_t kPartBar = 0xFF3A7EAA;
     static const uint32_t kPartBarB = 0xFF2A5E80;
-    (void)kAccent; (void)kPartBarB;
 
-    // Background
     framebuffer::fill_rect(x, y, w, h, kBg);
-
-    // Title bar stripe
     framebuffer::fill_rect(x, y, w, 22, kHeader);
-    appDrawText(x + 10, y + 7, "Disk Manager  [baremetal mode]", kText);
+    appDrawText(x + 10, y + 7, "Disk Manager  [read-only]", kText);
 
-    // Left pane: disk list
     const uint32_t leftW = 200;
     framebuffer::fill_rect(x, y + 22, leftW, h - 22, kPanel);
     appDrawText(x + 8, y + 28, "Disks", kSubText);
-
-    uint32_t rowH = 28;
-    for (int i = 0; i < m_diskCount; i++) {
-        uint32_t ry = y + 46 + (uint32_t)i * rowH;
-        uint32_t rowColor = (i == m_selectedDisk) ? kRowSel : ((i % 2 == 0) ? kPanel : kRowAlt);
-        framebuffer::fill_rect(x + 2, ry, leftW - 4, rowH - 2, rowColor);
-        appDrawText(x + 8, ry + (rowH - kGlyphH) / 2, m_disks[i].name, kText);
+    const uint32_t rowH = 28;
+    for (int i = 0; i < m_diskCount; ++i) {
+        const uint32_t rowY = y + 46 + static_cast<uint32_t>(i) * rowH;
+        const uint32_t rowColor = i == m_selectedDisk ? kRowSel :
+            ((i % 2 == 0) ? kPanel : kRowAlt);
+        framebuffer::fill_rect(x + 2, rowY, leftW - 4, rowH - 2, rowColor);
+        appDrawText(x + 8, rowY + (rowH - kGlyphH) / 2, m_disks[i].name, kText);
     }
 
-    // Right pane: detail
-    uint32_t rx = x + leftW + 4;
-    uint32_t rw = (w > leftW + 8) ? (w - leftW - 8) : 0;
+    const uint32_t rx = x + leftW + 4;
+    const uint32_t rw = w > leftW + 8 ? w - leftW - 8 : 0;
     framebuffer::fill_rect(rx, y + 22, rw, h - 22, kBg);
+    if (m_selectedDisk < 0 || m_selectedDisk >= m_diskCount) return;
 
-    if (m_selectedDisk >= 0 && m_selectedDisk < m_diskCount) {
-        const DiskEntry& d = m_disks[m_selectedDisk];
-        uint32_t dy = y + 28;
+    const DiskEntry& disk = m_disks[m_selectedDisk];
+    uint32_t drawY = y + 28;
+    appDrawText(rx + 4, drawY, disk.name, kText);
+    drawY += kGlyphH + 4;
 
-        // Disk header
-        appDrawText(rx + 4, dy, d.name, kText);
-        dy += kGlyphH + 6;
+    if (!disk.haveInfo) {
+        appDrawText(rx + 4, drawY, "No registered block device", kSubText);
+        return;
+    }
 
-        if (d.haveInfo) {
-            char szBuf[32];
-            formatSize(d.totalSectors * (uint64_t)d.sectorSize, szBuf, sizeof(szBuf));
-            appDrawText(rx + 4, dy, szBuf, kSubText);
-            dy += kGlyphH + 10;
+    uint64_t capacityBytes = 0;
+    if (storage::valid_geometry(disk.totalSectors, disk.sectorSize, &capacityBytes)) {
+        char sizeText[32];
+        formatSize(capacityBytes, sizeText, sizeof(sizeText));
+        appDrawText(rx + 4, drawY, sizeText, kSubText);
+    } else {
+        appDrawText(rx + 4, drawY, "Capacity or sector geometry unknown", kSubText);
+    }
+    drawY += kGlyphH + 3;
 
-            // Partition table header
-            appDrawText(rx + 4, dy, "# ", kSubText);
-            appDrawText(rx + 20, dy, "Type  LBA Start    Sectors     FS       Boot", kSubText);
-            dy += kGlyphH + 4;
-            framebuffer::fill_rect(rx + 4, dy, rw - 8, 1, kPanel);
-            dy += 3;
+    char capabilityText[128];
+    strcopy(capabilityText, "Sector: ", sizeof(capabilityText));
+    char sectorDigits[16];
+    disk_manager_u64(disk.sectorSize, sectorDigits, sizeof(sectorDigits));
+    strappend(capabilityText, sectorDigits, sizeof(capabilityText));
+    strappend(capabilityText, " bytes | ", sizeof(capabilityText));
+    strappend(capabilityText, disk.writable ? "Writable" : "Read-only", sizeof(capabilityText));
+    strappend(capabilityText, " | ", sizeof(capabilityText));
+    if (disk.persistence == storage::PERSISTENCE_FLUSH_REQUIRED && disk.flushSupported)
+        strappend(capabilityText, "Flush supported", sizeof(capabilityText));
+    else if (disk.persistence == storage::PERSISTENCE_SYNCHRONOUS_DURABLE)
+        strappend(capabilityText, "Synchronous durable", sizeof(capabilityText));
+    else if (disk.persistence == storage::PERSISTENCE_VOLATILE_MEMORY)
+        strappend(capabilityText, "Volatile memory", sizeof(capabilityText));
+    else
+        strappend(capabilityText, "Durability unknown", sizeof(capabilityText));
+    appDrawText(rx + 4, drawY, capabilityText, kSubText);
+    drawY += kGlyphH + 4;
 
-            if (d.partCount == 0) {
-                appDrawText(rx + 4, dy, "No MBR partitions found", kSubText);
-                dy += kGlyphH + 6;
+    appDrawText(rx + 4, drawY, storage::disk_state_name(disk.state), kText);
+    drawY += kGlyphH + 6;
+
+    appDrawText(rx + 4, drawY, "#  Type          Name                 Start LBA       Sectors       FS", kSubText);
+    drawY += kGlyphH + 4;
+    framebuffer::fill_rect(rx + 4, drawY, rw > 8 ? rw - 8 : 0, 1, kPanel);
+    drawY += 4;
+
+    if (disk.partCount == 0) {
+        const char* emptyText = disk.state == storage::DISK_STATE_NOT_INITIALIZED
+            ? "No table found; bounded raw probe is clear"
+            : ((disk.state == storage::DISK_STATE_VALID_MBR ||
+                disk.state == storage::DISK_STATE_VALID_GPT)
+                ? "Validated partition table has no used entries"
+                : "No validated partitions available");
+        appDrawText(rx + 4, drawY, emptyText, kSubText);
+        drawY += kGlyphH + 4;
+    }
+
+    const uint32_t rowBottom = y + h - 58;
+    const uint32_t partRowHeight = kGlyphH + 4;
+    int visibleRows = 0;
+    for (int pi = 0; pi < disk.partCount; ++pi) {
+        const uint32_t rowY = drawY + static_cast<uint32_t>(visibleRows) * partRowHeight;
+        if (rowY + kGlyphH > rowBottom) break;
+        const PartEntry& part = disk.parts[pi];
+        char number[6];
+        disk_manager_u64(static_cast<uint64_t>(pi + 1), number, sizeof(number));
+        char start[24];
+        char count[24];
+        disk_manager_u64(part.startLba, start, sizeof(start));
+        disk_manager_u64(part.sectorCount, count, sizeof(count));
+        framebuffer::fill_rect(rx + 4, rowY, 4, kGlyphH,
+                               (pi % 2 == 0) ? kPartBar : kPartBarB);
+        appDrawText(rx + 10, rowY, number, kText);
+        appDrawText(rx + 30, rowY, part.typeLabel, kSubText);
+        appDrawText(rx + 105, rowY, part.name, kText);
+        appDrawText(rx + 260, rowY, start, kSubText);
+        appDrawText(rx + 365, rowY, count, kSubText);
+        appDrawText(rx + 465, rowY, part.fsLabel, kSubText);
+        ++visibleRows;
+    }
+    const uint16_t displayed = disk.totalPartitionCount < disk.partCount
+        ? disk.totalPartitionCount : static_cast<uint16_t>(disk.partCount);
+    if (disk.totalPartitionCount > displayed || visibleRows < disk.partCount) {
+        char more[64];
+        strcopy(more, "Showing a bounded subset of ", sizeof(more));
+        char total[16];
+        disk_manager_u64(disk.totalPartitionCount, total, sizeof(total));
+        strappend(more, total, sizeof(more));
+        strappend(more, " validated partitions", sizeof(more));
+        appDrawText(rx + 4, rowBottom + 2, more, kSubText);
+    }
+
+    if (disk.partCount > 0 && disk.totalSectors > 0 && rw > 16) {
+        const uint32_t barY = y + h - 38;
+        const uint32_t barX = rx + 4;
+        const uint32_t barW = rw - 16;
+        framebuffer::fill_rect(barX, barY, barW, 14, kPanel);
+        if (disk.state == storage::DISK_STATE_VALID_MBR ||
+            disk.state == storage::DISK_STATE_VALID_GPT ||
+            disk.state == storage::DISK_STATE_GPT_DEGRADED) {
+            for (int pi = 0; pi < disk.partCount; ++pi) {
+                const PartEntry& part = disk.parts[pi];
+                const uint32_t offset = disk_manager_scale(part.startLba,
+                    disk.totalSectors, barW);
+                uint32_t partWidth = disk_manager_scale(part.sectorCount,
+                    disk.totalSectors, barW);
+                if (offset >= barW) continue;
+                if (partWidth == 0) partWidth = 1;
+                if (partWidth > barW - offset) partWidth = barW - offset;
+                framebuffer::fill_rect(barX + offset, barY, partWidth, 14,
+                    (pi % 2 == 0) ? kPartBar : kPartBarB);
             }
-
-            for (int pi = 0; pi < d.partCount; pi++) {
-                const PartEntry& p = d.parts[pi];
-                uint32_t pry = dy + (uint32_t)pi * (kGlyphH + 6);
-
-                // Small partition color bar
-                framebuffer::fill_rect(rx + 4, pry, 4, kGlyphH, kPartBar);
-
-                // Row text (manual number char)
-                char numBuf[4] = {'0' + (char)(pi + 1), '\0', '\0', '\0'};
-                appDrawText(rx + 10, pry, numBuf, kText);
-
-                // Type hex
-                char typeBuf[8];
-                typeBuf[0] = '0'; typeBuf[1] = 'x';
-                static const char hex[] = "0123456789ABCDEF";
-                typeBuf[2] = hex[(p.type >> 4) & 0xF];
-                typeBuf[3] = hex[p.type & 0xF];
-                typeBuf[4] = '\0';
-                appDrawText(rx + 22, pry, typeBuf, kSubText);
-
-                // LBA start (decimal, hand-rolled)
-                char lbaBuf[16]; int li = 0;
-                if (p.lbaStart == 0) { lbaBuf[li++] = '0'; }
-                else { uint32_t v = p.lbaStart; char rev[12]; int ri = 0;
-                       while (v > 0) { rev[ri++] = '0' + (int)(v % 10); v /= 10; }
-                       for (int j = ri - 1; j >= 0; j--) lbaBuf[li++] = rev[j]; }
-                lbaBuf[li] = '\0';
-                appDrawText(rx + 60, pry, lbaBuf, kSubText);
-
-                // Sector count
-                char scBuf[16]; int si = 0;
-                if (p.lbaCount == 0) { scBuf[si++] = '0'; }
-                else { uint32_t v = p.lbaCount; char rev[12]; int ri = 0;
-                       while (v > 0) { rev[ri++] = '0' + (int)(v % 10); v /= 10; }
-                       for (int j = ri - 1; j >= 0; j--) scBuf[si++] = rev[j]; }
-                scBuf[si] = '\0';
-                appDrawText(rx + 120, pry, scBuf, kSubText);
-
-                // FS label
-                appDrawText(rx + 190, pry, p.fsLabel, kText);
-
-                // Boot flag
-                if (p.bootable) appDrawText(rx + 240, pry, "*", kAccent);
-            }
-
-            // Partition bar at bottom
-            if (d.partCount > 0 && d.totalSectors > 0) {
-                uint32_t barY = y + h - 60;
-                uint32_t barX = rx + 4;
-                uint32_t barW = (rw > 16) ? rw - 16 : 0;
-                framebuffer::fill_rect(barX, barY, barW, 18, kPanel);
-
-                for (int pi = 0; pi < d.partCount; pi++) {
-                    const PartEntry& p = d.parts[pi];
-                    uint32_t pxOff = (uint32_t)((uint64_t)p.lbaStart * barW / d.totalSectors);
-                    uint32_t pxW   = (uint32_t)((uint64_t)p.lbaCount * barW / d.totalSectors);
-                    if (pxW < 2) pxW = 2;
-                    uint32_t col = (pi % 2 == 0) ? kPartBar : kPartBarB;
-                    framebuffer::fill_rect(barX + pxOff, barY, pxW, 18, col);
-                }
-
-                appDrawText(rx + 4, barY + 22, "Partition map", kSubText);
-            }
-        } else {
-            appDrawText(rx + 4, dy, "No disk info available", kSubText);
         }
+        appDrawText(rx + 4, barY + 16, "Validated partition map", kSubText);
     }
 }
 
@@ -6375,11 +6469,11 @@ void DiskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {
     const uint32_t leftW = 200;
     const uint32_t listTop = 46;
     const uint32_t rowH = 28;
-
-    if ((uint32_t)localX < leftW && (uint32_t)localY >= listTop) {
-        int idx = ((uint32_t)localY - listTop) / rowH;
-        if (idx >= 0 && idx < m_diskCount) {
-            m_selectedDisk = idx;
+    if (static_cast<uint32_t>(localX) < leftW &&
+        static_cast<uint32_t>(localY) >= listTop) {
+        const int index = static_cast<int>((static_cast<uint32_t>(localY) - listTop) / rowH);
+        if (index >= 0 && index < m_diskCount) {
+            m_selectedDisk = index;
             invalidate();
         }
     }

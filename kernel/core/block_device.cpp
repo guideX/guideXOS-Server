@@ -18,6 +18,7 @@ namespace block {
 
 static BlockDevice s_devices[MAX_BLOCK_DEVICES];
 static uint8_t     s_deviceCount = 0;
+static uint64_t    s_registryGeneration = 0;
 
 // ================================================================
 // Helpers
@@ -36,6 +37,27 @@ static void memcopy(void* dst, const void* src, uint32_t len)
     for (uint32_t i = 0; i < len; ++i) d[i] = s[i];
 }
 
+static void bump_generation()
+{
+    ++s_registryGeneration;
+    if (s_registryGeneration == 0) ++s_registryGeneration;
+}
+
+static bool valid_sector_size(uint32_t size)
+{
+    return size >= 512 && size <= 4096 && (size & (size - 1)) == 0;
+}
+
+static bool valid_transfer_buffer(const BlockDevice& dev, uint32_t count,
+                                 const void* buffer)
+{
+    if (!buffer || count == 0 || !valid_sector_size(dev.sectorSize)) return false;
+    const uint64_t bytes = static_cast<uint64_t>(count) * dev.sectorSize;
+    if (dev.maxTransferBytes != 0 && bytes > dev.maxTransferBytes) return false;
+    return dev.requiredBufferAlignment <= 1 ||
+           (reinterpret_cast<uintptr_t>(buffer) % dev.requiredBufferAlignment) == 0;
+}
+
 // ================================================================
 // Public API
 // ================================================================
@@ -44,6 +66,7 @@ void init()
 {
     memzero(s_devices, sizeof(s_devices));
     s_deviceCount = 0;
+    bump_generation();
 }
 
 uint8_t register_device(const BlockDevice& dev)
@@ -53,6 +76,7 @@ uint8_t register_device(const BlockDevice& dev)
             memcopy(&s_devices[i], &dev, sizeof(BlockDevice));
             s_devices[i].active = true;
             ++s_deviceCount;
+            bump_generation();
             return i;
         }
     }
@@ -63,8 +87,9 @@ void unregister_device(uint8_t index)
 {
     if (index >= MAX_BLOCK_DEVICES) return;
     if (!s_devices[index].active) return;
-    s_devices[index].active = false;
+    memzero(&s_devices[index], sizeof(BlockDevice));
     if (s_deviceCount > 0) --s_deviceCount;
+    bump_generation();
 }
 
 uint8_t device_count()
@@ -79,6 +104,11 @@ const BlockDevice* get_device(uint8_t index)
     return &s_devices[index];
 }
 
+uint64_t registry_generation()
+{
+    return s_registryGeneration;
+}
+
 Status read_sectors(uint8_t devIndex,
                     uint64_t lba,
                     uint32_t count,
@@ -87,7 +117,9 @@ Status read_sectors(uint8_t devIndex,
     if (devIndex >= MAX_BLOCK_DEVICES) return BLOCK_ERR_INVALID;
     if (!s_devices[devIndex].active)   return BLOCK_ERR_INVALID;
     if (!s_devices[devIndex].readFn)   return BLOCK_ERR_UNSUPPORTED;
-    if (!buffer || count == 0)         return BLOCK_ERR_INVALID;
+    if (!valid_sector_size(s_devices[devIndex].sectorSize)) return BLOCK_ERR_INVALID;
+    if (!valid_transfer_buffer(s_devices[devIndex], count, buffer))
+        return BLOCK_ERR_INVALID;
     if (lba > s_devices[devIndex].totalSectors ||
         static_cast<uint64_t>(count) > s_devices[devIndex].totalSectors - lba) {
         return BLOCK_ERR_INVALID;
@@ -95,6 +127,17 @@ Status read_sectors(uint8_t devIndex,
 
     return s_devices[devIndex].readFn(
         s_devices[devIndex].driverIndex, lba, count, buffer);
+}
+
+Status read_sectors_checked(uint8_t devIndex, uint64_t lba, uint32_t count,
+                            void* buffer, size_t bufferBytes)
+{
+    const BlockDevice* dev = get_device(devIndex);
+    if (!dev || !buffer || count == 0 || !valid_sector_size(dev->sectorSize))
+        return BLOCK_ERR_INVALID;
+    const uint64_t bytes = static_cast<uint64_t>(count) * dev->sectorSize;
+    if (bytes > static_cast<uint64_t>(bufferBytes)) return BLOCK_ERR_INVALID;
+    return read_sectors(devIndex, lba, count, buffer);
 }
 
 Status write_sectors(uint8_t devIndex,
@@ -105,7 +148,9 @@ Status write_sectors(uint8_t devIndex,
     if (devIndex >= MAX_BLOCK_DEVICES)  return BLOCK_ERR_INVALID;
     if (!s_devices[devIndex].active)    return BLOCK_ERR_INVALID;
     if (!s_devices[devIndex].writeFn)   return BLOCK_ERR_UNSUPPORTED;
-    if (!buffer || count == 0)          return BLOCK_ERR_INVALID;
+    if (!valid_sector_size(s_devices[devIndex].sectorSize)) return BLOCK_ERR_INVALID;
+    if (!valid_transfer_buffer(s_devices[devIndex], count, buffer))
+        return BLOCK_ERR_INVALID;
     if (lba > s_devices[devIndex].totalSectors ||
         static_cast<uint64_t>(count) > s_devices[devIndex].totalSectors - lba) {
         return BLOCK_ERR_INVALID;
@@ -115,12 +160,49 @@ Status write_sectors(uint8_t devIndex,
         s_devices[devIndex].driverIndex, lba, count, buffer);
 }
 
+Status write_sectors_checked(uint8_t devIndex, uint64_t lba, uint32_t count,
+                             const void* buffer, size_t bufferBytes)
+{
+    const BlockDevice* dev = get_device(devIndex);
+    if (!dev || !buffer || count == 0 || !valid_sector_size(dev->sectorSize))
+        return BLOCK_ERR_INVALID;
+    const uint64_t bytes = static_cast<uint64_t>(count) * dev->sectorSize;
+    if (bytes > static_cast<uint64_t>(bufferBytes)) return BLOCK_ERR_INVALID;
+    return write_sectors(devIndex, lba, count, buffer);
+}
+
+FlushReport flush_with_result(uint8_t devIndex)
+{
+    FlushReport report;
+    report.outcome = FLUSH_OUTCOME_INVALID;
+    report.status = BLOCK_ERR_INVALID;
+    report.semanticsKnown = false;
+    if (devIndex >= MAX_BLOCK_DEVICES || !s_devices[devIndex].active)
+        return report;
+
+    const BlockDevice& dev = s_devices[devIndex];
+    if (dev.flushFn) {
+        report.status = dev.flushFn(dev.driverIndex);
+        report.semanticsKnown = dev.flushSemanticsKnown;
+        report.outcome = report.status == BLOCK_OK
+            ? FLUSH_OUTCOME_SUPPORTED_SUCCEEDED : FLUSH_OUTCOME_FAILED;
+        return report;
+    }
+    if (dev.writeCompletionDurable) {
+        report.outcome = FLUSH_OUTCOME_SYNCHRONOUS_DURABLE;
+        report.status = BLOCK_OK;
+        report.semanticsKnown = true;
+        return report;
+    }
+    report.outcome = FLUSH_OUTCOME_UNSUPPORTED_UNKNOWN;
+    report.status = BLOCK_ERR_UNSUPPORTED;
+    return report;
+}
+
 Status flush(uint8_t devIndex)
 {
-    if (devIndex >= MAX_BLOCK_DEVICES) return BLOCK_ERR_INVALID;
-    if (!s_devices[devIndex].active) return BLOCK_ERR_INVALID;
-    if (!s_devices[devIndex].flushFn) return BLOCK_OK;
-    return s_devices[devIndex].flushFn(s_devices[devIndex].driverIndex);
+    const FlushReport report = flush_with_result(devIndex);
+    return report.status;
 }
 
 } // namespace block

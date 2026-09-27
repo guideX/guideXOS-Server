@@ -380,7 +380,10 @@ static bool try_mount_fat32_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
     kernel::serial::putc('\n');
 #endif
 
-    // Basic sanity checks
+    // The driver addresses block logical sectors directly. The BPB byte size
+    // must match that geometry or offsets would silently address the wrong bytes.
+    const block::BlockDevice* device = block::get_device(blockDevIdx);
+    if (!device || bpb->bytesPerSector != device->sectorSize) return false;
     if (bpb->bytesPerSector < 512 || bpb->bytesPerSector > 4096) return false;
     if (bpb->sectorsPerCluster == 0) return false;
     if (bpb->numFATs == 0) return false;
@@ -456,6 +459,8 @@ static bool try_mount_fat16_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
     kernel::serial::putc('\n');
 #endif
 
+    const block::BlockDevice* device = block::get_device(blockDevIdx);
+    if (!device || bpb->bytesPerSector != device->sectorSize) return false;
     if (bpb->bytesPerSector < 512 || bpb->bytesPerSector > 4096) return false;
     if (bpb->sectorsPerCluster == 0) return false;
     if (bpb->numFATs == 0) return false;
@@ -547,9 +552,12 @@ static bool try_mount_exfat(uint8_t blockDevIdx, FATVolume& vol)
 
     const ExFAT_BootSector* bs = reinterpret_cast<const ExFAT_BootSector*>(s_secBuf);
 
-    // Check "EXFAT   " signature
+    // Check "EXFAT   " signature and match its encoded sector size to the
+    // registered block geometry before interpreting sector-relative offsets.
     if (!str_equal(bs->fsName, "EXFAT   ", 8)) return false;
-    if (bs->bootSignature != 0xAA55) return false;
+    if (bs->bootSignature != 0xAA55 || bs->bytesPerSectorShift > 12) return false;
+    const block::BlockDevice* device = block::get_device(blockDevIdx);
+    if (!device || (1u << bs->bytesPerSectorShift) != device->sectorSize) return false;
 
     vol.type                       = FAT_TYPE_EXFAT;
     vol.blockDevIndex              = blockDevIdx;
@@ -870,6 +878,9 @@ void set_trash_trace(bool enabled, uint64_t generation)
 
 uint8_t mount(uint8_t blockDevIndex)
 {
+    const block::BlockDevice* device = block::get_device(blockDevIndex);
+    if (!device || device->sectorSize < 512 || device->sectorSize > 4096 ||
+        (device->sectorSize & (device->sectorSize - 1)) != 0) return 0xFF;
     if (s_volumeCount >= MAX_FAT_VOLUMES) return 0xFF;
 
     // Find a free slot

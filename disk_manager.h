@@ -1,7 +1,7 @@
 //
 // Disk Manager - guideXOS Server Port
 //
-// A Windows-like Disk Management UI with multi-disk support (System + USB MSC),
+// A read-only Disk Manager UI for registered disks and host image files,
 // left disk list, right volumes grid, and partition map. Buttons to switch filesystem drivers.
 //
 // Ported from guideXOS.Legacy/DefaultApps/DiskManager.cs
@@ -32,40 +32,43 @@ private:
     static const int BTN_H = 26;
     static const int GAP = 8;
     
-    // Partition table entry (MBR)
+    // Four primary entries for the hosted .img MBR viewer. Bare-metal disks
+    // use kernel::storage's normalized MBR/GPT representation.
     struct PartitionEntry {
         uint32_t status;       // Boot flag (0x80 = bootable)
         uint8_t type;          // Partition type
         uint32_t lbaStart;     // Starting LBA
         uint32_t lbaCount;     // Size in sectors
         std::string fs;        // Detected filesystem ("FAT", "EXT2", "TarFS", "Unknown")
-        std::string mountPoint; // Suggested mount point, or "unmounted"
-        bool mounted;
+        std::string mountPoint; // Suggested mount point; not mount state.
         
-        PartitionEntry() : status(0), type(0), lbaStart(0), lbaCount(0), mounted(false) {}
+        PartitionEntry() : status(0), type(0), lbaStart(0), lbaCount(0) {}
     };
 
     enum MbrStatus : uint8_t {
         MBR_UNREADABLE = 0,
         MBR_INVALID = 1,
         MBR_VALID = 2,
+        DISK_NOT_INITIALIZED = 3,
+        DISK_GPT_VALID = 4,
+        DISK_GPT_DEGRADED = 5,
+        DISK_UNSUPPORTED = 6,
     };
     
     // Disk entry
     struct DiskEntry {
-        std::string name;                  // "Disk 0 (System)", "Disk 1 (USB)", etc.
+        std::string name;                  // Display name for a disk or host image.
         std::string transportLabel;        // ATA, AHCI, NVMe, USB, RAM disk, unknown
-        bool isSystem;                     // True for IDE/SATA system disk
         bool isHostImage;                  // Windows host mode: backed by a .img file
         uint8_t devIndex;                  // Device index in block layer
         bool haveInfo;                     // True if size info available
         uint64_t totalSectors;             // Total disk capacity in sectors
         uint32_t bytesPerSector;           // Bytes per sector (usually 512)
-        MbrStatus mbrStatus;               // MBR signature/read status
+        MbrStatus mbrStatus;               // Partition table parse state
         std::string backingPath;           // Optional source path in host mode
         PartitionEntry parts[4];           // MBR primary partitions
         
-        DiskEntry() : isSystem(false), isHostImage(false), devIndex(0), haveInfo(false), 
+        DiskEntry() : isHostImage(false), devIndex(0), haveInfo(false),
                       totalSectors(0), bytesPerSector(512), mbrStatus(MBR_UNREADABLE) {}
     };
 
@@ -77,11 +80,13 @@ private:
         uint8_t* data;
         uint32_t sizeBytes;
         uint8_t ramdiskIndex;
+        uint8_t ramdiskBlockIndex;
+        uint64_t ramdiskIdentity;
 #endif
 
         HostImageEntry() : attached(false)
 #ifndef _WIN32
-            , data(nullptr), sizeBytes(0), ramdiskIndex(0xFF)
+            , data(nullptr), sizeBytes(0), ramdiskIndex(0xFF), ramdiskBlockIndex(0xFF), ramdiskIdentity(0)
 #endif
         {}
     };
@@ -128,7 +133,7 @@ private:
     static bool isImgName(const char* name);
     
     // Filesystem operations
-    static std::string detectFsAtLBA(uint8_t devIndex, uint32_t lbaStart);
+    static std::string detectFsAtLBA(uint8_t devIndex, uint32_t lbaStart, uint32_t sectorCount);
     static void trySetFS_Auto();
     static void trySetFS_FAT();
     static void trySetFS_TAR();

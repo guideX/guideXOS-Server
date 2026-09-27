@@ -118,7 +118,11 @@ struct IdentifyData {
     uint16_t commandSets83;       // word 83 — bit 10 = LBA48 supported
     uint16_t reserved5[16];       // words 84-99
     uint64_t lba48Sectors;        // words 100-103
-    uint16_t reserved6[152];      // words 104-255
+    uint16_t reserved6[2];        // words 104-105
+    uint16_t logicalSectorInfo;   // word 106
+    uint16_t reserved7[10];       // words 107-116
+    uint32_t logicalSectorWords;  // words 117-118
+    uint16_t reserved8[137];      // words 119-255
 };
 
 // ================================================================
@@ -134,6 +138,8 @@ struct ATADevice {
     uint8_t  ahciPort;            // AHCI port number (if AHCI)
     uint64_t abar;                // AHCI Base Address (MMIO)
     bool     lba48;               // supports 48-bit LBA
+    bool     flushCache;          // IDENTIFY word 83 advertises FLUSH CACHE
+    bool     flushCacheExt;       // IDENTIFY word 83 advertises FLUSH CACHE EXT
     uint64_t totalSectors;
     uint32_t sectorSize;          // almost always 512
     char     model[41];           // null-terminated model string

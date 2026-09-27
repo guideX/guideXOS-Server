@@ -298,6 +298,8 @@ void init()
 
 uint8_t mount(uint8_t blockDevIndex)
 {
+    const block::BlockDevice* device = block::get_device(blockDevIndex);
+    if (!device || device->sectorSize != 512) return 0xFF;
     if (s_volumeCount >= MAX_EXT4_VOLUMES) return 0xFF;
 
     uint8_t idx = 0xFF;
@@ -307,7 +309,7 @@ uint8_t mount(uint8_t blockDevIndex)
     if (idx == 0xFF) return 0xFF;
 
     // The superblock starts at byte offset 1024 (sector 2 for 512-byte sectors)
-    block::Status st = block::read_sectors(blockDevIndex, 2, 2, s_blkBuf);
+    block::Status st = block::read_sectors_checked(blockDevIndex, 2, 2, s_blkBuf, sizeof(s_blkBuf));
     if (st != block::BLOCK_OK) return 0xFF;
 
     const Superblock* sb = reinterpret_cast<const Superblock*>(s_blkBuf);

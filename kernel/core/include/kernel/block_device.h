@@ -29,6 +29,7 @@ enum DeviceType : uint8_t {
     BDEV_AHCI       = 2,    // SATA / AHCI (DMA, MMIO)
     BDEV_NVME       = 3,    // NVMe (PCIe, MMIO)
     BDEV_USB_MASS   = 4,    // USB Mass Storage (Bulk-Only)
+    BDEV_RAMDISK    = 5,    // In-memory block device
 };
 
 // ================================================================
@@ -60,10 +61,23 @@ typedef Status (*WriteSectorsFn)(uint8_t devIndex,
                                  uint32_t count,
                                  const void* buffer);
 
-// Persist completed writes in the device cache. Transports whose writes are
-// already durable may leave this callback null; the block layer then treats
-// synchronous write completion as the persistence boundary.
+// Complete pending writeback/cache work. A missing callback is unsupported
+// unless writeCompletionDurable is explicitly set on the device.
 typedef Status (*FlushFn)(uint8_t devIndex);
+
+enum FlushOutcome : uint8_t {
+    FLUSH_OUTCOME_INVALID = 0,
+    FLUSH_OUTCOME_SUPPORTED_SUCCEEDED,
+    FLUSH_OUTCOME_SYNCHRONOUS_DURABLE,
+    FLUSH_OUTCOME_UNSUPPORTED_UNKNOWN,
+    FLUSH_OUTCOME_FAILED,
+};
+
+struct FlushReport {
+    FlushOutcome outcome;
+    Status status;
+    bool semanticsKnown;
+};
 
 // ================================================================
 // Block device descriptor
@@ -79,6 +93,19 @@ struct BlockDevice {
     ReadSectorsFn  readFn;
     WriteSectorsFn writeFn;
     FlushFn       flushFn;
+    // A flush callback is useful only when its meaning is documented by the
+    // transport. Completion-durable is reserved for stable writes without an
+    // explicit flush (not for ordinary synchronous IO).
+    bool          flushSemanticsKnown;
+    bool          writeCompletionDurable;
+    bool          removableKnown;
+    bool          removable;
+    char          model[40];
+    char          serial[24];
+    // Optional transport DMA limits. Zero means the registry does not declare
+    // a constraint; new storage callers should use checked I/O helpers.
+    uint16_t      requiredBufferAlignment;
+    uint32_t      maxTransferBytes;
 };
 
 static const uint8_t MAX_BLOCK_DEVICES = 16;
@@ -103,6 +130,11 @@ uint8_t device_count();
 // Return a device descriptor by global index (nullptr if invalid).
 const BlockDevice* get_device(uint8_t index);
 
+// Changes whenever a block device is registered, unregistered, or the registry
+// is reinitialized. Equality is used for revalidation; ordering is not
+// meaningful across uint64_t wrap.
+uint64_t registry_generation();
+
 // ----------------------------------------------------------------
 // Sector I/O (delegates to the transport callbacks)
 // ----------------------------------------------------------------
@@ -112,14 +144,24 @@ Status read_sectors(uint8_t devIndex,
                     uint32_t count,
                     void* buffer);
 
+// Buffer-length-aware sector I/O for new storage-management callers.
+Status read_sectors_checked(uint8_t devIndex, uint64_t lba, uint32_t count,
+                            void* buffer, size_t bufferBytes);
+
 Status write_sectors(uint8_t devIndex,
                      uint64_t lba,
                      uint32_t count,
                      const void* buffer);
 
-// Flush transport/device write caches. A transport without a flush callback
-// is considered synchronously durable.
+Status write_sectors_checked(uint8_t devIndex, uint64_t lba, uint32_t count,
+                             const void* buffer, size_t bufferBytes);
+
+// Flush transport/device write caches. Missing callbacks return unsupported
+// unless the descriptor explicitly declares synchronous durable completion.
 Status flush(uint8_t devIndex);
+
+// A truthful flush result for code that needs to establish persistence.
+FlushReport flush_with_result(uint8_t devIndex);
 
 } // namespace block
 } // namespace kernel

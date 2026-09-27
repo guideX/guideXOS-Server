@@ -13,6 +13,7 @@
 #include "kernel/kernel_app.h"
 #include "kernel/vfs.h"
 #include "kernel/block_device.h"
+#include "kernel/storage_manager.h"
 #include "kernel/desktop.h"
 #include "kernel/image_adapter.h"
 #include "kernel/navigator_scrollbar.h"
@@ -1182,14 +1183,14 @@ public:
 
 private:
     static const int MAX_DISKS = 16;
-    static const int MAX_PARTS = 4;
+    static const int MAX_PARTS = 16; // Bounded UI list; parser retains up to 128.
 
     struct PartEntry {
-        uint8_t  type;
-        uint32_t lbaStart;
-        uint32_t lbaCount;
-        bool     bootable;
-        char     fsLabel[16];  // "FAT", "EXT2", "TarFS", "Unknown"
+        uint64_t startLba;
+        uint64_t sectorCount;
+        char typeLabel[20];
+        char name[64];
+        char fsLabel[16];
     };
 
     struct DiskEntry {
@@ -1198,8 +1199,15 @@ private:
         uint64_t totalSectors;
         uint32_t sectorSize;
         bool     haveInfo;
+        bool     readable;
+        bool     writable;
+        bool     flushSupported;
+        storage::PersistenceClass persistence;
+        storage::DiskState state;
+        uint16_t totalPartitionCount;
         PartEntry parts[MAX_PARTS];
         int       partCount;
+        storage::TargetIdentity identity;
     };
 
     DiskEntry m_disks[MAX_DISKS];
@@ -1209,8 +1217,8 @@ private:
     int m_refreshBtnId;
 
     void        scanDisks();
-    void        readMBR(DiskEntry& disk);
-    const char* detectFs(uint8_t devIndex, uint32_t lbaStart);
+    void        readPartitionTable(DiskEntry& disk);
+    const char* detectFs(uint8_t devIndex, uint64_t lbaStart, uint64_t sectorCount);
     void        formatSize(uint64_t bytes, char* out, int outSize) const;
 };
 

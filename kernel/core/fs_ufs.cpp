@@ -346,6 +346,8 @@ void init()
 
 uint8_t mount(uint8_t blockDevIndex)
 {
+    const block::BlockDevice* device = block::get_device(blockDevIndex);
+    if (!device || device->sectorSize != 512) return 0xFF;
     if (s_volumeCount >= MAX_UFS_VOLUMES) return 0xFF;
 
     uint8_t idx = 0xFF;
@@ -355,7 +357,7 @@ uint8_t mount(uint8_t blockDevIndex)
     if (idx == 0xFF) return 0xFF;
 
     // UFS superblock is at byte offset 8192 = sector 16
-    block::Status st = block::read_sectors(blockDevIndex, 16, 4, s_blkBuf);
+    block::Status st = block::read_sectors_checked(blockDevIndex, 16, 4, s_blkBuf, sizeof(s_blkBuf));
     if (st != block::BLOCK_OK) return 0xFF;
 
     // Try UFS1 first — magic is at a well-known offset within the superblock
