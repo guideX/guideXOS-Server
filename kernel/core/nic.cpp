@@ -1606,21 +1606,61 @@ static bool init_rx(uint64_t mmioBase)
 // Initialise TX descriptor ring
 // ================================================================
 
-static void apply_i219_spt_tx_workaround(uint64_t mmioBase)
+static void apply_i219_pch_tx_initialization(uint64_t mmioBase)
 {
     if (!is_i219_device(s_device.deviceId)) return;
 
-    // This is the narrowly scoped SPT/I219 MAC TX erratum workaround used by
-    // upstream e1000e. It changes no PHY state and is applied only to the
-    // exact I219/PCH family already selected by PCI identity.
+    // Apply only the I219/PCH hardware-bit setup that is absent from the
+    // existing initialization. Keep the SPT TX-DMA erratum policy intact.
     const uint32_t iosfpc = mmio_read32(mmioBase, E1000_IOSFPC);
     mmio_write32(mmioBase, E1000_IOSFPC, iosfpc | E1000_RCTL_RDMTS_HEX);
 
     const uint32_t tarc0 = mmio_read32(mmioBase, E1000_TARC0);
-    const uint32_t correctedTarc0 =
-        (tarc0 & ~E1000_TARC0_CB_MULTIQ_3_REQ) |
-        E1000_TARC0_CB_MULTIQ_2_REQ;
-    mmio_write32(mmioBase, E1000_TARC0, correctedTarc0);
+    mmio_write32(mmioBase, E1000_TARC0,
+                 i219_pch_tarc0_configuration(tarc0));
+
+    const uint32_t tctl = mmio_read32(mmioBase, E1000_TCTL);
+    const uint32_t tarc1 = mmio_read32(mmioBase, E1000_TARC1);
+    mmio_write32(mmioBase, E1000_TARC1,
+                 i219_pch_tarc1_configuration(tarc1, tctl));
+
+    const uint32_t rfctl = mmio_read32(mmioBase, E1000_RFCTL);
+    mmio_write32(mmioBase, E1000_RFCTL,
+                 i219_pch_rfctl_configuration(rfctl));
+}
+
+static void capture_i219_tx_timeout_registers(uint64_t mmioBase)
+{
+    if (!is_i219_device(s_device.deviceId) || mmioBase == 0u) return;
+
+    I219TxTimeoutRegisters& registers = s_device.tx.i219TimeoutRegisters;
+    registers = {};
+    // ICR is read-to-clear. Read it once, at the completed TX timeout
+    // boundary, and retain the captured cause before any later diagnostics.
+    registers.icr = mmio_read32(mmioBase, E1000_ICR);
+    registers.ims = mmio_read32(mmioBase, E1000_IMS);
+    registers.status = mmio_read32(mmioBase, E1000_STATUS);
+    registers.ctrl = mmio_read32(mmioBase, E1000_CTRL);
+    registers.tarc0 = mmio_read32(mmioBase, E1000_TARC0);
+    registers.tarc1 = mmio_read32(mmioBase, E1000_TARC1);
+    registers.rfctl = mmio_read32(mmioBase, E1000_RFCTL);
+    registers.valid = true;
+
+    serial::puts("[AIDA-I219-PCH-TX-TIMEOUT] ICR=0x");
+    serial::put_hex32(registers.icr);
+    serial::puts(" IMS=0x");
+    serial::put_hex32(registers.ims);
+    serial::puts(" STATUS=0x");
+    serial::put_hex32(registers.status);
+    serial::puts(" CTRL=0x");
+    serial::put_hex32(registers.ctrl);
+    serial::puts(" TARC0=0x");
+    serial::put_hex32(registers.tarc0);
+    serial::puts(" TARC1=0x");
+    serial::put_hex32(registers.tarc1);
+    serial::puts(" RFCTL=0x");
+    serial::put_hex32(registers.rfctl);
+    serial::putc('\n');
 }
 
 // The SPT/PCH e1000e path initializes TXDCTL before enabling TCTL.  The
@@ -1852,13 +1892,18 @@ static bool init_tx(uint64_t mmioBase, bool postResetRearm = false)
     // documented full-duplex legacy values; this is shared by QEMU E1000 and
     // physical I219.
     mmio_write32(mmioBase, E1000_TIPG, E1000_TIPG_DEFAULT);
-    uint32_t tctl = E1000_TCTL_EN |
-                    E1000_TCTL_PSP |
+    uint32_t tctl = E1000_TCTL_PSP |
                     (0x0F << E1000_TCTL_CT_SHIFT) |
                     (0x03F << E1000_TCTL_COLD_SHIFT);
+    if (is_i219_device(s_device.deviceId)) {
+        // Keep TX disabled while the I219/PCH arbitration and filter bits are
+        // established; TARC1's MULR policy reads the configured TCTL value.
+        mmio_write32(mmioBase, E1000_TCTL, tctl);
+        apply_i219_pch_tx_initialization(mmioBase);
+    }
+    tctl |= E1000_TCTL_EN;
     mmio_write32(mmioBase, E1000_TCTL, tctl);
 
-    apply_i219_spt_tx_workaround(mmioBase);
     s_txPoisoned = false;
     s_device.tx.failureReason = TxFailureReason::None;
     s_device.tx.ringPoisoned = false;
@@ -3852,6 +3897,7 @@ static Status submit_frame(const uint8_t* data, uint16_t len)
     } else {
         s_device.tx.failureReason = TxFailureReason::CompletionTimeout;
     }
+    capture_i219_tx_timeout_registers(s_device.mmioBase);
     snapshot_tx_final_registers();
     return NIC_ERR_INIT_FAIL;
 #else

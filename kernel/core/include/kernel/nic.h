@@ -179,6 +179,7 @@ static const uint32_t E1000_TXDCTL   = 0x3828;  // TX Descriptor Control
 static const uint32_t E1000_TXDCTL1  = 0x3928;  // TX Descriptor Control Q1
 static const uint32_t E1000_TARC0    = 0x3840;  // TX Arbitration Counter Q0
 static const uint32_t E1000_TARC1    = 0x3940;  // TX Arbitration Counter Q1
+static const uint32_t E1000_RFCTL    = 0x5008;  // Receive Filter Control
 static const uint32_t E1000_IOSFPC   = 0x0F28;  // I219 TX DMA erratum control
 static const uint32_t E1000_FEXTNVM11 = 0x5BBC; // Future Extended NVM 11
 static const uint32_t E1000_FWSM     = 0x5B54;  // Firmware Semaphore
@@ -268,6 +269,41 @@ static const uint32_t E1000_RCTL_RDMTS_HEX = (1u << 16);
 static const uint32_t E1000_TARC0_CB_MULTIQ_3_REQ =
     (1u << 28) | (1u << 29);
 static const uint32_t E1000_TARC0_CB_MULTIQ_2_REQ = (1u << 29);
+static const uint32_t E1000_TARC0_I219_INIT_BITS =
+    (1u << 23) | (1u << 24) | (1u << 26) | (1u << 27);
+static const uint32_t E1000_TARC1_I219_INIT_BITS =
+    (1u << 24) | (1u << 26) | (1u << 30);
+static const uint32_t E1000_TARC1_I219_MULR_POLICY = (1u << 28);
+static const uint32_t E1000_RFCTL_NFSW_DIS = (1u << 6);
+static const uint32_t E1000_RFCTL_NFSR_DIS = (1u << 7);
+
+// Linux e1000e's ICH8LAN hardware-bit initialization preserves unrelated
+// register state, selects two outstanding TX requests for the SPT workaround,
+// and configures TARC1 bit 28 opposite TCTL.MULR.
+inline uint32_t i219_pch_tarc0_configuration(uint32_t current)
+{
+    current |= E1000_TARC0_I219_INIT_BITS;
+    current &= ~E1000_TARC0_CB_MULTIQ_3_REQ;
+    current |= E1000_TARC0_CB_MULTIQ_2_REQ;
+    return current;
+}
+
+inline uint32_t i219_pch_tarc1_configuration(uint32_t current,
+                                             uint32_t tctl)
+{
+    current |= E1000_TARC1_I219_INIT_BITS;
+    if ((tctl & E1000_TCTL_MULR) != 0u) {
+        current &= ~E1000_TARC1_I219_MULR_POLICY;
+    } else {
+        current |= E1000_TARC1_I219_MULR_POLICY;
+    }
+    return current;
+}
+
+inline uint32_t i219_pch_rfctl_configuration(uint32_t current)
+{
+    return current | E1000_RFCTL_NFSW_DIS | E1000_RFCTL_NFSR_DIS;
+}
 
 // ICR / IMS interrupt bits
 static const uint32_t E1000_ICR_TXDW   = (1u << 0);   // TX Descriptor Written Back
@@ -1373,6 +1409,17 @@ struct TxRegisterSnapshot {
     bool     valid;
 };
 
+struct I219TxTimeoutRegisters {
+    uint32_t icr;
+    uint32_t ims;
+    uint32_t status;
+    uint32_t ctrl;
+    uint32_t tarc0;
+    uint32_t tarc1;
+    uint32_t rfctl;
+    bool     valid;
+};
+
 struct TxDiagnostics {
     uint32_t descriptorSubmissions;
     uint32_t descriptorPublications;
@@ -1421,6 +1468,7 @@ struct TxDiagnostics {
     uint32_t observedTail;
     uint32_t control;
     TxRawDiagnostics raw;
+    I219TxTimeoutRegisters i219TimeoutRegisters;
     bool     descriptorPublished;
     bool     dmaTranslationValid;
     bool     ringVirtualAddressInKernelImage;

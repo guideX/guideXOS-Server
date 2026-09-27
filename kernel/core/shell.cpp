@@ -2399,6 +2399,8 @@ static void cmd_nicinfo_tx_raw_status()
 
     const nic::TxDiagnostics& tx = dev->tx;
     const nic::TxRawDiagnostics& raw = tx.raw;
+    const nic::I219TxTimeoutRegisters& timeoutRegs =
+        tx.i219TimeoutRegisters;
     const nic::TxRegisterSnapshot& final = tx.finalRegisters.valid
         ? tx.finalRegisters : tx.initialRegisters;
     const uint64_t reconstructedTdbA =
@@ -2537,10 +2539,40 @@ static void cmd_nicinfo_tx_raw_status()
     output_string(" TARC0=0x");
     uint_hex_to_str(final.tarc0, 8, hexStr);
     output_string(hexStr);
+    output_string(" TARC1=0x");
+    uint_hex_to_str(final.tarc1, 8, hexStr);
+    output_string(hexStr);
     output_string(" IOSFPC=0x");
     uint_hex_to_str(final.iosfpc, 8, hexStr);
     output_string(hexStr);
     output_string("\n");
+    output_string("timeout-MMIO=");
+    if (timeoutRegs.valid) {
+        output_string("captured-once ICR=0x");
+        uint_hex_to_str(timeoutRegs.icr, 8, hexStr);
+        output_string(hexStr);
+        output_string(" IMS=0x");
+        uint_hex_to_str(timeoutRegs.ims, 8, hexStr);
+        output_string(hexStr);
+        output_string(" STATUS=0x");
+        uint_hex_to_str(timeoutRegs.status, 8, hexStr);
+        output_string(hexStr);
+        output_string(" CTRL=0x");
+        uint_hex_to_str(timeoutRegs.ctrl, 8, hexStr);
+        output_string(hexStr);
+        output_string(" TARC0=0x");
+        uint_hex_to_str(timeoutRegs.tarc0, 8, hexStr);
+        output_string(hexStr);
+        output_string(" TARC1=0x");
+        uint_hex_to_str(timeoutRegs.tarc1, 8, hexStr);
+        output_string(hexStr);
+        output_string(" RFCTL=0x");
+        uint_hex_to_str(timeoutRegs.rfctl, 8, hexStr);
+        output_string(hexStr);
+        output_string("\n");
+    } else {
+        output_string("not-captured\n");
+    }
     output_string("PCI-CMD=0x");
     uint_hex_to_str(final.pciCommand, 4, hexStr);
     output_string(hexStr);
@@ -5867,7 +5899,7 @@ static void execute_command(const char* cmd) {
             output_string("  tx lifecycle: compact reset/ownership/rearm/register state\n");
             output_string("  tx raw: one fixed raw Ethernet TX attempt\n");
             output_string("  tx raw direct: same fixture via direct submit\n");
-            output_string("  tx raw status: last raw attempt and descriptor bytes\n");
+            output_string("  tx raw status: raw TX, TDT/TDH/DD, and captured timeout MMIO\n");
         }
     } else if (str_eq(command, "netstat") || str_eq(command, "ss")) {
         cmd_netstat();
