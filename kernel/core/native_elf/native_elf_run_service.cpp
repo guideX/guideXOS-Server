@@ -243,6 +243,7 @@ struct Operation {
 
 static Operation s_operation = {};
 static gx_development_run_handle s_nextHandle = 1;
+static uint64_t s_nextCloseRequestGeneration = 1;
 static char s_projectText[kMaxProjectBytes + 1] = {};
 static char s_manifestText[kMaxProjectBytes + 1] = {};
 static char s_debugSource[compiler::COMPILER_MAX_SOURCE_BYTES + 1] = {};
@@ -267,6 +268,15 @@ static bool s_schedulerTargetComplete = false;
 static void scheduled_debug_cancel_entry();
 static SchedulerContext* make_debug_cancel_context();
 #endif
+
+static uint64_t next_close_request_generation()
+{
+    uint64_t generation = s_nextCloseRequestGeneration++;
+    if (generation == 0) generation = s_nextCloseRequestGeneration++;
+    if (s_nextCloseRequestGeneration == 0) s_nextCloseRequestGeneration = 1;
+    return generation;
+}
+
 static uint32_t s_phase28uTraceCount = 0;
 static uint32_t s_phase28vTraceCount = 0;
 static uint32_t s_phase29bTraceCount = 0;
@@ -2936,7 +2946,10 @@ gx_result request_close(gx_development_run_handle handle) {
 
     s_operation.closeRequested = true;
     s_operation.state = GX_DEVELOPMENT_RUN_CLOSING;
-    if (!request_native_elf_gui_close(s_operation.registrationGeneration)) {
+    if (!request_native_elf_gui_close(
+            s_operation.registrationGeneration, next_close_request_generation(),
+            "NativeElfRunService::request_close", "debug_stop",
+            "developer_studio_stop_command", "closing")) {
         phase29f_debug_start_trace("stop_handoff_result", "DEBUG_STOP_TARGET_CLOSE_REJECTED");
         s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
         s_operation.closeRequested = false;
@@ -2964,7 +2977,10 @@ gx_result cancel(gx_development_run_handle handle) {
     s_operation.state = GX_DEVELOPMENT_RUN_CLOSING;
     // Safe cancellation is deliberately cooperative: only a suspended GUI
     // target can be closed without destroying an arbitrary NativeElf stack.
-    if (!request_native_elf_gui_close(s_operation.registrationGeneration)) {
+    if (!request_native_elf_gui_close(
+            s_operation.registrationGeneration, next_close_request_generation(),
+            "NativeElfRunService::cancel", "cancel", "developer_studio_cancel_command",
+            "closing")) {
         s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
         s_operation.cancellationRequested = false;
         return GX_ERROR_UNSUPPORTED;

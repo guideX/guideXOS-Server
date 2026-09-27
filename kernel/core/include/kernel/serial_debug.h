@@ -46,6 +46,15 @@ inline void putc(char c)
     arch::outb(kCOM1, static_cast<uint8_t>(c));
 }
 
+// Best-effort output for application callbacks. Unlike putc(), this never
+// waits for the UART; callers may retry under their own explicit work budget.
+inline bool try_putc(char c)
+{
+    if ((arch::inb(kCOM1 + 5) & 0x20) == 0) return false;
+    arch::outb(kCOM1, static_cast<uint8_t>(c));
+    return true;
+}
+
 inline void puts(const char* s)
 {
     while (*s) {
@@ -90,6 +99,7 @@ inline void put_hex64(uint64_t v)
 
 inline void init() { }
 inline void putc(char) { }
+inline bool try_putc(char) { return false; }
 inline void puts(const char*) { }
 inline void put_hex8(uint8_t) { }
 inline void put_hex32(uint32_t) { }

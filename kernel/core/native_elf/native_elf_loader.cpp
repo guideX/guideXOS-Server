@@ -93,9 +93,17 @@ static uint32_t s_guiWindowId = 0;
 static uint32_t s_guiRenderCount = 0;
 static uint32_t s_guiPumpCount = 0;
 static uint64_t s_guiGeneration = 0;
+static uint64_t s_guiCloseRequestSequence = 0;
 static uint64_t s_guiContentHash = 0;
 static uint64_t s_guiLastDestroyedWindow = 0;
 static char s_guiContent[256] = {};
+
+static uint64_t next_gui_close_request_generation()
+{
+    ++s_guiCloseRequestSequence;
+    if (s_guiCloseRequestSequence == 0) s_guiCloseRequestSequence = 1;
+    return s_guiCloseRequestSequence;
+}
 
 // Eight persistent user breakpoints plus temporary Step Over/Out controls.
 // The table is deliberately a loader-owned physical patch boundary: semantic
@@ -205,6 +213,7 @@ static void reset_gui_runtime()
     s_guiRendered = false;
     s_guiClosedNormally = false;
     s_guiCloseLifecycleRequested = false;
+    s_guiCloseRequestSequence = 0;
     s_guiForcedCleanup = false;
     s_guiRenderAnnounced = false;
     s_guiWindowId = 0;
@@ -291,6 +300,38 @@ static bool native_app_log_pointer_range_for_runtime(uint64_t pointer,
     return *maximumReadableBytes != 0;
 }
 
+static bool native_app_host_log_putc_bounded(char value, uint32_t* probeBudget)
+{
+    if (!probeBudget) return false;
+    while (*probeBudget != 0) {
+        --*probeBudget;
+        if (serial::try_putc(value)) return true;
+    }
+    return false;
+}
+
+static void native_app_host_log_echo_bounded(const char* message)
+{
+    static const char prefix[] = "NativeElf host log: ";
+    if (!message) return;
+    uint32_t probeBudget = 65536U;
+    for (uint32_t i = 0; prefix[i] != '\0'; ++i) {
+        if (!native_app_host_log_putc_bounded(prefix[i], &probeBudget)) {
+            s_appRuntime.hostLogSerialTruncated = true;
+            return;
+        }
+    }
+    for (uint32_t i = 0; message[i] != '\0'; ++i) {
+        if (!native_app_host_log_putc_bounded(message[i], &probeBudget)) {
+            s_appRuntime.hostLogSerialTruncated = true;
+            return;
+        }
+    }
+    if (!native_app_host_log_putc_bounded('\r', &probeBudget) ||
+        !native_app_host_log_putc_bounded('\n', &probeBudget))
+        s_appRuntime.hostLogSerialTruncated = true;
+}
+
 static gx_result GX_CALL host_log(gx_app_context* context, const char* message)
 {
     if (s_appRuntime.state != NativeAppExecutionState::Running ||
@@ -310,9 +351,6 @@ static gx_result GX_CALL host_log(gx_app_context* context, const char* message)
     while (length < maximumReadableBytes && message[length] != '\0') ++length;
     if (length == maximumReadableBytes) return GX_ERROR_INVALID_ARGUMENT;
 
-    serial::puts("NativeElf host log: ");
-    serial::puts(message);
-    serial::putc('\n');
     s_appRuntime.hostLogObserved = true;
     s_appRuntime.hostLogBytes = length;
     if (s_appRuntime.hostLogCount < NATIVE_APP_MAX_LOG_LINES) {
@@ -322,6 +360,10 @@ static gx_result GX_CALL host_log(gx_app_context* context, const char* message)
     } else {
         s_appRuntime.hostLogTruncated = true;
     }
+    // Preserve the accepted message before best-effort serial echo. A stalled
+    // COM1 transmitter must never hold the synchronous Developer Studio host
+    // callback (including its debug-start return path) forever.
+    native_app_host_log_echo_bounded(message);
     return GX_OK;
 }
 
@@ -651,7 +693,13 @@ static gx_result GX_CALL host_native_window_run(gx_app_context* context,
 
         if (s_guiAutomationClose && s_guiRendered && s_guiPumpCount >= 2) {
             s_guiCloseLifecycleRequested = true;
-            serial::puts("NativeElf: close_request id=");
+            const uint64_t requestGeneration = next_gui_close_request_generation();
+            serial::puts("NativeElf: close_request origin=NativeElf::host_native_window_run");
+            serial::puts(" category=gui_automation target_generation=");
+            serial::put_hex64(s_guiGeneration);
+            serial::puts(" request_generation=");
+            serial::put_hex64(requestGeneration);
+            serial::puts(" reason=automation_close_policy lifecycle_state=closing id=");
             serial::put_hex32(s_guiWindowId);
             serial::putc('\n');
             if (!compositor::KernelCompositor::requestCloseWindow(s_guiWindowId)) {
@@ -1429,14 +1477,33 @@ bool native_elf_gui_runtime_snapshot(NativeElfGuiRuntimeSnapshot* output)
     return true;
 }
 
-bool request_native_elf_gui_close(uint64_t generation)
+bool request_native_elf_gui_close(uint64_t targetGeneration,
+                                  uint64_t requestGeneration,
+                                  const char* origin,
+                                  const char* category,
+                                  const char* reason,
+                                  const char* lifecycleState)
 {
-    if (generation == 0 || generation != s_guiGeneration || !s_guiApplication) return false;
+    if (targetGeneration == 0 || targetGeneration != s_guiGeneration ||
+        requestGeneration == 0 || !origin || !category || !reason ||
+        !lifecycleState || !s_guiApplication) return false;
     if (s_guiClosedNormally || !s_guiApplication->getWindow()) return s_guiClosedNormally;
     if (s_guiWindowId == 0) return false;
 
     s_guiCloseLifecycleRequested = true;
-    serial::puts("NativeElf: external_close_request id=");
+    serial::puts("NativeElf: external_close_request origin=");
+    serial::puts(origin);
+    serial::puts(" category=");
+    serial::puts(category);
+    serial::puts(" target_generation=");
+    serial::put_hex64(targetGeneration);
+    serial::puts(" request_generation=");
+    serial::put_hex64(requestGeneration);
+    serial::puts(" reason=");
+    serial::puts(reason);
+    serial::puts(" lifecycle_state=");
+    serial::puts(lifecycleState);
+    serial::puts(" id=");
     serial::put_hex32(s_guiWindowId);
     serial::putc('\n');
     if (!compositor::KernelCompositor::requestCloseWindow(s_guiWindowId)) return false;
@@ -1736,6 +1803,7 @@ static bool run_file_internal(const char* path,
         report->hostLogBytes = s_appRuntime.hostLogBytes;
         report->hostLogCount = s_appRuntime.hostLogCount;
         report->hostLogTruncated = s_appRuntime.hostLogTruncated;
+        report->hostLogSerialTruncated = s_appRuntime.hostLogSerialTruncated;
         report->runtimeStatus = s_appRuntime.runtimeStatus;
         report->runtimeCallDepth = s_appRuntime.runtimeCallDepth;
         for (uint32_t i = 0; i < s_appRuntime.hostLogCount && i < NATIVE_APP_MAX_LOG_LINES; ++i)

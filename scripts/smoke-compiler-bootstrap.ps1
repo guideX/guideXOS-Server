@@ -69,6 +69,7 @@ param(
     [switch]$Phase28OOnly,
     [switch]$Phase28POnly,
     [switch]$Phase28QOnly,
+    [switch]$Phase29GBeginDebugReturnOnly,
     [switch]$Phase29FDebugStartOnly,
     [switch]$Phase29COnly,
     [switch]$Phase29EManifestOnly
@@ -79,6 +80,7 @@ $ErrorActionPreference = "Stop"
 # mode deliberately keeps only the baseline C/D route plus the M smoke so a
 # flaky optional earlier IDE repeat cannot mask the recursion proof.
 if ($Phase29EManifestOnly) { $Phase29COnly = $true }
+if ($Phase29GBeginDebugReturnOnly) { $Phase29FDebugStartOnly = $true }
 if ($Phase29FDebugStartOnly) { $Phase28QOnly = $true }
 if ($Phase29COnly) { $Phase28QOnly = $true }
 if ($Phase28QOnly) {
@@ -836,11 +838,17 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                     $serialProbe = Get-Content -LiteralPath $serialPath -Raw -ErrorAction Stop
                     if ($serialProbe -and (($Phase29EManifestOnly -and
                             $serialProbe.Contains("DEVELOPER_STUDIO_PHASE28V_EVENT_DEBUG_START_REQUEST_ISSUED")) -or
-                        ($Phase29FDebugStartOnly -and
+                        ($Phase29FDebugStartOnly -and -not $Phase29GBeginDebugReturnOnly -and
                             ($serialProbe.Contains("DEVELOPER_STUDIO_PHASE28Q_RUNNING_PASS") -or
+                             $serialProbe.Contains("DEVELOPER_STUDIO_PHASE28Q_FAILURE"))) -or
+                        ($Phase29GBeginDebugReturnOnly -and
+                            ($serialProbe.Contains("DEVELOPER_STUDIO_PHASE29A_STOP_MAPPING_PASS") -or
+                             $serialProbe.Contains("DEVELOPER_STUDIO_PHASE29A_STOP_MAPPING_FAIL") -or
                              $serialProbe.Contains("DEVELOPER_STUDIO_PHASE28Q_FAILURE"))) -or
                         ($Phase29COnly -and -not $Phase29EManifestOnly -and
                             $serialProbe.Contains("P28Z APP 05 project_open_return")) -or
+                        ($Phase28QOnly -and
+                            $serialProbe.Contains("DEVELOPER_STUDIO_PHASE28Q_PASS")) -or
                         (-not $Phase28QOnly -and
                             $serialProbe.Contains("[KERNEL] Entering main loop (waiting for input)...")))) {
                         $process.Kill()
@@ -2184,6 +2192,28 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 "DEVELOPER_STUDIO_PHASE29F_DEBUG_START event=phase28q_running_observed result=DEBUG_START_PHASE28Q_RUNNING_PASS",
                 "DEVELOPER_STUDIO_PHASE28Q_RUNNING_PASS"
             )
+            if ($Phase29GBeginDebugReturnOnly) {
+                $requiredMarkers += @(
+                    "DEVELOPER_STUDIO_PHASE29G_SOURCE_ROOT_ASSOCIATION",
+                    "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_BEGIN_ENTRY",
+                    "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_SYMBOL_INITIALIZATION_ENTER",
+                    "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_SYMBOL_INITIALIZATION_RETURN",
+                    "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_BREAKPOINT_BINDING_RETURN",
+                    "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_START_API_CALL",
+                    "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_START_API_RETURN",
+                    "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_POST_START_STATE_BEGIN",
+                    "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_EXECUTABLE_MODULE_REGISTRATION_RETURN",
+                    "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_SERVER_RELEASE_CALLBACK_RETURN",
+                    "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_RELEASE_API_RETURN",
+                    "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_SERVER_RUNNING_CONFIRMED",
+                    "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_CLIENT_RUNNING_PUBLICATION_RETURN",
+                    "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_SESSION_STATE_PUBLICATION_RETURN",
+                    "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_READINESS_STATE_PUBLICATION_RETURN",
+                    "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_UI_STATUS_HOST_LOG_RETURN",
+                    "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_PRE_RETURN",
+                    "DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_BEGIN_DEBUG_SESSION_RETURN result=success"
+                )
+            }
             if (-not $Phase29FDebugStartOnly) {
                 $requiredMarkers += @(
                 # The product marker is UI_PAUSE_REQUEST_PASS. Keep the
@@ -2295,6 +2325,57 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 }
                 if ($serverStart -and $serverStart -notmatch 'handle=0000000000000001 service_generation=0000000000000001') {
                     $missingMarkers += "Phase29F server start did not carry the expected nonzero current service handle/generation"
+                }
+            }
+
+            if ($Phase29GBeginDebugReturnOnly) {
+                $phase29gLines = @($serial -split "`r?`n" | Where-Object {
+                    $_ -match 'DEVELOPER_STUDIO_PHASE29G_(BEGIN_DEBUG|SOURCE_ROOT_ASSOCIATION)'
+                })
+                $returnLines = @($phase29gLines | Where-Object {
+                    $_ -match 'BEGIN_DEBUG_SESSION_RETURN result=success '
+                })
+                if ($returnLines.Count -ne 1) {
+                    $missingMarkers += "Phase29G beginDebugSession successful return count=$($returnLines.Count)"
+                }
+                $requiredOrder = @(
+                    'DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_START_API_CALL result=entered',
+                    'DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_START_API_RETURN result=GX_OK',
+                    'DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_POST_START_STATE_BEGIN result=accepted',
+                    'DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_EXECUTABLE_MODULE_REGISTRATION_RETURN result=success',
+                    'DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_SERVER_RELEASE_CALLBACK_ENTER result=entered',
+                    'DEVELOPER_STUDIO_PHASE29F_DEBUG_START_SERVER event=running_publication result=DEBUG_START_AUTHORITATIVE_RUNNING',
+                    'DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_SERVER_RELEASE_CALLBACK_RETURN result=GX_OK',
+                    'DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_RELEASE_API_RETURN result=GX_OK',
+                    'DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_SERVER_RUNNING_CONFIRMED result=release_api_GX_OK',
+                    'DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_CLIENT_RUNNING_PUBLICATION_RETURN result=running',
+                    'DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_UI_STATUS_HOST_LOG_RETURN result=success',
+                    'DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_PRE_RETURN result=success',
+                    'DEVELOPER_STUDIO_PHASE29G_BEGIN_DEBUG_BEGIN_DEBUG_SESSION_RETURN result=success'
+                )
+                $lastPosition = -1
+                foreach ($requiredPhase29gMarker in $requiredOrder) {
+                    $position = $serial.IndexOf($requiredPhase29gMarker, [StringComparison]::Ordinal)
+                    if ($position -lt 0 -or $position -le $lastPosition) {
+                        $missingMarkers += "Phase29G return-path order failed at $requiredPhase29gMarker"
+                        break
+                    }
+                    $lastPosition = $position
+                }
+                $mappingPass = @($serial -split "`r?`n" | Where-Object {
+                    $_ -match 'DEVELOPER_STUDIO_PHASE29A_STOP_MAPPING_PASS'
+                })
+                $mappingFail = @($serial -split "`r?`n" | Where-Object {
+                    $_ -match 'DEVELOPER_STUDIO_PHASE29A_STOP_MAPPING_FAIL'
+                })
+                if (($mappingPass.Count + $mappingFail.Count) -ne 1) {
+                    $missingMarkers += "Phase29G first stop mapping attempt count pass=$($mappingPass.Count) fail=$($mappingFail.Count)"
+                } else {
+                    if ($mappingPass.Count -eq 1) {
+                        Write-Host 'phase29g_first_stop_mapping=PASS'
+                    } else {
+                        Write-Host 'phase29g_first_stop_mapping=FAIL (independent later blocker)'
+                    }
                 }
             }
 
@@ -4084,6 +4165,8 @@ try {
     }
     if ($Phase29EManifestOnly) {
         Write-Host "Phase 29E manifest identity validation completed across $BootCount fresh boot(s) through debugger-start issuance." -ForegroundColor Green
+    } elseif ($Phase29GBeginDebugReturnOnly) {
+        Write-Host "Phase 29G beginDebugSession return and first-stop mapping proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
     } elseif ($Phase29FDebugStartOnly) {
         Write-Host "Phase 29F debug-start admission/handoff proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
     } elseif ($Phase28QOnly) {

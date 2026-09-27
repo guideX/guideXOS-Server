@@ -57,6 +57,7 @@ struct NativeElfRunReport {
     uint64_t guiGeneration;
     uint64_t guiContentHash;
     char guiContent[256];
+    bool hostLogSerialTruncated;
 };
 
 struct NativeElfGuiRuntimeSnapshot {
@@ -86,7 +87,12 @@ bool native_elf_gui_runtime_snapshot(NativeElfGuiRuntimeSnapshot* output);
 
 // Request the current generation's normal compositor close path.  This is an
 // owner-side control operation; it never destroys an application stack.
-bool request_native_elf_gui_close(uint64_t generation);
+bool request_native_elf_gui_close(uint64_t targetGeneration,
+                                  uint64_t requestGeneration,
+                                  const char* origin,
+                                  const char* category,
+                                  const char* reason,
+                                  const char* lifecycleState);
 
 // The loader owns the bounded physical INT3 patch table.  The Run service
 // owns breakpoint meaning and lifetime; these helpers only acquire/release an

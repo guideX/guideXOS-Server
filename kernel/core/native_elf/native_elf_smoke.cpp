@@ -3466,7 +3466,8 @@ void run_bootstrap_execution_smoke()
     print_marker("phase27d_dedicated_stack", dedicatedStackProof);
     const bool appContextProof = runProofA && reportA.appContextValid;
     print_marker("phase27d_app_context", appContextProof);
-    const bool hostLogProof = runProofA && reportA.hostLogObserved && reportA.hostLogBytes != 0;
+    const bool hostLogProof = runProofA && reportA.hostLogObserved && reportA.hostLogBytes != 0 &&
+        !reportA.hostLogSerialTruncated;
     print_marker("phase27d_host_log", hostLogProof);
 
     const bool repeatLifecycle = compiler::compile("/d27a.c", "/d27a.elf", &buildAAgain) &&

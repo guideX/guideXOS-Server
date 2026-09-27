@@ -125,6 +125,7 @@ struct NativeAppExecutionContext {
     // this point stable for existing host-call and lifecycle code.
     NativeRuntimeStatus runtimeStatus;
     uint32_t runtimeCallDepth;
+    bool hostLogSerialTruncated;
 };
 
 // These assertions pin the generated-code ABI to the SDK definition.  The
