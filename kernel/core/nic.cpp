@@ -77,6 +77,8 @@ static uint64_t s_txDmaRegionPhysicalBase = 0;
 static uint64_t s_txDmaRegionSize = 0;
 static uint32_t s_txDmaRegionFlags = 0;
 static uint32_t s_txDmaRegionMemoryType = 0;
+static uint64_t s_txDmaRegionMemoryAttributes = 0;
+static bool s_txDmaRegionMemoryAttributesValid = false;
 static TxFailureReason s_txDmaRegionFailure =
     TxFailureReason::DmaRegionUnavailable;
 
@@ -1796,6 +1798,9 @@ static bool init_tx(uint64_t mmioBase, bool postResetRearm = false)
     s_device.tx.dmaMode = s_txDmaMode;
     s_device.tx.dmaRegionFlags = s_txDmaRegionFlags;
     s_device.tx.dmaRegionMemoryType = s_txDmaRegionMemoryType;
+    s_device.tx.dmaRegionMemoryAttributes = s_txDmaRegionMemoryAttributes;
+    s_device.tx.dmaRegionMemoryAttributesValid =
+        s_txDmaRegionMemoryAttributesValid;
     s_device.tx.dmaRegionPhysicalBase = s_txDmaRegionPhysicalBase;
     s_device.tx.dmaRegionSize = s_txDmaRegionSize;
     s_device.tx.dmaRegionPhysicalEnd =
@@ -1984,6 +1989,10 @@ void set_tx_dma_region(uint64_t physicalBase, uint64_t size,
     s_txDmaRegionSize = size;
     s_txDmaRegionFlags = flags;
     s_txDmaRegionMemoryType = memoryType;
+    s_txDmaRegionMemoryAttributes = 0u;
+    s_txDmaRegionMemoryAttributesValid = tx_dma_region_memory_map_attributes(
+        memoryMap, entryCount, descriptorSize, physicalBase, size,
+        &s_txDmaRegionMemoryAttributes);
     s_txDmaRegionFailure = TxFailureReason::DmaRegionUnavailable;
 
     if (physicalBase == 0u || size == 0u || flags == 0u) {
@@ -3672,12 +3681,21 @@ static Status submit_frame(const uint8_t* data, uint16_t len)
     s_device.tx.lastDescriptorRaw1BeforePublication = 0;
     s_device.tx.lastDescriptorRaw0AfterDoorbell = 0;
     s_device.tx.lastDescriptorRaw1AfterDoorbell = 0;
+    s_device.tx.lastDescriptorRaw0PreTdt = 0;
+    s_device.tx.lastDescriptorRaw1PreTdt = 0;
     s_device.tx.lastDescriptorRaw0Final = 0;
     s_device.tx.lastDescriptorRaw1Final = 0;
     s_device.tx.lastCommand = 0;
     s_device.tx.lastDescriptorStatusBefore = 0;
     s_device.tx.lastDescriptorStatus = 0;
     s_device.tx.lastStatus = NIC_OK;
+    memzero(s_device.tx.packetFirst32BeforeTdt,
+            sizeof(s_device.tx.packetFirst32BeforeTdt));
+    memzero(s_device.tx.packetFirst32AfterTdt,
+            sizeof(s_device.tx.packetFirst32AfterTdt));
+    s_device.tx.packetPrefixBeforeTdtValid = false;
+    s_device.tx.packetPrefixAfterTdtValid = false;
+    s_device.tx.publishBarrierBeforeTdt = false;
     s_device.tx.completionPolls = 0;
     s_device.tx.completionPollLimit = TX_COMPLETION_POLL_LIMIT;
     s_device.tx.descriptorPublished = false;
@@ -3817,12 +3835,34 @@ static Status submit_frame(const uint8_t* data, uint16_t len)
     record_i219_hw_control_tx_snapshot(
         s_device.tx.preDoorbellRegisters, HwControlStage::BeforeRaw);
 
-    // Advance tail pointer to submit the descriptor
+    if (is_i219_device(s_device.deviceId) && s_txBuffer != nullptr) {
+        for (uint32_t i = 0; i < sizeof(s_device.tx.packetFirst32BeforeTdt); ++i) {
+            s_device.tx.packetFirst32BeforeTdt[i] = s_txBuffer[i];
+        }
+        s_device.tx.packetPrefixBeforeTdtValid = true;
+    }
+
     uint16_t oldTx = s_txCur;
+    capture_tx_descriptor_raw(
+        s_txDescs[oldTx], &s_device.tx.lastDescriptorRaw0PreTdt,
+        &s_device.tx.lastDescriptorRaw1PreTdt);
+
+    // Advance tail pointer to submit the descriptor
     s_txCur = (s_txCur + 1) % NUM_TX_DESC;
     s_device.tx.tdtWritten = s_txCur;
+    // Keep the final publication fence adjacent to the TDT MMIO write. The
+    // earlier fence supports the diagnostic pre-doorbell snapshot; this one
+    // is the actual CPU-store visibility boundary for descriptor and payload.
+    s_device.tx.publishBarrierBeforeTdt = true;
+    dma_publish_barrier();
     mmio_write32(s_device.mmioBase, E1000_TDT, s_txCur);
     dma_completion_barrier();
+    if (is_i219_device(s_device.deviceId) && s_txBuffer != nullptr) {
+        for (uint32_t i = 0; i < sizeof(s_device.tx.packetFirst32AfterTdt); ++i) {
+            s_device.tx.packetFirst32AfterTdt[i] = s_txBuffer[i];
+        }
+        s_device.tx.packetPrefixAfterTdtValid = true;
+    }
     capture_tx_descriptor_raw(
         s_txDescs[oldTx],
         &s_device.tx.lastDescriptorRaw0AfterDoorbell,

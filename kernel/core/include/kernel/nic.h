@@ -103,6 +103,10 @@ static const uint32_t TX_DMA_REGION_FLAG_IDENTITY   = (1u << 3);
 static const uint32_t TX_DMA_REGION_FLAG_BELOW_4G   = (1u << 4);
 static const uint32_t TX_DMA_REGION_FLAG_CACHEABLE  = (1u << 5);
 static const uint32_t TX_DMA_EFI_LOADER_DATA_TYPE   = 2u;
+static const uint64_t TX_DMA_EFI_MEMORY_UC = 0x0000000000000001ULL;
+static const uint64_t TX_DMA_EFI_MEMORY_WC = 0x0000000000000002ULL;
+static const uint64_t TX_DMA_EFI_MEMORY_WT = 0x0000000000000004ULL;
+static const uint64_t TX_DMA_EFI_MEMORY_WB = 0x0000000000000008ULL;
 
 enum class TxDmaMode : uint8_t {
     KernelImage = 0,
@@ -899,6 +903,41 @@ inline bool tx_dma_region_owned_by_loader_memory_map(
     return false;
 }
 
+// EFI_MEMORY_DESCRIPTOR.Attribute is at byte offset 32. Report this firmware
+// provenance separately from the guideXOS identity-map PTE cache policy.
+inline bool tx_dma_region_memory_map_attributes(
+    const void* memoryMap, uint64_t entryCount, uint64_t descriptorSize,
+    uint64_t regionBase, uint64_t regionSize, uint64_t* attributesOut)
+{
+    if (!memoryMap || !attributesOut || entryCount == 0u ||
+        descriptorSize < 40u || descriptorSize > 0x1000u ||
+        regionBase == 0u || regionSize == 0u) {
+        return false;
+    }
+    const uint8_t* bytes = static_cast<const uint8_t*>(memoryMap);
+    for (uint64_t index = 0; index < entryCount; ++index) {
+        if (index > (~0ULL / descriptorSize)) return false;
+        const uint8_t* descriptor = bytes + index * descriptorSize;
+        const uint32_t type = *reinterpret_cast<const uint32_t*>(descriptor);
+        const uint64_t physicalStart =
+            *reinterpret_cast<const uint64_t*>(descriptor + 8u);
+        const uint64_t pages =
+            *reinterpret_cast<const uint64_t*>(descriptor + 24u);
+        if (type != TX_DMA_EFI_LOADER_DATA_TYPE || pages == 0u ||
+            pages > (~0ULL / TX_DMA_REGION_PAGE_SIZE)) {
+            continue;
+        }
+        const uint64_t descriptorLength = pages * TX_DMA_REGION_PAGE_SIZE;
+        if (dma_range_contains(physicalStart, descriptorLength,
+                               regionBase, regionSize)) {
+            *attributesOut =
+                *reinterpret_cast<const uint64_t*>(descriptor + 32u);
+            return true;
+        }
+    }
+    return false;
+}
+
 inline bool tx_dma_region_handoff_valid(
     uint64_t regionBase, uint64_t regionSize, uint32_t flags,
     uint32_t memoryType, const void* memoryMap, uint64_t entryCount,
@@ -1447,15 +1486,20 @@ struct TxDiagnostics {
     uint64_t lastDescriptorRaw1BeforePublication;
     uint64_t lastDescriptorRaw0AfterDoorbell;
     uint64_t lastDescriptorRaw1AfterDoorbell;
+    uint64_t lastDescriptorRaw0PreTdt;
+    uint64_t lastDescriptorRaw1PreTdt;
     uint64_t lastDescriptorRaw0Final;
     uint64_t lastDescriptorRaw1Final;
     uint8_t  lastCommand;
     uint8_t  lastDescriptorStatusBefore;
     uint8_t  lastDescriptorStatus;
     uint8_t  lastStatus;
+    uint8_t  packetFirst32BeforeTdt[32];
+    uint8_t  packetFirst32AfterTdt[32];
     TxDmaMode dmaMode;
     uint32_t dmaRegionFlags;
     uint32_t dmaRegionMemoryType;
+    uint64_t dmaRegionMemoryAttributes;
     uint64_t dmaRegionPhysicalBase;
     uint64_t dmaRegionPhysicalEnd;
     uint64_t dmaRegionSize;
@@ -1478,6 +1522,10 @@ struct TxDiagnostics {
     bool     dmaRegionContiguous;
     bool     dmaRegionCacheable;
     bool     dmaRegionBelow4G;
+    bool     dmaRegionMemoryAttributesValid;
+    bool     packetPrefixBeforeTdtValid;
+    bool     packetPrefixAfterTdtValid;
+    bool     publishBarrierBeforeTdt;
     bool     rxBufferRangeValid;
     bool     ringAddressMatches;
     bool     ringAlignmentValid;

@@ -2947,6 +2947,105 @@ static void cmd_nicinfo_dma_brief()
     cmd_nicinfo_dma_report(true);
 }
 
+static void nicinfo_print_tx_dma_registers(
+    const char* label, const nic::TxRegisterSnapshot& snapshot)
+{
+    char hexStr[9];
+    output_string(label);
+    output_string(" TDBAL=0x");
+    uint_hex_to_str(snapshot.tdbal, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TDBAH=0x");
+    uint_hex_to_str(snapshot.tdbah, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TDLEN=0x");
+    uint_hex_to_str(snapshot.tdlen, 8, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+
+    output_string(label);
+    output_string(" TDH=0x");
+    uint_hex_to_str(snapshot.tdh, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TDT=0x");
+    uint_hex_to_str(snapshot.tdt, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TXDCTL=0x");
+    uint_hex_to_str(snapshot.txdctl, 8, hexStr);
+    output_string(hexStr);
+    output_string(" PCI-CMD=0x");
+    uint_hex_to_str(snapshot.pciCommand, 4, hexStr);
+    output_string(hexStr);
+    output_string(snapshot.valid ? " valid=yes\n" : " valid=no\n");
+}
+
+static void nicinfo_print_tx_dma_packet_prefix(
+    const char* label, const uint8_t* bytes, bool valid)
+{
+    char hexStr[9];
+    output_string(label);
+    if (!valid || !bytes) {
+        output_string("unavailable\n");
+        return;
+    }
+    for (uint32_t i = 0; i < 32u; ++i) {
+        uint_hex_to_str(bytes[i], 2, hexStr);
+        output_string(hexStr);
+    }
+    output_string("\n");
+}
+
+static void nicinfo_print_tx_vtd_sample(
+    const char* label, const vtd::VtdRegisterSnapshot& sample)
+{
+    char hexStr[9];
+    char hex64Str[17];
+    char numStr[16];
+    output_string(label);
+    output_string(" valid=");
+    output_string(sample.valid ? "yes" : "no");
+    output_string(" TES=");
+    output_string(sample.valid ? nicinfo_vtd_bool(sample.translationEnabled)
+                               : "unknown");
+    output_string(" GCMD=0x");
+    uint_hex_to_str(sample.gcmd, 8, hexStr);
+    output_string(hexStr);
+    output_string(" GSTS=0x");
+    uint_hex_to_str(sample.gsts, 8, hexStr);
+    output_string(hexStr);
+    output_string(" RTADDR=0x");
+    uint_hex64_to_str(sample.rootTableAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" TTM=");
+    uint_to_str(sample.valid ? vtd::root_table_mode(
+                   sample.rootTableAddress) : 0u, numStr);
+    output_string(sample.valid ? numStr : "unknown");
+    output_string("\n");
+    output_string(label);
+    output_string(" FSTS=0x");
+    uint_hex_to_str(sample.faultStatus, 8, hexStr);
+    output_string(hexStr);
+    output_string(" PPF=");
+    output_string(sample.valid ? nicinfo_vtd_bool(sample.primaryFaultPending)
+                               : "unknown");
+    output_string(" FRI=");
+    uint_to_str(sample.selectedFaultRecord == vtd::VTD_INVALID_INDEX
+                    ? 0u : sample.selectedFaultRecord, numStr);
+    output_string(sample.valid ? numStr : "unknown");
+    output_string(" fault=");
+    output_string(sample.faultPresent ? "yes" : "no");
+    output_string(" SID=0x");
+    uint_hex_to_str(sample.faultSourceId, 4, hexStr);
+    output_string(hexStr);
+    output_string(" reason=0x");
+    uint_hex_to_str(sample.faultReason, 2, hexStr);
+    output_string(hexStr);
+    output_string(" address=0x");
+    uint_hex64_to_str(sample.faultAddress, hex64Str);
+    output_string(hex64Str);
+    output_string("\n");
+}
+
 static void cmd_nicinfo_tx_iommu()
 {
     output_string("NIC TX IOMMU observation\n");
@@ -2954,6 +3053,8 @@ static void cmd_nicinfo_tx_iommu()
     const nic::NICDevice* dev = nic::get_device();
     const nic::I219IommuDiagnostics empty = {};
     const nic::I219IommuDiagnostics& diagnostic = dev ? dev->iommu : empty;
+    const nic::TxDiagnostics emptyTx = {};
+    const nic::TxDiagnostics& tx = dev ? dev->tx : emptyTx;
     const nic::TxRegisterSnapshot& before = diagnostic.txBefore;
     const nic::TxRegisterSnapshot& after = diagnostic.txAfter;
     char numStr[16];
@@ -3061,6 +3162,157 @@ static void cmd_nicinfo_tx_iommu()
     output_string("failure=");
     output_string(diagnostic.failure ? diagnostic.failure : "unknown");
     output_string("\n");
+
+    output_string("dma-region=0x");
+    uint_hex64_to_str(tx.dmaRegionPhysicalBase, hex64Str);
+    output_string(hex64Str);
+    output_string("..0x");
+    uint_hex64_to_str(tx.dmaRegionPhysicalEnd, hex64Str);
+    output_string(hex64Str);
+    output_string(" size=0x");
+    uint_hex64_to_str(tx.dmaRegionSize, hex64Str);
+    output_string(hex64Str);
+    output_string(" EFI-type=");
+    uint_to_str(tx.dmaRegionMemoryType, numStr);
+    output_string(numStr);
+    output_string(" flags=0x");
+    uint_hex_to_str(tx.dmaRegionFlags, 8, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+    output_string("dma-provenance below4G=");
+    output_string(tx.dmaRegionBelow4G ? "yes" : "no");
+    output_string(" identity=");
+    output_string(tx.dmaRegionMappingValid ? "yes" : "no");
+    output_string(" contiguous=");
+    output_string(tx.dmaRegionContiguous ? "yes" : "no");
+    output_string(" owned=");
+    output_string(tx.dmaRegionOwnershipValid ? "yes" : "no");
+    output_string(" cacheable-flag=");
+    output_string(tx.dmaRegionCacheable ? "yes\n" : "no\n");
+    output_string("efi-attributes=");
+    if (tx.dmaRegionMemoryAttributesValid) {
+        output_string("0x");
+        uint_hex64_to_str(tx.dmaRegionMemoryAttributes, hex64Str);
+        output_string(hex64Str);
+        output_string(" UC=");
+        output_string((tx.dmaRegionMemoryAttributes &
+                       nic::TX_DMA_EFI_MEMORY_UC) ? "yes" : "no");
+        output_string(" WC=");
+        output_string((tx.dmaRegionMemoryAttributes &
+                       nic::TX_DMA_EFI_MEMORY_WC) ? "yes" : "no");
+        output_string(" WT=");
+        output_string((tx.dmaRegionMemoryAttributes &
+                       nic::TX_DMA_EFI_MEMORY_WT) ? "yes" : "no");
+        output_string(" WB=");
+        output_string((tx.dmaRegionMemoryAttributes &
+                       nic::TX_DMA_EFI_MEMORY_WB) ? "yes\n" : "no\n");
+    } else {
+        output_string("unavailable\n");
+    }
+    output_string("cpu-map=identity RAM PWT=0 PCD=0 (loader source)\n");
+
+    output_string("ring VA=0x");
+    uint_hex64_to_str(tx.descriptorRingVirtualAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" PA=0x");
+    uint_hex64_to_str(tx.descriptorRingAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" TDBA=0x");
+    uint_hex64_to_str(nic::dma_address_register_value(
+        tx.preDoorbellRegisters.tdbal, tx.preDoorbellRegisters.tdbah),
+        hex64Str);
+    output_string(hex64Str);
+    output_string(" TDBA-match=");
+    output_string(tx.ringAddressMatches ? "yes\n" : "no\n");
+    output_string("descriptor index=");
+    uint_to_str(tx.lastDescriptor, numStr);
+    output_string(numStr);
+    output_string(" VA=0x");
+    uint_hex64_to_str(tx.lastDescriptorVirtualAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" PA=0x");
+    uint_hex64_to_str(tx.lastDescriptorAddress, hex64Str);
+    output_string(hex64Str);
+    output_string("\n");
+    output_string("buffer VA=0x");
+    uint_hex64_to_str(tx.lastBufferVirtualAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" PA=0x");
+    uint_hex64_to_str(tx.lastBufferAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" desc-buffer-match=");
+    output_string(tx.bufferAddressMatches ? "yes\n" : "no\n");
+
+    nicinfo_print_tx_dma_registers("pre-TDT", tx.preDoorbellRegisters);
+    nicinfo_print_tx_dma_registers("post-TDT", tx.afterDoorbellRegisters);
+    output_string("publication-fence=sfence-immediately-before-TDT ");
+    output_string(tx.publishBarrierBeforeTdt ? "reached\n" : "not-reached\n");
+    output_string("descriptor-pre-TDT=0x");
+    uint_hex64_to_str(tx.lastDescriptorRaw0PreTdt, hex64Str);
+    output_string(hex64Str);
+    output_string("/0x");
+    uint_hex64_to_str(tx.lastDescriptorRaw1PreTdt, hex64Str);
+    output_string(hex64Str);
+    output_string("\n");
+    nicinfo_print_tx_dma_packet_prefix(
+        "buffer-pre-TDT=", tx.packetFirst32BeforeTdt,
+        tx.packetPrefixBeforeTdtValid);
+    output_string("descriptor-post-TDT=0x");
+    uint_hex64_to_str(tx.lastDescriptorRaw0AfterDoorbell, hex64Str);
+    output_string(hex64Str);
+    output_string("/0x");
+    uint_hex64_to_str(tx.lastDescriptorRaw1AfterDoorbell, hex64Str);
+    output_string(hex64Str);
+    const bool doorbellDescriptorDone =
+        (tx.lastDescriptorRaw1AfterDoorbell &
+         (static_cast<uint64_t>(nic::E1000_TXD_STAT_DD) << 32)) != 0u;
+    output_string(" post-TDT-DD=");
+    output_string(doorbellDescriptorDone ? "yes" : "no");
+    output_string(" final-DD=");
+    output_string((tx.lastDescriptorStatus & nic::E1000_TXD_STAT_DD)
+                      ? "yes\n" : "no\n");
+    nicinfo_print_tx_dma_packet_prefix(
+        "buffer-post-TDT=", tx.packetFirst32AfterTdt,
+        tx.packetPrefixAfterTdtValid);
+
+    const vtd::Audit* audit = vtd::get_audit();
+    output_string("DMAR=");
+    output_string(audit && audit->dmarTablePresent ? "present" : "absent");
+    output_string(" DRHD-count=");
+    uint_to_str(audit ? audit->drhdCount : 0u, numStr);
+    output_string(numStr);
+    output_string(" matching=");
+    output_string(audit && audit->matchingDrhdFound ? "yes" : "no");
+    output_string(" base=0x");
+    uint_hex64_to_str(audit ? audit->matchingRegisterBase : 0u, hex64Str);
+    output_string(hex64Str);
+    output_string(" scope=");
+    output_string(audit && audit->matchingDrhdExplicitScope ? "explicit" :
+                  (audit && audit->matchingDrhdIncludeAll ? "include-all" : "none"));
+    output_string(" RMRR-count=");
+    uint_to_str(audit ? audit->dmar.rmrrCount : 0u, numStr);
+    output_string(numStr);
+    output_string(" applicable=");
+    output_string(audit && audit->rmrrApplicable ? "yes\n" : "no\n");
+    if (audit && audit->dmar.valid) {
+        for (uint8_t i = 0; i < audit->dmar.rmrrCount; ++i) {
+            const vtd::DmarRmrr& rmrr = audit->dmar.rmrrs[i];
+            output_string("rmrr[");
+            uint_to_str(i, numStr);
+            output_string(numStr);
+            output_string("]=0x");
+            uint_hex64_to_str(rmrr.base, hex64Str);
+            output_string(hex64Str);
+            output_string("..0x");
+            uint_hex64_to_str(rmrr.limit, hex64Str);
+            output_string(hex64Str);
+            output_string(" target-applicable=");
+            output_string(rmrr.applicable ? "yes\n" : "no\n");
+        }
+    }
+    nicinfo_print_tx_vtd_sample("VTd-before", diagnostic.beforeVtd);
+    nicinfo_print_tx_vtd_sample("VTd-after", diagnostic.afterVtd);
+    output_string("context-entry=not-read RTADDR-is-pointer-only; active-device-context=unknown\n");
 }
 
 // Exactly twelve logical lines. This is intentionally cache-only: the word
