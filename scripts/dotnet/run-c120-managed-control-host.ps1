@@ -5,7 +5,7 @@ param(
     [string]$PythonExe = "",
     [int]$FreshBootCount = 3,
     [int]$TimeoutSeconds = 360,
-    [ValidateSet("C120", "C121", "C122", "C123", "C124", "C125", "C126", "C127", "C128", "C129", "C130", "C131", "C132", "C133", "C134", "C135", "C136", "C137", "C138", "C139", "C140", "C141", "C142", "C143", "C144")]
+    [ValidateSet("C120", "C121", "C122", "C123", "C124", "C125", "C126", "C127", "C128", "C129", "C130", "C131", "C132", "C133", "C134", "C135", "C136", "C137", "C138", "C139", "C140", "C141", "C142", "C143", "C144", "C145")]
     [string]$ProofPhase = "C120",
     [ValidateSet("Production", "FocusedApi", "FocusedHost")]
     [string]$C135ProofMode = "Production",
@@ -43,6 +43,7 @@ $isC141 = $ProofPhase -eq "C141"
 $isC142 = $ProofPhase -eq "C142"
 $isC143 = $ProofPhase -eq "C143"
 $isC144 = $ProofPhase -eq "C144"
+$isC145 = $ProofPhase -eq "C145"
 $isC139 = $ProofPhase -eq "C139"
 $isC138 = $ProofPhase -eq "C138" -or $isC139
 $isC135FocusedApi = $isC135 -and $C135ProofMode -eq "FocusedApi"
@@ -61,7 +62,9 @@ $startAheadBehind = if ($startUpstream) {
     (& git -C $RepoRoot rev-list --left-right --count "HEAD...$startUpstream").Trim()
 } else { "" }
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = if ($isC144) {
+    $EvidenceRoot = if ($isC145) {
+        Join-Path $RepoRoot "out\dotnet\c145-managed-modal-dialog"
+    } elseif ($isC144) {
         Join-Path $RepoRoot "out\dotnet\c144-managed-settings-center"
     } elseif ($isC143) {
         Join-Path $RepoRoot "out\dotnet\c143-managed-groupbox"
@@ -959,10 +962,23 @@ function Add-C144Key([System.Collections.Generic.List[object]]$Commands,
 }
 
 function Add-C144Wheel([System.Collections.Generic.List[object]]$Commands,
-                       [int]$Count, [string]$Marker, [string]$Phase) {
+                        [int]$Count, [string]$Marker, [string]$Phase) {
     $events = [System.Collections.Generic.List[object]]::new()
     for ($index = 0; $index -lt $Count; $index++) { $events.Add((New-C137Wheel -1)) }
     $Commands.Add([pscustomobject]@{ action = "events"; events = $events.ToArray(); marker = $Marker; phase = $Phase })
+}
+
+function Get-C145DialogPoint([string]$Serial, [string]$Kind, [string]$Field) {
+    $records = [regex]::Matches($Serial,
+        '(?m)^\[C102-MANAGED-OUTPUT\] C145-DIALOG-GEOMETRY kind=(?<kind>\w+) bounds=[^\r\n]+')
+    $record = $null
+    foreach ($candidate in $records) {
+        if ($candidate.Groups['kind'].Value -eq $Kind) { $record = $candidate }
+    }
+    if ($null -eq $record) { throw "C145 $Kind dialog geometry was not reported." }
+    $point = [regex]::Match($record.Value, "\b$Field=(?<x>\d+),(?<y>\d+)")
+    if (-not $point.Success) { throw "C145 $Kind dialog geometry omitted $Field." }
+    return [pscustomobject]@{ x = [int]$point.Groups['x'].Value; y = [int]$point.Groups['y'].Value }
 }
 
 function Invoke-C142Boot([string]$Esp, [string]$Serial, [string]$Stdout,
@@ -1305,15 +1321,64 @@ function Invoke-C144Boot([string]$Esp, [string]$Serial, [string]$Stdout,
             $partial = if (Test-Path -LiteralPath $Serial) {
                 Get-Content -LiteralPath $Serial -Raw -ErrorAction SilentlyContinue
             } else { "" }
-            if (-not $proofStarted -and $partial -match
+            if ($isC145 -and -not $proofStarted -and $partial -match
+                    '(?m)^\[C145-PROOF\] managed-proof-started context=c145-native transport=physical-qemu result=PASS') {
+                $proofStarted = $true
+            } elseif (-not $proofStarted -and $partial -match
                     '(?m)^\[C144-PROOF\] managed-proof-started context=c144-native transport=physical-qemu result=PASS') {
                 $proofStarted = $true
             }
-            if ($proofStarted -and -not $targetReady -and $partial -match
+            if ($isC145 -and $proofStarted -and -not $targetReady -and $partial -match
+                    '(?m)^\[C145-TARGET\].*result=PASS') {
+                $targetReady = $true
+            } elseif ($proofStarted -and -not $targetReady -and $partial -match
                     '(?m)^\[C144-TARGET\].*result=PASS') {
                 $targetReady = $true
             }
             if ($proofStarted -and $targetReady -and $null -eq $commandList) {
+                if ($isC145) {
+                    $geometry = Get-C144Geometry $partial "initial"
+                    $commands = [System.Collections.Generic.List[object]]::new()
+                    $commands.Add([pscustomobject]@{ action = "calibrate"; marker = ""; phase = "c145-calibration" })
+                    Add-C144Click $commands "showStatus" '(?m)^\[C102-MANAGED-OUTPUT\] C144-DIRTY working=changed applied=preserved result=PASS' "dirty-before-reset"
+                    Add-C144Click $commands "options" '(?m)^\[C102-MANAGED-OUTPUT\] C144-MENU open=PASS capture=menu result=PASS' "options-reset-escape"
+                    Add-C144Click $commands "menuDefaults" '(?m)^\[C102-MANAGED-OUTPUT\] C145-RESET open=PASS modal=active focus=default parent=blocked result=PASS' "reset-open-escape"
+                    Add-C144Key $commands "tab" $true '(?m)^\[C102-MANAGED-OUTPUT\] C145-FOCUS tab=contained result=PASS' "dialog-tab"
+                    Add-C144Key $commands "tab" $false "" "dialog-tab-up"
+                    Add-C144Key $commands "shift" $true "" "dialog-shift-down"
+                    Add-C144Key $commands "tab" $true '(?m)^\[C102-MANAGED-OUTPUT\] C145-FOCUS shift-tab=contained result=PASS' "dialog-shift-tab"
+                    Add-C144Key $commands "tab" $false "" "dialog-shift-tab-up"
+                    Add-C144Key $commands "shift" $false "" "dialog-shift-up"
+                    Add-C144Key $commands "esc" $true '(?m)^\[C102-MANAGED-OUTPUT\] C145-RESET result=Cancel working=preserved viewport=preserved focus=restored result=PASS' "reset-escape"
+                    Add-C144Key $commands "esc" $false "" "reset-escape-up"
+                    Add-C144Click $commands "options" '(?m)^\[C102-MANAGED-OUTPUT\] C144-MENU open=PASS capture=menu result=PASS' "options-reset-pointer-cancel"
+                    Add-C144Click $commands "menuDefaults" '(?m)^\[C102-MANAGED-OUTPUT\] C145-RESET open=PASS modal=active focus=default parent=blocked result=PASS' "reset-open-pointer-cancel"
+                    Add-C144Click $commands "outsideOptions" '(?m)^\[C102-MANAGED-OUTPUT\] C145-MODAL outside=consumed parent=blocked result=PASS' "reset-outside-click"
+                    Add-C144Click $commands "resetCancel" '(?m)^\[C102-MANAGED-OUTPUT\] C145-RESET result=Cancel working=preserved viewport=preserved focus=restored result=PASS' "reset-pointer-cancel"
+                    Add-C144Click $commands "options" '(?m)^\[C102-MANAGED-OUTPUT\] C144-MENU open=PASS capture=menu result=PASS' "options-reset-enter"
+                    Add-C144Click $commands "menuDefaults" '(?m)^\[C102-MANAGED-OUTPUT\] C145-RESET open=PASS modal=active focus=default parent=blocked result=PASS' "reset-open-enter"
+                    Add-C144Key $commands "ret" $true '(?m)^\[C102-MANAGED-OUTPUT\] C145-RESET result=Reset working=defaults dirty=updated viewport=valid focus=restored result=PASS' "reset-enter-default"
+                    Add-C144Key $commands "ret" $false "" "reset-enter-up"
+                    Add-C144Click $commands "options" '(?m)^\[C102-MANAGED-OUTPUT\] C144-MENU open=PASS capture=menu result=PASS' "options-reset-pointer"
+                    Add-C144Click $commands "menuDefaults" '(?m)^\[C102-MANAGED-OUTPUT\] C145-RESET open=PASS modal=active focus=default parent=blocked result=PASS' "reset-open-pointer"
+                    Add-C144Click $commands "resetConfirm" '(?m)^\[C102-MANAGED-OUTPUT\] C145-RESET result=Reset working=defaults dirty=updated viewport=valid focus=restored result=PASS' "reset-pointer-confirm"
+                    Add-C144Click $commands "showStatus" '(?m)^\[C102-MANAGED-OUTPUT\] C144-DIRTY working=changed applied=preserved result=PASS' "dirty-before-close"
+                    Add-C144Click $commands "options" '(?m)^\[C102-MANAGED-OUTPUT\] C144-MENU open=PASS capture=menu result=PASS' "options-close-cancel"
+                    Add-C144Click $commands "menuClose" '(?m)^\[C102-MANAGED-OUTPUT\] C145-UNSAVED open=PASS modal=active parent=blocked buttons=3 result=PASS' "close-open-cancel"
+                    Add-C144Move $commands "wheelPoint" "modal-wheel-point"
+                    Add-C144Wheel $commands 1 '(?m)^\[C102-MANAGED-OUTPUT\] C145-MODAL wheel=parent-blocked viewport=preserved result=PASS' "modal-wheel"
+                    Add-C144Click $commands "outsideOptions" '(?m)^\[C102-MANAGED-OUTPUT\] C145-MODAL outside=consumed parent=blocked result=PASS' "close-outside-click"
+                    Add-C144Click $commands "dirtyCancel" '(?m)^\[C102-MANAGED-OUTPUT\] C145-UNSAVED result=Cancel dirty=preserved parent=open focus=restored result=PASS' "close-cancel"
+                    Add-C144Click $commands "options" '(?m)^\[C102-MANAGED-OUTPUT\] C144-MENU open=PASS capture=menu result=PASS' "options-close-apply"
+                    Add-C144Click $commands "menuClose" '(?m)^\[C102-MANAGED-OUTPUT\] C145-UNSAVED open=PASS modal=active parent=blocked buttons=3 result=PASS' "close-open-apply"
+                    Add-C144Click $commands "dirtyApply" '(?m)^\[C102-MANAGED-OUTPUT\] C145-UNSAVED result=Apply applied=committed closed=true result=PASS' "close-apply"
+                    $commands.Add([pscustomobject]@{ action = "done"; marker = ""; phase = "complete" })
+                    $commandList = $commands.ToArray()
+                    $calibrating = $true
+                    Send-C136QmpEvents $MonitorPort (New-C136RelativeMove 1 1) $MonitorLog
+                    $previousSerialLength = $partial.Length
+                    $commandIndex = 1
+                } else {
                 $geometry = Get-C144Geometry $partial
                 $commands = [System.Collections.Generic.List[object]]::new()
                 $commands.Add([pscustomobject]@{ action = "calibrate"; marker = ""; phase = "c144-calibration" })
@@ -1403,6 +1468,7 @@ function Invoke-C144Boot([string]$Esp, [string]$Serial, [string]$Stdout,
                 Send-C136QmpEvents $MonitorPort (New-C136RelativeMove 1 1) $MonitorLog
                 $previousSerialLength = $partial.Length
                 $commandIndex = 1
+                }
             }
             if ($calibrating -and $commandIndex -ge 1) {
                 $start = [Math]::Min($previousSerialLength, $partial.Length)
@@ -1426,7 +1492,7 @@ function Invoke-C144Boot([string]$Esp, [string]$Serial, [string]$Stdout,
                     switch ($command.action) {
                         "calibrate" { $events = New-C136RelativeMove 1 1 }
                         "move" {
-                            $geometry = Get-C144Geometry $partial
+                            $geometry = if ($isC145) { Get-C144Geometry $partial "initial" } else { Get-C144Geometry $partial }
                             $point = switch -Exact ($command.target) {
                                 "density" { $geometry.density }
                                 "densityRow2" { [pscustomobject]@{ x = $geometry.density.x + 12; y = $geometry.density.y + 45 } }
@@ -1442,9 +1508,14 @@ function Invoke-C144Boot([string]$Esp, [string]$Serial, [string]$Stdout,
                                 "apply" { $geometry.apply }
                                 "defaults" { $geometry.defaults }
                                 "options" { $geometry.options }
+                                "outsideOptions" { $geometry.options }
                                 "menuApply" { [pscustomobject]@{ x = $geometry.options.x + 20; y = $geometry.options.y + 32 } }
                                 "menuDefaults" { [pscustomobject]@{ x = $geometry.options.x + 20; y = $geometry.options.y + 52 } }
                                 "menuClose" { [pscustomobject]@{ x = $geometry.options.x + 20; y = $geometry.options.y + 92 } }
+                                "resetCancel" { Get-C145DialogPoint $partial "reset" "cancel" }
+                                "resetConfirm" { Get-C145DialogPoint $partial "reset" "confirm" }
+                                "dirtyCancel" { Get-C145DialogPoint $partial "close" "cancel" }
+                                "dirtyApply" { Get-C145DialogPoint $partial "close" "apply" }
                                 "wheelPoint" { [pscustomobject]@{ x = $geometry.view.x + 140; y = $geometry.view.y + 100 } }
                                 "scrollbarThumb" { [pscustomobject]@{ x = $geometry.bar.x + 8; y = $geometry.thumbTop + [Math]::Floor($geometry.thumbHeight / 2) } }
                                 "scrollbarPageTop" { [pscustomobject]@{ x = $geometry.bar.x + 8; y = $geometry.trackTop + 10 } }
@@ -1839,7 +1910,7 @@ function Assert-C120Serial([string]$Serial) {
         '^\[NATIVEAOT-TLS-BRIDGE\] install=.*result=00000001',
         '^\[NATIVEAOT-HEAP\] action=initialize',
         '^\[NATIVEAOT-HEAP\] action=preserve')
-    if (-not $isC140 -and -not $isC141 -and -not $isC142 -and -not $isC143 -and -not $isC144 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and -not $isC136 -and -not $isC137 -and -not $isC138) {
+    if (-not $isC145 -and -not $isC140 -and -not $isC141 -and -not $isC142 -and -not $isC143 -and -not $isC144 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and -not $isC136 -and -not $isC137 -and -not $isC138) {
         $required += @(
             '^\[C120-APPMODEL\] catalogValid=true result=PASS',
             '^\[C120-RESULT\] outcome=PASS',
@@ -1864,7 +1935,40 @@ function Assert-C120Serial([string]$Serial) {
             '^\[C102-MANAGED-OUTPUT\] C120-TESTS cases=50 result=PASS',
             '^\[C102-MANAGED-OUTPUT\] C120-HOST tests=PASS')
     }
-    if ($isC144) {
+    if ($isC145) {
+        $required += @(
+            '^\[C145-APPMODEL\] catalogValid=true result=PASS',
+            '^\[C145-PROOF\] managed-proof-started context=c145-native transport=physical-qemu result=PASS',
+            '^\[C145-RELAUNCH\] close=PASS relaunch=PASS registration=9 result=PASS',
+            '^\[C145-TARGET\].*result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C145-LOWER-REGRESSIONS c128=PASS c131=57/57 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C128-PANEL-LIFECYCLE-TESTS cases=\d+ result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C131-CHECKBOX-TESTS cases=34 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C131-CHECKBOX-HOST-TESTS cases=23 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C145-DIALOG-TESTS core=15 members=10 messagebox=11 routing=13 total=49 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C145-SETTINGS-TESTS cases=18 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C145-FOCUSED-SUITES result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C145-PROOF launch=PASS registration=9 hostCapacity=10 dialogCapacity=8 resetRegistrations=2 closeRegistrations=3 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C145-RESET open=PASS modal=active focus=default parent=blocked result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C145-RESET result=Cancel working=preserved viewport=preserved focus=restored result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C145-RESET result=Reset working=defaults dirty=updated viewport=valid focus=restored result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C145-UNSAVED open=PASS modal=active parent=blocked buttons=3 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C145-UNSAVED result=Cancel dirty=preserved parent=open focus=restored result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C145-UNSAVED result=Apply applied=committed closed=true result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C145-MODAL wheel=parent-blocked viewport=preserved result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C145-MODAL outside=consumed parent=blocked result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C145-FOCUS tab=contained result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C145-FOCUS shift-tab=contained result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C145-FOCUS reverse=advanced-within-modal result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C145-KEYBOARD default=activated once result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C145-FINAL viewport=valid registration=9 modal=none capture=none drag=none result=PASS')
+        if ([regex]::Matches($Serial, '(?m)^\[C102-MANAGED-OUTPUT\] C145-RESET result=Cancel working=preserved').Count -lt 2) {
+            $required += '^\[C145-ASSERT\] expected-two-reset-cancellations=PASS'
+        }
+        if ([regex]::Matches($Serial, '(?m)^\[C102-MANAGED-OUTPUT\] C145-RESET result=Reset working=defaults').Count -lt 2) {
+            $required += '^\[C145-ASSERT\] expected-keyboard-and-pointer-reset-confirmations=PASS'
+        }
+    } elseif ($isC144) {
         $required += @(
             '^\[C144-APPMODEL\] catalogValid=true result=PASS',
             '^\[C144-PROOF\] managed-proof-started context=c144-native transport=physical-qemu result=PASS',
@@ -2352,11 +2456,11 @@ function Assert-C120Serial([string]$Serial) {
     }
     $spaceMarker = @([regex]::Matches($Serial,
         '(?m)^\[C120-SPACE\] keydown=PASS keychar=PASS exact-once=PASS\r?$')).Count
-    if (-not $isC143 -and -not $isC142 -and -not $isC140 -and -not $isC141 -and -not $isC144 -and -not $isC136 -and -not $isC137 -and -not $isC138 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and $spaceMarker -ne 1) { throw "C120 expected one exact-once Space marker, got $spaceMarker." }
+    if (-not $isC145 -and -not $isC143 -and -not $isC142 -and -not $isC140 -and -not $isC141 -and -not $isC144 -and -not $isC136 -and -not $isC137 -and -not $isC138 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and $spaceMarker -ne 1) { throw "C120 expected one exact-once Space marker, got $spaceMarker." }
     $saveActivation = @([regex]::Matches($Serial,
         '(?m)^\[C102-MANAGED-OUTPUT\] C120-ACTIVATE control=Save result=PASS\r?$')).Count
-    if (-not $isC143 -and -not $isC142 -and -not $isC140 -and -not $isC141 -and -not $isC144 -and -not $isC136 -and -not $isC137 -and -not $isC138 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and $saveActivation -ne 1) { throw "C120 expected one managed Save activation, got $saveActivation." }
-    if ($Serial -match '(?m)^\[(?:C144|C143|C142|C141|C140|C138|C137|C136|C135|C134|C132|C131|C130|C129|C120|C121|C122|C123|C124|C125|C126|C127|C128)-[^\r\n]*FAIL|PageFault|triple.?fault|FAIL_FAST|fatal kernel failure|boot failure') {
+    if (-not $isC145 -and -not $isC143 -and -not $isC142 -and -not $isC140 -and -not $isC141 -and -not $isC144 -and -not $isC136 -and -not $isC137 -and -not $isC138 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and $saveActivation -ne 1) { throw "C120 expected one managed Save activation, got $saveActivation." }
+    if ($Serial -match '(?m)^\[(?:C145|C144|C143|C142|C141|C140|C138|C137|C136|C135|C134|C132|C131|C130|C129|C120|C121|C122|C123|C124|C125|C126|C127|C128)-[^\r\n]*FAIL|PageFault|triple.?fault|FAIL_FAST|fatal kernel failure|boot failure') {
         throw "Managed control proof serial output contains a failure or fault marker."
     }
     [pscustomobject]@{
@@ -2385,7 +2489,7 @@ if (-not $SkipManagedBuild -and -not $providedComposite) {
         "-RuntimePackOutputRoot", $runtimePackOutputRoot,
         "-UseGuideXosRuntimePack", "-ProductionApplication", "-PersistentCompositeLifecycle",
         "-AllocationMode", "Allocating", "-ManagedProjectMode",
-        $(if ($isC144) { "C144Composite" } elseif ($isC143) { "C143Composite" } elseif ($isC142) { "C142Composite" } elseif ($isC141) { "C141Composite" } elseif ($isC140) { "C140Composite" } elseif ($isC139) { "C139Composite" } elseif ($isC138) { "C138Composite" } elseif ($isC137) { "C137Composite" } elseif ($isC136) { "C136Composite" } elseif ($isC135) { "C135Composite" } elseif ($isC134) { "C134Composite" } elseif ($isC133) { "C133Composite" } elseif ($isC132) { "C132Composite" } elseif ($isC131) { "C131Composite" } elseif ($isC129) { "C129Composite" } elseif ($isC128) { "C128Composite" } elseif ($isC130 -or $isC127) { "C127Composite" } elseif ($isC126) { "C126Composite" } elseif ($isC125) { "C125Composite" } elseif ($isC124) { "C124Composite" } elseif ($isC123) { "C123Composite" } elseif ($isC122) { "C122Composite" } elseif ($isC121) { "C121Composite" } else { "C120Composite" }),
+        $(if ($isC145) { "C145Composite" } elseif ($isC144) { "C144Composite" } elseif ($isC143) { "C143Composite" } elseif ($isC142) { "C142Composite" } elseif ($isC141) { "C141Composite" } elseif ($isC140) { "C140Composite" } elseif ($isC139) { "C139Composite" } elseif ($isC138) { "C138Composite" } elseif ($isC137) { "C137Composite" } elseif ($isC136) { "C136Composite" } elseif ($isC135) { "C135Composite" } elseif ($isC134) { "C134Composite" } elseif ($isC133) { "C133Composite" } elseif ($isC132) { "C132Composite" } elseif ($isC131) { "C131Composite" } elseif ($isC129) { "C129Composite" } elseif ($isC128) { "C128Composite" } elseif ($isC130 -or $isC127) { "C127Composite" } elseif ($isC126) { "C126Composite" } elseif ($isC125) { "C125Composite" } elseif ($isC124) { "C124Composite" } elseif ($isC123) { "C123Composite" } elseif ($isC122) { "C122Composite" } elseif ($isC121) { "C121Composite" } else { "C120Composite" }),
         "-PythonExe", $PythonExe)
     if ($isC134) { $managedBuildArguments += "-IncludeC134FocusedTests" }
     if ($isC135) { $managedBuildArguments += "-IncludeC135FocusedTests" }
@@ -2405,7 +2509,10 @@ Invoke-Checked "powershell" @(
     "-C114ManagedDirectoryServices", "-C117ManagedTextArea", "-C118ManagedListBox")
 
 $kernelFlags = "-DGXOS_NATIVEAOT_PRODUCTION_APPLICATION -DGXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH -DGXOS_NATIVEAOT_C112_REUSABLE_MANAGED_APPLICATION -DGXOS_NATIVEAOT_C113_MANAGED_FILE_SERVICES -DGXOS_NATIVEAOT_C114_MANAGED_DIRECTORY_SERVICES -DGXOS_NATIVEAOT_C115_MANAGED_FILE_PICKER -DGXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT -DGXOS_NATIVEAOT_C117_MANAGED_TEXT_AREA -DGXOS_NATIVEAOT_C118_MANAGED_LIST_BOX -DGXOS_NATIVEAOT_C119_MANAGED_BUTTON -DGXOS_NATIVEAOT_C120_MANAGED_CONTROL_HOST"
-if ($isC144) {
+if ($isC145) {
+    $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL -DGXOS_NATIVEAOT_C123_MANAGED_SEPARATOR -DGXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON -DGXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR -DGXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C127_MANAGED_PANEL -DGXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE -DGXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT -DGXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX -DGXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON -DGXOS_NATIVEAOT_C133_REUSABLE_COMBOBOX -DGXOS_NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING -DGXOS_NATIVEAOT_C135_REUSABLE_POPUP_MENU -DGXOS_NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU -DGXOS_NATIVEAOT_C137_MOUSE_WHEEL_SCROLLING -DGXOS_NATIVEAOT_C138_REUSABLE_SCROLLBAR -DGXOS_NATIVEAOT_C139_SHARED_SCROLL_VIEWPORT -DGXOS_NATIVEAOT_C140_MANAGED_SCROLL_VIEW -DGXOS_NATIVEAOT_C141_MANAGED_VERTICAL_STACK -DGXOS_NATIVEAOT_C142_MANAGED_VERTICAL_STACK -DGXOS_NATIVEAOT_C143_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C144_MANAGED_SETTINGS_CENTER -DGXOS_NATIVEAOT_C145_MANAGED_MODAL_DIALOG"
+}
+elseif ($isC144) {
     $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL -DGXOS_NATIVEAOT_C123_MANAGED_SEPARATOR -DGXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON -DGXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR -DGXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C127_MANAGED_PANEL -DGXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE -DGXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT -DGXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX -DGXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON -DGXOS_NATIVEAOT_C133_REUSABLE_COMBOBOX -DGXOS_NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING -DGXOS_NATIVEAOT_C135_REUSABLE_POPUP_MENU -DGXOS_NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU -DGXOS_NATIVEAOT_C137_MOUSE_WHEEL_SCROLLING -DGXOS_NATIVEAOT_C138_REUSABLE_SCROLLBAR -DGXOS_NATIVEAOT_C139_SHARED_SCROLL_VIEWPORT -DGXOS_NATIVEAOT_C140_MANAGED_SCROLL_VIEW -DGXOS_NATIVEAOT_C141_MANAGED_VERTICAL_STACK -DGXOS_NATIVEAOT_C142_MANAGED_VERTICAL_STACK -DGXOS_NATIVEAOT_C143_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C144_MANAGED_SETTINGS_CENTER"
 }
 elseif ($isC143) {
@@ -2519,7 +2626,9 @@ if (-not $SkipQemu) {
         foreach ($stale in @($serial, $stdout, $stderr, $monitorLog)) {
             if (Test-Path -LiteralPath $stale -PathType Leaf) { Remove-Item -LiteralPath $stale -Force }
         }
-        $boot = if ($isC144) {
+        $boot = if ($isC145) {
+            Invoke-C144Boot $esp $serial $stdout $stderr $monitorLog $monitorPort $qemu $ovmf
+        } elseif ($isC144) {
             Invoke-C144Boot $esp $serial $stdout $stderr $monitorLog $monitorPort $qemu $ovmf
         } elseif ($isC143) {
             Invoke-C143Boot $esp $serial $stdout $stderr $monitorLog $monitorPort $qemu $ovmf
@@ -2569,9 +2678,9 @@ if (-not $SkipQemu) {
 $evidenceSerial = if ($bootResults.Count -gt 0) {
     Get-Content -LiteralPath (Join-Path $EvidenceRoot "boot-01\serial.log")
 } else { @("QEMU not executed; build-only evidence.") }
-$evidenceSerial | Where-Object { $_ -match '^\[(?:C144|C143|C142|C141|C140|C138|C137|C136|C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C125|C124|C123|C122|C121|C120|C119|C118|C117|C116|C115)-' } |
+$evidenceSerial | Where-Object { $_ -match '^\[(?:C145|C144|C143|C142|C141|C140|C138|C137|C136|C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C125|C124|C123|C122|C121|C120|C119|C118|C117|C116|C115)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "managed-control-host-output.txt") -Encoding ASCII
-$evidenceSerial | Where-Object { $_ -match '^\[(?:C144|C143|C142|C141|C140|C138|C137|C136|C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C124|C123|C122|C121|C120)-' } |
+$evidenceSerial | Where-Object { $_ -match '^\[(?:C145|C144|C143|C142|C141|C140|C138|C137|C136|C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C124|C123|C122|C121|C120)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "control-host-evidence.txt") -Encoding ASCII
 $evidenceSerial | Where-Object { $_ -match '^\[(?:C116|C117|C118|C119)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "regression-evidence.txt") -Encoding ASCII
@@ -2673,6 +2782,7 @@ $sourceFiles = @(
     "scripts\dotnet\run-c135-managed-popup-menu.ps1",
     "scripts\dotnet\run-c136-secondary-pointer-context-menu.ps1",
     "scripts\dotnet\run-c144-managed-settings-center.ps1",
+    "scripts\dotnet\run-c145-managed-modal-dialog.ps1",
     "scripts\dotnet\run-c139-shared-scroll-viewport.ps1",
     "docs\dotnet\NATIVEAOT_C122_MANAGED_LABEL.md",
     "docs\dotnet\NATIVEAOT_C123_MANAGED_SEPARATOR.md",
@@ -2696,7 +2806,12 @@ $sourceFiles = @(
     "docs\dotnet\NATIVEAOT_C141_MANAGED_VERTICAL_STACK_LAYOUT.md",
     "docs\dotnet\NATIVEAOT_C142_STACK_MARGIN_ALIGNMENT.md",
     "docs\dotnet\NATIVEAOT_C143_MANAGED_GROUPBOX.md",
-    "docs\dotnet\NATIVEAOT_C144_MANAGED_SETTINGS_CENTER.md")
+    "docs\dotnet\NATIVEAOT_C144_MANAGED_SETTINGS_CENTER.md",
+    "docs\dotnet\NATIVEAOT_C145_MANAGED_MODAL_DIALOG.md",
+    "samples\managed\HostLogProof\GuideXos\GuideXosDialog.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosMessageBox.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosDialogC145Tests.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosSettingsCenterC145Tests.cs")
 $sourceHashes = [ordered]@{}
 foreach ($sourceFile in $sourceFiles) { $sourceHashes[$sourceFile] = Get-Hash (Join-Path $RepoRoot $sourceFile) }
 
@@ -2711,10 +2826,10 @@ $c143FinalOffset = if ($isC143 -and $bootResults.Count -gt 0) {
 $c144InitialGeometry = $null
 $c144FinalGeometry = $null
 $c144Serial = ""
-if ($isC144 -and $bootResults.Count -gt 0) {
+if (($isC144 -or $isC145) -and $bootResults.Count -gt 0) {
     $c144Serial = Get-Content -LiteralPath (Join-Path $EvidenceRoot "boot-01\serial.log") -Raw
     $c144InitialGeometry = Get-C144Geometry $c144Serial "initial"
-    $c144FinalGeometry = Get-C144Geometry $c144Serial "final"
+    if ($isC144) { $c144FinalGeometry = Get-C144Geometry $c144Serial "final" }
 }
 @"
 startHead=$startHead
@@ -2746,7 +2861,7 @@ $manifest = [ordered]@{
     freshBootCount = $FreshBootCount; qemuExecuted = -not $SkipQemu
     inputs = $inputs; sourceHashes = $sourceHashes; boots = @($bootResults)
     evidence = [ordered]@{ serial = "boot-01\serial.log"; managed = "managed-control-host-output.txt"; controlHost = "control-host-evidence.txt"; regressions = "regression-evidence.txt"; lifecycle = "lifecycle-evidence.txt" }
-    documentation = if ($isC144) { "docs\dotnet\NATIVEAOT_C144_MANAGED_SETTINGS_CENTER.md" } elseif ($isC143) { "docs\dotnet\NATIVEAOT_C143_MANAGED_GROUPBOX.md" } elseif ($isC142) { "docs\dotnet\NATIVEAOT_C142_STACK_MARGIN_ALIGNMENT.md" } elseif ($isC141) { "docs\dotnet\NATIVEAOT_C141_MANAGED_VERTICAL_STACK_LAYOUT.md" } elseif ($isC140) { "docs\dotnet\NATIVEAOT_C140_MANAGED_SCROLLVIEW.md" } elseif ($isC135) { "docs\dotnet\NATIVEAOT_C135_MANAGED_POPUP_MENU.md" } elseif ($isC134) { "docs\dotnet\NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING.md" } elseif ($isC132) { "docs\dotnet\NATIVEAOT_C132_MANAGED_RADIOBUTTON.md" } elseif ($isC131) { "docs\dotnet\NATIVEAOT_C131_MANAGED_CHECKBOX.md" } elseif ($isC130) { "docs\dotnet\NATIVEAOT_C130_C127_WRAPPER_STALL.md" } elseif ($isC129) { "docs\dotnet\NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT.md" } elseif ($isC128) { "docs\dotnet\NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE.md" } elseif ($isC127) { "docs\dotnet\NATIVEAOT_C127_MANAGED_PANEL.md" } elseif ($isC126) { "docs\dotnet\NATIVEAOT_C126_MANAGED_GROUP_BOX.md" } elseif ($isC125) { "docs\dotnet\NATIVEAOT_C125_MANAGED_PROGRESS_BAR.md" } elseif ($isC124) { "docs\dotnet\NATIVEAOT_C124_MANAGED_RADIO_BUTTON.md" } elseif ($isC123) { "docs\dotnet\NATIVEAOT_C123_MANAGED_SEPARATOR.md" } elseif ($isC122) { "docs\dotnet\NATIVEAOT_C122_MANAGED_LABEL.md" } elseif ($isC121) { "docs\dotnet\NATIVEAOT_C121_MANAGED_CHECKBOX.md" } else { "docs\dotnet\NATIVEAOT_C120_MANAGED_CONTROL_HOST.md" }
+    documentation = if ($isC145) { "docs\dotnet\NATIVEAOT_C145_MANAGED_MODAL_DIALOG.md" } elseif ($isC144) { "docs\dotnet\NATIVEAOT_C144_MANAGED_SETTINGS_CENTER.md" } elseif ($isC143) { "docs\dotnet\NATIVEAOT_C143_MANAGED_GROUPBOX.md" } elseif ($isC142) { "docs\dotnet\NATIVEAOT_C142_STACK_MARGIN_ALIGNMENT.md" } elseif ($isC141) { "docs\dotnet\NATIVEAOT_C141_MANAGED_VERTICAL_STACK_LAYOUT.md" } elseif ($isC140) { "docs\dotnet\NATIVEAOT_C140_MANAGED_SCROLLVIEW.md" } elseif ($isC135) { "docs\dotnet\NATIVEAOT_C135_MANAGED_POPUP_MENU.md" } elseif ($isC134) { "docs\dotnet\NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING.md" } elseif ($isC132) { "docs\dotnet\NATIVEAOT_C132_MANAGED_RADIOBUTTON.md" } elseif ($isC131) { "docs\dotnet\NATIVEAOT_C131_MANAGED_CHECKBOX.md" } elseif ($isC130) { "docs\dotnet\NATIVEAOT_C130_C127_WRAPPER_STALL.md" } elseif ($isC129) { "docs\dotnet\NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT.md" } elseif ($isC128) { "docs\dotnet\NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE.md" } elseif ($isC127) { "docs\dotnet\NATIVEAOT_C127_MANAGED_PANEL.md" } elseif ($isC126) { "docs\dotnet\NATIVEAOT_C126_MANAGED_GROUP_BOX.md" } elseif ($isC125) { "docs\dotnet\NATIVEAOT_C125_MANAGED_PROGRESS_BAR.md" } elseif ($isC124) { "docs\dotnet\NATIVEAOT_C124_MANAGED_RADIO_BUTTON.md" } elseif ($isC123) { "docs\dotnet\NATIVEAOT_C123_MANAGED_SEPARATOR.md" } elseif ($isC122) { "docs\dotnet\NATIVEAOT_C122_MANAGED_LABEL.md" } elseif ($isC121) { "docs\dotnet\NATIVEAOT_C121_MANAGED_CHECKBOX.md" } else { "docs\dotnet\NATIVEAOT_C120_MANAGED_CONTROL_HOST.md" }
 }
 if ($isC133) {
     $manifest.notes.order = "Open, Save, Save As, Show Path, Status display ComboBox, Document; C133 replaces the Full Path/File Name radio pair with one registered non-editable ComboBox and changes registration from 8 to 7"
@@ -2815,7 +2930,68 @@ if ($isC140) {
     $manifest.notes.capture = "final pointer drag owner none; ScrollView has no transient popup lease"
     $manifest.documentation = "docs\dotnet\NATIVEAOT_C140_MANAGED_SCROLLVIEW.md"
 }
-if ($isC144) {
+if ($isC145) {
+    $c145ResetCancel = Get-C145DialogPoint $c144Serial "reset" "cancel"
+    $c145ResetConfirm = Get-C145DialogPoint $c144Serial "reset" "confirm"
+    $c145CloseApply = Get-C145DialogPoint $c144Serial "close" "apply"
+    $c145CloseDiscard = Get-C145DialogPoint $c144Serial "close" "discard"
+    $c145CloseCancel = Get-C145DialogPoint $c144Serial "close" "cancel"
+    $manifest.hostAbi.inputTransport = "existing pointer, wheel, KeyDown, and Shift payload transport; ABI v1/table 104 unchanged"
+    $manifest.controlHost.capacity = 10
+    $manifest.controlHost.registrationCount = 9
+    $manifest.controlHost.tests = "C145 Dialog core 15; membership 10; MessageBox 11; modal routing 13; total 49; C145 Settings Center 18; C128 46; C131 34 API + 23 host cases; C144 56-case prior evidence referenced"
+    $manifest.controlHost.modalOwner = "existing GuideXosControlHost single child scope; no modal stack or parallel focus system"
+    $manifest.controlHost.registrationPolicy = "pre-register application-owned Dialog controls in two separate fixed-capacity child hosts; 14 registrations allocated total; parent stays 9/10; reset 2 and dirty-close 3; parent plus the active modal child is at most 12"
+    $manifest.dialog = [ordered]@{
+        capacity = 8
+        titleMaximumLength = 32
+        messageMaximumLength = 112
+        messageMaximumLines = 4
+        supportedMembers = @("Label", "Button", "CheckBox", "ComboBox", "Separator")
+        unsupportedMembers = @("RadioButton", "Panel", "GroupBox", "ScrollView", "Dialog", "other host controls")
+        defaultAndCancel = "configured Button result; Enter routes normal Button activation; Escape closes with cancel result; OK-only MessageBox Escape maps to OK"
+        focusEntry = "eligible configured default Button, otherwise first eligible focusable member"
+        traversal = "existing child GuideXosControlHost cyclic Tab/Shift+Tab order"
+        restoration = "existing parent host restores saved stable ID; if hidden/disabled, its eligible next-member fallback is used"
+        callbackOrder = "set Result, leave modal scope and restore parent focus, then call Closed once; callback may reopen only after the current modal exit completes"
+        membership = "fixed direct references; duplicate and layout-owned members rejected; no lifetime ownership; overflow returns false"
+        geometry = [ordered]@{ resetCancel = $c145ResetCancel; resetConfirm = $c145ResetConfirm; closeApply = $c145CloseApply; closeDiscard = $c145CloseDiscard; closeCancel = $c145CloseCancel }
+    }
+    $manifest.messageBox = [ordered]@{
+        api = "GuideXosMessageBox configures the same GuideXosDialog engine"
+        buttonSets = @("OK", "OKCancel", "YesNo", "YesNoCancel")
+        dynamicButtonArrays = $false
+        escape = "OK-only maps to OK; OKCancel/YesNoCancel map to Cancel; YesNo maps to No"
+    }
+    $manifest.settingsCenter = [ordered]@{
+        application = "Managed Settings Center"
+        parentRegistrations = 9
+        parentCapacity = 10
+        resetDialogRegistrations = 2
+        dirtyCloseDialogRegistrations = 3
+        dialogChildCapacity = 8
+        cleanClose = "direct; no confirmation"
+        reset = "Cancel preserves working/applied snapshot and viewport; Reset updates working defaults and normal dirty/dynamic-layout state"
+        dirtyClose = "Cancel keeps parent open and dirty; Discard closes without applying; Apply commits and closes"
+        scroll = "parent viewport remains unchanged through modal open/cancel; confirmed content change uses existing clamp"
+        ownership = "application owns controls; dialogs keep non-owning references; GroupBox, ScrollView and VerticalStack remain non-owning/geometry-only"
+    }
+    $manifest.productionInput = [ordered]@{
+        resetCancelEscape = $c144Serial.Contains("C145-RESET result=Cancel working=preserved")
+        resetCancelPointer = ([regex]::Matches($c144Serial, '(?m)^\[C102-MANAGED-OUTPUT\] C145-RESET result=Cancel working=preserved').Count -ge 2)
+        resetConfirmEnter = $c144Serial.Contains("C145-KEYBOARD default=activated once result=PASS")
+        resetConfirmPointer = ([regex]::Matches($c144Serial, '(?m)^\[C102-MANAGED-OUTPUT\] C145-RESET result=Reset working=defaults').Count -ge 2)
+        dirtyCloseCancel = $c144Serial.Contains("C145-UNSAVED result=Cancel dirty=preserved parent=open focus=restored result=PASS")
+        dirtyCloseApply = $c144Serial.Contains("C145-UNSAVED result=Apply applied=committed closed=true result=PASS")
+        modalWheelBlocksParent = $c144Serial.Contains("C145-MODAL wheel=parent-blocked viewport=preserved result=PASS")
+        outsideClickBlocksParent = $c144Serial.Contains("C145-MODAL outside=consumed parent=blocked result=PASS")
+    }
+    $manifest.stress = [ordered]@{ messageBoxOpenCloseCycles = 25; resetConfirmationCycles = 25; dirtyCloseConfirmationCycles = 25; closeChoices = "Cancel, Discard, Apply; repeated fixed registrations and no modal/capture/drag leakage verified each cycle" }
+    $manifest.finalState = [ordered]@{ modalOwner = "none"; transientCaptureOwner = "none"; pointerDragOwner = "none"; viewport = "valid"; registrationCount = 9; parentCapacity = 10 }
+    $manifest.nativeAot = [ordered]@{ compositeElfSha256 = Get-Hash $compositeElf; proofKernelSha256 = Get-Hash $kernelPath; boots = @($bootResults | ForEach-Object { [ordered]@{ boot = $_.boot; outcome = $_.outcome; serialSha256 = $_.serialSha256 } }) }
+    $manifest.retainedSuites = [ordered]@{ c144 = "56/56 prior evidence referenced; C145 reruns 18 integration cases against updated Reset/Close behavior"; c143 = "68/68 historical evidence referenced"; c142 = "68/68 historical evidence referenced"; c141 = "56/56 historical evidence referenced"; c140 = "58/58 historical evidence referenced"; c139 = "54/54 historical evidence referenced"; c138 = "62/62 historical evidence referenced"; c137 = "46/46 historical evidence referenced"; c128 = "46/46 Panel lifecycle rerun"; c129 = "31/31 Shift/Tab cases rerun; three fresh boots PASS"; c131 = "34/34 CheckBox API and 23/23 host cases rerun"; c133 = "Cumulative ComboBox production routing PASS in three C134 boots; standalone C133 proof timed out before its focused-suite marker"; c134 = "Transient-capture 30/30 and ComboBox production route rerun; three fresh boots PASS (focused C133 44/24 suites not emitted in this launch context)"; c135 = "Production 3/3 PASS; focused API 40/40 plus transient 30/30, 3/3 PASS; focused host emitted 40/40 PASS but timed out before close/result and did not emit transient 30/30" }
+    $manifest.documentation = "docs\dotnet\NATIVEAOT_C145_MANAGED_MODAL_DIALOG.md"
+} elseif ($isC144) {
     $manifest.hostAbi.inputTransport = "existing pointer, wheel, scrollbar drag, KeyDown, KeyChar, and Shift payload transport; ABI v1/table 104 unchanged"
     $manifest.controlHost.capacity = 10
     $manifest.controlHost.legacyC120HostSuite = "not rerun by C144; only the 56 focused C144 application cases are claimed as rerun"

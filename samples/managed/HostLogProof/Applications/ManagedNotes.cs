@@ -1144,12 +1144,15 @@ public sealed class ManagedNotes : GuideXosApplication
             }
 #endif
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
             if (_c133ProofContext)
             {
                 _mainControlHost.TryRegisterComboBox(
                     C133ComboControlId, _pathDisplayCombo);
             }
-            else if (_c124ProofContext
+            else
+#endif
+            if (_c124ProofContext
 #if HOSTLOGPROOF_C132_REUSABLE_RADIO_BUTTON
                 || _c132ProofContext
 #endif

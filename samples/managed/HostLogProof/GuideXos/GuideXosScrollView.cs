@@ -82,6 +82,7 @@ public sealed class GuideXosScrollView
     private bool _visible = true;
     private bool _enabled = true;
     private int _focusedIndex = -1;
+    private bool _hasFocus;
     private object _lastTargetMember;
     private object _lastActivatedMember;
     private uint _rejectedInputCount;
@@ -120,7 +121,8 @@ public sealed class GuideXosScrollView
     public bool Visible => _visible;
     public bool Enabled => _enabled;
     public bool EffectiveVisible => _visible;
-    public bool HasFocus => _focusedIndex >= 0 && IsFocusableEligible(_focusedIndex);
+    public bool HasFocus => _hasFocus && _focusedIndex >= 0 &&
+        IsFocusableEligible(_focusedIndex);
     public int FocusedMemberIndex => HasFocus ? _focusedIndex : -1;
     public object FocusedMember => HasFocus ? _members[_focusedIndex].Member : null;
     public object LastTargetMember => _lastTargetMember;
@@ -244,12 +246,14 @@ public sealed class GuideXosScrollView
     {
         int index = FindMemberIndex(member);
         if (index < 0) return Reject(GuideXosScrollViewResult.NotMember);
-        if (_focusedIndex == index) Blur();
+        bool removedFocused = _focusedIndex == index;
+        if (removedFocused) Blur();
         else if (_focusedIndex > index) --_focusedIndex;
         DetachMember(_members[index].Kind, _members[index].Member);
         for (int move = index + 1; move < _memberCount; move++)
             _members[move - 1] = _members[move];
         _members[--_memberCount] = default;
+        if (removedFocused) _focusedIndex = -1;
         RecalculateContentExtent();
         return GuideXosScrollViewResult.Removed;
     }
@@ -264,6 +268,7 @@ public sealed class GuideXosScrollView
             _members[index] = default;
         }
         _memberCount = 0;
+        _focusedIndex = -1;
         RecalculateContentExtent();
         return GuideXosScrollViewResult.Cleared;
     }
@@ -465,13 +470,21 @@ public sealed class GuideXosScrollView
                 return;
             }
         }
+        for (int index = 0; index < start && index < _memberCount; index++)
+        {
+            if (IsFocusableEligible(index))
+            {
+                FocusMemberIndex(index);
+                return;
+            }
+        }
     }
 
     public void Blur()
     {
-        if (_focusedIndex >= 0 && _focusedIndex < _memberCount)
+        if (_hasFocus && _focusedIndex >= 0 && _focusedIndex < _memberCount)
             BlurMember(_members[_focusedIndex].Kind, _members[_focusedIndex].Member);
-        _focusedIndex = -1;
+        _hasFocus = false;
     }
 
     public void RecalculateContentExtent()
@@ -574,6 +587,7 @@ public sealed class GuideXosScrollView
         _lastActivatedMember = null;
         _rejectedInputCount = 0;
         Blur();
+        _focusedIndex = -1;
         _viewport.SetOffset(0);
     }
 
@@ -593,12 +607,15 @@ public sealed class GuideXosScrollView
     private bool FocusMemberIndex(int index)
     {
         if (!IsFocusableEligible(index)) return false;
-        if (_focusedIndex != index)
+        if (_hasFocus && _focusedIndex == index)
         {
-            Blur();
-            _focusedIndex = index;
-            FocusMember(_members[index].Kind, _members[index].Member);
+            EnsureMemberVisible(index);
+            return true;
         }
+        if (_hasFocus) Blur();
+        _focusedIndex = index;
+        FocusMember(_members[index].Kind, _members[index].Member);
+        _hasFocus = true;
         EnsureMemberVisible(index);
         return true;
     }

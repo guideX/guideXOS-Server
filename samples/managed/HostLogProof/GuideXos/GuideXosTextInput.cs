@@ -76,6 +76,19 @@ public readonly struct GuideXosInputEvent
             GuideXosInputKind.PointerMove, x, y, 0u, '\0', false,
             GuideXosPointerButton.None, 0);
     }
+
+    internal static GuideXosInputEvent ForKeyDown(
+        GuideXosTextInputKey key, bool shift = false)
+    {
+        return new GuideXosInputEvent(GuideXosInputKind.KeyDown, 0, 0,
+            (uint)key, '\0', shift, GuideXosPointerButton.None, 0);
+    }
+
+    internal static GuideXosInputEvent ForKeyChar(char character)
+    {
+        return new GuideXosInputEvent(GuideXosInputKind.KeyChar, 0, 0,
+            0u, character, false, GuideXosPointerButton.None, 0);
+    }
 }
 
 public enum GuideXosTextInputKey : uint

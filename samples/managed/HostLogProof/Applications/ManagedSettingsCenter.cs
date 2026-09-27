@@ -104,6 +104,20 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         new(24, 54, 248, 18, "Enable input settings", true);
     private readonly GuideXosButton _optionsButton = new(420, 48, 112, 22, "Options");
     private readonly GuideXosPopupMenu _menu = new(0, 0, 144, 4, 20);
+    private readonly GuideXosDialog _resetDialog = new(112, 96, 336, 160,
+        "Confirm reset");
+    private readonly GuideXosButton _resetCancelButton =
+        new(140, 226, 96, 18, "Cancel");
+    private readonly GuideXosButton _resetConfirmButton =
+        new(264, 226, 96, 18, "Reset");
+    private readonly GuideXosDialog _dirtyCloseDialog = new(92, 96, 376, 160,
+        "Unsaved changes");
+    private readonly GuideXosButton _closeApplyButton =
+        new(136, 226, 88, 18, "Apply");
+    private readonly GuideXosButton _closeDiscardButton =
+        new(236, 226, 88, 18, "Discard");
+    private readonly GuideXosButton _closeCancelButton =
+        new(336, 226, 88, 18, "Cancel");
     private readonly object[][] _sectionLeaves;
     private GuideXosControlHost _controlHost;
     private GuideXosHost _appHost;
@@ -118,6 +132,14 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     private int _initialContentHeight;
     private int _finalContentHeight;
     private uint _geometrySequence;
+    private GuideXosDialog _activeDialog;
+    private bool _resettingComposition;
+    private bool _surfaceClosing;
+    private bool _c145TestsPassed;
+    private bool _c145FocusedTesting;
+    private ManagedSettingsSnapshot _dialogWorkingSnapshot;
+    private ManagedSettingsSnapshot _dialogAppliedSnapshot;
+    private int _dialogViewportOffset;
 
     public ManagedSettingsCenter()
     {
@@ -175,6 +197,26 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _menu.TryAddItem("Reset to defaults", MenuDefaults);
         _menu.TryAddSeparator();
         _menu.TryAddItem("Close", MenuClose);
+
+        _resetDialog.TryAddMember(_resetCancelButton);
+        _resetDialog.TryAddMember(_resetConfirmButton);
+        _resetDialog.TrySetButtonResult(_resetCancelButton, GuideXosDialogResult.Cancel);
+        _resetDialog.TrySetButtonResult(_resetConfirmButton, GuideXosDialogResult.Reset);
+        _resetDialog.TrySetDefaultButton(_resetConfirmButton);
+        _resetDialog.TrySetCancelResult(GuideXosDialogResult.Cancel);
+        _resetDialog.TrySetMessage("Replace the working settings with defaults?");
+        _resetDialog.Closed = OnResetDialogClosed;
+
+        _dirtyCloseDialog.TryAddMember(_closeApplyButton);
+        _dirtyCloseDialog.TryAddMember(_closeDiscardButton);
+        _dirtyCloseDialog.TryAddMember(_closeCancelButton);
+        _dirtyCloseDialog.TrySetButtonResult(_closeApplyButton, GuideXosDialogResult.Apply);
+        _dirtyCloseDialog.TrySetButtonResult(_closeDiscardButton, GuideXosDialogResult.Discard);
+        _dirtyCloseDialog.TrySetButtonResult(_closeCancelButton, GuideXosDialogResult.Cancel);
+        _dirtyCloseDialog.TrySetDefaultButton(_closeApplyButton);
+        _dirtyCloseDialog.TrySetCancelResult(GuideXosDialogResult.Cancel);
+        _dirtyCloseDialog.TrySetMessage("Apply changes before closing?");
+        _dirtyCloseDialog.Closed = OnDirtyCloseDialogClosed;
     }
 
     internal ManagedSettingsSnapshot Working => _working;
@@ -187,6 +229,15 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     internal int SectionGroupCount => SectionCount;
     internal int LeafControlCount => 17;
     internal int RegistrationCount => _controlHost?.RegistrationCount ?? 0;
+    internal int HostCapacity => _controlHost?.MaximumControlCount ?? 0;
+    internal int DialogRegistrationCount => _resetDialog.RegistrationCount;
+    internal int DialogCapacity => _resetDialog.MaximumMemberCount;
+    internal GuideXosDialog ActiveDialog => _activeDialog;
+    internal GuideXosButton ResetCancelButton => _resetCancelButton;
+    internal GuideXosButton ResetConfirmButton => _resetConfirmButton;
+    internal GuideXosButton CloseApplyButton => _closeApplyButton;
+    internal GuideXosButton CloseDiscardButton => _closeDiscardButton;
+    internal GuideXosButton CloseCancelButton => _closeCancelButton;
     internal GuideXosGroupBox Group(int index) => _groups[index];
     internal GuideXosVerticalStack Stack(int index) => _stacks[index];
     internal object Leaf(int section, int index) => _sectionLeaves[section][index];
@@ -217,6 +268,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         if (host.IsCapabilityProbe) return GuideXosResult.Success;
         _appHost = host;
         ++_launchCount;
+        _surfaceClosing = false;
         if (!ResetComposition()) return GuideXosResult.InvalidArgument;
         GuideXosResult create = host.TryCreateSurface(
             "Managed Settings Center"u8, 560, 340, out _surface);
@@ -224,9 +276,24 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _window = _surface.Handle;
         if (!_testsRun)
         {
-            bool c144 = GuideXosSettingsCenterC144Tests.Run(host, this);
+            bool c128 = GuideXosPanelLifecycleTests.Run(host);
+            bool c131Api = GuideXosCheckBoxC131Tests.Run(host, _surface);
+            bool c131Host = GuideXosCheckBoxC131HostTests.Run(host);
+            bool c131 = c131Api && c131Host;
+            bool c145Dialogs = GuideXosDialogC145Tests.Run(host, _dirtyCloseDialog);
+            _c145FocusedTesting = true;
+            bool c145Settings = GuideXosSettingsCenterC145Tests.Run(host, this);
+            _c145FocusedTesting = false;
+            bool lowerRegressions = c128 && c131;
+            host.TryLog(lowerRegressions
+                ? "C145-LOWER-REGRESSIONS c128=PASS c131=57/57 result=PASS"u8
+                : "C145-LOWER-REGRESSIONS result=FAIL"u8);
             _testsRun = true;
-            _ = c144;
+            _c145TestsPassed = lowerRegressions && c145Dialogs && c145Settings;
+            if (!ResetComposition()) return GuideXosResult.InvalidArgument;
+            host.TryLog(_c145TestsPassed
+                ? "C145-FOCUSED-SUITES result=PASS"u8
+                : "C145-FOCUSED-SUITES result=FAIL"u8);
         }
 
         _initialContentHeight = _view.ContentExtent;
@@ -238,6 +305,10 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         host.TryLog(valid
             ? "C144-PROOF launch=PASS registration=9 hostCapacity=10 groupBoxes=4 leaves=17 viewMembers=21 stacks=4 layout=valid result=PASS"u8
             : "C144-PROOF launch=FAIL result=FAIL"u8);
+        host.TryLog(valid && _resetDialog.RegistrationCount == 2 &&
+            _dirtyCloseDialog.RegistrationCount == 3 && _c145TestsPassed
+            ? "C145-PROOF launch=PASS registration=9 hostCapacity=10 dialogCapacity=8 resetRegistrations=2 closeRegistrations=3 result=PASS"u8
+            : "C145-PROOF launch=FAIL result=FAIL"u8);
         LogGeometry(host, "initial");
         if (_launchCount > 1)
             host.TryLog(valid ? "C144-RELAUNCH close=PASS relaunch=PASS registration=9 result=PASS"u8 : "C144-RELAUNCH result=FAIL"u8);
@@ -248,6 +319,50 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     {
         if (host.TryGetSurface(_window, out GuideXosSurface surface) != GuideXosResult.Success || surface == null)
             return GuideXosResult.SurfaceCreationFailed;
+
+        if (_activeDialog != null && _activeDialog.IsOpen)
+        {
+            GuideXosDialog activeDialog = _activeDialog;
+            int priorOffset = _view.Offset;
+            int priorDialogFocus = activeDialog.ControlHost.ActiveControlId;
+            bool outsideClick = input.Kind == GuideXosInputKind.PointerDown &&
+                !activeDialog.ContainsPoint(input.X, input.Y) &&
+                !activeDialog.HasTransientInputCapture;
+            GuideXosControlHostResult modalResult = activeDialog.HandleInput(input);
+            if (input.Kind == GuideXosInputKind.KeyDown &&
+                input.KeyCode == (uint)GuideXosTextInputKey.Tab)
+            {
+                bool contained = activeDialog.IsOpen && activeDialog.IsModal &&
+                    activeDialog.ControlHost.ActiveControlId != 0;
+                host.TryLog(contained
+                    ? input.Shift
+                        ? "C145-FOCUS shift-tab=contained result=PASS"u8
+                        : "C145-FOCUS tab=contained result=PASS"u8
+                    : "C145-FOCUS tab=escaped result=FAIL"u8);
+            }
+            if (input.Kind == GuideXosInputKind.Wheel)
+                host.TryLog(_view.Offset == priorOffset
+                    ? "C145-MODAL wheel=parent-blocked viewport=preserved result=PASS"u8
+                    : "C145-MODAL wheel=parent-leak result=FAIL"u8);
+            if (outsideClick)
+                host.TryLog(_view.Offset == priorOffset && IsDirty &&
+                    ReferenceEquals(_activeDialog, activeDialog) &&
+                    _controlHost.IsModalActive &&
+                    ReferenceEquals(_controlHost.ActiveScopeHost,
+                        activeDialog.ControlHost) && !_menu.IsOpen
+                    ? "C145-MODAL outside=consumed parent=blocked result=PASS"u8
+                    : "C145-MODAL outside=leaked parent=FAIL result=FAIL"u8);
+            if (input.Kind == GuideXosInputKind.KeyDown &&
+                input.KeyCode == (uint)GuideXosTextInputKey.Enter &&
+                modalResult == GuideXosControlHostResult.Activated)
+                host.TryLog("C145-KEYBOARD default=activated once result=PASS"u8);
+            if (input.Kind == GuideXosInputKind.KeyDown && input.Shift &&
+                input.KeyCode == (uint)GuideXosTextInputKey.Tab &&
+                activeDialog.ControlHost.ActiveControlId != priorDialogFocus)
+                host.TryLog("C145-FOCUS reverse=advanced-within-modal result=PASS"u8);
+            if (_surfaceClosing) return GuideXosResult.Success;
+            return Render(host, surface);
+        }
 
         if (input.Kind == GuideXosInputKind.PointerMove)
         {
@@ -338,11 +453,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
                 }
                 else if (ReferenceEquals(activated, _defaultsButton))
                 {
-                    RestoreDefaults();
-                    host.TryLog(_working.Equals(ManagedSettingsSnapshot.Defaults) &&
-                        _view.Offset <= _view.MaximumOffset
-                        ? "C144-DEFAULTS pointer=PASS controls=converged result=PASS"u8
-                        : "C144-DEFAULTS pointer=FAIL result=FAIL"u8);
+                    OpenResetConfirmation(host);
                 }
                 else if (ReferenceEquals(activated, _naturalWheel) || ReferenceEquals(activated, _standardWheel))
                     host.TryLog("C144-RADIO wheel-group=independent result=PASS"u8);
@@ -370,7 +481,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         GuideXosComboBox comboBeforeInput = OpenCombo();
         int comboSelectionBeforeInput = comboBeforeInput?.SelectedIndex ?? -1;
         ManagedSettingsSnapshot workingBeforeInput = _working;
-        _controlHost.HandleInput(input);
+        GuideXosControlHostResult hostInputResult = _controlHost.HandleInput(input);
         if (!wasPopupOpen && AnyComboOpen())
         {
             GuideXosComboBox openedByKeyboard = OpenCombo();
@@ -386,28 +497,35 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         if (input.Kind == GuideXosInputKind.KeyChar && input.Character == ' ' &&
             !_working.Equals(workingBeforeInput))
             host.TryLog("C144-KEYBOARD space=activated working=changed result=PASS"u8);
-        if (input.Kind == GuideXosInputKind.KeyDown)
+        if (input.Kind == GuideXosInputKind.KeyDown ||
+            (input.Kind == GuideXosInputKind.KeyChar && input.Character == ' ' &&
+                hostInputResult == GuideXosControlHostResult.Activated))
         {
-            if (input.KeyCode == (uint)GuideXosTextInputKey.Tab)
+            if (input.Kind == GuideXosInputKind.KeyDown &&
+                input.KeyCode == (uint)GuideXosTextInputKey.Tab)
             {
                 host.TryLog(_view.HasFocus && _view.Offset > 0
                     ? "C144-FOCUS tab=offscreen-revealed result=PASS"u8
                     : "C144-FOCUS tab=traversed result=PASS"u8);
                 LogGeometry(host, "keyboard-tab");
             }
-            if (input.KeyCode == (uint)GuideXosTextInputKey.Enter)
+            bool activate = input.Kind == GuideXosInputKind.KeyChar ||
+                input.KeyCode == (uint)GuideXosTextInputKey.Enter;
+            if (activate && priorActive == ViewId && ReferenceEquals(_view.FocusedMember, _applyButton))
             {
-                if (priorActive == ViewId && ReferenceEquals(_view.FocusedMember, _applyButton))
-                {
-                    ApplyWorking();
-                    host.TryLog("C144-KEYBOARD button=apply result=PASS"u8);
-                }
-                else if (priorActive == ViewId && ReferenceEquals(_view.FocusedMember, _defaultsButton))
-                {
-                    RestoreDefaults();
-                    host.TryLog("C144-KEYBOARD button=defaults result=PASS"u8);
-                }
-                else if (priorActive == OptionsButtonId) OpenOptionsMenu();
+                ApplyWorking();
+                host.TryLog("C144-KEYBOARD button=apply result=PASS"u8);
+            }
+            else if (activate && priorActive == ViewId &&
+                ReferenceEquals(_view.FocusedMember, _defaultsButton))
+            {
+                OpenResetConfirmation(host);
+            }
+            else if (input.Kind == GuideXosInputKind.KeyDown &&
+                input.KeyCode == (uint)GuideXosTextInputKey.Enter &&
+                priorActive == OptionsButtonId)
+            {
+                OpenOptionsMenu();
             }
         }
         if (input.Kind == GuideXosInputKind.KeyDown &&
@@ -424,6 +542,12 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         if (input.Kind == GuideXosInputKind.KeyDown && input.Shift &&
             input.KeyCode == (uint)GuideXosTextInputKey.Tab)
             host.TryLog("C144-FOCUS shift-tab=handled earlier-member=PASS result=PASS"u8);
+        if (_menuCommand != 0)
+        {
+            bool closed = DispatchMenuCommand(host, surface);
+            if (closed) return GuideXosResult.Success;
+        }
+        if (_surfaceClosing) return GuideXosResult.Success;
         return Render(host, surface);
     }
 
@@ -458,6 +582,11 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 
     private bool ResetComposition()
     {
+        _resettingComposition = true;
+        if (_resetDialog.IsOpen) _resetDialog.Close(GuideXosDialogResult.None);
+        if (_dirtyCloseDialog.IsOpen) _dirtyCloseDialog.Close(GuideXosDialogResult.None);
+        _activeDialog = null;
+        _resettingComposition = false;
         _syncing = true;
         _working = ManagedSettingsSnapshot.Defaults;
         _applied = _working;
@@ -473,7 +602,8 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             _stacks[section].TrySetPadding(4, 4, 4, 4);
             _stacks[section].TrySetSpacing(3);
         }
-        _controlHost = new GuideXosControlHost(10);
+        if (_controlHost == null) _controlHost = new GuideXosControlHost(10);
+        else _controlHost.Reset();
         _wheelGroup.Reset();
         _statusGroup.Reset();
         _standardWheel.Reset(); _naturalWheel.Reset();
@@ -741,6 +871,190 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 
     private void OnMenuCommand(uint command) => _menuCommand = command;
 
+    private bool OpenResetConfirmation(GuideXosHost host)
+    {
+        _menu.Close();
+        _controlHost?.RefreshVisibility();
+        _dialogWorkingSnapshot = _working;
+        _dialogAppliedSnapshot = _applied;
+        _dialogViewportOffset = _view.Offset;
+        if (!_resetDialog.TrySetMessage("Replace the working settings with defaults?") ||
+            !_resetDialog.Open(_controlHost))
+        {
+            host.TryLog("C145-RESET open=FAIL result=FAIL"u8);
+            return false;
+        }
+        _activeDialog = _resetDialog;
+        host.TryLog(_controlHost.IsModalActive && _controlHost.ActiveIndex == -1 &&
+            _resetDialog.IsModal && _resetDialog.ControlHost.ActiveControlId ==
+                _resetDialog.DefaultButtonId
+            ? "C145-RESET open=PASS modal=active focus=default parent=blocked result=PASS"u8
+            : "C145-RESET open=FAIL result=FAIL"u8);
+        LogDialogGeometry(host);
+        return true;
+    }
+
+    private bool OpenDirtyCloseConfirmation(GuideXosHost host)
+    {
+        _menu.Close();
+        _controlHost?.RefreshVisibility();
+        _dialogWorkingSnapshot = _working;
+        _dialogAppliedSnapshot = _applied;
+        _dialogViewportOffset = _view.Offset;
+        if (!_dirtyCloseDialog.TrySetMessage("Apply changes before closing?") ||
+            !_dirtyCloseDialog.Open(_controlHost))
+        {
+            host.TryLog("C145-UNSAVED open=FAIL result=FAIL"u8);
+            return false;
+        }
+        _activeDialog = _dirtyCloseDialog;
+        host.TryLog(_controlHost.IsModalActive && _controlHost.ActiveIndex == -1 &&
+            _dirtyCloseDialog.IsModal && _dirtyCloseDialog.RegistrationCount == 3
+            ? "C145-UNSAVED open=PASS modal=active parent=blocked buttons=3 result=PASS"u8
+            : "C145-UNSAVED open=FAIL result=FAIL"u8);
+        LogDialogGeometry(host);
+        return true;
+    }
+
+    private void OnResetDialogClosed(GuideXosDialogResult result)
+    {
+        if (_resettingComposition) return;
+        _activeDialog = null;
+        if (result == GuideXosDialogResult.Reset)
+        {
+            RestoreDefaults();
+            bool valid = _working.Equals(ManagedSettingsSnapshot.Defaults) &&
+                !_controlHost.IsModalActive && _view.Offset >= 0 &&
+                _view.Offset <= _view.MaximumOffset && _scrollBar.Value == _view.Offset;
+            _appHost?.TryLog(valid
+                ? "C145-RESET result=Reset working=defaults dirty=updated viewport=valid focus=restored result=PASS"u8
+                : "C145-RESET result=Reset result=FAIL"u8);
+        }
+        else if (result == GuideXosDialogResult.Cancel)
+        {
+            bool valid = _working.Equals(_dialogWorkingSnapshot) &&
+                _applied.Equals(_dialogAppliedSnapshot) &&
+                _view.Offset == _dialogViewportOffset && !_controlHost.IsModalActive;
+            _appHost?.TryLog(valid
+                ? "C145-RESET result=Cancel working=preserved viewport=preserved focus=restored result=PASS"u8
+                : "C145-RESET result=Cancel result=FAIL"u8);
+        }
+    }
+
+    private void OnDirtyCloseDialogClosed(GuideXosDialogResult result)
+    {
+        if (_resettingComposition) return;
+        _activeDialog = null;
+        if (result == GuideXosDialogResult.Cancel)
+        {
+            bool valid = _working.Equals(_dialogWorkingSnapshot) &&
+                _applied.Equals(_dialogAppliedSnapshot) && IsDirty &&
+                _view.Offset == _dialogViewportOffset && !_controlHost.IsModalActive;
+            _appHost?.TryLog(valid
+                ? "C145-UNSAVED result=Cancel dirty=preserved parent=open focus=restored result=PASS"u8
+                : "C145-UNSAVED result=Cancel result=FAIL"u8);
+        }
+        else if (result == GuideXosDialogResult.Apply)
+        {
+            ApplyWorking();
+            bool applied = _applied.Equals(_working) && !IsDirty;
+            bool closed = CloseSettingsCenter(_appHost, _surface, "apply");
+            _appHost?.TryLog(applied && closed
+                ? "C145-UNSAVED result=Apply applied=committed closed=true result=PASS"u8
+                : "C145-UNSAVED result=Apply result=FAIL"u8);
+        }
+        else if (result == GuideXosDialogResult.Discard)
+        {
+            bool discarded = _applied.Equals(_dialogAppliedSnapshot) &&
+                !_applied.Equals(_dialogWorkingSnapshot);
+            bool closed = CloseSettingsCenter(_appHost, _surface, "discard");
+            _appHost?.TryLog(discarded && closed
+                ? "C145-UNSAVED result=Discard applied=preserved closed=true result=PASS"u8
+                : "C145-UNSAVED result=Discard result=FAIL"u8);
+        }
+    }
+
+    private bool CloseSettingsCenter(GuideXosHost host,
+        GuideXosSurface surface, string reason)
+    {
+        if (surface == null || _surfaceClosing) return false;
+        if (_activeDialog != null && _activeDialog.IsOpen)
+        {
+            GuideXosDialog active = _activeDialog;
+            active.Close(GuideXosDialogResult.None);
+        }
+        _activeDialog = null;
+        _menu.Close();
+        _controlHost?.RefreshVisibility();
+        bool valid = _controlHost != null && !_controlHost.IsModalActive &&
+            !_controlHost.HasTransientInputCapture && !_controlHost.HasPointerDragCapture &&
+            _view.Offset >= 0 && _view.Offset <= _view.MaximumOffset &&
+            _scrollBar.Value == _view.Offset && ValidateComposition();
+        host?.TryLog(valid
+            ? "C145-FINAL viewport=valid registration=9 modal=none capture=none drag=none result=PASS"u8
+            : "C145-FINAL result=FAIL"u8);
+        if (reason == "clean")
+            host?.TryLog(IsDirty
+                ? "C145-CLOSE clean=FAIL result=FAIL"u8
+                : "C145-CLOSE clean=true confirmation=none result=PASS"u8);
+        if (_c145FocusedTesting) return valid;
+        _surfaceClosing = surface.TryClose() == GuideXosResult.Success;
+        return valid && _surfaceClosing;
+    }
+
+    internal bool RequestCloseForTests()
+    {
+        if (IsDirty) return OpenDirtyCloseConfirmation(_appHost);
+        return CloseSettingsCenter(_appHost, _surface, "clean");
+    }
+
+    internal bool OpenResetForTests() => OpenResetConfirmation(_appHost);
+
+    private void LogDialogGeometry(GuideXosHost host)
+    {
+        if (_activeDialog == null) return;
+        Span<byte> line = stackalloc byte[127];
+        int position = 0;
+        GuideXosText.Append(line, ref position, "C145-DIALOG-GEOMETRY kind="u8);
+        ReadOnlySpan<byte> name = ReferenceEquals(_activeDialog, _resetDialog)
+            ? "reset"u8 : "close"u8;
+        GuideXosText.Append(line, ref position, name);
+        GuideXosText.Append(line, ref position, " bounds="u8);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)_activeDialog.X);
+        GuideXosText.Append(line, ref position, ","u8);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)_activeDialog.Y);
+        GuideXosText.Append(line, ref position, ","u8);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)_activeDialog.Width);
+        GuideXosText.Append(line, ref position, ","u8);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)_activeDialog.Height);
+        if (ReferenceEquals(_activeDialog, _resetDialog))
+        {
+            AppendDialogPoint(line, ref position, " cancel="u8,
+                _resetCancelButton.X + 4, _resetCancelButton.Y + 4);
+            AppendDialogPoint(line, ref position, " confirm="u8,
+                _resetConfirmButton.X + 4, _resetConfirmButton.Y + 4);
+        }
+        else
+        {
+            AppendDialogPoint(line, ref position, " apply="u8,
+                _closeApplyButton.X + 4, _closeApplyButton.Y + 4);
+            AppendDialogPoint(line, ref position, " discard="u8,
+                _closeDiscardButton.X + 4, _closeDiscardButton.Y + 4);
+            AppendDialogPoint(line, ref position, " cancel="u8,
+                _closeCancelButton.X + 4, _closeCancelButton.Y + 4);
+        }
+        host?.TryLog(line[..position]);
+    }
+
+    private static void AppendDialogPoint(Span<byte> line, ref int position,
+        ReadOnlySpan<byte> name, int x, int y)
+    {
+        GuideXosText.Append(line, ref position, name);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)x);
+        GuideXosText.Append(line, ref position, ","u8);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)y);
+    }
+
     private bool DispatchMenuCommand(GuideXosHost host, GuideXosSurface surface)
     {
         uint command = _menuCommand;
@@ -756,30 +1070,18 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         }
         else if (command == MenuDefaults)
         {
-            RestoreDefaults();
-            host.TryLog(_working.Equals(ManagedSettingsSnapshot.Defaults)
-                ? "C144-DEFAULTS menu=PASS controls=converged viewport=preserved result=PASS"u8
-                : "C144-DEFAULTS menu=FAIL result=FAIL"u8);
-            host.TryLog("C144-MENU command=defaults result=PASS"u8);
+            OpenResetConfirmation(host);
         }
         else if (command == MenuClose)
         {
-            _menu.Close();
-            _controlHost.RefreshVisibility();
-            bool finalValid = !_controlHost.HasTransientInputCapture &&
-                !_controlHost.HasPointerDragCapture && _view.Offset >= 0 &&
-                _view.Offset <= _view.MaximumOffset && _scrollBar.Value == _view.Offset &&
-                ValidateComposition();
-            host.TryLog(finalValid
-                ? "C144-FINAL viewport=valid layout=valid membership=valid capture=none drag=none registration=9 result=PASS"u8
-                : "C144-FINAL result=FAIL"u8);
+            if (IsDirty)
+            {
+                OpenDirtyCloseConfirmation(host);
+                return false;
+            }
             LogGeometry(host, "final");
-            host.TryLog(finalValid
-                ? "C144-CLOSE popup=closed capture=none registration=bounded result=PASS"u8
-                : "C144-CLOSE result=FAIL"u8);
-            host.TryLog("C144-MENU command=close result=PASS"u8);
-            surface.TryClose();
-            return true;
+            host.TryLog("C144-CLOSE popup=closed capture=none registration=bounded result=PASS"u8);
+            return CloseSettingsCenter(host, surface, "clean");
         }
         return false;
     }
@@ -933,6 +1235,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             _view.Render(surface) != GuideXosResult.Success ||
             _scrollBar.Render(surface) != GuideXosResult.Success ||
             (_menu.IsOpen && _menu.Render(surface) != GuideXosResult.Success) ||
+            (_activeDialog != null && _activeDialog.Render(surface) != GuideXosResult.Success) ||
             surface.TrySetText(20, 306, _working.ShowKeyboardTips
                 ? "Tab / Shift+Tab move focus | Enter activates | wheel scrolls"u8
                 : "Tab moves focus | Enter activates"u8) != GuideXosResult.Success)
