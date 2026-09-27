@@ -356,6 +356,28 @@ static void phase29b_trace(const char* event)
     serial::putc('\n');
 }
 
+static void phase29f_debug_start_trace(const char* event, const char* result)
+{
+    if (!s_operation.debugControlled) return;
+    serial::puts("DEVELOPER_STUDIO_PHASE29F_DEBUG_START_SERVER event=");
+    serial::puts(event ? event : "unknown");
+    serial::puts(" result=");
+    serial::puts(result ? result : "pending");
+    serial::puts(" state="); serial::put_hex32(static_cast<uint32_t>(s_operation.state));
+    serial::puts(" handle="); serial::put_hex64(s_operation.handle);
+    serial::puts(" service_generation="); serial::put_hex64(s_operation.registrationGeneration);
+    serial::puts(" debug="); serial::put_hex32(s_operation.debugControlled ? 1U : 0U);
+    serial::puts(" size="); serial::put_hex64(s_operation.artifactSize);
+    serial::puts(" artifact_sha256="); serial::puts(s_operation.artifactSha256);
+    serial::puts(" artifact_path="); serial::puts(s_operation.artifactPath);
+#if defined(__x86_64__)
+    serial::puts(" scheduler="); serial::put_hex32(s_schedulerActive ? 1U : 0U);
+    serial::puts(" in_target="); serial::put_hex32(s_schedulerInTarget ? 1U : 0U);
+    serial::puts(" complete="); serial::put_hex32(s_schedulerTargetComplete ? 1U : 0U);
+#endif
+    serial::putc('\n');
+}
+
 static uint32_t text_length(const char* text, uint32_t capacity) {
     if (!text) return 0;
     uint32_t length = 0;
@@ -2696,6 +2718,8 @@ gx_result prepare(const gx_development_run_request& request,
     }
     s_operation.debugControlled =
         (request.flags & GX_DEVELOPMENT_RUN_FLAG_DEBUG_CONTROLLED) != 0;
+    phase29f_debug_start_trace("debug_service_lookup", s_operation.debugControlled
+        ? "DEBUG_START_SERVICE_OPERATION_CREATED" : "NOT_A_DEBUG_START");
     if (app::AppManager::isAppAvailable(s_operation.applicationId)) {
         s_operation.state = GX_DEVELOPMENT_RUN_FAILED;
         s_operation.error = GX_DEVELOPMENT_RUN_ERROR_APPLICATION_ID_INSTALLED;
@@ -2741,6 +2765,7 @@ gx_result prepare(const gx_development_run_request& request,
             s_operation.userBreakpoints[i].generation = s_operation.registrationGeneration;
     s_operation.cleanupComplete = false;
     s_operation.state = GX_DEVELOPMENT_RUN_REGISTERED;
+    phase29f_debug_start_trace("service_registration", "DEBUG_START_SERVICE_HANDLE_REGISTERED");
     phase28v_trace("APP_MODEL_REGISTERED");
     *outHandle = s_operation.handle;
     snapshot_operation(s_operation, outSnapshot);
@@ -2748,12 +2773,20 @@ gx_result prepare(const gx_development_run_request& request,
 }
 
 gx_result start(gx_development_run_handle handle) {
+    phase29f_debug_start_trace("start_api_entry", "SERVER_RECEIVED_REQUEST");
     phase28u_trace("START_ENTRY");
     phase29b_trace("START_COMMAND_CONSUMED");
     phase28v_trace("START_ENTRY");
-    if (!decode(handle)) return GX_ERROR_FAILED;
-    if (s_operation.state != GX_DEVELOPMENT_RUN_REGISTERED) return GX_ERROR_BUSY;
+    if (!decode(handle)) {
+        phase29f_debug_start_trace("server_admission", "DEBUG_START_SERVICE_HANDLE_STALE");
+        return GX_ERROR_FAILED;
+    }
+    if (s_operation.state != GX_DEVELOPMENT_RUN_REGISTERED) {
+        phase29f_debug_start_trace("server_admission", "DEBUG_START_SERVICE_NOT_READY");
+        return GX_ERROR_BUSY;
+    }
     if (s_operation.closeRequested) {
+        phase29f_debug_start_trace("server_admission", "DEBUG_START_COMMAND_CANCELLED_BEFORE_ADMISSION");
         fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_CANCELLED,
                          "Bare-metal Run was cancelled before start");
         return GX_OK;
@@ -2765,6 +2798,7 @@ gx_result start(gx_development_run_handle handle) {
         !equal_text(registration.artifactPath, s_operation.artifactPath) ||
         registration.artifactSize != s_operation.artifactSize ||
         !equal_text(registration.artifactSha256, s_operation.artifactSha256)) {
+        phase29f_debug_start_trace("server_admission", "DEBUG_START_GENERATION_OR_DEPLOYMENT_MISMATCH");
         fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_STALE_DEPLOYMENT,
                          "Temporary NativeElf deployment is stale");
         return GX_OK;
@@ -2773,15 +2807,18 @@ gx_result start(gx_development_run_handle handle) {
     // be replaced before Start. Revalidate immediately before launch so a
     // stale or tampered artifact is never executed.
     if (!validate_identity(s_operation)) {
+        phase29f_debug_start_trace("artifact_validation", "DEBUG_START_ARTIFACT_IDENTITY_REJECTED");
         const gx_development_run_error_code error = s_operation.error;
         char message[GX_DEVELOPMENT_RUN_MAX_ERROR_BYTES] = {};
         copy_text(message, sizeof(message), s_operation.errorMessage);
         fail_and_cleanup(s_operation, error, message);
         return GX_OK;
     }
+    phase29f_debug_start_trace("server_admission", "DEBUG_START_SERVER_ADMITTED");
     s_operation.state = GX_DEVELOPMENT_RUN_LAUNCHING;
     if (!configure_development_identity(s_operation.registrationGeneration,
                                         s_operation.applicationId)) {
+        phase29f_debug_start_trace("target_creation", "DEBUG_START_DEVELOPMENT_IDENTITY_BIND_FAILED");
         fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_INTERNAL,
                          "NativeElf development identity could not be bound");
         return GX_OK;
@@ -2809,6 +2846,7 @@ gx_result start(gx_development_run_handle handle) {
         &scheduled_task_entry,
         &s_operation);
     if (!s_targetContext) {
+        phase29f_debug_start_trace("target_creation", "DEBUG_START_EXECUTION_CONTEXT_ALLOCATION_FAILED");
         s_schedulerActive = false;
         s_schedulerYieldContext = nullptr;
         fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_LAUNCH_UNAVAILABLE,
@@ -2817,9 +2855,11 @@ gx_result start(gx_development_run_handle handle) {
     }
     phase28v_trace("PROCESS_CONTEXT_ALLOCATED");
     phase29b_trace("EXECUTION_OWNER_CREATED");
+    phase29f_debug_start_trace("target_creation", "DEBUG_START_EXECUTION_OWNER_CREATED");
     if (s_operation.debugControlled &&
         !NativeElfDebugTrap::install(native_elf_debug_breakpoint_exception,
                                      native_elf_debug_single_step_exception)) {
+        phase29f_debug_start_trace("target_creation", "DEBUG_START_DEBUG_TRAP_INSTALL_FAILED");
         native_elf_debug_breakpoint_install_failed();
         s_schedulerActive = false;
         s_targetContext = nullptr;
@@ -2830,6 +2870,7 @@ gx_result start(gx_development_run_handle handle) {
     }
     phase29b_trace("FIRST_DISPATCH_BEGIN");
     if (!native_elf_scheduler_pump()) {
+        phase29f_debug_start_trace("first_dispatch", "DEBUG_START_FIRST_DISPATCH_FAILED");
         phase29b_trace("FIRST_DISPATCH_FAILED");
         s_schedulerActive = false;
         s_targetContext = nullptr;
@@ -2839,8 +2880,10 @@ gx_result start(gx_development_run_handle handle) {
     }
     phase28v_trace("FIRST_DISPATCH_RETURNED");
     phase29b_trace("FIRST_DISPATCH_RETURNED");
+    phase29f_debug_start_trace("first_dispatch", "DEBUG_START_ENTRY_DISPATCH_RETURNED");
     phase28u_trace("START_RETURN");
 #else
+    phase29f_debug_start_trace("target_creation", "DEBUG_START_ARCHITECTURE_UNSUPPORTED");
     fail_and_cleanup(s_operation,
                      s_operation.debugControlled
                          ? GX_DEVELOPMENT_RUN_ERROR_UNSUPPORTED_TARGET
@@ -2849,6 +2892,7 @@ gx_result start(gx_development_run_handle handle) {
                          ? "NativeElf entry debugging is unavailable on this architecture"
                          : "Asynchronous NativeElf ownership is unavailable on this architecture");
 #endif
+    phase29f_debug_start_trace("start_api_return", "DEBUG_START_API_RETURNED_GX_OK");
     return GX_OK;
 }
 
@@ -2871,7 +2915,11 @@ gx_result poll(gx_development_run_handle handle, gx_development_run_snapshot* ou
 }
 
 gx_result request_close(gx_development_run_handle handle) {
-    if (!decode(handle)) return GX_ERROR_FAILED;
+    phase29f_debug_start_trace("stop_handoff_entry", "DEBUG_STOP_REQUEST_RECEIVED_BY_SERVICE");
+    if (!decode(handle)) {
+        phase29f_debug_start_trace("stop_handoff_result", "DEBUG_STOP_SERVICE_HANDLE_STALE");
+        return GX_ERROR_FAILED;
+    }
     if (is_terminal_state(s_operation.state)) return GX_OK;
     if (s_operation.state == GX_DEVELOPMENT_RUN_REGISTERED) {
         s_operation.closeRequested = true;
@@ -2881,15 +2929,20 @@ gx_result request_close(gx_development_run_handle handle) {
         return GX_OK;
     }
     if (s_operation.state == GX_DEVELOPMENT_RUN_CLOSING) return GX_OK;
-    if (s_operation.state != GX_DEVELOPMENT_RUN_RUNNING) return GX_ERROR_BUSY;
+    if (s_operation.state != GX_DEVELOPMENT_RUN_RUNNING) {
+        phase29f_debug_start_trace("stop_handoff_result", "DEBUG_STOP_INVALID_SERVICE_STATE");
+        return GX_ERROR_BUSY;
+    }
 
     s_operation.closeRequested = true;
     s_operation.state = GX_DEVELOPMENT_RUN_CLOSING;
     if (!request_native_elf_gui_close(s_operation.registrationGeneration)) {
+        phase29f_debug_start_trace("stop_handoff_result", "DEBUG_STOP_TARGET_CLOSE_REJECTED");
         s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
         s_operation.closeRequested = false;
         return GX_ERROR_UNSUPPORTED;
     }
+    phase29f_debug_start_trace("stop_handoff_result", "DEBUG_STOP_TARGET_CLOSE_ACCEPTED");
     (void)native_elf_scheduler_pump();
     return GX_OK;
 }
@@ -6340,9 +6393,13 @@ gx_result debug(const gx_development_debug_request& request,
     case GX_DEVELOPMENT_DEBUG_RESUME_INTERNAL_TRAP:
     case GX_DEVELOPMENT_DEBUG_RESUME:
         {
+        if (request.command == GX_DEVELOPMENT_DEBUG_RELEASE_EXECUTION)
+            phase29f_debug_start_trace("release_command_consumed", "DEBUG_START_RELEASE_COMMAND_RECEIVED");
         if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
             (!s_operation.debugBreakpointInstalled && !s_operation.debugStepTrapObserved &&
              !s_operation.debugBreakpointHit && !s_operation.debugPauseCaptured)) {
+            if (request.command == GX_DEVELOPMENT_DEBUG_RELEASE_EXECUTION)
+                phase29f_debug_start_trace("release_command_result", "DEBUG_START_RELEASE_REJECTED_INVALID_STOP_STATE");
             set_debug_error(outSnapshot, "NativeElf target is not paused at a resumable debug stop");
             return GX_ERROR_BUSY;
         }
@@ -6357,6 +6414,7 @@ gx_result debug(const gx_development_debug_request& request,
             phase29b_trace("EXECUTION_OWNER_RELEASED");
             phase29b_trace("FIRST_EXECUTION_DISPATCH_BEGIN");
             if (!native_elf_scheduler_pump()) {
+                phase29f_debug_start_trace("first_execution_dispatch", "DEBUG_START_FIRST_EXECUTION_DISPATCH_FAILED");
                 phase29b_trace("FIRST_EXECUTION_DISPATCH_FAILED");
                 set_debug_error(outSnapshot,
                                 "NativeElf first execution dispatch could not be completed");
@@ -6370,8 +6428,11 @@ gx_result debug(const gx_development_debug_request& request,
                           sizeof(outSnapshot->errorMessage),
                           "NativeElf target exited before RUNNING publication");
                 phase29b_trace("START_EXITED_BEFORE_RUNNING");
+                phase29f_debug_start_trace("first_execution_dispatch", "DEBUG_START_TARGET_EXITED_BEFORE_RUNNING");
                 return GX_ERROR_FAILED;
             }
+            phase29f_debug_start_trace("first_execution_dispatch", "DEBUG_START_FIRST_EXECUTION_DISPATCH_RETURNED");
+            phase29f_debug_start_trace("running_publication", "DEBUG_START_AUTHORITATIVE_RUNNING");
             serial::puts("DEVELOPER_STUDIO_PHASE28V_NATIVE_STARTUP_READY\n");
             return GX_OK;
         }
@@ -6633,6 +6694,7 @@ gx_result debug(const gx_development_debug_request& request,
 gx_result release(gx_development_run_handle handle) {
     if (!decode(handle)) return GX_ERROR_FAILED;
     if (!is_terminal_state(s_operation.state)) return GX_ERROR_BUSY;
+    phase29f_debug_start_trace("session_retirement", "DEBUG_START_SERVICE_SESSION_RETIRED");
     (void)unregister_application(s_operation);
     (void)restore_all_debug_breakpoints();
     step_over_clear_state(s_operation);

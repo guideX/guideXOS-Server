@@ -69,6 +69,7 @@ param(
     [switch]$Phase28OOnly,
     [switch]$Phase28POnly,
     [switch]$Phase28QOnly,
+    [switch]$Phase29FDebugStartOnly,
     [switch]$Phase29COnly,
     [switch]$Phase29EManifestOnly
 )
@@ -78,6 +79,7 @@ $ErrorActionPreference = "Stop"
 # mode deliberately keeps only the baseline C/D route plus the M smoke so a
 # flaky optional earlier IDE repeat cannot mask the recursion proof.
 if ($Phase29EManifestOnly) { $Phase29COnly = $true }
+if ($Phase29FDebugStartOnly) { $Phase28QOnly = $true }
 if ($Phase29COnly) { $Phase28QOnly = $true }
 if ($Phase28QOnly) {
     $Phase27E = $false; $Phase27F = $false; $Phase27G = $false; $Phase27H = $false
@@ -834,9 +836,13 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                     $serialProbe = Get-Content -LiteralPath $serialPath -Raw -ErrorAction Stop
                     if ($serialProbe -and (($Phase29EManifestOnly -and
                             $serialProbe.Contains("DEVELOPER_STUDIO_PHASE28V_EVENT_DEBUG_START_REQUEST_ISSUED")) -or
+                        ($Phase29FDebugStartOnly -and
+                            ($serialProbe.Contains("DEVELOPER_STUDIO_PHASE28Q_RUNNING_PASS") -or
+                             $serialProbe.Contains("DEVELOPER_STUDIO_PHASE28Q_FAILURE"))) -or
                         ($Phase29COnly -and -not $Phase29EManifestOnly -and
                             $serialProbe.Contains("P28Z APP 05 project_open_return")) -or
-                        $serialProbe.Contains("[KERNEL] Entering main loop (waiting for input)..."))) {
+                        (-not $Phase28QOnly -and
+                            $serialProbe.Contains("[KERNEL] Entering main loop (waiting for input)...")))) {
                         $process.Kill()
                         break
                     }
@@ -2151,7 +2157,35 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 "DEVELOPER_STUDIO_PHASE28Q_APP_LAUNCH_PASS",
                 "DEVELOPER_STUDIO_PHASE28Q_PROJECT_OPEN_PASS",
                 "DEVELOPER_STUDIO_PHASE28Q_DEBUG_START_PASS",
-                "DEVELOPER_STUDIO_PHASE28Q_RUNNING_PASS",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START event=intent result=DEBUG_START_INTENT_RECEIVED",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START event=request_validation result=DEBUG_START_REQUEST_OWNERSHIP_CAPTURED",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START_BOUNDARY stage=dirty_document_check_return result=DEBUG_START_PROJECT_DOCUMENTS_CLEAN",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START_BOUNDARY stage=build_admission_accepted result=DEBUG_START_BUILD_ADMISSION_ACCEPTED",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START_BOUNDARY stage=build_controller_start_return result=DEBUG_START_BUILD_CONTROLLER_ACCEPTED",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START event=build_submission result=DEBUG_START_BUILD_REQUEST_ACCEPTED",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START event=request_ownership result=DEBUG_START_PROJECT_AND_BUILD_CURRENT",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START event=artifact_validation result=DEBUG_START_ARTIFACT_VALID",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START event=begin_session_return result=DEBUG_START_BEGIN_SESSION_RETURNED",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START event=build_poll_return result=DEBUG_START_BUILD_POLL_SESSION_RETURNED",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START event=main_loop_after_build_poll result=DEBUG_START_MAIN_LOOP_AFTER_BUILD_POLL",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START event=client_poll_entry result=DEBUG_START_CLIENT_DEBUG_POLL_ENTERED",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START event=client_poll_return result=DEBUG_START_CLIENT_DEBUG_POLL_RETURNED",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START event=phase28q_wait_entry result=DEBUG_START_PHASE28Q_WAIT_ENTERED",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START_SERVER event=service_registration result=DEBUG_START_SERVICE_HANDLE_REGISTERED",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START_SERVER event=start_api_entry result=SERVER_RECEIVED_REQUEST",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START_SERVER event=server_admission result=DEBUG_START_SERVER_ADMITTED",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START_SERVER event=target_creation result=DEBUG_START_EXECUTION_OWNER_CREATED",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START_SERVER event=first_dispatch result=DEBUG_START_ENTRY_DISPATCH_RETURNED",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START_SERVER event=release_command_consumed result=DEBUG_START_RELEASE_COMMAND_RECEIVED",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START_SERVER event=first_execution_dispatch result=DEBUG_START_FIRST_EXECUTION_DISPATCH_RETURNED",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START_SERVER event=running_publication result=DEBUG_START_AUTHORITATIVE_RUNNING",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START event=client_running_observed result=DEBUG_START_CLIENT_RUNNING_OBSERVED",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START event=running_publication result=DEBUG_START_AUTHORITATIVE_RUNNING_READY",
+                "DEVELOPER_STUDIO_PHASE29F_DEBUG_START event=phase28q_running_observed result=DEBUG_START_PHASE28Q_RUNNING_PASS",
+                "DEVELOPER_STUDIO_PHASE28Q_RUNNING_PASS"
+            )
+            if (-not $Phase29FDebugStartOnly) {
+                $requiredMarkers += @(
                 # The product marker is UI_PAUSE_REQUEST_PASS. Keep the
                 # acceptance gate aligned with the emitted lifecycle event.
                 "DEVELOPER_STUDIO_PHASE28Q_UI_PAUSE_REQUEST_PASS",
@@ -2174,7 +2208,8 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 "DEVELOPER_STUDIO_PHASE28Q_PHASE28P_REGRESSION_PASS",
                 "DEVELOPER_STUDIO_PHASE28Q_CLEANUP_PASS",
                 "DEVELOPER_STUDIO_PHASE28Q_PASS"
-            )
+                )
+            }
         }
         if ($Phase29EManifestOnly) {
             $requiredMarkers += "DEVELOPER_STUDIO_PHASE28V_EVENT_DEBUG_START_REQUEST_ISSUED"
@@ -2228,6 +2263,39 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
             }
             if ($serial -match 'DEVELOPER_STUDIO_PHASE29D_STARTUP_REENTRY_REJECTED') {
                 $missingMarkers += "Phase29D rejected a live startup re-entry"
+            }
+
+            if ($Phase28QOnly) {
+                $phase29fMarkers = @($serial -split "`r?`n" | Where-Object {
+                    $_ -match 'DEVELOPER_STUDIO_PHASE29F_DEBUG_START (event=intent|event=request_validation|event=build_submission|event=request_ownership|event=artifact_validation|event=service_lookup|event=service_handoff|event=startup_handshake|event=client_running_observed|event=running_publication|event=phase28q_running_observed) ' -or
+                    $_ -match 'DEVELOPER_STUDIO_PHASE29F_DEBUG_START_SERVER event=(service_registration|start_api_entry|server_admission|target_creation|first_dispatch|release_command_consumed|first_execution_dispatch|running_publication) '
+                })
+                $requestIntent = @($phase29fMarkers | Where-Object { $_ -match 'DEBUG_START event=intent ' })
+                $startEntries = @($phase29fMarkers | Where-Object { $_ -match 'DEBUG_START_SERVER event=start_api_entry ' })
+                $admissions = @($phase29fMarkers | Where-Object { $_ -match 'DEBUG_START_SERVER event=server_admission result=DEBUG_START_SERVER_ADMITTED ' })
+                $ownerCreates = @($phase29fMarkers | Where-Object { $_ -match 'DEBUG_START_SERVER event=target_creation result=DEBUG_START_EXECUTION_OWNER_CREATED ' })
+                $firstDispatches = @($phase29fMarkers | Where-Object { $_ -match 'DEBUG_START_SERVER event=first_dispatch result=DEBUG_START_ENTRY_DISPATCH_RETURNED ' })
+                $firstExecutions = @($phase29fMarkers | Where-Object { $_ -match 'DEBUG_START_SERVER event=first_execution_dispatch result=DEBUG_START_FIRST_EXECUTION_DISPATCH_RETURNED ' })
+                $runningPublications = @($phase29fMarkers | Where-Object { $_ -match 'DEBUG_START_SERVER event=running_publication result=DEBUG_START_AUTHORITATIVE_RUNNING ' })
+                $clientRunning = @($phase29fMarkers | Where-Object { $_ -match 'DEBUG_START event=client_running_observed ' })
+                $phase28qRunning = @($phase29fMarkers | Where-Object { $_ -match 'DEBUG_START event=phase28q_running_observed ' })
+                if ($requestIntent.Count -ne 1 -or $startEntries.Count -ne 1 -or
+                    $admissions.Count -ne 1 -or $ownerCreates.Count -ne 1 -or
+                    $firstDispatches.Count -ne 1 -or $firstExecutions.Count -ne 1 -or
+                    $runningPublications.Count -ne 1 -or $clientRunning.Count -ne 1 -or
+                    $phase28qRunning.Count -ne 1) {
+                    $missingMarkers += "Phase29F one-shot start counts intent=$($requestIntent.Count) server_received=$($startEntries.Count) admitted=$($admissions.Count) owner=$($ownerCreates.Count) first_dispatch=$($firstDispatches.Count) first_execution=$($firstExecutions.Count) server_running=$($runningPublications.Count) client_running=$($clientRunning.Count) phase28q_running=$($phase28qRunning.Count)"
+                }
+                $debugIntent = $requestIntent | Select-Object -First 1
+                $serverStart = $startEntries | Select-Object -First 1
+                if ($debugIntent -and ($debugIntent -notmatch 'app_generation=(\d+).*project_request=(\d+).*request_generation=(\d+).*startup_request_generation=(\d+)' -or
+                    [int64]$Matches[1] -eq 0 -or [int64]$Matches[2] -eq 0 -or
+                    [int64]$Matches[3] -eq 0 -or [int64]$Matches[4] -eq 0)) {
+                    $missingMarkers += "Phase29F debug intent has incomplete application/project/request ownership"
+                }
+                if ($serverStart -and $serverStart -notmatch 'handle=0000000000000001 service_generation=0000000000000001') {
+                    $missingMarkers += "Phase29F server start did not carry the expected nonzero current service handle/generation"
+                }
             }
 
             $manifestEvidence = @($serial -split "`r?`n" | Where-Object {
@@ -4016,6 +4084,8 @@ try {
     }
     if ($Phase29EManifestOnly) {
         Write-Host "Phase 29E manifest identity validation completed across $BootCount fresh boot(s) through debugger-start issuance." -ForegroundColor Green
+    } elseif ($Phase29FDebugStartOnly) {
+        Write-Host "Phase 29F debug-start admission/handoff proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
     } elseif ($Phase28QOnly) {
         Write-Host "Phase 28Q native debugger pause proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
     } elseif ($Phase28OOnly) {
