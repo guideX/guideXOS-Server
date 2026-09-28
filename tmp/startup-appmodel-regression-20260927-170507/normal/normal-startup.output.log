@@ -1,0 +1,386 @@
+guideXOSServer server starting...
+[lifecycle] phase -> PlatformDiscovery
+[lifecycle] phase -> MemoryReady
+[lifecycle] phase -> SchedulerReady
+[lifecycle] phase -> IpcReady
+[lifecycle] phase -> DesktopStateReady
+AppRegistry initializing, count=1
+AppRegistry manifest scan succeeded: scanned=13, registered=13
+AppModel registry candidate:  displayName=Audio Beep id=com.guidexos.samples.audiobeep kind=NativeElf source=SystemApps
+Registered app: Audio Beep
+AppModel registry candidate:  displayName=Hello World id=com.guidexos.samples.helloworld kind=NativeElf source=SystemApps
+Registered app: Hello World
+AppModel registry candidate:  displayName=Missile Command (MC5) id=com.guidexos.samples.missilecommand kind=NativeElf source=SystemApps
+Registered app: Missile Command (MC5)
+AppModel registry candidate:  displayName=Resource Viewer id=com.guidexos.samples.resourceviewer kind=NativeElf source=SystemApps
+Registered app: Resource Viewer
+AppModel registry candidate:  displayName=Future GXApp Package id=com.guidexos.examples.futuregxapp kind=GXAppPackage source=SystemApps
+Registered app: Future GXApp Package
+AppModel registry candidate:  displayName=HelloWorld ELF id=com.guidexos.examples.helloworld kind=NativeElf source=SystemApps
+Registered app: HelloWorld ELF
+AppModel registry candidate:  displayName=Notepad id=com.guidexos.examples.notepad kind=BuiltIn source=SystemApps
+Registered app: Notepad
+AppModel registry candidate:  displayName=Audio Beep id=com.guidexos.audiobeep kind=NativeElf source=Package
+Registered app: Audio Beep
+AppModel registry candidate:  displayName=guideXOS Developer Studio id=com.guidexos.developerstudio kind=NativeElf source=Package
+Registered app: guideXOS Developer Studio
+AppModel registry candidate:  displayName=Hello World id=com.guidexos.helloworld kind=NativeElf source=Package
+Registered app: Hello World
+AppModel registry candidate:  displayName=Missile Command (MC5) id=com.guidexos.missilecommand kind=NativeElf source=Package
+Registered app: Missile Command (MC5)
+AppModel registry candidate:  displayName=Nexgen PacMan id=com.guidexos.pacman kind=NativeElf source=Package
+Registered app: Nexgen PacMan
+AppModel registry candidate:  displayName=Resource Viewer id=com.guidexos.resourceviewer kind=NativeElf source=Package
+Registered app: Resource Viewer
+AppModel registry candidate:  displayName=Notepad id=gxos.builtin.notepad kind=BuiltIn source=BuiltIn
+Registered app: Notepad
+AppModel registry candidate:  displayName=Calculator id=gxos.builtin.calculator kind=BuiltIn source=BuiltIn
+Registered app: Calculator
+AppModel registry candidate:  displayName=Clock id=gxos.builtin.clock kind=BuiltIn source=BuiltIn
+Registered app: Clock
+AppModel registry candidate:  displayName=Console id=gxos.builtin.console kind=BuiltIn source=BuiltIn
+Registered app: Console
+AppModel registry candidate:  displayName=File Explorer id=gxos.builtin.fileexplorer kind=BuiltIn source=BuiltIn
+Registered app: File Explorer
+AppModel registry candidate:  displayName=Trash id=gxos.builtin.trash kind=BuiltIn source=BuiltIn
+Registered app: Trash
+AppModel registry candidate:  displayName=TaskManager id=gxos.builtin.taskmanager kind=BuiltIn source=BuiltIn
+Registered app: TaskManager
+AppModel registry candidate:  displayName=Paint id=gxos.builtin.paint kind=BuiltIn source=BuiltIn
+Registered app: Paint
+AppModel registry candidate:  displayName=Image Viewer id=gxos.builtin.imageviewer kind=BuiltIn source=BuiltIn
+Registered app: Image Viewer
+AppModel registry candidate:  displayName=OnScreenKeyboard id=gxos.builtin.onscreenkeyboard kind=BuiltIn source=BuiltIn
+Registered app: OnScreenKeyboard
+AppModel registry candidate:  displayName=ShutdownDialog id=gxos.builtin.shutdowndialog kind=BuiltIn source=BuiltIn
+Registered app: ShutdownDialog
+AppModel registry candidate:  displayName=DiskManager id=gxos.builtin.diskmanager kind=BuiltIn source=BuiltIn
+Registered app: DiskManager
+AppModel registry candidate:  displayName=ControlPanel id=gxos.builtin.controlpanel kind=BuiltIn source=BuiltIn
+Registered app: ControlPanel
+AppModel registry candidate:  displayName=Settings id=gxos.builtin.settings kind=BuiltIn source=BuiltIn
+Registered app: Settings
+AppModel registry candidate:  displayName=DisplayOptions id=gxos.builtin.displayoptions kind=BuiltIn source=BuiltIn
+Registered app: DisplayOptions
+AppModel registry candidate:  displayName=guideXOS Navigator id=guidexos.navigator kind=BuiltIn source=BuiltIn
+Registered app: guideXOS Navigator
+AppModel registry candidate:  displayName=App Model Demo id=gxos.builtin.appmodeldemo kind=BuiltIn source=BuiltIn
+Registered app: App Model Demo
+AppModel registry candidate:  displayName=Native App Debug Viewer id=gxos.builtin.nativeappdebugviewer kind=BuiltIn source=BuiltIn
+Registered app: Native App Debug Viewer
+AppModel registry candidate:  displayName=HDInstaller id=gxos.builtin.hdinstaller kind=BuiltIn source=BuiltIn
+Registered app: HDInstaller
+Pinned app: App Model Demo
+Pinned app-model demo app: App Model Demo
+Pinned app: Native App Debug Viewer
+Pinned app-model demo app: Native App Debug Viewer
+Pinned app: Hello World
+Pinned app-model demo app: Hello World
+Pinned app: Resource Viewer
+Pinned app-model demo app: Resource Viewer
+AppRegistry initialized, desktop apps=32
+Desktop folder resolver selected virtualPath=/Documents hostedPath=D:/dev/guideXOSServer/Documents
+Desktop folder already exists: D:/dev/guideXOSServer/Documents
+Desktop folder resolver selected virtualPath=/Pictures hostedPath=D:/dev/guideXOSServer/Pictures
+Desktop folder already exists: D:/dev/guideXOSServer/Pictures
+Desktop folder resolver selected virtualPath=/Music hostedPath=D:/dev/guideXOSServer/Music
+Desktop folder already exists: D:/dev/guideXOSServer/Music
+Desktop folder resolver selected virtualPath=/Network hostedPath=D:/dev/guideXOSServer/Network
+Desktop folder already exists: D:/dev/guideXOSServer/Network
+Desktop state loaded
+NotificationManager initialized
+Firewall initialized (Normal mode)
+Module registered: Notepad
+Module registered: Calculator
+Module registered: Paint
+Module registered: ImageViewer
+Module registered: Clock
+Module registered: TaskManager
+Module registered: FileExplorer
+Module registered: Console
+Module registered: OnScreenKeyboard
+Module registered: ShutdownDialog
+Built-in modules registered (10)
+[lifecycle] phase -> ServicesReady
+[lifecycle] phase -> Interactive
+Commands:
+ mem | alloc <n> | tasks | log
+ spawn <echo|worker> [args...] | plist
+ send <pid> <text> | recv <pid>
+ bus.sub <chan> <pid> | bus.unsub <chan> <pid>
+ bus.pub <chan> <text> [fanout] | bus.pop <chan> [timeoutMs]
+ bus.cap <chan> <cap> | bus.stats <chan>
+ console.start | console.send <text> | console.pop [timeoutMs]
+ gui.start | gui.open.appmodeldemo | gui.smoke.launchshadow | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id> | gui.key <keyCode> <down|up> [modifiers] | gui.mouse <windowId> <x> <y> <button> <down|up|move>
+ gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>
+ gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id> | gui.sync <id> <frameGeneration> [frameSequence] [freeze] | gui.unfreeze <id>
+ gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>
+ desktop.wallpaper <path> | desktop.background.remove <id> | desktop.launch <action> | desktop.open <path> [dir] | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.appmodel.active-typed-dispatch-gate [force-on|force-off|reset] | desktop.appmodel.active-typed-dispatch-default-on-candidate [on|off|reset] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig | desktop.display.summary | desktop.display.viewport [1|2]
+ desktop.apps | desktop.apps.verbose | desktop.windows.owners | desktop.startup.regression | desktop.appmodel.summary | desktop.appmodel.inventory | desktop.appmodel.coverage | desktop.appmodel.file-associations | desktop.appmodel.shell-objects | desktop.appmodel.typed-dispatch-gate [force-off] | desktop.pinned | desktop.recent | desktop.recent.remove <name> | desktop.pinapp <name> | desktop.pinfile <name> <path>
+ nativeapp.capabilities | nativeapp.inspect <app> | nativeapp.smoketest <app> | nativeapp.processes | nativeapp.debuglog [count]
+ taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>
+ workspace.switch <n> | workspace.next | workspace.prev | workspace.current
+ notepad | notepad <file>
+ calculator
+ console | console.start | console.send <text> | console.pop [timeoutMs]
+ files | files <path>
+ clock
+ taskmanager.snapshot | taskmanager.network-snapshot-wait | taskmanager.tombstone-test
+ taskmgr
+ paint
+ navigator | navigator.smoke | navigator.positioned-link-probe | navigator.goto <url>
+ imgview [file] | osk
+ shutdown | msgbox <text> | welcome
+ notify <text> | notify.clear
+ fw.mode <normal|block|disabled|auto> | fw.allow <name> | fw.list | fw.alerts
+ modules | module.launch <name>
+ pkg.install <path.gxapp> | pkg.launch <app> | pkg.list | pkg.validate <path.gxapp>
+ proc.wait <pid> [timeoutMs] | proc.status <pid>
+ vfs.mkdir <path> | vfs.write <path> <text> | vfs.read <path> | vfs.ls <path>
+ vnc.start [port] | vnc.stop | vnc.status
+ pbytes | help | quit/exit
+Unknown command (help for list)
+[lifecycle] phase -> ServicesReady
+[lifecycle] compositor pid=10
+Compositor pid=10 (proto=3)
+DESKTOP_WINDOW_OWNERS_BEGIN
+compositorPid=10
+windowCount=0
+DESKTOP_WINDOW_OWNERS_END
+[lifecycle] phase -> ShuttingDown
+Bus::publish queueing msg type=5 to channel=gui.input
+Compositor service started (native window)
+PngLoader: loaded /system/fonts/roboto/roboto_9pt_regular.png 260x160 sourceChannels=4
+PngLoader: loaded /system/fonts/roboto/roboto_9pt_bold.png 260x160 sourceChannels=4
+PngLoader: loaded /system/fonts/roboto/roboto_9pt_italic.png 260x160 sourceChannels=4
+PngLoader: loaded /system/fonts/roboto/roboto_9pt_bolditalic.png 260x160 sourceChannels=4
+PngLoader: loaded /system/fonts/roboto/roboto_12pt_regular.png 260x160 sourceChannels=4
+PngLoader: loaded /system/fonts/roboto/roboto_12pt_bold.png 260x160 sourceChannels=4
+PngLoader: loaded /system/fonts/roboto/roboto_12pt_italic.png 260x160 sourceChannels=4
+PngLoader: loaded /system/fonts/roboto/roboto_12pt_bolditalic.png 260x160 sourceChannels=4
+PngLoader: loaded /system/fonts/roboto/roboto_12pt_thin.png 390x240 sourceChannels=4
+GdiVideoBackend: initialized 1024x768
+VideoBackend: GDI backend active size=1024x768
+Compositor DesktopConfig loaded=true err=
+Compositor display options store loaded=true err=
+Compositor taskbar position=bottom
+Compositor background scale mode=fill
+Compositor display layout summary: mode=mirror monitorCount=1 virtualDesktop=1024x768 bounds=0,0-1024,768 primary=display-1(Display 1) primaryViewport=0,0 1024x768 monitors=[display-1(Display 1)@0,0 1024x768 primary] persistedResolution=1024x768 arrangement=display-1|Display 1|0|0|1024|768|1|1|1|0|0|XRGB32|
+Compositor config pinned before merge count=17
+  config pinned before merge: App Model Demo
+  config pinned before merge: Future GXApp Package
+  config pinned before merge: Hello World
+  config pinned before merge: HelloWorld ELF
+  config pinned before merge: Native App Debug Viewer
+  config pinned before merge: Resource Viewer
+  config pinned before merge: Nexgen PacMan
+  config pinned before merge: Nexgen PacMan Danger Validation
+  config pinned before merge: Nexgen PacMan Bare-Metal Fruit Validation
+  config pinned before merge: Nexgen PacMan Fruit Validation
+  config pinned before merge: Nexgen PacMan Level Validation
+  config pinned before merge: ComputerFiles
+  config pinned before merge: Trash
+  config pinned before merge: guideXOS Developer Studio
+  config pinned before merge: Audio Beep
+  config pinned before merge: Audio Beep Denied
+  config pinned before merge: Missile Command (MC5)
+Compositor config recent before merge count=10
+  config recent before merge: Missile Command (MC5)
+  config recent before merge: guideXOS Developer Studio
+  config recent before merge: guideXOS Navigator
+  config recent before merge: Notepad
+  config recent before merge: File Explorer
+  config recent before merge: DisplayOptions
+  config recent before merge: ControlPanel
+  config recent before merge: Nexgen PacMan Danger Validation
+  config recent before merge: Nexgen PacMan
+  config recent before merge: Resource Viewer
+Compositor DesktopService pin considered: App Model Demo
+Compositor skip already present from DesktopService pin: App Model Demo
+Compositor DesktopService pin considered: Future GXApp Package
+Compositor skip already present from DesktopService pin: Future GXApp Package
+Compositor DesktopService pin considered: Hello World
+Compositor skip already present from DesktopService pin: Hello World
+Compositor DesktopService pin considered: HelloWorld ELF
+Compositor skip already present from DesktopService pin: HelloWorld ELF
+Compositor DesktopService pin considered: Native App Debug Viewer
+Compositor skip already present from DesktopService pin: Native App Debug Viewer
+Compositor DesktopService pin considered: Resource Viewer
+Compositor skip already present from DesktopService pin: Resource Viewer
+Compositor DesktopService pin considered: Nexgen PacMan
+Compositor skip already present from DesktopService pin: Nexgen PacMan
+Compositor DesktopService pin considered: Nexgen PacMan Danger Validation
+Compositor skip already present from DesktopService pin: Nexgen PacMan Danger Validation
+Compositor DesktopService pin considered: Nexgen PacMan Bare-Metal Fruit Validation
+Compositor skip already present from DesktopService pin: Nexgen PacMan Bare-Metal Fruit Validation
+Compositor DesktopService pin considered: Nexgen PacMan Fruit Validation
+Compositor skip already present from DesktopService pin: Nexgen PacMan Fruit Validation
+Compositor DesktopService pin considered: Nexgen PacMan Level Validation
+Compositor skip already present from DesktopService pin: Nexgen PacMan Level Validation
+Compositor DesktopService pin considered: ComputerFiles
+Compositor skip already present from DesktopService pin: ComputerFiles
+Compositor DesktopService pin considered: Trash
+Compositor skip already present from DesktopService pin: Trash
+Compositor DesktopService pin considered: guideXOS Developer Studio
+Compositor skip already present from DesktopService pin: guideXOS Developer Studio
+Compositor DesktopService pin considered: Audio Beep
+Compositor skip already present from DesktopService pin: Audio Beep
+Compositor DesktopService pin considered: Audio Beep Denied
+Compositor skip already present from DesktopService pin: Audio Beep Denied
+Compositor DesktopService pin considered: Missile Command (MC5)
+Compositor skip already present from DesktopService pin: Missile Command (MC5)
+Compositor app-model app considered: App Model Demo id=gxos.builtin.appmodeldemo source=BuiltIn
+Compositor skip already present from AppModel registry: App Model Demo
+Compositor app-model app considered: Audio Beep id=com.guidexos.samples.audiobeep source=SystemApps
+Compositor skip already present from AppModel registry: Audio Beep
+Compositor app-model app considered: Audio Beep id=com.guidexos.audiobeep source=Package
+Compositor skip already present from AppModel registry: Audio Beep
+Compositor app-model app considered: Future GXApp Package id=com.guidexos.examples.futuregxapp source=SystemApps
+Compositor skip already present from AppModel registry: Future GXApp Package
+Compositor app-model app considered: Hello World id=com.guidexos.samples.helloworld source=SystemApps
+Compositor skip already present from AppModel registry: Hello World
+Compositor app-model app considered: Hello World id=com.guidexos.helloworld source=Package
+Compositor skip already present from AppModel registry: Hello World
+Compositor app-model app considered: HelloWorld ELF id=com.guidexos.examples.helloworld source=SystemApps
+Compositor skip already present from AppModel registry: HelloWorld ELF
+Compositor app-model app considered: Missile Command (MC5) id=com.guidexos.samples.missilecommand source=SystemApps
+Compositor skip already present from AppModel registry: Missile Command (MC5)
+Compositor app-model app considered: Missile Command (MC5) id=com.guidexos.missilecommand source=Package
+Compositor skip already present from AppModel registry: Missile Command (MC5)
+Compositor app-model app considered: Native App Debug Viewer id=gxos.builtin.nativeappdebugviewer source=BuiltIn
+Compositor skip already present from AppModel registry: Native App Debug Viewer
+Compositor app-model app considered: Nexgen PacMan id=com.guidexos.pacman source=Package
+Compositor skip already present from AppModel registry: Nexgen PacMan
+Compositor app-model app considered: Resource Viewer id=com.guidexos.samples.resourceviewer source=SystemApps
+Compositor skip already present from AppModel registry: Resource Viewer
+Compositor app-model app considered: Resource Viewer id=com.guidexos.resourceviewer source=Package
+Compositor skip already present from AppModel registry: Resource Viewer
+Compositor app-model app considered: guideXOS Developer Studio id=com.guidexos.developerstudio source=Package
+Compositor skip already present from AppModel registry: guideXOS Developer Studio
+Compositor config pinned after merge count=17
+  config pinned after merge: App Model Demo
+  config pinned after merge: Future GXApp Package
+  config pinned after merge: Hello World
+  config pinned after merge: HelloWorld ELF
+  config pinned after merge: Native App Debug Viewer
+  config pinned after merge: Resource Viewer
+  config pinned after merge: Nexgen PacMan
+  config pinned after merge: Nexgen PacMan Danger Validation
+  config pinned after merge: Nexgen PacMan Bare-Metal Fruit Validation
+  config pinned after merge: Nexgen PacMan Fruit Validation
+  config pinned after merge: Nexgen PacMan Level Validation
+  config pinned after merge: ComputerFiles
+  config pinned after merge: Trash
+  config pinned after merge: guideXOS Developer Studio
+  config pinned after merge: Audio Beep
+  config pinned after merge: Audio Beep Denied
+  config pinned after merge: Missile Command (MC5)
+Compositor config recent after merge count=10
+  config recent after merge: Missile Command (MC5)
+  config recent after merge: guideXOS Developer Studio
+  config recent after merge: guideXOS Navigator
+  config recent after merge: Notepad
+  config recent after merge: File Explorer
+  config recent after merge: DisplayOptions
+  config recent after merge: ControlPanel
+  config recent after merge: Nexgen PacMan Danger Validation
+  config recent after merge: Nexgen PacMan
+  config recent after merge: Resource Viewer
+Compositor refreshDesktopItems input pinned=17 recent=10
+Compositor start menu skipped missing recent program: Nexgen PacMan Danger Validation
+Compositor start menu recent count=9
+  start menu recent: Missile Command (MC5)
+  start menu recent: guideXOS Developer Studio
+  start menu recent: guideXOS Navigator
+  start menu recent: Notepad
+  start menu recent: File Explorer
+  start menu recent: DisplayOptions
+  start menu recent: ControlPanel
+  start menu recent: Nexgen PacMan
+  start menu recent: Resource Viewer
+Desktop system icon visibility: system:Trash enabled=true
+Desktop system icon created: system:Trash label=Trash icon=trash.empty
+Desktop system icon visibility: system:FileExplorer enabled=true
+Desktop system icon created: system:FileExplorer label=File Explorer icon=app.files
+Desktop system icon visibility: system:SystemSettings enabled=false
+Desktop system icon skipped by setting: system:SystemSettings
+Desktop folder resolver selected virtualPath=/Desktop hostedPath=D:/dev/guideXOSServer/Desktop
+Desktop folder already exists: D:/dev/guideXOSServer/Desktop
+Desktop folder enumeration started: D:/dev/guideXOSServer/Desktop
+Desktop folder enumeration completed count=0
+Desktop icon slot allocation: occupied=0 columns=11 rows=7
+Desktop icon slot selected: x=20 y=20
+Desktop icon auto-positioned: system:Trash x=20 y=20
+Desktop icon slot allocation: occupied=1 columns=11 rows=7
+Desktop icon slot selected: x=104 y=20
+Desktop icon auto-positioned: system:FileExplorer x=104 y=20
+Compositor desktop item count=2
+  desktop item: Trash
+  desktop item: File Explorer
+Compositor start menu skipped shadowed app: Audio Beep id=com.guidexos.samples.audiobeep selectedId=com.guidexos.audiobeep source=SystemApps
+Compositor start menu skipped shadowed app: Hello World id=com.guidexos.samples.helloworld selectedId=com.guidexos.helloworld source=SystemApps
+Compositor start menu skipped shadowed app: Missile Command (MC5) id=com.guidexos.samples.missilecommand selectedId=com.guidexos.missilecommand source=SystemApps
+Compositor start menu skipped shadowed app: Resource Viewer id=com.guidexos.samples.resourceviewer selectedId=com.guidexos.resourceviewer source=SystemApps
+Compositor start menu include: Future GXApp Package targetAppId=com.guidexos.examples.futuregxapp source=SystemApps
+Compositor start menu include: HelloWorld ELF targetAppId=com.guidexos.examples.helloworld source=SystemApps
+Compositor start menu skipped shadowed app: Notepad id=com.guidexos.examples.notepad selectedId=gxos.builtin.notepad source=SystemApps
+Compositor start menu include: Audio Beep targetAppId=com.guidexos.audiobeep source=Package
+Compositor start menu include: guideXOS Developer Studio targetAppId=com.guidexos.developerstudio source=Package
+Compositor start menu include: Hello World targetAppId=com.guidexos.helloworld source=Package
+Compositor start menu include: Missile Command (MC5) targetAppId=com.guidexos.missilecommand source=Package
+Compositor start menu include: Nexgen PacMan targetAppId=com.guidexos.pacman source=Package
+Compositor start menu include: Resource Viewer targetAppId=com.guidexos.resourceviewer source=Package
+Compositor start menu include: Notepad targetAppId=gxos.builtin.notepad source=BuiltIn
+Compositor start menu include: Calculator targetAppId=gxos.builtin.calculator source=BuiltIn
+Compositor start menu include: Clock targetAppId=gxos.builtin.clock source=BuiltIn
+Compositor start menu include: Console targetAppId=gxos.builtin.console source=BuiltIn
+Compositor start menu include: File Explorer targetAppId=gxos.builtin.fileexplorer source=BuiltIn
+Compositor start menu include: Trash targetAppId=gxos.builtin.trash source=BuiltIn
+Compositor start menu include: TaskManager targetAppId=gxos.builtin.taskmanager source=BuiltIn
+Compositor start menu include: Paint targetAppId=gxos.builtin.paint source=BuiltIn
+Compositor start menu include: Image Viewer targetAppId=gxos.builtin.imageviewer source=BuiltIn
+Compositor start menu include: OnScreenKeyboard targetAppId=gxos.builtin.onscreenkeyboard source=BuiltIn
+Compositor start menu include: ShutdownDialog targetAppId=gxos.builtin.shutdowndialog source=BuiltIn
+Compositor start menu include: DiskManager targetAppId=gxos.builtin.diskmanager source=BuiltIn
+Compositor start menu include: ControlPanel targetAppId=gxos.builtin.controlpanel source=BuiltIn
+Compositor start menu include: Settings targetAppId=gxos.builtin.settings source=BuiltIn
+Compositor start menu include: DisplayOptions targetAppId=gxos.builtin.displayoptions source=BuiltIn
+Compositor start menu include: guideXOS Navigator targetAppId=guidexos.navigator source=BuiltIn
+Compositor start menu include: App Model Demo targetAppId=gxos.builtin.appmodeldemo source=BuiltIn
+Compositor start menu include: Native App Debug Viewer targetAppId=gxos.builtin.nativeappdebugviewer source=BuiltIn
+Compositor start menu include: HDInstaller targetAppId=gxos.builtin.hdinstaller source=BuiltIn
+Compositor start menu app count=27
+  start menu app: App Model Demo
+  start menu app: Audio Beep
+  start menu app: Calculator
+  start menu app: Clock
+  start menu app: Console
+  start menu app: ControlPanel
+  start menu app: DiskManager
+  start menu app: DisplayOptions
+  start menu app: File Explorer
+  start menu app: Future GXApp Package
+  start menu app: guideXOS Developer Studio
+  start menu app: guideXOS Navigator
+  start menu app: HDInstaller
+  start menu app: Hello World
+  start menu app: HelloWorld ELF
+  start menu app: Image Viewer
+  start menu app: Missile Command (MC5)
+  start menu app: Native App Debug Viewer
+  start menu app: Nexgen PacMan
+  start menu app: Notepad
+  start menu app: OnScreenKeyboard
+  start menu app: Paint
+  start menu app: Resource Viewer
+  start menu app: Settings
+  start menu app: ShutdownDialog
+  start menu app: TaskManager
+  start menu app: Trash
+Compositor background select id=legacy_ameobagx kind=image scale=fill
+Compositor wallpaper select id=legacy_ameobagx full=/system/wallpapers/ameobagx.png thumb=/system/wallpapers/ameobagx_thumb.png
+PngLoader: loaded /system/wallpapers/ameobagx.png 1536x1024 sourceChannels=3
+Compositor wallpaper decode succeeded id=legacy_ameobagx full=/system/wallpapers/ameobagx.png
+Compositor service stopping
+[lifecycle] phase -> Stopped
+guideXOSServer server exiting.

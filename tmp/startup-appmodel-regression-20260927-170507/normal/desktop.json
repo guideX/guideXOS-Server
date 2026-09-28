@@ -1,0 +1,50 @@
+﻿{
+    "wallpaper":  "/system/wallpapers/ameobagx.png",
+    "desktop.wallpaper.id":  "legacy_ameobagx",
+    "desktop.theme.id":  "classic",
+    "desktop.background.scale":  "fill",
+    "desktop.taskbar.position":  "bottom",
+    "desktop.display.mode":  "mirror",
+    "desktop.display.primaryId":  "display-1",
+    "desktop.display.arrangement":  "display-1|Display 1|0|0|1024|768|1|1|1|0|0|XRGB32|",
+    "desktop.display.resolution":  "1024x768",
+    "desktop.clock.timeZoneId":  "pacific",
+    "desktop.clock.use24HourTime":  false,
+    "pinned":  [
+                   "App Model Demo",
+                   "Future GXApp Package",
+                   "Hello World",
+                   "HelloWorld ELF",
+                   "Native App Debug Viewer",
+                   "Resource Viewer",
+                   "Nexgen PacMan",
+                   "Nexgen PacMan Danger Validation",
+                   "Nexgen PacMan Bare-Metal Fruit Validation",
+                   "Nexgen PacMan Fruit Validation",
+                   "Nexgen PacMan Level Validation",
+                   "ComputerFiles",
+                   "Trash",
+                   "guideXOS Developer Studio",
+                   "Audio Beep",
+                   "Audio Beep Denied",
+                   "Missile Command (MC5)"
+               ],
+    "recent":  [
+
+               ],
+    "desktopShortcuts":  [
+
+                         ],
+    "showDesktopTrash":  true,
+    "showDesktopThisSystem":  true,
+    "showDesktopFileManager":  true,
+    "showDesktopSystemSettings":  false,
+    "smallLiveDesktopFolderIcons":  true,
+    "autoArrangeDesktopIcons":  false,
+    "windows":  [
+
+                ],
+    "iconPositions":  [
+
+                      ]
+}
