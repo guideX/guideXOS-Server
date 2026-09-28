@@ -675,6 +675,10 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
     private bool _c147RuntimeConsumerContext;
 #endif
+#if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
+    private bool _c149LastRenderedKeyboardTips;
+    private int _c149LastRenderedKeyboardTipLength = -1;
+#endif
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
     private const int C138TextScrollControlId = 10;
     private const int C138ListScrollControlId = 11;
@@ -1598,6 +1602,14 @@ public sealed class ManagedNotes : GuideXosApplication
         }
 #endif
         if (!RenderMain(host, surface, launchCount)) return GuideXosResult.InvalidArgument;
+#if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
+        if (_c147RuntimeConsumerContext)
+        {
+            if (!LogC149KeyboardTips(host,
+                    "startup=before-settings-center"u8))
+                return GuideXosResult.InvalidArgument;
+        }
+#endif
 #if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
         if (_c125ProofContext)
         {
@@ -3871,6 +3883,14 @@ public sealed class ManagedNotes : GuideXosApplication
         {
             return GuideXosResult.SurfaceCreationFailed;
         }
+#if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
+        if (_c147RuntimeConsumerContext &&
+            (!RenderC149KeyboardTips(surface) ||
+             !LogC149KeyboardTips(host, "dispatch=runtime-current"u8)))
+        {
+            return GuideXosResult.InvalidArgument;
+        }
+#endif
 #if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
         if (_c136ProofContext && input.Button == GuideXosPointerButton.Secondary)
         {
@@ -4623,6 +4643,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #else
             GuideXosText.Line(surface, 174, "Editor: "u8, "bounded ASCII; [] selection; | caret"u8) &&
 #endif
+#if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
+            RenderC149KeyboardTips(surface) &&
+#endif
 #if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
             (!_c123ProofContext || _separator.Render(surface) == GuideXosResult.Success) &&
 #endif
@@ -4705,6 +4728,52 @@ public sealed class ManagedNotes : GuideXosApplication
             surface.TryAddButton(330, 220, 90, 28, "Reload"u8, 3u, out _) == GuideXosResult.Success;
 #endif
     }
+
+#if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
+    internal static ReadOnlySpan<byte> KeyboardTipsText(bool showTips) =>
+        showTips
+            ? "Tips: Tab/Shift+Tab focus, arrows navigate, Enter activates"u8
+            : ReadOnlySpan<byte>.Empty;
+
+    /// <summary>Draws the current shared keyboard-tip value during a Notes-owned dispatch.</summary>
+    private bool RenderC149KeyboardTips(GuideXosSurface surface)
+    {
+        bool showTips = GuideXosRuntimeSettings.Current.ShowKeyboardTips;
+        ReadOnlySpan<byte> text = KeyboardTipsText(showTips);
+        if (surface.TryFillRect(18, 196, 520, 20, 0x007A5A9Au) !=
+                GuideXosResult.Success ||
+            surface.TrySetText(20, 198, text) != GuideXosResult.Success)
+            return false;
+        _c149LastRenderedKeyboardTips = showTips;
+        _c149LastRenderedKeyboardTipLength = text.Length;
+        return true;
+    }
+
+    private bool LogC149KeyboardTips(GuideXosHost host,
+                                    ReadOnlySpan<byte> phase)
+    {
+        bool showTips = GuideXosRuntimeSettings.Current.ShowKeyboardTips;
+        bool rendered = showTips == _c149LastRenderedKeyboardTips &&
+            _c149LastRenderedKeyboardTipLength ==
+                KeyboardTipsText(showTips).Length;
+        Span<byte> line = stackalloc byte[128];
+        int position = 0;
+        if (!GuideXosText.Append(line, ref position,
+                "C149-NOTES-TIPS "u8) ||
+            !GuideXosText.Append(line, ref position, phase) ||
+            !GuideXosText.Append(line, ref position,
+                showTips
+                    ? " visible=true rendered="u8
+                    : " visible=false rendered="u8) ||
+            !GuideXosText.Append(line, ref position,
+                rendered ? "true result=PASS"u8 : "false result=FAIL"u8))
+        {
+            return false;
+        }
+        host?.TryLog(line[..position]);
+        return rendered;
+    }
+#endif
 
     private static GuideXosResult PickerStartResult(GuideXosFilePickerResult result)
     {

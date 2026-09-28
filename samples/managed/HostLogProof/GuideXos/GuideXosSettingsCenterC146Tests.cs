@@ -17,11 +17,14 @@ public static class GuideXosSettingsCenterC146Tests
         app.NaturalWheel.SetChecked(true);
         app.DensityCombo.TrySetSelectedIndex(1);
         app.ScrollLinesCombo.TrySetSelectedIndex(4);
+        app.TipsCheckBox.SetChecked(false);
         app.AdvancedCheckBox.SetChecked(true);
         ManagedSettingsSnapshot edited = app.Working;
         result &= Case(ref cases, app.IsDirty && edited.ShowStatus == false &&
             edited.NaturalScroll && edited.Density == 1 && edited.ShowAdvanced &&
             edited.ScrollLinesPerNotch == 5 &&
+            !edited.ShowKeyboardTips &&
+            GuideXosRuntimeSettings.Current.ShowKeyboardTips &&
             app.ScrollLinesCombo.SelectedIndex == 4 &&
             app.Applied.ScrollLinesPerNotch == 3 &&
             app.Persisted.ScrollLinesPerNotch == 3 &&
@@ -38,10 +41,12 @@ public static class GuideXosSettingsCenterC146Tests
             GuideXosRuntimeSettings.Current.ScrollLinesPerNotch == 3 &&
             app.Applied.Equals(appliedBeforeReset) &&
             app.Persisted.Equals(persistedBeforeReset) &&
+            GuideXosRuntimeSettings.Current.ShowKeyboardTips &&
             app.IsDirty == !defaults.Equals(appliedBeforeReset));
 
         app.StatusCheckBox.SetChecked(false);
         app.ScrollLinesCombo.TrySetSelectedIndex(4);
+        app.TipsCheckBox.SetChecked(false);
         ManagedSettingsSnapshot closeWorking = app.Working;
         ManagedSettingsSnapshot closeApplied = app.Applied;
         ManagedSettingsSnapshot closePersisted = app.Persisted;
@@ -50,6 +55,8 @@ public static class GuideXosSettingsCenterC146Tests
                 GuideXosTextInputKey.Escape)) == GuideXosControlHostResult.Cancelled;
         result &= Case(ref cases, cancel && app.Working.Equals(closeWorking) &&
             app.Applied.Equals(closeApplied) && app.Persisted.Equals(closePersisted) &&
+            !closeWorking.ShowKeyboardTips &&
+            GuideXosRuntimeSettings.Current.ShowKeyboardTips &&
             app.IsDirty && !app.ControlHost.IsModalActive);
 
         bool discard = app.RequestCloseForTests() && app.ActiveDialog != null &&
@@ -59,10 +66,12 @@ public static class GuideXosSettingsCenterC146Tests
                 GuideXosControlHostResult.Activated;
         result &= Case(ref cases, discard && app.Working.Equals(closeWorking) &&
             app.Applied.Equals(closeApplied) && app.Persisted.Equals(closePersisted) &&
+            GuideXosRuntimeSettings.Current.ShowKeyboardTips &&
             app.IsDirty && !app.ControlHost.IsModalActive);
 
         app.StatusCheckBox.SetChecked(false);
         app.ScrollLinesCombo.TrySetSelectedIndex(4);
+        app.TipsCheckBox.SetChecked(false);
         ManagedSettingsSnapshot failureApplied = app.Applied;
         ManagedSettingsSnapshot failurePersisted = app.Persisted;
         app.InjectNextSaveFailureForTests();
@@ -73,6 +82,9 @@ public static class GuideXosSettingsCenterC146Tests
             app.PersistenceDialog.IsOpen && app.ControlHost.IsModalActive &&
             app.IsDirty && app.Applied.Equals(failureApplied) &&
             app.Persisted.Equals(failurePersisted) &&
+            !app.Working.ShowKeyboardTips &&
+            GuideXosRuntimeSettings.Current.ShowKeyboardTips ==
+                failureApplied.ShowKeyboardTips &&
             app.Working.ScrollLinesPerNotch == 5 &&
             GuideXosRuntimeSettings.Current.ScrollLinesPerNotch ==
                 failureApplied.ScrollLinesPerNotch && !app.SurfaceClosingForTests;
@@ -82,14 +94,18 @@ public static class GuideXosSettingsCenterC146Tests
             GuideXosInputEvent.ForKeyDown(GuideXosTextInputKey.Enter)) ==
                 GuideXosControlHostResult.Activated && app.ActiveDialog == null &&
             !app.ControlHost.IsModalActive && app.IsDirty &&
-            app.Applied.Equals(failureApplied) && app.Persisted.Equals(failurePersisted);
+            app.Applied.Equals(failureApplied) && app.Persisted.Equals(failurePersisted) &&
+            GuideXosRuntimeSettings.Current.ShowKeyboardTips ==
+                failureApplied.ShowKeyboardTips;
         result &= Case(ref cases, dismissed);
 
         bool retry = app.RequestCloseForTests() && app.ActiveDialog != null &&
             app.ActiveDialog.HandleInput(GuideXosInputEvent.ForKeyDown(
                 GuideXosTextInputKey.Enter)) == GuideXosControlHostResult.Activated &&
             !app.IsDirty && app.Working.Equals(app.Applied) &&
-            app.Applied.Equals(app.Persisted) && !app.ControlHost.IsModalActive;
+            app.Applied.Equals(app.Persisted) && !app.ControlHost.IsModalActive &&
+            GuideXosRuntimeSettings.Current.ShowKeyboardTips ==
+                failureApplied.ShowKeyboardTips;
         result &= Case(ref cases, retry);
 
         bool noOpApply = app.ApplyForTests() && !app.IsDirty &&
@@ -97,15 +113,19 @@ public static class GuideXosSettingsCenterC146Tests
         result &= Case(ref cases, noOpApply);
 
         app.StatusCheckBox.SetChecked(false);
+        app.TipsCheckBox.SetChecked(false);
         ManagedSettingsSnapshot persistedBeforeDefaults = app.Persisted;
         bool resetForApply = app.OpenResetForTests() && app.ActiveDialog != null &&
             app.ActiveDialog.HandleInput(GuideXosInputEvent.ForKeyDown(
                 GuideXosTextInputKey.Enter)) == GuideXosControlHostResult.Activated &&
             app.Working.Equals(defaults) && app.IsDirty &&
-            app.Persisted.Equals(persistedBeforeDefaults);
+            app.Persisted.Equals(persistedBeforeDefaults) &&
+            GuideXosRuntimeSettings.Current.ShowKeyboardTips ==
+                failureApplied.ShowKeyboardTips;
         bool defaultsApplied = resetForApply && app.ApplyForTests() &&
             app.Working.Equals(defaults) && app.Applied.Equals(defaults) &&
-            app.Persisted.Equals(defaults) && !app.IsDirty;
+            app.Persisted.Equals(defaults) && !app.IsDirty &&
+            GuideXosRuntimeSettings.Current.ShowKeyboardTips;
         result &= Case(ref cases, defaultsApplied);
 
         bool clean = app.RegistrationCount == 10 &&
@@ -128,4 +148,5 @@ public static class GuideXosSettingsCenterC146Tests
         count++;
         return value;
     }
+
 }

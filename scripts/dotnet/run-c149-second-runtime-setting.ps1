@@ -1,0 +1,29 @@
+param(
+    [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
+    [string]$EvidenceRoot = "",
+    [string]$PythonExe = "",
+    [int]$FreshBootCount = 3,
+    [int]$TimeoutSeconds = 360,
+    [switch]$SkipManagedBuild,
+    [switch]$SkipKernelBuild,
+    [switch]$IncrementalKernelBuild
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+$arguments = @(
+    "-ExecutionPolicy", "Bypass",
+    "-File", (Join-Path $PSScriptRoot "run-c120-managed-control-host.ps1"),
+    "-RepoRoot", $RepoRoot,
+    "-ProofPhase", "C149",
+    "-FreshBootCount", $FreshBootCount,
+    "-TimeoutSeconds", $TimeoutSeconds
+)
+if ($EvidenceRoot) { $arguments += @("-EvidenceRoot", $EvidenceRoot) }
+if ($PythonExe) { $arguments += @("-PythonExe", $PythonExe) }
+if ($SkipManagedBuild) { $arguments += "-SkipManagedBuild" }
+if ($SkipKernelBuild) { $arguments += "-SkipKernelBuild" }
+if ($IncrementalKernelBuild) { $arguments += "-IncrementalKernelBuild" }
+
+& powershell @arguments
+exit $LASTEXITCODE

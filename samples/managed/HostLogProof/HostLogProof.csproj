@@ -202,31 +202,36 @@
     <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(HostLogProofMode)' == 'C143Composite' or '$(HostLogProofMode)' == 'C144Composite' or '$(HostLogProofMode)' == 'C145Composite' or '$(HostLogProofMode)' == 'C146Composite' or '$(HostLogProofMode)' == 'C147Composite' or '$(HostLogProofMode)' == 'C148Composite'">
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'C143Composite' or '$(HostLogProofMode)' == 'C144Composite' or '$(HostLogProofMode)' == 'C145Composite' or '$(HostLogProofMode)' == 'C146Composite' or '$(HostLogProofMode)' == 'C147Composite' or '$(HostLogProofMode)' == 'C148Composite' or '$(HostLogProofMode)' == 'C149Composite'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_PRODUCTION;HOSTLOGPROOF_PRODUCTION_COMPOSITE;HOSTLOGPROOF_C112_REUSABLE_APPLICATION;HOSTLOGPROOF_C113_MANAGED_FILE_SERVICES;HOSTLOGPROOF_C114_MANAGED_DIRECTORY_SERVICES;HOSTLOGPROOF_C115_MANAGED_FILE_PICKER;HOSTLOGPROOF_C116_MANAGED_TEXT_INPUT;HOSTLOGPROOF_C117_MANAGED_TEXT_AREA;HOSTLOGPROOF_C118_MANAGED_LIST_BOX;HOSTLOGPROOF_C119_MANAGED_BUTTON;HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST;HOSTLOGPROOF_C121_MANAGED_CHECKBOX;HOSTLOGPROOF_C122_MANAGED_LABEL;HOSTLOGPROOF_C123_MANAGED_SEPARATOR;HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON;HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR;HOSTLOGPROOF_C126_MANAGED_GROUP_BOX;HOSTLOGPROOF_C127_MANAGED_PANEL;HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE;HOSTLOGPROOF_C129_SHIFT_TAB_TRANSPORT;HOSTLOGPROOF_C131_REUSABLE_CHECKBOX;HOSTLOGPROOF_C132_REUSABLE_RADIO_BUTTON;HOSTLOGPROOF_C133_REUSABLE_COMBOBOX;HOSTLOGPROOF_C134_TRANSIENT_POPUP_ROUTING;HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU;HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU;HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING;HOSTLOGPROOF_C135_POPUP_MENU_TESTS;HOSTLOGPROOF_C135_HOST_TESTS;HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR;HOSTLOGPROOF_C139_SHARED_SCROLL_VIEWPORT;HOSTLOGPROOF_C140_MANAGED_SCROLL_VIEW;HOSTLOGPROOF_C141_MANAGED_VERTICAL_STACK;HOSTLOGPROOF_C142_MANAGED_VERTICAL_STACK;HOSTLOGPROOF_C143_MANAGED_GROUP_BOX</DefineConstants>
     <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(HostLogProofMode)' == 'C144Composite' or '$(HostLogProofMode)' == 'C147Composite' or '$(HostLogProofMode)' == 'C148Composite'">
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'C144Composite' or '$(HostLogProofMode)' == 'C147Composite' or '$(HostLogProofMode)' == 'C148Composite' or '$(HostLogProofMode)' == 'C149Composite'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C144_MANAGED_SETTINGS_CENTER</DefineConstants>
     <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(HostLogProofMode)' == 'C145Composite' or '$(HostLogProofMode)' == 'C146Composite' or '$(HostLogProofMode)' == 'C147Composite' or '$(HostLogProofMode)' == 'C148Composite'">
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'C145Composite' or '$(HostLogProofMode)' == 'C146Composite' or '$(HostLogProofMode)' == 'C147Composite' or '$(HostLogProofMode)' == 'C148Composite' or '$(HostLogProofMode)' == 'C149Composite'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C145_MANAGED_MODAL_DIALOG;HOSTLOGPROOF_C134_HOST_TESTS</DefineConstants>
     <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(HostLogProofMode)' == 'C146Composite' or '$(HostLogProofMode)' == 'C147Composite' or '$(HostLogProofMode)' == 'C148Composite'">
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'C146Composite' or '$(HostLogProofMode)' == 'C147Composite' or '$(HostLogProofMode)' == 'C148Composite' or '$(HostLogProofMode)' == 'C149Composite'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C146_PERSISTENT_SETTINGS</DefineConstants>
     <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(HostLogProofMode)' == 'C147Composite' or '$(HostLogProofMode)' == 'C148Composite'">
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'C147Composite' or '$(HostLogProofMode)' == 'C148Composite' or '$(HostLogProofMode)' == 'C149Composite'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C147_RUNTIME_SETTINGS</DefineConstants>
     <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(HostLogProofMode)' == 'C148Composite'">
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'C148Composite' or '$(HostLogProofMode)' == 'C149Composite'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C148_SETTINGS_V2</DefineConstants>
+    <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'C149Composite'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING</DefineConstants>
     <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
   </PropertyGroup>
 
@@ -242,11 +247,11 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C134_TRANSIENT_POPUP_ROUTING;HOSTLOGPROOF_C134_HOST_TESTS;HOSTLOGPROOF_C135_POPUP_MENU_TESTS;HOSTLOGPROOF_C135_HOST_TESTS;HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU</DefineConstants>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(HostLogProofC134IncludeFocusedTests)' != 'true' and '$(HostLogProofC135IncludeFocusedTests)' != 'true' and '$(HostLogProofC136IncludeFocusedTests)' != 'true' and '$(HostLogProofMode)' != 'C137Composite' and '$(HostLogProofMode)' != 'C138Composite' and '$(HostLogProofMode)' != 'C139Composite' and '$(HostLogProofMode)' != 'C140Composite' and '$(HostLogProofMode)' != 'C141Composite' and '$(HostLogProofMode)' != 'C142Composite' and '$(HostLogProofMode)' != 'C143Composite' and '$(HostLogProofMode)' != 'C144Composite' and '$(HostLogProofMode)' != 'C145Composite' and '$(HostLogProofMode)' != 'C146Composite' and '$(HostLogProofMode)' != 'C147Composite' and '$(HostLogProofMode)' != 'C148Composite'">
+  <ItemGroup Condition="'$(HostLogProofC134IncludeFocusedTests)' != 'true' and '$(HostLogProofC135IncludeFocusedTests)' != 'true' and '$(HostLogProofC136IncludeFocusedTests)' != 'true' and '$(HostLogProofMode)' != 'C137Composite' and '$(HostLogProofMode)' != 'C138Composite' and '$(HostLogProofMode)' != 'C139Composite' and '$(HostLogProofMode)' != 'C140Composite' and '$(HostLogProofMode)' != 'C141Composite' and '$(HostLogProofMode)' != 'C142Composite' and '$(HostLogProofMode)' != 'C143Composite' and '$(HostLogProofMode)' != 'C144Composite' and '$(HostLogProofMode)' != 'C145Composite' and '$(HostLogProofMode)' != 'C146Composite' and '$(HostLogProofMode)' != 'C147Composite' and '$(HostLogProofMode)' != 'C148Composite' and '$(HostLogProofMode)' != 'C149Composite'">
     <Compile Remove="GuideXos\GuideXosComboBoxC134HostTests.cs" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(HostLogProofC135IncludeFocusedTests)' != 'true' and '$(HostLogProofC136IncludeFocusedTests)' != 'true' and '$(HostLogProofMode)' != 'C137Composite' and '$(HostLogProofMode)' != 'C138Composite' and '$(HostLogProofMode)' != 'C139Composite' and '$(HostLogProofMode)' != 'C140Composite' and '$(HostLogProofMode)' != 'C141Composite' and '$(HostLogProofMode)' != 'C142Composite' and '$(HostLogProofMode)' != 'C143Composite' and '$(HostLogProofMode)' != 'C144Composite' and '$(HostLogProofMode)' != 'C145Composite' and '$(HostLogProofMode)' != 'C146Composite' and '$(HostLogProofMode)' != 'C147Composite' and '$(HostLogProofMode)' != 'C148Composite'">
+  <ItemGroup Condition="'$(HostLogProofC135IncludeFocusedTests)' != 'true' and '$(HostLogProofC136IncludeFocusedTests)' != 'true' and '$(HostLogProofMode)' != 'C137Composite' and '$(HostLogProofMode)' != 'C138Composite' and '$(HostLogProofMode)' != 'C139Composite' and '$(HostLogProofMode)' != 'C140Composite' and '$(HostLogProofMode)' != 'C141Composite' and '$(HostLogProofMode)' != 'C142Composite' and '$(HostLogProofMode)' != 'C143Composite' and '$(HostLogProofMode)' != 'C144Composite' and '$(HostLogProofMode)' != 'C145Composite' and '$(HostLogProofMode)' != 'C146Composite' and '$(HostLogProofMode)' != 'C147Composite' and '$(HostLogProofMode)' != 'C148Composite' and '$(HostLogProofMode)' != 'C149Composite'">
     <Compile Remove="GuideXos\GuideXosPopupMenuC135Tests.cs" />
     <Compile Remove="GuideXos\GuideXosPopupMenuC135HostTests.cs" />
   </ItemGroup>
@@ -256,7 +261,7 @@
     <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(HostLogProofMode)' == 'Production' or '$(HostLogProofMode)' == 'C104AppA' or '$(HostLogProofMode)' == 'C104AppB' or '$(HostLogProofMode)' == 'C107Composite' or '$(HostLogProofMode)' == 'C108ThreadStaticLifecycle' or '$(HostLogProofMode)' == 'ProductionComposite' or '$(HostLogProofMode)' == 'C112Composite' or '$(HostLogProofMode)' == 'C113Composite' or '$(HostLogProofMode)' == 'C114Composite' or '$(HostLogProofMode)' == 'C115Composite' or '$(HostLogProofMode)' == 'C116Composite' or '$(HostLogProofMode)' == 'C117Composite' or '$(HostLogProofMode)' == 'C118Composite' or '$(HostLogProofMode)' == 'C119Composite' or '$(HostLogProofMode)' == 'C120Composite' or '$(HostLogProofMode)' == 'C121Composite' or '$(HostLogProofMode)' == 'C122Composite' or '$(HostLogProofMode)' == 'C123Composite' or '$(HostLogProofMode)' == 'C124Composite' or '$(HostLogProofMode)' == 'C125Composite' or '$(HostLogProofMode)' == 'C126Composite' or '$(HostLogProofMode)' == 'C127Composite' or '$(HostLogProofMode)' == 'C128Composite' or '$(HostLogProofMode)' == 'C129Composite' or '$(HostLogProofMode)' == 'C131Composite' or '$(HostLogProofMode)' == 'C132Composite' or '$(HostLogProofMode)' == 'C133Composite' or '$(HostLogProofMode)' == 'C134Composite' or '$(HostLogProofMode)' == 'C135Composite' or '$(HostLogProofMode)' == 'C136Composite' or '$(HostLogProofMode)' == 'C137Composite' or '$(HostLogProofMode)' == 'C138Composite' or '$(HostLogProofMode)' == 'C139Composite' or '$(HostLogProofMode)' == 'C140Composite' or '$(HostLogProofMode)' == 'C141Composite' or '$(HostLogProofMode)' == 'C142Composite' or '$(HostLogProofMode)' == 'C143Composite' or '$(HostLogProofMode)' == 'C144Composite' or '$(HostLogProofMode)' == 'C145Composite' or '$(HostLogProofMode)' == 'C146Composite' or '$(HostLogProofMode)' == 'C147Composite' or '$(HostLogProofMode)' == 'C148Composite'">
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'Production' or '$(HostLogProofMode)' == 'C104AppA' or '$(HostLogProofMode)' == 'C104AppB' or '$(HostLogProofMode)' == 'C107Composite' or '$(HostLogProofMode)' == 'C108ThreadStaticLifecycle' or '$(HostLogProofMode)' == 'ProductionComposite' or '$(HostLogProofMode)' == 'C112Composite' or '$(HostLogProofMode)' == 'C113Composite' or '$(HostLogProofMode)' == 'C114Composite' or '$(HostLogProofMode)' == 'C115Composite' or '$(HostLogProofMode)' == 'C116Composite' or '$(HostLogProofMode)' == 'C117Composite' or '$(HostLogProofMode)' == 'C118Composite' or '$(HostLogProofMode)' == 'C119Composite' or '$(HostLogProofMode)' == 'C120Composite' or '$(HostLogProofMode)' == 'C121Composite' or '$(HostLogProofMode)' == 'C122Composite' or '$(HostLogProofMode)' == 'C123Composite' or '$(HostLogProofMode)' == 'C124Composite' or '$(HostLogProofMode)' == 'C125Composite' or '$(HostLogProofMode)' == 'C126Composite' or '$(HostLogProofMode)' == 'C127Composite' or '$(HostLogProofMode)' == 'C128Composite' or '$(HostLogProofMode)' == 'C129Composite' or '$(HostLogProofMode)' == 'C131Composite' or '$(HostLogProofMode)' == 'C132Composite' or '$(HostLogProofMode)' == 'C133Composite' or '$(HostLogProofMode)' == 'C134Composite' or '$(HostLogProofMode)' == 'C135Composite' or '$(HostLogProofMode)' == 'C136Composite' or '$(HostLogProofMode)' == 'C137Composite' or '$(HostLogProofMode)' == 'C138Composite' or '$(HostLogProofMode)' == 'C139Composite' or '$(HostLogProofMode)' == 'C140Composite' or '$(HostLogProofMode)' == 'C141Composite' or '$(HostLogProofMode)' == 'C142Composite' or '$(HostLogProofMode)' == 'C143Composite' or '$(HostLogProofMode)' == 'C144Composite' or '$(HostLogProofMode)' == 'C145Composite' or '$(HostLogProofMode)' == 'C146Composite' or '$(HostLogProofMode)' == 'C147Composite' or '$(HostLogProofMode)' == 'C148Composite' or '$(HostLogProofMode)' == 'C149Composite'">
     <HostLogProofIsProduction>true</HostLogProofIsProduction>
   </PropertyGroup>
 

@@ -6,16 +6,19 @@ namespace HostLogProof.Applications;
 internal readonly struct GuideXosRuntimeSettingsSnapshot
 {
     public GuideXosRuntimeSettingsSnapshot(bool naturalScroll,
-        int scrollLinesPerNotch)
+        int scrollLinesPerNotch, bool showKeyboardTips)
     {
         NaturalScroll = naturalScroll;
         ScrollLinesPerNotch = scrollLinesPerNotch;
+        ShowKeyboardTips = showKeyboardTips;
     }
 
     public bool NaturalScroll { get; }
     public int ScrollLinesPerNotch { get; }
+    public bool ShowKeyboardTips { get; }
     public static GuideXosRuntimeSettingsSnapshot Defaults =>
-        new(false, ManagedSettingsStore.DefaultScrollLinesPerNotch);
+        new(false, ManagedSettingsStore.DefaultScrollLinesPerNotch,
+            ManagedSettingsSnapshot.Defaults.ShowKeyboardTips);
 }
 
 /// <summary>
@@ -35,7 +38,8 @@ internal sealed class GuideXosRuntimeSettingsState
         if (!ManagedSettingsStore.IsValid(candidate)) return false;
 
         GuideXosRuntimeSettingsSnapshot next =
-            new(candidate.NaturalScroll, candidate.ScrollLinesPerNotch);
+            new(candidate.NaturalScroll, candidate.ScrollLinesPerNotch,
+                candidate.ShowKeyboardTips);
         _current = next;
         IsReady = true;
         return true;
@@ -174,6 +178,7 @@ internal static class GuideXosRuntimeSettings
     {
         bool oldNatural = s_active.Current.NaturalScroll;
         int oldAmount = s_active.Current.ScrollLinesPerNotch;
+        bool oldKeyboardTips = s_active.Current.ShowKeyboardTips;
         s_startup.CommitPersisted(candidate);
         Span<byte> line = stackalloc byte[127];
         int position = 0;
@@ -203,6 +208,23 @@ internal static class GuideXosRuntimeSettings
                 " persistence=verified runtime=committed result=PASS"u8))
         {
             host?.TryLog(amountLine[..amountPosition]);
+        }
+#endif
+#if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
+        Span<byte> tipsLine = stackalloc byte[128];
+        int tipsPosition = 0;
+        if (GuideXosText.Append(tipsLine, ref tipsPosition,
+                "C149-RUNTIME-APPLY oldKeyboardTips="u8) &&
+            GuideXosText.AppendUnsigned(tipsLine, ref tipsPosition,
+                oldKeyboardTips ? 1u : 0u) &&
+            GuideXosText.Append(tipsLine, ref tipsPosition,
+                " newKeyboardTips="u8) &&
+            GuideXosText.AppendUnsigned(tipsLine, ref tipsPosition,
+                candidate.ShowKeyboardTips ? 1u : 0u) &&
+            GuideXosText.Append(tipsLine, ref tipsPosition,
+                " persistence=verified runtime=committed result=PASS"u8))
+        {
+            host?.TryLog(tipsLine[..tipsPosition]);
         }
 #endif
     }
@@ -263,6 +285,22 @@ internal static class GuideXosRuntimeSettings
                 " ready=true before-application=true result=PASS"u8))
         {
             host?.TryLog(amountLine[..amountPosition]);
+        }
+#endif
+#if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
+        Span<byte> tipsLine = stackalloc byte[112];
+        int tipsPosition = 0;
+        if (GuideXosText.Append(tipsLine, ref tipsPosition,
+                "C149-RUNTIME-SETTING source="u8) &&
+            GuideXosText.Append(tipsLine, ref tipsPosition, source) &&
+            GuideXosText.Append(tipsLine, ref tipsPosition,
+                " keyboardTips="u8) &&
+            GuideXosText.AppendUnsigned(tipsLine, ref tipsPosition,
+                runtime.ShowKeyboardTips ? 1u : 0u) &&
+            GuideXosText.Append(tipsLine, ref tipsPosition,
+                " ready=true before-application=true result=PASS"u8))
+        {
+            host?.TryLog(tipsLine[..tipsPosition]);
         }
 #endif
     }

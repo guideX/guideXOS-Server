@@ -159,6 +159,9 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 #if HOSTLOGPROOF_C148_SETTINGS_V2
     private bool _c148TestsPassed;
 #endif
+#if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
+    private bool _c149TestsPassed;
+#endif
     private bool _c145FocusedTesting;
     private bool _saveInProgress;
     private bool _persistedFilePresent;
@@ -345,6 +348,12 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             }
         }
 #endif
+#if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
+        if (!_testsRun)
+        {
+            _c149TestsPassed = GuideXosSettingsRuntimeC149Tests.Run(host);
+        }
+#endif
 #if HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
         if (!_testsRun)
         {
@@ -453,6 +462,9 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
                 _c147RuntimeTestsPassed
 #if HOSTLOGPROOF_C148_SETTINGS_V2
                 && _c148TestsPassed
+#endif
+#if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
+                && _c149TestsPassed
 #endif
                 ;
 #else
@@ -840,6 +852,14 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
                 " dirty=false runtime=agrees result=PASS"u8);
         if (syncWritten) host?.TryLog(syncLine[..syncLength]);
 #endif
+#if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
+        host?.TryLog(_applied.ShowKeyboardTips ==
+                GuideXosRuntimeSettings.Current.ShowKeyboardTips && !IsDirty
+            ? _applied.ShowKeyboardTips
+                ? "C149-SETTINGS-SYNC keyboardTips=1 dirty=false runtime=agrees result=PASS"u8
+                : "C149-SETTINGS-SYNC keyboardTips=0 dirty=false runtime=agrees result=PASS"u8
+            : "C149-SETTINGS-SYNC result=FAIL"u8);
+#endif
 #endif
         if (load.Status == ManagedSettingsLoadStatus.Loaded)
         {
@@ -1089,6 +1109,9 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             // Save and exact read-back have succeeded; candidate validity was
             // proven above and runtime publication is one bounded assignment.
             GuideXosRuntimeSettings.CommitPersisted(_appHost, candidate);
+#if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
+            _appHost?.TryLog("C149-CONSUMER-APPLY persistence=verified runtime=published render=fresh-notes-launch result=PASS"u8);
+#endif
         }
 #endif
         _applied = candidate;
@@ -1456,6 +1479,18 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         if (_syncing) return;
         _working.ShowKeyboardTips = value;
         CompleteWorkingChange();
+#if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
+        GuideXosRuntimeSettingsSnapshot runtime = GuideXosRuntimeSettings.Current;
+        bool runtimePreserved =
+            runtime.ShowKeyboardTips == _applied.ShowKeyboardTips &&
+            _persisted.ShowKeyboardTips == _applied.ShowKeyboardTips;
+        _appHost?.TryLog(value == _working.ShowKeyboardTips &&
+                runtimePreserved && IsDirty
+            ? value
+                ? "C149-WORKING keyboardTips=1 runtime=preserved persisted=preserved dirty=true result=PASS"u8
+                : "C149-WORKING keyboardTips=0 runtime=preserved persisted=preserved dirty=true result=PASS"u8
+            : "C149-WORKING result=FAIL"u8);
+#endif
     }
 
     private void OnInputEnabledChanged(bool value)
@@ -1612,6 +1647,15 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
                     ? "C148-RESET scrollLines=working-default runtime=preserved persisted=preserved result=PASS"u8
                     : "C148-RESET result=FAIL"u8);
 #endif
+#if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
+                bool c149RuntimePreserved = GuideXosRuntimeSettings.Current
+                    .ShowKeyboardTips == _dialogAppliedSnapshot.ShowKeyboardTips &&
+                    _persisted.ShowKeyboardTips ==
+                        _dialogAppliedSnapshot.ShowKeyboardTips;
+                _appHost?.TryLog(c149RuntimePreserved
+                    ? "C149-RESET keyboardTips=working-default runtime=preserved persisted=preserved result=PASS"u8
+                    : "C149-RESET result=FAIL"u8);
+#endif
             }
 #endif
         }
@@ -1724,6 +1768,16 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
                 : "C145-CLOSE clean=true confirmation=none result=PASS"u8);
         if (_c145FocusedTesting) return valid;
         _surfaceClosing = surface.TryClose() == GuideXosResult.Success;
+#if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
+        if (_surfaceClosing && reason == "clean")
+        {
+            bool retained = GuideXosRuntimeSettings.Current.ShowKeyboardTips ==
+                _applied.ShowKeyboardTips;
+            host?.TryLog(retained
+                ? "C149-RUNTIME-RETENTION settings-center=closed snapshot=unchanged result=PASS"u8
+                : "C149-RUNTIME-RETENTION result=FAIL"u8);
+        }
+#endif
         return valid && _surfaceClosing;
     }
 
