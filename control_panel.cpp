@@ -11,6 +11,7 @@
 #include "process.h"
 #include "ipc_bus.h"
 #include "desktop_service.h"
+#include "settings_center.h"
 #include <chrono>
 #include <sstream>
 #include <algorithm>
@@ -538,6 +539,13 @@ bool ControlPanel::hit(int mx, int my, int x, int y, int w, int h) {
 
 void ControlPanel::launchItem(const std::string& action) {
     Logger::write(LogLevel::Info, std::string("ControlPanel launching: ") + action);
+
+    if (action == "NetworkSettings") {
+        if (SettingsCenter::Launch("settings://network") == 0) {
+            Logger::write(LogLevel::Warn, "Failed to open Network & Internet settings");
+        }
+        return;
+    }
     
     std::string error;
     if (!DesktopService::LaunchApp(action, error)) {

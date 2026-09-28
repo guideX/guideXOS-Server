@@ -34,6 +34,7 @@
 #include "disk_manager.h"
 #include "control_panel.h"
 #include "display_options.h"
+#include "settings_center.h"
 #include "navigator.h"
 #include "trash.h"
 #include "package_manager.h"
@@ -605,7 +606,7 @@ namespace gxos {
                 makeUiLaunchLabelDiagnostic("Music", "start menu right-column shortcut", "/Music", "opens FileExplorer and creates the shared folder if needed"),
                 makeUiLaunchLabelDiagnostic("Network", "start menu right-column shortcut", "/Network", "opens FileExplorer and creates the shared folder if needed"),
                 makeUiLaunchLabelDiagnostic("Control Panel", "start menu right-column shortcut", "ControlPanel", "launches the existing control surface"),
-                makeUiLaunchLabelDiagnostic("Settings", "start menu right-column shortcut", "ControlPanel", "temporary fallback until a dedicated Settings app exists")
+                makeUiLaunchLabelDiagnostic("Settings", "start menu right-column shortcut", "gxos.builtin.settings", "launches the unified Settings application")
             };
         }
 
@@ -881,6 +882,7 @@ namespace gxos {
                 "DiskManager",
                 "DisplayOptions",
                 "ControlPanel",
+                "Settings",
                 "guideXOS Navigator",
                 "HDInstaller",
                 "AppModel",
@@ -900,6 +902,7 @@ namespace gxos {
                 "DiskManager",
                 "DisplayOptions",
                 "ControlPanel",
+                "Settings",
                 "guideXOS Navigator",
                 "FileExplorer",
                 "Trash"
@@ -913,6 +916,7 @@ namespace gxos {
                 "Clock",
                 "Console",
                 "Control Panel",
+                "Settings",
                 "File Explorer",
                 "Image Viewer",
                 "App Model Demo",
@@ -935,6 +939,7 @@ namespace gxos {
                 "File Explorer",
                 "ControlPanel",
                 "DisplayOptions",
+                "Settings",
                 "Paint",
                 "TaskManager",
                 "DiskManager",
@@ -1405,7 +1410,7 @@ namespace gxos {
                 label == "Network";
         }
 
-        static bool isStartMenuSettingsFallbackLabel(const std::string& label) {
+        static bool isSettingsShellLabel(const std::string& label) {
             return label == "Settings" || label == "System Settings";
         }
 
@@ -3227,15 +3232,12 @@ namespace gxos {
                 return target;
             }
 
-            if (isStartMenuSettingsFallbackLabel(label)) {
-                target.type = apps::LaunchTargetType::ShellAction;
-                target.displayName = label;
-                target.shellAction = label;
-                target.dispatchLaunchName = "DisplayOptions";
-                target.hostedAvailable = true;
-                target.bareMetalAvailable = true;
-                target.diagnosticStatus = "resolved-shell";
-                target.diagnosticReason = "Temporary Start Menu Settings mapping routes to the existing DisplayOptions settings panel until a dedicated unified Settings app exists";
+            if (isSettingsShellLabel(label)) {
+                if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByAppId("gxos.builtin.settings")) {
+                    fillLaunchTargetFromMetadata(target, *metadata);
+                }
+                target.diagnosticStatus = "resolved-alias";
+                target.diagnosticReason = "Settings and System Settings resolve to the unified guideXOS Settings application";
                 return target;
             }
 
@@ -5215,24 +5217,16 @@ namespace gxos {
                 }
 
                 if (shellAction == "Settings" || shellAction == "System Settings") {
-                    uint64_t settingsPid = apps::DisplayOptions::Launch();
+                    const uint64_t settingsPid = apps::SettingsCenter::Launch();
                     if (settingsPid == 0) {
-                        settingsPid = apps::ControlPanel::Launch();
-                        if (settingsPid == 0) {
-                            error = "Could not open Settings";
-                            reason = "Active typed dispatch attempted Settings and Control Panel fallback but both failed";
-                            return false;
-                        }
-
-                        addRecentIfRequested("Control Panel");
-                        selectedHandler = "Control Panel";
-                        reason = "Active typed dispatch handled Settings through the existing Control Panel fallback";
-                        return true;
+                        error = "Could not open Settings";
+                        reason = "Active typed dispatch attempted Settings but the launcher returned pid=0";
+                        return false;
                     }
 
-                    addRecentIfRequested("DisplayOptions");
-                    selectedHandler = "DisplayOptions";
-                    reason = "Active typed dispatch handled Settings through DisplayOptions";
+                    addRecentIfRequested("Settings");
+                    selectedHandler = "Settings";
+                    reason = "Active typed dispatch handled the Settings application launch";
                     return true;
                 }
 
@@ -5383,10 +5377,24 @@ namespace gxos {
                 return true;
             }
 
+            if (dispatchName == "Settings") {
+                const uint64_t pid = apps::SettingsCenter::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Settings";
+                    reason = "Active typed dispatch attempted Settings but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("Settings");
+                selectedHandler = "Settings";
+                reason = "Active typed dispatch handled the Settings launch";
+                return true;
+            }
+
             if (dispatchName == "DisplayOptions") {
                 const uint64_t pid = apps::DisplayOptions::Launch();
                 if (pid == 0) {
-                    error = "Failed to launch Settings";
+                    error = "Failed to launch Display Options";
                     reason = "Active typed dispatch attempted DisplayOptions but the launcher returned pid=0";
                     return false;
                 }
@@ -5660,26 +5668,17 @@ namespace gxos {
                     return true;
                 }
 
-                if (isStartMenuSettingsFallbackLabel(shellAction)) {
-                    // Temporary Start Menu mapping until a dedicated unified Settings app exists.
-                    std::string recentName;
-                    uint64_t settingsPid = apps::DisplayOptions::Launch();
+                if (isSettingsShellLabel(shellAction)) {
+                    const uint64_t settingsPid = apps::SettingsCenter::Launch();
                     if (settingsPid == 0) {
-                        Logger::write(LogLevel::Warn, "DisplayOptions launch failed for Settings; falling back to Control Panel");
-                        settingsPid = apps::ControlPanel::Launch();
-                        if (settingsPid == 0) {
-                            error = "Could not open Settings";
-                            Logger::write(LogLevel::Warn, error);
-                            NotificationManager::Add(error, NotificationLevel::Error);
-                            return false;
-                        }
-                        recentName = "Control Panel";
-                    } else {
-                        recentName = "DisplayOptions";
+                        error = "Could not open Settings";
+                        Logger::write(LogLevel::Warn, error);
+                        NotificationManager::Add(error, NotificationLevel::Error);
+                        return false;
                     }
 
-                    Logger::write(LogLevel::Info, std::string("Launched Settings via settings panel pid=") + std::to_string(settingsPid));
-                    if (recordRecent && !recentName.empty()) AddRecentProgram(recentName);
+                    Logger::write(LogLevel::Info, std::string("Launched Settings app pid=") + std::to_string(settingsPid));
+                    if (recordRecent) AddRecentProgram("Settings");
                     return true;
                 }
             }
@@ -5868,6 +5867,14 @@ namespace gxos {
                     return false;
                 }
                 if (recordRecent) AddRecentProgram("Control Panel");
+            }
+            else if (appName == "Settings") {
+                if (apps::SettingsCenter::Launch() == 0) {
+                    error = "Failed to launch Settings";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+                if (recordRecent) AddRecentProgram("Settings");
             }
             else if (appName == "DisplayOptions" || appName == "Display Settings" || appName == "Desktop Background" || appName == "Wallpaper") {
                 if (apps::DisplayOptions::Launch() == 0) {

@@ -603,6 +603,12 @@
     <ClInclude Include="control_panel.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="settings_center.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="settings_center_model.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="focus_indicator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1305,6 +1311,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="control_panel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="settings_center.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="focus_indicator.cpp">

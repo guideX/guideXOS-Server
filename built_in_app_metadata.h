@@ -69,16 +69,19 @@ static const char* const kImageViewerAliases[] = {
 };
 
 static const char* const kControlPanelAliases[] = {
-	"Control Panel",
-	"Settings"
+    "Control Panel"
 };
 
 static const char* const kDisplayOptionsAliases[] = {
-	"System Settings",
-	"Display Options",
+    "Display Options",
 	"Display Settings",
 	"Desktop Background",
 	"Wallpaper"
+};
+
+static const char* const kUnifiedSettingsAliases[] = {
+    "System Settings",
+    "Settings Center"
 };
 
 static const char* const kAppModelAliases[] = {
@@ -111,6 +114,7 @@ static const BuiltInAppMetadata kBuiltInAppMetadata[] = {
 	{ "gxos.builtin.shutdowndialog", "ShutdownDialog", "ShutdownDialog", nullptr, nullptr, "app.generic", "System", "Built-in guideXOS shutdown dialog.", BuiltInAvailabilityHosted, 0, 0, 0, false, false, detail::kShutdownDialogAliases, sizeof(detail::kShutdownDialogAliases) / sizeof(detail::kShutdownDialogAliases[0]), false, false, false, false, false, true, true },
 	{ "gxos.builtin.diskmanager", "DiskManager", "DiskManager", "DiskManager", nullptr, "app.diskmanager", "System", "Built-in guideXOS disk manager.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFF7050C0u, 0, 0, false, false, nullptr, 0, true, true, true, false, false, false, false },
 	{ "gxos.builtin.controlpanel", "ControlPanel", "ControlPanel", nullptr, nullptr, "app.controlpanel", "System", "Built-in guideXOS control panel.", BuiltInAvailabilityHosted, 0, 0, 0, false, false, detail::kControlPanelAliases, sizeof(detail::kControlPanelAliases) / sizeof(detail::kControlPanelAliases[0]), true, true, true, false, false, true, false },
+	{ "gxos.builtin.settings", "Settings", "Settings", nullptr, nullptr, "app.settings", "System", "Unified guideXOS settings application.", BuiltInAvailabilityHosted, 0, 980, 700, true, false, detail::kUnifiedSettingsAliases, sizeof(detail::kUnifiedSettingsAliases) / sizeof(detail::kUnifiedSettingsAliases[0]), true, true, true, false, false, false, false },
 	{ "gxos.builtin.displayoptions", "DisplayOptions", "DisplayOptions", "DisplayOptions", nullptr, "app.settings", "System", "Built-in guideXOS display options.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFF606878u, 0, 0, false, false, detail::kDisplayOptionsAliases, sizeof(detail::kDisplayOptionsAliases) / sizeof(detail::kDisplayOptionsAliases[0]), true, true, true, false, false, true, false },
 	{ "guidexos.navigator", "guideXOS Navigator", "guideXOS Navigator", "guideXOS Navigator", nullptr, "app.navigator", "Internet", "Native guideXOS Navigator browser bundled with the OS app model.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFF4678BEu, 920, 640, false, false, nullptr, 0, true, true, true, false, false, false, false },
 	{ "gxos.builtin.appmodeldemo", "App Model Demo", "App Model Demo", nullptr, nullptr, "app.generic", "Diagnostics", "Built-in guideXOS app-model diagnostics viewer.", BuiltInAvailabilityHosted, 0, 0, 0, false, false, detail::kAppModelAliases, sizeof(detail::kAppModelAliases) / sizeof(detail::kAppModelAliases[0]), true, true, true, false, false, false, false },

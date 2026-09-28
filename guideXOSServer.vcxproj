@@ -155,6 +155,8 @@
     <ClInclude Include="display_options.h" />
     <ClInclude Include="disk_manager.h" />
     <ClInclude Include="control_panel.h" />
+    <ClInclude Include="settings_center.h" />
+    <ClInclude Include="settings_center_model.h" />
     <ClInclude Include="elf_validator.h" />
     <ClInclude Include="executable_memory.h" />
     <ClInclude Include="file_explorer.h" />
@@ -402,6 +404,7 @@
     <ClCompile Include="display_options.cpp" />
     <ClCompile Include="disk_manager.cpp" />
     <ClCompile Include="control_panel.cpp" />
+    <ClCompile Include="settings_center.cpp" />
     <ClCompile Include="elf_validator.cpp" />
     <ClCompile Include="executable_memory.cpp" />
     <ClCompile Include="file_explorer.cpp" />

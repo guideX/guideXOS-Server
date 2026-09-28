@@ -235,7 +235,9 @@ static std::string desktopStartupAppModelRegressionDiagnostic() {
     const std::vector<ExpectedApp> expectedApps = {
         {"gxos.builtin.notepad", "Notepad"},
         {"gxos.builtin.calculator", "Calculator"},
-        {"gxos.builtin.displayoptions", "DisplayOptions"}
+        {"gxos.builtin.displayoptions", "DisplayOptions"},
+        {"gxos.builtin.settings", "Settings"},
+        {"gxos.builtin.controlpanel", "ControlPanel"}
     };
 
     std::ostringstream oss;

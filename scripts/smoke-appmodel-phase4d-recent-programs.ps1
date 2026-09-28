@@ -239,8 +239,8 @@ This file should stay unsupported.
 
     Assert-Contains $preflightOutput "appModelPhase4DRecentProgramWritePathsInventoried=true" "phase 4D summary marker"
     Assert-Contains $preflightOutput "appModelPhase4DRecentProgramNamesRegistryAligned=true" "phase 4D summary marker"
-    Assert-Contains $preflightOutput "appModelPhase4DCanonicalRecentCapableBuiltIns=12" "phase 4D canonical count"
-    Assert-Contains $preflightOutput "appModelPhase4DRegistryRecentCapableBuiltIns=14" "phase 4D registry count"
+    Assert-Contains $preflightOutput "appModelPhase4DCanonicalRecentCapableBuiltIns=13" "phase 4D canonical count"
+    Assert-Contains $preflightOutput "appModelPhase4DRegistryRecentCapableBuiltIns=15" "phase 4D registry count"
     Assert-Contains $preflightOutput "appModelPhase4DShellObjectsRecentAllowed=7" "phase 4D shell allowed count"
     Assert-Contains $preflightOutput "appModelPhase4DShellObjectsRecentSuppressed=3" "phase 4D shell suppressed count"
     Assert-Contains $preflightOutput "appModelPhase4DShellObjectRecentPolicyAligned=true" "phase 4D shell policy"
@@ -333,7 +333,8 @@ This file should stay unsupported.
         @{ Command = "desktop.launch Pictures"; Expected = "File Explorer"; Reason = "Pictures shell object"; OutputNeedles = @("classification=ShellAction") },
         @{ Command = "desktop.launch Music"; Expected = "File Explorer"; Reason = "Music shell object"; OutputNeedles = @("classification=ShellAction") },
         @{ Command = "desktop.launch Network"; Expected = "File Explorer"; Reason = "Network shell object"; OutputNeedles = @("classification=ShellAction") },
-        @{ Command = "desktop.launch Settings"; Expected = "DisplayOptions"; Reason = "Settings shell object"; OutputNeedles = @("classification=ShellAction") },
+        @{ Command = "desktop.launch Settings"; Expected = "Settings"; Reason = "Settings application"; OutputNeedles = @("classification=BuiltInApp") },
+        @{ Command = "desktop.launch System Settings"; Expected = "Settings"; Reason = "Settings alias"; OutputNeedles = @("classification=BuiltInApp") },
         @{ Command = "desktop.launch Control Panel"; Expected = "ControlPanel"; Reason = "Control Panel shell object"; OutputNeedles = @("classification=ShellAction") },
         @{ Command = "desktop.launch Trash"; Expected = "Trash"; Reason = "Trash shell object"; OutputNeedles = @("classification=BuiltInApp") }
     )
@@ -487,8 +488,8 @@ This file should stay unsupported.
     )
     Assert-Contains $finalSummaryOutput "appModelPhase4DRecentProgramWritePathsInventoried=true" "final phase 4D summary"
     Assert-Contains $finalSummaryOutput "appModelPhase4DRecentProgramNamesRegistryAligned=true" "final phase 4D summary"
-    Assert-Contains $finalSummaryOutput "appModelPhase4DCanonicalRecentCapableBuiltIns=12" "final phase 4D summary"
-    Assert-Contains $finalSummaryOutput "appModelPhase4DRegistryRecentCapableBuiltIns=14" "final phase 4D summary"
+    Assert-Contains $finalSummaryOutput "appModelPhase4DCanonicalRecentCapableBuiltIns=13" "final phase 4D summary"
+    Assert-Contains $finalSummaryOutput "appModelPhase4DRegistryRecentCapableBuiltIns=15" "final phase 4D summary"
     Assert-Contains $finalSummaryOutput "appModelPhase4DShellObjectsRecentAllowed=7" "final phase 4D summary"
     Assert-Contains $finalSummaryOutput "appModelPhase4DShellObjectsRecentSuppressed=3" "final phase 4D summary"
     Assert-Contains $finalSummaryOutput "appModelPhase4DShellObjectRecentPolicyAligned=true" "final phase 4D summary"

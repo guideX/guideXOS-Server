@@ -47,7 +47,13 @@ function Invoke-ControlledRuntime {
     )
 
     $outputPath = Join-Path $Path ("$Label.output.log")
-    $output = ($Commands | & (Join-Path $Path "run-server.bat") 2>&1 | Out-String)
+    $inputPath = Join-Path $Path ("$Label.stdin.txt")
+    $runnerPath = Join-Path $Path ("$Label.runner.bat")
+    $inputText = ($Commands -join "`r`n") + "`r`n"
+    [System.IO.File]::WriteAllText($inputPath, $inputText, [System.Text.Encoding]::ASCII)
+    $runnerText = "@echo off`r`ncall `"$(Join-Path $Path 'run-server.bat')`" < `"$inputPath`"`r`n"
+    [System.IO.File]::WriteAllText($runnerPath, $runnerText, [System.Text.Encoding]::ASCII)
+    $output = (& $runnerPath 2>&1 | Out-String)
     [System.IO.File]::WriteAllText($outputPath, $output)
     Write-Host "[$Label] output: $outputPath"
     return $output
@@ -98,14 +104,18 @@ $normalOutput = Invoke-ControlledRuntime -Path $normalRoot -Label "normal-startu
 $normalOwnership = Get-WindowOwnershipBlock $normalOutput
 Assert-Check ($normalOutput.Contains("gxos.builtin.notepad") -and
     $normalOutput.Contains("gxos.builtin.calculator") -and
-    $normalOutput.Contains("gxos.builtin.displayoptions")) `
-    "Notepad, Calculator, and Display Options are registered by canonical app ID"
+    $normalOutput.Contains("gxos.builtin.displayoptions") -and
+    $normalOutput.Contains("gxos.builtin.settings") -and
+    $normalOutput.Contains("gxos.builtin.controlpanel")) `
+    "Notepad, Calculator, Display Options, Settings, and Control Panel are registered by canonical app ID"
 Assert-Check ($normalOwnership.Contains("windowCount=0")) `
     "normal desktop startup creates no application windows"
 Assert-Check (-not $normalOwnership.Contains("gxos.builtin.notepad") -and
     -not $normalOwnership.Contains("gxos.builtin.calculator") -and
-    -not $normalOwnership.Contains("gxos.builtin.displayoptions")) `
-    "registration does not launch any of the three applications"
+    -not $normalOwnership.Contains("gxos.builtin.displayoptions") -and
+    -not $normalOwnership.Contains("gxos.builtin.settings") -and
+    -not $normalOwnership.Contains("gxos.builtin.controlpanel")) `
+    "registration does not launch any of the five applications"
 Assert-Check (-not $normalOutput.Contains("STARTUP_APP_MODEL_REGRESSION_BEGIN")) `
     "the test-only launch diagnostic is not part of ordinary startup"
 
@@ -114,7 +124,7 @@ $explicitOutput = Invoke-ControlledRuntime -Path $explicitRoot -Label "explicit-
     "desktop.startup.regression",
     "exit"
 )
-foreach ($appId in @("gxos.builtin.notepad", "gxos.builtin.calculator", "gxos.builtin.displayoptions")) {
+foreach ($appId in @("gxos.builtin.notepad", "gxos.builtin.calculator", "gxos.builtin.displayoptions", "gxos.builtin.settings", "gxos.builtin.controlpanel")) {
     Assert-Check ($explicitOutput.Contains("registered appId=$appId") -and
         $explicitOutput.Contains("explicitLaunch appId=$appId launchResult=PASS windowOwnership=PASS")) `
         "$appId is registered and explicitly launchable with canonical window ownership"
