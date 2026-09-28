@@ -2553,7 +2553,96 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                 $missingMarkers += "Phase29D rejected a live startup re-entry"
             }
 
-            if ($Phase28QOnly -and -not $Phase29ISentinelOnly) {
+            if ($Phase29COnly) {
+                $phase29kLines = @($serial -split "`r?`n" | Where-Object {
+                    $_ -match 'DEVELOPER_STUDIO_PHASE29K_PROJECT_TX_STAGE '
+                })
+                $phase29kResults = @($serial -split "`r?`n" | Where-Object {
+                    $_ -match 'DEVELOPER_STUDIO_PHASE29K_PROJECT_TX_RESULT '
+                })
+                $phase29kStateLines = @($serial -split "`r?`n" | Where-Object {
+                    $_ -match 'DEVELOPER_STUDIO_PHASE29K_PROJECT_TX_STATE '
+                })
+                $phase29kIdentityLines = @($serial -split "`r?`n" | Where-Object {
+                    $_ -match 'DEVELOPER_STUDIO_PHASE29K_PROJECT_TX_IDENTITY '
+                })
+                $phase29kManifestLines = @($serial -split "`r?`n" | Where-Object {
+                    $_ -match 'DEVELOPER_STUDIO_PHASE29K_PROJECT_TX_MANIFEST '
+                })
+                $phase29kCountLines = @($serial -split "`r?`n" | Where-Object {
+                    $_ -match 'DEVELOPER_STUDIO_PHASE29K_PROJECT_TX_COUNTS '
+                })
+                $expectedTransactionStages = @(
+                    'load_started', 'loaded', 'candidate_allocated', 'refresh_started',
+                    'validated', 'committing', 'active', 'ready'
+                )
+                $actualTransactionStages = @($phase29kLines | ForEach-Object {
+                    if ($_ -match ' state=([^ ]+) ') { $Matches[1] }
+                })
+                if ($phase29kLines.Count -ne $expectedTransactionStages.Count -or
+                    ($actualTransactionStages -join ',') -ne ($expectedTransactionStages -join ',')) {
+                    $missingMarkers += "Phase29K transaction stages expected=$($expectedTransactionStages -join ',') actual=$($actualTransactionStages -join ',') count=$($phase29kLines.Count)"
+                }
+                if ($phase29kResults.Count -ne 1) {
+                    $missingMarkers += "Phase29K transaction result count=$($phase29kResults.Count)"
+                }
+                $transactionIdentities = @($phase29kLines | ForEach-Object {
+                    if ($_ -match ' tx=(\d+) tx_generation=(\d+).* request=(\d+) request_generation=(\d+)') {
+                        "$($Matches[1]):$($Matches[2]):$($Matches[3]):$($Matches[4])"
+                    }
+                } | Sort-Object -Unique)
+                $candidateIdentities = @($phase29kStateLines | ForEach-Object {
+                    if ($_ -match ' candidate=(\d+) candidate_generation=(\d+)') {
+                        "$($Matches[1]):$($Matches[2])"
+                    }
+                } | Sort-Object -Unique)
+                if ($transactionIdentities.Count -ne 1 -or $candidateIdentities.Count -ne 1) {
+                    $missingMarkers += "Phase29K transaction/candidate ownership changed transactions=$($transactionIdentities.Count) candidates=$($candidateIdentities.Count)"
+                }
+                if ($phase29kLines.Count -gt 0 -and $phase29kStateLines.Count -eq $expectedTransactionStages.Count) {
+                    $loadStartedLines = @($phase29kLines | Where-Object { $_ -match ' state=load_started ' })
+                    $loadedLines = @($phase29kLines | Where-Object { $_ -match ' state=loaded ' })
+                    $readyLines = @($phase29kLines | Where-Object { $_ -match ' state=ready ' })
+                    if ($loadStartedLines.Count -ne 1 -or $loadedLines.Count -ne 1 -or $readyLines.Count -ne 1) {
+                        $missingMarkers += "Phase29K owner-stage counts load_started=$($loadStartedLines.Count) loaded=$($loadedLines.Count) ready=$($readyLines.Count)"
+                    }
+                    if ($phase29kLines -match ' state=failed ' -or $phase29kLines -match ' reentries=[1-9]') {
+                        $missingMarkers += "Phase29K recorded a failed transaction stage or re-entry"
+                    }
+                    if ($phase29kIdentityLines.Count -ne $expectedTransactionStages.Count -or
+                        @($phase29kIdentityLines | Where-Object {
+                            $_ -notmatch 'owner_pointer=1 tx_id=1 tx_generation=1 request_id=1 request_generation=1 candidate_id=1 candidate_generation=1'
+                        }).Count -ne 0) {
+                        $missingMarkers += "Phase29K transaction/request/candidate owner identity mismatch count=$($phase29kIdentityLines.Count)"
+                    }
+                    if (@($phase29kLines | Where-Object {
+                        $_ -notmatch ' caller=phase28q_startup_pump '
+                    }).Count -ne 0) {
+                        $missingMarkers += "Phase29K transaction caller was not the one-shot startup pump"
+                    }
+                    if ($phase29kManifestLines.Count -ne 1 -or
+                        $phase29kManifestLines[0] -notmatch ' role=application path=/P28Q/app/app\.json project_metadata_path=/P28Q/guidexos\.project') {
+                        $missingMarkers += "Phase29K manifest evidence count/path/role mismatch count=$($phase29kManifestLines.Count)"
+                    }
+                    $readyOwnerLines = @($serial -split "`r?`n" | Where-Object {
+                        $_ -match 'DEVELOPER_STUDIO_PHASE29K_PROJECT_TX_OWNER .* state=ready '
+                    })
+                    if ($readyOwnerLines.Count -ne 1 -or
+                        $readyOwnerLines[0] -notmatch 'in_progress=1 tx_active=1 owner_matches=1 result=none') {
+                        $missingMarkers += "Phase29K ready stage did not retain active transaction ownership until settlement"
+                    }
+                }
+                if ($phase29kResults.Count -eq 1 -and
+                    $phase29kResults[0] -notmatch ' state=ready accepted=1 result=none reentries=0 max_entry_depth=1 load_in_progress=0 active_generation=[1-9]\d*') {
+                    $missingMarkers += "Phase29K transaction result did not prove single-owner ready settlement: $($phase29kResults[0])"
+                }
+                if ($phase29kCountLines.Count -ne 1 -or
+                    $phase29kCountLines[0] -notmatch 'manifest_validations=1 load_stages=8 refresh_count=1 commit_count=1') {
+                    $missingMarkers += "Phase29K transaction count result mismatch count=$($phase29kCountLines.Count)"
+                }
+            }
+
+            if ($Phase28QOnly -and -not $Phase29ISentinelOnly -and -not $Phase29COnly) {
                 $phase29fMarkers = @($serial -split "`r?`n" | Where-Object {
                     $_ -match 'DEVELOPER_STUDIO_PHASE29F_DEBUG_START (event=intent|event=request_validation|event=build_submission|event=request_ownership|event=artifact_validation|event=service_lookup|event=service_handoff|event=startup_handshake|event=client_running_observed|event=running_publication|event=phase28q_running_observed) ' -or
                     $_ -match 'DEVELOPER_STUDIO_PHASE29F_DEBUG_START_SERVER event=(service_registration|start_api_entry|server_admission|target_creation|first_dispatch|release_command_consumed|first_execution_dispatch|running_publication) '
@@ -2800,6 +2889,9 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
             $manifestEvidence = @($serial -split "`r?`n" | Where-Object {
                 $_ -match 'DEVELOPER_STUDIO_PHASE29E_MANIFEST path=/P28Q/app/app\.json '
             })
+            $manifestGenerationEvidence = @($serial -split "`r?`n" | Where-Object {
+                $_ -match 'DEVELOPER_STUDIO_PHASE29E_MANIFEST_GENERATION '
+            })
             $manifestReadEvidence = @($serial -split "`r?`n" | Where-Object {
                 $_ -match 'DEVELOPER_STUDIO_PHASE29E_MANIFEST_READ '
             })
@@ -2821,11 +2913,11 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
             $identityMismatchEvidence = @($serial -split "`r?`n" | Where-Object {
                 $_ -match 'DEVELOPER_STUDIO_PHASE29E_MISMATCH '
             })
-            if ($manifestEvidence.Count -ne 1 -or $manifestReadEvidence.Count -ne 1 -or
+            if ($manifestEvidence.Count -ne 1 -or $manifestGenerationEvidence.Count -ne 1 -or $manifestReadEvidence.Count -ne 1 -or
                 $identityIdEvidence.Count -ne 1 -or $identityDisplayEvidence.Count -ne 1 -or
                 $identitySchemaEvidence.Count -ne 1 -or $identityEntryEvidence.Count -ne 1 -or
                 $identityToolchainEvidence.Count -ne 1 -or $identityMismatchEvidence.Count -ne 1) {
-                $missingMarkers += "Phase29E manifest diagnostic count manifest=$($manifestEvidence.Count) read=$($manifestReadEvidence.Count) identity=$($identityIdEvidence.Count)/$($identityDisplayEvidence.Count)/$($identitySchemaEvidence.Count)/$($identityEntryEvidence.Count)/$($identityToolchainEvidence.Count) mismatch=$($identityMismatchEvidence.Count)"
+                $missingMarkers += "Phase29E manifest diagnostic count manifest=$($manifestEvidence.Count) generation=$($manifestGenerationEvidence.Count) read=$($manifestReadEvidence.Count) identity=$($identityIdEvidence.Count)/$($identityDisplayEvidence.Count)/$($identitySchemaEvidence.Count)/$($identityEntryEvidence.Count)/$($identityToolchainEvidence.Count) mismatch=$($identityMismatchEvidence.Count)"
             } else {
                 $fixtureManifestPath = Join-Path $phase28qFixtureDirectory 'app/app.json'
                 $fixtureProjectPath = Join-Path $phase28qFixtureDirectory 'guidexos.project'
@@ -2835,16 +2927,24 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                 $manifestHash = Get-Fnv1a64Hex $fixtureManifestPath
                 $projectBytes = (Get-Item -LiteralPath $fixtureProjectPath).Length
                 $projectHash = Get-Fnv1a64Hex $fixtureProjectPath
-                if ($manifestEvidence[0] -notmatch 'request_id=1 request_generation=(\d+) candidate_id=\d+ candidate_generation=(\d+) candidate_project_generation=0 expected_identity_generation=(\d+) parsed_identity_generation=(\d+)') {
+                if ($manifestEvidence[0] -notmatch 'request_id=1 tx=(\d+) role=application validation_count=1 request_generation=(\d+)') {
                     $missingMarkers += 'Phase29E manifest request/candidate generation tuple is malformed'
                 } else {
-                    $requestGenerationValue = [uint64]$Matches[1]
-                    $candidateGenerationValue = [uint64]$Matches[2]
-                    $expectedGenerationValue = [uint64]$Matches[3]
-                    $parsedGenerationValue = [uint64]$Matches[4]
-                    if ($requestGenerationValue -eq 0 -or $requestGenerationValue -ne $candidateGenerationValue -or
-                        $requestGenerationValue -ne $expectedGenerationValue -or $requestGenerationValue -ne $parsedGenerationValue) {
+                    $transactionValue = [uint64]$Matches[1]
+                    $requestGenerationValue = [uint64]$Matches[2]
+                    $generationLine = $manifestGenerationEvidence[0]
+                    if ($generationLine -notmatch 'tx=(\d+) candidate=\d+ candidate_generation=(\d+) candidate_project_generation=0 expected_identity_generation=(\d+) parsed_identity_generation=(\d+)') {
+                        $missingMarkers += 'Phase29E manifest generation evidence tuple is malformed'
+                    } else {
+                        $generationTransactionValue = [uint64]$Matches[1]
+                        $candidateGenerationValue = [uint64]$Matches[2]
+                        $expectedGenerationValue = [uint64]$Matches[3]
+                        $parsedGenerationValue = [uint64]$Matches[4]
+                        if ($transactionValue -eq 0 -or $transactionValue -ne $generationTransactionValue -or
+                            $requestGenerationValue -eq 0 -or $requestGenerationValue -ne $candidateGenerationValue -or
+                            $requestGenerationValue -ne $expectedGenerationValue -or $requestGenerationValue -ne $parsedGenerationValue) {
                         $missingMarkers += 'Phase29E manifest identity is not owned by the current request/candidate generation'
+                        }
                     }
                 }
                 if ($manifestReadEvidence[0] -notmatch "project_metadata_size=$projectBytes project_metadata_bytes=$projectBytes project_metadata_hash_fnv1a64=$projectHash manifest_size=$manifestBytes bytes_read=$manifestBytes content_hash_fnv1a64=$manifestHash result_code=none") {
