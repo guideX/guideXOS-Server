@@ -322,16 +322,20 @@ void testInvalidInputsAndBoundedSemantics()
         oversizedClass + "\");"
         "var invalidSafe = emptyTag.length === 0 && spacedTag.length === 0 &&"
         " joinedTag.length === 0 && selectorTextTag.length === 0 &&"
-        " idSelectorTag.length === 0 && wildcardTag.length === 0 &&"
+        " idSelectorTag.length === 0 &&"
         " missingTag.length === 0 && numberTag.length === 0 &&"
         " booleanTag.length === 0 && longTag.length === 0 &&"
         " emptyClass.length === 0 && spacedClass.length === 0 &&"
         " multiClass.length === 0 && missingClass.length === 0 &&"
         " numberClass.length === 0 && booleanClass.length === 0 &&"
-        " longClass.length === 0;");
+        " longClass.length === 0;"
+        "var wildcardTagUsesSharedDescriptor = wildcardTag.length > 0 &&"
+        " wildcardTag === document.querySelectorAll(\"*\");");
     expect(result.succeeded(), "invalid inputs: retrieval calls fail closed");
     expectBoolean(harness, "invalidSafe", true,
         "invalid inputs: empty/missing/non-string/whitespace/multi/oversized");
+    expectBoolean(harness, "wildcardTagUsesSharedDescriptor", true,
+        "wildcard tag retrieval now shares the Universal selector collection");
 
     const ScriptResult methodSurface = harness.execute(R"JS(
 var panel = document.querySelector("#panel");

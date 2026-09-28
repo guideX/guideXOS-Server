@@ -207,7 +207,8 @@ var invalid = document.querySelector("") === null &&
     document.querySelector(":focus") === null;
 var invalidCollections = document.querySelectorAll("").length === 0 &&
     document.querySelectorAll("form div input").length === 0 &&
-    document.querySelectorAll("*").length === 0 &&
+    document.querySelectorAll("*").length > 0 &&
+    document.querySelectorAll("*")[0] === document.querySelector("html") &&
     document.querySelectorAll("input,textarea").length === 0;
 var empty = document.querySelectorAll(".missing");
 var emptyCollection = empty !== null && empty.length === 0 &&
@@ -217,7 +218,7 @@ var emptyCollection = empty !== null && empty.length === 0 &&
     expectBoolean(harness, "invalid", true,
         "invalid selectors: querySelector null");
     expectBoolean(harness, "invalidCollections", true,
-        "invalid selectors: querySelectorAll empty");
+        "invalid selectors: malformed selectors empty; universal selector valid");
     expectBoolean(harness, "emptyCollection", true,
         "invalid selectors: bounded empty collection");
     expectError(harness.execute("empty[0] = document.querySelector(\"#login\");"),

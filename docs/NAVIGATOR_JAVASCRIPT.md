@@ -4319,3 +4319,128 @@ fresh kernel image was produced, so QEMU proof is not claimed.
 `out/wallpaper-pack/Apps/PacMan/` are unchanged. JS42 does not claim wildcard
 tag retrieval, multi-token class lookup, or complete browser `HTMLCollection`
 semantics.
+
+## JS43: Universal selector and element matching
+
+JS43 adds bare universal selector `*` as one more simple-selector kind in the
+existing bounded descriptor:
+
+```text
+Invalid, Id, Class, Tag, TagClass, TagId, Universal
+```
+
+The parser stores `Universal` without a tag string or wildcard flag. The shared
+simple matcher accepts it only for a valid current-generation structural
+`HtmlElementRef`: the record has a nonzero serial and tag name and is the
+canonical current record for that serial. Document, Event, collection, primitive,
+and internal/non-Element host objects do not enter that matcher. Existing
+receiver-generation checks happen before `matches("*")` can reach the matcher;
+a stale Element therefore returns `false`, and stale `closest("*")` returns
+`null`.
+
+The same parsed descriptor now works through the existing document and scoped
+selector methods and the JS42 tag retrieval constructor:
+
+```javascript
+document.querySelector("*");
+document.querySelectorAll("*");
+panel.querySelector("*");
+panel.querySelectorAll("*");
+element.matches("*");
+element.closest("*");
+document.getElementsByTagName("*");
+panel.getElementsByTagName("*");
+```
+
+Document queries use structural document order, including represented root
+elements such as `html` and `body`; no missing browser nodes are synthesized.
+Matching does not consult layout visibility: hidden/non-rendered Elements still
+match when their valid structural records remain in the document table.
+`querySelector("*")` returns the first represented Element or `null`.
+Document `querySelectorAll("*")` and `getElementsByTagName("*")` include all
+exposed structural Elements in the same order. Element-scoped queries and tag
+retrieval include strict descendants only: the receiver is excluded and no
+outside subtree element can appear. A leaf scope returns `null` for
+`querySelector("*")` and empty collections for the plural methods.
+
+Wildcard query results and wildcard tag results keep the JS36/JS42 selector
+collection representation: each collection retains the parsed descriptor and
+scope serial and resolves against authoritative structural storage when read.
+Equivalent selector/scope pairs use the same record and canonical host
+identities, so wildcard tag retrieval and wildcard `querySelectorAll()` agree
+in count, order, and element identity. Numeric indexing and read-only
+`length`/indices are unchanged; an out-of-range index is `undefined`. The
+document-node limit remains 1024 by default, and the fixed selector collection
+registry remains capped at 128 records. Wildcard matching does not allocate a
+wildcard-specific walker or result array and does not raise either bound.
+
+For `getElementsByTagName`, `"*"` is the one exact additional supported tag
+argument. Method arguments are not trimmed: `getElementsByTagName(" * ")`
+remains empty, while outer whitespace in selector strings follows ordinary
+selector trimming (`querySelector(" * ")` is valid). Ordinary tag-name
+validation/case-insensitive behavior and single-token exact
+`getElementsByClassName` behavior are unchanged. `form.getElementsByTagName("*")`
+follows structural parent links and includes non-control wrappers; `form.elements`
+continues to follow form ownership and returns controls only. Structural option
+elements naturally compare identical to `select.options` and `select.children`
+where those projections name the same Element.
+
+The one-relation grammar automatically permits universal selectors on either
+side and both sides of descendant, child, adjacent-sibling, and general-sibling
+relations, including `A > *`, `* > B`, `* > *`, `A *`, `* B`, `* *`, `A + *`,
+`* + B`, `* + *`, `A ~ *`, `* ~ B`, and `* ~ *`. Existing immediate-child,
+immediate-adjacent, same-parent, backward-only sibling, and bounded ancestry
+semantics are unchanged. More than one relation remains rejected safely; no
+arbitrary combinator chains are introduced. Empty and whitespace-only
+selectors, `**`, repeated/missing combinators, `*.class`, and `*#id` remain
+invalid. The optional compound forms `*.class` and `*#id` were audited and
+deferred: `.class` and `#id` already express those queries without adding
+another parser branch. Selector input remains capped at 256 bytes.
+
+The JS43 native proof is `tests/navigator_javascript_js43_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js43.ps1`. Its coverage includes document
+and scoped results, order/identity, receiver exclusion, root/Element matching,
+all four relations, malformed and bounded syntax, shared registry capacity,
+form ownership versus structural retrieval, select/options, children,
+containment, event target matching, metadata, nested dispatch, stale
+collections/receivers/results, serial reuse, and earlier selector retrieval
+regressions. The hosted fixture
+`navigator-smoke/javascript-js43.html` is registered in the normal production
+hosted aggregate and drives an authentic click callback.
+
+JS43 does not claim full CSS selector compatibility. Selector lists, attribute
+selectors, pseudo-classes/elements, escapes, namespaces, `*.class`, `*#id`, and
+arbitrary relation chains remain outside the bounded grammar. It does not
+change the `getElementsByClassName` token policy or add new collection APIs.
+
+### JS43 completion summary
+
+The focused JS43 suite passes **277/277 checks**. Focused JS36–JS42 regressions
+pass **99/99, 180/180, 152/152, 218/218, 155/155, 220/220, and 232/232**.
+The full JavaScript matrix passes **41/41 lanes** (lexer, parser, runtime, and
+JS6–JS43). The JS43 test includes a retained `display:none` subtree and proves
+that its structural Elements remain in wildcard results.
+
+All **4/4 hosted JS43 checks** pass, including shared query/tag identity,
+scoped results, form-ownership distinction, relational matching, and an
+authentic click callback with preserved Event metadata. The complete hosted
+aggregate reports **522 passed / 7 failed**. The seven failures are the existing
+CSS 3C, CSS 3G, CSS 6A, three CSS 6B checks, and CSS 6C; no JS43 check fails and
+there are no new unexplained failures.
+
+`build.bat`, the JS43 `-DGXOS_BARE_METAL` focused executable, and the strict
+warning-as-error adapter/runtime syntax lane pass. `pwsh.exe` is unavailable;
+`build-kernel.bat` exits **9009** before its PowerShell wrapper can run. The
+established direct kernel command `mingw32-make ARCH=amd64 EXTRA_CFLAGS=` from
+`kernel/` reaches the existing Mbed TLS blockers at
+`mbedtls_check_config.h:51` (partial ECC acceleration configuration) and `:64`
+(missing ECDHE-RSA prerequisites). No TLS files were changed. No fresh kernel
+was produced, so QEMU proof is not claimed.
+
+`git diff --check` passes. `ESP/ramdisk.img`, `out/wallpaper-pack/`, and
+`out/wallpaper-pack/Apps/PacMan/` remain unchanged and are excluded from the
+source commit. The JS43 source commit hash and final branch/worktree state are
+recorded in the milestone completion report.
+
+Recommended JS44 direction: bounded multi-token class retrieval/matching, with
+an explicit all-tokens policy and the same shared descriptor/collection bounds.

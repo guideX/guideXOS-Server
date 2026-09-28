@@ -180,6 +180,11 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
     if (begin == end) return false;
 
     const char first = source.data[begin];
+    if (first == '*') {
+        if (end != begin + 1u) return false;
+        selector.kind = NavigatorScriptSelectorKind::Universal;
+        return true;
+    }
     if (first == '#' || first == '.') {
         const std::size_t partBegin = begin + 1u;
         if (!isSelectorIdentifier(source, partBegin, end)) return false;
@@ -298,6 +303,11 @@ bool makeRetrievalSelector(SourceView argument, bool classSelector,
         argument.length > kNavigatorScriptMaxSelectorLength) return false;
 
     if (!classSelector) {
+        if (argument.length == 1u && argument.data[0] == '*') {
+            selector.rightSimple.kind =
+                NavigatorScriptSelectorKind::Universal;
+            return true;
+        }
         if (!isSelectorTagName(argument, 0u, argument.length)) return false;
         selector.rightSimple.kind = NavigatorScriptSelectorKind::Tag;
         return copySelectorPart(selector, argument, 0u, argument.length,
@@ -2349,6 +2359,9 @@ bool NavigatorScriptHostAdapter::selectorSimpleElementMatches(
         return selectorTagEquals(element.tagName, tag) &&
             selectorTextEquals(SourceView(element.id.data(),
                 element.id.size()), id);
+    case NavigatorScriptSelectorKind::Universal:
+        return document_ != nullptr &&
+            findElement(element.serial) == &element;
     case NavigatorScriptSelectorKind::Invalid:
         return false;
     }

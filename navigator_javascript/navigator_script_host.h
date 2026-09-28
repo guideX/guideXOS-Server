@@ -102,6 +102,7 @@ enum class NavigatorScriptSelectorKind : std::uint8_t {
     Tag,
     TagClass,
     TagId,
+    Universal,
 };
 
 enum class NavigatorScriptSelectorRelation : std::uint8_t {

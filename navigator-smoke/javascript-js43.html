@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS43</title></head>
+<body>
+<h1>Navigator JavaScript JS43</h1>
+<div id="panel" class="panel">
+  <span id="label"></span>
+  <form id="form" name="form">
+    <div id="wrapper"><input id="name" name="name" type="text" value="seed"></div>
+    <button id="save" type="button">Save</button>
+  </form>
+</div>
+<button id="outside" type="button">Outside</button>
+<p id="js43-state">initial</p>
+<script>
+var js43Panel = document.querySelector("#panel");
+var js43Label = document.querySelector("#label");
+var js43Form = document.querySelector("#form");
+var js43Wrapper = document.querySelector("#wrapper");
+var js43Input = document.querySelector("#name");
+var js43Save = document.querySelector("#save");
+var js43Outside = document.querySelector("#outside");
+var js43State = document.querySelector("#js43-state");
+var js43Event = false;
+var js43EventCollections = false;
+var js43EventMetadata = false;
+
+function js43Snapshot(label) {
+  var all = document.querySelectorAll("*");
+  var tagAll = document.getElementsByTagName("*");
+  var scoped = js43Panel.querySelectorAll("*");
+  var scopedTags = js43Panel.getElementsByTagName("*");
+  var formAll = js43Form.getElementsByTagName("*");
+  var first = document.querySelector("*");
+  var firstIsRoot = first === document.querySelector("html") && first === all[0];
+  var equivalent = all.length === tagAll.length && all === tagAll &&
+    scoped.length === scopedTags.length && scoped === scopedTags;
+  var scope = js43Panel.querySelector("*") === js43Label &&
+    scoped[0] === js43Label && scoped[0] !== js43Panel &&
+    !js43Panel.contains(js43Outside) && js43Panel.contains(scoped[0]);
+  var identity = all[0] === first && all[0] === tagAll[0] &&
+    js43Panel.querySelector("#label") === js43Label &&
+    js43Panel.firstElementChild === js43Panel.querySelector("*");
+  var predicates = js43Save.matches("*") &&
+    js43Save.closest("*") === js43Save;
+  var relations = js43Form.querySelector("div > *") === js43Input &&
+    js43Save.matches("* + button") &&
+    js43Form.querySelector("form > *") === js43Wrapper;
+  var structure = formAll.length === 3 && formAll[0] === js43Wrapper &&
+    js43Form.elements.length === 2 &&
+    js43Form.elements["name"] === js43Input &&
+    js43Form.elements["wrapper"] === undefined;
+  js43State.textContent = label + ":root=" + firstIsRoot +
+    ":equivalent=" + equivalent + ":scope=" + scope +
+    ":identity=" + identity + ":predicates=" + predicates +
+    ":relations=" + relations + ":structure=" + structure +
+    ":event=" + js43Event + ":event-collections=" + js43EventCollections +
+    ":metadata=" + js43EventMetadata;
+}
+
+js43Panel.addEventListener("click", function(event) {
+  if (event.target === js43Save) {
+    var targetBefore = event.target;
+    var currentBefore = event.currentTarget;
+    var phaseBefore = event.eventPhase;
+    var relatedBefore = event.relatedTarget;
+    event.preventDefault();
+    var allDuring = document.querySelectorAll("*");
+    var tagsDuring = document.getElementsByTagName("*");
+    var buttonsDuring = document.querySelectorAll("button");
+    js43Event = event.target.matches("*") && js43Panel.contains(event.target);
+    js43EventCollections = allDuring === tagsDuring &&
+      allDuring.length > buttonsDuring.length && buttonsDuring.length === 2 &&
+      js43Panel.querySelectorAll("*")[0] === js43Label;
+    js43EventMetadata = event.target === targetBefore &&
+      event.currentTarget === currentBefore && currentBefore === js43Panel &&
+      event.eventPhase === phaseBefore && phaseBefore === 3 &&
+      event.relatedTarget === relatedBefore && relatedBefore === null &&
+      event.defaultPrevented === true;
+  }
+  js43Snapshot("event");
+});
+
+js43Snapshot("initial");
+</script>
+</body>
+</html>

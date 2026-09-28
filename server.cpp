@@ -3936,6 +3936,43 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "real trigger click reaches retrieval listener and nested outside activation");
 
+    const std::string js43FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js43.html";
+    const bool js43Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js43FixtureUrl);
+    const std::string js43InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS43 hosted fixture loads universal element selectors",
+        js43Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js43FixtureUrl &&
+        contains(js43InitialText, "Navigator JavaScript JS43") &&
+        contains(js43InitialText,
+            "initial:root=true:equivalent=true:scope=true:identity=true:predicates=true:relations=true:structure=true:event=false:event-collections=false:metadata=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js43Loaded) + ",text=" +
+        summarizeText(js43InitialText, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js43SaveClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("save");
+    const std::string js43AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS43 hosted authentic click matches wildcard target in scope",
+        js43SaveClick && contains(js43AfterClick,
+            "event:root=true:equivalent=true:scope=true:identity=true:predicates=true:relations=true:structure=true:event=true:event-collections=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js43SaveClick) + ",text=" +
+        summarizeText(js43AfterClick, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS43 hosted wildcard tags equal querySelectorAll identities",
+        js43SaveClick && contains(js43AfterClick, ":equivalent=true:scope=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "document and scoped wildcard retrieval use shared collection identity");
+    add("JS43 hosted wildcard preserves form ownership distinction and event state",
+        js43SaveClick && contains(js43AfterClick,
+            ":structure=true:event=true:event-collections=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "wrapper is structural but not a form control; click metadata remains intact");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();
