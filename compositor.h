@@ -219,7 +219,7 @@ namespace gxos { namespace gui {
         static void handleMouseCaptureLost();
         static std::string hostedTitleInputStateDiagnostic(int mx, int my);
         static std::string packMousePayloadForTarget(int x, int y, int button, const std::string& action, uint64_t ownerPid, uint64_t windowId = 0);
-        static void emitWidgetEvt(uint64_t winId, int wid, const std::string& evt, const std::string& value);
+        static void emitWidgetEvt(uint64_t winId, uint64_t ownerPid, int wid, const std::string& evt, const std::string& value);
         static WinInfo* hitWindowAt(int mx, int my);
         static bool isDialogTitle(const std::string& title);
         static bool blockInputBehindModal(int mx, int my);

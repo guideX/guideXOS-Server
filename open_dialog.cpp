@@ -1,4 +1,5 @@
 #include "open_dialog.h"
+#include "desktop_theme.h"
 #include "gui_protocol.h"
 #include "logger.h"
 #include <sstream>
@@ -265,6 +266,8 @@ void OpenDialog::redraw() {
     if (s_windowId == 0) return;
     const char* kGuiChanIn = "gui.input";
     std::string wid = std::to_string(s_windowId);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const int actionY = kDialogH - theme.titleBarHeight - theme.windowPadding - kPadding - kBtnH;
 
     // Draw current path label
     {
@@ -317,7 +320,7 @@ void OpenDialog::redraw() {
     {
         ipc::Message m;
         m.type = static_cast<uint32_t>(MsgType::MT_WidgetAdd);
-        auto payload = packWidgetAdd(s_windowId, 1, 3, kPadding, kDialogH - kPadding - kBtnH, kBtnW, kBtnH, "Up");
+        auto payload = packWidgetAdd(s_windowId, 1, 3, kPadding, actionY, kBtnW, kBtnH, "Up");
         m.data.assign(payload.begin(), payload.end());
         ipc::Bus::publish(kGuiChanIn, std::move(m), false);
     }
@@ -325,7 +328,7 @@ void OpenDialog::redraw() {
     // Open button (id=1)
     {
         int btnX = kDialogW - kPadding - kBtnW;
-        int btnY = kDialogH - kPadding - kBtnH;
+        int btnY = actionY;
         ipc::Message m;
         m.type = static_cast<uint32_t>(MsgType::MT_WidgetAdd);
         auto payload = packWidgetAdd(s_windowId, 1, 1, btnX, btnY, kBtnW, kBtnH, "Open");
@@ -336,7 +339,7 @@ void OpenDialog::redraw() {
     // Cancel button (id=2)
     {
         int btnX = kDialogW - kPadding - kBtnW - 8 - kBtnW;
-        int btnY = kDialogH - kPadding - kBtnH;
+        int btnY = actionY;
         ipc::Message m;
         m.type = static_cast<uint32_t>(MsgType::MT_WidgetAdd);
         auto payload = packWidgetAdd(s_windowId, 1, 2, btnX, btnY, kBtnW, kBtnH, "Cancel");
