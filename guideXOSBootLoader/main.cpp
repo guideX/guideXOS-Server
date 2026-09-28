@@ -326,6 +326,7 @@ static void ZeroBootInfo(BootInfo* bi) {
 }
 
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
+    guideXOS::debug::DebugconPrint("P29J GUEST 01 uefi_loader_entry\n");
     // Set global SystemTable pointer for uefi_shim.h functions
     gST = SystemTable;
 
@@ -386,6 +387,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     UINT64 entryPhys = kernelBase + kernelEntryOffset;
     UINT64 entryVirt = kernelMinVaddr + kernelEntryOffset;
     Print(L"Kernel entry phys: %p virt: %p\n", (VOID*)(UINTN)entryPhys, (VOID*)(UINTN)entryVirt);
+    guideXOS::debug::DebugconPrint("P29J GUEST 02 kernel_image_loaded\n");
     Print(L"Kernel loaded at: %p - %p\n", (VOID*)(UINTN)kernelBase, (VOID*)(UINTN)(kernelBase + kernelTotalSize));
 
     v1BootInfo->KernelPhysicalBase = kernelBase;
@@ -927,6 +929,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         Print(L"ExitBootServices failed: %r\n", statusExit);
         return statusExit;
     }
+    guideXOS::debug::DebugconPrint("P29J GUEST 03 exit_boot_services_complete\n");
 
     // *** CRITICAL: No Print() or any UEFI Boot Services calls after ExitBootServices! ***
 
@@ -1090,6 +1093,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     guideXOS::debug::ValidatePageMapping(pt.Pml4Phys, trampolinePhys);
 
     guideXOS::debug::SerialPrint("\n[BOOT] === CALLING TRAMPOLINE NOW ===\n");
+    guideXOS::debug::DebugconPrint("P29J GUEST 04 kernel_handoff_invoke\n");
 
     // Use PHYSICAL entry point for the trampoline jump.
     // After CR3 switch, our identity-mapped page tables ensure physical addresses work.

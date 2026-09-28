@@ -77,6 +77,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+Import-Module (Join-Path $PSScriptRoot "Phase29J.BootEvidence.psm1") -Force
 # Phase 27G includes the complete earlier integration chain.  The focused M
 # mode deliberately keeps only the baseline C/D route plus the M smoke so a
 # flaky optional earlier IDE repeat cannot mask the recursion proof.
@@ -442,6 +443,12 @@ $directoryBackups = @{}
 $activeEspDirectory = $espDirectory
 $oldExtraCFlags = $env:EXTRA_CFLAGS
 
+function Write-P29JHostTrace([string]$path, [string]$stage, [string]$details) {
+    $line = "{0} {1} {2}" -f [DateTime]::UtcNow.ToString('o'), $stage, $details
+    Write-Host $line -ForegroundColor DarkCyan
+    [IO.File]::AppendAllText($path, $line + [Environment]::NewLine, [Text.Encoding]::UTF8)
+}
+
 function Get-RequiredTool([string]$name, [string]$fallback) {
     $command = Get-Command $name -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
@@ -530,6 +537,18 @@ function Assert-Phase28ZBootImage([int]$runNumber, [string]$imageRoot, [string]$
         $runNumber, [IO.Path]::GetFullPath((Join-Path $imageRoot "kernel.elf")), $kernelHash) -ForegroundColor DarkCyan
     Write-Host ("P28Z BOOT_IMAGE boot={0} arch=amd64 kernel={1} developer_studio={2} project={3} config={4} sentinel=present project_fixture=present isolated=present" -f
         $runNumber, $kernelHash, $studioHash, $projectHash, $configHash) -ForegroundColor DarkCyan
+
+    return [pscustomobject]@{
+        StageId = $stageId
+        EspPath = [IO.Path]::GetFullPath($imageRoot)
+        TreeSha256 = $treeHash
+        KernelPath = [IO.Path]::GetFullPath((Join-Path $imageRoot "kernel.elf"))
+        KernelSha256 = $kernelHash
+        LoaderPath = [IO.Path]::GetFullPath((Join-Path $imageRoot "EFI/BOOT/BOOTX64.EFI"))
+        LoaderSha256 = (Get-Phase28ZHash (Join-Path $imageRoot "EFI/BOOT/BOOTX64.EFI") "UEFI loader artifact")
+        SentinelPath = [IO.Path]::GetFullPath($sentinel)
+        SentinelSha256 = $sentinelHash
+    }
 }
 
 function Export-SerialArtifact([string]$serial, [string]$name, [string]$destination) {
@@ -850,20 +869,41 @@ function Stage-Phase28QProject([string]$target) {
     Copy-Item $phase28qFixtureDirectory $target -Recurse -Force
 }
 
-function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
+function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspAudit) {
     $serialPath = Join-Path $tempDirectory ("boot{0}.serial.log" -f $runNumber)
+    $debugconPath = Join-Path $tempDirectory ("boot{0}.debugcon.log" -f $runNumber)
+    $qemuDebugPath = Join-Path $tempDirectory ("boot{0}.qemu-debug.log" -f $runNumber)
+    $stdoutPath = Join-Path $tempDirectory ("boot{0}.stdout.log" -f $runNumber)
     $stderrPath = Join-Path $tempDirectory ("boot{0}.stderr.log" -f $runNumber)
-    $qemuArguments = @(
-        "-machine", "pc,usb=off",
-        "-drive", "if=pflash,format=raw,readonly=on,file=$ovmfCodePath",
-        "-drive", "file=fat:rw:$activeEspDirectory,format=raw,if=ide,index=0",
-        "-m", "4096M",
-        "-vga", "std",
-        "-serial", "file:$serialPath",
-        "-display", "none",
-        "-no-reboot",
-        "-no-shutdown"
-    )
+    $hostTracePath = Join-Path $tempDirectory ("boot{0}.host-trace.log" -f $runNumber)
+    $resolvedEspPath = [IO.Path]::GetFullPath($activeEspDirectory)
+    $preSpawnTreeHash = Get-Phase29IBootTreeIdentity $activeEspDirectory
+    if ($finalEspAudit -and $preSpawnTreeHash -cne $finalEspAudit.TreeSha256) {
+        throw "P29J immutable-stage check failed on boot ${runNumber}: ESP tree changed after final audit"
+    }
+    if ($finalEspAudit) {
+        Write-P29JHostTrace $hostTracePath 'P29J HOST 02 esp_audit_pass' ("boot={0} stage_id={1} esp={2} tree_sha256={3} pre_spawn_tree_sha256={4} kernel={5} kernel_sha256={6} loader={7} loader_sha256={8} sentinel={9} sentinel_sha256={10} host_mutations_after_audit=0" -f
+            $runNumber, $finalEspAudit.StageId, $resolvedEspPath, $finalEspAudit.TreeSha256, $preSpawnTreeHash,
+            $finalEspAudit.KernelPath, $finalEspAudit.KernelSha256, $finalEspAudit.LoaderPath, $finalEspAudit.LoaderSha256,
+            $finalEspAudit.SentinelPath, $finalEspAudit.SentinelSha256)
+    }
+    if ($Phase29ISentinelOnly) {
+        $qemuArguments = New-P29JQemuArguments -OvmfCodePath ([IO.Path]::GetFullPath($ovmfCodePath)) `
+            -EspPath $resolvedEspPath -SerialPath ([IO.Path]::GetFullPath($serialPath)) `
+            -DebugconPath ([IO.Path]::GetFullPath($debugconPath)) -QemuDebugPath ([IO.Path]::GetFullPath($qemuDebugPath))
+    } else {
+        $qemuArguments = @(
+            "-machine", "pc,usb=off",
+            "-drive", "if=pflash,format=raw,readonly=on,file=$ovmfCodePath",
+            "-drive", "file=fat:rw:$activeEspDirectory,format=raw,if=ide,index=0",
+            "-m", "4096M",
+            "-vga", "std",
+            "-serial", "file:$serialPath",
+            "-display", "none",
+            "-no-reboot",
+            "-no-shutdown"
+        )
+    }
     if ($Phase28QOnly) {
         Write-Host ("P29I QEMU_ATTACH boot={0} qemu={1} drive0_backend=fat-rw-directory drive0_path={2} drive0_format=raw drive0_if=ide index=0" -f
             $runNumber, [IO.Path]::GetFullPath($qemu), [IO.Path]::GetFullPath($activeEspDirectory)) -ForegroundColor DarkCyan
@@ -877,19 +917,83 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
 
+    $commandLine = '"{0}" {1}' -f [IO.Path]::GetFullPath($qemu), $startInfo.Arguments
+    if ($finalEspAudit) {
+        Write-P29JHostTrace $hostTracePath 'P29J HOST 03 qemu_spawn_begin' ("boot={0} qemu={1} command_line={2}" -f
+            $runNumber, [IO.Path]::GetFullPath($qemu), $commandLine)
+    }
+
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $startInfo
-    if (!$process.Start()) { throw "QEMU did not start for boot $runNumber" }
+    $spawnSucceeded = $false
+    try {
+        $spawnSucceeded = $process.Start()
+    } catch {
+        if ($finalEspAudit) {
+            Write-P29JHostTrace $hostTracePath 'P29J HOST 08 qemu_spawn_failed' ("boot={0} error={1}" -f $runNumber, $_.Exception.Message)
+            Write-P29JHostTrace $hostTracePath 'P29J HOST 12 classification' 'QEMU_SPAWN_FAILED'
+        }
+        throw
+    }
+    if (!$spawnSucceeded) {
+        if ($finalEspAudit) {
+            Write-P29JHostTrace $hostTracePath 'P29J HOST 08 qemu_spawn_failed' ("boot={0} error=Process.Start returned false" -f $runNumber)
+            Write-P29JHostTrace $hostTracePath 'P29J HOST 12 classification' 'QEMU_SPAWN_FAILED'
+        }
+        throw "QEMU did not start for boot $runNumber"
+    }
     $stdoutTask = $process.StandardOutput.ReadToEndAsync()
     $stderrTask = $process.StandardError.ReadToEndAsync()
+    if ($finalEspAudit) {
+        Write-P29JHostTrace $hostTracePath 'P29J HOST 04 qemu_spawned' ("boot={0} pid={1} launch_utc={2} process_state=running" -f
+            $runNumber, $process.Id, [DateTime]::UtcNow.ToString('o'))
+        Write-P29JHostTrace $hostTracePath 'P29J HOST 06 serial_attached' ("boot={0} destination={1} backend=file expected_boot_disk={2} firmware={3}" -f
+            $runNumber, [IO.Path]::GetFullPath($serialPath), $resolvedEspPath, [IO.Path]::GetFullPath($ovmfCodePath))
+    }
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $aliveAtDeadline = $false
+    $exitedBeforeHarnessStop = $false
+    $harnessStopReason = 'none'
+    $sawAlive = $false
+    $sawSerialByte = $false
+    $sawDebugconByte = $false
+    $sawLoaderMarker = $false
 
     try {
         while (!$process.HasExited -and [DateTime]::UtcNow -lt $deadline) {
             Start-Sleep -Milliseconds 250
-            if (Test-Path -LiteralPath $serialPath) {
+            if (!$process.HasExited -and !$sawAlive) {
+                $sawAlive = $true
+                if ($finalEspAudit) {
+                    Write-P29JHostTrace $hostTracePath 'P29J HOST 05 process_alive' ("boot={0} pid={1}" -f $runNumber, $process.Id)
+                }
+            }
+            if (!$sawSerialByte -and (Test-Path -LiteralPath $serialPath)) {
+                $serialLength = (Get-Item -LiteralPath $serialPath).Length
+                if ($serialLength -gt 0) {
+                    $sawSerialByte = $true
+                    if ($finalEspAudit) {
+                        Write-P29JHostTrace $hostTracePath 'P29J HOST 07 first_serial_byte' ("boot={0} bytes={1} destination={2}" -f
+                            $runNumber, $serialLength, [IO.Path]::GetFullPath($serialPath))
+                    }
+                }
+            }
+            if ($finalEspAudit -and !$sawDebugconByte -and (Test-Path -LiteralPath $debugconPath)) {
+                $debugconLength = (Get-Item -LiteralPath $debugconPath).Length
+                if ($debugconLength -gt 0) {
+                    $sawDebugconByte = $true
+                    Write-P29JHostTrace $hostTracePath 'P29J HOST 09 first_debugcon_byte' ("boot={0} bytes={1} destination={2}" -f
+                        $runNumber, $debugconLength, [IO.Path]::GetFullPath($debugconPath))
+                }
+            }
+            if ((Test-Path -LiteralPath $serialPath) -or ($finalEspAudit -and (Test-Path -LiteralPath $debugconPath))) {
                 try {
-                    $serialProbe = Get-Content -LiteralPath $serialPath -Raw -ErrorAction Stop
+                    $serialProbe = if (Test-Path -LiteralPath $serialPath) { Get-Content -LiteralPath $serialPath -Raw -ErrorAction Stop } else { '' }
+                    $debugconProbe = if (Test-Path -LiteralPath $debugconPath) { Get-Content -LiteralPath $debugconPath -Raw -ErrorAction Stop } else { '' }
+                    if ($finalEspAudit -and !$sawLoaderMarker -and (Get-P29JLoaderMarkerObserved -SerialText $serialProbe -DebugconText $debugconProbe)) {
+                        $sawLoaderMarker = $true
+                        Write-P29JHostTrace $hostTracePath 'P29J HOST 08 guest_loader_marker' ("boot={0} marker=uefi_loader_entry" -f $runNumber)
+                    }
                     if ($serialProbe -and (($Phase29EManifestOnly -and
                             $serialProbe.Contains("DEVELOPER_STUDIO_PHASE28V_EVENT_DEBUG_START_REQUEST_ISSUED")) -or
                         ($Phase29FDebugStartOnly -and -not $Phase29GBeginDebugReturnOnly -and
@@ -911,6 +1015,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                             $serialProbe.Contains("DEVELOPER_STUDIO_PHASE28Q_PASS")) -or
                         (-not $Phase28QOnly -and
                             $serialProbe.Contains("[KERNEL] Entering main loop (waiting for input)...")))) {
+                        $harnessStopReason = 'required_marker_observed'
                         $process.Kill()
                         break
                     }
@@ -920,9 +1025,14 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 }
             }
         }
+        $aliveAtDeadline = !$process.HasExited -and [DateTime]::UtcNow -ge $deadline
+        $exitedBeforeHarnessStop = $process.HasExited -and $harnessStopReason -eq 'none'
         if (!$process.HasExited) {
             Start-Sleep -Milliseconds 750
-            if (!$process.HasExited) { $process.Kill() }
+            if (!$process.HasExited) {
+                if ($harnessStopReason -eq 'none') { $harnessStopReason = 'timeout' }
+                $process.Kill()
+            }
         }
         $process.WaitForExit()
         $stdout = $stdoutTask.GetAwaiter().GetResult()
@@ -931,7 +1041,27 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
         # allow the final guest flush to become visible before auditing it.
         Start-Sleep -Milliseconds 1000
         $serial = Read-SerialText $serialPath
-        if ($stderr) { [System.IO.File]::WriteAllText($stderrPath, $stderr) }
+        $debugcon = Read-SerialText $debugconPath
+        $qemuDebug = Read-SerialText $qemuDebugPath
+        [System.IO.File]::WriteAllText($stdoutPath, $stdout)
+        [System.IO.File]::WriteAllText($stderrPath, $stderr)
+        $qemuExitCode = $null
+        if ($process.HasExited) { $qemuExitCode = $process.ExitCode }
+        $serialBytes = if (Test-Path -LiteralPath $serialPath) { (Get-Item -LiteralPath $serialPath).Length } else { 0 }
+        $debugconBytes = if (Test-Path -LiteralPath $debugconPath) { (Get-Item -LiteralPath $debugconPath).Length } else { 0 }
+        $cpuResetCount = [regex]::Matches($qemuDebug, '(?m)^CPU Reset').Count
+        if ($finalEspAudit) {
+            Write-P29JHostTrace $hostTracePath 'P29J HOST 10 process_result' ("boot={0} pid={1} alive_at_timeout={2} exited_before_harness_stop={3} harness_stop={4} exit_code={5} reset_records={6}" -f
+                $runNumber, $process.Id, [int]$aliveAtDeadline, [int]$exitedBeforeHarnessStop, $harnessStopReason, $qemuExitCode, $cpuResetCount)
+            Write-P29JHostTrace $hostTracePath 'P29J HOST 11 captured_evidence' ("boot={0} serial_exists={1} serial_bytes={2} stdout_bytes={3} stderr_bytes={4} debugcon_exists={5} debugcon_bytes={6} qemu_debug_exists={7}" -f
+                $runNumber, [int](Test-Path -LiteralPath $serialPath), $serialBytes,
+                [Text.Encoding]::UTF8.GetByteCount($stdout), [Text.Encoding]::UTF8.GetByteCount($stderr),
+                [int](Test-Path -LiteralPath $debugconPath), $debugconBytes, [int](Test-Path -LiteralPath $qemuDebugPath))
+            $classification = Get-P29JBootClassification -SpawnSucceeded $spawnSucceeded -AliveAtDeadline $aliveAtDeadline `
+                -ExitedBeforeHarnessStop $exitedBeforeHarnessStop -ExitCode $(if ($null -ne $qemuExitCode) { $qemuExitCode } else { 0 }) `
+                -SerialText $serial -DebugconText $debugcon -CpuResetCount $cpuResetCount
+            Write-P29JHostTrace $hostTracePath 'P29J HOST 12 classification' ("boot={0} code={1}" -f $runNumber, $classification)
+        }
 
         $requiredMarkers = @(
             "Compiler: Phase 27B smoke PASS",
@@ -2328,6 +2458,8 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 'P28Z BOOT 04 runtime_scheduler_ready',
                 'P28Z BOOT 05 gx_main_invoke',
                 'P28Z BOOT 06 desktop_init_complete',
+                'P28Z APP 00 gx_main_entry_raw',
+                'P28Z APP 01 gx_main_entered',
                 'DEVELOPER_STUDIO_PHASE29I_SENTINEL_FS_READY readiness=ready boundary=loaded_application_image expected_mount=/',
                 'DEVELOPER_STUDIO_PHASE29I_SENTINEL_MOUNT_READY mount=/ identity=containing_loaded_application_volume status=authoritative',
                 'DEVELOPER_STUDIO_PHASE29I_SENTINEL_PATH_NORMALIZED result=valid path=/Apps/DeveloperStudio/.phase28q-diagnostic',
@@ -2363,6 +2495,22 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
         }
         $missingMarkers = @($requiredMarkers | Where-Object { $serial -notmatch [regex]::Escape($_) })
         if ($Phase29ISentinelOnly) {
+            $requiredDebugconMarkers = @(
+                'P29J GUEST 01 uefi_loader_entry',
+                'P29J GUEST 02 kernel_image_loaded',
+                'P29J GUEST 03 exit_boot_services_complete',
+                'P29J GUEST 04 kernel_handoff_invoke',
+                'P29J GUEST 05 kernel_entry_before_uart',
+                'P29J GUEST 06 kernel_uart_initialized',
+                'P29J GUEST 07 native_loader_dispatch_ready',
+                'P29J GUEST 08 gx_main_invoke'
+            )
+            foreach ($debugconMarker in $requiredDebugconMarkers) {
+                if (!$debugcon.Contains($debugconMarker)) { $missingMarkers += "debugcon:$debugconMarker" }
+            }
+            if (!$sawSerialByte -or $serial.Length -eq 0) { $missingMarkers += 'serial output file had no bytes' }
+            if ($serial -notmatch 'BdsDxe: starting Boot') { $missingMarkers += 'firmware boot-selection serial marker' }
+            if ($classification -ne 'NATIVE_LOADER_REACHED') { $missingMarkers += "P29J boot classification=$classification" }
             $loadStartedLines = @($serial -split "`r?`n" | Where-Object {
                 $_ -match 'DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_REQUEST_ACCEPTED .*state=load_started .*path=/P28Q'
             })
@@ -3894,6 +4042,7 @@ try {
     }
 
     for ($run = 1; $run -le $BootCount; ++$run) {
+        $finalEspAudit = $null
         if ($run -gt 1) {
             foreach ($source in @(
                 @{ Fixture = (Join-Path $fixtureDirectory "r42.c"); Target = "r42.c" },
@@ -4132,7 +4281,7 @@ try {
         # Every QEMU invocation gets its own disposable directory-backed FAT
         # image. Guest writes must not become the input state of the next
         # requested fresh boot.
-        $activeEspStageId = [guid]::NewGuid().ToString('N')
+        $activeEspStageId = if ($Phase29ISentinelOnly) { New-P29JStageId } else { [guid]::NewGuid().ToString('N') }
         $activeEspDirectory = Join-Path $tempDirectory ("esp-boot{0}-{1}" -f $run, $activeEspStageId)
         $resolvedTempDirectory = [IO.Path]::GetFullPath($tempDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar)
         $resolvedActiveEspDirectory = [IO.Path]::GetFullPath($activeEspDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar)
@@ -4143,6 +4292,11 @@ try {
             Remove-Item -LiteralPath $activeEspDirectory -Recurse -Force
         }
         Copy-Item $espDirectory $activeEspDirectory -Recurse -Force
+        if ($Phase29ISentinelOnly) {
+            $hostTracePath = Join-Path $tempDirectory ("boot{0}.host-trace.log" -f $run)
+            Write-P29JHostTrace $hostTracePath 'P29J HOST 01 stage_created' ("boot={0} stage_id={1} esp={2} source={3}" -f
+                $run, $activeEspStageId, [IO.Path]::GetFullPath($activeEspDirectory), [IO.Path]::GetFullPath($espDirectory))
+        }
         if ($Phase28QOnly) {
             if (!$diagnosticSentinelGuestPath -or !$diagnosticSentinelContent) {
                 throw "P29I canonical sentinel definition is missing or invalid: $diagnosticSentinelDefinition"
@@ -4157,9 +4311,13 @@ try {
                 throw "P29I final staging verification failed on fresh boot ${run}: canonical sentinel content mismatch"
             }
             Write-Host ("P28Y STARTUP boot={0} launch_request_staged=present" -f $run)
-            Assert-Phase28ZBootImage $run $activeEspDirectory $activeEspStageId
+            if ($Phase29ISentinelOnly) {
+                Write-P29JHostTrace $hostTracePath 'P29J HOST staging_writes_complete' ("boot={0} stage_id={1} esp={2}" -f
+                    $run, $activeEspStageId, [IO.Path]::GetFullPath($activeEspDirectory))
+            }
+            $finalEspAudit = Assert-Phase28ZBootImage $run $activeEspDirectory $activeEspStageId
         }
-        Invoke-QemuProofBoot $run $qemu
+        Invoke-QemuProofBoot $run $qemu $finalEspAudit
     }
 
     # The guest compiler writes its artifacts through the boot-time VFS.  The

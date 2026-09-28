@@ -43,11 +43,32 @@ namespace guideXOS {
             return (__inbyte(0x3FD) & 0x20) != 0;
         }
 
+        // QEMU's ISA debug console is an independent, non-blocking execution
+        // trace. It is also the fallback when COM1 stops accepting bytes.
+        static inline void DebugconPutChar(char c) {
+            __outbyte(0xE9, (unsigned char)c);
+        }
+
+        static inline void DebugconPrint(const char* s) {
+            if (!s) return;
+            while (*s) DebugconPutChar(*s++);
+        }
+
         static inline void SerialPutChar(char c) {
-            while (!SerialReady( )) {
-                // Spin wait
+            // Never let a missing/stalled UART prevent the loader from
+            // handing off to the kernel. Preserve the byte on debugcon.
+            for (unsigned int attempt = 0; attempt < 65536; ++attempt) {
+                if (SerialReady( )) {
+                    __outbyte(0x3F8, (unsigned char)c);
+                    return;
+                }
             }
-            __outbyte(0x3F8, (unsigned char)c);
+            static bool timeoutReported = false;
+            if (!timeoutReported) {
+                timeoutReported = true;
+                DebugconPrint("\nP29J UART serial_tx_timeout; continuing on debugcon\n");
+            }
+            DebugconPutChar(c);
         }
 
         static inline void SerialPrint(const char* s) {

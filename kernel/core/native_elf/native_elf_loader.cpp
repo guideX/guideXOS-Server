@@ -1781,7 +1781,9 @@ static bool run_file_internal(const char* path,
     serial::puts(" top=0x");
     serial::put_hex64(s_appRuntime.stackTop);
     serial::putc('\n');
+    serial::debugcon_puts("P29J GUEST 07 native_loader_dispatch_ready\n");
     serial::puts("ELF Loader: invoking gx_main with gx_app_context\n");
+    serial::debugcon_puts("P29J GUEST 08 gx_main_invoke\n");
     serial::puts("P28Z BOOT 01 native_loader_entered\n");
     serial::puts("P28Z BOOT 05 gx_main_invoke\n");
     s_appRuntime.kernelRspBefore = read_stack_pointer();

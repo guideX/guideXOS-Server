@@ -224,8 +224,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     // x86 / amd64 boot path  —  Multiboot (BIOS) or BootInfo (UEFI)
     // ============================================================
 
+    kernel::serial::debugcon_puts("P29J GUEST 05 kernel_entry_before_uart\n");
     // Initialize serial debug output early
     kernel::serial::init();
+    kernel::serial::debugcon_puts("P29J GUEST 06 kernel_uart_initialized\n");
     kernel::serial::puts("[KERNEL] guideXOS kernel_main entered\n");
     kernel::serial::puts("P28Z BOOT 02 kernel_entry\n");
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)

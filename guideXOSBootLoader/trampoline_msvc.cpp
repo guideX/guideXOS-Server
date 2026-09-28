@@ -19,8 +19,13 @@ typedef void (*TrampolineFunc)(void* kernelEntry, void* bootInfo, void* stackTop
 
 // Serial output helpers for debugging (inline, no stack usage after trampoline)
 static inline void serial_putchar(char c) {
-    while ((__inbyte(0x3FD) & 0x20) == 0) { }
-    __outbyte(0x3F8, (unsigned char)c);
+    for (unsigned int attempt = 0; attempt < 65536; ++attempt) {
+        if ((__inbyte(0x3FD) & 0x20) != 0) {
+            __outbyte(0x3F8, (unsigned char)c);
+            return;
+        }
+    }
+    __outbyte(0xE9, (unsigned char)c);
 }
 
 static inline void serial_print(const char* s) {

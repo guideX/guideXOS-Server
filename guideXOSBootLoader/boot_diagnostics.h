@@ -38,8 +38,19 @@ inline void SerialInit() {
 }
 
 inline void SerialPutChar(char c) {
-    while ((__inbyte(0x3FD) & 0x20) == 0) { } // Wait for TX empty
-    __outbyte(0x3F8, (unsigned char)c);
+    for (unsigned int attempt = 0; attempt < 65536; ++attempt) {
+        if ((__inbyte(0x3FD) & 0x20) != 0) {
+            __outbyte(0x3F8, (unsigned char)c);
+            return;
+        }
+    }
+    static bool timeoutReported = false;
+    if (!timeoutReported) {
+        timeoutReported = true;
+        const char* marker = "\nP29J UART diagnostic_serial_tx_timeout; continuing on debugcon\n";
+        while (*marker) __outbyte(0xE9, (unsigned char)*marker++);
+    }
+    __outbyte(0xE9, (unsigned char)c);
 }
 
 inline void SerialPrint(const char* s) {

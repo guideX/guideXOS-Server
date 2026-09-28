@@ -27,6 +27,19 @@ namespace serial {
 #if ARCH_HAS_PORT_IO
 
 static const uint16_t kCOM1 = 0x3F8;
+static const uint16_t kDebugcon = 0xE9;
+static bool s_txTimeoutReported = false;
+
+inline void debugcon_putc(char c)
+{
+    arch::outb(kDebugcon, static_cast<uint8_t>(c));
+}
+
+inline void debugcon_puts(const char* s)
+{
+    if (!s) return;
+    while (*s) debugcon_putc(*s++);
+}
 
 inline void init()
 {
@@ -41,9 +54,19 @@ inline void init()
 
 inline void putc(char c)
 {
-    // Wait for transmit buffer to be empty
-    while ((arch::inb(kCOM1 + 5) & 0x20) == 0) { }
-    arch::outb(kCOM1, static_cast<uint8_t>(c));
+    // Bound every UART write so early boot cannot hang forever on a missing
+    // transmitter. Keep the dropped serial byte on QEMU debugcon for triage.
+    for (uint32_t attempt = 0; attempt < 65536U; ++attempt) {
+        if ((arch::inb(kCOM1 + 5) & 0x20) != 0) {
+            arch::outb(kCOM1, static_cast<uint8_t>(c));
+            return;
+        }
+    }
+    if (!s_txTimeoutReported) {
+        s_txTimeoutReported = true;
+        debugcon_puts("\nP29J UART serial_tx_timeout; continuing on debugcon\n");
+    }
+    debugcon_putc(c);
 }
 
 // Best-effort output for application callbacks. Unlike putc(), this never
@@ -98,6 +121,8 @@ inline void put_hex64(uint64_t v)
 #else
 
 inline void init() { }
+inline void debugcon_putc(char) { }
+inline void debugcon_puts(const char*) { }
 inline void putc(char) { }
 inline bool try_putc(char) { return false; }
 inline void puts(const char*) { }
