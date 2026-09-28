@@ -72,6 +72,8 @@ param(
     [switch]$Phase29GBeginDebugReturnOnly,
     [switch]$Phase29FDebugStartOnly,
     [switch]$Phase29COnly,
+    [switch]$Phase29LOwnershipOnly,
+    [switch]$Phase29LFullAcceptance,
     [switch]$Phase29ISentinelOnly,
     [switch]$Phase29EManifestOnly
 )
@@ -82,10 +84,13 @@ Import-Module (Join-Path $PSScriptRoot "Phase29J.BootEvidence.psm1") -Force
 # mode deliberately keeps only the baseline C/D route plus the M smoke so a
 # flaky optional earlier IDE repeat cannot mask the recursion proof.
 if ($Phase29EManifestOnly) { $Phase29COnly = $true }
+if ($Phase29LOwnershipOnly) { $Phase29COnly = $true }
+if ($Phase29LFullAcceptance) { $Phase28QOnly = $true }
 if ($Phase29GBeginDebugReturnOnly) { $Phase29FDebugStartOnly = $true }
 if ($Phase29FDebugStartOnly) { $Phase28QOnly = $true }
 if ($Phase29ISentinelOnly) { $Phase28QOnly = $true }
 if ($Phase29COnly) { $Phase28QOnly = $true }
+$Phase29LOwnershipGate = $Phase29LOwnershipOnly -or $Phase29LFullAcceptance
 if ($Phase28QOnly) {
     $Phase27E = $false; $Phase27F = $false; $Phase27G = $false; $Phase27H = $false
     $Phase27I = $false; $Phase27J = $false; $Phase27K = $false; $Phase27L = $false
@@ -887,7 +892,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
             $finalEspAudit.KernelPath, $finalEspAudit.KernelSha256, $finalEspAudit.LoaderPath, $finalEspAudit.LoaderSha256,
             $finalEspAudit.SentinelPath, $finalEspAudit.SentinelSha256)
     }
-    if ($Phase29ISentinelOnly) {
+    if ($Phase29ISentinelOnly -or $Phase29LOwnershipGate) {
         $qemuArguments = New-P29JQemuArguments -OvmfCodePath ([IO.Path]::GetFullPath($ovmfCodePath)) `
             -EspPath $resolvedEspPath -SerialPath ([IO.Path]::GetFullPath($serialPath)) `
             -DebugconPath ([IO.Path]::GetFullPath($debugconPath)) -QemuDebugPath ([IO.Path]::GetFullPath($qemuDebugPath))
@@ -994,8 +999,11 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                         $sawLoaderMarker = $true
                         Write-P29JHostTrace $hostTracePath 'P29J HOST 08 guest_loader_marker' ("boot={0} marker=uefi_loader_entry" -f $runNumber)
                     }
+                    $phase29lOwnerMismatchObserved = $Phase29LOwnershipGate -and
+                        $serialProbe -match 'DEVELOPER_STUDIO_PHASE29L_OWNER checkpoint=([^ ]+) state=([^ ]+) result=(?!CURRENT|TRANSACTION_NOT_ACTIVE)([^ ]+)'
                     if ($serialProbe -and (($Phase29EManifestOnly -and
                             $serialProbe.Contains("DEVELOPER_STUDIO_PHASE28V_EVENT_DEBUG_START_REQUEST_ISSUED")) -or
+                        $phase29lOwnerMismatchObserved -or
                         ($Phase29FDebugStartOnly -and -not $Phase29GBeginDebugReturnOnly -and
                             ($serialProbe.Contains("DEVELOPER_STUDIO_PHASE28Q_RUNNING_PASS") -or
                              $serialProbe.Contains("DEVELOPER_STUDIO_PHASE28Q_FAILURE"))) -or
@@ -1015,7 +1023,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                             $serialProbe.Contains("DEVELOPER_STUDIO_PHASE28Q_PASS")) -or
                         (-not $Phase28QOnly -and
                             $serialProbe.Contains("[KERNEL] Entering main loop (waiting for input)...")))) {
-                        $harnessStopReason = 'required_marker_observed'
+                        $harnessStopReason = if ($phase29lOwnerMismatchObserved) { 'phase29l_ownership_failure' } else { 'required_marker_observed' }
                         $process.Kill()
                         break
                     }
@@ -2450,7 +2458,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                 )
             }
         }
-        if ($Phase29ISentinelOnly) {
+        if ($Phase29ISentinelOnly -or $Phase29LOwnershipGate) {
             $requiredMarkers += @(
                 'P28Z BOOT 01 native_loader_entered',
                 'P28Z BOOT 02 kernel_entry',
@@ -2494,7 +2502,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
             )
         }
         $missingMarkers = @($requiredMarkers | Where-Object { $serial -notmatch [regex]::Escape($_) })
-        if ($Phase29ISentinelOnly) {
+        if ($Phase29ISentinelOnly -or $Phase29LOwnershipGate) {
             $requiredDebugconMarkers = @(
                 'P29J GUEST 01 uefi_loader_entry',
                 'P29J GUEST 02 kernel_image_loaded',
@@ -2639,6 +2647,163 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                 if ($phase29kCountLines.Count -ne 1 -or
                     $phase29kCountLines[0] -notmatch 'manifest_validations=1 load_stages=8 refresh_count=1 commit_count=1') {
                     $missingMarkers += "Phase29K transaction count result mismatch count=$($phase29kCountLines.Count)"
+                }
+            }
+
+            if ($Phase29LOwnershipGate) {
+                $p29lOwnerLines = @($serial -split "`r?`n" | Where-Object {
+                    $_ -match 'DEVELOPER_STUDIO_PHASE29L_OWNER checkpoint='
+                })
+                $expectedP29lCheckpoints = @(
+                    'request_accepted', 'transaction_created', 'load_started', 'metadata_validated',
+                    'manifest_validated', 'loaded', 'candidate_created', 'refresh_started',
+                    'before_refresh', 'after_refresh', 'commit_starting', 'before_commit',
+                    'after_commit', 'active_published', 'ready', 'transaction_release',
+                    'transaction_released'
+                )
+                $actualP29lCheckpoints = @($p29lOwnerLines | ForEach-Object {
+                    if ($_ -match 'checkpoint=([^ ]+) ') { $Matches[1] }
+                })
+                if (@($p29lOwnerLines | Where-Object { $_ -match 'TRACE_OVERFLOW' }).Count -ne 0 -or
+                    $serial -match 'DEVELOPER_STUDIO_PHASE29L_TRACE_OVERFLOW') {
+                    $missingMarkers += 'Phase29L reserved critical trace budget overflowed'
+                }
+                foreach ($checkpoint in $expectedP29lCheckpoints) {
+                    $checkpointLines = @($p29lOwnerLines | Where-Object {
+                        $_ -match ("checkpoint={0} " -f [regex]::Escape($checkpoint))
+                    })
+                    if ($checkpointLines.Count -ne 1) {
+                        $missingMarkers += "Phase29L checkpoint $checkpoint count=$($checkpointLines.Count)"
+                    }
+                }
+                $actualMainP29lCheckpoints = @($actualP29lCheckpoints | Where-Object {
+                    $_ -in $expectedP29lCheckpoints
+                })
+                if (($actualMainP29lCheckpoints -join ',') -ne ($expectedP29lCheckpoints -join ',')) {
+                    $missingMarkers += "Phase29L checkpoint order expected=$($expectedP29lCheckpoints -join ',') actual=$($actualMainP29lCheckpoints -join ',')"
+                }
+                $p29lObserverCallbacks = @($actualP29lCheckpoints | Where-Object { $_ -eq 'observer_callback' }).Count
+                $p29lObserverReturns = @($actualP29lCheckpoints | Where-Object { $_ -eq 'observer_return' }).Count
+                if ($p29lObserverCallbacks -ne 8 -or $p29lObserverReturns -ne 8) {
+                    $missingMarkers += "Phase29L observer callback/return counts callback=$p29lObserverCallbacks return=$p29lObserverReturns"
+                }
+                $p29lRequestLines = @($serial -split "`r?`n" | Where-Object { $_ -match 'DEVELOPER_STUDIO_PHASE29L_REQUEST cp=' })
+                $p29lTransactionLines = @($serial -split "`r?`n" | Where-Object { $_ -match 'DEVELOPER_STUDIO_PHASE29L_TRANSACTION cp=' })
+                $p29lCandidateLines = @($serial -split "`r?`n" | Where-Object { $_ -match 'DEVELOPER_STUDIO_PHASE29L_CANDIDATE cp=' })
+                $p29lCandidateProjectLines = @($serial -split "`r?`n" | Where-Object { $_ -match 'DEVELOPER_STUDIO_PHASE29L_CANDIDATE_PROJECT cp=' })
+                $p29lCandidateProjectIdExpectedLines = @($serial -split "`r?`n" | Where-Object { $_ -match 'DEVELOPER_STUDIO_PHASE29L_CANDIDATE_PROJECT_ID_EXPECTED cp=' })
+                $p29lCandidateProjectIdActualLines = @($serial -split "`r?`n" | Where-Object { $_ -match 'DEVELOPER_STUDIO_PHASE29L_CANDIDATE_PROJECT_ID_ACTUAL cp=' })
+                $p29lRefreshActiveLines = @($serial -split "`r?`n" | Where-Object { $_ -match 'DEVELOPER_STUDIO_PHASE29L_REFRESH_ACTIVE cp=' })
+                $p29lActiveExpectedLines = @($serial -split "`r?`n" | Where-Object { $_ -match 'DEVELOPER_STUDIO_PHASE29L_ACTIVE_ID cp=' })
+                $p29lActiveActualLines = @($serial -split "`r?`n" | Where-Object { $_ -match 'DEVELOPER_STUDIO_PHASE29L_ACTIVE_ID_ACTUAL cp=' })
+                foreach ($recordCount in @($p29lRequestLines.Count, $p29lTransactionLines.Count,
+                    $p29lCandidateLines.Count, $p29lCandidateProjectLines.Count,
+                    $p29lCandidateProjectIdExpectedLines.Count, $p29lCandidateProjectIdActualLines.Count,
+                    $p29lRefreshActiveLines.Count, $p29lActiveExpectedLines.Count,
+                    $p29lActiveActualLines.Count)) {
+                    if ($recordCount -ne $p29lOwnerLines.Count) {
+                        $missingMarkers += "Phase29L tuple record count expected=$($p29lOwnerLines.Count) actual=$recordCount"
+                    }
+                }
+                foreach ($line in @($p29lOwnerLines) + @($p29lRequestLines) + @($p29lTransactionLines) +
+                                  @($p29lCandidateLines) + @($p29lCandidateProjectLines) + @($p29lRefreshActiveLines) +
+                                  @($p29lCandidateProjectIdExpectedLines) + @($p29lCandidateProjectIdActualLines) +
+                                  @($p29lActiveExpectedLines) + @($p29lActiveActualLines)) {
+                    if ($line.Length -gt 240) { $missingMarkers += "Phase29L guest log line exceeded 240 characters length=$($line.Length)" }
+                }
+                foreach ($ownerLine in $p29lOwnerLines) {
+                    if ($ownerLine -notmatch 'checkpoint=([^ ]+) state=([^ ]+) result=([^ ]+) tx_active=([01]) in_progress=([01]) committed=([01]) commits=(\d+) releases=(\d+)') {
+                        $missingMarkers += "Phase29L owner tuple was not parseable: $ownerLine"
+                        continue
+                    }
+                    $checkpoint = $Matches[1]
+                    $state = $Matches[2]
+                    $ownerResult = $Matches[3]
+                    $transactionActiveValue = $Matches[4]
+                    $inProgressValue = $Matches[5]
+                    $committedValue = $Matches[6]
+                    $commitCountValue = [int]$Matches[7]
+                    $releaseCountValue = [int]$Matches[8]
+                    if ($checkpoint -eq 'transaction_released') {
+                        if ($ownerResult -ne 'TRANSACTION_NOT_ACTIVE' -or $transactionActiveValue -ne '0' -or
+                            $inProgressValue -ne '0' -or $releaseCountValue -ne 1) {
+                            $missingMarkers += "Phase29L release settlement mismatch: $ownerLine"
+                        }
+                    } elseif ($ownerResult -ne 'CURRENT') {
+                        $missingMarkers += "Phase29L ownership invalidated at checkpoint=$checkpoint reason=$ownerResult"
+                    }
+                    if ($checkpoint -eq 'before_commit' -and $commitCountValue -ne 0) {
+                        $missingMarkers += 'Phase29L pre-commit checkpoint observed a prior commit'
+                    }
+                    if ($checkpoint -in @('after_commit', 'active_published', 'ready', 'transaction_release') -and
+                        ($committedValue -ne '1' -or $commitCountValue -ne 1)) {
+                        $missingMarkers += "Phase29L committed state/count mismatch at checkpoint=$checkpoint"
+                    }
+                    $tupleKey = "cp={0} state={1} " -f [regex]::Escape($checkpoint), [regex]::Escape($state)
+                    $requestLine = @($p29lRequestLines | Where-Object { $_ -match $tupleKey })
+                    $transactionLine = @($p29lTransactionLines | Where-Object { $_ -match $tupleKey })
+                    $candidateLine = @($p29lCandidateLines | Where-Object { $_ -match $tupleKey })
+                    $candidateProjectLine = @($p29lCandidateProjectLines | Where-Object { $_ -match $tupleKey })
+                    $candidateProjectIdExpectedLine = @($p29lCandidateProjectIdExpectedLines | Where-Object { $_ -match $tupleKey })
+                    $candidateProjectIdActualLine = @($p29lCandidateProjectIdActualLines | Where-Object { $_ -match $tupleKey })
+                    $refreshActiveLine = @($p29lRefreshActiveLines | Where-Object { $_ -match $tupleKey })
+                    $activeExpectedLine = @($p29lActiveExpectedLines | Where-Object { $_ -match $tupleKey })
+                    $activeActualLine = @($p29lActiveActualLines | Where-Object { $_ -match $tupleKey })
+                    if ($requestLine.Count -ne 1 -or $transactionLine.Count -ne 1 -or $candidateLine.Count -ne 1 -or
+                        $candidateProjectLine.Count -ne 1 -or $candidateProjectIdExpectedLine.Count -ne 1 -or
+                        $candidateProjectIdActualLine.Count -ne 1 -or $refreshActiveLine.Count -ne 1 -or
+                        $activeExpectedLine.Count -ne 1 -or $activeActualLine.Count -ne 1) {
+                        $missingMarkers += "Phase29L tuple was incomplete at checkpoint=$checkpoint"
+                        continue
+                    }
+                    $requestMatch = [regex]::Match($requestLine[0], 'id=(\d+)/(\d+) arg=(\d+) gen=(\d+)/(\d+)')
+                    if (!$requestMatch.Success -or $requestMatch.Groups[1].Value -ne $requestMatch.Groups[2].Value -or
+                        $requestMatch.Groups[2].Value -ne $requestMatch.Groups[3].Value -or
+                        $requestMatch.Groups[4].Value -ne $requestMatch.Groups[5].Value) {
+                        $missingMarkers += "Phase29L request ownership tuple mismatch at checkpoint=$checkpoint"
+                    }
+                    $transactionMatch = [regex]::Match($transactionLine[0], 'id=(\d+)/(\d+) gen=(\d+)/(\d+) ptr=1')
+                    if (!$transactionMatch.Success -or $transactionMatch.Groups[1].Value -ne $transactionMatch.Groups[2].Value -or
+                        $transactionMatch.Groups[3].Value -ne $transactionMatch.Groups[4].Value) {
+                        $missingMarkers += "Phase29L transaction ownership tuple mismatch at checkpoint=$checkpoint"
+                    }
+                    $candidateMatch = [regex]::Match($candidateLine[0], 'id=(\d+)/(\d+) gen=(\d+)/(\d+)')
+                    if (!$candidateMatch.Success -or $candidateMatch.Groups[1].Value -ne $candidateMatch.Groups[2].Value -or
+                        $candidateMatch.Groups[3].Value -ne $candidateMatch.Groups[4].Value) {
+                        $missingMarkers += "Phase29L candidate ownership tuple mismatch at checkpoint=$checkpoint"
+                    }
+                    $candidateProjectMatch = [regex]::Match($candidateProjectLine[0], 'gen=(\d+)/(\d+) match=1')
+                    if (!$candidateProjectMatch.Success -or $candidateProjectMatch.Groups[1].Value -ne $candidateProjectMatch.Groups[2].Value) {
+                        $missingMarkers += "Phase29L candidate project generation mismatch at checkpoint=$checkpoint"
+                    }
+                    $candidateProjectIdExpectedMatch = [regex]::Match($candidateProjectIdExpectedLine[0], 'id=(\S+)$')
+                    $candidateProjectIdActualMatch = [regex]::Match($candidateProjectIdActualLine[0], 'id=(\S+) match=1$')
+                    if (!$candidateProjectIdExpectedMatch.Success -or !$candidateProjectIdActualMatch.Success -or
+                        $candidateProjectIdExpectedMatch.Groups[1].Value -ne $candidateProjectIdActualMatch.Groups[1].Value) {
+                        $missingMarkers += "Phase29L candidate project ID mismatch at checkpoint=$checkpoint"
+                    }
+                    $refreshActiveMatch = [regex]::Match($refreshActiveLine[0],
+                        'refresh=(\d+)/(\d+) active=(\d+)/(\d+) match=1')
+                    if (!$refreshActiveMatch.Success -or $refreshActiveMatch.Groups[1].Value -ne $refreshActiveMatch.Groups[2].Value) {
+                        $missingMarkers += "Phase29L refresh/active tuple mismatch at checkpoint=$checkpoint"
+                    } elseif ($committedValue -eq '1' -and
+                        ($refreshActiveMatch.Groups[3].Value -ne $candidateProjectMatch.Groups[2].Value -or
+                         $refreshActiveMatch.Groups[4].Value -ne $candidateProjectMatch.Groups[2].Value)) {
+                        $missingMarkers += "Phase29L post-commit active generation does not match the committed candidate at checkpoint=$checkpoint"
+                    }
+                    $activeExpectedMatch = [regex]::Match($activeExpectedLine[0], 'expected=(\S+)$')
+                    $activeActualMatch = [regex]::Match($activeActualLine[0], 'actual=(\S+)$')
+                    if (!$activeExpectedMatch.Success -or !$activeActualMatch.Success) {
+                        $missingMarkers += "Phase29L active project ID tuple was not parseable at checkpoint=$checkpoint"
+                    } elseif ($activeExpectedMatch.Groups[1].Value -ne $activeActualMatch.Groups[1].Value) {
+                        $missingMarkers += "Phase29L active project ID changed at checkpoint=$checkpoint"
+                    }
+                }
+                $p29lOwnerFailureLines = @($p29lOwnerLines | Where-Object {
+                    $_ -match 'result=(?!CURRENT|TRANSACTION_NOT_ACTIVE)'
+                })
+                if ($p29lOwnerFailureLines.Count -ne 0) {
+                    $missingMarkers += "Phase29L non-current ownership results count=$($p29lOwnerFailureLines.Count)"
                 }
             }
 
@@ -2927,23 +3092,27 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                 $manifestHash = Get-Fnv1a64Hex $fixtureManifestPath
                 $projectBytes = (Get-Item -LiteralPath $fixtureProjectPath).Length
                 $projectHash = Get-Fnv1a64Hex $fixtureProjectPath
-                if ($manifestEvidence[0] -notmatch 'request_id=1 tx=(\d+) role=application validation_count=1 request_generation=(\d+)') {
+                $manifestMatch = [regex]::Match($manifestEvidence[0], 'request_id=1 request_generation=(\d+) tx=(\d+) role=application validation_count=1')
+                if (!$manifestMatch.Success) {
                     $missingMarkers += 'Phase29E manifest request/candidate generation tuple is malformed'
                 } else {
-                    $transactionValue = [uint64]$Matches[1]
-                    $requestGenerationValue = [uint64]$Matches[2]
+                    $requestGenerationValue = [uint64]$manifestMatch.Groups[1].Value
+                    $transactionValue = [uint64]$manifestMatch.Groups[2].Value
                     $generationLine = $manifestGenerationEvidence[0]
-                    if ($generationLine -notmatch 'tx=(\d+) candidate=\d+ candidate_generation=(\d+) candidate_project_generation=0 expected_identity_generation=(\d+) parsed_identity_generation=(\d+)') {
+                    $generationMatch = [regex]::Match($generationLine, 'tx=(\d+) candidate=(\d+) candidate_generation=(\d+) candidate_project_generation=0 expected_identity_generation=(\d+) parsed_identity_generation=(\d+)')
+                    if (!$generationMatch.Success) {
                         $missingMarkers += 'Phase29E manifest generation evidence tuple is malformed'
                     } else {
-                        $generationTransactionValue = [uint64]$Matches[1]
-                        $candidateGenerationValue = [uint64]$Matches[2]
-                        $expectedGenerationValue = [uint64]$Matches[3]
-                        $parsedGenerationValue = [uint64]$Matches[4]
+                        $generationTransactionValue = [uint64]$generationMatch.Groups[1].Value
+                        $candidateIdValue = [uint64]$generationMatch.Groups[2].Value
+                        $candidateGenerationValue = [uint64]$generationMatch.Groups[3].Value
+                        $expectedGenerationValue = [uint64]$generationMatch.Groups[4].Value
+                        $parsedGenerationValue = [uint64]$generationMatch.Groups[5].Value
                         if ($transactionValue -eq 0 -or $transactionValue -ne $generationTransactionValue -or
-                            $requestGenerationValue -eq 0 -or $requestGenerationValue -ne $candidateGenerationValue -or
-                            $requestGenerationValue -ne $expectedGenerationValue -or $requestGenerationValue -ne $parsedGenerationValue) {
-                        $missingMarkers += 'Phase29E manifest identity is not owned by the current request/candidate generation'
+                            $requestGenerationValue -eq 0 -or $candidateIdValue -eq 0 -or $candidateGenerationValue -eq 0 -or
+                            $candidateGenerationValue -ne $expectedGenerationValue -or
+                            $candidateGenerationValue -ne $parsedGenerationValue) {
+                            $missingMarkers += 'Phase29E request and candidate generation namespaces were not independently valid'
                         }
                     }
                 }
@@ -2971,6 +3140,14 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
             }
         }
         if ($missingMarkers.Count -ne 0) {
+            if ($Phase29LOwnershipGate -and $missingMarkers.Count -gt 0 -and $missingMarkers[0] -match '^Phase29L' -and
+                ($serial.Contains('DEVELOPER_STUDIO_PHASE28Q_PROJECT_READY') -or
+                 $serial.Contains('DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_READY') -or
+                 $serial.Contains('P28Z APP 06 project_ready'))) {
+                Write-Host "PHASE29L CLASSIFICATION boot=$runNumber domain=EVIDENCE_VALIDATION_FAILURE production_ready=1 first_missing=$($missingMarkers[0])" -ForegroundColor Yellow
+            } elseif ($Phase29LOwnershipGate -and $serial -match 'DEVELOPER_STUDIO_PHASE29L_OWNER checkpoint=([^ ]+) state=([^ ]+) result=(?!CURRENT|TRANSACTION_NOT_ACTIVE)([^ ]+)') {
+                Write-Host "PHASE29L CLASSIFICATION boot=$runNumber domain=PROJECT_LOAD_OWNERSHIP_FAILURE checkpoint=$($Matches[1]) reason=$($Matches[3])" -ForegroundColor Yellow
+            }
             if ($Phase28QOnly -and $serial -notmatch [regex]::Escape("P28Z APP 00 gx_main_entry_raw") -and
                 $serial -notmatch [regex]::Escape("P28Z BOOT 05 gx_main_invoke")) {
                 $lastBootMilestone = ($serial -split "`r?`n" | Where-Object { $_ -match "^P28Z BOOT |^\[KERNEL\]" } | Select-Object -Last 1)
@@ -4381,7 +4558,7 @@ try {
         # Every QEMU invocation gets its own disposable directory-backed FAT
         # image. Guest writes must not become the input state of the next
         # requested fresh boot.
-        $activeEspStageId = if ($Phase29ISentinelOnly) { New-P29JStageId } else { [guid]::NewGuid().ToString('N') }
+        $activeEspStageId = if ($Phase29ISentinelOnly -or $Phase29LOwnershipGate) { New-P29JStageId } else { [guid]::NewGuid().ToString('N') }
         $activeEspDirectory = Join-Path $tempDirectory ("esp-boot{0}-{1}" -f $run, $activeEspStageId)
         $resolvedTempDirectory = [IO.Path]::GetFullPath($tempDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar)
         $resolvedActiveEspDirectory = [IO.Path]::GetFullPath($activeEspDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar)
@@ -4392,7 +4569,7 @@ try {
             Remove-Item -LiteralPath $activeEspDirectory -Recurse -Force
         }
         Copy-Item $espDirectory $activeEspDirectory -Recurse -Force
-        if ($Phase29ISentinelOnly) {
+        if ($Phase29ISentinelOnly -or $Phase29LOwnershipGate) {
             $hostTracePath = Join-Path $tempDirectory ("boot{0}.host-trace.log" -f $run)
             Write-P29JHostTrace $hostTracePath 'P29J HOST 01 stage_created' ("boot={0} stage_id={1} esp={2} source={3}" -f
                 $run, $activeEspStageId, [IO.Path]::GetFullPath($activeEspDirectory), [IO.Path]::GetFullPath($espDirectory))
@@ -4411,7 +4588,7 @@ try {
                 throw "P29I final staging verification failed on fresh boot ${run}: canonical sentinel content mismatch"
             }
             Write-Host ("P28Y STARTUP boot={0} launch_request_staged=present" -f $run)
-            if ($Phase29ISentinelOnly) {
+            if ($Phase29ISentinelOnly -or $Phase29LOwnershipGate) {
                 Write-P29JHostTrace $hostTracePath 'P29J HOST staging_writes_complete' ("boot={0} stage_id={1} esp={2}" -f
                     $run, $activeEspStageId, [IO.Path]::GetFullPath($activeEspDirectory))
             }
@@ -4705,7 +4882,11 @@ try {
             --start-address=0x10001000 --stop-address=0x10004000 (Join-Path $evidenceDirectory "o27primary.elf")
         if ($LASTEXITCODE -ne 0) { throw "external Phase 27O ELF inspection failed" }
     }
-    if ($Phase29EManifestOnly) {
+    if ($Phase29LOwnershipOnly) {
+        Write-Host "Phase 29L project-load ownership validation completed across $BootCount fresh boot(s)." -ForegroundColor Green
+    } elseif ($Phase29LFullAcceptance) {
+        Write-Host "Phase 29L ownership and full Phase 28Q lifecycle validation completed across $BootCount fresh boot(s)." -ForegroundColor Green
+    } elseif ($Phase29EManifestOnly) {
         Write-Host "Phase 29E manifest identity validation completed across $BootCount fresh boot(s) through debugger-start issuance." -ForegroundColor Green
     } elseif ($Phase29ISentinelOnly) {
         Write-Host "Phase 29I guest diagnostic sentinel detection completed across $BootCount fresh boot(s) through Phase 29C load_started." -ForegroundColor Green
@@ -5296,8 +5477,8 @@ finally {
             Copy-Item $directoryBackups[$relativeDirectory] $target -Recurse -Force
         }
     }
-    if ($Phase28LOnly -or $Phase28MOnly -or $Phase28NOnly -or $Phase28OOnly -or $Phase28POnly -or $Phase28QOnly -or $Phase29COnly -or $Phase29ISentinelOnly -or $Phase29EManifestOnly) {
-        $proofLabel = if ($Phase29EManifestOnly) { "Phase 29E manifest identity" } elseif ($Phase29ISentinelOnly) { "Phase 29I sentinel" } elseif ($Phase29COnly) { "Phase 29C" } elseif ($Phase28QOnly) { "Phase 28Q" } elseif ($Phase28POnly) { "Phase 28P" } elseif ($Phase28OOnly) { "Phase 28O" } elseif ($Phase28NOnly) { "Phase 28N" } elseif ($Phase28MOnly) { "Phase 28M" } else { "Phase 28L" }
+    if ($Phase28LOnly -or $Phase28MOnly -or $Phase28NOnly -or $Phase28OOnly -or $Phase28POnly -or $Phase28QOnly -or $Phase29COnly -or $Phase29LOwnershipOnly -or $Phase29LFullAcceptance -or $Phase29ISentinelOnly -or $Phase29EManifestOnly) {
+        $proofLabel = if ($Phase29LOwnershipOnly -or $Phase29LFullAcceptance) { "Phase 29L ownership" } elseif ($Phase29EManifestOnly) { "Phase 29E manifest identity" } elseif ($Phase29ISentinelOnly) { "Phase 29I sentinel" } elseif ($Phase29COnly) { "Phase 29C" } elseif ($Phase28QOnly) { "Phase 28Q" } elseif ($Phase28POnly) { "Phase 28P" } elseif ($Phase28OOnly) { "Phase 28O" } elseif ($Phase28NOnly) { "Phase 28N" } elseif ($Phase28MOnly) { "Phase 28M" } else { "Phase 28L" }
         Write-Host "$proofLabel evidence preserved at: $tempDirectory"
     } elseif (Test-Path $tempDirectory) {
         Remove-Item -LiteralPath $tempDirectory -Recurse -Force -ErrorAction SilentlyContinue
