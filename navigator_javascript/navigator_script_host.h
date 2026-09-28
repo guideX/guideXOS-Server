@@ -48,6 +48,7 @@ constexpr std::size_t kNavigatorScriptMaxDocumentMutations = 1024u;
 constexpr std::size_t kNavigatorScriptMaxDocumentNodes = 1024u;
 constexpr std::size_t kNavigatorScriptMaxClickHandlers = 64u;
 constexpr std::size_t kNavigatorScriptMaxSelectorLength = 256u;
+constexpr std::size_t kNavigatorScriptMaxClassQueryTokens = 8u;
 constexpr std::size_t kNavigatorScriptMaxSelectorCollections = 128u;
 constexpr std::size_t kNavigatorScriptMaxFormValueBytes = 256u;
 constexpr std::uint32_t kNavigatorClickListenerOnceFlag = 1u;
@@ -103,6 +104,7 @@ enum class NavigatorScriptSelectorKind : std::uint8_t {
     TagClass,
     TagId,
     Universal,
+    ClassTokens,
 };
 
 enum class NavigatorScriptSelectorRelation : std::uint8_t {
@@ -121,6 +123,13 @@ struct NavigatorScriptSimpleSelectorDescriptor {
     std::uint16_t idLength = 0;
     std::uint16_t classOffset = 0;
     std::uint16_t classLength = 0;
+    struct ClassTokenRange {
+        std::uint16_t offset = 0;
+        std::uint16_t length = 0;
+    };
+    std::uint8_t classTokenCount = 0;
+    std::array<ClassTokenRange, kNavigatorScriptMaxClassQueryTokens>
+        classTokens{};
 };
 
 // A selector is retained only as its parsed, bounded components.  The shared

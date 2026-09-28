@@ -315,14 +315,85 @@ bool makeRetrievalSelector(SourceView argument, bool classSelector,
             selector.rightSimple.tagLength);
     }
 
-    // Match the complete simple-selector limit: a class token occupies the
-    // same bounded descriptor storage as the token after its '.' marker.
-    if (argument.length + 1u > kNavigatorScriptMaxSelectorLength ||
-        !isSelectorIdentifier(argument, 0u, argument.length)) return false;
-    selector.rightSimple.kind = NavigatorScriptSelectorKind::Class;
-    return copySelectorPart(selector, argument, 0u, argument.length,
-        selector.rightSimple.classOffset,
-        selector.rightSimple.classLength);
+    // Class retrieval accepts a bounded whitespace-separated token query.
+    // Each token retains the existing simple-selector identifier bound, and
+    // duplicate tokens are removed before the canonical descriptor is stored.
+    if (argument.length > kNavigatorScriptMaxSelectorLength) return false;
+    struct SourceRange {
+        std::size_t offset = 0u;
+        std::size_t length = 0u;
+    };
+    std::array<SourceRange, kNavigatorScriptMaxClassQueryTokens> tokens{};
+    std::size_t tokenCount = 0u;
+    std::size_t parsedTokenCount = 0u;
+    std::size_t position = 0u;
+    while (position < argument.length) {
+        while (position < argument.length &&
+            isSelectorAsciiWhitespace(argument.data[position])) ++position;
+        if (position == argument.length) break;
+        const std::size_t tokenBegin = position;
+        while (position < argument.length &&
+            !isSelectorAsciiWhitespace(argument.data[position])) ++position;
+        const std::size_t tokenLength = position - tokenBegin;
+        if (tokenLength + 1u > kNavigatorScriptMaxSelectorLength ||
+            !isSelectorIdentifier(argument, tokenBegin, position) ||
+            parsedTokenCount >= kNavigatorScriptMaxClassQueryTokens)
+            return false;
+        ++parsedTokenCount;
+
+        const SourceView token(argument.data + tokenBegin, tokenLength);
+        bool duplicate = false;
+        for (std::size_t index = 0; index < tokenCount; ++index) {
+            const SourceView existing(argument.data + tokens[index].offset,
+                tokens[index].length);
+            if (existing.length == token.length &&
+                std::char_traits<char>::compare(existing.data, token.data,
+                    token.length) == 0) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate) tokens[tokenCount++] = {tokenBegin, tokenLength};
+    }
+    if (tokenCount == 0u) return false;
+
+    const auto tokenLess = [&argument](const SourceRange& left,
+        const SourceRange& right) {
+        const SourceView leftText(argument.data + left.offset, left.length);
+        const SourceView rightText(argument.data + right.offset, right.length);
+        return std::lexicographical_compare(leftText.data,
+            leftText.data + leftText.length, rightText.data,
+            rightText.data + rightText.length);
+    };
+    for (std::size_t index = 1u; index < tokenCount; ++index) {
+        const SourceRange token = tokens[index];
+        std::size_t position = index;
+        while (position > 0u && tokenLess(token, tokens[position - 1u])) {
+            tokens[position] = tokens[position - 1u];
+            --position;
+        }
+        tokens[position] = token;
+    }
+
+    if (tokenCount == 1u) {
+        selector.rightSimple.kind = NavigatorScriptSelectorKind::Class;
+        return copySelectorPart(selector, argument, tokens[0].offset,
+            tokens[0].offset + tokens[0].length,
+            selector.rightSimple.classOffset,
+            selector.rightSimple.classLength);
+    }
+
+    selector.rightSimple.kind = NavigatorScriptSelectorKind::ClassTokens;
+    selector.rightSimple.classTokenCount =
+        static_cast<std::uint8_t>(tokenCount);
+    for (std::size_t index = 0; index < tokenCount; ++index) {
+        NavigatorScriptSimpleSelectorDescriptor::ClassTokenRange& stored =
+            selector.rightSimple.classTokens[index];
+        if (!copySelectorPart(selector, argument, tokens[index].offset,
+                tokens[index].offset + tokens[index].length,
+                stored.offset, stored.length)) return false;
+    }
+    return true;
 }
 
 SourceView selectorPart(const NavigatorScriptSelectorDescriptor& storage,
@@ -363,6 +434,22 @@ bool classTokenMatches(const std::string& className, SourceView selector)
                     position - tokenBegin), selector)) return true;
     }
     return false;
+}
+
+bool classTokenSetMatches(const std::string& className,
+    const NavigatorScriptSimpleSelectorDescriptor& selector,
+    const NavigatorScriptSelectorDescriptor& storage)
+{
+    if (selector.classTokenCount == 0u ||
+        selector.classTokenCount > kNavigatorScriptMaxClassQueryTokens)
+        return false;
+    for (std::size_t index = 0; index < selector.classTokenCount; ++index) {
+        const NavigatorScriptSimpleSelectorDescriptor::ClassTokenRange& token =
+            selector.classTokens[index];
+        if (!classTokenMatches(className,
+                selectorPart(storage, token.offset, token.length))) return false;
+    }
+    return true;
 }
 
 } // namespace
@@ -2310,22 +2397,36 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
         const NavigatorScriptSimpleSelectorDescriptor& leftSimple,
         const NavigatorScriptSelectorDescriptor& right,
         const NavigatorScriptSimpleSelectorDescriptor& rightSimple) {
-        return leftSimple.kind == rightSimple.kind &&
-            leftSimple.tagLength == rightSimple.tagLength &&
-            leftSimple.idLength == rightSimple.idLength &&
-            leftSimple.classLength == rightSimple.classLength &&
-            selectorTextEquals(selectorPart(left, leftSimple.tagOffset,
+        if (leftSimple.kind != rightSimple.kind ||
+            leftSimple.tagLength != rightSimple.tagLength ||
+            leftSimple.idLength != rightSimple.idLength ||
+            leftSimple.classLength != rightSimple.classLength ||
+            leftSimple.classTokenCount != rightSimple.classTokenCount ||
+            leftSimple.classTokenCount > kNavigatorScriptMaxClassQueryTokens ||
+            !selectorTextEquals(selectorPart(left, leftSimple.tagOffset,
                 leftSimple.tagLength),
                 selectorPart(right, rightSimple.tagOffset,
-                    rightSimple.tagLength)) &&
-            selectorTextEquals(selectorPart(left, leftSimple.idOffset,
+                    rightSimple.tagLength)) ||
+            !selectorTextEquals(selectorPart(left, leftSimple.idOffset,
                 leftSimple.idLength),
                 selectorPart(right, rightSimple.idOffset,
-                    rightSimple.idLength)) &&
-            selectorTextEquals(selectorPart(left, leftSimple.classOffset,
+                    rightSimple.idLength)) ||
+            !selectorTextEquals(selectorPart(left, leftSimple.classOffset,
                 leftSimple.classLength),
                 selectorPart(right, rightSimple.classOffset,
-                    rightSimple.classLength));
+                    rightSimple.classLength))) return false;
+        for (std::size_t index = 0; index < leftSimple.classTokenCount;
+                ++index) {
+            const NavigatorScriptSimpleSelectorDescriptor::ClassTokenRange&
+                leftToken = leftSimple.classTokens[index];
+            const NavigatorScriptSimpleSelectorDescriptor::ClassTokenRange&
+                rightToken = rightSimple.classTokens[index];
+            if (leftToken.length != rightToken.length ||
+                !selectorTextEquals(selectorPart(left, leftToken.offset,
+                    leftToken.length), selectorPart(right, rightToken.offset,
+                    rightToken.length))) return false;
+        }
+        return true;
     };
     return left.relation == right.relation &&
         simpleEqual(left, left.leftSimple, right, right.leftSimple) &&
@@ -2350,6 +2451,8 @@ bool NavigatorScriptHostAdapter::selectorSimpleElementMatches(
                 element.id.size()), id);
     case NavigatorScriptSelectorKind::Class:
         return classTokenMatches(element.className, className);
+    case NavigatorScriptSelectorKind::ClassTokens:
+        return classTokenSetMatches(element.className, selector, storage);
     case NavigatorScriptSelectorKind::Tag:
         return selectorTagEquals(element.tagName, tag);
     case NavigatorScriptSelectorKind::TagClass:

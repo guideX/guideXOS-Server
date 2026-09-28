@@ -4444,3 +4444,110 @@ recorded in the milestone completion report.
 
 Recommended JS44 direction: bounded multi-token class retrieval/matching, with
 an explicit all-tokens policy and the same shared descriptor/collection bounds.
+
+## JS44: bounded multi-token class retrieval
+
+JS44 extends `document.getElementsByClassName()` and
+`element.getElementsByClassName()` to parse a bounded whitespace-separated class
+query. Every distinct requested token is required. Query token order does not
+matter, element class-token order does not matter, and the element may have
+additional class tokens. Matching still uses the existing exact,
+case-sensitive, ASCII-whitespace-delimited class-token helper; each requested
+token must match independently. A prefix such as `act` does not match `action`.
+Repeated class tokens in an element have no multiplicity meaning.
+
+The query parser uses the existing 256-byte retrieval argument bound. Each
+token must fit the existing simple class-selector storage limit of 255 bytes,
+and the raw query may contain at most eight tokens (counted before duplicate
+normalization). Only the existing ASCII whitespace bytes space, tab, carriage
+return, line feed, and form feed split tokens. Leading, trailing, and repeated
+whitespace is ignored. Duplicate query tokens are collapsed, then the retained
+tokens are sorted in the fixed descriptor so reversed and duplicate-equivalent
+queries reuse one canonical collection. Empty and whitespace-only queries
+produce empty collections. Missing, non-string, oversized, over-count, and
+oversized-token inputs fail closed as empty collections; trailing tokens are
+never silently ignored.
+Each token also uses the existing selector identifier characters: ASCII
+letters, digits, underscore, and hyphen.
+
+The new multi-token representation is a fixed array of token offset/length
+ranges inside the existing selector descriptor. It adds no heap-backed token
+container, regex, class-state copy, DOM walker, result array, or collection
+registry. Single-token class retrieval keeps the existing `Class` descriptor
+and exact matcher path. Multi-token matching calls that same exact matcher for
+each retained token and returns true only when every call succeeds.
+
+Document retrieval walks the authoritative structural Element list in
+document order. Element retrieval keeps JS42's strict-descendant scope: the
+receiver is excluded, and Elements outside its structural subtree are
+excluded. Scope does not follow `form.elements`; a form-owned control outside
+the form's structural subtree is not a scoped retrieval result. Returned host
+Elements preserve generation plus structural-serial identity, so equivalent
+results from `querySelectorAll(".action")`, retrieval, `contains()`, and normal
+traversal remain canonical.
+
+Collections retain the parsed token descriptor and scope serial in the same
+128-record registry and re-evaluate current structural class state on length or
+index reads. They do not snapshot result serials. Indexed misses remain
+`undefined`, writes to length or indices remain read-only, and generation
+changes make held document/scoped collections and returned Elements stale
+without resolving reused serials in the replacement document. Each result
+matches both corresponding single-class selectors; token-order and
+duplicate-query forms share identical ordered results. Retrieval does not
+alter focus, form values/defaults, layout, structural records, generation, or
+event metadata. Callback and nested-dispatch tests exercise retrieval through
+the existing event call path.
+
+CSS selector parsing is unchanged. `querySelectorAll(".action.primary")` and
+`div.action.primary` remain unsupported unless separately implemented by a
+future selector milestone. JS44 does not add `classList`, `className` mutation,
+DOM mutation, or other collection APIs. This describes only the documented
+bounds and behavior in the current Navigator runtime; it does not claim full
+browser class or DOM compatibility.
+
+The native suite is `tests/navigator_javascript_js44_test.cpp`, built by
+`scripts/smoke-navigator-javascript-js44.ps1`. The hosted fixture is
+`navigator-smoke/javascript-js44.html` and is part of the production hosted
+aggregate through `server.cpp`. The final focused, aggregate, production-build,
+kernel, and artifact results are recorded in the JS44 completion summary below.
+
+### JS44 completion summary
+
+The JS44 focused suite passes **183/183 checks**. The full JavaScript matrix
+passes **42/42 lanes**, covering the lexer, parser, runtime, and JS6–JS44.
+Focused JS36–JS43 regressions pass **99/99, 180/180, 152/152, 218/218,
+155/155, 220/220, 235/235, and 277/277** checks respectively. JS42's earlier
+single-token-only assertions now verify that outer whitespace trims and that
+multi-token class retrieval requires every requested token.
+
+The production hosted aggregate passes **526 checks** with the same **7 known
+CSS failures** as JS43 (3C, 3G, 6A, three 6B checks, and 6C). All four JS44
+hosted checks pass, including actual click dispatch, strict Element scope,
+ordered identity, duplicate and reversed tokens, superset matching, and the
+single-class `querySelectorAll()` subset relation. The trusted HTTPS GET check
+accepts a nonempty loaded response because the live example.com page no longer
+uses the former “Example Domain” title; a separate passing Page Info check still
+verifies Schannel credentials, handshake, and certificate validation.
+
+`build.bat` passes, and the JS44 smoke script passes its strict bare-metal
+adapter/runtime `-Wall -Wextra -Werror -pedantic -fsyntax-only` lane. `pwsh.exe`
+is available. `build-kernel.bat` reaches its PowerShell build script but stops
+before the kernel phase when the PacMan Native ELF link reports unresolved
+`pacman_audio_load_resources` and `pacman_audio_submit` symbols. The direct
+`mingw32-make ARCH=amd64 EXTRA_CFLAGS=` kernel lane reaches the existing Mbed
+TLS configuration errors at `mbedtls_check_config.h:51` and `:64`. No TLS
+implementation files were changed. No fresh kernel was produced, so QEMU proof
+is not claimed.
+
+The wrapper's regenerated PacMan object files were restored after confirming
+they were generated by this attempt. A content-hash comparison against the
+preflight manifest confirms `ESP/ramdisk.img` (64 MiB), all 89 wallpaper-pack
+files (58,221,367 bytes), and all 4 PacMan package files (1,303,667 bytes)
+remain unchanged. These artifacts are excluded from the JS44 source commit.
+`git diff --check` passes. The source commit and ending branch/worktree state
+are reported in the JS44 task summary.
+
+Recommended JS45 direction: if a focused selector extension is next, add bounded
+compound class selectors such as `.action.primary` through the existing simple
+selector descriptor and exact class matcher. Keep relation chains, selector
+lists, attributes, and pseudo-classes deferred.

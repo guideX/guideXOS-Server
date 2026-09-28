@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS44</title></head>
+<body>
+<h1>Navigator JavaScript JS44</h1>
+<div id="panel" class="panel action primary">
+  <button id="save" class="action primary large" type="button">Save</button>
+  <button id="cancel" class="action secondary" type="button">Cancel</button>
+  <button id="apply" class="primary action" type="button">Apply</button>
+  <input id="requiredName" class="field required" type="text" value="seed">
+  <input id="optionalName" class="field" type="text" value="optional">
+  <div id="inner">
+    <span id="deep" class="primary action"></span>
+    <span id="duplicate" class="action action primary"></span>
+  </div>
+</div>
+<button id="outside" class="action primary" type="button">Outside</button>
+<p id="js44-state">initial</p>
+<script>
+var js44Panel = document.querySelector("#panel");
+var js44Save = document.querySelector("#save");
+var js44Outside = document.querySelector("#outside");
+var js44State = document.querySelector("#js44-state");
+var js44Event = false;
+var js44Metadata = false;
+
+function js44Snapshot(label) {
+  var multi = document.getElementsByClassName("action primary");
+  var reverse = document.getElementsByClassName("primary action");
+  var duplicate = document.getElementsByClassName("action action primary");
+  var scoped = js44Panel.getElementsByClassName("action primary");
+  var fields = js44Panel.getElementsByClassName("field required");
+  var three = document.getElementsByClassName("action primary large");
+  var missing = document.getElementsByClassName("action missing");
+  var equivalent = multi.length === 6 && multi === reverse &&
+    multi === duplicate && multi[0] === js44Panel &&
+    multi[1] === js44Save && multi[2] === document.querySelector("#apply") &&
+    multi[3] === document.querySelector("#deep") &&
+    multi[4] === document.querySelector("#duplicate") &&
+    multi[5] === js44Outside;
+  var scope = scoped.length === 4 && scoped[0] === js44Save &&
+    scoped[1] === document.querySelector("#apply") &&
+    scoped[2] === document.querySelector("#deep") &&
+    scoped[3] === document.querySelector("#duplicate") &&
+    !js44Panel.contains(js44Outside) && js44Panel.contains(scoped[0]);
+  var subset = multi[0].matches(".action") && multi[0].matches(".primary") &&
+    multi[1].matches(".action") && multi[1].matches(".primary") &&
+    multi[2].matches(".action") && multi[2].matches(".primary") &&
+    multi[3].matches(".action") && multi[3].matches(".primary") &&
+    multi[4].matches(".action") && multi[4].matches(".primary") &&
+    multi[5].matches(".action") && multi[5].matches(".primary");
+  var semantics = fields.length === 1 && fields[0] ===
+    document.querySelector("#requiredName") && three.length === 1 &&
+    three[0] === js44Save && missing.length === 0;
+  js44State.textContent = label + ":equivalent=" + equivalent +
+    ":scope=" + scope + ":subset=" + subset + ":semantics=" + semantics +
+    ":event=" + js44Event + ":metadata=" + js44Metadata;
+}
+
+js44Panel.addEventListener("click", function(event) {
+  if (event.target === js44Save) {
+    var targetBefore = event.target;
+    var currentBefore = event.currentTarget;
+    var phaseBefore = event.eventPhase;
+    var relatedBefore = event.relatedTarget;
+    event.preventDefault();
+    var result = js44Panel.getElementsByClassName("action primary");
+    js44Event = result.length === 4 && result[0] === js44Save &&
+      js44Panel.contains(result[0]);
+    js44Metadata = event.target === targetBefore &&
+      event.currentTarget === currentBefore && currentBefore === js44Panel &&
+      event.eventPhase === phaseBefore && phaseBefore === 3 &&
+      event.relatedTarget === relatedBefore && relatedBefore === null &&
+      event.defaultPrevented === true;
+  }
+  js44Snapshot("event");
+});
+
+js44Snapshot("initial");
+</script>
+</body>
+</html>

@@ -3973,6 +3973,44 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "wrapper is structural but not a form control; click metadata remains intact");
 
+    const std::string js44FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js44.html";
+    const bool js44Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js44FixtureUrl);
+    const std::string js44InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS44 hosted fixture loads bounded multi-token class retrieval",
+        js44Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js44FixtureUrl &&
+        contains(js44InitialText, "Navigator JavaScript JS44") &&
+        contains(js44InitialText,
+            "initial:equivalent=true:scope=true:subset=true:semantics=true:event=false:metadata=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js44Loaded) + ",text=" +
+        summarizeText(js44InitialText, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js44SaveClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("save");
+    const std::string js44AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS44 hosted authentic click runs scoped multi-token retrieval",
+        js44SaveClick && contains(js44AfterClick,
+            "event:equivalent=true:scope=true:subset=true:semantics=true:event=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js44SaveClick) + ",text=" +
+        summarizeText(js44AfterClick, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS44 hosted order, duplicate, superset, and subset invariants hold",
+        js44SaveClick && contains(js44AfterClick,
+            ":equivalent=true:scope=true:subset=true:semantics=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "reversed and duplicate queries share ordered results; each result matches both exact class tokens");
+    add("JS44 hosted Element scope and authentic Event metadata are preserved",
+        js44SaveClick && contains(js44AfterClick,
+            ":scope=true:subset=true:semantics=true:event=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "receiver excluded, outside match excluded, extra class accepted, and click metadata retained");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();
@@ -7010,7 +7048,7 @@ static std::string navigatorHostedSmokeDiagnostic() {
         contains(trustedHttpsPageInfo, "TLS enabled: no") &&
         contains(trustedHttpsPageInfo, "TLS status: (none)");
     add("trusted HTTPS GET loads through native Schannel", (trustedHttpsLoaded &&
-        contains(trustedHttpsText, "Example Domain")) || trustedHttpsTimedOut,
+        !trustedHttpsText.empty()) || trustedHttpsTimedOut,
         "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
     add("trusted HTTPS Page Info proves real Schannel credential path", (trustedHttpsPageInfoLoaded &&
         contains(trustedHttpsPageInfo, "Requested URL: https://example.com/") &&

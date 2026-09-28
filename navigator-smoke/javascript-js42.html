@@ -45,7 +45,8 @@ function js42Snapshot(label) {
     scopedActions[0] === document.querySelector("#save") &&
     document.getElementsByClassName("primary")[0] === js42Save &&
     document.getElementsByClassName("act").length === 0 &&
-    document.getElementsByClassName("action primary").length === 0;
+    document.getElementsByClassName("action primary").length === 1 &&
+    document.getElementsByClassName("action primary")[0] === js42Save;
   var structural = js42Panel.contains(scopedActions[0]) &&
     scopedActions[0].parentElement === js42Panel &&
     scopedActions[1].closest(".panel") === js42Panel &&
