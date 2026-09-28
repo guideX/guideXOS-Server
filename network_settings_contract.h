@@ -340,15 +340,18 @@ inline const char* connectionStateText(const NetworkSnapshot& snapshot,
 {
     if (snapshot.state == SnapshotState::Unavailable)
         return snapshot.backend == Backend::Kernel ? "Adapter unavailable" :
-            "Kernel state unavailable in hosted Settings";
+            "guideXOS network service unavailable";
     if (snapshot.state == SnapshotState::NoAdapter || !adapter) return "No adapter";
     if (adapter->linkState == LinkState::Unknown) return "Adapter state unavailable";
     if (adapter->linkState == LinkState::Down) return "Disconnected";
     if (adapter->dhcpState == DhcpState::Initializing) return "Obtaining address...";
     if (adapter->dhcpState == DhcpState::FailedNoLease && !adapter->ipv4Address.available)
         return "DHCP failed; no lease";
-    if (!adapter->ipv4Address.available || adapter->ipv4Address.value == 0) return "Link up, no lease";
-    return "Connected";
+    if (!adapter->ipv4Address.available)
+        return adapter->configurationMode == ConfigurationMode::Dhcp
+            ? "Link up, no lease" : "Link up, address unavailable";
+    if (adapter->ipv4Address.value == 0) return "Link up; 0.0.0.0 assigned";
+    return "Configured; Internet not checked";
 }
 
 } // namespace network_settings

@@ -132,6 +132,7 @@ echo   Framebuffer display: QEMU window shows the desktop directly
 echo   VNC secondary viewer: connect to localhost:5900
 echo   Mouse: Press Ctrl+Alt+G to grab mouse, Ctrl+Alt+G again to release
 echo   Serial debug output from the kernel will appear below.
+echo   The guideXOS system-service channel uses COM2 on localhost:17771.
 echo   Press Ctrl+C in this window to exit QEMU
 echo ========================================
 echo.
@@ -170,6 +171,7 @@ if "%SPLIT_PFLASH%"=="1" (
         -display gtk ^
         -vnc :0 ^
         -serial stdio ^
+        -serial tcp:127.0.0.1:17771,server=on,wait=off ^
         -rtc base=utc,clock=host ^
         -no-reboot
 ) else (
@@ -187,6 +189,7 @@ if "%SPLIT_PFLASH%"=="1" (
         -display gtk ^
         -vnc :0 ^
         -serial stdio ^
+        -serial tcp:127.0.0.1:17771,server=on,wait=off ^
         -rtc base=utc,clock=host ^
         -no-reboot
 )

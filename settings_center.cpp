@@ -129,7 +129,6 @@ std::string fitText(const std::string& value, size_t maxChars)
 std::string networkAddressText(const network_settings::IPv4Value& value)
 {
     if (!value.available) return "Unavailable";
-    if (value.value == 0) return "Not configured";
     char address[16]{};
     return network_settings::formatIPv4(value.value, address) ? std::string(address) : "Unavailable";
 }
@@ -755,7 +754,7 @@ private:
     {
         const network_settings::NetworkSnapshot previous = m_networkSnapshot;
         network_settings::NetworkSnapshot current{};
-        m_networkReadResult = readSettingsNetworkSnapshot(hostedGuideXosNetworkProvider(), &current);
+        m_networkReadResult = readSettingsNetworkSnapshot(&current);
         if (current.version != network_settings::kContractVersion) {
             current = network_settings::NetworkSnapshot{};
             current.backend = network_settings::Backend::Unavailable;
@@ -1008,7 +1007,7 @@ private:
         if (m_networkSnapshot.state == network_settings::SnapshotState::Unavailable) {
             const char* unavailableText = m_networkSnapshot.backend == network_settings::Backend::Kernel
                 ? "The kernel network adapter is unavailable."
-                : "guideXOS kernel NIC state is unavailable in this hosted process.";
+                : "guideXOS network service unavailable.";
             drawText(x + 20, adaptersY + 50, unavailableText, mutedTextColor());
         } else if (count == 0) {
             drawText(x + 20, adaptersY + 50, "No supported network adapter was detected.", mutedTextColor());
@@ -1062,12 +1061,10 @@ private:
 
         const int advancedY = networkAdvancedY();
         drawButton(x + 6, advancedY, std::min(390, pageWidth() - 12), 40,
-            "Advanced network settings", false,
+            "Open network diagnostics", false,
             m_hoverItem.control == FocusControl::NetworkAdvanced,
             sameFocus(m_focusedItem, FocusItem{ FocusItem::Kind::Control, 0, FocusControl::NetworkAdvanced }), true);
-        if (m_networkReadResult == network_settings::Result::Unavailable) {
-            drawText(x + 410, advancedY + 12, "Status refreshes while this page is focused.", mutedTextColor());
-        }
+        drawText(x + 410, advancedY + 12, "Configuration is read-only in this Settings view.", mutedTextColor());
     }
 
     void renderAdvancedPage(const std::string& description, FocusControl control, const std::string& action)

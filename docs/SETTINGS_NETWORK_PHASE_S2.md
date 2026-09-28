@@ -1,6 +1,13 @@
 # Settings Center Phase S2: Network State Boundary
 
-## Result
+> **Recovery:** The original S2 result below recorded Outcome C because hosted
+> Settings could not reach the bare-metal kernel. S2R adds the runtime service
+> bridge and completes the read-only network snapshot path. See
+> [Settings Network Phase S2R](SETTINGS_NETWORK_PHASE_S2R.md) for the current
+> architecture, authorization boundary, test results, and QEMU proof. The
+> original findings remain here as the history of the retained S2 groundwork.
+
+## Original S2 result (before S2R)
 
 This change adds a bounded network snapshot contract, a kernel-side provider,
 and a Settings Network page that renders provider data without reading the host
@@ -75,7 +82,7 @@ the result.
   snapshot and clamps selection after refresh. Snapshots exceeding the fixed
   capacity are clamped and marked truncated.
 
-## Verification and remaining work
+## Original S2 verification and remaining work (before S2R)
 
 The focused Settings model suite passed **53/53** checks and the network
 contract suite passed **38/38** checks through

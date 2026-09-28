@@ -55,6 +55,7 @@
 #include "include/kernel/dns.h"
 #include "include/kernel/dhcp.h"
 #include "include/kernel/network_settings_provider.h"
+#include "include/kernel/system_service_bridge.h"
 
 // VirtIO subsystem
 #include "include/kernel/virtio_block.h"
@@ -1142,6 +1143,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             printNetworkAddress(" dns=", adapter.dns);
             kernel::serial::putc('\n');
         }
+        kernel::system_service_bridge::init();
         
         // ============================================================
         
@@ -1259,6 +1261,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 
             // Poll input manager for updates (handles USB HID polling)
             kernel::input::poll();
+
+            // Service bounded host-runtime requests on the dedicated COM2
+            // channel. This reads current kernel providers per request.
+            kernel::system_service_bridge::poll();
             
             // Poll network for received packets
             kernel::ipv4::poll_network();

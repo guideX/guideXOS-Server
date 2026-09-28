@@ -102,6 +102,7 @@ int main()
     check(std::strcmp(connectionStateText(providerState.snapshot, &adapter), "Disconnected") == 0,
           "link down remains disconnected");
     adapter.linkState = LinkState::Up;
+    adapter.configurationMode = ConfigurationMode::Dhcp;
     check(std::strcmp(connectionStateText(providerState.snapshot, &adapter), "Link up, no lease") == 0,
           "link up without an address is not called connected");
     adapter.configurationMode = ConfigurationMode::Dhcp;
@@ -114,8 +115,18 @@ int main()
     adapter.dhcpState = DhcpState::LeaseAcquired;
     adapter.ipv4Address = IPv4Value{ 0x0A01092Au, true };
     adapter.configurationMode = ConfigurationMode::Dhcp;
-    check(std::strcmp(connectionStateText(providerState.snapshot, &adapter), "Connected") == 0,
-          "addressed DHCP lease is connected");
+    check(std::strcmp(connectionStateText(providerState.snapshot, &adapter),
+                       "Configured; Internet not checked") == 0,
+          "assigned IPv4 is not presented as proof of Internet access");
+    adapter.ipv4Address = IPv4Value{ 0, true };
+    check(std::strcmp(connectionStateText(providerState.snapshot, &adapter),
+                       "Link up; 0.0.0.0 assigned") == 0,
+          "an authoritative zero address is distinct from an unavailable address");
+    adapter.ipv4Address = IPv4Value{};
+    adapter.configurationMode = ConfigurationMode::Unknown;
+    check(std::strcmp(connectionStateText(providerState.snapshot, &adapter),
+                       "Link up, address unavailable") == 0,
+          "unknown address data is not misreported as a missing DHCP lease");
     adapter.configurationMode = ConfigurationMode::Static;
     adapter.dhcpState = DhcpState::NotRunning;
     check(adapter.configurationMode == ConfigurationMode::Static,
@@ -132,8 +143,8 @@ int main()
           output.backend == Backend::Unavailable && output.state == SnapshotState::Unavailable,
           "hosted Settings provider never substitutes host network data");
     check(std::strcmp(connectionStateText(output, nullptr),
-                       "Kernel state unavailable in hosted Settings") == 0,
-          "hosted kernel unavailability is labeled explicitly");
+                       "guideXOS network service unavailable") == 0,
+          "an absent hosted bridge is labeled as a service outage");
     output.backend = Backend::Kernel;
     check(std::strcmp(connectionStateText(output, nullptr), "Adapter unavailable") == 0,
           "kernel adapter failure is distinguished from hosted isolation");
@@ -157,6 +168,9 @@ int main()
     check(!parseIPv4("10.1.9.256", &parsed) && !parseIPv4("10.1.9", &parsed) &&
           !parseIPv4("10.1.9.1x", &parsed) && !parseIPv4("10..9.1", &parsed),
           "strict IPv4 parser rejects malformed addresses");
+    char formattedZero[16]{};
+    check(formatIPv4(0u, formattedZero) && std::strcmp(formattedZero, "0.0.0.0") == 0,
+          "a known zero IPv4 value formats as 0.0.0.0 rather than unknown");
 
     IPv4Configuration validated{ 1, 2, 3, 4 };
     IPv4Configuration before = validated;

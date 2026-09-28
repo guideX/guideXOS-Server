@@ -612,6 +612,21 @@
     <ClInclude Include="settings_network_service.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="system_service_client.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="system_service_dispatcher.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="system_service_protocol.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="system_service_qemu_transport.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\system_service_bridge.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="settings_center_model.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1128,6 +1143,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="kernel\core\network_settings_provider.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\system_service_bridge.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="kernel\core\ethernet.cpp">
