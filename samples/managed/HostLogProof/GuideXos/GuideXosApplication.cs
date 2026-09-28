@@ -38,7 +38,13 @@ public readonly struct GuideXosApplicationDescriptor
 /// </summary>
 public static unsafe class GuideXosApplicationRegistry
 {
-#if HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
+#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+    private static readonly GuideXosApplicationDescriptor[] s_entries =
+    {
+        new(4u, "Managed Notes"u8, new Applications.ManagedNotes()),
+        new(5u, "Managed Settings Center"u8, new Applications.ManagedSettingsCenter()),
+    };
+#elif HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
     private static readonly GuideXosApplicationDescriptor[] s_entries =
     {
         new(5u, "Managed Settings Center"u8, new Applications.ManagedSettingsCenter()),
@@ -104,6 +110,16 @@ public static unsafe class GuideXosApplicationRegistry
             host.TryLog("C112-UNKNOWN-SELECTOR"u8);
             return GxAbi.ErrorInvalidApplicationId;
         }
+
+#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+        // The shared loader runs before the first managed application launch
+        // or input callback; Settings Center is only one consumer of state.
+        if (!host.IsCapabilityProbe &&
+            !Applications.GuideXosRuntimeSettings.EnsureInitialized(host))
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+#endif
 
         GuideXosInputEvent input = default;
         if (host.LaunchContext.IsInput)

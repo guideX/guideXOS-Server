@@ -140,6 +140,51 @@ char* strstr(const char* haystack, const char* needle)
     return (char*)0;
 }
 
+// The NativeAOT CoreLib can retain System.Math.Ceiling when managed code
+// reaches floating-point formatting helpers. Keep this primitive freestanding
+// instead of resolving it through the host CRT, which is intentionally absent
+// from the guideXOS image. Work on the IEEE-754 payload so large values,
+// infinities, NaNs, subnormals, and signed zero do not require floating math.
+double ceil(double value)
+{
+    unsigned long long bits;
+    unsigned long long sign;
+    unsigned long long exponentBits;
+    unsigned long long fractionalMask;
+    int exponent;
+
+    memcpy(&bits, &value, sizeof(bits));
+    sign = bits >> 63;
+    exponentBits = (bits >> 52) & 0x7ffULL;
+
+    // NaN and infinities are already integral for rounding purposes.
+    if (exponentBits == 0x7ffULL) return value;
+
+    // Preserve both positive and negative zero exactly.
+    if ((bits & 0x7fffffffffffffffULL) == 0ULL) return value;
+
+    exponent = (int)exponentBits - 1023;
+    if (exponent >= 52) return value;
+    if (exponent < 0) {
+        if (sign != 0ULL) {
+            bits = 0x8000000000000000ULL;
+            memcpy(&value, &bits, sizeof(bits));
+            return value;
+        }
+        bits = 0x3ff0000000000000ULL;
+        memcpy(&value, &bits, sizeof(bits));
+        return value;
+    }
+
+    fractionalMask = (1ULL << (52 - exponent)) - 1ULL;
+    if ((bits & fractionalMask) == 0ULL) return value;
+
+    bits &= ~fractionalMask;
+    if (sign == 0ULL) bits += 1ULL << (52 - exponent);
+    memcpy(&value, &bits, sizeof(bits));
+    return value;
+}
+
 void _purecall(void)
 {
     for (;;) {

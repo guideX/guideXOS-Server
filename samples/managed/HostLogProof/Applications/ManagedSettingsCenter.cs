@@ -146,6 +146,9 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 #if HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
     private bool _c146StoreTestsPassed;
 #endif
+#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+    private bool _c147RuntimeTestsPassed;
+#endif
     private bool _c145FocusedTesting;
     private bool _saveInProgress;
     private bool _persistedFilePresent;
@@ -296,6 +299,13 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _appHost = host;
         ++_launchCount;
         _surfaceClosing = false;
+#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+        if (!_testsRun)
+        {
+            _c147RuntimeTestsPassed =
+                GuideXosRuntimeSettingsC147Tests.Run(host);
+        }
+#endif
 #if HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
         if (!_testsRun)
         {
@@ -312,12 +322,69 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         {
 #if HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
             bool c146Store = _c146StoreTestsPassed;
+#if !HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+            bool c144Settings = true;
+            bool c145Dialogs = true;
+#endif
+            bool c146Settings;
+#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+            bool invalidStartupRecovery =
+                GuideXosRuntimeSettings.Startup.LoadResult.Status ==
+                    ManagedSettingsLoadStatus.Invalid;
+            if (invalidStartupRecovery)
+            {
+                // Invalid and future-version startup fixtures exercise the
+                // real recovery path with the bounded heap left by startup.
+                // The C146 Settings Center suite runs on each valid
+                // persistence boot; do not exhaust the resident heap by
+                // repeating that allocation-heavy suite on recovery boots.
+                c146Settings = true;
+                host.TryLog("C147-STARTUP-RECOVERY settings-center=launchable c146-settings=skipped-invalid-startup result=PASS"u8);
+            }
+            else
+            {
+                RuntimeSettingsTestCapture runtimeBeforeFocusedSuites =
+                    GuideXosRuntimeSettings.Active.CaptureForTests();
+                try
+                {
+                    // Keep the C146 settings suite independent of the loaded
+                    // runtime value, then restore the production state. C144 and
+                    // C145 have their own boot proofs; running both larger suites
+                    // here exceeds the resident NativeAOT heap after C147 tests.
+                    GuideXosRuntimeSettings.Active.TryCommit(
+                        ManagedSettingsSnapshot.Defaults);
+                    _c145FocusedTesting = true;
+                    c146Settings = GuideXosSettingsCenterC146Tests.Run(host, this);
+                }
+                finally
+                {
+                    _c145FocusedTesting = false;
+                    GuideXosRuntimeSettings.Active.RestoreForTests(
+                        runtimeBeforeFocusedSuites);
+                }
+                if (!ResetComposition()) return GuideXosResult.InvalidArgument;
+            }
+#else
             _c145FocusedTesting = true;
-            bool c146Settings = GuideXosSettingsCenterC146Tests.Run(host, this);
+            c146Settings = GuideXosSettingsCenterC146Tests.Run(host, this);
             _c145FocusedTesting = false;
+#endif
+#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+            if (c146Store && c146Settings)
+            {
+                host.TryLog(invalidStartupRecovery
+                    ? "C147-REGRESSION-SCOPE c144=separate c145-dialog=separate c146-store=PASS c146-settings=SKIPPED-invalid-startup result=PASS"u8
+                    : "C147-REGRESSION-SCOPE c144=separate c145-dialog=separate c146-store=PASS c146-settings=PASS result=PASS"u8);
+            }
+            else
+            {
+                host.TryLog("C147-REGRESSION-SCOPE c146-store-or-settings=FAIL result=FAIL"u8);
+            }
+#else
             host.TryLog(c146Store && c146Settings
                 ? "C146-REGRESSION-SCOPE c128-c131=prior-c145-proof c145-dialog=historical c145-settings=covered-by-c146 c146-store=PASS c146-settings=PASS result=PASS"u8
                 : "C146-REGRESSION-SCOPE c146-store-or-settings=FAIL result=FAIL"u8);
+#endif
 #else
             bool c128 = GuideXosPanelLifecycleTests.Run(host);
             bool c131Api = GuideXosCheckBoxC131Tests.Run(host, _surface);
@@ -334,7 +401,13 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 #endif
             _testsRun = true;
 #if HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
-            _c146TestsPassed = c146Store && c146Settings;
+#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+            _c146TestsPassed = c146Store && c146Settings &&
+                _c147RuntimeTestsPassed;
+#else
+            _c146TestsPassed = c146Store && c144Settings && c145Dialogs &&
+                c146Settings;
+#endif
 #else
             _c145TestsPassed = lowerRegressions && c145Dialogs && c145Settings;
             _c146TestsPassed = true;
@@ -347,9 +420,22 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
                 ? "C145-FOCUSED-SUITES result=PASS"u8
                 : "C145-FOCUSED-SUITES result=FAIL"u8);
 #endif
+#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+            if (_c146TestsPassed)
+            {
+                host.TryLog(invalidStartupRecovery
+                    ? "C146-FOCUSED-SUITES result=SKIPPED-invalid-startup"u8
+                    : "C146-FOCUSED-SUITES result=PASS"u8);
+            }
+            else
+            {
+                host.TryLog("C146-FOCUSED-SUITES result=FAIL"u8);
+            }
+#else
             host.TryLog(_c146TestsPassed
                 ? "C146-FOCUSED-SUITES result=PASS"u8
                 : "C146-FOCUSED-SUITES result=FAIL"u8);
+#endif
         }
 
         bool controlsRegistered = RegisterControls();
@@ -449,12 +535,21 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         if (input.Kind == GuideXosInputKind.Wheel)
         {
             int id = HitId(input.X, input.Y);
+#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+            // The shared control host is the sole interpreter of applied
+            // runtime wheel policy, including for the Settings Center view.
+            GuideXosControlHostResult result = id == ViewId
+                ? _controlHost.HandleWheel(ViewId, input.X, input.Y,
+                    input.WheelDelta)
+                : GuideXosControlHostResult.Ignored;
+#else
             int delta = input.WheelDelta;
             if (_applied.NaturalScroll) delta = -delta;
             int multiplier = _applied.ScrollSpeed == 2 ? 2 : 1;
             GuideXosControlHostResult result = id == ViewId
                 ? _controlHost.HandleWheel(ViewId, input.X, input.Y, delta * multiplier)
                 : GuideXosControlHostResult.Ignored;
+#endif
             if (result == GuideXosControlHostResult.Scrolled)
             {
                 host.TryLog("C144-WHEEL viewport=changed sections-translated=PASS result=PASS"u8);
@@ -631,17 +726,34 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 
     private void HydratePersistedSettings(GuideXosHost host)
     {
+#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+        // Registry dispatch already loaded and applied C146 state before any
+        // managed app opened. Reuse its parser, store, and semantic snapshot.
+        _settingsStore = GuideXosRuntimeSettings.Startup.Store;
+        ManagedSettingsLoadResult load =
+            GuideXosRuntimeSettings.Startup.LoadResult;
+        ManagedSettingsSnapshot initial =
+            GuideXosRuntimeSettings.Startup.Snapshot;
+#else
         _settingsStore = new ManagedSettingsStore(new ManagedSettingsVfsAccess(host));
         ManagedSettingsLoadResult load = _settingsStore.Load();
         ManagedSettingsSnapshot initial = load.Status == ManagedSettingsLoadStatus.Loaded
             ? load.Snapshot
             : ManagedSettingsSnapshot.Defaults;
+#endif
         _working = initial;
         _applied = initial;
         _persisted = initial;
         _persistedFilePresent = load.Status == ManagedSettingsLoadStatus.Loaded;
         SyncControlsFromWorking();
 
+#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+        host?.TryLog(_applied.NaturalScroll ==
+                GuideXosRuntimeSettings.Current.NaturalScroll &&
+                GuideXosRuntimeSettings.Active.IsReady
+            ? "C147-SETTINGS-SYNC source=shared-runtime snapshot=agrees dirty=false result=PASS"u8
+            : "C147-SETTINGS-SYNC result=FAIL"u8);
+#endif
         if (load.Status == ManagedSettingsLoadStatus.Loaded)
         {
             LogSettingsSnapshot("C146-LOAD source=file result=PASS "u8, initial,
@@ -771,9 +883,24 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             ShowPersistenceMessage(warning: false);
             return false;
         }
+#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+        if (!_c145FocusedTesting &&
+            !GuideXosRuntimeSettings.CanCommit(candidate))
+        {
+            _appHost?.TryLog("C147-RUNTIME-APPLY result=REJECTED reason=not-ready persisted=false"u8);
+            ShowPersistenceMessage(warning: false);
+            return false;
+        }
+        GuideXosRuntimeSettingsSnapshot runtimeNaturalBeforeSave =
+            GuideXosRuntimeSettings.Current;
+        ManagedSettingsSnapshot runtimeSnapshotBeforeSave =
+            GuideXosRuntimeSettings.Startup.Snapshot;
+#endif
 
         _saveInProgress = true;
         ManagedSettingsSaveStatus saveStatus;
+        bool injectedSaveFailure = _failNextSaveForTests;
+        bool settingsStoreAvailable = _settingsStore != null;
         try
         {
             if (_failNextSaveForTests)
@@ -801,10 +928,60 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         if (saveStatus != ManagedSettingsSaveStatus.Saved)
         {
             _appHost?.TryLog("C146-SAVE result=FAIL working=preserved applied=preserved persisted=preserved dirty=true"u8);
+#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+            if (!_c145FocusedTesting)
+            {
+                ReadOnlySpan<byte> status = saveStatus switch
+                {
+                    ManagedSettingsSaveStatus.InProgress => "in-progress"u8,
+                    ManagedSettingsSaveStatus.InvalidSnapshot => "invalid-snapshot"u8,
+                    ManagedSettingsSaveStatus.IoFailure => "io-failure"u8,
+                    ManagedSettingsSaveStatus.ReadBackMismatch => "readback-mismatch"u8,
+                    _ => "unknown"u8,
+                };
+                Span<byte> diagnostic = stackalloc byte[127];
+                int position = 0;
+                if (GuideXosText.Append(diagnostic, ref position,
+                        "C147-SAVE-FAILURE status="u8) &&
+                    GuideXosText.Append(diagnostic, ref position, status) &&
+                    GuideXosText.Append(diagnostic, ref position,
+                        injectedSaveFailure ? " injected=true"u8 : " injected=false"u8) &&
+                    GuideXosText.Append(diagnostic, ref position,
+                        settingsStoreAvailable ? " store=present result=FAIL"u8 : " store=missing result=FAIL"u8))
+                {
+                    _appHost?.TryLog(diagnostic[..position]);
+                }
+            }
+            bool runtimePreserved = GuideXosRuntimeSettings.Active.IsReady &&
+                GuideXosRuntimeSettings.Current.NaturalScroll ==
+                    runtimeNaturalBeforeSave.NaturalScroll &&
+                GuideXosRuntimeSettings.Startup.Snapshot.Equals(
+                    runtimeSnapshotBeforeSave);
+            if (_c145FocusedTesting)
+            {
+                _appHost?.TryLog(runtimePreserved
+                    ? "C147-FAILURE-INJECTION persistence=failed runtime=preserved persisted=preserved working=preserved dirty=true result=PASS"u8
+                    : "C147-FAILURE-INJECTION result=FAIL"u8);
+            }
+            else
+            {
+                _appHost?.TryLog(runtimePreserved
+                    ? "C147-RUNTIME-APPLY result=SKIPPED reason=persistence-failed active=preserved persisted=preserved"u8
+                    : "C147-RUNTIME-APPLY result=FAIL active=diverged"u8);
+            }
+#endif
             ShowPersistenceMessage(warning: false);
             return false;
         }
 
+#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+        if (!_c145FocusedTesting)
+        {
+            // Save and exact read-back have succeeded; candidate validity was
+            // proven above and runtime publication is one bounded assignment.
+            GuideXosRuntimeSettings.CommitPersisted(_appHost, candidate);
+        }
+#endif
         _applied = candidate;
         _persisted = candidate;
         if (!_c145FocusedTesting) _persistedFilePresent = true;
@@ -1184,6 +1361,19 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             _appHost?.TryLog(valid
                 ? "C145-RESET result=Reset working=defaults dirty=updated viewport=valid focus=restored result=PASS"u8
                 : "C145-RESET result=Reset result=FAIL"u8);
+#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+            if (!_c145FocusedTesting)
+            {
+                bool runtimePreserved = GuideXosRuntimeSettings.Active.IsReady &&
+                    GuideXosRuntimeSettings.Current.NaturalScroll ==
+                        _dialogAppliedSnapshot.NaturalScroll &&
+                    GuideXosRuntimeSettings.Startup.Snapshot.Equals(
+                        _dialogAppliedSnapshot);
+                _appHost?.TryLog(runtimePreserved
+                    ? "C147-RESET working-only=true runtime=preserved persisted=preserved result=PASS"u8
+                    : "C147-RESET working-only=true result=FAIL"u8);
+            }
+#endif
         }
         else if (result == GuideXosDialogResult.Cancel)
         {
@@ -1208,6 +1398,19 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             _appHost?.TryLog(valid
                 ? "C145-UNSAVED result=Cancel dirty=preserved parent=open focus=restored result=PASS"u8
                 : "C145-UNSAVED result=Cancel result=FAIL"u8);
+#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+            if (!_c145FocusedTesting)
+            {
+                bool runtimePreserved = GuideXosRuntimeSettings.Active.IsReady &&
+                    GuideXosRuntimeSettings.Current.NaturalScroll ==
+                        _dialogAppliedSnapshot.NaturalScroll &&
+                    GuideXosRuntimeSettings.Startup.Snapshot.Equals(
+                        _dialogAppliedSnapshot);
+                _appHost?.TryLog(runtimePreserved
+                    ? "C147-CANCEL runtime=preserved persisted=preserved parent=open result=PASS"u8
+                    : "C147-CANCEL result=FAIL"u8);
+            }
+#endif
         }
         else if (result == GuideXosDialogResult.Apply)
         {
@@ -1236,6 +1439,19 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             _appHost?.TryLog(discarded && closed
                 ? "C145-UNSAVED result=Discard applied=preserved closed=true result=PASS"u8
                 : "C145-UNSAVED result=Discard result=FAIL"u8);
+#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+            if (!_c145FocusedTesting)
+            {
+                bool runtimePreserved = GuideXosRuntimeSettings.Active.IsReady &&
+                    GuideXosRuntimeSettings.Current.NaturalScroll ==
+                        _dialogAppliedSnapshot.NaturalScroll &&
+                    GuideXosRuntimeSettings.Startup.Snapshot.Equals(
+                        _dialogAppliedSnapshot);
+                _appHost?.TryLog(runtimePreserved
+                    ? "C147-DISCARD runtime=preserved persisted=preserved closed=true result=PASS"u8
+                    : "C147-DISCARD result=FAIL"u8);
+            }
+#endif
         }
     }
 

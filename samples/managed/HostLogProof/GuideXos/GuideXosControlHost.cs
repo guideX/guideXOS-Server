@@ -582,11 +582,33 @@ public sealed class GuideXosControlHost
         int characterWidth = 8,
         int lineHeight = 18)
     {
+        return HandleWheelCore(id, x, y, wheelDelta, originX, originY,
+            characterWidth, lineHeight, applyRuntimePolicy: true);
+    }
+
+    private GuideXosControlHostResult HandleWheelCore(
+        int id,
+        int x,
+        int y,
+        int wheelDelta,
+        int originX,
+        int originY,
+        int characterWidth,
+        int lineHeight,
+        bool applyRuntimePolicy)
+    {
+#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+        if (applyRuntimePolicy)
+        {
+            wheelDelta = Applications.GuideXosRuntimeSettings
+                .TransformWheelDelta(wheelDelta);
+        }
+#endif
         if (_modalHost != null)
         {
-            return _modalHost.HandleWheel(
+            return _modalHost.HandleWheelCore(
                 id, x, y, wheelDelta, originX, originY,
-                characterWidth, lineHeight);
+                characterWidth, lineHeight, applyRuntimePolicy: false);
         }
         if (wheelDelta == 0) return GuideXosControlHostResult.Ignored;
         if (HasPointerDragCapture) return GuideXosControlHostResult.Ignored;

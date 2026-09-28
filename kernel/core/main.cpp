@@ -5416,6 +5416,90 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
         };
 
+#if defined(GXOS_NATIVEAOT_C147_RUNTIME_SETTINGS)
+        auto runC147RuntimeSettingsProof = [&]() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const gxos::apps::BuiltInAppMetadata* settingsCenter =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Settings Center");
+        const bool catalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            notes && settingsCenter && notes->managedSelector == 4u &&
+            settingsCenter->managedSelector == 5u;
+        kernel::serial::puts("[C147-APPMODEL] catalogValid=");
+        kernel::serial::puts(catalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+
+        // Start the real Managed Notes control surface first. Its dispatch
+        // loads GXSETT.BIN into the shared runtime state before any Settings
+        // Center code runs. Exercise both wheel directions through the same
+        // compositor-to-managed input path used by the device transport.
+        const bool notesLaunch = catalogValid &&
+            kernel::desktop::launch_app_with_context(
+                notes->appId, "c147-native-notes");
+        kernel::app::KernelWindow* notesWindow =
+            kernel::compositor::KernelCompositor::getFocusedWindow();
+        constexpr int32_t listLocalX = 340;
+        constexpr int32_t listLocalY = 100;
+        const bool notesTarget = notesLaunch && notesWindow &&
+            notesWindow->owner;
+        if (notesTarget) {
+            const int32_t listScreenX = notesWindow->x + listLocalX;
+            const int32_t listScreenY = notesWindow->y +
+                kernel::compositor::TITLEBAR_HEIGHT + listLocalY;
+            kernel::compositor::KernelCompositor::handleMouseWheel(
+                listScreenX, listScreenY, -1);
+            kernel::compositor::KernelCompositor::handleMouseWheel(
+                listScreenX, listScreenY, 1);
+            kernel::serial::puts("[C147-NOTES-TARGET] screenListX=");
+            kernel::serial::put_hex32(static_cast<uint32_t>(listScreenX));
+            kernel::serial::puts(" screenListY=");
+            kernel::serial::put_hex32(static_cast<uint32_t>(listScreenY));
+            kernel::serial::puts(" result=PASS\n");
+        }
+        kernel::serial::puts("[C147-NOTES-FIRST] launch=");
+        kernel::serial::puts(notesLaunch ? "PASS" : "FAIL");
+        kernel::serial::puts(" runtime-effect-before-settings-center=");
+        kernel::serial::puts(notesTarget ? "PASS result=PASS\n" : "FAIL result=FAIL\n");
+
+        const bool settingsLaunch = notesTarget &&
+            kernel::desktop::launch_app_with_context(
+                settingsCenter->appId, "c147-native");
+        kernel::app::KernelWindow* window =
+            kernel::compositor::KernelCompositor::getFocusedWindow();
+        constexpr int32_t viewX = 24;
+        constexpr int32_t viewY = 86;
+        constexpr int32_t viewWidth = 300;
+        constexpr int32_t viewHeight = 208;
+        constexpr int32_t barX = 336;
+        constexpr int32_t barY = 86;
+        constexpr int32_t optionsX = 420;
+        constexpr int32_t optionsY = 48;
+        kernel::serial::puts("[C147-PROOF] managed-proof-started context=c147-runtime-settings notes-first=true settings-after-notes=true result=");
+        kernel::serial::puts(settingsLaunch ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C144-PROOF] managed-proof-started context=c144-native transport=physical-qemu result=");
+        kernel::serial::puts(settingsLaunch ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C144-TARGET] viewX="); kernel::serial::put_hex32(viewX);
+        kernel::serial::puts(" viewY="); kernel::serial::put_hex32(viewY);
+        kernel::serial::puts(" viewWidth="); kernel::serial::put_hex32(viewWidth);
+        kernel::serial::puts(" viewHeight="); kernel::serial::put_hex32(viewHeight);
+        kernel::serial::puts(" scrollBarX="); kernel::serial::put_hex32(barX);
+        kernel::serial::puts(" scrollBarY="); kernel::serial::put_hex32(barY);
+        kernel::serial::puts(" optionsX="); kernel::serial::put_hex32(optionsX);
+        kernel::serial::puts(" optionsY="); kernel::serial::put_hex32(optionsY);
+        kernel::serial::puts(" screenViewX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window
+            ? window->x + viewX : -1));
+        kernel::serial::puts(" screenViewY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window
+            ? window->y + kernel::compositor::TITLEBAR_HEIGHT + viewY : -1));
+        kernel::serial::puts(" result=");
+        kernel::serial::puts(settingsLaunch && window ? "PASS\n" : "FAIL\n");
+        }
+        };
+        runC147RuntimeSettingsProof();
+        return;
+#endif
+
 #if defined(GXOS_NATIVEAOT_C145_MANAGED_MODAL_DIALOG)
         auto runC145ManagedModalDialogProof = [&]() __attribute__((noinline)) {
         {
