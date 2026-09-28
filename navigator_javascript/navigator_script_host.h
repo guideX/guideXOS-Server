@@ -37,6 +37,8 @@ constexpr std::uint32_t kNavigatorQuerySelectorAllMethod = 10u;
 constexpr std::uint32_t kNavigatorMatchesMethod = 11u;
 constexpr std::uint32_t kNavigatorClosestMethod = 12u;
 constexpr std::uint32_t kNavigatorContainsMethod = 13u;
+constexpr std::uint32_t kNavigatorGetElementsByTagNameMethod = 14u;
+constexpr std::uint32_t kNavigatorGetElementsByClassNameMethod = 15u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;
@@ -398,6 +400,10 @@ private:
     HostResult querySelectorAll(HostInstanceId scopeSerial,
         const HostValue* arguments, std::size_t argumentCount,
         HostValue& result);
+    HostResult getElementsBySimpleSelector(HostInstanceId scopeSerial,
+        const HostValue* arguments, std::size_t argumentCount,
+        bool classSelector, HostValue& result);
+    HostResult emptySelectorCollection(HostValue& result);
     HostResult validateDocumentReceiver(const HostObjectReference* receiver);
     HostResult textContentForElement(std::uint64_t serial,
         std::string& result) const;

@@ -3898,6 +3898,44 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js41AfterSelf, 1000) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js42FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js42.html";
+    const bool js42Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js42FixtureUrl);
+    const std::string js42InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS42 hosted fixture loads bounded tag/class retrieval",
+        js42Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js42FixtureUrl &&
+        contains(js42InitialText, "Navigator JavaScript JS42") &&
+        contains(js42InitialText,
+            "initial:tags=true:classes=true:scope=true:identity=true:structural=true:event=false:nested=false:metadata=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js42Loaded) + ",text=" +
+        summarizeText(js42InitialText, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js42ClickTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js42-trigger");
+    const std::string js42AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS42 hosted retrieval agrees with querySelectorAll identity and order",
+        js42ClickTrigger && contains(js42AfterClick,
+            "event:tags=true:classes=true:scope=true:identity=true:structural=true:event=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js42ClickTrigger) + ",text=" +
+        summarizeText(js42AfterClick, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS42 hosted scoped lookup excludes outside class matches",
+        js42ClickTrigger && contains(js42AfterClick,
+            ":scope=true:identity=true:structural=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "panel results are strict descendants and panel.contains accepts each");
+    add("JS42 hosted authentic nested click preserves event metadata",
+        js42ClickTrigger && contains(js42AfterClick,
+            ":event=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "real trigger click reaches retrieval listener and nested outside activation");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

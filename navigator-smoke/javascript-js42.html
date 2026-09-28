@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS42</title></head>
+<body>
+<h1>Navigator JavaScript JS42</h1>
+<div id="panel" class="panel">
+  <button id="save" class="action primary" type="button">Save</button>
+  <div id="content">
+    <input id="name" class="field" type="text" value="name-seed">
+    <input id="email" class="field urgent" type="text" value="email-seed">
+    <button id="cancel" class="action" type="button">Cancel</button>
+  </div>
+</div>
+<button id="outside" class="action" type="button">Outside</button>
+<button id="js42-trigger" type="button">Run retrieval proof</button>
+<p id="js42-state">initial</p>
+<script>
+var js42Panel = document.querySelector("#panel");
+var js42Save = document.querySelector("#save");
+var js42Outside = document.querySelector("#outside");
+var js42State = document.querySelector("#js42-state");
+var js42Event = false;
+var js42Nested = false;
+var js42NestedOutside = false;
+var js42EventMetadata = false;
+function js42Snapshot(label) {
+  var documentButtons = document.getElementsByTagName("button");
+  var scopedButtons = js42Panel.getElementsByTagName("button");
+  var documentActions = document.getElementsByClassName("action");
+  var scopedActions = js42Panel.getElementsByClassName("action");
+  var fields = js42Panel.getElementsByClassName("field");
+  var tagEquivalent = documentButtons.length ===
+      document.querySelectorAll("button").length &&
+    documentButtons[0] === document.querySelectorAll("button")[0] &&
+    scopedButtons.length === js42Panel.querySelectorAll("button").length &&
+    scopedButtons[0] === js42Panel.querySelectorAll("button")[0];
+  var classEquivalent = documentActions.length ===
+      document.querySelectorAll(".action").length &&
+    scopedActions.length === js42Panel.querySelectorAll(".action").length &&
+    scopedActions[0] === js42Panel.querySelectorAll(".action")[0];
+  var boundedScope = documentButtons.length === 4 && scopedButtons.length === 2 &&
+    documentActions.length === 3 && scopedActions.length === 2 && fields.length === 2 &&
+    scopedActions[2] === undefined && documentActions[2] === js42Outside;
+  var identityAndTokens = scopedButtons[0] === document.querySelector("#save") &&
+    scopedActions[0] === document.querySelector("#save") &&
+    document.getElementsByClassName("primary")[0] === js42Save &&
+    document.getElementsByClassName("act").length === 0 &&
+    document.getElementsByClassName("action primary").length === 0;
+  var structural = js42Panel.contains(scopedActions[0]) &&
+    scopedActions[0].parentElement === js42Panel &&
+    scopedActions[1].closest(".panel") === js42Panel &&
+    !js42Panel.contains(js42Outside);
+  js42State.textContent = label + ":tags=" + tagEquivalent +
+    ":classes=" + classEquivalent + ":scope=" + boundedScope +
+    ":identity=" + identityAndTokens + ":structural=" + structural +
+    ":event=" + js42Event + ":nested=" + js42Nested +
+    ":metadata=" + js42EventMetadata;
+}
+js42Panel.addEventListener("click", function(event) {
+  if (event.target === js42Save) {
+    var targetBefore = event.target;
+    var currentBefore = event.currentTarget;
+    var phaseBefore = event.eventPhase;
+    var relatedBefore = event.relatedTarget;
+    var defaultBefore = event.defaultPrevented;
+    var actions = js42Panel.getElementsByClassName("action");
+    var buttons = document.getElementsByTagName("button");
+    js42Event = actions.length === 2 && buttons.length === 4 &&
+      js42Panel.contains(event.target);
+    js42EventMetadata = event.target === targetBefore &&
+      event.currentTarget === currentBefore && event.currentTarget === js42Panel &&
+      event.eventPhase === phaseBefore && phaseBefore === 3 &&
+      event.relatedTarget === relatedBefore && relatedBefore === null &&
+      event.defaultPrevented === defaultBefore && defaultBefore === true;
+  }
+  js42Snapshot("event");
+});
+js42Save.addEventListener("click", function(event) {
+  var targetBefore = event.target;
+  var currentBefore = event.currentTarget;
+  var phaseBefore = event.eventPhase;
+  var relatedBefore = event.relatedTarget;
+  event.preventDefault();
+  js42Outside.click();
+  js42Nested = event.target === targetBefore &&
+    event.currentTarget === currentBefore && currentBefore === js42Save &&
+    event.eventPhase === phaseBefore && phaseBefore === 2 &&
+    event.relatedTarget === relatedBefore && relatedBefore === null &&
+    event.defaultPrevented === true &&
+    js42Panel.getElementsByTagName("button").length === 2 &&
+    js42NestedOutside;
+});
+document.addEventListener("click", function(event) {
+  if (event.target === js42Outside)
+    js42NestedOutside = !js42Panel.contains(event.target) &&
+      document.getElementsByClassName("action").length === 3;
+});
+document.querySelector("#js42-trigger").addEventListener("click", function() {
+  js42Save.click();
+});
+js42Snapshot("initial");
+</script>
+</body>
+</html>

@@ -290,6 +290,31 @@ bool parseBoundedSelector(SourceView source,
             selector.rightSimple);
 }
 
+bool makeRetrievalSelector(SourceView argument, bool classSelector,
+    NavigatorScriptSelectorDescriptor& selector)
+{
+    selector = NavigatorScriptSelectorDescriptor();
+    if (argument.data == nullptr || argument.length == 0u ||
+        argument.length > kNavigatorScriptMaxSelectorLength) return false;
+
+    if (!classSelector) {
+        if (!isSelectorTagName(argument, 0u, argument.length)) return false;
+        selector.rightSimple.kind = NavigatorScriptSelectorKind::Tag;
+        return copySelectorPart(selector, argument, 0u, argument.length,
+            selector.rightSimple.tagOffset,
+            selector.rightSimple.tagLength);
+    }
+
+    // Match the complete simple-selector limit: a class token occupies the
+    // same bounded descriptor storage as the token after its '.' marker.
+    if (argument.length + 1u > kNavigatorScriptMaxSelectorLength ||
+        !isSelectorIdentifier(argument, 0u, argument.length)) return false;
+    selector.rightSimple.kind = NavigatorScriptSelectorKind::Class;
+    return copySelectorPart(selector, argument, 0u, argument.length,
+        selector.rightSimple.classOffset,
+        selector.rightSimple.classLength);
+}
+
 SourceView selectorPart(const NavigatorScriptSelectorDescriptor& storage,
     std::uint16_t offset, std::uint16_t length)
 {
@@ -405,7 +430,9 @@ bool NavigatorScriptHostAdapter::allowsReentrantCall(
         methodId == kNavigatorQuerySelectorAllMethod ||
         methodId == kNavigatorMatchesMethod ||
         methodId == kNavigatorClosestMethod ||
-        methodId == kNavigatorContainsMethod;
+        methodId == kNavigatorContainsMethod ||
+        methodId == kNavigatorGetElementsByTagNameMethod ||
+        methodId == kNavigatorGetElementsByClassNameMethod;
 }
 
 bool NavigatorScriptHostAdapter::allowsStaleHostProperty(
@@ -415,6 +442,8 @@ bool NavigatorScriptHostAdapter::allowsStaleHostProperty(
         (textEquals(property, "matches") ||
             textEquals(property, "closest") ||
             textEquals(property, "contains") ||
+            textEquals(property, "getElementsByTagName") ||
+            textEquals(property, "getElementsByClassName") ||
             textEquals(property, "parentElement") ||
             textEquals(property, "children") ||
             textEquals(property, "childElementCount") ||
@@ -429,13 +458,17 @@ bool NavigatorScriptHostAdapter::allowsStaleHostMethod(
 {
     return methodId == kNavigatorMatchesMethod ||
         methodId == kNavigatorClosestMethod ||
-        methodId == kNavigatorContainsMethod;
+        methodId == kNavigatorContainsMethod ||
+        methodId == kNavigatorGetElementsByTagNameMethod ||
+        methodId == kNavigatorGetElementsByClassNameMethod;
 }
 
 bool NavigatorScriptHostAdapter::allowsStaleHostMethodArgument(
     std::uint32_t methodId) const
 {
-    return methodId == kNavigatorContainsMethod;
+    return methodId == kNavigatorContainsMethod ||
+        methodId == kNavigatorGetElementsByTagNameMethod ||
+        methodId == kNavigatorGetElementsByClassNameMethod;
 }
 
 std::size_t NavigatorScriptHostAdapter::callbackLimit() const
@@ -2547,6 +2580,40 @@ HostResult NavigatorScriptHostAdapter::querySelectorAll(HostInstanceId scopeSeri
     return HostResult();
 }
 
+HostResult NavigatorScriptHostAdapter::emptySelectorCollection(
+    HostValue& result)
+{
+    const NavigatorScriptSelectorDescriptor selector;
+    HostInstanceId token = 0u;
+    if (!getOrCreateSelectorCollection(0u, selector, token))
+        return HostResult{HostResultCode::DocumentLookupLimitExceeded};
+    result = HostValue::fromHostObject(HostObjectReference{
+        token, generation_, kNavigatorSelectorCollectionHostKind});
+    return HostResult();
+}
+
+HostResult NavigatorScriptHostAdapter::getElementsBySimpleSelector(
+    HostInstanceId scopeSerial, const HostValue* arguments,
+    std::size_t argumentCount, bool classSelector, HostValue& result)
+{
+    NavigatorScriptSelectorDescriptor selector;
+    const bool parsed = arguments != nullptr && argumentCount == 1u &&
+        arguments[0].type == HostValueType::String &&
+        makeRetrievalSelector(arguments[0].stringValue, classSelector, selector);
+    if (!parsed) selector = NavigatorScriptSelectorDescriptor();
+    else if (document_ != nullptr && document_->structuralElements.size() >
+            limits_.maxDocumentNodes) {
+        return HostResult{HostResultCode::DocumentLookupLimitExceeded};
+    }
+
+    HostInstanceId token = 0u;
+    if (!getOrCreateSelectorCollection(scopeSerial, selector, token))
+        return HostResult{HostResultCode::DocumentLookupLimitExceeded};
+    result = HostValue::fromHostObject(HostObjectReference{
+        token, generation_, kNavigatorSelectorCollectionHostKind});
+    return HostResult();
+}
+
 HostResult NavigatorScriptHostAdapter::validate(
     const HostObjectReference& object)
 {
@@ -2597,10 +2664,16 @@ HostResult NavigatorScriptHostAdapter::getProperty(
         object.generation != generation_ &&
         (textEquals(property, "matches") ||
             textEquals(property, "closest") ||
-            textEquals(property, "contains"))) {
+            textEquals(property, "contains") ||
+            textEquals(property, "getElementsByTagName") ||
+            textEquals(property, "getElementsByClassName"))) {
         const std::uint32_t methodId = textEquals(property, "matches")
             ? kNavigatorMatchesMethod : textEquals(property, "closest")
-                ? kNavigatorClosestMethod : kNavigatorContainsMethod;
+                ? kNavigatorClosestMethod : textEquals(property, "contains")
+                    ? kNavigatorContainsMethod
+                    : textEquals(property, "getElementsByTagName")
+                        ? kNavigatorGetElementsByTagNameMethod
+                        : kNavigatorGetElementsByClassNameMethod;
         result = HostValue::method(methodId, true, true);
         return HostResult();
     }
@@ -2635,6 +2708,16 @@ HostResult NavigatorScriptHostAdapter::getProperty(
         }
         if (textEquals(property, "querySelectorAll")) {
             result = HostValue::method(kNavigatorQuerySelectorAllMethod, true);
+            return HostResult();
+        }
+        if (textEquals(property, "getElementsByTagName")) {
+            result = HostValue::method(kNavigatorGetElementsByTagNameMethod,
+                true);
+            return HostResult();
+        }
+        if (textEquals(property, "getElementsByClassName")) {
+            result = HostValue::method(kNavigatorGetElementsByClassNameMethod,
+                true);
             return HostResult();
         }
         if (textEquals(property, "activeElement")) {
@@ -2853,6 +2936,16 @@ HostResult NavigatorScriptHostAdapter::getProperty(
     }
     if (textEquals(property, "querySelectorAll")) {
         result = HostValue::method(kNavigatorQuerySelectorAllMethod, true, true);
+        return HostResult();
+    }
+    if (textEquals(property, "getElementsByTagName")) {
+        result = HostValue::method(kNavigatorGetElementsByTagNameMethod,
+            true, true);
+        return HostResult();
+    }
+    if (textEquals(property, "getElementsByClassName")) {
+        result = HostValue::method(kNavigatorGetElementsByClassNameMethod,
+            true, true);
         return HostResult();
     }
     if (textEquals(property, "matches")) {
@@ -3494,10 +3587,15 @@ HostResult NavigatorScriptHostAdapter::callInternal(
     if (receiver == nullptr) return HostResult{HostResultCode::InvalidObject};
     if ((methodId == kNavigatorMatchesMethod ||
             methodId == kNavigatorClosestMethod ||
-            methodId == kNavigatorContainsMethod) &&
+            methodId == kNavigatorContainsMethod ||
+            methodId == kNavigatorGetElementsByTagNameMethod ||
+            methodId == kNavigatorGetElementsByClassNameMethod) &&
         receiver->kind == kNavigatorElementHostKind &&
         (receiver->generation != generation_ ||
             findElement(receiver->instanceId) == nullptr)) {
+        if (methodId == kNavigatorGetElementsByTagNameMethod ||
+            methodId == kNavigatorGetElementsByClassNameMethod)
+            return emptySelectorCollection(result);
         result = methodId == kNavigatorClosestMethod
             ? HostValue::nullValue() : HostValue::boolean(false);
         return HostResult();
@@ -3514,6 +3612,17 @@ HostResult NavigatorScriptHostAdapter::callInternal(
         return methodId == kNavigatorQuerySelectorMethod
             ? querySelector(scopeSerial, arguments, argumentCount, result)
             : querySelectorAll(scopeSerial, arguments, argumentCount, result);
+    }
+    if (methodId == kNavigatorGetElementsByTagNameMethod ||
+        methodId == kNavigatorGetElementsByClassNameMethod) {
+        if (receiver->kind != kNavigatorDocumentHostKind &&
+            receiver->kind != kNavigatorElementHostKind)
+            return HostResult{HostResultCode::InvalidValue};
+        const HostInstanceId scopeSerial = receiver->kind ==
+            kNavigatorDocumentHostKind ? 0u : receiver->instanceId;
+        return getElementsBySimpleSelector(scopeSerial, arguments,
+            argumentCount,
+            methodId == kNavigatorGetElementsByClassNameMethod, result);
     }
     if (methodId == kNavigatorContainsMethod) {
         if (receiver->kind != kNavigatorElementHostKind)

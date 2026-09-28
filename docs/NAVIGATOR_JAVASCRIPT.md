@@ -4173,3 +4173,149 @@ JS41 source change.
 The next bounded direction is JS42: add document/element tag and single-token
 class retrieval only if it remains a thin view over the JS36 matcher and
 generation-safe selector collection machinery.
+
+## JS42: bounded tag and class retrieval collections
+
+JS42 exposes the familiar document- and Element-scoped entry points:
+
+```javascript
+document.getElementsByTagName("button");
+panel.getElementsByTagName("button");
+document.getElementsByClassName("action");
+panel.getElementsByClassName("action");
+```
+
+These methods are projections over the existing JS36 simple-selector matcher
+and selector-collection host. A method validates its one bounded string
+argument, constructs a native `Tag` or `Class` simple-selector descriptor, and
+passes that descriptor plus the document/Element scope to the existing
+`getOrCreateSelectorCollection()` path. It does not serialize an argument into
+CSS source, invoke a second parser, keep copied results, add a JS-owned DOM
+registry, or create another walker. `querySelectorAll("button")` and
+`getElementsByTagName("button")` use equal descriptors and the same scope,
+therefore they reuse the same collection record and return equal canonical
+Element handles in the same order. The corresponding property holds for
+`".action"` and the one-token class retrieval method.
+
+The matcher scans `WebDocument::structuralElements` in its existing structural
+document order. A document receiver includes the full represented structural
+document. An Element receiver admits strict descendants only: the receiver is
+excluded, and a matching element outside its subtree cannot leak into the
+result. The established selector-scope parent resolver and matcher remain the
+authority. Form ownership, layout/render order, text records, and synthetic
+form collection entries are not retrieval scope.
+
+Tag arguments are individual tag-name tokens using the JS36 supported ASCII
+tag-name shape (`A-Z`/`a-z` first, then letters, digits, `-`, or `_`), with a
+maximum of 256 bytes. No outer whitespace is trimmed. Empty, malformed,
+selector-like (`"input.field"` or `"#save"`), whitespace-containing, missing,
+non-String, or oversized arguments produce an empty selector collection;
+unknown but syntactically valid names also naturally have no matches. Tag
+comparison is the existing ASCII case-insensitive matcher, so `"INPUT"` and
+`"input"` select the same structural Elements. The browser-style universal
+`"*"` audit found that the JS36 matcher intentionally treats universal
+selectors as invalid and has no dedicated universal-element predicate; wildcard
+lookup is **deferred** and currently returns an empty collection.
+
+Class arguments deliberately support exactly one JS36 class identifier token
+(`[A-Z]`, `[a-z]`, digits, `-`, or `_`); the `.` selector marker plus token
+must fit the existing 256-byte simple-selector input bound, so the token is at
+most 255 bytes. No trimming or multi-class interpretation occurs. Matching is
+the JS36 exact, case-sensitive, ASCII-whitespace-delimited token comparison:
+an element with `class="action primary"` matches `"action"` and `"primary"`,
+but not `"act"` or `"Action"`. Empty, missing, non-String, whitespace,
+multi-token (for example `"action primary"`), malformed, and oversized
+arguments return an empty collection. Full browser multi-class AND behavior
+is deliberately deferred.
+
+The returned value is the existing selector-collection HostObject, retaining
+only its bounded descriptor and scope serial. `length` and canonical numeric
+indices are read-only; an indexed miss is `undefined`. There is no new
+`HTMLCollection` type, `item()`, `namedItem()`, named lookup, iterator, or
+general collection API expansion. Collection records are live-on-read within
+their document generation: each `length`/index access scans current
+authoritative structural storage under the existing `maxDocumentNodes` bound
+(1024 by default). The fixed selector collection registry remains capped at
+128 descriptors; repeated equivalent selector/scope pairs share their record,
+and a new unique descriptor at capacity follows the existing
+`DocumentLookupLimitExceeded` failure behavior. There is no separate 128-result
+array or copied result buffer.
+
+Element identity remains `(host generation, structural serial)`. Results
+therefore compare identical to `getElementById()`, `querySelector()`,
+`querySelectorAll()`, `form.elements`, `document.forms`, `select.options`,
+`children`, and Event Element handles when those paths identify the same
+structural Element. For the same selector and scope, retrieval and
+`querySelectorAll()` equality proves count, structural order, and identity.
+Scoped results are strict descendants, so `scope.contains(results[i])` is true;
+their `parentElement`, `closest()`, sibling traversal, and `contains()` remain
+the ordinary Element surfaces.
+
+The distinction from form ownership is retained: `form.elements` follows
+`parentFormSerial`, while `form.getElementsByTagName()` follows structural
+`parentSerial`. The structural table can represent a form-owned control outside
+the form subtree, and focused coverage assigns that metadata to prove the two
+collections differ. Select option retrieval does not have a special path:
+where options are structural children,
+`select.getElementsByTagName("option")[0] === select.options[0]`.
+
+Generation changes clear the selector record table. Old document- and
+Element-scoped collections fail with the existing stale-host-object behavior;
+old returned Elements remain stale even if a new document reuses their serial.
+Calling either retrieval method through a stale Element receiver fails closed
+with a current-generation empty selector collection and never resolves the old
+scope serial into the new document. The method calls are reentrant along the
+same guarded host-call path as selector lookups, so lookups in event callbacks
+and nested clicks retain target/currentTarget/phase/relatedTarget/default
+cancellation state. The operations do not change focus, controls/defaults,
+layout state, structural metadata, document generation, listener registry, or
+event dispatch state.
+
+The focused proof is `tests/navigator_javascript_js42_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js42.ps1`. It covers both receiver kinds,
+document/scoped ordering and `querySelectorAll()` equivalence, canonical
+identity, exact class tokens, strict descendant scope, invalid/bounded
+arguments, wildcard and multi-token deferral, shared collection slots,
+read-only/index-miss behavior, access-time matching, generation invalidation
+and serial reuse, form ownership versus structure, select/options identity,
+traversal/containment, authentic and nested event callbacks, metadata, purity,
+and earlier selector/form/event regressions. The hosted proof is
+`navigator-smoke/javascript-js42.html`, included in the normal production
+hosted aggregate; it checks the document and scoped counts, query equivalence,
+outside-scope exclusion, exact class-token behavior, canonical identity,
+`contains()`/traversal, and retrieval inside an authentic nested click path.
+
+JS42 does not claim complete browser `HTMLCollection` or legacy DOM retrieval
+compatibility. It does not add wildcard lookup, multi-token class matching,
+named lookup, new selector grammar, DOM mutation, or async/browser APIs.
+Validation results, including the complete JavaScript and hosted aggregate
+counts, production and strict builds, kernel wrapper/direct-lane state, and
+QEMU proof status, are recorded in the JS42 completion summary below.
+
+### JS42 completion summary
+
+JS42 reached **Outcome A**. The focused suite passes 229/229 checks. Focused
+JS36–JS41 regressions pass 99/99, 180/180, 152/152, 218/218, 155/155, and
+220/220, respectively. The complete JavaScript matrix passes **40/40 lanes**
+(lexer, parser, runtime, and JS6–JS42).
+
+The final hosted aggregate run reports **518 passed / 7 failed**. All four
+hosted JS42 checks pass. The seven failures remain the existing unrelated CSS
+3C, CSS 3G, CSS 6A, CSS 6B (three checks), and CSS 6C cases. One earlier
+aggregate attempt also failed two JS15 link-navigation checks; those checks
+passed on immediate rerun, and both later complete aggregate runs report the
+expected 518/7 result.
+
+`build.bat`, the focused `-DGXOS_BARE_METAL` JS42 executable, and the strict
+warning-as-error adapter/runtime syntax lane pass. `pwsh.exe` is unavailable;
+`build-kernel.bat` consequently exits 9009 before starting PowerShell Core. The
+established direct lane, `mingw32-make ARCH=amd64 EXTRA_CFLAGS=` from `kernel/`,
+reaches the Mbed TLS compile and stops at the existing
+`mbedtls_check_config.h:51` unsupported partial ECC acceleration and `:64`
+missing ECDHE-RSA prerequisites diagnostics. No TLS files were changed. No
+fresh kernel image was produced, so QEMU proof is not claimed.
+
+`git diff --check` passes. `ESP/ramdisk.img`, `out/wallpaper-pack/`, and
+`out/wallpaper-pack/Apps/PacMan/` are unchanged. JS42 does not claim wildcard
+tag retrieval, multi-token class lookup, or complete browser `HTMLCollection`
+semantics.
