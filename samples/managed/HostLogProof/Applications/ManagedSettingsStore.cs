@@ -75,15 +75,22 @@ internal sealed class ManagedSettingsStore
 {
     public const int MaximumFileBytes = 64;
     public const int HeaderBytes = 12;
-    public const int PayloadBytes = 9;
+    public const int Version1PayloadBytes = 9;
+    public const int Version1EncodedFileBytes = HeaderBytes + Version1PayloadBytes + 4;
+    public const int PayloadBytes = 10;
     public const int ChecksumBytes = 4;
     public const int EncodedFileBytes = HeaderBytes + PayloadBytes + ChecksumBytes;
-    public const ushort FormatVersion = 1;
+    public const ushort FormatVersion = 2;
+    public const ushort LegacyFormatVersion = 1;
+    public const int DefaultScrollLinesPerNotch = 3;
+    public const int MinimumScrollLinesPerNotch = 1;
+    public const int MaximumScrollLinesPerNotch = 8;
 
     private const uint Magic0 = (uint)'G';
     private const uint Magic1 = (uint)'X';
     private const uint Magic2 = (uint)'S';
     private const uint Magic3 = (uint)'C';
+    public const int Version1ChecksumOffset = HeaderBytes + Version1PayloadBytes;
     private const int ChecksumOffset = HeaderBytes + PayloadBytes;
 
     private readonly ManagedSettingsFileAccessBase _files;
@@ -173,9 +180,18 @@ internal sealed class ManagedSettingsStore
 
             GuideXosFileResult readResult = _files.ReadAllBytes(out byte[] readBack);
             if (readResult != GuideXosFileResult.Success || readBack == null ||
-                readBack.Length != encodedLength ||
-                !TryDeserialize(readBack, out ManagedSettingsSnapshot actual,
-                    out _) || !actual.Equals(candidate))
+                readBack.Length != encodedLength)
+            {
+                return ManagedSettingsSaveStatus.ReadBackMismatch;
+            }
+
+            if (!TryDeserialize(readBack, out ManagedSettingsSnapshot actual,
+                    out _))
+            {
+                return ManagedSettingsSaveStatus.ReadBackMismatch;
+            }
+
+            if (!actual.Equals(candidate))
             {
                 return ManagedSettingsSaveStatus.ReadBackMismatch;
             }
@@ -202,7 +218,7 @@ internal sealed class ManagedSettingsStore
         destination[3] = (byte)Magic3;
         WriteUInt16(destination, 4, FormatVersion);
         WriteUInt16(destination, 6, PayloadBytes);
-        WriteUInt32(destination, 8, 0u); // Reserved flags must stay zero in v1.
+        WriteUInt32(destination, 8, 0u); // Header flags remain zero in v1 and v2.
 
         int offset = HeaderBytes;
         destination[offset++] = (byte)snapshot.Density;
@@ -213,7 +229,8 @@ internal sealed class ManagedSettingsStore
         destination[offset++] = (byte)snapshot.ScrollSpeed;
         destination[offset++] = snapshot.ShowKeyboardTips ? (byte)1 : (byte)0;
         destination[offset++] = (byte)snapshot.StatusDetail;
-        destination[offset] = (byte)snapshot.ReportFormat;
+        destination[offset++] = (byte)snapshot.ReportFormat;
+        destination[offset] = (byte)snapshot.ScrollLinesPerNotch;
 
         WriteUInt32(destination, ChecksumOffset,
             ComputeCrc32(destination[..ChecksumOffset]));
@@ -227,19 +244,25 @@ internal sealed class ManagedSettingsStore
         snapshot = default;
         error = source.Length < HeaderBytes
             ? ManagedSettingsFileError.Header : ManagedSettingsFileError.Length;
-        if (source.Length != EncodedFileBytes) return false;
+        if (source.Length < HeaderBytes) return false;
         if (source[0] != (byte)Magic0 || source[1] != (byte)Magic1 ||
             source[2] != (byte)Magic2 || source[3] != (byte)Magic3)
         {
             error = ManagedSettingsFileError.Magic;
             return false;
         }
-        if (ReadUInt16(source, 4) != FormatVersion)
+        ushort version = ReadUInt16(source, 4);
+        if (version != LegacyFormatVersion && version != FormatVersion)
         {
             error = ManagedSettingsFileError.Version;
             return false;
         }
-        if (ReadUInt16(source, 6) != PayloadBytes)
+
+        int payloadBytes = version == LegacyFormatVersion
+            ? Version1PayloadBytes : PayloadBytes;
+        int encodedBytes = HeaderBytes + payloadBytes + ChecksumBytes;
+        int checksumOffset = HeaderBytes + payloadBytes;
+        if (source.Length != encodedBytes || ReadUInt16(source, 6) != payloadBytes)
         {
             error = ManagedSettingsFileError.Length;
             return false;
@@ -249,13 +272,39 @@ internal sealed class ManagedSettingsStore
             error = ManagedSettingsFileError.Flags;
             return false;
         }
-        if (ReadUInt32(source, ChecksumOffset) !=
-            ComputeCrc32(source[..ChecksumOffset]))
+        if (ReadUInt32(source, checksumOffset) !=
+            ComputeCrc32(source[..checksumOffset]))
         {
             error = ManagedSettingsFileError.Checksum;
             return false;
         }
 
+        if (!TryReadVersion1Fields(source, out snapshot, out error)) return false;
+        if (version == LegacyFormatVersion)
+        {
+            snapshot.ScrollLinesPerNotch = DefaultScrollLinesPerNotch;
+            error = ManagedSettingsFileError.None;
+            return true;
+        }
+
+        int offset = HeaderBytes + Version1PayloadBytes;
+        byte scrollLinesPerNotch = source[offset];
+        if (scrollLinesPerNotch < MinimumScrollLinesPerNotch ||
+            scrollLinesPerNotch > MaximumScrollLinesPerNotch)
+        {
+            snapshot = default;
+            error = ManagedSettingsFileError.Enum;
+            return false;
+        }
+        snapshot.ScrollLinesPerNotch = scrollLinesPerNotch;
+        error = ManagedSettingsFileError.None;
+        return true;
+    }
+
+    private static bool TryReadVersion1Fields(ReadOnlySpan<byte> source,
+        out ManagedSettingsSnapshot snapshot, out ManagedSettingsFileError error)
+    {
+        snapshot = default;
         int offset = HeaderBytes;
         byte density = source[offset++];
         if (density > 1)
@@ -297,6 +346,7 @@ internal sealed class ManagedSettingsStore
             ShowAdvanced = showAdvanced,
             InputEnabled = inputEnabled,
             NaturalScroll = naturalScroll,
+            ScrollLinesPerNotch = DefaultScrollLinesPerNotch,
             ScrollSpeed = scrollSpeed,
             ShowKeyboardTips = showKeyboardTips,
             StatusDetail = statusDetail,
@@ -308,6 +358,8 @@ internal sealed class ManagedSettingsStore
 
     public static bool IsValid(ManagedSettingsSnapshot snapshot) =>
         snapshot.Density is >= 0 and <= 1 &&
+        snapshot.ScrollLinesPerNotch is >= MinimumScrollLinesPerNotch and
+            <= MaximumScrollLinesPerNotch &&
         snapshot.ScrollSpeed is >= 0 and <= 2 &&
         snapshot.StatusDetail is >= 0 and <= 1 &&
         snapshot.ReportFormat is >= 0 and <= 1;
@@ -362,6 +414,7 @@ internal sealed class ManagedSettingsStore
         destination[offset + 2] = (byte)(value >> 16);
         destination[offset + 3] = (byte)(value >> 24);
     }
+
 }
 
 internal sealed class ManagedSettingsVfsAccess : ManagedSettingsFileAccessBase

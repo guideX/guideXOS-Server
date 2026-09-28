@@ -383,12 +383,21 @@ public sealed class GuideXosScrollView
     public GuideXosScrollBar BoundScrollBar => _boundScrollBar;
 
     public GuideXosScrollViewResult HandleWheel(int x, int y, int wheelDelta)
+        => HandleWheel(x, y, wheelDelta, 3);
+
+    public GuideXosScrollViewResult HandleWheel(int x, int y, int wheelDelta,
+        int scrollUnitsPerNotch)
     {
+        if (scrollUnitsPerNotch is < 1 or > 8)
+            return GuideXosScrollViewResult.Rejected;
         if (!_visible || !_enabled || wheelDelta == 0 ||
             x < InnerX || x >= InnerX + InnerWidth ||
             y < InnerY || y >= InnerY + InnerHeight)
             return GuideXosScrollViewResult.Ignored;
-        return _viewport.ScrollSmall(-wheelDelta * 3)
+        int boundedDelta = wheelDelta;
+        if (boundedDelta > 8) boundedDelta = 8;
+        if (boundedDelta < -8) boundedDelta = -8;
+        return _viewport.ScrollSmall(-boundedDelta * scrollUnitsPerNotch)
             ? GuideXosScrollViewResult.Scrolled : GuideXosScrollViewResult.Ignored;
     }
 

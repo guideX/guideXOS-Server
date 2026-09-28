@@ -185,10 +185,16 @@ public sealed class GuideXosListBox
     }
 
     /// <summary>Moves only the bounded viewport; selection is unchanged.</summary>
-    public GuideXosListBoxResult HandleWheel(int wheelDelta)
+    public GuideXosListBoxResult HandleWheel(int wheelDelta) =>
+        HandleWheel(wheelDelta, 3);
+
+    /// <summary>Applies one bounded logical movement per normalized notch.</summary>
+    public GuideXosListBoxResult HandleWheel(int wheelDelta,
+        int linesPerNotch)
     {
         if (!_isVisible) return GuideXosListBoxResult.Ignored;
         if (!_isEnabled) return GuideXosListBoxResult.Rejected;
+        if (linesPerNotch is < 1 or > 8) return GuideXosListBoxResult.Rejected;
         if (wheelDelta == 0 || _itemCount <= _visibleRowCount)
         {
             return GuideXosListBoxResult.Ignored;
@@ -197,7 +203,7 @@ public sealed class GuideXosListBox
         int boundedDelta = wheelDelta;
         if (boundedDelta > 8) boundedDelta = 8;
         if (boundedDelta < -8) boundedDelta = -8;
-        bool changed = _viewport.ScrollSmall(-boundedDelta * 3);
+        bool changed = _viewport.ScrollSmall(-boundedDelta * linesPerNotch);
         return !changed
             ? GuideXosListBoxResult.Ignored
             : GuideXosListBoxResult.Scrolled;

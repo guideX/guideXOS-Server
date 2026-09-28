@@ -31,6 +31,7 @@ public static class ManagedSettingsStoreC146Tests
             ShowAdvanced = true,
             InputEnabled = false,
             NaturalScroll = true,
+            ScrollLinesPerNotch = 5,
             ScrollSpeed = 2,
             ShowKeyboardTips = false,
             StatusDetail = 1,
@@ -50,13 +51,14 @@ public static class ManagedSettingsStoreC146Tests
         result &= Case(ref formatCases, RejectWithMutation(valid,
             ManagedSettingsFileError.Magic, 0, (byte)'X'));
         result &= Case(ref formatCases, RejectWithMutation(valid,
-            ManagedSettingsFileError.Version, 4, 2));
+            ManagedSettingsFileError.Version, 4, 3, recomputeChecksum: true));
         result &= Case(ref formatCases, Reject(ManagedSettingsFileError.Header,
             valid[..8]));
         result &= Case(ref formatCases, Reject(ManagedSettingsFileError.Length,
             valid[..(valid.Length - 1)]));
 
         Span<byte> oversized = stackalloc byte[ManagedSettingsStore.MaximumFileBytes + 1];
+        valid.CopyTo(oversized);
         result &= Case(ref formatCases, Reject(ManagedSettingsFileError.Length, oversized));
         result &= Case(ref formatCases, RejectWithMutation(valid,
             ManagedSettingsFileError.Boolean, 13, 2, recomputeChecksum: true));
@@ -196,6 +198,7 @@ public static class ManagedSettingsStoreC146Tests
         ShowAdvanced = (index & 2) != 0,
         InputEnabled = (index & 4) == 0,
         NaturalScroll = (index & 8) != 0,
+        ScrollLinesPerNotch = 1 + index % 8,
         ScrollSpeed = index % 3,
         ShowKeyboardTips = (index & 16) == 0,
         StatusDetail = (index >> 1) & 1,

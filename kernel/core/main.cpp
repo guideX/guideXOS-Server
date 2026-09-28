@@ -5461,6 +5461,15 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts(" runtime-effect-before-settings-center=");
         kernel::serial::puts(notesTarget ? "PASS result=PASS\n" : "FAIL result=FAIL\n");
 
+#if defined(GXOS_NATIVEAOT_C148_NOTES_ONLY)
+        // A C148 verification reboot ends after the real Notes ListBox has
+        // consumed the physical wheel events. This proves startup settings
+        // before Settings Center is even dispatched.
+        kernel::serial::puts("[C148-NOTES-ONLY] settings-center=not-launched result=");
+        kernel::serial::puts(notesTarget ? "PASS\n" : "FAIL\n");
+        return;
+#endif
+
         const bool settingsLaunch = notesTarget &&
             kernel::desktop::launch_app_with_context(
                 settingsCenter->appId, "c147-native");

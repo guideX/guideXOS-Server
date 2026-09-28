@@ -583,7 +583,7 @@ public sealed class GuideXosControlHost
         int lineHeight = 18)
     {
         return HandleWheelCore(id, x, y, wheelDelta, originX, originY,
-            characterWidth, lineHeight, applyRuntimePolicy: true);
+            characterWidth, lineHeight, 3, applyRuntimePolicy: true);
     }
 
     private GuideXosControlHostResult HandleWheelCore(
@@ -595,6 +595,7 @@ public sealed class GuideXosControlHost
         int originY,
         int characterWidth,
         int lineHeight,
+        int linesPerNotch,
         bool applyRuntimePolicy)
     {
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
@@ -602,13 +603,16 @@ public sealed class GuideXosControlHost
         {
             wheelDelta = Applications.GuideXosRuntimeSettings
                 .TransformWheelDelta(wheelDelta);
+            linesPerNotch = Applications.GuideXosRuntimeSettings
+                .Current.ScrollLinesPerNotch;
         }
 #endif
         if (_modalHost != null)
         {
             return _modalHost.HandleWheelCore(
                 id, x, y, wheelDelta, originX, originY,
-                characterWidth, lineHeight, applyRuntimePolicy: false);
+                characterWidth, lineHeight, linesPerNotch,
+                applyRuntimePolicy: false);
         }
         if (wheelDelta == 0) return GuideXosControlHostResult.Ignored;
         if (HasPointerDragCapture) return GuideXosControlHostResult.Ignored;
@@ -627,7 +631,7 @@ public sealed class GuideXosControlHost
                 : GuideXosControlHostResult.Rejected;
         }
         return RouteWheel(index, x, y, wheelDelta, originX, originY,
-            characterWidth, lineHeight);
+            characterWidth, lineHeight, linesPerNotch);
     }
 
     public GuideXosControlHostResult HandleKey(
@@ -1163,21 +1167,23 @@ public sealed class GuideXosControlHost
         int originX,
         int originY,
         int characterWidth,
-        int lineHeight)
+        int lineHeight,
+        int linesPerNotch)
     {
         return _entries[index].Kind switch
         {
             GuideXosManagedControlKind.TextArea => Map(
                 ((GuideXosTextArea)_entries[index].Control).HandleWheel(
-                    wheelDelta)),
+                    wheelDelta, linesPerNotch)),
             GuideXosManagedControlKind.ListBox => Map(
                 ((GuideXosListBox)_entries[index].Control).HandleWheel(
-                    wheelDelta)),
+                    wheelDelta, linesPerNotch)),
             GuideXosManagedControlKind.ScrollBar => Map(
                 ((GuideXosScrollBar)_entries[index].Control).HandleWheel(
-                    wheelDelta)),
+                    wheelDelta, linesPerNotch)),
             GuideXosManagedControlKind.ScrollView => Map(
-                ((GuideXosScrollView)_entries[index].Control).HandleWheel(x, y, wheelDelta)),
+                ((GuideXosScrollView)_entries[index].Control).HandleWheel(
+                    x, y, wheelDelta, linesPerNotch)),
             _ => GuideXosControlHostResult.Ignored,
         };
     }

@@ -5,11 +5,17 @@ namespace HostLogProof.Applications;
 /// <summary>The small immutable runtime view used by shared managed controls.</summary>
 internal readonly struct GuideXosRuntimeSettingsSnapshot
 {
-    public GuideXosRuntimeSettingsSnapshot(bool naturalScroll) =>
+    public GuideXosRuntimeSettingsSnapshot(bool naturalScroll,
+        int scrollLinesPerNotch)
+    {
         NaturalScroll = naturalScroll;
+        ScrollLinesPerNotch = scrollLinesPerNotch;
+    }
 
     public bool NaturalScroll { get; }
-    public static GuideXosRuntimeSettingsSnapshot Defaults => new(false);
+    public int ScrollLinesPerNotch { get; }
+    public static GuideXosRuntimeSettingsSnapshot Defaults =>
+        new(false, ManagedSettingsStore.DefaultScrollLinesPerNotch);
 }
 
 /// <summary>
@@ -29,7 +35,7 @@ internal sealed class GuideXosRuntimeSettingsState
         if (!ManagedSettingsStore.IsValid(candidate)) return false;
 
         GuideXosRuntimeSettingsSnapshot next =
-            new(candidate.NaturalScroll);
+            new(candidate.NaturalScroll, candidate.ScrollLinesPerNotch);
         _current = next;
         IsReady = true;
         return true;
@@ -167,6 +173,7 @@ internal static class GuideXosRuntimeSettings
         ManagedSettingsSnapshot candidate)
     {
         bool oldNatural = s_active.Current.NaturalScroll;
+        int oldAmount = s_active.Current.ScrollLinesPerNotch;
         s_startup.CommitPersisted(candidate);
         Span<byte> line = stackalloc byte[127];
         int position = 0;
@@ -181,10 +188,31 @@ internal static class GuideXosRuntimeSettings
         {
             host?.TryLog(line[..position]);
         }
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+        Span<byte> amountLine = stackalloc byte[96];
+        int amountPosition = 0;
+        if (GuideXosText.Append(amountLine, ref amountPosition,
+                "C148-RUNTIME-APPLY oldLines="u8) &&
+            GuideXosText.AppendUnsigned(amountLine, ref amountPosition,
+                (uint)oldAmount) &&
+            GuideXosText.Append(amountLine, ref amountPosition,
+                " newLines="u8) &&
+            GuideXosText.AppendUnsigned(amountLine, ref amountPosition,
+                (uint)candidate.ScrollLinesPerNotch) &&
+            GuideXosText.Append(amountLine, ref amountPosition,
+                " persistence=verified runtime=committed result=PASS"u8))
+        {
+            host?.TryLog(amountLine[..amountPosition]);
+        }
+#endif
     }
 
-    public static int TransformWheelDelta(int wheelDelta) =>
-        s_active.Current.NaturalScroll ? -wheelDelta : wheelDelta;
+    public static int TransformWheelDelta(int wheelDelta)
+    {
+        if (!s_active.Current.NaturalScroll) return wheelDelta;
+        // Saturate the single value whose negation is not representable.
+        return wheelDelta == int.MinValue ? int.MaxValue : -wheelDelta;
+    }
 
     private static void LogStartup(GuideXosHost host,
         ManagedSettingsLoadResult load,
@@ -210,6 +238,33 @@ internal static class GuideXosRuntimeSettings
         {
             host?.TryLog(line[..position]);
         }
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+        uint fileVersion = load.FileSize ==
+            ManagedSettingsStore.Version1EncodedFileBytes ? 1u :
+            load.FileSize == ManagedSettingsStore.EncodedFileBytes ? 2u : 0u;
+        Span<byte> amountLine = stackalloc byte[127];
+        int amountPosition = 0;
+        if (GuideXosText.Append(amountLine, ref amountPosition,
+                "C148-RUNTIME-SETTING source="u8) &&
+            GuideXosText.Append(amountLine, ref amountPosition, source) &&
+            GuideXosText.Append(amountLine, ref amountPosition,
+                " naturalScroll="u8) &&
+            GuideXosText.AppendUnsigned(amountLine, ref amountPosition,
+                runtime.NaturalScroll ? 1u : 0u) &&
+            GuideXosText.Append(amountLine, ref amountPosition,
+                " fileVersion="u8) &&
+            GuideXosText.AppendUnsigned(amountLine, ref amountPosition,
+                fileVersion) &&
+            GuideXosText.Append(amountLine, ref amountPosition,
+                " scrollLines="u8) &&
+            GuideXosText.AppendUnsigned(amountLine, ref amountPosition,
+                (uint)runtime.ScrollLinesPerNotch) &&
+            GuideXosText.Append(amountLine, ref amountPosition,
+                " ready=true before-application=true result=PASS"u8))
+        {
+            host?.TryLog(amountLine[..amountPosition]);
+        }
+#endif
     }
 
     private sealed class MissingSettingsFiles : ManagedSettingsFileAccessBase

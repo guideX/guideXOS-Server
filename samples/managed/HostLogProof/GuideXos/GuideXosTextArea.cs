@@ -151,18 +151,23 @@ public sealed class GuideXosTextArea
     /// <summary>
     /// Scrolls the logical line viewport without moving the caret. Positive
     /// wheel values move toward earlier lines; negative values move later.
-    /// One normalized wheel notch is three logical lines.
+    /// The one-argument overload retains C137's three-line behavior.
     /// </summary>
-    public GuideXosTextAreaEditResult HandleWheel(int wheelDelta)
+    public GuideXosTextAreaEditResult HandleWheel(int wheelDelta) =>
+        HandleWheel(wheelDelta, 3);
+
+    public GuideXosTextAreaEditResult HandleWheel(int wheelDelta,
+        int linesPerNotch)
     {
         if (!_isVisible) return GuideXosTextAreaEditResult.Ignored;
         if (!_isEnabled) return GuideXosTextAreaEditResult.Rejected;
+        if (linesPerNotch is < 1 or > 8) return GuideXosTextAreaEditResult.Rejected;
         if (wheelDelta == 0) return GuideXosTextAreaEditResult.Ignored;
 
         int boundedDelta = wheelDelta;
         if (boundedDelta > 8) boundedDelta = 8;
         if (boundedDelta < -8) boundedDelta = -8;
-        bool changed = _viewport.ScrollSmall(-boundedDelta * 3);
+        bool changed = _viewport.ScrollSmall(-boundedDelta * linesPerNotch);
         return !changed
             ? GuideXosTextAreaEditResult.Ignored
             : GuideXosTextAreaEditResult.Scrolled;

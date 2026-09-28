@@ -16,10 +16,16 @@ public static class GuideXosSettingsCenterC146Tests
         app.StatusCheckBox.SetChecked(false);
         app.NaturalWheel.SetChecked(true);
         app.DensityCombo.TrySetSelectedIndex(1);
+        app.ScrollLinesCombo.TrySetSelectedIndex(4);
         app.AdvancedCheckBox.SetChecked(true);
         ManagedSettingsSnapshot edited = app.Working;
         result &= Case(ref cases, app.IsDirty && edited.ShowStatus == false &&
             edited.NaturalScroll && edited.Density == 1 && edited.ShowAdvanced &&
+            edited.ScrollLinesPerNotch == 5 &&
+            app.ScrollLinesCombo.SelectedIndex == 4 &&
+            app.Applied.ScrollLinesPerNotch == 3 &&
+            app.Persisted.ScrollLinesPerNotch == 3 &&
+            GuideXosRuntimeSettings.Current.ScrollLinesPerNotch == 3 &&
             app.Applied.Equals(defaults) && app.Persisted.Equals(defaults));
 
         ManagedSettingsSnapshot appliedBeforeReset = app.Applied;
@@ -28,11 +34,14 @@ public static class GuideXosSettingsCenterC146Tests
             app.ActiveDialog.HandleInput(GuideXosInputEvent.ForKeyDown(
                 GuideXosTextInputKey.Enter)) == GuideXosControlHostResult.Activated;
         result &= Case(ref cases, reset && app.Working.Equals(defaults) &&
+            app.ScrollLinesCombo.SelectedIndex == 2 &&
+            GuideXosRuntimeSettings.Current.ScrollLinesPerNotch == 3 &&
             app.Applied.Equals(appliedBeforeReset) &&
             app.Persisted.Equals(persistedBeforeReset) &&
             app.IsDirty == !defaults.Equals(appliedBeforeReset));
 
         app.StatusCheckBox.SetChecked(false);
+        app.ScrollLinesCombo.TrySetSelectedIndex(4);
         ManagedSettingsSnapshot closeWorking = app.Working;
         ManagedSettingsSnapshot closeApplied = app.Applied;
         ManagedSettingsSnapshot closePersisted = app.Persisted;
@@ -53,6 +62,7 @@ public static class GuideXosSettingsCenterC146Tests
             app.IsDirty && !app.ControlHost.IsModalActive);
 
         app.StatusCheckBox.SetChecked(false);
+        app.ScrollLinesCombo.TrySetSelectedIndex(4);
         ManagedSettingsSnapshot failureApplied = app.Applied;
         ManagedSettingsSnapshot failurePersisted = app.Persisted;
         app.InjectNextSaveFailureForTests();
@@ -62,7 +72,10 @@ public static class GuideXosSettingsCenterC146Tests
         bool errorModal = failedApply && app.ActiveDialog == app.PersistenceDialog &&
             app.PersistenceDialog.IsOpen && app.ControlHost.IsModalActive &&
             app.IsDirty && app.Applied.Equals(failureApplied) &&
-            app.Persisted.Equals(failurePersisted) && !app.SurfaceClosingForTests;
+            app.Persisted.Equals(failurePersisted) &&
+            app.Working.ScrollLinesPerNotch == 5 &&
+            GuideXosRuntimeSettings.Current.ScrollLinesPerNotch ==
+                failureApplied.ScrollLinesPerNotch && !app.SurfaceClosingForTests;
         result &= Case(ref cases, errorModal);
 
         bool dismissed = app.PersistenceDialog.HandleInput(
@@ -95,10 +108,13 @@ public static class GuideXosSettingsCenterC146Tests
             app.Persisted.Equals(defaults) && !app.IsDirty;
         result &= Case(ref cases, defaultsApplied);
 
-        bool clean = app.RegistrationCount == 9 &&
+        bool clean = app.RegistrationCount == 10 &&
+            app.View.MemberCount == 22 && app.ScrollViewMemberCount == 22 &&
+            app.InputGroupBoxMemberCount == 6 &&
             app.View.Offset == 0 && !app.ControlHost.IsModalActive &&
             !app.HasCapture && !app.HasDragOwner &&
-            app.Working.Equals(ManagedSettingsSnapshot.Defaults) && !app.IsDirty;
+            app.Working.Equals(ManagedSettingsSnapshot.Defaults) &&
+            app.ScrollLinesCombo.SelectedIndex == 2 && !app.IsDirty;
         result &= Case(ref cases, clean);
 
         host?.TryLog(result && cases == 11

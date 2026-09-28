@@ -9,6 +9,7 @@ internal struct ManagedSettingsSnapshot : IEquatable<ManagedSettingsSnapshot>
     public bool ShowAdvanced;
     public bool InputEnabled;
     public bool NaturalScroll;
+    public int ScrollLinesPerNotch;
     public int ScrollSpeed;
     public bool ShowKeyboardTips;
     public int StatusDetail;
@@ -21,6 +22,7 @@ internal struct ManagedSettingsSnapshot : IEquatable<ManagedSettingsSnapshot>
         ShowAdvanced = false,
         InputEnabled = true,
         NaturalScroll = false,
+        ScrollLinesPerNotch = 3,
         ScrollSpeed = 1,
         ShowKeyboardTips = true,
         StatusDetail = 0,
@@ -30,7 +32,9 @@ internal struct ManagedSettingsSnapshot : IEquatable<ManagedSettingsSnapshot>
     public readonly bool Equals(ManagedSettingsSnapshot other) =>
         Density == other.Density && ShowStatus == other.ShowStatus &&
         ShowAdvanced == other.ShowAdvanced && InputEnabled == other.InputEnabled &&
-        NaturalScroll == other.NaturalScroll && ScrollSpeed == other.ScrollSpeed &&
+        NaturalScroll == other.NaturalScroll &&
+        ScrollLinesPerNotch == other.ScrollLinesPerNotch &&
+        ScrollSpeed == other.ScrollSpeed &&
         ShowKeyboardTips == other.ShowKeyboardTips && StatusDetail == other.StatusDetail &&
         ReportFormat == other.ReportFormat;
 
@@ -41,7 +45,8 @@ internal struct ManagedSettingsSnapshot : IEquatable<ManagedSettingsSnapshot>
         Density ^ (ShowStatus ? 1 << 4 : 0) ^ (ShowAdvanced ? 1 << 5 : 0) ^
         (InputEnabled ? 1 << 6 : 0) ^ (NaturalScroll ? 1 << 7 : 0) ^
         (ScrollSpeed << 8) ^ (ShowKeyboardTips ? 1 << 12 : 0) ^
-        (StatusDetail << 13) ^ (ReportFormat << 14);
+        (StatusDetail << 13) ^ (ReportFormat << 14) ^
+        (ScrollLinesPerNotch << 15);
 }
 
 /// <summary>
@@ -60,6 +65,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     private const int OptionsButtonId = 7;
     private const int InputEnabledId = 8;
     private const int AdvancedToggleId = 9;
+    private const int ScrollLinesComboId = 10;
     private const int ViewCapacity = 24;
     private const int SectionCount = 4;
     private const uint MenuApply = 1;
@@ -71,7 +77,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     private readonly GuideXosGroupBox[] _groups =
     {
         new(0, 0, 272, 180, "Appearance"),
-        new(0, 0, 272, 198, "Input"),
+        new(0, 0, 272, 216, "Input"),
         new(0, 0, 272, 216, "System"),
         new(0, 0, 272, 144, "Advanced"),
     };
@@ -89,6 +95,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     private readonly GuideXosRadioButton _naturalWheel = new(0, 0, 216, 18, "Natural scrolling");
     private readonly GuideXosRadioGroup _wheelGroup = new(2);
     private readonly GuideXosComboBox _speed = new(0, 0, 216, 18, 4, 16, 4);
+    private readonly GuideXosComboBox _scrollLines = new(0, 0, 216, 18, 8, 16, 4);
     private readonly GuideXosCheckBox _showTips = new(0, 0, 216, 18, "Show keyboard tips", true);
     private readonly GuideXosLabel _systemHeading = new(0, 0, 216, "Settings preview");
     private readonly GuideXosRadioButton _summaryMode = new(0, 0, 216, 18, "Summary", true);
@@ -149,6 +156,9 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
     private bool _c147RuntimeTestsPassed;
 #endif
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+    private bool _c148TestsPassed;
+#endif
     private bool _c145FocusedTesting;
     private bool _saveInProgress;
     private bool _persistedFilePresent;
@@ -163,7 +173,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _sectionLeaves = new object[][]
         {
             new object[] { _appearanceHeading, _density, _showStatus },
-            new object[] { _inputHeading, _standardWheel, _naturalWheel, _speed, _showTips },
+            new object[] { _inputHeading, _standardWheel, _naturalWheel, _speed, _scrollLines, _showTips },
             new object[] { _systemHeading, _summaryMode, _detailMode, _statusCombo, _statusProgress, _systemDescription },
             new object[] { _advancedHeading, _applyButton, _defaultsButton },
         };
@@ -175,6 +185,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         ConfigureMember(_standardWheel, GuideXosVerticalStackHorizontalAlignment.Left, 0, 2, 0, 2);
         ConfigureMember(_naturalWheel, GuideXosVerticalStackHorizontalAlignment.Left, 0, 2, 0, 2);
         ConfigureMember(_speed, GuideXosVerticalStackHorizontalAlignment.Stretch, 8, 2, 8, 2);
+        ConfigureMember(_scrollLines, GuideXosVerticalStackHorizontalAlignment.Stretch, 8, 2, 8, 2);
         ConfigureMember(_showTips, GuideXosVerticalStackHorizontalAlignment.Left, 0, 2, 0, 2);
         ConfigureMember(_systemHeading, GuideXosVerticalStackHorizontalAlignment.Left, 0, 2, 0, 2);
         ConfigureMember(_summaryMode, GuideXosVerticalStackHorizontalAlignment.Left, 0, 2, 0, 2);
@@ -191,6 +202,14 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _speed.TryAddItem("Slow");
         _speed.TryAddItem("Normal");
         _speed.TryAddItem("Fast");
+        _scrollLines.TryAddItem("1 line");
+        _scrollLines.TryAddItem("2 lines");
+        _scrollLines.TryAddItem("3 lines");
+        _scrollLines.TryAddItem("4 lines");
+        _scrollLines.TryAddItem("5 lines");
+        _scrollLines.TryAddItem("6 lines");
+        _scrollLines.TryAddItem("7 lines");
+        _scrollLines.TryAddItem("8 lines");
         _statusCombo.TryAddItem("Current section");
         _statusCombo.TryAddItem("All choices");
         _wheelGroup.TryRegister(_standardWheel);
@@ -200,6 +219,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 
         _density.Changed = OnDensityChanged;
         _speed.Changed = OnSpeedChanged;
+        _scrollLines.Changed = OnScrollLinesChanged;
         _statusCombo.Changed = OnReportFormatChanged;
         _showStatus.Changed = OnShowStatusChanged;
         _showAdvanced.Changed = OnShowAdvancedChanged;
@@ -247,7 +267,9 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     internal GuideXosControlHost ControlHost => _controlHost;
     internal int LaunchCount => (int)_launchCount;
     internal int SectionGroupCount => SectionCount;
-    internal int LeafControlCount => 17;
+    internal int LeafControlCount => 18;
+    internal int InputGroupBoxMemberCount => _groups[1].MemberCount;
+    internal int ScrollViewMemberCount => _view.MemberCount;
     internal int RegistrationCount => _controlHost?.RegistrationCount ?? 0;
     internal int HostCapacity => _controlHost?.MaximumControlCount ?? 0;
     internal int DialogRegistrationCount => _resetDialog.RegistrationCount;
@@ -276,6 +298,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     internal GuideXosCheckBox TipsCheckBox => _showTips;
     internal GuideXosComboBox DensityCombo => _density;
     internal GuideXosComboBox SpeedCombo => _speed;
+    internal GuideXosComboBox ScrollLinesCombo => _scrollLines;
     internal GuideXosComboBox StatusCombo => _statusCombo;
     internal GuideXosRadioGroup WheelGroup => _wheelGroup;
     internal GuideXosRadioGroup StatusGroup => _statusGroup;
@@ -286,7 +309,8 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     internal GuideXosCheckBox KeyboardTips => _showTips;
     internal GuideXosButton ApplyButton => _applyButton;
     internal GuideXosButton DefaultsButton => _defaultsButton;
-    internal bool PopupOpen => _menu.IsOpen || _density.IsOpen || _speed.IsOpen || _statusCombo.IsOpen;
+    internal bool PopupOpen => _menu.IsOpen || _density.IsOpen || _speed.IsOpen ||
+        _scrollLines.IsOpen || _statusCombo.IsOpen;
     internal bool HasCapture => _controlHost?.HasTransientInputCapture ?? false;
     internal bool HasDragOwner => _controlHost?.HasPointerDragCapture ?? false;
     internal bool SurfaceClosingForTests => _surfaceClosing;
@@ -304,6 +328,21 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         {
             _c147RuntimeTestsPassed =
                 GuideXosRuntimeSettingsC147Tests.Run(host);
+        }
+#endif
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+        if (!_testsRun)
+        {
+            if (GuideXosRuntimeSettings.Startup.LoadResult.Status ==
+                ManagedSettingsLoadStatus.Invalid)
+            {
+                _c148TestsPassed = true;
+                host.TryLog("C148-FOCUSED-SUITES result=SKIPPED-invalid-startup"u8);
+            }
+            else
+            {
+                _c148TestsPassed = GuideXosSettingsV2C148Tests.Run(host);
+            }
         }
 #endif
 #if HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
@@ -351,10 +390,18 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
                     // runtime value, then restore the production state. C144 and
                     // C145 have their own boot proofs; running both larger suites
                     // here exceeds the resident NativeAOT heap after C147 tests.
-                    GuideXosRuntimeSettings.Active.TryCommit(
-                        ManagedSettingsSnapshot.Defaults);
-                    _c145FocusedTesting = true;
-                    c146Settings = GuideXosSettingsCenterC146Tests.Run(host, this);
+                GuideXosRuntimeSettings.Active.TryCommit(
+                    ManagedSettingsSnapshot.Defaults);
+                _c145FocusedTesting = true;
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+                host.TryLog("C148-C146-SETTINGS stage=start"u8);
+#endif
+                c146Settings = GuideXosSettingsCenterC146Tests.Run(host, this);
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+                host.TryLog(c146Settings
+                    ? "C148-C146-SETTINGS stage=complete result=PASS"u8
+                    : "C148-C146-SETTINGS stage=complete result=FAIL"u8);
+#endif
                 }
                 finally
                 {
@@ -403,7 +450,11 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 #if HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
             _c146TestsPassed = c146Store && c146Settings &&
-                _c147RuntimeTestsPassed;
+                _c147RuntimeTestsPassed
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+                && _c148TestsPassed
+#endif
+                ;
 #else
             _c146TestsPassed = c146Store && c144Settings && c145Dialogs &&
                 c146Settings;
@@ -441,29 +492,48 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         bool controlsRegistered = RegisterControls();
         HydratePersistedSettings(host);
         _initialContentHeight = _view.ContentExtent;
-        bool valid = controlsRegistered && _controlHost.RegistrationCount == 9 &&
-            _view.MemberCount == 21 && _view.MaximumMemberCount == ViewCapacity &&
+        bool valid = controlsRegistered && _controlHost.RegistrationCount == 10 &&
+            _view.MemberCount == 22 && _view.MaximumMemberCount == ViewCapacity &&
             _groups.Length == SectionCount && _stacks.Length == SectionCount &&
             _working.Equals(_applied) && _applied.Equals(_persisted) &&
             !IsDirty && _view.Offset == 0 &&
             _view.MaximumOffset > 0 && ValidateComposition();
+#if HOSTLOGPROOF_C148_SETTINGS_V2
         host.TryLog(valid
-            ? "C144-PROOF launch=PASS registration=9 hostCapacity=10 groupBoxes=4 leaves=17 viewMembers=21 stacks=4 layout=valid result=PASS"u8
+            ? "C148-COMPOSITION launch=PASS reg=10 host=10 groups=4 leaves=18 view=22 input=6 capacity=24 layout=valid result=PASS"u8
+            : "C148-COMPOSITION launch=FAIL result=FAIL"u8);
+#else
+        host.TryLog(valid
+            ? "C144-PROOF launch=PASS registration=10 hostCapacity=10 groupBoxes=4 leaves=18 viewMembers=22 stacks=4 layout=valid result=PASS"u8
             : "C144-PROOF launch=FAIL result=FAIL"u8);
+#endif
 #if HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
+#if HOSTLOGPROOF_C148_SETTINGS_V2
         host.TryLog(valid && _resetDialog.RegistrationCount == 2 &&
             _dirtyCloseDialog.RegistrationCount == 3 && _c146TestsPassed
-            ? "C146-PROOF launch=PASS registration=9 hostCapacity=10 dialogCapacity=8 resetRegistrations=2 closeRegistrations=3 result=PASS"u8
+            ? "C148-PROOF launch=PASS registration=10 hostCapacity=10 dialogCapacity=8 resetRegistrations=2 closeRegistrations=3 result=PASS"u8
+            : "C148-PROOF launch=FAIL result=FAIL"u8);
+#else
+        host.TryLog(valid && _resetDialog.RegistrationCount == 2 &&
+            _dirtyCloseDialog.RegistrationCount == 3 && _c146TestsPassed
+            ? "C146-PROOF launch=PASS registration=10 hostCapacity=10 dialogCapacity=8 resetRegistrations=2 closeRegistrations=3 result=PASS"u8
             : "C146-PROOF launch=FAIL result=FAIL"u8);
+#endif
 #else
         host.TryLog(valid && _resetDialog.RegistrationCount == 2 &&
             _dirtyCloseDialog.RegistrationCount == 3 && _c145TestsPassed
-            ? "C145-PROOF launch=PASS registration=9 hostCapacity=10 dialogCapacity=8 resetRegistrations=2 closeRegistrations=3 result=PASS"u8
-            : "C145-PROOF launch=FAIL result=FAIL"u8);
+            ? "C148-PROOF launch=PASS registration=10 hostCapacity=10 dialogCapacity=8 resetRegistrations=2 closeRegistrations=3 result=PASS"u8
+            : "C148-PROOF launch=FAIL result=FAIL"u8);
 #endif
         LogGeometry(host, "initial");
         if (_launchCount > 1)
+        {
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+            host.TryLog(valid ? "C144-RELAUNCH close=PASS relaunch=PASS registration=10 result=PASS"u8 : "C144-RELAUNCH result=FAIL"u8);
+#else
             host.TryLog(valid ? "C144-RELAUNCH close=PASS relaunch=PASS registration=9 result=PASS"u8 : "C144-RELAUNCH result=FAIL"u8);
+#endif
+        }
         return Render(host, _surface);
     }
 
@@ -750,15 +820,39 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
         host?.TryLog(_applied.NaturalScroll ==
                 GuideXosRuntimeSettings.Current.NaturalScroll &&
+                _applied.ScrollLinesPerNotch ==
+                    GuideXosRuntimeSettings.Current.ScrollLinesPerNotch &&
                 GuideXosRuntimeSettings.Active.IsReady
             ? "C147-SETTINGS-SYNC source=shared-runtime snapshot=agrees dirty=false result=PASS"u8
             : "C147-SETTINGS-SYNC result=FAIL"u8);
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+        Span<byte> syncLine = stackalloc byte[112];
+        int syncLength = 0;
+        bool syncWritten = GuideXosText.Append(syncLine, ref syncLength,
+                "C148-SETTINGS-SYNC naturalScroll="u8) &&
+            GuideXosText.AppendUnsigned(syncLine, ref syncLength,
+                _applied.NaturalScroll ? 1u : 0u) &&
+            GuideXosText.Append(syncLine, ref syncLength,
+                " scrollLines="u8) &&
+            GuideXosText.AppendUnsigned(syncLine, ref syncLength,
+                (uint)_applied.ScrollLinesPerNotch) &&
+            GuideXosText.Append(syncLine, ref syncLength,
+                " dirty=false runtime=agrees result=PASS"u8);
+        if (syncWritten) host?.TryLog(syncLine[..syncLength]);
+#endif
 #endif
         if (load.Status == ManagedSettingsLoadStatus.Loaded)
         {
             LogSettingsSnapshot("C146-LOAD source=file result=PASS "u8, initial,
                 "working=applied persisted=loaded dirty=false"u8);
-            host?.TryLog("C146-LOAD-META path=/system/apps/GXSETT.BIN version=1 size=25 readback=validated viewport=0 focus=normal result=PASS"u8);
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+            bool wasV1 = load.FileSize == ManagedSettingsStore.Version1EncodedFileBytes;
+            host?.TryLog(wasV1
+                ? "C148-LOAD-META path=/system/apps/GXSETT.BIN v=1 size=25 migrate=memory unchanged=yes viewport=0 focus=normal result=PASS"u8
+                : "C148-LOAD-META path=/system/apps/GXSETT.BIN v=2 size=26 migrate=no unchanged=yes viewport=0 focus=normal result=PASS"u8);
+#else
+            host?.TryLog("C146-LOAD-META path=/system/apps/GXSETT.BIN version=2 size=26 readback=validated viewport=0 focus=normal result=PASS"u8);
+#endif
         }
         else if (load.Status == ManagedSettingsLoadStatus.Missing)
         {
@@ -866,6 +960,21 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 
         _appHost?.TryLog(stateLine[..stateLength]);
         _appHost?.TryLog(valuesLine[..valuesLength]);
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+        Span<byte> amountLine = stackalloc byte[80];
+        int amountLength = 0;
+        if (GuideXosText.Append(amountLine, ref amountLength,
+                "C148-VALUES naturalScroll="u8) &&
+            GuideXosText.AppendUnsigned(amountLine, ref amountLength,
+                snapshot.NaturalScroll ? 1u : 0u) &&
+            GuideXosText.Append(amountLine, ref amountLength,
+                " scrollLines="u8) &&
+            GuideXosText.AppendUnsigned(amountLine, ref amountLength,
+                (uint)snapshot.ScrollLinesPerNotch))
+        {
+            _appHost?.TryLog(amountLine[..amountLength]);
+        }
+#endif
     }
 
     internal bool ApplyWorking()
@@ -1029,7 +1138,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         {
             _stacks[section].Clear();
             _groups[section].ClearMembers();
-            _groups[section].TrySetBounds(0, 0, 272, section switch { 0 => 180, 1 => 198, 2 => 216, _ => 144 });
+            _groups[section].TrySetBounds(0, 0, 272, section switch { 0 => 180, 1 => 216, 2 => 216, _ => 144 });
             _groups[section].SetVisible(section != 3);
             _groups[section].SetEnabled(true);
             _stacks[section].TrySetPadding(4, 4, 4, 4);
@@ -1046,6 +1155,11 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _statusGroup.TryRegister(_summaryMode); _statusGroup.TryRegister(_detailMode);
         _density.Reset(); _density.ClearItems(); _density.TryAddItem("Comfortable"); _density.TryAddItem("Compact");
         _speed.Reset(); _speed.ClearItems(); _speed.TryAddItem("Slow"); _speed.TryAddItem("Normal"); _speed.TryAddItem("Fast");
+        _scrollLines.Reset(); _scrollLines.ClearItems();
+        _scrollLines.TryAddItem("1 line"); _scrollLines.TryAddItem("2 lines");
+        _scrollLines.TryAddItem("3 lines"); _scrollLines.TryAddItem("4 lines");
+        _scrollLines.TryAddItem("5 lines"); _scrollLines.TryAddItem("6 lines");
+        _scrollLines.TryAddItem("7 lines"); _scrollLines.TryAddItem("8 lines");
         _statusCombo.Reset(); _statusCombo.ClearItems(); _statusCombo.TryAddItem("Current section"); _statusCombo.TryAddItem("All choices");
         _showStatus.SetEnabled(true); _showAdvanced.SetEnabled(true); _showTips.SetEnabled(true);
         _showStatus.SetVisible(true); _showAdvanced.SetVisible(true); _showTips.SetVisible(true);
@@ -1060,6 +1174,8 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _menuCommand = 0;
         _density.TrySetSelectedIndex(_working.Density);
         _speed.TrySetSelectedIndex(_working.ScrollSpeed);
+        _scrollLines.TrySetSelectedIndex(ScrollLinesToSelection(
+            _working.ScrollLinesPerNotch));
         _statusCombo.TrySetSelectedIndex(_working.ReportFormat);
         _statusProgress.TrySetValue(52);
 
@@ -1088,6 +1204,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _controlHost.TryRegisterScrollBar(ScrollBarId, _scrollBar, false);
         _controlHost.TryRegisterComboBox(DensityComboId, _density, true);
         _controlHost.TryRegisterComboBox(SpeedComboId, _speed, true);
+        _controlHost.TryRegisterComboBox(ScrollLinesComboId, _scrollLines, true);
         _controlHost.TryRegisterComboBox(StatusComboId, _statusCombo, true);
         _controlHost.TryRegisterPopupMenu(MenuId, _menu, false);
         _controlHost.TryRegisterButton(OptionsButtonId, _optionsButton, true);
@@ -1096,15 +1213,62 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _applyButton.SetEnabled(false);
         _syncing = false;
         SyncControlsFromWorking();
-        return ok && ValidateComposition();
+        bool compositionValid = ValidateComposition();
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+        if (!ok || !compositionValid) LogC148CompositionResetFailure(ok,
+            compositionValid);
+#endif
+        return ok && compositionValid;
     }
 
-    private bool RegisterControls() => _controlHost != null && _controlHost.RegistrationCount == 9;
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+    private void LogC148CompositionResetFailure(bool operationsSucceeded,
+        bool compositionValid)
+    {
+        Span<byte> line = stackalloc byte[128];
+        int length = 0;
+        bool written = GuideXosText.Append(line, ref length,
+                "C148-RESET-COMPOSITION result=FAIL operations="u8) &&
+            GuideXosText.AppendUnsigned(line, ref length,
+                operationsSucceeded ? 1u : 0u) &&
+            GuideXosText.Append(line, ref length, " valid="u8) &&
+            GuideXosText.AppendUnsigned(line, ref length,
+                compositionValid ? 1u : 0u) &&
+            GuideXosText.Append(line, ref length, " view="u8) &&
+            GuideXosText.AppendUnsigned(line, ref length,
+                (uint)_view.MemberCount) &&
+            GuideXosText.Append(line, ref length, " host="u8) &&
+            GuideXosText.AppendUnsigned(line, ref length,
+                (uint)(_controlHost?.RegistrationCount ?? 0)) &&
+            GuideXosText.Append(line, ref length, " groups="u8);
+        for (int index = 0; written && index < SectionCount; index++)
+        {
+            if (index != 0)
+                written = GuideXosText.Append(line, ref length, ","u8);
+            if (written)
+                written = GuideXosText.AppendUnsigned(line, ref length,
+                    (uint)_groups[index].MemberCount);
+        }
+        written = written && GuideXosText.Append(line, ref length,
+            " stacks="u8);
+        for (int index = 0; written && index < SectionCount; index++)
+        {
+            if (index != 0)
+                written = GuideXosText.Append(line, ref length, ","u8);
+            if (written)
+                written = GuideXosText.AppendUnsigned(line, ref length,
+                    (uint)_stacks[index].MemberCount);
+        }
+        if (written) _appHost?.TryLog(line[..length]);
+    }
+#endif
+
+    private bool RegisterControls() => _controlHost != null && _controlHost.RegistrationCount == 10;
 
     private bool ValidateComposition()
     {
-        if (_view.MemberCount != 21 || _view.MaximumMemberCount != ViewCapacity ||
-            _controlHost == null || _controlHost.RegistrationCount != 9 ||
+        if (_view.MemberCount != 22 || _view.MaximumMemberCount != ViewCapacity ||
+            _controlHost == null || _controlHost.RegistrationCount != 10 ||
             _controlHost.MaximumControlCount != 10 || _wheelGroup.MemberCount != 2 ||
             _statusGroup.MemberCount != 2 || _view.Offset < 0 || _view.Offset > _view.MaximumOffset)
             return false;
@@ -1142,6 +1306,8 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _syncing = true;
         _density.TrySetSelectedIndex(_working.Density);
         _speed.TrySetSelectedIndex(_working.ScrollSpeed);
+        _scrollLines.TrySetSelectedIndex(ScrollLinesToSelection(
+            _working.ScrollLinesPerNotch));
         _showStatus.SetChecked(_working.ShowStatus);
         _showAdvanced.SetChecked(_working.ShowAdvanced);
         _inputEnabled.SetChecked(_working.InputEnabled);
@@ -1186,6 +1352,72 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _working.ScrollSpeed = index;
         CompleteWorkingChange();
     }
+
+    private void OnScrollLinesChanged(int index)
+    {
+        if (_syncing) return;
+        int amount = SelectionToScrollLines(index);
+        if (amount == 0) return;
+        _working.ScrollLinesPerNotch = amount;
+        CompleteWorkingChange();
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+        LogC148WorkingScroll();
+#endif
+    }
+
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+    private void LogC148WorkingScroll()
+    {
+        Span<byte> line = stackalloc byte[112];
+        int length = 0;
+        GuideXosRuntimeSettingsSnapshot runtime = GuideXosRuntimeSettings.Current;
+        if (GuideXosText.Append(line, ref length,
+                "C148-WORKING scrollLines="u8) &&
+            GuideXosText.AppendUnsigned(line, ref length,
+                (uint)_working.ScrollLinesPerNotch) &&
+            GuideXosText.Append(line, ref length, " applied="u8) &&
+            GuideXosText.AppendUnsigned(line, ref length,
+                (uint)_applied.ScrollLinesPerNotch) &&
+            GuideXosText.Append(line, ref length, " runtime="u8) &&
+            GuideXosText.AppendUnsigned(line, ref length,
+                (uint)runtime.ScrollLinesPerNotch) &&
+            GuideXosText.Append(line, ref length, " persisted="u8) &&
+            GuideXosText.AppendUnsigned(line, ref length,
+                (uint)_persisted.ScrollLinesPerNotch) &&
+            GuideXosText.Append(line, ref length, " dirty="u8) &&
+            GuideXosText.Append(line, ref length,
+                IsDirty ? "true result=PASS"u8 : "false result=PASS"u8))
+        {
+            _appHost?.TryLog(line[..length]);
+        }
+    }
+#endif
+
+    private static int SelectionToScrollLines(int selection) => selection switch
+    {
+        0 => 1,
+        1 => 2,
+        2 => 3,
+        3 => 4,
+        4 => 5,
+        5 => 6,
+        6 => 7,
+        7 => 8,
+        _ => 0,
+    };
+
+    private static int ScrollLinesToSelection(int amount) => amount switch
+    {
+        1 => 0,
+        2 => 1,
+        3 => 2,
+        4 => 3,
+        5 => 4,
+        6 => 5,
+        7 => 6,
+        8 => 7,
+        _ => -1,
+    };
 
     private void OnShowStatusChanged(bool value)
     {
@@ -1372,6 +1604,14 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
                 _appHost?.TryLog(runtimePreserved
                     ? "C147-RESET working-only=true runtime=preserved persisted=preserved result=PASS"u8
                     : "C147-RESET working-only=true result=FAIL"u8);
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+                _appHost?.TryLog(runtimePreserved &&
+                    GuideXosRuntimeSettings.Current.ScrollLinesPerNotch ==
+                        _dialogAppliedSnapshot.ScrollLinesPerNotch &&
+                    _persisted.Equals(_dialogAppliedSnapshot)
+                    ? "C148-RESET scrollLines=working-default runtime=preserved persisted=preserved result=PASS"u8
+                    : "C148-RESET result=FAIL"u8);
+#endif
             }
 #endif
         }
@@ -1472,7 +1712,11 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             _view.Offset >= 0 && _view.Offset <= _view.MaximumOffset &&
             _scrollBar.Value == _view.Offset && ValidateComposition();
         host?.TryLog(valid
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+            ? "C145-FINAL viewport=valid registration=10 modal=none capture=none drag=none result=PASS"u8
+#else
             ? "C145-FINAL viewport=valid registration=9 modal=none capture=none drag=none result=PASS"u8
+#endif
             : "C145-FINAL result=FAIL"u8);
         if (reason == "clean")
             host?.TryLog(IsDirty
@@ -1573,10 +1817,14 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         return false;
     }
 
-    private bool AnyComboOpen() => _density.IsOpen || _speed.IsOpen || _statusCombo.IsOpen;
-    private GuideXosComboBox OpenCombo() => _density.IsOpen ? _density : _speed.IsOpen ? _speed : _statusCombo.IsOpen ? _statusCombo : null;
+    private bool AnyComboOpen() => _density.IsOpen || _speed.IsOpen ||
+        _scrollLines.IsOpen || _statusCombo.IsOpen;
+    private GuideXosComboBox OpenCombo() => _density.IsOpen ? _density :
+        _speed.IsOpen ? _speed : _scrollLines.IsOpen ? _scrollLines :
+        _statusCombo.IsOpen ? _statusCombo : null;
     private int ComboId(GuideXosComboBox combo) => ReferenceEquals(combo, _density)
-        ? DensityComboId : ReferenceEquals(combo, _speed) ? SpeedComboId : StatusComboId;
+        ? DensityComboId : ReferenceEquals(combo, _speed) ? SpeedComboId :
+        ReferenceEquals(combo, _scrollLines) ? ScrollLinesComboId : StatusComboId;
 
     private int HitId(int x, int y)
     {
@@ -1636,7 +1884,8 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         LogGeometryPoints(host, state, sequence, 4,
             "statusCombo="u8, _statusCombo.X, _statusCombo.Y - _view.Offset,
             "inputEnabled="u8, _inputEnabled.X, _inputEnabled.Y,
-            "advancedToggle="u8, _showAdvanced.X, _showAdvanced.Y);
+            "advancedToggle="u8, _showAdvanced.X, _showAdvanced.Y,
+            "scrollLines="u8, _scrollLines.X, _scrollLines.Y - _view.Offset);
         LogGeometryPoints(host, state, sequence, 5,
             "apply="u8, _applyButton.X, _applyButton.Y - _view.Offset,
             "defaults="u8, _defaultsButton.X, _defaultsButton.Y - _view.Offset,

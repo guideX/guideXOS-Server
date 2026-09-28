@@ -1694,7 +1694,87 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedFileWriteAll(
     }
     if (length > kManagedFileMaxBytes) return kManagedFileTooLarge;
     const char* vfsPath = resolveManagedFileVfsPath(validatedPath);
-    const int32_t written = vfs::write_file(vfsPath, data, length);
+
+    // QEMU's host-backed FAT drive does not reliably persist the final byte
+    // when an existing settings file grows from the authentic 25-byte v1
+    // record. For this exact transition, grow the directory entry first via
+    // one write, then rewrite all 26 bytes after the new size is visible.
+    int32_t written = -1;
+    if (vfsPath == kManagedSettingsBackingPath && length == 26u) {
+        vfs::FileInfo existing{};
+        if (vfs::stat(vfsPath, &existing) == vfs::VFS_OK &&
+            existing.type == vfs::FILE_TYPE_REGULAR && existing.size == 25u) {
+            uint8_t original[25] = {};
+            const int32_t originalLength =
+                vfs::read_file(vfsPath, original, sizeof(original));
+            if (originalLength != static_cast<int32_t>(sizeof(original))) {
+                return kManagedFileIoFailure;
+            }
+            written = vfs::write_file(vfsPath, data, length);
+            if (written == static_cast<int32_t>(length)) {
+                written = vfs::write_file(vfsPath, data, length);
+            }
+            bool replacementVerified = written == static_cast<int32_t>(length);
+            vfs::FileInfo replacementInfo{};
+            uint8_t replacement[26] = {};
+            if (replacementVerified) {
+                replacementVerified =
+                    vfs::stat(vfsPath, &replacementInfo) == vfs::VFS_OK &&
+                    replacementInfo.type == vfs::FILE_TYPE_REGULAR &&
+                    replacementInfo.size == sizeof(replacement);
+            }
+            if (replacementVerified) {
+                const int32_t replacementLength =
+                    vfs::read_file(vfsPath, replacement, sizeof(replacement));
+                replacementVerified = replacementLength ==
+                    static_cast<int32_t>(sizeof(replacement));
+            }
+            if (replacementVerified) {
+                for (uint32_t index = 0u; index < length; ++index) {
+                    if (replacement[index] != data[index]) {
+                        replacementVerified = false;
+                        break;
+                    }
+                }
+            }
+
+            if (!replacementVerified) {
+                const int32_t restored = vfs::write_file(
+                    vfsPath, original, sizeof(original));
+                bool originalRestored =
+                    restored == static_cast<int32_t>(sizeof(original));
+                vfs::FileInfo restoredInfo{};
+                uint8_t restoredBytes[25] = {};
+                if (originalRestored) {
+                    originalRestored =
+                        vfs::stat(vfsPath, &restoredInfo) == vfs::VFS_OK &&
+                        restoredInfo.type == vfs::FILE_TYPE_REGULAR &&
+                        restoredInfo.size == sizeof(restoredBytes);
+                }
+                if (originalRestored) {
+                    const int32_t restoredLength = vfs::read_file(
+                        vfsPath, restoredBytes, sizeof(restoredBytes));
+                    originalRestored = restoredLength ==
+                        static_cast<int32_t>(sizeof(restoredBytes));
+                }
+                if (originalRestored) {
+                    for (uint32_t index = 0u; index < sizeof(original); ++index) {
+                        if (restoredBytes[index] != original[index]) {
+                            originalRestored = false;
+                            break;
+                        }
+                    }
+                }
+                serial::puts("[C148-VFS-REPLACE] verify=FAIL restore=");
+                serial::puts(originalRestored ? "PASS" : "FAIL");
+                serial::puts(" result=FAIL\n");
+                return kManagedFileIoFailure;
+            }
+
+            serial::puts("[C148-VFS-GROW] passes=2 verify=PASS result=PASS\n");
+        }
+    }
+    if (written < 0) written = vfs::write_file(vfsPath, data, length);
     if (written < 0 || static_cast<uint32_t>(written) != length) {
         return kManagedFileIoFailure;
     }

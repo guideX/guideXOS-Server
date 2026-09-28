@@ -6,7 +6,7 @@ param(
     [string]$PythonExe = "",
     [int]$FreshBootCount = 3,
     [int]$TimeoutSeconds = 360,
-    [ValidateSet("C120", "C121", "C122", "C123", "C124", "C125", "C126", "C127", "C128", "C129", "C130", "C131", "C132", "C133", "C134", "C135", "C136", "C137", "C138", "C139", "C140", "C141", "C142", "C143", "C144", "C145", "C146", "C147")]
+    [ValidateSet("C120", "C121", "C122", "C123", "C124", "C125", "C126", "C127", "C128", "C129", "C130", "C131", "C132", "C133", "C134", "C135", "C136", "C137", "C138", "C139", "C140", "C141", "C142", "C143", "C144", "C145", "C146", "C147", "C148")]
     [string]$ProofPhase = "C120",
     [ValidateSet("Production", "FocusedApi", "FocusedHost")]
     [string]$C135ProofMode = "Production",
@@ -22,8 +22,9 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 if ($FreshBootCount -lt 3) { throw "Managed control proof requires at least three fresh boots." }
 if ($TimeoutSeconds -lt 10) { throw "TimeoutSeconds must be at least 10." }
+$isC148 = $ProofPhase -eq "C148"
 $isC147 = $ProofPhase -eq "C147"
-$isC146 = $ProofPhase -eq "C146" -or $isC147
+$isC146 = $ProofPhase -eq "C146" -or $isC147 -or $isC148
 if ($isC146 -and $FreshBootCount -ne 3) { throw "C146 requires exactly three independent persistence sequences." }
 if ($isC146 -and $SkipQemu) { throw "C146 acceptance requires the real write/read QEMU sequences and ordinary restoration boots." }
 $isC121 = $ProofPhase -eq "C121"
@@ -67,7 +68,9 @@ $startAheadBehind = if ($startUpstream) {
     (& git -C $RepoRoot rev-list --left-right --count "HEAD...$startUpstream").Trim()
 } else { "" }
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = if ($isC147) {
+    $EvidenceRoot = if ($isC148) {
+        Join-Path $RepoRoot "out\dotnet\c148-settings-v2-scroll-amount"
+    } elseif ($isC147) {
         Join-Path $RepoRoot "out\dotnet\c147-runtime-settings"
     } elseif ($isC146) {
         Join-Path $RepoRoot "out\dotnet\c146-settings-persistence"
@@ -204,18 +207,29 @@ function Get-DirectoryHash([string]$Path) {
 function Get-C146PersistedSnapshot([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "C146 settings record is missing after write: $Path" }
     $bytes = [System.IO.File]::ReadAllBytes($Path)
-    if ($bytes.Length -ne 25 -or [System.Text.Encoding]::ASCII.GetString($bytes, 0, 4) -ne 'GXSC' -or
-        $bytes[4] -ne 1 -or $bytes[5] -ne 0 -or $bytes[6] -ne 9 -or $bytes[7] -ne 0 -or
+    if ($bytes.Length -lt 12 -or [System.Text.Encoding]::ASCII.GetString($bytes, 0, 4) -ne 'GXSC' -or
+        $bytes[5] -ne 0 -or $bytes[7] -ne 0 -or
         $bytes[8] -ne 0 -or $bytes[9] -ne 0 -or $bytes[10] -ne 0 -or $bytes[11] -ne 0) {
-        throw "C146 settings record has an unexpected size or v1 header: $Path"
+        throw "Settings record has an unexpected magic or header: $Path"
+    }
+    $version = [int]$bytes[4]
+    $payloadBytes = if ($version -eq 1) { 9 } elseif ($version -eq 2) { 10 } else { 0 }
+    $checksumOffset = 12 + $payloadBytes
+    if ($payloadBytes -eq 0 -or $bytes[6] -ne $payloadBytes -or
+        $bytes.Length -ne $checksumOffset + 4 -or
+        (Get-C147Crc32 ([byte[]]$bytes[0..($checksumOffset - 1)])) -ne
+            [System.BitConverter]::ToUInt32($bytes, $checksumOffset)) {
+        throw "Settings record has an invalid version, size, or checksum: $Path"
     }
     [pscustomobject]@{
-        path = $Path; size = $bytes.Length; magic = 'GXSC'; version = 1
+        path = $Path; size = $bytes.Length; magic = 'GXSC'; version = $version
         density = [int]$bytes[12]; showStatus = [int]$bytes[13]
         advanced = [int]$bytes[14]; inputEnabled = [int]$bytes[15]
         naturalScroll = [int]$bytes[16]; speed = [int]$bytes[17]
         keyboardTips = [int]$bytes[18]; detail = [int]$bytes[19]
-        reportFormat = [int]$bytes[20]; sha256 = Get-Hash $Path
+        reportFormat = [int]$bytes[20]
+        scrollLines = if ($version -eq 1) { 3 } else { [int]$bytes[21] }
+        sha256 = Get-Hash $Path
     }
 }
 
@@ -247,6 +261,42 @@ function New-C147UnsupportedVersionRecord([string]$ValidV1Path) {
     $crc = Get-C147Crc32 ([byte[]]$bytes[0..20])
     [byte[]]$checksum = [System.BitConverter]::GetBytes([uint32]$crc)
     [Array]::Copy($checksum, 0, $bytes, 21, 4)
+    return ,$bytes
+}
+
+function New-C148AuthenticV1Record() {
+    [byte[]]$bytes = @(
+        0x47,0x58,0x53,0x43,0x01,0x00,0x09,0x00,0x00,0x00,0x00,0x00,
+        0x01,0x00,0x01,0x01,0x01,0x01,0x01,0x00,0x00,0xB6,0x1B,0x6A,0x36)
+    $hash = [System.BitConverter]::ToString(
+        [System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)) -replace '-', ''
+    if ($hash.ToUpperInvariant() -ne '952CA2183EE7DA2923EF76DBC121193C499750BDA7627D862D7F8B8BF5734FF5') {
+        throw "Embedded authentic C147 v1 fixture hash mismatch: $hash"
+    }
+    return ,$bytes
+}
+
+function New-C148V2Record([byte[]]$V1Bytes, [int]$ScrollLines) {
+    if ($V1Bytes.Length -ne 25 -or $V1Bytes[4] -ne 1 -or
+        $ScrollLines -lt 1 -or $ScrollLines -gt 8) {
+        throw 'Cannot construct C148 v2 proof record from the requested source/value.'
+    }
+    [byte[]]$bytes = [byte[]]::new(26)
+    [Array]::Copy($V1Bytes, 0, $bytes, 0, 21)
+    $bytes[4] = 2; $bytes[6] = 10; $bytes[21] = [byte]$ScrollLines
+    [byte[]]$checksum = [System.BitConverter]::GetBytes(
+        [uint32](Get-C147Crc32 ([byte[]]$bytes[0..21])))
+    [Array]::Copy($checksum, 0, $bytes, 22, 4)
+    return ,$bytes
+}
+
+function New-C148MalformedV2Record([byte[]]$ValidV2Bytes) {
+    [byte[]]$bytes = [byte[]]$ValidV2Bytes.Clone()
+    if ($bytes.Length -ne 26 -or $bytes[4] -ne 2) { throw 'Malformed-v2 source is not v2.' }
+    $bytes[21] = 0
+    [byte[]]$checksum = [System.BitConverter]::GetBytes(
+        [uint32](Get-C147Crc32 ([byte[]]$bytes[0..21])))
+    [Array]::Copy($checksum, 0, $bytes, 22, 4)
     return ,$bytes
 }
 
@@ -469,6 +519,33 @@ function Send-C136QmpEvents([int]$Port, [object[]]$Events, [string]$LogPath) {
         Start-Sleep -Milliseconds 250
     }
     throw "C136 QEMU input event failed ($lastError)"
+}
+
+function Stop-C148QemuCleanly([int]$Port, [System.Diagnostics.Process]$Process,
+                              [string]$LogPath) {
+    if ($Process.HasExited) { return }
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $client.Connect("127.0.0.1", $Port)
+        $stream = $client.GetStream()
+        $stream.ReadTimeout = 200
+        $greeting = Read-C129QmpResponse $stream 2
+        $capabilities = [System.Text.Encoding]::ASCII.GetBytes(
+            ('{"execute":"qmp_capabilities"}' + "`n"))
+        $stream.Write($capabilities, 0, $capabilities.Length)
+        $stream.Flush()
+        $capabilityResponse = Read-C129QmpResponse $stream 2
+        $quit = [System.Text.Encoding]::ASCII.GetBytes(
+            ('{"execute":"quit"}' + "`n"))
+        $stream.Write($quit, 0, $quit.Length)
+        $stream.Flush()
+        $quitResponse = Read-C129QmpResponse $stream 2
+        Add-Content -LiteralPath $LogPath -Value (
+            "shutdown=quit`ngreeting=$greeting`ncapabilities=$capabilityResponse`nresponse=$quitResponse") -Encoding ASCII
+    } finally {
+        if ($client) { $client.Dispose() }
+    }
+    Wait-Process -Id $Process.Id -Timeout 10 -ErrorAction SilentlyContinue
 }
 
 function Convert-C136ScreenCoordinate([int]$Value, [int]$Maximum) {
@@ -1009,6 +1086,27 @@ function Assert-C147NotesStartupBehavior([string]$Serial, [int]$Natural,
     }
 }
 
+function Assert-C148NotesStartupBehavior([string]$Serial, [int]$Natural,
+    [int]$Amount, [string]$BootRole, [bool]$NotesOnly) {
+    $first = if ($Natural -eq 0) { 16 + $Amount } else { 16 - $Amount }
+    $firstBack = if ($Natural -eq 0) { 16 } else { 16 }
+    $firstPattern = '(?m)^\[C102-MANAGED-OUTPUT\] C148-NOTES-WHEEL normalizedNotches=-1 naturalScroll={0} scrollLines={1} firstVisible=16->{2} result=PASS\r?$' -f $Natural, $Amount, $first
+    $secondPattern = '(?m)^\[C102-MANAGED-OUTPUT\] C148-NOTES-WHEEL normalizedNotches=1 naturalScroll={0} scrollLines={1} firstVisible={2}->{3} result=PASS\r?$' -f $Natural, $Amount, $first, $firstBack
+    $readyPattern = '(?m)^\[C102-MANAGED-OUTPUT\] C148-NOTES-FIRST control=ListBox firstVisible=16 scrollLines={0} before-settings-center=true result=PASS\r?$' -f $Amount
+    if ($Serial -notmatch $firstPattern -or $Serial -notmatch $secondPattern -or
+        $Serial -notmatch $readyPattern) {
+        throw "C148 $BootRole Notes ListBox movement did not match NaturalScroll=$Natural, ScrollLinesPerNotch=$Amount."
+    }
+    $firstIndex = $Serial.IndexOf('C148-NOTES-WHEEL')
+    $secondIndex = $Serial.IndexOf('C148-NOTES-WHEEL', $firstIndex + 1)
+    $settingsIndex = $Serial.IndexOf('[C144-PROOF]')
+    if ($firstIndex -lt 0 -or $secondIndex -le $firstIndex -or
+        ($NotesOnly -and ($Serial -notmatch '(?m)^\[C148-NOTES-ONLY\] settings-center=not-launched result=PASS' -or $settingsIndex -ge 0)) -or
+        (-not $NotesOnly -and ($settingsIndex -le $secondIndex))) {
+        throw "C148 $BootRole did not prove Notes-before-Settings-Center ordering."
+    }
+}
+
 function Get-C144Geometry([string]$Serial, [string]$State = "") {
     $geometryMatches = [regex]::Matches(
         $Serial,
@@ -1030,7 +1128,7 @@ function Get-C144Geometry([string]$Serial, [string]$State = "") {
         }
     }
     $geometry = [ordered]@{ state = $selected[0].Groups['state'].Value; sequence = $sequence }
-    foreach ($name in @("view", "bar", "density", "speed", "showStatus", "standardWheel", "naturalWheel", "showTips", "summaryMode", "detailMode", "statusCombo", "inputEnabled", "advancedToggle", "apply", "defaults", "options")) {
+    foreach ($name in @("view", "bar", "density", "speed", "showStatus", "standardWheel", "naturalWheel", "showTips", "summaryMode", "detailMode", "statusCombo", "inputEnabled", "advancedToggle", "apply", "defaults", "options", "scrollLines")) {
         if (-not $fields.ContainsKey($name)) { throw "C144 geometry omitted $name." }
         $xy = $fields[$name].Split(',')
         if ($xy.Count -ne 2 -or $xy[0] -notmatch '^-?\d+$' -or
@@ -1422,14 +1520,20 @@ function Invoke-C144Boot([string]$Esp, [string]$Serial, [string]$Stdout,
             $partial = if (Test-Path -LiteralPath $Serial) {
                 [string](Get-Content -LiteralPath $Serial -Raw -ErrorAction SilentlyContinue)
             } else { [string]::Empty }
-            if ($isC145 -and -not $isC147 -and -not $proofStarted -and $partial -match
+            if ($isC148 -and $script:C148NotesOnlyBoot -and -not $proofStarted -and $partial -match
+                    '(?m)^\[C102-MANAGED-OUTPUT\] C148-NOTES-FIRST control=ListBox') {
+                $proofStarted = $true
+            } elseif ($isC145 -and -not $isC147 -and -not $proofStarted -and $partial -match
                     '(?m)^\[C145-PROOF\] managed-proof-started context=c145-native transport=physical-qemu result=PASS') {
                 $proofStarted = $true
             } elseif (-not $proofStarted -and $partial -match
                     '(?m)^\[C144-PROOF\] managed-proof-started context=c144-native transport=physical-qemu result=PASS') {
                 $proofStarted = $true
             }
-            if ($isC145 -and -not $isC147 -and $proofStarted -and -not $targetReady -and $partial -match
+            if ($isC148 -and $script:C148NotesOnlyBoot -and $proofStarted -and -not $targetReady -and $partial -match
+                    '(?m)^\[C148-NOTES-ONLY\] settings-center=not-launched result=PASS') {
+                $targetReady = $true
+            } elseif ($isC145 -and -not $isC147 -and $proofStarted -and -not $targetReady -and $partial -match
                     '(?m)^\[C145-TARGET\].*result=PASS') {
                 $targetReady = $true
             } elseif ($proofStarted -and -not $targetReady -and $partial -match
@@ -1440,11 +1544,44 @@ function Invoke-C144Boot([string]$Esp, [string]$Serial, [string]$Stdout,
                 if ($isC146) {
                     $commands = [System.Collections.Generic.List[object]]::new()
                     $commands.Add([pscustomobject]@{ action = "calibrate"; marker = ""; phase = "c146-calibration" })
-                    if ($isC147 -and $C146BootRole -in @('corrupt', 'future-version')) {
+                    if ($isC148 -and $script:C148NotesOnlyBoot) {
+                        $commands.Add([pscustomobject]@{ action = "done"; marker = ""; phase = "c148-notes-only-complete" })
+                    } elseif ($isC147 -and $C146BootRole -in @('corrupt', 'future-version')) {
                         $commands.Add([pscustomobject]@{ action = "done"; marker = ""; phase = "c147-startup-only" })
                     } else {
+                    if ($isC148 -and $script:C148StartingFileHash -and
+                        (Get-Hash (Join-Path $Esp 'GXSETT.BIN')) -ne $script:C148StartingFileHash) {
+                        throw "C148 settings load or Settings Center open rewrote the seeded file before explicit Apply ($C146BootRole)."
+                    }
                     switch -Exact ($C146BootRole) {
                         "write" {
+                            if ($isC148) {
+                                if ($partial -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C148-LOAD-META path=/system/apps/GXSETT\.BIN v=1 size=25 migrate=memory unchanged=yes viewport=0 focus=normal result=PASS' -or
+                                    $partial -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C148-SETTINGS-SYNC naturalScroll=1 scrollLines=3 dirty=false runtime=agrees result=PASS') {
+                                    throw 'C148 authentic v1 did not hydrate the legacy snapshot plus the default scroll amount.'
+                                }
+                                Add-C144Move $commands "wheelPoint" "c148-reveal-scroll-amount-move"
+                                for ($notch = 0; $notch -lt 60; $notch++) {
+                                    $revealMarker = if ($notch -eq 59) {
+                                        '(?m)^\[C102-MANAGED-OUTPUT\] C144-GEOMETRY state=wheel seq=\d+ part=6 .*\boffset=[1-9]\d*'
+                                    } else { "" }
+                                    $commands.Add([pscustomobject]@{
+                                        action = "events"; events = @(New-C137Wheel 1)
+                                        marker = $revealMarker; phase = "c148-reveal-scroll-amount-$notch"
+                                    })
+                                }
+                                Add-C144Click $commands "scrollLines" '(?m)^\[C102-MANAGED-OUTPUT\] C144-COMBO open=PASS capture=combo result=PASS' "c148-scroll-lines-open"
+                                foreach ($step in 1..2) {
+                                    Add-C144Key $commands "down" $true "" "c148-scroll-lines-down-$step"
+                                    Add-C144Key $commands "down" $false "" "c148-scroll-lines-down-up-$step"
+                                }
+                                Add-C144Key $commands "ret" $true '(?m)^\[C102-MANAGED-OUTPUT\] C148-WORKING scrollLines=5 applied=3 runtime=3 persisted=3 dirty=true result=PASS' "c148-scroll-lines-commit"
+                                Add-C144Key $commands "ret" $false "" "c148-scroll-lines-commit-up"
+                                Add-C144Click $commands "options" '(?m)^\[C102-MANAGED-OUTPUT\] C144-MENU open=PASS capture=menu result=PASS' "c148-apply-menu-open"
+                                Add-C144Click $commands "menuApply" '(?m)^\[C102-MANAGED-OUTPUT\] C148-RUNTIME-APPLY oldLines=3 newLines=5 persistence=verified runtime=committed result=PASS' "c148-apply-write"
+                                Add-C144Click $commands "options" '(?m)^\[C102-MANAGED-OUTPUT\] C144-MENU open=PASS capture=menu result=PASS' "c148-clean-close-menu-open"
+                                Add-C144Click $commands "menuClose" '(?m)^\[C102-MANAGED-OUTPUT\] C144-CLOSE popup=closed capture=none registration=bounded result=PASS' "c148-clean-close"
+                            } else {
                             if (-not (Test-C146SnapshotOutput $partial `
                                 'C146-LOAD source=missing result=PASS working=applied persisted=defaults dirty=false' `
                                 'C146-VALUES density=0 showStatus=1 advanced=0 inputEnabled=1 naturalScroll=0 speed=1 keyboardTips=1 detail=0 reportFormat=0')) {
@@ -1464,6 +1601,7 @@ function Invoke-C144Boot([string]$Esp, [string]$Serial, [string]$Stdout,
                                 'C146-VALUES density=1 showStatus=0 advanced=1 inputEnabled=1 naturalScroll=1 speed=1 keyboardTips=1 detail=0 reportFormat=0') "c146-apply-write"
                             Add-C144Click $commands "options" '(?m)^\[C102-MANAGED-OUTPUT\] C144-MENU open=PASS capture=menu result=PASS' "c146-options-close"
                             Add-C144Click $commands "menuClose" '(?m)^\[C102-MANAGED-OUTPUT\] C144-CLOSE popup=closed capture=none registration=bounded result=PASS' "c146-clean-close"
+                            }
                         }
                         "discard" {
                             if (-not (Test-C146SnapshotOutput $partial `
@@ -1488,6 +1626,12 @@ function Invoke-C144Boot([string]$Esp, [string]$Serial, [string]$Stdout,
                             Add-C144Click $commands "dirtyCancel" '(?m)^\[C102-MANAGED-OUTPUT\] C145-UNSAVED result=Cancel dirty=preserved parent=open focus=restored result=PASS' "c147-cancel-confirm"
                         }
                         "verify" {
+                            if ($isC148) {
+                                $syncMatch = [regex]::Match($partial, '(?m)^\[C102-MANAGED-OUTPUT\] C148-SETTINGS-SYNC naturalScroll=([01]) scrollLines=([1-8]) dirty=false runtime=agrees result=PASS')
+                                if (-not $syncMatch.Success) { throw 'C148 verification Settings Center did not report hydrated v2 values.' }
+                                Add-C144Click $commands "options" '(?m)^\[C102-MANAGED-OUTPUT\] C144-MENU open=PASS capture=menu result=PASS' "c148-verify-clean-close-menu"
+                                Add-C144Click $commands "menuClose" '(?m)^\[C102-MANAGED-OUTPUT\] C144-CLOSE popup=closed capture=none registration=bounded result=PASS' "c148-verify-clean-close"
+                            } else {
                             if (-not (Test-C146SnapshotOutput $partial `
                                 'C146-LOAD source=file result=PASS working=applied persisted=loaded dirty=false' `
                                 'C146-VALUES density=1 showStatus=0 advanced=1 inputEnabled=1 naturalScroll=1 speed=1 keyboardTips=1 detail=0 reportFormat=0')) {
@@ -1495,8 +1639,21 @@ function Invoke-C144Boot([string]$Esp, [string]$Serial, [string]$Stdout,
                             }
                             Add-C144Click $commands "options" '(?m)^\[C102-MANAGED-OUTPUT\] C144-MENU open=PASS capture=menu result=PASS' "c146-verify-clean-close-menu"
                             Add-C144Click $commands "menuClose" '(?m)^\[C102-MANAGED-OUTPUT\] C144-CLOSE popup=closed capture=none registration=bounded result=PASS' "c146-verify-clean-close"
+                            }
                         }
                         "reset" {
+                            if ($isC148) {
+                                if ($partial -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C148-SETTINGS-SYNC naturalScroll=1 scrollLines=5 dirty=false runtime=agrees result=PASS') {
+                                    throw 'C148 Reset sequence did not start from its persisted custom v2 state.'
+                                }
+                                Add-C144Click $commands "options" '(?m)^\[C102-MANAGED-OUTPUT\] C144-MENU open=PASS capture=menu result=PASS' "c148-reset-menu"
+                                Add-C144Click $commands "menuDefaults" '(?m)^\[C102-MANAGED-OUTPUT\] C145-RESET open=PASS modal=active focus=default parent=blocked result=PASS' "c148-reset-open"
+                                Add-C144Click $commands "resetConfirm" '(?m)^\[C102-MANAGED-OUTPUT\] C145-RESET result=Reset working=defaults dirty=updated viewport=valid focus=restored result=PASS' "c148-reset-confirm"
+                                Add-C144Click $commands "options" '(?m)^\[C102-MANAGED-OUTPUT\] C144-MENU open=PASS capture=menu result=PASS' "c148-reset-apply-menu-open"
+                                Add-C144Click $commands "menuApply" '(?m)^\[C102-MANAGED-OUTPUT\] C148-RUNTIME-APPLY oldLines=5 newLines=3 persistence=verified runtime=committed result=PASS' "c148-reset-apply"
+                                Add-C144Click $commands "options" '(?m)^\[C102-MANAGED-OUTPUT\] C144-MENU open=PASS capture=menu result=PASS' "c148-reset-close-menu-open"
+                                Add-C144Click $commands "menuClose" '(?m)^\[C102-MANAGED-OUTPUT\] C144-CLOSE popup=closed capture=none registration=bounded result=PASS' "c148-reset-clean-close"
+                            } else {
                             if (-not (Test-C146SnapshotOutput $partial `
                                 'C146-LOAD source=file result=PASS working=applied persisted=loaded dirty=false' `
                                 'C146-VALUES density=1 showStatus=0 advanced=1 inputEnabled=1 naturalScroll=1 speed=1 keyboardTips=1 detail=0 reportFormat=0')) {
@@ -1511,6 +1668,7 @@ function Invoke-C144Boot([string]$Esp, [string]$Serial, [string]$Stdout,
                                 'C146-VALUES density=0 showStatus=1 advanced=0 inputEnabled=1 naturalScroll=0 speed=1 keyboardTips=1 detail=0 reportFormat=0') "c146-reset-apply"
                             Add-C144Click $commands "options" '(?m)^\[C102-MANAGED-OUTPUT\] C144-MENU open=PASS capture=menu result=PASS' "c146-reset-clean-close-menu"
                             Add-C144Click $commands "menuClose" '(?m)^\[C102-MANAGED-OUTPUT\] C144-CLOSE popup=closed capture=none registration=bounded result=PASS' "c146-reset-clean-close"
+                            }
                         }
                         "defaults" {
                             if (-not (Test-C146SnapshotOutput $partial `
@@ -1694,6 +1852,7 @@ function Invoke-C144Boot([string]$Esp, [string]$Serial, [string]$Stdout,
                                 "densityRow2" { [pscustomobject]@{ x = $geometry.density.x + 12; y = $geometry.density.y + 45 } }
                                 "speed" { $geometry.speed }
                                 "speedRow3" { [pscustomobject]@{ x = $geometry.speed.x + 12; y = $geometry.speed.y + 63 } }
+                                "scrollLines" { $geometry.scrollLines }
                                 "showStatus" { $geometry.showStatus }
                                 "naturalWheel" { $geometry.naturalWheel }
                                 "detailMode" { $geometry.detailMode }
@@ -1751,8 +1910,15 @@ function Invoke-C144Boot([string]$Esp, [string]$Serial, [string]$Stdout,
     finally {
         $process.Refresh()
         if (-not $process.HasExited) {
-            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-            Wait-Process -Id $process.Id -Timeout 5 -ErrorAction SilentlyContinue
+            if ($isC148) {
+                try { Stop-C148QemuCleanly $MonitorPort $process $MonitorLog }
+                catch { Add-Content -LiteralPath $MonitorLog -Value ("shutdown=quit error=" + $_.Exception.Message) -Encoding ASCII }
+                $process.Refresh()
+            }
+            if (-not $process.HasExited) {
+                Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+                Wait-Process -Id $process.Id -Timeout 5 -ErrorAction SilentlyContinue
+            }
         }
     }
     $process.Refresh()
@@ -2171,6 +2337,11 @@ function Assert-C120Serial([string]$Serial) {
         '^\[NATIVEAOT-TLS-BRIDGE\] install=.*result=00000001',
         '^\[NATIVEAOT-HEAP\] action=initialize',
         '^\[NATIVEAOT-HEAP\] action=preserve')
+    if ($isC148 -and $Serial -match '(?m)^\[C148-NOTES-ONLY\] settings-center=not-launched result=PASS') {
+        $required = @($required | Where-Object {
+            $_ -ne '^\[C103-RUNTIME\] resident runtime reused'
+        })
+    }
     if (-not $isC145 -and -not $isC140 -and -not $isC141 -and -not $isC142 -and -not $isC143 -and -not $isC144 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and -not $isC136 -and -not $isC137 -and -not $isC138) {
         $required += @(
             '^\[C120-APPMODEL\] catalogValid=true result=PASS',
@@ -2196,7 +2367,53 @@ function Assert-C120Serial([string]$Serial) {
             '^\[C102-MANAGED-OUTPUT\] C120-TESTS cases=50 result=PASS',
             '^\[C102-MANAGED-OUTPUT\] C120-HOST tests=PASS')
     }
-    if ($isC147) {
+    if ($isC148) {
+        $notesOnlyBoot = $Serial -match '(?m)^\[C148-NOTES-ONLY\] settings-center=not-launched result=PASS'
+        $required += @(
+            '^\[C147-APPMODEL\] catalogValid=true result=PASS',
+            '^\[C147-NOTES-FIRST\] launch=PASS runtime-effect-before-settings-center=PASS result=PASS',
+            '^\[C147-NOTES-TARGET\] screenListX=[0-9A-Fa-f]+ screenListY=[0-9A-Fa-f]+ result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C147-NOTES-HOST registration=5 list=registered initial=no-focus result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C148-NOTES-CONTEXT settings=v2-migration-proof source=shared-runtime result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C148-NOTES-FIRST control=ListBox firstVisible=16 scrollLines=[1-8] before-settings-center=true result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C148-NOTES-WHEEL normalizedNotches=-1 naturalScroll=[01] scrollLines=[1-8] firstVisible=16->\d+ result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C148-NOTES-WHEEL normalizedNotches=1 naturalScroll=[01] scrollLines=[1-8] firstVisible=\d+->16 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C147-RUNTIME-SETTING source=(file|missing|invalid|io-failure) naturalScroll=[01] ready=true before-application=true result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C148-RUNTIME-SETTING source=(file|missing|invalid|io-failure) naturalScroll=[01] fileVersion=[0-2] scrollLines=[1-8] ready=true before-application=true result=PASS')
+        if ($notesOnlyBoot) {
+            $required += '^\[C148-NOTES-ONLY\] settings-center=not-launched result=PASS'
+        } else {
+            $required += @(
+                '^\[C147-PROOF\] managed-proof-started context=c147-runtime-settings notes-first=true settings-after-notes=true result=PASS',
+                '^\[C144-PROOF\] managed-proof-started context=c144-native transport=physical-qemu result=PASS',
+                '^\[C102-MANAGED-OUTPUT\] C148-FORMAT-TESTS cases=23 v1-migration=PASS v2=PASS result=PASS',
+                '^\[C102-MANAGED-OUTPUT\] C148-RUNTIME-STATE-TESTS cases=17 startup=PASS transactional-apply=PASS result=PASS',
+                '^\[C102-MANAGED-OUTPUT\] C148-CONSUMER-TESTS cases=15 ListBox=PASS TextArea=PASS clamp=PASS result=PASS',
+                '^\[C102-MANAGED-OUTPUT\] C148-FOCUSED-TESTS format=PASS runtime=PASS consumer=PASS result=PASS',
+                '^\[C102-MANAGED-OUTPUT\] C148-SETTINGS-SYNC naturalScroll=[01] scrollLines=[1-8] dirty=false runtime=agrees result=PASS',
+                '^\[C102-MANAGED-OUTPUT\] C148-COMPOSITION launch=PASS reg=10 host=10 groups=4 leaves=18 view=22 input=6 capacity=24 layout=valid result=PASS',
+                '^\[C102-MANAGED-OUTPUT\] C148-PROOF launch=PASS registration=10 hostCapacity=10 dialogCapacity=8 resetRegistrations=2 closeRegistrations=3 result=PASS',
+                '^\[C102-MANAGED-OUTPUT\] C146-FORMAT-TESTS cases=13 result=PASS',
+                '^\[C102-MANAGED-OUTPUT\] C146-STORE-TESTS cases=10 stress=50 result=PASS',
+                '^\[C102-MANAGED-OUTPUT\] C146-SETTINGS-TESTS cases=11 result=PASS',
+                '^\[C102-MANAGED-OUTPUT\] C146-FOCUSED-SUITES result=PASS',
+                '^\[C102-MANAGED-OUTPUT\] C145-FINAL viewport=valid registration=10 modal=none capture=none drag=none result=PASS')
+            if ($Serial -notmatch '(?m)^\[C148-LOAD-META\]') {
+                $required += '^\[C102-MANAGED-OUTPUT\] C148-LOAD-META path=/system/apps/GXSETT\.BIN v=[12] size=(25|26) migrate=(memory|no) unchanged=yes viewport=0 focus=normal result=PASS'
+            }
+        }
+        foreach ($pattern in $required) {
+            if ($Serial -notmatch "(?m)$pattern") { throw "C148 managed proof missing serial marker: $pattern" }
+        }
+        if ($Serial -match '(?m)^\[(?:C148|C147)-[^\r\n]*result=FAIL|PageFault|triple.?fault|FAIL_FAST|fatal kernel failure|boot failure') {
+            throw 'C148 serial output contains a runtime, migration, or real-consumer failure marker.'
+        }
+        $settingsIndex = $Serial.IndexOf('[C144-PROOF]')
+        if ($notesOnlyBoot -and $settingsIndex -ge 0) { throw 'C148 Notes-only boot unexpectedly opened Settings Center.' }
+        if (-not $notesOnlyBoot -and $settingsIndex -le $Serial.IndexOf('C148-NOTES-WHEEL')) {
+            throw 'C148 full boot must prove real Notes behavior before Settings Center.'
+        }
+    } elseif ($isC147) {
         $invalidStartupRecovery = $Serial -match '(?m)^\[C102-MANAGED-OUTPUT\] C147-RUNTIME-SETTING source=invalid naturalScroll=0 ready=true before-application=true result=PASS'
         $required += @(
             '^\[C147-APPMODEL\] catalogValid=true result=PASS',
@@ -2798,6 +3015,9 @@ $c146EspKernelSha256 = $null
 $c146ProtectedRamdiskSha256 = $null
 $c146CanonicalKernelBackup = $null
 $c146EspKernelBackup = $null
+$c148PersistenceSequences = [System.Collections.Generic.List[object]]::new()
+$script:C148NotesOnlyBoot = $false
+$script:C148StartingFileHash = ""
 if ($isC146) {
     $canonicalKernel = Join-Path $RepoRoot 'kernel\build\amd64\bin\kernel.elf'
     $espKernel = Join-Path $RepoRoot 'ESP\kernel.elf'
@@ -2853,8 +3073,9 @@ if (-not $SkipManagedBuild -and -not $providedComposite) {
         "-RuntimePackOutputRoot", $runtimePackOutputRoot,
         "-UseGuideXosRuntimePack", "-ProductionApplication", "-PersistentCompositeLifecycle",
         "-AllocationMode", "Allocating", "-ManagedProjectMode",
-        $(if ($isC147) { "C147Composite" } elseif ($isC146) { "C146Composite" } elseif ($isC145) { "C145Composite" } elseif ($isC144) { "C144Composite" } elseif ($isC143) { "C143Composite" } elseif ($isC142) { "C142Composite" } elseif ($isC141) { "C141Composite" } elseif ($isC140) { "C140Composite" } elseif ($isC139) { "C139Composite" } elseif ($isC138) { "C138Composite" } elseif ($isC137) { "C137Composite" } elseif ($isC136) { "C136Composite" } elseif ($isC135) { "C135Composite" } elseif ($isC134) { "C134Composite" } elseif ($isC133) { "C133Composite" } elseif ($isC132) { "C132Composite" } elseif ($isC131) { "C131Composite" } elseif ($isC129) { "C129Composite" } elseif ($isC128) { "C128Composite" } elseif ($isC130 -or $isC127) { "C127Composite" } elseif ($isC126) { "C126Composite" } elseif ($isC125) { "C125Composite" } elseif ($isC124) { "C124Composite" } elseif ($isC123) { "C123Composite" } elseif ($isC122) { "C122Composite" } elseif ($isC121) { "C121Composite" } else { "C120Composite" }),
+        $(if ($isC148) { "C148Composite" } elseif ($isC147) { "C147Composite" } elseif ($isC146) { "C146Composite" } elseif ($isC145) { "C145Composite" } elseif ($isC144) { "C144Composite" } elseif ($isC143) { "C143Composite" } elseif ($isC142) { "C142Composite" } elseif ($isC141) { "C141Composite" } elseif ($isC140) { "C140Composite" } elseif ($isC139) { "C139Composite" } elseif ($isC138) { "C138Composite" } elseif ($isC137) { "C137Composite" } elseif ($isC136) { "C136Composite" } elseif ($isC135) { "C135Composite" } elseif ($isC134) { "C134Composite" } elseif ($isC133) { "C133Composite" } elseif ($isC132) { "C132Composite" } elseif ($isC131) { "C131Composite" } elseif ($isC129) { "C129Composite" } elseif ($isC128) { "C128Composite" } elseif ($isC130 -or $isC127) { "C127Composite" } elseif ($isC126) { "C126Composite" } elseif ($isC125) { "C125Composite" } elseif ($isC124) { "C124Composite" } elseif ($isC123) { "C123Composite" } elseif ($isC122) { "C122Composite" } elseif ($isC121) { "C121Composite" } else { "C120Composite" }),
         "-PythonExe", $PythonExe)
+    if ($isC148) { $managedBuildArguments += @("-HeapConfiguration", "Primary256KiB") }
     if ($isC134) { $managedBuildArguments += "-IncludeC134FocusedTests" }
     if ($isC135) { $managedBuildArguments += "-IncludeC135FocusedTests" }
     if ($isC136) { $managedBuildArguments += "-IncludeC136FocusedTests" }
@@ -2876,7 +3097,8 @@ $kernelFlags = "-DGXOS_NATIVEAOT_PRODUCTION_APPLICATION -DGXOS_NATIVEAOT_PRODUCT
 if ($isC145) {
     $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL -DGXOS_NATIVEAOT_C123_MANAGED_SEPARATOR -DGXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON -DGXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR -DGXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C127_MANAGED_PANEL -DGXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE -DGXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT -DGXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX -DGXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON -DGXOS_NATIVEAOT_C133_REUSABLE_COMBOBOX -DGXOS_NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING -DGXOS_NATIVEAOT_C135_REUSABLE_POPUP_MENU -DGXOS_NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU -DGXOS_NATIVEAOT_C137_MOUSE_WHEEL_SCROLLING -DGXOS_NATIVEAOT_C138_REUSABLE_SCROLLBAR -DGXOS_NATIVEAOT_C139_SHARED_SCROLL_VIEWPORT -DGXOS_NATIVEAOT_C140_MANAGED_SCROLL_VIEW -DGXOS_NATIVEAOT_C141_MANAGED_VERTICAL_STACK -DGXOS_NATIVEAOT_C142_MANAGED_VERTICAL_STACK -DGXOS_NATIVEAOT_C143_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C144_MANAGED_SETTINGS_CENTER -DGXOS_NATIVEAOT_C145_MANAGED_MODAL_DIALOG"
     if ($isC146) { $kernelFlags += " -DGXOS_NATIVEAOT_C146_SETTINGS_PERSISTENCE" }
-    if ($isC147) { $kernelFlags += " -DGXOS_NATIVEAOT_C147_RUNTIME_SETTINGS" }
+    if ($isC147 -or $isC148) { $kernelFlags += " -DGXOS_NATIVEAOT_C147_RUNTIME_SETTINGS" }
+    if ($isC148) { $kernelFlags += " -DGXOS_NATIVEAOT_C148_SETTINGS_V2" }
 }
 elseif ($isC144) {
     $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL -DGXOS_NATIVEAOT_C123_MANAGED_SEPARATOR -DGXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON -DGXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR -DGXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C127_MANAGED_PANEL -DGXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE -DGXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT -DGXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX -DGXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON -DGXOS_NATIVEAOT_C133_REUSABLE_COMBOBOX -DGXOS_NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING -DGXOS_NATIVEAOT_C135_REUSABLE_POPUP_MENU -DGXOS_NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU -DGXOS_NATIVEAOT_C137_MOUSE_WHEEL_SCROLLING -DGXOS_NATIVEAOT_C138_REUSABLE_SCROLLBAR -DGXOS_NATIVEAOT_C139_SHARED_SCROLL_VIEWPORT -DGXOS_NATIVEAOT_C140_MANAGED_SCROLL_VIEW -DGXOS_NATIVEAOT_C141_MANAGED_VERTICAL_STACK -DGXOS_NATIVEAOT_C142_MANAGED_VERTICAL_STACK -DGXOS_NATIVEAOT_C143_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C144_MANAGED_SETTINGS_CENTER"
@@ -2941,6 +3163,67 @@ if ($isC146 -and -not (Test-Path -LiteralPath $proofKernelPath -PathType Leaf)) 
 if ($isC146 -and -not $SkipKernelBuild -and $proofKernelPath -ne $kernelPath) {
     throw 'Pass -SkipKernelBuild when supplying an external C146 proof kernel.'
 }
+$c148NotesOnlyKernelPath = $null
+$c148UiKernelPath = $null
+$c148KernelVariantsReused = $false
+if ($isC148) {
+    $kernelEvidenceRoot = Join-Path $EvidenceRoot 'kernels'
+    New-Item -ItemType Directory -Force -Path $kernelEvidenceRoot | Out-Null
+    $c148UiKernelPath = Join-Path $kernelEvidenceRoot 'kernel-c148-ui.elf'
+    $c148NotesOnlyKernelPath = Join-Path $kernelEvidenceRoot 'kernel-c148-notes-only.elf'
+    if ($SkipKernelBuild) {
+        foreach ($variant in @($c148UiKernelPath, $c148NotesOnlyKernelPath)) {
+            if (-not (Test-Path -LiteralPath $variant -PathType Leaf)) {
+                throw "C148 cached kernel variant is missing: $variant"
+            }
+        }
+        $variantTimes = @(
+            (Get-Item -LiteralPath $c148UiKernelPath).LastWriteTimeUtc,
+            (Get-Item -LiteralPath $c148NotesOnlyKernelPath).LastWriteTimeUtc)
+        $variantTime = $variantTimes | Sort-Object | Select-Object -First 1
+        $kernelSourceRoot = Join-Path $RepoRoot 'kernel'
+        $kernelSourceInputs = @(Get-ChildItem -LiteralPath $kernelSourceRoot -Recurse -File |
+            Where-Object {
+                $_.FullName -notmatch '\\build\\' -and
+                ($_.Extension -in @('.c', '.cc', '.cpp', '.h', '.hpp', '.s', '.S', '.asm', '.inc', '.ld', '.mk') -or
+                    $_.Name -eq 'Makefile')
+            })
+        $kernelSourceInputs += @(Get-Item -LiteralPath (Join-Path $RepoRoot 'compositor.cpp'),
+            (Join-Path $RepoRoot 'built_in_app_metadata.h'))
+        $newerInputs = @($kernelSourceInputs | Where-Object { $_.LastWriteTimeUtc -gt $variantTime })
+        if ($newerInputs.Count -gt 0) {
+            throw "C148 cached proof kernels are stale; newer kernel input exists: $($newerInputs[0].FullName)"
+        }
+        $uiBytes = [System.IO.File]::ReadAllBytes($c148UiKernelPath)
+        $notesOnlyBytes = [System.IO.File]::ReadAllBytes($c148NotesOnlyKernelPath)
+        $uiText = [System.Text.Encoding]::ASCII.GetString($uiBytes)
+        $notesOnlyText = [System.Text.Encoding]::ASCII.GetString($notesOnlyBytes)
+        if ((Get-Hash $c148UiKernelPath) -eq (Get-Hash $c148NotesOnlyKernelPath) -or
+            -not $uiText.Contains('[C147-PROOF]') -or
+            -not $uiText.Contains('[C144-PROOF]') -or
+            $uiText.Contains('[C148-NOTES-ONLY]') -or
+            -not $notesOnlyText.Contains('[C148-NOTES-ONLY]') -or
+            $notesOnlyText.Contains('[C144-PROOF]') -or
+            $notesOnlyText.Contains('[C147-PROOF]')) {
+            throw 'C148 cached proof kernels do not contain distinct, expected launch variants.'
+        }
+        $proofKernelPath = $c148UiKernelPath
+        $c148KernelVariantsReused = $true
+        Write-Host '[C148] reused source-freshness-verified UI and Notes-only kernel variants.'
+    } else {
+        if ($proofKernelPath -ne $kernelPath) {
+            throw 'C148 proof variants must be built from the canonical kernel source in this run.'
+        }
+        Copy-Item -LiteralPath $proofKernelPath -Destination $c148UiKernelPath -Force
+        $notesOnlyFlags = $kernelFlags + ' -DGXOS_NATIVEAOT_C148_NOTES_ONLY'
+        Invoke-Checked 'mingw32-make' @('-C', (Join-Path $RepoRoot 'kernel'), 'ARCH=amd64', "EXTRA_CFLAGS=$notesOnlyFlags", '-B')
+        Copy-Item -LiteralPath $kernelPath -Destination $c148NotesOnlyKernelPath -Force
+        Copy-Item -LiteralPath $c148UiKernelPath -Destination $kernelPath -Force
+        if ((Get-Hash $kernelPath) -ne (Get-Hash $c148UiKernelPath)) {
+            throw 'C148 could not restore the full Settings Center proof kernel after building Notes-only variant.'
+        }
+    }
+}
 
 $inputs = [ordered]@{
     compositeElf = $compositeElf; compositeElfSha256 = Get-Hash $compositeElf
@@ -2977,6 +3260,9 @@ if ($isC136) {
 }
 
 $bootResults = [System.Collections.Generic.List[object]]::new()
+$c148ProofKernelSha256 = $null
+$script:C148NotesOnlyBoot = $false
+$script:C148StartingFileHash = $null
 if (-not $SkipQemu) {
     $qemu = Get-Tool "qemu-system-x86_64.exe" @(
         "C:\Program Files\qemu\qemu-system-x86_64.exe",
@@ -2987,7 +3273,213 @@ if (-not $SkipQemu) {
         "C:\Program Files (x86)\qemu\share\edk2-x86_64-code.fd")
     if (-not $qemu) { throw "qemu-system-x86_64.exe was not found." }
     if (-not $ovmf) { throw "OVMF code image was not found." }
-    if ($isC146) {
+    if ($isC148) {
+        $authenticV1 = New-C148AuthenticV1Record
+        $legacySnapshot = [ordered]@{ density = 1; showStatus = 0; advanced = 1; inputEnabled = 1; naturalScroll = 1; speed = 1; keyboardTips = 1; detail = 0; reportFormat = 0 }
+        $defaultSnapshotV2 = [ordered]@{ density = 0; showStatus = 1; advanced = 0; inputEnabled = 1; naturalScroll = 0; speed = 1; keyboardTips = 1; detail = 0; reportFormat = 0; scrollLines = 3 }
+        $c148ProofRoot = Join-Path $EvidenceRoot 'proof-media'
+        New-Item -ItemType Directory -Force -Path $c148ProofRoot | Out-Null
+
+        for ($sequence = 1; $sequence -le 3; $sequence++) {
+            $sequenceRoot = Join-Path $EvidenceRoot ("sequence-{0:D2}" -f $sequence)
+            $esp = Join-Path $sequenceRoot 'test-media\ESP'
+            New-Item -ItemType Directory -Force -Path $sequenceRoot | Out-Null
+            if (Test-Path -LiteralPath $esp) {
+                $resolvedEsp = [System.IO.Path]::GetFullPath($esp)
+                $resolvedEvidence = [System.IO.Path]::GetFullPath($EvidenceRoot).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+                if (-not $resolvedEsp.StartsWith($resolvedEvidence, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    throw "C148 sequence ESP cleanup target escaped evidence root: $resolvedEsp"
+                }
+                Remove-Item -LiteralPath $resolvedEsp -Recurse -Force
+            }
+            Stage-Esp $esp $c148UiKernelPath $bootloaderPath $stagingImage
+            $settingsPath = Join-Path $esp 'GXSETT.BIN'
+            [byte[]]$startingBytes = if ($sequence -eq 1) {
+                $authenticV1
+            } elseif ($sequence -eq 2) {
+                New-C148V2Record $authenticV1 7
+            } else {
+                New-C148V2Record $authenticV1 5
+            }
+            [System.IO.File]::WriteAllBytes($settingsPath, $startingBytes)
+            $startingFile = Get-C146PersistedSnapshot $settingsPath
+            $startingMediaHash = Get-DirectoryHash $esp
+            if (($sequence -eq 1 -and ($startingFile.version -ne 1 -or $startingFile.size -ne 25 -or $startingFile.sha256 -ne '952CA2183EE7DA2923EF76DBC121193C499750BDA7627D862D7F8B8BF5734FF5')) -or
+                ($sequence -eq 2 -and ($startingFile.version -ne 2 -or $startingFile.scrollLines -ne 7)) -or
+                ($sequence -eq 3 -and ($startingFile.version -ne 2 -or $startingFile.scrollLines -ne 5))) {
+                throw "C148 sequence $sequence starting proof record did not match its required authentic format and settings."
+            }
+            $roles = @(if ($sequence -eq 1) { @('v1-readonly', 'write', 'verify') } elseif ($sequence -eq 2) { @('verify') } else { @('reset', 'verify') })
+            $expectedByRole = @{}
+            if ($sequence -eq 1) { $expectedByRole['v1-readonly'] = @{ natural = 1; amount = 3 }; $expectedByRole['write'] = @{ natural = 1; amount = 3 }; $expectedByRole['verify'] = @{ natural = 1; amount = 5 } }
+            elseif ($sequence -eq 2) { $expectedByRole['verify'] = @{ natural = 1; amount = 7 } }
+            else { $expectedByRole['reset'] = @{ natural = 1; amount = 5 }; $expectedByRole['verify'] = @{ natural = 0; amount = 3 } }
+            $bootEvidence = [ordered]@{}
+            $postApplyFile = $null
+            foreach ($roleIndex in 0..($roles.Count - 1)) {
+                $role = $roles[$roleIndex]
+                $script:C148NotesOnlyBoot = $role -eq 'v1-readonly' -or ($role -eq 'verify' -and $sequence -in @(1, 3))
+                $bootKernel = if ($script:C148NotesOnlyBoot) { $c148NotesOnlyKernelPath } else { $c148UiKernelPath }
+                Stage-Esp $esp $bootKernel $bootloaderPath $stagingImage
+                $script:C148StartingFileHash = Get-Hash $settingsPath
+                $bootRoot = Join-Path $sequenceRoot ("boot-{0}" -f $role)
+                New-Item -ItemType Directory -Force -Path $bootRoot | Out-Null
+                Start-Sleep -Seconds 2
+                $serial = Join-Path $bootRoot 'serial.log'
+                $stdout = Join-Path $bootRoot 'qemu.stdout.log'
+                $stderr = Join-Path $bootRoot 'qemu.stderr.log'
+                $monitorLog = Join-Path $bootRoot 'qemu-monitor.log'
+                $monitorPort = 46800 + ($sequence * 10) + $roleIndex
+                foreach ($bootOutput in @($serial, $stdout, $stderr, $monitorLog)) {
+                    if (Test-Path -LiteralPath $bootOutput) { Remove-Item -LiteralPath $bootOutput -Force }
+                }
+                $boot = Invoke-C144Boot $esp $serial $stdout $stderr $monitorLog $monitorPort $qemu $ovmf $role
+                try { $classification = Assert-C120Serial $boot.serial }
+                catch { $classification = [pscustomobject]@{ outcome = if ($boot.timedOut) { 'TIMEOUT' } else { 'FAIL' }; error = $_.Exception.Message } }
+                if ($classification.outcome -eq 'PASS') {
+                    $expected = $expectedByRole[$role]
+                    Assert-C148NotesStartupBehavior $boot.serial $expected.natural $expected.amount $role $script:C148NotesOnlyBoot
+                }
+                $bootResults.Add([pscustomobject]@{
+                    boot = ("sequence-{0:D2}-{1}" -f $sequence, $role); sequence = $sequence; role = $role
+                    outcome = $classification.outcome; classification = $classification
+                    serialPath = $boot.serialPath; serialSha256 = $boot.serialSha256
+                    stdoutPath = $boot.stdoutPath; stderrPath = $boot.stderrPath
+                    monitorPath = $boot.monitorPath; qemuExitCode = $boot.qemuExitCode; timedOut = $boot.timedOut
+                }) | Out-Null
+                $bootEvidence[$role] = [ordered]@{
+                    serialPath = $boot.serialPath; serialSha256 = $boot.serialSha256
+                    outcome = $classification.outcome; settingsFileSha256BeforeBoot = $script:C148StartingFileHash
+                    kernelSha256 = Get-Hash $bootKernel; notesOnly = $script:C148NotesOnlyBoot
+                    naturalScroll = $expectedByRole[$role].natural; scrollLines = $expectedByRole[$role].amount
+                    noteWheelMarkers = @([regex]::Matches($boot.serial, '(?m)^\[C102-MANAGED-OUTPUT\] C148-NOTES-WHEEL .+result=PASS')).Count
+                }
+                Write-Host ("[C148] sequence={0} boot={1} outcome={2} serial={3}" -f $sequence, $role, $classification.outcome, $serial)
+                if ($classification.outcome -ne 'PASS') { throw "C148 sequence $sequence role '$role' failed: $($classification.error)" }
+
+                $current = Get-C146PersistedSnapshot $settingsPath
+                if ($role -eq 'v1-readonly') {
+                    if ($current.version -ne 1 -or $current.size -ne 25 -or
+                        $current.sha256 -ne $startingFile.sha256) {
+                        throw 'C148 Notes-only v1 boot changed the legacy settings file without Apply.'
+                    }
+                    $bootEvidence[$role].settingsFileVersionAfterBoot = $current.version
+                    $bootEvidence[$role].settingsFileSizeAfterBoot = $current.size
+                    $bootEvidence[$role].settingsFileSha256AfterBoot = $current.sha256
+                } elseif ($role -eq 'write') {
+                    if ($current.version -ne 2 -or $current.size -ne 26 -or
+                        $current.scrollLines -ne 5 -or $current.naturalScroll -ne 1) {
+                        throw 'C148 v1 Apply did not produce the expected v2 custom record.'
+                    }
+                    foreach ($key in $legacySnapshot.Keys) {
+                        if ($current.$key -ne $legacySnapshot[$key]) { throw "C148 v1 migration changed legacy field '$key'." }
+                    }
+                    if ($boot.serial -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C148-RUNTIME-APPLY oldLines=3 newLines=5 persistence=verified runtime=committed result=PASS' -or
+                        $boot.serial -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C148-WORKING scrollLines=5 applied=3 runtime=3 persisted=3 dirty=true result=PASS') {
+                        throw 'C148 Apply did not prove working isolation followed by a verified runtime commit.'
+                    }
+                    $postApplyFile = $current
+                    $bootEvidence[$role].settingsFileVersionAfterApply = $current.version
+                    $bootEvidence[$role].settingsFileSizeAfterApply = $current.size
+                    $bootEvidence[$role].settingsFileSha256AfterApply = $current.sha256
+                    $bootEvidence[$role].migratedNaturalScroll = $current.naturalScroll
+                    $bootEvidence[$role].migratedScrollLines = $current.scrollLines
+                } elseif ($role -eq 'reset') {
+                    if ($current.version -ne 2 -or $current.size -ne 26 -or
+                        $current.naturalScroll -ne 0 -or $current.scrollLines -ne 3) {
+                        throw 'C148 Reset+Apply did not persist the canonical default v2 snapshot.'
+                    }
+                    foreach ($key in $defaultSnapshotV2.Keys) {
+                        if ($current.$key -ne $defaultSnapshotV2[$key]) { throw "C148 Reset persisted nondefault '$key'." }
+                    }
+                    if ($boot.serial -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C148-RESET scrollLines=working-default runtime=preserved persisted=preserved result=PASS' -or
+                        $boot.serial -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C148-RUNTIME-APPLY oldLines=5 newLines=3 persistence=verified runtime=committed result=PASS') {
+                        throw 'C148 Reset did not preserve custom runtime until explicit Apply.'
+                    }
+                    $postApplyFile = $current
+                } elseif ($role -eq 'verify') {
+                    if ($current.sha256 -ne $script:C148StartingFileHash -and $sequence -eq 2) {
+                        throw 'C148 v2 hydration or clean close unexpectedly rewrote the sequence-2 file.'
+                    }
+                    $expectedFile = if ($sequence -eq 1) { @{ version = 2; amount = 5; natural = 1 } } elseif ($sequence -eq 2) { @{ version = 2; amount = 7; natural = 1 } } else { @{ version = 2; amount = 3; natural = 0 } }
+                    if ($current.version -ne $expectedFile.version -or $current.scrollLines -ne $expectedFile.amount -or $current.naturalScroll -ne $expectedFile.natural) {
+                        throw "C148 sequence $sequence fresh Notes boot read unexpected persisted values."
+                    }
+                    if (-not $script:C148NotesOnlyBoot -and $boot.serial -notmatch "(?m)^\[C102-MANAGED-OUTPUT\] C148-SETTINGS-SYNC naturalScroll=$($expectedFile.natural) scrollLines=$($expectedFile.amount) dirty=false runtime=agrees result=PASS") {
+                        throw 'C148 sequence-2 Settings Center did not hydrate both v2 settings cleanly.'
+                    }
+                }
+                if ($script:C148NotesOnlyBoot -and $boot.serial -notmatch '(?m)^\[C148-NOTES-ONLY\] settings-center=not-launched result=PASS') {
+                    throw "C148 sequence $sequence verification boot opened Settings Center."
+                }
+            }
+            $finalFile = Get-C146PersistedSnapshot $settingsPath
+            $expectedFinal = if ($sequence -eq 3) { $defaultSnapshotV2 } else { $finalFile }
+            if ($sequence -eq 1 -and ($startingFile.version -ne 1 -or $postApplyFile.version -ne 2)) { throw 'C148 sequence 1 failed v1-to-v2 migration.' }
+            if ($sequence -eq 2 -and ($startingFile.version -ne 2 -or $finalFile.sha256 -ne $startingFile.sha256)) { throw 'C148 sequence 2 did not retain its seeded v2 settings.' }
+            $c148PersistenceSequences.Add([ordered]@{
+                sequence = $sequence; outcome = 'PASS'; testMediaPath = $esp
+                startingTestMediaSha256 = $startingMediaHash
+                startingSettingsFileVersion = $startingFile.version
+                startingSettingsFileSize = $startingFile.size
+                startingSettingsFileSha256 = $startingFile.sha256
+                startingSnapshot = $startingFile
+                postApplySettingsFile = $postApplyFile
+                finalSettingsFile = $finalFile
+                finalSettingsFileSha256 = $finalFile.sha256
+                boots = $bootEvidence
+            }) | Out-Null
+        }
+
+        $corruptRoot = Join-Path $EvidenceRoot 'startup-matrix\malformed-v2'
+        $corruptEsp = Join-Path $corruptRoot 'test-media\ESP'
+        New-Item -ItemType Directory -Force -Path $corruptRoot | Out-Null
+        Stage-Esp $corruptEsp $c148NotesOnlyKernelPath $bootloaderPath $stagingImage
+        $corruptV2 = New-C148MalformedV2Record (New-C148V2Record $authenticV1 5)
+        $corruptPath = Join-Path $corruptEsp 'GXSETT.BIN'
+        [System.IO.File]::WriteAllBytes($corruptPath, $corruptV2)
+        $corruptHash = Get-Hash $corruptPath
+        $script:C148StartingFileHash = $corruptHash; $script:C148NotesOnlyBoot = $true
+        $corruptSerial = Join-Path $corruptRoot 'serial.log'
+        $corruptStdout = Join-Path $corruptRoot 'qemu.stdout.log'
+        $corruptStderr = Join-Path $corruptRoot 'qemu.stderr.log'
+        $corruptMonitor = Join-Path $corruptRoot 'qemu-monitor.log'
+        $corruptBoot = Invoke-C144Boot $corruptEsp $corruptSerial $corruptStdout $corruptStderr $corruptMonitor 46991 $qemu $ovmf 'corrupt-v2'
+        $corruptClassification = Assert-C120Serial $corruptBoot.serial
+        Assert-C148NotesStartupBehavior $corruptBoot.serial 0 3 'malformed-v2' $true
+        if ($corruptClassification.outcome -ne 'PASS' -or
+            $corruptBoot.serial -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C148-RUNTIME-SETTING source=invalid naturalScroll=0 fileVersion=2 scrollLines=3 ready=true before-application=true result=PASS' -or
+            (Get-Hash $corruptPath) -ne $corruptHash) {
+            throw 'C148 malformed v2 did not fall back to the default runtime without rewriting the bad file.'
+        }
+        $bootResults.Add([pscustomobject]@{ boot = 'startup-matrix-malformed-v2'; sequence = 0; role = 'malformed-v2'; outcome = 'PASS'; classification = $corruptClassification; serialPath = $corruptBoot.serialPath; serialSha256 = $corruptBoot.serialSha256; stdoutPath = $corruptBoot.stdoutPath; stderrPath = $corruptBoot.stderrPath; monitorPath = $corruptBoot.monitorPath; qemuExitCode = $corruptBoot.qemuExitCode; timedOut = $corruptBoot.timedOut }) | Out-Null
+        $c148ProofKernelSha256 = Get-Hash $c148UiKernelPath
+        Copy-Item -LiteralPath $c146CanonicalKernelBackup -Destination $kernelPath -Force
+        Copy-Item -LiteralPath $c146EspKernelBackup -Destination (Join-Path $RepoRoot 'ESP\kernel.elf') -Force
+        if ((Get-Hash $kernelPath) -ne $c146CanonicalKernelSha256 -or
+            (Get-Hash (Join-Path $RepoRoot 'ESP\kernel.elf')) -ne $c146EspKernelSha256 -or
+            (Get-Hash (Join-Path $RepoRoot 'ESP\ramdisk.img')) -ne $c146ProtectedRamdiskSha256) {
+            throw 'C148 could not restore canonical kernels and preserve the protected ramdisk.'
+        }
+        for ($ordinaryBoot = 1; $ordinaryBoot -le 3; $ordinaryBoot++) {
+            $ordinaryRoot = Join-Path $EvidenceRoot ("ordinary-boot-{0:D2}" -f $ordinaryBoot)
+            $ordinaryEsp = Join-Path $ordinaryRoot 'ESP'
+            New-Item -ItemType Directory -Force -Path $ordinaryRoot | Out-Null
+            Stage-Esp $ordinaryEsp $kernelPath $bootloaderPath (Join-Path $RepoRoot 'ESP\ramdisk.img')
+            $serial = Join-Path $ordinaryRoot 'serial.log'
+            $stdout = Join-Path $ordinaryRoot 'qemu.stdout.log'
+            $stderr = Join-Path $ordinaryRoot 'qemu.stderr.log'
+            $ordinary = Invoke-C146OrdinaryBoot $ordinaryEsp $serial $stdout $stderr $ordinaryBoot $qemu $ovmf
+            if ($ordinary.serial -match 'C148-|C147-RUNTIME-SETTING') { throw "C148 proof marker leaked into ordinary boot $ordinaryBoot." }
+            $c146OrdinaryBoots.Add([ordered]@{ boot = $ordinaryBoot; outcome = 'PASS'; serialPath = $ordinary.serialPath; serialSha256 = $ordinary.serialSha256; kernelSha256 = Get-Hash (Join-Path $ordinaryEsp 'kernel.elf'); ramdiskSha256 = Get-Hash (Join-Path $ordinaryEsp 'ramdisk.img') }) | Out-Null
+            Write-Host ("[C148] ordinary-boot={0} outcome=PASS serial={1}" -f $ordinaryBoot, $ordinary.serialPath)
+        }
+        if ((Get-Hash $kernelPath) -ne $c146CanonicalKernelSha256 -or
+            (Get-Hash (Join-Path $RepoRoot 'ESP\kernel.elf')) -ne $c146EspKernelSha256 -or
+            (Get-Hash (Join-Path $RepoRoot 'ESP\ramdisk.img')) -ne $c146ProtectedRamdiskSha256) {
+            throw 'C148 final ordinary artifacts differ from their original protected hashes.'
+        }
+    } elseif ($isC146) {
         $customSnapshot = [ordered]@{ density = 1; showStatus = 0; advanced = 1; inputEnabled = 1; naturalScroll = 1; speed = 1; keyboardTips = 1; detail = 0; reportFormat = 0 }
         $defaultSnapshot = [ordered]@{ density = 0; showStatus = 1; advanced = 0; inputEnabled = 1; naturalScroll = 0; speed = 1; keyboardTips = 1; detail = 0; reportFormat = 0 }
         for ($sequence = 1; $sequence -le 3; $sequence++) {
@@ -3292,9 +3784,9 @@ $primarySerialRelative = if ($isC146) { "sequence-01\boot-write\serial.log" } el
 $evidenceSerial = if ($bootResults.Count -gt 0) {
     Get-Content -LiteralPath (Join-Path $EvidenceRoot $primarySerialRelative)
 } else { @("QEMU not executed; build-only evidence.") }
-$evidenceSerial | Where-Object { $_ -match '^\[(?:C146|C145|C144|C143|C142|C141|C140|C138|C137|C136|C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C125|C124|C123|C122|C121|C120|C119|C118|C117|C116|C115)-' } |
+$evidenceSerial | Where-Object { $_ -match '^\[(?:C148|C147|C146|C145|C144|C143|C142|C141|C140|C138|C137|C136|C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C125|C124|C123|C122|C121|C120|C119|C118|C117|C116|C115)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "managed-control-host-output.txt") -Encoding ASCII
-$evidenceSerial | Where-Object { $_ -match '^\[(?:C146|C145|C144|C143|C142|C141|C140|C138|C137|C136|C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C124|C123|C122|C121|C120)-' } |
+$evidenceSerial | Where-Object { $_ -match '^\[(?:C148|C147|C146|C145|C144|C143|C142|C141|C140|C138|C137|C136|C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C124|C123|C122|C121|C120)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "control-host-evidence.txt") -Encoding ASCII
 $evidenceSerial | Where-Object { $_ -match '^\[(?:C116|C117|C118|C119)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "regression-evidence.txt") -Encoding ASCII
@@ -3367,6 +3859,8 @@ $sourceFiles = @(
     "samples\managed\HostLogProof\GuideXos\GuideXosSharedScrollViewportC139Tests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosScrollView.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosScrollViewC140Tests.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosSettingsV2C148Tests.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosRuntimeSettingsC147Tests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosVerticalStackMember.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosVerticalStack.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosVerticalStackC141Tests.cs",
@@ -3380,6 +3874,8 @@ $sourceFiles = @(
     "samples\managed\HostLogProof\Applications\ManagedVerticalStackDemo.cs",
     "samples\managed\HostLogProof\Applications\ManagedGroupBoxDemo.cs",
     "samples\managed\HostLogProof\Applications\ManagedSettingsCenter.cs",
+    "samples\managed\HostLogProof\Applications\ManagedSettingsRuntime.cs",
+    "samples\managed\HostLogProof\Applications\ManagedSettingsStore.cs",
     "samples\managed\HostLogProof\Applications\ManagedGroupBoxDemo.cs",
     "samples\managed\HostLogProof\HostLogProof.csproj",
     "samples\managed\HostLogProof\NativeAbi.cs",
@@ -3401,6 +3897,7 @@ $sourceFiles = @(
     "scripts\dotnet\run-c144-managed-settings-center.ps1",
     "scripts\dotnet\run-c145-managed-modal-dialog.ps1",
     "scripts\dotnet\run-c146-settings-persistence.ps1",
+    "scripts\dotnet\run-c148-settings-v2-scroll-amount.ps1",
     "scripts\dotnet\run-c139-shared-scroll-viewport.ps1",
     "docs\dotnet\NATIVEAOT_C122_MANAGED_LABEL.md",
     "docs\dotnet\NATIVEAOT_C123_MANAGED_SEPARATOR.md",
@@ -3427,6 +3924,7 @@ $sourceFiles = @(
     "docs\dotnet\NATIVEAOT_C144_MANAGED_SETTINGS_CENTER.md",
     "docs\dotnet\NATIVEAOT_C145_MANAGED_MODAL_DIALOG.md",
     "docs\dotnet\NATIVEAOT_C146_SETTINGS_PERSISTENCE.md",
+    "docs\dotnet\NATIVEAOT_C148_SETTINGS_V2_SCROLL_AMOUNT.md",
     "samples\managed\HostLogProof\GuideXos\GuideXosDialog.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosMessageBox.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosDialogC145Tests.cs",
@@ -3794,9 +4292,14 @@ if ($isC145) {
     $manifest.documentation = "docs\dotnet\NATIVEAOT_C141_MANAGED_VERTICAL_STACK_LAYOUT.md"
 }
 if ($isC146 -and -not $SkipQemu) {
-    $lastUiSerialPath = Join-Path $EvidenceRoot 'sequence-03\boot-verify\serial.log'
+    $lastUiSerialPath = if ($isC148) {
+        Join-Path $EvidenceRoot 'sequence-02\boot-verify\serial.log'
+    } else {
+        Join-Path $EvidenceRoot 'sequence-03\boot-verify\serial.log'
+    }
     $lastUiSerial = Get-Content -LiteralPath $lastUiSerialPath -Raw
-    $finalUiMarker = $lastUiSerial -match '(?m)^\[C102-MANAGED-OUTPUT\] C145-FINAL viewport=valid registration=9 modal=none capture=none drag=none result=PASS'
+    $expectedRegistration = if ($isC148) { 10 } else { 9 }
+    $finalUiMarker = $lastUiSerial -match ("(?m)^\[C102-MANAGED-OUTPUT\] C145-FINAL viewport=valid registration={0} modal=none capture=none drag=none result=PASS" -f $expectedRegistration)
     if (-not $finalUiMarker) { throw 'C146 final managed UI state did not report modal none, capture none, drag none, and a valid viewport.' }
     $manifest.outcome = 'Outcome A - durable Settings Center persistence validated'
     $manifest.hostAbi = [ordered]@{ version = 1; tableSize = 104; changed = $false; capabilityChanges = 'none'; fileCapabilities = 'existing FileRead, FileWrite, and FileStat' }
@@ -3884,6 +4387,132 @@ if ($isC146 -and -not $SkipQemu) {
         boots = @($c146OrdinaryBoots.ToArray())
     }
     $ordinaryManifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $EvidenceRoot 'ordinary.manifest.json') -Encoding ASCII
+}
+if ($isC148) {
+    $manifest.outcome = if ($SkipQemu) { 'BUILD_ONLY' } else { 'Outcome A - v2 migration and persisted scroll amount validated' }
+    $manifest.controlHost = [ordered]@{
+        api = 'GuideXosControlHost'; capacity = 8; pickerCapacity = 2
+        settingsCenterRegistrations = 10; settingsCenterRegistrationCapacity = 10
+        settingsInputGroupMembers = 6; settingsInputGroupCapacity = 8
+        settingsScrollViewMembers = 22; settingsScrollViewCapacity = 24
+        ownership = 'application owns controls; containers and dialogs retain non-owning references'
+        modalOwnerModel = 'one active modal child scope; no modal stack'
+        tests = 'C148 format 23, runtime 17, consumer 15; C147 startup 10, runtime 15, consumer 10; C146 format 13, store 10 with 50-save stress, Settings Center 11'
+    }
+    $manifest.hostAbi = [ordered]@{
+        version = 1; tableSize = 104; changed = $false; capabilityChanges = 'none'
+        fileCapabilities = 'existing FileRead, FileWrite, and FileStat'
+        inputTransport = 'existing PS/2 IntelliMouse normalization and logical wheel event; no raw transport changes'
+    }
+    $manifest.persistenceStore = [ordered]@{
+        managedPath = '/system/apps/GXSETT.BIN'; backingPath = '/GXSETT.BIN'
+        supportedVersions = @(1, 2); maximumAcceptedBytes = 64
+        byteOrder = 'little-endian'; magic = 'GXSC'; headerBytes = 12
+        v1 = [ordered]@{ version = 1; payloadBytes = 9; totalBytes = 25; semanticOffsets = '12..20'; checksumOffset = 21; checksum = 'CRC-32/IEEE over bytes 0..20' }
+        v2 = [ordered]@{ version = 2; payloadBytes = 10; totalBytes = 26; legacySemanticOffsets = '12..20 unchanged'; scrollLinesOffset = 21; checksumOffset = 22; checksum = 'CRC-32/IEEE over bytes 0..21' }
+        flags = 'u32 zero; no reserved semantic or payload bytes in v1'
+        migration = 'valid v1 preserves all nine semantic values, supplies ScrollLinesPerNotch=3 in memory, and does not write on startup or Settings Center open'
+        writePolicy = 'explicit successful Apply serializes v2, overwrites bounded file, verifies stat and full read-back, reparses and compares candidate, then commits complete runtime/applied/persisted snapshot'
+        invalid = 'unknown version, wrong length, nonzero flags, invalid enum/boolean/amount, oversized file, and CRC mismatch are rejected without partial state; runtime defaults are initialized before app dispatch'
+    }
+    $manifest.scrollAmount = [ordered]@{
+        setting = 'ScrollLinesPerNotch'; minimum = 1; maximum = 8; default = 3
+        control = 'eight-choice Input ComboBox; explicit selection index 0..7 maps to semantic amount 1..8'
+        runtimeSnapshot = 'NaturalScroll and ScrollLinesPerNotch committed together as one validated immutable GuideXosRuntimeSettingsSnapshot'
+        wheelPolicy = 'C137 normalized signed notch delta; NaturalScroll transforms direction; amount multiplies each notch; existing viewport clamps'
+        deltaBound = 'logical delta clamped to -8..+8 before safe multiplication; target consumers clamp their viewport'
+        physicalTransportChanged = $false
+    }
+    $manifest.settingsState = [ordered]@{
+        working = 'in-memory ComboBox edits'; applied = 'last accepted complete configuration'
+        runtime = 'shared C147 runtime snapshot; remains unchanged before successful Apply'
+        persisted = 'last successfully written and verified complete file snapshot'
+        reset = 'changes working controls only until explicit Apply'; failedApply = 'previous runtime/applied/persisted preserved; working remains dirty for retry'
+    }
+    $manifest.tests = [ordered]@{
+        c148Format = '23/23 expected from production NativeAOT serial marker: authentic v1 migration, no read rewrite, v2 format/CRC/bounds, invalid/corrupt/truncated/future records'
+        c148Runtime = '17/17 expected: whole-snapshot validation, amount bounds, NaturalScroll independence, working isolation, apply, reset, failed save, v1/v2 startup'
+        c148Consumer = '15/15 expected: ListBox and TextArea movement, one/default/larger amount, both directions, multi-notch, boundary/short-content clamp, apply and relaunch'
+        c146 = 'format 13/13; store 10/10 including 50-save stress; Settings Center 11/11; physical Apply/Reset/clean close paths integrated in C148 boots'
+        c147 = 'startup 10/10; runtime 15/15; consumer 10/10 and persistence error/reset/discard semantics rerun in Settings Center integrated path'
+        c137 = 'fresh focused C137 suite 46/46 PASS; three fresh physical transport/Notes boots PASS; serial hashes recorded in out/dotnet/c137-mouse-wheel-scrolling/c137.manifest.json; C148 changes only logical policy'
+        c144 = 'integrated Input ComboBox, hydration, focus, Apply, and clean-close paths; standalone C144 suite not claimed as rerun'
+        c145 = 'integrated Reset confirmation, dirty close, and MessageBox failure/retry coverage; standalone full C145 suites not claimed as rerun'
+        failureInjection = 'runtime and Settings Center suites verify failed persistence preserves prior applied/runtime/persisted values and keeps the new working value dirty for retry'
+    }
+    $manifest.regressions = [ordered]@{
+        c146 = 'format 13/13; store 10/10; Settings Center 11/11'
+        c147 = 'startup 10/10; runtime 15/15; consumer 10/10; startup precedes Managed Notes and Settings Center'
+        c137 = 'fresh C137 focused 46/46 and three boots PASS; see out/dotnet/c137-mouse-wheel-scrolling/c137.manifest.json and boot-01..03 serial logs'
+        c144 = 'integrated C148 Settings Center paths only; standalone result remains historical'
+        c145 = 'integrated C148 Dialog paths only; standalone full-suite result remains historical'
+    }
+    $manifest.persistenceSequences = @($c148PersistenceSequences.ToArray())
+    $manifest.persistenceSequenceOutcome = if ($c148PersistenceSequences.Count -eq 3 -and @($c148PersistenceSequences | Where-Object { $_.outcome -ne 'PASS' }).Count -eq 0) { 'PASS / PASS / PASS' } else { 'FAIL' }
+    $manifest.startupMatrix = [ordered]@{
+        malformedV2 = [ordered]@{
+            sourcePath = 'startup-matrix\malformed-v2\test-media\ESP\GXSETT.BIN'
+            sourceFileSha256 = if (Test-Path -LiteralPath (Join-Path $EvidenceRoot 'startup-matrix\malformed-v2\test-media\ESP\GXSETT.BIN')) { Get-Hash (Join-Path $EvidenceRoot 'startup-matrix\malformed-v2\test-media\ESP\GXSETT.BIN') } else { $null }
+            sourceVersion = 2; invalidScrollLines = 0; checksum = 'validly recomputed'
+            boot = @($bootResults.ToArray() | Where-Object { $_.role -eq 'malformed-v2' })
+            result = if ($SkipQemu) { 'NOT-RUN' } else { 'PASS; defaults applied before Notes; real default ListBox movement; invalid file unchanged' }
+        }
+    }
+    $manifest.nativeAot = [ordered]@{
+        compositeElfPath = $compositeElf; compositeElfSha256 = Get-Hash $compositeElf
+        uiProofKernelPath = $c148UiKernelPath; uiProofKernelSha256 = Get-Hash $c148UiKernelPath
+        notesOnlyProofKernelPath = $c148NotesOnlyKernelPath; notesOnlyProofKernelSha256 = Get-Hash $c148NotesOnlyKernelPath
+        proofKernelSha256 = if ($c148ProofKernelSha256) { $c148ProofKernelSha256 } else { Get-Hash $c148UiKernelPath }
+        kernelVariants = [ordered]@{
+            runAction = if ($c148KernelVariantsReused) { 'reused previously built exact C148 variants after kernel-source freshness and binary-marker checks' } else { 'built C148 UI and Notes-only variants from current sources' }
+            sourceFreshnessVerified = $true
+            uiVariantHasSettingsAndC147Markers = $true
+            notesOnlyVariantHasNoSettingsCenterMarker = $true
+        }
+        proofBoots = @($bootResults.ToArray())
+        nativeAot = $true; abiVersion = 1; abiTableSize = 104
+    }
+    $manifest.ordinaryRestoration = [ordered]@{
+        ordinaryKernelSha256Before = $c146CanonicalKernelSha256
+        ordinaryEspKernelSha256Before = $c146EspKernelSha256
+        ordinaryKernelSha256After = Get-Hash $kernelPath
+        ordinaryEspKernelSha256After = Get-Hash (Join-Path $RepoRoot 'ESP\kernel.elf')
+        protectedRamdiskSha256Before = $c146ProtectedRamdiskSha256
+        protectedRamdiskSha256After = Get-Hash (Join-Path $RepoRoot 'ESP\ramdisk.img')
+        protectedRamdiskUnchanged = ((Get-Hash (Join-Path $RepoRoot 'ESP\ramdisk.img')) -eq $c146ProtectedRamdiskSha256)
+        proofMarkerAbsentFromCanonicalKernel = ((Get-Hash $kernelPath) -eq $c146CanonicalKernelSha256)
+        ordinaryBootCount = $c146OrdinaryBoots.Count
+        ordinaryBoots = @($c146OrdinaryBoots.ToArray())
+    }
+    $manifest.finalManagedUi = [ordered]@{
+        modalOwner = 'none'; popupCapture = 'none'; pointerDragOwner = 'none'; viewport = 'valid'
+        registrationCount = 10; parentCapacity = 10
+        verifiedBy = 'C145-FINAL marker after sequence-02 fresh v2 hydration and clean Close'
+    }
+    $manifest.architectureConstraints = [ordered]@{
+        applicationOwnsControls = $true; newDaemonOrRegistry = $false; genericSchemaFramework = $false
+        recursiveOwnershipTree = $false; modalStack = $false; captureStack = $false
+        secondFocusSystem = $false; syntheticTabKeyChar = $false
+        abiVersion = 1; abiTableSize = 104
+    }
+    $manifest.documentation = 'docs\dotnet\NATIVEAOT_C148_SETTINGS_V2_SCROLL_AMOUNT.md'
+    $manifest.evidence = [ordered]@{
+        sequences = 'sequence-01 through sequence-03; sequence-01 first boots authentic v1 in Notes-only mode and proves the v1 file hash is unchanged after clean QEMU shutdown'
+        startupMatrix = 'startup-matrix\malformed-v2'
+        kernels = 'kernels\kernel-c148-ui.elf and kernels\kernel-c148-notes-only.elf'
+        ordinary = 'ordinary.manifest.json'
+        canonicalBackups = 'canonical\kernel.elf and canonical\ESP-kernel.elf'
+        serials = 'each sequence boot-role serial.log including sequence-01 boot-v1-readonly; malformed-v2 serial.log; ordinary-boot-01 through ordinary-boot-03 serial.log'
+    }
+    $ordinaryManifest = [ordered]@{
+        outcome = if ($c146OrdinaryBoots.Count -eq 3) { 'PASS' } else { 'FAIL' }
+        phase = 'C148'; kernelSha256 = Get-Hash $kernelPath
+        espKernelSha256 = Get-Hash (Join-Path $RepoRoot 'ESP\kernel.elf')
+        protectedRamdiskSha256 = Get-Hash (Join-Path $RepoRoot 'ESP\ramdisk.img')
+        protectedRamdiskMatchesStartingHash = ((Get-Hash (Join-Path $RepoRoot 'ESP\ramdisk.img')) -eq $c146ProtectedRamdiskSha256)
+        boots = @($c146OrdinaryBoots.ToArray())
+    }
+    $ordinaryManifest | ConvertTo-Json -Depth 14 | Set-Content -LiteralPath (Join-Path $EvidenceRoot 'ordinary.manifest.json') -Encoding ASCII
 }
 $manifest | ConvertTo-Json -Depth 24 | Set-Content -LiteralPath (Join-Path $EvidenceRoot ("{0}.manifest.json" -f $phaseLower)) -Encoding ASCII
 Write-Host "$ProofPhase outcome=$($manifest.outcome) evidence=$EvidenceRoot" -ForegroundColor Green

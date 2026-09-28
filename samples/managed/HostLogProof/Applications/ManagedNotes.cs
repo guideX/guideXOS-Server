@@ -664,7 +664,11 @@ public sealed class ManagedNotes : GuideXosApplication
     private const uint C137RelaunchKey = 0x11Bu;
     private const int C137ListControlId = 9;
     private readonly GuideXosListBox _c137ListBox =
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+        new(40, 32, 4, 24);
+#else
         new(16, 32, 4, 24);
+#endif
     private bool _c137ProofContext;
     private bool _c137TestsRun;
     private bool _c137TestsPassed;
@@ -702,6 +706,9 @@ public sealed class ManagedNotes : GuideXosApplication
         if (_c147RuntimeConsumerContext)
         {
             host.TryLog("C147-NOTES-CONTEXT startup=loaded list=enabled result=PASS"u8);
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+            host.TryLog("C148-NOTES-CONTEXT settings=v2-migration-proof source=shared-runtime result=PASS"u8);
+#endif
         }
 #endif
         uint launchCount = ++_launchCount;
@@ -1200,10 +1207,22 @@ public sealed class ManagedNotes : GuideXosApplication
                 )
             {
                 _c137ListBox.Reset();
-                for (int index = 0; index < 12; index++)
+                int fixtureRows = 12;
+#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+                if (_c147RuntimeConsumerContext) fixtureRows = 40;
+#endif
+                for (int index = 0; index < fixtureRows; index++)
                 {
                     _c137ListBox.TryAdd(C137FixtureLabel(index));
                 }
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+                if (_c147RuntimeConsumerContext)
+                {
+                    // Keep both directions away from the ListBox boundaries
+                    // so each real normalized notch reports its full movement.
+                    _c137ListBox.SetFirstVisibleIndex(16);
+                }
+#endif
                 _c137ListBox.Blur();
             }
 #endif
@@ -1349,6 +1368,28 @@ public sealed class ManagedNotes : GuideXosApplication
                             _mainControlHost.RegistrationCount == 5
                             ? "C147-NOTES-HOST registration=5 list=registered initial=no-focus result=PASS"u8
                             : "C147-NOTES-HOST registration=FAIL initial=no-focus result=FAIL"u8);
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+                        Span<byte> consumerReady = stackalloc byte[127];
+                        int consumerReadyLength = 0;
+                        bool consumerReadyWritten =
+                            GuideXosText.Append(consumerReady,
+                                ref consumerReadyLength,
+                                "C148-NOTES-FIRST control=ListBox firstVisible="u8) &&
+                            GuideXosText.AppendUnsigned(consumerReady,
+                                ref consumerReadyLength,
+                                (uint)_c137ListBox.FirstVisibleIndex) &&
+                            GuideXosText.Append(consumerReady,
+                                ref consumerReadyLength,
+                                " scrollLines="u8) &&
+                            GuideXosText.AppendUnsigned(consumerReady,
+                                ref consumerReadyLength,
+                                (uint)GuideXosRuntimeSettings.Current.ScrollLinesPerNotch) &&
+                            GuideXosText.Append(consumerReady,
+                                ref consumerReadyLength,
+                                " before-settings-center=true result=PASS"u8);
+                        if (consumerReadyWritten)
+                            host.TryLog(consumerReady[..consumerReadyLength]);
+#endif
                     }
                     else
 #endif
@@ -3210,6 +3251,14 @@ public sealed class ManagedNotes : GuideXosApplication
                         ? "TextArea"u8 : "ListBox"u8,
                     input.WheelDelta, before, after,
                     GuideXosRuntimeSettings.Current.NaturalScroll);
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+                if (targetId == C137ListControlId)
+                {
+                    LogC148RuntimeConsumer(host, input.WheelDelta,
+                        beforeListIndex, _c137ListBox.FirstVisibleIndex,
+                        GuideXosRuntimeSettings.Current);
+                }
+#endif
             }
 #endif
             return RenderMain(host, surface, _launchCount)
@@ -3659,6 +3708,40 @@ public sealed class ManagedNotes : GuideXosApplication
             _pathDisplayPanel.ChildCount == 2 &&
             _fullPathRadio.ParentPanel == _pathDisplayPanel &&
             _fileNameRadio.ParentPanel == _pathDisplayPanel;
+    }
+#endif
+
+#if HOSTLOGPROOF_C148_SETTINGS_V2
+    private static void LogC148RuntimeConsumer(GuideXosHost host,
+        int delta, int before, int after,
+        GuideXosRuntimeSettingsSnapshot runtime)
+    {
+        Span<byte> line = stackalloc byte[120];
+        int position = 0;
+        bool written = GuideXosText.Append(line, ref position,
+                "C148-NOTES-WHEEL normalizedNotches="u8);
+        if (written && delta < 0)
+            written = GuideXosText.Append(line, ref position, "-"u8);
+        if (written)
+        {
+            uint magnitude = delta == int.MinValue
+                ? (uint)int.MaxValue + 1u : (uint)Math.Abs(delta);
+            written = GuideXosText.AppendUnsigned(line, ref position, magnitude);
+        }
+        written = written &&
+            GuideXosText.Append(line, ref position, " naturalScroll="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                runtime.NaturalScroll ? 1u : 0u) &&
+            GuideXosText.Append(line, ref position, " scrollLines="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                (uint)runtime.ScrollLinesPerNotch) &&
+            GuideXosText.Append(line, ref position, " firstVisible="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position, (uint)before) &&
+            GuideXosText.Append(line, ref position, "->"u8) &&
+            GuideXosText.AppendUnsigned(line, ref position, (uint)after) &&
+            GuideXosText.Append(line, ref position,
+                " result=PASS"u8);
+        if (written) host?.TryLog(line[..position]);
     }
 #endif
 

@@ -92,7 +92,7 @@ public static class GuideXosRuntimeSettingsC147Tests
         result &= Case(ref cases, corrupt);
 
         var versionFiles = new MemorySettingsFiles();
-        versionFiles.SetBytes(EncodedWithVersion(2));
+        versionFiles.SetBytes(EncodedWithVersion(3));
         var versionState = new GuideXosRuntimeSettingsState();
         var versionStartup = new ManagedSettingsRuntimeStartup(versionState);
         bool unknownVersion = versionStartup.Initialize(new ManagedSettingsStore(versionFiles)) &&
@@ -354,6 +354,7 @@ public static class GuideXosRuntimeSettingsC147Tests
         ShowAdvanced = false,
         InputEnabled = true,
         NaturalScroll = naturalScroll,
+        ScrollLinesPerNotch = ManagedSettingsStore.DefaultScrollLinesPerNotch,
         ScrollSpeed = 1,
         ShowKeyboardTips = true,
         StatusDetail = 0,

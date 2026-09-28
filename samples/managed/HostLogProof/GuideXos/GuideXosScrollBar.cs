@@ -261,14 +261,22 @@ public sealed class GuideXosScrollBar
     }
 
     public GuideXosScrollBarResult HandleWheel(int wheelDelta)
+        => HandleWheel(wheelDelta, 3);
+
+    public GuideXosScrollBarResult HandleWheel(int wheelDelta,
+        int unitsPerNotch)
     {
         if (!_isVisible) return GuideXosScrollBarResult.Ignored;
         if (!_isEnabled) return GuideXosScrollBarResult.Disabled;
+        if (unitsPerNotch is < 1 or > 8) return GuideXosScrollBarResult.Rejected;
         if (_isDragging || wheelDelta == 0) return GuideXosScrollBarResult.Ignored;
         int bounded = wheelDelta;
         if (bounded > 8) bounded = 8;
         if (bounded < -8) bounded = -8;
-        return Step(-bounded * _smallChange * 3);
+        long movement = (long)-bounded * _smallChange * unitsPerNotch;
+        if (movement > int.MaxValue) movement = int.MaxValue;
+        if (movement < int.MinValue) movement = int.MinValue;
+        return Step((int)movement);
     }
 
     /// <summary>Handles one primary-button press.  Secondary clicks never act.</summary>
