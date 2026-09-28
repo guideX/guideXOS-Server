@@ -33,9 +33,14 @@ static void memcopy(void* dst, const void* src, uint32_t len)
 // Internal state
 // ================================================================
 
-static NetworkConfig s_config;
-static RouteEntry    s_routes[MAX_ROUTES];
+static ConfigurationSnapshot s_configurationBanks[2];
+static volatile uint8_t s_activeConfigurationBank = 0;
+#define s_config (s_configurationBanks[s_activeConfigurationBank].config)
+#define s_routes (s_configurationBanks[s_activeConfigurationBank].routes)
 static Statistics    s_stats;
+#if defined(GXOS_QEMU_NETWORK_CONFIGURATION_TRANSACTION_PROOF)
+static bool s_qemuFailNextConfigurationReplace = false;
+#endif
 static uint16_t      s_identification = 0;  // Packet ID counter
 
 // Protocol handlers (indexed by protocol number for common protocols)
@@ -207,8 +212,8 @@ bool verify_checksum(const Header* hdr)
 
 void init()
 {
-    memzero(&s_config, sizeof(s_config));
-    memzero(s_routes, sizeof(s_routes));
+    memzero(s_configurationBanks, sizeof(s_configurationBanks));
+    s_activeConfigurationBank = 0;
     memzero(&s_stats, sizeof(s_stats));
     memzero(s_handlers, sizeof(s_handlers));
     memzero(s_arpCache, sizeof(s_arpCache));
@@ -220,20 +225,11 @@ void init()
 
 void configure(uint32_t ip, uint32_t mask, uint32_t gateway, uint32_t dns)
 {
-    s_config.ipAddr = ip;
-    s_config.subnetMask = mask;
-    s_config.gateway = gateway;
-    s_config.dns = dns;
-    s_config.configured = true;
-    
-    // Add default route via gateway
-    if (gateway != 0) {
-        add_route(0, 0, gateway, 100);
+    if (replace_configuration(ip, mask, gateway, dns) != IP_OK) {
+        serial::puts("[IPv4] Configuration rejected; live state preserved\n");
+        return;
     }
-    
-    // Add local network route (direct)
-    add_route(ip & mask, mask, 0, 1);
-    
+
     serial::puts("[IPv4] Configured: IP=");
     char ipStr[16];
     ip_to_string(ip, ipStr);
@@ -247,6 +243,153 @@ void configure(uint32_t ip, uint32_t mask, uint32_t gateway, uint32_t dns)
     serial::putc('\n');
 }
 
+static bool validConfigurationAddress(uint32_t ip, uint32_t mask,
+                                      uint32_t gateway)
+{
+    if (ip == 0u || (ip >> 24) >= 224u || (ip >> 24) == 127u) return false;
+    bool sawZero = false;
+    uint32_t prefix = 0;
+    for (int bit = 31; bit >= 0; --bit) {
+        const bool set = (mask & (1u << bit)) != 0u;
+        if (sawZero && set) return false;
+        if (!set) sawZero = true;
+        else ++prefix;
+    }
+    if (prefix < 1u || prefix > 30u) return false;
+    const uint32_t network = ip & mask;
+    const uint32_t broadcast = network | ~mask;
+    if (ip == network || ip == broadcast) return false;
+    if (gateway != 0u && (gateway == ip || gateway == network ||
+        gateway == broadcast || (gateway >> 24) >= 224u || (gateway >> 24) == 127u ||
+        (gateway & mask) != network)) return false;
+    return true;
+}
+
+static bool sameRoute(const RouteEntry& left, uint32_t network, uint32_t mask,
+                      uint32_t gateway, uint8_t metric)
+{
+    return left.active && left.network == network && left.mask == mask &&
+        left.gateway == gateway && left.metric == metric;
+}
+
+static bool appendRoute(RouteEntry* routes, uint32_t network, uint32_t mask,
+                        uint32_t gateway, uint8_t metric)
+{
+    for (uint8_t i = 0; i < MAX_ROUTES; ++i) {
+        if (sameRoute(routes[i], network, mask, gateway, metric)) return true;
+    }
+    for (uint8_t i = 0; i < MAX_ROUTES; ++i) {
+        if (!routes[i].active) {
+            routes[i].network = network;
+            routes[i].mask = mask;
+            routes[i].gateway = gateway;
+            routes[i].metric = metric;
+            routes[i].active = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+Status replace_configuration(uint32_t ip, uint32_t mask,
+                             uint32_t gateway, uint32_t dns)
+{
+    if (!validConfigurationAddress(ip, mask, gateway)) return IP_ERR_INVALID_CONFIG;
+#if defined(GXOS_QEMU_NETWORK_CONFIGURATION_TRANSACTION_PROOF)
+    if (s_qemuFailNextConfigurationReplace) {
+        s_qemuFailNextConfigurationReplace = false;
+        return IP_ERR_NO_ROUTE;
+    }
+#endif
+
+    RouteEntry nextRoutes[MAX_ROUTES];
+    memzero(nextRoutes, sizeof(nextRoutes));
+    // Preserve routes not owned by the previous interface configuration.
+    // Current guideXOS call sites create only these two managed routes.
+    for (uint8_t i = 0; i < MAX_ROUTES; ++i) {
+        const RouteEntry& route = s_routes[i];
+        if (!route.active) continue;
+        const bool oldDefault = s_config.configured && route.network == 0u &&
+            route.mask == 0u && route.gateway == s_config.gateway && route.metric == 100u;
+        const bool oldLocal = s_config.configured &&
+            route.network == (s_config.ipAddr & s_config.subnetMask) &&
+            route.mask == s_config.subnetMask && route.gateway == 0u && route.metric == 1u;
+        if (oldDefault || oldLocal) continue;
+        if (!appendRoute(nextRoutes, route.network, route.mask,
+                route.gateway, route.metric)) return IP_ERR_NO_ROUTE;
+    }
+    if (gateway != 0u && !appendRoute(nextRoutes, 0u, 0u, gateway, 100u))
+        return IP_ERR_NO_ROUTE;
+    if (!appendRoute(nextRoutes, ip & mask, mask, 0u, 1u))
+        return IP_ERR_NO_ROUTE;
+
+    NetworkConfig nextConfig = s_config;
+    nextConfig.ipAddr = ip;
+    nextConfig.subnetMask = mask;
+    nextConfig.gateway = gateway;
+    nextConfig.dns = dns;
+    nextConfig.configured = true;
+    const uint8_t nextBank = static_cast<uint8_t>(s_activeConfigurationBank ^ 1u);
+    s_configurationBanks[nextBank].config = nextConfig;
+    memcopy(s_configurationBanks[nextBank].routes, nextRoutes,
+            sizeof(s_configurationBanks[nextBank].routes));
+#if defined(__GNUC__) || defined(__clang__)
+    __asm__ __volatile__("" ::: "memory");
+#endif
+    // One byte publishes the prebuilt config and route table together. Packet
+    // IRQs see either the complete previous bank or the complete next bank.
+    s_activeConfigurationBank = nextBank;
+    return IP_OK;
+}
+
+bool capture_configuration(ConfigurationSnapshot* output)
+{
+    if (!output) return false;
+    output->config = s_config;
+    memcopy(output->routes, s_routes, sizeof(s_routes));
+    return true;
+}
+
+bool restore_configuration(const ConfigurationSnapshot* previous)
+{
+    if (!previous) return false;
+    const uint8_t nextBank = static_cast<uint8_t>(s_activeConfigurationBank ^ 1u);
+    s_configurationBanks[nextBank] = *previous;
+#if defined(__GNUC__) || defined(__clang__)
+    __asm__ __volatile__("" ::: "memory");
+#endif
+    s_activeConfigurationBank = nextBank;
+    return true;
+}
+
+bool configuration_matches(uint32_t ip, uint32_t mask,
+                           uint32_t gateway, uint32_t dns)
+{
+    if (!s_config.configured || s_config.ipAddr != ip ||
+        s_config.subnetMask != mask || s_config.gateway != gateway ||
+        s_config.dns != dns) return false;
+    uint32_t activeRoutes = 0;
+    bool localRoute = false;
+    bool defaultRoute = false;
+    for (uint8_t i = 0; i < MAX_ROUTES; ++i) {
+        const RouteEntry& route = s_routes[i];
+        if (!route.active) continue;
+        ++activeRoutes;
+        if (route.network == (ip & mask) && route.mask == mask &&
+            route.gateway == 0u && route.metric == 1u) localRoute = true;
+        if (route.network == 0u && route.mask == 0u &&
+            route.gateway == gateway && route.metric == 100u) defaultRoute = true;
+    }
+    const uint32_t expectedRoutes = gateway == 0u ? 1u : 2u;
+    return localRoute && (gateway == 0u ? !defaultRoute : defaultRoute) &&
+        activeRoutes == expectedRoutes;
+}
+#if defined(GXOS_QEMU_NETWORK_CONFIGURATION_TRANSACTION_PROOF)
+void qemu_fail_next_configuration_replace()
+{
+    s_qemuFailNextConfigurationReplace = true;
+}
+#endif
 void set_mac_address(const uint8_t* mac)
 {
     if (!mac) return;

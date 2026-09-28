@@ -45,8 +45,22 @@ inline bool dispatch(const uint8_t* requestBytes, size_t requestSize,
     ResponseStatus status = ResponseStatus::Ok;
     network_settings::NetworkSnapshot snapshot{};
     bool includeSnapshot = false;
+    uint16_t responseType = 0x8001u;
     if (request.version != kProtocolVersion) {
         status = ResponseStatus::BadVersion;
+    } else if (request.type == static_cast<uint16_t>(RequestType::SetNetworkConfiguration)) {
+        responseType = 0x8002u;
+        network_settings::NetworkConfigurationCandidate candidate{};
+        RequestHeader decoded{};
+        if (!decodeConfigurationRequest(requestBytes, requestSize, &decoded, &candidate)) {
+            status = ResponseStatus::InvalidRequest;
+        } else if (trust != DispatchTrust::TrustedSystemServicePeer) {
+            status = ResponseStatus::Unauthorized;
+        } else {
+            // COM2's TCP peer is not authenticated. The trusted marker permits
+            // read-only service access only; it never grants mutation authority.
+            status = ResponseStatus::Unauthorized;
+        }
     } else if (request.payloadBytes != 0u) {
         status = ResponseStatus::InvalidRequest;
     } else if (trust != DispatchTrust::TrustedSystemServicePeer) {
@@ -67,7 +81,7 @@ inline bool dispatch(const uint8_t* requestBytes, size_t requestSize,
 
     const uint16_t payloadBytes = includeSnapshot
         ? static_cast<uint16_t>(kSnapshotWireBytes) : 0u;
-    if (!encodeResponseHeader(kProtocolVersion, 0x8001u, request.requestId,
+    if (!encodeResponseHeader(kProtocolVersion, responseType, request.requestId,
             status, payloadBytes, responseBytes, responseCapacity)) return false;
     if (includeSnapshot && !encodeSnapshot(snapshot,
             responseBytes + kResponseHeaderBytes,

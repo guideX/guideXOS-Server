@@ -211,6 +211,13 @@ struct RouteEntry {
 
 static const uint8_t MAX_ROUTES = 8;
 
+// Complete bounded snapshot used by the kernel configuration transaction.
+// It includes the route table so rollback restores routing as well as fields.
+struct ConfigurationSnapshot {
+    NetworkConfig config;
+    RouteEntry routes[MAX_ROUTES];
+};
+
 // ================================================================
 // Status codes
 // ================================================================
@@ -228,6 +235,7 @@ enum Status : uint8_t {
     IP_ERR_BUFFER_SMALL  = 9,    // Output buffer too small
     IP_ERR_TX_FAILED     = 10,   // Transmission failed
     IP_ERR_FRAGMENTED    = 11,   // Fragmentation not supported
+    IP_ERR_INVALID_CONFIG = 12,  // Invalid address, mask, or gateway
 };
 
 // ================================================================
@@ -309,6 +317,18 @@ void init();
 
 // Configure network settings
 void configure(uint32_t ip, uint32_t mask, uint32_t gateway, uint32_t dns);
+
+// Atomically replace the IPv4 fields and configuration-owned routes after
+// validating capacity. On failure, live fields and routes remain unchanged.
+Status replace_configuration(uint32_t ip, uint32_t mask,
+                             uint32_t gateway, uint32_t dns);
+bool capture_configuration(ConfigurationSnapshot* output);
+bool restore_configuration(const ConfigurationSnapshot* previous);
+bool configuration_matches(uint32_t ip, uint32_t mask,
+                           uint32_t gateway, uint32_t dns);
+#if defined(GXOS_QEMU_NETWORK_CONFIGURATION_TRANSACTION_PROOF)
+void qemu_fail_next_configuration_replace();
+#endif
 
 // Set our MAC address (for Ethernet frame building)
 void set_mac_address(const uint8_t* mac);

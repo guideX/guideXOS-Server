@@ -11,6 +11,12 @@ namespace network_settings_provider {
 gxos::network_settings::Result readSnapshot(
     gxos::network_settings::NetworkSnapshot* output);
 
+// Kernel-internal transaction entry point. It is deliberately not wired to
+// the unauthenticated COM2 service bridge; only trusted in-kernel callers may
+// invoke it until transport peer authentication exists.
+gxos::network_settings::ConfigurationTransactionResult applyCandidateLocally(
+    const gxos::network_settings::NetworkConfigurationCandidate& candidate);
+
 // Adapts the kernel snapshot reader to the same bounded provider contract
 // consumed by hosted Settings and deterministic test providers.
 gxos::network_settings::Provider appModelProvider();

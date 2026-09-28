@@ -89,7 +89,7 @@ void logAddress(const char* label, const IPv4Value& address)
 void serveRequest()
 {
     RequestHeader header{};
-    const bool headerValid = decodeRequest(s_request, sizeof(s_request), &header);
+    const bool headerValid = decodeRequest(s_request, s_requestUsed, &header);
     const uint16_t type = headerValid ? header.type : 0u;
     const uint32_t requestId = headerValid ? header.requestId : 0u;
     logRequest(type, requestId);
@@ -98,7 +98,7 @@ void serveRequest()
     size_t responseBytes = 0;
     const Provider provider =
         network_settings_provider::appModelProvider();
-    const bool framed = dispatch(s_request, sizeof(s_request), provider,
+    const bool framed = dispatch(s_request, s_requestUsed, provider,
         DispatchTrust::TrustedSystemServicePeer, response, sizeof(response),
         &responseBytes);
     if (!framed || responseBytes < kResponseHeaderBytes) {
@@ -169,22 +169,34 @@ bool requestPrefixHasMagic()
 
 void consumeByte(uint8_t value, uint64_t now)
 {
-    if (s_requestUsed < sizeof(s_request)) {
-        s_request[s_requestUsed++] = value;
-        s_lastRequestByteTick = now;
+    if (s_requestUsed >= sizeof(s_request)) {
+        s_requestUsed = 0;
+        return;
     }
-    if (s_requestUsed < sizeof(s_request)) return;
+    s_request[s_requestUsed++] = value;
+    s_lastRequestByteTick = now;
 
-    if (requestPrefixHasMagic()) {
+    if (s_requestUsed >= 4u && !requestPrefixHasMagic()) {
+        // Slide by one byte to find the fixed magic after serial noise.
+        for (size_t i = 1; i < s_requestUsed; ++i) s_request[i - 1] = s_request[i];
+        --s_requestUsed;
+        return;
+    }
+    if (s_requestUsed < kRequestHeaderBytes) return;
+
+    const uint32_t payloadBytes = readU32(s_request + 12);
+    if (payloadBytes > kMaxRequestBytes - kRequestHeaderBytes) {
+        // The bounded dispatcher will return InvalidRequest for this header.
+        s_requestUsed = kRequestHeaderBytes;
         serveRequest();
         s_requestUsed = 0;
         return;
     }
-
-    // Resynchronize on the fixed magic instead of retaining an unbounded
-    // stream buffer after noise or a truncated/disconnected sender.
-    for (size_t i = 1; i < sizeof(s_request); ++i) s_request[i - 1] = s_request[i];
-    s_requestUsed = sizeof(s_request) - 1;
+    const size_t expectedBytes = kRequestHeaderBytes + payloadBytes;
+    if (s_requestUsed == expectedBytes) {
+        serveRequest();
+        s_requestUsed = 0;
+    }
 }
 
 } // namespace

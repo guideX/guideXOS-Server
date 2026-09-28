@@ -138,9 +138,9 @@ struct Provider {
 
 // This surface is currently a Settings-only OS service. It is not in the
 // NativeHostCallTable or the public app SDK, so a manifest cannot grant an
-// ordinary app access by self-declaring a permission. Configuration authority
-// is reserved to the built-in Settings client, but the current kernel has no
-// safe configuration transaction and therefore returns Unsupported.
+// ordinary app access by self-declaring a permission. The local kernel has a
+// static transaction foundation, but COM2 does not authenticate its peer, so
+// remote configuration remains Unsupported at this service boundary.
 inline bool isAuthorized(Client client, Operation operation)
 {
     if (client != Client::BuiltInSettings) return false;
@@ -223,18 +223,164 @@ inline bool isContiguousSubnetMask(uint32_t mask)
     return true;
 }
 
-struct IPv4ConfigurationInput {
-    char address[16]{};
-    char subnetMask[16]{};
-    char gateway[16]{};
-    char dns[16]{};
-};
-
 struct IPv4Configuration {
     uint32_t address{0};
     uint32_t subnetMask{0};
     uint32_t gateway{0};
     uint32_t dns{0};
+};
+
+enum class NetworkMode : uint8_t {
+    Dhcp = 1,
+    Static = 2
+};
+
+enum class DnsMode : uint8_t {
+    Automatic = 1,
+    Manual = 2
+};
+
+// Complete, fixed-size request bound to the interface identity and snapshot
+// generation the user edited. Addresses use host byte order. The stable ID is
+// copied from NetworkInterfaceInfo and is never a pointer or caller claim.
+struct NetworkConfigurationCandidate {
+    uint64_t expectedGeneration{0};
+    uint32_t interfaceId{0};
+    char stableId[kInterfaceIdBytes]{};
+    NetworkMode mode{NetworkMode::Dhcp};
+    DnsMode dnsMode{DnsMode::Automatic};
+    IPv4Configuration staticIPv4{};
+};
+
+enum class ConfigurationField : uint8_t {
+    None = 0,
+    Generation = 1,
+    Interface = 2,
+    Mode = 3,
+    Address = 4,
+    SubnetMask = 5,
+    Gateway = 6,
+    Dns = 7,
+    DnsMode = 8
+};
+
+enum class TransactionOutcome : uint8_t {
+    Success = 0,
+    ValidationFailed = 1,
+    StaleInterface = 2,
+    MissingInterface = 3,
+    ApplyFailedRolledBack = 4,
+    ApplyFailedRollbackFailed = 5,
+    VerifyFailedRolledBack = 6,
+    VerifyFailedRollbackFailed = 7,
+    Unsupported = 8,
+    CaptureFailed = 9
+};
+
+struct ConfigurationTransactionResult {
+    TransactionOutcome outcome{TransactionOutcome::Unsupported};
+    ConfigurationField field{ConfigurationField::None};
+    uint64_t resultingGeneration{0};
+    bool snapshotRefreshRequired{true};
+};
+
+inline bool validUnicastIPv4(uint32_t address)
+{
+    if (address == 0u || address == 0xFFFFFFFFu) return false;
+    const uint32_t firstOctet = (address >> 24) & 0xFFu;
+    return firstOctet != 0u && firstOctet != 127u && firstOctet < 224u;
+}
+
+inline bool hasTextTerminator(const char* text, size_t capacity)
+{
+    if (!text || capacity == 0u) return false;
+    for (size_t i = 0; i < capacity; ++i) if (text[i] == '\0') return true;
+    return false;
+}
+
+inline ConfigurationField validateCandidate(
+    const NetworkConfigurationCandidate& candidate)
+{
+    if (candidate.expectedGeneration == 0u) return ConfigurationField::Generation;
+    if (!hasTextTerminator(candidate.stableId,
+            sizeof(candidate.stableId)) || candidate.stableId[0] == '\0')
+        return ConfigurationField::Interface;
+    if (candidate.mode != NetworkMode::Dhcp && candidate.mode != NetworkMode::Static)
+        return ConfigurationField::Mode;
+    if (candidate.dnsMode != DnsMode::Automatic && candidate.dnsMode != DnsMode::Manual)
+        return ConfigurationField::DnsMode;
+
+    const IPv4Configuration& config = candidate.staticIPv4;
+    if (candidate.mode == NetworkMode::Dhcp) {
+        if (candidate.dnsMode != DnsMode::Automatic)
+            return ConfigurationField::DnsMode;
+        if (config.address != 0u || config.subnetMask != 0u ||
+            config.gateway != 0u || config.dns != 0u)
+            return ConfigurationField::Address;
+        return ConfigurationField::None;
+    }
+
+    if (!validUnicastIPv4(config.address)) return ConfigurationField::Address;
+    if (!isContiguousSubnetMask(config.subnetMask)) return ConfigurationField::SubnetMask;
+    // The current IPv4 router has no point-to-point route semantics. Require a
+    // conventional /1 through /30 network with a usable host address.
+    uint32_t prefix = 0;
+    for (int bit = 31; bit >= 0; --bit) {
+        if ((config.subnetMask & (1u << bit)) == 0u) break;
+        ++prefix;
+    }
+    if (prefix < 1u || prefix > 30u) return ConfigurationField::SubnetMask;
+    const uint32_t network = config.address & config.subnetMask;
+    const uint32_t broadcast = network | ~config.subnetMask;
+    if (config.address == network || config.address == broadcast)
+        return ConfigurationField::Address;
+    if (config.gateway != 0u && (!validUnicastIPv4(config.gateway) ||
+        config.gateway == network || config.gateway == broadcast ||
+        config.gateway == config.address ||
+        (config.gateway & config.subnetMask) != network))
+        return ConfigurationField::Gateway;
+    if (candidate.dnsMode == DnsMode::Automatic) {
+        if (config.dns != 0u) return ConfigurationField::Dns;
+        return ConfigurationField::None;
+    }
+    if (!validUnicastIPv4(config.dns)) return ConfigurationField::Dns;
+    return ConfigurationField::None;
+}
+
+inline bool sameInterfaceIdentity(const char* left, const char* right,
+                                  size_t capacity)
+{
+    if (!left || !right || capacity == 0u) return false;
+    for (size_t i = 0; i < capacity; ++i) {
+        if (left[i] != right[i]) return false;
+        if (left[i] == '\0') return true;
+    }
+    return false;
+}
+
+inline TransactionOutcome validateCandidateInterface(
+    const NetworkSnapshot& snapshot,
+    const NetworkConfigurationCandidate& candidate)
+{
+    if (snapshot.generation != candidate.expectedGeneration)
+        return TransactionOutcome::StaleInterface;
+    if (snapshot.state != SnapshotState::AdaptersAvailable ||
+        snapshot.adapterCount == 0u) return TransactionOutcome::MissingInterface;
+    for (uint32_t i = 0; i < snapshot.adapterCount && i < kMaxAdapters; ++i) {
+        const NetworkInterfaceInfo& adapter = snapshot.adapters[i];
+        if (adapter.interfaceId != candidate.interfaceId) continue;
+        return sameInterfaceIdentity(adapter.stableId, candidate.stableId,
+            kInterfaceIdBytes) ? TransactionOutcome::Success :
+            TransactionOutcome::MissingInterface;
+    }
+    return TransactionOutcome::MissingInterface;
+}
+
+struct IPv4ConfigurationInput {
+    char address[16]{};
+    char subnetMask[16]{};
+    char gateway[16]{};
+    char dns[16]{};
 };
 
 enum class ValidationField : uint8_t {

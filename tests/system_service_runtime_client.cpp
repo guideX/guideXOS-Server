@@ -58,6 +58,37 @@ void printAddress(const char* label, const gxos::network_settings::IPv4Value& va
         std::cout << "unavailable";
 }
 
+void printSnapshot(uint32_t requestNumber,
+                   const gxos::network_settings::NetworkSnapshot& snapshot)
+{
+    std::cout << "SYSCLIENT snapshot received request=" << requestNumber
+        << " generation=";
+    printHex64(snapshot.generation);
+    std::cout << " state=";
+    printHex8(static_cast<uint8_t>(snapshot.state));
+    std::cout << " adapters=";
+    printHex32(snapshot.adapterCount);
+    std::cout << " backend=";
+    printHex8(static_cast<uint8_t>(snapshot.backend));
+    if (snapshot.adapterCount > 0) {
+        const auto& adapter = snapshot.adapters[0];
+        std::cout << " name=" << adapter.name << " driver=" << adapter.driver;
+        std::cout << " link=";
+        printHex8(static_cast<uint8_t>(adapter.linkState));
+        std::cout << " mode=";
+        printHex8(static_cast<uint8_t>(adapter.configurationMode));
+        std::cout << " dhcp=";
+        printHex8(static_cast<uint8_t>(adapter.dhcpState));
+        std::cout << " dnsSource=";
+        printHex8(static_cast<uint8_t>(adapter.dnsSource));
+        printAddress("ipv4", adapter.ipv4Address);
+        printAddress("mask", adapter.subnetMask);
+        printAddress("gateway", adapter.gateway);
+        printAddress("dns", adapter.dns);
+    }
+    std::cout << "\n";
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -70,46 +101,50 @@ int main(int argc, char** argv)
 
     gxos::system_service::QemuCom2TcpTransport transport(port);
     gxos::system_service::SystemServiceClient client(transport.asTransport(), 1500u);
+    gxos::network_settings::NetworkSnapshot lastSnapshot{};
     for (uint32_t requestNumber = 1; requestNumber <= 2; ++requestNumber) {
         gxos::network_settings::NetworkSnapshot snapshot{};
         const gxos::system_service::ClientResult result =
             client.getNetworkSnapshot(&snapshot);
         if (result != gxos::system_service::ClientResult::Ok ||
             snapshot.backend != gxos::network_settings::Backend::Kernel ||
-            snapshot.generation == 0u) {
+            snapshot.generation == 0u || snapshot.adapterCount != 1u) {
             std::cerr << "SYSCLIENT request=" << requestNumber
                 << " failed result=" << static_cast<unsigned>(result)
                 << " backend=" << static_cast<unsigned>(snapshot.backend)
                 << " generation=" << snapshot.generation << "\n";
             return 1;
         }
-
-        std::cout << "SYSCLIENT snapshot received request=" << requestNumber
-            << " generation=";
-        printHex64(snapshot.generation);
-        std::cout << " state=";
-        printHex8(static_cast<uint8_t>(snapshot.state));
-        std::cout << " adapters=";
-        printHex32(snapshot.adapterCount);
-        std::cout << " backend=";
-        printHex8(static_cast<uint8_t>(snapshot.backend));
-        if (snapshot.adapterCount > 0) {
-            const auto& adapter = snapshot.adapters[0];
-            std::cout << " name=" << adapter.name << " driver=" << adapter.driver;
-            std::cout << " link=";
-            printHex8(static_cast<uint8_t>(adapter.linkState));
-            std::cout << " mode=";
-            printHex8(static_cast<uint8_t>(adapter.configurationMode));
-            std::cout << " dhcp=";
-            printHex8(static_cast<uint8_t>(adapter.dhcpState));
-            std::cout << " dnsSource=";
-            printHex8(static_cast<uint8_t>(adapter.dnsSource));
-            printAddress("ipv4", adapter.ipv4Address);
-            printAddress("mask", adapter.subnetMask);
-            printAddress("gateway", adapter.gateway);
-            printAddress("dns", adapter.dns);
-        }
-        std::cout << "\n";
+        lastSnapshot = snapshot;
+        printSnapshot(requestNumber, snapshot);
     }
+
+    gxos::network_settings::NetworkConfigurationCandidate candidate{};
+    candidate.expectedGeneration = lastSnapshot.generation;
+    candidate.interfaceId = lastSnapshot.adapters[0].interfaceId;
+    gxos::network_settings::copyText(candidate.stableId, sizeof(candidate.stableId),
+        lastSnapshot.adapters[0].stableId);
+    candidate.mode = gxos::network_settings::NetworkMode::Static;
+    candidate.dnsMode = gxos::network_settings::DnsMode::Manual;
+    candidate.staticIPv4 = gxos::network_settings::IPv4Configuration{
+        0x0A01092Au, 0xFFFFFF00u, 0x0A010901u, 0x0A010974u
+    };
+    const gxos::system_service::ClientResult mutationResult =
+        client.setNetworkConfiguration(candidate);
+    if (mutationResult != gxos::system_service::ClientResult::Unauthorized) {
+        std::cerr << "SYSCLIENT mutation request=3 must be unauthorized; result="
+            << static_cast<unsigned>(mutationResult) << "\n";
+        return 1;
+    }
+    std::cout << "SYSCLIENT mutation received request=3 result=unauthorized\n";
+
+    gxos::network_settings::NetworkSnapshot afterDeniedMutation{};
+    if (client.getNetworkSnapshot(&afterDeniedMutation) !=
+            gxos::system_service::ClientResult::Ok ||
+        !gxos::network_settings::sameSnapshot(lastSnapshot, afterDeniedMutation)) {
+        std::cerr << "SYSCLIENT denied mutation changed authoritative network state\n";
+        return 1;
+    }
+    printSnapshot(4u, afterDeniedMutation);
     return 0;
 }

@@ -221,6 +221,32 @@ int main()
     check(!adapterForGeneration(generationSnapshot, 61, 8, &selected),
           "disappeared adapter cannot be selected from a newer snapshot");
 
+    NetworkConfigurationCandidate staged{};
+    staged.expectedGeneration = 9;
+    staged.interfaceId = 61;
+    copyText(staged.stableId, sizeof(staged.stableId), "pci:00:03.0");
+    staged.mode = NetworkMode::Static;
+    staged.dnsMode = DnsMode::Manual;
+    staged.staticIPv4 = IPv4Configuration{
+        0x0A01092Au, 0xFFFFFF00u, 0x0A010901u, 0x0A010974u
+    };
+    check(validateCandidate(staged) == ConfigurationField::None,
+          "complete generation-bound static candidate passes kernel-side validation");
+    generationSnapshot.generation = 9;
+    generationSnapshot.state = SnapshotState::AdaptersAvailable;
+    generationSnapshot.adapterCount = 1;
+    generationSnapshot.adapters[0] = makeAdapter(61, "pci:00:03.0");
+    check(validateCandidateInterface(generationSnapshot, staged) == TransactionOutcome::Success,
+          "candidate resolves only against its observed interface generation");
+    generationSnapshot.generation = 10;
+    check(validateCandidateInterface(generationSnapshot, staged) == TransactionOutcome::StaleInterface,
+          "candidate rejects a newer configuration generation");
+    generationSnapshot.generation = 9;
+    copyText(generationSnapshot.adapters[0].stableId,
+        sizeof(generationSnapshot.adapters[0].stableId), "pci:00:03.0:mac:changed");
+    check(validateCandidateInterface(generationSnapshot, staged) == TransactionOutcome::MissingInterface,
+          "candidate rejects same-slot NIC replacement by stable identity");
+
     RefreshPolicy refresh;
     refresh.setActive(true, 100);
     check(refresh.active() && refresh.due(100), "entering the visible Network page schedules an immediate refresh");

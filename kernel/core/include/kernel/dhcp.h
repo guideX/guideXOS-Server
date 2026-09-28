@@ -159,6 +159,14 @@ enum ClientState : uint8_t {
     STATE_ERROR      = 7,      // Error state
 };
 
+// Bounded copy of the DHCP-owned lifecycle state captured by a kernel
+// configuration transaction. Statistics are diagnostics and are not rolled
+// back.
+struct ConfigurationState {
+    LeaseInfo lease;
+    ClientState state;
+};
+
 // ================================================================
 // Parsed DHCP Options
 // ================================================================
@@ -329,6 +337,11 @@ const LeaseInfo* get_lease();
 
 // Get current client state
 ClientState get_state();
+
+bool capture_configuration_state(ConfigurationState* output);
+void enter_static_mode();
+void restore_configuration_state(const ConfigurationState* previous);
+bool static_mode_is_active();
 
 // Check if lease renewal is needed (call periodically)
 // If renewal is needed, attempts to renew

@@ -45,7 +45,8 @@ public:
 
         ResponseHeader header{};
         if (!decodeResponseHeader(response, responseBytes, &header) ||
-            header.requestId != requestId) return ClientResult::ProtocolError;
+            header.type != 0x8001u || header.requestId != requestId)
+            return ClientResult::ProtocolError;
         if (header.payloadBytes == kSnapshotWireBytes) {
             NetworkSnapshot snapshot{};
             if (!decodeSnapshot(response + kResponseHeaderBytes,
@@ -53,6 +54,55 @@ public:
             *output = snapshot;
         }
 
+        switch (header.status) {
+        case ResponseStatus::Ok: return ClientResult::Ok;
+        case ResponseStatus::Unavailable: return ClientResult::Unavailable;
+        case ResponseStatus::Unauthorized: return ClientResult::Unauthorized;
+        case ResponseStatus::Unsupported: return ClientResult::Unsupported;
+        case ResponseStatus::InvalidRequest: return ClientResult::InvalidArgument;
+        default: return ClientResult::ProtocolError;
+        }
+    }
+
+    ClientResult setNetworkConfiguration(
+        const network_settings::NetworkConfigurationCandidate& candidate,
+        network_settings::ConfigurationTransactionResult* transactionOutput = nullptr)
+    {
+        using namespace network_settings;
+        if (transactionOutput) *transactionOutput = ConfigurationTransactionResult{};
+        if (validateCandidate(candidate) != ConfigurationField::None)
+            return ClientResult::InvalidArgument;
+        if (!m_transport.transact) return ClientResult::Unavailable;
+
+        uint8_t request[kMaxRequestBytes]{};
+        size_t requestBytes = 0;
+        uint32_t requestId = m_nextRequestId++;
+        if (requestId == 0u) {
+            requestId = m_nextRequestId++;
+            if (requestId == 0u) requestId = 1u;
+        }
+        if (!encodeConfigurationRequest(candidate, requestId, request,
+                sizeof(request), &requestBytes)) return ClientResult::InvalidArgument;
+
+        uint8_t response[kMaxResponseBytes]{};
+        size_t responseBytes = 0;
+        const TransportResult transportResult = m_transport.transact(
+            m_transport.context, request, requestBytes, response,
+            sizeof(response), &responseBytes, m_timeoutMs);
+        if (transportResult == TransportResult::Timeout) return ClientResult::Timeout;
+        if (transportResult == TransportResult::Disconnected) return ClientResult::Disconnected;
+        if (transportResult != TransportResult::Ok) return ClientResult::Failed;
+
+        ResponseHeader header{};
+        if (!decodeResponseHeader(response, responseBytes, &header) ||
+            header.type != 0x8002u || header.requestId != requestId)
+            return ClientResult::ProtocolError;
+        if (header.status == ResponseStatus::Ok) {
+            ConfigurationTransactionResult transaction{};
+            if (!decodeConfigurationResult(response + kResponseHeaderBytes,
+                    header.payloadBytes, &transaction)) return ClientResult::ProtocolError;
+            if (transactionOutput) *transactionOutput = transaction;
+        }
         switch (header.status) {
         case ResponseStatus::Ok: return ClientResult::Ok;
         case ResponseStatus::Unavailable: return ClientResult::Unavailable;

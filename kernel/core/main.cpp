@@ -56,6 +56,7 @@
 #include "include/kernel/dhcp.h"
 #include "include/kernel/network_settings_provider.h"
 #include "include/kernel/system_service_bridge.h"
+#include "include/kernel/qemu_network_configuration_proof.h"
 
 // VirtIO subsystem
 #include "include/kernel/virtio_block.h"
@@ -1143,6 +1144,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             printNetworkAddress(" dns=", adapter.dns);
             kernel::serial::putc('\n');
         }
+#if defined(GXOS_QEMU_NETWORK_CONFIGURATION_TRANSACTION_PROOF)
+        kernel::qemu_network_configuration_proof::run();
+#endif
         kernel::system_service_bridge::init();
         
         // ============================================================

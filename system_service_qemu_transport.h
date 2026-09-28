@@ -167,7 +167,8 @@ private:
                                     uint32_t timeoutMs)
     {
         if (responseBytes) *responseBytes = 0;
-        if (!context || !request || requestBytes != kRequestHeaderBytes ||
+        if (!context || !request || requestBytes < kRequestHeaderBytes ||
+            requestBytes > kMaxRequestBytes ||
             !response || !responseBytes || responseCapacity < kResponseHeaderBytes)
             return TransportResult::Failed;
         const QemuCom2Endpoint& endpoint =

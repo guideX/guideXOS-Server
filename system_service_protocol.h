@@ -16,12 +16,16 @@ constexpr size_t kSnapshotHeaderBytes = 20;
 constexpr size_t kAdapterWireBytes = 140;
 constexpr size_t kSnapshotWireBytes = kSnapshotHeaderBytes +
     network_settings::kMaxAdapters * kAdapterWireBytes;
-constexpr size_t kMaxRequestBytes = kRequestHeaderBytes;
+constexpr size_t kConfigurationCandidateWireBytes = 64;
+constexpr size_t kConfigurationResultWireBytes = 16;
+constexpr size_t kMaxRequestBytes = kRequestHeaderBytes +
+    kConfigurationCandidateWireBytes;
 constexpr size_t kMaxResponseBytes = kResponseHeaderBytes + kSnapshotWireBytes;
 constexpr uint32_t kDefaultRequestTimeoutMs = 200;
 
 enum class RequestType : uint16_t {
-    GetNetworkSnapshot = 1
+    GetNetworkSnapshot = 1,
+    SetNetworkConfiguration = 2
 };
 
 enum class ResponseStatus : uint16_t {
@@ -49,6 +53,10 @@ struct ResponseHeader {
     ResponseStatus status{ResponseStatus::InternalError};
     uint16_t payloadBytes{0};
     uint32_t totalBytes{0};
+};
+
+struct ConfigurationWireResult {
+    network_settings::ConfigurationTransactionResult transaction{};
 };
 
 enum class TransportResult : uint8_t {
@@ -204,12 +212,105 @@ inline bool encodeRequest(uint16_t version, uint16_t type, uint32_t requestId,
 
 inline bool decodeRequest(const uint8_t* input, size_t inputBytes, RequestHeader* output)
 {
-    if (!input || !output || inputBytes != kRequestHeaderBytes ||
+    if (!input || !output || inputBytes < kRequestHeaderBytes ||
+        inputBytes > kMaxRequestBytes ||
         readU32(input) != kWireMagic) return false;
     output->version = readU16(input + 4);
     output->type = readU16(input + 6);
     output->requestId = readU32(input + 8);
     output->payloadBytes = readU32(input + 12);
+    return output->payloadBytes == inputBytes - kRequestHeaderBytes;
+}
+
+inline bool encodeConfigurationRequest(
+    const network_settings::NetworkConfigurationCandidate& candidate,
+    uint32_t requestId, uint8_t* output, size_t capacity, size_t* outputBytes)
+{
+    using namespace network_settings;
+    if (outputBytes) *outputBytes = 0;
+    if (!output || !outputBytes || capacity < kMaxRequestBytes ||
+        validateCandidate(candidate) != ConfigurationField::None) return false;
+    size_t headerBytes = 0;
+    if (!encodeRequest(kProtocolVersion,
+            static_cast<uint16_t>(RequestType::SetNetworkConfiguration),
+            requestId, static_cast<uint32_t>(kConfigurationCandidateWireBytes),
+            output, capacity, &headerBytes)) return false;
+    uint8_t* payload = output + kRequestHeaderBytes;
+    writeU64(payload, candidate.expectedGeneration);
+    writeU32(payload + 8, candidate.interfaceId);
+    for (size_t i = 0; i < kInterfaceIdBytes; ++i)
+        payload[12 + i] = static_cast<uint8_t>(candidate.stableId[i]);
+    payload[44] = static_cast<uint8_t>(candidate.mode);
+    payload[45] = static_cast<uint8_t>(candidate.dnsMode);
+    payload[46] = 0u;
+    payload[47] = 0u;
+    writeU32(payload + 48, candidate.staticIPv4.address);
+    writeU32(payload + 52, candidate.staticIPv4.subnetMask);
+    writeU32(payload + 56, candidate.staticIPv4.gateway);
+    writeU32(payload + 60, candidate.staticIPv4.dns);
+    *outputBytes = kRequestHeaderBytes + kConfigurationCandidateWireBytes;
+    return true;
+}
+
+inline bool decodeConfigurationRequest(
+    const uint8_t* input, size_t inputBytes, RequestHeader* header,
+    network_settings::NetworkConfigurationCandidate* output)
+{
+    using namespace network_settings;
+    RequestHeader decoded{};
+    if (!output || !decodeRequest(input, inputBytes, &decoded) ||
+        decoded.version != kProtocolVersion ||
+        decoded.type != static_cast<uint16_t>(RequestType::SetNetworkConfiguration) ||
+        decoded.payloadBytes != kConfigurationCandidateWireBytes ||
+        inputBytes != kRequestHeaderBytes + kConfigurationCandidateWireBytes)
+        return false;
+    const uint8_t* payload = input + kRequestHeaderBytes;
+    NetworkConfigurationCandidate candidate{};
+    candidate.expectedGeneration = readU64(payload);
+    candidate.interfaceId = readU32(payload + 8);
+    for (size_t i = 0; i < kInterfaceIdBytes; ++i)
+        candidate.stableId[i] = static_cast<char>(payload[12 + i]);
+    candidate.mode = static_cast<NetworkMode>(payload[44]);
+    candidate.dnsMode = static_cast<DnsMode>(payload[45]);
+    if (payload[46] != 0u || payload[47] != 0u) return false;
+    candidate.staticIPv4.address = readU32(payload + 48);
+    candidate.staticIPv4.subnetMask = readU32(payload + 52);
+    candidate.staticIPv4.gateway = readU32(payload + 56);
+    candidate.staticIPv4.dns = readU32(payload + 60);
+    if (validateCandidate(candidate) != ConfigurationField::None) return false;
+    if (header) *header = decoded;
+    *output = candidate;
+    return true;
+}
+
+inline bool encodeConfigurationResult(
+    const network_settings::ConfigurationTransactionResult& result,
+    uint8_t* output, size_t capacity)
+{
+    if (!output || capacity < kConfigurationResultWireBytes) return false;
+    output[0] = static_cast<uint8_t>(result.outcome);
+    output[1] = static_cast<uint8_t>(result.field);
+    output[2] = result.snapshotRefreshRequired ? 1u : 0u;
+    output[3] = 0u;
+    writeU64(output + 4, result.resultingGeneration);
+    for (size_t i = 12; i < kConfigurationResultWireBytes; ++i) output[i] = 0u;
+    return true;
+}
+
+inline bool decodeConfigurationResult(
+    const uint8_t* input, size_t inputBytes,
+    network_settings::ConfigurationTransactionResult* output)
+{
+    using namespace network_settings;
+    if (!input || !output || inputBytes != kConfigurationResultWireBytes ||
+        input[0] > static_cast<uint8_t>(TransactionOutcome::CaptureFailed) ||
+        input[1] > static_cast<uint8_t>(ConfigurationField::DnsMode) ||
+        input[2] > 1u || input[3] != 0u) return false;
+    for (size_t i = 12; i < inputBytes; ++i) if (input[i] != 0u) return false;
+    output->outcome = static_cast<TransactionOutcome>(input[0]);
+    output->field = static_cast<ConfigurationField>(input[1]);
+    output->snapshotRefreshRequired = input[2] != 0u;
+    output->resultingGeneration = readU64(input + 4);
     return true;
 }
 
@@ -240,12 +341,15 @@ inline bool decodeResponseHeader(const uint8_t* input, size_t inputBytes,
     output->status = static_cast<ResponseStatus>(readU16(input + 12));
     output->payloadBytes = readU16(input + 14);
     output->totalBytes = readU32(input + 16);
-    if (output->version != kProtocolVersion || output->type != 0x8001u ||
+    if (output->version != kProtocolVersion ||
+        (output->type != 0x8001u && output->type != 0x8002u) ||
         output->totalBytes != kResponseHeaderBytes + output->payloadBytes ||
         output->totalBytes > kMaxResponseBytes || output->totalBytes != inputBytes) return false;
     const uint16_t status = static_cast<uint16_t>(output->status);
     if (status > static_cast<uint16_t>(ResponseStatus::InternalError)) return false;
-    if (output->status == ResponseStatus::Ok && output->payloadBytes != kSnapshotWireBytes)
+    if (output->status == ResponseStatus::Ok &&
+        ((output->type == 0x8001u && output->payloadBytes != kSnapshotWireBytes) ||
+         (output->type == 0x8002u && output->payloadBytes != kConfigurationResultWireBytes)))
         return false;
     if (output->status != ResponseStatus::Ok && output->status != ResponseStatus::Unavailable &&
         output->payloadBytes != 0) return false;

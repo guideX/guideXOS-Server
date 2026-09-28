@@ -95,6 +95,30 @@ inline network_settings::Result readSettingsNetworkSnapshot(
     return readSettingsNetworkSnapshot(transport.asTransport(), output);
 }
 
+inline network_settings::Result applySettingsNetworkConfiguration(
+    const system_service::Transport& transport,
+    const network_settings::NetworkConfigurationCandidate& candidate,
+    network_settings::ConfigurationTransactionResult* transactionOutput)
+{
+    using namespace network_settings;
+    if (transactionOutput) *transactionOutput = ConfigurationTransactionResult{};
+    if (!isAuthorizedSettingsProcess()) return Result::Unauthorized;
+    if (validateCandidate(candidate) != ConfigurationField::None)
+        return Result::InvalidArgument;
+    system_service::SystemServiceClient client(transport);
+    return mapSystemServiceResult(
+        client.setNetworkConfiguration(candidate, transactionOutput));
+}
+
+inline network_settings::Result applySettingsNetworkConfiguration(
+    const network_settings::NetworkConfigurationCandidate& candidate,
+    network_settings::ConfigurationTransactionResult* transactionOutput)
+{
+    static system_service::QemuCom2TcpTransport transport;
+    return applySettingsNetworkConfiguration(transport.asTransport(), candidate,
+        transactionOutput);
+}
+
 inline network_settings::Result readSettingsNetworkSnapshot(
     const network_settings::Provider& provider,
     network_settings::NetworkSnapshot* output)

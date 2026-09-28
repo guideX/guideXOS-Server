@@ -1,6 +1,9 @@
 #include "include/kernel/network_settings_provider.h"
 
+#include "network_configuration_transaction.h"
+
 #include "include/kernel/dhcp.h"
+#include "include/kernel/dns.h"
 #include "include/kernel/ipv4.h"
 #include "include/kernel/nic.h"
 
@@ -12,6 +15,94 @@ using namespace gxos::network_settings;
 
 NetworkSnapshot s_previousSnapshot{};
 bool s_hasPreviousSnapshot = false;
+
+struct PreviousNetworkConfiguration {
+    ipv4::ConfigurationSnapshot ipv4State{};
+    dhcp::ConfigurationState dhcpState{};
+    uint32_t dnsServer{0};
+};
+
+bool sameDhcpState(const dhcp::ConfigurationState& left,
+                   const dhcp::ConfigurationState& right)
+{
+    const dhcp::LeaseInfo& a = left.lease;
+    const dhcp::LeaseInfo& b = right.lease;
+    return left.state == right.state && a.assignedIP == b.assignedIP &&
+        a.subnetMask == b.subnetMask && a.gateway == b.gateway &&
+        a.dnsServer == b.dnsServer && a.serverIP == b.serverIP &&
+        a.leaseTime == b.leaseTime && a.renewalTime == b.renewalTime &&
+        a.rebindingTime == b.rebindingTime && a.leaseStartTick == b.leaseStartTick &&
+        a.xid == b.xid && a.valid == b.valid;
+}
+
+bool sameIpv4State(const ipv4::ConfigurationSnapshot& left,
+                   const ipv4::ConfigurationSnapshot& right)
+{
+    const ipv4::NetworkConfig& a = left.config;
+    const ipv4::NetworkConfig& b = right.config;
+    if (a.ipAddr != b.ipAddr || a.subnetMask != b.subnetMask ||
+        a.gateway != b.gateway || a.dns != b.dns || a.configured != b.configured)
+        return false;
+    for (size_t i = 0; i < sizeof(a.macAddr); ++i)
+        if (a.macAddr[i] != b.macAddr[i]) return false;
+    for (size_t i = 0; i < ipv4::MAX_ROUTES; ++i) {
+        const ipv4::RouteEntry& x = left.routes[i];
+        const ipv4::RouteEntry& y = right.routes[i];
+        if (x.network != y.network || x.mask != y.mask || x.gateway != y.gateway ||
+            x.metric != y.metric || x.active != y.active) return false;
+    }
+    return true;
+}
+
+bool capturePrevious(void* context, PreviousNetworkConfiguration* output)
+{
+    if (!context || !output) return false;
+    return ipv4::capture_configuration(&output->ipv4State) &&
+        dhcp::capture_configuration_state(&output->dhcpState) &&
+        (output->dnsServer = dns::get_server(), true);
+}
+
+bool applyCandidate(void*, const NetworkConfigurationCandidate& candidate)
+{
+    dhcp::enter_static_mode();
+    if (ipv4::replace_configuration(candidate.staticIPv4.address,
+            candidate.staticIPv4.subnetMask, candidate.staticIPv4.gateway,
+            candidate.staticIPv4.dns) != ipv4::IP_OK) return false;
+    dns::set_server(candidate.staticIPv4.dns);
+    return true;
+}
+
+bool verifyCandidate(void*, const NetworkConfigurationCandidate& candidate)
+{
+    return candidate.mode == NetworkMode::Static &&
+        candidate.dnsMode == DnsMode::Manual &&
+        ipv4::configuration_matches(candidate.staticIPv4.address,
+            candidate.staticIPv4.subnetMask, candidate.staticIPv4.gateway,
+            candidate.staticIPv4.dns) &&
+        dns::get_server() == candidate.staticIPv4.dns &&
+        dhcp::static_mode_is_active();
+}
+
+bool rollbackPrevious(void* context, const PreviousNetworkConfiguration& previous)
+{
+    if (!context) return false;
+    const bool ipv4Restored = ipv4::restore_configuration(&previous.ipv4State);
+    dns::set_server(previous.dnsServer);
+    dhcp::restore_configuration_state(&previous.dhcpState);
+    return ipv4Restored;
+}
+
+bool verifyRollback(void* context, const PreviousNetworkConfiguration& previous)
+{
+    if (!context) return false;
+    ipv4::ConfigurationSnapshot currentIpv4{};
+    dhcp::ConfigurationState currentDhcp{};
+    return ipv4::capture_configuration(&currentIpv4) &&
+        dhcp::capture_configuration_state(&currentDhcp) &&
+        sameIpv4State(currentIpv4, previous.ipv4State) &&
+        sameDhcpState(currentDhcp, previous.dhcpState) &&
+        dns::get_server() == previous.dnsServer;
+}
 
 void appendHex(char* output, size_t& at, uint8_t value)
 {
@@ -30,6 +121,11 @@ void makeStableId(const nic::NICDevice& device, NetworkInterfaceInfo& output)
     appendHex(output.stableId, at, device.pciSlot);
     output.stableId[at++] = '.';
     output.stableId[at++] = static_cast<char>('0' + (device.pciFunc % 10));
+    const char macLabel[] = ":mac:";
+    for (size_t i = 0; i < sizeof(macLabel) - 1; ++i)
+        output.stableId[at++] = macLabel[i];
+    for (size_t i = 0; i < nic::ETH_ALEN; ++i)
+        appendHex(output.stableId, at, device.macAddress[i]);
     output.stableId[at] = '\0';
     output.interfaceId = (static_cast<uint32_t>(device.pciBus) << 16) |
         (static_cast<uint32_t>(device.pciSlot) << 8) | device.pciFunc;
@@ -176,11 +272,12 @@ gxos::network_settings::Result readSnapshot(
         adapter.ipv4Address = IPv4Value{ config->ipAddr, true };
         adapter.subnetMask = IPv4Value{ config->subnetMask, true };
         adapter.gateway = IPv4Value{ config->gateway, true };
-        adapter.dns = IPv4Value{ config->dns, true };
+        const uint32_t dnsServer = dns::get_server();
+        adapter.dns = IPv4Value{ dnsServer, dnsServer != 0u };
         if (leaseValid && adapter.dhcpState == DhcpState::LeaseAcquired)
             adapter.dnsSource = DnsSource::Dhcp;
         else
-            adapter.dnsSource = DnsSource::Unknown;
+            adapter.dnsSource = dnsServer != 0u ? DnsSource::Static : DnsSource::Unknown;
     } else {
         adapter.configurationMode = ConfigurationMode::Unknown;
         adapter.ipv4Address = IPv4Value{};
@@ -193,6 +290,81 @@ gxos::network_settings::Result readSnapshot(
     updateGeneration(snapshot);
     *output = snapshot;
     return Result::Ok;
+}
+
+gxos::network_settings::ConfigurationTransactionResult applyCandidateLocally(
+    const gxos::network_settings::NetworkConfigurationCandidate& candidate)
+{
+    using namespace gxos::network_settings;
+    ConfigurationTransactionResult result{};
+    const ConfigurationField invalid = validateCandidate(candidate);
+    if (invalid != ConfigurationField::None) {
+        result.outcome = TransactionOutcome::ValidationFailed;
+        result.field = invalid;
+        return result;
+    }
+
+    NetworkSnapshot current{};
+    const Result readResult = readSnapshot(&current);
+    result.resultingGeneration = current.generation;
+    if (candidate.expectedGeneration != current.generation) {
+        result.outcome = TransactionOutcome::StaleInterface;
+        result.field = ConfigurationField::Generation;
+        return result;
+    }
+    if (readResult != Result::Ok || current.state != SnapshotState::AdaptersAvailable) {
+        result.outcome = TransactionOutcome::MissingInterface;
+        return result;
+    }
+    result.outcome = validateCandidateInterface(current, candidate);
+    if (result.outcome != TransactionOutcome::Success) {
+        result.field = result.outcome == TransactionOutcome::StaleInterface
+            ? ConfigurationField::Generation : ConfigurationField::Interface;
+        return result;
+    }
+
+    const NetworkInterfaceInfo* selected = nullptr;
+    for (uint32_t i = 0; i < current.adapterCount; ++i) {
+        if (current.adapters[i].interfaceId == candidate.interfaceId) {
+            selected = &current.adapters[i];
+            break;
+        }
+    }
+    if (!selected) {
+        result.outcome = TransactionOutcome::MissingInterface;
+        result.field = ConfigurationField::Interface;
+        return result;
+    }
+    const nic::NICDevice* liveDevice = nic::get_device();
+    if (nic::get_probe_state() != nic::NIC_PROBE_READY || !liveDevice ||
+        !liveDevice->active) {
+        result.outcome = TransactionOutcome::MissingInterface;
+        result.field = ConfigurationField::Interface;
+        return result;
+    }
+    NetworkInterfaceInfo liveIdentity{};
+    makeStableId(*liveDevice, liveIdentity);
+    if (liveIdentity.interfaceId != candidate.interfaceId ||
+        !sameInterfaceIdentity(candidate.stableId, liveIdentity.stableId,
+            kInterfaceIdBytes)) {
+        result.outcome = TransactionOutcome::MissingInterface;
+        result.field = ConfigurationField::Interface;
+        return result;
+    }
+
+    int transactionContext = 1;
+    const ConfigurationTransactionOperations<PreviousNetworkConfiguration> operations{
+        &transactionContext, capturePrevious, applyCandidate, verifyCandidate,
+        rollbackPrevious, verifyRollback
+    };
+    result = runConfigurationTransaction(candidate, operations);
+    NetworkSnapshot resulting{};
+    if (readSnapshot(&resulting) == Result::Ok ||
+        resulting.generation != 0u) {
+        result.resultingGeneration = resulting.generation;
+    }
+    result.snapshotRefreshRequired = true;
+    return result;
 }
 
 } // namespace network_settings_provider

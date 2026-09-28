@@ -10,6 +10,7 @@
 #include "include/kernel/dhcp.h"
 #include "include/kernel/udp.h"
 #include "include/kernel/ipv4.h"
+#include "include/kernel/dns.h"
 #include "include/kernel/ethernet.h"
 #include "include/kernel/nic.h"
 #include "include/kernel/socket.h"
@@ -593,15 +594,20 @@ static Status do_request(const uint8_t* mac, uint32_t xid,
 }
 
 // Internal: Apply lease and configure the kernel networking state
-static void apply_lease(const Packet* ackPkt, const ParsedOptions* opts,
+static bool apply_lease(const Packet* ackPkt, const ParsedOptions* opts,
                         uint32_t xid)
 {
-    uint32_t assignedIP = dhcp_ntohl(ackPkt->yiaddr);
+    const uint32_t assignedIP = dhcp_ntohl(ackPkt->yiaddr);
+    const uint32_t subnetMask = opts->hasSubnetMask ? opts->subnetMask : ipv4::MASK_24;
+    const uint32_t gateway = opts->hasRouter ? opts->router : 0;
+    const uint32_t dnsServer = opts->hasDNS ? opts->dnsServer : 0;
+    if (ipv4::replace_configuration(assignedIP, subnetMask, gateway, dnsServer) != ipv4::IP_OK)
+        return false;
 
     s_lease.assignedIP     = assignedIP;
-    s_lease.subnetMask     = opts->hasSubnetMask ? opts->subnetMask : ipv4::MASK_24;
-    s_lease.gateway        = opts->hasRouter     ? opts->router     : 0;
-    s_lease.dnsServer      = opts->hasDNS        ? opts->dnsServer  : 0;
+    s_lease.subnetMask     = subnetMask;
+    s_lease.gateway        = gateway;
+    s_lease.dnsServer      = dnsServer;
     s_lease.serverIP       = opts->hasServerID   ? opts->serverID   : 0;
     s_lease.leaseTime      = opts->hasLeaseTime  ? opts->leaseTime  : DEFAULT_LEASE_SECS;
     s_lease.renewalTime    = opts->hasRenewalTime
@@ -613,16 +619,10 @@ static void apply_lease(const Packet* ackPkt, const ParsedOptions* opts,
     s_lease.leaseStartTick = s_tickCounter;
     s_lease.xid            = xid;
     s_lease.valid          = true;
-
-    // Configure IPv4 layer with the obtained parameters
-    ipv4::configure(s_lease.assignedIP,
-                    s_lease.subnetMask,
-                    s_lease.gateway,
-                    s_lease.dnsServer);
-
+    dns::set_server(dnsServer);
     s_state = STATE_BOUND;
+    return true;
 }
-
 // ================================================================
 // Public: Full DHCP Discovery
 // ================================================================
@@ -666,7 +666,11 @@ Status discover()
 
         if (st == DHCP_OK) {
             // Apply configuration
-            apply_lease(&ackPkt, &ackOpts, xid);
+            if (!apply_lease(&ackPkt, &ackOpts, xid)) {
+                s_state = STATE_ERROR;
+                udp::unbind(DHCP_CLIENT_PORT);
+                return DHCP_ERR_INVALID;
+            }
             dhcp_print_info();
             udp::unbind(DHCP_CLIENT_PORT);
             return DHCP_OK;
@@ -706,6 +710,32 @@ const LeaseInfo* get_lease()
 ClientState get_state()
 {
     return s_state;
+}
+
+bool capture_configuration_state(ConfigurationState* output)
+{
+    if (!output) return false;
+    output->lease = s_lease;
+    output->state = s_state;
+    return true;
+}
+
+void enter_static_mode()
+{
+    s_lease.valid = false;
+    s_state = STATE_RELEASED;
+}
+
+void restore_configuration_state(const ConfigurationState* previous)
+{
+    if (!previous) return;
+    s_lease = previous->lease;
+    s_state = previous->state;
+}
+
+bool static_mode_is_active()
+{
+    return !s_lease.valid && s_state == STATE_RELEASED;
 }
 
 void check_renewal()
@@ -769,7 +799,7 @@ void check_renewal()
                 ParsedOptions opts;
                 if (parse_options(resp, &opts) == DHCP_OK) {
                     if (opts.messageType == DHCPACK) {
-                        apply_lease(resp, &opts, xid);
+                        if (!apply_lease(resp, &opts, xid)) return;
                         s_stats.renewals++;
                         serial::puts("[DHCP] Lease renewed\n");
                         return;
