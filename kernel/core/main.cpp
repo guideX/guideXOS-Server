@@ -39,6 +39,8 @@
 #include "include/kernel/ata.h"
 #include "include/kernel/nvme.h"
 #include "include/kernel/ramdisk.h"
+#include "include/kernel/usb.h"
+#include "include/kernel/usb_storage.h"
 #include "include/kernel/vfs.h"
 #include "include/kernel/fs_fat.h"
 #include "include/kernel/fs_ext4.h"
@@ -752,6 +754,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::nic::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::virtio::rng::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::virtio::gpu::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
+#if defined(ARCH_AMD64)
+            kernel::usb::hci::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
+#endif
         }
     }
     
@@ -961,6 +966,14 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[KERNEL] NVMe driver initialized, ");
         kernel::serial::put_hex32(kernel::nvme::device_count());
         kernel::serial::puts(" namespace(s) found\n");
+
+        // Start USB enumeration after the shared block registry is ready.
+        // The USB core dispatches supported Mass Storage interfaces into the
+        // common block registry; unsupported controllers remain unavailable.
+        kernel::usb::init();
+        kernel::serial::puts("[KERNEL] USB Mass Storage devices: ");
+        kernel::serial::put_hex8(kernel::usb_storage::device_count());
+        kernel::serial::puts("\n");
         
         // Initialize RAM disk subsystem
         kernel::ramdisk::init();
@@ -1225,6 +1238,14 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 
             // Poll input manager for updates (handles USB HID polling)
             kernel::input::poll();
+
+            // USB port polling drives Mass Storage attach/detach. Keep it
+            // bounded and independent of whether a USB HID device is active.
+            static uint32_t usbPollCount = 0;
+            if (++usbPollCount >= 1000) {
+                usbPollCount = 0;
+                kernel::usb::poll();
+            }
             
             // Poll network for received packets
             kernel::ipv4::poll_network();

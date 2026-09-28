@@ -52,6 +52,7 @@ enum Status : uint8_t {
     BLOCK_ERR_NOT_READY = 4,
     BLOCK_ERR_INVALID   = 5,    // bad parameter
     BLOCK_ERR_UNSUPPORTED = 6,
+    BLOCK_ERR_READ_ONLY = 7,    // media is write protected
 };
 
 // ================================================================
@@ -105,6 +106,17 @@ struct TransportIoDiagnostic {
     uint64_t failingLba;
     uint32_t completedSectors;
     uint32_t dataSectorsTransferred;
+    uint8_t commandOpcode;
+    uint8_t statusCode;
+    uint8_t cswStatus;
+    uint8_t senseKey;
+    uint8_t senseAsc;
+    uint8_t senseAscq;
+    uint8_t usbSyncCacheState;
+    uint16_t usbVendorId;
+    uint16_t usbProductId;
+    uint8_t usbInterface;
+    uint8_t usbLun;
 };
 
 typedef bool (*GetTransportIoDiagnosticFn)(uint8_t driverIndex,
@@ -147,6 +159,15 @@ struct BlockDevice {
     uint8_t       ataChannel;
     uint8_t       ataTarget;
     uint32_t      namespaceId;
+    // USB Mass Storage fingerprint. The current HCI provides root-port
+    // topology only; registrationId still identifies each attachment.
+    bool          usbIdentityValid;
+    uint16_t      usbVendorId;
+    uint16_t      usbProductId;
+    uint8_t       usbPort;
+    uint8_t       usbInterface;
+    uint8_t       usbLun;
+    uint8_t       usbSyncCacheState;
     // Optional transport DMA limits. Zero means the registry does not declare
     // a constraint; new storage callers should use checked I/O helpers.
     uint16_t      requiredBufferAlignment;

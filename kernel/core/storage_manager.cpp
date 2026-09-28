@@ -148,6 +148,13 @@ bool query_device_capabilities(uint8_t globalIndex, DeviceCapabilities& out)
     out.flushSemanticsKnown = dev->flushSemanticsKnown;
     out.removableKnown = dev->removableKnown;
     out.removable = dev->removableKnown && dev->removable;
+    out.usbIdentityValid = dev->usbIdentityValid;
+    out.usbVendorId = dev->usbVendorId;
+    out.usbProductId = dev->usbProductId;
+    out.usbPort = dev->usbPort;
+    out.usbInterface = dev->usbInterface;
+    out.usbLun = dev->usbLun;
+    out.usbSyncCacheState = dev->usbSyncCacheState;
     out.logicalSectorSize = dev->sectorSize;
     out.totalLogicalSectors = dev->totalSectors;
     out.requiredBufferAlignment = dev->requiredBufferAlignment;
@@ -239,6 +246,12 @@ bool capture_target_identity(uint8_t globalIndex, TargetIdentity& out)
     snapshot.driverIndex = dev->driverIndex;
     snapshot.totalLogicalSectors = dev->totalSectors;
     snapshot.logicalSectorSize = dev->sectorSize;
+    snapshot.usbIdentityValid = dev->usbIdentityValid;
+    snapshot.usbVendorId = dev->usbVendorId;
+    snapshot.usbProductId = dev->usbProductId;
+    snapshot.usbPort = dev->usbPort;
+    snapshot.usbInterface = dev->usbInterface;
+    snapshot.usbLun = dev->usbLun;
     copy_text(snapshot.name, sizeof(snapshot.name), dev->name);
     copy_text(snapshot.model, sizeof(snapshot.model), dev->model);
     copy_text(snapshot.serial, sizeof(snapshot.serial), dev->serial);
@@ -257,6 +270,12 @@ bool target_identities_equal(const TargetIdentity& left,
            left.driverIndex == right.driverIndex &&
            left.totalLogicalSectors == right.totalLogicalSectors &&
            left.logicalSectorSize == right.logicalSectorSize &&
+           left.usbIdentityValid == right.usbIdentityValid &&
+           left.usbVendorId == right.usbVendorId &&
+           left.usbProductId == right.usbProductId &&
+           left.usbPort == right.usbPort &&
+           left.usbInterface == right.usbInterface &&
+           left.usbLun == right.usbLun &&
            text_equal(left.name, right.name, sizeof(left.name)) &&
            text_equal(left.model, right.model, sizeof(left.model)) &&
            text_equal(left.serial, right.serial, sizeof(left.serial));

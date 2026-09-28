@@ -8,6 +8,8 @@
 
 #include "include/kernel/usb.h"
 #include "include/kernel/arch.h"
+#include "include/kernel/usb_storage.h"
+#include "include/kernel/serial_debug.h"
 
 namespace kernel {
 namespace usb {
@@ -81,6 +83,8 @@ static int find_free_slot()
 static void parse_config(Device* dev, const uint8_t* data, uint16_t totalLen)
 {
     uint16_t offset = 0;
+    uint8_t currentInterfaceNumber = 0xFF;
+    bool currentAlternateSettingActive = false;
     dev->numInterfaces = 0;
 
     while (offset + 2 <= totalLen) {
@@ -94,8 +98,12 @@ static void parse_config(Device* dev, const uint8_t* data, uint16_t totalLen)
             const InterfaceDescriptor* iface =
                 reinterpret_cast<const InterfaceDescriptor*>(&data[offset]);
 
-            if (dev->numInterfaces < MAX_INTERFACES_PER_DEVICE) {
+            currentInterfaceNumber = iface->bInterfaceNumber;
+            currentAlternateSettingActive = iface->bAlternateSetting == 0;
+            if (currentAlternateSettingActive &&
+                dev->numInterfaces < MAX_INTERFACES_PER_DEVICE) {
                 uint8_t idx = dev->numInterfaces;
+                dev->interfaceNumber[idx] = iface->bInterfaceNumber;
                 dev->interfaceClass[idx]    = iface->bInterfaceClass;
                 dev->interfaceSubClass[idx] = iface->bInterfaceSubClass;
                 dev->interfaceProtocol[idx] = iface->bInterfaceProtocol;
@@ -111,8 +119,9 @@ static void parse_config(Device* dev, const uint8_t* data, uint16_t totalLen)
             uint8_t dirBit = (ep->bEndpointAddress & 0x80) ? 1 : 0;
             uint8_t idx = static_cast<uint8_t>(epNum * 2 + dirBit);
 
-            if (idx < MAX_ENDPOINTS * 2) {
+            if (idx < MAX_ENDPOINTS * 2 && currentAlternateSettingActive) {
                 dev->endpoints[idx].address       = ep->bEndpointAddress;
+                dev->endpoints[idx].interfaceNumber = currentInterfaceNumber;
                 dev->endpoints[idx].type           = static_cast<TransferType>(ep->bmAttributes & 0x03);
                 dev->endpoints[idx].dir            = dirBit ? DIR_DEVICE_TO_HOST : DIR_HOST_TO_DEVICE;
                 dev->endpoints[idx].maxPacketSize  = ep->wMaxPacketSize & 0x07FF;
@@ -220,6 +229,9 @@ static bool enumerate_device(uint8_t port, DeviceSpeed speed)
     dev->currentConfig = cfgDesc->bConfigurationValue;
 
     s_deviceCount++;
+    // Class dispatch is deliberately explicit for the storage driver until
+    // the generic USB class-driver registry exists.
+    (void)usb_storage::probe(addr);
     return true;
 }
 
@@ -233,18 +245,32 @@ void init()
     s_deviceCount = 0;
     s_nextAddress = 1;
     s_initialised = false;
+    usb_storage::init();
 
-    if (!hci::init()) return;
+    if (!hci::init()) {
+        serial::puts("[USB] host-controller=unavailable\n");
+        return;
+    }
 
     s_initialised = true;
+    const uint8_t ports = hci::port_count();
+    serial::puts("[USB] host-controller=UHCI ports=");
+    serial::put_hex8(ports);
+    serial::putc('\n');
 
-    // Enumerate devices on each root-hub port
-    uint8_t ports = hci::port_count();
+    // Enumerate devices on each root-hub port.
     for (uint8_t p = 0; p < ports; ++p) {
-        if (hci::port_connected(p)) {
-            DeviceSpeed spd = hci::port_reset(p);
-            enumerate_device(p, spd);
-        }
+        if (!hci::port_connected(p)) continue;
+        serial::puts("[USB] root-port=");
+        serial::put_hex8(p);
+        serial::puts(" connected=yes\n");
+        DeviceSpeed spd = hci::port_reset(p);
+        const bool enumerated = enumerate_device(p, spd);
+        serial::puts("[USB] root-port=");
+        serial::put_hex8(p);
+        serial::puts(" enumeration=");
+        serial::puts(enumerated ? "success" : "failed");
+        serial::putc('\n');
     }
 }
 
@@ -256,6 +282,11 @@ void poll()
     uint8_t ports = hci::port_count();
     for (uint8_t p = 0; p < ports; ++p) {
         bool connected = hci::port_connected(p);
+#if defined(ARCH_AMD64)
+        const bool connectionChanged = hci::port_connection_changed(p);
+#else
+        const bool connectionChanged = false;
+#endif
 
         // Find existing device on this port
         int existingSlot = -1;
@@ -266,13 +297,25 @@ void poll()
             }
         }
 
+        // A detach and reattach can occur between software polls. UHCI keeps
+        // the connection-change latch set, so retire the prior incarnation and
+        // enumerate the currently attached device as a fresh registration.
+        if (connectionChanged && existingSlot >= 0) {
+            usb_storage::release(s_devices[existingSlot].address);
+            s_devices[existingSlot].present = false;
+            if (s_deviceCount) --s_deviceCount;
+            existingSlot = -1;
+        }
+
         if (connected && existingSlot < 0) {
             // New device — enumerate
             DeviceSpeed spd = hci::port_reset(p);
             enumerate_device(p, spd);
         }
         else if (!connected && existingSlot >= 0) {
-            // Device removed
+            // Release the exact mass-storage registration before the USB
+            // address and device-table slot become available for reuse.
+            usb_storage::release(s_devices[existingSlot].address);
             s_devices[existingSlot].present = false;
             s_deviceCount--;
         }

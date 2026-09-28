@@ -154,6 +154,7 @@ enum TransferStatus : uint8_t {
     XFER_DATA_UNDERRUN  = 7,
     XFER_BUFFER_ERROR   = 8,
     XFER_CANCELLED      = 9,
+    XFER_READ_ONLY      = 10,
 };
 
 // ================================================================
@@ -278,6 +279,7 @@ struct HIDDescriptor {
 
 struct Endpoint {
     uint8_t       address;       // endpoint number + direction bit
+    uint8_t       interfaceNumber;
     TransferType  type;
     Direction     dir;
     uint16_t      maxPacketSize;
@@ -299,6 +301,7 @@ struct Device {
     DeviceDescriptor devDesc;
     uint8_t          currentConfig;
     Endpoint         endpoints[MAX_ENDPOINTS * 2]; // IN + OUT
+    uint8_t          interfaceNumber[MAX_INTERFACES_PER_DEVICE];
     uint8_t          interfaceClass[MAX_INTERFACES_PER_DEVICE];
     uint8_t          interfaceSubClass[MAX_INTERFACES_PER_DEVICE];
     uint8_t          interfaceProtocol[MAX_INTERFACES_PER_DEVICE];
@@ -319,6 +322,10 @@ namespace hci {
 // Returns true if a working host controller was found.
 bool init();
 
+// Set the physical load base used to translate linked kernel DMA objects on
+// AMD64 UEFI boots. Multiboot retains the identity-mapped default.
+void set_kernel_physical_base(uint64_t physicalBase);
+
 // Return true if the HCI is present and initialised.
 bool is_available();
 
@@ -331,6 +338,11 @@ uint8_t port_count();
 
 // Return true if the port has a device connected.
 bool port_connected(uint8_t port);
+
+// Report and clear the root-port connection-change latch. The USB core uses
+// this to detect detach/reattach churn even when the port is connected again
+// by the next poll.
+bool port_connection_changed(uint8_t port);
 
 // Issue a control transfer on the default pipe (endpoint 0).
 TransferStatus control_transfer(uint8_t deviceAddr,

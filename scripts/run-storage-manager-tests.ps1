@@ -15,6 +15,7 @@ try {
         -I kernel/arch/amd64/include `
         -iquote kernel/core -iquote kernel/core/include -iquote kernel/arch/amd64/include `
         tests/storage_manager_test.cpp `
+        kernel/core/usb_storage.cpp `
         kernel/core/block_device.cpp `
         kernel/core/partition_block_view.cpp `
         kernel/core/storage_manager.cpp `

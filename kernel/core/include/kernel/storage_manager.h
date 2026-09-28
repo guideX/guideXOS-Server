@@ -29,6 +29,13 @@ struct DeviceCapabilities {
     bool flushSemanticsKnown;
     bool removableKnown;
     bool removable;
+    bool usbIdentityValid;
+    uint16_t usbVendorId;
+    uint16_t usbProductId;
+    uint8_t usbPort;
+    uint8_t usbInterface;
+    uint8_t usbLun;
+    uint8_t usbSyncCacheState;
     bool geometryValid;
     bool capacityValid;
     uint32_t logicalSectorSize;
@@ -50,6 +57,12 @@ struct TargetIdentity {
     uint8_t driverIndex;
     uint64_t totalLogicalSectors;
     uint32_t logicalSectorSize;
+    bool usbIdentityValid;
+    uint16_t usbVendorId;
+    uint16_t usbProductId;
+    uint8_t usbPort;
+    uint8_t usbInterface;
+    uint8_t usbLun;
     char name[32];
     char model[40];
     char serial[24];

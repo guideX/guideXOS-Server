@@ -25,6 +25,7 @@
 #include "include/kernel/virtio_rng.h"
 #include "include/kernel/virtio_gpu.h"
 #include "include/kernel/ata.h"
+#include "include/kernel/usb_storage.h"
 #include "include/kernel/kernel_text_guard.h"
 #include "../../built_in_app_metadata.h"
 #include "../../gxos_tls_foundation.h"
@@ -6242,7 +6243,7 @@ static const char* disk_manager_transport_name(kernel::block::DeviceType type)
         case kernel::block::BDEV_ATA_PIO: return "ATA PIO";
         case kernel::block::BDEV_AHCI: return "AHCI";
         case kernel::block::BDEV_NVME: return "NVMe";
-        case kernel::block::BDEV_USB_MASS: return "USB mass storage";
+        case kernel::block::BDEV_USB_MASS: return "USB Mass Storage";
         case kernel::block::BDEV_RAMDISK: return "RAM disk";
         default: return "Unknown transport";
     }
@@ -6258,6 +6259,7 @@ static const char* disk_manager_block_status_name(kernel::block::Status status)
         case kernel::block::BLOCK_ERR_NOT_READY: return "BLOCK_ERR_NOT_READY";
         case kernel::block::BLOCK_ERR_INVALID: return "BLOCK_ERR_INVALID";
         case kernel::block::BLOCK_ERR_UNSUPPORTED: return "BLOCK_ERR_UNSUPPORTED";
+        case kernel::block::BLOCK_ERR_READ_ONLY: return "BLOCK_ERR_READ_ONLY";
         default: return "BLOCK_ERR_UNKNOWN";
     }
 }
@@ -8378,12 +8380,12 @@ void DiskManagerApp::drawDetails(uint32_t x, uint32_t y, uint32_t w,
     const uint32_t panelTop = y + 15;
     const uint32_t rowHeight = 12;
     const uint32_t columnWidth = w / 2 > 8 ? w / 2 - 8 : w;
-    char left[20][128] = {};
-    char right[20][128] = {};
+    char left[24][128] = {};
+    char right[24][128] = {};
     int leftCount = 0, rightCount = 0;
     auto add = [](char target[][128], int& count, const char* label,
                   const char* value) {
-        if (count >= 20) return;
+        if (count >= 24) return;
         strcopy(target[count], label ? label : "", 128);
         if (value && value[0]) {
             strappend(target[count], ": ", 128);
@@ -8518,6 +8520,26 @@ void DiskManagerApp::drawDetails(uint32_t x, uint32_t y, uint32_t w,
             add(left, leftCount, "Device", disk.identity.name);
             if (disk.identity.model[0]) add(left, leftCount, "Model", disk.identity.model);
             if (disk.identity.serial[0]) add(left, leftCount, "Serial", disk.identity.serial);
+            if (disk.capabilities.usbIdentityValid) {
+                char usbId[64] = {};
+                disk_manager_hex32(disk.capabilities.usbVendorId,
+                                   value, sizeof(value));
+                strcopy(usbId, value, sizeof(usbId));
+                strappend(usbId, ":", sizeof(usbId));
+                disk_manager_hex32(disk.capabilities.usbProductId,
+                                   value, sizeof(value));
+                strappend(usbId, value, sizeof(usbId));
+                add(left, leftCount, "USB VID:PID", usbId);
+                numberText(disk.capabilities.usbPort, value, sizeof(value));
+                strcopy(usbId, value, sizeof(usbId));
+                strappend(usbId, " / ", sizeof(usbId));
+                numberText(disk.capabilities.usbInterface, value, sizeof(value));
+                strappend(usbId, value, sizeof(usbId));
+                strappend(usbId, " / ", sizeof(usbId));
+                numberText(disk.capabilities.usbLun, value, sizeof(value));
+                strappend(usbId, value, sizeof(usbId));
+                add(left, leftCount, "USB port / interface / LUN", usbId);
+            }
             add(left, leftCount, "Transport", disk_manager_transport_name(disk.identity.transport));
             if (storage::valid_geometry(disk.capabilities.totalLogicalSectors,
                     disk.capabilities.logicalSectorSize, &capacityBytes)) {
@@ -8564,6 +8586,19 @@ void DiskManagerApp::drawDetails(uint32_t x, uint32_t y, uint32_t w,
                 disk.capabilities.flushSupported ?
                     (disk.capabilities.flushSemanticsKnown ? "Supported; semantics known" : "Supported; semantics unknown")
                     : "Unavailable / unknown");
+            if (disk.capabilities.usbIdentityValid) {
+                const char* syncCache = "Unknown";
+                switch (disk.capabilities.usbSyncCacheState) {
+                    case usb_storage::SYNC_CACHE_SUCCEEDED:
+                        syncCache = "Supported; succeeded"; break;
+                    case usb_storage::SYNC_CACHE_UNSUPPORTED:
+                        syncCache = "Unsupported"; break;
+                    case usb_storage::SYNC_CACHE_FAILED:
+                        syncCache = "Failed"; break;
+                    default: break;
+                }
+                add(right, rightCount, "SCSI Sync Cache", syncCache);
+            }
             if (disk.capabilities.removableKnown)
                 add(right, rightCount, "Media", disk.capabilities.removable ? "Removable" : "Fixed");
             else add(right, rightCount, "Media", "Removable status unknown");
@@ -8821,7 +8856,57 @@ void DiskManagerApp::drawDetails(uint32_t x, uint32_t y, uint32_t w,
                 add(right, rightCount, "Block status", value);
             }
             if (failedIo && failedIo->transportDiagnostic.valid) {
-                if (failedIo->transport == block::BDEV_ATA_PIO) {
+                if (failedIo->transport == block::BDEV_USB_MASS) {
+                    const block::TransportIoDiagnostic& diagnostic =
+                        failedIo->transportDiagnostic;
+                    char usbId[64] = {};
+                    disk_manager_hex32(diagnostic.usbVendorId, value,
+                                       sizeof(value));
+                    strcopy(usbId, value, sizeof(usbId));
+                    strappend(usbId, ":", sizeof(usbId));
+                    disk_manager_hex32(diagnostic.usbProductId, value,
+                                       sizeof(value));
+                    strappend(usbId, value, sizeof(usbId));
+                    add(right, rightCount, "USB VID:PID", usbId);
+                    strcopy(value, "BOT stage ", sizeof(value));
+                    disk_manager_hex32(diagnostic.stage, value2,
+                                       sizeof(value2));
+                    strappend(value, value2, sizeof(value));
+                    strappend(value, " command ", sizeof(value));
+                    disk_manager_hex32(diagnostic.commandOpcode, value2,
+                                       sizeof(value2));
+                    strappend(value, value2, sizeof(value));
+                    add(right, rightCount, "USB command", value);
+                    strcopy(value, "status ", sizeof(value));
+                    disk_manager_hex32(diagnostic.statusCode, value2,
+                                       sizeof(value2));
+                    strappend(value, value2, sizeof(value));
+                    strappend(value, " CSW ", sizeof(value));
+                    disk_manager_hex32(diagnostic.cswStatus, value2,
+                                       sizeof(value2));
+                    strappend(value, value2, sizeof(value));
+                    add(right, rightCount, "USB BOT result", value);
+                    strcopy(value, "Sync Cache state ", sizeof(value));
+                    disk_manager_hex32(diagnostic.usbSyncCacheState, value2,
+                                       sizeof(value2));
+                    strappend(value, value2, sizeof(value));
+                    add(right, rightCount, "USB durability", value);
+                    if (diagnostic.senseKey != 0xFF) {
+                        strcopy(value, "key ", sizeof(value));
+                        disk_manager_hex32(diagnostic.senseKey, value2,
+                                           sizeof(value2));
+                        strappend(value, value2, sizeof(value));
+                        strappend(value, " ASC ", sizeof(value));
+                        disk_manager_hex32(diagnostic.senseAsc, value2,
+                                           sizeof(value2));
+                        strappend(value, value2, sizeof(value));
+                        strappend(value, " ASCQ ", sizeof(value));
+                        disk_manager_hex32(diagnostic.senseAscq, value2,
+                                           sizeof(value2));
+                        strappend(value, value2, sizeof(value));
+                        add(right, rightCount, "USB sense", value);
+                    }
+                } else if (failedIo->transport == block::BDEV_ATA_PIO) {
                     strcopy(value, ata::ata_operation_stage_name(
                         static_cast<ata::AtaOperationStage>(
                             failedIo->transportDiagnostic.stage)), sizeof(value));

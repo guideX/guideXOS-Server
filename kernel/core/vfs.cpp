@@ -243,6 +243,7 @@ static const char* block_status_name(block::Status status)
         case block::BLOCK_ERR_NOT_READY: return "BLOCK_ERR_NOT_READY";
         case block::BLOCK_ERR_INVALID: return "BLOCK_ERR_INVALID";
         case block::BLOCK_ERR_UNSUPPORTED: return "BLOCK_ERR_UNSUPPORTED";
+        case block::BLOCK_ERR_READ_ONLY: return "BLOCK_ERR_READ_ONLY";
         default: return "BLOCK_STATUS_UNKNOWN";
     }
 }
@@ -885,6 +886,7 @@ static Status map_block_status(block::Status status)
         case block::BLOCK_ERR_NOT_READY: return VFS_ERR_NOT_READY;
         case block::BLOCK_ERR_TIMEOUT: return VFS_ERR_IO_TIMEOUT;
         case block::BLOCK_ERR_UNSUPPORTED: return VFS_ERR_NOT_SUPPORTED;
+        case block::BLOCK_ERR_READ_ONLY: return VFS_ERR_READ_ONLY;
         case block::BLOCK_ERR_INVALID: return VFS_ERR_INVALID;
         case block::BLOCK_ERR_IO:
         default: return VFS_ERR_IO;
