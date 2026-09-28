@@ -64,6 +64,9 @@
 #include "include/kernel/qemu_display_configuration_persistence_proof.h"
 #include "include/kernel/qemu_display_events_proof.h"
 #include "include/kernel/virtio_rng.h"
+#if defined(GXOS_DM9_QEMU_STORAGE_PROOF)
+#include "include/kernel/qemu_dm9_storage_proof.h"
+#endif
 
 // Interrupt support
 #include "include/kernel/msi.h"
@@ -978,6 +981,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::putc('\n');
         
         const bool mounted = mount_persistent_storage();
+#if defined(GXOS_DM9_QEMU_STORAGE_PROOF)
+        kernel::qemu_dm9_storage_proof::run(mounted);
+#endif
 
         if (is_bootinfo && bootinfo && bootinfo->RamdiskBase != 0 && bootinfo->RamdiskSize != 0) {
             kernel::serial::puts("[KERNEL] Boot wallpaper pack found in ramdisk.img\n");

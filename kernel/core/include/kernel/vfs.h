@@ -118,7 +118,12 @@ enum Status : int8_t {
     VFS_ERR_CORRUPT_DIRECTORY = -21,
     VFS_ERR_INVALID_DESTINATION = -22,
     VFS_ERR_ROLLBACK_FAILED = -23,
+    VFS_ERR_DEVICE_REMOVED = -24,
+    VFS_ERR_NOT_READY = -25,
+    VFS_ERR_MOUNT_STALE = -26,
 };
+
+const char* status_name(Status status);
 
 // ================================================================
 // File/directory information
@@ -242,6 +247,9 @@ bool propose_partition_mount_path(uint8_t blockDevIndex,
                                   uint16_t partitionNumber,
                                   char* outPath, size_t outPathSize);
 bool mount_identity_valid(uint8_t mountIndex);
+// Reports the current state of a mount's exact backing registration and view.
+// Stale mounts remain enumerable until explicit unmount cleanup succeeds.
+Status mount_backing_status(uint8_t mountIndex);
 const char* partition_mount_error_name(PartitionMountError error);
 #if defined(KERNEL_STORAGE_TEST)
 void test_set_mount(uint8_t index, bool active, uint8_t deviceIndex,
@@ -331,6 +339,8 @@ uint8_t opendir(const char* path);
 // Read next directory entry.
 // Returns true if entry was read, false if end of directory.
 bool readdir(uint8_t iterator, DirEntry* entry);
+// Distinguishes normal end-of-directory from media loss and I/O failure.
+Status readdir_detailed(uint8_t iterator, DirEntry* entry, bool& hasEntry);
 
 // Close directory iterator.
 void closedir(uint8_t iterator);

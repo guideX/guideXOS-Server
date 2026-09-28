@@ -43,6 +43,7 @@ struct FakeDisk {
     std::vector<uint8_t> sparseMbr;
     std::vector<uint8_t> bytes;
     bool failReads;
+    block::Status failReadStatus;
     uint64_t failLba;
     uint64_t failLbaAfterWrite;
     uint32_t failReadAtCall;
@@ -51,6 +52,8 @@ struct FakeDisk {
     block::Status failFlushStatus;
     uint32_t failWriteAtCall1;
     uint32_t failWriteAtCall2;
+    block::Status failWriteStatus;
+    uint32_t removeOnWriteAtCall;
     uint64_t corruptWriteLbaOnce;
     bool corruptWritePending;
     uint32_t reads;
@@ -71,10 +74,12 @@ struct FakeDisk {
         : sectorSize(size), sectorCount(count), driverId(0), sparse(!allocate),
           sparseMbr(static_cast<size_t>(size), 0),
           bytes(allocate ? static_cast<size_t>(size) * static_cast<size_t>(count) : 0, 0),
-          failReads(false), failLba(UINT64_MAX), failLbaAfterWrite(UINT64_MAX),
+          failReads(false), failReadStatus(block::BLOCK_ERR_IO),
+          failLba(UINT64_MAX), failLbaAfterWrite(UINT64_MAX),
           failReadAtCall(0), failFlush(false),
           failFlushAtCall(0), failFlushStatus(block::BLOCK_ERR_IO),
           failWriteAtCall1(0), failWriteAtCall2(0),
+          failWriteStatus(block::BLOCK_ERR_IO), removeOnWriteAtCall(0),
           corruptWriteLbaOnce(UINT64_MAX), corruptWritePending(false),
           reads(0), writes(0), writeAttempts(0), flushes(0),
           registryIndex(0xFF), registrationId(0), removeOnVerifyRead(false), removeOnFlush(false), removeOnFlushAt(0),
@@ -100,11 +105,13 @@ block::Status fake_read(uint8_t driverId, uint64_t lba, uint32_t count, void* bu
     FakeDisk* disk = g_fakeDisks[driverId];
     if (!disk) return block::BLOCK_ERR_IO;
     disk->readLog.push_back({lba, count});
-    if (!buffer || count == 0 || disk->failReads || lba == disk->failLba ||
-        (disk->writeAttempts != 0 && lba == disk->failLbaAfterWrite) ||
-        (disk->failReadAtCall != 0 && disk->reads + 1 == disk->failReadAtCall) ||
-        lba > disk->sectorCount || count > disk->sectorCount - lba)
+    if (!buffer || count == 0 || lba > disk->sectorCount ||
+        count > disk->sectorCount - lba)
         return block::BLOCK_ERR_IO;
+    if (disk->failReads || lba == disk->failLba ||
+        (disk->writeAttempts != 0 && lba == disk->failLbaAfterWrite) ||
+        (disk->failReadAtCall != 0 && disk->reads + 1 == disk->failReadAtCall))
+        return disk->failReadStatus;
     ++disk->reads;
     if (disk->removeOnVerifyRead && lba == 1 &&
         disk->bytes.size() >= disk->sectorSize * 2 &&
@@ -137,8 +144,15 @@ block::Status fake_write(uint8_t driverId, uint64_t lba, uint32_t count,
     if (lba > disk->sectorCount || count > disk->sectorCount - lba)
         return block::BLOCK_ERR_IO;
     ++disk->writeAttempts;
+    if (disk->removeOnWriteAtCall != 0 &&
+        disk->writeAttempts == disk->removeOnWriteAtCall) {
+        disk->removed = block::mark_device_offline(
+            disk->registryIndex, disk->registrationId);
+        return block::BLOCK_ERR_NO_MEDIA;
+    }
     if (disk->writeAttempts == disk->failWriteAtCall1 ||
-        disk->writeAttempts == disk->failWriteAtCall2) return block::BLOCK_ERR_IO;
+        disk->writeAttempts == disk->failWriteAtCall2)
+        return disk->failWriteStatus;
     if (disk->sparse) {
         if (lba != 0 || count != 1) return block::BLOCK_ERR_IO;
         std::memcpy(disk->sparseMbr.data(), buffer, disk->sectorSize);
@@ -2147,6 +2161,26 @@ int main()
           "removal during flush stops further writes, reports uncertainty, and releases the lease");
     g_fakeDisks[removedDuringFlush.driverId] = nullptr;
 
+    FakeDisk removedDuringInitializeWrite(512, 4096);
+    index = register_fake(removedDuringInitializeWrite, true, true, true);
+    initializeRequest = make_initialize_request(index,
+        storage::PARTITION_SCHEME_GPT);
+    const bool initializeWritePrepared =
+        storage::prepare_initialize_disk(initializeRequest, initializePlan,
+            initializeResult) == storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION;
+    removedDuringInitializeWrite.removeOnWriteAtCall = 3;
+    const storage::InitializeDiskStatus initializeWriteLossStatus =
+        storage::execute_initialize_disk(initializePlan, initializeResult);
+    check(initializeWritePrepared &&
+          initializeWriteLossStatus != storage::INITIALIZE_DISK_SUCCESS &&
+          removedDuringInitializeWrite.removed &&
+          removedDuringInitializeWrite.writeAttempts == 3 &&
+          !initializeResult.rollbackAttempted &&
+          initializeResult.finalStateUncertain &&
+          !storage::storage_operation_active() && block::get_device(index) == nullptr,
+          "removal during Initialize stops at the failed callback, skips rollback to unavailable media, and reports uncertainty");
+    g_fakeDisks[removedDuringInitializeWrite.driverId] = nullptr;
+
     FakeDisk firstFlushFail(512, 4096);
     index = register_fake(firstFlushFail, true, true, true);
     initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
@@ -2904,6 +2938,30 @@ int main()
     }
 
     {
+        FakeDisk removedDuringCreate(512, 16384);
+        build_empty_gpt(removedDuringCreate);
+        index = register_fake(removedDuringCreate, true, true, true);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        current_regions(index, removedDuringCreate, regions, regionCount);
+        storage::CreatePartitionRequest request = make_create_request(index,
+            storage::PARTITION_SCHEME_GPT, regions[0], 0, true, 0xC6);
+        removedDuringCreate.removeOnWriteAtCall = 2;
+        storage::CreatePartitionResult createResult = {};
+        const storage::CreatePartitionStatus createLossStatus =
+            storage::create_partition(request, createResult);
+        check(createLossStatus != storage::CREATE_PARTITION_SUCCESS &&
+              removedDuringCreate.removed &&
+              removedDuringCreate.writeAttempts == 2 &&
+              !createResult.rollbackAttempted &&
+              createResult.finalStateUncertain &&
+              !storage::storage_operation_active() &&
+              block::get_device(index) == nullptr,
+              "removal during Create Partition stops writes, skips unavailable-media rollback and reports uncertain metadata");
+        g_fakeDisks[removedDuringCreate.driverId] = nullptr;
+    }
+
+    {
         storage::Fat32FormatGeometry smallGeometry = {};
         check(storage::calculate_fat32_format_geometry(2048, 70000, 512,
                   smallGeometry) == storage::FAT32_FORMAT_READY &&
@@ -3292,6 +3350,30 @@ int main()
               "rollback failure reports uncertain filesystem state and releases the lease");
         resetFaultState();
         unregister_fake(index, guarded);
+    }
+
+    {
+        FakeDisk removedDuringFormat(512, 100000);
+        set_mbr_signature(removedDuringFormat);
+        set_mbr_partition(removedDuringFormat, 0, 0, 0x0C, 2048, 80000);
+        index = register_fake(removedDuringFormat, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        parse_first_partition(index, table, partition);
+        storage::Fat32FormatRequest request = make_format_request(index,
+            partition, "LOSS", 0x11224488u);
+        removedDuringFormat.removeOnWriteAtCall = 3;
+        storage::Fat32FormatResult result = {};
+        const storage::Fat32FormatStatus formatLossStatus =
+            storage::format_fat32_partition(request, result);
+        check(formatLossStatus != storage::FAT32_FORMAT_SUCCESS &&
+              removedDuringFormat.removed &&
+              removedDuringFormat.writeAttempts == 3 &&
+              !result.rollbackAttempted && result.finalStateUncertain &&
+              !storage::storage_operation_active() &&
+              block::get_device(index) == nullptr,
+              "removal during FAT metadata update stops further writes, skips unavailable-media rollback and reports filesystem uncertainty");
+        g_fakeDisks[removedDuringFormat.driverId] = nullptr;
     }
 
     {
@@ -4009,7 +4091,93 @@ int main()
         const vfs::Status remountUnmount = vfs::unmount(rootA.c_str());
         check(remountExact && remountUnmount == vfs::VFS_OK,
               "fresh VFS/FAT discovery after unmount reads persisted file bytes");
-        unregister_fake(index, gptVfs);
+
+        bool mountStressPassed = true;
+        for (uint32_t cycle = 0; cycle < 100; ++cycle) {
+            const vfs::PartitionMountResult stressMount =
+                vfs::mount_partition_detailed("/mnt/a", index,
+                    partA.partitionNumber, parentRegistration, &partA);
+            uint8_t stressHandle = vfs::open(fileA.c_str(), vfs::OPEN_READ);
+            std::vector<uint8_t> stressRead(payloadA.size());
+            const int32_t stressBytes = stressHandle == 0xFF
+                ? vfs::VFS_ERR_IO
+                : vfs::read(stressHandle, stressRead.data(),
+                    static_cast<uint32_t>(stressRead.size()));
+            const vfs::Status stressClose = stressHandle == 0xFF
+                ? vfs::VFS_ERR_INVALID : vfs::close(stressHandle);
+            const vfs::Status stressUnmount = vfs::unmount("/mnt/a");
+            if (stressMount.error != vfs::PARTITION_MOUNT_OK ||
+                stressBytes != static_cast<int32_t>(payloadA.size()) ||
+                stressRead != payloadA || stressClose != vfs::VFS_OK ||
+                stressUnmount != vfs::VFS_OK || vfs::mount_count() != 0) {
+                mountStressPassed = false;
+                break;
+            }
+        }
+        check(mountStressPassed,
+              "100 mount/read/unmount cycles reuse VFS and partition-view slots without leaking mounts or handles");
+
+        const vfs::PartitionMountResult lossMount =
+            vfs::mount_partition_detailed("/mnt/loss", index,
+                partA.partitionNumber, parentRegistration, &partA);
+        const uint8_t lossMountIndex = vfs::mount_index_for_path("/mnt/loss");
+        const vfs::MountPoint* lossMountPoint =
+            vfs::get_mount_by_index(lossMountIndex);
+        const block::PartitionViewHandle lossView = lossMountPoint
+            ? lossMountPoint->partitionView : block::PartitionViewHandle{};
+        const uint8_t openLossHandle =
+            vfs::open("/mnt/loss/test/hello.txt", vfs::OPEN_READ);
+        const uint8_t lossIterator = vfs::opendir("/mnt/loss/test");
+        bool iteratorPrimed = false;
+        if (lossIterator != 0xFF) {
+            vfs::DirEntry firstEntry{};
+            bool hasEntry = false;
+            iteratorPrimed = vfs::readdir_detailed(lossIterator,
+                &firstEntry, hasEntry) == vfs::VFS_OK && hasEntry;
+        }
+        gptVfs.failReads = true;
+        gptVfs.failReadStatus = block::BLOCK_ERR_NOT_READY;
+        uint8_t errorByte = 0;
+        const int32_t notReadyRead = openLossHandle == 0xFF
+            ? vfs::VFS_ERR_INVALID
+            : vfs::read(openLossHandle, &errorByte, 1);
+        gptVfs.failReadStatus = block::BLOCK_ERR_TIMEOUT;
+        const int32_t timeoutRead = openLossHandle == 0xFF
+            ? vfs::VFS_ERR_INVALID
+            : vfs::read(openLossHandle, &errorByte, 1);
+        bool hasEntry = false;
+        vfs::DirEntry errorEntry{};
+        const vfs::Status timeoutDirectoryRead = lossIterator == 0xFF
+            ? vfs::VFS_ERR_INVALID
+            : vfs::readdir_detailed(lossIterator, &errorEntry, hasEntry);
+        gptVfs.failReads = false;
+        const bool removed = block::mark_device_offline(index,
+            parentRegistration);
+        const int32_t removedRead = openLossHandle == 0xFF
+            ? vfs::VFS_ERR_INVALID
+            : vfs::read(openLossHandle, &errorByte, 1);
+        const vfs::Status removedDirectoryRead = lossIterator == 0xFF
+            ? vfs::VFS_ERR_INVALID
+            : vfs::readdir_detailed(lossIterator, &errorEntry, hasEntry);
+        const vfs::Status busyOrphanUnmount = vfs::unmount("/mnt/loss");
+        const vfs::Status closeRemovedFile = openLossHandle == 0xFF
+            ? vfs::VFS_ERR_INVALID : vfs::close(openLossHandle);
+        if (lossIterator != 0xFF) vfs::closedir(lossIterator);
+        const vfs::Status removeOrphanUnmount = vfs::unmount("/mnt/loss");
+        check(lossMount.error == vfs::PARTITION_MOUNT_OK && iteratorPrimed &&
+              notReadyRead == vfs::VFS_ERR_NOT_READY &&
+              timeoutRead == vfs::VFS_ERR_IO_TIMEOUT &&
+              timeoutDirectoryRead == vfs::VFS_ERR_IO_TIMEOUT && removed &&
+              removedRead == vfs::VFS_ERR_DEVICE_REMOVED &&
+              removedDirectoryRead == vfs::VFS_ERR_DEVICE_REMOVED &&
+              busyOrphanUnmount == vfs::VFS_ERR_BUSY &&
+              closeRemovedFile == vfs::VFS_ERR_DEVICE_REMOVED &&
+              removeOrphanUnmount == vfs::VFS_ERR_DEVICE_REMOVED &&
+              vfs::mount_count() == 0 &&
+              !block::partition_view_parent_valid(lossView),
+              "open file and directory handles report not-ready, timeout and removal; close and explicit stale unmount remain safe");
+        if (block::get_device(index)) unregister_fake(index, gptVfs);
+        else g_fakeDisks[gptVfs.driverId] = nullptr;
     }
 
     {
@@ -4194,14 +4362,141 @@ int main()
             0, 1, staleBuffer);
         const bool invalidMount = !vfs::mount_identity_valid(staleMountIndex);
         const size_t replacementReads = replacement.readLog.size();
+        const vfs::Status staleBackingStatus =
+            vfs::mount_backing_status(staleMountIndex);
+        storage::TargetIdentity replacementIdentity = {};
+        storage::capture_target_identity(replacementIndex,
+                                         replacementIdentity);
+        const storage::MountProtection replacementMountProtection =
+            storage::query_mount_protection(replacementIdentity);
         const vfs::Status invalidUnmount = vfs::unmount("/mnt/read-only");
         check(replacementIndex == readOnlyIndex && staleIo ==
                   block::BLOCK_ERR_NO_MEDIA && invalidMount &&
-              replacementReads == 0 && invalidUnmount == vfs::VFS_ERR_IO &&
+              replacementReads == 0 &&
+              staleBackingStatus == vfs::VFS_ERR_DEVICE_REMOVED &&
+              replacementMountProtection.safety == storage::DEVICE_UNMOUNTED &&
+              invalidUnmount == vfs::VFS_ERR_DEVICE_REMOVED &&
               vfs::get_mount_by_index(staleMountIndex) == nullptr,
               "removed parent and reused slot invalidate mounted I/O without touching the replacement; cleanup remains possible");
         unregister_fake(replacementIndex, replacement);
-        unregister_fake(index, mbrVfs);
+
+        const uint8_t reinsertedIndex = register_fake(readOnlyDisk, false);
+        block::BlockDevice reinsertedDevice = {};
+        block::copy_device(reinsertedIndex, reinsertedDevice);
+        const vfs::PartitionMountResult reinsertedMount =
+            vfs::mount_partition_detailed("/mnt/reinserted", reinsertedIndex,
+                readOnlyPartition.partitionNumber,
+                reinsertedDevice.registrationId, &readOnlyPartition);
+        const uint8_t reinsertedMountIndex =
+            vfs::mount_index_for_path("/mnt/reinserted");
+        readOnlyDisk.readLog.clear();
+        const block::Status oldViewAfterReinsert = block::read_endpoint(
+            staleEndpoint, 0, 1, staleBuffer);
+        const size_t reinsertedReadsFromOldView = readOnlyDisk.readLog.size();
+        const bool reinsertIdentityFresh = reinsertedIndex == readOnlyIndex &&
+            reinsertedDevice.registrationId != readOnlyIdentity.registrationId &&
+            reinsertedMount.error == vfs::PARTITION_MOUNT_OK &&
+            reinsertedMountIndex != 0xFF &&
+            vfs::mount_identity_valid(reinsertedMountIndex) &&
+            oldViewAfterReinsert == block::BLOCK_ERR_NO_MEDIA &&
+            reinsertedReadsFromOldView == 0;
+        const vfs::Status reinsertedUnmount = vfs::unmount("/mnt/reinserted");
+        check(reinsertIdentityFresh && reinsertedUnmount == vfs::VFS_OK,
+              "reinserting the exact backing bytes gets a fresh registration while the old partition view stays stale");
+        unregister_fake(reinsertedIndex, readOnlyDisk);
+
+        FakeDisk mountChurn(512, 4096);
+        const uint8_t registryCountBeforeChurn = block::device_count();
+        uint64_t previousRegistrationId = 0;
+        uint8_t firstChurnSlot = 0xFF;
+        bool registryStressPassed = true;
+        for (uint32_t cycle = 0; cycle < 100; ++cycle) {
+            const uint8_t churnIndex = register_fake(mountChurn);
+            block::BlockDevice churnDevice = {};
+            if (churnIndex == 0xFF ||
+                !block::copy_device(churnIndex, churnDevice) ||
+                (cycle != 0 && churnIndex != firstChurnSlot) ||
+                churnDevice.registrationId <= previousRegistrationId ||
+                !unregister_fake(churnIndex, mountChurn)) {
+                registryStressPassed = false;
+                break;
+            }
+            if (cycle == 0) firstChurnSlot = churnIndex;
+            previousRegistrationId = churnDevice.registrationId;
+        }
+        check(registryStressPassed &&
+              block::device_count() == registryCountBeforeChurn,
+              "100 fake-device register/unregister cycles reuse slots with strictly fresh identities and no registry leaks");
+
+        const vfs::PartitionMountResult writeLossMount =
+            vfs::mount_partition_detailed("/mnt/write-loss", index,
+                partition.partitionNumber, parentRegistration, &partition);
+        const uint32_t writeAttemptsBeforeLoss = mbrVfs.writeAttempts;
+        mbrVfs.removeOnWriteAtCall = writeAttemptsBeforeLoss + 3;
+        const uint8_t lossPayload[] = {0x14, 0x29, 0x3E, 0x53, 0x68};
+        const int32_t fileWriteLoss = vfs::create_file(
+            "/mnt/write-loss/loss.bin", lossPayload,
+            sizeof(lossPayload));
+        const uint8_t writeLossMountIndex =
+            vfs::mount_index_for_path("/mnt/write-loss");
+        const vfs::Status writeLossBackingStatus = writeLossMountIndex == 0xFF
+            ? vfs::VFS_ERR_NOT_MOUNT
+            : vfs::mount_backing_status(writeLossMountIndex);
+        const vfs::Status writeLossCleanup =
+            vfs::unmount("/mnt/write-loss");
+        check(writeLossMount.error == vfs::PARTITION_MOUNT_OK &&
+              fileWriteLoss == vfs::VFS_ERR_DEVICE_REMOVED &&
+              mbrVfs.removed &&
+              mbrVfs.writeAttempts == writeAttemptsBeforeLoss + 3 &&
+              writeLossBackingStatus == vfs::VFS_ERR_DEVICE_REMOVED &&
+              writeLossCleanup == vfs::VFS_ERR_DEVICE_REMOVED &&
+              vfs::mount_count() == 0 && block::get_device(index) == nullptr,
+              "device loss during a FAT file write is surfaced, stops callbacks, and still permits orphan mount cleanup");
+        if (block::get_device(index)) unregister_fake(index, mbrVfs);
+        else g_fakeDisks[mbrVfs.driverId] = nullptr;
+
+    }
+
+    {
+        block::init();
+        vfs::test_clear_mounts();
+        fs_fat::init();
+        FakeDisk flushLossDisk(512, 100000);
+        set_mbr_signature(flushLossDisk);
+        set_mbr_partition(flushLossDisk, 0, 0, 0x0C, 2048, 80000);
+        const uint8_t flushLossIndex = register_fake(
+            flushLossDisk, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        const bool parsed = parse_first_partition(flushLossIndex, table,
+                                                   partition);
+        storage::Fat32FormatRequest request = make_format_request(
+            flushLossIndex, partition, "FLUSHLSS", 0x8899AABBu);
+        storage::Fat32FormatResult formatResult = {};
+        const storage::Fat32FormatStatus formatted = parsed
+            ? storage::format_fat32_partition(request, formatResult)
+            : storage::FAT32_FORMAT_INVALID_REQUEST;
+        block::BlockDevice parent = {};
+        block::copy_device(flushLossIndex, parent);
+        const vfs::PartitionMountResult mountResult =
+            vfs::mount_partition_detailed("/mnt/flush-loss", flushLossIndex,
+                partition.partitionNumber, parent.registrationId, &partition);
+        const uint32_t flushesBeforeRemoval = flushLossDisk.flushes;
+        flushLossDisk.removeOnFlush = true;
+        flushLossDisk.removeOnFlushAt = flushesBeforeRemoval + 1;
+        const vfs::Status unmountStatus = vfs::unmount("/mnt/flush-loss");
+        check(formatted == storage::FAT32_FORMAT_SUCCESS &&
+              mountResult.error == vfs::PARTITION_MOUNT_OK &&
+              unmountStatus == vfs::VFS_ERR_DEVICE_REMOVED &&
+              flushLossDisk.removed &&
+              flushLossDisk.flushes == flushesBeforeRemoval + 1 &&
+              vfs::mount_count() == 0 &&
+              block::get_device(flushLossIndex) == nullptr,
+              "device removal during unmount flush reports loss and releases the stale mount without another callback");
+        if (block::get_device(flushLossIndex))
+            unregister_fake(flushLossIndex, flushLossDisk);
+        else
+            g_fakeDisks[flushLossDisk.driverId] = nullptr;
     }
 
     block::init();

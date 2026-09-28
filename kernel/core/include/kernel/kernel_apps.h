@@ -1257,6 +1257,7 @@ private:
         char mountPath[128];
         uint8_t mountCount;
         uint8_t exactPartitionMountCount;
+        uint8_t staleMountCount;
         storage::DiskState state;
         storage::PartitionScheme scheme;
         storage::PartitionError parserError;

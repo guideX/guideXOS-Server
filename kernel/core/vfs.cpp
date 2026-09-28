@@ -29,6 +29,8 @@ static DirIterator  s_dirs[VFS_MAX_OPEN_FILES];
 static uint8_t      s_mountCount = 0;
 static bool         s_initialized = false;
 static storage::PartitionTableModel s_partitionTableScratch;
+static Status mount_io_status(const MountPoint* mount);
+static Status map_block_status(block::Status status);
 
 // ================================================================
 // Helper functions
@@ -259,7 +261,8 @@ static Status map_fat_file_write_status(fs_fat::FileWriteStatus status)
         case fs_fat::FILE_WRITE_READ_ONLY: return VFS_ERR_READ_ONLY;
         case fs_fat::FILE_WRITE_NOT_MOUNTED: return VFS_ERR_NOT_MOUNT;
         case fs_fat::FILE_WRITE_UNSUPPORTED_TYPE: return VFS_ERR_NOT_SUPPORTED;
-        case fs_fat::FILE_WRITE_IO_ERROR: return VFS_ERR_IO;
+        case fs_fat::FILE_WRITE_IO_ERROR:
+            return map_block_status(fs_fat::last_io_status());
         case fs_fat::FILE_WRITE_IO_TIMEOUT: return VFS_ERR_IO_TIMEOUT;
         case fs_fat::FILE_WRITE_CORRUPT_CHAIN: return VFS_ERR_CORRUPT_CHAIN;
         case fs_fat::FILE_WRITE_NO_PROGRESS: return VFS_ERR_NO_PROGRESS;
@@ -827,6 +830,31 @@ bool mount_identity_valid(uint8_t mountIndex)
         partition_entry_matches_identity(current, mount->partitionIdentity);
 }
 
+static Status mount_io_status(const MountPoint* mount)
+{
+    if (!mount || !mount->active) return VFS_ERR_NOT_MOUNT;
+    block::BlockDevice parent = {};
+    if (!block::copy_device(mount->blockDevIndex, parent) ||
+        parent.registrationId != mount->parentRegistrationId)
+        return VFS_ERR_DEVICE_REMOVED;
+    if (mount->partitionMount &&
+        (!mount->partitionIdentity.valid ||
+         !block::partition_view_parent_valid(mount->partitionView)))
+        return VFS_ERR_MOUNT_STALE;
+    return VFS_OK;
+}
+
+Status mount_backing_status(uint8_t mountIndex)
+{
+    const MountPoint* mount = get_mount_by_index(mountIndex);
+    if (!mount || !mount->active) return VFS_ERR_NOT_MOUNT;
+    const Status ioStatus = mount_io_status(mount);
+    if (ioStatus != VFS_OK) return ioStatus;
+    if (mount->partitionMount && !mount_identity_valid(mountIndex))
+        return VFS_ERR_MOUNT_STALE;
+    return VFS_OK;
+}
+
 const char* partition_mount_error_name(PartitionMountError error)
 {
     switch (error) {
@@ -846,6 +874,20 @@ const char* partition_mount_error_name(PartitionMountError error)
         case PARTITION_MOUNT_FILESYSTEM_UNSUPPORTED:
             return "Filesystem is not supported for partition mounting";
         default: return "Unknown mount error";
+    }
+}
+
+static Status map_block_status(block::Status status)
+{
+    switch (status) {
+        case block::BLOCK_OK: return VFS_OK;
+        case block::BLOCK_ERR_NO_MEDIA: return VFS_ERR_DEVICE_REMOVED;
+        case block::BLOCK_ERR_NOT_READY: return VFS_ERR_NOT_READY;
+        case block::BLOCK_ERR_TIMEOUT: return VFS_ERR_IO_TIMEOUT;
+        case block::BLOCK_ERR_UNSUPPORTED: return VFS_ERR_NOT_SUPPORTED;
+        case block::BLOCK_ERR_INVALID: return VFS_ERR_INVALID;
+        case block::BLOCK_ERR_IO:
+        default: return VFS_ERR_IO;
     }
 }
 
@@ -903,6 +945,7 @@ uint8_t mount_alias(const char* path, const char* sourcePath)
 #endif
         return 0xFF;
     }
+    if (mount_io_status(sourceMount) != VFS_OK) return 0xFF;
     if (sourceMount->partitionMount &&
         !block::retain_partition_view(sourceMount->partitionView))
         return 0xFF;
@@ -961,19 +1004,16 @@ Status unmount(const char* path)
                 }
             }
 
-            const bool mountIdentityValid = mount_identity_valid(i);
-            bool reportIdentityFailure = !mountIdentityValid;
-            if (!s_mounts[i].alias && !s_mounts[i].readOnly &&
+            Status cleanupStatus = mount_backing_status(i);
+            if (cleanupStatus == VFS_OK && !s_mounts[i].alias &&
+                !s_mounts[i].readOnly &&
                 (s_mounts[i].fsType == FS_TYPE_FAT32 ||
                  s_mounts[i].fsType == FS_TYPE_EXFAT)) {
                 block::Status blockStatus = block::BLOCK_OK;
                 if (!fs_fat::flush(s_mounts[i].fsVolumeIndex, &blockStatus)) {
-                    if (block::registration_is_present(
-                            s_mounts[i].blockDevIndex,
-                            s_mounts[i].parentRegistrationId))
-                        return blockStatus == block::BLOCK_ERR_TIMEOUT
-                            ? VFS_ERR_IO_TIMEOUT : VFS_ERR_IO;
-                    reportIdentityFailure = true;
+                    const Status flushStatus = map_block_status(blockStatus);
+                    cleanupStatus = mount_io_status(&s_mounts[i]);
+                    if (cleanupStatus == VFS_OK) return flushStatus;
                 }
             }
             
@@ -1003,7 +1043,7 @@ Status unmount(const char* path)
             serial::puts("'\n");
 #endif
             
-            return reportIdentityFailure ? VFS_ERR_IO : VFS_OK;
+            return cleanupStatus;
         }
     }
     
@@ -1250,6 +1290,7 @@ uint8_t open(const char* path, uint16_t flags)
 #endif
         return 0xFF;
     }
+    if (mount_io_status(mount) != VFS_OK) return 0xFF;
     
     // Find free file handle
     uint8_t handle = 0xFF;
@@ -1383,15 +1424,15 @@ Status close(uint8_t handle)
     if (!s_files[handle].open) return VFS_ERR_INVALID;
     
     FileHandle& fh = s_files[handle];
-    Status flushStatus = VFS_OK;
+    Status flushStatus = mount_io_status(&s_mounts[fh.mountIndex]);
     // Close via filesystem driver
     MountPoint* mount = &s_mounts[fh.mountIndex];
 
-    if ((fh.flags & OPEN_WRITE) && mount->fsType == FS_TYPE_FAT32) {
+    if (flushStatus == VFS_OK && (fh.flags & OPEN_WRITE) &&
+        mount->fsType == FS_TYPE_FAT32) {
         block::Status blockStatus = block::BLOCK_OK;
         if (!fs_fat::flush(mount->fsVolumeIndex, &blockStatus)) {
-            flushStatus = blockStatus == block::BLOCK_ERR_TIMEOUT
-                ? VFS_ERR_IO_TIMEOUT : VFS_ERR_IO;
+            flushStatus = map_block_status(blockStatus);
         }
     }
     
@@ -1424,6 +1465,8 @@ int32_t read(uint8_t handle, void* buffer, uint32_t size)
     }
     
     MountPoint* mount = &s_mounts[fh.mountIndex];
+    const Status backingStatus = mount_io_status(mount);
+    if (backingStatus != VFS_OK) return backingStatus;
     int32_t bytesRead = 0;
     
     switch (mount->fsType) {
@@ -1441,6 +1484,17 @@ int32_t read(uint8_t handle, void* buffer, uint32_t size)
     
     if (bytesRead > 0) {
         fh.position += static_cast<uint64_t>(bytesRead);
+    } else if (bytesRead == 0) {
+        const block::Status ioStatus = fs_fat::last_io_status();
+        if (ioStatus != block::BLOCK_OK) return map_block_status(ioStatus);
+        const fs_fat::TraversalStatus traversal =
+            fs_fat::last_traversal_status();
+        if (traversal == fs_fat::TRAVERSAL_IO_ERROR)
+            return map_block_status(ioStatus);
+        if (traversal != fs_fat::TRAVERSAL_OK &&
+            traversal != fs_fat::TRAVERSAL_END_OF_CHAIN &&
+            traversal != fs_fat::TRAVERSAL_DIRECTORY_END)
+            return VFS_ERR_CORRUPT_CHAIN;
     }
     
     return bytesRead;
@@ -1459,6 +1513,8 @@ int32_t write(uint8_t handle, const void* buffer, uint32_t size)
     }
     
     MountPoint* mount = &s_mounts[fh.mountIndex];
+    const Status backingStatus = mount_io_status(mount);
+    if (backingStatus != VFS_OK) return backingStatus;
     
     if (mount->readOnly) {
         return VFS_ERR_READ_ONLY;
@@ -1496,6 +1552,10 @@ int32_t write(uint8_t handle, const void* buffer, uint32_t size)
             fh.size = fh.position;
         }
     }
+    if (bytesWritten == 0 && size != 0) {
+        const block::Status ioStatus = fs_fat::last_io_status();
+        if (ioStatus != block::BLOCK_OK) return map_block_status(ioStatus);
+    }
 
     return bytesWritten;
 }
@@ -1527,6 +1587,8 @@ Status seek(uint8_t handle, int64_t offset, SeekOrigin origin)
     }
 
     MountPoint* mount = &s_mounts[fh.mountIndex];
+    const Status backingStatus = mount_io_status(mount);
+    if (backingStatus != VFS_OK) return backingStatus;
     if (newPos > 0xFFFFFFFFll) return VFS_ERR_INVALID;
     switch (mount->fsType) {
         case FS_TYPE_FAT32:
@@ -1563,11 +1625,12 @@ Status flush(uint8_t handle)
     if (handle >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
     if (!s_files[handle].open) return VFS_ERR_INVALID;
     MountPoint* mount = &s_mounts[s_files[handle].mountIndex];
+    const Status backingStatus = mount_io_status(mount);
+    if (backingStatus != VFS_OK) return backingStatus;
     if (mount->fsType != FS_TYPE_FAT32) return VFS_OK;
     block::Status blockStatus = block::BLOCK_OK;
     return fs_fat::flush(mount->fsVolumeIndex, &blockStatus)
-        ? VFS_OK
-        : (blockStatus == block::BLOCK_ERR_TIMEOUT ? VFS_ERR_IO_TIMEOUT : VFS_ERR_IO);
+        ? VFS_OK : map_block_status(blockStatus);
 }
 
 const FileHandle* get_handle(uint8_t handle)
@@ -1587,6 +1650,7 @@ uint8_t opendir(const char* path)
     
     MountPoint* mount = find_mount_for_path(path);
     if (!mount) return 0xFF;
+    if (mount_io_status(mount) != VFS_OK) return 0xFF;
     
     // Find free iterator
     uint8_t iter = 0xFF;
@@ -1662,19 +1726,39 @@ uint8_t opendir(const char* path)
 
 bool readdir(uint8_t iterator, DirEntry* entry)
 {
-    if (iterator >= VFS_MAX_OPEN_FILES) return false;
-    if (!s_dirs[iterator].active) return false;
-    if (!entry) return false;
-    
+    bool hasEntry = false;
+    return readdir_detailed(iterator, entry, hasEntry) == VFS_OK && hasEntry;
+}
+
+Status readdir_detailed(uint8_t iterator, DirEntry* entry, bool& hasEntry)
+{
+    hasEntry = false;
+    if (iterator >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
+    if (!s_dirs[iterator].active) return VFS_ERR_INVALID;
+    if (!entry) return VFS_ERR_INVALID;
+
     DirIterator& di = s_dirs[iterator];
     MountPoint* mount = &s_mounts[di.mountIndex];
+    const Status backingStatus = mount_io_status(mount);
+    if (backingStatus != VFS_OK) return backingStatus;
     
     switch (mount->fsType) {
         case FS_TYPE_FAT32:
         case FS_TYPE_EXFAT: {
             fs_fat::DirEntry fatEntry;
             if (!fs_fat::read_dir(mount->fsVolumeIndex, &fatEntry)) {
-                return false;
+                const block::Status ioStatus = fs_fat::last_io_status();
+                if (ioStatus != block::BLOCK_OK)
+                    return map_block_status(ioStatus);
+                const fs_fat::TraversalStatus traversal =
+                    fs_fat::last_traversal_status();
+                if (traversal == fs_fat::TRAVERSAL_OK ||
+                    traversal == fs_fat::TRAVERSAL_END_OF_CHAIN ||
+                    traversal == fs_fat::TRAVERSAL_DIRECTORY_END)
+                    return VFS_OK;
+                if (traversal == fs_fat::TRAVERSAL_IO_ERROR)
+                    return map_block_status(ioStatus);
+                return VFS_ERR_CORRUPT_DIRECTORY;
             }
             
             strcopy(entry->name, fatEntry.name, sizeof(entry->name));
@@ -1684,14 +1768,15 @@ bool readdir(uint8_t iterator, DirEntry* entry)
             entry->isSystem = (fatEntry.attr & 0x04) != 0;
             entry->isReadOnly = (fatEntry.attr & 0x01) != 0;
             ++di.index;
-            return true;
+            hasEntry = true;
+            return VFS_OK;
         }
         
         case FS_TYPE_EXT2:
         case FS_TYPE_EXT4: {
             fs_ext4::Ext4DirEntry extEntry;
             if (!fs_ext4::read_dir(mount->fsVolumeIndex, &extEntry)) {
-                return false;
+                return VFS_OK;
             }
             
             strcopy(entry->name, extEntry.name, sizeof(entry->name));
@@ -1701,11 +1786,12 @@ bool readdir(uint8_t iterator, DirEntry* entry)
             entry->isSystem = false;
             entry->isReadOnly = false;
             ++di.index;
-            return true;
+            hasEntry = true;
+            return VFS_OK;
         }
         
         default:
-            return false;
+            return VFS_ERR_NOT_SUPPORTED;
     }
 }
 
@@ -1738,6 +1824,8 @@ Status mkdir(const char* path)
 
     MountPoint* mount = find_mount_for_path(path);
     if (!mount) return VFS_ERR_NOT_MOUNT;
+    const Status backingStatus = mount_io_status(mount);
+    if (backingStatus != VFS_OK) return backingStatus;
     if (mount->readOnly) return VFS_ERR_READ_ONLY;
 
     char resolvedPath[VFS_MAX_PATH];
@@ -1757,7 +1845,8 @@ Status mkdir(const char* path)
                 case fs_fat::DIRECTORY_CREATE_NO_FREE_CLUSTER:
                 case fs_fat::DIRECTORY_CREATE_NO_FREE_ENTRY: result = VFS_ERR_NO_SPACE; break;
                 case fs_fat::DIRECTORY_CREATE_NOT_MOUNTED: result = VFS_ERR_NOT_MOUNT; break;
-                case fs_fat::DIRECTORY_CREATE_IO_ERROR: result = VFS_ERR_IO; break;
+                case fs_fat::DIRECTORY_CREATE_IO_ERROR:
+                    result = map_block_status(blockStatus); break;
                 default: result = VFS_ERR_NOT_SUPPORTED; break;
             }
 #if defined(__GNUC__) || defined(__clang__)
@@ -1798,7 +1887,8 @@ static Status status_for_fat_delete(bool succeeded)
         case fs_fat::DELETE_CORRUPT_CHAIN: return VFS_ERR_CORRUPT_CHAIN;
         case fs_fat::DELETE_NOT_MOUNTED: return VFS_ERR_NOT_MOUNT;
         case fs_fat::DELETE_INVALID_ARGUMENT: return VFS_ERR_INVALID;
-        case fs_fat::DELETE_IO_ERROR: return VFS_ERR_IO;
+        case fs_fat::DELETE_IO_ERROR:
+            return map_block_status(fs_fat::last_io_status());
         default: return VFS_ERR_IO;
     }
 }
@@ -1809,6 +1899,8 @@ Status rmdir(const char* path)
 
     MountPoint* mount = find_mount_for_path(path);
     if (!mount) return VFS_ERR_NOT_MOUNT;
+    const Status backingStatus = mount_io_status(mount);
+    if (backingStatus != VFS_OK) return backingStatus;
     if (mount->readOnly) return VFS_ERR_READ_ONLY;
 
     char resolvedPath[VFS_MAX_PATH];
@@ -1841,6 +1933,8 @@ Status stat(const char* path, FileInfo* info)
     
     MountPoint* mount = find_mount_for_path(path);
     if (!mount) return VFS_ERR_NOT_MOUNT;
+    const Status backingStatus = mount_io_status(mount);
+    if (backingStatus != VFS_OK) return backingStatus;
     
     // Get path relative to mount point
     char resolvedPath[VFS_MAX_PATH];
@@ -1890,6 +1984,8 @@ Status unlink(const char* path)
 
     MountPoint* mount = find_mount_for_path(path);
     if (!mount) return VFS_ERR_NOT_MOUNT;
+    const Status backingStatus = mount_io_status(mount);
+    if (backingStatus != VFS_OK) return backingStatus;
     if (mount->readOnly) return VFS_ERR_READ_ONLY;
 
     char resolvedPath[VFS_MAX_PATH];
@@ -1952,6 +2048,8 @@ int32_t write_file(const char* path, const void* buffer, uint32_t size)
 
     MountPoint* mount = find_mount_for_path(path);
     if (!mount) return VFS_ERR_NOT_MOUNT;
+    const Status backingStatus = mount_io_status(mount);
+    if (backingStatus != VFS_OK) return backingStatus;
     if (mount->readOnly) return VFS_ERR_READ_ONLY;
 
     char resolvedPath[VFS_MAX_PATH];
@@ -1997,6 +2095,8 @@ int32_t create_file(const char* path, const void* buffer, uint32_t size)
 
     MountPoint* mount = find_mount_for_path(path);
     if (!mount) return VFS_ERR_NOT_MOUNT;
+    const Status backingStatus = mount_io_status(mount);
+    if (backingStatus != VFS_OK) return backingStatus;
     if (mount->readOnly) return VFS_ERR_READ_ONLY;
 
     char resolvedPath[VFS_MAX_PATH];
@@ -2081,30 +2181,35 @@ const char* fs_type_name(FSType type)
 const char* status_name(Status status)
 {
     switch (status) {
-        case VFS_OK: return "VFS_OK";
-        case VFS_ERR_NOT_FOUND: return "VFS_ERR_NOT_FOUND";
-        case VFS_ERR_EXISTS: return "VFS_ERR_EXISTS";
-        case VFS_ERR_NOT_DIR: return "VFS_ERR_NOT_DIR";
-        case VFS_ERR_IS_DIR: return "VFS_ERR_IS_DIR";
-        case VFS_ERR_NOT_EMPTY: return "VFS_ERR_NOT_EMPTY";
-        case VFS_ERR_NO_SPACE: return "VFS_ERR_NO_SPACE";
-        case VFS_ERR_READ_ONLY: return "VFS_ERR_READ_ONLY";
-        case VFS_ERR_INVALID: return "VFS_ERR_INVALID";
-        case VFS_ERR_IO: return "VFS_ERR_IO";
-        case VFS_ERR_NOT_MOUNT: return "VFS_ERR_NOT_MOUNT";
-        case VFS_ERR_BUSY: return "VFS_ERR_BUSY";
-        case VFS_ERR_TOO_MANY: return "VFS_ERR_TOO_MANY";
-        case VFS_ERR_NOT_SUPPORTED: return "VFS_ERR_NOT_SUPPORTED";
-        case VFS_ERR_IO_TIMEOUT: return "VFS_ERR_IO_TIMEOUT";
-        case VFS_ERR_CORRUPT_CHAIN: return "VFS_ERR_CORRUPT_CHAIN";
-        case VFS_ERR_NO_PROGRESS: return "VFS_ERR_NO_PROGRESS";
-        case VFS_ERR_ALLOCATION_FAILED: return "VFS_ERR_ALLOCATION_FAILED";
-        case VFS_ERR_DIRECTORY_NOT_EMPTY: return "VFS_ERR_DIRECTORY_NOT_EMPTY";
-        case VFS_ERR_RECURSION_LIMIT: return "VFS_ERR_RECURSION_LIMIT";
-        case VFS_ERR_ENTRY_LIMIT: return "VFS_ERR_ENTRY_LIMIT";
-        case VFS_ERR_CORRUPT_DIRECTORY: return "VFS_ERR_CORRUPT_DIRECTORY";
-        case VFS_ERR_INVALID_DESTINATION: return "VFS_ERR_INVALID_DESTINATION";
-        case VFS_ERR_ROLLBACK_FAILED: return "VFS_ERR_ROLLBACK_FAILED";
+        case VFS_OK: return "OK";
+        case VFS_ERR_NOT_FOUND: return "Path not found";
+        case VFS_ERR_EXISTS: return "Already exists";
+        case VFS_ERR_NOT_DIR: return "Parent is not a directory";
+        case VFS_ERR_IS_DIR: return "Path is a directory";
+        case VFS_ERR_NOT_EMPTY: return "Directory is not empty";
+        case VFS_ERR_NO_SPACE: return "No space left";
+        case VFS_ERR_READ_ONLY: return "Media is read-only";
+        case VFS_ERR_INVALID: return "Invalid filesystem operation";
+        case VFS_ERR_IO: return "Filesystem I/O failed";
+        case VFS_ERR_NOT_MOUNT: return "No mounted filesystem for path";
+        case VFS_ERR_BUSY: return "Filesystem is busy";
+        case VFS_ERR_TOO_MANY: return "Too many open filesystem objects";
+        case VFS_ERR_NOT_SUPPORTED: return "Filesystem operation is unsupported";
+        case VFS_ERR_IO_TIMEOUT: return "Storage I/O timed out";
+        case VFS_ERR_CORRUPT_CHAIN: return "Filesystem chain is corrupt";
+        case VFS_ERR_NO_PROGRESS: return "Filesystem operation made no progress";
+        case VFS_ERR_ALLOCATION_FAILED: return "Filesystem allocation failed";
+        case VFS_ERR_DIRECTORY_NOT_EMPTY: return "Directory is not empty";
+        case VFS_ERR_RECURSION_LIMIT: return "Directory traversal limit reached";
+        case VFS_ERR_ENTRY_LIMIT: return "Directory entry limit reached";
+        case VFS_ERR_CORRUPT_DIRECTORY: return "Directory is corrupt";
+        case VFS_ERR_INVALID_DESTINATION: return "Invalid destination";
+        case VFS_ERR_ROLLBACK_FAILED: return "Filesystem rollback failed";
+        case VFS_ERR_DEVICE_REMOVED:
+            return "Device was removed or is no longer available";
+        case VFS_ERR_NOT_READY: return "Device is not ready";
+        case VFS_ERR_MOUNT_STALE:
+            return "Mount is stale; parent identity changed";
         default: return "VFS_STATUS_UNKNOWN";
     }
 }

@@ -766,6 +766,11 @@ static const char* kernel_vfs_status_text(vfs::Status status)
         case vfs::VFS_ERR_CORRUPT_DIRECTORY: return "Directory is corrupt";
         case vfs::VFS_ERR_INVALID_DESTINATION: return "Invalid destination";
         case vfs::VFS_ERR_ROLLBACK_FAILED: return "Rollback failed";
+        case vfs::VFS_ERR_DEVICE_REMOVED:
+            return "Device was removed; I/O stopped and writes may be incomplete";
+        case vfs::VFS_ERR_NOT_READY: return "Device is not ready";
+        case vfs::VFS_ERR_MOUNT_STALE:
+            return "Mount is stale; parent identity changed";
         default: return "Filesystem operation failed";
     }
 }
@@ -4787,7 +4792,13 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             const vfs::MountPoint* mp = vfs::get_mount_by_index(i);
             if (!mp || !mp->active) continue;
             if (!drawThemedIcon(x + 10, bodyY + 60 + row * ROW_H, kIconSize, "drive.mounted")) drawPlaceholderIcon(x + 10, bodyY + 60 + row * ROW_H, kIconSize);
-            appDrawText(x + 30, bodyY + 64 + row * ROW_H, mp->path, rgb(30, 30, 30));
+            char mountLabel[vfs::VFS_MAX_PATH];
+            strcopy(mountLabel, mp->path, sizeof(mountLabel));
+            if (vfs::mount_backing_status(i) != vfs::VFS_OK)
+                strappend(mountLabel, " (Unavailable)", sizeof(mountLabel));
+            appDrawText(x + 30, bodyY + 64 + row * ROW_H, mountLabel,
+                vfs::mount_backing_status(i) == vfs::VFS_OK
+                    ? rgb(30, 30, 30) : rgb(170, 70, 60));
             row++;
         }
     }
@@ -5145,6 +5156,23 @@ bool FileExplorerApp::handleNavigationPaneClick(int localX, int localY) {
 
         const int rowTop = mountRowsTop + row * ROW_H;
         if (hitBand(rowTop, ROW_H)) {
+            const vfs::Status backingStatus = vfs::mount_backing_status(i);
+            if (backingStatus != vfs::VFS_OK) {
+                char stalePath[vfs::VFS_MAX_PATH];
+                strcopy(stalePath, mp->path, sizeof(stalePath));
+                const vfs::Status cleanupStatus = vfs::unmount(stalePath);
+                if (cleanupStatus == vfs::VFS_OK ||
+                    cleanupStatus == vfs::VFS_ERR_DEVICE_REMOVED ||
+                    cleanupStatus == vfs::VFS_ERR_MOUNT_STALE) {
+                    setStatus("Unavailable mount removed from the list");
+                    refresh();
+                } else {
+                    setStatus(vfs::status_name(cleanupStatus));
+                }
+                updateActionButtons();
+                invalidate();
+                return true;
+            }
             navigate(mp->path);
             return true;
         }
@@ -5179,6 +5207,17 @@ void FileExplorerApp::onWidgetClick(int widgetId) {
 }
 
 void FileExplorerApp::refresh() {
+    bool returnedFromUnavailableMount = false;
+    const vfs::MountPoint* currentMount = vfs::get_mount(m_currentPath);
+    if (currentMount && strcmp(currentMount->path, "/") != 0) {
+        const uint8_t currentMountIndex =
+            vfs::mount_index_for_path(m_currentPath);
+        if (currentMountIndex != 0xFF &&
+            vfs::mount_backing_status(currentMountIndex) != vfs::VFS_OK) {
+            strcopy(m_currentPath, "/", sizeof(m_currentPath));
+            returnedFromUnavailableMount = true;
+        }
+    }
     m_entryCount = 0;
     m_selected = 0;
     m_scroll = 0;
@@ -5187,13 +5226,30 @@ void FileExplorerApp::refresh() {
     closeTransientUi();
     uint8_t dir = vfs::opendir(m_currentPath);
     if (dir == 0xFF) {
-        setStatus("Cannot open directory. Mount a filesystem with vfsmount if needed.");
+        const vfs::MountPoint* mount = vfs::get_mount(m_currentPath);
+        const uint8_t mountIndex = mount
+            ? vfs::mount_index_for_path(m_currentPath) : 0xFF;
+        const vfs::Status status = mountIndex == 0xFF
+            ? vfs::VFS_ERR_IO : vfs::mount_backing_status(mountIndex);
+        setStatus(status == vfs::VFS_OK
+            ? "Cannot open directory" : vfs::status_name(status));
         return;
     }
 
     vfs::DirEntry de{};
     bool hasMore = false;
-    while (m_entryCount < MAX_ENTRIES && vfs::readdir(dir, &de)) {
+    bool enumerationFailed = false;
+    while (m_entryCount < MAX_ENTRIES) {
+        bool hasEntry = false;
+        const vfs::Status readStatus =
+            vfs::readdir_detailed(dir, &de, hasEntry);
+        if (readStatus != vfs::VFS_OK) {
+            m_entryCount = 0;
+            setStatus(vfs::status_name(readStatus));
+            enumerationFailed = true;
+            break;
+        }
+        if (!hasEntry) break;
         if (de.name[0] == '.' && (de.name[1] == '\0' ||
             (de.name[1] == '.' && de.name[2] == '\0'))) {
             continue;
@@ -5204,8 +5260,17 @@ void FileExplorerApp::refresh() {
         m_entries[m_entryCount].size = de.size;
         m_entryCount++;
     }
-    if (m_entryCount >= MAX_ENTRIES && vfs::readdir(dir, &de)) {
-        hasMore = true;
+    if (!enumerationFailed && m_entryCount >= MAX_ENTRIES) {
+        bool hasEntry = false;
+        const vfs::Status readStatus =
+            vfs::readdir_detailed(dir, &de, hasEntry);
+        if (readStatus != vfs::VFS_OK) {
+            m_entryCount = 0;
+            setStatus(vfs::status_name(readStatus));
+            enumerationFailed = true;
+        } else {
+            hasMore = hasEntry;
+        }
     }
     vfs::closedir(dir);
 
@@ -5237,7 +5302,11 @@ void FileExplorerApp::refresh() {
 
     clampSelectionAndScroll();
 
-    if (m_entryCount == 0) {
+    if (enumerationFailed) {
+        // The specific storage error was set while enumerating.
+    } else if (returnedFromUnavailableMount) {
+        setStatus("Device removed; returned to Root");
+    } else if (m_entryCount == 0) {
         setStatus("Directory is empty");
     } else if (hasMore) {
         setStatus("Showing first 128 entries; more items available");
@@ -5250,8 +5319,10 @@ void FileExplorerApp::refresh() {
 void FileExplorerApp::navigate(const char* path) {
     if (!path || !path[0]) return;
     vfs::FileInfo info{};
-    if (vfs::stat(path, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_DIRECTORY) {
-        setStatus("Path not found or not a directory");
+    const vfs::Status statStatus = vfs::stat(path, &info);
+    if (statStatus != vfs::VFS_OK || info.type != vfs::FILE_TYPE_DIRECTORY) {
+        setStatus(statStatus != vfs::VFS_OK ? vfs::status_name(statStatus)
+            : "Path is not a directory");
         invalidate();
         return;
     }
@@ -6284,6 +6355,16 @@ void DiskManagerApp::scanDisks() {
             previousRegion = m_disks[m_selectedDisk].regions[m_selectedRegion];
     }
 
+    uint8_t unavailableMountCount = 0;
+    for (uint8_t mountIndex = 0; mountIndex < vfs::VFS_MAX_MOUNTS;
+         ++mountIndex) {
+        const vfs::MountPoint* mount = vfs::get_mount_by_index(mountIndex);
+        if (mount && mount->active &&
+            vfs::mount_backing_status(mountIndex) != vfs::VFS_OK &&
+            unavailableMountCount < 0xFF)
+            ++unavailableMountCount;
+    }
+
     m_diskCount = 0;
     for (uint8_t i = 0; i < kernel::block::MAX_BLOCK_DEVICES &&
                          m_diskCount < MAX_DISKS; ++i) {
@@ -6319,10 +6400,14 @@ void DiskManagerApp::scanDisks() {
         for (uint8_t mountIndex = 0; mountIndex < vfs::VFS_MAX_MOUNTS;
              ++mountIndex) {
             const vfs::MountPoint* mount = vfs::get_mount_by_index(mountIndex);
-            if (!mount || !mount->active || mount->blockDevIndex != i) continue;
+            if (!mount || !mount->active || mount->blockDevIndex != i ||
+                mount->parentRegistrationId != identity.registrationId) continue;
             if (e.mountCount == 0) strcopy(e.mountPath, mount->path,
                                            sizeof(e.mountPath));
             if (e.mountCount < 0xFF) ++e.mountCount;
+            if (vfs::mount_backing_status(mountIndex) != vfs::VFS_OK &&
+                e.staleMountCount < 0xFF)
+                ++e.staleMountCount;
             if (mount->partitionMount &&
                 mount->parentRegistrationId == identity.registrationId &&
                 vfs::mount_identity_valid(mountIndex)) {
@@ -6441,6 +6526,15 @@ void DiskManagerApp::scanDisks() {
                 sizeof(m_statusMessage));
     } else {
         strcopy(m_statusMessage, "Disk state refreshed.", sizeof(m_statusMessage));
+    }
+    if (unavailableMountCount != 0) {
+        char count[16];
+        disk_manager_u64(unavailableMountCount, count, sizeof(count));
+        strappend(m_statusMessage, " ", sizeof(m_statusMessage));
+        strappend(m_statusMessage, count, sizeof(m_statusMessage));
+        strappend(m_statusMessage,
+            " mount(s) unavailable; select in File Explorer to clean up.",
+            sizeof(m_statusMessage));
     }
     probeSelectedRegion();
     updateInitializeControls();
@@ -7514,7 +7608,13 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     disk_manager_draw_clipped(rightX + 4, y + 52, rightW - 8, summary, kSubText);
 
     char mountSummary[160];
-    if (disk.exactPartitionMountCount != 0 &&
+    if (disk.staleMountCount != 0) {
+        strcopy(mountSummary, "Mount unavailable", sizeof(mountSummary));
+        if (disk.mountPath[0]) {
+            strappend(mountSummary, " at ", sizeof(mountSummary));
+            strappend(mountSummary, disk.mountPath, sizeof(mountSummary));
+        }
+    } else if (disk.exactPartitionMountCount != 0 &&
         disk.exactPartitionMountCount == disk.mountCount) {
         char count[16];
         disk_manager_u64(disk.exactPartitionMountCount, count, sizeof(count));

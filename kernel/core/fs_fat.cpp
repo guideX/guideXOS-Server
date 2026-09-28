@@ -1187,6 +1187,7 @@ uint8_t open_file(uint8_t volumeIndex, uint32_t firstCluster,
 
 uint32_t read_file(uint8_t fileHandle, void* buffer, uint32_t len)
 {
+    s_lastIoStatus = block::BLOCK_OK;
     if (fileHandle >= MAX_OPEN_FILES || (!buffer && len != 0)) {
         set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
         return 0;
@@ -2337,6 +2338,11 @@ const char* traversal_status_name(TraversalStatus status)
 TraversalStatus last_traversal_status()
 {
     return s_lastTraversalStatus;
+}
+
+block::Status last_io_status()
+{
+    return s_lastIoStatus;
 }
 
 const char* delete_status_name(DeleteStatus status)

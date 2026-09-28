@@ -97,6 +97,7 @@ enum TraversalStatus : uint8_t {
 
 const char* traversal_status_name(TraversalStatus status);
 TraversalStatus last_traversal_status();
+block::Status last_io_status();
 
 // Detailed result for delete_path().  The legacy bool API remains available,
 // but callers must be able to distinguish an intentionally refused rmdir from
