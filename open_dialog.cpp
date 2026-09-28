@@ -4,6 +4,11 @@
 #include <sstream>
 #include <thread>
 #include <chrono>
+#include <algorithm>
+#include <system_error>
+#if !defined(GXOS_BARE_METAL)
+#include <filesystem>
+#endif
 
 namespace gxos { namespace dialogs {
 
@@ -98,6 +103,22 @@ int OpenDialog::main(int /*argc*/, char** /*argv*/) {
                             } else if (widgetId == 3) {
                                 // Up button
                                 goUp();
+                            } else if (widgetId == 4 && s_scrollOffset > 0) {
+                                --s_scrollOffset;
+                                if (s_selectedIndex < s_scrollOffset) s_selectedIndex = s_scrollOffset;
+                                redraw();
+                            } else if (widgetId == 5 && s_scrollOffset + 10 < static_cast<int>(s_entries.size())) {
+                                ++s_scrollOffset;
+                                if (s_selectedIndex < s_scrollOffset) s_selectedIndex = s_scrollOffset;
+                                if (s_selectedIndex >= s_scrollOffset + 10) s_selectedIndex = s_scrollOffset + 9;
+                                redraw();
+                            } else if (widgetId >= 100 && widgetId < 110) {
+                                const int row = widgetId - 100;
+                                const int index = s_scrollOffset + row;
+                                if (index >= 0 && index < static_cast<int>(s_entries.size())) {
+                                    s_selectedIndex = index;
+                                    redraw();
+                                }
                             }
                         }
                     } catch (...) {}
@@ -144,6 +165,39 @@ void OpenDialog::goUp() {
 
 void OpenDialog::refresh() {
     s_entries = Vfs::instance().list(s_currentPath);
+#if !defined(GXOS_BARE_METAL)
+    std::string relativePath = s_currentPath;
+    std::replace(relativePath.begin(), relativePath.end(), '\\', '/');
+    while (!relativePath.empty() && relativePath.front() == '/') relativePath.erase(relativePath.begin());
+    if (relativePath.empty()) relativePath = ".";
+    const std::filesystem::path hostDirectory = std::filesystem::path(relativePath).lexically_normal();
+    for (const auto& part : hostDirectory) {
+        if (part == "..") return;
+    }
+
+    std::error_code error;
+    if (!std::filesystem::is_directory(hostDirectory, error) || error) return;
+    for (std::filesystem::directory_iterator it(hostDirectory, error), end; !error && it != end; it.increment(error)) {
+        std::error_code entryError;
+        const bool isDirectory = it->is_directory(entryError);
+        if (entryError) continue;
+        if (!isDirectory && !it->is_regular_file(entryError)) continue;
+        if (entryError) continue;
+        const std::string name = it->path().filename().string();
+        if (name.empty() || name == "." || name == "..") continue;
+        if (std::find_if(s_entries.begin(), s_entries.end(), [&](const VfsEntryInfo& entry) {
+                return entry.name == name;
+            }) != s_entries.end()) continue;
+        s_entries.push_back(VfsEntryInfo{ name, 0, isDirectory });
+        if (!isDirectory) {
+            const uintmax_t fileSize = it->file_size(entryError);
+            if (!entryError) s_entries.back().size = static_cast<uint64_t>(fileSize);
+        }
+    }
+    std::sort(s_entries.begin(), s_entries.end(), [](const VfsEntryInfo& left, const VfsEntryInfo& right) {
+        return left.name < right.name;
+    });
+#endif
 }
 
 void OpenDialog::openAction() {
@@ -190,6 +244,7 @@ void OpenDialog::handleKeyPress(int keyCode) {
     if (keyCode == 38) {
         if (s_selectedIndex > 0) {
             s_selectedIndex--;
+            if (s_selectedIndex < s_scrollOffset) s_scrollOffset = s_selectedIndex;
             redraw();
         }
         return;
@@ -199,6 +254,7 @@ void OpenDialog::handleKeyPress(int keyCode) {
     if (keyCode == 40) {
         if (s_selectedIndex < (int)s_entries.size() - 1) {
             s_selectedIndex++;
+            if (s_selectedIndex >= s_scrollOffset + 10) s_scrollOffset = s_selectedIndex - 9;
             redraw();
         }
         return;
@@ -219,21 +275,40 @@ void OpenDialog::redraw() {
         ipc::Bus::publish(kGuiChanIn, std::move(m), false);
     }
 
-    // Draw file list entries (up to 10 visible)
+    // Render selectable file list rows (up to 10 visible)
     int visibleCount = std::min(10, (int)s_entries.size());
     for (int i = 0; i < visibleCount; i++) {
         int index = s_scrollOffset + i;
         if (index >= (int)s_entries.size()) break;
 
         const VfsEntryInfo& entry = s_entries[index];
-        ipc::Message m;
-        m.type = static_cast<uint32_t>(MsgType::MT_DrawText);
         std::ostringstream oss;
-        oss << wid << "|";
         if (index == s_selectedIndex) oss << "> ";
         if (entry.isDir) oss << "[DIR] ";
         oss << entry.name;
-        std::string payload = oss.str();
+        std::string label = oss.str();
+        if (label.size() > 48) label = label.substr(0, 45) + "...";
+        ipc::Message m;
+        m.type = static_cast<uint32_t>(MsgType::MT_WidgetAdd);
+        auto payload = packWidgetAdd(s_windowId, 1, 100 + i, kPadding, 42 + i * kRowH,
+            kDialogW - kPadding * 2 - 22, kRowH - 2, label);
+        m.data.assign(payload.begin(), payload.end());
+        ipc::Bus::publish(kGuiChanIn, std::move(m), false);
+    }
+    for (int i = visibleCount; i < 10; ++i) {
+        ipc::Message m;
+        m.type = static_cast<uint32_t>(MsgType::MT_WidgetAdd);
+        auto payload = packWidgetAdd(s_windowId, 1, 100 + i, kPadding, kDialogH + 100, 0, 0, "");
+        m.data.assign(payload.begin(), payload.end());
+        ipc::Bus::publish(kGuiChanIn, std::move(m), false);
+    }
+    for (int i = 4; i <= 5; ++i) {
+        ipc::Message m;
+        m.type = static_cast<uint32_t>(MsgType::MT_WidgetAdd);
+        const bool enabled = i == 4 ? s_scrollOffset > 0 : s_scrollOffset + 10 < static_cast<int>(s_entries.size());
+        const int y = i == 4 ? 42 : 42 + 9 * kRowH;
+        auto payload = packWidgetAdd(s_windowId, 1, i, enabled ? kDialogW - kPadding - 18 : kDialogW + 100,
+            y, enabled ? 18 : 0, enabled ? 20 : 0, enabled ? (i == 4 ? "^" : "v") : "");
         m.data.assign(payload.begin(), payload.end());
         ipc::Bus::publish(kGuiChanIn, std::move(m), false);
     }

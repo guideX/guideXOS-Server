@@ -63,6 +63,7 @@ display_options.cpp ^
 display_configuration_service.cpp ^
 control_panel.cpp ^
 settings_center.cpp ^
+settings_system_information.cpp ^
 elf_validator.cpp ^
 executable_memory.cpp ^
 file_explorer.cpp ^

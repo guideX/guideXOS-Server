@@ -630,6 +630,12 @@
     <ClInclude Include="settings_center_model.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="settings_server_identity.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="settings_system_information.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="network_settings_contract.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1344,6 +1350,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="settings_center.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="settings_system_information.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="focus_indicator.cpp">

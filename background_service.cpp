@@ -44,6 +44,16 @@ bool DesktopBackgroundService::IsEligiblePngSource(const std::string&, bool, boo
     return false;
 }
 
+bool DesktopBackgroundService::ReadCurrentBackground(std::string& id, std::string& displayName,
+                                                      std::string& previewPath, std::string& error)
+{
+    id.clear();
+    displayName.clear();
+    previewPath.clear();
+    error = "desktop background state is unavailable in this build";
+    return false;
+}
+
 bool DesktopBackgroundService::ImportAndSetDesktopBackground(const std::string&, std::string& error)
 {
     error = "user background import is hosted-only in Phase 1";
@@ -346,6 +356,30 @@ bool DesktopBackgroundService::IsEligiblePngSource(const std::string& sourceVfsP
     if (!readRegularSource(sourceVfsPath, bytes, error)) return false;
     const ImageBitmap image = ImageAdapter::LoadFromBytes(bytes, sourceVfsPath);
     return image.status == ImageLoadStatus::Ok;
+}
+
+bool DesktopBackgroundService::ReadCurrentBackground(std::string& id, std::string& displayName,
+                                                      std::string& previewPath, std::string& error)
+{
+    id.clear();
+    displayName.clear();
+    previewPath.clear();
+    error.clear();
+    std::string inventoryError;
+    if (!BackgroundStore::Reload(inventoryError)) {
+        error = inventoryError.empty() ? "background inventory unavailable" : inventoryError;
+        return false;
+    }
+    id = currentSelectionId();
+    const BackgroundEntry* entry = BackgroundStore::FindById(id);
+    if (!entry) {
+        id.clear();
+        error = "current background is not present in the desktop inventory";
+        return false;
+    }
+    displayName = entry->displayName;
+    previewPath = entry->thumbnailPath;
+    return true;
 }
 
 bool DesktopBackgroundService::ImportAndSetDesktopBackground(const std::string& sourceVfsPath, std::string& error)

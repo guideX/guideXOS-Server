@@ -1,5 +1,6 @@
 #include "settings_center_model.h"
 #include "built_in_app_metadata.h"
+#include "settings_server_identity.h"
 
 #include <iostream>
 #include <string>
@@ -35,6 +36,16 @@ int main()
     SettingsRoute route;
     check(parseSettingsRoute("settings://display", route) && route.category == CategoryId::Display && route.target == TargetId::Page,
           "category deep link resolves");
+    check(parseSettingsRoute("settings://system", route) && route.category == CategoryId::System,
+          "System page deep link resolves");
+    check(parseSettingsRoute("settings://system/device", route) && route.target == TargetId::SystemDevice,
+          "System device information deep link resolves");
+    check(parseSettingsRoute("settings://personalization", route) && route.category == CategoryId::Personalization,
+          "Personalization page deep link resolves");
+    check(parseSettingsRoute("settings://personalization/background", route) && route.target == TargetId::PersonalizationBackground,
+          "Personalization background deep link resolves");
+    check(parseSettingsRoute("settings://about", route) && route.category == CategoryId::About,
+          "About page deep link resolves");
     check(parseSettingsRoute("settings://display/resolution", route) && route.target == TargetId::Resolution,
           "display resolution deep link resolves");
     check(parseSettingsRoute(" SETTINGS://NETWORK/IPv4 ", route) && route.category == CategoryId::Network && route.target == TargetId::IPv4,
@@ -49,6 +60,7 @@ int main()
           "about version deep link resolves");
     check(!parseSettingsRoute("settings://unknown", route), "unknown category deep link is rejected");
     check(!parseSettingsRoute("settings://storage/resolution", route), "target from another category is rejected");
+    check(!parseSettingsRoute("settings://about/background", route), "Personalization target is rejected under About");
 
     SearchResultSet results = searchSettings("resolution");
     check(results.count > 0 && results.values[0].route.category == CategoryId::Display && results.values[0].route.target == TargetId::Resolution,
@@ -80,6 +92,21 @@ int main()
     results = searchSettings("disk");
     check(results.count > 0 && results.values[0].route.category == CategoryId::Storage,
           "disk keyword maps to Storage");
+    results = searchSettings("hostname");
+    check(results.count > 0 && results.values[0].route.category == CategoryId::System && results.values[0].route.target == TargetId::SystemDevice,
+          "hostname keyword maps to System device information");
+    results = searchSettings("ram");
+    check(results.count > 0 && results.values[0].route.category == CategoryId::System,
+          "RAM keyword maps to real System memory information");
+    results = searchSettings("wallpaper");
+    check(results.count > 0 && results.values[0].route.category == CategoryId::Personalization && results.values[0].route.target == TargetId::PersonalizationBackground,
+          "wallpaper keyword maps to the background action");
+    results = searchSettings("firmware");
+    check(results.count > 0 && results.values[0].route.category == CategoryId::About,
+          "firmware keyword maps to About platform information");
+    results = searchSettings("version");
+    check(results.count > 0 && results.values[0].route.category == CategoryId::About,
+          "version keyword maps to About identity information");
     check(searchSettings("").count == 0, "empty search has no results");
     check(searchSettings("no-such-setting").count == 0, "unknown search has no fabricated results");
     check(searchSettings("settings").count <= SearchResultSet::kCapacity, "search result count is bounded");
@@ -99,6 +126,13 @@ int main()
     check(navigation.canFocus(FocusControl::NetworkAdapter), "Network page can focus adapter rows");
     navigation.selectCategory(CategoryId::Storage);
     check(!navigation.canFocus(FocusControl::NetworkAdvanced), "Network advanced action is excluded after navigating away");
+    navigation.selectCategory(CategoryId::System);
+    check(navigation.canFocus(FocusControl::SystemDisplay), "System navigation exposes Display while System is selected");
+    check(navigation.canFocus(FocusControl::SystemControlPanel), "Control Panel remains reachable from System");
+    check(!navigation.canFocus(FocusControl::PersonalizationChooseBackground), "hidden Personalization action is excluded from System focus");
+    navigation.navigate(SettingsRoute{ CategoryId::Personalization, TargetId::PersonalizationBackground });
+    check(navigation.canFocus(FocusControl::PersonalizationChooseBackground), "background deep link focuses its live action");
+    check(!navigation.canFocus(FocusControl::SystemAbout), "hidden System navigation is excluded on Personalization");
     for (int i = 0; i < 100; ++i) {
         navigation.selectCategory(static_cast<CategoryId>(i % static_cast<int>(CategoryId::Count)));
     }
@@ -106,6 +140,27 @@ int main()
 
     check(formatDisplayResolution(1920, 1080) == "1920 x 1080", "display state binding formats a real resolution");
     check(formatDisplayResolution(0, 0) == "Resolution unavailable", "missing display state remains unavailable");
+    check(formatProcessorName("  Intel Genuine CPU  ") == "Intel Genuine CPU", "processor label preserves reported model information");
+    check(formatProcessorName("") == "Processor unavailable", "empty processor model remains unavailable");
+    check(formatProcessorName(std::string(80, 'C'), 12) == "CCCCCCCCC...", "long processor model is safely bounded");
+    check(formatComputerName("guideXOS-host") == "guideXOS-host", "available host name is displayed as reported");
+    check(formatComputerName("") == "Unavailable", "missing computer name remains unavailable");
+    check(formatMemoryBytes(0) == "Unavailable", "zero memory is unavailable");
+    check(formatByteSize(1023) == "1023 B", "byte value immediately below KiB boundary is stable");
+    check(formatByteSize(1024) == "1.0 KiB", "KiB boundary is formatted deterministically");
+    check(formatByteSize(1024ull * 1024ull) == "1.0 MiB", "MiB boundary is formatted deterministically");
+    check(formatByteSize(1024ull * 1024ull * 1024ull) == "1.0 GiB", "GiB boundary is formatted deterministically");
+    check(formatByteSize(1024ull * 1024ull * 1024ull * 1024ull) == "1.0 TiB", "TiB boundary is formatted deterministically");
+    check(formatMemoryBytes(16ull * 1024ull * 1024ull * 1024ull) == "16.0 GiB", "installed memory has a readable GiB label");
+    check(formatArchitecture("amd64") == "AMD64", "canonical AMD64 architecture is displayed");
+    check(formatArchitecture("arm64") == "ARM64", "canonical ARM64 architecture is displayed");
+    check(formatArchitecture("ia64") == "IA-64", "canonical IA-64 architecture is displayed");
+    check(formatArchitecture("other") == "Unavailable", "unknown architecture is not guessed");
+    check(formatBootEnvironment("uefi") == "UEFI", "reported UEFI boot environment is displayed");
+    check(formatBootEnvironment("bios") == "Legacy BIOS", "reported BIOS boot environment is displayed");
+    check(formatBootEnvironment("") == "Unavailable", "unknown boot environment stays unavailable");
+    check(std::string(gxos::identity::kGuideXosServerVersion) == "Development build",
+          "About uses the shared product identity and does not borrow an app version");
     check(std::string(formatIpAssignment(IpAssignment::DHCP)) == "DHCP", "DHCP assignment is represented truthfully");
     check(std::string(formatIpAssignment(IpAssignment::Static)) == "Static", "static assignment is represented truthfully");
     check(std::string(formatIpAssignment(IpAssignment::Unavailable)) == "Unavailable", "unknown assignment is not guessed");
