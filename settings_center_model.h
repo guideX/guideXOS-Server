@@ -150,12 +150,13 @@ struct SearchEntry {
     SettingsRoute route;
 };
 
-inline constexpr std::array<SearchEntry, 19> kSearchEntries = {{
+inline constexpr std::array<SearchEntry, 20> kSearchEntries = {{
     { "System overview", "system computer hardware processor memory", { CategoryId::System, TargetId::Page } },
     { "Resolution", "resolution screen monitor display size", { CategoryId::Display, TargetId::Resolution } },
     { "Display mode", "display mirror extend monitor layout", { CategoryId::Display, TargetId::DisplayMode } },
     { "Network connection", "network internet ethernet adapter connection", { CategoryId::Network, TargetId::Page } },
-    { "IP assignment", "ip ipv4 address dhcp static assignment", { CategoryId::Network, TargetId::IPv4 } },
+    { "IP assignment", "ip ipv4 address dhcp static assignment subnet mask prefix", { CategoryId::Network, TargetId::IPv4 } },
+    { "IPv4 address", "ip address ipv4 adapter", { CategoryId::Network, TargetId::IPv4 } },
     { "DNS", "dns nameserver name server network", { CategoryId::Network, TargetId::DNS } },
     { "Gateway", "gateway router network ipv4", { CategoryId::Network, TargetId::Gateway } },
     { "Theme and wallpaper", "theme color appearance wallpaper background", { CategoryId::Personalization, TargetId::Page } },
@@ -200,6 +201,8 @@ inline SearchResultSet searchSettings(const std::string& query)
 
 enum class FocusControl : unsigned char {
     None,
+    NetworkAdapter,
+    NetworkAdvanced,
     DisplayResolution,
     DisplayMode,
     DisplayApply,
@@ -216,6 +219,8 @@ enum class FocusControl : unsigned char {
 inline CategoryId focusControlCategory(FocusControl control)
 {
     switch (control) {
+    case FocusControl::NetworkAdapter:
+    case FocusControl::NetworkAdvanced: return CategoryId::Network;
     case FocusControl::DisplayResolution:
     case FocusControl::DisplayMode:
     case FocusControl::DisplayApply:

@@ -9,6 +9,7 @@
 #include "ipc_bus.h"
 #include "logger.h"
 #include "network_telemetry.h"
+#include "settings_network_service.h"
 #include "process.h"
 
 #include <algorithm>
@@ -125,6 +126,38 @@ std::string fitText(const std::string& value, size_t maxChars)
     return value.substr(0, maxChars - 3) + "...";
 }
 
+std::string networkAddressText(const network_settings::IPv4Value& value)
+{
+    if (!value.available) return "Unavailable";
+    if (value.value == 0) return "Not configured";
+    char address[16]{};
+    return network_settings::formatIPv4(value.value, address) ? std::string(address) : "Unavailable";
+}
+
+std::string networkAssignmentText(network_settings::ConfigurationMode mode)
+{
+    switch (mode) {
+    case network_settings::ConfigurationMode::Dhcp: return "Automatic (DHCP)";
+    case network_settings::ConfigurationMode::Static: return "Static";
+    case network_settings::ConfigurationMode::Unknown: default: return "Unavailable";
+    }
+}
+
+std::string networkDnsText(const network_settings::NetworkInterfaceInfo& adapter)
+{
+    std::string value = networkAddressText(adapter.dns);
+    if (adapter.dnsSource == network_settings::DnsSource::Dhcp) value += " (DHCP)";
+    else if (adapter.dnsSource == network_settings::DnsSource::Static) value += " (static)";
+    else if (adapter.dns.available && adapter.dns.value != 0) value += " (source unavailable)";
+    return value;
+}
+
+uint64_t steadyMilliseconds()
+{
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
 void publish(MsgType type, const std::string& payload)
 {
     ipc::Message message;
@@ -161,11 +194,33 @@ public:
     {
         m_navigation.navigate(initialRoute);
         if (initialRoute.category == CategoryId::Display) refreshDisplay();
+        if (initialRoute.category == CategoryId::Network) {
+            m_networkRefreshPolicy.setActive(true, steadyMilliseconds());
+            refreshNetwork();
+        }
         setFocusForRoute(initialRoute);
     }
 
     void setWindowId(uint64_t id) { m_windowId = id; }
     uint64_t windowId() const { return m_windowId; }
+
+    bool setWindowFocused(bool focused)
+    {
+        if (m_windowFocused == focused) return false;
+        m_windowFocused = focused;
+        const bool refreshActive = focused && m_navigation.selectedCategory() == CategoryId::Network;
+        m_networkRefreshPolicy.setActive(refreshActive, steadyMilliseconds());
+        if (refreshActive) {
+            refreshNetwork();
+        }
+        return true;
+    }
+
+    bool refreshNetworkIfDue()
+    {
+        if (m_windowId == 0 || !m_networkRefreshPolicy.due(steadyMilliseconds())) return false;
+        return refreshNetwork();
+    }
 
     void setWindowSize(int width, int height)
     {
@@ -333,6 +388,16 @@ public:
                     (m_focusedItem.control == FocusControl::DisplayMode || m_focusedItem.control == FocusControl::DisplayResolution)) {
                     changeDisplayValue(key == kKeyRight ? 1 : -1);
                     render();
+                } else if (m_focusedItem.kind == FocusItem::Kind::Control &&
+                           m_focusedItem.control == FocusControl::NetworkAdapter &&
+                           m_networkSnapshot.adapterCount > 0) {
+                    const uint32_t count = m_networkSnapshot.adapterCount;
+                    const uint32_t next = key == kKeyRight
+                        ? (m_selectedNetworkAdapter + 1) % count
+                        : (m_selectedNetworkAdapter + count - 1) % count;
+                    m_selectedNetworkAdapter = next;
+                    m_focusedItem.index = static_cast<int>(next);
+                    render();
                 }
                 return;
             }
@@ -361,6 +426,11 @@ private:
     uint64_t m_lastMouseActionTime{0};
     bool m_enterDown{false};
     bool m_spaceDown{false};
+    bool m_windowFocused{true};
+    uint32_t m_selectedNetworkAdapter{0};
+    network_settings::NetworkSnapshot m_networkSnapshot{};
+    network_settings::Result m_networkReadResult{network_settings::Result::Unavailable};
+    network_settings::RefreshPolicy m_networkRefreshPolicy{};
 
     int searchX() const { return std::max(278, m_width - kSearchWidth - 16); }
     int searchWidth() const { return std::min(kSearchWidth, std::max(180, m_width - searchX() - 16)); }
@@ -373,6 +443,18 @@ private:
     int displaySettingsY() const { return kContentY + (compactDisplayLayout() ? 230 : 280); }
     int displayResolutionY() const { return displaySettingsY() + 42; }
     int displayModeY() const { return displayResolutionY() + 48; }
+    bool compactNetworkLayout() const { return m_height < 680; }
+    int networkAdaptersY() const { return kContentY + (compactNetworkLayout() ? 88 : 104); }
+    int networkAdapterRowY(uint32_t index) const { return networkAdaptersY() + 48 + static_cast<int>(index) * 26; }
+    int networkAdapterCardHeight() const
+    {
+        const uint32_t count = std::min<uint32_t>(m_networkSnapshot.adapterCount,
+            static_cast<uint32_t>(network_settings::kMaxAdapters));
+        return count == 0 ? 102 : 52 + static_cast<int>(count) * 26;
+    }
+    int networkDetailsY() const { return networkAdaptersY() + networkAdapterCardHeight() + 10; }
+    int networkDetailsHeight() const { return compactNetworkLayout() ? 216 : 238; }
+    int networkAdvancedY() const { return networkDetailsY() + networkDetailsHeight() + 10; }
 
     static bool sameFocus(const FocusItem& left, const FocusItem& right)
     {
@@ -466,6 +548,11 @@ private:
             if (m_navigation.canFocus(control)) items.push_back(FocusItem{ FocusItem::Kind::Control, 0, control });
         };
         switch (m_navigation.selectedCategory()) {
+        case CategoryId::Network:
+            for (uint32_t i = 0; i < m_networkSnapshot.adapterCount && i < network_settings::kMaxAdapters; ++i)
+                items.push_back(FocusItem{ FocusItem::Kind::Control, static_cast<int>(i), FocusControl::NetworkAdapter });
+            add(FocusControl::NetworkAdvanced);
+            break;
         case CategoryId::Display:
             if (m_display.available && m_display.supportedModes.size() > 1 && m_display.active.outputCount == 1) add(FocusControl::DisplayResolution);
             if (m_display.available && m_display.active.outputCount > 1) add(FocusControl::DisplayMode);
@@ -504,6 +591,13 @@ private:
         } else if (m_focusedItem.kind == FocusItem::Kind::SearchResult) {
             const size_t count = searchSettings(m_search).count;
             if (count > 0) m_focusedItem.index = (m_focusedItem.index + delta + static_cast<int>(count)) % static_cast<int>(count);
+        } else if (m_focusedItem.kind == FocusItem::Kind::Control &&
+                   m_focusedItem.control == FocusControl::NetworkAdapter &&
+                   m_networkSnapshot.adapterCount > 0) {
+            const int count = static_cast<int>(m_networkSnapshot.adapterCount);
+            const int next = (m_focusedItem.index + delta + count) % count;
+            m_focusedItem.index = next;
+            m_selectedNetworkAdapter = static_cast<uint32_t>(next);
         }
     }
 
@@ -525,6 +619,12 @@ private:
             }
             return FocusItem{};
         }
+        if (m_navigation.selectedCategory() == CategoryId::Network) {
+            for (uint32_t i = 0; i < m_networkSnapshot.adapterCount && i < network_settings::kMaxAdapters; ++i) {
+                if (inRect(x, y, pageX() + 12, networkAdapterRowY(i), pageWidth() - 24, 24))
+                    return FocusItem{ FocusItem::Kind::Control, static_cast<int>(i), FocusControl::NetworkAdapter };
+            }
+        }
         for (const FocusItem& item : focusOrder()) {
             if (item.kind != FocusItem::Kind::Control || !m_navigation.canFocus(item.control)) continue;
             if (controlHit(item.control, x, y)) return item;
@@ -535,6 +635,8 @@ private:
     bool controlHit(FocusControl control, int x, int y) const
     {
         switch (control) {
+        case FocusControl::NetworkAdvanced: return inRect(x, y, pageX() + 6, networkAdvancedY(), std::min(390, pageWidth() - 12), 40);
+        case FocusControl::NetworkAdapter: return false;
         case FocusControl::DisplayResolution: return inRect(x, y, pageX() + 12, displayResolutionY(), pageWidth() - 24, 44);
         case FocusControl::DisplayMode: return inRect(x, y, pageX() + 12, displayModeY(), pageWidth() - 24, 44);
         case FocusControl::DisplayApply: return inRect(x, y, 320, compactDisplayLayout() ? 449 : 496, 136, 40);
@@ -567,8 +669,12 @@ private:
 
     void navigateTo(const SettingsRoute& route)
     {
+        const CategoryId previousCategory = m_navigation.selectedCategory();
         if (!m_navigation.navigate(route)) return;
         if (route.category == CategoryId::Display && !m_display.dirty()) refreshDisplay();
+        const bool networkVisible = m_windowFocused && route.category == CategoryId::Network;
+        m_networkRefreshPolicy.setActive(networkVisible, steadyMilliseconds());
+        if (networkVisible && previousCategory != CategoryId::Network) refreshNetwork();
         setFocusForRoute(route);
         m_search.clear();
     }
@@ -600,6 +706,11 @@ private:
         case FocusItem::Kind::Control:
             if (!m_navigation.canFocus(item.control)) break;
             switch (item.control) {
+            case FocusControl::NetworkAdapter:
+                if (item.index >= 0 && static_cast<uint32_t>(item.index) < m_networkSnapshot.adapterCount)
+                    m_selectedNetworkAdapter = static_cast<uint32_t>(item.index);
+                break;
+            case FocusControl::NetworkAdvanced: launchAdvanced("Console"); break;
             case FocusControl::DisplayResolution: changeDisplayValue(1); break;
             case FocusControl::DisplayMode: changeDisplayValue(1); break;
             case FocusControl::DisplayApply: applyDisplay(); break;
@@ -638,6 +749,25 @@ private:
         command.commandType = static_cast<uint32_t>(DisplayConfigurationCommandType::QueryActiveConfiguration);
         return DisplayConfigurationService::submit(command, response) &&
             response.requestId == command.requestId && response.commandType == command.commandType && response.success != 0;
+    }
+
+    bool refreshNetwork()
+    {
+        const network_settings::NetworkSnapshot previous = m_networkSnapshot;
+        network_settings::NetworkSnapshot current{};
+        m_networkReadResult = readSettingsNetworkSnapshot(hostedGuideXosNetworkProvider(), &current);
+        if (current.version != network_settings::kContractVersion) {
+            current = network_settings::NetworkSnapshot{};
+            current.backend = network_settings::Backend::Unavailable;
+            current.state = network_settings::SnapshotState::Unavailable;
+            m_networkReadResult = network_settings::Result::Unavailable;
+        }
+        m_networkSnapshot = current;
+        if (m_networkSnapshot.adapterCount == 0) m_selectedNetworkAdapter = 0;
+        else if (m_selectedNetworkAdapter >= m_networkSnapshot.adapterCount)
+            m_selectedNetworkAdapter = m_networkSnapshot.adapterCount - 1;
+        m_networkRefreshPolicy.completed(steadyMilliseconds());
+        return !network_settings::sameSnapshot(previous, m_networkSnapshot);
     }
 
     void refreshDisplay()
@@ -871,52 +1001,72 @@ private:
     void renderNetwork()
     {
         const int x = pageX();
-        const bool compact = m_height < 680;
-        const int connectionY = kContentY + (compact ? 88 : 104);
-        const int connectionHeight = compact ? 235 : 296;
-        const int firstRow = connectionY + 48;
-        const int rowPitch = compact ? 27 : 36;
-        const int rowHeight = compact ? 24 : 32;
-        drawCard(x, connectionY, pageWidth(), connectionHeight, "Network connection");
-        auto infoRow = [&](int offset, const char* label, const char* value, TargetId target) {
-            const int y = firstRow + offset * rowPitch;
-            const bool highlighted = m_navigation.route().target == target && target != TargetId::Page;
-            drawRect(x + 12, y, pageWidth() - 24, rowHeight,
-                     highlighted ? blendColor(cardColor(), accentColor(), 12) : cardColor());
-            if (highlighted) drawOutline(x + 12, y, pageWidth() - 24, rowHeight, accentColor());
-            drawText(x + 22, y + 5, label, mutedTextColor());
-            drawText(x + pageWidth() / 2, y + 5, value, textColor());
-        };
-        infoRow(0, "Interface", "Information unavailable", TargetId::Page);
-        infoRow(1, "Connection", "Status unavailable", TargetId::Page);
-        infoRow(2, "IP assignment", "Unavailable", TargetId::IPv4);
-        infoRow(3, "IPv4 address", "Address unavailable", TargetId::IPv4);
-        infoRow(4, "DNS", "Address unavailable", TargetId::DNS);
-        infoRow(5, "Gateway", "Address unavailable", TargetId::Gateway);
-        drawText(x + 20, connectionY + connectionHeight - 25,
-                 fitText("Kernel NIC, DHCP, and IPv4 APIs are not connected to hosted Settings.", static_cast<size_t>(std::max(20, pageWidth() / 8))), mutedTextColor());
-
-        const int trafficY = connectionY + connectionHeight + 14;
-        const bool tiny = m_height < 580;
-        const int trafficHeight = tiny ? 108 : 146;
-        drawCard(x, trafficY, pageWidth(), trafficHeight, "Network traffic");
-        const net::NetworkTelemetrySnapshot telemetry = net::networkTelemetrySnapshot();
-        if (!telemetry.available) {
-            drawText(x + 20, trafficY + 50, "Hosted socket traffic telemetry is unavailable.", mutedTextColor());
+        const uint32_t count = std::min<uint32_t>(m_networkSnapshot.adapterCount,
+            static_cast<uint32_t>(network_settings::kMaxAdapters));
+        const int adaptersY = networkAdaptersY();
+        drawCard(x, adaptersY, pageWidth(), networkAdapterCardHeight(), "Network adapters");
+        if (m_networkSnapshot.state == network_settings::SnapshotState::Unavailable) {
+            const char* unavailableText = m_networkSnapshot.backend == network_settings::Backend::Kernel
+                ? "The kernel network adapter is unavailable."
+                : "guideXOS kernel NIC state is unavailable in this hosted process.";
+            drawText(x + 20, adaptersY + 50, unavailableText, mutedTextColor());
+        } else if (count == 0) {
+            drawText(x + 20, adaptersY + 50, "No supported network adapter was detected.", mutedTextColor());
         } else {
-            drawText(x + 20, trafficY + (tiny ? 36 : 48),
-                     std::string("Source: ") + fitText(telemetry.source, 38), mutedTextColor());
-            if (telemetry.ratesAvailable) {
-                drawText(x + 20, trafficY + (tiny ? 60 : 80),
-                    std::string("Receive ") + std::to_string(telemetry.receiveKBps) + " KB/s   Send " + std::to_string(telemetry.sendKBps) + " KB/s",
-                    textColor());
-            } else {
-                drawText(x + 20, trafficY + (tiny ? 60 : 80), "Collecting the first traffic sample...", mutedTextColor());
+            for (uint32_t i = 0; i < count; ++i) {
+                const network_settings::NetworkInterfaceInfo& item = m_networkSnapshot.adapters[i];
+                const std::string name = item.name[0] ? item.name : item.stableId;
+                const std::string status = network_settings::connectionStateText(m_networkSnapshot, &item);
+                drawButton(x + 12, networkAdapterRowY(i), pageWidth() - 24, 24,
+                    name + "    " + status, m_selectedNetworkAdapter == i,
+                    m_hoverItem.kind == FocusItem::Kind::Control &&
+                        m_hoverItem.control == FocusControl::NetworkAdapter && m_hoverItem.index == static_cast<int>(i),
+                    sameFocus(m_focusedItem, FocusItem{ FocusItem::Kind::Control, static_cast<int>(i), FocusControl::NetworkAdapter }),
+                    true);
             }
-            drawText(x + 20, trafficY + (tiny ? 84 : 112),
-                std::string("Totals: ") + std::to_string(telemetry.bytesReceivedTotal / 1024) + " KB received, " +
-                    std::to_string(telemetry.bytesSentTotal / 1024) + " KB sent",
-                mutedTextColor());
+        }
+
+        const network_settings::NetworkInterfaceInfo* adapter = count > 0 && m_selectedNetworkAdapter < count
+            ? &m_networkSnapshot.adapters[m_selectedNetworkAdapter] : nullptr;
+        const int detailsY = networkDetailsY();
+        const int detailsHeight = networkDetailsHeight();
+        drawCard(x, detailsY, pageWidth(), detailsHeight, "Network connection");
+        auto infoRow = [&](int offset, const char* label, const std::string& value, TargetId target) {
+            const int y = detailsY + 42 + offset * 25;
+            const bool highlighted = m_navigation.route().target == target && target != TargetId::Page;
+            drawRect(x + 12, y, pageWidth() - 24, 23,
+                     highlighted ? blendColor(cardColor(), accentColor(), 12) : cardColor());
+            if (highlighted) drawOutline(x + 12, y, pageWidth() - 24, 23, accentColor());
+            drawText(x + 22, y + 3, label, mutedTextColor());
+            drawText(x + pageWidth() / 2, y + 3, fitText(value, static_cast<size_t>(std::max(12, pageWidth() / 16))), textColor());
+        };
+        const std::string status = network_settings::connectionStateText(m_networkSnapshot, adapter);
+        infoRow(0, "Status", status, TargetId::Page);
+        infoRow(1, "IP assignment", adapter ? networkAssignmentText(adapter->configurationMode) : "Unavailable", TargetId::IPv4);
+        infoRow(2, "IPv4 address", adapter ? networkAddressText(adapter->ipv4Address) : "Unavailable", TargetId::IPv4);
+        infoRow(3, "Subnet mask", adapter ? networkAddressText(adapter->subnetMask) : "Unavailable", TargetId::IPv4);
+        infoRow(4, "Gateway", adapter ? networkAddressText(adapter->gateway) : "Unavailable", TargetId::Gateway);
+        infoRow(5, "DNS", adapter ? networkDnsText(*adapter) : "Unavailable", TargetId::DNS);
+
+        const net::NetworkTelemetrySnapshot telemetry = net::networkTelemetrySnapshot();
+        const int activityY = detailsY + detailsHeight - 23;
+        std::string activity = "Hosted socket telemetry unavailable";
+        if (telemetry.available) {
+            activity = "Hosted sockets: " + std::to_string(telemetry.bytesReceivedTotal / 1024) +
+                " KB received, " + std::to_string(telemetry.bytesSentTotal / 1024) + " KB sent";
+            if (telemetry.ratesAvailable)
+                activity += " | " + std::to_string(telemetry.receiveKBps) + "/" +
+                    std::to_string(telemetry.sendKBps) + " KB/s";
+        }
+        drawText(x + 20, activityY, fitText(activity, static_cast<size_t>(std::max(20, pageWidth() / 8))), mutedTextColor());
+
+        const int advancedY = networkAdvancedY();
+        drawButton(x + 6, advancedY, std::min(390, pageWidth() - 12), 40,
+            "Advanced network settings", false,
+            m_hoverItem.control == FocusControl::NetworkAdvanced,
+            sameFocus(m_focusedItem, FocusItem{ FocusItem::Kind::Control, 0, FocusControl::NetworkAdvanced }), true);
+        if (m_networkReadResult == network_settings::Result::Unavailable) {
+            drawText(x + 410, advancedY + 12, "Status refreshes while this page is focused.", mutedTextColor());
         }
     }
 
@@ -985,7 +1135,10 @@ int SettingsCenter::main(int argc, char** argv)
     bool running = true;
     while (running) {
         ipc::Message message;
-        if (!ipc::Bus::pop("gui.output", message, 100)) continue;
+        if (!ipc::Bus::pop("gui.output", message, 100)) {
+            if (application.refreshNetworkIfDue()) application.render();
+            continue;
+        }
         const MsgType type = static_cast<MsgType>(message.type);
         const std::string payload(message.data.begin(), message.data.end());
         switch (type) {
@@ -1022,6 +1175,16 @@ int SettingsCenter::main(int argc, char** argv)
         case MsgType::MT_InputKey:
             application.onKey(payload);
             break;
+        case MsgType::MT_SetFocus:
+        case MsgType::MT_ClearFocus: {
+            try {
+                const uint64_t focusedWindow = std::stoull(payload);
+                if (focusedWindow == application.windowId() &&
+                    application.setWindowFocused(type == MsgType::MT_SetFocus)) application.render();
+            } catch (...) {
+            }
+            break;
+        }
         case MsgType::MT_Close:
             running = false;
             break;

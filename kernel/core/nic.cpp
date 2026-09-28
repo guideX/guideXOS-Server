@@ -45,6 +45,7 @@ static void memcopy(void* dst, const void* src, uint32_t len)
 
 static NICDevice   s_device;
 static bool        s_initialised = false;
+static ProbeState  s_probeState = NIC_PROBE_UNINITIALIZED;
 static uint64_t    s_kernelPhysicalBase = 0x100000;
 
 // Descriptor rings (statically allocated, 16-byte aligned)
@@ -456,23 +457,27 @@ static bool scan_pci_nic()
 bool init_from_bootinfo(const NicBootInfo* nicInfo)
 {
     if (!nicInfo) {
+        s_probeState = NIC_PROBE_DEVICE_UNAVAILABLE;
         serial::puts("[NIC] init_from_bootinfo: null pointer\n");
         return false;
     }
     
     // Check if NIC was found by bootloader
     if (!(nicInfo->flags & NIC_BOOT_FLAG_FOUND)) {
+        s_probeState = NIC_PROBE_NO_SUPPORTED_DEVICE;
         serial::puts("[NIC] init_from_bootinfo: NIC not found by bootloader\n");
         return false;
     }
     
     // Check if MMIO is mapped
     if (!(nicInfo->flags & NIC_BOOT_FLAG_MAPPED)) {
+        s_probeState = NIC_PROBE_DEVICE_UNAVAILABLE;
         serial::puts("[NIC] init_from_bootinfo: MMIO not mapped by bootloader\n");
         return false;
     }
     
     if (nicInfo->mmioVirt == 0) {
+        s_probeState = NIC_PROBE_DEVICE_UNAVAILABLE;
         serial::puts("[NIC] init_from_bootinfo: MMIO virtual address is zero\n");
         return false;
     }
@@ -538,6 +543,7 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
     if (!init_e1000(s_device.mmioBase)) {
         serial::puts("[NIC] Hardware initialization failed\n");
         s_device.active = false;
+        s_probeState = NIC_PROBE_DEVICE_UNAVAILABLE;
         return false;
     }
     
@@ -551,11 +557,13 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
     
     s_device.active = true;
     s_initialised = true;
+    s_probeState = NIC_PROBE_READY;
     
     serial::puts("[NIC] E1000 initialization complete!\n");
     return true;
 #else
     serial::puts("[NIC] No PCI port-I/O support on this architecture\n");
+    s_probeState = NIC_PROBE_UNSUPPORTED_ARCHITECTURE;
     return false;
 #endif
 }
@@ -570,6 +578,7 @@ void init()
     memzero(s_rxDescs, sizeof(s_rxDescs));
     memzero(s_txDescs, sizeof(s_txDescs));
     s_initialised = false;
+    s_probeState = NIC_PROBE_UNINITIALIZED;
     s_rxCur = 0;
     s_txCur = 0;
 
@@ -578,6 +587,7 @@ void init()
 
     if (scan_pci_nic()) {
         s_initialised = true;
+        s_probeState = s_device.active ? NIC_PROBE_READY : NIC_PROBE_DEVICE_UNAVAILABLE;
         serial::puts("[NIC] Found ");
         serial::puts(s_device.name);
         serial::puts("  vendor=");
@@ -599,17 +609,24 @@ void init()
             serial::puts("[NIC] Device found but not active (MMIO not mapped)\n");
         }
     } else {
+        s_probeState = NIC_PROBE_NO_SUPPORTED_DEVICE;
         serial::puts("[NIC] No supported NIC found\n");
     }
 #else
     // Architectures without PCI port-I/O: stub — MMIO PCI ECAM
     // enumeration would go here for ia64/sparc64/riscv64.
+    s_probeState = NIC_PROBE_UNSUPPORTED_ARCHITECTURE;
 #endif
 }
 
 bool is_active()
 {
     return s_initialised && s_device.active;
+}
+
+ProbeState get_probe_state()
+{
+    return s_probeState;
 }
 
 const NICDevice* get_device()

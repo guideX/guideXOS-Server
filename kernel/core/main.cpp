@@ -54,6 +54,7 @@
 #include "include/kernel/socket.h"
 #include "include/kernel/dns.h"
 #include "include/kernel/dhcp.h"
+#include "include/kernel/network_settings_provider.h"
 
 // VirtIO subsystem
 #include "include/kernel/virtio_block.h"
@@ -1096,6 +1097,50 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             } else {
                 kernel::serial::puts("[KERNEL] DHCP failed, keeping static network configuration\n");
             }
+        }
+
+        // Exercise the bounded Settings provider against the live kernel-owned
+        // NIC/DHCP/IPv4 state once initialization is complete. This is also a
+        // serial-visible runtime diagnostic for QEMU and hardware bring-up.
+        gxos::network_settings::NetworkSnapshot settingsNetwork{};
+        const gxos::network_settings::Result settingsNetworkResult =
+            kernel::network_settings_provider::readSnapshot(&settingsNetwork);
+        kernel::serial::puts("[SettingsNetwork] result=");
+        kernel::serial::put_hex8(static_cast<uint8_t>(settingsNetworkResult));
+        kernel::serial::puts(" state=");
+        kernel::serial::put_hex8(static_cast<uint8_t>(settingsNetwork.state));
+        kernel::serial::puts(" adapters=");
+        kernel::serial::put_hex32(settingsNetwork.adapterCount);
+        kernel::serial::putc('\n');
+        for (uint32_t i = 0; i < settingsNetwork.adapterCount &&
+             i < gxos::network_settings::kMaxAdapters; ++i) {
+            const gxos::network_settings::NetworkInterfaceInfo& adapter = settingsNetwork.adapters[i];
+            kernel::serial::puts("[SettingsNetwork] adapter=");
+            kernel::serial::puts(adapter.name);
+            kernel::serial::puts(" driver=");
+            kernel::serial::puts(adapter.driver);
+            kernel::serial::puts(" link=");
+            kernel::serial::put_hex8(static_cast<uint8_t>(adapter.linkState));
+            kernel::serial::puts(" dhcp=");
+            kernel::serial::put_hex8(static_cast<uint8_t>(adapter.dhcpState));
+            auto printNetworkAddress = [](const char* label,
+                                          const gxos::network_settings::IPv4Value& address) {
+                kernel::serial::puts(label);
+                if (!address.available) {
+                    kernel::serial::puts("unavailable");
+                    return;
+                }
+                char text[16]{};
+                if (gxos::network_settings::formatIPv4(address.value, text))
+                    kernel::serial::puts(text);
+                else
+                    kernel::serial::puts("unavailable");
+            };
+            printNetworkAddress(" ipv4=", adapter.ipv4Address);
+            printNetworkAddress(" mask=", adapter.subnetMask);
+            printNetworkAddress(" gateway=", adapter.gateway);
+            printNetworkAddress(" dns=", adapter.dns);
+            kernel::serial::putc('\n');
         }
         
         // ============================================================

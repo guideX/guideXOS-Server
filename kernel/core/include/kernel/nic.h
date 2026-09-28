@@ -186,6 +186,15 @@ enum LinkState : uint8_t {
     NIC_LINK_UP   = 1,
 };
 
+// Read-only initialization outcome; querying this does not rescan PCI.
+enum ProbeState : uint8_t {
+    NIC_PROBE_UNINITIALIZED = 0,
+    NIC_PROBE_NO_SUPPORTED_DEVICE = 1,
+    NIC_PROBE_DEVICE_UNAVAILABLE = 2,
+    NIC_PROBE_READY = 3,
+    NIC_PROBE_UNSUPPORTED_ARCHITECTURE = 4
+};
+
 // ================================================================
 // NIC status codes
 // ================================================================
@@ -282,6 +291,9 @@ void init();
 
 // Return true if a NIC was found and initialised.
 bool is_active();
+
+// Last probe result. Does not trigger a new PCI scan.
+ProbeState get_probe_state();
 
 // Return the NIC device info.
 const NICDevice* get_device();

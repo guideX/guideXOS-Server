@@ -41,6 +41,8 @@ int main()
           "network IPv4 deep link is case and whitespace tolerant");
     check(parseSettingsRoute("settings://network/dns", route) && route.target == TargetId::DNS,
           "network DNS deep link resolves");
+    check(parseSettingsRoute("settings://network", route) && route.category == CategoryId::Network && route.target == TargetId::Page,
+          "Network & Internet category deep link resolves");
     check(parseSettingsRoute("settings://storage", route) && route.category == CategoryId::Storage,
           "storage deep link resolves");
     check(parseSettingsRoute("settings://about/version", route) && route.target == TargetId::AboutVersion,
@@ -54,6 +56,27 @@ int main()
     results = searchSettings("dns");
     check(results.count > 0 && results.values[0].route.category == CategoryId::Network && results.values[0].route.target == TargetId::DNS,
           "DNS keyword maps to Network DNS");
+    results = searchSettings("adapter");
+    check(results.count > 0 && results.values[0].route.category == CategoryId::Network,
+          "adapter keyword maps to Network & Internet");
+    results = searchSettings("ethernet");
+    check(results.count > 0 && results.values[0].route.category == CategoryId::Network,
+          "ethernet keyword maps to Network & Internet");
+    results = searchSettings("ipv4");
+    check(results.count > 0 && results.values[0].route.category == CategoryId::Network && results.values[0].route.target == TargetId::IPv4,
+          "IPv4 keyword maps to IP assignment");
+    results = searchSettings("ip address");
+    check(results.count > 0 && results.values[0].route.category == CategoryId::Network && results.values[0].route.target == TargetId::IPv4,
+          "IP address phrase maps to IPv4 details");
+    results = searchSettings("dhcp");
+    check(results.count > 0 && results.values[0].route.target == TargetId::IPv4,
+          "DHCP keyword maps to IP assignment");
+    results = searchSettings("gateway");
+    check(results.count > 0 && results.values[0].route.target == TargetId::Gateway,
+          "gateway keyword maps to Gateway");
+    results = searchSettings("subnet");
+    check(results.count > 0 && results.values[0].route.target == TargetId::IPv4,
+          "subnet keyword maps to IPv4 details");
     results = searchSettings("disk");
     check(results.count > 0 && results.values[0].route.category == CategoryId::Storage,
           "disk keyword maps to Storage");
@@ -71,6 +94,11 @@ int main()
     check(navigation.canFocus(FocusControl::StorageDiskManager), "selected Storage page can focus its action");
     check(!navigation.navigate(SettingsRoute{ CategoryId::Count, TargetId::Page }), "invalid category navigation is rejected");
     check(!navigation.canFocus(FocusControl::DisplayAdvanced), "Display action is excluded after navigating away");
+    navigation.selectCategory(CategoryId::Network);
+    check(navigation.canFocus(FocusControl::NetworkAdvanced), "Network page can focus its advanced diagnostics action");
+    check(navigation.canFocus(FocusControl::NetworkAdapter), "Network page can focus adapter rows");
+    navigation.selectCategory(CategoryId::Storage);
+    check(!navigation.canFocus(FocusControl::NetworkAdvanced), "Network advanced action is excluded after navigating away");
     for (int i = 0; i < 100; ++i) {
         navigation.selectCategory(static_cast<CategoryId>(i % static_cast<int>(CategoryId::Count)));
     }

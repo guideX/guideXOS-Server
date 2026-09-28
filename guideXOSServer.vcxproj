@@ -156,7 +156,9 @@
     <ClInclude Include="disk_manager.h" />
     <ClInclude Include="control_panel.h" />
     <ClInclude Include="settings_center.h" />
+    <ClInclude Include="settings_network_service.h" />
     <ClInclude Include="settings_center_model.h" />
+    <ClInclude Include="network_settings_contract.h" />
     <ClInclude Include="elf_validator.h" />
     <ClInclude Include="executable_memory.h" />
     <ClInclude Include="file_explorer.h" />
@@ -278,6 +280,7 @@
     <ClInclude Include="kernel\core\include\kernel\msi.h" />
     <ClInclude Include="kernel\core\include\kernel\multiboot.h" />
     <ClInclude Include="kernel\core\include\kernel\nic.h" />
+    <ClInclude Include="kernel\core\include\kernel\network_settings_provider.h" />
     <ClInclude Include="kernel\core\include\kernel\nvme.h" />
     <ClInclude Include="kernel\core\include\kernel\pci_audio.h" />
     <ClInclude Include="kernel\core\include\kernel\app_audio_stream.h" />
@@ -546,6 +549,7 @@
     <ClCompile Include="kernel\core\main.cpp" />
     <ClCompile Include="kernel\core\msi.cpp" />
     <ClCompile Include="kernel\core\nic.cpp" />
+    <ClCompile Include="kernel\core\network_settings_provider.cpp" />
     <ClCompile Include="kernel\core\nvme.cpp" />
     <ClCompile Include="kernel\core\pci_audio.cpp" />
     <ClCompile Include="kernel\core\app_audio_stream.cpp" />
