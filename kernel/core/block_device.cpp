@@ -17,6 +17,8 @@ static uint8_t s_deviceCount = 0;
 static uint64_t s_registryGeneration = 0;
 static uint64_t s_nextRegistrationId = 0;
 static volatile uint32_t s_registryLock = 0;
+static OperationDiagnostic s_lastOperationDiagnostic;
+static OperationCounters s_operationCounters;
 
 static void lock_registry()
 {
@@ -57,6 +59,11 @@ static void bump_generation_locked()
     if (s_registryGeneration != UINT64_MAX) ++s_registryGeneration;
 }
 
+static void saturating_add(uint64_t& value, uint64_t amount)
+{
+    value = value > UINT64_MAX - amount ? UINT64_MAX : value + amount;
+}
+
 static bool valid_sector_size(uint32_t size)
 {
     return size >= 512 && size <= 4096 && (size & (size - 1)) == 0;
@@ -87,8 +94,50 @@ static bool copy_and_pin(uint8_t index, BlockDevice& out)
     return true;
 }
 
+static void record_operation(uint8_t index, OperationKind operation,
+                             uint64_t lba, uint32_t count,
+                             const BlockDevice* dev, bool callbackInvoked,
+                             Status status)
+{
+    OperationDiagnostic diagnostic = {};
+    diagnostic.valid = true;
+    diagnostic.globalIndex = index;
+    diagnostic.requestedLba = lba;
+    diagnostic.requestedSectors = count;
+    diagnostic.operation = operation;
+    diagnostic.status = status;
+    diagnostic.callbackInvoked = callbackInvoked;
+    if (dev) {
+        diagnostic.deviceRegistered = true;
+        diagnostic.deviceOnline = status != BLOCK_ERR_NO_MEDIA && !dev->forcedOffline;
+        diagnostic.driverIndex = dev->driverIndex;
+        diagnostic.registrationId = dev->registrationId;
+        diagnostic.transport = dev->type;
+        diagnostic.logicalSectorSize = dev->sectorSize;
+        if (callbackInvoked && dev->getIoDiagnosticFn)
+            (void)dev->getIoDiagnosticFn(dev->driverIndex,
+                                         diagnostic.transportDiagnostic);
+    }
+    lock_registry();
+    if (operation == OPERATION_READ && callbackInvoked)
+        saturating_add(s_operationCounters.readOperations, 1);
+    else if (operation == OPERATION_WRITE && callbackInvoked) {
+        saturating_add(s_operationCounters.writeOperations, 1);
+        if (status == BLOCK_OK)
+            saturating_add(s_operationCounters.sectorsWritten, count);
+        else if (diagnostic.transportDiagnostic.valid)
+            saturating_add(s_operationCounters.sectorsWritten,
+                diagnostic.transportDiagnostic.completedSectors);
+    } else if (operation == OPERATION_FLUSH) {
+        saturating_add(s_operationCounters.flushAttempts, 1);
+    }
+    memcopy(&s_lastOperationDiagnostic, &diagnostic, sizeof(diagnostic));
+    unlock_registry();
+}
+
 static Status read_pinned(const BlockDevice& dev, uint64_t lba, uint32_t count,
-                          void* buffer, size_t bufferBytes, bool sizeChecked)
+                          void* buffer, size_t bufferBytes, bool sizeChecked,
+                          bool& callbackInvoked)
 {
     if (!dev.readFn) return BLOCK_ERR_UNSUPPORTED;
     if (!valid_sector_size(dev.sectorSize) ||
@@ -99,12 +148,14 @@ static Status read_pinned(const BlockDevice& dev, uint64_t lba, uint32_t count,
     const uint64_t requiredBytes = static_cast<uint64_t>(count) * dev.sectorSize;
     if (sizeChecked && requiredBytes > static_cast<uint64_t>(bufferBytes))
         return BLOCK_ERR_INVALID;
+    callbackInvoked = true;
     return dev.readFn(dev.driverIndex, lba, count, buffer);
 }
 
 static Status write_pinned(const BlockDevice& dev, uint64_t lba,
                            uint32_t count, const void* buffer,
-                           size_t bufferBytes, bool sizeChecked)
+                           size_t bufferBytes, bool sizeChecked,
+                           bool& callbackInvoked)
 {
     if (!dev.writeFn) return BLOCK_ERR_UNSUPPORTED;
     if (!valid_sector_size(dev.sectorSize) ||
@@ -115,6 +166,7 @@ static Status write_pinned(const BlockDevice& dev, uint64_t lba,
     const uint64_t requiredBytes = static_cast<uint64_t>(count) * dev.sectorSize;
     if (sizeChecked && requiredBytes > static_cast<uint64_t>(bufferBytes))
         return BLOCK_ERR_INVALID;
+    callbackInvoked = true;
     return dev.writeFn(dev.driverIndex, lba, count, buffer);
 }
 
@@ -129,6 +181,8 @@ static void remove_locked(uint8_t index)
 void init()
 {
     lock_registry();
+    memzero(&s_lastOperationDiagnostic, sizeof(s_lastOperationDiagnostic));
+    memzero(&s_operationCounters, sizeof(s_operationCounters));
     s_deviceCount = 0;
     for (uint8_t i = 0; i < MAX_BLOCK_DEVICES; ++i) {
         if (s_devicePins[i] != 0) {
@@ -291,15 +345,39 @@ uint64_t registry_generation()
     return generation;
 }
 
+bool last_operation_diagnostic(OperationDiagnostic& out)
+{
+    lock_registry();
+    const bool valid = s_lastOperationDiagnostic.valid;
+    if (valid) memcopy(&out, &s_lastOperationDiagnostic, sizeof(out));
+    unlock_registry();
+    return valid;
+}
+
+void operation_counters(OperationCounters& out)
+{
+    lock_registry();
+    memcopy(&out, &s_operationCounters, sizeof(out));
+    unlock_registry();
+}
+
 Status read_sectors(uint8_t devIndex, uint64_t lba, uint32_t count,
                     void* buffer)
 {
     BlockDevice dev;
-    if (!copy_and_pin(devIndex, dev)) return BLOCK_ERR_NO_MEDIA;
-    const Status status = read_pinned(dev, lba, count, buffer, 0, false);
+    if (!copy_and_pin(devIndex, dev)) {
+        record_operation(devIndex, OPERATION_READ, lba, count, nullptr, false,
+                         BLOCK_ERR_NO_MEDIA);
+        return BLOCK_ERR_NO_MEDIA;
+    }
+    bool callbackInvoked = false;
+    const Status status = read_pinned(dev, lba, count, buffer, 0, false,
+                                      callbackInvoked);
     if (status == BLOCK_ERR_NO_MEDIA)
         mark_device_offline(devIndex, dev.registrationId);
     unpin_device(devIndex, dev.registrationId);
+    record_operation(devIndex, OPERATION_READ, lba, count, &dev,
+                     callbackInvoked, status);
     return status;
 }
 
@@ -307,12 +385,19 @@ Status read_sectors_checked(uint8_t devIndex, uint64_t lba, uint32_t count,
                             void* buffer, size_t bufferBytes)
 {
     BlockDevice dev;
-    if (!copy_and_pin(devIndex, dev)) return BLOCK_ERR_NO_MEDIA;
+    if (!copy_and_pin(devIndex, dev)) {
+        record_operation(devIndex, OPERATION_READ, lba, count, nullptr, false,
+                         BLOCK_ERR_NO_MEDIA);
+        return BLOCK_ERR_NO_MEDIA;
+    }
+    bool callbackInvoked = false;
     const Status status = read_pinned(dev, lba, count, buffer,
-                                      bufferBytes, true);
+                                      bufferBytes, true, callbackInvoked);
     if (status == BLOCK_ERR_NO_MEDIA)
         mark_device_offline(devIndex, dev.registrationId);
     unpin_device(devIndex, dev.registrationId);
+    record_operation(devIndex, OPERATION_READ, lba, count, &dev,
+                     callbackInvoked, status);
     return status;
 }
 
@@ -320,11 +405,19 @@ Status write_sectors(uint8_t devIndex, uint64_t lba, uint32_t count,
                      const void* buffer)
 {
     BlockDevice dev;
-    if (!copy_and_pin(devIndex, dev)) return BLOCK_ERR_NO_MEDIA;
-    const Status status = write_pinned(dev, lba, count, buffer, 0, false);
+    if (!copy_and_pin(devIndex, dev)) {
+        record_operation(devIndex, OPERATION_WRITE, lba, count, nullptr, false,
+                         BLOCK_ERR_NO_MEDIA);
+        return BLOCK_ERR_NO_MEDIA;
+    }
+    bool callbackInvoked = false;
+    const Status status = write_pinned(dev, lba, count, buffer, 0, false,
+                                       callbackInvoked);
     if (status == BLOCK_ERR_NO_MEDIA)
         mark_device_offline(devIndex, dev.registrationId);
     unpin_device(devIndex, dev.registrationId);
+    record_operation(devIndex, OPERATION_WRITE, lba, count, &dev,
+                     callbackInvoked, status);
     return status;
 }
 
@@ -332,12 +425,19 @@ Status write_sectors_checked(uint8_t devIndex, uint64_t lba, uint32_t count,
                              const void* buffer, size_t bufferBytes)
 {
     BlockDevice dev;
-    if (!copy_and_pin(devIndex, dev)) return BLOCK_ERR_NO_MEDIA;
+    if (!copy_and_pin(devIndex, dev)) {
+        record_operation(devIndex, OPERATION_WRITE, lba, count, nullptr, false,
+                         BLOCK_ERR_NO_MEDIA);
+        return BLOCK_ERR_NO_MEDIA;
+    }
+    bool callbackInvoked = false;
     const Status status = write_pinned(dev, lba, count, buffer,
-                                       bufferBytes, true);
+                                       bufferBytes, true, callbackInvoked);
     if (status == BLOCK_ERR_NO_MEDIA)
         mark_device_offline(devIndex, dev.registrationId);
     unpin_device(devIndex, dev.registrationId);
+    record_operation(devIndex, OPERATION_WRITE, lba, count, &dev,
+                     callbackInvoked, status);
     return status;
 }
 
@@ -347,9 +447,13 @@ FlushReport flush_with_result(uint8_t devIndex)
     BlockDevice dev;
     if (!copy_and_pin(devIndex, dev)) {
         report.status = BLOCK_ERR_NO_MEDIA;
+        record_operation(devIndex, OPERATION_FLUSH, 0, 0, nullptr, false,
+                         report.status);
         return report;
     }
+    bool callbackInvoked = false;
     if (dev.flushFn) {
+        callbackInvoked = true;
         report.status = dev.flushFn(dev.driverIndex);
         report.semanticsKnown = dev.flushSemanticsKnown &&
                                 !dev.writeCompletionDurable;
@@ -366,6 +470,8 @@ FlushReport flush_with_result(uint8_t devIndex)
     if (report.status == BLOCK_ERR_NO_MEDIA)
         mark_device_offline(devIndex, dev.registrationId);
     unpin_device(devIndex, dev.registrationId);
+    record_operation(devIndex, OPERATION_FLUSH, 0, 0, &dev,
+                     callbackInvoked, report.status);
     return report;
 }
 

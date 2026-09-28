@@ -5,7 +5,7 @@
 //   - NVMe
 //   - USB Mass Storage (via usb_storage driver)
 //
-// Higher-level filesystem drivers (FAT32, ext4, UFS, …) use this
+// Higher-level filesystem drivers (FAT32, ext4, UFS, â€¦) use this
 // abstraction to perform sector I/O without knowing the transport.
 //
 // Copyright (c) 2026 guideXOS Server
@@ -87,6 +87,29 @@ struct FlushReport {
     bool semanticsKnown;
 };
 
+enum OperationKind : uint8_t {
+    OPERATION_NONE = 0,
+    OPERATION_READ,
+    OPERATION_WRITE,
+    OPERATION_FLUSH,
+};
+
+// Transport drivers may add a small bounded status snapshot for the most
+// recent callback. ATA uses this for command phase and task-file registers.
+struct TransportIoDiagnostic {
+    bool valid;
+    uint8_t stage;
+    uint8_t statusRegister;
+    uint8_t errorRegister;
+    bool errorRegisterValid;
+    uint64_t failingLba;
+    uint32_t completedSectors;
+    uint32_t dataSectorsTransferred;
+};
+
+typedef bool (*GetTransportIoDiagnosticFn)(uint8_t driverIndex,
+    TransportIoDiagnostic& out);
+
 // ================================================================
 // Block device descriptor
 // ================================================================
@@ -128,6 +151,31 @@ struct BlockDevice {
     // a constraint; new storage callers should use checked I/O helpers.
     uint16_t      requiredBufferAlignment;
     uint32_t      maxTransferBytes;
+    GetTransportIoDiagnosticFn getIoDiagnosticFn;
+};
+
+struct OperationDiagnostic {
+    bool valid;
+    bool deviceRegistered;
+    bool deviceOnline;
+    bool callbackInvoked;
+    uint8_t globalIndex;
+    uint8_t driverIndex;
+    uint64_t registrationId;
+    DeviceType transport;
+    uint32_t logicalSectorSize;
+    uint64_t requestedLba;
+    uint32_t requestedSectors;
+    OperationKind operation;
+    Status status;
+    TransportIoDiagnostic transportDiagnostic;
+};
+
+struct OperationCounters {
+    uint64_t readOperations;
+    uint64_t writeOperations;
+    uint64_t sectorsWritten;
+    uint64_t flushAttempts;
 };
 
 static const uint8_t MAX_BLOCK_DEVICES = 16;
@@ -170,6 +218,14 @@ const BlockDevice* get_device(uint8_t index);
 // is reinitialized. Equality is used for revalidation; ordering is not
 // meaningful across uint64_t wrap.
 uint64_t registry_generation();
+
+// Bounded snapshot of the most recent block callback/validation result.
+bool last_operation_diagnostic(OperationDiagnostic& out);
+// Bounded cumulative counts since block::init(), intended for diagnostics and
+// before/after operation comparisons. Successful sectors are counted only
+// on success, or from a transport's bounded completed-sector count after a
+// failed multi-sector callback when that transport can report partial progress.
+void operation_counters(OperationCounters& out);
 
 // ----------------------------------------------------------------
 // Sector I/O (delegates to the transport callbacks)

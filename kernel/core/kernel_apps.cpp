@@ -24,6 +24,7 @@
 #include "include/kernel/dns.h"
 #include "include/kernel/virtio_rng.h"
 #include "include/kernel/virtio_gpu.h"
+#include "include/kernel/ata.h"
 #include "include/kernel/kernel_text_guard.h"
 #include "../../built_in_app_metadata.h"
 #include "../../gxos_tls_foundation.h"
@@ -6247,6 +6248,20 @@ static const char* disk_manager_transport_name(kernel::block::DeviceType type)
     }
 }
 
+static const char* disk_manager_block_status_name(kernel::block::Status status)
+{
+    switch (status) {
+        case kernel::block::BLOCK_OK: return "BLOCK_OK";
+        case kernel::block::BLOCK_ERR_IO: return "BLOCK_ERR_IO";
+        case kernel::block::BLOCK_ERR_TIMEOUT: return "BLOCK_ERR_TIMEOUT";
+        case kernel::block::BLOCK_ERR_NO_MEDIA: return "BLOCK_ERR_NO_MEDIA";
+        case kernel::block::BLOCK_ERR_NOT_READY: return "BLOCK_ERR_NOT_READY";
+        case kernel::block::BLOCK_ERR_INVALID: return "BLOCK_ERR_INVALID";
+        case kernel::block::BLOCK_ERR_UNSUPPORTED: return "BLOCK_ERR_UNSUPPORTED";
+        default: return "BLOCK_ERR_UNKNOWN";
+    }
+}
+
 }
 
 DiskManagerApp::DiskManagerApp()
@@ -6276,6 +6291,7 @@ DiskManagerApp::DiskManagerApp()
     memset(&m_formatRequest, 0, sizeof(m_formatRequest));
     memset(&m_formatResult, 0, sizeof(m_formatResult));
     memset(&m_mountDialogPartition, 0, sizeof(m_mountDialogPartition));
+    m_lastStorageOperation = 0;
     m_mountDialogPath[0] = '\0';
     m_createSizeText[0] = '\0';
     m_createNameText[0] = '\0';
@@ -8662,6 +8678,174 @@ void DiskManagerApp::drawDetails(uint32_t x, uint32_t y, uint32_t w,
                 add(left, leftCount, "NVMe namespace", value);
             }
         }
+
+        block::OperationCounters counters = {};
+        block::operation_counters(counters);
+        numberText(counters.readOperations, value, sizeof(value));
+        add(left, leftCount, "Read operations", value);
+        numberText(counters.writeOperations, value, sizeof(value));
+        add(left, leftCount, "Write operations", value);
+        numberText(counters.sectorsWritten, value, sizeof(value));
+        add(left, leftCount, "Sectors written", value);
+        numberText(counters.flushAttempts, value, sizeof(value));
+        add(left, leftCount, "Flush attempts", value);
+
+        storage::TargetIdentity operationTarget = {};
+        const block::OperationDiagnostic* failedIo = nullptr;
+        const char* operationName = nullptr;
+        const char* operationStatus = nullptr;
+        const char* operationFailureStatus = nullptr;
+        const char* failedStage = "None";
+        uint64_t writesCompleted = 0;
+        bool writeMayHaveReachedMedia = false;
+        bool flushAttempted = false;
+        block::Status operationFlushStatus = block::BLOCK_ERR_INVALID;
+        block::Status operationBlockStatus = block::BLOCK_ERR_INVALID;
+        bool operationBlockStatusValid = false;
+        bool rollbackAttempted = false;
+        bool rollbackSucceeded = false;
+        bool targetMatchesDisk = false;
+        if (m_lastStorageOperation == 1) {
+            operationTarget = m_initializeResult.targetIdentity;
+            targetMatchesDisk = storage::disk_manager_same_disk_incarnation(
+                operationTarget, disk.identity);
+            operationName = "Initialize";
+            operationStatus = storage::initialize_disk_status_name(
+                m_initializeResult.status);
+            operationFailureStatus = storage::initialize_disk_status_name(
+                m_initializeResult.failureStatus);
+            failedStage = m_initializeResult.firstFailedStage ==
+                    storage::INITIALIZE_STAGE_IDLE
+                ? "None" : storage::initialize_disk_stage_name(
+                    m_initializeResult.firstFailedStage);
+            writesCompleted = m_initializeResult.writesCompleted;
+            writeMayHaveReachedMedia =
+                m_initializeResult.writeMayHaveReachedMedia;
+            flushAttempted = m_initializeResult.flushAttempted;
+            operationFlushStatus = m_initializeResult.flushStatus;
+            operationBlockStatus = m_initializeResult.blockStatus;
+            operationBlockStatusValid = m_initializeResult.blockStatusValid;
+            rollbackAttempted = m_initializeResult.rollbackAttempted;
+            rollbackSucceeded = m_initializeResult.rollbackSucceeded;
+            if (m_initializeResult.failedBlockDiagnosticValid)
+                failedIo = &m_initializeResult.failedBlockDiagnostic;
+        } else if (m_lastStorageOperation == 2) {
+            operationTarget = m_createResult.targetIdentity;
+            targetMatchesDisk = storage::disk_manager_same_disk_incarnation(
+                operationTarget, disk.identity);
+            operationName = "Create Partition";
+            operationStatus = storage::create_partition_status_name(
+                m_createResult.status);
+            operationFailureStatus = storage::create_partition_status_name(
+                m_createResult.failureStatus);
+            failedStage = m_createResult.firstFailedStage ==
+                    storage::CREATE_PARTITION_STAGE_IDLE
+                ? "None" : storage::create_partition_stage_name(
+                    m_createResult.firstFailedStage);
+            writesCompleted = m_createResult.writesCompleted;
+            writeMayHaveReachedMedia = m_createResult.writeMayHaveReachedMedia;
+            flushAttempted = m_createResult.flushAttempted;
+            operationFlushStatus = m_createResult.flushStatus;
+            operationBlockStatus = m_createResult.blockStatus;
+            operationBlockStatusValid = m_createResult.blockStatusValid;
+            rollbackAttempted = m_createResult.rollbackAttempted;
+            rollbackSucceeded = m_createResult.rollbackSucceeded;
+            if (m_createResult.failedBlockDiagnostic.valid)
+                failedIo = &m_createResult.failedBlockDiagnostic;
+        } else if (m_lastStorageOperation == 3) {
+            operationTarget = m_formatResult.targetIdentity;
+            targetMatchesDisk = storage::disk_manager_same_disk_incarnation(
+                operationTarget, disk.identity);
+            operationName = "Format FAT32";
+            operationStatus = storage::fat32_format_status_name(
+                m_formatResult.status);
+            operationFailureStatus = storage::fat32_format_status_name(
+                m_formatResult.failureStatus);
+            failedStage = m_formatResult.firstFailedStage ==
+                    storage::FAT32_FORMAT_STAGE_IDLE
+                ? "None" : storage::fat32_format_stage_name(
+                    m_formatResult.firstFailedStage);
+            writesCompleted = m_formatResult.sectorsWritten;
+            writeMayHaveReachedMedia = m_formatResult.writeMayHaveReachedMedia;
+            flushAttempted = m_formatResult.flushAttempted;
+            operationFlushStatus = m_formatResult.flushStatus;
+            operationBlockStatus = m_formatResult.blockStatus;
+            operationBlockStatusValid = m_formatResult.blockStatusValid;
+            rollbackAttempted = m_formatResult.rollbackAttempted;
+            rollbackSucceeded = m_formatResult.rollbackSucceeded;
+            if (m_formatResult.failedBlockDiagnostic.valid)
+                failedIo = &m_formatResult.failedBlockDiagnostic;
+        }
+        if (operationName && targetMatchesDisk) {
+            add(right, rightCount, "Last storage operation", operationName);
+            add(right, rightCount, "Final outcome", operationStatus);
+            if (operationFailureStatus && operationStatus &&
+                strcmp(operationStatus, operationFailureStatus) != 0)
+                add(right, rightCount, "Operation failure", operationFailureStatus);
+            add(right, rightCount, "Failed stage", failedStage);
+            numberText(writesCompleted, value, sizeof(value));
+            add(right, rightCount, "Writes completed", value);
+            add(right, rightCount, "Write may have reached media",
+                writeMayHaveReachedMedia ? "Yes" : "No");
+            add(right, rightCount, "Flush attempted",
+                flushAttempted ? "Yes" : "No");
+            if (flushAttempted) {
+                disk_manager_hex32(static_cast<uint32_t>(operationFlushStatus),
+                                   value, sizeof(value));
+                add(right, rightCount, "Flush result", value);
+            }
+            add(right, rightCount, "Rollback needed",
+                writeMayHaveReachedMedia ? "Yes" : "No");
+            add(right, rightCount, "Rollback result", !rollbackAttempted
+                ? "Not needed" : (rollbackSucceeded ? "Verified" : "Unverified"));
+            if (failedIo) {
+                const char* callbackName = failedIo->operation == block::OPERATION_READ
+                    ? "Read" : failedIo->operation == block::OPERATION_WRITE
+                        ? "Write" : failedIo->operation == block::OPERATION_FLUSH
+                            ? "Flush" : "None";
+                add(right, rightCount, "Failed callback", callbackName);
+            }
+            add(right, rightCount, "Target identity valid",
+                storage::revalidate_target_identity(operationTarget) ==
+                    storage::TARGET_VALID ? "Yes" : "No");
+            add(right, rightCount, "Target still present",
+                block::registration_is_present(operationTarget.globalIndex,
+                    operationTarget.registrationId) ? "Yes" : "No");
+            if (operationBlockStatusValid) {
+                strcopy(value, disk_manager_block_status_name(
+                    operationBlockStatus), sizeof(value));
+                strappend(value, " 0x", sizeof(value));
+                disk_manager_hex32(static_cast<uint32_t>(operationBlockStatus),
+                                   value2, sizeof(value2));
+                strappend(value, value2, sizeof(value));
+                add(right, rightCount, "Block status", value);
+            }
+            if (failedIo && failedIo->transportDiagnostic.valid) {
+                if (failedIo->transport == block::BDEV_ATA_PIO) {
+                    strcopy(value, ata::ata_operation_stage_name(
+                        static_cast<ata::AtaOperationStage>(
+                            failedIo->transportDiagnostic.stage)), sizeof(value));
+                } else {
+                    strcopy(value, "stage ", sizeof(value));
+                    disk_manager_hex32(failedIo->transportDiagnostic.stage,
+                                       value2, sizeof(value2));
+                    strappend(value, value2, sizeof(value));
+                }
+                strappend(value, " status ", sizeof(value));
+                disk_manager_hex32(
+                    failedIo->transportDiagnostic.statusRegister,
+                    value2, sizeof(value2));
+                strappend(value, value2, sizeof(value));
+                if (failedIo->transportDiagnostic.errorRegisterValid) {
+                    strappend(value, " error ", sizeof(value));
+                    disk_manager_hex32(
+                        failedIo->transportDiagnostic.errorRegister,
+                        value2, sizeof(value2));
+                    strappend(value, value2, sizeof(value));
+                }
+                add(right, rightCount, "Transport status", value);
+            }
+        }
     }
 
     const int availableRows = h > 18 ? static_cast<int>((h - 18) / rowHeight) : 0;
@@ -8698,6 +8882,7 @@ void DiskManagerApp::beginInitializeConfirmation(storage::PartitionScheme scheme
     request.expectedRegistryGeneration = request.targetSnapshot.registryGeneration;
     const storage::InitializeDiskStatus status = storage::prepare_initialize_disk(
         request, m_initializePlan, m_initializeResult);
+    m_lastStorageOperation = 1;
     if (status == storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION) {
         m_initializeDialogState = INITIALIZE_DIALOG_CONFIRM;
         m_initializeMessage[0] = '\0';
@@ -8718,9 +8903,32 @@ void DiskManagerApp::runInitializeOperation() {
     invalidate();
     const storage::InitializeDiskStatus status = storage::execute_initialize_disk(
         m_initializePlan, m_initializeResult);
+    m_lastStorageOperation = 1;
     (void)status;
-    strcopy(m_initializeMessage, m_initializeResult.diagnostic,
+    if (m_initializeResult.status != storage::INITIALIZE_DISK_SUCCESS &&
+        m_initializeResult.failedBeforeWrite) {
+        strcopy(m_initializeMessage,
+            "Initialization failed before any disk writes were made.",
             sizeof(m_initializeMessage));
+    } else if (m_initializeResult.flushAttempted &&
+               m_initializeResult.failureStatus ==
+                   storage::INITIALIZE_DISK_FLUSH_FAILED) {
+        strcopy(m_initializeMessage,
+            "Disk cache flush failed. Changes could not be verified.",
+            sizeof(m_initializeMessage));
+    } else if (m_initializeResult.failureStatus ==
+                   storage::INITIALIZE_DISK_IO_FAILED &&
+               m_initializeResult.blockStatusValid &&
+               m_initializeResult.blockStatus == block::BLOCK_ERR_TIMEOUT &&
+               m_initializeResult.firstFailedStage ==
+                   storage::INITIALIZE_STAGE_WRITE_BACKUP_ARRAY) {
+        strcopy(m_initializeMessage,
+            "Disk write timed out while writing the backup GPT.",
+            sizeof(m_initializeMessage));
+    } else {
+        strcopy(m_initializeMessage, m_initializeResult.diagnostic,
+                sizeof(m_initializeMessage));
+    }
     scanDisks();
     m_initializeDialogState = INITIALIZE_DIALOG_RESULT;
     updateInitializeControls();
@@ -8850,8 +9058,22 @@ void DiskManagerApp::runCreatePartitionOperation() {
     updateInitializeControls();
     invalidate();
     storage::create_partition(m_createRequest, m_createResult);
-    strcopy(m_initializeMessage, m_createResult.diagnostic,
+    m_lastStorageOperation = 2;
+    if (m_createResult.status != storage::CREATE_PARTITION_SUCCESS &&
+        m_createResult.failedBeforeWrite) {
+        strcopy(m_initializeMessage,
+            "Partition creation failed before any disk writes were made.",
             sizeof(m_initializeMessage));
+    } else if (m_createResult.flushAttempted &&
+               m_createResult.failureStatus ==
+                   storage::CREATE_PARTITION_FLUSH_FAILED) {
+        strcopy(m_initializeMessage,
+            "Disk cache flush failed. Changes could not be verified.",
+            sizeof(m_initializeMessage));
+    } else {
+        strcopy(m_initializeMessage, m_createResult.diagnostic,
+                sizeof(m_initializeMessage));
+    }
     scanDisks();
     if (m_createResult.status == storage::CREATE_PARTITION_SUCCESS) {
         for (int diskIndex = 0; diskIndex < m_diskCount; ++diskIndex) {
@@ -8954,8 +9176,22 @@ void DiskManagerApp::runFormatOperation() {
     updateInitializeControls();
     invalidate();
     storage::format_fat32_partition(m_formatRequest, m_formatResult);
-    strcopy(m_initializeMessage, m_formatResult.diagnostic,
+    m_lastStorageOperation = 3;
+    if (m_formatResult.status != storage::FAT32_FORMAT_SUCCESS &&
+        m_formatResult.failedBeforeWrite) {
+        strcopy(m_initializeMessage,
+            "Formatting failed before any disk writes were made.",
             sizeof(m_initializeMessage));
+    } else if (m_formatResult.flushAttempted &&
+               m_formatResult.failureStatus ==
+                   storage::FAT32_FORMAT_FLUSH_FAILED) {
+        strcopy(m_initializeMessage,
+            "Disk cache flush failed. Changes could not be verified.",
+            sizeof(m_initializeMessage));
+    } else {
+        strcopy(m_initializeMessage, m_formatResult.diagnostic,
+                sizeof(m_initializeMessage));
+    }
     scanDisks();
     if (m_formatResult.status == storage::FAT32_FORMAT_SUCCESS) {
         for (int diskIndex = 0; diskIndex < m_diskCount; ++diskIndex) {

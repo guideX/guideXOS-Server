@@ -75,6 +75,40 @@ enum InitializeDiskStage : uint8_t {
     INITIALIZE_STAGE_RESCANNING,
     INITIALIZE_STAGE_COMPLETED,
     INITIALIZE_STAGE_FAILED,
+    INITIALIZE_STAGE_ACQUIRE_LEASE,
+    INITIALIZE_STAGE_PIN_TARGET,
+    INITIALIZE_STAGE_PREFLIGHT,
+    INITIALIZE_STAGE_SNAPSHOT,
+    INITIALIZE_STAGE_PREPARE_METADATA,
+    INITIALIZE_STAGE_WRITE_BACKUP_ARRAY,
+    INITIALIZE_STAGE_WRITE_BACKUP_HEADER,
+    INITIALIZE_STAGE_WRITE_PRIMARY_ARRAY,
+    INITIALIZE_STAGE_WRITE_PRIMARY_HEADER,
+    INITIALIZE_STAGE_WRITE_PROTECTIVE_MBR,
+    INITIALIZE_STAGE_WRITE_MBR,
+    INITIALIZE_STAGE_FLUSH,
+    INITIALIZE_STAGE_VERIFY_PRIMARY,
+    INITIALIZE_STAGE_VERIFY_BACKUP,
+    INITIALIZE_STAGE_RESCAN,
+    INITIALIZE_STAGE_ROLLBACK_WRITE,
+    INITIALIZE_STAGE_ROLLBACK_FLUSH,
+    INITIALIZE_STAGE_ROLLBACK_VERIFY,
+};
+
+enum InitializeFailureOutcome : uint8_t {
+    INITIALIZE_OUTCOME_NONE = 0,
+    INITIALIZE_OUTCOME_FAILED_BEFORE_WRITE,
+    INITIALIZE_OUTCOME_ROLLBACK_VERIFIED,
+    INITIALIZE_OUTCOME_ROLLBACK_UNVERIFIED,
+};
+
+enum InitializeOperation : uint8_t {
+    INITIALIZE_OPERATION_NONE = 0,
+    INITIALIZE_OPERATION_READ,
+    INITIALIZE_OPERATION_WRITE,
+    INITIALIZE_OPERATION_FLUSH,
+    INITIALIZE_OPERATION_VERIFY,
+    INITIALIZE_OPERATION_RESCAN,
 };
 
 enum InitializeWriteStage : uint32_t {
@@ -144,18 +178,42 @@ struct InitializeDiskPlan {
 
 struct InitializeDiskResult {
     InitializeDiskStatus status;
+    // The operation failure is retained even if the overall status becomes
+    // ROLLBACK_FAILED after recovery could not be verified.
+    InitializeDiskStatus failureStatus;
     InitializeDiskStage stage;
     TargetIdentity targetIdentity;
     PartitionScheme requestedScheme;
     uint32_t writeStagesCompleted;
     bool writeAttempted;
+    uint32_t writesCompleted;
+    bool writeMayHaveReachedMedia;
+    bool failedBeforeWrite;
+    InitializeFailureOutcome failureOutcome;
     block::FlushOutcome flushOutcome;
     block::Status flushStatus;
+    bool flushAttempted;
+    uint32_t flushAttempts;
+    InitializeDiskStage lastStage;
+    InitializeDiskStage firstFailedStage;
+    InitializeOperation failedOperation;
+    InitializeOperation lastOperation;
+    bool blockStatusValid;
+    block::Status blockStatus;
     bool verificationPassed;
     DiskState finalDetectedState;
     bool rollbackAttempted;
     bool rollbackSucceeded;
+    InitializeDiskStage rollbackStage;
+    bool rollbackWriteAttempted;
+    block::Status rollbackWriteStatus;
+    bool rollbackFlushAttempted;
+    block::FlushOutcome rollbackFlushOutcome;
+    block::Status rollbackFlushStatus;
+    bool rollbackVerificationPassed;
     bool finalStateUncertain;
+    bool failedBlockDiagnosticValid;
+    block::OperationDiagnostic failedBlockDiagnostic;
     char diagnostic[128];
 };
 

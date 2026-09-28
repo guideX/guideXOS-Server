@@ -63,6 +63,19 @@ enum CreatePartitionStage : uint8_t {
     CREATE_PARTITION_STAGE_COMPLETED,
     CREATE_PARTITION_STAGE_FAILED,
     CREATE_PARTITION_STAGE_STATE_UNCERTAIN,
+    CREATE_PARTITION_STAGE_ACQUIRE_LEASE,
+    CREATE_PARTITION_STAGE_PIN_TARGET,
+    CREATE_PARTITION_STAGE_PREFLIGHT,
+    CREATE_PARTITION_STAGE_SNAPSHOT_TABLE,
+    CREATE_PARTITION_STAGE_PREPARE_METADATA,
+    CREATE_PARTITION_STAGE_WRITE_BACKUP_GPT,
+    CREATE_PARTITION_STAGE_WRITE_PRIMARY_GPT,
+    CREATE_PARTITION_STAGE_FLUSH,
+    CREATE_PARTITION_STAGE_VERIFY,
+    CREATE_PARTITION_STAGE_RESCAN,
+    CREATE_PARTITION_STAGE_ROLLBACK_WRITE,
+    CREATE_PARTITION_STAGE_ROLLBACK_FLUSH,
+    CREATE_PARTITION_STAGE_ROLLBACK_VERIFY,
 };
 
 enum CreatePartitionWriteStage : uint32_t {
@@ -108,13 +121,25 @@ struct CreatePartitionProbe {
 
 struct CreatePartitionResult {
     CreatePartitionStatus status;
+    CreatePartitionStatus failureStatus;
     CreatePartitionStage stage;
+    CreatePartitionStage lastStage;
+    CreatePartitionStage firstFailedStage;
     TargetIdentity targetIdentity;
     PartitionScheme requestedScheme;
     PartitionEntry createdPartition;
     uint16_t partitionTableSlot;
     uint32_t writeStagesCompleted;
     bool writeAttempted;
+    uint32_t writesCompleted;
+    bool writeMayHaveReachedMedia;
+    bool failedBeforeWrite;
+    bool blockStatusValid;
+    block::Status blockStatus;
+    block::OperationKind failedOperation;
+    block::OperationDiagnostic failedBlockDiagnostic;
+    bool flushAttempted;
+    uint32_t flushAttempts;
     block::FlushOutcome flushOutcome;
     block::Status flushStatus;
     bool verificationPassed;
@@ -123,6 +148,13 @@ struct CreatePartitionResult {
     uint16_t finalUnallocatedRegionCount;
     bool rollbackAttempted;
     bool rollbackSucceeded;
+    CreatePartitionStage rollbackStage;
+    bool rollbackWriteAttempted;
+    block::Status rollbackWriteStatus;
+    bool rollbackFlushAttempted;
+    block::FlushOutcome rollbackFlushOutcome;
+    block::Status rollbackFlushStatus;
+    bool rollbackVerificationPassed;
     bool finalStateUncertain;
     char diagnostic[128];
 };

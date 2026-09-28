@@ -1,4 +1,4 @@
-// ATA / SATA Storage Driver — Implementation
+// ATA / SATA Storage Driver â€” Implementation
 //
 // Scans PCI for IDE controllers (class 01/01) and AHCI controllers
 // (class 01/06), identifies attached drives, and registers them
@@ -14,6 +14,7 @@
 #include "include/kernel/ata.h"
 #include "include/kernel/block_device.h"
 #include "include/kernel/arch.h"
+#include "include/kernel/pit.h"
 
 // Define ARCH_HAS_PORT_IO for x86/amd64 architectures
 #if defined(ARCH_X86) || defined(ARCH_AMD64) || defined(__i386__) || defined(__x86_64__)
@@ -36,6 +37,7 @@ namespace ata {
 
 static ATADevice s_devices[MAX_ATA_DEVICES];
 static uint8_t   s_deviceCount = 0;
+static AtaIoDiagnostic s_ioDiagnostics[MAX_ATA_DEVICES];
 
 // ================================================================
 // Helpers
@@ -83,7 +85,7 @@ static void fix_ata_string(char* str, uint32_t len)
 }
 
 // ================================================================
-// PCI configuration (port I/O method — x86/amd64 only)
+// PCI configuration (port I/O method â€” x86/amd64 only)
 // ================================================================
 
 #if ARCH_HAS_PORT_IO
@@ -102,42 +104,78 @@ static uint32_t pci_read32(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offse
     return arch::inl(PCI_CONFIG_DATA);
 }
 
-// ================================================================
-// ATA PIO — wait for BSY clear, DRQ set, or error
-// ================================================================
+// Port-I/O wrappers let the actual PIO state machine run through a deterministic
+// seam in tests without mocking the storage service above it.
+static uint8_t pio_read8(void*, uint16_t port) { return arch::inb(port); }
+static void pio_write8(void*, uint16_t port, uint8_t value) { arch::outb(port, value); }
+static uint16_t pio_read16(void*, uint16_t port) { return arch::inw(port); }
+static void pio_write16(void*, uint16_t port, uint16_t value) { arch::outw(port, value); }
+static void pio_delay400ns(void*, uint16_t ctrlBase) { delay_400ns(ctrlBase); }
+static uint64_t pio_ticks(void*) { return pit::ticks(); }
 
-static bool ata_wait_bsy(uint16_t ioBase, uint32_t timeout)
+static const AtaPioIoOps s_pioIo = {
+    nullptr, pio_read8, pio_write8, pio_read16, pio_write16, pio_delay400ns,
+    pio_ticks
+};
+
+static bool ata_wait_identify_bsy(uint16_t ioBase, uint32_t timeout)
 {
     for (uint32_t i = 0; i < timeout; ++i) {
-        uint8_t st = arch::inb(static_cast<uint16_t>(ioBase + ATA_REG_STATUS));
-        if (!(st & ATA_SR_BSY)) return true;
+        const uint8_t status = arch::inb(
+            static_cast<uint16_t>(ioBase + ATA_REG_STATUS));
+        if (status == 0 || status == 0xFFu ||
+            (status & (ATA_SR_ERR | ATA_SR_DF))) return false;
+        if ((status & ATA_SR_BSY) == 0) return true;
     }
     return false;
 }
 
-static bool ata_wait_command_idle(uint16_t ioBase, uint32_t timeout)
+static bool ata_wait_identify_drq(uint16_t ioBase, uint32_t timeout)
 {
     for (uint32_t i = 0; i < timeout; ++i) {
-        uint8_t st = arch::inb(static_cast<uint16_t>(ioBase + ATA_REG_STATUS));
-        if (st & (ATA_SR_ERR | ATA_SR_DF)) return false;
-        if (!(st & (ATA_SR_BSY | ATA_SR_DRQ))) return true;
+        const uint8_t status = arch::inb(
+            static_cast<uint16_t>(ioBase + ATA_REG_STATUS));
+        if (status == 0 || status == 0xFFu ||
+            (status & (ATA_SR_ERR | ATA_SR_DF))) return false;
+        if ((status & ATA_SR_BSY) == 0 && (status & ATA_SR_DRQ) != 0)
+            return true;
     }
     return false;
 }
 
-static bool ata_wait_drq(uint16_t ioBase, uint32_t timeout)
+static void reset_io_diagnostic(AtaIoDiagnostic& diagnostic,
+                                AtaOperationKind operation,
+                                uint64_t lba, uint32_t count)
 {
-    for (uint32_t i = 0; i < timeout; ++i) {
-        uint8_t st = arch::inb(static_cast<uint16_t>(ioBase + ATA_REG_STATUS));
-        if (st & ATA_SR_ERR) return false;
-        if (st & ATA_SR_DF)  return false;
-        if (st & ATA_SR_DRQ) return true;
-    }
-    return false;
+    memzero(&diagnostic, sizeof(diagnostic));
+    diagnostic.valid = true;
+    diagnostic.operation = operation;
+    diagnostic.requestedLba = lba;
+    diagnostic.failingLba = lba;
+    diagnostic.requestedSectors = count;
+    diagnostic.result = block::BLOCK_OK;
+}
+
+static bool get_io_diagnostic(uint8_t devIdx,
+                              block::TransportIoDiagnostic& out)
+{
+    memzero(&out, sizeof(out));
+    if (devIdx >= MAX_ATA_DEVICES || !s_devices[devIdx].active ||
+        !s_ioDiagnostics[devIdx].valid) return false;
+    const AtaIoDiagnostic& source = s_ioDiagnostics[devIdx];
+    out.valid = source.result != block::BLOCK_OK;
+    out.stage = static_cast<uint8_t>(source.stage);
+    out.statusRegister = source.statusRegister;
+    out.errorRegister = source.errorRegister;
+    out.errorRegisterValid = source.errorRegisterValid;
+    out.failingLba = source.failingLba;
+    out.completedSectors = source.completedSectors;
+    out.dataSectorsTransferred = source.dataSectorsTransferred;
+    return out.valid;
 }
 
 // ================================================================
-// ATA PIO — IDENTIFY DEVICE
+// ATA PIO â€” IDENTIFY DEVICE
 // ================================================================
 
 static bool ata_identify(uint16_t ioBase, uint16_t ctrlBase,
@@ -159,15 +197,15 @@ static bool ata_identify(uint16_t ioBase, uint16_t ctrlBase,
     uint8_t st = arch::inb(static_cast<uint16_t>(ioBase + ATA_REG_STATUS));
     if (st == 0) return false; // no device
 
-    if (!ata_wait_bsy(ioBase, 100000)) return false;
+    if (!ata_wait_identify_bsy(ioBase, 100000)) return false;
 
-    // Check for ATAPI — LBA_MID/HI become non-zero
+    // Check for ATAPI â€” LBA_MID/HI become non-zero
     if (arch::inb(static_cast<uint16_t>(ioBase + ATA_REG_LBA_MID)) != 0 ||
         arch::inb(static_cast<uint16_t>(ioBase + ATA_REG_LBA_HI))  != 0) {
-        return false; // ATAPI or SATA — skip for PIO driver
+        return false; // ATAPI or SATA â€” skip for PIO driver
     }
 
-    if (!ata_wait_drq(ioBase, 100000)) return false;
+    if (!ata_wait_identify_drq(ioBase, 100000)) return false;
 
     // Read 256 words (512 bytes)
     uint16_t* buf = reinterpret_cast<uint16_t*>(id);
@@ -178,7 +216,7 @@ static bool ata_identify(uint16_t ioBase, uint16_t ctrlBase,
 }
 
 // ================================================================
-// ATA PIO — read sectors (28-bit LBA)
+// ATA PIO â€” read sectors (28-bit LBA)
 // ================================================================
 
 static block::Status ata_pio_read(uint8_t devIdx,
@@ -191,69 +229,22 @@ static block::Status ata_pio_read(uint8_t devIdx,
 
     ATADevice& dev = s_devices[devIdx];
     uint8_t* buf = static_cast<uint8_t*>(buffer);
+    reset_io_diagnostic(s_ioDiagnostics[devIdx], ATA_OPERATION_READ, lba, count);
 
     for (uint32_t sec = 0; sec < count; ++sec) {
         uint64_t curLBA = lba + sec;
-
-        if (dev.lba48 && curLBA >= 0x10000000ULL) {
-            // 48-bit LBA
-            uint8_t drv = dev.isMaster ? 0x40 : 0x50;
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_DRIVE_HEAD), drv);
-            delay_400ns(dev.ctrlBase);
-
-            // High bytes first
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_SECCOUNT),
-                       0); // sector count high = 0
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_LBA_LO),
-                       static_cast<uint8_t>(curLBA >> 24));
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_LBA_MID),
-                       static_cast<uint8_t>(curLBA >> 32));
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_LBA_HI),
-                       static_cast<uint8_t>(curLBA >> 40));
-
-            // Low bytes
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_SECCOUNT), 1);
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_LBA_LO),
-                       static_cast<uint8_t>(curLBA));
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_LBA_MID),
-                       static_cast<uint8_t>(curLBA >> 8));
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_LBA_HI),
-                       static_cast<uint8_t>(curLBA >> 16));
-
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_COMMAND),
-                       ATA_CMD_READ_PIO_EXT);
-        } else {
-            // 28-bit LBA
-            uint8_t drv = (dev.isMaster ? 0xE0 : 0xF0) |
-                          static_cast<uint8_t>((curLBA >> 24) & 0x0F);
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_DRIVE_HEAD), drv);
-            delay_400ns(dev.ctrlBase);
-
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_SECCOUNT), 1);
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_LBA_LO),
-                       static_cast<uint8_t>(curLBA));
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_LBA_MID),
-                       static_cast<uint8_t>(curLBA >> 8));
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_LBA_HI),
-                       static_cast<uint8_t>(curLBA >> 16));
-
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_COMMAND),
-                       ATA_CMD_READ_PIO);
-        }
-
-        if (!ata_wait_drq(dev.ioBase, 500000))
-            return block::BLOCK_ERR_TIMEOUT;
-
-        uint16_t* wbuf = reinterpret_cast<uint16_t*>(buf + sec * dev.sectorSize);
-        for (uint32_t w = 0; w < dev.sectorSize / 2; ++w) {
-            wbuf[w] = arch::inw(static_cast<uint16_t>(dev.ioBase + ATA_REG_DATA));
-        }
+        const block::Status status = ata_pio_transfer_sector_with_io(
+            dev.ioBase, dev.ctrlBase, dev.isMaster != 0, dev.lba48,
+            dev.sectorSize, curLBA, false,
+            buf + static_cast<size_t>(sec) * dev.sectorSize,
+            s_pioIo, s_ioDiagnostics[devIdx]);
+        if (status != block::BLOCK_OK) return status;
     }
     return block::BLOCK_OK;
 }
 
 // ================================================================
-// ATA PIO — write sectors (28-bit LBA)
+// ATA PIO â€” write sectors (28-bit LBA)
 // ================================================================
 
 static block::Status ata_pio_write(uint8_t devIdx,
@@ -266,63 +257,16 @@ static block::Status ata_pio_write(uint8_t devIdx,
 
     ATADevice& dev = s_devices[devIdx];
     const uint8_t* buf = static_cast<const uint8_t*>(buffer);
+    reset_io_diagnostic(s_ioDiagnostics[devIdx], ATA_OPERATION_WRITE, lba, count);
 
     for (uint32_t sec = 0; sec < count; ++sec) {
         uint64_t curLBA = lba + sec;
-
-        if (dev.lba48 && curLBA >= 0x10000000ULL) {
-            uint8_t drv = dev.isMaster ? 0x40 : 0x50;
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_DRIVE_HEAD), drv);
-            delay_400ns(dev.ctrlBase);
-
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_SECCOUNT), 0);
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_LBA_LO),
-                       static_cast<uint8_t>(curLBA >> 24));
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_LBA_MID),
-                       static_cast<uint8_t>(curLBA >> 32));
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_LBA_HI),
-                       static_cast<uint8_t>(curLBA >> 40));
-
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_SECCOUNT), 1);
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_LBA_LO),
-                       static_cast<uint8_t>(curLBA));
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_LBA_MID),
-                       static_cast<uint8_t>(curLBA >> 8));
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_LBA_HI),
-                       static_cast<uint8_t>(curLBA >> 16));
-
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_COMMAND),
-                       ATA_CMD_WRITE_PIO_EXT);
-        } else {
-            uint8_t drv = (dev.isMaster ? 0xE0 : 0xF0) |
-                          static_cast<uint8_t>((curLBA >> 24) & 0x0F);
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_DRIVE_HEAD), drv);
-            delay_400ns(dev.ctrlBase);
-
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_SECCOUNT), 1);
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_LBA_LO),
-                       static_cast<uint8_t>(curLBA));
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_LBA_MID),
-                       static_cast<uint8_t>(curLBA >> 8));
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_LBA_HI),
-                       static_cast<uint8_t>(curLBA >> 16));
-
-            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_COMMAND),
-                       ATA_CMD_WRITE_PIO);
-        }
-
-        if (!ata_wait_drq(dev.ioBase, 500000))
-            return block::BLOCK_ERR_TIMEOUT;
-
-        const uint16_t* wbuf = reinterpret_cast<const uint16_t*>(
-            buf + sec * dev.sectorSize);
-        for (uint32_t w = 0; w < dev.sectorSize / 2; ++w) {
-            arch::outw(static_cast<uint16_t>(dev.ioBase + ATA_REG_DATA), wbuf[w]);
-        }
-        // Complete one PIO write command before programming the next sector.
-        if (!ata_wait_command_idle(dev.ioBase, 500000))
-            return block::BLOCK_ERR_TIMEOUT;
-
+        const block::Status status = ata_pio_transfer_sector_with_io(
+            dev.ioBase, dev.ctrlBase, dev.isMaster != 0, dev.lba48,
+            dev.sectorSize, curLBA, true,
+            const_cast<uint8_t*>(buf + static_cast<size_t>(sec) * dev.sectorSize),
+            s_pioIo, s_ioDiagnostics[devIdx]);
+        if (status != block::BLOCK_OK) return status;
     }
 
     return block::BLOCK_OK;
@@ -341,15 +285,21 @@ static void ata_flush_write8(void*, uint16_t port, uint8_t value)
     arch::outb(port, value);
 }
 
+static uint64_t ata_flush_ticks(void*) { return pit::ticks(); }
+
 static block::Status ata_pio_flush(uint8_t devIdx)
 {
     if (devIdx >= MAX_ATA_DEVICES || !s_devices[devIdx].active)
         return block::BLOCK_ERR_INVALID;
 
     ATADevice& dev = s_devices[devIdx];
-    const AtaFlushIoOps io = { nullptr, ata_flush_read8, ata_flush_write8 };
+    reset_io_diagnostic(s_ioDiagnostics[devIdx], ATA_OPERATION_FLUSH, 0, 0);
+    const AtaFlushIoOps io = {
+        nullptr, ata_flush_read8, ata_flush_write8, ata_flush_ticks
+    };
     return ata_flush_command_with_io(dev.ioBase, dev.ctrlBase,
-        dev.isMaster != 0, dev.flushCache, dev.flushCacheExt, io);
+        dev.isMaster != 0, dev.flushCache, dev.flushCacheExt, io,
+        500000u, &s_ioDiagnostics[devIdx]);
 }
 
 // ================================================================
@@ -422,6 +372,7 @@ static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
         const AtaFlushSupport flushSupport =
             ata_flush_support_from_identify_word83(id.commandSets83);
         dev.lba48 = commandSets83Valid && (id.commandSets83 & (1 << 10)) != 0;
+        dev.identifyCommandSets83 = id.commandSets83;
         dev.flushCache = flushSupport.flushCache;
         dev.flushCacheExt = flushSupport.flushCacheExt;
 
@@ -465,6 +416,7 @@ static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
         bdev.ataTargetValid = true;
         bdev.ataChannel = chanIdx;
         bdev.ataTarget = drive;
+        bdev.getIoDiagnosticFn = get_io_diagnostic;
         memcopy(bdev.name, dev.name, 6);
         memcopy(bdev.model, dev.model, sizeof(dev.model) - 1);
         memcopy(bdev.serial, dev.serial, sizeof(dev.serial) - 1);
@@ -566,6 +518,23 @@ void init()
 uint8_t device_count()
 {
     return s_deviceCount;
+}
+
+const char* ata_operation_stage_name(AtaOperationStage stage)
+{
+    switch (stage) {
+        case ATA_STAGE_SELECT_DEVICE: return "SelectDevice";
+        case ATA_STAGE_WAIT_READY: return "WaitReady";
+        case ATA_STAGE_PROGRAM_LBA: return "ProgramLBA";
+        case ATA_STAGE_ISSUE_COMMAND: return "IssueCommand";
+        case ATA_STAGE_WAIT_DRQ: return "WaitDRQ";
+        case ATA_STAGE_TRANSFER_DATA: return "TransferData";
+        case ATA_STAGE_WAIT_COMPLETION: return "WaitCompletion";
+        case ATA_STAGE_FLUSH_WAIT_READY: return "FlushWaitReady";
+        case ATA_STAGE_FLUSH_ISSUE: return "FlushIssue";
+        case ATA_STAGE_FLUSH_WAIT_COMPLETION: return "FlushWaitCompletion";
+        case ATA_STAGE_NONE: default: return "None";
+    }
 }
 
 const ATADevice* get_device(uint8_t index)

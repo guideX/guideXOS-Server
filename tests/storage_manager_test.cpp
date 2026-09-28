@@ -49,6 +49,7 @@ struct FakeDisk {
     uint32_t failReadAtCall;
     bool failFlush;
     uint32_t failFlushAtCall;
+    uint32_t failFlushAtCall2;
     block::Status failFlushStatus;
     uint32_t failWriteAtCall1;
     uint32_t failWriteAtCall2;
@@ -77,7 +78,8 @@ struct FakeDisk {
           failReads(false), failReadStatus(block::BLOCK_ERR_IO),
           failLba(UINT64_MAX), failLbaAfterWrite(UINT64_MAX),
           failReadAtCall(0), failFlush(false),
-          failFlushAtCall(0), failFlushStatus(block::BLOCK_ERR_IO),
+          failFlushAtCall(0), failFlushAtCall2(0),
+          failFlushStatus(block::BLOCK_ERR_IO),
           failWriteAtCall1(0), failWriteAtCall2(0),
           failWriteStatus(block::BLOCK_ERR_IO), removeOnWriteAtCall(0),
           corruptWriteLbaOnce(UINT64_MAX), corruptWritePending(false),
@@ -185,7 +187,9 @@ block::Status fake_flush(uint8_t driverId)
         return block::BLOCK_ERR_NO_MEDIA;
     }
     return disk->failFlush ||
-        (disk->failFlushAtCall != 0 && disk->flushes == disk->failFlushAtCall)
+        (disk->failFlushAtCall != 0 && disk->flushes == disk->failFlushAtCall) ||
+        (disk->failFlushAtCall2 != 0 &&
+         disk->flushes == disk->failFlushAtCall2)
         ? disk->failFlushStatus : block::BLOCK_OK;
 }
 
@@ -255,7 +259,86 @@ struct AtaFlushFakeIo {
     uint16_t writePorts[8];
     uint8_t writeValues[8];
     size_t writeCount;
+    uint64_t tick;
 };
+
+struct AtaPioFakeIo {
+    uint16_t ioBase;
+    uint8_t statuses[32];
+    size_t statusCount;
+    size_t statusIndex;
+    uint8_t error;
+    uint16_t writePorts[64];
+    uint8_t writeValues[64];
+    size_t writeCount;
+    uint32_t readWords;
+    uint32_t writtenWords;
+    uint16_t firstWrittenWord;
+    uint32_t delayCount;
+    uint64_t tick;
+    uint64_t completionReadyAfterTick;
+};
+
+uint8_t fake_ata_pio_read8(void* context, uint16_t port)
+{
+    AtaPioFakeIo* io = static_cast<AtaPioFakeIo*>(context);
+    if (port == static_cast<uint16_t>(io->ioBase + ata::ATA_REG_STATUS)) {
+        if (io->statusIndex >= io->statusCount &&
+            io->completionReadyAfterTick != 0 &&
+            io->tick >= io->completionReadyAfterTick)
+            return ata::ATA_SR_DRDY;
+        const size_t index = io->statusIndex < io->statusCount
+            ? io->statusIndex++ : io->statusCount - 1;
+        return io->statuses[index];
+    }
+    if (port == static_cast<uint16_t>(io->ioBase + ata::ATA_REG_ERROR))
+        return io->error;
+    return 0;
+}
+
+uint64_t fake_ata_pio_ticks(void* context)
+{
+    return static_cast<AtaPioFakeIo*>(context)->tick++;
+}
+
+void fake_ata_pio_write8(void* context, uint16_t port, uint8_t value)
+{
+    AtaPioFakeIo* io = static_cast<AtaPioFakeIo*>(context);
+    if (io->writeCount < 64) {
+        io->writePorts[io->writeCount] = port;
+        io->writeValues[io->writeCount] = value;
+        ++io->writeCount;
+    }
+}
+
+uint16_t fake_ata_pio_read16(void* context, uint16_t)
+{
+    AtaPioFakeIo* io = static_cast<AtaPioFakeIo*>(context);
+    ++io->readWords;
+    return 0xABCDu;
+}
+
+void fake_ata_pio_write16(void* context, uint16_t, uint16_t value)
+{
+    AtaPioFakeIo* io = static_cast<AtaPioFakeIo*>(context);
+    if (io->writtenWords == 0) io->firstWrittenWord = value;
+    ++io->writtenWords;
+}
+
+void fake_ata_pio_delay(void* context, uint16_t)
+{
+    ++static_cast<AtaPioFakeIo*>(context)->delayCount;
+}
+
+ata::AtaPioIoOps fake_ata_pio_ops(AtaPioFakeIo& io)
+{
+    ata::AtaPioIoOps ops = {
+        &io, fake_ata_pio_read8, fake_ata_pio_write8,
+        fake_ata_pio_read16, fake_ata_pio_write16, fake_ata_pio_delay,
+        nullptr
+    };
+    return ops;
+}
 
 uint8_t fake_ata_read8(void* context, uint16_t port)
 {
@@ -266,6 +349,11 @@ uint8_t fake_ata_read8(void* context, uint16_t port)
         return io->statuses[index];
     }
     return 0;
+}
+
+uint64_t fake_ata_flush_ticks(void* context)
+{
+    return static_cast<AtaFlushFakeIo*>(context)->tick++;
 }
 
 void fake_ata_write8(void* context, uint16_t port, uint8_t value)
@@ -1328,6 +1416,49 @@ int main()
           "safe writes reject transfers above the declared transport limit");
     unregister_fake(index, constrained);
 
+    FakeDisk operationDiagnostics(512, 128);
+    index = register_fake(operationDiagnostics, true, true, true);
+    block::OperationCounters countersBefore = {};
+    block::operation_counters(countersBefore);
+    uint8_t diagnosticSector[512] = {};
+    check(block::read_sectors(index, 2, 1, diagnosticSector) == block::BLOCK_OK &&
+          block::write_sectors(index, 3, 1, diagnosticSector) == block::BLOCK_OK,
+          "block diagnostic fixture completes one read and one write callback");
+    block::OperationDiagnostic operationDiagnostic = {};
+    const bool haveWriteDiagnostic =
+        block::last_operation_diagnostic(operationDiagnostic);
+    block::OperationCounters countersAfter = {};
+    block::operation_counters(countersAfter);
+    check(haveWriteDiagnostic && operationDiagnostic.deviceRegistered &&
+          operationDiagnostic.callbackInvoked && operationDiagnostic.globalIndex == index &&
+          operationDiagnostic.driverIndex == operationDiagnostics.driverId &&
+          operationDiagnostic.registrationId == operationDiagnostics.registrationId &&
+          operationDiagnostic.transport == block::BDEV_ATA_PIO &&
+          operationDiagnostic.logicalSectorSize == 512 &&
+          operationDiagnostic.requestedLba == 3 &&
+          operationDiagnostic.requestedSectors == 1 &&
+          operationDiagnostic.operation == block::OPERATION_WRITE &&
+          operationDiagnostic.status == block::BLOCK_OK &&
+          countersAfter.readOperations - countersBefore.readOperations == 1 &&
+          countersAfter.writeOperations - countersBefore.writeOperations == 1 &&
+          countersAfter.sectorsWritten - countersBefore.sectorsWritten == 1,
+          "block diagnostic retains device identity, request, status, and bounded operation counters");
+    operationDiagnostics.failWriteAtCall1 = operationDiagnostics.writeAttempts + 1;
+    check(block::write_sectors(index, 4, 1, diagnosticSector) == block::BLOCK_ERR_IO &&
+          block::last_operation_diagnostic(operationDiagnostic) &&
+          operationDiagnostic.callbackInvoked &&
+          operationDiagnostic.operation == block::OPERATION_WRITE &&
+          operationDiagnostic.requestedLba == 4 &&
+          operationDiagnostic.status == block::BLOCK_ERR_IO,
+          "failed block callback retains its raw status and exact request");
+    (void)block::flush_with_result(index);
+    block::operation_counters(countersAfter);
+    check(countersAfter.flushAttempts - countersBefore.flushAttempts == 1 &&
+          countersAfter.writeOperations - countersBefore.writeOperations == 2 &&
+          countersAfter.sectorsWritten - countersBefore.sectorsWritten == 1,
+          "block counters distinguish callback attempts, successful sectors, and flush attempts");
+    unregister_fake(index, operationDiagnostics);
+
     FakeDisk readOnly(512, 128);
     index = register_fake(readOnly);
     storage::DeviceCapabilities capabilities;
@@ -1482,7 +1613,9 @@ int main()
     ataIo.statuses[0] = ata::ATA_SR_DRDY;
     ataIo.statuses[1] = ata::ATA_SR_DRDY;
     ataIo.statusCount = 2;
-    ata::AtaFlushIoOps ataOps = { &ataIo, fake_ata_read8, fake_ata_write8 };
+    ata::AtaFlushIoOps ataOps = {
+        &ataIo, fake_ata_read8, fake_ata_write8, nullptr
+    };
     check(ata::ata_flush_command_with_io(ataIo.ioBase, ata::ATA_PRIMARY_CTRL,
               true, true, true, ataOps, 4) == block::BLOCK_OK &&
           ataIo.writeCount == 2 && ataIo.writeValues[0] == 0xA0 &&
@@ -1525,6 +1658,196 @@ int main()
           !flushExtOnly.flushCache && flushExtOnly.flushCacheExt &&
           !invalidWord83.flushCache && !invalidWord83.flushCacheExt,
           "ATA cache-flush support is accepted only from valid IDENTIFY word 83 bits");
+
+    AtaPioFakeIo pioIo = {};
+    pioIo.ioBase = ata::ATA_PRIMARY_IO;
+    pioIo.statuses[0] = ata::ATA_SR_BSY;
+    pioIo.statuses[1] = ata::ATA_SR_DRDY;
+    pioIo.statuses[2] = ata::ATA_SR_DRQ;
+    pioIo.statuses[3] = ata::ATA_SR_DRDY;
+    pioIo.statusCount = 4;
+    ata::AtaPioIoOps pioOps = fake_ata_pio_ops(pioIo);
+    uint8_t pioWriteBuffer[512];
+    std::memset(pioWriteBuffer, 0x5A, sizeof(pioWriteBuffer));
+    ata::AtaIoDiagnostic pioDiagnostic = {};
+    check(ata::ata_pio_transfer_sector_with_io(ata::ATA_PRIMARY_IO,
+              ata::ATA_PRIMARY_CTRL, false, true, 512, 0x01234567u, true,
+              pioWriteBuffer, pioOps, pioDiagnostic, 8) == block::BLOCK_OK &&
+          pioIo.delayCount == 1 && pioIo.writtenWords == 256 &&
+          pioIo.firstWrittenWord == 0x5A5Au &&
+          pioDiagnostic.completedSectors == 1 &&
+          pioDiagnostic.dataSectorsTransferred == 1 &&
+          pioIo.writeCount == 6 && pioIo.writeValues[0] == 0xF1u &&
+          pioIo.writeValues[1] == 1 && pioIo.writeValues[2] == 0x67 &&
+          pioIo.writeValues[3] == 0x45 && pioIo.writeValues[4] == 0x23 &&
+          pioIo.writeValues[5] == ata::ATA_CMD_WRITE_PIO,
+          "ATA PIO waits through BSY, issues one LBA28 write sector, transfers 256 words, and confirms completion");
+
+    pioIo = {};
+    pioIo.ioBase = ata::ATA_PRIMARY_IO;
+    pioIo.statuses[0] = ata::ATA_SR_DRDY;
+    pioIo.statuses[1] = ata::ATA_SR_DRQ;
+    pioIo.statuses[2] = ata::ATA_SR_DRDY;
+    pioIo.statusCount = 3;
+    pioOps = fake_ata_pio_ops(pioIo);
+    pioDiagnostic = {};
+    uint8_t pioReadBuffer[512] = {};
+    check(ata::ata_pio_transfer_sector_with_io(ata::ATA_PRIMARY_IO,
+              ata::ATA_PRIMARY_CTRL, true, true, 512, 7, false,
+              pioReadBuffer, pioOps, pioDiagnostic, 8) == block::BLOCK_OK &&
+          pioIo.readWords == 256 && pioDiagnostic.completedSectors == 1 &&
+          pioReadBuffer[0] == 0xCD && pioReadBuffer[1] == 0xAB,
+          "ATA PIO read consumes exactly one sector and records successful completion");
+
+    pioIo = {};
+    pioIo.ioBase = ata::ATA_PRIMARY_IO;
+    pioIo.statuses[0] = ata::ATA_SR_DRDY;
+    pioIo.statuses[1] = ata::ATA_SR_DRQ;
+    pioIo.statuses[2] = ata::ATA_SR_DRDY;
+    pioIo.statusCount = 3;
+    pioOps = fake_ata_pio_ops(pioIo);
+    pioDiagnostic = {};
+    check(ata::ata_pio_transfer_sector_with_io(ata::ATA_PRIMARY_IO,
+              ata::ATA_PRIMARY_CTRL, false, true, 512,
+              0x010203040506ull, true, pioWriteBuffer, pioOps,
+              pioDiagnostic, 8) == block::BLOCK_OK &&
+          pioIo.writeCount == 10 && pioIo.writeValues[0] == 0x50u &&
+          pioIo.writeValues[1] == 0 && pioIo.writeValues[2] == 0x03 &&
+          pioIo.writeValues[3] == 0x02 && pioIo.writeValues[4] == 0x01 &&
+          pioIo.writeValues[5] == 1 && pioIo.writeValues[6] == 0x06 &&
+          pioIo.writeValues[7] == 0x05 && pioIo.writeValues[8] == 0x04 &&
+          pioIo.writeValues[9] == ata::ATA_CMD_WRITE_PIO_EXT,
+          "ATA PIO LBA48 writes high task-file bytes before one-sector low bytes");
+
+    pioIo = {};
+    pioIo.ioBase = ata::ATA_PRIMARY_IO;
+    pioIo.statuses[0] = ata::ATA_SR_DRDY;
+    pioIo.statuses[1] = ata::ATA_SR_DRDY | ata::ATA_SR_ERR;
+    pioIo.statusCount = 2;
+    pioIo.error = 0x04;
+    pioOps = fake_ata_pio_ops(pioIo);
+    pioDiagnostic = {};
+    check(ata::ata_pio_transfer_sector_with_io(ata::ATA_PRIMARY_IO,
+              ata::ATA_PRIMARY_CTRL, true, true, 512, 9, false,
+              pioReadBuffer, pioOps, pioDiagnostic, 8) == block::BLOCK_ERR_IO &&
+          pioDiagnostic.stage == ata::ATA_STAGE_WAIT_DRQ &&
+          pioDiagnostic.statusRegister == (ata::ATA_SR_DRDY | ata::ATA_SR_ERR) &&
+          pioDiagnostic.errorRegisterValid && pioDiagnostic.errorRegister == 0x04 &&
+          pioIo.readWords == 0,
+          "ATA PIO captures ERR and the error register before data transfer");
+
+    pioIo = {};
+    pioIo.ioBase = ata::ATA_PRIMARY_IO;
+    pioIo.statuses[0] = ata::ATA_SR_DRDY;
+    pioIo.statuses[1] = ata::ATA_SR_DRDY | ata::ATA_SR_DF;
+    pioIo.statusCount = 2;
+    pioIo.error = 0x40;
+    pioOps = fake_ata_pio_ops(pioIo);
+    pioDiagnostic = {};
+    check(ata::ata_pio_transfer_sector_with_io(ata::ATA_PRIMARY_IO,
+              ata::ATA_PRIMARY_CTRL, true, true, 512, 9, false,
+              pioReadBuffer, pioOps, pioDiagnostic, 8) == block::BLOCK_ERR_IO &&
+          pioDiagnostic.stage == ata::ATA_STAGE_WAIT_DRQ &&
+          pioDiagnostic.statusRegister == (ata::ATA_SR_DRDY | ata::ATA_SR_DF) &&
+          pioDiagnostic.errorRegisterValid && pioDiagnostic.errorRegister == 0x40 &&
+          pioIo.readWords == 0,
+          "ATA PIO distinguishes device fault and retains its error register");
+
+    pioIo = {};
+    pioIo.ioBase = ata::ATA_PRIMARY_IO;
+    pioIo.statuses[0] = ata::ATA_SR_DRDY;
+    pioIo.statuses[1] = ata::ATA_SR_DRDY;
+    pioIo.statusCount = 2;
+    pioOps = fake_ata_pio_ops(pioIo);
+    pioDiagnostic = {};
+    check(ata::ata_pio_transfer_sector_with_io(ata::ATA_PRIMARY_IO,
+              ata::ATA_PRIMARY_CTRL, true, true, 512, 9, false,
+              pioReadBuffer, pioOps, pioDiagnostic, 4) ==
+                  block::BLOCK_ERR_NOT_READY &&
+          pioDiagnostic.stage == ata::ATA_STAGE_WAIT_DRQ &&
+          pioDiagnostic.statusRegister == ata::ATA_SR_DRDY,
+          "ATA PIO retains a bounded not-ready result when DRQ never arrives");
+
+    pioIo = {};
+    pioIo.ioBase = ata::ATA_PRIMARY_IO;
+    pioIo.statuses[0] = ata::ATA_SR_BSY;
+    pioIo.statusCount = 1;
+    pioOps = fake_ata_pio_ops(pioIo);
+    pioDiagnostic = {};
+    check(ata::ata_pio_transfer_sector_with_io(ata::ATA_PRIMARY_IO,
+              ata::ATA_PRIMARY_CTRL, true, true, 512, 10, false,
+              pioReadBuffer, pioOps, pioDiagnostic, 4) == block::BLOCK_ERR_TIMEOUT &&
+          pioDiagnostic.stage == ata::ATA_STAGE_WAIT_READY &&
+          pioDiagnostic.statusRegister == ata::ATA_SR_BSY,
+          "ATA PIO readiness wait returns a bounded timeout with its last status");
+
+    pioIo = {};
+    pioIo.ioBase = ata::ATA_PRIMARY_IO;
+    pioIo.statuses[0] = ata::ATA_SR_DRDY;
+    pioIo.statuses[1] = ata::ATA_SR_DRQ;
+    pioIo.statuses[2] = ata::ATA_SR_BSY;
+    pioIo.statusCount = 3;
+    pioOps = fake_ata_pio_ops(pioIo);
+    pioDiagnostic = {};
+    check(ata::ata_pio_transfer_sector_with_io(ata::ATA_PRIMARY_IO,
+              ata::ATA_PRIMARY_CTRL, true, true, 512, 11, true,
+              pioWriteBuffer, pioOps, pioDiagnostic, 4) == block::BLOCK_ERR_TIMEOUT &&
+          pioDiagnostic.stage == ata::ATA_STAGE_WAIT_COMPLETION &&
+          pioDiagnostic.completedSectors == 0 &&
+          pioDiagnostic.dataSectorsTransferred == 1,
+          "ATA PIO distinguishes a timeout after data transfer from completed write");
+
+    pioIo = {};
+    pioIo.ioBase = ata::ATA_PRIMARY_IO;
+    pioIo.statuses[0] = ata::ATA_SR_DRDY;
+    pioIo.statuses[1] = ata::ATA_SR_DRQ;
+    pioIo.statuses[2] = ata::ATA_SR_BSY;
+    pioIo.statusCount = 3;
+    pioIo.completionReadyAfterTick = 600;
+    pioOps = fake_ata_pio_ops(pioIo);
+    pioOps.ticks = fake_ata_pio_ticks;
+    pioDiagnostic = {};
+    check(ata::ata_pio_transfer_sector_with_io(ata::ATA_PRIMARY_IO,
+              ata::ATA_PRIMARY_CTRL, true, true, 512, 12, true,
+              pioWriteBuffer, pioOps, pioDiagnostic, 4) == block::BLOCK_OK &&
+          pioIo.tick >= pioIo.completionReadyAfterTick &&
+          pioIo.tick < ata::ATA_COMMAND_TIMEOUT_TICKS &&
+          pioDiagnostic.completedSectors == 1,
+          "ATA PIO completion deadline tolerates device BSY beyond the former five-second limit");
+
+    pioIo = {};
+    pioIo.ioBase = ata::ATA_PRIMARY_IO;
+    pioIo.statuses[0] = ata::ATA_SR_BSY;
+    pioIo.statusCount = 1;
+    pioOps = fake_ata_pio_ops(pioIo);
+    pioOps.ticks = fake_ata_pio_ticks;
+    pioDiagnostic = {};
+    check(ata::ata_pio_transfer_sector_with_io(ata::ATA_PRIMARY_IO,
+              ata::ATA_PRIMARY_CTRL, true, true, 512, 13, false,
+              pioReadBuffer, pioOps, pioDiagnostic, 4) == block::BLOCK_ERR_TIMEOUT &&
+          pioIo.tick >= ata::ATA_COMMAND_TIMEOUT_TICKS &&
+          pioIo.tick < ata::ATA_COMMAND_TIMEOUT_TICKS + 10u &&
+          pioDiagnostic.stage == ata::ATA_STAGE_WAIT_READY &&
+          pioDiagnostic.statusRegister == ata::ATA_SR_BSY,
+          "ATA PIO still times out deterministically at the bounded command deadline");
+
+    AtaFlushFakeIo slowFlushIo = {};
+    slowFlushIo.ioBase = ata::ATA_PRIMARY_IO;
+    slowFlushIo.statuses[0] = ata::ATA_SR_DRDY;
+    slowFlushIo.statuses[1] = ata::ATA_SR_BSY;
+    slowFlushIo.statusCount = 2;
+    ata::AtaFlushIoOps slowFlushOps = {
+        &slowFlushIo, fake_ata_read8, fake_ata_write8, fake_ata_flush_ticks
+    };
+    ata::AtaIoDiagnostic slowFlushDiagnostic = {};
+    check(ata::ata_flush_command_with_io(ata::ATA_PRIMARY_IO,
+              ata::ATA_PRIMARY_CTRL, true, true, true, slowFlushOps, 4,
+              &slowFlushDiagnostic) == block::BLOCK_ERR_TIMEOUT &&
+          slowFlushIo.tick >= ata::ATA_FLUSH_TIMEOUT_TICKS &&
+          slowFlushIo.tick < ata::ATA_FLUSH_TIMEOUT_TICKS + 10u &&
+          slowFlushDiagnostic.stage == ata::ATA_STAGE_FLUSH_WAIT_COMPLETION &&
+          slowFlushDiagnostic.statusRegister == ata::ATA_SR_BSY,
+          "ATA cache flush has its own longer bounded completion deadline");
 
     FakeDisk synchronousInitialize(512, 4096);
     index = register_fake(synchronousInitialize, true, false, false, true);
@@ -1670,6 +1993,64 @@ int main()
     check(probe_fake_initialize(unreadableInit, storage::PARTITION_SCHEME_GPT) ==
               storage::INITIALIZE_DISK_READ_UNAVAILABLE,
           "initialization refuses unreadable media");
+    {
+        FakeDisk preflightReadFailure(512, 128);
+        const uint8_t readFailureIndex =
+            register_fake(preflightReadFailure, true, true, true);
+        preflightReadFailure.failReads = true;
+        storage::InitializeDiskRequest readFailureRequest =
+            make_initialize_request(readFailureIndex,
+                                    storage::PARTITION_SCHEME_GPT);
+        storage::InitializeDiskPlan readFailurePlan = {};
+        storage::InitializeDiskResult readFailureResult = {};
+        check(storage::prepare_initialize_disk(readFailureRequest,
+                  readFailurePlan, readFailureResult) ==
+                  storage::INITIALIZE_DISK_READ_UNAVAILABLE &&
+              readFailureResult.failedBeforeWrite &&
+              readFailureResult.failureOutcome ==
+                  storage::INITIALIZE_OUTCOME_FAILED_BEFORE_WRITE &&
+              readFailureResult.firstFailedStage ==
+                  storage::INITIALIZE_STAGE_PREFLIGHT &&
+              readFailureResult.failedOperation ==
+                  storage::INITIALIZE_OPERATION_READ &&
+              readFailureResult.blockStatusValid &&
+              readFailureResult.blockStatus == block::BLOCK_ERR_IO &&
+              readFailureResult.writesCompleted == 0 &&
+              !readFailureResult.flushAttempted &&
+              !readFailureResult.rollbackAttempted &&
+              preflightReadFailure.writeAttempts == 0,
+              "preflight read failure retains the callback status and reports zero writes without flush or rollback");
+        unregister_fake(readFailureIndex, preflightReadFailure);
+    }
+    {
+        FakeDisk snapshotReadFailure(512, 4096);
+        const uint8_t readFailureIndex =
+            register_fake(snapshotReadFailure, true, true, true);
+        snapshotReadFailure.failReadAtCall = 21;
+        storage::InitializeDiskRequest readFailureRequest =
+            make_initialize_request(readFailureIndex,
+                                    storage::PARTITION_SCHEME_GPT);
+        storage::InitializeDiskPlan readFailurePlan = {};
+        storage::InitializeDiskResult readFailureResult = {};
+        const storage::InitializeDiskStatus snapshotReadStatus =
+            storage::prepare_initialize_disk(readFailureRequest,
+                  readFailurePlan, readFailureResult);
+        check(snapshotReadStatus ==
+                  storage::INITIALIZE_DISK_READ_UNAVAILABLE &&
+              readFailureResult.failedBeforeWrite &&
+              readFailureResult.firstFailedStage ==
+                  storage::INITIALIZE_STAGE_SNAPSHOT &&
+              readFailureResult.failedOperation ==
+                  storage::INITIALIZE_OPERATION_READ &&
+              readFailureResult.blockStatusValid &&
+              readFailureResult.blockStatus == block::BLOCK_ERR_IO &&
+              readFailureResult.writesCompleted == 0 &&
+              !readFailureResult.flushAttempted &&
+              !readFailureResult.rollbackAttempted &&
+              snapshotReadFailure.writeAttempts == 0,
+              "metadata snapshot read failure retains its stage and raw status without claiming rollback");
+        unregister_fake(readFailureIndex, snapshotReadFailure);
+    }
     FakeDisk readOnlyInit(512, 128);
     check(probe_fake_initialize(readOnlyInit, storage::PARTITION_SCHEME_GPT,
                                 false) == storage::INITIALIZE_DISK_READ_ONLY,
@@ -2038,9 +2419,17 @@ int main()
               storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION,
           "table-change fixture reaches confirmation-ready state");
     sector(changedTable, 0)[100] = 0x11;
-    check(storage::execute_initialize_disk(initializePlan, initializeResult) ==
-              storage::INITIALIZE_DISK_NOT_RAW && changedTable.writeAttempts == 0,
-          "media changed after confirmation is rejected before the first write");
+    const storage::InitializeDiskStatus changedTableStatus =
+        storage::execute_initialize_disk(initializePlan, initializeResult);
+    check(changedTableStatus ==
+              storage::INITIALIZE_DISK_NOT_RAW && changedTable.writeAttempts == 0 &&
+          initializeResult.failedBeforeWrite && initializeResult.writesCompleted == 0 &&
+          initializeResult.failureOutcome == storage::INITIALIZE_OUTCOME_FAILED_BEFORE_WRITE &&
+          !initializeResult.flushAttempted &&
+          initializeResult.flushOutcome == block::FLUSH_OUTCOME_INVALID &&
+          !initializeResult.rollbackAttempted &&
+          initializeResult.firstFailedStage == storage::INITIALIZE_STAGE_REVALIDATING,
+          "media change is identified as a no-write snapshot failure without fake flush or rollback evidence");
     unregister_fake(index, changedTable);
 
     FakeDisk writeFailFirst(512, 4096);
@@ -2054,8 +2443,14 @@ int main()
               storage::INITIALIZE_DISK_IO_FAILED &&
           initializeResult.rollbackAttempted && initializeResult.rollbackSucceeded &&
           initializeResult.finalDetectedState == storage::DISK_STATE_NOT_INITIALIZED &&
+          initializeResult.firstFailedStage == storage::INITIALIZE_STAGE_WRITE_BACKUP_ARRAY &&
+          initializeResult.lastStage == storage::INITIALIZE_STAGE_WRITE_BACKUP_ARRAY &&
+          initializeResult.failedOperation == storage::INITIALIZE_OPERATION_WRITE &&
+          initializeResult.blockStatusValid && initializeResult.blockStatus == block::BLOCK_ERR_IO &&
+          initializeResult.writesCompleted == 0 && !initializeResult.failedBeforeWrite &&
+          initializeResult.rollbackStage == storage::INITIALIZE_STAGE_ROLLBACK_VERIFY &&
           !storage::storage_operation_active(),
-          "first GPT metadata write failure rolls back and releases the lock");
+          "first GPT-array callback failure reports its stage/status and verifies rollback");
     unregister_fake(index, writeFailFirst);
 
     FakeDisk writeFailMiddle(512, 4096);
@@ -2081,7 +2476,8 @@ int main()
               storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION &&
           storage::execute_initialize_disk(initializePlan, initializeResult) ==
               storage::INITIALIZE_DISK_IO_FAILED &&
-          initializeResult.rollbackAttempted && initializeResult.rollbackSucceeded,
+          initializeResult.rollbackAttempted && initializeResult.rollbackSucceeded &&
+          initializeResult.firstFailedStage == storage::INITIALIZE_STAGE_WRITE_PROTECTIVE_MBR,
           "final protective-MBR write failure rolls back the GPT metadata");
     unregister_fake(index, writeFailFinal);
 
@@ -2094,10 +2490,34 @@ int main()
               storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION &&
           storage::execute_initialize_disk(initializePlan, initializeResult) ==
               storage::INITIALIZE_DISK_FLUSH_FAILED &&
+          initializeResult.flushAttempted &&
           initializeResult.flushOutcome == block::FLUSH_OUTCOME_FAILED &&
+          initializeResult.firstFailedStage == storage::INITIALIZE_STAGE_FLUSH &&
+          initializeResult.failedOperation == storage::INITIALIZE_OPERATION_FLUSH &&
           initializeResult.rollbackAttempted && initializeResult.rollbackSucceeded,
           "post-write flush failure rejects success and verifies snapshot restoration");
     unregister_fake(index, flushFailAfterWrite);
+
+    FakeDisk rollbackFlushFail(512, 4096);
+    index = register_fake(rollbackFlushFail, true, true, true);
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
+    rollbackFlushFail.failFlushAtCall = 2;
+    rollbackFlushFail.failFlushAtCall2 = 3;
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION &&
+          storage::execute_initialize_disk(initializePlan, initializeResult) ==
+              storage::INITIALIZE_DISK_ROLLBACK_FAILED &&
+          initializeResult.rollbackAttempted &&
+          initializeResult.rollbackWriteAttempted &&
+          initializeResult.rollbackFlushAttempted &&
+          initializeResult.rollbackFlushOutcome == block::FLUSH_OUTCOME_FAILED &&
+          initializeResult.rollbackFlushStatus == block::BLOCK_ERR_IO &&
+          !initializeResult.rollbackVerificationPassed &&
+          initializeResult.failureOutcome ==
+              storage::INITIALIZE_OUTCOME_ROLLBACK_UNVERIFIED,
+          "rollback flush failure retains its separate status and leaves metadata uncertain");
+    unregister_fake(index, rollbackFlushFail);
 
     FakeDisk corruptVerification(512, 4096);
     index = register_fake(corruptVerification, true, true, true);
@@ -2113,6 +2533,26 @@ int main()
           initializeResult.finalDetectedState == storage::DISK_STATE_NOT_INITIALIZED,
           "normal-parser verification failure triggers bounded rollback");
     unregister_fake(index, corruptVerification);
+
+    FakeDisk rollbackVerifyFail(512, 4096);
+    index = register_fake(rollbackVerifyFail, true, true, true);
+    initializeRequest = make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
+    rollbackVerifyFail.failLbaAfterWrite = 1;
+    check(storage::prepare_initialize_disk(initializeRequest, initializePlan,
+                                           initializeResult) ==
+              storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION &&
+          storage::execute_initialize_disk(initializePlan, initializeResult) ==
+              storage::INITIALIZE_DISK_ROLLBACK_FAILED &&
+          initializeResult.rollbackAttempted &&
+          initializeResult.rollbackFlushAttempted &&
+          initializeResult.rollbackFlushOutcome ==
+              block::FLUSH_OUTCOME_SUPPORTED_SUCCEEDED &&
+          initializeResult.rollbackStage ==
+              storage::INITIALIZE_STAGE_ROLLBACK_VERIFY &&
+          !initializeResult.rollbackVerificationPassed &&
+          !initializeResult.rollbackSucceeded,
+          "rollback verification failure is distinct from write and flush failures");
+    unregister_fake(index, rollbackVerifyFail);
 
     FakeDisk rollbackFail(512, 4096);
     index = register_fake(rollbackFail, true, true, true);
@@ -2191,8 +2631,13 @@ int main()
           storage::execute_initialize_disk(initializePlan, initializeResult) ==
               storage::INITIALIZE_DISK_FLUSH_FAILED &&
           !initializeResult.writeAttempted && firstFlushFail.writeAttempts == 0 &&
+          initializeResult.failedBeforeWrite && initializeResult.writesCompleted == 0 &&
+          initializeResult.failureOutcome == storage::INITIALIZE_OUTCOME_FAILED_BEFORE_WRITE &&
+          initializeResult.flushAttempted &&
+          initializeResult.firstFailedStage == storage::INITIALIZE_STAGE_FLUSH &&
+          !initializeResult.rollbackAttempted &&
           !storage::storage_operation_active(),
-          "pre-write flush failure rejects the operation without modifying sectors");
+          "pre-write flush failure is diagnosed without writes or rollback claims");
     unregister_fake(index, firstFlushFail);
 
     {
@@ -2866,8 +3311,18 @@ int main()
             std::snprintf(label, sizeof(label),
                 "%s GPT metadata write failure rolls back byte-for-byte and releases the lease",
                 failureNames[scenario]);
+            const storage::CreatePartitionStage expectedFailureStage =
+                scenario == 2 ? storage::CREATE_PARTITION_STAGE_WRITE_PRIMARY_GPT
+                              : storage::CREATE_PARTITION_STAGE_WRITE_BACKUP_GPT;
             check(status == storage::CREATE_PARTITION_IO_FAILED &&
                   createResult.rollbackAttempted && createResult.rollbackSucceeded &&
+                  createResult.firstFailedStage == expectedFailureStage &&
+                  createResult.lastStage == expectedFailureStage &&
+                  createResult.failedOperation == block::OPERATION_WRITE &&
+                  createResult.blockStatusValid &&
+                  createResult.blockStatus == block::BLOCK_ERR_IO &&
+                  createResult.flushAttempted &&
+                  createResult.rollbackStage == storage::CREATE_PARTITION_STAGE_ROLLBACK_VERIFY &&
                   !createResult.finalStateUncertain && failedWrite.bytes == before &&
                   !storage::storage_operation_active(), label);
             unregister_fake(index, failedWrite);
@@ -2889,6 +3344,10 @@ int main()
         check(storage::create_partition(request, createResult) ==
                   storage::CREATE_PARTITION_FLUSH_FAILED &&
               createResult.rollbackAttempted && createResult.rollbackSucceeded &&
+              createResult.flushAttempted &&
+              createResult.firstFailedStage == storage::CREATE_PARTITION_STAGE_FLUSH &&
+              createResult.failedOperation == block::OPERATION_FLUSH &&
+              createResult.rollbackFlushAttempted &&
               flushFail.bytes == before && !storage::storage_operation_active(),
               "post-write flush failure restores and verifies original GPT metadata");
         unregister_fake(index, flushFail);
@@ -3295,6 +3754,13 @@ int main()
         check(firstFailure == storage::FAT32_FORMAT_METADATA_WRITE_FAILED &&
               firstWriteFailure.rollbackAttempted &&
               firstWriteFailure.rollbackSucceeded && guarded.bytes == before &&
+              firstWriteFailure.firstFailedStage == storage::FAT32_FORMAT_STAGE_WRITE_FAT &&
+              firstWriteFailure.lastStage == storage::FAT32_FORMAT_STAGE_WRITE_FAT &&
+              firstWriteFailure.failedOperation == block::OPERATION_WRITE &&
+              firstWriteFailure.blockStatusValid &&
+              firstWriteFailure.blockStatus == block::BLOCK_ERR_IO &&
+              firstWriteFailure.flushAttempted &&
+              firstWriteFailure.rollbackStage == storage::FAT32_FORMAT_STAGE_ROLLBACK_VERIFY &&
               !storage::storage_operation_active(),
               "first metadata write failure restores and verifies the snapshot");
         resetFaultState();

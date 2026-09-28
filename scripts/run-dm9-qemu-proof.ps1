@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Runs the compile-time DM9 storage lifecycle proof on an isolated QEMU disk.
+    Runs the compile-time DM10 storage lifecycle proof on an isolated QEMU disk.
 
 .DESCRIPTION
     Copies the selected ESP directory, builds/stages guideXOS, creates a new
@@ -8,7 +8,7 @@
     the same image again for rediscovery/remount, and independently inspects
     the resulting GPT/FAT32 structures. Only the copied ESP directory and the
     newly created raw file are attached to QEMU; no host physical disk is used.
-    Artifacts are preserved under out/dm9-qemu-proof-<timestamp> by default.
+    Artifacts are preserved under out/dm10-qemu-proof-<timestamp> by default.
 #>
 [CmdletBinding()]
 param(
@@ -17,6 +17,8 @@ param(
     [string]$QemuExecutable = "C:\Program Files\qemu\qemu-system-x86_64.exe",
     [string]$OvmfCode = "OVMF.fd",
     [string]$PythonExecutable = "",
+    [int]$AttemptNumber = 1,
+    [switch]$QemuDebug,
     [switch]$SkipBuild
 )
 
@@ -92,7 +94,9 @@ function Stop-ProofQemu([System.Diagnostics.Process]$Process, [int]$Port,
 
 function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
                          [string]$EspPath, [string]$DiskPath,
-                         [string]$OutputPath, [int]$TimeoutSeconds) {
+                         [string]$OutputPath, [int]$TimeoutSeconds,
+                         [string]$ManifestPath, [int]$ProofAttempt,
+                         [switch]$EnableQemuDebug) {
     for ($attempt = 1; $attempt -le 5; ++$attempt) {
         $serialPath = Join-Path $OutputPath "$RunName.serial.log"
         $stderrPath = Join-Path $OutputPath "$RunName.stderr.log"
@@ -113,9 +117,23 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
             "-monitor", "tcp:127.0.0.1:$port,server,nowait",
             "-rtc", "base=utc,clock=host", "-no-reboot"
         )
+        $debugPath = Join-Path $OutputPath "$RunName.qemu-debug.log"
+        if ($EnableQemuDebug) {
+            $arguments += @("-d", "guest_errors,int,cpu_reset", "-D", $debugPath)
+        }
         $process = Start-Process -FilePath $QemuFull -ArgumentList $arguments `
             -WorkingDirectory $Root -WindowStyle Hidden -PassThru `
             -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$($process.Id)"
+        if ($processInfo -and $ManifestPath -and
+            (Test-Path -LiteralPath $ManifestPath)) {
+            Add-Content -LiteralPath $ManifestPath -Encoding ascii -Value @(
+                "qemuAttempt=$ProofAttempt boot=$RunName launchTry=$attempt pid=$($process.Id)",
+                "qemuCommandLine.$RunName.$attempt=$($processInfo.CommandLine)",
+                "qemuSerial.$RunName.$attempt=$serialPath",
+                "qemuDebug.$RunName.$attempt=$debugPath"
+            )
+        }
         $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
         $bootSucceeded = $false
         while ([DateTime]::UtcNow -lt $deadline) {
@@ -146,6 +164,7 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
                 Port = $port
                 SerialPath = $serialPath
                 Attempt = $attempt
+                CommandLine = if ($processInfo) { $processInfo.CommandLine } else { "unavailable" }
             }
         }
 
@@ -164,12 +183,13 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
     throw "$RunName could not open its disposable disk after five attempts."
 }
 
-if (-not (Test-Path -LiteralPath $QemuExecutable)) { throw "QEMU was not found at $QemuExecutable" }
+    if (-not (Test-Path -LiteralPath $QemuExecutable)) { throw "QEMU was not found at $QemuExecutable" }
+if ($AttemptNumber -lt 1) { throw "AttemptNumber must be positive." }
 $QemuFull = (Resolve-Path -LiteralPath $QemuExecutable).Path
 $OvmfFull = (Resolve-Path -LiteralPath $OvmfCode).Path
 $EspFull = (Resolve-Path -LiteralPath $EspSource).Path
 $repoOut = [IO.Path]::GetFullPath((Join-Path $Root "out"))
-if (-not $WorkDir) { $WorkDir = "out\dm9-qemu-proof-$(Get-Date -Format 'yyyyMMdd-HHmmss')" }
+if (-not $WorkDir) { $WorkDir = "out\dm10-qemu-proof-$(Get-Date -Format 'yyyyMMdd-HHmmss')" }
 $WorkFull = [IO.Path]::GetFullPath((Join-Path $Root $WorkDir))
 if (-not $WorkFull.StartsWith($repoOut + [IO.Path]::DirectorySeparatorChar,
         [StringComparison]::OrdinalIgnoreCase)) {
@@ -191,7 +211,7 @@ if (Test-Path -LiteralPath $WorkFull) {
 
 $DiskPath = Join-Path $WorkFull "secondary-600m.raw"
 $EspPath = Join-Path $WorkFull "esp"
-$manifestPath = Join-Path $WorkFull "dm9-manifest.txt"
+$manifestPath = Join-Path $WorkFull "dm10-manifest.txt"
 $inspectionPath = Join-Path $WorkFull "disk-inspection.txt"
 $activeBoot = $null
 
@@ -206,6 +226,8 @@ try {
 
         $mainObject = Join-Path $Root "kernel\build\amd64\obj\core\main.o"
         if (Test-Path -LiteralPath $mainObject) { Remove-Item -LiteralPath $mainObject -Force }
+        $proofObject = Join-Path $Root "kernel\build\amd64\obj\core\qemu_dm9_storage_proof.o"
+        if (Test-Path -LiteralPath $proofObject) { Remove-Item -LiteralPath $proofObject -Force }
         & $makePath -C (Join-Path $Root "kernel") ARCH=amd64 `
             "EXTRA_CFLAGS=-DGXOS_DM9_QEMU_STORAGE_PROOF" -j4
         if ($LASTEXITCODE -ne 0) { throw "DM9 proof kernel build failed." }
@@ -243,33 +265,48 @@ try {
     $kernelHash = (Get-FileHash -LiteralPath (Join-Path $EspPath "kernel.elf") -Algorithm SHA256).Hash
     $initialHash = (Get-FileHash -LiteralPath $DiskPath -Algorithm SHA256).Hash
     @(
-        "proof=DM9-QEMU-SECONDARY-DISK",
+        "proof=DM10-QEMU-SECONDARY-DISK",
+        "attemptNumber=$AttemptNumber",
+        "timestampUtc=$([DateTime]::UtcNow.ToString('o'))",
         "bootMedium=isolated-ESP-directory-backend",
         "bootloaderSha256=$bootHash",
         "kernelSha256=$kernelHash",
-        "secondaryImage=$([IO.Path]::GetFileName($DiskPath))",
+        "secondaryImage=$DiskPath",
         "secondaryFormat=raw",
         "secondaryCapacityBytes=$((Get-Item -LiteralPath $DiskPath).Length)",
         "secondaryInitialSha256=$initialHash",
+        "secondaryPlacement=IDE-channel0-target1-primary-slave",
+        "bootDevicePlacement=IDE-channel0-target0-primary-master",
+        "secondarySelection=ATA-channel-target-and-QEMU-model-plus-DefinitelyNotBoot; global-index-scanned",
         "physicalHostDisksPassedToQemu=none",
         "qemu=$((& $QemuFull --version | Select-Object -First 1))"
     ) | Set-Content -LiteralPath $manifestPath -Encoding ascii
     @(
-        "identity=GUIDEXOS-DM9-QEMU-PROOF-V1",
+        "identity=GUIDEXOS-DM10-QEMU-PROOF-V1",
         "bootloaderSha256=$bootHash",
         "kernelSha256=$kernelHash",
-        "proofManifest=/dm9-manifest.txt"
+        "proofManifest=/dm10-manifest.txt"
     ) | Set-Content -LiteralPath (Join-Path $EspPath "build-identity.txt") -Encoding ascii
 
     $activeBoot = Start-ProofBoot "first-boot" "[DM9-QEMU] lifecycle=PASS" `
-        $EspPath $DiskPath $WorkFull 300
+        $EspPath $DiskPath $WorkFull 300 $manifestPath $AttemptNumber `
+        -EnableQemuDebug:$QemuDebug
     $firstBootSerialPath = $activeBoot.SerialPath
+    Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
+        "firstBootCommandLine=$($activeBoot.CommandLine)",
+        "firstBootSerial=$firstBootSerialPath"
+    )
     Stop-ProofQemu $activeBoot.Process $activeBoot.Port $activeBoot.SerialPath
     $activeBoot = $null
 
     $activeBoot = Start-ProofBoot "rediscovery-boot" `
-        "[DM9-QEMU] reboot-rediscovery=PASS" $EspPath $DiskPath $WorkFull 180
+        "[DM9-QEMU] reboot-rediscovery=PASS" $EspPath $DiskPath $WorkFull 180 `
+        $manifestPath $AttemptNumber -EnableQemuDebug:$QemuDebug
     $rediscoverySerialPath = $activeBoot.SerialPath
+    Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
+        "rediscoveryCommandLine=$($activeBoot.CommandLine)",
+        "rediscoverySerial=$rediscoverySerialPath"
+    )
     Stop-ProofQemu $activeBoot.Process $activeBoot.Port $activeBoot.SerialPath
     $activeBoot = $null
 
@@ -286,7 +323,9 @@ try {
         "secondaryFinalSha256=$((Get-FileHash -LiteralPath $DiskPath -Algorithm SHA256).Hash)",
         "firstBootSerial=$([IO.Path]::GetFileName($firstBootSerialPath))",
         "rediscoverySerial=$([IO.Path]::GetFileName($rediscoverySerialPath))",
-        "result=PASS tier=2 first-boot-lifecycle-and-restart-rediscovery",
+        "result=PASS tier=2 full-lifecycle-and-restart-rediscovery",
+        "failedStage=none",
+        "writesOccurred=yes",
         "inspection=PASS read-only-GPT-FAT32-independent-verifier"
     ) -Encoding ascii
     Write-Host "DM9 QEMU proof passed. Preserved artifacts: $WorkFull"
@@ -294,6 +333,10 @@ try {
     Write-Host "Inspection report: $inspectionPath"
 } catch {
     $failureText = $_.Exception.Message -replace '[\r\n]+', ' '
+    if ($activeBoot) {
+        Stop-ProofQemu $activeBoot.Process $activeBoot.Port $activeBoot.SerialPath
+        $activeBoot = $null
+    }
     $initialImageHash = "unavailable"
     $finalImageHash = "unavailable"
     if (Test-Path -LiteralPath $manifestPath) {
@@ -309,6 +352,29 @@ try {
         $initialImageHash -eq $finalImageHash
     $serialLogs = Get-ChildItem -LiteralPath $WorkFull -Filter "*.serial.log" -File `
         -ErrorAction SilentlyContinue | ForEach-Object { $_.Name }
+    $failedStage = "unknown"
+    $writesOccurred = -not $imageUnchanged
+    foreach ($serialLog in $serialLogs) {
+        $serialText = Get-Content -LiteralPath (Join-Path $WorkFull $serialLog) `
+            -Raw -ErrorAction SilentlyContinue
+        if ($serialText -match 'firstFailedStage=([^\s]+)') { $failedStage = $Matches[1] }
+        if ($serialText -match '(?:writesCompleted|sectorsWritten)=([0-9A-Fa-f]+)') {
+            $writesOccurred = $writesOccurred -or ([Convert]::ToUInt64($Matches[1], 16) -gt 0)
+        }
+        if ($serialText -match 'writeMayHaveReachedMedia=(yes|no)') {
+            if ($Matches[1] -eq 'yes') { $writesOccurred = $true }
+        }
+    }
+    if (Test-Path -LiteralPath $manifestPath) {
+        Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
+            "secondaryFinalSha256=$finalImageHash",
+            "result=FAIL",
+            "failedStage=$failedStage",
+            "writesOccurred=$($writesOccurred.ToString().ToLowerInvariant())",
+            "writeMayHaveReachedMedia=$($writesOccurred.ToString().ToLowerInvariant())",
+            "failure=$failureText"
+        )
+    }
     @(
         "result=FAIL",
         "detail=$failureText",
@@ -316,6 +382,9 @@ try {
         "finalImageSha256=$finalImageHash",
         "imageUnchanged=$($imageUnchanged.ToString().ToLowerInvariant())",
         "serialLogs=$($serialLogs -join ',')",
+        "failedStage=$failedStage",
+        "writesOccurred=$($writesOccurred.ToString().ToLowerInvariant())",
+        "writeMayHaveReachedMedia=$($writesOccurred.ToString().ToLowerInvariant())",
         "hostPhysicalDiskAttached=no"
     ) | Set-Content -LiteralPath (Join-Path $WorkFull "run-result.txt") -Encoding ascii
     throw

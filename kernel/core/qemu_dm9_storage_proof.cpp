@@ -3,6 +3,7 @@
 #if defined(GXOS_DM9_QEMU_STORAGE_PROOF)
 
 #include "include/kernel/block_device.h"
+#include "include/kernel/ata.h"
 #include "include/kernel/disk_initialization.h"
 #include "include/kernel/disk_manager_model.h"
 #include "include/kernel/fat32_formatter.h"
@@ -75,6 +76,52 @@ static bool bytes_equal(const char* left, const char* right, uint32_t count)
     return true;
 }
 
+static void print_block_io_diagnostic(const block::OperationDiagnostic& io)
+{
+    serial::puts("[DM10-IO] operation=");
+    serial::puts(io.operation == block::OPERATION_WRITE ? "write" :
+        io.operation == block::OPERATION_READ ? "read" :
+        io.operation == block::OPERATION_FLUSH ? "flush" : "none");
+    serial::puts(" globalIndex=");
+    serial::put_hex8(io.globalIndex);
+    serial::puts(" driverIndex=");
+    serial::put_hex8(io.driverIndex);
+    serial::puts(" registrationId=");
+    serial::put_hex64(io.registrationId);
+    serial::puts(" transport=");
+    serial::put_hex8(static_cast<uint8_t>(io.transport));
+    serial::puts(" sectorSize=");
+    serial::put_hex32(io.logicalSectorSize);
+    serial::puts(" lba=");
+    serial::put_hex64(io.requestedLba);
+    serial::puts(" count=");
+    serial::put_hex32(io.requestedSectors);
+    serial::puts(" callback=");
+    serial::puts(io.callbackInvoked ? "yes" : "no");
+    serial::puts(" blockStatus=0x");
+    serial::put_hex8(static_cast<uint8_t>(io.status));
+    if (io.transportDiagnostic.valid) {
+        serial::puts(" ataStage=");
+        serial::puts(ata::ata_operation_stage_name(
+            static_cast<ata::AtaOperationStage>(io.transportDiagnostic.stage)));
+        serial::puts(" ataLba=");
+        serial::put_hex64(io.transportDiagnostic.failingLba);
+        serial::puts(" ataStatus=0x");
+        serial::put_hex8(io.transportDiagnostic.statusRegister);
+        serial::puts(" ataErrorValid=");
+        serial::puts(io.transportDiagnostic.errorRegisterValid ? "yes" : "no");
+        if (io.transportDiagnostic.errorRegisterValid) {
+            serial::puts(" ataError=0x");
+            serial::put_hex8(io.transportDiagnostic.errorRegister);
+        }
+        serial::puts(" completedSectors=");
+        serial::put_hex32(io.transportDiagnostic.completedSectors);
+        serial::puts(" dataSectorsTransferred=");
+        serial::put_hex32(io.transportDiagnostic.dataSectorsTransferred);
+    }
+    serial::putc('\n');
+}
+
 static bool qemu_secondary_target(uint8_t index, block::BlockDevice& out,
                                   storage::TargetIdentity& identity)
 {
@@ -105,8 +152,20 @@ static bool find_qemu_secondary(block::BlockDevice& device,
             : storage::BootProtection{storage::BOOT_DEVICE_IDENTITY_UNKNOWN};
         serial::puts("[DM9-QEMU] ATA candidate name=");
         serial::puts(candidate.name);
+        serial::puts(" globalIndex=");
+        serial::put_hex8(index);
+        serial::puts(" driverIndex=");
+        serial::put_hex8(candidate.driverIndex);
+        serial::puts(" registrationId=");
+        serial::put_hex64(candidate.registrationId);
         serial::puts(" model=");
         serial::puts(candidate.model);
+        serial::puts(" serial=");
+        serial::puts(candidate.serial);
+        serial::puts(" sectors=");
+        serial::put_hex64(candidate.totalSectors);
+        serial::puts(" sectorSize=");
+        serial::put_hex32(candidate.sectorSize);
         serial::puts(" channel=");
         serial::put_hex8(candidate.ataChannel);
         serial::puts(" target=");
@@ -120,6 +179,17 @@ static bool find_qemu_secondary(block::BlockDevice& device,
                 ? "DefinitelyBoot" : "Unknown");
         serial::puts(" flush=");
         serial::puts(candidate.flushFn ? "yes" : "no");
+        const ata::ATADevice* ataDevice = ata::get_device(candidate.driverIndex);
+        if (ataDevice) {
+            serial::puts(" lba48=");
+            serial::puts(ataDevice->lba48 ? "yes" : "no");
+            serial::puts(" identifyWord83=0x");
+            serial::put_hex16(ataDevice->identifyCommandSets83);
+            serial::puts(" flushCache=");
+            serial::puts(ataDevice->flushCache ? "yes" : "no");
+            serial::puts(" flushCacheExt=");
+            serial::puts(ataDevice->flushCacheExt ? "yes" : "no");
+        }
         serial::putc('\n');
         if (qemu_secondary_target(index, device, identity)) return true;
     }
@@ -220,14 +290,24 @@ static bool run_fresh_lifecycle(const block::BlockDevice& device,
     const storage::InitializeDiskStatus prepared =
         storage::prepare_initialize_disk(s_initializeRequest, s_initializePlan,
                                          s_initializeResult);
+    serial::puts("[DM9-QEMU] initialize=prepare-complete status=");
+    serial::puts(storage::initialize_disk_status_name(prepared));
+    serial::puts(" stage=");
+    serial::puts(storage::initialize_disk_stage_name(s_initializeResult.stage));
+    serial::putc('\n');
     if (prepared != storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION) {
         serial::puts("[DM9-QEMU] initialize=BLOCKED status=");
         serial::puts(storage::initialize_disk_status_name(prepared));
         serial::putc('\n');
         return false;
     }
+    serial::puts("[DM10-TRACE] init-preflight=PASS\n");
+    serial::puts("[DM9-QEMU] initialize=execute-start\n");
     const storage::InitializeDiskStatus initialized =
         storage::execute_initialize_disk(s_initializePlan, s_initializeResult);
+    serial::puts("[DM9-QEMU] initialize=execute-complete status=");
+    serial::puts(storage::initialize_disk_status_name(initialized));
+    serial::putc('\n');
     if (initialized != storage::INITIALIZE_DISK_SUCCESS ||
         !s_initializeResult.verificationPassed ||
         s_initializeResult.finalStateUncertain) {
@@ -237,6 +317,10 @@ static bool run_fresh_lifecycle(const block::BlockDevice& device,
         serial::puts(storage::initialize_disk_stage_name(s_initializeResult.stage));
         serial::puts(" writeAttempted=");
         serial::puts(s_initializeResult.writeAttempted ? "yes" : "no");
+        serial::puts(" writesCompleted=");
+        serial::put_hex32(s_initializeResult.writesCompleted);
+        serial::puts(" writeMayHaveReachedMedia=");
+        serial::puts(s_initializeResult.writeMayHaveReachedMedia ? "yes" : "no");
         serial::puts(" writeStages=0x");
         serial::put_hex32(s_initializeResult.writeStagesCompleted);
         serial::puts(" rollbackAttempted=");
@@ -247,15 +331,48 @@ static bool run_fresh_lifecycle(const block::BlockDevice& device,
         serial::puts(s_initializeResult.finalStateUncertain ? "yes" : "no");
         serial::puts(" finalState=");
         serial::puts(storage::disk_state_name(s_initializeResult.finalDetectedState));
-        serial::puts(" flushOutcome=0x");
-        serial::put_hex8(static_cast<uint8_t>(s_initializeResult.flushOutcome));
-        serial::puts(" flushStatus=0x");
-        serial::put_hex8(static_cast<uint8_t>(s_initializeResult.flushStatus));
+        serial::puts(" flushAttempted=");
+        serial::puts(s_initializeResult.flushAttempted ? "yes" : "no");
+        if (s_initializeResult.flushAttempted) {
+            serial::puts(" flushOutcome=0x");
+            serial::put_hex8(static_cast<uint8_t>(s_initializeResult.flushOutcome));
+            serial::puts(" flushStatus=0x");
+            serial::put_hex8(static_cast<uint8_t>(s_initializeResult.flushStatus));
+        }
+        serial::puts(" firstFailedStage=");
+        serial::puts(storage::initialize_disk_stage_name(
+            s_initializeResult.firstFailedStage));
+        serial::puts(" lastStage=");
+        serial::puts(storage::initialize_disk_stage_name(
+            s_initializeResult.lastStage));
+        serial::puts(" failureOutcome=0x");
+        serial::put_hex8(static_cast<uint8_t>(s_initializeResult.failureOutcome));
+        serial::puts(" rollbackStage=");
+        serial::puts(storage::initialize_disk_stage_name(
+            s_initializeResult.rollbackStage));
+        serial::puts(" rollbackWriteAttempted=");
+        serial::puts(s_initializeResult.rollbackWriteAttempted ? "yes" : "no");
+        if (s_initializeResult.rollbackWriteAttempted) {
+            serial::puts(" rollbackWriteStatus=0x");
+            serial::put_hex8(static_cast<uint8_t>(s_initializeResult.rollbackWriteStatus));
+        }
+        serial::puts(" rollbackFlushAttempted=");
+        serial::puts(s_initializeResult.rollbackFlushAttempted ? "yes" : "no");
+        if (s_initializeResult.rollbackFlushAttempted) {
+            serial::puts(" rollbackFlushStatus=0x");
+            serial::put_hex8(static_cast<uint8_t>(s_initializeResult.rollbackFlushStatus));
+        }
+        serial::puts(" rollbackVerified=");
+        serial::puts(!s_initializeResult.rollbackAttempted ? "not-needed" :
+            s_initializeResult.rollbackVerificationPassed ? "yes" : "no");
         serial::puts(" detail=");
         serial::puts(s_initializeResult.diagnostic);
         serial::putc('\n');
+        if (s_initializeResult.failedBlockDiagnosticValid)
+            print_block_io_diagnostic(s_initializeResult.failedBlockDiagnostic);
         return false;
     }
+    serial::puts("[DM10-TRACE] GPT-writes-complete flush-and-verify=PASS\n");
 
     if (!storage::parse_partition_table(identity.globalIndex, s_table) ||
         s_table.state != storage::DISK_STATE_VALID_GPT ||
@@ -286,15 +403,41 @@ static bool run_fresh_lifecycle(const block::BlockDevice& device,
     s_createRequest.expectedRegistryGeneration = block::registry_generation();
 
     s_createResult = {};
+    serial::puts("[DM10-TRACE] create-partition=start\n");
     const storage::CreatePartitionStatus created = storage::create_partition(
         s_createRequest, s_createResult);
     if (created != storage::CREATE_PARTITION_SUCCESS ||
         !s_createResult.verificationPassed || s_createResult.finalStateUncertain) {
         serial::puts("[DM9-QEMU] create-partition=FAIL status=");
         serial::puts(storage::create_partition_status_name(created));
+        serial::puts(" firstFailedStage=");
+        serial::puts(storage::create_partition_stage_name(
+            s_createResult.firstFailedStage));
+        serial::puts(" writesCompleted=");
+        serial::put_hex32(s_createResult.writesCompleted);
+        serial::puts(" writeMayHaveReachedMedia=");
+        serial::puts(s_createResult.writeMayHaveReachedMedia ? "yes" : "no");
+        serial::puts(" flushAttempted=");
+        serial::puts(s_createResult.flushAttempted ? "yes" : "no");
+        if (s_createResult.flushAttempted) {
+            serial::puts(" flushStatus=0x");
+            serial::put_hex8(static_cast<uint8_t>(s_createResult.flushStatus));
+        }
+        serial::puts(" rollbackAttempted=");
+        serial::puts(s_createResult.rollbackAttempted ? "yes" : "no");
+        if (s_createResult.rollbackWriteAttempted) {
+            serial::puts(" rollbackWriteStatus=0x");
+            serial::put_hex8(static_cast<uint8_t>(s_createResult.rollbackWriteStatus));
+        }
+        serial::puts(" rollbackVerified=");
+        serial::puts(!s_createResult.rollbackAttempted ? "not-needed" :
+            s_createResult.rollbackVerificationPassed ? "yes" : "no");
         serial::putc('\n');
+        if (s_createResult.failedBlockDiagnostic.valid)
+            print_block_io_diagnostic(s_createResult.failedBlockDiagnostic);
         return false;
     }
+    serial::puts("[DM10-TRACE] create-partition=PASS\n");
 
     if (!storage::parse_partition_table(identity.globalIndex, s_table) ||
         s_table.state != storage::DISK_STATE_VALID_GPT ||
@@ -315,15 +458,41 @@ static bool run_fresh_lifecycle(const block::BlockDevice& device,
     s_formatRequest.expectedRegistryGeneration = block::registry_generation();
 
     s_formatResult = {};
+    serial::puts("[DM10-TRACE] format-fat32=start\n");
     const storage::Fat32FormatStatus formatted =
         storage::format_fat32_partition(s_formatRequest, s_formatResult);
     if (formatted != storage::FAT32_FORMAT_SUCCESS ||
         !s_formatResult.verificationPassed || s_formatResult.finalStateUncertain) {
         serial::puts("[DM9-QEMU] format-fat32=FAIL status=");
         serial::puts(storage::fat32_format_status_name(formatted));
+        serial::puts(" firstFailedStage=");
+        serial::puts(storage::fat32_format_stage_name(
+            s_formatResult.firstFailedStage));
+        serial::puts(" sectorsWritten=");
+        serial::put_hex32(s_formatResult.sectorsWritten);
+        serial::puts(" writeMayHaveReachedMedia=");
+        serial::puts(s_formatResult.writeMayHaveReachedMedia ? "yes" : "no");
+        serial::puts(" flushAttempted=");
+        serial::puts(s_formatResult.flushAttempted ? "yes" : "no");
+        if (s_formatResult.flushAttempted) {
+            serial::puts(" flushStatus=0x");
+            serial::put_hex8(static_cast<uint8_t>(s_formatResult.flushStatus));
+        }
+        serial::puts(" rollbackAttempted=");
+        serial::puts(s_formatResult.rollbackAttempted ? "yes" : "no");
+        if (s_formatResult.rollbackWriteAttempted) {
+            serial::puts(" rollbackWriteStatus=0x");
+            serial::put_hex8(static_cast<uint8_t>(s_formatResult.rollbackWriteStatus));
+        }
+        serial::puts(" rollbackVerified=");
+        serial::puts(!s_formatResult.rollbackAttempted ? "not-needed" :
+            s_formatResult.rollbackVerificationPassed ? "yes" : "no");
         serial::putc('\n');
+        if (s_formatResult.failedBlockDiagnostic.valid)
+            print_block_io_diagnostic(s_formatResult.failedBlockDiagnostic);
         return false;
     }
+    serial::puts("[DM10-TRACE] format-fat32=PASS\n");
 
     s_proofPartition = {};
     bool partitionFound = false;
@@ -337,8 +506,12 @@ static bool run_fresh_lifecycle(const block::BlockDevice& device,
     }
     if (!partitionFound) return false;
 
+    serial::puts("[DM10-TRACE] mount-file-roundtrip=start\n");
     const bool mountAndFileIo = mount_proof_partition(identity,
         s_proofPartition, true, rootMountCount);
+    serial::puts(mountAndFileIo
+        ? "[DM10-TRACE] mount-file-unmount-remount-persistent-read=PASS\n"
+        : "[DM10-TRACE] mount-file-unmount-remount-persistent-read=FAIL\n");
     serial::puts(mountAndFileIo
         ? "[DM9-QEMU] lifecycle=PASS initialize=PASS create-partition=PASS format-fat32=PASS mount=PASS mkdir=PASS file-write=PASS file-read=PASS unmount=PASS remount-read=PASS mounts-clean=PASS\n"
         : "[DM9-QEMU] lifecycle=FAIL mount-or-file-operation-failed\n");
@@ -371,6 +544,7 @@ void run(bool rootStorageMounted)
     serial::puts(" sectors=");
     serial::put_hex64(device.totalSectors);
     serial::puts(" boot=DefinitelyNotBoot\n");
+    serial::puts("[DM10-TRACE] secondary-disk-detected boot-provenance=DefinitelyNotBoot\n");
 
     serial::puts("[DM9-QEMU] target-table-parse=start\n");
     if (!storage::parse_partition_table(identity.globalIndex, s_table)) {

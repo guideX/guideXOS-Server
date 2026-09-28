@@ -1319,6 +1319,7 @@ private:
     storage::CreatePartitionResult m_createResult;
     storage::Fat32FormatRequest m_formatRequest;
     storage::Fat32FormatResult m_formatResult;
+    uint8_t m_lastStorageOperation;
     bool m_mountDialogOpen;
     uint8_t m_mountDialogDeviceIndex;
     uint64_t m_mountDialogRegistrationId;

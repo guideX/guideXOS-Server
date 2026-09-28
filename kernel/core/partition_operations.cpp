@@ -140,10 +140,35 @@ static void reset_result(CreatePartitionResult& result)
 {
     clear_bytes(&result, sizeof(result));
     result.status = CREATE_PARTITION_INVALID_REQUEST;
+    result.failureStatus = CREATE_PARTITION_INVALID_REQUEST;
+    result.failedBeforeWrite = true;
     result.stage = CREATE_PARTITION_STAGE_IDLE;
     result.flushOutcome = block::FLUSH_OUTCOME_INVALID;
-    result.flushStatus = block::BLOCK_ERR_UNSUPPORTED;
+    result.flushStatus = block::BLOCK_ERR_INVALID;
+    result.rollbackWriteStatus = block::BLOCK_ERR_INVALID;
+    result.rollbackFlushOutcome = block::FLUSH_OUTCOME_INVALID;
+    result.rollbackFlushStatus = block::BLOCK_ERR_INVALID;
     result.finalDetectedState = DISK_STATE_UNREADABLE;
+}
+
+static void mark_create_failed_stage(CreatePartitionResult& result)
+{
+    result.lastStage = result.stage;
+    if (result.firstFailedStage == CREATE_PARTITION_STAGE_IDLE)
+        result.firstFailedStage = result.stage;
+    result.failureStatus = result.status;
+    result.failedBeforeWrite = !result.writeMayHaveReachedMedia;
+    result.stage = CREATE_PARTITION_STAGE_FAILED;
+}
+
+static bool capture_current_io_result(CreatePartitionResult& result)
+{
+    if (!block::last_operation_diagnostic(result.failedBlockDiagnostic))
+        return false;
+    result.blockStatusValid = true;
+    result.blockStatus = result.failedBlockDiagnostic.status;
+    result.failedOperation = result.failedBlockDiagnostic.operation;
+    return true;
 }
 
 static CreatePartitionStatus map_identity(RevalidationStatus status)
@@ -693,28 +718,45 @@ static bool write_one(const TargetIdentity& target, uint64_t lba,
                       const uint8_t* source, uint32_t sectorSize,
                       CreatePartitionResult& result)
 {
+    result.lastStage = result.stage;
     const RevalidationStatus identity = revalidate_target_identity(target);
     if (identity != TARGET_VALID) {
         result.status = map_identity(identity);
         return false;
     }
     copy_bytes(s_ioSector, source, sectorSize);
-    result.writeAttempted = true;
-    if (write_sectors_safe(target.globalIndex, lba, 1, s_ioSector,
-                           sectorSize) != block::BLOCK_OK) {
+    const block::Status status = write_sectors_safe(target.globalIndex,
+        lba, 1, s_ioSector, sectorSize);
+    if (status != block::BLOCK_OK) {
+        const bool haveIo = capture_current_io_result(result);
+        result.writeAttempted = haveIo &&
+            result.failedBlockDiagnostic.callbackInvoked;
+        result.firstFailedStage = result.firstFailedStage == CREATE_PARTITION_STAGE_IDLE
+            ? result.stage : result.firstFailedStage;
+        result.writeMayHaveReachedMedia = result.writeAttempted &&
+            (!result.failedBlockDiagnostic.transportDiagnostic.valid ||
+             result.failedBlockDiagnostic.transportDiagnostic.dataSectorsTransferred != 0);
+        result.failedBeforeWrite = !result.writeMayHaveReachedMedia;
         result.status = CREATE_PARTITION_IO_FAILED;
         return false;
     }
+    result.writeAttempted = true;
+    result.failedOperation = block::OPERATION_NONE;
+    result.writeMayHaveReachedMedia = true;
+    result.failedBeforeWrite = false;
+    ++result.writesCompleted;
     return true;
 }
 
 static bool write_region(const TargetIdentity& target, uint64_t lba,
                          uint32_t sectors, uint32_t sectorSize,
                          const uint8_t* source,
+                         CreatePartitionStage stage,
                          CreatePartitionWriteStage completedStage,
                          CreatePartitionResult& result)
 {
     for (uint32_t i = 0; i < sectors; ++i) {
+        result.stage = stage;
         if (!write_one(target, lba + i,
                 source + static_cast<size_t>(i) * sectorSize,
                 sectorSize, result)) return false;
@@ -745,16 +787,17 @@ static bool write_gpt(const TargetIdentity& target,
                       uint32_t sectorSize,
                       CreatePartitionResult& result)
 {
-    result.stage = CREATE_PARTITION_STAGE_WRITING_GPT;
     if (!write_region(target, layout.backupArrayLba, layout.arraySectors,
-            sectorSize, s_newArray, CREATE_PARTITION_WRITE_BACKUP_ARRAY,
-            result) ||
+            sectorSize, s_newArray, CREATE_PARTITION_STAGE_WRITE_BACKUP_GPT,
+            CREATE_PARTITION_WRITE_BACKUP_ARRAY, result) ||
         !write_region(target, target.totalLogicalSectors - 1, 1, sectorSize,
-            s_backupHeader, CREATE_PARTITION_WRITE_BACKUP_HEADER, result) ||
+            s_backupHeader, CREATE_PARTITION_STAGE_WRITE_BACKUP_GPT,
+            CREATE_PARTITION_WRITE_BACKUP_HEADER, result) ||
         !write_region(target, layout.primaryArrayLba, layout.arraySectors,
-            sectorSize, s_newArray, CREATE_PARTITION_WRITE_PRIMARY_ARRAY,
-            result) ||
+            sectorSize, s_newArray, CREATE_PARTITION_STAGE_WRITE_PRIMARY_GPT,
+            CREATE_PARTITION_WRITE_PRIMARY_ARRAY, result) ||
         !write_region(target, 1, 1, sectorSize, s_primaryHeader,
+            CREATE_PARTITION_STAGE_WRITE_PRIMARY_GPT,
             CREATE_PARTITION_WRITE_PRIMARY_HEADER, result)) return false;
     return true;
 }
@@ -765,11 +808,11 @@ static bool write_mbr(const TargetIdentity& target,
                       uint32_t sectorSize,
                       CreatePartitionResult& result)
 {
-    result.stage = CREATE_PARTITION_STAGE_WRITING_MBR;
     modify_mbr_entry(layout, startLba, sectorCount, sectorSize);
     // write_region stages each sector through s_ioSector, so preserve this
     // single-sector candidate in a separate aligned buffer.
     const bool ok = write_region(target, 0, 1, sectorSize, s_mbrCandidate,
+        CREATE_PARTITION_STAGE_WRITING_MBR,
         CREATE_PARTITION_WRITE_MBR_ENTRY, result);
     return ok;
 }
@@ -924,14 +967,18 @@ static bool verify_mbr_bytes(const TargetIdentity& target,
 
 static bool restore_region(const TargetIdentity& target, uint64_t lba,
                            uint32_t sectors, uint32_t sectorSize,
-                           const uint8_t* snapshot)
+                           const uint8_t* snapshot,
+                           CreatePartitionResult& result)
 {
     for (uint32_t i = 0; i < sectors; ++i) {
+        result.rollbackStage = CREATE_PARTITION_STAGE_ROLLBACK_WRITE;
         if (revalidate_target_identity(target) != TARGET_VALID) return false;
         copy_bytes(s_ioSector,
             snapshot + static_cast<size_t>(i) * sectorSize, sectorSize);
-        if (write_sectors_safe(target.globalIndex, lba + i, 1, s_ioSector,
-                               sectorSize) != block::BLOCK_OK) return false;
+        result.rollbackWriteAttempted = true;
+        result.rollbackWriteStatus = write_sectors_safe(
+            target.globalIndex, lba + i, 1, s_ioSector, sectorSize);
+        if (result.rollbackWriteStatus != block::BLOCK_OK) return false;
     }
     return true;
 }
@@ -939,7 +986,7 @@ static bool restore_region(const TargetIdentity& target, uint64_t lba,
 static bool restore_snapshot(const TargetIdentity& target,
                              CreatePartitionResult& result)
 {
-    if (!result.writeAttempted || !s_snapshot.valid ||
+    if (!result.writeMayHaveReachedMedia || !s_snapshot.valid ||
         revalidate_target_identity(target) != TARGET_VALID) return false;
     DeviceCapabilities caps;
     if (!query_device_capabilities(target.globalIndex, caps) ||
@@ -950,24 +997,29 @@ static bool restore_snapshot(const TargetIdentity& target,
     bool restored = true;
     if (s_snapshot.isGpt) {
         restored = restore_region(target, 1, 1, s_snapshot.sectorSize,
-                                  s_snapshot.primaryHeader) && restored;
+                                  s_snapshot.primaryHeader, result) && restored;
         restored = restore_region(target,
             target.totalLogicalSectors - 1, 1, s_snapshot.sectorSize,
-            s_snapshot.backupHeader) && restored;
+            s_snapshot.backupHeader, result) && restored;
         restored = restore_region(target, s_snapshot.primaryArrayLba,
             s_snapshot.arraySectors, s_snapshot.sectorSize,
-            s_snapshot.primaryArray) && restored;
+            s_snapshot.primaryArray, result) && restored;
         restored = restore_region(target, s_snapshot.backupArrayLba,
             s_snapshot.arraySectors, s_snapshot.sectorSize,
-            s_snapshot.backupArray) && restored;
+            s_snapshot.backupArray, result) && restored;
     } else {
         restored = restore_region(target, 0, 1, s_snapshot.sectorSize,
-                                  s_snapshot.mbr) && restored;
+                                  s_snapshot.mbr, result) && restored;
     }
     if (!restored || revalidate_target_identity(target) != TARGET_VALID)
         return false;
+    result.rollbackStage = CREATE_PARTITION_STAGE_ROLLBACK_FLUSH;
+    result.rollbackFlushAttempted = true;
     const block::FlushReport flush = block::flush_with_result(target.globalIndex);
+    result.rollbackFlushOutcome = flush.outcome;
+    result.rollbackFlushStatus = flush.status;
     if (!trusted_flush(flush)) return false;
+    result.rollbackStage = CREATE_PARTITION_STAGE_ROLLBACK_VERIFY;
     if (!snapshot_matches(target, caps)) return false;
     if (!parse_partition_table(target.globalIndex, s_verifiedTable) ||
         !old_entries_unchanged(s_originalTable, s_verifiedTable) ||
@@ -976,6 +1028,7 @@ static bool restore_snapshot(const TargetIdentity& target,
         return false;
     result.finalDetectedState = s_verifiedTable.state;
     result.finalPartitionCount = s_verifiedTable.partitionCount;
+    result.rollbackVerificationPassed = true;
     return true;
 }
 
@@ -985,10 +1038,15 @@ static void finish_failure(StorageOperationLease& lease,
                            CreatePartitionResult& result,
                            CreatePartitionStatus status)
 {
+    result.lastStage = result.stage;
+    if (result.firstFailedStage == CREATE_PARTITION_STAGE_IDLE)
+        result.firstFailedStage = result.lastStage;
+    result.failureStatus = status;
     result.status = status;
-    result.stage = CREATE_PARTITION_STAGE_FAILED;
+    mark_create_failed_stage(result);
     set_diagnostic(result, create_partition_status_name(status));
-    if (result.writeAttempted) {
+    result.failedBeforeWrite = !result.writeMayHaveReachedMedia;
+    if (result.writeMayHaveReachedMedia) {
         result.rollbackSucceeded = restore_snapshot(target, result);
         if (!result.rollbackSucceeded) {
             result.finalStateUncertain = true;
@@ -999,14 +1057,14 @@ static void finish_failure(StorageOperationLease& lease,
         }
     }
     if (revalidate_target_identity(target) != TARGET_VALID) {
-        if (result.writeAttempted) {
+        if (result.writeMayHaveReachedMedia) {
             result.finalStateUncertain = true;
             result.status = CREATE_PARTITION_ROLLBACK_FAILED;
             result.stage = CREATE_PARTITION_STAGE_STATE_UNCERTAIN;
             set_diagnostic(result,
                 "Disk identity changed during creation; state is uncertain. Refresh and inspect the disk.");
         }
-    } else if (result.writeAttempted && !result.rollbackSucceeded) {
+    } else if (result.writeMayHaveReachedMedia && !result.rollbackSucceeded) {
         if (parse_partition_table(target.globalIndex, s_verifiedTable)) {
             result.finalDetectedState = s_verifiedTable.state;
             result.finalPartitionCount = s_verifiedTable.partitionCount;
@@ -1088,7 +1146,7 @@ CreatePartitionStatus create_partition(const CreatePartitionRequest& request,
          request.requestedScheme != PARTITION_SCHEME_MBR) ||
         (!request.useMaximumSize && request.requestedSizeBytes == 0)) {
         result.status = CREATE_PARTITION_INVALID_REQUEST;
-        result.stage = CREATE_PARTITION_STAGE_FAILED;
+        mark_create_failed_stage(result);
         set_diagnostic(result, create_partition_status_name(result.status));
         return result.status;
     }
@@ -1097,7 +1155,7 @@ CreatePartitionStatus create_partition(const CreatePartitionRequest& request,
         (request.requestedScheme == PARTITION_SCHEME_MBR &&
          request.partitionType != CREATE_PARTITION_MBR_FAT32_LBA)) {
         result.status = CREATE_PARTITION_UNSUPPORTED_TYPE;
-        result.stage = CREATE_PARTITION_STAGE_FAILED;
+        mark_create_failed_stage(result);
         set_diagnostic(result, create_partition_status_name(result.status));
         return result.status;
     }
@@ -1108,27 +1166,28 @@ CreatePartitionStatus create_partition(const CreatePartitionRequest& request,
         result.status = lock == STORAGE_OPERATION_LOCK_BUSY
             ? CREATE_PARTITION_OPERATION_BUSY
             : CREATE_PARTITION_OPERATION_OWNERSHIP_INVALID;
-        result.stage = CREATE_PARTITION_STAGE_FAILED;
+        mark_create_failed_stage(result);
         set_diagnostic(result, create_partition_status_name(result.status));
         return result.status;
     }
+    result.stage = CREATE_PARTITION_STAGE_PIN_TARGET;
     if (!pin_storage_operation_target(lease, request.targetSnapshot)) {
         result.status = map_identity(revalidate_target_identity(request.targetSnapshot));
         if (result.status == CREATE_PARTITION_SUCCESS)
             result.status = CREATE_PARTITION_IDENTITY_CHANGED;
-        result.stage = CREATE_PARTITION_STAGE_FAILED;
+        mark_create_failed_stage(result);
         set_diagnostic(result, create_partition_status_name(result.status));
         release_storage_operation(lease);
         return result.status;
     }
 
     ValidatedTarget layout;
-    result.stage = CREATE_PARTITION_STAGE_REVALIDATING_FREE_SPACE;
+    result.stage = CREATE_PARTITION_STAGE_PREFLIGHT;
     CreatePartitionStatus status = validate_target(request.targetSnapshot,
         request.requestedScheme, request.selectedRegion, lease, layout);
     if (status != CREATE_PARTITION_READY) {
         result.status = status;
-        result.stage = CREATE_PARTITION_STAGE_FAILED;
+        mark_create_failed_stage(result);
         set_diagnostic(result, create_partition_status_name(status));
         release_storage_operation(lease);
         return status;
@@ -1138,7 +1197,7 @@ CreatePartitionStatus create_partition(const CreatePartitionRequest& request,
     DeviceCapabilities caps;
     if (!query_device_capabilities(request.targetSnapshot.globalIndex, caps)) {
         result.status = CREATE_PARTITION_DEVICE_MISSING;
-        result.stage = CREATE_PARTITION_STAGE_FAILED;
+        mark_create_failed_stage(result);
         set_diagnostic(result, create_partition_status_name(result.status));
         release_storage_operation(lease);
         return result.status;
@@ -1152,7 +1211,7 @@ CreatePartitionStatus create_partition(const CreatePartitionRequest& request,
             : (request.useMaximumSize ? CREATE_PARTITION_TOO_SMALL
                                       : CREATE_PARTITION_TOO_LARGE);
         result.status = status;
-        result.stage = CREATE_PARTITION_STAGE_FAILED;
+        mark_create_failed_stage(result);
         set_diagnostic(result, create_partition_status_name(status));
         release_storage_operation(lease);
         return status;
@@ -1161,7 +1220,7 @@ CreatePartitionStatus create_partition(const CreatePartitionRequest& request,
         (layout.probe.firstAlignedLba > 0xFFFFFFFFull ||
          sectorCount > 0xFFFFFFFFull || endLba > 0xFFFFFFFFull)) {
         result.status = CREATE_PARTITION_TOO_LARGE;
-        result.stage = CREATE_PARTITION_STAGE_FAILED;
+        mark_create_failed_stage(result);
         set_diagnostic(result, create_partition_status_name(result.status));
         release_storage_operation(lease);
         return result.status;
@@ -1180,10 +1239,13 @@ CreatePartitionStatus create_partition(const CreatePartitionRequest& request,
         copy_bytes(result.createdPartition.typeGuid, GPT_TYPE_BASIC_DATA_GUID, 16);
 
     s_originalTable = s_currentTable;
-    result.stage = CREATE_PARTITION_STAGE_SNAPSHOTTING;
+    result.stage = CREATE_PARTITION_STAGE_SNAPSHOT_TABLE;
+    result.lastStage = result.stage;
     if (!capture_snapshot(request.targetSnapshot, caps, layout)) {
+        (void)capture_current_io_result(result);
+        result.firstFailedStage = result.stage;
         result.status = CREATE_PARTITION_READ_UNAVAILABLE;
-        result.stage = CREATE_PARTITION_STAGE_FAILED;
+        mark_create_failed_stage(result);
         set_diagnostic(result, create_partition_status_name(result.status));
         release_storage_operation(lease);
         clear_bytes(&s_snapshot, sizeof(s_snapshot));
@@ -1191,6 +1253,8 @@ CreatePartitionStatus create_partition(const CreatePartitionRequest& request,
     }
 
     uint8_t newGuid[16] = {};
+    result.stage = CREATE_PARTITION_STAGE_PREPARE_METADATA;
+    result.lastStage = result.stage;
     if (request.requestedScheme == PARTITION_SCHEME_GPT) {
         bool unique = false;
         for (uint8_t attempt = 0; attempt < 8 && !unique; ++attempt) {
@@ -1203,7 +1267,7 @@ CreatePartitionStatus create_partition(const CreatePartitionRequest& request,
         }
         if (bytes_zero(newGuid, sizeof(newGuid))) {
             result.status = CREATE_PARTITION_GUID_UNAVAILABLE;
-            result.stage = CREATE_PARTITION_STAGE_FAILED;
+            mark_create_failed_stage(result);
             set_diagnostic(result, create_partition_status_name(result.status));
             release_storage_operation(lease);
             clear_bytes(&s_snapshot, sizeof(s_snapshot));
@@ -1211,7 +1275,7 @@ CreatePartitionStatus create_partition(const CreatePartitionRequest& request,
         }
         if (!unique) {
             result.status = CREATE_PARTITION_GUID_COLLISION;
-            result.stage = CREATE_PARTITION_STAGE_FAILED;
+            mark_create_failed_stage(result);
             set_diagnostic(result, create_partition_status_name(result.status));
             release_storage_operation(lease);
             clear_bytes(&s_snapshot, sizeof(s_snapshot));
@@ -1221,7 +1285,7 @@ CreatePartitionStatus create_partition(const CreatePartitionRequest& request,
         if (!modify_gpt_entry(request, layout,
                 layout.probe.firstAlignedLba, endLba, newGuid)) {
             result.status = CREATE_PARTITION_INVALID_TABLE;
-            result.stage = CREATE_PARTITION_STAGE_FAILED;
+            mark_create_failed_stage(result);
             set_diagnostic(result, create_partition_status_name(result.status));
             release_storage_operation(lease);
             clear_bytes(&s_snapshot, sizeof(s_snapshot));
@@ -1231,7 +1295,7 @@ CreatePartitionStatus create_partition(const CreatePartitionRequest& request,
 
     if (!begin_storage_operation_execution(lease)) {
         result.status = CREATE_PARTITION_OPERATION_OWNERSHIP_INVALID;
-        result.stage = CREATE_PARTITION_STAGE_FAILED;
+        mark_create_failed_stage(result);
         set_diagnostic(result, create_partition_status_name(result.status));
         release_storage_operation(lease);
         clear_bytes(&s_snapshot, sizeof(s_snapshot));
@@ -1239,6 +1303,7 @@ CreatePartitionStatus create_partition(const CreatePartitionRequest& request,
     }
     bool executionStarted = true;
     result.stage = CREATE_PARTITION_STAGE_REVALIDATING_FREE_SPACE;
+    result.lastStage = result.stage;
     ValidatedTarget finalLayout;
     status = validate_target(request.targetSnapshot, request.requestedScheme,
         request.selectedRegion, lease, finalLayout);
@@ -1268,11 +1333,17 @@ CreatePartitionStatus create_partition(const CreatePartitionRequest& request,
             result, CREATE_PARTITION_GPT_DEGRADED);
         return result.status;
     }
+    result.stage = CREATE_PARTITION_STAGE_FLUSH;
+    result.lastStage = result.stage;
+    result.flushAttempted = true;
+    ++result.flushAttempts;
     const block::FlushReport preWriteFlush =
         block::flush_with_result(request.targetSnapshot.globalIndex);
+    result.flushOutcome = preWriteFlush.outcome;
+    result.flushStatus = preWriteFlush.status;
     if (!trusted_flush(preWriteFlush)) {
-        result.flushOutcome = preWriteFlush.outcome;
-        result.flushStatus = preWriteFlush.status;
+        result.failedOperation = block::OPERATION_FLUSH;
+        (void)capture_current_io_result(result);
         finish_failure(lease, executionStarted, request.targetSnapshot,
             result, CREATE_PARTITION_FLUSH_FAILED);
         return result.status;
@@ -1300,18 +1371,24 @@ CreatePartitionStatus create_partition(const CreatePartitionRequest& request,
         return result.status;
     }
 
-    result.stage = CREATE_PARTITION_STAGE_FLUSHING;
+    result.stage = CREATE_PARTITION_STAGE_FLUSH;
+    result.lastStage = result.stage;
+    result.flushAttempted = true;
+    ++result.flushAttempts;
     const block::FlushReport writeFlush =
         block::flush_with_result(request.targetSnapshot.globalIndex);
     result.flushOutcome = writeFlush.outcome;
     result.flushStatus = writeFlush.status;
     if (!trusted_flush(writeFlush)) {
+        result.failedOperation = block::OPERATION_FLUSH;
+        (void)capture_current_io_result(result);
         finish_failure(lease, executionStarted, request.targetSnapshot,
             result, CREATE_PARTITION_FLUSH_FAILED);
         return result.status;
     }
 
-    result.stage = CREATE_PARTITION_STAGE_VERIFYING;
+    result.stage = CREATE_PARTITION_STAGE_VERIFY;
+    result.lastStage = result.stage;
     if (!locate_created(request, layout, layout.probe.firstAlignedLba,
             endLba, newGuid, s_verifiedTable, result.createdPartition)) {
         finish_failure(lease, executionStarted, request.targetSnapshot,
@@ -1333,7 +1410,8 @@ CreatePartitionStatus create_partition(const CreatePartitionRequest& request,
     }
     result.verificationPassed = true;
 
-    result.stage = CREATE_PARTITION_STAGE_RESCANNING;
+    result.stage = CREATE_PARTITION_STAGE_RESCAN;
+    result.lastStage = result.stage;
     if (!parse_partition_table(request.targetSnapshot.globalIndex,
                                s_currentTable) ||
         s_currentTable.state != (request.requestedScheme == PARTITION_SCHEME_GPT
@@ -1349,7 +1427,10 @@ CreatePartitionStatus create_partition(const CreatePartitionRequest& request,
     result.finalDetectedState = s_currentTable.state;
     result.finalPartitionCount = s_currentTable.partitionCount;
     result.status = CREATE_PARTITION_SUCCESS;
+    result.failureStatus = CREATE_PARTITION_SUCCESS;
     result.stage = CREATE_PARTITION_STAGE_COMPLETED;
+    result.lastStage = CREATE_PARTITION_STAGE_COMPLETED;
+    result.failedBeforeWrite = false;
     set_diagnostic(result,
         "Partition created and verified. It remains unformatted and unmounted.");
     complete_storage_operation_execution(lease);
@@ -1405,9 +1486,22 @@ const char* create_partition_status_name(CreatePartitionStatus status)
 const char* create_partition_stage_name(CreatePartitionStage stage)
 {
     switch (stage) {
+        case CREATE_PARTITION_STAGE_ACQUIRE_LEASE: return "AcquireLease";
+        case CREATE_PARTITION_STAGE_PIN_TARGET: return "PinTarget";
+        case CREATE_PARTITION_STAGE_PREFLIGHT: return "Preflight";
         case CREATE_PARTITION_STAGE_VALIDATING: return "Validating";
         case CREATE_PARTITION_STAGE_REVALIDATING_FREE_SPACE: return "Revalidating free space";
+        case CREATE_PARTITION_STAGE_SNAPSHOT_TABLE: return "SnapshotTable";
         case CREATE_PARTITION_STAGE_SNAPSHOTTING: return "Snapshotting metadata";
+        case CREATE_PARTITION_STAGE_PREPARE_METADATA: return "PrepareMetadata";
+        case CREATE_PARTITION_STAGE_WRITE_BACKUP_GPT: return "WriteBackupGPT";
+        case CREATE_PARTITION_STAGE_WRITE_PRIMARY_GPT: return "WritePrimaryGPT";
+        case CREATE_PARTITION_STAGE_FLUSH: return "Flush";
+        case CREATE_PARTITION_STAGE_VERIFY: return "Verify";
+        case CREATE_PARTITION_STAGE_RESCAN: return "Rescan";
+        case CREATE_PARTITION_STAGE_ROLLBACK_WRITE: return "RollbackWrite";
+        case CREATE_PARTITION_STAGE_ROLLBACK_FLUSH: return "RollbackFlush";
+        case CREATE_PARTITION_STAGE_ROLLBACK_VERIFY: return "RollbackVerify";
         case CREATE_PARTITION_STAGE_WRITING_GPT:
         case CREATE_PARTITION_STAGE_WRITING_MBR: return "Writing partition table";
         case CREATE_PARTITION_STAGE_FLUSHING: return "Flushing";

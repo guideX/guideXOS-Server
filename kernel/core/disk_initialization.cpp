@@ -165,9 +165,14 @@ static void reset_result(InitializeDiskResult& result)
 {
     clear_bytes(&result, sizeof(result));
     result.status = INITIALIZE_DISK_INVALID_REQUEST;
+    result.failureStatus = INITIALIZE_DISK_INVALID_REQUEST;
+    result.failedBeforeWrite = true;
     result.stage = INITIALIZE_STAGE_IDLE;
     result.flushOutcome = block::FLUSH_OUTCOME_INVALID;
-    result.flushStatus = block::BLOCK_ERR_UNSUPPORTED;
+    result.flushStatus = block::BLOCK_ERR_INVALID;
+    result.rollbackWriteStatus = block::BLOCK_ERR_INVALID;
+    result.rollbackFlushOutcome = block::FLUSH_OUTCOME_INVALID;
+    result.rollbackFlushStatus = block::BLOCK_ERR_INVALID;
     result.finalDetectedState = DISK_STATE_UNREADABLE;
 }
 
@@ -178,6 +183,22 @@ static void reset_validation(InitializeTargetValidation& validation)
     validation.detectedState = DISK_STATE_UNREADABLE;
     validation.mountSafety = DEVICE_IDENTITY_UNKNOWN;
     validation.bootSafety = BOOT_DEVICE_IDENTITY_UNKNOWN;
+}
+
+static void mark_failure(InitializeDiskResult& result,
+                         InitializeDiskStatus status,
+                         InitializeOperation operation)
+{
+    result.lastStage = result.stage;
+    if (result.firstFailedStage == INITIALIZE_STAGE_IDLE)
+        result.firstFailedStage = result.lastStage;
+    result.failureStatus = status;
+    result.status = status;
+    result.failedOperation = operation;
+    result.failedBeforeWrite = !result.writeMayHaveReachedMedia;
+    if (result.failedBeforeWrite)
+        result.failureOutcome = INITIALIZE_OUTCOME_FAILED_BEFORE_WRITE;
+    result.stage = INITIALIZE_STAGE_FAILED;
 }
 
 static InitializeDiskStatus map_identity_status(RevalidationStatus status)
@@ -463,34 +484,91 @@ static bool revalidate_before_io(const InitializeDiskPlan& plan,
     return true;
 }
 
-static block::Status write_one(const InitializeDiskPlan& plan, uint64_t lba,
-                               const uint8_t* source, bool& attempted,
-                               InitializeDiskStatus& failure)
+static void capture_failed_block_diagnostic(InitializeDiskResult& result)
 {
-    if (!revalidate_before_io(plan, failure)) return block::BLOCK_ERR_INVALID;
+    result.failedBlockDiagnosticValid =
+        block::last_operation_diagnostic(result.failedBlockDiagnostic);
+    if (!result.failedBlockDiagnosticValid) return;
+    const block::OperationDiagnostic& io = result.failedBlockDiagnostic;
+    result.blockStatusValid = true;
+    result.blockStatus = io.status;
+    result.lastOperation = io.operation == block::OPERATION_READ
+        ? INITIALIZE_OPERATION_READ
+        : io.operation == block::OPERATION_WRITE
+            ? INITIALIZE_OPERATION_WRITE
+            : io.operation == block::OPERATION_FLUSH
+                ? INITIALIZE_OPERATION_FLUSH : INITIALIZE_OPERATION_NONE;
+}
+
+static block::Status write_one(const InitializeDiskPlan& plan, uint64_t lba,
+                               const uint8_t* source,
+                               InitializeDiskStage stage,
+                               InitializeDiskResult& result)
+{
+    result.lastStage = stage;
+    result.lastOperation = INITIALIZE_OPERATION_WRITE;
+    InitializeDiskStatus failure = INITIALIZE_DISK_SUCCESS;
+    if (!revalidate_before_io(plan, failure)) {
+        result.status = failure;
+        result.failureStatus = failure;
+        result.firstFailedStage = result.firstFailedStage == INITIALIZE_STAGE_IDLE
+            ? stage : result.firstFailedStage;
+        result.failedOperation = INITIALIZE_OPERATION_NONE;
+        return block::BLOCK_ERR_INVALID;
+    }
     copy_bytes(s_ioSector, source, plan.logicalSectorSize);
-    attempted = true;
+    result.writeAttempted = true;
     const block::Status status = write_sectors_safe(
         plan.targetSnapshot.globalIndex, lba, 1, s_ioSector,
         plan.logicalSectorSize);
-    if (status != block::BLOCK_OK && failure == INITIALIZE_DISK_SUCCESS)
-        failure = INITIALIZE_DISK_IO_FAILED;
+    if (status == block::BLOCK_OK) {
+        ++result.writesCompleted;
+        result.writeMayHaveReachedMedia = true;
+        return status;
+    }
+    capture_failed_block_diagnostic(result);
+    result.writeAttempted = result.failedBlockDiagnosticValid &&
+        result.failedBlockDiagnostic.callbackInvoked;
+    result.blockStatusValid = result.failedBlockDiagnosticValid;
+    result.blockStatus = status;
+    result.failedOperation = result.writeAttempted
+        ? INITIALIZE_OPERATION_WRITE : INITIALIZE_OPERATION_NONE;
+    result.firstFailedStage = result.firstFailedStage == INITIALIZE_STAGE_IDLE
+        ? stage : result.firstFailedStage;
+    // ATA reports whether data words reached the device even if the command
+    // failed before its completion status. Other transports do not expose
+    // that boundary, so conservatively assume their failed callback may have
+    // changed media.
+    if (!result.writeAttempted) {
+        result.writeMayHaveReachedMedia = false;
+    } else if (result.failedBlockDiagnosticValid &&
+        result.failedBlockDiagnostic.transportDiagnostic.valid) {
+        result.writeMayHaveReachedMedia =
+            result.failedBlockDiagnostic.transportDiagnostic.dataSectorsTransferred != 0;
+    } else {
+        result.writeMayHaveReachedMedia = true;
+    }
     return status;
 }
 
 static bool write_region(const InitializeDiskPlan& plan, uint64_t lba,
                          uint32_t sectors, const uint8_t* source,
-                         uint32_t completedStage, InitializeDiskResult& result)
+                         InitializeDiskStage stage, uint32_t completedStage,
+                         InitializeDiskResult& result)
 {
     for (uint32_t i = 0; i < sectors; ++i) {
-        InitializeDiskStatus failure = INITIALIZE_DISK_SUCCESS;
+        result.stage = stage;
+        result.lastStage = stage;
         const uint8_t* sector = source + static_cast<size_t>(i) *
                                 plan.logicalSectorSize;
         const block::Status status = write_one(plan, lba + i, sector,
-                                               result.writeAttempted, failure);
+                                               stage, result);
         if (status != block::BLOCK_OK) {
-            result.status = failure;
-            result.stage = INITIALIZE_STAGE_FAILED;
+            if (result.failedOperation != INITIALIZE_OPERATION_NONE) {
+                result.status = INITIALIZE_DISK_IO_FAILED;
+                result.failureStatus = result.status;
+            }
+            result.stage = stage;
             return false;
         }
     }
@@ -536,14 +614,19 @@ static bool write_gpt(const InitializeDiskPlan& plan,
     build_protective_mbr(plan);
 
     if (!write_region(plan, backupArrayLba, plan.entryArraySectors,
-                      s_entries, INITIALIZE_WRITE_BACKUP_ARRAY, result) ||
+                      s_entries, INITIALIZE_STAGE_WRITE_BACKUP_ARRAY,
+                      INITIALIZE_WRITE_BACKUP_ARRAY, result) ||
         !write_region(plan, plan.totalLogicalSectors - 1, 1,
-                      s_backupHeader, INITIALIZE_WRITE_BACKUP_HEADER, result) ||
+                      s_backupHeader, INITIALIZE_STAGE_WRITE_BACKUP_HEADER,
+                      INITIALIZE_WRITE_BACKUP_HEADER, result) ||
         !write_region(plan, 2, plan.entryArraySectors,
-                      s_entries, INITIALIZE_WRITE_PRIMARY_ARRAY, result) ||
+                      s_entries, INITIALIZE_STAGE_WRITE_PRIMARY_ARRAY,
+                      INITIALIZE_WRITE_PRIMARY_ARRAY, result) ||
         !write_region(plan, 1, 1, s_primaryHeader,
+                      INITIALIZE_STAGE_WRITE_PRIMARY_HEADER,
                       INITIALIZE_WRITE_PRIMARY_HEADER, result) ||
         !write_region(plan, 0, 1, s_protectiveMbr,
+                      INITIALIZE_STAGE_WRITE_PROTECTIVE_MBR,
                       INITIALIZE_WRITE_PROTECTIVE_MBR, result)) return false;
     return true;
 }
@@ -560,7 +643,8 @@ static bool write_mbr(const InitializeDiskPlan& plan,
     // alignment-safe transport staging buffer.
     copy_bytes(s_protectiveMbr, s_ioSector, plan.logicalSectorSize);
     if (!write_region(plan, 0, 1, s_protectiveMbr,
-                      INITIALIZE_WRITE_MBR, result)) return false;
+                      INITIALIZE_STAGE_WRITE_MBR, INITIALIZE_WRITE_MBR,
+                      result)) return false;
     return true;
 }
 
@@ -572,11 +656,24 @@ static bool flush_is_proven(const block::FlushReport& report)
 }
 
 static bool verify_partition_state(const InitializeDiskPlan& plan,
-                                   DiskState& detected)
+                                   DiskState& detected,
+                                   InitializeDiskResult& result,
+                                   bool rescan = false)
 {
+    if (rescan) {
+        result.stage = INITIALIZE_STAGE_RESCAN;
+        result.lastStage = INITIALIZE_STAGE_RESCAN;
+    } else {
+    result.stage = INITIALIZE_STAGE_VERIFY_PRIMARY;
+    result.lastStage = INITIALIZE_STAGE_VERIFY_PRIMARY;
+    }
     if (!parse_partition_table(plan.targetSnapshot.globalIndex, s_parseScratch)) {
         detected = DISK_STATE_UNREADABLE;
         return false;
+    }
+    if (!rescan) {
+        result.stage = INITIALIZE_STAGE_VERIFY_BACKUP;
+        result.lastStage = INITIALIZE_STAGE_VERIFY_BACKUP;
     }
     detected = s_parseScratch.state;
     if (plan.requestedScheme == PARTITION_SCHEME_GPT) {
@@ -594,16 +691,23 @@ static bool verify_partition_state(const InitializeDiskPlan& plan,
 }
 
 static bool restore_region(const InitializeDiskPlan& plan, uint64_t lba,
-                           uint32_t sectors, const uint8_t* source)
+                           uint32_t sectors, const uint8_t* source,
+                           InitializeDiskResult& result)
 {
     for (uint32_t i = 0; i < sectors; ++i) {
-        if (revalidate_target_identity(plan.targetSnapshot) != TARGET_VALID)
+        result.rollbackStage = INITIALIZE_STAGE_ROLLBACK_WRITE;
+        if (revalidate_target_identity(plan.targetSnapshot) != TARGET_VALID) {
+            result.rollbackWriteStatus = block::BLOCK_ERR_NO_MEDIA;
             return false;
+        }
         copy_bytes(s_ioSector,
                    source + static_cast<size_t>(i) * plan.logicalSectorSize,
                    plan.logicalSectorSize);
-        if (write_sectors_safe(plan.targetSnapshot.globalIndex, lba + i, 1,
-                               s_ioSector, plan.logicalSectorSize) != block::BLOCK_OK)
+        result.rollbackWriteAttempted = true;
+        result.rollbackWriteStatus = write_sectors_safe(
+            plan.targetSnapshot.globalIndex, lba + i, 1, s_ioSector,
+            plan.logicalSectorSize);
+        if (result.rollbackWriteStatus != block::BLOCK_OK)
             return false;
     }
     return true;
@@ -612,37 +716,45 @@ static bool restore_region(const InitializeDiskPlan& plan, uint64_t lba,
 static bool restore_snapshot(const InitializeDiskPlan& plan,
                              InitializeDiskResult& result)
 {
-    if (!result.writeAttempted || !s_snapshot.valid ||
+    if (!result.writeMayHaveReachedMedia || !s_snapshot.valid ||
         revalidate_target_identity(plan.targetSnapshot) != TARGET_VALID)
         return false;
     result.rollbackAttempted = true;
     bool writesOk = true;
     // Remove the visible marker and both headers before restoring their arrays.
-    writesOk = restore_region(plan, 0, 1, s_snapshot.mbr) && writesOk;
+    writesOk = restore_region(plan, 0, 1, s_snapshot.mbr, result) && writesOk;
     if (plan.requestedScheme == PARTITION_SCHEME_GPT) {
-        writesOk = restore_region(plan, 1, 1, s_snapshot.primaryHeader) && writesOk;
+        writesOk = restore_region(plan, 1, 1, s_snapshot.primaryHeader,
+                                  result) && writesOk;
         writesOk = restore_region(plan, plan.totalLogicalSectors - 1, 1,
-                                  s_snapshot.backupHeader) && writesOk;
+                                  s_snapshot.backupHeader, result) && writesOk;
         const uint64_t backupArrayLba = plan.totalLogicalSectors - 1 -
                                         plan.entryArraySectors;
         writesOk = restore_region(plan, backupArrayLba, plan.entryArraySectors,
-                                  s_snapshot.backupArray) && writesOk;
+                                  s_snapshot.backupArray, result) && writesOk;
         writesOk = restore_region(plan, 2, plan.entryArraySectors,
-                                  s_snapshot.primaryArray) && writesOk;
+                                  s_snapshot.primaryArray, result) && writesOk;
     }
     if (!writesOk || revalidate_target_identity(plan.targetSnapshot) != TARGET_VALID)
         return false;
 
+    result.rollbackStage = INITIALIZE_STAGE_ROLLBACK_FLUSH;
+    result.rollbackFlushAttempted = true;
     const block::FlushReport rollbackFlush =
         block::flush_with_result(plan.targetSnapshot.globalIndex);
+    result.rollbackFlushOutcome = rollbackFlush.outcome;
+    result.rollbackFlushStatus = rollbackFlush.status;
     if (!flush_is_proven(rollbackFlush)) return false;
+    result.rollbackStage = INITIALIZE_STAGE_ROLLBACK_VERIFY;
     if (!metadata_matches_snapshot(plan)) return false;
     DiskState finalState = DISK_STATE_UNREADABLE;
     if (!parse_partition_table(plan.targetSnapshot.globalIndex, s_parseScratch))
         return false;
     finalState = s_parseScratch.state;
     result.finalDetectedState = finalState;
-    return finalState == DISK_STATE_NOT_INITIALIZED;
+    result.rollbackVerificationPassed =
+        finalState == DISK_STATE_NOT_INITIALIZED;
+    return result.rollbackVerificationPassed;
 }
 
 static void finish_failure(InitializeDiskPlan& plan,
@@ -650,29 +762,62 @@ static void finish_failure(InitializeDiskPlan& plan,
                            InitializeDiskStatus failure,
                            const char* diagnostic)
 {
+    result.lastStage = result.stage;
+    if (result.firstFailedStage == INITIALIZE_STAGE_IDLE)
+        result.firstFailedStage = result.lastStage;
+    if (result.failedOperation == INITIALIZE_OPERATION_NONE) {
+        switch (result.lastStage) {
+            case INITIALIZE_STAGE_FLUSH:
+                result.failedOperation = INITIALIZE_OPERATION_FLUSH; break;
+            case INITIALIZE_STAGE_VERIFY_PRIMARY:
+            case INITIALIZE_STAGE_VERIFY_BACKUP:
+                result.failedOperation = INITIALIZE_OPERATION_VERIFY; break;
+            case INITIALIZE_STAGE_RESCAN:
+                result.failedOperation = INITIALIZE_OPERATION_RESCAN; break;
+            default: break;
+        }
+    }
     result.status = failure;
+    result.failureStatus = failure;
     result.stage = INITIALIZE_STAGE_FAILED;
+    result.failedBeforeWrite = !result.writeMayHaveReachedMedia;
     set_diagnostic(result, diagnostic ? diagnostic :
                    initialize_disk_status_name(failure));
-    if (result.writeAttempted) {
+    if (result.writeMayHaveReachedMedia) {
         result.rollbackSucceeded = restore_snapshot(plan, result);
         if (!result.rollbackSucceeded) {
             result.finalStateUncertain = true;
+            result.failureOutcome = INITIALIZE_OUTCOME_ROLLBACK_UNVERIFIED;
             result.status = INITIALIZE_DISK_ROLLBACK_FAILED;
             set_diagnostic(result,
                 "Initialization failed; rollback could not be verified. Refresh and inspect the disk.");
+        } else {
+            result.failureOutcome = INITIALIZE_OUTCOME_ROLLBACK_VERIFIED;
         }
+    } else {
+        result.failureOutcome = INITIALIZE_OUTCOME_FAILED_BEFORE_WRITE;
+        result.rollbackAttempted = false;
+        result.rollbackSucceeded = false;
+        result.finalStateUncertain = false;
+        DiskState currentState = DISK_STATE_UNREADABLE;
+        if (revalidate_target_identity(plan.targetSnapshot) == TARGET_VALID &&
+            metadata_matches_snapshot(plan) &&
+            parse_partition_table(plan.targetSnapshot.globalIndex, s_parseScratch)) {
+            currentState = s_parseScratch.state;
+        }
+        result.finalDetectedState = currentState;
     }
     const RevalidationStatus failureIdentity =
         revalidate_target_identity(plan.targetSnapshot);
     if (failureIdentity != TARGET_VALID) {
-        result.finalStateUncertain = result.writeAttempted;
-        if (result.writeAttempted) {
+        result.finalStateUncertain = result.writeMayHaveReachedMedia;
+        if (result.writeMayHaveReachedMedia) {
+            result.failureOutcome = INITIALIZE_OUTCOME_ROLLBACK_UNVERIFIED;
             result.status = INITIALIZE_DISK_ROLLBACK_FAILED;
             set_diagnostic(result,
                 "Target identity changed during initialization; disk state is uncertain. Refresh and inspect it.");
         }
-    } else if (result.writeAttempted) {
+    } else if (result.writeMayHaveReachedMedia) {
         // A failed or untrusted rollback always forces a fresh parser rescan
         // while the lease is still held. The UI performs its own enumeration
         // after this storage-layer rescan returns.
@@ -995,7 +1140,7 @@ InitializeDiskStatus prepare_initialize_disk(
     reset_result(result);
     result.targetIdentity = request.targetSnapshot;
     result.requestedScheme = request.requestedScheme;
-    result.stage = INITIALIZE_STAGE_VALIDATING;
+    result.stage = INITIALIZE_STAGE_PREFLIGHT;
 
     if (request.expectedRegistryGeneration !=
             request.targetSnapshot.registryGeneration ||
@@ -1003,42 +1148,52 @@ InitializeDiskStatus prepare_initialize_disk(
          request.requestedScheme != PARTITION_SCHEME_MBR) ||
         request.mbrSignaturePolicy != MBR_SIGNATURE_RANDOM_NONZERO ||
         request.diskGuidSource != DISK_GUID_SECURE_RANDOM) {
-        result.status = INITIALIZE_DISK_INVALID_REQUEST;
-        result.stage = INITIALIZE_STAGE_FAILED;
+        mark_failure(result, INITIALIZE_DISK_INVALID_REQUEST,
+                     INITIALIZE_OPERATION_NONE);
         set_diagnostic(result, "The initialization request is invalid.");
         return result.status;
     }
 
     StorageOperationLease lease = {};
+    result.stage = INITIALIZE_STAGE_ACQUIRE_LEASE;
     const StorageOperationLockStatus lockStatus =
         try_acquire_storage_operation(lease);
     if (lockStatus != STORAGE_OPERATION_LOCK_ACQUIRED) {
-        result.status = lockStatus == STORAGE_OPERATION_LOCK_BUSY
+        const InitializeDiskStatus failure = lockStatus == STORAGE_OPERATION_LOCK_BUSY
             ? INITIALIZE_DISK_OPERATION_BUSY
             : INITIALIZE_DISK_OPERATION_OWNERSHIP_INVALID;
-        result.stage = INITIALIZE_STAGE_FAILED;
+        mark_failure(result, failure, INITIALIZE_OPERATION_NONE);
         set_diagnostic(result, initialize_disk_status_name(result.status));
         return result.status;
     }
 
+    result.stage = INITIALIZE_STAGE_PIN_TARGET;
     if (!pin_storage_operation_target(lease, request.targetSnapshot)) {
         result.status = map_identity_status(
             revalidate_target_identity(request.targetSnapshot));
         if (result.status == INITIALIZE_DISK_SUCCESS)
             result.status = INITIALIZE_DISK_IDENTITY_CHANGED;
-        result.stage = INITIALIZE_STAGE_FAILED;
+        mark_failure(result, result.status, INITIALIZE_OPERATION_NONE);
         set_diagnostic(result, initialize_disk_status_name(result.status));
         release_storage_operation(lease);
         return result.status;
     }
 
     InitializeTargetValidation validation;
+    result.stage = INITIALIZE_STAGE_PREFLIGHT;
     const InitializeDiskStatus validationStatus = validate_target_impl(
         request.targetSnapshot, request.requestedScheme, lease, validation);
     result.finalDetectedState = validation.detectedState;
     if (validationStatus != INITIALIZE_DISK_READY_FOR_CONFIRMATION) {
         result.status = validationStatus;
-        result.stage = INITIALIZE_STAGE_FAILED;
+        mark_failure(result, validationStatus, INITIALIZE_OPERATION_READ);
+        if (validationStatus == INITIALIZE_DISK_READ_UNAVAILABLE) {
+            DeviceCapabilities capabilities;
+            if (query_device_capabilities(request.targetSnapshot.globalIndex,
+                                          capabilities) &&
+                capabilities.readable)
+                capture_failed_block_diagnostic(result);
+        }
         set_diagnostic(result, initialize_disk_status_name(validationStatus));
         release_storage_operation(lease);
         return result.status;
@@ -1054,9 +1209,11 @@ InitializeDiskStatus prepare_initialize_disk(
     plan.lastUsableLba = validation.lastUsableLba;
     plan.entryArraySectors = validation.entryArraySectors;
 
+    result.stage = INITIALIZE_STAGE_SNAPSHOT;
     if (!capture_metadata_snapshot(plan)) {
-        result.status = INITIALIZE_DISK_READ_UNAVAILABLE;
-        result.stage = INITIALIZE_STAGE_FAILED;
+        mark_failure(result, INITIALIZE_DISK_READ_UNAVAILABLE,
+                     INITIALIZE_OPERATION_READ);
+        capture_failed_block_diagnostic(result);
         set_diagnostic(result, initialize_disk_status_name(result.status));
         release_storage_operation(lease);
         plan.ownerToken = 0;
@@ -1064,8 +1221,8 @@ InitializeDiskStatus prepare_initialize_disk(
         return result.status;
     }
     if (!metadata_snapshot_is_clear(plan)) {
-        result.status = INITIALIZE_DISK_METADATA_NOT_CLEAR;
-        result.stage = INITIALIZE_STAGE_FAILED;
+        mark_failure(result, INITIALIZE_DISK_METADATA_NOT_CLEAR,
+                     INITIALIZE_OPERATION_READ);
         set_diagnostic(result, initialize_disk_status_name(result.status));
         release_storage_operation(lease);
         plan.ownerToken = 0;
@@ -1077,7 +1234,7 @@ InitializeDiskStatus prepare_initialize_disk(
     if (!identityValid) {
         result.status = map_identity_status(
             revalidate_target_identity(request.targetSnapshot));
-        result.stage = INITIALIZE_STAGE_FAILED;
+        mark_failure(result, result.status, INITIALIZE_OPERATION_NONE);
         set_diagnostic(result, initialize_disk_status_name(result.status));
         release_storage_operation(lease);
         plan.ownerToken = 0;
@@ -1091,7 +1248,10 @@ InitializeDiskStatus prepare_initialize_disk(
         !metadata_matches_snapshot(plan)) {
         result.status = finalValidation == INITIALIZE_DISK_READY_FOR_CONFIRMATION
             ? INITIALIZE_DISK_METADATA_NOT_CLEAR : finalValidation;
-        result.stage = INITIALIZE_STAGE_FAILED;
+        result.stage = INITIALIZE_STAGE_PREPARE_METADATA;
+        mark_failure(result, result.status,
+            finalValidation == INITIALIZE_DISK_READY_FOR_CONFIRMATION
+                ? INITIALIZE_OPERATION_READ : INITIALIZE_OPERATION_NONE);
         set_diagnostic(result, initialize_disk_status_name(result.status));
         release_storage_operation(lease);
         plan.ownerToken = 0;
@@ -1099,10 +1259,12 @@ InitializeDiskStatus prepare_initialize_disk(
         return result.status;
     }
 
+    result.stage = INITIALIZE_STAGE_PREPARE_METADATA;
+    result.lastStage = INITIALIZE_STAGE_PREPARE_METADATA;
     if (request.requestedScheme == PARTITION_SCHEME_GPT) {
         if (!make_disk_guid(plan.diskGuid, request)) {
-            result.status = INITIALIZE_DISK_ENTROPY_UNAVAILABLE;
-            result.stage = INITIALIZE_STAGE_FAILED;
+            mark_failure(result, INITIALIZE_DISK_ENTROPY_UNAVAILABLE,
+                         INITIALIZE_OPERATION_NONE);
             set_diagnostic(result, initialize_disk_status_name(result.status));
             release_storage_operation(lease);
             plan.ownerToken = 0;
@@ -1110,8 +1272,8 @@ InitializeDiskStatus prepare_initialize_disk(
             return result.status;
         }
     } else if (!make_mbr_signature(plan.mbrDiskSignature, request)) {
-        result.status = INITIALIZE_DISK_ENTROPY_UNAVAILABLE;
-        result.stage = INITIALIZE_STAGE_FAILED;
+        mark_failure(result, INITIALIZE_DISK_ENTROPY_UNAVAILABLE,
+                     INITIALIZE_OPERATION_NONE);
         set_diagnostic(result, initialize_disk_status_name(result.status));
         release_storage_operation(lease);
         plan.ownerToken = 0;
@@ -1121,8 +1283,8 @@ InitializeDiskStatus prepare_initialize_disk(
 
     plan.confirmationReady = true;
     if (!publish_active_plan(plan)) {
-        result.status = INITIALIZE_DISK_OPERATION_OWNERSHIP_INVALID;
-        result.stage = INITIALIZE_STAGE_FAILED;
+        mark_failure(result, INITIALIZE_DISK_OPERATION_OWNERSHIP_INVALID,
+                     INITIALIZE_OPERATION_NONE);
         set_diagnostic(result, initialize_disk_status_name(result.status));
         release_storage_operation(lease);
         plan.ownerToken = 0;
@@ -1132,6 +1294,7 @@ InitializeDiskStatus prepare_initialize_disk(
     }
     result.status = INITIALIZE_DISK_READY_FOR_CONFIRMATION;
     result.stage = INITIALIZE_STAGE_WAITING_FOR_CONFIRMATION;
+    result.lastStage = INITIALIZE_STAGE_PREPARE_METADATA;
     set_diagnostic(result, "Safety checks passed. Confirm to write partition-table metadata.");
     return result.status;
 }
@@ -1155,6 +1318,7 @@ InitializeDiskStatus execute_initialize_disk(
     reset_result(result);
     result.targetIdentity = plan.targetSnapshot;
     result.requestedScheme = plan.requestedScheme;
+    result.stage = INITIALIZE_STAGE_PREFLIGHT;
     InitializeDiskPlan confirmedPlan;
     const bool haveConfirmedPlan = get_active_plan(confirmedPlan);
     const bool planMatchesConfirmation = haveConfirmedPlan &&
@@ -1162,7 +1326,7 @@ InitializeDiskStatus execute_initialize_disk(
     if (!plan.confirmationReady || plan.ownerToken == 0 || !s_snapshot.valid ||
         !planMatchesConfirmation) {
         result.status = INITIALIZE_DISK_OPERATION_OWNERSHIP_INVALID;
-        result.stage = INITIALIZE_STAGE_FAILED;
+        mark_failure(result, result.status, INITIALIZE_OPERATION_NONE);
         if (haveConfirmedPlan) {
             result.targetIdentity = confirmedPlan.targetSnapshot;
             result.requestedScheme = confirmedPlan.requestedScheme;
@@ -1183,18 +1347,19 @@ InitializeDiskStatus execute_initialize_disk(
     lease.ownerToken = plan.ownerToken;
     if (!storage_operation_lease_is_current(lease)) {
         result.status = INITIALIZE_DISK_OPERATION_OWNERSHIP_INVALID;
-        result.stage = INITIALIZE_STAGE_FAILED;
+        mark_failure(result, result.status, INITIALIZE_OPERATION_NONE);
         set_diagnostic(result, initialize_disk_status_name(result.status));
         return result.status;
     }
     if (!begin_storage_operation_execution(lease)) {
         result.status = INITIALIZE_DISK_OPERATION_OWNERSHIP_INVALID;
-        result.stage = INITIALIZE_STAGE_FAILED;
+        mark_failure(result, result.status, INITIALIZE_OPERATION_NONE);
         set_diagnostic(result, initialize_disk_status_name(result.status));
         return result.status;
     }
 
     result.stage = INITIALIZE_STAGE_REVALIDATING;
+    result.lastStage = INITIALIZE_STAGE_REVALIDATING;
     if (plan.expectedRegistryGeneration != plan.targetSnapshot.registryGeneration) {
         finish_failure(plan, result, INITIALIZE_DISK_REGISTRY_CHANGED,
                        initialize_disk_status_name(INITIALIZE_DISK_REGISTRY_CHANGED));
@@ -1208,21 +1373,32 @@ InitializeDiskStatus execute_initialize_disk(
         finish_failure(plan, result, status, initialize_disk_status_name(status));
         return result.status;
     }
+    result.stage = INITIALIZE_STAGE_SNAPSHOT;
+    result.lastStage = INITIALIZE_STAGE_SNAPSHOT;
     if (!metadata_matches_snapshot(plan) || !metadata_snapshot_is_clear(plan)) {
         finish_failure(plan, result, INITIALIZE_DISK_METADATA_NOT_CLEAR,
                        initialize_disk_status_name(INITIALIZE_DISK_METADATA_NOT_CLEAR));
         return result.status;
     }
 
+    result.stage = INITIALIZE_STAGE_FLUSH;
+    result.lastStage = INITIALIZE_STAGE_FLUSH;
+    result.lastOperation = INITIALIZE_OPERATION_FLUSH;
+    result.flushAttempted = true;
+    ++result.flushAttempts;
     const block::FlushReport initialFlush =
         block::flush_with_result(plan.targetSnapshot.globalIndex);
+    result.flushOutcome = initialFlush.outcome;
+    result.flushStatus = initialFlush.status;
     if (!flush_is_proven(initialFlush)) {
-        result.flushOutcome = initialFlush.outcome;
-        result.flushStatus = initialFlush.status;
+        result.failedOperation = INITIALIZE_OPERATION_FLUSH;
+        capture_failed_block_diagnostic(result);
         finish_failure(plan, result, INITIALIZE_DISK_FLUSH_FAILED,
                        initialize_disk_status_name(INITIALIZE_DISK_FLUSH_FAILED));
         return result.status;
     }
+    result.stage = INITIALIZE_STAGE_REVALIDATING;
+    result.lastStage = INITIALIZE_STAGE_REVALIDATING;
     if (!metadata_matches_snapshot(plan) ||
         revalidate_target_identity(plan.targetSnapshot) != TARGET_VALID) {
         status = revalidate_target_identity(plan.targetSnapshot) == TARGET_VALID
@@ -1244,31 +1420,44 @@ InitializeDiskStatus execute_initialize_disk(
         return result.status;
     }
 
-    result.stage = INITIALIZE_STAGE_FLUSHING;
+    result.stage = INITIALIZE_STAGE_FLUSH;
+    result.lastStage = INITIALIZE_STAGE_FLUSH;
+    result.lastOperation = INITIALIZE_OPERATION_FLUSH;
+    result.flushAttempted = true;
+    ++result.flushAttempts;
     const block::FlushReport writeFlush =
         block::flush_with_result(plan.targetSnapshot.globalIndex);
     result.flushOutcome = writeFlush.outcome;
     result.flushStatus = writeFlush.status;
     if (!flush_is_proven(writeFlush)) {
+        result.failedOperation = INITIALIZE_OPERATION_FLUSH;
+        capture_failed_block_diagnostic(result);
         finish_failure(plan, result, INITIALIZE_DISK_FLUSH_FAILED,
                        initialize_disk_status_name(INITIALIZE_DISK_FLUSH_FAILED));
         return result.status;
     }
 
-    result.stage = INITIALIZE_STAGE_VERIFYING;
+    result.stage = INITIALIZE_STAGE_VERIFY_PRIMARY;
     DiskState detected = DISK_STATE_UNREADABLE;
-    if (!verify_partition_state(plan, detected)) {
+    if (!verify_partition_state(plan, detected, result)) {
         result.finalDetectedState = detected;
+        result.failedOperation = INITIALIZE_OPERATION_VERIFY;
+        capture_failed_block_diagnostic(result);
         finish_failure(plan, result, INITIALIZE_DISK_VERIFICATION_FAILED,
                        initialize_disk_status_name(INITIALIZE_DISK_VERIFICATION_FAILED));
         return result.status;
     }
     result.verificationPassed = true;
 
-    result.stage = INITIALIZE_STAGE_RESCANNING;
+    result.stage = INITIALIZE_STAGE_RESCAN;
+    result.lastStage = INITIALIZE_STAGE_RESCAN;
     detected = DISK_STATE_UNREADABLE;
-    if (!verify_partition_state(plan, detected)) {
+    if (!verify_partition_state(plan, detected, result, true)) {
         result.finalDetectedState = detected;
+        result.stage = INITIALIZE_STAGE_RESCAN;
+        result.lastStage = INITIALIZE_STAGE_RESCAN;
+        result.failedOperation = INITIALIZE_OPERATION_RESCAN;
+        capture_failed_block_diagnostic(result);
         finish_failure(plan, result, INITIALIZE_DISK_RESCAN_FAILED,
                        initialize_disk_status_name(INITIALIZE_DISK_RESCAN_FAILED));
         return result.status;
@@ -1284,7 +1473,10 @@ InitializeDiskStatus execute_initialize_disk(
     }
 
     result.status = INITIALIZE_DISK_SUCCESS;
+    result.failureStatus = INITIALIZE_DISK_SUCCESS;
+    result.failedBeforeWrite = false;
     result.stage = INITIALIZE_STAGE_COMPLETED;
+    result.lastStage = INITIALIZE_STAGE_COMPLETED;
     result.verificationPassed = true;
     set_diagnostic(result, plan.requestedScheme == PARTITION_SCHEME_GPT
         ? "GPT initialized and verified; the disk has no partitions."
@@ -1338,13 +1530,31 @@ const char* initialize_disk_stage_name(InitializeDiskStage stage)
 {
     switch (stage) {
         case INITIALIZE_STAGE_VALIDATING: return "Validating";
+        case INITIALIZE_STAGE_ACQUIRE_LEASE: return "AcquireLease";
+        case INITIALIZE_STAGE_PIN_TARGET: return "PinTarget";
+        case INITIALIZE_STAGE_PREFLIGHT: return "Preflight";
+        case INITIALIZE_STAGE_SNAPSHOT: return "Snapshot";
+        case INITIALIZE_STAGE_PREPARE_METADATA: return "PrepareMetadata";
         case INITIALIZE_STAGE_WAITING_FOR_CONFIRMATION: return "Waiting for confirmation";
-        case INITIALIZE_STAGE_REVALIDATING: return "Revalidating";
+        case INITIALIZE_STAGE_REVALIDATING: return "Revalidate";
         case INITIALIZE_STAGE_WRITING_GPT_METADATA: return "Writing GPT metadata";
         case INITIALIZE_STAGE_WRITING_MBR: return "Writing MBR";
+        case INITIALIZE_STAGE_WRITE_BACKUP_ARRAY: return "WriteBackupArray";
+        case INITIALIZE_STAGE_WRITE_BACKUP_HEADER: return "WriteBackupHeader";
+        case INITIALIZE_STAGE_WRITE_PRIMARY_ARRAY: return "WritePrimaryArray";
+        case INITIALIZE_STAGE_WRITE_PRIMARY_HEADER: return "WritePrimaryHeader";
+        case INITIALIZE_STAGE_WRITE_PROTECTIVE_MBR: return "WriteProtectiveMBR";
+        case INITIALIZE_STAGE_WRITE_MBR: return "WriteMBR";
+        case INITIALIZE_STAGE_FLUSH: return "Flush";
         case INITIALIZE_STAGE_FLUSHING: return "Flushing";
+        case INITIALIZE_STAGE_VERIFY_PRIMARY: return "VerifyPrimary";
+        case INITIALIZE_STAGE_VERIFY_BACKUP: return "VerifyBackup";
         case INITIALIZE_STAGE_VERIFYING: return "Verifying";
+        case INITIALIZE_STAGE_RESCAN: return "Rescan";
         case INITIALIZE_STAGE_RESCANNING: return "Rescanning";
+        case INITIALIZE_STAGE_ROLLBACK_WRITE: return "RollbackWrite";
+        case INITIALIZE_STAGE_ROLLBACK_FLUSH: return "RollbackFlush";
+        case INITIALIZE_STAGE_ROLLBACK_VERIFY: return "RollbackVerify";
         case INITIALIZE_STAGE_COMPLETED: return "Completed";
         case INITIALIZE_STAGE_FAILED: return "Failed";
         case INITIALIZE_STAGE_IDLE: default: return "Idle";

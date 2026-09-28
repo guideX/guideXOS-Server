@@ -65,6 +65,20 @@ enum Fat32FormatStage : uint8_t {
     FAT32_FORMAT_STAGE_COMPLETED,
     FAT32_FORMAT_STAGE_FAILED,
     FAT32_FORMAT_STAGE_STATE_UNCERTAIN,
+    FAT32_FORMAT_STAGE_SNAPSHOT_FILESYSTEM_METADATA,
+    FAT32_FORMAT_STAGE_WRITE_FAT,
+    FAT32_FORMAT_STAGE_WRITE_ROOT,
+    FAT32_FORMAT_STAGE_WRITE_BACKUP_METADATA,
+    FAT32_FORMAT_STAGE_WRITE_FSINFO,
+    FAT32_FORMAT_STAGE_WRITE_BOOT_SECTOR,
+    FAT32_FORMAT_STAGE_FLUSH,
+    FAT32_FORMAT_STAGE_VERIFY,
+    FAT32_FORMAT_STAGE_RESCAN,
+    FAT32_FORMAT_STAGE_ROLLBACK_WRITE,
+    FAT32_FORMAT_STAGE_ROLLBACK_FLUSH,
+    FAT32_FORMAT_STAGE_ROLLBACK_VERIFY,
+    FAT32_FORMAT_STAGE_ACQUIRE_LEASE,
+    FAT32_FORMAT_STAGE_PIN_TARGET,
 };
 
 enum Fat32ExistingState : uint8_t {
@@ -123,20 +137,39 @@ struct Fat32FormatRequest {
 
 struct Fat32FormatResult {
     Fat32FormatStatus status;
+    Fat32FormatStatus failureStatus;
     Fat32FormatStage stage;
+    Fat32FormatStage lastStage;
+    Fat32FormatStage firstFailedStage;
     Fat32ExistingState existingState;
     Fat32FinalProbeState finalProbeState;
     TargetIdentity targetIdentity;
     PartitionEntry partition;
     Fat32FormatGeometry geometry;
     uint64_t sectorsWritten;
+    bool writeMayHaveReachedMedia;
+    bool failedBeforeWrite;
+    bool blockStatusValid;
+    block::Status blockStatus;
+    block::OperationKind failedOperation;
+    block::OperationDiagnostic failedBlockDiagnostic;
     block::FlushOutcome flushOutcome;
     block::Status flushStatus;
+    bool flushAttempted;
+    uint32_t flushAttempts;
     bool persistenceTrusted;
     bool writeAttempted;
     bool verificationPassed;
     bool rollbackAttempted;
     bool rollbackSucceeded;
+    Fat32FormatStage rollbackStage;
+    bool rollbackWriteAttempted;
+    uint32_t rollbackSectorsWritten;
+    block::Status rollbackWriteStatus;
+    bool rollbackFlushAttempted;
+    block::FlushOutcome rollbackFlushOutcome;
+    block::Status rollbackFlushStatus;
+    bool rollbackVerificationPassed;
     bool finalStateUncertain;
     char diagnostic[160];
 };
