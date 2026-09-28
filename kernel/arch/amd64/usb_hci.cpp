@@ -1,4 +1,4 @@
-// AMD64 UHCI Host Controller Interface — Implementation
+// AMD64 UHCI Host Controller Interface â€” Implementation
 //
 // Provides the platform-specific USB HCI backend for amd64 (64-bit).
 // Implements the kernel::usb::hci namespace functions declared in usb.h.
@@ -11,8 +11,10 @@
 
 #include "include/arch/usb_hci.h"
 #include "include/arch/amd64.h"
+#include "include/arch/uhci_transfer_logic.h"
 #include <kernel/usb.h>
 #include <kernel/serial_debug.h>
+#include <stddef.h>
 
 namespace kernel {
 namespace usb {
@@ -32,6 +34,9 @@ static const uint16_t UHCI_FRBASEADD = 0x08;
 static const uint16_t UHCI_SOFMOD    = 0x0C;
 static const uint16_t UHCI_PORTSC1   = 0x10;
 static const uint16_t UHCI_PORTSC2   = 0x12;
+static const uint16_t UHCI_STS_HOST_SYSTEM_ERROR = 1u << 3;
+static const uint16_t UHCI_STS_HOST_PROCESS_ERROR = 1u << 4;
+static const uint16_t UHCI_STS_HALTED = 1u << 5;
 
 static const uint16_t UHCI_CMD_RUN         = 0x0001;
 static const uint16_t UHCI_CMD_HCRESET     = 0x0002;
@@ -82,34 +87,40 @@ static bool     s_available = false;
 static uint16_t s_ioBase    = 0;
 static uint64_t s_kernelPhysicalBase = 0x100000ULL;
 
-// Frame list — must be in the low 4 GB for UHCI (32-bit DMA).
+// Frame list â€” must be in the low 4 GB for UHCI (32-bit DMA).
 // Using alignas for C++14 compatibility.
 alignas(4096) static volatile uint32_t s_frameList[1024];
 
-struct alignas(16) UHCI_TD {
-    uint32_t link;
-    uint32_t status;
-    uint32_t token;
-    uint32_t buffer;
-    uint32_t reserved[4];
-};
-
-struct alignas(16) UHCI_QH {
-    uint32_t headLink;
-    uint32_t elementLink;
-    uint32_t reserved[2];
-};
+typedef arch::amd64::uhci::TransferDescriptor UHCI_TD;
+typedef arch::amd64::uhci::QueueHead UHCI_QH;
 
 alignas(16) static volatile UHCI_TD s_tds[16];
 alignas(16) static volatile UHCI_QH s_qh;
 alignas(16) static usb::SetupPacket s_dmaSetup;
 alignas(16) static volatile uint8_t s_controlPackets[13][64];
-alignas(16) static volatile uint8_t s_bulkPacket[64];
+alignas(16) static volatile uint8_t s_bulkPackets[13][64];
 static uint8_t s_dataToggle[128][usb::MAX_ENDPOINTS * 2];
 
 static inline void dma_compiler_barrier()
 {
-    asm volatile("" ::: "memory");
+    // UHCI owns descriptors in coherent WB memory. MFENCE publishes descriptor
+    // stores before the controller can fetch them and orders CPU reads after
+    // controller writes; the memory clobber also prevents compiler motion.
+    asm volatile("mfence" ::: "memory");
+}
+
+static void yield_to_controller()
+{
+    uint64_t flags = 0;
+    asm volatile("pushfq; popq %0" : "=r"(flags));
+    if (flags & (1ULL << 9)) {
+        // Let timer and host-async completions run while waiting. UHCI frames
+        // and QEMU block I/O completion are event driven; a guest busy loop can
+        // keep the vCPU running without giving either event a chance to fire.
+        asm volatile("sti; hlt" ::: "memory");
+    } else {
+        asm volatile("pause" ::: "memory");
+    }
 }
 
 // ================================================================
@@ -197,41 +208,176 @@ static const uint8_t PID_OUT   = 0xE1;
 static uint32_t make_token(uint8_t pid, uint8_t addr, uint8_t ep,
                            uint8_t toggle, uint16_t maxLen)
 {
-    uint32_t actualLen = (maxLen > 0) ? (maxLen - 1) : 0x7FF;
-    return (actualLen << 21) | (static_cast<uint32_t>(toggle) << 19) |
-           (static_cast<uint32_t>(ep) << 15) | (static_cast<uint32_t>(addr) << 8) |
-           pid;
+    return arch::amd64::uhci::make_token(pid, addr, ep, toggle, maxLen);
 }
 
-// Pointer cast helper — truncates 64-bit pointer to 32-bit for UHCI DMA
+static const uint32_t UHCI_TD_STATUS_ACTIVE = arch::amd64::uhci::TD_ACTIVE;
+static const uint32_t UHCI_FRAME_MASK = arch::amd64::uhci::FRAME_NUMBER_MASK;
+static const uint32_t UHCI_CONTROL_TIMEOUT_FRAMES = 250u;
+static const uint32_t UHCI_BULK_TIMEOUT_FRAMES = 1000u;
+
+static void initialize_td(volatile UHCI_TD* td, uint32_t link,
+                          uint32_t token, uint32_t buffer,
+                          bool shortPacketDetect = false)
+{
+    // The caller owns this TD and the schedule does not reference it yet.
+    // Keep the controller-owned status inactive while replacing its payload,
+    // then set ACTIVE as the final descriptor store.
+    arch::amd64::uhci::prepare_descriptor(td, link, token, buffer);
+    dma_compiler_barrier();
+    td->status = arch::amd64::uhci::initial_active_status(shortPacketDetect);
+}
+
+// Pointer cast helper â€” truncates 64-bit pointer to 32-bit for UHCI DMA
 static uint32_t ptr32(const volatile void* p)
 {
     const uint64_t virt = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(p));
-    uint64_t physical = virt;
-    if (virt >= 0x100000ULL) {
-        const uint64_t offset = virt - 0x100000ULL;
-        if (offset > UINT64_MAX - s_kernelPhysicalBase) return 0;
-        physical = s_kernelPhysicalBase + offset;
-    }
-    return physical <= 0xFFFFFFFFULL ? static_cast<uint32_t>(physical) : 0;
+    uint32_t physical = 0;
+    return arch::amd64::uhci::virtual_to_dma(
+        s_kernelPhysicalBase, virt, physical) ? physical : 0;
 }
 
 // ================================================================
 // Wait for TD completion
 // ================================================================
 
-static TransferStatus wait_td(volatile UHCI_TD* td, uint32_t timeout_loops)
+static TransferStatus decode_td_status(uint32_t status)
 {
-    for (uint32_t i = 0; i < timeout_loops; ++i) {
-        uint32_t st = td->status;
-        if (!(st & (1u << 23))) {
-            if (st & (1u << 22)) return XFER_STALL;
-            if (st & (1u << 21)) return XFER_DATA_OVERRUN;
-            if (st & (1u << 20)) return XFER_ERROR;
-            if (st & (1u << 18)) return XFER_TIMEOUT;
-            return XFER_SUCCESS;
-        }
+    using namespace arch::amd64::uhci;
+    const Observation result = observe(status, 0, 0, 0, 0);
+    switch (result) {
+        case OBSERVATION_STALL: return XFER_STALL;
+        case OBSERVATION_DATA_BUFFER_ERROR: return XFER_DATA_OVERRUN;
+        case OBSERVATION_BABBLE:
+        case OBSERVATION_BITSTUFF: return XFER_ERROR;
+        case OBSERVATION_CRC_TIMEOUT: return XFER_TIMEOUT;
+        case OBSERVATION_NAK: return XFER_NAK;
+        default: return XFER_SUCCESS;
     }
+}
+
+static TransferStatus wait_td(volatile UHCI_TD* td, uint32_t timeoutFrames)
+{
+    const uint16_t startFrame = static_cast<uint16_t>(
+        uhci_read16(UHCI_FRNUM) & UHCI_FRAME_MASK);
+    const uint32_t tdPhysical = ptr32(td);
+    const uint32_t maxPollsWithoutFrameProgress = 5000000u;
+    const uint32_t controllerPollInterval = 0x100u;
+
+    // FRNUM reads sample controller progress. Periodically yielding through
+    // HLT also gives the timer and asynchronous device I/O completions time to
+    // run; a memory or port-I/O busy loop alone can starve those events.
+    for (uint32_t poll = 0; poll < maxPollsWithoutFrameProgress; ++poll) {
+        dma_compiler_barrier();
+        const uint32_t status = td->status;
+        if ((status & UHCI_TD_STATUS_ACTIVE) == 0) {
+            const TransferStatus decoded = decode_td_status(status);
+            if (decoded != XFER_SUCCESS) {
+                serial::puts("[USB-UHCI] td-completion-error status=0x");
+                serial::put_hex32(status);
+                serial::puts(" decoded=");
+                serial::put_hex8(static_cast<uint8_t>(decoded));
+                serial::putc('\n');
+            }
+            return decoded;
+        }
+
+        if ((poll & (controllerPollInterval - 1u)) == 0) {
+            const uint16_t controllerStatus = uhci_read16(UHCI_USBSTS);
+            if (controllerStatus & (UHCI_STS_HOST_SYSTEM_ERROR |
+                                    UHCI_STS_HOST_PROCESS_ERROR |
+                                    UHCI_STS_HALTED)) {
+                serial::puts("[USB-UHCI] controller-error status=0x");
+                serial::put_hex16(controllerStatus);
+                serial::puts(" io-base=0x");
+                serial::put_hex16(s_ioBase);
+                serial::puts(" command=0x");
+                serial::put_hex16(uhci_read16(UHCI_USBCMD));
+                serial::puts(" pci-id=0x");
+                serial::put_hex32(pci_read32(0, 3, 0, 0));
+                serial::puts(" pci-command=0x");
+                serial::put_hex16(static_cast<uint16_t>(
+                    pci_read32(0, 3, 0, 0x04)));
+                serial::puts(" pci-bar4=0x");
+                serial::put_hex32(pci_read32(0, 3, 0, 0x20));
+                serial::puts(" interrupt-enable=0x");
+                serial::put_hex16(uhci_read16(UHCI_USBINTR));
+                serial::puts(" frnum=0x");
+                serial::put_hex16(uhci_read16(UHCI_FRNUM));
+                serial::puts(" frame-base=0x");
+                serial::put_hex32(uhci_read32(UHCI_FRBASEADD));
+                serial::puts(" sof-mod=0x");
+                serial::put_hex16(uhci_read16(UHCI_SOFMOD));
+                serial::puts(" port0=0x");
+                serial::put_hex16(uhci_read16(UHCI_PORTSC1));
+                serial::puts(" port1=0x");
+                serial::put_hex16(uhci_read16(UHCI_PORTSC2));
+                serial::puts(" qh-element=0x");
+                serial::put_hex32(s_qh.elementLink);
+                serial::puts(" td-token=0x");
+                serial::put_hex32(td->token);
+                serial::putc('\n');
+                return XFER_ERROR;
+            }
+
+            const uint16_t currentFrame = static_cast<uint16_t>(
+                uhci_read16(UHCI_FRNUM) & UHCI_FRAME_MASK);
+            if (arch::amd64::uhci::frame_deadline_expired(
+                    startFrame, currentFrame,
+                    static_cast<uint16_t>(timeoutFrames))) {
+                serial::puts("[USB-UHCI] td-frame-timeout start=");
+                serial::put_hex16(startFrame);
+                serial::puts(" current=");
+                serial::put_hex16(currentFrame);
+                serial::puts(" qh-element=0x");
+                serial::put_hex32(s_qh.elementLink);
+                serial::puts(" td-status=0x");
+                serial::put_hex32(status);
+                serial::puts(" td-link=0x");
+                serial::put_hex32(td->link);
+                serial::putc('\n');
+                return XFER_TIMEOUT;
+            }
+
+            const uint32_t queueElement = s_qh.elementLink;
+            const arch::amd64::uhci::Observation result =
+                arch::amd64::uhci::observe(status, queueElement,
+                    tdPhysical, td->link, controllerStatus);
+            if (result == arch::amd64::uhci::OBSERVATION_CONTROLLER_ERROR) {
+                serial::puts("[USB-UHCI] controller-error status=0x");
+                serial::put_hex16(controllerStatus);
+                serial::puts(" td-status=0x");
+                serial::put_hex32(status);
+                serial::putc('\n');
+                return XFER_ERROR;
+            }
+            if (result == arch::amd64::uhci::OBSERVATION_QH_ADVANCED_ACTIVE) {
+                serial::puts("[USB-UHCI] qh-advanced-active qh=0x");
+                serial::put_hex32(queueElement);
+                serial::puts(" td=0x");
+                serial::put_hex32(tdPhysical);
+                serial::puts(" link=0x");
+                serial::put_hex32(td->link);
+                serial::putc('\n');
+                return XFER_ERROR;
+            }
+            yield_to_controller();
+        }
+
+        asm volatile("pause" ::: "memory");
+    }
+    serial::puts("[USB-UHCI] td-poll-limit start=");
+    serial::put_hex16(startFrame);
+    serial::puts(" current=");
+    serial::put_hex16(static_cast<uint16_t>(
+        uhci_read16(UHCI_FRNUM) & UHCI_FRAME_MASK));
+    serial::puts(" qh-element=0x");
+    serial::put_hex32(s_qh.elementLink);
+    serial::puts(" td-status=0x");
+    serial::put_hex32(td->status);
+    serial::puts(" td-link=0x");
+    serial::put_hex32(td->link);
+    serial::putc('\n');
     return XFER_TIMEOUT;
 }
 
@@ -269,12 +415,11 @@ bool init()
     uhci_write16(UHCI_USBSTS, 0xFFFF);
 
     for (int i = 0; i < 1024; ++i) {
-        s_frameList[i] = ptr32(&s_qh) | 0x02;
+        s_frameList[i] = arch::amd64::uhci::frame_list_qh_link(ptr32(&s_qh));
     }
     dma_compiler_barrier();
     s_qh.headLink    = 0x01;
     s_qh.elementLink = 0x01;
-
     uhci_write32(UHCI_FRBASEADD, ptr32(s_frameList));
     uhci_write16(UHCI_FRNUM, 0);
     dma_compiler_barrier();
@@ -375,11 +520,12 @@ TransferStatus control_transfer(uint8_t deviceAddr,
     for (uint8_t i = 0; i < sizeof(s_dmaSetup); ++i)
         setupDestination[i] = setupSource[i];
     volatile UHCI_TD* setupTd = &s_tds[0];
-    setupTd->link   = ptr32(&s_tds[1]) | 0x04;
-    setupTd->status = (3u << 27) | (1u << 23);
-    setupTd->token  = make_token(PID_SETUP, deviceAddr, 0, 0, 8);
-    setupTd->buffer = ptr32(&s_dmaSetup);
-    if (setupTd->buffer == 0) return XFER_BUFFER_ERROR;
+    const uint32_t setupLink = arch::amd64::uhci::td_depth_link(
+        ptr32(&s_tds[1]));
+    const uint32_t setupBuffer = ptr32(&s_dmaSetup);
+    if (setupLink == 0x04 || setupBuffer == 0) return XFER_BUFFER_ERROR;
+    initialize_td(setupTd, setupLink,
+        make_token(PID_SETUP, deviceAddr, 0, 0, 8), setupBuffer);
 
     uint8_t tdIdx = 1;
     uint8_t packetCount = 0;
@@ -395,12 +541,13 @@ TransferStatus control_transfer(uint8_t deviceAddr,
         for (uint16_t i = 0; i < chunk; ++i)
             s_controlPackets[packetCount][i] = dirIn ? 0 : source[offset + i];
         volatile UHCI_TD* td = &s_tds[tdIdx];
-        td->link   = ptr32(&s_tds[tdIdx + 1]) | 0x04;
-        td->status = (3u << 27) | (1u << 23);
-        td->token  = make_token(dirIn ? PID_IN : PID_OUT,
-                                deviceAddr, 0, toggle, chunk);
-        td->buffer = ptr32(s_controlPackets[packetCount]);
-        if (td->buffer == 0) return XFER_BUFFER_ERROR;
+        const uint32_t nextLink = arch::amd64::uhci::td_depth_link(
+            ptr32(&s_tds[tdIdx + 1]));
+        const uint32_t packetBuffer = ptr32(s_controlPackets[packetCount]);
+        if (nextLink == 0x04 || packetBuffer == 0) return XFER_BUFFER_ERROR;
+        initialize_td(td, nextLink,
+            make_token(dirIn ? PID_IN : PID_OUT,
+                       deviceAddr, 0, toggle, chunk), packetBuffer, dirIn);
         packetLengths[packetCount] = chunk;
         toggle ^= 1;
         offset = static_cast<uint16_t>(offset + chunk);
@@ -411,17 +558,18 @@ TransferStatus control_transfer(uint8_t deviceAddr,
     if (remaining != 0) return XFER_BUFFER_ERROR;
 
     volatile UHCI_TD* statusTd = &s_tds[tdIdx++];
-    statusTd->link   = 0x01;
-    statusTd->status = (3u << 27) | (1u << 23);
-    statusTd->token  = make_token(dirIn ? PID_OUT : PID_IN,
-                                  deviceAddr, 0, 1, 0);
-    statusTd->buffer = 0;
+    initialize_td(statusTd, 0x01,
+        make_token(dirIn ? PID_OUT : PID_IN, deviceAddr, 0, 1, 0), 0);
 
-    s_qh.elementLink = ptr32(&s_tds[0]);
-    if (s_qh.elementLink == 0) return XFER_BUFFER_ERROR;
+    const uint32_t firstTdPhysical = ptr32(&s_tds[0]);
+    if (firstTdPhysical == 0 || (firstTdPhysical & 0x0Fu) != 0)
+        return XFER_BUFFER_ERROR;
+    dma_compiler_barrier();
+    s_qh.elementLink = firstTdPhysical;
     dma_compiler_barrier();
     for (uint8_t i = 0; i < tdIdx; ++i) {
-        const TransferStatus status = wait_td(&s_tds[i], 1000000);
+        const TransferStatus status = wait_td(
+            &s_tds[i], UHCI_CONTROL_TIMEOUT_FRAMES);
         if (status != XFER_SUCCESS) {
             s_qh.elementLink = 0x01;
             serial::puts("[USB-UHCI] control-transfer-failed td=");
@@ -490,6 +638,7 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
     uint16_t transferred = 0;
     const uint8_t slot = static_cast<uint8_t>(ep * 2u + (dirIn ? 1u : 0u));
     uint8_t toggle = s_dataToggle[deviceAddr][slot];
+    const uint8_t initialToggle = toggle;
     uint16_t maxPacket = 64;
     const usb::Device* descriptor = kernel::usb::get_device(deviceAddr);
     if (descriptor) {
@@ -501,56 +650,108 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
                 break;
             }
     }
-    if (maxPacket > sizeof(s_bulkPacket)) return XFER_BUFFER_ERROR;
+    if (maxPacket > sizeof(s_bulkPackets[0])) return XFER_BUFFER_ERROR;
 
     while (remaining > 0) {
-        const uint16_t chunk = remaining > maxPacket ? maxPacket : remaining;
-        if (!dirIn)
-            for (uint16_t i = 0; i < chunk; ++i) s_bulkPacket[i] = p[i];
+        uint16_t batchLengths[13] = {};
+        uint8_t batchCount = 0;
+        uint16_t batchBytes = 0;
+        uint8_t batchToggle = toggle;
 
-        volatile UHCI_TD* td = &s_tds[0];
-        td->link   = 0x01;
-        td->status = (3u << 27) | (1u << 23);
-        td->token  = make_token(pid, deviceAddr, ep, toggle, chunk);
-        td->buffer = ptr32(s_bulkPacket);
-        if (td->buffer == 0) return XFER_BUFFER_ERROR;
-        s_qh.elementLink = ptr32(td);
-        if (s_qh.elementLink == 0) return XFER_BUFFER_ERROR;
+        // Queue a bounded packet chain. Keeping every TD and packet buffer
+        // distinct lets UHCI advance through a multi-packet BOT phase without
+        // the CPU having to recycle one descriptor between adjacent frames.
+        while (batchBytes < remaining && batchCount < 13u) {
+            const uint16_t left = static_cast<uint16_t>(remaining - batchBytes);
+            const uint16_t chunk = left > maxPacket ? maxPacket : left;
+            volatile UHCI_TD* td = &s_tds[batchCount];
+            const uint32_t tdPhysical = ptr32(td);
+            const uint32_t tdBuffer = ptr32(s_bulkPackets[batchCount]);
+            if (tdPhysical == 0 || tdBuffer == 0 ||
+                (tdPhysical & 0x0Fu) != 0) return XFER_BUFFER_ERROR;
+
+            if (!dirIn) {
+                for (uint16_t i = 0; i < chunk; ++i)
+                    s_bulkPackets[batchCount][i] =
+                        p[transferred + batchBytes + i];
+            }
+            const bool hasNext = batchCount + 1u < 13u &&
+                batchBytes + chunk < remaining;
+            const uint32_t nextLink = hasNext
+                ? arch::amd64::uhci::td_depth_link(ptr32(&s_tds[batchCount + 1u]))
+                : 0x01u;
+            initialize_td(td, nextLink,
+                make_token(pid, deviceAddr, ep, batchToggle, chunk), tdBuffer,
+                dirIn);
+            batchLengths[batchCount] = chunk;
+            batchBytes = static_cast<uint16_t>(batchBytes + chunk);
+            batchToggle ^= 1u;
+            ++batchCount;
+        }
+
+        dma_compiler_barrier();
+        const uint32_t firstTdPhysical = ptr32(&s_tds[0]);
+        if (firstTdPhysical == 0) return XFER_BUFFER_ERROR;
+        s_qh.elementLink = firstTdPhysical;
         dma_compiler_barrier();
 
-        const TransferStatus status = wait_td(td, 500000);
+        bool shortPacket = false;
+        for (uint8_t packet = 0; packet < batchCount; ++packet) {
+            volatile UHCI_TD* td = &s_tds[packet];
+            const TransferStatus status = wait_td(
+                td, UHCI_BULK_TIMEOUT_FRAMES);
+            if (status != XFER_SUCCESS) {
+                s_qh.elementLink = 0x01;
+                dma_compiler_barrier();
+                if (bytesTransferred) *bytesTransferred = transferred;
+                serial::puts("[USB-UHCI] bulk-transfer-failed addr=");
+                serial::put_hex8(deviceAddr);
+                serial::puts(" endpoint=");
+                serial::put_hex8(endpointAddr);
+                serial::puts(" status=");
+                serial::put_hex8(static_cast<uint8_t>(status));
+                serial::puts(" requested=");
+                serial::put_hex16(dataLen);
+                serial::puts(" transferred=");
+                serial::put_hex16(transferred);
+                serial::puts(" batch-packet=");
+                serial::put_hex8(packet);
+                serial::puts(" toggle-start=");
+                serial::put_hex8(initialToggle);
+                serial::puts(" toggle-next=");
+                serial::put_hex8(toggle);
+                serial::puts(" hw=");
+                serial::put_hex32(td->status);
+                serial::putc('\n');
+                return status;
+            }
+            dma_compiler_barrier();
+
+            const uint16_t actual =
+                arch::amd64::uhci::decode_actual_length(td->status);
+            if (actual > batchLengths[packet]) {
+                s_qh.elementLink = 0x01;
+                if (bytesTransferred) *bytesTransferred = transferred;
+                return XFER_DATA_OVERRUN;
+            }
+            if (dirIn) {
+                for (uint16_t i = 0; i < actual; ++i)
+                    p[transferred + i] = s_bulkPackets[packet][i];
+            }
+            transferred = static_cast<uint16_t>(transferred + actual);
+            remaining = static_cast<uint16_t>(remaining - actual);
+            toggle ^= 1u;
+            s_dataToggle[deviceAddr][slot] = toggle;
+            if (actual < batchLengths[packet]) {
+                shortPacket = true;
+                break;
+            }
+        }
+
+        dma_compiler_barrier();
         s_qh.elementLink = 0x01;
-        if (status != XFER_SUCCESS) {
-            if (bytesTransferred) *bytesTransferred = transferred;
-            serial::puts("[USB-UHCI] bulk-transfer-failed addr=");
-            serial::put_hex8(deviceAddr);
-            serial::puts(" endpoint=");
-            serial::put_hex8(endpointAddr);
-            serial::puts(" status=");
-            serial::put_hex8(static_cast<uint8_t>(status));
-            serial::puts(" hw=");
-            serial::put_hex32(td->status);
-            serial::putc('\n');
-            return status;
-        }
         dma_compiler_barrier();
-
-        const uint16_t actual = static_cast<uint16_t>((td->status + 1u) & 0x7FFu);
-        if (actual > chunk) {
-            if (bytesTransferred) *bytesTransferred = transferred;
-            return XFER_DATA_OVERRUN;
-        }
-        if (dirIn)
-            for (uint16_t i = 0; i < actual; ++i) p[i] = s_bulkPacket[i];
-        transferred = static_cast<uint16_t>(transferred + actual);
-        p += actual;
-        remaining = static_cast<uint16_t>(remaining - actual);
-        toggle ^= 1;
-        s_dataToggle[deviceAddr][slot] = toggle;
-
-        // A short packet terminates this USB transfer; BOT validates its CSW
-        // residue against the byte count returned here.
-        if (actual < chunk) break;
+        if (shortPacket) break;
     }
 
     if (bytesTransferred) *bytesTransferred = transferred;

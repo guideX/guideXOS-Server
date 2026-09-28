@@ -1,13 +1,14 @@
 <#
 .SYNOPSIS
-    Boots guideXOS with a read-only QEMU USB Mass Storage device.
+    Boots guideXOS with a read-only QEMU USB Mass Storage device and proves a real FAT32 read.
 
 .DESCRIPTION
     Stages a private ESP copy and the current AMD64 kernel/UEFI loader, then
     attaches one repository-owned raw image behind QEMU's PIIX3 UHCI controller.
     The USB backing image is opened read-only. No host physical disk is passed
     to QEMU. The run succeeds only after guideXOS logs shared USB MSC registration
-    and reaches its main loop. All output is preserved under out/.
+    mounts the existing FAT32 partition read-only, reads a deterministic file,
+    unmounts cleanly, and reaches its main loop. All output is preserved under out/.
 #>
 [CmdletBinding()]
 param(
@@ -22,7 +23,7 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location -LiteralPath $Root
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-if (-not $WorkDir) { $WorkDir = "out\dm11-qemu-usb-probe-$timestamp" }
+if (-not $WorkDir) { $WorkDir = "out\dm12-qemu-uhci-proof-$timestamp" }
 $repoOut = [IO.Path]::GetFullPath((Join-Path $Root "out"))
 $WorkFull = [IO.Path]::GetFullPath((Join-Path $Root $WorkDir))
 $UsbFull = [IO.Path]::GetFullPath((Join-Path $Root $UsbImage))
@@ -114,13 +115,17 @@ try {
     $Monitor.Stop()
     @(
         "usb_uhci_schedule_start",
-        "usb_uhci_qh_load",
-        "usb_uhci_td_load",
-        "usb_uhci_td_complete",
         "usb_uhci_packet_add",
         "usb_uhci_packet_complete_success",
+        "usb_uhci_td_complete",
         "usb_uhci_packet_complete_error",
-        "usb_packet_state_fault"
+        "usb_packet_state_fault",
+        "usb_msd_cmd_submit",
+        "usb_msd_data_in",
+        "usb_msd_packet_async",
+        "usb_msd_packet_complete",
+        "usb_msd_cmd_complete",
+        "usb_msd_send_status"
     ) | Set-Content -LiteralPath $TraceEventsPath -Encoding ascii
 
     $arguments = @(
@@ -129,7 +134,7 @@ try {
         "-device", "piix3-usb-uhci,id=uhci",
         "-drive", "file=fat:rw:$EspPath,format=raw",
         "-drive", "if=none,id=usbdata,file=$UsbFull,format=raw,readonly=on",
-        "-device", "usb-storage,bus=uhci.0,drive=usbdata,removable=on,serial=DM11USB01",
+        "-device", "usb-storage,id=usbdisk,bus=uhci.0,drive=usbdata,removable=on,serial=DM12USB01",
         "-netdev", "user,id=net0",
         "-device", "e1000,netdev=net0",
         "-object", "rng-builtin,id=rng0",
@@ -142,7 +147,7 @@ try {
     )
     $commandLine = '"{0}" {1}' -f $QemuFull, ($arguments -join ' ')
     @(
-        "proof=DM11-QEMU-USB-UHCI-REGISTRATION",
+        "proof=DM12-QEMU-USB-UHCI-READ-ONLY-FAT32",
         "timestampUtc=$([DateTime]::UtcNow.ToString('o'))",
         "qemu=$((& $QemuFull --version | Select-Object -First 1))",
         "controller=PIIX3-UHCI",
@@ -168,7 +173,8 @@ try {
             if ($serial -and $serial -match '\[KERNEL-FAULT\]') { throw "QEMU kernel fault; inspect $SerialPath" }
             if ($serial -and $serial.Contains("[KERNEL] Entering main loop")) {
                 $Booted = $true
-                $Passed = $serial -match '\[USB-MSC\] registered'
+                $Passed = ($serial -match '\[USB-MSC\] registered') -and
+                    ($serial -match '\[DM12-QEMU-USB\] proof=PASS read-only-mount=PASS file-read=PASS unmount=PASS')
                 break
             }
         }
@@ -181,7 +187,7 @@ try {
         Add-Content -LiteralPath $ManifestPath -Encoding ascii -Value "usbImageSha256After=$usbHashAfter"
         if ($usbHashBefore -ne $usbHashAfter) { throw "Read-only USB backing image hash changed." }
         $lastLines = if ($serial) { (($serial -split "`r?`n") | Select-Object -Last 30) -join ' | ' } else { "(serial log is empty)" }
-        $stage = if ($Booted) { "boot completed without USB MSC shared-block registration" } else { "boot did not reach the main loop" }
+        $stage = if (-not $Booted) { "boot did not reach the main loop" } elseif ($serial -notmatch '\[USB-MSC\] registered') { "boot completed without USB MSC shared-block registration" } else { "USB FAT32 read-only mount proof did not pass" }
         throw "QEMU $stage. Serial: $SerialPath. Last lines: $lastLines"
     }
     Stop-UsbProbeQemu $QemuProcess $MonitorPort $SerialPath
@@ -192,9 +198,9 @@ try {
         "serialLog=$SerialPath",
         "uhciTrace=$TracePath",
         "usbImageSha256After=$usbHashAfter",
-        "result=PASS shared-block-registration=yes full-boot=yes usb-image-unchanged=yes"
+        "result=PASS shared-block-registration=yes read-only-fat32-mount=yes deterministic-file-read=yes clean-unmount=yes full-boot=yes usb-image-unchanged=yes"
     )
-    Write-Host "DM11 QEMU USB probe passed. Evidence: $WorkFull"
+    Write-Host "DM12 QEMU UHCI read-only USB proof passed. Evidence: $WorkFull"
 } catch {
     Add-Content -LiteralPath $ManifestPath -Encoding ascii -Value @(
         "result=FAIL",

@@ -42,5 +42,7 @@ _start:
 section .bss
 align 16
 stack_bottom:
-    resb 16384  ; 16 KB stack
+    ; Partition parsing combines bounded sector/interval scratch buffers with
+    ; the storage and UHCI call chain. Keep enough headroom for that path.
+    resb 65536  ; 64 KB kernel stack
 stack_top:

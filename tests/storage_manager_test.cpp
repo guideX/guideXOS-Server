@@ -13,6 +13,7 @@
 #include "../kernel/core/include/kernel/ata.h"
 #include "../kernel/core/include/kernel/usb_storage.h"
 #include "../kernel/arch/amd64/include/arch/amd64.h"
+#include "../kernel/arch/amd64/include/arch/uhci_transfer_logic.h"
 #include "../guideXOSBootLoader/guidexOSBootInfo.h"
 
 #include <algorithm>
@@ -2205,9 +2206,132 @@ TransferStatus bulk_transfer(uint8_t address, uint8_t endpoint, void* data,
 } // namespace hci
 }} // namespace kernel::usb
 
+static void run_uhci_transfer_logic_tests()
+{
+    using namespace kernel::arch::amd64::uhci;
+
+    check(sizeof(TransferDescriptor) == 16, "UHCI TD occupies four dwords");
+    check(alignof(TransferDescriptor) == 16, "UHCI TD alignment is 16 bytes");
+    check(offsetof(TransferDescriptor, status) == 4, "UHCI TD status offset");
+    check(offsetof(TransferDescriptor, token) == 8, "UHCI TD token offset");
+    check(offsetof(TransferDescriptor, buffer) == 12, "UHCI TD buffer offset");
+    check(sizeof(QueueHead) == 16, "UHCI QH occupies four dwords");
+    check(alignof(QueueHead) == 16, "UHCI QH alignment is 16 bytes");
+
+    uint32_t dma = 0;
+    check(virtual_to_dma(0x100000ULL, 0xFFFFFULL, dma) && dma == 0xFFFFFu,
+          "UHCI DMA preserves low identity addresses");
+    check(virtual_to_dma(0x220000ULL, 0x100000ULL, dma) && dma == 0x220000u,
+          "UHCI DMA maps the kernel load base");
+    check(virtual_to_dma(0x220000ULL, 0x123456ULL, dma) && dma == 0x243456u,
+          "UHCI DMA applies the kernel physical offset");
+    check(!virtual_to_dma(UINT64_MAX - 0x100ULL, 0x100101ULL, dma),
+          "UHCI DMA rejects physical addition overflow");
+    check(!virtual_to_dma(0x100000000ULL, 0x100000ULL, dma),
+          "UHCI DMA rejects addresses above 32 bits");
+
+    check(frame_list_qh_link(0x12345000u) == 0x12345002u,
+          "UHCI frame-list QH link sets the QH type bit");
+    check(td_depth_link(0x12345010u) == 0x12345014u,
+          "UHCI TD link selects depth-first traversal");
+    const uint32_t setupToken = make_token(0x2D, 5, 0, 0, 8);
+    check((setupToken & 0xFFu) == 0x2Du, "UHCI token encodes PID");
+    check(((setupToken >> 8) & 0x7Fu) == 5u, "UHCI token encodes device address");
+    check(((setupToken >> 15) & 0x0Fu) == 0u, "UHCI token encodes endpoint");
+    check(((setupToken >> 19) & 1u) == 0u, "UHCI token encodes DATA0 toggle");
+    check(((setupToken >> 21) & 0x7FFu) == 7u,
+          "UHCI token encodes maximum length minus one");
+    const uint32_t inToken = make_token(0x69, 127, 15, 1, 64);
+    check((inToken & 0xFFu) == 0x69u && ((inToken >> 8) & 0x7Fu) == 127u,
+          "UHCI IN token encodes PID and masked device address");
+    check(((inToken >> 15) & 0x0Fu) == 15u && ((inToken >> 19) & 1u) == 1u,
+          "UHCI token encodes endpoint and DATA1 toggle");
+    check(((inToken >> 21) & 0x7FFu) == 63u,
+          "UHCI token encodes a 64-byte packet length");
+    check(((make_token(0xE1, 1, 2, 0, 0) >> 21) & 0x7FFu) == 0x7FFu,
+          "UHCI zero-length token uses the no-data length encoding");
+
+    check((initial_active_status() & TD_ACTIVE) != 0,
+          "UHCI initialized TD is active");
+    check((initial_active_status() & TD_ERROR_COUNT) == TD_ERROR_COUNT,
+          "UHCI initialized TD has three hardware retries");
+    check((initial_active_status() & TD_INITIAL_ACTUAL_LENGTH) == 0x7FFu,
+          "UHCI initialized TD has the required actual-length sentinel");
+    check((initial_active_status(true) & TD_SHORT_PACKET_DETECT) != 0,
+          "UHCI IN TD enables short-packet termination");
+    check((initial_active_status(false) & TD_SHORT_PACKET_DETECT) == 0,
+          "UHCI OUT TD leaves short-packet detection disabled");
+    volatile TransferDescriptor descriptor = {};
+    prepare_descriptor(&descriptor, 0x1004u, setupToken, 0x2000u);
+    check(descriptor.status == 0,
+          "UHCI descriptor preparation keeps controller status inactive");
+    check(descriptor.link == 0x1004u && descriptor.token == setupToken &&
+          descriptor.buffer == 0x2000u,
+          "UHCI descriptor preparation publishes link token and buffer");
+    descriptor.status = initial_active_status();
+    check((descriptor.status & TD_ACTIVE) != 0,
+          "UHCI TD is activated after descriptor fields are prepared");
+    prepare_descriptor(&descriptor, 0x3004u, inToken, 0x4000u);
+    check(descriptor.status == 0 && descriptor.link == 0x3004u,
+          "UHCI descriptor reuse clears the previous completion status");
+    check(descriptor.token == inToken && descriptor.buffer == 0x4000u,
+          "UHCI descriptor reuse replaces token and DMA buffer");
+
+    check(decode_actual_length(0x7FFu) == 0,
+          "UHCI actual-length sentinel decodes to zero bytes");
+    check(decode_actual_length(0u) == 1,
+          "UHCI actual-length field decodes a one-byte transfer");
+    check(decode_actual_length(7u) == 8,
+          "UHCI actual-length field decodes an eight-byte transfer");
+    check(decode_actual_length(63u) == 64,
+          "UHCI actual-length field decodes a full packet");
+    check(decode_actual_length(2046u) == 2047,
+          "UHCI actual-length field decodes its maximum byte count");
+
+    check(elapsed_frames(10, 10) == 0,
+          "UHCI frame counter has zero elapsed frames at the start");
+    check(elapsed_frames(10, 17) == 7,
+          "UHCI frame counter measures ordinary progress");
+    check(elapsed_frames(2046, 3) == 5,
+          "UHCI frame counter handles 11-bit wraparound");
+    check(!frame_deadline_expired(2046, 3, 6),
+          "UHCI frame deadline stays open before the threshold across wrap");
+    check(frame_deadline_expired(2046, 4, 6),
+          "UHCI frame deadline expires at the threshold across wrap");
+
+    check(observe(TD_ACTIVE, 0x1000u, 0x1000u, 0x1004u, 0) ==
+          OBSERVATION_PENDING, "UHCI active TD with unchanged QH is pending");
+    check(observe(0, 0x1004u, 0x1000u, 0x1004u, 0) ==
+          OBSERVATION_SUCCESS, "UHCI inactive TD with no error succeeded");
+    check(observe(TD_STALLED, 0, 0, 0, 0) == OBSERVATION_STALL,
+          "UHCI stalled condition is classified");
+    check(observe(TD_DATA_BUFFER_ERROR, 0, 0, 0, 0) ==
+          OBSERVATION_DATA_BUFFER_ERROR, "UHCI data-buffer error is classified");
+    check(observe(TD_BABBLE, 0, 0, 0, 0) == OBSERVATION_BABBLE,
+          "UHCI babble condition is classified");
+    check(observe(TD_NAK, 0, 0, 0, 0) == OBSERVATION_NAK,
+          "UHCI NAK condition is classified");
+    check(observe(TD_CRC_TIMEOUT, 0, 0, 0, 0) == OBSERVATION_CRC_TIMEOUT,
+          "UHCI CRC timeout is classified");
+    check(observe(TD_BITSTUFF, 0, 0, 0, 0) == OBSERVATION_BITSTUFF,
+          "UHCI bit-stuff condition is classified");
+    check(observe(TD_ACTIVE, 0x2004u, 0x1000u, 0x2004u, 0) ==
+          OBSERVATION_QH_ADVANCED_ACTIVE,
+          "UHCI QH advance with an active TD is detected as inconsistent");
+    check(observe(TD_ACTIVE, 0x1000u, 0x1000u, 0x1004u,
+                  STS_HOST_SYSTEM_ERROR) == OBSERVATION_CONTROLLER_ERROR,
+          "UHCI host system error is classified");
+    check(observe(TD_ACTIVE, 0x1000u, 0x1000u, 0x1004u,
+                  STS_HOST_PROCESS_ERROR) == OBSERVATION_CONTROLLER_ERROR,
+          "UHCI host process error is classified");
+    check(observe(TD_ACTIVE, 0x1000u, 0x1000u, 0x1004u, STS_HALTED) ==
+          OBSERVATION_CONTROLLER_ERROR, "UHCI halted controller is classified");
+}
+
 int main()
 {
     using namespace kernel;
+    run_uhci_transfer_logic_tests();
     block::init();
     vfs::test_clear_mounts();
 
