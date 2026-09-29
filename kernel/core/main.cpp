@@ -72,6 +72,13 @@
 #if defined(GXOS_DM12_QEMU_USB_PROOF)
 #include "include/kernel/qemu_dm12_usb_proof.h"
 #endif
+#if defined(GXOS_DM13_QEMU_USB_WRITE_PROOF)
+#include "include/kernel/qemu_dm13_usb_write_proof.h"
+#endif
+#if defined(GXOS_DM13_QEMU_USB_WRITE_PROOF) || \
+    defined(GXOS_DM13_QEMU_USB_LIFECYCLE_PROOF)
+#include "include/kernel/qemu_dm13_usb_lifecycle_proof.h"
+#endif
 
 // Interrupt support
 #include "include/kernel/msi.h"
@@ -1002,6 +1009,13 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #endif
 #if defined(GXOS_DM12_QEMU_USB_PROOF)
         kernel::qemu_dm12_usb_proof::run();
+#endif
+#if defined(GXOS_DM13_QEMU_USB_WRITE_PROOF)
+        kernel::qemu_dm13_usb_write_proof::run();
+#endif
+#if defined(GXOS_DM13_QEMU_USB_LIFECYCLE_PROOF) && \
+    !defined(GXOS_DM13_QEMU_USB_WRITE_PROOF)
+        kernel::qemu_dm13_usb_lifecycle_proof::run();
 #endif
 
         if (is_bootinfo && bootinfo && bootinfo->RamdiskBase != 0 && bootinfo->RamdiskSize != 0) {

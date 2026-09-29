@@ -72,6 +72,9 @@ static uint32_t pci_read32(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offse
 
 static bool     s_available = false;
 static uint16_t s_ioBase    = 0;
+static uint8_t  s_controllerBus = 0;
+static uint8_t  s_controllerDevice = 0;
+static uint8_t  s_controllerFunction = 0;
 
 // ================================================================
 // Frame list (1024 entries × 4 bytes = 4 KB, must be 4 KB-aligned)
@@ -161,6 +164,9 @@ static bool find_uhci_controller()
                     uint32_t bar4 = pci_read32(static_cast<uint8_t>(bus), dev, func, 0x20);
                     if (bar4 & 0x01) {
                         s_ioBase = static_cast<uint16_t>(bar4 & 0xFFE0);
+                        s_controllerBus = static_cast<uint8_t>(bus);
+                        s_controllerDevice = dev;
+                        s_controllerFunction = func;
                         return true;
                     }
                 }
@@ -261,6 +267,18 @@ bool init()
 bool is_available()
 {
     return s_available;
+}
+
+bool get_controller_pci_location(uint32_t* segment, uint8_t* bus,
+                                 uint8_t* device, uint8_t* function)
+{
+    if (!s_available || !segment || !bus || !device || !function)
+        return false;
+    *segment = 0;
+    *bus = s_controllerBus;
+    *device = s_controllerDevice;
+    *function = s_controllerFunction;
+    return true;
 }
 
 DeviceSpeed port_reset(uint8_t port)

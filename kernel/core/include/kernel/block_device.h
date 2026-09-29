@@ -53,6 +53,8 @@ enum Status : uint8_t {
     BLOCK_ERR_INVALID   = 5,    // bad parameter
     BLOCK_ERR_UNSUPPORTED = 6,
     BLOCK_ERR_READ_ONLY = 7,    // media is write protected
+    BLOCK_ERR_WRITE_UNCERTAIN = 8, // a submitted write lacks validated completion
+    BLOCK_ERR_DURABILITY_UNVERIFIED = 9, // flush did not prove durability
 };
 
 // ================================================================
@@ -88,6 +90,17 @@ struct FlushReport {
     bool semanticsKnown;
 };
 
+enum UsbWriteOutcome : uint8_t {
+    USB_WRITE_OUTCOME_NONE = 0,
+    USB_WRITE_NOT_SUBMITTED,
+    USB_WRITE_SUBMITTED_UNKNOWN,
+    USB_WRITE_COMPLETED,
+    USB_WRITE_FAILED,
+    USB_WRITE_REMOVED,
+    USB_WRITE_REMOVED_UNKNOWN,
+    USB_WRITE_PARTIAL,
+};
+
 enum OperationKind : uint8_t {
     OPERATION_NONE = 0,
     OPERATION_READ,
@@ -113,6 +126,7 @@ struct TransportIoDiagnostic {
     uint8_t senseAsc;
     uint8_t senseAscq;
     uint8_t usbSyncCacheState;
+    uint8_t usbWriteOutcome;
     uint16_t usbVendorId;
     uint16_t usbProductId;
     uint8_t usbInterface;
@@ -223,6 +237,9 @@ bool unregister_device_if_matches(uint8_t index, uint64_t registrationId);
 // Marks a device unavailable after physical removal/fatal transport failure.
 // A pinned entry remains as an offline tombstone until the last pin is released.
 bool mark_device_offline(uint8_t index, uint64_t registrationId);
+// Clear write capability for one exact registration after authoritative
+// write-protect sense. This mutation advances the registry generation.
+bool mark_device_read_only(uint8_t index, uint64_t registrationId);
 
 // Pin/unpin a specific registration. Pin identity is an opaque 64-bit
 // incarnation token, independent of a reusable global slot.

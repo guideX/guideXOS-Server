@@ -99,7 +99,7 @@ static bool valid_range(const StorageDevice& dev, uint64_t lba,
                         uint32_t count)
 {
     return dev.capacityValid && count != 0 && lba <= dev.lastLBA &&
-        static_cast<uint64_t>(count) <= (dev.lastLBA + 1) - lba;
+        static_cast<uint64_t>(count - 1) <= dev.lastLBA - lba;
 }
 
 static void set_last_transfer(StorageDevice* dev, BotStage stage,
@@ -210,6 +210,10 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
         return usb::XFER_ERROR;
 
     dev->lastOpcode = command[0];
+    const bool writeCommand = command[0] == SCSI_WRITE_10 ||
+                              command[0] == SCSI_WRITE_16;
+    if (writeCommand) dev->lastWriteOutcome = block::USB_WRITE_NOT_SUBMITTED;
+
     dev->lastCswStatus = 0xFF;
     dev->lastSenseValid = false;
     CommandBlockWrapper cbw;
@@ -217,9 +221,22 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
 
     dev->lastBotStage = BOT_STAGE_CBW;
     uint16_t sent = 0;
+    if (writeCommand)
+        dev->lastWriteOutcome = block::USB_WRITE_SUBMITTED_UNKNOWN;
     usb::TransferStatus status = usb::hci::bulk_transfer(
         dev->usbAddress, dev->bulkOutEP, &cbw, sizeof(cbw), &sent);
     if (status != usb::XFER_SUCCESS || sent != sizeof(cbw)) {
+        if (writeCommand) {
+            if (status == usb::XFER_CANCELLED ||
+                !usb::get_device(dev->usbAddress))
+                dev->lastWriteOutcome = sent == 0
+                    ? block::USB_WRITE_REMOVED
+                    : block::USB_WRITE_REMOVED_UNKNOWN;
+            else
+                dev->lastWriteOutcome = sent == 0
+                    ? block::USB_WRITE_NOT_SUBMITTED
+                    : block::USB_WRITE_SUBMITTED_UNKNOWN;
+        }
         if (status == usb::XFER_SUCCESS) status = usb::XFER_DATA_UNDERRUN;
         set_last_transfer(dev, BOT_STAGE_CBW, status);
         (void)bot_reset_recovery(dev);
@@ -232,6 +249,9 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
         status = transfer_data(dev, direction, data, dataLength,
                                dataTransferred);
         if (status != usb::XFER_SUCCESS) {
+            if (writeCommand && (status == usb::XFER_CANCELLED ||
+                                 !usb::get_device(dev->usbAddress)))
+                dev->lastWriteOutcome = block::USB_WRITE_REMOVED_UNKNOWN;
             set_last_transfer(dev, BOT_STAGE_DATA, status);
             if (status != usb::XFER_STALL ||
                 !clear_endpoint_halt(dev,
@@ -249,6 +269,9 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
     status = usb::hci::bulk_transfer(dev->usbAddress, dev->bulkInEP,
                                      csw, sizeof(csw), &received);
     if (status != usb::XFER_SUCCESS || received != sizeof(csw)) {
+        if (writeCommand && (status == usb::XFER_CANCELLED ||
+                             !usb::get_device(dev->usbAddress)))
+            dev->lastWriteOutcome = block::USB_WRITE_REMOVED_UNKNOWN;
         if (status == usb::XFER_SUCCESS) status = usb::XFER_DATA_UNDERRUN;
         set_last_transfer(dev, BOT_STAGE_CSW, status);
         (void)bot_reset_recovery(dev);
@@ -272,15 +295,24 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
         return status;
     }
     if (csw[12] == CSW_STATUS_PHASE_ERROR) {
+        if (writeCommand) dev->lastWriteOutcome = block::USB_WRITE_SUBMITTED_UNKNOWN;
         status = usb::XFER_ERROR;
         set_last_transfer(dev, BOT_STAGE_VALIDATE, status);
         (void)bot_reset_recovery(dev);
         return status;
     }
     if (csw[12] == CSW_STATUS_FAILED) {
+        if (writeCommand) dev->lastWriteOutcome = dataTransferred != 0
+            ? block::USB_WRITE_PARTIAL : block::USB_WRITE_FAILED;
         set_last_transfer(dev, BOT_STAGE_VALIDATE, usb::XFER_STALL);
         return usb::XFER_STALL;
     }
+    if (writeCommand && (dataTransferred != dataLength || cswResidue != 0)) {
+        dev->lastWriteOutcome = block::USB_WRITE_PARTIAL;
+        set_last_transfer(dev, BOT_STAGE_VALIDATE, usb::XFER_DATA_UNDERRUN);
+        return usb::XFER_DATA_UNDERRUN;
+    }
+    if (writeCommand) dev->lastWriteOutcome = block::USB_WRITE_COMPLETED;
     if (actualDataLength) *actualDataLength = dataTransferred;
     set_last_transfer(dev, BOT_STAGE_VALIDATE, usb::XFER_SUCCESS);
     return usb::XFER_SUCCESS;
@@ -584,15 +616,65 @@ static block::Status block_flush(uint8_t index)
     if (index >= MAX_STORAGE_DEVICES) return block::BLOCK_ERR_INVALID;
     StorageDevice& dev = s_devices[index];
     if (!dev.active || !dev.ready || dev.transportFaulted)
-        return block::BLOCK_ERR_NO_MEDIA;
-    if (dev.syncCacheState != SYNC_CACHE_SUCCEEDED)
-        return block::BLOCK_ERR_UNSUPPORTED;
+        return dev.writeCompletedAwaitingFlush
+            ? block::BLOCK_ERR_DURABILITY_UNVERIFIED
+            : block::BLOCK_ERR_NO_MEDIA;
+    if (dev.syncCacheState == SYNC_CACHE_UNSUPPORTED)
+        return dev.writeCompletedAwaitingFlush
+            ? block::BLOCK_ERR_DURABILITY_UNVERIFIED
+            : block::BLOCK_ERR_UNSUPPORTED;
     const usb::TransferStatus transfer = synchronize_cache(index);
-    const block::Status status = map_transfer_status(dev, transfer);
+    block::Status status = map_transfer_status(dev, transfer);
+    if (transfer == usb::XFER_SUCCESS) {
+        dev.writeCompletedAwaitingFlush = false;
+    } else if (dev.writeCompletedAwaitingFlush) {
+        status = block::BLOCK_ERR_DURABILITY_UNVERIFIED;
+    }
     dev.lastBlockStatus = static_cast<uint8_t>(status);
     if (dev.transportFaulted && dev.blockRegistered)
         (void)block::mark_device_offline(dev.blockDeviceIndex,
                                          dev.blockRegistrationId);
+    return status;
+}
+
+static block::Status block_write(uint8_t index, uint64_t lba,
+                                 uint32_t count, const void* buffer)
+{
+    if (index >= MAX_STORAGE_DEVICES || !buffer || count == 0)
+        return block::BLOCK_ERR_INVALID;
+    StorageDevice& dev = s_devices[index];
+    if (!dev.active || !dev.ready || dev.transportFaulted)
+        return block::BLOCK_ERR_NO_MEDIA;
+    const usb::TransferStatus transfer = write_sectors(index, lba, count, buffer);
+    block::Status status = map_transfer_status(dev, transfer);
+
+    const uint8_t senseKey = dev.lastSenseValid
+        ? static_cast<uint8_t>(dev.lastSense.senseKey & 0x0Fu) : 0xFFu;
+    if (senseKey == 0x07u && transfer != usb::XFER_SUCCESS) {
+        // DATA PROTECT is authoritative even if MODE SENSE said writable.
+        dev.writeProtected = true;
+        (void)block::mark_device_read_only(dev.blockDeviceIndex,
+                                           dev.blockRegistrationId);
+        status = block::BLOCK_ERR_READ_ONLY;
+    } else if (dev.lastWriteOutcome == block::USB_WRITE_SUBMITTED_UNKNOWN ||
+               dev.lastWriteOutcome == block::USB_WRITE_REMOVED_UNKNOWN ||
+               dev.lastWriteOutcome == block::USB_WRITE_PARTIAL) {
+        status = block::BLOCK_ERR_WRITE_UNCERTAIN;
+    } else if (dev.lastWriteOutcome == block::USB_WRITE_REMOVED) {
+        status = block::BLOCK_ERR_NO_MEDIA;
+    }
+
+    dev.lastBlockStatus = static_cast<uint8_t>(status);
+    if (dev.lastWriteOutcome == block::USB_WRITE_REMOVED_UNKNOWN ||
+        dev.lastWriteOutcome == block::USB_WRITE_REMOVED) {
+        dev.transportFaulted = true;
+        if (dev.blockRegistered)
+            (void)block::mark_device_offline(dev.blockDeviceIndex,
+                                             dev.blockRegistrationId);
+    } else if (dev.transportFaulted && dev.blockRegistered) {
+        (void)block::mark_device_offline(dev.blockDeviceIndex,
+                                         dev.blockRegistrationId);
+    }
     return status;
 }
 
@@ -611,6 +693,7 @@ static bool get_io_diagnostic(uint8_t index,
     out.senseAsc = dev.lastSenseValid ? dev.lastSense.asc : 0;
     out.senseAscq = dev.lastSenseValid ? dev.lastSense.ascq : 0;
     out.usbSyncCacheState = static_cast<uint8_t>(dev.syncCacheState);
+    out.usbWriteOutcome = static_cast<uint8_t>(dev.lastWriteOutcome);
     out.usbVendorId = dev.usbVendorId;
     out.usbProductId = dev.usbProductId;
     out.usbInterface = dev.interfaceNum;
@@ -628,9 +711,10 @@ static bool register_block_device(uint8_t index)
     descriptor.sectorSize = dev.blockSize;
     make_block_name(dev, descriptor.name, sizeof(descriptor.name));
     descriptor.readFn = block_read;
-    // Shared USB writes stay disabled until the BOT/HCI write + cache-sync
-    // contract has runtime hardware proof. Keep ordinary VFS mounts read-only.
-    descriptor.writeFn = nullptr;
+    // DM13 proved the private BOT/SCSI production write path before enabling
+    // this callback. Persistence remains separately gated by a trusted
+    // SYNCHRONIZE CACHE result.
+    descriptor.writeFn = dev.writeProtected ? nullptr : block_write;
     descriptor.flushFn = dev.syncCacheState == SYNC_CACHE_SUCCEEDED
         ? block_flush : nullptr;
     descriptor.flushSemanticsKnown =
@@ -645,6 +729,11 @@ static bool register_block_device(uint8_t index)
     descriptor.usbVendorId = dev.usbVendorId;
     descriptor.usbProductId = dev.usbProductId;
     descriptor.usbPort = dev.usbPort;
+    descriptor.pciLocationValid = dev.controllerPciLocationValid;
+    descriptor.pciSegment = dev.controllerPciSegment;
+    descriptor.pciBus = dev.controllerPciBus;
+    descriptor.pciDevice = dev.controllerPciDevice;
+    descriptor.pciFunction = dev.controllerPciFunction;
     descriptor.usbInterface = dev.interfaceNum;
     descriptor.usbLun = dev.lun;
     descriptor.usbSyncCacheState = static_cast<uint8_t>(dev.syncCacheState);
@@ -706,6 +795,11 @@ bool probe(uint8_t usbAddress)
         dev.usbAddress = usbAddress;
         dev.interfaceNum = interfaceNumber;
         dev.usbPort = usbDev->hubPort;
+        dev.controllerPciLocationValid = usbDev->controllerPciLocationValid;
+        dev.controllerPciSegment = usbDev->controllerPciSegment;
+        dev.controllerPciBus = usbDev->controllerPciBus;
+        dev.controllerPciDevice = usbDev->controllerPciDevice;
+        dev.controllerPciFunction = usbDev->controllerPciFunction;
         dev.usbVendorId = usbDev->devDesc.idVendor;
         dev.usbProductId = usbDev->devDesc.idProduct;
         dev.lun = 0;
@@ -792,7 +886,9 @@ bool probe(uint8_t usbAddress)
         serial::puts(dev.syncCacheState == SYNC_CACHE_SUCCEEDED ? "succeeded" :
                      dev.syncCacheState == SYNC_CACHE_UNSUPPORTED ? "unsupported" :
                      dev.syncCacheState == SYNC_CACHE_FAILED ? "failed" : "unknown");
-        serial::puts(" access=read-only model=");
+        serial::puts(" access=");
+        serial::puts(dev.writeProtected ? "read-only" : "read-write");
+        serial::puts(" model=");
         serial::puts(dev.model);
         serial::putc('\n');
         claimed = true;
@@ -889,12 +985,14 @@ usb::TransferStatus write_sectors(uint8_t devIndex, uint64_t lba,
     StorageDevice* dev = &s_devices[devIndex];
     if (!dev->active || !dev->ready || dev->transportFaulted)
         return usb::XFER_CANCELLED;
+    dev->lastWriteOutcome = block::USB_WRITE_NOT_SUBMITTED;
+    dev->lastWriteCompletedSectors = 0;
     if (dev->writeProtected) return usb::XFER_READ_ONLY;
-    if (dev->syncCacheState != SYNC_CACHE_SUCCEEDED)
-        return usb::XFER_NOT_SUPPORTED;
-    if (!valid_range(*dev, lba, count)) return usb::XFER_ERROR;
+    if (!valid_block_size(dev->blockSize) || !valid_range(*dev, lba, count))
+        return usb::XFER_ERROR;
     const uint64_t totalBytes = static_cast<uint64_t>(count) * dev->blockSize;
-    if (static_cast<uint64_t>(static_cast<size_t>(totalBytes)) != totalBytes)
+    if (totalBytes > MAX_BOT_TRANSFER_BYTES * 0x10000ull ||
+        static_cast<uint64_t>(static_cast<size_t>(totalBytes)) != totalBytes)
         return usb::XFER_BUFFER_ERROR;
 
     const uint8_t* cursor = static_cast<const uint8_t*>(buffer);
@@ -921,14 +1019,37 @@ usb::TransferStatus write_sectors(uint8_t devIndex, uint64_t lba,
         const usb::TransferStatus status = run_command(
             dev, 0x00, command, commandLength,
             const_cast<uint8_t*>(cursor), bytes, &actual);
-        if (status != usb::XFER_SUCCESS) return status;
-        if (actual != bytes) return usb::XFER_DATA_UNDERRUN;
+        if (status != usb::XFER_SUCCESS || actual != bytes) {
+            if (dev->lastWriteCompletedSectors != 0 &&
+                dev->lastWriteOutcome != block::USB_WRITE_REMOVED &&
+                dev->lastWriteOutcome != block::USB_WRITE_REMOVED_UNKNOWN)
+                dev->lastWriteOutcome = block::USB_WRITE_PARTIAL;
+            if (status == usb::XFER_SUCCESS) return usb::XFER_DATA_UNDERRUN;
+            return status;
+        }
         cursor += bytes;
         currentLba += chunk;
         remaining -= chunk;
+        dev->lastWriteCompletedSectors += chunk;
     }
+    dev->writeCompletedAwaitingFlush = true;
     // The caller must still issue SYNCHRONIZE CACHE after the full write.
     return usb::XFER_SUCCESS;
+}
+
+const char* write_outcome_name(block::UsbWriteOutcome outcome)
+{
+    switch (outcome) {
+        case block::USB_WRITE_OUTCOME_NONE: return "none";
+        case block::USB_WRITE_NOT_SUBMITTED: return "not submitted";
+        case block::USB_WRITE_SUBMITTED_UNKNOWN: return "completion unknown";
+        case block::USB_WRITE_COMPLETED: return "completed; durability pending";
+        case block::USB_WRITE_FAILED: return "failed";
+        case block::USB_WRITE_REMOVED: return "removed before submission";
+        case block::USB_WRITE_REMOVED_UNKNOWN: return "removed; completion unknown";
+        case block::USB_WRITE_PARTIAL: return "partial or uncertain";
+        default: return "unknown";
+    }
 }
 
 usb::TransferStatus test_unit_ready(uint8_t devIndex)
@@ -961,6 +1082,7 @@ usb::TransferStatus synchronize_cache(uint8_t devIndex)
         sizeof(command), nullptr, 0);
     if (status == usb::XFER_SUCCESS) {
         dev.syncCacheState = SYNC_CACHE_SUCCEEDED;
+        dev.writeCompletedAwaitingFlush = false;
     } else {
         const bool illegalRequest = dev.lastSenseValid &&
             (dev.lastSense.senseKey & 0x0Fu) == 0x05 &&

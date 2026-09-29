@@ -1,5 +1,7 @@
 #include "include/kernel/storage_manager.h"
 #include "include/kernel/vfs.h"
+#include "include/kernel/usb.h"
+#include "include/kernel/usb_storage.h"
 #include "../../guideXOSBootLoader/guidexOSBootInfo.h"
 
 namespace kernel {
@@ -43,6 +45,94 @@ static const uint8_t* find_device_path_node(uint8_t type, uint8_t subtype,
     return nullptr;
 }
 
+static block::BootProvenance match_usb_boot_source(
+    const block::BlockDevice& device)
+{
+    if (device.type != block::BDEV_USB_MASS || !s_bootSourceValid ||
+        !device.usbIdentityValid)
+        return block::BOOT_PROVENANCE_UNKNOWN;
+
+    const uint8_t* usbNode = nullptr;
+    const uint8_t* classNode = nullptr;
+    const uint8_t* wwidNode = nullptr;
+    const uint8_t* lunNode = nullptr;
+    uint8_t usbCount = 0, classCount = 0, wwidCount = 0, lunCount = 0;
+    uint8_t hardDriveCount = 0;
+    bool hasHardDriveNode = false;
+    uint32_t offset = 0;
+    while (offset < s_bootSource.DevicePathLength) {
+        const uint8_t* node = s_bootSource.DevicePath + offset;
+        const uint16_t length = read_u16(node + 2);
+        if (node[0] == 0x03u && node[1] == 0x05u) {
+            ++usbCount;
+            usbNode = node;
+        } else if (node[0] == 0x03u && node[1] == 0x0Fu) {
+            ++classCount;
+            classNode = node;
+        } else if (node[0] == 0x03u && node[1] == 0x10u) {
+            ++wwidCount;
+            wwidNode = node;
+        } else if (node[0] == 0x03u && node[1] == 0x11u) {
+            ++lunCount;
+            lunNode = node;
+        } else if (node[0] == 0x04u && node[1] == 0x01u) {
+            ++hardDriveCount;
+            hasHardDriveNode = length == 42u;
+        }
+        offset += length;
+    }
+
+    // The current UHCI driver has no hub topology support. A direct USB path
+    // has exactly one USB node identifying the root port and interface.
+    if (usbCount != 1 || !usbNode || read_u16(usbNode + 2) != 6u ||
+        hardDriveCount != 1 || !hasHardDriveNode ||
+        classCount > 1 || wwidCount > 1 || lunCount > 1)
+        return block::BOOT_PROVENANCE_UNKNOWN;
+
+    if (usbNode[4] != device.usbPort ||
+        usbNode[5] != device.usbInterface)
+        return block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT;
+
+    if (classNode) {
+        if (read_u16(classNode + 2) != 11u)
+            return block::BOOT_PROVENANCE_UNKNOWN;
+        const uint16_t vendor = read_u16(classNode + 4);
+        const uint16_t product = read_u16(classNode + 6);
+        if ((vendor != 0xFFFFu && vendor != device.usbVendorId) ||
+            (product != 0xFFFFu && product != device.usbProductId) ||
+            (classNode[8] != 0xFFu &&
+             classNode[8] != usb::CLASS_MASS_STORAGE) ||
+            (classNode[9] != 0xFFu &&
+             classNode[9] != usb::MSC_SUBCLASS_SCSI_TRANSPARENT) ||
+            (classNode[10] != 0xFFu &&
+             classNode[10] != usb::MSC_PROTOCOL_BULK_ONLY))
+            return block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT;
+    }
+
+    // WWID paths select a device by USB serial, while the current USB core
+    // does not retain the USB string descriptor. VID/PID alone cannot prove
+    // that identity, so leave this form unknown.
+    if (wwidNode) {
+        if (read_u16(wwidNode + 2) < 10u)
+            return block::BOOT_PROVENANCE_UNKNOWN;
+        const uint16_t interfaceNumber = read_u16(wwidNode + 4);
+        const uint16_t vendor = read_u16(wwidNode + 6);
+        const uint16_t product = read_u16(wwidNode + 8);
+        if (interfaceNumber != device.usbInterface ||
+            vendor != device.usbVendorId || product != device.usbProductId)
+            return block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT;
+        return block::BOOT_PROVENANCE_UNKNOWN;
+    }
+
+    const uint8_t pathLun = lunNode ? lunNode[4] : 0u;
+    if (lunNode && read_u16(lunNode + 2) != 5u)
+        return block::BOOT_PROVENANCE_UNKNOWN;
+    if (pathLun != device.usbLun)
+        return block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT;
+
+    return block::BOOT_PROVENANCE_BOOT_BACKING;
+}
+
 static block::BootProvenance match_boot_source(const block::BlockDevice& device)
 {
     if (device.bootProvenance != block::BOOT_PROVENANCE_UNKNOWN)
@@ -76,10 +166,7 @@ static block::BootProvenance match_boot_source(const block::BlockDevice& device)
             : block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT;
     }
 
-    // UEFI SATA paths encode HBA port and multiplier port. The legacy ATA PIO
-    // driver does not retain an authoritative mapping for these values.
-    (void)find_device_path_node(0x03u, 0x12u, 10u);
-    return block::BOOT_PROVENANCE_UNKNOWN;
+    return match_usb_boot_source(device);
 }
 
 static void copy_text(char* dst, size_t capacity, const char* src)
@@ -155,6 +242,24 @@ bool query_device_capabilities(uint8_t globalIndex, DeviceCapabilities& out)
     out.usbInterface = dev->usbInterface;
     out.usbLun = dev->usbLun;
     out.usbSyncCacheState = dev->usbSyncCacheState;
+    if (dev->type == block::BDEV_USB_MASS && dev->getIoDiagnosticFn) {
+        block::TransportIoDiagnostic io = {};
+        if (dev->getIoDiagnosticFn(dev->driverIndex, io) && io.valid)
+            out.usbSyncCacheState = io.usbSyncCacheState;
+    }
+    if (dev->type == block::BDEV_USB_MASS) {
+        const bool syncCacheSucceeded = out.usbSyncCacheState ==
+            usb_storage::SYNC_CACHE_SUCCEEDED;
+        if (out.usbSyncCacheState == usb_storage::SYNC_CACHE_UNSUPPORTED)
+            out.flushSupported = false;
+        out.flushSemanticsKnown = out.flushSemanticsKnown &&
+            syncCacheSucceeded;
+    }
+    out.controllerPciLocationValid = dev->pciLocationValid;
+    out.controllerPciSegment = dev->pciSegment;
+    out.controllerPciBus = dev->pciBus;
+    out.controllerPciDevice = dev->pciDevice;
+    out.controllerPciFunction = dev->pciFunction;
     out.logicalSectorSize = dev->sectorSize;
     out.totalLogicalSectors = dev->totalSectors;
     out.requiredBufferAlignment = dev->requiredBufferAlignment;
@@ -170,8 +275,8 @@ bool query_device_capabilities(uint8_t globalIndex, DeviceCapabilities& out)
         // expose an untrusted/contradictory explicit-flush contract.
         out.persistence = dev->flushFn
             ? PERSISTENCE_UNKNOWN : PERSISTENCE_SYNCHRONOUS_DURABLE;
-    } else if (dev->flushFn) {
-        out.persistence = dev->flushSemanticsKnown
+    } else if (out.flushSupported) {
+        out.persistence = out.flushSemanticsKnown
             ? PERSISTENCE_FLUSH_REQUIRED : PERSISTENCE_UNKNOWN;
     } else {
         out.persistence = PERSISTENCE_UNKNOWN;
@@ -252,6 +357,11 @@ bool capture_target_identity(uint8_t globalIndex, TargetIdentity& out)
     snapshot.usbPort = dev->usbPort;
     snapshot.usbInterface = dev->usbInterface;
     snapshot.usbLun = dev->usbLun;
+    snapshot.pciLocationValid = dev->pciLocationValid;
+    snapshot.pciSegment = dev->pciSegment;
+    snapshot.pciBus = dev->pciBus;
+    snapshot.pciDevice = dev->pciDevice;
+    snapshot.pciFunction = dev->pciFunction;
     copy_text(snapshot.name, sizeof(snapshot.name), dev->name);
     copy_text(snapshot.model, sizeof(snapshot.model), dev->model);
     copy_text(snapshot.serial, sizeof(snapshot.serial), dev->serial);
@@ -276,6 +386,11 @@ bool target_identities_equal(const TargetIdentity& left,
            left.usbPort == right.usbPort &&
            left.usbInterface == right.usbInterface &&
            left.usbLun == right.usbLun &&
+           left.pciLocationValid == right.pciLocationValid &&
+           left.pciSegment == right.pciSegment &&
+           left.pciBus == right.pciBus &&
+           left.pciDevice == right.pciDevice &&
+           left.pciFunction == right.pciFunction &&
            text_equal(left.name, right.name, sizeof(left.name)) &&
            text_equal(left.model, right.model, sizeof(left.model)) &&
            text_equal(left.serial, right.serial, sizeof(left.serial));
@@ -390,6 +505,7 @@ bool validate_destructive_target(const TargetIdentity& target,
     result.issues = SAFETY_ISSUE_NONE;
     result.identityStatus = revalidate_target_identity(target);
     result.mountSafety = DEVICE_IDENTITY_UNKNOWN;
+    result.bootSafety = BOOT_DEVICE_IDENTITY_UNKNOWN;
     result.diskState = DISK_STATE_UNREADABLE;
 
     switch (result.identityStatus) {
@@ -407,6 +523,13 @@ bool validate_destructive_target(const TargetIdentity& target,
             break;
     }
     if (result.identityStatus != TARGET_VALID) return false;
+
+    const BootProtection boot = query_boot_protection(target);
+    result.bootSafety = boot.safety;
+    if (boot.safety == BOOT_DEVICE_IS_TARGET)
+        result.issues |= SAFETY_ISSUE_BOOT_BACKING;
+    else if (boot.safety == BOOT_DEVICE_IDENTITY_UNKNOWN)
+        result.issues |= SAFETY_ISSUE_BOOT_IDENTITY_UNKNOWN;
 
     DeviceCapabilities caps;
     if (!query_device_capabilities(target.globalIndex, caps)) {

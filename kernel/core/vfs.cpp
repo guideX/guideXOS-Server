@@ -244,6 +244,8 @@ static const char* block_status_name(block::Status status)
         case block::BLOCK_ERR_INVALID: return "BLOCK_ERR_INVALID";
         case block::BLOCK_ERR_UNSUPPORTED: return "BLOCK_ERR_UNSUPPORTED";
         case block::BLOCK_ERR_READ_ONLY: return "BLOCK_ERR_READ_ONLY";
+        case block::BLOCK_ERR_WRITE_UNCERTAIN: return "USB write completion is uncertain";
+        case block::BLOCK_ERR_DURABILITY_UNVERIFIED: return "USB cache synchronization failed; durability could not be verified";
         default: return "BLOCK_STATUS_UNKNOWN";
     }
 }
@@ -887,6 +889,8 @@ static Status map_block_status(block::Status status)
         case block::BLOCK_ERR_TIMEOUT: return VFS_ERR_IO_TIMEOUT;
         case block::BLOCK_ERR_UNSUPPORTED: return VFS_ERR_NOT_SUPPORTED;
         case block::BLOCK_ERR_READ_ONLY: return VFS_ERR_READ_ONLY;
+        case block::BLOCK_ERR_WRITE_UNCERTAIN: return VFS_ERR_WRITE_UNCERTAIN;
+        case block::BLOCK_ERR_DURABILITY_UNVERIFIED: return VFS_ERR_DURABILITY_UNVERIFIED;
         case block::BLOCK_ERR_INVALID: return VFS_ERR_INVALID;
         case block::BLOCK_ERR_IO:
         default: return VFS_ERR_IO;
@@ -2191,6 +2195,8 @@ const char* status_name(Status status)
         case VFS_ERR_NOT_EMPTY: return "Directory is not empty";
         case VFS_ERR_NO_SPACE: return "No space left";
         case VFS_ERR_READ_ONLY: return "Media is read-only";
+        case VFS_ERR_WRITE_UNCERTAIN: return "USB write completion is uncertain";
+        case VFS_ERR_DURABILITY_UNVERIFIED: return "USB write completed but durability could not be verified";
         case VFS_ERR_INVALID: return "Invalid filesystem operation";
         case VFS_ERR_IO: return "Filesystem I/O failed";
         case VFS_ERR_NOT_MOUNT: return "No mounted filesystem for path";

@@ -292,6 +292,23 @@ bool mark_device_offline(uint8_t index, uint64_t registrationId)
     return true;
 }
 
+bool mark_device_read_only(uint8_t index, uint64_t registrationId)
+{
+    if (index >= MAX_BLOCK_DEVICES || registrationId == 0) return false;
+    lock_registry();
+    BlockDevice& dev = s_devices[index];
+    if (!dev.active || dev.registrationId != registrationId) {
+        unlock_registry();
+        return false;
+    }
+    if (dev.writeFn) {
+        dev.writeFn = nullptr;
+        bump_generation_locked();
+    }
+    unlock_registry();
+    return true;
+}
+
 bool pin_device(uint8_t index, uint64_t registrationId)
 {
     if (index >= MAX_BLOCK_DEVICES || registrationId == 0) return false;

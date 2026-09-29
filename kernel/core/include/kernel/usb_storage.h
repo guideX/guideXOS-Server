@@ -3,6 +3,7 @@
 
 #include "kernel/types.h"
 #include "kernel/usb.h"
+#include "kernel/block_device.h"
 
 namespace kernel {
 namespace usb_storage {
@@ -106,6 +107,11 @@ struct StorageDevice {
     uint8_t usbAddress;
     uint8_t interfaceNum;
     uint8_t usbPort;
+    bool controllerPciLocationValid;
+    uint32_t controllerPciSegment;
+    uint8_t controllerPciBus;
+    uint8_t controllerPciDevice;
+    uint8_t controllerPciFunction;
     uint8_t bulkInEP;
     uint8_t bulkOutEP;
     uint16_t bulkInMaxPkt;
@@ -123,6 +129,9 @@ struct StorageDevice {
     uint8_t lastCswStatus;
     uint8_t lastTransferStatus;
     uint8_t lastBlockStatus;
+    block::UsbWriteOutcome lastWriteOutcome;
+    uint32_t lastWriteCompletedSectors;
+    bool writeCompletedAwaitingFlush;
     SCSISenseData lastSense;
     bool lastSenseValid;
     SCSIInquiryData inquiry;
@@ -146,6 +155,7 @@ usb::TransferStatus write_sectors(uint8_t devIndex, uint64_t lba,
 usb::TransferStatus test_unit_ready(uint8_t devIndex);
 usb::TransferStatus request_sense(uint8_t devIndex, SCSISenseData* sense);
 usb::TransferStatus synchronize_cache(uint8_t devIndex);
+const char* write_outcome_name(block::UsbWriteOutcome outcome);
 
 } // namespace usb_storage
 } // namespace kernel

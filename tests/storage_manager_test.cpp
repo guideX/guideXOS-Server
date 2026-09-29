@@ -206,7 +206,11 @@ uint8_t register_fake(FakeDisk& disk, bool writable = false,
                       uint8_t pciBus = 0, uint8_t pciDevice = 0,
                       uint8_t pciFunction = 0, bool ataTargetValid = false,
                       uint8_t ataChannel = 0, uint8_t ataTarget = 0,
-                      uint32_t namespaceId = 0)
+                      uint32_t namespaceId = 0,
+                      bool usbIdentityValid = false,
+                      uint16_t usbVendorId = 0, uint16_t usbProductId = 0,
+                      uint8_t usbPort = 0, uint8_t usbInterface = 0,
+                      uint8_t usbLun = 0)
 {
     disk.driverId = static_cast<uint8_t>(g_nextDriverId++);
     g_fakeDisks[disk.driverId] = &disk;
@@ -236,6 +240,12 @@ uint8_t register_fake(FakeDisk& disk, bool writable = false,
     descriptor.ataChannel = ataChannel;
     descriptor.ataTarget = ataTarget;
     descriptor.namespaceId = namespaceId;
+    descriptor.usbIdentityValid = usbIdentityValid;
+    descriptor.usbVendorId = usbVendorId;
+    descriptor.usbProductId = usbProductId;
+    descriptor.usbPort = usbPort;
+    descriptor.usbInterface = usbInterface;
+    descriptor.usbLun = usbLun;
     const uint8_t index = block::register_device(descriptor);
     if (index != 0xFF) {
         disk.registryIndex = index;
@@ -299,7 +309,15 @@ struct FakeBot {
     bool failNextCsw;
     bool failRequestSense;
     bool disconnectDuringData;
+    bool disconnectDuringDataOut;
+    bool disconnectBeforeCsw;
+    bool disconnectDuringSyncCache;
     bool failResetNext;
+    uint8_t lastCbwFlags;
+    uint32_t lastCbwTransferLength;
+    uint8_t lastCbwCommandLength;
+    uint8_t lastWriteCommand[16];
+    uint8_t lastWriteCommandLength;
     uint8_t corruptNextCsw;
     bool noMedia;
     bool notReady;
@@ -322,7 +340,11 @@ struct FakeBot {
         failSenseKey(0), failSenseAsc(0), failSenseAscq(0), failNextCbw(false),
         failNextDataIn(false), failNextDataOut(false), failNextCsw(false),
         failRequestSense(false), disconnectDuringData(false),
-        failResetNext(false), corruptNextCsw(0), noMedia(false), notReady(false), read10Commands(0),
+        disconnectDuringDataOut(false), disconnectBeforeCsw(false),
+        disconnectDuringSyncCache(false), failResetNext(false),
+        lastCbwFlags(0), lastCbwTransferLength(0), lastCbwCommandLength(0),
+        lastWriteCommand{}, lastWriteCommandLength(0), corruptNextCsw(0),
+        noMedia(false), notReady(false), read10Commands(0),
         read16Commands(0), write10Commands(0), write16Commands(0),
         resetCommands(0), clearHaltCommands(0), lastOpcode(0) {}
 };
@@ -905,6 +927,12 @@ void fake_usb_prepare_command()
         if (opcode == usb_storage::SCSI_READ_16) ++bot.read16Commands;
         if (opcode == usb_storage::SCSI_WRITE_10) ++bot.write10Commands;
         if (opcode == usb_storage::SCSI_WRITE_16) ++bot.write16Commands;
+        if (opcode == usb_storage::SCSI_WRITE_10 ||
+            opcode == usb_storage::SCSI_WRITE_16) {
+            std::memcpy(bot.lastWriteCommand, bot.command,
+                        bot.commandLength);
+            bot.lastWriteCommandLength = bot.commandLength;
+        }
         if (count == 0 || lba >= fake_usb_capacity() ||
             count > fake_usb_capacity() - lba) {
             bot.commandFailed = true;
@@ -949,8 +977,11 @@ usb::TransferStatus fake_usb_bulk_transfer(uint8_t deviceAddress,
             bot.commandActive = true;
             bot.tag = usb_le32(cbw + 4);
             bot.transferLength = usb_le32(cbw + 8);
+            bot.lastCbwTransferLength = bot.transferLength;
             bot.direction = cbw[12];
+            bot.lastCbwFlags = cbw[12];
             bot.commandLength = cbw[14] & 0x1Fu;
+            bot.lastCbwCommandLength = bot.commandLength;
             if (bot.commandLength == 0 || bot.commandLength > 16)
                 return usb::XFER_ERROR;
             std::memset(bot.command, 0, sizeof(bot.command));
@@ -964,17 +995,27 @@ usb::TransferStatus fake_usb_bulk_transfer(uint8_t deviceAddress,
             return bot.commandFailed && !bot.dataStageStalled
                 ? (bot.dataStageStalled = true, usb::XFER_STALL)
                 : usb::XFER_ERROR;
+        if (bot.disconnectDuringDataOut) {
+            bot.disconnectDuringDataOut = false;
+            bot.present = false;
+            g_usbDevice.present = false;
+            return usb::XFER_CANCELLED;
+        }
         if (bot.failNextDataOut) {
             bot.failNextDataOut = false;
             return usb::XFER_TIMEOUT;
         }
         const size_t offset = static_cast<size_t>(bot.mediaOffset +
                                                   bot.dataTransferred);
-        if (!bot.media || offset > bot.media->bytes.size() ||
-            requested > bot.media->bytes.size() - offset)
-            return usb::XFER_ERROR;
-        std::memcpy(bot.media->bytes.data() + offset, data, requested);
-        bot.dataTransferred += requested;
+        if (bot.syntheticLargeMedia && !bot.media) {
+            bot.dataTransferred += requested;
+        } else {
+            if (!bot.media || offset > bot.media->bytes.size() ||
+                requested > bot.media->bytes.size() - offset)
+                return usb::XFER_ERROR;
+            std::memcpy(bot.media->bytes.data() + offset, data, requested);
+            bot.dataTransferred += requested;
+        }
         if (transferred) *transferred = requested;
         return usb::XFER_SUCCESS;
     }
@@ -1024,6 +1065,19 @@ usb::TransferStatus fake_usb_bulk_transfer(uint8_t deviceAddress,
         }
         if (transferred) *transferred = amount;
         return usb::XFER_SUCCESS;
+    }
+    if (bot.disconnectDuringSyncCache &&
+        bot.command[0] == usb_storage::SCSI_SYNCHRONIZE_CACHE_10) {
+        bot.disconnectDuringSyncCache = false;
+        bot.present = false;
+        g_usbDevice.present = false;
+        return usb::XFER_CANCELLED;
+    }
+    if (bot.disconnectBeforeCsw) {
+        bot.disconnectBeforeCsw = false;
+        bot.present = false;
+        g_usbDevice.present = false;
+        return usb::XFER_CANCELLED;
     }
     if (bot.failNextCsw) {
         bot.failNextCsw = false;
@@ -1273,6 +1327,50 @@ guideXOS::BootSourceDescriptor make_boot_source(bool nvmePath,
     return source;
 }
 
+
+guideXOS::BootSourceDescriptor make_usb_boot_source(uint8_t pciDevice = 3,
+    uint8_t port = 1, uint8_t interfaceNumber = 3,
+    uint16_t vendor = 0x1234, uint16_t product = 0x5678,
+    uint8_t lun = 0)
+{
+    guideXOS::BootSourceDescriptor source = {};
+    source.Version = guideXOS::GUIDEXOS_BOOT_SOURCE_VERSION;
+    source.Size = sizeof(source);
+    source.Flags = guideXOS::BOOT_SOURCE_FLAG_VALID |
+        guideXOS::BOOT_SOURCE_FLAG_DEVICE_PATH_VALID |
+        guideXOS::BOOT_SOURCE_FLAG_PCI_LOCATION_VALID;
+    source.PciSegment = 0;
+    source.PciBus = 0;
+    source.PciDevice = pciDevice;
+    source.PciFunction = 0;
+    uint16_t offset = 0;
+    uint8_t* p = source.DevicePath;
+    p[offset++] = 0x02; p[offset++] = 0x01; write_u16(p + offset, 12); offset += 2;
+    write_u32(p + offset, 0x0A0341D0u); offset += 4;
+    write_u32(p + offset, 0); offset += 4;
+    p[offset++] = 0x01; p[offset++] = 0x01; write_u16(p + offset, 6); offset += 2;
+    p[offset++] = 0; p[offset++] = pciDevice;
+    p[offset++] = 0x03; p[offset++] = 0x05; write_u16(p + offset, 6); offset += 2;
+    p[offset++] = port; p[offset++] = interfaceNumber;
+    p[offset++] = 0x03; p[offset++] = 0x0F; write_u16(p + offset, 11); offset += 2;
+    write_u16(p + offset, vendor); offset += 2;
+    write_u16(p + offset, product); offset += 2;
+    p[offset++] = usb::CLASS_MASS_STORAGE;
+    p[offset++] = usb::MSC_SUBCLASS_SCSI_TRANSPARENT;
+    p[offset++] = usb::MSC_PROTOCOL_BULK_ONLY;
+    p[offset++] = 0x03; p[offset++] = 0x11; write_u16(p + offset, 5); offset += 2;
+    p[offset++] = lun;
+    p[offset++] = 0x04; p[offset++] = 0x01; write_u16(p + offset, 42); offset += 2;
+    write_u32(p + offset, 1); offset += 4;
+    write_u64(p + offset, 34); offset += 8;
+    write_u64(p + offset, 60); offset += 8;
+    for (uint8_t i = 0; i < 16; ++i) p[offset++] = static_cast<uint8_t>(i + 1);
+    p[offset++] = 1; p[offset++] = 2;
+    p[offset++] = 0x7F; p[offset++] = 0xFF; write_u16(p + offset, 4); offset += 2;
+    source.DevicePathLength = offset;
+    return source;
+}
+
 void fix_bootinfo_checksum(guideXOS::BootInfo& info)
 {
     info.HeaderChecksum = 0;
@@ -1383,6 +1481,11 @@ void setup_fake_usb_device(FakeDisk* media, uint16_t vendor = 0x1234,
     g_usbDevice.present = true;
     g_usbDevice.address = 7;
     g_usbDevice.hubPort = 1;
+    g_usbDevice.controllerPciLocationValid = true;
+    g_usbDevice.controllerPciSegment = 0;
+    g_usbDevice.controllerPciBus = 0;
+    g_usbDevice.controllerPciDevice = 3;
+    g_usbDevice.controllerPciFunction = 0;
     g_usbDevice.devDesc.idVendor = vendor;
     g_usbDevice.devDesc.idProduct = product;
     g_usbDevice.numInterfaces = 1;
@@ -1425,6 +1528,251 @@ uint8_t usb_registered_block_index()
         if (device && device->type == block::BDEV_USB_MASS) return i;
     }
     return 0xFF;
+}
+
+
+void run_usb_write_failure_tests()
+{
+    block::init();
+    vfs::test_clear_mounts();
+    fs_fat::init();
+    FakeDisk media(512, 4096);
+    auto attach = [&]() -> uint8_t {
+        setup_fake_usb_device(&media);
+        usb_storage::init();
+        return usb_storage::probe(7) ? usb_registered_block_index() : 0xFF;
+    };
+    alignas(4096) uint8_t original[2 * 512] = {};
+    alignas(4096) uint8_t input[2 * 512] = {};
+    alignas(4096) uint8_t readback[2 * 512] = {};
+    for (size_t i = 0; i < sizeof(input); ++i)
+        input[i] = static_cast<uint8_t>((i * 31u + 0xA3u) & 0xFFu);
+
+    uint8_t index = attach();
+    block::BlockDevice device = {};
+    const bool copied = index != 0xFF && block::copy_device(index, device);
+    const block::Status saved = copied
+        ? block::read_sectors_checked(index, 20, 2, original, sizeof(original))
+        : block::BLOCK_ERR_NO_MEDIA;
+    const uint32_t writesBefore = g_usbBot.write10Commands;
+    const block::Status zeroWrite = block::write_sectors_checked(
+        index, 20, 0, input, sizeof(input));
+    const usb::TransferStatus privateZeroWrite = usb_storage::write_sectors(
+        device.driverIndex, 20, 0, input);
+    usb_check(copied && device.writeFn && saved == block::BLOCK_OK &&
+              zeroWrite == block::BLOCK_ERR_INVALID &&
+              privateZeroWrite == usb::XFER_ERROR &&
+              g_usbBot.write10Commands == writesBefore,
+              "zero-count USB writes are rejected before a CBW through private and common entry points");
+
+    const block::Status success = block::write_sectors_checked(
+        index, 20, 1, input, 512);
+    const bool write10Encoding = success == block::BLOCK_OK &&
+        g_usbBot.lastWriteCommand[0] == usb_storage::SCSI_WRITE_10 &&
+        g_usbBot.lastWriteCommandLength == 10 &&
+        usb_be32(g_usbBot.lastWriteCommand + 2) == 20 &&
+        g_usbBot.lastWriteCommand[7] == 0 &&
+        g_usbBot.lastWriteCommand[8] == 1 &&
+        g_usbBot.lastCbwFlags == 0x00 &&
+        g_usbBot.lastCbwTransferLength == 512 &&
+        g_usbBot.lastCbwCommandLength == 10;
+    const block::Status successFlush = block::flush(index);
+    const block::Status successRead = block::read_sectors_checked(
+        index, 20, 1, readback, 512);
+    const bool exactReadback = successRead == block::BLOCK_OK &&
+        std::memcmp(input, readback, 512) == 0;
+    const block::Status restore = block::write_sectors_checked(
+        index, 20, 2, original, sizeof(original));
+    const block::Status restoreFlush = block::flush(index);
+    usb_check(write10Encoding && successFlush == block::BLOCK_OK &&
+              exactReadback && restore == block::BLOCK_OK &&
+              restoreFlush == block::BLOCK_OK,
+              "WRITE(10) uses big-endian CDB fields, 10-byte CDB, OUT CBW length/flag, Sync Cache, and exact read-back");
+
+    const block::Status pendingForFlushFailure = block::write_sectors_checked(
+        index, 20, 1, input, 512);
+    g_usbBot.syncCacheFailure = true;
+    const block::Status syncFailure = block::flush(index);
+    storage::DeviceCapabilities syncFailureCapabilities = {};
+    const bool failureStateVisible = storage::query_device_capabilities(
+        index, syncFailureCapabilities) &&
+        syncFailureCapabilities.usbSyncCacheState == usb_storage::SYNC_CACHE_FAILED &&
+        syncFailureCapabilities.persistence == storage::PERSISTENCE_UNKNOWN &&
+        syncFailureCapabilities.flushSupported &&
+        !syncFailureCapabilities.flushSemanticsKnown;
+    g_usbBot.syncCacheFailure = false;
+    const block::Status syncRetry = block::flush(index);
+    storage::DeviceCapabilities syncRetryCapabilities = {};
+    const bool retryStateVisible = storage::query_device_capabilities(
+        index, syncRetryCapabilities) &&
+        syncRetryCapabilities.usbSyncCacheState == usb_storage::SYNC_CACHE_SUCCEEDED &&
+        syncRetryCapabilities.persistence == storage::PERSISTENCE_FLUSH_REQUIRED &&
+        syncRetryCapabilities.flushSemanticsKnown;
+    std::memcpy(media.bytes.data() + 20 * 512, original, sizeof(original));
+    usb_check(pendingForFlushFailure == block::BLOCK_OK &&
+              syncFailure == block::BLOCK_ERR_DURABILITY_UNVERIFIED &&
+              failureStateVisible && syncRetry == block::BLOCK_OK &&
+              retryStateVisible,
+              "failed Sync Cache after a completed write reports unverified durability and a later good flush clears it");
+    usb_check(syncFailure == block::BLOCK_ERR_DURABILITY_UNVERIFIED &&
+              std::strcmp(vfs::status_name(vfs::VFS_ERR_DURABILITY_UNVERIFIED),
+                  "USB write completed but durability could not be verified") == 0,
+              "durability failure has a distinct user-facing VFS status");
+
+    const uint32_t beforeCbwFailure = g_usbBot.write10Commands;
+    g_usbBot.failNextCbw = true;
+    const block::Status cbwFailure = block::write_sectors_checked(
+        index, 20, 1, input, 512);
+    block::OperationDiagnostic diagnostic = {};
+    const bool cbwDiagnostic = block::last_operation_diagnostic(diagnostic) &&
+        diagnostic.transportDiagnostic.valid &&
+        diagnostic.transportDiagnostic.usbWriteOutcome ==
+            block::USB_WRITE_NOT_SUBMITTED;
+    usb_check(cbwFailure == block::BLOCK_ERR_TIMEOUT && cbwDiagnostic &&
+              g_usbBot.write10Commands == beforeCbwFailure,
+              "CBW timeout is reported as definitely not submitted without retry");
+
+    g_usbBot.failNextDataOut = true;
+    const block::Status dataTimeout = block::write_sectors_checked(
+        index, 20, 1, input, 512);
+    const bool dataTimeoutDiagnostic = block::last_operation_diagnostic(diagnostic) &&
+        diagnostic.transportDiagnostic.usbWriteOutcome ==
+            block::USB_WRITE_SUBMITTED_UNKNOWN;
+    usb_check(dataTimeout == block::BLOCK_ERR_WRITE_UNCERTAIN &&
+              dataTimeoutDiagnostic,
+              "data-OUT timeout after a submitted CBW returns structured write uncertainty");
+
+    g_usbBot.failNextCsw = true;
+    const block::Status cswTimeout = block::write_sectors_checked(
+        index, 20, 1, input, 512);
+    const bool cswTimeoutDiagnostic = block::last_operation_diagnostic(diagnostic) &&
+        diagnostic.transportDiagnostic.usbWriteOutcome ==
+            block::USB_WRITE_SUBMITTED_UNKNOWN;
+    usb_check(cswTimeout == block::BLOCK_ERR_WRITE_UNCERTAIN &&
+              cswTimeoutDiagnostic,
+              "CSW timeout after USB data-OUT reports uncertain completion, not success");
+    std::memcpy(media.bytes.data() + 20 * 512, original, sizeof(original));
+
+    g_usbBot.corruptNextCsw = 2;
+    const block::Status wrongTag = block::write_sectors_checked(
+        index, 20, 1, input, 512);
+    const bool wrongTagDiagnostic = block::last_operation_diagnostic(diagnostic) &&
+        diagnostic.transportDiagnostic.usbWriteOutcome ==
+            block::USB_WRITE_SUBMITTED_UNKNOWN;
+    usb_check(wrongTag == block::BLOCK_ERR_WRITE_UNCERTAIN &&
+              wrongTagDiagnostic,
+              "CSW tag mismatch makes a data-OUT completion uncertain");
+    std::memcpy(media.bytes.data() + 20 * 512, original, sizeof(original));
+    (void)block::flush(index);
+
+    g_usbBot.failOpcode = usb_storage::SCSI_WRITE_10;
+    g_usbBot.failSenseKey = 0x07;
+    g_usbBot.failSenseAsc = 0x27;
+    const block::Status dataProtect = block::write_sectors_checked(
+        index, 20, 1, input, 512);
+    block::BlockDevice protectedDescriptor = {};
+    const bool becameReadOnly = block::copy_device(index, protectedDescriptor) &&
+        protectedDescriptor.writeFn == nullptr;
+    const uint32_t protectedCommandCount = g_usbBot.write10Commands;
+    const block::Status noRetry = block::write_sectors_checked(
+        index, 20, 1, input, 512);
+    const uint32_t senseReadCount = g_usbBot.read10Commands;
+    const block::Status clearStaleSense = block::read_sectors_checked(
+        index, 20, 1, readback, 512);
+    const bool senseCleared = block::last_operation_diagnostic(diagnostic) &&
+        diagnostic.transportDiagnostic.senseKey == 0xFF;
+    usb_check(dataProtect == block::BLOCK_ERR_READ_ONLY && becameReadOnly &&
+              noRetry == block::BLOCK_ERR_UNSUPPORTED &&
+              g_usbBot.write10Commands == protectedCommandCount &&
+              senseReadCount != 0 && clearStaleSense == block::BLOCK_OK &&
+              senseCleared,
+              "DATA PROTECT overrides MODE SENSE, removes the shared writer, prevents retry, and clears stale sense");
+    (void)usb_storage::release(7);
+
+    index = attach();
+    const uint64_t removedBeforeWriteRegistration =
+        index == 0xFF ? 0 : block::get_device(index)->registrationId;
+    const uint32_t beforeDisconnectWrite = g_usbBot.write10Commands;
+    g_usbDevice.present = false;
+    g_usbBot.present = false;
+    const block::Status removedBeforeWrite = block::write_sectors_checked(
+        index, 20, 1, input, 512);
+    usb_check(index != 0xFF && removedBeforeWrite == block::BLOCK_ERR_NO_MEDIA &&
+              block::get_device(index) == nullptr &&
+              g_usbBot.write10Commands == beforeDisconnectWrite &&
+              removedBeforeWriteRegistration != 0,
+              "disconnect before CBW submission invalidates the exact registration without issuing WRITE");
+    (void)usb_storage::release(7);
+
+    index = attach();
+    const uint64_t dataDisconnectRegistration =
+        index == 0xFF ? 0 : block::get_device(index)->registrationId;
+    g_usbBot.disconnectDuringDataOut = true;
+    const block::Status removedDuringData = block::write_sectors_checked(
+        index, 20, 2, input, sizeof(input));
+    const bool dataDisconnectDiagnostic = block::last_operation_diagnostic(diagnostic) &&
+        diagnostic.transportDiagnostic.usbWriteOutcome ==
+            block::USB_WRITE_REMOVED_UNKNOWN;
+    usb_check(index != 0xFF && removedDuringData ==
+                  block::BLOCK_ERR_WRITE_UNCERTAIN && dataDisconnectDiagnostic &&
+              block::get_device(index) == nullptr &&
+              dataDisconnectRegistration != 0,
+              "disconnect during multi-sector data-OUT reports uncertainty and offlines the stale registration");
+    (void)usb_storage::release(7);
+
+    index = attach();
+    const uint64_t cswDisconnectRegistration =
+        index == 0xFF ? 0 : block::get_device(index)->registrationId;
+    const uint32_t beforeCswDisconnect = g_usbBot.write10Commands;
+    g_usbBot.disconnectBeforeCsw = true;
+    const block::Status removedBeforeCsw = block::write_sectors_checked(
+        index, 20, 1, input, 512);
+    const bool cswDisconnectDiagnostic = block::last_operation_diagnostic(diagnostic) &&
+        diagnostic.transportDiagnostic.usbWriteOutcome ==
+            block::USB_WRITE_REMOVED_UNKNOWN;
+    usb_check(index != 0xFF && removedBeforeCsw ==
+                  block::BLOCK_ERR_WRITE_UNCERTAIN && cswDisconnectDiagnostic &&
+              block::get_device(index) == nullptr &&
+              g_usbBot.write10Commands == beforeCswDisconnect + 1 &&
+              cswDisconnectRegistration != 0,
+              "disconnect after data-OUT and before CSW reports uncertain completion without a second write");
+    (void)usb_storage::release(7);
+
+    index = attach();
+    const uint64_t syncDisconnectRegistration =
+        index == 0xFF ? 0 : block::get_device(index)->registrationId;
+    const block::Status pendingWrite = block::write_sectors_checked(
+        index, 20, 1, input, 512);
+    g_usbBot.disconnectDuringSyncCache = true;
+    const block::Status syncDisconnect = block::flush(index);
+    usb_check(index != 0xFF && pendingWrite == block::BLOCK_OK &&
+              syncDisconnect == block::BLOCK_ERR_DURABILITY_UNVERIFIED &&
+              block::get_device(index) == nullptr &&
+              syncDisconnectRegistration != 0,
+              "disconnect during Sync Cache never reports a completed write as durable");
+    (void)usb_storage::release(7);
+
+    index = attach();
+    const block::Status pendingUnsupportedWrite =
+        block::write_sectors_checked(index, 20, 1, input, 512);
+    g_usbBot.syncCacheSupported = false;
+    const block::Status unsupportedAfterWrite = block::flush(index);
+    storage::DeviceCapabilities runtimeUnsupportedCapabilities = {};
+    const bool runtimeUnsupportedStateVisible =
+        storage::query_device_capabilities(index,
+            runtimeUnsupportedCapabilities) &&
+        runtimeUnsupportedCapabilities.usbSyncCacheState ==
+            usb_storage::SYNC_CACHE_UNSUPPORTED &&
+        runtimeUnsupportedCapabilities.persistence ==
+            storage::PERSISTENCE_UNKNOWN &&
+        !runtimeUnsupportedCapabilities.flushSupported &&
+        !runtimeUnsupportedCapabilities.flushSemanticsKnown;
+    usb_check(index != 0xFF && pendingUnsupportedWrite == block::BLOCK_OK &&
+              unsupportedAfterWrite ==
+                  block::BLOCK_ERR_DURABILITY_UNVERIFIED &&
+              runtimeUnsupportedStateVisible,
+              "runtime unsupported Sync Cache after a completed USB write revokes trusted persistence and reports unverified durability");
+    (void)usb_storage::release(7);
 }
 
 void run_usb_mass_storage_tests()
@@ -1493,8 +1841,8 @@ void run_usb_mass_storage_tests()
         storage::capture_target_identity(blockIndex, target);
     usb_check(probed && descriptorValid && block::device_count() == 1 &&
               device.type == block::BDEV_USB_MASS && device.totalSectors == 90000 &&
-              device.sectorSize == 512 && device.readFn && !device.writeFn,
-              "USB Mass Storage registers a truthful shared read-only block device");
+              device.sectorSize == 512 && device.readFn && device.writeFn,
+              "QEMU-proven USB writes are exposed through the common block callback");
     usb_check(probed && g_usbBot.lastOpcode ==
                   usb_storage::SCSI_SYNCHRONIZE_CACHE_10,
               "only a BOT/SCSI LUN 0 Mass Storage interface is probed and cache sync is issued");
@@ -1505,12 +1853,14 @@ void run_usb_mass_storage_tests()
               device.sectorSize == 512,
               "READ CAPACITY(10) populates exact sector count and logical block size");
     usb_check(capabilitiesValid && capabilities.readable &&
-              !capabilities.writable && capabilities.removableKnown &&
+              capabilities.writable && capabilities.removableKnown &&
               capabilities.removable && capabilities.usbIdentityValid &&
               capabilities.usbVendorId == 0x1234 &&
               capabilities.usbProductId == 0x5678 &&
               capabilities.usbPort == 1 && capabilities.usbInterface == 3 &&
-              capabilities.usbLun == 0 && capabilities.logicalSectorSize == 512 &&
+              capabilities.usbLun == 0 && capabilities.controllerPciLocationValid &&
+              capabilities.controllerPciDevice == 3 &&
+              capabilities.logicalSectorSize == 512 &&
               capabilities.totalLogicalSectors == 90000 &&
               std::strstr(capabilities.model, "GUIDEX") != nullptr &&
               std::strcmp(capabilities.serial, "USB-SERIAL01") == 0,
@@ -1568,13 +1918,39 @@ void run_usb_mass_storage_tests()
               crossingEndRead == block::BLOCK_ERR_INVALID &&
               readCommandsBeforeInvalid == g_usbBot.read10Commands,
               "zero-sector and capacity-crossing reads are rejected without USB commands");
-    block::Status blockWriteStatus = block::write_sectors_checked(blockIndex,
-        0, 1, sectorBuffer, 512);
-    usb_check(blockWriteStatus == block::BLOCK_ERR_UNSUPPORTED &&
-              g_usbBot.write10Commands == 0,
-              "shared USB block writes remain unavailable even when BOT WRITE(10) exists");
-    usb_check(blockWriteStatus == block::BLOCK_ERR_UNSUPPORTED,
-              "block layer reports USB's temporary read-only policy distinctly");
+    uint8_t finalSectorOriginal[512] = {};
+    uint8_t sharedWritePattern[512] = {};
+    uint8_t sharedWriteReadback[512] = {};
+    std::memcpy(finalSectorOriginal, sectorBuffer, sizeof(finalSectorOriginal));
+    for (size_t i = 0; i < sizeof(sharedWritePattern); ++i)
+        sharedWritePattern[i] = static_cast<uint8_t>((i * 17u + 0x5Du) & 0xFFu);
+    const uint32_t sharedWritesBefore = g_usbBot.write10Commands;
+    const block::Status blockWriteStatus = block::write_sectors_checked(
+        blockIndex, device.totalSectors - 1, 1, sharedWritePattern,
+        sizeof(sharedWritePattern));
+    const block::Status sharedWriteFlush = block::flush(blockIndex);
+    const block::Status sharedWriteRead = block::read_sectors_checked(
+        blockIndex, device.totalSectors - 1, 1, sharedWriteReadback,
+        sizeof(sharedWriteReadback));
+    const bool sharedWriteMatched = sharedWriteRead == block::BLOCK_OK &&
+        std::memcmp(sharedWritePattern, sharedWriteReadback,
+                    sizeof(sharedWritePattern)) == 0;
+    const block::Status restoreSectorWrite = block::write_sectors_checked(
+        blockIndex, device.totalSectors - 1, 1, finalSectorOriginal,
+        sizeof(finalSectorOriginal));
+    const block::Status restoreSectorFlush = block::flush(blockIndex);
+    const block::Status restoreSectorRead = block::read_sectors_checked(
+        blockIndex, device.totalSectors - 1, 1, sharedWriteReadback,
+        sizeof(sharedWriteReadback));
+    const bool restoredSector = restoreSectorRead == block::BLOCK_OK &&
+        std::memcmp(finalSectorOriginal, sharedWriteReadback,
+                    sizeof(finalSectorOriginal)) == 0;
+    usb_check(device.writeFn && blockWriteStatus == block::BLOCK_OK &&
+              sharedWriteFlush == block::BLOCK_OK && sharedWriteMatched &&
+              restoreSectorWrite == block::BLOCK_OK &&
+              restoreSectorFlush == block::BLOCK_OK && restoredSector &&
+              g_usbBot.write10Commands >= sharedWritesBefore + 2,
+              "common USB block writes complete, flush, read back, and restore an isolated final sector");
 
     storage::PartitionTableModel usbTable = {};
     const bool mbrParsed = storage::parse_partition_table(blockIndex, usbTable) &&
@@ -1585,6 +1961,16 @@ void run_usb_mass_storage_tests()
     block::PartitionViewHandle externalView = {};
     block::BlockEndpoint externalEndpoint = {};
     block::PartitionIdentity externalIdentity = {};
+    storage::SafetyRequest usbEligibilityRequest = { true, true, true, false };
+    storage::SafetyValidation usbEligibility = {};
+    const bool usbEligibleBeforeMount = identityCaptured &&
+        storage::validate_destructive_target(target, usbEligibilityRequest,
+                                             usbEligibility);
+    usb_check(usbEligibleBeforeMount && usbEligibility.issues ==
+                  storage::SAFETY_ISSUE_NONE &&
+              usbEligibility.bootSafety ==
+                  storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET,
+              "USB with proven non-boot PCI path, trusted flush, writable callback, valid table, and no mount is eligible through shared safety gates");
     const bool viewCreated = mbrParsed && block::create_partition_view(blockIndex,
         storage::PARTITION_SCHEME_MBR, usbPartition, externalView,
         externalEndpoint, &externalIdentity);
@@ -1595,7 +1981,7 @@ void run_usb_mass_storage_tests()
         ? vfs::mount_partition_detailed("/usb", blockIndex,
             usbPartition.partitionNumber, device.registrationId, &usbPartition)
         : vfs::PartitionMountResult{0xFF, vfs::PARTITION_MOUNT_TABLE_INVALID};
-    const uint8_t mountIndex = vfs::mount_index_for_path("/usb");
+    uint8_t mountIndex = vfs::mount_index_for_path("/usb");
     const vfs::MountPoint* mount = vfs::get_mount_by_index(mountIndex);
     const uint8_t directory = vfs::opendir("/usb");
     bool rootEntryFound = false;
@@ -1615,13 +2001,46 @@ void run_usb_mass_storage_tests()
     const bool fileMatched = fileRead == static_cast<int32_t>(fileBytes.size()) &&
                              fileReadback == fileBytes;
     if (fileHandle != 0xFF) (void)vfs::close(fileHandle);
-    const int32_t readOnlyWrite = vfs::create_file("/usb/blocked.bin",
+    const int32_t writableFileCreate = vfs::create_file("/usb/writable.bin",
         fileBytes.data(), static_cast<uint32_t>(fileBytes.size()));
+    const uint8_t writableHandle = vfs::open("/usb/writable.bin", vfs::OPEN_READ);
+    std::vector<uint8_t> writableReadback(fileBytes.size());
+    const int32_t writableRead = writableHandle == 0xFF ? vfs::VFS_ERR_IO
+        : vfs::read(writableHandle, writableReadback.data(),
+                    static_cast<uint32_t>(writableReadback.size()));
+    const vfs::Status explicitFileFlush = writableHandle == 0xFF
+        ? vfs::VFS_ERR_INVALID : vfs::flush(writableHandle);
+    const vfs::Status writableClose = writableHandle == 0xFF
+        ? vfs::VFS_ERR_INVALID : vfs::close(writableHandle);
+    const bool writableFileMatched =
+        writableRead == static_cast<int32_t>(fileBytes.size()) &&
+        writableReadback == fileBytes;
+    const vfs::Status cleanUnmount = vfs::unmount("/usb");
+    const vfs::PartitionMountResult cleanRemount =
+        vfs::mount_partition_detailed("/usb-remounted", blockIndex,
+            usbPartition.partitionNumber, device.registrationId, &usbPartition);
+    const uint8_t remountedWritableHandle =
+        cleanRemount.error == vfs::PARTITION_MOUNT_OK
+            ? vfs::open("/usb-remounted/writable.bin", vfs::OPEN_READ) : 0xFF;
+    std::vector<uint8_t> remountedWritableBytes(fileBytes.size());
+    const int32_t remountedWritableRead = remountedWritableHandle == 0xFF
+        ? vfs::VFS_ERR_IO
+        : vfs::read(remountedWritableHandle, remountedWritableBytes.data(),
+                    static_cast<uint32_t>(remountedWritableBytes.size()));
+    if (remountedWritableHandle != 0xFF)
+        (void)vfs::close(remountedWritableHandle);
+    mountIndex = vfs::mount_index_for_path("/usb-remounted");
+    mount = vfs::get_mount_by_index(mountIndex);
     usb_check(mbrParsed && viewCreated && viewRead == block::BLOCK_OK &&
               mountResult.error == vfs::PARTITION_MOUNT_OK && mount &&
-              mount->readOnly && rootEntryFound && fileMatched &&
-              readOnlyWrite == vfs::VFS_ERR_READ_ONLY,
-              "USB partition view mounts FAT32 read-only, enumerates root, and reads a file through VFS");
+              !mount->readOnly && rootEntryFound && fileMatched &&
+              writableFileCreate == static_cast<int32_t>(fileBytes.size()) &&
+              writableFileMatched && explicitFileFlush == vfs::VFS_OK &&
+              writableClose == vfs::VFS_OK && cleanUnmount == vfs::VFS_OK &&
+              cleanRemount.error == vfs::PARTITION_MOUNT_OK &&
+              remountedWritableRead == static_cast<int32_t>(fileBytes.size()) &&
+              remountedWritableBytes == fileBytes,
+              "USB FAT32 mounts read/write, writes and reads a file, flushes, unmounts, remounts, and reads it again");
     usb_check(mbrParsed && usbTable.scheme == storage::PARTITION_SCHEME_MBR &&
               usbTable.partitionCount == 1,
               "shared MBR partition parsing succeeds over USB READ(10)");
@@ -1629,14 +2048,20 @@ void run_usb_mass_storage_tests()
               viewRead == block::BLOCK_OK,
               "shared partition view translates reads to the selected USB extent");
     usb_check(mountResult.error == vfs::PARTITION_MOUNT_OK && mount &&
-              mount->readOnly,
-              "normal VFS mounts a USB FAT32 partition read-only");
+              !mount->readOnly,
+              "known USB write and Sync Cache contracts permit a normal read/write FAT32 mount");
     usb_check(directory != 0xFF && rootEntryFound,
               "VFS root enumeration finds the persisted USB FAT32 file");
     usb_check(fileMatched,
               "VFS reads deterministic file bytes from the USB FAT32 image");
-    usb_check(readOnlyWrite == vfs::VFS_ERR_READ_ONLY,
-              "normal VFS refuses file writes while shared USB writes remain disabled");
+    usb_check(writableFileCreate == static_cast<int32_t>(fileBytes.size()) &&
+              writableFileMatched,
+              "normal VFS creates a deterministic USB file and reads its exact bytes");
+    usb_check(explicitFileFlush == vfs::VFS_OK &&
+              cleanUnmount == vfs::VFS_OK &&
+              cleanRemount.error == vfs::PARTITION_MOUNT_OK &&
+              remountedWritableBytes == fileBytes,
+              "USB file bytes survive a clean flush, unmount, and remount");
     const uint8_t* partitionTableBefore = fixture.bytes.data();
     const bool tableUnchanged = partitionTableBefore[446 + 4] == 0x0C &&
         partitionTableBefore[510] == 0x55 && partitionTableBefore[511] == 0xAA;
@@ -1665,29 +2090,34 @@ void run_usb_mass_storage_tests()
         storage::validate_destructive_target(target, destructiveRequest,
                                               destructiveValidation);
     usb_check(!destructiveAllowed &&
-              (destructiveValidation.issues & storage::SAFETY_ISSUE_READ_ONLY) != 0,
-              "USB initialize/partition/format eligibility stays false while shared writes are disabled");
+              (destructiveValidation.issues & storage::SAFETY_ISSUE_MOUNTED) != 0,
+              "mounted USB volumes remain blocked from destructive Disk Manager operations");
 
     const uint64_t oldRegistration = device.registrationId;
     const block::Status disconnectedIo = block::read_endpoint(externalEndpoint,
         0, 1, sectorBuffer);
-    const uint8_t openAtRemoval = vfs::open("/usb/readme.bin", vfs::OPEN_READ);
+    const uint8_t openAtRemoval = vfs::open("/usb-remounted/readme.bin", vfs::OPEN_READ);
     (void)usb_storage::release(7);
     const block::Status afterReleaseIo = block::read_endpoint(externalEndpoint,
         0, 1, sectorBuffer);
+    const size_t writesBeforeStaleView = fixture.writeLog.size();
+    const block::Status afterReleaseWrite = block::write_endpoint(
+        externalEndpoint, 0, 1, sharedWritePattern);
     const vfs::Status staleBacking = vfs::mount_backing_status(mountIndex);
     const bool oldIdentityStale = storage::revalidate_target_identity(target) !=
                                   storage::TARGET_VALID;
     const int32_t readAfterRemoval = openAtRemoval == 0xFF
         ? vfs::VFS_ERR_IO
         : vfs::read(openAtRemoval, sectorBuffer, sizeof(sectorBuffer));
-    const vfs::Status busyStaleUnmount = vfs::unmount("/usb");
+    const vfs::Status busyStaleUnmount = vfs::unmount("/usb-remounted");
     const vfs::Status closeOpenAtRemoval = openAtRemoval == 0xFF
         ? vfs::VFS_ERR_INVALID : vfs::close(openAtRemoval);
-    const vfs::Status staleUnmount = vfs::unmount("/usb");
+    const vfs::Status staleUnmount = vfs::unmount("/usb-remounted");
     block::release_partition_view(externalView);
     usb_check(disconnectedIo == block::BLOCK_OK &&
-              afterReleaseIo == block::BLOCK_ERR_NO_MEDIA && oldIdentityStale &&
+              afterReleaseIo == block::BLOCK_ERR_NO_MEDIA &&
+              afterReleaseWrite == block::BLOCK_ERR_NO_MEDIA &&
+              fixture.writeLog.size() == writesBeforeStaleView && oldIdentityStale &&
               openAtRemoval != 0xFF &&
               readAfterRemoval == vfs::VFS_ERR_DEVICE_REMOVED &&
               busyStaleUnmount == vfs::VFS_ERR_BUSY &&
@@ -1720,6 +2150,11 @@ void run_usb_mass_storage_tests()
     fixture.readLog.clear();
     const block::Status staleViewAfterReinsert = block::read_endpoint(
         externalEndpoint, 0, 1, sectorBuffer);
+    const size_t writesBeforeReinsertedStaleView = fixture.writeLog.size();
+    const block::Status staleWriteAfterReinsert = block::write_endpoint(
+        externalEndpoint, 0, 1, sharedWritePattern);
+    const size_t replacementWritesThroughOldView = fixture.writeLog.size() -
+        writesBeforeReinsertedStaleView;
     const size_t replacementReadsThroughOldView = fixture.readLog.size();
     const vfs::PartitionMountResult remount = sameCopied
         ? vfs::mount_partition_detailed("/usb-reinserted", sameDeviceIndex,
@@ -1733,20 +2168,37 @@ void run_usb_mass_storage_tests()
         : vfs::read(reinsertedHandle, reinsertedBytes.data(),
                     static_cast<uint32_t>(reinsertedBytes.size()));
     if (reinsertedHandle != 0xFF) (void)vfs::close(reinsertedHandle);
+    const uint8_t reinsertedWritableHandle =
+        remount.error == vfs::PARTITION_MOUNT_OK
+            ? vfs::open("/usb-reinserted/writable.bin", vfs::OPEN_READ) : 0xFF;
+    std::vector<uint8_t> reinsertedWritableBytes(fileBytes.size());
+    const int32_t reinsertedWritableRead = reinsertedWritableHandle == 0xFF
+        ? vfs::VFS_ERR_IO
+        : vfs::read(reinsertedWritableHandle, reinsertedWritableBytes.data(),
+                    static_cast<uint32_t>(reinsertedWritableBytes.size()));
+    if (reinsertedWritableHandle != 0xFF)
+        (void)vfs::close(reinsertedWritableHandle);
     const vfs::Status reinsertUnmount = remount.error == vfs::PARTITION_MOUNT_OK
         ? vfs::unmount("/usb-reinserted") : vfs::VFS_ERR_INVALID;
     usb_check(sameDeviceProbed && sameIdentityCaptured &&
               sameDevice.registrationId != oldRegistration &&
               storage::revalidate_target_identity(target) != storage::TARGET_VALID &&
               staleViewAfterReinsert == block::BLOCK_ERR_NO_MEDIA &&
+              staleWriteAfterReinsert == block::BLOCK_ERR_NO_MEDIA &&
+              replacementWritesThroughOldView == 0 &&
               replacementReadsThroughOldView == 0 &&
               remount.error == vfs::PARTITION_MOUNT_OK &&
               reinsertedRead == static_cast<int32_t>(fileBytes.size()) &&
-              reinsertedBytes == fileBytes && reinsertUnmount == vfs::VFS_OK,
+              reinsertedBytes == fileBytes &&
+              reinsertedWritableRead == static_cast<int32_t>(fileBytes.size()) &&
+              reinsertedWritableBytes == fileBytes &&
+              reinsertUnmount == vfs::VFS_OK,
               "same-media reinsertion receives a new registration and a fresh FAT mount reads persisted data");
     usb_check(sameDevice.registrationId != oldRegistration &&
               storage::revalidate_target_identity(target) != storage::TARGET_VALID &&
               staleViewAfterReinsert == block::BLOCK_ERR_NO_MEDIA &&
+              staleWriteAfterReinsert == block::BLOCK_ERR_NO_MEDIA &&
+              replacementWritesThroughOldView == 0 &&
               replacementReadsThroughOldView == 0,
               "same-port reinsertion gets a fresh incarnation without reviving old identity");
     usb_check(reinsertedRead == static_cast<int32_t>(fileBytes.size()) &&
@@ -1805,6 +2257,7 @@ void run_usb_mass_storage_tests()
             destructiveRequest, destructiveValidation);
     usb_check(unsupportedProbed && unsupportedRead &&
               unsupportedCaps.persistence == storage::PERSISTENCE_UNKNOWN &&
+              unsupportedCaps.writable && unsupportedBlock.writeFn &&
               !unsupportedCaps.flushSupported &&
               unsupportedCaps.usbSyncCacheState ==
                   usb_storage::SYNC_CACHE_UNSUPPORTED &&
@@ -1822,6 +2275,32 @@ void run_usb_mass_storage_tests()
               (destructiveValidation.issues &
                   storage::SAFETY_ISSUE_DURABILITY_UNKNOWN) != 0,
               "unknown USB durability blocks shared destructive-operation preflight");
+    storage::PartitionTableModel unsupportedTable = {};
+    const bool unsupportedParsed = storage::parse_partition_table(
+        unsupportedIndex, unsupportedTable) &&
+        unsupportedTable.state == storage::DISK_STATE_VALID_MBR;
+    const vfs::PartitionMountResult unsupportedMount = unsupportedParsed
+        ? vfs::mount_partition_detailed("/usb-unknown-flush", unsupportedIndex,
+            unsupportedTable.partitions[0].partitionNumber)
+        : vfs::PartitionMountResult{0xFF, vfs::PARTITION_MOUNT_TABLE_INVALID};
+    const vfs::MountPoint* unsupportedMountPoint =
+        vfs::get_mount_by_index(unsupportedMount.mountIndex);
+    const bool unsupportedMountReadOnly =
+        unsupportedMountPoint && unsupportedMountPoint->readOnly;
+    const int32_t unsupportedMountWrite =
+        unsupportedMount.error == vfs::PARTITION_MOUNT_OK
+            ? vfs::create_file("/usb-unknown-flush/blocked.bin",
+                fileBytes.data(), static_cast<uint32_t>(fileBytes.size()))
+            : vfs::VFS_ERR_IO;
+    const vfs::Status unsupportedUnmount =
+        unsupportedMount.error == vfs::PARTITION_MOUNT_OK
+            ? vfs::unmount("/usb-unknown-flush") : vfs::VFS_ERR_INVALID;
+    usb_check(unsupportedCaps.writable && unsupportedBlock.writeFn &&
+              unsupportedMount.error == vfs::PARTITION_MOUNT_OK &&
+              unsupportedMountReadOnly &&
+              unsupportedMountWrite == vfs::VFS_ERR_READ_ONLY &&
+              unsupportedUnmount == vfs::VFS_OK,
+              "unknown USB cache persistence leaves block writes available but VFS read-only and destructive work blocked");
     (void)usb_storage::release(7);
 
     setup_fake_usb_device(&fixture);
@@ -1921,17 +2400,33 @@ void run_usb_mass_storage_tests()
     g_usbBot.failNextDataOut = false;
     const usb::TransferStatus privateWriteSuccess = usb_storage::write_sectors(
         device.driverIndex, fixture.sectorCount - 1, 1, sectorBuffer);
+    const uint32_t writeCommandsBeforeInvalid = g_usbBot.write10Commands;
     const usb::TransferStatus writePastEnd = usb_storage::write_sectors(
         device.driverIndex, fixture.sectorCount, 1, sectorBuffer);
+    const usb::TransferStatus zeroCountWrite = usb_storage::write_sectors(
+        device.driverIndex, 10, 0, sectorBuffer);
+    const bool write10Encoded =
+        g_usbBot.lastWriteCommand[0] == usb_storage::SCSI_WRITE_10 &&
+        g_usbBot.lastWriteCommandLength == 10 &&
+        usb_be32(g_usbBot.lastWriteCommand + 2) == fixture.sectorCount - 1 &&
+        g_usbBot.lastWriteCommand[7] == 0 &&
+        g_usbBot.lastWriteCommand[8] == 1 &&
+        g_usbBot.lastCbwFlags == 0x00 &&
+        g_usbBot.lastCbwTransferLength == 512 &&
+        g_usbBot.lastCbwCommandLength == 10;
     usb_check(dataOutFailure == usb::XFER_TIMEOUT &&
               privateWriteSuccess == usb::XFER_SUCCESS &&
-              writePastEnd == usb::XFER_ERROR && g_usbBot.write10Commands >= 2,
-              "private BOT WRITE(10) tests cover data OUT failure and strict final-sector bounds");
+              writePastEnd == usb::XFER_ERROR &&
+              zeroCountWrite == usb::XFER_ERROR &&
+              g_usbBot.write10Commands == writeCommandsBeforeInvalid,
+              "private BOT WRITE(10) rejects zero and capacity-crossing requests before another CBW");
+    usb_check(write10Encoded,
+              "WRITE(10) encodes LBA/count big-endian with a ten-byte CDB and DATA-OUT CBW");
     usb_check(dataOutFailure == usb::XFER_TIMEOUT,
               "bulk data OUT timeout is propagated without claiming write success");
     usb_check(privateWriteSuccess == usb::XFER_SUCCESS &&
               g_usbBot.write10Commands >= 2,
-              "private command seam verifies bounded WRITE(10) while public block writes stay disabled");
+              "private command seam verifies a bounded WRITE(10) after the shared gate is enabled");
     usb_check(writePastEnd == usb::XFER_ERROR,
               "WRITE(10) request beyond capacity is rejected before transport submission");
     g_usbBot.failOpcode = usb_storage::SCSI_WRITE_10;
@@ -1960,9 +2455,18 @@ void run_usb_mass_storage_tests()
     // Storage slot is the driver's index; for a fresh registry it is zero.
     const usb::TransferStatus protectedWriteBySlot = usb_storage::write_sectors(
         0, 10, 1, sectorBuffer);
+    const uint8_t protectedBlockIndex = usb_registered_block_index();
+    block::BlockDevice protectedBlock = {};
+    const bool protectedBlockCopied = protectedBlockIndex != 0xFF &&
+        block::copy_device(protectedBlockIndex, protectedBlock);
+    const block::Status protectedSharedWrite = protectedBlockCopied
+        ? block::write_sectors_checked(protectedBlockIndex, 10, 1,
+              sectorBuffer, 512) : block::BLOCK_ERR_NO_MEDIA;
     usb_check(protectedDevice && protectedWriteBySlot == usb::XFER_READ_ONLY &&
+              protectedBlockCopied && !protectedBlock.writeFn &&
+              protectedSharedWrite == block::BLOCK_ERR_UNSUPPORTED &&
               g_usbBot.write10Commands == protectedWriteCount,
-              "SCSI MODE SENSE write protection returns read-only before WRITE(10)");
+              "SCSI MODE SENSE write protection withholds the shared callback and issues no WRITE(10)");
     usb_check(protectedDevice && protectedWriteBySlot == usb::XFER_READ_ONLY &&
               g_usbBot.write10Commands == protectedWriteCount,
               "write-protected media issues no WRITE(10) command");
@@ -2001,11 +2505,26 @@ void run_usb_mass_storage_tests()
             block::get_device(largeIndex)->driverIndex,
             0x100000000ull, 1, sectorBuffer)
         : usb::XFER_ERROR;
+    const uint32_t write16Before = g_usbBot.write16Commands;
+    const usb::TransferStatus highWrite = largeProbed
+        ? usb_storage::write_sectors(
+            block::get_device(largeIndex)->driverIndex,
+            0x100000000ull, 1, sectorBuffer)
+        : usb::XFER_ERROR;
+    const bool write16Encoded = highWrite == usb::XFER_SUCCESS &&
+        g_usbBot.write16Commands == write16Before + 1 &&
+        g_usbBot.lastWriteCommand[0] == usb_storage::SCSI_WRITE_16 &&
+        g_usbBot.lastWriteCommandLength == 16 &&
+        usb_be64(g_usbBot.lastWriteCommand + 2) == 0x100000000ull &&
+        usb_be32(g_usbBot.lastWriteCommand + 10) == 1 &&
+        g_usbBot.lastCbwFlags == 0x00 &&
+        g_usbBot.lastCbwTransferLength == 512 &&
+        g_usbBot.lastCbwCommandLength == 16;
     usb_check(largeProbed && largeIndex != 0xFF &&
               block::get_device(largeIndex)->totalSectors == 0x100000002ull &&
-              highRead == usb::XFER_SUCCESS &&
-              g_usbBot.read16Commands > read16Before,
-              "READ CAPACITY(16) and READ(16) handle a synthetic capacity above 2 TiB");
+              highRead == usb::XFER_SUCCESS && highWrite == usb::XFER_SUCCESS &&
+              g_usbBot.read16Commands > read16Before && write16Encoded,
+              "READ/WRITE(16) encode high LBAs and transfer lengths without truncation on synthetic media");
     usb_check(largeProbed && largeIndex != 0xFF &&
               block::get_device(largeIndex)->totalSectors == 0x100000002ull,
               "READ CAPACITY(16) exposes a truthful multi-terabyte sector count");
@@ -2161,6 +2680,7 @@ void run_usb_mass_storage_tests()
               "100-cycle fake USB lifecycle leaves no block, transport, or mount registrations");
     usb_check(stressPassed,
               "all automated USB media came from the in-memory BOT fixture; no physical device was accessed");
+    run_usb_write_failure_tests();
     (void)usb_storage::release(7);
     g_usbBot.present = false;
     g_usbDevice.present = false;
@@ -3513,6 +4033,64 @@ int main()
           storage::query_boot_protection(ataOtherIdentity).safety ==
               storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET,
           "same ATA controller distinguishes the boot channel/target from another device");
+
+    guideXOS::BootSourceDescriptor usbBootPath = make_usb_boot_source();
+    check(storage::set_boot_source_descriptor(&usbBootPath),
+          "bounded UEFI USB/class/LUN/media path is accepted");
+    FakeDisk usbBootDisk(512, 128);
+    const uint8_t usbBootIndex = register_fake(usbBootDisk, true, true, true,
+        false, 0, 0, block::BOOT_PROVENANCE_UNKNOWN, block::BDEV_USB_MASS,
+        true, 0, 0, 3, 0, false, 0, 0, 0, true, 0x1234, 0x5678, 1, 3, 0);
+    storage::TargetIdentity usbBootIdentity = {};
+    storage::capture_target_identity(usbBootIndex, usbBootIdentity);
+    check(storage::query_boot_protection(usbBootIdentity).safety ==
+              storage::BOOT_DEVICE_IS_TARGET,
+          "matching controller, USB root port, interface, VID/PID, and LUN classify the USB boot backing disk");
+
+    FakeDisk usbOtherPort(512, 128);
+    const uint8_t usbOtherPortIndex = register_fake(usbOtherPort, true,
+        true, true, false, 0, 0, block::BOOT_PROVENANCE_UNKNOWN,
+        block::BDEV_USB_MASS, true, 0, 0, 3, 0, false, 0, 0, 0,
+        true, 0x1234, 0x5678, 2, 3, 0);
+    storage::TargetIdentity usbOtherPortIdentity = {};
+    storage::capture_target_identity(usbOtherPortIndex, usbOtherPortIdentity);
+    check(storage::query_boot_protection(usbOtherPortIdentity).safety ==
+              storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET,
+          "same VID/PID on another USB root port is definitely not the boot target");
+
+    FakeDisk usbWrongLun(512, 128);
+    const uint8_t usbWrongLunIndex = register_fake(usbWrongLun, true,
+        true, true, false, 0, 0, block::BOOT_PROVENANCE_UNKNOWN,
+        block::BDEV_USB_MASS, true, 0, 0, 3, 0, false, 0, 0, 0,
+        true, 0x1234, 0x5678, 1, 3, 1);
+    storage::TargetIdentity usbWrongLunIdentity = {};
+    storage::capture_target_identity(usbWrongLunIndex, usbWrongLunIdentity);
+    check(storage::query_boot_protection(usbWrongLunIdentity).safety ==
+              storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET,
+          "USB logical units are distinguished by the UEFI LUN node");
+
+    FakeDisk usbNoPathIdentity(512, 128);
+    const uint8_t usbNoPathIndex = register_fake(usbNoPathIdentity, true,
+        true, true, false, 0, 0, block::BOOT_PROVENANCE_UNKNOWN,
+        block::BDEV_USB_MASS, true, 0, 0, 3, 0, false, 0, 0, 0,
+        false);
+    storage::TargetIdentity usbNoPathTarget = {};
+    storage::capture_target_identity(usbNoPathIndex, usbNoPathTarget);
+    check(storage::query_boot_protection(usbNoPathTarget).safety ==
+              storage::BOOT_DEVICE_IDENTITY_UNKNOWN,
+          "missing USB identity evidence stays Unknown even on the boot controller");
+    storage::SafetyRequest usbUnknownRequest = { true, true, true, true };
+    storage::SafetyValidation usbUnknownValidation = {};
+    check(!storage::validate_destructive_target(usbNoPathTarget,
+              usbUnknownRequest, usbUnknownValidation) &&
+          (usbUnknownValidation.issues &
+              storage::SAFETY_ISSUE_BOOT_IDENTITY_UNKNOWN) != 0,
+          "unknown USB boot provenance blocks destructive eligibility");
+    unregister_fake(usbNoPathIndex, usbNoPathIdentity);
+    unregister_fake(usbWrongLunIndex, usbWrongLun);
+    unregister_fake(usbOtherPortIndex, usbOtherPort);
+    unregister_fake(usbBootIndex, usbBootDisk);
+    storage::set_boot_source_descriptor(&nvmeBootPath);
 
     storage::capture_target_identity(nvmeBootIndex, nvmeBootIdentity);
     guideXOS::BootSourceDescriptor truncatedPath = nvmeBootPath;

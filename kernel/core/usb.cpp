@@ -186,6 +186,11 @@ static bool enumerate_device(uint8_t port, DeviceSpeed speed)
     dev->address      = addr;
     dev->speed        = speed;
     dev->hubPort      = port;
+#if defined(__i386__) || defined(__x86_64__)
+    dev->controllerPciLocationValid = hci::get_controller_pci_location(
+        &dev->controllerPciSegment, &dev->controllerPciBus,
+        &dev->controllerPciDevice, &dev->controllerPciFunction);
+#endif
     dev->currentConfig = 0;
 
     // 4. Read configuration descriptor (first 9 bytes to get wTotalLength)

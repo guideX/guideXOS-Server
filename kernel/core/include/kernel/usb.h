@@ -298,6 +298,13 @@ struct Device {
     uint8_t          address;         // assigned USB address (1-127)
     DeviceSpeed      speed;
     uint8_t          hubPort;         // port on parent hub (0 = root)
+    // PCI identity of the host controller, used with the USB path for boot
+    // provenance. Valid only when the active HCI can establish it.
+    bool             controllerPciLocationValid;
+    uint32_t         controllerPciSegment;
+    uint8_t          controllerPciBus;
+    uint8_t          controllerPciDevice;
+    uint8_t          controllerPciFunction;
     DeviceDescriptor devDesc;
     uint8_t          currentConfig;
     Endpoint         endpoints[MAX_ENDPOINTS * 2]; // IN + OUT
@@ -328,6 +335,12 @@ void set_kernel_physical_base(uint64_t physicalBase);
 
 // Return true if the HCI is present and initialised.
 bool is_available();
+
+// Return the PCI BDF of the active USB host controller when the HCI can
+// establish it authoritatively. Legacy x86 PCI configuration access uses
+// segment zero.
+bool get_controller_pci_location(uint32_t* segment, uint8_t* bus,
+                                 uint8_t* device, uint8_t* function);
 
 // Reset a specific root-hub port and return the device speed, or
 // SPEED_LOW if the port has nothing connected.

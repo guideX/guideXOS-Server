@@ -6260,6 +6260,8 @@ static const char* disk_manager_block_status_name(kernel::block::Status status)
         case kernel::block::BLOCK_ERR_INVALID: return "BLOCK_ERR_INVALID";
         case kernel::block::BLOCK_ERR_UNSUPPORTED: return "BLOCK_ERR_UNSUPPORTED";
         case kernel::block::BLOCK_ERR_READ_ONLY: return "BLOCK_ERR_READ_ONLY";
+        case kernel::block::BLOCK_ERR_WRITE_UNCERTAIN: return "USB write completion is uncertain";
+        case kernel::block::BLOCK_ERR_DURABILITY_UNVERIFIED: return "USB durability could not be verified";
         default: return "BLOCK_ERR_UNKNOWN";
     }
 }
@@ -8891,6 +8893,10 @@ void DiskManagerApp::drawDetails(uint32_t x, uint32_t y, uint32_t w,
                                        sizeof(value2));
                     strappend(value, value2, sizeof(value));
                     add(right, rightCount, "USB durability", value);
+                    strcopy(value, usb_storage::write_outcome_name(
+                        static_cast<block::UsbWriteOutcome>(
+                            diagnostic.usbWriteOutcome)), sizeof(value));
+                    add(right, rightCount, "USB write outcome", value);
                     if (diagnostic.senseKey != 0xFF) {
                         strcopy(value, "key ", sizeof(value));
                         disk_manager_hex32(diagnostic.senseKey, value2,

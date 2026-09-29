@@ -201,6 +201,10 @@ static CreatePartitionStatus map_safety(uint32_t issues)
         return CREATE_PARTITION_ROOT_BACKING;
     if (issues & SAFETY_ISSUE_MOUNTED)
         return CREATE_PARTITION_MOUNTED;
+    if (issues & SAFETY_ISSUE_BOOT_BACKING)
+        return CREATE_PARTITION_BOOT_BACKING;
+    if (issues & SAFETY_ISSUE_BOOT_IDENTITY_UNKNOWN)
+        return CREATE_PARTITION_BOOT_IDENTITY_UNKNOWN;
     return CREATE_PARTITION_INVALID_TABLE;
 }
 

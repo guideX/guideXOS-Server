@@ -283,6 +283,10 @@ static Fat32FormatStatus map_safety_issues(uint32_t issues)
         return FAT32_FORMAT_ROOT_BACKING;
     if (issues & SAFETY_ISSUE_MOUNTED)
         return FAT32_FORMAT_MOUNTED;
+    if (issues & SAFETY_ISSUE_BOOT_BACKING)
+        return FAT32_FORMAT_BOOT_BACKING;
+    if (issues & SAFETY_ISSUE_BOOT_IDENTITY_UNKNOWN)
+        return FAT32_FORMAT_BOOT_IDENTITY_UNKNOWN;
     return FAT32_FORMAT_INVALID_TABLE;
 }
 

@@ -121,6 +121,8 @@ enum Status : int8_t {
     VFS_ERR_DEVICE_REMOVED = -24,
     VFS_ERR_NOT_READY = -25,
     VFS_ERR_MOUNT_STALE = -26,
+    VFS_ERR_WRITE_UNCERTAIN = -27,
+    VFS_ERR_DURABILITY_UNVERIFIED = -28,
 };
 
 const char* status_name(Status status);
