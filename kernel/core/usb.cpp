@@ -337,6 +337,19 @@ const Device* get_device(uint8_t address)
     return nullptr;
 }
 
+bool device_online(uint8_t address)
+{
+    const Device* device = get_device(address);
+    if (!device || device->hubPort >= hci::port_count() ||
+        !hci::port_connected(device->hubPort)) return false;
+#if defined(ARCH_AMD64)
+    // Do not let a quick detach/reinsert make the old USB address appear to
+    // describe the replacement before the normal port poll retires it.
+    if (hci::port_connection_change_pending(device->hubPort)) return false;
+#endif
+    return true;
+}
+
 uint8_t device_count()
 {
     return s_deviceCount;

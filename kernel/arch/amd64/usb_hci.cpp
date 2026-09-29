@@ -14,6 +14,7 @@
 #include "include/arch/uhci_transfer_logic.h"
 #include <kernel/usb.h>
 #include <kernel/serial_debug.h>
+#include <kernel/pit.h>
 #include <stddef.h>
 
 namespace kernel {
@@ -103,6 +104,9 @@ alignas(16) static usb::SetupPacket s_dmaSetup;
 alignas(16) static volatile uint8_t s_controlPackets[13][64];
 alignas(16) static volatile uint8_t s_bulkPackets[13][64];
 static uint8_t s_dataToggle[128][usb::MAX_ENDPOINTS * 2];
+#if defined(GXOS_DM14_QEMU_USB_HOTPLUG_PROOF)
+static bool s_testBulkOutDisconnectGate = false;
+#endif
 
 static inline void dma_compiler_barrier()
 {
@@ -262,7 +266,8 @@ static TransferStatus decode_td_status(uint32_t status)
     }
 }
 
-static TransferStatus wait_td(volatile UHCI_TD* td, uint32_t timeoutFrames)
+static TransferStatus wait_td(volatile UHCI_TD* td, uint32_t timeoutFrames,
+                                  uint8_t monitoredAddress = 0xFFu)
 {
     const uint16_t startFrame = static_cast<uint16_t>(
         uhci_read16(UHCI_FRNUM) & UHCI_FRAME_MASK);
@@ -289,6 +294,9 @@ static TransferStatus wait_td(volatile UHCI_TD* td, uint32_t timeoutFrames)
         }
 
         if ((poll & (controllerPollInterval - 1u)) == 0) {
+            if (monitoredAddress != 0xFFu &&
+                !kernel::usb::device_online(monitoredAddress))
+                return XFER_CANCELLED;
             const uint16_t controllerStatus = uhci_read16(UHCI_USBSTS);
             if (controllerStatus & (UHCI_STS_HOST_SYSTEM_ERROR |
                                     UHCI_STS_HOST_PROCESS_ERROR |
@@ -524,6 +532,32 @@ bool port_connection_changed(uint8_t port)
     return true;
 }
 
+bool port_connection_change_pending(uint8_t port)
+{
+    if (port >= 2) return false;
+    const uint16_t portReg = static_cast<uint16_t>(UHCI_PORTSC1 + port * 2);
+    return (uhci_read16(portReg) & UHCI_PORT_CONNECT_CHG) != 0;
+}
+
+#if defined(GXOS_DM14_QEMU_USB_HOTPLUG_PROOF)
+void test_arm_bulk_out_disconnect_gate()
+{
+    s_testBulkOutDisconnectGate = true;
+}
+
+bool test_wait_for_disconnect(uint8_t deviceAddr, const char* marker)
+{
+    serial::puts("[DM14-QEMU] wait=");
+    serial::puts(marker ? marker : "disconnect");
+    serial::putc('\n');
+    const uint64_t deadline = kernel::pit::ticks() + 1000u;
+    while (kernel::usb::device_online(deviceAddr) &&
+           kernel::pit::ticks() < deadline)
+        yield_to_controller();
+    return !kernel::usb::device_online(deviceAddr);
+}
+#endif
+
 TransferStatus control_transfer(uint8_t deviceAddr,
                                 const SetupPacket* setup,
                                 void* data,
@@ -587,7 +621,9 @@ TransferStatus control_transfer(uint8_t deviceAddr,
     dma_compiler_barrier();
     for (uint8_t i = 0; i < tdIdx; ++i) {
         const TransferStatus status = wait_td(
-            &s_tds[i], UHCI_CONTROL_TIMEOUT_FRAMES);
+            &s_tds[i], UHCI_CONTROL_TIMEOUT_FRAMES,
+            deviceAddr != 0 && kernel::usb::get_device(deviceAddr)
+                ? deviceAddr : 0xFFu);
         if (status != XFER_SUCCESS) {
             s_qh.elementLink = 0x01;
             serial::puts("[USB-UHCI] control-transfer-failed td=");
@@ -712,12 +748,18 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
         if (firstTdPhysical == 0) return XFER_BUFFER_ERROR;
         s_qh.elementLink = firstTdPhysical;
         dma_compiler_barrier();
+#if defined(GXOS_DM14_QEMU_USB_HOTPLUG_PROOF)
+        if (!dirIn && s_testBulkOutDisconnectGate) {
+            s_testBulkOutDisconnectGate = false;
+            serial::puts("[DM14-QEMU] wait=data-out-active\n");
+        }
+#endif
 
         bool shortPacket = false;
         for (uint8_t packet = 0; packet < batchCount; ++packet) {
             volatile UHCI_TD* td = &s_tds[packet];
             const TransferStatus status = wait_td(
-                td, UHCI_BULK_TIMEOUT_FRAMES);
+                td, UHCI_BULK_TIMEOUT_FRAMES, deviceAddr);
             if (status != XFER_SUCCESS) {
                 s_qh.elementLink = 0x01;
                 dma_compiler_barrier();

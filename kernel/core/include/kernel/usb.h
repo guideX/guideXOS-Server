@@ -357,6 +357,11 @@ bool port_connected(uint8_t port);
 // by the next poll.
 bool port_connection_changed(uint8_t port);
 
+// Read the root-port connection-change latch without consuming it. The USB
+// core uses this while I/O is active so a detach/reinsert between scheduler
+// polls cannot make the old address appear live for the replacement device.
+bool port_connection_change_pending(uint8_t port);
+
 // Issue a control transfer on the default pipe (endpoint 0).
 TransferStatus control_transfer(uint8_t deviceAddr,
                                 const SetupPacket* setup,
@@ -376,6 +381,11 @@ TransferStatus interrupt_transfer(uint8_t deviceAddr,
                                   void* data,
                                   uint16_t dataLen,
                                   uint16_t* bytesTransferred);
+#if defined(GXOS_DM14_QEMU_USB_HOTPLUG_PROOF)
+// Test-only gates used by the deterministic QEMU hotplug proof.
+void test_arm_bulk_out_disconnect_gate();
+bool test_wait_for_disconnect(uint8_t deviceAddr, const char* marker);
+#endif
 
 } // namespace hci
 
@@ -391,6 +401,11 @@ void poll();
 
 // Return the device at the given address, or nullptr.
 const Device* get_device(uint8_t address);
+
+// Check the live root-port state for an enumerated direct-root device. A
+// pending connection-change latch makes the current address stale even if a
+// replacement is already electrically connected.
+bool device_online(uint8_t address);
 
 // Return the number of currently attached devices.
 uint8_t device_count();

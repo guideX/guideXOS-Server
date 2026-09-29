@@ -278,6 +278,7 @@ struct FakeBot {
     FakeDisk* media;
     bool present;
     bool writeProtected;
+    bool noSerial;
     bool syncCacheSupported;
     bool syncCacheFailure;
     bool syntheticLargeMedia;
@@ -329,7 +330,7 @@ struct FakeBot {
     uint32_t clearHaltCommands;
     uint8_t lastOpcode;
 
-    FakeBot() : media(nullptr), present(false), writeProtected(false),
+    FakeBot() : media(nullptr), present(false), writeProtected(false), noSerial(false),
         syncCacheSupported(true), syncCacheFailure(false),
         syntheticLargeMedia(false), capacitySectors(0), blockSize(0),
         commandActive(false), commandFailed(false), dataStageStalled(false),
@@ -352,6 +353,8 @@ struct FakeBot {
 uint32_t g_usbChecks = 0;
 FakeBot g_usbBot;
 usb::Device g_usbDevice;
+bool g_usbPortConnected = true;
+bool g_usbConnectionChangePending = false;
 
 struct AtaPioFakeIo {
     uint16_t ioBase;
@@ -840,6 +843,13 @@ void fake_usb_prepare_command()
     }
     if (opcode == usb_storage::SCSI_INQUIRY) {
         if ((bot.command[1] & 0x01u) != 0 && bot.command[2] == 0x00) {
+            if (bot.noSerial) {
+                bot.fixedData[0] = 0;
+                bot.fixedData[1] = 0;
+                bot.fixedData[3] = 0;
+                bot.fixedDataLength = 4;
+                return;
+            }
             bot.fixedData[0] = 0;
             bot.fixedData[1] = 0;
             bot.fixedData[3] = 1;
@@ -1473,6 +1483,8 @@ void usb_check(bool condition, const char* label)
 void setup_fake_usb_device(FakeDisk* media, uint16_t vendor = 0x1234,
                            uint16_t product = 0x5678)
 {
+    g_usbPortConnected = true;
+    g_usbConnectionChangePending = false;
     g_usbBot = FakeBot();
     g_usbBot.media = media;
     g_usbBot.present = true;
@@ -1775,6 +1787,109 @@ void run_usb_write_failure_tests()
     (void)usb_storage::release(7);
 }
 
+void run_usb_hotplug_identity_tests()
+{
+    block::init();
+    vfs::test_clear_mounts();
+    fs_fat::init();
+    FakeDisk mediaA(512, 4096);
+    FakeDisk mediaB(512, 4096);
+    uint8_t patternA[512] = {};
+    uint8_t patternB[512] = {};
+    for (size_t i = 0; i < sizeof(patternA); ++i) {
+        patternA[i] = static_cast<uint8_t>((i * 13u + 0x31u) & 0xFFu);
+        patternB[i] = static_cast<uint8_t>((i * 29u + 0xA7u) & 0xFFu);
+    }
+    std::memcpy(mediaA.bytes.data() + 128u * 512u, patternA, sizeof(patternA));
+    std::memcpy(mediaB.bytes.data() + 128u * 512u, patternB, sizeof(patternB));
+    alignas(4096) uint8_t sector[512] = {};
+    bool cyclesPassed = true;
+
+    for (uint8_t cycle = 0; cycle < 25; ++cycle) {
+        block::init();
+        setup_fake_usb_device(&mediaA);
+        g_usbBot.noSerial = true;
+        usb_storage::init();
+        const bool oldProbed = usb_storage::probe(7);
+        const uint8_t oldIndex = usb_registered_block_index();
+        block::BlockDevice oldDevice = {};
+        storage::TargetIdentity oldTarget = {};
+        block::BlockEndpoint oldEndpoint = {};
+        const bool oldCaptured = oldIndex != 0xFF &&
+            block::copy_device(oldIndex, oldDevice) &&
+            storage::capture_target_identity(oldIndex, oldTarget) &&
+            block::make_device_endpoint(oldIndex, oldEndpoint);
+        const uint64_t oldRegistration = oldCaptured
+            ? oldDevice.registrationId : 0;
+        const uint32_t writesBeforeRemoval = g_usbBot.write10Commands;
+        g_usbConnectionChangePending = true;
+        const block::Status blockedWrite = block::write_sectors_checked(
+            oldIndex, 128, 1, patternB, sizeof(patternB));
+        const bool noCommandSubmitted = g_usbBot.write10Commands ==
+            writesBeforeRemoval;
+        usb_check(oldProbed && oldCaptured && oldRegistration != 0 &&
+                  oldDevice.totalSectors == 4096 &&
+                  oldDevice.serial[0] == '\0',
+                  "no-serial USB registration captures geometry and a unique incarnation");
+        usb_check(g_usbDevice.present && g_usbPortConnected &&
+                  g_usbConnectionChangePending &&
+                  blockedWrite == block::BLOCK_ERR_NO_MEDIA && noCommandSubmitted &&
+                  block::get_device(oldIndex) == nullptr,
+                  "pending root-port change blocks I/O and offlines the exact old registration before another BOT command");
+
+        (void)usb_storage::release(7);
+        setup_fake_usb_device(&mediaB);
+        g_usbBot.noSerial = true;
+        usb_storage::init();
+        const bool newProbed = usb_storage::probe(7);
+        const uint8_t newIndex = usb_registered_block_index();
+        block::BlockDevice newDevice = {};
+        storage::TargetIdentity newTarget = {};
+        const bool newCaptured = newIndex != 0xFF &&
+            block::copy_device(newIndex, newDevice) &&
+            storage::capture_target_identity(newIndex, newTarget);
+        const uint32_t replacementReadsBeforeStale = g_usbBot.read10Commands;
+        const block::Status staleEndpointRead = block::read_endpoint(
+            oldEndpoint, 128, 1, sector);
+        const bool staleDidNotReadReplacement =
+            g_usbBot.read10Commands == replacementReadsBeforeStale;
+        const storage::RevalidationStatus oldTargetStatus = oldCaptured
+            ? storage::revalidate_target_identity(oldTarget)
+            : storage::TARGET_DEVICE_MISSING;
+        usb_check(newProbed && newCaptured && newDevice.totalSectors ==
+                  oldDevice.totalSectors && newDevice.sectorSize ==
+                  oldDevice.sectorSize && newDevice.usbVendorId ==
+                  oldDevice.usbVendorId && newDevice.usbProductId ==
+                  oldDevice.usbProductId && newDevice.usbPort == oldDevice.usbPort &&
+                  newDevice.serial[0] == '\0' &&
+                  newDevice.registrationId != oldRegistration,
+                  "same-capacity same-VID/PID no-serial replacement on the same port receives a fresh registration");
+        usb_check(staleEndpointRead == block::BLOCK_ERR_NO_MEDIA &&
+                  staleDidNotReadReplacement && oldTargetStatus != storage::TARGET_VALID,
+                  "old endpoint and target snapshot cannot reach replacement media after same-slot reuse");
+        const block::Status freshRead = block::read_sectors_checked(
+            newIndex, 128, 1, sector, sizeof(sector));
+        const bool freshContentsMatch = freshRead == block::BLOCK_OK &&
+            std::memcmp(sector, patternB, sizeof(patternB)) == 0;
+        usb_check(freshContentsMatch && newTarget.registrationId ==
+                  newDevice.registrationId && block::device_count() == 1,
+                  "fresh registration alone reads the different replacement contents with no registry leak");
+        cyclesPassed = cyclesPassed && oldProbed && oldCaptured && newProbed &&
+            newCaptured && blockedWrite == block::BLOCK_ERR_NO_MEDIA &&
+            staleEndpointRead == block::BLOCK_ERR_NO_MEDIA && freshContentsMatch;
+        (void)usb_storage::release(7);
+        g_usbDevice.present = false;
+        g_usbBot.present = false;
+        g_usbPortConnected = false;
+        g_usbConnectionChangePending = false;
+        usb_check(block::device_count() == 0 &&
+                  usb_storage::device_count() == 0,
+                  "detach cleanup releases reusable block and USB registration slots");
+    }
+    usb_check(cyclesPassed && block::device_count() == 0 &&
+              usb_storage::device_count() == 0 && vfs::mount_count() == 0,
+              "25 repeated same-port replacement cycles leave no block, transport, or VFS registrations");
+}
 void run_usb_mass_storage_tests()
 {
     FakeDisk fixture(512, 90000);
@@ -2681,6 +2796,7 @@ void run_usb_mass_storage_tests()
     usb_check(stressPassed,
               "all automated USB media came from the in-memory BOT fixture; no physical device was accessed");
     run_usb_write_failure_tests();
+    run_usb_hotplug_identity_tests();
     (void)usb_storage::release(7);
     g_usbBot.present = false;
     g_usbDevice.present = false;
@@ -2697,6 +2813,11 @@ const Device* get_device(uint8_t address)
         ? &g_usbDevice : nullptr;
 }
 
+bool device_online(uint8_t address)
+{
+    return get_device(address) != nullptr && g_usbPortConnected &&
+        !g_usbConnectionChangePending;
+}
 TransferStatus control_transfer(uint8_t address, const SetupPacket* setup,
                                 void*, uint16_t)
 {

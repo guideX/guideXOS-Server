@@ -9402,6 +9402,15 @@ void DiskManagerApp::unmountSelectedPartition() {
         strcopy(message,
             "Mount cleaned up, but parent identity or flush could not be confirmed.",
             sizeof(message));
+    } else if (status == vfs::VFS_ERR_DEVICE_REMOVED &&
+               vfs::get_mount_by_index(mountIndex) == nullptr) {
+        strcopy(message,
+            "USB storage was removed; mount cleaned up, writes may be incomplete.",
+            sizeof(message));
+    } else if (status == vfs::VFS_ERR_DEVICE_REMOVED) {
+        strcopy(message,
+            "USB storage was removed; unmount flush did not complete.",
+            sizeof(message));
     } else {
         strcopy(message, "Unmount failed: filesystem flush failed; mount remains active.",
                 sizeof(message));

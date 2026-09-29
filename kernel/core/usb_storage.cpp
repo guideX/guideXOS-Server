@@ -9,6 +9,10 @@ namespace usb_storage {
 namespace {
 
 static StorageDevice s_devices[MAX_STORAGE_DEVICES];
+#if defined(GXOS_DM14_QEMU_USB_HOTPLUG_PROOF)
+static bool s_testDataOutDisconnectGate = false;
+static bool s_testSyncCacheDisconnectGate = false;
+#endif
 static uint8_t s_deviceCount = 0;
 
 enum BotStage : uint8_t {
@@ -110,6 +114,19 @@ static void set_last_transfer(StorageDevice* dev, BotStage stage,
     dev->lastTransferStatus = static_cast<uint8_t>(status);
 }
 
+static bool mark_transport_removed(StorageDevice& dev, BotStage stage)
+{
+    if (usb::device_online(dev.usbAddress)) return false;
+    if (dev.syncCacheState == SYNC_CACHE_SUCCEEDED)
+        dev.syncCacheState = SYNC_CACHE_FAILED;
+    dev.transportFaulted = true;
+    dev.lastBotStage = static_cast<uint8_t>(stage);
+    dev.lastTransferStatus = static_cast<uint8_t>(usb::XFER_CANCELLED);
+    if (dev.blockRegistered)
+        (void)block::mark_device_offline(dev.blockDeviceIndex,
+                                         dev.blockRegistrationId);
+    return true;
+}
 static bool clear_endpoint_halt(StorageDevice* dev, uint8_t endpoint,
                                 BotStage stage)
 {
@@ -127,6 +144,10 @@ static bool clear_endpoint_halt(StorageDevice* dev, uint8_t endpoint,
 
 static bool bot_reset_recovery(StorageDevice* dev)
 {
+    if (!dev || !usb::device_online(dev->usbAddress)) {
+        if (dev) (void)mark_transport_removed(*dev, BOT_STAGE_RESET);
+        return false;
+    }
     usb::SetupPacket reset = {};
     reset.bmRequestType = 0x21; // Host-to-device, class, interface.
     reset.bRequest = 0xFF;      // Mass Storage Reset.
@@ -136,6 +157,12 @@ static bool bot_reset_recovery(StorageDevice* dev)
     const usb::TransferStatus resetStatus = usb::control_transfer(
         dev->usbAddress, &reset, nullptr, 0);
     set_last_transfer(dev, BOT_STAGE_RESET, resetStatus);
+    if (resetStatus != usb::XFER_SUCCESS ||
+        !usb::device_online(dev->usbAddress)) {
+        dev->transportFaulted = true;
+        (void)mark_transport_removed(*dev, BOT_STAGE_RESET);
+        return false;
+    }
 
     const bool inCleared = clear_endpoint_halt(dev, dev->bulkInEP,
                                                 BOT_STAGE_CLEAR_IN);
@@ -208,6 +235,13 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
         (dataLength != 0 && data == nullptr) ||
         (direction != 0x00 && direction != 0x80))
         return usb::XFER_ERROR;
+    if (!usb::device_online(dev->usbAddress)) {
+        if (command && (command[0] == SCSI_WRITE_10 ||
+                        command[0] == SCSI_WRITE_16))
+            dev->lastWriteOutcome = block::USB_WRITE_REMOVED;
+        (void)mark_transport_removed(*dev, BOT_STAGE_CBW);
+        return usb::XFER_CANCELLED;
+    }
 
     dev->lastOpcode = command[0];
     const bool writeCommand = command[0] == SCSI_WRITE_10 ||
@@ -239,9 +273,29 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
         }
         if (status == usb::XFER_SUCCESS) status = usb::XFER_DATA_UNDERRUN;
         set_last_transfer(dev, BOT_STAGE_CBW, status);
-        (void)bot_reset_recovery(dev);
+        if (usb::device_online(dev->usbAddress))
+            (void)bot_reset_recovery(dev);
+        else
+            (void)mark_transport_removed(*dev, BOT_STAGE_CBW);
         return status;
     }
+
+#if defined(GXOS_DM14_QEMU_USB_HOTPLUG_PROOF)
+    if (writeCommand && dataLength != 0 && s_testDataOutDisconnectGate) {
+        s_testDataOutDisconnectGate = false;
+        usb::hci::test_arm_bulk_out_disconnect_gate();
+    }
+    if (command[0] == SCSI_SYNCHRONIZE_CACHE_10 &&
+        s_testSyncCacheDisconnectGate) {
+        s_testSyncCacheDisconnectGate = false;
+        if (usb::hci::test_wait_for_disconnect(dev->usbAddress,
+                                               "sync-cache-before-csw")) {
+            set_last_transfer(dev, BOT_STAGE_CSW, usb::XFER_CANCELLED);
+            (void)mark_transport_removed(*dev, BOT_STAGE_CSW);
+            return usb::XFER_CANCELLED;
+        }
+    }
+#endif
 
     uint32_t dataTransferred = 0;
     if (dataLength != 0) {
@@ -253,11 +307,16 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
                                  !usb::get_device(dev->usbAddress)))
                 dev->lastWriteOutcome = block::USB_WRITE_REMOVED_UNKNOWN;
             set_last_transfer(dev, BOT_STAGE_DATA, status);
+            if (!usb::device_online(dev->usbAddress)) {
+                (void)mark_transport_removed(*dev, BOT_STAGE_DATA);
+                return status;
+            }
             if (status != usb::XFER_STALL ||
                 !clear_endpoint_halt(dev,
                     direction == 0x80 ? dev->bulkInEP : dev->bulkOutEP,
                     direction == 0x80 ? BOT_STAGE_CLEAR_IN : BOT_STAGE_CLEAR_OUT)) {
-                (void)bot_reset_recovery(dev);
+                if (usb::device_online(dev->usbAddress))
+                    (void)bot_reset_recovery(dev);
                 return status;
             }
         }
@@ -274,7 +333,10 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
             dev->lastWriteOutcome = block::USB_WRITE_REMOVED_UNKNOWN;
         if (status == usb::XFER_SUCCESS) status = usb::XFER_DATA_UNDERRUN;
         set_last_transfer(dev, BOT_STAGE_CSW, status);
-        (void)bot_reset_recovery(dev);
+        if (usb::device_online(dev->usbAddress))
+            (void)bot_reset_recovery(dev);
+        else
+            (void)mark_transport_removed(*dev, BOT_STAGE_CSW);
         return status;
     }
 
@@ -291,14 +353,16 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
         cswResidue != dataLength - dataTransferred) {
         status = usb::XFER_ERROR;
         set_last_transfer(dev, BOT_STAGE_VALIDATE, status);
-        (void)bot_reset_recovery(dev);
+        if (usb::device_online(dev->usbAddress))
+            (void)bot_reset_recovery(dev);
         return status;
     }
     if (csw[12] == CSW_STATUS_PHASE_ERROR) {
         if (writeCommand) dev->lastWriteOutcome = block::USB_WRITE_SUBMITTED_UNKNOWN;
         status = usb::XFER_ERROR;
         set_last_transfer(dev, BOT_STAGE_VALIDATE, status);
-        (void)bot_reset_recovery(dev);
+        if (usb::device_online(dev->usbAddress))
+            (void)bot_reset_recovery(dev);
         return status;
     }
     if (csw[12] == CSW_STATUS_FAILED) {
@@ -343,6 +407,10 @@ static usb::TransferStatus run_command(StorageDevice* dev, uint8_t direction,
         commandLength, data, dataLength, actualDataLength);
     if (status != usb::XFER_STALL || dev->lastCswStatus != CSW_STATUS_FAILED ||
         failedOpcode == SCSI_REQUEST_SENSE) return status;
+    if (!usb::device_online(dev->usbAddress)) {
+        (void)mark_transport_removed(*dev, BOT_STAGE_SENSE);
+        return usb::XFER_CANCELLED;
+    }
 
     SCSISenseData sense = {};
     const usb::TransferStatus senseStatus = request_sense_raw(dev, &sense);
@@ -359,7 +427,7 @@ static usb::TransferStatus run_command(StorageDevice* dev, uint8_t direction,
 static block::Status map_transfer_status(const StorageDevice& dev,
                                          usb::TransferStatus status)
 {
-    if (!usb::get_device(dev.usbAddress) || !dev.active)
+    if (!dev.active || !usb::device_online(dev.usbAddress))
         return block::BLOCK_ERR_NO_MEDIA;
     if (status == usb::XFER_SUCCESS) return block::BLOCK_OK;
     if (status == usb::XFER_TIMEOUT) return block::BLOCK_ERR_TIMEOUT;
@@ -603,7 +671,11 @@ static block::Status block_read(uint8_t index, uint64_t lba,
         return block::BLOCK_ERR_NO_MEDIA;
     if (!valid_range(dev, lba, count)) return block::BLOCK_ERR_INVALID;
     const usb::TransferStatus transfer = read_sectors(index, lba, count, buffer);
-    const block::Status status = map_transfer_status(dev, transfer);
+    block::Status status = map_transfer_status(dev, transfer);
+    if (!usb::device_online(dev.usbAddress)) {
+        (void)mark_transport_removed(dev, static_cast<BotStage>(dev.lastBotStage));
+        status = block::BLOCK_ERR_NO_MEDIA;
+    }
     dev.lastBlockStatus = static_cast<uint8_t>(status);
     if (dev.transportFaulted && dev.blockRegistered)
         (void)block::mark_device_offline(dev.blockDeviceIndex,
@@ -625,7 +697,11 @@ static block::Status block_flush(uint8_t index)
             : block::BLOCK_ERR_UNSUPPORTED;
     const usb::TransferStatus transfer = synchronize_cache(index);
     block::Status status = map_transfer_status(dev, transfer);
-    if (transfer == usb::XFER_SUCCESS) {
+    if (!usb::device_online(dev.usbAddress)) {
+        (void)mark_transport_removed(dev, static_cast<BotStage>(dev.lastBotStage));
+        status = block::BLOCK_ERR_NO_MEDIA;
+    }
+    if (transfer == usb::XFER_SUCCESS && status == block::BLOCK_OK) {
         dev.writeCompletedAwaitingFlush = false;
     } else if (dev.writeCompletedAwaitingFlush) {
         status = block::BLOCK_ERR_DURABILITY_UNVERIFIED;
@@ -647,6 +723,10 @@ static block::Status block_write(uint8_t index, uint64_t lba,
         return block::BLOCK_ERR_NO_MEDIA;
     const usb::TransferStatus transfer = write_sectors(index, lba, count, buffer);
     block::Status status = map_transfer_status(dev, transfer);
+    if (!usb::device_online(dev.usbAddress)) {
+        (void)mark_transport_removed(dev, static_cast<BotStage>(dev.lastBotStage));
+        status = block::BLOCK_ERR_NO_MEDIA;
+    }
 
     const uint8_t senseKey = dev.lastSenseValid
         ? static_cast<uint8_t>(dev.lastSense.senseKey & 0x0Fu) : 0xFFu;
@@ -1036,6 +1116,18 @@ usb::TransferStatus write_sectors(uint8_t devIndex, uint64_t lba,
     // The caller must still issue SYNCHRONIZE CACHE after the full write.
     return usb::XFER_SUCCESS;
 }
+
+#if defined(GXOS_DM14_QEMU_USB_HOTPLUG_PROOF)
+void test_arm_data_out_disconnect_gate()
+{
+    s_testDataOutDisconnectGate = true;
+}
+
+void test_arm_sync_cache_disconnect_gate()
+{
+    s_testSyncCacheDisconnectGate = true;
+}
+#endif
 
 const char* write_outcome_name(block::UsbWriteOutcome outcome)
 {

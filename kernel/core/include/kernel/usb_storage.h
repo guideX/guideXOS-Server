@@ -145,6 +145,11 @@ static const uint32_t MAX_BOT_TRANSFER_BYTES = 64u * 1024u;
 void init();
 bool probe(uint8_t usbAddress);
 void release(uint8_t usbAddress);
+#if defined(GXOS_DM14_QEMU_USB_HOTPLUG_PROOF)
+// Test-only interruption gates; absent from ordinary kernel builds.
+void test_arm_data_out_disconnect_gate();
+void test_arm_sync_cache_disconnect_gate();
+#endif
 uint8_t device_count();
 const StorageDevice* get_device(uint8_t index);
 
