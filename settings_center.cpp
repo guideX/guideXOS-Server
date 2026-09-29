@@ -9,6 +9,7 @@
 #include "display_configuration.h"
 #include "display_configuration_service.h"
 #include "display_options_store.h"
+#include "focus_indicator.h"
 #include "gui_protocol.h"
 #include "ipc_bus.h"
 #include "logger.h"
@@ -17,6 +18,7 @@
 #include "settings_inventory_service.h"
 #include "settings_server_identity.h"
 #include "settings_system_information.h"
+#include "settings_s7_model.h"
 #include "open_dialog.h"
 #include "process.h"
 
@@ -229,6 +231,27 @@ void publish(MsgType type, const std::string& payload)
     ipc::Bus::publish("gui.input", std::move(message), false);
 }
 
+class DesktopFocusPreferenceStore {
+public:
+    bool read(bool& enabled)
+    {
+        DesktopConfigData config;
+        std::string error;
+        if (!DesktopConfig::Load("desktop.json", config, error)) return false;
+        enabled = config.enhancedFocusIndicator;
+        return true;
+    }
+
+    bool write(bool enabled)
+    {
+        DesktopConfigData config;
+        std::string error;
+        if (!DesktopConfig::Load("desktop.json", config, error)) return false;
+        config.enhancedFocusIndicator = enabled;
+        return DesktopConfig::Save("desktop.json", config, error);
+    }
+};
+
 struct FocusItem {
     enum class Kind { None, Search, Category, SearchResult, Control } kind{Kind::None};
     int index{0};
@@ -264,6 +287,12 @@ public:
           m_personalizationFeedback(std::make_shared<PersonalizationFeedback>())
     {
         m_navigation.navigate(initialRoute);
+        DesktopFocusPreferenceStore focusPreferenceStore;
+        m_accessibilityPreferenceAvailable = focusPreferenceStore.read(
+            m_accessibilityPreferences.enhancedFocusIndicator);
+        if (m_accessibilityPreferenceAvailable) {
+            FocusIndicator::SetEnhancedFocusEnabled(m_accessibilityPreferences.enhancedFocusIndicator);
+        }
         if (initialRoute.category == CategoryId::Personalization) refreshPersonalization();
         if (initialRoute.category == CategoryId::Display || initialRoute.category == CategoryId::System) refreshDisplay();
         if (initialRoute.category == CategoryId::Network) {
@@ -276,6 +305,12 @@ public:
         }
         if (initialRoute.category == CategoryId::Apps) refreshApps();
         if (initialRoute.category == CategoryId::DateTime) refreshDateTime();
+        if (initialRoute.category == CategoryId::Accessibility || initialRoute.category == CategoryId::Developer)
+            refreshDeveloperInventory();
+        if (initialRoute.category == CategoryId::Developer && initialRoute.target == TargetId::DeveloperServices)
+            refreshDeveloperServices();
+        if (initialRoute.category == CategoryId::Developer && initialRoute.target == TargetId::DeveloperDiagnostics)
+            refreshDeveloperDiagnostics();
         setFocusForRoute(initialRoute);
     }
 
@@ -344,6 +379,8 @@ public:
     {
         m_width = std::max(640, width);
         m_height = std::max(480, height);
+        m_s7PageScroll = clampSettingsPageScroll(m_s7PageScroll, s7MaximumScroll());
+        ensureS7FocusVisible();
     }
 
     void render()
@@ -403,8 +440,8 @@ public:
                 break;
             case CategoryId::Users: renderPlaceholder(); break;
             case CategoryId::DateTime: renderDateTimePage(); break;
-            case CategoryId::Accessibility: renderAdvancedPage("Open the built-in on-screen keyboard.", FocusControl::AccessibilityKeyboard, "Open on-screen keyboard"); break;
-            case CategoryId::Developer: renderAdvancedPage("Open the guideXOS Console for developer and diagnostic commands.", FocusControl::DeveloperConsole, "Open Console"); break;
+            case CategoryId::Accessibility: renderAccessibilityPage(); break;
+            case CategoryId::Developer: renderDeveloperPage(); break;
             case CategoryId::About: renderAbout(); break;
             case CategoryId::Count: renderPlaceholder(); break;
             }
@@ -431,6 +468,30 @@ public:
                 else {
                     const size_t colon = action.find(':');
                     if (colon != std::string::npos) wheelSteps = std::stoi(action.substr(colon + 1));
+                }
+                const bool s7PageVisible = m_navigation.selectedCategory() == CategoryId::Accessibility ||
+                    m_navigation.selectedCategory() == CategoryId::Developer;
+                if (s7PageVisible && wheelSteps != 0 && x >= pageX() && x <= pageX() + pageWidth() &&
+                    y >= s7ContentTop() && y <= s7ViewportBottom() && s7MaximumScroll() > 0) {
+                    m_s7PageScroll = clampSettingsPageScroll(
+                        m_s7PageScroll - wheelSteps * s7RowPitch() * 3, s7MaximumScroll());
+                    if (m_focusedItem.kind == FocusItem::Kind::Control) {
+                        const int focusedRow = s7FocusRow(m_focusedItem.control);
+                        if (focusedRow >= 0 && !s7RowFullyVisible(focusedRow)) {
+                            int categoryIndex = 0;
+                            for (size_t i = 0; i < kCategories.size(); ++i) {
+                                if (kCategories[i].id == m_navigation.selectedCategory()) {
+                                    categoryIndex = static_cast<int>(i);
+                                    break;
+                                }
+                            }
+                            m_focusedItem = FocusItem{ FocusItem::Kind::Category, categoryIndex, FocusControl::None };
+                        }
+                    }
+                    m_hoverItem = hitTest(x, y);
+                    m_hasHover = true;
+                    render();
+                    return;
                 }
                 const bool insideList = x >= pageX() && x <= pageX() + pageWidth() &&
                     y >= inventoryListTop() && y <= inventoryListBottom();
@@ -604,12 +665,27 @@ private:
     uint64_t m_selectedDeviceGeneration{0};
     uint64_t m_selectedDiskGeneration{0};
     AppInventory m_appInventory{};
+    DeveloperAppModelSnapshot m_developerAppModel{};
+    AccessibilityPreferences m_accessibilityPreferences{};
+    bool m_accessibilityPreferenceAvailable{false};
+    bool m_accessibilityKeyboardAvailable{false};
+    bool m_developerServiceNetworkAvailable{false};
+    bool m_developerServiceDevicesAvailable{false};
+    bool m_developerServiceStorageAvailable{false};
+    bool m_developerServicesChecked{false};
+    std::string m_developerAppModelStatus{"Unavailable"};
+    std::string m_developerAppModelStatusSource{"Unavailable"};
+    bool m_developerPreviewAvailable{false};
+    uint64_t m_developerPreviewTotal{0};
+    uint64_t m_developerPreviewUnresolved{0};
+    uint64_t m_developerPreviewHighRisk{0};
     std::string m_selectedAppId;
     uint64_t m_selectedAppGeneration{0};
     bool m_selectedAppMissing{false};
     std::string m_appStatus;
     uint64_t m_nextAppsRefreshMs{0};
     int m_appScroll{0};
+    int m_s7PageScroll{0};
     clocktime::ClockDisplaySettings m_clockDisplaySettings{};
     DateTimeSnapshot m_dateTimeSnapshot{};
     uint64_t m_nextDateTimeRefreshMs{0};
@@ -675,6 +751,42 @@ private:
     int personalizationActionHeight() const { return smallSettingsLayout() ? 32 : 40; }
     int personalizationBackgroundHeight() const { return smallSettingsLayout() ? 104 : 128; }
     int searchResultPitch() const { return smallSettingsLayout() ? 42 : 50; }
+    int s7ContentTop() const { return kContentY + (smallSettingsLayout() ? 76 : 84); }
+    int s7RowsTop() const { return s7ContentTop() + 16; }
+    int s7RowPitch() const { return 36; }
+    int s7ViewportBottom() const { return std::max(s7ContentTop() + 1, m_height - 16); }
+    int s7ViewportHeight() const { return s7ViewportBottom() - s7ContentTop(); }
+    int s7RowCount() const
+    {
+        if (m_navigation.selectedCategory() == CategoryId::Accessibility) return 8;
+        if (m_navigation.selectedCategory() != CategoryId::Developer) return 0;
+        switch (m_navigation.route().target) {
+        case TargetId::Page: return 9;
+        case TargetId::DeveloperApps: return 9;
+        case TargetId::DeveloperServices: return 8;
+        case TargetId::DeveloperDiagnostics: return 11;
+        default: return 0;
+        }
+    }
+    int s7MaximumScroll() const
+    {
+        return maximumSettingsPageScroll(s7RowCount(), s7RowPitch(),
+            std::max(1, s7ViewportHeight() - 16));
+    }
+    int s7RowY(int index) const
+    {
+        return s7RowsTop() + std::max(0, index) * s7RowPitch() - m_s7PageScroll;
+    }
+    int s7CardHeight(int rowCount) const
+    {
+        return std::min(rowCount * s7RowPitch() + 20,
+            std::max(1, m_height - 16 - (s7ContentTop() - 5)));
+    }
+    bool s7RowFullyVisible(int row) const
+    {
+        const int y = s7RowY(row);
+        return y >= s7ContentTop() && y + s7RowPitch() - 3 <= s7ViewportBottom();
+    }
     size_t visibleSearchResultCount(size_t count) const { return count; }
 
     static bool sameFocus(const FocusItem& left, const FocusItem& right)
@@ -690,6 +802,11 @@ private:
         case TargetId::PersonalizationBackground: return FocusControl::PersonalizationChooseBackground;
         case TargetId::Resolution: return FocusControl::DisplayResolution;
         case TargetId::DisplayMode: return FocusControl::DisplayMode;
+        case TargetId::AccessibilityFocus: return FocusControl::AccessibilityEnhancedFocus;
+        case TargetId::AccessibilityKeyboard: return FocusControl::AccessibilityKeyboard;
+        case TargetId::DeveloperApps:
+        case TargetId::DeveloperServices:
+        case TargetId::DeveloperDiagnostics: return FocusControl::DeveloperBack;
         case TargetId::DeviceDetail: return FocusControl::DeviceDetailBack;
         case TargetId::StorageDiskDetail: return FocusControl::StorageDetailBack;
         default: return FocusControl::None;
@@ -745,6 +862,83 @@ private:
         ensureInventoryFocusVisible();
         m_nextAppsRefreshMs = steadyMilliseconds() + 2000;
         return inventoryChanged || oldMissing != m_selectedAppMissing;
+    }
+
+    void refreshDeveloperInventory()
+    {
+        m_appInventory = DesktopService::GetSettingsAppModelInventory();
+        m_developerAppModel = buildDeveloperAppModelSnapshot(m_appInventory);
+        const DeveloperToolStatus keyboard = findDeveloperTool(
+            m_appInventory, "gxos.builtin.onscreenkeyboard");
+        m_accessibilityKeyboardAvailable = developerToolActionEnabled(keyboard);
+    }
+
+    void refreshDeveloperServices()
+    {
+        network_settings::NetworkSnapshot network{};
+        const network_settings::Result networkResult = readSettingsNetworkSnapshot(&network);
+        inventory::DeviceSnapshot devices{};
+        const system_service::ClientResult deviceResult = readSettingsDeviceSnapshot(&devices);
+        inventory::StorageSnapshot storage{};
+        const system_service::ClientResult storageResult = readSettingsStorageSnapshot(&storage);
+        m_developerServiceNetworkAvailable = networkResult == network_settings::Result::Ok;
+        m_developerServiceDevicesAvailable = deviceResult == system_service::ClientResult::Ok;
+        m_developerServiceStorageAvailable = storageResult == system_service::ClientResult::Ok;
+        m_developerServicesChecked = true;
+    }
+
+    void refreshDeveloperDiagnostics()
+    {
+        m_developerAppModelStatus = "Unavailable";
+        m_developerAppModelStatusSource = "Unavailable";
+        const std::string appModel = DesktopService::AppModelSummaryDiagnostic();
+        const std::string status = diagnosticFieldValue(appModel, "appModelV1Status");
+        const std::string source = diagnosticFieldValue(appModel, "appModelV1StatusSource");
+        if (!status.empty()) m_developerAppModelStatus = status;
+        if (!source.empty()) m_developerAppModelStatusSource = source;
+
+        m_developerPreviewAvailable = false;
+        m_developerPreviewTotal = 0;
+        m_developerPreviewUnresolved = 0;
+        m_developerPreviewHighRisk = 0;
+        const std::string preview = DesktopService::LaunchStoragePreviewDiagnostic();
+        m_developerPreviewAvailable =
+            parseDiagnosticCount(preview, "totalRecords", m_developerPreviewTotal) &&
+            parseDiagnosticCount(preview, "unresolved", m_developerPreviewUnresolved) &&
+            parseDiagnosticCount(preview, "highRisk", m_developerPreviewHighRisk);
+    }
+
+    static std::string registeredToolText(const DeveloperToolStatus& tool)
+    {
+        if (!tool.registered) return "Not registered";
+        if (!tool.openSupported) return "Open unavailable";
+        return "Available";
+    }
+
+    void launchDeveloperTool(const DeveloperToolStatus& tool, const char* appId)
+    {
+        if (!developerToolActionEnabled(tool) || !appId) return;
+        std::string error;
+        if (!DesktopService::LaunchApp(appId, error))
+            Logger::write(LogLevel::Warn, std::string("Settings App Model tool launch failed: ") + appId +
+                (error.empty() ? std::string() : ": " + error));
+    }
+
+    void toggleEnhancedFocusIndicator()
+    {
+        DesktopFocusPreferenceStore store;
+        bool authoritative = m_accessibilityPreferences.enhancedFocusIndicator;
+        const bool requested = !authoritative;
+        const AccessibilityMutationResult result = updateEnhancedFocusPreference(
+            store, requested, [](bool enabled) {
+                FocusIndicator::SetEnhancedFocusEnabled(enabled);
+                publish(MsgType::MT_DesktopConfigReload, std::string());
+                return FocusIndicator::EnhancedFocusEnabled() == enabled;
+            }, authoritative);
+        m_accessibilityPreferences.enhancedFocusIndicator = authoritative;
+        if (result != AccessibilityMutationResult::Applied) {
+            Logger::write(LogLevel::Warn, "Settings could not persist, reread, or apply the enhanced focus preference.");
+        }
     }
 
     void refreshDateTime()
@@ -925,6 +1119,19 @@ private:
         drawRect(x + width - 1, y, 1, height, color);
     }
 
+    void drawFocusOutline(int x, int y, int width, int height) const
+    {
+        if (!FocusIndicator::EnhancedFocusEnabled()) {
+            drawOutline(x, y, width, height, accentColor());
+            return;
+        }
+        drawOutline(x, y, width, height, packRgb(255, 255, 255));
+        if (width > 4 && height > 4)
+            drawOutline(x + 2, y + 2, width - 4, height - 4, packRgb(0, 0, 0));
+        if (width > 8 && height > 8)
+            drawOutline(x + 4, y + 4, width - 8, height - 8, accentColor());
+    }
+
     void drawCard(int x, int y, int width, int height, const std::string& title) const
     {
         drawRect(x, y, width, height, cardColor());
@@ -942,7 +1149,8 @@ private:
         drawRect(x, y, width, height, fill);
         drawOutline(x, y, width, height, edge);
         if (selected && !isSciFiTheme()) drawRect(x, y, 4, height, accentColor());
-        if (focused && !hover) drawRect(x + 2, y + 2, width - 4, 1, accentColor());
+        if (focused && enabled) drawFocusOutline(x, y, width, height);
+        else if (focused && !hover) drawRect(x + 2, y + 2, width - 4, 1, accentColor());
         drawText(x + 12, y + std::max(8, (height - 16) / 2), fitText(label, static_cast<size_t>(std::max(1, (width - 24) / 8))), enabled ? textColor() : mutedTextColor());
     }
 
@@ -955,7 +1163,8 @@ private:
         const uint32_t fill = hover && enabled ? blendColor(cardColor(), accentColor(), 8) :
             (highlighted ? blendColor(cardColor(), accentColor(), 12) : cardColor());
         drawRect(x, y, width, rowHeight, fill);
-        if (focused || hover || highlighted) drawOutline(x, y, width, rowHeight, accentColor());
+        if (focused) drawFocusOutline(x, y, width, rowHeight);
+        else if (hover || highlighted) drawOutline(x, y, width, rowHeight, accentColor());
         drawText(x + 14, y + 6, label, enabled ? textColor() : mutedTextColor());
         const int valueX = x + width / 2;
         const size_t valueLimit = static_cast<size_t>(std::max(8, std::min(30, (width / 2 - 24) / 8)));
@@ -1038,8 +1247,24 @@ private:
                 add(FocusControl::StorageDiskManager);
             }
             break;
-        case CategoryId::Developer: add(FocusControl::DeveloperConsole); break;
-        case CategoryId::Accessibility: add(FocusControl::AccessibilityKeyboard); break;
+        case CategoryId::Developer:
+            if (m_navigation.route().target == TargetId::Page) {
+                if (developerToolActionEnabled(m_developerAppModel.developerStudio)) add(FocusControl::DeveloperStudio);
+                if (developerToolActionEnabled(m_developerAppModel.console)) add(FocusControl::DeveloperConsole);
+                add(FocusControl::DeveloperApps);
+                add(FocusControl::DeveloperServices);
+                add(FocusControl::DeveloperDiagnostics);
+            } else {
+                add(FocusControl::DeveloperBack);
+                if (m_navigation.route().target == TargetId::DeveloperServices ||
+                    m_navigation.route().target == TargetId::DeveloperDiagnostics)
+                    add(FocusControl::DeveloperRefresh);
+            }
+            break;
+        case CategoryId::Accessibility:
+            add(FocusControl::AccessibilityEnhancedFocus);
+            if (m_accessibilityKeyboardAvailable) add(FocusControl::AccessibilityKeyboard);
+            break;
         default: break;
         }
         return items;
@@ -1049,13 +1274,46 @@ private:
     {
         std::vector<FocusItem> items = focusOrder();
         if (items.empty()) return;
-        size_t current = 0;
+        int current = -1;
         for (size_t i = 0; i < items.size(); ++i) {
-            if (sameFocus(items[i], m_focusedItem)) { current = i; break; }
+            if (sameFocus(items[i], m_focusedItem)) { current = static_cast<int>(i); break; }
         }
-        current = reverse ? (current + items.size() - 1) % items.size() : (current + 1) % items.size();
-        m_focusedItem = items[current];
+        const size_t next = nextSettingsFocusIndex(items.size(), current, reverse);
+        m_focusedItem = items[next];
         ensureInventoryFocusVisible();
+        ensureS7FocusVisible();
+    }
+
+    int s7FocusRow(FocusControl control) const
+    {
+        switch (control) {
+        case FocusControl::AccessibilityEnhancedFocus: return 0;
+        case FocusControl::AccessibilityKeyboard: return 1;
+        case FocusControl::DeveloperStudio: return 0;
+        case FocusControl::DeveloperConsole: return 1;
+        case FocusControl::DeveloperApps: return 2;
+        case FocusControl::DeveloperServices: return 3;
+        case FocusControl::DeveloperDiagnostics: return 4;
+        case FocusControl::DeveloperRefresh:
+            return m_navigation.route().target == TargetId::DeveloperServices ? 6 : 9;
+        case FocusControl::DeveloperBack:
+            return m_navigation.route().target == TargetId::DeveloperApps ? 8 :
+                m_navigation.route().target == TargetId::DeveloperServices ? 7 : 10;
+        default: return -1;
+        }
+    }
+
+    void ensureS7FocusVisible()
+    {
+        if (m_focusedItem.kind != FocusItem::Kind::Control) return;
+        const int row = s7FocusRow(m_focusedItem.control);
+        if (row < 0) return;
+        int y = s7RowY(row);
+        const int rowHeight = s7RowPitch() - 3;
+        if (y < s7ContentTop()) m_s7PageScroll -= s7ContentTop() - y;
+        else if (y + rowHeight > s7ViewportBottom())
+            m_s7PageScroll += y + rowHeight - s7ViewportBottom();
+        m_s7PageScroll = clampSettingsPageScroll(m_s7PageScroll, s7MaximumScroll());
     }
 
     void moveFocusWithinList(int delta)
@@ -1163,8 +1421,44 @@ private:
         case FocusControl::PersonalizationAdvanced: return inRect(x, y, pageX() + 8, personalizationAdvancedY(), std::min(390, pageWidth() - 16), personalizationActionHeight());
         case FocusControl::DateTimeAdvanced: return inRect(x, y, pageX() + 8, dateTimeActionY(),
             std::min(390, pageWidth() - 16), dateTimeActionHeight());
+        case FocusControl::AccessibilityEnhancedFocus:
+            return m_accessibilityPreferenceAvailable && s7RowFullyVisible(0) &&
+                inRect(x, y, pageX() + 8, s7RowY(0), pageWidth() - 16, s7RowPitch() - 2);
+        case FocusControl::AccessibilityKeyboard:
+            return m_accessibilityKeyboardAvailable && s7RowFullyVisible(1) &&
+                inRect(x, y, pageX() + 8, s7RowY(1), pageWidth() - 16, s7RowPitch() - 2);
+        case FocusControl::DeveloperStudio:
+            return m_navigation.route().target == TargetId::Page && developerToolActionEnabled(m_developerAppModel.developerStudio) &&
+                s7RowFullyVisible(0) &&
+                inRect(x, y, pageX() + 8, s7RowY(0), pageWidth() - 16, s7RowPitch() - 2);
         case FocusControl::DeveloperConsole:
-        case FocusControl::AccessibilityKeyboard: return inRect(x, y, pageX() + 6, 210, std::min(390, pageWidth() - 12), 46);
+            return m_navigation.route().target == TargetId::Page && developerToolActionEnabled(m_developerAppModel.console) &&
+                s7RowFullyVisible(1) &&
+                inRect(x, y, pageX() + 8, s7RowY(1), pageWidth() - 16, s7RowPitch() - 2);
+        case FocusControl::DeveloperApps:
+            return m_navigation.route().target == TargetId::Page &&
+                s7RowFullyVisible(2) &&
+                inRect(x, y, pageX() + 8, s7RowY(2), pageWidth() - 16, s7RowPitch() - 2);
+        case FocusControl::DeveloperServices:
+            return m_navigation.route().target == TargetId::Page &&
+                s7RowFullyVisible(3) &&
+                inRect(x, y, pageX() + 8, s7RowY(3), pageWidth() - 16, s7RowPitch() - 2);
+        case FocusControl::DeveloperDiagnostics:
+            return m_navigation.route().target == TargetId::Page &&
+                s7RowFullyVisible(4) &&
+                inRect(x, y, pageX() + 8, s7RowY(4), pageWidth() - 16, s7RowPitch() - 2);
+        case FocusControl::DeveloperRefresh: {
+            const int row = m_navigation.route().target == TargetId::DeveloperServices ? 6 : 9;
+            return s7RowFullyVisible(row) &&
+                inRect(x, y, pageX() + 8, s7RowY(row), pageWidth() - 16, s7RowPitch() - 2);
+        }
+        case FocusControl::DeveloperBack: {
+            int row = 7;
+            if (m_navigation.route().target == TargetId::DeveloperApps) row = 8;
+            else if (m_navigation.route().target == TargetId::DeveloperDiagnostics) row = 10;
+            return s7RowFullyVisible(row) &&
+                inRect(x, y, pageX() + 8, s7RowY(row), pageWidth() - 16, s7RowPitch() - 2);
+        }
         case FocusControl::StorageDiskManager: return inRect(x, y, pageX() + 6, inventoryActionY(), std::min(390, pageWidth() - 12), smallSettingsLayout() ? 34 : 42);
         case FocusControl::DeviceEntry: {
             const std::vector<int> indices = deviceDisplayIndices();
@@ -1232,6 +1526,12 @@ private:
         if (route.category == CategoryId::Personalization) refreshPersonalization();
         if (route.category == CategoryId::Apps) refreshApps();
         if (route.category == CategoryId::DateTime) refreshDateTime();
+        if (route.category == CategoryId::Accessibility || route.category == CategoryId::Developer)
+            refreshDeveloperInventory();
+        if (route.category == CategoryId::Developer && route.target == TargetId::DeveloperServices)
+            refreshDeveloperServices();
+        if (route.category == CategoryId::Developer && route.target == TargetId::DeveloperDiagnostics)
+            refreshDeveloperDiagnostics();
         const bool networkVisible = m_windowFocused && route.category == CategoryId::Network;
         m_networkRefreshPolicy.setActive(networkVisible, steadyMilliseconds());
         if (networkVisible && previousCategory != CategoryId::Network) refreshNetwork();
@@ -1241,6 +1541,8 @@ private:
             refreshInventory();
         setFocusForRoute(route);
         m_search.clear();
+        m_s7PageScroll = 0;
+        ensureS7FocusVisible();
     }
 
     void setFocusForRoute(const SettingsRoute& route)
@@ -1256,12 +1558,21 @@ private:
             ? route.category == CategoryId::Apps && route.target == TargetId::AppDetail
             : requested == FocusControl::DateTimeAdvanced
             ? route.category == CategoryId::DateTime && route.target == TargetId::DateTimeTimeZone
+            : requested == FocusControl::AccessibilityEnhancedFocus
+            ? route.category == CategoryId::Accessibility && m_accessibilityPreferenceAvailable
+            : requested == FocusControl::AccessibilityKeyboard
+            ? route.category == CategoryId::Accessibility && m_accessibilityKeyboardAvailable
+            : requested == FocusControl::DeveloperBack
+            ? route.category == CategoryId::Developer && route.target != TargetId::Page
+            : requested == FocusControl::DeveloperRefresh
+            ? route.category == CategoryId::Developer && route.target != TargetId::Page
             : requested == FocusControl::DisplayResolution
             ? m_display.available && m_display.supportedModes.size() > 1 && m_display.active.outputCount == 1
             : requested == FocusControl::DisplayMode ? m_display.available && m_display.active.outputCount > 1 : false;
         m_focusedItem = focusable
             ? FocusItem{ FocusItem::Kind::Control, 0, requested }
             : FocusItem{ FocusItem::Kind::Category, static_cast<int>(route.category), FocusControl::None };
+        ensureS7FocusVisible();
     }
 
     void activate(const FocusItem& item)
@@ -1298,6 +1609,44 @@ private:
             case FocusControl::PersonalizationAdvanced: launchAdvanced("DisplayOptions"); break;
             case FocusControl::PersonalizationChooseBackground: chooseBackground(); break;
             case FocusControl::DateTimeAdvanced: launchAdvanced("DisplayOptions"); break;
+            case FocusControl::AccessibilityEnhancedFocus: toggleEnhancedFocusIndicator(); break;
+            case FocusControl::AccessibilityKeyboard: {
+                refreshDeveloperInventory();
+                const DeveloperToolStatus keyboard = findDeveloperTool(m_appInventory, "gxos.builtin.onscreenkeyboard");
+                if (!developerToolActionEnabled(keyboard)) {
+                    Logger::write(LogLevel::Warn, "Settings on-screen keyboard action is unavailable: App Model registration missing or unsupported.");
+                    break;
+                }
+                std::string error;
+                if (!DesktopService::LaunchApp("gxos.builtin.onscreenkeyboard", error))
+                    Logger::write(LogLevel::Warn, std::string("Settings on-screen keyboard launch failed through App Model") +
+                        (error.empty() ? std::string() : ": " + error));
+                break;
+            }
+            case FocusControl::DeveloperStudio:
+                refreshDeveloperInventory();
+                launchDeveloperTool(m_developerAppModel.developerStudio, kDeveloperStudioAppId);
+                break;
+            case FocusControl::DeveloperConsole:
+                refreshDeveloperInventory();
+                launchDeveloperTool(m_developerAppModel.console, kConsoleAppId);
+                break;
+            case FocusControl::DeveloperApps:
+                navigateTo(SettingsRoute{ CategoryId::Developer, TargetId::DeveloperApps });
+                break;
+            case FocusControl::DeveloperServices:
+                navigateTo(SettingsRoute{ CategoryId::Developer, TargetId::DeveloperServices });
+                break;
+            case FocusControl::DeveloperDiagnostics:
+                navigateTo(SettingsRoute{ CategoryId::Developer, TargetId::DeveloperDiagnostics });
+                break;
+            case FocusControl::DeveloperRefresh:
+                if (m_navigation.route().target == TargetId::DeveloperServices) refreshDeveloperServices();
+                else if (m_navigation.route().target == TargetId::DeveloperDiagnostics) refreshDeveloperDiagnostics();
+                break;
+            case FocusControl::DeveloperBack:
+                navigateTo(SettingsRoute{ CategoryId::Developer, TargetId::Page });
+                break;
             case FocusControl::AppEntry:
                 if (item.index >= 0 && static_cast<size_t>(item.index) < m_appInventory.count) {
                     const AppInventoryEntry& selected = m_appInventory.entries[static_cast<size_t>(item.index)];
@@ -1385,8 +1734,6 @@ private:
                 navigateTo(SettingsRoute{ CategoryId::Storage, TargetId::Page });
                 break;
             case FocusControl::SystemControlPanel: launchAdvanced("ControlPanel"); break;
-            case FocusControl::DeveloperConsole: launchAdvanced("Console"); break;
-            case FocusControl::AccessibilityKeyboard: launchAdvanced("OnScreenKeyboard"); break;
             case FocusControl::None: break;
             }
             break;
@@ -2310,6 +2657,130 @@ private:
         drawButton(x + 8, dateTimeActionY(), std::min(390, width - 16), dateTimeActionHeight(),
             "Open time-zone settings", false, sameFocus(m_hoverItem, zoneAction),
             sameFocus(m_focusedItem, zoneAction), true);
+    }
+
+    void drawS7Row(int row, const std::string& label, const std::string& value,
+                   FocusControl control = FocusControl::None, bool enabled = false)
+    {
+        if (!s7RowFullyVisible(row)) return;
+        const int x = pageX() + 8;
+        const int width = pageWidth() - 16;
+        const int y = s7RowY(row);
+        const int height = s7RowPitch() - 3;
+        const FocusItem item{ FocusItem::Kind::Control, 0, control };
+        const bool interactive = control != FocusControl::None;
+        const bool hovered = interactive && sameFocus(m_hoverItem, item);
+        const bool focused = interactive && sameFocus(m_focusedItem, item);
+        const uint32_t fill = hovered && enabled
+            ? blendColor(cardColor(), accentColor(), 9) : cardColor();
+        drawRect(x, y, width, height, fill);
+        if (focused) drawFocusOutline(x, y, width, height);
+        else if (hovered && enabled) drawOutline(x, y, width, height, accentColor());
+
+        const int valueX = x + width / 2;
+        const int arrowRoom = interactive && enabled ? 26 : 8;
+        const size_t labelLimit = static_cast<size_t>(std::max(8, (width / 2 - 18) / 8));
+        const size_t valueLimit = static_cast<size_t>(std::max(8, (width / 2 - arrowRoom) / 8));
+        drawText(x + 10, y + 4, fitText(label, labelLimit), enabled || !interactive ? textColor() : mutedTextColor());
+        drawText(valueX, y + 4, fitText(value, valueLimit), interactive && !enabled ? mutedTextColor() : textColor());
+        if (interactive && enabled) drawText(x + width - 18, y + 4, ">", accentColor());
+    }
+
+    void renderAccessibilityPage()
+    {
+        const int x = pageX();
+        const int rowCount = 8;
+        drawCard(x, s7ContentTop() - 5, pageWidth(), s7CardHeight(rowCount), "");
+        drawS7Row(0, "Enhanced focus indicator",
+            m_accessibilityPreferenceAvailable
+                ? (m_accessibilityPreferences.enhancedFocusIndicator ? "On" : "Off")
+                : "Unavailable",
+            FocusControl::AccessibilityEnhancedFocus, m_accessibilityPreferenceAvailable);
+        drawS7Row(1, "On-screen keyboard",
+            m_accessibilityKeyboardAvailable ? "Available" : "Not registered",
+            FocusControl::AccessibilityKeyboard, m_accessibilityKeyboardAvailable);
+        drawS7Row(2, "System-wide text and UI size", "Unavailable");
+        drawS7Row(3, "High contrast palette", "Unavailable");
+        drawS7Row(4, "Pointer size and visibility", "Unavailable");
+        drawS7Row(5, "Reduced motion", "Unavailable");
+        drawS7Row(6, "Screen reader and speech", "Unavailable");
+        drawS7Row(7, "Magnifier, color filters, input timing", "Unavailable");
+    }
+
+    void renderDeveloperPage()
+    {
+        const int x = pageX();
+        const TargetId target = m_navigation.route().target;
+        if (target == TargetId::Page) {
+            drawCard(x, s7ContentTop() - 5, pageWidth(), s7CardHeight(9), "");
+            drawS7Row(0, "Developer Studio", registeredToolText(m_developerAppModel.developerStudio),
+                FocusControl::DeveloperStudio, developerToolActionEnabled(m_developerAppModel.developerStudio));
+            drawS7Row(1, "Console", registeredToolText(m_developerAppModel.console),
+                FocusControl::DeveloperConsole, developerToolActionEnabled(m_developerAppModel.console));
+            drawS7Row(2, "App Model", std::to_string(m_developerAppModel.registryTotalCount) + " registered",
+                FocusControl::DeveloperApps, true);
+            const int availableServices = static_cast<int>(m_developerServiceNetworkAvailable) +
+                static_cast<int>(m_developerServiceDevicesAvailable) +
+                static_cast<int>(m_developerServiceStorageAvailable);
+            drawS7Row(3, "System services", m_developerServicesChecked
+                ? std::to_string(availableServices) + " of 3 available" : "Open to query",
+                FocusControl::DeveloperServices, true);
+            drawS7Row(4, "App Model and launch diagnostics", "Open details",
+                FocusControl::DeveloperDiagnostics, true);
+            drawS7Row(5, "Build", gxos::identity::kGuideXosServerVersion);
+            drawS7Row(6, "Architecture", formatArchitecture(m_systemInformation.architecture));
+            drawS7Row(7, "Runtime", boundedSettingValue(m_systemInformation.runtime, 44, "Unavailable"));
+            drawS7Row(8, "Shared focus renderer",
+                FocusIndicator::EnhancedFocusEnabled() ? "Enhanced" : "Default");
+            return;
+        }
+
+        if (target == TargetId::DeveloperApps) {
+            drawCard(x, s7ContentTop() - 5, pageWidth(), s7CardHeight(9), "");
+            drawS7Row(0, "Registered applications", std::to_string(m_developerAppModel.registryTotalCount));
+            drawS7Row(1, "Settings snapshot", std::to_string(m_developerAppModel.registeredCount) +
+                (m_developerAppModel.truncated ? "; truncated" : "; complete"));
+            drawS7Row(2, "Snapshot capacity", std::to_string(kMaxSettingsApps));
+            drawS7Row(3, "Native ELF registrations", std::to_string(m_developerAppModel.nativeElfCount));
+            drawS7Row(4, "Developer Studio", registeredToolText(m_developerAppModel.developerStudio));
+            drawS7Row(5, "Console", registeredToolText(m_developerAppModel.console));
+            drawS7Row(6, "Launch dispatch", "Normal App Model route");
+            drawS7Row(7, "Launch readiness", "Not inferred from registration");
+            drawS7Row(8, "Back to Developer", "Return", FocusControl::DeveloperBack, true);
+            return;
+        }
+
+        if (target == TargetId::DeveloperServices) {
+            drawCard(x, s7ContentTop() - 5, pageWidth(), s7CardHeight(8), "");
+            const int availableServices = static_cast<int>(m_developerServiceNetworkAvailable) +
+                static_cast<int>(m_developerServiceDevicesAvailable) +
+                static_cast<int>(m_developerServiceStorageAvailable);
+            drawS7Row(0, "Available snapshots", std::to_string(availableServices) + " of 3");
+            drawS7Row(1, "Network service", m_developerServiceNetworkAvailable ? "Available" : "Unavailable");
+            drawS7Row(2, "Device service", m_developerServiceDevicesAvailable ? "Available" : "Unavailable");
+            drawS7Row(3, "Storage service", m_developerServiceStorageAvailable ? "Available" : "Unavailable");
+            drawS7Row(4, "COM2 peer authentication", "Unavailable; peer is unauthenticated");
+            drawS7Row(5, "Network configuration mutation", "Rejected by service bridge");
+            drawS7Row(6, "Refresh service status", "Refresh", FocusControl::DeveloperRefresh, true);
+            drawS7Row(7, "Back to Developer", "Return", FocusControl::DeveloperBack, true);
+            return;
+        }
+
+        if (target == TargetId::DeveloperDiagnostics) {
+            drawCard(x, s7ContentTop() - 5, pageWidth(), s7CardHeight(11), "");
+            drawS7Row(0, "App Model V1 status", m_developerAppModelStatus);
+            drawS7Row(1, "Status source", m_developerAppModelStatusSource);
+            drawS7Row(2, "Phase 5B storage preview", m_developerPreviewAvailable ? "Nonfatal; read only" : "Unavailable");
+            drawS7Row(3, "Preview records", m_developerPreviewAvailable ? std::to_string(m_developerPreviewTotal) : "Unavailable");
+            drawS7Row(4, "Phase 5B unresolved", m_developerPreviewAvailable ? std::to_string(m_developerPreviewUnresolved) : "Unavailable");
+            drawS7Row(5, "Phase 5B high-risk", m_developerPreviewAvailable ? std::to_string(m_developerPreviewHighRisk) : "Unavailable");
+            drawS7Row(6, "Preview storage writes", "None; diagnostic only");
+            drawS7Row(7, "Shared focus renderer",
+                FocusIndicator::EnhancedFocusEnabled() ? "Enhanced" : "Default");
+            drawS7Row(8, "Registry source", "Live AppRegistry snapshot");
+            drawS7Row(9, "Refresh diagnostics", "Refresh", FocusControl::DeveloperRefresh, true);
+            drawS7Row(10, "Back to Developer", "Return", FocusControl::DeveloperBack, true);
+        }
     }
 
     void renderAdvancedPage(const std::string& description, FocusControl control, const std::string& action)

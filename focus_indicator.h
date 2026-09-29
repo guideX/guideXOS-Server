@@ -19,6 +19,11 @@ namespace gui {
 
 class FocusIndicator {
 public:
+    // Shared desktop and Start-menu focus treatment. The preference is owned
+    // by desktop configuration and supplied by its live runtime owner.
+    static void SetEnhancedFocusEnabled(bool enabled);
+    static bool EnhancedFocusEnabled();
+
     // Draw a dashed focus rectangle with corner dots
     // x, y, w, h: rectangle bounds
     // dashLength: length of each dash segment

@@ -53,7 +53,12 @@ enum class TargetId : unsigned char {
     AppsList,
     AppDetail,
     DateTimeTime,
-    DateTimeTimeZone
+    DateTimeTimeZone,
+    AccessibilityFocus,
+    AccessibilityKeyboard,
+    DeveloperApps,
+    DeveloperServices,
+    DeveloperDiagnostics
 };
 
 struct CategoryInfo {
@@ -162,6 +167,11 @@ inline bool parseSettingsRoute(const std::string& uri, SettingsRoute& route)
         else if (target == "version") targetId = TargetId::AboutVersion;
         else if (target == "time") targetId = TargetId::DateTimeTime;
         else if (target == "timezone") targetId = TargetId::DateTimeTimeZone;
+        else if (target == "focus") targetId = TargetId::AccessibilityFocus;
+        else if (target == "keyboard") targetId = TargetId::AccessibilityKeyboard;
+        else if (target == "apps") targetId = TargetId::DeveloperApps;
+        else if (target == "services") targetId = TargetId::DeveloperServices;
+        else if (target == "diagnostics") targetId = TargetId::DeveloperDiagnostics;
         else return false;
     }
 
@@ -178,6 +188,9 @@ inline bool parseSettingsRoute(const std::string& uri, SettingsRoute& route)
           targetId == TargetId::DevicesOther || targetId == TargetId::DeviceDetail) && category == CategoryId::Devices) ||
         ((targetId == TargetId::AppsList || targetId == TargetId::AppDetail) && category == CategoryId::Apps) ||
         ((targetId == TargetId::DateTimeTime || targetId == TargetId::DateTimeTimeZone) && category == CategoryId::DateTime) ||
+        ((targetId == TargetId::AccessibilityFocus || targetId == TargetId::AccessibilityKeyboard) && category == CategoryId::Accessibility) ||
+        ((targetId == TargetId::DeveloperApps || targetId == TargetId::DeveloperServices ||
+          targetId == TargetId::DeveloperDiagnostics) && category == CategoryId::Developer) ||
         (targetId == TargetId::AboutVersion && category == CategoryId::About);
     if (!validTarget) return false;
     route = SettingsRoute{ category, targetId };
@@ -190,7 +203,7 @@ struct SearchEntry {
     SettingsRoute route;
 };
 
-inline constexpr std::array<SearchEntry, 29> kSearchEntries = {{
+inline constexpr std::array<SearchEntry, 36> kSearchEntries = {{
     { "System overview", "system computer hardware device hostname processor cpu memory ram architecture", { CategoryId::System, TargetId::SystemDevice } },
     { "Resolution", "resolution screen monitor display size", { CategoryId::Display, TargetId::Resolution } },
     { "Display mode", "display mirror extend monitor layout", { CategoryId::Display, TargetId::DisplayMode } },
@@ -214,8 +227,15 @@ inline constexpr std::array<SearchEntry, 29> kSearchEntries = {{
     { "Clock and time zone", "date time clock timezone time zone", { CategoryId::DateTime, TargetId::Page } },
     { "Current time", "current time date clock calendar rtc", { CategoryId::DateTime, TargetId::DateTimeTime } },
     { "Time zone", "timezone time zone utc daylight saving automatic time manual time", { CategoryId::DateTime, TargetId::DateTimeTimeZone } },
-    { "Accessibility tools", "accessibility keyboard assistive", { CategoryId::Accessibility, TargetId::Page } },
-    { "Developer tools", "developer diagnostics debug console", { CategoryId::Developer, TargetId::Page } },
+    { "Accessibility tools", "accessibility keyboard assistive focus contrast", { CategoryId::Accessibility, TargetId::Page } },
+    { "Enhanced focus indicator", "focus indicator focus ring keyboard accessibility outline", { CategoryId::Accessibility, TargetId::AccessibilityFocus } },
+    { "On-screen keyboard", "on-screen keyboard accessibility assistive input", { CategoryId::Accessibility, TargetId::AccessibilityKeyboard } },
+    { "Developer tools", "developer diagnostics debug console studio", { CategoryId::Developer, TargetId::Page } },
+    { "Developer Studio", "developer studio development editor native elf", { CategoryId::Developer, TargetId::Page } },
+    { "Console", "console terminal command line developer", { CategoryId::Developer, TargetId::Page } },
+    { "App Model diagnostics", "app model registered apps registry developer diagnostic", { CategoryId::Developer, TargetId::DeveloperApps } },
+    { "System service diagnostics", "system service bridge network device storage developer", { CategoryId::Developer, TargetId::DeveloperServices } },
+    { "Developer diagnostics", "diagnostics debug phase 5b launch storage developer", { CategoryId::Developer, TargetId::DeveloperDiagnostics } },
     { "Version and platform information", "about version build guidexos server firmware uefi platform", { CategoryId::About, TargetId::AboutVersion } },
     { "Control Panel", "advanced administrative control panel", { CategoryId::System, TargetId::Page } },
     { "Display Options", "advanced display settings wallpaper", { CategoryId::Display, TargetId::Page } },
@@ -276,7 +296,14 @@ enum class FocusControl : unsigned char {
     StorageDetailBack,
     SystemControlPanel,
     DeveloperConsole,
+    DeveloperStudio,
+    DeveloperApps,
+    DeveloperServices,
+    DeveloperDiagnostics,
+    DeveloperRefresh,
+    DeveloperBack,
     AccessibilityKeyboard,
+    AccessibilityEnhancedFocus,
     AppEntry,
     AppsDetailBack,
     AppsOpen
@@ -311,7 +338,14 @@ inline CategoryId focusControlCategory(FocusControl control)
     case FocusControl::DeviceDetailStorage: return CategoryId::Devices;
     case FocusControl::SystemControlPanel: return CategoryId::System;
     case FocusControl::DeveloperConsole: return CategoryId::Developer;
+    case FocusControl::DeveloperStudio:
+    case FocusControl::DeveloperApps:
+    case FocusControl::DeveloperServices:
+    case FocusControl::DeveloperDiagnostics:
+    case FocusControl::DeveloperRefresh:
+    case FocusControl::DeveloperBack: return CategoryId::Developer;
     case FocusControl::AccessibilityKeyboard: return CategoryId::Accessibility;
+    case FocusControl::AccessibilityEnhancedFocus: return CategoryId::Accessibility;
     case FocusControl::AppEntry:
     case FocusControl::AppsDetailBack:
     case FocusControl::AppsOpen: return CategoryId::Apps;
@@ -349,6 +383,10 @@ public:
                 route.category == CategoryId::Apps) ||
             ((route.target == TargetId::DateTimeTime || route.target == TargetId::DateTimeTimeZone) &&
                 route.category == CategoryId::DateTime) ||
+            ((route.target == TargetId::AccessibilityFocus || route.target == TargetId::AccessibilityKeyboard) &&
+                route.category == CategoryId::Accessibility) ||
+            ((route.target == TargetId::DeveloperApps || route.target == TargetId::DeveloperServices ||
+              route.target == TargetId::DeveloperDiagnostics) && route.category == CategoryId::Developer) ||
             (route.target == TargetId::AboutVersion && route.category == CategoryId::About);
         if (!targetValid) return false;
         m_route = route;

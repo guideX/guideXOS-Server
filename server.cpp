@@ -4516,7 +4516,7 @@ static void help(){
                  " bus.pub <chan> <text> [fanout] | bus.pop <chan> [timeoutMs]\n"
                  " bus.cap <chan> <cap> | bus.stats <chan>\n"
                  " console.start | console.send <text> | console.pop [timeoutMs]\n"
-                 " gui.start | gui.open.appmodeldemo | gui.smoke.launchshadow | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id> | gui.key <keyCode> <down|up> [modifiers] | gui.mouse <windowId> <x> <y> <button> <down|up|move>\n"
+                 " gui.start | gui.open.appmodeldemo | gui.smoke.launchshadow | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id> | gui.key <keyCode> <down|up> [modifiers] | gui.mouse <windowId> <x> <y> <button> <down|up|move|wheelup|wheeldown>\n"
                  " gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>\n"
                  " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id> | gui.sync <id> <frameGeneration> [frameSequence] [freeze] | gui.unfreeze <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
@@ -4704,8 +4704,9 @@ using namespace gxos;
             int appX = 0, appY = 0, button = 0;
             std::string action;
             iss >> windowId >> appX >> appY >> button >> action;
-            if (windowId == 0 || action != "down" && action != "up" && action != "move") {
-                std::cout << "Usage: gui.mouse <windowId> <x> <y> <button> <down|up|move>" << std::endl;
+            const bool wheelAction = action == "wheelup" || action == "wheeldown";
+            if (windowId == 0 || (!wheelAction && action != "down" && action != "up" && action != "move")) {
+                std::cout << "Usage: gui.mouse <windowId> <x> <y> <button> <down|up|move|wheelup|wheeldown>" << std::endl;
                 continue;
             }
             gxos::gui::WindowDebugInfo target;
@@ -4723,6 +4724,8 @@ using namespace gxos;
             }
             const int screenX = target.x + appX;
             const int screenY = target.y + GetCurrentDesktopTheme().titleBarHeight + appY;
+            const std::string inputAction = action == "wheelup" ? "wheel:1" :
+                action == "wheeldown" ? "wheel:-1" : action;
             ipc::Message m;
             m.type = (uint32_t)gui::MsgType::MT_InputMouse;
             m.dstPid = Lifecycle::state().compositorPid;
@@ -4730,7 +4733,7 @@ using namespace gxos;
             // performs the window-to-app coordinate conversion before routing
             // the event to the owning application.
             const std::string payload = std::to_string(screenX) + "|" + std::to_string(screenY) +
-                "|" + std::to_string(button) + "|" + action;
+                "|" + std::to_string(wheelAction ? 0 : button) + "|" + inputAction;
             m.data.assign(payload.begin(), payload.end());
             ipc::Bus::publish("gui.input", std::move(m), false);
             std::cout << "Mouse queued window=" << windowId << " x=" << appX << " y=" << appY

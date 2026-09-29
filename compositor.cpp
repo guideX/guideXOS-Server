@@ -6825,6 +6825,7 @@ namespace gxos {
                     ensureDisplayConfigDefaults(g_cfg);
                     g_clockDisplaySettings = clockDisplaySettingsFromConfig(g_cfg);
                     syncDesktopThemeFromConfig(g_cfg);
+                    FocusIndicator::SetEnhancedFocusEnabled(g_cfg.enhancedFocusIndicator);
                     g_taskbarPosition = parseTaskbarPosition(g_cfg.taskbarPosition);
                     g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition);
                     g_backgroundScaleMode = WallpaperRegistry::NormalizeScaleModeOrDefault(g_cfg.backgroundScaleMode.empty() ? "fill" : g_cfg.backgroundScaleMode);
@@ -6924,6 +6925,26 @@ namespace gxos {
                             }
                             handleMouse(mx, my, false, false);
                             publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 1, "move", ownerPid, targetWindow), ownerPid);
+                        }
+                    } else if (button == 0 && action.rfind("wheel:", 0) == 0) {
+                        uint64_t ownerPid = 0;
+                        uint64_t targetWindow = 0;
+                        {
+                            std::lock_guard<std::mutex> lk(g_lock);
+                            WinInfo* hitWin = hitWindowAt(mx, my);
+                            if (hitWin) {
+                                ownerPid = hitWin->ownerPid;
+                                targetWindow = hitWin->id;
+                            } else {
+                                ownerPid = inputOwnerPid();
+                                targetWindow = g_modalWindow ? g_modalWindow : g_focus;
+                            }
+                        }
+                        if (targetWindow != 0) {
+                            handleMouse(mx, my, false, false, &viewport);
+                            publishOut(MsgType::MT_InputMouse,
+                                Compositor::packMousePayloadForTarget(mx, my, 0, action, ownerPid, targetWindow),
+                                ownerPid);
                         }
                     } else if (button == 2) { // Right button
                         if (action == "down") {
@@ -7220,6 +7241,7 @@ namespace gxos {
             Logger::write(LogLevel::Info, std::string("Compositor DesktopConfig loaded=") + (cfgOk ? "true" : "false") + " err=" + cfgErr);
             Logger::write(LogLevel::Info, std::string("Compositor display options store loaded=") + (displayOk ? "true" : "false") + " err=" + displayErr);
             syncDesktopThemeFromConfig(g_cfg);
+            FocusIndicator::SetEnhancedFocusEnabled(g_cfg.enhancedFocusIndicator);
             g_taskbarPosition = parseTaskbarPosition(g_cfg.taskbarPosition);
             g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition);
             Logger::write(LogLevel::Info, std::string("Compositor taskbar position=") + g_cfg.taskbarPosition);

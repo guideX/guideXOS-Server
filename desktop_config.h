@@ -11,6 +11,20 @@
 #include "display_model.h"
 
 namespace gxos { namespace gui {
+    inline bool parseDesktopEnhancedFocusJsonBoolean(const std::string& value,
+                                                     bool fallback = false) {
+        size_t begin = 0;
+        while (begin < value.size() && (value[begin] == ' ' || value[begin] == '\n' ||
+               value[begin] == '\r' || value[begin] == '\t')) ++begin;
+        size_t end = value.size();
+        while (end > begin && (value[end - 1] == ' ' || value[end - 1] == '\n' ||
+               value[end - 1] == '\r' || value[end - 1] == '\t')) --end;
+        const std::string token = value.substr(begin, end - begin);
+        if (token == "true") return true;
+        if (token == "false") return false;
+        return fallback;
+    }
+
     struct DesktopWindowRec {
         uint64_t id;
         std::string title;
@@ -59,6 +73,7 @@ namespace gxos { namespace gui {
         bool showDesktopSystemSettings{false};
         bool smallLiveDesktopFolderIcons{true};
         bool autoArrangeDesktopIcons{false};
+        bool enhancedFocusIndicator{false};
     };
     class DesktopConfig {
     public:
@@ -107,6 +122,10 @@ namespace gxos { namespace gui {
             if(extractSection(txt, "showDesktopSystemSettings", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.showDesktopSystemSettings); }
             if(extractSection(txt, "smallLiveDesktopFolderIcons", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.smallLiveDesktopFolderIcons); }
             if(extractSection(txt, "autoArrangeDesktopIcons", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.autoArrangeDesktopIcons); }
+            if(extractSection(txt, "desktop.accessibility.enhancedFocusIndicator", section)){
+                out.enhancedFocusIndicator = parseDesktopEnhancedFocusJsonBoolean(
+                    section, out.enhancedFocusIndicator);
+            }
             {
                 DesktopThemeId themeId = DesktopThemeId::Classic;
                 TryParseDesktopThemeId(out.desktopThemeId.c_str(), &themeId);
@@ -151,6 +170,7 @@ namespace gxos { namespace gui {
             f << "  \"showDesktopSystemSettings\": " << (data.showDesktopSystemSettings ? "true" : "false") << ",\n";
             f << "  \"smallLiveDesktopFolderIcons\": " << (data.smallLiveDesktopFolderIcons ? "true" : "false") << ",\n";
             f << "  \"autoArrangeDesktopIcons\": " << (data.autoArrangeDesktopIcons ? "true" : "false") << ",\n";
+            f << "  \"desktop.accessibility.enhancedFocusIndicator\": " << (data.enhancedFocusIndicator ? "true" : "false") << ",\n";
             f << "  \"windows\": [\n";
             for(size_t i=0;i<data.windows.size();++i){ const auto& w=data.windows[i]; f << "    {";
             f << "\"id\": " << w.id << ", "; f << "\"title\": " << jsonEscape(w.title) << ", "; f << "\"x\": "<<w.x<<", \"y\": "<<w.y<<", \"w\": "<<w.w<<", \"h\": "<<w.h<<", ";

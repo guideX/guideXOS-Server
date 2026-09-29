@@ -6,11 +6,38 @@
 
 #include "focus_indicator.h"
 #include <cmath>
+#include <atomic>
 
 #ifdef _WIN32
 
 namespace gxos {
 namespace gui {
+
+namespace {
+std::atomic<bool> g_enhancedFocusEnabled{false};
+
+void drawSolidOutline(HDC dc, int x, int y, int width, int height,
+                      int inset, int penWidth, COLORREF color)
+{
+    if (width <= inset * 2 || height <= inset * 2) return;
+    HPEN pen = CreatePen(PS_SOLID, penWidth, color);
+    if (!pen) return;
+    HGDIOBJ oldPen = SelectObject(dc, pen);
+    Rectangle(dc, x + inset, y + inset, x + width - inset, y + height - inset);
+    SelectObject(dc, oldPen);
+    DeleteObject(pen);
+}
+}
+
+void FocusIndicator::SetEnhancedFocusEnabled(bool enabled)
+{
+    g_enhancedFocusEnabled.store(enabled, std::memory_order_release);
+}
+
+bool FocusIndicator::EnhancedFocusEnabled()
+{
+    return g_enhancedFocusEnabled.load(std::memory_order_acquire);
+}
 
 void FocusIndicator::DrawDashedLine(HDC dc, int x1, int y1, int x2, int y2,
                                     int dashLength, int gapLength) {
@@ -68,6 +95,14 @@ void FocusIndicator::DrawFocusRect(HDC dc, int x, int y, int w, int h,
 void FocusIndicator::DrawFocusRectColored(HDC dc, int x, int y, int w, int h,
                                           COLORREF color, int dashLength,
                                           int gapLength, int dotSize) {
+    if (EnhancedFocusEnabled()) {
+        HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+        drawSolidOutline(dc, x, y, w, h, 1, 4, RGB(255, 255, 255));
+        drawSolidOutline(dc, x, y, w, h, 5, 2, RGB(0, 0, 0));
+        SelectObject(dc, oldBrush);
+        return;
+    }
+
     // Create pen for dashed lines
     HPEN pen = CreatePen(PS_SOLID, 2, color);
     HGDIOBJ oldPen = SelectObject(dc, pen);
