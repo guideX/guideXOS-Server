@@ -37,6 +37,7 @@
 #include "include/kernel/block_device.h"
 #include "include/kernel/storage_manager.h"
 #include "include/kernel/ata.h"
+#include "include/kernel/ahci.h"
 #include "include/kernel/nvme.h"
 #include "include/kernel/ramdisk.h"
 #include "include/kernel/usb.h"
@@ -66,7 +67,8 @@
 #include "include/kernel/qemu_display_configuration_persistence_proof.h"
 #include "include/kernel/qemu_display_events_proof.h"
 #include "include/kernel/virtio_rng.h"
-#if defined(GXOS_DM9_QEMU_STORAGE_PROOF)
+#if defined(GXOS_DM9_QEMU_STORAGE_PROOF) || \
+    defined(GXOS_DM15_QEMU_AHCI_PROOF)
 #include "include/kernel/qemu_dm9_storage_proof.h"
 #endif
 #if defined(GXOS_DM12_QEMU_USB_PROOF)
@@ -767,6 +769,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::nic::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::virtio::rng::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::virtio::gpu::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
+            kernel::ahci::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
 #if defined(ARCH_AMD64)
             kernel::usb::hci::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
 #endif
@@ -973,6 +976,13 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[KERNEL] ATA/SATA driver initialized, ");
         kernel::serial::put_hex32(kernel::ata::device_count());
         kernel::serial::puts(" drive(s) found\n");
+
+        // AHCI shares the common block registry with ATA and other transports.
+        // Register only valid direct SATA disks discovered through PCI.
+        kernel::ahci::init();
+        kernel::serial::puts("[KERNEL] AHCI initialized, ");
+        kernel::serial::put_hex32(kernel::ahci::device_count());
+        kernel::serial::puts(" SATA disk(s) found\n");
         
         // Initialize NVMe driver (scans for NVMe controllers)
         kernel::nvme::init();
@@ -1007,7 +1017,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::putc('\n');
         
         const bool mounted = mount_persistent_storage();
-#if defined(GXOS_DM9_QEMU_STORAGE_PROOF)
+#if defined(GXOS_DM9_QEMU_STORAGE_PROOF) || \
+    defined(GXOS_DM15_QEMU_AHCI_PROOF)
         kernel::qemu_dm9_storage_proof::run(mounted);
 #endif
 #if defined(GXOS_DM12_QEMU_USB_PROOF)

@@ -166,21 +166,25 @@
 // Storage controller availability
 //
 // ATA PIO : uses port I/O registers — x86/amd64 only.
-// AHCI    : SATA over PCI MMIO — x86/amd64/ia64/sparc64/riscv64.
+// AHCI    : PCI mechanism 1 plus MMIO, implemented on amd64 only.
 // NVMe    : PCIe MMIO — x86/amd64/ia64/sparc64/riscv64.
 // ================================================================
 
 #if defined(ARCH_X86) || defined(ARCH_AMD64)
     #define ARCH_HAS_ATA_PIO   1
-    #define ARCH_HAS_AHCI      1
-    #define ARCH_HAS_NVME      1
-#elif defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64) || defined(ARCH_LOONGARCH64)
-    #define ARCH_HAS_ATA_PIO   0
-    #define ARCH_HAS_AHCI      1
-    #define ARCH_HAS_NVME      1
 #else
     #define ARCH_HAS_ATA_PIO   0
+#endif
+
+#if defined(ARCH_AMD64)
+    #define ARCH_HAS_AHCI      1
+#else
     #define ARCH_HAS_AHCI      0
+#endif
+
+#if defined(ARCH_X86) || defined(ARCH_AMD64) || defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64) || defined(ARCH_LOONGARCH64)
+    #define ARCH_HAS_NVME      1
+#else
     #define ARCH_HAS_NVME      0
 #endif
 

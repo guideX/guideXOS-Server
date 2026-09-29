@@ -41,6 +41,8 @@ struct DeviceCapabilities {
     uint8_t controllerPciBus;
     uint8_t controllerPciDevice;
     uint8_t controllerPciFunction;
+    bool ahciPortValid;
+    uint8_t ahciPort;
     bool geometryValid;
     bool capacityValid;
     uint32_t logicalSectorSize;
@@ -73,6 +75,8 @@ struct TargetIdentity {
     uint8_t pciBus;
     uint8_t pciDevice;
     uint8_t pciFunction;
+    bool ahciPortValid;
+    uint8_t ahciPort;
     char name[32];
     char model[40];
     char serial[24];

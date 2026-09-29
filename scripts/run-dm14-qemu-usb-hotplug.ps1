@@ -13,6 +13,7 @@ param(
     [string]$QemuExecutable = "C:\Program Files\qemu\qemu-system-x86_64.exe",
     [string]$QemuAccelerator = "whpx",
     [string]$OvmfCode = "OVMF.fd",
+    [string]$KernelPath = "kernel\build\amd64-dm14-proof\bin\kernel.elf",
     [string]$WorkDir = ""
 )
 
@@ -87,7 +88,7 @@ function Get-ByteArraySha256([byte[]]$Bytes) {
 $sectorHashAStart = Get-ByteArraySha256 $sectorBufferA
 $sectorHashBStart = Get-ByteArraySha256 $sectorBufferB
 
-$kernel = Join-Path $Root "kernel\build\amd64-dm14-proof\bin\kernel.elf"
+$kernel = [IO.Path]::GetFullPath((Join-Path $Root $KernelPath))
 $bootloader = Join-Path $Root "guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe"
 if (-not (Test-Path -LiteralPath $kernel) -or -not (Test-Path -LiteralPath $bootloader)) {
     throw "Build the DM14 proof kernel and UEFI x64 Release bootloader first."

@@ -11,6 +11,7 @@
 #include "../kernel/core/include/kernel/ramdisk.h"
 #include "../kernel/core/include/kernel/vfs.h"
 #include "../kernel/core/include/kernel/ata.h"
+#include "../kernel/core/include/kernel/ahci_logic.h"
 #include "../kernel/core/include/kernel/usb_storage.h"
 #include "../kernel/arch/amd64/include/arch/amd64.h"
 #include "../kernel/arch/amd64/include/arch/uhci_transfer_logic.h"
@@ -210,7 +211,8 @@ uint8_t register_fake(FakeDisk& disk, bool writable = false,
                       bool usbIdentityValid = false,
                       uint16_t usbVendorId = 0, uint16_t usbProductId = 0,
                       uint8_t usbPort = 0, uint8_t usbInterface = 0,
-                      uint8_t usbLun = 0)
+                      uint8_t usbLun = 0, bool ahciPortValid = false,
+                      uint8_t ahciPort = 0)
 {
     disk.driverId = static_cast<uint8_t>(g_nextDriverId++);
     g_fakeDisks[disk.driverId] = &disk;
@@ -246,6 +248,8 @@ uint8_t register_fake(FakeDisk& disk, bool writable = false,
     descriptor.usbPort = usbPort;
     descriptor.usbInterface = usbInterface;
     descriptor.usbLun = usbLun;
+    descriptor.ahciPortValid = ahciPortValid;
+    descriptor.ahciPort = ahciPort;
     const uint8_t index = block::register_device(descriptor);
     if (index != 0xFF) {
         disk.registryIndex = index;
@@ -1326,6 +1330,41 @@ guideXOS::BootSourceDescriptor make_boot_source(bool nvmePath,
         p[offset++] = ataChannel; p[offset++] = ataTarget;
         write_u16(p + offset, 0); offset += 2;
     }
+    p[offset++] = 0x04; p[offset++] = 0x01; write_u16(p + offset, 42); offset += 2;
+    write_u32(p + offset, 1); offset += 4;
+    write_u64(p + offset, 34); offset += 8;
+    write_u64(p + offset, 60); offset += 8;
+    for (uint8_t i = 0; i < 16; ++i) p[offset++] = static_cast<uint8_t>(i + 1);
+    p[offset++] = 1; p[offset++] = 2;
+    p[offset++] = 0x7F; p[offset++] = 0xFF; write_u16(p + offset, 4); offset += 2;
+    source.DevicePathLength = offset;
+    return source;
+}
+
+guideXOS::BootSourceDescriptor make_ahci_boot_source(uint16_t port,
+    uint16_t multiplierPort = 0xFFFFu, uint16_t lun = 0)
+{
+    guideXOS::BootSourceDescriptor source = {};
+    source.Version = guideXOS::GUIDEXOS_BOOT_SOURCE_VERSION;
+    source.Size = sizeof(source);
+    source.Flags = guideXOS::BOOT_SOURCE_FLAG_VALID |
+        guideXOS::BOOT_SOURCE_FLAG_DEVICE_PATH_VALID |
+        guideXOS::BOOT_SOURCE_FLAG_PCI_LOCATION_VALID;
+    source.PciSegment = 0;
+    source.PciBus = 0;
+    source.PciDevice = 5;
+    source.PciFunction = 0;
+    uint16_t offset = 0;
+    uint8_t* p = source.DevicePath;
+    p[offset++] = 0x02; p[offset++] = 0x01; write_u16(p + offset, 12); offset += 2;
+    write_u32(p + offset, 0x0A0341D0u); offset += 4;
+    write_u32(p + offset, 0); offset += 4;
+    p[offset++] = 0x01; p[offset++] = 0x01; write_u16(p + offset, 6); offset += 2;
+    p[offset++] = 0; p[offset++] = source.PciDevice;
+    p[offset++] = 0x03; p[offset++] = 0x12; write_u16(p + offset, 10); offset += 2;
+    write_u16(p + offset, port); offset += 2;
+    write_u16(p + offset, multiplierPort); offset += 2;
+    write_u16(p + offset, lun); offset += 2;
     p[offset++] = 0x04; p[offset++] = 0x01; write_u16(p + offset, 42); offset += 2;
     write_u32(p + offset, 1); offset += 4;
     write_u64(p + offset, 34); offset += 8;
@@ -2847,6 +2886,138 @@ TransferStatus bulk_transfer(uint8_t address, uint8_t endpoint, void* data,
 } // namespace hci
 }} // namespace kernel::usb
 
+static void run_ahci_logic_tests()
+{
+    using namespace kernel::ahci::logic;
+
+    check(is_ahci_pci(0x01u, 0x06u, 0x01u),
+          "AHCI PCI class tuple is recognized");
+    check(!is_ahci_pci(0x01u, 0x01u, 0x8Au) &&
+          !is_ahci_pci(0x01u, 0x06u, 0x00u),
+          "IDE and vendor-specific SATA PCI functions are not claimed as AHCI");
+    uint64_t abar = 0;
+    check(parse_abar_bar5(0xFEBF0000u, abar) && abar == 0xFEBF0000ULL,
+          "AHCI BAR5 32-bit memory address is decoded");
+    check(!parse_abar_bar5(0x00000001u, abar) && abar == 0,
+          "AHCI BAR5 rejects I/O BARs");
+    check(!parse_abar_bar5(0x00000004u, abar),
+          "AHCI BAR5 rejects unsupported 64-bit BAR encoding");
+    check(!parse_abar_bar5(0x00000008u, abar),
+          "AHCI BAR5 rejects below-1-MiB memory encoding");
+    check(!parse_abar_bar5(0xFFFFFFFFu, abar),
+          "AHCI BAR5 rejects an all-ones unassigned value");
+
+    check(classify_port(false, 0x103u, 0x101u) == PORT_NOT_IMPLEMENTED,
+          "AHCI port PI bit gates port classification");
+    check(classify_port(true, 0, 0x101u) == PORT_NO_DEVICE,
+          "AHCI DET zero reports no device");
+    check(classify_port(true, 1u, 0x101u) == PORT_LINK_ERROR,
+          "AHCI DET one reports an incomplete link");
+    check(classify_port(true, 0x103u, 0x101u) == PORT_SATA_DISK,
+          "AHCI active IPM and ATA signature select SATA disk");
+    check(classify_port(true, 0x103u, 0xEB140101u) == PORT_SATAPI,
+          "AHCI ATAPI signature remains outside the SATA block profile");
+    check(classify_port(true, 0x103u, 0xC33C0101u) == PORT_SEMB &&
+          classify_port(true, 0x103u, 0x96690101u) == PORT_MULTIPLIER,
+          "AHCI enclosure and multiplier signatures are excluded");
+    check(classify_port(true, 0x203u, 0x101u) == PORT_POWERED_DOWN,
+          "AHCI non-active IPM is rejected");
+    check(classify_port(true, 2u, 0x101u) == PORT_LINK_INACTIVE,
+          "AHCI unsupported DET state is inactive");
+    check(classify_port(true, 0x103u, 0x12345678u) == PORT_UNSUPPORTED_SIGNATURE,
+          "AHCI unknown signature is not treated as a disk");
+
+    uint32_t bit = 0;
+    check(slot_bit(0, 1, bit) && bit == 1u,
+          "AHCI slot zero maps to command issue bit zero");
+    check(slot_bit(31, 32, bit) && bit == 0x80000000u,
+          "AHCI last command slot avoids signed shift overflow");
+    check(!slot_bit(32, 33, bit) && bit == 0,
+          "AHCI slot numbers outside the CI bitmap are rejected");
+    check(slot_is_free(0, 0, 32, 31) &&
+          !slot_is_free(0x80000000u, 0, 32, 31) &&
+          !slot_is_free(0, 0x80000000u, 32, 31),
+          "AHCI slot availability checks both CI and SACT");
+    check(command_header_flags(false) == 5u &&
+          command_header_flags(true) == 0x45u,
+          "AHCI command header encodes CFL and write direction");
+
+    Fis fis = {};
+    check(build_identify_fis(fis) && fis.bytes[0] == 0x27u &&
+          fis.bytes[1] == 0x80u && fis.bytes[2] == 0xECu,
+          "AHCI IDENTIFY uses a register host-to-device FIS");
+    check(build_flush_fis(fis, true, false) && fis.bytes[2] == 0xE7u &&
+          fis.bytes[7] == 0x40u,
+          "AHCI cache flush command uses FLUSH CACHE when only that is supported");
+    check(build_flush_fis(fis, false, true) && fis.bytes[2] == 0xEAu,
+          "AHCI cache flush command prefers FLUSH CACHE EXT");
+    check(!build_flush_fis(fis, false, false),
+          "AHCI cache flush is unavailable when IDENTIFY advertises neither command");
+    check(build_data_fis(fis, 0x123456789ABCu, 0x1234u,
+                         0x200000000000ULL, true, false) &&
+          fis.bytes[2] == 0x25u && fis.bytes[4] == 0xBCu &&
+          fis.bytes[5] == 0x9Au && fis.bytes[6] == 0x78u &&
+          fis.bytes[7] == 0x40u && fis.bytes[8] == 0x56u &&
+          fis.bytes[9] == 0x34u && fis.bytes[10] == 0x12u &&
+          fis.bytes[12] == 0x34u && fis.bytes[13] == 0x12u,
+          "AHCI LBA48 read FIS encodes six LBA bytes and sector count");
+    check(build_data_fis(fis, 0x0A0BCDEFu, 256u, 0x10000000ULL,
+                         false, true) && fis.bytes[2] == 0xCAu &&
+          fis.bytes[7] == 0x4Au && fis.bytes[12] == 0,
+          "AHCI LBA28 write FIS encodes high nibble and 256-sector sentinel");
+    check(!build_data_fis(fis, 0, 0, 1000, true, false) &&
+          !build_data_fis(fis, 99, 2, 100, true, false) &&
+          !build_data_fis(fis, 1ULL << 48, 1, UINT64_MAX, true, false),
+          "AHCI data FIS rejects empty, out-of-range, and over-width requests");
+    check(!build_data_fis(fis, 1ULL << 28, 1, UINT64_MAX, false, false) &&
+          !build_data_fis(fis, 0, 257, 1000, false, false),
+          "AHCI LBA28 requests enforce address and count limits");
+
+    Prdt prdt = {};
+    check(build_prdt(0x123456789ULL, 512u, true, prdt) &&
+          prdt.addressLow == 0x23456789u && prdt.addressHigh == 1u &&
+          prdt.reserved == 0 && prdt.byteCountAndInterrupt == 0x800001FFu,
+          "AHCI PRDT encodes 64-bit address, DBC-minus-one, and IOC");
+    check(build_prdt(0xFFFFFF00ULL, 512u, false, prdt) == false,
+          "AHCI PRDT rejects a 32-bit DMA range crossing 4 GiB");
+    check(!build_prdt(0x1000u, 0, true, prdt) &&
+          !build_prdt(0x1000u, 0x400001u, true, prdt),
+          "AHCI PRDT rejects empty and over-4-MiB entries");
+    check(!build_prdt(UINT64_MAX - 1u, 4u, true, prdt),
+          "AHCI PRDT rejects address arithmetic overflow");
+
+    check(!has_fatal_port_error(0, 0, 0) &&
+          has_fatal_port_error(1u << 30, 0, 0) &&
+          has_fatal_port_error(0, 1u, 0) &&
+          has_fatal_port_error(0, 0, 1u),
+          "AHCI fatal interrupt, SATA error, and task-file error are detected");
+    check(command_result(false, false, 0, 0, 0, 0, 0, false, false) ==
+              block::BLOCK_ERR_NOT_READY,
+          "AHCI command result rejects commands that were not issued");
+    check(command_result(true, true, 0, 0, 0, 0, 512, false, false) ==
+              block::BLOCK_ERR_TIMEOUT &&
+          command_result(true, true, 0, 0, 0, 0, 512, true, false) ==
+              block::BLOCK_ERR_WRITE_UNCERTAIN,
+          "AHCI busy command maps reads to timeout and writes to uncertain");
+    check(command_result(true, false, 0, 0, 1u, 0, 512, false, false) ==
+              block::BLOCK_ERR_IO &&
+          command_result(true, false, 0, 0, 1u, 0, 512, true, false) ==
+              block::BLOCK_ERR_WRITE_UNCERTAIN,
+          "AHCI task-file errors preserve write uncertainty");
+    check(command_result(true, false, 0, 0, 0, 0, 0, false, true) ==
+              block::BLOCK_OK &&
+          command_result(true, false, 0, 0, 1u, 0, 0, false, true) ==
+              block::BLOCK_ERR_DURABILITY_UNVERIFIED &&
+          command_result(true, false, 0, 0, 0, 0, 0, false, false) ==
+              block::BLOCK_OK,
+          "AHCI flush success and uncertain durability are distinguished");
+    check(command_result(true, false, 0, 0, 0, 511, 512, false, false) ==
+              block::BLOCK_ERR_IO &&
+          command_result(true, false, 0, 0, 0, 511, 512, true, false) ==
+              block::BLOCK_ERR_WRITE_UNCERTAIN,
+          "AHCI short PRDBC is a read error or uncertain write");
+}
+
 static void run_uhci_transfer_logic_tests()
 {
     using namespace kernel::arch::amd64::uhci;
@@ -2972,6 +3143,7 @@ static void run_uhci_transfer_logic_tests()
 int main()
 {
     using namespace kernel;
+    run_ahci_logic_tests();
     run_uhci_transfer_logic_tests();
     block::init();
     vfs::test_clear_mounts();
@@ -4155,6 +4327,37 @@ int main()
               storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET,
           "same ATA controller distinguishes the boot channel/target from another device");
 
+    guideXOS::BootSourceDescriptor ahciBootPath = make_ahci_boot_source(1u);
+    check(storage::set_boot_source_descriptor(&ahciBootPath),
+          "valid direct-port UEFI SATA path is accepted for AHCI matching");
+    FakeDisk ahciBootDisk(512, 128);
+    const uint8_t ahciBootIndex = register_fake(ahciBootDisk, true, true, true,
+        false, 0, 0, block::BOOT_PROVENANCE_UNKNOWN, block::BDEV_AHCI,
+        true, 0, 0, 5, 0, false, 0, 0, 0, false, 0, 0, 0, 0, 0,
+        true, 1);
+    storage::TargetIdentity ahciBootIdentity = {};
+    storage::capture_target_identity(ahciBootIndex, ahciBootIdentity);
+    FakeDisk ahciOtherPort(512, 128);
+    const uint8_t ahciOtherIndex = register_fake(ahciOtherPort, true, true, true,
+        false, 0, 0, block::BOOT_PROVENANCE_UNKNOWN, block::BDEV_AHCI,
+        true, 0, 0, 5, 0, false, 0, 0, 0, false, 0, 0, 0, 0, 0,
+        true, 2);
+    storage::TargetIdentity ahciOtherIdentity = {};
+    storage::capture_target_identity(ahciOtherIndex, ahciOtherIdentity);
+    storage::capture_target_identity(ahciBootIndex, ahciBootIdentity);
+    check(storage::query_boot_protection(ahciBootIdentity).safety ==
+              storage::BOOT_DEVICE_IS_TARGET &&
+          storage::query_boot_protection(ahciOtherIdentity).safety ==
+              storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET,
+          "direct SATA boot path protects its AHCI HBA port and distinguishes another port");
+    guideXOS::BootSourceDescriptor ahciMultiplierPath =
+        make_ahci_boot_source(1u, 3u, 0u);
+    check(storage::set_boot_source_descriptor(&ahciMultiplierPath),
+          "bounded UEFI SATA multiplier path is accepted as provenance input");
+    check(storage::query_boot_protection(ahciBootIdentity).safety ==
+              storage::BOOT_DEVICE_IDENTITY_UNKNOWN,
+          "port-multiplier SATA provenance remains Unknown with a direct-port-only driver");
+
     guideXOS::BootSourceDescriptor usbBootPath = make_usb_boot_source();
     check(storage::set_boot_source_descriptor(&usbBootPath),
           "bounded UEFI USB/class/LUN/media path is accepted");
@@ -4275,6 +4478,8 @@ int main()
     unregister_fake(otherPciIndex, sameCapacityOtherPci);
     unregister_fake(ataBootIndex, ataBootDisk);
     unregister_fake(ataOtherIndex, ataOtherTarget);
+    unregister_fake(ahciOtherIndex, ahciOtherPort);
+    unregister_fake(ahciBootIndex, ahciBootDisk);
 
     FakeDisk unknownDurabilityInit(512, 128);
     check(probe_fake_initialize(unknownDurabilityInit,

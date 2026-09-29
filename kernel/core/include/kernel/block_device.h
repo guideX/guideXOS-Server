@@ -121,6 +121,9 @@ struct TransportIoDiagnostic {
     uint32_t dataSectorsTransferred;
     uint8_t commandOpcode;
     uint8_t statusCode;
+    uint8_t commandSlot;
+    uint32_t transportStatus;
+    uint32_t transportError;
     uint8_t cswStatus;
     uint8_t senseKey;
     uint8_t senseAsc;
@@ -169,6 +172,8 @@ struct BlockDevice {
     uint8_t       pciBus;
     uint8_t       pciDevice;
     uint8_t       pciFunction;
+    bool          ahciPortValid;
+    uint8_t       ahciPort;
     bool          ataTargetValid;
     uint8_t       ataChannel;
     uint8_t       ataTarget;

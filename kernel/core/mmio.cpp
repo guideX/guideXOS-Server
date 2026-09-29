@@ -1,7 +1,8 @@
 //
 // Kernel MMIO Mapping Implementation
 //
-// QEMU-only x86_64 runtime MMIO mapping for diagnostic VirtIO probing.
+// AMD64 runtime MMIO mapping for device BARs, including the VirtIO probe
+// and the AHCI block transport.
 // The active path installs supervisor-only, NX, UC-style mappings in a
 // reserved high virtual MMIO window and keeps the unmap path conservative.
 //
@@ -27,7 +28,7 @@ namespace mmio {
 
 namespace {
 
-#if defined(ARCH_AMD64) && defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE)
+#if defined(ARCH_AMD64)
 
 static const uint64_t KERNEL_VIRTUAL_BASE = 0x100000ULL;
 static const uint64_t PAGE_SHIFT = 12ULL;
@@ -443,13 +444,13 @@ static bool map_page_range(uint64_t alignedBase, uint64_t pageCount,
     return true;
 }
 
-#endif // ARCH_AMD64 && GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE
+#endif // ARCH_AMD64
 
 } // namespace
 
 void set_kernel_physical_base(uint64_t physicalBase)
 {
-#if defined(ARCH_AMD64) && defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE)
+#if defined(ARCH_AMD64)
     if (physicalBase != 0) {
         s_kernelPhysicalBase = physicalBase;
     }
@@ -473,7 +474,7 @@ bool mapForDevice(uint64_t physicalBase, uint64_t length,
     report.mappedVirtual = 0;
     report.mappedLength = report.alignedLength;
 
-#if defined(ARCH_AMD64) && defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE)
+#if defined(ARCH_AMD64)
     if ((flags & ~SUPPORTED_FLAG_MASK) != 0u) {
         report.reason = "MMIO mapping received unknown flags";
         report.nextKernelFeature = "flag validation";
@@ -579,8 +580,8 @@ bool mapForDevice(uint64_t physicalBase, uint64_t length,
     (void)physicalBase;
     (void)length;
     (void)flags;
-    report.reason = "runtime MMIO mapping is gated to the x86_64 QEMU probe build";
-    report.nextKernelFeature = "GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE";
+    report.reason = "runtime MMIO mapping is available only on AMD64";
+    report.nextKernelFeature = "architecture-specific safe MMIO mapping";
     if (reportOut != nullptr) {
         *reportOut = report;
     }
@@ -590,7 +591,7 @@ bool mapForDevice(uint64_t physicalBase, uint64_t length,
 
 bool unmap(uint64_t mappedVirtual, uint64_t length, const char** reasonOut)
 {
-#if defined(ARCH_AMD64) && defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE)
+#if defined(ARCH_AMD64)
     if (reasonOut != nullptr) {
         *reasonOut = nullptr;
     }

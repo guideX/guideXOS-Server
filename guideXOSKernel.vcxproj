@@ -299,6 +299,7 @@
       <ObjectFileName>$(IntDir)app_audio_stream_core.obj</ObjectFileName>
     </ClCompile>
     <ClCompile Include="kernel\core\ata.cpp" />
+    <ClCompile Include="kernel\core\ahci.cpp" />
     <ClCompile Include="kernel\core\nvme.cpp" />
     <ClCompile Include="kernel\core\block_device.cpp" />
     <ClCompile Include="kernel\core\virtio_rng.cpp" />

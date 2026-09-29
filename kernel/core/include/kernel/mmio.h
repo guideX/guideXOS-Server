@@ -3,10 +3,9 @@
 // Conservative helpers for reasoning about whether a physical MMIO range can
 // be mapped safely at runtime.
 //
-// The active x86_64 runtime path uses a reserved high virtual MMIO window in
-// QEMU diagnostic builds only.  The helpers here centralize the safety checks,
-// window geometry, and the precise blocker text used by the QEMU-only
-// virtio-gpu probe.
+// AMD64 device BAR mappings use a reserved high virtual MMIO window with
+// supervisor-only, non-executable, uncached PTEs. The helpers centralize range
+// checks, window geometry, and mapping diagnostics for production devices.
 //
 // Copyright (c) 2026 guideXOS Server
 //

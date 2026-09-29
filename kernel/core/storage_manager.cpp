@@ -166,6 +166,21 @@ static block::BootProvenance match_boot_source(const block::BlockDevice& device)
             : block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT;
     }
 
+    // UEFI SATA Messaging Device Path node (Type 3, SubType 0x12) carries
+    // HBA port, port-multiplier port, and LUN as 16-bit fields. This driver
+    // supports direct HBA-port disks only; multiplier paths remain unknown.
+    const uint8_t* sata = find_device_path_node(0x03u, 0x12u, 10u);
+    if (sata && device.type == block::BDEV_AHCI && device.ahciPortValid) {
+        const uint16_t hbaPort = read_u16(sata + 4);
+        const uint16_t multiplierPort = read_u16(sata + 6);
+        const uint16_t lun = read_u16(sata + 8);
+        if (multiplierPort != 0xFFFFu || lun != 0u)
+            return block::BOOT_PROVENANCE_UNKNOWN;
+        return hbaPort == device.ahciPort
+            ? block::BOOT_PROVENANCE_BOOT_BACKING
+            : block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT;
+    }
+
     return match_usb_boot_source(device);
 }
 
@@ -260,6 +275,8 @@ bool query_device_capabilities(uint8_t globalIndex, DeviceCapabilities& out)
     out.controllerPciBus = dev->pciBus;
     out.controllerPciDevice = dev->pciDevice;
     out.controllerPciFunction = dev->pciFunction;
+    out.ahciPortValid = dev->ahciPortValid;
+    out.ahciPort = dev->ahciPort;
     out.logicalSectorSize = dev->sectorSize;
     out.totalLogicalSectors = dev->totalSectors;
     out.requiredBufferAlignment = dev->requiredBufferAlignment;
@@ -362,6 +379,8 @@ bool capture_target_identity(uint8_t globalIndex, TargetIdentity& out)
     snapshot.pciBus = dev->pciBus;
     snapshot.pciDevice = dev->pciDevice;
     snapshot.pciFunction = dev->pciFunction;
+    snapshot.ahciPortValid = dev->ahciPortValid;
+    snapshot.ahciPort = dev->ahciPort;
     copy_text(snapshot.name, sizeof(snapshot.name), dev->name);
     copy_text(snapshot.model, sizeof(snapshot.model), dev->model);
     copy_text(snapshot.serial, sizeof(snapshot.serial), dev->serial);
@@ -391,6 +410,8 @@ bool target_identities_equal(const TargetIdentity& left,
            left.pciBus == right.pciBus &&
            left.pciDevice == right.pciDevice &&
            left.pciFunction == right.pciFunction &&
+           left.ahciPortValid == right.ahciPortValid &&
+           left.ahciPort == right.ahciPort &&
            text_equal(left.name, right.name, sizeof(left.name)) &&
            text_equal(left.model, right.model, sizeof(left.model)) &&
            text_equal(left.serial, right.serial, sizeof(left.serial));
