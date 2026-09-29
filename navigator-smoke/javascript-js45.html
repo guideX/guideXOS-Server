@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS45</title></head>
+<body>
+<h1>Navigator JavaScript JS45</h1>
+<div id="toolbar" class="toolbar active">
+  <label id="label" class="label required">Name</label>
+  <button id="save" class="action primary large" type="button">Save</button>
+  <button id="cancel" class="action secondary" type="button">Cancel</button>
+  <span id="marker" class="marker active"></span>
+  <button id="after-marker" class="action secondary" type="button">After</button>
+  <div id="group" class="group enabled">
+    <input id="name" class="field required" type="text" value="seed">
+    <div id="nested-panel" class="panel active">
+      <button id="nested-save" class="action primary" type="button">Nested</button>
+    </div>
+  </div>
+</div>
+<button id="outside" class="action primary" type="button">Outside</button>
+<p id="js45-state">initial</p>
+<script>
+var js45Toolbar = document.querySelector("#toolbar");
+var js45Save = document.querySelector("#save");
+var js45Cancel = document.querySelector("#cancel");
+var js45Outside = document.querySelector("#outside");
+var js45State = document.querySelector("#js45-state");
+var js45Event = false;
+var js45NestedEvent = false;
+var js45Metadata = false;
+
+function js45Snapshot(label) {
+  var query = document.querySelectorAll(".action.primary");
+  var retrieval = document.getElementsByClassName("action primary");
+  var scoped = js45Toolbar.querySelectorAll(".action.primary");
+  var scopedRetrieval = js45Toolbar.getElementsByClassName("action primary");
+  var equivalent = query.length === 3 && query[0] === js45Save &&
+    query[1] === document.querySelector("#nested-save") &&
+    query[2] === js45Outside && query === retrieval;
+  var scope = scoped.length === 2 && scoped[0] === js45Save &&
+    scoped[1] === document.querySelector("#nested-save") &&
+    scoped === scopedRetrieval && scoped[2] === undefined;
+  var relations = document.querySelector(".toolbar.active > button.action.primary") === js45Save &&
+    document.querySelector(".toolbar.active button.action.primary") === js45Save &&
+    document.querySelector(".label.required + button.action.primary") === js45Save &&
+    document.querySelector(".marker.active ~ button.action") ===
+      document.querySelector("#after-marker");
+  var semantics = js45Save.matches("button.action.primary") &&
+    !js45Cancel.matches(".action.primary") &&
+    document.querySelector("BUTTON.action.primary") === js45Save &&
+    js45Save.closest(".toolbar.active") === js45Toolbar;
+  js45State.textContent = label + ":equivalent=" + equivalent +
+    ":scope=" + scope + ":relations=" + relations +
+    ":semantics=" + semantics + ":event=" + js45Event +
+    ":nested=" + js45NestedEvent + ":metadata=" + js45Metadata;
+}
+
+js45Outside.addEventListener("click", function(event) {
+  js45NestedEvent = event.target === js45Outside &&
+    event.target.matches("button.action.primary") &&
+    event.currentTarget === js45Outside && event.relatedTarget === null;
+});
+js45Save.addEventListener("click", function(event) {
+  js45Outside.click();
+});
+js45Toolbar.addEventListener("click", function(event) {
+  if (event.target === js45Save) {
+    var targetBefore = event.target;
+    var currentBefore = event.currentTarget;
+    var phaseBefore = event.eventPhase;
+    var relatedBefore = event.relatedTarget;
+    js45Event = event.target.matches("button.action.primary") &&
+      event.target.closest(".toolbar.active > button.action.primary") === js45Save;
+    js45Metadata = event.target === targetBefore &&
+      event.currentTarget === currentBefore && currentBefore === js45Toolbar &&
+      event.eventPhase === phaseBefore && phaseBefore === 3 &&
+      event.relatedTarget === relatedBefore && relatedBefore === null &&
+      event.defaultPrevented === false;
+  }
+  js45Snapshot("event");
+});
+js45Snapshot("initial");
+</script>
+</body>
+</html>

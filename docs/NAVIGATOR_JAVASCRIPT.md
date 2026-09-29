@@ -4551,3 +4551,78 @@ Recommended JS45 direction: if a focused selector extension is next, add bounded
 compound class selectors such as `.action.primary` through the existing simple
 selector descriptor and exact class matcher. Keep relation chains, selector
 lists, attributes, and pseudo-classes deferred.
+
+## JS45: bounded compound-class selectors
+
+JS45 adds `.foo.bar` and `tag.foo.bar` to the existing simple-selector grammar.
+Every distinct class token is required on the same Element. Requested token
+order does not matter, additional Element classes are allowed, and duplicate
+requirements are idempotent. Element class matching remains exact,
+case-sensitive, and ASCII-whitespace-delimited; tag matching remains ASCII
+case-insensitive. Repeated class tokens in an Element have no multiplicity
+meaning.
+
+The selector descriptor now stores every class selector, including a single
+`.foo` or `tag.foo`, as the same fixed list of token offset/length ranges used
+for bounded class retrieval. `Class` and `TagClass` descriptors use the JS44
+exact token-set matcher; the old separate single-class text field is removed.
+The parser accepts at most eight raw class components per simple selector,
+counted before duplicate normalization, and retains the existing 256-byte
+selector input cap. Empty dot-separated components and malformed class
+compounds fail closed. Descriptor copies own their token text inside the
+bounded selector storage, so live collections retain no parser scratch or
+temporary source pointers.
+
+`querySelector()`, `querySelectorAll()`, `matches()`, and `closest()` all use
+the shared selector matcher. The existing one-relation model also accepts
+compound simple selectors on either side of descendant, child, adjacent
+sibling, and general sibling relations. Two-side compounds work within that
+single relation. Arbitrary chains remain invalid. `.foo .bar` stays a
+descendant relation and is distinct from `.foo.bar` on one Element.
+
+`getElementsByClassName("foo bar")` remains its own retrieval API. Its bounded
+descriptor uses the same token ranges and exact all-token matcher as
+`.foo.bar`; document and Element-scoped retrieval agree with equivalent
+`querySelectorAll()` results in order and canonical Element identity. Existing
+128-record selector collection behavior is unchanged. Collections reevaluate
+their retained descriptor on reads, remain read-only and generation-safe, and
+old individual results still make stale `matches()` return false and stale
+`closest()` return null.
+
+ID/class compounds such as `#id.foo` and `tag#id.foo` remain unsupported.
+Universal-class compounds such as `*.foo` are also deferred because they add no
+matching condition beyond `.foo`. Selector lists, attributes, pseudo-classes,
+and longer combinator chains remain outside this bounded grammar. This does
+not claim general CSS compound-selector completeness.
+
+The JS45 native suite is `tests/navigator_javascript_js45_test.cpp`, built by
+`scripts/smoke-navigator-javascript-js45.ps1`. The hosted fixture is
+`navigator-smoke/javascript-js45.html`, and its checks run in the production
+hosted aggregate through `server.cpp`.
+
+The JS45 focused suite passes **184/184 checks**, including the strict bare-metal
+adapter/runtime warning-as-error syntax lane. The complete JavaScript matrix
+passes **43/43 lanes**: lexer, parser, runtime, and JS6–JS45. Focused JS36–JS44
+regressions pass **99/99, 180/180, 152/152, 218/218, 155/155, 220/220,
+235/235, 277/277, and 183/183** checks respectively.
+
+The hosted aggregate reports **530 passed / 7 failed** out of 537 checks. All
+four JS45 hosted checks pass, covering the core selectors, authentic event
+delegation and nested click, ordered retrieval equivalence, scope, and
+relational compounds. The seven failures remain the established CSS checks:
+3C, 3G, 6A, three 6B checks, and 6C. `build.bat` passes. The JS45 smoke script's
+strict bare-metal adapter/runtime lane passes.
+
+`build-kernel.bat` reaches PacMan package linking and stops on unresolved
+`pacman_audio_load_resources` and `pacman_audio_submit`. The independent direct
+kernel lane, `mingw32-make ARCH=amd64 EXTRA_CFLAGS=`, stops at the existing
+Mbed TLS configuration errors in `mbedtls_check_config.h:51` and `:64`. Neither
+subsystem was changed. No fresh kernel was produced, so QEMU proof is not
+claimed. The wrapper regenerated three tracked PacMan object files; they were
+restored to their clean preflight contents. `ESP/ramdisk.img` (64 MiB), all 89
+wallpaper-pack files (58,221,367 bytes), and all four PacMan package files
+(1,303,667 bytes) retain their pre-attempt hashes.
+
+Recommended JS46 direction: allow one existing ID condition alongside a
+bounded class-token list, such as `#save.action.primary` and
+`button#save.action.primary`, without expanding the one-relation limit.

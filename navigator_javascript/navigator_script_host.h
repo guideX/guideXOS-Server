@@ -104,7 +104,6 @@ enum class NavigatorScriptSelectorKind : std::uint8_t {
     TagClass,
     TagId,
     Universal,
-    ClassTokens,
 };
 
 enum class NavigatorScriptSelectorRelation : std::uint8_t {
@@ -121,8 +120,6 @@ struct NavigatorScriptSimpleSelectorDescriptor {
     std::uint16_t tagLength = 0;
     std::uint16_t idOffset = 0;
     std::uint16_t idLength = 0;
-    std::uint16_t classOffset = 0;
-    std::uint16_t classLength = 0;
     struct ClassTokenRange {
         std::uint16_t offset = 0;
         std::uint16_t length = 0;

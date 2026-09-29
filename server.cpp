@@ -4011,6 +4011,44 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "receiver excluded, outside match excluded, extra class accepted, and click metadata retained");
 
+    const std::string js45FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js45.html";
+    const bool js45Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js45FixtureUrl);
+    const std::string js45InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS45 hosted fixture loads compound class selectors",
+        js45Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js45FixtureUrl &&
+        contains(js45InitialText, "Navigator JavaScript JS45") &&
+        contains(js45InitialText,
+            "initial:equivalent=true:scope=true:relations=true:semantics=true:event=false:nested=false:metadata=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js45Loaded) + ",text=" +
+        summarizeText(js45InitialText, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js45SaveClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("save");
+    const std::string js45AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS45 hosted authentic click delegates through compound matches/closest",
+        js45SaveClick && contains(js45AfterClick,
+            "event:equivalent=true:scope=true:relations=true:semantics=true:event=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js45SaveClick) + ",text=" +
+        summarizeText(js45AfterClick, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS45 hosted retrieval equivalence preserves document and Element scope",
+        js45SaveClick && contains(js45AfterClick,
+            ":equivalent=true:scope=true:relations=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "querySelectorAll and multi-token class retrieval return the same ordered canonical Elements");
+    add("JS45 hosted relational compounds and nested Event metadata pass",
+        js45SaveClick && contains(js45AfterClick,
+            ":relations=true:semantics=true:event=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "descendant, child, adjacent, sibling, authentic nested click, and Event metadata use the shared matcher");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

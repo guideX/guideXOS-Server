@@ -173,6 +173,75 @@ bool copySelectorPart(NavigatorScriptSelectorDescriptor& selector,
     return true;
 }
 
+struct SelectorSourceRange {
+    std::size_t offset = 0u;
+    std::size_t length = 0u;
+};
+
+bool storeSelectorClassTokens(SourceView source,
+    std::array<SelectorSourceRange,
+        kNavigatorScriptMaxClassQueryTokens>& tokens,
+    std::size_t tokenCount, NavigatorScriptSelectorDescriptor& storage,
+    NavigatorScriptSimpleSelectorDescriptor& selector)
+{
+    if (tokenCount == 0u ||
+        tokenCount > kNavigatorScriptMaxClassQueryTokens) return false;
+    const auto tokenLess = [&source](const SelectorSourceRange& left,
+        const SelectorSourceRange& right) {
+        const SourceView leftText(source.data + left.offset, left.length);
+        const SourceView rightText(source.data + right.offset, right.length);
+        return std::lexicographical_compare(leftText.data,
+            leftText.data + leftText.length, rightText.data,
+            rightText.data + rightText.length);
+    };
+    std::sort(tokens.begin(), tokens.begin() + tokenCount, tokenLess);
+
+    std::size_t uniqueCount = 0u;
+    for (std::size_t index = 0u; index < tokenCount; ++index) {
+        if (uniqueCount != 0u) {
+            const SelectorSourceRange& previous = tokens[uniqueCount - 1u];
+            const SelectorSourceRange& current = tokens[index];
+            if (previous.length == current.length &&
+                std::char_traits<char>::compare(source.data + previous.offset,
+                    source.data + current.offset, current.length) == 0)
+                continue;
+        }
+        tokens[uniqueCount++] = tokens[index];
+    }
+    selector.classTokenCount = static_cast<std::uint8_t>(uniqueCount);
+    for (std::size_t index = 0u; index < uniqueCount; ++index) {
+        NavigatorScriptSimpleSelectorDescriptor::ClassTokenRange& stored =
+            selector.classTokens[index];
+        if (!copySelectorPart(storage, source, tokens[index].offset,
+                tokens[index].offset + tokens[index].length,
+                stored.offset, stored.length)) return false;
+    }
+    return true;
+}
+
+bool parseCompoundClassTokens(SourceView source, std::size_t begin,
+    std::size_t end, NavigatorScriptSelectorDescriptor& storage,
+    NavigatorScriptSimpleSelectorDescriptor& selector)
+{
+    std::array<SelectorSourceRange,
+        kNavigatorScriptMaxClassQueryTokens> tokens{};
+    std::size_t tokenCount = 0u;
+    std::size_t position = begin;
+    while (position < end) {
+        const std::size_t tokenBegin = position;
+        while (position < end && source.data[position] != '.') ++position;
+        if (tokenCount >= kNavigatorScriptMaxClassQueryTokens ||
+            !isSelectorIdentifier(source, tokenBegin, position)) return false;
+        tokens[tokenCount++] = {tokenBegin, position - tokenBegin};
+        if (position < end) {
+            ++position;
+            if (position == end) return false;
+        }
+    }
+    return storeSelectorClassTokens(source, tokens, tokenCount, storage,
+        selector);
+}
+
 bool parseSimpleSelector(SourceView source, std::size_t begin,
     std::size_t end, NavigatorScriptSelectorDescriptor& storage,
     NavigatorScriptSimpleSelectorDescriptor& selector)
@@ -185,17 +254,17 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
         selector.kind = NavigatorScriptSelectorKind::Universal;
         return true;
     }
-    if (first == '#' || first == '.') {
+    if (first == '#') {
         const std::size_t partBegin = begin + 1u;
         if (!isSelectorIdentifier(source, partBegin, end)) return false;
-        if (first == '#') {
-            selector.kind = NavigatorScriptSelectorKind::Id;
-            return copySelectorPart(storage, source, partBegin, end,
-                selector.idOffset, selector.idLength);
-        }
-        selector.kind = NavigatorScriptSelectorKind::Class;
+        selector.kind = NavigatorScriptSelectorKind::Id;
         return copySelectorPart(storage, source, partBegin, end,
-            selector.classOffset, selector.classLength);
+            selector.idOffset, selector.idLength);
+    }
+    if (first == '.') {
+        selector.kind = NavigatorScriptSelectorKind::Class;
+        return parseCompoundClassTokens(source, begin + 1u, end, storage,
+            selector);
     }
 
     std::size_t specialPosition = end;
@@ -203,8 +272,10 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
     std::size_t specialCount = 0u;
     for (std::size_t index = begin; index < end; ++index) {
         if (source.data[index] != '#' && source.data[index] != '.') continue;
-        specialPosition = index;
-        special = source.data[index];
+        if (specialCount == 0u) {
+            specialPosition = index;
+            special = source.data[index];
+        }
         ++specialCount;
     }
     if (specialCount == 0u) {
@@ -213,19 +284,19 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
         return copySelectorPart(storage, source, begin, end,
             selector.tagOffset, selector.tagLength);
     }
-    if (specialCount != 1u || !isSelectorTagName(source, begin,
-            specialPosition) || !isSelectorIdentifier(source,
-            specialPosition + 1u, end)) return false;
+    if (!isSelectorTagName(source, begin, specialPosition)) return false;
     if (!copySelectorPart(storage, source, begin, specialPosition,
             selector.tagOffset, selector.tagLength)) return false;
     if (special == '#') {
+        if (!isSelectorIdentifier(source, specialPosition + 1u, end))
+            return false;
         selector.kind = NavigatorScriptSelectorKind::TagId;
         return copySelectorPart(storage, source, specialPosition + 1u, end,
             selector.idOffset, selector.idLength);
     }
     selector.kind = NavigatorScriptSelectorKind::TagClass;
-    return copySelectorPart(storage, source, specialPosition + 1u, end,
-        selector.classOffset, selector.classLength);
+    return parseCompoundClassTokens(source, specialPosition + 1u, end,
+        storage, selector);
 }
 
 bool parseBoundedSelector(SourceView source,
@@ -319,11 +390,8 @@ bool makeRetrievalSelector(SourceView argument, bool classSelector,
     // Each token retains the existing simple-selector identifier bound, and
     // duplicate tokens are removed before the canonical descriptor is stored.
     if (argument.length > kNavigatorScriptMaxSelectorLength) return false;
-    struct SourceRange {
-        std::size_t offset = 0u;
-        std::size_t length = 0u;
-    };
-    std::array<SourceRange, kNavigatorScriptMaxClassQueryTokens> tokens{};
+    std::array<SelectorSourceRange,
+        kNavigatorScriptMaxClassQueryTokens> tokens{};
     std::size_t tokenCount = 0u;
     std::size_t parsedTokenCount = 0u;
     std::size_t position = 0u;
@@ -341,59 +409,12 @@ bool makeRetrievalSelector(SourceView argument, bool classSelector,
             return false;
         ++parsedTokenCount;
 
-        const SourceView token(argument.data + tokenBegin, tokenLength);
-        bool duplicate = false;
-        for (std::size_t index = 0; index < tokenCount; ++index) {
-            const SourceView existing(argument.data + tokens[index].offset,
-                tokens[index].length);
-            if (existing.length == token.length &&
-                std::char_traits<char>::compare(existing.data, token.data,
-                    token.length) == 0) {
-                duplicate = true;
-                break;
-            }
-        }
-        if (!duplicate) tokens[tokenCount++] = {tokenBegin, tokenLength};
+        tokens[tokenCount++] = {tokenBegin, tokenLength};
     }
     if (tokenCount == 0u) return false;
-
-    const auto tokenLess = [&argument](const SourceRange& left,
-        const SourceRange& right) {
-        const SourceView leftText(argument.data + left.offset, left.length);
-        const SourceView rightText(argument.data + right.offset, right.length);
-        return std::lexicographical_compare(leftText.data,
-            leftText.data + leftText.length, rightText.data,
-            rightText.data + rightText.length);
-    };
-    for (std::size_t index = 1u; index < tokenCount; ++index) {
-        const SourceRange token = tokens[index];
-        std::size_t position = index;
-        while (position > 0u && tokenLess(token, tokens[position - 1u])) {
-            tokens[position] = tokens[position - 1u];
-            --position;
-        }
-        tokens[position] = token;
-    }
-
-    if (tokenCount == 1u) {
-        selector.rightSimple.kind = NavigatorScriptSelectorKind::Class;
-        return copySelectorPart(selector, argument, tokens[0].offset,
-            tokens[0].offset + tokens[0].length,
-            selector.rightSimple.classOffset,
-            selector.rightSimple.classLength);
-    }
-
-    selector.rightSimple.kind = NavigatorScriptSelectorKind::ClassTokens;
-    selector.rightSimple.classTokenCount =
-        static_cast<std::uint8_t>(tokenCount);
-    for (std::size_t index = 0; index < tokenCount; ++index) {
-        NavigatorScriptSimpleSelectorDescriptor::ClassTokenRange& stored =
-            selector.rightSimple.classTokens[index];
-        if (!copySelectorPart(selector, argument, tokens[index].offset,
-                tokens[index].offset + tokens[index].length,
-                stored.offset, stored.length)) return false;
-    }
-    return true;
+    selector.rightSimple.kind = NavigatorScriptSelectorKind::Class;
+    return storeSelectorClassTokens(argument, tokens, tokenCount, selector,
+        selector.rightSimple);
 }
 
 SourceView selectorPart(const NavigatorScriptSelectorDescriptor& storage,
@@ -2400,7 +2421,6 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
         if (leftSimple.kind != rightSimple.kind ||
             leftSimple.tagLength != rightSimple.tagLength ||
             leftSimple.idLength != rightSimple.idLength ||
-            leftSimple.classLength != rightSimple.classLength ||
             leftSimple.classTokenCount != rightSimple.classTokenCount ||
             leftSimple.classTokenCount > kNavigatorScriptMaxClassQueryTokens ||
             !selectorTextEquals(selectorPart(left, leftSimple.tagOffset,
@@ -2410,11 +2430,7 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
             !selectorTextEquals(selectorPart(left, leftSimple.idOffset,
                 leftSimple.idLength),
                 selectorPart(right, rightSimple.idOffset,
-                    rightSimple.idLength)) ||
-            !selectorTextEquals(selectorPart(left, leftSimple.classOffset,
-                leftSimple.classLength),
-                selectorPart(right, rightSimple.classOffset,
-                    rightSimple.classLength))) return false;
+                    rightSimple.idLength))) return false;
         for (std::size_t index = 0; index < leftSimple.classTokenCount;
                 ++index) {
             const NavigatorScriptSimpleSelectorDescriptor::ClassTokenRange&
@@ -2443,21 +2459,17 @@ bool NavigatorScriptHostAdapter::selectorSimpleElementMatches(
         selector.tagLength);
     const SourceView id = selectorPart(storage, selector.idOffset,
         selector.idLength);
-    const SourceView className = selectorPart(storage, selector.classOffset,
-        selector.classLength);
     switch (selector.kind) {
     case NavigatorScriptSelectorKind::Id:
         return selectorTextEquals(SourceView(element.id.data(),
                 element.id.size()), id);
     case NavigatorScriptSelectorKind::Class:
-        return classTokenMatches(element.className, className);
-    case NavigatorScriptSelectorKind::ClassTokens:
         return classTokenSetMatches(element.className, selector, storage);
     case NavigatorScriptSelectorKind::Tag:
         return selectorTagEquals(element.tagName, tag);
     case NavigatorScriptSelectorKind::TagClass:
         return selectorTagEquals(element.tagName, tag) &&
-            classTokenMatches(element.className, className);
+            classTokenSetMatches(element.className, selector, storage);
     case NavigatorScriptSelectorKind::TagId:
         return selectorTagEquals(element.tagName, tag) &&
             selectorTextEquals(SourceView(element.id.data(),

@@ -583,9 +583,10 @@ var surfaces = panel.getElementsByClassName !== undefined &&
     collection.getElementsByClassName === undefined &&
     forms.getElementsByClassName === undefined &&
     panel.children.getElementsByClassName === undefined;
-var selectorGrammarUnchanged =
-    document.querySelector(".action.primary") === null &&
-    document.querySelectorAll(".action.primary").length === 0 &&
+var selectorGrammarAdditive =
+    document.querySelector(".action.primary") === panel &&
+    document.querySelectorAll(".action.primary").length === 5 &&
+    document.querySelectorAll("button.action.primary").length === 2 &&
     document.querySelectorAll("button.action").length >= 1;
 var retrieversUnaffected = document.getElementsByTagName("button").length === 3 &&
     document.getElementsByTagName("*") === document.querySelectorAll("*");
@@ -593,8 +594,8 @@ var retrieversUnaffected = document.getElementsByTagName("button").length === 3 
     expect(result.succeeded(), "surface/regression: script");
     expectBoolean(harness, "surfaces", true,
         "receiver surface remains limited to Document and Element");
-    expectBoolean(harness, "selectorGrammarUnchanged", true,
-        "selector grammar remains unchanged; compound classes are deferred");
+    expectBoolean(harness, "selectorGrammarAdditive", true,
+        "JS45 adds compound class queries without changing retrieval behavior");
     expectBoolean(harness, "retrieversUnaffected", true,
         "regression: tag and universal retrieval remain unchanged");
     expectError(harness.execute(
