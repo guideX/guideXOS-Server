@@ -1,12 +1,16 @@
 #include "include/kernel/qemu_dm9_storage_proof.h"
 
 #if defined(GXOS_DM9_QEMU_STORAGE_PROOF) || \
-    defined(GXOS_DM15_QEMU_AHCI_PROOF)
+    defined(GXOS_DM15_QEMU_AHCI_PROOF) || \
+    defined(GXOS_DM16_QEMU_NVME_PROOF)
 
 #include "include/kernel/block_device.h"
 #include "include/kernel/ata.h"
 #if defined(GXOS_DM15_QEMU_AHCI_PROOF)
 #include "include/kernel/ahci.h"
+#endif
+#if defined(GXOS_DM16_QEMU_NVME_PROOF)
+#include "include/kernel/nvme.h"
 #endif
 #include "include/kernel/disk_initialization.h"
 #include "include/kernel/disk_manager_model.h"
@@ -20,6 +24,14 @@
 namespace kernel {
 namespace qemu_dm9_storage_proof {
 namespace {
+
+#if defined(GXOS_DM16_QEMU_NVME_PROOF)
+#define QEMU_PROOF_TAG "[DM16-QEMU]"
+#elif defined(GXOS_DM15_QEMU_AHCI_PROOF)
+#define QEMU_PROOF_TAG "[DM15-QEMU]"
+#else
+#define QEMU_PROOF_TAG "[DM9-QEMU]"
+#endif
 
 static const char kProofMountPath[] = "/mnt/dm9-proof";
 static const char kProofDirectoryPath[] = "/mnt/dm9-proof/dm9";
@@ -105,7 +117,18 @@ static void print_block_io_diagnostic(const block::OperationDiagnostic& io)
     serial::puts(" blockStatus=0x");
     serial::put_hex8(static_cast<uint8_t>(io.status));
     if (io.transportDiagnostic.valid) {
-#if defined(GXOS_DM15_QEMU_AHCI_PROOF)
+#if defined(GXOS_DM16_QEMU_NVME_PROOF)
+        serial::puts(" nvmeQueue=");
+        serial::put_hex16(io.transportDiagnostic.nvmeQueueId);
+        serial::puts(" nvmeCid=");
+        serial::put_hex16(io.transportDiagnostic.nvmeCommandId);
+        serial::puts(" nvmeSctSc=");
+        serial::put_hex8(io.transportDiagnostic.nvmeStatusCodeType);
+        serial::putc('/');
+        serial::put_hex8(io.transportDiagnostic.nvmeStatusCode);
+        serial::puts(" nvmeCsts=");
+        serial::put_hex32(io.transportDiagnostic.nvmeControllerStatus);
+#elif defined(GXOS_DM15_QEMU_AHCI_PROOF)
         serial::puts(" ahciCommand=0x");
         serial::put_hex8(io.transportDiagnostic.commandOpcode);
         serial::puts(" ahciSlot=");
@@ -140,7 +163,18 @@ static void print_block_io_diagnostic(const block::OperationDiagnostic& io)
 static bool qemu_secondary_target(uint8_t index, block::BlockDevice& out,
                                   storage::TargetIdentity& identity)
 {
-#if defined(GXOS_DM15_QEMU_AHCI_PROOF)
+#if defined(GXOS_DM16_QEMU_NVME_PROOF)
+    if (!block::copy_device(index, out) || !out.active ||
+        out.type != block::BDEV_NVME || !out.pciLocationValid ||
+        out.namespaceId != 1u || !out.readFn ||
+        !text_equal(out.serial, "GXOSDM16NVME") ||
+        !storage::capture_target_identity(index, identity)) return false;
+#if defined(GXOS_DM16_NVME_PRIVATE_PROOF)
+    if (out.writeFn || out.flushFn || out.flushSemanticsKnown) return false;
+#else
+    if (!out.writeFn || !out.flushFn || !out.flushSemanticsKnown) return false;
+#endif
+#elif defined(GXOS_DM15_QEMU_AHCI_PROOF)
     if (!block::copy_device(index, out) || !out.active ||
         out.type != block::BDEV_AHCI || !out.ahciPortValid ||
         out.ahciPort != 1u || !text_starts_with(out.model, "QEMU HARDDISK") ||
@@ -170,7 +204,10 @@ static bool find_qemu_secondary(block::BlockDevice& device,
 {
     for (uint8_t index = 0; index < block::MAX_BLOCK_DEVICES; ++index) {
         block::BlockDevice candidate = {};
-#if defined(GXOS_DM15_QEMU_AHCI_PROOF)
+#if defined(GXOS_DM16_QEMU_NVME_PROOF)
+        if (!block::copy_device(index, candidate) ||
+            candidate.type != block::BDEV_NVME) continue;
+#elif defined(GXOS_DM15_QEMU_AHCI_PROOF)
         if (!block::copy_device(index, candidate) ||
             candidate.type != block::BDEV_AHCI) continue;
 #else
@@ -183,10 +220,12 @@ static bool find_qemu_secondary(block::BlockDevice& device,
         const storage::BootProtection boot = haveIdentity
             ? storage::query_boot_protection(candidateIdentity)
             : storage::BootProtection{storage::BOOT_DEVICE_IDENTITY_UNKNOWN};
-#if defined(GXOS_DM15_QEMU_AHCI_PROOF)
-        serial::puts("[DM15-QEMU] AHCI candidate name=");
+#if defined(GXOS_DM16_QEMU_NVME_PROOF)
+        serial::puts(QEMU_PROOF_TAG " NVMe candidate name=");
+#elif defined(GXOS_DM15_QEMU_AHCI_PROOF)
+        serial::puts(QEMU_PROOF_TAG " AHCI candidate name=");
 #else
-        serial::puts("[DM9-QEMU] ATA candidate name=");
+        serial::puts(QEMU_PROOF_TAG " ATA candidate name=");
 #endif
         serial::puts(candidate.name);
         serial::puts(" globalIndex=");
@@ -203,7 +242,11 @@ static bool find_qemu_secondary(block::BlockDevice& device,
         serial::put_hex64(candidate.totalSectors);
         serial::puts(" sectorSize=");
         serial::put_hex32(candidate.sectorSize);
-#if defined(GXOS_DM15_QEMU_AHCI_PROOF)
+#if defined(GXOS_DM16_QEMU_NVME_PROOF)
+        serial::puts(" nsid="); serial::put_hex32(candidate.namespaceId);
+        serial::puts(" mdts="); serial::put_hex8(candidate.nvmeMdts);
+        serial::puts(" vwc="); serial::put_hex8(candidate.nvmeVwcState);
+#elif defined(GXOS_DM15_QEMU_AHCI_PROOF)
         serial::puts(" port=");
         serial::put_hex8(candidate.ahciPort);
 #else
@@ -221,7 +264,16 @@ static bool find_qemu_secondary(block::BlockDevice& device,
                 ? "DefinitelyBoot" : "Unknown");
         serial::puts(" flush=");
         serial::puts(candidate.flushFn ? "yes" : "no");
-#if defined(GXOS_DM15_QEMU_AHCI_PROOF)
+#if defined(GXOS_DM16_QEMU_NVME_PROOF)
+        serial::puts(" pci=");
+        serial::put_hex8(candidate.pciBus); serial::putc(':');
+        serial::put_hex8(candidate.pciDevice); serial::putc('.');
+        serial::put_hex8(candidate.pciFunction);
+        serial::puts(" namespaceNguid=");
+        serial::puts(candidate.namespaceNguidValid ? "present" : "absent");
+        serial::puts(" namespaceEui64=");
+        serial::puts(candidate.namespaceEui64Valid ? "present" : "absent");
+#elif defined(GXOS_DM15_QEMU_AHCI_PROOF)
         const ahci::DeviceInfo* ahciDevice =
             ahci::get_device(candidate.driverIndex);
         if (ahciDevice) {
@@ -251,6 +303,102 @@ static bool find_qemu_secondary(block::BlockDevice& device,
     return false;
 }
 
+#if (defined(GXOS_DM16_QEMU_NVME_PROOF) && \
+     defined(GXOS_DM16_NVME_PRIVATE_PROOF))
+static bool verify_private_nvme_write_flush_stress(
+    uint8_t globalIndex, const block::BlockDevice& device)
+{
+    static uint8_t original[9u * 4096u];
+    static uint8_t pattern[9u * 4096u];
+    static uint8_t readback[9u * 4096u];
+    const uint32_t sectorSize = device.sectorSize;
+    const uint32_t count = 9u;
+    const uint32_t byteCount = sectorSize * count;
+    if (sectorSize < 512u || sectorSize > 4096u ||
+        device.totalSectors < count + 1u || byteCount > sizeof(original))
+        return false;
+    const uint64_t lba = device.totalSectors - count;
+    if (block::read_sectors(globalIndex, lba, count, original) !=
+        block::BLOCK_OK) return false;
+    for (uint32_t i = 0; i < byteCount; ++i) {
+        if (original[i] != 0u) {
+            serial::puts(QEMU_PROOF_TAG " private-proof=BLOCKED reason=canary-range-not-zero\n");
+            return false;
+        }
+    }
+
+    bool allCyclesPassed = true;
+    uint32_t completedCycles = 0u;
+    for (uint32_t cycle = 0u; cycle < 100u; ++cycle) {
+        for (uint32_t i = 0; i < byteCount; ++i)
+            pattern[i] = static_cast<uint8_t>(
+                (i * 37u + cycle * 13u + 0x5Au) & 0xFFu);
+        const block::Status writeStatus = nvme::proof_write(
+            device.driverIndex, lba, count, pattern);
+        const block::Status flushStatus = writeStatus == block::BLOCK_OK
+            ? nvme::proof_flush(device.driverIndex) : block::BLOCK_ERR_NOT_READY;
+        const block::Status readStatus = flushStatus == block::BLOCK_OK
+            ? block::read_sectors(globalIndex, lba, count, readback)
+            : block::BLOCK_ERR_NOT_READY;
+        const bool patternMatches = readStatus == block::BLOCK_OK &&
+            bytes_equal(reinterpret_cast<const char*>(pattern),
+                        reinterpret_cast<const char*>(readback), byteCount);
+        const block::Status restoreStatus = nvme::proof_write(
+            device.driverIndex, lba, count, original);
+        const block::Status restoreFlushStatus = restoreStatus == block::BLOCK_OK
+            ? nvme::proof_flush(device.driverIndex) : block::BLOCK_ERR_NOT_READY;
+        const block::Status restoreReadStatus =
+            restoreFlushStatus == block::BLOCK_OK
+                ? block::read_sectors(globalIndex, lba, count, readback)
+                : block::BLOCK_ERR_NOT_READY;
+        const bool restored = restoreReadStatus == block::BLOCK_OK &&
+            bytes_equal(reinterpret_cast<const char*>(original),
+                        reinterpret_cast<const char*>(readback), byteCount);
+        if (writeStatus != block::BLOCK_OK || flushStatus != block::BLOCK_OK ||
+            !patternMatches || restoreStatus != block::BLOCK_OK ||
+            restoreFlushStatus != block::BLOCK_OK || !restored) {
+            serial::puts(QEMU_PROOF_TAG " private-cycle=FAIL cycle=");
+            serial::put_hex32(cycle + 1u);
+            serial::puts(" write="); serial::put_hex8(static_cast<uint8_t>(writeStatus));
+            serial::puts(" flush="); serial::put_hex8(static_cast<uint8_t>(flushStatus));
+            serial::puts(" read="); serial::put_hex8(static_cast<uint8_t>(readStatus));
+            serial::puts(" restore="); serial::put_hex8(static_cast<uint8_t>(restoreStatus));
+            serial::puts(" restoreFlush=");
+            serial::put_hex8(static_cast<uint8_t>(restoreFlushStatus));
+            serial::puts(" restoreRead=");
+            serial::put_hex8(static_cast<uint8_t>(restoreReadStatus));
+            serial::puts(" patternMatches=");
+            serial::puts(patternMatches ? "yes" : "no");
+            serial::puts(" restored=");
+            serial::puts(restored ? "yes" : "no");
+            serial::putc('\n');
+            allCyclesPassed = false;
+            break;
+        }
+        ++completedCycles;
+        if (((cycle + 1u) % 10u) == 0u) {
+            serial::puts(QEMU_PROOF_TAG " private-stress=progress cycles=");
+            serial::put_hex32(cycle + 1u);
+            serial::putc('\n');
+        }
+    }
+
+    const bool finallyRestored = allCyclesPassed && completedCycles == 100u &&
+        block::read_sectors(globalIndex, lba, count, readback) == block::BLOCK_OK &&
+        bytes_equal(reinterpret_cast<const char*>(original),
+                    reinterpret_cast<const char*>(readback), byteCount);
+    serial::puts(QEMU_PROOF_TAG " private-write-flush-stress=");
+    serial::puts(finallyRestored ? "PASS" : "FAIL");
+    serial::puts(" cycles="); serial::put_hex32(completedCycles);
+    serial::puts(" lba="); serial::put_hex64(lba);
+    serial::puts(" sectors="); serial::put_hex32(count);
+    serial::puts(" bytes="); serial::put_hex32(byteCount);
+    serial::puts(" restored="); serial::puts(finallyRestored ? "yes" : "no");
+    serial::putc('\n');
+    return finallyRestored;
+}
+#endif
+
 #if defined(GXOS_DM15_QEMU_AHCI_PROOF) && \
     defined(GXOS_DM15_AHCI_PRIVATE_PROOF)
 static bool verify_private_ahci_write_and_flush(
@@ -266,7 +414,7 @@ static bool verify_private_ahci_write_and_flush(
         block::BLOCK_OK) return false;
     for (uint32_t i = 0; i < device.sectorSize; ++i) {
         if (original[i] != 0u) {
-            serial::puts("[DM15-QEMU] private-write=BLOCKED reason=target-sector-not-zero\n");
+            serial::puts(QEMU_PROOF_TAG " private-write=BLOCKED reason=target-sector-not-zero\n");
             return false;
         }
         pattern[i] = static_cast<uint8_t>((i * 37u + 0x5Au) & 0xFFu);
@@ -302,7 +450,7 @@ static bool verify_private_ahci_write_and_flush(
                     reinterpret_cast<const char*>(readback),
                     device.sectorSize);
 
-    serial::puts("[DM15-QEMU] private-write=");
+    serial::puts(QEMU_PROOF_TAG " private-write=");
     serial::puts(dataPassed && restored ? "PASS" : "FAIL");
     serial::puts(" lba="); serial::put_hex64(lba);
     serial::puts(" bytes="); serial::put_hex32(device.sectorSize);
@@ -377,10 +525,10 @@ static void run_rediscovery(const storage::TargetIdentity& identity,
     if (table.state != storage::DISK_STATE_VALID_GPT ||
         !table.primaryGptValid || !table.backupGptValid ||
         !table.gptCopiesAgree) {
-#if defined(GXOS_DM15_QEMU_AHCI_PROOF)
-        serial::puts("[DM15-QEMU] reboot-rediscovery=BLOCKED reason=existing-disk-is-not-a-verified-GPT\n");
+#if defined(GXOS_DM15_QEMU_AHCI_PROOF) || defined(GXOS_DM16_QEMU_NVME_PROOF)
+        serial::puts(QEMU_PROOF_TAG " reboot-rediscovery=BLOCKED reason=existing-disk-is-not-a-verified-GPT\n");
 #else
-        serial::puts("[DM9-QEMU] reboot-rediscovery=BLOCKED reason=existing-disk-is-not-a-verified-GPT\n");
+        serial::puts(QEMU_PROOF_TAG " reboot-rediscovery=BLOCKED reason=existing-disk-is-not-a-verified-GPT\n");
 #endif
         return;
     }
@@ -390,22 +538,22 @@ static void run_rediscovery(const storage::TargetIdentity& identity,
         if (!text_equal(partition.name, kPartitionName)) continue;
         const bool mountedAndRead = mount_proof_partition(identity,
             partition, false, rootMountCount);
-#if defined(GXOS_DM15_QEMU_AHCI_PROOF)
+#if defined(GXOS_DM15_QEMU_AHCI_PROOF) || defined(GXOS_DM16_QEMU_NVME_PROOF)
         serial::puts(mountedAndRead
-            ? "[DM15-QEMU] reboot-rediscovery=PASS explicit-remount=PASS file-bytes=PASS mounts-clean=PASS\n"
-            : "[DM15-QEMU] reboot-rediscovery=FAIL explicit-remount-or-file-check-failed\n");
+            ? QEMU_PROOF_TAG " reboot-rediscovery=PASS explicit-remount=PASS file-bytes=PASS mounts-clean=PASS\n"
+            : QEMU_PROOF_TAG " reboot-rediscovery=FAIL explicit-remount-or-file-check-failed\n");
 #else
         serial::puts(mountedAndRead
-            ? "[DM9-QEMU] reboot-rediscovery=PASS explicit-remount=PASS file-bytes=PASS mounts-clean=PASS\n"
-            : "[DM9-QEMU] reboot-rediscovery=FAIL explicit-remount-or-file-check-failed\n");
+            ? QEMU_PROOF_TAG " reboot-rediscovery=PASS explicit-remount=PASS file-bytes=PASS mounts-clean=PASS\n"
+            : QEMU_PROOF_TAG " reboot-rediscovery=FAIL explicit-remount-or-file-check-failed\n");
 #endif
         return;
     }
 
-#if defined(GXOS_DM15_QEMU_AHCI_PROOF)
-    serial::puts("[DM15-QEMU] reboot-rediscovery=BLOCKED reason=proof-partition-not-found\n");
+#if defined(GXOS_DM15_QEMU_AHCI_PROOF) || defined(GXOS_DM16_QEMU_NVME_PROOF)
+    serial::puts(QEMU_PROOF_TAG " reboot-rediscovery=BLOCKED reason=proof-partition-not-found\n");
 #else
-    serial::puts("[DM9-QEMU] reboot-rediscovery=BLOCKED reason=proof-partition-not-found\n");
+    serial::puts(QEMU_PROOF_TAG " reboot-rediscovery=BLOCKED reason=proof-partition-not-found\n");
 #endif
 }
 
@@ -422,32 +570,32 @@ static bool run_fresh_lifecycle(const block::BlockDevice& device,
 
     s_initializePlan = {};
     s_initializeResult = {};
-    serial::puts("[DM9-QEMU] initialize=prepare-start\n");
+    serial::puts(QEMU_PROOF_TAG " initialize=prepare-start\n");
     const storage::InitializeDiskStatus prepared =
         storage::prepare_initialize_disk(s_initializeRequest, s_initializePlan,
                                          s_initializeResult);
-    serial::puts("[DM9-QEMU] initialize=prepare-complete status=");
+    serial::puts(QEMU_PROOF_TAG " initialize=prepare-complete status=");
     serial::puts(storage::initialize_disk_status_name(prepared));
     serial::puts(" stage=");
     serial::puts(storage::initialize_disk_stage_name(s_initializeResult.stage));
     serial::putc('\n');
     if (prepared != storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION) {
-        serial::puts("[DM9-QEMU] initialize=BLOCKED status=");
+        serial::puts(QEMU_PROOF_TAG " initialize=BLOCKED status=");
         serial::puts(storage::initialize_disk_status_name(prepared));
         serial::putc('\n');
         return false;
     }
     serial::puts("[DM10-TRACE] init-preflight=PASS\n");
-    serial::puts("[DM9-QEMU] initialize=execute-start\n");
+    serial::puts(QEMU_PROOF_TAG " initialize=execute-start\n");
     const storage::InitializeDiskStatus initialized =
         storage::execute_initialize_disk(s_initializePlan, s_initializeResult);
-    serial::puts("[DM9-QEMU] initialize=execute-complete status=");
+    serial::puts(QEMU_PROOF_TAG " initialize=execute-complete status=");
     serial::puts(storage::initialize_disk_status_name(initialized));
     serial::putc('\n');
     if (initialized != storage::INITIALIZE_DISK_SUCCESS ||
         !s_initializeResult.verificationPassed ||
         s_initializeResult.finalStateUncertain) {
-        serial::puts("[DM9-QEMU] initialize=FAIL status=");
+        serial::puts(QEMU_PROOF_TAG " initialize=FAIL status=");
         serial::puts(storage::initialize_disk_status_name(initialized));
         serial::puts(" stage=");
         serial::puts(storage::initialize_disk_stage_name(s_initializeResult.stage));
@@ -514,7 +662,7 @@ static bool run_fresh_lifecycle(const block::BlockDevice& device,
         s_table.state != storage::DISK_STATE_VALID_GPT ||
         !s_table.primaryGptValid || !s_table.backupGptValid ||
         !s_table.gptCopiesAgree) {
-        serial::puts("[DM9-QEMU] initialize=PASS parse-after-initialize=FAIL\n");
+        serial::puts(QEMU_PROOF_TAG " initialize=PASS parse-after-initialize=FAIL\n");
         return false;
     }
 
@@ -524,7 +672,7 @@ static bool run_fresh_lifecycle(const block::BlockDevice& device,
     if (!storage::compute_unallocated_regions(s_table, device.totalSectors,
             device.sectorSize, s_regions, storage::MAX_UNALLOCATED_REGIONS,
             regionCount) || regionCount == 0) {
-        serial::puts("[DM9-QEMU] initialize=PASS free-space-rescan=FAIL\n");
+        serial::puts(QEMU_PROOF_TAG " initialize=PASS free-space-rescan=FAIL\n");
         return false;
     }
 
@@ -544,7 +692,7 @@ static bool run_fresh_lifecycle(const block::BlockDevice& device,
         s_createRequest, s_createResult);
     if (created != storage::CREATE_PARTITION_SUCCESS ||
         !s_createResult.verificationPassed || s_createResult.finalStateUncertain) {
-        serial::puts("[DM9-QEMU] create-partition=FAIL status=");
+        serial::puts(QEMU_PROOF_TAG " create-partition=FAIL status=");
         serial::puts(storage::create_partition_status_name(created));
         serial::puts(" firstFailedStage=");
         serial::puts(storage::create_partition_stage_name(
@@ -579,7 +727,7 @@ static bool run_fresh_lifecycle(const block::BlockDevice& device,
         s_table.state != storage::DISK_STATE_VALID_GPT ||
         !s_table.primaryGptValid || !s_table.backupGptValid ||
         !s_table.gptCopiesAgree) {
-        serial::puts("[DM9-QEMU] create-partition=PASS rescan=FAIL\n");
+        serial::puts(QEMU_PROOF_TAG " create-partition=PASS rescan=FAIL\n");
         return false;
     }
 
@@ -599,7 +747,7 @@ static bool run_fresh_lifecycle(const block::BlockDevice& device,
         storage::format_fat32_partition(s_formatRequest, s_formatResult);
     if (formatted != storage::FAT32_FORMAT_SUCCESS ||
         !s_formatResult.verificationPassed || s_formatResult.finalStateUncertain) {
-        serial::puts("[DM9-QEMU] format-fat32=FAIL status=");
+        serial::puts(QEMU_PROOF_TAG " format-fat32=FAIL status=");
         serial::puts(storage::fat32_format_status_name(formatted));
         serial::puts(" firstFailedStage=");
         serial::puts(storage::fat32_format_stage_name(
@@ -650,12 +798,12 @@ static bool run_fresh_lifecycle(const block::BlockDevice& device,
         : "[DM10-TRACE] mount-file-unmount-remount-persistent-read=FAIL\n");
 #if defined(GXOS_DM15_QEMU_AHCI_PROOF)
     serial::puts(mountAndFileIo
-        ? "[DM15-QEMU] lifecycle=PASS initialize=PASS create-partition=PASS format-fat32=PASS mount=PASS mkdir=PASS file-write=PASS file-read=PASS unmount=PASS remount-read=PASS mounts-clean=PASS\n"
-        : "[DM15-QEMU] lifecycle=FAIL mount-or-file-operation-failed\n");
+        ? QEMU_PROOF_TAG " lifecycle=PASS initialize=PASS create-partition=PASS format-fat32=PASS mount=PASS mkdir=PASS file-write=PASS file-read=PASS unmount=PASS remount-read=PASS mounts-clean=PASS\n"
+        : QEMU_PROOF_TAG " lifecycle=FAIL mount-or-file-operation-failed\n");
 #else
     serial::puts(mountAndFileIo
-        ? "[DM9-QEMU] lifecycle=PASS initialize=PASS create-partition=PASS format-fat32=PASS mount=PASS mkdir=PASS file-write=PASS file-read=PASS unmount=PASS remount-read=PASS mounts-clean=PASS\n"
-        : "[DM9-QEMU] lifecycle=FAIL mount-or-file-operation-failed\n");
+        ? QEMU_PROOF_TAG " lifecycle=PASS initialize=PASS create-partition=PASS format-fat32=PASS mount=PASS mkdir=PASS file-write=PASS file-read=PASS unmount=PASS remount-read=PASS mounts-clean=PASS\n"
+        : QEMU_PROOF_TAG " lifecycle=FAIL mount-or-file-operation-failed\n");
 #endif
     return mountAndFileIo;
 }
@@ -664,17 +812,19 @@ static bool run_fresh_lifecycle(const block::BlockDevice& device,
 
 void run(bool rootStorageMounted)
 {
-#if defined(GXOS_DM15_QEMU_AHCI_PROOF)
-    serial::puts("[DM15-QEMU] proof=START transport=AHCI compile-time-opt-in=yes\n");
+#if defined(GXOS_DM16_QEMU_NVME_PROOF)
+    serial::puts(QEMU_PROOF_TAG " proof=START transport=NVMe compile-time-opt-in=yes\n");
+#elif defined(GXOS_DM15_QEMU_AHCI_PROOF)
+    serial::puts(QEMU_PROOF_TAG " proof=START transport=AHCI compile-time-opt-in=yes\n");
 #else
-    serial::puts("[DM9-QEMU] proof=START compile-time-opt-in=yes\n");
+    serial::puts(QEMU_PROOF_TAG " proof=START compile-time-opt-in=yes\n");
 #endif
-#if !defined(GXOS_DM15_QEMU_AHCI_PROOF)
+#if !defined(GXOS_DM15_QEMU_AHCI_PROOF) && !defined(GXOS_DM16_QEMU_NVME_PROOF)
     if (!rootStorageMounted || vfs::mount_count() == 0) {
-#if defined(GXOS_DM15_QEMU_AHCI_PROOF)
-        serial::puts("[DM15-QEMU] proof=BLOCKED reason=root-storage-not-mounted\n");
+#if defined(GXOS_DM15_QEMU_AHCI_PROOF) || defined(GXOS_DM16_QEMU_NVME_PROOF)
+        serial::puts(QEMU_PROOF_TAG " proof=BLOCKED reason=root-storage-not-mounted\n");
 #else
-        serial::puts("[DM9-QEMU] proof=BLOCKED reason=root-storage-not-mounted\n");
+        serial::puts(QEMU_PROOF_TAG " proof=BLOCKED reason=root-storage-not-mounted\n");
 #endif
         return;
     }
@@ -685,18 +835,20 @@ void run(bool rootStorageMounted)
     block::BlockDevice device = {};
     storage::TargetIdentity identity = {};
     if (!find_qemu_secondary(device, identity)) {
-#if defined(GXOS_DM15_QEMU_AHCI_PROOF)
-        serial::puts("[DM15-QEMU] proof=BLOCKED reason=expected-unmounted-QEMU-AHCI-port1-or-boot-identity-unknown\n");
+#if defined(GXOS_DM16_QEMU_NVME_PROOF)
+        serial::puts(QEMU_PROOF_TAG " proof=BLOCKED reason=expected-QEMU-NVMe-namespace-or-boot-identity-unknown\n");
+#elif defined(GXOS_DM15_QEMU_AHCI_PROOF)
+        serial::puts(QEMU_PROOF_TAG " proof=BLOCKED reason=expected-unmounted-QEMU-AHCI-port1-or-boot-identity-unknown\n");
 #else
-        serial::puts("[DM9-QEMU] proof=BLOCKED reason=expected-unmounted-QEMU-ATA-secondary-not-found-or-boot-identity-unknown\n");
+        serial::puts(QEMU_PROOF_TAG " proof=BLOCKED reason=expected-unmounted-QEMU-ATA-secondary-not-found-or-boot-identity-unknown\n");
 #endif
         return;
     }
 
-#if defined(GXOS_DM15_QEMU_AHCI_PROOF)
-    serial::puts("[DM15-QEMU] target=selected name=");
+#if defined(GXOS_DM15_QEMU_AHCI_PROOF) || defined(GXOS_DM16_QEMU_NVME_PROOF)
+    serial::puts(QEMU_PROOF_TAG " target=selected name=");
 #else
-    serial::puts("[DM9-QEMU] target=selected name=");
+    serial::puts(QEMU_PROOF_TAG " target=selected name=");
 #endif
     serial::puts(device.name);
     serial::puts(" model=");
@@ -705,49 +857,70 @@ void run(bool rootStorageMounted)
     serial::put_hex64(identity.registrationId);
     serial::puts(" sectors=");
     serial::put_hex64(device.totalSectors);
-#if defined(GXOS_DM15_QEMU_AHCI_PROOF)
+#if defined(GXOS_DM16_QEMU_NVME_PROOF)
+    serial::puts(" nsid="); serial::put_hex32(device.namespaceId);
+    serial::puts(" pci="); serial::put_hex8(device.pciBus);
+    serial::putc(':'); serial::put_hex8(device.pciDevice);
+    serial::putc('.'); serial::put_hex8(device.pciFunction);
+    serial::puts(" boot=DefinitelyNotBoot shared-write=");
+    serial::puts(device.writeFn ? "enabled" : "disabled");
+    serial::putc('\n');
+    serial::puts(QEMU_PROOF_TAG " secondary-disk-detected boot-provenance=DefinitelyNotBoot\n");
+#elif defined(GXOS_DM15_QEMU_AHCI_PROOF)
     serial::puts(" port="); serial::put_hex8(device.ahciPort);
     serial::puts(" boot=DefinitelyNotBoot shared-write=");
     serial::puts(device.writeFn ? "enabled" : "disabled");
     serial::putc('\n');
-    serial::puts("[DM15-QEMU] secondary-disk-detected boot-provenance=DefinitelyNotBoot\n");
+    serial::puts(QEMU_PROOF_TAG " secondary-disk-detected boot-provenance=DefinitelyNotBoot\n");
 #else
     serial::puts(" boot=DefinitelyNotBoot\n");
     serial::puts("[DM10-TRACE] secondary-disk-detected boot-provenance=DefinitelyNotBoot\n");
 #endif
 
 #if defined(GXOS_DM15_QEMU_AHCI_PROOF)
-    serial::puts("[DM15-QEMU] target-table-parse=start\n");
+    serial::puts(QEMU_PROOF_TAG " target-table-parse=start\n");
 #else
-    serial::puts("[DM9-QEMU] target-table-parse=start\n");
+    serial::puts(QEMU_PROOF_TAG " target-table-parse=start\n");
 #endif
     if (!storage::parse_partition_table(identity.globalIndex, s_table)) {
 #if defined(GXOS_DM15_QEMU_AHCI_PROOF)
-        serial::puts("[DM15-QEMU] proof=BLOCKED reason=target-table-unreadable\n");
+        serial::puts(QEMU_PROOF_TAG " proof=BLOCKED reason=target-table-unreadable\n");
 #else
-        serial::puts("[DM9-QEMU] proof=BLOCKED reason=target-table-unreadable\n");
+        serial::puts(QEMU_PROOF_TAG " proof=BLOCKED reason=target-table-unreadable\n");
 #endif
         return;
     }
 #if defined(GXOS_DM15_QEMU_AHCI_PROOF)
-    serial::puts("[DM15-QEMU] target-table-parse=complete state=");
+    serial::puts(QEMU_PROOF_TAG " target-table-parse=complete state=");
 #else
-    serial::puts("[DM9-QEMU] target-table-parse=complete state=");
+    serial::puts(QEMU_PROOF_TAG " target-table-parse=complete state=");
 #endif
     serial::puts(storage::disk_state_name(s_table.state));
     serial::putc('\n');
 
-#if defined(GXOS_DM15_QEMU_AHCI_PROOF) && \
+#if defined(GXOS_DM16_QEMU_NVME_PROOF) && \
+    defined(GXOS_DM16_NVME_PRIVATE_PROOF)
+    if (s_table.state != storage::DISK_STATE_NOT_INITIALIZED) {
+        serial::puts(QEMU_PROOF_TAG " private-proof=FAIL reason=target-not-blank\n");
+        return;
+    }
+    const bool privateProof = verify_private_nvme_write_flush_stress(
+        identity.globalIndex, device);
+    serial::puts(privateProof
+        ? QEMU_PROOF_TAG " private-proof=PASS raw-write=PASS readback=PASS flush=PASS restore=PASS stressCycles=100 pageCrossing=PASS shared-write=disabled\n"
+        : QEMU_PROOF_TAG " private-proof=FAIL raw-write-flush-or-restore-failed\n");
+    return;
+#elif defined(GXOS_DM15_QEMU_AHCI_PROOF) && \
     defined(GXOS_DM15_AHCI_PRIVATE_PROOF)
     if (s_table.state != storage::DISK_STATE_NOT_INITIALIZED) {
-        serial::puts("[DM15-QEMU] private-proof=FAIL reason=target-not-blank\n");
+        serial::puts(QEMU_PROOF_TAG " private-proof=FAIL reason=target-not-blank\n");
         return;
     }
     const bool privateProof = verify_private_ahci_write_and_flush(
         identity.globalIndex, device);
     serial::puts(privateProof
-        ? "[DM15-QEMU] private-proof=PASS raw-write=PASS readback=PASS flush=PASS restored=PASS shared-write=disabled\n"
-        : "[DM15-QEMU] private-proof=FAIL raw-write-or-restore-failed\n");
+        ? QEMU_PROOF_TAG " private-proof=PASS raw-write=PASS readback=PASS flush=PASS restored=PASS shared-write=disabled\n"
+        : QEMU_PROOF_TAG " private-proof=FAIL raw-write-or-restore-failed\n");
     return;
 #endif
 

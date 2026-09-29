@@ -3,7 +3,7 @@
 // Supports:
 //   - NVMe 1.0+ over PCIe (MMIO-based)
 //   - Admin queue: IDENTIFY CONTROLLER, IDENTIFY NAMESPACE
-//   - I/O queue:   READ, WRITE
+//   - I/O queue:   READ, WRITE, FLUSH
 //   - Single I/O submission / completion queue pair
 //
 // Functional on architectures with PCI MMIO access:
@@ -59,10 +59,13 @@ static const uint32_t NVME_CSTS_CFS  = 0x00000002;
 static const uint8_t NVME_ADM_IDENTIFY     = 0x06;
 static const uint8_t NVME_ADM_CREATE_IOSQ  = 0x01;
 static const uint8_t NVME_ADM_CREATE_IOCQ  = 0x05;
+static const uint8_t NVME_ADM_GET_FEATURES = 0x0A;
 
 // I/O opcodes
 static const uint8_t NVME_IO_READ  = 0x02;
 static const uint8_t NVME_IO_WRITE = 0x01;
+static const uint8_t NVME_IO_FLUSH = 0x00;
+static const uint8_t NVME_FEATURE_VOLATILE_WRITE_CACHE = 0x06;
 
 // ================================================================
 // Submission Queue Entry (64 bytes)
@@ -112,7 +115,7 @@ struct CompletionEntry {
 #undef NVME_PACKED
 
 // ================================================================
-// Identify Controller — selected fields (bytes 0-4095)
+// Identify Controller â€” selected fields (bytes 0-4095)
 // ================================================================
 
 struct IdentifyController {
@@ -125,11 +128,15 @@ struct IdentifyController {
     uint8_t  ieee[3];       // IEEE OUI
     uint8_t  cmic;
     uint8_t  mdts;          // Maximum Data Transfer Size (2^mdts pages)
-    uint8_t  reserved[4014]; // remainder of 4096 bytes
+    uint8_t  reservedBeforeNamespaceCount[438]; // bytes 78-515
+    uint32_t namespaceCount; // NN, bytes 516-519
+    uint8_t  reservedBeforeVwc[5];
+    uint8_t  volatileWriteCache; // VWC, byte 525
+    uint8_t  reservedAfterVwc[3570]; // remainder through byte 4095
 };
 
 // ================================================================
-// Identify Namespace — selected fields (bytes 0-4095)
+// Identify Namespace â€” selected fields (bytes 0-4095)
 // ================================================================
 
 struct IdentifyNamespace {
@@ -139,7 +146,16 @@ struct IdentifyNamespace {
     uint8_t  nsfeat;
     uint8_t  nlbaf;         // Number of LBA Formats (0-based)
     uint8_t  flbas;         // Formatted LBA Size index
-    uint8_t  reserved1[101];
+    uint8_t  metadataCapabilities;
+    uint8_t  protectionCapabilities;
+    uint8_t  protectionSettings;
+    uint8_t  namespaceMultipath;
+    uint8_t  reservationCapabilities;
+    uint8_t  formatProgress;
+    uint8_t  deallocateFeatures;
+    uint8_t  reserved1[70]; // bytes 34-103
+    uint8_t  nguid[16];     // Namespace Globally Unique Identifier
+    uint8_t  eui64[8];      // IEEE Extended Unique Identifier
     // LBA format descriptors start at offset 128
     // Each is 4 bytes: [RP(2) | LBADS(8) | MS(16)]
     struct {
@@ -163,6 +179,17 @@ struct NVMeDevice {
     uint8_t  mdts;          // maximum data transfer size exponent
     char     model[41];
     char     serial[21];
+    char     firmware[9];
+    uint8_t  pciBus;
+    uint8_t  pciDevice;
+    uint8_t  pciFunction;
+    uint8_t  vwcPresent;
+    bool     vwcEnabledKnown;
+    bool     vwcEnabled;
+    bool     nguidValid;
+    bool     eui64Valid;
+    uint8_t  nguid[16];
+    uint8_t  eui64[8];
 };
 
 static const uint8_t MAX_NVME_DEVICES = 4;
@@ -183,6 +210,19 @@ uint8_t device_count();
 
 // Return device info by driver-local index.
 const NVMeDevice* get_device(uint8_t index);
+
+// Translate kernel virtual DMA allocations using the UEFI load base. Call
+// before init() on UEFI boots; the linked-base default is correct for the
+// Multiboot layout.
+void set_kernel_physical_base(uint64_t physicalBase);
+
+#if defined(GXOS_DM16_QEMU_NVME_PROOF)
+// Proof-only access while common write and Flush callbacks are disabled in
+// the first private QEMU gate.
+block::Status proof_write(uint8_t driverIndex, uint64_t lba,
+                          uint32_t count, const void* buffer);
+block::Status proof_flush(uint8_t driverIndex);
+#endif
 
 } // namespace nvme
 } // namespace kernel

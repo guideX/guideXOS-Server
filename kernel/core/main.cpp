@@ -68,7 +68,8 @@
 #include "include/kernel/qemu_display_events_proof.h"
 #include "include/kernel/virtio_rng.h"
 #if defined(GXOS_DM9_QEMU_STORAGE_PROOF) || \
-    defined(GXOS_DM15_QEMU_AHCI_PROOF)
+    defined(GXOS_DM15_QEMU_AHCI_PROOF) || \
+    defined(GXOS_DM16_QEMU_NVME_PROOF)
 #include "include/kernel/qemu_dm9_storage_proof.h"
 #endif
 #if defined(GXOS_DM12_QEMU_USB_PROOF)
@@ -770,6 +771,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::virtio::rng::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::virtio::gpu::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::ahci::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
+            kernel::nvme::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
 #if defined(ARCH_AMD64)
             kernel::usb::hci::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
 #endif
@@ -1018,7 +1020,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         
         const bool mounted = mount_persistent_storage();
 #if defined(GXOS_DM9_QEMU_STORAGE_PROOF) || \
-    defined(GXOS_DM15_QEMU_AHCI_PROOF)
+    defined(GXOS_DM15_QEMU_AHCI_PROOF) || \
+    defined(GXOS_DM16_QEMU_NVME_PROOF)
         kernel::qemu_dm9_storage_proof::run(mounted);
 #endif
 #if defined(GXOS_DM12_QEMU_USB_PROOF)

@@ -4,8 +4,8 @@
 namespace kernel {
 namespace qemu_dm9_storage_proof {
 
-// Runs only in kernels built with GXOS_DM9_QEMU_STORAGE_PROOF. The harness
-// accepts only the explicitly attached QEMU secondary ATA hard disk.
+// Runs only in explicitly opted-in DM9/DM15/DM16 QEMU proof kernels. The
+// harness accepts only the configured disposable secondary storage target.
 void run(bool rootStorageMounted);
 
 } // namespace qemu_dm9_storage_proof

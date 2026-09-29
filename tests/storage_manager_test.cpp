@@ -12,6 +12,7 @@
 #include "../kernel/core/include/kernel/vfs.h"
 #include "../kernel/core/include/kernel/ata.h"
 #include "../kernel/core/include/kernel/ahci_logic.h"
+#include "../kernel/core/include/kernel/nvme_logic.h"
 #include "../kernel/core/include/kernel/usb_storage.h"
 #include "../kernel/arch/amd64/include/arch/amd64.h"
 #include "../kernel/arch/amd64/include/arch/uhci_transfer_logic.h"
@@ -3140,8 +3141,241 @@ static void run_uhci_transfer_logic_tests()
           OBSERVATION_CONTROLLER_ERROR, "UHCI halted controller is classified");
 }
 
+static void run_nvme_logic_tests()
+{
+    using namespace nvme;
+    using namespace nvme::logic;
+
+    SubmissionEntry flush = {};
+    build_flush_command(flush, 7u, 0x1234u);
+    check(flush.opcode == NVME_IO_FLUSH, "NVMe Flush uses opcode 00h");
+    check(flush.nsid == 7u, "NVMe Flush names the exact namespace");
+    check(flush.commandId == 0x1234u, "NVMe Flush retains its allocated CID");
+    check(flush.flags == 0u && flush.reserved1 == 0u && flush.mptr == 0u,
+          "NVMe Flush reserved command fields are zero");
+    check(flush.prp1 == 0u && flush.prp2 == 0u,
+          "NVMe Flush carries no fake data buffer");
+    check(flush.cdw10 == 0u && flush.cdw11 == 0u && flush.cdw12 == 0u &&
+          flush.cdw13 == 0u && flush.cdw14 == 0u && flush.cdw15 == 0u,
+          "NVMe Flush command-specific dwords are deterministic zeroes");
+
+    SubmissionEntry read = {};
+    check(build_rw_command(read, NVME_IO_READ, 2u, 9u,
+          0x123456789ABCDEF0ULL, 8u, 0x2000u, 4096u),
+          "NVMe read command accepts one aligned page");
+    check(read.opcode == NVME_IO_READ && read.nsid == 2u &&
+          read.commandId == 9u, "NVMe read command records opcode, NSID, and CID");
+    check(read.cdw10 == 0x9ABCDEF0u && read.cdw11 == 0x12345678u &&
+          read.cdw12 == 7u && (read.cdw12 & (1u << 30)) == 0u,
+          "NVMe read encodes 64-bit LBA, zero-based count, and no FUA");
+    check(read.prp1 == 0x2000u && read.prp2 == 0u,
+          "NVMe bounce-page PRP uses PRP1 without a PRP list");
+    check(!build_rw_command(read, NVME_IO_WRITE, 1u, 1u, 0u, 0u,
+          0x2000u, 512u), "NVMe rejects a zero-length data command");
+    check(!build_rw_command(read, NVME_IO_FLUSH, 1u, 1u, 0u, 1u,
+          0x2000u, 512u), "NVMe data builder rejects non-data opcode");
+
+    uint64_t prp1 = 0u;
+    uint64_t prp2 = 0u;
+    check(build_prp(0x3000u, 4096u, prp1, prp2) &&
+          prp1 == 0x3000u && prp2 == 0u,
+          "NVMe PRP bounds accept a page-aligned one-page transfer");
+    check(!build_prp(0x3FF0u, 512u, prp1, prp2),
+          "NVMe PRP bounds reject a buffer that could cross a page");
+    check(!build_prp(0x4000u, 4097u, prp1, prp2),
+          "NVMe PRP bounds reject transfers beyond the bounce page");
+    check(!build_prp(0x4000u, 0u, prp1, prp2),
+          "NVMe PRP bounds reject zero-byte data transfers");
+    check(transfer_chunk(256u, 512u) == 8u &&
+          transfer_chunk(2u, 512u) == 2u,
+          "NVMe 512-byte transfers split at the one-page PRP bound");
+    check(transfer_chunk(8u, 4096u) == 1u,
+          "NVMe 4Kn transfers split to one logical block");
+    check(transfer_chunk(1u, 1024u) == 1u &&
+          transfer_chunk(1u, 256u) == 0u,
+          "NVMe transfer planner accepts represented geometry only");
+
+    uint64_t capacityBytes = 0u;
+    uint32_t logicalBlockSize = 0u;
+    check(valid_namespace_geometry(1024u, 1024u, 0u, 0u, 9u, 0u,
+          capacityBytes, logicalBlockSize) && capacityBytes == 512u * 1024u &&
+          logicalBlockSize == 512u,
+          "NVMe namespace geometry validates 512-byte LBAs");
+    check(valid_namespace_geometry(1024u, 1000u, 0u, 0u, 12u, 0u,
+          capacityBytes, logicalBlockSize) && logicalBlockSize == 4096u,
+          "NVMe transport geometry classifies 4Kn independently");
+    check(!valid_namespace_geometry(1024u, 1024u, 0u, 0u, 9u, 8u,
+          capacityBytes, logicalBlockSize),
+          "NVMe rejects active LBA formats with unsupported metadata");
+    check(!valid_namespace_geometry(UINT64_MAX, UINT64_MAX, 0u, 0u, 12u, 0u,
+          capacityBytes, logicalBlockSize),
+          "NVMe rejects capacity multiplication overflow");
+    check(!valid_namespace_geometry(16u, 17u, 0u, 0u, 9u, 0u,
+          capacityBytes, logicalBlockSize),
+          "NVMe rejects namespace capacity larger than namespace size");
+    check(checked_lba_range(100u, 99u, 1u) &&
+          !checked_lba_range(100u, 99u, 2u) &&
+          !checked_lba_range(100u, 100u, 1u) &&
+          !checked_lba_range(100u, 1u, 0u),
+          "NVMe namespace capacity bounds prevent end-of-device overflow");
+
+    check(command_fits_mdts(0u, 0u, 4096u) &&
+          command_fits_mdts(1u, 0u, 4096u) &&
+          !command_fits_mdts(1u, 1u, 4096u) &&
+          !command_fits_mdts(0u, 0u, 8192u),
+          "NVMe MDTS and 4 KiB page constraints bound each command");
+    const uint8_t noIdentifier[16] = {};
+    const uint8_t nguid[16] = { 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u,
+                                 0u, 0u, 0u, 0u, 0u, 0u, 0u, 1u };
+    check(!is_nonzero_identifier(noIdentifier, sizeof(noIdentifier)) &&
+          is_nonzero_identifier(nguid, sizeof(nguid)),
+          "NVMe namespace identifiers are treated as optional fingerprints");
+
+    QueueOwnership queue = {};
+    reset_queue(queue);
+    uint16_t cid = 0u, slot = 0u, tail = 0u;
+    check(begin_command(queue, 4u, cid, slot, tail) == QUEUE_BEGIN_OK &&
+          cid == 0u && slot == 0u && tail == 1u && queue.outstanding,
+          "NVMe queue reserves one unambiguous command owner");
+    uint16_t blockedCid = 99u, blockedSlot = 99u, blockedTail = 99u;
+    check(begin_command(queue, 4u, blockedCid, blockedSlot, blockedTail) ==
+          QUEUE_BEGIN_BUSY && blockedCid == 99u && queue.expectedCommandId == 0u,
+          "NVMe serialized queue prevents duplicate CID and queue-slot reuse");
+
+    CompletionEntry cqe = {};
+    cqe.sqHead = 1u;
+    cqe.sqId = 1u;
+    cqe.commandId = 0u;
+    cqe.status = 1u; // phase 1, SC=0, SCT=0.
+    CompletionResult completion = consume_completion(queue, cqe, 1u, 4u);
+    check(completion.kind == COMPLETION_SUCCESS && !queue.outstanding &&
+          queue.completionHead == 1u && queue.completionPhase == 1u,
+          "NVMe CQ success consumes the exact CID and advances CQ head");
+    check(read_result(completion, true) == block::BLOCK_OK &&
+          write_result(completion, true) == block::BLOCK_OK &&
+          flush_result(completion, true) == block::BLOCK_OK,
+          "NVMe exact success maps to shared read, write, and flush results");
+
+    check(begin_command(queue, 4u, cid, slot, tail) == QUEUE_BEGIN_OK &&
+          cid == 1u && slot == 1u && tail == 2u,
+          "NVMe CID allocation advances only after prior CQ ownership ends");
+    cqe = {};
+    cqe.sqHead = 1u; cqe.sqId = 1u; cqe.commandId = 1u; cqe.status = 0u;
+    completion = consume_completion(queue, cqe, 1u, 4u);
+    check(completion.kind == COMPLETION_NOT_READY && queue.outstanding &&
+          queue.completionHead == 1u,
+          "NVMe stale CQ phase is not consumed as the outstanding completion");
+    cqe.sqHead = 2u;
+    cqe.status = 1u;
+    completion = consume_completion(queue, cqe, 1u, 4u);
+    check(completion.kind == COMPLETION_SUCCESS && queue.completionHead == 2u,
+          "NVMe matching CQ phase consumes the command after stale phase data");
+
+    QueueOwnership badCidQueue = {};
+    reset_queue(badCidQueue);
+    begin_command(badCidQueue, 4u, cid, slot, tail);
+    cqe = {};
+    cqe.sqHead = 1u; cqe.sqId = 1u; cqe.commandId = 77u; cqe.status = 1u;
+    check(consume_completion(badCidQueue, cqe, 1u, 4u).kind ==
+          COMPLETION_CORRUPT && badCidQueue.poisoned,
+          "NVMe wrong command ID poisons ownership instead of succeeding");
+    check(begin_command(badCidQueue, 4u, blockedCid, blockedSlot, blockedTail) ==
+          QUEUE_BEGIN_POISONED,
+          "NVMe stale completion cannot be reused after ownership corruption");
+
+    QueueOwnership badQueueId = {};
+    reset_queue(badQueueId);
+    begin_command(badQueueId, 4u, cid, slot, tail);
+    cqe = {};
+    cqe.sqHead = 1u; cqe.sqId = 0u; cqe.commandId = 0u; cqe.status = 1u;
+    check(consume_completion(badQueueId, cqe, 1u, 4u).kind ==
+          COMPLETION_CORRUPT && badQueueId.poisoned,
+          "NVMe wrong SQID cannot satisfy an I/O queue command");
+    QueueOwnership badHead = {};
+    reset_queue(badHead);
+    begin_command(badHead, 4u, cid, slot, tail);
+    cqe.sqHead = 2u; cqe.sqId = 1u; cqe.commandId = 0u; cqe.status = 1u;
+    check(consume_completion(badHead, cqe, 1u, 4u).kind ==
+          COMPLETION_CORRUPT && badHead.poisoned,
+          "NVMe impossible SQ head is rejected");
+
+    QueueOwnership timeoutQueue = {};
+    reset_queue(timeoutQueue);
+    begin_command(timeoutQueue, 4u, cid, slot, tail);
+    poison_queue(timeoutQueue); // Terminal timeout or controller loss.
+    check(timeoutQueue.outstanding && timeoutQueue.poisoned &&
+          begin_command(timeoutQueue, 4u, blockedCid, blockedSlot,
+                         blockedTail) == QUEUE_BEGIN_POISONED,
+          "NVMe timed-out command retains ownership and cannot reuse its CID");
+    reset_queue(timeoutQueue);
+    check(!timeoutQueue.outstanding && !timeoutQueue.poisoned &&
+          timeoutQueue.completionPhase == 1u,
+          "NVMe controller queue reset clears old completion ownership");
+
+    QueueOwnership wrapQueue = {};
+    reset_queue(wrapQueue);
+    begin_command(wrapQueue, 2u, cid, slot, tail);
+    cqe = {};
+    cqe.sqHead = 1u; cqe.sqId = 1u; cqe.commandId = 0u; cqe.status = 1u;
+    completion = consume_completion(wrapQueue, cqe, 1u, 2u);
+    begin_command(wrapQueue, 2u, cid, slot, tail);
+    cqe.sqHead = 0u; cqe.sqId = 1u; cqe.commandId = 1u; cqe.status = 1u;
+    completion = consume_completion(wrapQueue, cqe, 1u, 2u);
+    check(completion.kind == COMPLETION_SUCCESS && wrapQueue.completionHead == 0u &&
+          wrapQueue.completionPhase == 0u,
+          "NVMe CQ head wrap toggles its phase bit");
+
+    QueueOwnership errorQueue = {};
+    reset_queue(errorQueue);
+    begin_command(errorQueue, 4u, cid, slot, tail);
+    cqe = {};
+    cqe.sqHead = 1u; cqe.sqId = 1u; cqe.commandId = 0u;
+    cqe.status = static_cast<uint16_t>((1u << 1) | (2u << 9) | 1u | 0x8000u);
+    completion = consume_completion(errorQueue, cqe, 1u, 4u);
+    check(completion.kind == COMPLETION_ERROR && completion.statusCode == 1u &&
+          completion.statusCodeType == 2u && completion.doNotRetry,
+          "NVMe completion decodes raw SCT, SC, and DNR fields");
+    check(classify_status(0u, 0x01u) == COMPLETION_ERROR_INVALID_OPCODE &&
+          classify_status(0u, 0x02u) == COMPLETION_ERROR_INVALID_FIELD &&
+          classify_status(0u, 0x03u) == COMPLETION_ERROR_COMMAND_ID_CONFLICT,
+          "NVMe decoder distinguishes invalid opcode, field, and CID conflict");
+    check(classify_status(0u, 0x04u) == COMPLETION_ERROR_DATA_TRANSFER &&
+          classify_status(0u, 0x06u) == COMPLETION_ERROR_INTERNAL,
+          "NVMe decoder distinguishes transfer and controller internal errors");
+    check(classify_status(0u, 0x0Bu) == COMPLETION_ERROR_NAMESPACE &&
+          classify_status(0u, 0x82u) == COMPLETION_ERROR_NAMESPACE,
+          "NVMe decoder distinguishes namespace errors");
+    check(classify_status(0u, 0x07u) == COMPLETION_ERROR_ABORTED &&
+          classify_status(0u, 0x08u) == COMPLETION_ERROR_ABORTED &&
+          classify_status(2u, 0x81u) == COMPLETION_ERROR_OTHER,
+          "NVMe decoder distinguishes aborted and other SCT completions");
+    check(read_result(completion, true) == block::BLOCK_ERR_IO &&
+          write_result(completion, true) == block::BLOCK_ERR_WRITE_UNCERTAIN &&
+          flush_result(completion, true) == block::BLOCK_ERR_DURABILITY_UNVERIFIED,
+          "NVMe non-success completion never reports durable write success");
+    check(write_result(completion, true, false) == block::BLOCK_ERR_NOT_READY &&
+          write_result(completion, false, false) == block::BLOCK_ERR_NO_MEDIA,
+          "NVMe writes rejected before SQ submission remain definitely unwritten");
+    check(!flush_proves_durable(true, false) &&
+          !flush_proves_durable(false, true) &&
+          flush_proves_durable(true, true),
+          "NVMe persistence requires a supported, successful Flush completion");
+    check(classify_vwc_state(false, false, false) == block::NVME_VWC_NOT_PRESENT &&
+          classify_vwc_state(true, false, false) == block::NVME_VWC_UNKNOWN &&
+          classify_vwc_state(true, true, false) ==
+              block::NVME_VWC_PRESENT_DISABLED &&
+          classify_vwc_state(true, true, true) ==
+              block::NVME_VWC_PRESENT_ENABLED,
+          "NVMe VWC policy distinguishes absent, unknown, disabled, and enabled");
+    check(read_result(completion, false) == block::BLOCK_ERR_NO_MEDIA &&
+          flush_result(completion, false) ==
+              block::BLOCK_ERR_DURABILITY_UNVERIFIED,
+          "NVMe controller loss maps to no-media and unverified durability");
+}
+
 int main()
 {
+    run_nvme_logic_tests();
     using namespace kernel;
     run_ahci_logic_tests();
     run_uhci_transfer_logic_tests();

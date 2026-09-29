@@ -90,6 +90,13 @@ struct FlushReport {
     bool semanticsKnown;
 };
 
+enum NvmeVwcState : uint8_t {
+    NVME_VWC_UNKNOWN = 0,
+    NVME_VWC_NOT_PRESENT,
+    NVME_VWC_PRESENT_DISABLED,
+    NVME_VWC_PRESENT_ENABLED,
+};
+
 enum UsbWriteOutcome : uint8_t {
     USB_WRITE_OUTCOME_NONE = 0,
     USB_WRITE_NOT_SUBMITTED,
@@ -129,6 +136,17 @@ struct TransportIoDiagnostic {
     uint8_t senseAsc;
     uint8_t senseAscq;
     uint8_t usbSyncCacheState;
+    // NVMe completion details are populated only by transports that expose
+    // them. They remain raw so Diagnostics can render controller-specific
+    // status without weakening the common block result contract.
+    uint16_t nvmeQueueId;
+    uint16_t nvmeCommandId;
+    uint16_t nvmeSubmissionHead;
+    uint16_t nvmeRawStatus;
+    uint8_t nvmeStatusCodeType;
+    uint8_t nvmeStatusCode;
+    uint32_t nvmeControllerStatus;
+    bool nvmeSubmissionOccurred;
     uint8_t usbWriteOutcome;
     uint16_t usbVendorId;
     uint16_t usbProductId;
@@ -178,6 +196,14 @@ struct BlockDevice {
     uint8_t       ataChannel;
     uint8_t       ataTarget;
     uint32_t      namespaceId;
+    char          firmwareRevision[9];
+    bool          namespaceNguidValid;
+    uint8_t       namespaceNguid[16];
+    bool          namespaceEui64Valid;
+    uint8_t       namespaceEui64[8];
+    uint32_t      nvmeControllerVersion;
+    uint8_t       nvmeMdts;
+    NvmeVwcState  nvmeVwcState;
     // USB Mass Storage fingerprint. The current HCI provides root-port
     // topology only; registrationId still identifies each attachment.
     bool          usbIdentityValid;
