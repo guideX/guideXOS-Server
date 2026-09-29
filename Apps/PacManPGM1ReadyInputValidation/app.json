@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "com.guidexos.pacman.pgm1.ready-input-validation",
+  "displayName": "PacMan PGM1 Ready Input Validation",
+  "version": "0.3.0",
+  "publisher": "Team Nexgen / guideXOS",
+  "description": "Isolated PGM1 validation build for held arrow input through Ready.",
+  "category": "Games",
+  "kind": "NativeElf",
+  "icon": "",
+  "minGuideXOSVersion": "0.1.0",
+  "supportedArchitectures": [
+    "amd64"
+  ],
+  "entries": [
+    {
+      "architecture": "amd64",
+      "path": "bin/amd64/pacman-danger-validation.elf",
+      "entryPoint": "gx_main",
+      "abi": "guidexos-c-abi-v1",
+      "runtime": "native-elf"
+    }
+  ],
+  "permissions": [
+    "log",
+    "window",
+    "draw",
+    "file.read"
+  ],
+  "defaultWindow": {
+    "width": 480,
+    "height": 640,
+    "resizable": false
+  }
+}
