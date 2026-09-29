@@ -10,7 +10,7 @@ param(
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
     [switch]$NativeAotFpRepair,
-    [ValidateSet("Primary64KiB", "Primary128KiB", "Primary256KiB", "Small4KiB")]
+    [ValidateSet("Primary64KiB", "Primary128KiB", "Primary256KiB", "Primary4MiB", "Small4KiB")]
     [string]$HeapConfiguration = "Primary64KiB",
     [switch]$Clean
 )
@@ -159,7 +159,7 @@ if ($NativeAotFpRepair -and [string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) 
 }
 $externalCommit = $null
 $externalCheckoutHead = $null
-$managedHeapBytes = if ($HeapConfiguration -eq "Primary64KiB") { 65536 } elseif ($HeapConfiguration -eq "Primary128KiB") { 131072 } elseif ($HeapConfiguration -eq "Primary256KiB") { 262144 } else { 4096 }
+$managedHeapBytes = if ($HeapConfiguration -eq "Primary64KiB") { 65536 } elseif ($HeapConfiguration -eq "Primary128KiB") { 131072 } elseif ($HeapConfiguration -eq "Primary256KiB") { 262144 } elseif ($HeapConfiguration -eq "Primary4MiB") { 4194304 } else { 4096 }
 if ($ManagedRepeatedAllocation) { $ManagedAllocation = $true }
 
 if (-not [string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) {

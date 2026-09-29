@@ -215,6 +215,9 @@ public:
     virtual void onWindowClose() {}
     virtual void onWindowFocus() {}
     virtual void onWindowBlur() {}
+    // Called after the owned window has been unregistered and deleted.  Apps
+    // that defer lifecycle work until teardown is complete can use this hook.
+    virtual void onWindowClosed() {}
     
     // Drawing (called by compositor to render app content)
     virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) = 0;

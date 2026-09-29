@@ -111,6 +111,7 @@ void KernelApp::requestClose() {
         delete m_window;
         m_window = nullptr;
         m_state = AppState::Terminated;
+        onWindowClosed();
         #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
         serial::puts("[app] close-result=accepted app=");
         serial::puts(m_name);

@@ -92,6 +92,14 @@ constexpr uint32_t kManagedDirectoryMaxEntries = 64u;
 constexpr uint32_t kManagedDirectoryNameMaxBytes = 127u;
 constexpr uint32_t kManagedDirectoryEntryAbiSize = 144u;
 constexpr uint32_t kManagedFileInfoAbiSize = 16u;
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+constexpr uint32_t kManagedApplicationIdentityCapacity = 96u;
+constexpr uint32_t kManagedSettingsActionId = 24u;
+constexpr const char* kManagedNotesApplicationId =
+    "com.guidexos.apps.managed.notes";
+constexpr const char* kManagedSettingsApplicationId =
+    "com.guidexos.apps.managed.settingscenter";
+#endif
 constexpr int32_t kManagedFileSuccess = 0;
 constexpr int32_t kManagedFileNotFound = -10;
 constexpr int32_t kManagedFileInvalidPath = -11;
@@ -349,6 +357,131 @@ bool g_c107ManagedPassObserved = false;
 bool g_c107ManagedInvalidApplicationObserved = false;
 ResidentApplication g_application = {};
 NativeGxAppContext* g_activeManagedContext = nullptr;
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+class ManagedReturnTarget {
+public:
+    bool empty() const { return m_identity[0] == '\0'; }
+
+    bool set(const char* identity, bool resolvable, const char* selfIdentity) {
+        if (empty() == false || !resolvable || !identity || !identity[0] ||
+            identityEquals(identity, selfIdentity)) return false;
+        uint32_t length = 0u;
+        while (identity[length] && length < kManagedApplicationIdentityCapacity) {
+            const uint8_t value = static_cast<uint8_t>(identity[length]);
+            if (value < 0x21u || value > 0x7Eu) return false;
+            ++length;
+        }
+        if (length == 0u || length >= kManagedApplicationIdentityCapacity) return false;
+        for (uint32_t index = 0u; index < length; ++index)
+            m_identity[index] = identity[index];
+        m_identity[length] = '\0';
+        return true;
+    }
+
+    bool take(char* identity, uint32_t capacity) {
+        if (empty() || !identity || capacity == 0u) return false;
+        uint32_t length = 0u;
+        while (m_identity[length] && length < kManagedApplicationIdentityCapacity) ++length;
+        if (length == 0u || length >= capacity) return false;
+        for (uint32_t index = 0u; index <= length; ++index)
+            identity[index] = m_identity[index];
+        clear();
+        return true;
+    }
+
+    void clear() { m_identity[0] = '\0'; }
+    const char* identity() const { return m_identity; }
+
+    static bool identityEquals(const char* left, const char* right) {
+        if (!left || !right) return left == right;
+        uint32_t index = 0u;
+        while (left[index] && right[index] && left[index] == right[index]) ++index;
+        return left[index] == right[index];
+    }
+
+private:
+    char m_identity[kManagedApplicationIdentityCapacity] = {};
+};
+
+ManagedReturnTarget g_managedReturnTarget{};
+char g_managedActiveApplicationId[kManagedApplicationIdentityCapacity] = {};
+bool g_managedReturnLaunchPending = false;
+bool g_managedLaunchingSettingsFromNotes = false;
+bool g_managedReturnLaunchActive = false;
+uint32_t g_managedSurfaceGeneration = 0u;
+uint32_t g_managedApplicationLaunchGeneration = 0u;
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+bool g_c150ContractTestsRun = false;
+#endif
+
+bool launchSettingsCenterFromNotes();
+void completeManagedReturnIfPending();
+void clearManagedActiveApplicationId();
+
+bool copyManagedIdentity(const char* source, char* destination, uint32_t capacity) {
+    if (!source || !destination || capacity == 0u) return false;
+    uint32_t length = 0u;
+    while (source[length] && length + 1u < capacity) ++length;
+    if (source[length] != '\0') return false;
+    for (uint32_t index = 0u; index <= length; ++index)
+        destination[index] = source[index];
+    return true;
+}
+
+bool managedIdentityResolvable(const char* identity) {
+    const gxos::apps::BuiltInAppMetadata* metadata =
+        gxos::apps::FindManagedNativeAotAppByIdentity(identity);
+    return metadata != nullptr && gxos::apps::ManagedNativeAotCatalogIsValid() &&
+        gxos::apps::IsManagedNativeAotRecordValid(*metadata);
+}
+
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+bool runC150ReturnTargetTests() {
+    bool passed = true;
+    uint32_t cases = 0u;
+    ManagedReturnTarget target{};
+    passed = passed && target.empty(); ++cases;
+
+    char source[kManagedApplicationIdentityCapacity] = "com.guidexos.apps.managed.notes";
+    passed = passed && target.set(source, true, kManagedSettingsApplicationId);
+    source[0] = 'X';
+    passed = passed && !target.empty() && ManagedReturnTarget::identityEquals(
+        target.identity(), kManagedNotesApplicationId); ++cases;
+
+    passed = passed && !target.set(kManagedNotesApplicationId, true,
+        kManagedSettingsApplicationId); ++cases;
+    passed = passed && !target.set("invalid.application", false,
+        kManagedSettingsApplicationId); ++cases;
+    passed = passed && !target.set(kManagedSettingsApplicationId, true,
+        kManagedSettingsApplicationId); ++cases;
+    passed = passed && !target.set("com.guidexos.apps.missing", false,
+        kManagedSettingsApplicationId); ++cases;
+
+    char taken[kManagedApplicationIdentityCapacity] = {};
+    passed = passed && target.take(taken, sizeof(taken)) && target.empty() &&
+        ManagedReturnTarget::identityEquals(taken, kManagedNotesApplicationId);
+    ++cases;
+    passed = passed && !target.take(taken, sizeof(taken)); ++cases;
+    passed = passed && target.set(kManagedNotesApplicationId, true,
+        kManagedSettingsApplicationId);
+    target.clear();
+    passed = passed && target.empty(); ++cases;
+    passed = passed && managedIdentityResolvable(kManagedNotesApplicationId) &&
+        managedIdentityResolvable(kManagedSettingsApplicationId) &&
+        !managedIdentityResolvable("com.guidexos.apps.missing"); ++cases;
+
+    serial::puts("[C150-RETURN-TARGET-TESTS] cases=");
+    serial::puts("10");
+    serial::puts(" capacity=1 identity=canonical self=reject invalid=reject result=");
+    serial::puts(passed ? "PASS\n" : "FAIL\n");
+    return passed;
+}
+#endif
+
+void clearManagedActiveApplicationId() {
+    g_managedActiveApplicationId[0] = '\0';
+}
+#endif
 bool g_c116InputDispatchActive = false;
 #if defined(GXOS_C108_TLS_LIFECYCLE)
 uint32_t g_c108TlsInstallCount = 0;
@@ -414,6 +547,13 @@ public:
             serial::put_hex32(static_cast<uint32_t>(managedResult));
             serial::puts(" result=");
             serial::puts(managedResult == 0 ? "PASS\n" : "FAIL\n");
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+            if (managedResult == 0 &&
+                m_actionBindings[index].selector == 4u &&
+                m_actionBindings[index].actionId == kManagedSettingsActionId) {
+                (void)launchSettingsCenterFromNotes();
+            }
+#endif
             return;
         }
         if (widgetId != m_actionButtonId) return;
@@ -428,6 +568,12 @@ public:
             serial::put_hex32(static_cast<uint32_t>(managedResult));
             serial::puts(" result=");
             serial::puts(managedResult == 0 ? "PASS\n" : "FAIL\n");
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+            if (managedResult == 0 && m_actionSelector == 4u &&
+                m_actionId == kManagedSettingsActionId) {
+                (void)launchSettingsCenterFromNotes();
+            }
+#endif
             return;
         }
         ++m_actionCount;
@@ -450,6 +596,13 @@ public:
         const uint32_t kind = button == 2u
             ? kLaunchFlagInputSecondaryPointerDown
             : kLaunchFlagInputPointerDown;
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+        if (x == 475 && y == 294) {
+            serial::puts("[C150-POINTER-ACTION] settings=");
+            serial::puts(hasC150SettingsAction()
+                ? "registered result=PASS\n" : "missing result=FAIL\n");
+        }
+#endif
         const int32_t result = invokeManagedInput(
             m_selector, kLaunchFlagInput | kind | payload);
         if (button == 2u) {
@@ -631,7 +784,63 @@ public:
     }
 
     void onWindowClose() override {
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+        if (!m_replacingSurface) {
+            const gxos::apps::BuiltInAppMetadata* settings =
+                gxos::apps::FindManagedNativeAotAppByIdentity(
+                    kManagedSettingsApplicationId);
+            if (settings && ManagedReturnTarget::identityEquals(
+                    m_surfaceApplicationId, settings->appId)) {
+                if (!g_managedReturnTarget.empty() &&
+                    !ManagedReturnTarget::identityEquals(
+                        g_managedReturnTarget.identity(), settings->appId)) {
+                    g_managedReturnLaunchPending = true;
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+                    serial::puts("[C150-RETURN-READY] id=");
+                    serial::puts(g_managedReturnTarget.identity());
+                    serial::puts(" close=complete-after-dispatch\n");
+#endif
+                } else if (!g_managedReturnTarget.empty()) {
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+                    serial::puts("[C150-RETURN-REJECTED] reason=self-target\n");
+#endif
+                    g_managedReturnTarget.clear();
+                }
+                if (ManagedReturnTarget::identityEquals(
+                        g_managedActiveApplicationId, settings->appId)) {
+                    clearManagedActiveApplicationId();
+                }
+            }
+            if (m_surfaceApplicationId[0] &&
+                ManagedReturnTarget::identityEquals(
+                    g_managedActiveApplicationId, m_surfaceApplicationId)) {
+                clearManagedActiveApplicationId();
+            }
+            if (m_window) {
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+                serial::puts("[C150-SURFACE] action=destroy appId=");
+                serial::puts(m_surfaceApplicationId[0]
+                    ? m_surfaceApplicationId : "none");
+                serial::puts(" generation=");
+                serial::put_hex32(m_surfaceGeneration);
+                serial::puts(" window=");
+                serial::put_hex32(m_window->id);
+                serial::puts(g_managedReturnLaunchPending
+                    ? " reason=return\n" : " reason=close-or-replace\n");
+#endif
+            }
+        }
+#endif
         serial::puts("[C111-SURFACE] action=close result=PASS\n");
+    }
+
+    void onWindowClosed() override {
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+        const bool returnPending = g_managedReturnLaunchPending &&
+            g_activeManagedContext == nullptr;
+        m_surfaceApplicationId[0] = '\0';
+        if (returnPending) completeManagedReturnIfPending();
+#endif
     }
 
     bool open(const char* title, int32_t width, int32_t height) {
@@ -639,7 +848,15 @@ public:
             height < compositor::MIN_WINDOW_HEIGHT) {
             return false;
         }
-        if (m_window) requestClose();
+        if (m_window) {
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+            m_replacingSurface = true;
+#endif
+            requestClose();
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+            m_replacingSurface = false;
+#endif
+        }
 
         app::KernelWindow* window = new app::KernelWindow();
         if (!window) return false;
@@ -666,6 +883,23 @@ public:
         m_actionBindingCount = 0;
         setTitle(title);
         compositor::KernelCompositor::setFocus(m_window->id);
+ #if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+        if (!copyManagedIdentity(g_managedActiveApplicationId,
+                m_surfaceApplicationId, sizeof(m_surfaceApplicationId))) {
+            m_surfaceApplicationId[0] = '\0';
+        }
+        m_surfaceGeneration = ++g_managedSurfaceGeneration;
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+        serial::puts("[C150-SURFACE] action=create appId=");
+        serial::puts(m_surfaceApplicationId[0]
+            ? m_surfaceApplicationId : "unknown");
+        serial::puts(" generation=");
+        serial::put_hex32(m_surfaceGeneration);
+        serial::puts(" window=");
+        serial::put_hex32(m_window->id);
+        serial::puts(" result=PASS\n");
+#endif
+#endif
         return true;
     }
 
@@ -680,6 +914,34 @@ public:
     uint64_t windowId() const {
         return m_window ? static_cast<uint64_t>(m_window->id) : 0u;
     }
+
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+    bool activeApplicationIs(const char* identity) const {
+        return m_window != nullptr && ManagedReturnTarget::identityEquals(
+            m_surfaceApplicationId, identity);
+    }
+
+    uint32_t surfaceGeneration() const { return m_surfaceGeneration; }
+
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+    bool hasC150SettingsAction() const {
+        if (!m_window) return false;
+        for (int index = 0; index < m_actionBindingCount; ++index) {
+            const ManagedActionBinding& binding = m_actionBindings[index];
+            if (binding.selector != 4u || binding.actionId != kManagedSettingsActionId ||
+                binding.widgetId < 0 || binding.widgetId >= m_window->widgetCount) {
+                continue;
+            }
+            const app::Widget& widget = m_window->widgets[binding.widgetId];
+            return widget.type == app::WidgetType::Button &&
+                widget.x == 430 && widget.y == 280 &&
+                widget.w == 90 && widget.h == 28 &&
+                widget.visible && widget.enabled;
+        }
+        return false;
+    }
+#endif
+#endif
 
     bool setText(int32_t x, int32_t y, const char* text) {
         if (!m_window || !text || x < 0 || y < 0) return false;
@@ -764,6 +1026,11 @@ private:
     uint32_t m_actionSelector;
     int m_actionCount;
     uint32_t m_selector = 0;
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+    char m_surfaceApplicationId[kManagedApplicationIdentityCapacity] = {};
+    uint32_t m_surfaceGeneration = 0u;
+    bool m_replacingSurface = false;
+#endif
     ManagedActionBinding m_actionBindings[8] = {};
     int m_actionBindingCount = 0;
 };
@@ -779,6 +1046,117 @@ NativeAotManagedSurface* managedSurface() {
     }
     return g_managedSurface;
 }
+
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+bool launchSettingsCenterFromNotes() {
+    const gxos::apps::BuiltInAppMetadata* notes =
+        gxos::apps::FindManagedNativeAotAppByIdentity(kManagedNotesApplicationId);
+    const gxos::apps::BuiltInAppMetadata* settings =
+        gxos::apps::FindManagedNativeAotAppByIdentity(kManagedSettingsApplicationId);
+    NativeAotManagedSurface* surface = managedSurface();
+    if (!notes || !settings || !managedIdentityResolvable(notes->appId) ||
+        !managedIdentityResolvable(settings->appId) ||
+        notes->managedSelector != 4u || settings->managedSelector != 5u ||
+        !ManagedReturnTarget::identityEquals(
+            g_managedActiveApplicationId, notes->appId) ||
+        !surface || !surface->activeApplicationIs(notes->appId)) {
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+        serial::puts("[C150-CALLER-REJECTED] reason=identity-or-surface-invalid\n");
+#endif
+        return false;
+    }
+    if (!g_managedReturnTarget.set(notes->appId, true, settings->appId)) {
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+        serial::puts("[C150-CALLER-REJECTED] reason=return-target-occupied-or-invalid\n");
+#endif
+        return false;
+    }
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+    serial::puts("[C150-RETURN-ARMED] id=");
+    serial::puts(g_managedReturnTarget.identity());
+    serial::puts(" capacity=1\n");
+#endif
+
+    g_managedLaunchingSettingsFromNotes = true;
+    const bool launched = desktop::launch_app_with_context(
+        settings->displayName, nullptr);
+    g_managedLaunchingSettingsFromNotes = false;
+    if (launched) {
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+        serial::puts("[C150-SETTINGS-LAUNCH] source=Notes path=AppModel result=PASS\n");
+#endif
+        return true;
+    }
+
+    g_managedReturnTarget.clear();
+    g_managedReturnLaunchPending = false;
+    if (!surface->activeApplicationIs(notes->appId)) {
+        if (surface->windowId() != 0u) surface->requestClose();
+        clearManagedActiveApplicationId();
+        desktop::open_terminal();
+    }
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+    serial::puts("[C150-SETTINGS-LAUNCH] source=Notes path=AppModel result=FAIL\n");
+#endif
+    return false;
+}
+
+void completeManagedReturnIfPending() {
+    if (!g_managedReturnLaunchPending) return;
+    g_managedReturnLaunchPending = false;
+
+    char identity[kManagedApplicationIdentityCapacity] = {};
+    const bool consumed = g_managedReturnTarget.take(identity, sizeof(identity));
+    const gxos::apps::BuiltInAppMetadata* target = consumed
+        ? gxos::apps::FindManagedNativeAotAppByIdentity(identity) : nullptr;
+    const gxos::apps::BuiltInAppMetadata* settings =
+        gxos::apps::FindManagedNativeAotAppByIdentity(kManagedSettingsApplicationId);
+    const bool valid = target && settings && managedIdentityResolvable(identity) &&
+        !ManagedReturnTarget::identityEquals(identity, settings->appId);
+    if (!valid) {
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+        serial::puts("[C150-RETURN-FAIL] reason=invalid-or-self-identity fallback=shell\n");
+#endif
+        NativeAotManagedSurface* surface = managedSurface();
+        if (surface && surface->windowId() != 0u) surface->requestClose();
+        clearManagedActiveApplicationId();
+        desktop::open_terminal();
+        return;
+    }
+
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+    serial::puts("[C150-RETURN-CONSUMED] id=");
+    serial::puts(identity);
+    serial::puts(" target=cleared-before-launch\n");
+#endif
+    g_managedReturnLaunchActive = true;
+    const bool launched = desktop::launch_app_with_context(
+        target->displayName, "managed-app-return");
+    g_managedReturnLaunchActive = false;
+    if (launched) {
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+        serial::puts("[C150-RETURN-RESULT] id=");
+        serial::puts(identity);
+        serial::puts(" normal-launch=PASS target=none\n");
+        NativeAotManagedSurface* returnedSurface = managedSurface();
+        serial::puts("[C150-RETURN-ACTION] settings=");
+        serial::puts(returnedSurface && returnedSurface->hasC150SettingsAction()
+            ? "registered result=PASS\n" : "missing result=FAIL\n");
+#endif
+        return;
+    }
+
+    NativeAotManagedSurface* surface = managedSurface();
+    if (surface && surface->windowId() != 0u) surface->requestClose();
+    clearManagedActiveApplicationId();
+    desktop::open_terminal();
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+    serial::puts("[C150-RETURN-FAIL] id=");
+    serial::puts(identity);
+    serial::puts(" reason=launch-failed fallback=shell\n");
+#endif
+}
+#endif
 
 #if defined(GXOS_C103_PRODUCTION_LAUNCH) || defined(GXOS_C103_NEGATIVE_LAUNCH)
 constexpr bool kC103LifecycleEnabled = true;
@@ -1928,13 +2306,11 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedRequestWindow(
         return -2;
     }
     NativeAotManagedSurface* surface = managedSurface();
-    if (surface) {
-        surface->setSelector(static_cast<uint32_t>(
-            reinterpret_cast<uintptr_t>(context->userData)));
-    }
     if (!surface || !surface->open(reinterpret_cast<const char*>(title), width, height)) {
         return -4;
     }
+    surface->setSelector(static_cast<uint32_t>(
+        reinterpret_cast<uintptr_t>(context->userData)));
     *outWindow = surface->windowId();
     serial::puts("[C111-SURFACE] action=create title=");
     serial::puts(reinterpret_cast<const char*>(title));
@@ -2088,7 +2464,9 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(
     const bool c117Message = managedMessageStartsWith(message, "C117-");
     const bool c118Message = managedMessageStartsWith(message, "C118-");
     const bool c119Message = managedMessageStartsWith(message, "C119-");
-    serial::puts(c119Message ? "[C119-MANAGED-OUTPUT] " :
+    const bool c150Message = managedMessageStartsWith(message, "C150-");
+    serial::puts(c150Message ? "[C150-MANAGED-OUTPUT] " :
+        c119Message ? "[C119-MANAGED-OUTPUT] " :
         c118Message ? "[C118-MANAGED-OUTPUT] " :
         c117Message ? "[C117-MANAGED-OUTPUT] " :
         c116Message ? "[C116-MANAGED-OUTPUT] " :
@@ -2437,6 +2815,9 @@ int32_t invokeManagedWithHostMetadata(
         g_application.entryPoint)(&startup);
     arch::amd64::enable_interrupts();
     g_activeManagedContext = nullptr;
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+    completeManagedReturnIfPending();
+#endif
     return managedReturn;
 }
 
@@ -2946,6 +3327,15 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
                                       LaunchReport* report,
                                       const char* launchContext,
                                       uint32_t launchContextLength) {
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+    if (!g_c150ContractTestsRun) {
+        g_c150ContractTestsRun = true;
+        if (!runC150ReturnTargetTests()) {
+            serial::puts("[C150-RETURN-TARGET-TESTS] launch=blocked result=FAIL\n");
+            return LaunchStatus::ManagedFailed;
+        }
+    }
+#endif
     LaunchReport local{};
     if (report == nullptr) report = &local;
     *report = {};
@@ -2964,6 +3354,33 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
     }
 
     const uint32_t selector = metadata->managedSelector;
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+    char previousIdentity[kManagedApplicationIdentityCapacity] = {};
+    (void)copyManagedIdentity(g_managedActiveApplicationId, previousIdentity,
+        sizeof(previousIdentity));
+    const uint64_t previousWindow = g_managedSurface
+        ? g_managedSurface->windowId() : 0u;
+    if (!g_managedLaunchingSettingsFromNotes && !g_managedReturnLaunchActive)
+        g_managedReturnTarget.clear();
+    if (!copyManagedIdentity(metadata->appId, g_managedActiveApplicationId,
+            sizeof(g_managedActiveApplicationId))) {
+        clearManagedActiveApplicationId();
+        return LaunchStatus::InvalidApplicationId;
+    }
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+    const uint32_t launchGeneration = ++g_managedApplicationLaunchGeneration;
+    serial::puts("[C150-APP-LAUNCH] id=");
+    serial::puts(metadata->appId);
+    serial::puts(" generation=");
+    serial::put_hex32(launchGeneration);
+    serial::puts(" selector=");
+    serial::put_hex32(selector);
+    serial::puts(g_managedReturnLaunchActive
+        ? " kind=return\n" : " kind=normal\n");
+#else
+    ++g_managedApplicationLaunchGeneration;
+#endif
+#endif
 
     serial::puts("[NATIVEAOT-PRODUCTION-LAUNCH] applicationId=");
     serial::puts(applicationId);
@@ -2974,9 +3391,54 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
     serial::puts(" selector=");
     serial::put_hex32(selector);
     serial::puts("\n");
-    return launchLogical(kProductionCompositeImage, selector, report,
-                         launchContext, launchContextLength);
+    const LaunchStatus status = launchLogical(
+        kProductionCompositeImage, selector, report,
+        launchContext, launchContextLength);
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+    if (status != LaunchStatus::Success) {
+        const uint64_t currentWindow = g_managedSurface
+            ? g_managedSurface->windowId() : 0u;
+        if (previousWindow != 0u && currentWindow == previousWindow) {
+            (void)copyManagedIdentity(previousIdentity,
+                g_managedActiveApplicationId, sizeof(g_managedActiveApplicationId));
+        } else {
+            clearManagedActiveApplicationId();
+        }
+    }
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+    else if (g_managedReturnLaunchActive) {
+        serial::puts("[C150-RELAUNCH] generation=");
+        serial::put_hex32(launchGeneration);
+        serial::puts(" appId=");
+        serial::puts(metadata->appId);
+        serial::puts(" surface-generation=");
+        serial::put_hex32(g_managedSurface
+            ? g_managedSurface->surfaceGeneration() : 0u);
+        serial::puts(" instance=fresh target=none registration=bounded result=PASS\n");
+    }
+#endif
+#endif
+    return status;
 }
+
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+bool c150ReturnTargetIsEmpty() {
+    return g_managedReturnTarget.empty() && !g_managedReturnLaunchPending;
+}
+
+bool c150ActiveApplicationIs(const char* applicationId) {
+    return ManagedReturnTarget::identityEquals(
+        g_managedActiveApplicationId, applicationId);
+}
+
+uint32_t c150SurfaceGeneration() {
+    return g_managedSurfaceGeneration;
+}
+
+uint32_t c150ApplicationLaunchGeneration() {
+    return g_managedApplicationLaunchGeneration;
+}
+#endif
 
 LaunchStatus probeHostAbiMismatch(LaunchReport* report) {
     LaunchReport local{};

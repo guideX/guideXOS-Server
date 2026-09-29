@@ -137,7 +137,11 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     private ManagedSettingsSnapshot _persisted;
     private ManagedSettingsStore _settingsStore;
     private bool _syncing;
+#if HOSTLOGPROOF_MANAGED_APP_RETURN
+    private static bool _testsRun;
+#else
     private bool _testsRun;
+#endif
     private uint _launchCount;
     private uint _menuCommand;
     private int _initialContentHeight;
@@ -149,18 +153,38 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 #if !HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
     private bool _c145TestsPassed;
 #endif
+#if HOSTLOGPROOF_MANAGED_APP_RETURN
+    private static bool _c146TestsPassed;
+#else
     private bool _c146TestsPassed;
+#endif
 #if HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
+#if HOSTLOGPROOF_MANAGED_APP_RETURN
+    private static bool _c146StoreTestsPassed;
+#else
     private bool _c146StoreTestsPassed;
 #endif
+#endif
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+#if HOSTLOGPROOF_MANAGED_APP_RETURN
+    private static bool _c147RuntimeTestsPassed;
+#else
     private bool _c147RuntimeTestsPassed;
 #endif
+#endif
 #if HOSTLOGPROOF_C148_SETTINGS_V2
+#if HOSTLOGPROOF_MANAGED_APP_RETURN
+    private static bool _c148TestsPassed;
+#else
     private bool _c148TestsPassed;
 #endif
+#endif
 #if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
+#if HOSTLOGPROOF_MANAGED_APP_RETURN
+    private static bool _c149TestsPassed;
+#else
     private bool _c149TestsPassed;
+#endif
 #endif
     private bool _c145FocusedTesting;
     private bool _saveInProgress;
@@ -554,6 +578,16 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         if (host.TryGetSurface(_window, out GuideXosSurface surface) != GuideXosResult.Success || surface == null)
             return GuideXosResult.SurfaceCreationFailed;
 
+#if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
+        if (_activeDialog == null && input.Kind == GuideXosInputKind.KeyChar &&
+            input.Shift && input.Character == 'F')
+        {
+            _failNextSaveForTests = true;
+            host.TryLog("C150-FAILURE-INJECT armed=true result=PASS"u8);
+            return GuideXosResult.Success;
+        }
+#endif
+
         if (_activeDialog != null && _activeDialog.IsOpen)
         {
             GuideXosDialog activeDialog = _activeDialog;
@@ -941,6 +975,10 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             _activeDialog = null;
         byte pending = _pendingPersistenceMessage;
         _pendingPersistenceMessage = 0;
+#if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
+        if (result == GuideXosDialogResult.OK && pending == 0)
+            _appHost?.TryLog("C150-ERROR-DISMISSED settings=active retry=available result=PASS"u8);
+#endif
         if (pending != 0) ShowPersistenceMessage(pending == 1);
     }
 

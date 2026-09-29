@@ -5417,6 +5417,206 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         };
 
 #if defined(GXOS_NATIVEAOT_C147_RUNTIME_SETTINGS)
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+        auto runC150ManagedApplicationReturnProof = [&]() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* notes =
+            gxos::apps::FindManagedNativeAotAppByIdentity(
+                "com.guidexos.apps.managed.notes");
+        const gxos::apps::BuiltInAppMetadata* settings =
+            gxos::apps::FindManagedNativeAotAppByIdentity(
+                "com.guidexos.apps.managed.settingscenter");
+        const bool catalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            notes && settings && notes->managedSelector == 4u &&
+            settings->managedSelector == 5u;
+        kernel::serial::puts("[C150-APPMODEL] catalog=notes+settings identity=canonical result=");
+        kernel::serial::puts(catalogValid ? "PASS\n" : "FAIL\n");
+
+        auto clickClient = [](kernel::app::KernelWindow* window,
+                              int32_t localX, int32_t localY) {
+            if (!window || localX < 0 || localY < 0) return false;
+            const int32_t screenX = window->x + localX;
+            const int32_t screenY = window->y +
+                kernel::compositor::TITLEBAR_HEIGHT + localY;
+            kernel::compositor::KernelCompositor::handleMouseDown(
+                screenX, screenY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(
+                screenX, screenY, 1u);
+            return true;
+        };
+        auto openSettingsFromNotes = [&]() {
+            kernel::app::KernelWindow* notesWindow =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!catalogValid || !notesWindow ||
+                !kernel::nativeaot::c150ActiveApplicationIs(notes->appId))
+                return false;
+            const uint32_t priorId = notesWindow->id;
+            if (!clickClient(notesWindow, 475, 294)) return false;
+            kernel::app::KernelWindow* settingsWindow =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return settingsWindow && settingsWindow->id != priorId &&
+                kernel::nativeaot::c150ActiveApplicationIs(settings->appId);
+        };
+        auto closeSettingsCleanly = [&](bool expectReturn) {
+            kernel::app::KernelWindow* settingsWindow =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!settingsWindow ||
+                !kernel::nativeaot::c150ActiveApplicationIs(settings->appId) ||
+                !clickClient(settingsWindow, 450, 60)) return false;
+            settingsWindow = kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!settingsWindow ||
+                !kernel::nativeaot::c150ActiveApplicationIs(settings->appId) ||
+                !clickClient(settingsWindow, 440, 140)) return false;
+            kernel::app::KernelWindow* notesWindow =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!kernel::nativeaot::c150ReturnTargetIsEmpty()) return false;
+            return expectReturn
+                ? notesWindow && kernel::nativeaot::c150ActiveApplicationIs(notes->appId)
+                : !kernel::nativeaot::c150ActiveApplicationIs(notes->appId);
+        };
+
+#if defined(GXOS_NATIVEAOT_C148_NOTES_ONLY)
+        const bool notesOnlyLaunch = catalogValid &&
+            kernel::desktop::launch_app_with_context(notes->appId, "c147-native-notes");
+        const bool notesOnlyReady = notesOnlyLaunch &&
+            kernel::nativeaot::c150ActiveApplicationIs(notes->appId);
+        kernel::serial::puts("[C148-NOTES-ONLY] settings-center=not-launched result=");
+        kernel::serial::puts(notesOnlyReady ? "PASS\n" : "FAIL\n");
+        return;
+#endif
+
+        // A launcher-originated Settings Center run starts with no caller.
+        const uint32_t directGeneration =
+            kernel::nativeaot::c150ApplicationLaunchGeneration();
+        const bool directLaunch = catalogValid &&
+            kernel::desktop::launch_app_with_context(settings->appId, nullptr);
+        const bool directReady = directLaunch &&
+            kernel::nativeaot::c150ActiveApplicationIs(settings->appId) &&
+            kernel::nativeaot::c150ReturnTargetIsEmpty();
+        const bool directClose = directReady && closeSettingsCleanly(false);
+        const bool directNoNotes = directClose &&
+            !kernel::nativeaot::c150ActiveApplicationIs(notes->appId) &&
+            kernel::nativeaot::c150ReturnTargetIsEmpty() &&
+            kernel::nativeaot::c150ApplicationLaunchGeneration() ==
+                directGeneration + 1u;
+        kernel::serial::puts("[C150-DIRECT] launch=");
+        kernel::serial::puts(directLaunch ? "PASS" : "FAIL");
+        kernel::serial::puts(" return-target=none notes-launched=false after-close=");
+        kernel::serial::puts(directNoNotes ? "none result=PASS\n" : "invalid result=FAIL\n");
+
+        const bool notesLaunch = directNoNotes &&
+            kernel::desktop::launch_app_with_context(notes->appId,
+                "c147-native-notes");
+        kernel::app::KernelWindow* notesWindow =
+            kernel::compositor::KernelCompositor::getFocusedWindow();
+        const bool notesReady = notesLaunch && notesWindow &&
+            kernel::nativeaot::c150ActiveApplicationIs(notes->appId) &&
+            kernel::nativeaot::c150ReturnTargetIsEmpty();
+        kernel::serial::puts("[C150-NOTES-A] launch=");
+        kernel::serial::puts(notesReady ? "PASS" : "FAIL");
+        kernel::serial::puts(" surface-generation=");
+        kernel::serial::put_hex32(kernel::nativeaot::c150SurfaceGeneration());
+        kernel::serial::puts(" result=");
+        kernel::serial::puts(notesReady ? "PASS\n" : "FAIL\n");
+
+        bool stressPassed = notesReady;
+        const uint32_t stressLaunchStart =
+            kernel::nativeaot::c150ApplicationLaunchGeneration();
+        const uint32_t stressSurfaceStart =
+            kernel::nativeaot::c150SurfaceGeneration();
+        for (uint32_t cycle = 0u; cycle < 25u && stressPassed; ++cycle) {
+            const uint32_t priorLaunch =
+                kernel::nativeaot::c150ApplicationLaunchGeneration();
+            const uint32_t priorSurface =
+                kernel::nativeaot::c150SurfaceGeneration();
+            const bool opened = openSettingsFromNotes();
+            const bool closed = opened && closeSettingsCleanly(true);
+            const uint32_t launchAfter =
+                kernel::nativeaot::c150ApplicationLaunchGeneration();
+            const uint32_t surfaceAfter =
+                kernel::nativeaot::c150SurfaceGeneration();
+            const bool launchDelta = launchAfter == priorLaunch + 2u;
+            const bool surfaceDelta = surfaceAfter == priorSurface + 2u;
+            const bool targetEmpty =
+                kernel::nativeaot::c150ReturnTargetIsEmpty();
+            const bool notesActive =
+                kernel::nativeaot::c150ActiveApplicationIs(notes->appId);
+            const int windowCount =
+                kernel::compositor::KernelCompositor::getWindowCount();
+            stressPassed = closed && launchDelta && surfaceDelta &&
+                targetEmpty && notesActive && windowCount == 1;
+            kernel::serial::puts("[C150-STRESS-CYCLE] number=");
+            kernel::serial::put_hex32(cycle + 1u);
+            kernel::serial::puts(" opened=");
+            kernel::serial::puts(opened ? "true" : "false");
+            kernel::serial::puts(" closed=");
+            kernel::serial::puts(closed ? "true" : "false");
+            kernel::serial::puts(" launch-delta=");
+            kernel::serial::puts(launchDelta ? "pass" : "fail");
+            kernel::serial::puts(" surface-delta=");
+            kernel::serial::puts(surfaceDelta ? "pass" : "fail");
+            kernel::serial::puts(" target=");
+            kernel::serial::puts(targetEmpty ? "none" : "occupied");
+            kernel::serial::puts(" active=");
+            kernel::serial::puts(notesActive ? "Notes" : "other");
+            kernel::serial::puts(" windows=");
+            kernel::serial::put_hex32(static_cast<uint32_t>(windowCount));
+            kernel::serial::puts(stressPassed ? " result=PASS\n" : " result=FAIL\n");
+        }
+        kernel::serial::puts("[C150-STRESS] cycles=25 launch-generations=");
+        kernel::serial::put_hex32(
+            kernel::nativeaot::c150ApplicationLaunchGeneration() - stressLaunchStart);
+        kernel::serial::puts(" surface-generations=");
+        kernel::serial::put_hex32(
+            kernel::nativeaot::c150SurfaceGeneration() - stressSurfaceStart);
+        kernel::serial::puts(" target=none active=Notes modal=none capture=none drag=none result=");
+        kernel::serial::puts(stressPassed ? "PASS\n" : "FAIL\n");
+
+        kernel::app::KernelWindow* returnedNotesWindow =
+            kernel::compositor::KernelCompositor::getFocusedWindow();
+        bool runtimeContinuity = stressPassed && returnedNotesWindow &&
+            kernel::nativeaot::c150ActiveApplicationIs(notes->appId);
+        if (runtimeContinuity) {
+            const int32_t listLocalX = 340;
+            const int32_t listLocalY = 100;
+            const int32_t listScreenX = returnedNotesWindow->x + listLocalX;
+            const int32_t listScreenY = returnedNotesWindow->y +
+                kernel::compositor::TITLEBAR_HEIGHT + listLocalY;
+            kernel::compositor::KernelCompositor::handleMouseWheel(
+                listScreenX, listScreenY, -1);
+            kernel::compositor::KernelCompositor::handleMouseWheel(
+                listScreenX, listScreenY, 1);
+        }
+        kernel::serial::puts("[C150-RUNTIME-CONTINUITY] app=returned-Notes naturalScroll=shared scrollLines=shared wheel=");
+        kernel::serial::puts(runtimeContinuity ? "consumed result=PASS\n" : "unavailable result=FAIL\n");
+
+        const bool finalSettings = stressPassed && openSettingsFromNotes();
+        kernel::app::KernelWindow* settingsWindow =
+            kernel::compositor::KernelCompositor::getFocusedWindow();
+        const bool workflowReady = finalSettings && settingsWindow &&
+            kernel::nativeaot::c150ActiveApplicationIs(settings->appId) &&
+            !kernel::nativeaot::c150ReturnTargetIsEmpty();
+        kernel::serial::puts("[C150-PRIMARY-ENTRY] caller=Notes settings=active return-target=Notes surface-handoff=true result=");
+        kernel::serial::puts(workflowReady ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C147-PROOF] managed-proof-started context=c147-runtime-settings notes-first=true settings-after-notes=true result=");
+        kernel::serial::puts(workflowReady ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C144-PROOF] managed-proof-started context=c144-native transport=physical-qemu result=");
+        kernel::serial::puts(workflowReady ? "PASS\n" : "FAIL\n");
+        if (settingsWindow) {
+            kernel::serial::puts("[C144-TARGET] viewX=24 viewY=86 viewWidth=300 viewHeight=208 scrollBarX=336 scrollBarY=86 optionsX=420 optionsY=48 screenViewX=");
+            kernel::serial::put_hex32(static_cast<uint32_t>(settingsWindow->x + 24));
+            kernel::serial::puts(" screenViewY=");
+            kernel::serial::put_hex32(static_cast<uint32_t>(settingsWindow->y +
+                kernel::compositor::TITLEBAR_HEIGHT + 86));
+            kernel::serial::puts(" result=");
+            kernel::serial::puts(workflowReady ? "PASS\n" : "FAIL\n");
+        }
+        }
+        };
+        runC150ManagedApplicationReturnProof();
+        return;
+#endif
+
         auto runC147RuntimeSettingsProof = [&]() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* notes =

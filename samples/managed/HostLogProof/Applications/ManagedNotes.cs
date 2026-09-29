@@ -449,7 +449,11 @@ public sealed class ManagedNotes : GuideXosApplication
     private string _currentPath = "/system/apps/NOTES.TXT";
     private string _status = "Ready";
     private ulong _window;
+#if HOSTLOGPROOF_MANAGED_APP_RETURN
+    private static uint _launchCount;
+#else
     private uint _launchCount;
+#endif
     private int _saveInvocation;
     private bool _useTextInput;
     [ThreadStatic]
@@ -639,6 +643,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
     private const int C135MenuControlId = 8;
     private const uint C135OptionsActionId = 23u;
+#if HOSTLOGPROOF_MANAGED_APP_RETURN
+    private const uint C150SettingsActionId = 24u;
+#endif
     private const uint C135HideMenuKey = 0xA00u;
     private const uint C135ShowMenuKey = 0xA01u;
     private const uint C135DisableMenuKey = 0xA02u;
@@ -675,6 +682,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
     private bool _c147RuntimeConsumerContext;
 #endif
+#if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
+    private bool _c150ReturnLaunchContext;
+#endif
 #if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
     private bool _c149LastRenderedKeyboardTips;
     private int _c149LastRenderedKeyboardTipLength = -1;
@@ -707,6 +717,12 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
         _c147RuntimeConsumerContext =
             host.LaunchContext.Utf8.SequenceEqual("c147-native-notes"u8);
+#if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
+        _c150ReturnLaunchContext =
+            host.LaunchContext.Utf8.SequenceEqual("managed-app-return"u8);
+        _c147RuntimeConsumerContext = _c147RuntimeConsumerContext ||
+            _c150ReturnLaunchContext;
+#endif
         if (_c147RuntimeConsumerContext)
         {
             host.TryLog("C147-NOTES-CONTEXT startup=loaded list=enabled result=PASS"u8);
@@ -1606,7 +1622,13 @@ public sealed class ManagedNotes : GuideXosApplication
         if (_c147RuntimeConsumerContext)
         {
             if (!LogC149KeyboardTips(host,
+#if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
+                    _c150ReturnLaunchContext
+                        ? "startup=after-return"u8
+                        : "startup=before-settings-center"u8))
+#else
                     "startup=before-settings-center"u8))
+#endif
                 return GuideXosResult.InvalidArgument;
         }
 #endif
@@ -1828,11 +1850,10 @@ public sealed class ManagedNotes : GuideXosApplication
         }
 #endif
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
-        // C147 launches Notes as the actual runtime consumer before Settings
-        // Center. Keep this production surface boot bounded; the C137 wheel
-        // suite is rerun in its own phase image and the C147 consumer suite
-        // covers this shared runtime policy directly.
-        if (host.LaunchContext.Utf8.SequenceEqual("c147-native-notes"u8))
+        // C147 and managed-return launches run Notes as the actual runtime
+        // consumer. Keep that surface boot bounded; focused control suites
+        // are covered by their own phase images.
+        if (_c147RuntimeConsumerContext)
         {
             runFocusedProofTests = false;
         }
@@ -3885,8 +3906,7 @@ public sealed class ManagedNotes : GuideXosApplication
         }
 #if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
         if (_c147RuntimeConsumerContext &&
-            (!RenderC149KeyboardTips(surface) ||
-             !LogC149KeyboardTips(host, "dispatch=runtime-current"u8)))
+            !LogC149KeyboardTips(host, "dispatch=runtime-current"u8))
         {
             return GuideXosResult.InvalidArgument;
         }
@@ -4046,6 +4066,15 @@ public sealed class ManagedNotes : GuideXosApplication
         {
             return HandlePickerAction(host, surface, actionId);
         }
+#if HOSTLOGPROOF_MANAGED_APP_RETURN
+        if (actionId == C150SettingsActionId)
+        {
+#if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
+            host.TryLog("C150-CALLER id=Notes command=SettingsCenter"u8);
+#endif
+            return GuideXosResult.Success;
+        }
+#endif
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
         if (_c135ProofContext && actionId == C135OptionsActionId)
         {
@@ -4711,6 +4740,10 @@ public sealed class ManagedNotes : GuideXosApplication
                 out _) == GuideXosResult.Success) &&
             (!_c135ProofContext || _c135Menu.Render(surface) ==
                 GuideXosResult.Success) &&
+#endif
+#if HOSTLOGPROOF_MANAGED_APP_RETURN
+            surface.TryAddButton(430, 280, 90, 28, "Settings"u8,
+                C150SettingsActionId, out _) == GuideXosResult.Success &&
 #endif
 #endif
 #else

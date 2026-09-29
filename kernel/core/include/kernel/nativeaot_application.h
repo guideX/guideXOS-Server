@@ -76,6 +76,13 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
                                       LaunchReport* report,
                                       const char* launchContext = nullptr,
                                       uint32_t launchContextLength = 0u);
+#if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+// Read-only lifecycle observations for the C150 in-kernel proof harness.
+bool c150ReturnTargetIsEmpty();
+bool c150ActiveApplicationIs(const char* applicationId);
+uint32_t c150SurfaceGeneration();
+uint32_t c150ApplicationLaunchGeneration();
+#endif
 // C117 proof-only entry to the same managed input bridge used by the
 // compositor surface. It carries the reserved Shift payload bit without
 // changing the Host ABI table.

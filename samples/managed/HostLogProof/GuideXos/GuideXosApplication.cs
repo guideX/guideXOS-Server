@@ -26,11 +26,30 @@ public readonly struct GuideXosApplicationDescriptor
         Selector = selector;
         Name = name.ToArray();
         Application = application;
+#if HOSTLOGPROOF_MANAGED_APP_RETURN
+        Factory = null;
+#endif
     }
+
+#if HOSTLOGPROOF_MANAGED_APP_RETURN
+    public GuideXosApplicationDescriptor(
+        uint selector,
+        ReadOnlySpan<byte> name,
+        Func<GuideXosApplication> factory)
+    {
+        Selector = selector;
+        Name = name.ToArray();
+        Application = null;
+        Factory = factory;
+    }
+#endif
 
     public uint Selector { get; }
     public byte[] Name { get; }
     public GuideXosApplication Application { get; }
+#if HOSTLOGPROOF_MANAGED_APP_RETURN
+    public Func<GuideXosApplication> Factory { get; }
+#endif
 }
 
 /// <summary>
@@ -38,7 +57,18 @@ public readonly struct GuideXosApplicationDescriptor
 /// </summary>
 public static unsafe class GuideXosApplicationRegistry
 {
-#if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+#if HOSTLOGPROOF_MANAGED_APP_RETURN
+    private static readonly GuideXosApplicationDescriptor[] s_entries =
+    {
+        new(4u, "Managed Notes"u8, static () => new Applications.ManagedNotes()),
+        new(5u, "Managed Settings Center"u8,
+            static () => new Applications.ManagedSettingsCenter()),
+    };
+    private static readonly GuideXosManagedApplicationLifetime s_lifetime = new();
+#if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
+    private static bool s_lifecycleTestsRun;
+#endif
+#elif HOSTLOGPROOF_C147_RUNTIME_SETTINGS
     private static readonly GuideXosApplicationDescriptor[] s_entries =
     {
         new(4u, "Managed Notes"u8, new Applications.ManagedNotes()),
@@ -132,11 +162,65 @@ public static unsafe class GuideXosApplicationRegistry
                 host.TryLog("C136-BRIDGE secondary=recognized result=PASS"u8);
             }
         }
+#if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
+        if (!s_lifecycleTestsRun)
+        {
+            s_lifecycleTestsRun = true;
+            bool lifecycleTests = GuideXosManagedApplicationC150Tests.Run();
+            host.TryLog(lifecycleTests
+                ? "C150-MANAGED-LIFECYCLE-TESTS cases=8 fresh=PASS active=one result=PASS"u8
+                : "C150-MANAGED-LIFECYCLE-TESTS result=FAIL"u8);
+            if (!lifecycleTests) return GxAbi.ErrorInvalidArgument;
+        }
+#endif
+
+#if HOSTLOGPROOF_MANAGED_APP_RETURN
+        GuideXosApplication application;
+        bool isNewLaunch = !host.LaunchContext.IsInput && !host.IsAction;
+        if (isNewLaunch)
+        {
+            if (!s_lifetime.TryStart(descriptor, out application,
+                    out uint generation))
+                return GxAbi.ErrorInvalidApplicationId;
+#if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
+            Span<byte> instanceMarker = stackalloc byte[96];
+            int markerLength = 0;
+            GuideXosText.Append(instanceMarker, ref markerLength,
+                "C150-APP-INSTANCE id="u8);
+            GuideXosText.AppendUnsigned(instanceMarker, ref markerLength, selector);
+            GuideXosText.Append(instanceMarker, ref markerLength,
+                " generation="u8);
+            GuideXosText.AppendUnsigned(instanceMarker, ref markerLength, generation);
+            host.TryLog(instanceMarker[..markerLength]);
+#endif
+        }
+        else if (s_lifetime.TryGet(selector, out application))
+        {
+        }
+        else
+        {
+#if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
+            host.TryLog("C150-DISPATCH rejected=stale-application result=FAIL"u8);
+#endif
+            return GxAbi.ErrorInvalidApplicationId;
+        }
+
+        GuideXosResult result = host.LaunchContext.IsInput
+            ? application.HandleInput(host, input)
+            : host.IsAction
+                ? application.HandleAction(host, host.LaunchContext.ActionId)
+                : application.Launch(host);
+        if (isNewLaunch && result != GuideXosResult.Success)
+        {
+            s_lifetime.Clear(selector);
+        }
+#else
         GuideXosResult result = host.LaunchContext.IsInput
             ? descriptor.Application.HandleInput(host, input)
             : host.IsAction
                 ? descriptor.Application.HandleAction(host, host.LaunchContext.ActionId)
                 : descriptor.Application.Launch(host);
+#endif
         return (int)result;
     }
 }
