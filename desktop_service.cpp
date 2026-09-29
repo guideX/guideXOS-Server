@@ -199,6 +199,7 @@ namespace gxos {
 		/// Desktop service implementation and app registry management. This is the authoritative source for all registered desktop apps, which are collected from various sources and synthesized with built-in app metadata to power launch resolution and diagnostics.
         /// </summary>
         static apps::AppRegistry s_appRegistry;
+        static std::mutex s_appRegistrySnapshotMutex;
         static bool s_appRegistryInitialized = false;
         static size_t s_appRegistryInitializeCount = 0;
         static apps::AppScanResult s_lastManifestScanResult;
@@ -444,6 +445,27 @@ namespace gxos {
             const apps::AppEntry* entry = app.FindCompatibleEntry("any");
             if (entry && !entry->entryPoint.empty()) return entry->entryPoint;
             return app.manifest.displayName;
+        }
+
+        static bool supportsNormalSettingsOpen(const apps::RegisteredApp& app) {
+            if (app.manifest.kind != apps::AppKind::BuiltIn ||
+                app.sourceKind != apps::AppSourceKind::BuiltIn) return false;
+            const apps::BuiltInAppMetadata* metadata =
+                apps::FindBuiltInAppMetadataByAppId(app.manifest.id.c_str());
+            if (!metadata || !apps::IsBuiltInAppAvailableInHosted(*metadata)) return false;
+            const std::string launchName = apps::BuiltInAppCanonicalLaunchName(*metadata);
+            // These names match existing DesktopService::LaunchApp dispatch
+            // cases. HDInstaller is explicitly unavailable in this runtime;
+            // App Model Demo has no normal launch handler.
+            return launchName == "Notepad" || launchName == "Calculator" ||
+                launchName == "Console" || launchName == "FileExplorer" ||
+                launchName == "Clock" || launchName == "TaskManager" ||
+                launchName == "Paint" || launchName == "ImageViewer" ||
+                launchName == "OnScreenKeyboard" || launchName == "ShutdownDialog" ||
+                launchName == "DiskManager" || launchName == "ControlPanel" ||
+                launchName == "Settings" || launchName == "DisplayOptions" ||
+                launchName == "guideXOS Navigator" || launchName == "Trash" ||
+                launchName == "Native App Debug Viewer";
         }
 
         static const RegisteredDesktopApp* findRegisteredApp(const std::string& name) {
@@ -5976,12 +5998,39 @@ namespace gxos {
 
         bool DesktopService::RegisterDevelopmentApp(const apps::RegisteredApp& app, std::string& error) {
             ensureDefaultAppsRegistered();
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
             return s_appRegistry.RegisterTemporaryDevelopmentApp(app, error);
         }
 
         bool DesktopService::UnregisterDevelopmentApp(const std::string& appId, uint64_t ownerRuntimeId, uint64_t generation) {
             ensureDefaultAppsRegistered();
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
             return s_appRegistry.UnregisterTemporaryDevelopmentApp(appId, ownerRuntimeId, generation);
+        }
+
+        apps::settings::AppInventory DesktopService::GetSettingsAppModelInventory() {
+            ensureDefaultAppsRegistered();
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+
+            std::vector<apps::settings::AppInventoryEntry> entries;
+            const std::vector<apps::RegisteredApp>& registered = s_appRegistry.GetAllApps();
+            entries.reserve(registered.size());
+            for (const apps::RegisteredApp& app : registered) {
+                apps::settings::AppInventoryEntry entry;
+                entry.appId = app.manifest.id;
+                entry.displayName = app.manifest.displayName;
+                entry.version = app.sourceKind == apps::AppSourceKind::BuiltIn
+                    ? std::string() : app.manifest.version;
+                entry.iconKey = app.manifest.icon;
+                entry.launchName = launchNameForApp(app);
+                entry.kind = apps::ToString(app.manifest.kind);
+                entry.source = apps::AppRegistry::ToString(app.sourceKind);
+                entry.registrationGeneration = app.temporaryDevelopment
+                    ? app.temporaryGeneration : 0;
+                entry.openSupported = supportsNormalSettingsOpen(app);
+                entries.push_back(std::move(entry));
+            }
+            return apps::settings::buildAppInventory(std::move(entries));
         }
 
         bool DesktopService::IsInstalledAppId(const std::string& appId) {

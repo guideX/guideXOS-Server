@@ -2,10 +2,13 @@
 
 #include "compositor.h"
 #include "background_service.h"
+#include "clock_time_settings.h"
+#include "desktop_config.h"
 #include "desktop_service.h"
 #include "desktop_theme.h"
 #include "display_configuration.h"
 #include "display_configuration_service.h"
+#include "display_options_store.h"
 #include "gui_protocol.h"
 #include "ipc_bus.h"
 #include "logger.h"
@@ -160,6 +163,46 @@ std::string networkDnsText(const network_settings::NetworkInterfaceInfo& adapter
     return value;
 }
 
+clocktime::ClockDisplaySettings readHostedClockDisplaySettings()
+{
+    clocktime::ClockDisplaySettings settings;
+    DisplayOptionsStoreData store;
+    std::string error;
+    if (DisplayOptionsStore::Load("display-options.cfg", store, error)) {
+        settings.timeZoneId = store.timeZoneId;
+        settings.use24HourTime = store.use24HourTime;
+        return clocktime::NormalizeClockDisplaySettings(std::move(settings));
+    }
+
+    DesktopConfigData config;
+    if (DesktopConfig::Load("desktop.json", config, error)) {
+        if (!config.timeZoneId.empty()) settings.timeZoneId = config.timeZoneId;
+        settings.use24HourTime = config.use24HourTime;
+    }
+    return clocktime::NormalizeClockDisplaySettings(std::move(settings));
+}
+
+const char* appKindLabel(const std::string& kind)
+{
+    if (kind == "BuiltIn") return "Built-in application";
+    if (kind == "NativeElf") return "Native ELF application";
+    if (kind == "GXAppPackage") return "GXApp package";
+    if (kind == "Service") return "Service";
+    if (kind == "HypervisorGuest") return "Hypervisor guest";
+    if (kind == "Script") return "Script";
+    return "Application type unavailable";
+}
+
+const char* appSourceLabel(const std::string& source)
+{
+    if (source == "BuiltIn") return "Built-in registration";
+    if (source == "SystemApps") return "System app registration";
+    if (source == "UserApps") return "User app registration";
+    if (source == "Package") return "Package registration";
+    if (source == "DevelopmentTemporary") return "Temporary development registration";
+    return "Registration source unavailable";
+}
+
 std::string formatPciId(uint16_t vendor, uint16_t device)
 {
     static const char kHex[] = "0123456789ABCDEF";
@@ -231,6 +274,8 @@ public:
             m_inventoryRefreshPolicy.setActive(true, steadyMilliseconds());
             refreshInventory();
         }
+        if (initialRoute.category == CategoryId::Apps) refreshApps();
+        if (initialRoute.category == CategoryId::DateTime) refreshDateTime();
         setFocusForRoute(initialRoute);
     }
 
@@ -245,6 +290,8 @@ public:
         m_networkRefreshPolicy.setActive(refreshActive, steadyMilliseconds());
         const bool inventoryActive = focused && inventoryCategory(m_navigation.selectedCategory());
         m_inventoryRefreshPolicy.setActive(inventoryActive, steadyMilliseconds());
+        if (focused && m_navigation.selectedCategory() == CategoryId::Apps) refreshApps();
+        if (focused && m_navigation.selectedCategory() == CategoryId::DateTime) refreshDateTime();
         if (focused && m_navigation.selectedCategory() == CategoryId::Personalization) refreshPersonalization();
         if (refreshActive) {
             refreshNetwork();
@@ -263,6 +310,26 @@ public:
     {
         if (m_windowId == 0 || !m_inventoryRefreshPolicy.due(steadyMilliseconds())) return false;
         return refreshInventory();
+    }
+
+    bool refreshAppsIfDue()
+    {
+        const uint64_t now = steadyMilliseconds();
+        if (m_windowId == 0 || !m_windowFocused || !m_search.empty() ||
+            m_navigation.selectedCategory() != CategoryId::Apps || now < m_nextAppsRefreshMs) return false;
+        return refreshApps();
+    }
+
+    bool refreshDateTimeClockIfDue()
+    {
+        const uint64_t now = steadyMilliseconds();
+        if (m_windowId == 0 || !dateTimeRefreshDue(
+                m_navigation.selectedCategory() == CategoryId::DateTime,
+                m_windowFocused, !m_search.empty(), now, m_nextDateTimeRefreshMs)) return false;
+        m_nextDateTimeRefreshMs = now + 1000;
+        m_dateTimeSnapshot = readHostedDateTime(m_clockDisplaySettings);
+        renderDateTimeClockText();
+        return true;
     }
 
     bool refreshPersonalizationIfRequested()
@@ -330,9 +397,12 @@ public:
                 if (m_navigation.route().target == TargetId::StorageDiskDetail) renderStorageDiskDetail();
                 else renderStorage();
                 break;
-            case CategoryId::Apps: renderPlaceholder(); break;
+            case CategoryId::Apps:
+                if (m_navigation.route().target == TargetId::AppDetail) renderAppDetails();
+                else renderApps();
+                break;
             case CategoryId::Users: renderPlaceholder(); break;
-            case CategoryId::DateTime: renderAdvancedPage("Clock and time-zone settings remain available in Display Options.", FocusControl::DateTimeAdvanced, "Open date and time options"); break;
+            case CategoryId::DateTime: renderDateTimePage(); break;
             case CategoryId::Accessibility: renderAdvancedPage("Open the built-in on-screen keyboard.", FocusControl::AccessibilityKeyboard, "Open on-screen keyboard"); break;
             case CategoryId::Developer: renderAdvancedPage("Open the guideXOS Console for developer and diagnostic commands.", FocusControl::DeveloperConsole, "Open Console"); break;
             case CategoryId::About: renderAbout(); break;
@@ -365,7 +435,10 @@ public:
                 const bool insideList = x >= pageX() && x <= pageX() + pageWidth() &&
                     y >= inventoryListTop() && y <= inventoryListBottom();
                 if (insideList && wheelSteps != 0) {
-                    if (m_navigation.selectedCategory() == CategoryId::Devices &&
+                    if (m_navigation.selectedCategory() == CategoryId::Apps &&
+                        m_navigation.route().target != TargetId::AppDetail)
+                        m_appScroll -= wheelSteps * 3;
+                    else if (m_navigation.selectedCategory() == CategoryId::Devices &&
                         m_navigation.route().target != TargetId::DeviceDetail)
                         m_deviceScroll -= wheelSteps * 3;
                     else if (m_navigation.selectedCategory() == CategoryId::Storage &&
@@ -530,6 +603,16 @@ private:
     std::string m_selectedDiskStableId;
     uint64_t m_selectedDeviceGeneration{0};
     uint64_t m_selectedDiskGeneration{0};
+    AppInventory m_appInventory{};
+    std::string m_selectedAppId;
+    uint64_t m_selectedAppGeneration{0};
+    bool m_selectedAppMissing{false};
+    std::string m_appStatus;
+    uint64_t m_nextAppsRefreshMs{0};
+    int m_appScroll{0};
+    clocktime::ClockDisplaySettings m_clockDisplaySettings{};
+    DateTimeSnapshot m_dateTimeSnapshot{};
+    uint64_t m_nextDateTimeRefreshMs{0};
 
     int searchX() const { return std::max(278, m_width - kSearchWidth - 16); }
     int searchWidth() const { return std::min(kSearchWidth, std::max(180, m_width - searchX() - 16)); }
@@ -602,6 +685,8 @@ private:
     static FocusControl initialFocusFor(const SettingsRoute& route)
     {
         switch (route.target) {
+        case TargetId::AppDetail: return FocusControl::AppsDetailBack;
+        case TargetId::DateTimeTimeZone: return FocusControl::DateTimeAdvanced;
         case TargetId::PersonalizationBackground: return FocusControl::PersonalizationChooseBackground;
         case TargetId::Resolution: return FocusControl::DisplayResolution;
         case TargetId::DisplayMode: return FocusControl::DisplayMode;
@@ -614,6 +699,59 @@ private:
     static bool inventoryCategory(CategoryId category)
     {
         return category == CategoryId::Devices || category == CategoryId::Storage;
+    }
+
+    bool refreshApps()
+    {
+        const AppInventory previous = m_appInventory;
+        std::string focusedId;
+        uint64_t focusedGeneration = 0;
+        if (m_focusedItem.kind == FocusItem::Kind::Control &&
+            m_focusedItem.control == FocusControl::AppEntry && m_focusedItem.index >= 0 &&
+            static_cast<size_t>(m_focusedItem.index) < m_appInventory.count) {
+            const AppInventoryEntry& focused = m_appInventory.entries[static_cast<size_t>(m_focusedItem.index)];
+            focusedId = focused.appId;
+            focusedGeneration = focused.registrationGeneration;
+        }
+
+        m_appInventory = DesktopService::GetSettingsAppModelInventory();
+        const bool inventoryChanged = !sameAppInventory(previous, m_appInventory);
+        const bool oldMissing = m_selectedAppMissing;
+        if (m_navigation.route().target == TargetId::AppDetail && !m_selectedAppId.empty()) {
+            m_selectedAppMissing = findAppInventoryEntry(
+                m_appInventory, m_selectedAppId, m_selectedAppGeneration) == nullptr;
+            if (m_selectedAppMissing) {
+                m_focusedItem = FocusItem{ FocusItem::Kind::Control, 0, FocusControl::AppsDetailBack };
+            }
+        }
+
+        if (!focusedId.empty() && m_navigation.route().target != TargetId::AppDetail) {
+            bool restoredFocus = false;
+            for (size_t i = 0; i < m_appInventory.count; ++i) {
+                const AppInventoryEntry& entry = m_appInventory.entries[i];
+                if (entry.appId == focusedId && entry.registrationGeneration == focusedGeneration) {
+                    m_focusedItem.index = static_cast<int>(i);
+                    restoredFocus = true;
+                    break;
+                }
+            }
+            if (!restoredFocus) {
+                m_focusedItem = m_appInventory.count != 0
+                    ? FocusItem{ FocusItem::Kind::Control, 0, FocusControl::AppEntry }
+                    : FocusItem{ FocusItem::Kind::Category, static_cast<int>(CategoryId::Apps), FocusControl::None };
+            }
+        }
+        clampInventoryScroll();
+        ensureInventoryFocusVisible();
+        m_nextAppsRefreshMs = steadyMilliseconds() + 2000;
+        return inventoryChanged || oldMissing != m_selectedAppMissing;
+    }
+
+    void refreshDateTime()
+    {
+        m_clockDisplaySettings = readHostedClockDisplaySettings();
+        m_dateTimeSnapshot = readHostedDateTime(m_clockDisplaySettings);
+        m_nextDateTimeRefreshMs = steadyMilliseconds() + 1000;
     }
 
     bool refreshInventory()
@@ -679,7 +817,10 @@ private:
     {
         const int reserved = m_navigation.selectedCategory() == CategoryId::Storage
             ? (smallSettingsLayout() ? 66 : 78) : 24;
-        return std::max(inventoryListTop() + 48, m_height - reserved);
+        const int actionReserved = m_navigation.selectedCategory() == CategoryId::Apps &&
+            m_navigation.route().target == TargetId::AppDetail
+            ? (smallSettingsLayout() ? 66 : 78) : reserved;
+        return std::max(inventoryListTop() + 48, m_height - actionReserved);
     }
     int inventoryRowPitch() const { return smallSettingsLayout() ? 48 : 56; }
     int inventoryActionY() const { return m_height - (smallSettingsLayout() ? 54 : 62); }
@@ -687,13 +828,21 @@ private:
     {
         return std::max(1, (inventoryListBottom() - inventoryListTop()) / inventoryRowPitch());
     }
+    int dateTimeTop() const { return inventoryListTop(); }
+    int dateTimeClockCardHeight() const { return smallSettingsLayout() ? 112 : 144; }
+    int dateTimeZoneCardY() const { return dateTimeTop() + dateTimeClockCardHeight() + 10; }
+    int dateTimeZoneCardHeight() const { return smallSettingsLayout() ? 168 : 184; }
+    int dateTimeActionY() const { return dateTimeZoneCardY() + (smallSettingsLayout() ? 134 : 142); }
+    int dateTimeActionHeight() const { return smallSettingsLayout() ? 30 : 36; }
 
     void clampInventoryScroll()
     {
         const int deviceMax = std::max(0, static_cast<int>(deviceDisplayIndices().size()) - inventoryVisibleRows());
         const int storageMax = std::max(0, static_cast<int>(storageDisplayEntries().size()) - inventoryVisibleRows());
+        const int appMax = std::max(0, static_cast<int>(m_appInventory.count) - inventoryVisibleRows());
         m_deviceScroll = std::max(0, std::min(m_deviceScroll, deviceMax));
         m_storageScroll = std::max(0, std::min(m_storageScroll, storageMax));
+        m_appScroll = std::max(0, std::min(m_appScroll, appMax));
     }
 
     void ensureInventoryFocusVisible()
@@ -719,6 +868,11 @@ private:
                     m_storageScroll = static_cast<int>(i) - inventoryVisibleRows() + 1;
                 break;
             }
+        } else if (m_focusedItem.control == FocusControl::AppEntry && m_focusedItem.index >= 0 &&
+                   static_cast<size_t>(m_focusedItem.index) < m_appInventory.count) {
+            if (m_focusedItem.index < m_appScroll) m_appScroll = m_focusedItem.index;
+            else if (m_focusedItem.index >= m_appScroll + inventoryVisibleRows())
+                m_appScroll = m_focusedItem.index - inventoryVisibleRows() + 1;
         }
         clampInventoryScroll();
     }
@@ -849,6 +1003,17 @@ private:
             add(FocusControl::PersonalizationAdvanced);
             break;
         case CategoryId::DateTime: add(FocusControl::DateTimeAdvanced); break;
+        case CategoryId::Apps:
+            if (m_navigation.route().target == TargetId::AppDetail) {
+                add(FocusControl::AppsDetailBack);
+                const AppInventoryEntry* selected = findAppInventoryEntry(
+                    m_appInventory, m_selectedAppId, m_selectedAppGeneration);
+                if (selected && selected->openSupported) add(FocusControl::AppsOpen);
+            } else {
+                for (size_t i = 0; i < m_appInventory.count; ++i)
+                    items.push_back(FocusItem{ FocusItem::Kind::Control, static_cast<int>(i), FocusControl::AppEntry });
+            }
+            break;
         case CategoryId::Devices:
             if (m_navigation.route().target == TargetId::DeviceDetail) {
                 add(FocusControl::DeviceDetailBack);
@@ -936,6 +1101,12 @@ private:
                     ? FocusControl::StorageVolumeEntry : FocusControl::StorageDiskEntry;
                 ensureInventoryFocusVisible();
             }
+        } else if (m_focusedItem.kind == FocusItem::Kind::Control &&
+                   m_focusedItem.control == FocusControl::AppEntry && m_appInventory.count != 0) {
+            const int count = static_cast<int>(m_appInventory.count);
+            const int next = (m_focusedItem.index + delta + count) % count;
+            m_focusedItem.index = next;
+            ensureInventoryFocusVisible();
         }
     }
 
@@ -990,7 +1161,8 @@ private:
         case FocusControl::SystemControlPanel: return inRect(x, y, systemLinkX(5), systemLinkY(5), systemLinkWidth(), systemLinkHeight());
         case FocusControl::PersonalizationChooseBackground: return inRect(x, y, pageX() + 8, personalizationChooseY(), std::min(390, pageWidth() - 16), personalizationActionHeight());
         case FocusControl::PersonalizationAdvanced: return inRect(x, y, pageX() + 8, personalizationAdvancedY(), std::min(390, pageWidth() - 16), personalizationActionHeight());
-        case FocusControl::DateTimeAdvanced:
+        case FocusControl::DateTimeAdvanced: return inRect(x, y, pageX() + 8, dateTimeActionY(),
+            std::min(390, pageWidth() - 16), dateTimeActionHeight());
         case FocusControl::DeveloperConsole:
         case FocusControl::AccessibilityKeyboard: return inRect(x, y, pageX() + 6, 210, std::min(390, pageWidth() - 12), 46);
         case FocusControl::StorageDiskManager: return inRect(x, y, pageX() + 6, inventoryActionY(), std::min(390, pageWidth() - 12), smallSettingsLayout() ? 34 : 42);
@@ -1004,6 +1176,13 @@ private:
                 if (inRect(x, y, pageX() + 8, rowY, pageWidth() - 16, inventoryRowPitch() - 4)) return true;
             }
             return false;
+        }
+        case FocusControl::AppEntry: {
+            if (m_navigation.route().target == TargetId::AppDetail || focus.index < m_appScroll ||
+                focus.index >= m_appScroll + inventoryVisibleRows() || focus.index < 0 ||
+                static_cast<size_t>(focus.index) >= m_appInventory.count) return false;
+            const int rowY = inventoryListTop() + (focus.index - m_appScroll) * inventoryRowPitch();
+            return inRect(x, y, pageX() + 8, rowY, pageWidth() - 16, inventoryRowPitch() - 4);
         }
         case FocusControl::StorageDiskEntry:
         case FocusControl::StorageVolumeEntry: {
@@ -1019,7 +1198,9 @@ private:
             return false;
         }
         case FocusControl::DeviceDetailBack:
-        case FocusControl::StorageDetailBack: return inRect(x, y, pageX() + 8, inventoryListTop(), std::min(300, pageWidth() - 16), smallSettingsLayout() ? 34 : 42);
+        case FocusControl::StorageDetailBack:
+        case FocusControl::AppsDetailBack: return inRect(x, y, pageX() + 8, inventoryListTop(), std::min(300, pageWidth() - 16), smallSettingsLayout() ? 34 : 42);
+        case FocusControl::AppsOpen: return inRect(x, y, pageX() + 8, inventoryActionY(), std::min(390, pageWidth() - 16), smallSettingsLayout() ? 34 : 42);
         case FocusControl::DeviceDetailNetwork:
         case FocusControl::DeviceDetailDisplay:
         case FocusControl::DeviceDetailStorage: return inRect(x, y, pageX() + 8, inventoryActionY(), std::min(390, pageWidth() - 16), smallSettingsLayout() ? 34 : 42);
@@ -1049,6 +1230,8 @@ private:
         if (route.category == CategoryId::Display && !m_display.dirty()) refreshDisplay();
         if (route.category == CategoryId::System && !m_display.dirty()) refreshDisplay();
         if (route.category == CategoryId::Personalization) refreshPersonalization();
+        if (route.category == CategoryId::Apps) refreshApps();
+        if (route.category == CategoryId::DateTime) refreshDateTime();
         const bool networkVisible = m_windowFocused && route.category == CategoryId::Network;
         m_networkRefreshPolicy.setActive(networkVisible, steadyMilliseconds());
         if (networkVisible && previousCategory != CategoryId::Network) refreshNetwork();
@@ -1069,6 +1252,10 @@ private:
             ? route.category == CategoryId::Devices && route.target == TargetId::DeviceDetail
             : requested == FocusControl::StorageDetailBack
             ? route.category == CategoryId::Storage && route.target == TargetId::StorageDiskDetail
+            : requested == FocusControl::AppsDetailBack
+            ? route.category == CategoryId::Apps && route.target == TargetId::AppDetail
+            : requested == FocusControl::DateTimeAdvanced
+            ? route.category == CategoryId::DateTime && route.target == TargetId::DateTimeTimeZone
             : requested == FocusControl::DisplayResolution
             ? m_display.available && m_display.supportedModes.size() > 1 && m_display.active.outputCount == 1
             : requested == FocusControl::DisplayMode ? m_display.available && m_display.active.outputCount > 1 : false;
@@ -1111,6 +1298,46 @@ private:
             case FocusControl::PersonalizationAdvanced: launchAdvanced("DisplayOptions"); break;
             case FocusControl::PersonalizationChooseBackground: chooseBackground(); break;
             case FocusControl::DateTimeAdvanced: launchAdvanced("DisplayOptions"); break;
+            case FocusControl::AppEntry:
+                if (item.index >= 0 && static_cast<size_t>(item.index) < m_appInventory.count) {
+                    const AppInventoryEntry& selected = m_appInventory.entries[static_cast<size_t>(item.index)];
+                    m_selectedAppId = selected.appId;
+                    m_selectedAppGeneration = selected.registrationGeneration;
+                    m_selectedAppMissing = false;
+                    m_appStatus.clear();
+                    navigateTo(SettingsRoute{ CategoryId::Apps, TargetId::AppDetail });
+                }
+                break;
+            case FocusControl::AppsDetailBack: {
+                for (size_t i = 0; i < m_appInventory.count; ++i) {
+                    const AppInventoryEntry& entry = m_appInventory.entries[i];
+                    if (entry.appId == m_selectedAppId && entry.registrationGeneration == m_selectedAppGeneration) {
+                        m_focusedItem = FocusItem{ FocusItem::Kind::Control, static_cast<int>(i), FocusControl::AppEntry };
+                        break;
+                    }
+                }
+                m_selectedAppId.clear();
+                m_selectedAppGeneration = 0;
+                m_selectedAppMissing = false;
+                m_appStatus.clear();
+                navigateTo(SettingsRoute{ CategoryId::Apps, TargetId::AppsList });
+                break;
+            }
+            case FocusControl::AppsOpen: {
+                const AppInventoryEntry* selected = findAppInventoryEntry(
+                    m_appInventory, m_selectedAppId, m_selectedAppGeneration);
+                if (!selected || !selected->openSupported) {
+                    m_appStatus = "This app is no longer available to open.";
+                    break;
+                }
+                std::string error;
+                if (DesktopService::LaunchApp(selected->appId, error)) {
+                    m_appStatus = "Open request sent through the App Model.";
+                } else {
+                    m_appStatus = error.empty() ? "The App Model could not open this app." : error;
+                }
+                break;
+            }
             case FocusControl::StorageDiskManager: launchAdvanced("DiskManager"); break;
             case FocusControl::DeviceEntry:
                 if (item.index >= 0 && item.index < static_cast<int>(m_deviceSnapshot.deviceCount) &&
@@ -1941,6 +2168,150 @@ private:
             "Open Disk Manager", false, sameFocus(m_hoverItem, manager), sameFocus(m_focusedItem, manager), true);
     }
 
+    void renderApps()
+    {
+        const int x = pageX();
+        const int width = pageWidth();
+        const int top = inventoryListTop();
+        const int bottom = inventoryListBottom();
+        std::string count = std::to_string(m_appInventory.count);
+        if (m_appInventory.truncated) count += " of " + std::to_string(m_appInventory.totalCount);
+        count += m_appInventory.count == 1 ? " registered app" : " registered apps";
+        if (m_appInventory.truncated) count += " · inventory truncated";
+        drawText(x + 8, top - 28, count, mutedTextColor());
+        drawText(x + 8, top - 12, "Source: guideXOS App Model registry", mutedTextColor());
+
+        drawRect(x + 4, top, width - 8, bottom - top, cardColor());
+        drawOutline(x + 4, top, width - 8, bottom - top, borderColor());
+        if (m_appInventory.count == 0) {
+            drawText(x + 20, top + 24, "No applications are currently registered with the App Model.", mutedTextColor());
+            return;
+        }
+
+        const size_t first = static_cast<size_t>(m_appScroll);
+        const size_t end = std::min(m_appInventory.count, first + static_cast<size_t>(inventoryVisibleRows()));
+        for (size_t index = first; index < end; ++index) {
+            const AppInventoryEntry& app = m_appInventory.entries[index];
+            const int rowY = top + static_cast<int>(index - first) * inventoryRowPitch();
+            const FocusItem row{ FocusItem::Kind::Control, static_cast<int>(index), FocusControl::AppEntry };
+            const bool focused = sameFocus(row, m_focusedItem);
+            const bool hovered = sameFocus(row, m_hoverItem);
+            const uint32_t fill = hovered ? blendColor(cardColor(), accentColor(), 8) :
+                focused ? blendColor(cardColor(), accentColor(), 5) : cardColor();
+            drawRect(x + 10, rowY + 2, width - 28, inventoryRowPitch() - 6, fill);
+            if (focused || hovered) drawOutline(x + 10, rowY + 2, width - 28, inventoryRowPitch() - 6, accentColor());
+            const size_t charLimit = static_cast<size_t>(std::max(12, (width - 72) / 8));
+            drawText(x + 20, rowY + 7, fitText(app.displayName, charLimit), textColor());
+            const std::string secondary = std::string(appSourceLabel(app.source)) + " · " + appKindLabel(app.kind);
+            drawText(x + 20, rowY + (smallSettingsLayout() ? 27 : 30), fitText(secondary, charLimit), mutedTextColor());
+            drawText(x + width - 34, rowY + 16, ">", accentColor());
+        }
+        if (m_appInventory.count > static_cast<size_t>(inventoryVisibleRows()))
+            drawText(x + 10, bottom - 17, "Use the mouse wheel or arrow keys to browse.", mutedTextColor());
+    }
+
+    void renderAppDetails()
+    {
+        const int x = pageX();
+        const int width = pageWidth();
+        const int top = inventoryListTop();
+        const int bottom = inventoryListBottom();
+        const FocusItem back{ FocusItem::Kind::Control, 0, FocusControl::AppsDetailBack };
+        drawButton(x + 8, top, std::min(300, width - 16), smallSettingsLayout() ? 34 : 42,
+            "Back to Apps", false, sameFocus(m_hoverItem, back), sameFocus(m_focusedItem, back), true);
+        const int cardY = top + (smallSettingsLayout() ? 40 : 48);
+        drawRect(x + 4, cardY, width - 8, bottom - cardY, cardColor());
+        drawOutline(x + 4, cardY, width - 8, bottom - cardY, borderColor());
+
+        const AppInventoryEntry* app = findAppInventoryEntry(
+            m_appInventory, m_selectedAppId, m_selectedAppGeneration);
+        if (!app || m_selectedAppMissing) {
+            drawText(x + 20, cardY + 24, "This app registration is no longer available.", mutedTextColor());
+            drawText(x + 20, cardY + 48, "Return to Apps and select a current registration.", mutedTextColor());
+            return;
+        }
+
+        drawText(x + 18, cardY + 12,
+            fitText(app->displayName, static_cast<size_t>(std::max(12, (width - 40) / 8))), textColor());
+        std::vector<std::pair<std::string, std::string>> rows;
+        rows.push_back({ "Application ID", app->appId });
+        rows.push_back({ "Type", appKindLabel(app->kind) });
+        rows.push_back({ "Registration", appSourceLabel(app->source) });
+        if (!app->version.empty()) rows.push_back({ "Version", app->version });
+        if (!app->launchName.empty()) rows.push_back({ "Launch identity", app->launchName });
+
+        const size_t fullWidthLimit = static_cast<size_t>(std::max(12, (width - 40) / 8));
+        const size_t valueLimit = static_cast<size_t>(std::max(8, std::min(30, (width / 2 - 24) / 8)));
+        int rowY = cardY + (smallSettingsLayout() ? 38 : 44);
+        for (size_t i = 0; i < rows.size(); ++i) {
+            if (i == 0) {
+                drawText(x + 18, rowY, rows[i].first, mutedTextColor());
+                drawText(x + 18, rowY + 16, fitText(rows[i].second, fullWidthLimit), textColor());
+                rowY += smallSettingsLayout() ? 38 : 42;
+            } else {
+                drawText(x + 18, rowY, rows[i].first, mutedTextColor());
+                drawText(x + width / 2, rowY, fitText(rows[i].second, valueLimit), textColor());
+                rowY += smallSettingsLayout() ? 26 : 32;
+            }
+        }
+        if (!app->openSupported) {
+            drawText(x + 18, std::min(bottom - 18, rowY + 2), "Open is unavailable in this runtime.", mutedTextColor());
+        }
+        if (!m_appStatus.empty())
+            drawText(x + 18, bottom - 18, fitText(m_appStatus, fullWidthLimit), mutedTextColor());
+
+        if (app->openSupported) {
+            const FocusItem open{ FocusItem::Kind::Control, 0, FocusControl::AppsOpen };
+            drawButton(x + 8, inventoryActionY(), std::min(390, width - 16), smallSettingsLayout() ? 34 : 42,
+                "Open", false, sameFocus(m_hoverItem, open), sameFocus(m_focusedItem, open), true);
+        }
+    }
+
+    void renderDateTimeClockText()
+    {
+        if (m_windowId == 0 || m_search.size() != 0 ||
+            m_navigation.selectedCategory() != CategoryId::DateTime) return;
+        const int x = pageX();
+        const int width = pageWidth();
+        const int top = dateTimeTop();
+        drawRect(x + 12, top + 38, width - 24, 58, cardColor());
+        const size_t textLimit = static_cast<size_t>(std::max(12, (width - 40) / 8));
+        drawText(x + 18, top + 42, fitText(formatDateTimeDate(m_dateTimeSnapshot), textLimit), textColor());
+        drawText(x + 18, top + 68, formatDateTimeClock(m_dateTimeSnapshot), accentColor());
+    }
+
+    void renderDateTimePage()
+    {
+        const int x = pageX();
+        const int width = pageWidth();
+        const int top = dateTimeTop();
+        const int clockHeight = dateTimeClockCardHeight();
+        const bool clockHighlighted = m_navigation.route().target == TargetId::DateTimeTime;
+        drawCard(x + 4, top, width - 8, clockHeight, "Current date and time");
+        if (clockHighlighted) drawOutline(x + 4, top, width - 8, clockHeight, accentColor());
+        renderDateTimeClockText();
+        drawText(x + 18, top + (smallSettingsLayout() ? 96 : 112),
+            "Source: hosted runtime wall clock", mutedTextColor());
+
+        const int zoneY = dateTimeZoneCardY();
+        const int zoneHeight = dateTimeZoneCardHeight();
+        const bool zoneHighlighted = m_navigation.route().target == TargetId::DateTimeTimeZone;
+        drawCard(x + 4, zoneY, width - 8, zoneHeight, "Time zone");
+        if (zoneHighlighted) drawOutline(x + 4, zoneY, width - 8, zoneHeight, accentColor());
+        const size_t textLimit = static_cast<size_t>(std::max(12, (width - 40) / 8));
+        drawText(x + 18, zoneY + 40,
+            fitText(formatDateTimeTimeZoneName(m_dateTimeSnapshot), textLimit), textColor());
+        drawText(x + 18, zoneY + 58,
+            fitText(formatDateTimeTimeZoneOffset(m_dateTimeSnapshot), textLimit), textColor());
+        drawText(x + 18, zoneY + 82, "U.S. DST rules; no IANA database.", mutedTextColor());
+        drawText(x + 18, zoneY + 100, "Automatic time is unavailable.", mutedTextColor());
+        drawText(x + 18, zoneY + 118, "Manual time/RTC writes unavailable.", mutedTextColor());
+        const FocusItem zoneAction{ FocusItem::Kind::Control, 0, FocusControl::DateTimeAdvanced };
+        drawButton(x + 8, dateTimeActionY(), std::min(390, width - 16), dateTimeActionHeight(),
+            "Open time-zone settings", false, sameFocus(m_hoverItem, zoneAction),
+            sameFocus(m_focusedItem, zoneAction), true);
+    }
+
     void renderAdvancedPage(const std::string& description, FocusControl control, const std::string& action)
     {
         const int x = pageX();
@@ -2042,6 +2413,8 @@ int SettingsCenter::main(int argc, char** argv)
             application.refreshPersonalizationIfRequested();
             if (application.refreshNetworkIfDue()) application.render();
             if (application.refreshInventoryIfDue()) application.render();
+            if (application.refreshAppsIfDue()) application.render();
+            application.refreshDateTimeClockIfDue();
             continue;
         }
         application.refreshPersonalizationIfRequested();

@@ -1,6 +1,7 @@
 #pragma once
 #include "app_launch_target.h"
 #include "app_manifest.h"
+#include "settings_s6_model.h"
 
 #include <string>
 #include <vector>
@@ -132,6 +133,9 @@ namespace gxos { namespace apps { struct RegisteredApp; } namespace gui {
         static bool RegisterDevelopmentApp(const apps::RegisteredApp& app, std::string& error);
         static bool UnregisterDevelopmentApp(const std::string& appId, uint64_t ownerRuntimeId, uint64_t generation);
         static bool IsInstalledAppId(const std::string& appId);
+        // Bounded, value-owned snapshot for Settings. It is built from the
+        // authoritative AppRegistry, including temporary-registration identity.
+        static ::gxos::apps::settings::AppInventory GetSettingsAppModelInventory();
         // Semantic hosted-development launch. The caller must have already
         // registered a DevelopmentTemporary AppRegistry entry; this method
         // still uses the normal resolver, Native ELF pipeline, and runtime.

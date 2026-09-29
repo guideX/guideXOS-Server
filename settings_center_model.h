@@ -49,7 +49,11 @@ enum class TargetId : unsigned char {
     DeviceDetail,
     StorageDiskDetail,
     AboutVersion,
-    PersonalizationBackground
+    PersonalizationBackground,
+    AppsList,
+    AppDetail,
+    DateTimeTime,
+    DateTimeTimeZone
 };
 
 struct CategoryInfo {
@@ -66,7 +70,7 @@ inline constexpr std::array<CategoryInfo, static_cast<size_t>(CategoryId::Count)
     { CategoryId::Personalization, "personalization", "Personalization", "Desktop background and appearance." },
     { CategoryId::Devices, "devices", "Devices", "Connected devices and input." },
     { CategoryId::Storage, "storage", "Storage", "Disks and storage tools." },
-    { CategoryId::Apps, "apps", "Apps", "Installed and built-in applications." },
+    { CategoryId::Apps, "apps", "Apps", "Applications registered with the guideXOS App Model." },
     { CategoryId::Users, "users", "Users", "User accounts and sign-in." },
     { CategoryId::DateTime, "date-time", "Date & Time", "Clock and time-zone settings." },
     { CategoryId::Accessibility, "accessibility", "Accessibility", "Accessibility tools." },
@@ -138,7 +142,8 @@ inline bool parseSettingsRoute(const std::string& uri, SettingsRoute& route)
 
     TargetId targetId = TargetId::Page;
     if (!target.empty()) {
-        if (target == "device" || target == "computer") targetId = TargetId::SystemDevice;
+        if (target == "list") targetId = TargetId::AppsList;
+        else if (target == "device" || target == "computer") targetId = TargetId::SystemDevice;
         else if (target == "background" || target == "wallpaper") targetId = TargetId::PersonalizationBackground;
         else if (target == "resolution") targetId = TargetId::Resolution;
         else if (target == "display-mode") targetId = TargetId::DisplayMode;
@@ -155,6 +160,8 @@ inline bool parseSettingsRoute(const std::string& uri, SettingsRoute& route)
         else if (target == "usb") targetId = TargetId::DevicesUsb;
         else if (target == "other") targetId = TargetId::DevicesOther;
         else if (target == "version") targetId = TargetId::AboutVersion;
+        else if (target == "time") targetId = TargetId::DateTimeTime;
+        else if (target == "timezone") targetId = TargetId::DateTimeTimeZone;
         else return false;
     }
 
@@ -169,6 +176,8 @@ inline bool parseSettingsRoute(const std::string& uri, SettingsRoute& route)
           targetId == TargetId::DevicesDisplay || targetId == TargetId::DevicesStorage ||
           targetId == TargetId::DevicesAudio || targetId == TargetId::DevicesUsb ||
           targetId == TargetId::DevicesOther || targetId == TargetId::DeviceDetail) && category == CategoryId::Devices) ||
+        ((targetId == TargetId::AppsList || targetId == TargetId::AppDetail) && category == CategoryId::Apps) ||
+        ((targetId == TargetId::DateTimeTime || targetId == TargetId::DateTimeTimeZone) && category == CategoryId::DateTime) ||
         (targetId == TargetId::AboutVersion && category == CategoryId::About);
     if (!validTarget) return false;
     route = SettingsRoute{ category, targetId };
@@ -181,7 +190,7 @@ struct SearchEntry {
     SettingsRoute route;
 };
 
-inline constexpr std::array<SearchEntry, 27> kSearchEntries = {{
+inline constexpr std::array<SearchEntry, 29> kSearchEntries = {{
     { "System overview", "system computer hardware device hostname processor cpu memory ram architecture", { CategoryId::System, TargetId::SystemDevice } },
     { "Resolution", "resolution screen monitor display size", { CategoryId::Display, TargetId::Resolution } },
     { "Display mode", "display mirror extend monitor layout", { CategoryId::Display, TargetId::DisplayMode } },
@@ -200,9 +209,11 @@ inline constexpr std::array<SearchEntry, 27> kSearchEntries = {{
     { "USB devices", "usb peripheral", { CategoryId::Devices, TargetId::DevicesUsb } },
     { "Disks and partitions", "storage disk disks partition partitions drive filesystem fat32 removable", { CategoryId::Storage, TargetId::StorageDisks } },
     { "Volumes", "volume mount mounted filesystem fat32", { CategoryId::Storage, TargetId::StorageVolumes } },
-    { "Applications", "apps app installed application programs", { CategoryId::Apps, TargetId::Page } },
+    { "Registered apps", "apps app installed application applications programs registered open app", { CategoryId::Apps, TargetId::AppsList } },
     { "User accounts", "users user account sign in", { CategoryId::Users, TargetId::Page } },
     { "Clock and time zone", "date time clock timezone time zone", { CategoryId::DateTime, TargetId::Page } },
+    { "Current time", "current time date clock calendar rtc", { CategoryId::DateTime, TargetId::DateTimeTime } },
+    { "Time zone", "timezone time zone utc daylight saving automatic time manual time", { CategoryId::DateTime, TargetId::DateTimeTimeZone } },
     { "Accessibility tools", "accessibility keyboard assistive", { CategoryId::Accessibility, TargetId::Page } },
     { "Developer tools", "developer diagnostics debug console", { CategoryId::Developer, TargetId::Page } },
     { "Version and platform information", "about version build guidexos server firmware uefi platform", { CategoryId::About, TargetId::AboutVersion } },
@@ -265,7 +276,10 @@ enum class FocusControl : unsigned char {
     StorageDetailBack,
     SystemControlPanel,
     DeveloperConsole,
-    AccessibilityKeyboard
+    AccessibilityKeyboard,
+    AppEntry,
+    AppsDetailBack,
+    AppsOpen
 };
 
 inline CategoryId focusControlCategory(FocusControl control)
@@ -298,6 +312,9 @@ inline CategoryId focusControlCategory(FocusControl control)
     case FocusControl::SystemControlPanel: return CategoryId::System;
     case FocusControl::DeveloperConsole: return CategoryId::Developer;
     case FocusControl::AccessibilityKeyboard: return CategoryId::Accessibility;
+    case FocusControl::AppEntry:
+    case FocusControl::AppsDetailBack:
+    case FocusControl::AppsOpen: return CategoryId::Apps;
     case FocusControl::None: return CategoryId::Count;
     }
     return CategoryId::Count;
@@ -328,6 +345,10 @@ public:
               route.target == TargetId::DevicesAudio || route.target == TargetId::DevicesUsb ||
               route.target == TargetId::DevicesOther || route.target == TargetId::DeviceDetail) &&
                 route.category == CategoryId::Devices) ||
+            ((route.target == TargetId::AppsList || route.target == TargetId::AppDetail) &&
+                route.category == CategoryId::Apps) ||
+            ((route.target == TargetId::DateTimeTime || route.target == TargetId::DateTimeTimeZone) &&
+                route.category == CategoryId::DateTime) ||
             (route.target == TargetId::AboutVersion && route.category == CategoryId::About);
         if (!targetValid) return false;
         m_route = route;
