@@ -89,6 +89,58 @@ void printSnapshot(uint32_t requestNumber,
     std::cout << "\n";
 }
 
+void printDeviceSnapshot(uint32_t requestNumber,
+                         const gxos::settings_inventory::DeviceSnapshot& snapshot)
+{
+    using namespace gxos::settings_inventory;
+    std::cout << "SYSCLIENT devices received request=" << requestNumber << " generation=";
+    printHex64(snapshot.generation);
+    std::cout << " devices=";
+    printHex32(snapshot.deviceCount);
+    std::cout << " total=";
+    printHex32(snapshot.totalDeviceCount);
+    std::cout << " truncated=";
+    printHex8(snapshot.truncated ? 1u : 0u);
+    std::cout << " backend=";
+    printHex8(static_cast<uint8_t>(snapshot.backend));
+    if (snapshot.deviceCount != 0u) {
+        const DeviceInfo& device = snapshot.devices[0];
+        std::cout << " id=" << device.stableId << " category=";
+        printHex8(static_cast<uint8_t>(device.category));
+        std::cout << " status=";
+        printHex8(static_cast<uint8_t>(device.status));
+    }
+    std::cout << "\n";
+}
+
+void printStorageSnapshot(uint32_t requestNumber,
+                          const gxos::settings_inventory::StorageSnapshot& snapshot)
+{
+    using namespace gxos::settings_inventory;
+    std::cout << "SYSCLIENT storage received request=" << requestNumber << " generation=";
+    printHex64(snapshot.generation);
+    std::cout << " disks=";
+    printHex32(snapshot.diskCount);
+    std::cout << " volumes=";
+    printHex32(snapshot.volumeCount);
+    std::cout << " truncated=";
+    printHex8(snapshot.truncated ? 1u : 0u);
+    std::cout << " backend=";
+    printHex8(static_cast<uint8_t>(snapshot.backend));
+    if (snapshot.diskCount != 0u) {
+        const DiskInfo& disk = snapshot.disks[0];
+        std::cout << " diskId=" << disk.stableId << " bytes=";
+        printHex64(disk.capacityBytes);
+        std::cout << " sector=";
+        printHex32(disk.sectorSize);
+        std::cout << " partitions=";
+        printHex8(disk.partitionCount);
+        std::cout << " table=";
+        printHex8(static_cast<uint8_t>(disk.partitionTable));
+    }
+    std::cout << "\n";
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -146,5 +198,31 @@ int main(int argc, char** argv)
         return 1;
     }
     printSnapshot(4u, afterDeniedMutation);
+
+    gxos::settings_inventory::DeviceSnapshot devices{};
+    if (client.getDeviceSnapshot(&devices) != gxos::system_service::ClientResult::Ok ||
+        devices.backend != gxos::settings_inventory::Backend::Kernel ||
+        devices.generation == 0u || devices.deviceCount == 0u) {
+        std::cerr << "SYSCLIENT device snapshot failed or contained no guideXOS devices"
+            << " backend=" << static_cast<unsigned>(devices.backend)
+            << " generation=" << devices.generation
+            << " devices=" << devices.deviceCount << "\n";
+        return 1;
+    }
+    printDeviceSnapshot(5u, devices);
+
+    gxos::settings_inventory::StorageSnapshot storage{};
+    if (client.getStorageSnapshot(&storage) != gxos::system_service::ClientResult::Ok ||
+        storage.backend != gxos::settings_inventory::Backend::Kernel ||
+        storage.generation == 0u || storage.diskCount == 0u ||
+        (storage.disks[0].flags & gxos::settings_inventory::kDiskFlagCapacityAvailable) == 0u ||
+        (storage.disks[0].flags & gxos::settings_inventory::kDiskFlagSectorSizeAvailable) == 0u) {
+        std::cerr << "SYSCLIENT storage snapshot failed or lacked an identifiable disk capacity"
+            << " backend=" << static_cast<unsigned>(storage.backend)
+            << " generation=" << storage.generation
+            << " disks=" << storage.diskCount << "\n";
+        return 1;
+    }
+    printStorageSnapshot(6u, storage);
     return 0;
 }

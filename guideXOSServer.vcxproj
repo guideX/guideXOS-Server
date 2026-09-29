@@ -163,6 +163,9 @@
     <ClInclude Include="system_service_dispatcher.h" />
     <ClInclude Include="system_service_protocol.h" />
     <ClInclude Include="system_service_qemu_transport.h" />
+    <ClInclude Include="settings_inventory_contract.h" />
+    <ClInclude Include="settings_inventory_service.h" />
+    <ClInclude Include="kernel\core\include\kernel\settings_inventory_provider.h" />
     <ClInclude Include="settings_center_model.h" />
     <ClInclude Include="network_settings_contract.h" />
     <ClInclude Include="elf_validator.h" />
@@ -558,6 +561,7 @@
     <ClCompile Include="kernel\core\msi.cpp" />
     <ClCompile Include="kernel\core\nic.cpp" />
     <ClCompile Include="kernel\core\network_settings_provider.cpp" />
+    <ClCompile Include="kernel\core\settings_inventory_provider.cpp" />
     <ClCompile Include="kernel\core\system_service_bridge.cpp" />
     <ClCompile Include="kernel\core\nvme.cpp" />
     <ClCompile Include="kernel\core\pci_audio.cpp" />

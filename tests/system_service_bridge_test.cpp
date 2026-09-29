@@ -7,13 +7,19 @@
 #include <chrono>
 #include <cstring>
 #include <iostream>
+#include <string>
 
 using namespace gxos::network_settings;
 using namespace gxos::system_service;
+namespace inventory = gxos::settings_inventory;
 
 namespace {
 int checks = 0;
 int failures = 0;
+int deviceChecks = 0;
+int deviceFailures = 0;
+int storageChecks = 0;
+int storageFailures = 0;
 
 void check(bool condition, const char* name)
 {
@@ -22,6 +28,22 @@ void check(bool condition, const char* name)
         ++failures;
         std::cerr << "FAIL: " << name << "\n";
     }
+}
+
+void checkDevice(bool condition, const char* name)
+{
+    ++deviceChecks;
+    const int before = failures;
+    check(condition, name);
+    if (failures != before) ++deviceFailures;
+}
+
+void checkStorage(bool condition, const char* name)
+{
+    ++storageChecks;
+    const int before = failures;
+    check(condition, name);
+    if (failures != before) ++storageFailures;
 }
 
 NetworkSnapshot makeKernelSnapshot(uint64_t generation, uint32_t address)
@@ -76,6 +98,33 @@ Result readSnapshot(void* context, NetworkSnapshot* output)
     return state.result;
 }
 
+struct InventoryProviderState {
+    inventory::DeviceSnapshot devices{};
+    inventory::StorageSnapshot storage{};
+    ResponseStatus deviceResult{ResponseStatus::Ok};
+    ResponseStatus storageResult{ResponseStatus::Ok};
+    uint32_t deviceCalls{0};
+    uint32_t storageCalls{0};
+};
+
+ResponseStatus readDevices(void* context, inventory::DeviceSnapshot* output)
+{
+    if (!context || !output) return ResponseStatus::InternalError;
+    InventoryProviderState& state = *static_cast<InventoryProviderState*>(context);
+    ++state.deviceCalls;
+    *output = state.devices;
+    return state.deviceResult;
+}
+
+ResponseStatus readStorage(void* context, inventory::StorageSnapshot* output)
+{
+    if (!context || !output) return ResponseStatus::InternalError;
+    InventoryProviderState& state = *static_cast<InventoryProviderState*>(context);
+    ++state.storageCalls;
+    *output = state.storage;
+    return state.storageResult;
+}
+
 enum class TransportFault {
     None,
     Timeout,
@@ -89,6 +138,7 @@ enum class TransportFault {
 
 struct TransportState {
     Provider provider{};
+    DispatchProviders inventoryProviders{};
     DispatchTrust trust{DispatchTrust::TrustedSystemServicePeer};
     TransportFault fault{TransportFault::None};
     uint32_t transactions{0};
@@ -115,7 +165,9 @@ TransportResult fakeTransact(void* context, const uint8_t* request,
     uint8_t requestCopy[kMaxRequestBytes]{};
     if (!request || requestBytes > sizeof(requestCopy)) return TransportResult::Failed;
     for (size_t i = 0; i < requestBytes; ++i) requestCopy[i] = request[i];
-    const bool dispatched = dispatch(requestCopy, requestBytes, state.provider,
+    DispatchProviders providers = state.inventoryProviders;
+    providers.network = state.provider;
+    const bool dispatched = dispatch(requestCopy, requestBytes, providers,
         state.trust, response, responseCapacity, responseBytes);
     if (!dispatched) return TransportResult::Failed;
     if (state.fault == TransportFault::Truncated && *responseBytes > 0) --*responseBytes;
@@ -432,6 +484,231 @@ int main()
           source.adapters[0].ipv4Address.value == beforeTelemetry.adapters[0].ipv4Address.value,
           "hosted socket telemetry stays separate from authoritative kernel snapshots");
 
+    InventoryProviderState inventoryState;
+    inventoryState.devices.backend = inventory::Backend::Kernel;
+    inventoryState.devices.state = inventory::SnapshotState::Available;
+    inventoryState.devices.generation = 41;
+    inventoryState.devices.deviceCount = inventoryState.devices.totalDeviceCount = 1;
+    inventory::DeviceInfo& device = inventoryState.devices.devices[0];
+    inventory::copyText(device.stableId, sizeof(device.stableId), "pci:00:03.0");
+    inventory::copyText(device.name, sizeof(device.name), "PCI device 8086:100E");
+    inventory::copyText(device.driver, sizeof(device.driver), "e1000");
+    inventory::copyText(device.location, sizeof(device.location), "PCI 00:03.0");
+    device.category = inventory::DeviceCategory::Network;
+    device.status = inventory::DeviceStatus::DriverLoaded;
+    device.vendorId = 0x8086;
+    device.deviceId = 0x100E;
+    device.flags = inventory::kDeviceFlagPciIdentity;
+
+    inventoryState.storage.backend = inventory::Backend::Kernel;
+    inventoryState.storage.state = inventory::SnapshotState::Available;
+    inventoryState.storage.generation = 51;
+    inventoryState.storage.diskCount = inventoryState.storage.totalDiskCount = 1;
+    inventory::DiskInfo& disk = inventoryState.storage.disks[0];
+    inventory::copyText(disk.stableId, sizeof(disk.stableId), "block:0:1");
+    inventory::copyText(disk.name, sizeof(disk.name), "ata0");
+    disk.transport = inventory::DiskTransport::AtaPio;
+    disk.flags = inventory::kDiskFlagCapacityAvailable |
+        inventory::kDiskFlagSectorSizeAvailable | inventory::kDiskFlagWritable;
+    disk.sectorSize = 512;
+    disk.capacityBytes = 1024ull * 1024ull * 1024ull;
+    disk.partitionTable = inventory::PartitionTableState::NoMbr;
+
+    DispatchProviders inventoryProviders{};
+    inventoryProviders.inventoryContext = &inventoryState;
+    inventoryProviders.readDevices = readDevices;
+    inventoryProviders.readStorage = readStorage;
+    uint8_t deviceRequest[kMaxRequestBytes]{};
+    size_t deviceRequestBytes = 0;
+    checkDevice(encodeRequest(kProtocolVersion,
+              static_cast<uint16_t>(RequestType::GetDeviceSnapshot), 301u, 0u,
+              deviceRequest, sizeof(deviceRequest), &deviceRequestBytes) &&
+          deviceRequestBytes == kRequestHeaderBytes,
+          "device snapshot request uses a fixed bounded header");
+    uint8_t storageRequest[kMaxRequestBytes]{};
+    size_t storageRequestBytes = 0;
+    checkStorage(encodeRequest(kProtocolVersion,
+              static_cast<uint16_t>(RequestType::GetStorageSnapshot), 302u, 0u,
+              storageRequest, sizeof(storageRequest), &storageRequestBytes) &&
+          storageRequestBytes == kRequestHeaderBytes,
+          "storage snapshot request uses a fixed bounded header");
+
+    checkDevice(dispatch(deviceRequest, deviceRequestBytes, inventoryProviders,
+              DispatchTrust::TrustedSystemServicePeer, response, sizeof(response), &responseBytes) &&
+          decodeResponseHeader(response, responseBytes, &responseHeader) &&
+          responseHeader.type == kDeviceSnapshotResponseType &&
+          responseHeader.requestId == 301u && responseHeader.status == ResponseStatus::Ok &&
+          responseHeader.payloadBytes == kDeviceSnapshotWireBytes,
+          "valid device snapshot request returns the matching typed bounded response");
+    inventory::DeviceSnapshot decodedDevices{};
+    checkDevice(decodeDeviceSnapshot(response + kResponseHeaderBytes,
+              responseHeader.payloadBytes, &decodedDevices) &&
+          decodedDevices.generation == 41 && decodedDevices.deviceCount == 1 &&
+          std::string(decodedDevices.devices[0].stableId) == "pci:00:03.0",
+          "device identity and provider generation round-trip over the bridge");
+    checkStorage(dispatch(storageRequest, storageRequestBytes, inventoryProviders,
+              DispatchTrust::TrustedSystemServicePeer, response, sizeof(response), &responseBytes) &&
+          decodeResponseHeader(response, responseBytes, &responseHeader) &&
+          responseHeader.type == kStorageSnapshotResponseType &&
+          responseHeader.requestId == 302u && responseHeader.status == ResponseStatus::Ok &&
+          responseHeader.payloadBytes == kStorageSnapshotWireBytes,
+          "valid storage snapshot request returns the matching typed bounded response");
+    inventory::StorageSnapshot decodedStorage{};
+    checkStorage(decodeStorageSnapshot(response + kResponseHeaderBytes,
+              responseHeader.payloadBytes, &decodedStorage) &&
+          decodedStorage.generation == 51 && decodedStorage.diskCount == 1 &&
+          decodedStorage.disks[0].capacityBytes == 1024ull * 1024ull * 1024ull &&
+          decodedStorage.disks[0].sectorSize == 512,
+          "disk capacity, sector size, identity, and generation round-trip");
+
+    uint8_t malformedDeviceRequest[kMaxRequestBytes]{};
+    std::memcpy(malformedDeviceRequest, deviceRequest, deviceRequestBytes);
+    writeU32(malformedDeviceRequest + 12, 1u);
+    checkDevice(dispatch(malformedDeviceRequest, deviceRequestBytes, inventoryProviders,
+              DispatchTrust::TrustedSystemServicePeer, response, sizeof(response), &responseBytes) &&
+          decodeResponseHeader(response, responseBytes, &responseHeader) &&
+          responseHeader.status == ResponseStatus::InvalidRequest,
+          "malformed device request payload is rejected before provider access");
+    uint8_t wrongVersionDeviceRequest[kMaxRequestBytes]{};
+    std::memcpy(wrongVersionDeviceRequest, deviceRequest, deviceRequestBytes);
+    writeU16(wrongVersionDeviceRequest + 4, static_cast<uint16_t>(kProtocolVersion + 1));
+    checkDevice(dispatch(wrongVersionDeviceRequest, deviceRequestBytes, inventoryProviders,
+              DispatchTrust::TrustedSystemServicePeer, response, sizeof(response), &responseBytes) &&
+          decodeResponseHeader(response, responseBytes, &responseHeader) &&
+          responseHeader.status == ResponseStatus::BadVersion,
+          "device snapshot protocol version mismatch is reported explicitly");
+
+    TransportState inventoryTransportState;
+    inventoryTransportState.inventoryProviders = inventoryProviders;
+    inventoryTransportState.fault = TransportFault::None;
+    SystemServiceClient inventoryClient(Transport{ &inventoryTransportState, fakeTransact }, 125u);
+    inventory::DeviceSnapshot clientDevices{};
+    checkDevice(inventoryClient.getDeviceSnapshot(&clientDevices) == ClientResult::Ok &&
+          clientDevices.generation == 41 && clientDevices.backend == inventory::Backend::Kernel &&
+          clientDevices.deviceCount == 1,
+          "production client returns the kernel device snapshot and generation");
+    inventory::StorageSnapshot clientStorage{};
+    checkStorage(inventoryClient.getStorageSnapshot(&clientStorage) == ClientResult::Ok &&
+          clientStorage.generation == 51 && clientStorage.diskCount == 1 &&
+          clientStorage.disks[0].capacityBytes == disk.capacityBytes,
+          "production client returns the kernel storage snapshot and capacity");
+
+    inventoryState.devices.generation = 42;
+    inventory::copyText(inventoryState.devices.devices[0].name,
+        sizeof(inventoryState.devices.devices[0].name), "Updated PCI device");
+    checkDevice(inventoryClient.getDeviceSnapshot(&clientDevices) == ClientResult::Ok &&
+          clientDevices.generation == 42 &&
+          std::string(clientDevices.devices[0].name) == "Updated PCI device",
+          "repeated device reads propagate provider-side generation changes");
+
+    inventoryState.devices = inventory::DeviceSnapshot{};
+    inventoryState.devices.backend = inventory::Backend::Unavailable;
+    inventoryState.devices.state = inventory::SnapshotState::Unavailable;
+    inventoryState.devices.generation = 43;
+    inventoryState.deviceResult = ResponseStatus::Unavailable;
+    checkDevice(inventoryClient.getDeviceSnapshot(&clientDevices) == ClientResult::Unavailable &&
+          clientDevices.backend == inventory::Backend::Unavailable && clientDevices.generation == 43,
+          "provider unavailability remains distinct from transport failure");
+    inventoryTransportState.inventoryProviders.readDevices = nullptr;
+    checkDevice(inventoryClient.getDeviceSnapshot(&clientDevices) == ClientResult::Unavailable &&
+          clientDevices.backend == inventory::Backend::Unavailable && clientDevices.generation == 0,
+          "missing device provider returns unavailable without fabricating a snapshot");
+
+    inventoryState.deviceResult = ResponseStatus::Ok;
+    inventoryState.devices = inventory::DeviceSnapshot{};
+    inventoryState.devices.backend = inventory::Backend::Kernel;
+    inventoryState.devices.state = inventory::SnapshotState::Available;
+    inventoryState.devices.generation = 44;
+    for (size_t i = 0; i < inventory::kMaxDevices + 1; ++i) {
+        inventory::DeviceInfo item{};
+        const std::string id = "device:" + std::to_string(i);
+        inventory::copyText(item.stableId, sizeof(item.stableId), id.c_str());
+        inventory::copyText(item.name, sizeof(item.name), "bounded device");
+        inventory::appendDevice(inventoryState.devices, item);
+    }
+    inventory::finishDeviceSnapshot(inventoryState.devices);
+    inventoryState.devices.generation = 44;
+    inventoryTransportState.inventoryProviders.readDevices = readDevices;
+    checkDevice(inventoryClient.getDeviceSnapshot(&clientDevices) == ClientResult::Ok &&
+          clientDevices.deviceCount == inventory::kMaxDevices && clientDevices.truncated &&
+          clientDevices.totalDeviceCount == inventory::kMaxDevices + 1,
+          "device truncation and total count propagate without overflow");
+
+    inventoryState.devices.deviceCount = static_cast<uint16_t>(inventory::kMaxDevices + 1);
+    checkDevice(inventoryClient.getDeviceSnapshot(&clientDevices) == ClientResult::ProtocolError,
+          "provider device capacity overflow is rejected instead of clamped");
+    inventoryState.devices.deviceCount = static_cast<uint16_t>(inventory::kMaxDevices);
+
+    inventoryState.storage = inventory::StorageSnapshot{};
+    inventoryState.storage.backend = inventory::Backend::Kernel;
+    inventoryState.storage.state = inventory::SnapshotState::Available;
+    inventoryState.storage.generation = 61;
+    for (size_t i = 0; i < inventory::kMaxDisks + 1; ++i) {
+        inventory::DiskInfo item{};
+        const std::string id = "disk:" + std::to_string(i);
+        inventory::copyText(item.stableId, sizeof(item.stableId), id.c_str());
+        inventory::copyText(item.name, sizeof(item.name), "bounded disk");
+        inventory::appendDisk(inventoryState.storage, item);
+    }
+    inventory::finishStorageSnapshot(inventoryState.storage);
+    inventoryState.storage.generation = 61;
+    checkStorage(inventoryClient.getStorageSnapshot(&clientStorage) == ClientResult::Ok &&
+          clientStorage.diskCount == inventory::kMaxDisks && clientStorage.truncated &&
+          clientStorage.totalDiskCount == inventory::kMaxDisks + 1,
+          "disk truncation and total count propagate over the bridge");
+    inventoryState.storage.diskCount = static_cast<uint16_t>(inventory::kMaxDisks + 1);
+    checkStorage(inventoryClient.getStorageSnapshot(&clientStorage) == ClientResult::ProtocolError,
+          "provider disk capacity overflow is rejected instead of clamped");
+    inventoryState.storage.diskCount = static_cast<uint16_t>(inventory::kMaxDisks);
+
+    inventoryTransportState.fault = TransportFault::Truncated;
+    checkDevice(inventoryClient.getDeviceSnapshot(&clientDevices) == ClientResult::ProtocolError,
+          "truncated device response is rejected by the production client");
+    inventoryTransportState.fault = TransportFault::BadResponseVersion;
+    checkStorage(inventoryClient.getStorageSnapshot(&clientStorage) == ClientResult::ProtocolError,
+          "storage response protocol version mismatch is rejected");
+    inventoryTransportState.fault = TransportFault::Oversized;
+    checkStorage(inventoryClient.getStorageSnapshot(&clientStorage) == ClientResult::ProtocolError,
+          "oversized storage response is rejected");
+    inventoryTransportState.fault = TransportFault::Timeout;
+    checkDevice(inventoryClient.getDeviceSnapshot(&clientDevices) == ClientResult::Timeout &&
+          clientDevices.backend == inventory::Backend::Unavailable,
+          "device request timeout clears prior state");
+    inventoryTransportState.fault = TransportFault::Disconnected;
+    checkStorage(inventoryClient.getStorageSnapshot(&clientStorage) == ClientResult::Disconnected &&
+          clientStorage.backend == inventory::Backend::Unavailable,
+          "storage disconnect clears prior state");
+
+    inventoryTransportState.fault = TransportFault::None;
+    inventoryState.storage = inventory::StorageSnapshot{};
+    inventoryState.storage.backend = inventory::Backend::Kernel;
+    inventoryState.storage.state = inventory::SnapshotState::Available;
+    inventoryState.storage.generation = 62;
+    inventoryState.storage.diskCount = inventoryState.storage.totalDiskCount = 1;
+    inventory::copyText(inventoryState.storage.disks[0].stableId,
+        sizeof(inventoryState.storage.disks[0].stableId), "disk:new-generation");
+    inventory::copyText(inventoryState.storage.disks[0].name,
+        sizeof(inventoryState.storage.disks[0].name), "new disk");
+    checkStorage(inventoryClient.getStorageSnapshot(&clientStorage) == ClientResult::Ok &&
+          clientStorage.generation == 62 &&
+          std::string(clientStorage.disks[0].stableId) == "disk:new-generation",
+          "storage reads recover with a fresh provider generation after disconnect");
+    inventoryState.storage = inventory::StorageSnapshot{};
+    inventoryState.storage.backend = inventory::Backend::Unavailable;
+    inventoryState.storage.state = inventory::SnapshotState::Unavailable;
+    inventoryState.storage.generation = 63;
+    inventoryState.storageResult = ResponseStatus::Unavailable;
+    checkStorage(inventoryClient.getStorageSnapshot(&clientStorage) == ClientResult::Unavailable &&
+          clientStorage.backend == inventory::Backend::Unavailable && clientStorage.generation == 63,
+          "storage provider unavailability remains distinct from transport failure");
+    inventoryState.storageResult = ResponseStatus::Ok;
+    inventoryTransportState.inventoryProviders.readStorage = nullptr;
+    checkStorage(inventoryClient.getStorageSnapshot(&clientStorage) == ClientResult::Unavailable &&
+          clientStorage.backend == inventory::Backend::Unavailable,
+          "missing storage provider returns a truthful unavailable snapshot");
+
+    std::cout << "Device bridge tests: " << (deviceChecks - deviceFailures) << "/" << deviceChecks << " passed\n";
+    std::cout << "Storage bridge tests: " << (storageChecks - storageFailures) << "/" << storageChecks << " passed\n";
     std::cout << "System-service bridge tests: " << (checks - failures) << "/" << checks << " passed\n";
     return failures == 0 ? 0 : 1;
 }

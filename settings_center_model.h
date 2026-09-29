@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include "settings_inventory_contract.h"
 
 namespace gxos {
 namespace apps {
@@ -37,6 +38,16 @@ enum class TargetId : unsigned char {
     DNS,
     Gateway,
     StorageDisks,
+    StorageVolumes,
+    DevicesInput,
+    DevicesNetwork,
+    DevicesDisplay,
+    DevicesStorage,
+    DevicesAudio,
+    DevicesUsb,
+    DevicesOther,
+    DeviceDetail,
+    StorageDiskDetail,
     AboutVersion,
     PersonalizationBackground
 };
@@ -135,6 +146,14 @@ inline bool parseSettingsRoute(const std::string& uri, SettingsRoute& route)
         else if (target == "dns") targetId = TargetId::DNS;
         else if (target == "gateway") targetId = TargetId::Gateway;
         else if (target == "disks" || target == "partitions") targetId = TargetId::StorageDisks;
+        else if (target == "volumes") targetId = TargetId::StorageVolumes;
+        else if (target == "input") targetId = TargetId::DevicesInput;
+        else if (target == "network") targetId = TargetId::DevicesNetwork;
+        else if (target == "display") targetId = TargetId::DevicesDisplay;
+        else if (target == "storage") targetId = TargetId::DevicesStorage;
+        else if (target == "audio" || target == "sound") targetId = TargetId::DevicesAudio;
+        else if (target == "usb") targetId = TargetId::DevicesUsb;
+        else if (target == "other") targetId = TargetId::DevicesOther;
         else if (target == "version") targetId = TargetId::AboutVersion;
         else return false;
     }
@@ -144,7 +163,12 @@ inline bool parseSettingsRoute(const std::string& uri, SettingsRoute& route)
         (targetId == TargetId::PersonalizationBackground && category == CategoryId::Personalization) ||
         ((targetId == TargetId::Resolution || targetId == TargetId::DisplayMode) && category == CategoryId::Display) ||
         ((targetId == TargetId::IPv4 || targetId == TargetId::DNS || targetId == TargetId::Gateway) && category == CategoryId::Network) ||
-        (targetId == TargetId::StorageDisks && category == CategoryId::Storage) ||
+        ((targetId == TargetId::StorageDisks || targetId == TargetId::StorageVolumes ||
+          targetId == TargetId::StorageDiskDetail) && category == CategoryId::Storage) ||
+        ((targetId == TargetId::DevicesInput || targetId == TargetId::DevicesNetwork ||
+          targetId == TargetId::DevicesDisplay || targetId == TargetId::DevicesStorage ||
+          targetId == TargetId::DevicesAudio || targetId == TargetId::DevicesUsb ||
+          targetId == TargetId::DevicesOther || targetId == TargetId::DeviceDetail) && category == CategoryId::Devices) ||
         (targetId == TargetId::AboutVersion && category == CategoryId::About);
     if (!validTarget) return false;
     route = SettingsRoute{ category, targetId };
@@ -157,7 +181,7 @@ struct SearchEntry {
     SettingsRoute route;
 };
 
-inline constexpr std::array<SearchEntry, 21> kSearchEntries = {{
+inline constexpr std::array<SearchEntry, 27> kSearchEntries = {{
     { "System overview", "system computer hardware device hostname processor cpu memory ram architecture", { CategoryId::System, TargetId::SystemDevice } },
     { "Resolution", "resolution screen monitor display size", { CategoryId::Display, TargetId::Resolution } },
     { "Display mode", "display mirror extend monitor layout", { CategoryId::Display, TargetId::DisplayMode } },
@@ -168,8 +192,14 @@ inline constexpr std::array<SearchEntry, 21> kSearchEntries = {{
     { "Gateway", "gateway router network ipv4", { CategoryId::Network, TargetId::Gateway } },
     { "Desktop background", "wallpaper background image personalize", { CategoryId::Personalization, TargetId::PersonalizationBackground } },
     { "Theme and appearance", "theme color appearance personalization desktop", { CategoryId::Personalization, TargetId::Page } },
-    { "Input devices", "devices mouse keyboard hardware", { CategoryId::Devices, TargetId::Page } },
-    { "Disks and partitions", "storage disk disks partition partitions drive", { CategoryId::Storage, TargetId::StorageDisks } },
+    { "Devices", "device devices hardware connected", { CategoryId::Devices, TargetId::Page } },
+    { "Input devices", "input mouse keyboard hid", { CategoryId::Devices, TargetId::DevicesInput } },
+    { "Network adapters", "network adapter ethernet nic", { CategoryId::Devices, TargetId::DevicesNetwork } },
+    { "Display adapters", "display adapter graphics gpu monitor", { CategoryId::Devices, TargetId::DevicesDisplay } },
+    { "Audio devices", "audio sound speaker microphone", { CategoryId::Devices, TargetId::DevicesAudio } },
+    { "USB devices", "usb peripheral", { CategoryId::Devices, TargetId::DevicesUsb } },
+    { "Disks and partitions", "storage disk disks partition partitions drive filesystem fat32 removable", { CategoryId::Storage, TargetId::StorageDisks } },
+    { "Volumes", "volume mount mounted filesystem fat32", { CategoryId::Storage, TargetId::StorageVolumes } },
     { "Applications", "apps app installed application programs", { CategoryId::Apps, TargetId::Page } },
     { "User accounts", "users user account sign in", { CategoryId::Users, TargetId::Page } },
     { "Clock and time zone", "date time clock timezone time zone", { CategoryId::DateTime, TargetId::Page } },
@@ -213,6 +243,7 @@ enum class FocusControl : unsigned char {
     SystemNetwork,
     SystemStorage,
     SystemAbout,
+    SystemDevices,
     NetworkAdapter,
     NetworkAdvanced,
     DisplayResolution,
@@ -224,6 +255,14 @@ enum class FocusControl : unsigned char {
     PersonalizationChooseBackground,
     DateTimeAdvanced,
     StorageDiskManager,
+    DeviceEntry,
+    DeviceDetailBack,
+    DeviceDetailNetwork,
+    DeviceDetailDisplay,
+    DeviceDetailStorage,
+    StorageDiskEntry,
+    StorageVolumeEntry,
+    StorageDetailBack,
     SystemControlPanel,
     DeveloperConsole,
     AccessibilityKeyboard
@@ -235,7 +274,8 @@ inline CategoryId focusControlCategory(FocusControl control)
     case FocusControl::SystemDisplay:
     case FocusControl::SystemNetwork:
     case FocusControl::SystemStorage:
-    case FocusControl::SystemAbout: return CategoryId::System;
+    case FocusControl::SystemAbout:
+    case FocusControl::SystemDevices: return CategoryId::System;
     case FocusControl::NetworkAdapter:
     case FocusControl::NetworkAdvanced: return CategoryId::Network;
     case FocusControl::DisplayResolution:
@@ -247,6 +287,14 @@ inline CategoryId focusControlCategory(FocusControl control)
     case FocusControl::PersonalizationChooseBackground: return CategoryId::Personalization;
     case FocusControl::DateTimeAdvanced: return CategoryId::DateTime;
     case FocusControl::StorageDiskManager: return CategoryId::Storage;
+    case FocusControl::StorageDiskEntry:
+    case FocusControl::StorageVolumeEntry:
+    case FocusControl::StorageDetailBack: return CategoryId::Storage;
+    case FocusControl::DeviceEntry:
+    case FocusControl::DeviceDetailBack:
+    case FocusControl::DeviceDetailNetwork:
+    case FocusControl::DeviceDetailDisplay:
+    case FocusControl::DeviceDetailStorage: return CategoryId::Devices;
     case FocusControl::SystemControlPanel: return CategoryId::System;
     case FocusControl::DeveloperConsole: return CategoryId::Developer;
     case FocusControl::AccessibilityKeyboard: return CategoryId::Accessibility;
@@ -273,7 +321,13 @@ public:
             (route.target == TargetId::PersonalizationBackground && route.category == CategoryId::Personalization) ||
             ((route.target == TargetId::Resolution || route.target == TargetId::DisplayMode) && route.category == CategoryId::Display) ||
             ((route.target == TargetId::IPv4 || route.target == TargetId::DNS || route.target == TargetId::Gateway) && route.category == CategoryId::Network) ||
-            (route.target == TargetId::StorageDisks && route.category == CategoryId::Storage) ||
+            ((route.target == TargetId::StorageDisks || route.target == TargetId::StorageVolumes ||
+              route.target == TargetId::StorageDiskDetail) && route.category == CategoryId::Storage) ||
+            ((route.target == TargetId::DevicesInput || route.target == TargetId::DevicesNetwork ||
+              route.target == TargetId::DevicesDisplay || route.target == TargetId::DevicesStorage ||
+              route.target == TargetId::DevicesAudio || route.target == TargetId::DevicesUsb ||
+              route.target == TargetId::DevicesOther || route.target == TargetId::DeviceDetail) &&
+                route.category == CategoryId::Devices) ||
             (route.target == TargetId::AboutVersion && route.category == CategoryId::About);
         if (!targetValid) return false;
         m_route = route;
@@ -359,6 +413,93 @@ inline std::string formatMemoryBytes(uint64_t bytes)
 {
     if (bytes == 0) return "Unavailable";
     return formatByteSize(bytes);
+}
+
+inline const char* deviceCategoryName(settings_inventory::DeviceCategory category)
+{
+    using settings_inventory::DeviceCategory;
+    switch (category) {
+    case DeviceCategory::Input: return "Input";
+    case DeviceCategory::Network: return "Network";
+    case DeviceCategory::Display: return "Display";
+    case DeviceCategory::Storage: return "Storage";
+    case DeviceCategory::Audio: return "Audio";
+    case DeviceCategory::Usb: return "USB";
+    case DeviceCategory::Other: default: return "Other device";
+    }
+}
+
+inline const char* deviceStatusName(settings_inventory::DeviceStatus status)
+{
+    using settings_inventory::DeviceStatus;
+    switch (status) {
+    case DeviceStatus::DriverLoaded: return "Driver loaded";
+    case DeviceStatus::NoDriver: return "No driver";
+    case DeviceStatus::Disconnected: return "Disconnected";
+    case DeviceStatus::Unavailable: return "Unavailable";
+    case DeviceStatus::Unknown: default: return "Status unavailable";
+    }
+}
+
+inline const char* diskTransportName(settings_inventory::DiskTransport transport)
+{
+    using settings_inventory::DiskTransport;
+    switch (transport) {
+    case DiskTransport::AtaPio: return "ATA PIO";
+    case DiskTransport::Ahci: return "AHCI";
+    case DiskTransport::Nvme: return "NVMe";
+    case DiskTransport::UsbMassStorage: return "USB mass storage";
+    case DiskTransport::Unknown: default: return "Transport unavailable";
+    }
+}
+
+inline const char* partitionTableName(settings_inventory::PartitionTableState state)
+{
+    using settings_inventory::PartitionTableState;
+    switch (state) {
+    case PartitionTableState::Unreadable: return "Partition table unreadable";
+    case PartitionTableState::NoMbr: return "No MBR signature";
+    case PartitionTableState::ValidMbr: return "MBR";
+    case PartitionTableState::InvalidMbr: return "Invalid MBR";
+    case PartitionTableState::GptUnsupported: return "GPT detected; details unavailable";
+    case PartitionTableState::Unknown: default: return "Partition table unavailable";
+    }
+}
+
+inline const char* fileSystemName(settings_inventory::FileSystem fileSystem)
+{
+    using settings_inventory::FileSystem;
+    switch (fileSystem) {
+    case FileSystem::Fat32: return "FAT32";
+    case FileSystem::ExFat: return "exFAT";
+    case FileSystem::Ext2: return "ext2";
+    case FileSystem::Ext4: return "ext4";
+    case FileSystem::Ufs: return "UFS";
+    case FileSystem::Iso9660: return "ISO9660";
+    case FileSystem::RamDisk: return "RamDisk";
+    case FileSystem::Unknown: default: return "Filesystem unavailable";
+    }
+}
+
+inline bool deviceMatchesFilter(settings_inventory::DeviceCategory category, TargetId target)
+{
+    using settings_inventory::DeviceCategory;
+    switch (target) {
+    case TargetId::DevicesInput: return category == DeviceCategory::Input;
+    case TargetId::DevicesNetwork: return category == DeviceCategory::Network;
+    case TargetId::DevicesDisplay: return category == DeviceCategory::Display;
+    case TargetId::DevicesStorage: return category == DeviceCategory::Storage;
+    case TargetId::DevicesAudio: return category == DeviceCategory::Audio;
+    case TargetId::DevicesUsb: return category == DeviceCategory::Usb;
+    case TargetId::DevicesOther: return category == DeviceCategory::Other;
+    default: return true;
+    }
+}
+
+inline bool selectionGenerationMatches(uint64_t selectedGeneration,
+                                       uint64_t currentGeneration)
+{
+    return selectedGeneration != 0 && selectedGeneration == currentGeneration;
 }
 
 inline std::string formatBootEnvironment(const std::string& identifier)

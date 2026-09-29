@@ -183,10 +183,48 @@ try {
             }
         }
         if ($serial -notmatch "\[SYSBRIDGE\] request received type=0001 id=$requestId" -or
-            $serial -notmatch "\[SYSBRIDGE\] authorized service=network.read_snapshot" -or
+            $serial -notmatch "\[SYSBRIDGE\] authorized service=read_only_snapshot" -or
             $serial -notmatch "\[SYSBRIDGE\] response sent id=$requestId status=0000 result=ok") {
             throw "Kernel request, authorization, or response markers are incomplete for request $requestNumber. Serial=$SerialLog"
         }
+    }
+    $clientDevices = [regex]::Matches($clientText,
+        'SYSCLIENT devices received request=5 generation=(?<generation>[0-9A-F]{16}) devices=(?<devices>[0-9A-F]{8}) total=(?<total>[0-9A-F]{8}) truncated=(?<truncated>[0-9A-F]{2}) backend=(?<backend>[0-9A-F]{2}) id=(?<id>\S+) category=(?<category>[0-9A-F]{2}) status=(?<status>[0-9A-F]{2})')
+    if ($clientDevices.Count -ne 1 -or $clientDevices[0].Groups['devices'].Value -eq '00000000' -or
+        $clientDevices[0].Groups['backend'].Value -ne '01') {
+        throw "Runtime client did not receive a non-empty kernel device inventory: $clientText"
+    }
+    $clientStorage = [regex]::Matches($clientText,
+        'SYSCLIENT storage received request=6 generation=(?<generation>[0-9A-F]{16}) disks=(?<disks>[0-9A-F]{8}) volumes=(?<volumes>[0-9A-F]{8}) truncated=(?<truncated>[0-9A-F]{2}) backend=(?<backend>[0-9A-F]{2}) diskId=(?<diskId>\S+) bytes=(?<bytes>[0-9A-F]{16}) sector=(?<sector>[0-9A-F]{8}) partitions=(?<partitions>[0-9A-F]{2}) table=(?<table>[0-9A-F]{2})')
+    if ($clientStorage.Count -ne 1 -or $clientStorage[0].Groups['disks'].Value -eq '00000000' -or
+        $clientStorage[0].Groups['backend'].Value -ne '01' -or
+        $clientStorage[0].Groups['bytes'].Value -eq '0000000000000000' -or
+        $clientStorage[0].Groups['sector'].Value -eq '00000000') {
+        throw "Runtime client did not receive a kernel disk identity and capacity: $clientText"
+    }
+
+    $serial = Read-SharedText $SerialLog
+    $kernelDevices = [regex]::Matches($serial,
+        '\[DEVICESNAP\] generation=(?<generation>[0-9A-F]{16}) devices=(?<devices>[0-9A-F]{8}) total=(?<total>[0-9A-F]{8}) truncated=(?<truncated>[0-9A-F]{2}) id=(?<id>\S+) name=(?<name>.+?) category=(?<category>[0-9A-F]{2}) status=(?<status>[0-9A-F]{2})')
+    if ($kernelDevices.Count -ne 1) { throw "Kernel device snapshot marker is missing or ambiguous. Serial=$SerialLog" }
+    foreach ($field in @('generation', 'devices', 'total', 'truncated', 'id', 'category', 'status')) {
+        if ($clientDevices[0].Groups[$field].Value -cne $kernelDevices[0].Groups[$field].Value) {
+            throw "Client device field '$field' does not match the kernel provider marker. Serial=$SerialLog"
+        }
+    }
+    $kernelStorage = [regex]::Matches($serial,
+        '\[STORAGESNAP\] generation=(?<generation>[0-9A-F]{16}) disks=(?<disks>[0-9A-F]{8}) volumes=(?<volumes>[0-9A-F]{8}) truncated=(?<truncated>[0-9A-F]{2}) diskId=(?<diskId>\S+) diskName=(?<diskName>.+?) bytes=(?<bytes>[0-9A-F]{16}) sector=(?<sector>[0-9A-F]{8}) partitions=(?<partitions>[0-9A-F]{2}) table=(?<table>[0-9A-F]{2})')
+    if ($kernelStorage.Count -ne 1) { throw "Kernel storage snapshot marker is missing or ambiguous. Serial=$SerialLog" }
+    foreach ($field in @('generation', 'disks', 'volumes', 'truncated', 'diskId', 'bytes', 'sector', 'partitions', 'table')) {
+        if ($clientStorage[0].Groups[$field].Value -cne $kernelStorage[0].Groups[$field].Value) {
+            throw "Client storage field '$field' does not match the kernel provider marker. Serial=$SerialLog"
+        }
+    }
+    if ($serial -notmatch '\[SYSBRIDGE\] request received type=0003 id=00000005' -or
+        $serial -notmatch '\[SYSBRIDGE\] response sent id=00000005 status=0000 result=ok' -or
+        $serial -notmatch '\[SYSBRIDGE\] request received type=0004 id=00000006' -or
+        $serial -notmatch '\[SYSBRIDGE\] response sent id=00000006 status=0000 result=ok') {
+        throw "Kernel device/storage request and response markers are incomplete. Serial=$SerialLog"
     }
     if ($serial -notmatch '\[SYSBRIDGE\] request received type=0002 id=00000003' -or
         $serial -notmatch '\[SYSBRIDGE\] rejected status=0002' -or
@@ -201,6 +239,7 @@ try {
     Write-Output "QEMU=$Qemu"
     Write-Output "COM2 loopback port=$Port"
     Write-Output "Client: $clientText"
+    Write-Output 'Kernel device/storage snapshot fields matched the production client response.'
     Write-Output "Serial evidence=$SerialLog"
     Write-Output "QEMU stderr=$StderrLog"
 } finally {

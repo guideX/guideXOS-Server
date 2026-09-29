@@ -18,6 +18,13 @@ namespace block {
 
 static BlockDevice s_devices[MAX_BLOCK_DEVICES];
 static uint8_t     s_deviceCount = 0;
+static uint64_t    s_deviceGenerations[MAX_BLOCK_DEVICES] = {};
+
+static void advanceGeneration(uint8_t index)
+{
+    ++s_deviceGenerations[index];
+    if (s_deviceGenerations[index] == 0) ++s_deviceGenerations[index];
+}
 
 // ================================================================
 // Helpers
@@ -42,6 +49,9 @@ static void memcopy(void* dst, const void* src, uint32_t len)
 
 void init()
 {
+    for (uint8_t i = 0; i < MAX_BLOCK_DEVICES; ++i) {
+        if (s_devices[i].active) advanceGeneration(i);
+    }
     memzero(s_devices, sizeof(s_devices));
     s_deviceCount = 0;
 }
@@ -52,6 +62,7 @@ uint8_t register_device(const BlockDevice& dev)
         if (!s_devices[i].active) {
             memcopy(&s_devices[i], &dev, sizeof(BlockDevice));
             s_devices[i].active = true;
+            advanceGeneration(i);
             ++s_deviceCount;
             return i;
         }
@@ -64,6 +75,7 @@ void unregister_device(uint8_t index)
     if (index >= MAX_BLOCK_DEVICES) return;
     if (!s_devices[index].active) return;
     s_devices[index].active = false;
+    advanceGeneration(index);
     if (s_deviceCount > 0) --s_deviceCount;
 }
 
@@ -77,6 +89,12 @@ const BlockDevice* get_device(uint8_t index)
     if (index >= MAX_BLOCK_DEVICES) return nullptr;
     if (!s_devices[index].active) return nullptr;
     return &s_devices[index];
+}
+
+uint64_t device_generation(uint8_t index)
+{
+    if (index >= MAX_BLOCK_DEVICES || !s_devices[index].active) return 0;
+    return s_deviceGenerations[index];
 }
 
 Status read_sectors(uint8_t devIndex,

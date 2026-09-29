@@ -158,6 +158,7 @@ struct MountPoint {
     char     path[VFS_MAX_PATH];      // Mount path (e.g., "/", "/mnt/usb")
     FSType   fsType;
     uint8_t  blockDevIndex;           // Block device index
+    uint64_t blockDeviceGeneration;   // Block registry lifecycle generation
     uint8_t  fsVolumeIndex;           // FS-specific volume index
     bool     readOnly;
     bool     alias;

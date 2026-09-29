@@ -11,6 +11,7 @@
 #include "logger.h"
 #include "network_telemetry.h"
 #include "settings_network_service.h"
+#include "settings_inventory_service.h"
 #include "settings_server_identity.h"
 #include "settings_system_information.h"
 #include "open_dialog.h"
@@ -32,6 +33,7 @@ namespace apps {
 using namespace gxos::gui;
 using namespace gxos::display;
 using namespace gxos::apps::settings;
+namespace inventory = gxos::settings_inventory;
 
 namespace {
 constexpr int kWindowWidth = 980;
@@ -158,6 +160,18 @@ std::string networkDnsText(const network_settings::NetworkInterfaceInfo& adapter
     return value;
 }
 
+std::string formatPciId(uint16_t vendor, uint16_t device)
+{
+    static const char kHex[] = "0123456789ABCDEF";
+    std::string value(9, '0');
+    value[4] = ':';
+    for (int i = 0; i < 4; ++i) {
+        value[i] = kHex[(vendor >> ((3 - i) * 4)) & 0xFu];
+        value[5 + i] = kHex[(device >> ((3 - i) * 4)) & 0xFu];
+    }
+    return value;
+}
+
 uint64_t steadyMilliseconds()
 {
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -213,6 +227,10 @@ public:
             m_networkRefreshPolicy.setActive(true, steadyMilliseconds());
             refreshNetwork();
         }
+        if (inventoryCategory(initialRoute.category)) {
+            m_inventoryRefreshPolicy.setActive(true, steadyMilliseconds());
+            refreshInventory();
+        }
         setFocusForRoute(initialRoute);
     }
 
@@ -225,10 +243,13 @@ public:
         m_windowFocused = focused;
         const bool refreshActive = focused && m_navigation.selectedCategory() == CategoryId::Network;
         m_networkRefreshPolicy.setActive(refreshActive, steadyMilliseconds());
+        const bool inventoryActive = focused && inventoryCategory(m_navigation.selectedCategory());
+        m_inventoryRefreshPolicy.setActive(inventoryActive, steadyMilliseconds());
         if (focused && m_navigation.selectedCategory() == CategoryId::Personalization) refreshPersonalization();
         if (refreshActive) {
             refreshNetwork();
         }
+        if (inventoryActive) refreshInventory();
         return true;
     }
 
@@ -236,6 +257,12 @@ public:
     {
         if (m_windowId == 0 || !m_networkRefreshPolicy.due(steadyMilliseconds())) return false;
         return refreshNetwork();
+    }
+
+    bool refreshInventoryIfDue()
+    {
+        if (m_windowId == 0 || !m_inventoryRefreshPolicy.due(steadyMilliseconds())) return false;
+        return refreshInventory();
     }
 
     bool refreshPersonalizationIfRequested()
@@ -295,8 +322,14 @@ public:
             case CategoryId::Display: renderDisplay(); break;
             case CategoryId::Network: renderNetwork(); break;
             case CategoryId::Personalization: renderPersonalization(); break;
-            case CategoryId::Devices: renderPlaceholder(); break;
-            case CategoryId::Storage: renderAdvancedPage("Disk Manager provides the current disk and partition tools.", FocusControl::StorageDiskManager, "Manage disks and partitions"); break;
+            case CategoryId::Devices:
+                if (m_navigation.route().target == TargetId::DeviceDetail) renderDeviceDetail();
+                else renderDevices();
+                break;
+            case CategoryId::Storage:
+                if (m_navigation.route().target == TargetId::StorageDiskDetail) renderStorageDiskDetail();
+                else renderStorage();
+                break;
             case CategoryId::Apps: renderPlaceholder(); break;
             case CategoryId::Users: renderPlaceholder(); break;
             case CategoryId::DateTime: renderAdvancedPage("Clock and time-zone settings remain available in Display Options.", FocusControl::DateTimeAdvanced, "Open date and time options"); break;
@@ -321,6 +354,30 @@ public:
             const int x = std::stoi(xs);
             const int y = std::stoi(ys);
             const int buttons = std::stoi(buttonsText);
+            if (action.rfind("wheel", 0) == 0) {
+                int wheelSteps = 0;
+                if (action == "wheel" || action == "wheelup") wheelSteps = 1;
+                else if (action == "wheeldown") wheelSteps = -1;
+                else {
+                    const size_t colon = action.find(':');
+                    if (colon != std::string::npos) wheelSteps = std::stoi(action.substr(colon + 1));
+                }
+                const bool insideList = x >= pageX() && x <= pageX() + pageWidth() &&
+                    y >= inventoryListTop() && y <= inventoryListBottom();
+                if (insideList && wheelSteps != 0) {
+                    if (m_navigation.selectedCategory() == CategoryId::Devices &&
+                        m_navigation.route().target != TargetId::DeviceDetail)
+                        m_deviceScroll -= wheelSteps * 3;
+                    else if (m_navigation.selectedCategory() == CategoryId::Storage &&
+                             m_navigation.route().target != TargetId::StorageDiskDetail)
+                        m_storageScroll -= wheelSteps * 3;
+                    clampInventoryScroll();
+                    m_hoverItem = hitTest(x, y);
+                    m_hasHover = true;
+                    render();
+                    return;
+                }
+            }
             const FocusItem previousHover = m_hoverItem;
             const bool previousHoverValid = m_hasHover;
             m_hoverItem = hitTest(x, y);
@@ -462,6 +519,17 @@ private:
     network_settings::NetworkSnapshot m_networkSnapshot{};
     network_settings::Result m_networkReadResult{network_settings::Result::Unavailable};
     network_settings::RefreshPolicy m_networkRefreshPolicy{};
+    inventory::DeviceSnapshot m_deviceSnapshot{};
+    inventory::StorageSnapshot m_storageSnapshot{};
+    system_service::ClientResult m_deviceReadResult{system_service::ClientResult::Unavailable};
+    system_service::ClientResult m_storageReadResult{system_service::ClientResult::Unavailable};
+    network_settings::RefreshPolicy m_inventoryRefreshPolicy{};
+    int m_deviceScroll{0};
+    int m_storageScroll{0};
+    std::string m_selectedDeviceStableId;
+    std::string m_selectedDiskStableId;
+    uint64_t m_selectedDeviceGeneration{0};
+    uint64_t m_selectedDiskGeneration{0};
 
     int searchX() const { return std::max(278, m_width - kSearchWidth - 16); }
     int searchWidth() const { return std::min(kSearchWidth, std::max(180, m_width - searchX() - 16)); }
@@ -537,8 +605,142 @@ private:
         case TargetId::PersonalizationBackground: return FocusControl::PersonalizationChooseBackground;
         case TargetId::Resolution: return FocusControl::DisplayResolution;
         case TargetId::DisplayMode: return FocusControl::DisplayMode;
+        case TargetId::DeviceDetail: return FocusControl::DeviceDetailBack;
+        case TargetId::StorageDiskDetail: return FocusControl::StorageDetailBack;
         default: return FocusControl::None;
         }
+    }
+
+    static bool inventoryCategory(CategoryId category)
+    {
+        return category == CategoryId::Devices || category == CategoryId::Storage;
+    }
+
+    bool refreshInventory()
+    {
+        bool changed = false;
+        if (m_navigation.selectedCategory() == CategoryId::Devices) {
+            const uint64_t oldGeneration = m_deviceSnapshot.generation;
+            const inventory::SnapshotState oldState = m_deviceSnapshot.state;
+            const uint16_t oldCount = m_deviceSnapshot.deviceCount;
+            const auto oldResult = m_deviceReadResult;
+            inventory::DeviceSnapshot latest{};
+            m_deviceReadResult = readSettingsDeviceSnapshot(&latest);
+            m_deviceSnapshot = latest;
+            changed = oldGeneration != latest.generation || oldState != latest.state ||
+                oldCount != latest.deviceCount || oldResult != m_deviceReadResult;
+        } else if (m_navigation.selectedCategory() == CategoryId::Storage) {
+            const uint64_t oldGeneration = m_storageSnapshot.generation;
+            const inventory::SnapshotState oldState = m_storageSnapshot.state;
+            const uint16_t oldDisks = m_storageSnapshot.diskCount;
+            const uint16_t oldVolumes = m_storageSnapshot.volumeCount;
+            const auto oldResult = m_storageReadResult;
+            inventory::StorageSnapshot latest{};
+            m_storageReadResult = readSettingsStorageSnapshot(&latest);
+            m_storageSnapshot = latest;
+            changed = oldGeneration != latest.generation || oldState != latest.state ||
+                oldDisks != latest.diskCount || oldVolumes != latest.volumeCount ||
+                oldResult != m_storageReadResult;
+        }
+        m_inventoryRefreshPolicy.completed(steadyMilliseconds());
+        return changed;
+    }
+
+    std::vector<int> deviceDisplayIndices() const
+    {
+        std::vector<int> indices;
+        const size_t count = std::min<size_t>(m_deviceSnapshot.deviceCount, inventory::kMaxDevices);
+        for (size_t i = 0; i < count; ++i) {
+            if (deviceMatchesFilter(m_deviceSnapshot.devices[i].category, m_navigation.route().target))
+                indices.push_back(static_cast<int>(i));
+        }
+        return indices;
+    }
+
+    struct StorageListEntry { bool volume{false}; int index{0}; };
+
+    std::vector<StorageListEntry> storageDisplayEntries() const
+    {
+        std::vector<StorageListEntry> entries;
+        const TargetId target = m_navigation.route().target;
+        if (target != TargetId::StorageVolumes) {
+            for (uint16_t i = 0; i < m_storageSnapshot.diskCount && i < inventory::kMaxDisks; ++i)
+                entries.push_back(StorageListEntry{ false, static_cast<int>(i) });
+        }
+        if (target != TargetId::StorageDisks) {
+            for (uint16_t i = 0; i < m_storageSnapshot.volumeCount && i < inventory::kMaxVolumes; ++i)
+                entries.push_back(StorageListEntry{ true, static_cast<int>(i) });
+        }
+        return entries;
+    }
+
+    int inventoryListTop() const { return kContentY + 96; }
+    int inventoryListBottom() const
+    {
+        const int reserved = m_navigation.selectedCategory() == CategoryId::Storage
+            ? (smallSettingsLayout() ? 66 : 78) : 24;
+        return std::max(inventoryListTop() + 48, m_height - reserved);
+    }
+    int inventoryRowPitch() const { return smallSettingsLayout() ? 48 : 56; }
+    int inventoryActionY() const { return m_height - (smallSettingsLayout() ? 54 : 62); }
+    int inventoryVisibleRows() const
+    {
+        return std::max(1, (inventoryListBottom() - inventoryListTop()) / inventoryRowPitch());
+    }
+
+    void clampInventoryScroll()
+    {
+        const int deviceMax = std::max(0, static_cast<int>(deviceDisplayIndices().size()) - inventoryVisibleRows());
+        const int storageMax = std::max(0, static_cast<int>(storageDisplayEntries().size()) - inventoryVisibleRows());
+        m_deviceScroll = std::max(0, std::min(m_deviceScroll, deviceMax));
+        m_storageScroll = std::max(0, std::min(m_storageScroll, storageMax));
+    }
+
+    void ensureInventoryFocusVisible()
+    {
+        if (m_focusedItem.kind != FocusItem::Kind::Control) return;
+        if (m_focusedItem.control == FocusControl::DeviceEntry) {
+            const std::vector<int> indices = deviceDisplayIndices();
+            for (size_t i = 0; i < indices.size(); ++i) {
+                if (indices[i] != m_focusedItem.index) continue;
+                if (static_cast<int>(i) < m_deviceScroll) m_deviceScroll = static_cast<int>(i);
+                else if (static_cast<int>(i) >= m_deviceScroll + inventoryVisibleRows())
+                    m_deviceScroll = static_cast<int>(i) - inventoryVisibleRows() + 1;
+                break;
+            }
+        } else if (m_focusedItem.control == FocusControl::StorageDiskEntry ||
+                   m_focusedItem.control == FocusControl::StorageVolumeEntry) {
+            const std::vector<StorageListEntry> entries = storageDisplayEntries();
+            for (size_t i = 0; i < entries.size(); ++i) {
+                if (entries[i].index != m_focusedItem.index ||
+                    entries[i].volume != (m_focusedItem.control == FocusControl::StorageVolumeEntry)) continue;
+                if (static_cast<int>(i) < m_storageScroll) m_storageScroll = static_cast<int>(i);
+                else if (static_cast<int>(i) >= m_storageScroll + inventoryVisibleRows())
+                    m_storageScroll = static_cast<int>(i) - inventoryVisibleRows() + 1;
+                break;
+            }
+        }
+        clampInventoryScroll();
+    }
+
+    const inventory::DeviceInfo* selectedDevice() const
+    {
+        if (!selectionGenerationMatches(m_selectedDeviceGeneration, m_deviceSnapshot.generation)) return nullptr;
+        for (uint16_t i = 0; i < m_deviceSnapshot.deviceCount && i < inventory::kMaxDevices; ++i) {
+            if (m_selectedDeviceStableId == m_deviceSnapshot.devices[i].stableId)
+                return &m_deviceSnapshot.devices[i];
+        }
+        return nullptr;
+    }
+
+    const inventory::DiskInfo* selectedDisk() const
+    {
+        if (!selectionGenerationMatches(m_selectedDiskGeneration, m_storageSnapshot.generation)) return nullptr;
+        for (uint16_t i = 0; i < m_storageSnapshot.diskCount && i < inventory::kMaxDisks; ++i) {
+            if (m_selectedDiskStableId == m_storageSnapshot.disks[i].stableId)
+                return &m_storageSnapshot.disks[i];
+        }
+        return nullptr;
     }
 
     void drawRect(int x, int y, int width, int height, uint32_t color) const
@@ -638,6 +840,7 @@ private:
             add(FocusControl::SystemDisplay);
             add(FocusControl::SystemNetwork);
             add(FocusControl::SystemStorage);
+            add(FocusControl::SystemDevices);
             add(FocusControl::SystemAbout);
             add(FocusControl::SystemControlPanel);
             break;
@@ -646,7 +849,30 @@ private:
             add(FocusControl::PersonalizationAdvanced);
             break;
         case CategoryId::DateTime: add(FocusControl::DateTimeAdvanced); break;
-        case CategoryId::Storage: add(FocusControl::StorageDiskManager); break;
+        case CategoryId::Devices:
+            if (m_navigation.route().target == TargetId::DeviceDetail) {
+                add(FocusControl::DeviceDetailBack);
+                const inventory::DeviceInfo* device = selectedDevice();
+                if (device && device->category == inventory::DeviceCategory::Network) add(FocusControl::DeviceDetailNetwork);
+                if (device && device->category == inventory::DeviceCategory::Display) add(FocusControl::DeviceDetailDisplay);
+                if (device && device->category == inventory::DeviceCategory::Storage) add(FocusControl::DeviceDetailStorage);
+            } else {
+                for (int index : deviceDisplayIndices())
+                    items.push_back(FocusItem{ FocusItem::Kind::Control, index, FocusControl::DeviceEntry });
+            }
+            break;
+        case CategoryId::Storage:
+            if (m_navigation.route().target == TargetId::StorageDiskDetail) {
+                add(FocusControl::StorageDetailBack);
+                add(FocusControl::StorageDiskManager);
+            } else {
+                for (const StorageListEntry& entry : storageDisplayEntries()) {
+                    const FocusControl control = entry.volume ? FocusControl::StorageVolumeEntry : FocusControl::StorageDiskEntry;
+                    items.push_back(FocusItem{ FocusItem::Kind::Control, entry.index, control });
+                }
+                add(FocusControl::StorageDiskManager);
+            }
+            break;
         case CategoryId::Developer: add(FocusControl::DeveloperConsole); break;
         case CategoryId::Accessibility: add(FocusControl::AccessibilityKeyboard); break;
         default: break;
@@ -664,6 +890,7 @@ private:
         }
         current = reverse ? (current + items.size() - 1) % items.size() : (current + 1) % items.size();
         m_focusedItem = items[current];
+        ensureInventoryFocusVisible();
     }
 
     void moveFocusWithinList(int delta)
@@ -682,6 +909,33 @@ private:
             const int next = (m_focusedItem.index + delta + count) % count;
             m_focusedItem.index = next;
             m_selectedNetworkAdapter = static_cast<uint32_t>(next);
+        } else if (m_focusedItem.kind == FocusItem::Kind::Control &&
+                   m_focusedItem.control == FocusControl::DeviceEntry) {
+            const std::vector<int> indices = deviceDisplayIndices();
+            if (!indices.empty()) {
+                size_t current = 0;
+                for (size_t i = 0; i < indices.size(); ++i)
+                    if (indices[i] == m_focusedItem.index) { current = i; break; }
+                const int next = (static_cast<int>(current) + delta + static_cast<int>(indices.size())) % static_cast<int>(indices.size());
+                m_focusedItem.index = indices[static_cast<size_t>(next)];
+                ensureInventoryFocusVisible();
+            }
+        } else if (m_focusedItem.kind == FocusItem::Kind::Control &&
+                   (m_focusedItem.control == FocusControl::StorageDiskEntry ||
+                    m_focusedItem.control == FocusControl::StorageVolumeEntry)) {
+            const std::vector<StorageListEntry> entries = storageDisplayEntries();
+            if (!entries.empty()) {
+                size_t current = 0;
+                for (size_t i = 0; i < entries.size(); ++i)
+                    if (entries[i].volume == (m_focusedItem.control == FocusControl::StorageVolumeEntry) &&
+                        entries[i].index == m_focusedItem.index) { current = i; break; }
+                const int next = std::max(0, std::min(static_cast<int>(entries.size()) - 1,
+                    static_cast<int>(current) + delta));
+                m_focusedItem.index = entries[static_cast<size_t>(next)].index;
+                m_focusedItem.control = entries[static_cast<size_t>(next)].volume
+                    ? FocusControl::StorageVolumeEntry : FocusControl::StorageDiskEntry;
+                ensureInventoryFocusVisible();
+            }
         }
     }
 
@@ -712,13 +966,14 @@ private:
         }
         for (const FocusItem& item : focusOrder()) {
             if (item.kind != FocusItem::Kind::Control || !m_navigation.canFocus(item.control)) continue;
-            if (controlHit(item.control, x, y)) return item;
+            if (controlHit(item, x, y)) return item;
         }
         return FocusItem{};
     }
 
-    bool controlHit(FocusControl control, int x, int y) const
+    bool controlHit(const FocusItem& focus, int x, int y) const
     {
+        const FocusControl control = focus.control;
         switch (control) {
         case FocusControl::NetworkAdvanced: return inRect(x, y, pageX() + 6, networkAdvancedY(), std::min(390, pageWidth() - 12), smallSettingsLayout() ? 30 : 40);
         case FocusControl::NetworkAdapter: return false;
@@ -730,14 +985,44 @@ private:
         case FocusControl::SystemDisplay: return inRect(x, y, systemLinkX(0), systemLinkY(0), systemLinkWidth(), systemLinkHeight());
         case FocusControl::SystemNetwork: return inRect(x, y, systemLinkX(1), systemLinkY(1), systemLinkWidth(), systemLinkHeight());
         case FocusControl::SystemStorage: return inRect(x, y, systemLinkX(2), systemLinkY(2), systemLinkWidth(), systemLinkHeight());
-        case FocusControl::SystemAbout: return inRect(x, y, systemLinkX(3), systemLinkY(3), systemLinkWidth(), systemLinkHeight());
-        case FocusControl::SystemControlPanel: return inRect(x, y, systemLinkX(4), systemLinkY(4), systemLinkWidth(), systemLinkHeight());
+        case FocusControl::SystemDevices: return inRect(x, y, systemLinkX(3), systemLinkY(3), systemLinkWidth(), systemLinkHeight());
+        case FocusControl::SystemAbout: return inRect(x, y, systemLinkX(4), systemLinkY(4), systemLinkWidth(), systemLinkHeight());
+        case FocusControl::SystemControlPanel: return inRect(x, y, systemLinkX(5), systemLinkY(5), systemLinkWidth(), systemLinkHeight());
         case FocusControl::PersonalizationChooseBackground: return inRect(x, y, pageX() + 8, personalizationChooseY(), std::min(390, pageWidth() - 16), personalizationActionHeight());
         case FocusControl::PersonalizationAdvanced: return inRect(x, y, pageX() + 8, personalizationAdvancedY(), std::min(390, pageWidth() - 16), personalizationActionHeight());
         case FocusControl::DateTimeAdvanced:
-        case FocusControl::StorageDiskManager:
         case FocusControl::DeveloperConsole:
         case FocusControl::AccessibilityKeyboard: return inRect(x, y, pageX() + 6, 210, std::min(390, pageWidth() - 12), 46);
+        case FocusControl::StorageDiskManager: return inRect(x, y, pageX() + 6, inventoryActionY(), std::min(390, pageWidth() - 12), smallSettingsLayout() ? 34 : 42);
+        case FocusControl::DeviceEntry: {
+            const std::vector<int> indices = deviceDisplayIndices();
+            for (size_t i = 0; i < indices.size(); ++i) {
+                if (indices[i] != focus.index) continue;
+                const int ordinal = static_cast<int>(i);
+                if (ordinal < m_deviceScroll || ordinal >= m_deviceScroll + inventoryVisibleRows()) continue;
+                const int rowY = inventoryListTop() + (ordinal - m_deviceScroll) * inventoryRowPitch();
+                if (inRect(x, y, pageX() + 8, rowY, pageWidth() - 16, inventoryRowPitch() - 4)) return true;
+            }
+            return false;
+        }
+        case FocusControl::StorageDiskEntry:
+        case FocusControl::StorageVolumeEntry: {
+            const std::vector<StorageListEntry> entries = storageDisplayEntries();
+            for (size_t i = 0; i < entries.size(); ++i) {
+                if (entries[i].index != focus.index ||
+                    entries[i].volume != (control == FocusControl::StorageVolumeEntry)) continue;
+                const int ordinal = static_cast<int>(i);
+                if (ordinal < m_storageScroll || ordinal >= m_storageScroll + inventoryVisibleRows()) return false;
+                const int rowY = inventoryListTop() + (ordinal - m_storageScroll) * inventoryRowPitch();
+                return inRect(x, y, pageX() + 8, rowY, pageWidth() - 16, inventoryRowPitch() - 4);
+            }
+            return false;
+        }
+        case FocusControl::DeviceDetailBack:
+        case FocusControl::StorageDetailBack: return inRect(x, y, pageX() + 8, inventoryListTop(), std::min(300, pageWidth() - 16), smallSettingsLayout() ? 34 : 42);
+        case FocusControl::DeviceDetailNetwork:
+        case FocusControl::DeviceDetailDisplay:
+        case FocusControl::DeviceDetailStorage: return inRect(x, y, pageX() + 8, inventoryActionY(), std::min(390, pageWidth() - 16), smallSettingsLayout() ? 34 : 42);
         case FocusControl::None: default: return false;
         }
     }
@@ -767,6 +1052,10 @@ private:
         const bool networkVisible = m_windowFocused && route.category == CategoryId::Network;
         m_networkRefreshPolicy.setActive(networkVisible, steadyMilliseconds());
         if (networkVisible && previousCategory != CategoryId::Network) refreshNetwork();
+        const bool inventoryVisible = m_windowFocused && inventoryCategory(route.category);
+        m_inventoryRefreshPolicy.setActive(inventoryVisible, steadyMilliseconds());
+        if (inventoryVisible && (previousCategory != route.category || !inventoryCategory(previousCategory)))
+            refreshInventory();
         setFocusForRoute(route);
         m_search.clear();
     }
@@ -776,6 +1065,10 @@ private:
         const FocusControl requested = initialFocusFor(route);
         const bool focusable = requested == FocusControl::PersonalizationChooseBackground
             ? route.category == CategoryId::Personalization
+            : requested == FocusControl::DeviceDetailBack
+            ? route.category == CategoryId::Devices && route.target == TargetId::DeviceDetail
+            : requested == FocusControl::StorageDetailBack
+            ? route.category == CategoryId::Storage && route.target == TargetId::StorageDiskDetail
             : requested == FocusControl::DisplayResolution
             ? m_display.available && m_display.supportedModes.size() > 1 && m_display.active.outputCount == 1
             : requested == FocusControl::DisplayMode ? m_display.available && m_display.active.outputCount > 1 : false;
@@ -804,6 +1097,7 @@ private:
             case FocusControl::SystemNetwork: navigateTo(SettingsRoute{ CategoryId::Network, TargetId::Page }); break;
             case FocusControl::SystemStorage: navigateTo(SettingsRoute{ CategoryId::Storage, TargetId::Page }); break;
             case FocusControl::SystemAbout: navigateTo(SettingsRoute{ CategoryId::About, TargetId::Page }); break;
+            case FocusControl::SystemDevices: navigateTo(SettingsRoute{ CategoryId::Devices, TargetId::Page }); break;
             case FocusControl::NetworkAdapter:
                 if (item.index >= 0 && static_cast<uint32_t>(item.index) < m_networkSnapshot.adapterCount)
                     m_selectedNetworkAdapter = static_cast<uint32_t>(item.index);
@@ -818,6 +1112,51 @@ private:
             case FocusControl::PersonalizationChooseBackground: chooseBackground(); break;
             case FocusControl::DateTimeAdvanced: launchAdvanced("DisplayOptions"); break;
             case FocusControl::StorageDiskManager: launchAdvanced("DiskManager"); break;
+            case FocusControl::DeviceEntry:
+                if (item.index >= 0 && item.index < static_cast<int>(m_deviceSnapshot.deviceCount) &&
+                    static_cast<size_t>(item.index) < inventory::kMaxDevices) {
+                    m_selectedDeviceStableId = m_deviceSnapshot.devices[item.index].stableId;
+                    m_selectedDeviceGeneration = m_deviceSnapshot.generation;
+                    navigateTo(SettingsRoute{ CategoryId::Devices, TargetId::DeviceDetail });
+                }
+                break;
+            case FocusControl::DeviceDetailBack:
+                m_selectedDeviceStableId.clear();
+                navigateTo(SettingsRoute{ CategoryId::Devices, TargetId::Page });
+                break;
+            case FocusControl::DeviceDetailNetwork: navigateTo(SettingsRoute{ CategoryId::Network, TargetId::Page }); break;
+            case FocusControl::DeviceDetailDisplay: navigateTo(SettingsRoute{ CategoryId::Display, TargetId::Page }); break;
+            case FocusControl::DeviceDetailStorage: navigateTo(SettingsRoute{ CategoryId::Storage, TargetId::Page }); break;
+            case FocusControl::StorageDiskEntry:
+                if (item.index >= 0 && item.index < static_cast<int>(m_storageSnapshot.diskCount) &&
+                    static_cast<size_t>(item.index) < inventory::kMaxDisks) {
+                    m_storageScroll = 0;
+                    m_selectedDiskStableId = m_storageSnapshot.disks[item.index].stableId;
+                    m_selectedDiskGeneration = m_storageSnapshot.generation;
+                    navigateTo(SettingsRoute{ CategoryId::Storage, TargetId::StorageDiskDetail });
+                }
+                break;
+            case FocusControl::StorageVolumeEntry:
+                if (item.index >= 0 && item.index < static_cast<int>(m_storageSnapshot.volumeCount) &&
+                    static_cast<size_t>(item.index) < inventory::kMaxVolumes) {
+                    const inventory::VolumeInfo& volume = m_storageSnapshot.volumes[item.index];
+                    for (uint16_t i = 0; i < m_storageSnapshot.diskCount; ++i) {
+                        if (volume.diskStableId[0] &&
+                            std::string(m_storageSnapshot.disks[i].stableId) == volume.diskStableId) {
+                            m_storageScroll = 0;
+                            m_selectedDiskStableId = m_storageSnapshot.disks[i].stableId;
+                            m_selectedDiskGeneration = m_storageSnapshot.generation;
+                            navigateTo(SettingsRoute{ CategoryId::Storage, TargetId::StorageDiskDetail });
+                            break;
+                        }
+                    }
+                }
+                break;
+            case FocusControl::StorageDetailBack:
+                m_selectedDiskStableId.clear();
+                m_storageScroll = 0;
+                navigateTo(SettingsRoute{ CategoryId::Storage, TargetId::Page });
+                break;
             case FocusControl::SystemControlPanel: launchAdvanced("ControlPanel"); break;
             case FocusControl::DeveloperConsole: launchAdvanced("Console"); break;
             case FocusControl::AccessibilityKeyboard: launchAdvanced("OnScreenKeyboard"); break;
@@ -1046,14 +1385,22 @@ private:
             const CategoryInfo* resultCategory = categoryInfo(results.values[i].route.category);
             std::string summary = resultCategory ? resultCategory->label : "Settings";
             if (results.values[i].route.target != TargetId::Page) {
-                const char* detail = results.values[i].route.target == TargetId::SystemDevice ? "Device information" :
-                    results.values[i].route.target == TargetId::PersonalizationBackground ? "Background" :
-                    results.values[i].route.target == TargetId::Resolution ? "Resolution" :
-                    results.values[i].route.target == TargetId::DisplayMode ? "Display mode" :
-                    results.values[i].route.target == TargetId::IPv4 ? "IP assignment" :
-                    results.values[i].route.target == TargetId::DNS ? "DNS" :
-                    results.values[i].route.target == TargetId::Gateway ? "Gateway" :
-                    results.values[i].route.target == TargetId::StorageDisks ? "Disks and partitions" : "Version";
+                const TargetId target = results.values[i].route.target;
+                const char* detail = target == TargetId::SystemDevice ? "Device information" :
+                    target == TargetId::PersonalizationBackground ? "Background" :
+                    target == TargetId::Resolution ? "Resolution" :
+                    target == TargetId::DisplayMode ? "Display mode" :
+                    target == TargetId::IPv4 ? "IP assignment" :
+                    target == TargetId::DNS ? "DNS" :
+                    target == TargetId::Gateway ? "Gateway" :
+                    target == TargetId::StorageDisks ? "Disks and partitions" :
+                    target == TargetId::StorageVolumes ? "Volumes" :
+                    target == TargetId::DevicesInput ? "Input devices" :
+                    target == TargetId::DevicesNetwork ? "Network adapters" :
+                    target == TargetId::DevicesDisplay ? "Display adapters" :
+                    target == TargetId::DevicesStorage ? "Storage devices" :
+                    target == TargetId::DevicesAudio ? "Audio devices" :
+                    target == TargetId::DevicesUsb ? "USB devices" : "Version";
                 summary += " > ";
                 summary += detail;
             }
@@ -1098,11 +1445,11 @@ private:
         drawCard(x, systemLinksY(), pageWidth(), systemLinksHeight(), "Related settings");
         const FocusControl controls[] = {
             FocusControl::SystemDisplay, FocusControl::SystemNetwork,
-            FocusControl::SystemStorage, FocusControl::SystemAbout,
+            FocusControl::SystemStorage, FocusControl::SystemDevices, FocusControl::SystemAbout,
             FocusControl::SystemControlPanel
         };
-        const char* labels[] = { "Display", "Network & Internet", "Storage", "About", "Control Panel" };
-        for (int i = 0; i < 5; ++i) {
+        const char* labels[] = { "Display", "Network & Internet", "Storage", "Devices", "About", "Control Panel" };
+        for (int i = 0; i < 6; ++i) {
             const FocusItem item{ FocusItem::Kind::Control, 0, controls[i] };
             drawButton(systemLinkX(i), systemLinkY(i), systemLinkWidth(), systemLinkHeight(), labels[i], false,
                 m_hoverItem.kind == item.kind && m_hoverItem.control == item.control,
@@ -1298,6 +1645,302 @@ private:
             drawText(x + 410, advancedY + 12, "Configuration is read-only in this Settings view.", mutedTextColor());
     }
 
+    void renderDevices()
+    {
+        const int x = pageX();
+        const int width = pageWidth();
+        const int top = inventoryListTop();
+        const int bottom = inventoryListBottom();
+        std::vector<int> indices = deviceDisplayIndices();
+        clampInventoryScroll();
+        std::string countText;
+        if (m_navigation.route().target == TargetId::Page) {
+            countText = std::to_string(m_deviceSnapshot.deviceCount) + " devices shown";
+            if (m_deviceSnapshot.truncated) countText += " · additional devices not displayed";
+        } else {
+            countText = std::to_string(indices.size()) + " matching devices";
+            if (m_deviceSnapshot.truncated) countText += " · inventory truncated";
+        }
+        drawText(x + 8, top - 28, countText, mutedTextColor());
+        const char* deviceSource = m_deviceSnapshot.backend == inventory::Backend::Kernel
+            ? "Source: guideXOS kernel inventory"
+            : m_deviceSnapshot.backend == inventory::Backend::HostedTest
+                ? "Source: deterministic test inventory, not kernel hardware"
+                : "Source: guideXOS device provider unavailable";
+        drawText(x + 8, top - 12, deviceSource, mutedTextColor());
+
+        drawRect(x + 4, top, width - 8, bottom - top, cardColor());
+        drawOutline(x + 4, top, width - 8, bottom - top, borderColor());
+        if (m_deviceReadResult != system_service::ClientResult::Ok ||
+            m_deviceSnapshot.backend == inventory::Backend::Unavailable ||
+            m_deviceSnapshot.state == inventory::SnapshotState::Unavailable) {
+            drawText(x + 20, top + 24, "guideXOS device inventory unavailable", mutedTextColor());
+            drawText(x + 20, top + 48, "Hosted Windows devices are not substituted.", mutedTextColor());
+            return;
+        }
+        if (m_deviceSnapshot.state == inventory::SnapshotState::Empty) {
+            drawText(x + 20, top + 24, "No devices available", mutedTextColor());
+            return;
+        }
+        if (indices.empty()) {
+            const char* filterName = m_navigation.route().target == TargetId::DevicesInput ? "input" :
+                m_navigation.route().target == TargetId::DevicesNetwork ? "network" :
+                m_navigation.route().target == TargetId::DevicesDisplay ? "display" :
+                m_navigation.route().target == TargetId::DevicesStorage ? "storage" :
+                m_navigation.route().target == TargetId::DevicesAudio ? "audio" :
+                m_navigation.route().target == TargetId::DevicesUsb ? "USB" : "other";
+            drawText(x + 20, top + 24, std::string("No ") + filterName + " devices reported by guideXOS.", mutedTextColor());
+            return;
+        }
+
+        const size_t first = static_cast<size_t>(m_deviceScroll);
+        const size_t end = std::min(indices.size(), first + static_cast<size_t>(inventoryVisibleRows()));
+        for (size_t ordinal = first; ordinal < end; ++ordinal) {
+            const int index = indices[ordinal];
+            const inventory::DeviceInfo& device = m_deviceSnapshot.devices[index];
+            const int rowY = top + static_cast<int>(ordinal - first) * inventoryRowPitch();
+            const FocusItem row{ FocusItem::Kind::Control, index, FocusControl::DeviceEntry };
+            const bool focused = sameFocus(row, m_focusedItem);
+            const bool hovered = sameFocus(row, m_hoverItem);
+            const uint32_t fill = hovered ? blendColor(cardColor(), accentColor(), 8) :
+                focused ? blendColor(cardColor(), accentColor(), 5) : cardColor();
+            drawRect(x + 10, rowY + 2, width - 28, inventoryRowPitch() - 6, fill);
+            if (focused || hovered) drawOutline(x + 10, rowY + 2, width - 28, inventoryRowPitch() - 6, accentColor());
+            const std::string name = device.name[0] ? device.name : "Device name unavailable";
+            drawText(x + 20, rowY + 7, fitText(name, static_cast<size_t>(std::max(12, (width - 72) / 8))), textColor());
+            const std::string subline = std::string(deviceCategoryName(device.category)) + " · " + deviceStatusName(device.status);
+            drawText(x + 20, rowY + (smallSettingsLayout() ? 27 : 30),
+                fitText(subline, static_cast<size_t>(std::max(12, (width - 72) / 8))), mutedTextColor());
+            drawText(x + width - 34, rowY + 16, ">", accentColor());
+        }
+        if (indices.size() > static_cast<size_t>(inventoryVisibleRows()))
+            drawText(x + 10, bottom - 17, "Use the mouse wheel or arrow keys to browse.", mutedTextColor());
+    }
+
+    void renderDeviceDetail()
+    {
+        const int x = pageX();
+        const int width = pageWidth();
+        const int top = inventoryListTop();
+        const FocusItem back{ FocusItem::Kind::Control, 0, FocusControl::DeviceDetailBack };
+        drawButton(x + 8, top, std::min(300, width - 16), smallSettingsLayout() ? 34 : 42,
+            "Back to devices", false, sameFocus(m_hoverItem, back), sameFocus(m_focusedItem, back), true);
+        const inventory::DeviceInfo* device = selectedDevice();
+        const int cardY = top + (smallSettingsLayout() ? 40 : 48);
+        const int cardBottom = inventoryListBottom();
+        drawRect(x + 4, cardY, width - 8, cardBottom - cardY, cardColor());
+        drawOutline(x + 4, cardY, width - 8, cardBottom - cardY, borderColor());
+        if (!device) {
+            const char* message = m_deviceReadResult != system_service::ClientResult::Ok
+                ? "Device details unavailable."
+                : selectionGenerationMatches(m_selectedDeviceGeneration, m_deviceSnapshot.generation)
+                    ? "This device is no longer available."
+                    : "The inventory changed. Return and select the device again.";
+            drawText(x + 20, cardY + 24, message, mutedTextColor());
+            return;
+        }
+        drawText(x + 18, cardY + 12,
+            fitText(device->name[0] ? device->name : "Device name unavailable",
+                static_cast<size_t>(std::max(12, (width - 40) / 8))), textColor());
+        const std::string rows[][2] = {
+            { "Type", deviceCategoryName(device->category) },
+            { "Driver", boundedSettingValue(device->driver, 42) },
+            { "Vendor/device ID", (device->flags & inventory::kDeviceFlagPciIdentity)
+                ? formatPciId(device->vendorId, device->deviceId) : "Unavailable" },
+            { "Location", boundedSettingValue(device->location, 48) },
+            { "Status", deviceStatusName(device->status) },
+            { "Identity", boundedSettingValue(device->stableId, 48) }
+        };
+        const int rowPitch = smallSettingsLayout() ? 26 : 34;
+        for (int i = 0; i < 6; ++i) {
+            const int rowY = cardY + (smallSettingsLayout() ? 38 : 44) + i * rowPitch;
+            drawText(x + 18, rowY, rows[i][0], mutedTextColor());
+            drawText(x + width / 2, rowY,
+                fitText(rows[i][1], static_cast<size_t>(std::max(12, width / 16))), textColor());
+        }
+        if (device->flags & inventory::kDeviceFlagTextTruncated)
+            drawText(x + 18, cardBottom - 18, "A device name was shortened to fit the bounded inventory.", mutedTextColor());
+
+        FocusControl link = device->category == inventory::DeviceCategory::Network ? FocusControl::DeviceDetailNetwork :
+            device->category == inventory::DeviceCategory::Display ? FocusControl::DeviceDetailDisplay :
+            device->category == inventory::DeviceCategory::Storage ? FocusControl::DeviceDetailStorage : FocusControl::None;
+        if (link != FocusControl::None) {
+            const char* label = link == FocusControl::DeviceDetailNetwork ? "Open Network & Internet" :
+                link == FocusControl::DeviceDetailDisplay ? "Open Display settings" : "Open Storage";
+            const FocusItem item{ FocusItem::Kind::Control, 0, link };
+            drawButton(x + 8, inventoryActionY(), std::min(390, width - 16), smallSettingsLayout() ? 34 : 42,
+                label, false, sameFocus(m_hoverItem, item), sameFocus(m_focusedItem, item), true);
+        }
+    }
+
+    std::vector<std::pair<std::string, std::string>> diskDetailRows(const inventory::DiskInfo& disk) const
+    {
+        std::vector<std::pair<std::string, std::string>> rows;
+        rows.push_back({ "Capacity", (disk.flags & inventory::kDiskFlagCapacityAvailable)
+            ? formatByteSize(disk.capacityBytes) : "Unavailable" });
+        rows.push_back({ "Logical sector size", (disk.flags & inventory::kDiskFlagSectorSizeAvailable)
+            ? std::to_string(disk.sectorSize) + " bytes" : "Unavailable" });
+        rows.push_back({ "Transport", diskTransportName(disk.transport) });
+        rows.push_back({ "Block writes", (disk.flags & inventory::kDiskFlagWritable)
+            ? "Available at the block layer" : "Read-only at the block layer" });
+        rows.push_back({ "Partition table", partitionTableName(disk.partitionTable) });
+        rows.push_back({ "Partitions", std::to_string(disk.totalPartitionCount) });
+        for (uint8_t i = 0; i < disk.partitionCount; ++i) {
+            const inventory::PartitionInfo& part = disk.partitions[i];
+            const uint64_t bytes = part.sectorCount <= UINT64_MAX / std::max<uint32_t>(1, disk.sectorSize)
+                ? part.sectorCount * disk.sectorSize : 0;
+            std::ostringstream label;
+            label << "Partition " << static_cast<unsigned>(part.number) << " · MBR type 0x"
+                  << std::hex << std::uppercase << static_cast<unsigned>(part.typeCode);
+            std::ostringstream value;
+            value << "LBA " << std::dec << part.startSector << " · "
+                  << (bytes ? formatByteSize(bytes) : std::string("Size unavailable"))
+                  << " · filesystem not probed · mount state unavailable";
+            rows.push_back({ label.str(), value.str() });
+        }
+        if (disk.totalPartitionCount > disk.partitionCount) {
+            rows.push_back({ "Additional partitions",
+                std::to_string(disk.totalPartitionCount - disk.partitionCount) + " not shown in the bounded inventory" });
+        }
+        for (uint16_t i = 0; i < m_storageSnapshot.volumeCount && i < inventory::kMaxVolumes; ++i) {
+            const inventory::VolumeInfo& volume = m_storageSnapshot.volumes[i];
+            if (volume.diskStableId[0] && std::string(volume.diskStableId) == disk.stableId) {
+                rows.push_back({ "Mounted volume", std::string(volume.mountPath) + " · " + fileSystemName(volume.fileSystem) });
+                rows.push_back({ "Volume free space", "Unavailable from the current filesystem provider" });
+            }
+        }
+        if (disk.partitionTable == inventory::PartitionTableState::ValidMbr && disk.partitionCount == 0)
+            rows.push_back({ "Partition details", "No MBR partitions reported" });
+        if (disk.partitionTable == inventory::PartitionTableState::GptUnsupported)
+            rows.push_back({ "Partition details", "GPT is detected; partition details are not available" });
+        return rows;
+    }
+
+    void renderStorage()
+    {
+        const int x = pageX();
+        const int width = pageWidth();
+        const int top = inventoryListTop();
+        const int bottom = inventoryListBottom();
+        const std::vector<StorageListEntry> entries = storageDisplayEntries();
+        clampInventoryScroll();
+        std::string countText = std::to_string(m_storageSnapshot.diskCount) + " disks · " +
+            std::to_string(m_storageSnapshot.volumeCount) + " mounted volumes";
+        if (m_storageSnapshot.truncated) countText += " · additional items not displayed";
+        drawText(x + 8, top - 28, countText, mutedTextColor());
+        const char* storageSource = m_storageSnapshot.backend == inventory::Backend::Kernel
+            ? "Source: guideXOS kernel inventory · filesystem free space unavailable"
+            : m_storageSnapshot.backend == inventory::Backend::HostedTest
+                ? "Source: deterministic test inventory, not kernel disks · free space unavailable"
+                : "Source: guideXOS storage provider unavailable";
+        drawText(x + 8, top - 12, storageSource, mutedTextColor());
+        drawRect(x + 4, top, width - 8, bottom - top, cardColor());
+        drawOutline(x + 4, top, width - 8, bottom - top, borderColor());
+        if (m_storageReadResult != system_service::ClientResult::Ok ||
+            m_storageSnapshot.backend == inventory::Backend::Unavailable ||
+            m_storageSnapshot.state == inventory::SnapshotState::Unavailable) {
+            drawText(x + 20, top + 24, "guideXOS storage information unavailable", mutedTextColor());
+            drawText(x + 20, top + 48, "Hosted Windows disks are not substituted.", mutedTextColor());
+        } else if (m_storageSnapshot.state == inventory::SnapshotState::Empty || entries.empty()) {
+            const char* message = m_navigation.route().target == TargetId::StorageVolumes
+                ? "No mounted volumes available" : "No storage devices detected";
+            drawText(x + 20, top + 24, message, mutedTextColor());
+        } else {
+            const size_t first = static_cast<size_t>(m_storageScroll);
+            const size_t end = std::min(entries.size(), first + static_cast<size_t>(inventoryVisibleRows()));
+            for (size_t ordinal = first; ordinal < end; ++ordinal) {
+                const StorageListEntry& entry = entries[ordinal];
+                std::string primary;
+                std::string secondary;
+                FocusControl control = FocusControl::StorageDiskEntry;
+                if (!entry.volume) {
+                    const inventory::DiskInfo& disk = m_storageSnapshot.disks[entry.index];
+                    primary = std::string("Disk · ") + (disk.name[0] ? disk.name : "Disk name unavailable");
+                    secondary = (disk.flags & inventory::kDiskFlagCapacityAvailable)
+                        ? formatByteSize(disk.capacityBytes) : "Capacity unavailable";
+                    secondary += std::string(" · ") + diskTransportName(disk.transport);
+                    secondary += (disk.flags & inventory::kDiskFlagWritable) ? " · write support available" : " · read-only";
+                    control = FocusControl::StorageDiskEntry;
+                } else {
+                    const inventory::VolumeInfo& volume = m_storageSnapshot.volumes[entry.index];
+                    primary = std::string("Volume · ") + (volume.mountPath[0] ? volume.mountPath : "Mount path unavailable");
+                    secondary = fileSystemName(volume.fileSystem);
+                    secondary += " · Mounted · free space unavailable";
+                    if (volume.flags & inventory::kVolumeFlagReadOnly) secondary += " · read-only";
+                    control = FocusControl::StorageVolumeEntry;
+                }
+                const int rowY = top + static_cast<int>(ordinal - first) * inventoryRowPitch();
+                const FocusItem row{ FocusItem::Kind::Control, entry.index, control };
+                const bool focused = sameFocus(row, m_focusedItem);
+                const bool hovered = sameFocus(row, m_hoverItem);
+                const uint32_t fill = hovered ? blendColor(cardColor(), accentColor(), 8) :
+                    focused ? blendColor(cardColor(), accentColor(), 5) : cardColor();
+                drawRect(x + 10, rowY + 2, width - 28, inventoryRowPitch() - 6, fill);
+                if (focused || hovered) drawOutline(x + 10, rowY + 2, width - 28, inventoryRowPitch() - 6, accentColor());
+                const size_t charLimit = static_cast<size_t>(std::max(12, (width - 72) / 8));
+                drawText(x + 20, rowY + 7, fitText(primary, charLimit), textColor());
+                drawText(x + 20, rowY + (smallSettingsLayout() ? 27 : 30), fitText(secondary, charLimit), mutedTextColor());
+                drawText(x + width - 34, rowY + 16, ">", accentColor());
+            }
+            if (entries.size() > static_cast<size_t>(inventoryVisibleRows()))
+                drawText(x + 10, bottom - 17, "Use the mouse wheel or arrow keys to browse.", mutedTextColor());
+        }
+
+        const FocusItem manager{ FocusItem::Kind::Control, 0, FocusControl::StorageDiskManager };
+        drawButton(x + 8, inventoryActionY(), std::min(390, width - 16), smallSettingsLayout() ? 34 : 42,
+            "Open Disk Manager", false, sameFocus(m_hoverItem, manager), sameFocus(m_focusedItem, manager), true);
+        if (!smallSettingsLayout())
+            drawText(x + 410, inventoryActionY() + 12, "Advanced disk operations remain in Disk Manager.", mutedTextColor());
+    }
+
+    void renderStorageDiskDetail()
+    {
+        const int x = pageX();
+        const int width = pageWidth();
+        const int top = inventoryListTop();
+        const FocusItem back{ FocusItem::Kind::Control, 0, FocusControl::StorageDetailBack };
+        drawButton(x + 8, top, std::min(300, width - 16), smallSettingsLayout() ? 34 : 42,
+            "Back to Storage", false, sameFocus(m_hoverItem, back), sameFocus(m_focusedItem, back), true);
+        const int cardY = top + (smallSettingsLayout() ? 40 : 48);
+        const int cardBottom = inventoryListBottom();
+        drawRect(x + 4, cardY, width - 8, cardBottom - cardY, cardColor());
+        drawOutline(x + 4, cardY, width - 8, cardBottom - cardY, borderColor());
+        const inventory::DiskInfo* disk = selectedDisk();
+        if (m_storageReadResult != system_service::ClientResult::Ok || !disk) {
+            const char* message = m_storageReadResult != system_service::ClientResult::Ok
+                ? "Disk details unavailable."
+                : selectionGenerationMatches(m_selectedDiskGeneration, m_storageSnapshot.generation)
+                    ? "This disk is no longer available."
+                    : "The storage inventory changed. Return and select the disk again.";
+            drawText(x + 20, cardY + 24, message, mutedTextColor());
+        } else {
+            drawText(x + 18, cardY + 12,
+                fitText(disk->name[0] ? disk->name : "Disk name unavailable",
+                    static_cast<size_t>(std::max(12, (width - 40) / 8))), textColor());
+            const std::vector<std::pair<std::string, std::string>> rows = diskDetailRows(*disk);
+            const int areaTop = cardY + (smallSettingsLayout() ? 38 : 44);
+            const int areaBottom = cardBottom - 4;
+            const int rowPitch = inventoryRowPitch();
+            const int visible = std::max(1, (areaBottom - areaTop) / rowPitch);
+            m_storageScroll = std::max(0, std::min(m_storageScroll,
+                std::max(0, static_cast<int>(rows.size()) - visible)));
+            const size_t first = static_cast<size_t>(m_storageScroll);
+            const size_t end = std::min(rows.size(), first + static_cast<size_t>(visible));
+            for (size_t i = first; i < end; ++i) {
+                const int rowY = areaTop + static_cast<int>(i - first) * rowPitch;
+                drawText(x + 18, rowY + 4, fitText(rows[i].first,
+                    static_cast<size_t>(std::max(12, width / 18))), mutedTextColor());
+                drawText(x + width / 2, rowY + 4, fitText(rows[i].second,
+                    static_cast<size_t>(std::max(12, width / 16))), textColor());
+            }
+            if (rows.size() > static_cast<size_t>(visible))
+                drawText(x + 18, cardBottom - 17, "Use the mouse wheel to view more disk and volume details.", mutedTextColor());
+        }
+        const FocusItem manager{ FocusItem::Kind::Control, 0, FocusControl::StorageDiskManager };
+        drawButton(x + 8, inventoryActionY(), std::min(390, width - 16), smallSettingsLayout() ? 34 : 42,
+            "Open Disk Manager", false, sameFocus(m_hoverItem, manager), sameFocus(m_focusedItem, manager), true);
+    }
+
     void renderAdvancedPage(const std::string& description, FocusControl control, const std::string& action)
     {
         const int x = pageX();
@@ -1398,6 +2041,7 @@ int SettingsCenter::main(int argc, char** argv)
         if (!ipc::Bus::pop("gui.output", message, 100)) {
             application.refreshPersonalizationIfRequested();
             if (application.refreshNetworkIfDue()) application.render();
+            if (application.refreshInventoryIfDue()) application.render();
             continue;
         }
         application.refreshPersonalizationIfRequested();

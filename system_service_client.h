@@ -45,7 +45,7 @@ public:
 
         ResponseHeader header{};
         if (!decodeResponseHeader(response, responseBytes, &header) ||
-            header.type != 0x8001u || header.requestId != requestId)
+            header.type != kNetworkSnapshotResponseType || header.requestId != requestId)
             return ClientResult::ProtocolError;
         if (header.payloadBytes == kSnapshotWireBytes) {
             NetworkSnapshot snapshot{};
@@ -95,7 +95,7 @@ public:
 
         ResponseHeader header{};
         if (!decodeResponseHeader(response, responseBytes, &header) ||
-            header.type != 0x8002u || header.requestId != requestId)
+            header.type != kConfigurationResponseType || header.requestId != requestId)
             return ClientResult::ProtocolError;
         if (header.status == ResponseStatus::Ok) {
             ConfigurationTransactionResult transaction{};
@@ -113,7 +113,78 @@ public:
         }
     }
 
+    ClientResult getDeviceSnapshot(settings_inventory::DeviceSnapshot* output)
+    {
+        using namespace settings_inventory;
+        if (!output) return ClientResult::InvalidArgument;
+        *output = DeviceSnapshot{};
+        output->backend = Backend::Unavailable;
+        output->state = SnapshotState::Unavailable;
+        return readInventorySnapshot(static_cast<uint16_t>(RequestType::GetDeviceSnapshot),
+            kDeviceSnapshotResponseType, kDeviceSnapshotWireBytes,
+            [output](const uint8_t* bytes, size_t length) {
+                return decodeDeviceSnapshot(bytes, length, output);
+            });
+    }
+
+    ClientResult getStorageSnapshot(settings_inventory::StorageSnapshot* output)
+    {
+        using namespace settings_inventory;
+        if (!output) return ClientResult::InvalidArgument;
+        *output = StorageSnapshot{};
+        output->backend = Backend::Unavailable;
+        output->state = SnapshotState::Unavailable;
+        return readInventorySnapshot(static_cast<uint16_t>(RequestType::GetStorageSnapshot),
+            kStorageSnapshotResponseType, kStorageSnapshotWireBytes,
+            [output](const uint8_t* bytes, size_t length) {
+                return decodeStorageSnapshot(bytes, length, output);
+            });
+    }
+
 private:
+    template <typename DecodeFunction>
+    ClientResult readInventorySnapshot(uint16_t requestType, uint16_t responseType,
+                                       size_t snapshotBytes, DecodeFunction decode)
+    {
+        if (!m_transport.transact) return ClientResult::Unavailable;
+        uint8_t request[kMaxRequestBytes]{};
+        size_t requestBytes = 0;
+        uint32_t requestId = m_nextRequestId++;
+        if (requestId == 0u) {
+            requestId = m_nextRequestId++;
+            if (requestId == 0u) requestId = 1u;
+        }
+        if (!encodeRequest(kProtocolVersion, requestType, requestId, 0u,
+                request, sizeof(request), &requestBytes)) return ClientResult::Failed;
+
+        uint8_t response[kMaxResponseBytes]{};
+        size_t responseBytes = 0;
+        const TransportResult transportResult = m_transport.transact(
+            m_transport.context, request, requestBytes, response,
+            sizeof(response), &responseBytes, m_timeoutMs);
+        if (transportResult == TransportResult::Timeout) return ClientResult::Timeout;
+        if (transportResult == TransportResult::Disconnected) return ClientResult::Disconnected;
+        if (transportResult != TransportResult::Ok) return ClientResult::Failed;
+
+        ResponseHeader header{};
+        if (!decodeResponseHeader(response, responseBytes, &header) ||
+            header.type != responseType || header.requestId != requestId)
+            return ClientResult::ProtocolError;
+        if (header.payloadBytes == snapshotBytes &&
+            !decode(response + kResponseHeaderBytes, header.payloadBytes))
+            return ClientResult::ProtocolError;
+        if (header.status == ResponseStatus::Ok && header.payloadBytes != snapshotBytes)
+            return ClientResult::ProtocolError;
+        switch (header.status) {
+        case ResponseStatus::Ok: return ClientResult::Ok;
+        case ResponseStatus::Unavailable: return ClientResult::Unavailable;
+        case ResponseStatus::Unauthorized: return ClientResult::Unauthorized;
+        case ResponseStatus::Unsupported: return ClientResult::Unsupported;
+        case ResponseStatus::InvalidRequest: return ClientResult::InvalidArgument;
+        default: return ClientResult::ProtocolError;
+        }
+    }
+
     Transport m_transport{};
     uint32_t m_timeoutMs{kDefaultRequestTimeoutMs};
     uint32_t m_nextRequestId{1};

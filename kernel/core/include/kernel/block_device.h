@@ -103,6 +103,10 @@ uint8_t device_count();
 // Return a device descriptor by global index (nullptr if invalid).
 const BlockDevice* get_device(uint8_t index);
 
+// Return the lifecycle generation for an active registry slot, or 0 when
+// the slot is empty. Retain it with the index to reject stale associations.
+uint64_t device_generation(uint8_t index);
+
 // ----------------------------------------------------------------
 // Sector I/O (delegates to the transport callbacks)
 // ----------------------------------------------------------------

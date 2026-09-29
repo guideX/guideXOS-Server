@@ -5,6 +5,7 @@
 #include "include/kernel/network_settings_provider.h"
 #include "include/kernel/pit.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/settings_inventory_provider.h"
 #include "system_service_dispatcher.h"
 
 namespace kernel {
@@ -13,6 +14,7 @@ namespace {
 
 using namespace gxos::system_service;
 using namespace gxos::network_settings;
+namespace settings_inventory = gxos::settings_inventory;
 
 constexpr uint16_t kCom2 = 0x2F8;
 constexpr uint8_t kCom2Irq = 3;
@@ -24,6 +26,7 @@ volatile uint16_t s_rxHead = 0;
 volatile uint16_t s_rxTail = 0;
 volatile bool s_rxOverflow = false;
 uint8_t s_request[kMaxRequestBytes]{};
+uint8_t s_response[kMaxResponseBytes]{};
 size_t s_requestUsed = 0;
 uint64_t s_lastRequestByteTick = 0;
 bool s_initialized = false;
@@ -94,12 +97,12 @@ void serveRequest()
     const uint32_t requestId = headerValid ? header.requestId : 0u;
     logRequest(type, requestId);
 
-    uint8_t response[kMaxResponseBytes]{};
+    uint8_t* response = s_response;
+    for (size_t i = 0; i < kMaxResponseBytes; ++i) response[i] = 0u;
     size_t responseBytes = 0;
-    const Provider provider =
-        network_settings_provider::appModelProvider();
+    const DispatchProviders provider = settings_inventory_provider::appModelProvider();
     const bool framed = dispatch(s_request, s_requestUsed, provider,
-        DispatchTrust::TrustedSystemServicePeer, response, sizeof(response),
+        DispatchTrust::TrustedSystemServicePeer, response, kMaxResponseBytes,
         &responseBytes);
     if (!framed || responseBytes < kResponseHeaderBytes) {
         serial::puts("[SYSBRIDGE] response failed reason=encode\n");
@@ -141,9 +144,79 @@ void serveRequest()
             serial::putc('\n');
         }
     }
+    if (responseHeaderValid && responseHeader.payloadBytes == kDeviceSnapshotWireBytes) {
+        settings_inventory::DeviceSnapshot snapshot{};
+        if (decodeDeviceSnapshot(response + kResponseHeaderBytes,
+                responseHeader.payloadBytes, &snapshot)) {
+            serial::puts("[DEVICESNAP] generation=");
+            serial::put_hex64(snapshot.generation);
+            serial::puts(" devices=");
+            serial::put_hex32(snapshot.deviceCount);
+            serial::puts(" total=");
+            serial::put_hex32(snapshot.totalDeviceCount);
+            serial::puts(" truncated=");
+            serial::put_hex8(snapshot.truncated ? 1u : 0u);
+            if (snapshot.deviceCount != 0u) {
+                const settings_inventory::DeviceInfo& device = snapshot.devices[0];
+                serial::puts(" id=");
+                serial::puts(device.stableId);
+                serial::puts(" name=");
+                serial::puts(device.name);
+                serial::puts(" category=");
+                serial::put_hex8(static_cast<uint8_t>(device.category));
+                serial::puts(" status=");
+                serial::put_hex8(static_cast<uint8_t>(device.status));
+                if ((device.flags & settings_inventory::kDeviceFlagPciIdentity) != 0u) {
+                    serial::puts(" pci=");
+                    serial::put_hex16(device.vendorId);
+                    serial::putc(':');
+                    serial::put_hex16(device.deviceId);
+                    serial::puts(" location=");
+                    serial::puts(device.location);
+                }
+            }
+            serial::putc('\n');
+        }
+    }
+    if (responseHeaderValid && responseHeader.payloadBytes == kStorageSnapshotWireBytes) {
+        settings_inventory::StorageSnapshot snapshot{};
+        if (decodeStorageSnapshot(response + kResponseHeaderBytes,
+                responseHeader.payloadBytes, &snapshot)) {
+            serial::puts("[STORAGESNAP] generation=");
+            serial::put_hex64(snapshot.generation);
+            serial::puts(" disks=");
+            serial::put_hex32(snapshot.diskCount);
+            serial::puts(" volumes=");
+            serial::put_hex32(snapshot.volumeCount);
+            serial::puts(" truncated=");
+            serial::put_hex8(snapshot.truncated ? 1u : 0u);
+            if (snapshot.diskCount != 0u) {
+                const settings_inventory::DiskInfo& disk = snapshot.disks[0];
+                serial::puts(" diskId=");
+                serial::puts(disk.stableId);
+                serial::puts(" diskName=");
+                serial::puts(disk.name);
+                serial::puts(" bytes=");
+                serial::put_hex64(disk.capacityBytes);
+                serial::puts(" sector=");
+                serial::put_hex32(disk.sectorSize);
+                serial::puts(" partitions=");
+                serial::put_hex8(disk.partitionCount);
+                serial::puts(" table=");
+                serial::put_hex8(static_cast<uint8_t>(disk.partitionTable));
+            }
+            if (snapshot.volumeCount != 0u) {
+                serial::puts(" mount=");
+                serial::puts(snapshot.volumes[0].mountPath);
+                serial::puts(" filesystem=");
+                serial::put_hex8(static_cast<uint8_t>(snapshot.volumes[0].fileSystem));
+            }
+            serial::putc('\n');
+        }
+    }
     if (responseHeaderValid && (responseHeader.status == ResponseStatus::Ok ||
         responseHeader.status == ResponseStatus::Unavailable)) {
-        serial::puts("[SYSBRIDGE] authorized service=network.read_snapshot\n");
+        serial::puts("[SYSBRIDGE] authorized service=read_only_snapshot\n");
     } else {
         serial::puts("[SYSBRIDGE] rejected status=");
         serial::put_hex16(responseHeaderValid

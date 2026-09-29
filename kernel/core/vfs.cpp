@@ -394,6 +394,9 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
     if (!s_initialized) {
         init();
     }
+
+    const uint64_t blockDeviceGeneration = block::device_generation(blockDevIndex);
+    if (blockDeviceGeneration == 0) return 0xFF;
     
     if (!path || strlen(path) == 0) {
         return 0xFF;
@@ -461,6 +464,7 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
     strcopy(mp.path, path, sizeof(mp.path));
     mp.fsType = fsType;
     mp.blockDevIndex = blockDevIndex;
+    mp.blockDeviceGeneration = blockDeviceGeneration;
     mp.fsVolumeIndex = fsVolume;
     const block::BlockDevice* blockDevice = block::get_device(blockDevIndex);
     mp.readOnly = !blockDevice || !blockDevice->writeFn;
@@ -540,6 +544,7 @@ uint8_t mount_alias(const char* path, const char* sourcePath)
     strcopy(mp.path, path, sizeof(mp.path));
     mp.fsType = sourceMount->fsType;
     mp.blockDevIndex = sourceMount->blockDevIndex;
+    mp.blockDeviceGeneration = sourceMount->blockDeviceGeneration;
     mp.fsVolumeIndex = sourceMount->fsVolumeIndex;
     mp.readOnly = sourceMount->readOnly;
     mp.alias = true;

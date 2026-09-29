@@ -1,6 +1,7 @@
 #pragma once
 
 #include "network_settings_contract.h"
+#include "settings_inventory_contract.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -18,15 +19,35 @@ constexpr size_t kSnapshotWireBytes = kSnapshotHeaderBytes +
     network_settings::kMaxAdapters * kAdapterWireBytes;
 constexpr size_t kConfigurationCandidateWireBytes = 64;
 constexpr size_t kConfigurationResultWireBytes = 16;
+constexpr size_t kDeviceSnapshotHeaderBytes = 20;
+constexpr size_t kDeviceWireBytes = 180;
+constexpr size_t kDeviceSnapshotWireBytes = kDeviceSnapshotHeaderBytes +
+    settings_inventory::kMaxDevices * kDeviceWireBytes;
+constexpr size_t kStorageSnapshotHeaderBytes = 24;
+constexpr size_t kDiskWireBytes = 188;
+constexpr size_t kVolumeWireBytes = 164;
+constexpr size_t kStorageSnapshotWireBytes = kStorageSnapshotHeaderBytes +
+    settings_inventory::kMaxDisks * kDiskWireBytes +
+    settings_inventory::kMaxVolumes * kVolumeWireBytes;
 constexpr size_t kMaxRequestBytes = kRequestHeaderBytes +
     kConfigurationCandidateWireBytes;
-constexpr size_t kMaxResponseBytes = kResponseHeaderBytes + kSnapshotWireBytes;
+constexpr size_t kMaxSnapshotWireBytes = kSnapshotWireBytes > kDeviceSnapshotWireBytes
+    ? (kSnapshotWireBytes > kStorageSnapshotWireBytes ? kSnapshotWireBytes : kStorageSnapshotWireBytes)
+    : (kDeviceSnapshotWireBytes > kStorageSnapshotWireBytes ? kDeviceSnapshotWireBytes : kStorageSnapshotWireBytes);
+constexpr size_t kMaxResponseBytes = kResponseHeaderBytes + kMaxSnapshotWireBytes;
 constexpr uint32_t kDefaultRequestTimeoutMs = 200;
 
 enum class RequestType : uint16_t {
     GetNetworkSnapshot = 1,
-    SetNetworkConfiguration = 2
+    SetNetworkConfiguration = 2,
+    GetDeviceSnapshot = 3,
+    GetStorageSnapshot = 4
 };
+
+constexpr uint16_t kNetworkSnapshotResponseType = 0x8001u;
+constexpr uint16_t kConfigurationResponseType = 0x8002u;
+constexpr uint16_t kDeviceSnapshotResponseType = 0x8003u;
+constexpr uint16_t kStorageSnapshotResponseType = 0x8004u;
 
 enum class ResponseStatus : uint16_t {
     Ok = 0,
@@ -342,19 +363,28 @@ inline bool decodeResponseHeader(const uint8_t* input, size_t inputBytes,
     output->payloadBytes = readU16(input + 14);
     output->totalBytes = readU32(input + 16);
     if (output->version != kProtocolVersion ||
-        (output->type != 0x8001u && output->type != 0x8002u) ||
+        (output->type != kNetworkSnapshotResponseType &&
+         output->type != kConfigurationResponseType &&
+         output->type != kDeviceSnapshotResponseType &&
+         output->type != kStorageSnapshotResponseType) ||
         output->totalBytes != kResponseHeaderBytes + output->payloadBytes ||
         output->totalBytes > kMaxResponseBytes || output->totalBytes != inputBytes) return false;
     const uint16_t status = static_cast<uint16_t>(output->status);
     if (status > static_cast<uint16_t>(ResponseStatus::InternalError)) return false;
     if (output->status == ResponseStatus::Ok &&
-        ((output->type == 0x8001u && output->payloadBytes != kSnapshotWireBytes) ||
-         (output->type == 0x8002u && output->payloadBytes != kConfigurationResultWireBytes)))
+        ((output->type == kNetworkSnapshotResponseType && output->payloadBytes != kSnapshotWireBytes) ||
+         (output->type == kConfigurationResponseType && output->payloadBytes != kConfigurationResultWireBytes) ||
+         (output->type == kDeviceSnapshotResponseType && output->payloadBytes != kDeviceSnapshotWireBytes) ||
+         (output->type == kStorageSnapshotResponseType && output->payloadBytes != kStorageSnapshotWireBytes)))
         return false;
     if (output->status != ResponseStatus::Ok && output->status != ResponseStatus::Unavailable &&
         output->payloadBytes != 0) return false;
-    if (output->status == ResponseStatus::Unavailable && output->payloadBytes != 0 &&
-        output->payloadBytes != kSnapshotWireBytes) return false;
+    if (output->status == ResponseStatus::Unavailable && output->payloadBytes != 0) {
+        const size_t expected = output->type == kNetworkSnapshotResponseType ? kSnapshotWireBytes :
+            output->type == kDeviceSnapshotResponseType ? kDeviceSnapshotWireBytes :
+            output->type == kStorageSnapshotResponseType ? kStorageSnapshotWireBytes : 0;
+        if (expected == 0 || output->payloadBytes != expected) return false;
+    }
     return true;
 }
 
@@ -435,6 +465,223 @@ inline bool decodeSnapshot(const uint8_t* input, size_t inputBytes,
         }
     }
     if (!validSnapshot(decoded)) return false;
+    *output = decoded;
+    return true;
+}
+
+inline bool encodeDeviceSnapshot(const settings_inventory::DeviceSnapshot& snapshot,
+                                 uint8_t* output, size_t capacity)
+{
+    using namespace settings_inventory;
+    if (!output || capacity < kDeviceSnapshotWireBytes || !validDeviceSnapshot(snapshot)) return false;
+    writeU32(output, snapshot.version);
+    output[4] = static_cast<uint8_t>(snapshot.backend);
+    output[5] = static_cast<uint8_t>(snapshot.state);
+    output[6] = snapshot.truncated ? 1u : 0u;
+    output[7] = 0u;
+    writeU64(output + 8, snapshot.generation);
+    writeU16(output + 16, snapshot.deviceCount);
+    writeU16(output + 18, snapshot.totalDeviceCount);
+    for (size_t i = 0; i < kMaxDevices; ++i) {
+        uint8_t* row = output + kDeviceSnapshotHeaderBytes + i * kDeviceWireBytes;
+        if (i >= snapshot.deviceCount) {
+            for (size_t j = 0; j < kDeviceWireBytes; ++j) row[j] = 0u;
+            continue;
+        }
+        const DeviceInfo& item = snapshot.devices[i];
+        for (size_t j = 0; j < kStableIdBytes; ++j) row[j] = static_cast<uint8_t>(item.stableId[j]);
+        for (size_t j = 0; j < kDeviceNameBytes; ++j) row[40 + j] = static_cast<uint8_t>(item.name[j]);
+        for (size_t j = 0; j < kDriverNameBytes; ++j) row[104 + j] = static_cast<uint8_t>(item.driver[j]);
+        for (size_t j = 0; j < kDeviceLocationBytes; ++j) row[136 + j] = static_cast<uint8_t>(item.location[j]);
+        row[168] = static_cast<uint8_t>(item.category);
+        row[169] = static_cast<uint8_t>(item.status);
+        writeU16(row + 170, item.vendorId);
+        writeU16(row + 172, item.deviceId);
+        row[174] = item.bus;
+        row[175] = item.slot;
+        row[176] = item.function;
+        row[177] = item.flags;
+        row[178] = row[179] = 0u;
+    }
+    return true;
+}
+
+inline bool decodeDeviceSnapshot(const uint8_t* input, size_t inputBytes,
+                                 settings_inventory::DeviceSnapshot* output)
+{
+    using namespace settings_inventory;
+    if (!input || !output || inputBytes != kDeviceSnapshotWireBytes) return false;
+    DeviceSnapshot decoded{};
+    decoded.version = readU32(input);
+    decoded.backend = static_cast<Backend>(input[4]);
+    decoded.state = static_cast<SnapshotState>(input[5]);
+    if (input[6] > 1u || input[7] != 0u) return false;
+    decoded.truncated = input[6] != 0u;
+    decoded.generation = readU64(input + 8);
+    decoded.deviceCount = readU16(input + 16);
+    decoded.totalDeviceCount = readU16(input + 18);
+    if (decoded.deviceCount > kMaxDevices) return false;
+    for (size_t i = 0; i < kMaxDevices; ++i) {
+        const uint8_t* row = input + kDeviceSnapshotHeaderBytes + i * kDeviceWireBytes;
+        if (i >= decoded.deviceCount) {
+            for (size_t j = 0; j < kDeviceWireBytes; ++j) if (row[j] != 0u) return false;
+            continue;
+        }
+        DeviceInfo& item = decoded.devices[i];
+        for (size_t j = 0; j < kStableIdBytes; ++j) item.stableId[j] = static_cast<char>(row[j]);
+        for (size_t j = 0; j < kDeviceNameBytes; ++j) item.name[j] = static_cast<char>(row[40 + j]);
+        for (size_t j = 0; j < kDriverNameBytes; ++j) item.driver[j] = static_cast<char>(row[104 + j]);
+        for (size_t j = 0; j < kDeviceLocationBytes; ++j) item.location[j] = static_cast<char>(row[136 + j]);
+        item.category = static_cast<DeviceCategory>(row[168]);
+        item.status = static_cast<DeviceStatus>(row[169]);
+        item.vendorId = readU16(row + 170);
+        item.deviceId = readU16(row + 172);
+        item.bus = row[174];
+        item.slot = row[175];
+        item.function = row[176];
+        item.flags = row[177];
+        if (row[178] != 0u || row[179] != 0u) return false;
+    }
+    if (!validDeviceSnapshot(decoded)) return false;
+    *output = decoded;
+    return true;
+}
+
+inline bool encodeStorageSnapshot(const settings_inventory::StorageSnapshot& snapshot,
+                                  uint8_t* output, size_t capacity)
+{
+    using namespace settings_inventory;
+    if (!output || capacity < kStorageSnapshotWireBytes || !validStorageSnapshot(snapshot)) return false;
+    writeU32(output, snapshot.version);
+    output[4] = static_cast<uint8_t>(snapshot.backend);
+    output[5] = static_cast<uint8_t>(snapshot.state);
+    output[6] = snapshot.truncated ? 1u : 0u;
+    output[7] = 0u;
+    writeU64(output + 8, snapshot.generation);
+    writeU16(output + 16, snapshot.diskCount);
+    writeU16(output + 18, snapshot.volumeCount);
+    writeU16(output + 20, snapshot.totalDiskCount);
+    writeU16(output + 22, snapshot.totalVolumeCount);
+    for (size_t i = 0; i < kMaxDisks; ++i) {
+        uint8_t* row = output + kStorageSnapshotHeaderBytes + i * kDiskWireBytes;
+        if (i >= snapshot.diskCount) {
+            for (size_t j = 0; j < kDiskWireBytes; ++j) row[j] = 0u;
+            continue;
+        }
+        const DiskInfo& disk = snapshot.disks[i];
+        for (size_t j = 0; j < kStableIdBytes; ++j) row[j] = static_cast<uint8_t>(disk.stableId[j]);
+        for (size_t j = 0; j < kDiskNameBytes; ++j) row[40 + j] = static_cast<uint8_t>(disk.name[j]);
+        row[88] = static_cast<uint8_t>(disk.transport);
+        row[89] = disk.flags;
+        writeU32(row + 90, disk.sectorSize);
+        writeU64(row + 94, disk.capacityBytes);
+        row[102] = static_cast<uint8_t>(disk.partitionTable);
+        row[103] = disk.partitionCount;
+        row[104] = disk.totalPartitionCount;
+        row[105] = row[106] = row[107] = 0u;
+        for (size_t p = 0; p < kMaxPartitionsPerDisk; ++p) {
+            uint8_t* partRow = row + 108 + p * 20;
+            if (p >= disk.partitionCount) {
+                for (size_t j = 0; j < 20; ++j) partRow[j] = 0u;
+                continue;
+            }
+            const PartitionInfo& part = disk.partitions[p];
+            partRow[0] = part.number;
+            partRow[1] = part.typeCode;
+            partRow[2] = static_cast<uint8_t>(part.fileSystem);
+            partRow[3] = static_cast<uint8_t>(part.mountState);
+            writeU64(partRow + 4, part.startSector);
+            writeU64(partRow + 12, part.sectorCount);
+        }
+    }
+    const size_t volumesOffset = kStorageSnapshotHeaderBytes + kMaxDisks * kDiskWireBytes;
+    for (size_t i = 0; i < kMaxVolumes; ++i) {
+        uint8_t* row = output + volumesOffset + i * kVolumeWireBytes;
+        if (i >= snapshot.volumeCount) {
+            for (size_t j = 0; j < kVolumeWireBytes; ++j) row[j] = 0u;
+            continue;
+        }
+        const VolumeInfo& volume = snapshot.volumes[i];
+        for (size_t j = 0; j < kStableIdBytes; ++j) row[j] = static_cast<uint8_t>(volume.stableId[j]);
+        for (size_t j = 0; j < kMountPathBytes; ++j) row[40 + j] = static_cast<uint8_t>(volume.mountPath[j]);
+        for (size_t j = 0; j < kStableIdBytes; ++j) row[104 + j] = static_cast<uint8_t>(volume.diskStableId[j]);
+        row[144] = static_cast<uint8_t>(volume.fileSystem);
+        row[145] = volume.flags;
+        writeU64(row + 146, volume.capacityBytes);
+        writeU64(row + 154, volume.freeBytes);
+        row[162] = row[163] = 0u;
+    }
+    return true;
+}
+
+inline bool decodeStorageSnapshot(const uint8_t* input, size_t inputBytes,
+                                  settings_inventory::StorageSnapshot* output)
+{
+    using namespace settings_inventory;
+    if (!input || !output || inputBytes != kStorageSnapshotWireBytes) return false;
+    StorageSnapshot decoded{};
+    decoded.version = readU32(input);
+    decoded.backend = static_cast<Backend>(input[4]);
+    decoded.state = static_cast<SnapshotState>(input[5]);
+    if (input[6] > 1u || input[7] != 0u) return false;
+    decoded.truncated = input[6] != 0u;
+    decoded.generation = readU64(input + 8);
+    decoded.diskCount = readU16(input + 16);
+    decoded.volumeCount = readU16(input + 18);
+    decoded.totalDiskCount = readU16(input + 20);
+    decoded.totalVolumeCount = readU16(input + 22);
+    if (decoded.diskCount > kMaxDisks || decoded.volumeCount > kMaxVolumes) return false;
+    for (size_t i = 0; i < kMaxDisks; ++i) {
+        const uint8_t* row = input + kStorageSnapshotHeaderBytes + i * kDiskWireBytes;
+        if (i >= decoded.diskCount) {
+            for (size_t j = 0; j < kDiskWireBytes; ++j) if (row[j] != 0u) return false;
+            continue;
+        }
+        DiskInfo& disk = decoded.disks[i];
+        for (size_t j = 0; j < kStableIdBytes; ++j) disk.stableId[j] = static_cast<char>(row[j]);
+        for (size_t j = 0; j < kDiskNameBytes; ++j) disk.name[j] = static_cast<char>(row[40 + j]);
+        disk.transport = static_cast<DiskTransport>(row[88]);
+        disk.flags = row[89];
+        disk.sectorSize = readU32(row + 90);
+        disk.capacityBytes = readU64(row + 94);
+        disk.partitionTable = static_cast<PartitionTableState>(row[102]);
+        disk.partitionCount = row[103];
+        disk.totalPartitionCount = row[104];
+        if (row[105] != 0u || row[106] != 0u || row[107] != 0u ||
+            disk.partitionCount > kMaxPartitionsPerDisk) return false;
+        for (size_t p = 0; p < kMaxPartitionsPerDisk; ++p) {
+            const uint8_t* partRow = row + 108 + p * 20;
+            if (p >= disk.partitionCount) {
+                for (size_t j = 0; j < 20; ++j) if (partRow[j] != 0u) return false;
+                continue;
+            }
+            PartitionInfo& part = disk.partitions[p];
+            part.number = partRow[0];
+            part.typeCode = partRow[1];
+            part.fileSystem = static_cast<FileSystem>(partRow[2]);
+            part.mountState = static_cast<MountState>(partRow[3]);
+            part.startSector = readU64(partRow + 4);
+            part.sectorCount = readU64(partRow + 12);
+        }
+    }
+    const size_t volumesOffset = kStorageSnapshotHeaderBytes + kMaxDisks * kDiskWireBytes;
+    for (size_t i = 0; i < kMaxVolumes; ++i) {
+        const uint8_t* row = input + volumesOffset + i * kVolumeWireBytes;
+        if (i >= decoded.volumeCount) {
+            for (size_t j = 0; j < kVolumeWireBytes; ++j) if (row[j] != 0u) return false;
+            continue;
+        }
+        VolumeInfo& volume = decoded.volumes[i];
+        for (size_t j = 0; j < kStableIdBytes; ++j) volume.stableId[j] = static_cast<char>(row[j]);
+        for (size_t j = 0; j < kMountPathBytes; ++j) volume.mountPath[j] = static_cast<char>(row[40 + j]);
+        for (size_t j = 0; j < kStableIdBytes; ++j) volume.diskStableId[j] = static_cast<char>(row[104 + j]);
+        volume.fileSystem = static_cast<FileSystem>(row[144]);
+        volume.flags = row[145];
+        volume.capacityBytes = readU64(row + 146);
+        volume.freeBytes = readU64(row + 154);
+        if (row[162] != 0u || row[163] != 0u) return false;
+    }
+    if (!validStorageSnapshot(decoded)) return false;
     *output = decoded;
     return true;
 }
