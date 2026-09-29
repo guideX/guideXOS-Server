@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 
 namespace HostLogProof;
 
@@ -124,9 +125,11 @@ public sealed class GuideXosTextInput
 {
     public const int DefaultMaximumLength = 64;
     public const int MaximumSupportedLength = 127;
+    public const int DefaultHeight = 18;
 
     private readonly char[] _buffer;
     private readonly string _placeholder;
+    private readonly byte[] _labelUtf8;
     private int _length;
     private int _caretIndex;
     private bool _isFocused;
@@ -134,9 +137,15 @@ public sealed class GuideXosTextInput
     private bool _isCancelled;
     private bool _hasChanged;
     private uint _rejectedInputCount;
+    private int _x = -1;
+    private int _y = -1;
+    private int _width;
+    private bool _isVisible = true;
+    private bool _isEnabled = true;
 
     public GuideXosTextInput(
-        int maximumLength = DefaultMaximumLength, string placeholder = "")
+        int maximumLength = DefaultMaximumLength, string placeholder = "",
+        string label = "Filename: ")
     {
         if (maximumLength < 1 || maximumLength > MaximumSupportedLength)
         {
@@ -144,17 +153,50 @@ public sealed class GuideXosTextInput
         }
         _buffer = new char[maximumLength];
         _placeholder = placeholder ?? string.Empty;
+        _labelUtf8 = Encoding.ASCII.GetBytes(label ?? string.Empty);
     }
 
     public int MaximumLength => _buffer.Length;
+    public int X => _x;
+    public int Y => _y;
+    public int Width => _width;
+    public int Height => DefaultHeight;
     public int Length => _length;
     public int CaretIndex => _caretIndex;
     public bool IsFocused => _isFocused;
     public bool IsSubmitted => _isSubmitted;
     public bool IsCancelled => _isCancelled;
     public bool HasChanged => _hasChanged;
+    public bool IsVisible => _isVisible;
+    public bool IsEnabled => _isEnabled;
+    public ReadOnlySpan<byte> LabelUtf8 => _labelUtf8;
     public uint RejectedInputCount => _rejectedInputCount;
     public string Value => new string(_buffer, 0, _length);
+
+    public bool TrySetBounds(int x, int y, int width)
+    {
+        if (x < 0 || y < 0 || width < 1 ||
+            x > 4095 - width || y > 4095 - DefaultHeight)
+        {
+            return false;
+        }
+        _x = x;
+        _y = y;
+        _width = width;
+        return true;
+    }
+
+    public void SetVisible(bool visible)
+    {
+        _isVisible = visible;
+        if (!visible) Blur();
+    }
+
+    public void SetEnabled(bool enabled)
+    {
+        _isEnabled = enabled;
+        if (!enabled) Blur();
+    }
 
     public void Focus()
     {

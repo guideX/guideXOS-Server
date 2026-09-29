@@ -95,6 +95,12 @@ constexpr uint32_t kManagedFileInfoAbiSize = 16u;
 #if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
 constexpr uint32_t kManagedApplicationIdentityCapacity = 96u;
 constexpr uint32_t kManagedSettingsActionId = 24u;
+#if defined(GXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW)
+constexpr uint32_t kManagedNotesCloseRequestActionId = 26u;
+constexpr int32_t kManagedNotesCloseAllowed = 0xC15200;
+constexpr int32_t kManagedNotesCloseReady = 0xC15201;
+constexpr int32_t kManagedNotesSettingsReady = 0xC15202;
+#endif
 constexpr const char* kManagedNotesApplicationId =
     "com.guidexos.apps.managed.notes";
 constexpr const char* kManagedSettingsApplicationId =
@@ -408,6 +414,9 @@ char g_managedActiveApplicationId[kManagedApplicationIdentityCapacity] = {};
 bool g_managedReturnLaunchPending = false;
 bool g_managedLaunchingSettingsFromNotes = false;
 bool g_managedReturnLaunchActive = false;
+#if defined(GXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW)
+bool g_c152FailNextNotesWrite = false;
+#endif
 uint32_t g_managedSurfaceGeneration = 0u;
 uint32_t g_managedApplicationLaunchGeneration = 0u;
 #if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
@@ -620,6 +629,9 @@ public:
         serial::put_hex32(static_cast<uint32_t>(y));
         serial::puts(" result=");
         serial::puts(result == 0 ? "PASS\n" : "IGNORED\n");
+#if defined(GXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW)
+        completeC152DeferredAction(result);
+#endif
 #if defined(GXOS_NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU)
         serial::puts("[C136-NATIVE-INPUT] button=primary phase=down x=");
         serial::put_hex32(static_cast<uint32_t>(x));
@@ -647,6 +659,9 @@ public:
         serial::put_hex32(static_cast<uint32_t>(y));
         serial::puts(" result=");
         serial::puts(result == 0 ? "PASS\n" : "IGNORED\n");
+#if defined(GXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW)
+        completeC152DeferredAction(result);
+#endif
     }
 #endif
 
@@ -663,6 +678,9 @@ public:
             : kLaunchFlagInputPointerUp;
         const int32_t result = invokeManagedInput(
             m_selector, kLaunchFlagInput | kind | payload);
+#if defined(GXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW)
+        completeC152DeferredAction(result);
+#endif
         if (button == 2u) {
             serial::puts("[C136-NATIVE-INPUT] button=secondary phase=up x=");
             serial::put_hex32(static_cast<uint32_t>(x));
@@ -712,6 +730,16 @@ public:
 
     void onKeyDown(uint32_t key) override {
         if (m_selector == 0u || key > kLaunchFlagInputPayloadMask) return;
+#if defined(GXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW) && \
+    defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+        if (key == 0x11Bu && m_selector == 4u &&
+            ManagedReturnTarget::identityEquals(
+                m_surfaceApplicationId, kManagedNotesApplicationId)) {
+            g_c152FailNextNotesWrite = true;
+            serial::puts("[C152-FAILURE-INJECTION] next-notes-write=io-error result=PASS\n");
+            return;
+        }
+#endif
         uint32_t payload = key & kLaunchFlagInputValueMask;
         if (ps2keyboard::is_shift_down()) payload |= kLaunchFlagInputShift;
 #if defined(GXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT)
@@ -729,6 +757,9 @@ public:
         serial::put_hex32((payload & kLaunchFlagInputShift) != 0u ? 1u : 0u);
         serial::puts(" result=");
         serial::puts(result == 0 ? "PASS\n" : "IGNORED\n");
+#if defined(GXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW)
+        completeC152DeferredAction(result);
+#endif
 #if defined(GXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT)
         if (key == 9u) {
             serial::puts("[C129-NATIVE-INPUT] kind=key-down key=");
@@ -773,6 +804,9 @@ public:
         serial::put_hex32((inputPayload & kLaunchFlagInputShift) != 0u ? 1u : 0u);
         serial::puts(" result=");
         serial::puts(result == 0 ? "PASS\n" : "IGNORED\n");
+#if defined(GXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW)
+        completeC152DeferredAction(result);
+#endif
 #if defined(GXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT)
         serial::puts("[C129-NATIVE-INPUT] kind=key-char value=");
         serial::put_hex32(payload);
@@ -781,6 +815,25 @@ public:
         serial::puts(" result=");
         serial::puts(result == 0 ? "PASS\n" : "FAIL\n");
 #endif
+    }
+
+    bool onWindowCloseRequested() override {
+#if defined(GXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW) && \
+    defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+        if (!m_replacingSurface && m_window && m_selector == 4u &&
+            ManagedReturnTarget::identityEquals(
+                m_surfaceApplicationId, kManagedNotesApplicationId)) {
+            const int32_t managedResult = invokeManagedAction(
+                m_selector, kManagedNotesCloseRequestActionId);
+            if (managedResult == kManagedNotesCloseAllowed) {
+                serial::puts("[C152-CLOSE] request=accepted dirty=false result=PASS\n");
+                return true;
+            }
+            serial::puts("[C152-CLOSE] request=vetoed dirty-prompt=active result=PASS\n");
+            return false;
+        }
+#endif
+        return true;
     }
 
     void onWindowClose() override {
@@ -1014,6 +1067,18 @@ public:
     }
 
 private:
+#if defined(GXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW) && \
+    defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+    void completeC152DeferredAction(int32_t managedResult) {
+        if (managedResult == kManagedNotesCloseReady) {
+            serial::puts("[C152-CLOSE] decision=Discard or Save dispatch=accepted result=PASS\n");
+            requestClose();
+        } else if (managedResult == kManagedNotesSettingsReady) {
+            serial::puts("[C152-SETTINGS] dirty-decision=accepted dispatch=deferred result=PASS\n");
+            (void)launchSettingsCenterFromNotes();
+        }
+    }
+#endif
     struct ManagedActionBinding {
         int widgetId;
         uint32_t actionId;
@@ -2072,6 +2137,110 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedFileWriteAll(
     }
     if (length > kManagedFileMaxBytes) return kManagedFileTooLarge;
     const char* vfsPath = resolveManagedFileVfsPath(validatedPath);
+
+#if defined(GXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW)
+    if (reinterpret_cast<uintptr_t>(context->userData) == 4u) {
+        constexpr uint32_t kNotesDocumentMaxBytes = 256u;
+        if (length > kNotesDocumentMaxBytes) return kManagedFileTooLarge;
+        const bool injectNotesWriteFailure = g_c152FailNextNotesWrite;
+        g_c152FailNextNotesWrite = false;
+
+        vfs::FileInfo originalInfo{};
+        const vfs::Status originalStatus = vfs::stat(vfsPath, &originalInfo);
+        const bool hadOriginal = originalStatus == vfs::VFS_OK;
+        if (hadOriginal && originalInfo.type != vfs::FILE_TYPE_REGULAR)
+            return kManagedFileIoFailure;
+        if (hadOriginal && originalInfo.size > kNotesDocumentMaxBytes)
+            return kManagedFileTooLarge;
+        if (!hadOriginal && originalStatus != vfs::VFS_ERR_NOT_FOUND)
+            return kManagedFileIoFailure;
+
+        uint8_t original[kNotesDocumentMaxBytes] = {};
+        const uint32_t originalLength = hadOriginal
+            ? static_cast<uint32_t>(originalInfo.size) : 0u;
+        if (originalLength != 0u) {
+            const int32_t read = vfs::read_file(
+                vfsPath, original, originalLength);
+            if (read != static_cast<int32_t>(originalLength))
+                return kManagedFileIoFailure;
+        }
+
+        int32_t notesWritten = injectNotesWriteFailure
+            ? vfs::write_file(vfsPath, data, length == 0u ? 0u : length - 1u)
+            : vfs::write_file(vfsPath, data, length);
+        bool verified = !injectNotesWriteFailure &&
+            notesWritten == static_cast<int32_t>(length);
+        uint8_t replacement[kNotesDocumentMaxBytes] = {};
+        if (verified) {
+            vfs::FileInfo replacementInfo{};
+            verified = vfs::stat(vfsPath, &replacementInfo) == vfs::VFS_OK &&
+                replacementInfo.type == vfs::FILE_TYPE_REGULAR &&
+                replacementInfo.size == length;
+        }
+        if (verified && length != 0u) {
+            const int32_t read = vfs::read_file(
+                vfsPath, replacement, sizeof(replacement));
+            verified = read == static_cast<int32_t>(length);
+        }
+        if (verified) {
+            for (uint32_t index = 0u; index < length; ++index) {
+                if (replacement[index] != data[index]) {
+                    verified = false;
+                    break;
+                }
+            }
+        }
+        if (!verified) {
+            bool recovered = false;
+            if (hadOriginal) {
+                const int32_t restored = vfs::write_file(
+                    vfsPath, original, originalLength);
+                recovered = restored == static_cast<int32_t>(originalLength);
+                vfs::FileInfo restoredInfo{};
+                recovered = recovered &&
+                    vfs::stat(vfsPath, &restoredInfo) == vfs::VFS_OK &&
+                    restoredInfo.type == vfs::FILE_TYPE_REGULAR &&
+                    restoredInfo.size == originalLength;
+                if (recovered && originalLength != 0u) {
+                    uint8_t restoredBytes[kNotesDocumentMaxBytes] = {};
+                    const int32_t restoredRead = vfs::read_file(
+                        vfsPath, restoredBytes, sizeof(restoredBytes));
+                    recovered = restoredRead ==
+                        static_cast<int32_t>(originalLength);
+                    for (uint32_t index = 0u; recovered &&
+                            index < originalLength; ++index) {
+                        if (restoredBytes[index] != original[index])
+                            recovered = false;
+                    }
+                }
+            } else {
+                vfs::FileInfo partialInfo{};
+                if (vfs::stat(vfsPath, &partialInfo) == vfs::VFS_OK &&
+                    partialInfo.type == vfs::FILE_TYPE_REGULAR) {
+                    recovered = vfs::unlink(vfsPath) == vfs::VFS_OK;
+                } else {
+                    recovered = true;
+                }
+            }
+            serial::puts("[C152-VFS-WRITE] verify=FAIL restore=");
+            serial::puts(recovered ? "PASS" : "FAIL");
+            serial::puts(" result=FAIL\n");
+            if (injectNotesWriteFailure) {
+                serial::puts("[C152-VFS-FAILURE-INJECTION] operation=write path=");
+                serial::puts(validatedPath);
+                serial::puts(" disk=unchanged restore=");
+                serial::puts(recovered ? "PASS" : "FAIL");
+                serial::puts(" result=FAIL\n");
+            }
+            return kManagedFileIoFailure;
+        }
+
+        serial::puts("[C152-VFS-WRITE] verify=read-back exact=true backup=");
+        serial::puts(hadOriginal ? "bounded" : "not-needed");
+        serial::puts(" flush=unavailable replace=non-atomic result=PASS\n");
+        return kManagedFileSuccess;
+    }
+#endif
 
     // QEMU's host-backed FAT drive does not reliably persist the final byte
     // when an existing settings file grows from the authentic 25-byte v1

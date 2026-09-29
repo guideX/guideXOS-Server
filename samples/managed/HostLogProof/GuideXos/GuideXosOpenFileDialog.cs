@@ -248,11 +248,10 @@ public sealed class GuideXosOpenFileDialog
     private GuideXosFileResult RefreshDirectory()
     {
         ClearRows();
-        GuideXosFileResult result = GuideXosFile.TryListDirectory(
-            _host, Encoding.UTF8.GetBytes(_currentDirectory),
-            out GuideXosDirectorySnapshot snapshot);
-        if (result != GuideXosFileResult.Success || snapshot == null ||
-            snapshot.Entries == null)
+        GuideXosFileResult result = GuideXosDirectoryListing.Load(
+            _host, _currentDirectory, out GuideXosDirectoryEntry[] entries,
+            out bool snapshotHasMore);
+        if (result != GuideXosFileResult.Success || entries == null)
         {
             return result == GuideXosFileResult.Success
                 ? GuideXosFileResult.IoFailure : result;
@@ -260,20 +259,11 @@ public sealed class GuideXosOpenFileDialog
 
         bool hasParent = !string.Equals(_currentDirectory, ManagedVfsRoot,
             StringComparison.Ordinal);
-        if (snapshot.Entries.Length > MaximumDirectoryEntries)
-            return GuideXosFileResult.IoFailure;
-        int availableEntryCount = 0;
-        for (int index = 0; index < snapshot.Entries.Length; index++)
-        {
-            GuideXosDirectoryEntry entry = snapshot.Entries[index];
-            if (!IsValidMetadata(entry)) return GuideXosFileResult.IoFailure;
-            if (entry.Name == "." || entry.Name == "..") continue;
-            _sortedEntries[availableEntryCount++] = entry;
-        }
+        int availableEntryCount = entries.Length;
+        Array.Copy(entries, _sortedEntries, availableEntryCount);
         int actualLimit = ComputeEntryLimit(availableEntryCount,
-            hasParent, snapshot.HasMore, MaximumRowCount, out bool truncated);
+            hasParent, snapshotHasMore, MaximumRowCount, out bool truncated);
         if (hasParent) AddRow(default, RowKind.Parent, ParentLabel);
-        SortForExplorer(_sortedEntries, availableEntryCount);
         _entryCount = Math.Min(availableEntryCount, actualLimit);
         for (int index = 0; index < _entryCount; index++)
         {
@@ -339,9 +329,13 @@ public sealed class GuideXosOpenFileDialog
             Render(surface);
             return;
         }
-        int slash = _currentDirectory.LastIndexOf('/');
-        string parent = slash <= ManagedVfsRoot.Length
-            ? ManagedVfsRoot : _currentDirectory.Substring(0, slash);
+        if (!GuideXosDirectoryListing.TryGetParent(
+                _currentDirectory, ManagedVfsRoot, out string parent))
+        {
+            SetStatus("Parent directory is unavailable");
+            Render(surface);
+            return;
+        }
         string previous = _currentDirectory;
         _currentDirectory = parent;
         if (RefreshDirectory() != GuideXosFileResult.Success)

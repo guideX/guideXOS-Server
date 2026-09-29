@@ -8,7 +8,7 @@ namespace HostLogProof.Applications;
 /// intentionally a bounded action flow rather than a general text editor:
 /// New note -> Append -> Save -> Reload.
 /// </summary>
-public sealed class ManagedNotes : GuideXosApplication
+public sealed partial class ManagedNotes : GuideXosApplication
 {
 #if !HOSTLOGPROOF_C115_MANAGED_FILE_PICKER
     private static readonly byte[] s_path = "/system/apps/NOTES.TXT"u8.ToArray();
@@ -446,7 +446,20 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
     private readonly byte[] _fallbackDocument =
         "First line\nSecond line\nThird line\nFourth line\nFifth line\nSixth line"u8.ToArray();
+#if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
+    private string _legacyCurrentPath = "/system/apps/NOTES.TXT";
+    private string _currentPath
+    {
+        get => _c152Enabled ? _c152DocumentState.CurrentPath : _legacyCurrentPath;
+        set
+        {
+            if (_c152Enabled) _c152DocumentState.TrySetCurrentPath(value);
+            else _legacyCurrentPath = value;
+        }
+    }
+#else
     private string _currentPath = "/system/apps/NOTES.TXT";
+#endif
     private string _status = "Ready";
     private ulong _window;
 #if HOSTLOGPROOF_MANAGED_APP_RETURN
@@ -723,10 +736,19 @@ public sealed class ManagedNotes : GuideXosApplication
     public override GuideXosResult Launch(GuideXosHost host)
     {
         if (host.IsCapabilityProbe) return GuideXosResult.Success;
+#if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
+        _c152Enabled = true;
+        if (_c152Enabled) _c152DocumentState.InitializeUntitled(_textArea);
+#endif
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
 #if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
         _c151ProofContext =
-            host.LaunchContext.Utf8.SequenceEqual("c151-notes"u8);
+            host.LaunchContext.Utf8.SequenceEqual("c151-notes"u8)
+#if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
+            || host.LaunchContext.Utf8.SequenceEqual("c152-notes"u8)
+            || _c152Enabled
+#endif
+            ;
 #endif
         _c147RuntimeConsumerContext =
             host.LaunchContext.Utf8.SequenceEqual("c147-native-notes"u8);
@@ -1121,6 +1143,9 @@ public sealed class ManagedNotes : GuideXosApplication
             _c135Menu.ClearItems();
             _c135Menu.TryAddItem("Open", 20u);
             _c135Menu.TryAddItem("Save", 22u);
+#if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
+            if (_c152Enabled) _c135Menu.TryAddItem("Save As...", 21u);
+#endif
             _c135Menu.TryAddSeparator();
             _c135Menu.TryAddItem("Reload", 3u);
             _c135Menu.CommandInvoked = OnC135MenuCommand;
@@ -1579,7 +1604,12 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
         _useTextInput = _c118ProofContext;
 #endif
-        _currentPath = "/system/apps/NOTES.TXT";
+        _currentPath =
+#if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
+            _c152Enabled && host.LaunchContext.Utf8.SequenceEqual("c152-notes"u8)
+                ? "/system/apps/C152/alpha.txt" :
+#endif
+            "/system/apps/NOTES.TXT";
 #if HOSTLOGPROOF_C122_MANAGED_LABEL
         if ((_c122ProofContext || _c122LabelTestContext || _c122LabelHostTestContext) &&
             !UpdatePathLabel())
@@ -1602,6 +1632,29 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
         GuideXosFileResult loadResult = GuideXosFile.ReadAllTextUtf8(
             host, Encoding.UTF8.GetBytes(_currentPath), out byte[] loaded);
+#if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
+        if (_c152Enabled)
+        {
+            if (loadResult == GuideXosFileResult.Success &&
+                _c152DocumentState.TryHydrate(_textArea, _currentPath, loaded))
+            {
+                _status = "Loaded from VFS";
+            }
+            else if (loadResult == GuideXosFileResult.NotFound)
+            {
+                _currentPath = string.Empty;
+                _c152DocumentState.InitializeUntitled(_textArea);
+                _status = "Untitled note";
+            }
+            else
+            {
+                _currentPath = string.Empty;
+                _c152DocumentState.InitializeUntitled(_textArea);
+                _status = StatusText(loadResult);
+            }
+        }
+        else
+#endif
         if (loadResult == GuideXosFileResult.Success &&
             _textArea.SetUtf8(loaded))
         {
@@ -1683,6 +1736,21 @@ public sealed class ManagedNotes : GuideXosApplication
             host.TryLog(c145Regression && c151Core
                 ? "C151-REGRESSIONS C145=49/49 C151-core=10/10 result=PASS"u8
                 : "C151-REGRESSIONS result=FAIL"u8);
+        }
+#endif
+#if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
+        if (_c152Enabled)
+        {
+            bool documentState = GuideXosNotesDocumentStateC152Tests.Run(host);
+            bool saveDialog = GuideXosSaveFileDialogC152Tests.Run(
+                host, surface, _mainControlHost);
+            host.TryLog(documentState
+                ? "C152-DOCUMENT-STATE cases=10 untitled=named dirty=event-driven save-failure=preserved result=PASS"u8
+                : "C152-DOCUMENT-STATE result=FAIL"u8);
+            if (!documentState || !saveDialog)
+                host.TryLog("C152-REGRESSIONS result=FAIL"u8);
+            else
+                host.TryLog("C152-REGRESSIONS save-dialog=16/16 document-state=10/10 result=PASS"u8);
         }
 #endif
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
@@ -1818,16 +1886,30 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
             if (_c151ProofContext) c135ExpectedRegistration = 9;
 #endif
+            int c135ExpectedItems = 4;
+#if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
+            if (_c152Enabled) c135ExpectedItems = 5;
+#endif
             bool c135Initial = _mainControlHost.RegistrationCount ==
                 c135ExpectedRegistration &&
-                _c135Menu.ItemCount == 4 && !_c135Menu.IsOpen &&
+                _c135Menu.ItemCount == c135ExpectedItems && !_c135Menu.IsOpen &&
                 _c135Menu.InvokerAvailable;
 #if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
             if (_c151ProofContext)
             {
+#if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
+                host.TryLog(_c152Enabled
+                    ? c135Initial
+                        ? "C135-NOTES initial=registration=shared items=5 capture=none result=PASS"u8
+                        : "C135-NOTES initial=result=FAIL"u8
+                    : c135Initial
+                        ? "C135-NOTES initial=registration=shared items=4 capture=none result=PASS"u8
+                        : "C135-NOTES initial=result=FAIL"u8);
+#else
                 host.TryLog(c135Initial
                     ? "C135-NOTES initial=registration=shared items=4 capture=none result=PASS"u8
                     : "C135-NOTES initial=result=FAIL"u8);
+#endif
             }
             else
 #endif
@@ -3387,6 +3469,14 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 
         GuideXosControlHostResult routeResult = _mainControlHost.HandleInput(input);
+#if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
+        if (_c152Enabled && routeResult == GuideXosControlHostResult.Changed &&
+            _mainControlHost.ActiveControlId == C120DocumentControlId)
+        {
+            _c152DocumentState.MarkEdited();
+            _status = "Modified";
+        }
+#endif
 #if HOSTLOGPROOF_C129_SHIFT_TAB_TRANSPORT
         if (_c129ProofContext)
         {
@@ -3991,6 +4081,13 @@ public sealed class ManagedNotes : GuideXosApplication
         {
             return GuideXosResult.SurfaceCreationFailed;
         }
+#if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
+        if (_c152Enabled && (_c152SaveFileDialog?.IsOpen == true ||
+                _c152DecisionDialog?.IsOpen == true))
+        {
+            return HandleC152Input(host, surface, input);
+        }
+#endif
 #if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
         if (_c151ProofContext && _c151OpenFileDialog.IsOpen)
         {
@@ -4155,6 +4252,13 @@ public sealed class ManagedNotes : GuideXosApplication
         {
             return GuideXosResult.SurfaceCreationFailed;
         }
+#if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
+        if (_c152Enabled && TryHandleC152Action(
+                host, surface, actionId, out GuideXosResult c152Result))
+        {
+            return c152Result;
+        }
+#endif
         if (_picker.IsActive)
         {
             return HandlePickerAction(host, surface, actionId);
@@ -4487,14 +4591,26 @@ public sealed class ManagedNotes : GuideXosApplication
                 : "File read failed; current note kept";
             return false;
         }
-        if (!_textArea.SetUtf8(temporary[..byteCount]))
+#if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
+        bool hydrated = _c152Enabled
+            ? _c152DocumentState.TryHydrate(_textArea, path,
+                temporary[..byteCount])
+            : _textArea.SetUtf8(temporary[..byteCount]);
+#else
+        bool hydrated = _textArea.SetUtf8(temporary[..byteCount]);
+#endif
+        if (!hydrated)
         {
             fileResult = GuideXosFileResult.InvalidArgument;
             _status = "Unsupported text; current note kept";
             return false;
         }
 
+#if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
+        if (!_c152Enabled) _currentPath = path;
+#else
         _currentPath = path;
+#endif
         UpdatePathLabel();
         _textArea.SetCaretToStart();
         _status = "Opened file";
@@ -4876,7 +4992,12 @@ public sealed class ManagedNotes : GuideXosApplication
             Span<char> c151Line = stackalloc char[
                 GuideXosLabel.DefaultMaximumTextLength];
             ReadOnlySpan<char> c151Prefix = "Path: ".AsSpan();
-            ReadOnlySpan<char> c151Path = _currentPath.AsSpan();
+            ReadOnlySpan<char> c151Path =
+#if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
+                _c152Enabled && !_c152DocumentState.HasCurrentPath
+                    ? "Untitled".AsSpan() :
+#endif
+                _currentPath.AsSpan();
             c151Prefix.CopyTo(c151Line);
             int pathCapacity = c151Line.Length - c151Prefix.Length;
             if (c151Path.Length <= pathCapacity)
@@ -5245,6 +5366,17 @@ public sealed class ManagedNotes : GuideXosApplication
         if (rendered && _c151ProofContext && _c151OpenFileDialog.IsOpen)
         {
             rendered = _c151OpenFileDialog.Render(surface) ==
+                GuideXosResult.Success;
+        }
+#endif
+#if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
+        if (rendered && _c152Enabled && _c152SaveFileDialog?.IsOpen == true)
+        {
+            rendered = RenderC152SaveDialog(surface) == GuideXosResult.Success;
+        }
+        if (rendered && _c152Enabled && _c152DecisionDialog.IsOpen)
+        {
+            rendered = _c152DecisionDialog.Render(surface) ==
                 GuideXosResult.Success;
         }
 #endif

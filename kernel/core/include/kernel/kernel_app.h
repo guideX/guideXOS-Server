@@ -212,6 +212,8 @@ public:
     virtual void onKeyUp(uint32_t key) {}
     virtual void onKeyChar(char c) {}
     virtual void onWidgetClick(int widgetId) {}
+    // Allows an application to resolve a close request before teardown.
+    virtual bool onWindowCloseRequested() { return true; }
     virtual void onWindowClose() {}
     virtual void onWindowFocus() {}
     virtual void onWindowBlur() {}
@@ -231,7 +233,7 @@ public:
     void setTitle(const char* title);
     void setSize(int w, int h);
     void setPosition(int x, int y);
-    void requestClose();
+    bool requestClose();
     void invalidate();
     
     // Widget helpers

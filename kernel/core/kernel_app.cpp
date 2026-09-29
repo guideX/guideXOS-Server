@@ -94,7 +94,16 @@ void KernelApp::setPosition(int x, int y) {
     }
 }
 
-void KernelApp::requestClose() {
+bool KernelApp::requestClose() {
+    if (!m_window) return false;
+    if (!onWindowCloseRequested()) {
+        #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+        serial::puts("[app] close-result=vetoed app=");
+        serial::puts(m_name);
+        serial::putc('\n');
+        #endif
+        return false;
+    }
     if (m_window) {
         #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
         serial::puts("[app] close-request app=");
@@ -119,6 +128,7 @@ void KernelApp::requestClose() {
         #endif
         desktop_request_redraw();
     }
+    return true;
 }
 
 void KernelApp::invalidate() {

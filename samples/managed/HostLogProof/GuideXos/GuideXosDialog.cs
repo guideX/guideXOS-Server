@@ -30,6 +30,7 @@ public sealed class GuideXosDialog
         ComboBox = 4,
         Separator = 5,
         ListBox = 6,
+        TextInput = 7,
     }
 
     private struct MemberEntry
@@ -158,6 +159,8 @@ public sealed class GuideXosDialog
                 (GuideXosComboBox)control, focusable),
             MemberKind.ListBox => _controlHost.TryRegisterListBox(id,
                 (GuideXosListBox)control, focusable),
+            MemberKind.TextInput => _controlHost.TryRegisterTextInput(id,
+                (GuideXosTextInput)control, focusable),
             _ => GuideXosControlHostResult.Registered,
         };
         if (registration != GuideXosControlHostResult.Registered) return false;
@@ -167,7 +170,7 @@ public sealed class GuideXosDialog
             Control = control,
             Kind = kind,
             Id = kind is MemberKind.Button or MemberKind.CheckBox or
-                MemberKind.ComboBox or MemberKind.ListBox
+                MemberKind.ComboBox or MemberKind.ListBox or MemberKind.TextInput
                 ? id : 0,
             Focusable = focusable,
         };
@@ -505,7 +508,7 @@ public sealed class GuideXosDialog
         {
             MemberEntry entry = _members[index];
             entry.Id = entry.Kind is MemberKind.Button or MemberKind.CheckBox or
-                MemberKind.ComboBox or MemberKind.ListBox
+                MemberKind.ComboBox or MemberKind.ListBox or MemberKind.TextInput
                 ? index + 1 : 0;
             _members[index] = entry;
             GuideXosControlHostResult result = entry.Kind switch
@@ -518,6 +521,8 @@ public sealed class GuideXosDialog
                     (GuideXosComboBox)entry.Control, entry.Focusable),
                 MemberKind.ListBox => _controlHost.TryRegisterListBox(entry.Id,
                     (GuideXosListBox)entry.Control, entry.Focusable),
+                MemberKind.TextInput => _controlHost.TryRegisterTextInput(entry.Id,
+                    (GuideXosTextInput)entry.Control, entry.Focusable),
                 _ => GuideXosControlHostResult.Registered,
             };
             if (result != GuideXosControlHostResult.Registered) return false;
@@ -544,6 +549,7 @@ public sealed class GuideXosDialog
             GuideXosComboBox => MemberKind.ComboBox,
             GuideXosSeparator => MemberKind.Separator,
             GuideXosListBox => MemberKind.ListBox,
+            GuideXosTextInput => MemberKind.TextInput,
             _ => MemberKind.None,
         };
         return kind != MemberKind.None;
@@ -572,6 +578,7 @@ public sealed class GuideXosDialog
             ((GuideXosSeparator)control).ParentGroupBox == null &&
             ((GuideXosSeparator)control).VerticalStackOwner == null,
         MemberKind.ListBox => true,
+        MemberKind.TextInput => true,
         _ => false,
     };
 
@@ -585,6 +592,7 @@ public sealed class GuideXosDialog
             MemberKind.CheckBox => ((GuideXosCheckBox)control).X,
             MemberKind.ComboBox => ((GuideXosComboBox)control).X,
             MemberKind.ListBox => ((GuideXosListBox)control).X,
+            MemberKind.TextInput => ((GuideXosTextInput)control).X,
             _ => ((GuideXosSeparator)control).X,
         };
         int childY = kind switch
@@ -594,6 +602,7 @@ public sealed class GuideXosDialog
             MemberKind.CheckBox => ((GuideXosCheckBox)control).Y,
             MemberKind.ComboBox => ((GuideXosComboBox)control).Y,
             MemberKind.ListBox => ((GuideXosListBox)control).Y,
+            MemberKind.TextInput => ((GuideXosTextInput)control).Y,
             _ => ((GuideXosSeparator)control).Y,
         };
         int childWidth = kind switch
@@ -603,6 +612,7 @@ public sealed class GuideXosDialog
             MemberKind.CheckBox => ((GuideXosCheckBox)control).Width,
             MemberKind.ComboBox => ((GuideXosComboBox)control).Width,
             MemberKind.ListBox => ((GuideXosListBox)control).Width,
+            MemberKind.TextInput => ((GuideXosTextInput)control).Width,
             _ => ((GuideXosSeparator)control).Width,
         };
         int childHeight = kind switch
@@ -612,6 +622,7 @@ public sealed class GuideXosDialog
             MemberKind.CheckBox => ((GuideXosCheckBox)control).Height,
             MemberKind.ComboBox => ((GuideXosComboBox)control).Height,
             MemberKind.ListBox => ((GuideXosListBox)control).Height,
+            MemberKind.TextInput => ((GuideXosTextInput)control).Height,
             _ => ((GuideXosSeparator)control).Height,
         };
         return childX >= x && childY >= y && childWidth > 0 && childHeight > 0 &&
@@ -645,6 +656,8 @@ public sealed class GuideXosDialog
                     ((GuideXosComboBox)entry.Control).EffectiveEnabled,
                 MemberKind.ListBox => ((GuideXosListBox)entry.Control).EffectiveVisible &&
                     ((GuideXosListBox)entry.Control).Enabled,
+                MemberKind.TextInput => ((GuideXosTextInput)entry.Control).IsVisible &&
+                    ((GuideXosTextInput)entry.Control).IsEnabled,
                 _ => false,
             };
         }
@@ -663,6 +676,7 @@ public sealed class GuideXosDialog
                 MemberKind.CheckBox => Contains(((GuideXosCheckBox)entry.Control), x, y),
                 MemberKind.ComboBox => Contains(((GuideXosComboBox)entry.Control), x, y),
                 MemberKind.ListBox => Contains(((GuideXosListBox)entry.Control), x, y),
+                MemberKind.TextInput => Contains(((GuideXosTextInput)entry.Control), x, y),
                 _ => false,
             };
             if (hit) return entry.Id;
@@ -682,6 +696,10 @@ public sealed class GuideXosDialog
         control.ContainsPoint(x, y) || control.ContainsDropDownPoint(x, y);
 
     private static bool Contains(GuideXosListBox control, int x, int y) =>
+        x >= control.X && x < control.X + control.Width &&
+        y >= control.Y && y < control.Y + control.Height;
+
+    private static bool Contains(GuideXosTextInput control, int x, int y) =>
         x >= control.X && x < control.X + control.Width &&
         y >= control.Y && y < control.Y + control.Height;
 
@@ -705,6 +723,7 @@ public sealed class GuideXosDialog
         MemberKind.ComboBox => ((GuideXosComboBox)entry.Control).EffectiveVisible,
         MemberKind.Separator => ((GuideXosSeparator)entry.Control).Visible,
         MemberKind.ListBox => ((GuideXosListBox)entry.Control).EffectiveVisible,
+        MemberKind.TextInput => ((GuideXosTextInput)entry.Control).IsVisible,
         _ => false,
     };
 
@@ -763,6 +782,10 @@ public sealed class GuideXosDialog
             surface, ((GuideXosListBox)entry.Control).X,
             ((GuideXosListBox)entry.Control).Y,
             ((GuideXosListBox)entry.Control).LineHeight),
+        MemberKind.TextInput => ((GuideXosTextInput)entry.Control).Render(
+            surface, ((GuideXosTextInput)entry.Control).X,
+            ((GuideXosTextInput)entry.Control).Y,
+            ((GuideXosTextInput)entry.Control).LabelUtf8),
         _ => GuideXosResult.InvalidArgument,
     };
 }

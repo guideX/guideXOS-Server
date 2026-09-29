@@ -5423,16 +5423,28 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                 "com.guidexos.apps.managed.notes");
         const bool c151Catalog = gxos::apps::ManagedNativeAotCatalogIsValid() &&
             c151Notes && c151Notes->managedSelector == 4u;
+#if defined(GXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW)
+        constexpr const char* c151LaunchContext = "c152-notes";
+#else
+        constexpr const char* c151LaunchContext = "c151-notes";
+#endif
         const bool c151Launch = c151Catalog &&
             kernel::desktop::launch_app_with_context(
-                c151Notes->appId, "c151-notes");
+                c151Notes->appId, c151LaunchContext);
         kernel::app::KernelWindow* c151Window =
             kernel::compositor::KernelCompositor::getFocusedWindow();
         const bool c151Ready = c151Launch && c151Window &&
             kernel::nativeaot::c150ActiveApplicationIs(c151Notes->appId) &&
             kernel::nativeaot::c150ReturnTargetIsEmpty();
-        kernel::serial::puts("[C151-NOTES-LAUNCH] identity=canonical context=c151-notes active=");
+        kernel::serial::puts("[C151-NOTES-LAUNCH] identity=canonical context=");
+        kernel::serial::puts(c151LaunchContext);
+        kernel::serial::puts(" active=");
         kernel::serial::puts(c151Ready ? "Notes return-target=none result=PASS\n" : "invalid result=FAIL\n");
+#if defined(GXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW)
+        kernel::serial::puts(c151Ready
+            ? "[C152-NOTES-LAUNCH] identity=canonical context=c152-notes result=PASS\n"
+            : "[C152-NOTES-LAUNCH] identity=invalid result=FAIL\n");
+#endif
         if (c151Window) {
             kernel::serial::puts("[C151-TARGET] fileX=470 fileY=264 menuOpenX=420 menuOpenY=289 listX=60 listY=99 openX=326 openY=260 cancelX=426 cancelY=260 outsideX=12 outsideY=12 result=");
             kernel::serial::puts(c151Ready ? "PASS\n" : "FAIL\n");
