@@ -5417,6 +5417,28 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         };
 
 #if defined(GXOS_NATIVEAOT_C147_RUNTIME_SETTINGS)
+#if defined(GXOS_NATIVEAOT_C151_MANAGED_OPEN_FILE_DIALOG)
+        const gxos::apps::BuiltInAppMetadata* c151Notes =
+            gxos::apps::FindManagedNativeAotAppByIdentity(
+                "com.guidexos.apps.managed.notes");
+        const bool c151Catalog = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c151Notes && c151Notes->managedSelector == 4u;
+        const bool c151Launch = c151Catalog &&
+            kernel::desktop::launch_app_with_context(
+                c151Notes->appId, "c151-notes");
+        kernel::app::KernelWindow* c151Window =
+            kernel::compositor::KernelCompositor::getFocusedWindow();
+        const bool c151Ready = c151Launch && c151Window &&
+            kernel::nativeaot::c150ActiveApplicationIs(c151Notes->appId) &&
+            kernel::nativeaot::c150ReturnTargetIsEmpty();
+        kernel::serial::puts("[C151-NOTES-LAUNCH] identity=canonical context=c151-notes active=");
+        kernel::serial::puts(c151Ready ? "Notes return-target=none result=PASS\n" : "invalid result=FAIL\n");
+        if (c151Window) {
+            kernel::serial::puts("[C151-TARGET] fileX=470 fileY=264 menuOpenX=420 menuOpenY=289 listX=60 listY=99 openX=326 openY=260 cancelX=426 cancelY=260 outsideX=12 outsideY=12 result=");
+            kernel::serial::puts(c151Ready ? "PASS\n" : "FAIL\n");
+        }
+        return;
+#elif defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
 #if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
         auto runC150ManagedApplicationReturnProof = [&]() __attribute__((noinline)) {
         {
@@ -5615,6 +5637,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         };
         runC150ManagedApplicationReturnProof();
         return;
+#endif
 #endif
 
         auto runC147RuntimeSettingsProof = [&]() __attribute__((noinline)) {

@@ -204,6 +204,54 @@ public sealed unsafe class GuideXosHost
     }
 
     /// <summary>
+    /// Reads a file into caller-owned bounded storage. A larger file returns
+    /// BufferTooSmall without allocating a managed buffer sized from metadata.
+    /// </summary>
+    public GuideXosFileResult TryReadInto(
+        ReadOnlySpan<byte> path,
+        Span<byte> destination,
+        out int bytesRead)
+    {
+        bytesRead = 0;
+        if (!HasCapability(GuideXosCapability.FileRead) ||
+            !HasHostField(FileReadOffset) || _host->fileReadAll == null)
+        {
+            return GuideXosFileResult.CapabilityUnavailable;
+        }
+        if (path.Length == 0 || path.Length > GxAbi.FilePathMaxBytes)
+        {
+            return GuideXosFileResult.InvalidPath;
+        }
+        byte[] pathBuffer = new byte[path.Length + 1];
+        path.CopyTo(pathBuffer);
+        uint length = 0u;
+        int nativeResult;
+        fixed (byte* pathPointer = pathBuffer)
+        fixed (byte* destinationPointer = destination)
+        {
+            nativeResult = _host->fileReadAll(_context, pathPointer,
+                (uint)path.Length, destinationPointer,
+                (uint)destination.Length, &length);
+        }
+        if (length > GxAbi.MaxFileBytes)
+        {
+            return GuideXosFileResult.IoFailure;
+        }
+        if (nativeResult != (int)GuideXosFileResult.Success)
+        {
+            if (nativeResult == (int)GuideXosFileResult.BufferTooSmall)
+                bytesRead = (int)length;
+            return (GuideXosFileResult)nativeResult;
+        }
+        if (length > (uint)destination.Length)
+        {
+            return GuideXosFileResult.IoFailure;
+        }
+        bytesRead = (int)length;
+        return GuideXosFileResult.Success;
+    }
+
+    /// <summary>
     /// Writes one bounded application-data file. Native code copies the data
     /// into the VFS before this call returns and retains no managed pointer.
     /// </summary>

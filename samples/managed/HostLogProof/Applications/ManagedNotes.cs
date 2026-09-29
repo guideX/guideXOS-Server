@@ -684,6 +684,15 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
     private bool _c150ReturnLaunchContext;
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+    private readonly GuideXosOpenFileDialog _c151OpenFileDialog = new();
+    private bool _c151ProofContext;
+    private uint _c151DialogLaunchGeneration;
+    private ulong _c151DialogSurface;
+    private byte[] _c151DocumentBeforeDialog;
+    private uint _c151CancelCycles;
+    private uint _c151SuccessfulOpenCycles;
+#endif
 #endif
 #if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
     private bool _c149LastRenderedKeyboardTips;
@@ -715,6 +724,10 @@ public sealed class ManagedNotes : GuideXosApplication
     {
         if (host.IsCapabilityProbe) return GuideXosResult.Success;
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+        _c151ProofContext =
+            host.LaunchContext.Utf8.SequenceEqual("c151-notes"u8);
+#endif
         _c147RuntimeConsumerContext =
             host.LaunchContext.Utf8.SequenceEqual("c147-native-notes"u8);
 #if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
@@ -722,6 +735,10 @@ public sealed class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("managed-app-return"u8);
         _c147RuntimeConsumerContext = _c147RuntimeConsumerContext ||
             _c150ReturnLaunchContext;
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+        _c147RuntimeConsumerContext = _c147RuntimeConsumerContext ||
+            _c151ProofContext;
+#endif
 #endif
         if (_c147RuntimeConsumerContext)
         {
@@ -754,6 +771,9 @@ public sealed class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c136"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c136-native"u8);
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+        _c135ProofContext = _c135ProofContext || _c151ProofContext;
+#endif
         _c135MenuTestContext = host.LaunchContext.Utf8.SequenceEqual("c135-api"u8);
         _c135HostTestContext = host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8);
 #if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
@@ -885,6 +905,9 @@ public sealed class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("c136-native"u8)
 #endif
             ;
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+        _c133ProofContext = _c133ProofContext || _c151ProofContext;
+#endif
 #endif
 #endif
         _c133ComboTestContext = IsC133ComboTestContext(host) ||
@@ -914,6 +937,9 @@ public sealed class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("c137-relaunch"u8)
 #endif
             ;
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+        _c135ProofContext = _c135ProofContext || _c151ProofContext;
+#endif
         _c135MenuTestContext = host.LaunchContext.Utf8.SequenceEqual("c135-api"u8);
         _c135HostTestContext = host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8);
 #endif
@@ -928,6 +954,9 @@ public sealed class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("c137-api"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c137-host-tests"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c137-relaunch"u8);
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+        _c137ProofContext = _c137ProofContext || _c151ProofContext;
+#endif
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
         _c138ProofContext = host.LaunchContext.Utf8.SequenceEqual("c138"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c138-native"u8) ||
@@ -1279,6 +1308,9 @@ public sealed class ManagedNotes : GuideXosApplication
                 _c138ProofContext ? 10 :
 #endif
 #endif
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+                _c151ProofContext ? 9 :
+#endif
 #if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
                 _c137ProofContext ? 8 :
 #endif
@@ -1301,7 +1333,11 @@ public sealed class ManagedNotes : GuideXosApplication
                 4;
 #endif
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
-            if (_c147RuntimeConsumerContext) expectedHostRegistration = 5;
+            if (_c147RuntimeConsumerContext
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+                && !_c151ProofContext
+#endif
+                ) expectedHostRegistration = 5;
 #endif
             bool hostRegistration = _mainControlHost.RegistrationCount ==
                 expectedHostRegistration && _mainControlHost.ActiveIndex == -1;
@@ -1333,19 +1369,43 @@ public sealed class ManagedNotes : GuideXosApplication
             }
 #endif
 #if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
-            if (_c137ProofContext
+        if (_c137ProofContext
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
                 && !_c138ProofContext
 #endif
                 )
+        {
+            bool expectedInitialViewport = _c137ListBox.FirstVisibleIndex == 0;
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+            if (_c151ProofContext)
             {
-                host.TryLog(hostRegistration &&
-                    _mainControlHost.RegistrationCount == 8 &&
-                    _mainControlHost.TransientInputCaptureKind ==
-                        GuideXosManagedControlKind.None
-                    ? "C137-HOST registration=8 list=registered initial=viewport-zero result=PASS"u8
-                    : "C137-HOST registration=FAIL initial=viewport-zero result=FAIL"u8);
+                // The C151 composite also seeds the C148 runtime-consumer
+                // fixture away from its boundary so the persisted five-line
+                // wheel policy can be checked on the real modal ListBox.
+                expectedInitialViewport =
+                    _c137ListBox.FirstVisibleIndex == 16;
             }
+#endif
+            bool c137HostReady = hostRegistration &&
+                _mainControlHost.RegistrationCount == expectedHostRegistration &&
+                expectedInitialViewport &&
+                _mainControlHost.TransientInputCaptureKind ==
+                    GuideXosManagedControlKind.None;
+            if (c137HostReady)
+            {
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+                host.TryLog(_c151ProofContext
+                    ? "C137-HOST registration=9 list=registered initial=runtime-offset result=PASS"u8
+                    : "C137-HOST registration=8 list=registered initial=viewport-zero result=PASS"u8);
+#else
+                host.TryLog("C137-HOST registration=8 list=registered initial=viewport-zero result=PASS"u8);
+#endif
+            }
+            else
+            {
+                host.TryLog("C137-HOST registration=FAIL initial=viewport result=FAIL"u8);
+            }
+        }
 #endif
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
             if (_c133ProofContext
@@ -1382,7 +1442,11 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
                 {
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
-                    if (_c147RuntimeConsumerContext)
+                    if (_c147RuntimeConsumerContext
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+                        && !_c151ProofContext
+#endif
+                        )
                     {
                         host.TryLog(hostRegistration &&
                             _mainControlHost.RegistrationCount == 5
@@ -1610,6 +1674,17 @@ public sealed class ManagedNotes : GuideXosApplication
             "Managed Notes"u8, 600, 360, out GuideXosSurface surface);
         if (result != GuideXosResult.Success || surface == null) return result;
         _window = surface.Handle;
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+        if (_c151ProofContext)
+        {
+            bool c145Regression = GuideXosDialogC145Tests.Run(host,
+                new GuideXosDialog(100, 88, 360, 160, "C151 nested candidate"));
+            bool c151Core = GuideXosOpenFileDialogC151Tests.Run(host);
+            host.TryLog(c145Regression && c151Core
+                ? "C151-REGRESSIONS C145=49/49 C151-core=10/10 result=PASS"u8
+                : "C151-REGRESSIONS result=FAIL"u8);
+        }
+#endif
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
         if (_c138ProofContext && !_c138TestsRun)
         {
@@ -1736,14 +1811,26 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
         if (_c135ProofContext)
         {
-            bool c135Initial = _mainControlHost.RegistrationCount ==
+            int c135ExpectedRegistration = 8;
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
-                (_c138ProofContext ? 10 : 8) &&
-#else
-                8 &&
+            if (_c138ProofContext) c135ExpectedRegistration = 10;
 #endif
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+            if (_c151ProofContext) c135ExpectedRegistration = 9;
+#endif
+            bool c135Initial = _mainControlHost.RegistrationCount ==
+                c135ExpectedRegistration &&
                 _c135Menu.ItemCount == 4 && !_c135Menu.IsOpen &&
                 _c135Menu.InvokerAvailable;
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+            if (_c151ProofContext)
+            {
+                host.TryLog(c135Initial
+                    ? "C135-NOTES initial=registration=shared items=4 capture=none result=PASS"u8
+                    : "C135-NOTES initial=result=FAIL"u8);
+            }
+            else
+#endif
             host.TryLog(c135Initial
                 ? "C135-NOTES initial=registration=8 items=4 capture=none result=PASS"u8
                 : "C135-NOTES initial=result=FAIL"u8);
@@ -3904,6 +3991,12 @@ public sealed class ManagedNotes : GuideXosApplication
         {
             return GuideXosResult.SurfaceCreationFailed;
         }
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+        if (_c151ProofContext && _c151OpenFileDialog.IsOpen)
+        {
+            return HandleC151DialogInput(host, surface, input);
+        }
+#endif
 #if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
         if (_c147RuntimeConsumerContext &&
             !LogC149KeyboardTips(host, "dispatch=runtime-current"u8))
@@ -4066,6 +4159,12 @@ public sealed class ManagedNotes : GuideXosApplication
         {
             return HandlePickerAction(host, surface, actionId);
         }
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+        if (_c151ProofContext && actionId == 20u)
+        {
+            return OpenC151Dialog(host, surface);
+        }
+#endif
 #if HOSTLOGPROOF_MANAGED_APP_RETURN
         if (actionId == C150SettingsActionId)
         {
@@ -4165,6 +4264,356 @@ public sealed class ManagedNotes : GuideXosApplication
         }
         return GuideXosResult.InvalidAction;
     }
+
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+    private GuideXosResult OpenC151Dialog(
+        GuideXosHost host, GuideXosSurface surface)
+    {
+        _c151DialogLaunchGeneration = _launchCount;
+        _c151DialogSurface = _window;
+        _c151DocumentBeforeDialog = _textArea.ToUtf8();
+        bool popupWasOpen = _c135Menu.IsOpen;
+        GuideXosOpenFileDialogResult result = _c151OpenFileDialog.Open(
+            host, surface, _mainControlHost,
+            GuideXosOpenFileDialog.ManagedVfsRoot);
+        if (result.Status == GuideXosOpenFileDialogStatus.Pending)
+        {
+            bool cleanEntry = _mainControlHost.IsModalActive &&
+                _c151OpenFileDialog.IsOpen &&
+                _c151OpenFileDialog.RegistrationCount == 3 &&
+                !_mainControlHost.HasTransientInputCapture &&
+                !_mainControlHost.HasPointerDragCapture &&
+                (!popupWasOpen || !_c135Menu.IsOpen);
+            host.TryLog(cleanEntry
+                ? "C151-DIALOG open=PASS modal=active member-registration=3 popup=closed capture=none drag=none result=PASS"u8
+                : "C151-DIALOG open=FAIL result=FAIL"u8);
+            LogC151Directory(host, _c151OpenFileDialog.CurrentDirectory,
+                _c151OpenFileDialog.EntryCount, _c151OpenFileDialog.RowCount);
+        }
+        else
+        {
+            _status = result.Message;
+            host.TryLog("C151-DIALOG open=FAIL recoverable=true result=PASS"u8);
+        }
+        return RenderMain(host, surface, _launchCount)
+            ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+    }
+
+    private GuideXosResult HandleC151DialogInput(
+        GuideXosHost host, GuideXosSurface surface, GuideXosInputEvent input)
+    {
+        string directoryBefore = _c151OpenFileDialog.CurrentDirectory;
+        int before = _c151OpenFileDialog.ListBox.FirstVisibleIndex;
+        int notesListBefore = _c137ListBox.FirstVisibleIndex;
+        int notesTextBefore = _textArea.FirstVisibleLine;
+        GuideXosOpenFileDialogResult result =
+            _c151OpenFileDialog.HandleInput(surface, input);
+        int after = _c151OpenFileDialog.ListBox.FirstVisibleIndex;
+        if (input.Kind == GuideXosInputKind.PointerDown &&
+            (input.X < _c151OpenFileDialog.Dialog.X ||
+                input.Y < _c151OpenFileDialog.Dialog.Y ||
+                input.X >= _c151OpenFileDialog.Dialog.X +
+                    _c151OpenFileDialog.Dialog.Width ||
+                input.Y >= _c151OpenFileDialog.Dialog.Y +
+                    _c151OpenFileDialog.Dialog.Height))
+        {
+            host.TryLog("C151-OUTSIDE blocked=true notes-action=none result=PASS"u8);
+        }
+        if (input.Kind == GuideXosInputKind.KeyDown &&
+            input.KeyCode == (uint)GuideXosTextInputKey.Tab &&
+            _c151OpenFileDialog.IsOpen)
+        {
+            Span<byte> focusLine = stackalloc byte[88];
+            int focusPosition = 0;
+            bool focusLogged = GuideXosText.Append(focusLine,
+                    ref focusPosition, input.Shift
+                        ? "C151-KEYBOARD key=ShiftTab focus="u8
+                        : "C151-KEYBOARD key=Tab focus="u8) &&
+                GuideXosText.AppendUnsigned(focusLine, ref focusPosition,
+                    (uint)_c151OpenFileDialog.Dialog.ControlHost.ActiveControlId) &&
+                GuideXosText.Append(focusLine, ref focusPosition,
+                    " modal=true result=PASS"u8);
+            if (focusLogged) host.TryLog(focusLine[..focusPosition]);
+        }
+        if (!string.Equals(directoryBefore, _c151OpenFileDialog.CurrentDirectory,
+                StringComparison.Ordinal))
+        {
+            LogC151Directory(host, _c151OpenFileDialog.CurrentDirectory,
+                _c151OpenFileDialog.EntryCount, _c151OpenFileDialog.RowCount);
+        }
+        if (input.Kind == GuideXosInputKind.Wheel)
+        {
+            GuideXosRuntimeSettingsSnapshot runtime =
+                GuideXosRuntimeSettings.Current;
+            bool backgroundUnchanged = notesListBefore ==
+                    _c137ListBox.FirstVisibleIndex &&
+                notesTextBefore == _textArea.FirstVisibleLine;
+            LogC151Wheel(host, input.WheelDelta, before, after, runtime,
+                _c151OpenFileDialog.ListBox.MaximumFirstVisibleIndex,
+                backgroundUnchanged);
+        }
+        if (result.Status is GuideXosOpenFileDialogStatus.Selected or
+            GuideXosOpenFileDialogStatus.Cancelled)
+        {
+            ApplyC151DialogResult(host, surface, result);
+        }
+        return RenderMain(host, surface, _launchCount)
+            ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+    }
+
+    private void ApplyC151DialogResult(
+        GuideXosHost host,
+        GuideXosSurface surface,
+        GuideXosOpenFileDialogResult result)
+    {
+        bool loaded = false;
+        if (result.Status == GuideXosOpenFileDialogStatus.Selected)
+        {
+            loaded = TryLoadC151Document(host, result.Path,
+                out GuideXosFileResult loadResult, out int byteCount);
+            bool preserved = _c151DocumentBeforeDialog != null &&
+                _c151DocumentBeforeDialog.AsSpan().SequenceEqual(
+                    _textArea.ToUtf8());
+            if (loaded)
+            {
+                _c151SuccessfulOpenCycles++;
+                host.TryLog("C151-LOAD result=PASS source=VFS replacement=transactional bytes=bounded"u8);
+                LogC151Stress(host, "open"u8, _c151SuccessfulOpenCycles);
+            }
+            else if (loadResult == GuideXosFileResult.BufferTooSmall)
+            {
+                host.TryLog(preserved
+                    ? "C151-LOAD result=REJECTED reason=oversized document=preserved=true"u8
+                    : "C151-LOAD result=REJECTED reason=oversized document=preserved=false"u8);
+            }
+            else
+            {
+                host.TryLog(preserved
+                    ? "C151-LOAD result=REJECTED reason=read-or-content document=preserved=true"u8
+                    : "C151-LOAD result=REJECTED reason=read-or-content document=preserved=false"u8);
+            }
+            if (loaded)
+            {
+                Span<byte> line = stackalloc byte[128];
+                int position = 0;
+                bool logged = GuideXosText.Append(line, ref position,
+                    "C151-LOAD-DETAIL bytes="u8) &&
+                    GuideXosText.AppendUnsigned(line, ref position,
+                        (uint)byteCount) &&
+                    GuideXosText.Append(line, ref position,
+                        " path="u8) &&
+                    GuideXosText.Append(line, ref position,
+                        Encoding.UTF8.GetBytes(result.Path));
+                if (logged) host.TryLog(line[..position]);
+                LogC151DocumentContent(host);
+            }
+        }
+        else
+        {
+            bool preserved = _c151DocumentBeforeDialog != null &&
+                _c151DocumentBeforeDialog.AsSpan().SequenceEqual(
+                    _textArea.ToUtf8());
+            _status = "Open cancelled";
+            _c151CancelCycles++;
+            host.TryLog(preserved
+                ? "C151-CANCEL result=PASS document=preserved=true"u8
+                : "C151-CANCEL result=FAIL document=changed"u8);
+            LogC151Stress(host, "cancel"u8, _c151CancelCycles);
+        }
+
+        bool sameInstance = _launchCount == _c151DialogLaunchGeneration &&
+            _window == _c151DialogSurface;
+        bool modalClean = !_mainControlHost.IsModalActive &&
+            !_mainControlHost.HasTransientInputCapture &&
+            !_mainControlHost.HasPointerDragCapture &&
+            !_c151OpenFileDialog.IsOpen;
+        host.TryLog(sameInstance && modalClean
+            ? "C151-INSTANCE same=true surface=unchanged modal=none popup-capture=none drag=none result=PASS"u8
+            : "C151-INSTANCE same=false modal-or-capture=leaked result=FAIL"u8);
+        if (loaded)
+        {
+            host.TryLog("C151-SAME-NOTES active=true relaunch=false return-target=unarmed result=PASS"u8);
+        }
+        _c151DocumentBeforeDialog = null;
+        _ = surface;
+    }
+
+    private bool TryLoadC151Document(
+        GuideXosHost host,
+        string path,
+        out GuideXosFileResult fileResult,
+        out int byteCount)
+    {
+        fileResult = GuideXosFileResult.InvalidPath;
+        byteCount = 0;
+        if (string.IsNullOrEmpty(path) ||
+            Encoding.UTF8.GetByteCount(path) > GuideXosOpenFileDialog.MaximumPathBytes)
+        {
+            _status = "Selected path is invalid";
+            return false;
+        }
+        int separator = path.LastIndexOf('/');
+        if (separator < GuideXosOpenFileDialog.ManagedVfsRoot.Length - 1 ||
+            GuideXosPickerPath.TryBuildPath(path.Substring(0, separator),
+                path.Substring(separator + 1), out string checkedPath) !=
+                GuideXosPickerPathStatus.Success ||
+            !string.Equals(path, checkedPath, StringComparison.Ordinal))
+        {
+            _status = "Selected path is invalid";
+            return false;
+        }
+        ReadOnlySpan<byte> encodedPath = Encoding.UTF8.GetBytes(path);
+        fileResult = GuideXosFile.TryGetInfo(host, encodedPath,
+            out GuideXosFileInfo info);
+        if (fileResult != GuideXosFileResult.Success || info == null ||
+            info.Type != GuideXosEntryType.Regular)
+        {
+            _status = "Selected file is unavailable";
+            return false;
+        }
+        if (info.Size > (ulong)_textArea.MaximumCharacters)
+        {
+            fileResult = GuideXosFileResult.BufferTooSmall;
+            _status = "File exceeds the 256 byte editor limit";
+            return false;
+        }
+        Span<byte> temporary = stackalloc byte[GuideXosTextArea.DefaultMaximumCharacters];
+        fileResult = GuideXosFile.ReadAllTextUtf8(
+            host, encodedPath, temporary, out byteCount);
+        if (fileResult != GuideXosFileResult.Success)
+        {
+            _status = fileResult == GuideXosFileResult.BufferTooSmall
+                ? "File grew beyond the 256 byte editor limit"
+                : "File read failed; current note kept";
+            return false;
+        }
+        if (!_textArea.SetUtf8(temporary[..byteCount]))
+        {
+            fileResult = GuideXosFileResult.InvalidArgument;
+            _status = "Unsupported text; current note kept";
+            return false;
+        }
+
+        _currentPath = path;
+        UpdatePathLabel();
+        _textArea.SetCaretToStart();
+        _status = "Opened file";
+        fileResult = GuideXosFileResult.Success;
+        return true;
+    }
+
+    private bool RenderC151Path(GuideXosSurface surface)
+    {
+        const int MaximumDisplayedPathBytes = 56;
+        Span<byte> path = stackalloc byte[MaximumDisplayedPathBytes];
+        ReadOnlySpan<char> value = _currentPath.AsSpan();
+        int count = Math.Min(value.Length, path.Length);
+        for (int index = 0; index < count; index++)
+            path[index] = value[index] <= 0x7f ? (byte)value[index] : (byte)'?';
+        if (value.Length > path.Length)
+        {
+            path[^3] = (byte)'.';
+            path[^2] = (byte)'.';
+            path[^1] = (byte)'.';
+        }
+        return GuideXosText.Line(surface, 66, "Path: "u8, path);
+    }
+
+    private static void LogC151Wheel(
+        GuideXosHost host,
+        int wheelDelta,
+        int before,
+        int after,
+        GuideXosRuntimeSettingsSnapshot runtime,
+        int maximumFirstVisibleIndex,
+        bool backgroundUnchanged)
+    {
+        int transformed = runtime.NaturalScroll
+            ? wheelDelta == int.MinValue ? int.MaxValue : -wheelDelta
+            : wheelDelta;
+        int bounded = Math.Clamp(transformed, -8, 8);
+        int expected = Math.Clamp(before - bounded *
+            runtime.ScrollLinesPerNotch, 0, maximumFirstVisibleIndex);
+        bool exact = after == expected;
+        Span<byte> line = stackalloc byte[144];
+        int position = 0;
+        bool written = GuideXosText.Append(line, ref position,
+            "C151-WHEEL modal-list=true delta="u8) &&
+            (wheelDelta >= 0 || GuideXosText.Append(line, ref position, "-"u8)) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                wheelDelta == int.MinValue
+                    ? (uint)int.MaxValue + 1u
+                    : (uint)Math.Abs(wheelDelta)) &&
+            GuideXosText.Append(line, ref position, " first="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position, (uint)before) &&
+            GuideXosText.Append(line, ref position, "->"u8) &&
+            GuideXosText.AppendUnsigned(line, ref position, (uint)after) &&
+            GuideXosText.Append(line, ref position, " natural="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                runtime.NaturalScroll ? 1u : 0u) &&
+            GuideXosText.Append(line, ref position, " lines="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                (uint)runtime.ScrollLinesPerNotch) &&
+            GuideXosText.Append(line, ref position, " expected="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position, (uint)expected) &&
+            GuideXosText.Append(line, ref position, " background="u8) &&
+            GuideXosText.Append(line, ref position,
+                backgroundUnchanged ? "unchanged"u8 : "changed"u8) &&
+            GuideXosText.Append(line, ref position, " result="u8) &&
+            GuideXosText.Append(line, ref position, exact && backgroundUnchanged
+                ? before != after ? "PASS"u8 : "CONSUMED"u8
+                : "FAIL"u8);
+        if (written) host.TryLog(line[..position]);
+    }
+
+    private static void LogC151Directory(GuideXosHost host, string path,
+        int entries, int rows)
+    {
+        Span<byte> line = stackalloc byte[128];
+        int position = 0;
+        bool written = GuideXosText.Append(line, ref position,
+                "C151-DIRECTORY path="u8) &&
+            GuideXosText.Append(line, ref position,
+                Encoding.UTF8.GetBytes(path)) &&
+            GuideXosText.Append(line, ref position, " entries="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position, (uint)entries) &&
+            GuideXosText.Append(line, ref position, " rows="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position, (uint)rows);
+        if (written) host.TryLog(line[..position]);
+    }
+
+    private static void LogC151Stress(GuideXosHost host,
+        ReadOnlySpan<byte> operation, uint cycle)
+    {
+        Span<byte> line = stackalloc byte[96];
+        int position = 0;
+        bool written = GuideXosText.Append(line, ref position,
+                "C151-STRESS operation="u8) &&
+            GuideXosText.Append(line, ref position, operation) &&
+            GuideXosText.Append(line, ref position, " cycle="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position, cycle) &&
+            GuideXosText.Append(line, ref position,
+                " registration=3 same-instance=true result=PASS"u8);
+        if (written) host.TryLog(line[..position]);
+    }
+
+    private void LogC151DocumentContent(GuideXosHost host)
+    {
+        byte[] content = _textArea.ToUtf8();
+        int lineLength = content.AsSpan().IndexOf((byte)'\n');
+        if (lineLength < 0) lineLength = content.Length;
+        lineLength = Math.Min(lineLength, 56);
+        Span<byte> line = stackalloc byte[112];
+        int position = 0;
+        bool written = GuideXosText.Append(line, ref position,
+                "C151-CONTENT first-line="u8) &&
+            GuideXosText.Append(line, ref position,
+                content.AsSpan(0, lineLength)) &&
+            GuideXosText.Append(line, ref position,
+                " visible=Notes result=PASS"u8);
+        if (written) host.TryLog(line[..position]);
+    }
+#endif
 
     private GuideXosResult HandlePickerAction(
         GuideXosHost host, GuideXosSurface surface, uint actionId)
@@ -4410,11 +4859,39 @@ public sealed class ManagedNotes : GuideXosApplication
     private bool UpdatePathLabel()
     {
 #if HOSTLOGPROOF_C134_TRANSIENT_POPUP_ROUTING
-        if (_c133ProofContext)
+        if (_c133ProofContext
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+            && !_c151ProofContext
+#endif
+            )
         {
             return _pathLabel.SetText(_pathDisplayCombo.SelectedIndex == 1
                 ? "Path: NOTES.TXT"
                 : "Path: /system/apps/NOTES.TXT");
+        }
+#endif
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+        if (_c151ProofContext)
+        {
+            Span<char> c151Line = stackalloc char[
+                GuideXosLabel.DefaultMaximumTextLength];
+            ReadOnlySpan<char> c151Prefix = "Path: ".AsSpan();
+            ReadOnlySpan<char> c151Path = _currentPath.AsSpan();
+            c151Prefix.CopyTo(c151Line);
+            int pathCapacity = c151Line.Length - c151Prefix.Length;
+            if (c151Path.Length <= pathCapacity)
+            {
+                c151Path.CopyTo(c151Line[c151Prefix.Length..]);
+                return _pathLabel.SetText(c151Line[..(c151Prefix.Length +
+                    c151Path.Length)]);
+            }
+            int prefixPathLength = pathCapacity - 3;
+            c151Path[..prefixPathLength].CopyTo(
+                c151Line[c151Prefix.Length..]);
+            c151Line[^3] = '.';
+            c151Line[^2] = '.';
+            c151Line[^1] = '.';
+            return _pathLabel.SetText(c151Line);
         }
 #endif
         Span<char> line = stackalloc char[GuideXosLabel.DefaultMaximumTextLength];
@@ -4627,7 +5104,7 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
         if (!SyncDocumentUsage()) return false;
 #endif
-        return surface.TryFillRect(10, 10, 560, 300, 0x007A5A9Au) ==
+        bool rendered = surface.TryFillRect(10, 10, 560, 300, 0x007A5A9Au) ==
                 GuideXosResult.Success &&
             GuideXosText.Line(surface, 24, "Managed Notes | "u8, "multiline text area"u8) &&
             GuideXosText.CountLine(surface, 48, "Launches: "u8, launchCount) &&
@@ -4736,7 +5213,11 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
             (!_c135ProofContext || surface.TryAddButton(
-                420, 250, 100, 28, "Options"u8, C135OptionsActionId,
+                420, 250, 100, 28,
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+                _c151ProofContext ? "File"u8 :
+#endif
+                "Options"u8, C135OptionsActionId,
                 out _) == GuideXosResult.Success) &&
             (!_c135ProofContext || _c135Menu.Render(surface) ==
                 GuideXosResult.Success) &&
@@ -4760,6 +5241,14 @@ public sealed class ManagedNotes : GuideXosApplication
 #else
             surface.TryAddButton(330, 220, 90, 28, "Reload"u8, 3u, out _) == GuideXosResult.Success;
 #endif
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+        if (rendered && _c151ProofContext && _c151OpenFileDialog.IsOpen)
+        {
+            rendered = _c151OpenFileDialog.Render(surface) ==
+                GuideXosResult.Success;
+        }
+#endif
+        return rendered;
     }
 
 #if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING

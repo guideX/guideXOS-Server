@@ -29,6 +29,7 @@ public sealed class GuideXosDialog
         CheckBox = 3,
         ComboBox = 4,
         Separator = 5,
+        ListBox = 6,
     }
 
     private struct MemberEntry
@@ -155,6 +156,8 @@ public sealed class GuideXosDialog
                 (GuideXosCheckBox)control, focusable),
             MemberKind.ComboBox => _controlHost.TryRegisterComboBox(id,
                 (GuideXosComboBox)control, focusable),
+            MemberKind.ListBox => _controlHost.TryRegisterListBox(id,
+                (GuideXosListBox)control, focusable),
             _ => GuideXosControlHostResult.Registered,
         };
         if (registration != GuideXosControlHostResult.Registered) return false;
@@ -163,7 +166,8 @@ public sealed class GuideXosDialog
         {
             Control = control,
             Kind = kind,
-            Id = kind is MemberKind.Button or MemberKind.CheckBox or MemberKind.ComboBox
+            Id = kind is MemberKind.Button or MemberKind.CheckBox or
+                MemberKind.ComboBox or MemberKind.ListBox
                 ? id : 0,
             Focusable = focusable,
         };
@@ -317,18 +321,52 @@ public sealed class GuideXosDialog
                 return GuideXosControlHostResult.Ignored;
             }
             if (id == 0) return GuideXosControlHostResult.Ignored;
+            int originX = 0;
+            int originY = 0;
+            int lineHeight = 18;
+            for (int index = 0; index < _memberCount; index++)
+            {
+                MemberEntry entry = _members[index];
+                if (entry.Id == id && entry.Kind == MemberKind.ListBox)
+                {
+                    GuideXosListBox list = (GuideXosListBox)entry.Control;
+                    originX = list.X;
+                    originY = list.Y;
+                    lineHeight = list.LineHeight;
+                    break;
+                }
+            }
             GuideXosControlHostResult pointer = _parentHost.FocusAndRoutePointer(
-                id, input.X, input.Y);
+                id, input.X, input.Y, originX, originY,
+                GuideXosLabel.CharacterWidth, lineHeight);
             CompleteActivatedMember(pointer, _controlHost.ActiveControlId);
             return pointer;
         }
 
         if (input.Kind == GuideXosInputKind.Wheel)
         {
-            if (!_controlHost.HasTransientInputCapture) return GuideXosControlHostResult.Ignored;
-            return _parentHost.HandleWheel(
-                _controlHost.TransientInputCaptureOwnerId, input.X, input.Y,
-                input.WheelDelta);
+            int id = _controlHost.HasTransientInputCapture
+                ? _controlHost.TransientInputCaptureOwnerId
+                : HitWheelMember(input.X, input.Y);
+            if (id == 0) return GuideXosControlHostResult.Ignored;
+            int originX = 0;
+            int originY = 0;
+            int lineHeight = 18;
+            for (int index = 0; index < _memberCount; index++)
+            {
+                MemberEntry entry = _members[index];
+                if (entry.Id == id && entry.Kind == MemberKind.ListBox)
+                {
+                    GuideXosListBox list = (GuideXosListBox)entry.Control;
+                    originX = list.X;
+                    originY = list.Y;
+                    lineHeight = list.LineHeight;
+                    break;
+                }
+            }
+            return _parentHost.HandleWheel(id, input.X, input.Y,
+                input.WheelDelta, originX, originY,
+                GuideXosLabel.CharacterWidth, lineHeight);
         }
 
         if (input.Kind == GuideXosInputKind.KeyDown &&
@@ -466,7 +504,8 @@ public sealed class GuideXosDialog
         for (int index = 0; index < _memberCount; index++)
         {
             MemberEntry entry = _members[index];
-            entry.Id = entry.Kind is MemberKind.Button or MemberKind.CheckBox or MemberKind.ComboBox
+            entry.Id = entry.Kind is MemberKind.Button or MemberKind.CheckBox or
+                MemberKind.ComboBox or MemberKind.ListBox
                 ? index + 1 : 0;
             _members[index] = entry;
             GuideXosControlHostResult result = entry.Kind switch
@@ -477,6 +516,8 @@ public sealed class GuideXosDialog
                     (GuideXosCheckBox)entry.Control, entry.Focusable),
                 MemberKind.ComboBox => _controlHost.TryRegisterComboBox(entry.Id,
                     (GuideXosComboBox)entry.Control, entry.Focusable),
+                MemberKind.ListBox => _controlHost.TryRegisterListBox(entry.Id,
+                    (GuideXosListBox)entry.Control, entry.Focusable),
                 _ => GuideXosControlHostResult.Registered,
             };
             if (result != GuideXosControlHostResult.Registered) return false;
@@ -502,6 +543,7 @@ public sealed class GuideXosDialog
             GuideXosCheckBox => MemberKind.CheckBox,
             GuideXosComboBox => MemberKind.ComboBox,
             GuideXosSeparator => MemberKind.Separator,
+            GuideXosListBox => MemberKind.ListBox,
             _ => MemberKind.None,
         };
         return kind != MemberKind.None;
@@ -529,6 +571,7 @@ public sealed class GuideXosDialog
             ((GuideXosSeparator)control).ParentScrollView == null &&
             ((GuideXosSeparator)control).ParentGroupBox == null &&
             ((GuideXosSeparator)control).VerticalStackOwner == null,
+        MemberKind.ListBox => true,
         _ => false,
     };
 
@@ -541,6 +584,7 @@ public sealed class GuideXosDialog
             MemberKind.Button => ((GuideXosButton)control).X,
             MemberKind.CheckBox => ((GuideXosCheckBox)control).X,
             MemberKind.ComboBox => ((GuideXosComboBox)control).X,
+            MemberKind.ListBox => ((GuideXosListBox)control).X,
             _ => ((GuideXosSeparator)control).X,
         };
         int childY = kind switch
@@ -549,6 +593,7 @@ public sealed class GuideXosDialog
             MemberKind.Button => ((GuideXosButton)control).Y,
             MemberKind.CheckBox => ((GuideXosCheckBox)control).Y,
             MemberKind.ComboBox => ((GuideXosComboBox)control).Y,
+            MemberKind.ListBox => ((GuideXosListBox)control).Y,
             _ => ((GuideXosSeparator)control).Y,
         };
         int childWidth = kind switch
@@ -557,6 +602,7 @@ public sealed class GuideXosDialog
             MemberKind.Button => ((GuideXosButton)control).Width,
             MemberKind.CheckBox => ((GuideXosCheckBox)control).Width,
             MemberKind.ComboBox => ((GuideXosComboBox)control).Width,
+            MemberKind.ListBox => ((GuideXosListBox)control).Width,
             _ => ((GuideXosSeparator)control).Width,
         };
         int childHeight = kind switch
@@ -565,6 +611,7 @@ public sealed class GuideXosDialog
             MemberKind.Button => ((GuideXosButton)control).Height,
             MemberKind.CheckBox => ((GuideXosCheckBox)control).Height,
             MemberKind.ComboBox => ((GuideXosComboBox)control).Height,
+            MemberKind.ListBox => ((GuideXosListBox)control).Height,
             _ => ((GuideXosSeparator)control).Height,
         };
         return childX >= x && childY >= y && childWidth > 0 && childHeight > 0 &&
@@ -596,6 +643,8 @@ public sealed class GuideXosDialog
                     ((GuideXosCheckBox)entry.Control).EffectiveEnabled,
                 MemberKind.ComboBox => ((GuideXosComboBox)entry.Control).EffectiveVisible &&
                     ((GuideXosComboBox)entry.Control).EffectiveEnabled,
+                MemberKind.ListBox => ((GuideXosListBox)entry.Control).EffectiveVisible &&
+                    ((GuideXosListBox)entry.Control).Enabled,
                 _ => false,
             };
         }
@@ -613,6 +662,7 @@ public sealed class GuideXosDialog
                 MemberKind.Button => Contains(((GuideXosButton)entry.Control), x, y),
                 MemberKind.CheckBox => Contains(((GuideXosCheckBox)entry.Control), x, y),
                 MemberKind.ComboBox => Contains(((GuideXosComboBox)entry.Control), x, y),
+                MemberKind.ListBox => Contains(((GuideXosListBox)entry.Control), x, y),
                 _ => false,
             };
             if (hit) return entry.Id;
@@ -631,6 +681,22 @@ public sealed class GuideXosDialog
     private static bool Contains(GuideXosComboBox control, int x, int y) =>
         control.ContainsPoint(x, y) || control.ContainsDropDownPoint(x, y);
 
+    private static bool Contains(GuideXosListBox control, int x, int y) =>
+        x >= control.X && x < control.X + control.Width &&
+        y >= control.Y && y < control.Y + control.Height;
+
+    private int HitWheelMember(int x, int y)
+    {
+        for (int index = _memberCount - 1; index >= 0; index--)
+        {
+            MemberEntry entry = _members[index];
+            if (entry.Id == 0 || entry.Kind != MemberKind.ListBox ||
+                !IsMemberVisible(entry)) continue;
+            if (Contains((GuideXosListBox)entry.Control, x, y)) return entry.Id;
+        }
+        return 0;
+    }
+
     private bool IsMemberVisible(MemberEntry entry) => entry.Kind switch
     {
         MemberKind.Label => ((GuideXosLabel)entry.Control).EffectiveVisible,
@@ -638,6 +704,7 @@ public sealed class GuideXosDialog
         MemberKind.CheckBox => ((GuideXosCheckBox)entry.Control).EffectiveVisible,
         MemberKind.ComboBox => ((GuideXosComboBox)entry.Control).EffectiveVisible,
         MemberKind.Separator => ((GuideXosSeparator)entry.Control).Visible,
+        MemberKind.ListBox => ((GuideXosListBox)entry.Control).EffectiveVisible,
         _ => false,
     };
 
@@ -692,6 +759,10 @@ public sealed class GuideXosDialog
         MemberKind.CheckBox => ((GuideXosCheckBox)entry.Control).Render(surface),
         MemberKind.ComboBox => ((GuideXosComboBox)entry.Control).Render(surface),
         MemberKind.Separator => ((GuideXosSeparator)entry.Control).Render(surface),
+        MemberKind.ListBox => ((GuideXosListBox)entry.Control).Render(
+            surface, ((GuideXosListBox)entry.Control).X,
+            ((GuideXosListBox)entry.Control).Y,
+            ((GuideXosListBox)entry.Control).LineHeight),
         _ => GuideXosResult.InvalidArgument,
     };
 }

@@ -39,7 +39,10 @@ public sealed class GuideXosListBox
     private readonly int _maximumLabelLength;
     private readonly int _visibleRowCount;
     private readonly int _renderWidth;
+    private readonly int _lineHeight;
     private readonly GuideXosVerticalViewport _viewport;
+    private int _x;
+    private int _y;
     private int _itemCount;
     private int _selectedIndex = -1;
     private bool _isFocused;
@@ -51,7 +54,10 @@ public sealed class GuideXosListBox
         int maximumItemCount = DefaultMaximumItemCount,
         int maximumLabelLength = DefaultMaximumLabelLength,
         int visibleRowCount = DefaultVisibleRowCount,
-        int renderWidth = DefaultRenderWidth)
+        int renderWidth = DefaultRenderWidth,
+        int x = 0,
+        int y = 0,
+        int lineHeight = 18)
     {
         if (maximumItemCount < 1 || maximumItemCount > MaximumSupportedItemCount)
         {
@@ -70,12 +76,23 @@ public sealed class GuideXosListBox
         {
             renderWidth = DefaultRenderWidth;
         }
+        if (x < 0 || x > GuideXosLabel.MaximumSupportedCoordinate ||
+            y < 0 || y > GuideXosLabel.MaximumSupportedCoordinate ||
+            lineHeight < 1 || lineHeight > 128)
+        {
+            x = 0;
+            y = 0;
+            lineHeight = 18;
+        }
 
         _labelStorage = new char[maximumItemCount * maximumLabelLength];
         _labelLengths = new int[maximumItemCount];
         _maximumLabelLength = maximumLabelLength;
         _visibleRowCount = visibleRowCount;
         _renderWidth = renderWidth;
+        _lineHeight = lineHeight;
+        _x = x;
+        _y = y;
         _viewport = new GuideXosVerticalViewport(0, _visibleRowCount);
     }
 
@@ -83,6 +100,11 @@ public sealed class GuideXosListBox
     public int MaximumLabelLength => _maximumLabelLength;
     public int VisibleRowCount => _visibleRowCount;
     public int RenderWidth => _renderWidth;
+    public int X => _x;
+    public int Y => _y;
+    public int Width => _renderWidth * GuideXosLabel.CharacterWidth;
+    public int Height => _visibleRowCount * _lineHeight;
+    public int LineHeight => _lineHeight;
     public int ItemCount => _itemCount;
     public int SelectedIndex => _selectedIndex;
     public bool HasSelection => IsValidIndex(_selectedIndex);
@@ -96,6 +118,24 @@ public sealed class GuideXosListBox
     public int MaximumFirstVisibleIndex => _viewport.MaximumOffset;
     public GuideXosVerticalViewport VerticalViewport => _viewport;
     public uint RejectedOperationCount => _rejectedOperationCount;
+
+    /// <summary>
+    /// Sets the fixed hit-test/render bounds used when this leaf participates
+    /// in a Dialog. Standalone hosts may continue supplying their own origin.
+    /// </summary>
+    public bool TrySetBounds(int x, int y)
+    {
+        if (x < 0 || y < 0 ||
+            x > GuideXosLabel.MaximumSupportedCoordinate - Width ||
+            y > GuideXosLabel.MaximumSupportedCoordinate - Height)
+        {
+            ++_rejectedOperationCount;
+            return false;
+        }
+        _x = x;
+        _y = y;
+        return true;
+    }
 
     public bool IsValidIndex(int index)
     {

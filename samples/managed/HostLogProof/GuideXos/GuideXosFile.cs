@@ -78,6 +78,15 @@ public static class GuideXosFile
         return host.TryReadAllBytes(path, out utf8);
     }
 
+    public static GuideXosFileResult ReadAllTextUtf8(
+        GuideXosHost host,
+        ReadOnlySpan<byte> path,
+        Span<byte> destination,
+        out int bytesRead)
+    {
+        return host.TryReadInto(path, destination, out bytesRead);
+    }
+
     public static GuideXosFileResult WriteAllTextUtf8(
         GuideXosHost host,
         ReadOnlySpan<byte> path,
