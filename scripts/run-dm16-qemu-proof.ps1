@@ -5,9 +5,10 @@
 .DESCRIPTION
     Creates an isolated ESP copy and a fresh 600 MiB raw secondary image, then
     boots from a separate IDE-backed ESP and attaches the raw image to a QEMU
-    NVMe controller. DM17's private integrity gate requires a dense image and
-    writeback cache, pauses after each write/restore for host-side inspection,
-    and leaves common NVMe writes and Flush disabled.
+    NVMe controller. The canonical diagnostic profile is a dense raw image with
+    writeback cache, discard ignored, detect-zeroes disabled, and QEMU-default
+    AIO. Use -SparseImage only for an explicit matrix case. Private integrity
+    proof leaves common NVMe writes and Flush disabled.
 #>
 [CmdletBinding()]
 param(
@@ -16,8 +17,15 @@ param(
     [string]$EspSource = "ESP",
     [string]$WorkDir = "",
     [string]$QemuExecutable = "C:\Program Files\qemu\qemu-system-x86_64.exe",
+    [string]$QemuImgExecutable = "C:\Program Files\qemu\qemu-img.exe",
     [ValidateSet("writeback", "writethrough", "none", "directsync", "unsafe", "default")]
     [string]$CacheMode = "writeback",
+    [ValidateSet("ignore", "unmap")]
+    [string]$DiscardMode = "ignore",
+    [ValidateSet("off", "on", "unmap")]
+    [string]$DetectZeroesMode = "off",
+    [ValidateSet("", "threads", "native", "io_uring")]
+    [string]$AioMode = "",
     [string]$OvmfCode = "OVMF.fd",
     [string]$PythonExecutable = "",
     [string]$EspCacheDirectory = "",
@@ -27,6 +35,8 @@ param(
     [switch]$Dm17CommonWriteProof,
     [switch]$EnableNvmeCallbacks,
     [switch]$DenseImage,
+    [switch]$SparseImage,
+    [switch]$PreallocateTarget,
     [switch]$QemuDebug,
     [switch]$QemuTrace,
     [switch]$SkipBuild
@@ -35,6 +45,18 @@ param(
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location -LiteralPath $Root
+
+if ($DenseImage -and $SparseImage) {
+    throw "Choose either the dense canonical profile or an explicit sparse image."
+}
+if ($PreallocateTarget -and $DenseImage) {
+    throw "Choose either a dense image or a sparse image with only the target range preallocated."
+}
+if ($PreallocateTarget) {
+    $SparseImage = $true
+} elseif (-not $DenseImage -and -not $SparseImage) {
+    $DenseImage = $true
+}
 
 if ($Dm17Proof -and ($Stage -ne "PrivateWrite" -or
         $CacheMode -ne "writeback" -or -not $DenseImage)) {
@@ -47,6 +69,9 @@ if ($Dm17CommonWriteProof -and (-not $Dm17Proof -or
 if ($EnableNvmeCallbacks -and ($Stage -ne "Lifecycle" -or
         $CacheMode -ne "writeback" -or -not $DenseImage)) {
     throw "NVMe callback lifecycle proof requires Lifecycle, cache=writeback, and a dense raw image."
+}
+if ($DetectZeroesMode -eq "unmap" -and $DiscardMode -ne "unmap") {
+    throw "detect-zeroes=unmap requires discard=unmap."
 }
 
 function Find-MSBuild {
@@ -197,6 +222,57 @@ function Save-Dm17HostInspection([string]$DiskPath, [string]$OutputPath,
     if (-not $targetMatches -or -not $neighborsZero) { $script:Dm17HostInspectionFailures++ }
 }
 
+function Save-ImageAllocationEvidence([string]$DiskPath, [string]$OutputPath,
+                                      [string]$Phase) {
+    $path = Join-Path $OutputPath "image-allocation-$Phase.txt"
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $item = Get-Item -LiteralPath $DiskPath
+    $driveLetter = ([IO.Path]::GetPathRoot($DiskPath) -replace '[:\\]', '')
+    $volume = Get-Volume -DriveLetter $driveLetter
+    $lines.Add("phase=$Phase")
+    $lines.Add("path=$DiskPath")
+    $lines.Add("hostVolume=$driveLetter`:")
+    $lines.Add("hostFileSystem=$($volume.FileSystem)")
+    $lines.Add("logicalBytes=$($item.Length)")
+    $lines.Add("attributes=$($item.Attributes)")
+    $qemuInfo = & $script:QemuImgFull info --output=json -f raw $DiskPath 2>&1
+    $qemuInfo | ForEach-Object { $lines.Add("qemuImg=$($_)") }
+    if ($item.Attributes -band [IO.FileAttributes]::SparseFile) {
+        $queryFlag = & $script:FsutilFull sparse queryflag $DiskPath 2>&1
+        $queryFlag | ForEach-Object { $lines.Add("sparseFlag=$($_)") }
+        $queryRanges = & $script:FsutilFull sparse queryrange $DiskPath 2>&1
+        $queryRanges | ForEach-Object { $lines.Add("allocatedRange=$($_)") }
+    } else {
+        $lines.Add("sparseFlag=not-sparse")
+        $lines.Add("allocatedRange=fully-allocated-as-confirmed-by-qemu-img-actual-size")
+    }
+    Set-Content -LiteralPath $path -Value $lines -Encoding ascii
+}
+
+function Save-TargetBackingSnapshot([string]$DiskPath, [string]$OutputPath,
+                                   [string]$Phase) {
+    $pythonExe = $PythonExecutable
+    if (-not $pythonExe) {
+        $python = Get-Command python.exe -ErrorAction SilentlyContinue
+        if (-not $python) { throw "Python 3 was not found; specify -PythonExecutable." }
+        $pythonExe = $python.Source
+    }
+    $inspector = Join-Path $Root "scripts\inspect_dm18_raw_image.py"
+    $jsonLines = & $pythonExe $inspector --path $DiskPath `
+        --output-dir $OutputPath --phase $Phase 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Independent DM18 raw-image inspection failed during phase '$Phase'."
+    }
+    $inspection = ($jsonLines -join "`n") | ConvertFrom-Json
+    $line = "phase=$Phase lba=$($inspection.targetLba) sectors=$($inspection.targetSectors) bytes=$($inspection.targetBytes) actualSha256=$($inspection.targetSha256) cycle1PatternSha256=$($inspection.cycle1PatternSha256) allZero=$($inspection.targetAllZero.ToString().ToLowerInvariant()) precedingSectorAllZero=$($inspection.guardAllZero.ToString().ToLowerInvariant())"
+    return [pscustomobject]@{
+        InspectionLine = $line
+        LogicalSha256 = [string]$inspection.logicalImageSha256
+        TargetAllZero = [bool]$inspection.targetAllZero
+        GuardAllZero = [bool]$inspection.guardAllZero
+    }
+}
+
 function Get-EspTreeHash([string]$Source) {
     $excluded = @("EFI\BOOT\BOOTX64.EFI", "kernel.elf", "build-identity.txt")
     $lines = [System.Collections.Generic.List[string]]::new()
@@ -337,16 +413,24 @@ function Stop-ProofQemu([int]$ProcessId, [int]$Port, [int]$QmpPort,
 }
 
 function Save-ProofDmaSnapshot([int]$Port, [string]$Serial,
-                               [string]$OutputPath, [string]$RunName) {
-    $queueMatch = [regex]::Match($Serial, 'sqPhysical=([0-9A-Fa-f]+)')
-    $physicalMatch = [regex]::Match($Serial, 'bouncePhysical=([0-9A-Fa-f]+)')
-    $virtualMatch = [regex]::Match($Serial, 'bounceVirtual=([0-9A-Fa-f]+)')
+                               [string]$OutputPath, [string]$RunName,
+                               [string]$Phase) {
+    $pauseLines = @($Serial -split "`r?`n" | Where-Object {
+        $_ -match "\[DM16-NVME-DMA\] submit-pause=START phase=$Phase(?:\s|$)"
+    })
+    if ($pauseLines.Count -eq 0) { return }
+    $pauseLine = $pauseLines[-1]
+    $queueMatch = [regex]::Match($pauseLine, 'sqPhysical=([0-9A-Fa-f]+)')
+    $physicalMatch = [regex]::Match($pauseLine, 'prp1=([0-9A-Fa-f]+)')
+    $virtualMatch = [regex]::Match($pauseLine, 'bounceVirtual=([0-9A-Fa-f]+)')
     if (-not $queueMatch.Success -or -not $physicalMatch.Success -or
         -not $virtualMatch.Success) { return }
     $queueAddress = $queueMatch.Groups[1].Value
     $physicalAddress = $physicalMatch.Groups[1].Value
     $virtualAddress = $virtualMatch.Groups[1].Value
-    $snapshotPath = Join-Path $OutputPath "$RunName.dma-snapshot.txt"
+    $snapshotStem = if ($Phase -eq "pattern") { $RunName }
+        else { "$RunName-$Phase" }
+    $snapshotPath = Join-Path $OutputPath "$snapshotStem.dma-snapshot.txt"
     $client = [System.Net.Sockets.TcpClient]::new()
     try {
         $client.ReceiveTimeout = 1000
@@ -366,7 +450,11 @@ function Save-ProofDmaSnapshot([int]$Port, [string]$Serial,
             return $output.ToString()
         }
         $greeting = & $readMonitor
-        $commands = @("xp /64bx 0x$queueAddress", "xp /16bx 0x$physicalAddress", "x /16bx 0x$virtualAddress")
+        $queueDump = Join-Path $OutputPath "$snapshotStem.sq-entry.bin"
+        $payloadDump = Join-Path $OutputPath "$snapshotStem.prp1-data.bin"
+        $commands = @(
+            "pmemsave 0x$queueAddress 0x40 $queueDump",
+            "pmemsave 0x$physicalAddress 0x1000 $payloadDump")
         $results = [System.Collections.Generic.List[string]]::new()
         foreach ($command in $commands) {
             $bytes = [Text.Encoding]::ASCII.GetBytes("$command`r`n")
@@ -374,8 +462,33 @@ function Save-ProofDmaSnapshot([int]$Port, [string]$Serial,
             $stream.Flush()
             $results.Add((& $readMonitor))
         }
-        @("qemuMonitorSubmissionQueueAddress=0x$queueAddress", "qemuMonitorPhysicalAddress=0x$physicalAddress", "qemuMonitorVirtualAddress=0x$virtualAddress", "greeting=$greeting", "submissionEntry=$($results[0])", "physicalRead=$($results[1])", "virtualRead=$($results[2])") |
-            Set-Content -LiteralPath $snapshotPath -Encoding utf8
+        if (-not (Test-Path -LiteralPath $queueDump) -or
+            -not (Test-Path -LiteralPath $payloadDump)) {
+            throw "QEMU could not save the guest NVMe command and PRP payload pages."
+        }
+        $queueBytes = [IO.File]::ReadAllBytes($queueDump)
+        $payloadBytes = [IO.File]::ReadAllBytes($payloadDump)
+        if ($queueBytes.Length -ne 64 -or $payloadBytes.Length -ne 4096) {
+            throw "QEMU returned an unexpected command or PRP snapshot length."
+        }
+        $queueHex = ($queueBytes | ForEach-Object { $_.ToString('x2') }) -join ''
+        $payloadPrefix = ($payloadBytes[0..31] |
+            ForEach-Object { $_.ToString('x2') }) -join ''
+        $queueHash = (Get-FileHash -LiteralPath $queueDump -Algorithm SHA256).Hash
+        $payloadHash = (Get-FileHash -LiteralPath $payloadDump -Algorithm SHA256).Hash
+        $snapshotLines = @(
+            "phase=$Phase",
+            "qemuMonitorSubmissionQueueAddress=0x$queueAddress",
+            "qemuMonitorPrp1PhysicalAddress=0x$physicalAddress",
+            "qemuMonitorVirtualAddress=0x$virtualAddress",
+            "guestCommandSha256=$queueHash",
+            "guestCommand64BytesHex=$queueHex",
+            "guestPrp1SourcePageBytes=4096",
+            "guestPrp1SourcePageSha256=$payloadHash",
+            "guestPrp1Prefix32=$payloadPrefix",
+            "commandPage=$([IO.Path]::GetFileName($queueDump))",
+            "dataPage=$([IO.Path]::GetFileName($payloadDump) )")
+        Set-Content -LiteralPath $snapshotPath -Value $snapshotLines -Encoding utf8
     } finally { $client.Dispose() }
 }
 
@@ -394,7 +507,7 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
         "-machine", "q35,usb=off",
         "-drive", "if=none,id=dm16boot,format=raw,file=fat:rw:$EspPath",
         "-device", "ide-hd,drive=dm16boot,bus=ide.0",
-        "-drive", "if=none,id=dm16secondary,format=raw,cache=$CacheMode,file=$DiskPath",
+        "-drive", "if=none,id=dm16secondary,format=raw,cache=$CacheMode,discard=$DiscardMode,detect-zeroes=$DetectZeroesMode$(if ($AioMode) { ",aio=$AioMode" }),file=$DiskPath",
         "-device", "nvme,id=dm16nvme,serial=GXOSDM16NVME,drive=dm16secondary",
         "-netdev", "user,id=net0",
         "-device", "e1000,netdev=net0",
@@ -409,8 +522,25 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
     if ($QemuDebug) { $arguments += @("-d", "guest_errors,int,cpu_reset", "-D", $debugPath) }
     if ($QemuTrace) {
         $tracePath = Join-Path $OutputPath "$RunName.nvme-trace.log"
-        $arguments += @("-trace", "enable=pci_nvme_io_cmd,file=$tracePath")
+        $traceEventsPath = Join-Path $OutputPath "$RunName.trace-events.txt"
+        @(
+            "pci_nvme_io_cmd",
+            "pci_nvme_read", "pci_nvme_write", "pci_nvme_rw_cb",
+            "pci_nvme_flush_ns", "pci_nvme_aio_flush_cb",
+            "pci_nvme_rw_complete_cb", "pci_nvme_block_status",
+            "pci_nvme_dma_read", "pci_nvme_map_prp",
+            "blk_co_preadv", "blk_co_pwritev", "bdrv_co_preadv_part",
+            "bdrv_co_pwritev_part", "bdrv_co_pwrite_zeroes") |
+            Set-Content -LiteralPath $traceEventsPath -Encoding ascii
+        $arguments += @("-trace", "events=$traceEventsPath,file=$tracePath")
     }
+    $argumentLines = [System.Collections.Generic.List[string]]::new()
+    $argumentLines.Add("executable=$QemuFull")
+    for ($i = 0; $i -lt $arguments.Count; $i++) {
+        $argumentLines.Add("arg[$i]=$($arguments[$i])")
+    }
+    Set-Content -LiteralPath (Join-Path $OutputPath "$RunName.qemu-arguments.txt") `
+        -Value $argumentLines -Encoding ascii
     $process = Start-Process -FilePath $QemuFull -ArgumentList $arguments `
         -WorkingDirectory $Root -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
@@ -447,12 +577,21 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
                     }
                 }
             }
-            if ($serial -and $serial.Contains("[DM16-NVME-DMA] submit-pause=START") -and
-                -not (Test-Path -LiteralPath (Join-Path $OutputPath "$RunName.dma-snapshot.txt"))) {
-                try { Save-ProofDmaSnapshot $port $serial $OutputPath $RunName }
-                catch {
-                    Stop-ProofQemu $process.Id $port $qmpPort $serialPath
-                    throw
+            if ($serial) {
+                $pauseMatches = [regex]::Matches($serial,
+                    '(?m)^\[DM16-NVME-DMA\] submit-pause=START phase=([a-z-]+)')
+                foreach ($pauseMatch in $pauseMatches) {
+                    $phase = $pauseMatch.Groups[1].Value
+                    $snapshotStem = if ($phase -eq "pattern") { $RunName }
+                        else { "$RunName-$phase" }
+                    if (Test-Path -LiteralPath (Join-Path $OutputPath "$snapshotStem.dma-snapshot.txt")) {
+                        continue
+                    }
+                    try { Save-ProofDmaSnapshot $port $serial $OutputPath $RunName $phase }
+                    catch {
+                        Stop-ProofQemu $process.Id $port $qmpPort $serialPath
+                        throw
+                    }
                 }
             }
             if ($serial -and $serial.Contains($SuccessMarker) -and
@@ -469,8 +608,11 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
 }
 
 if (-not (Test-Path -LiteralPath $QemuExecutable)) { throw "QEMU was not found at $QemuExecutable" }
+if (-not (Test-Path -LiteralPath $QemuImgExecutable)) { throw "qemu-img was not found at $QemuImgExecutable" }
 if ($AttemptNumber -lt 1) { throw "AttemptNumber must be positive." }
 $QemuFull = (Resolve-Path -LiteralPath $QemuExecutable).Path
+$script:QemuImgFull = (Resolve-Path -LiteralPath $QemuImgExecutable).Path
+$script:FsutilFull = Join-Path $env:SystemRoot "System32\fsutil.exe"
 $OvmfFull = (Resolve-Path -LiteralPath $OvmfCode).Path
 $EspFull = (Resolve-Path -LiteralPath $EspSource).Path
 $repoOut = [IO.Path]::GetFullPath((Join-Path $Root "out"))
@@ -592,9 +734,28 @@ try {
         [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
     $diskStream.SetLength(600L * 1024L * 1024L)
     $diskStream.Dispose()
+    if ($PreallocateTarget) {
+        if (-not $PythonExecutable) {
+            $python = Get-Command python.exe -ErrorAction SilentlyContinue
+            if (-not $python) { throw "Python 3 was not found; specify -PythonExecutable." }
+            $PythonExecutable = $python.Source
+        }
+        $preallocator = Join-Path $Root "scripts\preallocate_dm18_raw_target.py"
+        $preallocationLog = Join-Path $WorkFull "target-preallocation.json"
+        $preallocationOutput = & $PythonExecutable $preallocator --path $DiskPath 2>&1
+        $preallocationOutput | Set-Content -LiteralPath $preallocationLog -Encoding utf8
+        if ($LASTEXITCODE -ne 0) {
+            throw "DM18 preallocated target did not verify as zero; refusing invalid proof fixture. See $preallocationLog"
+        }
+    }
     $bootHash = (Get-FileHash -LiteralPath (Join-Path $bootPath "BOOTX64.EFI") -Algorithm SHA256).Hash
     $kernelHash = (Get-FileHash -LiteralPath (Join-Path $EspPath "kernel.elf") -Algorithm SHA256).Hash
-    $initialHash = (Get-FileHash -LiteralPath $DiskPath -Algorithm SHA256).Hash
+    Save-ImageAllocationEvidence $DiskPath $WorkFull "before"
+    $targetBefore = Save-TargetBackingSnapshot $DiskPath $WorkFull "before"
+    if (-not $targetBefore.TargetAllZero -or -not $targetBefore.GuardAllZero) {
+        throw "DM18 target image is not logically zero before guest boot; refusing invalid proof fixture."
+    }
+    $initialHash = $targetBefore.LogicalSha256
     @(
         "proof=$($proofPrefix.ToUpperInvariant())-NVMe-$Stage",
         "attemptNumber=$AttemptNumber",
@@ -610,9 +771,20 @@ try {
         "secondaryFormat=raw",
         "secondaryCacheMode=$CacheMode",
         "secondarySparse=$(-not $DenseImage)",
+        "secondaryTargetPreallocated=$PreallocateTarget",
         "secondaryCapacityBytes=$((Get-Item -LiteralPath $DiskPath).Length)",
         "secondaryInitialSha256=$initialHash",
+        "hostTargetBefore=$($targetBefore.InspectionLine)",
         "secondaryPlacement=QEMU-NVMe-controller-namespace-1",
+        "secondaryDriveArgs=format=raw,cache=$CacheMode,discard=$DiscardMode,detect-zeroes=$DetectZeroesMode$(if ($AioMode) { ",aio=$AioMode" })",
+        "nvmeControllerArgs=nvme,id=dm16nvme,serial=GXOSDM16NVME,drive=dm16secondary; attached drive provides NSID 1 with default 512-byte LBAs",
+        "targetLba=0x12bff7",
+        "targetSectors=9",
+        "discard=$DiscardMode",
+        "detectZeroes=$DetectZeroesMode",
+        "aio=$(if ($AioMode) { $AioMode } else { 'QEMU-default' })",
+        "allocationBefore=see image-allocation-before.txt",
+        "qemuArguments=private-write-boot.qemu-arguments.txt",
         "physicalHostDisksPassedToQemu=none",
         "qemu=$((& $QemuFull --version | Select-Object -First 1))"
     ) | Set-Content -LiteralPath $manifestPath -Encoding ascii
@@ -652,16 +824,18 @@ try {
                 throw "DM17 restart boot did not read back and restore the flushed pattern."
             }
         }
-        $finalHash = (Get-FileHash -LiteralPath $DiskPath -Algorithm SHA256).Hash
+        Save-ImageAllocationEvidence $DiskPath $WorkFull "after"
+        $targetAfter = Save-TargetBackingSnapshot $DiskPath $WorkFull "after"
+        $finalHash = $targetAfter.LogicalSha256
         if ($initialHash -ne $finalHash) { throw "Private raw write proof did not restore the complete image hash." }
         if ($Dm17Proof -and $script:Dm17HostInspectionFailures -ne 0) {
             throw "DM17 host-side target or neighbor inspection failed $script:Dm17HostInspectionFailures time(s)."
         }
         $resultLines = if ($Dm17Proof) {
             $writeRegistration = if ($Dm17CommonWriteProof) { "enabled-stage2-private-proof" } else { "disabled" }
-            @("secondaryFinalSha256=$finalHash", "result=PASS tier=private-data-integrity-and-flush-restart", "flushStressCycles=100", "restartReadback=PASS", "hostInspectionFailures=0", "sharedWriteRegistration=$writeRegistration", "sharedFlushRegistration=disabled", "imageRestoredByteForByte=yes", "firstBootSerial=$([IO.Path]::GetFileName($firstSerialPath))", "restartSerial=$([IO.Path]::GetFileName($restartSerialPath))", "hostInspection=dm17-host-image-inspection.txt")
+            @("secondaryFinalSha256=$finalHash", "result=PASS tier=private-data-integrity-and-flush-restart", "flushStressCycles=100", "restartReadback=PASS", "hostInspectionFailures=0", "sharedWriteRegistration=$writeRegistration", "sharedFlushRegistration=disabled", "imageRestoredByteForByte=yes", "firstBootSerial=$([IO.Path]::GetFileName($firstSerialPath))", "restartSerial=$([IO.Path]::GetFileName($restartSerialPath))", "hostInspection=dm17-host-image-inspection.txt", $targetBefore.InspectionLine, $targetAfter.InspectionLine)
         } else {
-            @("secondaryFinalSha256=$finalHash", "result=PASS tier=1-private-write-flush-read-restore-stress-100-cycles", "sharedWriteRegistration=disabled", "imageRestoredByteForByte=yes", "serial=private-write-boot.serial.log")
+            @("secondaryFinalSha256=$finalHash", "result=PASS tier=1-private-write-flush-read-restore-stress-100-cycles", "sharedWriteRegistration=disabled", "imageRestoredByteForByte=yes", "serial=private-write-boot.serial.log", $targetBefore.InspectionLine, $targetAfter.InspectionLine)
         }
         Add-Content -LiteralPath $manifestPath -Encoding ascii -Value $resultLines
     } else {
@@ -690,8 +864,11 @@ try {
         $inspection = & $PythonExecutable (Join-Path $Root "scripts\verify-dm9-qemu-image.py") $DiskPath 2>&1
         $inspection | Set-Content -LiteralPath $inspectionPath -Encoding utf8
         if ($LASTEXITCODE -ne 0) { throw "Independent raw-image verification failed; see $inspectionPath" }
+        Save-ImageAllocationEvidence $DiskPath $WorkFull "after"
+        $targetAfter = Save-TargetBackingSnapshot $DiskPath $WorkFull "after"
         Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
-            "secondaryFinalSha256=$((Get-FileHash -LiteralPath $DiskPath -Algorithm SHA256).Hash)",
+            "secondaryFinalSha256=$($targetAfter.LogicalSha256)",
+            "hostTargetAfter=$($targetAfter.InspectionLine)",
             "firstBootSerial=$([IO.Path]::GetFileName($firstSerial))",
             "rediscoverySerial=$([IO.Path]::GetFileName($rediscoverySerial))",
             "result=PASS tier=DM17-full-lifecycle-and-restart-rediscovery",
@@ -712,14 +889,24 @@ try {
         $activeBoot = $null
     }
     @("result=FAIL", "detail=$failureText") | Set-Content -LiteralPath (Join-Path $WorkFull "failure.txt") -Encoding utf8
+    $finalHash = "unavailable"
+    $targetAfter = $null
+    if (Test-Path -LiteralPath $DiskPath) {
+        try {
+            Save-ImageAllocationEvidence $DiskPath $WorkFull "after"
+            $targetAfter = Save-TargetBackingSnapshot $DiskPath $WorkFull "after"
+            $finalHash = $targetAfter.LogicalSha256
+        } catch { $failureText += " hostAudit=$($_.Exception.Message -replace '[\r\n]+', ' ')" }
+    }
     if (Test-Path -LiteralPath $manifestPath) {
-        $finalHash = "unavailable"
-        if (Test-Path -LiteralPath $DiskPath) {
-            try { $finalHash = (Get-FileHash -LiteralPath $DiskPath -Algorithm SHA256).Hash }
-            catch { $failureText += " imageHash=locked-or-unavailable" }
-        }
         Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
             "secondaryFinalSha256=$finalHash", "result=FAIL", "failure=$failureText"
+        )
+    }
+    if ($targetAfter -and (Test-Path -LiteralPath $manifestPath)) {
+        Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
+            $targetAfter.InspectionLine,
+            "hostLogicalImageSha256=$($targetAfter.LogicalSha256)"
         )
     }
     throw

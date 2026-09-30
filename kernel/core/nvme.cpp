@@ -501,21 +501,33 @@ static CommandResult submit_and_wait(Controller& controller, QueuePair& queue,
     }
 #endif
 #if defined(GXOS_DM16_NVME_PRIVATE_PROOF)
-    if (queue.queueId == 1u && command.opcode == NVME_IO_WRITE &&
-        s_proofDmaTraceCount == 4u) {
+    const char* proofPausePhase = nullptr;
+    if (queue.queueId == 1u && command.opcode == NVME_IO_WRITE) {
+        if (s_proofDmaTraceCount == 4u) proofPausePhase = "pattern";
+        else if (s_proofDmaTraceCount == 10u) proofPausePhase = "restore";
+        else if (s_proofDmaTraceCount == 11u) proofPausePhase = "restore-tail";
+    }
+    if (proofPausePhase) {
         const uint64_t pauseStart = pit::ticks();
-        serial::puts("[DM16-NVME-DMA] submit-pause=START sqVirtual=");
+        serial::puts("[DM16-NVME-DMA] submit-pause=START phase=");
+        serial::puts(proofPausePhase);
+        serial::puts(" sqVirtual=");
         serial::put_hex64(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(
             &queue.submission[slot])));
         serial::puts(" sqPhysical=");
         serial::put_hex64(virtual_to_physical(&queue.submission[slot]));
+        serial::puts(" bounceVirtual=");
+        serial::put_hex64(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(
+            controller.ioBounce)));
         serial::puts(" slot="); serial::put_hex32(slot);
         serial::puts(" cid="); serial::put_hex32(commandId);
         serial::puts(" tail="); serial::put_hex32(newTail);
         serial::puts(" prp1="); serial::put_hex64(command.prp1);
         serial::puts(" ticks=2000\n");
         while (pit::ticks() - pauseStart < 2000u) { }
-        serial::puts("[DM16-NVME-DMA] submit-pause=END\n");
+        serial::puts("[DM16-NVME-DMA] submit-pause=END phase=");
+        serial::puts(proofPausePhase);
+        serial::putc('\n');
     }
 #endif
     result.submitted = true;
@@ -881,7 +893,7 @@ static block::Status transfer(uint8_t driverIndex, uint64_t lba,
             break;
         }
 #if defined(GXOS_DM16_QEMU_NVME_PROOF)
-        const bool traceDma = s_proofDmaTraceCount < 8u &&
+        const bool traceDma = s_proofDmaTraceCount < 16u &&
             currentLba >= device.totalSectors - 16u;
         if (traceDma) {
             serial::puts("[DM16-NVME-DMA] submit op=");

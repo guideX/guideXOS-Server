@@ -4042,6 +4042,39 @@ int main()
           "durable-write and explicit-flush metadata cannot contradict each other into eligibility");
     unregister_fake(index, contradictoryDurability);
 
+    FakeDisk defaultNvmeFallback(512, 4096);
+    index = register_fake(defaultNvmeFallback, false, false, false, false, 0, 0,
+        block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT, block::BDEV_NVME);
+    block::BlockDevice defaultNvmeDescriptor = {};
+    storage::TargetIdentity defaultNvmeIdentity = {};
+    storage::DeviceCapabilities defaultNvmeCapabilities = {};
+    storage::InitializeTargetValidation defaultNvmeInitializeValidation = {};
+    storage::SafetyRequest defaultNvmeSafetyRequest = {};
+    defaultNvmeSafetyRequest.requireWritable = true;
+    defaultNvmeSafetyRequest.requireDurableWrites = true;
+    defaultNvmeSafetyRequest.requireKnownPartitionState = true;
+    defaultNvmeSafetyRequest.allowNotInitialized = true;
+    storage::SafetyValidation defaultNvmeSafetyValidation = {};
+    const bool defaultNvmeReadOnlyFallback =
+        block::copy_device(index, defaultNvmeDescriptor) &&
+        defaultNvmeDescriptor.type == block::BDEV_NVME &&
+        defaultNvmeDescriptor.readFn && !defaultNvmeDescriptor.writeFn &&
+        !defaultNvmeDescriptor.flushFn &&
+        !defaultNvmeDescriptor.flushSemanticsKnown &&
+        storage::capture_target_identity(index, defaultNvmeIdentity) &&
+        storage::query_device_capabilities(index, defaultNvmeCapabilities) &&
+        defaultNvmeCapabilities.readable && !defaultNvmeCapabilities.writable &&
+        defaultNvmeCapabilities.persistence == storage::PERSISTENCE_UNKNOWN &&
+        !storage::validate_destructive_target(defaultNvmeIdentity,
+            defaultNvmeSafetyRequest, defaultNvmeSafetyValidation) &&
+        (defaultNvmeSafetyValidation.issues & storage::SAFETY_ISSUE_READ_ONLY) != 0 &&
+        storage::probe_initialize_target(defaultNvmeIdentity,
+            storage::PARTITION_SCHEME_GPT, defaultNvmeInitializeValidation) ==
+            storage::INITIALIZE_DISK_READ_ONLY;
+    check(defaultNvmeReadOnlyFallback,
+          "NVMe with no proven write or Flush callbacks remains read-only and is rejected by destructive preflight");
+    unregister_fake(index, defaultNvmeFallback);
+
     FakeDisk nvmeNoFlush(512, 4096);
     index = register_fake(nvmeNoFlush, true, false, false, false, 0, 0,
         block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT, block::BDEV_NVME);

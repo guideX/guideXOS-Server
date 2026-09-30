@@ -345,6 +345,14 @@ static bool verify_private_nvme_write_flush_stress(
                 (i * 37u + cycle * 13u + 0x5Au) & 0xFFu);
         const block::Status writeStatus = nvme::proof_write(
             device.driverIndex, lba, count, pattern);
+        const block::Status preFlushReadStatus =
+            writeStatus == block::BLOCK_OK
+                ? block::read_sectors(globalIndex, lba, count, readback)
+                : block::BLOCK_ERR_NOT_READY;
+        const bool preFlushPatternMatches =
+            preFlushReadStatus == block::BLOCK_OK &&
+            bytes_equal(reinterpret_cast<const char*>(pattern),
+                        reinterpret_cast<const char*>(readback), byteCount);
         const block::Status flushStatus = writeStatus == block::BLOCK_OK
             ? nvme::proof_flush(device.driverIndex) : block::BLOCK_ERR_NOT_READY;
         const block::Status readStatus = flushStatus == block::BLOCK_OK
@@ -365,11 +373,16 @@ static bool verify_private_nvme_write_flush_stress(
             bytes_equal(reinterpret_cast<const char*>(original),
                         reinterpret_cast<const char*>(readback), byteCount);
         if (writeStatus != block::BLOCK_OK || flushStatus != block::BLOCK_OK ||
-            !patternMatches || restoreStatus != block::BLOCK_OK ||
+            !preFlushPatternMatches || !patternMatches ||
+            restoreStatus != block::BLOCK_OK ||
             restoreFlushStatus != block::BLOCK_OK || !restored) {
             serial::puts(QEMU_PROOF_TAG " private-cycle=FAIL cycle=");
             serial::put_hex32(cycle + 1u);
             serial::puts(" write="); serial::put_hex8(static_cast<uint8_t>(writeStatus));
+            serial::puts(" preRead=");
+            serial::put_hex8(static_cast<uint8_t>(preFlushReadStatus));
+            serial::puts(" preMatches=");
+            serial::puts(preFlushPatternMatches ? "yes" : "no");
             serial::puts(" flush="); serial::put_hex8(static_cast<uint8_t>(flushStatus));
             serial::puts(" read="); serial::put_hex8(static_cast<uint8_t>(readStatus));
             serial::puts(" restore="); serial::put_hex8(static_cast<uint8_t>(restoreStatus));
@@ -384,6 +397,19 @@ static bool verify_private_nvme_write_flush_stress(
             serial::putc('\n');
             allCyclesPassed = false;
             break;
+        }
+        if (cycle == 0u) {
+            serial::puts(QEMU_PROOF_TAG " private-cycle=PASS cycle=00000001 preRead=");
+            serial::put_hex8(static_cast<uint8_t>(preFlushReadStatus));
+            serial::puts(" preMatches=");
+            serial::puts(preFlushPatternMatches ? "yes" : "no");
+            serial::puts(" flush=");
+            serial::put_hex8(static_cast<uint8_t>(flushStatus));
+            serial::puts(" postRead=");
+            serial::put_hex8(static_cast<uint8_t>(readStatus));
+            serial::puts(" postMatches=");
+            serial::puts(patternMatches ? "yes" : "no");
+            serial::putc('\n');
         }
         ++completedCycles;
         if (((cycle + 1u) % 10u) == 0u) {
