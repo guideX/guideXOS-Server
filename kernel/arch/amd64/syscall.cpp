@@ -19,6 +19,7 @@
 #include "include/arch/amd64.h"
 #include "include/arch/context_switch.h"
 #include "../../core/native_elf/native_elf_runtime.h"
+#include "../../core/include/kernel/serial_debug.h"
 
 #if defined(_MSC_VER)
 #define GXOS_MSVC_STUB 1
@@ -274,53 +275,36 @@ int64_t dispatch(SyscallArgs* args)
 // Exception dispatcher (called from IDT stubs)
 // ================================================================
 
+static void exception_debug_put_hex64(uint64_t value)
+{
+    static const char digits[] = "0123456789ABCDEF";
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        ::kernel::serial::debugcon_putc(digits[(value >> shift) & 0x0F]);
+    }
+}
+
 extern "C" void exception_dispatch(uint64_t vector, uint64_t error_code,
                                    uint64_t rip, uint64_t rflags)
 {
-    (void)rflags;
-    
-    switch (vector) {
-        case 0:   // Divide Error
-            handle_divide_error();
-            break;
-            
-        case 6:   // Invalid Opcode
-            handle_invalid_opcode();
-            break;
-            
-        case 8:   // Double Fault
-            handle_double_fault();
-            break;
-            
-        case 13:  // General Protection Fault
-            handle_general_protection(error_code);
-            break;
-            
-        case 14:  // Page Fault
-            {
-                uint64_t fault_addr;
-#if GXOS_MSVC_STUB
-                fault_addr = 0;
-#else
-                fault_addr = read_cr2();
-#endif
-                handle_page_fault(error_code, fault_addr);
-            }
-            break;
-            
-        default:
-            if (vector >= 32 && vector < 256) {
-                // Hardware interrupt or software interrupt
-                handle_interrupt(static_cast<uint32_t>(vector));
-            } else {
-                serial_puts("[Exception] Unhandled exception vector=");
-                serial_put_hex(vector);
-                serial_puts(" at RIP=");
-                serial_put_hex(rip);
-                serial_puts("\n");
-                while (1) { halt(); }
-            }
-            break;
+    const bool nativeElfActive = ::kernel::native_elf::native_elf_execution_active();
+    ::kernel::serial::debugcon_puts("P29M EXCEPTION vector=0x");
+    exception_debug_put_hex64(vector);
+    ::kernel::serial::debugcon_puts(" error=0x");
+    exception_debug_put_hex64(error_code);
+    ::kernel::serial::debugcon_puts(" rip=0x");
+    exception_debug_put_hex64(rip);
+    ::kernel::serial::debugcon_puts(" rflags=0x");
+    exception_debug_put_hex64(rflags);
+    ::kernel::serial::debugcon_puts(" native_elf=");
+    ::kernel::serial::debugcon_puts(nativeElfActive ? "1" : "0");
+    if (vector == 14) {
+        ::kernel::serial::debugcon_puts(" cr2=0x");
+        exception_debug_put_hex64(read_cr2());
+    }
+    ::kernel::serial::debugcon_puts("\n");
+
+    for (;;) {
+        halt();
     }
 }
 

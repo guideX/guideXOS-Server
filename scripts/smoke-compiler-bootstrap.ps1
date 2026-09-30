@@ -74,6 +74,7 @@ param(
     [switch]$Phase29COnly,
     [switch]$Phase29LOwnershipOnly,
     [switch]$Phase29LFullAcceptance,
+    [switch]$QemuExceptionTrace,
     [switch]$Phase29ISentinelOnly,
     [switch]$Phase29EManifestOnly
 )
@@ -86,6 +87,9 @@ Import-Module (Join-Path $PSScriptRoot "Phase29J.BootEvidence.psm1") -Force
 if ($Phase29EManifestOnly) { $Phase29COnly = $true }
 if ($Phase29LOwnershipOnly) { $Phase29COnly = $true }
 if ($Phase29LFullAcceptance) { $Phase28QOnly = $true }
+if ($QemuExceptionTrace -and -not ($Phase29LOwnershipOnly -or $Phase29LFullAcceptance)) {
+    throw 'QemuExceptionTrace is diagnostic-only and requires a Phase 29L ownership run.'
+}
 if ($Phase29GBeginDebugReturnOnly) { $Phase29FDebugStartOnly = $true }
 if ($Phase29FDebugStartOnly) { $Phase28QOnly = $true }
 if ($Phase29ISentinelOnly) { $Phase28QOnly = $true }
@@ -895,7 +899,8 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
     if ($Phase29ISentinelOnly -or $Phase29LOwnershipGate) {
         $qemuArguments = New-P29JQemuArguments -OvmfCodePath ([IO.Path]::GetFullPath($ovmfCodePath)) `
             -EspPath $resolvedEspPath -SerialPath ([IO.Path]::GetFullPath($serialPath)) `
-            -DebugconPath ([IO.Path]::GetFullPath($debugconPath)) -QemuDebugPath ([IO.Path]::GetFullPath($qemuDebugPath))
+            -DebugconPath ([IO.Path]::GetFullPath($debugconPath)) -QemuDebugPath ([IO.Path]::GetFullPath($qemuDebugPath)) `
+            -TraceExceptions:$QemuExceptionTrace
     } else {
         $qemuArguments = @(
             "-machine", "pc,usb=off",

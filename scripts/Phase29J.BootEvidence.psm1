@@ -10,8 +10,11 @@ function New-P29JQemuArguments {
         [Parameter(Mandatory = $true)][string]$EspPath,
         [Parameter(Mandatory = $true)][string]$SerialPath,
         [Parameter(Mandatory = $true)][string]$DebugconPath,
-        [Parameter(Mandatory = $true)][string]$QemuDebugPath
+        [Parameter(Mandatory = $true)][string]$QemuDebugPath,
+        [switch]$TraceExceptions
     )
+
+    $qemuTraceEvents = if ($TraceExceptions) { 'int,cpu_reset' } else { 'cpu_reset' }
 
     return @(
         '-machine', 'pc,usb=off',
@@ -22,7 +25,7 @@ function New-P29JQemuArguments {
         '-serial', "file:$SerialPath",
         '-debugcon', "file:$DebugconPath",
         '-global', 'isa-debugcon.iobase=0xe9',
-        '-d', 'cpu_reset',
+        '-d', $qemuTraceEvents,
         '-D', $QemuDebugPath,
         '-display', 'none',
         '-no-reboot',

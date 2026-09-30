@@ -18,6 +18,16 @@ $qemuArgs = New-P29JQemuArguments -OvmfCodePath 'D:\repo\OVMF.fd' -EspPath $esp 
 $driveArg = $qemuArgs[5]
 Assert-Equal $driveArg "file=fat:rw:$esp,format=raw,if=ide,index=0" 'QEMU must attach the requested staged ESP'
 if ($qemuArgs -notcontains 'isa-debugcon.iobase=0xe9') { throw 'QEMU debugcon must be attached at port 0xe9' }
+$debugFlagIndex = [array]::IndexOf($qemuArgs, '-d')
+if ($qemuArgs[$debugFlagIndex + 1] -ne 'cpu_reset') { throw 'normal QEMU runs must retain reset-only logging' }
+$diagnosticArgs = New-P29JQemuArguments -OvmfCodePath 'D:\repo\OVMF.fd' -EspPath $esp `
+    -SerialPath 'C:\temp\boot2.serial.log' -DebugconPath 'C:\temp\boot2.debugcon.log' `
+    -QemuDebugPath 'C:\temp\boot2.qemu-debug.log' -TraceExceptions
+$diagnosticFlagIndex = [array]::IndexOf($diagnosticArgs, '-d')
+if ($diagnosticArgs[$diagnosticFlagIndex + 1] -ne 'int,cpu_reset') {
+    throw 'exception diagnostic runs must capture interrupts and CPU resets'
+}
+if ($diagnosticArgs -notcontains '-no-reboot') { throw 'diagnostic QEMU runs must preserve reset evidence without rebooting' }
 
 function Classify([bool]$alive, [bool]$exited, [int]$code = 0, [string]$serial = '', [string]$debugcon = '', [int]$resets = 0) {
     Get-P29JBootClassification -SpawnSucceeded $true -AliveAtDeadline $alive `
