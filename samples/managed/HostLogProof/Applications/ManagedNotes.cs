@@ -1141,6 +1141,13 @@ public sealed partial class ManagedNotes : GuideXosApplication
         {
             _c135Menu.Reset();
             _c135Menu.ClearItems();
+#if HOSTLOGPROOF_C153_MANAGED_TEXT_UNDO_REDO
+            _c135Menu.TryAddItem("Undo", C153UndoActionId,
+                _textArea.CanUndo);
+            _c135Menu.TryAddItem("Redo", C153RedoActionId,
+                _textArea.CanRedo);
+            _c135Menu.TryAddSeparator();
+#endif
             _c135Menu.TryAddItem("Open", 20u);
             _c135Menu.TryAddItem("Save", 22u);
 #if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
@@ -1745,12 +1752,23 @@ public sealed partial class ManagedNotes : GuideXosApplication
             bool saveDialog = GuideXosSaveFileDialogC152Tests.Run(
                 host, surface, _mainControlHost);
             host.TryLog(documentState
-                ? "C152-DOCUMENT-STATE cases=10 untitled=named dirty=event-driven save-failure=preserved result=PASS"u8
+                ? "C152-DOCUMENT-STATE cases=10 untitled=named dirty=revision-derived save-failure=preserved result=PASS"u8
                 : "C152-DOCUMENT-STATE result=FAIL"u8);
             if (!documentState || !saveDialog)
                 host.TryLog("C152-REGRESSIONS result=FAIL"u8);
             else
                 host.TryLog("C152-REGRESSIONS save-dialog=16/16 document-state=10/10 result=PASS"u8);
+        }
+#endif
+#if HOSTLOGPROOF_C153_MANAGED_TEXT_UNDO_REDO
+        if (_c152Enabled)
+        {
+            bool historyCore = GuideXosTextHistoryC153Tests.Run(host);
+            bool textAreaHistory = GuideXosTextAreaUndoRedoC153Tests.Run(host);
+            bool savePointState = GuideXosNotesDocumentStateC153Tests.Run(host);
+            host.TryLog(historyCore && textAreaHistory && savePointState
+                ? "C153-REGRESSIONS history-core=26/26 text-area=25/25 save-point=17/17 result=PASS"u8
+                : "C153-REGRESSIONS result=FAIL"u8);
         }
 #endif
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
@@ -1890,6 +1908,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
             if (_c152Enabled) c135ExpectedItems = 5;
 #endif
+#if HOSTLOGPROOF_C153_MANAGED_TEXT_UNDO_REDO
+            if (_c152Enabled) c135ExpectedItems = 8;
+#endif
             bool c135Initial = _mainControlHost.RegistrationCount ==
                 c135ExpectedRegistration &&
                 _c135Menu.ItemCount == c135ExpectedItems && !_c135Menu.IsOpen &&
@@ -1897,7 +1918,15 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
             if (_c151ProofContext)
             {
-#if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
+#if HOSTLOGPROOF_C153_MANAGED_TEXT_UNDO_REDO
+                host.TryLog(_c152Enabled
+                    ? c135Initial
+                        ? "C135-NOTES initial=registration=shared items=8 capture=none result=PASS"u8
+                        : "C135-NOTES initial=result=FAIL"u8
+                    : c135Initial
+                        ? "C135-NOTES initial=registration=shared items=4 capture=none result=PASS"u8
+                        : "C135-NOTES initial=result=FAIL"u8);
+#elif HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
                 host.TryLog(_c152Enabled
                     ? c135Initial
                         ? "C135-NOTES initial=registration=shared items=5 capture=none result=PASS"u8
@@ -1913,9 +1942,15 @@ public sealed partial class ManagedNotes : GuideXosApplication
             }
             else
 #endif
+#if HOSTLOGPROOF_C153_MANAGED_TEXT_UNDO_REDO
+            host.TryLog(c135Initial
+                ? "C135-NOTES initial=registration=8 items=8 capture=none result=PASS"u8
+                : "C135-NOTES initial=result=FAIL"u8);
+#else
             host.TryLog(c135Initial
                 ? "C135-NOTES initial=registration=8 items=4 capture=none result=PASS"u8
                 : "C135-NOTES initial=result=FAIL"u8);
+#endif
         }
 #if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
         if (_c136ProofContext)
@@ -2837,6 +2872,13 @@ public sealed partial class ManagedNotes : GuideXosApplication
         GuideXosHost host, GuideXosSurface surface,
         int x = 400, int y = 280, bool secondaryInvocation = false)
     {
+#if HOSTLOGPROOF_C153_MANAGED_TEXT_UNDO_REDO
+        if (_c152Enabled)
+        {
+            _c135Menu.SetItemEnabled(0, _textArea.CanUndo);
+            _c135Menu.SetItemEnabled(1, _textArea.CanRedo);
+        }
+#endif
         GuideXosPopupMenuResult opened = _c135Menu.Open(x, y);
         if (opened != GuideXosPopupMenuResult.Opened)
         {
@@ -3473,8 +3515,8 @@ public sealed partial class ManagedNotes : GuideXosApplication
         if (_c152Enabled && routeResult == GuideXosControlHostResult.Changed &&
             _mainControlHost.ActiveControlId == C120DocumentControlId)
         {
-            _c152DocumentState.MarkEdited();
-            _status = "Modified";
+            _status = _c152DocumentState.Dirty
+                ? "Modified" : "Saved revision restored";
         }
 #endif
 #if HOSTLOGPROOF_C129_SHIFT_TAB_TRANSPORT
@@ -4257,6 +4299,13 @@ public sealed partial class ManagedNotes : GuideXosApplication
                 host, surface, actionId, out GuideXosResult c152Result))
         {
             return c152Result;
+        }
+#endif
+#if HOSTLOGPROOF_C153_MANAGED_TEXT_UNDO_REDO
+        if (_c152Enabled && TryHandleC153Action(
+                host, surface, actionId, out GuideXosResult c153Result))
+        {
+            return c153Result;
         }
 #endif
         if (_picker.IsActive)

@@ -298,7 +298,6 @@ public sealed partial class ManagedNotes
                 host.TryLog("C152-OPEN dirty-decision=Discard deferred-until-load=true result=PASS"u8);
                 return OpenC151Dialog(host, surface);
             }
-            _c152DocumentState.MarkClean();
             _status = "Changes discarded";
             host.TryLog(operation == C152PendingOperation.Close
                 ? "C152-CLOSE dirty-decision=Discard dispatch=accepted result=PASS"u8

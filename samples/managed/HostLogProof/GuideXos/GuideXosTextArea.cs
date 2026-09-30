@@ -29,12 +29,14 @@ public sealed class GuideXosTextArea
     public const int MaximumVisibleLineCount = 16;
     public const int DefaultMaximumRenderableColumns = 48;
     public const int MaximumSupportedRenderableColumns = 56;
+    public const int DefaultHistoryCapacity = GuideXosTextHistory.DefaultCapacity;
 
     private readonly char[] _buffer;
     private readonly int _maximumLines;
     private readonly int _maximumRenderableColumns;
     private readonly int _visibleLineCount;
     private readonly GuideXosVerticalViewport _viewport;
+    private readonly GuideXosTextHistory _history;
     private int _length;
     private int _lineCount = 1;
     private int _caretIndex;
@@ -76,6 +78,8 @@ public sealed class GuideXosTextArea
         _visibleLineCount = visibleLineCount;
         _maximumRenderableColumns = maximumRenderableColumns;
         _viewport = new GuideXosVerticalViewport(_lineCount, _visibleLineCount);
+        _history = new GuideXosTextHistory(maximumCharacters);
+        _history.Reset(ReadOnlySpan<char>.Empty, 0, 0);
     }
 
     public int MaximumCharacters => _buffer.Length;
@@ -109,10 +113,24 @@ public sealed class GuideXosTextArea
     }
     public int PreferredColumn => _preferredColumn;
     public uint RejectedInputCount => _rejectedInputCount;
+    public int HistoryCapacity => _history.Capacity;
+    public int HistoryCount => _history.Count;
+    public int HistoryIndex => _history.CurrentIndex;
+    public bool CanUndo => _history.CanUndo;
+    public bool CanRedo => _history.CanRedo;
+    public GuideXosTextRevision CurrentRevision => _history.CurrentRevision;
+    public bool IsRevisionReachable(GuideXosTextRevision revision) =>
+        _history.ContainsRevision(revision);
     public string Text => new string(_buffer, 0, _length);
     public string SelectedText => HasSelection
         ? new string(_buffer, SelectionStart, SelectionEnd - SelectionStart)
         : string.Empty;
+
+    /// <summary>Raised once for each successful user content mutation.</summary>
+    public event Action ContentChanged;
+
+    /// <summary>Raised when whole-document replacement establishes a baseline.</summary>
+    public event Action<GuideXosTextRevision> BaselineEstablished;
 
     public void Focus()
     {
@@ -179,7 +197,7 @@ public sealed class GuideXosTextArea
     /// </summary>
     public bool SetText(string value)
     {
-        if (value == null || value.Length > MaximumCharacters)
+        if (value == null || value.Length > _buffer.Length)
         {
             return false;
         }
@@ -193,13 +211,14 @@ public sealed class GuideXosTextArea
         _lineCount = lineCount;
         _viewport.ContentExtent = _lineCount;
         ResetCaretToEnd();
+        EstablishHistoryBaseline();
         return true;
     }
 
     /// <summary>Copies bounded ASCII/UTF-8 bytes without using a decoder.</summary>
     public bool SetUtf8(ReadOnlySpan<byte> value)
     {
-        if (value.Length > MaximumCharacters)
+        if (value.Length > _buffer.Length)
         {
             return false;
         }
@@ -216,6 +235,7 @@ public sealed class GuideXosTextArea
         _lineCount = lineCount;
         _viewport.ContentExtent = _lineCount;
         ResetCaretToEnd();
+        EstablishHistoryBaseline();
         return true;
     }
 
@@ -248,6 +268,33 @@ public sealed class GuideXosTextArea
         _anchorIndex = 0;
         _preferredColumn = -1;
         EnsureCaretVisible();
+        UpdateCurrentHistoryCaret();
+    }
+
+    /// <summary>Restores the preceding content revision, if one is retained.</summary>
+    public GuideXosTextAreaEditResult Undo()
+    {
+        if (!_history.TryUndo(_buffer, out int length, out int caret,
+                out int anchor, out _))
+        {
+            return GuideXosTextAreaEditResult.Ignored;
+        }
+        RestoreHistoryState(length, caret, anchor);
+        ContentChanged?.Invoke();
+        return GuideXosTextAreaEditResult.Changed;
+    }
+
+    /// <summary>Restores the following content revision, if one is retained.</summary>
+    public GuideXosTextAreaEditResult Redo()
+    {
+        if (!_history.TryRedo(_buffer, out int length, out int caret,
+                out int anchor, out _))
+        {
+            return GuideXosTextAreaEditResult.Ignored;
+        }
+        RestoreHistoryState(length, caret, anchor);
+        ContentChanged?.Invoke();
+        return GuideXosTextAreaEditResult.Changed;
     }
 
     /// <summary>
@@ -291,6 +338,7 @@ public sealed class GuideXosTextArea
         _anchorIndex = target;
         _preferredColumn = -1;
         Focus();
+        UpdateCurrentHistoryCaret();
         return GuideXosTextAreaEditResult.Focused;
     }
 
@@ -426,6 +474,7 @@ public sealed class GuideXosTextArea
             RemoveRange(SelectionStart, SelectionEnd);
             _caretIndex = start;
             _anchorIndex = start;
+            RecordContentMutation();
             return GuideXosTextAreaEditResult.Changed;
         }
         if (_caretIndex == 0) return GuideXosTextAreaEditResult.Ignored;
@@ -433,6 +482,7 @@ public sealed class GuideXosTextArea
         RemoveRange(target, _caretIndex);
         _caretIndex = target;
         _anchorIndex = target;
+        RecordContentMutation();
         return GuideXosTextAreaEditResult.Changed;
     }
 
@@ -444,10 +494,12 @@ public sealed class GuideXosTextArea
             RemoveRange(SelectionStart, SelectionEnd);
             _caretIndex = start;
             _anchorIndex = start;
+            RecordContentMutation();
             return GuideXosTextAreaEditResult.Changed;
         }
         if (_caretIndex >= _length) return GuideXosTextAreaEditResult.Ignored;
         RemoveRange(_caretIndex, _caretIndex + 1);
+        RecordContentMutation();
         return GuideXosTextAreaEditResult.Changed;
     }
 
@@ -480,9 +532,8 @@ public sealed class GuideXosTextArea
         _anchorIndex = _caretIndex;
         _preferredColumn = -1;
         EnsureCaretVisible();
-        return value == '\n'
-            ? GuideXosTextAreaEditResult.Changed
-            : GuideXosTextAreaEditResult.Changed;
+        RecordContentMutation();
+        return GuideXosTextAreaEditResult.Changed;
     }
 
     private GuideXosTextAreaEditResult MoveHorizontal(int direction, bool shift)
@@ -501,6 +552,7 @@ public sealed class GuideXosTextArea
         if (!shift) _anchorIndex = target;
         _preferredColumn = -1;
         EnsureCaretVisible();
+        UpdateCurrentHistoryCaret();
         return GuideXosTextAreaEditResult.Moved;
     }
 
@@ -512,6 +564,7 @@ public sealed class GuideXosTextArea
             _anchorIndex = _caretIndex;
             _preferredColumn = -1;
             EnsureCaretVisible();
+            UpdateCurrentHistoryCaret();
             return GuideXosTextAreaEditResult.Moved;
         }
         int line = GetLineAndColumn(_caretIndex, out int column);
@@ -525,6 +578,7 @@ public sealed class GuideXosTextArea
         _caretIndex = GetLineStart(targetLine) + targetColumn;
         if (!shift) _anchorIndex = _caretIndex;
         EnsureCaretVisible();
+        UpdateCurrentHistoryCaret();
         return GuideXosTextAreaEditResult.Moved;
     }
 
@@ -536,6 +590,7 @@ public sealed class GuideXosTextArea
             _anchorIndex = _caretIndex;
             _preferredColumn = -1;
             EnsureCaretVisible();
+            UpdateCurrentHistoryCaret();
             return GuideXosTextAreaEditResult.Moved;
         }
         int line = GetLineAndColumn(_caretIndex, out _);
@@ -544,6 +599,7 @@ public sealed class GuideXosTextArea
         if (!shift) _anchorIndex = target;
         _preferredColumn = -1;
         EnsureCaretVisible();
+        UpdateCurrentHistoryCaret();
         return GuideXosTextAreaEditResult.Moved;
     }
 
@@ -578,6 +634,38 @@ public sealed class GuideXosTextArea
         _preferredColumn = -1;
         _isSubmitted = false;
         _isCancelled = false;
+        EnsureCaretVisible();
+    }
+
+    private void EstablishHistoryBaseline()
+    {
+        _history.Reset(_buffer.AsSpan(0, _length), _caretIndex, _anchorIndex);
+        BaselineEstablished?.Invoke(_history.CurrentRevision);
+    }
+
+    private void RecordContentMutation()
+    {
+        _history.Record(_buffer.AsSpan(0, _length), _caretIndex, _anchorIndex);
+        ContentChanged?.Invoke();
+    }
+
+    private void UpdateCurrentHistoryCaret()
+    {
+        _history.UpdateCurrentCaret(_caretIndex, _anchorIndex);
+    }
+
+    private void RestoreHistoryState(int length, int caret, int anchor)
+    {
+        _length = length;
+        _lineCount = 1;
+        for (int index = 0; index < _length; index++)
+        {
+            if (_buffer[index] == '\n') ++_lineCount;
+        }
+        _caretIndex = Math.Clamp(caret, 0, _length);
+        _anchorIndex = Math.Clamp(anchor, 0, _length);
+        _preferredColumn = -1;
+        _viewport.ContentExtent = _lineCount;
         EnsureCaretVisible();
     }
 

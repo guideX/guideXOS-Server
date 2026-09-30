@@ -10,42 +10,69 @@ public static class GuideXosNotesDocumentStateC152Tests
         GuideXosTextArea area = new(256, 32, 4, 32);
         GuideXosNotesDocumentState state = new();
         bool untitledClean = state.InitializeUntitled(area) &&
-            !state.HasCurrentPath && !state.Dirty && area.Text.Length == 0;
+            !state.HasCurrentPath && !state.Dirty && area.Text.Length == 0 &&
+            area.HistoryCount == 1 && !area.CanUndo && !area.CanRedo;
 
-        state.MarkEdited();
-        bool untitledDirty = state.Dirty && !state.HasCurrentPath;
+        area.Focus();
+        bool untitledDirty = area.HandleCharacter('A') ==
+            GuideXosTextAreaEditResult.Changed && state.Dirty &&
+            !state.HasCurrentPath && area.CanUndo;
+        untitledDirty &= area.Undo() ==
+            GuideXosTextAreaEditResult.Changed && area.Text.Length == 0 &&
+            !state.Dirty && area.CanRedo && area.Redo() ==
+            GuideXosTextAreaEditResult.Changed && state.Dirty &&
+            area.Text == "A";
+
         bool namedClean = state.TryHydrate(area, "/system/apps/C152/alpha.txt",
             "initial"u8) && state.HasCurrentPath && !state.Dirty &&
-            area.Text == "initial";
-        state.MarkEdited();
-        bool namedDirty = state.Dirty && state.CurrentPath ==
-            "/system/apps/C152/alpha.txt";
+            area.Text == "initial" && area.HistoryCount == 1 &&
+            !area.CanUndo && !area.CanRedo;
+        area.Focus();
+        bool namedDirty = area.HandleCharacter('!') ==
+            GuideXosTextAreaEditResult.Changed && state.Dirty &&
+            state.CurrentPath == "/system/apps/C152/alpha.txt";
 
+        int historyBeforeSave = area.HistoryCount;
         bool saveSuccess = state.MarkSaveSucceeded(
             "/system/apps/C152/alpha.txt") && !state.Dirty &&
-            state.CurrentPath == "/system/apps/C152/alpha.txt";
-        state.MarkEdited();
+            state.CurrentPath == "/system/apps/C152/alpha.txt" &&
+            area.HistoryCount == historyBeforeSave;
+        GuideXosTextRevision savedRevision = state.SavedRevision;
+        bool postSaveEdit = area.HandleCharacter('?') ==
+            GuideXosTextAreaEditResult.Changed && state.Dirty;
+        int historyBeforeFailure = area.HistoryCount;
+        GuideXosTextRevision currentBeforeFailure = area.CurrentRevision;
         string priorPath = state.CurrentPath;
         state.MarkSaveFailed();
         bool saveFailure = state.Dirty && state.CurrentPath == priorPath &&
-            area.Text == "initial";
+            state.SavedRevision == savedRevision &&
+            area.CurrentRevision == currentBeforeFailure &&
+            area.HistoryCount == historyBeforeFailure;
 
+        int historyBeforeSaveAs = area.HistoryCount;
         bool saveAsSuccess = state.MarkSaveSucceeded(
             "/system/apps/C152/new.txt") && !state.Dirty &&
-            state.CurrentPath == "/system/apps/C152/new.txt";
-        state.MarkEdited();
-        string saveAsPriorPath = state.CurrentPath;
-        state.MarkSaveFailed();
-        bool saveAsFailure = state.Dirty &&
-            state.CurrentPath == saveAsPriorPath;
+            state.CurrentPath == "/system/apps/C152/new.txt" &&
+            state.SavedRevision == area.CurrentRevision &&
+            area.HistoryCount == historyBeforeSaveAs;
+        bool saveAsPathIndependent = area.Undo() ==
+                GuideXosTextAreaEditResult.Changed && state.Dirty &&
+            state.CurrentPath == "/system/apps/C152/new.txt" &&
+            area.Redo() == GuideXosTextAreaEditResult.Changed &&
+            !state.Dirty && state.CurrentPath == "/system/apps/C152/new.txt";
 
         bool emptyFileHydration = state.TryHydrate(
             area, "/system/apps/C152/empty.txt", ReadOnlySpan<byte>.Empty) &&
-            area.Text.Length == 0 && !state.Dirty && state.HasCurrentPath;
+            area.Text.Length == 0 && !state.Dirty && state.HasCurrentPath &&
+            !area.CanUndo && !area.CanRedo;
+        int historyBeforeRejectedOpen = area.HistoryCount;
+        GuideXosTextRevision revisionBeforeRejectedOpen = area.CurrentRevision;
         bool oversizedRejected = !state.TryHydrate(area,
             "/system/apps/C152/alpha.txt", new byte[257]) &&
             state.CurrentPath == "/system/apps/C152/empty.txt" &&
-            area.Text.Length == 0 && !state.Dirty;
+            area.Text.Length == 0 && !state.Dirty &&
+            area.HistoryCount == historyBeforeRejectedOpen &&
+            area.CurrentRevision == revisionBeforeRejectedOpen;
 
         bool emptySave = WriteAndVerify(host, "/system/apps/C152/e00.txt",
             ReadOnlySpan<byte>.Empty);
@@ -70,9 +97,10 @@ public static class GuideXosNotesDocumentStateC152Tests
             : "C152-SAVE-AS-STRESS result=FAIL"u8);
 
         return untitledClean && untitledDirty && namedClean && namedDirty &&
-            saveSuccess && saveFailure && saveAsSuccess && saveAsFailure &&
-            emptyFileHydration && oversizedRejected && emptySave && maximumSave &&
-            saveStress && saveAsStress;
+            saveSuccess && saveFailure &&
+            saveAsSuccess && saveAsPathIndependent && emptyFileHydration &&
+            oversizedRejected && emptySave && maximumSave && saveStress &&
+            saveAsStress;
     }
 
     private static bool RunSaveStress(GuideXosHost host)
@@ -81,6 +109,7 @@ public static class GuideXosNotesDocumentStateC152Tests
         byte[] pathBytes = Encoding.UTF8.GetBytes(path);
         byte[] payload = new byte[4];
         byte[] actual = new byte[256];
+        Span<byte> expected = stackalloc byte[4];
         GuideXosTextArea area = new(256, 32, 4, 32);
         GuideXosNotesDocumentState state = new();
         if (!state.InitializeUntitled(area)) return false;
@@ -91,11 +120,16 @@ public static class GuideXosNotesDocumentStateC152Tests
             payload[1] = (byte)('0' + cycle / 10);
             payload[2] = (byte)('0' + cycle % 10);
             payload[3] = (byte)(cycle % 2 == 0 ? 'A' : 'B');
-            if (!area.SetUtf8(payload)) return false;
-            state.MarkEdited();
-            if (GuideXosFile.WriteAllTextUtf8(host, pathBytes, payload) !=
+            if (!area.SetUtf8(payload.AsSpan(0, 3)) ||
+                !state.MarkSaveSucceeded(path)) return false;
+            area.Focus();
+            if (area.HandleCharacter((char)payload[3]) !=
+                    GuideXosTextAreaEditResult.Changed || !state.Dirty ||
+                !area.TryCopyUtf8To(expected, out int written) || written != 4)
+                return false;
+            if (GuideXosFile.WriteAllTextUtf8(host, pathBytes, expected) !=
                 GuideXosFileResult.Success ||
-                !ReadBackMatches(host, pathBytes, payload, actual) ||
+                !ReadBackMatches(host, pathBytes, expected, actual) ||
                 !state.MarkSaveSucceeded(path) || state.Dirty)
                 return false;
         }
@@ -114,6 +148,7 @@ public static class GuideXosNotesDocumentStateC152Tests
         ];
         byte[] payload = new byte[8];
         byte[] actual = new byte[256];
+        Span<byte> expected = stackalloc byte[8];
         GuideXosTextArea area = new(256, 32, 4, 32);
         GuideXosNotesDocumentState state = new();
         if (!state.InitializeUntitled(area)) return false;
@@ -130,11 +165,17 @@ public static class GuideXosNotesDocumentStateC152Tests
             payload[5] = (byte)'V';
             payload[6] = (byte)'E';
             payload[7] = (byte)'!';
-            if (!area.SetUtf8(payload)) return false;
-            state.MarkEdited();
-            if (GuideXosFile.WriteAllTextUtf8(host, pathBytes, payload) !=
+            if (!area.SetUtf8(payload.AsSpan(0, 7)) ||
+                !state.MarkSaveSucceeded("/system/apps/C152/base.txt"))
+                return false;
+            area.Focus();
+            if (area.HandleCharacter((char)payload[7]) !=
+                    GuideXosTextAreaEditResult.Changed || !state.Dirty ||
+                !area.TryCopyUtf8To(expected, out int written) || written != 8)
+                return false;
+            if (GuideXosFile.WriteAllTextUtf8(host, pathBytes, expected) !=
                 GuideXosFileResult.Success ||
-                !ReadBackMatches(host, pathBytes, payload, actual) ||
+                !ReadBackMatches(host, pathBytes, expected, actual) ||
                 !state.MarkSaveSucceeded(path) || state.Dirty ||
                 state.CurrentPath != path)
                 return false;
