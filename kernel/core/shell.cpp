@@ -169,9 +169,8 @@ static uint32_t s_historyIdx = 0;
 // Current working directory
 static char s_cwd[256] = "/";
 
-// Hostname and username
+// The shell has no guideXOS account identity; its prompt names the host and path.
 static const char* s_hostname = "guideXOS";
-static const char* s_username = "root";
 
 // Uptime counter (incremented externally)
 static uint32_t s_uptimeSeconds = 0;
@@ -301,11 +300,9 @@ static void output_string(const char* str) {
 
 static void output_prompt() {
     char prompt[128];
-    // Format: [user@host cwd]$ 
+    // Format: [host cwd]$; this is shell context, not a user identity.
     uint32_t i = 0;
     prompt[i++] = '[';
-    for (const char* p = s_username; *p && i < 120; p++) prompt[i++] = *p;
-    prompt[i++] = '@';
     for (const char* p = s_hostname; *p && i < 120; p++) prompt[i++] = *p;
     prompt[i++] = ' ';
     for (const char* p = s_cwd; *p && i < 120; p++) prompt[i++] = *p;
@@ -355,8 +352,8 @@ static void cmd_help() {
     output_string("  version, ver   - OS version\n");
     output_string("  about          - About guideXOS\n");
     output_string("  dmesg          - Kernel messages\n");
-    output_string("  whoami         - Current user\n");
-    output_string("  id             - User/group IDs\n");
+    output_string("  whoami         - Current user identity (not supported)\n");
+    output_string("  id             - User/group IDs (not supported)\n");
     output_string("  hostname       - System hostname\n");
     output_string("  uptime         - System uptime\n");
     output_string("  w, who         - Who is logged in\n");
@@ -546,8 +543,8 @@ static void cmd_ll(const char* path) {
             }
         }
         
-        // Owner/group
-        output_string("1 root root  ");
+        // VFS does not provide per-user file ownership.
+        output_string("1 n/a n/a  ");
         
         // Size (right-aligned in 8 chars)
         char sizeStr[16];
@@ -595,10 +592,7 @@ static bool resolve_cd_target_path(const char* path, char* targetPath, size_t ta
     if (!targetPath || targetPathSize == 0) return false;
     targetPath[0] = '\0';
 
-    if (!path || path[0] == '\0' || str_eq(path, "~")) {
-        str_copy(targetPath, "/home/root", (uint32_t)targetPathSize);
-        return true;
-    }
+    if (!path || path[0] == '\0' || str_eq(path, "~")) return false;
 
     if (str_eq(path, "/")) {
         str_copy(targetPath, "/", (uint32_t)targetPathSize);
@@ -629,6 +623,10 @@ static bool cd_target_is_directory(const char* targetPath)
 }
 
 static void cmd_cd(const char* path) {
+    if (!path || path[0] == '\0' || str_eq(path, "~")) {
+        output_string("cd: user home directories are not supported\n");
+        return;
+    }
     char targetPath[256];
     if (!resolve_cd_target_path(path, targetPath, sizeof(targetPath))) {
         output_string("cd: invalid path\n");
@@ -707,8 +705,7 @@ static void cmd_echo(const char* text) {
 }
 
 static void cmd_whoami() {
-    output_string(s_username);
-    output_string("\n");
+    output_string("guideXOS human user identity is not supported\n");
 }
 
 static void cmd_hostname() {
@@ -835,7 +832,7 @@ static void cmd_neofetch() {
     output_string("       ????????????? ????????????????????\n");
     output_string("        ??????? ???  ??? ??????? ????????\n");
     output_string("\n");
-    output_string("  root@guideXOS\n");
+    output_string("  guideXOS Server\n");
     output_string("  -------------\n");
     output_string("  OS:        guideXOS Server\n");
     output_string("  Kernel:    guideXOS Kernel 1.0.0\n");
@@ -1083,27 +1080,11 @@ static void cmd_df() {
 }
 
 static void cmd_id() {
-    output_string("uid=0(root) gid=0(root) groups=0(root)\n");
+    output_string("guideXOS user and group IDs are not supported\n");
 }
 
 static void cmd_w() {
-    output_string(" 00:00:00 up ");
-    
-    char buf[32];
-    uint32_t hours = s_uptimeSeconds / 3600;
-    uint32_t mins = (s_uptimeSeconds % 3600) / 60;
-    int i = 0;
-    buf[i++] = '0' + (hours / 10) % 10;
-    buf[i++] = '0' + hours % 10;
-    buf[i++] = ':';
-    buf[i++] = '0' + (mins / 10) % 10;
-    buf[i++] = '0' + mins % 10;
-    buf[i] = '\0';
-    output_string(buf);
-    
-    output_string(",  1 user,  load average: 0.00, 0.01, 0.05\n");
-    output_string("USER     TTY      FROM             LOGIN@   IDLE   JCPU   PCPU WHAT\n");
-    output_string("root     tty1     -                00:00    0.00s  0.00s  0.00s shell\n");
+    output_string("guideXOS login and session accounting are not supported\n");
 }
 
 static void cmd_head(const char* filename) {
@@ -2982,8 +2963,8 @@ static void execute_command(const char* cmd) {
         perform_sleep();
     } else if (str_eq(command, "env")) {
         output_string("PATH=/bin:/usr/bin\n");
-        output_string("HOME=/home/root\n");
-        output_string("USER=root\n");
+        output_string("HOME=<unavailable: user profiles are not supported>\n");
+        output_string("USER=<unavailable: guideXOS identity is not supported>\n");
         output_string("SHELL=/bin/sh\n");
         output_string("TERM=guideXOS-256color\n");
     } else if (str_eq(command, "history")) {
@@ -3188,16 +3169,16 @@ static void execute_command(const char* cmd) {
         buf[4] = '0' + mins % 10;
         buf[5] = '\0';
         output_string(buf);
-        output_string(",  1 user,  load: 0.00\n");
+        output_string(",  load: 0.00\n");
         output_string("Tasks:   4 total,   1 running,   3 sleeping\n");
         output_string("%Cpu(s):  0.0 us,  0.0 sy,  0.0 ni, 100.0 id\n");
         output_string("MiB Mem:   128.0 total,    96.0 free,    32.0 used\n");
         output_string("\n");
-        output_string("  PID USER      PR  NI    VIRT    RES %CPU CMD\n");
-        output_string("    1 root      20   0    4096   1024  0.0 init\n");
-        output_string("    2 root      20   0    8192   2048  0.0 kernel\n");
-        output_string("    3 root      20   0   16384   4096  0.0 desktop\n");
-        output_string("    4 root      20   0    8192   2048  0.1 shell\n");
+        output_string("  PID PR  NI    VIRT    RES %CPU CMD\n");
+        output_string("    1 20   0    4096   1024  0.0 init\n");
+        output_string("    2 20   0    8192   2048  0.0 kernel\n");
+        output_string("    3 20   0   16384   4096  0.0 desktop\n");
+        output_string("    4 20   0    8192   2048  0.1 shell\n");
     } else if (str_eq(command, "kill")) {
         if (arg1[0] == '\0') {
             output_string("kill: usage: kill <pid>\n");
@@ -3207,9 +3188,9 @@ static void execute_command(const char* cmd) {
             output_string(": Not permitted\n");
         }
     } else if (str_eq(command, "sudo")) {
-        output_string("root is not in the sudoers file. (Just kidding, you're already root!)\n");
+        output_string("Privilege elevation is not supported by guideXOS.\n");
     } else if (str_eq(command, "su")) {
-        output_string("Already running as root.\n");
+        output_string("User switching is not supported by guideXOS.\n");
     } else if (str_eq(command, "chmod") || str_eq(command, "chown") || str_eq(command, "chgrp")) {
         output_string(command);
         output_string(": Permission management not implemented in this shell.\n");
@@ -3223,7 +3204,7 @@ static void execute_command(const char* cmd) {
             output_string(arg1);
             output_string("\n");
             output_string("  Size: 0\t\tBlocks: 0\n");
-            output_string("Access: (0755/drwxr-xr-x)  Uid: (0/root)   Gid: (0/root)\n");
+            output_string("Access and owner: unavailable; guideXOS per-user permissions are not supported.\n");
         }
     } else if (str_eq(command, "file")) {
         if (arg1[0] == '\0') {
@@ -3322,8 +3303,6 @@ void process_char(char c) {
         char prompt[256];
         int p = 0;
         prompt[p++] = '[';
-        for (const char* s = s_username; *s; s++) prompt[p++] = *s;
-        prompt[p++] = '@';
         for (const char* s = s_hostname; *s; s++) prompt[p++] = *s;
         prompt[p++] = ' ';
         for (const char* s = s_cwd; *s; s++) prompt[p++] = *s;
@@ -3535,8 +3514,6 @@ void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     char prompt[256];
     int p = 0;
     prompt[p++] = '[';
-    for (const char* s = s_username; *s && p < 240; s++) prompt[p++] = *s;
-    prompt[p++] = '@';
     for (const char* s = s_hostname; *s && p < 240; s++) prompt[p++] = *s;
     prompt[p++] = ' ';
     for (const char* s = s_cwd; *s && p < 240; s++) prompt[p++] = *s;

@@ -58,7 +58,9 @@ enum class TargetId : unsigned char {
     AccessibilityKeyboard,
     DeveloperApps,
     DeveloperServices,
-    DeveloperDiagnostics
+    DeveloperDiagnostics,
+    UsersSession,
+    UsersSecurity
 };
 
 struct CategoryInfo {
@@ -76,7 +78,7 @@ inline constexpr std::array<CategoryInfo, static_cast<size_t>(CategoryId::Count)
     { CategoryId::Devices, "devices", "Devices", "Connected devices and input." },
     { CategoryId::Storage, "storage", "Storage", "Disks and storage tools." },
     { CategoryId::Apps, "apps", "Apps", "Applications registered with the guideXOS App Model." },
-    { CategoryId::Users, "users", "Users", "User accounts and sign-in." },
+    { CategoryId::Users, "users", "Users", "Identity and session capabilities." },
     { CategoryId::DateTime, "date-time", "Date & Time", "Clock and time-zone settings." },
     { CategoryId::Accessibility, "accessibility", "Accessibility", "Accessibility tools." },
     { CategoryId::Developer, "developer", "Developer", "Development and diagnostic tools." },
@@ -101,6 +103,15 @@ inline bool validCategory(CategoryId id)
 inline const CategoryInfo* categoryInfo(CategoryId id)
 {
     return validCategory(id) ? &kCategories[static_cast<size_t>(id)] : nullptr;
+}
+
+inline int fitSettingsWindowDimension(int desktopSize, int preferredSize,
+                                      int margin, int preferredMinimum)
+{
+    if (desktopSize <= 0) return preferredSize;
+    const int minimum = std::min(preferredMinimum, desktopSize);
+    const int withMargin = desktopSize > margin ? desktopSize - margin : desktopSize;
+    return std::min(preferredSize, std::max(minimum, withMargin));
 }
 
 inline std::string lowerAscii(std::string value)
@@ -172,6 +183,8 @@ inline bool parseSettingsRoute(const std::string& uri, SettingsRoute& route)
         else if (target == "apps") targetId = TargetId::DeveloperApps;
         else if (target == "services") targetId = TargetId::DeveloperServices;
         else if (target == "diagnostics") targetId = TargetId::DeveloperDiagnostics;
+        else if (target == "session") targetId = TargetId::UsersSession;
+        else if (target == "security") targetId = TargetId::UsersSecurity;
         else return false;
     }
 
@@ -191,6 +204,8 @@ inline bool parseSettingsRoute(const std::string& uri, SettingsRoute& route)
         ((targetId == TargetId::AccessibilityFocus || targetId == TargetId::AccessibilityKeyboard) && category == CategoryId::Accessibility) ||
         ((targetId == TargetId::DeveloperApps || targetId == TargetId::DeveloperServices ||
           targetId == TargetId::DeveloperDiagnostics) && category == CategoryId::Developer) ||
+        ((targetId == TargetId::UsersSession || targetId == TargetId::UsersSecurity) &&
+          category == CategoryId::Users) ||
         (targetId == TargetId::AboutVersion && category == CategoryId::About);
     if (!validTarget) return false;
     route = SettingsRoute{ category, targetId };
@@ -203,7 +218,7 @@ struct SearchEntry {
     SettingsRoute route;
 };
 
-inline constexpr std::array<SearchEntry, 36> kSearchEntries = {{
+inline constexpr std::array<SearchEntry, 40> kSearchEntries = {{
     { "System overview", "system computer hardware device hostname processor cpu memory ram architecture", { CategoryId::System, TargetId::SystemDevice } },
     { "Resolution", "resolution screen monitor display size", { CategoryId::Display, TargetId::Resolution } },
     { "Display mode", "display mirror extend monitor layout", { CategoryId::Display, TargetId::DisplayMode } },
@@ -223,7 +238,11 @@ inline constexpr std::array<SearchEntry, 36> kSearchEntries = {{
     { "Disks and partitions", "storage disk disks partition partitions drive filesystem fat32 removable", { CategoryId::Storage, TargetId::StorageDisks } },
     { "Volumes", "volume mount mounted filesystem fat32", { CategoryId::Storage, TargetId::StorageVolumes } },
     { "Registered apps", "apps app installed application applications programs registered open app", { CategoryId::Apps, TargetId::AppsList } },
-    { "User accounts", "users user account sign in", { CategoryId::Users, TargetId::Page } },
+    { "Users and identity", "users user account accounts identity principal", { CategoryId::Users, TargetId::Page } },
+    { "Current session", "session desktop shell login logon sign in signin sign-out logout", { CategoryId::Users, TargetId::UsersSession } },
+    { "Authentication and passwords", "authentication authenticate password passwords credentials credential login", { CategoryId::Users, TargetId::UsersSecurity } },
+    { "User profiles", "profile profiles home directory per-user user configuration", { CategoryId::Users, TargetId::Page } },
+    { "User permissions", "permissions permission owner ownership uid gid acl access control", { CategoryId::Users, TargetId::UsersSecurity } },
     { "Clock and time zone", "date time clock timezone time zone", { CategoryId::DateTime, TargetId::Page } },
     { "Current time", "current time date clock calendar rtc", { CategoryId::DateTime, TargetId::DateTimeTime } },
     { "Time zone", "timezone time zone utc daylight saving automatic time manual time", { CategoryId::DateTime, TargetId::DateTimeTimeZone } },
@@ -306,7 +325,11 @@ enum class FocusControl : unsigned char {
     AccessibilityEnhancedFocus,
     AppEntry,
     AppsDetailBack,
-    AppsOpen
+    AppsOpen,
+    UsersSessionDetails,
+    UsersSecurityDetails,
+    UsersDeveloperServices,
+    UsersBack
 };
 
 inline CategoryId focusControlCategory(FocusControl control)
@@ -349,6 +372,10 @@ inline CategoryId focusControlCategory(FocusControl control)
     case FocusControl::AppEntry:
     case FocusControl::AppsDetailBack:
     case FocusControl::AppsOpen: return CategoryId::Apps;
+    case FocusControl::UsersSessionDetails:
+    case FocusControl::UsersSecurityDetails:
+    case FocusControl::UsersDeveloperServices:
+    case FocusControl::UsersBack: return CategoryId::Users;
     case FocusControl::None: return CategoryId::Count;
     }
     return CategoryId::Count;
@@ -387,6 +414,8 @@ public:
                 route.category == CategoryId::Accessibility) ||
             ((route.target == TargetId::DeveloperApps || route.target == TargetId::DeveloperServices ||
               route.target == TargetId::DeveloperDiagnostics) && route.category == CategoryId::Developer) ||
+            ((route.target == TargetId::UsersSession || route.target == TargetId::UsersSecurity) &&
+                route.category == CategoryId::Users) ||
             (route.target == TargetId::AboutVersion && route.category == CategoryId::About);
         if (!targetValid) return false;
         m_route = route;

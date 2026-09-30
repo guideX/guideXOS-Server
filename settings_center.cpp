@@ -19,6 +19,7 @@
 #include "settings_server_identity.h"
 #include "settings_system_information.h"
 #include "settings_s7_model.h"
+#include "settings_users_model.h"
 #include "open_dialog.h"
 #include "process.h"
 
@@ -438,7 +439,7 @@ public:
                 if (m_navigation.route().target == TargetId::AppDetail) renderAppDetails();
                 else renderApps();
                 break;
-            case CategoryId::Users: renderPlaceholder(); break;
+            case CategoryId::Users: renderUsersPage(); break;
             case CategoryId::DateTime: renderDateTimePage(); break;
             case CategoryId::Accessibility: renderAccessibilityPage(); break;
             case CategoryId::Developer: renderDeveloperPage(); break;
@@ -470,7 +471,8 @@ public:
                     if (colon != std::string::npos) wheelSteps = std::stoi(action.substr(colon + 1));
                 }
                 const bool s7PageVisible = m_navigation.selectedCategory() == CategoryId::Accessibility ||
-                    m_navigation.selectedCategory() == CategoryId::Developer;
+                    m_navigation.selectedCategory() == CategoryId::Developer ||
+                    m_navigation.selectedCategory() == CategoryId::Users;
                 if (s7PageVisible && wheelSteps != 0 && x >= pageX() && x <= pageX() + pageWidth() &&
                     y >= s7ContentTop() && y <= s7ViewportBottom() && s7MaximumScroll() > 0) {
                     m_s7PageScroll = clampSettingsPageScroll(
@@ -759,6 +761,8 @@ private:
     int s7RowCount() const
     {
         if (m_navigation.selectedCategory() == CategoryId::Accessibility) return 8;
+        if (m_navigation.selectedCategory() == CategoryId::Users)
+            return usersPageRowCount(m_navigation.route().target);
         if (m_navigation.selectedCategory() != CategoryId::Developer) return 0;
         switch (m_navigation.route().target) {
         case TargetId::Page: return 9;
@@ -807,6 +811,8 @@ private:
         case TargetId::DeveloperApps:
         case TargetId::DeveloperServices:
         case TargetId::DeveloperDiagnostics: return FocusControl::DeveloperBack;
+        case TargetId::UsersSession:
+        case TargetId::UsersSecurity: return FocusControl::UsersBack;
         case TargetId::DeviceDetail: return FocusControl::DeviceDetailBack;
         case TargetId::StorageDiskDetail: return FocusControl::StorageDetailBack;
         default: return FocusControl::None;
@@ -1265,6 +1271,16 @@ private:
             add(FocusControl::AccessibilityEnhancedFocus);
             if (m_accessibilityKeyboardAvailable) add(FocusControl::AccessibilityKeyboard);
             break;
+        case CategoryId::Users:
+            if (m_navigation.route().target == TargetId::Page) {
+                add(FocusControl::UsersSessionDetails);
+                add(FocusControl::UsersSecurityDetails);
+            } else {
+                if (m_navigation.route().target == TargetId::UsersSecurity)
+                    add(FocusControl::UsersDeveloperServices);
+                add(FocusControl::UsersBack);
+            }
+            break;
         default: break;
         }
         return items;
@@ -1299,6 +1315,11 @@ private:
         case FocusControl::DeveloperBack:
             return m_navigation.route().target == TargetId::DeveloperApps ? 8 :
                 m_navigation.route().target == TargetId::DeveloperServices ? 7 : 10;
+        case FocusControl::UsersSessionDetails: return 6;
+        case FocusControl::UsersSecurityDetails: return 7;
+        case FocusControl::UsersDeveloperServices: return 5;
+        case FocusControl::UsersBack:
+            return m_navigation.route().target == TargetId::UsersSession ? 7 : 6;
         default: return -1;
         }
     }
@@ -1459,6 +1480,22 @@ private:
             return s7RowFullyVisible(row) &&
                 inRect(x, y, pageX() + 8, s7RowY(row), pageWidth() - 16, s7RowPitch() - 2);
         }
+        case FocusControl::UsersSessionDetails:
+            return m_navigation.route().target == TargetId::Page && s7RowFullyVisible(6) &&
+                inRect(x, y, pageX() + 8, s7RowY(6), pageWidth() - 16, s7RowPitch() - 2);
+        case FocusControl::UsersSecurityDetails:
+            return m_navigation.route().target == TargetId::Page && s7RowFullyVisible(7) &&
+                inRect(x, y, pageX() + 8, s7RowY(7), pageWidth() - 16, s7RowPitch() - 2);
+        case FocusControl::UsersDeveloperServices:
+            return m_navigation.route().target == TargetId::UsersSecurity && s7RowFullyVisible(5) &&
+                inRect(x, y, pageX() + 8, s7RowY(5), pageWidth() - 16, s7RowPitch() - 2);
+        case FocusControl::UsersBack:
+            return (m_navigation.route().target == TargetId::UsersSession ||
+                    m_navigation.route().target == TargetId::UsersSecurity) &&
+                s7RowFullyVisible(m_navigation.route().target == TargetId::UsersSession ? 7 : 6) &&
+                inRect(x, y, pageX() + 8,
+                    s7RowY(m_navigation.route().target == TargetId::UsersSession ? 7 : 6),
+                    pageWidth() - 16, s7RowPitch() - 2);
         case FocusControl::StorageDiskManager: return inRect(x, y, pageX() + 6, inventoryActionY(), std::min(390, pageWidth() - 12), smallSettingsLayout() ? 34 : 42);
         case FocusControl::DeviceEntry: {
             const std::vector<int> indices = deviceDisplayIndices();
@@ -1566,6 +1603,9 @@ private:
             ? route.category == CategoryId::Developer && route.target != TargetId::Page
             : requested == FocusControl::DeveloperRefresh
             ? route.category == CategoryId::Developer && route.target != TargetId::Page
+            : requested == FocusControl::UsersBack
+            ? route.category == CategoryId::Users &&
+                (route.target == TargetId::UsersSession || route.target == TargetId::UsersSecurity)
             : requested == FocusControl::DisplayResolution
             ? m_display.available && m_display.supportedModes.size() > 1 && m_display.active.outputCount == 1
             : requested == FocusControl::DisplayMode ? m_display.available && m_display.active.outputCount > 1 : false;
@@ -1646,6 +1686,18 @@ private:
                 break;
             case FocusControl::DeveloperBack:
                 navigateTo(SettingsRoute{ CategoryId::Developer, TargetId::Page });
+                break;
+            case FocusControl::UsersSessionDetails:
+                navigateTo(SettingsRoute{ CategoryId::Users, TargetId::UsersSession });
+                break;
+            case FocusControl::UsersSecurityDetails:
+                navigateTo(SettingsRoute{ CategoryId::Users, TargetId::UsersSecurity });
+                break;
+            case FocusControl::UsersDeveloperServices:
+                navigateTo(SettingsRoute{ CategoryId::Developer, TargetId::DeveloperServices });
+                break;
+            case FocusControl::UsersBack:
+                navigateTo(SettingsRoute{ CategoryId::Users, TargetId::Page });
                 break;
             case FocusControl::AppEntry:
                 if (item.index >= 0 && static_cast<size_t>(item.index) < m_appInventory.count) {
@@ -2686,6 +2738,52 @@ private:
         if (interactive && enabled) drawText(x + width - 18, y + 4, ">", accentColor());
     }
 
+    void renderUsersPage()
+    {
+        const int x = pageX();
+        const TargetId target = m_navigation.route().target;
+        const int rowCount = usersPageRowCount(target);
+        const UsersPageState state = buildUsersPageState(m_systemInformation.runtime);
+        const char* title = target == TargetId::UsersSession ? "Session and runtime" :
+            target == TargetId::UsersSecurity ? "Security capabilities" : "Identity and account model";
+        drawCard(x, s7ContentTop() - 5, pageWidth(), s7CardHeight(rowCount), title);
+
+        if (target == TargetId::Page) {
+            drawS7Row(0, "Account model", usersInfoStateText(state.accountModel));
+            drawS7Row(1, "Current identity", usersInfoStateText(state.currentIdentity));
+            drawS7Row(2, "Authentication", usersInfoStateText(state.authentication));
+            drawS7Row(3, "Separate profiles", usersInfoStateText(state.profiles));
+            drawS7Row(4, "Desktop preferences", "Shared configuration");
+            drawS7Row(5, "Hosted environment", state.hostedRuntime);
+            drawS7Row(6, "Session details", "View details", FocusControl::UsersSessionDetails, true);
+            drawS7Row(7, "Security details", "View details", FocusControl::UsersSecurityDetails, true);
+            return;
+        }
+
+        if (target == TargetId::UsersSession) {
+            drawS7Row(0, "Current guideXOS identity", usersInfoStateText(state.sessionIdentity));
+            drawS7Row(1, "Session manager", usersInfoStateText(state.sessionManager));
+            drawS7Row(2, "Sign-in state", usersInfoStateText(state.authentication));
+            drawS7Row(3, "Lock / sign-out / switch", usersInfoStateText(state.sessionActions));
+            drawS7Row(4, "App Model IDs", "Apps, not people");
+            drawS7Row(5, "Hosted runtime", state.hostedRuntime);
+            drawS7Row(6, "Windows user", "Not guideXOS user");
+            drawS7Row(7, "Back to Users", "Return", FocusControl::UsersBack, true);
+            return;
+        }
+
+        if (target == TargetId::UsersSecurity) {
+            drawS7Row(0, "User authentication", usersInfoStateText(state.authentication));
+            drawS7Row(1, "Separate user permissions", usersInfoStateText(state.userPermissions));
+            drawS7Row(2, "Per-user file ownership", usersInfoStateText(state.fileOwnership));
+            drawS7Row(3, "User-granted app access", usersInfoStateText(state.userGrantedAppPermissions));
+            drawS7Row(4, "COM2 peer authentication", usersInfoStateText(state.servicePeerAuthentication));
+            drawS7Row(5, "Developer service details", "Open",
+                FocusControl::UsersDeveloperServices, true);
+            drawS7Row(6, "Back to Users", "Return", FocusControl::UsersBack, true);
+        }
+    }
+
     void renderAccessibilityPage()
     {
         const int x = pageX();
@@ -2866,8 +2964,8 @@ int SettingsCenter::main(int argc, char** argv)
     const DetectedDisplayInventory inventory = Compositor::detectedDisplayInventory();
     const int desktopWidth = inventory.currentDesktop.width();
     const int desktopHeight = inventory.currentDesktop.height();
-    if (desktopWidth > 0) windowWidth = std::min(kWindowWidth, std::max(760, desktopWidth - 24));
-    if (desktopHeight > 0) windowHeight = std::min(kWindowHeight, std::max(540, desktopHeight - 60));
+    if (desktopWidth > 0) windowWidth = fitSettingsWindowDimension(desktopWidth, kWindowWidth, 24, 760);
+    if (desktopHeight > 0) windowHeight = fitSettingsWindowDimension(desktopHeight, kWindowHeight, 60, 540);
     SettingsApplication application(initialRoute, windowWidth, windowHeight);
     Logger::write(LogLevel::Info, "Settings Center starting");
     ipc::Bus::ensure("gui.input");
