@@ -39,9 +39,13 @@ constexpr std::uint32_t kNavigatorClosestMethod = 12u;
 constexpr std::uint32_t kNavigatorContainsMethod = 13u;
 constexpr std::uint32_t kNavigatorGetElementsByTagNameMethod = 14u;
 constexpr std::uint32_t kNavigatorGetElementsByClassNameMethod = 15u;
+constexpr std::uint32_t kNavigatorGetAttributeMethod = 16u;
+constexpr std::uint32_t kNavigatorHasAttributeMethod = 17u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;
+constexpr std::size_t kNavigatorScriptMaxAttributeNameLength = 64u;
+constexpr std::size_t kNavigatorScriptMaxAttributeValueLength = 64u * 1024u;
 constexpr std::size_t kNavigatorScriptMaxTextAggregationOperations = 1024u;
 constexpr std::size_t kNavigatorScriptMaxElementHostObjects = 1024u;
 constexpr std::size_t kNavigatorScriptMaxDocumentMutations = 1024u;
@@ -359,6 +363,8 @@ private:
         bool capture, bool optionsSupplied, RuntimeContext* runtime);
     gxos::web::HtmlElementRef* findElement(HostInstanceId serial);
     const gxos::web::HtmlElementRef* findElement(HostInstanceId serial) const;
+    bool resolveElementAttribute(HostInstanceId serial, SourceView name,
+        SourceView& value) const;
     bool isKnownElementSerial(HostInstanceId serial) const;
     bool resolveStructuralParentSerial(HostInstanceId serial,
         HostInstanceId& parentSerial) const;

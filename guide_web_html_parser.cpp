@@ -5581,6 +5581,24 @@ static HtmlElementRef elementRefFromTagBody(const std::string& tagName, const st
 	element.className = extractAttr(tagBody, "class");
 	element.id = extractAttr(tagBody, "id");
 	element.inlineStyle = extractAttr(tagBody, "style");
+	if (hasAttr(tagBody, "id"))
+		element.attributePresence |= HtmlAttributeIdPresent;
+	if (hasAttr(tagBody, "class"))
+		element.attributePresence |= HtmlAttributeClassPresent;
+	if (hasAttr(tagBody, "name"))
+		element.attributePresence |= HtmlAttributeNamePresent;
+	if (hasAttr(tagBody, "type"))
+		element.attributePresence |= HtmlAttributeTypePresent;
+	if (hasAttr(tagBody, "value"))
+		element.attributePresence |= HtmlAttributeValuePresent;
+	if (hasAttr(tagBody, "checked"))
+		element.attributePresence |= HtmlAttributeCheckedPresent;
+	if (hasAttr(tagBody, "selected"))
+		element.attributePresence |= HtmlAttributeSelectedPresent;
+	if (hasAttr(tagBody, "disabled"))
+		element.attributePresence |= HtmlAttributeDisabledPresent;
+	if (hasAttr(tagBody, "style"))
+		element.attributePresence |= HtmlAttributeStylePresent;
 	return element;
 }
 
@@ -6803,6 +6821,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		st.currentOptionDisabled = hasAttr(tagBody, "disabled") || st.currentSelectDisabled;
 		st.styleBuf = extractAttr(tagBody, "style");
 		elementRef.formControl = makeFormControlMetadata(st, elementRef, FormControlType::Option, "option", true);
+		elementRef.formControl.value = st.currentOptionValue;
 		elementRef.formControl.selected = st.currentOptionSelected;
 		elementRef.formControl.checked = st.currentOptionSelected;
 		elementRef.formControl.disabled = st.currentOptionDisabled;
@@ -6954,6 +6973,9 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 				type, true);
 			elementRef.formControl.name = boundedDecodedFormText(
 				extractAttr(tagBody, "name"), kFormMaxLabelBytes,
+				st.doc.formsDiagnostics);
+			elementRef.formControl.value = boundedDecodedFormText(
+				extractAttr(tagBody, "value"), kFormMaxValueBytes,
 				st.doc.formsDiagnostics);
             elementRef.formControl.disabled = hasAttr(tagBody, "disabled") || disabledByFieldset(st);
             st.open = OpenTag::ButtonSubmit;

@@ -23,6 +23,50 @@ bool textEquals(SourceView text, const char* expected)
         std::string(text.data, text.length) == expected;
 }
 
+bool validAttributeName(SourceView name)
+{
+    if (name.data == nullptr || name.length == 0u ||
+        name.length > kNavigatorScriptMaxAttributeNameLength) return false;
+    const auto isAsciiLetter = [](unsigned char character) {
+        return (character >= static_cast<unsigned char>('a') &&
+                character <= static_cast<unsigned char>('z')) ||
+            (character >= static_cast<unsigned char>('A') &&
+                character <= static_cast<unsigned char>('Z'));
+    };
+    if (!isAsciiLetter(static_cast<unsigned char>(name.data[0]))) return false;
+    for (std::size_t index = 1u; index < name.length; ++index) {
+        const unsigned char character = static_cast<unsigned char>(name.data[index]);
+        if (!isAsciiLetter(character) &&
+            !(character >= static_cast<unsigned char>('0') &&
+                character <= static_cast<unsigned char>('9')) &&
+            character != static_cast<unsigned char>('-') &&
+            character != static_cast<unsigned char>('_') &&
+            character != static_cast<unsigned char>(':')) return false;
+    }
+    return true;
+}
+
+bool attributeNameEquals(SourceView name, const char* expected)
+{
+    const std::size_t length = std::char_traits<char>::length(expected);
+    if (name.data == nullptr || name.length != length) return false;
+    for (std::size_t index = 0u; index < length; ++index) {
+        unsigned char character = static_cast<unsigned char>(name.data[index]);
+        if (character >= static_cast<unsigned char>('A') &&
+            character <= static_cast<unsigned char>('Z')) {
+            character = static_cast<unsigned char>(character - 'A' + 'a');
+        }
+        if (character != static_cast<unsigned char>(expected[index])) return false;
+    }
+    return true;
+}
+
+bool hasAttributePresence(const gxos::web::HtmlElementRef& element,
+    std::uint16_t attribute)
+{
+    return (element.attributePresence & attribute) != 0u;
+}
+
 bool parseCanonicalIndex(SourceView text, std::size_t& index)
 {
     index = 0;
@@ -542,7 +586,9 @@ bool NavigatorScriptHostAdapter::allowsReentrantCall(
         methodId == kNavigatorClosestMethod ||
         methodId == kNavigatorContainsMethod ||
         methodId == kNavigatorGetElementsByTagNameMethod ||
-        methodId == kNavigatorGetElementsByClassNameMethod;
+        methodId == kNavigatorGetElementsByClassNameMethod ||
+        methodId == kNavigatorGetAttributeMethod ||
+        methodId == kNavigatorHasAttributeMethod;
 }
 
 bool NavigatorScriptHostAdapter::allowsStaleHostProperty(
@@ -554,6 +600,8 @@ bool NavigatorScriptHostAdapter::allowsStaleHostProperty(
             textEquals(property, "contains") ||
             textEquals(property, "getElementsByTagName") ||
             textEquals(property, "getElementsByClassName") ||
+            textEquals(property, "getAttribute") ||
+            textEquals(property, "hasAttribute") ||
             textEquals(property, "parentElement") ||
             textEquals(property, "children") ||
             textEquals(property, "childElementCount") ||
@@ -570,7 +618,9 @@ bool NavigatorScriptHostAdapter::allowsStaleHostMethod(
         methodId == kNavigatorClosestMethod ||
         methodId == kNavigatorContainsMethod ||
         methodId == kNavigatorGetElementsByTagNameMethod ||
-        methodId == kNavigatorGetElementsByClassNameMethod;
+        methodId == kNavigatorGetElementsByClassNameMethod ||
+        methodId == kNavigatorGetAttributeMethod ||
+        methodId == kNavigatorHasAttributeMethod;
 }
 
 bool NavigatorScriptHostAdapter::allowsStaleHostMethodArgument(
@@ -578,7 +628,9 @@ bool NavigatorScriptHostAdapter::allowsStaleHostMethodArgument(
 {
     return methodId == kNavigatorContainsMethod ||
         methodId == kNavigatorGetElementsByTagNameMethod ||
-        methodId == kNavigatorGetElementsByClassNameMethod;
+        methodId == kNavigatorGetElementsByClassNameMethod ||
+        methodId == kNavigatorGetAttributeMethod ||
+        methodId == kNavigatorHasAttributeMethod;
 }
 
 std::size_t NavigatorScriptHostAdapter::callbackLimit() const
@@ -2214,6 +2266,107 @@ const gxos::web::HtmlElementRef* NavigatorScriptHostAdapter::findElement(
     return nullptr;
 }
 
+bool NavigatorScriptHostAdapter::resolveElementAttribute(
+    HostInstanceId serial, SourceView name, SourceView& value) const
+{
+    value = SourceView();
+    if (document_ == nullptr || !validAttributeName(name)) return false;
+    const gxos::web::HtmlElementRef* element = findElement(serial);
+    if (element == nullptr) return false;
+
+    const std::string& tag = element->tagName;
+    const auto has = [&](std::uint16_t bit) {
+        return hasAttributePresence(*element, bit);
+    };
+    const auto setValue = [&](const std::string& stored) {
+        value = SourceView(stored.data(), stored.size());
+    };
+    const auto isInputOrButton = [&]() {
+        return tag == "input" || tag == "button";
+    };
+
+    if (attributeNameEquals(name, "id")) {
+        if (!has(gxos::web::HtmlAttributeIdPresent)) return false;
+        setValue(element->id);
+        return true;
+    }
+    if (attributeNameEquals(name, "class")) {
+        if (!has(gxos::web::HtmlAttributeClassPresent)) return false;
+        setValue(element->className);
+        return true;
+    }
+    if (attributeNameEquals(name, "style")) {
+        if (!has(gxos::web::HtmlAttributeStylePresent)) return false;
+        setValue(element->inlineStyle);
+        return true;
+    }
+    if (attributeNameEquals(name, "name")) {
+        if (!has(gxos::web::HtmlAttributeNamePresent)) return false;
+        if (isInputOrButton() || tag == "textarea" || tag == "select") {
+            setValue(element->formControl.name);
+            return true;
+        }
+        if (tag == "form") {
+            const std::size_t count = std::min(limits_.maxDocumentNodes,
+                document_->formContainers.size());
+            for (std::size_t index = 0u; index < count; ++index) {
+                const gxos::web::FormContainerMetadata& container =
+                    document_->formContainers[index];
+                if (container.serial != serial || container.tagName != "form")
+                    continue;
+                setValue(container.name);
+                return true;
+            }
+        }
+        return false;
+    }
+    if (attributeNameEquals(name, "type")) {
+        if (!isInputOrButton() ||
+            !has(gxos::web::HtmlAttributeTypePresent)) return false;
+        setValue(element->formControl.inputType);
+        return true;
+    }
+    if (attributeNameEquals(name, "value")) {
+        if (!has(gxos::web::HtmlAttributeValuePresent)) return false;
+        if (tag == "option") {
+            setValue(element->formControl.value);
+            return true;
+        }
+        if (isInputOrButton()) {
+            const gxos::web::FormRuntimeControlState* state =
+                formRuntimeState(serial);
+            setValue(state == nullptr ? element->formControl.value :
+                state->defaultValue);
+            return true;
+        }
+        return false;
+    }
+    if (attributeNameEquals(name, "disabled")) {
+        const bool supportedTag = tag == "input" || tag == "button" ||
+            tag == "textarea" || tag == "select" || tag == "option" ||
+            tag == "fieldset";
+        if (!supportedTag ||
+            !has(gxos::web::HtmlAttributeDisabledPresent)) return false;
+        value = SourceView("", 0u);
+        return true;
+    }
+    if (attributeNameEquals(name, "checked")) {
+        if (tag != "input" ||
+            (element->formControl.inputType != "checkbox" &&
+                element->formControl.inputType != "radio") ||
+            !has(gxos::web::HtmlAttributeCheckedPresent)) return false;
+        value = SourceView("", 0u);
+        return true;
+    }
+    if (attributeNameEquals(name, "selected")) {
+        if (tag != "option" ||
+            !has(gxos::web::HtmlAttributeSelectedPresent)) return false;
+        value = SourceView("", 0u);
+        return true;
+    }
+    return false;
+}
+
 bool NavigatorScriptHostAdapter::isKnownElementSerial(
     HostInstanceId serial) const
 {
@@ -2778,14 +2931,20 @@ HostResult NavigatorScriptHostAdapter::getProperty(
             textEquals(property, "closest") ||
             textEquals(property, "contains") ||
             textEquals(property, "getElementsByTagName") ||
-            textEquals(property, "getElementsByClassName"))) {
+            textEquals(property, "getElementsByClassName") ||
+            textEquals(property, "getAttribute") ||
+            textEquals(property, "hasAttribute"))) {
         const std::uint32_t methodId = textEquals(property, "matches")
             ? kNavigatorMatchesMethod : textEquals(property, "closest")
                 ? kNavigatorClosestMethod : textEquals(property, "contains")
                     ? kNavigatorContainsMethod
                     : textEquals(property, "getElementsByTagName")
                         ? kNavigatorGetElementsByTagNameMethod
-                        : kNavigatorGetElementsByClassNameMethod;
+                        : textEquals(property, "getElementsByClassName")
+                            ? kNavigatorGetElementsByClassNameMethod
+                            : textEquals(property, "getAttribute")
+                                ? kNavigatorGetAttributeMethod
+                                : kNavigatorHasAttributeMethod;
         result = HostValue::method(methodId, true, true);
         return HostResult();
     }
@@ -3062,6 +3221,14 @@ HostResult NavigatorScriptHostAdapter::getProperty(
     }
     if (textEquals(property, "matches")) {
         result = HostValue::method(kNavigatorMatchesMethod, true, true);
+        return HostResult();
+    }
+    if (textEquals(property, "getAttribute")) {
+        result = HostValue::method(kNavigatorGetAttributeMethod, true, true);
+        return HostResult();
+    }
+    if (textEquals(property, "hasAttribute")) {
+        result = HostValue::method(kNavigatorHasAttributeMethod, true, true);
         return HostResult();
     }
     if (textEquals(property, "closest")) {
@@ -3701,7 +3868,9 @@ HostResult NavigatorScriptHostAdapter::callInternal(
             methodId == kNavigatorClosestMethod ||
             methodId == kNavigatorContainsMethod ||
             methodId == kNavigatorGetElementsByTagNameMethod ||
-            methodId == kNavigatorGetElementsByClassNameMethod) &&
+            methodId == kNavigatorGetElementsByClassNameMethod ||
+            methodId == kNavigatorGetAttributeMethod ||
+            methodId == kNavigatorHasAttributeMethod) &&
         receiver->kind == kNavigatorElementHostKind &&
         (receiver->generation != generation_ ||
             findElement(receiver->instanceId) == nullptr)) {
@@ -3709,11 +3878,34 @@ HostResult NavigatorScriptHostAdapter::callInternal(
             methodId == kNavigatorGetElementsByClassNameMethod)
             return emptySelectorCollection(result);
         result = methodId == kNavigatorClosestMethod
+            || methodId == kNavigatorGetAttributeMethod
             ? HostValue::nullValue() : HostValue::boolean(false);
         return HostResult();
     }
     const HostResult receiverResult = validate(*receiver);
     if (!receiverResult.succeeded()) return receiverResult;
+    if (methodId == kNavigatorGetAttributeMethod ||
+        methodId == kNavigatorHasAttributeMethod) {
+        if (receiver->kind != kNavigatorElementHostKind)
+            return HostResult{HostResultCode::InvalidValue};
+        const bool validArgument = arguments != nullptr &&
+            argumentCount == 1u && arguments[0].type == HostValueType::String;
+        SourceView attributeValue;
+        const bool present = validArgument && resolveElementAttribute(
+            receiver->instanceId, arguments[0].stringValue, attributeValue);
+        if (methodId == kNavigatorHasAttributeMethod) {
+            result = HostValue::boolean(present);
+        } else if (!present || attributeValue.data == nullptr ||
+            attributeValue.length > kNavigatorScriptMaxAttributeValueLength) {
+            result = HostValue::nullValue();
+        } else {
+            // The document-owned string stays live through this synchronous
+            // call. RuntimeContext copies the borrowed span into its own
+            // bounded string store before returning to JavaScript.
+            result = HostValue::string(attributeValue);
+        }
+        return HostResult();
+    }
     if (methodId == kNavigatorQuerySelectorMethod ||
         methodId == kNavigatorQuerySelectorAllMethod) {
         if (receiver->kind != kNavigatorDocumentHostKind &&

@@ -4087,6 +4087,43 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "descendant, child, adjacent, general sibling, authentic nested click, and Event metadata use the shared matcher");
 
+    const std::string js47FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js47.html";
+    const bool js47Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js47FixtureUrl);
+    const std::string js47InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS47 hosted fixture reads retained and missing attributes",
+        js47Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js47FixtureUrl &&
+        contains(js47InitialText, "Navigator JavaScript JS47") &&
+        contains(js47InitialText,
+            "initial:core=true:current=true:identity=true:event=false:nested=false:metadata=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js47Loaded) + ",text=" +
+        summarizeText(js47InitialText, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js47SaveClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("save");
+    const std::string js47AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS47 hosted authentic click reads event.target attributes",
+        js47SaveClick && contains(js47AfterClick,
+            "event:core=true:current=true:identity=true:event=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js47SaveClick) + ",text=" +
+        summarizeText(js47AfterClick, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS47 hosted current value remains separate from value attribute",
+        js47SaveClick && contains(js47AfterClick, ":current=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "editing input.value leaves getAttribute(\"value\") on its default markup value");
+    add("JS47 hosted canonical identity and nested Event metadata are preserved",
+        js47SaveClick && contains(js47AfterClick,
+            ":identity=true:event=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "query and form collections share canonical Elements while nested dispatch preserves Event fields");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

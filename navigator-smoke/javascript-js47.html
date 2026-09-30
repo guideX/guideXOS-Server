@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS47</title></head>
+<body>
+<h1>Navigator JavaScript JS47</h1>
+<form id="owner" name="profileForm" class="form active">
+  <div id="toolbar" class="toolbar active">
+    <button id="save" class="action primary" name="saveButton" type="button">Save</button>
+    <button id="locked" type="button" disabled>Locked</button>
+    <input id="name" class="field required" name="username" type="text" value="initial">
+    <input id="agree" type="checkbox" checked>
+    <select id="choice" name="choice">
+      <option id="first-option" value="one" selected>One</option>
+      <option id="empty-option" value="">Empty</option>
+    </select>
+    <span id="blank" class="" data-mode="compact"></span>
+  </div>
+</form>
+<button id="outside" type="button">Outside</button>
+<p id="js47-state">initial</p>
+<script>
+var js47Toolbar = document.querySelector("#toolbar");
+var js47Save = document.querySelector("#save");
+var js47Outside = document.querySelector("#outside");
+var js47Name = document.querySelector("#name");
+var js47State = document.querySelector("#js47-state");
+var js47Event = false;
+var js47NestedEvent = false;
+var js47Metadata = false;
+js47Name.value = "changed";
+
+function js47Snapshot(label) {
+  var locked = document.querySelector("#locked");
+  var empty = document.querySelector("#empty-option");
+  var blank = document.querySelector("#blank");
+  var core = js47Toolbar.getAttribute("id") === "toolbar" &&
+    js47Toolbar.getAttribute("CLASS") === "toolbar active" &&
+    js47Save.getAttribute("name") === "saveButton" &&
+    js47Name.getAttribute("name") === "username" &&
+    js47Name.getAttribute("type") === "text" &&
+    js47Name.getAttribute("value") === "initial" &&
+    locked.hasAttribute("disabled") && locked.getAttribute("disabled") === "" &&
+    blank.hasAttribute("class") && blank.getAttribute("class") === "" &&
+    empty.hasAttribute("value") && empty.getAttribute("value") === "" &&
+    js47Toolbar.getAttribute("missing") === null &&
+    !js47Toolbar.hasAttribute("missing") &&
+    js47Toolbar.getAttribute("data-mode") === null &&
+    !js47Toolbar.hasAttribute("data-mode");
+  var currentDefault = js47Name.value === "changed" &&
+    js47Name.getAttribute("value") === "initial";
+  var identity = document.getElementById(js47Save.getAttribute("id")) === js47Save &&
+    document.querySelector("button#save.action.primary") === js47Save &&
+    document.querySelector("#owner").elements["username"].getAttribute("id") === "name" &&
+    document.querySelector("#choice").options[0].getAttribute("value") === "one";
+  js47State.textContent = label + ":core=" + core +
+    ":current=" + currentDefault + ":identity=" + identity +
+    ":event=" + js47Event + ":nested=" + js47NestedEvent +
+    ":metadata=" + js47Metadata;
+}
+
+js47Outside.addEventListener("click", function(event) {
+  js47NestedEvent = event.target.getAttribute("id") === "outside" &&
+    !event.target.hasAttribute("disabled") &&
+    event.currentTarget === js47Outside && event.relatedTarget === null;
+});
+js47Save.addEventListener("click", function(event) {
+  event.preventDefault();
+  js47Event = event.target.getAttribute("id") === "save" &&
+    event.target.hasAttribute("class") && !event.target.hasAttribute("disabled");
+  js47Outside.click();
+});
+js47Toolbar.addEventListener("click", function(event) {
+  if (event.target === js47Save) {
+    var target = event.target;
+    var current = event.currentTarget;
+    var phase = event.eventPhase;
+    var related = event.relatedTarget;
+    js47Snapshot("event");
+    js47Metadata = event.target === target && event.currentTarget === current &&
+      current === js47Toolbar && event.eventPhase === phase && phase === 3 &&
+      event.relatedTarget === related && related === null &&
+      event.defaultPrevented === true;
+    js47Snapshot("event");
+  }
+});
+js47Snapshot("initial");
+</script>
+</body>
+</html>

@@ -4704,3 +4704,82 @@ Recommended JS47 direction: retain the bounded simple-selector representation
 and consider only a narrowly specified selector-list feature if the existing
 host and collection limits can support it without weakening fail-closed
 parsing or generation-safe identity.
+
+## JS47: bounded read-only Element attribute reads
+
+JS47 adds `Element.getAttribute(name)` and `Element.hasAttribute(name)` through
+one shared resolver over the current structural Element and form metadata.
+Presence is kept separately from retained values on the parser's
+`HtmlElementRef`, so empty `id`, `class`, `style`, and retained form values can
+remain distinguishable from missing attributes. There is no JavaScript-side
+attribute object, per-Element cache, or mutation API.
+
+The parser has no generic attribute table. `HtmlElementRef` already retains
+`id`, `class`, and inline style. The existing form model retains `name`, input
+and button `type`, form-control defaults, and option values. JS47 exposes these
+retained fields, plus presence for `disabled`, `checked`, and `selected` where
+the parser handles those attributes. `form.name` comes from the existing
+`FormContainerMetadata`. `input.getAttribute("value")` reads the form
+runtime's default value; editing `.value` does not change it, and reset restores
+that default. `checked` and `selected` presence is based on parse-time
+structural presence, not the current `.checked` or `.selected` property.
+
+Supported reads are `id`, `class`, `style`, form/control `name`, input/button
+`type`, input/button/option `value`, `disabled` on controls and fieldsets,
+`checked` on checkbox/radio inputs, and `selected` on options. Attribute names
+are matched ASCII case-insensitively and accept at most 64 bytes using the
+bounded ASCII form `[A-Za-z][A-Za-z0-9:_-]*`. Missing attributes, an empty or
+malformed name, unsupported names, stale handles, overlong names, and
+non-string arguments fail closed:
+`getAttribute()` returns `null`, and `hasAttribute()` returns `false`. A
+present empty retained value returns `""` while `hasAttribute()` remains true.
+
+Attribute values are not lowercased. The parser's existing value handling is
+preserved: `id`/`class`/style strings are returned as retained, form names and
+control values are entity-decoded and bounded to their existing 128-byte or
+256-byte limits, and input/button `type` is the parser's trimmed lowercase
+form. Boolean attributes have only presence metadata, so their
+`getAttribute()` value is normalized to the empty string. The host read bound
+is 64 KiB; a larger retained string makes `getAttribute()` return `null` while
+`hasAttribute()` still reports presence.
+
+Arbitrary attributes are not retained. In particular `data-*`, `href`, and
+`src` reads are unavailable even where other navigation/image code consumes
+those attributes. This is a parser limitation, not an empty attribute value.
+JS47 adds no attribute selectors or attribute mutation APIs. Attribute
+methods are available on canonical Elements returned by selectors, ID lookup,
+form/select collections, traversal, focus, and event targets. Reads are
+synchronous and read-only; stale handles return `null`/`false` after generation
+changes, including when a later document reuses their serial.
+
+The JS47 focused suite passes **137/137 checks**, including the strict
+bare-metal `-Wall -Wextra -Werror -pedantic -fsyntax-only` lane. The full
+JavaScript matrix passes **45/45 lanes**: lexer, parser, runtime, and JS6–JS47.
+Focused JS36–JS46 regressions pass **99/99, 180/180, 152/152, 218/218,
+155/155, 220/220, 235/235, 277/277, 183/183, 184/184, and 220/220** checks
+respectively.
+
+The production hosted aggregate reports **538 passed / 7 failed** out of 545
+checks. All four JS47 hosted checks pass, covering retained and missing
+attributes, current versus default value, authentic event-target reads,
+canonical Element identity, and nested Event metadata. The seven failures
+remain the established CSS checks: phases 3C and 3G, phase 6A, three phase 6B
+checks, and phase 6C. `build.bat` passes.
+
+`build-kernel.bat` stops at PacMan linking with unresolved
+`pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)`. It regenerated three tracked
+PacMan objects, which were restored to their clean preflight contents. The
+independent direct kernel command `mingw32-make ARCH=amd64 EXTRA_CFLAGS=`
+stops at the existing Mbed TLS configuration errors in
+`mbedtls_check_config.h:51` and `:64`. Neither subsystem was changed. No fresh
+kernel was produced, so QEMU proof is not claimed. `ESP/ramdisk.img` (64 MiB),
+all 89 `out/wallpaper-pack/` files (58,221,367 bytes), and all four
+`out/wallpaper-pack/Apps/PacMan/` files (1,303,667 bytes) match their
+pre-attempt hashes.
+
+JS47 supports only the retained attribute subset described above; arbitrary
+and `data-*` attributes remain unavailable because the parser discards them.
+The shared resolver reads the current document's structural/form metadata and
+returns borrowed views only for synchronous runtime copying. No JS-side
+attribute map or mutation API was added.

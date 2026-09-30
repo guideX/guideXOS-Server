@@ -474,11 +474,27 @@ enum class GenericFontFamily : uint8_t {
 	Unknown   = 5,
 };
 
+// Presence is kept separately from retained values so an explicitly empty
+// attribute remains distinguishable from a missing one. This is a deliberately
+// small parser-retained subset, not a generic attribute collection.
+enum HtmlAttributePresence : uint16_t {
+	HtmlAttributeIdPresent       = 1u << 0,
+	HtmlAttributeClassPresent    = 1u << 1,
+	HtmlAttributeNamePresent     = 1u << 2,
+	HtmlAttributeTypePresent     = 1u << 3,
+	HtmlAttributeValuePresent    = 1u << 4,
+	HtmlAttributeCheckedPresent  = 1u << 5,
+	HtmlAttributeSelectedPresent = 1u << 6,
+	HtmlAttributeDisabledPresent = 1u << 7,
+	HtmlAttributeStylePresent    = 1u << 8,
+};
+
 struct HtmlElementRef {
 	std::string tagName;
 	std::string className;
 	std::string id;
 	std::string inlineStyle;
+	uint16_t    attributePresence = 0;
 	uint64_t    serial = 0;
 	uint64_t    parentSerial = 0;
 	uint16_t    childIndex = 0;
