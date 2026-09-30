@@ -98,6 +98,20 @@ CFLAGS += -nostdlib -nostdinc++ -fno-builtin
 CFLAGS += -DGXOS_BARE_METAL
 CFLAGS += -I. -I.. -Icore/include -Iarch/$(ARCH)/include
 CFLAGS += $(EXTRA_CFLAGS)
+
+# NVMe shared persistence is fail-closed by default. Release profiles may set
+# these only after the corresponding private and common lifecycle gates pass.
+NVME_WRITE_PROVEN ?= 0
+NVME_FLUSH_PROVEN ?= 0
+ifeq ($(NVME_WRITE_PROVEN),1)
+CFLAGS += -DGXOS_DM16_NVME_WRITE_PROVEN
+endif
+ifeq ($(NVME_FLUSH_PROVEN),1)
+ifneq ($(NVME_WRITE_PROVEN),1)
+$(error NVME_FLUSH_PROVEN=1 requires NVME_WRITE_PROVEN=1)
+endif
+CFLAGS += -DGXOS_DM16_NVME_FLUSH_PROVEN
+endif
 ifneq ($(MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED),0)
 CFLAGS += $(MBEDTLS_GUIDEXOS_CFLAGS)
 endif

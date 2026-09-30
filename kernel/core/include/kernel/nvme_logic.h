@@ -176,8 +176,13 @@ inline bool build_rw_command(SubmissionEntry& command, uint8_t opcode,
     command = {};
     uint64_t prp1 = 0u;
     uint64_t prp2 = 0u;
+    if (blockCount == 0u || byteCount % blockCount != 0u)
+        return false;
+    const uint32_t bytesPerBlock = byteCount / blockCount;
     if ((opcode != NVME_IO_READ && opcode != NVME_IO_WRITE) || nsid == 0u ||
-        blockCount == 0u || blockCount > 65536u ||
+        blockCount > 65536u || bytesPerBlock < 512u ||
+        bytesPerBlock > 4096u ||
+        (bytesPerBlock & (bytesPerBlock - 1u)) != 0u ||
         !build_prp(physicalBuffer, byteCount, prp1, prp2))
         return false;
 

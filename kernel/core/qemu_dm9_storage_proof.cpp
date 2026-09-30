@@ -12,6 +12,7 @@
 #if defined(GXOS_DM16_QEMU_NVME_PROOF)
 #include "include/kernel/nvme.h"
 #endif
+#include "include/kernel/pit.h"
 #include "include/kernel/disk_initialization.h"
 #include "include/kernel/disk_manager_model.h"
 #include "include/kernel/fat32_formatter.h"
@@ -25,7 +26,10 @@ namespace kernel {
 namespace qemu_dm9_storage_proof {
 namespace {
 
-#if defined(GXOS_DM16_QEMU_NVME_PROOF)
+#if defined(GXOS_DM17_SINGLE_BLOCK_PROOF) || \
+    defined(GXOS_DM17_QEMU_NVME_LIFECYCLE_PROOF)
+#define QEMU_PROOF_TAG "[DM17-QEMU]"
+#elif defined(GXOS_DM16_QEMU_NVME_PROOF)
 #define QEMU_PROOF_TAG "[DM16-QEMU]"
 #elif defined(GXOS_DM15_QEMU_AHCI_PROOF)
 #define QEMU_PROOF_TAG "[DM15-QEMU]"
@@ -170,7 +174,11 @@ static bool qemu_secondary_target(uint8_t index, block::BlockDevice& out,
         !text_equal(out.serial, "GXOSDM16NVME") ||
         !storage::capture_target_identity(index, identity)) return false;
 #if defined(GXOS_DM16_NVME_PRIVATE_PROOF)
+#if defined(GXOS_DM17_COMMON_WRITE_PROOF)
+    if (!out.writeFn || out.flushFn || out.flushSemanticsKnown) return false;
+#else
     if (out.writeFn || out.flushFn || out.flushSemanticsKnown) return false;
+#endif
 #else
     if (!out.writeFn || !out.flushFn || !out.flushSemanticsKnown) return false;
 #endif
@@ -262,6 +270,8 @@ static bool find_qemu_secondary(block::BlockDevice& device,
             ? "DefinitelyNotBoot"
             : boot.safety == storage::BOOT_DEVICE_IS_TARGET
                 ? "DefinitelyBoot" : "Unknown");
+        serial::puts(" write=");
+        serial::puts(candidate.writeFn ? "yes" : "no");
         serial::puts(" flush=");
         serial::puts(candidate.flushFn ? "yes" : "no");
 #if defined(GXOS_DM16_QEMU_NVME_PROOF)
@@ -396,6 +406,470 @@ static bool verify_private_nvme_write_flush_stress(
     serial::puts(" restored="); serial::puts(finallyRestored ? "yes" : "no");
     serial::putc('\n');
     return finallyRestored;
+}
+#endif
+
+#if defined(GXOS_DM17_SINGLE_BLOCK_PROOF) && \
+    defined(GXOS_DM16_NVME_PRIVATE_PROOF)
+static const uint32_t kDm17MaximumTransferBlocks = 256u;
+static const uint32_t kDm17SectorBytes = 512u;
+
+static void fill_dm17_nvme_pattern(uint8_t* block, uint32_t generation,
+                                   uint64_t lba, uint32_t blockIndex)
+{
+    block[0] = 'D'; block[1] = 'M'; block[2] = '1'; block[3] = '7';
+    for (uint32_t i = 0; i < 4u; ++i) {
+        block[4u + i] = static_cast<uint8_t>(generation >> (i * 8u));
+        block[16u + i] = static_cast<uint8_t>(blockIndex >> (i * 8u));
+    }
+    for (uint32_t i = 0; i < 8u; ++i)
+        block[8u + i] = static_cast<uint8_t>(lba >> (i * 8u));
+    for (uint32_t i = 20u; i < kDm17SectorBytes; ++i) {
+        const uint64_t value = static_cast<uint64_t>(generation) * 29u +
+            static_cast<uint64_t>(lba) * 17u +
+            static_cast<uint64_t>(blockIndex) * 53u +
+            static_cast<uint64_t>(i) * 37u + 0xC3u;
+        block[i] = static_cast<uint8_t>(value);
+    }
+}
+
+static bool dm17_bytes_are_zero(const uint8_t* bytes, uint32_t length)
+{
+    if (!bytes) return false;
+    for (uint32_t i = 0; i < length; ++i)
+        if (bytes[i] != 0u) return false;
+    return true;
+}
+
+static void dm17_host_inspection_gate(const char* phase,
+                                      uint32_t generation, uint64_t lba,
+                                      uint32_t blocks, uint32_t sourceOffset)
+{
+    serial::puts("[DM17-QEMU] host-inspect phase="); serial::puts(phase);
+    serial::puts(" generation="); serial::put_hex32(generation);
+    serial::puts(" lba="); serial::put_hex64(lba);
+    serial::puts(" blocks="); serial::put_hex32(blocks);
+    serial::puts(" blockSize="); serial::put_hex32(kDm17SectorBytes);
+    serial::puts(" sourceOffset="); serial::put_hex32(sourceOffset);
+    serial::putc('\n');
+    const uint64_t start = pit::ticks();
+    while (pit::ticks() - start < 100u) { }
+}
+
+static bool verify_dm17_nvme_transfer_case(
+    uint8_t globalIndex, const block::BlockDevice& device, uint64_t lba,
+    uint32_t blocks, uint32_t generation, uint32_t sourceOffset)
+{
+    static uint8_t original[kDm17MaximumTransferBlocks * kDm17SectorBytes];
+    static uint8_t readback[kDm17MaximumTransferBlocks * kDm17SectorBytes];
+    static uint8_t sourceSnapshot[kDm17MaximumTransferBlocks * kDm17SectorBytes];
+#if defined(_MSC_VER)
+    __declspec(align(4096)) static uint8_t source[
+        kDm17MaximumTransferBlocks * kDm17SectorBytes + 4096u];
+#else
+    static uint8_t source[
+        kDm17MaximumTransferBlocks * kDm17SectorBytes + 4096u]
+        __attribute__((aligned(4096)));
+#endif
+    if (device.sectorSize != kDm17SectorBytes || blocks == 0u ||
+        blocks > kDm17MaximumTransferBlocks ||
+        sourceOffset > 4096u ||
+        static_cast<uint64_t>(sourceOffset) +
+            static_cast<uint64_t>(blocks) * kDm17SectorBytes > sizeof(source) ||
+        !nvme::get_device(device.driverIndex) ||
+        device.totalSectors < blocks || lba > device.totalSectors - blocks)
+        return false;
+
+    const uint32_t byteCount = blocks * kDm17SectorBytes;
+    if (block::read_sectors(globalIndex, lba, blocks, original) !=
+        block::BLOCK_OK) return false;
+    for (uint32_t i = 0; i < byteCount; ++i) {
+        if (original[i] != 0u) {
+            serial::puts("[DM17-QEMU] integrity=BLOCKED reason=range-not-zero\n");
+            return false;
+        }
+    }
+
+    uint8_t* pattern = source + sourceOffset;
+    for (uint32_t blockIndex = 0; blockIndex < blocks; ++blockIndex)
+        fill_dm17_nvme_pattern(pattern + blockIndex * kDm17SectorBytes,
+                               generation, lba + blockIndex, blockIndex);
+    for (uint32_t i = 0; i < byteCount; ++i)
+        sourceSnapshot[i] = pattern[i];
+
+    const block::Status writeStatus = nvme::proof_write(
+        device.driverIndex, lba, blocks, pattern);
+    if (writeStatus != block::BLOCK_OK) {
+        serial::puts("[DM17-QEMU] transfer=FAIL phase=write status=");
+        serial::put_hex8(static_cast<uint8_t>(writeStatus));
+        serial::puts(" lba="); serial::put_hex64(lba);
+        serial::puts(" blocks="); serial::put_hex32(blocks);
+        serial::putc('\n');
+        return false;
+    }
+    dm17_host_inspection_gate("write", generation, lba, blocks, sourceOffset);
+
+    const block::Status readStatus = block::read_sectors(
+        globalIndex, lba, blocks, readback);
+    const bool patternMatches = readStatus == block::BLOCK_OK &&
+        bytes_equal(reinterpret_cast<const char*>(sourceSnapshot),
+                    reinterpret_cast<const char*>(readback), byteCount);
+    bool sourcePreserved = true;
+    for (uint32_t i = 0; i < byteCount; ++i)
+        if (pattern[i] != sourceSnapshot[i]) {
+            sourcePreserved = false;
+            break;
+        }
+
+    const block::Status restoreStatus = nvme::proof_write(
+        device.driverIndex, lba, blocks, original);
+    if (restoreStatus != block::BLOCK_OK) {
+        serial::puts("[DM17-QEMU] transfer=FAIL phase=restore status=");
+        serial::put_hex8(static_cast<uint8_t>(restoreStatus));
+        serial::puts(" lba="); serial::put_hex64(lba);
+        serial::puts(" blocks="); serial::put_hex32(blocks);
+        serial::putc('\n');
+        return false;
+    }
+    dm17_host_inspection_gate("restore", generation, lba, blocks,
+                              sourceOffset);
+    const block::Status restoreReadStatus = block::read_sectors(
+        globalIndex, lba, blocks, readback);
+    const bool restored = restoreReadStatus == block::BLOCK_OK &&
+        bytes_equal(reinterpret_cast<const char*>(original),
+                    reinterpret_cast<const char*>(readback), byteCount);
+    serial::puts("[DM17-QEMU] transfer-case=");
+    serial::puts(patternMatches && sourcePreserved && restored ? "PASS" : "FAIL");
+    serial::puts(" generation="); serial::put_hex32(generation);
+    serial::puts(" lba="); serial::put_hex64(lba);
+    serial::puts(" blocks="); serial::put_hex32(blocks);
+    serial::puts(" bytes="); serial::put_hex32(byteCount);
+    serial::puts(" writeStatus="); serial::put_hex8(static_cast<uint8_t>(writeStatus));
+    serial::puts(" readStatus="); serial::put_hex8(static_cast<uint8_t>(readStatus));
+    serial::puts(" match="); serial::puts(patternMatches ? "yes" : "no");
+    serial::puts(" sourcePreserved=");
+    serial::puts(sourcePreserved ? "yes" : "no");
+    serial::puts(" restoreStatus=");
+    serial::put_hex8(static_cast<uint8_t>(restoreStatus));
+    serial::puts(" restoreReadStatus=");
+    serial::put_hex8(static_cast<uint8_t>(restoreReadStatus));
+    serial::puts(" restored="); serial::puts(restored ? "yes" : "no");
+    serial::putc('\n');
+    return patternMatches && sourcePreserved && restored;
+}
+
+#if defined(GXOS_DM17_COMMON_WRITE_PROOF)
+static bool verify_dm17_common_write_stage(
+    uint8_t globalIndex, const block::BlockDevice& device)
+{
+    static uint8_t original[kDm17SectorBytes];
+    static uint8_t pattern[kDm17SectorBytes];
+    static uint8_t readback[kDm17SectorBytes];
+    const uint64_t lba = 0x5001u;
+    const uint32_t generation = 0x180u;
+    if (device.totalSectors <= lba + 1u ||
+        block::read_sectors(globalIndex, lba, 1u, original) != block::BLOCK_OK ||
+        !dm17_bytes_are_zero(original, sizeof(original)))
+        return false;
+    fill_dm17_nvme_pattern(pattern, generation, lba, 0u);
+    const block::Status writeStatus = block::write_sectors(
+        globalIndex, lba, 1u, pattern);
+    if (writeStatus == block::BLOCK_OK)
+        dm17_host_inspection_gate("write", generation, lba, 1u, 128u);
+    const block::Status readStatus = writeStatus == block::BLOCK_OK
+        ? block::read_sectors(globalIndex, lba, 1u, readback)
+        : block::BLOCK_ERR_NOT_READY;
+    const bool matches = readStatus == block::BLOCK_OK &&
+        bytes_equal(reinterpret_cast<const char*>(pattern),
+                    reinterpret_cast<const char*>(readback),
+                    kDm17SectorBytes);
+    const block::Status flushStatus = block::flush(globalIndex);
+
+    const block::Status restoreStatus = block::write_sectors(
+        globalIndex, lba, 1u, original);
+    if (restoreStatus == block::BLOCK_OK)
+        dm17_host_inspection_gate("restore", generation, lba, 1u, 128u);
+    const block::Status restoreReadStatus =
+        restoreStatus == block::BLOCK_OK
+            ? block::read_sectors(globalIndex, lba, 1u, readback)
+            : block::BLOCK_ERR_NOT_READY;
+    const bool restored = restoreReadStatus == block::BLOCK_OK &&
+        bytes_equal(reinterpret_cast<const char*>(original),
+                    reinterpret_cast<const char*>(readback),
+                    kDm17SectorBytes);
+    const bool flushBlockedAsUnknown = !device.flushSemanticsKnown &&
+        flushStatus == block::BLOCK_ERR_UNSUPPORTED;
+    const bool passed = writeStatus == block::BLOCK_OK && matches &&
+        flushBlockedAsUnknown && restoreStatus == block::BLOCK_OK && restored;
+    serial::puts("[DM17-QEMU] common-write-stage=");
+    serial::puts(passed ? "PASS" : "FAIL");
+    serial::puts(" write="); serial::put_hex8(static_cast<uint8_t>(writeStatus));
+    serial::puts(" read="); serial::put_hex8(static_cast<uint8_t>(readStatus));
+    serial::puts(" match="); serial::puts(matches ? "yes" : "no");
+    serial::puts(" flush="); serial::put_hex8(static_cast<uint8_t>(flushStatus));
+    serial::puts(" flushBlockedAsUnknown=");
+    serial::puts(flushBlockedAsUnknown ? "yes" : "no");
+    serial::puts(" restore="); serial::put_hex8(static_cast<uint8_t>(restoreStatus));
+    serial::puts(" restoreRead=");
+    serial::put_hex8(static_cast<uint8_t>(restoreReadStatus));
+    serial::puts(" restored="); serial::puts(restored ? "yes" : "no");
+    serial::puts(" writeCallback=enabled flushCallback=disabled persistence=unknown\n");
+    return passed;
+}
+#endif
+
+static bool verify_dm17_nvme_flush_and_restart(
+    uint8_t globalIndex, const block::BlockDevice& device);
+static bool verify_dm17_nvme_restart_recovery(
+    uint8_t globalIndex, const block::BlockDevice& device, bool& pending);
+
+static bool verify_dm17_nvme_data_integrity(
+    uint8_t globalIndex, const block::BlockDevice& device)
+{
+    if (device.sectorSize != kDm17SectorBytes || device.totalSectors <= 0x5000u)
+        return false;
+
+    bool restartPending = false;
+    if (!verify_dm17_nvme_restart_recovery(globalIndex, device,
+                                            restartPending))
+        return false;
+    if (restartPending) return true;
+
+    uint32_t singlePassed = 0u;
+    for (uint32_t cycle = 0; cycle < 10u; ++cycle) {
+        const uint32_t sourceOffset = cycle % 3u == 0u ? 128u :
+            (cycle % 3u == 1u ? 3584u : 3968u);
+        if (!verify_dm17_nvme_transfer_case(globalIndex, device,
+                0x1001u + static_cast<uint64_t>(cycle) * 8u, 1u,
+                cycle + 1u, sourceOffset)) break;
+        ++singlePassed;
+    }
+    serial::puts("[DM17-QEMU] single-block-gate=");
+    serial::puts(singlePassed == 10u ? "PASS" : "FAIL");
+    serial::puts(" cycles="); serial::put_hex32(singlePassed);
+    serial::puts(" required=0000000A\n");
+    if (singlePassed != 10u) return false;
+
+    static const uint32_t matrixBlocks[] = { 2u, 7u, 8u, 9u };
+    for (uint32_t i = 0; i < sizeof(matrixBlocks) / sizeof(matrixBlocks[0]); ++i) {
+        if (!verify_dm17_nvme_transfer_case(globalIndex, device,
+                0x2001u + static_cast<uint64_t>(i) * 32u,
+                matrixBlocks[i], 0x20u + i,
+                4096u - 128u)) return false;
+    }
+
+    uint32_t multiPassed = 0u;
+    for (uint32_t cycle = 0; cycle < 10u; ++cycle) {
+        if (!verify_dm17_nvme_transfer_case(globalIndex, device,
+                0x3001u + static_cast<uint64_t>(cycle) * 16u, 7u,
+                0x40u + cycle, 4096u - 256u)) break;
+        ++multiPassed;
+    }
+    serial::puts("[DM17-QEMU] multi-block-gate=");
+    serial::puts(multiPassed == 10u ? "PASS" : "FAIL");
+    serial::puts(" cycles="); serial::put_hex32(multiPassed);
+    serial::puts(" blocks=00000007 required=0000000A\n");
+    if (multiPassed != 10u) return false;
+
+    if (!verify_dm17_nvme_transfer_case(globalIndex, device,
+            0x4001u, kDm17MaximumTransferBlocks, 0x80u, 3968u))
+        return false;
+    if (!verify_dm17_nvme_transfer_case(globalIndex, device,
+            device.totalSectors - 1u, 1u, 0x100u, 3584u))
+        return false;
+
+    serial::puts("[DM17-QEMU] data-integrity-gate=PASS single=10/10 multi=10/10 page-crossing=PASS maxBlocks=00000100 lastLba=PASS shared-write=disabled\n");
+#if defined(GXOS_DM17_COMMON_WRITE_PROOF)
+    if (!verify_dm17_common_write_stage(globalIndex, device)) return false;
+#endif
+    return verify_dm17_nvme_flush_and_restart(globalIndex, device);
+}
+
+static const uint64_t kDm17FlushStressLba = 0x6001u;
+static const uint64_t kDm17RestartLba = 0x7001u;
+static const uint32_t kDm17FlushCycles = 100u;
+static const uint32_t kDm17FlushPatternGeneration = 0x300u;
+
+static bool verify_dm17_nvme_flush_and_restart(
+    uint8_t globalIndex, const block::BlockDevice& device)
+{
+    static uint8_t original[kDm17SectorBytes];
+    static uint8_t readback[kDm17SectorBytes];
+    static uint8_t pattern[kDm17SectorBytes];
+    if (device.totalSectors <= kDm17RestartLba + 1u ||
+        block::read_sectors(globalIndex, kDm17FlushStressLba, 1u, original) !=
+            block::BLOCK_OK || !dm17_bytes_are_zero(original, sizeof(original))) {
+        serial::puts("[DM17-QEMU] flush-gate=FAIL reason=stress-range-not-zero-or-readable\n");
+        return false;
+    }
+
+    uint32_t completedCycles = 0u;
+    for (uint32_t cycle = 0u; cycle < kDm17FlushCycles; ++cycle) {
+        const uint32_t generation = 0x200u + cycle;
+        fill_dm17_nvme_pattern(pattern, generation, kDm17FlushStressLba, 0u);
+        const block::Status writeStatus = nvme::proof_write(
+            device.driverIndex, kDm17FlushStressLba, 1u, pattern);
+        if (writeStatus == block::BLOCK_OK)
+            dm17_host_inspection_gate("write", generation,
+                kDm17FlushStressLba, 1u, 128u);
+        const block::Status flushStatus = writeStatus == block::BLOCK_OK
+            ? nvme::proof_flush(device.driverIndex)
+            : block::BLOCK_ERR_NOT_READY;
+        const block::Status readStatus = flushStatus == block::BLOCK_OK
+            ? block::read_sectors(globalIndex, kDm17FlushStressLba, 1u,
+                                  readback)
+            : block::BLOCK_ERR_NOT_READY;
+        const bool patternMatches = readStatus == block::BLOCK_OK &&
+            bytes_equal(reinterpret_cast<const char*>(pattern),
+                        reinterpret_cast<const char*>(readback),
+                        kDm17SectorBytes);
+
+        const block::Status restoreStatus = nvme::proof_write(
+            device.driverIndex, kDm17FlushStressLba, 1u, original);
+        if (restoreStatus == block::BLOCK_OK)
+            dm17_host_inspection_gate("restore", generation,
+                kDm17FlushStressLba, 1u, 128u);
+        const block::Status restoreFlushStatus =
+            restoreStatus == block::BLOCK_OK
+                ? nvme::proof_flush(device.driverIndex)
+                : block::BLOCK_ERR_NOT_READY;
+        const block::Status restoreReadStatus =
+            restoreFlushStatus == block::BLOCK_OK
+                ? block::read_sectors(globalIndex, kDm17FlushStressLba, 1u,
+                                      readback)
+                : block::BLOCK_ERR_NOT_READY;
+        const bool restored = restoreReadStatus == block::BLOCK_OK &&
+            bytes_equal(reinterpret_cast<const char*>(original),
+                        reinterpret_cast<const char*>(readback),
+                        kDm17SectorBytes);
+        if (writeStatus != block::BLOCK_OK || flushStatus != block::BLOCK_OK ||
+            !patternMatches || restoreStatus != block::BLOCK_OK ||
+            restoreFlushStatus != block::BLOCK_OK || !restored) {
+            serial::puts("[DM17-QEMU] flush-cycle=FAIL cycle=");
+            serial::put_hex32(cycle + 1u);
+            serial::puts(" write=");
+            serial::put_hex8(static_cast<uint8_t>(writeStatus));
+            serial::puts(" flush=");
+            serial::put_hex8(static_cast<uint8_t>(flushStatus));
+            serial::puts(" read=");
+            serial::put_hex8(static_cast<uint8_t>(readStatus));
+            serial::puts(" match=");
+            serial::puts(patternMatches ? "yes" : "no");
+            serial::puts(" restore=");
+            serial::put_hex8(static_cast<uint8_t>(restoreStatus));
+            serial::puts(" restoreFlush=");
+            serial::put_hex8(static_cast<uint8_t>(restoreFlushStatus));
+            serial::puts(" restoreRead=");
+            serial::put_hex8(static_cast<uint8_t>(restoreReadStatus));
+            serial::puts(" restored=");
+            serial::puts(restored ? "yes" : "no");
+            serial::putc('\n');
+            return false;
+        }
+        ++completedCycles;
+        if ((completedCycles % 10u) == 0u) {
+            serial::puts("[DM17-QEMU] flush-stress=progress cycles=");
+            serial::put_hex32(completedCycles);
+            serial::putc('\n');
+        }
+    }
+
+    if (completedCycles != kDm17FlushCycles ||
+        block::read_sectors(globalIndex, kDm17RestartLba, 1u, original) !=
+            block::BLOCK_OK || !dm17_bytes_are_zero(original, sizeof(original))) {
+        serial::puts("[DM17-QEMU] flush-gate=FAIL reason=stress-or-restart-range\n");
+        return false;
+    }
+    fill_dm17_nvme_pattern(pattern, kDm17FlushPatternGeneration,
+                           kDm17RestartLba, 0u);
+    const block::Status restartWriteStatus = nvme::proof_write(
+        device.driverIndex, kDm17RestartLba, 1u, pattern);
+    if (restartWriteStatus == block::BLOCK_OK)
+        dm17_host_inspection_gate("write", kDm17FlushPatternGeneration,
+            kDm17RestartLba, 1u, 128u);
+    const block::Status restartFlushStatus =
+        restartWriteStatus == block::BLOCK_OK
+            ? nvme::proof_flush(device.driverIndex)
+            : block::BLOCK_ERR_NOT_READY;
+    const block::Status restartReadStatus = restartFlushStatus == block::BLOCK_OK
+        ? block::read_sectors(globalIndex, kDm17RestartLba, 1u, readback)
+        : block::BLOCK_ERR_NOT_READY;
+    const bool restartDataMatches = restartReadStatus == block::BLOCK_OK &&
+        bytes_equal(reinterpret_cast<const char*>(pattern),
+                    reinterpret_cast<const char*>(readback),
+                    kDm17SectorBytes);
+    serial::puts("[DM17-QEMU] flush-gate=");
+    serial::puts(restartWriteStatus == block::BLOCK_OK &&
+        restartFlushStatus == block::BLOCK_OK && restartDataMatches
+            ? "PASS" : "FAIL");
+    serial::puts(" cycles="); serial::put_hex32(completedCycles);
+    serial::puts(" write="); serial::put_hex8(static_cast<uint8_t>(restartWriteStatus));
+    serial::puts(" flush="); serial::put_hex8(static_cast<uint8_t>(restartFlushStatus));
+    serial::puts(" read="); serial::put_hex8(static_cast<uint8_t>(restartReadStatus));
+    serial::puts(" match="); serial::puts(restartDataMatches ? "yes" : "no");
+    serial::puts(" restartLba="); serial::put_hex64(kDm17RestartLba);
+    serial::putc('\n');
+    if (restartWriteStatus != block::BLOCK_OK ||
+        restartFlushStatus != block::BLOCK_OK || !restartDataMatches)
+        return false;
+
+    serial::puts("[DM17-QEMU] restart-proof=READY generation=");
+    serial::put_hex32(kDm17FlushPatternGeneration);
+    serial::puts(" lba="); serial::put_hex64(kDm17RestartLba);
+    serial::putc('\n');
+    return true;
+}
+
+static bool verify_dm17_nvme_restart_recovery(
+    uint8_t globalIndex, const block::BlockDevice& device, bool& pending)
+{
+    static uint8_t actual[kDm17SectorBytes];
+    static uint8_t expected[kDm17SectorBytes];
+    static uint8_t zero[kDm17SectorBytes];
+    static uint8_t readback[kDm17SectorBytes];
+    pending = false;
+    if (block::read_sectors(globalIndex, kDm17RestartLba, 1u, actual) !=
+        block::BLOCK_OK) {
+        serial::puts("[DM17-QEMU] restart-proof=FAIL reason=marker-read-failed\n");
+        return false;
+    }
+    fill_dm17_nvme_pattern(expected, kDm17FlushPatternGeneration,
+                           kDm17RestartLba, 0u);
+    if (bytes_equal(reinterpret_cast<const char*>(actual),
+                    reinterpret_cast<const char*>(expected),
+                    kDm17SectorBytes)) {
+        pending = true;
+        serial::puts("[DM17-QEMU] restart-read=PASS generation=");
+        serial::put_hex32(kDm17FlushPatternGeneration);
+        serial::puts(" lba="); serial::put_hex64(kDm17RestartLba);
+        serial::putc('\n');
+        const block::Status restoreStatus = nvme::proof_write(
+            device.driverIndex, kDm17RestartLba, 1u, zero);
+        if (restoreStatus == block::BLOCK_OK)
+            dm17_host_inspection_gate("restore", kDm17FlushPatternGeneration,
+                kDm17RestartLba, 1u, 128u);
+        const block::Status flushStatus = restoreStatus == block::BLOCK_OK
+            ? nvme::proof_flush(device.driverIndex)
+            : block::BLOCK_ERR_NOT_READY;
+        const block::Status readStatus = flushStatus == block::BLOCK_OK
+            ? block::read_sectors(globalIndex, kDm17RestartLba, 1u, readback)
+            : block::BLOCK_ERR_NOT_READY;
+        const bool restored = readStatus == block::BLOCK_OK &&
+            dm17_bytes_are_zero(readback, kDm17SectorBytes);
+        serial::puts("[DM17-QEMU] restart-proof=");
+        serial::puts(restoreStatus == block::BLOCK_OK &&
+            flushStatus == block::BLOCK_OK && restored ? "PASS" : "FAIL");
+        serial::puts(" restore="); serial::put_hex8(static_cast<uint8_t>(restoreStatus));
+        serial::puts(" flush="); serial::put_hex8(static_cast<uint8_t>(flushStatus));
+        serial::puts(" read="); serial::put_hex8(static_cast<uint8_t>(readStatus));
+        serial::puts(" restored="); serial::puts(restored ? "yes" : "no");
+        serial::putc('\n');
+        return restoreStatus == block::BLOCK_OK &&
+            flushStatus == block::BLOCK_OK && restored;
+    }
+    if (dm17_bytes_are_zero(actual, kDm17SectorBytes)) return true;
+    serial::puts("[DM17-QEMU] restart-proof=FAIL reason=unexpected-marker-data\n");
+    return false;
 }
 #endif
 
@@ -898,7 +1372,19 @@ void run(bool rootStorageMounted)
     serial::puts(storage::disk_state_name(s_table.state));
     serial::putc('\n');
 
-#if defined(GXOS_DM16_QEMU_NVME_PROOF) && \
+#if defined(GXOS_DM17_SINGLE_BLOCK_PROOF) && \
+    defined(GXOS_DM16_NVME_PRIVATE_PROOF)
+    if (s_table.state != storage::DISK_STATE_NOT_INITIALIZED) {
+        serial::puts(QEMU_PROOF_TAG " private-proof=FAIL reason=target-not-blank\n");
+        return;
+    }
+    const bool privateProof = verify_dm17_nvme_data_integrity(
+        identity.globalIndex, device);
+    serial::puts(privateProof
+        ? QEMU_PROOF_TAG " private-proof=PASS raw-write=PASS readback=PASS restore=PASS flush=PASS shared-write-stage=separate\n"
+        : QEMU_PROOF_TAG " private-proof=FAIL data-integrity-gate-failed\n");
+    return;
+#elif defined(GXOS_DM16_QEMU_NVME_PROOF) && \
     defined(GXOS_DM16_NVME_PRIVATE_PROOF)
     if (s_table.state != storage::DISK_STATE_NOT_INITIALIZED) {
         serial::puts(QEMU_PROOF_TAG " private-proof=FAIL reason=target-not-blank\n");

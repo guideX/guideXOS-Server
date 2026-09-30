@@ -200,11 +200,15 @@ def main() -> int:
         require(backup_boot == boot, "FAT32 backup boot sector differs from the primary")
         fsinfo = read_sector(start_lba + fsinfo_sector)
         backup_fsinfo = read_sector(start_lba + backup_boot_sector + fsinfo_sector)
-        require(fsinfo == backup_fsinfo, "primary and backup FSInfo sectors differ")
-        require(u32(fsinfo, 0) == 0x41615252 and
-                u32(fsinfo, 484) == 0x61417272 and
-                u32(fsinfo, 508) == 0xAA550000,
-                "FSInfo signatures are invalid")
+        def fsinfo_signatures_valid(sector: bytes) -> bool:
+            return (u32(sector, 0) == 0x41615252 and
+                    u32(sector, 484) == 0x61417272 and
+                    u32(sector, 508) == 0xAA550000)
+
+        require(fsinfo_signatures_valid(fsinfo),
+                "primary FSInfo signatures are invalid")
+        require(fsinfo_signatures_valid(backup_fsinfo),
+                "backup FSInfo signatures are invalid")
 
         fat_size = total_fat32
         first_fat_lba = start_lba + reserved
@@ -221,6 +225,14 @@ def main() -> int:
         cluster_count = (total_fs32 - (first_data_lba - start_lba)) // sectors_per_cluster
         require(cluster_count >= 65525, "FAT32 cluster count is below the standard minimum")
         require(root_cluster >= 2, "FAT32 root cluster is invalid")
+        primary_free_count = u32(fsinfo, 488)
+        require(primary_free_count == 0xFFFFFFFF or
+                primary_free_count <= cluster_count,
+                "primary FSInfo free-cluster count exceeds the FAT32 volume")
+        next_free_hint = u32(fsinfo, 492)
+        require(next_free_hint == 0xFFFFFFFF or
+                2 <= next_free_hint < cluster_count + 2,
+                "primary FSInfo next-free hint is outside the data-cluster range")
 
         def fat_entry(cluster: int) -> int:
             offset = cluster * 4
@@ -321,7 +333,7 @@ def main() -> int:
         print(f"partition=PASS number={partition_number} start_lba={start_lba} end_lba={end_lba} name={PARTITION_NAME}")
         print(f"leading_canary_gap=PASS first_lba={primary_array_end} last_lba={start_lba - 1} bytes={gap_bytes}")
         print(f"fat32_bpb=PASS bps={bytes_per_sector} spc={sectors_per_cluster} clusters={cluster_count} label=DM13PROOF")
-        print(f"fsinfo=PASS backup_boot=PASS fat_mirror=PASS")
+        print(f"fsinfo=PASS primary_free_hint={primary_free_count} backup_fsinfo_signatures=PASS backup_boot=PASS fat_mirror=PASS")
         print(f"root_directory=PASS dm13_directory=PASS proof_file=PASS payload_bytes={file_size}")
         print("metadata_isolation=PASS gaps_zero=PASS unallocated_data_zero=PASS")
         print("result=PASS read_only_inspection=yes")

@@ -3170,6 +3170,41 @@ static void run_nvme_logic_tests()
           "NVMe read encodes 64-bit LBA, zero-based count, and no FUA");
     check(read.prp1 == 0x2000u && read.prp2 == 0u,
           "NVMe bounce-page PRP uses PRP1 without a PRP list");
+    SubmissionEntry oneBlockWrite = {};
+    check(build_rw_command(oneBlockWrite, NVME_IO_WRITE, 1u, 0x2Au,
+          0x12BFFFu, 1u, 0x3A990000u, 512u) &&
+          oneBlockWrite.opcode == NVME_IO_WRITE &&
+          oneBlockWrite.nsid == 1u && oneBlockWrite.commandId == 0x2Au &&
+          oneBlockWrite.cdw10 == 0x12BFFFu && oneBlockWrite.cdw11 == 0u &&
+          oneBlockWrite.cdw12 == 0u && oneBlockWrite.prp1 == 0x3A990000u &&
+          oneBlockWrite.prp2 == 0u && oneBlockWrite.flags == 0u &&
+          oneBlockWrite.reserved1 == 0u && oneBlockWrite.mptr == 0u,
+          "NVMe one-block write encodes NSID, SLBA, zero-based NLB, and PRP1");
+    SubmissionEntry twoBlockWrite = {};
+    check(build_rw_command(twoBlockWrite, NVME_IO_WRITE, 1u, 0x2Bu,
+          0xFFFFFFFFull, 2u, 0x3A990000u, 1024u) &&
+          twoBlockWrite.cdw10 == 0xFFFFFFFFu &&
+          twoBlockWrite.cdw11 == 0u && twoBlockWrite.cdw12 == 1u,
+          "NVMe two-block write encodes NLB minus one across a 32-bit LBA edge");
+    SubmissionEntry highLbaWrite = {};
+    check(build_rw_command(highLbaWrite, NVME_IO_WRITE, 1u, 0x2Cu,
+          0x100000000ull, 1u, 0x3A990000u, 512u) &&
+          highLbaWrite.cdw10 == 0u && highLbaWrite.cdw11 == 1u &&
+          highLbaWrite.cdw12 == 0u,
+          "NVMe write encodes the high half of a 64-bit SLBA");
+    SubmissionEntry eightBlockWrite = {};
+    check(build_rw_command(eightBlockWrite, NVME_IO_WRITE, 1u, 0x2Du,
+          0x4001u, 8u, 0x3A990000u, 4096u) &&
+          eightBlockWrite.cdw12 == 7u && eightBlockWrite.prp2 == 0u,
+          "NVMe maximum one-page write encodes eight 512-byte blocks");
+    check(!build_rw_command(read, NVME_IO_READ, 0u, 1u, 0u, 1u,
+          0x2000u, 512u), "NVMe data command rejects an unspecified NSID");
+    check(!build_rw_command(read, NVME_IO_WRITE, 1u, 1u, 0u, 8u,
+          0x2000u, 3584u),
+          "NVMe data command rejects byte counts inconsistent with block count");
+    check(!build_rw_command(read, NVME_IO_WRITE, 1u, 1u, 0u, 9u,
+          0x2000u, 4608u),
+          "NVMe data command rejects a transfer that exceeds one PRP page");
     check(!build_rw_command(read, NVME_IO_WRITE, 1u, 1u, 0u, 0u,
           0x2000u, 512u), "NVMe rejects a zero-length data command");
     check(!build_rw_command(read, NVME_IO_FLUSH, 1u, 1u, 0u, 1u,
@@ -3182,6 +3217,8 @@ static void run_nvme_logic_tests()
           "NVMe PRP bounds accept a page-aligned one-page transfer");
     check(!build_prp(0x3FF0u, 512u, prp1, prp2),
           "NVMe PRP bounds reject a buffer that could cross a page");
+    check(!build_prp(0x3001u, 512u, prp1, prp2),
+          "NVMe PRP1 rejects an unaligned DMA page base");
     check(!build_prp(0x4000u, 4097u, prp1, prp2),
           "NVMe PRP bounds reject transfers beyond the bounce page");
     check(!build_prp(0x4000u, 0u, prp1, prp2),
@@ -3324,6 +3361,43 @@ static void run_nvme_logic_tests()
     check(completion.kind == COMPLETION_SUCCESS && wrapQueue.completionHead == 0u &&
           wrapQueue.completionPhase == 0u,
           "NVMe CQ head wrap toggles its phase bit");
+
+    QueueOwnership readWriteReadQueue = {};
+    reset_queue(readWriteReadQueue);
+    const uint8_t readWriteReadOpcodes[3] = {
+        NVME_IO_READ, NVME_IO_WRITE, NVME_IO_READ
+    };
+    bool readWriteReadOwned = true;
+    for (uint16_t i = 0u; i < 3u; ++i) {
+        SubmissionEntry sequenceCommand = {};
+        const uint8_t opcode = readWriteReadOpcodes[i];
+        if (!build_rw_command(sequenceCommand, opcode, 1u, 0u,
+                0x5000u + i, 1u, 0x3000u, 512u))
+            readWriteReadOwned = false;
+        uint16_t sequenceCid = 0u, sequenceSlot = 0u, sequenceTail = 0u;
+        if (begin_command(readWriteReadQueue, 2u, sequenceCid,
+                sequenceSlot, sequenceTail) != QUEUE_BEGIN_OK ||
+            sequenceCid != i || sequenceSlot != (i % 2u) ||
+            sequenceTail != ((i + 1u) % 2u)) {
+            readWriteReadOwned = false;
+            break;
+        }
+        sequenceCommand.commandId = sequenceCid;
+        CompletionEntry sequenceCqe = {};
+        sequenceCqe.sqHead = sequenceTail;
+        sequenceCqe.sqId = 1u;
+        sequenceCqe.commandId = sequenceCid;
+        sequenceCqe.status = readWriteReadQueue.completionPhase;
+        const CompletionResult sequenceResult = consume_completion(
+            readWriteReadQueue, sequenceCqe, 1u, 2u);
+        if (sequenceResult.kind != COMPLETION_SUCCESS ||
+            readWriteReadQueue.outstanding || readWriteReadQueue.poisoned)
+            readWriteReadOwned = false;
+    }
+    check(readWriteReadOwned && readWriteReadQueue.nextCommandId == 3u &&
+          readWriteReadQueue.completionHead == 1u &&
+          readWriteReadQueue.completionPhase == 0u,
+          "NVMe READ-WRITE-READ retains distinct CQ ownership through queue wrap");
 
     QueueOwnership errorQueue = {};
     reset_queue(errorQueue);

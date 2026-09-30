@@ -1,13 +1,13 @@
 <#
 .SYNOPSIS
-    Runs the DM16 private NVMe proof or one full NVMe storage lifecycle.
+    Runs DM16/DM17 private NVMe proofs or one full NVMe storage lifecycle.
 
 .DESCRIPTION
-    Creates an isolated ESP copy and a fresh sparse 600 MiB raw secondary image, then
-    Boots from a separate IDE-backed ESP and attaches a fresh raw image to a
-    QEMU NVMe controller. PrivateWrite keeps shared writes disabled and runs
-    100 write/flush/read/restore stress cycles before Lifecycle enables the
-    common GPT/FAT32/VFS workflow and restart verification.
+    Creates an isolated ESP copy and a fresh 600 MiB raw secondary image, then
+    boots from a separate IDE-backed ESP and attaches the raw image to a QEMU
+    NVMe controller. DM17's private integrity gate requires a dense image and
+    writeback cache, pauses after each write/restore for host-side inspection,
+    and leaves common NVMe writes and Flush disabled.
 #>
 [CmdletBinding()]
 param(
@@ -16,18 +16,38 @@ param(
     [string]$EspSource = "ESP",
     [string]$WorkDir = "",
     [string]$QemuExecutable = "C:\Program Files\qemu\qemu-system-x86_64.exe",
+    [ValidateSet("writeback", "writethrough", "none", "directsync", "unsafe", "default")]
+    [string]$CacheMode = "writeback",
     [string]$OvmfCode = "OVMF.fd",
     [string]$PythonExecutable = "",
     [string]$EspCacheDirectory = "",
     [string]$DiskDirectory = "",
     [int]$AttemptNumber = 1,
+    [switch]$Dm17Proof,
+    [switch]$Dm17CommonWriteProof,
+    [switch]$EnableNvmeCallbacks,
+    [switch]$DenseImage,
     [switch]$QemuDebug,
+    [switch]$QemuTrace,
     [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location -LiteralPath $Root
+
+if ($Dm17Proof -and ($Stage -ne "PrivateWrite" -or
+        $CacheMode -ne "writeback" -or -not $DenseImage)) {
+    throw "DM17 proof requires PrivateWrite, cache=writeback, and a dense raw image."
+}
+if ($Dm17CommonWriteProof -and (-not $Dm17Proof -or
+        $Stage -ne "PrivateWrite")) {
+    throw "DM17 common-write proof requires the DM17 PrivateWrite proof."
+}
+if ($EnableNvmeCallbacks -and ($Stage -ne "Lifecycle" -or
+        $CacheMode -ne "writeback" -or -not $DenseImage)) {
+    throw "NVMe callback lifecycle proof requires Lifecycle, cache=writeback, and a dense raw image."
+}
 
 function Find-MSBuild {
     $onPath = Get-Command msbuild.exe -ErrorAction SilentlyContinue
@@ -49,6 +69,132 @@ function Get-FreeLoopbackPort {
     $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
     $listener.Stop()
     return $port
+}
+
+function Send-ProofQmpCommand([int]$QmpPort, [string]$CommandName) {
+    $client = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $client.ReceiveTimeout = 2000
+        $client.Connect([System.Net.IPAddress]::Loopback, $QmpPort)
+        $stream = $client.GetStream()
+        $stream.ReadTimeout = 2000
+        $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::ASCII,
+            $false, 1024, $true)
+        $writer = [IO.StreamWriter]::new($stream, [Text.Encoding]::ASCII,
+            1024, $true)
+        $writer.NewLine = "`r`n"
+        [void]$reader.ReadLine() # QMP greeting.
+        $writer.WriteLine('{"execute":"qmp_capabilities"}')
+        $writer.Flush()
+        $capabilitiesReply = $reader.ReadLine()
+        if (-not $capabilitiesReply -or $capabilitiesReply -notmatch '"return"') {
+            throw "QMP capability negotiation failed: $capabilitiesReply"
+        }
+        $writer.WriteLine("{`"execute`":`"$CommandName`"}")
+        $writer.Flush()
+        if ($CommandName -eq "quit") { return "sent" }
+        $reply = $null
+        for ($i = 0; $i -lt 16; $i++) {
+            $line = $reader.ReadLine()
+            if ($line -match '"return"') { $reply = $line; break }
+            if ($line -match '"error"') { throw "QMP $CommandName failed: $line" }
+        }
+        if (-not $reply) {
+            throw "QMP $CommandName did not return a command result."
+        }
+        return $reply
+    } finally {
+        $client.Dispose()
+    }
+}
+
+function Get-Dm17ExpectedRange([UInt64]$Lba, [UInt32]$Blocks,
+                               [UInt32]$Generation, [UInt32]$BlockSize = 512) {
+    $bytes = New-Object byte[] ($Blocks * $BlockSize)
+    for ($blockIndex = 0; $blockIndex -lt $Blocks; $blockIndex++) {
+        $blockLba = $Lba + [UInt64]$blockIndex
+        $baseOffset = $blockIndex * $BlockSize
+        $bytes[$baseOffset + 0] = [byte][char]'D'
+        $bytes[$baseOffset + 1] = [byte][char]'M'
+        $bytes[$baseOffset + 2] = [byte][char]'1'
+        $bytes[$baseOffset + 3] = [byte][char]'7'
+        for ($i = 0; $i -lt 4; $i++) {
+            $bytes[$baseOffset + 4 + $i] = [byte](($Generation -shr (8 * $i)) -band 0xff)
+            $bytes[$baseOffset + 16 + $i] = [byte](($blockIndex -shr (8 * $i)) -band 0xff)
+        }
+        for ($i = 0; $i -lt 8; $i++) {
+            $bytes[$baseOffset + 8 + $i] = [byte](($blockLba -shr (8 * $i)) -band 0xff)
+        }
+        for ($i = 20; $i -lt $BlockSize; $i++) {
+            $value = ([UInt64]$Generation * 29 + $blockLba * 17 +
+                [UInt64]$blockIndex * 53 + [UInt64]$i * 37 + 0xC3) -band 0xff
+            $bytes[$baseOffset + $i] = [byte]$value
+        }
+    }
+    return ,$bytes
+}
+
+function Get-Dm17Sha256([byte[]]$Bytes) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return [Convert]::ToHexString($sha.ComputeHash($Bytes)) }
+    finally { $sha.Dispose() }
+}
+
+function Save-Dm17HostInspection([string]$DiskPath, [string]$OutputPath,
+                                 [string]$Phase, [UInt32]$Generation,
+                                 [UInt64]$Lba, [UInt32]$Blocks,
+                                 [UInt32]$BlockSize) {
+    $length = [int]($Blocks * $BlockSize)
+    $offset = [UInt64]$Lba * [UInt64]$BlockSize
+    $expected = if ($Phase -eq "write") {
+        Get-Dm17ExpectedRange $Lba $Blocks $Generation $BlockSize
+    } else { New-Object byte[] $length }
+    $actual = New-Object byte[] $length
+    $before = New-Object byte[] $BlockSize
+    $after = New-Object byte[] $BlockSize
+    $stream = [IO.File]::Open($DiskPath, [IO.FileMode]::Open,
+        [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    try {
+        if ($offset + [UInt64]$length -gt [UInt64]$stream.Length) {
+            throw "DM17 host inspection range exceeds the backing image."
+        }
+        $stream.Position = [Int64]$offset
+        $read = $stream.Read($actual, 0, $actual.Length)
+        if ($read -ne $actual.Length) { throw "Short host read for DM17 target range." }
+        if ($offset -ge [UInt64]$BlockSize) {
+            $stream.Position = [Int64]($offset - [UInt64]$BlockSize)
+            $read = $stream.Read($before, 0, $before.Length)
+            if ($read -ne $before.Length) { throw "Short host read for preceding block." }
+        }
+        if ($offset + [UInt64]$length + [UInt64]$BlockSize -le [UInt64]$stream.Length) {
+            $stream.Position = [Int64]($offset + [UInt64]$length)
+            $read = $stream.Read($after, 0, $after.Length)
+            if ($read -ne $after.Length) { throw "Short host read for following block." }
+        }
+    } finally { $stream.Dispose() }
+
+    $targetMatches = $true
+    for ($i = 0; $i -lt $length; $i++) {
+        if ($actual[$i] -ne $expected[$i]) { $targetMatches = $false; break }
+    }
+    $neighborsZero = $true
+    foreach ($value in $before) { if ($value -ne 0) { $neighborsZero = $false; break } }
+    if ($neighborsZero) {
+        foreach ($value in $after) { if ($value -ne 0) { $neighborsZero = $false; break } }
+    }
+    $expectedHash = Get-Dm17Sha256 $expected
+    $actualHash = Get-Dm17Sha256 $actual
+    $regionName = "dm17-host-region-g{0:X4}-lba{1:X}-{2}.bin" -f $Generation, $Lba, $Phase
+    [IO.File]::WriteAllBytes((Join-Path $OutputPath $regionName), $actual)
+    if ($Phase -eq "write") {
+        [IO.File]::WriteAllBytes((Join-Path $OutputPath ("dm17-intended-g{0:X4}-lba{1:X}.bin" -f $Generation, $Lba)), $expected)
+    }
+    $first64 = ($actual[0..([Math]::Min(63, $actual.Length - 1))] |
+        ForEach-Object { $_.ToString('X2') }) -join ''
+    $line = "phase=$Phase generation=$Generation lba=0x{0:X} offset=0x{1:X} blocks=$Blocks bytes=$length expectedSha256=$expectedHash actualSha256=$actualHash targetMatches=$targetMatches adjacentBlocksZero=$neighborsZero targetFirst64=$first64" -f $Lba, $offset
+    Add-Content -LiteralPath $script:Dm17InspectionPath -Value $line -Encoding ascii
+    Write-Host "DM17 host image: $line"
+    if (-not $targetMatches -or -not $neighborsZero) { $script:Dm17HostInspectionFailures++ }
 }
 
 function Get-EspTreeHash([string]$Source) {
@@ -165,7 +311,7 @@ function New-EspCopy([string]$Cache, [string]$Destination) {
     }
 }
 
-function Stop-ProofQemu([int]$ProcessId, [int]$Port,
+function Stop-ProofQemu([int]$ProcessId, [int]$Port, [int]$QmpPort,
                         [string]$ExpectedSerialPath) {
     if ($ProcessId -le 0) { throw "QEMU process ID is missing during proof cleanup." }
     $owned = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId"
@@ -176,15 +322,10 @@ function Stop-ProofQemu([int]$ProcessId, [int]$Port,
     }
     Write-Host "DM16 cleanup: requesting graceful QEMU shutdown PID=$ProcessId"
     $ownedProcess = [System.Diagnostics.Process]::GetProcessById($ProcessId)
-    $client = [System.Net.Sockets.TcpClient]::new()
     try {
-        $client.Connect([System.Net.IPAddress]::Loopback, $Port)
-        $stream = $client.GetStream()
-        $command = [Text.Encoding]::ASCII.GetBytes("quit`r`n")
-        $stream.Write($command, 0, $command.Length)
-        $stream.Flush()
-    } finally {
-        $client.Dispose()
+        [void](Send-ProofQmpCommand $QmpPort "quit")
+    } catch {
+        if (-not $ownedProcess.HasExited) { throw }
     }
     if (-not $ownedProcess.WaitForExit(15000)) {
         $ownedProcess.Kill()
@@ -247,12 +388,13 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
     $debugPath = Join-Path $OutputPath "$RunName.qemu-debug.log"
     Remove-Item -LiteralPath $serialPath,$stderrPath,$stdoutPath -Force -ErrorAction SilentlyContinue
     $port = Get-FreeLoopbackPort
+    $qmpPort = Get-FreeLoopbackPort
     $arguments = @(
         "-drive", "if=pflash,format=raw,readonly=on,file=$OvmfFull",
         "-machine", "q35,usb=off",
         "-drive", "if=none,id=dm16boot,format=raw,file=fat:rw:$EspPath",
         "-device", "ide-hd,drive=dm16boot,bus=ide.0",
-        "-drive", "if=none,id=dm16secondary,format=raw,cache=directsync,file=$DiskPath",
+        "-drive", "if=none,id=dm16secondary,format=raw,cache=$CacheMode,file=$DiskPath",
         "-device", "nvme,id=dm16nvme,serial=GXOSDM16NVME,drive=dm16secondary",
         "-netdev", "user,id=net0",
         "-device", "e1000,netdev=net0",
@@ -261,43 +403,68 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
         "-m", "1024M", "-vga", "std", "-display", "none",
         "-serial", "file:$serialPath",
         "-monitor", "tcp:127.0.0.1:$port,server,nowait",
+        "-qmp", "tcp:127.0.0.1:$qmpPort,server,nowait",
         "-rtc", "base=utc,clock=host", "-no-reboot"
     )
     if ($QemuDebug) { $arguments += @("-d", "guest_errors,int,cpu_reset", "-D", $debugPath) }
+    if ($QemuTrace) {
+        $tracePath = Join-Path $OutputPath "$RunName.nvme-trace.log"
+        $arguments += @("-trace", "enable=pci_nvme_io_cmd,file=$tracePath")
+    }
     $process = Start-Process -FilePath $QemuFull -ArgumentList $arguments `
         -WorkingDirectory $Root -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $seenDm17InspectionMessages = 0
     while ([DateTime]::UtcNow -lt $deadline) {
         if (Test-Path -LiteralPath $serialPath) {
             $serial = Get-Content -LiteralPath $serialPath -Raw -ErrorAction SilentlyContinue
             if ($serial -match '\[KERNEL-FAULT\]') {
-                Stop-ProofQemu $process.Id $port $serialPath
+                Stop-ProofQemu $process.Id $port $qmpPort $serialPath
                 throw "$RunName encountered a kernel fault; see $serialPath"
             }
-            if ($serial -match '(?m)^\[(?:DM16-QEMU|DM9-QEMU)\] (?:private-proof=FAIL|lifecycle=FAIL|proof=BLOCKED|reboot-rediscovery=FAIL|initialize=FAIL|create-partition=FAIL|format-fat32=FAIL)') {
+            if ($serial -match '(?m)^\[(?:DM17-QEMU|DM16-QEMU|DM9-QEMU)\] (?:private-proof=FAIL|lifecycle=FAIL|proof=BLOCKED|reboot-rediscovery=FAIL|initialize=FAIL|create-partition=FAIL|format-fat32=FAIL)') {
                 $failureLine = $Matches[0]
-                Stop-ProofQemu $process.Id $port $serialPath
+                Stop-ProofQemu $process.Id $port $qmpPort $serialPath
                 throw "$RunName reported '$failureLine'; see $serialPath"
+            }
+            if ($Dm17Proof -and $serial) {
+                $inspectionMatches = [regex]::Matches($serial,
+                    '(?m)^\[DM17-QEMU\] host-inspect phase=(write|restore) generation=([0-9A-Fa-f]+) lba=([0-9A-Fa-f]+) blocks=([0-9A-Fa-f]+) blockSize=([0-9A-Fa-f]+)')
+                while ($seenDm17InspectionMessages -lt $inspectionMatches.Count) {
+                    $gate = $inspectionMatches[$seenDm17InspectionMessages]
+                    $seenDm17InspectionMessages++
+                    [void](Send-ProofQmpCommand $qmpPort "stop")
+                    try {
+                        Save-Dm17HostInspection $DiskPath $OutputPath `
+                            $gate.Groups[1].Value `
+                            ([Convert]::ToUInt32($gate.Groups[2].Value, 16)) `
+                            ([Convert]::ToUInt64($gate.Groups[3].Value, 16)) `
+                            ([Convert]::ToUInt32($gate.Groups[4].Value, 16)) `
+                            ([Convert]::ToUInt32($gate.Groups[5].Value, 16))
+                    } finally {
+                        [void](Send-ProofQmpCommand $qmpPort "cont")
+                    }
+                }
             }
             if ($serial -and $serial.Contains("[DM16-NVME-DMA] submit-pause=START") -and
                 -not (Test-Path -LiteralPath (Join-Path $OutputPath "$RunName.dma-snapshot.txt"))) {
                 try { Save-ProofDmaSnapshot $port $serial $OutputPath $RunName }
                 catch {
-                    Stop-ProofQemu $process.Id $port $serialPath
+                    Stop-ProofQemu $process.Id $port $qmpPort $serialPath
                     throw
                 }
             }
             if ($serial -and $serial.Contains($SuccessMarker) -and
                 $serial.Contains("[KERNEL] Entering main loop")) {
-                return [pscustomobject]@{ ProcessId=$process.Id; Port=$port; SerialPath=$serialPath }
+                return [pscustomobject]@{ ProcessId=$process.Id; Port=$port; QmpPort=$qmpPort; SerialPath=$serialPath }
             }
         }
         if ($process.HasExited) { break }
         Start-Sleep -Milliseconds 500
     }
     $stderr = Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue
-    if (-not $process.HasExited) { Stop-ProofQemu $process.Id $port $serialPath }
+    if (-not $process.HasExited) { Stop-ProofQemu $process.Id $port $qmpPort $serialPath }
     throw "$RunName timed out or exited before '$SuccessMarker'. $stderrPath $serialPath"
 }
 
@@ -317,7 +484,12 @@ if (Test-Path -LiteralPath $WorkFull) {
     }
 } else { New-Item -ItemType Directory -Path $WorkFull -Force | Out-Null }
 
-$DiskRoot = if ($DiskDirectory) {
+$proofPrefix = if ($Dm17Proof -or $EnableNvmeCallbacks) { "dm17" } else { "dm16" }
+$manifestName = "$proofPrefix-manifest.txt"
+$script:Dm17HostInspectionFailures = 0
+$script:Dm17InspectionPath = Join-Path $WorkFull "dm17-host-image-inspection.txt"
+
+    $DiskRoot = if ($DiskDirectory) {
     if ([IO.Path]::IsPathRooted($DiskDirectory)) {
         [IO.Path]::GetFullPath($DiskDirectory)
     } else { [IO.Path]::GetFullPath((Join-Path $Root $DiskDirectory)) }
@@ -325,9 +497,9 @@ $DiskRoot = if ($DiskDirectory) {
 if (-not (Test-Path -LiteralPath $DiskRoot)) {
     New-Item -ItemType Directory -Path $DiskRoot -Force | Out-Null
 }
-$DiskPath = Join-Path $DiskRoot ("dm16-secondary-{0}-{1:D2}.raw" -f $Stage.ToLowerInvariant(), $AttemptNumber)
+$DiskPath = Join-Path $DiskRoot ("{0}-secondary-{1}-{2:D2}.raw" -f $proofPrefix, $Stage.ToLowerInvariant(), $AttemptNumber)
 $EspPath = Join-Path $WorkFull "esp"
-$manifestPath = Join-Path $WorkFull "dm16-manifest.txt"
+$manifestPath = Join-Path $WorkFull $manifestName
 $activeBoot = $null
 
 try {
@@ -341,9 +513,17 @@ try {
             $objectPath = Join-Path $Root "kernel\build\amd64\obj\core\$object"
             if (Test-Path -LiteralPath $objectPath) { Remove-Item -LiteralPath $objectPath -Force }
         }
-        $flags = if ($Stage -eq "PrivateWrite") {
+        $flags = if ($Dm17Proof) {
+            "-DGXOS_DM16_QEMU_NVME_PROOF -DGXOS_DM16_NVME_PRIVATE_PROOF -DGXOS_DM17_SINGLE_BLOCK_PROOF"
+        } elseif ($Stage -eq "PrivateWrite") {
             "-DGXOS_DM16_QEMU_NVME_PROOF -DGXOS_DM16_NVME_PRIVATE_PROOF"
         } else { "-DGXOS_DM16_QEMU_NVME_PROOF" }
+        if ($Dm17CommonWriteProof) {
+            $flags += " -DGXOS_DM17_COMMON_WRITE_PROOF -DGXOS_DM16_NVME_WRITE_PROVEN"
+        }
+        if ($EnableNvmeCallbacks) {
+            $flags += " -DGXOS_DM16_NVME_WRITE_PROVEN -DGXOS_DM16_NVME_FLUSH_PROVEN -DGXOS_DM17_QEMU_NVME_LIFECYCLE_PROOF -DGXOS_DM17_NVME_WRITE_TRACE"
+        }
         $kernelBuildLog = Join-Path $WorkFull "kernel-build-$($Stage.ToLowerInvariant()).log"
         $priorErrorActionPreference = $ErrorActionPreference
         try {
@@ -404,8 +584,10 @@ try {
     $diskStream = [IO.File]::Open($DiskPath, [IO.FileMode]::CreateNew,
         [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
     $diskStream.Dispose()
-    & $sparseTool sparse setflag $DiskPath 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Unable to mark the new raw proof image sparse (fsutil exit $LASTEXITCODE)." }
+    if (-not $DenseImage) {
+        & $sparseTool sparse setflag $DiskPath 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Unable to mark the new raw proof image sparse (fsutil exit $LASTEXITCODE)." }
+    }
     $diskStream = [IO.File]::Open($DiskPath, [IO.FileMode]::Open,
         [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
     $diskStream.SetLength(600L * 1024L * 1024L)
@@ -414,7 +596,7 @@ try {
     $kernelHash = (Get-FileHash -LiteralPath (Join-Path $EspPath "kernel.elf") -Algorithm SHA256).Hash
     $initialHash = (Get-FileHash -LiteralPath $DiskPath -Algorithm SHA256).Hash
     @(
-        "proof=DM16-NVMe-$Stage",
+        "proof=$($proofPrefix.ToUpperInvariant())-NVMe-$Stage",
         "attemptNumber=$AttemptNumber",
         "timestampUtc=$([DateTime]::UtcNow.ToString('o'))",
         "bootMedium=isolated-ESP-directory-backend",
@@ -426,40 +608,78 @@ try {
         "kernelSha256=$kernelHash",
         "secondaryImage=$DiskPath",
         "secondaryFormat=raw",
-        "secondaryCacheMode=directsync",
+        "secondaryCacheMode=$CacheMode",
+        "secondarySparse=$(-not $DenseImage)",
         "secondaryCapacityBytes=$((Get-Item -LiteralPath $DiskPath).Length)",
         "secondaryInitialSha256=$initialHash",
         "secondaryPlacement=QEMU-NVMe-controller-namespace-1",
         "physicalHostDisksPassedToQemu=none",
         "qemu=$((& $QemuFull --version | Select-Object -First 1))"
     ) | Set-Content -LiteralPath $manifestPath -Encoding ascii
-    @("identity=GUIDEXOS-DM16-QEMU-$Stage", "proofManifest=/dm16-manifest.txt") |
+    @("identity=GUIDEXOS-$($proofPrefix.ToUpperInvariant())-QEMU-$Stage", "proofManifest=/$manifestName") |
         Set-Content -LiteralPath (Join-Path $EspPath "build-identity.txt") -Encoding ascii
 
     if ($Stage -eq "PrivateWrite") {
+        $successMarker = if ($Dm17Proof) {
+            "[DM17-QEMU] restart-proof=READY"
+        } else { "[DM16-QEMU] private-proof=PASS" }
         $activeBoot = Start-ProofBoot "private-write-boot" `
-            "[DM16-QEMU] private-proof=PASS" $EspPath $DiskPath $WorkFull 300
-        Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
+            $successMarker $EspPath $DiskPath $WorkFull 900
+        $firstSerialPath = $activeBoot.SerialPath
+        Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.QmpPort $activeBoot.SerialPath
         $activeBoot = $null
+        $restartSerialPath = ""
+        if ($Dm17Proof) {
+            $firstSerial = Get-Content -LiteralPath $firstSerialPath -Raw
+            if (-not $firstSerial.Contains("[DM17-QEMU] data-integrity-gate=PASS") -or
+                -not $firstSerial.Contains("[DM17-QEMU] flush-gate=PASS cycles=00000064") -or
+                -not $firstSerial.Contains("[DM17-QEMU] restart-proof=READY")) {
+                throw "DM17 first boot did not complete data, Flush, and restart-setup gates."
+            }
+            if ($Dm17CommonWriteProof -and
+                -not $firstSerial.Contains("[DM17-QEMU] common-write-stage=PASS")) {
+                throw "DM17 common write callback stage did not pass."
+            }
+            $activeBoot = Start-ProofBoot "restart-boot" `
+                "[DM17-QEMU] restart-proof=PASS" $EspPath $DiskPath $WorkFull 300
+            $restartSerialPath = $activeBoot.SerialPath
+            Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port `
+                $activeBoot.QmpPort $activeBoot.SerialPath
+            $activeBoot = $null
+            $restartSerial = Get-Content -LiteralPath $restartSerialPath -Raw
+            if (-not $restartSerial.Contains("[DM17-QEMU] restart-read=PASS") -or
+                -not $restartSerial.Contains("[DM17-QEMU] restart-proof=PASS")) {
+                throw "DM17 restart boot did not read back and restore the flushed pattern."
+            }
+        }
         $finalHash = (Get-FileHash -LiteralPath $DiskPath -Algorithm SHA256).Hash
         if ($initialHash -ne $finalHash) { throw "Private raw write proof did not restore the complete image hash." }
-        Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
-            "secondaryFinalSha256=$finalHash",
-            "result=PASS tier=1-private-write-flush-read-restore-stress-100-cycles",
-            "sharedWriteRegistration=disabled",
-            "imageRestoredByteForByte=yes",
-            "serial=private-write-boot.serial.log"
-        )
+        if ($Dm17Proof -and $script:Dm17HostInspectionFailures -ne 0) {
+            throw "DM17 host-side target or neighbor inspection failed $script:Dm17HostInspectionFailures time(s)."
+        }
+        $resultLines = if ($Dm17Proof) {
+            $writeRegistration = if ($Dm17CommonWriteProof) { "enabled-stage2-private-proof" } else { "disabled" }
+            @("secondaryFinalSha256=$finalHash", "result=PASS tier=private-data-integrity-and-flush-restart", "flushStressCycles=100", "restartReadback=PASS", "hostInspectionFailures=0", "sharedWriteRegistration=$writeRegistration", "sharedFlushRegistration=disabled", "imageRestoredByteForByte=yes", "firstBootSerial=$([IO.Path]::GetFileName($firstSerialPath))", "restartSerial=$([IO.Path]::GetFileName($restartSerialPath))", "hostInspection=dm17-host-image-inspection.txt")
+        } else {
+            @("secondaryFinalSha256=$finalHash", "result=PASS tier=1-private-write-flush-read-restore-stress-100-cycles", "sharedWriteRegistration=disabled", "imageRestoredByteForByte=yes", "serial=private-write-boot.serial.log")
+        }
+        Add-Content -LiteralPath $manifestPath -Encoding ascii -Value $resultLines
     } else {
+        $lifecycleMarker = if ($EnableNvmeCallbacks) {
+            "[DM17-QEMU] lifecycle=PASS"
+        } else { "[DM16-QEMU] lifecycle=PASS" }
+        $rediscoveryMarker = if ($EnableNvmeCallbacks) {
+            "[DM17-QEMU] reboot-rediscovery=PASS"
+        } else { "[DM16-QEMU] reboot-rediscovery=PASS" }
         $activeBoot = Start-ProofBoot "first-boot" `
-            "[DM16-QEMU] lifecycle=PASS" $EspPath $DiskPath $WorkFull 300
+            $lifecycleMarker $EspPath $DiskPath $WorkFull 300
         $firstSerial = $activeBoot.SerialPath
-        Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
+        Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.QmpPort $activeBoot.SerialPath
         $activeBoot = $null
         $activeBoot = Start-ProofBoot "rediscovery-boot" `
-            "[DM16-QEMU] reboot-rediscovery=PASS" $EspPath $DiskPath $WorkFull 180
+            $rediscoveryMarker $EspPath $DiskPath $WorkFull 180
         $rediscoverySerial = $activeBoot.SerialPath
-        Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
+        Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.QmpPort $activeBoot.SerialPath
         $activeBoot = $null
         if (-not $PythonExecutable) {
             $python = Get-Command python.exe -ErrorAction SilentlyContinue
@@ -474,17 +694,20 @@ try {
             "secondaryFinalSha256=$((Get-FileHash -LiteralPath $DiskPath -Algorithm SHA256).Hash)",
             "firstBootSerial=$([IO.Path]::GetFileName($firstSerial))",
             "rediscoverySerial=$([IO.Path]::GetFileName($rediscoverySerial))",
-            "result=PASS tier=2-full-lifecycle-and-restart-rediscovery",
+            "result=PASS tier=DM17-full-lifecycle-and-restart-rediscovery",
             "failedStage=none",
             "writesOccurred=yes",
-            "inspection=PASS read-only-GPT-FAT32-independent-verifier"
+            "inspection=PASS read-only-GPT-FAT32-independent-verifier",
+            "sharedWriteRegistration=$(if ($EnableNvmeCallbacks) { 'enabled-stage2' } else { 'disabled' })",
+            "sharedFlushRegistration=$(if ($EnableNvmeCallbacks) { 'enabled-stage3' } else { 'disabled' })"
         )
     }
-    Write-Host "DM16 $Stage proof passed. Preserved artifacts: $WorkFull"
+    $proofLabel = if ($Dm17Proof -or $EnableNvmeCallbacks) { "DM17" } else { "DM16" }
+    Write-Host "$proofLabel $Stage proof passed. Preserved artifacts: $WorkFull"
 } catch {
     $failureText = $_.Exception.Message -replace '[\r\n]+', ' '
     if ($activeBoot) {
-        try { Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath }
+        try { Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.QmpPort $activeBoot.SerialPath }
         catch { $failureText += " cleanup=$($_.Exception.Message -replace '[\r\n]+', ' ')" }
         $activeBoot = $null
     }

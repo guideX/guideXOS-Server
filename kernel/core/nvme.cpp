@@ -11,7 +11,7 @@
 #include "include/kernel/arch.h"
 #include "include/kernel/mmio.h"
 #include "include/kernel/pit.h"
-#if defined(GXOS_DM16_QEMU_NVME_PROOF)
+#if defined(GXOS_DM16_QEMU_NVME_PROOF) || defined(GXOS_DM17_SINGLE_BLOCK_PROOF)
 #include "include/kernel/serial_debug.h"
 #endif
 
@@ -118,6 +118,9 @@ static bool s_initialized;
 static uint64_t s_kernelPhysicalBase = 0x100000ULL;
 #if defined(GXOS_DM16_QEMU_NVME_PROOF)
 static uint8_t s_proofDmaTraceCount;
+#endif
+#if defined(GXOS_DM17_SINGLE_BLOCK_PROOF) || defined(GXOS_DM17_NVME_WRITE_TRACE)
+static uint16_t s_dm17TraceSequence;
 #endif
 
 static void memzero(void* destination, size_t length)
@@ -296,6 +299,98 @@ static void ring_completion_doorbell(const Controller& controller,
                  doorbell_offset(controller, queue.queueId, true), head);
 }
 
+#if defined(GXOS_DM17_SINGLE_BLOCK_PROOF) || defined(GXOS_DM17_NVME_WRITE_TRACE)
+static uint16_t trace_dm17_submission(const Controller& controller,
+                                     const QueuePair& queue,
+                                     const SubmissionEntry& command,
+                                     uint16_t slot, uint16_t newTail)
+{
+    if (s_dm17TraceSequence >= 512u) return 0u;
+    const uint16_t sequence = ++s_dm17TraceSequence;
+    const uint32_t dwords[16] = {
+        static_cast<uint32_t>(command.opcode) |
+            (static_cast<uint32_t>(command.flags) << 8) |
+            (static_cast<uint32_t>(command.commandId) << 16),
+        command.nsid,
+        static_cast<uint32_t>(command.reserved1),
+        static_cast<uint32_t>(command.reserved1 >> 32),
+        static_cast<uint32_t>(command.mptr),
+        static_cast<uint32_t>(command.mptr >> 32),
+        static_cast<uint32_t>(command.prp1),
+        static_cast<uint32_t>(command.prp1 >> 32),
+        static_cast<uint32_t>(command.prp2),
+        static_cast<uint32_t>(command.prp2 >> 32),
+        command.cdw10, command.cdw11, command.cdw12,
+        command.cdw13, command.cdw14, command.cdw15
+    };
+    const uint8_t* intended = reinterpret_cast<const uint8_t*>(&command);
+    const volatile uint8_t* submitted = reinterpret_cast<const volatile uint8_t*>(
+        &queue.submission[slot]);
+    bool sqMatches = true;
+    for (uint32_t i = 0; i < sizeof(command); ++i) {
+        if (submitted[i] != intended[i]) { sqMatches = false; break; }
+    }
+    const uint64_t lba = static_cast<uint64_t>(command.cdw10) |
+        (static_cast<uint64_t>(command.cdw11) << 32);
+    serial::puts("[DM17-NVME-SQ] seq="); serial::put_hex32(sequence);
+    serial::puts(" bdf="); serial::put_hex8(controller.pciBus); serial::putc(':');
+    serial::put_hex8(controller.pciDevice); serial::putc('.');
+    serial::put_hex8(controller.pciFunction);
+    serial::puts(" qid="); serial::put_hex32(queue.queueId);
+    serial::puts(" opcode="); serial::put_hex8(command.opcode);
+    serial::puts(" nsid="); serial::put_hex32(command.nsid);
+    serial::puts(" cid="); serial::put_hex32(command.commandId);
+    serial::puts(" slba="); serial::put_hex64(lba);
+    serial::puts(" nlb="); serial::put_hex32((command.cdw12 & 0xFFFFu) + 1u);
+    serial::puts(" cdw12="); serial::put_hex32(command.cdw12);
+    serial::puts(" prp1="); serial::put_hex64(command.prp1);
+    serial::puts(" prp2="); serial::put_hex64(command.prp2);
+    serial::puts(" sqVirtual="); serial::put_hex64(static_cast<uint64_t>(
+        reinterpret_cast<uintptr_t>(&queue.submission[slot])));
+    serial::puts(" sqPhysical=");
+    serial::put_hex64(virtual_to_physical(&queue.submission[slot]));
+    serial::puts(" slot="); serial::put_hex32(slot);
+    serial::puts(" tailBefore="); serial::put_hex32(slot);
+    serial::puts(" tailAfter="); serial::put_hex32(newTail);
+    serial::puts(" doorbellOffset=");
+    serial::put_hex32(doorbell_offset(controller, queue.queueId, false));
+    serial::puts(" doorbellValue="); serial::put_hex32(newTail);
+    serial::puts(" sqMatches="); serial::puts(sqMatches ? "yes" : "no");
+    serial::puts(" dwords=");
+    for (uint32_t i = 0; i < 16u; ++i) {
+        if (i != 0u) serial::putc(',');
+        serial::put_hex32(dwords[i]);
+    }
+    serial::putc('\n');
+    return sequence;
+}
+
+static void trace_dm17_completion(uint16_t sequence, uint16_t expectedCid,
+                                 uint16_t queueHeadBefore,
+                                 uint8_t phaseBefore,
+                                 const CompletionEntry& observed,
+                                 const logic::CompletionResult& completion,
+                                 const logic::QueueOwnership& ownership)
+{
+    if (sequence == 0u) return;
+    serial::puts("[DM17-NVME-CQ] seq="); serial::put_hex32(sequence);
+    serial::puts(" expectedCid="); serial::put_hex32(expectedCid);
+    serial::puts(" cid="); serial::put_hex32(observed.commandId);
+    serial::puts(" sqid="); serial::put_hex32(observed.sqId);
+    serial::puts(" sqhd="); serial::put_hex32(observed.sqHead);
+    serial::puts(" phase="); serial::put_hex32(observed.status & 1u);
+    serial::puts(" headBefore="); serial::put_hex32(queueHeadBefore);
+    serial::puts(" phaseBefore="); serial::put_hex32(phaseBefore);
+    serial::puts(" headAfter="); serial::put_hex32(ownership.completionHead);
+    serial::puts(" phaseAfter="); serial::put_hex32(ownership.completionPhase);
+    serial::puts(" rawStatus="); serial::put_hex32(observed.status);
+    serial::puts(" sct="); serial::put_hex32(completion.statusCodeType);
+    serial::puts(" sc="); serial::put_hex32(completion.statusCode);
+    serial::puts(" kind="); serial::put_hex32(completion.kind);
+    serial::putc('\n');
+}
+#endif
+
 static void set_diagnostic(Controller& controller, block::Status status,
                            uint8_t stage, uint8_t opcode, uint16_t queueId,
                            bool submitted, const logic::CompletionResult& result,
@@ -362,6 +457,9 @@ static CommandResult submit_and_wait(Controller& controller, QueuePair& queue,
                                      uint32_t timeoutTicks)
 {
     CommandResult result = {};
+#if defined(GXOS_DM17_SINGLE_BLOCK_PROOF) || defined(GXOS_DM17_NVME_WRITE_TRACE)
+    uint16_t traceSequence = 0u;
+#endif
     result.completion.kind = logic::COMPLETION_NOT_READY;
     if (!controller.online || queue.depth < 2u || queue.ownership.poisoned) {
         result.controllerFault = !controller.online || queue.ownership.poisoned;
@@ -386,6 +484,22 @@ static CommandResult submit_and_wait(Controller& controller, QueuePair& queue,
     command.commandId = commandId;
     memcopy(&queue.submission[slot], &command, sizeof(command));
     memory_barrier();
+#if defined(GXOS_DM17_SINGLE_BLOCK_PROOF) || defined(GXOS_DM17_NVME_WRITE_TRACE)
+    if (queue.queueId == 1u) {
+#if defined(GXOS_DM17_NVME_WRITE_TRACE) && !defined(GXOS_DM17_SINGLE_BLOCK_PROOF)
+        const uint64_t traceLba = static_cast<uint64_t>(command.cdw10) |
+            (static_cast<uint64_t>(command.cdw11) << 32);
+        if (command.opcode == 0x00u ||
+            ((command.opcode == 0x01u || command.opcode == 0x02u) &&
+             traceLba >= 0x7FEu && traceLba <= 0x810u))
+            traceSequence = trace_dm17_submission(controller, queue, command,
+                                                  slot, newTail);
+#else
+        traceSequence = trace_dm17_submission(controller, queue, command,
+                                              slot, newTail);
+#endif
+    }
+#endif
 #if defined(GXOS_DM16_NVME_PRIVATE_PROOF)
     if (queue.queueId == 1u && command.opcode == NVME_IO_WRITE &&
         s_proofDmaTraceCount == 4u) {
@@ -410,7 +524,7 @@ static CommandResult submit_and_wait(Controller& controller, QueuePair& queue,
     const uint64_t startTick = pit::ticks();
     uint64_t previousTick = startTick;
     bool clockAdvanced = false;
-    volatile CompletionEntry* cqe = nullptr;
+        volatile CompletionEntry* cqe = nullptr;
     for (uint32_t poll = 0; poll < kFallbackPollLimit; ++poll) {
         const uint32_t csts = nvme_read32(controller.bar0Virtual, NVME_CSTS);
         result.controllerStatus = csts;
@@ -435,6 +549,13 @@ static CommandResult submit_and_wait(Controller& controller, QueuePair& queue,
         observed.status = cqe->status;
         memory_barrier();
 
+#if defined(GXOS_DM17_SINGLE_BLOCK_PROOF) || defined(GXOS_DM17_NVME_WRITE_TRACE)
+        const uint16_t completionHeadBefore =
+            queue.ownership.completionHead;
+        const uint8_t completionPhaseBefore =
+            queue.ownership.completionPhase;
+#endif
+
         const logic::CompletionResult completion = logic::consume_completion(
             queue.ownership, observed, queue.queueId, queue.depth);
         if (completion.kind == logic::COMPLETION_NOT_READY) {
@@ -448,6 +569,11 @@ static CommandResult submit_and_wait(Controller& controller, QueuePair& queue,
         }
 
         result.completion = completion;
+#if defined(GXOS_DM17_SINGLE_BLOCK_PROOF) || defined(GXOS_DM17_NVME_WRITE_TRACE)
+        trace_dm17_completion(traceSequence, commandId,
+            completionHeadBefore, completionPhaseBefore, observed,
+            completion, queue.ownership);
+#endif
         if (completion.kind == logic::COMPLETION_CORRUPT) {
             logic::poison_queue(queue.ownership);
             controller.online = false;
@@ -783,6 +909,64 @@ static block::Status transfer(uint8_t driverIndex, uint64_t lba,
             serial::putc('\n');
         }
 #endif
+#if defined(GXOS_DM17_SINGLE_BLOCK_PROOF)
+        const void* callerBuffer = write
+            ? static_cast<const void*>(writeBytes)
+            : static_cast<const void*>(readBytes);
+        const uint64_t callerPhysical = virtual_to_physical(callerBuffer);
+        const void* physicalAlias = reinterpret_cast<const void*>(
+            static_cast<uintptr_t>(bouncePhysical));
+        const uint64_t physicalAliasTranslation =
+            virtual_to_physical(physicalAlias);
+        bool callerMatchesBounce = true;
+        if (write) {
+            for (uint32_t i = 0; i < byteCount; ++i) {
+                if (writeBytes[i] != controller.ioBounce[i]) {
+                    callerMatchesBounce = false;
+                    break;
+                }
+            }
+        }
+        bool physicalAliasMatchesBounce = physicalAliasTranslation ==
+            bouncePhysical;
+        if (physicalAliasMatchesBounce) {
+            const volatile uint8_t* alias = static_cast<
+                const volatile uint8_t*>(physicalAlias);
+            for (uint32_t i = 0; i < byteCount; ++i) {
+                if (alias[i] != controller.ioBounce[i]) {
+                    physicalAliasMatchesBounce = false;
+                    break;
+                }
+            }
+        }
+        serial::puts("[DM17-NVME-DMA] phase=");
+        serial::puts(write ? "write-before-doorbell" : "read-before-doorbell");
+        serial::puts(" bdf="); serial::put_hex8(controller.pciBus); serial::putc(':');
+        serial::put_hex8(controller.pciDevice); serial::putc('.');
+        serial::put_hex8(controller.pciFunction);
+        serial::puts(" nsid="); serial::put_hex32(device.nsid);
+        serial::puts(" slba="); serial::put_hex64(currentLba);
+        serial::puts(" blocks="); serial::put_hex32(chunk);
+        serial::puts(" bytes="); serial::put_hex32(byteCount);
+        serial::puts(" callerVirtual="); serial::put_hex64(static_cast<uint64_t>(
+            reinterpret_cast<uintptr_t>(callerBuffer)));
+        serial::puts(" callerPhysical="); serial::put_hex64(callerPhysical);
+        serial::puts(" bounceVirtual="); serial::put_hex64(static_cast<uint64_t>(
+            reinterpret_cast<uintptr_t>(controller.ioBounce)));
+        serial::puts(" bouncePhysical="); serial::put_hex64(bouncePhysical);
+        serial::puts(" prp1="); serial::put_hex64(command.prp1);
+        serial::puts(" prp2="); serial::put_hex64(command.prp2);
+        serial::puts(" callerBounceMatch=");
+        serial::puts(write ? (callerMatchesBounce ? "yes" : "no") : "not-applicable");
+        serial::puts(" physicalAliasTranslation=");
+        serial::put_hex64(physicalAliasTranslation);
+        serial::puts(" physicalAliasBounceMatch=");
+        serial::puts(physicalAliasMatchesBounce ? "yes" : "no");
+        serial::puts(" bouncePrefix=");
+        for (uint32_t i = 0; i < 16u; ++i)
+            serial::put_hex8(controller.ioBounce[i]);
+        serial::putc('\n');
+#endif
         const CommandResult commandResult = submit_and_wait(
             controller, controller.io, command, kCommandTimeoutTicks);
         logic::CompletionResult completion = commandResult.completion;
@@ -820,6 +1004,28 @@ static block::Status transfer(uint8_t driverIndex, uint64_t lba,
             }
 #endif
             memcopy(readBytes, controller.ioBounce, byteCount);
+#if defined(GXOS_DM17_SINGLE_BLOCK_PROOF)
+            bool callerMatchesBounceAfterCopy = true;
+            for (uint32_t i = 0; i < byteCount; ++i) {
+                if (readBytes[i] != controller.ioBounce[i]) {
+                    callerMatchesBounceAfterCopy = false;
+                    break;
+                }
+            }
+            serial::puts("[DM17-NVME-DMA] phase=read-after-bounce-copy slba=");
+            serial::put_hex64(currentLba);
+            serial::puts(" blocks="); serial::put_hex32(chunk);
+            serial::puts(" bytes="); serial::put_hex32(byteCount);
+            serial::puts(" callerVirtual="); serial::put_hex64(static_cast<uint64_t>(
+                reinterpret_cast<uintptr_t>(readBytes)));
+            serial::puts(" callerPhysical=");
+            serial::put_hex64(virtual_to_physical(readBytes));
+            serial::puts(" callerBounceMatch=");
+            serial::puts(callerMatchesBounceAfterCopy ? "yes" : "no");
+            serial::puts(" callerPrefix=");
+            for (uint32_t i = 0; i < 16u; ++i) serial::put_hex8(readBytes[i]);
+            serial::putc('\n');
+#endif
             readBytes += byteCount;
         }
 #if defined(GXOS_DM16_QEMU_NVME_PROOF)
@@ -977,15 +1183,17 @@ static bool register_namespace(uint8_t slot, Controller& controller,
     blockDevice.totalSectors = device.totalSectors;
     blockDevice.sectorSize = device.sectorSize;
     blockDevice.readFn = nvme_read_sectors;
-#if defined(GXOS_DM16_NVME_DURABILITY_PROVEN)
+#if defined(GXOS_DM16_NVME_WRITE_PROVEN)
     blockDevice.writeFn = nvme_write_sectors;
+#else
+    blockDevice.writeFn = nullptr;
+#endif
+#if defined(GXOS_DM16_NVME_FLUSH_PROVEN)
     blockDevice.flushFn = nvme_flush;
     blockDevice.flushSemanticsKnown = true;
 #else
-    // DM16 runtime validation found a real DMA data mismatch on QEMU NVMe.
-    // Keep production persistence and destructive eligibility disabled until
-    // the private write/Flush/read/restore gate is clean on the final transport.
-    blockDevice.writeFn = nullptr;
+    // The default production profile stays fail-closed. A proof-qualified
+    // profile may opt into WRITE and Flush separately after their gates pass.
     blockDevice.flushFn = nullptr;
     blockDevice.flushSemanticsKnown = false;
 #endif
@@ -1032,6 +1240,34 @@ static bool register_namespace(uint8_t slot, Controller& controller,
     controller.globalBlockIndex = globalIndex;
     controller.registrationId = registered.registrationId;
     controller.identifyNamespaceCount = ctrlIdentify.namespaceCount;
+#if defined(GXOS_DM17_SINGLE_BLOCK_PROOF)
+    serial::puts("[DM17-NVME-NS] bdf=");
+    serial::put_hex8(controller.pciBus); serial::putc(':');
+    serial::put_hex8(controller.pciDevice); serial::putc('.');
+    serial::put_hex8(controller.pciFunction);
+    serial::puts(" controllerNamespaceCount=");
+    serial::put_hex32(ctrlIdentify.namespaceCount);
+    serial::puts(" nsid="); serial::put_hex32(device.nsid);
+    serial::puts(" nsze="); serial::put_hex64(namespaceIdentify.nsze);
+    serial::puts(" ncap="); serial::put_hex64(namespaceIdentify.ncap);
+    serial::puts(" capacityBytes="); serial::put_hex64(capacityBytes);
+    serial::puts(" logicalBlockSize="); serial::put_hex32(sectorSize);
+    serial::puts(" mdts="); serial::put_hex32(device.mdts);
+    serial::puts(" blockIndex="); serial::put_hex32(globalIndex);
+    serial::puts(" registrationId="); serial::put_hex64(registered.registrationId);
+    serial::puts(" sharedWrite=");
+#if defined(GXOS_DM16_NVME_WRITE_PROVEN)
+    serial::puts("enabled");
+#else
+    serial::puts("disabled");
+#endif
+    serial::puts(" sharedFlush=");
+#if defined(GXOS_DM16_NVME_FLUSH_PROVEN)
+    serial::puts("enabled\n");
+#else
+    serial::puts("disabled\n");
+#endif
+#endif
     return true;
 }
 
