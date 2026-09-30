@@ -1,0 +1,94 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS46</title></head>
+<body>
+<h1>Navigator JavaScript JS46</h1>
+<form id="owner" class="form owner active">
+<div id="toolbar" class="toolbar active">
+  <label id="label" class="label required">Name</label>
+  <button id="save" class="action primary large" type="button">Save</button>
+  <div id="save" class="action duplicate-id"></div>
+  <button id="cancel" class="action secondary" type="button">Cancel</button>
+  <span id="marker" class="marker active"></span>
+  <button id="after-marker" class="action secondary" type="button">After</button>
+  <div id="group" class="group enabled">
+    <input id="name" class="field required" type="text" value="seed">
+    <div id="nested-panel" class="panel active">
+      <button id="nested-save" class="action primary" type="button">Nested</button>
+    </div>
+  </div>
+</div>
+</form>
+<button id="outside" class="action primary" type="button">Outside</button>
+<p id="js46-state">initial</p>
+<script>
+var js46Toolbar = document.querySelector("#toolbar");
+var js46Save = document.querySelector("#save");
+var js46Cancel = document.querySelector("#cancel");
+var js46Outside = document.querySelector("#outside");
+var js46State = document.querySelector("#js46-state");
+var js46Event = false;
+var js46NestedEvent = false;
+var js46Metadata = false;
+
+function js46Snapshot(label) {
+  var idMatches = document.querySelectorAll("#save.action");
+  var fullMatches = document.querySelectorAll("button#save.action.primary");
+  var classes = document.getElementsByClassName("action primary");
+  var scoped = js46Toolbar.querySelectorAll("#save.action");
+  var core = document.querySelector("#save.action") === js46Save &&
+    document.querySelector("#save.action.primary") === js46Save &&
+    document.querySelector("button#save.action.primary") === js46Save;
+  var duplicates = idMatches.length === 2 && idMatches[0] === js46Save &&
+    idMatches[1] === document.querySelector("div#save.action") &&
+    document.querySelector("#save.action") === idMatches[0] &&
+    fullMatches.length === 1 && fullMatches[0] === js46Save;
+  var identity = document.getElementById("save") === js46Save &&
+    classes[0] === js46Save && classes[0] === document.querySelector("#save.action.primary");
+  var relations = document.querySelector("#toolbar.active button#save.action.primary") === js46Save &&
+    document.querySelector("div#toolbar.toolbar.active > button#save.action.primary") === js46Save &&
+    document.querySelector("#label.required + button#save.action.primary") === js46Save &&
+    document.querySelector("#marker.active ~ button#after-marker.action.secondary") ===
+      document.querySelector("#after-marker") &&
+    js46Save.closest("#toolbar.active") === js46Toolbar && scoped.length === 2;
+  var semantics = js46Save.matches("button#save.action.primary") &&
+    js46Save.matches("BUTTON#save.primary.action") &&
+    !js46Cancel.matches("#save.action") &&
+    document.querySelector("form#owner.form.owner.active button#save.action") === js46Save;
+  js46State.textContent = label + ":core=" + core +
+    ":duplicates=" + duplicates + ":identity=" + identity +
+    ":relations=" + relations + ":semantics=" + semantics +
+    ":event=" + js46Event + ":nested=" + js46NestedEvent +
+    ":metadata=" + js46Metadata;
+}
+
+js46Outside.addEventListener("click", function(event) {
+  js46NestedEvent = event.target === js46Outside &&
+    event.target.matches("button#outside.action.primary") &&
+    event.target.closest("#toolbar.active") === null &&
+    event.currentTarget === js46Outside && event.relatedTarget === null &&
+    event.defaultPrevented === false;
+});
+js46Save.addEventListener("click", function(event) {
+  js46Outside.click();
+});
+js46Toolbar.addEventListener("click", function(event) {
+  if (event.target === js46Save) {
+    var targetBefore = event.target;
+    var currentBefore = event.currentTarget;
+    var phaseBefore = event.eventPhase;
+    var relatedBefore = event.relatedTarget;
+    js46Event = event.target.matches("button#save.action.primary") &&
+      event.target.closest("#toolbar.active > button#save.action.primary") === js46Save;
+    js46Metadata = event.target === targetBefore &&
+      event.currentTarget === currentBefore && currentBefore === js46Toolbar &&
+      event.eventPhase === phaseBefore && phaseBefore === 3 &&
+      event.relatedTarget === relatedBefore && relatedBefore === null &&
+      event.defaultPrevented === false;
+  }
+  js46Snapshot("event");
+});
+js46Snapshot("initial");
+</script>
+</body>
+</html>

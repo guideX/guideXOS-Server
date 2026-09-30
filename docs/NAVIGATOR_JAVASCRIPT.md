@@ -4589,7 +4589,8 @@ their retained descriptor on reads, remain read-only and generation-safe, and
 old individual results still make stale `matches()` return false and stale
 `closest()` return null.
 
-ID/class compounds such as `#id.foo` and `tag#id.foo` remain unsupported.
+At JS45, ID/class compounds such as `#id.foo` and `tag#id.foo` remained
+unsupported; JS46 below adds them.
 Universal-class compounds such as `*.foo` are also deferred because they add no
 matching condition beyond `.foo`. Selector lists, attributes, pseudo-classes,
 and longer combinator chains remain outside this bounded grammar. This does
@@ -4623,6 +4624,83 @@ restored to their clean preflight contents. `ESP/ramdisk.img` (64 MiB), all 89
 wallpaper-pack files (58,221,367 bytes), and all four PacMan package files
 (1,303,667 bytes) retain their pre-attempt hashes.
 
-Recommended JS46 direction: allow one existing ID condition alongside a
-bounded class-token list, such as `#save.action.primary` and
-`button#save.action.primary`, without expanding the one-relation limit.
+The JS46 direction from the JS45 summary is implemented in the section below.
+
+## JS46: bounded ID and class compound selectors
+
+JS46 adds `#id.class`, `#id.class.class`, `tag#id.class`, and
+`tag#id.class.class` to the same bounded simple-selector model. A present tag,
+the one exact ID, and every requested class token must match the same
+structural Element. Tag matching remains ASCII case-insensitive; ID and class
+matching remain exact and case-sensitive. Class token order does not matter,
+duplicate selector requirements are idempotent, and extra Element classes are
+allowed.
+
+The simple-selector descriptor now stores validity/universal metadata and
+orthogonal optional tag and ID ranges plus the fixed class-token count and
+ranges. `#id`, `.class`, `.foo.bar`, `tag`, `tag.foo.bar`, `tag#id`, and `*`
+continue to use this representation. The former selector-kind cases for ID,
+class, tag, tag-plus-class, and tag-plus-ID are removed. One shared matcher
+checks the optional tag, exact ID, and all class tokens; ID/class selectors do
+not use a separate matching path.
+
+The canonical parser order is optional tag, optional `#id`, then zero or more
+`.class` requirements. For example, `button#save.action.primary` is valid;
+`.action#save`, `button.action#save`, and `.action.primary#save` are not.
+Multiple IDs are rejected rather than partially accepted. Empty IDs/classes,
+repeated dots, and other malformed compounds fail closed. Universal forms such
+as `*#save`, `*.action`, and `*#save.action` remain deferred.
+
+At most eight raw class requirements are accepted per simple selector, counted
+before duplicate normalization. The selector input limit remains 256 bytes.
+Class matching remains exact token matching over ASCII whitespace-separated
+Element classes, with no substring behavior.
+
+`querySelector()` returns the first structural match. `querySelectorAll()`
+checks every structural candidate in order, including malformed markup with
+duplicate IDs, and returns every match. `matches()` and `closest()` use the
+same matcher. The richer simple selectors also work on either side of the
+existing one-relation descendant, child, adjacent-sibling, and general-sibling
+forms. Arbitrary relation chains remain unsupported.
+
+Matching preserves canonical Element identity with `getElementById()` and
+multi-token `getElementsByClassName()` results. An ID-plus-class query is a
+subset of the corresponding all-class-token retrieval results. Collections
+retain copied bounded tag/ID/class ranges, relation, scope, and generation
+state; they do not retain parser-buffer pointers. They remain read-only and
+generation-safe. Stale collections fail closed, stale individual
+`matches()` returns false, and stale `closest()` returns null.
+
+JS46 does not implement reordered ID/class compounds, Universal compounds,
+selector lists, attributes, pseudo-classes, pseudo-elements, or arbitrary CSS
+compound-selector completeness. The native focused suite is
+`tests/navigator_javascript_js46_test.cpp`, built by
+`scripts/smoke-navigator-javascript-js46.ps1`. The hosted fixture is
+`navigator-smoke/javascript-js46.html`; its checks are part of the production
+hosted aggregate in `server.cpp`.
+
+The JS46 focused suite passes **220/220 checks**. The warning-as-error strict
+bare-metal adapter/runtime syntax lane passes. The full JavaScript matrix passes
+**44/44 lanes**: lexer, parser, runtime, and JS6–JS46. Focused JS36–JS45
+regressions pass **99/99, 180/180, 152/152, 218/218, 155/155, 220/220,
+235/235, 277/277, 183/183, and 184/184** checks respectively.
+
+The production hosted aggregate reports **534 passed / 7 failed** out of 541
+checks. All four JS46 hosted checks pass. The seven failures are the established
+CSS checks: 3C, 3G, 6A, three 6B checks, and 6C. `build.bat` passes.
+
+`build-kernel.bat` still stops at PacMan linking with unresolved
+`pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)`. It regenerated the tracked
+`game.o`, `main.o`, and `renderer.o` PacMan build objects; those three files
+were restored to the clean preflight HEAD contents. The independent direct
+kernel command `mingw32-make ARCH=amd64 EXTRA_CFLAGS=` still fails at
+`mbedtls_check_config.h:51` and `:64`. No PacMan or Mbed TLS sources were
+changed, and no fresh kernel was produced, so QEMU proof is not claimed.
+`ESP/ramdisk.img`, all 89 `out/wallpaper-pack/` files, and all four
+`out/wallpaper-pack/Apps/PacMan/` files retain their pre-attempt hashes.
+
+Recommended JS47 direction: retain the bounded simple-selector representation
+and consider only a narrowly specified selector-list feature if the existing
+host and collection limits can support it without weakening fail-closed
+parsing or generation-safe identity.

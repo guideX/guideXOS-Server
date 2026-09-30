@@ -96,16 +96,6 @@ struct NavigatorScriptHostLimits {
         kNavigatorScriptMaxSelectorCollections;
 };
 
-enum class NavigatorScriptSelectorKind : std::uint8_t {
-    Invalid = 0u,
-    Id,
-    Class,
-    Tag,
-    TagClass,
-    TagId,
-    Universal,
-};
-
 enum class NavigatorScriptSelectorRelation : std::uint8_t {
     None = 0u,
     Descendant,
@@ -115,7 +105,8 @@ enum class NavigatorScriptSelectorRelation : std::uint8_t {
 };
 
 struct NavigatorScriptSimpleSelectorDescriptor {
-    NavigatorScriptSelectorKind kind = NavigatorScriptSelectorKind::Invalid;
+    bool valid = false;
+    bool universal = false;
     std::uint16_t tagOffset = 0;
     std::uint16_t tagLength = 0;
     std::uint16_t idOffset = 0;

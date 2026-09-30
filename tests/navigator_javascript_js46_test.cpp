@@ -24,6 +24,7 @@ const char* kFixture = R"HTML(
   <div id="panel" class="panel active">
     <label id="label" class="label required"></label>
     <button id="save" class="action primary large" type="button">Save</button>
+    <div id="save" class="action duplicate-id"></div>
     <button id="cancel" class="action secondary" type="button">Cancel</button>
     <span id="marker" class="marker active"></span>
     <button id="after-marker" class="action secondary" type="button">After</button>
@@ -41,6 +42,7 @@ const char* kFixture = R"HTML(
     <div id="rel-foo" class="foo"><span id="rel-bar" class="bar"></span></div>
     <span id="eight"></span>
     <span id="nine"></span>
+    <span id="i"></span>
     <span id="long255"></span>
     <span id="long256"></span>
   </div>
@@ -87,7 +89,7 @@ void expectError(const ScriptResult& result, RuntimeErrorCode expected,
 void loadFixture(NavigatorScriptExecutionHarness& harness,
     RuntimeErrorCode& error)
 {
-    expect(harness.loadHtml("file:///js45.html", kFixture, error),
+    expect(harness.loadHtml("file:///js46.html", kFixture, error),
         "fixture: loads");
     expect(error == RuntimeErrorCode::None, "fixture: no load error");
     expect(harness.relayout(), "fixture: relayout");
@@ -122,19 +124,30 @@ void testParsingMatchingAndRetrievalEquivalence()
     const std::string nineTokens = "a b c d e f g h i";
     const std::string long255(255u, 'x');
     const std::string long256(256u, 'y');
+    const std::string maxIdClassSelector = "#i." + std::string(253u, 'z');
+    const std::string oversizedIdClassSelector = "#i." +
+        std::string(254u, 'z');
     auto* eight = elementById(harness, "eight");
     auto* nine = elementById(harness, "nine");
     auto* maxToken = elementById(harness, "long255");
     auto* oversizedToken = elementById(harness, "long256");
+    auto* idByteBoundary = elementById(harness, "i");
     expect(eight != nullptr && nine != nullptr && maxToken != nullptr &&
-            oversizedToken != nullptr, "bounds: fixture Elements exist");
+            oversizedToken != nullptr && idByteBoundary != nullptr,
+        "bounds: fixture Elements exist");
     if (eight != nullptr) eight->className = eightTokens;
     if (nine != nullptr) nine->className = nineTokens;
     if (maxToken != nullptr) maxToken->className = long255;
     if (oversizedToken != nullptr) oversizedToken->className = long256;
+    if (idByteBoundary != nullptr)
+        idByteBoundary->className = std::string(253u, 'z');
 
     const std::string eightSelector = ".a.b.c.d.e.f.g.h";
     const std::string nineSelector = ".a.b.c.d.e.f.g.h.i";
+    const std::string idEightSelector = "#eight.a.b.c.d.e.f.g.h";
+    const std::string idNineSelector = "#eight.a.b.c.d.e.f.g.h.i";
+    const std::string idRepeatedOverBound =
+        "#eight.a.a.a.a.a.a.a.a.a";
     const std::string repeatedOverBound =
         ".foo.foo.foo.foo.foo.foo.foo.foo.foo";
     const std::string maxSelector = "." + long255;
@@ -149,6 +162,10 @@ void testParsingMatchingAndRetrievalEquivalence()
         "var firstCompound = document.querySelector(\".action.primary\");"
         "var firstTagCompound = document.querySelector(\"button.action.primary\");"
         "var allCompound = document.querySelectorAll(\".action.primary\");"
+        "var firstIdClass = document.querySelector(\"#save.action\");"
+        "var duplicateIdClass = document.querySelectorAll(\"#save.action\");"
+        "var firstFullCompound = document.querySelector(\"button#save.action.primary\");"
+        "var allFullCompound = document.querySelectorAll(\"button#save.action.primary\");"
         "var reversed = document.querySelectorAll(\".primary.action\");"
         "var retrieval = document.getElementsByClassName(\"action primary\");"
         "var duplicateRetrieval = document.getElementsByClassName(\"action action primary\");"
@@ -156,15 +173,24 @@ void testParsingMatchingAndRetrievalEquivalence()
         "var duplicateFooBars = document.querySelectorAll(\".foo.foo.bar\");"
         "var fooRetrieval = document.getElementsByClassName(\"foo foo bar\");"
         "var panelSelectors = panel.querySelectorAll(\".action.primary\");"
+        "var panelIdSelectors = panel.querySelectorAll(\"#save.action\");"
         "var panelTagSelectors = panel.querySelectorAll(\"button.action.primary\");"
         "var panelRetrieval = panel.getElementsByClassName(\"action primary\");"
         "var eight = document.querySelector(\"" + eightSelector + "\");"
         "var nine = document.querySelector(\"" + nineSelector + "\");"
+        "var idEight = document.querySelector(\"" + idEightSelector + "\");"
+        "var idNine = document.querySelector(\"" + idNineSelector + "\");"
+        "var idRepeatedOverBound = document.querySelector(\"" +
+            idRepeatedOverBound + "\");"
         "var repeatedOverBound = document.querySelector(\"" +
             repeatedOverBound + "\");"
         "var maxSelector = document.querySelector(\"" + maxSelector + "\");"
         "var oversizedSelector = document.querySelector(\"" +
             oversizedSelector + "\");"
+        "var maxIdClassSelector = document.querySelector(\"" +
+            maxIdClassSelector + "\");"
+        "var oversizedIdClassSelector = document.querySelector(\"" +
+            oversizedIdClassSelector + "\");"
         R"JS(
 var positives = save.matches(".action.primary") &&
     save.matches(".primary.action") && save.matches(".action.primary.large") &&
@@ -190,6 +216,11 @@ var scopedEquivalence = panelSelectors.length === 2 &&
     panelSelectors === panelRetrieval && panelSelectors[2] === undefined;
 var scopedTagQuery = panelTagSelectors.length === 2 &&
     panelTagSelectors[0] === save && panelTagSelectors[1] === nestedSave;
+var scopedIdQuery = panelIdSelectors.length === 2 &&
+    panelIdSelectors[0] === save &&
+    panelIdSelectors[1] === document.querySelector("div#save.action") &&
+    panel.querySelector("#panel.active") === null &&
+    panel.querySelector("#outside.action.primary") === null;
 var duplicateEquivalence = fooBars.length === 2 && fooBars[0] === foo &&
     fooBars[1] === superset && fooBars === duplicateFooBars &&
     fooBars === fooRetrieval && foo.matches(".foo.bar") &&
@@ -206,11 +237,43 @@ var idCompatibility = document.querySelector("#save.action") === save &&
 var universalClassDeferred = document.querySelector("*.foo") === null &&
     document.querySelector("*.foo.bar") === null &&
     document.querySelectorAll("*.foo").length === 0 &&
-    !foo.matches("*.foo");
+    !foo.matches("*.foo") && document.querySelector("*#save") === null &&
+    document.querySelector("*#save.action") === null;
 var eightBound = eight === document.querySelector("#eight") &&
-    nine === null && repeatedOverBound === null;
+    nine === null && repeatedOverBound === null &&
+    idRepeatedOverBound === null;
 var selectorByteBound = maxSelector === document.querySelector("#long255") &&
-    oversizedSelector === null;
+    oversizedSelector === null &&
+    maxIdClassSelector === document.querySelector("#i") &&
+    oversizedIdClassSelector === null;
+var idClassCore = firstIdClass === save && firstFullCompound === save &&
+    allFullCompound.length === 1 && allFullCompound[0] === save &&
+    duplicateIdClass.length === 2 && duplicateIdClass[0] === save &&
+    duplicateIdClass[1] === document.querySelector("div#save.action");
+var idEightBound = idEight === document.querySelector("#eight") &&
+    idNine === null;
+var exactIdClassSemantics = save.matches("#save.action") &&
+    save.matches("#save.primary") && save.matches("#save.action.primary") &&
+    save.matches("#save.primary.action") &&
+    save.matches("#save.action.action.primary") &&
+    save.matches("button#save.action.primary") &&
+    save.matches("BUTTON#save.action.primary") &&
+    !save.matches("#other.action") && !save.matches("#save.missing") &&
+    !save.matches("div#save.action.primary") &&
+    !save.matches("#save.Primary") && !save.matches("#SAVE.action");
+var duplicateIdOrder = document.querySelector("#save.action") === save &&
+    document.querySelectorAll("#save.action").length === 2 &&
+    document.querySelectorAll("div#save.action").length === 1 &&
+    document.querySelectorAll("#save.action")[1].matches("div#save.action");
+var canonicalIdAndClassIdentity = document.getElementById("save") === save &&
+    document.getElementsByClassName("action primary")[0] === save &&
+    document.querySelector("#save.action.primary") === save &&
+    document.querySelector("button#save.action.primary") === save;
+var classRetrievalSubset = document.querySelectorAll("#save.action.primary");
+var classRetrievalCandidates = document.getElementsByClassName("action primary");
+var subsetRelationship = classRetrievalSubset.length <= classRetrievalCandidates.length &&
+    classRetrievalSubset.length === 1 && classRetrievalSubset[0] === save &&
+    classRetrievalCandidates[0] === classRetrievalSubset[0];
 var retrievalApiUnchanged = document.getElementsByClassName("foo bar").length === 2 &&
     document.getElementsByTagName("*") === document.querySelectorAll("*");
 )JS");
@@ -227,6 +290,8 @@ var retrievalApiUnchanged = document.getElementsByClassName("foo bar").length ==
         "scoped selector and retrieval exclude receiver/outside Elements");
     expectBoolean(harness, "scopedTagQuery", true,
         "Element-scoped tag-plus-class selectors retain subtree scope");
+    expectBoolean(harness, "scopedIdQuery", true,
+        "scoped ID/class selectors preserve subtree bounds and receiver exclusion");
     expectBoolean(harness, "duplicateEquivalence", true,
         "duplicate selector/retrieval requirements normalize idempotently");
     expectBoolean(harness, "subsetInvariants", true,
@@ -237,8 +302,20 @@ var retrievalApiUnchanged = document.getElementsByClassName("foo bar").length ==
         "universal-class compounds remain deferred");
     expectBoolean(harness, "eightBound", true,
         "eight distinct tokens accepted; ninth and ninth duplicate rejected");
+    expectBoolean(harness, "idEightBound", true,
+        "ID plus eight raw class requirements is accepted and the ninth is rejected");
     expectBoolean(harness, "selectorByteBound", true,
-        "256-byte selector accepted; selector above 256 bytes rejected");
+        "256-byte ID/class selector accepted; selector above 256 bytes rejected");
+    expectBoolean(harness, "idClassCore", true,
+        "querySelector and querySelectorAll find ID/class/full compounds in order");
+    expectBoolean(harness, "exactIdClassSemantics", true,
+        "tag, exact ID, and every exact class use AND semantics and case rules");
+    expectBoolean(harness, "duplicateIdOrder", true,
+        "duplicate IDs match every structural candidate in document order");
+    expectBoolean(harness, "canonicalIdAndClassIdentity", true,
+        "ID and multi-token class retrieval preserve canonical Element identity");
+    expectBoolean(harness, "subsetRelationship", true,
+        "ID/class results form a canonical-identity subset of multi-token class retrieval");
     expectBoolean(harness, "retrievalApiUnchanged", true,
         "JS44 retrieval remains independent and wildcard behavior is unchanged");
     expect(harness.hostAdapter().limits().maxSelectorCollections ==
@@ -253,14 +330,29 @@ var retrievalApiUnchanged = document.getElementsByClassName("foo bar").length ==
         " document.querySelector(\"tag.\") === null &&"
         " document.querySelector(\"tag..foo\") === null &&"
         " document.querySelector(\"tag.foo.\") === null &&"
+        " document.querySelector(\"#\") === null &&"
+        " document.querySelector(\"#.\") === null &&"
+        " document.querySelector(\"#save.\") === null &&"
+        " document.querySelector(\"#save..action\") === null &&"
+        " document.querySelector(\"button#\") === null &&"
+        " document.querySelector(\"button#save.\") === null &&"
+        " document.querySelector(\"button##save\") === null &&"
+        " document.querySelector(\"button#save..action\") === null &&"
+        " document.querySelector(\"#one#two\") === null &&"
+        " document.querySelector(\"button#one#two\") === null &&"
+        " document.querySelector(\"#one.foo#two\") === null &&"
+        " document.querySelector(\".action#save\") === null &&"
+        " document.querySelector(\".action.primary#save\") === null &&"
+        " document.querySelector(\"button.action#save\") === null &&"
         " document.querySelector(\".foo .bar\") === document.querySelector(\"#rel-bar\") &&"
         " document.querySelector(\".foo.bar\") !== document.querySelector(\"#rel-bar\");"
         "var malformedAll = document.querySelectorAll(\".\").length === 0 &&"
-        " document.querySelectorAll(\".foo..bar\").length === 0;";
+        " document.querySelectorAll(\".foo..bar\").length === 0 &&"
+        " document.querySelectorAll(\"#one#two\").length === 0;";
     const ScriptResult malformedResult = harness.execute(malformed);
     expect(malformedResult.succeeded(), "parse/malformed: script");
     expectBoolean(harness, "malformed", true,
-        "empty class segments reject; whitespace keeps descendant relation distinct");
+        "malformed IDs/classes, duplicate IDs, and reordered forms reject; descendant stays distinct");
     expectBoolean(harness, "malformedAll", true,
         "malformed plural selectors fail closed as empty collections");
 }
@@ -277,6 +369,10 @@ var nestedSave = document.querySelector("#nested-save");
 var descendantLeft = document.querySelector(".panel.active button.action.primary") === save &&
     document.querySelector(".group.enabled input.field.required") ===
         document.querySelector("#field");
+var descendantIdClass =
+    document.querySelector("#panel.active button#save.action.primary") === save &&
+    document.querySelector("form#owner.form.owner.active input#field.field.required") ===
+        document.querySelector("#field");
 var descendantRight = document.querySelector("div button.action.primary") === save &&
     document.querySelectorAll("div input.field.required").length === 2;
 var bothSides = document.querySelector(".panel.active > button.action.primary") === save &&
@@ -284,29 +380,52 @@ var bothSides = document.querySelector(".panel.active > button.action.primary") 
 var childRightTag = document.querySelector("form > div.panel.active") === panel;
 var childRightClasses =
     document.querySelectorAll(".group.enabled > input.field.required").length === 2;
+var childIdClass =
+    document.querySelector("form#owner.form.owner.active > div#panel.panel.active") === panel &&
+    document.querySelector("div#panel.panel.active > button#save.action.primary") === save;
 var childRight = childRightTag && childRightClasses;
 var adjacent = document.querySelector(".label.required + button.action.primary") === save &&
     save.matches(".label.required + button.action.primary");
+var adjacentIdClass =
+    document.querySelector("#label.required + button#save.action.primary") === save &&
+    save.matches("#label.required + button#save.primary.action");
 var generalSibling = document.querySelector(".marker.active ~ button.action") ===
     document.querySelector("#after-marker") &&
     document.querySelectorAll(".marker.active ~ button.action").length === 1;
+var generalSiblingIdClass = document.querySelector(
+    "#marker.active ~ button#after-marker.action.secondary") ===
+        document.querySelector("#after-marker");
 var matchesAndClosest = save.matches("button.action.primary") &&
+    save.matches("button#save.action.primary") &&
+    save.closest("button#save.action.primary") === save &&
     save.closest(".panel.active") === panel &&
     nestedSave.closest(".panel.active") === document.querySelector("#nested-panel") &&
+    nestedSave.closest("div#nested-panel.panel.active") ===
+        document.querySelector("#nested-panel") &&
+    nestedSave.closest("#panel.active") === panel &&
     nestedSave.closest("div.panel.active > button.action.primary") === nestedSave &&
     nestedSave.closest(".missing.active") === null;
 var chainRejected = document.querySelector(".panel.active > div.group > input.field") === null &&
     document.querySelectorAll(".panel.active > div.group > input.field").length === 0 &&
-    !save.matches(".panel.active > div.group > button.action");
+    !save.matches(".panel.active > div.group > button.action") &&
+    document.querySelector("form#owner.form.owner.active > div#group.group.enabled > input#field.field") === null;
 var first = document.querySelectorAll(".action.primary");
 var second = document.querySelectorAll(".field.required");
 var relational = document.querySelectorAll(".panel.active > button.action.primary");
 var relationalOther = document.querySelectorAll(".group.enabled input.field.required");
+var idA = document.querySelectorAll("#save.action.primary");
+var idB = document.querySelectorAll("#cancel.action.secondary");
+var idRelA = document.querySelectorAll("#panel.active > button#save.action.primary");
+var idRelB = document.querySelectorAll("#group.enabled input#field.field.required");
 var independentDescriptors = first !== second && first !== relational &&
     second !== relationalOther && first.length === 3 && second.length === 2 &&
     relational.length === 2 && relationalOther.length === 2 &&
     first[0] === save && second[0] === document.querySelector("#field") &&
-    relational[0] === save && relationalOther[0] === document.querySelector("#field");
+    relational[0] === save && relationalOther[0] === document.querySelector("#field") &&
+    idA.length === 1 && idA[0] === save && idB.length === 1 &&
+    idB[0] === document.querySelector("#cancel") && idRelA.length === 1 &&
+    idRelA[0] === save && idRelB.length === 1 &&
+    idRelB[0] === document.querySelector("#field");
 var indexedMiss = first[999] === undefined && first.item === undefined &&
     first.namedItem === undefined;
 )JS");
@@ -315,6 +434,8 @@ var indexedMiss = first[999] === undefined && first.item === undefined &&
         "descendant relation accepts compound left and right descriptors");
     expectBoolean(harness, "descendantRight", true,
         "descendant compound queries retain structural document order");
+    expectBoolean(harness, "descendantIdClass", true,
+        "descendant relation accepts ID/class compounds on either side");
     expectBoolean(harness, "bothSides", true,
         "both sides of one relation may carry compound class requirements");
     expectBoolean(harness, "childRight", true,
@@ -323,10 +444,16 @@ var indexedMiss = first[999] === undefined && first.item === undefined &&
         "tag compound child relation uses immediate structural parent");
     expectBoolean(harness, "childRightClasses", true,
         "class compound child relation uses immediate structural parent");
+    expectBoolean(harness, "childIdClass", true,
+        "child relation applies rich left and right descriptors to immediate parents");
     expectBoolean(harness, "adjacent", true,
         "adjacent sibling accepts compounds and keeps sibling direction");
+    expectBoolean(harness, "adjacentIdClass", true,
+        "adjacent sibling matches ID/class compounds on the shared matcher");
     expectBoolean(harness, "generalSibling", true,
         "general sibling accepts compounds with existing backward search");
+    expectBoolean(harness, "generalSiblingIdClass", true,
+        "general sibling matches the richer right-side ID/class compound");
     expectBoolean(harness, "matchesAndClosest", true,
         "matches and closest use the same full compound matcher");
     expectBoolean(harness, "chainRejected", true,
@@ -384,20 +511,20 @@ void testStaleGenerationAndPurity()
     const std::uint64_t fieldSerial = serialById(harness, "field");
     const ScriptResult capture = harness.execute(R"JS(
 var panel = document.querySelector("#panel");
-var oldCompoundCollection = document.querySelectorAll(".action.primary");
-var oldScopedCollection = panel.querySelectorAll("button.action.primary");
+var oldCompoundCollection = document.querySelectorAll("#save.action.primary");
+var oldScopedCollection = panel.querySelectorAll("button#save.action.primary");
 var oldResult = oldCompoundCollection[0];
-var oldField = document.querySelector("#field");
+var oldField = document.querySelector("#field.field.required");
 )JS");
     expect(capture.succeeded(), "stale: capture compound descriptors and Elements");
     expect(harness.invalidateDocumentGeneration(error),
         "stale: invalidate document generation");
     expect(error == RuntimeErrorCode::None, "stale: invalidation no error");
     const ScriptResult stale = harness.execute(R"JS(
-var stalePredicates = oldResult.matches(".action.primary") === false &&
-    oldResult.closest(".panel.active") === null &&
-    oldField.matches(".field.required") === false &&
-    oldField.closest(".group.enabled") === null;
+var stalePredicates = oldResult.matches("#save.action.primary") === false &&
+    oldResult.closest("#panel.active") === null &&
+    oldField.matches("#field.field.required") === false &&
+    oldField.closest("#group.group.enabled") === null;
 )JS");
     expect(stale.succeeded(), "stale: compound predicates fail closed");
     expectBoolean(harness, "stalePredicates", true,
@@ -416,7 +543,7 @@ var stalePredicates = oldResult.matches(".action.primary") === false &&
         "stale: individual scoped candidate rejects old generation");
 
     harness.document() = gxos::web::parseHtml(
-        "file:///js45-replacement.html", kFixture);
+        "file:///js46-replacement.html", kFixture);
     expect(oldSave == serialById(harness, "save") &&
             fieldSerial == serialById(harness, "field"),
         "stale: replacement fixture deliberately reuses serials");
@@ -429,9 +556,9 @@ var stalePredicates = oldResult.matches(".action.primary") === false &&
             gxos::javascript::kNavigatorElementHostKind, error),
         "stale: install replacement generation scope");
     const ScriptResult replacement = harness.execute(R"JS(
-var freshWorks = newSave.matches("button.action.primary") &&
-    newSave.closest(".panel.active") === newPanel &&
-    newPanel.querySelectorAll(".action.primary")[0] === newSave;
+var freshWorks = newSave.matches("button#save.action.primary") &&
+    newSave.closest("div#panel.panel.active") === newPanel &&
+    newPanel.querySelectorAll("button#save.action.primary")[0] === newSave;
 )JS");
     if (!replacement.succeeded())
         std::cerr << "  stale replacement runtime error=" << static_cast<int>(
@@ -450,6 +577,12 @@ void testEventDelegationNestedDispatchAndPurity()
     loadFixture(harness, error);
     const std::uint64_t saveSerial = serialById(harness, "save");
     const std::uint64_t fieldSerial = serialById(harness, "field");
+    const gxos::web::HtmlElementRef* saveElement =
+        elementById(harness, "save");
+    const std::string saveIdBefore = saveElement == nullptr
+        ? std::string() : saveElement->id;
+    const std::string saveClassesBefore = saveElement == nullptr
+        ? std::string() : saveElement->className;
     const ScriptResult setup = harness.execute(R"JS(
 var panel = document.querySelector("#panel");
 var form = document.querySelector("#owner");
@@ -471,8 +604,8 @@ save.addEventListener("click", function(event) {
 });
 outside.addEventListener("click", function(event) {
   nestedDispatch = event.target === outside &&
-    event.target.matches("button.action.primary") &&
-    event.target.closest(".panel.active") === null &&
+    event.target.matches("button#outside.action.primary") &&
+    event.target.closest("#panel.active") === null &&
     event.currentTarget === outside && event.eventPhase === 2 &&
     event.relatedTarget === null && event.defaultPrevented === false;
 });
@@ -482,8 +615,8 @@ panel.addEventListener("click", function(event) {
     var currentBefore = event.currentTarget;
     var phaseBefore = event.eventPhase;
     var relatedBefore = event.relatedTarget;
-    delegated = event.target.matches("button.action.primary") &&
-      event.target.closest(".panel.active > button.action.primary") === save;
+    delegated = event.target.matches("button#save.action.primary") &&
+      event.target.closest("#panel.active > button#save.action.primary") === save;
     metadataPreserved = event.target === targetBefore &&
       event.currentTarget === currentBefore && currentBefore === panel &&
       event.eventPhase === phaseBefore && phaseBefore === 3 &&
@@ -492,14 +625,14 @@ panel.addEventListener("click", function(event) {
   }
 });
 form.addEventListener("submit", function(event) {
-  submitCompound = event.target.matches("form.form.owner.active") &&
-    event.target.closest(".owner.active") === form &&
+  submitCompound = event.target.matches("form#owner.form.owner.active") &&
+    event.target.closest("form#owner.form.owner.active") === form &&
     event.defaultPrevented === false;
   event.preventDefault();
 });
 form.addEventListener("reset", function(event) {
-  resetCompound = event.target.matches("form.form.owner.active") &&
-    event.target.closest("form.owner.active") === form &&
+  resetCompound = event.target.matches("form#owner.form.owner.active") &&
+    event.target.closest("form#owner.form.owner.active") === form &&
     event.defaultPrevented === false;
 });
 )JS");
@@ -507,6 +640,12 @@ form.addEventListener("reset", function(event) {
     expect(harness.hostAdapter().clickListenerCount() <= 64u,
         "events: listener registry stays within its 64-listener cap");
 
+    const ScriptResult focusResult = harness.execute(
+        "document.querySelector(\"#field.field.required\").focus();");
+    expect(focusResult.succeeded(),
+        "focus: selected ID/class Element retains normal focus behavior");
+    expect(harness.focusedElementSerial() == fieldSerial,
+        "focus: selected Element becomes the canonical activeElement");
     expect(harness.focusElement(fieldSerial, error),
         "purity: establish focus before dispatch");
     expect(error == RuntimeErrorCode::None, "purity: focus setup no error");
@@ -534,7 +673,7 @@ form.addEventListener("reset", function(event) {
         "purity: event listener registry remains bounded and unchanged");
     const ScriptResult state = harness.execute(R"JS(
 var focusUnchanged = document.activeElement === field &&
-    document.activeElement.matches(".field.required");
+    document.activeElement.matches("#field.field.required");
 var valuesUnchanged = field.value === "field-seed" &&
     field.defaultValue === "field-seed" &&
     document.querySelector("#deep-field").value === "deep-seed";
@@ -552,6 +691,9 @@ var valuesUnchanged = field.value === "field-seed" &&
         "purity: script mutation count unchanged");
     expect(harness.document().structuralElements.size() == structuralCountBefore,
         "purity: structural tree size unchanged");
+    expect(saveElement != nullptr && saveElement->id == saveIdBefore &&
+            saveElement->className == saveClassesBefore,
+        "purity: matching leaves ID and class attributes unchanged");
     expect(harness.runtime().hostGeneration() == generationBefore,
         "purity: generation unchanged");
     expect(harness.focusedElementSerial() == fieldSerial,
@@ -586,11 +728,11 @@ int main()
     testStaleGenerationAndPurity();
     testEventDelegationNestedDispatchAndPurity();
     if (failures != 0) {
-        std::cerr << failures << " JS45 test failure(s) across " << checks
+        std::cerr << failures << " JS46 test failure(s) across " << checks
             << " checks\n";
         return 1;
     }
-    std::cout << "Navigator JavaScript JS45 checks: " << (checks - failures)
+    std::cout << "Navigator JavaScript JS46 checks: " << (checks - failures)
         << "/" << checks << " passed\n";
     return 0;
 }

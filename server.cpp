@@ -4049,6 +4049,44 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "descendant, child, adjacent, sibling, authentic nested click, and Event metadata use the shared matcher");
 
+    const std::string js46FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js46.html";
+    const bool js46Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js46FixtureUrl);
+    const std::string js46InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS46 hosted fixture loads ID/class compound selectors",
+        js46Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js46FixtureUrl &&
+        contains(js46InitialText, "Navigator JavaScript JS46") &&
+        contains(js46InitialText,
+            "initial:core=true:duplicates=true:identity=true:relations=true:semantics=true:event=false:nested=false:metadata=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js46Loaded) + ",text=" +
+        summarizeText(js46InitialText, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js46SaveClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("save");
+    const std::string js46AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS46 hosted authentic click delegates through rich matches/closest",
+        js46SaveClick && contains(js46AfterClick,
+            "event:core=true:duplicates=true:identity=true:relations=true:semantics=true:event=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js46SaveClick) + ",text=" +
+        summarizeText(js46AfterClick, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS46 hosted identity and duplicate-ID structural order are preserved",
+        js46SaveClick && contains(js46AfterClick,
+            ":core=true:duplicates=true:identity=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "querySelector returns the first candidate, querySelectorAll retains all duplicate-ID matches, and retrieval APIs share canonical identity");
+    add("JS46 hosted relational compounds and nested Event metadata pass",
+        js46SaveClick && contains(js46AfterClick,
+            ":relations=true:semantics=true:event=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "descendant, child, adjacent, general sibling, authentic nested click, and Event metadata use the shared matcher");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();
