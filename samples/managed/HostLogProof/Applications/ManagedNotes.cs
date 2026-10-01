@@ -664,7 +664,11 @@ public sealed partial class ManagedNotes : GuideXosApplication
     private const uint C135DisableMenuKey = 0xA02u;
     private const uint C135EnableMenuKey = 0xA03u;
     private readonly GuideXosPopupMenu _c135Menu =
+#if HOSTLOGPROOF_C154_MANAGED_CLIPBOARD
+        new(340, 40, 176, 12, 32);
+#else
         new(400, 280, 176, 8, 32);
+#endif
     private bool _c135ProofContext;
     private bool _c135MenuTestContext;
     private bool _c135HostTestContext;
@@ -1141,7 +1145,21 @@ public sealed partial class ManagedNotes : GuideXosApplication
         {
             _c135Menu.Reset();
             _c135Menu.ClearItems();
-#if HOSTLOGPROOF_C153_MANAGED_TEXT_UNDO_REDO
+#if HOSTLOGPROOF_C154_MANAGED_CLIPBOARD
+            _c135Menu.TryAddItem("Undo", C153UndoActionId,
+                _textArea.CanUndo);
+            _c135Menu.TryAddItem("Redo", C153RedoActionId,
+                _textArea.CanRedo);
+            _c135Menu.TryAddSeparator();
+            _c135Menu.TryAddItem("Cut", C154CutActionId,
+                _textArea.CanCutSelection);
+            _c135Menu.TryAddItem("Copy", C154CopyActionId,
+                _textArea.CanCopySelection);
+            _c135Menu.TryAddItem("Paste", C154PasteActionId,
+                GuideXosClipboard.Shared.HasText &&
+                    _textArea.CanPasteText(GuideXosClipboard.Shared.TextSpan));
+            _c135Menu.TryAddSeparator();
+#elif HOSTLOGPROOF_C153_MANAGED_TEXT_UNDO_REDO
             _c135Menu.TryAddItem("Undo", C153UndoActionId,
                 _textArea.CanUndo);
             _c135Menu.TryAddItem("Redo", C153RedoActionId,
@@ -1734,6 +1752,14 @@ public sealed partial class ManagedNotes : GuideXosApplication
             "Managed Notes"u8, 600, 360, out GuideXosSurface surface);
         if (result != GuideXosResult.Success || surface == null) return result;
         _window = surface.Handle;
+#if HOSTLOGPROOF_C154_MANAGED_CLIPBOARD
+        if (!s_c154ClipboardTestsRun)
+        {
+            s_c154ClipboardTestsRun = true;
+            if (!GuideXosClipboardC154Tests.Run(host))
+                return GuideXosResult.InvalidArgument;
+        }
+#endif
 #if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
         if (_c151ProofContext)
         {
@@ -1911,6 +1937,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C153_MANAGED_TEXT_UNDO_REDO
             if (_c152Enabled) c135ExpectedItems = 8;
 #endif
+#if HOSTLOGPROOF_C154_MANAGED_CLIPBOARD
+            if (_c152Enabled) c135ExpectedItems = 12;
+#endif
             bool c135Initial = _mainControlHost.RegistrationCount ==
                 c135ExpectedRegistration &&
                 _c135Menu.ItemCount == c135ExpectedItems && !_c135Menu.IsOpen &&
@@ -1918,7 +1947,15 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
             if (_c151ProofContext)
             {
-#if HOSTLOGPROOF_C153_MANAGED_TEXT_UNDO_REDO
+#if HOSTLOGPROOF_C154_MANAGED_CLIPBOARD
+                host.TryLog(_c152Enabled
+                    ? c135Initial
+                        ? "C135-NOTES initial=registration=shared items=12 capture=none result=PASS"u8
+                        : "C135-NOTES initial=result=FAIL"u8
+                    : c135Initial
+                        ? "C135-NOTES initial=registration=shared items=4 capture=none result=PASS"u8
+                        : "C135-NOTES initial=result=FAIL"u8);
+#elif HOSTLOGPROOF_C153_MANAGED_TEXT_UNDO_REDO
                 host.TryLog(_c152Enabled
                     ? c135Initial
                         ? "C135-NOTES initial=registration=shared items=8 capture=none result=PASS"u8
@@ -1942,7 +1979,11 @@ public sealed partial class ManagedNotes : GuideXosApplication
             }
             else
 #endif
-#if HOSTLOGPROOF_C153_MANAGED_TEXT_UNDO_REDO
+#if HOSTLOGPROOF_C154_MANAGED_CLIPBOARD
+            host.TryLog(c135Initial
+                ? "C135-NOTES initial=registration=8 items=12 capture=none result=PASS"u8
+                : "C135-NOTES initial=result=FAIL"u8);
+#elif HOSTLOGPROOF_C153_MANAGED_TEXT_UNDO_REDO
             host.TryLog(c135Initial
                 ? "C135-NOTES initial=registration=8 items=8 capture=none result=PASS"u8
                 : "C135-NOTES initial=result=FAIL"u8);
@@ -2870,9 +2911,19 @@ public sealed partial class ManagedNotes : GuideXosApplication
 
     private GuideXosResult OpenC135Menu(
         GuideXosHost host, GuideXosSurface surface,
+#if HOSTLOGPROOF_C154_MANAGED_CLIPBOARD
+        int x = 340, int y = 40, bool secondaryInvocation = false)
+#else
         int x = 400, int y = 280, bool secondaryInvocation = false)
+#endif
     {
-#if HOSTLOGPROOF_C153_MANAGED_TEXT_UNDO_REDO
+#if HOSTLOGPROOF_C154_MANAGED_CLIPBOARD
+        if (_c152Enabled && !RefreshC154MenuStates(
+                _c135Menu, _textArea, GuideXosClipboard.Shared))
+        {
+            return GuideXosResult.InvalidArgument;
+        }
+#elif HOSTLOGPROOF_C153_MANAGED_TEXT_UNDO_REDO
         if (_c152Enabled)
         {
             _c135Menu.SetItemEnabled(0, _textArea.CanUndo);
@@ -4306,6 +4357,13 @@ public sealed partial class ManagedNotes : GuideXosApplication
                 host, surface, actionId, out GuideXosResult c153Result))
         {
             return c153Result;
+        }
+#endif
+#if HOSTLOGPROOF_C154_MANAGED_CLIPBOARD
+        if (TryHandleC154Action(host, surface, actionId,
+                out GuideXosResult c154Result))
+        {
+            return c154Result;
         }
 #endif
         if (_picker.IsActive)

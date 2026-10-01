@@ -125,6 +125,9 @@ public sealed class GuideXosTextArea
     public string SelectedText => HasSelection
         ? new string(_buffer, SelectionStart, SelectionEnd - SelectionStart)
         : string.Empty;
+    public bool CanCopySelection => HasSelection;
+    public bool CanCutSelection => HasSelection &&
+        SelectionEnd - SelectionStart <= GuideXosClipboard.Capacity;
 
     /// <summary>Raised once for each successful user content mutation.</summary>
     public event Action ContentChanged;
@@ -260,6 +263,73 @@ public sealed class GuideXosTextArea
         }
         return true;
     }
+
+    /// <summary>Copies the normalized selection into caller-owned storage.</summary>
+    public bool TryCopySelectionTo(Span<byte> destination, out int written)
+    {
+        written = HasSelection ? SelectionEnd - SelectionStart : 0;
+        if (!HasSelection || destination.Length < written) return false;
+        int start = SelectionStart;
+        for (int index = 0; index < written; index++)
+        {
+            char value = _buffer[start + index];
+            if (value != '\n' && !IsSupportedCharacter(value)) return false;
+            destination[index] = (byte)value;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Removes the selection only after the bounded clipboard accepted it.
+    /// A missing selection or failed copy leaves both objects unchanged.
+    /// </summary>
+    public GuideXosTextAreaEditResult CutSelection(GuideXosClipboard clipboard)
+    {
+        if (!HasSelection) return GuideXosTextAreaEditResult.Ignored;
+        if (clipboard == null || !CanCutSelection ||
+            !clipboard.TryCopySelectionFrom(this))
+        {
+            return RejectInput();
+        }
+        return DeleteSelection();
+    }
+
+    /// <summary>
+    /// Replaces the selection, or inserts at the caret, with one bounded
+    /// printable-ASCII/LF payload and one ordinary content revision.
+    /// </summary>
+    public GuideXosTextAreaEditResult PasteText(ReadOnlySpan<byte> text)
+    {
+        if (text.Length == 0) return GuideXosTextAreaEditResult.Ignored;
+        if (!CanPasteText(text, out int insertedLineCount)) return RejectInput();
+
+        int start = SelectionStart;
+        int end = SelectionEnd;
+        RemoveRange(start, end);
+        _caretIndex = start;
+        _anchorIndex = start;
+        for (int index = _length - 1; index >= start; index--)
+        {
+            _buffer[index + text.Length] = _buffer[index];
+        }
+        for (int index = 0; index < text.Length; index++)
+        {
+            _buffer[start + index] = (char)text[index];
+        }
+        _length += text.Length;
+        _lineCount += insertedLineCount;
+        _caretIndex = start + text.Length;
+        _anchorIndex = _caretIndex;
+        _preferredColumn = -1;
+        _viewport.ContentExtent = _lineCount;
+        EnsureCaretVisible();
+        RecordContentMutation();
+        return GuideXosTextAreaEditResult.Changed;
+    }
+
+    /// <summary>Checks the whole replacement against byte and line bounds.</summary>
+    public bool CanPasteText(ReadOnlySpan<byte> text) =>
+        CanPasteText(text, out _);
 
     /// <summary>Places a newly loaded document at its deterministic start.</summary>
     public void SetCaretToStart()
@@ -468,15 +538,7 @@ public sealed class GuideXosTextArea
 
     private GuideXosTextAreaEditResult DeleteBackward()
     {
-        if (HasSelection)
-        {
-            int start = SelectionStart;
-            RemoveRange(SelectionStart, SelectionEnd);
-            _caretIndex = start;
-            _anchorIndex = start;
-            RecordContentMutation();
-            return GuideXosTextAreaEditResult.Changed;
-        }
+        if (HasSelection) return DeleteSelection();
         if (_caretIndex == 0) return GuideXosTextAreaEditResult.Ignored;
         int target = _caretIndex - 1;
         RemoveRange(target, _caretIndex);
@@ -488,15 +550,7 @@ public sealed class GuideXosTextArea
 
     private GuideXosTextAreaEditResult DeleteForward()
     {
-        if (HasSelection)
-        {
-            int start = SelectionStart;
-            RemoveRange(SelectionStart, SelectionEnd);
-            _caretIndex = start;
-            _anchorIndex = start;
-            RecordContentMutation();
-            return GuideXosTextAreaEditResult.Changed;
-        }
+        if (HasSelection) return DeleteSelection();
         if (_caretIndex >= _length) return GuideXosTextAreaEditResult.Ignored;
         RemoveRange(_caretIndex, _caretIndex + 1);
         RecordContentMutation();
@@ -505,35 +559,38 @@ public sealed class GuideXosTextArea
 
     private GuideXosTextAreaEditResult ReplaceSelection(char value)
     {
-        int start = SelectionStart;
-        int end = SelectionEnd;
-        int removedNewlines = CountNewlines(start, end);
-        int insertedNewlines = value == '\n' ? 1 : 0;
-        int newLength = _length - (end - start) + 1;
-        int newLineCount = _lineCount - removedNewlines + insertedNewlines;
-        if (newLength > MaximumCharacters || newLineCount > _maximumLines)
-        {
-            return RejectInput();
-        }
+        Span<byte> character = stackalloc byte[1];
+        character[0] = (byte)value;
+        return PasteText(character);
+    }
 
-        if (end != start)
-        {
-            RemoveRange(start, end);
-            _caretIndex = start;
-        }
-        for (int index = _length; index > _caretIndex; index--)
-        {
-            _buffer[index] = _buffer[index - 1];
-        }
-        _buffer[_caretIndex++] = value;
-        _length++;
-        _lineCount = newLineCount;
-        _viewport.ContentExtent = _lineCount;
-        _anchorIndex = _caretIndex;
+    private GuideXosTextAreaEditResult DeleteSelection()
+    {
+        if (!HasSelection) return GuideXosTextAreaEditResult.Ignored;
+        int start = SelectionStart;
+        RemoveRange(start, SelectionEnd);
+        _caretIndex = start;
+        _anchorIndex = start;
         _preferredColumn = -1;
         EnsureCaretVisible();
         RecordContentMutation();
         return GuideXosTextAreaEditResult.Changed;
+    }
+
+    private bool CanPasteText(ReadOnlySpan<byte> text,
+        out int insertedLineCount)
+    {
+        insertedLineCount = 0;
+        if (text.Length == 0 ||
+            !ValidateUtf8(text, out int insertedTotalLineCount)) return false;
+
+        int start = SelectionStart;
+        int end = SelectionEnd;
+        if (_length - (end - start) + text.Length > _buffer.Length) return false;
+
+        int removedNewlines = CountNewlines(start, end);
+        insertedLineCount = insertedTotalLineCount - 1;
+        return _lineCount - removedNewlines + insertedLineCount <= _maximumLines;
     }
 
     private GuideXosTextAreaEditResult MoveHorizontal(int direction, bool shift)

@@ -21,7 +21,7 @@ public enum GuideXosPopupMenuResult
 public sealed class GuideXosPopupMenu
 {
     public const int DefaultMaximumItemCount = 8;
-    public const int MaximumSupportedItemCount = 8;
+    public const int MaximumSupportedItemCount = 12;
     public const int DefaultMaximumItemTextLength = 48;
     public const int MaximumSupportedItemTextLength = 48;
     public const int MinimumSupportedWidth = 64;
