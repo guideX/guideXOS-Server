@@ -200,6 +200,7 @@ namespace gxos {
         /// </summary>
         static apps::AppRegistry s_appRegistry;
         static std::mutex s_appRegistrySnapshotMutex;
+        static std::once_flag s_appRegistryInitializationFlag;
         static bool s_appRegistryInitialized = false;
         static size_t s_appRegistryInitializeCount = 0;
         static apps::AppScanResult s_lastManifestScanResult;
@@ -447,16 +448,9 @@ namespace gxos {
             return app.manifest.displayName;
         }
 
-        static bool supportsNormalSettingsOpen(const apps::RegisteredApp& app) {
-            if (app.manifest.kind != apps::AppKind::BuiltIn ||
-                app.sourceKind != apps::AppSourceKind::BuiltIn) return false;
-            const apps::BuiltInAppMetadata* metadata =
-                apps::FindBuiltInAppMetadataByAppId(app.manifest.id.c_str());
-            if (!metadata || !apps::IsBuiltInAppAvailableInHosted(*metadata)) return false;
-            const std::string launchName = apps::BuiltInAppCanonicalLaunchName(*metadata);
-            // These names match existing DesktopService::LaunchApp dispatch
-            // cases. HDInstaller is explicitly unavailable in this runtime;
-            // App Model Demo has no normal launch handler.
+        static bool hostedBuiltInLaunchNameSupported(const std::string& launchName) {
+            // This list mirrors the built-in branches implemented by the
+            // normal hosted DesktopService::LaunchApp path.
             return launchName == "Notepad" || launchName == "Calculator" ||
                 launchName == "Console" || launchName == "FileExplorer" ||
                 launchName == "Clock" || launchName == "TaskManager" ||
@@ -468,7 +462,18 @@ namespace gxos {
                 launchName == "Native App Debug Viewer";
         }
 
+        static bool supportsNormalSettingsOpen(const apps::RegisteredApp& app) {
+            if (app.manifest.kind != apps::AppKind::BuiltIn ||
+                app.sourceKind != apps::AppSourceKind::BuiltIn) return false;
+            const apps::BuiltInAppMetadata* metadata =
+                apps::FindBuiltInAppMetadataByAppId(app.manifest.id.c_str());
+            if (!metadata || !apps::IsBuiltInAppAvailableInHosted(*metadata)) return false;
+            const std::string launchName = apps::BuiltInAppCanonicalLaunchName(*metadata);
+            return hostedBuiltInLaunchNameSupported(launchName);
+        }
+
         static const RegisteredDesktopApp* findRegisteredApp(const std::string& name) {
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
             const apps::RegisteredApp* registryApp = s_appRegistry.FindById(name);
             if (!registryApp) {
                 if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByIdentity(name.c_str())) {
@@ -516,12 +521,19 @@ namespace gxos {
             return name;
         }
 
-        static const apps::RegisteredApp* findRegistryApp(const RegisteredDesktopApp& app) {
-            if (const apps::RegisteredApp* registryApp = s_appRegistry.FindById(app.id)) return registryApp;
-            if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByIdentity(app.displayName.c_str())) {
-                return s_appRegistry.FindById(metadata->appId ? metadata->appId : "");
+        static bool copyRegistryApp(const RegisteredDesktopApp& app, apps::RegisteredApp& out) {
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+            if (const apps::RegisteredApp* registryApp = s_appRegistry.FindById(app.id)) {
+                out = *registryApp;
+                return true;
             }
-            return nullptr;
+            if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByIdentity(app.displayName.c_str())) {
+                if (const apps::RegisteredApp* registryApp = s_appRegistry.FindById(metadata->appId ? metadata->appId : "")) {
+                    out = *registryApp;
+                    return true;
+                }
+            }
+            return false;
         }
 
         static bool isAppModelDemoApp(const RegisteredDesktopApp& app) {
@@ -1397,23 +1409,23 @@ namespace gxos {
         }
 
         static void ensureDefaultAppsRegistered() {
-            if (s_appRegistryInitialized) return;
+            std::call_once(s_appRegistryInitializationFlag, []() {
+                ++s_appRegistryInitializeCount;
+                Logger::write(LogLevel::Info, "AppRegistry initializing, count=" + std::to_string(s_appRegistryInitializeCount));
 
-            ++s_appRegistryInitializeCount;
-            Logger::write(LogLevel::Info, "AppRegistry initializing, count=" + std::to_string(s_appRegistryInitializeCount));
+                s_lastManifestScanResult = s_appRegistry.Scan();
+                Logger::write(LogLevel::Info, "AppRegistry manifest scan succeeded: scanned=" + std::to_string(s_lastManifestScanResult.scannedManifestCount) + ", registered=" + std::to_string(s_lastManifestScanResult.registeredAppCount));
+                logScanIssues("Invalid app manifest", s_lastManifestScanResult.invalidApps);
+                logScanIssues("Duplicate app id", s_lastManifestScanResult.duplicateApps);
 
-            s_lastManifestScanResult = s_appRegistry.Scan();
-            Logger::write(LogLevel::Info, "AppRegistry manifest scan succeeded: scanned=" + std::to_string(s_lastManifestScanResult.scannedManifestCount) + ", registered=" + std::to_string(s_lastManifestScanResult.registeredAppCount));
-            logScanIssues("Invalid app manifest", s_lastManifestScanResult.invalidApps);
-            logScanIssues("Duplicate app id", s_lastManifestScanResult.duplicateApps);
+                s_lastBuiltInRegisterResult = s_appRegistry.RegisterBuiltInAppsAsManifests();
+                logScanIssues("Duplicate app id", s_lastBuiltInRegisterResult.duplicateApps);
 
-            s_lastBuiltInRegisterResult = s_appRegistry.RegisterBuiltInAppsAsManifests();
-            logScanIssues("Duplicate app id", s_lastBuiltInRegisterResult.duplicateApps);
-
-            refreshRegisteredAppsFromRegistry();
-            ensureDefaultAppModelPins();
-            s_appRegistryInitialized = true;
-            Logger::write(LogLevel::Info, "AppRegistry initialized, desktop apps=" + std::to_string(DesktopService::GetRegisteredApps().size()));
+                refreshRegisteredAppsFromRegistry();
+                ensureDefaultAppModelPins();
+                s_appRegistryInitialized = true;
+                Logger::write(LogLevel::Info, "AppRegistry initialized, desktop apps=" + std::to_string(DesktopService::GetRegisteredApps().size()));
+            });
         }
 
         static std::string canonicalAppName(const std::string& name) {
@@ -1467,7 +1479,8 @@ namespace gxos {
             target.appId = metadata.appId ? metadata.appId : "";
             target.displayName = metadata.displayName ? metadata.displayName : "";
             target.dispatchLaunchName = metadata.launchName ? metadata.launchName : "";
-            target.hostedAvailable = apps::IsBuiltInAppAvailableInHosted(metadata);
+            target.hostedAvailable = apps::IsBuiltInAppAvailableInHosted(metadata) &&
+                hostedBuiltInLaunchNameSupported(apps::BuiltInAppCanonicalLaunchName(metadata));
             target.bareMetalAvailable = apps::IsBuiltInAppAvailableInBareMetal(metadata);
         }
 
@@ -1476,9 +1489,14 @@ namespace gxos {
             target.appId = app.id;
             target.displayName = app.displayName;
             target.dispatchLaunchName = app.launchName;
-            target.hostedAvailable = true;
+            target.hostedAvailable = false;
             if (const apps::BuiltInAppMetadata* metadata = findMetadataForRegisteredDesktopApp(app)) {
                 target.bareMetalAvailable = apps::IsBuiltInAppAvailableInBareMetal(*metadata);
+                target.hostedAvailable = app.kind == apps::AppKind::BuiltIn &&
+                    apps::IsBuiltInAppAvailableInHosted(*metadata) &&
+                    hostedBuiltInLaunchNameSupported(apps::BuiltInAppCanonicalLaunchName(*metadata));
+            } else if (app.kind == apps::AppKind::NativeElf) {
+                target.hostedAvailable = apps::NativeElfExecutor::ExperimentalExecutionEnabled();
             }
         }
 
@@ -1487,9 +1505,16 @@ namespace gxos {
             target.appId = app.manifest.id;
             target.displayName = app.manifest.displayName;
             target.dispatchLaunchName = launchNameForApp(app);
-            target.hostedAvailable = true;
+            target.hostedAvailable = false;
             if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByAppId(app.manifest.id.c_str())) {
                 target.bareMetalAvailable = apps::IsBuiltInAppAvailableInBareMetal(*metadata);
+                target.hostedAvailable = app.manifest.kind == apps::AppKind::BuiltIn &&
+                    app.sourceKind == apps::AppSourceKind::BuiltIn &&
+                    apps::IsBuiltInAppAvailableInHosted(*metadata) &&
+                    hostedBuiltInLaunchNameSupported(apps::BuiltInAppCanonicalLaunchName(*metadata));
+            } else if (app.manifest.kind == apps::AppKind::NativeElf) {
+                target.hostedAvailable = !app.temporaryDevelopment &&
+                    apps::NativeElfExecutor::ExperimentalExecutionEnabled();
             }
         }
 
@@ -2002,6 +2027,7 @@ namespace gxos {
             size_t ready = 0;
             size_t alias = 0;
             size_t shellAction = 0;
+            size_t safelyUnsupported = 0;
             size_t unresolved = 0;
             size_t skippedLayoutOnly = 0;
             size_t targetSpecificUnsupportedAliases = 0;
@@ -2035,15 +2061,19 @@ namespace gxos {
             return target.type == apps::LaunchTargetType::Unknown ? "unknown" : "launch string";
         }
 
-        static std::string launchStoragePreviewStatus(const apps::LaunchTarget& target) {
+        static std::string launchStoragePreviewStatus(const apps::LaunchTarget& target, const std::string& backend) {
             if (target.type == apps::LaunchTargetType::Unknown) return "unresolved";
             if (target.type == apps::LaunchTargetType::LegacyAlias) return "alias";
             if (target.type == apps::LaunchTargetType::ShellAction) return "shell-action";
+            const bool backendAvailable = backend == "bareMetal"
+                ? target.bareMetalAvailable : target.hostedAvailable;
+            if (!backendAvailable) return "unsupported";
             return "ready";
         }
 
         static std::string launchStoragePreviewRisk(const std::string& baseRisk, const std::string& status) {
             if (status == "unresolved") return "high";
+            if (status == "unsupported") return "low";
             if (status == "alias" || status == "shell-action") return "medium";
             return baseRisk.empty() ? "medium" : baseRisk;
         }
@@ -2080,6 +2110,7 @@ namespace gxos {
             if (status == "ready") ++counts.ready;
             else if (status == "alias") ++counts.alias;
             else if (status == "shell-action") ++counts.shellAction;
+            else if (status == "unsupported") ++counts.safelyUnsupported;
             else if (status == "skip-layout-only") ++counts.skippedLayoutOnly;
             else ++counts.unresolved;
             if (risk == "high") ++counts.highRisk;
@@ -2108,12 +2139,12 @@ namespace gxos {
             counts.unsupportedAliasDetails.push_back(detail);
         }
 
-        static void appendLaunchStoragePreviewRecord(std::ostringstream& oss, LaunchStoragePreviewCounts& counts, const std::string& site, size_t index, const std::string& value, const std::string& existingKindHint, const std::string& baseRisk, const size_t maxRows) {
-            const apps::LaunchTarget target = DesktopService::ResolveLaunchTarget(value);
+        static void appendLaunchStoragePreviewRecord(std::ostringstream& oss, LaunchStoragePreviewCounts& counts, const std::string& site, size_t index, const std::string& value, const std::string& existingKindHint, const std::string& baseRisk, const size_t maxRows, const std::string& stableAppId = std::string()) {
+            const apps::LaunchTarget target = DesktopService::ResolveLaunchTarget(stableAppId.empty() ? value : stableAppId);
             std::string adapterStatus;
             std::string adapterReason;
             const std::string legacyDispatch = DesktopService::LegacyDispatchStringForLaunchTarget(target, adapterStatus, adapterReason);
-            const std::string status = launchStoragePreviewStatus(target);
+            const std::string status = launchStoragePreviewStatus(target, "hosted");
             const std::string risk = launchStoragePreviewRisk(baseRisk, status);
             countLaunchStoragePreviewStatus(counts, status, risk);
             countLaunchStoragePreviewTargetSpecificAlias(counts, target, "hosted");
@@ -2128,6 +2159,7 @@ namespace gxos {
                 << " index=" << index
                 << " existing=" << quoteDiagnosticValue(value)
                 << " existingKind=" << quoteDiagnosticValue(launchStorageExistingKind(value, target, existingKindHint))
+                << (stableAppId.empty() ? std::string() : " storedAppId=" + quoteDiagnosticValue(stableAppId))
                 << " resolvedType=" << apps::ToString(target.type)
                 << " appId=" << quoteDiagnosticValue(target.appId)
                 << " displayName=" << quoteDiagnosticValue(target.displayName)
@@ -2165,11 +2197,27 @@ namespace gxos {
             }
         }
 
+        static void appendLaunchStoragePreviewStoredLabels(std::ostringstream& oss,
+                                                           LaunchStoragePreviewCounts& counts,
+                                                           const std::string& site,
+                                                           const std::vector<std::string>& labels,
+                                                           const std::vector<std::string>& appIds,
+                                                           const std::string& risk,
+                                                           const size_t maxRows) {
+            for (size_t i = 0; i < labels.size(); ++i) {
+                const std::string appId = i < appIds.size() ? appIds[i] : std::string();
+                appendLaunchStoragePreviewRecord(oss, counts, site, i, labels[i],
+                    appId.empty() ? std::string() : "stored display name", risk, maxRows, appId);
+            }
+        }
+
         static LaunchStoragePreviewCounts collectLaunchStoragePreviewCounts(
             bool cfgLoaded,
             const DesktopConfigData& cfg,
             const std::vector<std::string>& inMemoryPinned,
+            const std::vector<std::string>& inMemoryPinnedAppIds,
             const std::vector<std::string>& inMemoryRecentPrograms,
+            const std::vector<std::string>& inMemoryRecentProgramAppIds,
             const std::vector<std::string>& inMemoryRecentDocuments,
             const std::vector<RegisteredDesktopApp>& registeredApps,
             std::ostringstream* rows,
@@ -2179,8 +2227,8 @@ namespace gxos {
             std::ostringstream& out = rows ? *rows : sink;
 
             if (cfgLoaded) {
-                appendLaunchStoragePreviewLabels(out, counts, "desktop.json:pinned", cfg.pinned, "", "medium", maxRows);
-                appendLaunchStoragePreviewLabels(out, counts, "desktop.json:recent", cfg.recent, "", "medium", maxRows);
+                appendLaunchStoragePreviewStoredLabels(out, counts, "desktop.json:pinned", cfg.pinned, cfg.pinnedAppIds, "medium", maxRows);
+                appendLaunchStoragePreviewStoredLabels(out, counts, "desktop.json:recent", cfg.recent, cfg.recentAppIds, "medium", maxRows);
 
                 for (size_t i = 0; i < cfg.desktopShortcuts.size(); ++i) {
                     const DesktopShortcutRec& shortcut = cfg.desktopShortcuts[i];
@@ -2197,8 +2245,8 @@ namespace gxos {
                 }
             }
 
-            appendLaunchStoragePreviewLabels(out, counts, "DesktopService:s_pinned", inMemoryPinned, "", "medium", maxRows);
-            appendLaunchStoragePreviewLabels(out, counts, "DesktopService:s_recentPrograms", inMemoryRecentPrograms, "", "medium", maxRows);
+            appendLaunchStoragePreviewStoredLabels(out, counts, "DesktopService:s_pinned", inMemoryPinned, inMemoryPinnedAppIds, "medium", maxRows);
+            appendLaunchStoragePreviewStoredLabels(out, counts, "DesktopService:s_recentPrograms", inMemoryRecentPrograms, inMemoryRecentProgramAppIds, "medium", maxRows);
             appendLaunchStoragePreviewLabels(out, counts, "DesktopService:s_recentDocuments", inMemoryRecentDocuments, "file path", "low", maxRows);
 
             std::vector<std::string> allProgramLabels;
@@ -2220,7 +2268,7 @@ namespace gxos {
         }
 
         static void countLaunchStoragePreviewTarget(LaunchStoragePreviewCounts& counts, const apps::LaunchTarget& target, const std::string& baseRisk, const std::string& targetName) {
-            const std::string status = launchStoragePreviewStatus(target);
+            const std::string status = launchStoragePreviewStatus(target, targetName);
             const std::string risk = launchStoragePreviewRisk(baseRisk, status);
             countLaunchStoragePreviewStatus(counts, status, risk);
             countLaunchStoragePreviewTargetSpecificAlias(counts, target, targetName);
@@ -2273,6 +2321,7 @@ namespace gxos {
                 << " ready=" << counts.ready
                 << " alias=" << counts.alias
                 << " shellAction=" << counts.shellAction
+                << " safelyUnsupported=" << counts.safelyUnsupported
                 << " unresolved=" << counts.unresolved
                 << " skippedLayoutOnly=" << counts.skippedLayoutOnly
                 << " targetSpecificUnsupportedAliases=" << counts.targetSpecificUnsupportedAliases
@@ -2536,14 +2585,32 @@ namespace gxos {
         }
 
         void DesktopService::PinApp(const std::string& name) {
-            if (name.empty() || IsPinned(name)) return;
+            if (name.empty() || name.size() > kDesktopConfigMaxPinnedLabelBytes ||
+                name.find('\0') != std::string::npos ||
+                s_pinned.size() >= kDesktopConfigMaxPinnedEntries) return;
+            std::string appId;
+            std::string displayName = name;
+            if (const RegisteredDesktopApp* registered = findRegisteredApp(name)) {
+                appId = registered->id;
+                displayName = registered->displayName;
+            } else {
+                const apps::LaunchTarget target = ResolveLaunchTarget(name);
+                if (target.type == apps::LaunchTargetType::Unknown || target.diagnosticStatus == "ambiguous") {
+                    Logger::write(LogLevel::Warn, "Pin rejected for unresolved App Model target: " + name);
+                    return;
+                }
+                appId = target.appId;
+                if (!target.displayName.empty()) displayName = target.displayName;
+            }
+            if (IsPinned(appId.empty() ? displayName : appId)) return;
             PinnedItem item;
-            item.name = name;
+            item.name = displayName;
+            item.appId = appId;
             item.kind = PinnedKind::App;
             item.iconName = "document"; // default
             s_pinned.push_back(item);
             SaveState();
-            Logger::write(LogLevel::Info, std::string("Pinned app: ") + name);
+            Logger::write(LogLevel::Info, std::string("Pinned app: ") + displayName + (appId.empty() ? std::string() : " appId=" + appId));
         }
         /// <summary>
         /// Pin File
@@ -2551,7 +2618,9 @@ namespace gxos {
         /// <param name="displayName"></param>
         /// <param name="absolutePath"></param>
         void DesktopService::PinFile(const std::string& displayName, const std::string& absolutePath) {
-            if (displayName.empty() || absolutePath.empty() || IsPinned(displayName)) return;
+            if (displayName.empty() || displayName.size() > apps::kAppModelMaxDisplayNameBytes ||
+                absolutePath.empty() || absolutePath.size() > kDesktopConfigMaxPathBytes ||
+                s_pinned.size() >= kDesktopConfigMaxPinnedEntries || IsPinned(displayName)) return;
             PinnedItem item;
             item.name = displayName;
             item.path = absolutePath;
@@ -2566,7 +2635,7 @@ namespace gxos {
         /// </summary>
         /// <param name="name"></param>
         void DesktopService::PinSpecial(const std::string& name) {
-            if (name.empty() || IsPinned(name)) return;
+            if (name.empty() || name.size() > kDesktopConfigMaxRecentLabelBytes || s_pinned.size() >= kDesktopConfigMaxPinnedEntries || IsPinned(name)) return;
             PinnedItem item;
             item.name = name;
             item.kind = PinnedKind::Special;
@@ -2588,20 +2657,43 @@ namespace gxos {
         }
 
         bool DesktopService::IsPinned(const std::string& name) {
+            if (name.empty()) return false;
+            std::string appId = name;
+            if (const RegisteredDesktopApp* registered = findRegisteredApp(name)) appId = registered->id;
+            else if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByIdentity(name.c_str())) {
+                appId = metadata->appId ? metadata->appId : name;
+            }
             for (const auto& item : s_pinned) {
-                if (item.name == name) return true;
+                if (item.name == name || (!appId.empty() && item.appId == appId)) return true;
             }
             return false;
         }
 
         void DesktopService::AddRecentProgram(const std::string& name) {
             ensureDefaultAppsRegistered();
-            const std::string canonicalName = canonicalRecentProgramName(name);
+            if (name.empty() || name.size() > kDesktopConfigMaxRecentLabelBytes) return;
+            apps::LaunchTarget target = ResolveLaunchTarget(name);
+            if (target.type == apps::LaunchTargetType::ShellAction && !target.dispatchLaunchName.empty()) {
+                const apps::LaunchTarget handler = ResolveLaunchTarget(target.dispatchLaunchName);
+                if (handler.type != apps::LaunchTargetType::Unknown &&
+                    handler.type != apps::LaunchTargetType::ShellAction &&
+                    handler.hostedAvailable && !handler.appId.empty()) {
+                    target = handler;
+                }
+            }
+            if (target.type == apps::LaunchTargetType::Unknown || target.diagnosticStatus == "ambiguous") return;
+            const bool dedicatedDemoRoute = isSpecialCaseLaunchTarget(name) ||
+                target.appId == "gxos.builtin.appmodeldemo";
+            if (!target.hostedAvailable && !dedicatedDemoRoute) return;
+            const std::string appId = target.appId;
+            const std::string canonicalName = !target.displayName.empty()
+                ? target.displayName
+                : canonicalRecentProgramName(name);
             if (canonicalName.empty()) return;
 
             // Remove existing entry if present
             for (auto it = s_recentPrograms.begin(); it != s_recentPrograms.end(); ++it) {
-                if (it->name == canonicalName) {
+                if ((!appId.empty() && it->appId == appId) || (appId.empty() && it->name == canonicalName)) {
                     s_recentPrograms.erase(it);
                     break;
                 }
@@ -2610,6 +2702,7 @@ namespace gxos {
             // Add to front
             RecentProgramEntry entry;
             entry.name = canonicalName;
+            entry.appId = appId;
             entry.lastUsedTicks = currentTicks();
             entry.iconName = "document";
             s_recentPrograms.insert(s_recentPrograms.begin(), entry);
@@ -2626,9 +2719,10 @@ namespace gxos {
             ensureDefaultAppsRegistered();
             const std::string canonicalName = canonicalRecentProgramName(name);
             if (canonicalName.empty()) return false;
+            const apps::LaunchTarget target = ResolveLaunchTarget(name);
 
             for (auto it = s_recentPrograms.begin(); it != s_recentPrograms.end(); ++it) {
-                if (it->name == canonicalName) {
+                if (it->name == canonicalName || (!target.appId.empty() && it->appId == target.appId)) {
                     s_recentPrograms.erase(it);
                     SaveState();
                     Logger::write(LogLevel::Info, std::string("Removed recent program: ") + canonicalName);
@@ -2762,16 +2856,20 @@ namespace gxos {
             std::string storagePreviewCfgErr;
             const bool storagePreviewCfgLoaded = DesktopConfig::Load("desktop.json", storagePreviewCfg, storagePreviewCfgErr);
             std::vector<std::string> storagePreviewPinned;
-            for (const PinnedItem& item : s_pinned) storagePreviewPinned.push_back(item.name);
+            std::vector<std::string> storagePreviewPinnedAppIds;
+            for (const PinnedItem& item : s_pinned) { storagePreviewPinned.push_back(item.name); storagePreviewPinnedAppIds.push_back(item.appId); }
             std::vector<std::string> storagePreviewRecentPrograms;
-            for (const RecentProgramEntry& entry : s_recentPrograms) storagePreviewRecentPrograms.push_back(entry.name);
+            std::vector<std::string> storagePreviewRecentProgramAppIds;
+            for (const RecentProgramEntry& entry : s_recentPrograms) { storagePreviewRecentPrograms.push_back(entry.name); storagePreviewRecentProgramAppIds.push_back(entry.appId); }
             std::vector<std::string> storagePreviewRecentDocuments;
             for (const RecentDocumentEntry& entry : s_recentDocuments) storagePreviewRecentDocuments.push_back(entry.path);
             const LaunchStoragePreviewCounts storagePreviewCounts = collectLaunchStoragePreviewCounts(
                 storagePreviewCfgLoaded,
                 storagePreviewCfg,
                 storagePreviewPinned,
+                storagePreviewPinnedAppIds,
                 storagePreviewRecentPrograms,
+                storagePreviewRecentProgramAppIds,
                 storagePreviewRecentDocuments,
                 s_apps,
                 nullptr,
@@ -2929,6 +3027,7 @@ namespace gxos {
                 << " ready=" << storagePreviewCounts.ready
                 << " alias=" << storagePreviewCounts.alias
                 << " shellAction=" << storagePreviewCounts.shellAction
+                << " safelyUnsupported=" << storagePreviewCounts.safelyUnsupported
                 << " unresolved=" << storagePreviewCounts.unresolved
                 << " skippedLayoutOnly=" << storagePreviewCounts.skippedLayoutOnly
                 << " targetSpecificUnsupportedAliases=" << storagePreviewCounts.targetSpecificUnsupportedAliases
@@ -3186,9 +3285,21 @@ namespace gxos {
         }
 
         apps::LaunchTarget DesktopService::ResolveLaunchTarget(const std::string& label) {
-            ensureDefaultAppsRegistered();
-
             apps::LaunchTarget target;
+            if (label.size() > apps::kAppModelMaxLaunchTargetBytes) {
+                target.originalLabel = "<rejected overlong launch target>";
+                target.diagnosticStatus = "invalid-target";
+                target.diagnosticReason = "Launch target exceeds the 4096-byte bound";
+                return target;
+            }
+            for (unsigned char c : label) {
+                if (c < 0x20u || c == 0x7fu) {
+                    target.originalLabel = "<rejected control character>";
+                    target.diagnosticStatus = "invalid-target";
+                    target.diagnosticReason = "Launch target contains a control or terminator character";
+                    return target;
+                }
+            }
             target.originalLabel = label;
 
             if (label.empty()) {
@@ -3197,6 +3308,16 @@ namespace gxos {
                 target.diagnosticReason = "No launch label supplied";
                 return target;
             }
+            if (label.size() > apps::kAppModelMaxAppIdBytes &&
+                label.find('.') != std::string::npos &&
+                !isPathLikeLaunchLabel(label)) {
+                target.type = apps::LaunchTargetType::Unknown;
+                target.diagnosticStatus = "invalid-target";
+                target.diagnosticReason = "App Model IDs are limited to 128 bytes";
+                return target;
+            }
+
+            ensureDefaultAppsRegistered();
 
             // Diagnostic-only legacy alias: keep reporting the old UI label without
             // changing the current string dispatch path.
@@ -3292,32 +3413,41 @@ namespace gxos {
                 return target;
             }
 
-            const apps::RegisteredApp* registryApp = s_appRegistry.FindById(label);
-            if (!registryApp) {
-                const apps::DisplayNameResolution resolution = s_appRegistry.ResolveByDisplayName(
-                    label, apps::AppLaunchResolver::CurrentArchitecture());
-                if (resolution.status == apps::DisplayNameResolutionStatus::Ambiguous) {
-                    target.type = apps::LaunchTargetType::Unknown;
-                    target.diagnosticStatus = "ambiguous";
-                    target.diagnosticReason = "Ambiguous display name '" + label + "': " + resolution.reason;
-                    for (const apps::DisplayNameMatch& match : resolution.matches) {
-                        if (!match.app) continue;
-                        target.diagnosticReason += " [id=" + match.app->manifest.id +
-                            " source=" + apps::AppRegistry::ToString(match.app->sourceKind) +
-                            " eligible=" + (match.eligible ? "true" : "false") +
-                            (match.reason.empty() ? std::string() : " reason=" + match.reason) + "]";
+            {
+                std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+                const apps::RegisteredApp* registryApp = s_appRegistry.FindById(label);
+                if (!registryApp) {
+                    const apps::DisplayNameResolution resolution = s_appRegistry.ResolveByDisplayName(
+                        label, apps::AppLaunchResolver::CurrentArchitecture());
+                    if (resolution.status == apps::DisplayNameResolutionStatus::Ambiguous) {
+                        target.type = apps::LaunchTargetType::Unknown;
+                        target.diagnosticStatus = "ambiguous";
+                        target.diagnosticReason = "Ambiguous display name '" + label + "': " + resolution.reason;
+                        for (const apps::DisplayNameMatch& match : resolution.matches) {
+                            if (!match.app) continue;
+                            target.diagnosticReason += " [id=" + match.app->manifest.id +
+                                " source=" + apps::AppRegistry::ToString(match.app->sourceKind) +
+                                " eligible=" + (match.eligible ? "true" : "false") +
+                                (match.reason.empty() ? std::string() : " reason=" + match.reason) + "]";
+                        }
+                        return target;
                     }
+                    if (resolution.status == apps::DisplayNameResolutionStatus::Resolved) registryApp = resolution.app;
+                }
+                if (registryApp) {
+                    if (registryApp->temporaryDevelopment) {
+                        target.type = apps::LaunchTargetType::Unknown;
+                        target.diagnosticStatus = "development-route-required";
+                        target.diagnosticReason = "Temporary development registrations require an owner and generation token";
+                        return target;
+                    }
+                    fillLaunchTargetFromRegistryApp(target, *registryApp);
+                    target.diagnosticStatus = "resolved";
+                    target.diagnosticReason = target.originalLabel == target.appId
+                        ? "Matched manifest app registry by exact canonical application id"
+                        : "Matched manifest app registry by deterministic display-name compatibility policy";
                     return target;
                 }
-                if (resolution.status == apps::DisplayNameResolutionStatus::Resolved) registryApp = resolution.app;
-            }
-            if (registryApp) {
-                fillLaunchTargetFromRegistryApp(target, *registryApp);
-                target.diagnosticStatus = "resolved";
-                target.diagnosticReason = target.originalLabel == target.appId
-                    ? "Matched manifest app registry by exact canonical application id"
-                    : "Matched manifest app registry by deterministic display-name compatibility policy";
-                return target;
             }
 
             target.type = apps::LaunchTargetType::Unknown;
@@ -3704,10 +3834,12 @@ namespace gxos {
             }
 
             std::vector<std::string> inMemoryPinned;
-            for (const PinnedItem& item : s_pinned) inMemoryPinned.push_back(item.name);
+            std::vector<std::string> inMemoryPinnedAppIds;
+            for (const PinnedItem& item : s_pinned) { inMemoryPinned.push_back(item.name); inMemoryPinnedAppIds.push_back(item.appId); }
 
             std::vector<std::string> inMemoryRecentPrograms;
-            for (const RecentProgramEntry& entry : s_recentPrograms) inMemoryRecentPrograms.push_back(entry.name);
+            std::vector<std::string> inMemoryRecentProgramAppIds;
+            for (const RecentProgramEntry& entry : s_recentPrograms) { inMemoryRecentPrograms.push_back(entry.name); inMemoryRecentProgramAppIds.push_back(entry.appId); }
 
             std::vector<std::string> inMemoryRecentDocuments;
             for (const RecentDocumentEntry& entry : s_recentDocuments) inMemoryRecentDocuments.push_back(entry.path);
@@ -3908,10 +4040,18 @@ namespace gxos {
             const size_t maxRows = 96;
 
             std::vector<std::string> inMemoryPinned;
-            for (const PinnedItem& item : s_pinned) inMemoryPinned.push_back(item.name);
+            std::vector<std::string> inMemoryPinnedAppIds;
+            for (const PinnedItem& item : s_pinned) {
+                inMemoryPinned.push_back(item.name);
+                inMemoryPinnedAppIds.push_back(item.appId);
+            }
 
             std::vector<std::string> inMemoryRecentPrograms;
-            for (const RecentProgramEntry& entry : s_recentPrograms) inMemoryRecentPrograms.push_back(entry.name);
+            std::vector<std::string> inMemoryRecentProgramAppIds;
+            for (const RecentProgramEntry& entry : s_recentPrograms) {
+                inMemoryRecentPrograms.push_back(entry.name);
+                inMemoryRecentProgramAppIds.push_back(entry.appId);
+            }
 
             std::vector<std::string> inMemoryRecentDocuments;
             for (const RecentDocumentEntry& entry : s_recentDocuments) inMemoryRecentDocuments.push_back(entry.path);
@@ -3921,7 +4061,9 @@ namespace gxos {
                 cfgLoaded,
                 cfg,
                 inMemoryPinned,
+                inMemoryPinnedAppIds,
                 inMemoryRecentPrograms,
+                inMemoryRecentProgramAppIds,
                 inMemoryRecentDocuments,
                 s_apps,
                 &rows,
@@ -3939,6 +4081,7 @@ namespace gxos {
                 << " ready=" << counts.ready
                 << " alias=" << counts.alias
                 << " shellAction=" << counts.shellAction
+                << " safelyUnsupported=" << counts.safelyUnsupported
                 << " unresolved=" << counts.unresolved
                 << " skippedLayoutOnly=" << counts.skippedLayoutOnly
                 << " targetSpecificUnsupportedAliases=" << counts.targetSpecificUnsupportedAliases
@@ -3959,10 +4102,12 @@ namespace gxos {
             const bool cfgLoaded = DesktopConfig::Load("desktop.json", cfg, cfgErr);
 
             std::vector<std::string> inMemoryPinned;
-            for (const PinnedItem& item : s_pinned) inMemoryPinned.push_back(item.name);
+            std::vector<std::string> inMemoryPinnedAppIds;
+            for (const PinnedItem& item : s_pinned) { inMemoryPinned.push_back(item.name); inMemoryPinnedAppIds.push_back(item.appId); }
 
             std::vector<std::string> inMemoryRecentPrograms;
-            for (const RecentProgramEntry& entry : s_recentPrograms) inMemoryRecentPrograms.push_back(entry.name);
+            std::vector<std::string> inMemoryRecentProgramAppIds;
+            for (const RecentProgramEntry& entry : s_recentPrograms) { inMemoryRecentPrograms.push_back(entry.name); inMemoryRecentProgramAppIds.push_back(entry.appId); }
 
             std::vector<std::string> inMemoryRecentDocuments;
             for (const RecentDocumentEntry& entry : s_recentDocuments) inMemoryRecentDocuments.push_back(entry.path);
@@ -3971,7 +4116,9 @@ namespace gxos {
                 cfgLoaded,
                 cfg,
                 inMemoryPinned,
+                inMemoryPinnedAppIds,
                 inMemoryRecentPrograms,
+                inMemoryRecentProgramAppIds,
                 inMemoryRecentDocuments,
                 s_apps,
                 nullptr,
@@ -4092,8 +4239,17 @@ namespace gxos {
 
         static std::map<apps::LaunchTargetType, LaunchTargetTypeCounts> collectLaunchTargetTypeCoverageCounts(const std::set<std::string>& labels);
 
-        static bool isExpectedUnsupportedLaunchTargetLabel(const std::string& label) {
-            return label == "ImgViewer";
+        static bool isExpectedUnsupportedLaunchTargetLabel(
+            const std::string& label,
+            const apps::LaunchTarget& hostedTarget,
+            const apps::LaunchTarget& bareMetalTarget) {
+            if (label == "ImgViewer") return true;
+
+            // A registered identity with no launcher on either backend is a
+            // known, safe unsupported target. Keep unknown labels visible so
+            // new typos or stale identities still surface in diagnostics.
+            return (hostedTarget.type != apps::LaunchTargetType::Unknown && !hostedTarget.appId.empty()) ||
+                (bareMetalTarget.type != apps::LaunchTargetType::Unknown && !bareMetalTarget.appId.empty());
         }
 
         static apps::LaunchTargetType launchTargetTypeForCoverageStatus(const apps::LaunchTarget& hostedTarget, const apps::LaunchTarget& bareMetalTarget) {
@@ -4203,7 +4359,7 @@ namespace gxos {
                     const apps::LaunchTargetType statusType = launchTargetTypeForCoverageStatus(hostedTarget, bareMetalTarget);
                     if (statusType == apps::LaunchTargetType::Unknown) {
                         typeCounts[statusType].unknownLabels++;
-                    } else if (isExpectedUnsupportedLaunchTargetLabel(label)) {
+                    } else if (isExpectedUnsupportedLaunchTargetLabel(label, hostedTarget, bareMetalTarget)) {
                         typeCounts[statusType].expectedUnsupportedOnTarget++;
                     } else {
                         typeCounts[statusType].unexpectedUnsupportedOnTarget++;
@@ -4315,9 +4471,11 @@ namespace gxos {
             std::string cfgErr;
             const bool cfgLoaded = DesktopConfig::Load("desktop.json", cfg, cfgErr);
             std::vector<std::string> inMemoryPinned;
-            for (const PinnedItem& item : s_pinned) inMemoryPinned.push_back(item.name);
+            std::vector<std::string> inMemoryPinnedAppIds;
+            for (const PinnedItem& item : s_pinned) { inMemoryPinned.push_back(item.name); inMemoryPinnedAppIds.push_back(item.appId); }
             std::vector<std::string> inMemoryRecentPrograms;
-            for (const RecentProgramEntry& entry : s_recentPrograms) inMemoryRecentPrograms.push_back(entry.name);
+            std::vector<std::string> inMemoryRecentProgramAppIds;
+            for (const RecentProgramEntry& entry : s_recentPrograms) { inMemoryRecentPrograms.push_back(entry.name); inMemoryRecentProgramAppIds.push_back(entry.appId); }
             std::vector<std::string> inMemoryRecentDocuments;
             for (const RecentDocumentEntry& entry : s_recentDocuments) inMemoryRecentDocuments.push_back(entry.path);
 
@@ -4325,7 +4483,9 @@ namespace gxos {
                 cfgLoaded,
                 cfg,
                 inMemoryPinned,
+                inMemoryPinnedAppIds,
                 inMemoryRecentPrograms,
+                inMemoryRecentProgramAppIds,
                 inMemoryRecentDocuments,
                 s_apps,
                 nullptr,
@@ -4931,6 +5091,7 @@ namespace gxos {
 
         std::string DesktopService::InspectNativeAppPipeline(const std::string& appIdOrDisplayName) {
             ensureDefaultAppsRegistered();
+            std::lock_guard<std::mutex> registryLock(s_appRegistrySnapshotMutex);
 
             std::ostringstream oss;
             oss << "nativeapp.inspect " << appIdOrDisplayName << "\n";
@@ -5608,6 +5769,18 @@ namespace gxos {
         }
 
         bool DesktopService::LaunchApp(const std::string& name, std::string& error, bool recordRecent) {
+            error.clear();
+            if (name.size() > apps::kAppModelMaxLaunchTargetBytes ||
+                name.find('\0') != std::string::npos) {
+                error = "Launch target is invalid or exceeds the 4096-byte bound";
+                return false;
+            }
+            for (unsigned char c : name) {
+                if (c < 0x20u || c == 0x7fu) {
+                    error = "Launch target contains a control character";
+                    return false;
+                }
+            }
             ensureDefaultAppsRegistered();
             const LaunchDispatchDecision dispatchDecision = SelectLaunchDispatch(name);
             RecordLaunchDispatchDecision("HostedDesktopService", dispatchDecision);
@@ -5718,24 +5891,24 @@ namespace gxos {
                 return false;
             }
 
-            const apps::RegisteredApp* registryApp = findRegistryApp(*manifestApp);
-            if (!registryApp) {
+            apps::RegisteredApp registryApp;
+            if (!copyRegistryApp(*manifestApp, registryApp)) {
                 error = "Application manifest not found: " + name;
                 return false;
             }
 
             apps::AppLaunchResolver launchResolver(s_appRegistry, apps::AppLaunchResolver::CurrentArchitecture());
-            apps::LaunchDecision launchDecision = launchResolver.ResolveLaunch(*registryApp);
+            apps::LaunchDecision launchDecision = launchResolver.ResolveLaunch(registryApp);
             if (!launchDecision.success) {
                 error = launchDecision.reason;
                 return false;
             }
 
                 if (launchDecision.strategy == apps::AppLaunchStrategy::NativeElf) {
-                const apps::AppEntry* nativeEntry = registryApp->FindCompatibleEntry(launchDecision.architecture);
+                const apps::AppEntry* nativeEntry = registryApp.FindCompatibleEntry(launchDecision.architecture);
                 std::string resolvedNativeElfPath;
-                if (nativeEntry && !nativeEntry->path.empty() && !registryApp->appDirectory.empty()) {
-                    resolvedNativeElfPath = (registryApp->appDirectory / std::filesystem::path(nativeEntry->path)).string();
+                if (nativeEntry && !nativeEntry->path.empty() && !registryApp.appDirectory.empty()) {
+                    resolvedNativeElfPath = (registryApp.appDirectory / std::filesystem::path(nativeEntry->path)).string();
                 }
 
                 if (!apps::NativeElfExecutor::ExperimentalExecutionEnabled()) {
@@ -5753,7 +5926,7 @@ namespace gxos {
                     return false;
                 }
 
-                uint64_t nativePid = launchNativeElfProcess(*registryApp, launchDecision);
+                uint64_t nativePid = launchNativeElfProcess(registryApp, launchDecision);
                 if (nativePid == 0) {
                     error = std::string("Native app launch failed to start process: ") + manifestApp->displayName;
                     NotificationManager::Add(error, NotificationLevel::Error);
@@ -5952,6 +6125,11 @@ namespace gxos {
             error.clear();
             outProcessId = 0;
             ensureDefaultAppsRegistered();
+            // Keep lookup, owner/generation validation, resolution, and process
+            // publication in one registry critical section. Unregister therefore
+            // either wins first (and this launch reports STALE_DEPLOYMENT) or
+            // waits until the owned launch request has been copied into a process.
+            std::lock_guard<std::mutex> registryLock(s_appRegistrySnapshotMutex);
 
             const apps::RegisteredApp* registryApp = s_appRegistry.FindById(appId);
             if (!registryApp || !registryApp->temporaryDevelopment ||
@@ -6035,6 +6213,7 @@ namespace gxos {
 
         bool DesktopService::IsInstalledAppId(const std::string& appId) {
             ensureDefaultAppsRegistered();
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
             const apps::RegisteredApp* app = s_appRegistry.FindById(appId);
             return app && !app->temporaryDevelopment;
         }
@@ -6056,25 +6235,57 @@ namespace gxos {
 
             ensureDefaultAppsRegistered();
 
-            // Load pinned from cfg.pinned
+            // Load pinned entries by stable ID when present. Legacy labels are
+            // resolved once and upgraded; missing/ambiguous identities are
+            // omitted so a later app cannot claim the stale display name.
             s_pinned.clear();
-            for (const auto& p : cfg.pinned) {
+            for (size_t i = 0; i < cfg.pinned.size() && s_pinned.size() < kDesktopConfigMaxPinnedEntries; ++i) {
+                const std::string& p = cfg.pinned[i];
+                const std::string storedId = i < cfg.pinnedAppIds.size() ? cfg.pinnedAppIds[i] : std::string();
+                const apps::LaunchTarget target = ResolveLaunchTarget(storedId.empty() ? p : storedId);
+                if (target.type == apps::LaunchTargetType::Unknown || target.diagnosticStatus == "ambiguous" ||
+                    (!storedId.empty() && target.appId != storedId)) {
+                    Logger::write(LogLevel::Info, "Dropped stale pinned launch target: " + p + (storedId.empty() ? std::string() : " appId=" + storedId));
+                    continue;
+                }
                 PinnedItem item;
-                item.name = p;
-                item.kind = PinnedKind::App; // Default to app; TODO: enhance config to store kind
+                item.name = target.appId.empty() || target.displayName.empty() ? p : target.displayName;
+                item.appId = target.appId;
+                item.kind = target.type == apps::LaunchTargetType::FileOpen ? PinnedKind::File :
+                    (target.type == apps::LaunchTargetType::ShellAction ? PinnedKind::Special : PinnedKind::App);
+                if (target.type == apps::LaunchTargetType::FileOpen) item.path = target.pathParameter;
                 item.iconName = "document";
+                bool duplicate = false;
+                for (const PinnedItem& existing : s_pinned) {
+                    if ((!item.appId.empty() && existing.appId == item.appId) ||
+                        (item.appId.empty() && existing.name == item.name)) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (duplicate) continue;
                 s_pinned.push_back(item);
             }
 
-            // Load recent from cfg.recent
+            // Recent entries follow the same rule and remain capped to the
+            // existing recent-program contract.
             s_recentPrograms.clear();
-            for (const auto& r : cfg.recent) {
+            for (size_t i = 0; i < cfg.recent.size() && s_recentPrograms.size() < kMaxRecentPrograms; ++i) {
+                const std::string& r = cfg.recent[i];
+                const std::string storedId = i < cfg.recentAppIds.size() ? cfg.recentAppIds[i] : std::string();
+                const apps::LaunchTarget target = ResolveLaunchTarget(storedId.empty() ? r : storedId);
+                if (target.type == apps::LaunchTargetType::Unknown || target.diagnosticStatus == "ambiguous" ||
+                    (!storedId.empty() && target.appId != storedId) || target.type == apps::LaunchTargetType::FileOpen) {
+                    Logger::write(LogLevel::Info, "Dropped stale recent launch target: " + r + (storedId.empty() ? std::string() : " appId=" + storedId));
+                    continue;
+                }
                 RecentProgramEntry entry;
-                entry.name = canonicalRecentProgramName(r);
-                if (entry.name.empty()) continue;
+                entry.name = target.appId.empty() || target.displayName.empty() ? r : target.displayName;
+                entry.appId = target.appId;
                 bool alreadyPresent = false;
                 for (const auto& existing : s_recentPrograms) {
-                    if (existing.name == entry.name) {
+                    if ((!entry.appId.empty() && existing.appId == entry.appId) ||
+                        (entry.appId.empty() && existing.name == entry.name)) {
                         alreadyPresent = true;
                         break;
                     }
@@ -6083,7 +6294,6 @@ namespace gxos {
                 entry.lastUsedTicks = currentTicks();
                 entry.iconName = "document";
                 s_recentPrograms.push_back(entry);
-                if (s_recentPrograms.size() >= (size_t)kMaxRecentPrograms) break;
             }
             std::string folderError;
             if (!DesktopFolderResolver::EnsureStandardUserFolders(folderError)) {
@@ -6106,14 +6316,18 @@ namespace gxos {
 
             // Update pinned
             cfg.pinned.clear();
+            cfg.pinnedAppIds.clear();
             for (const auto& item : s_pinned) {
                 cfg.pinned.push_back(item.name);
+                cfg.pinnedAppIds.push_back(item.appId);
             }
 
             // Update recent
             cfg.recent.clear();
+            cfg.recentAppIds.clear();
             for (const auto& prog : s_recentPrograms) {
                 cfg.recent.push_back(prog.name);
+                cfg.recentAppIds.push_back(prog.appId);
             }
 
             if (!DesktopConfig::Save("desktop.json", cfg, err)) {

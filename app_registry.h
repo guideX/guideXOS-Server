@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app_manifest.h"
+#include "app_model_limits.h"
 
 #include <cstddef>
 #include <cstdint>

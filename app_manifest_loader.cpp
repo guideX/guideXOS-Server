@@ -1,6 +1,7 @@
 #include "app_manifest_loader.h"
 
 #include "app_manifest_validator.h"
+#include "app_model_limits.h"
 
 #include <cctype>
 #include <fstream>
@@ -305,15 +306,38 @@ AppManifest manifestFromJson(const JsonValue& root) {
 
 AppManifestLoadResult AppManifestLoader::LoadFromFile(const std::filesystem::path& appJsonPath) {
     AppManifestLoadResult result;
-    std::ifstream file(appJsonPath);
+    std::error_code sizeError;
+    const auto fileSize = std::filesystem::file_size(appJsonPath, sizeError);
+    if (sizeError) {
+        result.errors.push_back("Unable to determine manifest size: " + sizeError.message());
+        return result;
+    }
+    if (fileSize > kAppModelMaxManifestBytes) {
+        result.errors.push_back("Manifest exceeds the 1 MiB App Model limit.");
+        return result;
+    }
+    // Read the byte count returned by file_size exactly. Text-mode newline
+    // translation on Windows can shorten CRLF manifests and make valid files
+    // look truncated.
+    std::ifstream file(appJsonPath, std::ios::binary);
     if (!file) {
         result.errors.push_back("Unable to open manifest: " + appJsonPath.string());
         return result;
     }
 
-    std::ostringstream buffer;
-    buffer << file.rdbuf();
-    return LoadFromString(buffer.str());
+    std::string json(static_cast<size_t>(fileSize), '\0');
+    if (fileSize > 0) {
+        file.read(&json[0], static_cast<std::streamsize>(fileSize));
+        if (file.gcount() != static_cast<std::streamsize>(fileSize)) {
+            result.errors.push_back("Manifest changed while it was being read.");
+            return result;
+        }
+    }
+    if (file.peek() != std::char_traits<char>::eof()) {
+        result.errors.push_back("Manifest exceeds the 1 MiB App Model limit.");
+        return result;
+    }
+    return LoadFromString(json);
 }
 
 AppManifestLoadResult AppManifestLoader::LoadFromDirectory(const std::filesystem::path& appDirectory) {
@@ -322,6 +346,10 @@ AppManifestLoadResult AppManifestLoader::LoadFromDirectory(const std::filesystem
 
 AppManifestLoadResult AppManifestLoader::LoadFromString(const std::string& jsonText) {
     AppManifestLoadResult result;
+    if (jsonText.size() > kAppModelMaxManifestBytes) {
+        result.errors.push_back("Manifest exceeds the 1 MiB App Model limit.");
+        return result;
+    }
     try {
         JsonParser parser(jsonText);
         JsonValue root = parser.parse();

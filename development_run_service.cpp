@@ -556,8 +556,12 @@ gx_result Prepare(NativeAppRuntimeContext& owner, const gx_development_run_reque
     temporary.manifest = loaded.manifest;
     std::string registrationError;
     if (!gui::DesktopService::RegisterDevelopmentApp(temporary, registrationError)) {
-        const gx_development_run_error_code registrationCode = registrationError == "APPLICATION_ID_INSTALLED" ? GX_DEVELOPMENT_RUN_ERROR_APPLICATION_ID_INSTALLED :
-            (registrationError == "APPLICATION_ID_IN_USE" ? GX_DEVELOPMENT_RUN_ERROR_APPLICATION_ID_IN_USE : GX_DEVELOPMENT_RUN_ERROR_DEPLOYMENT_ALREADY_ACTIVE);
+        const gx_development_run_error_code registrationCode =
+            registrationError == "APPLICATION_ID_INSTALLED" ? GX_DEVELOPMENT_RUN_ERROR_APPLICATION_ID_INSTALLED :
+            registrationError == "APPLICATION_ID_IN_USE" ? GX_DEVELOPMENT_RUN_ERROR_APPLICATION_ID_IN_USE :
+            registrationError == "DEPLOYMENT_ALREADY_ACTIVE" ? GX_DEVELOPMENT_RUN_ERROR_DEPLOYMENT_ALREADY_ACTIVE :
+            registrationError == "APP_REGISTRY_FULL" ? GX_DEVELOPMENT_RUN_ERROR_SERVICE_UNAVAILABLE :
+            GX_DEVELOPMENT_RUN_ERROR_MANIFEST_MALFORMED;
         setFailure(outSnapshot, registrationCode, registrationError);
         return GX_OK;
     }

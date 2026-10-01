@@ -1,4 +1,5 @@
 #include "app_manifest_validator.h"
+#include "app_model_limits.h"
 
 #include <algorithm>
 #include <cctype>
@@ -25,6 +26,11 @@ bool isValidFileExtension(const std::string& extension) {
 
 void addError(std::vector<std::string>& errors, const std::string& message) {
     errors.push_back(message);
+}
+
+bool hasControlCharacter(const std::string& value) {
+    for (unsigned char c : value) if (c < 0x20u || c == 0x7fu) return true;
+    return false;
 }
 
 } // namespace
@@ -61,10 +67,16 @@ AppManifestValidationResult AppManifestValidator::Validate(const AppManifest& ma
 
     if (manifest.id.empty()) {
         addError(result.errors, "Manifest id is required.");
+    } else if (manifest.id.size() > kAppModelMaxAppIdBytes ||
+               hasControlCharacter(manifest.id)) {
+        addError(result.errors, "Manifest id exceeds the App Model identity bound.");
     }
 
     if (manifest.displayName.empty()) {
         addError(result.errors, "Manifest displayName is required.");
+    } else if (manifest.displayName.size() > kAppModelMaxDisplayNameBytes ||
+               hasControlCharacter(manifest.displayName)) {
+        addError(result.errors, "Manifest displayName exceeds the App Model display-name bound.");
     }
 
     if (!IsKnownAppKind(manifest.kind)) {
@@ -78,12 +90,47 @@ AppManifestValidationResult AppManifestValidator::Validate(const AppManifest& ma
     if ((manifest.kind == AppKind::NativeElf || manifest.kind == AppKind::GXAppPackage) && manifest.supportedArchitectures.empty()) {
         addError(result.errors, "NativeElf and GXAppPackage manifests require at least one supported architecture.");
     }
+    if (manifest.entries.size() > kAppModelMaxEntriesPerManifest) {
+        addError(result.errors, "Manifest entry count exceeds the App Model bound.");
+    }
 
     if (!manifest.icon.empty() && !isRelativePath(manifest.icon)) {
         addError(result.errors, "Manifest icon path must be relative.");
     }
+    if (manifest.icon.size() > kAppModelMaxEntryPathBytes || hasControlCharacter(manifest.icon)) {
+        addError(result.errors, "Manifest icon path exceeds the App Model bound.");
+    }
+    if (manifest.supportedArchitectures.size() > kAppModelMaxEntriesPerManifest ||
+        manifest.permissions.size() > kAppModelMaxEntriesPerManifest ||
+        manifest.fileAssociations.size() > kAppModelMaxEntriesPerManifest ||
+        manifest.desktopRegistryHints.size() > kAppModelMaxEntriesPerManifest) {
+        addError(result.errors, "Manifest metadata count exceeds the App Model bound.");
+    }
+    for (const std::string& architecture : manifest.supportedArchitectures) {
+        if (architecture.size() > kAppModelMaxDisplayNameBytes || hasControlCharacter(architecture)) {
+            addError(result.errors, "Supported architecture value exceeds the App Model bound.");
+        }
+    }
+    for (const auto& hint : manifest.desktopRegistryHints) {
+        if (hint.first.size() > kAppModelMaxDisplayNameBytes ||
+            hint.second.size() > kAppModelMaxDisplayNameBytes ||
+            hasControlCharacter(hint.first) || hasControlCharacter(hint.second)) {
+            addError(result.errors, "Desktop registry hint exceeds the App Model bound.");
+        }
+    }
 
     for (const AppEntry& entry : manifest.entries) {
+        if (entry.path.size() > kAppModelMaxEntryPathBytes || hasControlCharacter(entry.path)) {
+            addError(result.errors, "Invalid manifest entry: entry path exceeds the App Model bound.");
+        }
+        if (entry.architecture.size() > kAppModelMaxDisplayNameBytes ||
+            entry.entryPoint.size() > kAppModelMaxDisplayNameBytes ||
+            entry.abi.size() > kAppModelMaxDisplayNameBytes ||
+            entry.runtime.size() > kAppModelMaxDisplayNameBytes ||
+            hasControlCharacter(entry.architecture) || hasControlCharacter(entry.entryPoint) ||
+            hasControlCharacter(entry.abi) || hasControlCharacter(entry.runtime)) {
+            addError(result.errors, "Manifest entry metadata exceeds the App Model bound.");
+        }
         if (!isRelativePath(entry.path)) {
             addError(result.errors, "Invalid manifest entry: entry path must be relative: " + entry.path);
         }

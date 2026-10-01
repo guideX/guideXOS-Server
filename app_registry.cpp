@@ -1,6 +1,7 @@
 #include "app_registry.h"
 
 #include "app_manifest_loader.h"
+#include "app_manifest_validator.h"
 #include "built_in_app_metadata.h"
 
 #include <algorithm>
@@ -177,6 +178,11 @@ AppScanResult AppRegistry::Scan(const std::vector<AppRegistrySource>& sources) {
 
             if (entry.path().filename() != "app.json") continue;
 
+            if (result.scannedManifestCount >= kAppModelMaxRegistryApps) {
+                result.invalidApps.push_back(makeIssue(source.kind, entry.path(), std::string(),
+                    { "App Model manifest scan capacity reached" }));
+                break;
+            }
             ++result.scannedManifestCount;
             AppManifestLoadResult loadResult = AppManifestLoader::LoadFromFile(entry.path());
             if (!loadResult.valid) {
@@ -355,6 +361,18 @@ bool AppRegistry::RegisterTemporaryDevelopmentApp(const RegisteredApp& app, std:
         error = "invalid temporary development registration";
         return false;
     }
+    const AppManifestValidationResult validation = AppManifestValidator::Validate(app.manifest);
+    if (!validation.valid) {
+        error = validation.errors.empty() ? "invalid temporary development manifest" : validation.errors.front();
+        return false;
+    }
+    if (app.manifest.id.size() > kAppModelMaxAppIdBytes ||
+        app.manifest.entries.size() > kAppModelMaxEntriesPerManifest ||
+        app.manifestPath.generic_string().size() > kAppModelMaxEntryPathBytes ||
+        app.appDirectory.generic_string().size() > kAppModelMaxEntryPathBytes) {
+        error = "temporary development registration exceeds App Model capacity";
+        return false;
+    }
 
     auto existing = m_appsById.find(app.manifest.id);
     if (existing != m_appsById.end()) {
@@ -368,6 +386,11 @@ bool AppRegistry::RegisterTemporaryDevelopmentApp(const RegisteredApp& app, std:
             return false;
         }
         error = "DEPLOYMENT_ALREADY_ACTIVE";
+        return false;
+    }
+
+    if (m_apps.size() >= kAppModelMaxRegistryApps) {
+        error = "APP_REGISTRY_FULL";
         return false;
     }
 
@@ -424,6 +447,15 @@ int AppRegistry::DisplayNameSourcePriority(AppSourceKind kind) {
 }
 
 bool AppRegistry::RegisterApp(const RegisteredApp& app, AppScanResult& result) {
+    if (app.manifest.id.empty() || app.manifest.id.size() > kAppModelMaxAppIdBytes ||
+        app.manifest.displayName.empty() || app.manifest.displayName.size() > kAppModelMaxDisplayNameBytes ||
+        app.manifest.entries.size() > kAppModelMaxEntriesPerManifest ||
+        app.manifestPath.generic_string().size() > kAppModelMaxEntryPathBytes ||
+        app.appDirectory.generic_string().size() > kAppModelMaxEntryPathBytes) {
+        result.invalidApps.push_back(makeIssue(app.sourceKind, app.manifestPath, app.manifest.id,
+            { "App Model identity, display name, or entry count exceeds its bound" }));
+        return false;
+    }
     auto existing = m_appsById.find(app.manifest.id);
     if (existing != m_appsById.end()) {
         std::vector<std::string> errors = { "Duplicate app id: " + app.manifest.id };
@@ -432,6 +464,18 @@ bool AppRegistry::RegisterApp(const RegisteredApp& app, AppScanResult& result) {
 
         m_apps[existing->second] = app;
         return true;
+    }
+
+    if (m_apps.size() >= kAppModelMaxRegistryApps) {
+        const bool alreadyReported = std::any_of(result.invalidApps.begin(), result.invalidApps.end(),
+            [](const AppScanIssue& issue) {
+                return !issue.errors.empty() && issue.errors.front() == "App Model registry capacity reached";
+            });
+        if (!alreadyReported) {
+            result.invalidApps.push_back(makeIssue(app.sourceKind, app.manifestPath, app.manifest.id,
+                { "App Model registry capacity reached" }));
+        }
+        return false;
     }
 
     m_appsById[app.manifest.id] = m_apps.size();
@@ -446,6 +490,12 @@ bool AppRegistry::ShouldReplaceDuplicate(const RegisteredApp& existingApp, const
 
     if (existingApp.sourceKind == AppSourceKind::UserApps && newApp.sourceKind == AppSourceKind::SystemApps) {
         return m_preferSystemAppsOverUserApps;
+    }
+
+    if (existingApp.sourceKind == newApp.sourceKind) {
+        const std::string existingPath = existingApp.manifestPath.lexically_normal().generic_string();
+        const std::string newPath = newApp.manifestPath.lexically_normal().generic_string();
+        return !newPath.empty() && (existingPath.empty() || newPath < existingPath);
     }
 
     return false;

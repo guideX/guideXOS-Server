@@ -2257,10 +2257,15 @@ namespace gxos {
 
         static void refreshStartMenuPinnedRecentFromConfig(const DesktopConfigData& cfg, std::vector<std::string>& items) {
             items.clear();
-            for (const auto& recent : cfg.recent) {
-                const std::string displayName = hostedRecentProgramDisplayName(recent);
+            for (size_t i = 0; i < cfg.recent.size(); ++i) {
+                const std::string& recent = cfg.recent[i];
+                const std::string appId = i < cfg.recentAppIds.size() ? cfg.recentAppIds[i] : std::string();
+                const apps::LaunchTarget target = DesktopService::ResolveLaunchTarget(appId.empty() ? recent : appId);
+                const std::string displayName = target.type == apps::LaunchTargetType::Unknown || target.diagnosticStatus == "ambiguous"
+                    ? std::string()
+                    : (!target.displayName.empty() ? target.displayName : hostedRecentProgramDisplayName(recent));
                 if (displayName.empty()) {
-                    Logger::write(LogLevel::Info, "Compositor start menu skipped missing recent program: " + recent);
+                    Logger::write(LogLevel::Info, "Compositor start menu skipped missing recent program: " + recent + (appId.empty() ? std::string() : " appId=" + appId));
                     continue;
                 }
                 if (!hasEquivalentListItem(items, displayName)) items.push_back(displayName);
@@ -2273,10 +2278,56 @@ namespace gxos {
             ids.clear();
             ids.reserve(labels.size());
             for (const std::string& label : labels) {
+                std::string storedAppId;
+                for (const PinnedItem& item : DesktopService::GetPinned()) {
+                    if (item.name == label && !item.appId.empty()) { storedAppId = item.appId; break; }
+                }
+                if (storedAppId.empty()) {
+                    for (const RecentProgramEntry& entry : DesktopService::GetRecentPrograms()) {
+                        if (entry.name == label && !entry.appId.empty()) { storedAppId = entry.appId; break; }
+                    }
+                }
+                if (!storedAppId.empty()) {
+                    // Keep the original identity even if that registration has
+                    // disappeared since it was persisted. Dispatch by the stale
+                    // ID will fail closed instead of rebinding the label.
+                    ids.push_back(storedAppId);
+                    continue;
+                }
                 const apps::LaunchTarget target = DesktopService::ResolveLaunchTarget(label);
-                ids.push_back(
-                    target.diagnosticStatus == "resolved" ? target.appId : std::string());
+                ids.push_back(target.type == apps::LaunchTargetType::Unknown || target.diagnosticStatus == "ambiguous"
+                    ? std::string() : target.appId);
             }
+        }
+
+        static void synchronizeStoredAppIds(DesktopConfigData& cfg) {
+            const auto appIdForLabel = [](const std::string& label) {
+                for (const PinnedItem& item : DesktopService::GetPinned()) {
+                    if (item.name == label) return item.appId;
+                }
+                for (const RecentProgramEntry& entry : DesktopService::GetRecentPrograms()) {
+                    if (entry.name == label) return entry.appId;
+                }
+                const apps::LaunchTarget target = DesktopService::ResolveLaunchTarget(label);
+                return target.type == apps::LaunchTargetType::Unknown || target.diagnosticStatus == "ambiguous"
+                    ? std::string() : target.appId;
+            };
+
+            std::vector<std::string> pinnedIds;
+            pinnedIds.reserve(cfg.pinned.size());
+            for (size_t i = 0; i < cfg.pinned.size(); ++i) {
+                const std::string existingId = i < cfg.pinnedAppIds.size() ? cfg.pinnedAppIds[i] : std::string();
+                pinnedIds.push_back(existingId.empty() ? appIdForLabel(cfg.pinned[i]) : existingId);
+            }
+            cfg.pinnedAppIds = std::move(pinnedIds);
+
+            std::vector<std::string> recentIds;
+            recentIds.reserve(cfg.recent.size());
+            for (size_t i = 0; i < cfg.recent.size(); ++i) {
+                const std::string existingId = i < cfg.recentAppIds.size() ? cfg.recentAppIds[i] : std::string();
+                recentIds.push_back(existingId.empty() ? appIdForLabel(cfg.recent[i]) : existingId);
+            }
+            cfg.recentAppIds = std::move(recentIds);
         }
 
         static std::string startMenuActionAt(const std::vector<std::string>& labels, const std::vector<std::string>& targetIds, int index) {
@@ -2885,6 +2936,7 @@ namespace gxos {
             g_cfg.desktopThemeId = DesktopThemeIdToString(GetCurrentDesktopThemeId());
             g_cfg.backgroundScaleMode = g_backgroundScaleMode;
             ensureDisplayConfigDefaults(g_cfg);
+            synchronizeStoredAppIds(g_cfg);
 
             std::string legacyErr;
             if (!DesktopConfig::Save("desktop.json", g_cfg, legacyErr)) {
@@ -2902,12 +2954,22 @@ namespace gxos {
         static bool isRightColumnStartMenuShortcut(const std::string& act);
         static void syncRecentProgramsFromService(DesktopConfigData& cfg) {
             cfg.recent.clear();
+            cfg.recentAppIds.clear();
             for (const auto& entry : DesktopService::GetRecentPrograms()) {
                 if (entry.name.empty()) continue;
-                if (!hasEquivalentListItem(cfg.recent, entry.name)) {
-                    cfg.recent.push_back(entry.name);
-                    if (cfg.recent.size() >= 10) break;
+                bool duplicate = false;
+                for (size_t i = 0; i < cfg.recent.size(); ++i) {
+                    const std::string existingId = i < cfg.recentAppIds.size() ? cfg.recentAppIds[i] : std::string();
+                    if ((!entry.appId.empty() && existingId == entry.appId) ||
+                        (entry.appId.empty() && existingId.empty() && cfg.recent[i] == entry.name)) {
+                        duplicate = true;
+                        break;
+                    }
                 }
+                if (duplicate) continue;
+                cfg.recent.push_back(entry.name);
+                cfg.recentAppIds.push_back(entry.appId);
+                if (cfg.recent.size() >= kDesktopConfigMaxRecentEntries) break;
             }
         }
 
@@ -2951,8 +3013,36 @@ namespace gxos {
                 act == "Control Panel" ||
                 act == "Settings";
         }
-        void Compositor::pinAction(const std::string& act) { if (act.empty( )) return; if (std::find(g_cfg.pinned.begin( ), g_cfg.pinned.end( ), act) == g_cfg.pinned.end( )) { g_cfg.pinned.push_back(act); refreshDesktopItems( ); saveDesktopConfig( ); } }
-        void Compositor::unpinAction(const std::string& act) { auto it = std::find(g_cfg.pinned.begin( ), g_cfg.pinned.end( ), act); if (it != g_cfg.pinned.end( )) { g_cfg.pinned.erase(it); refreshDesktopItems( ); saveDesktopConfig( ); } }
+        void Compositor::pinAction(const std::string& act) {
+            if (act.empty() || g_cfg.pinned.size() >= kDesktopConfigMaxPinnedEntries) return;
+            synchronizeStoredAppIds(g_cfg);
+            const apps::LaunchTarget target = DesktopService::ResolveLaunchTarget(act);
+            if (target.type == apps::LaunchTargetType::Unknown || target.diagnosticStatus == "ambiguous") return;
+            const std::string appId = target.appId;
+            const std::string displayName = target.displayName.empty() ? act : target.displayName;
+            for (size_t i = 0; i < g_cfg.pinned.size(); ++i) {
+                if ((!appId.empty() && i < g_cfg.pinnedAppIds.size() && g_cfg.pinnedAppIds[i] == appId) ||
+                    (appId.empty() && g_cfg.pinned[i] == displayName)) return;
+            }
+            g_cfg.pinned.push_back(displayName);
+            g_cfg.pinnedAppIds.push_back(appId);
+            refreshDesktopItems();
+            saveDesktopConfig();
+        }
+        void Compositor::unpinAction(const std::string& act) {
+            synchronizeStoredAppIds(g_cfg);
+            const apps::LaunchTarget target = DesktopService::ResolveLaunchTarget(act);
+            for (size_t i = 0; i < g_cfg.pinned.size(); ++i) {
+                const bool matches = g_cfg.pinned[i] == act ||
+                    (!target.appId.empty() && i < g_cfg.pinnedAppIds.size() && g_cfg.pinnedAppIds[i] == target.appId);
+                if (!matches) continue;
+                g_cfg.pinned.erase(g_cfg.pinned.begin() + static_cast<std::ptrdiff_t>(i));
+                if (i < g_cfg.pinnedAppIds.size()) g_cfg.pinnedAppIds.erase(g_cfg.pinnedAppIds.begin() + static_cast<std::ptrdiff_t>(i));
+                refreshDesktopItems();
+                saveDesktopConfig();
+                return;
+            }
+        }
         static std::string hostedLaunchStatus(const RegisteredDesktopApp& app) {
             if (app.displayName == "App Model Demo" || app.launchName == "App Model Demo") return "launchable viewer";
             if (app.kind == apps::AppKind::BuiltIn) return "launchable if built-in handler exists";
@@ -3237,7 +3327,7 @@ namespace gxos {
             s_lastLaunchAction = act;
             s_lastLaunchTicks = now;
             Logger::write(LogLevel::Info, std::string("Desktop launch: ") + act);
-            if (act == "App Model Demo" || act == "AppModel") {
+            if (act == "App Model Demo" || act == "AppModel" || act == "gxos.builtin.appmodeldemo") {
                 const LaunchDispatchDecision dispatchDecision = DesktopService::SelectLaunchDispatch(act);
                 DesktopService::RecordLaunchDispatchDecision("HostedCompositorEmbeddedAction", dispatchDecision);
                 openAppModelDemoViewerWindow();
@@ -3251,14 +3341,7 @@ namespace gxos {
                 NotificationManager::Add(err.empty() ? std::string("Failed to launch app: ") + act : err, NotificationLevel::Error);
                 return;
             }
-            g_cfg.recent.clear();
-            for (const auto& entry : DesktopService::GetRecentPrograms()) {
-                if (entry.name.empty()) continue;
-                if (!hasEquivalentListItem(g_cfg.recent, entry.name)) {
-                    g_cfg.recent.push_back(entry.name);
-                    if (g_cfg.recent.size() >= 10) break;
-                }
-            }
+            syncRecentProgramsFromService(g_cfg);
             refreshDesktopItems();
         }
 

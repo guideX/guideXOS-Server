@@ -17,6 +17,7 @@ namespace gxos { namespace apps { struct RegisteredApp; } namespace gui {
 
     struct PinnedItem {
         std::string name;           // Display name
+        std::string appId;          // Stable App Model identity; empty for shell/path targets
         std::string path;           // Full path (for File kind) or empty
         PinnedKind kind;
         std::string iconName;       // Icon identifier (optional)
@@ -24,6 +25,7 @@ namespace gxos { namespace apps { struct RegisteredApp; } namespace gui {
 
     struct RecentProgramEntry {
         std::string name;
+        std::string appId;          // Stable App Model identity; empty for fixed shell actions
         uint64_t lastUsedTicks;
         std::string iconName;
     };

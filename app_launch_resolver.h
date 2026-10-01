@@ -38,7 +38,6 @@ public:
     static const char* ToString(AppLaunchStrategy strategy);
 
 private:
-    const AppRegistry& m_registry;
     std::string m_currentArchitecture;
 
     LaunchDecision MakeFailure(const RegisteredApp& app, AppLaunchStrategy strategy, const std::string& reason) const;

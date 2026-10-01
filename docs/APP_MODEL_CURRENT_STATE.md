@@ -908,10 +908,14 @@ Phase 5A smoke coverage is captured by `scripts\smoke-appmodel-phase5a-status.ps
 
 ## 19. Phase 5B regression closeout
 
-Status: passed on 2026-07-05.
+Status: **passed; `appModelV1Status=ready` on 2026-10-01.** See [the Phase 5B closeout report](APPMODEL_PHASE5B_CLOSEOUT.md) for the baseline, 12-record analysis, fixes, full regression evidence, and limitations.
 
-Phase 5B is the final read-only App Model v1 regression closeout. It uses `scripts\smoke-appmodel-phase5b-regression-closeout.ps1` to verify summary/inventory agreement, the product-default active-dispatch rollback path, representative launch equivalence, recent-program canonicalization, trash open-only safety, legacy image retention, out-of-scope boundaries, and cleanup of temporary smoke artifacts.
+The canonical command `scripts\smoke-appmodel-phase5b-regression-closeout.ps1` was first run before source changes. It failed on `appModelV1StatusReady=true` with 96 actual preview records (the earlier brief expected 94), 12 unresolved records and 12 high-risk records. Those sets were identical: five stale display labels appeared 12 times across persisted pinned/recent values and their DesktopService mirrors. They had no canonical registration. The report documents each occurrence and the migration/drop behavior.
 
-App Model v1 is complete.
+After the production repair, the canonical closeout passed with 86 post-smoke storage records: 51 resolved and available (43 ready, 8 shell actions), 35 safely unsupported for the hosted target, 0 unresolved, and 0 high-risk. The status is computed from the existing `overallOk` readiness predicate; no readiness bypass was added. The normal summary reports `appModelV1StatusReady=true`.
+
+The 18-registration value in the Phase 5A snapshot above is historical. The unified Settings Center added the legitimate 19th hosted built-in, `gxos.builtin.settings`, in commit `3e5aa43d0efd098b651d45afbece26bcf81f8c00`. Phase 5B updates the fixture to 19, checks the Settings identity and uniqueness, and retains the count check.
+
+Phase 5B adds owned App Model IDs to pinned and recent storage, bounded config/manifest/registry values, CRLF-safe manifest reads, unique legacy-label migration, truthful safely-unsupported classification, and temporary-registration owner/generation checks. Developer Studio and Native ELF apps remain unavailable to the ordinary hosted launcher. Hosted production dispatch, repeat attempts, unknown/unsupported failures, startup, Recent Programs, Settings, service/network, synthetic display, and clock regressions passed. QEMU was not required because no kernel or native launch code changed. The runtime harness verified dispatch cycles but did not provide visual UI acceptance.
 
 

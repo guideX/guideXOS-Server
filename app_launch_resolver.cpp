@@ -15,13 +15,16 @@ bool architectureMatches(const std::string& candidate, const std::string& curren
 } // namespace
 
 AppLaunchResolver::AppLaunchResolver(const AppRegistry& registry, const std::string& currentArchitecture)
-    : m_registry(registry), m_currentArchitecture(currentArchitecture.empty() ? CurrentArchitecture() : currentArchitecture) {
+    : m_currentArchitecture(currentArchitecture.empty() ? CurrentArchitecture() : currentArchitecture) {
+    (void)registry;
 }
 
 LaunchDecision AppLaunchResolver::ResolveLaunch(const RegisteredApp& app) const {
     AppLaunchStrategy strategy = StrategyForKind(app.manifest.kind);
-    const AppEntry* entry = m_registry.FindCompatibleEntry(app.manifest.id, m_currentArchitecture);
-    if (!entry) entry = app.FindCompatibleEntry(m_currentArchitecture);
+    // Resolve against the value-owned registration supplied by the caller.
+    // Re-querying the mutable registry here could return a pointer invalidated
+    // by a concurrent temporary-app unregister after the caller took a snapshot.
+    const AppEntry* entry = app.FindCompatibleEntry(m_currentArchitecture);
 
     if (app.manifest.id.empty()) return MakeFailure(app, strategy, "Manifest id is required");
     if (!IsArchitectureSupportedByManifest(app.manifest)) return MakeFailure(app, strategy, "Application does not support current architecture: " + m_currentArchitecture);
