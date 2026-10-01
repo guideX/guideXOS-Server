@@ -104,4 +104,12 @@ The smallest next step is a bounded API that enumerates capable registrations fo
 
 ## Final Git closeout
 
-Final branch, worktree inventory, commit hash/message, divergence, and push result are recorded after commit.
+The Phase 6 implementation was committed on branch `main` as:
+
+- Commit: `5c71e323ad235390382fe5d37e747a1405d3655d` — `Add App Model file associations and document activation`
+- Starting HEAD: `bec46eba3468cd8a5f6938bb2181544fd20fa559`
+- Upstream before closeout: `origin/main`; the implementation commit was **0 behind / 1 ahead**.
+- A normal `git push` was attempted and rejected by SSH authentication: `Permission denied (publickey)`. No credentials or remote settings were changed. The push was retried after this report update and received the same rejection.
+- The report update is a separate documentation-only follow-up commit; the final branch is **0 behind / 2 ahead** of `origin/main` because push access is unavailable.
+
+The implementation commit excludes the user's `desktop.json` edit and all startup regression fixtures. The final worktree retains the original two `desktop.json` preferences (the `PacMan PGM1 Ready Input Validation` pin and `desktop.accessibility.enhancedFocusIndicator=false`), the four pre-existing untracked `tmp/startup-appmodel-regression-*` directories, and one additional timestamped fixture produced by this task's Startup App Model regression. The test-created fixture was left in place after the cleanup command was rejected. `desktop.state` and `window-bounds.cfg` were restored to their clean starting contents.
