@@ -3061,6 +3061,12 @@ static void run_uhci_transfer_logic_tests()
           "UHCI token encodes endpoint and DATA1 toggle");
     check(((inToken >> 21) & 0x7FFu) == 63u,
           "UHCI token encodes a 64-byte packet length");
+    const uint32_t cswInToken = make_token(0x69, 2, 1, 1, 13);
+    check((cswInToken & 0xFFu) == 0x69u &&
+          ((cswInToken >> 15) & 0x0Fu) == 1u &&
+          ((cswInToken >> 19) & 1u) == 1u &&
+          ((cswInToken >> 21) & 0x7FFu) == 12u,
+          "UHCI CSW IN TD carries endpoint, current toggle, and exact 13-byte length");
     check(((make_token(0xE1, 1, 2, 0, 0) >> 21) & 0x7FFu) == 0x7FFu,
           "UHCI zero-length token uses the no-data length encoding");
 
@@ -3096,6 +3102,8 @@ static void run_uhci_transfer_logic_tests()
           "UHCI actual-length field decodes a one-byte transfer");
     check(decode_actual_length(7u) == 8,
           "UHCI actual-length field decodes an eight-byte transfer");
+    check(decode_actual_length(12u) == 13,
+          "UHCI actual-length field decodes the exact 13-byte BOT CSW");
     check(decode_actual_length(63u) == 64,
           "UHCI actual-length field decodes a full packet");
     check(decode_actual_length(2046u) == 2047,
@@ -3116,6 +3124,9 @@ static void run_uhci_transfer_logic_tests()
           OBSERVATION_PENDING, "UHCI active TD with unchanged QH is pending");
     check(observe(0, 0x1004u, 0x1000u, 0x1004u, 0) ==
           OBSERVATION_SUCCESS, "UHCI inactive TD with no error succeeded");
+    check(observe(TD_SHORT_PACKET_DETECT | 12u, 0, 0, 0, 0) ==
+          OBSERVATION_SUCCESS,
+          "UHCI completed 13-byte short CSW remains a successful TD");
     check(observe(TD_STALLED, 0, 0, 0, 0) == OBSERVATION_STALL,
           "UHCI stalled condition is classified");
     check(observe(TD_DATA_BUFFER_ERROR, 0, 0, 0, 0) ==

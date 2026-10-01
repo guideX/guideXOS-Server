@@ -143,7 +143,8 @@ function Stop-ProofQemu([int]$ProcessId, [int]$Port,
 
 function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
                          [string]$EspPath, [string]$DiskPath,
-                         [string]$OutputPath, [int]$TimeoutSeconds) {
+                         [string]$OutputPath, [int]$TimeoutSeconds,
+                         [string]$ManifestPath) {
     $serialPath = Join-Path $OutputPath "$RunName.serial.log"
     $stderrPath = Join-Path $OutputPath "$RunName.stderr.log"
     $stdoutPath = Join-Path $OutputPath "$RunName.stdout.log"
@@ -170,6 +171,19 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
     $process = Start-Process -FilePath $QemuFull -ArgumentList $arguments `
         -WorkingDirectory $Root -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+    $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$($process.Id)"
+    $otherQemu = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'" |
+        Where-Object { $_.ProcessId -ne $process.Id })
+    if ($ManifestPath -and (Test-Path -LiteralPath $ManifestPath)) {
+        Add-Content -LiteralPath $ManifestPath -Encoding ascii -Value @(
+            "qemu.$RunName.pid=$($process.Id)",
+            "qemu.$RunName.commandLine=$($processInfo.CommandLine)",
+            "qemu.$RunName.serial=$serialPath",
+            "qemu.$RunName.monitorPort=$port",
+            "qemu.$RunName.otherProcessesAtStart=$($otherQemu.Count)",
+            "qemu.$RunName.otherPidsAtStart=$(($otherQemu | ForEach-Object { $_.ProcessId }) -join ',')"
+        )
+    }
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     while ([DateTime]::UtcNow -lt $deadline) {
         if (Test-Path -LiteralPath $serialPath) {
@@ -284,36 +298,60 @@ try {
     $diskStream.Dispose()
     $bootHash = (Get-FileHash -LiteralPath (Join-Path $bootPath "BOOTX64.EFI") -Algorithm SHA256).Hash
     $kernelHash = (Get-FileHash -LiteralPath (Join-Path $EspPath "kernel.elf") -Algorithm SHA256).Hash
+    $kernelBytes = (Get-Item -LiteralPath (Join-Path $EspPath "kernel.elf")).Length
     $initialHash = (Get-FileHash -LiteralPath $DiskPath -Algorithm SHA256).Hash
+    $qemuVersion = (& $QemuFull --version | Select-Object -First 1)
+    $qemuHash = (Get-FileHash -LiteralPath $QemuFull -Algorithm SHA256).Hash
+    $ovmfHash = (Get-FileHash -LiteralPath $OvmfFull -Algorithm SHA256).Hash
+    $qemuAtStart = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'")
     @(
         "proof=DM15-AHCI-$Stage",
+        "manifestSchema=DM19-TRANSPORT-1",
         "attemptNumber=$AttemptNumber",
         "timestampUtc=$([DateTime]::UtcNow.ToString('o'))",
         "bootMedium=isolated-ESP-directory-backend",
         "machine=q35-usb-off-built-in-ICH9-AHCI",
+        "cpu=QEMU-default (no -cpu argument)",
+        "controller=ICH9-AHCI on Q35",
+        "controllerArguments=-machine q35,usb=off (built-in ICH9 AHCI)",
+        "accelerator=QEMU default (no -accel argument)",
         "bootloaderSha256=$bootHash",
         "kernelSha256=$kernelHash",
+        "kernelBytes=$kernelBytes",
         "secondaryImage=$DiskPath",
+        "storageImagePath=$DiskPath",
         "secondaryFormat=raw",
         "secondaryCapacityBytes=$((Get-Item -LiteralPath $DiskPath).Length)",
         "secondaryInitialSha256=$initialHash",
+        "storageImageBytes=$((Get-Item -LiteralPath $DiskPath).Length)",
+        "storageImageSha256Before=$initialHash",
+        "storageImageAccess=writable-disposable-only",
+        "storageCacheMode=QEMU default (cache option omitted from argv)",
+        "uefiImagePath=$OvmfFull",
+        "uefiSha256=$ovmfHash",
         "secondaryPlacement=AHCI-port1",
         "bootDevicePlacement=AHCI-port0",
         "physicalHostDisksPassedToQemu=none",
-        "qemu=$((& $QemuFull --version | Select-Object -First 1))"
+        "qemu=$qemuVersion",
+        "qemuSha256=$qemuHash",
+        "timeoutPrivateOrFirstBootSeconds=300",
+        "timeoutRediscoveryBootSeconds=180",
+        "hostQemuProcessesBefore=$($qemuAtStart.Count)",
+        "hostQemuPidsBefore=$(($qemuAtStart | ForEach-Object { $_.ProcessId }) -join ',')"
     ) | Set-Content -LiteralPath $manifestPath -Encoding ascii
     @("identity=GUIDEXOS-DM15-QEMU-$Stage", "proofManifest=/dm15-manifest.txt") |
         Set-Content -LiteralPath (Join-Path $EspPath "build-identity.txt") -Encoding ascii
 
     if ($Stage -eq "PrivateWrite") {
         $activeBoot = Start-ProofBoot "private-write-boot" `
-            "[DM15-QEMU] private-proof=PASS" $EspPath $DiskPath $WorkFull 300
+            "[DM15-QEMU] private-proof=PASS" $EspPath $DiskPath $WorkFull 300 $manifestPath
         Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
         $activeBoot = $null
         $finalHash = (Get-FileHash -LiteralPath $DiskPath -Algorithm SHA256).Hash
         if ($initialHash -ne $finalHash) { throw "Private raw write proof did not restore the complete image hash." }
         Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
             "secondaryFinalSha256=$finalHash",
+            "transportResult=PASS",
             "result=PASS tier=1-private-write-readback-flush-restore",
             "sharedWriteRegistration=disabled",
             "imageRestoredByteForByte=yes",
@@ -321,12 +359,12 @@ try {
         )
     } else {
         $activeBoot = Start-ProofBoot "first-boot" `
-            "[DM15-QEMU] lifecycle=PASS" $EspPath $DiskPath $WorkFull 300
+            "[DM15-QEMU] lifecycle=PASS" $EspPath $DiskPath $WorkFull 300 $manifestPath
         $firstSerial = $activeBoot.SerialPath
         Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
         $activeBoot = $null
         $activeBoot = Start-ProofBoot "rediscovery-boot" `
-            "[DM15-QEMU] reboot-rediscovery=PASS" $EspPath $DiskPath $WorkFull 180
+            "[DM15-QEMU] reboot-rediscovery=PASS" $EspPath $DiskPath $WorkFull 180 $manifestPath
         $rediscoverySerial = $activeBoot.SerialPath
         Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
         $activeBoot = $null
@@ -346,7 +384,8 @@ try {
             "result=PASS tier=2-full-lifecycle-and-restart-rediscovery",
             "failedStage=none",
             "writesOccurred=yes",
-            "inspection=PASS read-only-GPT-FAT32-independent-verifier"
+            "inspection=PASS read-only-GPT-FAT32-independent-verifier",
+            "transportResult=PASS"
         )
     }
     Write-Host "DM15 $Stage proof passed. Preserved artifacts: $WorkFull"
@@ -365,7 +404,8 @@ try {
             catch { $failureText += " imageHash=locked-or-unavailable" }
         }
         Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
-            "secondaryFinalSha256=$finalHash", "result=FAIL", "failure=$failureText"
+            "secondaryFinalSha256=$finalHash", "transportResult=FAIL",
+            "result=FAIL", "failure=$failureText"
         )
     }
     throw

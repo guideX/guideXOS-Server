@@ -107,14 +107,36 @@ $stderr = Join-Path $WorkFull "qemu-stderr.log"
 $qmpLog = Join-Path $WorkFull "qmp-transcript.jsonl"
 $manifest = Join-Path $WorkFull "manifest.txt"
 $qemuVersion = (& $QemuFull --version | Select-Object -First 1)
+$qemuHash = (Get-FileHash -LiteralPath $QemuFull -Algorithm SHA256).Hash
+$ovmfHash = (Get-FileHash -LiteralPath $OvmfFull -Algorithm SHA256).Hash
+$kernelHash = (Get-FileHash -LiteralPath $kernel -Algorithm SHA256).Hash
+$kernelBytes = (Get-Item -LiteralPath $kernel).Length
+$bootloaderHash = (Get-FileHash -LiteralPath $bootloader -Algorithm SHA256).Hash
+$qemuAtStart = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'")
 @("proof=DM14-QEMU-USB-HOTPLUG",
+  "manifestSchema=DM19-TRANSPORT-1",
   "timestampUtc=$([DateTime]::UtcNow.ToString('o'))",
-  "qemu=$qemuVersion", "controller=PIIX3-UHCI", "rootPortBus=uhci.0",
+  "qemu=$qemuVersion", "qemuSha256=$qemuHash",
+  "machine=pc,usb=off", "cpu=QEMU-default (no -cpu argument)",
+  "controller=PIIX3-UHCI", "controllerArguments=-device piix3-usb-uhci,id=uhci",
+  "accelerator=$QemuAccelerator", "rootPortBus=uhci.0",
   "deviceId=usbdisk", "sourceImage=$SourceFull",
   "sourceImageSha256=$((Get-FileHash -LiteralPath $SourceFull -Algorithm SHA256).Hash)",
   "mediaA=$imageA", "mediaASha256Before=$hashAStart",
   "mediaB=$imageB", "mediaBSha256Before=$hashBStart",
   "mediaBytes=$((Get-Item -LiteralPath $imageA).Length)",
+  "storageImagePath=A:$imageA;B:$imageB",
+  "storageImageBytes=$((Get-Item -LiteralPath $imageA).Length)",
+  "storageImageSha256Before=A:$hashAStart;B:$hashBStart",
+  "storageImageAccess=writable-disposable-only",
+  "storageCacheMode=writeback (explicit on initial and replacement backends)",
+  "uefiImagePath=$OvmfFull", "uefiSha256=$ovmfHash",
+  "kernelBytes=$kernelBytes", "kernelSha256=$kernelHash",
+  "bootloaderSha256=$bootloaderHash",
+  "timeoutSerialMarkerSeconds=180", "timeoutQmpConnectSeconds=30",
+  "timeoutQmpCommandSeconds=15", "timeoutDeviceDeletedSeconds=15",
+  "hostQemuProcessesBefore=$($qemuAtStart.Count)",
+  "hostQemuPidsBefore=$(($qemuAtStart | ForEach-Object { $_.ProcessId }) -join ',')",
   "sameCapacity=yes", "sameSectorSize=512", "sameDefaultVidPid=yes",
   "usbSerialDescriptor=not-specified-by-qemu-command-line",
   "mediaBPayloadOffset=$payloadOffset", "mediaBPayload=guideXOS DM14 USB revisionB proof 002\\r\\n",
@@ -142,7 +164,9 @@ $process = Start-Process -FilePath $QemuFull -ArgumentList $arguments -WorkingDi
 $processRow = Get-CimInstance Win32_Process -Filter "ProcessId=$($process.Id)"
 Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
     "qemuPid=$($process.Id)", "qmpPort=$qmpPort", "serialLog=$serial",
-    "qmpLog=$qmpLog", "qemuCommandLine=$($processRow.CommandLine)")
+    "qmpLog=$qmpLog", "qemuCommandLine=$($processRow.CommandLine)",
+    "qemu.otherProcessesAtStart=$(($qemuAtStart | Where-Object { $_.ProcessId -ne $process.Id }).Count)",
+    "qemu.otherPidsAtStart=$(($qemuAtStart | Where-Object { $_.ProcessId -ne $process.Id } | ForEach-Object { $_.ProcessId }) -join ',')")
 
 $script:QmpId = 0
 $script:Run = $null
@@ -341,11 +365,12 @@ try {
     Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
       "mediaASha256After=$hashAEnd", "mediaBSha256After=$hashBEnd",
       "rawInspection=$inspection", "dm14FailureMarkerCount=$($failure.Count)",
+      "transportResult=PASS",
       "result=PASS-QEMU-SEQUENCE-AND-PROOF-COMPLETED")
     Write-Host "DM14 QEMU hotplug sequence completed. Evidence: $WorkFull"
 } catch {
     Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
-        "result=FAIL", "failure=$($_.Exception.Message -replace '[\r\n]+',' ')")
+        "transportResult=FAIL", "result=FAIL", "failure=$($_.Exception.Message -replace '[\r\n]+',' ')")
     if (Test-Path -LiteralPath $serial) {
         Get-Content -LiteralPath $serial -Tail 80 | Set-Content -LiteralPath (Join-Path $WorkFull "failure-tail.txt") -Encoding utf8
     }

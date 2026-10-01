@@ -125,11 +125,15 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
             -WorkingDirectory $Root -WindowStyle Hidden -PassThru `
             -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
         $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$($process.Id)"
+        $otherQemu = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'" |
+            Where-Object { $_.ProcessId -ne $process.Id })
         if ($processInfo -and $ManifestPath -and
             (Test-Path -LiteralPath $ManifestPath)) {
             Add-Content -LiteralPath $ManifestPath -Encoding ascii -Value @(
                 "qemuAttempt=$ProofAttempt boot=$RunName launchTry=$attempt pid=$($process.Id)",
                 "qemuCommandLine.$RunName.$attempt=$($processInfo.CommandLine)",
+                "qemu.$RunName.$attempt.otherProcessesAtStart=$($otherQemu.Count)",
+                "qemu.$RunName.$attempt.otherPidsAtStart=$(($otherQemu | ForEach-Object { $_.ProcessId }) -join ',')",
                 "qemuSerial.$RunName.$attempt=$serialPath",
                 "qemuDebug.$RunName.$attempt=$debugPath"
             )
@@ -263,23 +267,49 @@ try {
 
     $bootHash = (Get-FileHash -LiteralPath (Join-Path $bootPath "BOOTX64.EFI") -Algorithm SHA256).Hash
     $kernelHash = (Get-FileHash -LiteralPath (Join-Path $EspPath "kernel.elf") -Algorithm SHA256).Hash
+    $kernelBytes = (Get-Item -LiteralPath (Join-Path $EspPath "kernel.elf")).Length
     $initialHash = (Get-FileHash -LiteralPath $DiskPath -Algorithm SHA256).Hash
+    $qemuVersion = (& $QemuFull --version | Select-Object -First 1)
+    $qemuHash = (Get-FileHash -LiteralPath $QemuFull -Algorithm SHA256).Hash
+    $ovmfHash = (Get-FileHash -LiteralPath $OvmfFull -Algorithm SHA256).Hash
+    $qemuAtStart = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'")
     @(
         "proof=DM10-QEMU-SECONDARY-DISK",
+        "manifestSchema=DM19-TRANSPORT-1",
         "attemptNumber=$AttemptNumber",
         "timestampUtc=$([DateTime]::UtcNow.ToString('o'))",
         "bootMedium=isolated-ESP-directory-backend",
         "bootloaderSha256=$bootHash",
         "kernelSha256=$kernelHash",
         "secondaryImage=$DiskPath",
+        "storageImagePath=$DiskPath",
         "secondaryFormat=raw",
         "secondaryCapacityBytes=$((Get-Item -LiteralPath $DiskPath).Length)",
         "secondaryInitialSha256=$initialHash",
+        "storageImageBytes=$((Get-Item -LiteralPath $DiskPath).Length)",
+        "storageImageSha256Before=$initialHash",
+        "storageImageAccess=writable-disposable-only",
+        "storageCacheMode=QEMU default (cache option omitted from argv)",
         "secondaryPlacement=IDE-channel0-target1-primary-slave",
         "bootDevicePlacement=IDE-channel0-target0-primary-master",
         "secondarySelection=ATA-channel-target-and-QEMU-model-plus-DefinitelyNotBoot; global-index-scanned",
+        "machine=pc,usb=off",
+        "cpu=QEMU-default (no -cpu argument)",
+        "controller=QEMU legacy IDE on machine pc",
+        "controllerArguments=-drive file=$DiskPath,format=raw,if=ide,index=1",
+        "uefiImagePath=$OvmfFull",
+        "uefiSha256=$ovmfHash",
         "physicalHostDisksPassedToQemu=none",
-        "qemu=$((& $QemuFull --version | Select-Object -First 1))"
+        "kernelBytes=$kernelBytes",
+        "kernelSha256=$kernelHash",
+        "bootloaderSha256=$bootHash",
+        "qemu=$qemuVersion",
+        "qemuSha256=$qemuHash",
+        "timeoutFirstBootSeconds=300",
+        "timeoutRediscoveryBootSeconds=180",
+        "timeoutLaunchRetries=5",
+        "hostQemuProcessesBefore=$($qemuAtStart.Count)",
+        "hostQemuPidsBefore=$(($qemuAtStart | ForEach-Object { $_.ProcessId }) -join ',')"
     ) | Set-Content -LiteralPath $manifestPath -Encoding ascii
     @(
         "identity=GUIDEXOS-DM10-QEMU-PROOF-V1",
@@ -326,7 +356,8 @@ try {
         "result=PASS tier=2 full-lifecycle-and-restart-rediscovery",
         "failedStage=none",
         "writesOccurred=yes",
-        "inspection=PASS read-only-GPT-FAT32-independent-verifier"
+        "inspection=PASS read-only-GPT-FAT32-independent-verifier",
+        "transportResult=PASS"
     ) -Encoding ascii
     Write-Host "DM9 QEMU proof passed. Preserved artifacts: $WorkFull"
     Write-Host "Secondary raw image: $DiskPath"
@@ -368,6 +399,7 @@ try {
     if (Test-Path -LiteralPath $manifestPath) {
         Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
             "secondaryFinalSha256=$finalImageHash",
+            "transportResult=FAIL",
             "result=FAIL",
             "failedStage=$failedStage",
             "writesOccurred=$($writesOccurred.ToString().ToLowerInvariant())",

@@ -252,6 +252,8 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
     dev->lastSenseValid = false;
     CommandBlockWrapper cbw;
     build_cbw(dev, &cbw, direction, dataLength, command, commandLength);
+    const uint32_t expectedCswTag = le32(
+        reinterpret_cast<const uint8_t*>(&cbw) + 4);
 
     dev->lastBotStage = BOT_STAGE_CBW;
     uint16_t sent = 0;
@@ -328,6 +330,28 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
     status = usb::hci::bulk_transfer(dev->usbAddress, dev->bulkInEP,
                                      csw, sizeof(csw), &received);
     if (status != usb::XFER_SUCCESS || received != sizeof(csw)) {
+        serial::puts("[USB-MSC] bot-csw-failure opcode=0x");
+        serial::put_hex8(command[0]);
+        serial::puts(" cbw-tag=0x");
+        serial::put_hex32(expectedCswTag);
+        serial::puts(" direction=0x");
+        serial::put_hex8(direction);
+        serial::puts(" data-expected=0x");
+        serial::put_hex32(dataLength);
+        serial::puts(" data-actual=0x");
+        serial::put_hex32(dataTransferred);
+        serial::puts(" csw-expected=0x");
+        serial::put_hex8(sizeof(CommandStatusWrapper));
+        serial::puts(" csw-actual=0x");
+        serial::put_hex16(received);
+        serial::puts(" expected-csw-tag=0x");
+        serial::put_hex32(expectedCswTag);
+        serial::puts(" transfer-status=0x");
+        serial::put_hex8(static_cast<uint8_t>(status));
+        serial::puts(" csw-buffer=");
+        for (uint8_t i = 0; i < sizeof(CommandStatusWrapper); ++i)
+            serial::put_hex8(csw[i]);
+        serial::putc('\n');
         if (writeCommand && (status == usb::XFER_CANCELLED ||
                              !usb::get_device(dev->usbAddress)))
             dev->lastWriteOutcome = block::USB_WRITE_REMOVED_UNKNOWN;

@@ -14,6 +14,10 @@ param(
     [string]$QemuExecutable = "C:\Program Files\qemu\qemu-system-x86_64.exe",
     [string]$OvmfCode = "OVMF.fd",
     [string]$WorkDir = "",
+    [string]$QemuAccelerator = "",
+    [string]$KernelImage = "kernel\build\amd64\bin\kernel.elf",
+    [string]$BootloaderImage = "guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe",
+    [int]$ProofTimeoutSeconds = 300,
     [switch]$UsbReadOnly
 )
 $ErrorActionPreference = "Stop"
@@ -39,8 +43,10 @@ if (-not $UsbFull.StartsWith($repoOut + [IO.Path]::DirectorySeparatorChar,
 if (-not (Test-Path -LiteralPath $UsbFull -PathType Leaf)) { throw "Create a fresh disposable raw image first: $UsbFull" }
 if ((Get-Item -LiteralPath $UsbFull).Length -lt 64MB) { throw "USB proof image must be at least 64 MiB." }
 if (-not (Test-Path -LiteralPath (Join-Path $EspFull "ramdisk.img"))) { throw "ESP runtime files are missing." }
-$kernel = Join-Path $Root "kernel\build\amd64\bin\kernel.elf"
-$bootloader = Join-Path $Root "guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe"
+$kernelPath = if ([IO.Path]::IsPathRooted($KernelImage)) { $KernelImage } else { Join-Path $Root $KernelImage }
+$bootloaderPath = if ([IO.Path]::IsPathRooted($BootloaderImage)) { $BootloaderImage } else { Join-Path $Root $BootloaderImage }
+$kernel = [IO.Path]::GetFullPath($kernelPath)
+$bootloader = [IO.Path]::GetFullPath($bootloaderPath)
 if (-not (Test-Path -LiteralPath $kernel) -or -not (Test-Path -LiteralPath $bootloader)) { throw "Build the UEFI loader and DM13 proof kernel first." }
 $espStage = Join-Path $WorkFull "esp"
 $serial = Join-Path $WorkFull "usb-write.serial.log"
@@ -86,7 +92,9 @@ try {
       "usb_msd_packet_complete","usb_msd_cmd_complete","usb_msd_send_status") |
         Set-Content -LiteralPath $events -Encoding ascii
     $usbDrive = if ($UsbReadOnly) { "file=$UsbFull,format=raw,readonly=on" } else { "file=$UsbFull,format=raw" }
-    $args=@("-drive","if=pflash,format=raw,readonly=on,file=$OvmfFull",
+    $args=@()
+    if ($QemuAccelerator) { $args += @("-accel",$QemuAccelerator) }
+    $args += @("-drive","if=pflash,format=raw,readonly=on,file=$OvmfFull",
       "-machine","pc,usb=off","-device","piix3-usb-uhci,id=uhci",
       "-drive","file=fat:rw:$espStage,format=raw",
       "-drive","if=none,id=usbdata,$usbDrive",
@@ -96,31 +104,55 @@ try {
       "-m","1024M","-vga","std","-display","none","-serial","file:$serial",
       "-trace","events=$events,file=$trace","-monitor","tcp:127.0.0.1:$port,server,nowait",
       "-rtc","base=utc,clock=host","-no-reboot")
-    @("proof=DM13-QEMU-USB-PRIVATE-WRITE-RESTORE","timestampUtc=$([DateTime]::UtcNow.ToString('o'))",
-      "qemu=$((& $QemuFull --version | Select-Object -First 1))","controller=PIIX3-UHCI",
-      "usbImage=$UsbFull","usbImageBytes=$((Get-Item -LiteralPath $UsbFull).Length)",
-      "usbImageSha256Before=$hashBefore","usbImageAccess=$(if ($UsbReadOnly) { 'read-only-disposable-only' } else { 'writable-disposable-only' })",
+    $qemuVersion = (& $QemuFull --version | Select-Object -First 1)
+    $qemuHash = (Get-FileHash -LiteralPath $QemuFull -Algorithm SHA256).Hash
+    $ovmfHash = (Get-FileHash -LiteralPath $OvmfFull -Algorithm SHA256).Hash
+    $kernelHash = (Get-FileHash -LiteralPath (Join-Path $espStage "kernel.elf") -Algorithm SHA256).Hash
+    $bootloaderHash = (Get-FileHash -LiteralPath (Join-Path $bootDir "BOOTX64.EFI") -Algorithm SHA256).Hash
+    $existingQemu = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'")
+    $proofName = if ($UsbReadOnly) { 'DM13-QEMU-USB-READ-ONLY-REFERENCE' } else { 'DM13-QEMU-USB-PRIVATE-WRITE-RESTORE' }
+    $imageAccess = if ($UsbReadOnly) { 'read-only-existing-reference' } else { 'writable-disposable-only' }
+    @("manifestSchema=DM19-TRANSPORT-1","proof=$proofName","timestampUtc=$([DateTime]::UtcNow.ToString('o'))",
+      "qemu=$qemuVersion","qemuSha256=$qemuHash","machine=pc,usb=off","cpu=QEMU-default (no -cpu argument)",
+      "controller=PIIX3-UHCI","controllerArguments=-device piix3-usb-uhci,id=uhci",
+      "accelerator=$(if ($QemuAccelerator) { $QemuAccelerator } else { 'QEMU-default' })",
+      "storageImagePath=$UsbFull","storageImageBytes=$((Get-Item -LiteralPath $UsbFull).Length)",
+      "storageImageSha256Before=$hashBefore","storageImageAccess=$imageAccess",
+      "storageCacheMode=QEMU default (cache option omitted from argv)",
+      "uefiImagePath=$OvmfFull","uefiSha256=$ovmfHash",
+      "kernelBytes=$((Get-Item -LiteralPath (Join-Path $espStage 'kernel.elf')).Length)",
+      "kernelSha256=$kernelHash","bootloaderSha256=$bootloaderHash",
+      "timeoutUhciBulkFrames=1000","timeoutHarnessSeconds=$ProofTimeoutSeconds","timeoutKernelMainLoopSeconds=300",
+      "hostQemuProcessesBefore=$($existingQemu.Count)",
+      "hostQemuPidsBefore=$(($existingQemu | ForEach-Object { $_.ProcessId }) -join ',')",
+      "qemuTraceEnabled=yes","qemuTraceEvents=$events","qemuTrace=$trace",
+      "monitorProtocol=HMP TCP loopback; runner sends quit only after proof or in cleanup",
       "targetLba=32768",
       "targetCounts=$(if ($UsbReadOnly) { 'single-sector-read-only-check' } else { '1x100,2,7,128' })",
       "targetCanaries=$(if ($UsbReadOnly) { 'read-only-sector' } else { 'LBA-1 and LBA+count' })",
       "physicalHostDisksPassedToQemu=none","sharedWriteCallbackExpected=$(if ($UsbReadOnly) { 'no' } else { 'yes' })") |
         Set-Content -LiteralPath $manifest -Encoding ascii
     $proc=Start-Process -FilePath $QemuFull -ArgumentList $args -WorkingDirectory $Root -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-    $deadline=[DateTime]::UtcNow.AddSeconds(300); $booted=$false
+    $processRow = Get-CimInstance Win32_Process -Filter "ProcessId=$($proc.Id)"
+    Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
+      "qemuPid=$($proc.Id)","qemuCommandLine=$($processRow.CommandLine)")
+    $deadline=[DateTime]::UtcNow.AddSeconds($ProofTimeoutSeconds); $booted=$false
     while ([DateTime]::UtcNow -lt $deadline) {
         if (Test-Path -LiteralPath $serial) {
             $log=Get-Content -LiteralPath $serial -Raw -ErrorAction SilentlyContinue
             if ($log -and $log -match '\[KERNEL-FAULT\]') { throw "QEMU kernel fault: $serial" }
-            if ($log -and $log.Contains("[KERNEL] Entering main loop")) {
-                $booted=$true
-                if ($UsbReadOnly) {
-                    $passed=$log -match '\[DM13-QEMU-USB\] write-protect=PASS reads=PASS private-write-blocked=PASS common-write-blocked=PASS'
-                } else {
-                    $passed=($log -match '\[DM13-QEMU-USB\] proof=PASS private-write=PASS sync-cache=PASS readback=PASS adjacent-canaries=PASS restored=PASS') -and
-                        ($log -match '\[DM13-QEMU-USB\] common-write-callback-readback-restore=PASS')
-                }
-                break
+            if ($log -and $log.Contains("[KERNEL] Entering main loop")) { $booted=$true }
+            if ($log -and $log -match '\[DM13-QEMU-USB\] (?:proof=FAIL|hundred-write-sync-readback-restore-cycles=FAIL|common-write-callback-readback-restore=FAIL)') {
+                throw "QEMU USB proof reported a failure; inspect $serial"
             }
+            if ($UsbReadOnly) {
+                $passed=$log -match '\[DM13-QEMU-USB\] write-protect=PASS reads=PASS private-write-blocked=PASS common-write-blocked=PASS'
+            } else {
+                $passed=($log -match '\[DM13-QEMU-USB\] proof=PASS private-write=PASS sync-cache=PASS readback=PASS adjacent-canaries=PASS restored=PASS') -and
+                    ($log -match '\[DM13-QEMU-USB\] common-write-callback-readback-restore=PASS')
+            }
+            if ($passed) { break }
+            if ($booted) { throw "QEMU reached the main loop without the expected USB proof success markers; inspect $serial" }
         }
         if ($proc.HasExited) { break }
         Start-Sleep -Milliseconds 500
@@ -128,16 +160,17 @@ try {
     if (-not $passed) {
         $log=Get-Content -LiteralPath $serial -Raw -ErrorAction SilentlyContinue
         $tail=if ($log) { (($log -split "`r?`n") | Select-Object -Last 28) -join ' | ' } else { '(serial empty)' }
-        throw "DM13 USB write proof failed (booted=$booted). $tail"
+        throw "DM13 USB proof failed (booted=$booted). $tail"
     }
     Stop-Dm13Qemu $proc $port $serial; $proc=$null
     $hashAfter=(Get-FileHash -LiteralPath $UsbFull -Algorithm SHA256).Hash
     if ($hashBefore -ne $hashAfter) { throw "Host image hash changed after restore: $hashBefore => $hashAfter" }
     $resultSummary = if ($UsbReadOnly) { "result=PASS qemu-write-protection=yes reads=yes writes-blocked=yes host-image-unchanged=yes physical-media=none" } else { "result=PASS private-production-write=yes sync-cache=yes exact-readback=yes canaries=yes host-image-restored=yes physical-media=none" }
     Add-Content -LiteralPath $manifest -Encoding ascii -Value @("serialLog=$serial","uhciTrace=$trace",
-      "usbImageSha256After=$hashAfter",$resultSummary)
-    Write-Host "DM13 private USB write proof passed. Evidence: $WorkFull"
+      "storageImageSha256After=$hashAfter","transportResult=PASS",$resultSummary)
+    if ($UsbReadOnly) { Write-Host "DM13 USB read-only reference proof passed. Evidence: $WorkFull" }
+    else { Write-Host "DM13 private USB write proof passed. Evidence: $WorkFull" }
 } catch {
-    Add-Content -LiteralPath $manifest -Encoding ascii -Value @("result=FAIL","failure=$($_.Exception.Message -replace '[\r\n]+',' ')") -ErrorAction SilentlyContinue
+    Add-Content -LiteralPath $manifest -Encoding ascii -Value @("transportResult=FAIL","result=FAIL","failure=$($_.Exception.Message -replace '[\r\n]+',' ')") -ErrorAction SilentlyContinue
     throw
 } finally { if ($proc) { Stop-Dm13Qemu $proc $port $serial } }

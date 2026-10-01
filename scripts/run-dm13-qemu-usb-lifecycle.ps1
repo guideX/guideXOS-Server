@@ -15,7 +15,10 @@ param(
     [string]$QemuExecutable = "C:\Program Files\qemu\qemu-system-x86_64.exe",
     [string]$QemuAccelerator = "whpx",
     [string]$OvmfCode = "OVMF.fd",
-    [string]$WorkDir = ""
+    [string]$WorkDir = "",
+    [string]$KernelImage = "kernel\build\amd64\bin\kernel.elf",
+    [string]$BootloaderImage = "guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe",
+    [switch]$TraceUsb
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,8 +44,10 @@ if (Test-Path -LiteralPath $WorkFull) {
     }
 } else { New-Item -ItemType Directory -Path $WorkFull -Force | Out-Null }
 
-$kernel = Join-Path $Root "kernel\build\amd64\bin\kernel.elf"
-$bootloader = Join-Path $Root "guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe"
+$kernelPath = if ([IO.Path]::IsPathRooted($KernelImage)) { $KernelImage } else { Join-Path $Root $KernelImage }
+$bootloaderPath = if ([IO.Path]::IsPathRooted($BootloaderImage)) { $BootloaderImage } else { Join-Path $Root $BootloaderImage }
+$kernel = [IO.Path]::GetFullPath($kernelPath)
+$bootloader = [IO.Path]::GetFullPath($bootloaderPath)
 if (-not (Test-Path -LiteralPath $kernel) -or -not (Test-Path -LiteralPath $bootloader)) {
     throw "Build the UEFI loader and DM13 proof kernel first."
 }
@@ -69,14 +74,28 @@ if ($LASTEXITCODE -ne 0) { throw "Refusing to attach a nonblank USB image: $($bl
 $imageBefore = (Get-FileHash -LiteralPath $UsbFull -Algorithm SHA256).Hash
 $imageBytes = (Get-Item -LiteralPath $UsbFull).Length
 $qemuVersion = (& $QemuFull --version | Select-Object -First 1)
+$qemuHash = (Get-FileHash -LiteralPath $QemuFull -Algorithm SHA256).Hash
 $bootloaderHash = (Get-FileHash -LiteralPath (Join-Path $bootDir "BOOTX64.EFI") -Algorithm SHA256).Hash
 $kernelHash = (Get-FileHash -LiteralPath (Join-Path $espStage "kernel.elf") -Algorithm SHA256).Hash
-@("proof=DM13-QEMU-USB-DISK-MANAGER-LIFECYCLE-AND-RESTART",
-  "timestampUtc=$([DateTime]::UtcNow.ToString('o'))","qemu=$qemuVersion",
-  "controller=PIIX3-UHCI","accelerator=$QemuAccelerator",
-  "usbImage=$UsbFull","usbImageBytes=$imageBytes",
-  "usbImageSha256Before=$imageBefore","blankImageVerification=$($blankCheck -join '; ')",
-  "usbImageAccess=writable-disposable-only",
+$kernelBytes = (Get-Item -LiteralPath (Join-Path $espStage "kernel.elf")).Length
+$uefiHash = (Get-FileHash -LiteralPath $OvmfFull -Algorithm SHA256).Hash
+$qemuAtStart = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'")
+@("manifestSchema=DM19-TRANSPORT-1","proof=DM13-QEMU-USB-DISK-MANAGER-LIFECYCLE-AND-RESTART",
+  "timestampUtc=$([DateTime]::UtcNow.ToString('o'))","qemu=$qemuVersion","qemuSha256=$qemuHash",
+  "machine=pc,usb=off","cpu=QEMU-default (no -cpu argument)",
+  "controller=PIIX3-UHCI","controllerArguments=-device piix3-usb-uhci,id=uhci",
+  "accelerator=$QemuAccelerator",
+  "storageImagePath=$UsbFull","storageImageBytes=$imageBytes",
+  "storageImageSha256Before=$imageBefore","blankImageVerification=$($blankCheck -join '; ')",
+  "storageImageAccess=writable-disposable-only","storageCacheMode=QEMU default (cache option omitted from argv)",
+  "uefiImagePath=$OvmfFull","uefiSha256=$uefiHash",
+  "bootloaderSha256=$bootloaderHash","kernelBytes=$kernelBytes","kernelSha256=$kernelHash",
+  "timeoutUhciBulkFrames=1000","timeoutHarnessSeconds=3600","timeoutRestartSeconds=300",
+  "timeoutKernelMainLoopSeconds=300","qemuTraceEnabled=$(if ($TraceUsb) { 'yes' } else { 'no' })",
+  "qemuTraceEvents=$events","qemuTraceFiles=first-boot.uhci.trace.log,restart-boot.uhci.trace.log",
+  "hostQemuProcessesBefore=$($qemuAtStart.Count)",
+  "hostQemuPidsBefore=$(($qemuAtStart | ForEach-Object { $_.ProcessId }) -join ',')",
+  "monitorProtocol=HMP TCP loopback; runner sends quit only after proof or in cleanup",
   "commonWriteCallback=enabled-and-exercised-by-production-lifecycle-services",
   "lifecycle=initialize,create-partition,format-fat32,mount,file-write,read,unmount,remount,mount-write-read-unmount-stress-10x",
   "physicalHostDisksPassedToQemu=none","bootloaderSha256=$bootloaderHash",
@@ -86,6 +105,7 @@ function Start-Dm13Qemu([string]$RunName) {
     $serial = Join-Path $WorkFull "$RunName.serial.log"
     $stdout = Join-Path $WorkFull "$RunName.stdout.log"
     $stderr = Join-Path $WorkFull "$RunName.stderr.log"
+    $trace = Join-Path $WorkFull "$RunName.uhci.trace.log"
     $listener = [System.Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     $listener.Start(); $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port; $listener.Stop()
     $arguments = @("-accel",$QemuAccelerator,
@@ -97,14 +117,21 @@ function Start-Dm13Qemu([string]$RunName) {
       "-netdev","user,id=net0","-device","e1000,netdev=net0",
       "-object","rng-builtin,id=rng0",
       "-device","virtio-rng-pci,rng=rng0,disable-modern=on,max-bytes=1024,period=1000",
-      "-m","1024M","-vga","std","-display","none","-serial","file:$serial",
-      "-monitor","tcp:127.0.0.1:$port,server,nowait","-rtc","base=utc,clock=host","-no-reboot")
+      "-m","1024M","-vga","std","-display","none","-serial","file:$serial")
+    if ($TraceUsb) { $arguments += @("-trace","events=$events,file=$trace") }
+    $arguments += @("-monitor","tcp:127.0.0.1:$port,server,nowait",
+      "-rtc","base=utc,clock=host","-no-reboot")
     $process = Start-Process -FilePath $QemuFull -ArgumentList $arguments -WorkingDirectory $Root `
         -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     $row = Get-CimInstance Win32_Process -Filter "ProcessId=$($process.Id)"
+    $otherQemu = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'" |
+        Where-Object { $_.ProcessId -ne $process.Id })
     Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
       "qemu.$RunName.pid=$($process.Id)","qemu.$RunName.monitorPort=$port",
-      "qemu.$RunName.serial=$serial","qemu.$RunName.commandLine=$($row.CommandLine)")
+      "qemu.$RunName.serial=$serial","qemu.$RunName.commandLine=$($row.CommandLine)",
+      "qemu.$RunName.trace=$trace",
+      "qemu.$RunName.otherQemuProcessesAtStart=$($otherQemu.Count)",
+      "qemu.$RunName.otherQemuPidsAtStart=$(($otherQemu | ForEach-Object { $_.ProcessId }) -join ',')")
     return [pscustomobject]@{ Process=$process; Port=$port; Serial=$serial; Trace=$trace }
 }
 
@@ -164,11 +191,12 @@ try {
     Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
       "firstBootSerial=$($WorkFull)\first-boot.serial.log",
       "restartBootSerial=$($WorkFull)\restart-boot.serial.log",
-      "usbImageSha256After=$hashAfter","independentVerifier=$($verification -join '; ')",
+      "storageImageSha256After=$hashAfter","independentVerifier=$($verification -join '; ')",
+      "transportResult=PASS",
       "result=PASS private-write=yes shared-write=yes durability=trusted lifecycle=yes cold-restart-persistence=yes independent-image-verification=yes host-physical-media=none")
     Write-Host "DM13 USB lifecycle and restart proof passed. Evidence: $WorkFull"
 } catch {
-    Add-Content -LiteralPath $manifest -Encoding ascii -Value @("result=FAIL","failure=$($_.Exception.Message -replace '[\r\n]+',' ')")
+    Add-Content -LiteralPath $manifest -Encoding ascii -Value @("transportResult=FAIL","result=FAIL","failure=$($_.Exception.Message -replace '[\r\n]+',' ')")
     throw
 } finally {
     if ($first) { Stop-Dm13Qemu $first }

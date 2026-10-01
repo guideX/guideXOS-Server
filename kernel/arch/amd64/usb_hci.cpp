@@ -761,6 +761,21 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
             const TransferStatus status = wait_td(
                 td, UHCI_BULK_TIMEOUT_FRAMES, deviceAddr);
             if (status != XFER_SUCCESS) {
+                const uint32_t failedQhElement = s_qh.elementLink;
+                const uint32_t failedTdPhysical = ptr32(td);
+                const uint32_t failedTdStatus = td->status;
+                const uint32_t failedTdToken = td->token;
+                const uint32_t failedTdBuffer = td->buffer;
+                const uint16_t failedFrame = uhci_read16(UHCI_FRNUM);
+                const uint16_t failedControllerStatus =
+                    uhci_read16(UHCI_USBSTS);
+                const uint16_t failedControllerCommand =
+                    uhci_read16(UHCI_USBCMD);
+                const uint16_t failedPort0 = uhci_read16(UHCI_PORTSC1);
+                const uint16_t failedPort1 = uhci_read16(UHCI_PORTSC2);
+                uint8_t failedBufferPrefix[13] = {};
+                for (uint8_t i = 0; i < sizeof(failedBufferPrefix); ++i)
+                    failedBufferPrefix[i] = s_bulkPackets[packet][i];
                 s_qh.elementLink = 0x01;
                 dma_compiler_barrier();
                 if (bytesTransferred) *bytesTransferred = transferred;
@@ -781,7 +796,48 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
                 serial::puts(" toggle-next=");
                 serial::put_hex8(toggle);
                 serial::puts(" hw=");
-                serial::put_hex32(td->status);
+                serial::put_hex32(failedTdStatus);
+                serial::puts(" qh-va=0x");
+                serial::put_hex64(reinterpret_cast<uint64_t>(&s_qh));
+                serial::puts(" qh-pa=0x");
+                serial::put_hex32(ptr32(&s_qh));
+                serial::puts(" qh-head=0x");
+                serial::put_hex32(s_qh.headLink);
+                serial::puts(" qh-element=0x");
+                serial::put_hex32(failedQhElement);
+                serial::puts(" td-va=0x");
+                serial::put_hex64(reinterpret_cast<uint64_t>(td));
+                serial::puts(" td-pa=0x");
+                serial::put_hex32(failedTdPhysical);
+                serial::puts(" td-token=0x");
+                serial::put_hex32(failedTdToken);
+                serial::puts(" td-buffer-pa=0x");
+                serial::put_hex32(failedTdBuffer);
+                serial::puts(" dma-buffer-va=0x");
+                serial::put_hex64(reinterpret_cast<uint64_t>(
+                    s_bulkPackets[packet]));
+                serial::puts(" dma-buffer-pa=0x");
+                serial::put_hex32(ptr32(s_bulkPackets[packet]));
+                serial::puts(" max-packet=0x");
+                serial::put_hex16(maxPacket);
+                serial::puts(" actual=0x");
+                serial::put_hex16(arch::amd64::uhci::decode_actual_length(
+                    failedTdStatus));
+                serial::puts(" timeout-frames=0x");
+                serial::put_hex32(UHCI_BULK_TIMEOUT_FRAMES);
+                serial::puts(" frnum=0x");
+                serial::put_hex16(failedFrame);
+                serial::puts(" usbsts=0x");
+                serial::put_hex16(failedControllerStatus);
+                serial::puts(" usbcmd=0x");
+                serial::put_hex16(failedControllerCommand);
+                serial::puts(" port0=0x");
+                serial::put_hex16(failedPort0);
+                serial::puts(" port1=0x");
+                serial::put_hex16(failedPort1);
+                serial::puts(" dma-first13=");
+                for (uint8_t i = 0; i < 13; ++i)
+                    serial::put_hex8(failedBufferPrefix[i]);
                 serial::putc('\n');
                 return status;
             }
