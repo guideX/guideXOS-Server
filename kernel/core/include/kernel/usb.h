@@ -296,6 +296,7 @@ static const uint8_t MAX_INTERFACES_PER_DEVICE = 8;
 struct Device {
     bool             present;
     uint8_t          address;         // assigned USB address (1-127)
+    uint64_t         incarnationId;  // fresh lifetime identity on re-enumeration
     DeviceSpeed      speed;
     uint8_t          hubPort;         // port on parent hub (0 = root)
     // PCI identity of the host controller, used with the USB path for boot
@@ -314,6 +315,33 @@ struct Device {
     uint8_t          interfaceProtocol[MAX_INTERFACES_PER_DEVICE];
     uint8_t          numInterfaces;
 };
+
+enum BotDiagnosticPhase : uint8_t {
+    BOT_DIAG_PHASE_NONE = 0,
+    BOT_DIAG_PHASE_CBW,
+    BOT_DIAG_PHASE_DATA,
+    BOT_DIAG_PHASE_CSW,
+    BOT_DIAG_PHASE_VALIDATE,
+    BOT_DIAG_PHASE_COMPLETE,
+    BOT_DIAG_PHASE_RECOVERY,
+};
+
+struct BotDiagnosticContext {
+    uint64_t commandSequence;
+    uint64_t deviceIncarnation;
+    uint32_t cbwTag;
+    uint32_t expectedCswTag;
+    uint32_t requestedBytes;
+    uint8_t deviceAddress;
+    uint8_t endpointAddress;
+    uint8_t opcode;
+    uint8_t cdbLength;
+    uint8_t direction;
+    BotDiagnosticPhase phase;
+};
+
+void set_bot_diagnostic_context(const BotDiagnosticContext* context);
+bool get_bot_diagnostic_context(BotDiagnosticContext* context);
 
 // ================================================================
 // Host Controller Interface (HCI) — arch-specific implementations

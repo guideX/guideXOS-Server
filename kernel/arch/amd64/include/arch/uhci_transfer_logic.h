@@ -43,10 +43,82 @@ static const uint32_t TD_NAK = 1u << 19;
 static const uint32_t TD_CRC_TIMEOUT = 1u << 18;
 static const uint32_t TD_BITSTUFF = 1u << 17;
 static const uint32_t TD_SHORT_PACKET_DETECT = 1u << 29;
+static const uint32_t TD_DATA_TOGGLE = 1u << 19;
 static const uint32_t TD_ERROR_COUNT = 3u << 27;
 static const uint32_t TD_INITIAL_ACTUAL_LENGTH = 0x7FFu;
 static const uint32_t TD_ACTUAL_LENGTH_MASK = 0x7FFu;
 static const uint32_t FRAME_NUMBER_MASK = 0x07FFu;
+static const uint8_t CSW_DMA_SENTINEL = 0xA5u;
+
+struct SampleHistory {
+    uint32_t values[16];
+    uint8_t count;
+    uint8_t next;
+};
+
+inline void clear_history(SampleHistory& history)
+{
+    history.count = 0;
+    history.next = 0;
+}
+
+inline void record_distinct(SampleHistory& history, uint32_t value)
+{
+    if (history.count != 0) {
+        const uint8_t last = static_cast<uint8_t>(
+            (history.next + 15u) & 15u);
+        if (history.values[last] == value) return;
+    }
+    history.values[history.next] = value;
+    history.next = static_cast<uint8_t>((history.next + 1u) & 15u);
+    if (history.count < 16u) ++history.count;
+}
+
+inline uint32_t history_value(const SampleHistory& history, uint8_t index)
+{
+    const uint8_t first = history.count == 16u ? history.next : 0u;
+    return history.values[static_cast<uint8_t>((first + index) & 15u)];
+}
+
+enum CswBufferClassification : uint8_t {
+    CSW_BUFFER_UNTOUCHED_SENTINEL = 0,
+    CSW_BUFFER_PARTIALLY_CHANGED,
+    CSW_BUFFER_COMPLETE_EXPECTED_CSW,
+    CSW_BUFFER_UNRELATED_BYTES,
+};
+
+inline CswBufferClassification classify_csw_buffer(const uint8_t* bytes,
+                                                     uint8_t length,
+                                                     uint16_t actualLength,
+                                                     uint8_t sentinel,
+                                                     uint32_t expectedTag)
+{
+    if (!bytes || length != 13u) return CSW_BUFFER_UNRELATED_BYTES;
+    if (actualLength == 0) {
+        for (uint8_t i = 0; i < length; ++i)
+            if (bytes[i] != sentinel) return CSW_BUFFER_UNRELATED_BYTES;
+        return CSW_BUFFER_UNTOUCHED_SENTINEL;
+    }
+    if (actualLength < length) return CSW_BUFFER_PARTIALLY_CHANGED;
+    if (actualLength > length) return CSW_BUFFER_UNRELATED_BYTES;
+    const uint32_t signature = static_cast<uint32_t>(bytes[0]) |
+        (static_cast<uint32_t>(bytes[1]) << 8) |
+        (static_cast<uint32_t>(bytes[2]) << 16) |
+        (static_cast<uint32_t>(bytes[3]) << 24);
+    const uint32_t tag = static_cast<uint32_t>(bytes[4]) |
+        (static_cast<uint32_t>(bytes[5]) << 8) |
+        (static_cast<uint32_t>(bytes[6]) << 16) |
+        (static_cast<uint32_t>(bytes[7]) << 24);
+    if (signature == 0x53425355u && tag == expectedTag && bytes[12] <= 2u)
+        return CSW_BUFFER_COMPLETE_EXPECTED_CSW;
+    return CSW_BUFFER_UNRELATED_BYTES;
+}
+
+inline uint16_t decode_max_length(uint32_t token)
+{
+    const uint16_t encoded = static_cast<uint16_t>((token >> 21) & 0x7FFu);
+    return encoded == 0x7FFu ? 0u : static_cast<uint16_t>(encoded + 1u);
+}
 
 static const uint16_t STS_HOST_SYSTEM_ERROR = 1u << 3;
 static const uint16_t STS_HOST_PROCESS_ERROR = 1u << 4;
@@ -122,6 +194,18 @@ inline uint16_t decode_actual_length(uint32_t status)
         status & TD_ACTUAL_LENGTH_MASK);
     return encoded == TD_ACTUAL_LENGTH_MASK
         ? 0u : static_cast<uint16_t>(encoded + 1u);
+}
+
+inline bool short_packet(uint32_t status, uint16_t requestedLength)
+{
+    return decode_actual_length(status) < requestedLength;
+}
+
+inline bool short_packet(uint32_t status, uint16_t actualTransferred,
+                         uint16_t requestedLength)
+{
+    return (status & TD_SHORT_PACKET_DETECT) != 0 &&
+           actualTransferred < requestedLength;
 }
 
 inline uint16_t elapsed_frames(uint16_t startFrame, uint16_t currentFrame)

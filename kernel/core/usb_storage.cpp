@@ -14,6 +14,33 @@ static bool s_testDataOutDisconnectGate = false;
 static bool s_testSyncCacheDisconnectGate = false;
 #endif
 static uint8_t s_deviceCount = 0;
+static uint64_t s_nextBotCommandSequence = 1;
+
+struct SerialDiagnosticScope {
+#if defined(__x86_64__)
+    uint64_t savedFlags;
+    SerialDiagnosticScope() : savedFlags(0)
+    {
+        asm volatile("pushfq; popq %0; cli" : "=r"(savedFlags) :: "memory");
+    }
+    ~SerialDiagnosticScope()
+    {
+        if (savedFlags & (1ULL << 9)) asm volatile("sti" ::: "memory");
+    }
+#elif defined(__i386__)
+    uint32_t savedFlags;
+    SerialDiagnosticScope() : savedFlags(0)
+    {
+        asm volatile("pushfl; popl %0; cli" : "=r"(savedFlags) :: "memory");
+    }
+    ~SerialDiagnosticScope()
+    {
+        if (savedFlags & (1u << 9)) asm volatile("sti" ::: "memory");
+    }
+#else
+    SerialDiagnosticScope() {}
+#endif
+};
 
 enum BotStage : uint8_t {
     BOT_STAGE_NONE = 0,
@@ -25,6 +52,66 @@ enum BotStage : uint8_t {
     BOT_STAGE_CLEAR_IN = 6,
     BOT_STAGE_CLEAR_OUT = 7,
     BOT_STAGE_SENSE = 8,
+};
+
+static const char* opcode_name(uint8_t opcode)
+{
+    switch (opcode) {
+        case SCSI_TEST_UNIT_READY: return "TEST_UNIT_READY";
+        case SCSI_REQUEST_SENSE: return "REQUEST_SENSE";
+        case SCSI_INQUIRY: return "INQUIRY";
+        case SCSI_READ_CAPACITY_10: return "READ_CAPACITY10";
+        case SCSI_READ_10: return "READ10";
+        case SCSI_WRITE_10: return "WRITE10";
+        case SCSI_SYNCHRONIZE_CACHE_10: return "SYNCHRONIZE_CACHE";
+        case SCSI_READ_16: return "READ16";
+        case SCSI_WRITE_16: return "WRITE16";
+        case SCSI_SERVICE_ACTION_IN_16: return "SERVICE_ACTION_IN16";
+        default: return "SCSI_UNKNOWN";
+    }
+}
+
+static const char* caller_csw_buffer_class(const uint8_t* bytes,
+                                           uint16_t received,
+                                           uint32_t expectedTag)
+{
+    if (!bytes) return "unrelated-bytes";
+    if (received == 0) {
+        for (uint8_t i = 0; i < sizeof(CommandStatusWrapper); ++i)
+            if (bytes[i] != 0xA5u) return "unrelated-bytes";
+        return "untouched-sentinel";
+    }
+    if (received < sizeof(CommandStatusWrapper)) return "partially-changed";
+    const uint32_t signature = static_cast<uint32_t>(bytes[0]) |
+        (static_cast<uint32_t>(bytes[1]) << 8) |
+        (static_cast<uint32_t>(bytes[2]) << 16) |
+        (static_cast<uint32_t>(bytes[3]) << 24);
+    const uint32_t tag = static_cast<uint32_t>(bytes[4]) |
+        (static_cast<uint32_t>(bytes[5]) << 8) |
+        (static_cast<uint32_t>(bytes[6]) << 16) |
+        (static_cast<uint32_t>(bytes[7]) << 24);
+    if (received != sizeof(CommandStatusWrapper) ||
+        signature != CSW_SIGNATURE || tag != expectedTag ||
+        bytes[12] > CSW_STATUS_PHASE_ERROR)
+        return "unrelated-bytes";
+    return "complete-expected-csw";
+}
+
+static void set_diagnostic_phase(StorageDevice* dev,
+                                 usb::BotDiagnosticPhase phase,
+                                 uint8_t endpoint)
+{
+    if (!dev) return;
+    dev->botDiagnostic.phase = phase;
+    dev->botDiagnostic.endpointAddress = endpoint;
+    usb::set_bot_diagnostic_context(&dev->botDiagnostic);
+}
+
+struct BotDiagnosticContextScope {
+    ~BotDiagnosticContextScope()
+    {
+        usb::set_bot_diagnostic_context(nullptr);
+    }
 };
 
 static void zero(void* dst, size_t len)
@@ -144,6 +231,8 @@ static bool clear_endpoint_halt(StorageDevice* dev, uint8_t endpoint,
 
 static bool bot_reset_recovery(StorageDevice* dev)
 {
+    set_diagnostic_phase(dev, usb::BOT_DIAG_PHASE_RECOVERY,
+                        dev ? dev->bulkInEP : 0);
     if (!dev || !usb::device_online(dev->usbAddress)) {
         if (dev) (void)mark_transport_removed(*dev, BOT_STAGE_RESET);
         return false;
@@ -171,6 +260,15 @@ static bool bot_reset_recovery(StorageDevice* dev)
     const bool recovered = resetStatus == usb::XFER_SUCCESS && inCleared &&
                            outCleared;
     if (!recovered) dev->transportFaulted = true;
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+    serial::puts("[USB-MSC] bot-recovery sequence=BOT#");
+    serial::put_hex64(dev->botDiagnostic.commandSequence);
+    serial::puts(" endpoints-cleared=");
+    serial::puts(inCleared && outCleared ? "yes" : "no");
+    serial::puts(" toggles-reset=");
+    serial::puts(recovered ? "yes" : "no");
+    serial::putc('\n');
+#endif
     return recovered;
 }
 
@@ -255,6 +353,49 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
     const uint32_t expectedCswTag = le32(
         reinterpret_cast<const uint8_t*>(&cbw) + 4);
 
+    dev->commandSequence = s_nextBotCommandSequence;
+    if (s_nextBotCommandSequence != UINT64_MAX) ++s_nextBotCommandSequence;
+    dev->botDiagnostic = {};
+    dev->botDiagnostic.commandSequence = dev->commandSequence;
+    dev->botDiagnostic.deviceAddress = dev->usbAddress;
+    const usb::Device* identity = usb::get_device(dev->usbAddress);
+    dev->botDiagnostic.deviceIncarnation = identity ? identity->incarnationId : 0;
+    dev->botDiagnostic.cbwTag = expectedCswTag;
+    dev->botDiagnostic.expectedCswTag = expectedCswTag;
+    dev->botDiagnostic.requestedBytes = dataLength;
+    dev->botDiagnostic.opcode = command[0];
+    dev->botDiagnostic.cdbLength = commandLength;
+    dev->botDiagnostic.direction = direction;
+    BotDiagnosticContextScope diagnosticScope;
+    set_diagnostic_phase(dev, usb::BOT_DIAG_PHASE_CBW, dev->bulkOutEP);
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+    {
+    SerialDiagnosticScope diagnosticLine;
+    serial::puts("[USB-MSC] command-submit BOT#");
+    serial::put_hex64(dev->commandSequence);
+    serial::putc(' ');
+    serial::puts(opcode_name(command[0]));
+    serial::puts(" opcode=0x");
+    serial::put_hex8(command[0]);
+    serial::puts(" cdb-len=");
+    serial::put_hex8(commandLength);
+    serial::puts(" device-address=0x");
+    serial::put_hex8(dev->usbAddress);
+    serial::puts(" incarnation=0x");
+    serial::put_hex64(dev->botDiagnostic.deviceIncarnation);
+    serial::puts(" endpoint-out=0x");
+    serial::put_hex8(dev->bulkOutEP);
+    serial::puts(" endpoint-in=0x");
+    serial::put_hex8(dev->bulkInEP);
+    serial::puts(" direction=0x");
+    serial::put_hex8(direction);
+    serial::puts(" bytes=0x");
+    serial::put_hex32(dataLength);
+    serial::puts(" tag=0x");
+    serial::put_hex32(expectedCswTag);
+    serial::putc('\n');
+    }
+#endif
     dev->lastBotStage = BOT_STAGE_CBW;
     uint16_t sent = 0;
     if (writeCommand)
@@ -302,6 +443,8 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
     uint32_t dataTransferred = 0;
     if (dataLength != 0) {
         dev->lastBotStage = BOT_STAGE_DATA;
+        set_diagnostic_phase(dev, usb::BOT_DIAG_PHASE_DATA,
+            direction == 0x80 ? dev->bulkInEP : dev->bulkOutEP);
         status = transfer_data(dev, direction, data, dataLength,
                                dataTransferred);
         if (status != usb::XFER_SUCCESS) {
@@ -324,18 +467,38 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
         }
     }
 
-    uint8_t csw[sizeof(CommandStatusWrapper)] = {};
+    uint8_t csw[sizeof(CommandStatusWrapper)];
+    for (uint8_t i = 0; i < sizeof(csw); ++i) csw[i] = 0xA5u;
     uint16_t received = 0;
     dev->lastBotStage = BOT_STAGE_CSW;
+    set_diagnostic_phase(dev, usb::BOT_DIAG_PHASE_CSW, dev->bulkInEP);
     status = usb::hci::bulk_transfer(dev->usbAddress, dev->bulkInEP,
                                      csw, sizeof(csw), &received);
     if (status != usb::XFER_SUCCESS || received != sizeof(csw)) {
-        serial::puts("[USB-MSC] bot-csw-failure opcode=0x");
+        {
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+        SerialDiagnosticScope diagnosticLine;
+#endif
+        serial::puts("[USB-MSC] bot-csw-failure sequence=BOT#");
+        serial::put_hex64(dev->commandSequence);
+        serial::puts(" command=");
+        serial::puts(opcode_name(command[0]));
+        serial::puts(" opcode=0x");
         serial::put_hex8(command[0]);
         serial::puts(" cbw-tag=0x");
         serial::put_hex32(expectedCswTag);
+        serial::puts(" cdb-len=");
+        serial::put_hex8(commandLength);
+        serial::puts(" device-address=0x");
+        serial::put_hex8(dev->usbAddress);
+        serial::puts(" incarnation=0x");
+        serial::put_hex64(dev->botDiagnostic.deviceIncarnation);
+        serial::puts(" endpoint=0x");
+        serial::put_hex8(dev->bulkInEP);
         serial::puts(" direction=0x");
         serial::put_hex8(direction);
+        serial::puts(" endpoint-out=0x");
+        serial::put_hex8(dev->bulkOutEP);
         serial::puts(" data-expected=0x");
         serial::put_hex32(dataLength);
         serial::puts(" data-actual=0x");
@@ -344,14 +507,19 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
         serial::put_hex8(sizeof(CommandStatusWrapper));
         serial::puts(" csw-actual=0x");
         serial::put_hex16(received);
-        serial::puts(" expected-csw-tag=0x");
-        serial::put_hex32(expectedCswTag);
+        serial::puts(" phase=CSW");
         serial::puts(" transfer-status=0x");
         serial::put_hex8(static_cast<uint8_t>(status));
+        serial::puts(" expected-csw-tag=0x");
+        serial::put_hex32(dev->botDiagnostic.expectedCswTag);
+        serial::puts(" caller-buffer-class=");
+        serial::puts(caller_csw_buffer_class(csw, received,
+            dev->botDiagnostic.expectedCswTag));
         serial::puts(" csw-buffer=");
         for (uint8_t i = 0; i < sizeof(CommandStatusWrapper); ++i)
             serial::put_hex8(csw[i]);
         serial::putc('\n');
+        }
         if (writeCommand && (status == usb::XFER_CANCELLED ||
                              !usb::get_device(dev->usbAddress)))
             dev->lastWriteOutcome = block::USB_WRITE_REMOVED_UNKNOWN;
@@ -365,6 +533,7 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
     }
 
     dev->lastBotStage = BOT_STAGE_VALIDATE;
+    set_diagnostic_phase(dev, usb::BOT_DIAG_PHASE_VALIDATE, dev->bulkInEP);
     const uint32_t cswSignature = le32(csw);
     const uint32_t cswTag = le32(csw + 4);
     const uint32_t cswResidue = le32(csw + 8);
@@ -372,9 +541,38 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
     dev->lastCswStatus = csw[12];
     if (cswSignature != CSW_SIGNATURE ||
         cswTag != cbwTag || csw[12] > CSW_STATUS_PHASE_ERROR ||
-        cswResidue > dataLength ||
-        dataTransferred > dataLength ||
+        cswResidue > dataLength || dataTransferred > dataLength ||
         cswResidue != dataLength - dataTransferred) {
+        {
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+        SerialDiagnosticScope diagnosticLine;
+#endif
+        serial::puts("[USB-MSC] bot-csw-invalid sequence=BOT#");
+        serial::put_hex64(dev->commandSequence);
+        serial::puts(" opcode=0x");
+        serial::put_hex8(command[0]);
+        serial::puts(" incarnation=0x");
+        serial::put_hex64(dev->botDiagnostic.deviceIncarnation);
+        serial::puts(" phase=VALIDATE");
+        serial::puts(" caller-buffer-class=");
+        serial::puts(caller_csw_buffer_class(csw, received, cbwTag));
+        serial::puts(" csw-buffer=");
+        for (uint8_t i = 0; i < sizeof(CommandStatusWrapper); ++i)
+            serial::put_hex8(csw[i]);
+        serial::puts(" expected-tag=0x");
+        serial::put_hex32(cbwTag);
+        serial::puts(" actual-tag=0x");
+        serial::put_hex32(cswTag);
+        serial::puts(" signature=0x");
+        serial::put_hex32(cswSignature);
+        serial::puts(" residue=0x");
+        serial::put_hex32(cswResidue);
+        serial::puts(" expected-residue=0x");
+        serial::put_hex32(dataLength >= dataTransferred ? dataLength - dataTransferred : 0xFFFFFFFFu);
+        serial::puts(" status=0x");
+        serial::put_hex8(csw[12]);
+        serial::putc('\n');
+        }
         status = usb::XFER_ERROR;
         set_last_transfer(dev, BOT_STAGE_VALIDATE, status);
         if (usb::device_online(dev->usbAddress))
@@ -400,6 +598,7 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
         set_last_transfer(dev, BOT_STAGE_VALIDATE, usb::XFER_DATA_UNDERRUN);
         return usb::XFER_DATA_UNDERRUN;
     }
+    set_diagnostic_phase(dev, usb::BOT_DIAG_PHASE_COMPLETE, dev->bulkInEP);
     if (writeCommand) dev->lastWriteOutcome = block::USB_WRITE_COMPLETED;
     if (actualDataLength) *actualDataLength = dataTransferred;
     set_last_transfer(dev, BOT_STAGE_VALIDATE, usb::XFER_SUCCESS);
@@ -864,6 +1063,7 @@ void init()
     for (uint8_t i = 0; i < MAX_STORAGE_DEVICES; ++i) {
         if (s_devices[i].active) release(s_devices[i].usbAddress);
     }
+    s_nextBotCommandSequence = 1;
     s_deviceCount = 0;
     for (uint8_t i = 0; i < MAX_STORAGE_DEVICES; ++i) {
         if (s_devices[i].blockRegistrationId != 0 &&
@@ -1150,6 +1350,42 @@ void test_arm_data_out_disconnect_gate()
 void test_arm_sync_cache_disconnect_gate()
 {
     s_testSyncCacheDisconnectGate = true;
+}
+#endif
+
+#if defined(GXOS_DM20_USB_BOT_STRESS_PROOF)
+usb::TransferStatus test_run_bot_opcode(uint8_t devIndex, uint8_t opcode,
+                                          uint64_t lba, void* sectorBuffer)
+{
+    if (devIndex >= MAX_STORAGE_DEVICES || !s_devices[devIndex].active)
+        return usb::XFER_ERROR;
+    StorageDevice& dev = s_devices[devIndex];
+    switch (opcode) {
+        case SCSI_TEST_UNIT_READY:
+            return do_test_unit_ready(&dev);
+        case SCSI_INQUIRY:
+            return do_inquiry(&dev);
+        case SCSI_READ_CAPACITY_10:
+            return do_read_capacity(&dev);
+        case SCSI_READ_10:
+            return sectorBuffer ? read_sectors(devIndex, lba, 1, sectorBuffer)
+                                : usb::XFER_BUFFER_ERROR;
+        case SCSI_WRITE_10:
+            return sectorBuffer ? write_sectors(devIndex, lba, 1, sectorBuffer)
+                                : usb::XFER_BUFFER_ERROR;
+        case SCSI_SYNCHRONIZE_CACHE_10:
+            return synchronize_cache(devIndex);
+        case SCSI_REQUEST_SENSE: {
+            SCSISenseData sense = {};
+            return request_sense(devIndex, &sense);
+        }
+        case 0xFF: {
+            const uint8_t invalidCommand[6] = {0xFF, 0, 0, 0, 0, 0};
+            return run_command(&dev, 0x00, invalidCommand,
+                sizeof(invalidCommand), nullptr, 0);
+        }
+        default: return usb::XFER_NOT_SUPPORTED;
+    }
 }
 #endif
 

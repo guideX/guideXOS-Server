@@ -22,6 +22,9 @@ static Device s_devices[MAX_DEVICES];
 static uint8_t s_deviceCount = 0;
 static uint8_t s_nextAddress = 1;
 static bool    s_initialised = false;
+static uint64_t s_nextDeviceIncarnationId = 1;
+static BotDiagnosticContext s_botDiagnosticContext = {};
+static bool s_botDiagnosticActive = false;
 
 // ================================================================
 // Helpers
@@ -184,6 +187,8 @@ static bool enumerate_device(uint8_t port, DeviceSpeed speed)
 
     dev->present      = true;
     dev->address      = addr;
+    dev->incarnationId = s_nextDeviceIncarnationId++;
+    if (s_nextDeviceIncarnationId == 0) s_nextDeviceIncarnationId = UINT64_MAX;
     dev->speed        = speed;
     dev->hubPort      = port;
 #if defined(__i386__) || defined(__x86_64__)
@@ -244,11 +249,31 @@ static bool enumerate_device(uint8_t port, DeviceSpeed speed)
 // Public API
 // ================================================================
 
+void set_bot_diagnostic_context(const BotDiagnosticContext* context)
+{
+    if (!context) {
+        memzero(&s_botDiagnosticContext, sizeof(s_botDiagnosticContext));
+        s_botDiagnosticActive = false;
+        return;
+    }
+    s_botDiagnosticContext = *context;
+    s_botDiagnosticActive = true;
+}
+
+bool get_bot_diagnostic_context(BotDiagnosticContext* context)
+{
+    if (!context || !s_botDiagnosticActive) return false;
+    *context = s_botDiagnosticContext;
+    return true;
+}
+
 void init()
 {
     memzero(s_devices, sizeof(s_devices));
     s_deviceCount = 0;
     s_nextAddress = 1;
+    s_nextDeviceIncarnationId = 1;
+    set_bot_diagnostic_context(nullptr);
     s_initialised = false;
     usb_storage::init();
 

@@ -122,6 +122,8 @@ struct StorageDevice {
     uint64_t lastLBA;
     uint32_t blockSize;
     uint32_t cbwTag;
+    uint64_t commandSequence;
+    usb::BotDiagnosticContext botDiagnostic;
     uint64_t blockRegistrationId;
     uint8_t blockDeviceIndex;
     uint8_t lastOpcode;
@@ -149,6 +151,10 @@ void release(uint8_t usbAddress);
 // Test-only interruption gates; absent from ordinary kernel builds.
 void test_arm_data_out_disconnect_gate();
 void test_arm_sync_cache_disconnect_gate();
+#endif
+#if defined(GXOS_DM20_USB_BOT_STRESS_PROOF)
+usb::TransferStatus test_run_bot_opcode(uint8_t devIndex, uint8_t opcode,
+                                          uint64_t lba, void* sectorBuffer);
 #endif
 uint8_t device_count();
 const StorageDevice* get_device(uint8_t index);

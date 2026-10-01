@@ -91,19 +91,78 @@ static uint8_t  s_controllerDevice = 0;
 static uint8_t  s_controllerFunction = 0;
 static uint64_t s_kernelPhysicalBase = 0x100000ULL;
 
-// Frame list — must be in the low 4 GB for UHCI (32-bit DMA).
-// Using alignas for C++14 compatibility.
-alignas(4096) static volatile uint32_t s_frameList[1024];
+struct SerialDiagnosticScope {
+    uint64_t savedFlags;
+    SerialDiagnosticScope() : savedFlags(0)
+    {
+        asm volatile("pushfq; popq %0; cli" : "=r"(savedFlags) :: "memory");
+    }
+    ~SerialDiagnosticScope()
+    {
+        if (savedFlags & (1ULL << 9)) asm volatile("sti" ::: "memory");
+    }
+};
 
 typedef arch::amd64::uhci::TransferDescriptor UHCI_TD;
 typedef arch::amd64::uhci::QueueHead UHCI_QH;
 
+#if defined(GXOS_DM20_USB_DIAGNOSTICS) && \
+    defined(GXOS_DM20_LAYOUT_PAD_BYTES) && \
+    GXOS_DM20_LAYOUT_PAD_BYTES > 0
+#if (GXOS_DM20_LAYOUT_PAD_BYTES % 4096) != 0
+#error "DM20 frame-list layout padding must preserve 4 KiB alignment."
+#endif
+struct Dm20FrameListStorage {
+    uint8_t padding[GXOS_DM20_LAYOUT_PAD_BYTES];
+    volatile uint32_t frameList[1024];
+};
+alignas(4096) static Dm20FrameListStorage s_dm20FrameListStorage
+    __attribute__((used));
+static inline volatile uint32_t* frame_list()
+{
+    return s_dm20FrameListStorage.frameList;
+}
+#else
+// Frame list — must be in the low 4 GB for UHCI (32-bit DMA).
+// Using alignas for C++14 compatibility.
+alignas(4096) static volatile uint32_t s_frameList[1024];
+static inline volatile uint32_t* frame_list() { return s_frameList; }
+#endif
+
+#if defined(GXOS_DM20_USB_DIAGNOSTICS) && \
+    defined(GXOS_DM20_LAYOUT_DESCRIPTOR_PAD_BYTES) && \
+    GXOS_DM20_LAYOUT_DESCRIPTOR_PAD_BYTES > 0
+#if GXOS_DM20_LAYOUT_DESCRIPTOR_PAD_BYTES > 4080 || \
+    (GXOS_DM20_LAYOUT_DESCRIPTOR_PAD_BYTES % 16) != 0
+#error "DM20 descriptor padding must be a 16-byte multiple no greater than 4080."
+#endif
+struct Dm20DescriptorPool {
+    uint8_t padding[GXOS_DM20_LAYOUT_DESCRIPTOR_PAD_BYTES];
+    alignas(16) volatile UHCI_TD tds[16];
+    alignas(16) volatile UHCI_QH qh;
+};
+alignas(4096) static Dm20DescriptorPool s_dm20DescriptorPool
+    __attribute__((used));
+#define s_tds (s_dm20DescriptorPool.tds)
+#define s_qh (s_dm20DescriptorPool.qh)
+#else
 alignas(16) static volatile UHCI_TD s_tds[16];
 alignas(16) static volatile UHCI_QH s_qh;
+#endif
 alignas(16) static usb::SetupPacket s_dmaSetup;
 alignas(16) static volatile uint8_t s_controlPackets[13][64];
+#if defined(GXOS_DM20_USB_DIAGNOSTICS) && \
+    defined(GXOS_DM20_LAYOUT_BUFFER_OFFSET_BYTES) && \
+    GXOS_DM20_LAYOUT_BUFFER_OFFSET_BYTES > 0
+#if GXOS_DM20_LAYOUT_BUFFER_OFFSET_BYTES > 65535
+#error "DM20 UHCI layout buffer offset must be at most 65535 bytes."
+#endif
+alignas(4096) static volatile uint8_t s_bulkPackets[13][65536 + 64];
+#else
 alignas(16) static volatile uint8_t s_bulkPackets[13][64];
+#endif
 static uint8_t s_dataToggle[128][usb::MAX_ENDPOINTS * 2];
+static uint64_t s_transferGeneration = 1;
 #if defined(GXOS_DM14_QEMU_USB_HOTPLUG_PROOF)
 static bool s_testBulkOutDisconnectGate = false;
 #endif
@@ -224,7 +283,67 @@ static uint32_t make_token(uint8_t pid, uint8_t addr, uint8_t ep,
 static const uint32_t UHCI_TD_STATUS_ACTIVE = arch::amd64::uhci::TD_ACTIVE;
 static const uint32_t UHCI_FRAME_MASK = arch::amd64::uhci::FRAME_NUMBER_MASK;
 static const uint32_t UHCI_CONTROL_TIMEOUT_FRAMES = 250u;
+#if defined(GXOS_DM20_USB_DIAGNOSTICS) && \
+    defined(GXOS_DM20_UHCI_BULK_TIMEOUT_FRAMES)
+static const uint32_t UHCI_BULK_TIMEOUT_FRAMES =
+    GXOS_DM20_UHCI_BULK_TIMEOUT_FRAMES;
+#else
 static const uint32_t UHCI_BULK_TIMEOUT_FRAMES = 1000u;
+#endif
+
+struct WaitHistory {
+    uint16_t submitFrame;
+    uint16_t timeoutFrame;
+    arch::amd64::uhci::SampleHistory qhElements;
+    arch::amd64::uhci::SampleHistory tdStatuses;
+};
+
+static const char* csw_buffer_class_name(
+    arch::amd64::uhci::CswBufferClassification classification)
+{
+    using namespace arch::amd64::uhci;
+    switch (classification) {
+        case CSW_BUFFER_UNTOUCHED_SENTINEL: return "UNTOUCHED_SENTINEL";
+        case CSW_BUFFER_PARTIALLY_CHANGED: return "PARTIALLY_CHANGED";
+        case CSW_BUFFER_COMPLETE_EXPECTED_CSW: return "COMPLETE_EXPECTED_CSW";
+        default: return "UNRELATED_BYTES";
+    }
+}
+
+static uint32_t ptr32(const volatile void* p);
+
+static inline volatile uint8_t* bulk_packet_buffer(uint8_t packet)
+{
+#if defined(GXOS_DM20_USB_DIAGNOSTICS) && \
+    defined(GXOS_DM20_LAYOUT_BUFFER_OFFSET_BYTES) && \
+    GXOS_DM20_LAYOUT_BUFFER_OFFSET_BYTES > 0
+    const uint32_t bufferAddress = ptr32(s_bulkPackets[packet]);
+    const uint32_t currentOffset = bufferAddress & 0xFFFFu;
+    const uint32_t requestedOffset =
+        GXOS_DM20_LAYOUT_BUFFER_OFFSET_BYTES & 0xFFFFu;
+    const uint32_t adjustment =
+        (requestedOffset - currentOffset) & 0xFFFFu;
+    return &s_bulkPackets[packet][adjustment];
+#else
+    return s_bulkPackets[packet];
+#endif
+}
+
+static const char* guest_timeout_classification(
+    uint32_t tdStatus, uint32_t qhElement, uint32_t tdAddress,
+    uint32_t tdLink, uint16_t controllerStatus)
+{
+    using namespace arch::amd64::uhci;
+    const Observation observation = observe(tdStatus, qhElement, tdAddress,
+                                             tdLink, controllerStatus);
+    if (observation == OBSERVATION_CONTROLLER_ERROR ||
+        (tdStatus & (TD_STALLED | TD_DATA_BUFFER_ERROR | TD_BABBLE |
+                     TD_CRC_TIMEOUT | TD_BITSTUFF)) != 0)
+        return "CONTROLLER_ERROR";
+    if (observation == OBSERVATION_QH_ADVANCED_ACTIVE)
+        return "QH_PROGRESSION_MISMATCH";
+    return "UNCLASSIFIED";
+}
 
 static void initialize_td(volatile UHCI_TD* td, uint32_t link,
                           uint32_t token, uint32_t buffer,
@@ -267,10 +386,21 @@ static TransferStatus decode_td_status(uint32_t status)
 }
 
 static TransferStatus wait_td(volatile UHCI_TD* td, uint32_t timeoutFrames,
-                                  uint8_t monitoredAddress = 0xFFu)
+                              uint8_t monitoredAddress = 0xFFu,
+                              WaitHistory* history = nullptr)
 {
     const uint16_t startFrame = static_cast<uint16_t>(
         uhci_read16(UHCI_FRNUM) & UHCI_FRAME_MASK);
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+    uint16_t lastObservedFrame = startFrame;
+    uint32_t observedFrameProgress = 0;
+#endif
+    if (history) {
+        history->submitFrame = startFrame;
+        history->timeoutFrame = startFrame;
+        arch::amd64::uhci::clear_history(history->qhElements);
+        arch::amd64::uhci::clear_history(history->tdStatuses);
+    }
     const uint32_t tdPhysical = ptr32(td);
     const uint32_t maxPollsWithoutFrameProgress = 5000000u;
     const uint32_t controllerPollInterval = 0x100u;
@@ -336,13 +466,38 @@ static TransferStatus wait_td(volatile UHCI_TD* td, uint32_t timeoutFrames,
 
             const uint16_t currentFrame = static_cast<uint16_t>(
                 uhci_read16(UHCI_FRNUM) & UHCI_FRAME_MASK);
-            if (arch::amd64::uhci::frame_deadline_expired(
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+            observedFrameProgress += arch::amd64::uhci::elapsed_frames(
+                lastObservedFrame, currentFrame);
+            lastObservedFrame = currentFrame;
+#endif
+            if (history) {
+                history->timeoutFrame = currentFrame;
+                arch::amd64::uhci::record_distinct(
+                    history->qhElements, s_qh.elementLink);
+                arch::amd64::uhci::record_distinct(
+                    history->tdStatuses, status);
+            }
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+            const bool deadlineExpired = timeoutFrames > UHCI_FRAME_MASK
+                ? observedFrameProgress >= timeoutFrames
+                : arch::amd64::uhci::frame_deadline_expired(
                     startFrame, currentFrame,
-                    static_cast<uint16_t>(timeoutFrames))) {
+                    static_cast<uint16_t>(timeoutFrames));
+#else
+            const bool deadlineExpired = arch::amd64::uhci::frame_deadline_expired(
+                startFrame, currentFrame,
+                static_cast<uint16_t>(timeoutFrames));
+#endif
+            if (deadlineExpired) {
                 serial::puts("[USB-UHCI] td-frame-timeout start=");
                 serial::put_hex16(startFrame);
                 serial::puts(" current=");
                 serial::put_hex16(currentFrame);
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+                serial::puts(" elapsed-frames=0x");
+                serial::put_hex32(observedFrameProgress);
+#endif
                 serial::puts(" qh-element=0x");
                 serial::put_hex32(s_qh.elementLink);
                 serial::puts(" td-status=0x");
@@ -412,6 +567,7 @@ void set_kernel_physical_base(uint64_t physicalBase)
 bool init()
 {
     s_available = false;
+    s_transferGeneration = 1;
     for (uint8_t addr = 0; addr < 128; ++addr)
         for (uint8_t ep = 0; ep < usb::MAX_ENDPOINTS * 2; ++ep)
             s_dataToggle[addr][ep] = 0;
@@ -429,12 +585,12 @@ bool init()
     uhci_write16(UHCI_USBSTS, 0xFFFF);
 
     for (int i = 0; i < 1024; ++i) {
-        s_frameList[i] = arch::amd64::uhci::frame_list_qh_link(ptr32(&s_qh));
+        frame_list()[i] = arch::amd64::uhci::frame_list_qh_link(ptr32(&s_qh));
     }
     dma_compiler_barrier();
     s_qh.headLink    = 0x01;
     s_qh.elementLink = 0x01;
-    uhci_write32(UHCI_FRBASEADD, ptr32(s_frameList));
+    uhci_write32(UHCI_FRBASEADD, ptr32(frame_list()));
     uhci_write16(UHCI_FRNUM, 0);
     dma_compiler_barrier();
     uhci_write16(UHCI_USBCMD, UHCI_CMD_RUN | UHCI_CMD_MAXP);
@@ -452,13 +608,43 @@ bool init()
     serial::puts(" frame-base=");
     serial::put_hex32(uhci_read32(UHCI_FRBASEADD));
     serial::puts(" expected=");
-    serial::put_hex32(ptr32(s_frameList));
+    serial::put_hex32(ptr32(frame_list()));
     serial::puts(" frame-virt=");
-    serial::put_hex64(reinterpret_cast<uint64_t>(s_frameList));
+    serial::put_hex64(reinterpret_cast<uint64_t>(frame_list()));
     serial::puts(" frame-entry=");
-    serial::put_hex32(s_frameList[0]);
+    serial::put_hex32(frame_list()[0]);
     serial::puts(" qh-phys=");
     serial::put_hex32(ptr32(&s_qh));
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+    {
+    SerialDiagnosticScope diagnosticLine;
+    serial::puts("\n[USB-UHCI] dm20-layout td-va=0x");
+    serial::put_hex64(reinterpret_cast<uint64_t>(&s_tds[0]));
+    serial::puts(" td-pa=0x");
+    serial::put_hex32(ptr32(&s_tds[0]));
+    serial::puts(" bulk-buffer-va=0x");
+    serial::put_hex64(reinterpret_cast<uint64_t>(bulk_packet_buffer(0)));
+    serial::puts(" bulk-buffer-pa=0x");
+    serial::put_hex32(ptr32(bulk_packet_buffer(0)));
+#if defined(GXOS_DM20_LAYOUT_BUFFER_OFFSET_BYTES) && \
+    GXOS_DM20_LAYOUT_BUFFER_OFFSET_BYTES > 0
+    serial::puts(" buffer-layout-offset=0x");
+    serial::put_hex32(GXOS_DM20_LAYOUT_BUFFER_OFFSET_BYTES);
+#else
+    serial::puts(" buffer-layout-offset=0x0");
+#endif
+#if defined(GXOS_DM20_LAYOUT_PAD_BYTES) && GXOS_DM20_LAYOUT_PAD_BYTES > 0
+    serial::puts(" pad-va=0x");
+    serial::put_hex64(reinterpret_cast<uint64_t>(
+        s_dm20FrameListStorage.padding));
+    serial::puts(" pad-bytes=0x");
+    serial::put_hex32(sizeof(s_dm20FrameListStorage.padding));
+#else
+    serial::puts(" pad-bytes=0x0");
+#endif
+    serial::putc('\n');
+    }
+#endif
     serial::puts(" port0=");
     serial::put_hex16(uhci_read16(UHCI_PORTSC1));
     serial::puts(" port1=");
@@ -687,12 +873,25 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
         (dataLen != 0 && data == nullptr)) return XFER_BUFFER_ERROR;
     if (dataLen == 0) return XFER_SUCCESS;
 
+    usb::BotDiagnosticContext botContext = {};
+    const bool hasBotContext =
+        usb::get_bot_diagnostic_context(&botContext);
+    const bool isCsw = hasBotContext &&
+        botContext.phase == usb::BOT_DIAG_PHASE_CSW;
+
     uint8_t* p = static_cast<uint8_t*>(data);
     uint16_t remaining = dataLen;
     uint16_t transferred = 0;
     const uint8_t slot = static_cast<uint8_t>(ep * 2u + (dirIn ? 1u : 0u));
     uint8_t toggle = s_dataToggle[deviceAddr][slot];
     const uint8_t initialToggle = toggle;
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+    uint32_t finalCswTdStatus = 0;
+    uint32_t finalCswTdPhysical = 0;
+    uint32_t finalCswBufferPhysical = 0;
+    uint64_t finalCswGeneration = 0;
+    uint16_t finalCswTdLength = 0;
+#endif
     uint16_t maxPacket = 64;
     const usb::Device* descriptor = kernel::usb::get_device(deviceAddr);
     if (descriptor) {
@@ -704,10 +903,11 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
                 break;
             }
     }
-    if (maxPacket > sizeof(s_bulkPackets[0])) return XFER_BUFFER_ERROR;
+    if (maxPacket > 64u) return XFER_BUFFER_ERROR;
 
     while (remaining > 0) {
         uint16_t batchLengths[13] = {};
+        uint64_t batchGenerations[13] = {};
         uint8_t batchCount = 0;
         uint16_t batchBytes = 0;
         uint8_t batchToggle = toggle;
@@ -720,14 +920,18 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
             const uint16_t chunk = left > maxPacket ? maxPacket : left;
             volatile UHCI_TD* td = &s_tds[batchCount];
             const uint32_t tdPhysical = ptr32(td);
-            const uint32_t tdBuffer = ptr32(s_bulkPackets[batchCount]);
+            const uint32_t tdBuffer = ptr32(bulk_packet_buffer(batchCount));
             if (tdPhysical == 0 || tdBuffer == 0 ||
                 (tdPhysical & 0x0Fu) != 0) return XFER_BUFFER_ERROR;
 
             if (!dirIn) {
                 for (uint16_t i = 0; i < chunk; ++i)
-                    s_bulkPackets[batchCount][i] =
+                    bulk_packet_buffer(batchCount)[i] =
                         p[transferred + batchBytes + i];
+            } else {
+                for (uint16_t i = 0; i < 64u; ++i)
+                    bulk_packet_buffer(batchCount)[i] =
+                        arch::amd64::uhci::CSW_DMA_SENTINEL;
             }
             const bool hasNext = batchCount + 1u < 13u &&
                 batchBytes + chunk < remaining;
@@ -738,6 +942,8 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
                 make_token(pid, deviceAddr, ep, batchToggle, chunk), tdBuffer,
                 dirIn);
             batchLengths[batchCount] = chunk;
+            batchGenerations[batchCount] = s_transferGeneration;
+            if (s_transferGeneration != UINT64_MAX) ++s_transferGeneration;
             batchBytes = static_cast<uint16_t>(batchBytes + chunk);
             batchToggle ^= 1u;
             ++batchCount;
@@ -746,8 +952,87 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
         dma_compiler_barrier();
         const uint32_t firstTdPhysical = ptr32(&s_tds[0]);
         if (firstTdPhysical == 0) return XFER_BUFFER_ERROR;
+        const uint16_t batchSubmitFrame = static_cast<uint16_t>(
+            uhci_read16(UHCI_FRNUM) & UHCI_FRAME_MASK);
         s_qh.elementLink = firstTdPhysical;
         dma_compiler_barrier();
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+        if (isCsw) {
+            SerialDiagnosticScope diagnosticLine;
+            serial::puts("[USB-UHCI] csw-submit sequence=BOT#");
+            serial::put_hex64(botContext.commandSequence);
+            serial::puts(" opcode=0x");
+            serial::put_hex8(botContext.opcode);
+            serial::puts(" cbw-tag=0x");
+            serial::put_hex32(botContext.cbwTag);
+            serial::puts(" expected-csw-tag=0x");
+            serial::put_hex32(botContext.expectedCswTag);
+            serial::puts(" incarnation=0x");
+            serial::put_hex64(botContext.deviceIncarnation);
+            serial::puts(" address=0x");
+            serial::put_hex8(deviceAddr);
+            serial::puts(" endpoint=0x");
+            serial::put_hex8(endpointAddr);
+            serial::puts(" cdb-len=0x");
+            serial::put_hex8(botContext.cdbLength);
+            serial::puts(" command-data-bytes=0x");
+            serial::put_hex32(botContext.requestedBytes);
+            serial::puts(" direction=0x");
+            serial::put_hex8(botContext.direction);
+            serial::puts(" expected-toggle=0x");
+            serial::put_hex8(toggle);
+            serial::puts(" td-toggle=0x");
+            serial::put_hex8(static_cast<uint8_t>(
+                (s_tds[0].token & arch::amd64::uhci::TD_DATA_TOGGLE) != 0));
+            serial::puts(" software-toggle=0x");
+            serial::put_hex8(s_dataToggle[deviceAddr][slot]);
+            serial::puts(" td-max-encoded=0x");
+            serial::put_hex16(static_cast<uint16_t>(
+                (s_tds[0].token >> 21) & 0x7FFu));
+            serial::puts(" td-max-decoded=0x");
+            serial::put_hex16(arch::amd64::uhci::decode_max_length(
+                s_tds[0].token));
+            serial::puts(" max-packet=0x");
+            serial::put_hex16(maxPacket);
+            serial::puts(" buffer-length=0x");
+            serial::put_hex16(batchLengths[0]);
+            serial::puts(" generation=0x");
+            serial::put_hex64(batchGenerations[0]);
+            serial::puts(" qh-pa=0x");
+            serial::put_hex32(ptr32(&s_qh));
+            serial::puts(" td-pa=0x");
+            serial::put_hex32(ptr32(&s_tds[0]));
+            serial::puts(" buffer-pa=0x");
+            serial::put_hex32(ptr32(bulk_packet_buffer(0)));
+            serial::puts(" buffer-page-offset=0x");
+            serial::put_hex16(static_cast<uint16_t>(
+                ptr32(bulk_packet_buffer(0)) & 0x0FFFu));
+            serial::puts(" buffer-crosses-4k=");
+            serial::puts(((ptr32(bulk_packet_buffer(0)) & 0x0FFFu) +
+                batchLengths[0] >
+                4096u) ? "yes" : "no");
+            serial::puts(" buffer-64k-offset=0x");
+            serial::put_hex16(static_cast<uint16_t>(
+                ptr32(bulk_packet_buffer(0)) & 0xFFFFu));
+            serial::puts(" buffer-crosses-64k=");
+            serial::puts(((ptr32(bulk_packet_buffer(0)) & 0xFFFFu) +
+                batchLengths[0] > 65536u) ? "yes" : "no");
+            serial::puts(" qh-page-offset=0x");
+            serial::put_hex16(static_cast<uint16_t>(ptr32(&s_qh) & 0x0FFFu));
+            serial::puts(" td-page-offset=0x");
+            serial::put_hex16(static_cast<uint16_t>(
+                ptr32(&s_tds[0]) & 0x0FFFu));
+            serial::puts(" qh-td-same-page=");
+            serial::puts(((ptr32(&s_qh) >> 12) ==
+                (ptr32(&s_tds[0]) >> 12)) ? "yes" : "no");
+            serial::puts(" td-crosses-4k=");
+            serial::puts(((ptr32(&s_tds[0]) & 0x0FFFu) + sizeof(UHCI_TD) >
+                4096u) ? "yes" : "no");
+            serial::puts(" frnum-submit=0x");
+            serial::put_hex16(batchSubmitFrame);
+            serial::putc('\n');
+        }
+#endif
 #if defined(GXOS_DM14_QEMU_USB_HOTPLUG_PROOF)
         if (!dirIn && s_testBulkOutDisconnectGate) {
             s_testBulkOutDisconnectGate = false;
@@ -756,26 +1041,215 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
 #endif
 
         bool shortPacket = false;
+        uint8_t completedPacketCount = 0;
         for (uint8_t packet = 0; packet < batchCount; ++packet) {
             volatile UHCI_TD* td = &s_tds[packet];
+            WaitHistory waitHistory = {};
             const TransferStatus status = wait_td(
-                td, UHCI_BULK_TIMEOUT_FRAMES, deviceAddr);
+                td, UHCI_BULK_TIMEOUT_FRAMES, deviceAddr,
+                isCsw ? &waitHistory : nullptr);
             if (status != XFER_SUCCESS) {
                 const uint32_t failedQhElement = s_qh.elementLink;
                 const uint32_t failedTdPhysical = ptr32(td);
                 const uint32_t failedTdStatus = td->status;
                 const uint32_t failedTdToken = td->token;
+                const uint32_t failedTdLink = td->link;
                 const uint32_t failedTdBuffer = td->buffer;
                 const uint16_t failedFrame = uhci_read16(UHCI_FRNUM);
                 const uint16_t failedControllerStatus =
                     uhci_read16(UHCI_USBSTS);
                 const uint16_t failedControllerCommand =
                     uhci_read16(UHCI_USBCMD);
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+                const uint16_t failedInterruptEnable =
+                    uhci_read16(UHCI_USBINTR);
+                const uint32_t failedFrameBase =
+                    uhci_read32(UHCI_FRBASEADD);
+#endif
                 const uint16_t failedPort0 = uhci_read16(UHCI_PORTSC1);
                 const uint16_t failedPort1 = uhci_read16(UHCI_PORTSC2);
                 uint8_t failedBufferPrefix[13] = {};
                 for (uint8_t i = 0; i < sizeof(failedBufferPrefix); ++i)
-                    failedBufferPrefix[i] = s_bulkPackets[packet][i];
+                    failedBufferPrefix[i] = bulk_packet_buffer(packet)[i];
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+                if (isCsw && status == XFER_TIMEOUT &&
+                    (failedTdStatus & UHCI_TD_STATUS_ACTIVE) != 0) {
+                    SerialDiagnosticScope diagnosticLine;
+                    serial::puts("[USB-FAULT] signature=USB_CSW_TIMEOUT_ACTIVE_TD");
+                    serial::puts(" sequence=BOT#");
+                    serial::put_hex64(botContext.commandSequence);
+                    serial::puts(" opcode=0x");
+                    serial::put_hex8(botContext.opcode);
+                    serial::puts(" cbw-tag=0x");
+                    serial::put_hex32(botContext.cbwTag);
+                    serial::puts(" expected-csw-tag=0x");
+                    serial::put_hex32(botContext.expectedCswTag);
+                    serial::puts(" incarnation=0x");
+                    serial::put_hex64(botContext.deviceIncarnation);
+                    serial::puts(" address=0x");
+                    serial::put_hex8(deviceAddr);
+                    serial::puts(" endpoint=0x");
+                    serial::put_hex8(endpointAddr);
+                    serial::puts(" cdb-len=0x");
+                    serial::put_hex8(botContext.cdbLength);
+                    serial::puts(" direction=0x");
+                    serial::put_hex8(botContext.direction);
+                    serial::puts(" bot-phase=CSW");
+                    serial::puts(" requested=0x");
+                    serial::put_hex16(dataLen);
+                    serial::puts(" actual-received=0x");
+                    serial::put_hex16(transferred);
+                    serial::puts(" generation=0x");
+                    serial::put_hex64(batchGenerations[packet]);
+                    serial::puts(" qh-va=0x");
+                    serial::put_hex64(reinterpret_cast<uint64_t>(&s_qh));
+                    serial::puts(" qh-pa=0x");
+                    serial::put_hex32(ptr32(&s_qh));
+                    serial::puts(" td-va=0x");
+                    serial::put_hex64(reinterpret_cast<uint64_t>(td));
+                    serial::puts(" td-pa=0x");
+                    serial::put_hex32(failedTdPhysical);
+                    serial::puts(" qh-element=0x");
+                    serial::put_hex32(failedQhElement);
+                    serial::puts(" td-link=0x");
+                    serial::put_hex32(failedTdLink);
+                    serial::puts(" td-token=0x");
+                    serial::put_hex32(failedTdToken);
+                    serial::puts(" td-status=0x");
+                    serial::put_hex32(failedTdStatus);
+                    serial::puts(" td-buffer-pa=0x");
+                    serial::put_hex32(failedTdBuffer);
+                    serial::puts(" buffer-page-offset=0x");
+                    serial::put_hex16(static_cast<uint16_t>(
+                        failedTdBuffer & 0x0FFFu));
+                    serial::puts(" buffer-crosses-4k=");
+                    serial::puts(((failedTdBuffer & 0x0FFFu) +
+                        batchLengths[packet] >
+                        4096u) ? "yes" : "no");
+                    serial::puts(" buffer-64k-offset=0x");
+                    serial::put_hex16(static_cast<uint16_t>(
+                        failedTdBuffer & 0xFFFFu));
+                    serial::puts(" buffer-crosses-64k=");
+                    serial::puts(((failedTdBuffer & 0xFFFFu) +
+                        batchLengths[packet] > 65536u) ? "yes" : "no");
+                    serial::puts(" dma-buffer-va=0x");
+                    serial::put_hex64(reinterpret_cast<uint64_t>(
+                        bulk_packet_buffer(packet)));
+                    serial::puts(" dma-buffer-pa=0x");
+                    serial::put_hex32(ptr32(bulk_packet_buffer(packet)));
+                    serial::puts(" td-max-encoded=0x");
+                    serial::put_hex16(static_cast<uint16_t>(
+                        (failedTdToken >> 21) & 0x7FFu));
+                    serial::puts(" td-max-decoded=0x");
+                    serial::put_hex16(arch::amd64::uhci::decode_max_length(
+                        failedTdToken));
+                    serial::puts(" actual-raw=0x");
+                    serial::put_hex16(static_cast<uint16_t>(
+                        failedTdStatus & arch::amd64::uhci::TD_ACTUAL_LENGTH_MASK));
+                    serial::puts(" actual-decoded=0x");
+                    serial::put_hex16(arch::amd64::uhci::decode_actual_length(
+                        failedTdStatus));
+                    serial::puts(" short-packet-detect=");
+                    serial::puts((failedTdStatus &
+                        arch::amd64::uhci::TD_SHORT_PACKET_DETECT) != 0
+                            ? "yes" : "no");
+                    serial::puts(" expected-toggle=0x");
+                    serial::put_hex8(initialToggle);
+                    serial::puts(" td-toggle=0x");
+                    serial::put_hex8(static_cast<uint8_t>(
+                        (failedTdToken & arch::amd64::uhci::TD_DATA_TOGGLE) != 0));
+                    serial::puts(" software-toggle=0x");
+                    serial::put_hex8(s_dataToggle[deviceAddr][slot]);
+                    serial::puts(" software-toggle-advanced=");
+                    serial::puts(s_dataToggle[deviceAddr][slot] != initialToggle
+                        ? "yes" : "no");
+                    serial::puts(" frnum-submit=0x");
+                    serial::put_hex16(batchSubmitFrame);
+                    serial::puts(" frnum-wait-start=0x");
+                    serial::put_hex16(waitHistory.submitFrame);
+                    serial::puts(" frnum-timeout=0x");
+                    serial::put_hex16(waitHistory.timeoutFrame);
+                    serial::puts(" frame-progress=0x");
+                    serial::put_hex16(arch::amd64::uhci::elapsed_frames(
+                        waitHistory.submitFrame, waitHistory.timeoutFrame));
+                    serial::puts(" timeout-frames=0x");
+                    serial::put_hex32(UHCI_BULK_TIMEOUT_FRAMES);
+                    serial::puts(" usbsts=0x");
+                    serial::put_hex16(failedControllerStatus);
+                    serial::puts(" usbcmd=0x");
+                    serial::put_hex16(failedControllerCommand);
+                    serial::puts(" usbintr=0x");
+                    serial::put_hex16(failedInterruptEnable);
+                    serial::puts(" sofmod=0x");
+                    serial::put_hex16(uhci_read16(UHCI_SOFMOD));
+                    serial::puts(" frbaseadd=0x");
+                    serial::put_hex32(failedFrameBase);
+                    serial::puts(" io-base=0x");
+                    serial::put_hex16(s_ioBase);
+                    serial::puts(" pci-bdf=0x");
+                    serial::put_hex32((static_cast<uint32_t>(s_controllerBus) << 16) |
+                        (static_cast<uint32_t>(s_controllerDevice) << 8) |
+                        s_controllerFunction);
+                    serial::puts(" pci-command-status=0x");
+                    serial::put_hex32(pci_read32(s_controllerBus,
+                        s_controllerDevice, s_controllerFunction, 0x04));
+                    serial::puts(" pci-bar4=0x");
+                    serial::put_hex32(pci_read32(s_controllerBus,
+                        s_controllerDevice, s_controllerFunction, 0x20));
+                    serial::puts(" qh-page-offset=0x");
+                    serial::put_hex16(static_cast<uint16_t>(
+                        ptr32(&s_qh) & 0x0FFFu));
+                    serial::puts(" td-page-offset=0x");
+                    serial::put_hex16(static_cast<uint16_t>(
+                        failedTdPhysical & 0x0FFFu));
+                    serial::puts(" qh-td-same-page=");
+                    serial::puts(((ptr32(&s_qh) >> 12) ==
+                        (failedTdPhysical >> 12)) ? "yes" : "no");
+                    serial::puts(" td-crosses-4k=");
+                    serial::puts(((failedTdPhysical & 0x0FFFu) +
+                        sizeof(UHCI_TD) > 4096u) ? "yes" : "no");
+                    serial::puts(" port0=0x");
+                    serial::put_hex16(failedPort0);
+                    serial::puts(" port1=0x");
+                    serial::put_hex16(failedPort1);
+                    serial::puts(" qh-ring=");
+                    for (uint8_t i = 0; i < waitHistory.qhElements.count; ++i) {
+                        if (i) serial::putc(',');
+                        serial::put_hex32(arch::amd64::uhci::history_value(
+                            waitHistory.qhElements, i));
+                    }
+                    serial::puts(" td-status-ring=");
+                    for (uint8_t i = 0; i < waitHistory.tdStatuses.count; ++i) {
+                        if (i) serial::putc(',');
+                        serial::put_hex32(arch::amd64::uhci::history_value(
+                            waitHistory.tdStatuses, i));
+                    }
+                    serial::puts(" dma-buffer-class=");
+                    serial::puts(csw_buffer_class_name(
+                        arch::amd64::uhci::classify_csw_buffer(
+                            failedBufferPrefix, 13u,
+                            arch::amd64::uhci::decode_actual_length(
+                                failedTdStatus),
+                            arch::amd64::uhci::CSW_DMA_SENTINEL,
+                            botContext.expectedCswTag)));
+                    serial::puts(" caller-buffer-class=");
+                    serial::puts(csw_buffer_class_name(
+                        arch::amd64::uhci::classify_csw_buffer(
+                            p, 13u, transferred,
+                            arch::amd64::uhci::CSW_DMA_SENTINEL,
+                            botContext.expectedCswTag)));
+                    serial::puts(" dma-csw=");
+                    for (uint8_t i = 0; i < sizeof(failedBufferPrefix); ++i)
+                        serial::put_hex8(failedBufferPrefix[i]);
+                    serial::puts(" guest-classification=");
+                    serial::puts(guest_timeout_classification(failedTdStatus,
+                        failedQhElement, failedTdPhysical, failedTdLink,
+                        failedControllerStatus));
+                    serial::puts(" trace-td-physical=0x");
+                    serial::put_hex32(failedTdPhysical);
+                    serial::putc('\n');
+                }
+#endif
                 s_qh.elementLink = 0x01;
                 dma_compiler_barrier();
                 if (bytesTransferred) *bytesTransferred = transferred;
@@ -815,9 +1289,9 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
                 serial::put_hex32(failedTdBuffer);
                 serial::puts(" dma-buffer-va=0x");
                 serial::put_hex64(reinterpret_cast<uint64_t>(
-                    s_bulkPackets[packet]));
+                    bulk_packet_buffer(packet)));
                 serial::puts(" dma-buffer-pa=0x");
-                serial::put_hex32(ptr32(s_bulkPackets[packet]));
+                serial::put_hex32(ptr32(bulk_packet_buffer(packet)));
                 serial::puts(" max-packet=0x");
                 serial::put_hex16(maxPacket);
                 serial::puts(" actual=0x");
@@ -852,7 +1326,7 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
             }
             if (dirIn) {
                 for (uint16_t i = 0; i < actual; ++i)
-                    p[transferred + i] = s_bulkPackets[packet][i];
+                    p[transferred + i] = bulk_packet_buffer(packet)[i];
             }
             transferred = static_cast<uint16_t>(transferred + actual);
             remaining = static_cast<uint16_t>(remaining - actual);
@@ -860,15 +1334,106 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
             s_dataToggle[deviceAddr][slot] = toggle;
             if (actual < batchLengths[packet]) {
                 shortPacket = true;
+                completedPacketCount = static_cast<uint8_t>(packet + 1u);
                 break;
             }
+            completedPacketCount = static_cast<uint8_t>(packet + 1u);
         }
 
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+        if (isCsw && completedPacketCount != 0) {
+            const uint8_t finalPacket = static_cast<uint8_t>(
+                completedPacketCount - 1u);
+            finalCswTdStatus = s_tds[finalPacket].status;
+            finalCswTdPhysical = ptr32(&s_tds[finalPacket]);
+            finalCswBufferPhysical = ptr32(bulk_packet_buffer(finalPacket));
+            finalCswGeneration = batchGenerations[finalPacket];
+            finalCswTdLength = batchLengths[finalPacket];
+        }
+#endif
         dma_compiler_barrier();
         s_qh.elementLink = 0x01;
         dma_compiler_barrier();
         if (shortPacket) break;
     }
+
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+    if (isCsw && finalCswTdPhysical != 0) {
+        SerialDiagnosticScope diagnosticLine;
+        serial::puts("[USB-UHCI] csw-complete sequence=BOT#");
+        serial::put_hex64(botContext.commandSequence);
+        serial::puts(" opcode=0x");
+        serial::put_hex8(botContext.opcode);
+        serial::puts(" cbw-tag=0x");
+        serial::put_hex32(botContext.cbwTag);
+        serial::puts(" expected-csw-tag=0x");
+        serial::put_hex32(botContext.expectedCswTag);
+        serial::puts(" incarnation=0x");
+        serial::put_hex64(botContext.deviceIncarnation);
+        serial::puts(" cdb-len=0x");
+        serial::put_hex8(botContext.cdbLength);
+        serial::puts(" direction=0x");
+        serial::put_hex8(botContext.direction);
+        serial::puts(" requested=0x");
+        serial::put_hex16(dataLen);
+        serial::puts(" generation=0x");
+        serial::put_hex64(finalCswGeneration);
+        serial::puts(" qh-pa=0x");
+        serial::put_hex32(ptr32(&s_qh));
+        serial::puts(" td-pa=0x");
+        serial::put_hex32(finalCswTdPhysical);
+        serial::puts(" buffer-pa=0x");
+        serial::put_hex32(finalCswBufferPhysical);
+        serial::puts(" buffer-page-offset=0x");
+        serial::put_hex16(static_cast<uint16_t>(
+            finalCswBufferPhysical & 0x0FFFu));
+        serial::puts(" buffer-crosses-4k=");
+        serial::puts(((finalCswBufferPhysical & 0x0FFFu) +
+            finalCswTdLength > 4096u) ? "yes" : "no");
+        serial::puts(" buffer-64k-offset=0x");
+        serial::put_hex16(static_cast<uint16_t>(
+            finalCswBufferPhysical & 0xFFFFu));
+        serial::puts(" buffer-crosses-64k=");
+        serial::puts(((finalCswBufferPhysical & 0xFFFFu) +
+            finalCswTdLength > 65536u) ? "yes" : "no");
+        serial::puts(" qh-page-offset=0x");
+        serial::put_hex16(static_cast<uint16_t>(ptr32(&s_qh) & 0x0FFFu));
+        serial::puts(" td-page-offset=0x");
+        serial::put_hex16(static_cast<uint16_t>(finalCswTdPhysical & 0x0FFFu));
+        serial::puts(" qh-td-same-page=");
+        serial::puts(((ptr32(&s_qh) >> 12) ==
+            (finalCswTdPhysical >> 12)) ? "yes" : "no");
+        serial::puts(" td-crosses-4k=");
+        serial::puts(((finalCswTdPhysical & 0x0FFFu) + sizeof(UHCI_TD) >
+            4096u) ? "yes" : "no");
+        serial::puts(" td-status=0x");
+        serial::put_hex32(finalCswTdStatus);
+        serial::puts(" actual-received=0x");
+        serial::put_hex16(transferred);
+        serial::puts(" actual-last-td=0x");
+        serial::put_hex16(arch::amd64::uhci::decode_actual_length(
+            finalCswTdStatus));
+        serial::puts(" short-packet=");
+        serial::puts(arch::amd64::uhci::short_packet(
+            finalCswTdStatus, transferred, dataLen) ? "yes" : "no");
+        serial::puts(" toggle-start=0x");
+        serial::put_hex8(initialToggle);
+        serial::puts(" toggle-final=0x");
+        serial::put_hex8(toggle);
+        serial::puts(" software-toggle-final=0x");
+        serial::put_hex8(s_dataToggle[deviceAddr][slot]);
+        serial::puts(" caller-csw=");
+        for (uint8_t i = 0; i < 13u; ++i)
+            serial::put_hex8(p[i]);
+        serial::puts(" class=");
+        serial::puts(csw_buffer_class_name(
+            arch::amd64::uhci::classify_csw_buffer(
+                p, 13u, transferred,
+                arch::amd64::uhci::CSW_DMA_SENTINEL,
+                botContext.expectedCswTag)));
+        serial::putc('\n');
+    }
+#endif
 
     if (bytesTransferred) *bytesTransferred = transferred;
     return XFER_SUCCESS;

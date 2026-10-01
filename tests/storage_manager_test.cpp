@@ -2001,6 +2001,28 @@ void run_usb_mass_storage_tests()
     usb_check(probed && g_usbBot.lastOpcode ==
                   usb_storage::SCSI_SYNCHRONIZE_CACHE_10,
               "only a BOT/SCSI LUN 0 Mass Storage interface is probed and cache sync is issued");
+    const usb_storage::StorageDevice* diagnosticTransport = descriptorValid
+        ? usb_storage::get_device(device.driverIndex) : nullptr;
+    usb_check(diagnosticTransport && diagnosticTransport->commandSequence != 0 &&
+              diagnosticTransport->botDiagnostic.commandSequence ==
+                  diagnosticTransport->commandSequence &&
+              diagnosticTransport->botDiagnostic.opcode ==
+                  usb_storage::SCSI_SYNCHRONIZE_CACHE_10 &&
+              diagnosticTransport->botDiagnostic.cdbLength == 10 &&
+              diagnosticTransport->botDiagnostic.direction == 0 &&
+              diagnosticTransport->botDiagnostic.requestedBytes == 0 &&
+              diagnosticTransport->botDiagnostic.cbwTag ==
+                  diagnosticTransport->botDiagnostic.expectedCswTag &&
+              diagnosticTransport->botDiagnostic.phase ==
+                  usb::BOT_DIAG_PHASE_COMPLETE,
+              "BOT command diagnostic records sequence, CDB, direction, length, tags, and completion phase");
+    const uint64_t sequenceBeforeTUR = diagnosticTransport
+        ? diagnosticTransport->commandSequence : 0;
+    const usb::TransferStatus turStatus = diagnosticTransport
+        ? usb_storage::test_unit_ready(device.driverIndex) : usb::XFER_ERROR;
+    usb_check(turStatus == usb::XFER_SUCCESS && diagnosticTransport &&
+              diagnosticTransport->commandSequence == sequenceBeforeTUR + 1,
+              "BOT diagnostic command sequence advances independently for the next command");
     usb_check(descriptorValid && device.type == block::BDEV_USB_MASS &&
               device.name[0] == 'u',
               "shared registry classifies the transport as USB Mass Storage");
@@ -2847,6 +2869,22 @@ void run_usb_mass_storage_tests()
 } // namespace
 
 namespace kernel { namespace usb {
+static BotDiagnosticContext g_botDiagnosticContext = {};
+static bool g_botDiagnosticActive = false;
+
+void set_bot_diagnostic_context(const BotDiagnosticContext* context)
+{
+    g_botDiagnosticActive = context != nullptr;
+    g_botDiagnosticContext = context ? *context : BotDiagnosticContext{};
+}
+
+bool get_bot_diagnostic_context(BotDiagnosticContext* context)
+{
+    if (!context || !g_botDiagnosticActive) return false;
+    *context = g_botDiagnosticContext;
+    return true;
+}
+
 const Device* get_device(uint8_t address)
 {
     return g_usbDevice.present && g_usbDevice.address == address
@@ -3108,6 +3146,53 @@ static void run_uhci_transfer_logic_tests()
           "UHCI actual-length field decodes a full packet");
     check(decode_actual_length(2046u) == 2047,
           "UHCI actual-length field decodes its maximum byte count");
+
+    const uint32_t cswStatus = TD_SHORT_PACKET_DETECT | 12u;
+    check(decode_max_length(cswInToken) == 13u &&
+          decode_actual_length(cswStatus) == 13u &&
+          !short_packet(cswStatus, 13u) && 64u > decode_max_length(cswInToken),
+          "13-byte successful CSW is complete when endpoint max packet is larger");
+
+    uint8_t cswBuffer[13];
+    std::fill(cswBuffer, cswBuffer + sizeof(cswBuffer), CSW_DMA_SENTINEL);
+    check(classify_csw_buffer(cswBuffer, sizeof(cswBuffer), 0u,
+              CSW_DMA_SENTINEL, 0x12345678u) ==
+              CSW_BUFFER_UNTOUCHED_SENTINEL,
+          "CSW DMA classifier recognizes an untouched sentinel buffer");
+    cswBuffer[0] = 0x55u;
+    check(classify_csw_buffer(cswBuffer, sizeof(cswBuffer), 1u,
+              CSW_DMA_SENTINEL, 0x12345678u) ==
+              CSW_BUFFER_PARTIALLY_CHANGED,
+          "CSW DMA classifier recognizes partial buffer changes");
+    const uint32_t cswSignature = 0x53425355u;
+    for (uint8_t i = 0; i < 4; ++i) {
+        cswBuffer[i] = static_cast<uint8_t>(cswSignature >> (i * 8));
+        cswBuffer[4 + i] = static_cast<uint8_t>(0x12345678u >> (i * 8));
+    }
+    check(classify_csw_buffer(cswBuffer, sizeof(cswBuffer), 8u,
+              CSW_DMA_SENTINEL, 0x12345678u) ==
+              CSW_BUFFER_PARTIALLY_CHANGED,
+          "expected signature and tag remain partial without all 13 bytes");
+    for (uint8_t i = 8; i < 12; ++i) cswBuffer[i] = 0;
+    cswBuffer[12] = 0;
+    check(classify_csw_buffer(cswBuffer, sizeof(cswBuffer), 13u,
+              CSW_DMA_SENTINEL, 0x12345678u) ==
+              CSW_BUFFER_COMPLETE_EXPECTED_CSW,
+          "CSW DMA classifier recognizes a complete expected CSW");
+    std::fill(cswBuffer, cswBuffer + sizeof(cswBuffer), 0x5Au);
+    check(classify_csw_buffer(cswBuffer, sizeof(cswBuffer), 13u,
+              CSW_DMA_SENTINEL, 0x12345678u) ==
+              CSW_BUFFER_UNRELATED_BYTES,
+          "CSW DMA classifier separates unrelated bytes from a valid CSW");
+
+    SampleHistory history = {};
+    clear_history(history);
+    record_distinct(history, 1u);
+    record_distinct(history, 1u);
+    for (uint32_t i = 2; i <= 20; ++i) record_distinct(history, i);
+    check(history.count == 16u && history_value(history, 0) == 5u &&
+          history_value(history, 15) == 20u,
+          "UHCI diagnostic ring retains the last 16 distinct samples");
 
     check(elapsed_frames(10, 10) == 0,
           "UHCI frame counter has zero elapsed frames at the start");

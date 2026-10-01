@@ -18,7 +18,8 @@ param(
     [string]$WorkDir = "",
     [string]$KernelImage = "kernel\build\amd64\bin\kernel.elf",
     [string]$BootloaderImage = "guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe",
-    [switch]$TraceUsb
+    [switch]$TraceUsb,
+    [switch]$StopAfterInitialize
 )
 
 $ErrorActionPreference = "Stop"
@@ -81,6 +82,7 @@ $kernelBytes = (Get-Item -LiteralPath (Join-Path $espStage "kernel.elf")).Length
 $uefiHash = (Get-FileHash -LiteralPath $OvmfFull -Algorithm SHA256).Hash
 $qemuAtStart = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'")
 @("manifestSchema=DM19-TRANSPORT-1","proof=DM13-QEMU-USB-DISK-MANAGER-LIFECYCLE-AND-RESTART",
+  "proofMode=$(if ($StopAfterInitialize) { 'production-initialize-prefix' } else { 'full-lifecycle-and-restart' })",
   "timestampUtc=$([DateTime]::UtcNow.ToString('o'))","qemu=$qemuVersion","qemuSha256=$qemuHash",
   "machine=pc,usb=off","cpu=QEMU-default (no -cpu argument)",
   "controller=PIIX3-UHCI","controllerArguments=-device piix3-usb-uhci,id=uhci",
@@ -157,7 +159,8 @@ function Stop-Dm13Qemu($Run) {
     }
 }
 
-function Wait-Dm13Marker($Run, [string]$Marker, [int]$TimeoutSeconds) {
+function Wait-Dm13Marker($Run, [string]$Marker, [int]$TimeoutSeconds,
+                         [bool]$RequireMainLoop = $true) {
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     while ([DateTime]::UtcNow -lt $deadline) {
         if (Test-Path -LiteralPath $Run.Serial) {
@@ -167,7 +170,8 @@ function Wait-Dm13Marker($Run, [string]$Marker, [int]$TimeoutSeconds) {
                 throw "QEMU proof reported a failure or blocker; inspect $($Run.Serial)"
             }
             if ($log -and $log.Contains($Marker) -and
-                $log.Contains("[KERNEL] Entering main loop")) { return }
+                (-not $RequireMainLoop -or
+                 $log.Contains("[KERNEL] Entering main loop"))) { return }
         }
         if ($Run.Process.HasExited) { break }
         Start-Sleep -Milliseconds 500
@@ -178,6 +182,19 @@ function Wait-Dm13Marker($Run, [string]$Marker, [int]$TimeoutSeconds) {
 $first = $null; $second = $null
 try {
     $first = Start-Dm13Qemu "first-boot"
+    if ($StopAfterInitialize) {
+        Wait-Dm13Marker $first "[DM13-QEMU-USB] initialize=PASS verified=PASS" 3600 $false
+        Stop-Dm13Qemu $first; $first = $null
+        $prefixImageHash = (Get-FileHash -LiteralPath $UsbFull -Algorithm SHA256).Hash
+        Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
+          "firstBootSerial=$($WorkFull)\first-boot.serial.log",
+          "initializationPrefix=PASS qemuTraceEnabled=$(if ($TraceUsb) { 'yes' } else { 'no' })",
+          "imageSha256AfterInitialize=$prefixImageHash",
+          "transportResult=PASS",
+          "result=PASS tier=production-usb-initialize-prefix qemuTraceFromStartup=$(if ($TraceUsb) { 'yes' } else { 'no' }) physicalHostDisks=none")
+        Write-Host "DM13 USB production initialize-prefix proof passed. Evidence: $WorkFull"
+        return
+    }
     Wait-Dm13Marker $first "[DM13-QEMU-USB] lifecycle=PASS" 3600
     Stop-Dm13Qemu $first; $first = $null
 
