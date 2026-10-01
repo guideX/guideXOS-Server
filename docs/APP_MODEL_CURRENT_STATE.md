@@ -1,6 +1,6 @@
 # guideXOS App Model Current-State Map
 
-Status: Phase 5A final App Model v1 snapshot
+Status: Phase 6 current state (2026-10-01). The Phase 5A/5B material below is historical; see [Phase 6 file associations and document activation](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md) for the current file-open contract and verification.
 
 This document maps the app model as it exists in the repository today. It is intended to ground future GXApp runtime work without rewriting or destabilizing current launch behavior.
 
@@ -917,5 +917,13 @@ After the production repair, the canonical closeout passed with 86 post-smoke st
 The 18-registration value in the Phase 5A snapshot above is historical. The unified Settings Center added the legitimate 19th hosted built-in, `gxos.builtin.settings`, in commit `3e5aa43d0efd098b651d45afbece26bcf81f8c00`. Phase 5B updates the fixture to 19, checks the Settings identity and uniqueness, and retains the count check.
 
 Phase 5B adds owned App Model IDs to pinned and recent storage, bounded config/manifest/registry values, CRLF-safe manifest reads, unique legacy-label migration, truthful safely-unsupported classification, and temporary-registration owner/generation checks. Developer Studio and Native ELF apps remain unavailable to the ordinary hosted launcher. Hosted production dispatch, repeat attempts, unknown/unsupported failures, startup, Recent Programs, Settings, service/network, synthetic display, and clock regressions passed. QEMU was not required because no kernel or native launch code changed. The runtime harness verified dispatch cycles but did not provide visual UI acceptance.
+
+## 20. Phase 6 file association and document activation
+
+Phase 6 moves the supported text-file default into the AppRegistry-owned association index and introduces an owned `AppActivationContext` document target. The canonical handler is `gxos.builtin.notepad`; `.txt`, `.log`, `.ini`, and `.cfg` are the hosted built-in declarations. File Explorer continues to navigate directories separately and sends selected files through `DesktopService::OpenFilesystemEntry`. Notepad receives the copied path through `ProcessTable` and reads it with its existing `loadFile()`/VFS logic.
+
+Document paths are bounded to 4096 bytes. The index is capped at 256 records, 16 declarations per app, and 32 bytes per extension. Extension matching ASCII-folds the final suffix; malformed, unknown, ambiguous, stale, unsupported, unavailable, or over-capacity targets fail closed. Hosted Windows VFS reads now use the same current-directory mapping already used by File Explorer after checking the in-memory VFS. Bare-metal kernel VFS behavior is unchanged. Directories are excluded from the association record count; the current association count is 13 (9 legacy image/unknown/risky rows plus 4 launchable AppRegistry rows).
+
+Phase 6 code, runtime proof, regression results, known boundaries, and commit/push closeout are maintained in [the Phase 6 report](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md).
 
 

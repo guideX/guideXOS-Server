@@ -16,10 +16,11 @@ bool isRelativePath(const std::string& value) {
 }
 
 bool isValidFileExtension(const std::string& extension) {
-    if (extension.size() < 2 || extension[0] != '.') return false;
+    if (extension.size() < 2 || extension.size() > kAppModelMaxFileExtensionBytes || extension[0] != '.') return false;
     for (size_t i = 1; i < extension.size(); ++i) {
         unsigned char c = static_cast<unsigned char>(extension[i]);
-        if (!std::isalnum(c) && extension[i] != '_' && extension[i] != '-') return false;
+        const bool asciiAlphaNumeric = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+        if (!asciiAlphaNumeric && extension[i] != '_' && extension[i] != '-') return false;
     }
     return true;
 }
@@ -102,7 +103,7 @@ AppManifestValidationResult AppManifestValidator::Validate(const AppManifest& ma
     }
     if (manifest.supportedArchitectures.size() > kAppModelMaxEntriesPerManifest ||
         manifest.permissions.size() > kAppModelMaxEntriesPerManifest ||
-        manifest.fileAssociations.size() > kAppModelMaxEntriesPerManifest ||
+        manifest.fileAssociations.size() > kAppModelMaxFileAssociationsPerApp ||
         manifest.desktopRegistryHints.size() > kAppModelMaxEntriesPerManifest) {
         addError(result.errors, "Manifest metadata count exceeds the App Model bound.");
     }
@@ -151,6 +152,11 @@ AppManifestValidationResult AppManifestValidator::Validate(const AppManifest& ma
     for (const FileAssociation& association : manifest.fileAssociations) {
         if (!isValidFileExtension(association.extension)) {
             addError(result.errors, "Invalid file association extension: " + association.extension);
+        }
+        if (association.contentType.size() > kAppModelMaxDisplayNameBytes ||
+            association.description.size() > kAppModelMaxDisplayNameBytes ||
+            hasControlCharacter(association.contentType) || hasControlCharacter(association.description)) {
+            addError(result.errors, "File association metadata exceeds the App Model bound.");
         }
     }
 

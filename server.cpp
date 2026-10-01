@@ -5130,13 +5130,15 @@ using namespace gxos;
             std::getline(iss, filePath); 
             if(filePath.size()>0 && filePath[0]==' ') filePath.erase(0,1);
             
-            uint64_t pid;
             if(filePath.empty()) {
-                pid = apps::Notepad::Launch();
+                const uint64_t pid = apps::Notepad::Launch();
+                std::cout<<"Notepad launched, pid="<<pid<<std::endl;
             } else {
-                pid = apps::Notepad::LaunchWithFile(filePath);
+                std::string error;
+                const bool opened = gui::DesktopService::OpenFilesystemEntry(filePath, false, error);
+                if (opened) std::cout << "Notepad document activation dispatched through App Model" << std::endl;
+                else std::cout << "Notepad document open rejected: " << error << std::endl;
             }
-            std::cout<<"Notepad launched, pid="<<pid<<std::endl;
         }
         else if (cmd=="calculator"){
             if(!requireCompositor()) continue;

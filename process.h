@@ -10,6 +10,7 @@
 #include <thread>
 #include <atomic>
 #include "ipc.h"
+#include "app_activation.h"
 
 namespace gxos {
     using ProcessFn = std::function<int(int,char**)>; // simplified entry point
@@ -23,6 +24,7 @@ namespace gxos {
         std::string name;
         ProcessFn entry;
         std::string appId;
+        apps::AppActivationContext activation;
     };
 
     struct ProcessTombstoneRecord {
@@ -61,7 +63,7 @@ namespace gxos {
 
     class Process {
     public:
-        uint64_t pid; std::string name; std::string appId; ipc::Mailbox mbox; ProcessFn entry; std::atomic<bool> running{false}; int exitCode=0;
+        uint64_t pid; std::string name; std::string appId; apps::AppActivationContext activation; ipc::Mailbox mbox; ProcessFn entry; std::atomic<bool> running{false}; int exitCode=0;
         // phase 1: completion signalling
         std::mutex mu; std::condition_variable cv; std::atomic<bool> finished{false};
         std::atomic<bool> tombstoneCaptured{false};
@@ -69,13 +71,14 @@ namespace gxos {
         std::atomic<uint64_t> cpuFinalMicros{0};
         ProcessThreadHandle cpuThreadHandle{};
         uint64_t startWallMicros = 0;
-        Process(uint64_t id, const std::string& n, const std::string& a, ProcessFn fn): pid(id), name(n), appId(a), mbox(), entry(fn){}
+        Process(uint64_t id, const std::string& n, const std::string& a, const apps::AppActivationContext& context, ProcessFn fn): pid(id), name(n), appId(a), activation(context), mbox(), entry(fn){}
         ~Process();
     };
 
     class ProcessTable {
     public:
         static uint64_t spawn(const ProcessSpec& spec, const std::vector<std::string>& args);
+        static apps::AppActivationContext CurrentActivationContext();
         static bool send(uint64_t dstPid, ipc::Message&& msg);
         static bool try_recv(uint64_t pid, ipc::Message& out);
         static bool try_recv_type(uint64_t pid, uint32_t type, ipc::Message& out);

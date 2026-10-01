@@ -170,54 +170,31 @@ namespace gxos { namespace apps {
         }
     }
     
-    // Static member initialization
-    uint64_t Notepad::s_windowId = 0;
-    std::string Notepad::s_filePath = "";
-    std::vector<std::string> Notepad::s_lines;
-    int Notepad::s_cursorLine = 0;
-    int Notepad::s_cursorCol = 0;
-    int Notepad::s_selectionAnchorIndex = 0;
-    int Notepad::s_selectionActiveEndIndex = 0;
-    bool Notepad::s_mouseSelecting = false;
-    bool Notepad::s_modified = false;
-    int Notepad::s_scrollOffset = 0;
-    bool Notepad::s_wrapText = true;
-    bool Notepad::s_shiftPressed = false;
-    bool Notepad::s_ctrlPressed = false;
-    bool Notepad::s_capsLockOn = false;
-    int Notepad::s_lastKeyCode = 0;
-    bool Notepad::s_keyDown = false;
-    bool Notepad::s_pendingClose = false;
-    int Notepad::s_pendingModalLaunches = 0;
-    std::vector<uint64_t> Notepad::s_modalDialogWindowIds;
-    bool Notepad::s_contextMenuVisible = false;
-    int Notepad::s_contextMenuX = 0;
-    int Notepad::s_contextMenuY = 0;
-    int Notepad::s_contextMenuHoverIndex = -1;
-    bool Notepad::s_fileMenuVisible = false;
-    int Notepad::s_fileMenuX = 4;
-    int Notepad::s_fileMenuY = 28;
-    int Notepad::s_fileMenuHoverIndex = -1;
-    bool Notepad::s_editMenuVisible = false;
-    int Notepad::s_editMenuX = 56;
-    int Notepad::s_editMenuY = 28;
-    int Notepad::s_editMenuHoverIndex = -1;
-    std::vector<Notepad::TextSnapshot> Notepad::s_undoStack;
-    std::vector<Notepad::TextSnapshot> Notepad::s_redoStack;
-    
     uint64_t Notepad::Launch() {
         ProcessSpec spec{"notepad", Notepad::main};
         spec.appId = "gxos.builtin.notepad";
         return ProcessTable::spawn(spec, {"notepad"});
     }
     
-    uint64_t Notepad::LaunchWithFile(const std::string& filePath) {
+    uint64_t Notepad::LaunchWithActivation(const AppActivationContext& activation) {
+        if (activation.kind != AppActivationKind::Document ||
+            activation.appId != "gxos.builtin.notepad" ||
+            !IsValidDocumentActivationPath(activation.documentPath)) {
+            Logger::write(LogLevel::Warn, "Notepad: Rejected invalid document activation context");
+            return 0;
+        }
         ProcessSpec spec{"notepad", Notepad::main};
         spec.appId = "gxos.builtin.notepad";
-        return ProcessTable::spawn(spec, {"notepad", filePath});
+        spec.activation = activation;
+        return ProcessTable::spawn(spec, {"notepad"});
     }
-    
+
     int Notepad::main(int argc, char** argv) {
+        Notepad instance;
+        return instance.run(argc, argv);
+    }
+
+    int Notepad::run(int argc, char** argv) {
         try {
             Logger::write(LogLevel::Info, "Notepad starting...");
             
@@ -237,6 +214,9 @@ namespace gxos { namespace apps {
             s_shiftPressed = false;
             s_ctrlPressed = false;
             s_capsLockOn = false;
+            s_keyDown = false;
+            s_lastKeyCode = 0;
+            s_pendingClose = false;
             s_undoStack.clear();
             s_redoStack.clear();
             s_pendingModalLaunches = 0;
@@ -249,13 +229,26 @@ namespace gxos { namespace apps {
             s_editMenuX = 56;
             s_editMenuY = 28;
             s_editMenuHoverIndex = -1;
+            s_contextMenuVisible = false;
+            s_contextMenuX = 0;
+            s_contextMenuY = 0;
+            s_contextMenuHoverIndex = -1;
 
             runSelectionSelfTest();
             
-            // Check if file path was provided
-            if (argc > 1) {
-                s_filePath = argv[1];
-                Logger::write(LogLevel::Info, std::string("Notepad: Would load file ") + s_filePath);
+            std::string pendingDocumentPath;
+            const AppActivationContext activation = ProcessTable::CurrentActivationContext();
+            if (activation.kind == AppActivationKind::Document) {
+                if (activation.appId == "gxos.builtin.notepad" &&
+                    IsValidDocumentActivationPath(activation.documentPath)) {
+                    pendingDocumentPath = activation.documentPath;
+                    Logger::write(LogLevel::Info, "Notepad: Document activation received appId=" +
+                        activation.appId + " path=" + pendingDocumentPath);
+                } else {
+                    Logger::write(LogLevel::Error, "Notepad: Rejected stale or mismatched document activation");
+                }
+            } else if (argc > 1 || (argc > 0 && argv && argv[0] && std::string(argv[0]) != "notepad")) {
+                Logger::write(LogLevel::Warn, "Notepad: Ignoring untyped launch arguments; documents require App Model activation");
             }
             
             // Subscribe to IPC channels
@@ -299,7 +292,7 @@ namespace gxos { namespace apps {
                                         const char* kGuiChanIn = "gui.input";
 
                                         // Helper lambda to add a button
-                                        auto addButton = [](int id, int x, int y, int w, int h, const std::string& text) {
+                                        auto addButton = [this](int id, int x, int y, int w, int h, const std::string& text) {
                                             ipc::Message msg;
                                             msg.type = (uint32_t)MsgType::MT_WidgetAdd;
                                             std::ostringstream oss;
@@ -322,6 +315,11 @@ namespace gxos { namespace apps {
                                         // Draw initial content
                                         redrawContent();
                                         updateStatusBar();
+                                        if (!pendingDocumentPath.empty()) {
+                                            const std::string documentPath = pendingDocumentPath;
+                                            pendingDocumentPath.clear();
+                                            loadFile(documentPath);
+                                        }
                                     } else if (s_pendingModalLaunches > 0 && createdId != s_windowId) {
                                         s_modalDialogWindowIds.push_back(createdId);
                                         s_pendingModalLaunches--;
@@ -1088,7 +1086,7 @@ namespace gxos { namespace apps {
         s_keyDown = false;
         s_lastKeyCode = 0;
         OpenDialog::Show(ownerX, ownerY, "data/",
-            [](const std::string& path) {
+            [this](const std::string& path) {
                 loadFile(path);
             }
         );
@@ -1219,7 +1217,7 @@ namespace gxos { namespace apps {
         }
         
         SaveDialog::Show(ownerX, ownerY, "drives", fileName,
-            [](const std::string& path) {
+            [this](const std::string& path) {
                 // Save callback
                 s_filePath = path;
                 saveFile();
@@ -1239,14 +1237,14 @@ namespace gxos { namespace apps {
         s_lastKeyCode = 0;
         
         SaveChangesDialog::Show(ownerX, ownerY,
-            []() {
+            [this]() {
                 // Save clicked
                 Logger::write(LogLevel::Info, "SaveChangesDialog: User chose Save");
                 if (s_filePath.empty()) {
                     // Need to show SaveDialog first
                     s_pendingModalLaunches++;
                     SaveDialog::Show(100, 100, "data/", "untitled.txt",
-                        [](const std::string& path) {
+                        [this](const std::string& path) {
                             s_filePath = path;
                             saveFile();
                             s_pendingClose = true;
@@ -1260,14 +1258,14 @@ namespace gxos { namespace apps {
                     // Window will close after this
                 }
             },
-            []() {
+            [this]() {
                 // Don't Save clicked
                 Logger::write(LogLevel::Info, "SaveChangesDialog: User chose Don't Save");
                 s_pendingClose = true;
                 s_modified = false;  // Clear modified flag so close proceeds
                 // Window will close after this
             },
-            []() {
+            [this]() {
                 // Cancel clicked
                 Logger::write(LogLevel::Info, "SaveChangesDialog: User chose Cancel");
                 // Do nothing - window stays open
@@ -1421,7 +1419,7 @@ namespace gxos { namespace apps {
     }
     
     void Notepad::rebuildToolbarButtons() {
-        auto addButton = [](int id, int x, int y, int w, int h, const std::string& text) {
+        auto addButton = [this](int id, int x, int y, int w, int h, const std::string& text) {
             ipc::Message msg;
             msg.type = (uint32_t)MsgType::MT_WidgetAdd;
             std::ostringstream oss;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app_manifest.h"
+#include "app_activation.h"
 #include "app_model_limits.h"
 
 #include <cstddef>
@@ -27,6 +28,43 @@ enum class DisplayNameResolutionStatus {
     Ambiguous
 };
 
+enum class FileAssociationResolutionStatus {
+    Resolved = 0,
+    InvalidPath,
+    NoExtension,
+    InvalidExtension,
+    NoAssociation,
+    Ambiguous,
+    HandlerMissing,
+    HandlerStale,
+    HandlerDoesNotSupportDocuments,
+    HandlerUnavailable,
+    RegistryCapacityExceeded
+};
+
+struct FileAssociationRecord {
+    std::string extension;
+    std::string appId;
+    std::string contentType;
+    std::string description;
+    uint64_t registrationOwner = 0;
+    uint64_t registrationGeneration = 0;
+    bool supportsDocumentActivation = false;
+    bool backendAvailable = false;
+    bool ambiguous = false;
+};
+
+struct FileAssociationResolution {
+    FileAssociationResolutionStatus status = FileAssociationResolutionStatus::NoAssociation;
+    std::string extension;
+    std::string appId;
+    std::string displayName;
+    AppActivationContext activation;
+    std::string reason;
+
+    bool launchable() const { return status == FileAssociationResolutionStatus::Resolved; }
+};
+
 struct RegisteredApp {
     AppManifest manifest;
     AppSourceKind sourceKind = AppSourceKind::UserApps;
@@ -35,6 +73,9 @@ struct RegisteredApp {
     bool temporaryDevelopment = false;
     uint64_t temporaryOwnerRuntimeId = 0;
     uint64_t temporaryGeneration = 0;
+    // Runtime-owned capability: the current backend has a production route
+    // that can launch this registration with a document activation context.
+    bool documentActivationBackendAvailable = false;
 
     const AppEntry* FindCompatibleEntry(const std::string& currentArchitecture) const;
 };
@@ -102,20 +143,28 @@ public:
                                                const std::string& architecture = "amd64",
                                                bool includeTemporaryDevelopment = false) const;
     const AppEntry* FindCompatibleEntry(const std::string& appId, const std::string& currentArchitecture) const;
+    FileAssociationResolution ResolveFileAssociation(const std::string& path) const;
+    bool IsDocumentActivationCurrent(const AppActivationContext& activation) const;
+    const std::vector<FileAssociationRecord>& GetFileAssociations() const;
+    bool FileAssociationCapacityExceeded() const;
 
     static std::vector<AppRegistrySource> DefaultSources();
     static const char* ToString(AppSourceKind kind);
     static const char* ToString(DisplayNameResolutionStatus status);
+    static const char* ToString(FileAssociationResolutionStatus status);
     static int DisplayNameSourcePriority(AppSourceKind kind);
 
 private:
     bool RegisterApp(const RegisteredApp& app, AppScanResult& result);
     bool ShouldReplaceDuplicate(const RegisteredApp& existingApp, const RegisteredApp& newApp) const;
+    void RebuildFileAssociations();
 
     bool m_preferSystemAppsOverUserApps = false;
     std::vector<AppRegistrySource> m_sources;
     std::vector<RegisteredApp> m_apps;
     std::map<std::string, size_t> m_appsById;
+    std::vector<FileAssociationRecord> m_fileAssociations;
+    bool m_fileAssociationCapacityExceeded = false;
 };
 
 } // namespace apps

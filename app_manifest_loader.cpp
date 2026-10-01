@@ -265,6 +265,10 @@ void populateFileAssociations(const JsonValue& root, AppManifest& manifest) {
     }
 }
 
+void populateActivationCapabilities(const JsonValue& root, AppManifest& manifest) {
+    manifest.supportsDocumentActivation = boolProperty(root, "supportsDocumentActivation", false);
+}
+
 void populateDefaultWindow(const JsonValue& root, AppManifest& manifest) {
     const JsonValue* window = root.get("defaultWindow");
     if (!window || !window->isObject()) return;
@@ -297,6 +301,7 @@ AppManifest manifestFromJson(const JsonValue& root) {
     manifest.permissions = stringArrayProperty(root, "permissions");
     populateEntries(root, manifest);
     populateFileAssociations(root, manifest);
+    populateActivationCapabilities(root, manifest);
     populateDefaultWindow(root, manifest);
     populateDesktopRegistryHints(root, manifest);
     return manifest;

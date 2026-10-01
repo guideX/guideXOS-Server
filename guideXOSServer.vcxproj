@@ -135,6 +135,7 @@
     <ClInclude Include="allocator.h" />
     <ClInclude Include="app_launch_resolver.h" />
     <ClInclude Include="app_manifest.h" />
+    <ClInclude Include="app_activation.h" />
     <ClInclude Include="app_manifest_loader.h" />
     <ClInclude Include="app_manifest_validator.h" />
     <ClInclude Include="app_registry.h" />

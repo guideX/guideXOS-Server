@@ -223,7 +223,7 @@ namespace gxos {
 
             enum class FilesystemEntryLaunchTarget {
                 FileExplorer = 0,
-                Notepad,
+                DocumentActivation,
                 ImageViewer,
                 Unsupported
             };
@@ -269,11 +269,6 @@ namespace gxos {
             };
 
             static const FileAssociationV1Record kFileAssociationV1Table[] = {
-                { "<folder>", FileAssociationV1Kind::Folder, "gxos.builtin.fileexplorer", "File Explorer", "FileExplorer", true, true, false, true, true, false, false, "Folders open through File Explorer" },
-                { ".txt", FileAssociationV1Kind::Extension, "gxos.builtin.notepad", "Notepad", "Notepad", true, true, true, false, false, false, false, "Plain text file" },
-                { ".log", FileAssociationV1Kind::Extension, "gxos.builtin.notepad", "Notepad", "Notepad", true, true, true, false, false, false, false, "Log file" },
-                { ".ini", FileAssociationV1Kind::Extension, "gxos.builtin.notepad", "Notepad", "Notepad", true, true, true, false, false, false, false, "INI configuration file" },
-                { ".cfg", FileAssociationV1Kind::Extension, "gxos.builtin.notepad", "Notepad", "Notepad", true, true, true, false, false, false, false, "CFG configuration file" },
                 { ".png", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
                 { ".bmp", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
                 { ".jpg", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
@@ -308,6 +303,21 @@ namespace gxos {
                 return findFileAssociationV1RecordByKey("<unknown>");
             }
 
+            static std::vector<apps::FileAssociationRecord> appModelFileAssociationsSnapshot() {
+                std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+                return s_appRegistry.GetFileAssociations();
+            }
+
+            static bool appModelFileAssociationCapacityExceededSnapshot() {
+                std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+                return s_appRegistry.FileAssociationCapacityExceeded();
+            }
+
+            static apps::FileAssociationResolution resolveRegisteredFileAssociation(const std::string& path) {
+                std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+                return s_appRegistry.ResolveFileAssociation(path);
+            }
+
             static const char* fileAssociationV1KindName(FileAssociationV1Kind kind) {
                 switch (kind) {
                 case FileAssociationV1Kind::Folder: return "folder";
@@ -327,12 +337,14 @@ namespace gxos {
             }
 
             static FilesystemEntryLaunchTarget resolveFilesystemEntryLaunchTarget(const std::string& path, bool isDirectory) {
-                const FileAssociationV1Record* record = lookupFileAssociationV1Record(path, isDirectory);
-                if (!record) return FilesystemEntryLaunchTarget::Unsupported;
-
-                if (record->folder) return FilesystemEntryLaunchTarget::FileExplorer;
-                if (record->textLike) return FilesystemEntryLaunchTarget::Notepad;
-                if (record->legacyDirectPath) return FilesystemEntryLaunchTarget::ImageViewer;
+                if (isDirectory) return FilesystemEntryLaunchTarget::FileExplorer;
+                const apps::FileAssociationResolution resolved = resolveRegisteredFileAssociation(path);
+                if (resolved.launchable()) return FilesystemEntryLaunchTarget::DocumentActivation;
+                if (resolved.status == apps::FileAssociationResolutionStatus::NoAssociation ||
+                    resolved.status == apps::FileAssociationResolutionStatus::NoExtension) {
+                    const FileAssociationV1Record* record = lookupFileAssociationV1Record(path, false);
+                    if (record && record->legacyDirectPath) return FilesystemEntryLaunchTarget::ImageViewer;
+                }
                 return FilesystemEntryLaunchTarget::Unsupported;
             }
 
@@ -342,15 +354,17 @@ namespace gxos {
             }
 
             static std::string filesystemEntryExtension(const std::string& path) {
-                size_t dot = path.find_last_of('.');
-                if (dot == std::string::npos || dot + 1 >= path.size()) return std::string();
+                const size_t slash = path.find_last_of("/\\");
+                const size_t baseStart = slash == std::string::npos ? 0 : slash + 1;
+                const size_t dot = path.find_last_of('.');
+                if (dot == std::string::npos || dot <= baseStart || dot + 1 >= path.size()) return std::string();
                 return lowerCopy(path.substr(dot));
             }
 
             static const char* filesystemEntryLaunchTargetName(FilesystemEntryLaunchTarget target) {
                 switch (target) {
                 case FilesystemEntryLaunchTarget::FileExplorer: return "FileExplorer";
-                case FilesystemEntryLaunchTarget::Notepad: return "Notepad";
+                case FilesystemEntryLaunchTarget::DocumentActivation: return "DocumentActivation";
                 case FilesystemEntryLaunchTarget::ImageViewer: return "ImageViewer";
                 case FilesystemEntryLaunchTarget::Unsupported:
                 default: return "Unsupported";
@@ -360,7 +374,7 @@ namespace gxos {
             static const char* filesystemEntryLaunchStatus(FilesystemEntryLaunchTarget target) {
                 switch (target) {
                 case FilesystemEntryLaunchTarget::FileExplorer:
-                case FilesystemEntryLaunchTarget::Notepad:
+                case FilesystemEntryLaunchTarget::DocumentActivation:
                 case FilesystemEntryLaunchTarget::ImageViewer:
                     return "supported";
                 case FilesystemEntryLaunchTarget::Unsupported:
@@ -372,7 +386,7 @@ namespace gxos {
             static const char* filesystemEntryLaunchReason(FilesystemEntryLaunchTarget target) {
                 switch (target) {
                 case FilesystemEntryLaunchTarget::FileExplorer: return "Folder association routes to File Explorer";
-                case FilesystemEntryLaunchTarget::Notepad: return "Text-like extension matched case-insensitively and routes to Notepad::LaunchWithFile";
+                case FilesystemEntryLaunchTarget::DocumentActivation: return "App Model association resolved and carries an owned document activation context";
                 case FilesystemEntryLaunchTarget::ImageViewer: return "Image extension remains on the legacy direct path to ImageViewer";
                 case FilesystemEntryLaunchTarget::Unsupported:
                 default: return "No file association registered";
@@ -380,13 +394,20 @@ namespace gxos {
             }
 
             static std::string filesystemEntryDiagnostic(const std::string& path, bool isDirectory) {
-                const FileAssociationV1Record* association = lookupFileAssociationV1Record(path, isDirectory);
+                const apps::FileAssociationResolution appAssociation = isDirectory
+                    ? apps::FileAssociationResolution{}
+                    : resolveRegisteredFileAssociation(path);
+                const FileAssociationV1Record* association = isDirectory ? nullptr : lookupFileAssociationV1Record(path, false);
+                const bool hasAppAssociation = appAssociation.launchable();
                 const FilesystemEntryLaunchTarget target = resolveFilesystemEntryLaunchTarget(path, isDirectory);
                 const std::string normalized = isDirectory ? path : lowerCopy(path);
                 const apps::BuiltInAppMetadata* registryMetadata = nullptr;
                 bool registryResolved = false;
                 bool registryMismatch = false;
-                if (association && association->handlerAppId && association->handlerAppId[0]) {
+                if (hasAppAssociation) {
+                    registryMetadata = apps::FindBuiltInAppMetadataByAppId(appAssociation.appId.c_str());
+                    registryResolved = registryMetadata != nullptr;
+                } else if (association && association->handlerAppId && association->handlerAppId[0]) {
                     registryMetadata = apps::FindBuiltInAppMetadataByAppId(association->handlerAppId);
                     registryResolved = registryMetadata != nullptr;
                     if (registryMetadata) {
@@ -403,12 +424,14 @@ namespace gxos {
                 oss << "path: " << path << "\n";
                 oss << "normalizedPath: " << normalized << "\n";
                 oss << "isDirectory: " << (isDirectory ? "true" : "false") << "\n";
-                oss << "associationKey: " << (association ? association->associationKey : "") << "\n";
-                oss << "associationKind: " << fileAssociationV1KindName(association ? association->kind : FileAssociationV1Kind::UnknownFallback) << "\n";
-                oss << "associationTargetName: " << fileAssociationV1TargetName(association) << "\n";
-                oss << "handlerAppId: " << (association && association->handlerAppId ? association->handlerAppId : "") << "\n";
-                oss << "handlerDisplayName: " << (association && association->handlerDisplayName ? association->handlerDisplayName : "") << "\n";
-                oss << "handlerLaunchName: " << (association && association->handlerLaunchName ? association->handlerLaunchName : "") << "\n";
+                oss << "associationKey: " << (hasAppAssociation ? appAssociation.extension : (association ? association->associationKey : "")) << "\n";
+                oss << "associationKind: " << (isDirectory ? "directory-route" : (hasAppAssociation ? "app-model-extension" : fileAssociationV1KindName(association ? association->kind : FileAssociationV1Kind::UnknownFallback))) << "\n";
+                oss << "associationTargetName: " << (isDirectory ? "File Explorer" : (hasAppAssociation ? appAssociation.displayName : fileAssociationV1TargetName(association))) << "\n";
+                oss << "handlerAppId: " << (isDirectory ? "gxos.builtin.fileexplorer" : (hasAppAssociation ? appAssociation.appId : (association && association->handlerAppId ? association->handlerAppId : ""))) << "\n";
+                oss << "handlerDisplayName: " << (isDirectory ? "File Explorer" : (hasAppAssociation ? appAssociation.displayName : (association && association->handlerDisplayName ? association->handlerDisplayName : ""))) << "\n";
+                oss << "handlerLaunchName: " << (hasAppAssociation && registryMetadata && registryMetadata->launchName ? registryMetadata->launchName : (association && association->handlerLaunchName ? association->handlerLaunchName : "")) << "\n";
+                oss << "appModelAssociationStatus: " << (isDirectory ? "not-applicable" : apps::AppRegistry::ToString(appAssociation.status)) << "\n";
+                oss << "appModelAssociationReason: " << (isDirectory ? "directory navigation is a separate shell route" : appAssociation.reason) << "\n";
                 oss << "activeTypedDispatchMayOwn: " << (association && association->activeTypedDispatchMayOwn ? "true" : "false") << "\n";
                 oss << "fallbackRequired: " << (association ? (association->fallbackRequired ? "true" : "false") : "true") << "\n";
                 oss << "textLike: " << (association && association->textLike ? "true" : "false") << "\n";
@@ -1626,6 +1649,7 @@ namespace gxos {
 
         static FileAssociationV1CoverageSummary collectFileAssociationV1CoverageSummary() {
             FileAssociationV1CoverageSummary summary;
+            const std::vector<apps::FileAssociationRecord> appAssociations = appModelFileAssociationsSnapshot();
             summary.tableExists = sizeof(kFileAssociationV1Table) / sizeof(kFileAssociationV1Table[0]) > 0;
             summary.visibleLaunchBehaviorChanged = false;
             summary.persistentDesktopStorageWrites = false;
@@ -1654,9 +1678,35 @@ namespace gxos {
                 }
             }
 
-            const size_t supportedRegistryAssociations = summary.folderAssociations + summary.textAssociations + summary.imageLegacyAssociations;
+            const std::vector<std::string> requiredTextExtensions = { ".txt", ".log", ".ini", ".cfg" };
+            bool allRequiredTextAssociationsResolve = true;
+            for (const std::string& extension : requiredTextExtensions) {
+                const apps::FileAssociationResolution resolved = resolveRegisteredFileAssociation("phase6-probe" + extension);
+                if (!resolved.launchable() || resolved.appId != "gxos.builtin.notepad") {
+                    allRequiredTextAssociationsResolve = false;
+                }
+            }
+            for (const apps::FileAssociationRecord& record : appAssociations) {
+                if (!record.supportsDocumentActivation || !record.backendAvailable || record.ambiguous) continue;
+                const apps::FileAssociationResolution resolved = resolveRegisteredFileAssociation("phase6-probe" + record.extension);
+                if (!resolved.launchable() || resolved.appId != record.appId) {
+                    ++summary.registryMismatch;
+                    continue;
+                }
+                ++summary.total;
+                ++summary.textAssociations;
+                ++summary.activeTypedDispatchOwned;
+                ++summary.registryResolved;
+            }
+
+            // Directory navigation is a separate shell route, not an
+            // extension association. Keep the old Phase 4B compatibility
+            // markers while excluding it from the association record count.
+            summary.folderAssociations = apps::FindBuiltInAppMetadataByAppId("gxos.builtin.fileexplorer") ? 1 : 0;
+
+            const size_t supportedRegistryAssociations = summary.textAssociations + summary.imageLegacyAssociations;
             summary.handlersResolveToRegistry = summary.registryMismatch == 0;
-            summary.textFilesOpenWithNotepad = summary.textAssociations == 4 && summary.registryMismatch == 0 && summary.registryResolved == supportedRegistryAssociations;
+            summary.textFilesOpenWithNotepad = summary.textAssociations == 4 && allRequiredTextAssociationsResolve && summary.registryMismatch == 0 && summary.registryResolved == supportedRegistryAssociations;
             summary.foldersOpenWithFileExplorer = summary.folderAssociations == 1 && summary.registryMismatch == 0 && summary.registryResolved == supportedRegistryAssociations;
             summary.imagesRemainLegacy = summary.imageLegacyAssociations == 5;
             summary.unknownExtensionsFallback = summary.unknownFallbackAssociations == 1;
@@ -1670,7 +1720,7 @@ namespace gxos {
             std::ostringstream oss;
             oss << "fileAssociationV1: " << statusText(summary.tableExists && summary.registryMismatch == 0 && summary.textAssociations == 4 && summary.folderAssociations == 1 && summary.imageLegacyAssociations == 5 && summary.unknownFallbackAssociations == 1 && summary.riskyFallbackAssociations == 3)
                 << " entries=" << summary.total
-                << " folders=" << summary.folderAssociations
+                << " directoryRoutes=" << summary.folderAssociations
                 << " text=" << summary.textAssociations
                 << " imagesLegacy=" << summary.imageLegacyAssociations
                 << " unknownFallback=" << summary.unknownFallbackAssociations
@@ -1683,13 +1733,14 @@ namespace gxos {
         }
 
         static std::string fileAssociationV1KeyMappingsLine() {
-            return "fileAssociationV1KeyMappings: folder->File Explorer; .txt/.log/.ini/.cfg->Notepad; .png/.bmp/.jpg/.gif/.jpeg->Image Viewer (legacy direct path); unknown/risky->Unsupported\n";
+            return "fileAssociationV1KeyMappings: directories->File Explorer (separate route); AppRegistry .txt/.log/.ini/.cfg->Notepad; .png/.bmp/.jpg/.gif/.jpeg->Image Viewer (legacy direct path); unknown/risky->Unsupported\n";
         }
 
         static std::string fileAssociationV1MarkersLine(const FileAssociationV1CoverageSummary& summary) {
             std::ostringstream oss;
             oss << "appModelPhase4BFileAssociationTableExists=" << diagnosticBool(summary.tableExists) << "\n";
             oss << "appModelPhase4BFolderAssociationRegistered=" << diagnosticBool(summary.folderAssociationRegistered) << "\n";
+            oss << "appModelPhase6DirectoryActivationIsSeparate=" << diagnosticBool(summary.foldersOpenWithFileExplorer) << "\n";
             oss << "appModelPhase4BTextAssociationsRegistered=" << diagnosticBool(summary.textAssociationsRegistered) << "\n";
             oss << "appModelPhase4BHandlersResolveToRegistry=" << diagnosticBool(summary.handlersResolveToRegistry) << "\n";
             oss << "appModelPhase4BTextFilesOpenWithNotepad=" << diagnosticBool(summary.textFilesOpenWithNotepad) << "\n";
@@ -1930,13 +1981,21 @@ namespace gxos {
                 target.type == apps::LaunchTargetType::LegacyAlias;
         }
 
-        static bool isActiveTypedDispatchFilesystemEntryTarget(bool isDirectory, const std::string& path, std::string& routeName) {
+        static bool isActiveTypedDispatchFilesystemEntryTarget(
+            bool isDirectory,
+            const std::string& path,
+            const apps::FileAssociationResolution& association,
+            std::string& routeName) {
+            if (!isDirectory && association.launchable()) {
+                routeName = "DocumentActivation";
+                return true;
+            }
             switch (resolveFilesystemEntryLaunchTarget(path, isDirectory)) {
             case FilesystemEntryLaunchTarget::FileExplorer:
                 routeName = "FileExplorer";
                 return true;
-            case FilesystemEntryLaunchTarget::Notepad:
-                routeName = "Notepad";
+            case FilesystemEntryLaunchTarget::DocumentActivation:
+                routeName = "DocumentActivation";
                 return true;
             case FilesystemEntryLaunchTarget::ImageViewer:
                 routeName = "ImageViewer";
@@ -3231,6 +3290,19 @@ namespace gxos {
                     << " note=" << (record.note ? record.note : "")
                     << "\n";
             }
+            for (const apps::FileAssociationRecord& record : appModelFileAssociationsSnapshot()) {
+                oss << "  record key=" << record.extension
+                    << " kind=extension"
+                    << " handlerAppId=" << record.appId
+                    << " handlerDisplayName=" << (record.supportsDocumentActivation ? "Notepad" : "")
+                    << " handlerLaunchName=" << (record.supportsDocumentActivation ? "Notepad" : "")
+                    << " activeTypedDispatchMayOwn=" << diagnosticBool(record.supportsDocumentActivation && record.backendAvailable && !record.ambiguous)
+                    << " fallbackRequired=true textLike=" << diagnosticBool(record.supportsDocumentActivation)
+                    << " folder=false system=false risky=false legacyDirectPath=false"
+                    << " associationAmbiguous=" << diagnosticBool(record.ambiguous)
+                    << " handlerAvailable=" << diagnosticBool(record.backendAvailable)
+                    << " note=" << record.description << "\n";
+            }
             oss << "nonFatal: true\n";
             return oss.str();
         }
@@ -3275,6 +3347,37 @@ namespace gxos {
                 }
                 oss << "\n";
             }
+            const std::vector<apps::FileAssociationRecord> appAssociations = appModelFileAssociationsSnapshot();
+            for (const apps::FileAssociationRecord& record : appAssociations) {
+                if (!record.supportsDocumentActivation || !record.backendAvailable || record.ambiguous) continue;
+                const apps::FileAssociationResolution resolved = resolveRegisteredFileAssociation("phase6-probe" + record.extension);
+                oss << "  key=" << record.extension
+                    << " kind=extension handlerAppId=" << record.appId
+                    << " handlerDisplayName=" << resolved.displayName
+                    << " handlerLaunchName=" << (apps::FindBuiltInAppMetadataByAppId(record.appId.c_str()) &&
+                        apps::FindBuiltInAppMetadataByAppId(record.appId.c_str())->launchName
+                        ? apps::FindBuiltInAppMetadataByAppId(record.appId.c_str())->launchName : "")
+                    << " activeTypedDispatchMayOwn=true fallbackRequired=true textLike=true folder=false system=false risky=false legacyDirectPath=false"
+                    << " registryResolved=" << diagnosticBool(resolved.launchable())
+                    << " registryMatch=" << diagnosticBool(resolved.launchable() && resolved.appId == record.appId)
+                    << " documentActivationSupported=true backendAvailable=true note=" << record.description << "\n";
+            }
+            oss << "registeredAssociations:\n";
+            for (const apps::FileAssociationRecord& record : appAssociations) {
+                const apps::FileAssociationResolution resolved = resolveRegisteredFileAssociation("phase6-probe" + record.extension);
+                oss << "  extension=" << record.extension
+                    << " handlerAppId=" << record.appId
+                    << " owner=" << record.registrationOwner
+                    << " generation=" << record.registrationGeneration
+                    << " ambiguous=" << diagnosticBool(record.ambiguous)
+                    << " documentActivationSupported=" << diagnosticBool(record.supportsDocumentActivation)
+                    << " backendAvailable=" << diagnosticBool(record.backendAvailable)
+                    << " resolution=" << apps::AppRegistry::ToString(resolved.status)
+                    << "\n";
+            }
+            oss << "associationRegistryCapacity=" << apps::kAppModelMaxFileAssociationRecords
+                << " associationRegistryCount=" << appAssociations.size()
+                << " associationRegistryCapacityExceeded=" << diagnosticBool(appModelFileAssociationCapacityExceededSnapshot()) << "\n";
             oss << "summary: tableExists=" << diagnosticBool(summary.tableExists)
                 << " handlersResolveToRegistry=" << diagnosticBool(summary.handlersResolveToRegistry)
                 << " visibleLaunchBehaviorChanged=" << diagnosticBool(summary.visibleLaunchBehaviorChanged)
@@ -5605,7 +5708,32 @@ namespace gxos {
             return failUnsupported("Active typed dispatch is not enabled for this app target");
         }
 
-        static bool tryExecuteActiveTypedDispatchFilesystemEntry(const std::string& path, bool isDirectory, bool recordRecent, std::string& error, std::string& selectedHandler, std::string& reason) {
+        static bool dispatchDocumentActivation(const apps::AppActivationContext& activation, std::string& error) {
+            {
+                std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+                if (!s_appRegistry.IsDocumentActivationCurrent(activation)) {
+                    error = "Document activation became stale before dispatch";
+                    return false;
+                }
+            }
+
+            if (activation.appId == "gxos.builtin.notepad") {
+                if (apps::Notepad::LaunchWithActivation(activation) != 0) return true;
+                error = "Failed to launch the registered document handler";
+                return false;
+            }
+            error = "The registered application has no current document activation dispatcher";
+            return false;
+        }
+
+        static bool tryExecuteActiveTypedDispatchFilesystemEntry(
+            const std::string& path,
+            bool isDirectory,
+            const apps::FileAssociationResolution& association,
+            bool recordRecent,
+            std::string& error,
+            std::string& selectedHandler,
+            std::string& reason) {
             error.clear();
             selectedHandler.clear();
             reason.clear();
@@ -5622,7 +5750,7 @@ namespace gxos {
             };
 
             std::string routeName;
-            if (!isActiveTypedDispatchFilesystemEntryTarget(isDirectory, path, routeName)) {
+            if (!isActiveTypedDispatchFilesystemEntryTarget(isDirectory, path, association, routeName)) {
                 reason = "Active typed dispatch is not enabled for this filesystem entry";
                 return false;
             }
@@ -5643,17 +5771,16 @@ namespace gxos {
                 return true;
             }
 
-            if (routeName == "Notepad") {
-                const uint64_t pid = apps::Notepad::LaunchWithFile(path);
-                if (pid == 0) {
-                    error = "Failed to open file in Notepad";
-                    reason = "Active typed dispatch attempted Notepad but the launcher returned pid=0";
+            if (routeName == "DocumentActivation") {
+                if (!association.launchable() || !dispatchDocumentActivation(association.activation, error)) {
+                    if (error.empty()) error = "The document association is unavailable";
+                    reason = "Active typed dispatch rejected an unavailable or stale App Model document activation";
                     return false;
                 }
 
-                addRecentIfRequested("Notepad");
-                selectedHandler = "Notepad";
-                reason = "Active typed dispatch handled the text-file open in Notepad";
+                addRecentIfRequested(association.displayName.c_str());
+                selectedHandler = association.displayName;
+                reason = "Active typed dispatch delivered an owned document activation to " + association.appId;
                 return true;
             }
 
@@ -5662,16 +5789,31 @@ namespace gxos {
 
         bool DesktopService::OpenFilesystemEntry(const std::string& path, bool isDirectory, std::string& error, bool recordRecent) {
             error.clear();
-            Logger::write(LogLevel::Info, std::string("Desktop filesystem open requested path=") + path + " directory=" + (isDirectory ? "true" : "false"));
             if (path.empty()) {
                 error = "No filesystem path supplied";
+                Logger::write(LogLevel::Warn, "Desktop filesystem open rejected: no path supplied");
+                NotificationManager::Add(error, NotificationLevel::Error);
                 return false;
             }
+            if (!isDirectory && !apps::IsValidDocumentActivationPath(path)) {
+                error = "Invalid or overlong document path";
+                Logger::write(LogLevel::Warn, "Desktop filesystem open rejected: invalid or overlong document path");
+                NotificationManager::Add(error, NotificationLevel::Error);
+                return false;
+            }
+            Logger::write(LogLevel::Info, std::string("Desktop filesystem open requested path=") + path + " directory=" + (isDirectory ? "true" : "false"));
 
-            const FilesystemEntryLaunchTarget shadowRoute = resolveFilesystemEntryLaunchTarget(path, isDirectory);
+            ensureDefaultAppsRegistered();
+            const apps::FileAssociationResolution association = isDirectory
+                ? apps::FileAssociationResolution{}
+                : resolveRegisteredFileAssociation(path);
+            const FilesystemEntryLaunchTarget shadowRoute = association.launchable()
+                ? FilesystemEntryLaunchTarget::DocumentActivation
+                : resolveFilesystemEntryLaunchTarget(path, isDirectory);
             std::string activeSelectedHandler;
             std::string activeReason;
-            const bool activeHandled = tryExecuteActiveTypedDispatchFilesystemEntry(path, isDirectory, recordRecent, error, activeSelectedHandler, activeReason);
+            const bool activeHandled = tryExecuteActiveTypedDispatchFilesystemEntry(
+                path, isDirectory, association, recordRecent, error, activeSelectedHandler, activeReason);
             Logger::write(LogLevel::Info, buildAppModelActiveTypedDispatchEvidenceLine(
                 "HostedFilesystemEntry",
                 path,
@@ -5684,7 +5826,7 @@ namespace gxos {
                 activeReason));
             if (activeHandled) return true;
 
-            switch (resolveFilesystemEntryLaunchTarget(path, isDirectory)) {
+            switch (shadowRoute) {
             case FilesystemEntryLaunchTarget::FileExplorer:
                 if (apps::FileExplorer::Launch(path) == 0) {
                     error = "Failed to open path in File Explorer";
@@ -5693,18 +5835,15 @@ namespace gxos {
                 }
                 if (recordRecent) AddRecentProgram("File Explorer");
                 return true;
-            case FilesystemEntryLaunchTarget::Notepad:
-                if (apps::Notepad::LaunchWithFile(path) == 0) {
-                    error = "Failed to open file in Notepad";
+            case FilesystemEntryLaunchTarget::DocumentActivation:
+                if (!association.launchable() || !dispatchDocumentActivation(association.activation, error)) {
+                    if (error.empty()) error = "The registered document handler is unavailable";
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                if (recordRecent) AddRecentProgram("Notepad");
+                if (recordRecent) AddRecentProgram(association.displayName);
                 return true;
             case FilesystemEntryLaunchTarget::ImageViewer:
-                // TODO: once AppModel launch arguments become first-class, route this
-                // through typed app launch with a file-path parameter instead of the
-                // direct helper call.
                 if (apps::ImageViewer::Launch(path) == 0) {
                     error = "Failed to open image in Image Viewer";
                     NotificationManager::Add(error, NotificationLevel::Error);
@@ -5717,7 +5856,16 @@ namespace gxos {
                 break;
             }
 
-            error = "No file association registered for " + path;
+            if (association.status == apps::FileAssociationResolutionStatus::HandlerUnavailable ||
+                association.status == apps::FileAssociationResolutionStatus::HandlerDoesNotSupportDocuments ||
+                association.status == apps::FileAssociationResolutionStatus::Ambiguous ||
+                association.status == apps::FileAssociationResolutionStatus::HandlerStale ||
+                association.status == apps::FileAssociationResolutionStatus::HandlerMissing ||
+                association.status == apps::FileAssociationResolutionStatus::RegistryCapacityExceeded) {
+                error = "Document association rejected for " + path + ": " + association.reason;
+            } else {
+                error = "No file association registered for " + path;
+            }
             Logger::write(LogLevel::Warn, "Desktop filesystem open failed: " + error);
             NotificationManager::Add(error, NotificationLevel::Error);
             return false;

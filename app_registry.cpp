@@ -44,6 +44,47 @@ bool entryPathIsContainedAndPresent(const RegisteredApp& app, const AppEntry& en
     return std::filesystem::is_regular_file(candidate, error) && !error;
 }
 
+std::string normalizeExtension(const std::string& extension) {
+    std::string normalized = extension;
+    for (char& ch : normalized) {
+        if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
+    }
+    return normalized;
+}
+
+bool isValidExtension(const std::string& extension) {
+    if (extension.size() < 2 || extension.size() > kAppModelMaxFileExtensionBytes || extension[0] != '.') return false;
+    for (size_t i = 1; i < extension.size(); ++i) {
+        const unsigned char ch = static_cast<unsigned char>(extension[i]);
+        const bool asciiAlphaNumeric = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9');
+        if (!asciiAlphaNumeric && extension[i] != '_' && extension[i] != '-') return false;
+    }
+    return true;
+}
+
+enum class PathExtensionStatus { Valid, NoExtension, InvalidPath, InvalidExtension };
+
+PathExtensionStatus extensionFromPath(const std::string& path, std::string& extension) {
+    extension.clear();
+    if (!IsValidDocumentActivationPath(path)) return PathExtensionStatus::InvalidPath;
+
+    const size_t separator = path.find_last_of("/\\");
+    const size_t baseNameStart = separator == std::string::npos ? 0 : separator + 1;
+    if (baseNameStart >= path.size()) return PathExtensionStatus::InvalidPath;
+    const std::string baseName = path.substr(baseNameStart);
+    const size_t dot = baseName.find_last_of('.');
+    if (dot == std::string::npos || dot == 0) return PathExtensionStatus::NoExtension;
+    if (dot + 1 >= baseName.size()) return PathExtensionStatus::InvalidExtension;
+
+    extension = baseName.substr(dot);
+    if (!isValidExtension(extension)) {
+        extension.clear();
+        return PathExtensionStatus::InvalidExtension;
+    }
+    extension = normalizeExtension(extension);
+    return PathExtensionStatus::Valid;
+}
+
 RegisteredApp makeBuiltInApp(const BuiltInAppMetadata& metadata) {
     RegisteredApp app;
     app.sourceKind = AppSourceKind::BuiltIn;
@@ -68,6 +109,17 @@ RegisteredApp makeBuiltInApp(const BuiltInAppMetadata& metadata) {
     entry.abi = "guidexos-desktop-service-v1";
     entry.runtime = "builtin-hosted";
     app.manifest.entries.push_back(entry);
+
+    if (app.manifest.id == "gxos.builtin.notepad") {
+        app.manifest.supportsDocumentActivation = true;
+        app.documentActivationBackendAvailable = true;
+        app.manifest.fileAssociations = {
+            { ".txt", "text/plain", "Plain text document" },
+            { ".log", "text/plain", "Log file" },
+            { ".ini", "text/plain", "INI configuration file" },
+            { ".cfg", "text/plain", "CFG configuration file" }
+        };
+    }
 
     app.manifest.permissions.push_back("desktop.window");
     app.manifest.desktopRegistryHints["registeredName"] = entry.entryPoint;
@@ -131,6 +183,8 @@ bool AppRegistry::PreferSystemAppsOverUserApps() const {
 void AppRegistry::Clear() {
     m_apps.clear();
     m_appsById.clear();
+    m_fileAssociations.clear();
+    m_fileAssociationCapacityExceeded = false;
 }
 
 void AppRegistry::SetSources(const std::vector<AppRegistrySource>& sources) {
@@ -201,6 +255,7 @@ AppScanResult AppRegistry::Scan(const std::vector<AppRegistrySource>& sources) {
 
     result.registeredAppCount = m_apps.size();
     result.registeredApps = m_apps;
+    RebuildFileAssociations();
     return result;
 }
 
@@ -215,6 +270,7 @@ AppScanResult AppRegistry::RegisterBuiltInAppsAsManifests() {
 
     result.registeredAppCount = m_apps.size();
     result.registeredApps = m_apps;
+    RebuildFileAssociations();
     return result;
 }
 
@@ -229,6 +285,7 @@ AppScanResult AppRegistry::RegisterBuiltInAppsAsManifests(const std::vector<std:
 
     result.registeredAppCount = m_apps.size();
     result.registeredApps = m_apps;
+    RebuildFileAssociations();
     return result;
 }
 
@@ -337,6 +394,143 @@ const AppEntry* AppRegistry::FindCompatibleEntry(const std::string& appId, const
     return app ? app->FindCompatibleEntry(currentArchitecture) : nullptr;
 }
 
+FileAssociationResolution AppRegistry::ResolveFileAssociation(const std::string& path) const {
+    FileAssociationResolution resolution;
+    std::string extension;
+    const PathExtensionStatus pathStatus = extensionFromPath(path, extension);
+    if (pathStatus == PathExtensionStatus::InvalidPath) {
+        resolution.status = FileAssociationResolutionStatus::InvalidPath;
+        resolution.reason = "document path is empty, malformed, or over capacity";
+        return resolution;
+    }
+    if (pathStatus == PathExtensionStatus::NoExtension) {
+        resolution.status = FileAssociationResolutionStatus::NoExtension;
+        resolution.reason = "document name has no extension";
+        return resolution;
+    }
+    if (pathStatus == PathExtensionStatus::InvalidExtension) {
+        resolution.status = FileAssociationResolutionStatus::InvalidExtension;
+        resolution.reason = "document extension is malformed or over capacity";
+        return resolution;
+    }
+
+    resolution.extension = extension;
+    const FileAssociationRecord* match = nullptr;
+    size_t matchCount = 0;
+    for (const FileAssociationRecord& record : m_fileAssociations) {
+        if (record.extension != extension) continue;
+        match = &record;
+        ++matchCount;
+    }
+    if (matchCount == 0) {
+        resolution.status = m_fileAssociationCapacityExceeded
+            ? FileAssociationResolutionStatus::RegistryCapacityExceeded
+            : FileAssociationResolutionStatus::NoAssociation;
+        resolution.reason = m_fileAssociationCapacityExceeded
+            ? "association registry capacity was reached; unresolved extensions fail closed"
+            : "no application declared this extension";
+        return resolution;
+    }
+    if (matchCount > 1 || (match && match->ambiguous)) {
+        resolution.status = FileAssociationResolutionStatus::Ambiguous;
+        resolution.reason = "more than one application declared this extension";
+        return resolution;
+    }
+
+    resolution.appId = match->appId;
+    auto appIt = m_appsById.find(match->appId);
+    if (appIt == m_appsById.end() || appIt->second >= m_apps.size()) {
+        resolution.status = FileAssociationResolutionStatus::HandlerMissing;
+        resolution.reason = "association handler is not registered";
+        return resolution;
+    }
+    const RegisteredApp& app = m_apps[appIt->second];
+    resolution.displayName = app.manifest.displayName;
+    if (app.temporaryOwnerRuntimeId != match->registrationOwner ||
+        app.temporaryGeneration != match->registrationGeneration) {
+        resolution.status = FileAssociationResolutionStatus::HandlerStale;
+        resolution.reason = "association registration owner or generation is stale";
+        return resolution;
+    }
+    if (!app.manifest.supportsDocumentActivation || !match->supportsDocumentActivation) {
+        resolution.status = FileAssociationResolutionStatus::HandlerDoesNotSupportDocuments;
+        resolution.reason = "registered handler does not declare document activation support";
+        return resolution;
+    }
+    if (!app.documentActivationBackendAvailable || !match->backendAvailable) {
+        resolution.status = FileAssociationResolutionStatus::HandlerUnavailable;
+        resolution.reason = "current runtime has no document activation dispatcher for this handler";
+        return resolution;
+    }
+
+    resolution.status = FileAssociationResolutionStatus::Resolved;
+    resolution.activation.kind = AppActivationKind::Document;
+    resolution.activation.appId = app.manifest.id;
+    resolution.activation.documentPath = path;
+    resolution.activation.registrationOwner = app.temporaryOwnerRuntimeId;
+    resolution.activation.registrationGeneration = app.temporaryGeneration;
+    resolution.reason = "association resolved to the current launchable registration";
+    return resolution;
+}
+
+bool AppRegistry::IsDocumentActivationCurrent(const AppActivationContext& activation) const {
+    if (activation.kind != AppActivationKind::Document || activation.appId.empty() ||
+        activation.appId.size() > kAppModelMaxAppIdBytes || !IsValidDocumentActivationPath(activation.documentPath)) {
+        return false;
+    }
+    const FileAssociationResolution current = ResolveFileAssociation(activation.documentPath);
+    return current.launchable() && current.appId == activation.appId &&
+        current.activation.registrationOwner == activation.registrationOwner &&
+        current.activation.registrationGeneration == activation.registrationGeneration;
+}
+
+const std::vector<FileAssociationRecord>& AppRegistry::GetFileAssociations() const {
+    return m_fileAssociations;
+}
+
+bool AppRegistry::FileAssociationCapacityExceeded() const {
+    return m_fileAssociationCapacityExceeded;
+}
+
+void AppRegistry::RebuildFileAssociations() {
+    // Both dimensions are bounded: at most 512 registered apps, each with at
+    // most 16 declarations. Sort before applying the 256-record index cap so
+    // overflow behavior does not depend on directory enumeration order.
+    std::vector<FileAssociationRecord> candidates;
+    candidates.reserve(std::min(m_apps.size() * kAppModelMaxFileAssociationsPerApp,
+        kAppModelMaxRegistryApps * kAppModelMaxFileAssociationsPerApp));
+    for (const RegisteredApp& app : m_apps) {
+        for (const FileAssociation& declaration : app.manifest.fileAssociations) {
+            FileAssociationRecord record;
+            record.extension = normalizeExtension(declaration.extension);
+            record.appId = app.manifest.id;
+            record.contentType = declaration.contentType;
+            record.description = declaration.description;
+            record.registrationOwner = app.temporaryOwnerRuntimeId;
+            record.registrationGeneration = app.temporaryGeneration;
+            record.supportsDocumentActivation = app.manifest.supportsDocumentActivation;
+            record.backendAvailable = app.documentActivationBackendAvailable;
+            candidates.push_back(std::move(record));
+        }
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const FileAssociationRecord& a, const FileAssociationRecord& b) {
+        if (a.extension != b.extension) return a.extension < b.extension;
+        if (a.appId != b.appId) return a.appId < b.appId;
+        if (a.registrationOwner != b.registrationOwner) return a.registrationOwner < b.registrationOwner;
+        return a.registrationGeneration < b.registrationGeneration;
+    });
+
+    m_fileAssociationCapacityExceeded = candidates.size() > kAppModelMaxFileAssociationRecords;
+    m_fileAssociations.clear();
+    m_fileAssociations.reserve(std::min(candidates.size(), kAppModelMaxFileAssociationRecords));
+    for (size_t i = 0; i < candidates.size() && i < kAppModelMaxFileAssociationRecords; ++i) {
+        const bool duplicateBefore = i > 0 && candidates[i - 1].extension == candidates[i].extension;
+        const bool duplicateAfter = i + 1 < candidates.size() && candidates[i + 1].extension == candidates[i].extension;
+        candidates[i].ambiguous = duplicateBefore || duplicateAfter;
+        m_fileAssociations.push_back(candidates[i]);
+    }
+}
+
 std::vector<AppRegistrySource> AppRegistry::DefaultSources() {
     // Prefer the checkout-local package layout when developing the hosted
     // Server from a source checkout. Production-style hosted roots still use
@@ -396,6 +590,7 @@ bool AppRegistry::RegisterTemporaryDevelopmentApp(const RegisteredApp& app, std:
 
     m_appsById[app.manifest.id] = m_apps.size();
     m_apps.push_back(app);
+    RebuildFileAssociations();
     return true;
 }
 
@@ -409,6 +604,7 @@ bool AppRegistry::UnregisterTemporaryDevelopmentApp(const std::string& appId, ui
     m_apps.erase(m_apps.begin() + static_cast<std::ptrdiff_t>(index));
     m_appsById.clear();
     for (size_t i = 0; i < m_apps.size(); ++i) m_appsById[m_apps[i].manifest.id] = i;
+    RebuildFileAssociations();
     return true;
 }
 
@@ -499,6 +695,23 @@ bool AppRegistry::ShouldReplaceDuplicate(const RegisteredApp& existingApp, const
     }
 
     return false;
+}
+
+const char* AppRegistry::ToString(FileAssociationResolutionStatus status) {
+    switch (status) {
+    case FileAssociationResolutionStatus::Resolved: return "resolved";
+    case FileAssociationResolutionStatus::InvalidPath: return "invalid-path";
+    case FileAssociationResolutionStatus::NoExtension: return "no-extension";
+    case FileAssociationResolutionStatus::InvalidExtension: return "invalid-extension";
+    case FileAssociationResolutionStatus::NoAssociation: return "no-association";
+    case FileAssociationResolutionStatus::Ambiguous: return "ambiguous";
+    case FileAssociationResolutionStatus::HandlerMissing: return "handler-missing";
+    case FileAssociationResolutionStatus::HandlerStale: return "handler-stale";
+    case FileAssociationResolutionStatus::HandlerDoesNotSupportDocuments: return "handler-no-document-activation";
+    case FileAssociationResolutionStatus::HandlerUnavailable: return "handler-unavailable";
+    case FileAssociationResolutionStatus::RegistryCapacityExceeded: return "capacity-exceeded";
+    default: return "unknown";
+    }
 }
 
 } // namespace apps

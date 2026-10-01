@@ -24,13 +24,7 @@
     "filesystem.read",
     "filesystem.write"
   ],
-  "fileAssociations": [
-    {
-      "extension": ".txt",
-      "contentType": "text/plain",
-      "description": "Plain text document"
-    }
-  ],
+  "fileAssociations": [],
   "defaultWindow": {
     "width": 640,
     "height": 480,

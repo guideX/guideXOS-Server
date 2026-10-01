@@ -381,7 +381,7 @@ This file should stay unsupported.
     Assert-True ($summaryFallbackUnsupportedCoverageCount -eq $inventoryCounts.FallbackUnsupportedCoverage) "Summary/inventory fallback coverage counts disagree"
     Assert-True ($summaryBuiltInCount -eq 19) "Expected 19 built-in apps, including the unified Settings registration"
     Assert-True ($summaryShellObjectCount -eq 10) "Expected 10 shell objects"
-    Assert-True ($summaryFileAssociationCount -eq 14) "Expected 14 file associations"
+    Assert-True ($summaryFileAssociationCount -eq 13) "Expected 13 file associations, excluding separate directory navigation"
     Assert-True ($summaryActiveDispatchCoverageCount -eq 12) "Expected 12 active-dispatch-owned coverage entries"
     Assert-True ($summaryFallbackUnsupportedCoverageCount -eq 27) "Expected 26 registered identities with no supported backend plus the explicit unknown probe"
     Assert-Contains $summaryOutput "expectedUnsupportedOnTarget=26 unexpectedUnsupportedOnTarget=0 unknownLabels=1" "phase 5B known unsupported launch classification"
@@ -389,7 +389,7 @@ This file should stay unsupported.
 
     Assert-Contains $inventoryOutput "inventorySurfaceExists=true" "phase 5B inventory surface"
     Assert-Contains $inventoryOutput "statusSurface=desktop.appmodel.summary" "phase 5B inventory status surface"
-    Assert-Contains $inventoryOutput "counts: builtInApps=19 shellObjects=10 fileAssociations=14 activeDispatchOwnedCoverage=12 fallbackUnsupportedCoverage=27" "phase 5B inventory counts"
+    Assert-Contains $inventoryOutput "counts: builtInApps=19 shellObjects=10 fileAssociations=13 activeDispatchOwnedCoverage=12 fallbackUnsupportedCoverage=27" "phase 5B inventory counts"
     Assert-Contains $inventoryOutput "recentProgramPolicy:" "phase 5B inventory recent-program policy"
     Assert-Contains $inventoryOutput "aligned=true" "phase 5B inventory recent-program alignment"
     Assert-Contains $inventoryOutput "canonicalRecentCapableBuiltIns=13" "phase 5B inventory canonical recent count"
@@ -640,7 +640,7 @@ This file should stay unsupported.
                 "selectedHandler=Notepad",
                 "activeTypedDispatchHandled=true",
                 "legacyFallbackUsed=false",
-                "reason=Active typed dispatch handled the text-file open in Notepad"
+                "reason=Active typed dispatch delivered an owned document activation to gxos.builtin.notepad"
             )
         Assert-Contains $textOutput "path=$($fixture.Path)" "phase 5B $($fixture.Label) file open path"
     }
@@ -718,10 +718,10 @@ This file should stay unsupported.
     Assert-Contains $finalSummaryOutput "appModelV1OutOfScopeBoundary=true" "phase 5B final summary out-of-scope boundary"
     Assert-Contains $finalSummaryOutput "appModelV1BuiltInAppRegistryCount=19" "phase 5B final summary built-in count"
     Assert-Contains $finalSummaryOutput "appModelV1ShellObjectRegistryCount=10" "phase 5B final summary shell-object count"
-    Assert-Contains $finalSummaryOutput "appModelV1FileAssociationCount=14" "phase 5B final summary file-association count"
+    Assert-Contains $finalSummaryOutput "appModelV1FileAssociationCount=13" "phase 5B final summary file-association count"
     Assert-Contains $finalSummaryOutput "appModelV1ActiveDispatchOwnedCoverageCount=12" "phase 5B final summary active-owned coverage"
     Assert-Contains $finalSummaryOutput "appModelV1FallbackUnsupportedCoverageCount=27" "phase 5B final summary fallback coverage"
-    Assert-Contains $finalSummaryOutput "counts: builtInApps=19 shellObjects=10 fileAssociations=14 activeDispatchOwnedCoverage=12 fallbackUnsupportedCoverage=27" "phase 5B final inventory counts"
+    Assert-Contains $finalSummaryOutput "counts: builtInApps=19 shellObjects=10 fileAssociations=13 activeDispatchOwnedCoverage=12 fallbackUnsupportedCoverage=27" "phase 5B final inventory counts"
     Assert-Contains $finalSummaryOutput "recentProgramPolicy:" "phase 5B final recent-program policy"
     Assert-Contains $finalSummaryOutput "aligned=true" "phase 5B final recent-program alignment"
     Assert-Contains $finalSummaryOutput "trashOpenOnlySafe=true" "phase 5B final trash boundary"

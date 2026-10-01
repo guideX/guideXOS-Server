@@ -25,6 +25,10 @@ namespace gxos {
     std::mutex ProcessTable::g_tombstoneLock;
 
     namespace {
+        thread_local const apps::AppActivationContext* g_currentActivationContext = nullptr;
+    }
+
+    namespace {
         bool isPriorityInputMessage(uint32_t type) {
             switch (static_cast<gui::MsgType>(type)) {
             case gui::MsgType::MT_InputKey:
@@ -185,12 +189,27 @@ namespace gxos {
     }
 
     uint64_t ProcessTable::spawn(const ProcessSpec& spec, const std::vector<std::string>& args){
+        apps::AppActivationContext activation = spec.activation;
+        if (activation.kind == apps::AppActivationKind::Document) {
+            if (spec.appId.empty() || spec.appId.size() > apps::kAppModelMaxAppIdBytes ||
+                activation.appId != spec.appId || !apps::IsValidDocumentActivationPath(activation.documentPath)) {
+                Logger::write(LogLevel::Warn, "Process launch rejected: invalid document activation context");
+                return 0;
+            }
+        } else if ((!activation.appId.empty() && activation.appId != spec.appId) ||
+            !activation.documentPath.empty() || activation.registrationOwner != 0 || activation.registrationGeneration != 0) {
+            Logger::write(LogLevel::Warn, "Process launch rejected: application activation contains document metadata");
+            return 0;
+        } else if (activation.appId.empty()) {
+            activation.appId = spec.appId;
+        }
+
         uint64_t pid;
         std::shared_ptr<Process> p;
         {
             std::lock_guard<std::mutex> _g(g_lock);
             pid = g_nextPid++;
-            p = std::make_shared<Process>(pid, spec.name, spec.appId, spec.entry);
+            p = std::make_shared<Process>(pid, spec.name, spec.appId, activation, spec.entry);
             p->startWallMicros = steady_clock_micros();
             g_proc[pid] = p;
         }
@@ -200,6 +219,7 @@ namespace gxos {
             p->running.store(true, std::memory_order_release);
             p->finished.store(false, std::memory_order_release);
             Allocator::setCurrentPid(pid);
+            g_currentActivationContext = &p->activation;
             std::vector<std::unique_ptr<char[]>> hold; 
             auto argv = make_argv(args, hold); 
             int argc = (int)args.size();
@@ -214,6 +234,7 @@ namespace gxos {
                 crashed = true;
                 crashMessage = "Process crashed";
             }
+            g_currentActivationContext = nullptr;
             Allocator::setCurrentPid(0);
             uint64_t cpuMicros = 0;
             if (query_thread_cpu_micros(current_thread_handle(), cpuMicros)) {
@@ -238,6 +259,10 @@ namespace gxos {
 #endif
         t.detach();
         return pid;
+    }
+
+    apps::AppActivationContext ProcessTable::CurrentActivationContext() {
+        return g_currentActivationContext ? *g_currentActivationContext : apps::AppActivationContext{};
     }
 
     bool ProcessTable::send(uint64_t dstPid, ipc::Message&& msg){

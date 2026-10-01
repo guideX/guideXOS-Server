@@ -389,7 +389,7 @@ This file should stay unsupported.
             "selectedHandler=Notepad",
             "activeTypedDispatchHandled=true",
             "legacyFallbackUsed=false",
-            "reason=Active typed dispatch handled the text-file open in Notepad"
+            "reason=Active typed dispatch delivered an owned document activation to gxos.builtin.notepad"
         )
 
     $imageOutput = Invoke-LaunchAndAssertTop `
