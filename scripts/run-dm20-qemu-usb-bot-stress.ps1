@@ -23,8 +23,7 @@ param(
     [string]$UsbSerial = "DM13WR01",
     [int]$CommandCount = 1000,
     [int]$ProofTimeoutSeconds = 1800,
-    [switch]$SkipBuild,
-    [switch]$NoTrace
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -52,11 +51,30 @@ $OvmfFull = (Resolve-Path -LiteralPath $OvmfCode).Path
 $verify = Join-Path $Root "scripts\verify-dm13-qemu-usb-image.py"
 $python = Get-Command python -ErrorAction Stop
 $qemuMonitor = $null
+$qemuMonitorReader = $null
+$qemuMonitorWriter = $null
 $qemuProcess = $null
 $manifest = Join-Path $WorkFull "manifest.txt"
 $serial = Join-Path $WorkFull "guest.serial.log"
 $trace = Join-Path $WorkFull "usb-uhci.trace.log"
+$qmpLog = Join-Path $WorkFull "qemu.qmp.log"
+$stressFailed = $false
 $events = Join-Path $WorkFull "usb-uhci.trace-events.txt"
+
+function Invoke-Dm20Qmp([string]$Command, [string]$Id) {
+    if (-not $script:qemuMonitorWriter -or -not $script:qemuMonitorReader) { return }
+    $request = '{"execute":"' + $Command + '","id":"' + $Id + '"}'
+    Add-Content -LiteralPath $script:qmpLog -Encoding utf8 -Value "TX $request"
+    $script:qemuMonitorWriter.WriteLine($request)
+    while ($true) {
+        $line = $script:qemuMonitorReader.ReadLine()
+        if ($null -eq $line) { throw "QMP closed while waiting for '$Command'." }
+        Add-Content -LiteralPath $script:qmpLog -Encoding utf8 -Value "RX $line"
+        if ($line -match ('"id"\s*:\s*"' + [regex]::Escape($Id) + '"')) {
+            return $line
+        }
+    }
+}
 
 try {
     if (-not (Test-Path -LiteralPath (Join-Path $EspFull "ramdisk.img"))) {
@@ -107,10 +125,16 @@ try {
     Copy-Item -LiteralPath $bootloaderPath -Destination (Join-Path $bootDir "BOOTX64.EFI") -Force
     Copy-Item -LiteralPath $kernel -Destination (Join-Path $espStage "kernel.elf") -Force
 
-    @("usb_uhci_schedule_start","usb_uhci_packet_add","usb_uhci_packet_complete_success",
-      "usb_uhci_td_complete","usb_uhci_packet_complete_error","usb_packet_state_fault",
-      "usb_msd_cmd_submit","usb_msd_data_in","usb_msd_data_out","usb_msd_packet_async",
-      "usb_msd_packet_complete","usb_msd_cmd_complete","usb_msd_send_status") |
+@("usb_uhci_schedule_start","usb_uhci_qh_load","usb_uhci_td_load",
+  "usb_uhci_td_queue","usb_uhci_td_nextqh","usb_uhci_td_async",
+  "usb_uhci_packet_add","usb_uhci_packet_link_async",
+  "usb_uhci_packet_complete_success",
+  "usb_uhci_packet_complete_shortxfer","usb_uhci_packet_complete_stall",
+  "usb_uhci_packet_complete_babble","usb_uhci_packet_complete_error",
+  "usb_uhci_packet_cancel","usb_packet_state_change","usb_packet_state_fault",
+  "usb_uhci_td_complete","usb_msd_cmd_submit","usb_msd_data_in",
+  "usb_msd_data_out","usb_msd_packet_async","usb_msd_packet_complete",
+  "usb_msd_cmd_complete","usb_msd_send_status") |
         Set-Content -LiteralPath $events -Encoding ascii
 
     $imageBefore = (Get-FileHash -LiteralPath $UsbFull -Algorithm SHA256).Hash
@@ -127,7 +151,7 @@ try {
     $monitorListener.Start()
     $port = ([Net.IPEndPoint]$monitorListener.LocalEndpoint).Port
     $monitorListener.Stop()
-    @("manifestSchema=DM20-USB-BOT-1","proof=DM20-QEMU-PRODUCTION-UHCI-BOT-CSW-STRESS",
+    @("manifestSchema=DM21-USB-BOT-1","proof=DM21-QEMU-PRODUCTION-UHCI-BOT-CSW-STRESS",
       "timestampUtc=$([DateTime]::UtcNow.ToString('o'))","sourceHead=$head",
       "trackedTreeDirty=$(if ($dirty) { 'yes' } else { 'no' })",
       "qemu=$qemuVersion","qemuSha256=$qemuHash","machine=pc,usb=off",
@@ -143,8 +167,8 @@ try {
       "layoutBufferOffsetBytes=$LayoutBufferOffsetBytes","usbSerial=$UsbSerial",
       "layoutDescriptorPadBytes=$LayoutDescriptorPadBytes",
       "proofSequences=A,B,C,D,E;repeats=10;large-transfer=128-sectors",
-      "qemuTraceEnabled=$(if ($NoTrace) { 'no' } else { 'yes' })","qemuTraceEvents=$events",
-      "monitorProtocol=HMP TCP loopback; runner sends quit only after proof or cleanup",
+      "qemuTraceEnabled=yes","qemuTraceEvents=$events",
+      "controlProtocol=QMP TCP loopback; transcript saved in qemu.qmp.log",
       "hostPhysicalDisksPassedToQemu=none") | Set-Content -LiteralPath $manifest -Encoding ascii
 
     $arguments = @("-accel",$QemuAccelerator,
@@ -157,8 +181,8 @@ try {
       "-object","rng-builtin,id=rng0",
       "-device","virtio-rng-pci,rng=rng0,disable-modern=on,max-bytes=1024,period=1000",
       "-m","1024M","-vga","std","-display","none","-serial","file:$serial")
-    if (-not $NoTrace) { $arguments += @("-trace","events=$events,file=$trace") }
-    $arguments += @("-monitor","tcp:127.0.0.1:$port,server,nowait",
+    $arguments += @("-trace","events=$events,file=$trace",
+      "-qmp","tcp:127.0.0.1:$port,server=on,wait=off",
       "-rtc","base=utc,clock=host","-no-reboot")
     $stdout = Join-Path $WorkFull "qemu.stdout.log"
     $stderr = Join-Path $WorkFull "qemu.stderr.log"
@@ -167,8 +191,25 @@ try {
         -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     $procRow = Get-CimInstance Win32_Process -Filter "ProcessId=$($qemuProcess.Id)"
     Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
-      "qemuPid=$($qemuProcess.Id)","qemuMonitorPort=$port",
-      "qemuCommandLine=$($procRow.CommandLine)","guestSerial=$serial","qemuTrace=$trace")
+      "qemuPid=$($qemuProcess.Id)","qemuQmpPort=$port",
+      "qemuCommandLine=$($procRow.CommandLine)","guestSerial=$serial",
+      "qemuTrace=$trace","qemuQmpTranscript=$qmpLog")
+
+    $connectDeadline = [DateTime]::UtcNow.AddSeconds(15)
+    while (-not $qemuMonitor -and [DateTime]::UtcNow -lt $connectDeadline) {
+        $attempt = [System.Net.Sockets.TcpClient]::new()
+        try { $attempt.Connect("127.0.0.1",$port); $qemuMonitor=$attempt }
+        catch { $attempt.Dispose(); Start-Sleep -Milliseconds 100 }
+    }
+    if (-not $qemuMonitor) { throw "QEMU QMP did not open on port $port." }
+    $qmpStream = $qemuMonitor.GetStream(); $qmpStream.ReadTimeout = 10000
+    $qmpEncoding = [Text.UTF8Encoding]::new($false)
+    $qemuMonitorReader = [IO.StreamReader]::new($qmpStream,$qmpEncoding,$false,1024,$true)
+    $qemuMonitorWriter = [IO.StreamWriter]::new($qmpStream,$qmpEncoding,1024,$true)
+    $qemuMonitorWriter.AutoFlush = $true
+    Add-Content -LiteralPath $qmpLog -Encoding utf8 -Value "RX $($qemuMonitorReader.ReadLine())"
+    [void](Invoke-Dm20Qmp 'qmp_capabilities' 'caps')
+    [void](Invoke-Dm20Qmp 'query-status' 'status')
 
     $deadline = [DateTime]::UtcNow.AddSeconds($ProofTimeoutSeconds)
     $passed = $false
@@ -196,13 +237,8 @@ try {
     if (-not $row -or $row.Name -ne "qemu-system-x86_64.exe" -or
         $row.CommandLine -notlike "*$serial*") { throw "Refusing to stop a QEMU process not owned by this run." }
     if (-not $qemuProcess.HasExited) {
-        try {
-            $qemuMonitor = [System.Net.Sockets.TcpClient]::new()
-            $qemuMonitor.Connect("127.0.0.1", $port)
-            $stream = $qemuMonitor.GetStream()
-            $quit = [Text.Encoding]::ASCII.GetBytes("quit`n")
-            $stream.Write($quit, 0, $quit.Length)
-            $stream.Dispose(); $qemuMonitor.Dispose(); $qemuMonitor = $null
+try {
+            [void](Invoke-Dm20Qmp 'quit' 'quit')
         } catch { }
         [void]$qemuProcess.WaitForExit(7000)
     }
@@ -221,29 +257,45 @@ try {
       "guestPassMarker=[DM20-QEMU-USB-BOT] stress=PASS commands=$('{0:X8}' -f $reportedCommandCount)","result=PASS")
     Write-Host "DM20 BOT stress passed. Evidence: $WorkFull"
 } catch {
+    $stressFailed = $true
+    $failureImageHash = (Get-FileHash -LiteralPath $UsbFull -Algorithm SHA256).Hash
     Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
-      "result=FAIL","failure=$($_.Exception.Message -replace '[\r\n]+',' ')")
+      "result=FAIL","storageImageSha256AtFailure=$failureImageHash",
+      "failure=$($_.Exception.Message -replace '[\r\n]+',' ')")
     throw
 } finally {
-    if ($qemuMonitor) { $qemuMonitor.Dispose() }
     if ($qemuProcess -and -not $qemuProcess.HasExited) {
         $row = Get-CimInstance Win32_Process -Filter "ProcessId=$($qemuProcess.Id)"
         if ($row -and $row.Name -eq "qemu-system-x86_64.exe" -and
             $row.CommandLine -like "*$serial*") {
             try {
-                $client = [System.Net.Sockets.TcpClient]::new()
-                $client.Connect("127.0.0.1", $port)
-                $stream = $client.GetStream()
-                $quit = [Text.Encoding]::ASCII.GetBytes("quit`n")
-                $stream.Write($quit, 0, $quit.Length)
-                $stream.Dispose(); $client.Dispose()
+                [void](Invoke-Dm20Qmp 'quit' 'cleanup-quit')
             } catch { }
-            [void]$qemuProcess.WaitForExit(5000)
+            [void]$qemuProcess.WaitForExit(7000)
             $row = Get-CimInstance Win32_Process -Filter "ProcessId=$($qemuProcess.Id)"
             if ($row -and $row.Name -eq "qemu-system-x86_64.exe" -and
                 $row.CommandLine -like "*$serial*") {
-                Stop-Process -Id $qemuProcess.Id -Force -ErrorAction SilentlyContinue
-            }
+            Stop-Process -Id $qemuProcess.Id -Force -ErrorAction SilentlyContinue
+            [void]$qemuProcess.WaitForExit(10000)
         }
+        }
+    }
+    if ($qemuMonitorReader) { $qemuMonitorReader.Dispose() }
+    if ($qemuMonitorWriter) { $qemuMonitorWriter.Dispose() }
+    if ($qemuMonitor) { $qemuMonitor.Dispose() }
+    if ($stressFailed -and (Test-Path -LiteralPath $serial) -and
+        (Test-Path -LiteralPath $trace)) {
+        $correlation = Join-Path $WorkFull "failure-trace-correlation.json"
+        $classifierLog = Join-Path $WorkFull "failure-trace-classifier.log"
+        & $python.Source (Join-Path $Root "scripts\classify-dm20-usb-trace.py") `
+            --serial $serial --trace $trace --output $correlation *> $classifierLog
+        $classifierExitCode = $LASTEXITCODE
+        Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
+            "failureTraceCorrelation=$correlation",
+            "failureTraceCorrelationExitCode=$classifierExitCode")
+    }
+    if ($stressFailed -and (Test-Path -LiteralPath $UsbFull)) {
+        $failureHashAfterQemuStop = (Get-FileHash -LiteralPath $UsbFull -Algorithm SHA256).Hash
+        Add-Content -LiteralPath $manifest -Encoding ascii -Value "storageImageSha256AfterQemuStop=$failureHashAfterQemuStop"
     }
 }

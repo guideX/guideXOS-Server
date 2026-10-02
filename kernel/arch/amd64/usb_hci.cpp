@@ -13,6 +13,7 @@
 #include "include/arch/amd64.h"
 #include "include/arch/uhci_transfer_logic.h"
 #include <kernel/usb.h>
+#include <kernel/usb_bot_diagnostics.h>
 #include <kernel/serial_debug.h>
 #include <kernel/pit.h>
 #include <stddef.h>
@@ -163,6 +164,10 @@ alignas(16) static volatile uint8_t s_bulkPackets[13][64];
 #endif
 static uint8_t s_dataToggle[128][usb::MAX_ENDPOINTS * 2];
 static uint64_t s_transferGeneration = 1;
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+static usb::BotDiagnosticRing s_botDiagnosticRing = {};
+static usb::BulkTransferDiagnostic s_lastBulkTransferDiagnostic = {};
+#endif
 #if defined(GXOS_DM14_QEMU_USB_HOTPLUG_PROOF)
 static bool s_testBulkOutDisconnectGate = false;
 #endif
@@ -294,6 +299,21 @@ static const uint32_t UHCI_BULK_TIMEOUT_FRAMES = 1000u;
 struct WaitHistory {
     uint16_t submitFrame;
     uint16_t timeoutFrame;
+    uint16_t deadlineFrame;
+    uint16_t diagnosticEndFrame;
+    uint32_t diagnosticExtendedFrames;
+    uint32_t diagnosticFinalTdStatus;
+    uint32_t deadlineTdStatus;
+    uint32_t deadlineQhElement;
+    uint32_t deadlineTdLink;
+    uint32_t deadlineTdToken;
+    uint16_t deadlineUsbStatus;
+    uint16_t deadlineUsbCommand;
+    uint16_t deadlinePort0;
+    uint16_t deadlinePort1;
+    uint8_t deadlineBuffer[13];
+    bool diagnosticExtendedWindow;
+    bool diagnosticLateCompletion;
     arch::amd64::uhci::SampleHistory qhElements;
     arch::amd64::uhci::SampleHistory tdStatuses;
 };
@@ -345,6 +365,19 @@ static const char* guest_timeout_classification(
     return "UNCLASSIFIED";
 }
 
+static const char* qh_element_classification(uint32_t qhElement,
+                                              uint32_t tdAddress,
+                                              uint32_t tdLink)
+{
+    if ((qhElement & ~0x0Fu) == (tdAddress & ~0x0Fu))
+        return "QH_POINTS_AT_EXPECTED_TD";
+    if (qhElement & 1u) return "QH_TERMINATED";
+    if ((tdLink & 1u) == 0 &&
+        (qhElement & ~0x0Fu) == (tdLink & ~0x0Fu))
+        return "QH_MOVED_TO_NEXT_TD";
+    return "QH_POINTS_UNEXPECTEDLY";
+}
+
 static void initialize_td(volatile UHCI_TD* td, uint32_t link,
                           uint32_t token, uint32_t buffer,
                           bool shortPacketDetect = false)
@@ -365,6 +398,102 @@ static uint32_t ptr32(const volatile void* p)
     return arch::amd64::uhci::virtual_to_dma(
         s_kernelPhysicalBase, virt, physical) ? physical : 0;
 }
+
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+static const char* bot_phase_name(uint8_t phase)
+{
+    switch (phase) {
+        case usb::BOT_DIAG_PHASE_CBW: return "CBW";
+        case usb::BOT_DIAG_PHASE_DATA: return "DATA";
+        case usb::BOT_DIAG_PHASE_CSW: return "CSW";
+        case usb::BOT_DIAG_PHASE_VALIDATE: return "VALIDATE";
+        case usb::BOT_DIAG_PHASE_COMPLETE: return "COMPLETE";
+        case usb::BOT_DIAG_PHASE_RECOVERY: return "RECOVERY";
+        default: return "NONE";
+    }
+}
+
+static void record_bot_transition(const usb::BotDiagnosticContext* context,
+                                  uint8_t endpoint, uint8_t direction,
+                                  uint32_t transferLength, uint8_t toggle,
+                                  volatile UHCI_TD* td)
+{
+    if (!context) return;
+    usb::BotDiagnosticRecord record = {};
+    record.commandSequence = context->commandSequence;
+    record.incarnation = context->deviceIncarnation;
+    record.lba = context->lba;
+    record.cbwTag = context->cbwTag;
+    record.blockCount = context->blockCount;
+    record.transferLength = transferLength;
+    record.qhPhysical = ptr32(&s_qh);
+    record.qhElement = s_qh.elementLink;
+    record.tdPhysical = td ? ptr32(td) : 0;
+    record.tdStatus = td ? td->status : 0;
+    record.tdToken = td ? td->token : 0;
+    record.tdLink = td ? td->link : 0;
+    record.tdBufferPhysical = td ? td->buffer : 0;
+    record.frameNumber = static_cast<uint16_t>(
+        uhci_read16(UHCI_FRNUM) & UHCI_FRAME_MASK);
+    record.opcode = context->opcode;
+    record.phase = static_cast<uint8_t>(context->phase);
+    record.endpoint = endpoint;
+    record.direction = direction;
+    record.toggle = toggle;
+    (void)usb::record_bot_diagnostic(s_botDiagnosticRing, record);
+}
+
+static void emit_bot_diagnostic_ring()
+{
+    SerialDiagnosticScope diagnosticLine;
+    serial::puts("[USB-BOT-DIAG-RING] count=");
+    serial::put_hex8(s_botDiagnosticRing.count);
+    serial::putc('\n');
+    for (uint8_t i = 0; i < s_botDiagnosticRing.count; ++i) {
+        const usb::BotDiagnosticRecord& record =
+            usb::bot_diagnostic_at(s_botDiagnosticRing, i);
+        serial::puts("[USB-BOT-DIAG-RING] seq=");
+        serial::put_hex64(record.diagnosticSequence);
+        serial::puts(" command=BOT#");
+        serial::put_hex64(record.commandSequence);
+        serial::puts(" incarnation=0x");
+        serial::put_hex64(record.incarnation);
+        serial::puts(" opcode=0x");
+        serial::put_hex8(record.opcode);
+        serial::puts(" tag=0x");
+        serial::put_hex32(record.cbwTag);
+        serial::puts(" phase=0x");
+        serial::put_hex8(record.phase);
+        serial::puts(" phase-name=");
+        serial::puts(bot_phase_name(record.phase));
+        serial::puts(" endpoint=0x");
+        serial::put_hex8(record.endpoint);
+        serial::puts(" direction=0x");
+        serial::put_hex8(record.direction);
+        serial::puts(" bytes=0x");
+        serial::put_hex32(record.transferLength);
+        serial::puts(" toggle=0x");
+        serial::put_hex8(record.toggle);
+        serial::puts(" qh-pa=0x");
+        serial::put_hex32(record.qhPhysical);
+        serial::puts(" qh-element=0x");
+        serial::put_hex32(record.qhElement);
+        serial::puts(" td-pa=0x");
+        serial::put_hex32(record.tdPhysical);
+        serial::puts(" td-status=0x");
+        serial::put_hex32(record.tdStatus);
+        serial::puts(" td-token=0x");
+        serial::put_hex32(record.tdToken);
+        serial::puts(" td-link=0x");
+        serial::put_hex32(record.tdLink);
+        serial::puts(" td-buffer-pa=0x");
+        serial::put_hex32(record.tdBufferPhysical);
+        serial::puts(" frnum=0x");
+        serial::put_hex16(record.frameNumber);
+        serial::putc('\n');
+    }
+}
+#endif
 
 // ================================================================
 // Wait for TD completion
@@ -387,7 +516,8 @@ static TransferStatus decode_td_status(uint32_t status)
 
 static TransferStatus wait_td(volatile UHCI_TD* td, uint32_t timeoutFrames,
                               uint8_t monitoredAddress = 0xFFu,
-                              WaitHistory* history = nullptr)
+                              WaitHistory* history = nullptr,
+                              const volatile uint8_t* diagnosticBuffer = nullptr)
 {
     const uint16_t startFrame = static_cast<uint16_t>(
         uhci_read16(UHCI_FRNUM) & UHCI_FRAME_MASK);
@@ -490,6 +620,72 @@ static TransferStatus wait_td(volatile UHCI_TD* td, uint32_t timeoutFrames,
                 static_cast<uint16_t>(timeoutFrames));
 #endif
             if (deadlineExpired) {
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+                if (history) {
+                    history->deadlineFrame = currentFrame;
+                    history->deadlineTdStatus = td->status;
+                    history->deadlineQhElement = s_qh.elementLink;
+                    history->deadlineTdLink = td->link;
+                    history->deadlineTdToken = td->token;
+                    history->deadlineUsbStatus = uhci_read16(UHCI_USBSTS);
+                    history->deadlineUsbCommand = uhci_read16(UHCI_USBCMD);
+                    history->deadlinePort0 = uhci_read16(UHCI_PORTSC1);
+                    history->deadlinePort1 = uhci_read16(UHCI_PORTSC2);
+                    if (diagnosticBuffer) {
+                        for (uint8_t i = 0; i <
+                             sizeof(history->deadlineBuffer); ++i)
+                            history->deadlineBuffer[i] = diagnosticBuffer[i];
+                    }
+                }
+                if (history && timeoutFrames == 1000u) {
+                    history->diagnosticExtendedWindow = true;
+                    uint16_t diagnosticLastFrame = currentFrame;
+                    uint32_t diagnosticPolls = 0;
+                    const uint32_t diagnosticPollLimit = 25000000u;
+                    while (history->diagnosticExtendedFrames < 4000u &&
+                           diagnosticPolls < diagnosticPollLimit) {
+                        ++diagnosticPolls;
+                        dma_compiler_barrier();
+                        const uint32_t diagnosticStatus = td->status;
+                        if ((diagnosticStatus & UHCI_TD_STATUS_ACTIVE) == 0) {
+                            history->diagnosticLateCompletion = true;
+                            history->diagnosticFinalTdStatus = diagnosticStatus;
+                            break;
+                        }
+                        if ((diagnosticPolls &
+                             (controllerPollInterval - 1u)) == 0) {
+                            if (monitoredAddress != 0xFFu &&
+                                !kernel::usb::device_online(monitoredAddress))
+                                break;
+                            const uint16_t diagnosticFrame = static_cast<uint16_t>(
+                                uhci_read16(UHCI_FRNUM) & UHCI_FRAME_MASK);
+                            history->diagnosticExtendedFrames +=
+                                arch::amd64::uhci::elapsed_frames(
+                                    diagnosticLastFrame, diagnosticFrame);
+                            diagnosticLastFrame = diagnosticFrame;
+                            history->diagnosticEndFrame = diagnosticFrame;
+                            arch::amd64::uhci::record_distinct(
+                                history->qhElements, s_qh.elementLink);
+                            arch::amd64::uhci::record_distinct(
+                                history->tdStatuses, diagnosticStatus);
+                            const uint16_t diagnosticControllerStatus =
+                                uhci_read16(UHCI_USBSTS);
+                            if (diagnosticControllerStatus &
+                                (UHCI_STS_HOST_SYSTEM_ERROR |
+                                 UHCI_STS_HOST_PROCESS_ERROR |
+                                 UHCI_STS_HALTED))
+                                break;
+                            yield_to_controller();
+                        }
+                    }
+                    history->diagnosticFinalTdStatus = td->status;
+                    history->diagnosticEndFrame = static_cast<uint16_t>(
+                        uhci_read16(UHCI_FRNUM) & UHCI_FRAME_MASK);
+                    if ((history->diagnosticFinalTdStatus &
+                         UHCI_TD_STATUS_ACTIVE) == 0)
+                        history->diagnosticLateCompletion = true;
+                }
+#endif
                 serial::puts("[USB-UHCI] td-frame-timeout start=");
                 serial::put_hex16(startFrame);
                 serial::puts(" current=");
@@ -504,6 +700,19 @@ static TransferStatus wait_td(volatile UHCI_TD* td, uint32_t timeoutFrames,
                 serial::put_hex32(status);
                 serial::puts(" td-link=0x");
                 serial::put_hex32(td->link);
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+                if (history && history->diagnosticExtendedWindow) {
+                    serial::puts(" diagnostic-window-frames=0x");
+                    serial::put_hex32(history->diagnosticExtendedFrames);
+                    serial::puts(" diagnostic-end-frame=0x");
+                    serial::put_hex16(history->diagnosticEndFrame);
+                    serial::puts(" diagnostic-final-td-status=0x");
+                    serial::put_hex32(history->diagnosticFinalTdStatus);
+                    serial::puts(" diagnostic-late-completion=");
+                    serial::puts(history->diagnosticLateCompletion
+                        ? "yes" : "no");
+                }
+#endif
                 serial::putc('\n');
                 return XFER_TIMEOUT;
             }
@@ -568,6 +777,10 @@ bool init()
 {
     s_available = false;
     s_transferGeneration = 1;
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+    usb::clear_bot_diagnostic_ring(s_botDiagnosticRing);
+    s_lastBulkTransferDiagnostic = {};
+#endif
     for (uint8_t addr = 0; addr < 128; ++addr)
         for (uint8_t ep = 0; ep < usb::MAX_ENDPOINTS * 2; ++ep)
             s_dataToggle[addr][ep] = 0;
@@ -886,6 +1099,15 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
     uint8_t toggle = s_dataToggle[deviceAddr][slot];
     const uint8_t initialToggle = toggle;
 #if defined(GXOS_DM20_USB_DIAGNOSTICS)
+    s_lastBulkTransferDiagnostic = {};
+    s_lastBulkTransferDiagnostic.requestedBytes = dataLen;
+    s_lastBulkTransferDiagnostic.endpointAddress = endpointAddr;
+    s_lastBulkTransferDiagnostic.startToggle = toggle;
+    s_lastBulkTransferDiagnostic.finalToggle = toggle;
+    s_lastBulkTransferDiagnostic.startFrame = static_cast<uint16_t>(
+        uhci_read16(UHCI_FRNUM) & UHCI_FRAME_MASK);
+    s_lastBulkTransferDiagnostic.completeFrame =
+        s_lastBulkTransferDiagnostic.startFrame;
     uint32_t finalCswTdStatus = 0;
     uint32_t finalCswTdPhysical = 0;
     uint32_t finalCswBufferPhysical = 0;
@@ -954,10 +1176,77 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
         if (firstTdPhysical == 0) return XFER_BUFFER_ERROR;
         const uint16_t batchSubmitFrame = static_cast<uint16_t>(
             uhci_read16(UHCI_FRNUM) & UHCI_FRAME_MASK);
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+        if (isCsw) {
+            // Preserve the descriptor and sentinel baseline before publishing
+            // the QH element pointer to UHCI.
+            SerialDiagnosticScope diagnosticLine;
+            serial::puts("[USB-UHCI] csw-before-schedule sequence=BOT#");
+            serial::put_hex64(botContext.commandSequence);
+            serial::puts(" expected-tag=0x");
+            serial::put_hex32(botContext.expectedCswTag);
+            serial::puts(" endpoint=0x");
+            serial::put_hex8(endpointAddr);
+            serial::puts(" expected-length=0x");
+            serial::put_hex16(dataLen);
+            serial::puts(" toggle=0x");
+            serial::put_hex8(toggle);
+            serial::puts(" buffer-va=0x");
+            serial::put_hex64(reinterpret_cast<uint64_t>(
+                bulk_packet_buffer(0)));
+            serial::puts(" buffer-pa=0x");
+            serial::put_hex32(ptr32(bulk_packet_buffer(0)));
+            serial::puts(" sentinel=");
+            for (uint8_t i = 0; i < 13u; ++i)
+                serial::put_hex8(bulk_packet_buffer(0)[i]);
+            serial::puts(" qh-va=0x");
+            serial::put_hex64(reinterpret_cast<uint64_t>(&s_qh));
+            serial::puts(" qh-pa=0x");
+            serial::put_hex32(ptr32(&s_qh));
+            serial::puts(" qh-head=0x");
+            serial::put_hex32(s_qh.headLink);
+            serial::puts(" qh-element=0x");
+            serial::put_hex32(s_qh.elementLink);
+            serial::puts(" td-va=0x");
+            serial::put_hex64(reinterpret_cast<uint64_t>(&s_tds[0]));
+            serial::puts(" td-pa=0x");
+            serial::put_hex32(ptr32(&s_tds[0]));
+            serial::puts(" td-token=0x");
+            serial::put_hex32(s_tds[0].token);
+            serial::puts(" td-status=0x");
+            serial::put_hex32(s_tds[0].status);
+            serial::puts(" td-link=0x");
+            serial::put_hex32(s_tds[0].link);
+            serial::puts(" td-buffer-pa=0x");
+            serial::put_hex32(s_tds[0].buffer);
+            serial::puts(" frame=0x");
+            serial::put_hex16(batchSubmitFrame);
+            serial::putc('\n');
+        }
+#endif
         s_qh.elementLink = firstTdPhysical;
         dma_compiler_barrier();
 #if defined(GXOS_DM20_USB_DIAGNOSTICS)
+        for (uint8_t packet = 0; packet < batchCount; ++packet) {
+            volatile UHCI_TD* td = &s_tds[packet];
+            if (s_lastBulkTransferDiagnostic.tdCount == 0) {
+                s_lastBulkTransferDiagnostic.firstTdPhysical = ptr32(td);
+                s_lastBulkTransferDiagnostic.firstBufferPhysical = td->buffer;
+            }
+            ++s_lastBulkTransferDiagnostic.tdCount;
+            s_lastBulkTransferDiagnostic.lastTdPhysical = ptr32(td);
+            s_lastBulkTransferDiagnostic.lastBufferPhysical = td->buffer;
+            if (hasBotContext)
+                record_bot_transition(&botContext, endpointAddr,
+                    dirIn ? 0x80u : 0x00u, batchLengths[packet],
+                    static_cast<uint8_t>((td->token &
+                        arch::amd64::uhci::TD_DATA_TOGGLE) != 0), td);
+        }
         if (isCsw) {
+            botContext.expectedCswToggle = toggle;
+            botContext.cswTdPhysical = firstTdPhysical;
+            botContext.cswSubmitFrame = batchSubmitFrame;
+            usb::set_bot_diagnostic_context(&botContext);
             SerialDiagnosticScope diagnosticLine;
             serial::puts("[USB-UHCI] csw-submit sequence=BOT#");
             serial::put_hex64(botContext.commandSequence);
@@ -975,11 +1264,35 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
             serial::put_hex8(endpointAddr);
             serial::puts(" cdb-len=0x");
             serial::put_hex8(botContext.cdbLength);
+            serial::puts(" lba=0x");
+            serial::put_hex64(botContext.lba);
+            serial::puts(" blocks=0x");
+            serial::put_hex32(botContext.blockCount);
+            serial::puts(" logical-block-size=0x");
+            serial::put_hex32(botContext.logicalBlockSize);
             serial::puts(" command-data-bytes=0x");
             serial::put_hex32(botContext.requestedBytes);
+            serial::puts(" data-out-expected=0x");
+            serial::put_hex32(botContext.dataOutExpectedBytes);
+            serial::puts(" data-out-actual=0x");
+            serial::put_hex32(botContext.dataOutActualBytes);
+            serial::puts(" data-out-td-count=0x");
+            serial::put_hex32(botContext.dataOutTdCount);
+            serial::puts(" data-out-first-td=0x");
+            serial::put_hex32(botContext.firstDataOutTdPhysical);
+            serial::puts(" data-out-last-td=0x");
+            serial::put_hex32(botContext.lastDataOutTdPhysical);
+            serial::puts(" out-toggle-start=0x");
+            serial::put_hex8(botContext.dataOutStartToggle);
+            serial::puts(" out-toggle-final=0x");
+            serial::put_hex8(botContext.dataOutFinalToggle);
             serial::puts(" direction=0x");
             serial::put_hex8(botContext.direction);
+            serial::puts(" csw-expected-length=0x");
+            serial::put_hex16(dataLen);
             serial::puts(" expected-toggle=0x");
+            serial::put_hex8(toggle);
+            serial::puts(" csw-expected-toggle=0x");
             serial::put_hex8(toggle);
             serial::puts(" td-toggle=0x");
             serial::put_hex8(static_cast<uint8_t>(
@@ -1000,10 +1313,32 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
             serial::put_hex64(batchGenerations[0]);
             serial::puts(" qh-pa=0x");
             serial::put_hex32(ptr32(&s_qh));
+            serial::puts(" qh-va=0x");
+            serial::put_hex64(reinterpret_cast<uint64_t>(&s_qh));
+            serial::puts(" qh-head=0x");
+            serial::put_hex32(s_qh.headLink);
+            serial::puts(" qh-element=0x");
+            serial::put_hex32(s_qh.elementLink);
             serial::puts(" td-pa=0x");
             serial::put_hex32(ptr32(&s_tds[0]));
+            serial::puts(" td-va=0x");
+            serial::put_hex64(reinterpret_cast<uint64_t>(&s_tds[0]));
+            serial::puts(" td-link=0x");
+            serial::put_hex32(s_tds[0].link);
+            serial::puts(" td-token=0x");
+            serial::put_hex32(s_tds[0].token);
+            serial::puts(" td-status=0x");
+            serial::put_hex32(s_tds[0].status);
             serial::puts(" buffer-pa=0x");
             serial::put_hex32(ptr32(bulk_packet_buffer(0)));
+            serial::puts(" buffer-va=0x");
+            serial::put_hex64(reinterpret_cast<uint64_t>(
+                bulk_packet_buffer(0)));
+            serial::puts(" buffer-sentinel=");
+            for (uint8_t i = 0; i < 13u; ++i)
+                serial::put_hex8(bulk_packet_buffer(0)[i]);
+            serial::puts(" block-registration=0x");
+            serial::put_hex64(botContext.blockRegistrationId);
             serial::puts(" buffer-page-offset=0x");
             serial::put_hex16(static_cast<uint16_t>(
                 ptr32(bulk_packet_buffer(0)) & 0x0FFFu));
@@ -1047,7 +1382,8 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
             WaitHistory waitHistory = {};
             const TransferStatus status = wait_td(
                 td, UHCI_BULK_TIMEOUT_FRAMES, deviceAddr,
-                isCsw ? &waitHistory : nullptr);
+                isCsw ? &waitHistory : nullptr,
+                isCsw ? bulk_packet_buffer(packet) : nullptr);
             if (status != XFER_SUCCESS) {
                 const uint32_t failedQhElement = s_qh.elementLink;
                 const uint32_t failedTdPhysical = ptr32(td);
@@ -1072,10 +1408,18 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
                 for (uint8_t i = 0; i < sizeof(failedBufferPrefix); ++i)
                     failedBufferPrefix[i] = bulk_packet_buffer(packet)[i];
 #if defined(GXOS_DM20_USB_DIAGNOSTICS)
-                if (isCsw && status == XFER_TIMEOUT &&
-                    (failedTdStatus & UHCI_TD_STATUS_ACTIVE) != 0) {
+                s_lastBulkTransferDiagnostic.actualBytes = transferred;
+                s_lastBulkTransferDiagnostic.finalToggle = toggle;
+                s_lastBulkTransferDiagnostic.completeFrame = static_cast<uint16_t>(
+                    uhci_read16(UHCI_FRNUM) & UHCI_FRAME_MASK);
+                if (hasBotContext)
+                    record_bot_transition(&botContext, endpointAddr,
+                        dirIn ? 0x80u : 0x00u, batchLengths[packet],
+                        static_cast<uint8_t>((failedTdToken &
+                            arch::amd64::uhci::TD_DATA_TOGGLE) != 0), td);
+                if (isCsw && status == XFER_TIMEOUT) {
                     SerialDiagnosticScope diagnosticLine;
-                    serial::puts("[USB-FAULT] signature=USB_CSW_TIMEOUT_ACTIVE_TD");
+                    serial::puts("[USB-FAULT] signature=USB_CSW_TIMEOUT_OBSERVED");
                     serial::puts(" sequence=BOT#");
                     serial::put_hex64(botContext.commandSequence);
                     serial::puts(" opcode=0x");
@@ -1084,8 +1428,30 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
                     serial::put_hex32(botContext.cbwTag);
                     serial::puts(" expected-csw-tag=0x");
                     serial::put_hex32(botContext.expectedCswTag);
+                    serial::puts(" block-registration=0x");
+                    serial::put_hex64(botContext.blockRegistrationId);
                     serial::puts(" incarnation=0x");
                     serial::put_hex64(botContext.deviceIncarnation);
+                    serial::puts(" lba=0x");
+                    serial::put_hex64(botContext.lba);
+                    serial::puts(" block-count=0x");
+                    serial::put_hex32(botContext.blockCount);
+                    serial::puts(" logical-block-size=0x");
+                    serial::put_hex32(botContext.logicalBlockSize);
+                    serial::puts(" data-out-expected=0x");
+                    serial::put_hex32(botContext.dataOutExpectedBytes);
+                    serial::puts(" data-out-actual=0x");
+                    serial::put_hex32(botContext.dataOutActualBytes);
+                    serial::puts(" data-out-td-count=0x");
+                    serial::put_hex32(botContext.dataOutTdCount);
+                    serial::puts(" data-out-first-td=0x");
+                    serial::put_hex32(botContext.firstDataOutTdPhysical);
+                    serial::puts(" data-out-last-td=0x");
+                    serial::put_hex32(botContext.lastDataOutTdPhysical);
+                    serial::puts(" data-out-toggle-start=0x");
+                    serial::put_hex8(botContext.dataOutStartToggle);
+                    serial::puts(" data-out-toggle-final=0x");
+                    serial::put_hex8(botContext.dataOutFinalToggle);
                     serial::puts(" address=0x");
                     serial::put_hex8(deviceAddr);
                     serial::puts(" endpoint=0x");
@@ -1111,12 +1477,23 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
                     serial::put_hex32(failedTdPhysical);
                     serial::puts(" qh-element=0x");
                     serial::put_hex32(failedQhElement);
+                    serial::puts(" qh-state=");
+                    serial::puts(qh_element_classification(failedQhElement,
+                        failedTdPhysical, failedTdLink));
+                    serial::puts(" qh-head=0x");
+                    serial::put_hex32(s_qh.headLink);
                     serial::puts(" td-link=0x");
                     serial::put_hex32(failedTdLink);
                     serial::puts(" td-token=0x");
                     serial::put_hex32(failedTdToken);
                     serial::puts(" td-status=0x");
                     serial::put_hex32(failedTdStatus);
+                    serial::puts(" td-active-at-deadline=");
+                    serial::puts((waitHistory.deadlineTdStatus &
+                        UHCI_TD_STATUS_ACTIVE) != 0 ? "yes" : "no");
+                    serial::puts(" td-active-after-diagnostic=");
+                    serial::puts((failedTdStatus & UHCI_TD_STATUS_ACTIVE) != 0
+                        ? "yes" : "no");
                     serial::puts(" td-buffer-pa=0x");
                     serial::put_hex32(failedTdBuffer);
                     serial::puts(" buffer-page-offset=0x");
@@ -1155,6 +1532,8 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
                             ? "yes" : "no");
                     serial::puts(" expected-toggle=0x");
                     serial::put_hex8(initialToggle);
+                    serial::puts(" expected-csw-toggle=0x");
+                    serial::put_hex8(botContext.expectedCswToggle);
                     serial::puts(" td-toggle=0x");
                     serial::put_hex8(static_cast<uint8_t>(
                         (failedTdToken & arch::amd64::uhci::TD_DATA_TOGGLE) != 0));
@@ -1169,6 +1548,42 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
                     serial::put_hex16(waitHistory.submitFrame);
                     serial::puts(" frnum-timeout=0x");
                     serial::put_hex16(waitHistory.timeoutFrame);
+                    serial::puts(" csw-submit-frame=0x");
+                    serial::put_hex16(botContext.cswSubmitFrame);
+                    serial::puts(" deadline-frnum=0x");
+                    serial::put_hex16(waitHistory.deadlineFrame);
+                    serial::puts(" deadline-qh-element=0x");
+                    serial::put_hex32(waitHistory.deadlineQhElement);
+                    serial::puts(" deadline-td-status=0x");
+                    serial::put_hex32(waitHistory.deadlineTdStatus);
+                    serial::puts(" deadline-td-link=0x");
+                    serial::put_hex32(waitHistory.deadlineTdLink);
+                    serial::puts(" deadline-td-token=0x");
+                    serial::put_hex32(waitHistory.deadlineTdToken);
+                    serial::puts(" deadline-qh-state=");
+                    serial::puts(qh_element_classification(
+                        waitHistory.deadlineQhElement, failedTdPhysical,
+                        waitHistory.deadlineTdLink));
+                    serial::puts(" deadline-usbsts=0x");
+                    serial::put_hex16(waitHistory.deadlineUsbStatus);
+                    serial::puts(" deadline-usbcmd=0x");
+                    serial::put_hex16(waitHistory.deadlineUsbCommand);
+                    serial::puts(" deadline-port0=0x");
+                    serial::put_hex16(waitHistory.deadlinePort0);
+                    serial::puts(" deadline-port1=0x");
+                    serial::put_hex16(waitHistory.deadlinePort1);
+                    serial::puts(" frnum-diagnostic-end=0x");
+                    serial::put_hex16(waitHistory.diagnosticEndFrame);
+                    serial::puts(" diagnostic-extension-frames=0x");
+                    serial::put_hex32(
+                        waitHistory.diagnosticExtendedFrames);
+                    serial::puts(" diagnostic-late-completion=");
+                    serial::puts(waitHistory.diagnosticLateCompletion
+                        ? "yes" : "no");
+                    serial::puts(" diagnostic-final-td-status=0x");
+                    serial::put_hex32(waitHistory.diagnosticFinalTdStatus);
+                    serial::puts(" csw-expected-length=0x");
+                    serial::put_hex16(dataLen);
                     serial::puts(" frame-progress=0x");
                     serial::put_hex16(arch::amd64::uhci::elapsed_frames(
                         waitHistory.submitFrame, waitHistory.timeoutFrame));
@@ -1176,6 +1591,13 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
                     serial::put_hex32(UHCI_BULK_TIMEOUT_FRAMES);
                     serial::puts(" usbsts=0x");
                     serial::put_hex16(failedControllerStatus);
+                    serial::puts(" controller-halted=");
+                    serial::puts((failedControllerStatus & UHCI_STS_HALTED)
+                        != 0 ? "yes" : "no");
+                    serial::puts(" controller-error=");
+                    serial::puts((failedControllerStatus &
+                        (UHCI_STS_HOST_SYSTEM_ERROR |
+                         UHCI_STS_HOST_PROCESS_ERROR)) != 0 ? "yes" : "no");
                     serial::puts(" usbcmd=0x");
                     serial::put_hex16(failedControllerCommand);
                     serial::puts(" usbintr=0x");
@@ -1210,8 +1632,20 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
                         sizeof(UHCI_TD) > 4096u) ? "yes" : "no");
                     serial::puts(" port0=0x");
                     serial::put_hex16(failedPort0);
+                    serial::puts(" port0-connected=");
+                    serial::puts((failedPort0 & UHCI_PORT_CONNECTED) != 0
+                        ? "yes" : "no");
+                    serial::puts(" port0-change-latch=");
+                    serial::puts((failedPort0 & UHCI_PORT_CONNECT_CHG) != 0
+                        ? "yes" : "no");
                     serial::puts(" port1=0x");
                     serial::put_hex16(failedPort1);
+                    serial::puts(" port1-connected=");
+                    serial::puts((failedPort1 & UHCI_PORT_CONNECTED) != 0
+                        ? "yes" : "no");
+                    serial::puts(" port1-change-latch=");
+                    serial::puts((failedPort1 & UHCI_PORT_CONNECT_CHG) != 0
+                        ? "yes" : "no");
                     serial::puts(" qh-ring=");
                     for (uint8_t i = 0; i < waitHistory.qhElements.count; ++i) {
                         if (i) serial::putc(',');
@@ -1241,10 +1675,17 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
                     serial::puts(" dma-csw=");
                     for (uint8_t i = 0; i < sizeof(failedBufferPrefix); ++i)
                         serial::put_hex8(failedBufferPrefix[i]);
+                    serial::puts(" deadline-csw=");
+                    for (uint8_t i = 0; i <
+                         sizeof(waitHistory.deadlineBuffer); ++i)
+                        serial::put_hex8(waitHistory.deadlineBuffer[i]);
                     serial::puts(" guest-classification=");
-                    serial::puts(guest_timeout_classification(failedTdStatus,
-                        failedQhElement, failedTdPhysical, failedTdLink,
-                        failedControllerStatus));
+                    serial::puts(waitHistory.diagnosticLateCompletion
+                        ? "LATE_COMPLETION_AFTER_DEADLINE"
+                        : guest_timeout_classification(
+                            failedTdStatus, failedQhElement,
+                            failedTdPhysical, failedTdLink,
+                            failedControllerStatus));
                     serial::puts(" trace-td-physical=0x");
                     serial::put_hex32(failedTdPhysical);
                     serial::putc('\n');
@@ -1319,7 +1760,9 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
 
             const uint16_t actual =
                 arch::amd64::uhci::decode_actual_length(td->status);
-            if (actual > batchLengths[packet]) {
+            uint32_t accumulatedBytes = 0;
+            if (!usb::accumulate_completed_packet_bytes(transferred,
+                    batchLengths[packet], actual, accumulatedBytes)) {
                 s_qh.elementLink = 0x01;
                 if (bytesTransferred) *bytesTransferred = transferred;
                 return XFER_DATA_OVERRUN;
@@ -1328,12 +1771,26 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
                 for (uint16_t i = 0; i < actual; ++i)
                     p[transferred + i] = bulk_packet_buffer(packet)[i];
             }
-            transferred = static_cast<uint16_t>(transferred + actual);
+            transferred = static_cast<uint16_t>(accumulatedBytes);
             remaining = static_cast<uint16_t>(remaining - actual);
-            toggle ^= 1u;
+            toggle = usb::toggle_after_completed_packets(toggle, 1u);
             s_dataToggle[deviceAddr][slot] = toggle;
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+            s_lastBulkTransferDiagnostic.actualBytes = transferred;
+            s_lastBulkTransferDiagnostic.finalToggle = toggle;
+            s_lastBulkTransferDiagnostic.completeFrame = static_cast<uint16_t>(
+                uhci_read16(UHCI_FRNUM) & UHCI_FRAME_MASK);
+            if (hasBotContext)
+                record_bot_transition(&botContext, endpointAddr,
+                    dirIn ? 0x80u : 0x00u, batchLengths[packet],
+                    static_cast<uint8_t>((td->token &
+                        arch::amd64::uhci::TD_DATA_TOGGLE) != 0), td);
+#endif
             if (actual < batchLengths[packet]) {
                 shortPacket = true;
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+                s_lastBulkTransferDiagnostic.shortPacket = true;
+#endif
                 completedPacketCount = static_cast<uint8_t>(packet + 1u);
                 break;
             }
@@ -1408,6 +1865,14 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
             4096u) ? "yes" : "no");
         serial::puts(" td-status=0x");
         serial::put_hex32(finalCswTdStatus);
+        serial::puts(" frnum-submit=0x");
+        serial::put_hex16(s_lastBulkTransferDiagnostic.startFrame);
+        serial::puts(" frnum-complete=0x");
+        serial::put_hex16(s_lastBulkTransferDiagnostic.completeFrame);
+        serial::puts(" elapsed-frames=0x");
+        serial::put_hex16(arch::amd64::uhci::elapsed_frames(
+            s_lastBulkTransferDiagnostic.startFrame,
+            s_lastBulkTransferDiagnostic.completeFrame));
         serial::puts(" actual-received=0x");
         serial::put_hex16(transferred);
         serial::puts(" actual-last-td=0x");
@@ -1438,6 +1903,38 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
     if (bytesTransferred) *bytesTransferred = transferred;
     return XFER_SUCCESS;
 }
+
+bool get_last_bulk_transfer_diagnostic(
+    BulkTransferDiagnostic* diagnostic)
+{
+    if (!diagnostic) return false;
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+    *diagnostic = s_lastBulkTransferDiagnostic;
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool get_bulk_endpoint_toggle(uint8_t deviceAddr, uint8_t endpointAddr,
+                              uint8_t* toggle)
+{
+    const uint8_t endpoint = endpointAddr & 0x0Fu;
+    if (!toggle || deviceAddr >= 128u || endpoint >= usb::MAX_ENDPOINTS)
+        return false;
+    const uint8_t slot = static_cast<uint8_t>(endpoint * 2u +
+        ((endpointAddr & 0x80u) ? 1u : 0u));
+    *toggle = s_dataToggle[deviceAddr][slot];
+    return true;
+}
+
+void dump_bot_diagnostic_ring()
+{
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+    emit_bot_diagnostic_ring();
+#endif
+}
+
 TransferStatus interrupt_transfer(uint8_t deviceAddr,
                                   uint8_t endpointAddr,
                                   void* data,

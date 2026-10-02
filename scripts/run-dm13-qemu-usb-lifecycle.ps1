@@ -18,7 +18,6 @@ param(
     [string]$WorkDir = "",
     [string]$KernelImage = "kernel\build\amd64\bin\kernel.elf",
     [string]$BootloaderImage = "guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe",
-    [switch]$TraceUsb,
     [switch]$StopAfterInitialize
 )
 
@@ -61,8 +60,13 @@ Copy-Item -LiteralPath $bootloader -Destination (Join-Path $bootDir "BOOTX64.EFI
 Copy-Item -LiteralPath $kernel -Destination (Join-Path $espStage "kernel.elf") -Force
 
 $events = Join-Path $WorkFull "usb-uhci.trace-events.txt"
-@("usb_uhci_schedule_start","usb_uhci_packet_add","usb_uhci_packet_complete_success",
-  "usb_uhci_td_complete","usb_uhci_packet_complete_error","usb_packet_state_fault",
+@("usb_uhci_schedule_start","usb_uhci_qh_load","usb_uhci_td_load",
+  "usb_uhci_td_queue","usb_uhci_td_nextqh","usb_uhci_td_async",
+  "usb_uhci_packet_add","usb_uhci_packet_link_async",
+  "usb_uhci_packet_complete_success","usb_uhci_packet_complete_shortxfer",
+  "usb_uhci_packet_complete_stall","usb_uhci_packet_complete_babble",
+  "usb_uhci_packet_complete_error","usb_uhci_packet_cancel",
+  "usb_packet_state_change","usb_packet_state_fault","usb_uhci_td_complete",
   "usb_msd_cmd_submit","usb_msd_data_in","usb_msd_data_out","usb_msd_packet_async",
   "usb_msd_packet_complete","usb_msd_cmd_complete","usb_msd_send_status") |
     Set-Content -LiteralPath $events -Encoding ascii
@@ -81,7 +85,7 @@ $kernelHash = (Get-FileHash -LiteralPath (Join-Path $espStage "kernel.elf") -Alg
 $kernelBytes = (Get-Item -LiteralPath (Join-Path $espStage "kernel.elf")).Length
 $uefiHash = (Get-FileHash -LiteralPath $OvmfFull -Algorithm SHA256).Hash
 $qemuAtStart = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'")
-@("manifestSchema=DM19-TRANSPORT-1","proof=DM13-QEMU-USB-DISK-MANAGER-LIFECYCLE-AND-RESTART",
+@("manifestSchema=DM21-TRANSPORT-1","proof=DM13-QEMU-USB-DISK-MANAGER-LIFECYCLE-AND-RESTART",
   "proofMode=$(if ($StopAfterInitialize) { 'production-initialize-prefix' } else { 'full-lifecycle-and-restart' })",
   "timestampUtc=$([DateTime]::UtcNow.ToString('o'))","qemu=$qemuVersion","qemuSha256=$qemuHash",
   "machine=pc,usb=off","cpu=QEMU-default (no -cpu argument)",
@@ -93,11 +97,11 @@ $qemuAtStart = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64
   "uefiImagePath=$OvmfFull","uefiSha256=$uefiHash",
   "bootloaderSha256=$bootloaderHash","kernelBytes=$kernelBytes","kernelSha256=$kernelHash",
   "timeoutUhciBulkFrames=1000","timeoutHarnessSeconds=3600","timeoutRestartSeconds=300",
-  "timeoutKernelMainLoopSeconds=300","qemuTraceEnabled=$(if ($TraceUsb) { 'yes' } else { 'no' })",
+  "timeoutKernelMainLoopSeconds=300","qemuTraceEnabled=yes",
   "qemuTraceEvents=$events","qemuTraceFiles=first-boot.uhci.trace.log,restart-boot.uhci.trace.log",
   "hostQemuProcessesBefore=$($qemuAtStart.Count)",
   "hostQemuPidsBefore=$(($qemuAtStart | ForEach-Object { $_.ProcessId }) -join ',')",
-  "monitorProtocol=HMP TCP loopback; runner sends quit only after proof or in cleanup",
+  "controlProtocol=QMP TCP loopback; qmp transcript saved per boot; quit after proof or in cleanup",
   "commonWriteCallback=enabled-and-exercised-by-production-lifecycle-services",
   "lifecycle=initialize,create-partition,format-fat32,mount,file-write,read,unmount,remount,mount-write-read-unmount-stress-10x",
   "physicalHostDisksPassedToQemu=none","bootloaderSha256=$bootloaderHash",
@@ -108,6 +112,7 @@ function Start-Dm13Qemu([string]$RunName) {
     $stdout = Join-Path $WorkFull "$RunName.stdout.log"
     $stderr = Join-Path $WorkFull "$RunName.stderr.log"
     $trace = Join-Path $WorkFull "$RunName.uhci.trace.log"
+    $qmpLog = Join-Path $WorkFull "$RunName.qmp.log"
     $listener = [System.Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     $listener.Start(); $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port; $listener.Stop()
     $arguments = @("-accel",$QemuAccelerator,
@@ -120,21 +125,54 @@ function Start-Dm13Qemu([string]$RunName) {
       "-object","rng-builtin,id=rng0",
       "-device","virtio-rng-pci,rng=rng0,disable-modern=on,max-bytes=1024,period=1000",
       "-m","1024M","-vga","std","-display","none","-serial","file:$serial")
-    if ($TraceUsb) { $arguments += @("-trace","events=$events,file=$trace") }
-    $arguments += @("-monitor","tcp:127.0.0.1:$port,server,nowait",
+    $arguments += @("-trace","events=$events,file=$trace",
+      "-qmp","tcp:127.0.0.1:$port,server=on,wait=off",
       "-rtc","base=utc,clock=host","-no-reboot")
     $process = Start-Process -FilePath $QemuFull -ArgumentList $arguments -WorkingDirectory $Root `
         -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     $row = Get-CimInstance Win32_Process -Filter "ProcessId=$($process.Id)"
     $otherQemu = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'" |
         Where-Object { $_.ProcessId -ne $process.Id })
+    $client = $null
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    while (-not $client -and [DateTime]::UtcNow -lt $deadline) {
+        $attempt = [System.Net.Sockets.TcpClient]::new()
+        try { $attempt.Connect("127.0.0.1", $port); $client = $attempt }
+        catch { $attempt.Dispose(); Start-Sleep -Milliseconds 100 }
+    }
+    if (-not $client -or -not $client.Connected) { throw "QEMU QMP did not open on port $port." }
+    $stream = $client.GetStream(); $stream.ReadTimeout = 10000
+    $encoding = [Text.UTF8Encoding]::new($false)
+    $reader = [IO.StreamReader]::new($stream, $encoding, $false, 1024, $true)
+    $writer = [IO.StreamWriter]::new($stream, $encoding, 1024, $true)
+    $writer.AutoFlush = $true
+    $run = [pscustomobject]@{ Name=$RunName; Process=$process; Port=$port;
+        Serial=$serial; Stdout=$stdout; Stderr=$stderr; Trace=$trace;
+        QmpLog=$qmpLog; QmpClient=$client; QmpReader=$reader; QmpWriter=$writer }
+    $greeting = $reader.ReadLine()
+    Add-Content -LiteralPath $qmpLog -Encoding utf8 -Value "RX $greeting"
+    [void](Invoke-Dm13Qmp $run 'qmp_capabilities' 'caps')
+    [void](Invoke-Dm13Qmp $run 'query-status' 'status')
     Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
-      "qemu.$RunName.pid=$($process.Id)","qemu.$RunName.monitorPort=$port",
+      "qemu.$RunName.pid=$($process.Id)","qemu.$RunName.qmpPort=$port",
       "qemu.$RunName.serial=$serial","qemu.$RunName.commandLine=$($row.CommandLine)",
-      "qemu.$RunName.trace=$trace",
+      "qemu.$RunName.trace=$trace","qemu.$RunName.qmpTranscript=$qmpLog",
       "qemu.$RunName.otherQemuProcessesAtStart=$($otherQemu.Count)",
       "qemu.$RunName.otherQemuPidsAtStart=$(($otherQemu | ForEach-Object { $_.ProcessId }) -join ',')")
-    return [pscustomobject]@{ Process=$process; Port=$port; Serial=$serial; Trace=$trace }
+    return $run
+}
+
+function Invoke-Dm13Qmp($Run, [string]$Command, [string]$Id) {
+    if (-not $Run.QmpWriter -or -not $Run.QmpReader) { return }
+    $request = '{"execute":"' + $Command + '","id":"' + $Id + '"}'
+    Add-Content -LiteralPath $Run.QmpLog -Encoding utf8 -Value "TX $request"
+    $Run.QmpWriter.WriteLine($request)
+    while ($true) {
+        $line = $Run.QmpReader.ReadLine()
+        if ($null -eq $line) { throw "QMP closed while waiting for '$Command'." }
+        Add-Content -LiteralPath $Run.QmpLog -Encoding utf8 -Value "RX $line"
+        if ($line -match ('"id"\s*:\s*"' + [regex]::Escape($Id) + '"')) { return $line }
+    }
 }
 
 function Stop-Dm13Qemu($Run) {
@@ -146,9 +184,7 @@ function Stop-Dm13Qemu($Run) {
     }
     if (-not $Run.Process.HasExited) {
         try {
-            $client=[System.Net.Sockets.TcpClient]::new(); $client.Connect("127.0.0.1",$Run.Port)
-            $stream=$client.GetStream(); $quit=[Text.Encoding]::ASCII.GetBytes("quit`n")
-            $stream.Write($quit,0,$quit.Length); $stream.Dispose(); $client.Dispose()
+            [void](Invoke-Dm13Qmp $Run 'quit' 'quit')
         } catch { }
         [void]$Run.Process.WaitForExit(7000)
     }
@@ -157,6 +193,9 @@ function Stop-Dm13Qemu($Run) {
         Stop-Process -Id $Run.Process.Id -Force -ErrorAction SilentlyContinue
         [void]$Run.Process.WaitForExit(10000)
     }
+    if ($Run.QmpReader) { $Run.QmpReader.Dispose() }
+    if ($Run.QmpWriter) { $Run.QmpWriter.Dispose() }
+    if ($Run.QmpClient) { $Run.QmpClient.Dispose() }
 }
 
 function Wait-Dm13Marker($Run, [string]$Marker, [int]$TimeoutSeconds,
@@ -169,36 +208,44 @@ function Wait-Dm13Marker($Run, [string]$Marker, [int]$TimeoutSeconds,
             if ($log -match '\[DM13-QEMU-USB\] (?:proof=FAIL|initialize=FAIL|create-partition=FAIL|format-fat32=FAIL|gpt-unchanged=FAIL|vfs-gpt-unchanged=FAIL|lifecycle=FAIL|restart-persistence=FAIL|destructive-lifecycle=BLOCKED)') {
                 throw "QEMU proof reported a failure or blocker; inspect $($Run.Serial)"
             }
-            if ($log -and $log.Contains($Marker) -and
-                (-not $RequireMainLoop -or
-                 $log.Contains("[KERNEL] Entering main loop"))) { return }
+        if ($log -and $log.Contains($Marker) -and
+            (-not $RequireMainLoop -or
+             $log.Contains("[KERNEL] Entering main loop"))) { return }
         }
-        if ($Run.Process.HasExited) { break }
+        if ($Run.Process.HasExited) {
+            $exitCode = $Run.Process.ExitCode
+            throw "QEMU exited before '$Marker' with exit code $exitCode. Serial output: $($Run.Serial); stderr: $($Run.Stderr)"
+        }
         Start-Sleep -Milliseconds 500
     }
     throw "Timed out waiting for '$Marker'. Serial output: $($Run.Serial)"
 }
 
 $first = $null; $second = $null
+$allRuns = [System.Collections.Generic.List[object]]::new()
+$proofFailed = $false
 try {
     $first = Start-Dm13Qemu "first-boot"
+    $allRuns.Add($first)
     if ($StopAfterInitialize) {
         Wait-Dm13Marker $first "[DM13-QEMU-USB] initialize=PASS verified=PASS" 3600 $false
         Stop-Dm13Qemu $first; $first = $null
         $prefixImageHash = (Get-FileHash -LiteralPath $UsbFull -Algorithm SHA256).Hash
         Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
           "firstBootSerial=$($WorkFull)\first-boot.serial.log",
-          "initializationPrefix=PASS qemuTraceEnabled=$(if ($TraceUsb) { 'yes' } else { 'no' })",
+          "initializationPrefix=PASS qemuTraceEnabled=yes",
           "imageSha256AfterInitialize=$prefixImageHash",
           "transportResult=PASS",
-          "result=PASS tier=production-usb-initialize-prefix qemuTraceFromStartup=$(if ($TraceUsb) { 'yes' } else { 'no' }) physicalHostDisks=none")
+          "result=PASS tier=production-usb-initialize-prefix qemuTraceFromStartup=yes physicalHostDisks=none")
         Write-Host "DM13 USB production initialize-prefix proof passed. Evidence: $WorkFull"
         return
     }
     Wait-Dm13Marker $first "[DM13-QEMU-USB] lifecycle=PASS" 3600
     Stop-Dm13Qemu $first; $first = $null
+    $firstBootImageHash = (Get-FileHash -LiteralPath $UsbFull -Algorithm SHA256).Hash
 
     $second = Start-Dm13Qemu "restart-boot"
+    $allRuns.Add($second)
     Wait-Dm13Marker $second "[DM13-QEMU-USB] restart-persistence=PASS" 300
     Stop-Dm13Qemu $second; $second = $null
 
@@ -208,14 +255,54 @@ try {
     Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
       "firstBootSerial=$($WorkFull)\first-boot.serial.log",
       "restartBootSerial=$($WorkFull)\restart-boot.serial.log",
-      "storageImageSha256After=$hashAfter","independentVerifier=$($verification -join '; ')",
+      "imageSha256AfterFirstBoot=$firstBootImageHash",
+      "storageImageSha256After=$hashAfter","finalImageHash=$hashAfter",
+      "independentVerifier=$($verification -join '; ')",
       "transportResult=PASS",
       "result=PASS private-write=yes shared-write=yes durability=trusted lifecycle=yes cold-restart-persistence=yes independent-image-verification=yes host-physical-media=none")
     Write-Host "DM13 USB lifecycle and restart proof passed. Evidence: $WorkFull"
 } catch {
-    Add-Content -LiteralPath $manifest -Encoding ascii -Value @("transportResult=FAIL","result=FAIL","failure=$($_.Exception.Message -replace '[\r\n]+',' ')")
+    $proofFailed = $true
+    $failureImageHash = (Get-FileHash -LiteralPath $UsbFull -Algorithm SHA256).Hash
+    $failureRows = [System.Collections.Generic.List[string]]::new()
+    $failureRows.Add("transportResult=FAIL")
+    $failureRows.Add("result=FAIL")
+    $failureRows.Add("imageSha256AtFailure=$failureImageHash")
+    foreach ($run in $allRuns) {
+        if ($run.Process.HasExited) {
+            $failureRows.Add("qemu.$($run.Name).exitCode=$($run.Process.ExitCode)")
+        } else {
+            $failureRows.Add("qemu.$($run.Name).stillRunning=yes")
+        }
+    }
+    $failureRows.Add("failure=$($_.Exception.Message -replace '[\r\n]+',' ')")
+    Add-Content -LiteralPath $manifest -Encoding ascii -Value $failureRows
     throw
 } finally {
     if ($first) { Stop-Dm13Qemu $first }
     if ($second) { Stop-Dm13Qemu $second }
+    if ($proofFailed -and (Test-Path -LiteralPath $UsbFull)) {
+        try {
+            $finalFailureImageHash = (Get-FileHash -LiteralPath $UsbFull -Algorithm SHA256).Hash
+            Add-Content -LiteralPath $manifest -Encoding ascii -Value "storageImageSha256AfterQemuStop=$finalFailureImageHash"
+        } catch { }
+    }
+    if ($proofFailed) {
+        foreach ($run in $allRuns) {
+            if ((Test-Path -LiteralPath $run.Serial) -and
+                (Test-Path -LiteralPath $run.Trace)) {
+                $classification = [IO.Path]::ChangeExtension($run.Serial,
+                    ".trace-correlation.json")
+                $classifierLog = Join-Path $WorkFull `
+                    "$([IO.Path]::GetFileNameWithoutExtension($run.Serial)).classifier.log"
+                & $python.Source (Join-Path $Root "scripts\classify-dm20-usb-trace.py") `
+                    --serial $run.Serial --trace $run.Trace --output $classification `
+                    *> $classifierLog
+                $classifierExitCode = $LASTEXITCODE
+                Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
+                    "failureTraceCorrelation=$classification",
+                    "failureTraceCorrelationExitCode=$classifierExitCode")
+            }
+        }
+    }
 }

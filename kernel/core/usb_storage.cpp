@@ -1,4 +1,5 @@
 #include "include/kernel/usb_storage.h"
+#include "include/kernel/usb_bot_diagnostics.h"
 #include "include/kernel/usb.h"
 #include "include/kernel/block_device.h"
 #include "include/kernel/serial_debug.h"
@@ -15,6 +16,91 @@ static bool s_testSyncCacheDisconnectGate = false;
 #endif
 static uint8_t s_deviceCount = 0;
 static uint64_t s_nextBotCommandSequence = 1;
+static usb::BotCommandHistory s_botCommandHistory = {};
+
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+static const char* command_result_name(uint8_t result)
+{
+    switch (result) {
+        case usb::BOT_COMMAND_PENDING: return "PENDING";
+        case usb::BOT_COMMAND_PASSED: return "PASS";
+        case usb::BOT_COMMAND_SCSI_FAILED: return "SCSI_FAILED";
+        case usb::BOT_COMMAND_TRANSPORT_FAILED: return "TRANSPORT_FAILED";
+        case usb::BOT_COMMAND_CSW_TIMEOUT: return "CSW_TIMEOUT";
+        case usb::BOT_COMMAND_CSW_INVALID: return "CSW_INVALID";
+        default: return "UNKNOWN";
+    }
+}
+
+static void dump_bot_command_history()
+{
+    serial::puts("[USB-BOT-HISTORY] count=");
+    serial::put_hex8(s_botCommandHistory.count);
+    serial::putc('\n');
+    for (uint8_t i = 0; i < s_botCommandHistory.count; ++i) {
+        const usb::BotCommandHistoryRecord& record =
+            usb::bot_command_history_at(s_botCommandHistory, i);
+        serial::puts("[USB-BOT-HISTORY] sequence=BOT#");
+        serial::put_hex64(record.commandSequence);
+        serial::puts(" incarnation=0x");
+        serial::put_hex64(record.incarnation);
+        serial::puts(" opcode=0x");
+        serial::put_hex8(record.opcode);
+        serial::puts(" tag=0x");
+        serial::put_hex32(record.cbwTag);
+        serial::puts(" expected-csw-tag=0x");
+        serial::put_hex32(record.expectedCswTag);
+        serial::puts(" direction=0x");
+        serial::put_hex8(record.direction);
+        serial::puts(" lba=0x");
+        serial::put_hex64(record.lba);
+        serial::puts(" blocks=0x");
+        serial::put_hex32(record.blockCount);
+        serial::puts(" block-size=0x");
+        serial::put_hex32(record.logicalBlockSize);
+        serial::puts(" expected-bytes=0x");
+        serial::put_hex32(record.expectedBytes);
+        serial::puts(" actual-bytes=0x");
+        serial::put_hex32(record.actualBytes);
+        serial::puts(" data-td-count=0x");
+        serial::put_hex32(record.dataOutTdCount);
+        serial::puts(" data-first-td=0x");
+        serial::put_hex32(record.firstDataOutTd);
+        serial::puts(" data-last-td=0x");
+        serial::put_hex32(record.lastDataOutTd);
+        serial::puts(" cbw-submit-frame=0x");
+        serial::put_hex16(record.cbwSubmitFrame);
+        serial::puts(" cbw-complete-frame=0x");
+        serial::put_hex16(record.cbwCompleteFrame);
+        serial::puts(" data-submit-frame=0x");
+        serial::put_hex16(record.dataOutStartFrame);
+        serial::puts(" data-complete-frame=0x");
+        serial::put_hex16(record.dataOutCompleteFrame);
+        serial::puts(" csw-td=0x");
+        serial::put_hex32(record.cswTd);
+        serial::puts(" csw-submit-frame=0x");
+        serial::put_hex16(record.cswSubmitFrame);
+        serial::puts(" csw-end-frame=0x");
+        serial::put_hex16(record.cswCompleteFrame);
+        serial::puts(" out-toggle-start=0x");
+        serial::put_hex8(record.dataOutStartToggle);
+        serial::puts(" out-toggle-final=0x");
+        serial::put_hex8(record.dataOutFinalToggle);
+        serial::puts(" csw-toggle-expected=0x");
+        serial::put_hex8(record.expectedCswToggle);
+        serial::puts(" csw-toggle-final=0x");
+        serial::put_hex8(record.finalCswToggle);
+        serial::puts(" result=");
+        serial::puts(command_result_name(record.result));
+        serial::putc('\n');
+    }
+}
+#endif
+
+static usb::BotCommandHistoryRecord* current_history(uint64_t sequence)
+{
+    return usb::find_bot_command(s_botCommandHistory, sequence);
+}
 
 struct SerialDiagnosticScope {
 #if defined(__x86_64__)
@@ -41,6 +127,41 @@ struct SerialDiagnosticScope {
     SerialDiagnosticScope() {}
 #endif
 };
+
+static void finish_bot_history(StorageDevice* dev, uint8_t result,
+                               uint32_t actualBytes)
+{
+    if (!dev) return;
+    usb::BotCommandHistoryRecord* history =
+        current_history(dev->commandSequence);
+    if (!history) return;
+    history->actualBytes = actualBytes;
+    history->cbwSubmitFrame = dev->botDiagnostic.cbwSubmitFrame;
+    history->cbwCompleteFrame = dev->botDiagnostic.cbwCompleteFrame;
+    history->dataOutTdCount = dev->botDiagnostic.dataOutTdCount;
+    history->firstDataOutTd = dev->botDiagnostic.firstDataOutTdPhysical;
+    history->lastDataOutTd = dev->botDiagnostic.lastDataOutTdPhysical;
+    history->dataOutStartFrame = dev->botDiagnostic.dataOutStartFrame;
+    history->dataOutCompleteFrame = dev->botDiagnostic.dataOutCompleteFrame;
+    history->dataOutStartToggle = dev->botDiagnostic.dataOutStartToggle;
+    history->dataOutFinalToggle = dev->botDiagnostic.dataOutFinalToggle;
+    history->expectedCswToggle = dev->botDiagnostic.expectedCswToggle;
+    history->cswTd = dev->botDiagnostic.cswTdPhysical;
+    history->cswSubmitFrame = dev->botDiagnostic.cswSubmitFrame;
+    history->cswCompleteFrame = dev->botDiagnostic.cswCompleteFrame;
+    history->result = result;
+}
+
+static void capture_bot_failure(StorageDevice* dev, uint8_t result,
+                                uint32_t actualBytes)
+{
+    finish_bot_history(dev, result, actualBytes);
+#if defined(GXOS_DM20_USB_DIAGNOSTICS) && defined(__x86_64__)
+    SerialDiagnosticScope diagnosticLine;
+    usb::hci::dump_bot_diagnostic_ring();
+    dump_bot_command_history();
+#endif
+}
 
 enum BotStage : uint8_t {
     BOT_STAGE_NONE = 0,
@@ -304,8 +425,46 @@ static usb::TransferStatus transfer_data(StorageDevice* dev, uint8_t direction,
                                       cursor, chunk, &amount)
             : usb::hci::bulk_transfer(dev->usbAddress, dev->bulkOutEP,
                                       cursor, chunk, &amount);
-        if (amount > chunk || amount > remaining) return usb::XFER_DATA_OVERRUN;
-        transferred += amount;
+#if defined(GXOS_DM20_USB_DIAGNOSTICS) && defined(__x86_64__)
+        if (direction == 0x00) {
+            usb::BulkTransferDiagnostic detail = {};
+            if (usb::hci::get_last_bulk_transfer_diagnostic(&detail)) {
+                usb::BotDiagnosticContext& context = dev->botDiagnostic;
+                if (context.dataOutTdCount == 0) {
+                    context.dataOutStartToggle = detail.startToggle;
+                    context.dataOutStartFrame = detail.startFrame;
+                    context.firstDataOutTdPhysical = detail.firstTdPhysical;
+                }
+                context.dataOutActualBytes += detail.actualBytes;
+                context.dataOutTdCount += detail.tdCount;
+                context.lastDataOutTdPhysical = detail.lastTdPhysical;
+                context.dataOutFinalToggle = detail.finalToggle;
+                context.dataOutCompleteFrame = detail.completeFrame;
+                usb::set_bot_diagnostic_context(&context);
+
+                usb::BotCommandHistoryRecord* history =
+                    current_history(context.commandSequence);
+                if (history) {
+                    history->actualBytes = context.dataOutActualBytes;
+                    history->dataOutTdCount = context.dataOutTdCount;
+                    history->firstDataOutTd = context.firstDataOutTdPhysical;
+                    history->lastDataOutTd = context.lastDataOutTdPhysical;
+                    history->dataOutStartFrame = context.dataOutStartFrame;
+                    history->dataOutCompleteFrame =
+                        context.dataOutCompleteFrame;
+                    history->dataOutStartToggle =
+                        context.dataOutStartToggle;
+                    history->dataOutFinalToggle =
+                        context.dataOutFinalToggle;
+                }
+            }
+        }
+#endif
+        uint32_t accumulated = 0;
+        if (amount > remaining ||
+            !usb::accumulate_completed_packet_bytes(transferred, chunk,
+                amount, accumulated)) return usb::XFER_DATA_OVERRUN;
+        transferred = accumulated;
         cursor += amount;
         remaining -= amount;
         if (status != usb::XFER_SUCCESS) return status;
@@ -344,6 +503,16 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
     dev->lastOpcode = command[0];
     const bool writeCommand = command[0] == SCSI_WRITE_10 ||
                               command[0] == SCSI_WRITE_16;
+    usb::BotWriteCommandContext writeContext = {};
+    uint32_t expectedWriteBytes = 0;
+    if (writeCommand &&
+        (!usb::decode_write_command(command, commandLength, writeContext) ||
+         !usb::expected_block_bytes(writeContext.blockCount, dev->blockSize,
+                                    expectedWriteBytes) ||
+         expectedWriteBytes != dataLength)) {
+        set_last_transfer(dev, BOT_STAGE_CBW, usb::XFER_BUFFER_ERROR);
+        return usb::XFER_BUFFER_ERROR;
+    }
     if (writeCommand) dev->lastWriteOutcome = block::USB_WRITE_NOT_SUBMITTED;
 
     dev->lastCswStatus = 0xFF;
@@ -360,12 +529,33 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
     dev->botDiagnostic.deviceAddress = dev->usbAddress;
     const usb::Device* identity = usb::get_device(dev->usbAddress);
     dev->botDiagnostic.deviceIncarnation = identity ? identity->incarnationId : 0;
+    dev->botDiagnostic.blockRegistrationId = dev->blockRegistrationId;
+    dev->botDiagnostic.lba = writeContext.lba;
     dev->botDiagnostic.cbwTag = expectedCswTag;
     dev->botDiagnostic.expectedCswTag = expectedCswTag;
     dev->botDiagnostic.requestedBytes = dataLength;
+    dev->botDiagnostic.blockCount = writeContext.blockCount;
+    dev->botDiagnostic.logicalBlockSize = writeCommand ? dev->blockSize : 0;
+    dev->botDiagnostic.dataOutExpectedBytes =
+        direction == 0x00 ? dataLength : 0;
     dev->botDiagnostic.opcode = command[0];
     dev->botDiagnostic.cdbLength = commandLength;
     dev->botDiagnostic.direction = direction;
+    usb::BotCommandHistoryRecord commandRecord = {};
+    commandRecord.commandSequence = dev->commandSequence;
+    commandRecord.incarnation = dev->botDiagnostic.deviceIncarnation;
+    commandRecord.lba = writeContext.lba;
+    commandRecord.blockRegistrationId = dev->blockRegistrationId;
+    commandRecord.cbwTag = expectedCswTag;
+    commandRecord.expectedCswTag = expectedCswTag;
+    commandRecord.blockCount = writeContext.blockCount;
+    commandRecord.logicalBlockSize = writeCommand ? dev->blockSize : 0;
+    commandRecord.expectedBytes = dataLength;
+    commandRecord.opcode = command[0];
+    commandRecord.cdbLength = commandLength;
+    commandRecord.direction = direction;
+    commandRecord.result = usb::BOT_COMMAND_PENDING;
+    (void)usb::record_bot_command(s_botCommandHistory, commandRecord);
     BotDiagnosticContextScope diagnosticScope;
     set_diagnostic_phase(dev, usb::BOT_DIAG_PHASE_CBW, dev->bulkOutEP);
 #if defined(GXOS_DM20_USB_DIAGNOSTICS)
@@ -391,6 +581,12 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
     serial::put_hex8(direction);
     serial::puts(" bytes=0x");
     serial::put_hex32(dataLength);
+    serial::puts(" lba=0x");
+    serial::put_hex64(writeContext.lba);
+    serial::puts(" blocks=0x");
+    serial::put_hex32(writeContext.blockCount);
+    serial::puts(" logical-block-size=0x");
+    serial::put_hex32(writeCommand ? dev->blockSize : 0);
     serial::puts(" tag=0x");
     serial::put_hex32(expectedCswTag);
     serial::putc('\n');
@@ -402,7 +598,24 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
         dev->lastWriteOutcome = block::USB_WRITE_SUBMITTED_UNKNOWN;
     usb::TransferStatus status = usb::hci::bulk_transfer(
         dev->usbAddress, dev->bulkOutEP, &cbw, sizeof(cbw), &sent);
+#if defined(GXOS_DM20_USB_DIAGNOSTICS) && defined(__x86_64__)
+    {
+        usb::BulkTransferDiagnostic detail = {};
+        usb::BotCommandHistoryRecord* history =
+            current_history(dev->commandSequence);
+        if (usb::hci::get_last_bulk_transfer_diagnostic(&detail)) {
+            dev->botDiagnostic.cbwSubmitFrame = detail.startFrame;
+            dev->botDiagnostic.cbwCompleteFrame = detail.completeFrame;
+            usb::set_bot_diagnostic_context(&dev->botDiagnostic);
+            if (history) {
+                history->cbwSubmitFrame = detail.startFrame;
+                history->cbwCompleteFrame = detail.completeFrame;
+            }
+        }
+    }
+#endif
     if (status != usb::XFER_SUCCESS || sent != sizeof(cbw)) {
+        capture_bot_failure(dev, usb::BOT_COMMAND_TRANSPORT_FAILED, sent);
         if (writeCommand) {
             if (status == usb::XFER_CANCELLED ||
                 !usb::get_device(dev->usbAddress))
@@ -448,6 +661,8 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
         status = transfer_data(dev, direction, data, dataLength,
                                dataTransferred);
         if (status != usb::XFER_SUCCESS) {
+            capture_bot_failure(dev, usb::BOT_COMMAND_TRANSPORT_FAILED,
+                                dataTransferred);
             if (writeCommand && (status == usb::XFER_CANCELLED ||
                                  !usb::get_device(dev->usbAddress)))
                 dev->lastWriteOutcome = block::USB_WRITE_REMOVED_UNKNOWN;
@@ -472,8 +687,35 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
     uint16_t received = 0;
     dev->lastBotStage = BOT_STAGE_CSW;
     set_diagnostic_phase(dev, usb::BOT_DIAG_PHASE_CSW, dev->bulkInEP);
+#if defined(GXOS_DM20_USB_DIAGNOSTICS) && defined(__x86_64__)
+    (void)usb::hci::get_bulk_endpoint_toggle(dev->usbAddress,
+        dev->bulkInEP, &dev->botDiagnostic.expectedCswToggle);
+    usb::set_bot_diagnostic_context(&dev->botDiagnostic);
+    if (usb::BotCommandHistoryRecord* history =
+            current_history(dev->commandSequence))
+        history->expectedCswToggle = dev->botDiagnostic.expectedCswToggle;
+#endif
     status = usb::hci::bulk_transfer(dev->usbAddress, dev->bulkInEP,
                                      csw, sizeof(csw), &received);
+#if defined(GXOS_DM20_USB_DIAGNOSTICS) && defined(__x86_64__)
+    {
+        usb::BulkTransferDiagnostic detail = {};
+        usb::BotCommandHistoryRecord* history =
+            current_history(dev->commandSequence);
+        if (usb::hci::get_last_bulk_transfer_diagnostic(&detail)) {
+            dev->botDiagnostic.cswTdPhysical = detail.firstTdPhysical;
+            dev->botDiagnostic.cswSubmitFrame = detail.startFrame;
+            dev->botDiagnostic.cswCompleteFrame = detail.completeFrame;
+            usb::set_bot_diagnostic_context(&dev->botDiagnostic);
+            if (history) {
+                history->cswTd = detail.firstTdPhysical;
+                history->cswSubmitFrame = detail.startFrame;
+                history->cswCompleteFrame = detail.completeFrame;
+                history->finalCswToggle = detail.finalToggle;
+            }
+        }
+    }
+#endif
     if (status != usb::XFER_SUCCESS || received != sizeof(csw)) {
         {
 #if defined(GXOS_DM20_USB_DIAGNOSTICS)
@@ -503,6 +745,26 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
         serial::put_hex32(dataLength);
         serial::puts(" data-actual=0x");
         serial::put_hex32(dataTransferred);
+        serial::puts(" lba=0x");
+        serial::put_hex64(dev->botDiagnostic.lba);
+        serial::puts(" blocks=0x");
+        serial::put_hex32(dev->botDiagnostic.blockCount);
+        serial::puts(" logical-block-size=0x");
+        serial::put_hex32(dev->botDiagnostic.logicalBlockSize);
+        serial::puts(" out-td-count=0x");
+        serial::put_hex32(dev->botDiagnostic.dataOutTdCount);
+        serial::puts(" out-expected=0x");
+        serial::put_hex32(dev->botDiagnostic.dataOutExpectedBytes);
+        serial::puts(" out-actual=0x");
+        serial::put_hex32(dev->botDiagnostic.dataOutActualBytes);
+        serial::puts(" out-toggle-start=0x");
+        serial::put_hex8(dev->botDiagnostic.dataOutStartToggle);
+        serial::puts(" out-toggle-final=0x");
+        serial::put_hex8(dev->botDiagnostic.dataOutFinalToggle);
+        serial::puts(" csw-toggle-expected=0x");
+        serial::put_hex8(dev->botDiagnostic.expectedCswToggle);
+        serial::puts(" csw-td=0x");
+        serial::put_hex32(dev->botDiagnostic.cswTdPhysical);
         serial::puts(" csw-expected=0x");
         serial::put_hex8(sizeof(CommandStatusWrapper));
         serial::puts(" csw-actual=0x");
@@ -520,6 +782,9 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
             serial::put_hex8(csw[i]);
         serial::putc('\n');
         }
+        capture_bot_failure(dev, status == usb::XFER_TIMEOUT
+            ? usb::BOT_COMMAND_CSW_TIMEOUT
+            : usb::BOT_COMMAND_TRANSPORT_FAILED, dataTransferred);
         if (writeCommand && (status == usb::XFER_CANCELLED ||
                              !usb::get_device(dev->usbAddress)))
             dev->lastWriteOutcome = block::USB_WRITE_REMOVED_UNKNOWN;
@@ -573,6 +838,8 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
         serial::put_hex8(csw[12]);
         serial::putc('\n');
         }
+        capture_bot_failure(dev, usb::BOT_COMMAND_CSW_INVALID,
+                            dataTransferred);
         status = usb::XFER_ERROR;
         set_last_transfer(dev, BOT_STAGE_VALIDATE, status);
         if (usb::device_online(dev->usbAddress))
@@ -580,6 +847,8 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
         return status;
     }
     if (csw[12] == CSW_STATUS_PHASE_ERROR) {
+        capture_bot_failure(dev, usb::BOT_COMMAND_CSW_INVALID,
+                            dataTransferred);
         if (writeCommand) dev->lastWriteOutcome = block::USB_WRITE_SUBMITTED_UNKNOWN;
         status = usb::XFER_ERROR;
         set_last_transfer(dev, BOT_STAGE_VALIDATE, status);
@@ -588,12 +857,16 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
         return status;
     }
     if (csw[12] == CSW_STATUS_FAILED) {
+        finish_bot_history(dev, usb::BOT_COMMAND_SCSI_FAILED,
+                           dataTransferred);
         if (writeCommand) dev->lastWriteOutcome = dataTransferred != 0
             ? block::USB_WRITE_PARTIAL : block::USB_WRITE_FAILED;
         set_last_transfer(dev, BOT_STAGE_VALIDATE, usb::XFER_STALL);
         return usb::XFER_STALL;
     }
     if (writeCommand && (dataTransferred != dataLength || cswResidue != 0)) {
+        finish_bot_history(dev, usb::BOT_COMMAND_TRANSPORT_FAILED,
+                           dataTransferred);
         dev->lastWriteOutcome = block::USB_WRITE_PARTIAL;
         set_last_transfer(dev, BOT_STAGE_VALIDATE, usb::XFER_DATA_UNDERRUN);
         return usb::XFER_DATA_UNDERRUN;
@@ -601,6 +874,7 @@ static usb::TransferStatus bot_transfer(StorageDevice* dev,
     set_diagnostic_phase(dev, usb::BOT_DIAG_PHASE_COMPLETE, dev->bulkInEP);
     if (writeCommand) dev->lastWriteOutcome = block::USB_WRITE_COMPLETED;
     if (actualDataLength) *actualDataLength = dataTransferred;
+    finish_bot_history(dev, usb::BOT_COMMAND_PASSED, dataTransferred);
     set_last_transfer(dev, BOT_STAGE_VALIDATE, usb::XFER_SUCCESS);
     return usb::XFER_SUCCESS;
 }
@@ -1064,6 +1338,7 @@ void init()
         if (s_devices[i].active) release(s_devices[i].usbAddress);
     }
     s_nextBotCommandSequence = 1;
+    usb::clear_bot_command_history(s_botCommandHistory);
     s_deviceCount = 0;
     for (uint8_t i = 0; i < MAX_STORAGE_DEVICES; ++i) {
         if (s_devices[i].blockRegistrationId != 0 &&

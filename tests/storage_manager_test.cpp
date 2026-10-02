@@ -14,6 +14,7 @@
 #include "../kernel/core/include/kernel/ahci_logic.h"
 #include "../kernel/core/include/kernel/nvme_logic.h"
 #include "../kernel/core/include/kernel/usb_storage.h"
+#include "../kernel/core/include/kernel/usb_bot_diagnostics.h"
 #include "../kernel/arch/amd64/include/arch/amd64.h"
 #include "../kernel/arch/amd64/include/arch/uhci_transfer_logic.h"
 #include "../guideXOSBootLoader/guidexOSBootInfo.h"
@@ -3060,6 +3061,7 @@ static void run_ahci_logic_tests()
 static void run_uhci_transfer_logic_tests()
 {
     using namespace kernel::arch::amd64::uhci;
+    using namespace kernel::usb;
 
     check(sizeof(TransferDescriptor) == 16, "UHCI TD occupies four dwords");
     check(alignof(TransferDescriptor) == 16, "UHCI TD alignment is 16 bytes");
@@ -3235,6 +3237,223 @@ static void run_uhci_transfer_logic_tests()
           "UHCI host process error is classified");
     check(observe(TD_ACTIVE, 0x1000u, 0x1000u, 0x1004u, STS_HALTED) ==
           OBSERVATION_CONTROLLER_ERROR, "UHCI halted controller is classified");
+
+    uint8_t write10[10] = {0x2A, 0, 0x12, 0x34, 0x56, 0x78,
+                           0, 0, 7, 0};
+    BotWriteCommandContext writeContext = {};
+    check(decode_write_command(write10, sizeof(write10), writeContext),
+          "BOT diagnostic metadata recognizes WRITE(10)");
+    check(writeContext.lba == 0x12345678u,
+          "WRITE(10) diagnostic decodes the exact big-endian LBA");
+    check(writeContext.blockCount == 7u,
+          "WRITE(10) diagnostic decodes the exact block count");
+    uint32_t expectedBytes = 0;
+    check(expected_block_bytes(writeContext.blockCount, 512u, expectedBytes),
+          "BOT diagnostic computes expected WRITE(10) bytes");
+    check(expectedBytes == 7u * 512u,
+          "WRITE(10) expected bytes equal block count times sector size");
+    check(expectedBytes == 3584u && bulk_td_count(expectedBytes, 64u) == 56u,
+          "seven-sector WRITE(10) accounts for every 64-byte TD");
+    check(bulk_td_count(64u, 64u) == 1u,
+          "single-packet OUT stage uses one TD");
+    check(bulk_td_count(512u, 64u) == 8u,
+          "one-sector OUT stage uses eight 64-byte TDs");
+    check(bulk_td_count(2u * 512u, 64u) == 16u,
+          "two-sector OUT stage accounts for sixteen TDs");
+    check(bulk_td_count(128u * 512u, 64u) == 1024u,
+          "128-sector OUT stage accounts for 1024 TD packets");
+    uint32_t packetBytes = 0;
+    bool packetAccounting = true;
+    for (uint8_t packet = 0; packet < 8u; ++packet) {
+        uint32_t nextBytes = 0;
+        packetAccounting = packetAccounting &&
+            accumulate_completed_packet_bytes(packetBytes, 64u, 64u,
+                                               nextBytes);
+        packetBytes = nextBytes;
+    }
+    check(packetAccounting && packetBytes == 512u,
+          "multi-TD OUT byte accumulation sums all eight actual packets");
+    uint32_t shortPacketBytes = 0;
+    check(accumulate_completed_packet_bytes(64u, 64u, 17u,
+              shortPacketBytes) && shortPacketBytes == 81u,
+          "multi-TD accounting sums an actual short packet exactly once");
+    check(!accumulate_completed_packet_bytes(0u, 64u, 65u, packetBytes),
+          "multi-TD accounting rejects actual bytes beyond the TD request");
+    check(bulk_td_count(0u, 64u) == 0u && bulk_td_count(512u, 0u) == 0u,
+          "BOT TD accounting rejects empty transfers and zero max packet");
+    check(!expected_block_bytes(0u, 512u, expectedBytes),
+          "BOT byte accounting rejects a zero block count");
+    check(!expected_block_bytes(UINT32_MAX, 4096u, expectedBytes),
+          "BOT byte accounting rejects multiplication overflow");
+    check(expected_block_bytes(128u, 512u, expectedBytes) &&
+          expectedBytes == 65536u,
+          "128-sector WRITE(10) accounts for the exact 64 KiB data phase");
+    check(decode_write_command(write10, 9u, writeContext) == false,
+          "BOT diagnostic rejects a truncated WRITE(10) CDB");
+    uint8_t emptyWrite10[10] = {0x2A, 0, 0, 0, 0, 1, 0, 0, 0, 0};
+    check(!decode_write_command(emptyWrite10, sizeof(emptyWrite10), writeContext),
+          "BOT diagnostic rejects zero-block WRITE(10)");
+    uint8_t write16[16] = {0x8A, 0, 0, 0, 0, 0, 0, 0, 0, 9,
+                           0, 0, 0, 2, 0, 0};
+    check(decode_write_command(write16, sizeof(write16), writeContext),
+          "BOT diagnostic metadata recognizes WRITE(16)");
+    check(writeContext.lba == 9u && writeContext.blockCount == 2u,
+          "WRITE(16) diagnostic decodes LBA and block count");
+    check(!decode_write_command(write16, 15u, writeContext),
+          "BOT diagnostic rejects a truncated WRITE(16) CDB");
+    check(toggle_after_completed_packets(0u, 1u) == 1u &&
+          toggle_after_completed_packets(1u, 1u) == 0u,
+          "USB endpoint toggle advances only for one completed packet");
+    check(toggle_after_completed_packets(1u, 8u) == 1u,
+          "eight successful OUT packets preserve DATA1 parity");
+    check(toggle_after_completed_packets(0u, 56u) == 0u,
+          "seven-sector OUT toggle follows actual completed packet parity");
+    check(toggle_after_completed_packets(0u, 1024u) == 0u,
+          "128-sector OUT toggle follows all completed packet parity");
+    check(toggle_after_completed_packets(1u, 0u) == 1u,
+          "NAK or error without a completed packet leaves toggle unchanged");
+
+    BotDiagnosticRing diagnosticRing = {};
+    clear_bot_diagnostic_ring(diagnosticRing);
+    BotDiagnosticRecord diagnostic = {};
+    diagnostic.commandSequence = 0x1BCu;
+    diagnostic.incarnation = 7u;
+    diagnostic.lba = 0x12345678u;
+    diagnostic.cbwTag = 0x1BCu;
+    diagnostic.blockCount = 1u;
+    diagnostic.transferLength = 512u;
+    diagnostic.qhPhysical = 0x3BF60690u;
+    diagnostic.qhElement = 0x3BF606A0u;
+    diagnostic.tdPhysical = 0x3BF606A0u;
+    diagnostic.tdStatus = TD_ACTIVE;
+    diagnostic.tdToken = cswInToken;
+    diagnostic.tdLink = 1u;
+    diagnostic.tdBufferPhysical = 0x3BF60000u;
+    diagnostic.frameNumber = 0x123u;
+    diagnostic.opcode = 0x2Au;
+    diagnostic.phase = BOT_DIAG_PHASE_CSW;
+    diagnostic.endpoint = 0x81u;
+    diagnostic.direction = 0u;
+    diagnostic.toggle = 1u;
+    const uint64_t firstDiagnosticSequence =
+        record_bot_diagnostic(diagnosticRing, diagnostic);
+    check(firstDiagnosticSequence == 1u,
+          "BOT diagnostic ring starts with sequence one");
+    check(record_bot_diagnostic(diagnosticRing, diagnostic) == 2u,
+          "BOT diagnostic sequence increases monotonically");
+    check(diagnosticRing.count == 2u,
+          "BOT diagnostic ring records each state transition");
+    const BotDiagnosticRecord& diagnosticRead =
+        bot_diagnostic_at(diagnosticRing, 0u);
+    check(diagnosticRead.commandSequence == 0x1BCu &&
+          diagnosticRead.incarnation == 7u &&
+          diagnosticRead.cbwTag == 0x1BCu,
+          "BOT diagnostic ring retains command identity and incarnation");
+    check(diagnosticRead.opcode == 0x2Au && diagnosticRead.lba == 0x12345678u &&
+          diagnosticRead.blockCount == 1u,
+          "BOT diagnostic ring retains WRITE(10) parameters");
+    check(diagnosticRead.phase == BOT_DIAG_PHASE_CSW &&
+          diagnosticRead.endpoint == 0x81u && diagnosticRead.direction == 0u,
+          "BOT diagnostic ring retains phase, endpoint, and direction");
+    check(diagnosticRead.transferLength == 512u &&
+          diagnosticRead.toggle == 1u && diagnosticRead.frameNumber == 0x123u,
+          "BOT diagnostic ring retains transfer length, toggle, and FRNUM");
+    check(diagnosticRead.qhPhysical == 0x3BF60690u &&
+          diagnosticRead.qhElement == 0x3BF606A0u,
+          "BOT diagnostic ring retains QH identity and element");
+    check(diagnosticRead.tdPhysical == 0x3BF606A0u &&
+          diagnosticRead.tdStatus == TD_ACTIVE &&
+          diagnosticRead.tdToken == cswInToken &&
+          diagnosticRead.tdLink == 1u &&
+          diagnosticRead.tdBufferPhysical == 0x3BF60000u,
+          "BOT diagnostic ring retains complete TD state");
+    for (uint32_t i = 0; i < BOT_DIAGNOSTIC_RING_CAPACITY + 5u; ++i) {
+        diagnostic.commandSequence = i;
+        record_bot_diagnostic(diagnosticRing, diagnostic);
+    }
+    check(diagnosticRing.count == BOT_DIAGNOSTIC_RING_CAPACITY,
+          "BOT diagnostic ring remains bounded at 64 transitions");
+    check(bot_diagnostic_at(diagnosticRing, 0u).diagnosticSequence == 8u &&
+          bot_diagnostic_at(diagnosticRing,
+              BOT_DIAGNOSTIC_RING_CAPACITY - 1u).diagnosticSequence == 71u,
+          "BOT diagnostic ring wrap retains newest transitions in order");
+
+    BotCommandHistory commandHistory = {};
+    clear_bot_command_history(commandHistory);
+    BotCommandHistoryRecord commandRecord = {};
+    commandRecord.commandSequence = 0x1BCu;
+    commandRecord.incarnation = 7u;
+    commandRecord.lba = 0x12345678u;
+    commandRecord.blockRegistrationId = 0xABCDEFu;
+    commandRecord.cbwTag = 0x1BCu;
+    commandRecord.expectedCswTag = 0x1BCu;
+    commandRecord.blockCount = 1u;
+    commandRecord.logicalBlockSize = 512u;
+    commandRecord.expectedBytes = 512u;
+    commandRecord.actualBytes = 512u;
+    commandRecord.dataOutTdCount = 8u;
+    commandRecord.firstDataOutTd = 0x1000u;
+    commandRecord.lastDataOutTd = 0x1070u;
+    commandRecord.cswTd = 0x2000u;
+    commandRecord.opcode = 0x2Au;
+    commandRecord.cdbLength = 10u;
+    commandRecord.direction = 0u;
+    commandRecord.result = BOT_COMMAND_PENDING;
+    commandRecord.dataOutStartToggle = 1u;
+    commandRecord.dataOutFinalToggle = 1u;
+    commandRecord.expectedCswToggle = 1u;
+    BotCommandHistoryRecord* storedCommand =
+        record_bot_command(commandHistory, commandRecord);
+    check(commandHistory.count == 1u && storedCommand != nullptr,
+          "BOT command history accepts the active command");
+    check(find_bot_command(commandHistory, 0x1BCu) == storedCommand,
+          "BOT command history locates an entry by diagnostic sequence");
+    check(storedCommand->lba == 0x12345678u &&
+          storedCommand->blockCount == 1u &&
+          storedCommand->logicalBlockSize == 512u,
+          "BOT command history retains exact WRITE(10) LBA and geometry");
+    check(storedCommand->cbwTag == 0x1BCu &&
+          storedCommand->expectedCswTag == 0x1BCu &&
+          storedCommand->blockRegistrationId == 0xABCDEFu,
+          "BOT command history retains tag and registration identity");
+    check(storedCommand->expectedBytes == storedCommand->actualBytes &&
+          storedCommand->actualBytes == 512u,
+          "BOT command history distinguishes expected and actual data bytes");
+    check(storedCommand->dataOutTdCount == 8u &&
+          storedCommand->firstDataOutTd == 0x1000u &&
+          storedCommand->lastDataOutTd == 0x1070u,
+          "BOT command history retains the first and last data TD");
+    check(storedCommand->dataOutStartToggle == 1u &&
+          storedCommand->dataOutFinalToggle == 1u &&
+          storedCommand->expectedCswToggle == 1u,
+          "BOT command history retains OUT and expected CSW toggles");
+    check(storedCommand->result == BOT_COMMAND_PENDING,
+          "BOT command history records an in-flight command state");
+    storedCommand->result = BOT_COMMAND_CSW_TIMEOUT;
+    storedCommand->cswTd = 0x3BF606A0u;
+    storedCommand->cswSubmitFrame = 0x18Eu;
+    check(find_bot_command(commandHistory, 0x1BCu)->result ==
+              BOT_COMMAND_CSW_TIMEOUT,
+          "BOT command history updates failure classification in place");
+    check(find_bot_command(commandHistory, 0x1BCu)->cswTd == 0x3BF606A0u &&
+          find_bot_command(commandHistory, 0x1BCu)->cswSubmitFrame == 0x18Eu,
+          "BOT command history retains CSW descriptor and frame timing");
+    for (uint64_t i = 0; i < BOT_COMMAND_HISTORY_CAPACITY + 4u; ++i) {
+        commandRecord.commandSequence = 0x200u + i;
+        record_bot_command(commandHistory, commandRecord);
+    }
+    check(commandHistory.count == BOT_COMMAND_HISTORY_CAPACITY,
+          "BOT command history is bounded to the last 16 commands");
+    check(bot_command_history_at(commandHistory, 0u).commandSequence == 0x204u &&
+          bot_command_history_at(commandHistory,
+              BOT_COMMAND_HISTORY_CAPACITY - 1u).commandSequence == 0x213u,
+          "BOT command-history wrap retains the newest commands in order");
+    check(find_bot_command(commandHistory, 0x1BCu) == nullptr,
+          "overwritten BOT command history entries cannot leak into later commands");
+    clear_bot_command_history(commandHistory);
+    check(commandHistory.count == 0u &&
+          find_bot_command(commandHistory, 0x1BCu) == nullptr,
+          "BOT command-history reset removes all prior incarnation state");
 }
 
 static void run_nvme_logic_tests()

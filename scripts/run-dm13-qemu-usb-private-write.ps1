@@ -56,6 +56,20 @@ $trace = Join-Path $WorkFull "usb-uhci.trace.log"
 $events = Join-Path $WorkFull "usb-uhci.trace-events.txt"
 $manifest = Join-Path $WorkFull "manifest.txt"
 $proc = $null; $port = 0; $passed = $false
+$qmpClient = $null; $qmpReader = $null; $qmpWriter = $null
+$qmpLog = Join-Path $WorkFull "usb-write.qmp.log"
+function Invoke-Dm13Qmp([string]$Command,[string]$Id) {
+    if (-not $script:qmpWriter -or -not $script:qmpReader) { return }
+    $request = '{"execute":"' + $Command + '","id":"' + $Id + '"}'
+    Add-Content -LiteralPath $script:qmpLog -Encoding utf8 -Value "TX $request"
+    $script:qmpWriter.WriteLine($request)
+    while ($true) {
+        $line = $script:qmpReader.ReadLine()
+        if ($null -eq $line) { throw "QMP closed while waiting for '$Command'." }
+        Add-Content -LiteralPath $script:qmpLog -Encoding utf8 -Value "RX $line"
+        if ($line -match ('"id"\s*:\s*"' + [regex]::Escape($Id) + '"')) { return $line }
+    }
+}
 function Stop-Dm13Qemu([System.Diagnostics.Process]$Process,[int]$Port,[string]$ExpectedSerial) {
     if (-not $Process) { return }
     $row = Get-CimInstance Win32_Process -Filter "ProcessId=$($Process.Id)"
@@ -64,11 +78,7 @@ function Stop-Dm13Qemu([System.Diagnostics.Process]$Process,[int]$Port,[string]$
         throw "Refusing to stop a QEMU process not owned by this proof."
     }
     if (-not $Process.HasExited) {
-        try {
-            $client=[System.Net.Sockets.TcpClient]::new(); $client.Connect("127.0.0.1",$Port)
-            $stream=$client.GetStream(); $quit=[Text.Encoding]::ASCII.GetBytes("quit`n")
-            $stream.Write($quit,0,$quit.Length); $stream.Dispose(); $client.Dispose()
-        } catch { }
+        try { [void](Invoke-Dm13Qmp 'quit' 'quit') } catch { }
         [void]$Process.WaitForExit(5000)
     }
     $row=Get-CimInstance Win32_Process -Filter "ProcessId=$($Process.Id)"
@@ -76,6 +86,9 @@ function Stop-Dm13Qemu([System.Diagnostics.Process]$Process,[int]$Port,[string]$
         Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
         [void]$Process.WaitForExit(10000)
     }
+    if ($script:qmpReader) { $script:qmpReader.Dispose(); $script:qmpReader = $null }
+    if ($script:qmpWriter) { $script:qmpWriter.Dispose(); $script:qmpWriter = $null }
+    if ($script:qmpClient) { $script:qmpClient.Dispose(); $script:qmpClient = $null }
 }
 try {
     New-Item -ItemType Directory -Path $espStage -Force | Out-Null
@@ -86,9 +99,14 @@ try {
     $hashBefore=(Get-FileHash -LiteralPath $UsbFull -Algorithm SHA256).Hash
     $monitor=[System.Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0); $monitor.Start()
     $port=([Net.IPEndPoint]$monitor.LocalEndpoint).Port; $monitor.Stop()
-    @("usb_uhci_schedule_start","usb_uhci_packet_add","usb_uhci_packet_complete_success",
-      "usb_uhci_td_complete","usb_uhci_packet_complete_error","usb_packet_state_fault",
-      "usb_msd_cmd_submit","usb_msd_data_out","usb_msd_packet_async",
+    @("usb_uhci_schedule_start","usb_uhci_qh_load","usb_uhci_td_load",
+      "usb_uhci_td_queue","usb_uhci_td_nextqh","usb_uhci_td_async",
+      "usb_uhci_packet_add","usb_uhci_packet_link_async",
+      "usb_uhci_packet_complete_success","usb_uhci_packet_complete_shortxfer",
+      "usb_uhci_packet_complete_stall","usb_uhci_packet_complete_babble",
+      "usb_uhci_packet_complete_error","usb_uhci_packet_cancel",
+      "usb_packet_state_change","usb_packet_state_fault","usb_uhci_td_complete",
+      "usb_msd_cmd_submit","usb_msd_data_in","usb_msd_data_out","usb_msd_packet_async",
       "usb_msd_packet_complete","usb_msd_cmd_complete","usb_msd_send_status") |
         Set-Content -LiteralPath $events -Encoding ascii
     $usbDrive = if ($UsbReadOnly) { "file=$UsbFull,format=raw,readonly=on" } else { "file=$UsbFull,format=raw" }
@@ -102,7 +120,7 @@ try {
       "-netdev","user,id=net0","-device","e1000,netdev=net0",
       "-object","rng-builtin,id=rng0","-device","virtio-rng-pci,rng=rng0,disable-modern=on,max-bytes=1024,period=1000",
       "-m","1024M","-vga","std","-display","none","-serial","file:$serial",
-      "-trace","events=$events,file=$trace","-monitor","tcp:127.0.0.1:$port,server,nowait",
+      "-trace","events=$events,file=$trace","-qmp","tcp:127.0.0.1:$port,server=on,wait=off",
       "-rtc","base=utc,clock=host","-no-reboot")
     $qemuVersion = (& $QemuFull --version | Select-Object -First 1)
     $qemuHash = (Get-FileHash -LiteralPath $QemuFull -Algorithm SHA256).Hash
@@ -112,7 +130,7 @@ try {
     $existingQemu = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'")
     $proofName = if ($UsbReadOnly) { 'DM13-QEMU-USB-READ-ONLY-REFERENCE' } else { 'DM13-QEMU-USB-PRIVATE-WRITE-RESTORE' }
     $imageAccess = if ($UsbReadOnly) { 'read-only-existing-reference' } else { 'writable-disposable-only' }
-    @("manifestSchema=DM19-TRANSPORT-1","proof=$proofName","timestampUtc=$([DateTime]::UtcNow.ToString('o'))",
+    @("manifestSchema=DM21-TRANSPORT-1","proof=$proofName","timestampUtc=$([DateTime]::UtcNow.ToString('o'))",
       "qemu=$qemuVersion","qemuSha256=$qemuHash","machine=pc,usb=off","cpu=QEMU-default (no -cpu argument)",
       "controller=PIIX3-UHCI","controllerArguments=-device piix3-usb-uhci,id=uhci",
       "accelerator=$(if ($QemuAccelerator) { $QemuAccelerator } else { 'QEMU-default' })",
@@ -126,7 +144,7 @@ try {
       "hostQemuProcessesBefore=$($existingQemu.Count)",
       "hostQemuPidsBefore=$(($existingQemu | ForEach-Object { $_.ProcessId }) -join ',')",
       "qemuTraceEnabled=yes","qemuTraceEvents=$events","qemuTrace=$trace",
-      "monitorProtocol=HMP TCP loopback; runner sends quit only after proof or in cleanup",
+      "controlProtocol=QMP TCP loopback; QMP transcript retained at $qmpLog",
       "targetLba=32768",
       "targetCounts=$(if ($UsbReadOnly) { 'single-sector-read-only-check' } else { '1x100,2,7,128' })",
       "targetCanaries=$(if ($UsbReadOnly) { 'read-only-sector' } else { 'LBA-1 and LBA+count' })",
@@ -135,7 +153,23 @@ try {
     $proc=Start-Process -FilePath $QemuFull -ArgumentList $args -WorkingDirectory $Root -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     $processRow = Get-CimInstance Win32_Process -Filter "ProcessId=$($proc.Id)"
     Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
-      "qemuPid=$($proc.Id)","qemuCommandLine=$($processRow.CommandLine)")
+      "qemuPid=$($proc.Id)","qemuQmpPort=$port","qemuCommandLine=$($processRow.CommandLine)",
+      "qmpTranscript=$qmpLog")
+    $connectDeadline=[DateTime]::UtcNow.AddSeconds(15)
+    while (-not $qmpClient -and [DateTime]::UtcNow -lt $connectDeadline) {
+        $attempt=[System.Net.Sockets.TcpClient]::new()
+        try { $attempt.Connect("127.0.0.1",$port); $qmpClient=$attempt }
+        catch { $attempt.Dispose(); Start-Sleep -Milliseconds 100 }
+    }
+    if (-not $qmpClient -or -not $qmpClient.Connected) { throw "QEMU QMP did not open on port $port." }
+    $stream=$qmpClient.GetStream(); $stream.ReadTimeout=10000
+    $encoding=[Text.UTF8Encoding]::new($false)
+    $qmpReader=[IO.StreamReader]::new($stream,$encoding,$false,1024,$true)
+    $qmpWriter=[IO.StreamWriter]::new($stream,$encoding,1024,$true); $qmpWriter.AutoFlush=$true
+    $greeting=$qmpReader.ReadLine()
+    Add-Content -LiteralPath $qmpLog -Encoding utf8 -Value "RX $greeting"
+    [void](Invoke-Dm13Qmp 'qmp_capabilities' 'caps')
+    [void](Invoke-Dm13Qmp 'query-status' 'status')
     $deadline=[DateTime]::UtcNow.AddSeconds($ProofTimeoutSeconds); $booted=$false
     while ([DateTime]::UtcNow -lt $deadline) {
         if (Test-Path -LiteralPath $serial) {
@@ -167,10 +201,29 @@ try {
     if ($hashBefore -ne $hashAfter) { throw "Host image hash changed after restore: $hashBefore => $hashAfter" }
     $resultSummary = if ($UsbReadOnly) { "result=PASS qemu-write-protection=yes reads=yes writes-blocked=yes host-image-unchanged=yes physical-media=none" } else { "result=PASS private-production-write=yes sync-cache=yes exact-readback=yes canaries=yes host-image-restored=yes physical-media=none" }
     Add-Content -LiteralPath $manifest -Encoding ascii -Value @("serialLog=$serial","uhciTrace=$trace",
-      "storageImageSha256After=$hashAfter","transportResult=PASS",$resultSummary)
+      "qmpTranscript=$qmpLog","storageImageSha256After=$hashAfter","transportResult=PASS",$resultSummary)
     if ($UsbReadOnly) { Write-Host "DM13 USB read-only reference proof passed. Evidence: $WorkFull" }
     else { Write-Host "DM13 private USB write proof passed. Evidence: $WorkFull" }
 } catch {
     Add-Content -LiteralPath $manifest -Encoding ascii -Value @("transportResult=FAIL","result=FAIL","failure=$($_.Exception.Message -replace '[\r\n]+',' ')") -ErrorAction SilentlyContinue
     throw
-} finally { if ($proc) { Stop-Dm13Qemu $proc $port $serial } }
+} finally {
+    if ($proc) { Stop-Dm13Qemu $proc $port $serial; $proc=$null }
+    if (-not $passed -and (Test-Path -LiteralPath $serial) -and
+        (Test-Path -LiteralPath $trace)) {
+        try {
+            $correlation=Join-Path $WorkFull "usb-trace-correlation.json"
+            & python (Join-Path $Root "scripts\classify-dm20-usb-trace.py") `
+                --serial $serial --trace $trace --output $correlation | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Add-Content -LiteralPath $manifest -Encoding ascii -Value "traceCorrelation=$correlation"
+            }
+        } catch { }
+    }
+    if ((Test-Path -LiteralPath $UsbFull) -and (Test-Path -LiteralPath $manifest) -and -not $passed) {
+        try {
+            $hashAtFailure=(Get-FileHash -LiteralPath $UsbFull -Algorithm SHA256).Hash
+            Add-Content -LiteralPath $manifest -Encoding ascii -Value "storageImageSha256AfterFailureAndQemuStop=$hashAtFailure"
+        } catch { }
+    }
+}

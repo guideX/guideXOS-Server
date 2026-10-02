@@ -32,6 +32,10 @@ try {
 
     & $testExe
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    $python = Get-Command python -ErrorAction Stop
+    & $python.Source (Join-Path $repoRoot 'tests/classify_dm20_usb_trace_test.py')
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {
     Remove-Item -LiteralPath $testExe -Force -ErrorAction SilentlyContinue
 }

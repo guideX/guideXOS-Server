@@ -329,15 +329,50 @@ enum BotDiagnosticPhase : uint8_t {
 struct BotDiagnosticContext {
     uint64_t commandSequence;
     uint64_t deviceIncarnation;
+    uint64_t blockRegistrationId;
+    uint64_t lba;
     uint32_t cbwTag;
     uint32_t expectedCswTag;
     uint32_t requestedBytes;
+    uint32_t blockCount;
+    uint32_t logicalBlockSize;
+    uint32_t dataOutExpectedBytes;
+    uint32_t dataOutActualBytes;
+    uint32_t dataOutTdCount;
+    uint32_t firstDataOutTdPhysical;
+    uint32_t lastDataOutTdPhysical;
+    uint32_t cswTdPhysical;
+    uint16_t cbwSubmitFrame;
+    uint16_t cbwCompleteFrame;
+    uint16_t dataOutStartFrame;
+    uint16_t dataOutCompleteFrame;
+    uint16_t cswSubmitFrame;
+    uint16_t cswCompleteFrame;
+    uint8_t dataOutStartToggle;
+    uint8_t dataOutFinalToggle;
+    uint8_t expectedCswToggle;
     uint8_t deviceAddress;
     uint8_t endpointAddress;
     uint8_t opcode;
     uint8_t cdbLength;
     uint8_t direction;
     BotDiagnosticPhase phase;
+};
+
+struct BulkTransferDiagnostic {
+    uint32_t requestedBytes;
+    uint32_t actualBytes;
+    uint32_t tdCount;
+    uint32_t firstTdPhysical;
+    uint32_t lastTdPhysical;
+    uint32_t firstBufferPhysical;
+    uint32_t lastBufferPhysical;
+    uint16_t startFrame;
+    uint16_t completeFrame;
+    uint8_t endpointAddress;
+    uint8_t startToggle;
+    uint8_t finalToggle;
+    bool shortPacket;
 };
 
 void set_bot_diagnostic_context(const BotDiagnosticContext* context);
@@ -402,6 +437,13 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
                              void* data,
                              uint16_t dataLen,
                              uint16_t* bytesTransferred);
+
+// Detailed completion state is available from the AMD64 UHCI backend in
+// diagnostic builds. Other HCI backends may leave it unavailable.
+bool get_last_bulk_transfer_diagnostic(BulkTransferDiagnostic* diagnostic);
+bool get_bulk_endpoint_toggle(uint8_t deviceAddr, uint8_t endpointAddr,
+                              uint8_t* toggle);
+void dump_bot_diagnostic_ring();
 
 // Issue an interrupt transfer (single poll).
 TransferStatus interrupt_transfer(uint8_t deviceAddr,

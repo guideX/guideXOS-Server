@@ -105,6 +105,19 @@ $serial = Join-Path $WorkFull "qemu-serial.log"
 $stdout = Join-Path $WorkFull "qemu-stdout.log"
 $stderr = Join-Path $WorkFull "qemu-stderr.log"
 $qmpLog = Join-Path $WorkFull "qmp-transcript.jsonl"
+$trace = Join-Path $WorkFull "usb-uhci.trace.log"
+$events = Join-Path $WorkFull "usb-uhci.trace-events.txt"
+$traceEvents = @("usb_uhci_schedule_start","usb_uhci_qh_load","usb_uhci_td_load",
+  "usb_uhci_td_queue","usb_uhci_td_nextqh","usb_uhci_td_async",
+  "usb_uhci_packet_add","usb_uhci_packet_link_async",
+  "usb_uhci_packet_complete_success","usb_uhci_packet_complete_shortxfer",
+  "usb_uhci_packet_complete_stall","usb_uhci_packet_complete_babble",
+  "usb_uhci_packet_complete_error","usb_uhci_packet_cancel",
+  "usb_packet_state_change","usb_packet_state_fault","usb_uhci_td_complete",
+  "usb_msd_cmd_submit","usb_msd_data_in","usb_msd_data_out",
+  "usb_msd_packet_async","usb_msd_packet_complete","usb_msd_cmd_complete",
+  "usb_msd_send_status")
+$traceEvents | Set-Content -LiteralPath $events -Encoding ascii
 $manifest = Join-Path $WorkFull "manifest.txt"
 $qemuVersion = (& $QemuFull --version | Select-Object -First 1)
 $qemuHash = (Get-FileHash -LiteralPath $QemuFull -Algorithm SHA256).Hash
@@ -114,7 +127,7 @@ $kernelBytes = (Get-Item -LiteralPath $kernel).Length
 $bootloaderHash = (Get-FileHash -LiteralPath $bootloader -Algorithm SHA256).Hash
 $qemuAtStart = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'")
 @("proof=DM14-QEMU-USB-HOTPLUG",
-  "manifestSchema=DM19-TRANSPORT-1",
+  "manifestSchema=DM21-TRANSPORT-1",
   "timestampUtc=$([DateTime]::UtcNow.ToString('o'))",
   "qemu=$qemuVersion", "qemuSha256=$qemuHash",
   "machine=pc,usb=off", "cpu=QEMU-default (no -cpu argument)",
@@ -143,6 +156,7 @@ $qemuAtStart = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64
   "mediaATestLba90000Sha256Before=$sectorHashAStart",
   "mediaBTestLba90000Sha256Before=$sectorHashBStart",
   "physicalHostUsbPassthrough=none", "physicalHostDiskPassthrough=none",
+  "qemuTraceEnabled=yes", "qemuTraceEvents=$events", "qemuTrace=$trace",
   "evidenceDirectory=$WorkFull") | Set-Content -LiteralPath $manifest -Encoding ascii
 
 $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
@@ -157,6 +171,7 @@ $arguments = @("-accel",$QemuAccelerator,
   "-object","rng-builtin,id=rng0",
   "-device","virtio-rng-pci,rng=rng0,disable-modern=on,max-bytes=1024,period=1000",
   "-m","1024M","-vga","std","-display","none","-serial","file:$serial",
+  "-trace","events=$events,file=$trace",
   "-qmp","tcp:127.0.0.1:$qmpPort,server=on,wait=off",
   "-rtc","base=utc,clock=host","-no-reboot")
 $process = Start-Process -FilePath $QemuFull -ArgumentList $arguments -WorkingDirectory $Root `
@@ -170,6 +185,7 @@ Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
 
 $script:QmpId = 0
 $script:Run = $null
+$hotplugFailed = $false
 function Add-QmpEvidence([string]$Line) {
     Add-Content -LiteralPath $qmpLog -Encoding utf8 -Value $Line
 }
@@ -369,15 +385,39 @@ try {
       "result=PASS-QEMU-SEQUENCE-AND-PROOF-COMPLETED")
     Write-Host "DM14 QEMU hotplug sequence completed. Evidence: $WorkFull"
 } catch {
+    $hotplugFailed = $true
+    $hashAAtFailure = (Get-FileHash -LiteralPath $imageA -Algorithm SHA256).Hash
+    $hashBAtFailure = (Get-FileHash -LiteralPath $imageB -Algorithm SHA256).Hash
     Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
-        "transportResult=FAIL", "result=FAIL", "failure=$($_.Exception.Message -replace '[\r\n]+',' ')")
+        "transportResult=FAIL", "result=FAIL",
+        "mediaASha256AtFailure=$hashAAtFailure",
+        "mediaBSha256AtFailure=$hashBAtFailure",
+        "failure=$($_.Exception.Message -replace '[\r\n]+',' ')")
     if (Test-Path -LiteralPath $serial) {
         Get-Content -LiteralPath $serial -Tail 80 | Set-Content -LiteralPath (Join-Path $WorkFull "failure-tail.txt") -Encoding utf8
     }
     throw
 } finally {
+    Stop-Qemu
     if ($script:Run) {
         try { $script:Run.Reader.Dispose(); $script:Run.Writer.Dispose(); $script:Run.Client.Dispose() } catch { }
     }
-    Stop-Qemu
+    if ($hotplugFailed -and (Test-Path -LiteralPath $manifest)) {
+        try {
+            $hashAAfterStop = (Get-FileHash -LiteralPath $imageA -Algorithm SHA256).Hash
+            $hashBAfterStop = (Get-FileHash -LiteralPath $imageB -Algorithm SHA256).Hash
+            Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
+                "mediaASha256AfterQemuStop=$hashAAfterStop",
+                "mediaBSha256AfterQemuStop=$hashBAfterStop")
+            if ((Test-Path -LiteralPath $serial) -and (Test-Path -LiteralPath $trace)) {
+                $correlation = Join-Path $WorkFull "failure-trace-correlation.json"
+                $classifierLog = Join-Path $WorkFull "failure-trace-classifier.log"
+                & $python.Source (Join-Path $Root "scripts\classify-dm20-usb-trace.py") `
+                    --serial $serial --trace $trace --output $correlation *> $classifierLog
+                Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
+                    "failureTraceCorrelation=$correlation",
+                    "failureTraceCorrelationExitCode=$LASTEXITCODE")
+            }
+        } catch { }
+    }
 }

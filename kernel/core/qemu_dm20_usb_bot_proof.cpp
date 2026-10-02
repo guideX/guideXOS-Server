@@ -248,12 +248,50 @@ void run()
         }
     }
 
+    // Exercise every requested WRITE(10) boundary against the same guarded
+    // scratch range. The original 128-sector contents remain in
+    // s_largeBefore and are restored after the full matrix.
+    const uint16_t boundarySectors[] = { 1, 2, 7, 8, 16, 32, 64, 128 };
+    bool boundaryMatrixPassed = true;
+    for (uint8_t i = 0; i < sizeof(boundarySectors) /
+                            sizeof(boundarySectors[0]); ++i) {
+        const uint16_t sectors = boundarySectors[i];
+        const uint32_t bytes = static_cast<uint32_t>(sectors) * 512u;
+        fill_pattern(s_largePattern, bytes, 0xB0u + sectors);
+        const usb::TransferStatus writeStatus = usb_storage::write_sectors(
+            driverIndex, kLargeLba, sectors, s_largePattern);
+        const usb::TransferStatus flushStatus = writeStatus == usb::XFER_SUCCESS
+            ? usb_storage::synchronize_cache(driverIndex) : usb::XFER_ERROR;
+        const usb::TransferStatus readStatus = flushStatus == usb::XFER_SUCCESS
+            ? usb_storage::read_sectors(driverIndex, kLargeLba, sectors,
+                                        s_largeReadback)
+            : usb::XFER_ERROR;
+        boundaryMatrixPassed = writeStatus == usb::XFER_SUCCESS &&
+            flushStatus == usb::XFER_SUCCESS && readStatus == usb::XFER_SUCCESS &&
+            equal_bytes(s_largePattern, s_largeReadback, bytes);
+        if (!boundaryMatrixPassed) {
+            serial::puts("[DM20-QEMU-USB-BOT] boundary-size=FAIL sectors=");
+            serial::put_hex16(sectors);
+            serial::puts(" write-status=0x");
+            serial::put_hex8(static_cast<uint8_t>(writeStatus));
+            serial::puts(" flush-status=0x");
+            serial::put_hex8(static_cast<uint8_t>(flushStatus));
+            serial::puts(" read-status=0x");
+            serial::put_hex8(static_cast<uint8_t>(readStatus));
+            serial::putc('\n');
+            break;
+        }
+    }
+    if (boundaryMatrixPassed)
+        serial::puts("[DM20-QEMU-USB-BOT] boundary-size-matrix=PASS sectors=1,2,7,8,16,32,64,128 guarded=yes\n");
+
     const usb_storage::StorageDevice* finalTransport =
         usb_storage::get_device(driverIndex);
     const uint64_t completedCommands = finalTransport &&
         finalTransport->commandSequence >= firstSequence
             ? finalTransport->commandSequence - firstSequence + 1u : 0;
-    if (!sequencesPassed || !restore_and_verify(driverIndex)) {
+    if (!sequencesPassed || !boundaryMatrixPassed ||
+        !restore_and_verify(driverIndex)) {
         serial::puts("[DM20-QEMU-USB-BOT] stress=FAIL reason=sequence-or-restore\n");
         return;
     }
