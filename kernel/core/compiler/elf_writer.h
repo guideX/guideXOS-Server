@@ -115,6 +115,18 @@ bool write_bootstrap_elf(const uint8_t* code,
                          uint32_t codeBytes,
                          const uint8_t* readOnlyData,
                          uint32_t readOnlyDataBytes,
+                         const uint8_t* mutableData,
+                         uint32_t mutableDataBytes,
+                         uint32_t entryCodeOffset,
+                         uint64_t imageBase,
+                         uint8_t* output,
+                         uint32_t outputCapacity,
+                         ElfLayout* layout);
+
+bool write_bootstrap_elf(const uint8_t* code,
+                         uint32_t codeBytes,
+                         const uint8_t* readOnlyData,
+                         uint32_t readOnlyDataBytes,
                          uint8_t* output,
                          uint32_t outputCapacity,
                          ElfLayout* layout);

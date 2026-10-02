@@ -113,6 +113,14 @@ struct DebugRuntime {
     uint32_t debugCodeBytes = 0;
     bool sourceMetadataPresent = false;
     bool sourceMetadataValid = false;
+    uint16_t sourceMetadataVersion = 0;
+    uint32_t sourceMetadataOffset = 0;
+    uint32_t sourceMetadataBytes = 0;
+    uint64_t sourceMetadataChecksum = 0;
+    uint32_t sourceMetadataFileCount = 0;
+    uint32_t sourceMetadataFunctionCount = 0;
+    uint32_t sourceMetadataMappingCount = 0;
+    uint32_t sourceMetadataVariableCount = 0;
     std::atomic<bool> stepOverActive{false};
     std::atomic<uint64_t> stepOverCommandGeneration{0};
     std::atomic<uint64_t> stepOverInternalOwnerId{0};
@@ -286,30 +294,45 @@ bool parseSourceMappings(const NativeElfImage& image, DebugRuntime& runtime,
     runtime.sourceMappings.clear();
     runtime.sourceMetadataPresent = false;
     runtime.sourceMetadataValid = false;
+    runtime.sourceMetadataVersion = 0;
+    runtime.sourceMetadataOffset = 0;
+    runtime.sourceMetadataBytes = 0;
+    runtime.sourceMetadataChecksum = 0;
+    runtime.sourceMetadataFileCount = 0;
+    runtime.sourceMetadataFunctionCount = 0;
+    runtime.sourceMetadataMappingCount = 0;
+    runtime.sourceMetadataVariableCount = 0;
     const std::vector<uint8_t>& bytes = image.imageBytes;
     if (bytes.size() < 8 || sourceMapU32(bytes, static_cast<uint32_t>(bytes.size() - 8)) != 0x454D5847U)
         return true;
     runtime.sourceMetadataPresent = true;
     if (bytes.size() > 0xFFFFFFFFu) {
-        error = "GXSM artifact is too large";
+        error = "GXSM malformed bounds: artifact is too large";
         return false;
     }
     const uint32_t imageBytes = static_cast<uint32_t>(bytes.size());
     const uint32_t footer = imageBytes - 8;
     const uint32_t payload = sourceMapU32(bytes, footer + 4);
     if (payload < 48 || payload > imageBytes) {
-        error = "GXSM payload is invalid";
+        error = "GXSM malformed bounds: payload is outside the artifact";
         return false;
     }
     const uint32_t start = imageBytes - payload;
     const uint16_t version = sourceMapU16(bytes, start + 4);
+    if (sourceMapU32(bytes, start) != 0x4D535847U) {
+        error = "GXSM bad marker/header: header marker is invalid";
+        return false;
+    }
+    if (version != 1 && version != 2) {
+        error = "GXSM unsupported version";
+        return false;
+    }
     const uint32_t headerBytes = version == 1 ? 40U :
         version == 2 ? kernel::compiler::BOOTSTRAP_SOURCE_MAP_V2_HEADER_BYTES : 0U;
-    if (headerBytes == 0 || payload < headerBytes + 8U ||
-        sourceMapU32(bytes, start) != 0x4D535847U ||
-        sourceMapU16(bytes, start + 6) != headerBytes || sourceMapU32(bytes, start + 24) != payload ||
+    if (payload < headerBytes + 8U || sourceMapU16(bytes, start + 6) != headerBytes ||
+        sourceMapU32(bytes, start + 24) != payload ||
         sourceMapU64(bytes, start + 32) != sourceMapHash(bytes, start, payload)) {
-        error = "GXSM header or checksum is invalid";
+        error = "GXSM bad marker/header: header size or checksum is invalid";
         return false;
     }
     const uint32_t fileCount = sourceMapU16(bytes, start + 8);
@@ -319,17 +342,23 @@ bool parseSourceMappings(const NativeElfImage& image, DebugRuntime& runtime,
     const uint32_t codeBytes = sourceMapU32(bytes, start + 20);
     const uint32_t variableCount = version == 2 ? sourceMapU32(bytes, start + 40) : 0;
     const uint32_t variableBytes = version == 2 ? sourceMapU32(bytes, start + 44) : 0;
-    if (fileCount == 0 || fileCount > 16 || functionCount == 0 || functionCount > 256 ||
-        mapCount == 0 || mapCount > 256 || codeBytes == 0 ||
-        variableCount > kernel::compiler::COMPILER_MAX_DEBUG_VARIABLES * kernel::compiler::COMPILER_MAX_TRANSLATION_UNITS ||
+    if (fileCount > 16 || functionCount > 256 || mapCount > 256) {
+        error = "GXSM source capacity exceeded";
+        return false;
+    }
+    if (variableCount > kernel::compiler::COMPILER_MAX_DEBUG_VARIABLES * kernel::compiler::COMPILER_MAX_TRANSLATION_UNITS) {
+        error = "GXSM variable capacity exceeded";
+        return false;
+    }
+    if (fileCount == 0 || functionCount == 0 || mapCount == 0 || codeBytes == 0 ||
         variableBytes != variableCount * kernel::compiler::BOOTSTRAP_SOURCE_MAP_VARIABLE_BYTES) {
-        error = "GXSM counts are invalid";
+        error = "GXSM malformed bounds: counts or variable byte count are invalid";
         return false;
     }
     const uint64_t expected = headerBytes + static_cast<uint64_t>(fileCount) * 268ULL +
         static_cast<uint64_t>(functionCount) * 64ULL + static_cast<uint64_t>(mapCount) * 24ULL + 8ULL;
     if (expected + variableBytes != payload) {
-        error = "GXSM size accounting is invalid";
+        error = "GXSM malformed bounds: trailer size accounting is invalid";
         return false;
     }
     std::array<std::array<char, 256>, 16> paths{};
@@ -379,6 +408,14 @@ bool parseSourceMappings(const NativeElfImage& image, DebugRuntime& runtime,
         std::memcpy(mapping.functionName, functions[functionIndex].data(), sizeof(mapping.functionName));
         runtime.sourceMappings.push_back(mapping);
     }
+    runtime.sourceMetadataVersion = version;
+    runtime.sourceMetadataOffset = start;
+    runtime.sourceMetadataBytes = payload;
+    runtime.sourceMetadataChecksum = sourceMapU64(bytes, start + 32);
+    runtime.sourceMetadataFileCount = fileCount;
+    runtime.sourceMetadataFunctionCount = functionCount;
+    runtime.sourceMetadataMappingCount = mapCount;
+    runtime.sourceMetadataVariableCount = variableCount;
     runtime.sourceMetadataValid = true;
     return true;
 }
@@ -1040,6 +1077,28 @@ bool NativeAppDebugger::RegisterRuntime(NativeAppRuntimeContext& context,
         std::string sourceMapError;
         if (!parseSourceMappings(image, runtime, sourceMapError)) {
             Logger::write(LogLevel::Warn, "[NativeAppDebugger] GXSM metadata unavailable: " + sourceMapError);
+        }
+        {
+            std::ostringstream gxsmTrace;
+            gxsmTrace << "[NativeAppDebugger] GXSM validation process=" << context.processId
+                      << " native_runtime=" << context.runtimeId
+                      << " present="
+                      << (runtime.sourceMetadataPresent ? 1 : 0)
+                      << " valid=" << (runtime.sourceMetadataValid ? 1 : 0)
+                      << " version=" << runtime.sourceMetadataVersion
+                      << " trailer_offset=" << runtime.sourceMetadataOffset
+                      << " trailer_size=" << runtime.sourceMetadataBytes
+                      << " trailer_fnv1a64=0x" << std::hex << runtime.sourceMetadataChecksum << std::dec
+                      << " source_files=" << runtime.sourceMetadataFileCount
+                      << " functions=" << runtime.sourceMetadataFunctionCount
+                      << " source_records=" << runtime.sourceMetadataMappingCount
+                      << " variable_records=" << runtime.sourceMetadataVariableCount
+                      << " capacities=files:16,functions:256,mappings:256,variables:576"
+                      << " image_bytes=" << image.imageBytes.size()
+                      << " result=" << (runtime.sourceMetadataValid ? "accepted" :
+                           runtime.sourceMetadataPresent ? "rejected" : "absent");
+            Logger::write(runtime.sourceMetadataValid ? LogLevel::Info : LogLevel::Warn,
+                          gxsmTrace.str());
         }
 #ifdef _WIN32
         runtime.gateEvent = CreateEventA(nullptr, TRUE, gateExecution ? FALSE : TRUE, nullptr);
@@ -1845,11 +1904,10 @@ gx_result NativeAppDebugger::CallStack(const gx_development_debug_request& reque
     uint64_t normalizedRip = 0;
     bool stopped = false;
     if (runtime->trapObserved.load(std::memory_order_acquire)) {
-        if (runtime->trapInternalBreakpoint.load(std::memory_order_acquire)) {
-            setCallStackError(result, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_NO_PAUSED_CONTEXT,
-                              "internal debugger trap is not a user pause");
-            return GX_ERROR_FAILED;
-        }
+        // The active Step Over/Out guards above reject an in-flight internal
+        // trap. Once the controller has completed that operation and removed
+        // its temporary owner, the held trap context is the user's paused
+        // source stop and must remain inspectable until Continue.
         context = runtime->trapContext;
         normalizedRip = runtime->trapAddress.load(std::memory_order_acquire);
         stopped = true;
@@ -2126,11 +2184,10 @@ gx_result NativeAppDebugger::InspectVariables(
     uint64_t normalizedRip = 0;
     bool stopped = false;
     if (runtime->trapObserved.load(std::memory_order_acquire)) {
-        if (runtime->trapInternalBreakpoint.load(std::memory_order_acquire)) {
-            setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_NO_PAUSED_CONTEXT,
-                              "internal debugger trap is not a user pause");
-            return GX_ERROR_FAILED;
-        }
+        // The active Step Over/Out guards above reject an in-flight internal
+        // trap. After the controller completes the step, its temporary owner
+        // is removed but the exact trap context remains held at the user stop;
+        // generation and thread identity are checked below before any read.
         context = runtime->trapContext;
         normalizedRip = runtime->trapAddress.load(std::memory_order_acquire);
         stopped = true;
@@ -2263,11 +2320,55 @@ gx_result NativeAppDebugger::InspectVariables(
             : static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(raw)));
         target.availability = GX_DEVELOPMENT_DEBUG_VARIABLE_AVAILABILITY_AVAILABLE;
         target.flags |= GX_DEVELOPMENT_DEBUG_VARIABLE_VALUE_VALID;
+
+        std::ostringstream readTrace;
+        readTrace << "[NativeAppDebugger] GXSM variable read result=PASS"
+                  << " process=" << runtime->processId
+                  << " native_runtime=" << runtime->runtimeId
+                  << " session_gen=" << request.sessionGeneration
+                  << " stop_gen=" << request.stopGeneration
+                  << " thread=" << request.threadId
+                  << " frame=" << selectedFrameIndex
+                  << " pc=0x" << std::hex << selectedRip
+                  << " rbp=0x" << selectedRbp << std::dec
+                  << " function=" << source.functionName
+                  << " source=" << source.sourcePath << ':' << source.declaration.line
+                  << " name=" << source.name
+                  << " type=" << (source.type == kernel::compiler::DebugVariableTypeKind::Pointer
+                                      ? "pointer" : "signed_i32")
+                  << " location=rbp_relative"
+                  << " frame_offset=" << source.frameOffset
+                  << " width=" << source.sizeBytes
+                  << " live_pc=" << source.liveStart << '-' << source.liveEnd
+                  << " address=0x" << std::hex << (selectedRbp - magnitude) << std::dec
+                  << " raw_bytes=";
+        static const char hexDigits[] = "0123456789ABCDEF";
+        for (uint32_t byte = 0; byte < source.sizeBytes; ++byte) {
+            if (byte != 0) readTrace << ' ';
+            readTrace << hexDigits[bytes[byte] >> 4] << hexDigits[bytes[byte] & 0x0F];
+        }
+        readTrace << " raw=0x" << std::hex << raw << std::dec
+                  << " signed_value=" << target.signedValue;
+        Logger::write(LogLevel::Info, readTrace.str());
     }
     result->variableCount = variableCount;
     result->truncated = truncated;
     result->status = truncated ? GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_TRUNCATED
                                : GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_SUCCESS;
+    {
+        std::ostringstream parseTrace;
+        parseTrace << "[NativeAppDebugger] GXSM variables accepted=1"
+                   << " version=" << runtime->sourceMetadataVersion
+                   << " records_header=" << runtime->sourceMetadataVariableCount
+                   << " records_resolved=" << variableCount
+                   << " records_truncated=" << truncated
+                   << " function=" << result->functionName
+                   << " pc=0x" << std::hex << selectedRip << std::dec
+                   << " session_gen=" << request.sessionGeneration
+                   << " stop_gen=" << request.stopGeneration
+                   << " frame=" << selectedFrameIndex;
+        Logger::write(LogLevel::Info, parseTrace.str());
+    }
     return GX_OK;
 }
 

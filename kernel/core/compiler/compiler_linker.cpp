@@ -148,6 +148,17 @@ static bool valid_linker_data_signature(SymbolKind kind, uint16_t elementCount, 
 bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                   LinkedProgram* output, Diagnostics& diagnostics)
 {
+    return link_modules(modules, moduleCount, output, diagnostics, BOOTSTRAP_IMAGE_BASE);
+}
+
+bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
+                  LinkedProgram* output, Diagnostics& diagnostics, uint64_t imageBase)
+{
+    if (imageBase == 0 || (imageBase & 0xFFFU) != 0 ||
+        imageBase > ~static_cast<uint64_t>(0) - BOOTSTRAP_MAX_ELF_BYTES) {
+        diagnostics.error(SourceLocation{}, "link image base must be page-aligned and leave room for the bounded ELF", "linker");
+        return false;
+    }
     if (!modules || !output || moduleCount == 0 || moduleCount > COMPILER_MAX_TRANSLATION_UNITS) {
         diagnostics.error((SourceLocation){0, 1, 1},
                           "linker module count exceeds bounded project limit", "linker");
@@ -631,9 +642,9 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                 }
                 if (output->exports[targetIndex].kind != SymbolKind::Function)
                     return report_kind_conflict(relocation.location, relocation.targetSymbolName, diagnostics);
-                const uint64_t targetAddress = BOOTSTRAP_IMAGE_BASE + BOOTSTRAP_CODE_OFFSET +
+                const uint64_t targetAddress = imageBase + BOOTSTRAP_CODE_OFFSET +
                     output->exports[targetIndex].finalCodeOffset;
-                const uint64_t afterCall = BOOTSTRAP_IMAGE_BASE + BOOTSTRAP_CODE_OFFSET + finalPatch + 4U;
+                const uint64_t afterCall = imageBase + BOOTSTRAP_CODE_OFFSET + finalPatch + 4U;
                 int32_t displacement = 0;
                 if (!calculate_rel32(targetAddress, afterCall, &displacement) ||
                     !patch_u32(output->code, output->codeBytes, finalPatch, displacement)) {
@@ -647,7 +658,7 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                     relocation.dataOffset > output->dataBytes - moduleDataOffsets[m] ||
                     output->dataBytes - moduleDataOffsets[m] - relocation.dataOffset < 1U ||
                     !patch_u64(output->code, output->codeBytes, finalPatch,
-                               BOOTSTRAP_IMAGE_BASE + output->dataFileOffset +
+                               imageBase + output->dataFileOffset +
                                moduleDataOffsets[m] + relocation.dataOffset)) {
                     diagnostics.error(relocation.location, "DataAddress64 relocation is invalid", "relocation");
                     return false;
@@ -662,7 +673,7 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                 if (!symbol_is_data(output->exports[targetIndex].kind) ||
                     output->mutableDataFileOffset == 0 ||
                     !patch_u64(output->code, output->codeBytes, finalPatch,
-                               BOOTSTRAP_IMAGE_BASE + output->mutableDataFileOffset +
+                               imageBase + output->mutableDataFileOffset +
                                output->exports[targetIndex].finalDataOffset)) {
                     diagnostics.error(relocation.location, "GlobalDataAddress64 relocation is invalid", "relocation");
                     return false;

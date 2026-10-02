@@ -1,6 +1,7 @@
 #include "native_build_service.h"
 
 #include "logger.h"
+#include "kernel/core/compiler/elf_writer.h"
 
 #include <algorithm>
 #include <atomic>
@@ -40,6 +41,61 @@ constexpr char kTargetProfile[] = "guidexos.amd64.hosted.native";
 constexpr char kBuildScript[] = "build.ps1";
 constexpr char kConfiguration[] = "Debug";
 constexpr char kDebugSymbolsConfiguration[] = "DebugSymbols";
+
+uint16_t readU16(const unsigned char* bytes, size_t offset) {
+    return static_cast<uint16_t>(bytes[offset]) |
+        static_cast<uint16_t>(static_cast<uint16_t>(bytes[offset + 1]) << 8);
+}
+
+uint32_t readU32(const unsigned char* bytes, size_t offset) {
+    return static_cast<uint32_t>(bytes[offset]) |
+        (static_cast<uint32_t>(bytes[offset + 1]) << 8) |
+        (static_cast<uint32_t>(bytes[offset + 2]) << 16) |
+        (static_cast<uint32_t>(bytes[offset + 3]) << 24);
+}
+
+uint64_t readU64(const unsigned char* bytes, size_t offset) {
+    uint64_t value = 0;
+    for (uint32_t i = 0; i < 8; ++i) value |= static_cast<uint64_t>(bytes[offset + i]) << (i * 8);
+    return value;
+}
+
+bool hasBootstrapEntryPoint(const std::vector<unsigned char>& bytes) {
+    if (bytes.size() < 64) return false;
+    const uint64_t entryPoint = readU64(bytes.data(), 24);
+    const uint64_t programHeaderOffset = readU64(bytes.data(), 32);
+    const uint16_t programHeaderBytes = readU16(bytes.data(), 54);
+    const uint16_t programHeaderCount = readU16(bytes.data(), 56);
+    if (programHeaderBytes < 56 || programHeaderOffset > bytes.size() ||
+        programHeaderCount > (bytes.size() - programHeaderOffset) / programHeaderBytes) return false;
+    uint64_t imageBase = 0;
+    for (uint16_t index = 0; index < programHeaderCount; ++index) {
+        const size_t offset = static_cast<size_t>(programHeaderOffset +
+            static_cast<uint64_t>(index) * programHeaderBytes);
+        if (readU32(bytes.data(), offset) != 1 || readU64(bytes.data(), offset + 8) != 0) continue;
+        const uint32_t flags = readU32(bytes.data(), offset + 4);
+        if ((flags & 1U) == 0) continue;
+        imageBase = readU64(bytes.data(), offset + 16);
+        break;
+    }
+    if (imageBase == 0 || (imageBase & 0xFFFU) != 0 ||
+        imageBase > std::numeric_limits<uint64_t>::max() - kernel::compiler::BOOTSTRAP_CODE_OFFSET) return false;
+    const uint64_t firstCodeAddress = imageBase + kernel::compiler::BOOTSTRAP_CODE_OFFSET;
+    if (entryPoint < firstCodeAddress || entryPoint - firstCodeAddress > UINT32_MAX) return false;
+
+    // The supported bootstrap writer emits a sectionless ET_EXEC image and
+    // records its canonical entry in e_entry. Reuse its production ELF
+    // validator to check the entry against the executable PT_LOAD and the
+    // bootstrap load layout instead of requiring a section table it does not
+    // emit.
+    kernel::compiler::ElfValidationResult validation = {};
+    return kernel::compiler::validate_bootstrap_elf(
+        bytes.data(), static_cast<uint32_t>(bytes.size()),
+        imageBase,
+        kernel::compiler::BOOTSTRAP_CODE_OFFSET, nullptr, 0,
+        &validation, nullptr, 0, nullptr, 0,
+        static_cast<uint32_t>(entryPoint - firstCodeAddress));
+}
 
 struct CapturedLine {
     uint32_t stream = 0;
@@ -549,10 +605,10 @@ bool validateArtifact(const std::shared_ptr<BuildJob>& job) {
     const uint16_t machine = static_cast<uint16_t>(bytes[18] | (bytes[19] << 8));
     if (machine != 62) { setFailure(job, GX_BUILD_ERROR_ARTIFACT_WRONG_ARCHITECTURE); return false; }
     if (type != 2) { setFailure(job, GX_BUILD_ERROR_ARTIFACT_INVALID); return false; }
-    const uint64_t shoff = *reinterpret_cast<const uint64_t*>(&bytes[40]);
-    const uint16_t shentsize = static_cast<uint16_t>(bytes[58] | (bytes[59] << 8));
-    const uint16_t shnum = static_cast<uint16_t>(bytes[60] | (bytes[61] << 8));
-    const uint16_t shstrndx = static_cast<uint16_t>(bytes[62] | (bytes[63] << 8));
+    const uint64_t shoff = readU64(bytes.data(), 40);
+    const uint16_t shentsize = readU16(bytes.data(), 58);
+    const uint16_t shnum = readU16(bytes.data(), 60);
+    const uint16_t shstrndx = readU16(bytes.data(), 62);
     bool entryPoint = false;
     if (shentsize >= 64 && shnum > 0 && shoff <= bytes.size() && shnum <= (bytes.size() - shoff) / shentsize && shstrndx < shnum) {
         const unsigned char* shstr = &bytes[shoff + static_cast<uint64_t>(shstrndx) * shentsize];
@@ -583,6 +639,7 @@ bool validateArtifact(const std::shared_ptr<BuildJob>& job) {
             if (entryPoint) break;
         }
     }
+    if (!entryPoint) entryPoint = hasBootstrapEntryPoint(bytes);
     Sha256 sha;
     sha.update(&bytes[0], bytes.size());
     std::lock_guard<std::mutex> lock(job->mutex);

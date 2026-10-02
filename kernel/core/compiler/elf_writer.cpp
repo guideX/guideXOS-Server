@@ -780,7 +780,26 @@ bool write_bootstrap_elf(const uint8_t* code,
                          uint32_t outputCapacity,
                          ElfLayout* layout)
 {
+    return write_bootstrap_elf(code, codeBytes, readOnlyData, readOnlyDataBytes,
+                               mutableData, mutableDataBytes, entryCodeOffset,
+                               BOOTSTRAP_IMAGE_BASE, output, outputCapacity, layout);
+}
+
+bool write_bootstrap_elf(const uint8_t* code,
+                         uint32_t codeBytes,
+                         const uint8_t* readOnlyData,
+                         uint32_t readOnlyDataBytes,
+                         const uint8_t* mutableData,
+                         uint32_t mutableDataBytes,
+                         uint32_t entryCodeOffset,
+                         uint64_t imageBase,
+                         uint8_t* output,
+                         uint32_t outputCapacity,
+                         ElfLayout* layout)
+{
     if (!code || !output || !layout || codeBytes == 0 || entryCodeOffset >= codeBytes ||
+        imageBase == 0 || (imageBase & 0xFFFU) != 0 ||
+        imageBase > ~static_cast<uint64_t>(0) - BOOTSTRAP_MAX_ELF_BYTES ||
         readOnlyDataBytes > BOOTSTRAP_DATA_BYTES_LIMIT || mutableDataBytes > BOOTSTRAP_DATA_BYTES_LIMIT ||
         (readOnlyDataBytes != 0 && !readOnlyData) || (mutableDataBytes != 0 && !mutableData)) return false;
 
@@ -804,7 +823,7 @@ bool write_bootstrap_elf(const uint8_t* code,
         return false;
 
     uint64_t entryPoint = 0;
-    if (!add_u64(BOOTSTRAP_IMAGE_BASE, BOOTSTRAP_CODE_OFFSET + entryCodeOffset, &entryPoint)) return false;
+    if (!add_u64(imageBase, BOOTSTRAP_CODE_OFFSET + entryCodeOffset, &entryPoint)) return false;
 
     clear_bytes(output, outputBytes);
     output[0] = 0x7F;
@@ -835,8 +854,8 @@ bool write_bootstrap_elf(const uint8_t* code,
     put_u32(output, codePh + 0, PROGRAM_TYPE_LOAD);
     put_u32(output, codePh + 4, PROGRAM_FLAGS_READABLE | PROGRAM_FLAGS_EXECUTABLE);
     put_u64(output, codePh + 8, 0);
-    put_u64(output, codePh + 16, BOOTSTRAP_IMAGE_BASE);
-    put_u64(output, codePh + 24, BOOTSTRAP_IMAGE_BASE);
+    put_u64(output, codePh + 16, imageBase);
+    put_u64(output, codePh + 24, imageBase);
     put_u64(output, codePh + 32, codeFileEnd);
     put_u64(output, codePh + 40, codeFileEnd);
     put_u64(output, codePh + 48, SEGMENT_ALIGNMENT);
@@ -847,8 +866,8 @@ bool write_bootstrap_elf(const uint8_t* code,
         put_u32(output, nextPh + 0, PROGRAM_TYPE_LOAD);
         put_u32(output, nextPh + 4, PROGRAM_FLAGS_READABLE);
         put_u64(output, nextPh + 8, rodataOffset);
-        put_u64(output, nextPh + 16, BOOTSTRAP_IMAGE_BASE + rodataOffset);
-        put_u64(output, nextPh + 24, BOOTSTRAP_IMAGE_BASE + rodataOffset);
+        put_u64(output, nextPh + 16, imageBase + rodataOffset);
+        put_u64(output, nextPh + 24, imageBase + rodataOffset);
         put_u64(output, nextPh + 32, readOnlyDataBytes);
         put_u64(output, nextPh + 40, readOnlyDataBytes);
         put_u64(output, nextPh + 48, SEGMENT_ALIGNMENT);
@@ -859,24 +878,24 @@ bool write_bootstrap_elf(const uint8_t* code,
         put_u32(output, nextPh + 0, PROGRAM_TYPE_LOAD);
         put_u32(output, nextPh + 4, PROGRAM_FLAGS_READABLE | PROGRAM_FLAGS_WRITABLE);
         put_u64(output, nextPh + 8, mutableDataOffset);
-        put_u64(output, nextPh + 16, BOOTSTRAP_IMAGE_BASE + mutableDataOffset);
-        put_u64(output, nextPh + 24, BOOTSTRAP_IMAGE_BASE + mutableDataOffset);
+        put_u64(output, nextPh + 16, imageBase + mutableDataOffset);
+        put_u64(output, nextPh + 24, imageBase + mutableDataOffset);
         put_u64(output, nextPh + 32, mutableDataBytes);
         put_u64(output, nextPh + 40, mutableDataBytes);
         put_u64(output, nextPh + 48, SEGMENT_ALIGNMENT);
         for (uint32_t i = 0; i < mutableDataBytes; ++i) output[mutableDataOffset + i] = mutableData[i];
     }
 
-    layout->imageBase = BOOTSTRAP_IMAGE_BASE;
+    layout->imageBase = imageBase;
     layout->entryPoint = entryPoint;
     layout->codeOffset = BOOTSTRAP_CODE_OFFSET;
     layout->codeBytes = codeBytes;
     layout->entryCodeOffset = entryCodeOffset;
     layout->dataOffset = rodataOffset;
-    layout->dataAddress = readOnlyDataBytes == 0 ? 0 : BOOTSTRAP_IMAGE_BASE + rodataOffset;
+    layout->dataAddress = readOnlyDataBytes == 0 ? 0 : imageBase + rodataOffset;
     layout->dataBytes = readOnlyDataBytes;
     layout->mutableDataOffset = mutableDataOffset;
-    layout->mutableDataAddress = mutableDataBytes == 0 ? 0 : BOOTSTRAP_IMAGE_BASE + mutableDataOffset;
+    layout->mutableDataAddress = mutableDataBytes == 0 ? 0 : imageBase + mutableDataOffset;
     layout->mutableDataBytes = mutableDataBytes;
     layout->outputBytes = outputBytes;
     return true;
