@@ -341,6 +341,24 @@ public sealed class GuideXosTextArea
         UpdateCurrentHistoryCaret();
     }
 
+#if HOSTLOGPROOF_C155_MANAGED_NOTES_SESSION
+    /// <summary>
+    /// Restores bounded logical view state after a whole-document baseline has
+    /// been loaded. The requested top line is clamped first; the viewport then
+    /// moves only when needed to make the restored caret visible.
+    /// </summary>
+    public void RestoreSessionPosition(int caretIndex, int anchorIndex,
+        int firstVisibleLine)
+    {
+        _caretIndex = Math.Clamp(caretIndex, 0, _length);
+        _anchorIndex = Math.Clamp(anchorIndex, 0, _length);
+        _preferredColumn = -1;
+        _viewport.SetOffset(firstVisibleLine);
+        EnsureCaretVisible();
+        UpdateCurrentHistoryCaret();
+    }
+#endif
+
     /// <summary>Restores the preceding content revision, if one is retained.</summary>
     public GuideXosTextAreaEditResult Undo()
     {

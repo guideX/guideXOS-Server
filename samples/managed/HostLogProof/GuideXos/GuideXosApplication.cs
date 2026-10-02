@@ -141,6 +141,27 @@ public static unsafe class GuideXosApplicationRegistry
             return GxAbi.ErrorInvalidApplicationId;
         }
 
+#if HOSTLOGPROOF_C155_MANAGED_NOTES_SESSION
+        // C150 may need to discard a pending semantic session after Notes was
+        // destroyed. This host-owned one-shot operation intentionally runs
+        // before the resident application lifetime lookup.
+        if (selector == 4u && host.IsAction &&
+            host.LaunchContext.ActionId ==
+                GuideXosNotesReturnSessionC155.NativeClearActionId)
+        {
+            GuideXosNotesReturnSessionC155.Shared.Clear();
+            host.TryLog("C155-SESSION-CLEAR pending=none result=PASS"u8);
+            return (int)GuideXosResult.Success;
+        }
+        if (selector == 4u && host.IsAction &&
+            host.LaunchContext.ActionId ==
+                GuideXosNotesReturnSessionC155.NativeCheckActionId)
+        {
+            return GuideXosNotesReturnSessionC155.Shared.IsPending
+                ? (int)GuideXosResult.Success : (int)GuideXosResult.InvalidAction;
+        }
+#endif
+
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
         // The shared loader runs before the first managed application launch
         // or input callback; Settings Center is only one consumer of state.

@@ -100,6 +100,10 @@ constexpr uint32_t kManagedNotesCloseRequestActionId = 26u;
 constexpr int32_t kManagedNotesCloseAllowed = 0xC15200;
 constexpr int32_t kManagedNotesCloseReady = 0xC15201;
 constexpr int32_t kManagedNotesSettingsReady = 0xC15202;
+#if defined(GXOS_NATIVEAOT_C155_MANAGED_NOTES_SESSION)
+constexpr uint32_t kManagedNotesSessionClearActionId = 0xC15506u;
+constexpr uint32_t kManagedNotesSessionCheckActionId = 0xC15507u;
+#endif
 #endif
 constexpr const char* kManagedNotesApplicationId =
     "com.guidexos.apps.managed.notes";
@@ -1113,6 +1117,15 @@ NativeAotManagedSurface* managedSurface() {
 }
 
 #if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+#if defined(GXOS_NATIVEAOT_C155_MANAGED_NOTES_SESSION)
+void clearManagedNotesReturnSession() {
+    const int32_t result = invokeManagedAction(4u,
+        kManagedNotesSessionClearActionId);
+    serial::puts("[C155-SESSION-CLEAR-REQUEST] result=");
+    serial::puts(result == 0 ? "PASS\n" : "FAIL\n");
+}
+#endif
+
 bool launchSettingsCenterFromNotes() {
     const gxos::apps::BuiltInAppMetadata* notes =
         gxos::apps::FindManagedNativeAotAppByIdentity(kManagedNotesApplicationId);
@@ -1125,12 +1138,25 @@ bool launchSettingsCenterFromNotes() {
         !ManagedReturnTarget::identityEquals(
             g_managedActiveApplicationId, notes->appId) ||
         !surface || !surface->activeApplicationIs(notes->appId)) {
+#if defined(GXOS_NATIVEAOT_C155_MANAGED_NOTES_SESSION)
+        clearManagedNotesReturnSession();
+#endif
 #if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
         serial::puts("[C150-CALLER-REJECTED] reason=identity-or-surface-invalid\n");
 #endif
         return false;
     }
+#if defined(GXOS_NATIVEAOT_C155_MANAGED_NOTES_SESSION)
+    if (invokeManagedAction(4u, kManagedNotesSessionCheckActionId) != 0) {
+        clearManagedNotesReturnSession();
+        serial::puts("[C155-RETURN-PAIR] target=Notes session=missing result=FAIL\n");
+        return false;
+    }
+#endif
     if (!g_managedReturnTarget.set(notes->appId, true, settings->appId)) {
+#if defined(GXOS_NATIVEAOT_C155_MANAGED_NOTES_SESSION)
+        clearManagedNotesReturnSession();
+#endif
 #if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
         serial::puts("[C150-CALLER-REJECTED] reason=return-target-occupied-or-invalid\n");
 #endif
@@ -1140,6 +1166,9 @@ bool launchSettingsCenterFromNotes() {
     serial::puts("[C150-RETURN-ARMED] id=");
     serial::puts(g_managedReturnTarget.identity());
     serial::puts(" capacity=1\n");
+#endif
+#if defined(GXOS_NATIVEAOT_C155_MANAGED_NOTES_SESSION)
+    serial::puts("[C155-RETURN-PAIR] target=Notes session=armed result=PASS\n");
 #endif
 
     g_managedLaunchingSettingsFromNotes = true;
@@ -1155,6 +1184,9 @@ bool launchSettingsCenterFromNotes() {
 
     g_managedReturnTarget.clear();
     g_managedReturnLaunchPending = false;
+#if defined(GXOS_NATIVEAOT_C155_MANAGED_NOTES_SESSION)
+    clearManagedNotesReturnSession();
+#endif
     if (!surface->activeApplicationIs(notes->appId)) {
         if (surface->windowId() != 0u) surface->requestClose();
         clearManagedActiveApplicationId();
@@ -1179,6 +1211,9 @@ void completeManagedReturnIfPending() {
     const bool valid = target && settings && managedIdentityResolvable(identity) &&
         !ManagedReturnTarget::identityEquals(identity, settings->appId);
     if (!valid) {
+#if defined(GXOS_NATIVEAOT_C155_MANAGED_NOTES_SESSION)
+        clearManagedNotesReturnSession();
+#endif
 #if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
         serial::puts("[C150-RETURN-FAIL] reason=invalid-or-self-identity fallback=shell\n");
 #endif
@@ -1188,6 +1223,14 @@ void completeManagedReturnIfPending() {
         desktop::open_terminal();
         return;
     }
+
+#if defined(GXOS_NATIVEAOT_C155_MANAGED_NOTES_SESSION)
+    if (!ManagedReturnTarget::identityEquals(
+            identity, kManagedNotesApplicationId)) {
+        clearManagedNotesReturnSession();
+        serial::puts("[C155-RETURN-PAIR] target=other session=discarded result=PASS\n");
+    }
+#endif
 
 #if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
     serial::puts("[C150-RETURN-CONSUMED] id=");
@@ -1211,6 +1254,9 @@ void completeManagedReturnIfPending() {
         return;
     }
 
+#if defined(GXOS_NATIVEAOT_C155_MANAGED_NOTES_SESSION)
+    clearManagedNotesReturnSession();
+#endif
     NativeAotManagedSurface* surface = managedSurface();
     if (surface && surface->windowId() != 0u) surface->requestClose();
     clearManagedActiveApplicationId();

@@ -259,6 +259,10 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C154_MANAGED_CLIPBOARD</DefineConstants>
     <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
   </PropertyGroup>
+
+  <PropertyGroup Condition="'$(HostLogProofC155ManagedNotesSession)' == 'true'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C155_MANAGED_NOTES_SESSION</DefineConstants>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(HostLogProofC134IncludeFocusedTests)' == 'true'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C134_TRANSIENT_POPUP_ROUTING;HOSTLOGPROOF_C134_HOST_TESTS</DefineConstants>
   </PropertyGroup>

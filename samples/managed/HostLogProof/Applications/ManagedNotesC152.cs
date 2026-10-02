@@ -67,6 +67,9 @@ public sealed partial class ManagedNotes
                 return true;
             case 24u:
 #if HOSTLOGPROOF_MANAGED_APP_RETURN
+#if HOSTLOGPROOF_C155_MANAGED_NOTES_SESSION
+                GuideXosNotesReturnSessionC155.Shared.Clear();
+#endif
                 if (_c152DocumentState.Dirty)
                 {
                     result = OpenC152DirtyPrompt(host, surface,
@@ -75,6 +78,14 @@ public sealed partial class ManagedNotes
                         result = GuideXosResult.InvalidAction;
                     return true;
                 }
+#if HOSTLOGPROOF_C155_MANAGED_NOTES_SESSION
+                if (!TryArmC155ReturnSession(host,
+                        GuideXosNotesSessionDecisionC155.Clean))
+                {
+                    result = GuideXosResult.InvalidArgument;
+                    return true;
+                }
+#endif
                 host.TryLog("C150-CALLER id=Notes command=SettingsCenter"u8);
                 result = GuideXosResult.Success;
                 return true;
@@ -302,6 +313,15 @@ public sealed partial class ManagedNotes
             host.TryLog(operation == C152PendingOperation.Close
                 ? "C152-CLOSE dirty-decision=Discard dispatch=accepted result=PASS"u8
                 : "C152-SETTINGS dirty-decision=Discard dispatch=deferred result=PASS"u8);
+#if HOSTLOGPROOF_C155_MANAGED_NOTES_SESSION
+            if (operation == C152PendingOperation.Settings)
+            {
+                return TryArmC155ReturnSession(host,
+                        GuideXosNotesSessionDecisionC155.Discarded)
+                    ? (GuideXosResult)ManagedNotesC152Returns.SettingsReady
+                    : GuideXosResult.Success;
+            }
+#endif
             return operation == C152PendingOperation.Close
                 ? (GuideXosResult)ManagedNotesC152Returns.CloseReady
                 : operation == C152PendingOperation.Settings
@@ -437,7 +457,16 @@ public sealed partial class ManagedNotes
         if (operation == C152PendingOperation.Close)
             return (GuideXosResult)ManagedNotesC152Returns.CloseReady;
         if (operation == C152PendingOperation.Settings)
+#if HOSTLOGPROOF_C155_MANAGED_NOTES_SESSION
+        {
+            return TryArmC155ReturnSession(host,
+                    GuideXosNotesSessionDecisionC155.Saved)
+                ? (GuideXosResult)ManagedNotesC152Returns.SettingsReady
+                : GuideXosResult.Success;
+        }
+#else
             return (GuideXosResult)ManagedNotesC152Returns.SettingsReady;
+#endif
         return GuideXosResult.Success;
     }
 
