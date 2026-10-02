@@ -1,12 +1,18 @@
 # guideXOS App Model Current-State Map
 
-Status: Phase 10 current state (2026-10-02). The Phase 5A/5B material below is historical; see [Phase 10 Developer Studio document activation](APPMODEL_PHASE10_DEVELOPER_STUDIO_DOCUMENT_ACTIVATION.md) for the first real additional document-capable application, [Phase 9 Settings Default Apps](APPMODEL_PHASE9_SETTINGS_DEFAULT_APPS.md) for the Settings surface and validation, [Phase 8 default-app persistence](APPMODEL_PHASE8_DEFAULT_APP_PERSISTENCE.md) for the authoritative machine-global override owner and API, [Phase 7 capable handlers and Open With](APPMODEL_PHASE7_OPEN_WITH.md) for handler selection, and [Phase 6 file associations and document activation](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md) for the original owned-path contract.
+Status: Phase 11 current state (2026-10-02). The Phase 5A/5B material below is historical; see [Phase 11 ImageViewer PNG activation](APPMODEL_PHASE11_IMAGEVIEWER_DOCUMENT_ACTIVATION.md) for the hosted PNG migration, [Phase 10 Developer Studio document activation](APPMODEL_PHASE10_DEVELOPER_STUDIO_DOCUMENT_ACTIVATION.md) for NativeElf activation, [Phase 9 Settings Default Apps](APPMODEL_PHASE9_SETTINGS_DEFAULT_APPS.md) for the Settings surface, [Phase 8 default-app persistence](APPMODEL_PHASE8_DEFAULT_APP_PERSISTENCE.md) for the machine-global override owner, [Phase 7 capable handlers and Open With](APPMODEL_PHASE7_OPEN_WITH.md) for handler selection, and [Phase 6 file associations and document activation](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md) for the original owned-path contract.
 
 ## Phase 10 current document-handler state
 
 Developer Studio keeps its existing canonical ID `com.guidexos.developerstudio` and declares `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hh`, `.hpp`, `.hxx`, and `.txt` through the ordinary manifest/AppRegistry capability path. The shared NativeElf ABI now returns an owned document path copy to the launched process; Developer Studio validates the declared extension and opens it through its normal workspace document loader. `.txt` is the first real competing production type: Notepad remains the built-in default, while Developer Studio appears automatically in Open With and Default Apps when the hosted NativeElf backend is available. The ordinary `build.bat` keeps that experimental backend unavailable; `build-native-experimental.bat` is required for real hosted NativeElf activation.
 
 See the [Phase 10 report](APPMODEL_PHASE10_DEVELOPER_STUDIO_DOCUMENT_ACTIVATION.md) for ownership, file/path bounds, runtime routing, Default Apps policy, validation results, and the bounded experimental-backend gate.
+
+## Phase 11 current document-handler state
+
+Hosted ImageViewer keeps its canonical ID `gxos.builtin.imageviewer` and now declares `.png` through AppRegistry. A reusable built-in document dispatcher passes the same owned `AppActivationContext` contract used by the other handlers. File Explorer normal Open resolves the effective `.png` default through AppRegistry; Open With and Settings Default Apps enumerate the capability and default data. The built-in/effective handler is ImageViewer and there is no configured `.png` override. The old direct image route remains only for `.bmp`, `.jpg`, `.jpeg`, and `.gif`.
+
+ImageViewer consumes the owned path through its existing hosted PNG adapter/decoder. Its current process-static state supports one active window at a time, so concurrent launches are rejected and close releases image and path state before a later activation. See the [Phase 11 report](APPMODEL_PHASE11_IMAGEVIEWER_DOCUMENT_ACTIVATION.md) for the legacy baseline, exact runtime proof, bounds, malformed-file behavior, other formats audited, regressions, and hosted/bare-metal boundary.
 
 This document maps the app model as it exists in the repository today. It is intended to ground future GXApp runtime work without rewriting or destabilizing current launch behavior.
 
@@ -85,7 +91,7 @@ Hosted mode has a real manifest data model:
 - Native App Debug Viewer
 - HDInstaller
 
-This lets hosted UI surfaces use a manifest-shaped registry even though actual built-in launch still uses hardcoded dispatch.
+This lets hosted UI surfaces use a manifest-shaped registry. Ordinary app launches still use built-in dispatch, while document-capable built-ins such as Notepad and ImageViewer enter through the canonical App Model document dispatcher.
 
 ### 2.3 App ID ownership convention
 
@@ -130,6 +136,8 @@ App Model v1.x closure:
 - v1.7 promotes `Clock`.
 - `Paint` still requires bare-metal implementation before typed-ready promotion.
 - `ImageViewer` remains deferred until active Image Viewer stabilization is complete.
+
+That Phase 2 deferral is historical. Phase 11 promotes the hosted ImageViewer `.png` document capability; bare-metal `ImageViewerApp` remains a separate path.
 
 Both should be revisited during Phase 2 launch-resolution cleanup. That pass should decide whether aliases become explicit app-model launch aliases, shell commands, or another typed launch target while preserving existing user-visible shortcuts.
 
@@ -276,8 +284,8 @@ Status: hosted only
   - `openDesktopItem()` calls `DesktopService::OpenFilesystemEntry()`
 - `desktop_service.cpp`
   - directories -> `FileExplorer::Launch(path)`
-  - text-like files -> `Notepad::LaunchWithFile(path)`
-  - image-like files -> `ImageViewer::Launch(path)`
+  - AppRegistry document activation -> the effective canonical handler (Notepad, Developer Studio when its experimental hosted backend is enabled, or ImageViewer for `.png`)
+  - legacy image fallback -> `ImageViewer::Launch(path)` for `.bmp`, `.jpg`, `.jpeg`, and `.gif`
 
 Status: hosted only
 
@@ -836,9 +844,9 @@ This is the final App Model v1 closeout state.
 - `appModelV1RecentProgramsAligned=true`
 - `appModelV1RiskyDestructiveTargetsExcluded=true`
 - `appModelV1TrashOpenOnlyBoundary=true`
-- `appModelV1ImagesRemainLegacy=true`
+- `appModelV1ImagesRemainLegacy=true` (current hosted legacy rows are `.bmp`, `.jpg`, `.jpeg`, and `.gif`; `.png` moved to AppRegistry in Phase 11)
 - `appModelV1OutOfScopeBoundary=true`
-- `appModelV1OutOfScopeScope=GXAppExecution|ELFLoading|PackageInstall|Sandboxing|Permissions|IDEBehavior|OpenWith|AppStore|UninstallUpdateLifecycle|TrashDestructiveActions|ImageActiveDispatchOwnership`
+- `appModelV1OutOfScopeScope=GXAppExecution|ELFLoading|PackageInstall|Sandboxing|Permissions|IDEBehavior|OpenWith|AppStore|UninstallUpdateLifecycle|TrashDestructiveActions`
 
 `desktop.appmodel.inventory` is the compact read-only inventory dump. It lists:
 

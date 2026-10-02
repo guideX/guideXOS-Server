@@ -231,7 +231,7 @@ This file exists only to prove temporary smoke artifacts are cleaned up.
     Assert-Contains $inventoryOutput "recentProgramPolicy:" "phase 5A inventory recent-program policy"
     Assert-Contains $inventoryOutput "aligned=true" "phase 5A inventory recent-program alignment"
     Assert-Contains $inventoryOutput "fallbackExclusions:" "phase 5A inventory fallback exclusions"
-    Assert-Contains $inventoryOutput "core=GXAppExecution|ELFLoading|PackageInstall|Sandboxing|Permissions|IDEBehavior|OpenWith|AppStore|UninstallUpdateLifecycle|TrashDestructiveActions|ImageActiveDispatchOwnership" "phase 5A inventory out-of-scope boundary"
+    Assert-Contains $inventoryOutput "core=GXAppExecution|ELFLoading|PackageInstall|Sandboxing|Permissions|IDEBehavior|OpenWith|AppStore|UninstallUpdateLifecycle|TrashDestructiveActions" "phase 5A inventory out-of-scope boundary"
     Assert-Contains $inventoryOutput "legacyFallbacks=AppModel|ComputerFiles|Image Viewer|ImgViewer" "phase 5A inventory legacy fallback list"
     Assert-Contains $inventoryOutput "builtInApps:" "phase 5A inventory built-ins"
     Assert-Contains $inventoryOutput "shellObjects:" "phase 5A inventory shell objects"

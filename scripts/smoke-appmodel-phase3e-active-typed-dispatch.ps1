@@ -256,8 +256,8 @@ This file intentionally uses an unsupported extension.
         @{ Name = "FileExplorer"; Pattern = '\[AppModelActiveTypedDispatch\] source=HostedDesktopService request=FileExplorer classification=BuiltInApp'; Reason = "File Explorer repeated launches"; ExpectedCount = 2 },
         @{ Name = "Files"; Pattern = '\[AppModelActiveTypedDispatch\] source=HostedDesktopService request=Files classification=BuiltInApp'; Reason = "Files repeated launches"; ExpectedCount = 2 },
         @{ Name = "Console"; Pattern = '\[AppModelActiveTypedDispatch\] source=HostedDesktopService request=Console classification=BuiltInApp'; Reason = "Console repeated launches"; ExpectedCount = 2 },
-        @{ Name = "Settings"; Pattern = '\[AppModelActiveTypedDispatch\] source=HostedDesktopService request=Settings classification=ShellAction'; Reason = "Settings repeated launches"; ExpectedCount = 2 },
-        @{ Name = "System Settings"; Pattern = '\[AppModelActiveTypedDispatch\] source=HostedDesktopService request=System Settings classification=ShellAction'; Reason = "System Settings repeated launches"; ExpectedCount = 2 },
+        @{ Name = "Settings"; Pattern = '\[AppModelActiveTypedDispatch\] source=HostedDesktopService request=Settings classification=BuiltInApp'; Reason = "Settings repeated launches"; ExpectedCount = 2 },
+        @{ Name = "System Settings"; Pattern = '\[AppModelActiveTypedDispatch\] source=HostedDesktopService request=System Settings classification=BuiltInApp'; Reason = "System Settings repeated launches"; ExpectedCount = 2 },
         @{ Name = "Control Panel"; Pattern = '\[AppModelActiveTypedDispatch\] source=HostedDesktopService request=Control Panel classification=ShellAction'; Reason = "Control Panel repeated launches"; ExpectedCount = 2 },
         @{ Name = "Calculator"; Pattern = '\[AppModelActiveTypedDispatch\] source=HostedDesktopService request=Calculator classification=BuiltInApp'; Reason = "Calculator repeated launches"; ExpectedCount = 2 },
         @{ Name = "Clock"; Pattern = '\[AppModelActiveTypedDispatch\] source=HostedDesktopService request=Clock classification=BuiltInApp'; Reason = "Clock repeated launches"; ExpectedCount = 2 },
@@ -318,8 +318,9 @@ This file intentionally uses an unsupported extension.
     Assert-Contains $fallbackOutput "[AppModelActiveTypedDispatch] source=HostedFilesystemEntry request=$FixtureUnsupported classification=FileOpen" "unsupported file fallback"
     Assert-Contains $fallbackOutput "selectedHandler=Unsupported" "unsupported file fallback"
     Assert-Contains $fallbackOutput "[AppModelActiveTypedDispatch] source=HostedFilesystemEntry request=$FixtureImage classification=FileOpen" "image fallback"
-    Assert-Contains $fallbackOutput "selectedHandler=ImageViewer" "image fallback"
-    Assert-Contains $fallbackOutput "reason=Active typed dispatch is not enabled for this filesystem entry" "image/unsupported fallback reason"
+    Assert-Contains $fallbackOutput "selectedHandler=Image Viewer" "canonical image handler"
+    Assert-Contains $fallbackOutput "activeTypedDispatchHandled=true legacyFallbackUsed=false" "canonical image dispatch"
+    Assert-Contains $fallbackOutput "reason=Active typed dispatch delivered an owned document activation to gxos.builtin.imageviewer" "canonical image dispatch reason"
 
     $fallbackRecents = Get-DesktopRecentNames
     Assert-True (Test-RecentExcludesAny -RecentNames $fallbackRecents -ExcludedNames @("TotallyUnknownLaunchThing", "ComputerFiles", "Unsupported")) "Fallback targets should not appear as bogus recent entries"

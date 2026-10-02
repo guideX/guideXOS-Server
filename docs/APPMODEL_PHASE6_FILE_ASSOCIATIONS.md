@@ -113,3 +113,7 @@ The Phase 6 implementation was committed on branch `main` as:
 - The report update is a separate documentation-only follow-up commit; the final branch is **0 behind / 2 ahead** of `origin/main` because push access is unavailable.
 
 The implementation commit excludes the user's `desktop.json` edit and all startup regression fixtures. The final worktree retains the original two `desktop.json` preferences (the `PacMan PGM1 Ready Input Validation` pin and `desktop.accessibility.enhancedFocusIndicator=false`), the four pre-existing untracked `tmp/startup-appmodel-regression-*` directories, and one additional timestamped fixture produced by this task's Startup App Model regression. The test-created fixture was left in place after the cleanup command was rejected. `desktop.state` and `window-bounds.cfg` were restored to their clean starting contents.
+
+## Phase 11 follow-up
+
+The statements above that image extensions remain on a legacy route describe the Phase 6 checkout. Phase 11 later added hosted ImageViewer's `.png` capability to AppRegistry and moved normal PNG Open, Open With, and Settings Default Apps discovery to that model. The direct fallback now covers `.bmp`, `.jpg`, `.jpeg`, and `.gif`; see [the Phase 11 report](APPMODEL_PHASE11_IMAGEVIEWER_DOCUMENT_ACTIVATION.md).

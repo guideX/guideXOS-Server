@@ -195,3 +195,7 @@ and resolution correct.
 This report records the implementation and tests, but the environment's lack
 of a visible native Settings window leaves layout/focus/hover/clipping
 inspection outstanding. Runtime fixtures and logs were not staged.
+
+## Phase 11 follow-up
+
+Phase 11 added `.png` to the known-extension snapshot through ImageViewer's AppRegistry capability and built-in default. The production Settings model now reports `gxos.builtin.imageviewer` as built-in and effective, with no configured override and one capable handler. No Settings-specific ImageViewer rule was added; see [the Phase 11 report](APPMODEL_PHASE11_IMAGEVIEWER_DOCUMENT_ACTIVATION.md).

@@ -221,7 +221,7 @@ This file should stay unsupported.
 
     Assert-Contains $assocOutput "[FileAssociationV1]" "file association diagnostic section"
     Assert-Contains $assocOutput "registryResolved=true" "registry-backed handler resolution"
-    Assert-Contains $assocOutput "fileAssociationV1KeyMappings: directories->File Explorer (separate route); AppRegistry .txt/.log/.ini/.cfg->Notepad; .png/.bmp/.jpg/.gif/.jpeg->Image Viewer (legacy direct path); unknown/risky->Unsupported" "key mappings"
+    Assert-Contains $assocOutput "fileAssociationV1KeyMappings: directories->File Explorer (separate route); AppRegistry .txt/.log/.ini/.cfg->Notepad; AppRegistry .png->Image Viewer; .bmp/.jpg/.gif/.jpeg->Image Viewer (legacy direct path); unknown/risky->Unsupported" "key mappings"
     Assert-Contains $assocOutput "appModelPhase6DirectoryActivationIsSeparate=true" "directory route remains separate from file associations"
     Assert-Contains $assocOutput "key=.txt kind=extension" "text table row"
     Assert-Contains $assocOutput "handlerAppId=gxos.builtin.notepad" "text table handler"
@@ -260,10 +260,10 @@ This file should stay unsupported.
     Assert-Contains $resolveOutput "status: supported" "folder status"
 
     Assert-RegexCountAtLeast $resolveOutput 'associationKind: app-model-extension' 4 "App Model document extension kinds"
-    Assert-RegexCountAtLeast $resolveOutput 'associationKind: extension' 2 "legacy image extension kinds"
+    Assert-RegexCountAtLeast $resolveOutput 'associationKind: extension' 1 "remaining legacy image extension kinds"
     Assert-RegexCountAtLeast $resolveOutput 'handlerDisplayName: Notepad' 4 "text handlers"
     Assert-RegexCountAtLeast $resolveOutput 'launchTarget: DocumentActivation' 4 "text document activation targets"
-    Assert-RegexCountAtLeast $resolveOutput 'legacyDirectPath: true' 2 "image legacy direct path"
+    Assert-RegexCountAtLeast $resolveOutput 'legacyDirectPath: true' 1 "non-PNG image legacy direct path"
     Assert-RegexCountAtLeast $resolveOutput 'handlerDisplayName: Image Viewer' 2 "image handler display names"
     Assert-Contains $resolveOutput "associationKind: unknown-fallback" "unknown fallback kind"
     Assert-Contains $resolveOutput "launchTarget: Unsupported" "unknown fallback target"

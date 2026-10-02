@@ -395,16 +395,17 @@ This file should stay unsupported.
     $imageOutput = Invoke-LaunchAndAssertTop `
         -Commands @("gui.start", "desktop.open `"$FixtureImage`"") `
         -ExpectedTop "Image Viewer" `
-        -Reason "legacy image open" `
+        -Reason "canonical PNG image open" `
         -RecentContains @("Image Viewer", "Notepad", "File Explorer") `
         -RecentExcludes @("TotallyUnknownLaunchThing", "ComputerFiles", "Unsupported") `
         -OutputNeedles @(
-            "selectedHandler=ImageViewer",
-            "activeTypedDispatchHandled=false",
-            "legacyFallbackUsed=true"
+            "selectedHandler=Image Viewer",
+            "activeTypedDispatchHandled=true",
+            "legacyFallbackUsed=false",
+            "reason=Active typed dispatch delivered an owned document activation to gxos.builtin.imageviewer"
         )
 
-    Assert-Contains $imageOutput "reason=Active typed dispatch is not enabled for this filesystem entry" "legacy image fallback reason"
+    Assert-Contains $imageOutput "Built-in document dispatcher delivered canonical activation appId=gxos.builtin.imageviewer path=$FixtureImage" "canonical PNG activation path"
     $phase4DFileFolderRecentsStable = $true
 
     $unsupportedOutput = Invoke-ServerCommands -Commands @(

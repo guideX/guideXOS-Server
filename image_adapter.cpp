@@ -10,6 +10,7 @@
 #include <cctype>
 #include <fstream>
 #include <iterator>
+#include <limits>
 
 namespace gxos {
 namespace gui {
@@ -39,6 +40,12 @@ static bool readPngSize(const uint8_t* bytes, size_t byteCount, uint32_t& width,
     width = be32(16);
     height = be32(20);
     return width > 0 && height > 0;
+}
+
+static bool hasPngSignature(const uint8_t* bytes, size_t byteCount)
+{
+    static const uint8_t sig[8] = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n' };
+    return bytes && byteCount >= sizeof(sig) && std::equal(sig, sig + sizeof(sig), bytes);
 }
 
 static bool withinLimits(uint64_t byteCount, uint32_t width, uint32_t height, const ImageSafetyLimits& limits)
@@ -98,9 +105,28 @@ static bool readHostFile(const std::string& path, std::vector<uint8_t>& bytes, c
         status = ImageLoadStatus::TooLarge;
         return false;
     }
+    if (static_cast<uint64_t>(size) > std::numeric_limits<size_t>::max() ||
+        static_cast<uint64_t>(size) > static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max())) {
+        status = ImageLoadStatus::TooLarge;
+        return false;
+    }
     file.seekg(0, std::ios::beg);
-    bytes.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
-    if (!file.good() && !file.eof()) {
+    bytes.resize(static_cast<size_t>(size));
+    const std::streamsize expectedSize = static_cast<std::streamsize>(bytes.size());
+    if (expectedSize > 0) {
+        file.read(reinterpret_cast<char*>(bytes.data()), expectedSize);
+        if (file.gcount() != expectedSize) {
+            bytes.clear();
+            status = ImageLoadStatus::DecodeFailed;
+            return false;
+        }
+    }
+    if (file.peek() != std::char_traits<char>::eof()) {
+        bytes.clear();
+        status = ImageLoadStatus::TooLarge;
+        return false;
+    }
+    if (file.bad()) {
         bytes.clear();
         status = ImageLoadStatus::DecodeFailed;
         return false;
@@ -140,8 +166,13 @@ ImageBitmap ImageAdapter::LoadFromFile(const std::string& path, const ImageSafet
     }
 
     std::vector<uint8_t> bytes;
-    if (Vfs::instance().readFile(path, bytes)) {
+    const VfsReadFileStatus vfsStatus = Vfs::instance().readFileBounded(path, bytes, limits.maxBytes);
+    if (vfsStatus == VfsReadFileStatus::Success) {
         return LoadFromBytes(bytes, path, limits);
+    }
+    if (vfsStatus == VfsReadFileStatus::TooLarge) {
+        result.status = ImageLoadStatus::TooLarge;
+        return result;
     }
 
     ImageLoadStatus readStatus = ImageLoadStatus::NotFound;
@@ -172,6 +203,7 @@ ImageBitmap ImageAdapter::LoadFromBytes(const uint8_t* bytes, size_t byteCount, 
 
     uint32_t headerW = 0;
     uint32_t headerH = 0;
+    const bool pngSignature = hasPngSignature(bytes, byteCount);
     if (readPngSize(bytes, byteCount, headerW, headerH)) {
         if (!withinLimits(byteCount, headerW, headerH, limits)) {
             result.status = ImageLoadStatus::TooLarge;
@@ -197,6 +229,12 @@ ImageBitmap ImageAdapter::LoadFromBytes(const uint8_t* bytes, size_t byteCount, 
         result.width = decoded->Width;
         result.height = decoded->Height;
         result.format = ImageFormat::Png;
+        return result;
+    }
+
+    if (pngSignature) {
+        (void)PngLoader::LoadFromMemory(bytes, byteCount, sourceName);
+        result.status = ImageLoadStatus::DecodeFailed;
         return result;
     }
 

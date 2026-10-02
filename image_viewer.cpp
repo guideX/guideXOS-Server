@@ -4,6 +4,7 @@
 #include "save_dialog.h"
 #include "desktop_theme.h"
 #include "desktop_service.h"
+#include "app_activation.h"
 #include "gui_protocol.h"
 #include "kernel/core/include/kernel/image_adapter.h"
 #include "logger.h"
@@ -16,12 +17,18 @@
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
+#include <mutex>
 #include <sstream>
 #include <system_error>
 #include <utility>
 #include <thread>
 
 namespace gxos { namespace apps {
+
+namespace {
+std::mutex g_imageViewerLaunchMutex;
+bool g_imageViewerProcessActive = false;
+}
 
 uint64_t ImageViewer::s_windowId = 0;
 int ImageViewer::s_windowW = ImageViewer::kWinW;
@@ -549,6 +556,27 @@ static gui::ImagePtr imageFromSnapshot(const gxos::apps::ImageViewer::HistorySna
 } // namespace
 
 uint64_t ImageViewer::Launch(const std::string& filePath) {
+    return LaunchInternal(filePath, AppActivationContext{});
+}
+
+uint64_t ImageViewer::LaunchWithActivation(const AppActivationContext& activation) {
+    if (activation.kind != AppActivationKind::Document ||
+        activation.appId != "gxos.builtin.imageviewer" ||
+        !IsValidDocumentActivationPath(activation.documentPath)) {
+        Logger::write(LogLevel::Warn, "ImageViewer rejected an invalid App Model document activation");
+        return 0;
+    }
+    return LaunchInternal(activation.documentPath, activation);
+}
+
+uint64_t ImageViewer::LaunchInternal(const std::string& filePath, const AppActivationContext& activation) {
+    std::lock_guard<std::mutex> launchLock(g_imageViewerLaunchMutex);
+    if (g_imageViewerProcessActive) {
+        Logger::write(LogLevel::Warn, "ImageViewer rejected a second concurrent launch because its window state is single-instance");
+        return 0;
+    }
+    g_imageViewerProcessActive = true;
+
     s_filePath = filePath;
     s_originalPath = filePath;
     s_displayPath = filePath;
@@ -586,9 +614,12 @@ uint64_t ImageViewer::Launch(const std::string& filePath) {
 
     ProcessSpec spec{"ImageViewer", &ImageViewer::main};
     spec.appId = "gxos.builtin.imageviewer";
+    spec.activation = activation;
     std::vector<std::string> args;
-    if (!filePath.empty()) args.push_back(filePath);
-    return ProcessTable::spawn(spec, args);
+    if (activation.kind != AppActivationKind::Document && !filePath.empty()) args.push_back(filePath);
+    const uint64_t pid = ProcessTable::spawn(spec, args);
+    if (pid == 0) g_imageViewerProcessActive = false;
+    return pid;
 }
 
 std::string ImageViewer::displayNameForPath(const std::string& path) {
@@ -1132,7 +1163,25 @@ bool ImageViewer::trySetCurrentImageAsWallpaper() {
 int ImageViewer::main(int argc, char** argv) {
     Logger::write(LogLevel::Info, "ImageViewer starting");
 
-    if (argc > 1 && argv[1]) {
+    const AppActivationContext activation = ProcessTable::CurrentActivationContext();
+    if (activation.kind == AppActivationKind::Document) {
+        if (activation.appId != "gxos.builtin.imageviewer" ||
+            !IsValidDocumentActivationPath(activation.documentPath)) {
+            Logger::write(LogLevel::Warn, "ImageViewer process rejected an invalid owned document activation");
+            std::lock_guard<std::mutex> launchLock(g_imageViewerLaunchMutex);
+            g_imageViewerProcessActive = false;
+            return 1;
+        }
+        s_filePath = activation.documentPath;
+        s_originalPath = activation.documentPath;
+        s_displayPath = activation.documentPath;
+        s_currentDirectory = normalizeFolderPath(activation.documentPath);
+        s_fileName = displayNameForPath(activation.documentPath);
+        Logger::write(LogLevel::Info, "ImageViewer received App Model document activation appId=" +
+            activation.appId + " path=" + activation.documentPath +
+            " owner=" + std::to_string(activation.registrationOwner) +
+            " generation=" + std::to_string(activation.registrationGeneration));
+    } else if (argc > 1 && argv[1]) {
         s_filePath = argv[1];
         s_originalPath = s_filePath;
         s_displayPath = s_filePath;
@@ -1318,7 +1367,28 @@ int ImageViewer::main(int argc, char** argv) {
         publishMessage(gui::MsgType::MT_Close, std::to_string(s_windowId));
     }
 
-    Logger::write(LogLevel::Info, "ImageViewer exiting");
+    const uint64_t closedWindowId = s_windowId;
+    s_windowId = 0;
+    s_image.reset();
+    s_originalSnapshot = {};
+    s_hasOriginalSnapshot = false;
+    s_undoStack.clear();
+    s_redoStack.clear();
+    s_folderImages.clear();
+    s_currentImageIndex = -1;
+    s_filePath.clear();
+    s_originalPath.clear();
+    s_displayPath.clear();
+    s_currentDirectory.clear();
+    s_fileName.clear();
+    s_originalW = 0;
+    s_originalH = 0;
+    {
+        std::lock_guard<std::mutex> launchLock(g_imageViewerLaunchMutex);
+        g_imageViewerProcessActive = false;
+    }
+    Logger::write(LogLevel::Info, "ImageViewer exiting window=" + std::to_string(closedWindowId) +
+        " imageStateReleased=true activationPathReleased=true");
     return 0;
 }
 

@@ -3,6 +3,7 @@
 #include "app_launch_resolver.h"
 #include "app_manifest_loader.h"
 #include "app_registry.h"
+#include "built_in_document_dispatcher.h"
 #include "built_in_app_metadata.h"
 #include "shell_object_registry.h"
 #include "desktop_config.h"
@@ -248,6 +249,8 @@ namespace gxos {
                 size_t total = 0;
                 size_t folderAssociations = 0;
                 size_t textAssociations = 0;
+                size_t appModelAssociations = 0;
+                size_t imageViewerAppModelAssociations = 0;
                 size_t imageLegacyAssociations = 0;
                 size_t unknownFallbackAssociations = 0;
                 size_t riskyFallbackAssociations = 0;
@@ -269,7 +272,6 @@ namespace gxos {
             };
 
             static const FileAssociationV1Record kFileAssociationV1Table[] = {
-                { ".png", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
                 { ".bmp", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
                 { ".jpg", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
                 { ".gif", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
@@ -306,6 +308,19 @@ namespace gxos {
             static std::vector<apps::FileAssociationRecord> appModelFileAssociationsSnapshot() {
                 std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
                 return s_appRegistry.GetFileAssociations();
+            }
+
+            static std::string registeredAppDisplayNameSnapshot(const std::string& canonicalAppId) {
+                std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+                const apps::RegisteredApp* app = s_appRegistry.FindById(canonicalAppId);
+                return app ? app->manifest.displayName : std::string();
+            }
+
+            static std::string registeredAppLaunchNameSnapshot(const std::string& canonicalAppId) {
+                std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+                const apps::RegisteredApp* app = s_appRegistry.FindById(canonicalAppId);
+                if (!app || app->manifest.entries.empty()) return std::string();
+                return app->manifest.entries.front().entryPoint;
             }
 
             static bool appModelFileAssociationCapacityExceededSnapshot() {
@@ -1649,7 +1664,7 @@ namespace gxos {
 
         struct LaunchTargetTypeCoverageSummary;
 
-        static const char* kAppModelV1OutOfScopeScope = "GXAppExecution|ELFLoading|PackageInstall|Sandboxing|Permissions|IDEBehavior|OpenWith|AppStore|UninstallUpdateLifecycle|TrashDestructiveActions|ImageActiveDispatchOwnership";
+        static const char* kAppModelV1OutOfScopeScope = "GXAppExecution|ELFLoading|PackageInstall|Sandboxing|Permissions|IDEBehavior|OpenWith|AppStore|UninstallUpdateLifecycle|TrashDestructiveActions";
 
         static LaunchTargetTypeCoverageSummary collectLaunchTargetTypeCoverageSummary();
 
@@ -1722,7 +1737,9 @@ namespace gxos {
                     continue;
                 }
                 ++summary.total;
-                ++summary.textAssociations;
+                ++summary.appModelAssociations;
+                if (record.appId == "gxos.builtin.notepad") ++summary.textAssociations;
+                if (record.appId == "gxos.builtin.imageviewer") ++summary.imageViewerAppModelAssociations;
                 ++summary.activeTypedDispatchOwned;
                 ++summary.registryResolved;
             }
@@ -1732,11 +1749,11 @@ namespace gxos {
             // markers while excluding it from the association record count.
             summary.folderAssociations = apps::FindBuiltInAppMetadataByAppId("gxos.builtin.fileexplorer") ? 1 : 0;
 
-            const size_t supportedRegistryAssociations = summary.textAssociations + summary.imageLegacyAssociations;
+            const size_t supportedRegistryAssociations = summary.appModelAssociations + summary.imageLegacyAssociations;
             summary.handlersResolveToRegistry = summary.registryMismatch == 0;
             summary.textFilesOpenWithNotepad = summary.textAssociations == 4 && allRequiredTextAssociationsResolve && summary.registryMismatch == 0 && summary.registryResolved == supportedRegistryAssociations;
             summary.foldersOpenWithFileExplorer = summary.folderAssociations == 1 && summary.registryMismatch == 0 && summary.registryResolved == supportedRegistryAssociations;
-            summary.imagesRemainLegacy = summary.imageLegacyAssociations == 5;
+            summary.imagesRemainLegacy = summary.imageLegacyAssociations == 4;
             summary.unknownExtensionsFallback = summary.unknownFallbackAssociations == 1;
             summary.riskyExtensionsNotActiveDispatchOwned = summary.riskyFallbackAssociations == 3;
             summary.folderAssociationRegistered = summary.folderAssociations == 1 && summary.handlersResolveToRegistry;
@@ -1746,10 +1763,12 @@ namespace gxos {
 
         static std::string fileAssociationV1CompactSummaryLine(const FileAssociationV1CoverageSummary& summary) {
             std::ostringstream oss;
-            oss << "fileAssociationV1: " << statusText(summary.tableExists && summary.registryMismatch == 0 && summary.textAssociations == 4 && summary.folderAssociations == 1 && summary.imageLegacyAssociations == 5 && summary.unknownFallbackAssociations == 1 && summary.riskyFallbackAssociations == 3)
+            oss << "fileAssociationV1: " << statusText(summary.tableExists && summary.registryMismatch == 0 && summary.textAssociations == 4 && summary.folderAssociations == 1 && summary.imageLegacyAssociations == 4 && summary.imageViewerAppModelAssociations == 1 && summary.unknownFallbackAssociations == 1 && summary.riskyFallbackAssociations == 3)
                 << " entries=" << summary.total
                 << " directoryRoutes=" << summary.folderAssociations
                 << " text=" << summary.textAssociations
+                << " appModel=" << summary.appModelAssociations
+                << " imageViewerAppModel=" << summary.imageViewerAppModelAssociations
                 << " imagesLegacy=" << summary.imageLegacyAssociations
                 << " unknownFallback=" << summary.unknownFallbackAssociations
                 << " riskyFallback=" << summary.riskyFallbackAssociations
@@ -1761,7 +1780,7 @@ namespace gxos {
         }
 
         static std::string fileAssociationV1KeyMappingsLine() {
-            return "fileAssociationV1KeyMappings: directories->File Explorer (separate route); AppRegistry .txt/.log/.ini/.cfg->Notepad; .png/.bmp/.jpg/.gif/.jpeg->Image Viewer (legacy direct path); unknown/risky->Unsupported\n";
+            return "fileAssociationV1KeyMappings: directories->File Explorer (separate route); AppRegistry .txt/.log/.ini/.cfg->Notepad; AppRegistry .png->Image Viewer; .bmp/.jpg/.gif/.jpeg->Image Viewer (legacy direct path); unknown/risky->Unsupported\n";
         }
 
         static std::string fileAssociationV1MarkersLine(const FileAssociationV1CoverageSummary& summary) {
@@ -3319,13 +3338,15 @@ namespace gxos {
                     << "\n";
             }
             for (const apps::FileAssociationRecord& record : appModelFileAssociationsSnapshot()) {
+                const std::string handlerDisplayName = registeredAppDisplayNameSnapshot(record.appId);
+                const std::string handlerLaunchName = registeredAppLaunchNameSnapshot(record.appId);
                 oss << "  record key=" << record.extension
                     << " kind=extension"
                     << " handlerAppId=" << record.appId
-                    << " handlerDisplayName=" << (record.supportsDocumentActivation ? "Notepad" : "")
-                    << " handlerLaunchName=" << (record.supportsDocumentActivation ? "Notepad" : "")
+                    << " handlerDisplayName=" << handlerDisplayName
+                    << " handlerLaunchName=" << handlerLaunchName
                     << " activeTypedDispatchMayOwn=" << diagnosticBool(record.supportsDocumentActivation && record.backendAvailable && !record.ambiguous)
-                    << " fallbackRequired=true textLike=" << diagnosticBool(record.supportsDocumentActivation)
+                    << " fallbackRequired=true textLike=" << diagnosticBool(record.contentType.rfind("text/", 0) == 0)
                     << " folder=false system=false risky=false legacyDirectPath=false"
                     << " associationAmbiguous=" << diagnosticBool(record.ambiguous)
                     << " handlerAvailable=" << diagnosticBool(record.backendAvailable)
@@ -5736,6 +5757,28 @@ namespace gxos {
             return failUnsupported("Active typed dispatch is not enabled for this app target");
         }
 
+        static bool dispatchNotepadDocumentActivation(const apps::AppActivationContext& activation, std::string& error) {
+            if (apps::Notepad::LaunchWithActivation(activation) != 0) return true;
+            error = "Failed to launch the registered document handler";
+            return false;
+        }
+
+        static bool dispatchImageViewerDocumentActivation(const apps::AppActivationContext& activation, std::string& error) {
+            if (apps::ImageViewer::LaunchWithActivation(activation) != 0) return true;
+            error = "Failed to launch the registered document handler";
+            return false;
+        }
+
+        static const apps::BuiltInDocumentDispatcher& builtInDocumentDispatcher() {
+            static const apps::BuiltInDocumentDispatcher dispatcher = [] {
+                apps::BuiltInDocumentDispatcher value;
+                (void)value.RegisterHandler("gxos.builtin.notepad", &dispatchNotepadDocumentActivation);
+                (void)value.RegisterHandler("gxos.builtin.imageviewer", &dispatchImageViewerDocumentActivation);
+                return value;
+            }();
+            return dispatcher;
+        }
+
         static bool dispatchDocumentActivation(const apps::AppActivationContext& activation, std::string& error) {
             apps::RegisteredApp selectedApp;
             apps::LaunchDecision nativeDecision;
@@ -5751,11 +5794,13 @@ namespace gxos {
                     error = "Document activation registration disappeared before dispatch";
                     return false;
                 }
-                if (registered->manifest.kind == apps::AppKind::BuiltIn &&
-                    activation.appId == "gxos.builtin.notepad") {
-                    if (apps::Notepad::LaunchWithActivation(activation) != 0) return true;
-                    error = "Failed to launch the registered document handler";
-                    return false;
+                if (registered->manifest.kind == apps::AppKind::BuiltIn) {
+                    const bool dispatched = builtInDocumentDispatcher().Dispatch(s_appRegistry, activation, error);
+                    if (dispatched) {
+                        Logger::write(LogLevel::Info, "Built-in document dispatcher delivered canonical activation appId=" +
+                            activation.appId + " path=" + activation.documentPath);
+                    }
+                    return dispatched;
                 }
                 if (registered->manifest.kind != apps::AppKind::NativeElf ||
                     !apps::NativeElfExecutor::ExperimentalExecutionEnabled()) {

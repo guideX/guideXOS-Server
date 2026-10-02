@@ -71,6 +71,7 @@ std::string builtInDefaultAppId(const std::string& extension) {
     if (extension == ".txt" || extension == ".log" || extension == ".ini" || extension == ".cfg") {
         return "gxos.builtin.notepad";
     }
+    if (extension == ".png") return "gxos.builtin.imageviewer";
     return std::string();
 }
 
@@ -126,6 +127,12 @@ RegisteredApp makeBuiltInApp(const BuiltInAppMetadata& metadata) {
             { ".log", "text/plain", "Log file" },
             { ".ini", "text/plain", "INI configuration file" },
             { ".cfg", "text/plain", "CFG configuration file" }
+        };
+    } else if (app.manifest.id == "gxos.builtin.imageviewer") {
+        app.manifest.supportsDocumentActivation = true;
+        app.documentActivationBackendAvailable = true;
+        app.manifest.fileAssociations = {
+            { ".png", "image/png", "PNG image" }
         };
     }
 

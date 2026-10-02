@@ -9,6 +9,13 @@
 namespace gxos {
     struct VfsEntryInfo { std::string name; uint64_t size; bool isDir; };
 
+    enum class VfsReadFileStatus {
+        Success = 0,
+        NotFound,
+        TooLarge,
+        ReadFailed
+    };
+
     class Vfs {
     public:
         // Singleton-style access
@@ -20,6 +27,7 @@ namespace gxos {
         bool writeFile(const std::string& path, const std::vector<uint8_t>& data);
         // Read file; returns false if not found or is directory
         bool readFile(const std::string& path, std::vector<uint8_t>& out);
+        VfsReadFileStatus readFileBounded(const std::string& path, std::vector<uint8_t>& out, uint64_t maxBytes);
         // List directory entries; empty vector if no such dir
         std::vector<VfsEntryInfo> list(const std::string& path);
         // Test existence

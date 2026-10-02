@@ -1,5 +1,6 @@
 #include "vfs.h"
 #include <algorithm>
+#include <limits>
 
 #ifdef _WIN32
 #include <filesystem>
@@ -22,18 +23,23 @@ namespace gxos {
     bool Vfs::writeFile(const std::string& path, const std::vector<uint8_t>& data){ std::lock_guard<std::mutex> lk(_mu); std::vector<std::string> parts; splitPath(path, parts); if(parts.empty()) return false; Node* dir = getOrCreateDir(parts, parts.size()-1); if(!dir) return false; const std::string& fname = parts.back(); auto it = dir->children.find(fname); if(it==dir->children.end()){ auto f = std::make_unique<Node>(); f->isDir=false; f->content = data; dir->children[fname] = std::move(f); } else { if(it->second->isDir) return false; it->second->content = data; } return true; }
 
     bool Vfs::readFile(const std::string& path, std::vector<uint8_t>& out){
+        return readFileBounded(path, out, std::numeric_limits<uint64_t>::max()) == VfsReadFileStatus::Success;
+    }
+
+    VfsReadFileStatus Vfs::readFileBounded(const std::string& path, std::vector<uint8_t>& out, uint64_t maxBytes){
         out.clear();
         {
             std::lock_guard<std::mutex> lk(_mu);
             std::vector<std::string> parts;
             splitPath(path, parts);
-            if (parts.empty()) return false;
+            if (parts.empty()) return VfsReadFileStatus::NotFound;
             Node* n = getNode(parts);
             if (n && !n->isDir) {
+                if (n->content.size() > maxBytes) return VfsReadFileStatus::TooLarge;
                 out = n->content;
-                return true;
+                return VfsReadFileStatus::Success;
             }
-            if (n && n->isDir) return false;
+            if (n && n->isDir) return VfsReadFileStatus::NotFound;
         }
 
 #ifdef _WIN32
@@ -52,18 +58,28 @@ namespace gxos {
         }
 
         std::ifstream file(hostPath, std::ios::binary);
-        if (!file) return false;
+        if (!file) return VfsReadFileStatus::NotFound;
         file.seekg(0, std::ios::end);
         const std::streamoff size = file.tellg();
-        if (size < 0) return false;
+        if (size < 0) return VfsReadFileStatus::ReadFailed;
+        if (static_cast<uint64_t>(size) > maxBytes) return VfsReadFileStatus::TooLarge;
+        if (static_cast<uint64_t>(size) > std::numeric_limits<size_t>::max() ||
+            static_cast<uint64_t>(size) > static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max())) {
+            return VfsReadFileStatus::TooLarge;
+        }
         file.seekg(0, std::ios::beg);
-        std::vector<uint8_t> hostedBytes((std::istreambuf_iterator<char>(file)),
-            std::istreambuf_iterator<char>());
-        if (!file.good() && !file.eof()) return false;
+        std::vector<uint8_t> hostedBytes(static_cast<size_t>(size));
+        const std::streamsize expectedSize = static_cast<std::streamsize>(hostedBytes.size());
+        if (expectedSize > 0) {
+            file.read(reinterpret_cast<char*>(hostedBytes.data()), expectedSize);
+            if (file.gcount() != expectedSize) return VfsReadFileStatus::ReadFailed;
+        }
+        if (file.peek() != std::char_traits<char>::eof()) return VfsReadFileStatus::TooLarge;
+        if (file.bad()) return VfsReadFileStatus::ReadFailed;
         out.swap(hostedBytes);
-        return true;
+        return VfsReadFileStatus::Success;
 #else
-        return false;
+        return VfsReadFileStatus::NotFound;
 #endif
     }
 

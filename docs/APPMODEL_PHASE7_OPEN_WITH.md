@@ -94,3 +94,7 @@ No Settings Default Apps UI was added. No image viewer, package installation, MI
 ## Deferred work
 
 A later Settings → Apps → Default apps page may store only normalized extensions and canonical handler IDs under a clearly named global configuration owner (unless a user/profile owner exists by then). On load or write it must validate the app's current capability and backend using the same AppRegistry APIs. A failed or stale override must fall back safely to the built-in/default declaration or report no usable default. Phase 7 deliberately leaves persistence and the Settings page deferred.
+
+## Phase 11 follow-up
+
+The production handler counts above are the Phase 7 baseline. Phase 11 later added hosted ImageViewer as the `.png` capable handler through AppRegistry and verified its one-handler Open With route. Settings Default Apps and the persistent default policy were added in later phases; the `.png` row now appears from the same capability/default data without ImageViewer-specific menu or Settings logic. See [the Phase 11 report](APPMODEL_PHASE11_IMAGEVIEWER_DOCUMENT_ACTIVATION.md).

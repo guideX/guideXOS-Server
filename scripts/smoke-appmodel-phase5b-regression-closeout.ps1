@@ -361,7 +361,7 @@ This file should stay unsupported.
     Assert-Contains $summaryOutput "appModelV1TrashOpenOnlyBoundary=true" "phase 5B trash boundary"
     Assert-Contains $summaryOutput "appModelV1ImagesRemainLegacy=true" "phase 5B images boundary"
     Assert-Contains $summaryOutput "appModelV1OutOfScopeBoundary=true" "phase 5B out-of-scope boundary"
-    Assert-Contains $summaryOutput "appModelV1OutOfScopeScope=GXAppExecution|ELFLoading|PackageInstall|Sandboxing|Permissions|IDEBehavior|OpenWith|AppStore|UninstallUpdateLifecycle|TrashDestructiveActions|ImageActiveDispatchOwnership" "phase 5B out-of-scope scope"
+    Assert-Contains $summaryOutput "appModelV1OutOfScopeScope=GXAppExecution|ELFLoading|PackageInstall|Sandboxing|Permissions|IDEBehavior|OpenWith|AppStore|UninstallUpdateLifecycle|TrashDestructiveActions" "phase 5B out-of-scope scope"
     Assert-Contains $registryOutput "manifestScan scanned=14 registered=14" "phase 5B bounded manifest registry scan"
     Assert-Contains $registryOutput "id=com.guidexos.developerstudio displayName=guideXOS Developer Studio kind=NativeElf" "phase 5B Developer Studio registration remains visible"
     Assert-Contains $registryOutput "id=com.guidexos.pacman displayName=Nexgen PacMan kind=NativeElf" "phase 5B Native ELF Pac-Man registration remains visible"
@@ -397,7 +397,7 @@ This file should stay unsupported.
     Assert-Contains $inventoryOutput "shellObjectsAllowedForRecent=7" "phase 5B inventory shell-object recent allowance"
     Assert-Contains $inventoryOutput "shellObjectsSuppressedForRecent=3" "phase 5B inventory shell-object recent suppression"
     Assert-Contains $inventoryOutput "fallbackExclusions:" "phase 5B inventory fallback exclusions"
-    Assert-Contains $inventoryOutput "core=GXAppExecution|ELFLoading|PackageInstall|Sandboxing|Permissions|IDEBehavior|OpenWith|AppStore|UninstallUpdateLifecycle|TrashDestructiveActions|ImageActiveDispatchOwnership" "phase 5B inventory out-of-scope boundary"
+    Assert-Contains $inventoryOutput "core=GXAppExecution|ELFLoading|PackageInstall|Sandboxing|Permissions|IDEBehavior|OpenWith|AppStore|UninstallUpdateLifecycle|TrashDestructiveActions" "phase 5B inventory out-of-scope boundary"
     Assert-Contains $inventoryOutput "legacyFallbacks=AppModel|ComputerFiles|Image Viewer|ImgViewer" "phase 5B inventory legacy fallback list"
     Assert-Contains $inventoryOutput "builtInApps:" "phase 5B inventory built-ins"
     $builtInSection = [regex]::Match($inventoryOutput, "(?s)builtInApps:\s*(.*?)\s*shellObjects:")
@@ -648,15 +648,16 @@ This file should stay unsupported.
     $imageOutput = Invoke-LaunchAndAssertTop `
         -Commands @("gui.start", "desktop.open `"$FixtureImage`"") `
         -ExpectedTop "Image Viewer" `
-        -Reason "phase 5B legacy image open" `
+        -Reason "phase 5B canonical PNG document open" `
         -RecentContains @("Image Viewer", "Notepad", "File Explorer") `
         -RecentExcludes @("TotallyUnknownLaunchThing", "ComputerFiles", "Unsupported") `
         -OutputNeedles @(
-            "selectedHandler=ImageViewer",
-            "activeTypedDispatchHandled=false",
-            "legacyFallbackUsed=true"
+            "selectedHandler=Image Viewer",
+            "activeTypedDispatchHandled=true",
+            "legacyFallbackUsed=false",
+            "reason=Active typed dispatch delivered an owned document activation to gxos.builtin.imageviewer"
         )
-    Assert-Contains $imageOutput "reason=Active typed dispatch is not enabled for this filesystem entry" "phase 5B legacy image reason"
+    Assert-Contains $imageOutput "Built-in document dispatcher delivered canonical activation appId=gxos.builtin.imageviewer path=$FixtureImage" "phase 5B canonical PNG dispatcher"
 
     $unsupportedOutput = Invoke-ServerCommands -Commands @(
         "gui.start",

@@ -35,9 +35,11 @@ namespace gxos { namespace apps {
 
         /// Launch with optional file path
         static uint64_t Launch(const std::string& filePath = "");
+        static uint64_t LaunchWithActivation(const AppActivationContext& activation);
 
     private:
         static int main(int argc, char** argv);
+        static uint64_t LaunchInternal(const std::string& filePath, const AppActivationContext& activation);
 
         // Zoom / Pan / navigation
         static void zoomIn();

@@ -1006,6 +1006,21 @@ private:
         DesktopDefaultAppsBackend backend(m_appInventory);
         const bool changed = m_defaultAppsModel.refresh(backend);
         const DefaultAppsSnapshot& refreshed = m_defaultAppsModel.snapshot();
+        if (changed) {
+            Logger::write(LogLevel::Info, "[SettingsDefaultAppsModel] snapshot available=" +
+                std::string(refreshed.available ? "true" : "false") +
+                " rows=" + std::to_string(refreshed.count) +
+                " total=" + std::to_string(refreshed.totalCount));
+            for (size_t i = 0; i < refreshed.count; ++i) {
+                const DefaultAppsRow& row = refreshed.rows[i];
+                Logger::write(LogLevel::Info, "[SettingsDefaultAppsModel] row extension=" + row.extension +
+                    " builtInDefault=" + (row.policy.builtInDefaultAppId.empty() ? std::string("none") : row.policy.builtInDefaultAppId) +
+                    " configuredOverride=" + (row.policy.configuredOverrideAppId.empty() ? std::string("none") : row.policy.configuredOverrideAppId) +
+                    " effectiveDefault=" + (row.policy.effectiveDefaultAppId.empty() ? std::string("none") : row.policy.effectiveDefaultAppId) +
+                    " effectiveDisplayName=" + (row.effectiveDisplayName.empty() ? std::string("none") : row.effectiveDisplayName) +
+                    " handlers=" + std::to_string(row.handlers.availableHandlerCount));
+            }
+        }
         if (!refreshed.available) m_defaultAppsStatus = "Default app information is unavailable.";
         if (!m_selectedDefaultExtension.empty() && defaultAppsRowIndex(m_selectedDefaultExtension) < 0) {
             m_selectedDefaultExtension.clear();
