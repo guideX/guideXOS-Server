@@ -12,11 +12,18 @@ namespace {
 int failures = 0;
 int associationChecks = 0;
 int ownershipChecks = 0;
+int handlerEnumerationChecks = 0;
+int explicitActivationChecks = 0;
 int associationFailures = 0;
 int ownershipFailures = 0;
+int handlerEnumerationFailures = 0;
+int explicitActivationFailures = 0;
 
 void check(bool condition, const char* group, const char* name) {
-    if (std::string(group) == "association") ++associationChecks;
+    const std::string groupName(group);
+    if (groupName == "association") ++associationChecks;
+    else if (groupName == "handlers") ++handlerEnumerationChecks;
+    else if (groupName == "explicit") ++explicitActivationChecks;
     else ++ownershipChecks;
     if (condition) {
         std::cout << "PASS: " << name << "\n";
@@ -24,7 +31,9 @@ void check(bool condition, const char* group, const char* name) {
     }
     std::cout << "FAIL: " << name << "\n";
     ++failures;
-    if (std::string(group) == "association") ++associationFailures;
+    if (groupName == "association") ++associationFailures;
+    else if (groupName == "handlers") ++handlerEnumerationFailures;
+    else if (groupName == "explicit") ++explicitActivationFailures;
     else ++ownershipFailures;
 }
 
@@ -81,6 +90,10 @@ int main() {
         "association", "slash paths resolve through the canonical built-in App ID");
     check(builtIns.ResolveFileAssociation("C:\\docs\\settings.cfg").launchable(),
         "association", "backslash paths resolve through the AppRegistry index");
+    const DocumentHandlerList builtInHandlers = builtIns.EnumerateCapableHandlers(".TXT");
+    check(builtInHandlers.validExtension && builtInHandlers.count == 1 && builtInHandlers.handlers[0].available &&
+        builtInHandlers.handlers[0].isDefault && builtInHandlers.handlers[0].appId == "gxos.builtin.notepad",
+        "handlers", "normalized handler enumeration retains Notepad as the built-in default by canonical App ID");
     const std::string traversalPath = "C:\\docs\\..\\safe.txt";
     const FileAssociationResolution traversalResolution = builtIns.ResolveFileAssociation(traversalPath);
     check(traversalResolution.launchable() && traversalResolution.activation.documentPath == traversalPath,
@@ -128,11 +141,56 @@ int main() {
         "association", "per-app association count rejects one over the configured maximum");
 
     AppRegistry duplicateRegistry;
-    check(registerApp(duplicateRegistry, temporaryApp("com.guidexos.tests.duplicatea", "Duplicate A", 10, 1, ".DUP")) &&
-        registerApp(duplicateRegistry, temporaryApp("com.guidexos.tests.duplicateb", "Duplicate B", 11, 1, ".dup")),
-        "association", "duplicate association fixtures register with case normalization");
-    check(duplicateRegistry.ResolveFileAssociation("item.DuP").status == FileAssociationResolutionStatus::Ambiguous,
-        "association", "duplicate declarations become ambiguous without ranking by ID or source order");
+    check(registerApp(duplicateRegistry, temporaryApp("app.test.alpha", "Editor", 10, 1, ".DUP")) &&
+        registerApp(duplicateRegistry, temporaryApp("app.test.beta", "Editor", 11, 1, ".dup")),
+        "handlers", "two capable registrations with duplicate labels register with extension normalization");
+    const DocumentHandlerList duplicateHandlers = duplicateRegistry.EnumerateCapableHandlers(".DuP");
+    check(duplicateHandlers.count == 2 && duplicateHandlers.handlers[0].appId == "app.test.alpha" &&
+        duplicateHandlers.handlers[1].appId == "app.test.beta" &&
+        duplicateHandlers.handlers[0].displayName == duplicateHandlers.handlers[1].displayName,
+        "handlers", "duplicate display labels remain distinct and deterministically ordered by canonical ID");
+    check(duplicateHandlers.handlers[0].isDefault && duplicateRegistry.ResolveFileAssociation("item.DuP").appId == "app.test.alpha",
+        "handlers", "default resolution selects the first stable capable handler without making declarations ambiguous");
+    const FileAssociationResolution explicitBeta = duplicateRegistry.ResolveDocumentActivation(
+        duplicateHandlers.handlers[1], "C:\\docs\\nested\\chosen.DuP");
+    check(explicitBeta.launchable() && explicitBeta.appId == "app.test.beta" &&
+        explicitBeta.activation.documentPath == "C:\\docs\\nested\\chosen.DuP" &&
+        duplicateRegistry.ResolveFileAssociation("item.dup").appId == "app.test.alpha",
+        "explicit", "one-time explicit choice opens with Beta and does not mutate the normal default");
+    check(duplicateRegistry.ResolveDocumentActivation("app.test.missing", "item.dup").status == FileAssociationResolutionStatus::HandlerMissing,
+        "explicit", "unknown canonical app ID fails closed");
+    check(duplicateRegistry.ResolveDocumentActivation("app.test.beta", "item.other").status == FileAssociationResolutionStatus::HandlerDoesNotSupportDocuments,
+        "explicit", "capable application cannot be explicitly chosen for an undeclared extension");
+    check(duplicateRegistry.ResolveDocumentActivation("app.test.beta", std::string(kAppModelMaxDocumentPathBytes + 1, 'x') + ".dup").status == FileAssociationResolutionStatus::InvalidPath,
+        "explicit", "explicit activation rejects an overlong path before dispatch");
+    check(duplicateRegistry.ResolveDocumentActivation("app.test.beta", "README").status == FileAssociationResolutionStatus::NoExtension,
+        "explicit", "explicit activation rejects an extensionless document");
+    check(duplicateRegistry.ResolveDocumentActivation("app.test.beta", "bad\nname.dup").status == FileAssociationResolutionStatus::InvalidPath,
+        "explicit", "explicit activation rejects malformed document paths");
+
+    AppRegistry emptyHandlerRegistry;
+    check(emptyHandlerRegistry.EnumerateCapableHandlers(".zero").count == 0 &&
+        emptyHandlerRegistry.EnumerateCapableHandlers("zero").validExtension == false,
+        "handlers", "empty handler results and malformed normalized extensions are represented safely");
+
+    AppRegistry unavailableFallbackRegistry;
+    check(registerApp(unavailableFallbackRegistry, temporaryApp("app.test.unavailable", "Unavailable", 14, 1, ".pick", true, false)) &&
+        registerApp(unavailableFallbackRegistry, temporaryApp("app.test.usable", "Usable", 15, 1, ".PICK", true, true)),
+        "handlers", "available and unavailable capability declarations register together");
+    const DocumentHandlerList fallbackHandlers = unavailableFallbackRegistry.EnumerateCapableHandlers(".pick");
+    check(fallbackHandlers.count == 2 && fallbackHandlers.availableHandlerCount == 1 &&
+        fallbackHandlers.handlers[0].appId == "app.test.usable" && fallbackHandlers.handlers[0].isDefault &&
+        !fallbackHandlers.handlers[1].available,
+        "handlers", "unavailable declarations remain distinguishable while default selection picks a launchable handler");
+    check(unavailableFallbackRegistry.ResolveDocumentActivation("app.test.unavailable", "x.pick").status == FileAssociationResolutionStatus::HandlerUnavailable,
+        "explicit", "explicit activation rejects a declared handler without a current backend");
+
+    AppRegistry repeatedDeclarationRegistry;
+    RegisteredApp repeatedDeclaration = temporaryApp("app.test.repeat", "Repeat", 16, 1, ".repeat");
+    repeatedDeclaration.manifest.fileAssociations.push_back({ ".REPEAT", "text/plain", "duplicate declaration" });
+    check(registerApp(repeatedDeclarationRegistry, repeatedDeclaration) &&
+        repeatedDeclarationRegistry.EnumerateCapableHandlers(".repeat").count == 1,
+        "handlers", "duplicate extension declarations from one application collapse to one capable handler");
     AppRegistry unsupportedRegistry;
     check(registerApp(unsupportedRegistry, temporaryApp("com.guidexos.tests.nodoc", "No Document Capability", 12, 1, ".nodoc", false, true)) &&
         unsupportedRegistry.ResolveFileAssociation("item.nodoc").status == FileAssociationResolutionStatus::HandlerDoesNotSupportDocuments,
@@ -164,9 +222,26 @@ int main() {
     check(capacityRegistry.ResolveFileAssociation("overflow.e256").status == FileAssociationResolutionStatus::RegistryCapacityExceeded,
         "association", "extension omitted by capacity cap fails closed with explicit status");
 
+    AppRegistry handlerCapacityRegistry;
+    bool handlerRegistrationsSucceeded = true;
+    for (size_t i = 0; i < kAppModelMaxDocumentHandlersPerExtension + 4; ++i) {
+        char suffix[8];
+        std::snprintf(suffix, sizeof(suffix), "%02u", static_cast<unsigned>(i));
+        if (!registerApp(handlerCapacityRegistry, temporaryApp(std::string("app.capacity.") + suffix,
+            std::string("Capacity Handler ") + suffix, 200 + i, 1, ".many"))) handlerRegistrationsSucceeded = false;
+    }
+    const DocumentHandlerList boundedHandlers = handlerCapacityRegistry.EnumerateCapableHandlers(".many");
+    check(handlerRegistrationsSucceeded && boundedHandlers.count == kAppModelMaxDocumentHandlersPerExtension &&
+        boundedHandlers.declaredHandlerCount == kAppModelMaxDocumentHandlersPerExtension + 4 && boundedHandlers.truncated,
+        "handlers", "handler enumeration has a fixed capacity and reports omitted declarations");
+    check(boundedHandlers.handlers[0].isDefault && boundedHandlers.handlers[0].appId == "app.capacity.00" &&
+        handlerCapacityRegistry.ResolveFileAssociation("large.many").appId == "app.capacity.00",
+        "handlers", "bounded enumeration never truncates away the deterministic effective default");
+
     AppRegistry ownershipRegistry;
     RegisteredApp first = temporaryApp("com.guidexos.tests.document", "Document Handler One", 77, 1, ".owned");
     check(registerApp(ownershipRegistry, first), "ownership", "owned activation handler registers");
+    const DocumentHandlerList oldMenuHandlers = ownershipRegistry.EnumerateCapableHandlers(".owned");
     std::string callerPath = "C:\\users\\default\\notes.owned";
     FileAssociationResolution resolved = ownershipRegistry.ResolveFileAssociation(callerPath);
     check(resolved.launchable() && resolved.activation.kind == AppActivationKind::Document &&
@@ -194,6 +269,9 @@ int main() {
         "ownership", "unregister removes the association instead of leaving a dangling handler ID");
     RegisteredApp second = temporaryApp("com.guidexos.tests.document", "Document Handler Two", 77, 2, ".owned");
     check(registerApp(ownershipRegistry, second), "ownership", "same App ID can be reused with a fresh generation");
+    check(oldMenuHandlers.count == 1 && ownershipRegistry.ResolveDocumentActivation(oldMenuHandlers.handlers[0],
+        "C:\\users\\default\\stale.owned").status == FileAssociationResolutionStatus::HandlerStale,
+        "explicit", "handler reference captured by an old menu cannot target a reused registration generation");
     check(!ownershipRegistry.IsDocumentActivationCurrent(resolved.activation),
         "ownership", "old owned activation cannot survive unregister and same-ID generation reuse");
     FileAssociationResolution fresh = ownershipRegistry.ResolveFileAssociation("C:\\users\\default\\notes.owned");
@@ -218,7 +296,11 @@ int main() {
 
     std::cout << "associationRegistryChecks=" << (associationChecks - associationFailures) << "/" << associationChecks << "\n";
     std::cout << "documentTargetOwnershipChecks=" << (ownershipChecks - ownershipFailures) << "/" << ownershipChecks << "\n";
-    std::cout << "appModelFileActivationChecks=" << (associationChecks + ownershipChecks - failures)
-        << "/" << (associationChecks + ownershipChecks) << "\n";
+    std::cout << "handlerEnumerationChecks=" << (handlerEnumerationChecks - handlerEnumerationFailures)
+        << "/" << handlerEnumerationChecks << "\n";
+    std::cout << "explicitActivationChecks=" << (explicitActivationChecks - explicitActivationFailures)
+        << "/" << explicitActivationChecks << "\n";
+    const int totalChecks = associationChecks + ownershipChecks + handlerEnumerationChecks + explicitActivationChecks;
+    std::cout << "appModelFileActivationChecks=" << (totalChecks - failures) << "/" << totalChecks << "\n";
     return failures == 0 ? 0 : 1;
 }

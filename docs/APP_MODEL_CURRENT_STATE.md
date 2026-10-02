@@ -1,6 +1,6 @@
 # guideXOS App Model Current-State Map
 
-Status: Phase 6 current state (2026-10-01). The Phase 5A/5B material below is historical; see [Phase 6 file associations and document activation](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md) for the current file-open contract and verification.
+Status: Phase 7 current state (2026-10-01). The Phase 5A/5B material below is historical; see [Phase 7 capable handlers and Open With](APPMODEL_PHASE7_OPEN_WITH.md) for the current handler-selection contract and verification, and [Phase 6 file associations and document activation](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md) for the original owned-path contract.
 
 This document maps the app model as it exists in the repository today. It is intended to ground future GXApp runtime work without rewriting or destabilizing current launch behavior.
 
@@ -925,5 +925,11 @@ Phase 6 moves the supported text-file default into the AppRegistry-owned associa
 Document paths are bounded to 4096 bytes. The index is capped at 256 records, 16 declarations per app, and 32 bytes per extension. Extension matching ASCII-folds the final suffix; malformed, unknown, ambiguous, stale, unsupported, unavailable, or over-capacity targets fail closed. Hosted Windows VFS reads now use the same current-directory mapping already used by File Explorer after checking the in-memory VFS. Bare-metal kernel VFS behavior is unchanged. Directories are excluded from the association record count; the current association count is 13 (9 legacy image/unknown/risky rows plus 4 launchable AppRegistry rows).
 
 Phase 6 code, runtime proof, regression results, known boundaries, and commit/push closeout are maintained in [the Phase 6 report](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md).
+
+## 21. Phase 7 capable handlers and Open With
+
+Phase 7 keeps association records as per-app capabilities and resolves the effective default separately. AppRegistry now returns a bounded, deterministic, value-owned list of handlers per normalized extension, validates explicit document activation by canonical App ID and current registration, and preserves the `.txt`, `.log`, `.ini`, and `.cfg` Notepad defaults. File Explorer adds `Open With >` to files with currently launchable handlers; one-time selection does not change the default. Persistent defaults and the Settings page remain deferred because App Model configuration does not yet have a clear authoritative owner.
+
+See [the Phase 7 report](APPMODEL_PHASE7_OPEN_WITH.md) for the menu, identity and generation guarantees, capacities, limitations, and final verification results.
 
 

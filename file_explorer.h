@@ -1,4 +1,6 @@
 #pragma once
+#include "app_registry.h"
+#include "file_explorer_open_with_model.h"
 #include "process.h"
 #include "ipc_bus.h"
 #include "gui_protocol.h"
@@ -132,6 +134,7 @@ namespace gxos { namespace apps {
         static int hitTestEntryRow(int x, int y);
         static int hitTestFileListScrollbar(int x, int y);
         static int hitTestContextMenu(int x, int y);
+        static int hitTestOpenWithSubmenu(int x, int y);
         static void showContextMenuForRow(int rowIndex, int x, int y);
         static void showContextMenuForEmptySpace(int x, int y);
         static bool handleContextMenuClick(int x, int y);
@@ -185,10 +188,13 @@ namespace gxos { namespace apps {
         static std::string s_deleteTargetPath;
         static bool s_deleteTargetIsDirectory;
         static bool s_contextMenuOpen;
+        static bool s_openWithSubmenuOpen;
         static int s_contextMenuX;
         static int s_contextMenuY;
         static int s_contextMenuHover;
+        static int s_openWithSubmenuHover;
         static std::vector<int> s_contextMenuActions;
+        static FileExplorerOpenWithMenuSnapshot s_contextMenuOpenWith;
         static std::string s_contextMenuDestinationPath;
         static uint64_t s_lastFileOperationGeneration;
     };

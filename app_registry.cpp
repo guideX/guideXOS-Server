@@ -62,6 +62,13 @@ bool isValidExtension(const std::string& extension) {
     return true;
 }
 
+std::string builtInDefaultAppId(const std::string& extension) {
+    if (extension == ".txt" || extension == ".log" || extension == ".ini" || extension == ".cfg") {
+        return "gxos.builtin.notepad";
+    }
+    return std::string();
+}
+
 enum class PathExtensionStatus { Valid, NoExtension, InvalidPath, InvalidExtension };
 
 PathExtensionStatus extensionFromPath(const std::string& path, std::string& extension) {
@@ -394,35 +401,119 @@ const AppEntry* AppRegistry::FindCompatibleEntry(const std::string& appId, const
     return app ? app->FindCompatibleEntry(currentArchitecture) : nullptr;
 }
 
+DocumentHandlerList AppRegistry::EnumerateCapableHandlers(const std::string& requestedExtension) const {
+    DocumentHandlerList result;
+    if (requestedExtension.size() > kAppModelMaxFileExtensionBytes) return result;
+    result.extension = normalizeExtension(requestedExtension);
+    if (!isValidExtension(result.extension)) return result;
+    result.validExtension = true;
+
+    std::vector<DocumentHandlerInfo> candidates;
+    candidates.reserve(std::min(m_fileAssociations.size(), kAppModelMaxFileAssociationRecords));
+    for (const FileAssociationRecord& record : m_fileAssociations) {
+        if (record.extension != result.extension) continue;
+        auto appIt = m_appsById.find(record.appId);
+        const RegisteredApp* app = appIt == m_appsById.end() || appIt->second >= m_apps.size()
+            ? nullptr : &m_apps[appIt->second];
+
+        DocumentHandlerInfo handler;
+        handler.appId = record.appId;
+        handler.registrationOwner = record.registrationOwner;
+        handler.registrationGeneration = record.registrationGeneration;
+        handler.registrationCurrent = app &&
+            app->temporaryOwnerRuntimeId == record.registrationOwner &&
+            app->temporaryGeneration == record.registrationGeneration;
+        if (app) {
+            handler.displayName = app->manifest.displayName;
+            handler.supportsDocumentActivation = record.supportsDocumentActivation && app->manifest.supportsDocumentActivation;
+            handler.backendAvailable = record.backendAvailable && app->documentActivationBackendAvailable;
+        } else {
+            handler.supportsDocumentActivation = record.supportsDocumentActivation;
+            handler.backendAvailable = false;
+        }
+        handler.available = handler.registrationCurrent && handler.supportsDocumentActivation && handler.backendAvailable;
+
+        const bool duplicate = std::any_of(candidates.begin(), candidates.end(), [&](const DocumentHandlerInfo& existing) {
+            return existing.appId == handler.appId &&
+                existing.registrationOwner == handler.registrationOwner &&
+                existing.registrationGeneration == handler.registrationGeneration;
+        });
+        if (!duplicate) candidates.push_back(std::move(handler));
+    }
+
+    result.declaredHandlerCount = candidates.size();
+    result.availableHandlerCount = static_cast<size_t>(std::count_if(candidates.begin(), candidates.end(),
+        [](const DocumentHandlerInfo& handler) { return handler.available; }));
+
+    const std::string preferredDefault = builtInDefaultAppId(result.extension);
+    auto matchesPreferred = [&](const DocumentHandlerInfo& handler) {
+        return !preferredDefault.empty() && handler.appId == preferredDefault;
+    };
+    auto defaultIt = std::find_if(candidates.begin(), candidates.end(), [&](const DocumentHandlerInfo& handler) {
+        return matchesPreferred(handler) && handler.available;
+    });
+    if (defaultIt == candidates.end()) {
+        defaultIt = std::find_if(candidates.begin(), candidates.end(),
+            [](const DocumentHandlerInfo& handler) { return handler.available; });
+    }
+    if (defaultIt == candidates.end() && !preferredDefault.empty()) {
+        defaultIt = std::find_if(candidates.begin(), candidates.end(), matchesPreferred);
+    }
+    if (defaultIt == candidates.end() && !candidates.empty()) defaultIt = candidates.begin();
+    if (defaultIt != candidates.end()) defaultIt->isDefault = true;
+
+    std::sort(candidates.begin(), candidates.end(), [](const DocumentHandlerInfo& left, const DocumentHandlerInfo& right) {
+        if (left.isDefault != right.isDefault) return left.isDefault;
+        if (left.available != right.available) return left.available;
+        if (left.appId != right.appId) return left.appId < right.appId;
+        if (left.registrationOwner != right.registrationOwner) return left.registrationOwner < right.registrationOwner;
+        return left.registrationGeneration < right.registrationGeneration;
+    });
+
+    result.count = std::min(candidates.size(), result.handlers.size());
+    result.truncated = candidates.size() > result.handlers.size();
+    for (size_t i = 0; i < result.count; ++i) result.handlers[i] = std::move(candidates[i]);
+    return result;
+}
+
+DocumentHandlerList AppRegistry::EnumerateCapableHandlersForPath(const std::string& path) const {
+    std::string extension;
+    if (extensionFromPath(path, extension) != PathExtensionStatus::Valid) return DocumentHandlerList{};
+    return EnumerateCapableHandlers(extension);
+}
+
 FileAssociationResolution AppRegistry::ResolveFileAssociation(const std::string& path) const {
-    FileAssociationResolution resolution;
     std::string extension;
     const PathExtensionStatus pathStatus = extensionFromPath(path, extension);
-    if (pathStatus == PathExtensionStatus::InvalidPath) {
-        resolution.status = FileAssociationResolutionStatus::InvalidPath;
-        resolution.reason = "document path is empty, malformed, or over capacity";
+    if (pathStatus != PathExtensionStatus::Valid) {
+        FileAssociationResolution resolution;
+        if (pathStatus == PathExtensionStatus::InvalidPath) {
+            resolution.status = FileAssociationResolutionStatus::InvalidPath;
+            resolution.reason = "document path is empty, malformed, or over capacity";
+        } else if (pathStatus == PathExtensionStatus::NoExtension) {
+            resolution.status = FileAssociationResolutionStatus::NoExtension;
+            resolution.reason = "document name has no extension";
+        } else {
+            resolution.status = FileAssociationResolutionStatus::InvalidExtension;
+            resolution.reason = "document extension is malformed or over capacity";
+        }
         return resolution;
     }
-    if (pathStatus == PathExtensionStatus::NoExtension) {
-        resolution.status = FileAssociationResolutionStatus::NoExtension;
-        resolution.reason = "document name has no extension";
-        return resolution;
-    }
-    if (pathStatus == PathExtensionStatus::InvalidExtension) {
+    return ResolveFileAssociationForExtension(path, extension);
+}
+
+FileAssociationResolution AppRegistry::ResolveFileAssociationForExtension(const std::string& path,
+                                                                           const std::string& extension) const {
+    const DocumentHandlerList handlers = EnumerateCapableHandlers(extension);
+    if (!handlers.validExtension) {
+        FileAssociationResolution resolution;
         resolution.status = FileAssociationResolutionStatus::InvalidExtension;
         resolution.reason = "document extension is malformed or over capacity";
         return resolution;
     }
-
-    resolution.extension = extension;
-    const FileAssociationRecord* match = nullptr;
-    size_t matchCount = 0;
-    for (const FileAssociationRecord& record : m_fileAssociations) {
-        if (record.extension != extension) continue;
-        match = &record;
-        ++matchCount;
-    }
-    if (matchCount == 0) {
+    if (handlers.count == 0) {
+        FileAssociationResolution resolution;
+        resolution.extension = handlers.extension;
         resolution.status = m_fileAssociationCapacityExceeded
             ? FileAssociationResolutionStatus::RegistryCapacityExceeded
             : FileAssociationResolutionStatus::NoAssociation;
@@ -431,33 +522,89 @@ FileAssociationResolution AppRegistry::ResolveFileAssociation(const std::string&
             : "no application declared this extension";
         return resolution;
     }
-    if (matchCount > 1 || (match && match->ambiguous)) {
-        resolution.status = FileAssociationResolutionStatus::Ambiguous;
-        resolution.reason = "more than one application declared this extension";
+    const DocumentHandlerInfo* selected = nullptr;
+    for (size_t i = 0; i < handlers.count; ++i) {
+        if (handlers.handlers[i].isDefault) {
+            selected = &handlers.handlers[i];
+            break;
+        }
+    }
+    if (!selected) selected = &handlers.handlers[0];
+    return ResolveDocumentActivation(*selected, path);
+}
+
+FileAssociationResolution AppRegistry::ResolveDocumentActivation(const DocumentHandlerInfo& handler,
+                                                                 const std::string& path) const {
+    return ResolveDocumentActivation(handler.appId, path, handler.registrationOwner, handler.registrationGeneration);
+}
+
+FileAssociationResolution AppRegistry::ResolveDocumentActivation(const std::string& canonicalAppId,
+                                                                 const std::string& path,
+                                                                 uint64_t expectedOwner,
+                                                                 uint64_t expectedGeneration) const {
+    FileAssociationResolution resolution;
+    std::string extension;
+    const PathExtensionStatus pathStatus = extensionFromPath(path, extension);
+    if (pathStatus != PathExtensionStatus::Valid) {
+        if (pathStatus == PathExtensionStatus::InvalidPath) {
+            resolution.status = FileAssociationResolutionStatus::InvalidPath;
+            resolution.reason = "document path is empty, malformed, or over capacity";
+        } else if (pathStatus == PathExtensionStatus::NoExtension) {
+            resolution.status = FileAssociationResolutionStatus::NoExtension;
+            resolution.reason = "document name has no extension";
+        } else {
+            resolution.status = FileAssociationResolutionStatus::InvalidExtension;
+            resolution.reason = "document extension is malformed or over capacity";
+        }
         return resolution;
     }
+    resolution.extension = extension;
+    if (canonicalAppId.empty() || canonicalAppId.size() > kAppModelMaxAppIdBytes) {
+        resolution.status = FileAssociationResolutionStatus::HandlerMissing;
+        resolution.reason = "canonical application ID is empty or over capacity";
+        return resolution;
+    }
+    resolution.appId = canonicalAppId;
 
-    resolution.appId = match->appId;
-    auto appIt = m_appsById.find(match->appId);
+    auto appIt = m_appsById.find(canonicalAppId);
     if (appIt == m_appsById.end() || appIt->second >= m_apps.size()) {
         resolution.status = FileAssociationResolutionStatus::HandlerMissing;
-        resolution.reason = "association handler is not registered";
+        resolution.reason = "selected canonical application ID is not registered";
         return resolution;
     }
     const RegisteredApp& app = m_apps[appIt->second];
     resolution.displayName = app.manifest.displayName;
-    if (app.temporaryOwnerRuntimeId != match->registrationOwner ||
-        app.temporaryGeneration != match->registrationGeneration) {
+    if ((expectedOwner != 0 || expectedGeneration != 0) &&
+        (app.temporaryOwnerRuntimeId != expectedOwner || app.temporaryGeneration != expectedGeneration)) {
+        resolution.status = FileAssociationResolutionStatus::HandlerStale;
+        resolution.reason = "selected handler registration owner or generation changed after enumeration";
+        return resolution;
+    }
+
+    const FileAssociationRecord* declaration = nullptr;
+    for (const FileAssociationRecord& record : m_fileAssociations) {
+        if (record.extension == extension && record.appId == canonicalAppId) {
+            declaration = &record;
+            break;
+        }
+    }
+    if (!declaration) {
+        resolution.status = FileAssociationResolutionStatus::HandlerDoesNotSupportDocuments;
+        resolution.reason = "selected application does not declare support for this extension";
+        return resolution;
+    }
+    if (app.temporaryOwnerRuntimeId != declaration->registrationOwner ||
+        app.temporaryGeneration != declaration->registrationGeneration) {
         resolution.status = FileAssociationResolutionStatus::HandlerStale;
         resolution.reason = "association registration owner or generation is stale";
         return resolution;
     }
-    if (!app.manifest.supportsDocumentActivation || !match->supportsDocumentActivation) {
+    if (!app.manifest.supportsDocumentActivation || !declaration->supportsDocumentActivation) {
         resolution.status = FileAssociationResolutionStatus::HandlerDoesNotSupportDocuments;
         resolution.reason = "registered handler does not declare document activation support";
         return resolution;
     }
-    if (!app.documentActivationBackendAvailable || !match->backendAvailable) {
+    if (!app.documentActivationBackendAvailable || !declaration->backendAvailable) {
         resolution.status = FileAssociationResolutionStatus::HandlerUnavailable;
         resolution.reason = "current runtime has no document activation dispatcher for this handler";
         return resolution;
@@ -469,7 +616,7 @@ FileAssociationResolution AppRegistry::ResolveFileAssociation(const std::string&
     resolution.activation.documentPath = path;
     resolution.activation.registrationOwner = app.temporaryOwnerRuntimeId;
     resolution.activation.registrationGeneration = app.temporaryGeneration;
-    resolution.reason = "association resolved to the current launchable registration";
+    resolution.reason = "explicit handler selection resolved to the current capable registration";
     return resolution;
 }
 
@@ -478,7 +625,8 @@ bool AppRegistry::IsDocumentActivationCurrent(const AppActivationContext& activa
         activation.appId.size() > kAppModelMaxAppIdBytes || !IsValidDocumentActivationPath(activation.documentPath)) {
         return false;
     }
-    const FileAssociationResolution current = ResolveFileAssociation(activation.documentPath);
+    const FileAssociationResolution current = ResolveDocumentActivation(activation.appId, activation.documentPath,
+        activation.registrationOwner, activation.registrationGeneration);
     return current.launchable() && current.appId == activation.appId &&
         current.activation.registrationOwner == activation.registrationOwner &&
         current.activation.registrationGeneration == activation.registrationGeneration;
@@ -520,13 +668,16 @@ void AppRegistry::RebuildFileAssociations() {
         return a.registrationGeneration < b.registrationGeneration;
     });
 
+    candidates.erase(std::unique(candidates.begin(), candidates.end(), [](const FileAssociationRecord& a, const FileAssociationRecord& b) {
+        return a.extension == b.extension && a.appId == b.appId &&
+            a.registrationOwner == b.registrationOwner && a.registrationGeneration == b.registrationGeneration;
+    }), candidates.end());
+
     m_fileAssociationCapacityExceeded = candidates.size() > kAppModelMaxFileAssociationRecords;
     m_fileAssociations.clear();
     m_fileAssociations.reserve(std::min(candidates.size(), kAppModelMaxFileAssociationRecords));
     for (size_t i = 0; i < candidates.size() && i < kAppModelMaxFileAssociationRecords; ++i) {
-        const bool duplicateBefore = i > 0 && candidates[i - 1].extension == candidates[i].extension;
-        const bool duplicateAfter = i + 1 < candidates.size() && candidates[i + 1].extension == candidates[i].extension;
-        candidates[i].ambiguous = duplicateBefore || duplicateAfter;
+        candidates[i].ambiguous = false;
         m_fileAssociations.push_back(candidates[i]);
     }
 }

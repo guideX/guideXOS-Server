@@ -13,6 +13,9 @@ constexpr size_t kAppModelMaxDocumentPathBytes = 4096;
 constexpr size_t kAppModelMaxFileExtensionBytes = 32;
 constexpr size_t kAppModelMaxFileAssociationsPerApp = 16;
 constexpr size_t kAppModelMaxFileAssociationRecords = 256;
+// Open With snapshots stay small and fixed-capacity. The current default is
+// always promoted into the retained prefix before truncation is reported.
+constexpr size_t kAppModelMaxDocumentHandlersPerExtension = 16;
 constexpr size_t kAppModelMaxEntriesPerManifest = 64;
 constexpr size_t kAppModelMaxRegistryApps = 512;
 constexpr size_t kAppModelMaxManifestBytes = 1024 * 1024;

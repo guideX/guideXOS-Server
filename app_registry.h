@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <array>
 #include <filesystem>
 #include <map>
 #include <string>
@@ -63,6 +64,31 @@ struct FileAssociationResolution {
     std::string reason;
 
     bool launchable() const { return status == FileAssociationResolutionStatus::Resolved; }
+};
+
+// Value-owned handler identity captured when a menu is built. owner/generation
+// are lifecycle guards for temporary registrations; appId remains the only
+// application identity used for lookup and dispatch.
+struct DocumentHandlerInfo {
+    std::string appId;
+    std::string displayName;
+    uint64_t registrationOwner = 0;
+    uint64_t registrationGeneration = 0;
+    bool supportsDocumentActivation = false;
+    bool registrationCurrent = false;
+    bool backendAvailable = false;
+    bool available = false;
+    bool isDefault = false;
+};
+
+struct DocumentHandlerList {
+    std::string extension;
+    std::array<DocumentHandlerInfo, kAppModelMaxDocumentHandlersPerExtension> handlers{};
+    size_t count = 0;
+    size_t declaredHandlerCount = 0;
+    size_t availableHandlerCount = 0;
+    bool truncated = false;
+    bool validExtension = false;
 };
 
 struct RegisteredApp {
@@ -143,7 +169,17 @@ public:
                                                const std::string& architecture = "amd64",
                                                bool includeTemporaryDevelopment = false) const;
     const AppEntry* FindCompatibleEntry(const std::string& appId, const std::string& currentArchitecture) const;
+    // One association record is one application's declared capability.
+    // Defaults are resolved separately, with stable canonical-ID ordering.
+    DocumentHandlerList EnumerateCapableHandlers(const std::string& extension) const;
+    DocumentHandlerList EnumerateCapableHandlersForPath(const std::string& path) const;
     FileAssociationResolution ResolveFileAssociation(const std::string& path) const;
+    FileAssociationResolution ResolveDocumentActivation(const std::string& canonicalAppId,
+                                                        const std::string& path,
+                                                        uint64_t expectedOwner = 0,
+                                                        uint64_t expectedGeneration = 0) const;
+    FileAssociationResolution ResolveDocumentActivation(const DocumentHandlerInfo& handler,
+                                                        const std::string& path) const;
     bool IsDocumentActivationCurrent(const AppActivationContext& activation) const;
     const std::vector<FileAssociationRecord>& GetFileAssociations() const;
     bool FileAssociationCapacityExceeded() const;
@@ -157,6 +193,8 @@ public:
 private:
     bool RegisterApp(const RegisteredApp& app, AppScanResult& result);
     bool ShouldReplaceDuplicate(const RegisteredApp& existingApp, const RegisteredApp& newApp) const;
+    FileAssociationResolution ResolveFileAssociationForExtension(const std::string& path,
+                                                                 const std::string& extension) const;
     void RebuildFileAssociations();
 
     bool m_preferSystemAppsOverUserApps = false;

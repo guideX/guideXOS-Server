@@ -5871,6 +5871,47 @@ namespace gxos {
             return false;
         }
 
+        apps::DocumentHandlerList DesktopService::GetDocumentHandlersForPath(const std::string& path) {
+            ensureDefaultAppsRegistered();
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+            return s_appRegistry.EnumerateCapableHandlersForPath(path);
+        }
+
+        bool DesktopService::OpenFilesystemEntryWithHandler(const apps::DocumentHandlerInfo& handler,
+                                                            const std::string& path,
+                                                            std::string& error,
+                                                            bool recordRecent) {
+            error.clear();
+            if (!apps::IsValidDocumentActivationPath(path)) {
+                error = "Invalid or overlong document path";
+                Logger::write(LogLevel::Warn, "Open With rejected an invalid or overlong document path");
+                NotificationManager::Add(error, NotificationLevel::Error);
+                return false;
+            }
+
+            ensureDefaultAppsRegistered();
+            apps::FileAssociationResolution activation;
+            {
+                std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+                activation = s_appRegistry.ResolveDocumentActivation(handler, path);
+            }
+            if (!activation.launchable()) {
+                error = "Open With selection rejected for " + path + ": " + activation.reason;
+                Logger::write(LogLevel::Warn, error);
+                NotificationManager::Add(error, NotificationLevel::Error);
+                return false;
+            }
+            if (!dispatchDocumentActivation(activation.activation, error)) {
+                if (error.empty()) error = "The selected document handler is no longer available";
+                NotificationManager::Add(error, NotificationLevel::Error);
+                return false;
+            }
+            if (recordRecent) AddRecentProgram(activation.appId);
+            Logger::write(LogLevel::Info, "Open With dispatched canonical appId=" + activation.appId +
+                " path=" + activation.activation.documentPath);
+            return true;
+        }
+
         bool DesktopService::IsSetAsDesktopBackgroundEligible(const std::string& path, bool isDirectory, bool isTrashItem) {
 #if defined(GXOS_BARE_METAL)
             (void)path;

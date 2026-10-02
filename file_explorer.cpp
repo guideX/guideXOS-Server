@@ -70,7 +70,8 @@ namespace gxos { namespace apps {
             SetAsDesktopBackground = 5,
             CopyFile = 6,
             CutFile = 7,
-            PasteFile = 8
+            PasteFile = 8,
+            OpenWith = 9
         };
 
         static const char* contextMenuLabel(ContextMenuAction action) {
@@ -84,6 +85,7 @@ namespace gxos { namespace apps {
                 case ContextMenuAction::CopyFile: return "Copy File";
                 case ContextMenuAction::CutFile: return "Cut File";
                 case ContextMenuAction::PasteFile: return "Paste";
+                case ContextMenuAction::OpenWith: return "Open With";
                 default: return "";
             }
         }
@@ -546,10 +548,13 @@ namespace gxos { namespace apps {
     std::string FileExplorer::s_deleteTargetPath;
     bool FileExplorer::s_deleteTargetIsDirectory = false;
     bool FileExplorer::s_contextMenuOpen = false;
+    bool FileExplorer::s_openWithSubmenuOpen = false;
     int FileExplorer::s_contextMenuX = 0;
     int FileExplorer::s_contextMenuY = 0;
     int FileExplorer::s_contextMenuHover = -1;
+    int FileExplorer::s_openWithSubmenuHover = -1;
     std::vector<int> FileExplorer::s_contextMenuActions;
+    FileExplorerOpenWithMenuSnapshot FileExplorer::s_contextMenuOpenWith;
     std::string FileExplorer::s_contextMenuDestinationPath;
     uint64_t FileExplorer::s_lastFileOperationGeneration = 0;
 
@@ -608,8 +613,11 @@ namespace gxos { namespace apps {
         s_promptMode = PromptNone;
         s_showDeleteConfirmation = false;
         s_contextMenuOpen = false;
+        s_openWithSubmenuOpen = false;
         s_contextMenuHover = -1;
+        s_openWithSubmenuHover = -1;
         s_contextMenuActions.clear();
+        s_contextMenuOpenWith.Reset();
         s_contextMenuDestinationPath.clear();
         s_lastFileOperationGeneration = gxos::files::FileOperations::OperationGeneration();
         s_lastEntryClickTick = 0;
@@ -1239,8 +1247,10 @@ namespace gxos { namespace apps {
         }
 
         if (s_contextMenuOpen && action == "move") {
-            int hover = hitTestContextMenu(x, y);
-            if (hover != s_contextMenuHover) {
+            const int handlerHover = hitTestOpenWithSubmenu(x, y);
+            const int hover = handlerHover >= 0 ? hitTestContextMenu(-1, -1) : hitTestContextMenu(x, y);
+            if (handlerHover != s_openWithSubmenuHover || hover != s_contextMenuHover) {
+                s_openWithSubmenuHover = handlerHover;
                 s_contextMenuHover = hover;
                 updateDisplay();
             }
@@ -1250,8 +1260,11 @@ namespace gxos { namespace apps {
         if (s_contextMenuOpen && action == "down") {
             if (button == 1 && handleContextMenuClick(x, y)) return;
             s_contextMenuOpen = false;
+            s_openWithSubmenuOpen = false;
             s_contextMenuHover = -1;
+            s_openWithSubmenuHover = -1;
             s_contextMenuActions.clear();
+            s_contextMenuOpenWith.Reset();
             s_contextMenuDestinationPath.clear();
             updateDisplay();
             if (button != 2) return;
@@ -1545,14 +1558,40 @@ namespace gxos { namespace apps {
         return (y - s_contextMenuY) / kContextMenuItemH;
     }
 
+    int FileExplorer::hitTestOpenWithSubmenu(int x, int y) {
+        if (!s_contextMenuOpen || !s_openWithSubmenuOpen || s_contextMenuOpenWith.count == 0) return -1;
+        const auto parent = std::find(s_contextMenuActions.begin(), s_contextMenuActions.end(),
+            static_cast<int>(ContextMenuAction::OpenWith));
+        if (parent == s_contextMenuActions.end()) return -1;
+        const int parentIndex = static_cast<int>(std::distance(s_contextMenuActions.begin(), parent));
+        const int width = kContextMenuW;
+        const int height = kContextMenuItemH * static_cast<int>(s_contextMenuOpenWith.count);
+        int left = s_contextMenuX + kContextMenuW - 1;
+        if (left + width > kWindowW) left = std::max(0, s_contextMenuX - width + 1);
+        int top = s_contextMenuY + parentIndex * kContextMenuItemH;
+        top = std::max(0, std::min(top, kWindowH - height - 28));
+        if (x < left || x >= left + width || y < top || y >= top + height) return -1;
+        return (y - top) / kContextMenuItemH;
+    }
+
     void FileExplorer::showContextMenuForRow(int rowIndex, int x, int y) {
         if (rowIndex < 0 || rowIndex >= static_cast<int>(s_entries.size())) return;
         s_selectedIndex = rowIndex;
         s_contextMenuOpen = true;
+        s_openWithSubmenuOpen = false;
         s_contextMenuActions.clear();
+        s_contextMenuOpenWith.Reset();
         s_contextMenuDestinationPath.clear();
         s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::Open));
         const ExplorerFileEntry& entry = s_entries[rowIndex];
+        if (!entry.isDirectory()) {
+            const DocumentHandlerList handlers = DesktopService::GetDocumentHandlersForPath(entry.fullPath);
+            s_contextMenuOpenWith = BuildFileExplorerOpenWithMenu(handlers, entry.isDirectory(), entry.fullPath);
+            if (s_contextMenuOpenWith.visible) s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::OpenWith));
+            Logger::write(LogLevel::Info, "FileExplorer Open With snapshot path=" + entry.fullPath +
+                " handlers=" + std::to_string(s_contextMenuOpenWith.count) +
+                " truncated=" + (s_contextMenuOpenWith.truncated ? "true" : "false"));
+        }
         s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::CopyFile));
         s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::CutFile));
         if (entry.isDirectory()) {
@@ -1583,6 +1622,7 @@ namespace gxos { namespace apps {
         if (s_contextMenuX < 0) s_contextMenuX = 0;
         if (s_contextMenuY < 0) s_contextMenuY = 0;
         s_contextMenuHover = -1;
+        s_openWithSubmenuHover = -1;
         Logger::write(LogLevel::Info, "FileExplorer context menu created for path=" + s_entries[rowIndex].fullPath);
     }
 
@@ -1590,7 +1630,9 @@ namespace gxos { namespace apps {
         std::string pasteError;
         if (!gxos::files::FileOperations::CanPasteFile(s_currentPath, pasteError)) return;
         s_contextMenuOpen = true;
+        s_openWithSubmenuOpen = false;
         s_contextMenuActions.clear();
+        s_contextMenuOpenWith.Reset();
         s_contextMenuDestinationPath = s_currentPath;
         s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::PasteFile));
         const int menuH = kContextMenuItemH * static_cast<int>(s_contextMenuActions.size());
@@ -1599,17 +1641,55 @@ namespace gxos { namespace apps {
         if (s_contextMenuX < 0) s_contextMenuX = 0;
         if (s_contextMenuY < 0) s_contextMenuY = 0;
         s_contextMenuHover = -1;
+        s_openWithSubmenuHover = -1;
         Logger::write(LogLevel::Info, "FileExplorer empty-space context menu created for path=" + s_currentPath);
     }
 
     bool FileExplorer::handleContextMenuClick(int x, int y) {
+        const int handlerIndex = hitTestOpenWithSubmenu(x, y);
+        if (handlerIndex >= 0 && handlerIndex < static_cast<int>(s_contextMenuOpenWith.count)) {
+            DocumentHandlerInfo handler;
+            std::string targetPath;
+            if (!s_contextMenuOpenWith.Select(static_cast<size_t>(handlerIndex), handler, targetPath)) return false;
+            s_contextMenuOpen = false;
+            s_openWithSubmenuOpen = false;
+            s_contextMenuHover = -1;
+            s_openWithSubmenuHover = -1;
+            s_contextMenuActions.clear();
+            s_contextMenuOpenWith.Reset();
+            s_contextMenuDestinationPath.clear();
+            Logger::write(LogLevel::Info, "FileExplorer Open With selected canonical appId=" + handler.appId +
+                " path=" + targetPath + " owner=" + std::to_string(handler.registrationOwner) +
+                " generation=" + std::to_string(handler.registrationGeneration));
+            std::string error;
+            if (DesktopService::OpenFilesystemEntryWithHandler(handler, targetPath, error)) {
+                s_status = "Opened with " + handler.displayName;
+            } else {
+                s_status = error.empty() ? "Selected document handler is unavailable" : error;
+            }
+            updateDisplay();
+            return true;
+        }
         int item = hitTestContextMenu(x, y);
         if (item < 0) return false;
         if (item >= static_cast<int>(s_contextMenuActions.size())) return false;
         const ContextMenuAction action = static_cast<ContextMenuAction>(s_contextMenuActions[item]);
+        if (action == ContextMenuAction::OpenWith) {
+            s_openWithSubmenuOpen = !s_openWithSubmenuOpen;
+            s_openWithSubmenuHover = -1;
+            Logger::write(LogLevel::Info, std::string("FileExplorer Open With submenu ") +
+                (s_openWithSubmenuOpen ? "opened" : "closed") +
+                " path=" + s_contextMenuOpenWith.targetPath +
+                " handlers=" + std::to_string(s_contextMenuOpenWith.count));
+            updateDisplay();
+            return true;
+        }
         s_contextMenuOpen = false;
+        s_openWithSubmenuOpen = false;
         s_contextMenuHover = -1;
+        s_openWithSubmenuHover = -1;
         s_contextMenuActions.clear();
+        s_contextMenuOpenWith.Reset();
         const std::string pasteDestination = s_contextMenuDestinationPath;
         s_contextMenuDestinationPath.clear();
         switch (action) {
@@ -2029,6 +2109,49 @@ namespace gxos { namespace apps {
             }
             drawSurfaceTextAt(s_contextMenuX + 8, centeredTextY(itemY, kContextMenuItemH), contextMenuLabel(static_cast<ContextMenuAction>(s_contextMenuActions[i])),
                 FileExplorerTextColor());
+            if (s_contextMenuActions[i] == static_cast<int>(ContextMenuAction::OpenWith)) {
+                drawSurfaceTextAt(s_contextMenuX + kContextMenuW - 18, centeredTextY(itemY, kContextMenuItemH), ">",
+                    FileExplorerTextColor());
+            }
+        }
+
+        if (s_openWithSubmenuOpen && s_contextMenuOpenWith.count != 0) {
+            const auto parent = std::find(s_contextMenuActions.begin(), s_contextMenuActions.end(),
+                static_cast<int>(ContextMenuAction::OpenWith));
+            if (parent == s_contextMenuActions.end()) return;
+            const int parentIndex = static_cast<int>(std::distance(s_contextMenuActions.begin(), parent));
+            const int subHeight = kContextMenuItemH * static_cast<int>(s_contextMenuOpenWith.count);
+            int subX = s_contextMenuX + kContextMenuW - 1;
+            if (subX + kContextMenuW > kWindowW) subX = std::max(0, s_contextMenuX - kContextMenuW + 1);
+            int subY = s_contextMenuY + parentIndex * kContextMenuItemH;
+            subY = std::max(0, std::min(subY, kWindowH - subHeight - 28));
+            drawRect(subX + 2, subY + 2, kContextMenuW, subHeight,
+                static_cast<int>((shadowColor >> 16) & 0xFF),
+                static_cast<int>((shadowColor >> 8) & 0xFF),
+                static_cast<int>(shadowColor & 0xFF));
+            drawRect(subX, subY, kContextMenuW, subHeight,
+                static_cast<int>((menuColor >> 16) & 0xFF),
+                static_cast<int>((menuColor >> 8) & 0xFF),
+                static_cast<int>(menuColor & 0xFF));
+            drawRect(subX, subY, kContextMenuW, 1,
+                static_cast<int>((menuBorder >> 16) & 0xFF),
+                static_cast<int>((menuBorder >> 8) & 0xFF),
+                static_cast<int>(menuBorder & 0xFF));
+            drawRect(subX, subY + subHeight - 1, kContextMenuW, 1,
+                static_cast<int>((menuBorder >> 16) & 0xFF),
+                static_cast<int>((menuBorder >> 8) & 0xFF),
+                static_cast<int>(menuBorder & 0xFF));
+            for (size_t i = 0; i < s_contextMenuOpenWith.count; ++i) {
+                const int itemY = subY + static_cast<int>(i) * kContextMenuItemH;
+                if (static_cast<int>(i) == s_openWithSubmenuHover) {
+                    drawRect(subX + 1, itemY + 1, kContextMenuW - 2, kContextMenuItemH - 2,
+                        static_cast<int>((hoverColor >> 16) & 0xFF),
+                        static_cast<int>((hoverColor >> 8) & 0xFF),
+                        static_cast<int>(hoverColor & 0xFF));
+                }
+                drawSurfaceTextAt(subX + 8, centeredTextY(itemY, kContextMenuItemH), s_contextMenuOpenWith.items[i].label,
+                    FileExplorerTextColor());
+            }
         }
     }
 

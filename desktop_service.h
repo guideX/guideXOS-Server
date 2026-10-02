@@ -7,7 +7,7 @@
 #include <vector>
 #include <cstdint>
 
-namespace gxos { namespace apps { struct RegisteredApp; } namespace gui {
+namespace gxos { namespace apps { struct RegisteredApp; struct DocumentHandlerInfo; struct DocumentHandlerList; } namespace gui {
     // Pinned item types matching C# implementation
     enum class PinnedKind : uint8_t {
         App = 0,        // Application name (e.g., "Calculator")
@@ -143,6 +143,8 @@ namespace gxos { namespace apps { struct RegisteredApp; } namespace gui {
         // still uses the normal resolver, Native ELF pipeline, and runtime.
         static bool LaunchDevelopmentApp(const std::string& appId, uint64_t ownerRuntimeId, uint64_t generation, bool debugControlled, std::string& error, uint64_t& outProcessId);
         static bool OpenFilesystemEntry(const std::string& path, bool isDirectory, std::string& error, bool recordRecent = true);
+        static bool OpenFilesystemEntryWithHandler(const apps::DocumentHandlerInfo& handler, const std::string& path, std::string& error, bool recordRecent = true);
+        static apps::DocumentHandlerList GetDocumentHandlersForPath(const std::string& path);
         static bool IsSetAsDesktopBackgroundEligible(const std::string& path, bool isDirectory, bool isTrashItem = false);
         static bool DispatchSetAsDesktopBackground(const std::string& path, const std::string& sourceSurface, std::string& error);
         static const char* SetAsDesktopBackgroundActionIdentity();
