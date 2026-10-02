@@ -245,6 +245,9 @@ typedef struct gx_development_debug_request {
     uint32_t hitCountPolicy;
     uint64_t hitCountThreshold;
     const char* logTemplate;
+    /* Append-only Phase 29O user-step command identity. Zero is reserved for
+       non-step commands and internal breakpoint rebind single-steps. */
+    uint64_t commandGeneration;
 } gx_development_debug_request;
 
 #define GX_DEVELOPMENT_DEBUG_REQUEST_BREAKPOINT_BYTES \
@@ -253,6 +256,9 @@ typedef struct gx_development_debug_request {
 #define GX_DEVELOPMENT_DEBUG_REQUEST_POLICY_BYTES \
     ((uint32_t)(offsetof(gx_development_debug_request, logTemplate) + \
                 sizeof(((gx_development_debug_request*)0)->logTemplate)))
+#define GX_DEVELOPMENT_DEBUG_REQUEST_STEP_BYTES \
+    ((uint32_t)(offsetof(gx_development_debug_request, commandGeneration) + \
+                sizeof(((gx_development_debug_request*)0)->commandGeneration)))
 
 typedef enum gx_development_debug_breakpoint_status {
     GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_NONE = 0,
@@ -541,6 +547,8 @@ typedef struct gx_development_debug_snapshot {
     uint32_t outputDroppedCount;
     uint32_t outputOperationStatus;
     gx_development_debug_output_record output[GX_DEVELOPMENT_DEBUG_MAX_OUTPUT_RECORDS];
+    /* Append-only Phase 29O identity for the user step that owns this stop. */
+    uint64_t commandGeneration;
 } gx_development_debug_snapshot;
 
 enum {

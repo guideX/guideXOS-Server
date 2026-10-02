@@ -96,7 +96,7 @@ static_assert(offsetof(gx_development_run_request, debugSourcePath) == 96, "deve
 static_assert(offsetof(gx_development_run_request, debugSourceLine) == 104, "development run source line offset changed");
 static_assert(offsetof(gx_development_run_request, debugSourceColumn) == 108, "development run source column offset changed");
 static_assert(offsetof(gx_development_run_request, debugSourceCondition) == 112, "development run condition offset changed");
-static_assert(sizeof(gx_development_debug_request) == 160, "development debug request size changed");
+static_assert(sizeof(gx_development_debug_request) == 168, "development debug request size changed");
 static_assert(offsetof(gx_development_debug_request, expression) == 104,
               "watch expression request field must be append-only");
 static_assert(offsetof(gx_development_debug_request, sourcePath) == 112,
@@ -121,6 +121,10 @@ static_assert(GX_DEVELOPMENT_DEBUG_REQUEST_BREAKPOINT_BYTES == 136,
               "source breakpoint request bytes changed");
 static_assert(GX_DEVELOPMENT_DEBUG_REQUEST_POLICY_BYTES == 160,
               "breakpoint policy request bytes changed");
+static_assert(offsetof(gx_development_debug_request, commandGeneration) == 160,
+              "step command identity must be appended after the policy contract");
+static_assert(GX_DEVELOPMENT_DEBUG_REQUEST_STEP_BYTES == 168,
+              "step request extension size changed");
 static_assert(sizeof(gx_development_debug_variable) == 128, "development debug variable size changed");
 static_assert(offsetof(gx_development_debug_variable, kind) == 64, "development debug variable kind offset changed");
 static_assert(offsetof(gx_development_debug_variable, frameOffset) == 92,
@@ -249,7 +253,9 @@ static_assert(offsetof(gx_development_debug_snapshot, outputCount) == 4328,
               "debug output count must be appended after the breakpoint list");
 static_assert(offsetof(gx_development_debug_snapshot, output) == 4344,
               "debug output records offset changed");
-static_assert(sizeof(gx_development_debug_snapshot) == 27384, "development debug snapshot size changed");
+static_assert(offsetof(gx_development_debug_snapshot, commandGeneration) == 27384,
+              "step command identity must be append-only in the debug snapshot");
+static_assert(sizeof(gx_development_debug_snapshot) == 27392, "development debug snapshot size changed");
 static_assert(offsetof(gx_development_debug_call_stack_frame, instructionPointer) == 8,
               "call stack frame instruction pointer offset changed");
 static_assert(offsetof(gx_development_debug_call_stack_frame, sourcePath) == 112,

@@ -358,6 +358,7 @@ int main() {
     sourceStep.flags = GX_DEVELOPMENT_DEBUG_FLAG_REINSTALL_BREAKPOINT;
     sourceStep.threadId = secondTrap.threadId;
     sourceStep.stopGeneration = secondTrap.context.stopGeneration;
+    sourceStep.commandGeneration = 101;
     gx_development_debug_snapshot sourceStepPending{};
     if (!expect(NativeAppDebugger::Command(sourceStep, "native-debugger-runtime-proof", &sourceStepPending) == gxos::apps::GX_OK &&
                 sourceStepPending.status == GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING &&
@@ -370,6 +371,8 @@ int main() {
     gx_development_debug_snapshot userStepOne{};
     if (!expect(pollForTrap(GX_DEVELOPMENT_DEBUG_TRAP_SINGLE_STEP, userStepOne) &&
                 userStepOne.singleStepKind == GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE &&
+                userStepOne.commandGeneration == sourceStep.commandGeneration &&
+                userStepOne.context.stopGeneration == secondTrap.context.stopGeneration + 1 &&
                 userStepOne.context.rip == targetAddress + 2 && *breakpointByte == 0xCC && *counter == 2,
                 "user source-step observes a real instruction and rebinds the breakpoint")) {
         cleanup();
@@ -381,6 +384,7 @@ int main() {
     gx_development_debug_request sourceStepTwo = makeRequest(GX_DEVELOPMENT_DEBUG_STEP_INSTRUCTION, 0, 0);
     sourceStepTwo.threadId = userStepOne.threadId;
     sourceStepTwo.stopGeneration = userStepOne.context.stopGeneration;
+    sourceStepTwo.commandGeneration = 102;
     gx_development_debug_snapshot sourceStepTwoPending{};
     if (!expect(NativeAppDebugger::Command(sourceStepTwo, "native-debugger-runtime-proof", &sourceStepTwoPending) == gxos::apps::GX_OK &&
                 sourceStepTwoPending.status == GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING &&
@@ -392,6 +396,8 @@ int main() {
     gx_development_debug_snapshot userStepTwo{};
     if (!expect(pollForTrap(GX_DEVELOPMENT_DEBUG_TRAP_SINGLE_STEP, userStepTwo) &&
                 userStepTwo.singleStepKind == GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE &&
+                userStepTwo.commandGeneration == sourceStepTwo.commandGeneration &&
+                userStepTwo.context.stopGeneration == userStepOne.context.stopGeneration + 1 &&
                 userStepTwo.context.threadId == userStepOne.context.threadId,
                 "second user source-step observes a real EXCEPTION_SINGLE_STEP")) {
         cleanup();
@@ -547,6 +553,7 @@ int main() {
     stepOverCallRequest.auxiliaryAddress = stepOverReturn;
     stepOverCallRequest.threadId = stepOverCallTrap.threadId;
     stepOverCallRequest.stopGeneration = stepOverCallTrap.context.stopGeneration;
+    stepOverCallRequest.commandGeneration = 201;
     gx_development_debug_snapshot stepOverCallResult{};
     if (!expect(NativeAppDebugger::Command(stepOverCallRequest,
                                            "native-debugger-runtime-proof", &stepOverCallResult) == gxos::apps::GX_OK &&
@@ -557,6 +564,8 @@ int main() {
     if (!expect(pollForTrapFor(GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT, stepOverReturnTrap, 43, 78) &&
                 stepOverReturnTrap.internalBreakpointTrap != 0 &&
                 stepOverReturnTrap.internalBreakpointId == stepOverOwner &&
+                stepOverReturnTrap.commandGeneration == stepOverCallRequest.commandGeneration &&
+                stepOverReturnTrap.context.stopGeneration == stepOverCallTrap.context.stopGeneration + 1 &&
                 stepOverReturnTrap.targetAddress == stepOverReturn && *stepOverCounter == 1 &&
                 stepOverCode[5] == 0xCC,
                 "callee executes exactly once and the real return INT3 traps")) return 1;
@@ -751,6 +760,7 @@ int main() {
     stepOutRequest.auxiliaryAddress = savedReturnAddress;
     stepOutRequest.threadId = stepOutCurrentTrap.threadId;
     stepOutRequest.stopGeneration = stepOutCurrentTrap.context.stopGeneration;
+    stepOutRequest.commandGeneration = 301;
     stepOutRequest.flags = GX_DEVELOPMENT_DEBUG_FLAG_REINSTALL_BREAKPOINT;
     gx_development_debug_snapshot stepOutStart{};
     if (!expect(NativeAppDebugger::Command(stepOutRequest, "native-debugger-runtime-proof", &stepOutStart) == gxos::apps::GX_OK &&
@@ -765,6 +775,8 @@ int main() {
                 stepOutReturnTrap.internalBreakpointTrap != 0 &&
                 stepOutReturnTrap.internalBreakpointPurpose == GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_STEP_OUT &&
                 stepOutReturnTrap.internalBreakpointId == stepOutOwner &&
+                stepOutReturnTrap.commandGeneration == stepOutRequest.commandGeneration &&
+                stepOutReturnTrap.context.stopGeneration == stepOutCurrentTrap.context.stopGeneration + 1 &&
                 stepOutReturnTrap.targetAddress == savedReturnAddress &&
                 stepOutReturnTrap.threadId == stepOutCurrentTrap.threadId && *stepOutCounter == 0 &&
                 stepOutCode[69] == 0xCC,

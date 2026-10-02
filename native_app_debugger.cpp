@@ -83,6 +83,7 @@ struct DebugRuntime {
     std::atomic<uint64_t> trapAddress{0};
     std::atomic<uint64_t> trapBindingId{0};
     std::atomic<uint64_t> trapStopGeneration{0};
+    std::atomic<uint64_t> trapCommandGeneration{0};
     std::atomic<bool> trapInternalBreakpoint{false};
     std::atomic<uint64_t> trapInternalBreakpointId{0};
     std::atomic<uint32_t> trapInternalBreakpointPurpose{GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_NONE};
@@ -94,6 +95,7 @@ struct DebugRuntime {
     std::atomic<uint64_t> pendingSessionGeneration{0};
     std::atomic<uint64_t> pendingThreadId{0};
     std::atomic<uint64_t> pendingStopGeneration{0};
+    std::atomic<uint64_t> pendingCommandGeneration{0};
     std::atomic<uint64_t> pendingBindingId{0};
     std::atomic<uint64_t> pendingAddress{0};
     std::atomic<uint32_t> pendingReinstall{0};
@@ -102,6 +104,7 @@ struct DebugRuntime {
     std::atomic<uint64_t> pendingRflagsWithTrapFlag{0};
     std::atomic<uint64_t> singleStepRflagsAfterClear{0};
     std::atomic<uint32_t> singleStepKind{GX_DEVELOPMENT_DEBUG_SINGLE_STEP_NONE};
+    std::atomic<uint64_t> singleStepCommandGeneration{0};
     gx_development_debug_register_context trapContext{};
     gx_development_debug_register_context singleStepContext{};
     std::vector<DebugSourceMapping> sourceMappings;
@@ -111,12 +114,14 @@ struct DebugRuntime {
     bool sourceMetadataPresent = false;
     bool sourceMetadataValid = false;
     std::atomic<bool> stepOverActive{false};
+    std::atomic<uint64_t> stepOverCommandGeneration{0};
     std::atomic<uint64_t> stepOverInternalOwnerId{0};
     std::atomic<uint64_t> stepOverReturnBindingId{0};
     std::atomic<uint64_t> stepOverReturnAddress{0};
     std::atomic<uint64_t> stepOverCallBindingId{0};
     std::atomic<uint64_t> stepOverCallAddress{0};
     std::atomic<bool> stepOutActive{false};
+    std::atomic<uint64_t> stepOutCommandGeneration{0};
     std::atomic<uint64_t> stepOutInternalOwnerId{0};
     std::atomic<uint64_t> stepOutReturnBindingId{0};
     std::atomic<uint64_t> stepOutReturnAddress{0};
@@ -676,6 +681,7 @@ bool rebindSuspendedCall(DebugRuntime& runtime, std::string& error) {
 
 void clearStepOverRuntime(DebugRuntime& runtime) {
     runtime.stepOverActive.store(false, std::memory_order_release);
+    runtime.stepOverCommandGeneration.store(0, std::memory_order_release);
     runtime.stepOverInternalOwnerId.store(0, std::memory_order_release);
     runtime.stepOverReturnBindingId.store(0, std::memory_order_release);
     runtime.stepOverReturnAddress.store(0, std::memory_order_release);
@@ -683,6 +689,7 @@ void clearStepOverRuntime(DebugRuntime& runtime) {
 
 void clearStepOutRuntime(DebugRuntime& runtime) {
     runtime.stepOutActive.store(false, std::memory_order_release);
+    runtime.stepOutCommandGeneration.store(0, std::memory_order_release);
     runtime.stepOutInternalOwnerId.store(0, std::memory_order_release);
     runtime.stepOutReturnBindingId.store(0, std::memory_order_release);
     runtime.stepOutReturnAddress.store(0, std::memory_order_release);
@@ -734,13 +741,33 @@ LONG CALLBACK debugVectoredHandler(EXCEPTION_POINTERS* pointers) {
         if (!runtime->singleStepPending.load(std::memory_order_acquire)) return EXCEPTION_CONTINUE_SEARCH;
         const uint64_t threadId = static_cast<uint64_t>(GetCurrentThreadId());
         if (threadId != runtime->pendingThreadId.load(std::memory_order_acquire)) return EXCEPTION_CONTINUE_SEARCH;
-        const uint64_t stopGeneration = runtime->pendingStopGeneration.load(std::memory_order_acquire);
+        uint64_t stopGeneration = runtime->pendingStopGeneration.load(std::memory_order_acquire);
+        const uint64_t commandGeneration = runtime->pendingCommandGeneration.load(std::memory_order_acquire);
         const uint64_t bindingId = runtime->pendingBindingId.load(std::memory_order_acquire);
         const uint64_t address = runtime->pendingAddress.load(std::memory_order_acquire);
         const uint32_t stepKind = runtime->pendingStepKind.load(std::memory_order_acquire);
+        if (stepKind == GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE) {
+            uint64_t observed = runtime->stopGenerationCounter.load(std::memory_order_acquire);
+            for (;;) {
+                const uint64_t base = observed > stopGeneration ? observed : stopGeneration;
+                if (base == std::numeric_limits<uint64_t>::max()) {
+                    runtime->singleStepFailed.store(true, std::memory_order_release);
+                    return EXCEPTION_CONTINUE_SEARCH;
+                }
+                const uint64_t next = base + 1;
+                if (runtime->stopGenerationCounter.compare_exchange_weak(
+                        observed, next, std::memory_order_acq_rel, std::memory_order_acquire)) {
+                    stopGeneration = next;
+                    break;
+                }
+            }
+        }
         captureWindowsContext(*pointers->ContextRecord, processId, runtime->runtimeId, threadId,
                               runtime->pendingSessionGeneration.load(std::memory_order_acquire), stopGeneration,
                               runtime->singleStepContext);
+        runtime->singleStepCommandGeneration.store(
+            stepKind == GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE ? commandGeneration : 0,
+            std::memory_order_release);
         const uint64_t rflagsBeforeClear = static_cast<uint64_t>(pointers->ContextRecord->EFlags);
         pointers->ContextRecord->EFlags = static_cast<DWORD>(rflagsBeforeClear & ~kAmd64TrapFlag);
         runtime->singleStepRflagsAfterClear.store(static_cast<uint64_t>(pointers->ContextRecord->EFlags), std::memory_order_release);
@@ -840,6 +867,10 @@ LONG CALLBACK debugVectoredHandler(EXCEPTION_POINTERS* pointers) {
             runtime->stepOverReturnBindingId.load(std::memory_order_acquire) == binding.bindingId &&
             runtime->stepOverReturnAddress.load(std::memory_order_acquire) == binding.address;
         const bool internalBreakpoint = stepOutBreakpoint || stepOverBreakpoint;
+        runtime->trapCommandGeneration.store(stepOutBreakpoint ?
+            runtime->stepOutCommandGeneration.load(std::memory_order_acquire) :
+            (stepOverBreakpoint ? runtime->stepOverCommandGeneration.load(std::memory_order_acquire) : 0),
+            std::memory_order_release);
         runtime->trapInternalBreakpoint.store(internalBreakpoint, std::memory_order_release);
         runtime->trapInternalBreakpointId.store(stepOutBreakpoint ?
             runtime->stepOutInternalOwnerId.load(std::memory_order_acquire) :
@@ -927,6 +958,7 @@ bool NativeAppDebugger::RegisterRuntime(NativeAppRuntimeContext& context,
         runtime.trapAddress.store(0, std::memory_order_release);
         runtime.trapBindingId.store(0, std::memory_order_release);
         runtime.trapStopGeneration.store(0, std::memory_order_release);
+        runtime.trapCommandGeneration.store(0, std::memory_order_release);
         runtime.stopGenerationCounter.store(0, std::memory_order_release);
         runtime.singleStepObserved.store(false, std::memory_order_release);
         runtime.singleStepFailed.store(false, std::memory_order_release);
@@ -935,6 +967,7 @@ bool NativeAppDebugger::RegisterRuntime(NativeAppRuntimeContext& context,
         runtime.pendingSessionGeneration.store(0, std::memory_order_release);
         runtime.pendingThreadId.store(0, std::memory_order_release);
         runtime.pendingStopGeneration.store(0, std::memory_order_release);
+        runtime.pendingCommandGeneration.store(0, std::memory_order_release);
         runtime.pendingBindingId.store(0, std::memory_order_release);
         runtime.pendingAddress.store(0, std::memory_order_release);
         runtime.pendingReinstall.store(0, std::memory_order_release);
@@ -943,6 +976,7 @@ bool NativeAppDebugger::RegisterRuntime(NativeAppRuntimeContext& context,
         runtime.pendingRflagsWithTrapFlag.store(0, std::memory_order_release);
         runtime.singleStepRflagsAfterClear.store(0, std::memory_order_release);
         runtime.singleStepKind.store(GX_DEVELOPMENT_DEBUG_SINGLE_STEP_NONE, std::memory_order_release);
+        runtime.singleStepCommandGeneration.store(0, std::memory_order_release);
         runtime.trapContext = gx_development_debug_register_context{};
         runtime.singleStepContext = gx_development_debug_register_context{};
         runtime.sourceMappings.clear();
@@ -1087,6 +1121,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
     snapshot->nativeRuntimeId = runtime->runtimeId;
     snapshot->stackLow = runtime->stackLow;
     snapshot->stackHigh = runtime->stackHigh;
+    snapshot->commandGeneration = request.commandGeneration;
     switch (request.command) {
     case GX_DEVELOPMENT_DEBUG_BIND_SOFTWARE_BREAKPOINT: {
         if (request.targetAddress == 0 || request.breakpointId == 0) { setError(snapshot, "breakpoint identity is incomplete"); return GX_ERROR_INVALID_ARGUMENT; }
@@ -1251,7 +1286,8 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
     }
     case GX_DEVELOPMENT_DEBUG_STEP_OVER_CALL: {
         if (request.breakpointId == 0 || request.targetAddress == 0 || request.auxiliaryAddress == 0 ||
-            request.threadId == 0 || request.stopGeneration == 0) {
+            request.threadId == 0 || request.stopGeneration == 0 || request.commandGeneration == 0 ||
+            request.size < GX_DEVELOPMENT_DEBUG_REQUEST_STEP_BYTES) {
             setError(snapshot, "Step Over call identity is incomplete");
             return GX_ERROR_INVALID_ARGUMENT;
         }
@@ -1278,6 +1314,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
             return GX_ERROR_FAILED;
         }
         runtime->stepOverActive.store(true, std::memory_order_release);
+        runtime->stepOverCommandGeneration.store(request.commandGeneration, std::memory_order_release);
         runtime->stepOverInternalOwnerId.store(request.breakpointId, std::memory_order_release);
         runtime->stepOverReturnBindingId.store(returnBinding->bindingId, std::memory_order_release);
         runtime->stepOverReturnAddress.store(request.auxiliaryAddress, std::memory_order_release);
@@ -1318,6 +1355,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
         snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_READY;
         snapshot->bindingId = returnBinding->bindingId;
         snapshot->targetAddress = request.auxiliaryAddress;
+        snapshot->commandGeneration = request.commandGeneration;
         Logger::write(LogLevel::Info, "[NativeAppDebugger] Step Over call released runtimeId=" +
             std::to_string(runtime->runtimeId) + " call=0x" + [&request]() {
                 std::ostringstream value; value << std::hex << request.targetAddress; return value.str(); }() +
@@ -1327,7 +1365,8 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
     }
     case GX_DEVELOPMENT_DEBUG_STEP_OUT_RETURN: {
         if (request.breakpointId == 0 || request.targetAddress == 0 ||
-            request.auxiliaryAddress == 0 || request.threadId == 0 || request.stopGeneration == 0) {
+            request.auxiliaryAddress == 0 || request.threadId == 0 || request.stopGeneration == 0 ||
+            request.commandGeneration == 0 || request.size < GX_DEVELOPMENT_DEBUG_REQUEST_STEP_BYTES) {
             setError(snapshot, "Step Out return identity is incomplete");
             return GX_ERROR_INVALID_ARGUMENT;
         }
@@ -1357,6 +1396,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
         }
 
         runtime->stepOutActive.store(true, std::memory_order_release);
+        runtime->stepOutCommandGeneration.store(request.commandGeneration, std::memory_order_release);
         runtime->stepOutInternalOwnerId.store(request.breakpointId, std::memory_order_release);
         runtime->stepOutReturnBindingId.store(returnBinding->bindingId, std::memory_order_release);
         runtime->stepOutReturnAddress.store(request.auxiliaryAddress, std::memory_order_release);
@@ -1389,6 +1429,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
             runtime->pendingSessionGeneration.store(request.sessionGeneration, std::memory_order_release);
             runtime->pendingThreadId.store(request.threadId, std::memory_order_release);
             runtime->pendingStopGeneration.store(request.stopGeneration, std::memory_order_release);
+            runtime->pendingCommandGeneration.store(0, std::memory_order_release);
             runtime->pendingBindingId.store(currentBinding->bindingId, std::memory_order_release);
             runtime->pendingAddress.store(request.targetAddress, std::memory_order_release);
             runtime->pendingReinstall.store((request.flags & GX_DEVELOPMENT_DEBUG_FLAG_REINSTALL_BREAKPOINT) != 0 ? 1u : 0u,
@@ -1416,6 +1457,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
         snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_READY;
         snapshot->bindingId = returnBinding->bindingId;
         snapshot->targetAddress = request.auxiliaryAddress;
+        snapshot->commandGeneration = request.commandGeneration;
         return GX_OK;
     }
     case GX_DEVELOPMENT_DEBUG_RESUME_INTERNAL_TRAP: {
@@ -1438,7 +1480,9 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
     }
     case GX_DEVELOPMENT_DEBUG_STEP_INTERNAL_TRAP: {
         if (!runtime->trapObserved.load(std::memory_order_acquire) || request.threadId == 0 ||
-            request.stopGeneration == 0 || runtime->trapThreadId.load(std::memory_order_acquire) != request.threadId ||
+            request.stopGeneration == 0 || request.commandGeneration == 0 ||
+            request.size < GX_DEVELOPMENT_DEBUG_REQUEST_STEP_BYTES ||
+            runtime->trapThreadId.load(std::memory_order_acquire) != request.threadId ||
             runtime->trapStopGeneration.load(std::memory_order_acquire) != request.stopGeneration) {
             setError(snapshot, "stale or mismatched internal trap source-step context");
             return GX_ERROR_FAILED;
@@ -1455,6 +1499,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
         runtime->pendingSessionGeneration.store(request.sessionGeneration, std::memory_order_release);
         runtime->pendingThreadId.store(request.threadId, std::memory_order_release);
         runtime->pendingStopGeneration.store(request.stopGeneration, std::memory_order_release);
+        runtime->pendingCommandGeneration.store(request.commandGeneration, std::memory_order_release);
         runtime->pendingBindingId.store(bindingId, std::memory_order_release);
         runtime->pendingAddress.store(address, std::memory_order_release);
         runtime->pendingReinstall.store(0, std::memory_order_release);
@@ -1468,6 +1513,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
 #endif
         snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING;
         snapshot->singleStepKind = GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE;
+        snapshot->commandGeneration = request.commandGeneration;
         snapshot->bindingId = bindingId;
         snapshot->targetAddress = address;
         snapshot->threadId = request.threadId;
@@ -1489,6 +1535,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
             snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_TRAP;
             snapshot->trapKind = GX_DEVELOPMENT_DEBUG_TRAP_SINGLE_STEP;
             snapshot->singleStepKind = runtime->singleStepKind.load(std::memory_order_acquire);
+            snapshot->commandGeneration = runtime->singleStepCommandGeneration.load(std::memory_order_acquire);
             snapshot->threadId = runtime->singleStepContext.threadId;
             snapshot->instructionPointer = runtime->singleStepContext.rip;
             snapshot->targetAddress = runtime->pendingAddress.load(std::memory_order_acquire);
@@ -1504,12 +1551,14 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
         } else if (runtime->singleStepPending.load(std::memory_order_acquire)) {
             snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING;
             snapshot->singleStepKind = runtime->pendingStepKind.load(std::memory_order_acquire);
+            snapshot->commandGeneration = runtime->pendingCommandGeneration.load(std::memory_order_acquire);
             snapshot->threadId = runtime->pendingThreadId.load(std::memory_order_acquire);
             snapshot->targetAddress = runtime->pendingAddress.load(std::memory_order_acquire);
             snapshot->bindingId = runtime->pendingBindingId.load(std::memory_order_acquire);
         } else if (runtime->userStepStopPending.load(std::memory_order_acquire)) {
             snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING;
             snapshot->singleStepKind = GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE;
+            snapshot->commandGeneration = runtime->singleStepCommandGeneration.load(std::memory_order_acquire);
             snapshot->threadId = runtime->singleStepContext.threadId;
             snapshot->instructionPointer = runtime->singleStepContext.rip;
             snapshot->targetAddress = runtime->pendingAddress.load(std::memory_order_acquire);
@@ -1518,6 +1567,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
         } else if (runtime->trapObserved.load(std::memory_order_acquire)) {
             snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_TRAP;
             snapshot->trapKind = GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT;
+            snapshot->commandGeneration = runtime->trapCommandGeneration.load(std::memory_order_acquire);
             snapshot->internalBreakpointTrap = runtime->trapInternalBreakpoint.load(std::memory_order_acquire) ? 1 : 0;
             snapshot->internalBreakpointId = runtime->trapInternalBreakpointId.load(std::memory_order_acquire);
             snapshot->internalBreakpointPurpose = runtime->trapInternalBreakpointPurpose.load(std::memory_order_acquire);
@@ -1569,6 +1619,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
         runtime->pendingSessionGeneration.store(request.sessionGeneration, std::memory_order_release);
         runtime->pendingThreadId.store(request.threadId, std::memory_order_release);
         runtime->pendingStopGeneration.store(request.stopGeneration, std::memory_order_release);
+        runtime->pendingCommandGeneration.store(0, std::memory_order_release);
         runtime->pendingBindingId.store(bindingId, std::memory_order_release);
         runtime->pendingAddress.store(request.targetAddress, std::memory_order_release);
         runtime->pendingReinstall.store((request.flags & GX_DEVELOPMENT_DEBUG_FLAG_REINSTALL_BREAKPOINT) != 0 ? 1u : 0u,
@@ -1584,6 +1635,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
         SetEvent(runtime->resumeEvent);
 #endif
         snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING;
+        snapshot->commandGeneration = 0;
         snapshot->bindingId = bindingId;
         snapshot->targetAddress = request.targetAddress;
         snapshot->threadId = request.threadId;
@@ -1595,7 +1647,8 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
         }
     case GX_DEVELOPMENT_DEBUG_STEP_INSTRUCTION:
         {
-        if (request.threadId == 0 || request.stopGeneration == 0) {
+        if (request.threadId == 0 || request.stopGeneration == 0 || request.commandGeneration == 0 ||
+            request.size < GX_DEVELOPMENT_DEBUG_REQUEST_STEP_BYTES) {
             setError(snapshot, "source-step thread identity is incomplete");
             return GX_ERROR_INVALID_ARGUMENT;
         }
@@ -1651,6 +1704,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
         runtime->pendingSessionGeneration.store(request.sessionGeneration, std::memory_order_release);
         runtime->pendingThreadId.store(request.threadId, std::memory_order_release);
         runtime->pendingStopGeneration.store(request.stopGeneration, std::memory_order_release);
+        runtime->pendingCommandGeneration.store(request.commandGeneration, std::memory_order_release);
         runtime->pendingBindingId.store(bindingId, std::memory_order_release);
         runtime->pendingAddress.store(address, std::memory_order_release);
         runtime->pendingReinstall.store(fromBreakpoint && (request.flags & GX_DEVELOPMENT_DEBUG_FLAG_REINSTALL_BREAKPOINT) != 0 ? 1u : 0u,
@@ -1665,6 +1719,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
 #endif
         snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING;
         snapshot->singleStepKind = GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE;
+        snapshot->commandGeneration = request.commandGeneration;
         snapshot->bindingId = bindingId;
         snapshot->targetAddress = address;
         snapshot->threadId = request.threadId;
@@ -1683,6 +1738,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
             return GX_ERROR_FAILED;
         }
         runtime->userStepStopPending.store(false, std::memory_order_release);
+        runtime->singleStepCommandGeneration.store(0, std::memory_order_release);
         runtime->resumeMode.store(kResumeModeRelease, std::memory_order_release);
 #ifdef _WIN32
         SetEvent(runtime->resumeEvent);
@@ -1816,8 +1872,13 @@ gx_result NativeAppDebugger::CallStack(const gx_development_debug_request& reque
     result->threadId = context.threadId;
     result->stopGeneration = context.stopGeneration;
     if (!runtime->sourceMetadataPresent || !runtime->sourceMetadataValid) {
+        const std::string metadataError = "authoritative GXSM metadata is unavailable (present=" +
+            std::to_string(runtime->sourceMetadataPresent ? 1u : 0u) + " valid=" +
+            std::to_string(runtime->sourceMetadataValid ? 1u : 0u) + " mappings=" +
+            std::to_string(runtime->sourceMappings.size()) + " image_bytes=" +
+            std::to_string(runtime->imageBytes.size()) + ")";
         setCallStackError(result, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_UNSUPPORTED_FRAME,
-                          "authoritative GXSM metadata is unavailable");
+                          metadataError.c_str());
         return GX_ERROR_UNSUPPORTED;
     }
     if (!executableAddress(*runtime, normalizedRip, nullptr)) {
