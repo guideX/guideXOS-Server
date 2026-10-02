@@ -11,6 +11,7 @@
 #include "include/kernel/fs_fat.h"
 #include "include/kernel/fs_ext4.h"
 #include "include/kernel/partition_table.h"
+#include "include/kernel/disk_initialization.h"
 
 #if defined(__GNUC__) || defined(__clang__)
 #include "include/kernel/serial_debug.h"
@@ -459,6 +460,7 @@ void init()
 
 uint8_t mount(const char* path, uint8_t blockDevIndex)
 {
+    if (storage::storage_operation_active()) return 0xFF;
     FSType fsType = detect_fs_type(blockDevIndex);
     if (fsType == FS_TYPE_NONE) {
 #if defined(__GNUC__) || defined(__clang__)
@@ -493,6 +495,11 @@ PartitionMountResult mount_partition_detailed(const char* path,
         return partition_mount_result(PARTITION_MOUNT_INVALID_ARGUMENT);
     if (!partition_path_is_normalized(path))
         return partition_mount_result(PARTITION_MOUNT_BAD_PATH);
+    // A destructive operation pins an exact disk across long scans and
+    // revalidates mount state before writing. Prevent a new VFS view from
+    // appearing on any disk while that exclusive operation is active.
+    if (storage::storage_operation_active())
+        return partition_mount_result(PARTITION_MOUNT_OPERATION_BUSY);
 
     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
         if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0)
@@ -623,6 +630,7 @@ PartitionMountResult mount_partition_detailed(const char* path,
 
 uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
 {
+    if (storage::storage_operation_active()) return 0xFF;
     if (!s_initialized) {
         init();
     }
@@ -876,6 +884,8 @@ const char* partition_mount_error_name(PartitionMountError error)
             return "Filesystem is not recognized or is invalid";
         case PARTITION_MOUNT_FILESYSTEM_UNSUPPORTED:
             return "Filesystem is not supported for partition mounting";
+        case PARTITION_MOUNT_OPERATION_BUSY:
+            return "A storage operation is in progress";
         default: return "Unknown mount error";
     }
 }

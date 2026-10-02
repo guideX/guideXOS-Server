@@ -52,6 +52,15 @@ struct FakeDisk {
     bool failReads;
     block::Status failReadStatus;
     uint64_t failLba;
+    uint64_t failReadAtLba;
+    uint32_t failReadAtLbaMinCount;
+    uint64_t removeOnScanReadLba;
+    uint32_t removeOnScanReadMinCount;
+    FakeDisk* replacementDuringScan;
+    uint8_t replacementIndex;
+    bool replacementRegisteredDuringScan;
+    uint64_t mutatePartitionOnReadLba;
+    uint64_t mutatePartitionStartTo;
     uint64_t failLbaAfterWrite;
     uint32_t failReadAtCall;
     bool failFlush;
@@ -77,14 +86,21 @@ struct FakeDisk {
     bool removeOnFlush;
     uint32_t removeOnFlushAt;
     bool removed;
+    bool attemptMountDuringScanRead;
+    vfs::PartitionMountError mountAttemptError;
 
     FakeDisk(uint32_t size, uint64_t count, bool allocate = true)
         : sectorSize(size), sectorCount(count), driverId(0), sparse(!allocate),
           sparseMbr(static_cast<size_t>(size), 0),
           bytes(allocate ? static_cast<size_t>(size) * static_cast<size_t>(count) : 0, 0),
           failReads(false), failReadStatus(block::BLOCK_ERR_IO),
-          failLba(UINT64_MAX), failLbaAfterWrite(UINT64_MAX),
-          failReadAtCall(0), failFlush(false),
+          failLba(UINT64_MAX), failReadAtLba(UINT64_MAX),
+          failReadAtLbaMinCount(0),
+          removeOnScanReadLba(UINT64_MAX), removeOnScanReadMinCount(0),
+          replacementDuringScan(nullptr), replacementIndex(0xFF),
+          replacementRegisteredDuringScan(false),
+          mutatePartitionOnReadLba(UINT64_MAX), mutatePartitionStartTo(0),
+          failLbaAfterWrite(UINT64_MAX), failReadAtCall(0), failFlush(false),
           failFlushAtCall(0), failFlushAtCall2(0),
           failFlushStatus(block::BLOCK_ERR_IO),
           failWriteAtCall1(0), failWriteAtCall2(0),
@@ -92,7 +108,8 @@ struct FakeDisk {
           corruptWriteLbaOnce(UINT64_MAX), corruptWritePending(false),
           reads(0), writes(0), writeAttempts(0), flushes(0),
           registryIndex(0xFF), registrationId(0), removeOnVerifyRead(false), removeOnFlush(false), removeOnFlushAt(0),
-          removed(false) {}
+          removed(false), attemptMountDuringScanRead(false),
+          mountAttemptError(vfs::PARTITION_MOUNT_INVALID_ARGUMENT) {}
 };
 
 FakeDisk* g_fakeDisks[256] = {};
@@ -117,7 +134,52 @@ block::Status fake_read(uint8_t driverId, uint64_t lba, uint32_t count, void* bu
     if (!buffer || count == 0 || lba > disk->sectorCount ||
         count > disk->sectorCount - lba)
         return block::BLOCK_ERR_IO;
+    if (disk->attemptMountDuringScanRead &&
+        lba == disk->failReadAtLba &&
+        count >= disk->failReadAtLbaMinCount) {
+        disk->attemptMountDuringScanRead = false;
+        disk->mountAttemptError = vfs::mount_partition_detailed(
+            "/dm23-scan-race", disk->registryIndex, 1).error;
+    }
+    if (lba == disk->removeOnScanReadLba &&
+        count >= disk->removeOnScanReadMinCount) {
+        disk->removed = block::mark_device_offline(
+            disk->registryIndex, disk->registrationId);
+        FakeDisk* replacement = disk->replacementDuringScan;
+        if (replacement) {
+            replacement->driverId = static_cast<uint8_t>(g_nextDriverId++);
+            g_fakeDisks[replacement->driverId] = replacement;
+            block::BlockDevice descriptor = {};
+            descriptor.active = true;
+            descriptor.type = block::BDEV_USB_MASS;
+            descriptor.driverIndex = replacement->driverId;
+            descriptor.totalSectors = replacement->sectorCount;
+            descriptor.sectorSize = replacement->sectorSize;
+            descriptor.readFn = fake_read;
+            descriptor.maxTransferBytes = 128u * 1024u;
+            std::strncpy(descriptor.name, "scan-replacement",
+                         sizeof(descriptor.name) - 1);
+            std::strncpy(descriptor.model, "replacement during scan",
+                         sizeof(descriptor.model) - 1);
+            std::strncpy(descriptor.serial, "FAKE-REPLACEMENT",
+                         sizeof(descriptor.serial) - 1);
+            disk->replacementIndex = block::register_device(descriptor);
+            if (disk->replacementIndex != 0xFF) {
+                replacement->registryIndex = disk->replacementIndex;
+                block::BlockDevice registered = {};
+                if (block::copy_device(disk->replacementIndex, registered)) {
+                    replacement->registrationId = registered.registrationId;
+                    disk->replacementRegisteredDuringScan = true;
+                }
+            } else {
+                g_fakeDisks[replacement->driverId] = nullptr;
+            }
+        }
+        return block::BLOCK_ERR_NO_MEDIA;
+    }
     if (disk->failReads || lba == disk->failLba ||
+        (lba == disk->failReadAtLba &&
+         count >= disk->failReadAtLbaMinCount) ||
         (disk->writeAttempts != 0 && lba == disk->failLbaAfterWrite) ||
         (disk->failReadAtCall != 0 && disk->reads + 1 == disk->failReadAtCall))
         return disk->failReadStatus;
@@ -151,6 +213,15 @@ block::Status fake_read(uint8_t driverId, uint64_t lba, uint32_t count, void* bu
     if (offset > disk->bytes.size() || bytes > disk->bytes.size() - offset)
         return block::BLOCK_ERR_IO;
     std::memcpy(buffer, disk->bytes.data() + offset, bytes);
+    if (lba == disk->mutatePartitionOnReadLba &&
+        disk->mutatePartitionStartTo != 0 && disk->bytes.size() >= 512) {
+        const uint32_t start = static_cast<uint32_t>(
+            disk->mutatePartitionStartTo);
+        disk->bytes[446u + 8u] = static_cast<uint8_t>(start);
+        disk->bytes[446u + 9u] = static_cast<uint8_t>(start >> 8);
+        disk->bytes[446u + 10u] = static_cast<uint8_t>(start >> 16);
+        disk->bytes[446u + 11u] = static_cast<uint8_t>(start >> 24);
+    }
     return block::BLOCK_OK;
 }
 
@@ -3298,6 +3369,16 @@ static void run_uhci_transfer_logic_tests()
           "BOT diagnostic computes expected WRITE(10) bytes");
     check(expectedBytes == 7u * 512u,
           "WRITE(10) expected bytes equal block count times sector size");
+    uint8_t read10[10] = {0x28, 0, 0x12, 0x34, 0x56, 0x78,
+                          0, 0, 7, 0};
+    BotWriteCommandContext readContext = {};
+    check(decode_read_command(read10, sizeof(read10), readContext) &&
+          readContext.lba == 0x12345678u && readContext.blockCount == 7u,
+          "BOT diagnostic decodes READ(10) LBA and block count");
+    check(exact_block_data_phase(3584u, 3584u, 0u) &&
+          !exact_block_data_phase(3584u, 3072u, 512u) &&
+          !exact_block_data_phase(3584u, 3584u, 1u),
+          "BOT full-block reads reject short data or nonzero residue");
     check(expectedBytes == 3584u && bulk_td_count(expectedBytes, 64u) == 56u,
           "seven-sector WRITE(10) accounts for every 64-byte TD");
     check(bulk_td_count(64u, 64u) == 1u,
@@ -6389,6 +6470,21 @@ int main()
     }
 
     {
+        check(storage::FAT32_FORMAT_SCAN_BUFFER_MAX_BYTES == 1024u * 1024u &&
+              storage::fat32_scan_batch_sectors(512u, 0u) == 2048u &&
+              storage::fat32_scan_batch_sectors(512u, 64u * 1024u) == 128u &&
+              storage::fat32_scan_batch_sectors(512u, 128u * 1024u) == 256u &&
+              storage::fat32_scan_batch_sectors(512u, 1024u * 1024u) == 2048u,
+              "scan batches use the one-MiB bound and honor common transfer caps");
+        check(storage::fat32_scan_batch_sectors(4096u, 0u) == 256u &&
+              storage::fat32_scan_batch_sectors(512u, 130000u) == 253u &&
+              storage::fat32_scan_batch_sectors(512u, 511u) == 0u &&
+              storage::fat32_scan_batch_sectors(256u, 0u) == 0u &&
+              storage::fat32_scan_batch_sectors(8192u, 0u) == 0u,
+              "scan batch calculation floors partial caps and rejects invalid sectors");
+    }
+
+    {
         storage::Fat32FormatGeometry smallGeometry = {};
         check(storage::calculate_fat32_format_geometry(2048, 70000, 512,
                   smallGeometry) == storage::FAT32_FORMAT_READY &&
@@ -6489,6 +6585,146 @@ int main()
     }
 
     {
+        const uint32_t partitionSectors = 70000u;
+        const uint32_t maxReadBytes = 128u * 1024u;
+        const uint32_t maxReadSectors = maxReadBytes / 512u;
+        FakeDisk scanFailures(512, 90000);
+        set_mbr_signature(scanFailures);
+        set_mbr_partition(scanFailures, 0, 0, 0x0C, 2048,
+                          partitionSectors);
+        const uint8_t index = register_fake(scanFailures, true, true, true,
+            false, 0, maxReadBytes);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        const bool parsed = parse_first_partition(index, table, partition);
+        storage::Fat32FormatRequest request = make_format_request(index,
+            partition, "", 0xD23F0001u);
+        const uint64_t scanStart = partition.startLba;
+        const uint64_t midRelative =
+            (static_cast<uint64_t>(partitionSectors / 2u) /
+             maxReadSectors) * maxReadSectors;
+        const uint64_t finalRelative =
+            (static_cast<uint64_t>(partitionSectors - 1u) /
+             maxReadSectors) * maxReadSectors;
+        const uint64_t failingLbas[] = {
+            scanStart,
+            scanStart + midRelative,
+            scanStart + finalRelative,
+        };
+        const uint64_t expectedRelative[] = {0u, midRelative, finalRelative};
+        const uint32_t expectedRequestCounts[] = {
+            1u,
+            static_cast<uint32_t>(midRelative / maxReadSectors) + 1u,
+            static_cast<uint32_t>(finalRelative / maxReadSectors) + 1u,
+        };
+        bool failuresStoppedBeforeWrites = parsed;
+        bool mountWasBlocked = false;
+        bool timeoutStoppedBeforeWrites = false;
+        for (uint8_t i = 0; i < 3u; ++i) {
+            scanFailures.failReadAtLba = failingLbas[i];
+            scanFailures.failReadAtLbaMinCount = 5u;
+            scanFailures.failReadStatus = i == 1u
+                ? block::BLOCK_ERR_TIMEOUT : block::BLOCK_ERR_IO;
+            scanFailures.attemptMountDuringScanRead = i == 1u;
+            storage::Fat32FormatResult result = {};
+            const storage::Fat32FormatStatus status =
+                storage::format_fat32_partition(request, result);
+            failuresStoppedBeforeWrites = failuresStoppedBeforeWrites &&
+                status == storage::FAT32_FORMAT_READ_UNAVAILABLE &&
+                result.existingState == storage::FAT32_EXISTING_UNREADABLE &&
+                !result.scanCoverageComplete &&
+                result.scanZeroVerifiedSectors == expectedRelative[i] &&
+                result.scanRelativeLba == expectedRelative[i] &&
+                result.scanCurrentLba == failingLbas[i] &&
+                result.scanReadRequests == expectedRequestCounts[i] &&
+                scanFailures.writeAttempts == 0 &&
+                scanFailures.writeLog.empty();
+            if (i == 1u)
+                timeoutStoppedBeforeWrites =
+                    result.blockStatusValid &&
+                    result.blockStatus == block::BLOCK_ERR_TIMEOUT &&
+                    scanFailures.writeAttempts == 0 &&
+                    scanFailures.writeLog.empty();
+            if (i == 1u)
+                mountWasBlocked = scanFailures.mountAttemptError ==
+                    vfs::PARTITION_MOUNT_OPERATION_BUSY;
+            scanFailures.failReadAtLba = UINT64_MAX;
+            scanFailures.failReadAtLbaMinCount = 0;
+            scanFailures.failReadStatus = block::BLOCK_ERR_IO;
+        }
+        check(failuresStoppedBeforeWrites,
+              "first, middle-timeout, and final scan read failures abort before formatting writes");
+        check(timeoutStoppedBeforeWrites,
+              "a scan timeout is retained in diagnostics and cannot fall through to formatting");
+        check(mountWasBlocked,
+              "VFS partition mounts are rejected while the blank scan holds the operation lease");
+
+        const uint64_t finalReadStart = scanStart + finalRelative;
+        scanFailures.mutatePartitionOnReadLba = finalReadStart;
+        scanFailures.mutatePartitionStartTo = scanStart + 1u;
+        storage::Fat32FormatResult changedDuringScan = {};
+        const storage::Fat32FormatStatus changedStatus =
+            storage::format_fat32_partition(request, changedDuringScan);
+        check(changedStatus == storage::FAT32_FORMAT_PARTITION_IDENTITY_CHANGED &&
+              changedDuringScan.scanCoverageComplete &&
+              changedDuringScan.scanZeroVerifiedSectors == partitionSectors &&
+              scanFailures.writeAttempts == 0 &&
+              scanFailures.writeLog.empty(),
+              "post-scan partition revalidation invalidates blank proof before the first write");
+        unregister_fake(index, scanFailures);
+    }
+
+    {
+        const uint32_t partitionSectors = 70000u;
+        const uint32_t maxReadBytes = 128u * 1024u;
+        const uint32_t maxReadSectors = maxReadBytes / 512u;
+        FakeDisk removedDuringScan(512, 90000);
+        FakeDisk replacement(512, 90000, false);
+        set_mbr_signature(removedDuringScan);
+        set_mbr_partition(removedDuringScan, 0, 0, 0x0C, 2048,
+                          partitionSectors);
+        const uint8_t index = register_fake(removedDuringScan, true, true,
+            true, false, 0, maxReadBytes);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        const bool parsed = parse_first_partition(index, table, partition);
+        storage::Fat32FormatRequest request = make_format_request(index,
+            partition, "", 0xD23F0002u);
+        const uint64_t removalLba = partition.startLba + maxReadSectors;
+        removedDuringScan.removeOnScanReadLba = removalLba;
+        removedDuringScan.removeOnScanReadMinCount = maxReadSectors;
+        removedDuringScan.replacementDuringScan = &replacement;
+        storage::Fat32FormatResult result = {};
+        const storage::Fat32FormatStatus status =
+            storage::format_fat32_partition(request, result);
+        block::BlockDevice replacementDevice = {};
+        const bool replacementIdentityFresh =
+            removedDuringScan.replacementRegisteredDuringScan &&
+            removedDuringScan.replacementIndex != 0xFF &&
+            removedDuringScan.replacementIndex != index &&
+            replacement.registrationId != request.targetSnapshot.registrationId &&
+            block::copy_device(removedDuringScan.replacementIndex,
+                               replacementDevice) &&
+            replacementDevice.registrationId == replacement.registrationId;
+        check(parsed && status == storage::FAT32_FORMAT_READ_UNAVAILABLE &&
+              removedDuringScan.removed && replacementIdentityFresh &&
+              replacement.reads == 0 && !result.scanCoverageComplete &&
+              result.scanReadRequests == 2u &&
+              result.scanZeroVerifiedSectors == maxReadSectors &&
+              result.scanCurrentLba == removalLba &&
+              removedDuringScan.writeAttempts == 0 &&
+              removedDuringScan.writeLog.empty() &&
+              !storage::storage_operation_active(),
+              "removal during a scan aborts the pinned incarnation and never reads a replacement or writes metadata");
+        if (removedDuringScan.replacementIndex != 0xFF)
+            (void)unregister_fake(removedDuringScan.replacementIndex,
+                                  replacement);
+        else
+            g_fakeDisks[replacement.driverId] = nullptr;
+        g_fakeDisks[removedDuringScan.driverId] = nullptr;
+    }
+
+    {
         const uint32_t largePartitionSectors =
             static_cast<uint32_t>(8ull * 1024u * 1024u * 1024u / 512u);
         const uint64_t largeDiskSectors =
@@ -6501,8 +6737,8 @@ int main()
             2048ull + largePartitionSectors - 1u;
         std::memset(sector(largeSparse, 2047), 0xA7, 512);
         std::memset(sector(largeSparse, partitionEnd + 1), 0x5C, 512);
-        const uint8_t largeIndex =
-            register_fake(largeSparse, true, true, true);
+        const uint8_t largeIndex = register_fake(largeSparse, true, true,
+            true, false, 0, 1024u * 1024u);
         storage::PartitionTableModel largeTable = {};
         storage::PartitionEntry largePartition = {};
         const bool largeParsed = parse_first_partition(
@@ -6519,6 +6755,13 @@ int main()
                 write.lba > largePartition.endLba) writesInside = false;
         }
         check(largeParsed && largeFormatStatus == storage::FAT32_FORMAT_SUCCESS &&
+              largeResult.scanCoverageComplete &&
+              largeResult.scanZeroVerifiedSectors == largePartitionSectors &&
+              largeResult.scanBytesRead ==
+                  static_cast<uint64_t>(largePartitionSectors) * 512u &&
+              largeResult.scanReadRequests == 8192u &&
+              largeResult.scanLargestRequestBytes == 1024u * 1024u &&
+              largeResult.scanSmallestRequestBytes == 1024u * 1024u &&
               largeResult.geometry.totalSectors == largePartitionSectors &&
               largeResult.geometry.clusterCount > 120000u &&
               largeResult.geometry.fatSizeSectors > 120000u / 64u &&
@@ -6649,7 +6892,8 @@ int main()
     {
         FakeDisk gptCreated(512, 100000);
         build_empty_gpt(gptCreated);
-        const uint8_t index = register_fake(gptCreated, true, true, true);
+        const uint8_t index = register_fake(gptCreated, true, true, true,
+            false, 0, 128u * 1024u);
         storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
         uint16_t regionCount = 0;
         current_regions(index, gptCreated, regions, regionCount);
@@ -6663,6 +6907,7 @@ int main()
         const bool havePartition = parse_first_partition(index, table, partition);
         storage::Fat32FormatRequest request = make_format_request(index,
             partition, "DATA", 0x12345678u);
+        const size_t partitionStart = static_cast<size_t>(partition.startLba) * 512;
         storage::PartitionEntry expectedPartition = partition;
         uint8_t expectedDiskGuid[16];
         std::memcpy(expectedDiskGuid, table.primaryDiskGuid,
@@ -6674,13 +6919,99 @@ int main()
         const storage::Fat32FormatStatus probed =
             storage::probe_fat32_format_partition(request, probe);
         const bool preflightNoWrites = gptCreated.writeLog.empty();
+        check(created == storage::CREATE_PARTITION_SUCCESS && havePartition &&
+              probed == storage::FAT32_FORMAT_READY &&
+              probe.existingState == storage::FAT32_EXISTING_CLEAN &&
+              probe.scanCoverageComplete &&
+              probe.scanZeroVerifiedSectors == partition.sectorCount &&
+              probe.scanBytesRead == partition.sectorCount * 512u &&
+              preflightNoWrites,
+              "new DM6 GPT partition passes full clean-format scan without writes");
+
+        const uint64_t nonzeroRelativeLbas[] = {
+            0u, 255u, 256u, partition.sectorCount / 2u,
+            partition.sectorCount - 2u, partition.sectorCount - 1u,
+        };
+        const uint32_t nonzeroByteOffsets[] = {0u, 511u, 0u, 37u, 11u, 511u};
+        bool nonzeroCasesStoppedBeforeWrites = true;
+        const uint32_t writesBeforeNonzeroCases = gptCreated.writeAttempts;
+        for (uint8_t i = 0; i < 6u; ++i) {
+            const size_t byteOffset = partitionStart + static_cast<size_t>(
+                nonzeroRelativeLbas[i] * 512u + nonzeroByteOffsets[i]);
+            gptCreated.bytes[byteOffset] = 0x6Du;
+            storage::Fat32FormatResult nonzeroResult = {};
+            const storage::Fat32FormatStatus nonzeroStatus =
+                storage::format_fat32_partition(request, nonzeroResult);
+            nonzeroCasesStoppedBeforeWrites =
+                nonzeroCasesStoppedBeforeWrites &&
+                nonzeroStatus == storage::FAT32_FORMAT_AMBIGUOUS_EXISTING_DATA &&
+                nonzeroResult.existingState ==
+                    storage::FAT32_EXISTING_AMBIGUOUS_DATA &&
+                !nonzeroResult.scanCoverageComplete &&
+                nonzeroResult.scanFirstNonzeroRelativeLba ==
+                    nonzeroRelativeLbas[i] &&
+                nonzeroResult.scanFirstNonzeroByteOffset ==
+                    nonzeroByteOffsets[i] &&
+                std::strstr(nonzeroResult.diagnostic,
+                    "no formatter writes were made") != nullptr &&
+                gptCreated.writeAttempts == writesBeforeNonzeroCases &&
+                gptCreated.writeLog.empty();
+            gptCreated.bytes[byteOffset] = 0;
+        }
+        check(nonzeroCasesStoppedBeforeWrites,
+              "first, batch-boundary, middle, final-sector, and final-byte data stop before formatter writes");
+
         gptCreated.writeLog.clear();
         gptCreated.flushWriteCounts.clear();
+        gptCreated.readLog.clear();
         storage::Fat32FormatResult formatResult = {};
         const storage::Fat32FormatStatus formatted =
             storage::format_fat32_partition(request, formatResult);
+        const uint32_t scanBatchSectors = storage::fat32_scan_batch_sectors(
+            512u, 128u * 1024u);
+        const uint64_t scanRemainder =
+            partition.sectorCount % scanBatchSectors;
+        const uint32_t expectedScanRequests = static_cast<uint32_t>(
+            (partition.sectorCount + scanBatchSectors - 1u) /
+            scanBatchSectors);
+        uint64_t observedRelative = 0;
+        uint32_t observedScanRequests = 0;
+        bool exactScanLogCoverage = false;
+        for (size_t logIndex = 0; logIndex < gptCreated.readLog.size();
+             ++logIndex) {
+            const FakeWriteRecord& first = gptCreated.readLog[logIndex];
+            if (first.lba != partition.startLba ||
+                first.count != scanBatchSectors) continue;
+            observedRelative = 0;
+            observedScanRequests = 0;
+            bool contiguous = true;
+            for (uint32_t requestIndex = 0;
+                 requestIndex < expectedScanRequests; ++requestIndex) {
+                const size_t currentIndex = logIndex + requestIndex;
+                if (currentIndex >= gptCreated.readLog.size()) {
+                    contiguous = false;
+                    break;
+                }
+                const FakeWriteRecord& read =
+                    gptCreated.readLog[currentIndex];
+                const uint32_t expectedCount = static_cast<uint32_t>(
+                    partition.sectorCount - observedRelative < scanBatchSectors
+                        ? partition.sectorCount - observedRelative
+                        : scanBatchSectors);
+                if (read.lba != partition.startLba + observedRelative ||
+                    read.count != expectedCount) {
+                    contiguous = false;
+                    break;
+                }
+                observedRelative += read.count;
+                ++observedScanRequests;
+            }
+            if (contiguous && observedRelative == partition.sectorCount) {
+                exactScanLogCoverage = true;
+                break;
+            }
+        }
         bool outsidePartitionUnchanged = true;
-        const size_t partitionStart = static_cast<size_t>(partition.startLba) * 512;
         const size_t partitionEnd = partitionStart +
             static_cast<size_t>(partition.sectorCount) * 512;
         for (size_t i = 0; i < gptCreated.bytes.size(); ++i) {
@@ -6703,13 +7034,19 @@ int main()
         const bool flushOrdering = gptCreated.flushWriteCounts.size() >= 2 &&
             gptCreated.flushWriteCounts.back() == gptCreated.writeLog.size() &&
             gptCreated.writeLog.back().lba == partition.startLba;
-        check(created == storage::CREATE_PARTITION_SUCCESS && havePartition &&
-              probed == storage::FAT32_FORMAT_READY &&
-              probe.existingState == storage::FAT32_EXISTING_CLEAN &&
-              preflightNoWrites,
-              "new DM6 GPT partition passes clean-format preflight without writes");
         check(formatted == storage::FAT32_FORMAT_SUCCESS &&
               formatResult.verificationPassed &&
+              formatResult.scanCoverageComplete &&
+              formatResult.scanZeroVerifiedSectors == partition.sectorCount &&
+              formatResult.scanBytesRead == partition.sectorCount * 512u &&
+              formatResult.scanProgressPercent == 100u &&
+              formatResult.scanReadRequests == expectedScanRequests &&
+              formatResult.scanSmallestRequestBytes ==
+                  static_cast<uint32_t>((scanRemainder == 0
+                      ? scanBatchSectors : scanRemainder) * 512u) &&
+              formatResult.scanLargestRequestBytes == 128u * 1024u &&
+              exactScanLogCoverage &&
+              observedScanRequests == expectedScanRequests &&
               formatResult.finalProbeState == storage::FAT32_FINAL_PROBE_FAT32 &&
               formatResult.geometry.volumeId == 0x12345678u &&
               formatResult.partition.startLba == partition.startLba &&

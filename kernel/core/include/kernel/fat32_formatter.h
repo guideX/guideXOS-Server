@@ -21,6 +21,10 @@ static const uint32_t FAT32_FORMAT_MIN_CLUSTERS = 65525u;
 // clusters. The last valid data cluster number is therefore 0x0FFFFFEF.
 static const uint32_t FAT32_FORMAT_MAX_CLUSTERS = 0x0FFFFFEEu;
 static const uint32_t FAT32_FORMAT_MAX_SECTORS_PER_CLUSTER = 64u;
+// A single reusable, bounded buffer backs the full-partition blank scan.
+// Its size is independent of partition capacity and is also the request
+// ceiling when a transport does not advertise a smaller transfer limit.
+static const uint32_t FAT32_FORMAT_SCAN_BUFFER_MAX_BYTES = 1024u * 1024u;
 
 enum Fat32FormatStatus : uint8_t {
     FAT32_FORMAT_READY = 0,
@@ -154,6 +158,20 @@ struct Fat32FormatResult {
     TargetIdentity targetIdentity;
     PartitionEntry partition;
     Fat32FormatGeometry geometry;
+    // Full-volume blank-scan evidence. Requests are sequential and bounded;
+    // these counters make the zero-coverage proof and throughput auditable.
+    uint64_t scanBytesRead;
+    uint64_t scanZeroVerifiedSectors;
+    uint64_t scanElapsedTicks;
+    uint64_t scanCurrentLba;
+    uint64_t scanRelativeLba;
+    uint64_t scanFirstNonzeroRelativeLba;
+    uint32_t scanReadRequests;
+    uint32_t scanSmallestRequestBytes;
+    uint32_t scanLargestRequestBytes;
+    uint32_t scanFirstNonzeroByteOffset;
+    uint8_t scanProgressPercent;
+    bool scanCoverageComplete;
     uint64_t sectorsWritten;
     bool writeMayHaveReachedMedia;
     bool failedBeforeWrite;
@@ -189,6 +207,11 @@ struct Fat32FormatResult {
 Fat32FormatStatus calculate_fat32_format_geometry(
     uint64_t partitionStartLba, uint64_t partitionSectorCount,
     uint32_t logicalSectorSize, Fat32FormatGeometry& result);
+// Computes a whole-sector batch bound from the fixed scan buffer and the
+// common block layer's maximum safe transfer size. A zero transfer limit
+// means that the device did not advertise a smaller bound.
+uint32_t fat32_scan_batch_sectors(uint32_t logicalSectorSize,
+                                  uint32_t maxTransferBytes);
 Fat32FormatStatus normalize_fat32_volume_label(
     const char* input, char normalized[11]);
 

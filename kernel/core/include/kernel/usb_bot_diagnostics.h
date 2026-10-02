@@ -48,6 +48,23 @@ inline bool decode_write_command(const uint8_t* cdb, uint8_t cdbLength,
     return false;
 }
 
+inline bool decode_read_command(const uint8_t* cdb, uint8_t cdbLength,
+                                BotWriteCommandContext& command)
+{
+    if (!cdb) return false;
+    if (cdb[0] == 0x28u && cdbLength == 10u) {
+        command.lba = diagnostic_be32(cdb + 2);
+        command.blockCount = diagnostic_be16(cdb + 7);
+        return command.blockCount != 0;
+    }
+    if (cdb[0] == 0x88u && cdbLength == 16u) {
+        command.lba = diagnostic_be64(cdb + 2);
+        command.blockCount = diagnostic_be32(cdb + 10);
+        return command.blockCount != 0;
+    }
+    return false;
+}
+
 inline bool expected_block_bytes(uint32_t blockCount, uint32_t blockSize,
                                  uint32_t& bytes)
 {
@@ -55,6 +72,13 @@ inline bool expected_block_bytes(uint32_t blockCount, uint32_t blockSize,
         blockCount > UINT32_MAX / blockSize) return false;
     bytes = blockCount * blockSize;
     return true;
+}
+
+inline bool exact_block_data_phase(uint32_t expectedBytes,
+                                   uint32_t actualBytes,
+                                   uint32_t residue)
+{
+    return actualBytes == expectedBytes && residue == 0;
 }
 
 inline uint32_t bulk_td_count(uint32_t bytes, uint16_t maxPacket)
@@ -161,6 +185,9 @@ struct BotCommandHistoryRecord {
     uint32_t logicalBlockSize;
     uint32_t expectedBytes;
     uint32_t actualBytes;
+    uint32_t dataInTdCount;
+    uint32_t firstDataInTd;
+    uint32_t lastDataInTd;
     uint32_t expectedCswTag;
     uint32_t dataOutTdCount;
     uint32_t firstDataOutTd;
@@ -170,6 +197,8 @@ struct BotCommandHistoryRecord {
     uint16_t cbwCompleteFrame;
     uint16_t dataOutStartFrame;
     uint16_t dataOutCompleteFrame;
+    uint16_t dataInStartFrame;
+    uint16_t dataInCompleteFrame;
     uint16_t cswSubmitFrame;
     uint16_t cswCompleteFrame;
     uint8_t opcode;
@@ -178,6 +207,8 @@ struct BotCommandHistoryRecord {
     uint8_t result;
     uint8_t dataOutStartToggle;
     uint8_t dataOutFinalToggle;
+    uint8_t dataInStartToggle;
+    uint8_t dataInFinalToggle;
     uint8_t expectedCswToggle;
     uint8_t finalCswToggle;
 };

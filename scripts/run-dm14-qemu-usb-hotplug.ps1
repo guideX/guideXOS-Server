@@ -386,6 +386,7 @@ try {
     Write-Host "DM14 QEMU hotplug sequence completed. Evidence: $WorkFull"
 } catch {
     $hotplugFailed = $true
+    Stop-Qemu
     $hashAAtFailure = (Get-FileHash -LiteralPath $imageA -Algorithm SHA256).Hash
     $hashBAtFailure = (Get-FileHash -LiteralPath $imageB -Algorithm SHA256).Hash
     Add-Content -LiteralPath $manifest -Encoding ascii -Value @(

@@ -18,7 +18,10 @@ param(
     [string]$WorkDir = "",
     [string]$KernelImage = "kernel\build\amd64\bin\kernel.elf",
     [string]$BootloaderImage = "guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe",
-    [switch]$StopAfterInitialize
+    [switch]$StopAfterInitialize,
+    [switch]$DisableQemuTrace,
+    [switch]$RequireDm23ScanMetrics,
+    [switch]$RestartOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -74,8 +77,17 @@ $manifest = Join-Path $WorkFull "manifest.txt"
 $verify = Join-Path $Root "scripts\verify-dm13-qemu-usb-image.py"
 $python = Get-Command python -ErrorAction SilentlyContinue
 if (-not $python) { throw "Python was not found for independent raw-image verification." }
-$blankCheck = & $python.Source $verify --check-blank $UsbFull 2>&1
-if ($LASTEXITCODE -ne 0) { throw "Refusing to attach a nonblank USB image: $($blankCheck -join ' ')" }
+if ($RestartOnly) {
+    $blankCheck = & $python.Source $verify $UsbFull 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "RestartOnly requires an independently verified formatted proof image: $($blankCheck -join ' ')"
+    }
+} else {
+    $blankCheck = & $python.Source $verify --check-blank $UsbFull 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Refusing to attach a nonblank USB image: $($blankCheck -join ' ')"
+    }
+}
 $imageBefore = (Get-FileHash -LiteralPath $UsbFull -Algorithm SHA256).Hash
 $imageBytes = (Get-Item -LiteralPath $UsbFull).Length
 $qemuVersion = (& $QemuFull --version | Select-Object -First 1)
@@ -86,7 +98,7 @@ $kernelBytes = (Get-Item -LiteralPath (Join-Path $espStage "kernel.elf")).Length
 $uefiHash = (Get-FileHash -LiteralPath $OvmfFull -Algorithm SHA256).Hash
 $qemuAtStart = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'")
 @("manifestSchema=DM21-TRANSPORT-1","proof=DM13-QEMU-USB-DISK-MANAGER-LIFECYCLE-AND-RESTART",
-  "proofMode=$(if ($StopAfterInitialize) { 'production-initialize-prefix' } else { 'full-lifecycle-and-restart' })",
+  "proofMode=$(if ($RestartOnly) { 'restart-only' } elseif ($StopAfterInitialize) { 'production-initialize-prefix' } else { 'full-lifecycle-and-restart' })",
   "timestampUtc=$([DateTime]::UtcNow.ToString('o'))","qemu=$qemuVersion","qemuSha256=$qemuHash",
   "machine=pc,usb=off","cpu=QEMU-default (no -cpu argument)",
   "controller=PIIX3-UHCI","controllerArguments=-device piix3-usb-uhci,id=uhci",
@@ -97,8 +109,11 @@ $qemuAtStart = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64
   "uefiImagePath=$OvmfFull","uefiSha256=$uefiHash",
   "bootloaderSha256=$bootloaderHash","kernelBytes=$kernelBytes","kernelSha256=$kernelHash",
   "timeoutUhciBulkFrames=1000","timeoutHarnessSeconds=3600","timeoutRestartSeconds=300",
-  "timeoutKernelMainLoopSeconds=300","qemuTraceEnabled=yes",
-  "qemuTraceEvents=$events","qemuTraceFiles=first-boot.uhci.trace.log,restart-boot.uhci.trace.log",
+  "timeoutKernelMainLoopSeconds=300",
+  "qemuTraceEnabled=$(if ($DisableQemuTrace) { 'no' } else { 'yes' })",
+  "dm23ScanMetricsRequired=$(if ($RequireDm23ScanMetrics) { 'yes' } else { 'no' })",
+  "qemuTraceEvents=$(if ($DisableQemuTrace) { 'disabled' } else { $events })",
+  "qemuTraceFiles=$(if ($DisableQemuTrace) { 'none' } else { 'first-boot.uhci.trace.log,restart-boot.uhci.trace.log' })",
   "hostQemuProcessesBefore=$($qemuAtStart.Count)",
   "hostQemuPidsBefore=$(($qemuAtStart | ForEach-Object { $_.ProcessId }) -join ',')",
   "controlProtocol=QMP TCP loopback; qmp transcript saved per boot; quit after proof or in cleanup",
@@ -125,8 +140,10 @@ function Start-Dm13Qemu([string]$RunName) {
       "-object","rng-builtin,id=rng0",
       "-device","virtio-rng-pci,rng=rng0,disable-modern=on,max-bytes=1024,period=1000",
       "-m","1024M","-vga","std","-display","none","-serial","file:$serial")
-    $arguments += @("-trace","events=$events,file=$trace",
-      "-qmp","tcp:127.0.0.1:$port,server=on,wait=off",
+    if (-not $DisableQemuTrace) {
+      $arguments += @("-trace","events=$events,file=$trace")
+    }
+    $arguments += @("-qmp","tcp:127.0.0.1:$port,server=on,wait=off",
       "-rtc","base=utc,clock=host","-no-reboot")
     $process = Start-Process -FilePath $QemuFull -ArgumentList $arguments -WorkingDirectory $Root `
         -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
@@ -156,7 +173,8 @@ function Start-Dm13Qemu([string]$RunName) {
     Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
       "qemu.$RunName.pid=$($process.Id)","qemu.$RunName.qmpPort=$port",
       "qemu.$RunName.serial=$serial","qemu.$RunName.commandLine=$($row.CommandLine)",
-      "qemu.$RunName.trace=$trace","qemu.$RunName.qmpTranscript=$qmpLog",
+      "qemu.$RunName.trace=$(if ($DisableQemuTrace) { 'disabled' } else { $trace })",
+      "qemu.$RunName.qmpTranscript=$qmpLog",
       "qemu.$RunName.otherQemuProcessesAtStart=$($otherQemu.Count)",
       "qemu.$RunName.otherQemuPidsAtStart=$(($otherQemu | ForEach-Object { $_.ProcessId }) -join ',')")
     return $run
@@ -221,10 +239,77 @@ function Wait-Dm13Marker($Run, [string]$Marker, [int]$TimeoutSeconds,
     throw "Timed out waiting for '$Marker'. Serial output: $($Run.Serial)"
 }
 
+function Get-Dm23UsbScanMetrics($Run) {
+    if (-not (Test-Path -LiteralPath $Run.Serial)) {
+        throw "DM23 scan metrics are missing: $($Run.Serial)"
+    }
+    $lines = Get-Content -LiteralPath $Run.Serial
+    $scanLines = @($lines | Where-Object {
+        $_ -match '^\[DM23-SCAN\].*transport=USB .*coverage=complete'
+    })
+    if ($scanLines.Count -eq 0) {
+        throw "No completed DM23 USB blank-scan telemetry was recorded in $($Run.Serial)."
+    }
+    $line = $scanLines[-1]
+    $match = [regex]::Match($line,
+        'bytes=([0-9A-Fa-f]+).*requests=([0-9A-Fa-f]+).*maxBytes=([0-9A-Fa-f]+).*elapsedTicks=([0-9A-Fa-f]+).*milliMiBps=([0-9A-Fa-f]+)')
+    if (-not $match.Success) {
+        throw "Completed DM23 scan telemetry has an unrecognized format: $line"
+    }
+    $metrics = [pscustomobject]@{
+        Bytes = [Convert]::ToUInt64($match.Groups[1].Value, 16)
+        Requests = [Convert]::ToUInt32($match.Groups[2].Value, 16)
+        MaxBytes = [Convert]::ToUInt32($match.Groups[3].Value, 16)
+        ElapsedTicks = [Convert]::ToUInt64($match.Groups[4].Value, 16)
+        MilliMiBPerSecond = [Convert]::ToUInt64($match.Groups[5].Value, 16)
+        Line = $line
+    }
+    $readLines = @($lines | Where-Object {
+        $_ -match '^\[DM23-USB-READ\] result=PASS .*opcode=READ10 .*tdCount=00004001 .*maxPacket=40'
+    })
+    $minReadCommands = [Math]::Max(1, [int][Math]::Floor(
+        $metrics.Bytes / 1048576.0) - 3)
+    $maxExpectedRequests = [int][Math]::Ceiling(
+        $metrics.Bytes / [double]$metrics.MaxBytes) + 3
+    if ($metrics.Bytes -lt 64MB -or
+        $metrics.Requests -gt $maxExpectedRequests -or
+        $metrics.MaxBytes -lt 1MB -or $metrics.ElapsedTicks -gt 360000 -or
+        $readLines.Count -lt $minReadCommands) {
+        throw "DM23 USB scan regression gate failed: bytes=$($metrics.Bytes), requests=$($metrics.Requests), maxBytes=$($metrics.MaxBytes), elapsedTicks=$($metrics.ElapsedTicks), fullMiBReadCommands=$($readLines.Count)."
+    }
+    Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
+      "dm23ScanTransport=USB","dm23ScanBytes=$($metrics.Bytes)",
+      "dm23ScanRequests=$($metrics.Requests)",
+      "dm23ScanMaxRequestBytes=$($metrics.MaxBytes)",
+      "dm23ScanElapsedTicks=$($metrics.ElapsedTicks)",
+      "dm23ScanMilliMiBPerSecond=$($metrics.MilliMiBPerSecond)",
+      "dm23UsbReadCommandsWith16Ktds=$($readLines.Count)",
+      "dm23ScanMetricLine=$($metrics.Line)")
+}
+
 $first = $null; $second = $null
 $allRuns = [System.Collections.Generic.List[object]]::new()
 $proofFailed = $false
 try {
+    if ($RestartOnly) {
+        $second = Start-Dm13Qemu "restart-boot"
+        $allRuns.Add($second)
+        Wait-Dm13Marker $second "[DM13-QEMU-USB] restart-persistence=PASS" 300
+        Stop-Dm13Qemu $second; $second = $null
+        $verification = & $python.Source $verify $UsbFull 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "Independent restart-only image verification failed: $($verification -join ' ')"
+        }
+        $hashAfter = (Get-FileHash -LiteralPath $UsbFull -Algorithm SHA256).Hash
+        Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
+          "restartBootSerial=$($WorkFull)\restart-boot.serial.log",
+          "storageImageSha256After=$hashAfter",
+          "independentVerifier=$($verification -join '; ')",
+          "transportResult=PASS",
+          "result=PASS tier=restart-only-persistence host-physical-media=none")
+        Write-Host "DM13 USB restart-only persistence proof passed. Evidence: $WorkFull"
+        return
+    }
     $first = Start-Dm13Qemu "first-boot"
     $allRuns.Add($first)
     if ($StopAfterInitialize) {
@@ -241,6 +326,7 @@ try {
         return
     }
     Wait-Dm13Marker $first "[DM13-QEMU-USB] lifecycle=PASS" 3600
+    if ($RequireDm23ScanMetrics) { Get-Dm23UsbScanMetrics $first }
     Stop-Dm13Qemu $first; $first = $null
     $firstBootImageHash = (Get-FileHash -LiteralPath $UsbFull -Algorithm SHA256).Hash
 

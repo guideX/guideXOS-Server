@@ -142,7 +142,10 @@ struct StorageDevice {
 };
 
 static const uint8_t MAX_STORAGE_DEVICES = 4;
-static const uint32_t MAX_BOT_TRANSFER_BYTES = 64u * 1024u;
+// A single READ(10)/(16) shared-block request may carry up to 1 MiB. The UHCI
+// HCI segments the data phase into bounded 16-bit bulk-transfer calls and TD
+// chains; the block layer still enforces this advertised per-call limit.
+static const uint32_t MAX_BOT_TRANSFER_BYTES = 1024u * 1024u;
 
 void init();
 bool probe(uint8_t usbAddress);

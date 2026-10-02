@@ -5,6 +5,7 @@ param(
     [string]$QemuExecutable = "C:\Program Files\qemu\qemu-system-x86_64.exe",
     [string]$OvmfCode = "OVMF.fd",
     [string]$PythonExecutable = "",
+    [string]$KernelImage = "",
     [UInt64]$DiskSizeBytes = 10737418240,
     [switch]$SkipBuild,
     [switch]$QemuDebug
@@ -25,6 +26,7 @@ $parameters = @{
     Dm22LargeProof = $true
 }
 if ($PythonExecutable) { $parameters.PythonExecutable = $PythonExecutable }
+if ($KernelImage) { $parameters.KernelImage = $KernelImage }
 if ($SkipBuild) { $parameters.SkipBuild = $true }
 if ($QemuDebug) { $parameters.QemuDebug = $true }
 & $runner @parameters

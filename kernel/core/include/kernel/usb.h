@@ -339,17 +339,27 @@ struct BotDiagnosticContext {
     uint32_t dataOutExpectedBytes;
     uint32_t dataOutActualBytes;
     uint32_t dataOutTdCount;
+    uint32_t dataInExpectedBytes;
+    uint32_t dataInActualBytes;
+    uint32_t dataInTdCount;
     uint32_t firstDataOutTdPhysical;
     uint32_t lastDataOutTdPhysical;
+    uint32_t firstDataInTdPhysical;
+    uint32_t lastDataInTdPhysical;
     uint32_t cswTdPhysical;
     uint16_t cbwSubmitFrame;
     uint16_t cbwCompleteFrame;
     uint16_t dataOutStartFrame;
     uint16_t dataOutCompleteFrame;
+    uint16_t dataInStartFrame;
+    uint16_t dataInCompleteFrame;
     uint16_t cswSubmitFrame;
     uint16_t cswCompleteFrame;
     uint8_t dataOutStartToggle;
     uint8_t dataOutFinalToggle;
+    uint8_t dataInStartToggle;
+    uint8_t dataInFinalToggle;
+    uint8_t dataInMaxPacketSize;
     uint8_t expectedCswToggle;
     uint8_t deviceAddress;
     uint8_t endpointAddress;
@@ -372,6 +382,7 @@ struct BulkTransferDiagnostic {
     uint8_t endpointAddress;
     uint8_t startToggle;
     uint8_t finalToggle;
+    uint8_t maxPacketSize;
     bool shortPacket;
 };
 

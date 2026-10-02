@@ -1,7 +1,12 @@
 #include "include/kernel/fat32_formatter.h"
 #include "include/kernel/block_device.h"
+#include "include/kernel/pit.h"
 #if !defined(KERNEL_STORAGE_TEST)
 #include "include/kernel/virtio_rng.h"
+#endif
+#if defined(GXOS_DM23_SCAN_DIAGNOSTICS) && \
+    (defined(__GNUC__) || defined(__clang__))
+#include "include/kernel/serial_debug.h"
 #endif
 
 namespace kernel {
@@ -14,7 +19,8 @@ static const uint32_t kFat32Count = 2;
 static const uint32_t kFsInfoSector = 1;
 static const uint32_t kBackupBootSector = 6;
 static const uint32_t kBackupFsInfoSector = 7;
-static const uint64_t kZeroScanBufferBytes = 64u * 1024u;
+static const uint32_t kZeroScanBufferBytes =
+    FAT32_FORMAT_SCAN_BUFFER_MAX_BYTES;
 
 enum Fat32RollbackPriorState : uint8_t {
     FAT32_ROLLBACK_KNOWN_ZERO = 1,
@@ -36,6 +42,9 @@ struct PartitionCheck {
 };
 
 alignas(4096) static uint8_t s_ioSector[MAX_LOGICAL_SECTOR_SIZE];
+// One shared scan buffer is operation-owned scratch. FAT32 probe/format calls
+// hold the global storage-operation lease, so scans cannot overlap or reuse
+// this buffer concurrently. It never grows with partition size.
 alignas(4096) static uint8_t s_zeroScanBuffer[kZeroScanBufferBytes];
 static Fat32RollbackRecord s_rollbackRecords[FAT32_FORMAT_MAX_ROLLBACK_ENTRIES];
 alignas(4096) static PartitionTableModel s_partitionTable;
@@ -433,60 +442,322 @@ static Fat32ExistingState classify_existing_prefix(
     return FAT32_EXISTING_UNKNOWN;
 }
 
-static bool buffer_is_zero(const uint8_t* bytes, size_t length)
+struct BlankVerificationToken {
+    bool valid;
+    TargetIdentity target;
+    PartitionEntry partition;
+    Fat32FormatGeometry geometry;
+    uint64_t operationGeneration;
+    uint64_t sectorsVerified;
+};
+
+static bool buffer_is_zero(const uint8_t* bytes, size_t length,
+                           size_t& firstNonzeroOffset)
 {
-    return bytes_zero(bytes, length);
+    firstNonzeroOffset = length;
+    size_t offset = 0;
+    // Check eight bytes per branch. The grouped byte loads avoid alignment
+    // and strict-aliasing assumptions while keeping an early exit at the
+    // first nonzero word-sized group.
+    for (; length - offset >= sizeof(uint64_t); offset += sizeof(uint64_t)) {
+        const uint8_t combined = static_cast<uint8_t>(bytes[offset] |
+            bytes[offset + 1] | bytes[offset + 2] | bytes[offset + 3] |
+            bytes[offset + 4] | bytes[offset + 5] | bytes[offset + 6] |
+            bytes[offset + 7]);
+        if (combined != 0) {
+            for (size_t i = 0; i < sizeof(uint64_t); ++i) {
+                if (bytes[offset + i] != 0) {
+                    firstNonzeroOffset = offset + i;
+                    return false;
+                }
+            }
+        }
+    }
+    for (; offset < length; ++offset) {
+        if (bytes[offset] != 0) {
+            firstNonzeroOffset = offset;
+            return false;
+        }
+    }
+    return true;
 }
+
+static bool same_scan_target(const TargetIdentity& left,
+                             const TargetIdentity& right)
+{
+    return left.registryGeneration == right.registryGeneration &&
+        left.registrationId == right.registrationId &&
+        left.globalIndex == right.globalIndex &&
+        left.transport == right.transport &&
+        left.driverIndex == right.driverIndex &&
+        left.totalLogicalSectors == right.totalLogicalSectors &&
+        left.logicalSectorSize == right.logicalSectorSize;
+}
+
+static bool same_scan_partition(const PartitionEntry& left,
+                                const PartitionEntry& right)
+{
+    if (!same_partition_extent(left, right) ||
+        left.partitionNumber != right.partitionNumber ||
+        left.mbrType != right.mbrType) return false;
+    if (left.isGpt)
+        return bytes_equal(left.uniqueGuid, right.uniqueGuid, 16) &&
+            bytes_equal(left.typeGuid, right.typeGuid, 16);
+    return true;
+}
+
+static bool same_scan_geometry(const Fat32FormatGeometry& left,
+                               const Fat32FormatGeometry& right)
+{
+    return left.bytesPerSector == right.bytesPerSector &&
+        left.sectorsPerCluster == right.sectorsPerCluster &&
+        left.clusterSizeBytes == right.clusterSizeBytes &&
+        left.reservedSectorCount == right.reservedSectorCount &&
+        left.fatCount == right.fatCount &&
+        left.fatSizeSectors == right.fatSizeSectors &&
+        left.firstFatSector == right.firstFatSector &&
+        left.secondFatSector == right.secondFatSector &&
+        left.firstDataSector == right.firstDataSector &&
+        left.rootCluster == right.rootCluster &&
+        left.clusterCount == right.clusterCount &&
+        left.freeClusterCount == right.freeClusterCount &&
+        left.totalSectors == right.totalSectors &&
+        left.fsInfoSector == right.fsInfoSector &&
+        left.backupFsInfoSector == right.backupFsInfoSector &&
+        left.backupBootSector == right.backupBootSector &&
+        // The volume ID is generated after the blank scan and is not part of
+        // the scanned on-media geometry.
+        left.hiddenSectors == right.hiddenSectors;
+}
+
+static bool blank_token_matches(const BlankVerificationToken& token,
+                                const Fat32FormatRequest& request,
+                                const PartitionEntry& partition,
+                                const Fat32FormatGeometry& geometry,
+                                const StorageOperationLease& lease)
+{
+    return token.valid && storage_operation_lease_is_current(lease) &&
+        token.operationGeneration == lease.ownerToken &&
+        same_scan_target(token.target, request.targetSnapshot) &&
+        same_scan_partition(token.partition, partition) &&
+        same_scan_geometry(token.geometry, geometry) &&
+        token.sectorsVerified == partition.sectorCount;
+}
+
+static void finish_scan_metrics(Fat32FormatResult& result,
+                                uint64_t startTicks)
+{
+#if defined(KERNEL_STORAGE_TEST)
+    const uint64_t now = startTicks;
+#else
+    const uint64_t now = kernel::pit::ticks();
+#endif
+    result.scanElapsedTicks = now >= startTicks ? now - startTicks : 0;
+}
+
+static uint64_t scan_clock_ticks()
+{
+#if defined(KERNEL_STORAGE_TEST)
+    return 0;
+#else
+    return kernel::pit::ticks();
+#endif
+}
+
+#if defined(GXOS_DM23_SCAN_DIAGNOSTICS) && \
+    (defined(__GNUC__) || defined(__clang__))
+static const char* scan_transport_name(block::DeviceType type)
+{
+    switch (type) {
+        case block::BDEV_ATA_PIO: return "ATA";
+        case block::BDEV_AHCI: return "AHCI";
+        case block::BDEV_USB_MASS: return "USB";
+        case block::BDEV_NVME: return "NVMe";
+        case block::BDEV_RAMDISK: return "RAM";
+        default: return "unknown";
+    }
+}
+
+static void report_scan_progress(const Fat32FormatResult& result,
+                                 const TargetIdentity& target)
+{
+    serial::puts("[DM23-SCAN] transport=");
+    serial::puts(scan_transport_name(target.transport));
+    serial::puts(" device=");
+    serial::puts(target.name);
+    serial::puts(" model=");
+    serial::puts(target.model);
+    serial::puts(" serial=");
+    serial::puts(target.serial);
+    serial::puts(" lba=");
+    serial::put_hex64(result.scanCurrentLba);
+    serial::puts(" relative=");
+    serial::put_hex64(result.scanRelativeLba);
+    serial::puts(" percent=");
+    serial::put_hex32(result.scanProgressPercent);
+    serial::puts(" bytes=");
+    serial::put_hex64(result.scanBytesRead);
+    serial::puts(" requests=");
+    serial::put_hex32(result.scanReadRequests);
+    serial::puts(" minBytes=");
+    serial::put_hex32(result.scanSmallestRequestBytes);
+    serial::puts(" maxBytes=");
+    serial::put_hex32(result.scanLargestRequestBytes);
+    serial::puts(" zeroSectors=");
+    serial::put_hex64(result.scanZeroVerifiedSectors);
+    serial::puts(" coverage=");
+    serial::puts(result.scanCoverageComplete ? "complete" : "incomplete");
+    serial::puts(" nonzeroRel=");
+    serial::put_hex64(result.scanFirstNonzeroRelativeLba);
+    serial::puts(" nonzeroByte=");
+    serial::put_hex32(result.scanFirstNonzeroByteOffset);
+    serial::puts(" elapsedTicks=");
+    serial::put_hex64(result.scanElapsedTicks);
+    serial::puts(" avgRequestBytes=");
+    serial::put_hex32(result.scanReadRequests
+        ? static_cast<uint32_t>(result.scanBytesRead /
+                                result.scanReadRequests) : 0u);
+    const uint64_t milliMiBPerSecond = result.scanElapsedTicks
+        ? (result.scanBytesRead * 100000u) /
+            (result.scanElapsedTicks * 1048576u) : 0u;
+    serial::puts(" milliMiBps=");
+    serial::put_hex64(milliMiBPerSecond);
+    serial::putc('\n');
+}
+#endif
 
 static Fat32FormatStatus scan_partition_for_clean_state(
     const Fat32FormatRequest& request, uint32_t sectorSize,
-    Fat32ExistingState& existingState)
+    const Fat32FormatGeometry& geometry,
+    const StorageOperationLease& lease,
+    Fat32ExistingState& existingState, Fat32FormatResult& result,
+    BlankVerificationToken& token)
 {
+    clear_bytes(&token, sizeof(token));
+    const uint64_t startTicks = scan_clock_ticks();
     existingState = classify_existing_prefix(request, sectorSize);
-    if (existingState == FAT32_EXISTING_UNREADABLE)
+    if (existingState == FAT32_EXISTING_UNREADABLE) {
+        finish_scan_metrics(result, startTicks);
         return FAT32_FORMAT_READ_UNAVAILABLE;
-    if (existingState == FAT32_EXISTING_RECOGNIZED_FILESYSTEM)
+    }
+    if (existingState == FAT32_EXISTING_RECOGNIZED_FILESYSTEM) {
+        finish_scan_metrics(result, startTicks);
         return FAT32_FORMAT_FILESYSTEM_ALREADY_RECOGNIZED;
+    }
 
     const uint64_t total = request.partitionSnapshot.sectorCount;
     uint64_t relative = 0;
-    bool allZero = true;
+    DeviceCapabilities caps;
+    if (!query_device_capabilities(request.targetSnapshot.globalIndex, caps)) {
+        finish_scan_metrics(result, startTicks);
+        return FAT32_FORMAT_DEVICE_MISSING;
+    }
+    const uint32_t maxSectors = fat32_scan_batch_sectors(
+        sectorSize, caps.maxTransferBytes);
+    if (maxSectors == 0) {
+        finish_scan_metrics(result, startTicks);
+        return FAT32_FORMAT_READ_UNAVAILABLE;
+    }
+    const uint64_t totalBytes = total * static_cast<uint64_t>(sectorSize);
+    uint8_t lastReportedPercent = 0;
     while (relative < total) {
-        uint64_t maxSectors = kZeroScanBufferBytes / sectorSize;
-        DeviceCapabilities caps;
-        if (!query_device_capabilities(request.targetSnapshot.globalIndex,
-                                       caps))
-            return FAT32_FORMAT_DEVICE_MISSING;
-        if (caps.maxTransferBytes != 0) {
-            const uint64_t transferSectors = caps.maxTransferBytes / sectorSize;
-            if (transferSectors == 0) return FAT32_FORMAT_READ_UNAVAILABLE;
-            if (maxSectors > transferSectors) maxSectors = transferSectors;
+        if (!storage_operation_lease_is_current(lease) ||
+            !request.targetSnapshot.registrationId ||
+            revalidate_target_identity(request.targetSnapshot) != TARGET_VALID) {
+            finish_scan_metrics(result, startTicks);
+            return FAT32_FORMAT_IDENTITY_CHANGED;
         }
-        if (maxSectors == 0) return FAT32_FORMAT_READ_UNAVAILABLE;
         const uint32_t count = static_cast<uint32_t>(
             total - relative < maxSectors ? total - relative : maxSectors);
         uint64_t lba = 0;
         if (!add_u64(request.partitionSnapshot.startLba, relative, lba) ||
-            !checked_lba_range(caps.totalLogicalSectors, lba, count))
+            !checked_lba_range(caps.totalLogicalSectors, lba, count)) {
+            finish_scan_metrics(result, startTicks);
             return FAT32_FORMAT_INVALID_GEOMETRY;
+        }
+        const uint32_t bytes = count * sectorSize;
+        ++result.scanReadRequests;
+        if (result.scanSmallestRequestBytes == 0 ||
+            bytes < result.scanSmallestRequestBytes)
+            result.scanSmallestRequestBytes = bytes;
+        if (bytes > result.scanLargestRequestBytes)
+            result.scanLargestRequestBytes = bytes;
+        result.scanCurrentLba = lba;
+        result.scanRelativeLba = relative;
         if (read_sectors_safe(request.targetSnapshot.globalIndex, lba, count,
-                s_zeroScanBuffer,
-                static_cast<size_t>(count) * sectorSize) != block::BLOCK_OK) {
+                s_zeroScanBuffer, bytes) != block::BLOCK_OK) {
             existingState = FAT32_EXISTING_UNREADABLE;
+            (void)capture_current_io_result(result);
+            finish_scan_metrics(result, startTicks);
             return FAT32_FORMAT_READ_UNAVAILABLE;
         }
-        const size_t bytes = static_cast<size_t>(count) * sectorSize;
-        if (!buffer_is_zero(s_zeroScanBuffer, bytes)) {
-            allZero = false;
-            break;
+        result.scanBytesRead += bytes;
+        size_t firstNonzeroOffset = 0;
+        if (!buffer_is_zero(s_zeroScanBuffer, bytes, firstNonzeroOffset)) {
+            const uint64_t nonzeroRelativeLba = relative +
+                firstNonzeroOffset / sectorSize;
+            result.scanFirstNonzeroRelativeLba = nonzeroRelativeLba;
+            result.scanFirstNonzeroByteOffset = static_cast<uint32_t>(
+                firstNonzeroOffset % sectorSize);
+            result.scanCurrentLba = request.partitionSnapshot.startLba +
+                nonzeroRelativeLba;
+            result.scanRelativeLba = nonzeroRelativeLba;
+            result.scanProgressPercent = totalBytes == 0 ? 100u :
+                static_cast<uint8_t>((result.scanBytesRead * 100u) /
+                                     totalBytes);
+            existingState = FAT32_EXISTING_AMBIGUOUS_DATA;
+            set_diagnostic(result,
+                "Blank scan found non-zero data; no formatter writes were made.");
+            finish_scan_metrics(result, startTicks);
+#if defined(GXOS_DM23_SCAN_DIAGNOSTICS) && \
+    (defined(__GNUC__) || defined(__clang__))
+            report_scan_progress(result, request.targetSnapshot);
+#endif
+            return FAT32_FORMAT_AMBIGUOUS_EXISTING_DATA;
+        }
+        if (relative > UINT64_MAX - count ||
+            result.scanZeroVerifiedSectors > UINT64_MAX - count) {
+            finish_scan_metrics(result, startTicks);
+            return FAT32_FORMAT_INVALID_GEOMETRY;
         }
         relative += count;
+        result.scanZeroVerifiedSectors += count;
+        result.scanRelativeLba = relative;
+        result.scanCurrentLba = request.partitionSnapshot.startLba + relative;
+        result.scanProgressPercent = totalBytes == 0 ? 100u :
+            static_cast<uint8_t>((result.scanBytesRead * 100u) / totalBytes);
+#if defined(GXOS_DM23_SCAN_DIAGNOSTICS) && \
+    (defined(__GNUC__) || defined(__clang__))
+        if (result.scanProgressPercent >=
+            static_cast<uint8_t>(lastReportedPercent + 10u)) {
+            lastReportedPercent = static_cast<uint8_t>(
+                (result.scanProgressPercent / 10u) * 10u);
+            report_scan_progress(result, request.targetSnapshot);
+        }
+#else
+        (void)lastReportedPercent;
+#endif
     }
-    if (!allZero) {
-        existingState = FAT32_EXISTING_AMBIGUOUS_DATA;
-        return FAT32_FORMAT_AMBIGUOUS_EXISTING_DATA;
+    if (relative != total || result.scanZeroVerifiedSectors != total) {
+        finish_scan_metrics(result, startTicks);
+        return FAT32_FORMAT_INVALID_GEOMETRY;
     }
+    result.scanCoverageComplete = true;
+    result.scanProgressPercent = 100u;
+    result.scanRelativeLba = total;
+    result.scanCurrentLba = request.partitionSnapshot.startLba + total;
     existingState = FAT32_EXISTING_CLEAN;
+    token.valid = true;
+    token.target = request.targetSnapshot;
+    token.partition = request.partitionSnapshot;
+    token.geometry = geometry;
+    token.operationGeneration = lease.ownerToken;
+    token.sectorsVerified = result.scanZeroVerifiedSectors;
+    finish_scan_metrics(result, startTicks);
+#if defined(GXOS_DM23_SCAN_DIAGNOSTICS) && \
+    (defined(__GNUC__) || defined(__clang__))
+    report_scan_progress(result, request.targetSnapshot);
+#endif
     return FAT32_FORMAT_READY;
 }
 
@@ -988,9 +1259,28 @@ static Fat32FormatStatus execute_locked(const Fat32FormatRequest& request,
     result.lastStage = result.stage;
     clear_bytes(s_rollbackRecords, sizeof(s_rollbackRecords));
     s_rollbackRecordCount = 0;
+    BlankVerificationToken blankToken = {};
     status = scan_partition_for_clean_state(request,
-        check.capabilities.logicalSectorSize, result.existingState);
+        check.capabilities.logicalSectorSize, check.geometry, lease,
+        result.existingState, result, blankToken);
     if (status != FAT32_FORMAT_READY) return status;
+
+    // The long scan held the exact target pin and exclusive storage lease.
+    // Re-run destructive preflight immediately afterward, before metadata
+    // reads, Flush, or any formatter write; this also rechecks mount and boot.
+    PartitionCheck postScanCheck = {};
+    status = validate_request_and_partition(request, result, postScanCheck);
+    if (status != FAT32_FORMAT_READY ||
+        !storage_operation_lease_is_current(lease) ||
+        !blank_token_matches(blankToken, request,
+            postScanCheck.currentPartition, postScanCheck.geometry, lease) ||
+        !same_partition_extent(check.currentPartition,
+                               postScanCheck.currentPartition) ||
+        !same_scan_geometry(check.geometry, postScanCheck.geometry))
+        return status == FAT32_FORMAT_READY
+            ? FAT32_FORMAT_PARTITION_IDENTITY_CHANGED : status;
+    check = postScanCheck;
+    blankToken.valid = false; // One-use authorization is consumed here.
 
     char label[11];
     status = normalize_fat32_volume_label(request.volumeLabel, label);
@@ -1195,7 +1485,8 @@ failed:
 }
 
 static Fat32FormatStatus run_probe_locked(const Fat32FormatRequest& request,
-                                         Fat32FormatResult& result)
+                                         Fat32FormatResult& result,
+                                         const StorageOperationLease& lease)
 {
     PartitionCheck check = {};
     result.stage = FAT32_FORMAT_STAGE_REVALIDATING_PARTITION;
@@ -1203,9 +1494,14 @@ static Fat32FormatStatus run_probe_locked(const Fat32FormatRequest& request,
                                                                check);
     if (status != FAT32_FORMAT_READY) return status;
     result.stage = FAT32_FORMAT_STAGE_CALCULATING_LAYOUT;
+    BlankVerificationToken blankToken = {};
     status = scan_partition_for_clean_state(request,
-        check.capabilities.logicalSectorSize, result.existingState);
+        check.capabilities.logicalSectorSize, check.geometry, lease,
+        result.existingState, result, blankToken);
     if (status != FAT32_FORMAT_READY) return status;
+    // A probe is only a transient observation; it cannot publish durable
+    // KnownZero state to another request or operation.
+    blankToken.valid = false;
     result.status = FAT32_FORMAT_READY;
     result.finalProbeState = FAT32_FINAL_PROBE_UNFORMATTED;
     set_diagnostic(result, "Partition is clean and eligible for FAT32 formatting.");
@@ -1240,7 +1536,7 @@ static Fat32FormatStatus run_with_lease(const Fat32FormatRequest& request,
     }
     const Fat32FormatStatus status = format
         ? execute_locked(request, result, lease)
-        : run_probe_locked(request, result);
+        : run_probe_locked(request, result, lease);
     if (format && !result.writeAttempted &&
         result.stage != FAT32_FORMAT_STAGE_COMPLETED &&
         result.stage != FAT32_FORMAT_STAGE_STATE_UNCERTAIN)
@@ -1252,12 +1548,31 @@ static Fat32FormatStatus run_with_lease(const Fat32FormatRequest& request,
         result.status = status;
         if (result.stage != FAT32_FORMAT_STAGE_FAILED)
             mark_stage_failed(result);
-        set_diagnostic(result, fat32_format_status_name(status));
+        if (status != FAT32_FORMAT_AMBIGUOUS_EXISTING_DATA ||
+            result.diagnostic[0] == '\0')
+            set_diagnostic(result, fat32_format_status_name(status));
     }
     return status;
 }
 
 } // namespace
+
+uint32_t fat32_scan_batch_sectors(uint32_t logicalSectorSize,
+                                  uint32_t maxTransferBytes)
+{
+    if (logicalSectorSize < MIN_LOGICAL_SECTOR_SIZE ||
+        logicalSectorSize > MAX_LOGICAL_SECTOR_SIZE ||
+        (logicalSectorSize & (logicalSectorSize - 1u)) != 0)
+        return 0;
+    uint32_t sectors = FAT32_FORMAT_SCAN_BUFFER_MAX_BYTES /
+        logicalSectorSize;
+    if (maxTransferBytes != 0) {
+        const uint32_t transferSectors = maxTransferBytes / logicalSectorSize;
+        if (transferSectors == 0) return 0;
+        if (sectors > transferSectors) sectors = transferSectors;
+    }
+    return sectors;
+}
 
 Fat32FormatStatus calculate_fat32_format_geometry(
     uint64_t partitionStartLba, uint64_t partitionSectorCount,

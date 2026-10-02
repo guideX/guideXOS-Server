@@ -17,6 +17,7 @@ param(
     [string]$QemuExecutable = "C:\Program Files\qemu\qemu-system-x86_64.exe",
     [string]$OvmfCode = "OVMF.fd",
     [string]$PythonExecutable = "",
+    [string]$KernelImage = "",
     [int]$AttemptNumber = 1,
     [UInt64]$DiskSizeBytes = 629145600,
     [switch]$QemuDebug,
@@ -251,7 +252,10 @@ try {
         throw "EspSource must contain the guideXOS runtime files, including ramdisk.img."
     }
     $bootloaderSource = Join-Path $Root "guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe"
-    $kernelSource = Join-Path $Root "kernel\build\amd64\bin\kernel.elf"
+    $kernelSource = if ($KernelImage) {
+        if ([IO.Path]::IsPathRooted($KernelImage)) { $KernelImage }
+        else { Join-Path $Root $KernelImage }
+    } else { Join-Path $Root "kernel\build\amd64\bin\kernel.elf" }
     if (-not (Test-Path -LiteralPath $bootloaderSource) -or
         -not (Test-Path -LiteralPath $kernelSource)) {
         throw "Built UEFI bootloader or amd64 kernel is missing. Run without -SkipBuild."

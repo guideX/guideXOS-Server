@@ -130,6 +130,8 @@ alignas(4096) static volatile uint32_t s_frameList[1024];
 static inline volatile uint32_t* frame_list() { return s_frameList; }
 #endif
 
+static const uint8_t kBulkTdCount = 64u;
+
 #if defined(GXOS_DM20_USB_DIAGNOSTICS) && \
     defined(GXOS_DM20_LAYOUT_DESCRIPTOR_PAD_BYTES) && \
     GXOS_DM20_LAYOUT_DESCRIPTOR_PAD_BYTES > 0
@@ -139,7 +141,7 @@ static inline volatile uint32_t* frame_list() { return s_frameList; }
 #endif
 struct Dm20DescriptorPool {
     uint8_t padding[GXOS_DM20_LAYOUT_DESCRIPTOR_PAD_BYTES];
-    alignas(16) volatile UHCI_TD tds[16];
+    alignas(16) volatile UHCI_TD tds[kBulkTdCount];
     alignas(16) volatile UHCI_QH qh;
 };
 alignas(4096) static Dm20DescriptorPool s_dm20DescriptorPool
@@ -147,7 +149,7 @@ alignas(4096) static Dm20DescriptorPool s_dm20DescriptorPool
 #define s_tds (s_dm20DescriptorPool.tds)
 #define s_qh (s_dm20DescriptorPool.qh)
 #else
-alignas(16) static volatile UHCI_TD s_tds[16];
+alignas(16) static volatile UHCI_TD s_tds[kBulkTdCount];
 alignas(16) static volatile UHCI_QH s_qh;
 #endif
 alignas(16) static usb::SetupPacket s_dmaSetup;
@@ -158,9 +160,16 @@ alignas(16) static volatile uint8_t s_controlPackets[13][64];
 #if GXOS_DM20_LAYOUT_BUFFER_OFFSET_BYTES > 65535
 #error "DM20 UHCI layout buffer offset must be at most 65535 bytes."
 #endif
-alignas(4096) static volatile uint8_t s_bulkPackets[13][65536 + 64];
+static const uint8_t kDm20BulkBufferCount = 13u;
+// Preserve the oversized DM20 boundary-test backing for its original first
+// thirteen DMA buffers. Additional pipelined TDs need only one max-packet
+// buffer each; expanding this proof-only pool by 64 KiB per TD is unnecessary.
+alignas(4096) static volatile uint8_t
+    s_bulkPackets[kDm20BulkBufferCount][65536 + 64];
+alignas(16) static volatile uint8_t
+    s_extraBulkPackets[kBulkTdCount - kDm20BulkBufferCount][64];
 #else
-alignas(16) static volatile uint8_t s_bulkPackets[13][64];
+alignas(16) static volatile uint8_t s_bulkPackets[kBulkTdCount][64];
 #endif
 static uint8_t s_dataToggle[128][usb::MAX_ENDPOINTS * 2];
 static uint64_t s_transferGeneration = 1;
@@ -337,6 +346,8 @@ static inline volatile uint8_t* bulk_packet_buffer(uint8_t packet)
 #if defined(GXOS_DM20_USB_DIAGNOSTICS) && \
     defined(GXOS_DM20_LAYOUT_BUFFER_OFFSET_BYTES) && \
     GXOS_DM20_LAYOUT_BUFFER_OFFSET_BYTES > 0
+    if (packet >= kDm20BulkBufferCount)
+        return s_extraBulkPackets[packet - kDm20BulkBufferCount];
     const uint32_t bufferAddress = ptr32(s_bulkPackets[packet]);
     const uint32_t currentOffset = bufferAddress & 0xFFFFu;
     const uint32_t requestedOffset =
@@ -1101,6 +1112,7 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
 #if defined(GXOS_DM20_USB_DIAGNOSTICS)
     s_lastBulkTransferDiagnostic = {};
     s_lastBulkTransferDiagnostic.requestedBytes = dataLen;
+    s_lastBulkTransferDiagnostic.maxPacketSize = 0;
     s_lastBulkTransferDiagnostic.endpointAddress = endpointAddr;
     s_lastBulkTransferDiagnostic.startToggle = toggle;
     s_lastBulkTransferDiagnostic.finalToggle = toggle;
@@ -1126,10 +1138,14 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
             }
     }
     if (maxPacket > 64u) return XFER_BUFFER_ERROR;
+#if defined(GXOS_DM20_USB_DIAGNOSTICS)
+    s_lastBulkTransferDiagnostic.maxPacketSize =
+        static_cast<uint8_t>(maxPacket);
+#endif
 
     while (remaining > 0) {
-        uint16_t batchLengths[13] = {};
-        uint64_t batchGenerations[13] = {};
+        uint16_t batchLengths[kBulkTdCount] = {};
+        uint64_t batchGenerations[kBulkTdCount] = {};
         uint8_t batchCount = 0;
         uint16_t batchBytes = 0;
         uint8_t batchToggle = toggle;
@@ -1137,7 +1153,7 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
         // Queue a bounded packet chain. Keeping every TD and packet buffer
         // distinct lets UHCI advance through a multi-packet BOT phase without
         // the CPU having to recycle one descriptor between adjacent frames.
-        while (batchBytes < remaining && batchCount < 13u) {
+        while (batchBytes < remaining && batchCount < kBulkTdCount) {
             const uint16_t left = static_cast<uint16_t>(remaining - batchBytes);
             const uint16_t chunk = left > maxPacket ? maxPacket : left;
             volatile UHCI_TD* td = &s_tds[batchCount];
@@ -1155,7 +1171,7 @@ TransferStatus bulk_transfer(uint8_t deviceAddr,
                     bulk_packet_buffer(batchCount)[i] =
                         arch::amd64::uhci::CSW_DMA_SENTINEL;
             }
-            const bool hasNext = batchCount + 1u < 13u &&
+            const bool hasNext = batchCount + 1u < kBulkTdCount &&
                 batchBytes + chunk < remaining;
             const uint32_t nextLink = hasNext
                 ? arch::amd64::uhci::td_depth_link(ptr32(&s_tds[batchCount + 1u]))
