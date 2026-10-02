@@ -348,15 +348,18 @@ bool isSelectorIdentifier(SourceView source, std::size_t begin,
     return true;
 }
 
+template <typename Length>
 bool copySelectorPart(NavigatorScriptSelectorDescriptor& selector,
     SourceView source, std::size_t begin, std::size_t end,
-    std::uint16_t& offset, std::uint16_t& length)
+    std::uint8_t& offset, Length& length)
 {
     if (begin > end || end - begin >
-            kNavigatorScriptMaxSelectorLength - selector.textLength)
+            kNavigatorScriptMaxSelectorLength - selector.textLength ||
+        selector.textLength > std::numeric_limits<std::uint8_t>::max() ||
+        end - begin > std::numeric_limits<Length>::max())
         return false;
-    offset = selector.textLength;
-    length = static_cast<std::uint16_t>(end - begin);
+    offset = static_cast<std::uint8_t>(selector.textLength);
+    length = static_cast<Length>(end - begin);
     for (std::size_t index = begin; index < end; ++index)
         selector.text[selector.textLength++] = source.data[index];
     return true;
@@ -588,10 +591,10 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
     return true;
 }
 
-bool parseBoundedSelector(SourceView source,
-    NavigatorScriptSelectorDescriptor& selector)
+bool parseBoundedSelectorMember(SourceView source,
+    NavigatorScriptSelectorDescriptor& storage,
+    NavigatorScriptSelectorMemberDescriptor& selector)
 {
-    selector = NavigatorScriptSelectorDescriptor();
     if (source.data == nullptr || source.length == 0u ||
         source.length > kNavigatorScriptMaxSelectorLength) return false;
 
@@ -648,14 +651,14 @@ bool parseBoundedSelector(SourceView source,
         std::size_t rightBegin = relationPosition + 1u;
         while (rightBegin < end &&
             isSelectorAsciiWhitespace(source.data[rightBegin])) ++rightBegin;
-        return parseSimpleSelector(source, begin, leftEnd, selector,
+        return parseSimpleSelector(source, begin, leftEnd, storage,
                 selector.leftSimple) &&
-            parseSimpleSelector(source, rightBegin, end, selector,
+            parseSimpleSelector(source, rightBegin, end, storage,
                 selector.rightSimple);
     }
 
     if (whitespacePosition == end) {
-        return parseSimpleSelector(source, begin, end, selector,
+        return parseSimpleSelector(source, begin, end, storage,
             selector.rightSimple);
     }
 
@@ -663,10 +666,55 @@ bool parseBoundedSelector(SourceView source,
     std::size_t rightBegin = whitespacePosition;
     while (rightBegin < end &&
         isSelectorAsciiWhitespace(source.data[rightBegin])) ++rightBegin;
-    return parseSimpleSelector(source, begin, whitespacePosition, selector,
+    return parseSimpleSelector(source, begin, whitespacePosition, storage,
             selector.leftSimple) &&
-        parseSimpleSelector(source, rightBegin, end, selector,
+        parseSimpleSelector(source, rightBegin, end, storage,
             selector.rightSimple);
+}
+
+bool parseBoundedSelector(SourceView source,
+    NavigatorScriptSelectorDescriptor& selector)
+{
+    selector = NavigatorScriptSelectorDescriptor();
+    if (source.data == nullptr || source.length == 0u ||
+        source.length > kNavigatorScriptMaxSelectorLength) return false;
+
+    std::size_t memberBegin = 0u;
+    bool insideAttribute = false;
+    char quote = '\0';
+    for (std::size_t index = 0u; index < source.length; ++index) {
+        const char character = source.data[index];
+        if (insideAttribute) {
+            if (quote != '\0') {
+                if (character == quote) quote = '\0';
+            } else if (character == '"' || character == '\'') {
+                quote = character;
+            } else if (character == ']') {
+                insideAttribute = false;
+            }
+            continue;
+        }
+        if (character == '[') {
+            insideAttribute = true;
+            continue;
+        }
+        if (character != ',') continue;
+        if (selector.memberCount >=
+                kNavigatorScriptMaxSelectorListMembers ||
+            !parseBoundedSelectorMember(
+                SourceView(source.data + memberBegin, index - memberBegin),
+                selector, selector.members[selector.memberCount]))
+            return false;
+        ++selector.memberCount;
+        memberBegin = index + 1u;
+    }
+    if (selector.memberCount >= kNavigatorScriptMaxSelectorListMembers ||
+        !parseBoundedSelectorMember(
+            SourceView(source.data + memberBegin, source.length - memberBegin),
+            selector, selector.members[selector.memberCount]))
+        return false;
+    ++selector.memberCount;
+    return true;
 }
 
 bool makeRetrievalSelector(SourceView argument, bool classSelector,
@@ -675,18 +723,21 @@ bool makeRetrievalSelector(SourceView argument, bool classSelector,
     selector = NavigatorScriptSelectorDescriptor();
     if (argument.data == nullptr || argument.length == 0u ||
         argument.length > kNavigatorScriptMaxSelectorLength) return false;
+    NavigatorScriptSelectorMemberDescriptor& member = selector.members[0];
 
     if (!classSelector) {
         if (argument.length == 1u && argument.data[0] == '*') {
-            selector.rightSimple.valid = true;
-            selector.rightSimple.universal = true;
+            member.rightSimple.valid = true;
+            member.rightSimple.universal = true;
+            selector.memberCount = 1u;
             return true;
         }
         if (!isSelectorTagName(argument, 0u, argument.length)) return false;
         if (!copySelectorPart(selector, argument, 0u, argument.length,
-            selector.rightSimple.tagOffset,
-            selector.rightSimple.tagLength)) return false;
-        selector.rightSimple.valid = true;
+            member.rightSimple.tagOffset,
+            member.rightSimple.tagLength)) return false;
+        member.rightSimple.valid = true;
+        selector.memberCount = 1u;
         return true;
     }
 
@@ -717,8 +768,9 @@ bool makeRetrievalSelector(SourceView argument, bool classSelector,
     }
     if (tokenCount == 0u) return false;
     if (!storeSelectorClassTokens(argument, tokens, tokenCount, selector,
-            selector.rightSimple)) return false;
-    selector.rightSimple.valid = true;
+            member.rightSimple)) return false;
+    member.rightSimple.valid = true;
+    selector.memberCount = 1u;
     return true;
 }
 
@@ -2995,6 +3047,9 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
     const NavigatorScriptSelectorDescriptor& left,
     const NavigatorScriptSelectorDescriptor& right) const
 {
+    if (left.memberCount != right.memberCount ||
+        left.memberCount > kNavigatorScriptMaxSelectorListMembers)
+        return false;
     const auto simpleEqual = [](const NavigatorScriptSelectorDescriptor& left,
         const NavigatorScriptSimpleSelectorDescriptor& leftSimple,
         const NavigatorScriptSelectorDescriptor& right,
@@ -3046,9 +3101,18 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
                         rightSimple.attributeValueLength)))) return false;
         return true;
     };
-    return left.relation == right.relation &&
-        simpleEqual(left, left.leftSimple, right, right.leftSimple) &&
-        simpleEqual(left, left.rightSimple, right, right.rightSimple);
+    for (std::size_t index = 0u; index < left.memberCount; ++index) {
+        const NavigatorScriptSelectorMemberDescriptor& leftMember =
+            left.members[index];
+        const NavigatorScriptSelectorMemberDescriptor& rightMember =
+            right.members[index];
+        if (leftMember.relation != rightMember.relation ||
+            !simpleEqual(left, leftMember.leftSimple, right,
+                rightMember.leftSimple) ||
+            !simpleEqual(left, leftMember.rightSimple, right,
+                rightMember.rightSimple)) return false;
+    }
+    return true;
 }
 
 bool NavigatorScriptHostAdapter::selectorSimpleElementMatches(
@@ -3095,12 +3159,13 @@ bool NavigatorScriptHostAdapter::selectorSimpleElementMatches(
         selector.classTokenCount != 0u || selector.hasAttributePredicate;
 }
 
-bool NavigatorScriptHostAdapter::selectorElementMatches(
+bool NavigatorScriptHostAdapter::selectorMemberElementMatches(
     const gxos::web::HtmlElementRef& element,
-    const NavigatorScriptSelectorDescriptor& selector) const
+    const NavigatorScriptSelectorMemberDescriptor& selector,
+    const NavigatorScriptSelectorDescriptor& storage) const
 {
     if (document_ == nullptr || !selector.rightSimple.valid ||
-        !selectorSimpleElementMatches(element, selector.rightSimple, selector))
+        !selectorSimpleElementMatches(element, selector.rightSimple, storage))
         return false;
     if (selector.relation == NavigatorScriptSelectorRelation::None)
         return true;
@@ -3111,7 +3176,7 @@ bool NavigatorScriptHostAdapter::selectorElementMatches(
     if (selector.relation == NavigatorScriptSelectorRelation::Child) {
         const gxos::web::HtmlElementRef* parent = findElement(parentSerial);
         return parent != nullptr && selectorSimpleElementMatches(*parent,
-            selector.leftSimple, selector);
+            selector.leftSimple, storage);
     }
 
     if (selector.relation == NavigatorScriptSelectorRelation::AdjacentSibling) {
@@ -3121,7 +3186,7 @@ bool NavigatorScriptHostAdapter::selectorElementMatches(
             return false;
         const gxos::web::HtmlElementRef* previous = findElement(previousSerial);
         return previous != nullptr && selectorSimpleElementMatches(*previous,
-            selector.leftSimple, selector);
+            selector.leftSimple, storage);
     }
 
     if (selector.relation == NavigatorScriptSelectorRelation::GeneralSibling) {
@@ -3138,7 +3203,7 @@ bool NavigatorScriptHostAdapter::selectorElementMatches(
                 findElement(previousSerial);
             if (previous == nullptr) return false;
             if (selectorSimpleElementMatches(*previous, selector.leftSimple,
-                    selector)) return true;
+                    storage)) return true;
             currentSerial = previousSerial;
         }
         return false;
@@ -3155,11 +3220,25 @@ bool NavigatorScriptHostAdapter::selectorElementMatches(
         const gxos::web::HtmlElementRef* ancestor = findElement(ancestorSerial);
         if (ancestor == nullptr) return false;
         if (selectorSimpleElementMatches(*ancestor, selector.leftSimple,
-                selector)) return true;
+                storage)) return true;
         HostInstanceId nextParentSerial = 0u;
         if (!resolveStructuralParentSerial(ancestorSerial,
                 nextParentSerial)) break;
         ancestorSerial = nextParentSerial;
+    }
+    return false;
+}
+
+bool NavigatorScriptHostAdapter::selectorElementMatches(
+    const gxos::web::HtmlElementRef& element,
+    const NavigatorScriptSelectorDescriptor& selector) const
+{
+    if (selector.memberCount == 0u ||
+        selector.memberCount > kNavigatorScriptMaxSelectorListMembers)
+        return false;
+    for (std::size_t index = 0u; index < selector.memberCount; ++index) {
+        if (selectorMemberElementMatches(element, selector.members[index],
+                selector)) return true;
     }
     return false;
 }
@@ -3171,7 +3250,8 @@ bool NavigatorScriptHostAdapter::selectorClosestMatch(
 {
     matchSerial = 0u;
     if (document_ == nullptr || receiverSerial == 0u ||
-        !selector.rightSimple.valid)
+        selector.memberCount == 0u ||
+        selector.memberCount > kNavigatorScriptMaxSelectorListMembers)
         return false;
 
     // The structural document-node capacity is also the maximum ancestry
@@ -3207,7 +3287,9 @@ bool NavigatorScriptHostAdapter::selectorScopeMatches(
 std::size_t NavigatorScriptHostAdapter::selectorMatchCount(
     const SelectorCollectionRecord& record) const
 {
-    if (document_ == nullptr || !record.selector.rightSimple.valid) return 0u;
+    if (document_ == nullptr || record.selector.memberCount == 0u ||
+        record.selector.memberCount > kNavigatorScriptMaxSelectorListMembers)
+        return 0u;
     const std::size_t count = std::min(limits_.maxDocumentNodes,
         document_->structuralElements.size());
     std::size_t matches = 0u;
@@ -3225,7 +3307,8 @@ bool NavigatorScriptHostAdapter::selectorMatchAt(
     HostInstanceId& serial) const
 {
     serial = 0u;
-    if (document_ == nullptr || !record.selector.rightSimple.valid)
+    if (document_ == nullptr || record.selector.memberCount == 0u ||
+        record.selector.memberCount > kNavigatorScriptMaxSelectorListMembers)
         return false;
     const std::size_t count = std::min(limits_.maxDocumentNodes,
         document_->structuralElements.size());

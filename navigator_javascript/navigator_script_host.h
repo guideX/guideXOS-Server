@@ -54,6 +54,7 @@ constexpr std::size_t kNavigatorScriptMaxDocumentMutations = 1024u;
 constexpr std::size_t kNavigatorScriptMaxDocumentNodes = 1024u;
 constexpr std::size_t kNavigatorScriptMaxClickHandlers = 64u;
 constexpr std::size_t kNavigatorScriptMaxSelectorLength = 256u;
+constexpr std::size_t kNavigatorScriptMaxSelectorListMembers = 4u;
 constexpr std::size_t kNavigatorScriptMaxSelectorAttributeNameLength = 64u;
 constexpr std::size_t kNavigatorScriptMaxSelectorAttributeValueLength = 128u;
 constexpr std::size_t kNavigatorScriptMaxClassQueryTokens = 8u;
@@ -115,35 +116,41 @@ enum class NavigatorScriptSelectorRelation : std::uint8_t {
 struct NavigatorScriptSimpleSelectorDescriptor {
     bool valid = false;
     bool universal = false;
-    std::uint16_t tagOffset = 0;
+    std::uint8_t tagOffset = 0;
     std::uint16_t tagLength = 0;
-    std::uint16_t idOffset = 0;
-    std::uint16_t idLength = 0;
+    std::uint8_t idOffset = 0;
+    std::uint8_t idLength = 0;
     struct ClassTokenRange {
-        std::uint16_t offset = 0;
-        std::uint16_t length = 0;
+        std::uint8_t offset = 0;
+        std::uint8_t length = 0;
     };
     std::uint8_t classTokenCount = 0;
     std::array<ClassTokenRange, kNavigatorScriptMaxClassQueryTokens>
         classTokens{};
     bool hasAttributePredicate = false;
     bool attributeValuePresent = false;
-    std::uint16_t attributeNameOffset = 0;
-    std::uint16_t attributeNameLength = 0;
-    std::uint16_t attributeValueOffset = 0;
-    std::uint16_t attributeValueLength = 0;
+    std::uint8_t attributeNameOffset = 0;
+    std::uint8_t attributeNameLength = 0;
+    std::uint8_t attributeValueOffset = 0;
+    std::uint8_t attributeValueLength = 0;
 };
 
-// A selector is retained only as its parsed, bounded components.  The shared
-// storage keeps querySelectorAll live without retaining an arbitrary raw
-// selector string in a host value or creating a second DOM representation.
-struct NavigatorScriptSelectorDescriptor {
+struct NavigatorScriptSelectorMemberDescriptor {
     NavigatorScriptSelectorRelation relation =
         NavigatorScriptSelectorRelation::None;
-    std::array<char, kNavigatorScriptMaxSelectorLength> text{};
     NavigatorScriptSimpleSelectorDescriptor leftSimple;
     NavigatorScriptSimpleSelectorDescriptor rightSimple;
+};
+
+// A selector list shares one bounded component-text buffer across its members.
+// Every persistent member is a fixed-size complete-selector descriptor; no
+// selector source pointers or per-member allocations survive parsing.
+struct NavigatorScriptSelectorDescriptor {
+    std::array<char, kNavigatorScriptMaxSelectorLength> text{};
     std::uint16_t textLength = 0;
+    std::uint8_t memberCount = 0;
+    std::array<NavigatorScriptSelectorMemberDescriptor,
+        kNavigatorScriptMaxSelectorListMembers> members{};
 };
 
 // The adapter never stores a JavaScript pointer and never creates a
@@ -396,6 +403,10 @@ private:
     bool selectorSimpleElementMatches(
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSimpleSelectorDescriptor& selector,
+        const NavigatorScriptSelectorDescriptor& storage) const;
+    bool selectorMemberElementMatches(
+        const gxos::web::HtmlElementRef& element,
+        const NavigatorScriptSelectorMemberDescriptor& selector,
         const NavigatorScriptSelectorDescriptor& storage) const;
     bool selectorElementMatches(const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSelectorDescriptor& selector) const;

@@ -4249,6 +4249,51 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js50AfterClick, 1100) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js51FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js51.html";
+    const bool js51Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js51FixtureUrl);
+    const std::string js51InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS51 hosted selector-list fixture loads and evaluates",
+        js51Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js51FixtureUrl &&
+        contains(js51InitialText, "Navigator JavaScript JS51") &&
+        contains(js51InitialText,
+            "initial:order=true:union=true:scoped=true:matches=true:closest=true:quoted=true:invalid=true:mutation=true:event=false:nested=false:metadata=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js51Loaded) + ",text=" +
+        summarizeText(js51InitialText, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS51 hosted querySelector uses structural union order",
+        js51Loaded && contains(js51InitialText, ":order=true:union=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "reversing selector-list member order preserves first document match and one-pass deduplicated structural querySelectorAll order");
+    add("JS51 hosted scoped query, matches, and closest use OR semantics",
+        js51Loaded && contains(js51InitialText,
+            ":scoped=true:matches=true:closest=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "scoped descendants exclude self/outside elements, matches accepts either member, and closest chooses the nearest ancestor independent of member order");
+    add("JS51 hosted quoted commas and whole-list failure pass",
+        js51Loaded && contains(js51InitialText,
+            ":quoted=true:invalid=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "a comma and closing bracket inside a quoted attribute stay within one member; an unsupported member invalidates the complete list");
+    add("JS51 hosted held collection preserves live union through mutation",
+        js51Loaded && contains(js51InitialText, ":mutation=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "attribute set/replace/remove and alternate class matching update one held, deduplicated structural-order collection");
+    const bool js51EarlyClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("early");
+    const std::string js51AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS51 hosted delegated list checks preserve nested Event metadata",
+        js51EarlyClick && contains(js51AfterClick,
+            "event:order=true:union=true:scoped=true:matches=true:closest=true:quoted=true:invalid=true:mutation=true:event=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js51EarlyClick) + ",text=" +
+        summarizeText(js51AfterClick, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

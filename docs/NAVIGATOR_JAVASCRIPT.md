@@ -5154,11 +5154,75 @@ restored from the pre-kernel copies. All 96 snapshot files then matched their
 pre-kernel hashes and lengths, with no new files in the snapshotted paths.
 Generated outputs are excluded from the JS50 source commit.
 
-`git diff --check` passes. One local source commit is created for JS50; nothing
-is pushed. Recommended JS51 direction: another bounded selector capability
-only after preserving the shared descriptor, resolver, live-collection,
-generation, and strict-build invariants.
+`git diff --check` passes. One local source commit was created for JS50; nothing
+was pushed.
 
-Recommended JS51 direction: add only another bounded selector capability
-after the same shared descriptor, resolver, live-collection, generation, and
-strict-build invariants remain intact.
+## JS51: bounded selector lists
+
+JS51 adds comma-separated selector lists to the JS50 bounded selector
+grammar. A list contains one to four members and the complete input remains
+limited to 256 bytes. ASCII whitespace around members is trimmed. The scanner
+recognizes commas only outside attribute brackets and quoted values, so a
+quoted attribute value can contain both a comma and a closing bracket. Every
+member uses the existing JS50 parser and grammar, including its tag, ID,
+class, one-attribute-predicate, standalone universal, and at-most-one-relation
+rules. An empty, malformed, or unsupported member rejects the entire list.
+
+`querySelector()` returns the first matching element in structural document
+order, regardless of selector-member order. `querySelectorAll()` scans the
+eligible document or scoped descendants once, appending an element only once
+when any member matches. Held collections remain live and reflect attribute,
+class, and ID mutations on each read. Scoped element queries continue to
+exclude the scope element itself. `matches()` uses OR semantics; `closest()`
+walks from the receiver toward the root and returns the nearest element
+matching any member. Invalid lists fail closed with null, false, or an empty
+live collection. Stale generation checks still prevent old Element and
+collection handles from reading replacement-document state.
+
+The parser stores no borrowed input pointers, dynamic list, or selector AST.
+Four compact member descriptors share one 256-byte descriptor-owned text
+buffer. This keeps the complete list descriptor at 524 bytes, compared with
+368 bytes for the JS50 complete selector descriptor. A collection record is
+544 bytes, compared with 384 bytes in JS50; 128 records use 69,632 bytes,
+20,480 bytes more than the prior 49,152-byte registry. Four members are the
+bounded list capacity for this representation and its fixed registry cost.
+
+The focused suite is `tests/navigator_javascript_js51_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js51.ps1`. It covers the byte and member
+limits, top-level comma scanning, all-or-nothing parsing, selector relations,
+structural union order and deduplication, scope, `matches()` and nearest
+`closest()`, live mutation, event dispatch, nested Event metadata, collection
+capacity and read-only behavior, stale generations, serial reuse, and repeated
+reads. It passes **278/278 checks**, including the strict
+`-Wall -Wextra -Werror -pedantic` parser/adapter/runtime lane. The JS36
+regression now also covers selector-list unions and passes **114/114**; its
+earlier JS50-era count was 99. The final JavaScript matrix passes **49/49
+lanes** across lexer, parser, runtime, and JS6–JS51.
+
+The hosted fixture `navigator-smoke/javascript-js51.html` is part of
+`navigator.smoke`. All six JS51 hosted checks pass, including structural
+query order, scoped and matching behavior, quoted commas, whole-list failure,
+live collections, and authentic delegated click dispatch with nested Event
+metadata. The complete hosted aggregate reports **559 passed / 7 failed** out
+of 566 checks. Its seven failures remain the existing CSS checks: phases 3C
+and 3G, phase 6A, three phase 6B checks, and phase 6C. `build.bat` passes and
+links `guideXOSServer.exe`.
+
+The `build-kernel.bat` attempt stops before the kernel build at the PacMan
+Native ELF link because `pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)` are unresolved. The separate
+`mingw32-make ARCH=amd64 EXTRA_CFLAGS=` attempt from `kernel/` stops at
+`mbedtls_check_config.h:51` (partial ECC curves acceleration) and `:64`
+(missing ECDHE-RSA prerequisites). No fresh kernel was produced, so no QEMU
+proof is claimed.
+
+Before those attempts, a SHA-256 and length snapshot covered 308 files totaling
+130,758,816 bytes across `ESP/`, `out/wallpaper-pack/`, `Apps/PacMan/`,
+`build/pacman-native/amd64/`, `kernel/build/`, and both bootloader output
+folders. The wrapper changed PacMan's `game.o`, `main.o`, and `renderer.o`;
+all three were restored from the pre-attempt copies. Final comparison found no
+changed, missing, or extra files in the snapshot paths. Generated outputs are
+excluded from the source commit.
+
+`git diff --check` and staged validation pass. One local source commit is
+created for JS51; nothing is pushed.

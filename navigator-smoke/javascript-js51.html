@@ -1,0 +1,97 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS51</title></head>
+<body>
+<h1>Navigator JavaScript JS51</h1>
+<div id="panel" class="panel" data-state="ready" data-label="a],b">
+  <div id="group" class="group">
+    <button id="early" class="action primary always" data-action="save" data-state="ready">Early</button>
+    <button id="late" class="action secondary" data-action="cancel">Late</button>
+    <input id="field" class="field" value="initial">
+    <button id="sibling" class="action" data-action="other">Sibling</button>
+    <span id="nested" class="leaf"></span>
+    <input id="agree" type="checkbox" checked>
+  </div>
+</div>
+<div id="outside" class="field" data-action="save"></div>
+<p id="js51-state">initial</p>
+<script>
+var panel = document.getElementById("panel");
+var group = document.getElementById("group");
+var early = document.getElementById("early");
+var late = document.getElementById("late");
+var nested = document.getElementById("nested");
+var outside = document.getElementById("outside");
+var state = document.getElementById("js51-state");
+var eventOk = false;
+var nestedOk = false;
+var metadataOk = false;
+var orderOk = document.querySelector("#late, #early") === early &&
+  document.querySelector("#early, #late") === early;
+var union = document.querySelectorAll(".action, button");
+var reverseUnion = document.querySelectorAll("button, .action");
+var unionOk = union.length === 3 && union[0] === early && union[1] === late &&
+  union[2] === document.getElementById("sibling") &&
+  reverseUnion.length === union.length && reverseUnion[0] === union[0] &&
+  reverseUnion[1] === union[1] && reverseUnion[2] === union[2];
+var scope = panel.querySelectorAll(".field, [data-action]");
+var scopeOk = scope.length === 4 && scope[0] === early && scope[1] === late &&
+  scope[2] === document.getElementById("field") &&
+  scope[3] === document.getElementById("sibling") &&
+  panel.querySelector("#panel") === null &&
+  panel.querySelector("#outside, #late") === late;
+var matchesOk = early.matches("[data-action=cancel], .primary") &&
+  late.matches("#missing, [data-action=cancel]") &&
+  !late.matches("#missing, [data-action=save]");
+var closestOk = nested.closest(".panel, .group") === group &&
+  nested.closest(".group, .panel") === group &&
+  early.closest("#early, .group") === early;
+var quotedCommaOk = panel.matches('[data-label="a],b"], #missing');
+var invalidWholeListOk = document.querySelector("button, [type^=text]") === null &&
+  document.querySelectorAll("button, [type^=text]").length === 0;
+var live = document.querySelectorAll("[data-state=ready], .always");
+var liveMutationOk = live.length === 2 && live[0] === panel && live[1] === early;
+early.removeAttribute("data-state");
+liveMutationOk = liveMutationOk && live.length === 2 && live[1] === early;
+late.setAttribute("data-state", "ready");
+liveMutationOk = liveMutationOk && live.length === 3 && live[2] === late;
+late.setAttribute("data-state", "busy");
+liveMutationOk = liveMutationOk && live.length === 2;
+late.removeAttribute("data-state");
+early.setAttribute("class", "action primary");
+liveMutationOk = liveMutationOk && live.length === 1 && live[0] === panel;
+early.setAttribute("class", "action primary always");
+liveMutationOk = liveMutationOk && live.length === 2 && live[1] === early;
+outside.addEventListener("click", function (event) {
+  nestedOk = event.target === outside &&
+    event.target.matches("[data-action=save], .never") &&
+    event.currentTarget === outside && event.eventPhase === 2;
+});
+panel.addEventListener("click", function (event) {
+  if (event.target.matches("[data-action=save], [data-action=cancel]")) {
+    var target = event.target;
+    var current = event.currentTarget;
+    var phase = event.eventPhase;
+    event.target.setAttribute("data-state", "clicked");
+    eventOk = event.target.matches(".always, [data-state=clicked]") &&
+      event.target.closest(".panel, .group") === group;
+    outside.click();
+    metadataOk = event.target === target && target === early &&
+      event.currentTarget === current && current === panel &&
+      event.eventPhase === phase && phase === 3 &&
+      event.relatedTarget === null && event.defaultPrevented === false;
+    js51Snapshot("event");
+  }
+});
+function js51Snapshot(label) {
+  state.textContent = label + ":order=" + orderOk + ":union=" + unionOk +
+    ":scoped=" + scopeOk + ":matches=" + matchesOk +
+    ":closest=" + closestOk + ":quoted=" + quotedCommaOk +
+    ":invalid=" + invalidWholeListOk + ":mutation=" + liveMutationOk +
+    ":event=" + eventOk + ":nested=" + nestedOk +
+    ":metadata=" + metadataOk;
+}
+js51Snapshot("initial");
+</script>
+</body>
+</html>

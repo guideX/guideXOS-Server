@@ -203,13 +203,25 @@ var invalid = document.querySelector("") === null &&
     document.querySelector("   ") === null &&
     document.querySelector("form div input") === null &&
     document.querySelector("input[type^=text]") === null &&
-    document.querySelector("input, textarea") === null &&
     document.querySelector(":focus") === null;
+var inputList = document.querySelectorAll("input,textarea");
+var selectorListCount = inputList.length;
+var singleInputCount = document.querySelectorAll("input").length;
+var selectorListOrder = inputList[0] === document.getElementById("username") &&
+    inputList[1] === document.getElementById("other-input") &&
+    inputList[2] === document.getElementById("submit") &&
+    inputList[3] === document.getElementById("reset") &&
+    inputList[4] === document.getElementById("unowned");
+var selectorListMiss = inputList[5] === undefined;
 var invalidCollections = document.querySelectorAll("").length === 0 &&
     document.querySelectorAll("form div input").length === 0 &&
     document.querySelectorAll("*").length > 0 &&
     document.querySelectorAll("*")[0] === document.querySelector("html") &&
-    document.querySelectorAll("input,textarea").length === 0;
+    selectorListCount === 5;
+var selectorLists =
+    document.querySelector("input, textarea") ===
+        document.getElementById("username") &&
+    inputList.length === 5;
 var empty = document.querySelectorAll(".missing");
 var emptyCollection = empty !== null && empty.length === 0 &&
     empty[999] === undefined;
@@ -219,6 +231,16 @@ var emptyCollection = empty !== null && empty.length === 0 &&
         "invalid selectors: querySelector null");
     expectBoolean(harness, "invalidCollections", true,
         "invalid selectors: malformed selectors empty; universal selector valid");
+    expectBoolean(harness, "selectorLists", true,
+        "selector lists: union of existing simple selectors");
+    expectNumber(harness, "selectorListCount", 5.0,
+        "selector lists: input and textarea union count");
+    expectNumber(harness, "singleInputCount", 5.0,
+        "selector lists: baseline input-only count");
+    expectBoolean(harness, "selectorListOrder", true,
+        "selector lists: union retains structural order");
+    expectBoolean(harness, "selectorListMiss", true,
+        "selector lists: collection contains no duplicate Element");
     expectBoolean(harness, "emptyCollection", true,
         "invalid selectors: bounded empty collection");
     expectError(harness.execute("empty[0] = document.querySelector(\"#login\");"),
