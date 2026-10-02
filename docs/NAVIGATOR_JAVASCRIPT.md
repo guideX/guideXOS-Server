@@ -5027,7 +5027,138 @@ pre-wrapper snapshot. All 94 preflight generated artifact hashes and lengths
 match, including `ESP/ramdisk.img` and the wallpaper/PacMan package trees.
 Generated build outputs are excluded from the JS49 source change.
 
-Recommended JS50 direction: evaluate bounded attribute-selector support against
-the now-mutable authoritative generic/id/class state, with explicit selector
-grammar and collection-liveness tests. Keep style and form-reflected mutation
-deferred until their CSS/form consumer projections can be updated atomically.
+JS50 builds on the mutable authoritative generic/id/class state while keeping
+style and form-reflected mutation deferred until their consumer projections can
+be updated atomically.
+
+## JS50: bounded attribute presence and exact-value selectors
+
+JS50 extends the existing parsed selector descriptor and shared selector
+matcher with one optional attribute predicate on each simple-selector side:
+
+```javascript
+document.querySelector("[disabled]")
+document.querySelector("[data-action=save]")
+document.querySelector("button[data-action=save]")
+element.matches("button#save.action.primary[data-action=save]")
+element.closest(".panel[data-role=panel]")
+```
+
+The canonical compound order is an optional tag, optional `#id`, zero or more
+`.class` tokens, then one optional `[attribute]` or `[attribute=value]`
+predicate. A simple selector can carry at most one attribute predicate. For a
+one-relation selector, each side can independently carry one predicate. The
+existing one-relation and strict scoped-query behavior is unchanged. Attribute
+selectors are accepted on attribute-only, tag, ID, class, and full compounds;
+`*[attribute]` remains unsupported.
+
+Attribute names reuse JS49's ASCII grammar
+`[A-Za-z][A-Za-z0-9:_-]*` and 64-byte limit. Name lookup remains
+ASCII-case-insensitive. Unquoted exact values use the bounded token grammar
+`[A-Za-z0-9:_./-]+`, with a 128-byte maximum. Single- and double-quoted values
+are also accepted up to 128 bytes; quoted values may contain spaces and other
+non-control bytes, but backslash escapes and the matching quote inside the
+value are not supported. Quoted empty (`[name=""]`) is supported and matches
+only a present empty value. Unquoted empty (`[name=]`) is rejected. Values are
+compared byte-for-byte and case-sensitively, while names are looked up
+case-insensitively. Presence matches valueless and empty attributes without
+requiring a non-empty value.
+
+Selectors remain capped at 256 input bytes. Parsing is manual and fixed-bound;
+there is no regex, raw-HTML scan, CSS AST, selector-specific attribute cache,
+or dynamic selector storage. Attribute names and values are copied into the
+descriptor, not borrowed from the source selector. The current simple-selector
+descriptor grows by 10 bytes; the full selector descriptor grows by 20 bytes
+because it embeds two simple selectors. The 128-record collection registry
+therefore grows by 2,048 bytes total. Each collection retains its parsed
+descriptor and scope, and rescans the current document on each read.
+
+Attribute matching calls the same `resolveElementAttribute()` routine used by
+`getAttribute()` and `hasAttribute()`. Generic retained values and JS49
+mutations are therefore visible immediately, including replacement and
+removal. The resolver keeps the established id/class and supported form
+projections authoritative. For input/button `value`, checked inputs, and
+selected options, selectors observe the same retained/default attribute state
+as `getAttribute()`, not current `.value`, `.checked`, or `.selected` state.
+The JS49 deferred write policy for style and reflected form attributes is
+unchanged. Existing generation validation rejects stale Element receivers
+before matching; a reused serial cannot expose a replacement document's
+attributes through an old handle. Selector reads do not mutate document state.
+
+The accepted operators are only presence and exact equality. Multiple
+attribute predicates on one simple selector, selector lists, universal-plus-
+attribute syntax, namespace interpretation, case modifiers, CSS escapes,
+and the other CSS attribute operators remain unsupported. Malformed syntax
+fails closed (`querySelector()` returns null, `matches()` false, and
+`querySelectorAll()` an empty bounded live collection). Entity-decoded retained
+values are matched through the resolver; values with spaces require a quoted
+selector value.
+
+The JS50 focused suite in `tests/navigator_javascript_js50_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js50.ps1`, covers presence, exact and empty
+values, name/value case behavior, generic/data/ARIA/custom/href/src attributes,
+quoted entity-decoded values, tag/ID/class/full compounds, malformed syntax,
+scoped queries, live collections through mutation, all existing one-relation
+types, retained form/default semantics, authentic event mutation and nested
+dispatch, stale serial reuse, selector purity, and 120 simultaneously retained
+selector collections. The strict parser/adapter/runtime warning-as-error lane
+is part of the focused script. JS50's production hosted fixture is
+`navigator-smoke/javascript-js50.html` and is included in
+`scripts/smoke-navigator-hosted.ps1`'s `navigator.smoke` run.
+
+The focused JS50 suite passes **313/313 checks**, and both its optimized
+bare-metal harness and strict `-Wall -Wextra -Werror -pedantic` lane pass. It
+includes 300 repeated `matches()` calls, 200 repeated live collection reads,
+120 distinct retained collections, and live mutation updates. Stale attribute
+collections are rejected by generation validation and cannot read a later
+document's collection results; stale Element `matches()`/`closest()` continue
+to return false/null.
+
+The full JavaScript matrix passes **48/48 lanes**: lexer, parser, runtime, and
+JS6–JS50. The first matrix run caught a stale JS36 negative assertion that
+treated the newly supported `[type=text]` form as invalid. That assertion now
+uses the still-unsupported `[type^=text]` operator, and JS36 reruns at **99/99**.
+JS39's malformed-operator check was similarly made explicit as `^=`. Focused
+JS36–JS49 regressions pass **99/99, 180/180, 152/152, 218/218, 155/155,
+220/220, 235/235, 277/277, 183/183, 184/184, 220/220, 137/137, 136/136,
+and 150/150** checks, respectively. JS50 passes 313/313. `build.bat` passes.
+
+The production hosted aggregate reports **553 passed / 7 failed** out of 560
+checks. All five hosted JS50 checks pass: exact and presence queries with
+scoping/compounds/relations, live set/replace/remove behavior, retained form
+defaults, and authentic event mutation with nested dispatch metadata. The
+seven failures remain the established CSS checks: phases 3C and 3G, phase 6A,
+three phase 6B checks, and phase 6C. No JS50 hosted check failed.
+
+The strict lane passes with no JS50 regex, dynamic CSS AST, map, unbounded
+selector storage, exception, RTTI, or hosted-only matcher additions. Descriptor
+sizes on the validated 64-bit toolchain are 44 to 54 bytes for a simple
+selector and 348 to 368 bytes for the complete descriptor. Each of the 128
+collection records rounds from 368 to 384 bytes, for a 2,048-byte registry
+increase. Name and value ranges share the existing 256-byte descriptor text
+buffer; the descriptor owns no pointers into parser scratch.
+
+`build-kernel.bat` stops in the PacMan Native ELF link before invoking the
+kernel build, with unresolved `pacman_audio_load_resources(gx_app_context*)`
+and `pacman_audio_submit(void*, PacManSoundId)`. The independent
+`mingw32-make ARCH=amd64 EXTRA_CFLAGS=` run from `kernel/` stops at
+`mbedtls_check_config.h:51` (unsupported partial ECC curves acceleration) and
+`:64` (ECDHE-RSA prerequisites missing). Neither dependency was changed. No
+fresh kernel was produced, so QEMU proof is not claimed.
+
+Before kernel attempts, SHA-256 and length snapshots covered 96 files: the
+`ESP/ramdisk.img`, all 89 `out/wallpaper-pack/` files (including the four-file
+PacMan package), six tracked PacMan object files, and the kernel output folder.
+The wrapper regenerated `game.o`, `main.o`, and `renderer.o`; those three were
+restored from the pre-kernel copies. All 96 snapshot files then matched their
+pre-kernel hashes and lengths, with no new files in the snapshotted paths.
+Generated outputs are excluded from the JS50 source commit.
+
+`git diff --check` passes. One local source commit is created for JS50; nothing
+is pushed. Recommended JS51 direction: another bounded selector capability
+only after preserving the shared descriptor, resolver, live-collection,
+generation, and strict-build invariants.
+
+Recommended JS51 direction: add only another bounded selector capability
+after the same shared descriptor, resolver, live-collection, generation, and
+strict-build invariants remain intact.

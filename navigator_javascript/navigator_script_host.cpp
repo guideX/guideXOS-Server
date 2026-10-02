@@ -431,6 +431,106 @@ bool parseCompoundClassTokens(SourceView source, std::size_t begin,
         selector);
 }
 
+bool isSelectorAttributeValueCharacter(char character)
+{
+    const unsigned char value = static_cast<unsigned char>(character);
+    return (value >= static_cast<unsigned char>('a') &&
+            value <= static_cast<unsigned char>('z')) ||
+        (value >= static_cast<unsigned char>('A') &&
+            value <= static_cast<unsigned char>('Z')) ||
+        (value >= static_cast<unsigned char>('0') &&
+            value <= static_cast<unsigned char>('9')) ||
+        character == '-' || character == '_' || character == ':' ||
+        character == '.' || character == '/';
+}
+
+bool parseAttributePredicate(SourceView source, std::size_t open,
+    std::size_t end, NavigatorScriptSelectorDescriptor& storage,
+    NavigatorScriptSimpleSelectorDescriptor& selector)
+{
+    if (open >= end || source.data[open] != '[' ||
+        selector.hasAttributePredicate) return false;
+
+    char quote = '\0';
+    std::size_t close = end;
+    for (std::size_t index = open + 1u; index < end; ++index) {
+        const char character = source.data[index];
+        if (quote != '\0') {
+            if (character == quote) quote = '\0';
+            continue;
+        }
+        if (character == '"' || character == '\'') {
+            quote = character;
+            continue;
+        }
+        if (character == '[') return false;
+        if (character == ']') {
+            close = index;
+            break;
+        }
+    }
+    if (quote != '\0' || close == end || close + 1u != end) return false;
+
+    std::size_t equals = close;
+    char valueDelimiter = '\0';
+    for (std::size_t index = open + 1u; index < close; ++index) {
+        const char character = source.data[index];
+        if (valueDelimiter != '\0') {
+            if (character == valueDelimiter) valueDelimiter = '\0';
+            continue;
+        }
+        if (character == '"' || character == '\'') {
+            valueDelimiter = character;
+            continue;
+        }
+        if (character != '=') continue;
+        if (equals != close) return false;
+        equals = index;
+    }
+    const std::size_t nameEnd = equals;
+    if (nameEnd - (open + 1u) >
+            kNavigatorScriptMaxSelectorAttributeNameLength ||
+        !validAttributeName(SourceView(source.data + open + 1u,
+            nameEnd - (open + 1u))) ||
+        !copySelectorPart(storage, source, open + 1u, nameEnd,
+            selector.attributeNameOffset, selector.attributeNameLength))
+        return false;
+
+    selector.hasAttributePredicate = true;
+    if (equals == close) return true;
+
+    std::size_t valueBegin = equals + 1u;
+    std::size_t valueEnd = close;
+    if (valueBegin == valueEnd) return false;
+    if (source.data[valueBegin] == '"' || source.data[valueBegin] == '\'') {
+        const char valueQuote = source.data[valueBegin++];
+        if (valueEnd <= valueBegin || source.data[valueEnd - 1u] != valueQuote)
+            return false;
+        --valueEnd;
+        if (valueEnd - valueBegin >
+            kNavigatorScriptMaxSelectorAttributeValueLength) return false;
+        for (std::size_t index = valueBegin; index < valueEnd; ++index) {
+            const unsigned char character =
+                static_cast<unsigned char>(source.data[index]);
+            if (source.data[index] == valueQuote || character < 0x20u ||
+                character == 0x7fu || character == static_cast<unsigned char>('\\'))
+                return false;
+        }
+    } else {
+        if (valueEnd - valueBegin >
+            kNavigatorScriptMaxSelectorAttributeValueLength) return false;
+        for (std::size_t index = valueBegin; index < valueEnd; ++index) {
+            if (!isSelectorAttributeValueCharacter(source.data[index]))
+                return false;
+        }
+    }
+    if (!copySelectorPart(storage, source, valueBegin, valueEnd,
+            selector.attributeValueOffset, selector.attributeValueLength))
+        return false;
+    selector.attributeValuePresent = true;
+    return true;
+}
+
 bool parseSimpleSelector(SourceView source, std::size_t begin,
     std::size_t end, NavigatorScriptSelectorDescriptor& storage,
     NavigatorScriptSimpleSelectorDescriptor& selector)
@@ -446,9 +546,10 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
     }
 
     std::size_t position = begin;
-    if (first != '#' && first != '.') {
+    if (first != '#' && first != '.' && first != '[') {
         while (position < end && source.data[position] != '#' &&
-            source.data[position] != '.') ++position;
+            source.data[position] != '.' && source.data[position] != '[')
+            ++position;
         if (!isSelectorTagName(source, begin, position) ||
             !copySelectorPart(storage, source, begin, position,
                 selector.tagOffset, selector.tagLength)) return false;
@@ -458,7 +559,7 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
         const std::size_t idBegin = position + 1u;
         std::size_t idEnd = idBegin;
         while (idEnd < end && source.data[idEnd] != '#' &&
-            source.data[idEnd] != '.') ++idEnd;
+            source.data[idEnd] != '.' && source.data[idEnd] != '[') ++idEnd;
         if (!isSelectorIdentifier(source, idBegin, idEnd) ||
             !copySelectorPart(storage, source, idBegin, idEnd,
                 selector.idOffset, selector.idLength)) return false;
@@ -466,13 +567,22 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
     }
 
     if (position < end && source.data[position] == '.') {
-        if (!parseCompoundClassTokens(source, position + 1u, end, storage,
+        std::size_t classEnd = position + 1u;
+        while (classEnd < end && source.data[classEnd] != '[') ++classEnd;
+        if (!parseCompoundClassTokens(source, position + 1u, classEnd, storage,
                 selector)) return false;
+        position = classEnd;
+    }
+
+    if (position < end && source.data[position] == '[') {
+        if (!parseAttributePredicate(source, position, end, storage, selector))
+            return false;
         position = end;
     }
 
     if (position != end || (selector.tagLength == 0u &&
-            selector.idLength == 0u && selector.classTokenCount == 0u))
+            selector.idLength == 0u && selector.classTokenCount == 0u &&
+            !selector.hasAttributePredicate))
         return false;
     selector.valid = true;
     return true;
@@ -494,15 +604,35 @@ bool parseBoundedSelector(SourceView source,
     if (begin == end) return false;
 
     std::size_t relationPosition = end;
+    std::size_t whitespacePosition = end;
     char relationCharacter = '\0';
     std::size_t relationCount = 0u;
+    bool insideAttribute = false;
+    char quote = '\0';
     for (std::size_t index = begin; index < end; ++index) {
         const char character = source.data[index];
-        if (character != '>' && character != '+' && character != '~')
+        if (insideAttribute) {
+            if (quote != '\0') {
+                if (character == quote) quote = '\0';
+            } else if (character == '"' || character == '\'') {
+                quote = character;
+            } else if (character == ']') {
+                insideAttribute = false;
+            }
             continue;
-        relationPosition = index;
-        relationCharacter = character;
-        ++relationCount;
+        }
+        if (character == '[') {
+            insideAttribute = true;
+            continue;
+        }
+        if (character == '>' || character == '+' || character == '~') {
+            relationPosition = index;
+            relationCharacter = character;
+            ++relationCount;
+        } else if (whitespacePosition == end &&
+            isSelectorAsciiWhitespace(character)) {
+            whitespacePosition = index;
+        }
     }
 
     if (relationCount > 1u) return false;
@@ -524,12 +654,6 @@ bool parseBoundedSelector(SourceView source,
                 selector.rightSimple);
     }
 
-    std::size_t whitespacePosition = end;
-    for (std::size_t index = begin; index < end; ++index) {
-        if (!isSelectorAsciiWhitespace(source.data[index])) continue;
-        whitespacePosition = index;
-        break;
-    }
     if (whitespacePosition == end) {
         return parseSimpleSelector(source, begin, end, selector,
             selector.rightSimple);
@@ -2880,6 +3004,10 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
             leftSimple.tagLength != rightSimple.tagLength ||
             leftSimple.idLength != rightSimple.idLength ||
             leftSimple.classTokenCount != rightSimple.classTokenCount ||
+            leftSimple.hasAttributePredicate !=
+                rightSimple.hasAttributePredicate ||
+            leftSimple.attributeValuePresent !=
+                rightSimple.attributeValuePresent ||
             leftSimple.classTokenCount > kNavigatorScriptMaxClassQueryTokens ||
             !selectorTextEquals(selectorPart(left, leftSimple.tagOffset,
                 leftSimple.tagLength),
@@ -2900,6 +3028,22 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
                     leftToken.length), selectorPart(right, rightToken.offset,
                     rightToken.length))) return false;
         }
+        if (leftSimple.hasAttributePredicate &&
+            (leftSimple.attributeNameLength !=
+                    rightSimple.attributeNameLength ||
+                !selectorTextEquals(selectorPart(left,
+                    leftSimple.attributeNameOffset,
+                    leftSimple.attributeNameLength),
+                    selectorPart(right, rightSimple.attributeNameOffset,
+                        rightSimple.attributeNameLength)))) return false;
+        if (leftSimple.attributeValuePresent &&
+            (leftSimple.attributeValueLength !=
+                    rightSimple.attributeValueLength ||
+                !selectorTextEquals(selectorPart(left,
+                    leftSimple.attributeValueOffset,
+                    leftSimple.attributeValueLength),
+                    selectorPart(right, rightSimple.attributeValueOffset,
+                        rightSimple.attributeValueLength)))) return false;
         return true;
     };
     return left.relation == right.relation &&
@@ -2930,8 +3074,25 @@ bool NavigatorScriptHostAdapter::selectorSimpleElementMatches(
     if (selector.classTokenCount != 0u &&
         !classTokenSetMatches(element.className, selector, storage))
         return false;
+    if (selector.hasAttributePredicate) {
+        if (selector.attributeNameLength == 0u ||
+            selector.attributeNameLength >
+                kNavigatorScriptMaxSelectorAttributeNameLength ||
+            (selector.attributeValuePresent &&
+                selector.attributeValueLength >
+                    kNavigatorScriptMaxSelectorAttributeValueLength))
+            return false;
+        SourceView retainedValue;
+        if (!resolveElementAttribute(element.serial,
+                selectorPart(storage, selector.attributeNameOffset,
+                    selector.attributeNameLength), retainedValue)) return false;
+        if (selector.attributeValuePresent &&
+            !selectorTextEquals(retainedValue,
+                selectorPart(storage, selector.attributeValueOffset,
+                    selector.attributeValueLength))) return false;
+    }
     return selector.tagLength != 0u || selector.idLength != 0u ||
-        selector.classTokenCount != 0u;
+        selector.classTokenCount != 0u || selector.hasAttributePredicate;
 }
 
 bool NavigatorScriptHostAdapter::selectorElementMatches(

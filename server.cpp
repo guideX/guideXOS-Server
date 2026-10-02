@@ -4207,6 +4207,48 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "same-callback class/ID matching is immediate and nested dispatch preserves target/currentTarget/phase/relatedTarget/defaultPrevented");
 
+    const std::string js50FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js50.html";
+    const bool js50Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js50FixtureUrl);
+    const std::string js50InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS50 hosted presence and exact-value attribute selectors pass",
+        js50Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js50FixtureUrl &&
+        contains(js50InitialText, "Navigator JavaScript JS50") &&
+        contains(js50InitialText,
+            "initial:core=true:scoped=true:compound=true:relation=true:mutation=true:replace=true:remove=true:idclass=true:forms=true:event=false:nested=false:metadata=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js50Loaded) + ",text=" +
+        summarizeText(js50InitialText, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS50 hosted scoped, compound, and one-relation selectors agree",
+        js50Loaded && contains(js50InitialText,
+            "initial:core=true:scoped=true:compound=true:relation=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "querySelector, scoped querySelector(All), matches, closest, and child/adjacent/general-sibling attribute predicates use canonical Elements");
+    add("JS50 hosted mutation, replacement, removal, and live reads agree",
+        js50Loaded && contains(js50InitialText,
+            ":mutation=true:replace=true:remove=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "setAttribute and removeAttribute are immediately visible to matches and held querySelectorAll collections");
+    add("JS50 hosted exact selectors keep retained form defaults",
+        js50Loaded && contains(js50InitialText, ":forms=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "value, checked, and selected selectors observe retained/default attributes rather than current form properties");
+
+    const bool js50SaveClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("save");
+    const std::string js50AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS50 hosted event mutation, nested dispatch, and metadata pass",
+        js50SaveClick && contains(js50AfterClick,
+            "event:core=true:scoped=true:compound=true:relation=true:mutation=true:replace=true:remove=true:idclass=true:forms=true:event=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js50SaveClick) + ",text=" +
+        summarizeText(js50AfterClick, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

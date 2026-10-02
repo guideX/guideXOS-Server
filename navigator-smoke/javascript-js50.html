@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS50</title></head>
+<body>
+<h1>Navigator JavaScript JS50</h1>
+<div id="panel" class="panel active" data-mode="active" data-state="Ready"
+     data-empty="" data-label="Tom &amp; Jerry" aria-label="Main panel"
+     title="tip" custom-flag href="/docs" src="/logo.png">
+  <button id="save" class="action primary" data-action="save"
+          data-state="Ready" disabled>Save</button>
+  <button id="other" type="button" data-action="other">Other</button>
+  <span id="marker" class="marker" data-state="active"></span>
+  <button id="next" class="next" data-action="save">Next</button>
+  <label id="label" data-required="yes"></label>
+  <input id="field" data-state="ready" value="initial">
+  <input id="agree" type="checkbox" checked>
+  <select id="choices"><option id="option" value="opt" selected>Option</option></select>
+</div>
+<div id="outside" data-state="ready"></div>
+<p id="js50-state">initial</p>
+<script>
+var panel = document.getElementById("panel");
+var save = document.getElementById("save");
+var other = document.getElementById("other");
+var field = document.getElementById("field");
+var agree = document.getElementById("agree");
+var option = document.getElementById("option");
+var js50State = document.getElementById("js50-state");
+var coreSelectors = document.querySelector("[data-action]") === save &&
+  document.querySelector("[data-action=save]") === save &&
+  document.querySelector("button[data-action=save]") === save &&
+  panel.matches("[data-empty]") && panel.matches("[data-empty='']") &&
+  panel.matches("[DATA-STATE=Ready]") && !panel.matches("[data-state=ready]") &&
+  panel.matches("[data-label='Tom & Jerry']") &&
+  panel.matches("[aria-label]") && panel.matches("[href=/docs]") &&
+  panel.matches("[src=/logo.png]") && panel.matches("[custom-flag='']");
+var scopedSelectors = panel.querySelector("button[data-action=save]") === save &&
+  panel.querySelectorAll("[data-action=save]").length === 2 &&
+  panel.querySelector("#outside") === null;
+var compoundSelectors = save.matches("button#save.action.primary[data-action=save]") &&
+  save.closest(".panel[data-mode=active]") === panel;
+var relationSelectors = document.querySelector(".panel[data-mode=active] > button[data-action=save]") === save &&
+  document.querySelector("label[data-required=yes] + input[data-state=ready]") === field &&
+  document.querySelector(".marker[data-state=active] ~ button[data-action=save]") === document.getElementById("next");
+var readyLive = document.querySelectorAll("[data-state=ready]");
+var busyLive = document.querySelectorAll("[data-state=busy]");
+save.setAttribute("data-state", "ready");
+var mutationWrite = save.matches("[data-state=ready]") &&
+  save.getAttribute("data-state") === "ready" && readyLive.length === 3;
+save.setAttribute("data-state", "busy");
+var mutationReplace = !save.matches("[data-state=ready]") &&
+  save.matches("[data-state=busy]") && busyLive.length === 1 && readyLive.length === 2;
+save.removeAttribute("data-state");
+var mutationRemove = !save.matches("[data-state]") &&
+  busyLive.length === 0 && readyLive.length === 2 &&
+  !save.hasAttribute("data-state") && save.getAttribute("data-state") === null;
+save.setAttribute("id", "save-js50");
+save.setAttribute("class", "action primary featured");
+var idClassMutation = save.matches("#save-js50.action.primary.featured[data-action=save]");
+save.setAttribute("id", "save");
+save.setAttribute("class", "action primary");
+field.value = "edited";
+agree.checked = false;
+option.selected = false;
+var formDefaults = field.matches("[value=initial]") &&
+  !field.matches("[value=edited]") && agree.matches("[checked]") &&
+  option.matches("[selected]");
+var eventMatch = false;
+var nestedMatch = false;
+var eventMetadata = false;
+other.addEventListener("click", function (event) {
+  event.target.setAttribute("data-nested", "yes");
+  nestedMatch = event.target.matches("[data-nested=yes]") &&
+    event.currentTarget === other && event.eventPhase === 2;
+});
+save.addEventListener("click", function (event) {
+  event.target.setAttribute("data-state", "clicked");
+  eventMatch = event.target.matches("[data-state=clicked]") &&
+    document.querySelector("button[data-state=clicked]") === save;
+  var target = event.target;
+  var current = event.currentTarget;
+  var phase = event.eventPhase;
+  other.click();
+  eventMetadata = event.target === target && target === save &&
+    event.currentTarget === current && current === save &&
+    event.eventPhase === phase && phase === 2 &&
+    event.relatedTarget === null && event.defaultPrevented === false;
+  js50Snapshot("event");
+});
+function js50Snapshot(label) {
+  js50State.textContent = label + ":core=" + coreSelectors +
+    ":scoped=" + scopedSelectors + ":compound=" + compoundSelectors +
+    ":relation=" + relationSelectors + ":mutation=" + mutationWrite +
+    ":replace=" + mutationReplace + ":remove=" + mutationRemove +
+    ":idclass=" + idClassMutation + ":forms=" + formDefaults +
+    ":event=" + eventMatch + ":nested=" + nestedMatch +
+    ":metadata=" + eventMetadata;
+}
+js50Snapshot("initial");
+</script>
+</body>
+</html>

@@ -202,7 +202,7 @@ void testInvalidSelectorsAndReadOnlyCollections()
 var invalid = document.querySelector("") === null &&
     document.querySelector("   ") === null &&
     document.querySelector("form div input") === null &&
-    document.querySelector("input[type=text]") === null &&
+    document.querySelector("input[type^=text]") === null &&
     document.querySelector("input, textarea") === null &&
     document.querySelector(":focus") === null;
 var invalidCollections = document.querySelectorAll("").length === 0 &&

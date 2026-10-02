@@ -249,7 +249,7 @@ var malformedAll = document.querySelectorAll("a >").length === 0 &&
     document.querySelectorAll("a > > b").length === 0 &&
     document.querySelectorAll("a + b").length === 0 &&
     document.querySelectorAll("a,b").length === 0 &&
-    document.querySelectorAll("[id=x]").length === 0;
+    document.querySelectorAll("[id^=x]").length === 0;
 var nestedCallSafety = nested.matches("form button") &&
     nested.closest(".group > button").matches("div button") &&
     nested.matches("form button") && nested.closest(".group > button") === nested;
