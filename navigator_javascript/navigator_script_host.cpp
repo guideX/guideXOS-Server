@@ -67,6 +67,151 @@ bool hasAttributePresence(const gxos::web::HtmlElementRef& element,
     return (element.attributePresence & attribute) != 0u;
 }
 
+struct RetainedAttributeLocation {
+    std::size_t offset = 0u;
+    std::size_t valueLength = 0u;
+    std::size_t recordSize = 0u;
+    std::size_t spanEnd = 0u;
+    bool found = false;
+};
+
+unsigned char lowerAscii(unsigned char character)
+{
+    if (character >= static_cast<unsigned char>('A') &&
+        character <= static_cast<unsigned char>('Z'))
+        return static_cast<unsigned char>(character - 'A' + 'a');
+    return character;
+}
+
+bool locateRetainedAttribute(const gxos::web::WebDocument& document,
+    const gxos::web::HtmlElementRef& element, SourceView name,
+    RetainedAttributeLocation& location)
+{
+    location = {};
+    const std::size_t storageSize = document.retainedAttributeStorage.size();
+    std::size_t offset = element.retainedAttributeOffset;
+    if (element.retainedAttributeCount >
+        gxos::web::kHtmlMaxRetainedAttributesPerElement || offset > storageSize)
+        return false;
+    for (std::size_t index = 0u; index < element.retainedAttributeCount; ++index) {
+        if (storageSize - offset < 3u) return false;
+        const std::size_t nameLength =
+            document.retainedAttributeStorage[offset];
+        const std::size_t valueLength =
+            static_cast<std::size_t>(
+                document.retainedAttributeStorage[offset + 1u]) |
+            (static_cast<std::size_t>(
+                document.retainedAttributeStorage[offset + 2u]) << 8u);
+        if (nameLength == 0u ||
+            nameLength > gxos::web::kHtmlMaxRetainedAttributeNameBytes ||
+            valueLength > gxos::web::kHtmlMaxRetainedAttributeValueBytes)
+            return false;
+        const std::size_t recordSize = 3u + nameLength + valueLength;
+        if (recordSize > storageSize - offset) return false;
+        bool matches = name.data != nullptr && name.length == nameLength;
+        for (std::size_t nameIndex = 0u; matches && nameIndex < nameLength;
+            ++nameIndex) {
+            matches = document.retainedAttributeStorage[
+                offset + 3u + nameIndex] == lowerAscii(
+                    static_cast<unsigned char>(name.data[nameIndex]));
+        }
+        if (matches) {
+            location.offset = offset;
+            location.valueLength = valueLength;
+            location.recordSize = recordSize;
+            location.found = true;
+        }
+        offset += recordSize;
+    }
+    location.spanEnd = offset;
+    return true;
+}
+
+bool attributeMutationIsDeferred(const gxos::web::HtmlElementRef& element,
+    SourceView name)
+{
+    const std::string& tag = element.tagName;
+    if (attributeNameEquals(name, "style")) return true;
+    if (attributeNameEquals(name, "name"))
+        return tag == "input" || tag == "button" || tag == "textarea" ||
+            tag == "select" || tag == "form";
+    if (attributeNameEquals(name, "type"))
+        return tag == "input" || tag == "button";
+    if (attributeNameEquals(name, "value"))
+        return tag == "input" || tag == "button" || tag == "option";
+    if (attributeNameEquals(name, "checked"))
+        return tag == "input" &&
+            (element.formControl.inputType == "checkbox" ||
+                element.formControl.inputType == "radio");
+    if (attributeNameEquals(name, "selected")) return tag == "option";
+    if (attributeNameEquals(name, "disabled"))
+        return tag == "input" || tag == "button" || tag == "textarea" ||
+            tag == "select" || tag == "option" || tag == "fieldset";
+    return false;
+}
+
+void writeRetainedAttributeRecord(std::vector<std::uint8_t>& storage,
+    std::size_t offset, SourceView name, SourceView value)
+{
+    storage[offset] = static_cast<std::uint8_t>(name.length);
+    storage[offset + 1u] = static_cast<std::uint8_t>(value.length & 0xFFu);
+    storage[offset + 2u] = static_cast<std::uint8_t>(
+        (value.length >> 8u) & 0xFFu);
+    for (std::size_t index = 0u; index < name.length; ++index)
+        storage[offset + 3u + index] = lowerAscii(
+            static_cast<unsigned char>(name.data[index]));
+    for (std::size_t index = 0u; index < value.length; ++index)
+        storage[offset + 3u + name.length + index] =
+            static_cast<std::uint8_t>(value.data[index]);
+}
+
+void shiftLaterElementAttributeOffsets(gxos::web::WebDocument& document,
+    const gxos::web::HtmlElementRef& changed, std::size_t boundary,
+    int delta)
+{
+    if (delta == 0) return;
+    for (gxos::web::HtmlElementRef& candidate : document.structuralElements) {
+        if (&candidate == &changed || candidate.retainedAttributeCount == 0u ||
+            candidate.retainedAttributeOffset < boundary) continue;
+        const int shifted = static_cast<int>(candidate.retainedAttributeOffset) +
+            delta;
+        if (shifted >= 0 && shifted <= 65535)
+            candidate.retainedAttributeOffset =
+                static_cast<std::uint16_t>(shifted);
+    }
+}
+
+void updateElementCopies(gxos::web::WebDocument& document,
+    std::uint64_t serial, bool idAttribute, const std::string& value,
+    bool present)
+{
+    const auto update = [&](gxos::web::HtmlElementRef& element) {
+        if (element.serial != serial) return;
+        std::uint16_t& bits = element.attributePresence;
+        const std::uint16_t bit = idAttribute
+            ? gxos::web::HtmlAttributeIdPresent
+            : gxos::web::HtmlAttributeClassPresent;
+        if (present) bits = static_cast<std::uint16_t>(bits | bit);
+        else bits = static_cast<std::uint16_t>(bits & ~bit);
+        std::string& projection = idAttribute ? element.id : element.className;
+        if (present) projection = value;
+        else projection.clear();
+    };
+    for (gxos::web::HtmlElementRef& element : document.structuralElements)
+        update(element);
+    if (document.hasDocumentElement) update(document.documentElement);
+    if (document.hasBodyElement) update(document.bodyElement);
+    for (gxos::web::DocBlock& block : document.blocks) {
+        if (block.elementMetadata.serial == serial) {
+            update(block.elementMetadata);
+            if (idAttribute) block.id = present ? value : std::string();
+            else block.className = present ? value : std::string();
+        }
+        for (gxos::web::HtmlElementRef& ancestor : block.ancestors)
+            update(ancestor);
+    }
+}
+
 bool parseCanonicalIndex(SourceView text, std::size_t& index)
 {
     index = 0;
@@ -588,7 +733,9 @@ bool NavigatorScriptHostAdapter::allowsReentrantCall(
         methodId == kNavigatorGetElementsByTagNameMethod ||
         methodId == kNavigatorGetElementsByClassNameMethod ||
         methodId == kNavigatorGetAttributeMethod ||
-        methodId == kNavigatorHasAttributeMethod;
+        methodId == kNavigatorHasAttributeMethod ||
+        methodId == kNavigatorSetAttributeMethod ||
+        methodId == kNavigatorRemoveAttributeMethod;
 }
 
 bool NavigatorScriptHostAdapter::allowsStaleHostProperty(
@@ -602,6 +749,8 @@ bool NavigatorScriptHostAdapter::allowsStaleHostProperty(
             textEquals(property, "getElementsByClassName") ||
             textEquals(property, "getAttribute") ||
             textEquals(property, "hasAttribute") ||
+            textEquals(property, "setAttribute") ||
+            textEquals(property, "removeAttribute") ||
             textEquals(property, "parentElement") ||
             textEquals(property, "children") ||
             textEquals(property, "childElementCount") ||
@@ -620,7 +769,9 @@ bool NavigatorScriptHostAdapter::allowsStaleHostMethod(
         methodId == kNavigatorGetElementsByTagNameMethod ||
         methodId == kNavigatorGetElementsByClassNameMethod ||
         methodId == kNavigatorGetAttributeMethod ||
-        methodId == kNavigatorHasAttributeMethod;
+        methodId == kNavigatorHasAttributeMethod ||
+        methodId == kNavigatorSetAttributeMethod ||
+        methodId == kNavigatorRemoveAttributeMethod;
 }
 
 bool NavigatorScriptHostAdapter::allowsStaleHostMethodArgument(
@@ -630,7 +781,9 @@ bool NavigatorScriptHostAdapter::allowsStaleHostMethodArgument(
         methodId == kNavigatorGetElementsByTagNameMethod ||
         methodId == kNavigatorGetElementsByClassNameMethod ||
         methodId == kNavigatorGetAttributeMethod ||
-        methodId == kNavigatorHasAttributeMethod;
+        methodId == kNavigatorHasAttributeMethod ||
+        methodId == kNavigatorSetAttributeMethod ||
+        methodId == kNavigatorRemoveAttributeMethod;
 }
 
 std::size_t NavigatorScriptHostAdapter::callbackLimit() const
@@ -2392,6 +2545,140 @@ bool NavigatorScriptHostAdapter::resolveElementAttribute(
     return false;
 }
 
+bool NavigatorScriptHostAdapter::mutateElementAttribute(
+    HostInstanceId serial, SourceView name, SourceView value, bool remove)
+{
+    if (document_ == nullptr || !validAttributeName(name)) return false;
+    gxos::web::HtmlElementRef* element = findElement(serial);
+    if (element == nullptr || attributeMutationIsDeferred(*element, name))
+        return false;
+    if (!remove && (value.length >
+            gxos::web::kHtmlMaxRetainedAttributeValueBytes ||
+            (value.length != 0u && value.data == nullptr))) return false;
+
+    RetainedAttributeLocation location;
+    if (!locateRetainedAttribute(*document_, *element, name, location))
+        return false;
+
+    const bool isId = attributeNameEquals(name, "id");
+    const bool isClass = attributeNameEquals(name, "class");
+    const std::uint16_t projectionBit = isId
+        ? gxos::web::HtmlAttributeIdPresent
+        : gxos::web::HtmlAttributeClassPresent;
+    const bool hasProjection = (isId || isClass) &&
+        hasAttributePresence(*element, projectionBit);
+
+    // The parser can keep its specialized id/class projection even when the
+    // generic record is omitted by an earlier parser cap. Preserve that
+    // existing logical attribute without manufacturing a seventeenth record.
+    if (!remove && !location.found && hasProjection) {
+        const std::string projection(value.data == nullptr ? "" : value.data,
+            value.length);
+        updateElementCopies(*document_, serial, isId, projection, true);
+        return true;
+    }
+    if (remove && !location.found && !hasProjection) return true;
+
+    std::string projection;
+    if (!remove && (isId || isClass))
+        projection.assign(value.data == nullptr ? "" : value.data,
+            value.length);
+
+    std::vector<std::uint8_t>& storage =
+        document_->retainedAttributeStorage;
+    if (remove) {
+        if (location.found) {
+            const std::size_t oldEnd = location.offset + location.recordSize;
+            storage.erase(storage.begin() + static_cast<std::ptrdiff_t>(
+                location.offset), storage.begin() + static_cast<std::ptrdiff_t>(
+                    oldEnd));
+            shiftLaterElementAttributeOffsets(*document_, *element, oldEnd,
+                -static_cast<int>(location.recordSize));
+            if (element->retainedAttributeCount != 0u)
+                --element->retainedAttributeCount;
+            if (document_->retainedAttributeRecordCount != 0u)
+                --document_->retainedAttributeRecordCount;
+            if (element->retainedAttributeCount == 0u)
+                element->retainedAttributeOffset = 0u;
+        }
+        if (isId || isClass)
+            updateElementCopies(*document_, serial, isId, std::string(), false);
+        return true;
+    }
+
+    const std::size_t newRecordSize = 3u + name.length + value.length;
+    std::size_t finalStorageSize = storage.size();
+    if (location.found) {
+        if (location.recordSize > finalStorageSize) return false;
+        finalStorageSize -= location.recordSize;
+    } else {
+        if (element->retainedAttributeCount >=
+                gxos::web::kHtmlMaxRetainedAttributesPerElement ||
+            document_->retainedAttributeRecordCount >=
+                gxos::web::kHtmlMaxRetainedAttributeRecordsPerDocument)
+            return false;
+    }
+    if (finalStorageSize >
+            gxos::web::kHtmlMaxRetainedAttributeStorageBytesPerDocument ||
+        newRecordSize >
+            gxos::web::kHtmlMaxRetainedAttributeStorageBytesPerDocument -
+                finalStorageSize)
+        return false;
+    finalStorageSize += newRecordSize;
+
+    // Parser-retained documents reserve the complete fixed arena on their
+    // first record. Empty documents acquire that reservation before any
+    // logical state changes; subsequent byte shifts stay within this cap.
+    if (storage.capacity() < finalStorageSize)
+        storage.reserve(
+            gxos::web::kHtmlMaxRetainedAttributeStorageBytesPerDocument);
+
+    if (location.found) {
+        const std::size_t oldEnd = location.offset + location.recordSize;
+        const int delta = static_cast<int>(newRecordSize) -
+            static_cast<int>(location.recordSize);
+        if (delta > 0)
+            storage.insert(storage.begin() + static_cast<std::ptrdiff_t>(oldEnd),
+                static_cast<std::size_t>(delta), 0u);
+        writeRetainedAttributeRecord(storage, location.offset, name, value);
+        if (delta < 0) {
+            storage.erase(storage.begin() + static_cast<std::ptrdiff_t>(
+                    location.offset + newRecordSize),
+                storage.begin() + static_cast<std::ptrdiff_t>(oldEnd));
+        }
+        shiftLaterElementAttributeOffsets(*document_, *element, oldEnd, delta);
+    } else {
+        const std::size_t insertionOffset = element->retainedAttributeCount == 0u
+            ? storage.size() : location.spanEnd;
+        std::array<std::uint8_t,
+            3u + gxos::web::kHtmlMaxRetainedAttributeNameBytes +
+                gxos::web::kHtmlMaxRetainedAttributeValueBytes> record{};
+        record[0] = static_cast<std::uint8_t>(name.length);
+        record[1] = static_cast<std::uint8_t>(value.length & 0xFFu);
+        record[2] = static_cast<std::uint8_t>((value.length >> 8u) & 0xFFu);
+        for (std::size_t index = 0u; index < name.length; ++index)
+            record[3u + index] = lowerAscii(
+                static_cast<unsigned char>(name.data[index]));
+        for (std::size_t index = 0u; index < value.length; ++index)
+            record[3u + name.length + index] =
+                static_cast<std::uint8_t>(value.data[index]);
+        storage.insert(storage.begin() + static_cast<std::ptrdiff_t>(
+                insertionOffset), record.begin(),
+            record.begin() + static_cast<std::ptrdiff_t>(newRecordSize));
+        shiftLaterElementAttributeOffsets(*document_, *element,
+            insertionOffset, static_cast<int>(newRecordSize));
+        if (element->retainedAttributeCount == 0u)
+            element->retainedAttributeOffset =
+                static_cast<std::uint16_t>(insertionOffset);
+        ++element->retainedAttributeCount;
+        ++document_->retainedAttributeRecordCount;
+    }
+
+    if (isId || isClass)
+        updateElementCopies(*document_, serial, isId, projection, true);
+    return true;
+}
+
 bool NavigatorScriptHostAdapter::isKnownElementSerial(
     HostInstanceId serial) const
 {
@@ -2958,7 +3245,9 @@ HostResult NavigatorScriptHostAdapter::getProperty(
             textEquals(property, "getElementsByTagName") ||
             textEquals(property, "getElementsByClassName") ||
             textEquals(property, "getAttribute") ||
-            textEquals(property, "hasAttribute"))) {
+            textEquals(property, "hasAttribute") ||
+            textEquals(property, "setAttribute") ||
+            textEquals(property, "removeAttribute"))) {
         const std::uint32_t methodId = textEquals(property, "matches")
             ? kNavigatorMatchesMethod : textEquals(property, "closest")
                 ? kNavigatorClosestMethod : textEquals(property, "contains")
@@ -2969,7 +3258,11 @@ HostResult NavigatorScriptHostAdapter::getProperty(
                             ? kNavigatorGetElementsByClassNameMethod
                             : textEquals(property, "getAttribute")
                                 ? kNavigatorGetAttributeMethod
-                                : kNavigatorHasAttributeMethod;
+                                : textEquals(property, "hasAttribute")
+                                    ? kNavigatorHasAttributeMethod
+                                    : textEquals(property, "setAttribute")
+                                        ? kNavigatorSetAttributeMethod
+                                        : kNavigatorRemoveAttributeMethod;
         result = HostValue::method(methodId, true, true);
         return HostResult();
     }
@@ -3254,6 +3547,14 @@ HostResult NavigatorScriptHostAdapter::getProperty(
     }
     if (textEquals(property, "hasAttribute")) {
         result = HostValue::method(kNavigatorHasAttributeMethod, true, true);
+        return HostResult();
+    }
+    if (textEquals(property, "setAttribute")) {
+        result = HostValue::method(kNavigatorSetAttributeMethod, true, true);
+        return HostResult();
+    }
+    if (textEquals(property, "removeAttribute")) {
+        result = HostValue::method(kNavigatorRemoveAttributeMethod, true, true);
         return HostResult();
     }
     if (textEquals(property, "closest")) {
@@ -3895,13 +4196,20 @@ HostResult NavigatorScriptHostAdapter::callInternal(
             methodId == kNavigatorGetElementsByTagNameMethod ||
             methodId == kNavigatorGetElementsByClassNameMethod ||
             methodId == kNavigatorGetAttributeMethod ||
-            methodId == kNavigatorHasAttributeMethod) &&
+            methodId == kNavigatorHasAttributeMethod ||
+            methodId == kNavigatorSetAttributeMethod ||
+            methodId == kNavigatorRemoveAttributeMethod) &&
         receiver->kind == kNavigatorElementHostKind &&
         (receiver->generation != generation_ ||
             findElement(receiver->instanceId) == nullptr)) {
         if (methodId == kNavigatorGetElementsByTagNameMethod ||
             methodId == kNavigatorGetElementsByClassNameMethod)
             return emptySelectorCollection(result);
+        if (methodId == kNavigatorSetAttributeMethod ||
+            methodId == kNavigatorRemoveAttributeMethod) {
+            result = HostValue::undefined();
+            return HostResult();
+        }
         result = methodId == kNavigatorClosestMethod
             || methodId == kNavigatorGetAttributeMethod
             ? HostValue::nullValue() : HostValue::boolean(false);
@@ -3929,6 +4237,26 @@ HostResult NavigatorScriptHostAdapter::callInternal(
             // bounded string store before returning to JavaScript.
             result = HostValue::string(attributeValue);
         }
+        return HostResult();
+    }
+    if (methodId == kNavigatorSetAttributeMethod ||
+        methodId == kNavigatorRemoveAttributeMethod) {
+        if (receiver->kind != kNavigatorElementHostKind)
+            return HostResult{HostResultCode::InvalidValue};
+        if (methodId == kNavigatorSetAttributeMethod) {
+            if (arguments != nullptr && argumentCount == 2u &&
+                arguments[0].type == HostValueType::String &&
+                arguments[1].type == HostValueType::String)
+                mutateElementAttribute(receiver->instanceId,
+                    arguments[0].stringValue, arguments[1].stringValue, false);
+        } else if (arguments != nullptr && argumentCount == 1u &&
+            arguments[0].type == HostValueType::String) {
+            mutateElementAttribute(receiver->instanceId,
+                arguments[0].stringValue, SourceView(), true);
+        }
+        // This bounded host API deliberately fails closed for invalid names,
+        // non-string arguments, capacity failures, and deferred projections.
+        result = HostValue::undefined();
         return HostResult();
     }
     if (methodId == kNavigatorQuerySelectorMethod ||

@@ -4165,6 +4165,48 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "canonical Elements and target/currentTarget/phase/relatedTarget/defaultPrevented survive nested attribute reads");
 
+    const std::string js49FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js49.html";
+    const bool js49Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js49FixtureUrl);
+    const std::string js49InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS49 hosted fixture mutates generic retained attributes",
+        js49Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js49FixtureUrl &&
+        contains(js49InitialText, "Navigator JavaScript JS49") &&
+        contains(js49InitialText,
+            "initial:generic=true:id=true:class=true:live=true:deferred=true:event=false:nested=false:metadata=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js49Loaded) + ",text=" +
+        summarizeText(js49InitialText, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS49 hosted generic, href/src, ID, class, and live collections agree",
+        js49Loaded && contains(js49InitialText,
+            "initial:generic=true:id=true:class=true:live=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "document attribute reads, getElementById, selectors, and held class/query collections observe the same mutation");
+    add("JS49 hosted form/style projections fail closed coherently",
+        js49Loaded && contains(js49InitialText, ":deferred=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "deferred value/name/type/checked/selected/disabled/style mutations leave their existing consumer projections unchanged");
+
+    const bool js49SaveClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("save2");
+    const std::string js49AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS49 hosted click mutates generic/class/id attributes in dispatch",
+        js49SaveClick && contains(js49AfterClick,
+            "event:generic=true:id=true:class=true:live=true:deferred=true:event=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js49SaveClick) + ",text=" +
+        summarizeText(js49AfterClick, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS49 hosted same-callback selectors and nested Event metadata pass",
+        js49SaveClick && contains(js49AfterClick,
+            ":event=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "same-callback class/ID matching is immediate and nested dispatch preserves target/currentTarget/phase/relatedTarget/defaultPrevented");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

@@ -1,0 +1,138 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS49</title></head>
+<body>
+<h1>Navigator JavaScript JS49</h1>
+<form id="owner" name="profileForm">
+  <div id="panel" class="panel active" data-mode="normal"
+       data-empty="" style="color: red">
+    <button id="save" class="action primary" data-action="save"
+            type="button" value="button-seed">Save</button>
+    <button id="other" type="button" data-action="other">Other</button>
+    <input id="name" name="username" type="text" value="initial">
+    <input id="agree" type="checkbox" checked>
+    <select id="choice" name="choice">
+      <option id="first-option" value="One" selected>One</option>
+    </select>
+    <a id="docs" href="/docs">Docs</a>
+    <img id="logo" src="/logo.png" alt="GuideXOS">
+  </div>
+</form>
+<p id="js49-state">initial</p>
+<script>
+var panel = document.querySelector("#panel");
+var save = document.querySelector("#save");
+var other = document.querySelector("#other");
+var input = document.querySelector("#name");
+var agree = document.querySelector("#agree");
+var option = document.querySelector("#first-option");
+var docs = document.querySelector("#docs");
+var logo = document.querySelector("#logo");
+var js49State = document.querySelector("#js49-state");
+panel.setAttribute("data-mode", "compact");
+panel.setAttribute("data-empty", "");
+panel.setAttribute("data-action", "save");
+panel.setAttribute("custom-thing", "abc");
+var genericMutation = panel.getAttribute("data-mode") === "compact" &&
+  panel.hasAttribute("data-mode") && panel.getAttribute("data-empty") === "" &&
+  panel.getAttribute("data-action") === "save" &&
+  panel.getAttribute("custom-thing") === "abc";
+panel.removeAttribute("data-mode");
+panel.removeAttribute("custom-thing");
+genericMutation = genericMutation && panel.getAttribute("data-mode") === null &&
+  !panel.hasAttribute("data-mode") && panel.getAttribute("custom-thing") === null;
+docs.setAttribute("href", "/new-docs");
+logo.setAttribute("src", "/new-logo.png");
+genericMutation = genericMutation && docs.getAttribute("href") === "/new-docs" &&
+  logo.getAttribute("src") === "/new-logo.png";
+
+var activeCollection = document.getElementsByClassName("active");
+panel.setAttribute("class", "panel");
+var activeCollectionLive = activeCollection.length === 0;
+panel.setAttribute("class", "panel active");
+activeCollectionLive = activeCollectionLive && activeCollection.length === 1 &&
+  activeCollection[0] === panel;
+var saveBefore = document.getElementById("save");
+save.setAttribute("id", "save2");
+var idMutation = save.matches("#save2") && !save.matches("#save") &&
+  document.getElementById("save2") === save &&
+  document.getElementById("save") === null && saveBefore === save;
+var primaryCollection = document.querySelectorAll(".primary");
+save.setAttribute("class", "action danger");
+var dangerCollection = document.getElementsByClassName("danger");
+var classMutation = save.matches(".action.danger") && !save.matches(".primary") &&
+  primaryCollection.length === 0 && dangerCollection.length === 1 &&
+  dangerCollection[0] === save && save.getAttribute("class") === "action danger";
+save.removeAttribute("class");
+classMutation = classMutation && !save.hasAttribute("class") &&
+  !save.matches(".action") && dangerCollection.length === 0;
+save.setAttribute("class", "action danger");
+save.removeAttribute("id");
+idMutation = idMutation && !save.hasAttribute("id") &&
+  document.getElementById("save2") === null && !save.matches("#save2");
+save.setAttribute("id", "save2");
+idMutation = idMutation && document.getElementById("save2") === save;
+
+var defaultName = input.getAttribute("name");
+var defaultType = input.getAttribute("type");
+var defaultValue = input.getAttribute("value");
+var defaultStyle = panel.getAttribute("style");
+var defaultChecked = agree.getAttribute("checked");
+var defaultSelected = option.getAttribute("selected");
+input.value = "edited";
+input.setAttribute("name", "newName");
+input.setAttribute("type", "checkbox");
+input.setAttribute("value", "new-default");
+input.removeAttribute("value");
+agree.removeAttribute("checked");
+option.removeAttribute("selected");
+save.setAttribute("disabled", "");
+panel.setAttribute("style", "color: blue");
+var deferredReflections = input.getAttribute("name") === defaultName &&
+  input.getAttribute("type") === defaultType &&
+  input.getAttribute("value") === defaultValue && input.value === "edited" &&
+  agree.getAttribute("checked") === defaultChecked &&
+  option.getAttribute("selected") === defaultSelected &&
+  !save.hasAttribute("disabled") && panel.getAttribute("style") === defaultStyle;
+
+var eventMutation = false;
+var nestedMutation = false;
+var eventMetadata = false;
+other.addEventListener("click", function (event) {
+  event.target.setAttribute("data-nested", "yes");
+  nestedMutation = event.target.getAttribute("data-nested") === "yes" &&
+    event.currentTarget === other;
+});
+save.addEventListener("click", function (event) {
+  var target = event.target;
+  var current = event.currentTarget;
+  var phase = event.eventPhase;
+  var related = event.relatedTarget;
+  event.preventDefault();
+  event.target.setAttribute("data-clicked", "yes");
+  event.target.setAttribute("class", "action clicked");
+  var sameCallbackClass = event.target.matches(".clicked") &&
+    document.getElementsByClassName("clicked")[0] === event.target;
+  event.target.setAttribute("id", "clicked-save");
+  var sameCallbackId = event.target.matches("#clicked-save") &&
+    document.getElementById("clicked-save") === event.target;
+  other.click();
+  eventMutation = event.target.getAttribute("data-clicked") === "yes" &&
+    sameCallbackClass && sameCallbackId;
+  eventMetadata = event.target === target && event.currentTarget === current &&
+    current === save && event.eventPhase === phase &&
+    event.relatedTarget === related && related === null &&
+    event.defaultPrevented === true;
+  js49Snapshot("event");
+});
+function js49Snapshot(label) {
+  js49State.textContent = label + ":generic=" + genericMutation +
+    ":id=" + idMutation + ":class=" + classMutation +
+    ":live=" + activeCollectionLive + ":deferred=" + deferredReflections +
+    ":event=" + eventMutation + ":nested=" + nestedMutation +
+    ":metadata=" + eventMetadata;
+}
+js49Snapshot("initial");
+</script>
+</body>
+</html>

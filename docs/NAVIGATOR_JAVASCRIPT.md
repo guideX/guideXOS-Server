@@ -4892,7 +4892,142 @@ three were restored to their clean preflight contents. `ESP/ramdisk.img`, all
 PacMan build objects match their pre-kernel hashes. No generated artifacts
 are part of the JS48 source change.
 
-Recommended JS49 direction: define a bounded mutation model that synchronizes
-generic retained values with the existing `id`/`class`/form projections before
-adding any attribute-write API. That needs explicit semantics for duplicate
-attributes, selector updates, and markup defaults versus current form state.
+## JS49: bounded `setAttribute()` and `removeAttribute()`
+
+JS49 exposes `Element.setAttribute(name, value)` and
+`Element.removeAttribute(name)` on canonical Navigator Elements. Both methods
+return `undefined`. They mutate JS48's document-owned packed attribute pool;
+there is no JS-side dictionary, mutation sidecar, selector override, or
+per-host-object copy of generic attributes. The packed records remain the
+authoritative state read by `getAttribute()` and `hasAttribute()`.
+
+Attribute names must be strings matching the existing ASCII query grammar
+`[A-Za-z][A-Za-z0-9:_-]*`, with a 64-byte maximum. Names are stored lowercase
+and matched case-insensitively, so case variants replace/remove the same
+logical record. Values must be strings and are preserved byte-for-byte and
+case-for-case, with a 256-byte maximum. Empty string is a present empty value.
+Missing arguments, non-string arguments, invalid/overlong names, overlong
+values, stale receivers, and capacity failures are safe no-ops; Navigator does
+not add JavaScript coercion in this milestone. Removing an absent valid name
+is also a no-op. Names and values are validated before mutation, so an
+overlong replacement leaves the existing value intact.
+
+An insertion adds one record if all limits permit. Replacement edits the
+existing record and does not add a logical record. Removal erases the record,
+compacts the packed bytes, updates later Element offsets, and releases one
+logical record and one per-Element slot. Re-insertion uses those released
+limits. The encoded record is exactly three header bytes (one name-length byte
+and a two-byte little-endian value length), followed by lowercase name bytes
+and exact value bytes. At the maximum name and value sizes a record is 323
+bytes; no per-attribute string object or free-list entry is allocated.
+
+| Bound/accounting | JS49 limit or cost |
+| --- | ---: |
+| Logical attributes per Element | 16 |
+| Logical records per document | 2,048 |
+| Name bytes per record | 64 |
+| Value bytes per record | 256 |
+| Encoded bytes per record | 4–323 |
+| Aggregate retained encoded bytes | 65,535 |
+| Additional per-Element metadata from JS49 | 0 bytes |
+| Additional per-record metadata from JS49 | 0 bytes |
+| Free-list / slot metadata | none |
+
+Each Element continues to carry JS48's 16-bit packed-pool offset and 8-bit
+record count (three logical metadata bytes; `HtmlElementRef` remains 440 bytes
+on the validated 64-bit build because those fields occupy existing alignment
+padding). `WebDocument` continues to own the packed vector and record/byte
+counters. Mutation inserts/erases within the bounded pool and adjusts offsets
+of later Elements; repeated replacement and removal therefore do not create a
+one-way append budget. The first mutation in a document without a reserved
+pool reserves the fixed 65,535-byte arena before changing logical state.
+
+The existing attribute-count, record-count, and byte limits are checked before
+the record bytes or projections change. Replacing at 16 attributes is allowed;
+inserting a seventeenth is rejected. A full 2,048-record document rejects an
+additional record, while removal allows later reuse. Aggregate byte overflow
+also rejects insertion/replacement atomically. The JS49 capacity tests fill a
+single Element to 16 records, reach exactly 2,048 records across 128 Elements,
+and fill the byte pool to fewer than 67 bytes remaining. They verify that
+replacement at capacity succeeds, rejected insertion leaves no partial
+record, and a rejected replacement preserves its old value.
+
+`id` and `class` are the reflected attributes that mutate in JS49. Their
+generic packed record and specialized structural projection/presence bit are
+updated together, including duplicate `documentElement`, `body`, and block
+projections that carry the same Element serial. Consequently `getAttribute()`,
+`hasAttribute()`, `getElementById()`, ID/class matching, compound class
+matching, `getElementsByClassName()`, and held live class/query collections
+observe changes immediately. Removing either attribute clears its presence
+and projection. A parser-retained specialized ID/class projection can still be
+updated if its generic record was omitted at a parser retention cap, without
+manufacturing a seventeenth generic record. Canonical Element identity,
+structural serials, tree relationships, and document generation do not
+change.
+
+Other reflected attributes are deliberately rejected on the Elements whose
+runtime consumers use specialized state, preserving coherent reads and form
+behavior rather than creating conflicting representations:
+
+| Attribute | Mutation decision |
+| --- | --- |
+| `style` | Deferred on every Element; the CSS/style projection is not synchronized by JS49. |
+| `name` | Deferred on `input`, `button`, `textarea`, `select`, and `form`; generic on other tags. |
+| `type` | Deferred on `input` and `button`; generic on other tags. |
+| `value` | Deferred on `input`, `button`, and `option`; generic on other tags. For controls, `getAttribute("value")` remains the markup default and `.value` remains the current runtime value. |
+| `checked` | Deferred on checkbox/radio inputs; their checked/default/current state is unchanged. Generic on other tags and non-checkable inputs. |
+| `selected` | Deferred on `option`; selected/default/index state is unchanged. Generic on other tags. |
+| `disabled` | Deferred on `input`, `button`, `textarea`, `select`, `option`, and `fieldset`; generic on other tags. |
+
+For deferred names, both setting and removing are no-ops and all existing
+attribute/form/style views remain unchanged. This includes input reset
+defaults, current values, checked state, selected options, disabled behavior,
+and CSS style state. Generic/data attributes and attributes such as `href`,
+`src`, and custom names remain mutable when the Element and document bounds
+permit. Attribute selectors remain out of scope, so this milestone's selector
+integration is the existing ID/class/tag selector model.
+
+The host validates the current Element receiver before mutation. A stale
+receiver cannot modify a replacement document even if a structural serial is
+reused. Event-target Elements use the same host path: mutation is visible to
+same-callback reads and selectors, and nested dispatch preserves existing
+`target`, `currentTarget`, and event metadata behavior.
+
+The JS49 focused suite passes **150/150 checks**, including argument and
+capacity failure semantics, 16/2,048/65,535-byte caps, ID/class projection,
+live collections, deferred form/style behavior, canonical identity, stale
+serial reuse, event mutation, and nested dispatch. Its mutation stress performs
+**1,000 replacements** and **1,000 remove/re-add/remove cycles**, then restores
+one final value. The logical record count is unchanged from the start and the
+final packed byte count equals its original value; the final value and a
+neighboring Element's record remain correct. The strict
+`-Wall -Wextra -Werror -pedantic` parser/adapter/runtime lane passes.
+
+The full JavaScript matrix passes **47/47 lanes**: lexer, parser, runtime, and
+JS6–JS49. Focused JS36–JS48 regressions pass **99/99, 180/180, 152/152,
+218/218, 155/155, 220/220, 235/235, 277/277, 183/183, 184/184, 220/220,
+137/137, and 136/136** checks respectively. `build.bat` succeeds.
+
+The production hosted aggregate reports **548 passed / 7 failed** out of 555
+checks. All five JS49 hosted checks pass, covering generic/data/custom writes,
+`href`/`src`, ID and class selector/lookup/collection synchronization,
+deferred default/current form and style state, and authentic event mutation
+with nested dispatch metadata. The seven failures remain the established CSS
+checks: phases 3C and 3G, phase 6A, three phase 6B checks, and phase 6C.
+
+The kernel wrapper still stops before producing a kernel at PacMan linking
+with unresolved `pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)`. Direct
+`mingw32-make ARCH=amd64 EXTRA_CFLAGS=` independently stops at the existing
+Mbed TLS configuration errors in `mbedtls_check_config.h:51` and `:64`. Neither
+dependency was changed. No fresh kernel was produced, so QEMU proof is not
+claimed. The wrapper regenerated `game.o`, `main.o`, and `renderer.o`; those
+three objects were restored and all six PacMan object hashes match the
+pre-wrapper snapshot. All 94 preflight generated artifact hashes and lengths
+match, including `ESP/ramdisk.img` and the wallpaper/PacMan package trees.
+Generated build outputs are excluded from the JS49 source change.
+
+Recommended JS50 direction: evaluate bounded attribute-selector support against
+the now-mutable authoritative generic/id/class state, with explicit selector
+grammar and collection-liveness tests. Keep style and form-reflected mutation
+deferred until their CSS/form consumer projections can be updated atomically.
