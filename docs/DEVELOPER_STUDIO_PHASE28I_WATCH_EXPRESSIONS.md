@@ -23,10 +23,12 @@ but non-live name.
 ## Grammar and limits
 
 Supported tokens are identifiers, decimal integers, hexadecimal integers
-(0x/0X), parentheses, unary + and -, and binary +, -, *, /, and %. ASCII
-whitespace is accepted between tokens. Precedence is conventional: parentheses,
-unary operators, multiplicative operators, then additive operators. Evaluation
-is left-to-right within one precedence level.
+(0x/0X), parentheses, unary + and -, binary +, -, *, /, and %, and the
+Phase 29P integer equality operator `==`. ASCII whitespace is accepted between
+tokens. Precedence is conventional: parentheses, unary operators,
+multiplicative operators, additive operators, then equality. Evaluation is
+left-to-right within one precedence level. Equality accepts signed integer
+operands and returns signed integer `1` or `0`.
 
 The hard bounds are:
 
@@ -38,10 +40,10 @@ The hard bounds are:
 - recursive evaluation depth: 32;
 - identifier and numeric-literal text: 64 and 32 bytes respectively.
 
-Malformed text, assignments, increment/decrement, comparisons, logical and
-bitwise operators, dereference, member/array access, casts, calls, strings,
-floating-point literals, declarations, and comma expressions are rejected
-deterministically. * is multiplication only.
+Malformed text, assignments, increment/decrement, relational and other
+comparisons, logical and bitwise operators, dereference, member/array access,
+casts, calls, strings, floating-point literals, declarations, and comma
+expressions are rejected deterministically. * is multiplication only.
 
 Arithmetic uses checked signed 64-bit values. Addition, subtraction, and
 multiplication detect overflow. Division and modulo truncate toward zero and

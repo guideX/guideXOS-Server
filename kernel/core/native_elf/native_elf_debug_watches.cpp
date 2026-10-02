@@ -10,11 +10,11 @@ static const int64_t kInt64Max = 9223372036854775807LL;
 static const uint64_t kInt64MinMagnitude = 0x8000000000000000ULL;
 
 enum class TokenKind : uint8_t {
-    Identifier, Integer, LeftParen, RightParen, Plus, Minus, Star, Slash, Percent, End
+    Identifier, Integer, LeftParen, RightParen, Plus, Minus, Star, Slash, Percent, EqualEqual, End
 };
 
 enum class NodeKind : uint8_t { Integer, Identifier, Unary, Binary };
-enum class Operator : uint8_t { Positive, Negative, Add, Subtract, Multiply, Divide, Modulo };
+enum class Operator : uint8_t { Positive, Negative, Add, Subtract, Multiply, Divide, Modulo, Equal };
 
 struct Token {
     TokenKind kind;
@@ -201,6 +201,15 @@ static bool tokenize(const char* expression, uint32_t length, Ast* ast,
         case '*': kind = TokenKind::Star; break;
         case '/': kind = TokenKind::Slash; break;
         case '%': kind = TokenKind::Percent; break;
+        case '=':
+            if (offset + 1 < length && expression[offset + 1] == '=') {
+                if (!push_token(ast, TokenKind::EqualEqual, offset, 2, 0, result)) return false;
+                offset += 2;
+                continue;
+            }
+            set_failure(result, NativeDebugWatchStatus::UnsupportedOperator,
+                        "operator or token is not supported", offset);
+            return false;
         default:
             set_failure(result, NativeDebugWatchStatus::UnsupportedOperator,
                         "operator or token is not supported", offset);
@@ -277,6 +286,7 @@ private:
         case TokenKind::Star: *operation = Operator::Multiply; *precedence = 2; return true;
         case TokenKind::Slash: *operation = Operator::Divide; *precedence = 2; return true;
         case TokenKind::Percent: *operation = Operator::Modulo; *precedence = 2; return true;
+        case TokenKind::EqualEqual: *operation = Operator::Equal; *precedence = 0; return true;
         default: return false;
         }
     }
@@ -568,6 +578,9 @@ static bool evaluate_node(const Ast& ast, uint16_t index, const NativeDebugWatch
         }
         if (left.signedValue == kInt64Min && right.signedValue == -1) valid = false;
         else computed = left.signedValue % right.signedValue;
+        break;
+    case Operator::Equal:
+        computed = left.signedValue == right.signedValue ? 1 : 0;
         break;
     default: valid = false; break;
     }

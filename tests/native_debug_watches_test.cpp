@@ -94,6 +94,14 @@ int main()
 
     if (!expect(evaluates("counter", frame, NativeDebugWatchStatus::Success,
                           NativeDebugWatchValueType::SignedInt32, 10), "identifier evaluation")) return 1;
+    if (!expect(evaluates("counter == 10", frame, NativeDebugWatchStatus::Success,
+                          NativeDebugWatchValueType::SignedInt32, 1), "integer equality evaluates true")) return 1;
+    if (!expect(evaluates("counter == 2", frame, NativeDebugWatchStatus::Success,
+                          NativeDebugWatchValueType::SignedInt32, 0), "integer equality evaluates false")) return 1;
+    if (!expect(evaluates("x + y == 7", frame, NativeDebugWatchStatus::Success,
+                          NativeDebugWatchValueType::SignedInt32, 1), "equality binds below arithmetic")) return 1;
+    if (!expect(evaluates("(counter + 1) == 11", frame, NativeDebugWatchStatus::Success,
+                          NativeDebugWatchValueType::SignedInt32, 1), "parenthesized equality evaluates")) return 1;
     if (!expect(evaluates("counter + 1", frame, NativeDebugWatchStatus::Success,
                           NativeDebugWatchValueType::SignedInt32, 11), "arithmetic evaluation")) return 1;
     if (!expect(evaluates("x + y * 2", frame, NativeDebugWatchStatus::Success,
