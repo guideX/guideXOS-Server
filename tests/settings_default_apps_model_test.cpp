@@ -204,6 +204,15 @@ int main()
         findDefaultAppsRow(initial, longExtension) != nullptr,
         "registry-declared synthetic extensions appear without Settings hard-coding them");
 
+    const DefaultAppsRow* html = findDefaultAppsRow(initial, ".html");
+    const DefaultAppsRow* htm = findDefaultAppsRow(initial, ".htm");
+    check(html && htm && html->policy.builtInDefaultAppId == "guidexos.navigator" &&
+        html->policy.configuredOverrideAppId.empty() &&
+        html->policy.effectiveDefaultAppId == "guidexos.navigator" &&
+        html->handlers.count == 1 && html->handlers.handlers[0].appId == "guidexos.navigator" &&
+        htm->policy.effectiveDefaultAppId == "guidexos.navigator",
+        "Settings discovers HTML and HTM from AppRegistry with Navigator as the unconfigured built-in default");
+
     const DefaultAppsRow* txt = findDefaultAppsRow(initial, ".txt");
     check(txt && txt->policy.builtInDefaultAppId == "gxos.builtin.notepad" &&
         txt->policy.configuredOverrideAppId.empty() &&

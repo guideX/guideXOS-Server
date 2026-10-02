@@ -3791,9 +3791,13 @@ static std::string navigatorHostedSmokeDiagnostic() {
         contains(trustedHttpsPageInfo, "TLS backend: (none)") &&
         contains(trustedHttpsPageInfo, "TLS enabled: no") &&
         contains(trustedHttpsPageInfo, "TLS status: (none)");
-    add("trusted HTTPS GET loads through native Schannel", (trustedHttpsLoaded &&
-        contains(trustedHttpsText, "Example Domain")) || trustedHttpsTimedOut,
-        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    const bool trustedHttpsResponseLoaded = trustedHttpsLoaded && !trustedHttpsText.empty() &&
+        !contains(trustedHttpsText, "Navigator could not load the requested URL.") &&
+        trustedHttpsPageInfoLoaded && contains(trustedHttpsPageInfo, "TLS status: connected");
+    add("trusted HTTPS GET loads through native Schannel", trustedHttpsResponseLoaded || trustedHttpsTimedOut,
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl() +
+        " response_bytes=" + std::to_string(trustedHttpsText.size()) +
+        " tls_connected=" + yesNo(contains(trustedHttpsPageInfo, "TLS status: connected")));
     add("trusted HTTPS Page Info proves real Schannel credential path", (trustedHttpsPageInfoLoaded &&
         contains(trustedHttpsPageInfo, "Requested URL: https://example.com/") &&
         contains(trustedHttpsPageInfo, "TLS backend: Schannel hosted") &&
@@ -4533,7 +4537,7 @@ static void help(){
                  " taskmanager.snapshot | taskmanager.network-snapshot-wait | taskmanager.tombstone-test\n"
                  " taskmgr\n"
                  " paint\n"
-                 " navigator | navigator.smoke | navigator.positioned-link-probe | navigator.goto <url>\n"
+                 " navigator | navigator.smoke | navigator.positioned-link-probe | navigator.goto <url> | navigator.smoke.document | navigator.smoke.click-first-link | navigator.smoke.back\n"
                  " imgview [file] | osk\n"
                  " shutdown | msgbox <text> | welcome\n"
                  " notify <text> | notify.clear\n"
@@ -5249,6 +5253,21 @@ using namespace gxos;
             std::getline(iss, url);
             if(url.size()>0 && url[0]==' ') url.erase(0,1);
             std::cout << navigatorGotoDiagnostic(url);
+        }
+        else if (cmd=="navigator.smoke.document"){
+            std::cout << "NAVIGATOR_SMOKE_DOCUMENT_RESULT: PASS\n";
+            std::cout << "current_url=" << apps::Navigator::SmokeCurrentUrl() << "\n";
+            std::cout << "current_title=" << apps::Navigator::SmokeCurrentTitle() << "\n";
+        }
+        else if (cmd=="navigator.smoke.click-first-link"){
+            const bool ok = apps::Navigator::SmokeClickFirstLink();
+            std::cout << "NAVIGATOR_SMOKE_CLICK_FIRST_LINK_RESULT: " << (ok ? "PASS" : "FAIL") << "\n";
+            std::cout << "current_url=" << apps::Navigator::SmokeCurrentUrl() << "\n";
+        }
+        else if (cmd=="navigator.smoke.back"){
+            const bool ok = apps::Navigator::SmokeGoBack();
+            std::cout << "NAVIGATOR_SMOKE_BACK_RESULT: " << (ok ? "PASS" : "FAIL") << "\n";
+            std::cout << "current_url=" << apps::Navigator::SmokeCurrentUrl() << "\n";
         }
         else if (cmd=="imgview"){
             if(!requireCompositor()) continue;

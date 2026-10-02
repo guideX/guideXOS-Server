@@ -5,8 +5,8 @@
 // guideXOS Navigator.
 //
 // Host / compositor mode  (!GXOS_BARE_METAL):
-//   Uses std::ifstream so the Windows test harness can load files from the
-//   working directory alongside the binary.
+//   Uses std::ifstream, mapping absolute guideXOS paths below the process
+//   working directory. Traversal and canonical paths outside that root fail.
 //
 // Bare-metal mode  (GXOS_BARE_METAL):
 //   Uses kernel::vfs::read_file() which is already initialised and mounted
@@ -44,13 +44,14 @@ struct BinaryReadResult {
 	std::vector<uint8_t> bytes;  // populated on Ok
 };
 
-// Read the entire contents of |absolutePath| as UTF-8 / Latin-1 text.
+// Read the entire contents of |absolutePath| as UTF-8 / Latin-1 text, bounded
+// by kNavigatorMaxFileBytes.
 //
 // |absolutePath| must be an absolute POSIX-style path (e.g. /docs/index.html).
 //
-// On the host the leading '/' is stripped and the path is resolved relative to
-// the process working directory so that running from D:\dev\guideXOSServer\
-// finds docs\index.html naturally.
+// On the host the absolute VFS path is resolved below the process working
+// directory. For example, /docs/index.html maps to docs/index.html when the
+// process starts in the repository root.
 FileReadResult readTextFile(const std::string& absolutePath);
 
 // Read binary data from |absolutePath| using the same host / bare-metal path
@@ -71,7 +72,7 @@ std::string imageLoaderPathForFile(const std::string& absolutePath);
 
 // Write |text| to |absolutePath|, creating the file (and any missing
 // intermediate directories) if necessary.  Returns true on success.
-// On the host the leading '/' is stripped as with readTextFile().
+// The host uses the same root-confined VFS mapping as readTextFile().
 bool writeTextFile(const std::string& absolutePath, const std::string& text);
 
 } // namespace apps

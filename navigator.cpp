@@ -14,6 +14,7 @@
 #include "logger.h"
 #include "navigator_file_io.h"
 #include "navigator_html_parser.h"
+#include "navigator_local_document.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -21,6 +22,7 @@
 #include <fstream>
 #include <functional>
 #include <limits>
+#include <mutex>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -30,6 +32,17 @@
 
 namespace gxos {
 namespace apps {
+
+namespace {
+std::mutex s_navigatorLaunchMutex;
+bool s_navigatorProcessActive = false;
+
+void releaseNavigatorProcessReservation()
+{
+	std::lock_guard<std::mutex> lock(s_navigatorLaunchMutex);
+	s_navigatorProcessActive = false;
+}
+}
 
 using namespace gxos::gui;
 using gxos::web::TextAlign;
@@ -12379,10 +12392,8 @@ namespace {
 
 	static std::string filePathFromUrl(const std::string& url)
 	{
-		if (url.rfind("file://", 0) != 0) return "";
-		std::string path = url.substr(7);
-		if (path.size() >= 2 && path[0] == '/' && path[1] == '/') path = path.substr(1);
-		return path;
+		std::string path;
+		return NavigatorLocalFileUrlToPath(url, path) ? path : std::string();
 	}
 
 	static int resourceReferenceIndexForBlock(int blockIndex)
@@ -13005,6 +13016,14 @@ namespace {
 			NavigatorResourceClassificationInput input;
 			input.policyFailure = NavigatorResourcePolicyFailure::RelativeUrlResolutionFailed;
 			setImageClassification(info, input, "Image URL resolution produced an empty URL.");
+			auto inserted = s_imageCache.emplace(key, std::move(info));
+			return inserted.first->second;
+		}
+
+		if (!Navigator::CurrentDocumentAllowsResource(requestedUrl)) {
+			NavigatorResourceClassificationInput input;
+			input.policyFailure = NavigatorResourcePolicyFailure::UnsupportedScheme;
+			setImageClassification(info, input, "Local file resources are blocked from remote documents.");
 			auto inserted = s_imageCache.emplace(key, std::move(info));
 			return inserted.first->second;
 		}
@@ -14867,9 +14886,40 @@ namespace {
 
 uint64_t Navigator::Launch()
 {
+	std::lock_guard<std::mutex> lock(s_navigatorLaunchMutex);
+	if (s_navigatorProcessActive) {
+		Logger::write(LogLevel::Warn, "Navigator rejected a second concurrent launch because its window/document state is single-instance");
+		return 0;
+	}
+	s_navigatorProcessActive = true;
 	ProcessSpec spec{"navigator", Navigator::main};
-	spec.appId = "guidexos.navigator";
-	return ProcessTable::spawn(spec, {"navigator"});
+	spec.appId = kNavigatorCanonicalAppId;
+	const uint64_t pid = ProcessTable::spawn(spec, {"navigator"});
+	if (pid == 0) s_navigatorProcessActive = false;
+	return pid;
+}
+
+uint64_t Navigator::LaunchWithActivation(const AppActivationContext& activation)
+{
+	std::string documentUrl;
+	if (activation.kind != AppActivationKind::Document ||
+		activation.appId != kNavigatorCanonicalAppId ||
+		!NavigatorLocalHtmlPathToUrl(activation.documentPath, documentUrl)) {
+		Logger::write(LogLevel::Warn, "Navigator rejected an invalid or unsupported App Model document activation");
+		return 0;
+	}
+	std::lock_guard<std::mutex> lock(s_navigatorLaunchMutex);
+	if (s_navigatorProcessActive) {
+		Logger::write(LogLevel::Warn, "Navigator rejected a second concurrent document activation because its window/document state is single-instance");
+		return 0;
+	}
+	s_navigatorProcessActive = true;
+	ProcessSpec spec{"navigator", Navigator::main};
+	spec.appId = kNavigatorCanonicalAppId;
+	spec.activation = activation;
+	const uint64_t pid = ProcessTable::spawn(spec, {"navigator"});
+	if (pid == 0) s_navigatorProcessActive = false;
+	return pid;
 }
 
 bool Navigator::SmokeNavigateTo(const std::string& url)
@@ -15696,6 +15746,16 @@ std::string Navigator::SmokeCurrentUrl()
 	return s_currentDoc.url;
 }
 
+std::string Navigator::SmokeCurrentTitle()
+{
+	return s_currentDoc.title;
+}
+
+bool Navigator::CurrentDocumentAllowsResource(const std::string& resourceUrl)
+{
+	return NavigatorMayLoadLocalResource(s_currentDoc.url, resourceUrl);
+}
+
 int Navigator::SmokeCurrentBlockCount()
 {
 	return static_cast<int>(s_currentDoc.blocks.size());
@@ -16312,6 +16372,19 @@ std::vector<int> Navigator::SmokeToolbarWidgetIds()
 
 int Navigator::main(int, char**)
 {
+	const AppActivationContext activation = ProcessTable::CurrentActivationContext();
+	std::string activationUrl;
+	if (activation.kind == AppActivationKind::Document) {
+		if (activation.appId != kNavigatorCanonicalAppId ||
+			!NavigatorLocalHtmlPathToUrl(activation.documentPath, activationUrl)) {
+			Logger::write(LogLevel::Error, "Navigator rejected a mismatched, unsupported, or invalid owned document activation");
+			releaseNavigatorProcessReservation();
+			return 1;
+		}
+		Logger::write(LogLevel::Info, "Navigator received App Model document activation appId=" + activation.appId +
+			" path=" + activation.documentPath + " owner=" + std::to_string(activation.registrationOwner) +
+			" generation=" + std::to_string(activation.registrationGeneration));
+	}
 	Logger::write(LogLevel::Info, "guideXOS Navigator starting");
 	s_windowId        = 0;
 	s_scrollOffset    = 0;
@@ -16368,13 +16441,21 @@ int Navigator::main(int, char**)
 
 	// Load the startup page through the normal URL path.
 	// Later phases make this read from a config or command-line argument.
-	loadUrl("about:navigator", true, NavigatorTransitionCategory::InitialNavigation);
+	loadUrl(activationUrl.empty() ? "about:navigator" : activationUrl, true,
+		NavigatorTransitionCategory::InitialNavigation);
 
 	ipc::Bus::ensure("gui.input");
 	ipc::Bus::ensure("gui.output");
 
+	std::string initialWindowTitle = s_currentDoc.title.empty()
+		? "guideXOS Navigator"
+		: s_currentDoc.title + " - guideXOS Navigator";
+	for (char& ch : initialWindowTitle) {
+		const unsigned char value = static_cast<unsigned char>(ch);
+		if (ch == '|' || ch == '\r' || ch == '\n' || value < 0x20u || value == 0x7fu) ch = ' ';
+	}
 	std::ostringstream create;
-	create << "guideXOS Navigator|" << kWindowW << "|" << kWindowH;
+	create << initialWindowTitle << "|" << kWindowW << "|" << kWindowH;
 	publish(MsgType::MT_Create, create.str());
 
 	bool running = true;
@@ -16479,7 +16560,19 @@ int Navigator::main(int, char**)
 		}
 	}
 
+	const uint64_t closedWindow = s_windowId;
 	cleanupRemoteImageTempFiles();
+	releaseCachedImages();
+	s_currentDoc = WebDocument{};
+	s_inspectedDoc = WebDocument{};
+	s_pageMetadata = NavigatorPageMetadata{};
+	s_backStack.clear();
+	s_forwardStack.clear();
+	s_pendingDocumentUrl.clear();
+	s_windowId = 0;
+	Logger::write(LogLevel::Info, "Navigator exiting window=" + std::to_string(closedWindow) +
+		" activationPathReleased=true documentStateReleased=true");
+	releaseNavigatorProcessReservation();
 	Logger::write(LogLevel::Info, "guideXOS Navigator terminated");
 	return 0;
 }
@@ -16496,6 +16589,12 @@ void Navigator::updateDisplay(bool renderDocumentContent)
 		// Refresh only the bounded diagnostics view. This walks the existing
 		// document/cache state; it does not parse HTML or initiate a fetch.
 		fillDocumentCounts(s_pageMetadata, s_currentDoc, s_scrollOffset);
+	// Keep the compositor's title in sync even when a hosted lifecycle smoke
+	// defers redundant paint submission after the first frame.
+	const std::string winTitle = s_currentDoc.title.empty()
+		? "guideXOS Navigator"
+		: s_currentDoc.title + " - guideXOS Navigator";
+	publish(MsgType::MT_SetTitle, std::to_string(s_windowId) + "|" + winTitle);
 	// Hosted lifecycle smoke drives many real state transitions synchronously.
 	// Keep the first compositor frame for toolbar registration, then defer
 	// redundant paint submission while the smoke suite inspects state through
@@ -16503,11 +16602,6 @@ void Navigator::updateDisplay(bool renderDocumentContent)
 	// screenshot runs do not set this environment-gated test switch.
 	if (navigatorSmokePaintDeferred() && !s_registeredWidgetIds.empty()) return;
 
-	// Window title tracks the current document title.
-	const std::string winTitle = s_currentDoc.title.empty()
-		? "guideXOS Navigator"
-		: s_currentDoc.title + " - guideXOS Navigator";
-	publish(MsgType::MT_SetTitle, std::to_string(s_windowId) + "|" + winTitle);
 	publish(MsgType::MT_DrawText, std::to_string(s_windowId) + "|\f");
 
 	drawThemeRect(s_windowId, 0, 0, kWindowW, kWindowH, NavigatorBodyColor());
@@ -20290,7 +20384,7 @@ void Navigator::commitAddressBar()
 	s_statusText = "Loading " + url;
 	renderToolbar();
 	renderStatusBar();
-	navigateTo(url);
+	navigateTo(url, true);
 }
 
 // -----------------------------------------------------------------------------
@@ -20562,8 +20656,14 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad,
 	navigatorSmokeProgress("navigation-complete");
 }
 
-void Navigator::navigateTo(const std::string& url)
+void Navigator::navigateTo(const std::string& url, bool userInitiated)
 {
+	if (!userInitiated && !NavigatorMayFollowLocalLink(s_currentDoc.url, url)) {
+		s_statusText = "Blocked local file navigation from a remote document.";
+		Logger::write(LogLevel::Warn, "Navigator blocked remote-to-local navigation from=" + s_currentDoc.url + " to=" + url);
+		renderStatusBar();
+		return;
+	}
 	// Don't push a duplicate entry if we're already on this URL.
 	const std::string prev = s_currentDoc.url;
 	if (!prev.empty() && prev != url) {
@@ -22184,15 +22284,17 @@ int Navigator::maxScrollOffset()
 
 WebDocument Navigator::loadFileUrl(const std::string& url)
 {
-	// Strip "file://" to get the absolute POSIX path.
-	// file:///docs/index.html  ->  /docs/index.html
-	// file://docs/index.html   ->  docs/index.html  (non-standard, tolerated)
-	std::string path = url.substr(7); // remove "file://"
-	if (path.size() >= 2 && path[0] == '/' && path[1] == '/') {
-		// file:////... â€” trim the extra slash pair (rare)
-		path = path.substr(1);
+	std::string path = filePathFromUrl(url);
+	if (path.empty()) {
+		NavigatorPageMetadata metadata;
+		metadata.requestedUrl = url;
+		metadata.finalUrl = url;
+		metadata.sourceType = "file";
+		metadata.errorStatus = "Invalid local file URL";
+		WebDocument doc = buildErrorDocument(url, "Invalid local file URL: " + url);
+		storePageMetadata(std::move(metadata), doc);
+		return doc;
 	}
-	// path is now an absolute POSIX path like /docs/index.html
 
 	// Derive a human-readable filename for the title.
 	std::string filename = path;

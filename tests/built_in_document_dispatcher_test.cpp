@@ -38,10 +38,10 @@ int main() {
     const std::filesystem::path storePath = std::filesystem::temp_directory_path() /
         ("guidexos-built-in-dispatcher-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".cfg");
     AppRegistry registry(false, storePath);
-    registry.RegisterBuiltInAppsAsManifests({ "Notepad", "Image Viewer" });
+    registry.RegisterBuiltInAppsAsManifests({ "Notepad", "Image Viewer", "guideXOS Navigator" });
 
-    check(registry.GetFileAssociations().size() == 5,
-        "built-in registry adds one PNG capability beside the four Notepad capabilities");
+    check(registry.GetFileAssociations().size() == 7,
+        "built-in registry adds PNG plus HTML and HTM capabilities beside Notepad's four text types");
 
     const FileAssociationResolution lower = registry.ResolveFileAssociation("/images/nested/picture.png");
     const FileAssociationResolution upper = registry.ResolveFileAssociation("/images/nested/picture.PNG");
@@ -63,14 +63,34 @@ int main() {
         defaults.configuredOverrideAppId.empty() && defaults.effectiveDefaultAppId == "gxos.builtin.imageviewer" &&
         defaults.effectiveDefaultAvailable,
         "PNG policy reports ImageViewer as built-in/effective default without a configured override");
+
+    const DocumentHandlerList htmlHandlers = registry.EnumerateCapableHandlers(".HTML");
+    const DefaultHandlerInfo htmlDefaults = registry.GetDefaultHandlerInfo(".html");
+    const FileAssociationResolution nestedHtml = registry.ResolveFileAssociation("/docs/nested folder/Index.HtMl");
+    const FileAssociationResolution shortHtml = registry.ResolveFileAssociation("/docs/nested folder/Index.HTM");
+    check(htmlHandlers.validExtension && htmlHandlers.count == 1 && htmlHandlers.availableHandlerCount == 1 &&
+        htmlHandlers.handlers[0].isDefault && htmlHandlers.handlers[0].appId == "guidexos.navigator" &&
+        htmlDefaults.builtInDefaultAppId == "guidexos.navigator" && htmlDefaults.configuredOverrideAppId.empty() &&
+        htmlDefaults.effectiveDefaultAppId == "guidexos.navigator" && htmlDefaults.effectiveDefaultAvailable,
+        "HTML handler enumeration and built-in default use Navigator's existing canonical application identity");
+    check(nestedHtml.launchable() && nestedHtml.appId == "guidexos.navigator" &&
+        nestedHtml.activation.documentPath == "/docs/nested folder/Index.HtMl" &&
+        shortHtml.launchable() && shortHtml.appId == nestedHtml.appId,
+        "mixed-case HTML and HTM extensions resolve the exact nested VFS path to Navigator");
+    check(registry.ResolveDocumentActivation("guidexos.navigator", "/docs/arbitrary.bin").status ==
+        FileAssociationResolutionStatus::HandlerDoesNotSupportDocuments &&
+        registry.ResolveDocumentActivation("missing.navigator", "/docs/page.html").status ==
+        FileAssociationResolutionStatus::HandlerMissing,
+        "explicit Navigator activation rejects unsupported extensions and missing canonical identities");
     check(registry.ResolveFileAssociation("/images/picture.xyz").status == FileAssociationResolutionStatus::NoAssociation &&
         registry.ResolveFileAssociation("/images/picture.image").status == FileAssociationResolutionStatus::NoAssociation,
         "unregistered image-like extensions remain unassociated");
 
     BuiltInDocumentDispatcher dispatcher;
     check(dispatcher.RegisterHandler("gxos.builtin.imageviewer", &captureActivation) &&
+        dispatcher.RegisterHandler("guidexos.navigator", &captureActivation) &&
         !dispatcher.RegisterHandler("gxos.builtin.imageviewer", &captureActivation),
-        "generic built-in dispatcher accepts a canonical handler once and rejects duplicate registration");
+        "generic built-in dispatcher accepts canonical Navigator and ImageViewer handlers once and rejects duplicates");
 
     std::string callerPath = "/images/nested/exact path.PnG";
     FileAssociationResolution ownedResolution = registry.ResolveFileAssociation(callerPath);
@@ -95,6 +115,20 @@ int main() {
     }
     check(lifecycleCyclesSucceeded && dispatchCalls == 101,
         "100 model/dispatcher activation cycles deliver distinct owned paths");
+
+    bool htmlLifecycleCyclesSucceeded = true;
+    for (size_t i = 0; i < 100; ++i) {
+        const std::string extension = (i % 2 == 0) ? ".html" : ".HtM";
+        const std::string path = "/docs/nested folder/cycle-" + std::to_string(i) + extension;
+        const FileAssociationResolution cycle = registry.ResolveFileAssociation(path);
+        if (!cycle.launchable() || cycle.appId != "guidexos.navigator" ||
+            !dispatcher.Dispatch(registry, cycle.activation, error) || receivedActivation.documentPath != path) {
+            htmlLifecycleCyclesSucceeded = false;
+            break;
+        }
+    }
+    check(htmlLifecycleCyclesSucceeded && dispatchCalls == 201,
+        "100 Navigator HTML/HTM model and generic-dispatcher cycles preserve distinct owned paths");
 
     AppActivationContext unsupportedKind = ownedResolution.activation;
     unsupportedKind.kind = AppActivationKind::Application;
@@ -129,6 +163,7 @@ int main() {
     std::filesystem::remove(storePath, ignored);
     std::filesystem::remove(storePath.string() + ".missing", ignored);
     std::cout << "builtInDocumentDispatcherChecks=" << (checks - failures) << "/" << checks << "\n";
-    std::cout << "builtInDocumentDispatcherLifecycleCycles=" << (dispatchCalls - 1) << "/100\n";
+    std::cout << "builtInDocumentDispatcherPngLifecycleCycles=100/100\n";
+    std::cout << "builtInDocumentDispatcherNavigatorLifecycleCycles=" << (dispatchCalls - 101) << "/100\n";
     return failures == 0 ? 0 : 1;
 }

@@ -1,6 +1,6 @@
 # guideXOS App Model Current-State Map
 
-Status: Phase 11 current state (2026-10-02). The Phase 5A/5B material below is historical; see [Phase 11 ImageViewer PNG activation](APPMODEL_PHASE11_IMAGEVIEWER_DOCUMENT_ACTIVATION.md) for the hosted PNG migration, [Phase 10 Developer Studio document activation](APPMODEL_PHASE10_DEVELOPER_STUDIO_DOCUMENT_ACTIVATION.md) for NativeElf activation, [Phase 9 Settings Default Apps](APPMODEL_PHASE9_SETTINGS_DEFAULT_APPS.md) for the Settings surface, [Phase 8 default-app persistence](APPMODEL_PHASE8_DEFAULT_APP_PERSISTENCE.md) for the machine-global override owner, [Phase 7 capable handlers and Open With](APPMODEL_PHASE7_OPEN_WITH.md) for handler selection, and [Phase 6 file associations and document activation](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md) for the original owned-path contract.
+Status: Phase 12 current state (2026-10-02). The Phase 5A/5B material below is historical; see [Phase 12 Navigator local HTML activation](APPMODEL_PHASE12_NAVIGATOR_LOCAL_HTML_ACTIVATION.md) for bounded local HTML/HTM activation, [Phase 11 ImageViewer PNG activation](APPMODEL_PHASE11_IMAGEVIEWER_DOCUMENT_ACTIVATION.md) for the hosted PNG migration, [Phase 10 Developer Studio document activation](APPMODEL_PHASE10_DEVELOPER_STUDIO_DOCUMENT_ACTIVATION.md) for NativeElf activation, [Phase 9 Settings Default Apps](APPMODEL_PHASE9_SETTINGS_DEFAULT_APPS.md) for the Settings surface, [Phase 8 default-app persistence](APPMODEL_PHASE8_DEFAULT_APP_PERSISTENCE.md) for the machine-global override owner, [Phase 7 capable handlers and Open With](APPMODEL_PHASE7_OPEN_WITH.md) for handler selection, and [Phase 6 file associations and document activation](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md) for the original owned-path contract.
 
 ## Phase 10 current document-handler state
 
@@ -15,6 +15,14 @@ Hosted ImageViewer keeps its canonical ID `gxos.builtin.imageviewer` and now dec
 ImageViewer consumes the owned path through its existing hosted PNG adapter/decoder. Its current process-static state supports one active window at a time, so concurrent launches are rejected and close releases image and path state before a later activation. See the [Phase 11 report](APPMODEL_PHASE11_IMAGEVIEWER_DOCUMENT_ACTIVATION.md) for the legacy baseline, exact runtime proof, bounds, malformed-file behavior, other formats audited, regressions, and hosted/bare-metal boundary.
 
 This document maps the app model as it exists in the repository today. It is intended to ground future GXApp runtime work without rewriting or destabilizing current launch behavior.
+
+## Phase 12 current document-handler state
+
+Hosted Navigator keeps its existing canonical ID `guidexos.navigator` and now declares `.html` and `.htm` through AppRegistry as `text/html`, with Navigator as the unconfigured built-in default. File Explorer normal Open, Open With, and Settings Default Apps use the generic association/owned-activation/handler-enumeration paths. No Navigator-specific route was added to those surfaces.
+
+Navigator already had `file://` loading, VFS-backed reads, relative URL resolution, an HTML parser, and a bounded image decoder. The gap was that App Model document activation had no Navigator adapter or HTML association. `Navigator::LaunchWithActivation` now copies and validates the owned VFS path, turns it into an escaped `file:///` URL, and uses Navigator's existing `loadUrl → loadFileUrl → parseHtml → CSS/layout/render` path. Hosted VFS translation rejects root escape; bare-metal still reads through `kernel::vfs`. Local HTML is capped at 64 KiB, while the shared activation path remains capped at 4096 bytes.
+
+Local relative HTML navigation, existing history/Reload, inline CSS, and relative PNG image loading are supported. Linked local CSS is deferred because the existing stylesheet loader fetches HTTP(S) only. JavaScript remains unsupported for both remote and local pages because Navigator has no JS engine. Remote pages cannot follow local-file links or load local image resources. Developer Studio does not declare HTML, so `.html` remains a one-handler type with no machine-global browse/edit switch. See the [Phase 12 report](APPMODEL_PHASE12_NAVIGATOR_LOCAL_HTML_ACTIVATION.md) for exact test, runtime, build, QEMU, security-boundary, and resource-matrix evidence.
 
 ## Phase 9 default-handler baseline
 

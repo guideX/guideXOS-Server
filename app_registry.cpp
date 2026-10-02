@@ -72,6 +72,7 @@ std::string builtInDefaultAppId(const std::string& extension) {
         return "gxos.builtin.notepad";
     }
     if (extension == ".png") return "gxos.builtin.imageviewer";
+    if (extension == ".html" || extension == ".htm") return "guidexos.navigator";
     return std::string();
 }
 
@@ -133,6 +134,13 @@ RegisteredApp makeBuiltInApp(const BuiltInAppMetadata& metadata) {
         app.documentActivationBackendAvailable = true;
         app.manifest.fileAssociations = {
             { ".png", "image/png", "PNG image" }
+        };
+    } else if (app.manifest.id == "guidexos.navigator") {
+        app.manifest.supportsDocumentActivation = true;
+        app.documentActivationBackendAvailable = true;
+        app.manifest.fileAssociations = {
+            { ".html", "text/html", "HTML document" },
+            { ".htm", "text/html", "HTML document" }
         };
     }
 

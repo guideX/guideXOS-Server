@@ -5769,11 +5769,18 @@ namespace gxos {
             return false;
         }
 
+        static bool dispatchNavigatorDocumentActivation(const apps::AppActivationContext& activation, std::string& error) {
+            if (apps::Navigator::LaunchWithActivation(activation) != 0) return true;
+            error = "Failed to launch the registered document handler";
+            return false;
+        }
+
         static const apps::BuiltInDocumentDispatcher& builtInDocumentDispatcher() {
             static const apps::BuiltInDocumentDispatcher dispatcher = [] {
                 apps::BuiltInDocumentDispatcher value;
                 (void)value.RegisterHandler("gxos.builtin.notepad", &dispatchNotepadDocumentActivation);
                 (void)value.RegisterHandler("gxos.builtin.imageviewer", &dispatchImageViewerDocumentActivation);
+                (void)value.RegisterHandler("guidexos.navigator", &dispatchNavigatorDocumentActivation);
                 return value;
             }();
             return dispatcher;

@@ -821,6 +821,7 @@ struct NavigatorLifecycleDiagnostics {
 class Navigator {
 public:
 	static uint64_t Launch();
+	static uint64_t LaunchWithActivation(const AppActivationContext& activation);
 	static bool SmokeNavigateTo(const std::string& url);
 	static bool SmokeNavigateToQuiet(const std::string& url);
 	static bool SmokeNavigateToWithHistory(const std::string& url);
@@ -857,6 +858,8 @@ public:
 	static std::string SmokePageDiagnostics();
 	static std::string SmokeLifecycleReport();
 	static std::string SmokeCurrentUrl();
+	static std::string SmokeCurrentTitle();
+	static bool CurrentDocumentAllowsResource(const std::string& resourceUrl);
 	static int SmokeCurrentBlockCount();
 	static std::string SmokeCurrentDocumentText();
 	static std::string SmokeCurrentLinkUrl(const std::string& text);
@@ -978,7 +981,7 @@ private:
 	// navigateTo() – normal forward navigation (link clicks, Home).
 	//   Pushes the current URL onto the back stack, clears the forward stack,
 	//   then calls loadUrl().
-	static void navigateTo(const std::string& url);
+	static void navigateTo(const std::string& url, bool userInitiated = false);
 
 	// goBack() / goForward() – history traversal.
 	//   Move current URL to the opposite stack then call loadUrl().
