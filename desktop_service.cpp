@@ -1378,11 +1378,15 @@ namespace gxos {
             return oss.str();
         }
 
-        static uint64_t launchNativeElfProcess(const apps::RegisteredApp& registryApp, const apps::LaunchDecision& launchDecision, bool debugControlled = false) {
+        static uint64_t launchNativeElfProcess(const apps::RegisteredApp& registryApp, const apps::LaunchDecision& launchDecision,
+                                               bool debugControlled = false,
+                                               const apps::AppActivationContext& activation = apps::AppActivationContext()) {
             ProcessSpec spec;
             spec.name = std::string("nativeelf:") + (registryApp.manifest.id.empty() ? registryApp.manifest.displayName : registryApp.manifest.id);
             spec.appId = registryApp.manifest.id;
+            spec.activation = activation;
             spec.entry = [registryApp, launchDecision, debugControlled](int, char**) -> int {
+                const apps::AppActivationContext activation = ProcessTable::CurrentActivationContext();
                 apps::NativeElfLaunchResult nativeElfResult = apps::NativeElfLaunchPipeline::PrepareLaunch(registryApp, launchDecision);
                 if (!nativeElfResult.success) {
                     std::string message = std::string("Native app launch failed: ") + (nativeElfResult.validationErrors.empty() ? nativeElfResult.message : joinMessages(nativeElfResult.validationErrors));
@@ -1399,7 +1403,8 @@ namespace gxos {
                     return apps::GX_ERROR_FAILED;
                 }
 
-                apps::NativeAppRuntimeContext runtimeContext = apps::NativeAppRuntime::Prepare(registryApp, launchDecision, nativeElfResult, nativeElfImage);
+                apps::NativeAppRuntimeContext runtimeContext = apps::NativeAppRuntime::Prepare(
+                    registryApp, launchDecision, nativeElfResult, nativeElfImage, activation);
                 if (!runtimeContext.success) {
                     std::string message = std::string("Native app runtime prepare failed: ") + joinMessages(runtimeContext.diagnostics);
                     Logger::write(LogLevel::Warn, message);
@@ -1443,6 +1448,29 @@ namespace gxos {
 
                 s_lastBuiltInRegisterResult = s_appRegistry.RegisterBuiltInAppsAsManifests();
                 logScanIssues("Duplicate app id", s_lastBuiltInRegisterResult.duplicateApps);
+
+                // Native document dispatch uses the same production activation
+                // contract only when the hosted NativeElf executor is present.
+                // Ordinary builds keep every NativeElf document declaration
+                // unavailable because their launch backend is intentionally off.
+                if (apps::NativeElfExecutor::ExperimentalExecutionEnabled()) {
+                    const apps::AppLaunchResolver resolver(s_appRegistry, apps::AppLaunchResolver::CurrentArchitecture());
+                    std::vector<std::string> nativeDocumentApps;
+                    for (const apps::RegisteredApp& candidate : s_appRegistry.GetAllApps()) {
+                        if (candidate.manifest.kind != apps::AppKind::NativeElf ||
+                            !candidate.manifest.supportsDocumentActivation || candidate.manifest.fileAssociations.empty()) continue;
+                        const apps::LaunchDecision decision = resolver.ResolveLaunch(candidate);
+                        const apps::AppEntry* entry = candidate.FindCompatibleEntry(decision.architecture);
+                        if (!decision.success || decision.strategy != apps::AppLaunchStrategy::NativeElf || !entry ||
+                            candidate.appDirectory.empty()) continue;
+                        std::error_code entryError;
+                        const std::filesystem::path executable = candidate.appDirectory / std::filesystem::path(entry->path);
+                        if (std::filesystem::is_regular_file(executable, entryError) && !entryError)
+                            nativeDocumentApps.push_back(candidate.manifest.id);
+                    }
+                    for (const std::string& appId : nativeDocumentApps)
+                        (void)s_appRegistry.SetDocumentActivationBackendAvailable(appId, true);
+                }
 
                 refreshRegisteredAppsFromRegistry();
                 ensureDefaultAppModelPins();
@@ -5709,20 +5737,66 @@ namespace gxos {
         }
 
         static bool dispatchDocumentActivation(const apps::AppActivationContext& activation, std::string& error) {
+            apps::RegisteredApp selectedApp;
+            apps::LaunchDecision nativeDecision;
+            bool nativeHandler = false;
             {
                 std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
                 if (!s_appRegistry.IsDocumentActivationCurrent(activation)) {
                     error = "Document activation became stale before dispatch";
                     return false;
                 }
+                const apps::RegisteredApp* registered = s_appRegistry.FindById(activation.appId);
+                if (!registered) {
+                    error = "Document activation registration disappeared before dispatch";
+                    return false;
+                }
+                if (registered->manifest.kind == apps::AppKind::BuiltIn &&
+                    activation.appId == "gxos.builtin.notepad") {
+                    if (apps::Notepad::LaunchWithActivation(activation) != 0) return true;
+                    error = "Failed to launch the registered document handler";
+                    return false;
+                }
+                if (registered->manifest.kind != apps::AppKind::NativeElf ||
+                    !apps::NativeElfExecutor::ExperimentalExecutionEnabled()) {
+                    error = "The registered application has no current document activation dispatcher";
+                    return false;
+                }
+                selectedApp = *registered;
+                apps::AppLaunchResolver resolver(s_appRegistry, apps::AppLaunchResolver::CurrentArchitecture());
+                nativeDecision = resolver.ResolveLaunch(selectedApp);
+                if (!nativeDecision.success || nativeDecision.strategy != apps::AppLaunchStrategy::NativeElf) {
+                    error = nativeDecision.reason.empty() ? "Native document handler launch resolution failed" : nativeDecision.reason;
+                    return false;
+                }
+                nativeHandler = true;
             }
-
-            if (activation.appId == "gxos.builtin.notepad") {
-                if (apps::Notepad::LaunchWithActivation(activation) != 0) return true;
-                error = "Failed to launch the registered document handler";
-                return false;
+            apps::AppActivationContext nativeActivation = activation;
+#ifdef _WIN32
+            // File Explorer exposes the hosted server tree as a VFS rooted at
+            // '/', while NativeElf's hosted filesystem API accepts absolute
+            // host paths. Translate only at the native-process boundary so
+            // built-in handlers keep receiving the original VFS path.
+            if (nativeHandler && !nativeActivation.documentPath.empty() &&
+                nativeActivation.documentPath[0] == '/' &&
+                (nativeActivation.documentPath.size() < 2 || nativeActivation.documentPath[1] != '/')) {
+                std::error_code pathError;
+                const std::filesystem::path workingRoot = std::filesystem::current_path(pathError);
+                if (pathError) {
+                    error = "Could not resolve the hosted workspace root for document activation";
+                    return false;
+                }
+                const std::filesystem::path relativePath = nativeActivation.documentPath.substr(1);
+                const std::filesystem::path hostPath = (workingRoot / relativePath).lexically_normal();
+                nativeActivation.documentPath = hostPath.generic_string();
+                if (!apps::IsValidDocumentActivationPath(nativeActivation.documentPath)) {
+                    error = "Resolved hosted document path is invalid or exceeds the App Model path bound";
+                    return false;
+                }
             }
-            error = "The registered application has no current document activation dispatcher";
+#endif
+            if (nativeHandler && launchNativeElfProcess(selectedApp, nativeDecision, false, nativeActivation) != 0) return true;
+            error = "Failed to launch the registered document handler";
             return false;
         }
 

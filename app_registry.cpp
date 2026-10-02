@@ -848,6 +848,17 @@ bool AppRegistry::IsDocumentActivationCurrent(const AppActivationContext& activa
         current.activation.registrationGeneration == activation.registrationGeneration;
 }
 
+bool AppRegistry::SetDocumentActivationBackendAvailable(const std::string& canonicalAppId, bool available) {
+    auto found = m_appsById.find(canonicalAppId);
+    if (found == m_appsById.end() || found->second >= m_apps.size()) return false;
+    RegisteredApp& app = m_apps[found->second];
+    if (available && (!app.manifest.supportsDocumentActivation || app.manifest.fileAssociations.empty())) return false;
+    if (app.documentActivationBackendAvailable == available) return true;
+    app.documentActivationBackendAvailable = available;
+    RebuildFileAssociations();
+    return true;
+}
+
 const std::vector<FileAssociationRecord>& AppRegistry::GetFileAssociations() const {
     return m_fileAssociations;
 }

@@ -237,6 +237,7 @@ public:
     FileAssociationResolution ResolveDocumentActivation(const DocumentHandlerInfo& handler,
                                                         const std::string& path) const;
     bool IsDocumentActivationCurrent(const AppActivationContext& activation) const;
+    bool SetDocumentActivationBackendAvailable(const std::string& canonicalAppId, bool available);
     const std::vector<FileAssociationRecord>& GetFileAssociations() const;
     bool FileAssociationCapacityExceeded() const;
 

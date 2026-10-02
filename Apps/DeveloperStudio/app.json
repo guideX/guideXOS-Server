@@ -28,7 +28,18 @@
     "filesystem.read",
     "filesystem.write"
   ],
-  "fileAssociations": [],
+  "supportsDocumentActivation": true,
+  "fileAssociations": [
+    { "extension": ".c", "contentType": "text/x-csrc", "description": "C source" },
+    { "extension": ".cc", "contentType": "text/x-c++src", "description": "C++ source" },
+    { "extension": ".cpp", "contentType": "text/x-c++src", "description": "C++ source" },
+    { "extension": ".cxx", "contentType": "text/x-c++src", "description": "C++ source" },
+    { "extension": ".h", "contentType": "text/x-chdr", "description": "C header" },
+    { "extension": ".hh", "contentType": "text/x-c++hdr", "description": "C++ header" },
+    { "extension": ".hpp", "contentType": "text/x-c++hdr", "description": "C++ header" },
+    { "extension": ".hxx", "contentType": "text/x-c++hdr", "description": "C++ header" },
+    { "extension": ".txt", "contentType": "text/plain", "description": "Plain text document" }
+  ],
   "defaultWindow": {
     "width": 960,
     "height": 640,

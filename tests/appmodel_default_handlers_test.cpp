@@ -1,4 +1,5 @@
 #include "app_registry.h"
+#include "settings_default_apps_model.h"
 
 #include <algorithm>
 #include <chrono>
@@ -18,6 +19,37 @@
 
 namespace {
 using namespace gxos::apps;
+
+class RegistrySettingsBackend final : public settings::DefaultAppsBackend {
+public:
+    explicit RegistrySettingsBackend(AppRegistry& value) : registry(value) {}
+    bool available() const override { return true; }
+    std::vector<std::string> knownDocumentExtensions() override { return registry.GetKnownDocumentExtensions(); }
+    DefaultHandlerInfo defaultHandlerInfo(const std::string& extension) override {
+        return registry.GetDefaultHandlerInfo(extension);
+    }
+    DocumentHandlerList capableHandlers(const std::string& extension) override {
+        return registry.EnumerateCapableHandlers(extension);
+    }
+    std::string displayName(const std::string& canonicalAppId) override {
+        const RegisteredApp* app = registry.FindById(canonicalAppId);
+        return app ? app->manifest.displayName : std::string();
+    }
+    bool isDurableApp(const std::string& canonicalAppId) override {
+        const RegisteredApp* app = registry.FindById(canonicalAppId);
+        return app && !app->temporaryDevelopment && app->sourceKind != AppSourceKind::DevelopmentTemporary;
+    }
+    DefaultHandlerMutationResult setDefaultHandler(
+        const std::string& extension, const std::string& canonicalAppId) override {
+        return registry.SetDefaultHandler(extension, canonicalAppId);
+    }
+    DefaultHandlerMutationResult clearDefaultHandler(const std::string& extension) override {
+        return registry.ClearDefaultHandler(extension);
+    }
+
+private:
+    AppRegistry& registry;
+};
 
 int checks = 0;
 int failures = 0;
@@ -205,6 +237,90 @@ int main() {
     const RegisteredApp incapable = durableHandler("test.handler.incapable", "Incapable", { ".other" });
     const RegisteredApp unavailable = durableHandler("test.handler.unavailable", "Unavailable", { ".txt" }, true, false);
     const RegisteredApp noActivation = durableHandler("test.handler.no-activation", "No Activation", { ".txt" }, false, true);
+
+    {
+        const std::filesystem::path studioStorePath = tempRoot / "developer-studio.cfg";
+        AppRegistry production(false, studioStorePath);
+        production.SetSources({ { AppSourceKind::Package, "Apps/DeveloperStudio" } });
+        const AppScanResult scan = production.Scan();
+        const RegisteredApp* studio = production.FindById("com.guidexos.developerstudio");
+        check(scan.registeredAppCount == 1 && studio && studio->manifest.supportsDocumentActivation &&
+            studio->manifest.fileAssociations.size() == 9,
+            "production Developer Studio manifest declares its canonical ID and bounded C, C++, and plain-text capabilities");
+        const DocumentHandlerList unavailableStudio = production.EnumerateCapableHandlers(".txt");
+        check(studio && unavailableStudio.declaredHandlerCount == 1 &&
+            unavailableStudio.availableHandlerCount == 0 &&
+            production.SetDocumentActivationBackendAvailable(studio->manifest.id, true),
+            "production Developer Studio registration can receive a live document backend");
+        addBuiltIns(production);
+        const DocumentHandlerList sharedText = production.EnumerateCapableHandlers(".TXT");
+        const DefaultHandlerInfo textDefault = production.GetDefaultHandlerInfo(".txt");
+        check(sharedText.count == 2 && sharedText.availableHandlerCount == 2 && sharedText.handlers[0].isDefault &&
+            sharedText.handlers[0].appId == "gxos.builtin.notepad" &&
+            sharedText.handlers[1].appId == "com.guidexos.developerstudio" &&
+            textDefault.builtInDefaultAppId == "gxos.builtin.notepad" &&
+            textDefault.configuredOverrideAppId.empty() && textDefault.effectiveDefaultAppId == "gxos.builtin.notepad",
+            "real production .txt competition keeps Notepad as the unchanged built-in default");
+        check(production.ResolveFileAssociation("/src/HELLO.CPP").launchable() &&
+            production.ResolveFileAssociation("/src/HELLO.CPP").appId == "com.guidexos.developerstudio",
+            "a newly declared standalone C++ source uses Developer Studio under the existing single-handler default policy");
+        RegistrySettingsBackend settingsBackend(production);
+        settings::DefaultAppsModel settingsModel;
+        settingsModel.refresh(settingsBackend);
+        const int textRowIndex = settings::findDefaultAppsRowIndex(settingsModel.snapshot(), ".txt");
+        const settings::DefaultAppsRow* textRow = textRowIndex >= 0
+            ? &settingsModel.snapshot().rows[static_cast<size_t>(textRowIndex)] : nullptr;
+        const std::vector<size_t> eligibleChoices = textRow
+            ? settings::eligibleDefaultAppHandlerIndices(*textRow, settingsBackend) : std::vector<size_t>{};
+        size_t studioChoice = eligibleChoices.size();
+        for (size_t choice = 0; choice < eligibleChoices.size(); ++choice) {
+            if (textRow->handlers.handlers[eligibleChoices[choice]].appId == "com.guidexos.developerstudio") {
+                studioChoice = choice;
+                break;
+            }
+        }
+        const DefaultHandlerMutationResult selected = studioChoice < eligibleChoices.size()
+            ? settingsModel.chooseHandler(settingsBackend, ".txt", studioChoice) : DefaultHandlerMutationResult{};
+        const FileAssociationResolution changedDefault = production.ResolveFileAssociation("/docs/one.txt");
+        const DocumentHandlerList withOverride = production.EnumerateCapableHandlers(".txt");
+        auto notepad = std::find_if(withOverride.handlers.begin(), withOverride.handlers.begin() + withOverride.count,
+            [](const DocumentHandlerInfo& handler) { return handler.appId == "gxos.builtin.notepad"; });
+        const FileAssociationResolution oneTimeNotepad = notepad == withOverride.handlers.begin() + withOverride.count
+            ? FileAssociationResolution{} : production.ResolveDocumentActivation(*notepad, "/docs/once.TXT");
+        AppRegistry reloadedProduction(false, studioStorePath);
+        reloadedProduction.SetSources({ { AppSourceKind::Package, "Apps/DeveloperStudio" } });
+        const AppScanResult reloadedScan = reloadedProduction.Scan();
+        const RegisteredApp* reloadedStudio = reloadedProduction.FindById("com.guidexos.developerstudio");
+        const bool reloadedBackend = reloadedStudio &&
+            reloadedProduction.SetDocumentActivationBackendAvailable(reloadedStudio->manifest.id, true);
+        addBuiltIns(reloadedProduction);
+        const DefaultHandlerInfo reloadedTextDefault = reloadedProduction.GetDefaultHandlerInfo(".txt");
+        const FileAssociationResolution reloadedOrdinaryOpen = reloadedProduction.ResolveFileAssociation("/docs/reloaded.txt");
+        const DocumentHandlerList reloadedHandlers = reloadedProduction.EnumerateCapableHandlers(".txt");
+        const settings::DefaultAppsRow* configuredRow = settings::findDefaultAppsRow(settingsModel.snapshot(), ".txt");
+        check(selected.succeeded() && changedDefault.launchable() &&
+            changedDefault.appId == "com.guidexos.developerstudio" && oneTimeNotepad.launchable() &&
+            oneTimeNotepad.appId == "gxos.builtin.notepad" &&
+            production.GetDefaultHandlerInfo(".txt").effectiveDefaultAppId == "com.guidexos.developerstudio" &&
+            configuredRow && configuredRow->policy.configuredOverrideAppId ==
+                "com.guidexos.developerstudio",
+            "production Default Apps model persists the real Developer Studio handler while one-time Notepad remains non-mutating");
+        check(reloadedScan.registeredAppCount == 1 && reloadedBackend &&
+            reloadedTextDefault.configuredOverrideAppId == "com.guidexos.developerstudio" &&
+            reloadedOrdinaryOpen.launchable() && reloadedOrdinaryOpen.appId == "com.guidexos.developerstudio" &&
+            reloadedHandlers.count == 2 && reloadedHandlers.availableHandlerCount == 2,
+            "a recreated production AppRegistry owner reloads the persisted Developer Studio canonical ID and ordinary Open target");
+        RegistrySettingsBackend reloadedBackendForSettings(reloadedProduction);
+        settings::DefaultAppsModel reloadedSettingsModel;
+        reloadedSettingsModel.refresh(reloadedBackendForSettings);
+        check(reloadedSettingsModel.restoreBuiltInDefault(reloadedBackendForSettings, ".txt").succeeded() &&
+            reloadedProduction.ResolveFileAssociation("/docs/restored.txt").appId == "gxos.builtin.notepad" &&
+            reloadedProduction.EnumerateCapableHandlers(".txt").availableHandlerCount == 2,
+            "production Default Apps Restore selects Notepad and keeps Developer Studio available");
+        check(production.ResolveDocumentActivation("com.guidexos.developerstudio", "/docs/unsupported.ini").status ==
+            FileAssociationResolutionStatus::HandlerDoesNotSupportDocuments,
+            "direct Developer Studio activation rejects an extension outside its manifest capability set");
+    }
 
     {
         AppRegistry registry(false, storePath);

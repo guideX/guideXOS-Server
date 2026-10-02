@@ -1,10 +1,16 @@
 # guideXOS App Model Current-State Map
 
-Status: Phase 9 current state (2026-10-02). The Phase 5A/5B material below is historical; see [Phase 9 Settings Default Apps](APPMODEL_PHASE9_SETTINGS_DEFAULT_APPS.md) for the Settings surface and validation, [Phase 8 default-app persistence](APPMODEL_PHASE8_DEFAULT_APP_PERSISTENCE.md) for the authoritative machine-global override owner and API, [Phase 7 capable handlers and Open With](APPMODEL_PHASE7_OPEN_WITH.md) for handler selection, and [Phase 6 file associations and document activation](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md) for the original owned-path contract.
+Status: Phase 10 current state (2026-10-02). The Phase 5A/5B material below is historical; see [Phase 10 Developer Studio document activation](APPMODEL_PHASE10_DEVELOPER_STUDIO_DOCUMENT_ACTIVATION.md) for the first real additional document-capable application, [Phase 9 Settings Default Apps](APPMODEL_PHASE9_SETTINGS_DEFAULT_APPS.md) for the Settings surface and validation, [Phase 8 default-app persistence](APPMODEL_PHASE8_DEFAULT_APP_PERSISTENCE.md) for the authoritative machine-global override owner and API, [Phase 7 capable handlers and Open With](APPMODEL_PHASE7_OPEN_WITH.md) for handler selection, and [Phase 6 file associations and document activation](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md) for the original owned-path contract.
+
+## Phase 10 current document-handler state
+
+Developer Studio keeps its existing canonical ID `com.guidexos.developerstudio` and declares `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hh`, `.hpp`, `.hxx`, and `.txt` through the ordinary manifest/AppRegistry capability path. The shared NativeElf ABI now returns an owned document path copy to the launched process; Developer Studio validates the declared extension and opens it through its normal workspace document loader. `.txt` is the first real competing production type: Notepad remains the built-in default, while Developer Studio appears automatically in Open With and Default Apps when the hosted NativeElf backend is available. The ordinary `build.bat` keeps that experimental backend unavailable; `build-native-experimental.bat` is required for real hosted NativeElf activation.
+
+See the [Phase 10 report](APPMODEL_PHASE10_DEVELOPER_STUDIO_DOCUMENT_ACTIVATION.md) for ownership, file/path bounds, runtime routing, Default Apps policy, validation results, and the bounded experimental-backend gate.
 
 This document maps the app model as it exists in the repository today. It is intended to ground future GXApp runtime work without rewriting or destabilizing current launch behavior.
 
-## Phase 9 current default-handler state
+## Phase 9 default-handler baseline
 
 AppRegistry owns the bounded machine-global default-handler store at `appmodel-default-handlers.cfg`. Settings now exposes it under **Apps → Default apps** through `DesktopService`; the page does not parse or write that file. It presents known extensions from AppRegistry in a bounded deterministic snapshot, shows built-in/configured/effective state separately, and offers only current capable durable handlers by canonical App ID. An unusable configured handler remains visible while File Explorer ordinary Open uses the safe effective fallback. Open With remains a one-time choice.
 

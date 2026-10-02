@@ -148,6 +148,8 @@ typedef struct gx_host_calls {
      * functional without audio. Requires the "audio.output" manifest
      * permission, otherwise GX_ERROR_PERMISSION_DENIED. */
     gx_result (GX_CALL *play_pcm)(gx_app_context* ctx, const void* pcmData, uint32_t pcmBytes, uint32_t sampleRateHz, uint32_t channels, uint32_t bitsPerSample);
+    /* App Model activation is returned as an owned bounded path copy. */
+    gx_result (GX_CALL *get_document_activation_path)(gx_app_context* ctx, char* path, uint32_t pathCapacity, uint32_t* requiredBytes);
 } gx_host_calls;
 
 #ifdef __cplusplus

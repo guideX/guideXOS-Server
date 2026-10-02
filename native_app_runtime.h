@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app_launch_resolver.h"
+#include "app_activation.h"
 #include "native_elf_image_loader.h"
 #include "sdk/include/guidexos/build.h"
 #include "sdk/include/guidexos/development_run.h"
@@ -142,6 +143,7 @@ struct NativeHostCallTable {
     // App Model audio output (MC5, appended: every existing slot keeps its
     // offset). Fire-and-forget short PCM playback, "audio.output"-gated.
     gx_result (*play_pcm)(NativeGxAppContext* ctx, const void* pcmData, uint32_t pcmBytes, uint32_t sampleRateHz, uint32_t channels, uint32_t bitsPerSample) = nullptr;
+    gx_result (*get_document_activation_path)(NativeGxAppContext* ctx, char* path, uint32_t pathCapacity, uint32_t* requiredBytes) = nullptr;
 };
 
 static_assert(offsetof(NativeHostCallTable, log) == 8, "native ABI log slot changed");
@@ -169,7 +171,8 @@ static_assert(offsetof(NativeHostCallTable, development_run_request_close) == 21
 static_assert(offsetof(NativeHostCallTable, development_run_release) == 224, "native ABI development run release slot changed");
 static_assert(offsetof(NativeHostCallTable, development_debug) == 232, "native ABI development debug slot changed");
 static_assert(offsetof(NativeHostCallTable, play_pcm) == 240, "native ABI play_pcm slot must be appended after development_debug");
-static_assert(sizeof(NativeHostCallTable) == 248, "native ABI host call table size changed");
+static_assert(offsetof(NativeHostCallTable, get_document_activation_path) == 248, "native ABI document activation slot must be appended");
+static_assert(sizeof(NativeHostCallTable) == 256, "native ABI host call table size changed");
 
 enum class NativeAppLifecycleState {
     Created = 0,
@@ -195,6 +198,7 @@ struct NativeAppRuntimeContext {
     uint64_t nativeStackEndAddress = 0;
     NativeGxAppContext* activeGxContext = nullptr;
     std::vector<std::string> permissions;
+    AppActivationContext activation;
     NativeHostCallTable hostCalls;
     std::map<std::string, std::string> environment;
     std::vector<std::string> arguments;
@@ -293,7 +297,8 @@ public:
         const RegisteredApp& app,
         const LaunchDecision& launchDecision,
         const NativeElfLaunchResult& launchResult,
-        const NativeElfImage& image);
+        const NativeElfImage& image,
+        const AppActivationContext& activation = AppActivationContext());
 
     static void BeginHostCallDispatch(NativeAppRuntimeContext& context);
     static void EndHostCallDispatch(NativeAppRuntimeContext& context);

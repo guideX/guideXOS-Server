@@ -800,6 +800,27 @@ gx_result hostPlayPcm(NativeGxAppContext* ctx, const void* pcmData, uint32_t pcm
     return GX_OK;
 }
 
+gx_result hostGetDocumentActivationPath(NativeGxAppContext* ctx, char* path, uint32_t pathCapacity,
+                                        uint32_t* requiredBytes) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context || !requiredBytes || !nativeBufferRangeContains(*context, requiredBytes, sizeof(uint32_t)) ||
+        (pathCapacity > 0 && (!path || !nativeBufferRangeContains(*context, path, pathCapacity)))) {
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    *requiredBytes = 0;
+    if (pathCapacity > 0) path[0] = '\0';
+    if (context->activation.kind != AppActivationKind::Document) return GX_OK;
+    if (context->activation.appId != context->appId ||
+        !IsValidDocumentActivationPath(context->activation.documentPath) ||
+        context->activation.documentPath.size() >= std::numeric_limits<uint32_t>::max()) return GX_ERROR_FAILED;
+    const uint32_t required = static_cast<uint32_t>(context->activation.documentPath.size() + 1);
+    *requiredBytes = required;
+    if (pathCapacity < required) return GX_ERROR_INVALID_ARGUMENT;
+    std::memcpy(path, context->activation.documentPath.data(), required - 1);
+    path[required - 1] = '\0';
+    return GX_OK;
+}
+
 bool hasWorkspaceReadPermission(const NativeAppRuntimeContext& context) {
     return hasPermission(context, "filesystem.read");
 }
@@ -1793,7 +1814,8 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     const RegisteredApp& app,
     const LaunchDecision& launchDecision,
     const NativeElfLaunchResult& launchResult,
-    const NativeElfImage& image) {
+    const NativeElfImage& image,
+    const AppActivationContext& activation) {
     NativeAppRuntimeContext context;
     context.appId = app.manifest.id;
     context.runtimeId = g_nextRuntimeId.fetch_add(1);
@@ -1806,6 +1828,7 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
         context.nativeImageEndAddress = context.nativeImageBaseAddress + image.imageSize;
     }
     context.permissions = app.manifest.permissions;
+    context.activation = activation;
     context.arguments.push_back(context.displayName.empty() ? context.appId : context.displayName);
     context.environment["GX_APP_ID"] = context.appId;
     context.environment["GX_APP_DISPLAY_NAME"] = context.displayName;
@@ -1847,6 +1870,7 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.hostCalls.development_run_release = hostDevelopmentRunRelease;
     context.hostCalls.development_debug = hostDevelopmentDebug;
     context.hostCalls.play_pcm = hostPlayPcm;
+    context.hostCalls.get_document_activation_path = hostGetDocumentActivationPath;
 
     if (launchDecision.strategy != AppLaunchStrategy::NativeElf) {
         addDiagnostic(context, "Launch decision strategy is not NativeElf");
@@ -1862,6 +1886,14 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     }
     if (context.appId.empty()) {
         addDiagnostic(context, "Native app id is empty");
+    }
+    if (context.activation.kind == AppActivationKind::Document) {
+        if (context.activation.appId != context.appId || !IsValidDocumentActivationPath(context.activation.documentPath)) {
+            addDiagnostic(context, "Native app document activation is malformed or belongs to another canonical application id");
+        }
+    } else if (!context.activation.documentPath.empty() || context.activation.registrationOwner != 0 ||
+               context.activation.registrationGeneration != 0) {
+        addDiagnostic(context, "Native app application activation contains document metadata");
     }
 
     if (context.diagnostics.empty()) {
@@ -2086,6 +2118,7 @@ bool RunNativeFilesystemContractTest(std::string* failure) {
         context.hostCalls.file_write_all = hostFileWriteAll;
         context.hostCalls.file_create_directory = hostFileCreateDirectory;
         context.hostCalls.file_remove = hostFileRemove;
+        context.hostCalls.get_document_activation_path = hostGetDocumentActivationPath;
         context.hostCalls.build_project_start = hostBuildProjectStart;
         context.hostCalls.build_project_poll = hostBuildProjectPoll;
         context.hostCalls.build_project_release = hostBuildProjectRelease;
@@ -2108,6 +2141,30 @@ bool RunNativeFilesystemContractTest(std::string* failure) {
         auto pathString = [&](const std::filesystem::path& path) {
             return path.generic_string();
         };
+
+        context.activation.kind = AppActivationKind::Document;
+        context.activation.appId = context.appId;
+        context.activation.documentPath = pathString(root / "nested" / "config.json");
+        char activationPath[512] = {};
+        uint32_t activationRequired = 0;
+        const gx_result activationCopy = hostGetDocumentActivationPath(
+            &appContext, activationPath, sizeof(activationPath), &activationRequired);
+        check(activationCopy == GX_OK && activationRequired == context.activation.documentPath.size() + 1 &&
+            std::string(activationPath) == context.activation.documentPath,
+            "owned App Model activation path crosses the native host ABI as an exact bounded copy");
+        char shortActivationPath[4] = { 'x', 'x', 'x', 'x' };
+        activationRequired = 0;
+        const gx_result shortActivationCopy = hostGetDocumentActivationPath(
+            &appContext, shortActivationPath, sizeof(shortActivationPath), &activationRequired);
+        check(shortActivationCopy == GX_ERROR_INVALID_ARGUMENT &&
+            activationRequired == context.activation.documentPath.size() + 1 && shortActivationPath[0] == '\0',
+            "short activation output reports the required length without returning a truncated path");
+        context.activation = AppActivationContext();
+        activationRequired = UINT32_MAX;
+        const gx_result noActivation = hostGetDocumentActivationPath(
+            &appContext, activationPath, sizeof(activationPath), &activationRequired);
+        check(noActivation == GX_OK && activationRequired == 0 && activationPath[0] == '\0',
+            "ordinary native application launch has no document target");
 
         char path[256] = {};
         gx_file_info info = {};

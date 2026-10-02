@@ -39,6 +39,7 @@ app_manifest.cpp ^
 app_manifest_loader.cpp ^
 app_manifest_validator.cpp ^
 app_registry.cpp ^
+app_default_handler_store.cpp ^
 calculator.cpp ^
 clock.cpp ^
 compositor.cpp ^
@@ -52,6 +53,8 @@ disk_manager.cpp ^
 display_options.cpp ^
 display_configuration_service.cpp ^
 control_panel.cpp ^
+settings_center.cpp ^
+settings_system_information.cpp ^
 elf_validator.cpp ^
 executable_memory.cpp ^
 file_explorer.cpp ^
