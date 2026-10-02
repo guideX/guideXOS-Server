@@ -19,6 +19,7 @@ public sealed partial class ManagedNotes
         Open = 1,
         Close = 2,
         Settings = 3,
+        New = 4,
     }
 
     private const int C152SaveReadyForClose = 0xC15201;
@@ -47,6 +48,11 @@ public sealed partial class ManagedNotes
         result = GuideXosResult.InvalidAction;
         switch (actionId)
         {
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+            case C157NewDocumentActionId:
+                result = RequestNewDocument(host, surface);
+                return true;
+#endif
             case 20u:
                 if (_c152DocumentState.Dirty)
                 {
@@ -171,6 +177,8 @@ public sealed partial class ManagedNotes
         if (!ConfigureC152Decision("Unsaved changes",
                 operation == C152PendingOperation.Open
                     ? "Save changes before opening another file?"
+                    : operation == C152PendingOperation.New
+                        ? "Save changes before creating a new document?"
                     : operation == C152PendingOperation.Settings
                         ? "Save changes before opening Settings?"
                         : "Save changes before closing Notes?",
@@ -181,6 +189,8 @@ public sealed partial class ManagedNotes
         }
         host.TryLog(operation == C152PendingOperation.Open
             ? "C152-OPEN dirty-prompt=active deferred=true result=PASS"u8
+            : operation == C152PendingOperation.New
+                ? "C157-NEW dirty-prompt=active deferred=true result=PASS"u8
             : operation == C152PendingOperation.Close
                 ? "C152-CLOSE dirty-prompt=active veto=true result=PASS"u8
                 : "C152-SETTINGS dirty-prompt=active transition=deferred result=PASS"u8);
@@ -293,7 +303,9 @@ public sealed partial class ManagedNotes
         {
             _c152PendingOperation = C152PendingOperation.None;
             _status = "Unsaved changes kept";
-            host.TryLog(operation == C152PendingOperation.Open
+            host.TryLog(operation == C152PendingOperation.New
+                ? "C157-NEW dirty-decision=Cancel document=preserved=true result=PASS"u8
+                : operation == C152PendingOperation.Open
                 ? "C152-OPEN dirty-decision=Cancel document=preserved=true result=PASS"u8
                 : operation == C152PendingOperation.Close
                     ? "C152-CLOSE dirty-decision=Cancel window=preserved=true result=PASS"u8
@@ -303,6 +315,13 @@ public sealed partial class ManagedNotes
         if (decision == GuideXosDialogResult.Discard)
         {
             _c152PendingOperation = C152PendingOperation.None;
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+            if (operation == C152PendingOperation.New)
+            {
+                host.TryLog("C157-NEW dirty-decision=Discard vfs-write=none result=PASS"u8);
+                return CreateNewDocument(host, surface);
+            }
+#endif
             if (operation == C152PendingOperation.Open)
             {
                 _status = "Open file; current edits stay until a file opens";
@@ -466,6 +485,12 @@ public sealed partial class ManagedNotes
         }
 #else
             return (GuideXosResult)ManagedNotesC152Returns.SettingsReady;
+#endif
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+        if (operation == C152PendingOperation.New)
+        {
+            return CreateNewDocument(host, surface);
+        }
 #endif
         return GuideXosResult.Success;
     }

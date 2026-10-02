@@ -15,16 +15,25 @@ public sealed partial class ManagedNotes
         GuideXosTextArea textArea, GuideXosClipboard clipboard)
     {
         if (menu == null || textArea == null || clipboard == null ||
-            menu.ItemCount != 12)
+            menu.ItemCount != 12 && menu.ItemCount != 13)
         {
             return false;
         }
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+        return menu.SetItemEnabled(5, textArea.CanUndo) &&
+            menu.SetItemEnabled(6, textArea.CanRedo) &&
+            menu.SetItemEnabled(8, textArea.CanCutSelection) &&
+            menu.SetItemEnabled(9, textArea.CanCopySelection) &&
+            menu.SetItemEnabled(10, clipboard.HasText &&
+                textArea.CanPasteText(clipboard.TextSpan));
+#else
         return menu.SetItemEnabled(0, textArea.CanUndo) &&
             menu.SetItemEnabled(1, textArea.CanRedo) &&
             menu.SetItemEnabled(3, textArea.CanCutSelection) &&
             menu.SetItemEnabled(4, textArea.CanCopySelection) &&
             menu.SetItemEnabled(5, clipboard.HasText &&
                 textArea.CanPasteText(clipboard.TextSpan));
+#endif
     }
 
     private bool TryHandleC154Action(GuideXosHost host,

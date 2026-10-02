@@ -16,7 +16,8 @@ param(
     [switch]$C151ManagedOpenFileDialog,
     [switch]$C152ManagedNotesSaveWorkflow,
     [switch]$C155ManagedNotesSession,
-    [switch]$C156ControlModifierShortcuts
+    [switch]$C156ControlModifierShortcuts,
+    [switch]$C157ManagedNotesNewDocument
 )
 
 $ErrorActionPreference = "Stop"
@@ -1196,6 +1197,10 @@ if ($C155ManagedNotesSession) {
 
 if ($C156ControlModifierShortcuts -and -not $C155ManagedNotesSession) {
     throw "C156 proof media requires the C155 managed Notes session fixture."
+}
+if ($C157ManagedNotesNewDocument -and
+    (-not $C155ManagedNotesSession -or -not $C156ControlModifierShortcuts)) {
+    throw "C157 proof media requires the C155 session and C156 modifier fixtures."
 }
 
 $httpsPolicyToken = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_HTTPS_POLICY)) { $null } else { $env:GXOS_NAVIGATOR_HTTPS_POLICY.Trim() }

@@ -21,6 +21,9 @@ public sealed partial class ManagedNotes
             (uint)'c' => C154CopyActionId,
             (uint)'x' => C154CutActionId,
             (uint)'v' => C154PasteActionId,
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+            (uint)'n' => C157NewDocumentActionId,
+#endif
             (uint)'s' when input.Shift => 21u,
             (uint)'s' => 22u,
             (uint)'o' => 20u,
@@ -49,7 +52,7 @@ public sealed partial class ManagedNotes
             return false;
         }
 
-        if (input.Kind == GuideXosInputKind.KeyChar)
+        if (ShouldConsumeC156KeyChar(input))
         {
             // Defensive managed boundary: a split KeyChar carrying Control is
             // consumed once and never reaches TextArea or a filename field.
@@ -67,6 +70,9 @@ public sealed partial class ManagedNotes
             C154PasteActionId => GuideXosClipboard.Shared.HasText &&
                 _textArea.CanPasteText(GuideXosClipboard.Shared.TextSpan),
             20u or 21u or 22u => true,
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+            C157NewDocumentActionId => true,
+#endif
             _ => false,
         };
 
@@ -92,6 +98,9 @@ public sealed partial class ManagedNotes
         return true;
     }
 
+    internal static bool ShouldConsumeC156KeyChar(GuideXosInputEvent input) =>
+        input.Kind == GuideXosInputKind.KeyChar && input.Control;
+
     private void LogC156Shortcut(GuideXosHost host,
         GuideXosInputEvent input, uint actionId, bool enabled, bool succeeded)
     {
@@ -104,6 +113,7 @@ public sealed partial class ManagedNotes
             (uint)'x' => "x"u8,
             (uint)'c' => "c"u8,
             (uint)'v' => "v"u8,
+            (uint)'n' => "n"u8,
             (uint)'s' => "s"u8,
             (uint)'o' => "o"u8,
             _ => "other"u8,
@@ -118,6 +128,9 @@ public sealed partial class ManagedNotes
             20u => "Open"u8,
             21u => "SaveAs"u8,
             22u => "Save"u8,
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+            C157NewDocumentActionId => "New"u8,
+#endif
             _ => "none"u8,
         };
         Span<byte> line = stackalloc byte[160];
@@ -163,11 +176,26 @@ internal static class GuideXosNotesShortcutC156Tests
             Check(Map('z', false) == 0u) &&
             Check(Map('c', true, kind: GuideXosInputKind.KeyChar) == 0u) &&
             Check(Map('\t', true) == 0u) &&
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+            Check(Map('n', true) == ManagedNotes.C157NewDocumentActionId) &&
+            Check(ManagedNotes.ShouldConsumeC156KeyChar(
+                GuideXosInputEvent.ForKeyChar('n', control: true))) &&
+#endif
             Check(Map(' ', true) == 0u);
-        host.TryLog(result && s_cases == 13
+        int expectedCases =
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+            15;
+#else
+            13;
+#endif
+        host.TryLog(result && s_cases == expectedCases
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+            ? "C156-SHORTCUT-ROUTING cases=15 recognized=8 unsupported=consumed repeat=platform ctrl-n=text-leak=false result=PASS"u8
+#else
             ? "C156-SHORTCUT-ROUTING cases=13 recognized=7 unsupported=consumed repeat=platform result=PASS"u8
+#endif
             : "C156-SHORTCUT-ROUTING result=FAIL"u8);
-        return result && s_cases == 13;
+        return result && s_cases == expectedCases;
     }
 
     private static uint Map(char key, bool control, bool shift = false,

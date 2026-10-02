@@ -49,7 +49,12 @@ public static class GuideXosClipboardC154Tests
             ? "C154-HISTORY copy=revision-free cut-paste=single-revision save-point=PASS result=PASS"u8
             : "C154-HISTORY result=FAIL"u8);
         host.TryLog(menu
-            ? "C154-MENU capacity=12 dynamic-enabled=PASS repeated-open=PASS result=PASS"u8
+            ?
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+                "C154-MENU capacity=13 dynamic-enabled=PASS repeated-open=PASS result=PASS"u8
+#else
+                "C154-MENU capacity=12 dynamic-enabled=PASS repeated-open=PASS result=PASS"u8
+#endif
             : "C154-MENU result=FAIL"u8);
         host.TryLog(popupApi && popupHost
             ? "C135-FOCUSED-TESTS menu=PASS host=PASS result=PASS"u8
@@ -380,37 +385,71 @@ public static class GuideXosClipboardC154Tests
         clipboard.Clear();
         int history = area.HistoryCount;
         GuideXosTextRevision revision = area.CurrentRevision;
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+        all &= Check(menu.MaximumItemCount == 13 && menu.ItemCount == 13 &&
+            menu.GetItemText(0) == "New" && menu.GetItemText(1) == "Open" &&
+            menu.GetItemText(2) == "Save" && menu.GetItemText(3) == "Save As..." &&
+            menu.IsSeparator(4) && menu.GetItemText(5) == "Undo" &&
+            menu.GetItemText(6) == "Redo" && menu.IsSeparator(7) &&
+            menu.GetItemText(8) == "Cut" && menu.GetItemText(9) == "Copy" &&
+            menu.GetItemText(10) == "Paste" && menu.IsSeparator(11) &&
+            menu.GetItemText(12) == "Reload");
+#else
         all &= Check(menu.MaximumItemCount == 12 && menu.ItemCount == 12 &&
             menu.GetItemText(0) == "Undo" && menu.GetItemText(1) == "Redo" &&
             menu.IsSeparator(2) && menu.GetItemText(3) == "Cut" &&
             menu.GetItemText(4) == "Copy" && menu.GetItemText(5) == "Paste" &&
             menu.IsSeparator(6) && menu.GetItemText(7) == "Open" &&
             menu.GetItemText(11) == "Reload");
+#endif
         all &= Check(ManagedNotes.RefreshC154MenuStates(menu, area, clipboard) &&
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+            !menu.IsItemEnabled(5) && !menu.IsItemEnabled(6) &&
+            !menu.IsItemEnabled(8) && !menu.IsItemEnabled(9) &&
+            !menu.IsItemEnabled(10));
+#else
             !menu.IsItemEnabled(0) && !menu.IsItemEnabled(1) &&
             !menu.IsItemEnabled(3) && !menu.IsItemEnabled(4) &&
             !menu.IsItemEnabled(5));
+#endif
         all &= Check(area.HistoryCount == history &&
             area.CurrentRevision == revision && !area.HasSelection);
 
         Select(area, 0, 2);
         all &= Check(ManagedNotes.RefreshC154MenuStates(menu, area, clipboard) &&
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+            menu.IsItemEnabled(8) && menu.IsItemEnabled(9) &&
+            !menu.IsItemEnabled(10));
+#else
             menu.IsItemEnabled(3) && menu.IsItemEnabled(4) &&
             !menu.IsItemEnabled(5));
+#endif
         clipboard.TrySetText("Z"u8);
         all &= Check(ManagedNotes.RefreshC154MenuStates(menu, area, clipboard) &&
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+            menu.IsItemEnabled(10));
+#else
             menu.IsItemEnabled(5));
+#endif
 
         GuideXosTextArea full = NewArea(new string('A', 256));
         clipboard.TrySetText("X"u8);
         all &= Check(ManagedNotes.RefreshC154MenuStates(menu, full, clipboard) &&
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+            !menu.IsItemEnabled(10));
+#else
             !menu.IsItemEnabled(5));
+#endif
 
         int callbacks = 0;
         menu.CommandInvoked = _ => ++callbacks;
         all &= Check(menu.Open() == GuideXosPopupMenuResult.Opened &&
             menu.HandlePointerDown(menu.X + 2,
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+                menu.Y + 8 * GuideXosPopupMenu.PopupRowHeight + 1) ==
+#else
                 menu.Y + 3 * GuideXosPopupMenu.PopupRowHeight + 1) ==
+#endif
                 GuideXosPopupMenuResult.Disabled && callbacks == 0 && menu.IsOpen);
         menu.Cancel();
         for (int index = 0; index < 25; index++)
@@ -423,7 +462,13 @@ public static class GuideXosClipboardC154Tests
                 break;
             }
         }
-        all &= Check(menu.ItemCount == 12 && callbacks == 0 && !menu.IsOpen);
+        all &= Check(menu.ItemCount ==
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+            13
+#else
+            12
+#endif
+            && callbacks == 0 && !menu.IsOpen);
         return all;
     }
 
@@ -538,7 +583,28 @@ public static class GuideXosClipboardC154Tests
 
     private static GuideXosPopupMenu NewMenu()
     {
-        GuideXosPopupMenu menu = new(340, 40, 176, 12, 32);
+        GuideXosPopupMenu menu = new(340, 40, 176,
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+            13,
+#else
+            12,
+#endif
+            32);
+#if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
+        menu.TryAddItem("New", 25u);
+        menu.TryAddItem("Open", 20u);
+        menu.TryAddItem("Save", 22u);
+        menu.TryAddItem("Save As...", 21u);
+        menu.TryAddSeparator();
+        menu.TryAddItem("Undo", 0xC15301u);
+        menu.TryAddItem("Redo", 0xC15302u);
+        menu.TryAddSeparator();
+        menu.TryAddItem("Cut", ManagedNotes.C154CutActionId);
+        menu.TryAddItem("Copy", ManagedNotes.C154CopyActionId);
+        menu.TryAddItem("Paste", ManagedNotes.C154PasteActionId);
+        menu.TryAddSeparator();
+        menu.TryAddItem("Reload", 3u);
+#else
         menu.TryAddItem("Undo", 0xC15301u);
         menu.TryAddItem("Redo", 0xC15302u);
         menu.TryAddSeparator();
@@ -551,6 +617,7 @@ public static class GuideXosClipboardC154Tests
         menu.TryAddItem("Save As...", 21u);
         menu.TryAddSeparator();
         menu.TryAddItem("Reload", 3u);
+#endif
         return menu;
     }
 
