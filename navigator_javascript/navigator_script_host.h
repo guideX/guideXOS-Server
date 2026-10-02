@@ -113,6 +113,13 @@ enum class NavigatorScriptSelectorRelation : std::uint8_t {
     GeneralSibling,
 };
 
+enum class NavigatorScriptStatePseudo : std::uint8_t {
+    None = 0u,
+    Checked,
+    Disabled,
+    Focus,
+};
+
 struct NavigatorScriptSimpleSelectorDescriptor {
     bool valid = false;
     bool universal = false;
@@ -133,6 +140,8 @@ struct NavigatorScriptSimpleSelectorDescriptor {
     std::uint8_t attributeNameLength = 0;
     std::uint8_t attributeValueOffset = 0;
     std::uint8_t attributeValueLength = 0;
+    NavigatorScriptStatePseudo statePseudo =
+        NavigatorScriptStatePseudo::None;
 };
 
 struct NavigatorScriptSelectorMemberDescriptor {
@@ -404,6 +413,9 @@ private:
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSimpleSelectorDescriptor& selector,
         const NavigatorScriptSelectorDescriptor& storage) const;
+    bool selectorStatePseudoMatches(
+        const gxos::web::HtmlElementRef& element,
+        NavigatorScriptStatePseudo pseudo) const;
     bool selectorMemberElementMatches(
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSelectorMemberDescriptor& selector,

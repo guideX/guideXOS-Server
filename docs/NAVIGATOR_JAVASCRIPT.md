@@ -5226,3 +5226,119 @@ excluded from the source commit.
 
 `git diff --check` and staged validation pass. One local source commit is
 created for JS51; nothing is pushed.
+
+## JS52: bounded `:checked`, `:disabled`, and `:focus`
+
+JS52 adds three zero-argument state pseudo-classes to the existing shared
+simple-selector matcher. A simple selector may contain at most one of
+`:checked`, `:disabled`, or `:focus`. The accepted order is an optional tag,
+optional ID, class tokens, optional one attribute predicate, then the optional
+state pseudo. `:checked`, `:disabled`, and `:focus` may also stand alone, and
+each supports a `*` prefix; the previously unsupported `*[attribute]` form
+remains rejected. The existing one-relation selectors and one-to-four selector
+lists reuse this same grammar. The complete input remains limited to 256 bytes.
+Reordered suffixes, a second pseudo, functional pseudo syntax, and unknown
+pseudo names fail closed. Pseudo keywords are ASCII-case-insensitive; ID and
+class values keep their existing case-sensitive behavior.
+
+The matcher reads current control and focus state directly. For checkbox and
+radio inputs, `:checked` reads the document's `FormRuntimeControlState::checked`
+bit, including the current radio-group winner and scripted `.checked` writes.
+For options, it compares the option's index in its owning select's
+`DocBlock::selectedOption`. It does not inspect retained `checked` or
+`selected` attributes. Therefore `[checked]` keeps matching after current
+checkbox state is cleared, and an option's retained `[selected]` may disagree
+with current `:checked` after selection changes. Non-checkable inputs and
+arbitrary Elements never match `:checked`.
+
+`:focus` compares the candidate serial with the adapter's canonical
+`activeElementSerial()` projection, which validates the current document focus
+serial and generation and its supported focused control. It does not maintain
+a selector-side focus copy. `document.activeElement` and `:focus` consequently
+use the same owner. Existing focus timing is preserved: focus ownership moves
+before `focus`/`focusin` handlers run; the previous owner remains current while
+its `blur`/`focusout` handlers run; clearing occurs after those handlers; and
+the existing deferred focus redirect drains after the active transition.
+
+`:disabled` reflects the current Navigator runtime projection for supported
+form controls: supported input types (text, password, search, email, URL,
+number, checkbox, radio, button, submit, and reset), `<button>`, `<textarea>`,
+`<select>`, disabled `<option>` data in the owning select block, and
+`<fieldset>`. Inputs/buttons/textareas/selects use the document's
+`FormRuntimeControlState::disabled`; options use the authoritative
+`FormOption::disabled` field; a fieldset uses its existing parsed
+`FormControlMetadata::disabled`. Unsupported and hidden input types do not
+match. Existing parser fieldset inheritance is observed for child controls;
+JS52 does not add or broaden that parser model. A `<div disabled>` can match
+`[disabled]` but not `:disabled`. JS49's deferred disabled-attribute writes
+remain no-ops and do not change pseudo state. This is the runtime's bounded
+applicability model, not a claim of complete browser CSS disabled semantics.
+
+The matcher composes each state condition with the existing tag, ID, all class
+tokens, and optional retained-attribute predicate. `querySelector()`,
+`querySelectorAll()`, scoped queries, `matches()`, `closest()`, one-relation
+selectors, and selector-list union/deduplication all use that matcher. Held
+selector collections remain live because each read rescans current Elements
+and state. State matching is read-only and checks current Element membership
+before accessing runtime state, so stale generations fail closed even when a
+replacement document reuses a serial.
+
+The descriptor stores only one `NavigatorScriptStatePseudo` enum value per
+simple selector; pseudo names are not copied into the bounded descriptor text.
+On the validated 64-bit toolchain the simple descriptor is 32 bytes, the
+complete four-member selector-list descriptor is 524 bytes, and a collection
+record is 544 bytes. Those sizes are unchanged from JS51: the enum occupies
+existing simple-descriptor padding, so the 128-record collection registry
+remains 69,632 bytes with zero net growth.
+
+JS52 does not add `:enabled`, `:hover`, `:active`, `:visited`, `:link`,
+`:focus-within`, `:focus-visible`, structural or functional pseudo-classes,
+pseudo-elements, multiple state pseudos per simple selector, or additional
+combinators. Unknown names fail the whole selector or selector list.
+
+The focused suite is `tests/navigator_javascript_js52_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js52.ps1`. It covers exact parser bounds,
+keyword casing and rejection, checkbox default/current divergence, scripted
+and authentic click state changes, radio exclusivity and held collections,
+option selection versus its retained attribute, non-applicable controls,
+focus acquisition/transfer/blur/redirect and event timing, disabled controls
+and fieldset projection, all query APIs and selector forms, nested event
+metadata, purity, 1,000 checked writes, 300 held-collection reads, and stale
+serial reuse for all three pseudo states. The focused suite passes **319/319
+checks**, and its strict `-Wall -Wextra -Werror -pedantic` parser/adapter/runtime
+lane passes.
+
+The production hosted fixture is `navigator-smoke/javascript-js52.html` and
+adds six checks to `navigator.smoke`: current checked divergence, programmatic
+focus and event timing, disabled-attribute distinction, option/held-list
+behavior, and nested activation with click-time focus, nested state visibility,
+and Event metadata. All six pass in the final hosted run. The aggregate reports
+**565 passed / 7 failed / 572 total**. Its seven failures are the existing CSS
+checks for phases 3C and 3G, phase 6A, three phase 6B checks, and phase 6C; it
+adds no JS52 or other unexplained failure.
+
+The complete JavaScript matrix passes **50/50 lanes** across lexer, parser,
+runtime, and JS6–JS52. The focused regression counts include JS24 214/214,
+JS25 219/219, JS27 304/304, JS30 137/137, JS31 258/258, JS32 273/273,
+JS33 133/133, JS36 114/114, JS37 180/180, JS38 152/152, JS39 218/218,
+JS40 155/155, JS41 220/220, JS42 235/235, JS43 277/277, JS44 183/183,
+JS45 184/184, JS46 220/220, JS47 137/137, JS48 136/136, JS49 150/150,
+JS50 313/313, JS51 278/278, and JS52 319/319. The strict
+`-Wall -Wextra -Werror -pedantic` parser/adapter/runtime lane passes. The
+production `build.bat` build links `guideXOSServer.exe`.
+
+The `build-kernel.bat` attempt still stops in the PacMan Native ELF link on
+unresolved `pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)`. The direct
+`mingw32-make ARCH=amd64 EXTRA_CFLAGS=` attempt from `kernel/` still stops at
+`mbedtls_check_config.h:51` (partial ECC curves acceleration) and `:64`
+(missing ECDHE-RSA prerequisites). JS52 does not modify PacMan or Mbed TLS.
+No fresh kernel was produced, so no QEMU proof is claimed.
+
+Before the kernel attempts, the SHA-256/length audit covered 308 files totaling
+130,758,816 bytes across `ESP/`, `out/wallpaper-pack/`, `Apps/PacMan/`,
+`build/pacman-native/amd64/`, `kernel/build/`, and both bootloader Release
+folders. The wrapper regenerated `game.o`, `main.o`, and `renderer.o`; each was
+restored from its pre-attempt copy. Final comparison found zero changed files,
+zero missing files, and zero extras. Generated outputs are excluded from the
+JS52 source commit.

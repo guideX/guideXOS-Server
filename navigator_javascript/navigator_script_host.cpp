@@ -449,7 +449,8 @@ bool isSelectorAttributeValueCharacter(char character)
 
 bool parseAttributePredicate(SourceView source, std::size_t open,
     std::size_t end, NavigatorScriptSelectorDescriptor& storage,
-    NavigatorScriptSimpleSelectorDescriptor& selector)
+    NavigatorScriptSimpleSelectorDescriptor& selector,
+    std::size_t& afterPredicate)
 {
     if (open >= end || source.data[open] != '[' ||
         selector.hasAttributePredicate) return false;
@@ -472,7 +473,7 @@ bool parseAttributePredicate(SourceView source, std::size_t open,
             break;
         }
     }
-    if (quote != '\0' || close == end || close + 1u != end) return false;
+    if (quote != '\0' || close == end) return false;
 
     std::size_t equals = close;
     char valueDelimiter = '\0';
@@ -500,6 +501,7 @@ bool parseAttributePredicate(SourceView source, std::size_t open,
         return false;
 
     selector.hasAttributePredicate = true;
+    afterPredicate = close + 1u;
     if (equals == close) return true;
 
     std::size_t valueBegin = equals + 1u;
@@ -531,7 +533,39 @@ bool parseAttributePredicate(SourceView source, std::size_t open,
             selector.attributeValueOffset, selector.attributeValueLength))
         return false;
     selector.attributeValuePresent = true;
+    afterPredicate = close + 1u;
     return true;
+}
+
+bool parseStatePseudo(SourceView source, std::size_t colon,
+    std::size_t end, NavigatorScriptStatePseudo& pseudo)
+{
+    if (colon >= end || source.data[colon] != ':' || colon + 1u >= end)
+        return false;
+    const std::size_t length = end - colon - 1u;
+    const char* name = source.data + colon + 1u;
+    const auto equalsAsciiCaseInsensitive = [name, length](const char* expected) {
+        const std::size_t expectedLength = std::char_traits<char>::length(expected);
+        if (length != expectedLength) return false;
+        for (std::size_t index = 0u; index < length; ++index) {
+            if (lowerAscii(static_cast<unsigned char>(name[index])) !=
+                static_cast<unsigned char>(expected[index])) return false;
+        }
+        return true;
+    };
+    if (equalsAsciiCaseInsensitive("checked")) {
+        pseudo = NavigatorScriptStatePseudo::Checked;
+        return true;
+    }
+    if (equalsAsciiCaseInsensitive("disabled")) {
+        pseudo = NavigatorScriptStatePseudo::Disabled;
+        return true;
+    }
+    if (equalsAsciiCaseInsensitive("focus")) {
+        pseudo = NavigatorScriptStatePseudo::Focus;
+        return true;
+    }
+    return false;
 }
 
 bool parseSimpleSelector(SourceView source, std::size_t begin,
@@ -540,18 +574,18 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
 {
     if (begin == end) return false;
 
+    std::size_t position = begin;
     const char first = source.data[begin];
     if (first == '*') {
-        if (end != begin + 1u) return false;
-        selector.valid = true;
         selector.universal = true;
-        return true;
-    }
-
-    std::size_t position = begin;
-    if (first != '#' && first != '.' && first != '[') {
+        ++position;
+        // Universal selectors remain standalone except for one trailing
+        // state pseudo. Universal-plus-attribute was unsupported in JS50.
+        if (position < end && source.data[position] != ':') return false;
+    } else if (first != '#' && first != '.' && first != '[' && first != ':') {
         while (position < end && source.data[position] != '#' &&
-            source.data[position] != '.' && source.data[position] != '[')
+            source.data[position] != '.' && source.data[position] != '[' &&
+            source.data[position] != ':')
             ++position;
         if (!isSelectorTagName(source, begin, position) ||
             !copySelectorPart(storage, source, begin, position,
@@ -562,7 +596,8 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
         const std::size_t idBegin = position + 1u;
         std::size_t idEnd = idBegin;
         while (idEnd < end && source.data[idEnd] != '#' &&
-            source.data[idEnd] != '.' && source.data[idEnd] != '[') ++idEnd;
+            source.data[idEnd] != '.' && source.data[idEnd] != '[' &&
+            source.data[idEnd] != ':') ++idEnd;
         if (!isSelectorIdentifier(source, idBegin, idEnd) ||
             !copySelectorPart(storage, source, idBegin, idEnd,
                 selector.idOffset, selector.idLength)) return false;
@@ -571,21 +606,31 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
 
     if (position < end && source.data[position] == '.') {
         std::size_t classEnd = position + 1u;
-        while (classEnd < end && source.data[classEnd] != '[') ++classEnd;
+        while (classEnd < end && source.data[classEnd] != '[' &&
+            source.data[classEnd] != ':') ++classEnd;
         if (!parseCompoundClassTokens(source, position + 1u, classEnd, storage,
                 selector)) return false;
         position = classEnd;
     }
 
     if (position < end && source.data[position] == '[') {
-        if (!parseAttributePredicate(source, position, end, storage, selector))
+        std::size_t afterPredicate = position;
+        if (!parseAttributePredicate(source, position, end, storage, selector,
+                afterPredicate))
+            return false;
+        position = afterPredicate;
+    }
+
+    if (position < end && source.data[position] == ':') {
+        if (!parseStatePseudo(source, position, end, selector.statePseudo))
             return false;
         position = end;
     }
 
     if (position != end || (selector.tagLength == 0u &&
             selector.idLength == 0u && selector.classTokenCount == 0u &&
-            !selector.hasAttributePredicate))
+            !selector.hasAttributePredicate && !selector.universal &&
+            selector.statePseudo == NavigatorScriptStatePseudo::None))
         return false;
     selector.valid = true;
     return true;
@@ -3061,6 +3106,7 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
             leftSimple.classTokenCount != rightSimple.classTokenCount ||
             leftSimple.hasAttributePredicate !=
                 rightSimple.hasAttributePredicate ||
+            leftSimple.statePseudo != rightSimple.statePseudo ||
             leftSimple.attributeValuePresent !=
                 rightSimple.attributeValuePresent ||
             leftSimple.classTokenCount > kNavigatorScriptMaxClassQueryTokens ||
@@ -3122,9 +3168,8 @@ bool NavigatorScriptHostAdapter::selectorSimpleElementMatches(
 {
     if (!selector.valid || element.serial == 0u || element.tagName.empty())
         return false;
-    if (selector.universal)
-        return document_ != nullptr &&
-            findElement(element.serial) == &element;
+    if (document_ == nullptr || findElement(element.serial) != &element)
+        return false;
 
     const SourceView tag = selectorPart(storage, selector.tagOffset,
         selector.tagLength);
@@ -3155,8 +3200,72 @@ bool NavigatorScriptHostAdapter::selectorSimpleElementMatches(
                 selectorPart(storage, selector.attributeValueOffset,
                     selector.attributeValueLength))) return false;
     }
+    if (selector.statePseudo != NavigatorScriptStatePseudo::None &&
+        !selectorStatePseudoMatches(element, selector.statePseudo))
+        return false;
     return selector.tagLength != 0u || selector.idLength != 0u ||
-        selector.classTokenCount != 0u || selector.hasAttributePredicate;
+        selector.classTokenCount != 0u || selector.hasAttributePredicate ||
+        selector.universal ||
+        selector.statePseudo != NavigatorScriptStatePseudo::None;
+}
+
+bool NavigatorScriptHostAdapter::selectorStatePseudoMatches(
+    const gxos::web::HtmlElementRef& element,
+    NavigatorScriptStatePseudo pseudo) const
+{
+    if (document_ == nullptr || element.serial == 0u ||
+        findElement(element.serial) != &element) return false;
+
+    switch (pseudo) {
+    case NavigatorScriptStatePseudo::None:
+        return true;
+    case NavigatorScriptStatePseudo::Checked: {
+        if (element.tagName == "input" &&
+            isCheckableFormElement(element.serial)) {
+            const gxos::web::FormRuntimeControlState* state =
+                formRuntimeState(element.serial);
+            return state != nullptr && state->checked;
+        }
+        if (element.tagName == "option") {
+            HostInstanceId selectSerial = 0u;
+            std::size_t optionIndex = 0u;
+            if (!optionIndexFor(element.serial, selectSerial, optionIndex))
+                return false;
+            const gxos::web::DocBlock* select =
+                formControlBlock(selectSerial);
+            return select != nullptr && select->selectedOption >= 0 &&
+                static_cast<std::size_t>(select->selectedOption) == optionIndex;
+        }
+        return false;
+    }
+    case NavigatorScriptStatePseudo::Disabled: {
+        const gxos::web::FormControlMetadata& metadata = element.formControl;
+        if (element.tagName == "option") {
+            HostInstanceId selectSerial = 0u;
+            std::size_t optionIndex = 0u;
+            if (!optionIndexFor(element.serial, selectSerial, optionIndex))
+                return false;
+            const gxos::web::DocBlock* select =
+                formControlBlock(selectSerial);
+            return select != nullptr && optionIndex < select->options.size() &&
+                select->options[optionIndex].disabled;
+        }
+        if (!metadata.metadataComplete) return false;
+        if (element.tagName == "fieldset") return metadata.disabled;
+        const bool supportedType = element.tagName == "input" ||
+            element.tagName == "button" || element.tagName == "textarea" ||
+            element.tagName == "select";
+        if (!supportedType || !metadata.supported) return false;
+        const gxos::web::FormRuntimeControlState* state =
+            formRuntimeState(element.serial);
+        return state != nullptr && state->disabled;
+    }
+    case NavigatorScriptStatePseudo::Focus:
+        // activeElementSerial() is the adapter's canonical projection of the
+        // generation-checked focused serial and supported focused control.
+        return activeElementSerial() == element.serial;
+    }
+    return false;
 }
 
 bool NavigatorScriptHostAdapter::selectorMemberElementMatches(

@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS52</title></head>
+<body>
+<h1>Navigator JavaScript JS52</h1>
+<div id="panel" class="panel">
+  <form id="form" class="form">
+    <input id="agree" class="field checkbox" type="checkbox" checked>
+    <input id="radio-a" class="field radio" type="radio" name="choice" checked>
+    <input id="radio-b" class="field radio" type="radio" name="choice">
+    <input id="name" class="field name" type="text" value="initial">
+    <input id="name-two" class="field name" type="text">
+    <input id="name-three" class="field name" type="text">
+    <input id="scripted" class="field scripted" type="checkbox">
+    <input id="disabled-input" type="text" disabled>
+    <button id="save" class="action" disabled>Save</button>
+    <button id="run" class="action" type="button">Run</button>
+    <div id="fake-disabled" disabled>Not a form control</div>
+    <div id="fake-checked" checked>Not a checkable control</div>
+    <div id="marker" class="marker"></div>
+    <button id="after-marker" class="action" disabled>After marker</button>
+    <fieldset id="disabled-group" disabled>
+      <input id="inherited-disabled" type="text">
+    </fieldset>
+    <textarea id="notes" disabled></textarea>
+    <select id="choice-select">
+      <option id="option-a" selected>Alpha</option>
+      <option id="option-b">Beta</option>
+      <option id="disabled-option" disabled>Unavailable</option>
+    </select>
+    <select id="disabled-select" disabled>
+      <option id="disabled-select-option">Disabled select option</option>
+    </select>
+  </form>
+</div>
+<p id="js52-state">initial</p>
+<script>
+var js52State = document.getElementById("js52-state");
+var agree = document.getElementById("agree");
+var radioA = document.getElementById("radio-a");
+var radioB = document.getElementById("radio-b");
+var nameField = document.getElementById("name");
+var save = document.getElementById("save");
+var run = document.getElementById("run");
+var optionA = document.getElementById("option-a");
+var optionB = document.getElementById("option-b");
+var checkedInitial = agree.matches(":checked") && agree.matches("[checked]");
+var checkedDivergence = false;
+var focusReady = false;
+var disabledReady = save.matches(":disabled") &&
+  document.getElementById("fake-disabled").matches("[disabled]") &&
+  !document.getElementById("fake-disabled").matches(":disabled");
+var js52Event = false;
+var js52Nested = false;
+var js52Metadata = false;
+var js52Held = document.querySelectorAll(":checked, :focus");
+agree.checked = false;
+checkedDivergence = agree.matches("[checked]") && !agree.matches(":checked");
+agree.checked = true;
+nameField.addEventListener("focus", function (event) {
+  focusReady = nameField.matches(":focus") &&
+    event.target === nameField && event.relatedTarget === null;
+});
+run.addEventListener("click", function (event) {
+  var targetFocused = event.target.matches(".action:focus") &&
+    document.activeElement === event.target;
+  agree.click();
+  js52Nested = targetFocused && event.target === run &&
+    agree.matches(":checked") === agree.checked;
+  js52Metadata = event.currentTarget === run && event.eventPhase === 2 &&
+    event.relatedTarget === null && event.defaultPrevented === false;
+  js52Event = event.target.matches("button:disabled, .action") &&
+    document.querySelectorAll(":checked, :focus").length >= 2;
+  js52Snapshot("event");
+});
+nameField.focus();
+function js52Snapshot(label) {
+  var focusState = ":focus=" +
+    (document.querySelector(":focus") === nameField) +
+    ":focusEvent=" + focusReady;
+  if (label === "event") {
+    js52State.textContent = label + ":checked=" + checkedInitial +
+      ":divergence=" + checkedDivergence + ":disabled=" + disabledReady +
+      ":option=" + optionA.matches(":checked") +
+      ":held=" + (js52Held.length >= 2) + ":event=" + js52Event +
+      ":nested=" + js52Nested + ":metadata=" + js52Metadata + focusState;
+  } else {
+    js52State.textContent = label + ":checked=" + checkedInitial +
+      ":divergence=" + checkedDivergence + focusState +
+      ":disabled=" + disabledReady + ":option=" +
+      optionA.matches(":checked") + ":held=" + (js52Held.length >= 2) +
+      ":event=" + js52Event + ":nested=" + js52Nested +
+      ":metadata=" + js52Metadata;
+  }
+}
+js52Snapshot("initial");
+</script>
+</body>
+</html>

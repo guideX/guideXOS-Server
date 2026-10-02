@@ -126,7 +126,7 @@ var invalidEmptyMembers =
 var invalidMemberInvalidatesWholeList =
   document.querySelector("button, [type^=text]") === null &&
   document.querySelectorAll("button, [type^=text]").length === 0 &&
-  !early.matches("button, :focus") &&
+  !early.matches("button, :hover") &&
   early.closest("button, *.foo") === null &&
   document.querySelector(".panel > .group > button, input") === null;
 var mixedSimpleAndRelation =

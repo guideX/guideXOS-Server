@@ -4294,6 +4294,49 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js51AfterClick, 1100) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js52FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js52.html";
+    const bool js52Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js52FixtureUrl);
+    const std::string js52InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS52 hosted state-pseudo fixture loads and evaluates",
+        js52Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js52FixtureUrl &&
+        contains(js52InitialText, "Navigator JavaScript JS52") &&
+        contains(js52InitialText,
+            "initial:checked=true:divergence=true:focus=true:focusEvent=true:disabled=true:option=true:held=true:event=false:nested=false:metadata=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js52Loaded) + ",text=" +
+        summarizeText(js52InitialText, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS52 hosted checked pseudo observes current checkbox state",
+        js52Loaded && contains(js52InitialText, ":checked=true:divergence=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "retained [checked] remains true while current checked is temporarily false, then matches again after current state returns true");
+    add("JS52 hosted focus pseudo agrees with activeElement and focus event",
+        js52Loaded && contains(js52InitialText, ":focus=true:focusEvent=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "programmatic focus is visible in the focus handler, :focus, and document.activeElement in the same turn");
+    add("JS52 hosted disabled pseudo rejects arbitrary disabled attributes",
+        js52Loaded && contains(js52InitialText, ":disabled=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "the disabled button matches current disabled state while a disabled attribute on a div remains attribute-only");
+    add("JS52 hosted option checked state and selector-list collection pass",
+        js52Loaded && contains(js52InitialText, ":option=true:held=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "selected option state participates in :checked and the held :checked, :focus union collection is readable");
+    const bool js52RunClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("run");
+    const std::string js52AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS52 hosted nested activation observes state pseudos and Event metadata",
+        js52RunClick && contains(js52AfterClick,
+            "event:checked=true:divergence=true:disabled=true:option=true:held=true:event=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js52RunClick) + ",text=" +
+        summarizeText(js52AfterClick, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();
