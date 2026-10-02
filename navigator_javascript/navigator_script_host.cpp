@@ -2284,29 +2284,44 @@ bool NavigatorScriptHostAdapter::resolveElementAttribute(
     const auto isInputOrButton = [&]() {
         return tag == "input" || tag == "button";
     };
+    const bool usesSpecializedProjection =
+        (attributeNameEquals(name, "value") && isInputOrButton()) ||
+        attributeNameEquals(name, "id") ||
+        attributeNameEquals(name, "class") ||
+        attributeNameEquals(name, "style");
+    gxos::web::HtmlRetainedAttributeView retained;
+    if (!usesSpecializedProjection &&
+        gxos::web::findRetainedHtmlAttribute(*document_, *element,
+            name.data, name.length, retained)) {
+        value = SourceView(retained.value, retained.valueLength);
+        return true;
+    }
 
     if (attributeNameEquals(name, "id")) {
-        if (!has(gxos::web::HtmlAttributeIdPresent)) return false;
-        setValue(element->id);
-        return true;
+        if (has(gxos::web::HtmlAttributeIdPresent)) {
+            setValue(element->id);
+            return true;
+        }
     }
     if (attributeNameEquals(name, "class")) {
-        if (!has(gxos::web::HtmlAttributeClassPresent)) return false;
-        setValue(element->className);
-        return true;
+        if (has(gxos::web::HtmlAttributeClassPresent)) {
+            setValue(element->className);
+            return true;
+        }
     }
     if (attributeNameEquals(name, "style")) {
-        if (!has(gxos::web::HtmlAttributeStylePresent)) return false;
-        setValue(element->inlineStyle);
-        return true;
+        if (has(gxos::web::HtmlAttributeStylePresent)) {
+            setValue(element->inlineStyle);
+            return true;
+        }
     }
     if (attributeNameEquals(name, "name")) {
-        if (!has(gxos::web::HtmlAttributeNamePresent)) return false;
-        if (isInputOrButton() || tag == "textarea" || tag == "select") {
+        if (has(gxos::web::HtmlAttributeNamePresent) &&
+            (isInputOrButton() || tag == "textarea" || tag == "select")) {
             setValue(element->formControl.name);
             return true;
         }
-        if (tag == "form") {
+        if (has(gxos::web::HtmlAttributeNamePresent) && tag == "form") {
             const std::size_t count = std::min(limits_.maxDocumentNodes,
                 document_->formContainers.size());
             for (std::size_t index = 0u; index < count; ++index) {
@@ -2318,50 +2333,60 @@ bool NavigatorScriptHostAdapter::resolveElementAttribute(
                 return true;
             }
         }
-        return false;
     }
     if (attributeNameEquals(name, "type")) {
-        if (!isInputOrButton() ||
-            !has(gxos::web::HtmlAttributeTypePresent)) return false;
-        setValue(element->formControl.inputType);
-        return true;
+        if (isInputOrButton() &&
+            has(gxos::web::HtmlAttributeTypePresent)) {
+            setValue(element->formControl.inputType);
+            return true;
+        }
     }
     if (attributeNameEquals(name, "value")) {
-        if (!has(gxos::web::HtmlAttributeValuePresent)) return false;
-        if (tag == "option") {
+        if (has(gxos::web::HtmlAttributeValuePresent) && tag == "option") {
             setValue(element->formControl.value);
             return true;
         }
-        if (isInputOrButton()) {
+        if (has(gxos::web::HtmlAttributeValuePresent) && isInputOrButton()) {
             const gxos::web::FormRuntimeControlState* state =
                 formRuntimeState(serial);
             setValue(state == nullptr ? element->formControl.value :
                 state->defaultValue);
             return true;
         }
-        return false;
     }
     if (attributeNameEquals(name, "disabled")) {
         const bool supportedTag = tag == "input" || tag == "button" ||
             tag == "textarea" || tag == "select" || tag == "option" ||
             tag == "fieldset";
-        if (!supportedTag ||
-            !has(gxos::web::HtmlAttributeDisabledPresent)) return false;
-        value = SourceView("", 0u);
-        return true;
+        if (supportedTag &&
+            has(gxos::web::HtmlAttributeDisabledPresent)) {
+            value = SourceView("", 0u);
+            return true;
+        }
     }
     if (attributeNameEquals(name, "checked")) {
-        if (tag != "input" ||
+        if (tag == "input" &&
             (element->formControl.inputType != "checkbox" &&
-                element->formControl.inputType != "radio") ||
-            !has(gxos::web::HtmlAttributeCheckedPresent)) return false;
-        value = SourceView("", 0u);
-        return true;
+                element->formControl.inputType != "radio")) {
+            // This branch is deliberately left to the generic store for
+            // unsupported input types.
+        } else if (tag == "input" &&
+            has(gxos::web::HtmlAttributeCheckedPresent)) {
+            value = SourceView("", 0u);
+            return true;
+        }
     }
     if (attributeNameEquals(name, "selected")) {
-        if (tag != "option" ||
-            !has(gxos::web::HtmlAttributeSelectedPresent)) return false;
-        value = SourceView("", 0u);
+        if (tag == "option" &&
+            has(gxos::web::HtmlAttributeSelectedPresent)) {
+            value = SourceView("", 0u);
+            return true;
+        }
+    }
+    if (!usesSpecializedProjection &&
+        gxos::web::findRetainedHtmlAttribute(*document_, *element,
+            name.data, name.length, retained)) {
+        value = SourceView(retained.value, retained.valueLength);
         return true;
     }
     return false;

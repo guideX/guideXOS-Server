@@ -4124,6 +4124,47 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "query and form collections share canonical Elements while nested dispatch preserves Event fields");
 
+    const std::string js48FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js48.html";
+    const bool js48Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js48FixtureUrl);
+    const std::string js48InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS48 hosted fixture reads bounded generic and ARIA attributes",
+        js48Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js48FixtureUrl &&
+        contains(js48InitialText, "Navigator JavaScript JS48") &&
+        contains(js48InitialText,
+            "initial:core=true:resource=true:current=true:identity=true:event=false:nested=false:metadata=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js48Loaded) + ",text=" +
+        summarizeText(js48InitialText, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js48SaveClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("save");
+    const std::string js48AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS48 hosted authentic click reads event.target data-action",
+        js48SaveClick && contains(js48AfterClick,
+            "event:core=true:resource=true:current=true:identity=true:event=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js48SaveClick) + ",text=" +
+        summarizeText(js48AfterClick, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS48 hosted href and src remain retained markup values",
+        js48SaveClick && contains(js48AfterClick, ":resource=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "anchor href/rel and image src/alt are inspected without navigation or resource loading");
+    add("JS48 hosted current value stays separate from value attribute",
+        js48SaveClick && contains(js48AfterClick, ":current=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "editing input.value leaves getAttribute(\"value\") at the default markup value");
+    add("JS48 hosted nested dispatch preserves Event metadata and identity",
+        js48SaveClick && contains(js48AfterClick,
+            ":identity=true:event=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "canonical Elements and target/currentTarget/phase/relatedTarget/defaultPrevented survive nested attribute reads");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

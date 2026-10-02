@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+<body>
+<h1>Navigator JavaScript JS48</h1>
+<form id="owner" name="profileForm" data-form-kind="settings">
+  <div id="panel" class="panel active" data-mode="Compact"
+       aria-label="Main Panel" title="Settings"
+       data-label="Tom &amp; Jerry" data-empty="" custom-flag
+       data-single='single-quoted' data-unquoted=plain
+       data-duplicate="first" data-duplicate="second">
+    <a id="docs" href="/docs" rel="next" data-action="docs">Docs</a>
+    <img id="logo" src="/logo.png" alt="GuideXOS">
+    <button id="save" class="Action Primary" data-action="save"
+            type="button" value="button-seed" disabled>Save</button>
+    <button id="other" type="button" data-action="other">Other</button>
+    <input id="name" name="UserName" type="TEXT" value="initial">
+    <input id="agree" type="checkbox" checked>
+    <select id="choice" name="choice">
+      <option id="first-option" value="One" selected>One</option>
+    </select>
+  </div>
+</form>
+<p id="js48-state">initial</p>
+<script>
+var panel = document.querySelector("#panel");
+var docs = document.querySelector("#docs");
+var logo = document.querySelector("#logo");
+var save = document.querySelector("#save");
+var other = document.querySelector("#other");
+var name = document.querySelector("#name");
+var state = document.querySelector("#js48-state");
+var js48Event = false;
+var js48Nested = false;
+var js48Metadata = false;
+name.value = "changed";
+
+function js48Snapshot(label) {
+  var core = panel.getAttribute("data-mode") === "Compact" &&
+    panel.getAttribute("aria-label") === "Main Panel" &&
+    panel.getAttribute("data-label") === "Tom & Jerry" &&
+    panel.hasAttribute("data-mode") && !panel.hasAttribute("missing");
+  var resource = docs.getAttribute("href") === "/docs" &&
+    docs.getAttribute("rel") === "next" &&
+    logo.getAttribute("src") === "/logo.png" &&
+    logo.getAttribute("alt") === "GuideXOS";
+  var current = name.value === "changed" &&
+    name.getAttribute("value") === "initial";
+  var identity = document.getElementById(save.getAttribute("id")) === save &&
+    document.querySelector("button#save.Action.Primary") === save;
+  state.textContent = label + ":core=" + core + ":resource=" + resource +
+    ":current=" + current + ":identity=" + identity +
+    ":event=" + js48Event + ":nested=" + js48Nested +
+    ":metadata=" + js48Metadata;
+}
+
+other.addEventListener("click", function(event) {
+  js48Nested = event.target.getAttribute("data-action") === "other" &&
+    event.currentTarget === other && event.relatedTarget === null;
+});
+save.addEventListener("click", function(event) {
+  event.preventDefault();
+  js48Event = event.target.getAttribute("data-action") === "save" &&
+    event.target.hasAttribute("data-action");
+  other.click();
+});
+panel.addEventListener("click", function(event) {
+  if (event.target === save) {
+    var target = event.target;
+    var currentTarget = event.currentTarget;
+    var phase = event.eventPhase;
+    var relatedTarget = event.relatedTarget;
+    js48Snapshot("event");
+    js48Metadata = event.target === target &&
+      event.currentTarget === currentTarget && currentTarget === panel &&
+      event.eventPhase === phase && phase === 3 &&
+      event.relatedTarget === relatedTarget && relatedTarget === null &&
+      event.defaultPrevented === true;
+    js48Snapshot("event");
+  }
+});
+js48Snapshot("initial");
+</script>
+</body>
+</html>

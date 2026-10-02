@@ -4783,3 +4783,116 @@ and `data-*` attributes remain unavailable because the parser discards them.
 The shared resolver reads the current document's structural/form metadata and
 returns borrowed views only for synchronous runtime copying. No JS-side
 attribute map or mutation API was added.
+
+## JS48: bounded parser-owned generic attributes
+
+JS48 extends the HTML parser's retained attribute model so the existing
+`getAttribute(name)` and `hasAttribute(name)` methods can inspect arbitrary
+attributes on structurally retained Elements. This includes `data-*`,
+`aria-*`, `href`, `src`, `alt`, `title`, `rel`, and custom names such as
+`custom-thing`. There is still no JavaScript-side attribute dictionary and no
+generic attribute mutation API.
+
+At opening-tag handling, the parser scans attribute syntax into a fixed
+scratch array of name/value views. When it registers a structural Element, it
+copies retained values into the owning `WebDocument`'s packed byte pool. Each
+`HtmlElementRef` stores only a byte offset and a retained-record count; its
+records contain a one-byte name length, a two-byte value length, a lowercase
+name, and the value bytes. Returned runtime strings copy from this document
+storage, so values outlive parser scratch and remain safe across later reads.
+The document pool is generation-local and discarded with its document.
+
+The fixed retention bounds are:
+
+| Bound | Limit |
+| --- | ---: |
+| Source attributes considered per Element | 16 |
+| Retained attribute-name bytes | 64 |
+| Retained attribute-value bytes | 256 |
+| Retained records per document | 2,048 |
+| Encoded name/value/header bytes per document | 65,535 |
+| Structural Elements per document | 1,024, unchanged |
+
+The 65,535-byte aggregate limit includes each record's three-byte header.
+`HtmlElementRef` remains 440 bytes on the validated 64-bit build because the
+new offset/count fields fit existing alignment padding. `WebDocument` grows by
+48 bytes for the pool vector and counters. Its packed pool reserves at most
+65,535 additional bytes after the first retained attribute; there is no
+per-attribute heap allocation or per-Element container.
+
+HTML attribute names are retained only when they fit JS47's query grammar,
+`[A-Za-z][A-Za-z0-9:_-]*`, and are looked up ASCII case-insensitively. The
+first exact duplicate wins, including duplicate `id`, `class`, and `data-*`
+attributes. The parser's specialized extractor and generic retention use that
+same first occurrence. Values preserve case. Generic values decode the
+parser's supported entities; the surrounding quotes are not retained.
+Present-empty and valueless attributes return `""` and remain present.
+Boolean `checked`, `selected`, and `disabled` values follow JS47's empty-string
+convention. The legacy `id`, `class`, and inline `style` projections keep their
+existing raw-value behavior.
+
+Overflow is deterministic and non-destructive. Only the first 16 source
+attributes on an Element are considered. An overlong or invalid name and a
+raw or decoded value longer than 256 bytes are dropped whole, never truncated
+into a potentially ambiguous attribute. If the document record or byte budget
+fills, later generic records are dropped while structural parsing continues;
+already-retained records and neighboring Elements remain intact. Specialized
+JS47 fields remain a fallback when a generic record was omitted, so legacy
+reads such as `id`, `class`, `style`, and supported form metadata continue to
+work under generic-storage pressure. Drop counters on `WebDocument` record
+per-Element, name, value, duplicate, and document-budget drops.
+
+The shared resolver consults the retained document model first for ordinary
+attributes. `id`, `class`, and `style` continue to use their established
+specialized projections for JS47 compatibility. Specialized `name`, `type`,
+boolean, and form-value reads keep their existing behavior. For input/button
+`value`, the resolver continues to read the form runtime's default-value
+state, which can be changed through the existing `defaultValue` property.
+Editing current `.value` does not change that state; checked and selected
+reads remain parse-time presence and do not alias current properties. These
+compatibility paths are the only places where the legacy projection takes
+precedence over a retained generic record.
+
+JS48 adds no `setAttribute()`, `removeAttribute()`, `toggleAttribute()`,
+`attributes`, `NamedNodeMap`, `Attr`, `dataset`, `classList`, or attribute
+selectors. Generic attribute mutation remains unsupported. Missing and
+unsupported queries retain JS47's `null`/`false` results, malformed and
+over-64-byte query names still fail closed, and stale receivers cannot read
+attributes from a later document even when structural serials are reused.
+
+The JS48 focused suite passes **136/136 checks** and its bare-metal
+warning-as-error compile and strict parser/adapter/runtime syntax lane pass.
+The complete JavaScript matrix passes **46/46 lanes**: lexer, parser, runtime,
+and JS6–JS48. Focused JS36–JS47 regressions pass **99/99, 180/180, 152/152,
+218/218, 155/155, 220/220, 235/235, 277/277, 183/183, 184/184, 220/220,
+and 137/137** checks respectively. JS48's parser stress cases cover the 16
+attribute-per-Element cap, 64-byte name limit, 256-byte value limit, 2,048
+record cap, aggregate byte overflow, continuation to later Elements, and
+first-wins duplicate behavior. Its runtime cases cover entity decoding,
+empty/boolean presence, selector and form consistency, collection/traversal
+access, current/default separation, stable returned strings, authentic event
+targets, nested dispatch metadata, purity, and stale serial reuse.
+
+The production hosted aggregate reports **543 passed / 7 failed** out of 550
+checks. All five new JS48 hosted checks pass: generic and ARIA reads, an
+authentic `data-action` event-target read, retained `href`/`src`, current versus
+default input value, and nested Event metadata with canonical Element
+identity. The seven failures are unchanged CSS checks: phases 3C and 3G, phase
+6A, three phase 6B checks, and phase 6C. The production `build.bat` succeeds.
+
+The kernel wrapper still stops before the kernel build at PacMan linking with
+unresolved `pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)`. The independent
+`mingw32-make ARCH=amd64 EXTRA_CFLAGS=` lane still stops at the existing Mbed
+TLS configuration errors in `mbedtls_check_config.h:51` and `:64`. No fresh
+kernel was produced, so QEMU proof is not claimed. The wrapper regenerated
+`build/pacman-native/amd64/objects/game.o`, `main.o`, and `renderer.o`; all
+three were restored to their clean preflight contents. `ESP/ramdisk.img`, all
+89 `out/wallpaper-pack/` files, all four PacMan package files, and the tracked
+PacMan build objects match their pre-kernel hashes. No generated artifacts
+are part of the JS48 source change.
+
+Recommended JS49 direction: define a bounded mutation model that synchronizes
+generic retained values with the existing `id`/`class`/form projections before
+adding any attribute-write API. That needs explicit semantics for duplicate
+attributes, selector updates, and markup defaults versus current form state.

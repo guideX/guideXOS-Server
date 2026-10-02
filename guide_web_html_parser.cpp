@@ -28,6 +28,7 @@
 #include <limits>
 #include <map>
 #include <sstream>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -486,46 +487,141 @@ static std::string decodeEntities(const std::string& s)
 	return out;
 }
 
-// Extract the value of an attribute from a raw tag body string.
-// E.g.  extractAttr("a href=\"foo.html\" id=\"x\"", "href")  ->  "foo.html"
+struct HtmlAttributeView {
+	std::string_view name;
+	std::string_view value;
+};
+
+static bool asciiNameEquals(std::string_view left, std::string_view right)
+{
+	if (left.size() != right.size()) return false;
+	for (size_t index = 0u; index < left.size(); ++index) {
+		unsigned char character = static_cast<unsigned char>(left[index]);
+		if (character >= static_cast<unsigned char>('A') &&
+			character <= static_cast<unsigned char>('Z'))
+			character = static_cast<unsigned char>(character - 'A' + 'a');
+		if (character != static_cast<unsigned char>(right[index])) return false;
+	}
+	return true;
+}
+
+static bool nextHtmlAttribute(const std::string& tagBody, size_t& position,
+	HtmlAttributeView& attribute)
+{
+	const size_t length = tagBody.size();
+	size_t nameStart = 0u;
+	for (;;) {
+		while (position < length &&
+			std::isspace(static_cast<unsigned char>(tagBody[position]))) ++position;
+		if (position >= length || tagBody[position] == '/' ||
+			tagBody[position] == '>') return false;
+		nameStart = position;
+		while (position < length &&
+			!std::isspace(static_cast<unsigned char>(tagBody[position])) &&
+			tagBody[position] != '=' && tagBody[position] != '/' &&
+			tagBody[position] != '>') ++position;
+		if (position != nameStart) break;
+		++position;
+	}
+	attribute.name = std::string_view(tagBody.data() + nameStart,
+		position - nameStart);
+	while (position < length &&
+		std::isspace(static_cast<unsigned char>(tagBody[position]))) ++position;
+	attribute.value = std::string_view();
+	if (position >= length || tagBody[position] != '=') return true;
+	++position;
+	while (position < length &&
+		std::isspace(static_cast<unsigned char>(tagBody[position]))) ++position;
+	if (position >= length) return true;
+	const char delimiter = tagBody[position];
+	if (delimiter == '"' || delimiter == '\'') {
+		const size_t valueStart = ++position;
+		while (position < length && tagBody[position] != delimiter) ++position;
+		attribute.value = std::string_view(tagBody.data() + valueStart,
+			position - valueStart);
+		if (position < length) ++position;
+		return true;
+	}
+	const size_t valueStart = position;
+	while (position < length && tagBody[position] != '>' &&
+		!std::isspace(static_cast<unsigned char>(tagBody[position]))) ++position;
+	attribute.value = std::string_view(tagBody.data() + valueStart,
+		position - valueStart);
+	return true;
+}
+
+static size_t htmlAttributeStart(const std::string& tagBody)
+{
+	size_t position = 0u;
+	while (position < tagBody.size() &&
+		!std::isspace(static_cast<unsigned char>(tagBody[position])) &&
+		tagBody[position] != '/' && tagBody[position] != '>') ++position;
+	return position;
+}
+
+static size_t collectHtmlAttributeViews(const std::string& tagBody,
+	std::array<HtmlAttributeView, kHtmlMaxRetainedAttributesPerElement>& out,
+	bool& overflow)
+{
+	overflow = false;
+	size_t position = htmlAttributeStart(tagBody);
+	size_t count = 0u;
+	HtmlAttributeView attribute;
+	while (nextHtmlAttribute(tagBody, position, attribute)) {
+		if (count == out.size()) {
+			overflow = true;
+			break;
+		}
+		out[count++] = attribute;
+	}
+	return count;
+}
+
+// Attribute names follow the JS47 name grammar so every retained name is
+// queryable through getAttribute()/hasAttribute().
+static bool validRetainedAttributeName(std::string_view name)
+{
+	if (name.empty() || name.size() > kHtmlMaxRetainedAttributeNameBytes)
+		return false;
+	auto isAsciiLetter = [](unsigned char character) {
+		return (character >= static_cast<unsigned char>('a') &&
+			character <= static_cast<unsigned char>('z')) ||
+			(character >= static_cast<unsigned char>('A') &&
+			character <= static_cast<unsigned char>('Z'));
+	};
+	if (!isAsciiLetter(static_cast<unsigned char>(name[0]))) return false;
+	for (size_t index = 1u; index < name.size(); ++index) {
+		const unsigned char character = static_cast<unsigned char>(name[index]);
+		if (!isAsciiLetter(character) &&
+			!(character >= static_cast<unsigned char>('0') &&
+				character <= static_cast<unsigned char>('9')) &&
+			character != static_cast<unsigned char>('-') &&
+			character != static_cast<unsigned char>('_') &&
+			character != static_cast<unsigned char>(':')) return false;
+	}
+	return true;
+}
+
+// Extract the value of an exact attribute name. Duplicates use first-wins,
+// matching the retained generic store and specialized projections.
 static std::string extractAttr(const std::string& tagBody, const std::string& attr)
 {
-	std::string body = toLower(tagBody);
-	std::string key  = toLower(attr);
-	size_t pos = body.find(key + "=");
-	if (pos == std::string::npos) return "";
-	pos += key.size() + 1; // skip "attr="
-	if (pos >= body.size()) return "";
-
-	// Use the raw tagBody (original case) for the value substring
-	// but find the position in the original string.
-	size_t rawPos = pos; // positions match because we only lowercased
-	char delim = tagBody[rawPos];
-	if (delim == '"' || delim == '\'') {
-		size_t end = tagBody.find(delim, rawPos + 1);
-		if (end == std::string::npos) return tagBody.substr(rawPos + 1);
-		return tagBody.substr(rawPos + 1, end - rawPos - 1);
+	size_t position = htmlAttributeStart(tagBody);
+	HtmlAttributeView attribute;
+	while (nextHtmlAttribute(tagBody, position, attribute)) {
+		if (asciiNameEquals(attribute.name, attr))
+			return attribute.value.empty() ? std::string() :
+				std::string(attribute.value.data(), attribute.value.size());
 	}
-	// unquoted value: read until whitespace or '>'
-	size_t end = rawPos;
-	while (end < tagBody.size() && tagBody[end] != ' ' && tagBody[end] != '>' && tagBody[end] != '\t')
-		++end;
-	return tagBody.substr(rawPos, end - rawPos);
+	return std::string();
 }
 
 static bool hasAttr(const std::string& tagBody, const std::string& attr)
 {
-	std::string body = toLower(tagBody);
-	std::string key = toLower(attr);
-	size_t pos = 0;
-	while ((pos = body.find(key, pos)) != std::string::npos) {
-		bool leftOk = (pos == 0) || std::isspace(static_cast<unsigned char>(body[pos - 1])) || body[pos - 1] == '<';
-		size_t end = pos + key.size();
-		bool rightOk = (end >= body.size()) ||
-			std::isspace(static_cast<unsigned char>(body[end])) ||
-			body[end] == '=' || body[end] == '/' || body[end] == '>';
-		if (leftOk && rightOk) return true;
-		pos = end;
+	size_t position = htmlAttributeStart(tagBody);
+	HtmlAttributeView attribute;
+	while (nextHtmlAttribute(tagBody, position, attribute)) {
+		if (asciiNameEquals(attribute.name, attr)) return true;
 	}
 	return false;
 }
@@ -5510,6 +5606,9 @@ struct ParserState {
 	std::vector<HtmlElementRef> structuralElements;
 	std::vector<HtmlElementContentMetadata> contentMetadata;
 	std::vector<StructuralChildCounter> structuralCounters;
+	std::array<HtmlAttributeView, kHtmlMaxRetainedAttributesPerElement> pendingAttributes{};
+	size_t     pendingAttributeCount = 0;
+	bool       pendingAttributeOverflow = false;
 	uint64_t     nextElementSerial = 1;
 	uint64_t     activeBlockSerial = 0;
 	size_t       uncapturedOpenElementDepth = 0;
@@ -5702,6 +5801,124 @@ static void markUncertainContent(ParserState& st)
 	markContentForOpenElements(st, false, 0, false, false, false, true, true);
 }
 
+static bool retainedAttributeNameIsSpecial(std::string_view name,
+	const char* wanted)
+{
+	return asciiNameEquals(name, wanted);
+}
+
+static std::string retainedAttributeValue(const HtmlElementRef& element,
+	std::string_view name, std::string_view rawValue)
+{
+	if (retainedAttributeNameIsSpecial(name, "disabled") ||
+		retainedAttributeNameIsSpecial(name, "checked") ||
+		retainedAttributeNameIsSpecial(name, "selected"))
+		return std::string();
+
+	// Preserve JS47's existing projections for the attributes already exposed
+	// through specialized metadata. These values are fed from the same first
+	// parsed occurrence and remain the compatibility authority in the host.
+	if (retainedAttributeNameIsSpecial(name, "id")) return std::string(rawValue);
+	if (retainedAttributeNameIsSpecial(name, "class")) return std::string(rawValue);
+	if (retainedAttributeNameIsSpecial(name, "style")) return std::string(rawValue);
+	if (retainedAttributeNameIsSpecial(name, "type") &&
+		(element.tagName == "input" || element.tagName == "button"))
+		return element.formControl.inputType;
+	if (retainedAttributeNameIsSpecial(name, "name")) {
+		if (element.formControl.type != FormControlType::None &&
+			!element.formControl.name.empty())
+			return element.formControl.name;
+		std::string decoded = decodeEntities(std::string(rawValue));
+		if (element.tagName == "form" && decoded.size() > kFormMaxLabelBytes)
+			decoded.resize(kFormMaxLabelBytes);
+		return decoded;
+	}
+	if (retainedAttributeNameIsSpecial(name, "value") &&
+		(element.tagName == "input" || element.tagName == "button" ||
+			element.tagName == "option") &&
+		element.formControl.type != FormControlType::None)
+		return element.formControl.value;
+	return decodeEntities(std::string(rawValue));
+}
+
+static void incrementRetentionCounter(uint32_t& counter)
+{
+	if (counter != std::numeric_limits<uint32_t>::max()) ++counter;
+}
+
+static void retainPendingAttributes(ParserState& st, HtmlElementRef& element)
+{
+	element.retainedAttributeOffset = 0u;
+	element.retainedAttributeCount = 0u;
+	if (st.pendingAttributeOverflow)
+		incrementRetentionCounter(st.doc.retainedAttributePerElementDrops);
+	for (size_t index = 0u; index < st.pendingAttributeCount; ++index) {
+		const HtmlAttributeView& attribute = st.pendingAttributes[index];
+		bool duplicate = false;
+		for (size_t previous = 0u; previous < index; ++previous) {
+			if (asciiNameEquals(attribute.name,
+				st.pendingAttributes[previous].name)) {
+				duplicate = true;
+				break;
+			}
+		}
+		if (duplicate) {
+			incrementRetentionCounter(st.doc.retainedAttributeDuplicateDrops);
+			continue;
+		}
+		if (!validRetainedAttributeName(attribute.name)) {
+			incrementRetentionCounter(st.doc.retainedAttributeNameDrops);
+			continue;
+		}
+		if (attribute.value.size() > kHtmlMaxRetainedAttributeValueBytes) {
+			incrementRetentionCounter(st.doc.retainedAttributeValueDrops);
+			continue;
+		}
+		const std::string value = retainedAttributeValue(element,
+			attribute.name, attribute.value);
+		if (value.size() > kHtmlMaxRetainedAttributeValueBytes) {
+			incrementRetentionCounter(st.doc.retainedAttributeValueDrops);
+			continue;
+		}
+		const size_t recordSize = 3u + attribute.name.size() + value.size();
+		if (st.doc.retainedAttributeRecordCount >=
+			kHtmlMaxRetainedAttributeRecordsPerDocument ||
+			st.doc.retainedAttributeStorage.size() >
+				kHtmlMaxRetainedAttributeStorageBytesPerDocument ||
+			recordSize > kHtmlMaxRetainedAttributeStorageBytesPerDocument -
+				st.doc.retainedAttributeStorage.size()) {
+			incrementRetentionCounter(st.doc.retainedAttributeDocumentDrops);
+			continue;
+		}
+		if (st.doc.retainedAttributeStorage.empty())
+			st.doc.retainedAttributeStorage.reserve(
+				kHtmlMaxRetainedAttributeStorageBytesPerDocument);
+		if (element.retainedAttributeCount == 0u) {
+			element.retainedAttributeOffset = static_cast<uint16_t>(
+				st.doc.retainedAttributeStorage.size());
+		}
+		st.doc.retainedAttributeStorage.push_back(
+			static_cast<uint8_t>(attribute.name.size()));
+		st.doc.retainedAttributeStorage.push_back(
+			static_cast<uint8_t>(value.size() & 0xFFu));
+		st.doc.retainedAttributeStorage.push_back(
+			static_cast<uint8_t>((value.size() >> 8u) & 0xFFu));
+		for (char rawNameCharacter : attribute.name) {
+			unsigned char nameCharacter =
+				static_cast<unsigned char>(rawNameCharacter);
+			if (nameCharacter >= static_cast<unsigned char>('A') &&
+				nameCharacter <= static_cast<unsigned char>('Z'))
+				nameCharacter = static_cast<unsigned char>(
+					nameCharacter - 'A' + 'a');
+			st.doc.retainedAttributeStorage.push_back(nameCharacter);
+		}
+		st.doc.retainedAttributeStorage.insert(
+			st.doc.retainedAttributeStorage.end(), value.begin(), value.end());
+		++st.doc.retainedAttributeRecordCount;
+		++element.retainedAttributeCount;
+	}
+}
+
 static HtmlElementRef registerStructuralElement(ParserState& st, HtmlElementRef element)
 {
 	element.tagName = toLower(element.tagName);
@@ -5767,6 +5984,7 @@ static HtmlElementRef registerStructuralElement(ParserState& st, HtmlElementRef 
 			parentMetadata->contentMetadataComplete = false;
 		return element;
 	}
+	retainPendingAttributes(st, element);
 	st.structuralElements.push_back(element);
 	HtmlElementContentMetadata content;
 	content.serial = element.serial;
@@ -6325,6 +6543,8 @@ static void flushText(ParserState& st)
 // Handle an opening tag.  tagBody is everything inside <...>, e.g. "a href=\"x\""
 static void handleOpenTag(ParserState& st, const std::string& tagBody)
 {
+	st.pendingAttributeCount = collectHtmlAttributeViews(tagBody,
+		st.pendingAttributes, st.pendingAttributeOverflow);
 	// Extract the tag name (first token before whitespace or /).
 	std::string name;
 	for (char c : tagBody) {

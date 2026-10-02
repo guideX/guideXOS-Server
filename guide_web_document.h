@@ -489,12 +489,24 @@ enum HtmlAttributePresence : uint16_t {
 	HtmlAttributeStylePresent    = 1u << 8,
 };
 
+// Generic markup attributes share one bounded, document-owned byte pool.
+// The encoded pool includes a three-byte record header per attribute; offsets
+// therefore remain representable in HtmlElementRef without per-attribute
+// strings or heap-owned maps.
+constexpr size_t kHtmlMaxRetainedAttributesPerElement = 16u;
+constexpr size_t kHtmlMaxRetainedAttributeRecordsPerDocument = 2048u;
+constexpr size_t kHtmlMaxRetainedAttributeStorageBytesPerDocument = 65535u;
+constexpr size_t kHtmlMaxRetainedAttributeNameBytes = 64u;
+constexpr size_t kHtmlMaxRetainedAttributeValueBytes = 256u;
+
 struct HtmlElementRef {
 	std::string tagName;
 	std::string className;
 	std::string id;
 	std::string inlineStyle;
 	uint16_t    attributePresence = 0;
+	uint16_t    retainedAttributeOffset = 0;
+	uint8_t     retainedAttributeCount = 0;
 	uint64_t    serial = 0;
 	uint64_t    parentSerial = 0;
 	uint16_t    childIndex = 0;
@@ -1192,6 +1204,17 @@ struct WebDocument {
 	// This is not a DOM tree: records are compact, serial-addressed, and capped
 	// by the parser's structural metadata limit.
 	std::vector<HtmlElementRef> structuralElements;
+	// Packed generic attribute records: [name length:1][value length:2 LE]
+	// followed by the lowercase name and decoded/canonical value. Every
+	// HtmlElementRef carries a byte offset and bounded record count into this
+	// generation-local pool.
+	std::vector<uint8_t> retainedAttributeStorage;
+	uint16_t retainedAttributeRecordCount = 0;
+	uint32_t retainedAttributePerElementDrops = 0;
+	uint32_t retainedAttributeNameDrops = 0;
+	uint32_t retainedAttributeValueDrops = 0;
+	uint32_t retainedAttributeDuplicateDrops = 0;
+	uint32_t retainedAttributeDocumentDrops = 0;
 	// Bounded content summaries keyed by the same logical serials as
 	// structuralElements.  Entries are capped with the structural registry.
 	std::vector<HtmlElementContentMetadata> contentMetadata;
@@ -1211,6 +1234,57 @@ struct WebDocument {
 	std::size_t          layoutTextExtent = 0;
 	std::size_t          scriptMutationCount = 0;
 };
+
+struct HtmlRetainedAttributeView {
+	const char* value = nullptr;
+	size_t valueLength = 0;
+};
+
+inline bool findRetainedHtmlAttribute(const WebDocument& document,
+	const HtmlElementRef& element, const char* name, size_t nameLength,
+	HtmlRetainedAttributeView& out)
+{
+	out = {};
+	if (name == nullptr || nameLength == 0u ||
+		nameLength > kHtmlMaxRetainedAttributeNameBytes ||
+		element.retainedAttributeCount == 0u ||
+		element.retainedAttributeCount > kHtmlMaxRetainedAttributesPerElement)
+		return false;
+	const size_t storageSize = document.retainedAttributeStorage.size();
+	size_t offset = element.retainedAttributeOffset;
+	for (size_t index = 0u; index < element.retainedAttributeCount; ++index) {
+		if (offset > storageSize || storageSize - offset < 3u) return false;
+		const size_t storedNameLength = document.retainedAttributeStorage[offset];
+		const size_t storedValueLength =
+			static_cast<size_t>(document.retainedAttributeStorage[offset + 1u]) |
+			(static_cast<size_t>(document.retainedAttributeStorage[offset + 2u]) << 8u);
+		if (storedNameLength == 0u ||
+			storedNameLength > kHtmlMaxRetainedAttributeNameBytes ||
+			storedValueLength > kHtmlMaxRetainedAttributeValueBytes)
+			return false;
+		const size_t recordSize = 3u + storedNameLength + storedValueLength;
+		if (recordSize > storageSize - offset) return false;
+		bool matches = storedNameLength == nameLength;
+		for (size_t nameIndex = 0u; matches && nameIndex < nameLength;
+			++nameIndex) {
+			unsigned char requested = static_cast<unsigned char>(name[nameIndex]);
+			if (requested >= static_cast<unsigned char>('A') &&
+				requested <= static_cast<unsigned char>('Z'))
+				requested = static_cast<unsigned char>(requested - 'A' + 'a');
+			matches = document.retainedAttributeStorage[offset + 3u + nameIndex] ==
+				requested;
+		}
+		if (matches) {
+			out.value = reinterpret_cast<const char*>(
+				document.retainedAttributeStorage.data() + offset + 3u +
+				storedNameLength);
+			out.valueLength = storedValueLength;
+			return true;
+		}
+		offset += recordSize;
+	}
+	return false;
+}
 
 } // namespace web
 } // namespace gxos
