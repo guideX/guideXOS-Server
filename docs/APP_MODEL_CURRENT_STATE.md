@@ -1,14 +1,14 @@
 # guideXOS App Model Current-State Map
 
-Status: Phase 8 current state (2026-10-02). The Phase 5A/5B material below is historical; see [Phase 8 default-app persistence](APPMODEL_PHASE8_DEFAULT_APP_PERSISTENCE.md) for the authoritative machine-global override owner and API, [Phase 7 capable handlers and Open With](APPMODEL_PHASE7_OPEN_WITH.md) for handler selection, and [Phase 6 file associations and document activation](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md) for the original owned-path contract.
+Status: Phase 9 current state (2026-10-02). The Phase 5A/5B material below is historical; see [Phase 9 Settings Default Apps](APPMODEL_PHASE9_SETTINGS_DEFAULT_APPS.md) for the Settings surface and validation, [Phase 8 default-app persistence](APPMODEL_PHASE8_DEFAULT_APP_PERSISTENCE.md) for the authoritative machine-global override owner and API, [Phase 7 capable handlers and Open With](APPMODEL_PHASE7_OPEN_WITH.md) for handler selection, and [Phase 6 file associations and document activation](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md) for the original owned-path contract.
 
 This document maps the app model as it exists in the repository today. It is intended to ground future GXApp runtime work without rewriting or destabilizing current launch behavior.
 
-## Phase 8 current default-handler state
+## Phase 9 current default-handler state
 
-AppRegistry now owns one bounded machine-global default-handler store at `appmodel-default-handlers.cfg`. It persists only normalized extensions and canonical App Model IDs, and validates current capability, document activation, registration durability, and backend availability before selecting an override. Invalid or unavailable overrides remain distinguishable from the effective handler and fall back safely. File Explorer ordinary Open follows the effective handler; Open With remains a one-time choice. The Settings Default apps UI is still deferred.
+AppRegistry owns the bounded machine-global default-handler store at `appmodel-default-handlers.cfg`. Settings now exposes it under **Apps → Default apps** through `DesktopService`; the page does not parse or write that file. It presents known extensions from AppRegistry in a bounded deterministic snapshot, shows built-in/configured/effective state separately, and offers only current capable durable handlers by canonical App ID. An unusable configured handler remains visible while File Explorer ordinary Open uses the safe effective fallback. Open With remains a one-time choice.
 
-See [the Phase 8 report](APPMODEL_PHASE8_DEFAULT_APP_PERSISTENCE.md) for the ownership audit, format and capacities, APIs, test results, runtime proof, and limitations.
+See the [Phase 9 report](APPMODEL_PHASE9_SETTINGS_DEFAULT_APPS.md) for the Settings integration, test results, runtime evidence, and visual-inspection limit. See [the Phase 8 report](APPMODEL_PHASE8_DEFAULT_APP_PERSISTENCE.md) for the store format, ownership audit, APIs, and persistence validation.
 
 ## 1. Actual languages and components in this repo
 

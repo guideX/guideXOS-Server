@@ -145,6 +145,7 @@ namespace gxos { namespace apps { struct RegisteredApp; struct DocumentHandlerIn
         static bool OpenFilesystemEntry(const std::string& path, bool isDirectory, std::string& error, bool recordRecent = true);
         static bool OpenFilesystemEntryWithHandler(const apps::DocumentHandlerInfo& handler, const std::string& path, std::string& error, bool recordRecent = true);
         static apps::DocumentHandlerList GetDocumentHandlersForPath(const std::string& path);
+        static apps::DocumentHandlerList GetDocumentHandlersForExtension(const std::string& extension);
         static apps::DefaultHandlerMutationResult SetDefaultDocumentHandler(const std::string& extension, const std::string& canonicalAppId);
         static apps::DefaultHandlerMutationResult ClearDefaultDocumentHandler(const std::string& extension);
         static apps::DefaultHandlerInfo GetDefaultDocumentHandlerInfo(const std::string& extension);

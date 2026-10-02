@@ -5877,6 +5877,12 @@ namespace gxos {
             return s_appRegistry.EnumerateCapableHandlersForPath(path);
         }
 
+        apps::DocumentHandlerList DesktopService::GetDocumentHandlersForExtension(const std::string& extension) {
+            ensureDefaultAppsRegistered();
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+            return s_appRegistry.EnumerateCapableHandlers(extension);
+        }
+
         apps::DefaultHandlerMutationResult DesktopService::SetDefaultDocumentHandler(
             const std::string& extension, const std::string& canonicalAppId) {
             ensureDefaultAppsRegistered();

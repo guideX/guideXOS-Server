@@ -19,9 +19,11 @@ $Arguments = @(
     "-std=c++17", "-Wall", "-Wextra", "-O2", "-iquote", ".",
     "tests/app_model_file_activation_test.cpp",
     "app_registry.cpp",
+    "app_default_handler_store.cpp",
     "app_manifest.cpp",
     "app_manifest_loader.cpp",
     "app_manifest_validator.cpp",
+    "fs.cpp",
     "-o", $Output
 )
 

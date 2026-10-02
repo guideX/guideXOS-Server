@@ -51,6 +51,7 @@ enum class TargetId : unsigned char {
     AboutVersion,
     PersonalizationBackground,
     AppsList,
+    AppsDefault,
     AppDetail,
     DateTimeTime,
     DateTimeTimeZone,
@@ -159,6 +160,7 @@ inline bool parseSettingsRoute(const std::string& uri, SettingsRoute& route)
     TargetId targetId = TargetId::Page;
     if (!target.empty()) {
         if (target == "list") targetId = TargetId::AppsList;
+        else if (target == "default" || target == "defaults") targetId = TargetId::AppsDefault;
         else if (target == "device" || target == "computer") targetId = TargetId::SystemDevice;
         else if (target == "background" || target == "wallpaper") targetId = TargetId::PersonalizationBackground;
         else if (target == "resolution") targetId = TargetId::Resolution;
@@ -199,7 +201,8 @@ inline bool parseSettingsRoute(const std::string& uri, SettingsRoute& route)
           targetId == TargetId::DevicesDisplay || targetId == TargetId::DevicesStorage ||
           targetId == TargetId::DevicesAudio || targetId == TargetId::DevicesUsb ||
           targetId == TargetId::DevicesOther || targetId == TargetId::DeviceDetail) && category == CategoryId::Devices) ||
-        ((targetId == TargetId::AppsList || targetId == TargetId::AppDetail) && category == CategoryId::Apps) ||
+        ((targetId == TargetId::AppsList || targetId == TargetId::AppsDefault ||
+          targetId == TargetId::AppDetail) && category == CategoryId::Apps) ||
         ((targetId == TargetId::DateTimeTime || targetId == TargetId::DateTimeTimeZone) && category == CategoryId::DateTime) ||
         ((targetId == TargetId::AccessibilityFocus || targetId == TargetId::AccessibilityKeyboard) && category == CategoryId::Accessibility) ||
         ((targetId == TargetId::DeveloperApps || targetId == TargetId::DeveloperServices ||
@@ -218,7 +221,7 @@ struct SearchEntry {
     SettingsRoute route;
 };
 
-inline constexpr std::array<SearchEntry, 40> kSearchEntries = {{
+inline constexpr std::array<SearchEntry, 41> kSearchEntries = {{
     { "System overview", "system computer hardware device hostname processor cpu memory ram architecture", { CategoryId::System, TargetId::SystemDevice } },
     { "Resolution", "resolution screen monitor display size", { CategoryId::Display, TargetId::Resolution } },
     { "Display mode", "display mirror extend monitor layout", { CategoryId::Display, TargetId::DisplayMode } },
@@ -238,6 +241,7 @@ inline constexpr std::array<SearchEntry, 40> kSearchEntries = {{
     { "Disks and partitions", "storage disk disks partition partitions drive filesystem fat32 removable", { CategoryId::Storage, TargetId::StorageDisks } },
     { "Volumes", "volume mount mounted filesystem fat32", { CategoryId::Storage, TargetId::StorageVolumes } },
     { "Registered apps", "apps app installed application applications programs registered open app", { CategoryId::Apps, TargetId::AppsList } },
+    { "Default apps", "default defaults default apps default applications file types file associations open with .txt .log .ini .cfg", { CategoryId::Apps, TargetId::AppsDefault } },
     { "Users and identity", "users user account accounts identity principal", { CategoryId::Users, TargetId::Page } },
     { "Current session", "session desktop shell login logon sign in signin sign-out logout", { CategoryId::Users, TargetId::UsersSession } },
     { "Authentication and passwords", "authentication authenticate password passwords credentials credential login", { CategoryId::Users, TargetId::UsersSecurity } },
@@ -324,6 +328,12 @@ enum class FocusControl : unsigned char {
     AccessibilityKeyboard,
     AccessibilityEnhancedFocus,
     AppEntry,
+    AppsInstalledTab,
+    AppsDefaultTab,
+    DefaultAppEntry,
+    DefaultAppHandler,
+    DefaultAppRestore,
+    DefaultAppCancel,
     AppsDetailBack,
     AppsOpen,
     UsersSessionDetails,
@@ -370,6 +380,12 @@ inline CategoryId focusControlCategory(FocusControl control)
     case FocusControl::AccessibilityKeyboard: return CategoryId::Accessibility;
     case FocusControl::AccessibilityEnhancedFocus: return CategoryId::Accessibility;
     case FocusControl::AppEntry:
+    case FocusControl::AppsInstalledTab:
+    case FocusControl::AppsDefaultTab:
+    case FocusControl::DefaultAppEntry:
+    case FocusControl::DefaultAppHandler:
+    case FocusControl::DefaultAppRestore:
+    case FocusControl::DefaultAppCancel:
     case FocusControl::AppsDetailBack:
     case FocusControl::AppsOpen: return CategoryId::Apps;
     case FocusControl::UsersSessionDetails:
@@ -406,7 +422,8 @@ public:
               route.target == TargetId::DevicesAudio || route.target == TargetId::DevicesUsb ||
               route.target == TargetId::DevicesOther || route.target == TargetId::DeviceDetail) &&
                 route.category == CategoryId::Devices) ||
-            ((route.target == TargetId::AppsList || route.target == TargetId::AppDetail) &&
+            ((route.target == TargetId::AppsList || route.target == TargetId::AppsDefault ||
+              route.target == TargetId::AppDetail) &&
                 route.category == CategoryId::Apps) ||
             ((route.target == TargetId::DateTimeTime || route.target == TargetId::DateTimeTimeZone) &&
                 route.category == CategoryId::DateTime) ||

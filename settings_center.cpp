@@ -16,6 +16,7 @@
 #include "network_telemetry.h"
 #include "settings_network_service.h"
 #include "settings_inventory_service.h"
+#include "settings_default_apps_model.h"
 #include "settings_server_identity.h"
 #include "settings_system_information.h"
 #include "settings_s7_model.h"
@@ -67,6 +68,53 @@ constexpr uint32_t kKeyUp = 0x26;
 constexpr uint32_t kKeyRight = 0x27;
 constexpr uint32_t kKeyDown = 0x28;
 constexpr int kModifierShift = 1;
+
+class DesktopDefaultAppsBackend final : public DefaultAppsBackend {
+public:
+    explicit DesktopDefaultAppsBackend(const AppInventory& inventory) : m_inventory(inventory) {}
+
+    bool available() const override { return true; }
+    std::vector<std::string> knownDocumentExtensions() override
+    {
+        return DesktopService::GetKnownDocumentExtensions();
+    }
+    DefaultHandlerInfo defaultHandlerInfo(const std::string& extension) override
+    {
+        return DesktopService::GetDefaultDocumentHandlerInfo(extension);
+    }
+    DocumentHandlerList capableHandlers(const std::string& extension) override
+    {
+        return DesktopService::GetDocumentHandlersForExtension(extension);
+    }
+    std::string displayName(const std::string& canonicalAppId) override
+    {
+        if (canonicalAppId.empty()) return {};
+        for (size_t i = 0; i < m_inventory.count; ++i)
+            if (m_inventory.entries[i].appId == canonicalAppId) return m_inventory.entries[i].displayName;
+        return {};
+    }
+    bool isDurableApp(const std::string& canonicalAppId) override
+    {
+        if (canonicalAppId.empty()) return false;
+        for (size_t i = 0; i < m_inventory.count; ++i) {
+            if (m_inventory.entries[i].appId != canonicalAppId) continue;
+            return m_inventory.entries[i].source != "DevelopmentTemporary";
+        }
+        return true;
+    }
+    DefaultHandlerMutationResult setDefaultHandler(
+        const std::string& extension, const std::string& canonicalAppId) override
+    {
+        return DesktopService::SetDefaultDocumentHandler(extension, canonicalAppId);
+    }
+    DefaultHandlerMutationResult clearDefaultHandler(const std::string& extension) override
+    {
+        return DesktopService::ClearDefaultDocumentHandler(extension);
+    }
+
+private:
+    const AppInventory& m_inventory;
+};
 
 uint32_t packRgb(int r, int g, int b)
 {
@@ -305,6 +353,8 @@ public:
             refreshInventory();
         }
         if (initialRoute.category == CategoryId::Apps) refreshApps();
+        if (initialRoute.category == CategoryId::Apps && initialRoute.target == TargetId::AppsDefault)
+            refreshDefaultApps();
         if (initialRoute.category == CategoryId::DateTime) refreshDateTime();
         if (initialRoute.category == CategoryId::Accessibility || initialRoute.category == CategoryId::Developer)
             refreshDeveloperInventory();
@@ -437,6 +487,7 @@ public:
                 break;
             case CategoryId::Apps:
                 if (m_navigation.route().target == TargetId::AppDetail) renderAppDetails();
+                else if (m_navigation.route().target == TargetId::AppsDefault) renderDefaultApps();
                 else renderApps();
                 break;
             case CategoryId::Users: renderUsersPage(); break;
@@ -495,11 +546,41 @@ public:
                     render();
                     return;
                 }
+                if (m_navigation.selectedCategory() == CategoryId::Apps &&
+                    m_navigation.route().target == TargetId::AppsDefault && wheelSteps != 0 &&
+                    x >= pageX() && x <= pageX() + pageWidth()) {
+                    if (m_defaultAppsPickerOpen && y >= defaultAppsPickerRowsTop() &&
+                        y <= defaultAppsPickerBottom()) {
+                        const int maxScroll = std::max(0, static_cast<int>(currentDefaultHandlerIndices().size()) -
+                            defaultAppsPickerVisibleRows());
+                        m_defaultAppsPickerScroll = std::max(0, std::min(maxScroll,
+                            m_defaultAppsPickerScroll - wheelSteps * 3));
+                        m_hoverItem = hitTest(x, y);
+                        m_hasHover = true;
+                        render();
+                        return;
+                    }
+                    if (!m_defaultAppsPickerOpen && y >= defaultAppsListTop() &&
+                        y <= defaultAppsListBottom()) {
+                        const int maxScroll = std::max(0, static_cast<int>(m_defaultAppsModel.snapshot().count) -
+                            defaultAppsVisibleRows());
+                        m_defaultAppsScroll = std::max(0, std::min(maxScroll,
+                            m_defaultAppsScroll - wheelSteps * 3));
+                        m_hoverItem = hitTest(x, y);
+                        m_hasHover = true;
+                        render();
+                        return;
+                    }
+                }
+                const int ordinaryListTop = m_navigation.selectedCategory() == CategoryId::Apps &&
+                    m_navigation.route().target != TargetId::AppDetail
+                    ? appsInventoryListTop() : inventoryListTop();
                 const bool insideList = x >= pageX() && x <= pageX() + pageWidth() &&
-                    y >= inventoryListTop() && y <= inventoryListBottom();
+                    y >= ordinaryListTop && y <= inventoryListBottom();
                 if (insideList && wheelSteps != 0) {
                     if (m_navigation.selectedCategory() == CategoryId::Apps &&
-                        m_navigation.route().target != TargetId::AppDetail)
+                        m_navigation.route().target != TargetId::AppDetail &&
+                        m_navigation.route().target != TargetId::AppsDefault)
                         m_appScroll -= wheelSteps * 3;
                     else if (m_navigation.selectedCategory() == CategoryId::Devices &&
                         m_navigation.route().target != TargetId::DeviceDetail)
@@ -568,6 +649,9 @@ public:
                     m_search.clear();
                     m_navigation.navigate(SettingsRoute{ m_navigation.selectedCategory(), TargetId::Page });
                     m_focusedItem = FocusItem{ FocusItem::Kind::Search, 0, FocusControl::None };
+                    render();
+                } else if (m_defaultAppsPickerOpen) {
+                    closeDefaultAppsPicker();
                     render();
                 }
                 return;
@@ -667,6 +751,7 @@ private:
     uint64_t m_selectedDeviceGeneration{0};
     uint64_t m_selectedDiskGeneration{0};
     AppInventory m_appInventory{};
+    DefaultAppsModel m_defaultAppsModel{};
     DeveloperAppModelSnapshot m_developerAppModel{};
     AccessibilityPreferences m_accessibilityPreferences{};
     bool m_accessibilityPreferenceAvailable{false};
@@ -687,6 +772,11 @@ private:
     std::string m_appStatus;
     uint64_t m_nextAppsRefreshMs{0};
     int m_appScroll{0};
+    int m_defaultAppsScroll{0};
+    int m_defaultAppsPickerScroll{0};
+    bool m_defaultAppsPickerOpen{false};
+    std::string m_selectedDefaultExtension;
+    std::string m_defaultAppsStatus;
     int m_s7PageScroll{0};
     clocktime::ClockDisplaySettings m_clockDisplaySettings{};
     DateTimeSnapshot m_dateTimeSnapshot{};
@@ -798,9 +888,12 @@ private:
         return left.kind == right.kind && left.index == right.index && left.control == right.control;
     }
 
-    static FocusControl initialFocusFor(const SettingsRoute& route)
+    FocusControl initialFocusFor(const SettingsRoute& route) const
     {
         switch (route.target) {
+        case TargetId::AppsList: return FocusControl::AppsInstalledTab;
+        case TargetId::AppsDefault:
+            return initialDefaultAppsFocusControl(m_defaultAppsModel.snapshot());
         case TargetId::AppDetail: return FocusControl::AppsDetailBack;
         case TargetId::DateTimeTimeZone: return FocusControl::DateTimeAdvanced;
         case TargetId::PersonalizationBackground: return FocusControl::PersonalizationChooseBackground;
@@ -868,6 +961,187 @@ private:
         ensureInventoryFocusVisible();
         m_nextAppsRefreshMs = steadyMilliseconds() + 2000;
         return inventoryChanged || oldMissing != m_selectedAppMissing;
+    }
+
+    std::vector<size_t> currentDefaultHandlerIndices() const
+    {
+        const DefaultAppsRow* row = findDefaultAppsRow(
+            m_defaultAppsModel.snapshot(), m_selectedDefaultExtension);
+        if (!row) return {};
+        DesktopDefaultAppsBackend backend(m_appInventory);
+        return eligibleDefaultAppHandlerIndices(*row, backend);
+    }
+
+    int defaultAppsRowIndex(const std::string& extension) const
+    {
+        return findDefaultAppsRowIndex(m_defaultAppsModel.snapshot(), extension);
+    }
+
+    bool refreshDefaultApps()
+    {
+        std::string focusedExtension;
+        std::string focusedHandlerId;
+        uint64_t focusedHandlerOwner = 0;
+        uint64_t focusedHandlerGeneration = 0;
+        if (m_focusedItem.kind == FocusItem::Kind::Control &&
+            m_focusedItem.control == FocusControl::DefaultAppEntry && m_focusedItem.index >= 0 &&
+            static_cast<size_t>(m_focusedItem.index) < m_defaultAppsModel.snapshot().count) {
+            focusedExtension = m_defaultAppsModel.snapshot().rows[static_cast<size_t>(m_focusedItem.index)].extension;
+        }
+        if (m_defaultAppsPickerOpen && m_focusedItem.kind == FocusItem::Kind::Control &&
+            m_focusedItem.control == FocusControl::DefaultAppHandler && m_focusedItem.index >= 0) {
+            const std::vector<size_t> oldChoices = currentDefaultHandlerIndices();
+            if (static_cast<size_t>(m_focusedItem.index) < oldChoices.size()) {
+                const DefaultAppsRow* oldRow = findDefaultAppsRow(
+                    m_defaultAppsModel.snapshot(), m_selectedDefaultExtension);
+                if (oldRow) {
+                    const DocumentHandlerInfo& handler = oldRow->handlers.handlers[
+                        oldChoices[static_cast<size_t>(m_focusedItem.index)]];
+                    focusedHandlerId = handler.appId;
+                    focusedHandlerOwner = handler.registrationOwner;
+                    focusedHandlerGeneration = handler.registrationGeneration;
+                }
+            }
+        }
+        DesktopDefaultAppsBackend backend(m_appInventory);
+        const bool changed = m_defaultAppsModel.refresh(backend);
+        const DefaultAppsSnapshot& refreshed = m_defaultAppsModel.snapshot();
+        if (!refreshed.available) m_defaultAppsStatus = "Default app information is unavailable.";
+        if (!m_selectedDefaultExtension.empty() && defaultAppsRowIndex(m_selectedDefaultExtension) < 0) {
+            m_selectedDefaultExtension.clear();
+            if (m_defaultAppsPickerOpen) {
+                m_defaultAppsPickerOpen = false;
+                m_defaultAppsStatus = "This file type is no longer available.";
+            }
+        }
+        if (!focusedExtension.empty()) {
+            const int rowIndex = defaultAppsRowIndex(focusedExtension);
+            if (rowIndex >= 0)
+                m_focusedItem.index = rowIndex;
+            else
+                m_focusedItem = FocusItem{ FocusItem::Kind::Control, 0, FocusControl::AppsDefaultTab };
+        }
+        const std::vector<size_t> choices = currentDefaultHandlerIndices();
+        if (m_defaultAppsPickerOpen && m_focusedItem.kind == FocusItem::Kind::Control &&
+            m_focusedItem.control == FocusControl::DefaultAppHandler) {
+            int restoredChoice = -1;
+            const DefaultAppsRow* refreshedRow = findDefaultAppsRow(
+                m_defaultAppsModel.snapshot(), m_selectedDefaultExtension);
+            if (refreshedRow && !focusedHandlerId.empty()) {
+                DesktopDefaultAppsBackend refreshedBackend(m_appInventory);
+                restoredChoice = eligibleDefaultAppHandlerIndexByIdentity(*refreshedRow, refreshedBackend,
+                    focusedHandlerId, focusedHandlerOwner, focusedHandlerGeneration);
+            }
+            if (restoredChoice >= 0) {
+                m_focusedItem.index = restoredChoice;
+            } else {
+                m_focusedItem = !choices.empty()
+                    ? FocusItem{ FocusItem::Kind::Control, 0, FocusControl::DefaultAppHandler }
+                    : refreshedRow && !refreshedRow->policy.configuredOverrideAppId.empty()
+                    ? FocusItem{ FocusItem::Kind::Control, 0, FocusControl::DefaultAppRestore }
+                    : FocusItem{ FocusItem::Kind::Control, 0, FocusControl::DefaultAppCancel };
+            }
+        }
+        m_defaultAppsScroll = std::max(0, std::min(m_defaultAppsScroll,
+            std::max(0, static_cast<int>(refreshed.count) - defaultAppsVisibleRows())));
+        m_defaultAppsPickerScroll = std::max(0, std::min(m_defaultAppsPickerScroll,
+            std::max(0, static_cast<int>(choices.size()) - defaultAppsPickerVisibleRows())));
+        return changed;
+    }
+
+    void openDefaultAppsPicker(const std::string& extension)
+    {
+        refreshApps();
+        refreshDefaultApps();
+        if (!m_defaultAppsModel.snapshot().available) return;
+        const int rowIndex = defaultAppsRowIndex(extension);
+        if (rowIndex < 0 || !gxos::apps::settings::openDefaultAppsPicker(m_defaultAppsModel.snapshot(),
+                static_cast<size_t>(rowIndex), m_selectedDefaultExtension,
+                m_defaultAppsPickerOpen, m_defaultAppsPickerScroll)) {
+            m_defaultAppsStatus = "This file type is no longer available.";
+            return;
+        }
+        const std::vector<size_t> choices = currentDefaultHandlerIndices();
+        const DefaultAppsRow* row = findDefaultAppsRow(m_defaultAppsModel.snapshot(), extension);
+        if (!choices.empty()) {
+            m_focusedItem = FocusItem{ FocusItem::Kind::Control, 0, FocusControl::DefaultAppHandler };
+        } else if (row && !row->policy.configuredOverrideAppId.empty()) {
+            m_focusedItem = FocusItem{ FocusItem::Kind::Control, 0, FocusControl::DefaultAppRestore };
+        } else {
+            m_focusedItem = FocusItem{ FocusItem::Kind::Control, 0, FocusControl::DefaultAppCancel };
+        }
+        m_defaultAppsStatus.clear();
+        ensureInventoryFocusVisible();
+    }
+
+    void closeDefaultAppsPicker()
+    {
+        const int rowIndex = gxos::apps::settings::closeDefaultAppsPicker(m_defaultAppsModel.snapshot(),
+            m_selectedDefaultExtension, m_defaultAppsPickerOpen, m_defaultAppsPickerScroll);
+        m_focusedItem = rowIndex >= 0
+            ? FocusItem{ FocusItem::Kind::Control, rowIndex, FocusControl::DefaultAppEntry }
+            : FocusItem{ FocusItem::Kind::Control, 0, FocusControl::AppsDefaultTab };
+    }
+
+    void chooseDefaultAppHandler(size_t eligibleIndex)
+    {
+        DesktopDefaultAppsBackend backend(m_appInventory);
+        std::string requestedAppId;
+        uint64_t requestedOwner = 0;
+        uint64_t requestedGeneration = 0;
+        const DefaultAppsRow* before = findDefaultAppsRow(
+            m_defaultAppsModel.snapshot(), m_selectedDefaultExtension);
+        const std::vector<size_t> beforeChoices = currentDefaultHandlerIndices();
+        if (before && eligibleIndex < beforeChoices.size()) {
+            const DocumentHandlerInfo& selected = before->handlers.handlers[beforeChoices[eligibleIndex]];
+            requestedAppId = selected.appId;
+            requestedOwner = selected.registrationOwner;
+            requestedGeneration = selected.registrationGeneration;
+        }
+        // Keep a failed or stale choice from rebinding to a new app at the same list index.
+        m_focusedItem = FocusItem{ FocusItem::Kind::Control, 0, FocusControl::DefaultAppCancel };
+        const DefaultHandlerMutationResult result = m_defaultAppsModel.chooseHandler(
+            backend, m_selectedDefaultExtension, eligibleIndex);
+        const bool noOp = result.succeeded() && result.reason == "The built-in default is already selected.";
+        m_defaultAppsStatus = result.succeeded()
+            ? (noOp ? "The system default is already selected." : "Default app updated.")
+            : "The default app could not be changed.";
+        refreshDefaultApps();
+        if (result.succeeded()) {
+            closeDefaultAppsPicker();
+            return;
+        }
+        const DefaultAppsRow* refreshed = findDefaultAppsRow(
+            m_defaultAppsModel.snapshot(), m_selectedDefaultExtension);
+        bool restored = false;
+        if (refreshed && !requestedAppId.empty()) {
+            DesktopDefaultAppsBackend refreshedBackend(m_appInventory);
+            const int currentChoice = eligibleDefaultAppHandlerIndexByIdentity(*refreshed, refreshedBackend,
+                requestedAppId, requestedOwner, requestedGeneration);
+            if (currentChoice >= 0) {
+                m_focusedItem = FocusItem{ FocusItem::Kind::Control, currentChoice,
+                    FocusControl::DefaultAppHandler };
+                restored = true;
+            }
+        }
+        if (!restored) {
+            m_focusedItem = refreshed && !refreshed->policy.configuredOverrideAppId.empty()
+                ? FocusItem{ FocusItem::Kind::Control, 0, FocusControl::DefaultAppRestore }
+                : FocusItem{ FocusItem::Kind::Control, 0, FocusControl::DefaultAppCancel };
+        }
+        ensureInventoryFocusVisible();
+    }
+
+    void restoreDefaultApp()
+    {
+        DesktopDefaultAppsBackend backend(m_appInventory);
+        const DefaultHandlerMutationResult result = m_defaultAppsModel.restoreBuiltInDefault(
+            backend, m_selectedDefaultExtension);
+        m_defaultAppsStatus = result.succeeded()
+            ? "Configured default cleared."
+            : "The configured default could not be cleared.";
+        refreshDefaultApps();
+        if (result.succeeded()) closeDefaultAppsPicker();
     }
 
     void refreshDeveloperInventory()
@@ -1028,6 +1302,34 @@ private:
     {
         return std::max(1, (inventoryListBottom() - inventoryListTop()) / inventoryRowPitch());
     }
+    int appsTabsY() const { return settingsDefaultAppsTabsY(kContentY); }
+    int appsTabsHeight() const { return settingsDefaultAppsTabsHeight(smallSettingsLayout()); }
+    int appsTabWidth() const { return std::min(150, std::max(112, (pageWidth() - 22) / 2)); }
+    int appsTabX(bool defaultApps) const
+    {
+        return pageX() + 8 + (defaultApps ? appsTabWidth() + 8 : 0);
+    }
+    int appsInventoryListTop() const { return settingsDefaultAppsListTop(kContentY, smallSettingsLayout()); }
+    int appsInventoryVisibleRows() const
+    {
+        return settingsDefaultAppsVisibleRows(appsInventoryListTop(), inventoryListBottom(), inventoryRowPitch());
+    }
+    int defaultAppsListTop() const { return appsInventoryListTop(); }
+    int defaultAppsListBottom() const { return inventoryListBottom(); }
+    int defaultAppsVisibleRows() const
+    {
+        return settingsDefaultAppsVisibleRows(defaultAppsListTop(), defaultAppsListBottom(), inventoryRowPitch());
+    }
+    int defaultAppsPickerTop() const { return settingsDefaultAppsPickerTop(kContentY, smallSettingsLayout()); }
+    int defaultAppsPickerRowsTop() const { return settingsDefaultAppsPickerRowsTop(kContentY, smallSettingsLayout()); }
+    int defaultAppsPickerActionY() const { return inventoryActionY(); }
+    int defaultAppsPickerBottom() const { return defaultAppsPickerActionY() - 10; }
+    int defaultAppsPickerRowPitch() const { return smallSettingsLayout() ? 28 : 32; }
+    int defaultAppsPickerVisibleRows() const
+    {
+        return settingsDefaultAppsVisibleRows(defaultAppsPickerRowsTop(), defaultAppsPickerBottom(),
+            defaultAppsPickerRowPitch());
+    }
     int dateTimeTop() const { return inventoryListTop(); }
     int dateTimeClockCardHeight() const { return smallSettingsLayout() ? 112 : 144; }
     int dateTimeZoneCardY() const { return dateTimeTop() + dateTimeClockCardHeight() + 10; }
@@ -1039,10 +1341,12 @@ private:
     {
         const int deviceMax = std::max(0, static_cast<int>(deviceDisplayIndices().size()) - inventoryVisibleRows());
         const int storageMax = std::max(0, static_cast<int>(storageDisplayEntries().size()) - inventoryVisibleRows());
-        const int appMax = std::max(0, static_cast<int>(m_appInventory.count) - inventoryVisibleRows());
+        const int appMax = std::max(0, static_cast<int>(m_appInventory.count) - appsInventoryVisibleRows());
+        const int defaultAppsMax = std::max(0, static_cast<int>(m_defaultAppsModel.snapshot().count) - defaultAppsVisibleRows());
         m_deviceScroll = std::max(0, std::min(m_deviceScroll, deviceMax));
         m_storageScroll = std::max(0, std::min(m_storageScroll, storageMax));
         m_appScroll = std::max(0, std::min(m_appScroll, appMax));
+        m_defaultAppsScroll = std::max(0, std::min(m_defaultAppsScroll, defaultAppsMax));
     }
 
     void ensureInventoryFocusVisible()
@@ -1071,8 +1375,15 @@ private:
         } else if (m_focusedItem.control == FocusControl::AppEntry && m_focusedItem.index >= 0 &&
                    static_cast<size_t>(m_focusedItem.index) < m_appInventory.count) {
             if (m_focusedItem.index < m_appScroll) m_appScroll = m_focusedItem.index;
-            else if (m_focusedItem.index >= m_appScroll + inventoryVisibleRows())
-                m_appScroll = m_focusedItem.index - inventoryVisibleRows() + 1;
+            else if (m_focusedItem.index >= m_appScroll + appsInventoryVisibleRows())
+                m_appScroll = m_focusedItem.index - appsInventoryVisibleRows() + 1;
+        } else if (m_focusedItem.control == FocusControl::DefaultAppEntry && m_focusedItem.index >= 0 &&
+                   static_cast<size_t>(m_focusedItem.index) < m_defaultAppsModel.snapshot().count) {
+            m_defaultAppsScroll = settingsDefaultAppsScrollToInclude(m_defaultAppsScroll,
+                m_focusedItem.index, m_defaultAppsModel.snapshot().count, defaultAppsVisibleRows());
+        } else if (m_focusedItem.control == FocusControl::DefaultAppHandler && m_focusedItem.index >= 0) {
+            m_defaultAppsPickerScroll = settingsDefaultAppsScrollToInclude(m_defaultAppsPickerScroll,
+                m_focusedItem.index, currentDefaultHandlerIndices().size(), defaultAppsPickerVisibleRows());
         }
         clampInventoryScroll();
     }
@@ -1224,7 +1535,24 @@ private:
                 const AppInventoryEntry* selected = findAppInventoryEntry(
                     m_appInventory, m_selectedAppId, m_selectedAppGeneration);
                 if (selected && selected->openSupported) add(FocusControl::AppsOpen);
+            } else if (m_navigation.route().target == TargetId::AppsDefault) {
+                add(FocusControl::AppsInstalledTab);
+                add(FocusControl::AppsDefaultTab);
+                if (m_defaultAppsPickerOpen) {
+                    const std::vector<size_t> choices = currentDefaultHandlerIndices();
+                    for (size_t i = 0; i < choices.size(); ++i)
+                        items.push_back(FocusItem{ FocusItem::Kind::Control, static_cast<int>(i), FocusControl::DefaultAppHandler });
+                    const DefaultAppsRow* row = findDefaultAppsRow(
+                        m_defaultAppsModel.snapshot(), m_selectedDefaultExtension);
+                    if (row && !row->policy.configuredOverrideAppId.empty()) add(FocusControl::DefaultAppRestore);
+                    add(FocusControl::DefaultAppCancel);
+                } else {
+                    for (size_t i = 0; i < m_defaultAppsModel.snapshot().count; ++i)
+                        items.push_back(FocusItem{ FocusItem::Kind::Control, static_cast<int>(i), FocusControl::DefaultAppEntry });
+                }
             } else {
+                add(FocusControl::AppsInstalledTab);
+                add(FocusControl::AppsDefaultTab);
                 for (size_t i = 0; i < m_appInventory.count; ++i)
                     items.push_back(FocusItem{ FocusItem::Kind::Control, static_cast<int>(i), FocusControl::AppEntry });
             }
@@ -1386,6 +1714,38 @@ private:
             const int next = (m_focusedItem.index + delta + count) % count;
             m_focusedItem.index = next;
             ensureInventoryFocusVisible();
+        } else if (m_focusedItem.kind == FocusItem::Kind::Control &&
+                   m_focusedItem.control == FocusControl::DefaultAppEntry &&
+                   m_defaultAppsModel.snapshot().count != 0) {
+            m_focusedItem.index = nextDefaultAppsRowIndex(m_focusedItem.index,
+                m_defaultAppsModel.snapshot().count, delta);
+            ensureInventoryFocusVisible();
+        } else if (m_defaultAppsPickerOpen && m_focusedItem.kind == FocusItem::Kind::Control &&
+                   (m_focusedItem.control == FocusControl::DefaultAppHandler ||
+                    m_focusedItem.control == FocusControl::DefaultAppRestore ||
+                    m_focusedItem.control == FocusControl::DefaultAppCancel)) {
+            const std::vector<size_t> choices = currentDefaultHandlerIndices();
+            const DefaultAppsRow* row = findDefaultAppsRow(
+                m_defaultAppsModel.snapshot(), m_selectedDefaultExtension);
+            const bool hasRestore = row && !row->policy.configuredOverrideAppId.empty();
+            DefaultAppsPickerFocus current;
+            if (m_focusedItem.control == FocusControl::DefaultAppHandler) {
+                current.kind = DefaultAppsPickerFocusKind::Handler;
+                current.handlerIndex = static_cast<size_t>(std::max(0, m_focusedItem.index));
+            } else if (m_focusedItem.control == FocusControl::DefaultAppRestore) {
+                current.kind = DefaultAppsPickerFocusKind::Restore;
+            } else {
+                current.kind = DefaultAppsPickerFocusKind::Cancel;
+            }
+            const DefaultAppsPickerFocus next = nextDefaultAppsPickerFocus(current, choices.size(), hasRestore, delta);
+            if (next.kind == DefaultAppsPickerFocusKind::Handler)
+                m_focusedItem = FocusItem{ FocusItem::Kind::Control, static_cast<int>(next.handlerIndex),
+                    FocusControl::DefaultAppHandler };
+            else if (next.kind == DefaultAppsPickerFocusKind::Restore)
+                m_focusedItem = FocusItem{ FocusItem::Kind::Control, 0, FocusControl::DefaultAppRestore };
+            else
+                m_focusedItem = FocusItem{ FocusItem::Kind::Control, 0, FocusControl::DefaultAppCancel };
+            ensureInventoryFocusVisible();
         }
     }
 
@@ -1412,6 +1772,22 @@ private:
                 const uint32_t i = networkAdapterDisplayStart() + row;
                 if (inRect(x, y, pageX() + 12, networkAdapterRowY(row), pageWidth() - 24, 24))
                     return FocusItem{ FocusItem::Kind::Control, static_cast<int>(i), FocusControl::NetworkAdapter };
+            }
+        }
+        if (m_navigation.selectedCategory() == CategoryId::Apps &&
+            m_navigation.route().target == TargetId::AppsDefault) {
+            if (m_defaultAppsPickerOpen) {
+                const int index = settingsDefaultAppsMouseRowIndex(y, defaultAppsPickerRowsTop(),
+                    defaultAppsPickerBottom(), defaultAppsPickerRowPitch(), m_defaultAppsPickerScroll,
+                    currentDefaultHandlerIndices().size());
+                if (index >= 0 && x >= pageX() + 8 && x <= pageX() + pageWidth() - 8)
+                    return FocusItem{ FocusItem::Kind::Control, index, FocusControl::DefaultAppHandler };
+            } else {
+                const int index = settingsDefaultAppsMouseRowIndex(y, defaultAppsListTop(),
+                    defaultAppsListBottom(), inventoryRowPitch(), m_defaultAppsScroll,
+                    m_defaultAppsModel.snapshot().count);
+                if (index >= 0 && x >= pageX() + 8 && x <= pageX() + pageWidth() - 8)
+                    return FocusItem{ FocusItem::Kind::Control, index, FocusControl::DefaultAppEntry };
             }
         }
         for (const FocusItem& item : focusOrder()) {
@@ -1510,10 +1886,47 @@ private:
         }
         case FocusControl::AppEntry: {
             if (m_navigation.route().target == TargetId::AppDetail || focus.index < m_appScroll ||
-                focus.index >= m_appScroll + inventoryVisibleRows() || focus.index < 0 ||
+                focus.index >= m_appScroll + appsInventoryVisibleRows() || focus.index < 0 ||
                 static_cast<size_t>(focus.index) >= m_appInventory.count) return false;
-            const int rowY = inventoryListTop() + (focus.index - m_appScroll) * inventoryRowPitch();
+            const int rowY = appsInventoryListTop() + (focus.index - m_appScroll) * inventoryRowPitch();
             return inRect(x, y, pageX() + 8, rowY, pageWidth() - 16, inventoryRowPitch() - 4);
+        }
+        case FocusControl::AppsInstalledTab:
+            return m_navigation.route().target != TargetId::AppDetail &&
+                inRect(x, y, appsTabX(false), appsTabsY(), appsTabWidth(), appsTabsHeight());
+        case FocusControl::AppsDefaultTab:
+            return m_navigation.route().target != TargetId::AppDetail &&
+                inRect(x, y, appsTabX(true), appsTabsY(), appsTabWidth(), appsTabsHeight());
+        case FocusControl::DefaultAppEntry: {
+            if (m_navigation.route().target != TargetId::AppsDefault || m_defaultAppsPickerOpen ||
+                focus.index < m_defaultAppsScroll ||
+                focus.index >= m_defaultAppsScroll + defaultAppsVisibleRows() || focus.index < 0 ||
+                static_cast<size_t>(focus.index) >= m_defaultAppsModel.snapshot().count) return false;
+            const int rowY = defaultAppsListTop() + (focus.index - m_defaultAppsScroll) * inventoryRowPitch();
+            return inRect(x, y, pageX() + 8, rowY, pageWidth() - 16, inventoryRowPitch() - 4);
+        }
+        case FocusControl::DefaultAppHandler: {
+            if (m_navigation.route().target != TargetId::AppsDefault || !m_defaultAppsPickerOpen ||
+                focus.index < m_defaultAppsPickerScroll ||
+                focus.index >= m_defaultAppsPickerScroll + defaultAppsPickerVisibleRows() || focus.index < 0 ||
+                static_cast<size_t>(focus.index) >= currentDefaultHandlerIndices().size()) return false;
+            const int rowY = defaultAppsPickerRowsTop() +
+                (focus.index - m_defaultAppsPickerScroll) * defaultAppsPickerRowPitch();
+            return inRect(x, y, pageX() + 8, rowY, pageWidth() - 16, defaultAppsPickerRowPitch() - 2);
+        }
+        case FocusControl::DefaultAppRestore:
+        case FocusControl::DefaultAppCancel: {
+            if (m_navigation.route().target != TargetId::AppsDefault || !m_defaultAppsPickerOpen) return false;
+            const int actionWidth = std::max(1, (pageWidth() - 28) / 2);
+            const int actionX = control == FocusControl::DefaultAppRestore
+                ? pageX() + 8 : pageX() + 20 + actionWidth;
+            if (control == FocusControl::DefaultAppRestore) {
+                const DefaultAppsRow* row = findDefaultAppsRow(
+                    m_defaultAppsModel.snapshot(), m_selectedDefaultExtension);
+                if (!row || row->policy.configuredOverrideAppId.empty()) return false;
+            }
+            return inRect(x, y, actionX, defaultAppsPickerActionY(), actionWidth,
+                smallSettingsLayout() ? 30 : 38);
         }
         case FocusControl::StorageDiskEntry:
         case FocusControl::StorageVolumeEntry: {
@@ -1561,7 +1974,11 @@ private:
         if (route.category == CategoryId::Display && !m_display.dirty()) refreshDisplay();
         if (route.category == CategoryId::System && !m_display.dirty()) refreshDisplay();
         if (route.category == CategoryId::Personalization) refreshPersonalization();
-        if (route.category == CategoryId::Apps) refreshApps();
+        if (route.category == CategoryId::Apps) {
+            refreshApps();
+            if (route.target == TargetId::AppsDefault) refreshDefaultApps();
+            if (route.target != TargetId::AppsDefault) m_defaultAppsPickerOpen = false;
+        }
         if (route.category == CategoryId::DateTime) refreshDateTime();
         if (route.category == CategoryId::Accessibility || route.category == CategoryId::Developer)
             refreshDeveloperInventory();
@@ -1593,6 +2010,13 @@ private:
             ? route.category == CategoryId::Storage && route.target == TargetId::StorageDiskDetail
             : requested == FocusControl::AppsDetailBack
             ? route.category == CategoryId::Apps && route.target == TargetId::AppDetail
+            : requested == FocusControl::AppsInstalledTab
+            ? route.category == CategoryId::Apps && route.target != TargetId::AppDetail
+            : requested == FocusControl::DefaultAppEntry
+            ? route.category == CategoryId::Apps && route.target == TargetId::AppsDefault &&
+                m_defaultAppsModel.snapshot().available && m_defaultAppsModel.snapshot().count > 0
+            : requested == FocusControl::AppsDefaultTab
+            ? route.category == CategoryId::Apps && route.target != TargetId::AppDetail
             : requested == FocusControl::DateTimeAdvanced
             ? route.category == CategoryId::DateTime && route.target == TargetId::DateTimeTimeZone
             : requested == FocusControl::AccessibilityEnhancedFocus
@@ -1609,9 +2033,14 @@ private:
             : requested == FocusControl::DisplayResolution
             ? m_display.available && m_display.supportedModes.size() > 1 && m_display.active.outputCount == 1
             : requested == FocusControl::DisplayMode ? m_display.available && m_display.active.outputCount > 1 : false;
-        m_focusedItem = focusable
-            ? FocusItem{ FocusItem::Kind::Control, 0, requested }
-            : FocusItem{ FocusItem::Kind::Category, static_cast<int>(route.category), FocusControl::None };
+        if (requested == FocusControl::DefaultAppEntry && !focusable &&
+            route.category == CategoryId::Apps && route.target == TargetId::AppsDefault) {
+            m_focusedItem = FocusItem{ FocusItem::Kind::Control, 0, FocusControl::AppsDefaultTab };
+        } else {
+            m_focusedItem = focusable
+                ? FocusItem{ FocusItem::Kind::Control, 0, requested }
+                : FocusItem{ FocusItem::Kind::Category, static_cast<int>(route.category), FocusControl::None };
+        }
         ensureS7FocusVisible();
     }
 
@@ -1698,6 +2127,28 @@ private:
                 break;
             case FocusControl::UsersBack:
                 navigateTo(SettingsRoute{ CategoryId::Users, TargetId::Page });
+                break;
+            case FocusControl::AppsInstalledTab:
+                navigateTo(SettingsRoute{ CategoryId::Apps, TargetId::AppsList });
+                break;
+            case FocusControl::AppsDefaultTab:
+                if (m_defaultAppsPickerOpen) closeDefaultAppsPicker();
+                else navigateTo(SettingsRoute{ CategoryId::Apps, TargetId::AppsDefault });
+                break;
+            case FocusControl::DefaultAppEntry:
+                if (item.index >= 0 && static_cast<size_t>(item.index) < m_defaultAppsModel.snapshot().count) {
+                    const std::string extension = m_defaultAppsModel.snapshot().rows[static_cast<size_t>(item.index)].extension;
+                    openDefaultAppsPicker(extension);
+                }
+                break;
+            case FocusControl::DefaultAppHandler:
+                if (item.index >= 0) chooseDefaultAppHandler(static_cast<size_t>(item.index));
+                break;
+            case FocusControl::DefaultAppRestore:
+                restoreDefaultApp();
+                break;
+            case FocusControl::DefaultAppCancel:
+                closeDefaultAppsPicker();
                 break;
             case FocusControl::AppEntry:
                 if (item.index >= 0 && static_cast<size_t>(item.index) < m_appInventory.count) {
@@ -2569,9 +3020,10 @@ private:
 
     void renderApps()
     {
+        renderAppsTabs();
         const int x = pageX();
         const int width = pageWidth();
-        const int top = inventoryListTop();
+        const int top = appsInventoryListTop();
         const int bottom = inventoryListBottom();
         std::string count = std::to_string(m_appInventory.count);
         if (m_appInventory.truncated) count += " of " + std::to_string(m_appInventory.totalCount);
@@ -2588,7 +3040,7 @@ private:
         }
 
         const size_t first = static_cast<size_t>(m_appScroll);
-        const size_t end = std::min(m_appInventory.count, first + static_cast<size_t>(inventoryVisibleRows()));
+        const size_t end = std::min(m_appInventory.count, first + static_cast<size_t>(appsInventoryVisibleRows()));
         for (size_t index = first; index < end; ++index) {
             const AppInventoryEntry& app = m_appInventory.entries[index];
             const int rowY = top + static_cast<int>(index - first) * inventoryRowPitch();
@@ -2605,8 +3057,172 @@ private:
             drawText(x + 20, rowY + (smallSettingsLayout() ? 27 : 30), fitText(secondary, charLimit), mutedTextColor());
             drawText(x + width - 34, rowY + 16, ">", accentColor());
         }
-        if (m_appInventory.count > static_cast<size_t>(inventoryVisibleRows()))
+        if (m_appInventory.count > static_cast<size_t>(appsInventoryVisibleRows()))
             drawText(x + 10, bottom - 17, "Use the mouse wheel or arrow keys to browse.", mutedTextColor());
+    }
+
+    void renderAppsTabs()
+    {
+        const bool defaultPage = m_navigation.route().target == TargetId::AppsDefault;
+        const FocusItem installed{ FocusItem::Kind::Control, 0, FocusControl::AppsInstalledTab };
+        const FocusItem defaults{ FocusItem::Kind::Control, 0, FocusControl::AppsDefaultTab };
+        drawButton(appsTabX(false), appsTabsY(), appsTabWidth(), appsTabsHeight(),
+            "Installed apps", !defaultPage, sameFocus(m_hoverItem, installed),
+            sameFocus(m_focusedItem, installed), true);
+        drawButton(appsTabX(true), appsTabsY(), appsTabWidth(), appsTabsHeight(),
+            "Default apps", defaultPage, sameFocus(m_hoverItem, defaults),
+            sameFocus(m_focusedItem, defaults), true);
+    }
+
+    std::string defaultAppHandlerName(const DefaultAppsRow& row, const std::string& appId) const
+    {
+        if (appId.empty()) return {};
+        for (size_t i = 0; i < row.handlers.count; ++i)
+            if (row.handlers.handlers[i].appId == appId && !row.handlers.handlers[i].displayName.empty())
+                return row.handlers.handlers[i].displayName;
+        if (appId == row.policy.builtInDefaultAppId && !row.builtInDisplayName.empty())
+            return row.builtInDisplayName;
+        if (appId == row.policy.configuredOverrideAppId && !row.configuredDisplayName.empty())
+            return row.configuredDisplayName;
+        if (appId == row.policy.effectiveDefaultAppId) return row.effectiveDisplayName;
+        return {};
+    }
+
+    std::string defaultAppsStateLine(const DefaultAppsRow& row) const
+    {
+        if (row.policy.configuredOverrideAppId.empty()) {
+            if (row.policy.effectiveDefaultAppId.empty()) return "No default app";
+            if (!row.policy.effectiveDefaultAvailable) return "System default unavailable";
+            return "System default";
+        }
+        if (row.policy.configuredStatus == ConfiguredDefaultHandlerStatus::Available &&
+            row.policy.effectiveDefaultAppId == row.policy.configuredOverrideAppId)
+            return "Configured default";
+        const std::string configuredName = defaultAppHandlerName(row, row.policy.configuredOverrideAppId);
+        if (configuredName.empty()) return "Configured app unavailable";
+        return "Configured: " + configuredName + " (unavailable)";
+    }
+
+    void renderDefaultApps()
+    {
+        renderAppsTabs();
+        const int x = pageX();
+        const int width = pageWidth();
+        const int bottom = m_defaultAppsPickerOpen ? defaultAppsPickerBottom() : defaultAppsListBottom();
+        const DefaultAppsSnapshot& snapshot = m_defaultAppsModel.snapshot();
+        const std::string context = snapshot.available
+            ? "Default apps apply system-wide on guideXOS."
+            : "Default app information is unavailable.";
+        drawText(x + 8, appsTabsY() + appsTabsHeight() + 4,
+            fitText(context, static_cast<size_t>(std::max(18, (width - 20) / 8))),
+            m_defaultAppsStatus.empty() ? mutedTextColor() : accentColor());
+
+        if (m_defaultAppsPickerOpen) {
+            const DefaultAppsRow* row = findDefaultAppsRow(snapshot, m_selectedDefaultExtension);
+            drawText(x + 8, appsTabsY() + appsTabsHeight() + 22,
+                fitText("Choose a default app for " + m_selectedDefaultExtension,
+                    static_cast<size_t>(std::max(18, (width - 20) / 8))), textColor());
+            const int top = defaultAppsPickerTop();
+            drawRect(x + 4, top - 4, width - 8, std::max(1, bottom - top + 10), cardColor());
+            drawOutline(x + 4, top - 4, width - 8, std::max(1, bottom - top + 10), borderColor());
+            const std::vector<size_t> choices = currentDefaultHandlerIndices();
+            drawText(x + 18, top + 3,
+                row && row->handlers.truncated
+                    ? "Handler list truncated at the App Model limit."
+                    : "Only current capable apps are listed.", mutedTextColor());
+            if (!snapshot.available) {
+                drawText(x + 18, top + 42, "Default app information is unavailable.", mutedTextColor());
+            } else if (!row || choices.empty()) {
+                drawText(x + 18, top + 42, "No available app can open this file type.", mutedTextColor());
+            } else {
+                const size_t first = static_cast<size_t>(m_defaultAppsPickerScroll);
+                const size_t end = std::min(choices.size(), first + static_cast<size_t>(defaultAppsPickerVisibleRows()));
+                const int rowPitch = defaultAppsPickerRowPitch();
+                DesktopDefaultAppsBackend backend(m_appInventory);
+                for (size_t choice = first; choice < end; ++choice) {
+                    const size_t handlerIndex = choices[choice];
+                    const int rowY = defaultAppsPickerRowsTop() + static_cast<int>(choice - first) * rowPitch;
+                    const FocusItem item{ FocusItem::Kind::Control, static_cast<int>(choice), FocusControl::DefaultAppHandler };
+                    const bool focused = sameFocus(item, m_focusedItem);
+                    const bool hovered = sameFocus(item, m_hoverItem);
+                    const uint32_t fill = hovered ? blendColor(cardColor(), accentColor(), 8) :
+                        focused ? blendColor(cardColor(), accentColor(), 5) : cardColor();
+                    drawRect(x + 10, rowY + 1, width - 28, rowPitch - 3, fill);
+                    if (focused || hovered) drawOutline(x + 10, rowY + 1, width - 28, rowPitch - 3, accentColor());
+                    drawText(x + 20, rowY + (smallSettingsLayout() ? 5 : 7),
+                        formatDefaultAppHandlerChoice(*row, handlerIndex, backend,
+                            static_cast<size_t>(std::max(12, (width - 52) / 8))), textColor());
+                    if (row->handlers.handlers[handlerIndex].appId == row->policy.effectiveDefaultAppId)
+                        drawText(x + width - 48, rowY + (smallSettingsLayout() ? 5 : 7), "Current", mutedTextColor());
+                }
+            }
+
+            const int actionWidth = std::max(1, (width - 28) / 2);
+            const int buttonHeight = smallSettingsLayout() ? 30 : 38;
+            if (row && !row->policy.configuredOverrideAppId.empty()) {
+                const FocusItem restore{ FocusItem::Kind::Control, 0, FocusControl::DefaultAppRestore };
+                drawButton(x + 8, defaultAppsPickerActionY(), actionWidth, buttonHeight,
+                    "Restore default", false, sameFocus(m_hoverItem, restore),
+                    sameFocus(m_focusedItem, restore), true);
+            }
+            const FocusItem cancel{ FocusItem::Kind::Control, 0, FocusControl::DefaultAppCancel };
+            drawButton(x + 20 + actionWidth, defaultAppsPickerActionY(), actionWidth, buttonHeight,
+                "Cancel", false, sameFocus(m_hoverItem, cancel), sameFocus(m_focusedItem, cancel), true);
+            return;
+        }
+
+        const int top = defaultAppsListTop();
+        std::string countLine = snapshot.available
+            ? std::to_string(snapshot.count) + (snapshot.count == 1 ? " file type" : " file types")
+            : std::string("No App Model snapshot");
+        if (snapshot.truncated)
+            countLine += " shown of " + std::to_string(snapshot.totalCount) + " · list truncated";
+        if (!m_defaultAppsStatus.empty()) countLine += " · " + m_defaultAppsStatus;
+        drawText(x + 8, appsTabsY() + appsTabsHeight() + 22,
+            fitText(countLine, static_cast<size_t>(std::max(18, (width - 20) / 8))),
+            m_defaultAppsStatus.empty() ? mutedTextColor() : accentColor());
+        drawRect(x + 4, top, width - 8, defaultAppsListBottom() - top, cardColor());
+        drawOutline(x + 4, top, width - 8, defaultAppsListBottom() - top, borderColor());
+        if (!snapshot.available) {
+            drawText(x + 20, top + 24, "Default app information is unavailable.", mutedTextColor());
+            return;
+        }
+        if (snapshot.count == 0) {
+            drawText(x + 20, top + 24, "No file-type associations are currently registered.", mutedTextColor());
+            return;
+        }
+
+        const size_t first = static_cast<size_t>(m_defaultAppsScroll);
+        const size_t end = std::min(snapshot.count, first + static_cast<size_t>(defaultAppsVisibleRows()));
+        const size_t rowPitch = static_cast<size_t>(inventoryRowPitch());
+        const size_t extensionLimit = static_cast<size_t>(std::max(10, std::min(18, (width / 3 - 24) / 8)));
+        const size_t appLimit = static_cast<size_t>(std::max(12,
+            (width - static_cast<int>(extensionLimit) * 8 - 92) / 8));
+        for (size_t index = first; index < end; ++index) {
+            const DefaultAppsRow& row = snapshot.rows[index];
+            const int rowY = top + static_cast<int>(index - first) * static_cast<int>(rowPitch);
+            const FocusItem item{ FocusItem::Kind::Control, static_cast<int>(index), FocusControl::DefaultAppEntry };
+            const bool focused = sameFocus(item, m_focusedItem);
+            const bool hovered = sameFocus(item, m_hoverItem);
+            const uint32_t fill = hovered ? blendColor(cardColor(), accentColor(), 8) :
+                focused ? blendColor(cardColor(), accentColor(), 5) : cardColor();
+            drawRect(x + 10, rowY + 2, width - 28, static_cast<int>(rowPitch) - 6, fill);
+            if (focused || hovered) drawOutline(x + 10, rowY + 2, width - 28, static_cast<int>(rowPitch) - 6, accentColor());
+            std::string effectiveName = row.policy.effectiveDefaultAvailable
+                ? defaultAppHandlerName(row, row.policy.effectiveDefaultAppId) : std::string();
+            if (effectiveName.empty()) effectiveName = row.policy.effectiveDefaultAvailable
+                ? "Application unavailable" : "No available app";
+            drawText(x + 20, rowY + 5, fitText(row.extension, extensionLimit), textColor());
+            drawText(x + 20 + static_cast<int>(extensionLimit) * 8 + 12, rowY + 5,
+                fitText("Current: " + effectiveName, appLimit), textColor());
+            drawText(x + 20, rowY + (smallSettingsLayout() ? 26 : 30),
+                fitText(defaultAppsStateLine(row), static_cast<size_t>(std::max(16, (width - 52) / 8))),
+                row.policy.configuredOverrideAppId.empty() ? mutedTextColor() : accentColor());
+            drawText(x + width - 34, rowY + 15, ">", accentColor());
+        }
+        if (snapshot.count > static_cast<size_t>(defaultAppsVisibleRows()))
+            drawText(x + 14, defaultAppsListBottom() - 17,
+                "Use the mouse wheel or arrow keys to browse file types.", mutedTextColor());
     }
 
     void renderAppDetails()

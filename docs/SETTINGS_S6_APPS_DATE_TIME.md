@@ -18,6 +18,11 @@ the Settings window was not visually inspected. The page renderer and input
 translation unit passed direct syntax compilation; S6 model tests cover the
 inventory, selection identity, routes, clock formatting, and refresh policy.
 
+Phase 9 extends the Apps page with a **Default apps** tab while retaining the
+S6 registered-app inventory and its existing Open behavior. The additions,
+including current production limitations and validation, are documented in
+[the Phase 9 Default Apps report](APPMODEL_PHASE9_SETTINGS_DEFAULT_APPS.md).
+
 ## Apps ownership and behavior
 
 `DesktopService::s_appRegistry` is the authoritative App Model registry. It
@@ -166,3 +171,9 @@ system-service request. No live Settings screenshot was captured.
 - The existing phase 5B App Model status closeout remains not-ready for the
   unrelated launch-storage preview warnings and stale expected count noted
   above.
+
+Phase 9 reran `scripts/smoke-appmodel-phase5b-regression-closeout.ps1` against
+the current hosted executable and it passed, including the ready status and
+status/inventory agreement checks. The earlier S6 closeout result above is
+historical and is superseded by that Phase 9 run; see the Phase 9 report for
+the current regression result.
