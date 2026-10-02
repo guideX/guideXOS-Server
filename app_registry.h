@@ -2,6 +2,7 @@
 
 #include "app_manifest.h"
 #include "app_activation.h"
+#include "app_default_handler_store.h"
 #include "app_model_limits.h"
 
 #include <cstddef>
@@ -14,6 +15,8 @@
 
 namespace gxos {
 namespace apps {
+
+bool NormalizeDocumentExtension(const std::string& extension, std::string& normalized);
 
 enum class AppSourceKind {
     BuiltIn = 0,
@@ -41,6 +44,48 @@ enum class FileAssociationResolutionStatus {
     HandlerDoesNotSupportDocuments,
     HandlerUnavailable,
     RegistryCapacityExceeded
+};
+
+enum class ConfiguredDefaultHandlerStatus {
+    NotConfigured = 0,
+    Available,
+    RegistrationMissing,
+    CapabilityMissing,
+    DocumentActivationUnsupported,
+    TemporarilyUnavailable,
+    NonDurableRegistration,
+    RegistryCapacityExceeded
+};
+
+enum class DefaultHandlerMutationStatus {
+    Success = 0,
+    InvalidExtension,
+    UnknownApplication,
+    CapabilityMissing,
+    DocumentActivationUnsupported,
+    HandlerUnavailable,
+    NonDurableRegistration,
+    CapacityExceeded,
+    PersistenceFailure,
+    VerificationFailure
+};
+
+struct DefaultHandlerInfo {
+    std::string extension;
+    std::string builtInDefaultAppId;
+    std::string configuredOverrideAppId;
+    std::string effectiveDefaultAppId;
+    ConfiguredDefaultHandlerStatus configuredStatus = ConfiguredDefaultHandlerStatus::NotConfigured;
+    bool effectiveDefaultAvailable = false;
+};
+
+struct DefaultHandlerMutationResult {
+    DefaultHandlerMutationStatus status = DefaultHandlerMutationStatus::Success;
+    std::string extension;
+    std::string appId;
+    std::string reason;
+
+    bool succeeded() const { return status == DefaultHandlerMutationStatus::Success; }
 };
 
 struct FileAssociationRecord {
@@ -144,6 +189,7 @@ class AppRegistry {
 public:
     AppRegistry();
     explicit AppRegistry(bool preferSystemAppsOverUserApps);
+    AppRegistry(bool preferSystemAppsOverUserApps, const std::filesystem::path& defaultHandlerStorePath);
 
     void SetPreferSystemAppsOverUserApps(bool enabled);
     bool PreferSystemAppsOverUserApps() const;
@@ -161,6 +207,10 @@ public:
     // in source scanning or persistent package discovery.
     bool RegisterTemporaryDevelopmentApp(const RegisteredApp& app, std::string& error);
     bool UnregisterTemporaryDevelopmentApp(const std::string& appId, uint64_t ownerRuntimeId, uint64_t generation);
+#if defined(GXOS_APPMODEL_TESTING)
+    bool RegisterTestDurableApp(const RegisteredApp& app, std::string& error);
+    bool SetTestDocumentActivationBackend(const std::string& appId, bool available);
+#endif
 
     const std::vector<RegisteredApp>& GetAllApps() const;
     const RegisteredApp* FindById(const std::string& appId) const;
@@ -173,6 +223,12 @@ public:
     // Defaults are resolved separately, with stable canonical-ID ordering.
     DocumentHandlerList EnumerateCapableHandlers(const std::string& extension) const;
     DocumentHandlerList EnumerateCapableHandlersForPath(const std::string& path) const;
+    DefaultHandlerMutationResult SetDefaultHandler(const std::string& extension, const std::string& canonicalAppId);
+    DefaultHandlerMutationResult ClearDefaultHandler(const std::string& extension);
+    DefaultHandlerInfo GetDefaultHandlerInfo(const std::string& extension) const;
+    std::vector<std::string> GetKnownDocumentExtensions() const;
+    DefaultHandlerStoreDiagnostics GetDefaultHandlerStoreDiagnostics() const;
+    bool ReloadDefaultHandlerConfiguration(std::string& error);
     FileAssociationResolution ResolveFileAssociation(const std::string& path) const;
     FileAssociationResolution ResolveDocumentActivation(const std::string& canonicalAppId,
                                                         const std::string& path,
@@ -188,13 +244,19 @@ public:
     static const char* ToString(AppSourceKind kind);
     static const char* ToString(DisplayNameResolutionStatus status);
     static const char* ToString(FileAssociationResolutionStatus status);
+    static const char* ToString(ConfiguredDefaultHandlerStatus status);
+    static const char* ToString(DefaultHandlerMutationStatus status);
     static int DisplayNameSourcePriority(AppSourceKind kind);
+
+    // Phase 6/7 extension contract shared by path resolution and persistence.
+    static bool NormalizeDocumentExtension(const std::string& extension, std::string& normalized);
 
 private:
     bool RegisterApp(const RegisteredApp& app, AppScanResult& result);
     bool ShouldReplaceDuplicate(const RegisteredApp& existingApp, const RegisteredApp& newApp) const;
     FileAssociationResolution ResolveFileAssociationForExtension(const std::string& path,
                                                                  const std::string& extension) const;
+    bool HasDeclaredCapability(const RegisteredApp& app, const std::string& normalizedExtension) const;
     void RebuildFileAssociations();
 
     bool m_preferSystemAppsOverUserApps = false;
@@ -203,6 +265,7 @@ private:
     std::map<std::string, size_t> m_appsById;
     std::vector<FileAssociationRecord> m_fileAssociations;
     bool m_fileAssociationCapacityExceeded = false;
+    DefaultAppHandlerStore m_defaultHandlerStore;
 };
 
 } // namespace apps

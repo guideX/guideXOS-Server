@@ -10,6 +10,29 @@
 
 namespace gxos {
 namespace apps {
+
+bool NormalizeDocumentExtension(const std::string& extension, std::string& normalized) {
+    normalized.clear();
+    if (extension.size() > kAppModelMaxFileExtensionBytes) return false;
+    normalized = extension;
+    for (char& ch : normalized) {
+        if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
+    }
+    if (normalized.size() < 2 || normalized[0] != '.') {
+        normalized.clear();
+        return false;
+    }
+    for (size_t i = 1; i < normalized.size(); ++i) {
+        const unsigned char ch = static_cast<unsigned char>(normalized[i]);
+        const bool asciiAlphaNumeric = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9');
+        if (!asciiAlphaNumeric && normalized[i] != '_' && normalized[i] != '-') {
+            normalized.clear();
+            return false;
+        }
+    }
+    return true;
+}
+
 namespace {
 
 std::string joinKnownAliases(const BuiltInAppMetadata& metadata) {
@@ -44,24 +67,6 @@ bool entryPathIsContainedAndPresent(const RegisteredApp& app, const AppEntry& en
     return std::filesystem::is_regular_file(candidate, error) && !error;
 }
 
-std::string normalizeExtension(const std::string& extension) {
-    std::string normalized = extension;
-    for (char& ch : normalized) {
-        if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
-    }
-    return normalized;
-}
-
-bool isValidExtension(const std::string& extension) {
-    if (extension.size() < 2 || extension.size() > kAppModelMaxFileExtensionBytes || extension[0] != '.') return false;
-    for (size_t i = 1; i < extension.size(); ++i) {
-        const unsigned char ch = static_cast<unsigned char>(extension[i]);
-        const bool asciiAlphaNumeric = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9');
-        if (!asciiAlphaNumeric && extension[i] != '_' && extension[i] != '-') return false;
-    }
-    return true;
-}
-
 std::string builtInDefaultAppId(const std::string& extension) {
     if (extension == ".txt" || extension == ".log" || extension == ".ini" || extension == ".cfg") {
         return "gxos.builtin.notepad";
@@ -83,12 +88,8 @@ PathExtensionStatus extensionFromPath(const std::string& path, std::string& exte
     if (dot == std::string::npos || dot == 0) return PathExtensionStatus::NoExtension;
     if (dot + 1 >= baseName.size()) return PathExtensionStatus::InvalidExtension;
 
-    extension = baseName.substr(dot);
-    if (!isValidExtension(extension)) {
-        extension.clear();
-        return PathExtensionStatus::InvalidExtension;
-    }
-    extension = normalizeExtension(extension);
+    const std::string rawExtension = baseName.substr(dot);
+    if (!NormalizeDocumentExtension(rawExtension, extension)) return PathExtensionStatus::InvalidExtension;
     return PathExtensionStatus::Valid;
 }
 
@@ -177,6 +178,15 @@ AppRegistry::AppRegistry()
 
 AppRegistry::AppRegistry(bool preferSystemAppsOverUserApps)
     : m_preferSystemAppsOverUserApps(preferSystemAppsOverUserApps), m_sources(DefaultSources()) {
+}
+
+AppRegistry::AppRegistry(bool preferSystemAppsOverUserApps, const std::filesystem::path& defaultHandlerStorePath)
+    : m_preferSystemAppsOverUserApps(preferSystemAppsOverUserApps), m_sources(DefaultSources()),
+      m_defaultHandlerStore(defaultHandlerStorePath.string()) {
+}
+
+bool AppRegistry::NormalizeDocumentExtension(const std::string& extension, std::string& normalized) {
+    return apps::NormalizeDocumentExtension(extension, normalized);
 }
 
 void AppRegistry::SetPreferSystemAppsOverUserApps(bool enabled) {
@@ -403,9 +413,7 @@ const AppEntry* AppRegistry::FindCompatibleEntry(const std::string& appId, const
 
 DocumentHandlerList AppRegistry::EnumerateCapableHandlers(const std::string& requestedExtension) const {
     DocumentHandlerList result;
-    if (requestedExtension.size() > kAppModelMaxFileExtensionBytes) return result;
-    result.extension = normalizeExtension(requestedExtension);
-    if (!isValidExtension(result.extension)) return result;
+    if (!NormalizeDocumentExtension(requestedExtension, result.extension)) return result;
     result.validExtension = true;
 
     std::vector<DocumentHandlerInfo> candidates;
@@ -445,13 +453,28 @@ DocumentHandlerList AppRegistry::EnumerateCapableHandlers(const std::string& req
     result.availableHandlerCount = static_cast<size_t>(std::count_if(candidates.begin(), candidates.end(),
         [](const DocumentHandlerInfo& handler) { return handler.available; }));
 
+    const std::string configuredOverride = m_defaultHandlerStore.Find(result.extension)
+        ? m_defaultHandlerStore.Find(result.extension)->appId : std::string();
     const std::string preferredDefault = builtInDefaultAppId(result.extension);
     auto matchesPreferred = [&](const DocumentHandlerInfo& handler) {
         return !preferredDefault.empty() && handler.appId == preferredDefault;
     };
-    auto defaultIt = std::find_if(candidates.begin(), candidates.end(), [&](const DocumentHandlerInfo& handler) {
-        return matchesPreferred(handler) && handler.available;
-    });
+    auto durableAndAvailable = [&](const DocumentHandlerInfo& handler) {
+        if (!handler.available) return false;
+        const RegisteredApp* app = FindById(handler.appId);
+        return app && !app->temporaryDevelopment && app->sourceKind != AppSourceKind::DevelopmentTemporary;
+    };
+    auto defaultIt = candidates.end();
+    if (!configuredOverride.empty()) {
+        defaultIt = std::find_if(candidates.begin(), candidates.end(), [&](const DocumentHandlerInfo& handler) {
+            return handler.appId == configuredOverride && durableAndAvailable(handler);
+        });
+    }
+    if (defaultIt == candidates.end()) {
+        defaultIt = std::find_if(candidates.begin(), candidates.end(), [&](const DocumentHandlerInfo& handler) {
+            return matchesPreferred(handler) && handler.available;
+        });
+    }
     if (defaultIt == candidates.end()) {
         defaultIt = std::find_if(candidates.begin(), candidates.end(),
             [](const DocumentHandlerInfo& handler) { return handler.available; });
@@ -480,6 +503,199 @@ DocumentHandlerList AppRegistry::EnumerateCapableHandlersForPath(const std::stri
     std::string extension;
     if (extensionFromPath(path, extension) != PathExtensionStatus::Valid) return DocumentHandlerList{};
     return EnumerateCapableHandlers(extension);
+}
+
+DefaultHandlerMutationResult AppRegistry::SetDefaultHandler(const std::string& requestedExtension,
+                                                            const std::string& canonicalAppId) {
+    DefaultHandlerMutationResult result;
+    std::string extension;
+    if (!NormalizeDocumentExtension(requestedExtension, extension)) {
+        result.status = DefaultHandlerMutationStatus::InvalidExtension;
+        result.reason = "extension is malformed or over capacity";
+        return result;
+    }
+    result.extension = extension;
+    result.appId = canonicalAppId;
+    std::string reloadError;
+    if (!m_defaultHandlerStore.Reload(reloadError)) {
+        result.status = DefaultHandlerMutationStatus::PersistenceFailure;
+        result.reason = reloadError.empty() ? "authoritative default-handler configuration could not be reread" : reloadError;
+        return result;
+    }
+    const RegisteredApp* app = FindById(canonicalAppId);
+    if (!app) {
+        result.status = DefaultHandlerMutationStatus::UnknownApplication;
+        result.reason = "canonical App Model ID is not currently registered";
+        return result;
+    }
+    if (app->temporaryDevelopment || app->sourceKind == AppSourceKind::DevelopmentTemporary) {
+        result.status = DefaultHandlerMutationStatus::NonDurableRegistration;
+        result.reason = "temporary development registrations cannot become durable machine defaults";
+        return result;
+    }
+    if (!HasDeclaredCapability(*app, extension)) {
+        result.status = DefaultHandlerMutationStatus::CapabilityMissing;
+        result.reason = "application does not currently declare this normalized extension";
+        return result;
+    }
+    if (!app->manifest.supportsDocumentActivation) {
+        result.status = DefaultHandlerMutationStatus::DocumentActivationUnsupported;
+        result.reason = "application does not declare document activation support";
+        return result;
+    }
+    if (!app->documentActivationBackendAvailable) {
+        result.status = DefaultHandlerMutationStatus::HandlerUnavailable;
+        result.reason = "current hosted backend cannot dispatch document activation to this application";
+        return result;
+    }
+    const bool indexed = std::any_of(m_fileAssociations.begin(), m_fileAssociations.end(), [&](const FileAssociationRecord& record) {
+        return record.extension == extension && record.appId == canonicalAppId &&
+            record.registrationOwner == app->temporaryOwnerRuntimeId &&
+            record.registrationGeneration == app->temporaryGeneration;
+    });
+    if (!indexed) {
+        result.status = m_fileAssociationCapacityExceeded
+            ? DefaultHandlerMutationStatus::CapacityExceeded : DefaultHandlerMutationStatus::CapabilityMissing;
+        result.reason = m_fileAssociationCapacityExceeded
+            ? "the bounded AppRegistry association index cannot safely resolve this capability"
+            : "the declared capability is not present in the current AppRegistry index";
+        return result;
+    }
+
+    std::vector<DefaultHandlerOverride> updated = m_defaultHandlerStore.Overrides();
+    auto existing = std::find_if(updated.begin(), updated.end(), [&](const DefaultHandlerOverride& entry) {
+        return entry.extension == extension;
+    });
+    if (existing == updated.end()) {
+        if (updated.size() >= kAppModelMaxDefaultHandlerOverrides) {
+            result.status = DefaultHandlerMutationStatus::CapacityExceeded;
+            result.reason = "machine default-handler override capacity is full";
+            return result;
+        }
+        updated.push_back({extension, canonicalAppId});
+    } else {
+        existing->appId = canonicalAppId;
+    }
+
+    std::string error;
+    if (!m_defaultHandlerStore.Commit(updated, error)) {
+        result.status = m_defaultHandlerStore.Diagnostics().lastWriteStatus == DefaultHandlerStoreWriteStatus::VerificationFailed
+            ? DefaultHandlerMutationStatus::VerificationFailure : DefaultHandlerMutationStatus::PersistenceFailure;
+        result.reason = error;
+        return result;
+    }
+    const DefaultHandlerInfo verified = GetDefaultHandlerInfo(extension);
+    if (verified.configuredOverrideAppId != canonicalAppId || verified.effectiveDefaultAppId != canonicalAppId ||
+        verified.configuredStatus != ConfiguredDefaultHandlerStatus::Available) {
+        result.status = DefaultHandlerMutationStatus::VerificationFailure;
+        result.reason = "durable override reread succeeded but did not resolve to the requested current handler";
+        return result;
+    }
+    return result;
+}
+
+DefaultHandlerMutationResult AppRegistry::ClearDefaultHandler(const std::string& requestedExtension) {
+    DefaultHandlerMutationResult result;
+    std::string extension;
+    if (!NormalizeDocumentExtension(requestedExtension, extension)) {
+        result.status = DefaultHandlerMutationStatus::InvalidExtension;
+        result.reason = "extension is malformed or over capacity";
+        return result;
+    }
+    result.extension = extension;
+    std::string reloadError;
+    if (!m_defaultHandlerStore.Reload(reloadError)) {
+        result.status = DefaultHandlerMutationStatus::PersistenceFailure;
+        result.reason = reloadError.empty() ? "authoritative default-handler configuration could not be reread" : reloadError;
+        return result;
+    }
+    std::vector<DefaultHandlerOverride> updated = m_defaultHandlerStore.Overrides();
+    const size_t oldSize = updated.size();
+    updated.erase(std::remove_if(updated.begin(), updated.end(), [&](const DefaultHandlerOverride& entry) {
+        return entry.extension == extension;
+    }), updated.end());
+    if (updated.size() != oldSize) {
+        std::string error;
+        if (!m_defaultHandlerStore.Commit(updated, error)) {
+            result.status = m_defaultHandlerStore.Diagnostics().lastWriteStatus == DefaultHandlerStoreWriteStatus::VerificationFailed
+                ? DefaultHandlerMutationStatus::VerificationFailure : DefaultHandlerMutationStatus::PersistenceFailure;
+            result.reason = error;
+            return result;
+        }
+    }
+    if (m_defaultHandlerStore.Find(extension)) {
+        result.status = DefaultHandlerMutationStatus::VerificationFailure;
+        result.reason = "cleared override remained present after authoritative reread";
+    }
+    return result;
+}
+
+DefaultHandlerInfo AppRegistry::GetDefaultHandlerInfo(const std::string& requestedExtension) const {
+    DefaultHandlerInfo info;
+    if (!NormalizeDocumentExtension(requestedExtension, info.extension)) return info;
+    info.builtInDefaultAppId = builtInDefaultAppId(info.extension);
+    const DefaultHandlerOverride* configured = m_defaultHandlerStore.Find(info.extension);
+    if (configured) {
+        info.configuredOverrideAppId = configured->appId;
+        const RegisteredApp* app = FindById(configured->appId);
+        if (!app) {
+            info.configuredStatus = ConfiguredDefaultHandlerStatus::RegistrationMissing;
+        } else if (app->temporaryDevelopment || app->sourceKind == AppSourceKind::DevelopmentTemporary) {
+            info.configuredStatus = ConfiguredDefaultHandlerStatus::NonDurableRegistration;
+        } else if (!HasDeclaredCapability(*app, info.extension)) {
+            info.configuredStatus = ConfiguredDefaultHandlerStatus::CapabilityMissing;
+        } else if (!app->manifest.supportsDocumentActivation) {
+            info.configuredStatus = ConfiguredDefaultHandlerStatus::DocumentActivationUnsupported;
+        } else if (!app->documentActivationBackendAvailable) {
+            info.configuredStatus = ConfiguredDefaultHandlerStatus::TemporarilyUnavailable;
+        } else {
+            const bool indexed = std::any_of(m_fileAssociations.begin(), m_fileAssociations.end(), [&](const FileAssociationRecord& record) {
+                return record.extension == info.extension && record.appId == configured->appId &&
+                    record.registrationOwner == app->temporaryOwnerRuntimeId &&
+                    record.registrationGeneration == app->temporaryGeneration;
+            });
+            info.configuredStatus = indexed ? ConfiguredDefaultHandlerStatus::Available
+                : (m_fileAssociationCapacityExceeded
+                    ? ConfiguredDefaultHandlerStatus::RegistryCapacityExceeded
+                    : ConfiguredDefaultHandlerStatus::CapabilityMissing);
+        }
+    }
+
+    const DocumentHandlerList handlers = EnumerateCapableHandlers(info.extension);
+    for (size_t i = 0; i < handlers.count; ++i) {
+        if (!handlers.handlers[i].isDefault) continue;
+        info.effectiveDefaultAppId = handlers.handlers[i].appId;
+        info.effectiveDefaultAvailable = handlers.handlers[i].available;
+        break;
+    }
+    return info;
+}
+
+std::vector<std::string> AppRegistry::GetKnownDocumentExtensions() const {
+    std::vector<std::string> extensions;
+    extensions.reserve(m_fileAssociations.size() + m_defaultHandlerStore.Overrides().size() + 4);
+    for (const FileAssociationRecord& record : m_fileAssociations) extensions.push_back(record.extension);
+    for (const DefaultHandlerOverride& record : m_defaultHandlerStore.Overrides()) extensions.push_back(record.extension);
+    extensions.insert(extensions.end(), { ".txt", ".log", ".ini", ".cfg" });
+    std::sort(extensions.begin(), extensions.end());
+    extensions.erase(std::unique(extensions.begin(), extensions.end()), extensions.end());
+    return extensions;
+}
+
+DefaultHandlerStoreDiagnostics AppRegistry::GetDefaultHandlerStoreDiagnostics() const {
+    return m_defaultHandlerStore.Diagnostics();
+}
+
+bool AppRegistry::ReloadDefaultHandlerConfiguration(std::string& error) {
+    return m_defaultHandlerStore.Reload(error);
+}
+
+bool AppRegistry::HasDeclaredCapability(const RegisteredApp& app, const std::string& normalizedExtension) const {
+    return std::any_of(app.manifest.fileAssociations.begin(), app.manifest.fileAssociations.end(),
+        [&](const FileAssociation& association) {
+            std::string normalized;
+            return NormalizeDocumentExtension(association.extension, normalized) && normalized == normalizedExtension;
+        });
 }
 
 FileAssociationResolution AppRegistry::ResolveFileAssociation(const std::string& path) const {
@@ -650,7 +866,7 @@ void AppRegistry::RebuildFileAssociations() {
     for (const RegisteredApp& app : m_apps) {
         for (const FileAssociation& declaration : app.manifest.fileAssociations) {
             FileAssociationRecord record;
-            record.extension = normalizeExtension(declaration.extension);
+            NormalizeDocumentExtension(declaration.extension, record.extension);
             record.appId = app.manifest.id;
             record.contentType = declaration.contentType;
             record.description = declaration.description;
@@ -759,6 +975,37 @@ bool AppRegistry::UnregisterTemporaryDevelopmentApp(const std::string& appId, ui
     return true;
 }
 
+#if defined(GXOS_APPMODEL_TESTING)
+bool AppRegistry::RegisterTestDurableApp(const RegisteredApp& app, std::string& error) {
+    error.clear();
+    if (app.temporaryDevelopment || app.sourceKind == AppSourceKind::DevelopmentTemporary ||
+        app.temporaryOwnerRuntimeId != 0 || app.temporaryGeneration != 0) {
+        error = "test durable registrations must use persistent App Model identity";
+        return false;
+    }
+    const AppManifestValidationResult validation = AppManifestValidator::Validate(app.manifest);
+    if (!validation.valid) {
+        error = validation.errors.empty() ? "test durable application manifest is invalid" : validation.errors.front();
+        return false;
+    }
+    AppScanResult result;
+    if (!RegisterApp(app, result)) {
+        error = result.invalidApps.empty() ? "test durable application registration failed" : result.invalidApps.back().errors.front();
+        return false;
+    }
+    RebuildFileAssociations();
+    return true;
+}
+
+bool AppRegistry::SetTestDocumentActivationBackend(const std::string& appId, bool available) {
+    auto found = m_appsById.find(appId);
+    if (found == m_appsById.end() || found->second >= m_apps.size()) return false;
+    m_apps[found->second].documentActivationBackendAvailable = available;
+    RebuildFileAssociations();
+    return true;
+}
+#endif
+
 const char* AppRegistry::ToString(AppSourceKind kind) {
     switch (kind) {
     case AppSourceKind::BuiltIn: return "BuiltIn";
@@ -862,6 +1109,36 @@ const char* AppRegistry::ToString(FileAssociationResolutionStatus status) {
     case FileAssociationResolutionStatus::HandlerUnavailable: return "handler-unavailable";
     case FileAssociationResolutionStatus::RegistryCapacityExceeded: return "capacity-exceeded";
     default: return "unknown";
+    }
+}
+
+const char* AppRegistry::ToString(ConfiguredDefaultHandlerStatus status) {
+    switch (status) {
+    case ConfiguredDefaultHandlerStatus::Available: return "available";
+    case ConfiguredDefaultHandlerStatus::RegistrationMissing: return "registration-missing";
+    case ConfiguredDefaultHandlerStatus::CapabilityMissing: return "capability-missing";
+    case ConfiguredDefaultHandlerStatus::DocumentActivationUnsupported: return "document-activation-unsupported";
+    case ConfiguredDefaultHandlerStatus::TemporarilyUnavailable: return "temporarily-unavailable";
+    case ConfiguredDefaultHandlerStatus::NonDurableRegistration: return "non-durable-registration";
+    case ConfiguredDefaultHandlerStatus::RegistryCapacityExceeded: return "registry-capacity-exceeded";
+    case ConfiguredDefaultHandlerStatus::NotConfigured:
+    default: return "not-configured";
+    }
+}
+
+const char* AppRegistry::ToString(DefaultHandlerMutationStatus status) {
+    switch (status) {
+    case DefaultHandlerMutationStatus::InvalidExtension: return "invalid-extension";
+    case DefaultHandlerMutationStatus::UnknownApplication: return "unknown-application";
+    case DefaultHandlerMutationStatus::CapabilityMissing: return "capability-missing";
+    case DefaultHandlerMutationStatus::DocumentActivationUnsupported: return "document-activation-unsupported";
+    case DefaultHandlerMutationStatus::HandlerUnavailable: return "handler-unavailable";
+    case DefaultHandlerMutationStatus::NonDurableRegistration: return "non-durable-registration";
+    case DefaultHandlerMutationStatus::CapacityExceeded: return "capacity-exceeded";
+    case DefaultHandlerMutationStatus::PersistenceFailure: return "persistence-failure";
+    case DefaultHandlerMutationStatus::VerificationFailure: return "verification-failure";
+    case DefaultHandlerMutationStatus::Success:
+    default: return "success";
     }
 }
 

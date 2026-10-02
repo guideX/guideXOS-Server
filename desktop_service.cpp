@@ -5877,6 +5877,37 @@ namespace gxos {
             return s_appRegistry.EnumerateCapableHandlersForPath(path);
         }
 
+        apps::DefaultHandlerMutationResult DesktopService::SetDefaultDocumentHandler(
+            const std::string& extension, const std::string& canonicalAppId) {
+            ensureDefaultAppsRegistered();
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+            return s_appRegistry.SetDefaultHandler(extension, canonicalAppId);
+        }
+
+        apps::DefaultHandlerMutationResult DesktopService::ClearDefaultDocumentHandler(const std::string& extension) {
+            ensureDefaultAppsRegistered();
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+            return s_appRegistry.ClearDefaultHandler(extension);
+        }
+
+        apps::DefaultHandlerInfo DesktopService::GetDefaultDocumentHandlerInfo(const std::string& extension) {
+            ensureDefaultAppsRegistered();
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+            return s_appRegistry.GetDefaultHandlerInfo(extension);
+        }
+
+        std::vector<std::string> DesktopService::GetKnownDocumentExtensions() {
+            ensureDefaultAppsRegistered();
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+            return s_appRegistry.GetKnownDocumentExtensions();
+        }
+
+        apps::DefaultHandlerStoreDiagnostics DesktopService::GetDefaultDocumentHandlerStoreDiagnostics() {
+            ensureDefaultAppsRegistered();
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+            return s_appRegistry.GetDefaultHandlerStoreDiagnostics();
+        }
+
         bool DesktopService::OpenFilesystemEntryWithHandler(const apps::DocumentHandlerInfo& handler,
                                                             const std::string& path,
                                                             std::string& error,

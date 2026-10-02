@@ -407,6 +407,7 @@
     <ClCompile Include="app_manifest_loader.cpp" />
     <ClCompile Include="app_manifest_validator.cpp" />
     <ClCompile Include="app_registry.cpp" />
+    <ClCompile Include="app_default_handler_store.cpp" />
     <ClCompile Include="calculator.cpp" />
     <ClCompile Include="clock.cpp" />
     <ClCompile Include="compositor.cpp" />

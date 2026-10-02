@@ -1,8 +1,14 @@
 # guideXOS App Model Current-State Map
 
-Status: Phase 7 current state (2026-10-01). The Phase 5A/5B material below is historical; see [Phase 7 capable handlers and Open With](APPMODEL_PHASE7_OPEN_WITH.md) for the current handler-selection contract and verification, and [Phase 6 file associations and document activation](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md) for the original owned-path contract.
+Status: Phase 8 current state (2026-10-02). The Phase 5A/5B material below is historical; see [Phase 8 default-app persistence](APPMODEL_PHASE8_DEFAULT_APP_PERSISTENCE.md) for the authoritative machine-global override owner and API, [Phase 7 capable handlers and Open With](APPMODEL_PHASE7_OPEN_WITH.md) for handler selection, and [Phase 6 file associations and document activation](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md) for the original owned-path contract.
 
 This document maps the app model as it exists in the repository today. It is intended to ground future GXApp runtime work without rewriting or destabilizing current launch behavior.
+
+## Phase 8 current default-handler state
+
+AppRegistry now owns one bounded machine-global default-handler store at `appmodel-default-handlers.cfg`. It persists only normalized extensions and canonical App Model IDs, and validates current capability, document activation, registration durability, and backend availability before selecting an override. Invalid or unavailable overrides remain distinguishable from the effective handler and fall back safely. File Explorer ordinary Open follows the effective handler; Open With remains a one-time choice. The Settings Default apps UI is still deferred.
+
+See [the Phase 8 report](APPMODEL_PHASE8_DEFAULT_APP_PERSISTENCE.md) for the ownership audit, format and capacities, APIs, test results, runtime proof, and limitations.
 
 ## 1. Actual languages and components in this repo
 

@@ -49,6 +49,7 @@ app_manifest.cpp ^
 app_manifest_loader.cpp ^
 app_manifest_validator.cpp ^
 app_registry.cpp ^
+app_default_handler_store.cpp ^
 calculator.cpp ^
 clock.cpp ^
 compositor.cpp ^
