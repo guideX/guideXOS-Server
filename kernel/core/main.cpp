@@ -5424,7 +5424,11 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         const bool c151Catalog = gxos::apps::ManagedNativeAotCatalogIsValid() &&
             c151Notes && c151Notes->managedSelector == 4u;
 #if defined(GXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW)
+#if defined(GXOS_NATIVEAOT_C156_CONTROL_MODIFIER_SHORTCUTS)
+        constexpr const char* c151LaunchContext = "c156-untitled";
+#else
         constexpr const char* c151LaunchContext = "c152-notes";
+#endif
 #else
         constexpr const char* c151LaunchContext = "c151-notes";
 #endif
@@ -5441,9 +5445,15 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts(" active=");
         kernel::serial::puts(c151Ready ? "Notes return-target=none result=PASS\n" : "invalid result=FAIL\n");
 #if defined(GXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW)
+#if defined(GXOS_NATIVEAOT_C156_CONTROL_MODIFIER_SHORTCUTS)
+        kernel::serial::puts(c151Ready
+            ? "[C152-NOTES-LAUNCH] identity=canonical context=c156-untitled result=PASS\n"
+            : "[C152-NOTES-LAUNCH] identity=invalid result=FAIL\n");
+#else
         kernel::serial::puts(c151Ready
             ? "[C152-NOTES-LAUNCH] identity=canonical context=c152-notes result=PASS\n"
             : "[C152-NOTES-LAUNCH] identity=invalid result=FAIL\n");
+#endif
 #endif
         if (c151Window) {
             kernel::serial::puts("[C151-TARGET] fileX=470 fileY=264 menuOpenX=420 menuOpenY=289 listX=60 listY=99 openX=326 openY=260 cancelX=426 cancelY=260 outsideX=12 outsideY=12 result=");

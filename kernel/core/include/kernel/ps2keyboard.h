@@ -28,6 +28,13 @@ uint32_t get_key();
 
 // Modifier state accessors
 bool is_ctrl_down();
+bool is_left_ctrl_down();
+bool is_right_ctrl_down();
+// Modifier snapshots belonging to the most recently queued make event.
+bool last_key_ctrl_down();
+bool last_key_left_ctrl_down();
+bool last_key_right_ctrl_down();
+bool last_key_shift_down();
 bool is_shift_down();
 bool is_alt_down();
 bool is_left_alt_down();

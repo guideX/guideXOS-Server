@@ -29,7 +29,7 @@ public readonly struct GuideXosInputEvent
 {
     private GuideXosInputEvent(
         GuideXosInputKind kind, int x, int y, uint keyCode, char character,
-        bool shift, GuideXosPointerButton button, int wheelDelta)
+        bool shift, bool control, GuideXosPointerButton button, int wheelDelta)
     {
         Kind = kind;
         X = x;
@@ -37,6 +37,7 @@ public readonly struct GuideXosInputEvent
         KeyCode = keyCode;
         Character = character;
         Shift = shift;
+        Control = control;
         Button = button;
         WheelDelta = wheelDelta;
     }
@@ -47,6 +48,7 @@ public readonly struct GuideXosInputEvent
     public uint KeyCode { get; }
     public char Character { get; }
     public bool Shift { get; }
+    public bool Control { get; }
     public GuideXosPointerButton Button { get; }
     public int WheelDelta { get; }
 
@@ -55,40 +57,42 @@ public readonly struct GuideXosInputEvent
         return new GuideXosInputEvent(
             context.InputKind, context.InputX, context.InputY,
             context.InputKeyCode, context.InputCharacter, context.InputShift,
+            context.InputControl,
             context.InputButton, context.InputWheelDelta);
     }
 
     internal static GuideXosInputEvent ForPointer(
         GuideXosInputKind kind, GuideXosPointerButton button, int x, int y)
     {
-        return new GuideXosInputEvent(kind, x, y, 0u, '\0', false, button, 0);
+        return new GuideXosInputEvent(kind, x, y, 0u, '\0', false, false, button, 0);
     }
 
     internal static GuideXosInputEvent ForWheel(int x, int y, int delta)
     {
         return new GuideXosInputEvent(
-            GuideXosInputKind.Wheel, x, y, 0u, '\0', false,
+            GuideXosInputKind.Wheel, x, y, 0u, '\0', false, false,
             GuideXosPointerButton.None, delta);
     }
 
     internal static GuideXosInputEvent ForPointerMove(int x, int y)
     {
         return new GuideXosInputEvent(
-            GuideXosInputKind.PointerMove, x, y, 0u, '\0', false,
+            GuideXosInputKind.PointerMove, x, y, 0u, '\0', false, false,
             GuideXosPointerButton.None, 0);
     }
 
     internal static GuideXosInputEvent ForKeyDown(
-        GuideXosTextInputKey key, bool shift = false)
+        GuideXosTextInputKey key, bool shift = false, bool control = false)
     {
         return new GuideXosInputEvent(GuideXosInputKind.KeyDown, 0, 0,
-            (uint)key, '\0', shift, GuideXosPointerButton.None, 0);
+            (uint)key, '\0', shift, control, GuideXosPointerButton.None, 0);
     }
 
-    internal static GuideXosInputEvent ForKeyChar(char character)
+    internal static GuideXosInputEvent ForKeyChar(
+        char character, bool shift = false, bool control = false)
     {
         return new GuideXosInputEvent(GuideXosInputKind.KeyChar, 0, 0,
-            0u, character, false, GuideXosPointerButton.None, 0);
+            0u, character, shift, control, GuideXosPointerButton.None, 0);
     }
 }
 

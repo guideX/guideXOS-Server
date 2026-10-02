@@ -15,7 +15,8 @@ param(
     [switch]$C118ManagedListBox,
     [switch]$C151ManagedOpenFileDialog,
     [switch]$C152ManagedNotesSaveWorkflow,
-    [switch]$C155ManagedNotesSession
+    [switch]$C155ManagedNotesSession,
+    [switch]$C156ControlModifierShortcuts
 )
 
 $ErrorActionPreference = "Stop"
@@ -1191,6 +1192,10 @@ if ($C155ManagedNotesSession) {
         [System.Text.Encoding]::ASCII)
     $staged += @(Get-ChildItem -LiteralPath $c155Dir -File)
     Write-Host "      staged C155 named-session and Save As fixtures" -ForegroundColor Yellow
+}
+
+if ($C156ControlModifierShortcuts -and -not $C155ManagedNotesSession) {
+    throw "C156 proof media requires the C155 managed Notes session fixture."
 }
 
 $httpsPolicyToken = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_HTTPS_POLICY)) { $null } else { $env:GXOS_NAVIGATOR_HTTPS_POLICY.Trim() }

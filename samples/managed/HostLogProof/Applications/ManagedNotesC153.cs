@@ -34,8 +34,12 @@ public sealed partial class ManagedNotes
             _status = _c152DocumentState.Dirty
                 ? "Modified" : "Saved revision restored";
             host.TryLog(actionId == C153UndoActionId
-                ? "C153-UNDO source=menu content-change=once result=PASS"u8
-                : "C153-REDO source=menu content-change=once result=PASS"u8);
+                ? _c156ShortcutDispatch
+                    ? "C153-UNDO source=keyboard content-change=once result=PASS"u8
+                    : "C153-UNDO source=menu content-change=once result=PASS"u8
+                : _c156ShortcutDispatch
+                    ? "C153-REDO source=keyboard content-change=once result=PASS"u8
+                    : "C153-REDO source=menu content-change=once result=PASS"u8);
         }
         if (!RenderMain(host, surface, _launchCount))
         {

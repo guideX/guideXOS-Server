@@ -24,7 +24,12 @@ static uint32_t s_lastKey = 0;
 static bool s_hasKey = false;
 static bool s_leftShiftDown = false;
 static bool s_rightShiftDown = false;
-static bool s_ctrlDown = false;
+static bool s_leftCtrlDown = false;
+static bool s_rightCtrlDown = false;
+static bool s_lastKeyCtrlDown = false;
+static bool s_lastKeyLeftCtrlDown = false;
+static bool s_lastKeyRightCtrlDown = false;
+static bool s_lastKeyShiftDown = false;
 static bool s_altDown = false;
 static bool s_rightAltDown = false;
 static bool s_f4Down = false;
@@ -50,6 +55,10 @@ static void log_key_transition(const char* label, uint8_t scancode, bool keyUp, 
     serial::put_hex8(scancode);
     serial::puts(" ext=");
     serial::puts(extended ? "1" : "0");
+    serial::puts(" leftCtrl=");
+    serial::puts(s_leftCtrlDown ? "1" : "0");
+    serial::puts(" rightCtrl=");
+    serial::puts(s_rightCtrlDown ? "1" : "0");
     serial::puts(" leftAlt=");
     serial::puts(s_altDown ? "1" : "0");
     serial::puts(" rightAlt=");
@@ -143,7 +152,12 @@ void init()
     s_hasKey = false;
     s_leftShiftDown = false;
     s_rightShiftDown = false;
-    s_ctrlDown = false;
+    s_leftCtrlDown = false;
+    s_rightCtrlDown = false;
+    s_lastKeyCtrlDown = false;
+    s_lastKeyLeftCtrlDown = false;
+    s_lastKeyRightCtrlDown = false;
+    s_lastKeyShiftDown = false;
     s_altDown = false;
     s_rightAltDown = false;
     s_f4Down = false;
@@ -212,9 +226,27 @@ void irq_handler()
         return;
     }
     if (scancode == SC2_LCTRL) {
-        s_ctrlDown = !keyUp;
+        const bool rightCtrl = s_extendedKey;
+        if (rightCtrl) {
+            s_rightCtrlDown = !keyUp;
+        } else {
+            s_leftCtrlDown = !keyUp;
+        }
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
-        log_key_transition("ctrl-left", scancode, keyUp, s_extendedKey);
+        log_key_transition(rightCtrl ? "ctrl-right" : "ctrl-left",
+            scancode, keyUp, s_extendedKey);
+#endif
+#if defined(GXOS_NATIVEAOT_C156_CONTROL_MODIFIER_SHORTCUTS)
+        serial::puts("[C156-KEYBOARD] event=control-");
+        serial::puts(rightCtrl ? "right" : "left");
+        serial::puts(keyUp ? "-up" : "-down");
+        serial::puts(" left=");
+        serial::puts(s_leftCtrlDown ? "1" : "0");
+        serial::puts(" right=");
+        serial::puts(s_rightCtrlDown ? "1" : "0");
+        serial::puts(" aggregate=");
+        serial::puts((s_leftCtrlDown || s_rightCtrlDown) ? "1" : "0");
+        serial::puts(" result=PASS\n");
 #endif
         s_extendedKey = false;
         return;
@@ -321,6 +353,10 @@ void irq_handler()
     if (key != 0) {
         s_lastKey = key;
         s_hasKey = true;
+        s_lastKeyCtrlDown = s_leftCtrlDown || s_rightCtrlDown;
+        s_lastKeyLeftCtrlDown = s_leftCtrlDown;
+        s_lastKeyRightCtrlDown = s_rightCtrlDown;
+        s_lastKeyShiftDown = s_leftShiftDown || s_rightShiftDown;
         s_lastKeyAltF4Candidate = altF4Candidate;
         s_lastKeyAltLeftDown = altF4LeftDown;
         s_lastKeyAltRightDown = altF4RightDown;
@@ -343,6 +379,10 @@ void clear()
 {
     s_hasKey = false;
     s_lastKey = 0;
+    s_lastKeyCtrlDown = false;
+    s_lastKeyLeftCtrlDown = false;
+    s_lastKeyRightCtrlDown = false;
+    s_lastKeyShiftDown = false;
     s_lastKeyAltF4Candidate = false;
     s_lastKeyAltLeftDown = false;
     s_lastKeyAltRightDown = false;
@@ -350,7 +390,37 @@ void clear()
 
 bool is_ctrl_down()
 {
-    return s_ctrlDown;
+    return s_leftCtrlDown || s_rightCtrlDown;
+}
+
+bool is_left_ctrl_down()
+{
+    return s_leftCtrlDown;
+}
+
+bool is_right_ctrl_down()
+{
+    return s_rightCtrlDown;
+}
+
+bool last_key_ctrl_down()
+{
+    return s_lastKeyCtrlDown;
+}
+
+bool last_key_left_ctrl_down()
+{
+    return s_lastKeyLeftCtrlDown;
+}
+
+bool last_key_right_ctrl_down()
+{
+    return s_lastKeyRightCtrlDown;
+}
+
+bool last_key_shift_down()
+{
+    return s_lastKeyShiftDown;
 }
 
 bool is_shift_down()
@@ -401,6 +471,12 @@ bool has_key() { return false; }
 uint32_t get_key() { return 0; }
 void clear() {}
 bool is_ctrl_down() { return false; }
+bool is_left_ctrl_down() { return false; }
+bool is_right_ctrl_down() { return false; }
+bool last_key_ctrl_down() { return false; }
+bool last_key_left_ctrl_down() { return false; }
+bool last_key_right_ctrl_down() { return false; }
+bool last_key_shift_down() { return false; }
 bool is_shift_down() { return false; }
 bool is_alt_down() { return false; }
 bool is_left_alt_down() { return false; }

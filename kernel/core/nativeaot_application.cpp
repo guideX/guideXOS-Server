@@ -160,10 +160,11 @@ constexpr uint32_t kLaunchFlagInputWheelLast = 0x0F000000u;
 constexpr uint32_t kLaunchFlagInputPayloadMask = 0x00FFFFFFu;
 constexpr uint32_t kLaunchFlagInputCoordinateMask = 0x00000FFFu;
 constexpr uint32_t kC137RelaunchKey = 0x11Bu;
-// C117 reserves the high bit of the 24-bit key payload for Shift. This is an
-// input-transport detail, not a host-table or ABI extension.
+// C117 reserves the high bit of the 24-bit key payload for Shift; C156 uses
+// the next key-only bit for Control. The remaining 22 bits hold the key value.
 constexpr uint32_t kLaunchFlagInputShift = 0x00800000u;
-constexpr uint32_t kLaunchFlagInputValueMask = 0x007FFFFFu;
+constexpr uint32_t kLaunchFlagInputControl = 0x00400000u;
+constexpr uint32_t kLaunchFlagInputValueMask = 0x003FFFFFu;
 
 #pragma pack(push, 1)
 struct Elf64Header {
@@ -745,7 +746,21 @@ public:
         }
 #endif
         uint32_t payload = key & kLaunchFlagInputValueMask;
-        if (ps2keyboard::is_shift_down()) payload |= kLaunchFlagInputShift;
+        if (ps2keyboard::last_key_shift_down()) payload |= kLaunchFlagInputShift;
+        if (ps2keyboard::last_key_ctrl_down()) payload |= kLaunchFlagInputControl;
+#if defined(GXOS_NATIVEAOT_C156_CONTROL_MODIFIER_SHORTCUTS)
+        serial::puts("[C156-NATIVE-INPUT] kind=key-down code=");
+        serial::put_hex32(key);
+        serial::puts(" control=");
+        serial::puts(ps2keyboard::last_key_ctrl_down() ? "1" : "0");
+        serial::puts(" leftCtrl=");
+        serial::puts(ps2keyboard::last_key_left_ctrl_down() ? "1" : "0");
+        serial::puts(" rightCtrl=");
+        serial::puts(ps2keyboard::last_key_right_ctrl_down() ? "1" : "0");
+        serial::puts(" shift=");
+        serial::puts(ps2keyboard::last_key_shift_down() ? "1" : "0");
+        serial::puts("\n");
+#endif
 #if defined(GXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT)
         if (key == 9u) {
             serial::puts("[C129-NATIVE] tab-keydown shift=");
@@ -759,6 +774,8 @@ public:
         serial::put_hex32(key);
         serial::puts(" shift=");
         serial::put_hex32((payload & kLaunchFlagInputShift) != 0u ? 1u : 0u);
+        serial::puts(" control=");
+        serial::put_hex32((payload & kLaunchFlagInputControl) != 0u ? 1u : 0u);
         serial::puts(" result=");
         serial::puts(result == 0 ? "PASS\n" : "IGNORED\n");
 #if defined(GXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW)
@@ -796,10 +813,14 @@ public:
 
     void onKeyChar(char c) override {
         if (m_selector == 0u) return;
+        // Printable Control chords are routed as KeyDown from the desktop
+        // dispatcher. This guard also prevents a late split KeyChar from
+        // inserting a command letter if another path emits one unexpectedly.
+        if (ps2keyboard::last_key_ctrl_down()) return;
         const uint32_t payload = static_cast<uint32_t>(
             static_cast<uint8_t>(c));
         const uint32_t inputPayload = payload |
-            (ps2keyboard::is_shift_down() ? kLaunchFlagInputShift : 0u);
+            (ps2keyboard::last_key_shift_down() ? kLaunchFlagInputShift : 0u);
         const int32_t result = invokeManagedInput(
             m_selector, kLaunchFlagInput | kLaunchFlagInputKeyChar | inputPayload);
         serial::puts("[C116-NATIVE-INPUT] kind=key-char value=");

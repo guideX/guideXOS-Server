@@ -263,6 +263,12 @@
   <PropertyGroup Condition="'$(HostLogProofC155ManagedNotesSession)' == 'true'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C155_MANAGED_NOTES_SESSION</DefineConstants>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofC156ControlModifierShortcuts)' == 'true'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C156_CONTROL_MODIFIER_SHORTCUTS</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(HostLogProofMode)' != 'C152Composite' and '$(HostLogProofMode)' != 'C153Composite' and '$(HostLogProofMode)' != 'C154Composite' and '$(HostLogProofC155ManagedNotesSession)' != 'true' and '$(HostLogProofC156ControlModifierShortcuts)' != 'true'">
+    <Compile Remove="Applications/ManagedNotesC152.cs" />
+  </ItemGroup>
   <PropertyGroup Condition="'$(HostLogProofC134IncludeFocusedTests)' == 'true'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C134_TRANSIENT_POPUP_ROUTING;HOSTLOGPROOF_C134_HOST_TESTS</DefineConstants>
   </PropertyGroup>

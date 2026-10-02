@@ -1642,6 +1642,10 @@ public sealed partial class ManagedNotes : GuideXosApplication
         _useTextInput = _c118ProofContext;
 #endif
         _currentPath =
+#if HOSTLOGPROOF_C156_CONTROL_MODIFIER_SHORTCUTS
+            host.LaunchContext.Utf8.SequenceEqual("c156-untitled"u8)
+                ? "/system/apps/C156-UNTITLED.TXT" :
+#endif
 #if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
             _c152Enabled && host.LaunchContext.Utf8.SequenceEqual("c152-notes"u8)
 #if HOSTLOGPROOF_C155_MANAGED_NOTES_SESSION
@@ -1794,6 +1798,12 @@ public sealed partial class ManagedNotes : GuideXosApplication
             "Managed Notes"u8, 600, 360, out GuideXosSurface surface);
         if (result != GuideXosResult.Success || surface == null) return result;
         _window = surface.Handle;
+#if HOSTLOGPROOF_C156_CONTROL_MODIFIER_SHORTCUTS
+        bool c156Modifiers = GuideXosInputTransportC156Tests.Run(host);
+        bool c156Shortcuts = GuideXosNotesShortcutC156Tests.Run(host);
+        if (!c156Modifiers || !c156Shortcuts) return GuideXosResult.InvalidArgument;
+        host.TryLog("C156-REGRESSIONS ABI=v1 table=104 event-bits=PASS lifecycle=stateless result=PASS"u8);
+#endif
 #if HOSTLOGPROOF_C154_MANAGED_CLIPBOARD
         if (!s_c154ClipboardTestsRun)
         {
@@ -4239,6 +4249,13 @@ public sealed partial class ManagedNotes : GuideXosApplication
         if (_c151ProofContext && _c151OpenFileDialog.IsOpen)
         {
             return HandleC151DialogInput(host, surface, input);
+        }
+#endif
+#if HOSTLOGPROOF_C156_CONTROL_MODIFIER_SHORTCUTS
+        if (TryHandleC156Shortcut(host, surface, input,
+                out GuideXosResult shortcutResult))
+        {
+            return shortcutResult;
         }
 #endif
 #if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING

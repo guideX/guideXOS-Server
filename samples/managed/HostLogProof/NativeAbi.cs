@@ -45,11 +45,12 @@ public static class GxAbi
     public const uint LaunchFlagInputWheel = 0x07000000u;
     public const uint LaunchFlagInputWheelLast = 0x0F000000u;
     public const uint LaunchFlagInputPayloadMask = 0x00FFFFFFu;
-    // The high payload bit is reserved for key-event modifier state. Pointer
-    // coordinates remain unchanged and are far below this bit in the current
-    // managed surface geometry.
+    // Modifier bits are key-event-only. Bit 23 preserves C117 Shift and bit
+    // 22 carries C156 Control; the low 22 bits remain the key value. Pointer
+    // coordinate payloads retain their full existing 12+12-bit layout.
     public const uint LaunchFlagInputShift = 0x00800000u;
-    public const uint LaunchFlagInputValueMask = 0x007FFFFFu;
+    public const uint LaunchFlagInputControl = 0x00400000u;
+    public const uint LaunchFlagInputValueMask = 0x003FFFFFu;
     public const uint LaunchFlagInputCoordinateMask = 0x00000FFFu;
     public const uint LaunchFlagPayloadMask = 0x1FFFFFFFu;
     public const int ErrorInvalidArgument = -2;

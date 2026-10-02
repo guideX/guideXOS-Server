@@ -10527,7 +10527,16 @@ void handle_key(uint32_t key)
                 return;
             }
             
-            // Route printable character keys to the compositor
+            // Control chords use the KeyDown path so managed applications
+            // receive modifier-aware commands and never receive a printable
+            // KeyChar for the same physical press.
+            if (key >= 32 && key < 127 && ps2keyboard::last_key_ctrl_down()) {
+                compositor::KernelCompositor::handleKeyDown(key);
+                draw();
+                return;
+            }
+
+            // Route ordinary printable character keys to the compositor.
             if (key >= 32 && key < 127) {
                 compositor::KernelCompositor::handleKeyChar((char)key);
                 draw();

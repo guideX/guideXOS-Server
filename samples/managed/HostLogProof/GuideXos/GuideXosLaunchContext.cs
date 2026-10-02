@@ -77,7 +77,11 @@ public sealed unsafe class GuideXosLaunchContext
     public bool InputShift => InputKind != GuideXosInputKind.PointerDown &&
         InputKind != GuideXosInputKind.PointerUp &&
         InputKind != GuideXosInputKind.Wheel &&
+        InputKind != GuideXosInputKind.PointerMove &&
         (InputPayload & GxAbi.LaunchFlagInputShift) != 0u;
+    public bool InputControl => (InputKind == GuideXosInputKind.KeyDown ||
+        InputKind == GuideXosInputKind.KeyChar) &&
+        (InputPayload & GxAbi.LaunchFlagInputControl) != 0u;
 
     internal bool TryCopy(
         NativeGxAppContext* context,
