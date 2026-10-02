@@ -14,6 +14,7 @@ param(
     [string]$QemuExecutable = "C:\Program Files\qemu\qemu-system-x86_64.exe",
     [string]$OvmfCode = "OVMF.fd",
     [string]$PythonExecutable = "",
+    [UInt64]$DiskSizeBytes = 629145600,
     [switch]$QemuDebug,
     [switch]$SkipBuild,
     [string]$WorkDir = ""
@@ -58,6 +59,7 @@ for ($attempt = 1; $attempt -le 5; ++$attempt) {
         QemuExecutable = $QemuExecutable
         OvmfCode = $OvmfCode
         AttemptNumber = $attempt
+        DiskSizeBytes = $DiskSizeBytes
         SkipBuild = $built
     }
     if ($PythonExecutable) { $proofArgs.PythonExecutable = $PythonExecutable }

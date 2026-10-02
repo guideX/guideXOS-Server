@@ -18,6 +18,7 @@ param(
     [string]$OvmfCode = "OVMF.fd",
     [string]$PythonExecutable = "",
     [int]$AttemptNumber = 1,
+    [UInt64]$DiskSizeBytes = 629145600,
     [switch]$QemuDebug,
     [switch]$SkipBuild
 )
@@ -189,6 +190,9 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
 
     if (-not (Test-Path -LiteralPath $QemuExecutable)) { throw "QEMU was not found at $QemuExecutable" }
 if ($AttemptNumber -lt 1) { throw "AttemptNumber must be positive." }
+if ($DiskSizeBytes -lt 68MB -or ($DiskSizeBytes % 512) -ne 0) {
+    throw "DiskSizeBytes must be at least 68 MiB and aligned to 512-byte sectors."
+}
 $QemuFull = (Resolve-Path -LiteralPath $QemuExecutable).Path
 $OvmfFull = (Resolve-Path -LiteralPath $OvmfCode).Path
 $EspFull = (Resolve-Path -LiteralPath $EspSource).Path
@@ -213,7 +217,8 @@ if (Test-Path -LiteralPath $WorkFull) {
     New-Item -ItemType Directory -Path $WorkFull -Force | Out-Null
 }
 
-$DiskPath = Join-Path $WorkFull "secondary-600m.raw"
+$diskMiB = [math]::Floor($DiskSizeBytes / 1MB)
+$DiskPath = Join-Path $WorkFull "secondary-$diskMiB-MiB.raw"
 $EspPath = Join-Path $WorkFull "esp"
 $manifestPath = Join-Path $WorkFull "dm10-manifest.txt"
 $inspectionPath = Join-Path $WorkFull "disk-inspection.txt"
@@ -262,7 +267,7 @@ try {
     if (Test-Path -LiteralPath $DiskPath) { throw "Refusing to overwrite an existing proof disk: $DiskPath" }
     $diskStream = [IO.File]::Open($DiskPath, [IO.FileMode]::CreateNew,
         [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
-    $diskStream.SetLength(600L * 1024L * 1024L)
+    $diskStream.SetLength([int64]$DiskSizeBytes)
     $diskStream.Dispose()
 
     $bootHash = (Get-FileHash -LiteralPath (Join-Path $bootPath "BOOTX64.EFI") -Algorithm SHA256).Hash
@@ -284,6 +289,7 @@ try {
         "secondaryImage=$DiskPath",
         "storageImagePath=$DiskPath",
         "secondaryFormat=raw",
+        "secondaryRequestedBytes=$DiskSizeBytes",
         "secondaryCapacityBytes=$((Get-Item -LiteralPath $DiskPath).Length)",
         "secondaryInitialSha256=$initialHash",
         "storageImageBytes=$((Get-Item -LiteralPath $DiskPath).Length)",

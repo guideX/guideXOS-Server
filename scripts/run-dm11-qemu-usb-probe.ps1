@@ -16,6 +16,7 @@ param(
     [string]$UsbImage = "out\dm10-qemu-repeatability-final-340\attempt-01\secondary-600m.raw",
     [string]$QemuExecutable = "C:\Program Files\qemu\qemu-system-x86_64.exe",
     [string]$OvmfCode = "OVMF.fd",
+    [string]$KernelImage = "kernel\build\amd64\bin\kernel.elf",
     [string]$WorkDir = ""
 )
 
@@ -93,7 +94,11 @@ function Stop-UsbProbeQemu([System.Diagnostics.Process]$Process, [int]$Port,
 
 try {
     $bootloaderSource = Join-Path $Root "guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe"
-    $kernelSource = Join-Path $Root "kernel\build\amd64\bin\kernel.elf"
+    $kernelSource = if ([IO.Path]::IsPathRooted($KernelImage)) {
+        [IO.Path]::GetFullPath($KernelImage)
+    } else {
+        [IO.Path]::GetFullPath((Join-Path $Root $KernelImage))
+    }
     if (-not (Test-Path -LiteralPath $bootloaderSource) -or
         -not (Test-Path -LiteralPath $kernelSource)) {
         throw "Built UEFI bootloader or AMD64 kernel is missing. Run the DM11 builds first."

@@ -374,6 +374,13 @@ uint8_t mount_endpoint(const block::BlockEndpoint& endpoint);
 // a mount or writing to the block device.
 bool test_probe_fat32_volume(uint8_t blockDevIndex, uint64_t partitionOffset,
                              FATVolume& out);
+uint32_t test_fat32_next_cluster(const FATVolume& volume, uint32_t cluster);
+bool test_fat32_chain_cycle_detected(const FATVolume& volume,
+                                    uint32_t firstCluster,
+                                    uint32_t stepLimit);
+block::Status test_write_fat32_entry(const FATVolume& volume, uint32_t cluster,
+                                     uint32_t value);
+uint32_t test_allocate_fat32_cluster(FATVolume& volume);
 #endif
 
 // Unmount a volume.

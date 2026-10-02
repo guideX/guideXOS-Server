@@ -26,7 +26,9 @@ namespace kernel {
 namespace qemu_dm9_storage_proof {
 namespace {
 
-#if defined(GXOS_DM17_SINGLE_BLOCK_PROOF) || \
+#if defined(GXOS_DM22_QEMU_FAT32_PROOF)
+#define QEMU_PROOF_TAG "[DM22-QEMU]"
+#elif defined(GXOS_DM17_SINGLE_BLOCK_PROOF) || \
     defined(GXOS_DM17_QEMU_NVME_LIFECYCLE_PROOF)
 #define QEMU_PROOF_TAG "[DM17-QEMU]"
 #elif defined(GXOS_DM16_QEMU_NVME_PROOF)
@@ -42,6 +44,10 @@ static const char kProofDirectoryPath[] = "/mnt/dm9-proof/dm9";
 static const char kProofFilePath[] = "/mnt/dm9-proof/dm9/proof.bin";
 static const char kPartitionName[] = "DM9 QEMU Proof";
 static const char kPayload[] = "guideXOS DM9 QEMU proof 001\r\n";
+#if defined(GXOS_DM22_QEMU_FAT32_PROOF)
+static const uint32_t kDm22PayloadBytes = 96u * 1024u;
+static uint8_t s_dm22Payload[kDm22PayloadBytes];
+#endif
 
 // The integrated kernel enters on a 16 KiB boot stack. Keep the parser model
 // and operation snapshots out of that stack; PartitionTableModel alone is
@@ -971,6 +977,32 @@ static bool read_proof_file()
     const uint8_t handle = vfs::open(kProofFilePath, vfs::OPEN_READ);
     if (handle == 0xFFu) return false;
 
+#if defined(GXOS_DM22_QEMU_FAT32_PROOF)
+    uint8_t bytes[4096];
+    uint32_t offset = 0;
+    bool matches = true;
+    while (offset < kDm22PayloadBytes) {
+        const uint32_t requested =
+            kDm22PayloadBytes - offset < sizeof(bytes)
+                ? kDm22PayloadBytes - offset
+                : static_cast<uint32_t>(sizeof(bytes));
+        const int32_t count = vfs::read(handle, bytes, requested);
+        if (count != static_cast<int32_t>(requested)) {
+            matches = false;
+            break;
+        }
+        for (uint32_t i = 0; i < requested; ++i) {
+            const uint32_t index = offset + i;
+            const uint8_t expected = static_cast<uint8_t>(
+                index * 37u + (index >> 8) * 13u + 0x5Au);
+            if (bytes[i] != expected) matches = false;
+        }
+        offset += requested;
+    }
+    const vfs::Status closeStatus = vfs::close(handle);
+    return matches && offset == kDm22PayloadBytes &&
+        closeStatus == vfs::VFS_OK;
+#else
     char bytes[sizeof(kPayload)] = {};
     const int32_t count = vfs::read(handle, bytes,
         static_cast<uint32_t>(sizeof(kPayload) - 1u));
@@ -979,6 +1011,7 @@ static bool read_proof_file()
         bytes_equal(bytes, kPayload,
             static_cast<uint32_t>(sizeof(kPayload) - 1u)) &&
         closeStatus == vfs::VFS_OK;
+#endif
 }
 
 static bool mount_proof_partition(const storage::TargetIdentity& identity,
@@ -993,10 +1026,20 @@ static bool mount_proof_partition(const storage::TargetIdentity& identity,
 
     bool contentsValid = true;
     if (expectNewLifecycle) {
+#if defined(GXOS_DM22_QEMU_FAT32_PROOF)
+        for (uint32_t i = 0; i < kDm22PayloadBytes; ++i)
+            s_dm22Payload[i] = static_cast<uint8_t>(
+                i * 37u + (i >> 8) * 13u + 0x5Au);
+        const void* payload = s_dm22Payload;
+        const uint32_t payloadBytes = kDm22PayloadBytes;
+#else
+        const void* payload = kPayload;
+        const uint32_t payloadBytes =
+            static_cast<uint32_t>(sizeof(kPayload) - 1u);
+#endif
         contentsValid = vfs::mkdir(kProofDirectoryPath) == vfs::VFS_OK &&
-            vfs::create_file(kProofFilePath, kPayload,
-                static_cast<uint32_t>(sizeof(kPayload) - 1u)) ==
-                static_cast<int32_t>(sizeof(kPayload) - 1u) &&
+            vfs::create_file(kProofFilePath, payload, payloadBytes) ==
+                static_cast<int32_t>(payloadBytes) &&
             read_proof_file();
     } else {
         contentsValid = read_proof_file();
@@ -1277,6 +1320,21 @@ static bool run_fresh_lifecycle(const block::BlockDevice& device,
         return false;
     }
     serial::puts("[DM10-TRACE] format-fat32=PASS\n");
+#if defined(GXOS_DM22_QEMU_FAT32_PROOF)
+    serial::puts(QEMU_PROOF_TAG " format-geometry=PASS sectors=");
+    serial::put_hex32(s_formatResult.geometry.totalSectors);
+    serial::puts(" spc=");
+    serial::put_hex32(s_formatResult.geometry.sectorsPerCluster);
+    serial::puts(" clusters=");
+    serial::put_hex32(s_formatResult.geometry.clusterCount);
+    serial::puts(" fatSectors=");
+    serial::put_hex32(s_formatResult.geometry.fatSizeSectors);
+    serial::puts(" metadataWrites=");
+    serial::put_hex64(s_formatResult.sectorsWritten);
+    serial::puts(" rollbackBytes=");
+    serial::put_hex32(s_formatResult.rollbackRecordBytes);
+    serial::putc('\n');
+#endif
 
     s_proofPartition = {};
     bool partitionFound = false;
@@ -1289,6 +1347,82 @@ static bool run_fresh_lifecycle(const block::BlockDevice& device,
         }
     }
     if (!partitionFound) return false;
+
+#if defined(GXOS_DM22_QEMU_FAT32_PROOF)
+    if (s_proofPartition.sectorCount <
+            (8ull * 1024u * 1024u * 1024u) / 512u) {
+        serial::puts(QEMU_PROOF_TAG " large-volume=FAIL reason=partition-under-8GiB\n");
+        return false;
+    }
+    uint8_t boot[512], fsinfo[512], backupFsinfo[512];
+    if (block::read_sectors(identity.globalIndex, s_proofPartition.startLba,
+            1, boot) != block::BLOCK_OK) {
+        serial::puts(QEMU_PROOF_TAG " allocation-hint=FAIL reason=boot-read\n");
+        return false;
+    }
+    const uint16_t fsInfoSector =
+        static_cast<uint16_t>(boot[48] | (static_cast<uint16_t>(boot[49]) << 8));
+    const uint16_t backupBootSector =
+        static_cast<uint16_t>(boot[50] | (static_cast<uint16_t>(boot[51]) << 8));
+    const uint64_t backupFsInfoLba = s_proofPartition.startLba +
+        backupBootSector + fsInfoSector;
+    if (fsInfoSector == 0 || fsInfoSector >=
+            static_cast<uint16_t>(boot[14] |
+                (static_cast<uint16_t>(boot[15]) << 8)) ||
+        block::read_sectors(identity.globalIndex,
+            s_proofPartition.startLba + fsInfoSector, 1, fsinfo) !=
+                block::BLOCK_OK ||
+        block::read_sectors(identity.globalIndex, backupFsInfoLba, 1,
+                            backupFsinfo) != block::BLOCK_OK ||
+        fsinfo[0] != 0x52 || fsinfo[1] != 0x52 ||
+        fsinfo[2] != 0x61 || fsinfo[3] != 0x41 ||
+        fsinfo[484] != 0x72 || fsinfo[485] != 0x72 ||
+        fsinfo[486] != 0x41 || fsinfo[487] != 0x61 ||
+        fsinfo[508] != 0x00 || fsinfo[509] != 0x00 ||
+        fsinfo[510] != 0x55 || fsinfo[511] != 0xAA ||
+        backupFsinfo[0] != 0x52 || backupFsinfo[1] != 0x52 ||
+        backupFsinfo[2] != 0x61 || backupFsinfo[3] != 0x41 ||
+        backupFsinfo[484] != 0x72 || backupFsinfo[485] != 0x72 ||
+        backupFsinfo[486] != 0x41 || backupFsinfo[487] != 0x61 ||
+        backupFsinfo[508] != 0x00 || backupFsinfo[509] != 0x00 ||
+        backupFsinfo[510] != 0x55 || backupFsinfo[511] != 0xAA) {
+        serial::puts(QEMU_PROOF_TAG " allocation-hint=FAIL reason=FSInfo-invalid\n");
+        return false;
+    }
+    fsinfo[492] = 0xC1;
+    fsinfo[493] = 0xD4;
+    fsinfo[494] = 0x01;
+    fsinfo[495] = 0x00;
+    backupFsinfo[492] = 0xC1;
+    backupFsinfo[493] = 0xD4;
+    backupFsinfo[494] = 0x01;
+    backupFsinfo[495] = 0x00;
+    if (block::write_sectors(identity.globalIndex,
+            s_proofPartition.startLba + fsInfoSector, 1, fsinfo) !=
+                block::BLOCK_OK ||
+        block::write_sectors(identity.globalIndex, backupFsInfoLba, 1,
+                             backupFsinfo) != block::BLOCK_OK ||
+        block::flush(identity.globalIndex) != block::BLOCK_OK) {
+        serial::puts(QEMU_PROOF_TAG " allocation-hint=FAIL reason=write-or-flush\n");
+        return false;
+    }
+    if (block::read_sectors(identity.globalIndex,
+            s_proofPartition.startLba + fsInfoSector, 1, fsinfo) !=
+                block::BLOCK_OK ||
+        block::read_sectors(identity.globalIndex, backupFsInfoLba, 1,
+                            backupFsinfo) != block::BLOCK_OK ||
+        fsinfo[492] != 0xC1 || fsinfo[493] != 0xD4 ||
+        fsinfo[494] != 0x01 || fsinfo[495] != 0x00 ||
+        backupFsinfo[492] != 0xC1 || backupFsinfo[493] != 0xD4 ||
+        backupFsinfo[494] != 0x01 || backupFsinfo[495] != 0x00) {
+        serial::puts(QEMU_PROOF_TAG " allocation-hint=FAIL reason=readback\n");
+        return false;
+    }
+    serial::puts(QEMU_PROOF_TAG " allocation-hint=PASS cluster=120001\n");
+    serial::puts(QEMU_PROOF_TAG " large-volume=PASS bytes=");
+    serial::put_hex64(static_cast<uint64_t>(s_proofPartition.sectorCount) * 512u);
+    serial::putc('\n');
+#endif
 
     serial::puts("[DM10-TRACE] mount-file-roundtrip=start\n");
     const bool mountAndFileIo = mount_proof_partition(identity,

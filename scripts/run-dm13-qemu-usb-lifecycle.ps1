@@ -263,7 +263,18 @@ try {
     Write-Host "DM13 USB lifecycle and restart proof passed. Evidence: $WorkFull"
 } catch {
     $proofFailed = $true
-    $failureImageHash = (Get-FileHash -LiteralPath $UsbFull -Algorithm SHA256).Hash
+    $failureText = $_.Exception.Message -replace '[\r\n]+',' '
+    if ($first) {
+        try { Stop-Dm13Qemu $first } catch { }
+        $first = $null
+    }
+    if ($second) {
+        try { Stop-Dm13Qemu $second } catch { }
+        $second = $null
+    }
+    $failureImageHash = 'unavailable'
+    try { $failureImageHash = (Get-FileHash -LiteralPath $UsbFull -Algorithm SHA256).Hash }
+    catch { }
     $failureRows = [System.Collections.Generic.List[string]]::new()
     $failureRows.Add("transportResult=FAIL")
     $failureRows.Add("result=FAIL")
@@ -275,7 +286,7 @@ try {
             $failureRows.Add("qemu.$($run.Name).stillRunning=yes")
         }
     }
-    $failureRows.Add("failure=$($_.Exception.Message -replace '[\r\n]+',' ')")
+    $failureRows.Add("failure=$failureText")
     Add-Content -LiteralPath $manifest -Encoding ascii -Value $failureRows
     throw
 } finally {

@@ -16,6 +16,19 @@ static const uint32_t kBackupBootSector = 6;
 static const uint32_t kBackupFsInfoSector = 7;
 static const uint64_t kZeroScanBufferBytes = 64u * 1024u;
 
+enum Fat32RollbackPriorState : uint8_t {
+    FAT32_ROLLBACK_KNOWN_ZERO = 1,
+};
+
+struct Fat32RollbackRecord {
+    uint32_t relativeSector;
+    Fat32RollbackPriorState priorState;
+    uint8_t reserved[3];
+};
+static_assert(sizeof(Fat32RollbackRecord) ==
+              FAT32_FORMAT_ROLLBACK_RECORD_BYTES,
+              "FAT32 rollback record size is part of the memory bound");
+
 struct PartitionCheck {
     DeviceCapabilities capabilities;
     PartitionEntry currentPartition;
@@ -24,10 +37,9 @@ struct PartitionCheck {
 
 alignas(4096) static uint8_t s_ioSector[MAX_LOGICAL_SECTOR_SIZE];
 alignas(4096) static uint8_t s_zeroScanBuffer[kZeroScanBufferBytes];
-alignas(4096) static uint8_t s_metadataSnapshot[FAT32_FORMAT_ROLLBACK_LIMIT_BYTES];
+static Fat32RollbackRecord s_rollbackRecords[FAT32_FORMAT_MAX_ROLLBACK_ENTRIES];
 alignas(4096) static PartitionTableModel s_partitionTable;
-static uint32_t s_snapshotBytes;
-static uint32_t s_snapshotSectors;
+static uint32_t s_rollbackRecordCount;
 
 static void clear_bytes(void* destination, size_t bytes)
 {
@@ -485,6 +497,12 @@ static bool relative_range_valid(const Fat32FormatGeometry& geometry,
         sectors <= static_cast<uint64_t>(geometry.totalSectors) - relative;
 }
 
+static bool rollback_context_valid(const Fat32FormatRequest& request,
+                                   const TargetIdentity& target,
+                                   const PartitionEntry& partition,
+                                   const Fat32FormatGeometry& geometry,
+                                   const StorageOperationLease& lease);
+
 static block::Status read_partition_sector(const TargetIdentity& target,
                                            const PartitionEntry& partition,
                                            const Fat32FormatGeometry& geometry,
@@ -501,18 +519,27 @@ static block::Status read_partition_sector(const TargetIdentity& target,
                                MAX_LOGICAL_SECTOR_SIZE);
 }
 
-static bool write_partition_sector(const TargetIdentity& target,
+static bool write_partition_sector(const Fat32FormatRequest& request,
+                                   const TargetIdentity& target,
                                    const PartitionEntry& partition,
                                    const Fat32FormatGeometry& geometry,
                                    uint64_t relative, const uint8_t* sector,
+                                   const StorageOperationLease& lease,
                                    Fat32FormatResult& result)
 {
     result.lastStage = result.stage;
     if (!sector || !relative_range_valid(geometry, relative, 1) ||
-        relative >= partition.sectorCount) return false;
+        relative >= partition.sectorCount) {
+        result.status = FAT32_FORMAT_INVALID_GEOMETRY;
+        return false;
+    }
     const RevalidationStatus identity = revalidate_target_identity(target);
     if (identity != TARGET_VALID) {
         result.status = map_identity(identity);
+        return false;
+    }
+    if (!rollback_context_valid(request, target, partition, geometry, lease)) {
+        result.status = FAT32_FORMAT_PARTITION_IDENTITY_CHANGED;
         return false;
     }
     uint64_t absolute = 0;
@@ -525,13 +552,16 @@ static bool write_partition_sector(const TargetIdentity& target,
         absolute, 1, sector, geometry.bytesPerSector);
     if (status != block::BLOCK_OK) {
         const bool haveIo = capture_current_io_result(result);
-        result.writeAttempted = haveIo &&
+        const bool thisWriteAttempted = haveIo &&
             result.failedBlockDiagnostic.callbackInvoked;
-        result.firstFailedStage = result.firstFailedStage == FAT32_FORMAT_STAGE_IDLE
-            ? result.stage : result.firstFailedStage;
-        result.writeMayHaveReachedMedia = result.writeAttempted &&
+        const bool thisWriteMayHaveReachedMedia = thisWriteAttempted &&
             (!result.failedBlockDiagnostic.transportDiagnostic.valid ||
              result.failedBlockDiagnostic.transportDiagnostic.dataSectorsTransferred != 0);
+        result.writeAttempted = result.writeAttempted || thisWriteAttempted;
+        result.firstFailedStage = result.firstFailedStage == FAT32_FORMAT_STAGE_IDLE
+            ? result.stage : result.firstFailedStage;
+        result.writeMayHaveReachedMedia = result.writeMayHaveReachedMedia ||
+            thisWriteMayHaveReachedMedia;
         result.failedBeforeWrite = !result.writeMayHaveReachedMedia;
         if (result.status == FAT32_FORMAT_INVALID_REQUEST)
             result.status = FAT32_FORMAT_METADATA_WRITE_FAILED;
@@ -542,21 +572,6 @@ static bool write_partition_sector(const TargetIdentity& target,
     result.failedBeforeWrite = false;
     result.failedOperation = block::OPERATION_NONE;
     ++result.sectorsWritten;
-    return true;
-}
-
-static bool zero_range(const TargetIdentity& target,
-                       const PartitionEntry& partition,
-                       const Fat32FormatGeometry& geometry,
-                       uint64_t relative, uint32_t sectors,
-                       Fat32FormatResult& result)
-{
-    if (!relative_range_valid(geometry, relative, sectors) ||
-        relative + sectors > partition.sectorCount) return false;
-    clear_bytes(s_ioSector, geometry.bytesPerSector);
-    for (uint32_t i = 0; i < sectors; ++i)
-        if (!write_partition_sector(target, partition, geometry,
-                relative + i, s_ioSector, result)) return false;
     return true;
 }
 
@@ -629,48 +644,115 @@ static void build_root_sector(const char label[11], bool haveLabel,
     sector[11] = 0x08; // Volume-label entry; the following 0x00 ends the root.
 }
 
-static bool capture_metadata_snapshot(const TargetIdentity& target,
-                                      const PartitionEntry& partition,
-                                      const Fat32FormatGeometry& geometry)
+static bool cluster_relative_range(const Fat32FormatGeometry& geometry,
+                                   uint32_t cluster, uint64_t& firstSector)
 {
-    if (geometry.rollbackSnapshotBytes > sizeof(s_metadataSnapshot) ||
-        geometry.rollbackSnapshotSectors == 0 ||
-        geometry.rollbackSnapshotSectors > partition.sectorCount) return false;
-    s_snapshotBytes = geometry.rollbackSnapshotBytes;
-    s_snapshotSectors = geometry.rollbackSnapshotSectors;
-    for (uint32_t i = 0; i < s_snapshotSectors; ++i) {
-        if (read_partition_sector(target, partition, geometry, i,
-                s_ioSector) != block::BLOCK_OK) return false;
-        copy_bytes(s_metadataSnapshot + static_cast<size_t>(i) *
-            geometry.bytesPerSector, s_ioSector, geometry.bytesPerSector);
+    if (cluster < 2 ||
+        static_cast<uint64_t>(cluster - 2u) >= geometry.clusterCount)
+        return false;
+    uint64_t clusterOffset = 0;
+    uint64_t end = 0;
+    if (!mul_u64(static_cast<uint64_t>(cluster - 2u),
+                 geometry.sectorsPerCluster, clusterOffset) ||
+        !add_u64(geometry.firstDataSector, clusterOffset, firstSector) ||
+        !add_u64(firstSector, geometry.sectorsPerCluster, end) ||
+        end > geometry.totalSectors) return false;
+    return true;
+}
+
+static bool add_known_zero_record(const TargetIdentity& target,
+                                  const PartitionEntry& partition,
+                                  const Fat32FormatGeometry& geometry,
+                                  uint64_t relativeSector)
+{
+    if (relativeSector > UINT32_MAX ||
+        !relative_range_valid(geometry, relativeSector, 1) ||
+        relativeSector >= partition.sectorCount) return false;
+    for (uint32_t i = 0; i < s_rollbackRecordCount; ++i)
+        if (s_rollbackRecords[i].relativeSector == relativeSector) return true;
+    if (s_rollbackRecordCount >= FAT32_FORMAT_MAX_ROLLBACK_ENTRIES ||
+        read_partition_sector(target, partition, geometry, relativeSector,
+            s_ioSector) != block::BLOCK_OK ||
+        !bytes_zero(s_ioSector, geometry.bytesPerSector)) return false;
+    Fat32RollbackRecord& record = s_rollbackRecords[s_rollbackRecordCount++];
+    record.relativeSector = static_cast<uint32_t>(relativeSector);
+    record.priorState = FAT32_ROLLBACK_KNOWN_ZERO;
+    clear_bytes(record.reserved, sizeof(record.reserved));
+    return true;
+}
+
+// The full-partition zero scan is the authority for this representation.
+// Recheck every planned write sector and retain only its LBA plus KnownZero;
+// no sector payload or FAT-sized prefix is copied into rollback memory.
+static bool capture_known_zero_rollback_set(
+    const TargetIdentity& target, const PartitionEntry& partition,
+    const Fat32FormatGeometry& geometry, bool haveLabel)
+{
+    clear_bytes(s_rollbackRecords, sizeof(s_rollbackRecords));
+    s_rollbackRecordCount = 0;
+    uint64_t rootSector = 0;
+    if (!cluster_relative_range(geometry, geometry.rootCluster, rootSector) ||
+        !add_known_zero_record(target, partition, geometry,
+            geometry.firstFatSector) ||
+        !add_known_zero_record(target, partition, geometry,
+            geometry.secondFatSector) ||
+        (haveLabel && !add_known_zero_record(target, partition, geometry,
+            rootSector)) ||
+        !add_known_zero_record(target, partition, geometry,
+            geometry.backupBootSector) ||
+        !add_known_zero_record(target, partition, geometry,
+            geometry.backupFsInfoSector) ||
+        !add_known_zero_record(target, partition, geometry,
+            geometry.fsInfoSector) ||
+        !add_known_zero_record(target, partition, geometry, 0))
+        return false;
+    return s_rollbackRecordCount != 0;
+}
+
+static bool rollback_context_valid(const Fat32FormatRequest& request,
+                                   const TargetIdentity& target,
+                                   const PartitionEntry& partition,
+                                   const Fat32FormatGeometry& geometry,
+                                   const StorageOperationLease& lease)
+{
+    if (!storage_operation_lease_is_current(lease) ||
+        revalidate_target_identity(target) != TARGET_VALID) return false;
+    DeviceCapabilities caps;
+    if (!query_device_capabilities(target.globalIndex, caps) ||
+        caps.totalLogicalSectors != target.totalLogicalSectors ||
+        caps.logicalSectorSize != geometry.bytesPerSector ||
+        !target_range_valid(target, partition.startLba,
+                            partition.sectorCount)) return false;
+    PartitionEntry current = {};
+    return find_and_validate_partition(request, caps, s_partitionTable,
+                                       current) &&
+        same_partition_extent(current, partition);
+}
+
+static bool rollback_set_is_zero(const TargetIdentity& target,
+                                 const PartitionEntry& partition,
+                                 const Fat32FormatGeometry& geometry)
+{
+    if (s_rollbackRecordCount == 0) return false;
+    for (uint32_t i = 0; i < s_rollbackRecordCount; ++i) {
+        const Fat32RollbackRecord& record = s_rollbackRecords[i];
+        if (record.priorState != FAT32_ROLLBACK_KNOWN_ZERO ||
+            read_partition_sector(target, partition, geometry,
+                record.relativeSector, s_ioSector) != block::BLOCK_OK ||
+            !bytes_zero(s_ioSector, geometry.bytesPerSector)) return false;
     }
     return true;
 }
 
-static bool metadata_snapshot_unchanged(const TargetIdentity& target,
-                                       const PartitionEntry& partition,
-                                       const Fat32FormatGeometry& geometry)
+static bool restore_known_zero_rollback_set(
+    const Fat32FormatRequest& request, const TargetIdentity& target,
+    const PartitionEntry& partition, const Fat32FormatGeometry& geometry,
+    const StorageOperationLease& lease, Fat32FormatResult& result)
 {
-    if (s_snapshotSectors == 0 ||
-        revalidate_target_identity(target) != TARGET_VALID) return false;
-    for (uint32_t i = 0; i < s_snapshotSectors; ++i) {
-        if (read_partition_sector(target, partition, geometry, i, s_ioSector) !=
-                block::BLOCK_OK ||
-            !bytes_equal(s_ioSector, s_metadataSnapshot +
-                static_cast<size_t>(i) * geometry.bytesPerSector,
-                geometry.bytesPerSector)) return false;
-    }
-    return true;
-}
-
-static bool restore_metadata_snapshot(const TargetIdentity& target,
-                                      const PartitionEntry& partition,
-                                      const Fat32FormatGeometry& geometry,
-                                      Fat32FormatResult& result)
-{
-    if (!result.writeMayHaveReachedMedia || s_snapshotSectors == 0 ||
-        s_snapshotBytes > sizeof(s_metadataSnapshot) ||
-        revalidate_target_identity(target) != TARGET_VALID) return false;
+    if (!result.writeMayHaveReachedMedia || s_rollbackRecordCount == 0 ||
+        s_rollbackRecordCount > FAT32_FORMAT_MAX_ROLLBACK_ENTRIES ||
+        !rollback_context_valid(request, target, partition, geometry, lease))
+        return false;
     DeviceCapabilities caps;
     if (!query_device_capabilities(target.globalIndex, caps) ||
         (caps.persistence != PERSISTENCE_SYNCHRONOUS_DURABLE &&
@@ -678,20 +760,26 @@ static bool restore_metadata_snapshot(const TargetIdentity& target,
            caps.flushSupported && caps.flushSemanticsKnown))) return false;
 
     result.rollbackAttempted = true;
+    result.rollbackEntryCount = s_rollbackRecordCount;
+    result.rollbackRecordBytes = s_rollbackRecordCount *
+        FAT32_FORMAT_ROLLBACK_RECORD_BYTES;
     bool restored = true;
     result.rollbackWriteStatus = block::BLOCK_OK;
-    for (uint32_t i = 0; i < s_snapshotSectors; ++i) {
+    clear_bytes(s_ioSector, geometry.bytesPerSector);
+    for (uint32_t i = 0; i < s_rollbackRecordCount; ++i) {
+        const Fat32RollbackRecord& record = s_rollbackRecords[i];
         result.rollbackStage = FAT32_FORMAT_STAGE_ROLLBACK_WRITE;
-        if (revalidate_target_identity(target) != TARGET_VALID) {
+        if (record.priorState != FAT32_ROLLBACK_KNOWN_ZERO ||
+            !rollback_context_valid(request, target, partition, geometry,
+                                     lease)) {
             restored = false;
             result.rollbackWriteStatus = block::BLOCK_ERR_NO_MEDIA;
             break;
         }
-        copy_bytes(s_ioSector, s_metadataSnapshot + static_cast<size_t>(i) *
-            geometry.bytesPerSector, geometry.bytesPerSector);
         uint64_t absolute = 0;
-        if (!add_u64(partition.startLba, i, absolute) ||
-            !checked_lba_range(target.totalLogicalSectors, absolute, 1)) {
+        if (!add_u64(partition.startLba, record.relativeSector, absolute) ||
+            !checked_lba_range(target.totalLogicalSectors, absolute, 1) ||
+            !relative_range_valid(geometry, record.relativeSector, 1)) {
             restored = false;
             result.rollbackWriteStatus = block::BLOCK_ERR_INVALID;
             break;
@@ -705,23 +793,19 @@ static bool restore_metadata_snapshot(const TargetIdentity& target,
         }
         ++result.rollbackSectorsWritten;
     }
-    if (!restored || revalidate_target_identity(target) != TARGET_VALID)
-        return false;
+    if (!restored || !rollback_context_valid(request, target, partition,
+                                              geometry, lease)) return false;
     result.rollbackStage = FAT32_FORMAT_STAGE_ROLLBACK_FLUSH;
     result.rollbackFlushAttempted = true;
     const block::FlushReport flush =
         block::flush_with_result(target.globalIndex);
     result.rollbackFlushOutcome = flush.outcome;
     result.rollbackFlushStatus = flush.status;
-    if (!trusted_flush(flush)) return false;
+    if (!trusted_flush(flush) ||
+        !rollback_context_valid(request, target, partition, geometry, lease))
+        return false;
     result.rollbackStage = FAT32_FORMAT_STAGE_ROLLBACK_VERIFY;
-    for (uint32_t i = 0; i < s_snapshotSectors; ++i) {
-        if (read_partition_sector(target, partition, geometry, i,
-                s_ioSector) != block::BLOCK_OK ||
-            !bytes_equal(s_ioSector, s_metadataSnapshot +
-                static_cast<size_t>(i) * geometry.bytesPerSector,
-                geometry.bytesPerSector)) return false;
-    }
+    if (!rollback_set_is_zero(target, partition, geometry)) return false;
     result.rollbackVerificationPassed = true;
     return true;
 }
@@ -755,7 +839,8 @@ static bool verify_fat32_structure(const TargetIdentity& target,
     const uint32_t fatSectors = read_u32(primary + 36);
     const uint32_t rootCluster = read_u32(primary + 44);
     uint64_t fatRegionSectors = 0, firstData = 0;
-    if (bps != FAT32_FORMAT_SECTOR_SIZE || spc == 0 || spc > 64 ||
+    if (bps != FAT32_FORMAT_SECTOR_SIZE || spc == 0 ||
+        spc > FAT32_FORMAT_MAX_SECTORS_PER_CLUSTER ||
         (spc & (spc - 1u)) != 0 || reserved == 0 || fats != 2 ||
         read_u16(primary + 17) != 0 || read_u16(primary + 19) != 0 ||
         read_u16(primary + 22) != 0 || total == 0 ||
@@ -776,12 +861,14 @@ static bool verify_fat32_structure(const TargetIdentity& target,
         !checked_lba_range(target.totalLogicalSectors,
             partition.startLba, total)) return false;
 
-    const uint32_t clusters = static_cast<uint32_t>((total - firstData) / spc);
-    uint64_t fatBytes = 0;
+    const uint64_t clusterCount64 = (total - firstData) / spc;
+    const uint32_t clusters = static_cast<uint32_t>(clusterCount64);
+    uint64_t fatBytes = 0, fatCapacityBytes = 0;
     if (clusters < FAT32_FORMAT_MIN_CLUSTERS ||
         clusters > FAT32_FORMAT_MAX_CLUSTERS ||
         !mul_u64(static_cast<uint64_t>(clusters) + 2u, 4u, fatBytes) ||
-        fatBytes > static_cast<uint64_t>(fatSectors) * bps ||
+        !mul_u64(fatSectors, bps, fatCapacityBytes) ||
+        fatBytes > fatCapacityBytes ||
         !bytes_equal(primary, backup, sizeof(primary))) return false;
     if (read_u32(fsinfo) != 0x41615252u ||
         read_u32(fsinfo + 484) != 0x61417272u ||
@@ -793,29 +880,30 @@ static bool verify_fat32_structure(const TargetIdentity& target,
     const uint32_t diskVolumeId = read_u32(primary + 67);
     if (diskVolumeId != planned.volumeId) return false;
 
-    for (uint32_t fat = 0; fat < fats; ++fat) {
-        const uint64_t fatStart = reserved +
-            static_cast<uint64_t>(fat) * fatSectors;
-        if (!relative_range_valid(planned, fatStart, fatSectors)) return false;
-        for (uint32_t sector = 0; sector < fatSectors; ++sector) {
-            if (read_partition_sector(target, partition, planned,
-                    fatStart + sector, s_ioSector) != block::BLOCK_OK)
-                return false;
-            if (sector == 0) {
-                if (read_u32(s_ioSector) != 0x0FFFFFF8u ||
-                    read_u32(s_ioSector + 4) != 0x0FFFFFFFu ||
-                    read_u32(s_ioSector + 8) != 0x0FFFFFFFu ||
-                    !bytes_zero(s_ioSector + 12, bps - 12)) return false;
-            } else if (!bytes_zero(s_ioSector, bps)) {
-                return false;
-            }
-        }
-    }
-    const uint64_t rootSector = firstData +
-        static_cast<uint64_t>(rootCluster - 2) * spc;
-    if (!relative_range_valid(planned, rootSector, spc)) return false;
+    uint8_t firstFatSector[512];
+    uint8_t secondFatSector[512];
+    if (!relative_range_valid(planned, reserved, 1) ||
+        !relative_range_valid(planned,
+            static_cast<uint64_t>(reserved) + fatSectors, 1) ||
+        read_partition_sector(target, partition, planned, reserved,
+            firstFatSector) != block::BLOCK_OK ||
+        read_partition_sector(target, partition, planned,
+            static_cast<uint64_t>(reserved) + fatSectors,
+            secondFatSector) != block::BLOCK_OK ||
+        read_u32(firstFatSector) != 0x0FFFFFF8u ||
+        read_u32(firstFatSector + 4) != 0x0FFFFFFFu ||
+        read_u32(firstFatSector + 8) != 0x0FFFFFFFu ||
+        !bytes_zero(firstFatSector + 12, bps - 12) ||
+        !bytes_equal(firstFatSector, secondFatSector, bps)) return false;
+    // The full-volume blank scan established all untouched FAT sectors as
+    // zero. Read-back therefore checks the initialized FAT sector in each
+    // mirror, avoiding verification work proportional to FAT capacity.
+    uint64_t rootSector = 0;
+    if (!cluster_relative_range(planned, rootCluster, rootSector)) return false;
     for (uint32_t i = 0; i < spc; ++i) {
-        if (read_partition_sector(target, partition, planned, rootSector + i,
+        uint64_t sector = 0;
+        if (!add_u64(rootSector, i, sector) ||
+            read_partition_sector(target, partition, planned, sector,
                 s_ioSector) != block::BLOCK_OK) return false;
         if (i == 0 && expectedLabel[0] != ' ') {
             if (!bytes_equal(s_ioSector,
@@ -898,6 +986,8 @@ static Fat32FormatStatus execute_locked(const Fat32FormatRequest& request,
     if (status != FAT32_FORMAT_READY) return status;
     result.stage = FAT32_FORMAT_STAGE_CALCULATING_LAYOUT;
     result.lastStage = result.stage;
+    clear_bytes(s_rollbackRecords, sizeof(s_rollbackRecords));
+    s_rollbackRecordCount = 0;
     status = scan_partition_for_clean_state(request,
         check.capabilities.logicalSectorSize, result.existingState);
     if (status != FAT32_FORMAT_READY) return status;
@@ -910,31 +1000,28 @@ static Fat32FormatStatus execute_locked(const Fat32FormatRequest& request,
         return FAT32_FORMAT_VOLUME_ID_UNAVAILABLE;
     check.geometry.volumeId = volumeId;
     result.geometry = check.geometry;
+    const bool haveLabel = label[0] != ' ';
 
     result.stage = FAT32_FORMAT_STAGE_SNAPSHOT_FILESYSTEM_METADATA;
     result.lastStage = result.stage;
-    if (!capture_metadata_snapshot(request.targetSnapshot,
-            check.currentPartition, check.geometry)) {
+    if (!capture_known_zero_rollback_set(request.targetSnapshot,
+            check.currentPartition, check.geometry, haveLabel)) {
         result.firstFailedStage = result.stage;
         (void)capture_current_io_result(result);
         return FAT32_FORMAT_SNAPSHOT_FAILED;
     }
+    result.rollbackEntryCount = s_rollbackRecordCount;
+    result.rollbackRecordBytes = s_rollbackRecordCount *
+        FAT32_FORMAT_ROLLBACK_RECORD_BYTES;
 
     result.stage = FAT32_FORMAT_STAGE_SNAPSHOT_FILESYSTEM_METADATA;
     result.lastStage = result.stage;
-    if (revalidate_target_identity(request.targetSnapshot) != TARGET_VALID ||
-        !find_and_validate_partition(request, check.capabilities,
-            s_partitionTable, check.currentPartition))
+    if (!rollback_context_valid(request, request.targetSnapshot,
+            check.currentPartition, check.geometry, lease))
         return FAT32_FORMAT_PARTITION_IDENTITY_CHANGED;
-    for (uint32_t i = 0; i < s_snapshotSectors; ++i) {
-        if (read_partition_sector(request.targetSnapshot,
-                check.currentPartition, check.geometry, i, s_ioSector) !=
-                block::BLOCK_OK ||
-            !bytes_equal(s_ioSector, s_metadataSnapshot +
-                static_cast<size_t>(i) * check.geometry.bytesPerSector,
-                check.geometry.bytesPerSector))
-            return FAT32_FORMAT_SNAPSHOT_FAILED;
-    }
+    if (!rollback_set_is_zero(request.targetSnapshot,
+            check.currentPartition, check.geometry))
+        return FAT32_FORMAT_SNAPSHOT_FAILED;
     result.stage = FAT32_FORMAT_STAGE_FLUSH;
     result.lastStage = result.stage;
     result.flushAttempted = true;
@@ -959,63 +1046,59 @@ static Fat32FormatStatus execute_locked(const Fat32FormatRequest& request,
     uint8_t fsinfoSector[512];
     uint8_t bootSector[512];
     uint8_t rootSector[512];
-    const uint64_t secondFat = check.geometry.secondFatSector;
     build_fat_sector(check.geometry, fatSector);
-    bool writeOk = true;
-    for (uint32_t fatIndex = 0; fatIndex < check.geometry.fatCount && writeOk;
-         ++fatIndex) {
-        const uint64_t fatStart = fatIndex == 0
-            ? check.geometry.firstFatSector : secondFat;
-        writeOk = write_partition_sector(request.targetSnapshot,
-            check.currentPartition, check.geometry, fatStart, fatSector, result);
-        if (writeOk && check.geometry.fatSizeSectors > 1)
-            writeOk = zero_range(request.targetSnapshot,
-                check.currentPartition, check.geometry, fatStart + 1,
-                check.geometry.fatSizeSectors - 1, result);
-    }
-    const bool haveLabel = label[0] != ' ';
-    build_root_sector(label, haveLabel, rootSector);
+    bool writeOk = write_partition_sector(request, request.targetSnapshot,
+        check.currentPartition, check.geometry,
+        check.geometry.firstFatSector, fatSector, lease, result);
     if (writeOk) {
+        writeOk = write_partition_sector(request, request.targetSnapshot,
+            check.currentPartition, check.geometry,
+            check.geometry.secondFatSector, fatSector, lease, result);
+    }
+    build_root_sector(label, haveLabel, rootSector);
+    uint64_t rootSectorLba = 0;
+    if (writeOk && haveLabel) {
         result.stage = FAT32_FORMAT_STAGE_WRITE_ROOT;
         result.lastStage = result.stage;
-        writeOk = write_partition_sector(request.targetSnapshot,
-            check.currentPartition, check.geometry,
-            check.geometry.firstDataSector, rootSector, result);
+        writeOk = cluster_relative_range(check.geometry,
+            check.geometry.rootCluster, rootSectorLba);
     }
-    if (writeOk && check.geometry.sectorsPerCluster > 1)
-        writeOk = zero_range(request.targetSnapshot, check.currentPartition,
-            check.geometry, check.geometry.firstDataSector + 1,
-            check.geometry.sectorsPerCluster - 1, result);
+    if (writeOk && haveLabel) {
+        writeOk = write_partition_sector(request, request.targetSnapshot,
+            check.currentPartition, check.geometry,
+            rootSectorLba, rootSector, lease, result);
+    }
 
     build_fsinfo(check.geometry, fsinfoSector);
     build_boot_sector(check.geometry, label, bootSector);
     if (writeOk) {
         result.stage = FAT32_FORMAT_STAGE_WRITE_BACKUP_METADATA;
         result.lastStage = result.stage;
-        writeOk = write_partition_sector(request.targetSnapshot,
+        writeOk = write_partition_sector(request, request.targetSnapshot,
         check.currentPartition, check.geometry,
-        check.geometry.backupBootSector, bootSector, result);
+        check.geometry.backupBootSector, bootSector, lease, result);
     }
     if (writeOk) {
         result.stage = FAT32_FORMAT_STAGE_WRITE_FSINFO;
         result.lastStage = result.stage;
-        writeOk = write_partition_sector(request.targetSnapshot,
+        writeOk = write_partition_sector(request, request.targetSnapshot,
         check.currentPartition, check.geometry,
-        check.geometry.backupFsInfoSector, fsinfoSector, result);
+        check.geometry.backupFsInfoSector, fsinfoSector, lease, result);
     }
     if (writeOk) {
         result.stage = FAT32_FORMAT_STAGE_WRITE_FSINFO;
         result.lastStage = result.stage;
-        writeOk = write_partition_sector(request.targetSnapshot,
+        writeOk = write_partition_sector(request, request.targetSnapshot,
         check.currentPartition, check.geometry,
-        check.geometry.fsInfoSector, fsinfoSector, result);
+        check.geometry.fsInfoSector, fsinfoSector, lease, result);
     }
     // Publish FAT32 only after the supporting structures exist.
     if (writeOk) {
         result.stage = FAT32_FORMAT_STAGE_WRITE_BOOT_SECTOR;
         result.lastStage = result.stage;
-        writeOk = write_partition_sector(request.targetSnapshot,
-            check.currentPartition, check.geometry, 0, bootSector, result);
+        writeOk = write_partition_sector(request, request.targetSnapshot,
+            check.currentPartition, check.geometry, 0, bootSector, lease,
+            result);
     }
     if (!writeOk) {
         status = result.status == FAT32_FORMAT_INVALID_REQUEST
@@ -1072,9 +1155,8 @@ static Fat32FormatStatus execute_locked(const Fat32FormatRequest& request,
     set_diagnostic(result,
         "FAT32 metadata formatted and verified. The partition remains unmounted.");
     complete_storage_operation_execution(lease);
-    clear_bytes(s_metadataSnapshot, s_snapshotBytes);
-    s_snapshotBytes = 0;
-    s_snapshotSectors = 0;
+    clear_bytes(s_rollbackRecords, sizeof(s_rollbackRecords));
+    s_rollbackRecordCount = 0;
     return result.status;
 
 failed:
@@ -1087,27 +1169,28 @@ failed:
     set_diagnostic(result, fat32_format_status_name(status));
     result.failedBeforeWrite = !result.writeMayHaveReachedMedia;
     if (result.writeMayHaveReachedMedia) {
-        result.rollbackSucceeded = restore_metadata_snapshot(
+        result.rollbackSucceeded = restore_known_zero_rollback_set(request,
             request.targetSnapshot, check.currentPartition, check.geometry,
-            result);
+            lease, result);
         if (!result.rollbackSucceeded) {
             result.status = FAT32_FORMAT_ROLLBACK_FAILED;
             result.stage = FAT32_FORMAT_STAGE_STATE_UNCERTAIN;
-            result.finalStateUncertain = true;
+    result.finalStateUncertain = true;
             result.finalProbeState = FAT32_FINAL_PROBE_UNKNOWN;
             set_diagnostic(result,
                 "Filesystem state uncertain; rollback could not be verified.");
-        } else {
-            result.finalProbeState = FAT32_FINAL_PROBE_UNFORMATTED;
-        }
-    } else if (metadata_snapshot_unchanged(request.targetSnapshot,
-            check.currentPartition, check.geometry)) {
+    } else {
+        result.finalProbeState = FAT32_FINAL_PROBE_UNFORMATTED;
+    }
+    } else if (rollback_context_valid(request, request.targetSnapshot,
+                   check.currentPartition, check.geometry, lease) &&
+               rollback_set_is_zero(request.targetSnapshot,
+                   check.currentPartition, check.geometry)) {
         result.finalProbeState = FAT32_FINAL_PROBE_UNFORMATTED;
     }
     complete_storage_operation_execution(lease);
-    clear_bytes(s_metadataSnapshot, s_snapshotBytes);
-    s_snapshotBytes = 0;
-    s_snapshotSectors = 0;
+    clear_bytes(s_rollbackRecords, sizeof(s_rollbackRecords));
+    s_rollbackRecordCount = 0;
     return result.status;
 }
 
@@ -1187,25 +1270,33 @@ Fat32FormatStatus calculate_fat32_format_geometry(
     if (partitionSectorCount > UINT32_MAX)
         return FAT32_FORMAT_LAYOUT_OVERFLOW;
 
-    uint32_t sectorsPerCluster = 1;
+    uint32_t sectorsPerCluster = FAT32_FORMAT_MAX_SECTORS_PER_CLUSTER;
     uint64_t fatSectors = 0;
     uint64_t clusterCount = 0;
     uint64_t firstData = 0;
     bool chosen = false;
-    while (sectorsPerCluster <= FAT32_FORMAT_MAX_SECTORS_PER_CLUSTER) {
+    // Keep the cluster size at or below 32 KiB for FAT32 interoperability.
+    // Prefer the largest supported cluster that still leaves enough data
+    // clusters to be FAT32. FAT size and rollback memory do not choose this
+    // geometry.
+    for (;;) {
         fatSectors = 1;
         bool converged = false;
-        for (uint8_t iteration = 0; iteration < 32; ++iteration) {
+        bool candidateTooSmall = false;
+        for (uint8_t iteration = 0; iteration < 64; ++iteration) {
             uint64_t fatRegions = 0;
             if (!mul_u64(kFat32Count, fatSectors, fatRegions) ||
                 !add_u64(kFat32ReservedSectors, fatRegions, firstData))
                 return FAT32_FORMAT_LAYOUT_OVERFLOW;
-            if (firstData >= partitionSectorCount)
-                return FAT32_FORMAT_TOO_SMALL;
+            if (firstData >= partitionSectorCount) {
+                candidateTooSmall = true;
+                break;
+            }
             clusterCount = (partitionSectorCount - firstData) /
                 sectorsPerCluster;
             uint64_t requiredFatBytes = 0;
-            if (!mul_u64(clusterCount + 2u, 4u, requiredFatBytes))
+            if (!mul_u64(clusterCount + 2u, 4u, requiredFatBytes) ||
+                requiredFatBytes > UINT64_MAX - (logicalSectorSize - 1u))
                 return FAT32_FORMAT_LAYOUT_OVERFLOW;
             const uint64_t neededFatSectors = (requiredFatBytes +
                 logicalSectorSize - 1u) / logicalSectorSize;
@@ -1217,6 +1308,11 @@ Fat32FormatStatus calculate_fat32_format_geometry(
                 return FAT32_FORMAT_LAYOUT_OVERFLOW;
             fatSectors = neededFatSectors;
         }
+        if (candidateTooSmall) {
+            if (sectorsPerCluster == 1) break;
+            sectorsPerCluster >>= 1;
+            continue;
+        }
         if (!converged || fatSectors > UINT32_MAX)
             return FAT32_FORMAT_LAYOUT_OVERFLOW;
 
@@ -1224,35 +1320,32 @@ Fat32FormatStatus calculate_fat32_format_geometry(
         if (!mul_u64(kFat32Count, fatSectors, totalFatSectors) ||
             !add_u64(kFat32ReservedSectors, totalFatSectors, firstData) ||
             firstData >= partitionSectorCount)
-            return FAT32_FORMAT_LAYOUT_OVERFLOW;
+            return FAT32_FORMAT_TOO_SMALL;
         clusterCount = (partitionSectorCount - firstData) /
             sectorsPerCluster;
-        if (clusterCount <= FAT32_FORMAT_MAX_CLUSTERS) {
+        if (clusterCount > FAT32_FORMAT_MAX_CLUSTERS)
+            return FAT32_FORMAT_LAYOUT_OVERFLOW;
+        if (clusterCount >= FAT32_FORMAT_MIN_CLUSTERS) {
             chosen = true;
             break;
         }
-        if (sectorsPerCluster == FAT32_FORMAT_MAX_SECTORS_PER_CLUSTER)
-            break;
-        sectorsPerCluster <<= 1;
+        if (sectorsPerCluster == 1) break;
+        sectorsPerCluster >>= 1;
     }
-    if (!chosen) return FAT32_FORMAT_ROLLBACK_BUFFER_LIMIT;
-    if (clusterCount < FAT32_FORMAT_MIN_CLUSTERS)
-        return FAT32_FORMAT_TOO_SMALL;
-    if (clusterCount > 0x0FFFFFF5u)
-        return FAT32_FORMAT_ROLLBACK_BUFFER_LIMIT;
+    if (!chosen) return FAT32_FORMAT_TOO_SMALL;
 
-    uint64_t fatBytes = 0;
+    uint64_t fatBytes = 0, fatCapacityBytes = 0, fatEntriesAvailable = 0;
     if (!mul_u64(clusterCount + 2u, 4u, fatBytes) ||
-        fatBytes > fatSectors * logicalSectorSize)
+        !mul_u64(fatSectors, logicalSectorSize, fatCapacityBytes))
         return FAT32_FORMAT_LAYOUT_OVERFLOW;
-    const uint64_t rootEnd = firstData + sectorsPerCluster;
-    if (rootEnd > partitionSectorCount || rootEnd > UINT32_MAX)
+    fatEntriesAvailable = fatCapacityBytes / 4u;
+    if (fatBytes > fatCapacityBytes ||
+        fatEntriesAvailable < clusterCount + 2u)
         return FAT32_FORMAT_LAYOUT_OVERFLOW;
-    uint64_t snapshotBytes = 0;
-    if (!mul_u64(rootEnd, logicalSectorSize, snapshotBytes))
+    uint64_t rootEnd = 0;
+    if (!add_u64(firstData, sectorsPerCluster, rootEnd) ||
+        rootEnd > partitionSectorCount)
         return FAT32_FORMAT_LAYOUT_OVERFLOW;
-    if (snapshotBytes > FAT32_FORMAT_ROLLBACK_LIMIT_BYTES)
-        return FAT32_FORMAT_ROLLBACK_BUFFER_LIMIT;
     uint64_t absoluteEnd = 0;
     if (!add_u64(partitionStartLba, partitionSectorCount, absoluteEnd) ||
         absoluteEnd == 0) return FAT32_FORMAT_LAYOUT_OVERFLOW;
@@ -1264,8 +1357,10 @@ Fat32FormatStatus calculate_fat32_format_geometry(
     result.fatCount = kFat32Count;
     result.fatSizeSectors = static_cast<uint32_t>(fatSectors);
     result.firstFatSector = kFat32ReservedSectors;
-    result.secondFatSector = kFat32ReservedSectors +
-        static_cast<uint32_t>(fatSectors);
+    uint64_t secondFatSector = 0;
+    if (!add_u64(kFat32ReservedSectors, fatSectors, secondFatSector) ||
+        secondFatSector > UINT32_MAX) return FAT32_FORMAT_LAYOUT_OVERFLOW;
+    result.secondFatSector = static_cast<uint32_t>(secondFatSector);
     result.firstDataSector = static_cast<uint32_t>(firstData);
     result.rootCluster = 2;
     result.clusterCount = static_cast<uint32_t>(clusterCount);
@@ -1276,8 +1371,6 @@ Fat32FormatStatus calculate_fat32_format_geometry(
     result.backupBootSector = kBackupBootSector;
     result.hiddenSectors = partitionStartLba <= UINT32_MAX
         ? static_cast<uint32_t>(partitionStartLba) : 0;
-    result.rollbackSnapshotSectors = static_cast<uint32_t>(rootEnd);
-    result.rollbackSnapshotBytes = static_cast<uint32_t>(snapshotBytes);
     return FAT32_FORMAT_READY;
 }
 
@@ -1358,7 +1451,7 @@ const char* fat32_format_status_name(Fat32FormatStatus status)
         case FAT32_FORMAT_AMBIGUOUS_EXISTING_DATA: return "Partition contains non-zero data of unknown type; formatting is blocked";
         case FAT32_FORMAT_LABEL_INVALID: return "Volume label must use supported FAT characters and be at most 11 characters";
         case FAT32_FORMAT_VOLUME_ID_UNAVAILABLE: return "A non-zero volume ID could not be generated";
-        case FAT32_FORMAT_ROLLBACK_BUFFER_LIMIT: return "FAT32 metadata exceeds the bounded rollback limit";
+        case FAT32_FORMAT_ROLLBACK_BUFFER_LIMIT: return "Legacy rollback-cap status; this formatter no longer returns it";
         case FAT32_FORMAT_SNAPSHOT_FAILED: return "Partition metadata snapshot failed";
         case FAT32_FORMAT_OPERATION_OWNERSHIP_INVALID: return "Storage operation lease is no longer valid";
         case FAT32_FORMAT_METADATA_WRITE_FAILED: return "FAT32 metadata write failed";

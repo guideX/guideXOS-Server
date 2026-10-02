@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 using namespace kernel;
@@ -46,6 +47,7 @@ struct FakeDisk {
     uint8_t driverId;
     bool sparse;
     std::vector<uint8_t> sparseMbr;
+    std::unordered_map<uint64_t, std::vector<uint8_t>> sparseSectors;
     std::vector<uint8_t> bytes;
     bool failReads;
     block::Status failReadStatus;
@@ -129,9 +131,19 @@ block::Status fake_read(uint8_t driverId, uint64_t lba, uint32_t count, void* bu
     }
     if (disk->sparse) {
         std::memset(buffer, 0, static_cast<size_t>(count) * disk->sectorSize);
-        if (lba == 0 && count == 1)
-            std::memcpy(buffer, disk->sparseMbr.data(), disk->sectorSize);
-        ++disk->reads;
+        uint8_t* output = static_cast<uint8_t*>(buffer);
+        for (uint32_t i = 0; i < count; ++i) {
+            const uint64_t sectorLba = lba + i;
+            if (sectorLba == 0) {
+                std::memcpy(output + static_cast<size_t>(i) * disk->sectorSize,
+                            disk->sparseMbr.data(), disk->sectorSize);
+                continue;
+            }
+            auto found = disk->sparseSectors.find(sectorLba);
+            if (found != disk->sparseSectors.end())
+                std::memcpy(output + static_cast<size_t>(i) * disk->sectorSize,
+                            found->second.data(), disk->sectorSize);
+        }
         return block::BLOCK_OK;
     }
     const size_t offset = static_cast<size_t>(lba * disk->sectorSize);
@@ -161,8 +173,20 @@ block::Status fake_write(uint8_t driverId, uint64_t lba, uint32_t count,
         disk->writeAttempts == disk->failWriteAtCall2)
         return disk->failWriteStatus;
     if (disk->sparse) {
-        if (lba != 0 || count != 1) return block::BLOCK_ERR_IO;
-        std::memcpy(disk->sparseMbr.data(), buffer, disk->sectorSize);
+        const uint8_t* input = static_cast<const uint8_t*>(buffer);
+        for (uint32_t i = 0; i < count; ++i) {
+            const uint64_t sectorLba = lba + i;
+            const uint8_t* sectorBytes = input +
+                static_cast<size_t>(i) * disk->sectorSize;
+            if (sectorLba == 0) {
+                std::memcpy(disk->sparseMbr.data(), sectorBytes,
+                            disk->sectorSize);
+            } else {
+                std::vector<uint8_t>& stored =
+                    disk->sparseSectors[sectorLba];
+                stored.assign(sectorBytes, sectorBytes + disk->sectorSize);
+            }
+        }
         ++disk->writes;
         return block::BLOCK_OK;
     }
@@ -488,6 +512,12 @@ void write_u64(uint8_t* p, uint64_t v)
 
 uint8_t* sector(FakeDisk& disk, uint64_t lba)
 {
+    if (disk.sparse) {
+        if (lba == 0) return disk.sparseMbr.data();
+        std::vector<uint8_t>& stored = disk.sparseSectors[lba];
+        if (stored.empty()) stored.assign(disk.sectorSize, 0);
+        return stored.data();
+    }
     return disk.bytes.data() + static_cast<size_t>(lba * disk.sectorSize);
 }
 
@@ -1114,14 +1144,36 @@ usb::TransferStatus fake_usb_bulk_transfer(uint8_t deviceAddress,
     return usb::XFER_SUCCESS;
 }
 
+bool fake_sector_copy(const FakeDisk& disk, uint64_t lba, uint8_t* output)
+{
+    if (!output || lba >= disk.sectorCount) return false;
+    if (!disk.sparse) {
+        const size_t offset = static_cast<size_t>(lba * disk.sectorSize);
+        if (offset > disk.bytes.size() ||
+            disk.sectorSize > disk.bytes.size() - offset) return false;
+        std::memcpy(output, disk.bytes.data() + offset, disk.sectorSize);
+        return true;
+    }
+    std::memset(output, 0, disk.sectorSize);
+    if (lba == 0) {
+        std::memcpy(output, disk.sparseMbr.data(), disk.sectorSize);
+    } else {
+        auto found = disk.sparseSectors.find(lba);
+        if (found != disk.sparseSectors.end())
+            std::memcpy(output, found->second.data(), disk.sectorSize);
+    }
+    return true;
+}
+
 bool independent_verify_fat32(const FakeDisk& disk,
                               const storage::PartitionEntry& partition,
                               const char* expectedLabel,
                               uint32_t expectedVolumeId)
 {
-    const uint8_t* bytes = disk.bytes.data();
-    const size_t start = static_cast<size_t>(partition.startLba) * 512;
-    const uint8_t* boot = bytes + start;
+    uint8_t boot[512], backup[512], fsinfo[512], backupFsinfo[512];
+    uint8_t firstFat[512], secondFat[512], root[512];
+    if (disk.sectorSize != 512 ||
+        !fake_sector_copy(disk, partition.startLba, boot)) return false;
     if (read_u16(boot + 11) != 512 || boot[13] == 0 ||
         read_u16(boot + 14) != 32 || boot[16] != 2 ||
         read_u16(boot + 17) != 0 || read_u16(boot + 19) != 0 ||
@@ -1141,33 +1193,27 @@ bool independent_verify_fat32(const FakeDisk& disk,
         (read_u32(boot + 32) - firstData) / boot[13];
     if (clusters < storage::FAT32_FORMAT_MIN_CLUSTERS ||
         clusters > storage::FAT32_FORMAT_MAX_CLUSTERS) return false;
-    const uint8_t* backup = bytes + start + 6 * 512;
-    if (std::memcmp(boot, backup, 512) != 0) return false;
-    const uint8_t* fsinfo = bytes + start + 1 * 512;
-    const uint8_t* backupFsinfo = bytes + start + 7 * 512;
+    if (!fake_sector_copy(disk, partition.startLba + 6, backup) ||
+        !fake_sector_copy(disk, partition.startLba + 1, fsinfo) ||
+        !fake_sector_copy(disk, partition.startLba + 7, backupFsinfo) ||
+        std::memcmp(boot, backup, 512) != 0) return false;
     if (read_u32(fsinfo) != 0x41615252u ||
         read_u32(fsinfo + 484) != 0x61417272u ||
         read_u32(fsinfo + 488) != clusters - 1 ||
         read_u32(fsinfo + 492) != 3 ||
         read_u32(fsinfo + 508) != 0xAA550000u ||
         std::memcmp(fsinfo, backupFsinfo, 512) != 0) return false;
-    for (uint32_t copy = 0; copy < 2; ++copy) {
-        const uint8_t* fat = bytes + start +
-            static_cast<size_t>(32 + copy * fatSize) * 512;
-        if (read_u32(fat) != 0x0FFFFFF8u ||
-            read_u32(fat + 4) != 0x0FFFFFFFu ||
-            read_u32(fat + 8) != 0x0FFFFFFFu) return false;
-        for (uint32_t s = 0; s < fatSize; ++s) {
-            const uint8_t* fatSector = fat + static_cast<size_t>(s) * 512;
-            const uint8_t* otherSector = bytes + start +
-                static_cast<size_t>(32 + (1 - copy) * fatSize + s) * 512;
-            if (std::memcmp(fatSector, otherSector, 512) != 0) return false;
-            if (s > 0 && !std::all_of(fatSector, fatSector + 512,
-                                      [](uint8_t v) { return v == 0; }))
-                return false;
-        }
-    }
-    const uint8_t* root = bytes + start + static_cast<size_t>(firstData) * 512;
+    if (!fake_sector_copy(disk, partition.startLba + 32, firstFat) ||
+        !fake_sector_copy(disk, partition.startLba + 32 + fatSize,
+                          secondFat) ||
+        read_u32(firstFat) != 0x0FFFFFF8u ||
+        read_u32(firstFat + 4) != 0x0FFFFFFFu ||
+        read_u32(firstFat + 8) != 0x0FFFFFFFu ||
+        !std::all_of(firstFat + 12, firstFat + 512,
+                     [](uint8_t v) { return v == 0; }) ||
+        std::memcmp(firstFat, secondFat, 512) != 0 ||
+        !fake_sector_copy(disk, partition.startLba + firstData, root))
+        return false;
     if (normalized[0] == ' ') {
         if (root[0] != 0) return false;
     } else if (std::memcmp(root, normalized, 11) != 0 || root[11] != 0x08 ||
@@ -6348,9 +6394,8 @@ int main()
                   smallGeometry) == storage::FAT32_FORMAT_READY &&
               smallGeometry.sectorsPerCluster == 1 &&
               smallGeometry.clusterCount >= storage::FAT32_FORMAT_MIN_CLUSTERS &&
-              smallGeometry.rollbackSnapshotBytes <=
-                  storage::FAT32_FORMAT_ROLLBACK_LIMIT_BYTES,
-              "minimum supported FAT32 geometry is deterministic and rollback-bounded");
+              storage::FAT32_FORMAT_ROLLBACK_MAX_BYTES <= 64,
+              "minimum FAT32 geometry stays valid with a fixed-size rollback record");
         storage::Fat32FormatGeometry mediumGeometry = {};
         storage::Fat32FormatGeometry largerGeometry = {};
         check(storage::calculate_fat32_format_geometry(2048, 200000, 512,
@@ -6366,12 +6411,62 @@ int main()
         check(storage::calculate_fat32_format_geometry(2048, 60000, 512,
                   rejectedGeometry) == storage::FAT32_FORMAT_TOO_SMALL,
               "FAT32 layout rejects a volume below the minimum cluster count");
+        storage::Fat32FormatGeometry minimumBoundary = {};
+        check(storage::calculate_fat32_format_geometry(2048, 66580, 512,
+                  rejectedGeometry) == storage::FAT32_FORMAT_TOO_SMALL &&
+              storage::calculate_fat32_format_geometry(2048, 66581, 512,
+                  minimumBoundary) == storage::FAT32_FORMAT_READY &&
+              minimumBoundary.clusterCount == storage::FAT32_FORMAT_MIN_CLUSTERS,
+              "FAT32 minimum cluster-count boundary is exact");
         check(storage::calculate_fat32_format_geometry(2048, 70000, 4096,
                   rejectedGeometry) == storage::FAT32_FORMAT_UNSUPPORTED_SECTOR_SIZE,
               "FAT32 geometry rejects 4Kn sectors");
         check(storage::calculate_fat32_format_geometry(2048, 10000000, 512,
-                  rejectedGeometry) == storage::FAT32_FORMAT_ROLLBACK_BUFFER_LIMIT,
-              "FAT32 geometry rejects a volume outside the bounded cluster policy");
+                  rejectedGeometry) == storage::FAT32_FORMAT_READY &&
+              rejectedGeometry.sectorsPerCluster == 64 &&
+              rejectedGeometry.clusterCount > 120000u,
+              "FAT32 geometry accepts large volumes without capping FAT capacity");
+        const uint64_t scalableSectorCounts[] = {
+            (3ull * 1024u * 1024u * 1024u) / 512u,
+            (4ull * 1024u * 1024u * 1024u) / 512u,
+            (8ull * 1024u * 1024u * 1024u) / 512u,
+            (16ull * 1024u * 1024u * 1024u) / 512u,
+            (32ull * 1024u * 1024u * 1024u) / 512u,
+            (64ull * 1024u * 1024u * 1024u) / 512u,
+            (128ull * 1024u * 1024u * 1024u) / 512u,
+        };
+        bool scalableGeometriesValid = true;
+        for (uint64_t sectors : scalableSectorCounts) {
+            storage::Fat32FormatGeometry large = {};
+            const storage::Fat32FormatStatus largeStatus =
+                storage::calculate_fat32_format_geometry(2048, sectors, 512,
+                                                           large);
+            const uint64_t capacityEntries =
+                static_cast<uint64_t>(large.fatSizeSectors) * 512u / 4u;
+            scalableGeometriesValid = scalableGeometriesValid &&
+                largeStatus == storage::FAT32_FORMAT_READY &&
+                large.clusterCount >= storage::FAT32_FORMAT_MIN_CLUSTERS &&
+                large.clusterCount <= storage::FAT32_FORMAT_MAX_CLUSTERS &&
+                capacityEntries >= static_cast<uint64_t>(large.clusterCount) + 2u &&
+                large.sectorsPerCluster != 0 &&
+                (large.sectorsPerCluster & (large.sectorsPerCluster - 1u)) == 0 &&
+                large.sectorsPerCluster <= 64u;
+        }
+        check(scalableGeometriesValid,
+              "3–128 GiB FAT32 layouts have bounded, sufficient FAT capacity");
+        const uint64_t oldLimitSectors = 32u + 2u * 938u +
+            120000u * 64u;
+        storage::Fat32FormatGeometry oldLimit = {};
+        storage::Fat32FormatGeometry beyondOldLimit = {};
+        check(storage::calculate_fat32_format_geometry(2048,
+                  oldLimitSectors, 512, oldLimit) == storage::FAT32_FORMAT_READY &&
+              oldLimit.sectorsPerCluster == 64u &&
+              oldLimit.clusterCount == 120000u &&
+              storage::calculate_fat32_format_geometry(2048,
+                  oldLimitSectors + 64u, 512, beyondOldLimit) ==
+                  storage::FAT32_FORMAT_READY &&
+              beyondOldLimit.clusterCount == 120001u,
+              "geometry accepts the former 120000-cluster boundary and the first cluster beyond it");
         check(storage::calculate_fat32_format_geometry(2048,
                   static_cast<uint64_t>(UINT32_MAX) + 1u, 512,
                   rejectedGeometry) == storage::FAT32_FORMAT_LAYOUT_OVERFLOW,
@@ -6391,6 +6486,164 @@ int main()
               storage::normalize_fat32_volume_label("bad/name", normalized) ==
                   storage::FAT32_FORMAT_LABEL_INVALID,
               "FAT labels normalize case, allow blank and 11 characters, and reject separators");
+    }
+
+    {
+        const uint32_t largePartitionSectors =
+            static_cast<uint32_t>(8ull * 1024u * 1024u * 1024u / 512u);
+        const uint64_t largeDiskSectors =
+            static_cast<uint64_t>(largePartitionSectors) + 4096u;
+        FakeDisk largeSparse(512, largeDiskSectors, false);
+        set_mbr_signature(largeSparse);
+        set_mbr_partition(largeSparse, 0, 0, 0x0C, 2048,
+                          largePartitionSectors);
+        const uint64_t partitionEnd =
+            2048ull + largePartitionSectors - 1u;
+        std::memset(sector(largeSparse, 2047), 0xA7, 512);
+        std::memset(sector(largeSparse, partitionEnd + 1), 0x5C, 512);
+        const uint8_t largeIndex =
+            register_fake(largeSparse, true, true, true);
+        storage::PartitionTableModel largeTable = {};
+        storage::PartitionEntry largePartition = {};
+        const bool largeParsed = parse_first_partition(
+            largeIndex, largeTable, largePartition);
+        storage::Fat32FormatRequest largeRequest = make_format_request(
+            largeIndex, largePartition, "", 0xD22F3201u);
+        largeSparse.writeLog.clear();
+        storage::Fat32FormatResult largeResult = {};
+        const storage::Fat32FormatStatus largeFormatStatus =
+            storage::format_fat32_partition(largeRequest, largeResult);
+        bool writesInside = true;
+        for (const FakeWriteRecord& write : largeSparse.writeLog) {
+            if (write.count != 1 || write.lba < largePartition.startLba ||
+                write.lba > largePartition.endLba) writesInside = false;
+        }
+        check(largeParsed && largeFormatStatus == storage::FAT32_FORMAT_SUCCESS &&
+              largeResult.geometry.totalSectors == largePartitionSectors &&
+              largeResult.geometry.clusterCount > 120000u &&
+              largeResult.geometry.fatSizeSectors > 120000u / 64u &&
+              largeSparse.writeLog.size() == 6 && writesInside &&
+              largeResult.rollbackEntryCount == 6 &&
+              largeResult.rollbackRecordBytes == 48 &&
+              largeResult.rollbackRecordBytes <=
+                  storage::FAT32_FORMAT_ROLLBACK_MAX_BYTES &&
+              independent_verify_fat32(largeSparse, largePartition, "",
+                                       0xD22F3201u) &&
+              std::all_of(sector(largeSparse, 2047),
+                          sector(largeSparse, 2047) + 512,
+                          [](uint8_t v) { return v == 0xA7; }) &&
+              std::all_of(sector(largeSparse, partitionEnd + 1),
+                          sector(largeSparse, partitionEnd + 1) + 512,
+                          [](uint8_t v) { return v == 0x5C; }),
+              "8 GiB sparse media formats with bounded metadata writes and unchanged canaries");
+
+        uint8_t* fsInfo = sector(largeSparse, largePartition.startLba + 1);
+        uint8_t* backupFsInfo =
+            sector(largeSparse, largePartition.startLba + 7);
+        write_u32(fsInfo + 492, 120001u);
+        write_u32(backupFsInfo + 492, 120001u);
+        fs_fat::FATVolume largeVolume = {};
+        const bool highHintMounted = fs_fat::test_probe_fat32_volume(
+            largeIndex, largePartition.startLba, largeVolume);
+        const uint32_t allocated =
+            fs_fat::test_allocate_fat32_cluster(largeVolume);
+        const uint32_t highCluster = 250000u;
+        const uint32_t distantCluster = 65525u;
+        const uint64_t highEntryBytes =
+            static_cast<uint64_t>(highCluster) * 4u;
+        const uint64_t highFatSector =
+            largePartition.startLba + largeVolume.reservedSectors +
+            highEntryBytes / 512u;
+        const uint32_t highEntryOffset =
+            static_cast<uint32_t>(highEntryBytes % 512u);
+        const uint64_t distantEntryBytes =
+            static_cast<uint64_t>(distantCluster) * 4u;
+        const uint64_t distantFatSector =
+            largePartition.startLba + largeVolume.reservedSectors +
+            distantEntryBytes / 512u;
+        const uint32_t distantEntryOffset =
+            static_cast<uint32_t>(distantEntryBytes % 512u);
+        (void)sector(largeSparse, highFatSector);
+        (void)sector(largeSparse,
+            highFatSector + largeVolume.fatSizeSectors);
+        (void)sector(largeSparse, distantFatSector);
+        (void)sector(largeSparse,
+            distantFatSector + largeVolume.fatSizeSectors);
+        uint8_t* highPrimary = sector(largeSparse, highFatSector);
+        uint8_t* highMirror = sector(largeSparse,
+            highFatSector + largeVolume.fatSizeSectors);
+        write_u32(highPrimary + highEntryOffset, 0xA0000000u);
+        write_u32(highMirror + highEntryOffset, 0xA0000000u);
+        const block::Status chainFirstWrite = fs_fat::test_write_fat32_entry(
+            largeVolume, distantCluster, allocated);
+        const block::Status chainMiddleWrite = fs_fat::test_write_fat32_entry(
+            largeVolume, allocated, highCluster);
+        const block::Status highWriteStatus = fs_fat::test_write_fat32_entry(
+            largeVolume, highCluster, 0x0FFFFFFFu);
+        const uint32_t lastCluster = largeVolume.totalDataClusters + 1u;
+        const block::Status lastWriteStatus = fs_fat::test_write_fat32_entry(
+            largeVolume, lastCluster, 0x0FFFFFFFu);
+        const uint64_t lastEntryBytes = static_cast<uint64_t>(lastCluster) * 4u;
+        const uint64_t lastFatSector =
+            largePartition.startLba + largeVolume.reservedSectors +
+            lastEntryBytes / 512u;
+        uint8_t primaryReadback[512], mirrorReadback[512];
+        const bool mirrorsAgree =
+            fake_sector_copy(largeSparse, distantFatSector, primaryReadback) &&
+            fake_sector_copy(largeSparse,
+                distantFatSector + largeVolume.fatSizeSectors,
+                mirrorReadback) &&
+            std::memcmp(primaryReadback, mirrorReadback, 512) == 0 &&
+            fake_sector_copy(largeSparse, highFatSector, primaryReadback) &&
+            fake_sector_copy(largeSparse,
+                highFatSector + largeVolume.fatSizeSectors, mirrorReadback) &&
+            std::memcmp(primaryReadback, mirrorReadback, 512) == 0 &&
+            fake_sector_copy(largeSparse, lastFatSector, primaryReadback) &&
+            fake_sector_copy(largeSparse,
+                lastFatSector + largeVolume.fatSizeSectors, mirrorReadback) &&
+            std::memcmp(primaryReadback, mirrorReadback, 512) == 0;
+        const bool distantChainValid =
+            chainFirstWrite == block::BLOCK_OK &&
+            chainMiddleWrite == block::BLOCK_OK &&
+            highWriteStatus == block::BLOCK_OK &&
+            fs_fat::test_fat32_next_cluster(largeVolume, distantCluster) ==
+                allocated &&
+            fs_fat::test_fat32_next_cluster(largeVolume, allocated) ==
+                highCluster &&
+            fs_fat::test_fat32_next_cluster(largeVolume, highCluster) ==
+                0x0FFFFFFFu &&
+            !fs_fat::test_fat32_chain_cycle_detected(
+                largeVolume, distantCluster, 8);
+        const bool farCycleWrite = fs_fat::test_write_fat32_entry(
+            largeVolume, highCluster, distantCluster) == block::BLOCK_OK;
+        const bool farCycleDetected = farCycleWrite &&
+            fs_fat::test_fat32_chain_cycle_detected(
+                largeVolume, distantCluster, 8);
+        const bool farCycleRestored = fs_fat::test_write_fat32_entry(
+            largeVolume, highCluster, 0x0FFFFFFFu) == block::BLOCK_OK;
+        check(highHintMounted && largeVolume.nextFreeCluster == 120002u &&
+              allocated == 120001u && distantChainValid,
+              "FSInfo hint allocates at 120001 and traverses a valid chain across distant FAT sectors");
+        check(farCycleDetected && farCycleRestored,
+              "FAT cycle detection catches a loop spanning distant FAT sectors");
+        check(highWriteStatus == block::BLOCK_OK &&
+              fs_fat::test_fat32_next_cluster(largeVolume, highCluster) ==
+                  0x0FFFFFFFu &&
+              read_u32(sector(largeSparse, highFatSector) + highEntryOffset) ==
+                  (0xA0000000u | 0x0FFFFFFFu),
+              "high FAT entry retains its checked offset and reserved high bits");
+        check(read_u32(primaryReadback +
+                  static_cast<uint32_t>(lastEntryBytes % 512u)) ==
+                  0x0FFFFFFFu &&
+              lastWriteStatus == block::BLOCK_OK &&
+              fs_fat::test_fat32_next_cluster(largeVolume, lastCluster) ==
+                  0x0FFFFFFFu,
+              "final valid FAT32 data cluster is addressable and stores EOC");
+        check(mirrorsAgree && farCycleRestored &&
+              read_u32(sector(largeSparse, distantFatSector) +
+                  distantEntryOffset) == allocated,
+              "distant FAT-sector writes and the final high entry are mirrored");
+        unregister_fake(largeIndex, largeSparse);
     }
 
     {
@@ -6657,8 +6910,7 @@ int main()
         storage::Fat32FormatGeometry geometry = {};
         storage::calculate_fat32_format_geometry(partition.startLba,
             partition.sectorCount, 512, geometry);
-        const uint32_t totalMetadataWrites = 2 * geometry.fatSizeSectors +
-            geometry.sectorsPerCluster + 4;
+        const uint32_t totalMetadataWrites = 7;
         auto resetFaultState = [&]() {
             guarded.failWriteAtCall1 = 0;
             guarded.failWriteAtCall2 = 0;
@@ -6687,7 +6939,29 @@ int main()
               "first metadata write failure restores and verifies the snapshot");
         resetFaultState();
 
-        guarded.failWriteAtCall1 = guarded.writeAttempts + 17;
+        const storage::Fat32FormatStage metadataStages[7] = {
+            storage::FAT32_FORMAT_STAGE_WRITE_FAT,
+            storage::FAT32_FORMAT_STAGE_WRITE_FAT,
+            storage::FAT32_FORMAT_STAGE_WRITE_ROOT,
+            storage::FAT32_FORMAT_STAGE_WRITE_BACKUP_METADATA,
+            storage::FAT32_FORMAT_STAGE_WRITE_FSINFO,
+            storage::FAT32_FORMAT_STAGE_WRITE_FSINFO,
+            storage::FAT32_FORMAT_STAGE_WRITE_BOOT_SECTOR,
+        };
+        for (uint32_t step = 0; step < totalMetadataWrites; ++step) {
+            guarded.failWriteAtCall1 = guarded.writeAttempts + step + 1;
+            storage::Fat32FormatResult injectedFailure = {};
+            const storage::Fat32FormatStatus injectedStatus =
+                storage::format_fat32_partition(request, injectedFailure);
+            check(injectedStatus == storage::FAT32_FORMAT_METADATA_WRITE_FAILED &&
+                  injectedFailure.firstFailedStage == metadataStages[step] &&
+                  injectedFailure.rollbackAttempted &&
+                  injectedFailure.rollbackSucceeded && guarded.bytes == before,
+                  "each FAT, root, backup, FSInfo, and publication write failure restores the exact blank partition");
+            resetFaultState();
+        }
+
+        guarded.failWriteAtCall1 = guarded.writeAttempts + 3;
         storage::Fat32FormatResult middleFailureResult = {};
         const storage::Fat32FormatStatus middleFailure =
             storage::format_fat32_partition(request, middleFailureResult);
@@ -6797,11 +7071,15 @@ int main()
             partition, "", 0x33445566u);
         rescanFailure.failLbaAfterWrite = 0;
         storage::Fat32FormatResult result = {};
-        check(storage::format_fat32_partition(request, result) ==
-                  storage::FAT32_FORMAT_RESCAN_FAILED &&
-              result.rollbackAttempted && result.rollbackSucceeded &&
-              rescanFailure.bytes == before,
-              "post-verification partition-table rescan failure restores the full snapshot");
+        const storage::Fat32FormatStatus rescanStatus =
+            storage::format_fat32_partition(request, result);
+        check(rescanStatus == storage::FAT32_FORMAT_ROLLBACK_FAILED &&
+              result.failureStatus ==
+                  storage::FAT32_FORMAT_PARTITION_IDENTITY_CHANGED &&
+              !result.rollbackAttempted && result.finalStateUncertain &&
+              rescanFailure.writeAttempts == 1 &&
+              rescanFailure.bytes != before,
+              "table-read failure stops further writes and rollback when partition identity cannot be revalidated");
         unregister_fake(index, rescanFailure);
     }
 

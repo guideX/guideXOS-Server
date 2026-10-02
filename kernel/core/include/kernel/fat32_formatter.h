@@ -9,9 +9,17 @@ namespace storage {
 // The current VFS only probes and mounts filesystems on 512-byte logical
 // sectors. Keep the formatter aligned with that end-to-end contract.
 static const uint32_t FAT32_FORMAT_SECTOR_SIZE = 512;
-static const uint32_t FAT32_FORMAT_ROLLBACK_LIMIT_BYTES = 1024u * 1024u;
-static const uint32_t FAT32_FORMAT_MAX_CLUSTERS = 120000u;
+// The rollback log stores only sector addresses plus a prior-state tag. The
+// formatter accepts at most seven distinct sectors today; the eighth slot is
+// a fail-closed bound for future metadata additions.
+static const uint32_t FAT32_FORMAT_MAX_ROLLBACK_ENTRIES = 8u;
+static const uint32_t FAT32_FORMAT_ROLLBACK_RECORD_BYTES = 8u;
+static const uint32_t FAT32_FORMAT_ROLLBACK_MAX_BYTES =
+    FAT32_FORMAT_MAX_ROLLBACK_ENTRIES * FAT32_FORMAT_ROLLBACK_RECORD_BYTES;
 static const uint32_t FAT32_FORMAT_MIN_CLUSTERS = 65525u;
+// FAT32 data cluster numbers 0x0FFFFFF0..0x0FFFFFF7 are reserved or mark bad
+// clusters. The last valid data cluster number is therefore 0x0FFFFFEF.
+static const uint32_t FAT32_FORMAT_MAX_CLUSTERS = 0x0FFFFFEEu;
 static const uint32_t FAT32_FORMAT_MAX_SECTORS_PER_CLUSTER = 64u;
 
 enum Fat32FormatStatus : uint8_t {
@@ -43,6 +51,8 @@ enum Fat32FormatStatus : uint8_t {
     FAT32_FORMAT_AMBIGUOUS_EXISTING_DATA,
     FAT32_FORMAT_LABEL_INVALID,
     FAT32_FORMAT_VOLUME_ID_UNAVAILABLE,
+    // Retained for result-code compatibility; the scalable formatter no
+    // longer returns this former geometry blocker.
     FAT32_FORMAT_ROLLBACK_BUFFER_LIMIT,
     FAT32_FORMAT_SNAPSHOT_FAILED,
     FAT32_FORMAT_OPERATION_OWNERSHIP_INVALID,
@@ -114,8 +124,6 @@ struct Fat32FormatGeometry {
     uint32_t backupBootSector;
     uint32_t volumeId;
     uint32_t hiddenSectors;
-    uint32_t rollbackSnapshotSectors;
-    uint32_t rollbackSnapshotBytes;
 };
 
 struct Fat32FormatRequest {
@@ -162,6 +170,8 @@ struct Fat32FormatResult {
     bool verificationPassed;
     bool rollbackAttempted;
     bool rollbackSucceeded;
+    uint32_t rollbackEntryCount;
+    uint32_t rollbackRecordBytes;
     Fat32FormatStage rollbackStage;
     bool rollbackWriteAttempted;
     uint32_t rollbackSectorsWritten;

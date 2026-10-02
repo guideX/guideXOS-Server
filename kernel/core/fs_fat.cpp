@@ -159,12 +159,38 @@ static block::Status flush_volume_io(const FATVolume& vol)
 // FAT cluster ? sector translation
 // ================================================================
 
-static uint32_t cluster_to_sector(const FATVolume& vol, uint32_t cluster)
+static uint32_t fat_entry_size(const FATVolume& vol);
+static bool is_valid_data_cluster(const FATVolume& vol, uint32_t cluster);
+
+static bool cluster_to_sector(const FATVolume& vol, uint32_t cluster,
+                              uint64_t& sector)
 {
-    const uint64_t sector = static_cast<uint64_t>(vol.firstDataSector) +
-                            static_cast<uint64_t>(cluster - 2) *
-                            vol.sectorsPerCluster;
-    return sector > 0xFFFFFFFFull ? 0 : static_cast<uint32_t>(sector);
+    if (!is_valid_data_cluster(vol, cluster) || vol.sectorsPerCluster == 0)
+        return false;
+    const uint64_t offset = static_cast<uint64_t>(cluster - 2u) *
+        vol.sectorsPerCluster;
+    sector = static_cast<uint64_t>(vol.firstDataSector) + offset;
+    return sector < vol.totalSectors &&
+        vol.sectorsPerCluster <= vol.totalSectors - sector;
+}
+
+static bool fat_entry_location(const FATVolume& vol, uint32_t cluster,
+                               uint64_t& sector, uint32_t& entryOffset)
+{
+    if ((vol.type != FAT_TYPE_FAT16 && vol.type != FAT_TYPE_FAT32) ||
+        !is_valid_data_cluster(vol, cluster) || vol.bytesPerSector == 0 ||
+        vol.fatSizeSectors == 0 || vol.reservedSectors == 0) return false;
+    const uint64_t entryBytes = static_cast<uint64_t>(cluster) *
+        fat_entry_size(vol);
+    const uint64_t fatSectorOffset = entryBytes / vol.bytesPerSector;
+    if (fatSectorOffset >= vol.fatSizeSectors) return false;
+    const uint64_t primarySector =
+        static_cast<uint64_t>(vol.reservedSectors) + fatSectorOffset;
+    if (primarySector >= vol.firstDataSector ||
+        primarySector >= vol.totalSectors) return false;
+    sector = primarySector;
+    entryOffset = static_cast<uint32_t>(entryBytes % vol.bytesPerSector);
+    return entryOffset + fat_entry_size(vol) <= vol.bytesPerSector;
 }
 
 static uint32_t fat_entry_size(const FATVolume& vol)
@@ -269,10 +295,13 @@ static uint32_t fat_next_cluster(const FATVolume& vol, uint32_t cluster)
         return fat_end_value(vol);
     }
 
-    uint32_t entrySize = fat_entry_size(vol);
-    uint32_t fatOffset   = cluster * entrySize;
-    uint32_t fatSector   = vol.reservedSectors + (fatOffset / vol.bytesPerSector);
-    uint32_t entryOffset = fatOffset % vol.bytesPerSector;
+    const uint32_t entrySize = fat_entry_size(vol);
+    uint64_t fatSector = 0;
+    uint32_t entryOffset = 0;
+    if (!fat_entry_location(vol, cluster, fatSector, entryOffset)) {
+        set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+        return fat_end_value(vol);
+    }
 
     block::Status st = read_volume_sector(vol, fatSector, s_secBuf);
     if (st != block::BLOCK_OK) {
@@ -304,10 +333,16 @@ static uint32_t exfat_next_cluster(const FATVolume& vol, uint32_t cluster)
         return 0xFFFFFFFF;
     }
 
-    uint32_t fatOffset   = cluster * 4;
-    uint32_t sectorSize  = 1u << vol.exfatBytesPerSectorShift;
-    uint32_t fatSector   = vol.exfatFatOffset + (fatOffset / sectorSize);
-    uint32_t entryOffset = fatOffset % sectorSize;
+    const uint64_t fatOffset = static_cast<uint64_t>(cluster) * 4u;
+    const uint32_t sectorSize = 1u << vol.exfatBytesPerSectorShift;
+    const uint64_t fatSector = static_cast<uint64_t>(vol.exfatFatOffset) +
+        (fatOffset / sectorSize);
+    const uint32_t entryOffset = static_cast<uint32_t>(fatOffset % sectorSize);
+    if (fatOffset / sectorSize >= vol.exfatFatLength ||
+        entryOffset + 4u > sectorSize) {
+        set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+        return 0xFFFFFFFF;
+    }
 
     block::Status st = read_volume_sector(vol, fatSector, s_secBuf);
     if (st != block::BLOCK_OK) {
@@ -402,9 +437,14 @@ static bool try_mount_fat32_boot_sector(const block::BlockEndpoint& endpoint,
         bpb->bytesPerSector != endpoint.sectorSize) return false;
     if (bpb->bytesPerSector < 512 || bpb->bytesPerSector > 4096) return false;
     if (bootSector[510] != 0x55 || bootSector[511] != 0xAA) return false;
-    if (bpb->sectorsPerCluster == 0) return false;
+    if (bpb->sectorsPerCluster == 0 ||
+        (bpb->sectorsPerCluster & (bpb->sectorsPerCluster - 1u)) != 0 ||
+        static_cast<uint64_t>(bpb->bytesPerSector) *
+            bpb->sectorsPerCluster > 32768u) return false;
     if (bpb->reservedSectors == 0) return false;
-    if (bpb->numFATs == 0) return false;
+    if (bpb->numFATs == 0 || (bpb->extFlags & 0x0080u) != 0 ||
+        bpb->fsVersion != 0 || bpb->rootEntryCount != 0 ||
+        bpb->totalSectors16 != 0 || bpb->fatSize16 != 0) return false;
     if (bpb->fatSize32 == 0) {
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
         kernel::serial::puts("[FAT] boot-sector reject reason=fat32-size-zero\n");
@@ -433,9 +473,7 @@ static bool try_mount_fat32_boot_sector(const block::BlockEndpoint& endpoint,
     vol.rootDirFirstSector = 0;
     vol.rootDirSectors     = 0;
 
-    vol.totalSectors = (bpb->totalSectors32 != 0)
-                       ? bpb->totalSectors32
-                       : bpb->totalSectors16;
+    vol.totalSectors = bpb->totalSectors32;
 
     if (vol.totalSectors == 0) return false;
 
@@ -449,7 +487,9 @@ static bool try_mount_fat32_boot_sector(const block::BlockEndpoint& endpoint,
         vol.totalSectors > endpoint.totalSectors - partitionOffset) return false;
     uint32_t dataSectors = vol.totalSectors - vol.firstDataSector;
     vol.totalDataClusters = dataSectors / vol.sectorsPerCluster;
-    if (vol.totalDataClusters == 0 || !cluster_byte_count(vol, &dataSectors)) return false;
+    if (vol.totalDataClusters < 65525u ||
+        vol.totalDataClusters > 0x0FFFFFEEu ||
+        !cluster_byte_count(vol, &dataSectors)) return false;
     const uint64_t fatEntries =
         static_cast<uint64_t>(vol.fatSizeSectors) * bpb->bytesPerSector / 4;
     if (fatEntries < static_cast<uint64_t>(vol.totalDataClusters) + 2)
@@ -459,8 +499,28 @@ static bool try_mount_fat32_boot_sector(const block::BlockEndpoint& endpoint,
             static_cast<uint64_t>(vol.totalDataClusters) + 2) return false;
     vol.nextFreeCluster = 2;
 
+    char labelCopy[11];
+    memcopy(labelCopy, bpb->volumeLabel, sizeof(labelCopy));
+
+    // FSInfo values are hints only. Invalid pointers, signatures, or cluster
+    // values leave the safe default in place and never make mount fail.
+    if (bpb->fsInfoSector != 0 && bpb->fsInfoSector != 0xFFFFu &&
+        bpb->fsInfoSector < vol.reservedSectors &&
+        read_volume_sector(vol, bpb->fsInfoSector, s_secBuf) == block::BLOCK_OK &&
+        read_le32(s_secBuf) == 0x41615252u &&
+        read_le32(s_secBuf + 484) == 0x61417272u &&
+        read_le32(s_secBuf + 508) == 0xAA550000u) {
+        const uint32_t hint = read_le32(s_secBuf + 492);
+        if (hint >= 2 && static_cast<uint64_t>(hint) <
+                static_cast<uint64_t>(vol.totalDataClusters) + 2u)
+            vol.nextFreeCluster = hint;
+    }
+    // An unreadable optional FSInfo sector does not make the volume
+    // unmountable; it only discards the advisory allocation hint.
+    s_lastIoStatus = block::BLOCK_OK;
+
     // Copy volume label
-    memcopy(vol.volumeLabel, bpb->volumeLabel, 11);
+    memcopy(vol.volumeLabel, labelCopy, 11);
     vol.volumeLabel[11] = '\0';
 
     vol.mounted = true;
@@ -684,9 +744,12 @@ static block::Status read_cluster_sector(const FATVolume& vol,
         return block::BLOCK_ERR_INVALID;
     }
 
-    uint32_t lba;
+    uint64_t lba;
     if (vol.type == FAT_TYPE_FAT16 || vol.type == FAT_TYPE_FAT32) {
-        lba = cluster_to_sector(vol, cluster) + sectorOffset;
+        uint64_t clusterStart = 0;
+        if (!cluster_to_sector(vol, cluster, clusterStart))
+            return block::BLOCK_ERR_INVALID;
+        lba = clusterStart + sectorOffset;
     } else {
         // exFAT
         lba = vol.exfatClusterHeapOffset +
@@ -705,9 +768,12 @@ static block::Status write_cluster_sector(const FATVolume& vol,
         return block::BLOCK_ERR_INVALID;
     }
 
-    uint32_t lba;
+    uint64_t lba;
     if (vol.type == FAT_TYPE_FAT16 || vol.type == FAT_TYPE_FAT32) {
-        lba = cluster_to_sector(vol, cluster) + sectorOffset;
+        uint64_t clusterStart = 0;
+        if (!cluster_to_sector(vol, cluster, clusterStart))
+            return block::BLOCK_ERR_INVALID;
+        lba = clusterStart + sectorOffset;
     } else {
         lba = vol.exfatClusterHeapOffset +
               (cluster - 2) * vol.sectorsPerCluster + sectorOffset;
@@ -718,9 +784,10 @@ static block::Status write_cluster_sector(const FATVolume& vol,
 static block::Status write_fat_entry(const FATVolume& vol, uint32_t cluster, uint32_t value)
 {
     uint32_t entrySize = fat_entry_size(vol);
-    uint32_t fatOffset = cluster * entrySize;
-    uint32_t fatSector = vol.reservedSectors + (fatOffset / vol.bytesPerSector);
-    uint32_t entryOffset = fatOffset % vol.bytesPerSector;
+    uint64_t fatSector = 0;
+    uint32_t entryOffset = 0;
+    if (!fat_entry_location(vol, cluster, fatSector, entryOffset))
+        return block::BLOCK_ERR_INVALID;
 
     block::Status st = read_volume_sector(vol, fatSector, s_secBuf);
     if (st != block::BLOCK_OK) return st;
@@ -728,13 +795,18 @@ static block::Status write_fat_entry(const FATVolume& vol, uint32_t cluster, uin
     if (entrySize == 2) {
         *reinterpret_cast<uint16_t*>(&s_secBuf[entryOffset]) = static_cast<uint16_t>(value & FAT16_CLUSTER_MASK);
     } else {
-        *reinterpret_cast<uint32_t*>(&s_secBuf[entryOffset]) = value & FAT32_CLUSTER_MASK;
+        const uint32_t prior = *reinterpret_cast<uint32_t*>(&s_secBuf[entryOffset]);
+        *reinterpret_cast<uint32_t*>(&s_secBuf[entryOffset]) =
+            (prior & 0xF0000000u) | (value & FAT32_CLUSTER_MASK);
     }
     st = write_volume_sector(vol, fatSector, s_secBuf);
     if (st != block::BLOCK_OK) return st;
 
     for (uint32_t fatIndex = 1; fatIndex < vol.numFATs; ++fatIndex) {
-        uint32_t mirrorSector = fatSector + fatIndex * vol.fatSizeSectors;
+        const uint64_t mirrorSector = fatSector +
+            static_cast<uint64_t>(fatIndex) * vol.fatSizeSectors;
+        if (mirrorSector >= vol.firstDataSector ||
+            mirrorSector >= vol.totalSectors) return block::BLOCK_ERR_INVALID;
         st = write_volume_sector(vol, mirrorSector, s_secBuf);
         if (st != block::BLOCK_OK) return st;
     }
@@ -745,7 +817,7 @@ static block::Status write_fat_entry(const FATVolume& vol, uint32_t cluster, uin
 static uint32_t allocate_cluster(FATVolume& vol)
 {
     if (vol.totalDataClusters == 0) return 0;
-    uint32_t entrySize = fat_entry_size(vol);
+    const uint32_t entrySize = fat_entry_size(vol);
     const uint32_t previousHint = vol.nextFreeCluster;
     const uint32_t firstCluster =
         is_valid_data_cluster(vol, vol.nextFreeCluster) ? vol.nextFreeCluster : 2;
@@ -762,11 +834,10 @@ static uint32_t allocate_cluster(FATVolume& vol)
         const uint32_t relative =
             (static_cast<uint64_t>(firstCluster - 2) + scan) % vol.totalDataClusters;
         const uint32_t cluster = relative + 2;
-        const uint32_t fatOffset = cluster * entrySize;
-        const uint32_t fatSectorOffset = fatOffset / vol.bytesPerSector;
-        const uint32_t entryOffset = fatOffset % vol.bytesPerSector;
-        if (fatSectorOffset >= vol.fatSizeSectors ||
-            read_volume_sector(vol, vol.reservedSectors + fatSectorOffset, s_secBuf) != block::BLOCK_OK) {
+        uint64_t fatSector = 0;
+        uint32_t entryOffset = 0;
+        if (!fat_entry_location(vol, cluster, fatSector, entryOffset) ||
+            read_volume_sector(vol, fatSector, s_secBuf) != block::BLOCK_OK) {
             return 0;
         }
         ++s_fatScanIterations;
@@ -802,6 +873,35 @@ static uint32_t allocate_cluster(FATVolume& vol)
     serial::puts(" status=NO_SPACE\n");
     return 0;
 }
+
+#if defined(KERNEL_STORAGE_TEST)
+uint32_t test_fat32_next_cluster(const FATVolume& volume, uint32_t cluster)
+{
+    return volume.type == FAT_TYPE_FAT32
+        ? fat_next_cluster(volume, cluster) : FAT32_CLUSTER_END;
+}
+
+bool test_fat32_chain_cycle_detected(const FATVolume& volume,
+                                     uint32_t firstCluster,
+                                     uint32_t stepLimit)
+{
+    return volume.type == FAT_TYPE_FAT32 &&
+        chain_cycle_detected(volume, firstCluster, stepLimit);
+}
+
+block::Status test_write_fat32_entry(const FATVolume& volume,
+                                     uint32_t cluster, uint32_t value)
+{
+    return volume.type == FAT_TYPE_FAT32
+        ? write_fat_entry(volume, cluster, value) : block::BLOCK_ERR_INVALID;
+}
+
+uint32_t test_allocate_fat32_cluster(FATVolume& volume)
+{
+    return volume.type == FAT_TYPE_FAT32
+        ? allocate_cluster(volume) : 0;
+}
+#endif
 
 static void release_allocated_cluster(FATVolume& vol, uint32_t cluster)
 {
@@ -1733,7 +1833,9 @@ static bool find_free_dir_entry(uint8_t volumeIndex, uint32_t dirCluster, uint32
            clusterSteps < directory_chain_step_limit(vol)) {
         ++clusterSteps;
         for (uint32_t sectorInCluster = 0; sectorInCluster < vol.sectorsPerCluster; ++sectorInCluster) {
-            uint32_t sector = cluster_to_sector(vol, cluster) + sectorInCluster;
+            uint64_t clusterStart = 0;
+            if (!cluster_to_sector(vol, cluster, clusterStart)) return false;
+            const uint64_t sector = clusterStart + sectorInCluster;
             if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
                 return false;
             }
@@ -1851,7 +1953,9 @@ static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const
            clusterSteps < directory_chain_step_limit(vol)) {
         ++clusterSteps;
         for (uint32_t sectorInCluster = 0; sectorInCluster < vol.sectorsPerCluster; ++sectorInCluster) {
-            uint32_t sector = cluster_to_sector(vol, cluster) + sectorInCluster;
+            uint64_t clusterStart = 0;
+            if (!cluster_to_sector(vol, cluster, clusterStart)) return false;
+            const uint64_t sector = clusterStart + sectorInCluster;
             if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
                 return false;
             }

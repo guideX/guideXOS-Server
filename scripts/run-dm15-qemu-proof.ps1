@@ -20,11 +20,18 @@ param(
     [string]$PythonExecutable = "",
     [string]$EspCacheDirectory = "",
     [int]$AttemptNumber = 1,
+    [UInt64]$DiskSizeBytes = 629145600,
+    [ValidateRange(0, 86400)]
+    [int]$FirstBootTimeoutSeconds = 0,
+    [ValidateRange(0, 86400)]
+    [int]$RediscoveryTimeoutSeconds = 0,
+    [switch]$Dm22LargeProof,
     [switch]$QemuDebug,
     [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $false
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location -LiteralPath $Root
 
@@ -64,6 +71,35 @@ function Get-EspTreeHash([string]$Source) {
     $sha = [Security.Cryptography.SHA256]::Create()
     try { $digest = $sha.ComputeHash($payload) } finally { $sha.Dispose() }
     return [BitConverter]::ToString($digest).Replace("-", "")
+}
+
+function Save-Dm22ImageAllocation([string]$DiskPath, [string]$OutputPath,
+                                  [string]$Phase) {
+    $qemuImg = Join-Path (Split-Path -Parent $QemuFull) "qemu-img.exe"
+    $fsutil = Join-Path $env:SystemRoot "System32\fsutil.exe"
+    if (-not (Test-Path -LiteralPath $qemuImg) -or
+        -not (Test-Path -LiteralPath $fsutil)) {
+        throw "DM22 allocation evidence requires qemu-img.exe and fsutil.exe."
+    }
+    $infoLines = & $qemuImg info --output=json -f raw $DiskPath 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "qemu-img could not inspect the DM22 raw image." }
+    $info = ($infoLines -join [Environment]::NewLine) | ConvertFrom-Json
+    $actualBytes = [UInt64]$info.'actual-size'
+    $queryFlag = & $fsutil sparse queryflag $DiskPath 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "fsutil could not inspect the DM22 sparse-image flag." }
+    $ranges = & $fsutil sparse queryrange $DiskPath 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "fsutil could not inspect the DM22 allocated ranges." }
+    $item = Get-Item -LiteralPath $DiskPath
+    @(
+        "phase=$Phase",
+        "path=$DiskPath",
+        "logicalBytes=$($item.Length)",
+        "qemuImgActualBytes=$actualBytes",
+        "sparseAttributes=$($item.Attributes)",
+        "sparseFlag=$($queryFlag -join ' ')",
+        $ranges
+    ) | Set-Content -LiteralPath (Join-Path $OutputPath "image-allocation-$Phase.txt") -Encoding ascii
+    return $actualBytes
 }
 
 function Ensure-EspCache([string]$Source, [string]$Cache,
@@ -192,7 +228,7 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
                 Stop-ProofQemu $process.Id $port $serialPath
                 throw "$RunName encountered a kernel fault; see $serialPath"
             }
-            if ($serial -match '(?m)^\[(?:DM15-QEMU|DM9-QEMU)\] (?:private-proof=FAIL|lifecycle=FAIL|proof=BLOCKED|reboot-rediscovery=FAIL|initialize=FAIL|create-partition=FAIL|format-fat32=FAIL)') {
+            if ($serial -match '(?m)^\[(?:DM22-QEMU|DM15-QEMU|DM9-QEMU)\] (?:private-proof=FAIL|lifecycle=FAIL|proof=BLOCKED|reboot-rediscovery=FAIL|initialize=FAIL|create-partition=FAIL|format-fat32=FAIL|large-volume=FAIL|allocation-hint=FAIL)') {
                 $failureLine = $Matches[0]
                 Stop-ProofQemu $process.Id $port $serialPath
                 throw "$RunName reported '$failureLine'; see $serialPath"
@@ -210,13 +246,22 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
     throw "$RunName timed out or exited before '$SuccessMarker'. $stderrPath $serialPath"
 }
 
+if ($Dm22LargeProof -and $Stage -ne "Lifecycle") {
+    throw "DM22 large FAT32 proof requires -Stage Lifecycle."
+}
+if ($Dm22LargeProof -and $DiskSizeBytes -lt [UInt64]::Parse("9663676416")) {
+    throw "DM22 image must be at least 9 GiB so the GPT partition can exceed 8 GiB."
+}
 if (-not (Test-Path -LiteralPath $QemuExecutable)) { throw "QEMU was not found at $QemuExecutable" }
 if ($AttemptNumber -lt 1) { throw "AttemptNumber must be positive." }
 $QemuFull = (Resolve-Path -LiteralPath $QemuExecutable).Path
 $OvmfFull = (Resolve-Path -LiteralPath $OvmfCode).Path
 $EspFull = (Resolve-Path -LiteralPath $EspSource).Path
 $repoOut = [IO.Path]::GetFullPath((Join-Path $Root "out"))
-if (-not $WorkDir) { $WorkDir = "out\dm15-$($Stage.ToLowerInvariant())-$(Get-Date -Format 'yyyyMMdd-HHmmss')" }
+if (-not $WorkDir) {
+    $workLabel = if ($Dm22LargeProof) { "dm22-large-fat32" } else { "dm15-$($Stage.ToLowerInvariant())" }
+    $WorkDir = "out\$workLabel-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+}
 $WorkFull = [IO.Path]::GetFullPath((Join-Path $Root $WorkDir))
 if (-not $WorkFull.StartsWith($repoOut + [IO.Path]::DirectorySeparatorChar,
         [StringComparison]::OrdinalIgnoreCase)) { throw "WorkDir must be below $repoOut" }
@@ -226,9 +271,11 @@ if (Test-Path -LiteralPath $WorkFull) {
     }
 } else { New-Item -ItemType Directory -Path $WorkFull -Force | Out-Null }
 
-$DiskPath = Join-Path $WorkFull "secondary-600m.raw"
+$diskLabel = if ($Dm22LargeProof) { "secondary-large.raw" } else { "secondary-600m.raw" }
+$DiskPath = Join-Path $WorkFull $diskLabel
 $EspPath = Join-Path $WorkFull "esp"
-$manifestPath = Join-Path $WorkFull "dm15-manifest.txt"
+$manifestName = if ($Dm22LargeProof) { "dm22-manifest.txt" } else { "dm15-manifest.txt" }
+$manifestPath = Join-Path $WorkFull $manifestName
 $activeBoot = $null
 
 try {
@@ -245,9 +292,17 @@ try {
         $flags = if ($Stage -eq "PrivateWrite") {
             "-DGXOS_DM15_QEMU_AHCI_PROOF -DGXOS_DM15_AHCI_PRIVATE_PROOF"
         } else { "-DGXOS_DM15_QEMU_AHCI_PROOF" }
+        if ($Dm22LargeProof) {
+            $flags += " -DGXOS_DM22_QEMU_FAT32_PROOF"
+        }
         $kernelBuildLog = Join-Path $WorkFull "kernel-build-$($Stage.ToLowerInvariant()).log"
-        & $makePath -C (Join-Path $Root "kernel") ARCH=amd64 "EXTRA_CFLAGS=$flags" -j4 `
-            2>&1 | Out-File -LiteralPath $kernelBuildLog -Encoding utf8
+        $buildErrorPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            & $makePath -C (Join-Path $Root "kernel") ARCH=amd64 "EXTRA_CFLAGS=$flags" -j4 2>&1 | Out-File -LiteralPath $kernelBuildLog -Encoding utf8
+        } finally {
+            $ErrorActionPreference = $buildErrorPreference
+        }
         $kernelBuildExitCode = $LASTEXITCODE
         if ($kernelBuildExitCode -ne 0) {
             Get-Content -LiteralPath $kernelBuildLog -Tail 80
@@ -294,19 +349,25 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Unable to mark the new raw proof image sparse (fsutil exit $LASTEXITCODE)." }
     $diskStream = [IO.File]::Open($DiskPath, [IO.FileMode]::Open,
         [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
-    $diskStream.SetLength(600L * 1024L * 1024L)
+    $diskStream.SetLength([int64]$DiskSizeBytes)
     $diskStream.Dispose()
     $bootHash = (Get-FileHash -LiteralPath (Join-Path $bootPath "BOOTX64.EFI") -Algorithm SHA256).Hash
     $kernelHash = (Get-FileHash -LiteralPath (Join-Path $EspPath "kernel.elf") -Algorithm SHA256).Hash
     $kernelBytes = (Get-Item -LiteralPath (Join-Path $EspPath "kernel.elf")).Length
     $initialHash = (Get-FileHash -LiteralPath $DiskPath -Algorithm SHA256).Hash
+    $initialActualBytes = if ($Dm22LargeProof) {
+        Save-Dm22ImageAllocation $DiskPath $WorkFull "initial"
+    } else { 0 }
     $qemuVersion = (& $QemuFull --version | Select-Object -First 1)
     $qemuHash = (Get-FileHash -LiteralPath $QemuFull -Algorithm SHA256).Hash
     $ovmfHash = (Get-FileHash -LiteralPath $OvmfFull -Algorithm SHA256).Hash
     $qemuAtStart = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'")
+    $proofName = if ($Dm22LargeProof) { "DM22-LARGE-FAT32-AHCI" } else { "DM15-AHCI-$Stage" }
+    $manifestSchema = if ($Dm22LargeProof) { "DM22-LARGE-FAT32-1" } else { "DM19-TRANSPORT-1" }
+    $proofIdentity = if ($Dm22LargeProof) { "GUIDEXOS-DM22-QEMU-LargeFAT32" } else { "GUIDEXOS-DM15-QEMU-$Stage" }
     @(
-        "proof=DM15-AHCI-$Stage",
-        "manifestSchema=DM19-TRANSPORT-1",
+        "proof=$proofName",
+        "manifestSchema=$manifestSchema",
         "attemptNumber=$AttemptNumber",
         "timestampUtc=$([DateTime]::UtcNow.ToString('o'))",
         "bootMedium=isolated-ESP-directory-backend",
@@ -322,7 +383,9 @@ try {
         "storageImagePath=$DiskPath",
         "secondaryFormat=raw",
         "secondaryCapacityBytes=$((Get-Item -LiteralPath $DiskPath).Length)",
+        "secondaryRequestedBytes=$DiskSizeBytes",
         "secondaryInitialSha256=$initialHash",
+        "secondaryInitialActualBytes=$(if ($Dm22LargeProof) { $initialActualBytes } else { 'not-recorded' })",
         "storageImageBytes=$((Get-Item -LiteralPath $DiskPath).Length)",
         "storageImageSha256Before=$initialHash",
         "storageImageAccess=writable-disposable-only",
@@ -334,12 +397,12 @@ try {
         "physicalHostDisksPassedToQemu=none",
         "qemu=$qemuVersion",
         "qemuSha256=$qemuHash",
-        "timeoutPrivateOrFirstBootSeconds=300",
-        "timeoutRediscoveryBootSeconds=180",
+        "timeoutPrivateOrFirstBootSeconds=$(if ($Dm22LargeProof) { 1800 } elseif ($FirstBootTimeoutSeconds -gt 0) { $FirstBootTimeoutSeconds } else { 300 })",
+        "timeoutRediscoveryBootSeconds=$(if ($Dm22LargeProof) { 300 } elseif ($RediscoveryTimeoutSeconds -gt 0) { $RediscoveryTimeoutSeconds } else { 180 })",
         "hostQemuProcessesBefore=$($qemuAtStart.Count)",
         "hostQemuPidsBefore=$(($qemuAtStart | ForEach-Object { $_.ProcessId }) -join ',')"
     ) | Set-Content -LiteralPath $manifestPath -Encoding ascii
-    @("identity=GUIDEXOS-DM15-QEMU-$Stage", "proofManifest=/dm15-manifest.txt") |
+    @("identity=$proofIdentity", "proofManifest=/$manifestName") |
         Set-Content -LiteralPath (Join-Path $EspPath "build-identity.txt") -Encoding ascii
 
     if ($Stage -eq "PrivateWrite") {
@@ -358,13 +421,19 @@ try {
             "serial=private-write-boot.serial.log"
         )
     } else {
-        $activeBoot = Start-ProofBoot "first-boot" `
-            "[DM15-QEMU] lifecycle=PASS" $EspPath $DiskPath $WorkFull 300 $manifestPath
+        $lifecycleMarker = if ($Dm22LargeProof) { "[DM22-QEMU] lifecycle=PASS" } else { "[DM15-QEMU] lifecycle=PASS" }
+        $firstTimeout = if ($Dm22LargeProof) { 1800 }
+            elseif ($FirstBootTimeoutSeconds -gt 0) { $FirstBootTimeoutSeconds }
+            else { 300 }
+        $activeBoot = Start-ProofBoot "first-boot" $lifecycleMarker $EspPath $DiskPath $WorkFull $firstTimeout $manifestPath
         $firstSerial = $activeBoot.SerialPath
         Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
         $activeBoot = $null
-        $activeBoot = Start-ProofBoot "rediscovery-boot" `
-            "[DM15-QEMU] reboot-rediscovery=PASS" $EspPath $DiskPath $WorkFull 180 $manifestPath
+        $rediscoveryMarker = if ($Dm22LargeProof) { "[DM22-QEMU] reboot-rediscovery=PASS" } else { "[DM15-QEMU] reboot-rediscovery=PASS" }
+        $rediscoveryTimeout = if ($Dm22LargeProof) { 300 }
+            elseif ($RediscoveryTimeoutSeconds -gt 0) { $RediscoveryTimeoutSeconds }
+            else { 180 }
+        $activeBoot = Start-ProofBoot "rediscovery-boot" $rediscoveryMarker $EspPath $DiskPath $WorkFull $rediscoveryTimeout $manifestPath
         $rediscoverySerial = $activeBoot.SerialPath
         Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
         $activeBoot = $null
@@ -374,21 +443,29 @@ try {
             $PythonExecutable = $python.Source
         }
         $inspectionPath = Join-Path $WorkFull "disk-inspection.txt"
-        $inspection = & $PythonExecutable (Join-Path $Root "scripts\verify-dm9-qemu-image.py") $DiskPath 2>&1
+        $verifier = if ($Dm22LargeProof) {
+            Join-Path $Root "scripts\verify-dm22-qemu-image.py"
+        } else { Join-Path $Root "scripts\verify-dm9-qemu-image.py" }
+        $inspection = & $PythonExecutable $verifier $DiskPath 2>&1
         $inspection | Set-Content -LiteralPath $inspectionPath -Encoding utf8
         if ($LASTEXITCODE -ne 0) { throw "Independent raw-image verification failed; see $inspectionPath" }
+        $finalActualBytes = if ($Dm22LargeProof) {
+            Save-Dm22ImageAllocation $DiskPath $WorkFull "final"
+        } else { 0 }
         Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
             "secondaryFinalSha256=$((Get-FileHash -LiteralPath $DiskPath -Algorithm SHA256).Hash)",
+            "secondaryFinalActualBytes=$(if ($Dm22LargeProof) { $finalActualBytes } else { 'not-recorded' })",
             "firstBootSerial=$([IO.Path]::GetFileName($firstSerial))",
             "rediscoverySerial=$([IO.Path]::GetFileName($rediscoverySerial))",
-            "result=PASS tier=2-full-lifecycle-and-restart-rediscovery",
+            "result=PASS tier=$(if ($Dm22LargeProof) { 'DM22-large-FAT32-AHCI-high-cluster-96KiB-file-restart' } else { '2-full-lifecycle-and-restart-rediscovery' })",
             "failedStage=none",
             "writesOccurred=yes",
             "inspection=PASS read-only-GPT-FAT32-independent-verifier",
             "transportResult=PASS"
         )
     }
-    Write-Host "DM15 $Stage proof passed. Preserved artifacts: $WorkFull"
+    $passedProofName = if ($Dm22LargeProof) { "DM22 large FAT32 AHCI" } else { "DM15 $Stage" }
+    Write-Host "$passedProofName proof passed. Preserved artifacts: $WorkFull"
 } catch {
     $failureText = $_.Exception.Message -replace '[\r\n]+', ' '
     if ($activeBoot) {
