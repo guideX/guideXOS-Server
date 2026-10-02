@@ -146,6 +146,12 @@ static const char* const kManagedSettingsCenterAliases[] = {
 };
 #endif
 
+#if defined(GXOS_NATIVEAOT_C158_MANAGED_CALCULATOR)
+static const char* const kManagedCalculatorAliases[] = {
+	"Managed Calculator"
+};
+#endif
+
 static const char* const kOnScreenKeyboardAliases[] = {
 	"On Screen Keyboard"
 };
@@ -191,6 +197,9 @@ static const BuiltInAppMetadata kBuiltInAppMetadata[] = {
 , 	{ "com.guidexos.apps.managed.settingscenter", "Managed Settings Center", "Settings Center", nullptr, nullptr, "app.settings", "Utilities", "Managed guideXOS multi-section settings application composition proof.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedSettingsCenterAliases, sizeof(detail::kManagedSettingsCenterAliases) / sizeof(detail::kManagedSettingsCenterAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 5u, kManagedNativeAotCompositeImagePath }
 #elif defined(GXOS_NATIVEAOT_C143_MANAGED_GROUP_BOX)
 ,	{ "com.guidexos.apps.managed.groupbox", "Managed GroupBox", "Managed GroupBox", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS bounded non-owning titled section proof application.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedGroupBoxAliases, sizeof(detail::kManagedGroupBoxAliases) / sizeof(detail::kManagedGroupBoxAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 5u, kManagedNativeAotCompositeImagePath }
+#endif
+#if defined(GXOS_NATIVEAOT_C158_MANAGED_CALCULATOR)
+, 	{ "com.guidexos.apps.managed.calculator", "Managed Calculator", "Managed Calculator", nullptr, nullptr, "app.generic", "Utilities", "Managed signed Int64 calculator with bounded checked arithmetic.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedCalculatorAliases, sizeof(detail::kManagedCalculatorAliases) / sizeof(detail::kManagedCalculatorAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 6u, kManagedNativeAotCompositeImagePath }
 #endif
 };
 

@@ -1743,6 +1743,9 @@ static StartMenuApp s_startMenuApps[] = {
     {"Managed Status",    true, false, 0xFF5C9A88}, // shared resident NativeAOT logical app
     {"Managed Counter",   true, false, 0xFF9A6A42}, // shared resident NativeAOT logical app
     {"Managed Notes",     true, false, 0xFF7A5A9A}, // shared resident NativeAOT logical app
+#if defined(GXOS_NATIVEAOT_C158_MANAGED_CALCULATOR)
+    {"Managed Calculator", true, false, 0xFF4690C8}, // separate managed application; native Calculator remains registered
+#endif
     {"Paint",       false, true,  0xFFC87830},  // recent
     {"Clock",       false, true,  0xFF4690C8},  // recent
     {"File Explorer", false, true, 0xFFC8B43C}, // recent
@@ -1764,6 +1767,9 @@ static const char* s_allProgramsList[] = {
     "ImgViewer",
     "AppModel",
     "Managed Counter",
+#if defined(GXOS_NATIVEAOT_C158_MANAGED_CALCULATOR)
+    "Managed Calculator",
+#endif
     "Managed Notes",
     "Managed Status",
     "Managed Workspace",
@@ -11333,6 +11339,9 @@ static void show_start_menu_notification(const char* label)
         launch_managed_appmodel_record(launchLabel, "StartMenu", nullptr, 0u);
     if (managedResult != ManagedAppModelLaunchResult::NotManaged) {
         if (managedResult == ManagedAppModelLaunchResult::Succeeded) {
+            // Keep the managed app visible at the top of Recent Programs so
+            // clean surface relaunches use the ordinary Start-menu path.
+            record_recent_program(launchLabel);
             app::AppLogger::logLaunch(launchLabel, app::LaunchResult::Success);
             return;
         }

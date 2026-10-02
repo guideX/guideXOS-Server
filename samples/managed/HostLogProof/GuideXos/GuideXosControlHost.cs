@@ -46,7 +46,9 @@ public enum GuideXosControlHostResult
 /// </summary>
 public sealed class GuideXosControlHost
 {
-    public const int MaximumSupportedControlCount = 10;
+    // C158's 18-button Calculator is one flat application-owned control set.
+    // Keep a fixed upper bound while allowing that one dense surface.
+    public const int MaximumSupportedControlCount = 20;
     public const int DefaultMaximumControlCount = 8;
 
     private struct ControlEntry

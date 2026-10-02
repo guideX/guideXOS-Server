@@ -5,6 +5,7 @@ namespace HostLogProof;
 public abstract unsafe class GuideXosApplication
 {
     public abstract GuideXosResult Launch(GuideXosHost host);
+    public virtual void OnTearingDown() { }
     public virtual GuideXosResult HandleAction(GuideXosHost host, uint actionId)
     {
         return GuideXosResult.InvalidAction;
@@ -63,6 +64,10 @@ public static unsafe class GuideXosApplicationRegistry
         new(4u, "Managed Notes"u8, static () => new Applications.ManagedNotes()),
         new(5u, "Managed Settings Center"u8,
             static () => new Applications.ManagedSettingsCenter()),
+#if HOSTLOGPROOF_C158_MANAGED_CALCULATOR
+        new(6u, "Managed Calculator"u8,
+            static () => new Applications.ManagedCalculatorC158()),
+#endif
     };
     private static readonly GuideXosManagedApplicationLifetime s_lifetime = new();
 #if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
@@ -118,6 +123,8 @@ public static unsafe class GuideXosApplicationRegistry
         descriptor = default;
         return false;
     }
+
+    public static int RegistrationCount => s_entries.Length;
 
     public static int Dispatch(NativeGxAppContext* context)
     {
@@ -231,6 +238,15 @@ public static unsafe class GuideXosApplicationRegistry
             : host.IsAction
                 ? application.HandleAction(host, host.LaunchContext.ActionId)
                 : application.Launch(host);
+#if HOSTLOGPROOF_C158_MANAGED_CALCULATOR
+        if (selector == 6u && host.IsAction &&
+            host.LaunchContext.ActionId ==
+                Applications.ManagedCalculatorC158.CloseActionId &&
+            result == GuideXosResult.Success)
+        {
+            s_lifetime.Clear(selector);
+        }
+#endif
         if (isNewLaunch && result != GuideXosResult.Success)
         {
             s_lifetime.Clear(selector);

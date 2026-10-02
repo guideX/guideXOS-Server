@@ -449,6 +449,36 @@ bool managedIdentityResolvable(const char* identity) {
         gxos::apps::IsManagedNativeAotRecordValid(*metadata);
 }
 
+#if defined(GXOS_NATIVEAOT_C158_MANAGED_CALCULATOR)
+bool runC158ManagedCalculatorRegistrationTest() {
+    const gxos::apps::BuiltInAppMetadata* managed =
+        gxos::apps::FindManagedNativeAotAppByIdentity(
+            "com.guidexos.apps.managed.calculator");
+    const gxos::apps::BuiltInAppMetadata* native =
+        gxos::apps::FindBuiltInAppMetadataByAppId("gxos.builtin.calculator");
+    const bool passed = managed && native &&
+        gxos::apps::ManagedNativeAotCatalogIsValid() &&
+        gxos::apps::IsManagedNativeAotRecordValid(*managed) &&
+        managed->managedSelector == 6u &&
+        gxos::apps::detail::builtInTextEquals(
+            managed->displayName, "Managed Calculator") &&
+        gxos::apps::detail::builtInTextEquals(
+            managed->launchName, "Managed Calculator") &&
+        gxos::apps::detail::builtInTextEquals(
+            managed->managedCompositeImagePath,
+            kProductionCompositeImage) &&
+        gxos::apps::IsBuiltInAppAvailableInBareMetal(*managed) &&
+        gxos::apps::BuiltInAppHasKnownAlias(*managed, "Managed Calculator") &&
+        native->launchKind == gxos::apps::BuiltInAppLaunchKind::Native &&
+        gxos::apps::detail::builtInTextEquals(native->displayName, "Calculator") &&
+        gxos::apps::IsBuiltInAppAvailableInBareMetal(*native) &&
+        gxos::apps::IsManagedNativeAotRecordValid(*native);
+    serial::puts("[C158-CALC-APP-REGISTRY] identity=com.guidexos.apps.managed.calculator selector=6 display=Managed-Calculator native-calculator=preserved result=");
+    serial::puts(passed ? "PASS\n" : "FAIL\n");
+    return passed;
+}
+#endif
+
 #if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
 bool runC150ReturnTargetTests() {
     bool passed = true;
@@ -862,6 +892,18 @@ public:
     }
 
     void onWindowClose() override {
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION) && \
+    defined(GXOS_NATIVEAOT_C158_MANAGED_CALCULATOR)
+        if (!m_replacingSurface && m_selector == 6u &&
+            ManagedReturnTarget::identityEquals(
+                m_surfaceApplicationId,
+                "com.guidexos.apps.managed.calculator")) {
+            const int32_t teardownResult = invokeManagedAction(
+                6u, 0x01580001u);
+            serial::puts("[C158-CALC-CLOSE-DISPATCH] selector=6 controls=0 result=");
+            serial::puts(teardownResult == 0 ? "PASS\n" : "FAIL\n");
+        }
+#endif
 #if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
         if (!m_replacingSurface) {
             const gxos::apps::BuiltInAppMetadata* settings =
@@ -3563,6 +3605,16 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
                                       LaunchReport* report,
                                       const char* launchContext,
                                       uint32_t launchContextLength) {
+#if defined(GXOS_NATIVEAOT_C158_MANAGED_CALCULATOR)
+    static bool c158RegistrationTestRun = false;
+    if (!c158RegistrationTestRun) {
+        c158RegistrationTestRun = true;
+        if (!runC158ManagedCalculatorRegistrationTest()) {
+            serial::puts("[C158-CALC-APP-REGISTRY] launch=blocked result=FAIL\n");
+            return LaunchStatus::ManagedFailed;
+        }
+    }
+#endif
 #if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
     if (!g_c150ContractTestsRun) {
         g_c150ContractTestsRun = true;

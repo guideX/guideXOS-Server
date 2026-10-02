@@ -18,6 +18,7 @@ internal sealed class GuideXosManagedApplicationLifetime
         out GuideXosApplication application,
         out uint generation)
     {
+        _active?.OnTearingDown();
         _active = null;
         _activeSelector = 0u;
         application = descriptor.Factory?.Invoke();
@@ -41,6 +42,7 @@ internal sealed class GuideXosManagedApplicationLifetime
     public void Clear(uint selector)
     {
         if (_activeSelector != selector) return;
+        _active?.OnTearingDown();
         _active = null;
         _activeSelector = 0u;
     }
