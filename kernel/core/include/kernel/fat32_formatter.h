@@ -6,9 +6,16 @@
 namespace kernel {
 namespace storage {
 
-// The current VFS only probes and mounts filesystems on 512-byte logical
-// sectors. Keep the formatter aligned with that end-to-end contract.
+// Supported end-to-end FAT32 formatter geometries. Keep the legacy 512-byte
+// constant for callers that specifically describe the original format.
 static const uint32_t FAT32_FORMAT_SECTOR_SIZE = 512;
+static const uint32_t FAT32_FORMAT_4KN_SECTOR_SIZE = 4096;
+static const uint32_t FAT32_FORMAT_MAX_CLUSTER_BYTES = 32768u;
+static inline bool fat32_format_sector_size_supported(uint32_t bytesPerSector)
+{
+    return bytesPerSector == FAT32_FORMAT_SECTOR_SIZE ||
+        bytesPerSector == FAT32_FORMAT_4KN_SECTOR_SIZE;
+}
 // The rollback log stores only sector addresses plus a prior-state tag. The
 // formatter accepts at most seven distinct sectors today; the eighth slot is
 // a fail-closed bound for future metadata additions.
@@ -20,7 +27,8 @@ static const uint32_t FAT32_FORMAT_MIN_CLUSTERS = 65525u;
 // FAT32 data cluster numbers 0x0FFFFFF0..0x0FFFFFF7 are reserved or mark bad
 // clusters. The last valid data cluster number is therefore 0x0FFFFFEF.
 static const uint32_t FAT32_FORMAT_MAX_CLUSTERS = 0x0FFFFFEEu;
-static const uint32_t FAT32_FORMAT_MAX_SECTORS_PER_CLUSTER = 64u;
+static const uint32_t FAT32_FORMAT_MAX_SECTORS_PER_CLUSTER =
+    FAT32_FORMAT_MAX_CLUSTER_BYTES / FAT32_FORMAT_SECTOR_SIZE;
 // A single reusable, bounded buffer backs the full-partition blank scan.
 // Its size is independent of partition capacity and is also the request
 // ceiling when a transport does not advertise a smaller transfer limit.

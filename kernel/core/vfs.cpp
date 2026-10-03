@@ -30,6 +30,10 @@ static DirIterator  s_dirs[VFS_MAX_OPEN_FILES];
 static uint8_t      s_mountCount = 0;
 static bool         s_initialized = false;
 static storage::PartitionTableModel s_partitionTableScratch;
+// Filesystem detection reads one complete device logical sector. Reuse this
+// bounded scratch instead of putting a 4 KiB sector on the kernel stack.
+alignas(4096) static uint8_t s_detectSectorBuffer[
+    storage::MAX_LOGICAL_SECTOR_SIZE];
 static Status mount_io_status(const MountPoint* mount);
 static Status map_block_status(block::Status status);
 
@@ -304,15 +308,15 @@ static const char* resolve_relative_path(const char* fullPath,
 static FSType detect_fs_type(uint8_t blockDevIndex)
 {
     const block::BlockDevice* device = block::get_device(blockDevIndex);
-    // Current VFS/filesystem drivers use 512-byte logical-sector arithmetic.
-    // Disk Manager's independent parser supports larger sectors safely, while
-    // VFS refuses to mount them until each filesystem has a 4Kn adapter.
-    if (!device || device->sectorSize != 512) return FS_TYPE_NONE;
-    // Four 512-byte sectors cover the bounded UFS probe below.
-    uint8_t buffer[2048];
+    if (!device || (device->sectorSize != 512 &&
+                    device->sectorSize != 4096)) return FS_TYPE_NONE;
+    // One full logical block is needed for boot-sector and MBR probing. The
+    // legacy ext/UFS probes below remain restricted to 512-byte devices.
+    uint8_t* buffer = s_detectSectorBuffer;
     
     // Read first sector
-    if (block::read_sectors_checked(blockDevIndex, 0, 1, buffer, sizeof(buffer)) != block::BLOCK_OK) {
+    if (block::read_sectors_checked(blockDevIndex, 0, 1, buffer,
+            storage::MAX_LOGICAL_SECTOR_SIZE) != block::BLOCK_OK) {
 #if defined(__GNUC__) || defined(__clang__)
         serial::puts("[VFS] detect_fs: Failed to read sector 0\n");
 #endif
@@ -334,8 +338,14 @@ static FSType detect_fs_type(uint8_t blockDevIndex)
         serial::puts("[VFS]   Found 0x55AA boot signature\n");
 #endif
         
-        // Check for FAT32 specific fields at offset 82
-        if (buffer[82] == 'F' && buffer[83] == 'A' && buffer[84] == 'T' &&
+        const uint16_t bytesPerSector =
+            *reinterpret_cast<uint16_t*>(&buffer[11]);
+        const bool matchingFatGeometry =
+            bytesPerSector == device->sectorSize;
+
+        // FAT BPB fields stay at their standard offsets in a 4Kn block.
+        if (matchingFatGeometry &&
+            buffer[82] == 'F' && buffer[83] == 'A' && buffer[84] == 'T' &&
             buffer[85] == '3' && buffer[86] == '2') {
 #if defined(__GNUC__) || defined(__clang__)
             serial::puts("[VFS]   Found FAT32 string at offset 82\n");
@@ -350,7 +360,8 @@ static FSType detect_fs_type(uint8_t blockDevIndex)
         }
         
         // Check for FAT signature at offset 54 (FAT12/16) 
-        if (buffer[54] == 'F' && buffer[55] == 'A' && buffer[56] == 'T') {
+        if (matchingFatGeometry && buffer[54] == 'F' &&
+            buffer[55] == 'A' && buffer[56] == 'T') {
 #if defined(__GNUC__) || defined(__clang__)
             serial::puts("[VFS]   Found FAT string at offset 54\n");
 #endif
@@ -358,7 +369,8 @@ static FSType detect_fs_type(uint8_t blockDevIndex)
         }
         
         // Check for FAT32 at offset 82 with different format
-        if (buffer[82] == 'F' && buffer[83] == 'A' && buffer[84] == 'T') {
+        if (matchingFatGeometry && buffer[82] == 'F' &&
+            buffer[83] == 'A' && buffer[84] == 'T') {
 #if defined(__GNUC__) || defined(__clang__)
             serial::puts("[VFS]   Found FAT at offset 82 (partial)\n");
 #endif
@@ -369,7 +381,6 @@ static FSType detect_fs_type(uint8_t blockDevIndex)
         // FAT32 has sectorsPerFAT16 = 0 (offset 22-23) and sectorsPerFAT32 > 0 (offset 36-39)
         uint16_t sectorsPerFAT16 = *reinterpret_cast<uint16_t*>(&buffer[22]);
         uint32_t sectorsPerFAT32 = *reinterpret_cast<uint32_t*>(&buffer[36]);
-        uint16_t bytesPerSector = *reinterpret_cast<uint16_t*>(&buffer[11]);
         
 #if defined(__GNUC__) || defined(__clang__)
         serial::puts("[VFS]   BPB: bps=0x");
@@ -381,7 +392,8 @@ static FSType detect_fs_type(uint8_t blockDevIndex)
         serial::puts("\n");
 #endif
         
-        if (bytesPerSector == 512 && sectorsPerFAT16 == 0 && sectorsPerFAT32 > 0) {
+        if (matchingFatGeometry && sectorsPerFAT16 == 0 &&
+            sectorsPerFAT32 > 0) {
 #if defined(__GNUC__) || defined(__clang__)
             serial::puts("[VFS]   Detected FAT32 from BPB fields\n");
 #endif
@@ -409,8 +421,11 @@ static FSType detect_fs_type(uint8_t blockDevIndex)
         }
     }
     
-    // Check for ext2/ext4 (superblock at offset 1024)
-    if (block::read_sectors_checked(blockDevIndex, 2, 1, buffer, sizeof(buffer)) == block::BLOCK_OK) {
+    if (device->sectorSize != 512) return FS_TYPE_NONE;
+
+    // Check for ext2/ext4 (superblock at offset 1024).
+    if (block::read_sectors_checked(blockDevIndex, 2, 1, buffer,
+            storage::MAX_LOGICAL_SECTOR_SIZE) == block::BLOCK_OK) {
         // ext2/ext4 magic number at offset 56 in superblock
         if (buffer[56] == 0x53 && buffer[57] == 0xEF) {
             // Check for ext4 features
@@ -425,7 +440,8 @@ static FSType detect_fs_type(uint8_t blockDevIndex)
     // Check for UFS (various magic locations)
     // UFS superblock is at offset 8192 (sector 16), magic at offset 0x55C within superblock
     // Need to read 4 sectors (2048 bytes) to reach the magic location
-    if (block::read_sectors_checked(blockDevIndex, 16, 4, buffer, sizeof(buffer)) == block::BLOCK_OK) {
+    if (block::read_sectors_checked(blockDevIndex, 16, 4, buffer,
+            storage::MAX_LOGICAL_SECTOR_SIZE) == block::BLOCK_OK) {
         uint32_t magic = *reinterpret_cast<uint32_t*>(&buffer[0x55C]);
         if (magic == 0x00011954 || magic == 0x54190100) {  // UFS1/UFS2
             return FS_TYPE_UFS;
@@ -640,7 +656,9 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
     }
     block::BlockDevice geometry = {};
     if (!block::copy_device(blockDevIndex, geometry) ||
-        geometry.sectorSize != 512) return 0xFF;
+        (geometry.sectorSize != 512 &&
+         !(fsType == FS_TYPE_FAT32 && geometry.sectorSize == 4096)))
+        return 0xFF;
     
     // Check if path is already mounted
     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
@@ -696,6 +714,13 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
         serial::puts("[VFS] ERROR: Filesystem mount failed\n");
 #endif
         return 0xFF;
+    }
+    if (geometry.sectorSize == 4096 && fsType == FS_TYPE_FAT32) {
+        const fs_fat::FATVolume* mountedFat = fs_fat::get_volume(fsVolume);
+        if (!mountedFat || mountedFat->type != fs_fat::FAT_TYPE_FAT32) {
+            fs_fat::unmount(fsVolume);
+            return 0xFF;
+        }
     }
     if (!block::registration_is_present(blockDevIndex, geometry.registrationId)) {
         if (fsType == FS_TYPE_FAT32 || fsType == FS_TYPE_EXFAT)

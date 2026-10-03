@@ -12,18 +12,20 @@ import zlib
 from pathlib import Path
 
 
-SECTOR_SIZE = 512
+SUPPORTED_SECTOR_SIZES = (512, 4096)
 GPT_BASIC_DATA = uuid.UUID("EBD0A0A2-B9E5-4433-87C0-68B6B72699C7").bytes_le
 PARTITION_NAME = "DM9 QEMU Proof"
 DIRECTORY_NAME = b"DM9        "
 FILE_NAME = b"PROOF   BIN"
 PAYLOAD_BYTES = 96 * 1024
-MIN_VOLUME_BYTES = 8 * 1024 * 1024 * 1024
+MIN_512_VOLUME_BYTES = 8 * 1024 * 1024 * 1024
+MIN_4KN_VOLUME_BYTES = 600 * 1024 * 1024
 MIN_CLUSTERS = 65525
 MAX_CLUSTERS = 0x0FFFFFEE
 CLUSTER_MASK = 0x0FFFFFFF
 EOC = 0x0FFFFFF8
-ALLOCATOR_START = 120001
+ALLOCATOR_START_512 = 120001
+ALLOCATOR_START_4KN = 70001
 
 
 class VerificationError(RuntimeError):
@@ -55,22 +57,34 @@ def expected_payload(length: int) -> bytes:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", type=Path, help="read-only raw disk image")
+    parser.add_argument("--sector-size", type=int, choices=SUPPORTED_SECTOR_SIZES,
+                        help="logical sector size; detected from GPT when omitted")
     args = parser.parse_args()
     image_path = args.image.resolve(strict=True)
 
     with image_path.open("rb") as image:
         image.seek(0, 2)
         image_bytes = image.tell()
-        require(image_bytes % SECTOR_SIZE == 0,
-                "image is not 512-byte aligned")
-        total_sectors = image_bytes // SECTOR_SIZE
+        sector_size = args.sector_size
+        if sector_size is None:
+            sector_size = 0
+            for candidate in SUPPORTED_SECTOR_SIZES:
+                image.seek(candidate)
+                if image.read(8) == b"EFI PART":
+                    sector_size = candidate
+                    break
+        require(sector_size in SUPPORTED_SECTOR_SIZES,
+                "logical sector size was not supplied or detected from GPT")
+        require(image_bytes % sector_size == 0,
+                f"image is not {sector_size}-byte aligned")
+        total_sectors = image_bytes // sector_size
 
         def read_sector(lba: int) -> bytes:
             require(0 <= lba < total_sectors,
                     f"LBA {lba} is outside the image")
-            image.seek(lba * SECTOR_SIZE)
-            sector = image.read(SECTOR_SIZE)
-            require(len(sector) == SECTOR_SIZE, f"short read at LBA {lba}")
+            image.seek(lba * sector_size)
+            sector = image.read(sector_size)
+            require(len(sector) == sector_size, f"short read at LBA {lba}")
             return sector
 
         mbr = read_sector(0)
@@ -80,6 +94,9 @@ def main() -> int:
         require(protective[4] == 0xEE and u32(protective, 8) == 1 and
                 u32(protective, 12) == min(total_sectors - 1, 0xFFFFFFFF),
                 "protective MBR does not cover the image")
+        if sector_size == 4096:
+            require(mbr[4094:4096] != b"\x55\xAA",
+                    "protective MBR signature was incorrectly moved to the end of 4Kn LBA0")
         primary = read_sector(1)
         backup = read_sector(total_sectors - 1)
         require(primary[:8] == b"EFI PART" and backup[:8] == b"EFI PART",
@@ -89,7 +106,7 @@ def main() -> int:
                             backup_lba: int) -> tuple[int, int, int, bytes, bytes]:
             header_size = u32(header, 12)
             stored_crc = u32(header, 16)
-            require(92 <= header_size <= SECTOR_SIZE,
+            require(92 <= header_size <= sector_size,
                     "GPT header size is invalid")
             header_copy = bytearray(header[:header_size])
             header_copy[16:20] = b"\0\0\0\0"
@@ -105,7 +122,7 @@ def main() -> int:
             count, size, entries_crc = u32(header, 80), u32(header, 84), u32(header, 88)
             require(count == 128 and size == 128,
                     "GPT entry geometry differs from the proof format")
-            image.seek(entries_lba * SECTOR_SIZE)
+            image.seek(entries_lba * sector_size)
             entries = image.read(count * size)
             require(len(entries) == count * size,
                     "GPT entry array is truncated")
@@ -120,7 +137,7 @@ def main() -> int:
         require((p_first, p_last, disk_guid) == (b_first, b_last, backup_guid) and
                 p_entries == b_entries and p_array_lba == 2,
                 "primary and backup GPT metadata disagree")
-        array_sectors = (128 * 128 + SECTOR_SIZE - 1) // SECTOR_SIZE
+        array_sectors = (128 * 128 + sector_size - 1) // sector_size
         require(b_array_lba == total_sectors - 1 - array_sectors,
                 "backup GPT entry array is misplaced")
 
@@ -137,6 +154,9 @@ def main() -> int:
         partition_number, start_lba, end_lba, _ = partition
         require(p_first <= start_lba <= end_lba <= p_last,
                 "proof partition escapes the GPT usable range")
+        alignment_sectors = (1024 * 1024) // sector_size
+        require(start_lba % alignment_sectors == 0,
+                "proof partition does not preserve 1 MiB logical-sector alignment")
 
         boot = read_sector(start_lba)
         require(boot[510:512] == b"\x55\xAA",
@@ -148,7 +168,8 @@ def main() -> int:
         root_cluster = u32(boot, 44)
         fsinfo_sector = u16(boot, 48)
         backup_boot_sector = u16(boot, 50)
-        require(bps == SECTOR_SIZE and 0 < spc <= 64 and
+        max_spc = min(64, 32768 // bps) if bps else 0
+        require(bps == sector_size and 0 < spc <= max_spc and
                 spc & (spc - 1) == 0 and spc * bps <= 32768,
                 "FAT32 sector or cluster geometry is invalid")
         require(reserved > 0 and fats == 2 and fat_size > 0 and
@@ -157,9 +178,11 @@ def main() -> int:
         require(u16(boot, 17) == 0 and u16(boot, 19) == 0 and
                 u16(boot, 22) == 0 and total_sectors_fat > 0,
                 "FAT32 BPB uses invalid legacy fields")
-        require(total_sectors_fat >= MIN_VOLUME_BYTES // SECTOR_SIZE and
+        minimum_volume_bytes = (MIN_512_VOLUME_BYTES if sector_size == 512
+                                else MIN_4KN_VOLUME_BYTES)
+        require(total_sectors_fat >= minimum_volume_bytes // sector_size and
                 total_sectors_fat <= end_lba - start_lba + 1,
-                "FAT32 volume is smaller than 8 GiB or exceeds its partition")
+                "FAT32 volume is smaller than its transport-specific proof bound or exceeds its partition")
         require(u32(boot, 28) == start_lba and
                 boot[71:82] == b"DM9PROOF   " and
                 boot[82:90] == b"FAT32   ",
@@ -184,7 +207,9 @@ def main() -> int:
                 primary_fsinfo == backup_fsinfo,
                 "primary and backup FSInfo sectors disagree")
         next_free = u32(primary_fsinfo, 492)
-        require(next_free == ALLOCATOR_START,
+        allocator_start = (ALLOCATOR_START_512 if sector_size == 512
+                          else ALLOCATOR_START_4KN)
+        require(next_free == allocator_start,
                 "FSInfo does not retain the high-cluster allocator hint")
 
         first_data_offset = reserved + fats * fat_size
@@ -214,7 +239,7 @@ def main() -> int:
             require(2 <= cluster < cluster_count + 2,
                     f"cluster {cluster} is outside the data region")
             offset = cluster * 4
-            sector_index, within = divmod(offset, SECTOR_SIZE)
+            sector_index, within = divmod(offset, sector_size)
             if sector_index not in fat_sector_cache:
                 first = read_sector(fat1_lba + sector_index)
                 second = read_sector(fat2_lba + sector_index)
@@ -268,17 +293,20 @@ def main() -> int:
         require(directory is not None and directory[11] & 0x10,
                 "DM9 proof directory is missing")
         directory_cluster = (u16(directory, 20) << 16) | u16(directory, 26)
-        require(directory_cluster > 120000 and fat_entry(directory_cluster) >= EOC,
+        minimum_high_cluster = (120000 if sector_size == 512 else 65525)
+        require(directory_cluster > minimum_high_cluster and
+                fat_entry(directory_cluster) >= EOC,
                 "directory allocation did not use a high FAT cluster")
         file_entry = find_entry(directory_cluster, FILE_NAME)
         require(file_entry is not None and not file_entry[11] & 0x10,
                 "proof file is missing or is a directory")
         file_cluster = (u16(file_entry, 20) << 16) | u16(file_entry, 26)
         file_size = u32(file_entry, 28)
-        require(file_size == PAYLOAD_BYTES and file_cluster > 120000,
+        require(file_size == PAYLOAD_BYTES and
+                file_cluster > minimum_high_cluster,
                 "large proof file size or starting cluster is invalid")
         file_chain = chain(file_cluster)
-        cluster_bytes = spc * SECTOR_SIZE
+        cluster_bytes = spc * sector_size
         require(len(file_chain) == (file_size + cluster_bytes - 1) // cluster_bytes,
                 "file chain length does not match its data size")
         contents = b"".join(cluster_data(cluster) for cluster in file_chain)[:file_size]
@@ -292,7 +320,8 @@ def main() -> int:
     print(f"image={image_path}")
     print(f"image_sha256={image_digest.hexdigest().upper()}")
     print(f"image_bytes={image_bytes}")
-    print(f"partition=PASS number={partition_number} start_lba={start_lba} end_lba={end_lba} bytes={(end_lba - start_lba + 1) * SECTOR_SIZE}")
+    print(f"logical_sector_size={sector_size}")
+    print(f"partition=PASS number={partition_number} start_lba={start_lba} end_lba={end_lba} bytes={(end_lba - start_lba + 1) * sector_size}")
     print(f"fat32=PASS sectors={total_sectors_fat} bps={bps} spc={spc} cluster_bytes={spc * bps} clusters={cluster_count} fat_sectors={fat_size}")
     print(f"fsinfo=PASS next_free_hint={next_free} copies_agree=PASS backup_boot=PASS")
     print(f"fat_mirror=PASS sectors_checked={len(fat_sector_cache) + 1} root_cluster={root_cluster} directory_cluster={directory_cluster} file_cluster={file_cluster}")

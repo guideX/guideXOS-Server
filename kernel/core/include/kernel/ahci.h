@@ -24,6 +24,7 @@ struct DeviceInfo {
     bool flushCacheExt;
     uint64_t totalSectors;
     uint32_t sectorSize;
+    uint32_t physicalSectorSize; // zero when IDENTIFY geometry is unavailable
     char model[41];
     char serial[21];
     char firmware[9];

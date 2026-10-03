@@ -557,13 +557,26 @@ static bool parse_identify(uint8_t driverIndex, const ata::IdentifyData& identif
         (!lba48 && totalSectors > (1ULL << 28))) return false;
 
     uint32_t sectorSize = 512u;
-    if ((identify.logicalSectorInfo & 0xC000u) == 0x4000u &&
+    const bool sectorInfoValid =
+        (identify.logicalSectorInfo & 0xC000u) == 0x4000u;
+    if (sectorInfoValid &&
         (identify.logicalSectorInfo & 0x1000u) != 0u) {
         const uint64_t logicalBytes =
             static_cast<uint64_t>(identify.logicalSectorWords) * 2u;
         if (logicalBytes < 512u || logicalBytes > 4096u ||
             (logicalBytes & (logicalBytes - 1u)) != 0u) return false;
         sectorSize = static_cast<uint32_t>(logicalBytes);
+    }
+    uint32_t physicalSectorSize = 0;
+    if (sectorInfoValid) {
+        physicalSectorSize = sectorSize;
+        if ((identify.logicalSectorInfo & 0x2000u) != 0u) {
+            const uint8_t exponent = static_cast<uint8_t>(
+                identify.logicalSectorInfo & 0x000Fu);
+            if (exponent >= 32u ||
+                sectorSize > (UINT32_MAX >> exponent)) return false;
+            physicalSectorSize = sectorSize << exponent;
+        }
     }
 
     memzero(&info, sizeof(info));
@@ -572,6 +585,7 @@ static bool parse_identify(uint8_t driverIndex, const ata::IdentifyData& identif
     info.lba48 = lba48;
     info.totalSectors = totalSectors;
     info.sectorSize = sectorSize;
+    info.physicalSectorSize = physicalSectorSize;
     info.flushCache = commandSetsValid &&
         (identify.commandSets83 & (1u << 12)) != 0u;
     info.flushCacheExt = commandSetsValid &&
@@ -1085,6 +1099,7 @@ static void register_port_device(uint8_t controllerIndex, uint8_t port)
     blockDevice.driverIndex = driverIndex;
     blockDevice.totalSectors = info.totalSectors;
     blockDevice.sectorSize = info.sectorSize;
+    blockDevice.physicalSectorSize = info.physicalSectorSize;
     blockDevice.readFn = read_sectors;
 #if defined(GXOS_DM15_QEMU_AHCI_PROOF) && \
     defined(GXOS_DM15_AHCI_PRIVATE_PROOF)
@@ -1145,6 +1160,11 @@ static void register_port_device(uint8_t controllerIndex, uint8_t port)
     serial::puts(" firmware="); serial::puts(info.firmware);
     serial::puts(" sectors="); serial::put_hex64(info.totalSectors);
     serial::puts(" sectorSize="); serial::put_hex32(info.sectorSize);
+    serial::puts(" physicalSectorSize=");
+    if (info.physicalSectorSize != 0)
+        serial::put_hex32(info.physicalSectorSize);
+    else
+        serial::puts("unknown");
     serial::puts(" LBA48="); serial::puts(info.lba48 ? "yes" : "no");
     serial::puts(" FLUSH="); serial::puts(info.flushCache ? "yes" : "no");
     serial::puts(" FLUSH_EXT="); serial::puts(info.flushCacheExt ? "yes" : "no");

@@ -169,6 +169,7 @@ struct BlockDevice {
     uint8_t       driverIndex;    // index within the transport driver
     uint64_t      totalSectors;
     uint32_t      sectorSize;     // typically 512 or 4096
+    uint32_t      physicalSectorSize; // zero when the transport cannot report it
     char          name[32];       // human-readable, e.g. "ata0", "nvme0n1"
     ReadSectorsFn  readFn;
     WriteSectorsFn writeFn;

@@ -42,6 +42,9 @@ struct PartitionCheck {
 };
 
 alignas(4096) static uint8_t s_ioSector[MAX_LOGICAL_SECTOR_SIZE];
+// Independent read-back scratch; keeping it static avoids adding several
+// logical-sector-sized arrays to the kernel boot stack.
+alignas(4096) static uint8_t s_verifySector[MAX_LOGICAL_SECTOR_SIZE];
 // One shared scan buffer is operation-owned scratch. FAT32 probe/format calls
 // hold the global storage-operation lease, so scans cannot overlap or reuse
 // this buffer concurrently. It never grows with partition size.
@@ -343,7 +346,7 @@ static Fat32FormatStatus validate_request_and_partition(
         return FAT32_FORMAT_INVALID_GEOMETRY;
     if (!caps.readable) return FAT32_FORMAT_READ_UNAVAILABLE;
     if (!caps.writable) return FAT32_FORMAT_READ_ONLY;
-    if (caps.logicalSectorSize != FAT32_FORMAT_SECTOR_SIZE)
+    if (!fat32_format_sector_size_supported(caps.logicalSectorSize))
         return FAT32_FORMAT_UNSUPPORTED_SECTOR_SIZE;
 
     SafetyRequest safetyRequest = {};
@@ -420,7 +423,11 @@ static Fat32ExistingState classify_existing_prefix(
 {
     const uint64_t start = request.partitionSnapshot.startLba;
     const uint64_t sectors = request.partitionSnapshot.sectorCount;
-    const uint32_t probeCount = sectors < 4 ? static_cast<uint32_t>(sectors) : 4;
+    // The reusable scratch sector holds one complete logical block up to
+    // 4096 bytes. A four-sector prefix fits for 512-byte media, while 4Kn
+    // must be read as one complete logical sector.
+    const uint32_t probeCount = sectorSize == 4096u ? 1u :
+        (sectors < 4 ? static_cast<uint32_t>(sectors) : 4u);
     if (probeCount == 0 || block::read_sectors_checked(
             request.targetSnapshot.globalIndex, start, probeCount, s_ioSector,
             sizeof(s_ioSector)) != block::BLOCK_OK)
@@ -847,14 +854,16 @@ static bool write_partition_sector(const Fat32FormatRequest& request,
 }
 
 static void build_boot_sector(const Fat32FormatGeometry& geometry,
-                              const char label[11], uint8_t sector[512])
+                              const char label[11], uint8_t* sector,
+                              uint32_t sectorSize)
 {
-    clear_bytes(sector, 512);
+    clear_bytes(sector, sectorSize);
     sector[0] = 0xEB;
     sector[1] = 0x58;
     sector[2] = 0x90;
     copy_bytes(sector + 3, "GUIDEXOS ", 8);
-    write_u16(sector + 11, 512);
+    write_u16(sector + 11,
+              static_cast<uint16_t>(geometry.bytesPerSector));
     sector[13] = static_cast<uint8_t>(geometry.sectorsPerCluster);
     write_u16(sector + 14,
               static_cast<uint16_t>(geometry.reservedSectorCount));
@@ -886,9 +895,9 @@ static void build_boot_sector(const Fat32FormatGeometry& geometry,
 }
 
 static void build_fsinfo(const Fat32FormatGeometry& geometry,
-                         uint8_t sector[512])
+                         uint8_t* sector, uint32_t sectorSize)
 {
-    clear_bytes(sector, 512);
+    clear_bytes(sector, sectorSize);
     write_u32(sector + 0, 0x41615252u);
     write_u32(sector + 484, 0x61417272u);
     write_u32(sector + 488, geometry.freeClusterCount);
@@ -897,9 +906,9 @@ static void build_fsinfo(const Fat32FormatGeometry& geometry,
 }
 
 static void build_fat_sector(const Fat32FormatGeometry& geometry,
-                             uint8_t sector[512])
+                             uint8_t* sector, uint32_t sectorSize)
 {
-    clear_bytes(sector, 512);
+    clear_bytes(sector, sectorSize);
     write_u32(sector + 0, 0x0FFFFFF8u);
     write_u32(sector + 4, 0x0FFFFFFFu);
     write_u32(sector + 8, 0x0FFFFFFFu); // Root cluster 2 is allocated to EOC.
@@ -907,9 +916,9 @@ static void build_fat_sector(const Fat32FormatGeometry& geometry,
 }
 
 static void build_root_sector(const char label[11], bool haveLabel,
-                              uint8_t sector[512])
+                              uint8_t* sector, uint32_t sectorSize)
 {
-    clear_bytes(sector, 512);
+    clear_bytes(sector, sectorSize);
     if (!haveLabel) return;
     copy_bytes(sector, label, 11);
     sector[11] = 0x08; // Volume-label entry; the following 0x00 ends the root.
@@ -1086,22 +1095,14 @@ static bool verify_fat32_structure(const TargetIdentity& target,
                                    const Fat32FormatGeometry& planned,
                                    const char expectedLabel[11])
 {
-    uint8_t primary[512];
-    uint8_t backup[512];
-    uint8_t fsinfo[512];
-    uint8_t backupFsinfo[512];
-    uint64_t absolute = 0;
-    if (read_partition_sector(target, partition, planned, 0, primary) !=
-            block::BLOCK_OK ||
-        read_partition_sector(target, partition, planned,
-            planned.backupBootSector, backup) != block::BLOCK_OK ||
-        read_partition_sector(target, partition, planned,
-            planned.fsInfoSector, fsinfo) != block::BLOCK_OK ||
-        read_partition_sector(target, partition, planned,
-            planned.backupFsInfoSector, backupFsinfo) != block::BLOCK_OK)
-        return false;
+    const uint32_t sectorSize = planned.bytesPerSector;
+    if (!fat32_format_sector_size_supported(sectorSize) ||
+        sectorSize > sizeof(s_verifySector) ||
+        read_partition_sector(target, partition, planned, 0,
+            s_verifySector) != block::BLOCK_OK) return false;
 
     // Parse the written BPB independently and derive region bounds from disk.
+    const uint8_t* primary = s_verifySector;
     const uint32_t bps = read_u16(primary + 11);
     const uint32_t spc = primary[13];
     const uint32_t reserved = read_u16(primary + 14);
@@ -1110,8 +1111,8 @@ static bool verify_fat32_structure(const TargetIdentity& target,
     const uint32_t fatSectors = read_u32(primary + 36);
     const uint32_t rootCluster = read_u32(primary + 44);
     uint64_t fatRegionSectors = 0, firstData = 0;
-    if (bps != FAT32_FORMAT_SECTOR_SIZE || spc == 0 ||
-        spc > FAT32_FORMAT_MAX_SECTORS_PER_CLUSTER ||
+    if (bps != sectorSize || !fat32_format_sector_size_supported(bps) ||
+        spc == 0 || spc > FAT32_FORMAT_MAX_CLUSTER_BYTES / bps ||
         (spc & (spc - 1u)) != 0 || reserved == 0 || fats != 2 ||
         read_u16(primary + 17) != 0 || read_u16(primary + 19) != 0 ||
         read_u16(primary + 22) != 0 || total == 0 ||
@@ -1120,6 +1121,7 @@ static bool verify_fat32_structure(const TargetIdentity& target,
         read_u16(primary + 48) != planned.fsInfoSector ||
         read_u16(primary + 50) != planned.backupBootSector ||
         primary[66] != 0x29 || read_u32(primary + 67) == 0 ||
+        read_u32(primary + 28) != planned.hiddenSectors ||
         primary[510] != 0x55 || primary[511] != 0xAA ||
         !ascii_eq(primary + 82, "FAT32   ", 8) ||
         !bytes_equal(primary + 71, reinterpret_cast<const uint8_t*>(expectedLabel), 11) ||
@@ -1134,38 +1136,48 @@ static bool verify_fat32_structure(const TargetIdentity& target,
 
     const uint64_t clusterCount64 = (total - firstData) / spc;
     const uint32_t clusters = static_cast<uint32_t>(clusterCount64);
+    const uint32_t diskVolumeId = read_u32(primary + 67);
     uint64_t fatBytes = 0, fatCapacityBytes = 0;
     if (clusters < FAT32_FORMAT_MIN_CLUSTERS ||
         clusters > FAT32_FORMAT_MAX_CLUSTERS ||
         !mul_u64(static_cast<uint64_t>(clusters) + 2u, 4u, fatBytes) ||
         !mul_u64(fatSectors, bps, fatCapacityBytes) ||
         fatBytes > fatCapacityBytes ||
-        !bytes_equal(primary, backup, sizeof(primary))) return false;
-    if (read_u32(fsinfo) != 0x41615252u ||
-        read_u32(fsinfo + 484) != 0x61417272u ||
-        read_u32(fsinfo + 488) != clusters - 1 ||
-        read_u32(fsinfo + 492) != 3u ||
-        read_u32(fsinfo + 508) != 0xAA550000u ||
-        !bytes_equal(fsinfo, backupFsinfo, sizeof(fsinfo))) return false;
+        !bytes_zero(primary + 512, bps - 512u)) return false;
 
-    const uint32_t diskVolumeId = read_u32(primary + 67);
+    if (read_partition_sector(target, partition, planned,
+            planned.backupBootSector, s_ioSector) != block::BLOCK_OK ||
+        !bytes_equal(primary, s_ioSector, bps)) return false;
+
+    // FSInfo retains the standard offsets within the logical sector. Reuse
+    // the two bounded static buffers, comparing all bytes in each copy.
+    if (read_partition_sector(target, partition, planned,
+            planned.fsInfoSector, s_verifySector) != block::BLOCK_OK ||
+        read_partition_sector(target, partition, planned,
+            planned.backupFsInfoSector, s_ioSector) != block::BLOCK_OK ||
+        read_u32(s_verifySector) != 0x41615252u ||
+        read_u32(s_verifySector + 484) != 0x61417272u ||
+        read_u32(s_verifySector + 488) != clusters - 1 ||
+        read_u32(s_verifySector + 492) != 3u ||
+        read_u32(s_verifySector + 508) != 0xAA550000u ||
+        !bytes_equal(s_verifySector, s_ioSector, bps) ||
+        !bytes_zero(s_verifySector + 512, bps - 512u)) return false;
+
     if (diskVolumeId != planned.volumeId) return false;
 
-    uint8_t firstFatSector[512];
-    uint8_t secondFatSector[512];
     if (!relative_range_valid(planned, reserved, 1) ||
         !relative_range_valid(planned,
             static_cast<uint64_t>(reserved) + fatSectors, 1) ||
         read_partition_sector(target, partition, planned, reserved,
-            firstFatSector) != block::BLOCK_OK ||
+            s_verifySector) != block::BLOCK_OK ||
         read_partition_sector(target, partition, planned,
             static_cast<uint64_t>(reserved) + fatSectors,
-            secondFatSector) != block::BLOCK_OK ||
-        read_u32(firstFatSector) != 0x0FFFFFF8u ||
-        read_u32(firstFatSector + 4) != 0x0FFFFFFFu ||
-        read_u32(firstFatSector + 8) != 0x0FFFFFFFu ||
-        !bytes_zero(firstFatSector + 12, bps - 12) ||
-        !bytes_equal(firstFatSector, secondFatSector, bps)) return false;
+            s_ioSector) != block::BLOCK_OK ||
+        read_u32(s_verifySector) != 0x0FFFFFF8u ||
+        read_u32(s_verifySector + 4) != 0x0FFFFFFFu ||
+        read_u32(s_verifySector + 8) != 0x0FFFFFFFu ||
+        !bytes_zero(s_verifySector + 12, bps - 12) ||
+        !bytes_equal(s_verifySector, s_ioSector, bps)) return false;
     // The full-volume blank scan established all untouched FAT sectors as
     // zero. Read-back therefore checks the initialized FAT sector in each
     // mirror, avoiding verification work proportional to FAT capacity.
@@ -1192,7 +1204,6 @@ static bool verify_fat32_structure(const TargetIdentity& target,
         fatSectors != planned.fatSizeSectors || total != planned.totalSectors ||
         rootCluster != planned.rootCluster || firstData != planned.firstDataSector)
         return false;
-    (void)absolute;
     return true;
 }
 
@@ -1332,62 +1343,60 @@ static Fat32FormatStatus execute_locked(const Fat32FormatRequest& request,
     result.stage = FAT32_FORMAT_STAGE_WRITE_FAT;
     result.lastStage = result.stage;
     result.status = FAT32_FORMAT_INVALID_REQUEST;
-    uint8_t fatSector[512];
-    uint8_t fsinfoSector[512];
-    uint8_t bootSector[512];
-    uint8_t rootSector[512];
-    build_fat_sector(check.geometry, fatSector);
+    const uint32_t sectorSize = check.geometry.bytesPerSector;
+    build_fat_sector(check.geometry, s_ioSector, sectorSize);
     bool writeOk = write_partition_sector(request, request.targetSnapshot,
         check.currentPartition, check.geometry,
-        check.geometry.firstFatSector, fatSector, lease, result);
+        check.geometry.firstFatSector, s_ioSector, lease, result);
     if (writeOk) {
         writeOk = write_partition_sector(request, request.targetSnapshot,
             check.currentPartition, check.geometry,
-            check.geometry.secondFatSector, fatSector, lease, result);
+            check.geometry.secondFatSector, s_ioSector, lease, result);
     }
-    build_root_sector(label, haveLabel, rootSector);
     uint64_t rootSectorLba = 0;
     if (writeOk && haveLabel) {
         result.stage = FAT32_FORMAT_STAGE_WRITE_ROOT;
         result.lastStage = result.stage;
         writeOk = cluster_relative_range(check.geometry,
             check.geometry.rootCluster, rootSectorLba);
-    }
-    if (writeOk && haveLabel) {
-        writeOk = write_partition_sector(request, request.targetSnapshot,
-            check.currentPartition, check.geometry,
-            rootSectorLba, rootSector, lease, result);
+        if (writeOk) {
+            build_root_sector(label, haveLabel, s_ioSector, sectorSize);
+            writeOk = write_partition_sector(request,
+                request.targetSnapshot, check.currentPartition,
+                check.geometry, rootSectorLba, s_ioSector, lease, result);
+        }
     }
 
-    build_fsinfo(check.geometry, fsinfoSector);
-    build_boot_sector(check.geometry, label, bootSector);
     if (writeOk) {
         result.stage = FAT32_FORMAT_STAGE_WRITE_BACKUP_METADATA;
         result.lastStage = result.stage;
+        build_boot_sector(check.geometry, label, s_ioSector, sectorSize);
         writeOk = write_partition_sector(request, request.targetSnapshot,
-        check.currentPartition, check.geometry,
-        check.geometry.backupBootSector, bootSector, lease, result);
+            check.currentPartition, check.geometry,
+            check.geometry.backupBootSector, s_ioSector, lease, result);
+    }
+    if (writeOk) {
+        result.stage = FAT32_FORMAT_STAGE_WRITE_FSINFO;
+        result.lastStage = result.stage;
+        build_fsinfo(check.geometry, s_ioSector, sectorSize);
+        writeOk = write_partition_sector(request, request.targetSnapshot,
+            check.currentPartition, check.geometry,
+            check.geometry.backupFsInfoSector, s_ioSector, lease, result);
     }
     if (writeOk) {
         result.stage = FAT32_FORMAT_STAGE_WRITE_FSINFO;
         result.lastStage = result.stage;
         writeOk = write_partition_sector(request, request.targetSnapshot,
-        check.currentPartition, check.geometry,
-        check.geometry.backupFsInfoSector, fsinfoSector, lease, result);
-    }
-    if (writeOk) {
-        result.stage = FAT32_FORMAT_STAGE_WRITE_FSINFO;
-        result.lastStage = result.stage;
-        writeOk = write_partition_sector(request, request.targetSnapshot,
-        check.currentPartition, check.geometry,
-        check.geometry.fsInfoSector, fsinfoSector, lease, result);
+            check.currentPartition, check.geometry,
+            check.geometry.fsInfoSector, s_ioSector, lease, result);
     }
     // Publish FAT32 only after the supporting structures exist.
     if (writeOk) {
         result.stage = FAT32_FORMAT_STAGE_WRITE_BOOT_SECTOR;
         result.lastStage = result.stage;
+        build_boot_sector(check.geometry, label, s_ioSector, sectorSize);
         writeOk = write_partition_sector(request, request.targetSnapshot,
-            check.currentPartition, check.geometry, 0, bootSector, lease,
+            check.currentPartition, check.geometry, 0, s_ioSector, lease,
             result);
     }
     if (!writeOk) {
@@ -1579,13 +1588,16 @@ Fat32FormatStatus calculate_fat32_format_geometry(
     uint32_t logicalSectorSize, Fat32FormatGeometry& result)
 {
     clear_bytes(&result, sizeof(result));
-    if (logicalSectorSize != FAT32_FORMAT_SECTOR_SIZE)
+    if (!fat32_format_sector_size_supported(logicalSectorSize))
         return FAT32_FORMAT_UNSUPPORTED_SECTOR_SIZE;
     if (partitionSectorCount == 0) return FAT32_FORMAT_TOO_SMALL;
-    if (partitionSectorCount > UINT32_MAX)
+    if (partitionSectorCount > UINT32_MAX || partitionStartLba > UINT32_MAX)
         return FAT32_FORMAT_LAYOUT_OVERFLOW;
 
-    uint32_t sectorsPerCluster = FAT32_FORMAT_MAX_SECTORS_PER_CLUSTER;
+    uint32_t sectorsPerCluster =
+        FAT32_FORMAT_MAX_CLUSTER_BYTES / logicalSectorSize;
+    if (sectorsPerCluster > FAT32_FORMAT_MAX_SECTORS_PER_CLUSTER)
+        sectorsPerCluster = FAT32_FORMAT_MAX_SECTORS_PER_CLUSTER;
     uint64_t fatSectors = 0;
     uint64_t clusterCount = 0;
     uint64_t firstData = 0;
@@ -1662,12 +1674,15 @@ Fat32FormatStatus calculate_fat32_format_geometry(
         rootEnd > partitionSectorCount)
         return FAT32_FORMAT_LAYOUT_OVERFLOW;
     uint64_t absoluteEnd = 0;
+    uint64_t clusterBytes = 0;
     if (!add_u64(partitionStartLba, partitionSectorCount, absoluteEnd) ||
-        absoluteEnd == 0) return FAT32_FORMAT_LAYOUT_OVERFLOW;
+        absoluteEnd == 0 ||
+        !mul_u64(sectorsPerCluster, logicalSectorSize, clusterBytes) ||
+        clusterBytes > UINT32_MAX) return FAT32_FORMAT_LAYOUT_OVERFLOW;
 
     result.bytesPerSector = logicalSectorSize;
     result.sectorsPerCluster = sectorsPerCluster;
-    result.clusterSizeBytes = sectorsPerCluster * logicalSectorSize;
+    result.clusterSizeBytes = static_cast<uint32_t>(clusterBytes);
     result.reservedSectorCount = kFat32ReservedSectors;
     result.fatCount = kFat32Count;
     result.fatSizeSectors = static_cast<uint32_t>(fatSectors);
@@ -1684,8 +1699,7 @@ Fat32FormatStatus calculate_fat32_format_geometry(
     result.fsInfoSector = kFsInfoSector;
     result.backupFsInfoSector = kBackupFsInfoSector;
     result.backupBootSector = kBackupBootSector;
-    result.hiddenSectors = partitionStartLba <= UINT32_MAX
-        ? static_cast<uint32_t>(partitionStartLba) : 0;
+    result.hiddenSectors = static_cast<uint32_t>(partitionStartLba);
     return FAT32_FORMAT_READY;
 }
 
@@ -1759,7 +1773,7 @@ const char* fat32_format_status_name(Fat32FormatStatus status)
         case FAT32_FORMAT_ROOT_BACKING: return "The disk backs the root filesystem and is protected";
         case FAT32_FORMAT_BOOT_BACKING: return "The disk is the boot device and is protected";
         case FAT32_FORMAT_BOOT_IDENTITY_UNKNOWN: return "Boot-device identity is unknown";
-        case FAT32_FORMAT_UNSUPPORTED_SECTOR_SIZE: return "FAT32 formatting currently requires 512-byte logical sectors";
+        case FAT32_FORMAT_UNSUPPORTED_SECTOR_SIZE: return "FAT32 formatting supports 512-byte and 4096-byte logical sectors";
         case FAT32_FORMAT_TOO_SMALL: return "Partition is too small for the supported FAT32 layout.";
         case FAT32_FORMAT_LAYOUT_OVERFLOW: return "FAT32 layout arithmetic exceeded a supported bound";
         case FAT32_FORMAT_FILESYSTEM_ALREADY_RECOGNIZED: return "A recognized filesystem already exists on this partition";

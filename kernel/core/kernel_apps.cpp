@@ -6695,7 +6695,8 @@ const char* DiskManagerApp::detectFs(uint8_t devIndex, uint64_t lbaStart,
                 sector[84] == 'T' && sector[85] == '3' &&
                 sector[86] == '2' && sector[87] == ' ' &&
                 sector[88] == ' ' && sector[89] == ' ') {
-                if (caps.logicalSectorSize == storage::FAT32_FORMAT_SECTOR_SIZE) {
+                if (storage::fat32_format_sector_size_supported(
+                        caps.logicalSectorSize)) {
                     const uint32_t reserved = disk_manager_read_u16(sector + 14);
                     const uint32_t fatCopies = sector[16];
                     const uint32_t totalSectors = disk_manager_read_u32(sector + 32);
@@ -6916,13 +6917,15 @@ void DiskManagerApp::updateInitializeControls() {
         formatAvailable = possibleFs && disk.haveInfo &&
             validTable && durable && disk.identity.registrationId != 0 &&
             disk.capabilities.geometryValid &&
-            disk.capabilities.logicalSectorSize ==
-                storage::FAT32_FORMAT_SECTOR_SIZE && disk.capabilities.writable &&
+            storage::fat32_format_sector_size_supported(
+                disk.capabilities.logicalSectorSize) &&
+            disk.capabilities.writable &&
             disk.mountSafety == storage::DEVICE_UNMOUNTED &&
             disk.bootSafety == storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET &&
             !part.mounted;
         const bool supportedPartition = validTable && disk.haveInfo &&
-            disk.capabilities.logicalSectorSize == 512 &&
+            (disk.capabilities.logicalSectorSize == 512 ||
+             disk.capabilities.logicalSectorSize == 4096) &&
             disk.identity.registrationId != 0 &&
             block::registration_is_present(disk.devIndex,
                                             disk.identity.registrationId);
@@ -7963,8 +7966,11 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                 disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
                     line, kSubText);
                 lineY += 14;
-                const uint64_t bytes = part.sectorCount *
-                    storage::FAT32_FORMAT_SECTOR_SIZE;
+                const uint32_t logicalSectorSize =
+                    disk.capabilities.logicalSectorSize;
+                const uint64_t bytes = logicalSectorSize != 0 &&
+                    part.sectorCount <= UINT64_MAX / logicalSectorSize
+                    ? part.sectorCount * logicalSectorSize : 0;
                 formatSizePrecise(bytes, capacityText, sizeof(capacityText));
                 strcopy(line, "Capacity: ", sizeof(line));
                 strappend(line, capacityText, sizeof(line));
@@ -7979,7 +7985,11 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                 disk_manager_u64(m_formatResult.geometry.clusterSizeBytes,
                     number, sizeof(number));
                 strappend(line, number, sizeof(line));
-                strappend(line, " bytes) | 512-byte sectors", sizeof(line));
+                strappend(line, " bytes) | Logical sector size: ",
+                    sizeof(line));
+                disk_manager_u64(logicalSectorSize, number, sizeof(number));
+                strappend(line, number, sizeof(line));
+                strappend(line, " bytes", sizeof(line));
                 disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
                     line, kText);
                 lineY += 17;

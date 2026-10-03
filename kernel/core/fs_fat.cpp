@@ -86,6 +86,11 @@ static bool is_fat_partition_type(uint8_t partType)
            partType == 0x0B || partType == 0x0C || partType == 0x0E;
 }
 
+static bool supported_fat32_sector_size(uint32_t sectorSize)
+{
+    return sectorSize == 512u || sectorSize == 4096u;
+}
+
 static uint32_t read_le32(const uint8_t* bytes)
 {
     return static_cast<uint32_t>(bytes[0]) |
@@ -434,15 +439,16 @@ static bool try_mount_fat32_boot_sector(const block::BlockEndpoint& endpoint,
     // The driver addresses block logical sectors directly. The BPB byte size
     // must match that geometry or offsets would silently address the wrong bytes.
     if (endpoint.kind == block::ENDPOINT_INVALID ||
+        !supported_fat32_sector_size(endpoint.sectorSize) ||
         bpb->bytesPerSector != endpoint.sectorSize) return false;
-    if (bpb->bytesPerSector < 512 || bpb->bytesPerSector > 4096) return false;
     if (bootSector[510] != 0x55 || bootSector[511] != 0xAA) return false;
     if (bpb->sectorsPerCluster == 0 ||
         (bpb->sectorsPerCluster & (bpb->sectorsPerCluster - 1u)) != 0 ||
         static_cast<uint64_t>(bpb->bytesPerSector) *
             bpb->sectorsPerCluster > 32768u) return false;
     if (bpb->reservedSectors == 0) return false;
-    if (bpb->numFATs == 0 || (bpb->extFlags & 0x0080u) != 0 ||
+    if (bpb->numFATs == 0 || bpb->numFATs > 2 ||
+        (bpb->extFlags & 0x0080u) != 0 ||
         bpb->fsVersion != 0 || bpb->rootEntryCount != 0 ||
         bpb->totalSectors16 != 0 || bpb->fatSize16 != 0) return false;
     if (bpb->fatSize32 == 0) {
@@ -620,7 +626,7 @@ bool test_probe_fat32_volume(uint8_t blockDevIndex, uint64_t partitionOffset,
     memzero(&out, sizeof(out));
     block::BlockEndpoint endpoint = {};
     if (!block::make_device_endpoint(blockDevIndex, endpoint) ||
-        endpoint.sectorSize < 512 || endpoint.sectorSize > 4096 ||
+        !supported_fat32_sector_size(endpoint.sectorSize) ||
         block::read_endpoint(endpoint, partitionOffset, 1, s_secBuf) !=
             block::BLOCK_OK) return false;
     return try_mount_fat32_boot_sector(endpoint, partitionOffset, out,
@@ -1094,7 +1100,8 @@ uint8_t mount(uint8_t blockDevIndex)
 uint8_t mount_endpoint(const block::BlockEndpoint& endpoint)
 {
     if (endpoint.kind == block::ENDPOINT_INVALID ||
-        endpoint.sectorSize != 512 || endpoint.totalSectors == 0 ||
+        !supported_fat32_sector_size(endpoint.sectorSize) ||
+        endpoint.totalSectors == 0 ||
         s_volumeCount >= MAX_FAT_VOLUMES) return 0xFF;
     uint8_t index = 0xFF;
     for (uint8_t i = 0; i < MAX_FAT_VOLUMES; ++i) {

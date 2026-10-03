@@ -72,6 +72,7 @@ struct FakeDisk {
     block::Status failWriteStatus;
     uint32_t removeOnWriteAtCall;
     uint64_t corruptWriteLbaOnce;
+    uint32_t corruptWriteByteOffset;
     bool corruptWritePending;
     uint32_t reads;
     uint32_t writes;
@@ -105,7 +106,8 @@ struct FakeDisk {
           failFlushStatus(block::BLOCK_ERR_IO),
           failWriteAtCall1(0), failWriteAtCall2(0),
           failWriteStatus(block::BLOCK_ERR_IO), removeOnWriteAtCall(0),
-          corruptWriteLbaOnce(UINT64_MAX), corruptWritePending(false),
+          corruptWriteLbaOnce(UINT64_MAX), corruptWriteByteOffset(16),
+          corruptWritePending(false),
           reads(0), writes(0), writeAttempts(0), flushes(0),
           registryIndex(0xFF), registrationId(0), removeOnVerifyRead(false), removeOnFlush(false), removeOnFlushAt(0),
           removed(false), attemptMountDuringScanRead(false),
@@ -256,6 +258,12 @@ block::Status fake_write(uint8_t driverId, uint64_t lba, uint32_t count,
                 std::vector<uint8_t>& stored =
                     disk->sparseSectors[sectorLba];
                 stored.assign(sectorBytes, sectorBytes + disk->sectorSize);
+                if (disk->corruptWritePending &&
+                    sectorLba == disk->corruptWriteLbaOnce &&
+                    disk->corruptWriteByteOffset < disk->sectorSize) {
+                    stored[disk->corruptWriteByteOffset] ^= 0x01;
+                    disk->corruptWritePending = false;
+                }
             }
         }
         ++disk->writes;
@@ -267,8 +275,9 @@ block::Status fake_write(uint8_t driverId, uint64_t lba, uint32_t count,
         return block::BLOCK_ERR_IO;
     std::memcpy(disk->bytes.data() + offset, buffer, bytes);
     ++disk->writes;
-    if (disk->corruptWritePending && lba == disk->corruptWriteLbaOnce) {
-        disk->bytes[offset + 16] ^= 0x01;
+    if (disk->corruptWritePending && lba == disk->corruptWriteLbaOnce &&
+        disk->corruptWriteByteOffset < disk->sectorSize) {
+        disk->bytes[offset + disk->corruptWriteByteOffset] ^= 0x01;
         disk->corruptWritePending = false;
     }
     return block::BLOCK_OK;
@@ -844,6 +853,23 @@ bool parse_first_partition(uint8_t index, storage::PartitionTableModel& table,
     return true;
 }
 
+bool setup_4kn_mbr_fixture(FakeDisk& disk, uint8_t& index,
+                           storage::PartitionTableModel& table,
+                           storage::PartitionEntry& partition)
+{
+    static const uint32_t partitionStartLba = 256u;
+    static const uint32_t partitionSectorCount = 70000u;
+    if (disk.sectorSize != 4096 ||
+        disk.sectorCount <= partitionStartLba + partitionSectorCount)
+        return false;
+    set_mbr_signature(disk);
+    set_mbr_partition(disk, 0, 0, 0x0C, partitionStartLba,
+                      partitionSectorCount);
+    index = register_fake(disk, true, true, true, false, 0,
+                          1024u * 1024u);
+    return index != 0xFF && parse_first_partition(index, table, partition);
+}
+
 uint32_t usb_le32(const uint8_t* bytes)
 {
     return static_cast<uint32_t>(bytes[0]) |
@@ -1241,53 +1267,63 @@ bool independent_verify_fat32(const FakeDisk& disk,
                               const char* expectedLabel,
                               uint32_t expectedVolumeId)
 {
-    uint8_t boot[512], backup[512], fsinfo[512], backupFsinfo[512];
-    uint8_t firstFat[512], secondFat[512], root[512];
-    if (disk.sectorSize != 512 ||
-        !fake_sector_copy(disk, partition.startLba, boot)) return false;
-    if (read_u16(boot + 11) != 512 || boot[13] == 0 ||
-        read_u16(boot + 14) != 32 || boot[16] != 2 ||
-        read_u16(boot + 17) != 0 || read_u16(boot + 19) != 0 ||
-        read_u16(boot + 22) != 0 || read_u32(boot + 36) == 0 ||
-        read_u32(boot + 44) != 2 || read_u16(boot + 48) != 1 ||
-        read_u16(boot + 50) != 6 || read_u32(boot + 67) != expectedVolumeId ||
-        std::memcmp(boot + 82, "FAT32   ", 8) != 0 ||
+    if (!storage::fat32_format_sector_size_supported(disk.sectorSize))
+        return false;
+    std::vector<uint8_t> boot(disk.sectorSize), backup(disk.sectorSize);
+    std::vector<uint8_t> fsinfo(disk.sectorSize), backupFsinfo(disk.sectorSize);
+    std::vector<uint8_t> firstFat(disk.sectorSize), secondFat(disk.sectorSize);
+    std::vector<uint8_t> root(disk.sectorSize);
+    if (!fake_sector_copy(disk, partition.startLba, boot.data())) return false;
+    if (read_u16(boot.data() + 11) != disk.sectorSize || boot[13] == 0 ||
+        boot[13] > storage::FAT32_FORMAT_MAX_CLUSTER_BYTES / disk.sectorSize ||
+        read_u16(boot.data() + 14) != 32 || boot[16] != 2 ||
+        read_u16(boot.data() + 17) != 0 || read_u16(boot.data() + 19) != 0 ||
+        read_u16(boot.data() + 22) != 0 || read_u32(boot.data() + 36) == 0 ||
+        read_u32(boot.data() + 44) != 2 || read_u16(boot.data() + 48) != 1 ||
+        read_u16(boot.data() + 50) != 6 ||
+        read_u32(boot.data() + 67) != expectedVolumeId ||
+        read_u32(boot.data() + 28) != partition.startLba ||
+        std::memcmp(boot.data() + 82, "FAT32   ", 8) != 0 ||
         boot[510] != 0x55 || boot[511] != 0xAA ||
-        read_u32(boot + 32) != partition.sectorCount) return false;
+        read_u32(boot.data() + 32) != partition.sectorCount ||
+        !std::all_of(boot.begin() + 512, boot.end(),
+                     [](uint8_t v) { return v == 0; })) return false;
     char normalized[11];
     if (storage::normalize_fat32_volume_label(expectedLabel, normalized) !=
             storage::FAT32_FORMAT_READY ||
-        std::memcmp(boot + 71, normalized, 11) != 0) return false;
-    const uint32_t fatSize = read_u32(boot + 36);
+        std::memcmp(boot.data() + 71, normalized, 11) != 0) return false;
+    const uint32_t fatSize = read_u32(boot.data() + 36);
     const uint32_t firstData = 32 + 2 * fatSize;
     const uint32_t clusters =
-        (read_u32(boot + 32) - firstData) / boot[13];
+        (read_u32(boot.data() + 32) - firstData) / boot[13];
     if (clusters < storage::FAT32_FORMAT_MIN_CLUSTERS ||
         clusters > storage::FAT32_FORMAT_MAX_CLUSTERS) return false;
-    if (!fake_sector_copy(disk, partition.startLba + 6, backup) ||
-        !fake_sector_copy(disk, partition.startLba + 1, fsinfo) ||
-        !fake_sector_copy(disk, partition.startLba + 7, backupFsinfo) ||
-        std::memcmp(boot, backup, 512) != 0) return false;
-    if (read_u32(fsinfo) != 0x41615252u ||
-        read_u32(fsinfo + 484) != 0x61417272u ||
-        read_u32(fsinfo + 488) != clusters - 1 ||
-        read_u32(fsinfo + 492) != 3 ||
-        read_u32(fsinfo + 508) != 0xAA550000u ||
-        std::memcmp(fsinfo, backupFsinfo, 512) != 0) return false;
-    if (!fake_sector_copy(disk, partition.startLba + 32, firstFat) ||
+    if (!fake_sector_copy(disk, partition.startLba + 6, backup.data()) ||
+        !fake_sector_copy(disk, partition.startLba + 1, fsinfo.data()) ||
+        !fake_sector_copy(disk, partition.startLba + 7, backupFsinfo.data()) ||
+        boot != backup) return false;
+    if (read_u32(fsinfo.data()) != 0x41615252u ||
+        read_u32(fsinfo.data() + 484) != 0x61417272u ||
+        read_u32(fsinfo.data() + 488) != clusters - 1 ||
+        read_u32(fsinfo.data() + 492) != 3 ||
+        read_u32(fsinfo.data() + 508) != 0xAA550000u ||
+        fsinfo != backupFsinfo ||
+        !std::all_of(fsinfo.begin() + 512, fsinfo.end(),
+                     [](uint8_t v) { return v == 0; })) return false;
+    if (!fake_sector_copy(disk, partition.startLba + 32, firstFat.data()) ||
         !fake_sector_copy(disk, partition.startLba + 32 + fatSize,
-                          secondFat) ||
-        read_u32(firstFat) != 0x0FFFFFF8u ||
-        read_u32(firstFat + 4) != 0x0FFFFFFFu ||
-        read_u32(firstFat + 8) != 0x0FFFFFFFu ||
-        !std::all_of(firstFat + 12, firstFat + 512,
+                          secondFat.data()) ||
+        read_u32(firstFat.data()) != 0x0FFFFFF8u ||
+        read_u32(firstFat.data() + 4) != 0x0FFFFFFFu ||
+        read_u32(firstFat.data() + 8) != 0x0FFFFFFFu ||
+        !std::all_of(firstFat.begin() + 12, firstFat.end(),
                      [](uint8_t v) { return v == 0; }) ||
-        std::memcmp(firstFat, secondFat, 512) != 0 ||
-        !fake_sector_copy(disk, partition.startLba + firstData, root))
+        firstFat != secondFat ||
+        !fake_sector_copy(disk, partition.startLba + firstData, root.data()))
         return false;
     if (normalized[0] == ' ') {
         if (root[0] != 0) return false;
-    } else if (std::memcmp(root, normalized, 11) != 0 || root[11] != 0x08 ||
+    } else if (std::memcmp(root.data(), normalized, 11) != 0 || root[11] != 0x08 ||
                root[32] != 0) {
         return false;
     }
@@ -1303,6 +1339,68 @@ uint32_t independent_crc32(const uint8_t* bytes, size_t length)
             crc = (crc >> 1) ^ ((crc & 1u) ? 0xEDB88320u : 0u);
     }
     return crc ^ 0xFFFFFFFFu;
+}
+
+bool independent_verify_gpt_4kn(const FakeDisk& disk,
+                                const storage::PartitionEntry& partition)
+{
+    if (disk.sectorSize != 4096 || partition.partitionNumber == 0 ||
+        partition.partitionNumber > 128) return false;
+    std::vector<uint8_t> mbr(4096), primary(4096), backup(4096);
+    if (!fake_sector_copy(disk, 0, mbr.data()) ||
+        !fake_sector_copy(disk, 1, primary.data()) ||
+        !fake_sector_copy(disk, disk.sectorCount - 1, backup.data())) return false;
+    if (mbr[510] != 0x55 || mbr[511] != 0xAA || mbr[450] != 0xEE ||
+        read_u32(mbr.data() + 454) != 1 ||
+        read_u32(mbr.data() + 458) != disk.sectorCount - 1 ||
+        !std::all_of(mbr.begin() + 512, mbr.end(),
+                     [](uint8_t byte) { return byte == 0; })) return false;
+    const uint64_t lastLba = disk.sectorCount - 1;
+    if (std::memcmp(primary.data(), "EFI PART", 8) != 0 ||
+        std::memcmp(backup.data(), "EFI PART", 8) != 0 ||
+        read_u64(primary.data() + 24) != 1 ||
+        read_u64(primary.data() + 32) != lastLba ||
+        read_u64(backup.data() + 24) != lastLba ||
+        read_u64(backup.data() + 32) != 1 ||
+        read_u64(primary.data() + 72) != 2 ||
+        read_u64(backup.data() + 72) != lastLba - 4 ||
+        read_u32(primary.data() + 80) != 128 ||
+        read_u32(primary.data() + 84) != 128 ||
+        read_u32(backup.data() + 80) != 128 ||
+        read_u32(backup.data() + 84) != 128) return false;
+    uint8_t header[4096];
+    std::memcpy(header, primary.data(), sizeof(header));
+    uint32_t expectedCrc = read_u32(header + 16);
+    write_u32(header + 16, 0);
+    if (independent_crc32(header, 92) != expectedCrc) return false;
+    std::memcpy(header, backup.data(), sizeof(header));
+    expectedCrc = read_u32(header + 16);
+    write_u32(header + 16, 0);
+    if (independent_crc32(header, 92) != expectedCrc) return false;
+
+    std::vector<uint8_t> primaryEntries(128u * 128u), backupEntries(128u * 128u);
+    for (uint32_t i = 0; i < 4; ++i) {
+        if (!fake_sector_copy(disk, 2 + i,
+                primaryEntries.data() + i * 4096u) ||
+            !fake_sector_copy(disk, lastLba - 4 + i,
+                backupEntries.data() + i * 4096u)) return false;
+    }
+    if (primaryEntries != backupEntries ||
+        independent_crc32(primaryEntries.data(), primaryEntries.size()) !=
+            read_u32(primary.data() + 88) ||
+        independent_crc32(backupEntries.data(), backupEntries.size()) !=
+            read_u32(backup.data() + 88)) return false;
+    const uint8_t* entry = primaryEntries.data() +
+        static_cast<size_t>(partition.partitionNumber - 1u) * 128u;
+    static const uint8_t basicDataType[16] = {
+        0xA2, 0xA0, 0xD0, 0xEB, 0xE5, 0xB9, 0x33, 0x44,
+        0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26, 0x99, 0xC7
+    };
+    return std::memcmp(entry, basicDataType, sizeof(basicDataType)) == 0 &&
+        read_u64(entry + 32) == partition.startLba &&
+        read_u64(entry + 40) == partition.endLba &&
+        partition.startLba % 256u == 0 &&
+        partition.endLba < lastLba - 4;
 }
 
 bool independent_verify_gpt_create(const FakeDisk& disk,
@@ -1592,41 +1690,59 @@ bool verify_gpt_bytes(FakeDisk& disk, const storage::InitializeDiskPlan& plan)
     const uint64_t arrayBytes = storage::INITIALIZE_GPT_ARRAY_BYTES;
     const uint64_t arraySectors = arrayBytes / sectorSize;
     const uint64_t backupArrayLba = backupHeaderLba - arraySectors;
-    const uint8_t* mbr = sector(disk, 0);
-    const uint8_t* primary = sector(disk, 1);
-    const uint8_t* backup = sector(disk, backupHeaderLba);
-    const uint8_t* primaryArray = sector(disk, 2);
-    const uint8_t* backupArray = sector(disk, backupArrayLba);
+    std::vector<uint8_t> mbr(sectorSize), primary(sectorSize),
+        backup(sectorSize), primaryArray(static_cast<size_t>(arrayBytes)),
+        backupArray(static_cast<size_t>(arrayBytes));
+    if (!fake_sector_copy(disk, 0, mbr.data()) ||
+        !fake_sector_copy(disk, 1, primary.data()) ||
+        !fake_sector_copy(disk, backupHeaderLba, backup.data())) return false;
+    for (uint64_t i = 0; i < arraySectors; ++i) {
+        if (!fake_sector_copy(disk, 2 + i,
+                primaryArray.data() + static_cast<size_t>(i * sectorSize)) ||
+            !fake_sector_copy(disk, backupArrayLba + i,
+                backupArray.data() + static_cast<size_t>(i * sectorSize)))
+            return false;
+    }
     if (mbr[510] != 0x55 || mbr[511] != 0xAA || mbr[450] != 0xEE ||
-        read_u32(mbr + 454) != 1 || read_u32(mbr + 458) != disk.sectorCount - 1)
+        read_u32(mbr.data() + 454) != 1 ||
+        read_u32(mbr.data() + 458) != disk.sectorCount - 1)
         return false;
-    if (std::memcmp(primary, "EFI PART", 8) != 0 ||
-        std::memcmp(backup, "EFI PART", 8) != 0) return false;
-    if (read_u64(primary + 24) != 1 || read_u64(primary + 32) != backupHeaderLba ||
-        read_u64(backup + 24) != backupHeaderLba || read_u64(backup + 32) != 1)
+    if (sectorSize == 4096 &&
+        (mbr[4094] == 0x55 || mbr[4095] == 0xAA ||
+         !std::all_of(mbr.begin() + 512, mbr.end(),
+                      [](uint8_t byte) { return byte == 0; }))) return false;
+    if (std::memcmp(primary.data(), "EFI PART", 8) != 0 ||
+        std::memcmp(backup.data(), "EFI PART", 8) != 0) return false;
+    if (read_u64(primary.data() + 24) != 1 ||
+        read_u64(primary.data() + 32) != backupHeaderLba ||
+        read_u64(backup.data() + 24) != backupHeaderLba ||
+        read_u64(backup.data() + 32) != 1)
         return false;
-    if (read_u64(primary + 40) != plan.firstUsableLba ||
-        read_u64(primary + 48) != plan.lastUsableLba ||
-        read_u64(backup + 40) != plan.firstUsableLba ||
-        read_u64(backup + 48) != plan.lastUsableLba) return false;
-    if (read_u64(primary + 72) != 2 || read_u64(backup + 72) != backupArrayLba ||
-        read_u32(primary + 80) != storage::INITIALIZE_GPT_ENTRY_COUNT ||
-        read_u32(primary + 84) != storage::INITIALIZE_GPT_ENTRY_SIZE)
+    if (read_u64(primary.data() + 40) != plan.firstUsableLba ||
+        read_u64(primary.data() + 48) != plan.lastUsableLba ||
+        read_u64(backup.data() + 40) != plan.firstUsableLba ||
+        read_u64(backup.data() + 48) != plan.lastUsableLba) return false;
+    if (read_u64(primary.data() + 72) != 2 ||
+        read_u64(backup.data() + 72) != backupArrayLba ||
+        read_u32(primary.data() + 80) != storage::INITIALIZE_GPT_ENTRY_COUNT ||
+        read_u32(primary.data() + 84) != storage::INITIALIZE_GPT_ENTRY_SIZE)
         return false;
-    if (std::memcmp(primary + 56, plan.diskGuid, 16) != 0 ||
-        std::memcmp(backup + 56, plan.diskGuid, 16) != 0) return false;
-    if (!std::all_of(primaryArray, primaryArray + arrayBytes,
+    if (std::memcmp(primary.data() + 56, plan.diskGuid, 16) != 0 ||
+        std::memcmp(backup.data() + 56, plan.diskGuid, 16) != 0) return false;
+    if (!std::all_of(primaryArray.begin(), primaryArray.end(),
                      [](uint8_t byte) { return byte == 0; }) ||
-        !std::all_of(backupArray, backupArray + arrayBytes,
+        !std::all_of(backupArray.begin(), backupArray.end(),
                      [](uint8_t byte) { return byte == 0; })) return false;
-    if (read_u32(primary + 88) != storage::crc32(primaryArray, arrayBytes) ||
-        read_u32(backup + 88) != storage::crc32(backupArray, arrayBytes)) return false;
+    if (read_u32(primary.data() + 88) != storage::crc32(
+            primaryArray.data(), arrayBytes) ||
+        read_u32(backup.data() + 88) != storage::crc32(
+            backupArray.data(), arrayBytes)) return false;
     uint8_t headerCopy[4096];
-    std::memcpy(headerCopy, primary, sectorSize);
+    std::memcpy(headerCopy, primary.data(), sectorSize);
     const uint32_t primaryHeaderCrc = read_u32(headerCopy + 16);
     write_u32(headerCopy + 16, 0);
     if (primaryHeaderCrc != storage::crc32(headerCopy, 92)) return false;
-    std::memcpy(headerCopy, backup, sectorSize);
+    std::memcpy(headerCopy, backup.data(), sectorSize);
     const uint32_t backupHeaderCrc = read_u32(headerCopy + 16);
     write_u32(headerCopy + 16, 0);
     return backupHeaderCrc == storage::crc32(headerCopy, 92);
@@ -4908,8 +5024,12 @@ int main()
           storage::execute_initialize_disk(initializePlan, initializeResult) ==
               storage::INITIALIZE_DISK_SUCCESS &&
           initializeResult.finalDetectedState == storage::DISK_STATE_VALID_MBR &&
-          initializeMbr4Kn.bytes[510] == 0x55 && initializeMbr4Kn.bytes[511] == 0xAA,
-          "MBR initialization handles a 4096-byte logical-sector device");
+          initializeMbr4Kn.bytes[510] == 0x55 && initializeMbr4Kn.bytes[511] == 0xAA &&
+          initializeMbr4Kn.bytes[4094] == 0 && initializeMbr4Kn.bytes[4095] == 0 &&
+          std::all_of(initializeMbr4Kn.bytes.begin() + 512,
+              initializeMbr4Kn.bytes.begin() + 4096,
+              [](uint8_t byte) { return byte == 0; }),
+          "4Kn MBR initializes the full LBA0 while keeping the signature at bytes 510–511");
     unregister_fake(index, initializeMbr4Kn);
 
     FakeDisk existingMbr(512, 128);
@@ -6514,9 +6634,71 @@ int main()
                   minimumBoundary) == storage::FAT32_FORMAT_READY &&
               minimumBoundary.clusterCount == storage::FAT32_FORMAT_MIN_CLUSTERS,
               "FAT32 minimum cluster-count boundary is exact");
-        check(storage::calculate_fat32_format_geometry(2048, 70000, 4096,
+        storage::Fat32FormatGeometry minimum4Kn = {};
+        check(storage::calculate_fat32_format_geometry(256, 65684, 4096,
+                  rejectedGeometry) == storage::FAT32_FORMAT_TOO_SMALL &&
+              storage::calculate_fat32_format_geometry(256, 65685, 4096,
+                  minimum4Kn) == storage::FAT32_FORMAT_READY &&
+              minimum4Kn.clusterCount == storage::FAT32_FORMAT_MIN_CLUSTERS &&
+              minimum4Kn.sectorsPerCluster == 1 &&
+              minimum4Kn.clusterSizeBytes == 4096 &&
+              minimum4Kn.reservedSectorCount == 32 &&
+              minimum4Kn.hiddenSectors == 256,
+              "4Kn FAT32 minimum geometry retains 32 reserved sectors and represents hidden logical sectors");
+        const uint64_t fourKnSectorCounts[] = {
+            (3ull * 1024u * 1024u * 1024u) / 4096u,
+            (4ull * 1024u * 1024u * 1024u) / 4096u,
+            (10ull * 1024u * 1024u * 1024u) / 4096u,
+            (32ull * 1024u * 1024u * 1024u) / 4096u,
+            (64ull * 1024u * 1024u * 1024u) / 4096u,
+            (128ull * 1024u * 1024u * 1024u) / 4096u,
+        };
+        bool fourKnGeometriesValid = true;
+        storage::Fat32FormatGeometry fourGiBGeometry = {};
+        for (uint64_t sectors : fourKnSectorCounts) {
+            storage::Fat32FormatGeometry geometry = {};
+            const storage::Fat32FormatStatus status =
+                storage::calculate_fat32_format_geometry(256, sectors,
+                    4096, geometry);
+            const uint64_t fatCapacityEntries =
+                static_cast<uint64_t>(geometry.fatSizeSectors) * 4096u / 4u;
+            fourKnGeometriesValid = fourKnGeometriesValid &&
+                status == storage::FAT32_FORMAT_READY &&
+                geometry.bytesPerSector == 4096 &&
+                geometry.sectorsPerCluster >= 1 &&
+                geometry.sectorsPerCluster <= 8 &&
+                (geometry.sectorsPerCluster &
+                    (geometry.sectorsPerCluster - 1u)) == 0 &&
+                geometry.clusterSizeBytes <= 32768u &&
+                geometry.clusterSizeBytes ==
+                    geometry.sectorsPerCluster * 4096u &&
+                geometry.clusterCount >= storage::FAT32_FORMAT_MIN_CLUSTERS &&
+                geometry.clusterCount <= storage::FAT32_FORMAT_MAX_CLUSTERS &&
+                geometry.firstDataSector == 32u +
+                    2u * geometry.fatSizeSectors &&
+                fatCapacityEntries >=
+                    static_cast<uint64_t>(geometry.clusterCount) + 2u;
+            if (sectors == fourKnSectorCounts[1])
+                fourGiBGeometry = geometry;
+        }
+        check(fourKnGeometriesValid &&
+              fourGiBGeometry.clusterCount > 120000u &&
+              storage::calculate_fat32_format_geometry(256, 70000, 1024,
+                  rejectedGeometry) == storage::FAT32_FORMAT_UNSUPPORTED_SECTOR_SIZE &&
+              storage::calculate_fat32_format_geometry(256, 70000, 2048,
                   rejectedGeometry) == storage::FAT32_FORMAT_UNSUPPORTED_SECTOR_SIZE,
-              "FAT32 geometry rejects 4Kn sectors");
+              "4Kn 3–128 GiB layouts honor FAT capacity and a 32 KiB cluster ceiling; untested 1/2 KiB formats stay unsupported");
+        storage::Fat32FormatGeometry eightTiBGeometry = {};
+        const uint64_t eightTiBSectors =
+            (8ull * 1024u * 1024u * 1024u * 1024u) / 4096u;
+        check(storage::calculate_fat32_format_geometry(256,
+                  eightTiBSectors, 4096, eightTiBGeometry) ==
+                  storage::FAT32_FORMAT_READY &&
+              eightTiBGeometry.totalSectors == eightTiBSectors &&
+              eightTiBGeometry.clusterCount <=
+                  storage::FAT32_FORMAT_MAX_CLUSTERS &&
+              eightTiBGeometry.clusterSizeBytes <= 32768u,
+              "largest tested representable 4Kn geometry stays within BPB sector and FAT32 cluster limits");
         check(storage::calculate_fat32_format_geometry(2048, 10000000, 512,
                   rejectedGeometry) == storage::FAT32_FORMAT_READY &&
               rejectedGeometry.sectorsPerCluster == 64 &&
@@ -6887,6 +7069,287 @@ int main()
                   distantEntryOffset) == allocated,
               "distant FAT-sector writes and the final high entry are mirrored");
         unregister_fake(largeIndex, largeSparse);
+    }
+
+    {
+        block::init();
+        vfs::test_clear_mounts();
+        fs_fat::init();
+        FakeDisk fourKnMbr(4096, 70400, false);
+        std::memset(sector(fourKnMbr, 255), 0xA7, 4096);
+        std::memset(sector(fourKnMbr, 70256), 0x5C, 4096);
+        uint8_t fourKnIndex = 0xFF;
+        storage::PartitionTableModel fourKnTable = {};
+        storage::PartitionEntry fourKnPartition = {};
+        const bool fourKnParsed = setup_4kn_mbr_fixture(fourKnMbr,
+            fourKnIndex, fourKnTable, fourKnPartition);
+        fourKnMbr.writeLog.clear();
+        storage::Fat32FormatRequest fourKnRequest = make_format_request(
+            fourKnIndex, fourKnPartition, "DM24", 0xD2400001u);
+        storage::Fat32FormatResult fourKnFormat = {};
+        const storage::Fat32FormatStatus fourKnFormatStatus = fourKnParsed
+            ? storage::format_fat32_partition(fourKnRequest, fourKnFormat)
+            : storage::FAT32_FORMAT_INVALID_REQUEST;
+        const bool fourKnWritesBounded = std::all_of(
+            fourKnMbr.writeLog.begin(), fourKnMbr.writeLog.end(),
+            [&](const FakeWriteRecord& write) {
+                return write.count == 1 && write.lba >= fourKnPartition.startLba &&
+                    write.lba <= fourKnPartition.endLba;
+            });
+        check(fourKnParsed && fourKnPartition.startLba == 256 &&
+              fourKnPartition.sectorCount == 70000 &&
+              fourKnFormatStatus == storage::FAT32_FORMAT_SUCCESS &&
+              fourKnFormat.geometry.bytesPerSector == 4096 &&
+              fourKnFormat.geometry.sectorsPerCluster <= 8 &&
+              fourKnFormat.geometry.clusterSizeBytes <= 32768 &&
+              fourKnFormat.geometry.hiddenSectors == 256 &&
+              fourKnFormat.scanCoverageComplete &&
+              fourKnFormat.scanZeroVerifiedSectors == 70000 &&
+              fourKnFormat.scanBytesRead == 70000ull * 4096u &&
+              fourKnFormat.scanReadRequests == 274 &&
+              fourKnFormat.scanLargestRequestBytes == 1024u * 1024u &&
+              fourKnFormat.scanSmallestRequestBytes < 1024u * 1024u &&
+              fourKnFormat.rollbackRecordBytes <=
+                  storage::FAT32_FORMAT_ROLLBACK_MAX_BYTES &&
+              fourKnWritesBounded &&
+              independent_verify_fat32(fourKnMbr, fourKnPartition,
+                                        "DM24", 0xD2400001u),
+              "4Kn MBR FAT32 format scans every sector in 1 MiB batches, emits BPB/backup/FSInfo/FAT copies, and stays inside the partition");
+        check(std::all_of(sector(fourKnMbr, 255),
+                          sector(fourKnMbr, 255) + 4096,
+                          [](uint8_t byte) { return byte == 0xA7; }) &&
+              std::all_of(sector(fourKnMbr, 70256),
+                          sector(fourKnMbr, 70256) + 4096,
+                          [](uint8_t byte) { return byte == 0x5C; }),
+              "4Kn formatter leaves full-sector canaries before and after its MBR partition unchanged");
+
+        fs_fat::FATVolume fourKnVolume = {};
+        const bool fourKnProbed = fourKnFormatStatus ==
+                storage::FAT32_FORMAT_SUCCESS &&
+            fs_fat::test_probe_fat32_volume(fourKnIndex,
+                fourKnPartition.startLba, fourKnVolume);
+        bool boundaryEntriesPass = fourKnProbed;
+        const uint32_t boundaryClusters[] = {127u, 128u, 1023u, 1024u, 65525u};
+        const uint64_t fatStart = fourKnPartition.startLba +
+            fourKnVolume.reservedSectors;
+        std::vector<uint64_t> touchedFatSectors;
+        for (uint32_t cluster : boundaryClusters) {
+            const uint64_t entryBytes = static_cast<uint64_t>(cluster) * 4u;
+            const uint64_t sectorIndex = entryBytes / 4096u;
+            const uint64_t primaryLba = fatStart + sectorIndex;
+            const uint64_t mirrorLba = primaryLba +
+                fourKnVolume.fatSizeSectors;
+            (void)sector(fourKnMbr, primaryLba);
+            (void)sector(fourKnMbr, mirrorLba);
+            sector(fourKnMbr, primaryLba)[2040] = 0xA5;
+            sector(fourKnMbr, mirrorLba)[2040] = 0xA5;
+            if (std::find(touchedFatSectors.begin(), touchedFatSectors.end(),
+                          sectorIndex) == touchedFatSectors.end())
+                touchedFatSectors.push_back(sectorIndex);
+        }
+        for (uint32_t cluster : boundaryClusters) {
+            const uint32_t value = 0x0FFFFFFFu;
+            if (fs_fat::test_write_fat32_entry(fourKnVolume, cluster, value) !=
+                    block::BLOCK_OK ||
+                fs_fat::test_fat32_next_cluster(fourKnVolume, cluster) != value)
+                boundaryEntriesPass = false;
+        }
+        for (uint64_t sectorIndex : touchedFatSectors) {
+            std::vector<uint8_t> primary(4096), mirror(4096);
+            if (!fake_sector_copy(fourKnMbr, fatStart + sectorIndex,
+                    primary.data()) ||
+                !fake_sector_copy(fourKnMbr,
+                    fatStart + fourKnVolume.fatSizeSectors + sectorIndex,
+                    mirror.data()) || primary != mirror ||
+                primary[2040] != 0xA5) boundaryEntriesPass = false;
+        }
+        check(fourKnProbed && fourKnVolume.bytesPerSector == 4096 &&
+              boundaryEntriesPass,
+              "4Kn FAT entry writes cross 512-byte and 4096-byte offsets, reach the last entry and next sector, preserve canaries, and mirror complete sectors");
+
+        if (fourKnProbed) {
+            uint8_t* boot = sector(fourKnMbr, fourKnPartition.startLba);
+            write_u16(boot + 11, 512);
+        }
+        fs_fat::FATVolume mismatched4k = {};
+        check(fourKnProbed && !fs_fat::test_probe_fat32_volume(
+                  fourKnIndex, fourKnPartition.startLba, mismatched4k),
+              "4Kn block geometry rejects an otherwise valid FAT32 BPB that says 512 bytes per sector");
+        unregister_fake(fourKnIndex, fourKnMbr);
+
+        FakeDisk fourKnFailures(4096, 70400, false);
+        uint8_t failureIndex = 0xFF;
+        storage::PartitionTableModel failureTable = {};
+        storage::PartitionEntry failurePartition = {};
+        const bool failureFixture = setup_4kn_mbr_fixture(fourKnFailures,
+            failureIndex, failureTable, failurePartition);
+        fourKnFailures.failReadAtLba = failurePartition.startLba + 256u;
+        fourKnFailures.failReadAtLbaMinCount = 1;
+        storage::Fat32FormatRequest failureRequest = make_format_request(
+            failureIndex, failurePartition, "", 0xD2400002u);
+        storage::Fat32FormatResult scanFailureResult = {};
+        const storage::Fat32FormatStatus scanFailureStatus = failureFixture
+            ? storage::format_fat32_partition(failureRequest, scanFailureResult)
+            : storage::FAT32_FORMAT_INVALID_REQUEST;
+        check(failureFixture && scanFailureStatus != storage::FAT32_FORMAT_SUCCESS &&
+              !scanFailureResult.scanCoverageComplete &&
+              scanFailureResult.scanZeroVerifiedSectors < 70000,
+              "4Kn blank scan stops and reports incomplete coverage after an injected sector read failure");
+        fourKnFailures.failReadAtLba = UINT64_MAX;
+        fourKnFailures.failReadAtLbaMinCount = 0;
+        sector(fourKnFailures, failurePartition.startLba + 512u)[3000] = 0x81;
+        storage::Fat32FormatResult nonzeroResult = {};
+        const storage::Fat32FormatStatus nonzeroStatus = failureFixture
+            ? storage::format_fat32_partition(failureRequest, nonzeroResult)
+            : storage::FAT32_FORMAT_INVALID_REQUEST;
+        check(failureFixture && nonzeroStatus != storage::FAT32_FORMAT_SUCCESS &&
+              nonzeroResult.scanFirstNonzeroRelativeLba == 512u &&
+              nonzeroResult.scanFirstNonzeroByteOffset == 3000u &&
+              fourKnFailures.writeLog.empty(),
+              "4Kn blank scan reports the exact logical LBA and byte offset of nonzero data before any write");
+        unregister_fake(failureIndex, fourKnFailures);
+
+        bool injectedWriteFailuresTruthful = true;
+        bool injectedWritesBounded = true;
+        for (uint32_t failedCall = 1; failedCall <= 7; ++failedCall) {
+            FakeDisk failedDisk(4096, 70400, false);
+            uint8_t failedIndex = 0xFF;
+            storage::PartitionTableModel failedTable = {};
+            storage::PartitionEntry failedPartition = {};
+            bool setup = setup_4kn_mbr_fixture(failedDisk, failedIndex,
+                failedTable, failedPartition);
+            failedDisk.failWriteAtCall1 = failedCall;
+            storage::Fat32FormatRequest failedRequest = make_format_request(
+                failedIndex, failedPartition, "DM24", 0xD2400100u + failedCall);
+            storage::Fat32FormatResult failedResult = {};
+            const storage::Fat32FormatStatus failedStatus = setup
+                ? storage::format_fat32_partition(failedRequest, failedResult)
+                : storage::FAT32_FORMAT_INVALID_REQUEST;
+            bool rollbackTargetsZero = true;
+            const uint64_t firstFat = failedPartition.startLba + 32u;
+            const uint64_t mirrorFat = firstFat +
+                failedResult.geometry.fatSizeSectors;
+            const uint64_t rootSector = failedPartition.startLba +
+                failedResult.geometry.firstDataSector;
+            const uint64_t metadataLbas[] = {
+                failedPartition.startLba,
+                failedPartition.startLba + 1,
+                failedPartition.startLba + 6,
+                failedPartition.startLba + 7,
+                firstFat,
+                mirrorFat,
+                rootSector
+            };
+            for (uint64_t lba : metadataLbas) {
+                std::vector<uint8_t> bytes(4096);
+                if (!fake_sector_copy(failedDisk, lba, bytes.data()) ||
+                    !std::all_of(bytes.begin(), bytes.end(),
+                                 [](uint8_t byte) { return byte == 0; }))
+                    rollbackTargetsZero = false;
+            }
+            const bool writesInside = std::all_of(failedDisk.writeLog.begin(),
+                failedDisk.writeLog.end(), [&](const FakeWriteRecord& write) {
+                    return write.count == 1 &&
+                        write.lba >= failedPartition.startLba &&
+                        write.lba <= failedPartition.endLba;
+                });
+            injectedWriteFailuresTruthful = injectedWriteFailuresTruthful &&
+                setup && failedStatus != storage::FAT32_FORMAT_SUCCESS &&
+                failedResult.rollbackRecordBytes <=
+                    storage::FAT32_FORMAT_ROLLBACK_MAX_BYTES &&
+                rollbackTargetsZero;
+            injectedWritesBounded = injectedWritesBounded && writesInside;
+            unregister_fake(failedIndex, failedDisk);
+        }
+        check(injectedWriteFailuresTruthful && injectedWritesBounded,
+              "4Kn failure injection at every formatter metadata write restores complete KnownZero sectors and keeps rollback records bounded");
+
+        FakeDisk fourKnFlushFailure(4096, 70400, false);
+        uint8_t flushFailureIndex = 0xFF;
+        storage::PartitionTableModel flushFailureTable = {};
+        storage::PartitionEntry flushFailurePartition = {};
+        const bool flushFailureFixture = setup_4kn_mbr_fixture(
+            fourKnFlushFailure, flushFailureIndex, flushFailureTable,
+            flushFailurePartition);
+        fourKnFlushFailure.failFlushAtCall2 = 2;
+        storage::Fat32FormatRequest flushFailureRequest = make_format_request(
+            flushFailureIndex, flushFailurePartition, "DM24", 0xD2400180u);
+        storage::Fat32FormatResult flushFailureResult = {};
+        const storage::Fat32FormatStatus flushFailureStatus =
+            flushFailureFixture ? storage::format_fat32_partition(
+                flushFailureRequest, flushFailureResult)
+                : storage::FAT32_FORMAT_INVALID_REQUEST;
+        std::vector<uint8_t> flushRestoredSector(4096);
+        const bool flushRestoredFullSector = fake_sector_copy(
+            fourKnFlushFailure, flushFailurePartition.startLba + 1,
+            flushRestoredSector.data()) &&
+            std::all_of(flushRestoredSector.begin(), flushRestoredSector.end(),
+                        [](uint8_t byte) { return byte == 0; });
+        check(flushFailureFixture && flushFailureStatus !=
+                  storage::FAT32_FORMAT_SUCCESS &&
+              flushFailureResult.rollbackVerificationPassed &&
+              flushFailureResult.rollbackRecordBytes <=
+                  storage::FAT32_FORMAT_ROLLBACK_MAX_BYTES &&
+              flushRestoredFullSector,
+              "4Kn post-write flush failure rolls back and verifies the full logical metadata sector");
+        unregister_fake(flushFailureIndex, fourKnFlushFailure);
+
+        FakeDisk fourKnVerifyFailure(4096, 70400, false);
+        uint8_t verifyIndex = 0xFF;
+        storage::PartitionTableModel verifyTable = {};
+        storage::PartitionEntry verifyPartition = {};
+        const bool verifyFixture = setup_4kn_mbr_fixture(fourKnVerifyFailure,
+            verifyIndex, verifyTable, verifyPartition);
+        fourKnVerifyFailure.corruptWriteLbaOnce = verifyPartition.startLba + 1;
+        fourKnVerifyFailure.corruptWriteByteOffset = 3000;
+        fourKnVerifyFailure.corruptWritePending = true;
+        storage::Fat32FormatRequest verifyRequest = make_format_request(
+            verifyIndex, verifyPartition, "DM24", 0xD2400200u);
+        storage::Fat32FormatResult verifyFailureResult = {};
+        const storage::Fat32FormatStatus verifyFailureStatus = verifyFixture
+            ? storage::format_fat32_partition(verifyRequest,
+                                               verifyFailureResult)
+            : storage::FAT32_FORMAT_INVALID_REQUEST;
+        std::vector<uint8_t> restoredFsInfo(4096);
+        const bool fullSectorRestored = fake_sector_copy(fourKnVerifyFailure,
+            verifyPartition.startLba + 1, restoredFsInfo.data()) &&
+            std::all_of(restoredFsInfo.begin(), restoredFsInfo.end(),
+                        [](uint8_t byte) { return byte == 0; });
+        check(verifyFixture && verifyFailureStatus !=
+                  storage::FAT32_FORMAT_SUCCESS &&
+              verifyFailureResult.rollbackVerificationPassed &&
+              verifyFailureResult.rollbackRecordBytes <=
+                  storage::FAT32_FORMAT_ROLLBACK_MAX_BYTES &&
+              fullSectorRestored,
+              "4Kn verification corruption beyond byte 512 is detected and rollback verifies the entire 4096-byte sector");
+        unregister_fake(verifyIndex, fourKnVerifyFailure);
+
+        FakeDisk mismatched512(512, 80000);
+        set_mbr_signature(mismatched512);
+        set_mbr_partition(mismatched512, 0, 0, 0x0C, 2048, 70000);
+        const uint8_t mismatched512Index = register_fake(mismatched512,
+            true, true, true);
+        storage::PartitionTableModel mismatched512Table = {};
+        storage::PartitionEntry mismatched512Partition = {};
+        const bool mismatched512PartitionFound = parse_first_partition(
+            mismatched512Index, mismatched512Table, mismatched512Partition);
+        storage::Fat32FormatRequest mismatched512Request = make_format_request(
+            mismatched512Index, mismatched512Partition, "", 0xD2400300u);
+        storage::Fat32FormatResult mismatched512Format = {};
+        const storage::Fat32FormatStatus mismatched512Status =
+            mismatched512PartitionFound
+                ? storage::format_fat32_partition(mismatched512Request,
+                                                   mismatched512Format)
+                : storage::FAT32_FORMAT_INVALID_REQUEST;
+        if (mismatched512Status == storage::FAT32_FORMAT_SUCCESS)
+            write_u16(sector(mismatched512,
+                mismatched512Partition.startLba) + 11, 4096);
+        fs_fat::FATVolume mismatched512Volume = {};
+        check(mismatched512Status == storage::FAT32_FORMAT_SUCCESS &&
+              !fs_fat::test_probe_fat32_volume(mismatched512Index,
+                  mismatched512Partition.startLba, mismatched512Volume),
+              "512-byte block geometry rejects a FAT32 BPB that claims 4096-byte logical sectors");
+        unregister_fake(mismatched512Index, mismatched512);
     }
 
     {
@@ -7557,8 +8020,8 @@ int main()
     }
 
     {
-        FakeDisk fourKn(4096, 100000, false);
-        const uint8_t index = register_fake(fourKn, true, true, true);
+        FakeDisk unsupported(2048, 100000, false);
+        const uint8_t index = register_fake(unsupported, true, true, true);
         storage::PartitionEntry partition = {};
         partition.partitionNumber = 1;
         partition.startLba = 2048;
@@ -7576,9 +8039,9 @@ int main()
         storage::Fat32FormatResult result = {};
         check(storage::probe_fat32_format_partition(request, result) ==
                   storage::FAT32_FORMAT_UNSUPPORTED_SECTOR_SIZE &&
-              fourKn.writeLog.empty(),
-              "4Kn format preflight returns the explicit 512-byte-only blocker before table or data writes");
-        unregister_fake(index, fourKn);
+              unsupported.writeLog.empty(),
+              "FAT32 format preflight keeps unsupported 2048-byte sectors blocked before data writes");
+        unregister_fake(index, unsupported);
     }
 
     {
@@ -8593,6 +9056,334 @@ int main()
           ramdisk::disk_count() == 0,
           "destroying a stale image cannot unregister a replacement block device");
     unregister_fake(unrelatedIndex, unrelated);
+
+    {
+        block::init();
+        vfs::test_clear_mounts();
+        fs_fat::init();
+        const uint64_t diskSectors = 640ull * 1024u * 1024u / 4096u;
+        FakeDisk fourKnGpt(4096u, diskSectors, false);
+        const uint8_t index = register_fake(fourKnGpt, true, true, true,
+            false, 0, 1024u * 1024u);
+        storage::InitializeDiskRequest initializeRequest =
+            make_initialize_request(index, storage::PARTITION_SCHEME_GPT);
+        storage::InitializeDiskPlan initializePlan = {};
+        storage::InitializeDiskResult initializeResult = {};
+        const storage::InitializeDiskStatus initializePrepared =
+            storage::prepare_initialize_disk(initializeRequest,
+                initializePlan, initializeResult);
+        const storage::InitializeDiskStatus initializeStatus =
+            initializePrepared == storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION
+                ? storage::execute_initialize_disk(initializePlan,
+                    initializeResult)
+                : initializePrepared;
+        check(index != 0xFF &&
+              initializePrepared == storage::INITIALIZE_DISK_READY_FOR_CONFIRMATION &&
+              initializePlan.logicalSectorSize == 4096 &&
+              initializePlan.entryArraySectors == 4 &&
+              initializePlan.firstUsableLba == 256 &&
+              initializeStatus == storage::INITIALIZE_DISK_SUCCESS &&
+              verify_gpt_bytes(fourKnGpt, initializePlan),
+              "4Kn GPT initialization independently verifies PMBR bytes 510–511, LBA1 header, four-sector entry arrays, backup placement, and CRCs");
+
+        storage::UnallocatedRegion regions[
+            storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        const bool haveRegions = index != 0xFF && current_regions(index,
+            fourKnGpt, regions, regionCount) && regionCount != 0;
+        const uint64_t requestedBytes = 620ull * 1024u * 1024u;
+        storage::CreatePartitionRequest createRequest = make_create_request(
+            index, storage::PARTITION_SCHEME_GPT,
+            haveRegions ? regions[0] : storage::UnallocatedRegion{},
+            requestedBytes, false, 0xD4);
+        storage::CreatePartitionResult createResult = {};
+        const storage::CreatePartitionStatus createStatus = haveRegions
+            ? storage::create_partition(createRequest, createResult)
+            : storage::CREATE_PARTITION_INVALID_REQUEST;
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = createResult.createdPartition;
+        const bool gptValidAfterCreate = createStatus ==
+                storage::CREATE_PARTITION_SUCCESS &&
+            storage::parse_partition_table(index, table) &&
+            table.state == storage::DISK_STATE_VALID_GPT &&
+            table.primaryGptValid && table.backupGptValid &&
+            independent_verify_gpt_4kn(fourKnGpt, partition) &&
+            partition.startLba == 256 && partition.startLba % 256u == 0 &&
+            static_cast<uint64_t>(partition.sectorCount) * 4096u >=
+                600ull * 1024u * 1024u;
+        check(gptValidAfterCreate,
+              "4Kn GPT partition creation preserves 1 MiB alignment at 256 LBAs, exact bounds, mirrored arrays, and independent CRC validation");
+        if (gptValidAfterCreate) {
+            std::memset(sector(fourKnGpt, partition.startLba - 1), 0xA7, 4096);
+            std::memset(sector(fourKnGpt, partition.endLba + 1), 0x5C, 4096);
+        }
+        storage::Fat32FormatRequest formatRequest = make_format_request(
+            index, partition, "DM24", 0xD2402400u);
+        fourKnGpt.writeLog.clear();
+        storage::Fat32FormatResult formatResult = {};
+        const storage::Fat32FormatStatus formatStatus = gptValidAfterCreate
+            ? storage::format_fat32_partition(formatRequest, formatResult)
+            : storage::FAT32_FORMAT_INVALID_REQUEST;
+        uint64_t writeSectors = 0;
+        bool writeBoundsValid = true;
+        for (const FakeWriteRecord& write : fourKnGpt.writeLog) {
+            writeSectors += write.count;
+            if (write.count != 1 || write.lba < partition.startLba ||
+                write.lba > partition.endLba) writeBoundsValid = false;
+        }
+        const bool gptFormatValid = formatStatus == storage::FAT32_FORMAT_SUCCESS &&
+            formatResult.geometry.bytesPerSector == 4096 &&
+            formatResult.geometry.sectorsPerCluster <= 8 &&
+            formatResult.geometry.clusterSizeBytes <= 32768 &&
+            formatResult.geometry.clusterCount > 65525 &&
+            formatResult.geometry.hiddenSectors == partition.startLba &&
+            formatResult.scanCoverageComplete &&
+            formatResult.scanZeroVerifiedSectors == partition.sectorCount &&
+            formatResult.scanBytesRead ==
+                static_cast<uint64_t>(partition.sectorCount) * 4096u &&
+            formatResult.scanReadRequests == partition.sectorCount / 256u &&
+            formatResult.scanLargestRequestBytes == 1024u * 1024u &&
+            formatResult.scanSmallestRequestBytes == 1024u * 1024u &&
+            formatResult.sectorsWritten == writeSectors &&
+            formatResult.rollbackRecordBytes <=
+                storage::FAT32_FORMAT_ROLLBACK_MAX_BYTES &&
+            writeBoundsValid && independent_verify_fat32(fourKnGpt,
+                partition, "DM24", 0xD2402400u);
+        check(gptFormatValid,
+              "4Kn GPT volume above 600 MiB receives full-sector FAT32 metadata, complete 1 MiB blank scan, bounded rollback, and independent BPB/FSInfo/FAT/root checks");
+
+        fs_fat::FATVolume highClusterVolume = {};
+        const bool highClusterVolumeValid = gptFormatValid &&
+            fs_fat::test_probe_fat32_volume(index, partition.startLba,
+                                            highClusterVolume);
+        const uint32_t highCluster = 70001u;
+        const uint64_t highEntryBytes = static_cast<uint64_t>(highCluster) * 4u;
+        const uint64_t highFatSector = partition.startLba +
+            highClusterVolume.reservedSectors + highEntryBytes / 4096u;
+        const uint32_t highEntryOffset = static_cast<uint32_t>(
+            highEntryBytes % 4096u);
+        const uint64_t highMirrorSector = highFatSector +
+            highClusterVolume.fatSizeSectors;
+        if (highClusterVolumeValid &&
+            highCluster < highClusterVolume.totalDataClusters + 2u) {
+            sector(fourKnGpt, highFatSector)[2000] = 0x6B;
+            sector(fourKnGpt, highMirrorSector)[2000] = 0x6B;
+        }
+        const block::Status highEntryWrite = highClusterVolumeValid
+            ? fs_fat::test_write_fat32_entry(highClusterVolume,
+                highCluster, 0x0FFFFFFFu)
+            : block::BLOCK_ERR_INVALID;
+        std::vector<uint8_t> highFatPrimary(4096), highFatMirror(4096);
+        const bool highClusterMirrored = highEntryWrite == block::BLOCK_OK &&
+            fake_sector_copy(fourKnGpt, highFatSector,
+                highFatPrimary.data()) &&
+            fake_sector_copy(fourKnGpt, highMirrorSector,
+                highFatMirror.data()) && highFatPrimary == highFatMirror &&
+            read_u32(highFatPrimary.data() + highEntryOffset) == 0x0FFFFFFFu &&
+            highFatPrimary[2000] == 0x6B &&
+            fs_fat::test_fat32_next_cluster(highClusterVolume, highCluster) ==
+                0x0FFFFFFFu;
+        check(highClusterVolumeValid && highClusterMirrored,
+              "4Kn FAT entry above cluster 70000 maps through geometry into matching full-sector FAT mirrors with canaries intact");
+
+        std::vector<uint8_t> canaryBefore(4096), canaryAfter(4096);
+        std::memset(canaryBefore.data(), 0xA7, canaryBefore.size());
+        std::memset(canaryAfter.data(), 0x5C, canaryAfter.size());
+        auto canariesIntact = [&]() {
+            std::vector<uint8_t> before(4096), after(4096);
+            return fake_sector_copy(fourKnGpt, partition.startLba - 1,
+                        before.data()) &&
+                fake_sector_copy(fourKnGpt, partition.endLba + 1,
+                        after.data()) && before == canaryBefore &&
+                after == canaryAfter;
+        };
+
+        block::BlockDevice registered = {};
+        const bool identityCaptured = block::copy_device(index, registered);
+        const vfs::PartitionMountResult mountResult = gptFormatValid &&
+                identityCaptured
+            ? vfs::mount_partition_detailed("/mnt/dm24", index,
+                partition.partitionNumber, registered.registrationId,
+                &partition)
+            : vfs::PartitionMountResult{0xFF,
+                vfs::PARTITION_MOUNT_DEVICE_UNAVAILABLE};
+        const uint8_t mountIndex = mountResult.mountIndex;
+        const fs_fat::FATVolume* mountedVolume = mountResult.error ==
+                vfs::PARTITION_MOUNT_OK
+            ? fs_fat::get_volume(vfs::get_mount_by_index(mountIndex)->fsVolumeIndex)
+            : nullptr;
+        const uint8_t rootIterator = mountResult.error == vfs::PARTITION_MOUNT_OK
+            ? vfs::opendir("/mnt/dm24") : 0xFF;
+        bool rootEnumerated = rootIterator != 0xFF;
+        if (rootIterator != 0xFF) {
+            vfs::DirEntry entry = {};
+            while (vfs::readdir(rootIterator, &entry)) { }
+            vfs::closedir(rootIterator);
+        }
+        check(mountResult.error == vfs::PARTITION_MOUNT_OK &&
+              mountedVolume && mountedVolume->type == fs_fat::FAT_TYPE_FAT32 &&
+              mountedVolume->bytesPerSector == 4096 && rootEnumerated &&
+              vfs::mount_identity_valid(mountIndex),
+              "4Kn GPT partition mounts through its ordinary identity-bound view and immediately supports root enumeration");
+
+        const vfs::Status mkdirStatus = gptFormatValid &&
+                mountResult.error == vfs::PARTITION_MOUNT_OK
+            ? vfs::mkdir("/mnt/dm24/dense") : vfs::VFS_ERR_NOT_MOUNT;
+        bool denseCreated = mkdirStatus == vfs::VFS_OK;
+        for (uint32_t i = 0; i < 140 && denseCreated; ++i) {
+            char path[96];
+            std::snprintf(path, sizeof(path),
+                "/mnt/dm24/dense/F%07u.BIN", i);
+            const uint8_t value = static_cast<uint8_t>(i * 17u + 3u);
+            denseCreated = vfs::create_file(path, &value, 1) == 1;
+        }
+        uint32_t denseFiles = 0;
+        const uint8_t denseIterator = denseCreated
+            ? vfs::opendir("/mnt/dm24/dense") : 0xFF;
+        bool denseEnumerated = denseIterator != 0xFF;
+        if (denseIterator != 0xFF) {
+            vfs::DirEntry entry = {};
+            while (vfs::readdir(denseIterator, &entry)) {
+                if (entry.name[0] != '.' &&
+                    entry.type == vfs::FILE_TYPE_REGULAR) ++denseFiles;
+            }
+            vfs::closedir(denseIterator);
+        }
+        check(denseCreated && denseEnumerated && denseFiles == 140,
+              "4Kn directory enumeration crosses the former 512-byte boundaries and the 4096-byte sector boundary with all 140 entries");
+
+        std::vector<uint8_t> partialExpected(20000), partialReadback;
+        for (size_t i = 0; i < partialExpected.size(); ++i)
+            partialExpected[i] = static_cast<uint8_t>(i * 23u + 0x41u);
+        const int32_t partialCreated = vfs::create_file(
+            "/mnt/dm24/partial.bin", partialExpected.data(),
+            static_cast<uint32_t>(partialExpected.size()));
+        const uint8_t partialHandle = partialCreated ==
+                static_cast<int32_t>(partialExpected.size())
+            ? vfs::open("/mnt/dm24/partial.bin", vfs::OPEN_RDWR) : 0xFF;
+        const uint32_t partialLengths[] = {1u, 31u, 512u, 513u, 4095u,
+                                            4096u, 4097u};
+        const uint32_t partialOffsets[] = {1u, 511u, 512u, 4095u,
+                                            4096u, 4097u, 8193u};
+        bool partialWrites = partialHandle != 0xFF;
+        for (size_t i = 0; i < 7 && partialWrites; ++i) {
+            std::vector<uint8_t> patchBytes(partialLengths[i]);
+            for (size_t j = 0; j < patchBytes.size(); ++j)
+                patchBytes[j] = static_cast<uint8_t>(i * 31u + j * 7u);
+            if (vfs::seek(partialHandle, partialOffsets[i],
+                    static_cast<vfs::SeekOrigin>(0)) !=
+                    vfs::VFS_OK ||
+                vfs::write(partialHandle, patchBytes.data(),
+                    static_cast<uint32_t>(patchBytes.size())) !=
+                    static_cast<int32_t>(patchBytes.size())) {
+                partialWrites = false;
+                break;
+            }
+            std::memcpy(partialExpected.data() + partialOffsets[i],
+                        patchBytes.data(), patchBytes.size());
+        }
+        if (partialHandle != 0xFF &&
+            vfs::close(partialHandle) != vfs::VFS_OK) partialWrites = false;
+        auto readFile = [](const char* path, std::vector<uint8_t>& output) {
+            const uint8_t handle = vfs::open(path, vfs::OPEN_READ);
+            if (handle == 0xFF) return false;
+            const int64_t fileBytes = vfs::file_size(handle);
+            if (fileBytes < 0 || fileBytes > 1024 * 1024) {
+                (void)vfs::close(handle);
+                return false;
+            }
+            output.assign(static_cast<size_t>(fileBytes), 0);
+            size_t offset = 0;
+            bool valid = true;
+            while (offset < output.size()) {
+                const uint32_t amount = static_cast<uint32_t>(
+                    std::min<size_t>(4096, output.size() - offset));
+                const int32_t read = vfs::read(handle, output.data() + offset,
+                                                amount);
+                if (read <= 0) { valid = false; break; }
+                offset += static_cast<size_t>(read);
+            }
+            return vfs::close(handle) == vfs::VFS_OK && valid &&
+                offset == output.size();
+        };
+        const bool partialReadExact = partialWrites && readFile(
+            "/mnt/dm24/partial.bin", partialReadback) &&
+            partialReadback == partialExpected;
+
+        std::vector<uint8_t> multiCluster(96u * 1024u), multiReadback;
+        for (size_t i = 0; i < multiCluster.size(); ++i)
+            multiCluster[i] = static_cast<uint8_t>(
+                i * 37u + (i >> 8) * 13u + 0x5Au);
+        const int32_t multiWritten = vfs::create_file("/mnt/dm24/multi.bin",
+            multiCluster.data(), static_cast<uint32_t>(multiCluster.size()));
+        const bool multiReadExact = multiWritten ==
+                static_cast<int32_t>(multiCluster.size()) &&
+            readFile("/mnt/dm24/multi.bin", multiReadback) &&
+            multiReadback == multiCluster;
+        check(partialReadExact && multiReadExact && canariesIntact(),
+              "4Kn VFS preserves canaries through unaligned 1/31/512/513/4095/4096/4097-byte writes and exact multi-cluster file I/O");
+
+        const vfs::Status unmounted = vfs::unmount("/mnt/dm24");
+        const bool removed = unmounted == vfs::VFS_OK &&
+            unregister_fake(index, fourKnGpt);
+        fs_fat::init();
+        vfs::test_clear_mounts();
+        const uint8_t restartedIndex = removed
+            ? register_fake(fourKnGpt, true, true, true, false, 0,
+                1024u * 1024u)
+            : 0xFF;
+        storage::PartitionTableModel restartedTable = {};
+        storage::PartitionEntry restartedPartition = {};
+        const bool restartedIdentity = restartedIndex != 0xFF &&
+            parse_first_partition(restartedIndex, restartedTable,
+                                  restartedPartition) &&
+            restartedTable.state == storage::DISK_STATE_VALID_GPT &&
+            restartedPartition.startLba == partition.startLba &&
+            restartedPartition.endLba == partition.endLba;
+        block::BlockDevice restartedDevice = {};
+        const bool restartedDeviceCaptured = restartedIndex != 0xFF &&
+            block::copy_device(restartedIndex, restartedDevice);
+        const vfs::PartitionMountResult restartedMount = restartedIdentity &&
+                restartedDeviceCaptured
+            ? vfs::mount_partition_detailed("/mnt/dm24", restartedIndex,
+                restartedPartition.partitionNumber,
+                restartedDevice.registrationId, &restartedPartition)
+            : vfs::PartitionMountResult{0xFF,
+                vfs::PARTITION_MOUNT_DEVICE_UNAVAILABLE};
+        std::vector<uint8_t> partialAfterRestart, multiAfterRestart;
+        uint32_t denseFilesAfterRestart = 0;
+        const uint8_t restartedDenseIterator = restartedMount.error ==
+                vfs::PARTITION_MOUNT_OK
+            ? vfs::opendir("/mnt/dm24/dense") : 0xFF;
+        bool denseDirectoryPersisted = restartedDenseIterator != 0xFF;
+        if (restartedDenseIterator != 0xFF) {
+            vfs::DirEntry entry = {};
+            while (vfs::readdir(restartedDenseIterator, &entry)) {
+                if (entry.name[0] != '.' &&
+                    entry.type == vfs::FILE_TYPE_REGULAR)
+                    ++denseFilesAfterRestart;
+            }
+            vfs::closedir(restartedDenseIterator);
+        }
+        const bool restartFilesPersisted = restartedMount.error ==
+                vfs::PARTITION_MOUNT_OK &&
+            denseDirectoryPersisted && denseFilesAfterRestart == 140 &&
+            readFile("/mnt/dm24/partial.bin", partialAfterRestart) &&
+            partialAfterRestart == partialExpected &&
+            readFile("/mnt/dm24/multi.bin", multiAfterRestart) &&
+            multiAfterRestart == multiCluster &&
+            vfs::mount_identity_valid(restartedMount.mountIndex) &&
+            canariesIntact();
+        const vfs::Status restartedUnmount = restartedMount.error ==
+                vfs::PARTITION_MOUNT_OK
+            ? vfs::unmount("/mnt/dm24") : vfs::VFS_ERR_INVALID;
+        check(removed && restartedIdentity &&
+              restartedMount.error == vfs::PARTITION_MOUNT_OK &&
+              restartFilesPersisted && restartedUnmount == vfs::VFS_OK,
+              "4Kn GPT/FAT32 unmount, device-registration restart, partition-identity remount, and persistent exact reads all pass");
+        if (restartedIndex != 0xFF)
+            unregister_fake(restartedIndex, fourKnGpt);
+    }
 
     run_usb_mass_storage_tests();
 

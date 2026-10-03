@@ -1,13 +1,14 @@
 <#
 .SYNOPSIS
-    Runs the DM15 private AHCI proof or one full AHCI storage lifecycle.
+    Runs DM15/DM22 AHCI proofs or the DM24 4Kn FAT32 storage proof.
 
 .DESCRIPTION
-    Creates an isolated ESP copy and a fresh sparse 600 MiB raw secondary image, then
-    boots QEMU q35 with the built-in ICH9 AHCI controller. The PrivateWrite
-    stage validates and restores one zero-filled sector while shared writes
-    are disabled. The Lifecycle stage runs the common GPT/FAT32/VFS workflow,
-    reboots the same image, and independently verifies the result.
+    Creates an isolated ESP copy and a fresh disposable raw secondary image.
+    DM15/DM22 use Q35 ICH9 AHCI; DM24 uses PIIX3 UHCI USB mass storage with
+    4096-byte blocks because the QEMU ide-hd device class used by the AHCI
+    runner rejects 4Kn logical blocks. PrivateWrite validates and restores a zero-filled sector while
+    shared writes are disabled. Lifecycle runs GPT/FAT32/VFS, restarts the
+    same image, and independently verifies it.
 #>
 [CmdletBinding()]
 param(
@@ -27,6 +28,7 @@ param(
     [ValidateRange(0, 86400)]
     [int]$RediscoveryTimeoutSeconds = 0,
     [switch]$Dm22LargeProof,
+    [switch]$Dm24FourKnProof,
     [switch]$QemuDebug,
     [switch]$SkipBuild
 )
@@ -190,11 +192,9 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
     $port = Get-FreeLoopbackPort
     $arguments = @(
         "-drive", "if=pflash,format=raw,readonly=on,file=$OvmfFull",
-        "-machine", "q35,usb=off",
+        "-machine", $(if ($Dm24FourKnProof) { "pc,usb=off" } else { "q35,usb=off" }),
         "-drive", "if=none,id=dm15boot,format=raw,file=fat:rw:$EspPath",
         "-device", "ide-hd,drive=dm15boot,bus=ide.0",
-        "-drive", "if=none,id=dm15secondary,format=raw,file=$DiskPath",
-        "-device", "ide-hd,drive=dm15secondary,bus=ide.1",
         "-netdev", "user,id=net0",
         "-device", "e1000,netdev=net0",
         "-object", "rng-builtin,id=rng0",
@@ -204,6 +204,18 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
         "-monitor", "tcp:127.0.0.1:$port,server,nowait",
         "-rtc", "base=utc,clock=host", "-no-reboot"
     )
+    if ($Dm24FourKnProof) {
+        $arguments += @(
+            "-device", "piix3-usb-uhci,id=uhci",
+            "-drive", "if=none,id=dm24secondary,format=raw,file=$DiskPath",
+            "-device", "usb-storage,id=dm24disk,bus=uhci.0,drive=dm24secondary,removable=on,serial=DM24USB01,logical_block_size=4096,physical_block_size=4096,discard_granularity=4096"
+        )
+    } else {
+        $arguments += @(
+            "-drive", "if=none,id=dm15secondary,format=raw,file=$DiskPath",
+            "-device", "ide-hd,drive=dm15secondary,bus=ide.1"
+        )
+    }
     if ($QemuDebug) { $arguments += @("-d", "guest_errors,int,cpu_reset", "-D", $debugPath) }
     $process = Start-Process -FilePath $QemuFull -ArgumentList $arguments `
         -WorkingDirectory $Root -WindowStyle Hidden -PassThru `
@@ -229,7 +241,7 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
                 Stop-ProofQemu $process.Id $port $serialPath
                 throw "$RunName encountered a kernel fault; see $serialPath"
             }
-            if ($serial -match '(?m)^\[(?:DM22-QEMU|DM15-QEMU|DM9-QEMU)\] (?:private-proof=FAIL|lifecycle=FAIL|proof=BLOCKED|reboot-rediscovery=FAIL|initialize=FAIL|create-partition=FAIL|format-fat32=FAIL|large-volume=FAIL|allocation-hint=FAIL)') {
+            if ($serial -match '(?m)^\[(?:DM24-QEMU|DM22-QEMU|DM15-QEMU|DM9-QEMU)\] (?:private-proof=FAIL|lifecycle=FAIL|proof=BLOCKED|reboot-rediscovery=FAIL|initialize=FAIL|create-partition=FAIL|format-fat32=FAIL|large-volume=FAIL|allocation-hint=FAIL|geometry=FAIL)') {
                 $failureLine = $Matches[0]
                 Stop-ProofQemu $process.Id $port $serialPath
                 throw "$RunName reported '$failureLine'; see $serialPath"
@@ -247,11 +259,18 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
     throw "$RunName timed out or exited before '$SuccessMarker'. $stderrPath $serialPath"
 }
 
-if ($Dm22LargeProof -and $Stage -ne "Lifecycle") {
+if (($Dm22LargeProof -or $Dm24FourKnProof) -and $Stage -ne "Lifecycle") {
     throw "DM22 large FAT32 proof requires -Stage Lifecycle."
+}
+if ($Dm22LargeProof -and $Dm24FourKnProof) {
+    throw "Select only one of -Dm22LargeProof or -Dm24FourKnProof."
 }
 if ($Dm22LargeProof -and $DiskSizeBytes -lt [UInt64]::Parse("9663676416")) {
     throw "DM22 image must be at least 9 GiB so the GPT partition can exceed 8 GiB."
+}
+if ($Dm24FourKnProof -and ($DiskSizeBytes -lt [UInt64]::Parse("671088640") -or
+        ($DiskSizeBytes % 4096) -ne 0)) {
+    throw "DM24 image must be at least 640 MiB and aligned to 4096-byte logical sectors."
 }
 if (-not (Test-Path -LiteralPath $QemuExecutable)) { throw "QEMU was not found at $QemuExecutable" }
 if ($AttemptNumber -lt 1) { throw "AttemptNumber must be positive." }
@@ -260,7 +279,9 @@ $OvmfFull = (Resolve-Path -LiteralPath $OvmfCode).Path
 $EspFull = (Resolve-Path -LiteralPath $EspSource).Path
 $repoOut = [IO.Path]::GetFullPath((Join-Path $Root "out"))
 if (-not $WorkDir) {
-    $workLabel = if ($Dm22LargeProof) { "dm22-large-fat32" } else { "dm15-$($Stage.ToLowerInvariant())" }
+    $workLabel = if ($Dm24FourKnProof) { "dm24-4kn-fat32" }
+        elseif ($Dm22LargeProof) { "dm22-large-fat32" }
+        else { "dm15-$($Stage.ToLowerInvariant())" }
     $WorkDir = "out\$workLabel-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 }
 $WorkFull = [IO.Path]::GetFullPath((Join-Path $Root $WorkDir))
@@ -272,10 +293,14 @@ if (Test-Path -LiteralPath $WorkFull) {
     }
 } else { New-Item -ItemType Directory -Path $WorkFull -Force | Out-Null }
 
-$diskLabel = if ($Dm22LargeProof) { "secondary-large.raw" } else { "secondary-600m.raw" }
+$diskLabel = if ($Dm24FourKnProof) { "secondary-4kn-640m.raw" }
+    elseif ($Dm22LargeProof) { "secondary-large.raw" }
+    else { "secondary-600m.raw" }
 $DiskPath = Join-Path $WorkFull $diskLabel
 $EspPath = Join-Path $WorkFull "esp"
-$manifestName = if ($Dm22LargeProof) { "dm22-manifest.txt" } else { "dm15-manifest.txt" }
+$manifestName = if ($Dm24FourKnProof) { "dm24-manifest.txt" }
+    elseif ($Dm22LargeProof) { "dm22-manifest.txt" }
+    else { "dm15-manifest.txt" }
 $manifestPath = Join-Path $WorkFull $manifestName
 $activeBoot = $null
 
@@ -290,7 +315,9 @@ try {
             $objectPath = Join-Path $Root "kernel\build\amd64\obj\core\$object"
             if (Test-Path -LiteralPath $objectPath) { Remove-Item -LiteralPath $objectPath -Force }
         }
-        $flags = if ($Stage -eq "PrivateWrite") {
+        $flags = if ($Dm24FourKnProof) {
+            "-DGXOS_DM24_QEMU_FAT32_4KN_PROOF"
+        } elseif ($Stage -eq "PrivateWrite") {
             "-DGXOS_DM15_QEMU_AHCI_PROOF -DGXOS_DM15_AHCI_PRIVATE_PROOF"
         } else { "-DGXOS_DM15_QEMU_AHCI_PROOF" }
         if ($Dm22LargeProof) {
@@ -307,7 +334,7 @@ try {
         $kernelBuildExitCode = $LASTEXITCODE
         if ($kernelBuildExitCode -ne 0) {
             Get-Content -LiteralPath $kernelBuildLog -Tail 80
-            throw "DM15 $Stage kernel build failed; see $kernelBuildLog."
+            throw "DM proof $Stage kernel build failed; see $kernelBuildLog."
         }
         $msbuild = Find-MSBuild
         & $msbuild (Join-Path $Root "guideXOSBootLoader\guideXOSBootLoader.vcxproj") `
@@ -366,19 +393,30 @@ try {
     $qemuHash = (Get-FileHash -LiteralPath $QemuFull -Algorithm SHA256).Hash
     $ovmfHash = (Get-FileHash -LiteralPath $OvmfFull -Algorithm SHA256).Hash
     $qemuAtStart = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'")
-    $proofName = if ($Dm22LargeProof) { "DM22-LARGE-FAT32-AHCI" } else { "DM15-AHCI-$Stage" }
-    $manifestSchema = if ($Dm22LargeProof) { "DM22-LARGE-FAT32-1" } else { "DM19-TRANSPORT-1" }
-    $proofIdentity = if ($Dm22LargeProof) { "GUIDEXOS-DM22-QEMU-LargeFAT32" } else { "GUIDEXOS-DM15-QEMU-$Stage" }
+    $proofName = if ($Dm24FourKnProof) { "DM24-4KN-FAT32-USB" }
+        elseif ($Dm22LargeProof) { "DM22-LARGE-FAT32-AHCI" }
+        else { "DM15-AHCI-$Stage" }
+    $manifestSchema = if ($Dm24FourKnProof) { "DM24-4KN-FAT32-1" }
+        elseif ($Dm22LargeProof) { "DM22-LARGE-FAT32-1" }
+        else { "DM19-TRANSPORT-1" }
+    $proofIdentity = if ($Dm24FourKnProof) { "GUIDEXOS-DM24-QEMU-4KnFAT32" }
+        elseif ($Dm22LargeProof) { "GUIDEXOS-DM22-QEMU-LargeFAT32" }
+        else { "GUIDEXOS-DM15-QEMU-$Stage" }
     @(
         "proof=$proofName",
         "manifestSchema=$manifestSchema",
         "attemptNumber=$AttemptNumber",
         "timestampUtc=$([DateTime]::UtcNow.ToString('o'))",
         "bootMedium=isolated-ESP-directory-backend",
-        "machine=q35-usb-off-built-in-ICH9-AHCI",
+        "machine=$(if ($Dm24FourKnProof) { 'pc-usb-off' } else { 'q35-usb-off-built-in-ICH9-AHCI' })",
         "cpu=QEMU-default (no -cpu argument)",
-        "controller=ICH9-AHCI on Q35",
-        "controllerArguments=-machine q35,usb=off (built-in ICH9 AHCI)",
+        "controller=$(if ($Dm24FourKnProof) { 'PIIX3-UHCI' } else { 'ICH9-AHCI on Q35' })",
+        "controllerArguments=$(if ($Dm24FourKnProof) { '-machine pc,usb=off -device piix3-usb-uhci,id=uhci' } else { '-machine q35,usb=off (built-in ICH9 AHCI)' })",
+        "secondaryDeviceArguments=$(if ($Dm24FourKnProof) { 'usb-storage,logical_block_size=4096,physical_block_size=4096,discard_granularity=4096,serial=DM24USB01' } else { 'ide-hd defaults' })",
+        "secondaryTransport=$(if ($Dm24FourKnProof) { 'USB-MASS / SCSI READ CAPACITY' } else { 'AHCI / ATA IDENTIFY' })",
+        "secondaryLogicalSectorSize=$(if ($Dm24FourKnProof) { 4096 } else { 'transport-reported' })",
+        "secondaryPhysicalSectorSize=$(if ($Dm24FourKnProof) { '4096 configured in QEMU; physical geometry is not reported by USB mass storage' } else { 'transport-reported' })",
+        "secondaryCapacityLba=$(if ($Dm24FourKnProof) { [uint64]($DiskSizeBytes / 4096) } else { 'transport-reported' })",
         "accelerator=QEMU default (no -accel argument)",
         "bootloaderSha256=$bootHash",
         "kernelSha256=$kernelHash",
@@ -396,13 +434,13 @@ try {
         "storageCacheMode=QEMU default (cache option omitted from argv)",
         "uefiImagePath=$OvmfFull",
         "uefiSha256=$ovmfHash",
-        "secondaryPlacement=AHCI-port1",
-        "bootDevicePlacement=AHCI-port0",
+        "secondaryPlacement=$(if ($Dm24FourKnProof) { 'PIIX3-UHCI USB storage' } else { 'AHCI-port1' })",
+        "bootDevicePlacement=$(if ($Dm24FourKnProof) { 'PIIX IDE port0' } else { 'AHCI-port0' })",
         "physicalHostDisksPassedToQemu=none",
         "qemu=$qemuVersion",
         "qemuSha256=$qemuHash",
-        "timeoutPrivateOrFirstBootSeconds=$(if ($Dm22LargeProof) { 1800 } elseif ($FirstBootTimeoutSeconds -gt 0) { $FirstBootTimeoutSeconds } else { 300 })",
-        "timeoutRediscoveryBootSeconds=$(if ($Dm22LargeProof) { 300 } elseif ($RediscoveryTimeoutSeconds -gt 0) { $RediscoveryTimeoutSeconds } else { 180 })",
+        "timeoutPrivateOrFirstBootSeconds=$(if ($Dm22LargeProof) { 1800 } elseif ($Dm24FourKnProof -and $FirstBootTimeoutSeconds -gt 0) { $FirstBootTimeoutSeconds } elseif ($Dm24FourKnProof) { 2700 } elseif ($FirstBootTimeoutSeconds -gt 0) { $FirstBootTimeoutSeconds } else { 300 })",
+        "timeoutRediscoveryBootSeconds=$(if ($Dm22LargeProof) { 300 } elseif ($Dm24FourKnProof -and $RediscoveryTimeoutSeconds -gt 0) { $RediscoveryTimeoutSeconds } elseif ($Dm24FourKnProof) { 600 } elseif ($RediscoveryTimeoutSeconds -gt 0) { $RediscoveryTimeoutSeconds } else { 180 })",
         "hostQemuProcessesBefore=$($qemuAtStart.Count)",
         "hostQemuPidsBefore=$(($qemuAtStart | ForEach-Object { $_.ProcessId }) -join ',')"
     ) | Set-Content -LiteralPath $manifestPath -Encoding ascii
@@ -425,16 +463,24 @@ try {
             "serial=private-write-boot.serial.log"
         )
     } else {
-        $lifecycleMarker = if ($Dm22LargeProof) { "[DM22-QEMU] lifecycle=PASS" } else { "[DM15-QEMU] lifecycle=PASS" }
+        $lifecycleMarker = if ($Dm24FourKnProof) { "[DM24-QEMU] lifecycle=PASS" }
+            elseif ($Dm22LargeProof) { "[DM22-QEMU] lifecycle=PASS" }
+            else { "[DM15-QEMU] lifecycle=PASS" }
         $firstTimeout = if ($Dm22LargeProof) { 1800 }
+            elseif ($Dm24FourKnProof -and $FirstBootTimeoutSeconds -gt 0) { $FirstBootTimeoutSeconds }
+            elseif ($Dm24FourKnProof) { 2700 }
             elseif ($FirstBootTimeoutSeconds -gt 0) { $FirstBootTimeoutSeconds }
             else { 300 }
         $activeBoot = Start-ProofBoot "first-boot" $lifecycleMarker $EspPath $DiskPath $WorkFull $firstTimeout $manifestPath
         $firstSerial = $activeBoot.SerialPath
         Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
         $activeBoot = $null
-        $rediscoveryMarker = if ($Dm22LargeProof) { "[DM22-QEMU] reboot-rediscovery=PASS" } else { "[DM15-QEMU] reboot-rediscovery=PASS" }
+        $rediscoveryMarker = if ($Dm24FourKnProof) { "[DM24-QEMU] reboot-rediscovery=PASS" }
+            elseif ($Dm22LargeProof) { "[DM22-QEMU] reboot-rediscovery=PASS" }
+            else { "[DM15-QEMU] reboot-rediscovery=PASS" }
         $rediscoveryTimeout = if ($Dm22LargeProof) { 300 }
+            elseif ($Dm24FourKnProof -and $RediscoveryTimeoutSeconds -gt 0) { $RediscoveryTimeoutSeconds }
+            elseif ($Dm24FourKnProof) { 600 }
             elseif ($RediscoveryTimeoutSeconds -gt 0) { $RediscoveryTimeoutSeconds }
             else { 180 }
         $activeBoot = Start-ProofBoot "rediscovery-boot" $rediscoveryMarker $EspPath $DiskPath $WorkFull $rediscoveryTimeout $manifestPath
@@ -447,10 +493,14 @@ try {
             $PythonExecutable = $python.Source
         }
         $inspectionPath = Join-Path $WorkFull "disk-inspection.txt"
-        $verifier = if ($Dm22LargeProof) {
+        $verifier = if ($Dm24FourKnProof -or $Dm22LargeProof) {
             Join-Path $Root "scripts\verify-dm22-qemu-image.py"
         } else { Join-Path $Root "scripts\verify-dm9-qemu-image.py" }
-        $inspection = & $PythonExecutable $verifier $DiskPath 2>&1
+        if ($Dm24FourKnProof) {
+            $inspection = & $PythonExecutable $verifier $DiskPath --sector-size 4096 2>&1
+        } else {
+            $inspection = & $PythonExecutable $verifier $DiskPath 2>&1
+        }
         $inspection | Set-Content -LiteralPath $inspectionPath -Encoding utf8
         if ($LASTEXITCODE -ne 0) { throw "Independent raw-image verification failed; see $inspectionPath" }
         $finalActualBytes = if ($Dm22LargeProof) {
@@ -461,14 +511,16 @@ try {
             "secondaryFinalActualBytes=$(if ($Dm22LargeProof) { $finalActualBytes } else { 'not-recorded' })",
             "firstBootSerial=$([IO.Path]::GetFileName($firstSerial))",
             "rediscoverySerial=$([IO.Path]::GetFileName($rediscoverySerial))",
-            "result=PASS tier=$(if ($Dm22LargeProof) { 'DM22-large-FAT32-AHCI-high-cluster-96KiB-file-restart' } else { '2-full-lifecycle-and-restart-rediscovery' })",
+            "result=PASS tier=$(if ($Dm24FourKnProof) { 'DM24-4Kn-FAT32-USB-high-cluster-96KiB-file-restart' } elseif ($Dm22LargeProof) { 'DM22-large-FAT32-AHCI-high-cluster-96KiB-file-restart' } else { '2-full-lifecycle-and-restart-rediscovery' })",
             "failedStage=none",
             "writesOccurred=yes",
             "inspection=PASS read-only-GPT-FAT32-independent-verifier",
             "transportResult=PASS"
         )
     }
-    $passedProofName = if ($Dm22LargeProof) { "DM22 large FAT32 AHCI" } else { "DM15 $Stage" }
+    $passedProofName = if ($Dm24FourKnProof) { "DM24 4Kn FAT32 USB" }
+        elseif ($Dm22LargeProof) { "DM22 large FAT32 AHCI" }
+        else { "DM15 $Stage" }
     Write-Host "$passedProofName proof passed. Preserved artifacts: $WorkFull"
 } catch {
     $failureText = $_.Exception.Message -replace '[\r\n]+', ' '

@@ -69,7 +69,8 @@
 #include "include/kernel/virtio_rng.h"
 #if defined(GXOS_DM9_QEMU_STORAGE_PROOF) || \
     defined(GXOS_DM15_QEMU_AHCI_PROOF) || \
-    defined(GXOS_DM16_QEMU_NVME_PROOF)
+    defined(GXOS_DM16_QEMU_NVME_PROOF) || \
+    defined(GXOS_DM24_QEMU_FAT32_4KN_PROOF)
 #include "include/kernel/qemu_dm9_storage_proof.h"
 #endif
 #if defined(GXOS_DM12_QEMU_USB_PROOF)
@@ -1024,7 +1025,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         const bool mounted = mount_persistent_storage();
 #if defined(GXOS_DM9_QEMU_STORAGE_PROOF) || \
     defined(GXOS_DM15_QEMU_AHCI_PROOF) || \
-    defined(GXOS_DM16_QEMU_NVME_PROOF)
+    defined(GXOS_DM16_QEMU_NVME_PROOF) || \
+    defined(GXOS_DM24_QEMU_FAT32_4KN_PROOF)
         kernel::qemu_dm9_storage_proof::run(mounted);
 #endif
 #if defined(GXOS_DM12_QEMU_USB_PROOF)
