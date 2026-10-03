@@ -72,6 +72,16 @@ enum Fat32FormatStatus : uint8_t {
     FAT32_FORMAT_VERIFICATION_FAILED,
     FAT32_FORMAT_RESCAN_FAILED,
     FAT32_FORMAT_ROLLBACK_FAILED,
+    FAT32_FORMAT_REFORMAT_TARGET_UNSUPPORTED,
+    FAT32_FORMAT_REFORMAT_MARKER_FAILED,
+    FAT32_FORMAT_REFORMAT_INCOMPLETE,
+};
+
+enum Fat32ReformatState : uint8_t {
+    FAT32_REFORMAT_BEFORE_DESTRUCTIVE_COMMIT = 0,
+    FAT32_REFORMAT_IN_PROGRESS,
+    FAT32_REFORMAT_NEW_FILESYSTEM_WRITTEN_NOT_DURABLE,
+    FAT32_REFORMAT_DURABLE,
 };
 
 enum Fat32FormatStage : uint8_t {
@@ -109,6 +119,7 @@ enum Fat32ExistingState : uint8_t {
     FAT32_EXISTING_RECOGNIZED_FILESYSTEM,
     FAT32_EXISTING_AMBIGUOUS_DATA,
     FAT32_EXISTING_UNREADABLE,
+    FAT32_EXISTING_INTERRUPTED_REFORMAT,
 };
 
 enum Fat32FinalProbeState : uint8_t {
@@ -207,6 +218,21 @@ struct Fat32FormatResult {
     block::Status rollbackFlushStatus;
     bool rollbackVerificationPassed;
     bool finalStateUncertain;
+    // Quick Reformat has no rollback to the old filesystem. This state is
+    // monotonic once metadata writes begin and is separate from the blank
+    // KnownZero formatter's rollback result.
+    Fat32ReformatState reformatState;
+    bool reformatRetry;
+    bool reformatInvalidationFlushPassed;
+    uint32_t oldVolumeId;
+    char oldVolumeLabel[12];
+    uint64_t fat1BytesCleared;
+    uint64_t fat2BytesCleared;
+    uint64_t reservedBytesWritten;
+    uint64_t rootClusterBytesWritten;
+    uint64_t reformatBytesWritten;
+    uint64_t reformatElapsedTicks;
+    uint32_t reformatWriteRequests;
     char diagnostic[160];
 };
 
@@ -233,9 +259,19 @@ Fat32FormatStatus probe_fat32_format_partition(
 Fat32FormatStatus format_fat32_partition(
     const Fat32FormatRequest& request, Fat32FormatResult& result);
 
+// Quick Reformat is an explicit FAT32-to-FAT32 destructive contract. It does
+// not scan or erase the whole partition and never uses KnownZero rollback.
+// Preflight accepts either a valid supported FAT32 filesystem or a partition
+// carrying the identity-bound DM26 interrupted-format marker.
+Fat32FormatStatus probe_fat32_quick_reformat_partition(
+    const Fat32FormatRequest& request, Fat32FormatResult& result);
+Fat32FormatStatus quick_reformat_fat32_partition(
+    const Fat32FormatRequest& request, Fat32FormatResult& result);
+
 const char* fat32_format_status_name(Fat32FormatStatus status);
 const char* fat32_format_stage_name(Fat32FormatStage stage);
 const char* fat32_existing_state_name(Fat32ExistingState state);
+const char* fat32_reformat_state_name(Fat32ReformatState state);
 
 } // namespace storage
 } // namespace kernel

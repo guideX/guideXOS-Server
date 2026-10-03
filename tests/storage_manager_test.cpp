@@ -73,6 +73,7 @@ struct FakeDisk {
     uint32_t removeOnWriteAtCall;
     uint64_t corruptWriteLbaOnce;
     uint32_t corruptWriteByteOffset;
+    uint32_t corruptWriteAfterCall;
     bool corruptWritePending;
     uint32_t reads;
     uint32_t writes;
@@ -107,7 +108,7 @@ struct FakeDisk {
           failWriteAtCall1(0), failWriteAtCall2(0),
           failWriteStatus(block::BLOCK_ERR_IO), removeOnWriteAtCall(0),
           corruptWriteLbaOnce(UINT64_MAX), corruptWriteByteOffset(16),
-          corruptWritePending(false),
+          corruptWriteAfterCall(0), corruptWritePending(false),
           reads(0), writes(0), writeAttempts(0), flushes(0),
           registryIndex(0xFF), registrationId(0), removeOnVerifyRead(false), removeOnFlush(false), removeOnFlushAt(0),
           removed(false), attemptMountDuringScanRead(false),
@@ -260,6 +261,8 @@ block::Status fake_write(uint8_t driverId, uint64_t lba, uint32_t count,
                 stored.assign(sectorBytes, sectorBytes + disk->sectorSize);
                 if (disk->corruptWritePending &&
                     sectorLba == disk->corruptWriteLbaOnce &&
+                    (disk->corruptWriteAfterCall == 0 ||
+                     disk->writeAttempts >= disk->corruptWriteAfterCall) &&
                     disk->corruptWriteByteOffset < disk->sectorSize) {
                     stored[disk->corruptWriteByteOffset] ^= 0x01;
                     disk->corruptWritePending = false;
@@ -276,6 +279,8 @@ block::Status fake_write(uint8_t driverId, uint64_t lba, uint32_t count,
     std::memcpy(disk->bytes.data() + offset, buffer, bytes);
     ++disk->writes;
     if (disk->corruptWritePending && lba == disk->corruptWriteLbaOnce &&
+        (disk->corruptWriteAfterCall == 0 ||
+         disk->writeAttempts >= disk->corruptWriteAfterCall) &&
         disk->corruptWriteByteOffset < disk->sectorSize) {
         disk->bytes[offset + disk->corruptWriteByteOffset] ^= 0x01;
         disk->corruptWritePending = false;
@@ -7602,7 +7607,7 @@ int main()
 
     {
         const uint32_t largePartitionSectors =
-            static_cast<uint32_t>(8ull * 1024u * 1024u * 1024u / 512u);
+            static_cast<uint32_t>(10ull * 1024u * 1024u * 1024u / 512u);
         const uint64_t largeDiskSectors =
             static_cast<uint64_t>(largePartitionSectors) + 4096u;
         FakeDisk largeSparse(512, largeDiskSectors, false);
@@ -7635,7 +7640,7 @@ int main()
               largeResult.scanZeroVerifiedSectors == largePartitionSectors &&
               largeResult.scanBytesRead ==
                   static_cast<uint64_t>(largePartitionSectors) * 512u &&
-              largeResult.scanReadRequests == 8192u &&
+              largeResult.scanReadRequests == 10240u &&
               largeResult.scanLargestRequestBytes == 1024u * 1024u &&
               largeResult.scanSmallestRequestBytes == 1024u * 1024u &&
               largeResult.geometry.totalSectors == largePartitionSectors &&
@@ -7654,7 +7659,7 @@ int main()
               std::all_of(sector(largeSparse, partitionEnd + 1),
                           sector(largeSparse, partitionEnd + 1) + 512,
                           [](uint8_t v) { return v == 0x5C; }),
-              "8 GiB sparse media formats with bounded metadata writes and unchanged canaries");
+              "10 GiB sparse media formats with bounded metadata writes and unchanged canaries");
 
         uint8_t* fsInfo = sector(largeSparse, largePartition.startLba + 1);
         uint8_t* backupFsInfo =
@@ -7762,6 +7767,76 @@ int main()
               read_u32(sector(largeSparse, distantFatSector) +
                   distantEntryOffset) == allocated,
               "distant FAT-sector writes and the final high entry are mirrored");
+
+        storage::Fat32FormatRequest largeQuickRequest = make_format_request(
+            largeIndex, largePartition, "DM26", 0xD2602602u);
+        storage::Fat32FormatResult largeQuickProbe = {};
+        const storage::Fat32FormatStatus largeQuickProbeStatus =
+            storage::probe_fat32_quick_reformat_partition(largeQuickRequest,
+                largeQuickProbe);
+        uint64_t largeDataCanaryLba = largePartition.startLba;
+        const bool largeDataCanaryRange = largeQuickProbeStatus ==
+                storage::FAT32_FORMAT_READY &&
+            largeDataCanaryLba <= UINT64_MAX -
+                largeQuickProbe.geometry.firstDataSector -
+                largeQuickProbe.geometry.sectorsPerCluster;
+        if (largeDataCanaryRange) {
+            largeDataCanaryLba += largeQuickProbe.geometry.firstDataSector +
+                largeQuickProbe.geometry.sectorsPerCluster;
+            std::memset(sector(largeSparse, largeDataCanaryLba), 0xB6, 512);
+        }
+        uint8_t largeCanaryBefore[512] = {}, largeCanaryAfter[512] = {};
+        const bool largeDataCanaryCaptured = largeDataCanaryRange &&
+            fake_sector_copy(largeSparse, largeDataCanaryLba,
+                             largeCanaryBefore);
+        largeSparse.writeLog.clear();
+        storage::Fat32FormatResult largeQuickResult = {};
+        const storage::Fat32FormatStatus largeQuickStatus =
+            largeQuickProbeStatus == storage::FAT32_FORMAT_READY
+                ? storage::quick_reformat_fat32_partition(largeQuickRequest,
+                    largeQuickResult)
+                : storage::FAT32_FORMAT_INVALID_REQUEST;
+        bool largeQuickWritesInside = true;
+        for (const FakeWriteRecord& write : largeSparse.writeLog) {
+            if (write.lba < largePartition.startLba ||
+                write.lba > largePartition.endLba) largeQuickWritesInside = false;
+        }
+        const bool largeQuickCanaryPreserved =
+            fake_sector_copy(largeSparse, largeDataCanaryLba,
+                             largeCanaryAfter) &&
+            std::memcmp(largeCanaryBefore, largeCanaryAfter, 512) == 0;
+        std::printf("DM26 10 GiB sparse Quick Reformat: partition_bytes=%llu fat_bytes_per_copy=%llu fat1_bytes=%llu fat2_bytes=%llu reserved_bytes=%llu root_bytes=%llu total_metadata_bytes=%llu write_requests=%u elapsed_ticks=%llu (test clock is synthetic)\n",
+            static_cast<unsigned long long>(largeQuickResult.geometry.totalSectors) *
+                largeQuickResult.geometry.bytesPerSector,
+            static_cast<unsigned long long>(largeQuickResult.geometry.fatSizeSectors) *
+                largeQuickResult.geometry.bytesPerSector,
+            static_cast<unsigned long long>(largeQuickResult.fat1BytesCleared),
+            static_cast<unsigned long long>(largeQuickResult.fat2BytesCleared),
+            static_cast<unsigned long long>(largeQuickResult.reservedBytesWritten),
+            static_cast<unsigned long long>(largeQuickResult.rootClusterBytesWritten),
+            static_cast<unsigned long long>(largeQuickResult.reformatBytesWritten),
+            largeQuickResult.reformatWriteRequests,
+            static_cast<unsigned long long>(largeQuickResult.reformatElapsedTicks));
+        check(largeQuickProbeStatus == storage::FAT32_FORMAT_READY &&
+              largeQuickStatus == storage::FAT32_FORMAT_SUCCESS &&
+              largeQuickResult.reformatState ==
+                  storage::FAT32_REFORMAT_DURABLE &&
+              largeQuickResult.verificationPassed &&
+              largeQuickResult.scanBytesRead == 0 &&
+              largeQuickResult.scanReadRequests == 0 &&
+              largeQuickResult.fat1BytesCleared ==
+                  static_cast<uint64_t>(largeQuickResult.geometry.fatSizeSectors) * 512u &&
+              largeQuickResult.fat2BytesCleared ==
+                  largeQuickResult.fat1BytesCleared &&
+              largeQuickResult.reformatBytesWritten <
+                  static_cast<uint64_t>(largeQuickResult.geometry.totalSectors) *
+                      largeQuickResult.geometry.bytesPerSector &&
+              largeQuickResult.reformatWriteRequests > 0 &&
+              largeQuickWritesInside && largeDataCanaryCaptured &&
+              largeQuickCanaryPreserved &&
+              independent_verify_fat32(largeSparse, largePartition,
+                                       "DM26", 0xD2602602u),
+              "10 GiB sparse Quick Reformat clears both complete FATs without scanning data, publishes a verified fresh volume, and preserves an old data-cluster canary");
         unregister_fake(largeIndex, largeSparse);
     }
 
@@ -9918,6 +9993,15 @@ int main()
                 &partition)
             : vfs::PartitionMountResult{0xFF,
                 vfs::PARTITION_MOUNT_DEVICE_UNAVAILABLE};
+        storage::Fat32FormatResult mountedQuickProbe = {};
+        const storage::Fat32FormatStatus mountedQuickStatus =
+            mountResult.error == vfs::PARTITION_MOUNT_OK
+                ? storage::probe_fat32_quick_reformat_partition(formatRequest,
+                    mountedQuickProbe)
+                : storage::FAT32_FORMAT_INVALID_REQUEST;
+        check(mountedQuickStatus == storage::FAT32_FORMAT_MOUNTED &&
+              mountedQuickProbe.failedBeforeWrite,
+              "Quick Reformat preflight blocks an existing mounted FAT32 partition before any write");
         const uint8_t mountIndex = mountResult.mountIndex;
         const fs_fat::FATVolume* mountedVolume = mountResult.error ==
                 vfs::PARTITION_MOUNT_OK
@@ -10092,8 +10176,307 @@ int main()
               restartedMount.error == vfs::PARTITION_MOUNT_OK &&
               restartFilesPersisted && restartedUnmount == vfs::VFS_OK,
               "4Kn GPT/FAT32 unmount, device-registration restart, partition-identity remount, and persistent exact reads all pass");
-        if (restartedIndex != 0xFF)
-            unregister_fake(restartedIndex, fourKnGpt);
+
+        // Put a recognizable remnant in a data cluster immediately after the
+        // new root cluster. The test verifies it survives both a failed
+        // mid-FAT reformat and its explicit marker-authorized retry.
+        storage::Fat32FormatResult quickProbe = {};
+        storage::Fat32FormatRequest quickRequest = make_format_request(
+            restartedIndex, restartedPartition, "FRESH", 0xD2602601u);
+        const storage::Fat32FormatStatus quickProbeStatus = restartedIndex != 0xFF
+            ? storage::probe_fat32_quick_reformat_partition(quickRequest,
+                quickProbe)
+            : storage::FAT32_FORMAT_INVALID_REQUEST;
+        uint64_t dataCanaryLba = restartedPartition.startLba;
+        const bool dataCanaryRange = quickProbeStatus == storage::FAT32_FORMAT_READY &&
+            dataCanaryLba <= UINT64_MAX - quickProbe.geometry.firstDataSector -
+                quickProbe.geometry.sectorsPerCluster;
+        if (dataCanaryRange) {
+            dataCanaryLba += quickProbe.geometry.firstDataSector +
+                quickProbe.geometry.sectorsPerCluster;
+            std::memset(sector(fourKnGpt, dataCanaryLba), 0xB6, 4096);
+        }
+        std::vector<uint8_t> dataCanaryBefore(4096), dataCanaryAfter(4096);
+        const bool dataCanaryCaptured = dataCanaryRange &&
+            fake_sector_copy(fourKnGpt, dataCanaryLba,
+                             dataCanaryBefore.data());
+        const uint32_t failedQuickWrite = fourKnGpt.writeAttempts + 6u;
+        fourKnGpt.failWriteAtCall1 = failedQuickWrite;
+        fourKnGpt.writeLog.clear();
+        storage::Fat32FormatResult interruptedQuick = {};
+        const storage::Fat32FormatStatus interruptedQuickStatus =
+            quickProbeStatus == storage::FAT32_FORMAT_READY
+                ? storage::quick_reformat_fat32_partition(quickRequest,
+                    interruptedQuick)
+                : storage::FAT32_FORMAT_INVALID_REQUEST;
+        fourKnGpt.failWriteAtCall1 = 0;
+        storage::Fat32FormatResult retryProbe = {};
+        const storage::Fat32FormatStatus retryProbeStatus =
+            restartedIndex != 0xFF
+                ? storage::probe_fat32_quick_reformat_partition(quickRequest,
+                    retryProbe)
+                : storage::FAT32_FORMAT_INVALID_REQUEST;
+        check(quickProbeStatus == storage::FAT32_FORMAT_READY &&
+              interruptedQuickStatus == storage::FAT32_FORMAT_REFORMAT_INCOMPLETE &&
+              interruptedQuick.reformatState == storage::FAT32_REFORMAT_IN_PROGRESS &&
+              interruptedQuick.failureStatus == storage::FAT32_FORMAT_METADATA_WRITE_FAILED &&
+              retryProbeStatus == storage::FAT32_FORMAT_READY && retryProbe.reformatRetry &&
+              retryProbe.existingState == storage::FAT32_EXISTING_INTERRUPTED_REFORMAT,
+              "failure during FAT2 clearing reports an incomplete reformat and exposes identity-bound retry without requiring the old FAT32 probe");
+
+        fourKnGpt.writeLog.clear();
+        storage::Fat32FormatResult quickResult = {};
+        const uint32_t oldVolumeId = read_u32(sector(fourKnGpt,
+            restartedPartition.startLba) + 67);
+        const storage::Fat32FormatStatus quickStatus = retryProbeStatus ==
+                storage::FAT32_FORMAT_READY
+            ? storage::quick_reformat_fat32_partition(quickRequest, quickResult)
+            : storage::FAT32_FORMAT_INVALID_REQUEST;
+        storage::PartitionTableModel quickTable = {};
+        const bool partitionIdentityPreserved = quickStatus ==
+                storage::FAT32_FORMAT_SUCCESS &&
+            storage::parse_partition_table(restartedIndex, quickTable) &&
+            quickTable.state == storage::DISK_STATE_VALID_GPT &&
+            quickTable.partitions[0].startLba == restartedPartition.startLba &&
+            quickTable.partitions[0].endLba == restartedPartition.endLba &&
+            std::memcmp(quickTable.partitions[0].uniqueGuid,
+                restartedPartition.uniqueGuid, 16) == 0;
+        std::vector<uint8_t> primaryFatSector(4096), mirrorFatSector(4096);
+        bool fullFatMirrorClear = quickStatus == storage::FAT32_FORMAT_SUCCESS;
+        const uint64_t fat1Lba = restartedPartition.startLba +
+            quickResult.geometry.firstFatSector;
+        const uint64_t fat2Lba = restartedPartition.startLba +
+            quickResult.geometry.secondFatSector;
+        for (uint32_t i = 0; i < quickResult.geometry.fatSizeSectors &&
+                fullFatMirrorClear; ++i) {
+            fullFatMirrorClear = fake_sector_copy(fourKnGpt, fat1Lba + i,
+                    primaryFatSector.data()) &&
+                fake_sector_copy(fourKnGpt, fat2Lba + i,
+                    mirrorFatSector.data()) &&
+                primaryFatSector == mirrorFatSector;
+            if (i == 0) {
+                fullFatMirrorClear = fullFatMirrorClear &&
+                    read_u32(primaryFatSector.data()) == 0x0FFFFFF8u &&
+                    read_u32(primaryFatSector.data() + 4) == 0x0FFFFFFFu &&
+                    read_u32(primaryFatSector.data() + 8) == 0x0FFFFFFFu &&
+                    std::all_of(primaryFatSector.begin() + 12,
+                        primaryFatSector.end(), [](uint8_t b) { return b == 0; });
+            } else {
+                fullFatMirrorClear = fullFatMirrorClear &&
+                    std::all_of(primaryFatSector.begin(), primaryFatSector.end(),
+                        [](uint8_t b) { return b == 0; });
+            }
+        }
+        uint8_t quickBoot[4096] = {};
+        const bool quickBootRead = quickStatus == storage::FAT32_FORMAT_SUCCESS &&
+            fake_sector_copy(fourKnGpt, restartedPartition.startLba, quickBoot);
+        const uint32_t newVolumeId = quickBootRead
+            ? read_u32(quickBoot + 67) : 0;
+        const bool reservedRootAndDataValid = quickStatus ==
+                storage::FAT32_FORMAT_SUCCESS &&
+            quickResult.reformatState == storage::FAT32_REFORMAT_DURABLE &&
+            quickResult.reformatInvalidationFlushPassed &&
+            quickResult.verificationPassed && quickResult.scanBytesRead == 0 &&
+            quickResult.scanReadRequests == 0 &&
+            quickResult.fat1BytesCleared == static_cast<uint64_t>(
+                quickResult.geometry.fatSizeSectors) * 4096u &&
+            quickResult.fat2BytesCleared == quickResult.fat1BytesCleared &&
+            quickResult.rootClusterBytesWritten >= static_cast<uint64_t>(
+                quickResult.geometry.sectorsPerCluster) * 4096u &&
+            newVolumeId != 0 && newVolumeId != oldVolumeId &&
+            std::memcmp(quickBoot + 71, "FRESH      ", 11) == 0 &&
+            fake_sector_copy(fourKnGpt, dataCanaryLba, dataCanaryAfter.data()) &&
+            dataCanaryBefore == dataCanaryAfter &&
+            std::all_of(sector(fourKnGpt, restartedPartition.startLba + 31),
+                sector(fourKnGpt, restartedPartition.startLba + 31) + 4096,
+                [](uint8_t b) { return b == 0; });
+        check(quickStatus == storage::FAT32_FORMAT_SUCCESS &&
+              partitionIdentityPreserved && fullFatMirrorClear &&
+              reservedRootAndDataValid && dataCanaryCaptured,
+              "4Kn Quick Reformat retries in place, clears the full mirrored FATs and reserved/root metadata, creates a fresh volume ID/label, preserves the GPT identity and an old data-sector canary, and skips the full-partition scan");
+
+        const block::BlockDevice quickBeforeRestart = [&]() {
+            block::BlockDevice value = {};
+            (void)block::copy_device(restartedIndex, value);
+            return value;
+        }();
+        const bool quickRemoved = unregister_fake(restartedIndex, fourKnGpt);
+        fs_fat::init();
+        vfs::test_clear_mounts();
+        const uint8_t quickRestartedIndex = quickRemoved
+            ? register_fake(fourKnGpt, true, true, true, false, 0,
+                1024u * 1024u)
+            : 0xFF;
+        storage::PartitionTableModel quickRestartTable = {};
+        storage::PartitionEntry quickRestartPartition = {};
+        const bool quickRestartIdentity = quickRestartedIndex != 0xFF &&
+            parse_first_partition(quickRestartedIndex, quickRestartTable,
+                                  quickRestartPartition) &&
+            quickRestartPartition.startLba == restartedPartition.startLba &&
+            quickRestartPartition.endLba == restartedPartition.endLba &&
+            std::memcmp(quickRestartPartition.uniqueGuid,
+                restartedPartition.uniqueGuid, 16) == 0;
+        block::BlockDevice quickRestartDevice = {};
+        const bool quickRestartDeviceCaptured = quickRestartedIndex != 0xFF &&
+            block::copy_device(quickRestartedIndex, quickRestartDevice);
+        const vfs::PartitionMountResult quickRestartMount =
+            quickRestartIdentity && quickRestartDeviceCaptured
+                ? vfs::mount_partition_detailed("/mnt/dm26", quickRestartedIndex,
+                    quickRestartPartition.partitionNumber,
+                    quickRestartDevice.registrationId, &quickRestartPartition)
+                : vfs::PartitionMountResult{0xFF,
+                    vfs::PARTITION_MOUNT_DEVICE_UNAVAILABLE};
+        const uint8_t staleOldFile = quickRestartMount.error ==
+                vfs::PARTITION_MOUNT_OK
+            ? vfs::open("/mnt/dm26/multi.bin", vfs::OPEN_READ) : 0xFF;
+        const int32_t freshFileWrite = quickRestartMount.error ==
+                vfs::PARTITION_MOUNT_OK
+            ? vfs::create_file("/mnt/dm26/fresh.txt", "fresh", 5) : -1;
+        const uint8_t freshFileHandle = freshFileWrite == 5
+            ? vfs::open("/mnt/dm26/fresh.txt", vfs::OPEN_READ) : 0xFF;
+        char freshFileBytes[5] = {};
+        const bool freshFileRead = freshFileHandle != 0xFF &&
+            vfs::read(freshFileHandle, freshFileBytes, sizeof(freshFileBytes)) == 5 &&
+            std::memcmp(freshFileBytes, "fresh", sizeof(freshFileBytes)) == 0;
+        if (freshFileHandle != 0xFF) (void)vfs::close(freshFileHandle);
+        const vfs::Status quickRestartUnmount = quickRestartMount.error ==
+                vfs::PARTITION_MOUNT_OK
+            ? vfs::unmount("/mnt/dm26") : vfs::VFS_ERR_INVALID;
+        check(quickRemoved && quickRestartIdentity &&
+              quickRestartMount.error == vfs::PARTITION_MOUNT_OK &&
+              staleOldFile == 0xFF && freshFileRead &&
+              quickRestartUnmount == vfs::VFS_OK &&
+              quickBeforeRestart.registrationId !=
+                  quickRestartDevice.registrationId,
+              "4Kn Quick Reformat remounts after a new device-registration incarnation, hides prior directory/file entries, and supports fresh writes and reads");
+
+        storage::Fat32FormatRequest stageFailureRequest = make_format_request(
+            quickRestartedIndex, quickRestartPartition, "STAGE", 0xD2602610u);
+        bool quickWriteFailureClassification = quickRestartedIndex != 0xFF;
+        bool quickWriteFailuresRetry = quickWriteFailureClassification;
+        for (uint32_t offset = 1;
+             offset <= quickResult.reformatWriteRequests &&
+                 quickWriteFailureClassification && quickWriteFailuresRetry;
+             ++offset) {
+            fourKnGpt.failWriteAtCall1 = fourKnGpt.writeAttempts + offset;
+            storage::Fat32FormatResult failedStage = {};
+            const storage::Fat32FormatStatus failedStageStatus =
+                storage::quick_reformat_fat32_partition(stageFailureRequest,
+                    failedStage);
+            fourKnGpt.failWriteAtCall1 = 0;
+            const bool conservativeClassification =
+                failedStageStatus == storage::FAT32_FORMAT_REFORMAT_INCOMPLETE
+                    ? failedStage.reformatState >= storage::FAT32_REFORMAT_IN_PROGRESS
+                    : failedStageStatus != storage::FAT32_FORMAT_SUCCESS &&
+                      failedStage.reformatState ==
+                          storage::FAT32_REFORMAT_BEFORE_DESTRUCTIVE_COMMIT;
+            quickWriteFailureClassification = quickWriteFailureClassification &&
+                conservativeClassification;
+            storage::Fat32FormatResult retryAfterStageProbe = {};
+            const storage::Fat32FormatStatus retryAfterStageProbeStatus =
+                storage::probe_fat32_quick_reformat_partition(
+                    stageFailureRequest, retryAfterStageProbe);
+            storage::Fat32FormatResult retryAfterStage = {};
+            const storage::Fat32FormatStatus retryAfterStageStatus =
+                retryAfterStageProbeStatus == storage::FAT32_FORMAT_READY
+                    ? storage::quick_reformat_fat32_partition(
+                        stageFailureRequest, retryAfterStage)
+                    : retryAfterStageProbeStatus;
+            quickWriteFailuresRetry = quickWriteFailuresRetry &&
+                retryAfterStageProbeStatus == storage::FAT32_FORMAT_READY &&
+                retryAfterStageStatus == storage::FAT32_FORMAT_SUCCESS &&
+                retryAfterStage.reformatState == storage::FAT32_REFORMAT_DURABLE;
+        }
+        check(quickResult.reformatWriteRequests > 0 &&
+              quickWriteFailureClassification,
+              "Quick Reformat write-failure injection classifies every marker, invalidation, reserved, FAT, root, backup, publication, and marker-cleanup write without claiming success");
+        check(quickResult.reformatWriteRequests > 0 && quickWriteFailuresRetry,
+              "a fresh preflight and complete Quick Reformat retry succeeds after failure at every write position");
+
+        bool quickFlushFailureClassification = quickRestartedIndex != 0xFF;
+        bool quickFlushFailuresRetry = quickFlushFailureClassification;
+        const uint32_t flushOrdinals[] = {1u, 2u, 3u, 4u};
+        for (uint32_t ordinal : flushOrdinals) {
+            fourKnGpt.failFlushAtCall = fourKnGpt.flushes + ordinal;
+            storage::Fat32FormatResult failedFlush = {};
+            const storage::Fat32FormatStatus failedFlushStatus =
+                storage::quick_reformat_fat32_partition(stageFailureRequest,
+                    failedFlush);
+            fourKnGpt.failFlushAtCall = 0;
+            quickFlushFailureClassification = quickFlushFailureClassification &&
+                failedFlushStatus == storage::FAT32_FORMAT_REFORMAT_INCOMPLETE &&
+                failedFlush.reformatState >= storage::FAT32_REFORMAT_IN_PROGRESS &&
+                failedFlush.failureStatus == storage::FAT32_FORMAT_FLUSH_FAILED;
+            if (ordinal == 1u)
+                quickFlushFailureClassification = quickFlushFailureClassification &&
+                    !failedFlush.reformatInvalidationFlushPassed;
+            if (ordinal >= 3u)
+                quickFlushFailureClassification = quickFlushFailureClassification &&
+                    failedFlush.reformatState ==
+                        storage::FAT32_REFORMAT_NEW_FILESYSTEM_WRITTEN_NOT_DURABLE;
+            storage::Fat32FormatResult retryAfterFlushProbe = {};
+            const storage::Fat32FormatStatus retryAfterFlushProbeStatus =
+                storage::probe_fat32_quick_reformat_partition(
+                    stageFailureRequest, retryAfterFlushProbe);
+            storage::Fat32FormatResult retryAfterFlush = {};
+            const storage::Fat32FormatStatus retryAfterFlushStatus =
+                retryAfterFlushProbeStatus == storage::FAT32_FORMAT_READY
+                    ? storage::quick_reformat_fat32_partition(
+                        stageFailureRequest, retryAfterFlush)
+                    : retryAfterFlushProbeStatus;
+            quickFlushFailuresRetry = quickFlushFailuresRetry &&
+                retryAfterFlushProbeStatus == storage::FAT32_FORMAT_READY &&
+                retryAfterFlushStatus == storage::FAT32_FORMAT_SUCCESS &&
+                retryAfterFlush.reformatState == storage::FAT32_REFORMAT_DURABLE;
+        }
+        check(quickFlushFailureClassification,
+              "Quick Reformat failure at each invalidation, prepublication, publication, and marker-cleanup Flush reports the correct incomplete durability state");
+        check(quickFlushFailuresRetry,
+              "Quick Reformat safely rebuilds after every injected Flush failure");
+
+        uint32_t primaryPublicationOffset = 0;
+        uint32_t primaryWritesSeen = 0;
+        for (size_t i = 0; i < fourKnGpt.writeLog.size(); ++i) {
+            if (fourKnGpt.writeLog[i].lba != quickRestartPartition.startLba)
+                continue;
+            if (++primaryWritesSeen == 2) {
+                primaryPublicationOffset = static_cast<uint32_t>(i + 1u);
+                break;
+            }
+        }
+        fourKnGpt.corruptWriteLbaOnce = quickRestartPartition.startLba;
+        fourKnGpt.corruptWriteByteOffset = 67;
+        fourKnGpt.corruptWriteAfterCall = primaryPublicationOffset == 0
+            ? 0 : fourKnGpt.writeAttempts + primaryPublicationOffset;
+        fourKnGpt.corruptWritePending = true;
+        storage::Fat32FormatResult verifyStageFailure = {};
+        const storage::Fat32FormatStatus verifyStageStatus =
+            storage::quick_reformat_fat32_partition(stageFailureRequest,
+                verifyStageFailure);
+        fourKnGpt.corruptWriteLbaOnce = UINT64_MAX;
+        fourKnGpt.corruptWriteAfterCall = 0;
+        fourKnGpt.corruptWritePending = false;
+        storage::Fat32FormatResult verifyStageRetryProbe = {};
+        const storage::Fat32FormatStatus verifyStageRetryProbeStatus =
+            storage::probe_fat32_quick_reformat_partition(stageFailureRequest,
+                verifyStageRetryProbe);
+        storage::Fat32FormatResult verifyStageRetry = {};
+        const storage::Fat32FormatStatus verifyStageRetryStatus =
+            verifyStageRetryProbeStatus == storage::FAT32_FORMAT_READY
+                ? storage::quick_reformat_fat32_partition(stageFailureRequest,
+                    verifyStageRetry)
+                : verifyStageRetryProbeStatus;
+        check(primaryPublicationOffset != 0 &&
+              verifyStageStatus == storage::FAT32_FORMAT_REFORMAT_INCOMPLETE &&
+              verifyStageFailure.failureStatus ==
+                  storage::FAT32_FORMAT_VERIFICATION_FAILED &&
+              verifyStageFailure.reformatState ==
+                  storage::FAT32_REFORMAT_NEW_FILESYSTEM_WRITTEN_NOT_DURABLE &&
+              verifyStageRetryProbeStatus == storage::FAT32_FORMAT_READY &&
+              verifyStageRetryStatus == storage::FAT32_FORMAT_SUCCESS,
+              "corrupt final-primary read-back is incomplete after publication and marker-authorized retry restores a verified FAT32 volume");
+        if (quickRestartedIndex != 0xFF)
+            unregister_fake(quickRestartedIndex, fourKnGpt);
     }
 
     run_usb_mass_storage_tests();

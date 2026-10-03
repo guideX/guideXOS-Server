@@ -6277,7 +6277,8 @@ DiskManagerApp::DiskManagerApp()
       m_confirmInitializeBtnId(-1), m_cancelInitializeBtnId(-1),
       m_createSizeTextBoxId(-1), m_createNameTextBoxId(-1),
       m_initializeDialogState(INITIALIZE_DIALOG_CLOSED),
-      m_dialogIsCreate(false), m_dialogIsFormat(false), m_dialogIsDelete(false),
+      m_dialogIsCreate(false), m_dialogIsFormat(false),
+      m_dialogIsReformat(false), m_dialogIsDelete(false),
       m_createSizeEdited(false),
       m_createNameEdited(false), m_createInputFocus(0),
       m_initializeScheme(storage::DEFAULT_INITIALIZE_SCHEME),
@@ -6918,7 +6919,9 @@ void DiskManagerApp::updateInitializeControls() {
         m_selectedPart >= 0 && m_selectedPart < m_disks[m_selectedDisk].partCount) {
         const DiskEntry& disk = m_disks[m_selectedDisk];
         const PartEntry& part = disk.parts[m_selectedPart];
-        const bool possibleFs = strcmp(part.fsLabel, "Unformatted") == 0 ||
+        const bool existingFat32 = strcmp(part.fsLabel, "FAT32") == 0;
+        const bool possibleFs = existingFat32 ||
+            strcmp(part.fsLabel, "Unformatted") == 0 ||
             strcmp(part.fsLabel, "Unknown") == 0;
         const bool validTable = disk.scheme == storage::PARTITION_SCHEME_GPT
             ? disk.state == storage::DISK_STATE_VALID_GPT &&
@@ -6985,7 +6988,14 @@ void DiskManagerApp::updateInitializeControls() {
         initialize->visible = dialogClosed &&
             (rawSelected || enableCreate || formatAvailable);
         initialize->enabled = enableInitialize || enableCreate || formatAvailable;
-        setWidgetText(m_initializeBtnId, formatAvailable ? "Format..." :
+        const bool reformatSelected = haveSelection &&
+            m_selectedObject == SELECTED_PARTITION && m_selectedDisk >= 0 &&
+            m_selectedDisk < m_diskCount && m_selectedPart >= 0 &&
+            m_selectedPart < m_disks[m_selectedDisk].partCount &&
+            strcmp(m_disks[m_selectedDisk].parts[m_selectedPart].fsLabel,
+                   "FAT32") == 0;
+        setWidgetText(m_initializeBtnId, formatAvailable
+            ? (reformatSelected ? "Reformat..." : "Format...") :
             (selectedRegion ? "Create Partition..." : "Initialize Disk..."));
     }
     if (deleteAction) {
@@ -7015,7 +7025,7 @@ void DiskManagerApp::updateInitializeControls() {
                     (formatOptions && updateFormatLabelWidget()))));
         setWidgetText(m_confirmInitializeBtnId,
             m_mountDialogOpen ? "Mount" : (deleteConfirm ? "Delete Partition" :
-                (formatOptions ? "Format" :
+                (formatOptions ? (m_dialogIsReformat ? "Reformat FAT32" : "Format") :
                     (createOptions ? "Create" : "Initialize"))));
     }
     if (sizeInput) {
@@ -7934,7 +7944,10 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                     ? "Delete Partition Result" : "Delete Partition")
                 : (m_dialogIsFormat
                 ? (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
-                    ? "Format FAT32 Result" : "Format Partition as FAT32")
+                    ? (m_dialogIsReformat ? "Quick Reformat FAT32 Result" :
+                        "Format FAT32 Result")
+                    : (m_dialogIsReformat ? "Reformat FAT32 Partition" :
+                        "Format Partition as FAT32"))
                 : (m_dialogIsCreate
                 ? (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
                     ? "Create Partition Result" : "Create Partition")
@@ -8128,9 +8141,17 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                 formatSizePrecise(bytes, capacityText, sizeof(capacityText));
                 strcopy(line, "Capacity: ", sizeof(line));
                 strappend(line, capacityText, sizeof(line));
-                strappend(line, " | Current: ", sizeof(line));
-                strappend(line, storage::fat32_existing_state_name(
-                    m_formatResult.existingState), sizeof(line));
+                strappend(line, m_dialogIsReformat
+                    ? " | Current FAT32, label: " : " | Current: ",
+                    sizeof(line));
+                if (m_dialogIsReformat) {
+                    strappend(line, m_formatResult.oldVolumeLabel[0]
+                        ? m_formatResult.oldVolumeLabel : "(empty)", sizeof(line));
+                    strappend(line, " | Unmounted", sizeof(line));
+                } else {
+                    strappend(line, storage::fat32_existing_state_name(
+                        m_formatResult.existingState), sizeof(line));
+                }
                 disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
                     line, kSubText);
                 lineY += 16;
@@ -8153,15 +8174,21 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                 updateFormatLabelWidget();
                 lineY = panelY + 228;
                 disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
-                    "Formatting replaces partition metadata and root cluster data.",
+                    m_dialogIsReformat
+                        ? "Existing files will become inaccessible after reformat."
+                        : "Formatting replaces partition metadata and root cluster data.",
                     kSubText);
                 lineY += 14;
                 disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
-                    "Existing non-zero or recognized data is rejected at preflight.",
-                    kSubText);
+                    m_dialogIsReformat
+                        ? "Quick Reformat does not securely erase old file data."
+                        : "Existing non-zero or recognized data is rejected at preflight.",
+                    m_dialogIsReformat ? 0xFFFFD080 : kSubText);
                 lineY += 14;
                 disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
-                    "Confirm to write FAT32. The partition remains unmounted.", kText);
+                    m_dialogIsReformat
+                        ? "Confirm to replace FAT32 metadata. Partition stays unmounted."
+                        : "Confirm to write FAT32. The partition remains unmounted.", kText);
                 char normalized[11];
                 if (storage::normalize_fat32_volume_label(m_createNameText,
                         normalized) != storage::FAT32_FORMAT_READY) {
@@ -8186,8 +8213,11 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                     line, success ? kSubText : 0xFFFFB0A0);
                 lineY += 14;
                 disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
-                    success ? "FAT32 formatting completed and verified" :
-                        "FAT32 formatting failed",
+                    success ? (m_dialogIsReformat
+                        ? "FAT32 Quick Reformat completed and verified"
+                        : "FAT32 formatting completed and verified") :
+                        (m_dialogIsReformat ? "Quick Reformat incomplete" :
+                            "FAT32 formatting failed"),
                     success ? kText : 0xFFFFB0A0);
                 lineY += 14;
                 if (success) {
@@ -9443,8 +9473,10 @@ void DiskManagerApp::beginFormatOptions() {
 
     DiskEntry& disk = m_disks[m_selectedDisk];
     const PartEntry& selected = disk.parts[m_selectedPart];
+    const bool existingFat32 = strcmp(selected.fsLabel, "FAT32") == 0;
     if ((strcmp(selected.fsLabel, "Unformatted") != 0 &&
-         strcmp(selected.fsLabel, "Unknown") != 0) || !disk.haveInfo ||
+         strcmp(selected.fsLabel, "Unknown") != 0 && !existingFat32) ||
+        !disk.haveInfo ||
         disk.identity.registrationId == 0) return;
 
     memset(&m_formatRequest, 0, sizeof(m_formatRequest));
@@ -9468,14 +9500,27 @@ void DiskManagerApp::beginFormatOptions() {
     m_createInputFocus = 1;
     m_dialogIsCreate = false;
     m_dialogIsFormat = true;
+    m_dialogIsReformat = false;
 
-    const storage::Fat32FormatStatus status =
-        storage::probe_fat32_format_partition(m_formatRequest, m_formatResult);
+    storage::Fat32FormatStatus status = storage::FAT32_FORMAT_REFORMAT_TARGET_UNSUPPORTED;
+    if (existingFat32 || strcmp(selected.fsLabel, "Unformatted") == 0) {
+        status = storage::probe_fat32_quick_reformat_partition(
+            m_formatRequest, m_formatResult);
+        if (status == storage::FAT32_FORMAT_READY) {
+            m_dialogIsReformat = true;
+            strcopy(m_createNameText, m_formatResult.oldVolumeLabel,
+                    sizeof(m_createNameText));
+        }
+    }
+    if (!m_dialogIsReformat && !existingFat32)
+        status = storage::probe_fat32_format_partition(
+            m_formatRequest, m_formatResult);
     if (status != storage::FAT32_FORMAT_READY) {
         strcopy(m_statusMessage, m_formatResult.diagnostic[0]
             ? m_formatResult.diagnostic : storage::fat32_format_status_name(status),
             sizeof(m_statusMessage));
         m_dialogIsFormat = false;
+        m_dialogIsReformat = false;
         updateInitializeControls();
         invalidate();
         return;
@@ -9511,13 +9556,21 @@ void DiskManagerApp::runFormatOperation() {
     m_formatResult.stage = storage::FAT32_FORMAT_STAGE_VALIDATING;
     updateInitializeControls();
     invalidate();
-    storage::format_fat32_partition(m_formatRequest, m_formatResult);
+    if (m_dialogIsReformat)
+        storage::quick_reformat_fat32_partition(m_formatRequest, m_formatResult);
+    else
+        storage::format_fat32_partition(m_formatRequest, m_formatResult);
     m_lastStorageOperation = 3;
     if (m_formatResult.status != storage::FAT32_FORMAT_SUCCESS &&
         m_formatResult.failedBeforeWrite) {
-        strcopy(m_initializeMessage,
-            "Formatting failed before any disk writes were made.",
+        strcopy(m_initializeMessage, m_dialogIsReformat
+            ? "Quick Reformat failed before any metadata writes were made."
+            : "Formatting failed before any disk writes were made.",
             sizeof(m_initializeMessage));
+    } else if (m_dialogIsReformat && m_formatResult.reformatState >=
+                   storage::FAT32_REFORMAT_IN_PROGRESS) {
+        strcopy(m_initializeMessage, m_formatResult.diagnostic,
+                sizeof(m_initializeMessage));
     } else if (m_formatResult.flushAttempted &&
                m_formatResult.failureStatus ==
                    storage::FAT32_FORMAT_FLUSH_FAILED) {
@@ -9559,6 +9612,7 @@ void DiskManagerApp::closeInitializeDialog() {
     m_initializeDialogState = INITIALIZE_DIALOG_CLOSED;
     m_dialogIsCreate = false;
     m_dialogIsFormat = false;
+    m_dialogIsReformat = false;
     m_dialogIsDelete = false;
     m_createInputFocus = 0;
     m_initializeMessage[0] = '\0';

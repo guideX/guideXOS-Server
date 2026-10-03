@@ -95,6 +95,12 @@ static uint32_t read_u32(const uint8_t* input)
         (static_cast<uint32_t>(input[3]) << 24);
 }
 
+static uint64_t read_u64(const uint8_t* input)
+{
+    return static_cast<uint64_t>(read_u32(input)) |
+        (static_cast<uint64_t>(read_u32(input + 4)) << 32);
+}
+
 static void write_u16(uint8_t* output, uint16_t value)
 {
     output[0] = static_cast<uint8_t>(value);
@@ -107,6 +113,12 @@ static void write_u32(uint8_t* output, uint32_t value)
     output[1] = static_cast<uint8_t>(value >> 8);
     output[2] = static_cast<uint8_t>(value >> 16);
     output[3] = static_cast<uint8_t>(value >> 24);
+}
+
+static void write_u64(uint8_t* output, uint64_t value)
+{
+    write_u32(output, static_cast<uint32_t>(value));
+    write_u32(output + 4, static_cast<uint32_t>(value >> 32));
 }
 
 static void set_diagnostic(Fat32FormatResult& result, const char* message)
@@ -1256,6 +1268,807 @@ static bool make_volume_id(const Fat32FormatRequest& request,
     return false;
 }
 
+// DM26's interrupted-format token is deliberately small and stored in an
+// otherwise unused reserved sector. It binds retry to the persistent
+// partition-table identity; registration incarnations are revalidated by the
+// operation lease on every invocation instead of being persisted here.
+static const uint32_t kQuickMarkerFirstSector = 8u;
+static const uint32_t kQuickMarkerLastSector = 31u;
+static const uint32_t kQuickMarkerVersion = 1u;
+static const uint32_t kQuickMarkerChecksumOffset = 120u;
+static const char kQuickMarkerMagic[8] = {'G','X','D','M','2','6','R','F'};
+
+struct QuickReformatSource {
+    bool retry;
+    uint32_t markerSector;
+    uint32_t oldBackupBootSector;
+    uint32_t oldVolumeId;
+    uint32_t oldFsInfoSector;
+    uint8_t oldLabel[11];
+};
+
+enum QuickWriteKind {
+    QUICK_WRITE_RESERVED,
+    QUICK_WRITE_FAT1_ZERO,
+    QUICK_WRITE_FAT2_ZERO,
+    QUICK_WRITE_FAT1_INIT,
+    QUICK_WRITE_FAT2_INIT,
+    QUICK_WRITE_ROOT,
+};
+
+static uint32_t quick_marker_checksum(const uint8_t* bytes, uint32_t count)
+{
+    uint32_t hash = 2166136261u;
+    for (uint32_t i = 0; i < count; ++i) {
+        hash ^= bytes[i];
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+static bool quick_marker_identity_matches(const uint8_t* marker,
+    const Fat32FormatRequest& request, const PartitionEntry& partition,
+    uint32_t sectorSize, uint32_t markerSector)
+{
+    if (!marker || !bytes_equal(marker, reinterpret_cast<const uint8_t*>(
+            kQuickMarkerMagic), sizeof(kQuickMarkerMagic)) ||
+        read_u32(marker + 8) != kQuickMarkerVersion ||
+        read_u32(marker + 12) != static_cast<uint32_t>(request.partitionScheme) ||
+        read_u64(marker + 16) != partition.startLba ||
+        read_u64(marker + 24) != partition.sectorCount ||
+        read_u32(marker + 32) != sectorSize ||
+        read_u32(marker + 36) != partition.partitionNumber ||
+        read_u32(marker + 116) != markerSector ||
+        read_u32(marker + kQuickMarkerChecksumOffset) !=
+            quick_marker_checksum(marker, kQuickMarkerChecksumOffset))
+        return false;
+    if (request.partitionScheme == PARTITION_SCHEME_GPT)
+        return bytes_equal(marker + 48, partition.uniqueGuid, 16) &&
+            bytes_equal(marker + 64, partition.typeGuid, 16) &&
+            bytes_equal(marker + 80, request.gptDiskGuid, 16);
+    return read_u32(marker + 40) == partition.mbrType &&
+        read_u32(marker + 44) == request.mbrDiskSignature &&
+        bytes_zero(marker + 48, 48);
+}
+
+static void build_quick_marker(uint8_t* sector, uint32_t sectorSize,
+    const Fat32FormatRequest& request, const PartitionEntry& partition,
+    uint32_t markerSector, const QuickReformatSource& source)
+{
+    clear_bytes(sector, sectorSize);
+    copy_bytes(sector, kQuickMarkerMagic, sizeof(kQuickMarkerMagic));
+    write_u32(sector + 8, kQuickMarkerVersion);
+    write_u32(sector + 12, static_cast<uint32_t>(request.partitionScheme));
+    write_u64(sector + 16, partition.startLba);
+    write_u64(sector + 24, partition.sectorCount);
+    write_u32(sector + 32, sectorSize);
+    write_u32(sector + 36, partition.partitionNumber);
+    if (request.partitionScheme == PARTITION_SCHEME_GPT) {
+        copy_bytes(sector + 48, partition.uniqueGuid, 16);
+        copy_bytes(sector + 64, partition.typeGuid, 16);
+        copy_bytes(sector + 80, request.gptDiskGuid, 16);
+    } else {
+        write_u32(sector + 40, partition.mbrType);
+        write_u32(sector + 44, request.mbrDiskSignature);
+    }
+    write_u32(sector + 96, source.oldBackupBootSector);
+    write_u32(sector + 100, source.oldVolumeId);
+    copy_bytes(sector + 104, source.oldLabel, sizeof(source.oldLabel));
+    write_u32(sector + 116, markerSector);
+    write_u32(sector + kQuickMarkerChecksumOffset,
+        quick_marker_checksum(sector, kQuickMarkerChecksumOffset));
+}
+
+static bool read_quick_marker(const Fat32FormatRequest& request,
+    const PartitionEntry& partition, const Fat32FormatGeometry& geometry,
+    QuickReformatSource& source)
+{
+    for (uint32_t sector = kQuickMarkerFirstSector;
+         sector <= kQuickMarkerLastSector; ++sector) {
+        if (read_partition_sector(request.targetSnapshot, partition, geometry,
+                sector, s_ioSector) != block::BLOCK_OK) continue;
+        if (!quick_marker_identity_matches(s_ioSector, request, partition,
+                geometry.bytesPerSector, sector)) continue;
+        source.retry = true;
+        source.markerSector = sector;
+        source.oldBackupBootSector = read_u32(s_ioSector + 96);
+        source.oldVolumeId = read_u32(s_ioSector + 100);
+        copy_bytes(source.oldLabel, s_ioSector + 104,
+                   sizeof(source.oldLabel));
+        source.oldFsInfoSector = 0;
+        return true;
+    }
+    return false;
+}
+
+static bool valid_old_fat32_primary(const uint8_t* boot,
+    uint32_t sectorSize, const PartitionEntry& partition,
+    uint32_t& backupBootSector, uint32_t& fsInfoSector,
+    uint32_t& volumeId, uint8_t label[11])
+{
+    if (!boot || read_u16(boot + 11) != sectorSize ||
+        !fat32_format_sector_size_supported(sectorSize) ||
+        boot[510] != 0x55 || boot[511] != 0xAA ||
+        !ascii_eq(boot + 82, "FAT32   ", 8)) return false;
+    const uint32_t spc = boot[13];
+    const uint32_t reserved = read_u16(boot + 14);
+    const uint32_t fats = boot[16];
+    const uint32_t total = read_u32(boot + 32);
+    const uint32_t fatSectors = read_u32(boot + 36);
+    const uint32_t rootCluster = read_u32(boot + 44);
+    const uint64_t clustersFirstData = static_cast<uint64_t>(reserved) +
+        2ull * fatSectors;
+    if (spc == 0 || (spc & (spc - 1u)) != 0 ||
+        static_cast<uint64_t>(spc) * sectorSize > FAT32_FORMAT_MAX_CLUSTER_BYTES ||
+        reserved < 32u || fats != 2u || read_u16(boot + 17) != 0 ||
+        read_u16(boot + 19) != 0 || read_u16(boot + 22) != 0 ||
+        read_u16(boot + 40) != 0 || read_u16(boot + 42) != 0 ||
+        total == 0 || total > partition.sectorCount || fatSectors == 0 ||
+        clustersFirstData >= total || rootCluster < 2 ||
+        rootCluster - 2u >= (total - clustersFirstData) / spc)
+        return false;
+    const uint32_t clusters = (total - clustersFirstData) / spc;
+    const uint64_t fatEntries = static_cast<uint64_t>(fatSectors) *
+        sectorSize / 4u;
+    if (clusters < FAT32_FORMAT_MIN_CLUSTERS ||
+        clusters > FAT32_FORMAT_MAX_CLUSTERS || fatEntries < clusters + 2u)
+        return false;
+    backupBootSector = read_u16(boot + 50);
+    fsInfoSector = read_u16(boot + 48);
+    // DM26 writes the new geometry's 32-sector reserved region. Requiring the
+    // old backup to lie there prevents invalidation from touching old ordinary
+    // data that becomes a data sector in the new layout.
+    if (backupBootSector == 0 || backupBootSector >= 32u ||
+        backupBootSector >= reserved || backupBootSector == 0xFFFFu ||
+        (fsInfoSector != 0 && fsInfoSector != 0xFFFFu &&
+         fsInfoSector >= reserved)) return false;
+    volumeId = boot[66] == 0x29 ? read_u32(boot + 67) : 0;
+    copy_bytes(label, boot + 71, 11);
+    return true;
+}
+
+static bool old_boot_copies_match(const uint8_t* primary,
+                                  const uint8_t* backup)
+{
+    static const uint8_t bpbRanges[][2] = {
+        {11, 25}, {28, 52}, {64, 90}
+    };
+    if (!primary || !backup || backup[510] != 0x55 || backup[511] != 0xAA)
+        return false;
+    for (uint32_t r = 0; r < sizeof(bpbRanges) / sizeof(bpbRanges[0]); ++r)
+        if (!bytes_equal(primary + bpbRanges[r][0],
+                backup + bpbRanges[r][0], bpbRanges[r][1] - bpbRanges[r][0]))
+            return false;
+    return true;
+}
+
+static Fat32FormatStatus inspect_quick_reformat_source(
+    const Fat32FormatRequest& request, const PartitionCheck& check,
+    QuickReformatSource& source)
+{
+    clear_bytes(&source, sizeof(source));
+    const uint32_t sectorSize = check.geometry.bytesPerSector;
+    if (read_partition_sector(request.targetSnapshot, check.currentPartition,
+            check.geometry, 0, s_verifySector) != block::BLOCK_OK)
+        return FAT32_FORMAT_READ_UNAVAILABLE;
+    uint32_t backupBoot = 0, fsInfo = 0, volumeId = 0;
+    uint8_t label[11];
+    const bool primaryValid = valid_old_fat32_primary(s_verifySector,
+        sectorSize, check.currentPartition, backupBoot, fsInfo, volumeId,
+        label);
+    bool copiesMatch = false;
+    if (primaryValid && read_partition_sector(request.targetSnapshot,
+            check.currentPartition, check.geometry, backupBoot,
+            s_ioSector) == block::BLOCK_OK)
+        copiesMatch = old_boot_copies_match(s_verifySector, s_ioSector);
+    if (primaryValid && copiesMatch) {
+        source.oldBackupBootSector = backupBoot;
+        source.oldFsInfoSector = fsInfo;
+        source.oldVolumeId = volumeId;
+        copy_bytes(source.oldLabel, label, sizeof(source.oldLabel));
+        return FAT32_FORMAT_READY;
+    }
+    if (!read_quick_marker(request, check.currentPartition, check.geometry,
+            source)) return FAT32_FORMAT_REFORMAT_TARGET_UNSUPPORTED;
+    if (source.oldBackupBootSector == 0 ||
+        source.oldBackupBootSector >= 32u ||
+        source.oldBackupBootSector >= check.currentPartition.sectorCount ||
+        source.oldBackupBootSector == source.markerSector)
+        return FAT32_FORMAT_REFORMAT_MARKER_FAILED;
+    return FAT32_FORMAT_READY;
+}
+
+static bool quick_write_range(const Fat32FormatRequest& request,
+    const PartitionCheck& check, const StorageOperationLease& lease,
+    uint64_t relative, uint32_t sectors, const uint8_t* buffer,
+    QuickWriteKind kind, Fat32FormatResult& result)
+{
+    const uint32_t sectorSize = check.geometry.bytesPerSector;
+    if (!buffer || !relative_range_valid(check.geometry, relative, sectors) ||
+        !rollback_context_valid(request, request.targetSnapshot,
+            check.currentPartition, check.geometry, lease)) {
+        result.status = FAT32_FORMAT_PARTITION_IDENTITY_CHANGED;
+        return false;
+    }
+    uint64_t absolute = 0;
+    if (!add_u64(check.currentPartition.startLba, relative, absolute) ||
+        !checked_lba_range(request.targetSnapshot.totalLogicalSectors,
+                           absolute, sectors)) {
+        result.status = FAT32_FORMAT_INVALID_GEOMETRY;
+        return false;
+    }
+    ++result.reformatWriteRequests;
+    const block::Status writeStatus = write_sectors_safe(
+        request.targetSnapshot.globalIndex, absolute, sectors, buffer,
+        buffer == s_zeroScanBuffer ? sizeof(s_zeroScanBuffer)
+                                   : sizeof(s_ioSector));
+    if (writeStatus != block::BLOCK_OK) {
+        result.status = FAT32_FORMAT_METADATA_WRITE_FAILED;
+        if (capture_current_io_result(result)) {
+            const bool submitted = result.failedBlockDiagnostic.callbackInvoked;
+            const bool mayHaveReached = submitted &&
+                (!result.failedBlockDiagnostic.transportDiagnostic.valid ||
+                 result.failedBlockDiagnostic.transportDiagnostic.dataSectorsTransferred != 0);
+            result.writeAttempted = result.writeAttempted || submitted;
+            result.writeMayHaveReachedMedia = result.writeMayHaveReachedMedia ||
+                mayHaveReached;
+            if (submitted && result.reformatState ==
+                    FAT32_REFORMAT_BEFORE_DESTRUCTIVE_COMMIT)
+                result.reformatState = FAT32_REFORMAT_IN_PROGRESS;
+        }
+        result.failedBeforeWrite = !result.writeMayHaveReachedMedia;
+        return false;
+    }
+    const uint64_t bytes = static_cast<uint64_t>(sectors) * sectorSize;
+    result.writeAttempted = true;
+    result.writeMayHaveReachedMedia = true;
+    result.failedBeforeWrite = false;
+    result.sectorsWritten += sectors;
+    result.reformatBytesWritten += bytes;
+    if (result.reformatState == FAT32_REFORMAT_BEFORE_DESTRUCTIVE_COMMIT)
+        result.reformatState = FAT32_REFORMAT_IN_PROGRESS;
+    switch (kind) {
+        case QUICK_WRITE_FAT1_ZERO: result.fat1BytesCleared += bytes; break;
+        case QUICK_WRITE_FAT2_ZERO: result.fat2BytesCleared += bytes; break;
+        case QUICK_WRITE_ROOT: result.rootClusterBytesWritten += bytes; break;
+        case QUICK_WRITE_RESERVED: result.reservedBytesWritten += bytes; break;
+        default: break;
+    }
+    return true;
+}
+
+static bool quick_zero_range(const Fat32FormatRequest& request,
+    const PartitionCheck& check, const StorageOperationLease& lease,
+    uint64_t relative, uint32_t sectors, QuickWriteKind kind,
+    uint32_t maxBatchSectors, Fat32FormatResult& result)
+{
+    uint32_t left = sectors;
+    uint64_t cursor = relative;
+    while (left != 0) {
+        const uint32_t batch = left < maxBatchSectors ? left : maxBatchSectors;
+        if (!quick_write_range(request, check, lease, cursor, batch,
+                s_zeroScanBuffer, kind, result)) return false;
+        cursor += batch;
+        left -= batch;
+    }
+    return true;
+}
+
+static bool quick_verify_fats(const Fat32FormatRequest& request,
+    const PartitionCheck& check, const StorageOperationLease& lease,
+    uint32_t maxBatchSectors)
+{
+    const uint32_t bps = check.geometry.bytesPerSector;
+    const uint64_t starts[2] = {check.geometry.firstFatSector,
+                                check.geometry.secondFatSector};
+    for (uint32_t copy = 0; copy < 2; ++copy) {
+        uint32_t left = check.geometry.fatSizeSectors;
+        uint64_t cursor = starts[copy];
+        uint32_t fatSector = 0;
+        while (left != 0) {
+            const uint32_t batch = left < maxBatchSectors ? left : maxBatchSectors;
+            uint64_t absolute = 0;
+            if (!rollback_context_valid(request, request.targetSnapshot,
+                    check.currentPartition, check.geometry, lease) ||
+                !add_u64(check.currentPartition.startLba, cursor, absolute) ||
+                block::read_sectors_checked(request.targetSnapshot.globalIndex,
+                    absolute, batch, s_zeroScanBuffer,
+                    FAT32_FORMAT_SCAN_BUFFER_MAX_BYTES) != block::BLOCK_OK)
+                return false;
+            const uint64_t bytes64 = static_cast<uint64_t>(batch) * bps;
+            if (bytes64 > FAT32_FORMAT_SCAN_BUFFER_MAX_BYTES) return false;
+            const size_t bytes = static_cast<size_t>(bytes64);
+            if (fatSector == 0) {
+                if (read_u32(s_zeroScanBuffer) != 0x0FFFFFF8u ||
+                    read_u32(s_zeroScanBuffer + 4) != 0x0FFFFFFFu ||
+                    read_u32(s_zeroScanBuffer + 8) != 0x0FFFFFFFu ||
+                    !bytes_zero(s_zeroScanBuffer + 12, bytes - 12u))
+                    return false;
+            } else if (!bytes_zero(s_zeroScanBuffer, bytes)) {
+                return false;
+            }
+            fatSector += batch;
+            cursor += batch;
+            left -= batch;
+        }
+    }
+    return true;
+}
+
+static bool quick_verify_reserved_and_root(const Fat32FormatRequest& request,
+    const PartitionCheck& check, const StorageOperationLease& lease,
+    const char label[11], uint32_t markerSector)
+{
+    const uint32_t bps = check.geometry.bytesPerSector;
+    for (uint32_t sector = 1; sector < check.geometry.reservedSectorCount;
+         ++sector) {
+        if (sector == check.geometry.fsInfoSector ||
+            sector == check.geometry.backupBootSector ||
+            sector == check.geometry.backupFsInfoSector ||
+            sector == markerSector) continue;
+        if (!rollback_context_valid(request, request.targetSnapshot,
+                check.currentPartition, check.geometry, lease) ||
+            read_partition_sector(request.targetSnapshot,
+                check.currentPartition, check.geometry, sector,
+                s_verifySector) != block::BLOCK_OK ||
+            !bytes_zero(s_verifySector, bps)) return false;
+    }
+    uint64_t rootSector = 0;
+    if (!cluster_relative_range(check.geometry, check.geometry.rootCluster,
+                                rootSector)) return false;
+    const bool haveLabel = label[0] != ' ';
+    for (uint32_t i = 0; i < check.geometry.sectorsPerCluster; ++i) {
+        uint64_t relative = 0;
+        if (!add_u64(rootSector, i, relative) ||
+            read_partition_sector(request.targetSnapshot,
+                check.currentPartition, check.geometry, relative,
+                s_verifySector) != block::BLOCK_OK) return false;
+        if (i == 0 && haveLabel) {
+            if (!bytes_equal(s_verifySector,
+                    reinterpret_cast<const uint8_t*>(label), 11) ||
+                s_verifySector[11] != 0x08 ||
+                !bytes_zero(s_verifySector + 12, bps - 12u)) return false;
+        } else if (!bytes_zero(s_verifySector, bps)) return false;
+    }
+    return true;
+}
+
+static bool quick_verify_prepublication(const Fat32FormatRequest& request,
+    const PartitionCheck& check, const StorageOperationLease& lease,
+    const char label[11], uint32_t markerSector, uint32_t maxBatchSectors)
+{
+    const uint32_t bps = check.geometry.bytesPerSector;
+    build_boot_sector(check.geometry, label, s_verifySector, bps);
+    if (read_partition_sector(request.targetSnapshot, check.currentPartition,
+            check.geometry, check.geometry.backupBootSector, s_ioSector) !=
+            block::BLOCK_OK || !bytes_equal(s_verifySector, s_ioSector, bps))
+        return false;
+    build_fsinfo(check.geometry, s_verifySector, bps);
+    if (read_partition_sector(request.targetSnapshot, check.currentPartition,
+            check.geometry, check.geometry.fsInfoSector, s_ioSector) !=
+            block::BLOCK_OK || !bytes_equal(s_verifySector, s_ioSector, bps) ||
+        read_partition_sector(request.targetSnapshot, check.currentPartition,
+            check.geometry, check.geometry.backupFsInfoSector, s_ioSector) !=
+            block::BLOCK_OK || !bytes_equal(s_verifySector, s_ioSector, bps))
+        return false;
+    return quick_verify_fats(request, check, lease, maxBatchSectors) &&
+        quick_verify_reserved_and_root(request, check, lease, label,
+                                       markerSector);
+}
+
+static Fat32FormatStatus quick_reformat_preflight_locked(
+    const Fat32FormatRequest& request, Fat32FormatResult& result,
+    PartitionCheck& check, QuickReformatSource& source)
+{
+    const Fat32FormatStatus status = validate_request_and_partition(
+        request, result, check);
+    if (status != FAT32_FORMAT_READY) return status;
+    const Fat32FormatStatus sourceStatus = inspect_quick_reformat_source(
+        request, check, source);
+    if (sourceStatus != FAT32_FORMAT_READY) return sourceStatus;
+    result.existingState = source.retry
+        ? FAT32_EXISTING_INTERRUPTED_REFORMAT
+        : FAT32_EXISTING_RECOGNIZED_FILESYSTEM;
+    result.reformatRetry = source.retry;
+    result.oldVolumeId = source.oldVolumeId;
+    uint32_t labelLength = 11;
+    while (labelLength != 0 && source.oldLabel[labelLength - 1] == ' ')
+        --labelLength;
+    for (uint32_t i = 0; i < labelLength; ++i)
+        result.oldVolumeLabel[i] = static_cast<char>(source.oldLabel[i]);
+    result.oldVolumeLabel[labelLength] = '\0';
+    result.reformatState = FAT32_REFORMAT_BEFORE_DESTRUCTIVE_COMMIT;
+    return FAT32_FORMAT_READY;
+}
+
+static Fat32FormatStatus execute_quick_reformat_locked(
+    const Fat32FormatRequest& request, Fat32FormatResult& result,
+    StorageOperationLease& lease)
+{
+    const uint64_t startTicks = scan_clock_ticks();
+    PartitionCheck check = {};
+    QuickReformatSource source = {};
+    result.stage = FAT32_FORMAT_STAGE_REVALIDATING_PARTITION;
+    Fat32FormatStatus status = quick_reformat_preflight_locked(
+        request, result, check, source);
+    if (status != FAT32_FORMAT_READY) return status;
+    char label[11];
+    status = normalize_fat32_volume_label(request.volumeLabel, label);
+    if (status != FAT32_FORMAT_READY) return status;
+    uint32_t volumeId = 0;
+    if (!make_volume_id(request, volumeId)) return FAT32_FORMAT_VOLUME_ID_UNAVAILABLE;
+    if (volumeId == source.oldVolumeId) {
+        volumeId ^= 0xA5A5A5A5u;
+        if (volumeId == 0) volumeId = 1;
+    }
+    check.geometry.volumeId = volumeId;
+    result.geometry = check.geometry;
+
+    // Revalidate the exact disk registration, table identity, mount/root/boot
+    // state, bounds, and current FAT32-or-marker state immediately before the
+    // first destructive write.
+    PartitionCheck finalCheck = {};
+    QuickReformatSource finalSource = {};
+    status = quick_reformat_preflight_locked(request, result, finalCheck,
+                                              finalSource);
+    if (status != FAT32_FORMAT_READY ||
+        !storage_operation_lease_is_current(lease) ||
+        !same_partition_extent(check.currentPartition,
+                               finalCheck.currentPartition) ||
+        !same_scan_geometry(check.geometry, finalCheck.geometry))
+        return status == FAT32_FORMAT_READY
+            ? FAT32_FORMAT_PARTITION_IDENTITY_CHANGED : status;
+    check = finalCheck;
+    source = finalSource;
+    check.geometry.volumeId = volumeId;
+    result.geometry = check.geometry;
+
+    const DeviceCapabilities& caps = check.capabilities;
+    const uint32_t maxBatchSectors = fat32_scan_batch_sectors(
+        check.geometry.bytesPerSector, caps.maxTransferBytes);
+    if (maxBatchSectors == 0) return FAT32_FORMAT_INVALID_GEOMETRY;
+    clear_bytes(s_zeroScanBuffer, sizeof(s_zeroScanBuffer));
+    if (!begin_storage_operation_execution(lease))
+        return FAT32_FORMAT_OPERATION_OWNERSHIP_INVALID;
+
+    bool ok = true;
+    bool primaryPublicationAttempted = false;
+    uint32_t markerSector = source.markerSector;
+    if (!source.retry) {
+        markerSector = kQuickMarkerLastSector;
+        while (markerSector >= kQuickMarkerFirstSector &&
+               (markerSector == source.oldBackupBootSector ||
+                markerSector == source.oldFsInfoSector)) --markerSector;
+        if (markerSector < kQuickMarkerFirstSector) {
+            result.status = FAT32_FORMAT_REFORMAT_MARKER_FAILED;
+            ok = false;
+        }
+    }
+
+    if (ok) {
+        result.stage = FAT32_FORMAT_STAGE_WRITE_BACKUP_METADATA;
+        result.lastStage = result.stage;
+        build_quick_marker(s_ioSector, check.geometry.bytesPerSector,
+            request, check.currentPartition, markerSector, source);
+        ok = quick_write_range(request, check, lease, markerSector, 1,
+            s_ioSector, QUICK_WRITE_RESERVED, result);
+    }
+    // Invalidate the previous backup first and primary second. Both changes
+    // are flushed and independently reread before either FAT copy is cleared.
+    if (ok) {
+        result.stage = FAT32_FORMAT_STAGE_WRITE_BACKUP_METADATA;
+        result.lastStage = result.stage;
+        if (read_partition_sector(request.targetSnapshot,
+                check.currentPartition, check.geometry,
+                source.oldBackupBootSector, s_ioSector) != block::BLOCK_OK) {
+            result.status = FAT32_FORMAT_READ_UNAVAILABLE;
+            ok = false;
+        } else {
+            s_ioSector[510] = 0;
+            s_ioSector[511] = 0;
+            ok = quick_write_range(request, check, lease,
+                source.oldBackupBootSector, 1, s_ioSector,
+                QUICK_WRITE_RESERVED, result);
+        }
+    }
+    if (ok) {
+        result.stage = FAT32_FORMAT_STAGE_WRITE_BOOT_SECTOR;
+        result.lastStage = result.stage;
+        if (read_partition_sector(request.targetSnapshot,
+                check.currentPartition, check.geometry, 0,
+                s_ioSector) != block::BLOCK_OK) {
+            result.status = FAT32_FORMAT_READ_UNAVAILABLE;
+            ok = false;
+        } else {
+            s_ioSector[510] = 0;
+            s_ioSector[511] = 0;
+            ok = quick_write_range(request, check, lease, 0, 1, s_ioSector,
+                QUICK_WRITE_RESERVED, result);
+        }
+    }
+    if (ok) {
+        result.stage = FAT32_FORMAT_STAGE_FLUSH;
+        result.lastStage = result.stage;
+        result.flushAttempted = true;
+        ++result.flushAttempts;
+        const block::FlushReport flush =
+            block::flush_with_result(request.targetSnapshot.globalIndex);
+        result.flushOutcome = flush.outcome;
+        result.flushStatus = flush.status;
+        if (!trusted_flush(flush)) {
+            result.failedOperation = block::OPERATION_FLUSH;
+            (void)capture_current_io_result(result);
+            result.status = flush.semanticsKnown ? FAT32_FORMAT_FLUSH_FAILED
+                                                  : FAT32_FORMAT_FLUSH_UNAVAILABLE;
+            ok = false;
+        } else {
+            result.reformatInvalidationFlushPassed = true;
+            result.finalProbeState = FAT32_FINAL_PROBE_UNFORMATTED;
+            if (read_partition_sector(request.targetSnapshot,
+                    check.currentPartition, check.geometry, 0,
+                    s_verifySector) != block::BLOCK_OK ||
+                s_verifySector[510] == 0x55 || s_verifySector[511] == 0xAA ||
+                read_partition_sector(request.targetSnapshot,
+                    check.currentPartition, check.geometry,
+                    source.oldBackupBootSector, s_verifySector) != block::BLOCK_OK ||
+                s_verifySector[510] == 0x55 || s_verifySector[511] == 0xAA ||
+                read_partition_sector(request.targetSnapshot,
+                    check.currentPartition, check.geometry, markerSector,
+                    s_verifySector) != block::BLOCK_OK ||
+                !quick_marker_identity_matches(s_verifySector, request,
+                    check.currentPartition, check.geometry.bytesPerSector,
+                    markerSector)) {
+                result.status = FAT32_FORMAT_VERIFICATION_FAILED;
+                ok = false;
+            }
+        }
+    }
+
+    // Clear the complete new reserved region except the primary publication
+    // sector and the retry marker. The marker remains until the new primary
+    // and all supporting structures have been durably verified.
+    if (ok) {
+        result.stage = FAT32_FORMAT_STAGE_WRITE_BACKUP_METADATA;
+        result.lastStage = result.stage;
+        if (markerSector > 1)
+            ok = quick_zero_range(request, check, lease, 1,
+                markerSector - 1u, QUICK_WRITE_RESERVED, maxBatchSectors, result);
+        const uint32_t afterMarker = markerSector + 1u;
+        if (ok && afterMarker < check.geometry.reservedSectorCount)
+            ok = quick_zero_range(request, check, lease, afterMarker,
+                check.geometry.reservedSectorCount - afterMarker,
+                QUICK_WRITE_RESERVED, maxBatchSectors, result);
+    }
+    if (ok) {
+        result.stage = FAT32_FORMAT_STAGE_WRITE_FAT;
+        result.lastStage = result.stage;
+        ok = quick_zero_range(request, check, lease,
+            check.geometry.firstFatSector, check.geometry.fatSizeSectors,
+            QUICK_WRITE_FAT1_ZERO, maxBatchSectors, result);
+    }
+    if (ok) {
+        result.stage = FAT32_FORMAT_STAGE_WRITE_FAT;
+        result.lastStage = result.stage;
+        ok = quick_zero_range(request, check, lease,
+            check.geometry.secondFatSector, check.geometry.fatSizeSectors,
+            QUICK_WRITE_FAT2_ZERO, maxBatchSectors, result);
+    }
+    if (ok) {
+        result.stage = FAT32_FORMAT_STAGE_WRITE_FAT;
+        result.lastStage = result.stage;
+        build_fat_sector(check.geometry, s_ioSector,
+                         check.geometry.bytesPerSector);
+        ok = quick_write_range(request, check, lease,
+            check.geometry.firstFatSector, 1, s_ioSector,
+            QUICK_WRITE_FAT1_INIT, result);
+        if (ok) ok = quick_write_range(request, check, lease,
+            check.geometry.secondFatSector, 1, s_ioSector,
+            QUICK_WRITE_FAT2_INIT, result);
+    }
+    uint64_t rootSector = 0;
+    if (ok) {
+        result.stage = FAT32_FORMAT_STAGE_WRITE_ROOT;
+        result.lastStage = result.stage;
+        ok = cluster_relative_range(check.geometry,
+            check.geometry.rootCluster, rootSector) &&
+            quick_zero_range(request, check, lease, rootSector,
+                check.geometry.sectorsPerCluster, QUICK_WRITE_ROOT,
+                maxBatchSectors, result);
+        if (!ok && result.status == FAT32_FORMAT_INVALID_REQUEST)
+            result.status = FAT32_FORMAT_INVALID_GEOMETRY;
+        if (ok && label[0] != ' ') {
+            build_root_sector(label, true, s_ioSector,
+                              check.geometry.bytesPerSector);
+            ok = quick_write_range(request, check, lease, rootSector, 1,
+                s_ioSector, QUICK_WRITE_ROOT, result);
+        }
+    }
+    if (ok) {
+        result.stage = FAT32_FORMAT_STAGE_WRITE_FSINFO;
+        result.lastStage = result.stage;
+        build_fsinfo(check.geometry, s_ioSector,
+                     check.geometry.bytesPerSector);
+        ok = quick_write_range(request, check, lease,
+            check.geometry.fsInfoSector, 1, s_ioSector,
+            QUICK_WRITE_RESERVED, result);
+        if (ok) ok = quick_write_range(request, check, lease,
+            check.geometry.backupFsInfoSector, 1, s_ioSector,
+            QUICK_WRITE_RESERVED, result);
+    }
+    if (ok) {
+        result.stage = FAT32_FORMAT_STAGE_WRITE_BACKUP_METADATA;
+        result.lastStage = result.stage;
+        build_boot_sector(check.geometry, label, s_ioSector,
+                          check.geometry.bytesPerSector);
+        ok = quick_write_range(request, check, lease,
+            check.geometry.backupBootSector, 1, s_ioSector,
+            QUICK_WRITE_RESERVED, result);
+    }
+    if (ok) {
+        result.stage = FAT32_FORMAT_STAGE_FLUSH;
+        result.lastStage = result.stage;
+        result.flushAttempted = true;
+        ++result.flushAttempts;
+        const block::FlushReport flush =
+            block::flush_with_result(request.targetSnapshot.globalIndex);
+        result.flushOutcome = flush.outcome;
+        result.flushStatus = flush.status;
+        if (!trusted_flush(flush)) {
+            result.failedOperation = block::OPERATION_FLUSH;
+            (void)capture_current_io_result(result);
+            result.status = flush.semanticsKnown ? FAT32_FORMAT_FLUSH_FAILED
+                                                  : FAT32_FORMAT_FLUSH_UNAVAILABLE;
+            ok = false;
+        }
+    }
+    if (ok) {
+        result.stage = FAT32_FORMAT_STAGE_VERIFY;
+        result.lastStage = result.stage;
+        ok = quick_verify_prepublication(request, check, lease, label,
+            markerSector, maxBatchSectors);
+        if (!ok) {
+            result.failedOperation = block::OPERATION_READ;
+            (void)capture_current_io_result(result);
+            result.status = FAT32_FORMAT_VERIFICATION_FAILED;
+        }
+    }
+    if (ok) {
+        // The primary BPB is the final filesystem-authority publication.
+        result.stage = FAT32_FORMAT_STAGE_WRITE_BOOT_SECTOR;
+        result.lastStage = result.stage;
+        build_boot_sector(check.geometry, label, s_ioSector,
+                          check.geometry.bytesPerSector);
+        primaryPublicationAttempted = true;
+        ok = quick_write_range(request, check, lease, 0, 1, s_ioSector,
+            QUICK_WRITE_RESERVED, result);
+    }
+    if (ok) {
+        result.reformatState = FAT32_REFORMAT_NEW_FILESYSTEM_WRITTEN_NOT_DURABLE;
+        result.stage = FAT32_FORMAT_STAGE_FLUSH;
+        result.lastStage = result.stage;
+        result.flushAttempted = true;
+        ++result.flushAttempts;
+        const block::FlushReport flush =
+            block::flush_with_result(request.targetSnapshot.globalIndex);
+        result.flushOutcome = flush.outcome;
+        result.flushStatus = flush.status;
+        result.persistenceTrusted = trusted_flush(flush);
+        if (!result.persistenceTrusted) {
+            result.failedOperation = block::OPERATION_FLUSH;
+            (void)capture_current_io_result(result);
+            result.status = flush.semanticsKnown ? FAT32_FORMAT_FLUSH_FAILED
+                                                  : FAT32_FORMAT_FLUSH_UNAVAILABLE;
+            ok = false;
+        }
+    }
+    if (ok) {
+        result.stage = FAT32_FORMAT_STAGE_VERIFY;
+        result.lastStage = result.stage;
+        if (!verify_fat32_structure(request.targetSnapshot,
+                check.currentPartition, check.geometry, label) ||
+            !quick_verify_fats(request, check, lease, maxBatchSectors)) {
+            result.failedOperation = block::OPERATION_READ;
+            (void)capture_current_io_result(result);
+            result.status = FAT32_FORMAT_VERIFICATION_FAILED;
+            ok = false;
+        } else {
+            result.verificationPassed = true;
+            result.finalProbeState = FAT32_FINAL_PROBE_FAT32;
+        }
+    }
+    if (ok) {
+        // Remove the retry marker only after the fresh filesystem is durable.
+        clear_bytes(s_ioSector, check.geometry.bytesPerSector);
+        ok = quick_write_range(request, check, lease, markerSector, 1,
+            s_ioSector, QUICK_WRITE_RESERVED, result);
+    }
+    if (ok) {
+        result.stage = FAT32_FORMAT_STAGE_FLUSH;
+        result.lastStage = result.stage;
+        result.flushAttempted = true;
+        ++result.flushAttempts;
+        const block::FlushReport flush =
+            block::flush_with_result(request.targetSnapshot.globalIndex);
+        result.flushOutcome = flush.outcome;
+        result.flushStatus = flush.status;
+        result.persistenceTrusted = trusted_flush(flush);
+        if (!result.persistenceTrusted) {
+            result.failedOperation = block::OPERATION_FLUSH;
+            (void)capture_current_io_result(result);
+            result.status = flush.semanticsKnown ? FAT32_FORMAT_FLUSH_FAILED
+                                                  : FAT32_FORMAT_FLUSH_UNAVAILABLE;
+            ok = false;
+        }
+    }
+    if (ok) {
+        result.stage = FAT32_FORMAT_STAGE_VERIFY;
+        result.lastStage = result.stage;
+        ok = verify_fat32_structure(request.targetSnapshot,
+                check.currentPartition, check.geometry, label) &&
+            quick_verify_fats(request, check, lease, maxBatchSectors) &&
+            quick_verify_reserved_and_root(request, check, lease, label,
+                check.geometry.reservedSectorCount) &&
+            read_partition_sector(request.targetSnapshot,
+                check.currentPartition, check.geometry, markerSector,
+                s_verifySector) == block::BLOCK_OK &&
+            bytes_zero(s_verifySector, check.geometry.bytesPerSector);
+        if (!ok) {
+            result.failedOperation = block::OPERATION_READ;
+            (void)capture_current_io_result(result);
+            result.status = FAT32_FORMAT_VERIFICATION_FAILED;
+        }
+    }
+    if (ok) {
+        result.stage = FAT32_FORMAT_STAGE_RESCAN;
+        result.lastStage = result.stage;
+        ok = rescan_partition(request, check.currentPartition) &&
+            revalidate_target_identity(request.targetSnapshot) == TARGET_VALID;
+        if (!ok) {
+            result.failedOperation = block::OPERATION_READ;
+            (void)capture_current_io_result(result);
+            result.status = FAT32_FORMAT_RESCAN_FAILED;
+        }
+    }
+
+    result.reformatElapsedTicks = scan_clock_ticks() - startTicks;
+    if (!ok) {
+        if (result.status == FAT32_FORMAT_INVALID_REQUEST)
+            result.status = FAT32_FORMAT_METADATA_WRITE_FAILED;
+        result.failureStatus = result.status;
+        result.firstFailedStage = result.firstFailedStage ==
+            FAT32_FORMAT_STAGE_IDLE ? result.stage : result.firstFailedStage;
+        result.stage = FAT32_FORMAT_STAGE_FAILED;
+        result.failedBeforeWrite = !result.writeMayHaveReachedMedia;
+        if (result.reformatState >= FAT32_REFORMAT_IN_PROGRESS) {
+            result.status = FAT32_FORMAT_REFORMAT_INCOMPLETE;
+            result.finalProbeState = result.verificationPassed
+                ? FAT32_FINAL_PROBE_FAT32
+                : (result.reformatInvalidationFlushPassed &&
+                   !primaryPublicationAttempted
+                    ? FAT32_FINAL_PROBE_UNFORMATTED
+                    : FAT32_FINAL_PROBE_UNKNOWN);
+            set_diagnostic(result,
+                "Quick Reformat did not complete. The previous filesystem may no longer be usable; retry formatting after fresh preflight.");
+        } else {
+            set_diagnostic(result, fat32_format_status_name(result.status));
+        }
+        complete_storage_operation_execution(lease);
+        return result.status;
+    }
+    result.status = FAT32_FORMAT_SUCCESS;
+    result.failureStatus = FAT32_FORMAT_SUCCESS;
+    result.stage = FAT32_FORMAT_STAGE_COMPLETED;
+    result.lastStage = FAT32_FORMAT_STAGE_COMPLETED;
+    result.failedBeforeWrite = false;
+    result.verificationPassed = true;
+    result.finalProbeState = FAT32_FINAL_PROBE_FAT32;
+    result.reformatState = FAT32_REFORMAT_DURABLE;
+    set_diagnostic(result,
+        "Quick Reformat completed, flushed, reread, verified, and rescanned. Ordinary file-data sectors were not erased.");
+    complete_storage_operation_execution(lease);
+    return result.status;
+}
+
 static Fat32FormatStatus execute_locked(const Fat32FormatRequest& request,
                                         Fat32FormatResult& result,
                                         StorageOperationLease& lease)
@@ -1517,6 +2330,55 @@ static Fat32FormatStatus run_probe_locked(const Fat32FormatRequest& request,
     return FAT32_FORMAT_READY;
 }
 
+static Fat32FormatStatus run_quick_reformat_with_lease(
+    const Fat32FormatRequest& request, Fat32FormatResult& result, bool format)
+{
+    StorageOperationLease lease = {};
+    result.stage = FAT32_FORMAT_STAGE_ACQUIRE_LEASE;
+    const StorageOperationLockStatus lock = try_acquire_storage_operation(lease);
+    if (lock != STORAGE_OPERATION_LOCK_ACQUIRED) {
+        result.status = lock == STORAGE_OPERATION_LOCK_BUSY
+            ? FAT32_FORMAT_OPERATION_BUSY
+            : FAT32_FORMAT_OPERATION_OWNERSHIP_INVALID;
+        mark_stage_failed(result);
+        set_diagnostic(result, fat32_format_status_name(result.status));
+        return result.status;
+    }
+    result.stage = FAT32_FORMAT_STAGE_PIN_TARGET;
+    if (!pin_storage_operation_target(lease, request.targetSnapshot)) {
+        result.status = map_identity(
+            revalidate_target_identity(request.targetSnapshot));
+        if (result.status == FAT32_FORMAT_SUCCESS)
+            result.status = FAT32_FORMAT_IDENTITY_CHANGED;
+        mark_stage_failed(result);
+        set_diagnostic(result, fat32_format_status_name(result.status));
+        release_storage_operation(lease);
+        return result.status;
+    }
+    Fat32FormatStatus status;
+    if (format) {
+        status = execute_quick_reformat_locked(request, result, lease);
+    } else {
+        PartitionCheck check = {};
+        QuickReformatSource source = {};
+        status = quick_reformat_preflight_locked(request, result, check,
+                                                  source);
+    }
+    if (!format || (!result.writeAttempted &&
+            result.stage != FAT32_FORMAT_STAGE_COMPLETED &&
+            result.stage != FAT32_FORMAT_STAGE_STATE_UNCERTAIN))
+        release_storage_operation(lease);
+    if (status != FAT32_FORMAT_READY && status != FAT32_FORMAT_SUCCESS &&
+        status != FAT32_FORMAT_REFORMAT_INCOMPLETE &&
+        result.stage != FAT32_FORMAT_STAGE_STATE_UNCERTAIN) {
+        result.status = status;
+        if (result.stage != FAT32_FORMAT_STAGE_FAILED)
+            mark_stage_failed(result);
+        set_diagnostic(result, fat32_format_status_name(status));
+    }
+    return status;
+}
+
 static Fat32FormatStatus run_with_lease(const Fat32FormatRequest& request,
                                         Fat32FormatResult& result,
                                         bool format)
@@ -1749,6 +2611,26 @@ Fat32FormatStatus format_fat32_partition(
     return run_with_lease(request, result, true);
 }
 
+Fat32FormatStatus probe_fat32_quick_reformat_partition(
+    const Fat32FormatRequest& request, Fat32FormatResult& result)
+{
+    reset_result(result);
+    result.targetIdentity = request.targetSnapshot;
+    result.partition = request.partitionSnapshot;
+    result.stage = FAT32_FORMAT_STAGE_VALIDATING;
+    return run_quick_reformat_with_lease(request, result, false);
+}
+
+Fat32FormatStatus quick_reformat_fat32_partition(
+    const Fat32FormatRequest& request, Fat32FormatResult& result)
+{
+    reset_result(result);
+    result.targetIdentity = request.targetSnapshot;
+    result.partition = request.partitionSnapshot;
+    result.stage = FAT32_FORMAT_STAGE_VALIDATING;
+    return run_quick_reformat_with_lease(request, result, true);
+}
+
 const char* fat32_format_status_name(Fat32FormatStatus status)
 {
     switch (status) {
@@ -1787,6 +2669,9 @@ const char* fat32_format_status_name(Fat32FormatStatus status)
         case FAT32_FORMAT_VERIFICATION_FAILED: return "FAT32 structure verification failed";
         case FAT32_FORMAT_RESCAN_FAILED: return "The partition table could not be verified after formatting";
         case FAT32_FORMAT_ROLLBACK_FAILED: return "Filesystem state uncertain; rollback could not be verified";
+        case FAT32_FORMAT_REFORMAT_TARGET_UNSUPPORTED: return "Quick Reformat supports guideXOS FAT32 or a marked interrupted reformat";
+        case FAT32_FORMAT_REFORMAT_MARKER_FAILED: return "Interrupted-reformat marker is invalid or does not match this partition";
+        case FAT32_FORMAT_REFORMAT_INCOMPLETE: return "Quick Reformat did not complete; the filesystem may be incomplete";
         default: return "Unknown FAT32 format status";
     }
 }
@@ -1831,7 +2716,21 @@ const char* fat32_existing_state_name(Fat32ExistingState state)
         case FAT32_EXISTING_RECOGNIZED_FILESYSTEM: return "Recognized filesystem";
         case FAT32_EXISTING_AMBIGUOUS_DATA: return "Unknown non-zero data";
         case FAT32_EXISTING_UNREADABLE: return "Unreadable";
+        case FAT32_EXISTING_INTERRUPTED_REFORMAT: return "Interrupted FAT32 reformat";
         case FAT32_EXISTING_UNKNOWN: default: return "Unknown";
+    }
+}
+
+const char* fat32_reformat_state_name(Fat32ReformatState state)
+{
+    switch (state) {
+        case FAT32_REFORMAT_BEFORE_DESTRUCTIVE_COMMIT:
+            return "BeforeDestructiveCommit";
+        case FAT32_REFORMAT_IN_PROGRESS: return "ReformatInProgress";
+        case FAT32_REFORMAT_NEW_FILESYSTEM_WRITTEN_NOT_DURABLE:
+            return "NewFilesystemWrittenButNotDurable";
+        case FAT32_REFORMAT_DURABLE: return "Durable";
+        default: return "Unknown";
     }
 }
 

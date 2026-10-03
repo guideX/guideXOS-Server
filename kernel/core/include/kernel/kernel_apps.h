@@ -1309,6 +1309,7 @@ private:
     InitializeDialogState m_initializeDialogState;
     bool m_dialogIsCreate;
     bool m_dialogIsFormat;
+    bool m_dialogIsReformat;
     bool m_dialogIsDelete;
     bool m_createSizeEdited;
     bool m_createNameEdited;
