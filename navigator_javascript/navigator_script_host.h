@@ -121,6 +121,9 @@ enum class NavigatorScriptStatePseudo : std::uint8_t {
     FirstChild,
     LastChild,
     OnlyChild,
+    FirstOfType,
+    LastOfType,
+    OnlyOfType,
 };
 
 struct NavigatorScriptSimpleSelectorDescriptor {

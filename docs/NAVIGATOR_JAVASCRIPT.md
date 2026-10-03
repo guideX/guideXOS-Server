@@ -5436,8 +5436,109 @@ changed `game.o`, `renderer.o`, and `main.o`; all three were restored from the
 snapshot. Final comparison found zero changed, zero missing, and zero extra
 files. Generated artifacts are excluded from the JS53 source commit.
 
-JS53 does not add `:first-of-type`, `:last-of-type`, `:only-of-type`, any
-`nth-*` pseudo, `:empty`, `:root`, functional pseudos, pseudo-elements,
-multiple pseudos on one simple selector, more relation depth, or public DOM
-insertion/removal APIs. This remains a bounded structural subset of CSS
-selectors.
+The JS53 increment did not add `:first-of-type`, `:last-of-type`, or
+`:only-of-type`; JS54 adds those below. `nth-*`, `:empty`, `:root`, functional
+pseudos, pseudo-elements, multiple pseudos on one simple selector, more
+relation depth, and public DOM insertion/removal APIs remain outside this
+bounded structural subset of CSS selectors.
+
+## JS54: bounded structural of-type pseudo-classes
+
+JS54 adds the zero-argument selector pseudos `:first-of-type`,
+`:last-of-type`, and `:only-of-type` to the existing simple-selector pseudo
+field. The optional pseudo enum remains one byte, so the descriptor does not
+grow. The implementation uses the current `WebDocument::structuralElements`
+records and their `parentSerial` links, requires a resolvable nonzero parent,
+and scans at most `min(maxDocumentNodes, structuralElements.size())` records.
+Only structural Elements with that same parent are candidates. Text, comment,
+parser-token, layout, style visibility, and form-ownership state do not take
+part.
+
+“Type” uses the same `selectorTagEquals()` helper as an ordinary tag selector.
+That comparison is ASCII case-insensitive under the existing selector/tag
+rules. `HtmlElementRef::tagName` is a `std::string` with no separate fixed
+per-tag byte limit; HTML parsing lowercases tag names before storing them and
+the structural registry is capped at 1,024 Elements. The selector itself
+remains subject to the 256-byte bound. Of-type evaluation compares directly
+against the current structural tag and does not allocate or cache indexes.
+
+Each pseudo requires a valid structural parent, including for `:only-of-type`;
+a root Element with `parentSerial == 0`, a missing parent record, or a
+self-parent fails closed. First/last scans use the structural vector's order
+and ignore different-tag siblings. Only-of-type succeeds when there is no
+other same-tag structural sibling. Hidden represented Elements count, and
+logical form ownership does not change structural position. Class and
+attribute predicates filter the matched Element, but do not change which
+sibling tags count as its type. Thus a button between spans can be both
+`:first-of-type` and `:last-of-type` while failing all three child pseudos;
+`:class:first-of-type` still means the first sibling with that tag, not the
+first sibling with that class.
+
+Before evaluating type position, the matcher checks the bounded same-parent
+sequence against each Element's `childIndex`, `previousSiblingSerial`, and
+`siblingCount`, plus the parent's `childCount`. Missing or inconsistent order
+metadata fails closed.
+
+Pseudo-only, universal, tag, ID, class, attribute, and full compound forms
+share the existing matcher. Pseudo names remain exact, hyphenated,
+ASCII-case-insensitive keywords; functional forms, malformed spellings,
+unknown names, reordered compound syntax, and a second pseudo on one simple
+selector fail closed. The pseudos compose with the existing single-relation
+selectors, selector lists, `querySelector()`, live `querySelectorAll()`
+collections, `matches()`, and `closest()`. Selector-list results retain
+structural document order and deduplicate Elements that match multiple
+members. Held collections reevaluate the current parent and tag state. Stale
+Elements and collections keep the existing generation checks.
+
+The focused suite is `tests/navigator_javascript_js54_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js54.ps1`. It covers parser bounds,
+mixed-type and same-type sibling rules, all-six-pseudo child/of-type
+distinction, hidden siblings, form ownership, malformed and parentless
+Elements, selector compounds and relations, list overlap, API identity, live
+parent/tag reevaluation, generation reuse, event matching, purity, and
+near-capacity stress. The stress fixture has 1,024 structural Elements with
+1,021 siblings under one parent, including 1,019 same-tag spans. It completes
+1,000 repeated matches for each of the three pseudos and 300 reread rounds for
+held first/last/only collections. The focused suite passes **238/238 checks**;
+its strict warning-as-error parser/adapter/runtime lane also passes.
+
+JS54 reuses the fixed selector descriptors and collection registry. Sizes
+remain **32 bytes** for a simple selector, **524 bytes** for a four-member
+selector descriptor, **544 bytes** per collection record, and **69,632 bytes**
+for the 128-record registry. No selector or Element cache was added.
+
+The complete JavaScript matrix, lexer, parser, runtime, and JS6–JS54, passes
+**52/52 lanes**. Focused regressions JS36–JS54 all pass: JS36–JS43 report
+114/114, 180/180, 152/152, 218/218, 155/155, 220/220, 235/235, and 277/277;
+JS44–JS53 report 183/183, 184/184, 220/220, 137/137, 136/136, 150/150,
+313/313, 278/278, 319/319, and 211/211; JS54 reports 238/238. JS52's former
+unknown-pseudo assertion now confirms that `:first-of-type` matches the
+first input in its structural parent.
+
+All seven JS54 production hosted checks pass, including mixed-type divergence,
+parser and compound behavior, root/hidden/form semantics, relation and query
+integration, selector-list deduplication, and nested Event matching with
+metadata preservation. The hosted aggregate reports **579 passed / 7 failed /
+586 total**. Its seven failures remain the existing CSS 3C, CSS 3G, CSS 6A,
+three CSS 6B, and CSS 6C checks; JS54 adds no hosted failure. `build.bat`
+passes.
+
+The kernel wrapper stops at the existing PacMan Native ELF link errors for
+`pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)`. The independent direct kernel lane
+stops at the existing Mbed TLS configuration errors in
+`mbedtls_check_config.h:51` and `:64`. Neither dependency was changed. No fresh
+kernel was produced, so QEMU proof is not claimed.
+
+Before the kernel attempts, the generated-output audit snapshotted 315 files
+totaling 147,131,477 bytes across `ESP/`, `out/`, the PacMan source/package and
+AMD64 objects, `kernel/build/`, and both BootLoader Release folders. The
+wrapper changed `game.o`, `main.o`, and `renderer.o`; they were restored from
+the snapshot and their lengths and SHA-256 hashes verified. Final comparison
+found **zero changed, zero missing, and zero extra files**.
+
+JS54 does not add `nth-*`, `:empty`, `:root`, functional pseudos,
+pseudo-elements, multiple pseudos on one simple selector, more relation depth,
+or public DOM insertion/removal. A bounded `:nth-child()` / `:nth-last-child()`
+phase is a possible JS55 direction; it should define its accepted formula
+grammar and arithmetic bounds before implementation.

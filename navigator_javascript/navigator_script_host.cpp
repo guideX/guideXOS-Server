@@ -577,6 +577,18 @@ bool parseStatePseudo(SourceView source, std::size_t colon,
         pseudo = NavigatorScriptStatePseudo::OnlyChild;
         return true;
     }
+    if (equalsAsciiCaseInsensitive("first-of-type")) {
+        pseudo = NavigatorScriptStatePseudo::FirstOfType;
+        return true;
+    }
+    if (equalsAsciiCaseInsensitive("last-of-type")) {
+        pseudo = NavigatorScriptStatePseudo::LastOfType;
+        return true;
+    }
+    if (equalsAsciiCaseInsensitive("only-of-type")) {
+        pseudo = NavigatorScriptStatePseudo::OnlyOfType;
+        return true;
+    }
     return false;
 }
 
@@ -3317,6 +3329,64 @@ bool NavigatorScriptHostAdapter::selectorStatePseudoMatches(
             previousSerial == 0u &&
             !elementSiblingAt(element.serial, true, nextSerial) &&
             nextSerial == 0u;
+    }
+    case NavigatorScriptStatePseudo::FirstOfType:
+    case NavigatorScriptStatePseudo::LastOfType:
+    case NavigatorScriptStatePseudo::OnlyOfType: {
+        HostInstanceId parentSerial = 0u;
+        if (!resolveStructuralParentSerial(element.serial, parentSerial) ||
+            parentSerial == 0u) return false;
+
+        const std::size_t count = std::min(limits_.maxDocumentNodes,
+            document_->structuralElements.size());
+        const gxos::web::HtmlElementRef* parent = findElement(parentSerial);
+        if (parent == nullptr) return false;
+        std::size_t currentPosition = count;
+        std::size_t siblingCount = 0u;
+        HostInstanceId previousSiblingSerial = 0u;
+        for (std::size_t position = 0u; position < count; ++position) {
+            const gxos::web::HtmlElementRef& candidate =
+                document_->structuralElements[position];
+            if (candidate.parentSerial != parentSerial) continue;
+            if (candidate.serial == 0u ||
+                siblingCount >= std::numeric_limits<std::uint16_t>::max())
+                return false;
+            ++siblingCount;
+            if (candidate.childIndex != siblingCount ||
+                candidate.siblingCount != element.siblingCount ||
+                candidate.previousSiblingSerial != previousSiblingSerial)
+                return false;
+            if (&candidate == &element) currentPosition = position;
+            previousSiblingSerial = candidate.serial;
+        }
+        if (currentPosition >= count || siblingCount != element.siblingCount ||
+            parent->childCount != siblingCount) return false;
+
+        const SourceView currentTag(element.tagName.data(),
+            element.tagName.size());
+        bool hasEarlierSameType = false;
+        bool hasLaterSameType = false;
+        for (std::size_t position = 0u; position < count; ++position) {
+            if (position == currentPosition) continue;
+            const gxos::web::HtmlElementRef& candidate =
+                document_->structuralElements[position];
+            if (candidate.serial == 0u ||
+                candidate.parentSerial != parentSerial ||
+                !selectorTagEquals(candidate.tagName, currentTag)) continue;
+            if (position < currentPosition) hasEarlierSameType = true;
+            else hasLaterSameType = true;
+        }
+
+        switch (pseudo) {
+        case NavigatorScriptStatePseudo::FirstOfType:
+            return !hasEarlierSameType;
+        case NavigatorScriptStatePseudo::LastOfType:
+            return !hasLaterSameType;
+        case NavigatorScriptStatePseudo::OnlyOfType:
+            return !hasEarlierSameType && !hasLaterSameType;
+        default:
+            return false;
+        }
     }
     }
     return false;
