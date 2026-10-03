@@ -22,6 +22,7 @@
 #include "include/kernel/input_manager.h"
 #include "include/kernel/pit.h"
 #include "include/kernel/pci_audio.h"
+#include "include/kernel/usb_controller.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/desktop_capabilities.h"
 #include "include/kernel/app_launch_target_resolver.h"
@@ -898,6 +899,13 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[KERNEL] Audio controllers detected: ");
         kernel::serial::put_hex8(kernel::pci_audio::controller_count());
         kernel::serial::puts("\n");
+
+        // Modern-input diagnostics: enumerate and classify every PCI USB
+        // host controller and report the xHCI capability/protocol milestones.
+        // This is read-only and makes the bare-metal input failure frontier
+        // visible even before a controller driver exists.  See
+        // docs/MODERN_INPUT_INPUT1.md.
+        kernel::usb::diagnostics::scan_host_controllers();
 #if defined(GXOS_AUDIO_BOOT_SELFTEST)
         // Opt-in full DMA proof (QEMU proof builds only, never default:
         // it audibly exercises the hardware). See
