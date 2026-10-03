@@ -1,0 +1,874 @@
+WARNING: Experimental Native ELF execution is enabled.
+This build is for local hosted runtime validation only.
+Building guideXOS Server experimental Native ELF runtime...
+Using compiler: C:\mingw64\bin\g++.exe
+MBEDTLS_PROFILE_VERIFY=PASS
+MBEDTLS_VERSION=4.1.0
+TF_PSA_CRYPTO_VERSION=1.1.0
+MBEDTLS_DEPENDENCY_ROOT=D:\dev\guideXOSServer\third_party\mbedtls
+MBEDTLS_PATCH_COUNT=3
+MBEDTLS_PROFILE_SHA_MODE=normalized-UTF8-LF
+Compiling experimental hosted runtime...
+allocator.cpp: In static member function 'static void gxos::Allocator::free(void*)':
+allocator.cpp:63:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   63 |         if (!ptr) return; std::lock_guard<std::mutex> _g(g_lock);
+      |         ^~
+allocator.cpp:63:27: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   63 |         if (!ptr) return; std::lock_guard<std::mutex> _g(g_lock);
+      |                           ^~~
+In file included from calculator.cpp:3:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from clock.cpp:3:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:105:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+  105 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from clock.cpp:6:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:10,
+                 from compositor.cpp:1:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:105:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+  105 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+compositor.cpp: In static member function 'static LRESULT gxos::gui::Compositor::WndProc(HWND, UINT, WPARAM, LPARAM)':
+compositor.cpp:4678:26: warning: unused variable 'wrect' [-Wunused-variable]
+ 4678 |                     RECT wrect{ winfo.x, winfo.y, winfo.x + winfo.w, winfo.y + winfo.h };
+      |                          ^~~~~
+compositor.cpp:5014:25: warning: unused variable 'rightColW' [-Wunused-variable]
+ 5014 |                     int rightColW = 160; // right column for shortcuts
+      |                         ^~~~~~~~~
+compositor.cpp:5314:40: warning: unused variable 'tmActions' [-Wunused-variable]
+ 5314 |                     static const char* tmActions[] = { "TaskManager", "Reboot", "LogOff" };
+      |                                        ^~~~~~~~~
+compositor.cpp: At global scope:
+compositor.cpp:2496:25: warning: 'uint32_t gxos::gui::startMenuFallbackIconColor32(const std::string&)' defined but not used [-Wunused-function]
+ 2496 |         static uint32_t startMenuFallbackIconColor32(const std::string& label) {
+      |                         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compositor.cpp:1669:21: warning: 'void gxos::gui::drawBackgroundImageToPixels(uint32_t*, int, int, int, const ImagePtr&, BackgroundScaleMode)' defined but not used [-Wunused-function]
+ 1669 |         static void drawBackgroundImageToPixels(uint32_t* pixels, int fbW, int fbH, int pitch, const ImagePtr& image, BackgroundScaleMode mode)
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+compositor.cpp:1647:21: warning: 'void gxos::gui::drawBackgroundGradientToPixels(uint32_t*, int, int, int, uint32_t, uint32_t)' defined but not used [-Wunused-function]
+ 1647 |         static void drawBackgroundGradientToPixels(uint32_t* pixels, int fbW, int fbH, int pitch, uint32_t topColor, uint32_t bottomColor)
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compositor.cpp:1125:28: warning: 'gxos::gui::DisplayRect gxos::gui::monitorWorkAreaForPoint(const DisplayVirtualDesktop&, const DisplayViewport&, int, int)' defined but not used [-Wunused-function]
+ 1125 |         static DisplayRect monitorWorkAreaForPoint(
+      |                            ^~~~~~~~~~~~~~~~~~~~~~~
+In file included from console_window.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from desktop_service.cpp:9:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:105:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+  105 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from compositor.h:10,
+                 from desktop_service.cpp:15:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:10,
+                 from development_run_service.cpp:4:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:105:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+  105 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+development_run_service.cpp: At global scope:
+development_run_service.cpp:77:10: warning: 'uint32_t gxos::apps::DevelopmentRunService::{anonymous}::textLength(const char*, uint32_t)' defined but not used [-Wunused-function]
+   77 | uint32_t textLength(const char* value, uint32_t limit) {
+      |          ^~~~~~~~~~
+desktop_state.cpp: In static member function 'static bool gxos::gui::DesktopState::Load(const std::string&, std::vector<gxos::gui::SavedWindow>&, std::string&)':
+desktop_state.cpp:25:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   25 |             if(line.empty()) continue; std::istringstream iss(line); std::string idS,title,xs,ys,ws,hs,ms,maxS,zS,fS,snapS,restoreXs,restoreYs,restoreWs,restoreHs; std::getline(iss,idS,'|'); std::getline(iss,title,'|'); std::getline(iss,xs,'|'); std::getline(iss,ys,'|'); std::getline(iss,ws,'|'); std::getline(iss,hs,'|'); std::getline(iss,ms,'|'); std::getline(iss,maxS,'|'); std::getline(iss,zS,'|'); std::getline(iss,fS,'|'); std::getline(iss,snapS,'|'); std::getline(iss,restoreXs,'|'); std::getline(iss,restoreYs,'|'); std::getline(iss,restoreWs,'|'); std::getline(iss,restoreHs,'|'); SavedWindow sw{}; try{ sw.id=std::stoull(idS); sw.title=title; sw.x=std::stoi(xs); sw.y=std::stoi(ys); sw.w=std::stoi(ws); sw.h=std::stoi(hs); sw.minimized=(ms=="1"); sw.maximized=(maxS=="1"); sw.z=std::stoi(zS); sw.focused=(fS=="1"); sw.snap=std::stoi(snapS); sw.restoreX=restoreXs.empty()?sw.x:std::stoi(restoreXs); sw.restoreY=restoreYs.empty()?sw.y:std::stoi(restoreYs); sw.restoreW=restoreWs.empty()?sw.w:std::stoi(restoreWs); sw.restoreH=restoreHs.empty()?sw.h:std::stoi(restoreHs); }catch(...){ continue; } wins.push_back(sw);
+      |             ^~
+desktop_state.cpp:25:40: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   25 |             if(line.empty()) continue; std::istringstream iss(line); std::string idS,title,xs,ys,ws,hs,ms,maxS,zS,fS,snapS,restoreXs,restoreYs,restoreWs,restoreHs; std::getline(iss,idS,'|'); std::getline(iss,title,'|'); std::getline(iss,xs,'|'); std::getline(iss,ys,'|'); std::getline(iss,ws,'|'); std::getline(iss,hs,'|'); std::getline(iss,ms,'|'); std::getline(iss,maxS,'|'); std::getline(iss,zS,'|'); std::getline(iss,fS,'|'); std::getline(iss,snapS,'|'); std::getline(iss,restoreXs,'|'); std::getline(iss,restoreYs,'|'); std::getline(iss,restoreWs,'|'); std::getline(iss,restoreHs,'|'); SavedWindow sw{}; try{ sw.id=std::stoull(idS); sw.title=title; sw.x=std::stoi(xs); sw.y=std::stoi(ys); sw.w=std::stoi(ws); sw.h=std::stoi(hs); sw.minimized=(ms=="1"); sw.maximized=(maxS=="1"); sw.z=std::stoi(zS); sw.focused=(fS=="1"); sw.snap=std::stoi(snapS); sw.restoreX=restoreXs.empty()?sw.x:std::stoi(restoreXs); sw.restoreY=restoreYs.empty()?sw.y:std::stoi(restoreYs); sw.restoreW=restoreWs.empty()?sw.w:std::stoi(restoreWs); sw.restoreH=restoreHs.empty()?sw.h:std::stoi(restoreHs); }catch(...){ continue; } wins.push_back(sw);
+      |                                        ^~~
+In file included from disk_manager.cpp:10:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+disk_manager.cpp: In static member function 'static void gxos::apps::DiskManager::tryCreatePartitionLargestFree()':
+disk_manager.cpp:847:16: warning: unused variable 'sel' [-Wunused-variable]
+  847 |     DiskEntry* sel = getSelected();
+      |                ^~~
+In file included from compositor.h:10,
+                 from display_options.cpp:4:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:105:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+  105 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+display_options.cpp: At global scope:
+display_options.cpp:320:10: warning: 'bool gxos::apps::{anonymous}::isGalleryKey(uint32_t)' defined but not used [-Wunused-function]
+  320 |     bool isGalleryKey(uint32_t key)
+      |          ^~~~~~~~~~~~
+In file included from compositor.h:10,
+                 from display_configuration_service.cpp:3:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:105:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+  105 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+display_configuration_service.cpp: At global scope:
+display_configuration_service.cpp:157:6: warning: 'void gxos::display::{anonymous}::requestedFromSnapshot(const gxos::display::DisplayConfigurationSnapshot&, gxos::display::DisplayConfigurationRequest&)' defined but not used [-Wunused-function]
+  157 | void requestedFromSnapshot(const DisplayConfigurationSnapshot& snapshot,
+      |      ^~~~~~~~~~~~~~~~~~~~~
+In file included from control_panel.cpp:9:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:10,
+                 from settings_center.cpp:3:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:105:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+  105 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from file_explorer.h:6,
+                 from file_explorer.cpp:1:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13,
+                 from file_explorer.cpp:7:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:105:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+  105 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+file_operations.cpp:288:21: warning: 'std::string gxos::files::{anonymous}::statusText(int)' defined but not used [-Wunused-function]
+  288 |         std::string statusText(int status) {
+      |                     ^~~~~~~~~~
+In file included from file_explorer.h:6,
+                 from file_icon_provider.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from background_service.cpp:6:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:105:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+  105 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from background_service.cpp:9:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+gxapp_container.cpp:118:22: warning: 'gxos::GXAppMetadata gxos::{anonymous}::parseMetadataJson(const std::string&)' defined but not used [-Wunused-function]
+  118 | static GXAppMetadata parseMetadataJson(const std::string& json){
+      |                      ^~~~~~~~~~~~~~~~~
+In file included from gxm_loader.cpp:4:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+gxos_tls_foundation.cpp:2547:6: warning: 'void gxos::{anonymous}::tls_set_setup_error(gxos::GxosTlsLocalHandshakeResult*, int, const char*)' defined but not used [-Wunused-function]
+ 2547 | void tls_set_setup_error(GxosTlsLocalHandshakeResult* result, int code, const char* step)
+      |      ^~~~~~~~~~~~~~~~~~~
+gxos_tls_foundation.cpp:2210:6: warning: 'bool gxos::{anonymous}::non_smoke_https_prerequisites_ready(const gxos::GxosTrustStorePolicyInfo&)' defined but not used [-Wunused-function]
+ 2210 | bool non_smoke_https_prerequisites_ready(const GxosTrustStorePolicyInfo& trustPolicy)
+      |      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+gxos_tls_foundation.cpp:1951:22: warning: 'gxos::GxosCaStoreParseInfo gxos::{anonymous}::gxos_ca_store_parse_info()' defined but not used [-Wunused-function]
+ 1951 | GxosCaStoreParseInfo gxos_ca_store_parse_info()
+      |                      ^~~~~~~~~~~~~~~~~~~~~~~~
+gxos_tls_foundation.cpp:766:6: warning: 'bool gxos::{anonymous}::parse_ca_bundle_manifest_json(const uint8_t*, size_t, ParsedCaBundleManifest*, char*, size_t)' defined but not used [-Wunused-function]
+  766 | bool parse_ca_bundle_manifest_json(const uint8_t* bytes,
+      |      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+gxos_tls_foundation.cpp:486:6: warning: 'void gxos::{anonymous}::bytes_to_lower_hex(const uint8_t*, size_t, char*, size_t)' defined but not used [-Wunused-function]
+  486 | void bytes_to_lower_hex(const uint8_t* bytes, size_t byteCount, char* dst, size_t dstSize)
+      |      ^~~~~~~~~~~~~~~~~~
+gxos_tls_foundation.cpp:434:6: warning: 'void gxos::{anonymous}::copy_trimmed_ascii_span(char*, size_t, const char*, const char*)' defined but not used [-Wunused-function]
+  434 | void copy_trimmed_ascii_span(char* dst, size_t dstSize, const char* begin, const char* end)
+      |      ^~~~~~~~~~~~~~~~~~~~~~~
+gxos_tls_foundation.cpp:404:8: warning: 'size_t gxos::{anonymous}::token_length(const char*)' defined but not used [-Wunused-function]
+  404 | size_t token_length(const char* token)
+      |        ^~~~~~~~~~~~
+In file included from image_viewer.cpp:8:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+image_viewer.cpp: At global scope:
+image_viewer.cpp:83:13: warning: 'void gxos::apps::{anonymous}::publishWindowText(uint64_t, int, int, const std::string&, bool)' defined but not used [-Wunused-function]
+   83 | static void publishWindowText(uint64_t windowId, int x, int y, const std::string& text, bool colored = false) {
+      |             ^~~~~~~~~~~~~~~~~
+In file included from ipc_bus.cpp:8:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+guide_web_html_parser.cpp:5960:20: warning: 'std::string gxos::web::{anonymous}::openTagName(OpenTag)' defined but not used [-Wunused-function]
+ 5960 | static std::string openTagName(OpenTag tag)
+      |                    ^~~~~~~~~~~
+guide_web_html_parser.cpp:4100:17: warning: 'gxos::web::WebStyle gxos::web::{anonymous}::mergeStyles(const gxos::web::WebStyle&, const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 4100 | static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideStyle)
+      |                 ^~~~~~~~~~~
+guide_web_html_parser.cpp:2046:24: warning: 'gxos::web::BorderLineStyle gxos::web::{anonymous}::defaultVisibleBorderStyle(const gxos::web::WebStyle&, BorderSideIndex)' defined but not used [-Wunused-function]
+ 2046 | static BorderLineStyle defaultVisibleBorderStyle(const WebStyle& style, BorderSideIndex side)
+      |                        ^~~~~~~~~~~~~~~~~~~~~~~~~
+guide_web_html_parser.cpp:305:13: warning: 'bool gxos::web::{anonymous}::scanCssBalancedRange(const std::string&, size_t, size_t, gxos::web::CssDiagnostics&, bool)' defined but not used [-Wunused-function]
+  305 | static bool scanCssBalancedRange(const std::string& text,
+      |             ^~~~~~~~~~~~~~~~~~~~
+guide_web_http.cpp:23: warning: ignoring '#pragma comment ' [-Wunknown-pragmas]
+   23 | #pragma comment(lib, "ws2_32.lib")
+guide_web_http.cpp:24: warning: ignoring '#pragma comment ' [-Wunknown-pragmas]
+   24 | #pragma comment(lib, "secur32.lib")
+guide_web_http.cpp:25: warning: ignoring '#pragma comment ' [-Wunknown-pragmas]
+   25 | #pragma comment(lib, "crypt32.lib")
+kernel/core/system_font.cpp:138:13: warning: 'bool gxos::gui::{anonymous}::stringEquals(const char*, const char*)' defined but not used [-Wunused-function]
+  138 | static bool stringEquals(const char* a, const char* b)
+      |             ^~~~~~~~~~~~
+In file included from compositor.h:10,
+                 from lifecycle.cpp:9:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:105:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+  105 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from message_box.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from file_explorer.h:6,
+                 from module_manager.cpp:9:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from navigator.cpp:5:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+navigator.cpp: In function 'void gxos::apps::{anonymous}::cssStickyAncestorVisualDeltaForSerial(const gxos::web::WebDocument&, uint64_t, int*, int*)':
+navigator.cpp:10947:59: warning: comparison of integer expressions of different signedness: 'int' and 'const size_t' {aka 'const long long unsigned int'} [-Wsign-compare]
+10947 |                 for (int depth = 0; current != 0 && depth < kCssPositionedAncestryCap; ++depth) {
+      |                                                     ~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp: In function 'void gxos::apps::{anonymous}::resolveCssStickyLayout(const gxos::web::WebDocument&, int)':
+navigator.cpp:11132:82: warning: comparison of integer expressions of different signedness: 'int' and 'const size_t' {aka 'const long long unsigned int'} [-Wsign-compare]
+11132 |                                 for (int depth = 0; ancestorSerial != 0 && depth < kCssPositionedAncestryCap; ++depth) {
+      |                                                                            ~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp: At global scope:
+navigator.cpp:14515:20: warning: 'int gxos::apps::{anonymous}::atomicFindBlockBySerial(const gxos::web::WebDocument&, uint64_t)' defined but not used [-Wunused-function]
+14515 |         static int atomicFindBlockBySerial(const WebDocument& doc, uint64_t serial)
+      |                    ^~~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:14407:21: warning: 'bool gxos::apps::{anonymous}::atomicBlockContainsSerial(const gxos::web::DocBlock&, uint64_t)' defined but not used [-Wunused-function]
+14407 |         static bool atomicBlockContainsSerial(const DocBlock& block, uint64_t serial)
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:11393:21: warning: 'bool gxos::apps::{anonymous}::isHiddenByDisplay(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+11393 |         static bool isHiddenByDisplay(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~~~~
+navigator.cpp:11388:21: warning: 'bool gxos::apps::{anonymous}::isRightAlignedText(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+11388 |         static bool isRightAlignedText(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~~~~~
+navigator.cpp:11383:21: warning: 'bool gxos::apps::{anonymous}::isCenteredText(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+11383 |         static bool isCenteredText(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~
+navigator.cpp:10624:21: warning: 'bool gxos::apps::{anonymous}::cssDocumentBorderBoxForScroll(const gxos::web::WebDocument&, int, CssPaintRect&)' defined but not used [-Wunused-function]
+10624 |         static bool cssDocumentBorderBoxForScroll(const WebDocument& doc, int blockIndex,
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:8526:20: warning: 'int gxos::apps::{anonymous}::cssPositionedScreenX(const CssPositionedRecord&)' defined but not used [-Wunused-function]
+ 8526 |         static int cssPositionedScreenX(const CssPositionedRecord& record)
+      |                    ^~~~~~~~~~~~~~~~~~~~
+navigator.cpp:8520:20: warning: 'int gxos::apps::{anonymous}::cssPositionedScreenY(const CssPositionedRecord&, int)' defined but not used [-Wunused-function]
+ 8520 |         static int cssPositionedScreenY(const CssPositionedRecord& record, int scrollOffset)
+      |                    ^~~~~~~~~~~~~~~~~~~~
+navigator.cpp:7419:21: warning: 'bool gxos::apps::{anonymous}::cssFlexSerialDescendsFrom(const gxos::web::WebDocument&, uint64_t, uint64_t)' defined but not used [-Wunused-function]
+ 7419 |         static bool cssFlexSerialDescendsFrom(const WebDocument& doc, uint64_t serial, uint64_t ancestor)
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:6824:43: warning: 'const gxos::apps::{anonymous}::CssBfcContextRecord* gxos::apps::{anonymous}::cssBfcContextRecordFor(const CssFloatLayoutSnapshot&, uint64_t)' defined but not used [-Wunused-function]
+ 6824 |         static const CssBfcContextRecord* cssBfcContextRecordFor(
+      |                                           ^~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:5765:20: warning: 'int gxos::apps::{anonymous}::blockWrapWidth(const gxos::web::DocBlock&, int)' defined but not used [-Wunused-function]
+ 5765 |         static int blockWrapWidth(const DocBlock& block, int outerWidth)
+      |                    ^~~~~~~~~~~~~~
+navigator.cpp:5582:41: warning: 'std::vector<std::__cxx11::basic_string<char> > gxos::apps::{anonymous}::tableRowTextLines(const TableGroupLayout&, const TableRowLayout&)' defined but not used [-Wunused-function]
+ 5582 |         static std::vector<std::string> tableRowTextLines(const TableGroupLayout& layout, const TableRowLayout& row)
+      |                                         ^~~~~~~~~~~~~~~~~
+navigator.cpp:5015:20: warning: 'int gxos::apps::{anonymous}::textLongestLineChars(const std::string&)' defined but not used [-Wunused-function]
+ 5015 |         static int textLongestLineChars(const std::string& text)
+      |                    ^~~~~~~~~~~~~~~~~~~~
+navigator.cpp:5000:20: warning: 'int gxos::apps::{anonymous}::textLineCountForTableCell(const std::string&)' defined but not used [-Wunused-function]
+ 5000 |         static int textLineCountForTableCell(const std::string& text)
+      |                    ^~~~~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:4993:28: warning: 'std::string gxos::apps::{anonymous}::tableRowSignature(const gxos::web::DocBlock&)' defined but not used [-Wunused-function]
+ 4993 |         static std::string tableRowSignature(const DocBlock& block)
+      |                            ^~~~~~~~~~~~~~~~~
+navigator.cpp:4782:21: warning: 'bool gxos::apps::{anonymous}::cssBorderLeftVisible(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 4782 |         static bool cssBorderLeftVisible(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~~~~~~~
+navigator.cpp:4776:21: warning: 'bool gxos::apps::{anonymous}::cssBorderBottomVisible(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 4776 |         static bool cssBorderBottomVisible(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:4770:21: warning: 'bool gxos::apps::{anonymous}::cssBorderRightVisible(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 4770 |         static bool cssBorderRightVisible(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:4764:21: warning: 'bool gxos::apps::{anonymous}::cssBorderTopVisible(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 4764 |         static bool cssBorderTopVisible(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~~~~~~
+navigator.cpp:4600:20: warning: 'int gxos::apps::{anonymous}::cssMinHeightPx(const gxos::web::WebStyle&, int)' defined but not used [-Wunused-function]
+ 4600 |         static int cssMinHeightPx(const WebStyle& style, int basisHeight)
+      |                    ^~~~~~~~~~~~~~
+navigator.cpp:4594:20: warning: 'int gxos::apps::{anonymous}::cssMinWidthPx(const gxos::web::WebStyle&, int)' defined but not used [-Wunused-function]
+ 4594 |         static int cssMinWidthPx(const WebStyle& style, int basisWidth)
+      |                    ^~~~~~~~~~~~~
+navigator.cpp:4587:20: warning: 'int gxos::apps::{anonymous}::cssMaxHeightPx(const gxos::web::WebStyle&, int, int)' defined but not used [-Wunused-function]
+ 4587 |         static int cssMaxHeightPx(const WebStyle& style, int availableHeight, int fallbackValue)
+      |                    ^~~~~~~~~~~~~~
+navigator.cpp:4581:20: warning: 'int gxos::apps::{anonymous}::cssHeightPx(const gxos::web::WebStyle&, int, int)' defined but not used [-Wunused-function]
+ 4581 |         static int cssHeightPx(const WebStyle& style, int availableHeight, int fallbackValue)
+      |                    ^~~~~~~~~~~
+navigator.cpp:4397:20: warning: 'int gxos::apps::{anonymous}::cssMarginSideOrDefault(int, int, int)' defined but not used [-Wunused-function]
+ 4397 |         static int cssMarginSideOrDefault(int sideValue, int uniformValue, int fallbackValue)
+      |                    ^~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:4392:20: warning: 'int gxos::apps::{anonymous}::cssMarginOrDefault(const gxos::web::WebStyle&, int)' defined but not used [-Wunused-function]
+ 4392 |         static int cssMarginOrDefault(const WebStyle& style, int fallbackValue)
+      |                    ^~~~~~~~~~~~~~~~~~
+navigator.cpp:4382:25: warning: 'gxos::web::DocBlock gxos::apps::{anonymous}::makeBlock(gxos::web::BlockType, const std::string&, const std::string&, const std::string&)' defined but not used [-Wunused-function]
+ 4382 |         static DocBlock makeBlock(BlockType type, const std::string& text, const std::string& url, const std::string& tagName)
+      |                         ^~~~~~~~~
+navigator.cpp:1811:18: warning: 'uint32_t gxos::apps::{anonymous}::NavigatorButtonBorderColor(bool, bool)' defined but not used [-Wunused-function]
+ 1811 |         uint32_t NavigatorButtonBorderColor(bool focused, bool disabled)
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:1282:14: warning: 'void gxos::apps::{anonymous}::drawTextAt(uint64_t, int, int, const std::string&)' defined but not used [-Wunused-function]
+ 1282 |         void drawTextAt(uint64_t windowId, int x, int y, const std::string& text)
+      |              ^~~~~~~~~~
+In file included from native_app_runtime.cpp:4:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+native_app_runtime.cpp: At global scope:
+native_app_runtime.cpp:165:13: warning: 'std::string gxos::apps::{anonymous}::nativeImageRangeClassification(const gxos::apps::NativeAppRuntimeContext&, const void*, uint64_t)' defined but not used [-Wunused-function]
+  165 | std::string nativeImageRangeClassification(const NativeAppRuntimeContext& context, const void* pointer, uint64_t bytes) {
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+native_app_runtime.cpp:136:6: warning: 'bool gxos::apps::{anonymous}::experimentalExecutionEnabled()' defined but not used [-Wunused-function]
+  136 | bool experimentalExecutionEnabled() {
+      |      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from notepad.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+notepad.cpp: In member function 'int gxos::apps::Notepad::run(int, char**)':
+notepad.cpp:292:53: warning: unused variable 'kGuiChanIn' [-Wunused-variable]
+  292 |                                         const char* kGuiChanIn = "gui.input";
+      |                                                     ^~~~~~~~~~
+In file included from onscreen_keyboard.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from open_dialog.cpp:3:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from paint.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+paint.cpp: In static member function 'static void gxos::apps::Paint::updateDisplay()':
+paint.cpp:239:13: warning: unused variable 'r' [-Wunused-variable]
+  239 |         int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
+      |             ^
+paint.cpp:239:35: warning: unused variable 'g' [-Wunused-variable]
+  239 |         int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
+      |                                   ^
+paint.cpp:239:56: warning: unused variable 'b' [-Wunused-variable]
+  239 |         int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
+      |                                                        ^
+In file included from process.cpp:7:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+process.cpp: In static member function 'static bool gxos::ProcessTable::wait(uint64_t, uint64_t, int*)':
+process.cpp:328:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+  328 |         if(exitCodeOut) *exitCodeOut = proc->exitCode; return true;
+      |         ^~
+process.cpp:328:56: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+  328 |         if(exitCodeOut) *exitCodeOut = proc->exitCode; return true;
+      |                                                        ^~~~~~
+In file included from png_loader.cpp:63:
+third_party/stb/stb_image.h: In function 'int stbi__parse_png_file(stbi__png*, int, int)':
+third_party/stb/stb_image.h:5247:28: warning: variable 'invalid_chunk' set but not used [-Wunused-but-set-variable]
+ 5247 |                static char invalid_chunk[] = "XXXX PNG chunk not known";
+      |                            ^~~~~~~~~~~~~
+third_party/stb/stb_image.h: At global scope:
+third_party/stb/stb_image.h:433:18: warning: 'stbi_uc* stbi_load_gif_from_memory(const stbi_uc*, int, int**, int*, int*, int*, int*, int)' declared 'static' but never defined [-Wunused-function]
+  433 | STBIDEF stbi_uc *stbi_load_gif_from_memory(stbi_uc const *buffer, int len, int **delays, int *x, int *y, int *z, int *comp, int req_comp);
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:523:14: warning: 'void stbi_set_unpremultiply_on_load_thread(int)' declared 'static' but never defined [-Wunused-function]
+  523 | STBIDEF void stbi_set_unpremultiply_on_load_thread(int flag_true_if_should_unpremultiply);
+      |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:524:14: warning: 'void stbi_convert_iphone_png_to_rgb_thread(int)' declared 'static' but never defined [-Wunused-function]
+  524 | STBIDEF void stbi_convert_iphone_png_to_rgb_thread(int flag_true_if_should_convert);
+      |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:525:14: warning: 'void stbi_set_flip_vertically_on_load_thread(int)' declared 'static' but never defined [-Wunused-function]
+  525 | STBIDEF void stbi_set_flip_vertically_on_load_thread(int flag_true_if_should_flip);
+      |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:7755:13: warning: 'int stbi_is_16_bit_from_callbacks(const stbi_io_callbacks*, void*)' defined but not used [-Wunused-function]
+ 7755 | STBIDEF int stbi_is_16_bit_from_callbacks(stbi_io_callbacks const *c, void *user)
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:7748:13: warning: 'int stbi_is_16_bit_from_memory(const stbi_uc*, int)' defined but not used [-Wunused-function]
+ 7748 | STBIDEF int stbi_is_16_bit_from_memory(stbi_uc const *buffer, int len)
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:7741:13: warning: 'int stbi_info_from_callbacks(const stbi_io_callbacks*, void*, int*, int*, int*)' defined but not used [-Wunused-function]
+ 7741 | STBIDEF int stbi_info_from_callbacks(stbi_io_callbacks const *c, void *user, int *x, int *y, int *comp)
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:7734:13: warning: 'int stbi_info_from_memory(const stbi_uc*, int, int*, int*, int*)' defined but not used [-Wunused-function]
+ 7734 | STBIDEF int stbi_info_from_memory(stbi_uc const *buffer, int len, int *x, int *y, int *comp)
+      |             ^~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:5001:14: warning: 'void stbi_convert_iphone_png_to_rgb(int)' defined but not used [-Wunused-function]
+ 5001 | STBIDEF void stbi_convert_iphone_png_to_rgb(int flag_true_if_should_convert)
+      |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:4996:14: warning: 'void stbi_set_unpremultiply_on_load(int)' defined but not used [-Wunused-function]
+ 4996 | STBIDEF void stbi_set_unpremultiply_on_load(int flag_true_if_should_unpremultiply)
+      |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:4584:13: warning: 'int stbi_zlib_decode_noheader_buffer(char*, int, const char*, int)' defined but not used [-Wunused-function]
+ 4584 | STBIDEF int stbi_zlib_decode_noheader_buffer(char *obuffer, int olen, const char *ibuffer, int ilen)
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:4568:15: warning: 'char* stbi_zlib_decode_noheader_malloc(const char*, int, int*)' defined but not used [-Wunused-function]
+ 4568 | STBIDEF char *stbi_zlib_decode_noheader_malloc(char const *buffer, int len, int *outlen)
+      |               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:4557:13: warning: 'int stbi_zlib_decode_buffer(char*, int, const char*, int)' defined but not used [-Wunused-function]
+ 4557 | STBIDEF int stbi_zlib_decode_buffer(char *obuffer, int olen, char const *ibuffer, int ilen)
+      |             ^~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:4536:15: warning: 'char* stbi_zlib_decode_malloc(const char*, int, int*)' defined but not used [-Wunused-function]
+ 4536 | STBIDEF char *stbi_zlib_decode_malloc(char const *buffer, int len, int *outlen)
+      |               ^~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1582:16: warning: 'void stbi_hdr_to_ldr_scale(float)' defined but not used [-Wunused-function]
+ 1582 | STBIDEF void   stbi_hdr_to_ldr_scale(float scale) { stbi__h2l_scale_i = 1/scale; }
+      |                ^~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1581:16: warning: 'void stbi_hdr_to_ldr_gamma(float)' defined but not used [-Wunused-function]
+ 1581 | STBIDEF void   stbi_hdr_to_ldr_gamma(float gamma) { stbi__h2l_gamma_i = 1/gamma; }
+      |                ^~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1559:18: warning: 'int stbi_is_hdr_from_callbacks(const stbi_io_callbacks*, void*)' defined but not used [-Wunused-function]
+ 1559 | STBIDEF int      stbi_is_hdr_from_callbacks(stbi_io_callbacks const *clbk, void *user)
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1517:13: warning: 'int stbi_is_hdr_from_memory(const stbi_uc*, int)' defined but not used [-Wunused-function]
+ 1517 | STBIDEF int stbi_is_hdr_from_memory(stbi_uc const *buffer, int len)
+      |             ^~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1436:18: warning: 'stbi_uc* stbi_load_from_callbacks(const stbi_io_callbacks*, void*, int*, int*, int*, int)' defined but not used [-Wunused-function]
+ 1436 | STBIDEF stbi_uc *stbi_load_from_callbacks(stbi_io_callbacks const *clbk, void *user, int *x, int *y, int *comp, int req_comp)
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1422:18: warning: 'stbi_us* stbi_load_16_from_callbacks(const stbi_io_callbacks*, void*, int*, int*, int*, int)' defined but not used [-Wunused-function]
+ 1422 | STBIDEF stbi_us *stbi_load_16_from_callbacks(stbi_io_callbacks const *clbk, void *user, int *x, int *y, int *channels_in_file, int desired_channels)
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1415:18: warning: 'stbi_us* stbi_load_16_from_memory(const stbi_uc*, int, int*, int*, int*, int)' defined but not used [-Wunused-function]
+ 1415 | STBIDEF stbi_us *stbi_load_16_from_memory(stbi_uc const *buffer, int len, int *x, int *y, int *channels_in_file, int desired_channels)
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1116:14: warning: 'void stbi_set_flip_vertically_on_load(int)' defined but not used [-Wunused-function]
+ 1116 | STBIDEF void stbi_set_flip_vertically_on_load(int flag_true_if_should_flip)
+      |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1078:12: warning: 'int stbi__mul2shorts_valid(int, int)' defined but not used [-Wunused-function]
+ 1078 | static int stbi__mul2shorts_valid(int a, int b)
+      |            ^~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1070:12: warning: 'int stbi__addints_valid(int, int)' defined but not used [-Wunused-function]
+ 1070 | static int stbi__addints_valid(int a, int b)
+      |            ^~~~~~~~~~~~~~~~~~~
+png_loader.cpp:42:14: warning: 'void* gxos_stbi_realloc(void*, size_t)' defined but not used [-Wunused-function]
+   42 | static void* gxos_stbi_realloc(void* ptr, size_t newSize)
+      |              ^~~~~~~~~~~~~~~~~
+In file included from jpeg_loader.cpp:165:
+third_party/stb/stb_image.h:433:18: warning: '{anonymous}::stbi_uc* {anonymous}::stbi_load_gif_from_memory(const stbi_uc*, int, int**, int*, int*, int*, int*, int)' declared 'static' but never defined [-Wunused-function]
+  433 | STBIDEF stbi_uc *stbi_load_gif_from_memory(stbi_uc const *buffer, int len, int **delays, int *x, int *y, int *z, int *comp, int req_comp);
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:511:14: warning: 'void {anonymous}::stbi_set_unpremultiply_on_load(int)' declared 'static' but never defined [-Wunused-function]
+  511 | STBIDEF void stbi_set_unpremultiply_on_load(int flag_true_if_should_unpremultiply);
+      |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:515:14: warning: 'void {anonymous}::stbi_convert_iphone_png_to_rgb(int)' declared 'static' but never defined [-Wunused-function]
+  515 | STBIDEF void stbi_convert_iphone_png_to_rgb(int flag_true_if_should_convert);
+      |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:523:14: warning: 'void {anonymous}::stbi_set_unpremultiply_on_load_thread(int)' declared 'static' but never defined [-Wunused-function]
+  523 | STBIDEF void stbi_set_unpremultiply_on_load_thread(int flag_true_if_should_unpremultiply);
+      |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:524:14: warning: 'void {anonymous}::stbi_convert_iphone_png_to_rgb_thread(int)' declared 'static' but never defined [-Wunused-function]
+  524 | STBIDEF void stbi_convert_iphone_png_to_rgb_thread(int flag_true_if_should_convert);
+      |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:525:14: warning: 'void {anonymous}::stbi_set_flip_vertically_on_load_thread(int)' declared 'static' but never defined [-Wunused-function]
+  525 | STBIDEF void stbi_set_flip_vertically_on_load_thread(int flag_true_if_should_flip);
+      |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:529:15: warning: 'char* {anonymous}::stbi_zlib_decode_malloc_guesssize(const char*, int, int, int*)' declared 'static' but never defined [-Wunused-function]
+  529 | STBIDEF char *stbi_zlib_decode_malloc_guesssize(const char *buffer, int len, int initial_size, int *outlen);
+      |               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:530:15: warning: 'char* {anonymous}::stbi_zlib_decode_malloc_guesssize_headerflag(const char*, int, int, int*, int)' declared 'static' but never defined [-Wunused-function]
+  530 | STBIDEF char *stbi_zlib_decode_malloc_guesssize_headerflag(const char *buffer, int len, int initial_size, int *outlen, int parse_header);
+      |               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:531:15: warning: 'char* {anonymous}::stbi_zlib_decode_malloc(const char*, int, int*)' declared 'static' but never defined [-Wunused-function]
+  531 | STBIDEF char *stbi_zlib_decode_malloc(const char *buffer, int len, int *outlen);
+      |               ^~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:532:15: warning: 'int {anonymous}::stbi_zlib_decode_buffer(char*, int, const char*, int)' declared 'static' but never defined [-Wunused-function]
+  532 | STBIDEF int   stbi_zlib_decode_buffer(char *obuffer, int olen, const char *ibuffer, int ilen);
+      |               ^~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:534:15: warning: 'char* {anonymous}::stbi_zlib_decode_noheader_malloc(const char*, int, int*)' declared 'static' but never defined [-Wunused-function]
+  534 | STBIDEF char *stbi_zlib_decode_noheader_malloc(const char *buffer, int len, int *outlen);
+      |               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:535:15: warning: 'int {anonymous}::stbi_zlib_decode_noheader_buffer(char*, int, const char*, int)' declared 'static' but never defined [-Wunused-function]
+  535 | STBIDEF int   stbi_zlib_decode_noheader_buffer(char *obuffer, int olen, const char *ibuffer, int ilen);
+      |               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:7755:13: warning: 'int {anonymous}::stbi_is_16_bit_from_callbacks(const stbi_io_callbacks*, void*)' defined but not used [-Wunused-function]
+ 7755 | STBIDEF int stbi_is_16_bit_from_callbacks(stbi_io_callbacks const *c, void *user)
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:7748:13: warning: 'int {anonymous}::stbi_is_16_bit_from_memory(const stbi_uc*, int)' defined but not used [-Wunused-function]
+ 7748 | STBIDEF int stbi_is_16_bit_from_memory(stbi_uc const *buffer, int len)
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:7741:13: warning: 'int {anonymous}::stbi_info_from_callbacks(const stbi_io_callbacks*, void*, int*, int*, int*)' defined but not used [-Wunused-function]
+ 7741 | STBIDEF int stbi_info_from_callbacks(stbi_io_callbacks const *c, void *user, int *x, int *y, int *comp)
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:7734:13: warning: 'int {anonymous}::stbi_info_from_memory(const stbi_uc*, int, int*, int*, int*)' defined but not used [-Wunused-function]
+ 7734 | STBIDEF int stbi_info_from_memory(stbi_uc const *buffer, int len, int *x, int *y, int *comp)
+      |             ^~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1582:16: warning: 'void {anonymous}::stbi_hdr_to_ldr_scale(float)' defined but not used [-Wunused-function]
+ 1582 | STBIDEF void   stbi_hdr_to_ldr_scale(float scale) { stbi__h2l_scale_i = 1/scale; }
+      |                ^~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1581:16: warning: 'void {anonymous}::stbi_hdr_to_ldr_gamma(float)' defined but not used [-Wunused-function]
+ 1581 | STBIDEF void   stbi_hdr_to_ldr_gamma(float gamma) { stbi__h2l_gamma_i = 1/gamma; }
+      |                ^~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1559:18: warning: 'int {anonymous}::stbi_is_hdr_from_callbacks(const stbi_io_callbacks*, void*)' defined but not used [-Wunused-function]
+ 1559 | STBIDEF int      stbi_is_hdr_from_callbacks(stbi_io_callbacks const *clbk, void *user)
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1517:13: warning: 'int {anonymous}::stbi_is_hdr_from_memory(const stbi_uc*, int)' defined but not used [-Wunused-function]
+ 1517 | STBIDEF int stbi_is_hdr_from_memory(stbi_uc const *buffer, int len)
+      |             ^~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1436:18: warning: '{anonymous}::stbi_uc* {anonymous}::stbi_load_from_callbacks(const stbi_io_callbacks*, void*, int*, int*, int*, int)' defined but not used [-Wunused-function]
+ 1436 | STBIDEF stbi_uc *stbi_load_from_callbacks(stbi_io_callbacks const *clbk, void *user, int *x, int *y, int *comp, int req_comp)
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1422:18: warning: '{anonymous}::stbi_us* {anonymous}::stbi_load_16_from_callbacks(const stbi_io_callbacks*, void*, int*, int*, int*, int)' defined but not used [-Wunused-function]
+ 1422 | STBIDEF stbi_us *stbi_load_16_from_callbacks(stbi_io_callbacks const *clbk, void *user, int *x, int *y, int *channels_in_file, int desired_channels)
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1415:18: warning: '{anonymous}::stbi_us* {anonymous}::stbi_load_16_from_memory(const stbi_uc*, int, int*, int*, int*, int)' defined but not used [-Wunused-function]
+ 1415 | STBIDEF stbi_us *stbi_load_16_from_memory(stbi_uc const *buffer, int len, int *x, int *y, int *channels_in_file, int desired_channels)
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1116:14: warning: 'void {anonymous}::stbi_set_flip_vertically_on_load(int)' defined but not used [-Wunused-function]
+ 1116 | STBIDEF void stbi_set_flip_vertically_on_load(int flag_true_if_should_flip)
+      |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:972:21: warning: 'const char* {anonymous}::stbi_failure_reason()' defined but not used [-Wunused-function]
+  972 | STBIDEF const char *stbi_failure_reason(void)
+      |                     ^~~~~~~~~~~~~~~~~~~
+jpeg_loader.cpp:152:14: warning: 'void* {anonymous}::gxos_jpeg_realloc(void*, size_t)' defined but not used [-Wunused-function]
+  152 | static void* gxos_jpeg_realloc(void* ptr, size_t newSize)
+      |              ^~~~~~~~~~~~~~~~~
+In file included from compositor.h:10,
+                 from right_click_menu.cpp:3:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:105:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+  105 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from save_changes_dialog.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from save_dialog.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:10,
+                 from server.cpp:49:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:105:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+  105 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from shutdown_dialog.cpp:3:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from task_manager.cpp:3:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13,
+                 from task_manager.cpp:7:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:105:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+  105 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+task_manager.cpp: At global scope:
+task_manager.cpp:375:21: warning: 'void gxos::apps::{anonymous}::publishRect(uint64_t, int, int, int, int, uint8_t, uint8_t, uint8_t)' defined but not used [-Wunused-function]
+  375 |         static void publishRect(uint64_t windowId, int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b) {
+      |                     ^~~~~~~~~~~
+In file included from compositor.h:10,
+                 from trash.cpp:3:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:105:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+  105 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+trash.cpp: At global scope:
+trash.cpp:54:17: warning: 'std::string gxos::apps::{anonymous}::readOriginalPath(const std::filesystem::__cxx11::path&)' defined but not used [-Wunused-function]
+   54 |     std::string readOriginalPath(const std::filesystem::path& infoPath) {
+      |                 ^~~~~~~~~~~~~~~~
+In file included from C:/mingw64/include/c++/15.2.0/string:56,
+                 from trash.h:4,
+                 from trash.cpp:1:
+In constructor 'std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::basic_string(std::__cxx11::basic_string<_CharT, _Traits, _Alloc>&&) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]',
+    inlined from 'void std::__new_allocator<_Tp>::construct(_Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:191:4,
+    inlined from 'static void std::allocator_traits<std::allocator<_CharT> >::construct(allocator_type&, _Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:674:17,
+    inlined from 'std::vector<_Tp, _Alloc>::reference std::vector<_Tp, _Alloc>::emplace_back(_Args&& ...) [with _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/vector.tcc:117:30,
+    inlined from 'void std::vector<_Tp, _Alloc>::push_back(value_type&&) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1434:21,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:208:23:
+C:/mingw64/include/c++/15.2.0/bits/basic_string.h:742:7: warning: array subscript 1 is outside array bounds of 'std::__cxx11::basic_string<char> [1]' [-Warray-bounds=]
+  742 |       basic_string(basic_string&& __str) noexcept
+      |       ^~~~~~~~~~~~
+In file included from C:/mingw64/include/c++/15.2.0/x86_64-w64-mingw32/bits/c++allocator.h:33,
+                 from C:/mingw64/include/c++/15.2.0/bits/allocator.h:46,
+                 from C:/mingw64/include/c++/15.2.0/string:45:
+In member function '_Tp* std::__new_allocator<_Tp>::allocate(size_type, const void*) [with _Tp = std::__cxx11::basic_string<char>]',
+    inlined from 'static _Tp* std::allocator_traits<std::allocator<_CharT> >::allocate(allocator_type&, size_type) [with _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:614:28,
+    inlined from 'std::_Vector_base<_Tp, _Alloc>::pointer std::_Vector_base<_Tp, _Alloc>::_M_allocate(std::size_t) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:387:33,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize_n(_Iterator, _Sentinel, size_type) [with _Iterator = const char* const*; _Sentinel = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1985:23,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize(_ForwardIterator, _ForwardIterator, std::forward_iterator_tag) [with _ForwardIterator = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1974:25,
+    inlined from 'std::vector<_Tp, _Alloc>::vector(_InputIterator, _InputIterator, const allocator_type&) [with _InputIterator = const char* const*; <template-parameter-2-2> = void; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:751:23,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:206:47:
+C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:151:73: note: at offset 32 into object of size 32 allocated by 'operator new'
+  151 |         return static_cast<_Tp*>(_GLIBCXX_OPERATOR_NEW(__n * sizeof(_Tp)));
+      |                                                                         ^
+In constructor 'std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::_Alloc_hider::_Alloc_hider(std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::pointer, _Alloc&&) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]',
+    inlined from 'std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::basic_string(std::__cxx11::basic_string<_CharT, _Traits, _Alloc>&&) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]' at C:/mingw64/include/c++/15.2.0/bits/basic_string.h:743:9,
+    inlined from 'void std::__new_allocator<_Tp>::construct(_Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:191:4,
+    inlined from 'static void std::allocator_traits<std::allocator<_CharT> >::construct(allocator_type&, _Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:674:17,
+    inlined from 'std::vector<_Tp, _Alloc>::reference std::vector<_Tp, _Alloc>::emplace_back(_Args&& ...) [with _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/vector.tcc:117:30,
+    inlined from 'void std::vector<_Tp, _Alloc>::push_back(value_type&&) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1434:21,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:208:23:
+C:/mingw64/include/c++/15.2.0/bits/basic_string.h:208:9: warning: array subscript 4 is outside array bounds of 'std::__cxx11::basic_string<char> [1]' [-Warray-bounds=]
+  208 |         _Alloc_hider(pointer __dat, _Alloc&& __a = _Alloc())
+      |         ^~~~~~~~~~~~
+In member function '_Tp* std::__new_allocator<_Tp>::allocate(size_type, const void*) [with _Tp = std::__cxx11::basic_string<char>]',
+    inlined from 'static _Tp* std::allocator_traits<std::allocator<_CharT> >::allocate(allocator_type&, size_type) [with _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:614:28,
+    inlined from 'std::_Vector_base<_Tp, _Alloc>::pointer std::_Vector_base<_Tp, _Alloc>::_M_allocate(std::size_t) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:387:33,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize_n(_Iterator, _Sentinel, size_type) [with _Iterator = const char* const*; _Sentinel = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1985:23,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize(_ForwardIterator, _ForwardIterator, std::forward_iterator_tag) [with _ForwardIterator = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1974:25,
+    inlined from 'std::vector<_Tp, _Alloc>::vector(_InputIterator, _InputIterator, const allocator_type&) [with _InputIterator = const char* const*; <template-parameter-2-2> = void; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:751:23,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:206:47:
+C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:151:73: note: at offset 32 into object of size 32 allocated by 'operator new'
+  151 |         return static_cast<_Tp*>(_GLIBCXX_OPERATOR_NEW(__n * sizeof(_Tp)));
+      |                                                                         ^
+In constructor 'std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::_Alloc_hider::_Alloc_hider(std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::pointer, _Alloc&&) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]',
+    inlined from 'std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::basic_string(std::__cxx11::basic_string<_CharT, _Traits, _Alloc>&&) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]' at C:/mingw64/include/c++/15.2.0/bits/basic_string.h:743:9,
+    inlined from 'void std::__new_allocator<_Tp>::construct(_Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:191:4,
+    inlined from 'static void std::allocator_traits<std::allocator<_CharT> >::construct(allocator_type&, _Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:674:17,
+    inlined from 'std::vector<_Tp, _Alloc>::reference std::vector<_Tp, _Alloc>::emplace_back(_Args&& ...) [with _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/vector.tcc:117:30,
+    inlined from 'void std::vector<_Tp, _Alloc>::push_back(value_type&&) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1434:21,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:208:23:
+C:/mingw64/include/c++/15.2.0/bits/basic_string.h:209:43: warning: array subscript 4 is outside array bounds of 'std::__cxx11::basic_string<char> [1]' [-Warray-bounds=]
+  209 |         : allocator_type(std::move(__a)), _M_p(__dat) { }
+      |                                           ^~~~~~~~~~~
+In member function '_Tp* std::__new_allocator<_Tp>::allocate(size_type, const void*) [with _Tp = std::__cxx11::basic_string<char>]',
+    inlined from 'static _Tp* std::allocator_traits<std::allocator<_CharT> >::allocate(allocator_type&, size_type) [with _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:614:28,
+    inlined from 'std::_Vector_base<_Tp, _Alloc>::pointer std::_Vector_base<_Tp, _Alloc>::_M_allocate(std::size_t) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:387:33,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize_n(_Iterator, _Sentinel, size_type) [with _Iterator = const char* const*; _Sentinel = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1985:23,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize(_ForwardIterator, _ForwardIterator, std::forward_iterator_tag) [with _ForwardIterator = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1974:25,
+    inlined from 'std::vector<_Tp, _Alloc>::vector(_InputIterator, _InputIterator, const allocator_type&) [with _InputIterator = const char* const*; <template-parameter-2-2> = void; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:751:23,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:206:47:
+C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:151:73: note: at offset 32 into object of size 32 allocated by 'operator new'
+  151 |         return static_cast<_Tp*>(_GLIBCXX_OPERATOR_NEW(__n * sizeof(_Tp)));
+      |                                                                         ^
+In member function 'void std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::_M_length(size_type) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]',
+    inlined from 'std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::basic_string(std::__cxx11::basic_string<_CharT, _Traits, _Alloc>&&) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]' at C:/mingw64/include/c++/15.2.0/bits/basic_string.h:760:11,
+    inlined from 'void std::__new_allocator<_Tp>::construct(_Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:191:4,
+    inlined from 'static void std::allocator_traits<std::allocator<_CharT> >::construct(allocator_type&, _Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:674:17,
+    inlined from 'std::vector<_Tp, _Alloc>::reference std::vector<_Tp, _Alloc>::emplace_back(_Args&& ...) [with _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/vector.tcc:117:30,
+    inlined from 'void std::vector<_Tp, _Alloc>::push_back(value_type&&) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1434:21,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:208:23:
+C:/mingw64/include/c++/15.2.0/bits/basic_string.h:234:26: warning: array subscript 1 is outside array bounds of 'std::__cxx11::basic_string<char> [1]' [-Warray-bounds=]
+  234 |       { _M_string_length = __length; }
+      |         ~~~~~~~~~~~~~~~~~^~~~~~~~~~
+In member function '_Tp* std::__new_allocator<_Tp>::allocate(size_type, const void*) [with _Tp = std::__cxx11::basic_string<char>]',
+    inlined from 'static _Tp* std::allocator_traits<std::allocator<_CharT> >::allocate(allocator_type&, size_type) [with _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:614:28,
+    inlined from 'std::_Vector_base<_Tp, _Alloc>::pointer std::_Vector_base<_Tp, _Alloc>::_M_allocate(std::size_t) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:387:33,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize_n(_Iterator, _Sentinel, size_type) [with _Iterator = const char* const*; _Sentinel = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1985:23,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize(_ForwardIterator, _ForwardIterator, std::forward_iterator_tag) [with _ForwardIterator = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1974:25,
+    inlined from 'std::vector<_Tp, _Alloc>::vector(_InputIterator, _InputIterator, const allocator_type&) [with _InputIterator = const char* const*; <template-parameter-2-2> = void; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:751:23,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:206:47:
+C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:151:73: note: at offset 32 into object of size 32 allocated by 'operator new'
+  151 |         return static_cast<_Tp*>(_GLIBCXX_OPERATOR_NEW(__n * sizeof(_Tp)));
+      |                                                                         ^
+vnc_server.cpp:16: warning: ignoring '#pragma comment ' [-Wunknown-pragmas]
+   16 | #pragma comment(lib, "ws2_32.lib")
+In file included from compositor.h:10,
+                 from vnc_server.cpp:3:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:105:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+  105 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from welcome.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:96:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   96 |                 if (!first)
+      |                 ^~
+gui_protocol.h:97:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   97 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+Build successful: guideXOSServer.experimental.exe
+WARNING: Experimental Native ELF execution is enabled in guideXOSServer.experimental.exe.
+Run with: guideXOSServer.experimental.exe

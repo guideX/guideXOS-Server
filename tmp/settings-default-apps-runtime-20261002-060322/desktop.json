@@ -1,0 +1,31 @@
+{
+  "wallpaper": "/system/wallpapers/ameobagx.png",
+  "desktop.wallpaper.id": "legacy_ameobagx",
+  "desktop.theme.id": "classic",
+  "desktop.background.scale": "fill",
+  "desktop.taskbar.position": "bottom",
+  "desktop.display.mode": "mirror",
+  "desktop.display.primaryId": "display-1",
+  "desktop.display.arrangement": "display-1|Display 1|0|0|1024|768|1|1|1|0|0|XRGB32|",
+  "desktop.display.resolution": "1024x768",
+  "desktop.clock.timeZoneId": "pacific",
+  "desktop.clock.use24HourTime": false,
+  "pinned": ["App Model Demo","Native App Debug Viewer","ComputerFiles","Trash"],
+  "pinnedAppIds": ["gxos.builtin.appmodeldemo","gxos.builtin.nativeappdebugviewer","","gxos.builtin.trash"],
+  "recent": [],
+  "recentAppIds": [],
+  "desktopShortcuts": [
+  ],
+  "showDesktopTrash": true,
+  "showDesktopThisSystem": true,
+  "showDesktopFileManager": true,
+  "showDesktopSystemSettings": false,
+  "smallLiveDesktopFolderIcons": true,
+  "autoArrangeDesktopIcons": false,
+  "desktop.accessibility.enhancedFocusIndicator": false,
+  "windows": [
+    {"id": 1000, "title": "Settings", "x": 28, "y": 0, "w": 980, "h": 689, "minimized": false, "maximized": false, "z": 0, "focused": true, "snap": 0, "restoreX": 28, "restoreY": 0, "restoreW": 980, "restoreH": 689}
+  ],
+  "iconPositions": [
+  ]
+}

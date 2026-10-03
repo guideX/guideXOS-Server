@@ -10,8 +10,10 @@
   "desktop.display.resolution": "1024x768",
   "desktop.clock.timeZoneId": "pacific",
   "desktop.clock.use24HourTime": false,
-  "pinned": ["App Model Demo","Future GXApp Package","Hello World","HelloWorld ELF","Native App Debug Viewer","Resource Viewer","Nexgen PacMan","Nexgen PacMan Danger Validation","Nexgen PacMan Bare-Metal Fruit Validation","Nexgen PacMan Fruit Validation","Nexgen PacMan Level Validation","ComputerFiles","Trash","guideXOS Developer Studio","Audio Beep","Audio Beep Denied","Missile Command (MC5)"],
-  "recent": ["Missile Command (MC5)","guideXOS Developer Studio","guideXOS Navigator","Notepad","File Explorer","DisplayOptions","ControlPanel","Nexgen PacMan Danger Validation","Nexgen PacMan","Resource Viewer"],
+  "pinned": ["App Model Demo","Future GXApp Package","Hello World","HelloWorld ELF","Native App Debug Viewer","Resource Viewer","Nexgen PacMan","ComputerFiles","Trash","guideXOS Developer Studio","Audio Beep","PacMan PGM1 Ready Input Validation","Missile Command (MC5)"],
+  "pinnedAppIds": ["gxos.builtin.appmodeldemo","com.guidexos.examples.futuregxapp","com.guidexos.helloworld","com.guidexos.examples.helloworld","gxos.builtin.nativeappdebugviewer","com.guidexos.resourceviewer","com.guidexos.pacman","","gxos.builtin.trash","com.guidexos.developerstudio","com.guidexos.audiobeep","com.guidexos.pacman.pgm1.ready-input-validation","com.guidexos.missilecommand"],
+  "recent": ["guideXOS Navigator","File Explorer","Missile Command (MC5)","guideXOS Developer Studio","Notepad","DisplayOptions","ControlPanel","Nexgen PacMan","Resource Viewer"],
+  "recentAppIds": ["guidexos.navigator","gxos.builtin.fileexplorer","com.guidexos.missilecommand","com.guidexos.developerstudio","gxos.builtin.notepad","gxos.builtin.displayoptions","gxos.builtin.controlpanel","com.guidexos.pacman","com.guidexos.resourceviewer"],
   "desktopShortcuts": [
   ],
   "showDesktopTrash": true,
@@ -20,6 +22,7 @@
   "showDesktopSystemSettings": false,
   "smallLiveDesktopFolderIcons": true,
   "autoArrangeDesktopIcons": false,
+  "desktop.accessibility.enhancedFocusIndicator": false,
   "windows": [
   ],
   "iconPositions": [
