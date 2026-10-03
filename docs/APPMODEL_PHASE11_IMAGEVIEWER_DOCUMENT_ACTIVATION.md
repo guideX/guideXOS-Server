@@ -36,7 +36,7 @@ Before removing the `.png` row from that fallback, the legacy hosted route opene
 
 `built_in_document_dispatcher.h` adds a reusable, value-owned dispatcher keyed by canonical App ID. It accepts only a current AppRegistry document activation with a valid `Document` kind, matching canonical target, bounded path, current owner/generation, and registered built-in backend. It does not inspect file extensions or contain PNG-specific behavior. Notepad and ImageViewer are registered through this same dispatcher.
 
-The activation path is copied into an owned string before the activation context/caller can expire. ImageViewer validates the app ID and path again, then passes that exact path into its existing launch/load path and PNG adapter. The old `.png` special row is removed from the legacy table. Normal Open now resolves through AppRegistry and effective default data; the remaining direct image fallback rows are only `.bmp`, `.jpg`, `.jpeg`, and `.gif`.
+The activation path is copied into an owned string before the activation context/caller can expire. ImageViewer validates the app ID and path again, then passes that exact path into its existing launch/load path and PNG adapter. The old `.png` special row is removed from the legacy table. At the Phase 11 checkout, the remaining direct image fallback rows were `.bmp`, `.jpg`, `.jpeg`, and `.gif`; Phases 13 and 14 later migrated JPEG and retired unsupported BMP/GIF.
 
 The production AppRegistry declares `.png` with display metadata `PNG image` for `gxos.builtin.imageviewer`, marks document activation/backend availability, and names ImageViewer as the built-in default. Extension matching folds ASCII case, so `.png`, `.PNG`, and `.Png` resolve identically. The global default store has no `.png` override; effective default is ImageViewer. No second pseudo-app identity, MIME sniffing, or content-based association was added.
 
@@ -71,7 +71,7 @@ The hosted smoke reported exact dispatch and decode state but could not inspect 
 
 ## Regression/build/platform results
 
-- Phase 5B closeout: **PASS**, current readiness retained with **0 unresolved / 0 high-risk** targets. The final preview recorded 43 ready, 8 shell actions, 35 safely unsupported, 0 unresolved, and 0 high-risk records. `.png` is now AppRegistry-owned; `appModelV1ImagesRemainLegacy` describes only the other four legacy extensions.
+- Phase 5B closeout at the Phase 11 checkout: **PASS**, readiness retained with **0 unresolved / 0 high-risk** targets. The final preview recorded 43 ready, 8 shell actions, 35 safely unsupported, 0 unresolved, and 0 high-risk records. `.png` was AppRegistry-owned; the historical `appModelV1ImagesRemainLegacy` marker described the other four routes then present. Phase 14 now reports no hosted legacy image route.
 - Phase 5A status, Phase 4B associations, Phase 4D Recent Programs, and Phase 3E active typed dispatch: **PASS** after updating their PNG expectations to the canonical AppRegistry route.
 - Phase 6 hosted file activation: **57/57** model checks; hosted Notepad runtime **7/7** service checks, **29/29** app checks, 20 exact-path activations, and negative cases passed.
 - Phase 7 runtime: **20** Open With activations and **4/4** runtime checks passed.

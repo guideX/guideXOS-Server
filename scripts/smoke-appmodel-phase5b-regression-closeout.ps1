@@ -359,7 +359,8 @@ This file should stay unsupported.
     Assert-Contains $summaryOutput "appModelV1RecentProgramsAligned=true" "phase 5B recent-program alignment"
     Assert-Contains $summaryOutput "appModelV1RiskyDestructiveTargetsExcluded=true" "phase 5B risky/destructive boundary"
     Assert-Contains $summaryOutput "appModelV1TrashOpenOnlyBoundary=true" "phase 5B trash boundary"
-    Assert-Contains $summaryOutput "appModelV1ImagesRemainLegacy=true" "phase 5B images boundary"
+    Assert-Contains $summaryOutput "appModelV1ImagesRemainLegacy=false" "Phase 14 removed the BMP/GIF image fallback"
+    Assert-Contains $summaryOutput "appModelPhase14BmpGifUnsupportedNoHandler=true" "Phase 14 unsupported image result"
     Assert-Contains $summaryOutput "appModelV1OutOfScopeBoundary=true" "phase 5B out-of-scope boundary"
     Assert-Contains $summaryOutput "appModelV1OutOfScopeScope=GXAppExecution|ELFLoading|PackageInstall|Sandboxing|Permissions|IDEBehavior|OpenWith|AppStore|UninstallUpdateLifecycle|TrashDestructiveActions" "phase 5B out-of-scope scope"
     Assert-Contains $registryOutput "manifestScan scanned=14 registered=14" "phase 5B bounded manifest registry scan"
@@ -381,7 +382,7 @@ This file should stay unsupported.
     Assert-True ($summaryFallbackUnsupportedCoverageCount -eq $inventoryCounts.FallbackUnsupportedCoverage) "Summary/inventory fallback coverage counts disagree"
     Assert-True ($summaryBuiltInCount -eq 19) "Expected 19 built-in apps, including the unified Settings registration"
     Assert-True ($summaryShellObjectCount -eq 10) "Expected 10 shell objects"
-    Assert-True ($summaryFileAssociationCount -eq 15) "Expected 15 file associations after HTML/HTM join the existing associations, excluding separate directory navigation"
+    Assert-True ($summaryFileAssociationCount -eq 13) "Expected 13 file associations after retiring BMP/GIF and adding HTML/HTM, excluding separate directory navigation"
     Assert-True ($summaryActiveDispatchCoverageCount -eq 12) "Expected 12 active-dispatch-owned coverage entries"
     Assert-True ($summaryFallbackUnsupportedCoverageCount -eq 27) "Expected 26 registered identities with no supported backend plus the explicit unknown probe"
     Assert-Contains $summaryOutput "expectedUnsupportedOnTarget=26 unexpectedUnsupportedOnTarget=0 unknownLabels=1" "phase 5B known unsupported launch classification"
@@ -389,7 +390,7 @@ This file should stay unsupported.
 
     Assert-Contains $inventoryOutput "inventorySurfaceExists=true" "phase 5B inventory surface"
     Assert-Contains $inventoryOutput "statusSurface=desktop.appmodel.summary" "phase 5B inventory status surface"
-    Assert-Contains $inventoryOutput "counts: builtInApps=19 shellObjects=10 fileAssociations=15 activeDispatchOwnedCoverage=12 fallbackUnsupportedCoverage=27" "phase 5B inventory counts"
+    Assert-Contains $inventoryOutput "counts: builtInApps=19 shellObjects=10 fileAssociations=13 activeDispatchOwnedCoverage=12 fallbackUnsupportedCoverage=27" "phase 5B inventory counts"
     Assert-Contains $inventoryOutput "recentProgramPolicy:" "phase 5B inventory recent-program policy"
     Assert-Contains $inventoryOutput "aligned=true" "phase 5B inventory recent-program alignment"
     Assert-Contains $inventoryOutput "canonicalRecentCapableBuiltIns=13" "phase 5B inventory canonical recent count"
@@ -398,7 +399,7 @@ This file should stay unsupported.
     Assert-Contains $inventoryOutput "shellObjectsSuppressedForRecent=3" "phase 5B inventory shell-object recent suppression"
     Assert-Contains $inventoryOutput "fallbackExclusions:" "phase 5B inventory fallback exclusions"
     Assert-Contains $inventoryOutput "core=GXAppExecution|ELFLoading|PackageInstall|Sandboxing|Permissions|IDEBehavior|OpenWith|AppStore|UninstallUpdateLifecycle|TrashDestructiveActions" "phase 5B inventory out-of-scope boundary"
-    Assert-Contains $inventoryOutput "legacyFallbacks=AppModel|ComputerFiles|Image Viewer|ImgViewer" "phase 5B inventory legacy fallback list"
+    Assert-Contains $inventoryOutput "legacyFallbacks=AppModel|ComputerFiles|ImgViewer (bare-metal compatibility alias only)" "phase 5B inventory legacy fallback list"
     Assert-Contains $inventoryOutput "builtInApps:" "phase 5B inventory built-ins"
     $builtInSection = [regex]::Match($inventoryOutput, "(?s)builtInApps:\s*(.*?)\s*shellObjects:")
     Assert-True $builtInSection.Success "phase 5B built-in registration section"
@@ -413,7 +414,8 @@ This file should stay unsupported.
     Assert-Contains $inventoryOutput "record id=gxos.shell.trash-open displayName=Trash" "phase 5B inventory includes Trash shell object"
     Assert-Contains $inventoryOutput "record key=.txt kind=extension" "phase 5B inventory includes text association"
     Assert-Contains $inventoryOutput "trashDestructiveActionsExcluded=true" "phase 5B inventory trash destructive exclusion"
-    Assert-Contains $inventoryOutput "imagesRemainLegacy=true" "phase 5B inventory images remain legacy"
+    Assert-Contains $inventoryOutput "imagesRemainLegacy=false" "phase 5B inventory has no hosted image fallback"
+    Assert-Contains $inventoryOutput "unsupportedImageExtensionsFailClosed=true" "phase 5B inventory BMP/GIF no-handler boundary"
 
     Assert-Contains $shellOutput "registryExists: true" "phase 5B shell registry exists"
     Assert-Contains $shellOutput "shellObjectRegistryIdsUnique: true" "phase 5B shell registry unique ids"
@@ -715,20 +717,22 @@ This file should stay unsupported.
     Assert-Contains $finalSummaryOutput "appModelV1RecentProgramsAligned=true" "phase 5B final summary recent-program alignment"
     Assert-Contains $finalSummaryOutput "appModelV1RiskyDestructiveTargetsExcluded=true" "phase 5B final summary risky/destructive boundary"
     Assert-Contains $finalSummaryOutput "appModelV1TrashOpenOnlyBoundary=true" "phase 5B final summary trash boundary"
-    Assert-Contains $finalSummaryOutput "appModelV1ImagesRemainLegacy=true" "phase 5B final summary images boundary"
+    Assert-Contains $finalSummaryOutput "appModelV1ImagesRemainLegacy=false" "phase 5B final summary has no hosted image fallback"
+    Assert-Contains $finalSummaryOutput "appModelPhase14BmpGifUnsupportedNoHandler=true" "phase 5B final BMP/GIF no-handler boundary"
     Assert-Contains $finalSummaryOutput "appModelV1OutOfScopeBoundary=true" "phase 5B final summary out-of-scope boundary"
     Assert-Contains $finalSummaryOutput "appModelV1BuiltInAppRegistryCount=19" "phase 5B final summary built-in count"
     Assert-Contains $finalSummaryOutput "appModelV1ShellObjectRegistryCount=10" "phase 5B final summary shell-object count"
-    Assert-Contains $finalSummaryOutput "appModelV1FileAssociationCount=15" "phase 5B final summary file-association count"
+    Assert-Contains $finalSummaryOutput "appModelV1FileAssociationCount=13" "phase 5B final summary file-association count"
     Assert-Contains $finalSummaryOutput "appModelV1ActiveDispatchOwnedCoverageCount=12" "phase 5B final summary active-owned coverage"
     Assert-Contains $finalSummaryOutput "appModelV1FallbackUnsupportedCoverageCount=27" "phase 5B final summary fallback coverage"
-    Assert-Contains $finalSummaryOutput "counts: builtInApps=19 shellObjects=10 fileAssociations=15 activeDispatchOwnedCoverage=12 fallbackUnsupportedCoverage=27" "phase 5B final inventory counts"
+    Assert-Contains $finalSummaryOutput "counts: builtInApps=19 shellObjects=10 fileAssociations=13 activeDispatchOwnedCoverage=12 fallbackUnsupportedCoverage=27" "phase 5B final inventory counts"
     Assert-Contains $finalSummaryOutput "recentProgramPolicy:" "phase 5B final recent-program policy"
     Assert-Contains $finalSummaryOutput "aligned=true" "phase 5B final recent-program alignment"
     Assert-Contains $finalSummaryOutput "trashOpenOnlySafe=true" "phase 5B final trash boundary"
     Assert-Contains $finalSummaryOutput "trashDestructiveActionsExcluded=true" "phase 5B final trash destructive exclusion"
-    Assert-Contains $finalSummaryOutput "imagesRemainLegacy=true" "phase 5B final images boundary"
-    Assert-Contains $finalSummaryOutput "legacyFallbacks=AppModel|ComputerFiles|Image Viewer|ImgViewer" "phase 5B final legacy fallback list"
+    Assert-Contains $finalSummaryOutput "imagesRemainLegacy=false" "phase 5B final images boundary"
+    Assert-Contains $finalSummaryOutput "unsupportedImageExtensionsFailClosed=true" "phase 5B final no-handler boundary"
+    Assert-Contains $finalSummaryOutput "legacyFallbacks=AppModel|ComputerFiles|ImgViewer (bare-metal compatibility alias only)" "phase 5B final legacy fallback list"
     Assert-Contains $finalSummaryOutput "recentProgramsNotPolluted: true" "phase 5B final shell recent boundary"
 
     $appModelPhase5BV1RegressionCloseout = $true
@@ -739,7 +743,7 @@ This file should stay unsupported.
     $appModelPhase5BCoreLaunchEquivalenceVerified = $true
     $appModelPhase5BRecentProgramsVerified = $true
     $appModelPhase5BRiskyDestructiveTargetsExcluded = $true
-    $appModelPhase5BImagesRemainLegacy = $true
+    $appModelPhase5BImagesRemainLegacy = $false
     $appModelPhase5BOutOfScopeBoundaryVerified = $true
     $appModelPhase5BVisibleLaunchBehaviorChanged = $false
     $appModelPhase5BPersistentDesktopStorageWrites = $false

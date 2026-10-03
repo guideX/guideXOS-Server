@@ -52,7 +52,9 @@
 #include <sstream>
 #include <chrono>
 #include <ctime>
+#include <cstring>
 #include <thread>
+#include <iterator>
 /// <summary>
 /// guideX OS GUI - Desktop Service
 /// </summary>
@@ -216,32 +218,21 @@ namespace gxos {
             static std::string filesystemEntryExtension(const std::string& path);
 
             enum class FileAssociationV1Kind {
-                Folder = 0,
-                Extension,
-                UnknownFallback,
+                UnknownFallback = 0,
                 RiskyFallback,
             };
 
             enum class FilesystemEntryLaunchTarget {
                 FileExplorer = 0,
                 DocumentActivation,
-                ImageViewer,
                 Unsupported
             };
 
             struct FileAssociationV1Record {
                 const char* associationKey;
                 FileAssociationV1Kind kind;
-                const char* handlerAppId;
-                const char* handlerDisplayName;
-                const char* handlerLaunchName;
-                bool activeTypedDispatchMayOwn;
                 bool fallbackRequired;
-                bool textLike;
-                bool folder;
-                bool system;
                 bool risky;
-                bool legacyDirectPath;
                 const char* note;
             };
 
@@ -251,7 +242,6 @@ namespace gxos {
                 size_t textAssociations = 0;
                 size_t appModelAssociations = 0;
                 size_t imageViewerAppModelAssociations = 0;
-                size_t imageLegacyAssociations = 0;
                 size_t unknownFallbackAssociations = 0;
                 size_t riskyFallbackAssociations = 0;
                 size_t activeTypedDispatchOwned = 0;
@@ -264,7 +254,7 @@ namespace gxos {
                 bool handlersResolveToRegistry = false;
                 bool textFilesOpenWithNotepad = false;
                 bool foldersOpenWithFileExplorer = false;
-                bool imagesRemainLegacy = false;
+                bool unsupportedImageExtensionsFailClosed = false;
                 bool unknownExtensionsFallback = false;
                 bool riskyExtensionsNotActiveDispatchOwned = false;
                 bool visibleLaunchBehaviorChanged = false;
@@ -272,12 +262,10 @@ namespace gxos {
             };
 
             static const FileAssociationV1Record kFileAssociationV1Table[] = {
-                { ".bmp", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
-                { ".gif", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
-                { "<unknown>", FileAssociationV1Kind::UnknownFallback, nullptr, "Unsupported", nullptr, false, true, false, false, false, false, false, "Unknown extensions remain fallback-only" },
-                { ".exe", FileAssociationV1Kind::RiskyFallback, nullptr, "Unsupported", nullptr, false, true, false, false, false, true, false, "Executable-style extensions remain unsupported" },
-                { ".gxapp", FileAssociationV1Kind::RiskyFallback, nullptr, "Unsupported", nullptr, false, true, false, false, false, true, false, "Package-style extensions remain unsupported" },
-                { ".elf", FileAssociationV1Kind::RiskyFallback, nullptr, "Unsupported", nullptr, false, true, false, false, false, true, false, "ELF-style extensions remain unsupported" }
+                { "<unknown>", FileAssociationV1Kind::UnknownFallback, true, false, "Unknown extensions fail closed" },
+                { ".exe", FileAssociationV1Kind::RiskyFallback, true, true, "Executable-style extensions remain unsupported" },
+                { ".gxapp", FileAssociationV1Kind::RiskyFallback, true, true, "Package-style extensions remain unsupported" },
+                { ".elf", FileAssociationV1Kind::RiskyFallback, true, true, "ELF-style extensions remain unsupported" }
             };
 
             static const FileAssociationV1Record* findFileAssociationV1RecordByKey(const std::string& key) {
@@ -333,31 +321,16 @@ namespace gxos {
 
             static const char* fileAssociationV1KindName(FileAssociationV1Kind kind) {
                 switch (kind) {
-                case FileAssociationV1Kind::Folder: return "folder";
-                case FileAssociationV1Kind::Extension: return "extension";
                 case FileAssociationV1Kind::UnknownFallback: return "unknown-fallback";
                 case FileAssociationV1Kind::RiskyFallback: return "risky-fallback";
                 default: return "unknown-fallback";
                 }
             }
 
-            static const char* fileAssociationV1TargetName(const FileAssociationV1Record* record) {
-                if (!record) return "Unsupported";
-                if (record->folder) return "FileExplorer";
-                if (record->textLike) return "Notepad";
-                if (record->legacyDirectPath) return "ImageViewer";
-                return "Unsupported";
-            }
-
             static FilesystemEntryLaunchTarget resolveFilesystemEntryLaunchTarget(const std::string& path, bool isDirectory) {
                 if (isDirectory) return FilesystemEntryLaunchTarget::FileExplorer;
                 const apps::FileAssociationResolution resolved = resolveRegisteredFileAssociation(path);
                 if (resolved.launchable()) return FilesystemEntryLaunchTarget::DocumentActivation;
-                if (resolved.status == apps::FileAssociationResolutionStatus::NoAssociation ||
-                    resolved.status == apps::FileAssociationResolutionStatus::NoExtension) {
-                    const FileAssociationV1Record* record = lookupFileAssociationV1Record(path, false);
-                    if (record && record->legacyDirectPath) return FilesystemEntryLaunchTarget::ImageViewer;
-                }
                 return FilesystemEntryLaunchTarget::Unsupported;
             }
 
@@ -378,7 +351,6 @@ namespace gxos {
                 switch (target) {
                 case FilesystemEntryLaunchTarget::FileExplorer: return "FileExplorer";
                 case FilesystemEntryLaunchTarget::DocumentActivation: return "DocumentActivation";
-                case FilesystemEntryLaunchTarget::ImageViewer: return "ImageViewer";
                 case FilesystemEntryLaunchTarget::Unsupported:
                 default: return "Unsupported";
                 }
@@ -388,7 +360,6 @@ namespace gxos {
                 switch (target) {
                 case FilesystemEntryLaunchTarget::FileExplorer:
                 case FilesystemEntryLaunchTarget::DocumentActivation:
-                case FilesystemEntryLaunchTarget::ImageViewer:
                     return "supported";
                 case FilesystemEntryLaunchTarget::Unsupported:
                 default:
@@ -400,7 +371,6 @@ namespace gxos {
                 switch (target) {
                 case FilesystemEntryLaunchTarget::FileExplorer: return "Folder association routes to File Explorer";
                 case FilesystemEntryLaunchTarget::DocumentActivation: return "App Model association resolved and carries an owned document activation context";
-                case FilesystemEntryLaunchTarget::ImageViewer: return "Image extension remains on the legacy direct path to ImageViewer";
                 case FilesystemEntryLaunchTarget::Unsupported:
                 default: return "No file association registered";
                 }
@@ -420,17 +390,6 @@ namespace gxos {
                 if (hasAppAssociation) {
                     registryMetadata = apps::FindBuiltInAppMetadataByAppId(appAssociation.appId.c_str());
                     registryResolved = registryMetadata != nullptr;
-                } else if (association && association->handlerAppId && association->handlerAppId[0]) {
-                    registryMetadata = apps::FindBuiltInAppMetadataByAppId(association->handlerAppId);
-                    registryResolved = registryMetadata != nullptr;
-                    if (registryMetadata) {
-                        const std::string metadataDisplayName = registryMetadata->displayName ? registryMetadata->displayName : "";
-                        const std::string metadataLaunchName = registryMetadata->launchName ? registryMetadata->launchName : "";
-                        if ((association->handlerDisplayName && metadataDisplayName != association->handlerDisplayName) ||
-                            (association->handlerLaunchName && metadataLaunchName != association->handlerLaunchName)) {
-                            registryMismatch = true;
-                        }
-                    }
                 }
                 std::ostringstream oss;
                 oss << "[FilesystemEntryLaunchTarget]\n";
@@ -439,19 +398,18 @@ namespace gxos {
                 oss << "isDirectory: " << (isDirectory ? "true" : "false") << "\n";
                 oss << "associationKey: " << (hasAppAssociation ? appAssociation.extension : (association ? association->associationKey : "")) << "\n";
                 oss << "associationKind: " << (isDirectory ? "directory-route" : (hasAppAssociation ? "app-model-extension" : fileAssociationV1KindName(association ? association->kind : FileAssociationV1Kind::UnknownFallback))) << "\n";
-                oss << "associationTargetName: " << (isDirectory ? "File Explorer" : (hasAppAssociation ? appAssociation.displayName : fileAssociationV1TargetName(association))) << "\n";
-                oss << "handlerAppId: " << (isDirectory ? "gxos.builtin.fileexplorer" : (hasAppAssociation ? appAssociation.appId : (association && association->handlerAppId ? association->handlerAppId : ""))) << "\n";
-                oss << "handlerDisplayName: " << (isDirectory ? "File Explorer" : (hasAppAssociation ? appAssociation.displayName : (association && association->handlerDisplayName ? association->handlerDisplayName : ""))) << "\n";
-                oss << "handlerLaunchName: " << (hasAppAssociation && registryMetadata && registryMetadata->launchName ? registryMetadata->launchName : (association && association->handlerLaunchName ? association->handlerLaunchName : "")) << "\n";
+                oss << "associationTargetName: " << (isDirectory ? "File Explorer" : (hasAppAssociation ? appAssociation.displayName : "Unsupported")) << "\n";
+                oss << "handlerAppId: " << (isDirectory ? "gxos.builtin.fileexplorer" : (hasAppAssociation ? appAssociation.appId : "")) << "\n";
+                oss << "handlerDisplayName: " << (isDirectory ? "File Explorer" : (hasAppAssociation ? appAssociation.displayName : "")) << "\n";
+                oss << "handlerLaunchName: " << (hasAppAssociation && registryMetadata && registryMetadata->launchName ? registryMetadata->launchName : "") << "\n";
                 oss << "appModelAssociationStatus: " << (isDirectory ? "not-applicable" : apps::AppRegistry::ToString(appAssociation.status)) << "\n";
                 oss << "appModelAssociationReason: " << (isDirectory ? "directory navigation is a separate shell route" : appAssociation.reason) << "\n";
-                oss << "activeTypedDispatchMayOwn: " << (association && association->activeTypedDispatchMayOwn ? "true" : "false") << "\n";
+                oss << "activeTypedDispatchMayOwn: false\n";
                 oss << "fallbackRequired: " << (association ? (association->fallbackRequired ? "true" : "false") : "true") << "\n";
-                oss << "textLike: " << (association && association->textLike ? "true" : "false") << "\n";
-                oss << "folder: " << (association && association->folder ? "true" : "false") << "\n";
-                oss << "system: " << (association && association->system ? "true" : "false") << "\n";
+                oss << "textLike: false\n";
+                oss << "folder: false\n";
+                oss << "system: false\n";
                 oss << "risky: " << (association && association->risky ? "true" : "false") << "\n";
-                oss << "legacyDirectPath: " << (association && association->legacyDirectPath ? "true" : "false") << "\n";
                 oss << "handlerRegistryResolved: " << (registryResolved ? "true" : "false") << "\n";
                 if (registryMetadata) {
                     oss << "handlerRegistryDisplayName: " << (registryMetadata->displayName ? registryMetadata->displayName : "") << "\n";
@@ -1672,22 +1630,6 @@ namespace gxos {
 
         static size_t appModelV1FallbackUnsupportedCoverageCount();
 
-        static bool fileAssociationV1HandlerMatchesRegistry(const FileAssociationV1Record& record) {
-            if (!record.handlerAppId || !record.handlerAppId[0]) return false;
-
-            const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByAppId(record.handlerAppId);
-            if (!metadata) return false;
-
-            const std::string metadataDisplayName = metadata->displayName ? metadata->displayName : "";
-            const std::string metadataLaunchName = metadata->launchName ? metadata->launchName : "";
-            const std::string expectedDisplayName = record.handlerDisplayName ? record.handlerDisplayName : "";
-            const std::string expectedLaunchName = record.handlerLaunchName ? record.handlerLaunchName : "";
-
-            if (!expectedDisplayName.empty() && metadataDisplayName != expectedDisplayName) return false;
-            if (!expectedLaunchName.empty() && metadataLaunchName != expectedLaunchName) return false;
-            return true;
-        }
-
         static FileAssociationV1CoverageSummary collectFileAssociationV1CoverageSummary() {
             FileAssociationV1CoverageSummary summary;
             const std::vector<apps::FileAssociationRecord> appAssociations = appModelFileAssociationsSnapshot();
@@ -1698,26 +1640,25 @@ namespace gxos {
             for (const auto& record : kFileAssociationV1Table) {
                 ++summary.total;
                 if (record.fallbackRequired) ++summary.fallbackRequired;
-                if (record.activeTypedDispatchMayOwn) ++summary.activeTypedDispatchOwned;
-
-                if (record.folder) {
-                    ++summary.folderAssociations;
-                } else if (record.textLike) {
-                    ++summary.textAssociations;
-                } else if (record.legacyDirectPath) {
-                    ++summary.imageLegacyAssociations;
-                } else if (record.kind == FileAssociationV1Kind::UnknownFallback) {
+                if (record.kind == FileAssociationV1Kind::UnknownFallback) {
                     ++summary.unknownFallbackAssociations;
                 } else if (record.kind == FileAssociationV1Kind::RiskyFallback) {
                     ++summary.riskyFallbackAssociations;
                 }
-
-                if (record.handlerAppId && record.handlerAppId[0]) {
-                    const bool registryMatch = fileAssociationV1HandlerMatchesRegistry(record);
-                    if (registryMatch) ++summary.registryResolved;
-                    else ++summary.registryMismatch;
-                }
             }
+
+            const bool hasLegacyBmpGifRows = std::any_of(
+                std::begin(kFileAssociationV1Table), std::end(kFileAssociationV1Table),
+                [](const FileAssociationV1Record& record) {
+                    return std::strcmp(record.associationKey, ".bmp") == 0 ||
+                        std::strcmp(record.associationKey, ".gif") == 0;
+                });
+            const bool hasBmpGifCapabilities = std::any_of(
+                appAssociations.begin(), appAssociations.end(),
+                [](const apps::FileAssociationRecord& record) {
+                    return record.extension == ".bmp" || record.extension == ".gif";
+                });
+            summary.unsupportedImageExtensionsFailClosed = !hasLegacyBmpGifRows && !hasBmpGifCapabilities;
 
             const std::vector<std::string> requiredTextExtensions = { ".txt", ".log", ".ini", ".cfg" };
             bool allRequiredTextAssociationsResolve = true;
@@ -1747,11 +1688,10 @@ namespace gxos {
             // markers while excluding it from the association record count.
             summary.folderAssociations = apps::FindBuiltInAppMetadataByAppId("gxos.builtin.fileexplorer") ? 1 : 0;
 
-            const size_t supportedRegistryAssociations = summary.appModelAssociations + summary.imageLegacyAssociations;
+            const size_t supportedRegistryAssociations = summary.appModelAssociations;
             summary.handlersResolveToRegistry = summary.registryMismatch == 0;
             summary.textFilesOpenWithNotepad = summary.textAssociations == 4 && allRequiredTextAssociationsResolve && summary.registryMismatch == 0 && summary.registryResolved == supportedRegistryAssociations;
             summary.foldersOpenWithFileExplorer = summary.folderAssociations == 1 && summary.registryMismatch == 0 && summary.registryResolved == supportedRegistryAssociations;
-            summary.imagesRemainLegacy = summary.imageLegacyAssociations == 2;
             summary.unknownExtensionsFallback = summary.unknownFallbackAssociations == 1;
             summary.riskyExtensionsNotActiveDispatchOwned = summary.riskyFallbackAssociations == 3;
             summary.folderAssociationRegistered = summary.folderAssociations == 1 && summary.handlersResolveToRegistry;
@@ -1761,13 +1701,13 @@ namespace gxos {
 
         static std::string fileAssociationV1CompactSummaryLine(const FileAssociationV1CoverageSummary& summary) {
             std::ostringstream oss;
-            oss << "fileAssociationV1: " << statusText(summary.tableExists && summary.registryMismatch == 0 && summary.textAssociations == 4 && summary.folderAssociations == 1 && summary.imageLegacyAssociations == 2 && summary.imageViewerAppModelAssociations == 3 && summary.unknownFallbackAssociations == 1 && summary.riskyFallbackAssociations == 3)
+            oss << "fileAssociationV1: " << statusText(summary.tableExists && summary.registryMismatch == 0 && summary.textAssociations == 4 && summary.folderAssociations == 1 && summary.unsupportedImageExtensionsFailClosed && summary.imageViewerAppModelAssociations == 3 && summary.unknownFallbackAssociations == 1 && summary.riskyFallbackAssociations == 3)
                 << " entries=" << summary.total
                 << " directoryRoutes=" << summary.folderAssociations
                 << " text=" << summary.textAssociations
                 << " appModel=" << summary.appModelAssociations
                 << " imageViewerAppModel=" << summary.imageViewerAppModelAssociations
-                << " imagesLegacy=" << summary.imageLegacyAssociations
+                << " unsupportedImageRoutesRemoved=" << diagnosticBool(summary.unsupportedImageExtensionsFailClosed)
                 << " unknownFallback=" << summary.unknownFallbackAssociations
                 << " riskyFallback=" << summary.riskyFallbackAssociations
                 << " activeOwned=" << summary.activeTypedDispatchOwned
@@ -1778,7 +1718,7 @@ namespace gxos {
         }
 
         static std::string fileAssociationV1KeyMappingsLine() {
-            return "fileAssociationV1KeyMappings: directories->File Explorer (separate route); AppRegistry .txt/.log/.ini/.cfg->Notepad; AppRegistry .png/.jpg/.jpeg->Image Viewer; .bmp/.gif->Image Viewer (legacy direct path; decoder unsupported); unknown/risky->Unsupported\n";
+            return "fileAssociationV1KeyMappings: directories->File Explorer (separate route); AppRegistry declared document capabilities->registered capable handlers; .bmp/.gif/unknown/risky->Unsupported with no legacy application fallback\n";
         }
 
         static std::string fileAssociationV1MarkersLine(const FileAssociationV1CoverageSummary& summary) {
@@ -1790,7 +1730,8 @@ namespace gxos {
             oss << "appModelPhase4BHandlersResolveToRegistry=" << diagnosticBool(summary.handlersResolveToRegistry) << "\n";
             oss << "appModelPhase4BTextFilesOpenWithNotepad=" << diagnosticBool(summary.textFilesOpenWithNotepad) << "\n";
             oss << "appModelPhase4BFoldersOpenWithFileExplorer=" << diagnosticBool(summary.foldersOpenWithFileExplorer) << "\n";
-            oss << "appModelPhase4BImagesRemainLegacy=" << diagnosticBool(summary.imagesRemainLegacy) << "\n";
+            oss << "appModelPhase4BImagesRemainLegacy=false\n";
+            oss << "appModelPhase14BmpGifUnsupportedNoHandler=" << diagnosticBool(summary.unsupportedImageExtensionsFailClosed) << "\n";
             oss << "appModelPhase4BUnknownExtensionsFallback=" << diagnosticBool(summary.unknownExtensionsFallback) << "\n";
             oss << "appModelPhase4BRiskyExtensionsNotActiveDispatchOwned=" << diagnosticBool(summary.riskyExtensionsNotActiveDispatchOwned) << "\n";
             oss << "appModelPhase4BVisibleLaunchBehaviorChanged=" << diagnosticBool(summary.visibleLaunchBehaviorChanged) << "\n";
@@ -2042,9 +1983,6 @@ namespace gxos {
             case FilesystemEntryLaunchTarget::DocumentActivation:
                 routeName = "DocumentActivation";
                 return true;
-            case FilesystemEntryLaunchTarget::ImageViewer:
-                routeName = "ImageViewer";
-                return false;
             case FilesystemEntryLaunchTarget::Unsupported:
             default:
                 routeName = "Unsupported";
@@ -3063,7 +3001,7 @@ namespace gxos {
                 phase4BFileAssociationSummary.riskyExtensionsNotActiveDispatchOwned &&
                 phase4CShellObjectSummary.trashDestructiveActionsExcluded;
             const bool appModelV1TrashOpenOnlyBoundary = phase4CShellObjectSummary.trashOpenOnlySafe;
-            const bool appModelV1ImagesRemainLegacy = phase4BFileAssociationSummary.imagesRemainLegacy;
+            const bool appModelV1ImagesRemainLegacy = false;
             const bool appModelV1OutOfScopeBoundary = true;
             const bool phase4BFileAssociationCoverageOk =
                 phase4BFileAssociationSummary.tableExists &&
@@ -3072,7 +3010,7 @@ namespace gxos {
                 phase4BFileAssociationSummary.handlersResolveToRegistry &&
                 phase4BFileAssociationSummary.textFilesOpenWithNotepad &&
                 phase4BFileAssociationSummary.foldersOpenWithFileExplorer &&
-                phase4BFileAssociationSummary.imagesRemainLegacy &&
+                phase4BFileAssociationSummary.unsupportedImageExtensionsFailClosed &&
                 phase4BFileAssociationSummary.unknownExtensionsFallback &&
                 phase4BFileAssociationSummary.riskyExtensionsNotActiveDispatchOwned &&
                 !phase4BFileAssociationSummary.visibleLaunchBehaviorChanged &&
@@ -3272,8 +3210,9 @@ namespace gxos {
             oss << "fallbackExclusions:\n";
             oss << "  core=" << kAppModelV1OutOfScopeScope << "\n";
             oss << "  trashDestructiveActionsExcluded=" << diagnosticBool(shellSummary.trashDestructiveActionsExcluded) << "\n";
-            oss << "  imagesRemainLegacy=" << diagnosticBool(fileAssocSummary.imagesRemainLegacy) << "\n";
-            oss << "  legacyFallbacks=AppModel|ComputerFiles|Image Viewer|ImgViewer\n";
+            oss << "  imagesRemainLegacy=false\n";
+            oss << "  unsupportedImageExtensionsFailClosed=" << diagnosticBool(fileAssocSummary.unsupportedImageExtensionsFailClosed) << "\n";
+            oss << "  legacyFallbacks=AppModel|ComputerFiles|ImgViewer (bare-metal compatibility alias only)\n";
             oss << "builtInApps:\n";
             for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
                 const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
@@ -3322,16 +3261,10 @@ namespace gxos {
             for (const auto& record : kFileAssociationV1Table) {
                 oss << "  record key=" << record.associationKey
                     << " kind=" << fileAssociationV1KindName(record.kind)
-                    << " handlerAppId=" << (record.handlerAppId ? record.handlerAppId : "")
-                    << " handlerDisplayName=" << (record.handlerDisplayName ? record.handlerDisplayName : "")
-                    << " handlerLaunchName=" << (record.handlerLaunchName ? record.handlerLaunchName : "")
-                    << " activeTypedDispatchMayOwn=" << diagnosticBool(record.activeTypedDispatchMayOwn)
+                    << " handlerAppId="
+                    << " activeTypedDispatchMayOwn=false"
                     << " fallbackRequired=" << diagnosticBool(record.fallbackRequired)
-                    << " textLike=" << diagnosticBool(record.textLike)
-                    << " folder=" << diagnosticBool(record.folder)
-                    << " system=" << diagnosticBool(record.system)
                     << " risky=" << diagnosticBool(record.risky)
-                    << " legacyDirectPath=" << diagnosticBool(record.legacyDirectPath)
                     << " note=" << (record.note ? record.note : "")
                     << "\n";
             }
@@ -3345,7 +3278,7 @@ namespace gxos {
                     << " handlerLaunchName=" << handlerLaunchName
                     << " activeTypedDispatchMayOwn=" << diagnosticBool(record.supportsDocumentActivation && record.backendAvailable && !record.ambiguous)
                     << " fallbackRequired=true textLike=" << diagnosticBool(record.contentType.rfind("text/", 0) == 0)
-                    << " folder=false system=false risky=false legacyDirectPath=false"
+                    << " folder=false system=false risky=false"
                     << " associationAmbiguous=" << diagnosticBool(record.ambiguous)
                     << " handlerAvailable=" << diagnosticBool(record.backendAvailable)
                     << " note=" << record.description << "\n";
@@ -3365,30 +3298,13 @@ namespace gxos {
             oss << fileAssociationV1MarkersLine(summary);
             oss << "table:\n";
             for (const auto& record : kFileAssociationV1Table) {
-                const bool registryMatch = fileAssociationV1HandlerMatchesRegistry(record);
-                const apps::BuiltInAppMetadata* registryMetadata = nullptr;
-                if (record.handlerAppId && record.handlerAppId[0]) {
-                    registryMetadata = apps::FindBuiltInAppMetadataByAppId(record.handlerAppId);
-                }
-
                 oss << "  key=" << record.associationKey
                     << " kind=" << fileAssociationV1KindName(record.kind)
-                    << " handlerAppId=" << (record.handlerAppId ? record.handlerAppId : "")
-                    << " handlerDisplayName=" << (record.handlerDisplayName ? record.handlerDisplayName : "")
-                    << " handlerLaunchName=" << (record.handlerLaunchName ? record.handlerLaunchName : "")
-                    << " activeTypedDispatchMayOwn=" << diagnosticBool(record.activeTypedDispatchMayOwn)
+                    << " handlerAppId="
+                    << " activeTypedDispatchMayOwn=false"
                     << " fallbackRequired=" << diagnosticBool(record.fallbackRequired)
-                    << " textLike=" << diagnosticBool(record.textLike)
-                    << " folder=" << diagnosticBool(record.folder)
-                    << " system=" << diagnosticBool(record.system)
                     << " risky=" << diagnosticBool(record.risky)
-                    << " legacyDirectPath=" << diagnosticBool(record.legacyDirectPath)
-                    << " registryResolved=" << diagnosticBool(registryMetadata != nullptr)
-                    << " registryMatch=" << diagnosticBool(registryMatch);
-                if (registryMetadata) {
-                    oss << " registryDisplayName=" << (registryMetadata->displayName ? registryMetadata->displayName : "")
-                        << " registryLaunchName=" << (registryMetadata->launchName ? registryMetadata->launchName : "");
-                }
+                    << " registryResolved=false registryMatch=false";
                 if (record.note && record.note[0]) {
                     oss << " note=" << record.note;
                 }
@@ -3404,7 +3320,7 @@ namespace gxos {
                     << " handlerLaunchName=" << (apps::FindBuiltInAppMetadataByAppId(record.appId.c_str()) &&
                         apps::FindBuiltInAppMetadataByAppId(record.appId.c_str())->launchName
                         ? apps::FindBuiltInAppMetadataByAppId(record.appId.c_str())->launchName : "")
-                    << " activeTypedDispatchMayOwn=true fallbackRequired=true textLike=true folder=false system=false risky=false legacyDirectPath=false"
+                    << " activeTypedDispatchMayOwn=true fallbackRequired=true textLike=true folder=false system=false risky=false"
                     << " registryResolved=" << diagnosticBool(resolved.launchable())
                     << " registryMatch=" << diagnosticBool(resolved.launchable() && resolved.appId == record.appId)
                     << " documentActivationSupported=true backendAvailable=true note=" << record.description << "\n";
@@ -5946,7 +5862,7 @@ namespace gxos {
                 filesystemEntryLaunchStatus(shadowRoute),
                 activeSelectedHandler.empty() ? filesystemEntryLaunchTargetName(shadowRoute) : activeSelectedHandler,
                 activeHandled,
-                !activeHandled,
+                !activeHandled && shadowRoute != FilesystemEntryLaunchTarget::Unsupported,
                 activeReason));
             if (activeHandled) return true;
 
@@ -5966,14 +5882,6 @@ namespace gxos {
                     return false;
                 }
                 if (recordRecent) AddRecentProgram(association.displayName);
-                return true;
-            case FilesystemEntryLaunchTarget::ImageViewer:
-                if (apps::ImageViewer::Launch(path) == 0) {
-                    error = "Failed to open image in Image Viewer";
-                    NotificationManager::Add(error, NotificationLevel::Error);
-                    return false;
-                }
-                if (recordRecent) AddRecentProgram("Image Viewer");
                 return true;
             case FilesystemEntryLaunchTarget::Unsupported:
             default:

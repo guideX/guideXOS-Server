@@ -211,7 +211,8 @@ This file exists only to prove temporary smoke artifacts are cleaned up.
     Assert-Contains $summaryOutput "appModelV1RecentProgramsAligned=true" "phase 5A recent-program alignment"
     Assert-Contains $summaryOutput "appModelV1RiskyDestructiveTargetsExcluded=true" "phase 5A risky/destructive boundary"
     Assert-Contains $summaryOutput "appModelV1TrashOpenOnlyBoundary=true" "phase 5A trash boundary"
-    Assert-Contains $summaryOutput "appModelV1ImagesRemainLegacy=true" "phase 5A images boundary"
+    Assert-Contains $summaryOutput "appModelV1ImagesRemainLegacy=false" "Phase 14 removed the hosted BMP/GIF image fallback"
+    Assert-Contains $summaryOutput "appModelPhase14BmpGifUnsupportedNoHandler=true" "Phase 14 BMP/GIF no-handler boundary"
     Assert-Contains $summaryOutput "appModelV1OutOfScopeBoundary=true" "phase 5A out-of-scope boundary"
 
     $builtInCount = Get-CountValue -Text $summaryOutput -Field "appModelV1BuiltInAppRegistryCount"
@@ -232,7 +233,7 @@ This file exists only to prove temporary smoke artifacts are cleaned up.
     Assert-Contains $inventoryOutput "aligned=true" "phase 5A inventory recent-program alignment"
     Assert-Contains $inventoryOutput "fallbackExclusions:" "phase 5A inventory fallback exclusions"
     Assert-Contains $inventoryOutput "core=GXAppExecution|ELFLoading|PackageInstall|Sandboxing|Permissions|IDEBehavior|OpenWith|AppStore|UninstallUpdateLifecycle|TrashDestructiveActions" "phase 5A inventory out-of-scope boundary"
-    Assert-Contains $inventoryOutput "legacyFallbacks=AppModel|ComputerFiles|Image Viewer|ImgViewer" "phase 5A inventory legacy fallback list"
+    Assert-Contains $inventoryOutput "legacyFallbacks=AppModel|ComputerFiles|ImgViewer (bare-metal compatibility alias only)" "phase 5A inventory legacy fallback list"
     Assert-Contains $inventoryOutput "builtInApps:" "phase 5A inventory built-ins"
     Assert-Contains $inventoryOutput "shellObjects:" "phase 5A inventory shell objects"
     Assert-Contains $inventoryOutput "fileAssociations:" "phase 5A inventory file associations"
@@ -265,7 +266,7 @@ This file exists only to prove temporary smoke artifacts are cleaned up.
     $appModelPhase5ARecentProgramsAligned = $true
     $appModelPhase5ARiskyDestructiveTargetsExcluded = $true
     $appModelPhase5ATrashOpenOnlyBoundary = $true
-    $appModelPhase5AImagesRemainLegacy = $true
+    $appModelPhase5AImagesRemainLegacy = $false
     $appModelPhase5AVisibleLaunchBehaviorChanged = $false
     $appModelPhase5APersistentDesktopStorageWrites = $false
 

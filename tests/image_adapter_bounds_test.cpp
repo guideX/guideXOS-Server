@@ -64,6 +64,12 @@ int main() {
     check(corruptImage.status == ImageLoadStatus::UnsupportedFormat && !corruptImage.image,
         "corrupt non-PNG contents fail without creating image state");
 
+    const ImageBitmap bmpPath = ImageAdapter::LoadFromFile("unsupported.bmp");
+    const ImageBitmap gifPath = ImageAdapter::LoadFromFile("unsupported.gif");
+    check(bmpPath.status == ImageLoadStatus::UnsupportedFormat && !bmpPath.image &&
+        gifPath.status == ImageLoadStatus::UnsupportedFormat && !gifPath.image,
+        "production ImageAdapter rejects BMP and GIF suffixes as UnsupportedFormat before file reads");
+
     const std::vector<uint8_t> signatureOnly(valid.begin(), valid.begin() + std::min<size_t>(8, valid.size()));
     const ImageBitmap signatureOnlyImage = ImageAdapter::LoadFromBytes(signatureOnly, "signature-only.png");
     check(signatureOnlyImage.status == ImageLoadStatus::DecodeFailed && !signatureOnlyImage.image,

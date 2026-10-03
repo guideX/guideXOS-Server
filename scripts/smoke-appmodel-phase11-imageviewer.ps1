@@ -225,7 +225,12 @@ try {
     Send-ServerCommand "gui.start"
     Start-Sleep -Milliseconds 500
     Send-ServerCommand "desktop.appmodel.file-associations"
-    Wait-OutputCount ([regex]::Escape("AppRegistry .png/.jpg/.jpeg->Image Viewer")) 1
+    Wait-OutputCount ([regex]::Escape("fileAssociationV1: OK")) 1
+    $AssociationOutput = Get-RuntimeOutput
+    Assert-Phase11 ($AssociationOutput.Contains("extension=.png handlerAppId=gxos.builtin.imageviewer") -and
+        $AssociationOutput.Contains("extension=.jpg handlerAppId=gxos.builtin.imageviewer") -and
+        $AssociationOutput.Contains("extension=.jpeg handlerAppId=gxos.builtin.imageviewer")) `
+        "PNG and JPEG handler declarations are surfaced through AppRegistry"
     # The diagnostic command reads one whitespace-delimited token and does not strip quotes.
     Send-ServerCommand ("desktop.open.resolve {0}" -f $NormalCases[0].VirtualPath)
     Wait-OutputCount ([regex]::Escape("launchTarget: DocumentActivation")) 1
@@ -322,8 +327,8 @@ try {
     Send-ServerCommand "gui.mouse $SettingsWindowId 500 165 1 up"
     Wait-OutputCount ([regex]::Escape("[SettingsDefaultAppsModel] row extension=.png builtInDefault=gxos.builtin.imageviewer configuredOverride=none effectiveDefault=gxos.builtin.imageviewer effectiveDisplayName=Image Viewer handlers=1")) 1
     Assert-Phase11 $true "Settings Default Apps production model discovers .png and its AppRegistry built-in default"
-    Send-ServerCommand "desktop.windows.owners"
     $OwnerEnd = $Runner.Count('DESKTOP_WINDOW_OWNERS_END') + 1
+    Send-ServerCommand "desktop.windows.owners"
     Wait-OutputCount 'DESKTOP_WINDOW_OWNERS_END' $OwnerEnd
     $SettingsWindows = [regex]::Matches((Get-RuntimeOutput), 'window id=(\d+) ownerPid=(\d+) ownerName=[^\s]+ appId=gxos\.builtin\.settings title=Settings')
     if ($SettingsWindows.Count -gt 0) { Send-ServerCommand ("gui.close {0}" -f $SettingsWindows[$SettingsWindows.Count - 1].Groups[1].Value) }

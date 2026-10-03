@@ -224,6 +224,8 @@ int main()
         jpeg->policy.effectiveDefaultAppId == "gxos.builtin.imageviewer" &&
         jpeg->handlers.count == 1 && jpeg->handlers.handlers[0].appId == "gxos.builtin.imageviewer",
         "Settings discovers JPG and JPEG generically with ImageViewer as built-in/effective and no override");
+    check(findDefaultAppsRow(initial, ".bmp") == nullptr && findDefaultAppsRow(initial, ".gif") == nullptr,
+        "Settings does not invent BMP or GIF rows without an AppRegistry capability or stored policy entry");
 
     const DefaultAppsRow* txt = findDefaultAppsRow(initial, ".txt");
     check(txt && txt->policy.builtInDefaultAppId == "gxos.builtin.notepad" &&

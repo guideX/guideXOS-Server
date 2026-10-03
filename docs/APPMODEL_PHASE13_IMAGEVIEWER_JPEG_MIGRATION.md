@@ -48,9 +48,9 @@ The Phase 13 runtime smoke covered `.jpg`, `.JPEG`, and `.JpG` through normal Op
 
 ## BMP and GIF audit
 
-Neither format has a production decoder in the hosted ImageViewer adapter: PNG and JPEG are explicitly selected decoders, and BMP/GIF inputs are rejected as unsupported. The remaining legacy File Explorer table still routes `.bmp` and `.gif` to ImageViewer, which overstates capability and leads to an unsupported-format result. The exact remaining legacy image fallback is `.bmp` and `.gif`; their current association is legacy routing, not proof that they open.
+At the end of Phase 13, neither format had a production decoder in the hosted ImageViewer adapter: PNG and JPEG were explicitly selected decoders, and BMP/GIF inputs were rejected as unsupported. The Phase 13 checkout still routed `.bmp` and `.gif` through a legacy File Explorer fallback, which overclaimed capability. Phase 14 removed both rows and the direct launch branch; the current behavior is the AppRegistry no-handler result documented in [the Phase 14 report](APPMODEL_PHASE14_LEGACY_ASSOCIATION_RETIREMENT.md).
 
-Phase 14 should first remove these misleading legacy associations unless a separate, bounded product decision chooses and implements a decoder. Do not imply either format is supported by retaining a route alone. GIF animation and broad BMP support are outside this phase.
+The dormant vendored stb header contains BMP and GIF decoder implementations, but the production PNG and JPEG translation units compile with `STBI_ONLY_PNG` and `STBI_ONLY_JPEG`; the ImageAdapter also dispatches only those three suffixes. No production BMP/GIF decoder was wired into ImageViewer. GIF animation and broad BMP support remain outside Phase 14.
 
 ## Regression and build evidence
 

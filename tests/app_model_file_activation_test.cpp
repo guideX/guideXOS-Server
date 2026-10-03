@@ -2,6 +2,7 @@
 #include "app_manifest_validator.h"
 #include "app_registry.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <iostream>
 #include <string>
@@ -74,6 +75,21 @@ int main() {
 
     AppRegistry builtIns;
     builtIns.RegisterBuiltInAppsAsManifests({ "Notepad" });
+    AppRegistry imageViewerCapabilities;
+    imageViewerCapabilities.RegisterBuiltInAppsAsManifests({ "Image Viewer" });
+    const std::vector<std::string> imageViewerExtensions = imageViewerCapabilities.GetKnownDocumentExtensions();
+    check(imageViewerCapabilities.GetFileAssociations().size() == 3 &&
+        imageViewerCapabilities.EnumerateCapableHandlers(".bmp").count == 0 &&
+        imageViewerCapabilities.EnumerateCapableHandlers(".gif").count == 0 &&
+        imageViewerCapabilities.ResolveFileAssociation("/images/unsupported.bmp").status == FileAssociationResolutionStatus::NoAssociation &&
+        imageViewerCapabilities.ResolveFileAssociation("/images/unsupported.gif").status == FileAssociationResolutionStatus::NoAssociation,
+        "association", "ImageViewer declares only PNG and JPEG, so BMP and GIF resolve to no handler");
+    check(std::find(imageViewerExtensions.begin(), imageViewerExtensions.end(), ".bmp") == imageViewerExtensions.end() &&
+        std::find(imageViewerExtensions.begin(), imageViewerExtensions.end(), ".gif") == imageViewerExtensions.end(),
+        "association", "unsupported BMP and GIF do not appear in the AppRegistry known-capability set");
+    check(imageViewerCapabilities.ResolveDocumentActivation("gxos.builtin.imageviewer", "/images/explicit.bmp").status ==
+        FileAssociationResolutionStatus::HandlerDoesNotSupportDocuments,
+        "association", "explicit ImageViewer activation rejects a BMP path without bypassing capability validation");
     const AppManifestLoadResult manifestCapability = AppManifestLoader::LoadFromString(
         "{\"schemaVersion\":1,\"id\":\"com.guidexos.tests.loader\",\"displayName\":\"Loader Test\","
         "\"version\":\"1.0.0\",\"kind\":\"service\",\"supportsDocumentActivation\":true,"

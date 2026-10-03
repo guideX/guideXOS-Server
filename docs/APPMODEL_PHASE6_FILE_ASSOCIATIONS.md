@@ -27,7 +27,7 @@ File Explorer does not own or rank handlers and contains no `.txt`-specific laun
 
 The built-in Notepad registration is `gxos.builtin.notepad`. It declares document activation support and a current hosted dispatcher in AppRegistry. Its supported built-in associations are `.txt`, `.log`, `.ini`, and `.cfg`; the sample manifest's duplicate Notepad association was removed. The App Model manifest loader also reads the optional `supportsDocumentActivation` capability for future registrations. A declaration alone does not make an app launchable: current registration, capability, and backend availability are checked.
 
-Developer Studio remains unavailable for Open because its hosted metadata says `openSupported=false`. Navigator has no local-file activation backend. `.md`, `.html`, `.htm`, and image formats are not added to the AppRegistry defaults. Existing image extensions remain on the legacy Image Viewer route; this phase does not claim to expand its format support or associate wallpaper selection with document opening.
+At the Phase 6 checkout, Developer Studio remained unavailable for Open because its hosted metadata said `openSupported=false`. Navigator had no local-file activation backend. `.md`, `.html`, `.htm`, and image formats were not added to the AppRegistry defaults. Existing image extensions stayed on the legacy Image Viewer route; Phase 11 and 13 later migrated PNG/JPEG, and Phase 14 retired unsupported BMP/GIF. This phase did not claim to expand image format support or associate wallpaper selection with document opening.
 
 ## Bounds and extension rules
 
@@ -116,4 +116,4 @@ The implementation commit excludes the user's `desktop.json` edit and all startu
 
 ## Phase 11 follow-up
 
-The statements above that image extensions remain on a legacy route describe the Phase 6 checkout. Phase 11 later added hosted ImageViewer's `.png` capability to AppRegistry and moved normal PNG Open, Open With, and Settings Default Apps discovery to that model. The direct fallback now covers `.bmp`, `.jpg`, `.jpeg`, and `.gif`; see [the Phase 11 report](APPMODEL_PHASE11_IMAGEVIEWER_DOCUMENT_ACTIVATION.md).
+The statements above that image extensions remain on a legacy route describe the Phase 6 checkout. Phase 11 later added hosted ImageViewer's `.png` capability to AppRegistry and moved normal PNG Open, Open With, and Settings Default Apps discovery to that model. Phase 13 migrated JPEG, and Phase 14 retired the final unsupported BMP/GIF fallback; see [the Phase 11 report](APPMODEL_PHASE11_IMAGEVIEWER_DOCUMENT_ACTIVATION.md) for its historical route and [the Phase 14 report](APPMODEL_PHASE14_LEGACY_ASSOCIATION_RETIREMENT.md) for current behavior.

@@ -174,6 +174,10 @@ try {
     }
     Assert-Phase13 (@($NormalCases.Dimensions | Select-Object -Unique).Count -ge 2) "valid JPEG fixtures cover multiple dimensions"
 
+    $RenamedJpegAsBmpPath = Join-Path $NormalCases[0].Folder "valid-jpeg-renamed.bmp"
+    [IO.File]::Copy($Sources[0], $RenamedJpegAsBmpPath, $true)
+    $RenamedJpegAsBmpVirtualPath = Get-VirtualPath $RenamedJpegAsBmpPath
+
     $OpenWithFolder = Join-Path $FixtureRoot "open-with"
     New-Item -ItemType Directory -Force -Path $OpenWithFolder | Out-Null
     $OpenWithPath = Join-Path $OpenWithFolder "Open With.jpeg"
@@ -220,12 +224,25 @@ try {
     Send-ServerCommand "gui.start"
     Start-Sleep -Milliseconds 500
     Send-ServerCommand "desktop.appmodel.file-associations"
-    [void](Wait-Output 'AppRegistry \.png/\.jpg/\.jpeg->Image Viewer')
+    $AssociationOutput = Wait-Output 'fileAssociationV1: OK'
+    Assert-Phase13 ($AssociationOutput.Contains("extension=.png handlerAppId=gxos.builtin.imageviewer") -and
+        $AssociationOutput.Contains("extension=.jpg handlerAppId=gxos.builtin.imageviewer") -and
+        $AssociationOutput.Contains("extension=.jpeg handlerAppId=gxos.builtin.imageviewer")) `
+        "PNG and JPEG handler declarations are surfaced through AppRegistry"
     Send-ServerCommand "desktop.open.resolve /phase13-case/photo.JpG"
     $ResolveOutput = Wait-Output 'handlerAppId: gxos\.builtin\.imageviewer'
     Assert-Phase13 ($ResolveOutput.Contains("handlerAppId: gxos.builtin.imageviewer")) "mixed-case JPG extension resolves to canonical ImageViewer in AppRegistry"
 
     foreach ($Case in $NormalCases) { [void](Open-FileExplorerImage $Case) }
+
+    $ImageViewerDispatchPattern = [regex]::Escape("Built-in document dispatcher delivered canonical activation appId=gxos.builtin.imageviewer")
+    $ImageViewerDispatchesBeforeBmpRename = [regex]::Matches((Get-RuntimeOutput), $ImageViewerDispatchPattern).Count
+    Send-ServerCommand ("desktop.open `"{0}`"" -f $RenamedJpegAsBmpVirtualPath)
+    $RenamedBmpOutput = Wait-Output ([regex]::Escape("Desktop open failed: No file association registered for $RenamedJpegAsBmpVirtualPath"))
+    $ImageViewerDispatchesAfterBmpRename = [regex]::Matches((Get-RuntimeOutput), $ImageViewerDispatchPattern).Count
+    Assert-Phase13 ($RenamedBmpOutput.Contains("Desktop open failed: No file association registered for $RenamedJpegAsBmpVirtualPath") -and
+        $ImageViewerDispatchesBeforeBmpRename -eq $ImageViewerDispatchesAfterBmpRename) `
+        "valid JPEG bytes renamed to BMP remain unsupported and do not launch ImageViewer"
 
     $OpenWithExplorerBefore = [regex]::Matches((Get-RuntimeOutput), 'FileExplorer window created: (\d+)').Count
     Send-ServerCommand ("desktop.open `"{0}`" dir" -f $OpenWithCase.VirtualFolder)

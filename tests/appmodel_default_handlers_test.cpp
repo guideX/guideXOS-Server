@@ -427,6 +427,39 @@ int main() {
     }
 
     {
+        const std::filesystem::path staleImagePath = tempRoot / "stale-image-overrides.cfg";
+        const std::string staleImageBody = ".bmp=gxos.builtin.imageviewer\n.gif=gxos.builtin.imageviewer\n";
+        writeText(staleImagePath, configText(staleImageBody, 2));
+        const std::string staleImageConfigBefore = readText(staleImagePath);
+        AppRegistry staleImages(false, staleImagePath);
+        check(addBuiltIns(staleImages), "stale BMP/GIF override fixture loads production handlers");
+        const DefaultHandlerInfo bmpState = staleImages.GetDefaultHandlerInfo(".bmp");
+        const DefaultHandlerInfo gifState = staleImages.GetDefaultHandlerInfo(".gif");
+        const std::vector<std::string> known = staleImages.GetKnownDocumentExtensions();
+        RegistrySettingsBackend staleBackend(staleImages);
+        settings::DefaultAppsModel staleSettings;
+        staleSettings.refresh(staleBackend);
+        const settings::DefaultAppsRow* bmpRow = settings::findDefaultAppsRow(staleSettings.snapshot(), ".bmp");
+        const settings::DefaultAppsRow* gifRow = settings::findDefaultAppsRow(staleSettings.snapshot(), ".gif");
+        check(bmpState.configuredStatus == ConfiguredDefaultHandlerStatus::CapabilityMissing &&
+            gifState.configuredStatus == ConfiguredDefaultHandlerStatus::CapabilityMissing &&
+            bmpState.effectiveDefaultAppId.empty() && gifState.effectiveDefaultAppId.empty() &&
+            staleImages.ResolveFileAssociation("/docs/stale.bmp").status == FileAssociationResolutionStatus::NoAssociation &&
+            staleImages.ResolveFileAssociation("/docs/stale.gif").status == FileAssociationResolutionStatus::NoAssociation &&
+            staleImages.ResolveDocumentActivation("gxos.builtin.imageviewer", "/docs/explicit.bmp").status ==
+                FileAssociationResolutionStatus::HandlerDoesNotSupportDocuments &&
+            staleImages.EnumerateCapableHandlers(".bmp").count == 0 &&
+            staleImages.EnumerateCapableHandlers(".gif").count == 0 &&
+            bmpRow && gifRow && bmpRow->handlers.count == 0 && gifRow->handlers.count == 0 &&
+            settings::eligibleDefaultAppHandlerIndices(*bmpRow, staleBackend).empty() &&
+            settings::eligibleDefaultAppHandlerIndices(*gifRow, staleBackend).empty() &&
+            std::find(known.begin(), known.end(), ".bmp") != known.end() &&
+            std::find(known.begin(), known.end(), ".gif") != known.end() &&
+            readText(staleImagePath) == staleImageConfigBefore,
+            "stale BMP/GIF policy remains inert: no effective default, capable handler, Open, or eligible Settings choice");
+    }
+
+    {
         DefaultAppHandlerStore staleStore((tempRoot / "stale.cfg").string());
         std::string error;
         check(staleStore.Commit({ { ".abc", "test.handler.gone" } }, error), "stale-ID fixture is stored as canonical identity only");

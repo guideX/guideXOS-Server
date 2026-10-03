@@ -28,7 +28,8 @@ $FixtureLog = Join-Path $FixtureRoot "phase4b-safe-open.log"
 $FixtureIni = Join-Path $FixtureRoot "phase4b-safe-open.ini"
 $FixtureCfg = Join-Path $FixtureRoot "phase4b-safe-open.cfg"
 $FixturePng = Join-Path $FixtureRoot "phase4b-legacy-image.png"
-$FixtureBmp = Join-Path $FixtureRoot "phase4b-legacy-image.bmp"
+$FixtureBmp = Join-Path $FixtureRoot "phase4b-unsupported-image.bmp"
+$FixtureGif = Join-Path $FixtureRoot "phase4b-unsupported-image.gif"
 $FixtureJpg = Join-Path $FixtureRoot "phase4b-legacy-image.jpg"
 $FixtureJpeg = Join-Path $FixtureRoot "phase4b-legacy-image.jpeg"
 $FixtureUnknown = Join-Path $FixtureRoot "phase4b-unsupported.xyz"
@@ -114,6 +115,16 @@ function Assert-Contains {
     Assert-True ($Text.Contains($Needle)) "Missing expected text for ${Reason}: $Needle"
 }
 
+function Assert-NotContains {
+    param(
+        [string]$Text,
+        [string]$Needle,
+        [string]$Reason
+    )
+
+    Assert-True (-not $Text.Contains($Needle)) "Unexpected text for ${Reason}: $Needle"
+}
+
 function Assert-RegexCountAtLeast {
     param(
         [string]$Text,
@@ -179,7 +190,11 @@ This file should stay unsupported.
 "@
     New-AsciiTextFile -Path $FixtureBmp -Text @"
 Phase 4B unsupported BMP fixture
-The legacy route is retained only for the Phase 13 decoder audit.
+No AppRegistry handler or legacy image route should accept this file.
+"@
+    New-AsciiTextFile -Path $FixtureGif -Text @"
+Phase 4B unsupported GIF fixture
+No AppRegistry handler or legacy image route should accept this file.
 "@
 
     Copy-Item -LiteralPath (Join-Path $Root "assets\Backgrounds\ameoba.png") -Destination $FixturePng -Force
@@ -218,7 +233,8 @@ The legacy route is retained only for the Phase 13 decoder audit.
     Assert-Contains $summaryOutput "appModelPhase4BHandlersResolveToRegistry=true" "handlers resolve to registry"
     Assert-Contains $summaryOutput "appModelPhase4BTextFilesOpenWithNotepad=true" "text files open with Notepad"
     Assert-Contains $summaryOutput "appModelPhase4BFoldersOpenWithFileExplorer=true" "folders open with File Explorer"
-    Assert-Contains $summaryOutput "appModelPhase4BImagesRemainLegacy=true" "images remain legacy"
+    Assert-Contains $summaryOutput "appModelPhase4BImagesRemainLegacy=false" "unsupported image formats no longer remain legacy"
+    Assert-Contains $summaryOutput "appModelPhase14BmpGifUnsupportedNoHandler=true" "Phase 14 BMP/GIF no-handler marker"
     Assert-Contains $summaryOutput "appModelPhase4BUnknownExtensionsFallback=true" "unknown fallback"
     Assert-Contains $summaryOutput "appModelPhase4BRiskyExtensionsNotActiveDispatchOwned=true" "risky excluded"
     Assert-Contains $summaryOutput "appModelPhase4BVisibleLaunchBehaviorChanged=false" "visible launch behavior unchanged"
@@ -228,12 +244,14 @@ The legacy route is retained only for the Phase 13 decoder audit.
 
     Assert-Contains $assocOutput "[FileAssociationV1]" "file association diagnostic section"
     Assert-Contains $assocOutput "registryResolved=true" "registry-backed handler resolution"
-    Assert-Contains $assocOutput "fileAssociationV1KeyMappings: directories->File Explorer (separate route); AppRegistry .txt/.log/.ini/.cfg->Notepad; AppRegistry .png/.jpg/.jpeg->Image Viewer; .bmp/.gif->Image Viewer (legacy direct path; decoder unsupported); unknown/risky->Unsupported" "key mappings"
+    Assert-Contains $assocOutput "fileAssociationV1KeyMappings: directories->File Explorer (separate route); AppRegistry declared document capabilities->registered capable handlers; .bmp/.gif/unknown/risky->Unsupported with no legacy application fallback" "key mappings"
     Assert-Contains $assocOutput "appModelPhase6DirectoryActivationIsSeparate=true" "directory route remains separate from file associations"
     Assert-Contains $assocOutput "key=.txt kind=extension" "text table row"
     Assert-Contains $assocOutput "handlerAppId=gxos.builtin.notepad" "text table handler"
     Assert-Contains $assocOutput "key=.png kind=extension" "image table row"
-    Assert-Contains $assocOutput "legacyDirectPath=true" "image table legacy direct path"
+    Assert-Contains $assocOutput "unsupportedImageRoutesRemoved=true" "legacy BMP/GIF routes removed"
+    Assert-NotContains $assocOutput "key=.bmp" "BMP is absent from legacy association metadata"
+    Assert-NotContains $assocOutput "key=.gif" "GIF is absent from legacy association metadata"
     Assert-Contains $assocOutput "key=<unknown> kind=unknown-fallback" "unknown table row"
     Assert-Contains $assocOutput "key=.exe kind=risky-fallback" "risky table row"
 
@@ -254,6 +272,7 @@ The legacy route is retained only for the Phase 13 decoder audit.
         "desktop.open.resolve $FixtureCfg",
         "desktop.open.resolve $FixturePng",
         "desktop.open.resolve $FixtureBmp",
+        "desktop.open.resolve $FixtureGif",
         "desktop.open.resolve $FixtureJpg",
         "desktop.open.resolve $FixtureJpeg",
         "desktop.open.resolve $FixtureUnknown",
@@ -270,11 +289,11 @@ The legacy route is retained only for the Phase 13 decoder audit.
 
     Assert-RegexCountAtLeast $resolveOutput 'associationKind: app-model-extension' 7 "App Model document extension kinds including PNG/JPG/JPEG"
     Assert-RegexCountAtLeast $resolveOutput 'launchTarget: DocumentActivation' 7 "App Model document activation targets including JPG/JPEG"
-    Assert-RegexCountAtLeast $resolveOutput 'associationKind: extension' 1 "remaining legacy image extension kinds"
     Assert-RegexCountAtLeast $resolveOutput 'handlerDisplayName: Notepad' 4 "text handlers"
     Assert-RegexCountAtLeast $resolveOutput 'launchTarget: DocumentActivation' 4 "text document activation targets"
-    Assert-True ([regex]::Matches($resolveOutput, 'legacyDirectPath: true').Count -eq 1) "only the BMP probe uses the remaining legacy image route"
-    Assert-RegexCountAtLeast $resolveOutput 'handlerDisplayName: Image Viewer' 4 "image handler display names"
+    Assert-True ([regex]::Matches($resolveOutput, 'legacyDirectPath: true').Count -eq 0) "unsupported files have no legacy image route"
+    Assert-RegexCountAtLeast $resolveOutput 'handlerDisplayName: Image Viewer' 3 "PNG/JPEG image handlers"
+    Assert-RegexCountAtLeast $resolveOutput 'associationKind: unknown-fallback' 3 "BMP, GIF and unknown extensions all resolve to no-handler fallback"
     Assert-Contains $resolveOutput "associationKind: unknown-fallback" "unknown fallback kind"
     Assert-Contains $resolveOutput "launchTarget: Unsupported" "unknown fallback target"
     Assert-Contains $resolveOutput "associationKind: risky-fallback" "risky fallback kind"
@@ -291,6 +310,7 @@ The legacy route is retained only for the Phase 13 decoder audit.
         "desktop.open `"$FixtureCfg`"",
         "desktop.open `"$FixturePng`"",
         "desktop.open `"$FixtureBmp`"",
+        "desktop.open `"$FixtureGif`"",
         "desktop.open `"$FixtureJpg`"",
         "desktop.open `"$FixtureJpeg`"",
         "desktop.open `"$FixtureUnknown`"",
@@ -317,6 +337,7 @@ The legacy route is retained only for the Phase 13 decoder audit.
         "desktop.open `"$FixtureCfg`"",
         "desktop.open `"$FixturePng`"",
         "desktop.open `"$FixtureBmp`"",
+        "desktop.open `"$FixtureGif`"",
         "desktop.open `"$FixtureJpg`"",
         "desktop.open `"$FixtureJpeg`""
     )
@@ -328,9 +349,11 @@ The legacy route is retained only for the Phase 13 decoder audit.
     Assert-Contains $resetOutput "activeTypedDispatchHandled=true" "reset restored active typed dispatch"
     Assert-Contains $resetOutput "reason=Active typed dispatch handled the folder open in File Explorer" "reset folder active reason"
     Assert-Contains $resetOutput "reason=Active typed dispatch delivered an owned document activation to gxos.builtin.notepad" "reset text active reason"
-    Assert-Contains $resetOutput "activeTypedDispatchHandled=false" "image remains legacy after reset"
-    Assert-Contains $resetOutput "selectedHandler=ImageViewer" "image remains legacy after reset"
-    Assert-Contains $resetOutput "legacyFallbackUsed=true" "image remains legacy after reset"
+    Assert-Contains $resetOutput "selectedHandler=Unsupported" "unsupported images have no selected handler after reset"
+    Assert-Contains $resetOutput "request=$FixtureBmp classification=FileOpen shadowDecision=Unsupported shadowUsage=unsupported selectedHandler=Unsupported" "BMP open reaches the no-handler path"
+    Assert-Contains $resetOutput "request=$FixtureGif classification=FileOpen shadowDecision=Unsupported shadowUsage=unsupported selectedHandler=Unsupported" "GIF open reaches the no-handler path"
+    Assert-Contains $resetOutput "Desktop open failed: No file association registered for $FixtureBmp" "BMP Open fails safely"
+    Assert-Contains $resetOutput "Desktop open failed: No file association registered for $FixtureGif" "GIF Open fails safely"
 
 } finally {
     Restore-TrackedArtifacts -State $artifactState
@@ -357,7 +380,8 @@ $reportLines = @(
     "appModelPhase4BHandlersResolveToRegistry=true",
     "appModelPhase4BTextFilesOpenWithNotepad=true",
     "appModelPhase4BFoldersOpenWithFileExplorer=true",
-    "appModelPhase4BImagesRemainLegacy=true",
+    "appModelPhase4BImagesRemainLegacy=false",
+    "appModelPhase14BmpGifUnsupportedNoHandler=true",
     "appModelPhase4BUnknownExtensionsFallback=true",
     "appModelPhase4BRiskyExtensionsNotActiveDispatchOwned=true",
     "appModelPhase4BVisibleLaunchBehaviorChanged=false",

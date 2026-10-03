@@ -1,14 +1,22 @@
 # guideXOS App Model Current-State Map
 
-Status: Phase 13 current state (2026-10-02). The Phase 5A/5B material below is historical; see [Phase 13 ImageViewer JPEG migration](APPMODEL_PHASE13_IMAGEVIEWER_JPEG_MIGRATION.md) for the production JPEG path and legacy audit, [Phase 12 Navigator local HTML activation](APPMODEL_PHASE12_NAVIGATOR_LOCAL_HTML_ACTIVATION.md) for bounded local HTML/HTM activation, [Phase 11 ImageViewer PNG activation](APPMODEL_PHASE11_IMAGEVIEWER_DOCUMENT_ACTIVATION.md) for the initial hosted PNG migration, [Phase 10 Developer Studio document activation](APPMODEL_PHASE10_DEVELOPER_STUDIO_DOCUMENT_ACTIVATION.md) for NativeElf activation, [Phase 9 Settings Default Apps](APPMODEL_PHASE9_SETTINGS_DEFAULT_APPS.md) for the Settings surface, [Phase 8 default-app persistence](APPMODEL_PHASE8_DEFAULT_APP_PERSISTENCE.md) for the machine-global override owner, [Phase 7 capable handlers and Open With](APPMODEL_PHASE7_OPEN_WITH.md) for handler selection, and [Phase 6 file associations and document activation](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md) for the original owned-path contract.
+Status: Phase 14 current state (2026-10-02). The Phase 5A/5B material below is historical; see [Phase 14 legacy association retirement](APPMODEL_PHASE14_LEGACY_ASSOCIATION_RETIREMENT.md) for the current routing audit, [Phase 13 ImageViewer JPEG migration](APPMODEL_PHASE13_IMAGEVIEWER_JPEG_MIGRATION.md) for the production JPEG path, [Phase 12 Navigator local HTML activation](APPMODEL_PHASE12_NAVIGATOR_LOCAL_HTML_ACTIVATION.md) for bounded local HTML/HTM activation, [Phase 11 ImageViewer PNG activation](APPMODEL_PHASE11_IMAGEVIEWER_DOCUMENT_ACTIVATION.md) for the initial hosted PNG migration, [Phase 10 Developer Studio document activation](APPMODEL_PHASE10_DEVELOPER_STUDIO_DOCUMENT_ACTIVATION.md) for NativeElf activation, [Phase 9 Settings Default Apps](APPMODEL_PHASE9_SETTINGS_DEFAULT_APPS.md) for the Settings surface, [Phase 8 default-app persistence](APPMODEL_PHASE8_DEFAULT_APP_PERSISTENCE.md) for the machine-global override owner, [Phase 7 capable handlers and Open With](APPMODEL_PHASE7_OPEN_WITH.md) for handler selection, and [Phase 6 file associations and document activation](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md) for the original owned-path contract.
 
-## Phase 13 current document-handler state
+## Phase 14 current document-handler state
+
+AppRegistry owns every currently supported hosted document extension. The built-in capabilities are `.txt`, `.log`, `.ini`, `.cfg`, `.png`, `.jpg`, `.jpeg`, `.html`, and `.htm`; Developer Studio additionally declares `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hh`, `.hpp`, and `.hxx` when its manifest is available. File Explorer sends normal file Open through DesktopService to AppRegistry, and Open With enumerates only current capable handlers. Directory navigation remains a separate File Explorer route.
+
+BMP and GIF are not AppRegistry capabilities and have no legacy image route. Ordinary Open fails with the existing no-association error; Open With has no eligible handler. ImageViewer's Open filter and folder enumeration remain limited to PNG/JPEG. Settings discovers the genuine registered defaults and does not invent BMP/GIF rows when no stored policy entry exists. The App Model validates explicit activation against the selected app's declared capability.
+
+See [the Phase 14 report](APPMODEL_PHASE14_LEGACY_ASSOCIATION_RETIREMENT.md) for decoder audits, unsupported-open runtime evidence, the File Explorer/DesktopService route table, regressions, build results, and QEMU boundary.
+
+## Phase 13 document-handler baseline (historical; Phase 14 supersedes its BMP/GIF route)
 
 Hosted ImageViewer keeps canonical ID `gxos.builtin.imageviewer` and declares `.png`, `.jpg`, and `.jpeg` through AppRegistry. File Explorer normal Open follows the owned built-in document-dispatch path for all three formats; Open With and Settings Default Apps discover the same capabilities generically. ImageViewer is the built-in/effective default for each extension, with no configured override. Suffix matching is ASCII case-insensitive.
 
 The production ImageViewer entry now accepts PNG and JPEG paths and sends both through the existing bounded `ImageAdapter::LoadFromFile` implementation into one owned RGBA `Image` state. JPEG decoding reuses the shared `STBI_ONLY_JPEG` loader; no second decoder was added. The encoded limit is 4 MiB, dimensions are capped at 4096×4096, pixel count at 16,777,216, and decoded RGBA at 64 MiB. Content is validated by the decoder after extension-based AppRegistry resolution.
 
-Only `.bmp` and `.gif` remain on the hosted legacy direct route. Neither format has a production decoder in the ImageAdapter or ImageViewer loader, so those associations currently reach an unsupported-format screen rather than displaying an image. Phase 14 should remove those misleading legacy rows unless a bounded, production decoder capability is separately selected and proven; AppRegistry registration alone would not make them supported.
+At the Phase 13 checkout, `.bmp` and `.gif` remained on the hosted legacy direct route even though the production ImageAdapter and ImageViewer loader rejected them. Phase 14 removed those routes; they now fail as no-handler cases before ImageViewer launch.
 
 See [the Phase 13 report](APPMODEL_PHASE13_IMAGEVIEWER_JPEG_MIGRATION.md) for exact JPEG variants, failure/bounds evidence, BMP/GIF audit, runtime results, build and regression results, and platform boundary.
 
@@ -20,7 +28,7 @@ See the [Phase 10 report](APPMODEL_PHASE10_DEVELOPER_STUDIO_DOCUMENT_ACTIVATION.
 
 ## Phase 11 PNG migration baseline (historical)
 
-Hosted ImageViewer keeps its canonical ID `gxos.builtin.imageviewer` and now declares `.png` through AppRegistry. A reusable built-in document dispatcher passes the same owned `AppActivationContext` contract used by the other handlers. File Explorer normal Open resolves the effective `.png` default through AppRegistry; Open With and Settings Default Apps enumerate the capability and default data. The built-in/effective handler is ImageViewer and there is no configured `.png` override. The old direct image route remains only for `.bmp`, `.jpg`, `.jpeg`, and `.gif`.
+At the Phase 11 checkout, Hosted ImageViewer kept canonical ID `gxos.builtin.imageviewer` and declared `.png` through AppRegistry. A reusable built-in document dispatcher passed the same owned `AppActivationContext` contract used by the other handlers. The old direct image route then remained for `.bmp`, `.jpg`, `.jpeg`, and `.gif`; Phase 13 migrated JPEG and Phase 14 retired BMP/GIF.
 
 ImageViewer consumes the owned path through its existing hosted PNG adapter/decoder. Its current process-static state supports one active window at a time, so concurrent launches are rejected and close releases image and path state before a later activation. See the [Phase 11 report](APPMODEL_PHASE11_IMAGEVIEWER_DOCUMENT_ACTIVATION.md) for the legacy baseline, exact runtime proof, bounds, malformed-file behavior, other formats audited, regressions, and hosted/bare-metal boundary.
 
@@ -303,7 +311,7 @@ Status: hosted only
 - `desktop_service.cpp`
   - directories -> `FileExplorer::Launch(path)`
   - AppRegistry document activation -> the effective canonical handler (Notepad, Developer Studio when its experimental hosted backend is enabled, ImageViewer for `.png`/`.jpg`/`.jpeg`, or Navigator for `.html`/`.htm`)
-  - legacy image fallback -> `ImageViewer::Launch(path)` for `.bmp` and `.gif` (both currently decode as unsupported)
+  - unsupported document -> no-handler error; no legacy image application fallback (Phase 14)
 
 Status: hosted only
 
@@ -638,7 +646,7 @@ The current evidence markers include:
 
 Status: complete, still narrow, no visible launch behavior change.
 
-This is the historical Phase 4B table. Phase 11 moved `.png` to AppRegistry and Phase 13 moved `.jpg`/`.jpeg`; the remaining hosted legacy image rows are `.bmp` and `.gif`.
+This is the historical Phase 4B table. Phase 11 moved `.png` to AppRegistry, Phase 13 moved `.jpg`/`.jpeg`, and Phase 14 removed the remaining unsupported `.bmp`/`.gif` legacy routes.
 
 Phase 4B adds a small explicit file association table in `desktop_service.cpp`. The table is intentionally limited to safe routing only:
 
@@ -648,7 +656,7 @@ Phase 4B adds a small explicit file association table in `desktop_service.cpp`. 
   - `.log`
   - `.ini`
   - `.cfg`
-- images -> remain on the legacy direct path for now
+- images -> remained on the legacy direct path at Phase 4B (historical)
   - `.png`
   - `.bmp`
   - `.jpg`
@@ -668,7 +676,7 @@ The table is diagnostic and routing-only. It does not add:
 
 The new file-association diagnostics and markers live in `desktop_service.cpp` and are surfaced through `desktop.appmodel.summary` and `desktop.appmodel.file-associations`.
 
-Current Phase 4B evidence markers:
+Historical Phase 4B evidence markers (at that phase):
 
 - `appModelPhase4BFileAssociationTableExists=true`
 - `appModelPhase4BFolderAssociationRegistered=true`
@@ -681,6 +689,8 @@ Current Phase 4B evidence markers:
 - `appModelPhase4BRiskyExtensionsNotActiveDispatchOwned=true`
 - `appModelPhase4BVisibleLaunchBehaviorChanged=false`
 - `appModelPhase4BPersistentDesktopStorageWrites=false`
+
+Current Phase 14 evidence is `appModelPhase4BImagesRemainLegacy=false` and `appModelPhase14BmpGifUnsupportedNoHandler=true`.
 
 `desktop.appmodel.active-typed-dispatch-gate` still reports product-default active dispatch as enabled, and `force-off` / `reset` continue to work. `desktop.appmodel.file-associations` is the detailed read-only table dump for smoke and troubleshooting.
 
@@ -801,11 +811,11 @@ Shell-object recent behavior is now explicit:
 - `Documents`, `Pictures`, `Music`, `Network`, `Settings`, `Control Panel`, and `Trash` use canonical registry-backed identities when they do record a recent entry.
 - `Trash` remains open-only and non-destructive; no destructive trash actions were added.
 
-File and folder handling remains stable:
+Historical Phase 4C file and folder handling was:
 
 - folders record `File Explorer` when routed through the existing folder-open path
 - text-like files record `Notepad` when routed through the existing text-file path
-- image files remain on the legacy image-viewer path and are not reclassified by App Model
+- image files followed the legacy ImageViewer path at Phase 4C; Phase 11 and 13 migrated PNG/JPEG to AppRegistry, and Phase 14 removed unsupported BMP/GIF routes
 - unsupported, unknown, risky, executable-style, package-style, and ELF-style targets do not pollute Recent Programs
 
 Phase 4D deliberately does not add:
@@ -864,7 +874,7 @@ This is the final App Model v1 closeout state.
 - `appModelV1RecentProgramsAligned=true`
 - `appModelV1RiskyDestructiveTargetsExcluded=true`
 - `appModelV1TrashOpenOnlyBoundary=true`
-- `appModelV1ImagesRemainLegacy=true` (historical Phase 5A rows were `.bmp`, `.jpg`, `.jpeg`, and `.gif`; current Phase 13 rows are `.bmp` and `.gif`, while `.png`/`.jpg`/`.jpeg` are AppRegistry capabilities)
+- `appModelV1ImagesRemainLegacy=true` was the historical Phase 5A marker; Phase 14 reports it as false and reports `appModelPhase14BmpGifUnsupportedNoHandler=true`.
 - `appModelV1OutOfScopeBoundary=true`
 - `appModelV1OutOfScopeScope=GXAppExecution|ELFLoading|PackageInstall|Sandboxing|Permissions|IDEBehavior|OpenWith|AppStore|UninstallUpdateLifecycle|TrashDestructiveActions`
 
@@ -880,7 +890,7 @@ App Model v1 owns:
 
 - the shared built-in app registry for the current hosted and bare-metal coverage set
 - the shell object registry for `Desktop`, `This System`, `Files`, `Documents`, `Pictures`, `Music`, `Network`, `Settings`, `Control Panel`, and `Trash`
-- the file association v1 table for folders, text-like files, legacy images, and risky/unsupported fallbacks
+- the historical file association v1 table for unsupported and risky fallbacks; current document capabilities are declared in AppRegistry
 - recent-program identity alignment with the built-in app registry
 - the emergency force-off and reset diagnostics for active typed dispatch
 
@@ -891,12 +901,13 @@ Active typed dispatch owns by default:
 - folder opens through File Explorer
 - text-like file opens through Notepad
 
-What still falls back to legacy:
+The Phase 5A historical fallback list was:
 
 - `AppModel` legacy compatibility
 - `ComputerFiles` compatibility bridge behavior
-- image opens on the legacy direct path
 - unsupported, unknown, risky, GXApp, ELF, and package-style cases
+
+Current hosted unsupported and unknown document types fail closed without attempting a second application route.
 
 Built-in app registry scope:
 
@@ -908,7 +919,8 @@ File association v1 scope:
 
 - folders -> File Explorer
 - `.txt`, `.log`, `.ini`, `.cfg` -> Notepad
-- `.png`, `.bmp`, `.jpg`, `.gif`, `.jpeg` -> legacy Image Viewer path (historical Phase 5A; Phases 11 and 13 later migrated PNG and JPEG)
+- `.png`, `.jpg`, `.jpeg` -> ImageViewer AppRegistry capabilities (Phases 11 and 13)
+- `.bmp`, `.gif` -> unsupported, no-handler result (Phase 14)
 - unknown/risky -> unsupported fallback
 
 Shell object registry scope:
@@ -962,7 +974,7 @@ Phase 5B adds owned App Model IDs to pinned and recent storage, bounded config/m
 
 Phase 6 moves the supported text-file default into the AppRegistry-owned association index and introduces an owned `AppActivationContext` document target. The canonical handler is `gxos.builtin.notepad`; `.txt`, `.log`, `.ini`, and `.cfg` are the hosted built-in declarations. File Explorer continues to navigate directories separately and sends selected files through `DesktopService::OpenFilesystemEntry`. Notepad receives the copied path through `ProcessTable` and reads it with its existing `loadFile()`/VFS logic.
 
-Document paths are bounded to 4096 bytes. The index is capped at 256 records, 16 declarations per app, and 32 bytes per extension. Extension matching ASCII-folds the final suffix; malformed, unknown, ambiguous, stale, unsupported, unavailable, or over-capacity targets fail closed. Hosted Windows VFS reads now use the same current-directory mapping already used by File Explorer after checking the in-memory VFS. Bare-metal kernel VFS behavior is unchanged. Directories are excluded from the association record count; the current association count is 13 (9 legacy image/unknown/risky rows plus 4 launchable AppRegistry rows).
+Document paths are bounded to 4096 bytes. The index is capped at 256 records, 16 declarations per app, and 32 bytes per extension. Extension matching ASCII-folds the final suffix; malformed, unknown, ambiguous, stale, unsupported, unavailable, or over-capacity targets fail closed. Hosted Windows VFS reads now use the same current-directory mapping already used by File Explorer after checking the in-memory VFS. Bare-metal kernel VFS behavior is unchanged. Directories are excluded from the association record count; the current association count is 13 (9 AppRegistry declarations plus 4 generic unknown/risky fallback classifications; the legacy BMP/GIF image rows were removed in Phase 14).
 
 Phase 6 code, runtime proof, regression results, known boundaries, and commit/push closeout are maintained in [the Phase 6 report](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md).
 

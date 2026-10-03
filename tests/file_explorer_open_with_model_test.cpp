@@ -51,6 +51,16 @@ int main() {
     check(!BuildFileExplorerOpenWithMenu(empty, false, "/docs/file.menu").visible,
         "unknown or unassociated file has no Open With menu");
 
+    AppRegistry imageViewerRegistry;
+    imageViewerRegistry.RegisterBuiltInAppsAsManifests({ "Image Viewer" });
+    check(BuildFileExplorerOpenWithMenu(imageViewerRegistry.EnumerateCapableHandlers(".png"), false,
+            "/images/supported.png").visible &&
+        !BuildFileExplorerOpenWithMenu(imageViewerRegistry.EnumerateCapableHandlers(".bmp"), false,
+            "/images/unsupported.bmp").visible &&
+        !BuildFileExplorerOpenWithMenu(imageViewerRegistry.EnumerateCapableHandlers(".gif"), false,
+            "/images/unsupported.gif").visible,
+        "Open With offers ImageViewer for supported PNG but no fabricated BMP or GIF choice");
+
     AppRegistry oneRegistry;
     check(registerApp(oneRegistry, temporaryApp("app.test.notepad", "Notepad", 31, 1)),
         "one-handler fixture registers");
