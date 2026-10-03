@@ -5644,3 +5644,119 @@ changed, zero missing, and zero extra files**.
 JS55 does not add `of <selector>` nth forms, other functional pseudo-classes,
 multiple pseudos per simple selector, additional relation depth, or public DOM
 insertion/removal APIs.
+
+## JS56: parser-designated `:root`; `:empty` deferred
+
+JS56 adds the zero-argument `:root` pseudo to the existing bounded selector
+descriptor and shared matcher. `WebDocument::documentElement` is the parser's
+authoritative root reference: handling an `<html>` start tag pushes the
+structural Element, assigns its document-local serial, and stores that
+reference in `documentElement`. Final structural-metadata processing refreshes
+the stored reference from the canonical structural record. In the normal HTML
+fixture this Element is `html`, and `document.querySelector(":root")` returns
+the same serial and JavaScript host identity as `document.querySelector("html")`.
+
+The matcher requires `hasDocumentElement`, a nonzero `documentElement.serial`,
+and equality with the candidate Element serial. It does not treat a missing
+parent as root evidence. The parser can retain more than one parentless
+structural Element—for example, structural content accepted before a later
+`html` start tag—and the JS56 test also exercises an added parentless
+root-like record. Only the designated `documentElement` matches. The serial is
+owned by the active `WebDocument`; no static or selector-specific root pointer
+is cached. An old-generation Element cannot match the replacement document's
+root even when parsing reuses the same numeric serial.
+
+`:root` uses the existing terminal one-pseudo slot and keeps the canonical
+compound order: optional tag, optional ID, classes, optional attribute, then
+optional pseudo. ASCII case-insensitive names, pseudo-only and `*:root`
+selectors, compound filters, selector lists, one-relation selectors, query
+methods, `matches()`, and `closest()` all use the same selector path. A wrong
+tag, ID, class, or attribute still fails. `:root > body` and `:root .panel`
+use the ordinary relation matcher; `.panel > :root` parses and yields no match.
+Selector-list results retain structural order and deduplicate the root when
+multiple members match it. Root is distinct from `:first-child` and
+`:only-child`: those continue to require validated parent/sibling metadata.
+
+### Why JavaScript `:empty` remains unsupported
+
+The parser has bounded `HtmlElementContentMetadata`, but it is a render/content
+summary rather than authoritative child-node metadata. It records Element
+children and non-whitespace text, while `flushText()` collapses and trims
+ordinary whitespace before updating the summary. Whitespace-only raw runs can
+be placed in bounded inline-layout items on some parser paths, but other paths
+such as option and textarea content skip those items; the inline-item list can
+also be capped or text-truncated. The summary's render flags describe content
+such as a replaced Element's own rendering, which is not the same as that
+Element having children. Therefore neither `childElementCount == 0` nor the
+existing render summary can prove the CSS child-content rule in every case.
+
+JS56 leaves `:empty` unsupported in the JavaScript selector parser, so
+`:empty`, `:EMPTY`, and `:empty()` fail closed in `querySelector()`,
+`querySelectorAll()`, and `matches()`. No text cache or scan over rendered
+layout state was added. Element-child, text-only, whitespace-only, hidden
+content, comment, and void-element `:empty` semantics are deferred until the
+document model can provide complete structural text-child authority. This
+means JS56 does not claim browser `:empty` compatibility.
+
+The `NavigatorScriptStatePseudo` enum already uses an explicit one-byte
+representation, so adding `Root` does not enlarge selector records. The simple
+descriptor remains **36 bytes**, the fixed four-member selector descriptor
+**556 bytes**, a selector collection record **576 bytes**, and the 128-record
+registry **73,728 bytes**: zero net growth from JS55. Root matching compares
+the candidate with the current document serial and introduces no per-match
+allocation, root cache, text cache, regular expression, map, or dynamic
+selector-side structure.
+
+The focused proof is `tests/navigator_javascript_js56_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js56.ps1`. It covers canonical `html`
+identity, pseudo-only/universal/tag/ID/class/attribute forms, case folding,
+fail-closed functional and second-pseudo syntax, root relations and lists,
+`querySelector()`/`querySelectorAll()`/`matches()`/`closest()`, multiple
+parentless Elements, root-versus-child pseudos, unsupported `:empty`, 1,000
+repeated matches and queries, 320 held collection rereads, purity, nested
+events, Event metadata, stale generations, and serial reuse. The smoke also
+runs the strict warning-as-error parser/adapter/runtime compilation lane.
+
+The hosted JS56 fixture is `navigator-smoke/javascript-js56.html`; its six
+aggregate checks cover root identity and compound filters, traversal and
+relations, list order and deduplication, fail-closed `:empty`, and nested Event
+matching. See the JS56 closeout below for live matrix, aggregate, build,
+generated-artifact, and commit results.
+
+### JS56 closeout (2026-10-03)
+
+The JS56 focused suite passed **110/110**, including the strict
+warning-as-error parser/adapter/runtime lane. The complete JavaScript matrix
+passed **54/54 lanes**: the three base lanes plus JS6 through JS56. Focused
+regressions passed with these totals:
+
+| Phase | Checks | Phase | Checks | Phase | Checks |
+| --- | ---: | --- | ---: | --- | ---: |
+| JS36 | 114/114 | JS43 | 277/277 | JS50 | 313/313 |
+| JS37 | 180/180 | JS44 | 183/183 | JS51 | 278/278 |
+| JS38 | 152/152 | JS45 | 184/184 | JS52 | 319/319 |
+| JS39 | 218/218 | JS46 | 220/220 | JS53 | 211/211 |
+| JS40 | 155/155 | JS47 | 137/137 | JS54 | 238/238 |
+| JS41 | 220/220 | JS48 | 136/136 | JS55 | 340/340 |
+| JS42 | 235/235 | JS49 | 150/150 | JS56 | 110/110 |
+
+All **six** new hosted JS56 checks passed. The hosted aggregate reported
+**592 passed / 7 failed / 599 total**. The seven failures are the established
+CSS phase 3C, CSS phase 3G, CSS phase 6A, three CSS phase 6B checks, and CSS
+phase 6C; no JS56 check failed. The production `build.bat` completed
+successfully after the hosted expectation string was corrected.
+
+The kernel wrapper stopped at the existing PacMan Native ELF link errors for
+`pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)`. The direct
+`mingw32-make ARCH=amd64 EXTRA_CFLAGS=` lane independently stopped at the
+existing Mbed TLS configuration errors in `mbedtls_check_config.h:51` and
+`:64`. No fresh kernel was produced, `ESP/kernel.elf` is absent, and QEMU is
+not installed on PATH; no QEMU proof is claimed.
+
+The pre-kernel artifact snapshot covered **382 files / 133,988,800 bytes**.
+The wrapper rebuilt three PacMan object files; those exact files were restored
+from the snapshot and their hashes verified. Final artifact delta was **0
+changed / 0 missing / 0 extra**. `git diff --check` passed. The source change is
+Outcome B: `:root` is complete and `:empty` remains fail-closed pending
+authoritative text-child state.

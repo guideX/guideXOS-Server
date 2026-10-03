@@ -4510,6 +4510,51 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js55AfterLastClick, 1800) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js56FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js56.html";
+    const bool js56Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js56FixtureUrl);
+    const std::string js56InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS56 hosted root fixture loads and evaluates",
+        js56Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js56FixtureUrl &&
+        contains(js56InitialText, "Navigator JavaScript JS56") &&
+        contains(js56InitialText,
+            "initial:root=true:queries=true:filters=true:traversal=true:relations=true:lists=true:emptyDeferred=true:event=false:secondEvent=false:nested=false:metadata=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js56Loaded) + ",text=" +
+        summarizeText(js56InitialText, 1200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS56 hosted canonical root identity and compound filters pass",
+        js56Loaded && contains(js56InitialText,
+            ":root=true:queries=true:filters=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "querySelector, querySelectorAll, matches, universal/tag/ID/class/attribute compounds identify only the parser-designated html Element");
+    add("JS56 hosted closest and root relations pass",
+        js56Loaded && contains(js56InitialText,
+            ":traversal=true:relations=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "closest reaches canonical html from descendants and the existing one-relation matcher handles :root on either side");
+    add("JS56 hosted selector-list order and dedup pass",
+        js56Loaded && contains(js56InitialText, ":lists=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "overlapping :root members deduplicate and query results retain structural document order");
+    add("JS56 hosted :empty remains fail-closed",
+        js56Loaded && contains(js56InitialText, ":emptyDeferred=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "the JavaScript selector parser does not expose :empty without complete text-child authority");
+    const bool js56FirstClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("click-one");
+    const std::string js56AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS56 hosted nested Event root matching preserves metadata",
+        js56FirstClick && contains(js56AfterClick,
+            ":event=true:secondEvent=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js56FirstClick) + ",text=" +
+        summarizeText(js56AfterClick, 1200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

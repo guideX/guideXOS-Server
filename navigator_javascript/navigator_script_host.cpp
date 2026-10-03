@@ -699,6 +699,8 @@ bool parseStatePseudo(SourceView source, std::size_t colon,
             selector.statePseudo = NavigatorScriptStatePseudo::LastOfType;
         else if (equalsAsciiCaseInsensitive("only-of-type"))
             selector.statePseudo = NavigatorScriptStatePseudo::OnlyOfType;
+        else if (equalsAsciiCaseInsensitive("root"))
+            selector.statePseudo = NavigatorScriptStatePseudo::Root;
         else
             return false;
         return true;
@@ -3444,6 +3446,13 @@ bool NavigatorScriptHostAdapter::selectorStatePseudoMatches(
         // activeElementSerial() is the adapter's canonical projection of the
         // generation-checked focused serial and supported focused control.
         return activeElementSerial() == element.serial;
+    case NavigatorScriptStatePseudo::Root:
+        // WebDocument owns the parser-designated document Element. Its serial
+        // is local to this document generation; a parentless Element is not
+        // sufficient evidence that it is the document root.
+        return document_->hasDocumentElement &&
+            document_->documentElement.serial != 0u &&
+            element.serial == document_->documentElement.serial;
     case NavigatorScriptStatePseudo::FirstChild: {
         HostInstanceId parentSerial = 0u;
         HostInstanceId previousSerial = 0u;

@@ -1,0 +1,73 @@
+<!doctype html>
+<html id="rootId" class="document-root" data-root="yes">
+<head><title>Navigator JavaScript JS56</title></head>
+<body id="body">
+<h1>Navigator JavaScript JS56</h1>
+<div id="panel" class="panel">
+  <button id="click-one">One</button>
+  <button id="click-two">Two</button>
+</div>
+<div id="fallback" class="fallback">Fallback</div>
+<p id="js56-state">initial</p>
+<script>
+var js56State = document.getElementById("js56-state");
+var root = document.querySelector(":root");
+var body = document.getElementById("body");
+var panel = document.getElementById("panel");
+var firstButton = document.getElementById("click-one");
+var secondButton = document.getElementById("click-two");
+var rootIdentity = root === document.querySelector("html") &&
+  root === document.querySelector("*:root") &&
+  root === document.querySelector("html:root");
+var rootQueries = document.querySelectorAll(":root").length === 1 &&
+  document.querySelectorAll(":root")[0] === root;
+var rootFilters = root.matches("#rootId:root") &&
+  root.matches(".document-root:root") &&
+  root.matches("[data-root=yes]:root") &&
+  root.matches("html#rootId.document-root[data-root=yes]:root") &&
+  !body.matches(":root") && !panel.matches(":root");
+var rootTraversal = body.closest(":root") === root &&
+  panel.closest(":root") === root && root.closest(":root") === root;
+var rootRelations = document.querySelector(":root > body") === body &&
+  document.querySelector(":root .panel") === panel &&
+  document.querySelector(".panel > :root") === null;
+var rootLists = document.querySelectorAll(":root, .fallback").length === 2 &&
+  document.querySelectorAll(":root, .fallback")[0] === root &&
+  document.querySelectorAll(":root, .fallback")[1] ===
+    document.getElementById("fallback") &&
+  document.querySelectorAll(":root, html:root").length === 1;
+var emptyDeferred = document.querySelector(":empty") === null &&
+  document.querySelectorAll(":EMPTY").length === 0;
+var firstEvent = false;
+var secondEvent = false;
+var nestedEvent = false;
+var eventMetadata = false;
+firstButton.addEventListener("click", function (event) {
+  var target = event.target;
+  var current = event.currentTarget;
+  var phase = event.eventPhase;
+  firstEvent = target.closest(":root") === root &&
+    document.querySelector(":root") === root;
+  secondButton.click();
+  nestedEvent = event.target === target && event.currentTarget === current &&
+    event.eventPhase === phase;
+  eventMetadata = event.relatedTarget === null &&
+    event.defaultPrevented === false && current === firstButton && phase === 2;
+  js56Snapshot("event");
+});
+secondButton.addEventListener("click", function (event) {
+  secondEvent = event.target.closest(":root") === root;
+  js56Snapshot("event");
+});
+function js56Snapshot(label) {
+  js56State.textContent = label + ":root=" + rootIdentity +
+    ":queries=" + rootQueries + ":filters=" + rootFilters +
+    ":traversal=" + rootTraversal + ":relations=" + rootRelations +
+    ":lists=" + rootLists + ":emptyDeferred=" + emptyDeferred +
+    ":event=" + firstEvent + ":secondEvent=" + secondEvent +
+    ":nested=" + nestedEvent + ":metadata=" + eventMetadata;
+}
+js56Snapshot("initial");
+</script>
+</body>
+</html>
