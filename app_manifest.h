@@ -57,6 +57,7 @@ struct AppManifest {
     std::vector<std::string> protocols;
     bool supportsDocumentActivation = false;
     bool supportsProtocolActivation = false;
+    bool supportsFolderActivation = false;
     DefaultWindow defaultWindow;
     std::map<std::string, std::string> desktopRegistryHints;
 };

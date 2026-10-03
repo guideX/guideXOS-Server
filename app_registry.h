@@ -58,6 +58,17 @@ enum class UriActivationResolutionStatus {
     RegistryCapacityExceeded
 };
 
+enum class FolderActivationResolutionStatus {
+    Resolved = 0,
+    InvalidPath,
+    NoHandler,
+    HandlerMissing,
+    HandlerStale,
+    HandlerDoesNotSupportFolders,
+    HandlerUnavailable,
+    RegistryCapacityExceeded
+};
+
 enum class ConfiguredDefaultHandlerStatus {
     NotConfigured = 0,
     Available,
@@ -171,6 +182,44 @@ struct UriActivationResolution {
     bool launchable() const { return status == UriActivationResolutionStatus::Resolved; }
 };
 
+struct FolderHandlerInfo {
+    std::string appId;
+    std::string displayName;
+    uint64_t registrationOwner = 0;
+    uint64_t registrationGeneration = 0;
+    bool supportsFolderActivation = false;
+    bool registrationCurrent = false;
+    bool backendAvailable = false;
+    bool available = false;
+    bool isDefault = false;
+};
+
+struct FolderHandlerList {
+    std::array<FolderHandlerInfo, kAppModelMaxFolderHandlers> handlers{};
+    size_t count = 0;
+    size_t declaredHandlerCount = 0;
+    size_t availableHandlerCount = 0;
+    bool truncated = false;
+};
+
+struct FolderHandlerRecord {
+    std::string appId;
+    uint64_t registrationOwner = 0;
+    uint64_t registrationGeneration = 0;
+    bool supportsFolderActivation = false;
+    bool backendAvailable = false;
+};
+
+struct FolderActivationResolution {
+    FolderActivationResolutionStatus status = FolderActivationResolutionStatus::NoHandler;
+    std::string appId;
+    std::string displayName;
+    AppActivationContext activation;
+    std::string reason;
+
+    bool launchable() const { return status == FolderActivationResolutionStatus::Resolved; }
+};
+
 struct ProtocolHandlerRecord {
     std::string scheme;
     std::string appId;
@@ -217,6 +266,7 @@ struct RegisteredApp {
     // that can launch this registration with a document activation context.
     bool documentActivationBackendAvailable = false;
     bool protocolActivationBackendAvailable = false;
+    bool folderActivationBackendAvailable = false;
 
     const AppEntry* FindCompatibleEntry(const std::string& currentArchitecture) const;
 };
@@ -281,6 +331,7 @@ public:
     bool RegisterTestDurableApp(const RegisteredApp& app, std::string& error);
     bool SetTestDocumentActivationBackend(const std::string& appId, bool available);
     bool SetTestProtocolActivationBackend(const std::string& appId, bool available);
+    bool SetTestFolderActivationBackend(const std::string& appId, bool available);
 #endif
 
     const std::vector<RegisteredApp>& GetAllApps() const;
@@ -324,11 +375,20 @@ public:
     const std::vector<ProtocolHandlerRecord>& GetProtocolHandlers() const;
     bool ProtocolHandlerCapacityExceeded() const;
 
+    FolderHandlerList EnumerateCapableFolderHandlers() const;
+    FolderActivationResolution ResolveFolderActivation(const std::string& path) const;
+    FolderActivationResolution ResolveFolderActivation(const FolderHandlerInfo& handler, const std::string& path) const;
+    bool IsFolderActivationCurrent(const AppActivationContext& activation) const;
+    bool SetFolderActivationBackendAvailable(const std::string& canonicalAppId, bool available);
+    const std::vector<FolderHandlerRecord>& GetFolderHandlers() const;
+    bool FolderHandlerCapacityExceeded() const;
+
     static std::vector<AppRegistrySource> DefaultSources();
     static const char* ToString(AppSourceKind kind);
     static const char* ToString(DisplayNameResolutionStatus status);
     static const char* ToString(FileAssociationResolutionStatus status);
     static const char* ToString(UriActivationResolutionStatus status);
+    static const char* ToString(FolderActivationResolutionStatus status);
     static const char* ToString(ConfiguredDefaultHandlerStatus status);
     static const char* ToString(DefaultHandlerMutationStatus status);
     static int DisplayNameSourcePriority(AppSourceKind kind);
@@ -345,6 +405,7 @@ private:
     bool HasDeclaredProtocol(const RegisteredApp& app, const std::string& normalizedScheme) const;
     void RebuildFileAssociations();
     void RebuildProtocolHandlers();
+    void RebuildFolderHandlers();
 
     bool m_preferSystemAppsOverUserApps = false;
     std::vector<AppRegistrySource> m_sources;
@@ -354,6 +415,8 @@ private:
     bool m_fileAssociationCapacityExceeded = false;
     std::vector<ProtocolHandlerRecord> m_protocolHandlers;
     bool m_protocolHandlerCapacityExceeded = false;
+    std::vector<FolderHandlerRecord> m_folderHandlers;
+    bool m_folderHandlerCapacityExceeded = false;
     DefaultAppHandlerStore m_defaultHandlerStore;
 };
 

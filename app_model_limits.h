@@ -10,6 +10,7 @@ constexpr size_t kAppModelMaxDisplayNameBytes = 128;
 constexpr size_t kAppModelMaxLaunchTargetBytes = 4096;
 constexpr size_t kAppModelMaxEntryPathBytes = 4096;
 constexpr size_t kAppModelMaxDocumentPathBytes = 4096;
+constexpr size_t kAppModelMaxFolderPathBytes = kAppModelMaxDocumentPathBytes;
 // Keep activation payloads aligned with guideWeb's bounded URL parser.
 constexpr size_t kAppModelMaxUriBytes = 2048;
 constexpr size_t kAppModelMaxFileExtensionBytes = 32;
@@ -22,6 +23,8 @@ constexpr size_t kAppModelMaxProtocolRecords = 256;
 // always promoted into the retained prefix before truncation is reported.
 constexpr size_t kAppModelMaxDocumentHandlersPerExtension = 16;
 constexpr size_t kAppModelMaxProtocolHandlersPerScheme = 16;
+constexpr size_t kAppModelMaxFolderHandlerRecords = 256;
+constexpr size_t kAppModelMaxFolderHandlers = 16;
 constexpr size_t kAppModelMaxEntriesPerManifest = 64;
 constexpr size_t kAppModelMaxRegistryApps = 512;
 constexpr size_t kAppModelMaxManifestBytes = 1024 * 1024;

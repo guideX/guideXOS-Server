@@ -68,6 +68,12 @@ namespace gxos { namespace apps {
         /// <param name="startPath">Optional starting directory path</param>
         /// <returns>Process ID of the launched FileExplorer</returns>
         static uint64_t Launch(const std::string& startPath = "");
+        static uint64_t LaunchWithActivation(const AppActivationContext& activation);
+        static bool InspectVirtualPath(const std::string& path,
+                                       std::string& normalizedPath,
+                                       bool& exists,
+                                       bool& isDirectory,
+                                       std::string& error);
         /// Launch the existing Explorer confirmation UI for a stable target.
         static uint64_t LaunchDeleteConfirmation(const std::string& targetPath, bool isDirectory);
         

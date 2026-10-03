@@ -566,6 +566,16 @@ namespace gxos { namespace apps {
             : ProcessTable::spawn(spec, {"file_explorer", startPath});
     }
 
+    uint64_t FileExplorer::LaunchWithActivation(const AppActivationContext& activation) {
+        if (activation.kind != AppActivationKind::Folder ||
+            activation.appId != "gxos.builtin.fileexplorer" ||
+            !IsValidFolderActivationPath(activation.folderPath)) return 0;
+        ProcessSpec spec{"file_explorer", FileExplorer::main};
+        spec.appId = "gxos.builtin.fileexplorer";
+        spec.activation = activation;
+        return ProcessTable::spawn(spec, {"file_explorer"});
+    }
+
     uint64_t FileExplorer::LaunchDeleteConfirmation(const std::string& targetPath, bool isDirectory) {
         const std::string normalized = gxos::files::FileOperations::NormalizePath(targetPath);
         return Launch("--confirm-delete|" + normalized + "|" + (isDirectory ? "1" : "0"));
@@ -575,6 +585,54 @@ namespace gxos { namespace apps {
         return std::make_unique<KernelVfsExplorerFileSystem>();
     }
 
+    bool FileExplorer::InspectVirtualPath(const std::string& path,
+                                          std::string& normalizedPath,
+                                          bool& exists,
+                                          bool& isDirectory,
+                                          std::string& error) {
+        normalizedPath.clear();
+        exists = false;
+        isDirectory = false;
+        error.clear();
+        if (!IsValidFolderActivationPath(path)) {
+            error = "Invalid or overlong filesystem path";
+            return false;
+        }
+        try {
+#ifndef _WIN32
+            // kernel::vfs::normalize_path truncates at its output buffer. Run
+            // the same VFS normalizer with an input-sized buffer first, then
+            // enforce the actual mounted VFS path limit before the provider's
+            // fixed-size stat/list calls can see the value.
+            std::vector<char> fullyNormalized(path.size() + 2, '\0');
+            kernel::vfs::normalize_path(path.c_str(), fullyNormalized.data(), fullyNormalized.size());
+            const std::string vfsNormalized(fullyNormalized.data());
+            if (vfsNormalized.empty() || vfsNormalized.size() >= kernel::vfs::VFS_MAX_PATH) {
+                error = "Filesystem path exceeds the VFS path limit";
+                return false;
+            }
+#endif
+            std::unique_ptr<IExplorerFileSystem> fileSystem = createFileSystemProvider();
+            normalizedPath = fileSystem->normalizePath(path);
+            if (!IsValidFolderActivationPath(normalizedPath)) {
+                normalizedPath.clear();
+                error = "Filesystem path normalization failed or exceeded the App Model path bound";
+                return false;
+            }
+            exists = fileSystem->exists(normalizedPath);
+            isDirectory = exists && fileSystem->isDirectory(normalizedPath);
+            return true;
+        } catch (const std::exception& exception) {
+            normalizedPath.clear();
+            error = std::string("Filesystem path could not be inspected: ") + exception.what();
+            return false;
+        } catch (...) {
+            normalizedPath.clear();
+            error = "Filesystem path could not be inspected";
+            return false;
+        }
+    }
+
     int FileExplorer::main(int argc, char** argv) {
         Logger::write(LogLevel::Info, "FileExplorer starting...");
 
@@ -582,7 +640,16 @@ namespace gxos { namespace apps {
         bool launchDeleteConfirmation = false;
         bool launchDeleteIsDirectory = false;
         std::string launchDeletePath;
-        std::string requestedStartPath = (argc > 1) ? argv[1] : "";
+        const AppActivationContext activation = ProcessTable::CurrentActivationContext();
+        const bool hasFolderActivation = activation.kind == AppActivationKind::Folder;
+        if (hasFolderActivation && (activation.appId != "gxos.builtin.fileexplorer" ||
+            !IsValidFolderActivationPath(activation.folderPath))) {
+            Logger::write(LogLevel::Warn, "FileExplorer rejected an invalid owned folder activation context");
+            return 1;
+        }
+        std::string requestedStartPath = hasFolderActivation
+            ? activation.folderPath
+            : ((argc > 1) ? argv[1] : "");
         const std::string deletePrefix = "--confirm-delete|";
         if (requestedStartPath.rfind(deletePrefix, 0) == 0) {
             const std::string payload = requestedStartPath.substr(deletePrefix.size());
@@ -599,6 +666,12 @@ namespace gxos { namespace apps {
         s_currentPath = !requestedStartPath.empty()
             ? s_fileSystem->normalizePath(requestedStartPath)
             : (s_roots.empty() ? "/" : s_fileSystem->normalizePath(s_roots[0].fullPath));
+        if (hasFolderActivation && (!IsValidFolderActivationPath(s_currentPath) ||
+            !s_fileSystem->exists(s_currentPath) || !s_fileSystem->isDirectory(s_currentPath))) {
+            Logger::write(LogLevel::Warn, "FileExplorer folder activation target disappeared or is not a directory: " + activation.folderPath);
+            s_fileSystem.reset();
+            return 1;
+        }
         s_entries.clear();
         s_backHistory.clear();
         s_forwardHistory.clear();
@@ -624,6 +697,10 @@ namespace gxos { namespace apps {
         s_lastEntryClickRow = -1;
 
         refresh();
+        if (hasFolderActivation) {
+            Logger::write(LogLevel::Info, "FileExplorer consumed owned folder activation appId=" +
+                activation.appId + " path=" + s_currentPath + " entries=" + std::to_string(s_entries.size()));
+        }
         if (launchDeleteConfirmation) {
             s_deleteTargetPath = launchDeletePath;
             s_deleteTargetIsDirectory = launchDeleteIsDirectory;
@@ -675,7 +752,9 @@ namespace gxos { namespace apps {
                     size_t sep = message.find('|');
                     if (sep == std::string::npos) break;
                     int keyCode = std::stoi(message.substr(0, sep));
-                    std::string action = message.substr(sep + 1);
+                    const size_t actionEnd = message.find('|', sep + 1);
+                    std::string action = message.substr(sep + 1,
+                        actionEnd == std::string::npos ? std::string::npos : actionEnd - sep - 1);
                     if (action == "down") {
                         if (s_keyDown && s_lastKeyCode == keyCode) break;
                         s_keyDown = true;

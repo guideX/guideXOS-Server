@@ -179,8 +179,9 @@ try {
     Send-ServerCommand "plist"
     $BeforeProcessOutput = Wait-Output "(?m)^Processes:"
     $BeforeProcesses = Get-LastLine $BeforeProcessOutput "(?m)^Processes:.*$"
+    $BeforeAssociationSnapshotCount = [regex]::Matches((Get-RuntimeOutput), "associationRegistryCapacity=").Count
     Send-ServerCommand "desktop.appmodel.file-associations"
-    $BeforeAssociationOutput = Wait-Output "associationRegistryCapacity="
+    $BeforeAssociationOutput = Wait-OutputCount "associationRegistryCapacity=" ($BeforeAssociationSnapshotCount + 1)
     $BeforeRegistered = Get-LastSection $BeforeAssociationOutput "registeredAssociations:" "nonFatal: true"
     Send-ServerCommand "desktop.apps.verbose"
     $BeforeAppsOutput = Wait-Output "manifestScan"
@@ -222,8 +223,9 @@ try {
     Send-ServerCommand "plist"
     $AfterProcessOutput = Wait-Output "(?m)^Processes:"
     $AfterProcesses = Get-LastLine $AfterProcessOutput "(?m)^Processes:.*$"
+    $AfterAssociationSnapshotCount = [regex]::Matches((Get-RuntimeOutput), "associationRegistryCapacity=").Count
     Send-ServerCommand "desktop.appmodel.file-associations"
-    $AfterAssociationOutput = Wait-Output "associationRegistryCapacity="
+    $AfterAssociationOutput = Wait-OutputCount "associationRegistryCapacity=" ($AfterAssociationSnapshotCount + 1)
     $AfterRegistered = Get-LastSection $AfterAssociationOutput "registeredAssociations:" "nonFatal: true"
     Send-ServerCommand "desktop.apps.verbose"
     $AfterAppsOutput = Wait-Output "manifestScan"

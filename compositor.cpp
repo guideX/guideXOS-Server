@@ -3566,7 +3566,10 @@ namespace gxos {
             }
             Logger::write(LogLevel::Info, "Desktop shortcut Open Target Location selected: " + desktopLayoutKey(item) +
                 " location=" + targetLocation);
-            apps::FileExplorer::Launch(targetLocation);
+            std::string error;
+            if (!DesktopService::OpenFolder(targetLocation, error)) {
+                Logger::write(LogLevel::Warn, "Desktop shortcut target folder activation failed: " + error);
+            }
             return true;
         }
 

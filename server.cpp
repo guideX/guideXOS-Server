@@ -4524,7 +4524,7 @@ static void help(){
                  " gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>\n"
                  " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id> | gui.sync <id> <frameGeneration> [frameSequence] [freeze] | gui.unfreeze <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
-                 " desktop.wallpaper <path> | desktop.background.remove <id> | desktop.launch <action> | desktop.open <path> [dir] | desktop.open.uri <uri> | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.appmodel.active-typed-dispatch-gate [force-on|force-off|reset] | desktop.appmodel.active-typed-dispatch-default-on-candidate [on|off|reset] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig | desktop.display.summary | desktop.display.viewport [1|2]\n"
+                 " desktop.wallpaper <path> | desktop.background.remove <id> | desktop.launch <action> | desktop.open <path> [dir] | desktop.open.folder <path> | desktop.open.uri <uri> | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.appmodel.active-typed-dispatch-gate [force-on|force-off|reset] | desktop.appmodel.active-typed-dispatch-default-on-candidate [on|off|reset] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig | desktop.display.summary | desktop.display.viewport [1|2]\n"
                  " desktop.apps | desktop.apps.verbose | desktop.windows.owners | desktop.startup.regression | desktop.appmodel.summary | desktop.appmodel.inventory | desktop.appmodel.coverage | desktop.appmodel.file-associations | desktop.appmodel.shell-objects | desktop.appmodel.typed-dispatch-gate [force-off] | desktop.pinned | desktop.recent | desktop.recent.remove <name> | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
                   " nativeapp.capabilities | nativeapp.inspect <app> | nativeapp.smoketest <app> | nativeapp.processes | nativeapp.debuglog [count]\n"
                  " taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>\n"
@@ -4892,6 +4892,19 @@ using namespace gxos;
                 std::cout<<"Desktop URI activation failed: "<<err<<std::endl;
             }
          }
+         else if (cmd=="desktop.open.folder"){
+            if(!requireCompositor()) continue;
+            std::string path;
+            std::getline(iss, path);
+            if(path.size()>0 && path[0]==' ') path.erase(0,1);
+            if(path.size()>=2 && path.front()=='"' && path.back()=='"') path=path.substr(1, path.size()-2);
+            if(path.empty()){ std::cout<<"desktop.open.folder <path>"<<std::endl; continue; }
+            std::string err;
+            if (gui::DesktopService::OpenFolder(path, err))
+                std::cout<<"Desktop folder activation successful: "<<path<<std::endl;
+            else
+                std::cout<<"Desktop folder activation failed: "<<err<<std::endl;
+         }
          else if (cmd=="desktop.pin" || cmd=="desktop.unpin"){
             if(!requireCompositor()) continue;
              std::string action; std::getline(iss, action); if(action.size()>0 && action[0]==' ') action.erase(0,1); if(action.empty()){ std::cout<< (cmd=="desktop.pin"?"desktop.pin <action>":"desktop.unpin <action>") << std::endl; continue; }
@@ -5174,13 +5187,16 @@ using namespace gxos;
             std::getline(iss, startPath);
             if(startPath.size()>0 && startPath[0]==' ') startPath.erase(0,1);
             
-            uint64_t pid;
             if(startPath.empty()) {
-                pid = apps::FileExplorer::Launch();
+                const uint64_t pid = apps::FileExplorer::Launch();
+                std::cout<<"File Explorer launched, pid="<<pid<<std::endl;
             } else {
-                pid = apps::FileExplorer::Launch(startPath);
+                std::string error;
+                if (gui::DesktopService::OpenFolder(startPath, error))
+                    std::cout<<"Folder opened through App Model: "<<startPath<<std::endl;
+                else
+                    std::cout<<"Folder open failed: "<<error<<std::endl;
             }
-            std::cout<<"File Explorer launched, pid="<<pid<<std::endl;
         }
         else if (cmd=="clock"){
             if(!requireCompositor()) continue;

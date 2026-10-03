@@ -11,7 +11,8 @@ namespace apps {
 enum class AppActivationKind {
     Application = 0,
     Document,
-    Uri
+    Uri,
+    Folder
 };
 
 // Owned activation data carried by launch storage for the lifetime of the app.
@@ -21,12 +22,21 @@ struct AppActivationContext {
     std::string appId;
     std::string documentPath;
     std::string uri;
+    std::string folderPath;
     uint64_t registrationOwner = 0;
     uint64_t registrationGeneration = 0;
 };
 
 inline bool IsValidDocumentActivationPath(const std::string& path) {
     if (path.empty() || path.size() > kAppModelMaxDocumentPathBytes) return false;
+    for (unsigned char byte : path) {
+        if (byte == 0 || byte < 0x20u || byte == 0x7fu) return false;
+    }
+    return true;
+}
+
+inline bool IsValidFolderActivationPath(const std::string& path) {
+    if (path.empty() || path.size() > kAppModelMaxFolderPathBytes) return false;
     for (unsigned char byte : path) {
         if (byte == 0 || byte < 0x20u || byte == 0x7fu) return false;
     }

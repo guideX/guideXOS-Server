@@ -29,8 +29,10 @@ public:
         error.clear();
         const bool document = activation.kind == AppActivationKind::Document;
         const bool uri = activation.kind == AppActivationKind::Uri;
-        if ((!document && !uri) || activation.appId.empty() || activation.appId.size() > kAppModelMaxAppIdBytes ||
+        const bool folder = activation.kind == AppActivationKind::Folder;
+        if ((!document && !uri && !folder) || activation.appId.empty() || activation.appId.size() > kAppModelMaxAppIdBytes ||
             (document && !IsValidDocumentActivationPath(activation.documentPath)) ||
+            (folder && !IsValidFolderActivationPath(activation.folderPath)) ||
             (uri && !IsValidUriActivationUri(activation.uri))) {
             error = "Built-in activation target is invalid, unsupported, or overlong";
             return false;
@@ -46,7 +48,7 @@ public:
             return false;
         }
         const bool current = document ? registry.IsDocumentActivationCurrent(activation)
-                                      : registry.IsUriActivationCurrent(activation);
+            : (uri ? registry.IsUriActivationCurrent(activation) : registry.IsFolderActivationCurrent(activation));
         if (!current) {
             error = "Built-in activation target is stale or unavailable";
             return false;

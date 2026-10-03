@@ -192,16 +192,36 @@ namespace gxos {
         apps::AppActivationContext activation = spec.activation;
         if (activation.kind == apps::AppActivationKind::Document) {
             if (spec.appId.empty() || spec.appId.size() > apps::kAppModelMaxAppIdBytes ||
-                activation.appId != spec.appId || !apps::IsValidDocumentActivationPath(activation.documentPath)) {
+                activation.appId != spec.appId || !apps::IsValidDocumentActivationPath(activation.documentPath) ||
+                !activation.uri.empty() || !activation.folderPath.empty()) {
                 Logger::write(LogLevel::Warn, "Process launch rejected: invalid document activation context");
                 return 0;
             }
-        } else if ((!activation.appId.empty() && activation.appId != spec.appId) ||
-            !activation.documentPath.empty() || activation.registrationOwner != 0 || activation.registrationGeneration != 0) {
-            Logger::write(LogLevel::Warn, "Process launch rejected: application activation contains document metadata");
+        } else if (activation.kind == apps::AppActivationKind::Uri) {
+            if (spec.appId.empty() || spec.appId.size() > apps::kAppModelMaxAppIdBytes ||
+                activation.appId != spec.appId || !apps::IsValidUriActivationUri(activation.uri) ||
+                !activation.documentPath.empty() || !activation.folderPath.empty()) {
+                Logger::write(LogLevel::Warn, "Process launch rejected: invalid URI activation context");
+                return 0;
+            }
+        } else if (activation.kind == apps::AppActivationKind::Folder) {
+            if (spec.appId.empty() || spec.appId.size() > apps::kAppModelMaxAppIdBytes ||
+                activation.appId != spec.appId || !apps::IsValidFolderActivationPath(activation.folderPath) ||
+                !activation.documentPath.empty() || !activation.uri.empty()) {
+                Logger::write(LogLevel::Warn, "Process launch rejected: invalid folder activation context");
+                return 0;
+            }
+        } else if (activation.kind == apps::AppActivationKind::Application) {
+            if ((!activation.appId.empty() && activation.appId != spec.appId) ||
+                !activation.documentPath.empty() || !activation.uri.empty() || !activation.folderPath.empty() ||
+                activation.registrationOwner != 0 || activation.registrationGeneration != 0) {
+                Logger::write(LogLevel::Warn, "Process launch rejected: application activation contains typed activation metadata");
+                return 0;
+            }
+            if (activation.appId.empty()) activation.appId = spec.appId;
+        } else {
+            Logger::write(LogLevel::Warn, "Process launch rejected: unknown activation kind");
             return 0;
-        } else if (activation.appId.empty()) {
-            activation.appId = spec.appId;
         }
 
         uint64_t pid;

@@ -143,6 +143,7 @@ namespace gxos { namespace apps { struct RegisteredApp; struct DocumentHandlerIn
         // still uses the normal resolver, Native ELF pipeline, and runtime.
         static bool LaunchDevelopmentApp(const std::string& appId, uint64_t ownerRuntimeId, uint64_t generation, bool debugControlled, std::string& error, uint64_t& outProcessId);
         static bool OpenFilesystemEntry(const std::string& path, bool isDirectory, std::string& error, bool recordRecent = true);
+        static bool OpenFolder(const std::string& path, std::string& error, bool recordRecent = true);
         static bool OpenFilesystemEntryWithHandler(const apps::DocumentHandlerInfo& handler, const std::string& path, std::string& error, bool recordRecent = true);
         static apps::DocumentHandlerList GetDocumentHandlersForPath(const std::string& path);
         static apps::DocumentHandlerList GetDocumentHandlersForExtension(const std::string& extension);

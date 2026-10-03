@@ -151,6 +151,9 @@ RegisteredApp makeBuiltInApp(const BuiltInAppMetadata& metadata) {
         app.manifest.protocols = { "http", "https" };
         app.manifest.supportsProtocolActivation = true;
         app.protocolActivationBackendAvailable = true;
+    } else if (app.manifest.id == "gxos.builtin.fileexplorer") {
+        app.manifest.supportsFolderActivation = true;
+        app.folderActivationBackendAvailable = true;
     }
 
     app.manifest.permissions.push_back("desktop.window");
@@ -228,6 +231,8 @@ void AppRegistry::Clear() {
     m_fileAssociationCapacityExceeded = false;
     m_protocolHandlers.clear();
     m_protocolHandlerCapacityExceeded = false;
+    m_folderHandlers.clear();
+    m_folderHandlerCapacityExceeded = false;
 }
 
 void AppRegistry::SetSources(const std::vector<AppRegistrySource>& sources) {
@@ -893,6 +898,168 @@ bool AppRegistry::IsUriActivationCurrent(const AppActivationContext& activation)
         current.activation.registrationGeneration == activation.registrationGeneration && current.activation.uri == activation.uri;
 }
 
+FolderHandlerList AppRegistry::EnumerateCapableFolderHandlers() const {
+    FolderHandlerList result;
+    std::vector<FolderHandlerInfo> candidates;
+    candidates.reserve(std::min(m_folderHandlers.size(), kAppModelMaxFolderHandlerRecords));
+    for (const FolderHandlerRecord& record : m_folderHandlers) {
+        const auto appIt = m_appsById.find(record.appId);
+        const RegisteredApp* app = appIt == m_appsById.end() || appIt->second >= m_apps.size()
+            ? nullptr : &m_apps[appIt->second];
+        FolderHandlerInfo handler;
+        handler.appId = record.appId;
+        handler.registrationOwner = record.registrationOwner;
+        handler.registrationGeneration = record.registrationGeneration;
+        handler.registrationCurrent = app && app->temporaryOwnerRuntimeId == record.registrationOwner &&
+            app->temporaryGeneration == record.registrationGeneration;
+        if (app) {
+            handler.displayName = app->manifest.displayName;
+            handler.supportsFolderActivation = record.supportsFolderActivation && app->manifest.supportsFolderActivation;
+            handler.backendAvailable = record.backendAvailable && app->folderActivationBackendAvailable;
+        } else {
+            handler.supportsFolderActivation = record.supportsFolderActivation;
+        }
+        handler.available = handler.registrationCurrent && handler.supportsFolderActivation && handler.backendAvailable;
+        const bool duplicate = std::any_of(candidates.begin(), candidates.end(), [&](const FolderHandlerInfo& existing) {
+            return existing.appId == handler.appId && existing.registrationOwner == handler.registrationOwner &&
+                existing.registrationGeneration == handler.registrationGeneration;
+        });
+        if (!duplicate) candidates.push_back(std::move(handler));
+    }
+
+    result.declaredHandlerCount = candidates.size();
+    result.availableHandlerCount = static_cast<size_t>(std::count_if(candidates.begin(), candidates.end(),
+        [](const FolderHandlerInfo& handler) { return handler.available; }));
+    auto selected = std::find_if(candidates.begin(), candidates.end(), [](const FolderHandlerInfo& handler) {
+        return handler.appId == "gxos.builtin.fileexplorer" && handler.available;
+    });
+    if (selected == candidates.end()) {
+        selected = std::find_if(candidates.begin(), candidates.end(),
+            [](const FolderHandlerInfo& handler) { return handler.available; });
+    }
+    if (selected == candidates.end()) {
+        selected = std::find_if(candidates.begin(), candidates.end(), [](const FolderHandlerInfo& handler) {
+            return handler.appId == "gxos.builtin.fileexplorer";
+        });
+    }
+    if (selected != candidates.end()) selected->isDefault = true;
+
+    std::sort(candidates.begin(), candidates.end(), [](const FolderHandlerInfo& left, const FolderHandlerInfo& right) {
+        if (left.isDefault != right.isDefault) return left.isDefault;
+        if (left.available != right.available) return left.available;
+        if (left.appId != right.appId) return left.appId < right.appId;
+        if (left.registrationOwner != right.registrationOwner) return left.registrationOwner < right.registrationOwner;
+        return left.registrationGeneration < right.registrationGeneration;
+    });
+    result.count = std::min(candidates.size(), result.handlers.size());
+    result.truncated = candidates.size() > result.handlers.size();
+    for (size_t i = 0; i < result.count; ++i) result.handlers[i] = std::move(candidates[i]);
+    return result;
+}
+
+FolderActivationResolution AppRegistry::ResolveFolderActivation(const std::string& path) const {
+    FolderActivationResolution result;
+    if (!IsValidFolderActivationPath(path)) {
+        result.status = FolderActivationResolutionStatus::InvalidPath;
+        result.reason = "folder path is empty, contains control characters, or exceeds the App Model path bound";
+        return result;
+    }
+    const FolderHandlerList handlers = EnumerateCapableFolderHandlers();
+    const FolderHandlerInfo* selected = nullptr;
+    for (size_t i = 0; i < handlers.count; ++i) {
+        if (handlers.handlers[i].isDefault) { selected = &handlers.handlers[i]; break; }
+    }
+    if (!selected) {
+        result.status = m_folderHandlerCapacityExceeded
+            ? FolderActivationResolutionStatus::RegistryCapacityExceeded : FolderActivationResolutionStatus::NoHandler;
+        result.reason = m_folderHandlerCapacityExceeded
+            ? "folder handler registry capacity was reached; activation fails closed"
+            : "no registered application declared folder activation support";
+        return result;
+    }
+    return ResolveFolderActivation(*selected, path);
+}
+
+FolderActivationResolution AppRegistry::ResolveFolderActivation(const FolderHandlerInfo& handler,
+                                                                 const std::string& path) const {
+    FolderActivationResolution result;
+    if (!IsValidFolderActivationPath(path)) {
+        result.status = FolderActivationResolutionStatus::InvalidPath;
+        result.reason = "folder path is empty, contains control characters, or exceeds the App Model path bound";
+        return result;
+    }
+    if (handler.appId.empty() || handler.appId.size() > kAppModelMaxAppIdBytes) {
+        result.status = FolderActivationResolutionStatus::HandlerMissing;
+        result.reason = "canonical application ID is empty or over capacity";
+        return result;
+    }
+    const RegisteredApp* app = FindById(handler.appId);
+    if (!app) {
+        result.status = FolderActivationResolutionStatus::HandlerMissing;
+        result.reason = "selected canonical application ID is not registered";
+        return result;
+    }
+    result.appId = handler.appId;
+    result.displayName = app->manifest.displayName;
+    if (app->temporaryOwnerRuntimeId != handler.registrationOwner ||
+        app->temporaryGeneration != handler.registrationGeneration) {
+        result.status = FolderActivationResolutionStatus::HandlerStale;
+        result.reason = "selected handler registration owner or generation changed after enumeration";
+        return result;
+    }
+    const auto declaration = std::find_if(m_folderHandlers.begin(), m_folderHandlers.end(), [&](const FolderHandlerRecord& record) {
+        return record.appId == handler.appId && record.registrationOwner == handler.registrationOwner &&
+            record.registrationGeneration == handler.registrationGeneration;
+    });
+    if (declaration == m_folderHandlers.end() || !app->manifest.supportsFolderActivation ||
+        !declaration->supportsFolderActivation) {
+        result.status = FolderActivationResolutionStatus::HandlerDoesNotSupportFolders;
+        result.reason = "selected application does not currently declare folder activation support";
+        return result;
+    }
+    if (!app->folderActivationBackendAvailable || !declaration->backendAvailable) {
+        result.status = FolderActivationResolutionStatus::HandlerUnavailable;
+        result.reason = "current runtime has no folder activation dispatcher for this application";
+        return result;
+    }
+    result.status = FolderActivationResolutionStatus::Resolved;
+    result.activation.kind = AppActivationKind::Folder;
+    result.activation.appId = app->manifest.id;
+    result.activation.folderPath = path;
+    result.activation.registrationOwner = app->temporaryOwnerRuntimeId;
+    result.activation.registrationGeneration = app->temporaryGeneration;
+    result.reason = "folder resolved to the current capable registration with an owned folder path";
+    return result;
+}
+
+bool AppRegistry::IsFolderActivationCurrent(const AppActivationContext& activation) const {
+    if (activation.kind != AppActivationKind::Folder || activation.appId.empty() ||
+        !IsValidFolderActivationPath(activation.folderPath)) return false;
+    FolderHandlerInfo expected;
+    expected.appId = activation.appId;
+    expected.registrationOwner = activation.registrationOwner;
+    expected.registrationGeneration = activation.registrationGeneration;
+    const FolderActivationResolution current = ResolveFolderActivation(expected, activation.folderPath);
+    return current.launchable() && current.activation.appId == activation.appId &&
+        current.activation.registrationOwner == activation.registrationOwner &&
+        current.activation.registrationGeneration == activation.registrationGeneration &&
+        current.activation.folderPath == activation.folderPath;
+}
+
+bool AppRegistry::SetFolderActivationBackendAvailable(const std::string& canonicalAppId, bool available) {
+    auto found = m_appsById.find(canonicalAppId);
+    if (found == m_appsById.end() || found->second >= m_apps.size()) return false;
+    RegisteredApp& app = m_apps[found->second];
+    if (available && !app.manifest.supportsFolderActivation) return false;
+    if (app.folderActivationBackendAvailable == available) return true;
+    app.folderActivationBackendAvailable = available;
+    RebuildFolderHandlers();
+    return true;
+}
+
+const std::vector<FolderHandlerRecord>& AppRegistry::GetFolderHandlers() const { return m_folderHandlers; }
+bool AppRegistry::FolderHandlerCapacityExceeded() const { return m_folderHandlerCapacityExceeded; }
+
 bool AppRegistry::SetProtocolActivationBackendAvailable(const std::string& canonicalAppId, bool available) {
     const auto found = m_appsById.find(canonicalAppId);
     if (found == m_appsById.end() || found->second >= m_apps.size()) return false;
@@ -1351,6 +1518,32 @@ void AppRegistry::RebuildProtocolHandlers() {
     m_protocolHandlers.reserve(std::min(candidates.size(), kAppModelMaxProtocolRecords));
     for (size_t i = 0; i < candidates.size() && i < kAppModelMaxProtocolRecords; ++i)
         m_protocolHandlers.push_back(std::move(candidates[i]));
+    RebuildFolderHandlers();
+}
+
+void AppRegistry::RebuildFolderHandlers() {
+    std::vector<FolderHandlerRecord> candidates;
+    candidates.reserve(std::min(m_apps.size(), kAppModelMaxRegistryApps));
+    for (const RegisteredApp& app : m_apps) {
+        if (!app.manifest.supportsFolderActivation) continue;
+        FolderHandlerRecord record;
+        record.appId = app.manifest.id;
+        record.registrationOwner = app.temporaryOwnerRuntimeId;
+        record.registrationGeneration = app.temporaryGeneration;
+        record.supportsFolderActivation = app.manifest.supportsFolderActivation;
+        record.backendAvailable = app.folderActivationBackendAvailable;
+        candidates.push_back(std::move(record));
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const FolderHandlerRecord& left, const FolderHandlerRecord& right) {
+        if (left.appId != right.appId) return left.appId < right.appId;
+        if (left.registrationOwner != right.registrationOwner) return left.registrationOwner < right.registrationOwner;
+        return left.registrationGeneration < right.registrationGeneration;
+    });
+    m_folderHandlerCapacityExceeded = candidates.size() > kAppModelMaxFolderHandlerRecords;
+    m_folderHandlers.clear();
+    m_folderHandlers.reserve(std::min(candidates.size(), kAppModelMaxFolderHandlerRecords));
+    for (size_t i = 0; i < candidates.size() && i < kAppModelMaxFolderHandlerRecords; ++i)
+        m_folderHandlers.push_back(std::move(candidates[i]));
 }
 
 std::vector<AppRegistrySource> AppRegistry::DefaultSources() {
@@ -1466,6 +1659,10 @@ bool AppRegistry::SetTestProtocolActivationBackend(const std::string& appId, boo
     m_apps[found->second].protocolActivationBackendAvailable = available;
     RebuildProtocolHandlers();
     return true;
+}
+
+bool AppRegistry::SetTestFolderActivationBackend(const std::string& appId, bool available) {
+    return SetFolderActivationBackendAvailable(appId, available);
 }
 #endif
 
@@ -1586,6 +1783,20 @@ const char* AppRegistry::ToString(UriActivationResolutionStatus status) {
     case UriActivationResolutionStatus::HandlerDoesNotSupportProtocol: return "handler-no-protocol-activation";
     case UriActivationResolutionStatus::HandlerUnavailable: return "handler-unavailable";
     case UriActivationResolutionStatus::RegistryCapacityExceeded: return "capacity-exceeded";
+    default: return "unknown";
+    }
+}
+
+const char* AppRegistry::ToString(FolderActivationResolutionStatus status) {
+    switch (status) {
+    case FolderActivationResolutionStatus::Resolved: return "resolved";
+    case FolderActivationResolutionStatus::InvalidPath: return "invalid-path";
+    case FolderActivationResolutionStatus::NoHandler: return "no-handler";
+    case FolderActivationResolutionStatus::HandlerMissing: return "handler-missing";
+    case FolderActivationResolutionStatus::HandlerStale: return "handler-stale";
+    case FolderActivationResolutionStatus::HandlerDoesNotSupportFolders: return "handler-does-not-support-folders";
+    case FolderActivationResolutionStatus::HandlerUnavailable: return "handler-unavailable";
+    case FolderActivationResolutionStatus::RegistryCapacityExceeded: return "registry-capacity-exceeded";
     default: return "unknown";
     }
 }

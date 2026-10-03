@@ -272,6 +272,7 @@ void populateProtocols(const JsonValue& root, AppManifest& manifest) {
 void populateActivationCapabilities(const JsonValue& root, AppManifest& manifest) {
     manifest.supportsDocumentActivation = boolProperty(root, "supportsDocumentActivation", false);
     manifest.supportsProtocolActivation = boolProperty(root, "supportsProtocolActivation", false);
+    manifest.supportsFolderActivation = boolProperty(root, "supportsFolderActivation", false);
 }
 
 void populateDefaultWindow(const JsonValue& root, AppManifest& manifest) {

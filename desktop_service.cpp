@@ -403,7 +403,9 @@ namespace gxos {
                 oss << "handlerDisplayName: " << (isDirectory ? "File Explorer" : (hasAppAssociation ? appAssociation.displayName : "")) << "\n";
                 oss << "handlerLaunchName: " << (hasAppAssociation && registryMetadata && registryMetadata->launchName ? registryMetadata->launchName : "") << "\n";
                 oss << "appModelAssociationStatus: " << (isDirectory ? "not-applicable" : apps::AppRegistry::ToString(appAssociation.status)) << "\n";
-                oss << "appModelAssociationReason: " << (isDirectory ? "directory navigation is a separate shell route" : appAssociation.reason) << "\n";
+                oss << "appModelAssociationReason: " << (isDirectory
+                    ? "external folder requests use AppRegistry folder activation; File Explorer in-window navigation stays internal"
+                    : appAssociation.reason) << "\n";
                 oss << "activeTypedDispatchMayOwn: false\n";
                 oss << "fallbackRequired: " << (association ? (association->fallbackRequired ? "true" : "false") : "true") << "\n";
                 oss << "textLike: false\n";
@@ -5415,14 +5417,11 @@ namespace gxos {
                         }
                     }
 
-                    const uint64_t explorerPid = apps::FileExplorer::Launch(folderPath);
-                    if (explorerPid == 0) {
-                        error = "Could not open " + shellAction;
-                        reason = "Active typed dispatch attempted the root shell object but File Explorer returned pid=0";
+                    if (!DesktopService::OpenFolder(folderPath, error, recordRecent)) {
+                        reason = "Active typed dispatch attempted the root shell object but generic folder activation failed";
                         return false;
                     }
 
-                    addRecentIfRequested("File Explorer");
                     selectedHandler = "File Explorer";
                     reason = "Active typed dispatch handled the root shell object in File Explorer";
                     return true;
@@ -5438,14 +5437,11 @@ namespace gxos {
                         return false;
                     }
 
-                    const uint64_t explorerPid = apps::FileExplorer::Launch(folderPath);
-                    if (explorerPid == 0) {
-                        error = "Could not open " + shellAction;
-                        reason = "Active typed dispatch attempted the folder shell action but File Explorer returned pid=0";
+                    if (!DesktopService::OpenFolder(folderPath, error, recordRecent)) {
+                        reason = "Active typed dispatch attempted the folder shell action but generic folder activation failed";
                         return false;
                     }
 
-                    addRecentIfRequested("File Explorer");
                     selectedHandler = "File Explorer";
                     reason = "Active typed dispatch handled the folder shell action in File Explorer";
                     return true;
@@ -5689,12 +5685,19 @@ namespace gxos {
             return false;
         }
 
-        static const apps::BuiltInActivationDispatcher& builtInDocumentDispatcher() {
+        static bool dispatchFileExplorerFolderActivation(const apps::AppActivationContext& activation, std::string& error) {
+            if (apps::FileExplorer::LaunchWithActivation(activation) != 0) return true;
+            error = "Failed to launch the registered folder handler";
+            return false;
+        }
+
+        static const apps::BuiltInActivationDispatcher& builtInActivationDispatcher() {
             static const apps::BuiltInActivationDispatcher dispatcher = [] {
                 apps::BuiltInActivationDispatcher value;
                 (void)value.RegisterHandler("gxos.builtin.notepad", &dispatchNotepadDocumentActivation);
                 (void)value.RegisterHandler("gxos.builtin.imageviewer", &dispatchImageViewerDocumentActivation);
                 (void)value.RegisterHandler("guidexos.navigator", &dispatchNavigatorActivation);
+                (void)value.RegisterHandler("gxos.builtin.fileexplorer", &dispatchFileExplorerFolderActivation);
                 return value;
             }();
             return dispatcher;
@@ -5716,7 +5719,7 @@ namespace gxos {
                     return false;
                 }
                 if (registered->manifest.kind == apps::AppKind::BuiltIn) {
-                    const bool dispatched = builtInDocumentDispatcher().Dispatch(s_appRegistry, activation, error);
+                    const bool dispatched = builtInActivationDispatcher().Dispatch(s_appRegistry, activation, error);
                     if (dispatched) {
                         Logger::write(LogLevel::Info, "Built-in document dispatcher delivered canonical activation appId=" +
                             activation.appId + " path=" + activation.documentPath);
@@ -5782,13 +5785,36 @@ namespace gxos {
                     error = "The registered application has no current NativeElf URI activation ABI";
                     return false;
                 }
-                const bool dispatched = builtInDocumentDispatcher().Dispatch(s_appRegistry, activation, error);
+                const bool dispatched = builtInActivationDispatcher().Dispatch(s_appRegistry, activation, error);
                 if (dispatched) {
                     Logger::write(LogLevel::Info, "Built-in dispatcher delivered canonical owned URI activation appId=" +
                         activation.appId + " uri=" + activation.uri);
                 }
                 return dispatched;
             }
+        }
+
+        static bool dispatchFolderActivation(const apps::AppActivationContext& activation, std::string& error) {
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+            if (!s_appRegistry.IsFolderActivationCurrent(activation)) {
+                error = "Folder activation became stale before dispatch";
+                return false;
+            }
+            const apps::RegisteredApp* registered = s_appRegistry.FindById(activation.appId);
+            if (!registered) {
+                error = "Folder activation registration disappeared before dispatch";
+                return false;
+            }
+            if (registered->manifest.kind != apps::AppKind::BuiltIn) {
+                error = "The registered application has no current folder activation dispatcher";
+                return false;
+            }
+            const bool dispatched = builtInActivationDispatcher().Dispatch(s_appRegistry, activation, error);
+            if (dispatched) {
+                Logger::write(LogLevel::Info, "Built-in dispatcher delivered canonical owned folder activation appId=" +
+                    activation.appId + " path=" + activation.folderPath);
+            }
+            return dispatched;
         }
 
         static bool tryExecuteActiveTypedDispatchFilesystemEntry(
@@ -5821,14 +5847,10 @@ namespace gxos {
             }
 
             if (routeName == "FileExplorer") {
-                const uint64_t pid = apps::FileExplorer::Launch(path);
-                if (pid == 0) {
-                    error = "Failed to open path in File Explorer";
-                    reason = "Active typed dispatch attempted File Explorer but the launcher returned pid=0";
+                if (!DesktopService::OpenFolder(path, error, recordRecent)) {
+                    reason = "Active typed dispatch attempted generic folder activation but it failed";
                     return false;
                 }
-
-                addRecentIfRequested("File Explorer");
                 selectedHandler = "File Explorer";
                 reason = isDirectory
                     ? "Active typed dispatch handled the folder open in File Explorer"
@@ -5852,6 +5874,49 @@ namespace gxos {
             return false;
         }
 
+        bool DesktopService::OpenFolder(const std::string& path, std::string& error, bool recordRecent) {
+            error.clear();
+            std::string normalizedPath;
+            bool exists = false;
+            bool isDirectory = false;
+            if (!apps::FileExplorer::InspectVirtualPath(path, normalizedPath, exists, isDirectory, error)) {
+                if (error.empty()) error = "Invalid or overlong folder path";
+                Logger::write(LogLevel::Warn, "Desktop folder activation rejected: " + error);
+                NotificationManager::Add(error, NotificationLevel::Error);
+                return false;
+            }
+            if (!exists) error = "Folder path not found: " + normalizedPath;
+            else if (!isDirectory) error = "Folder path exists but is not a directory: " + normalizedPath;
+            if (!error.empty()) {
+                Logger::write(LogLevel::Warn, "Desktop folder activation rejected: " + error);
+                NotificationManager::Add(error, NotificationLevel::Error);
+                return false;
+            }
+
+            ensureDefaultAppsRegistered();
+            apps::FolderActivationResolution activation;
+            {
+                std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+                activation = s_appRegistry.ResolveFolderActivation(normalizedPath);
+            }
+            if (!activation.launchable()) {
+                error = std::string("Folder activation rejected (") +
+                    apps::AppRegistry::ToString(activation.status) + "): " + activation.reason;
+                Logger::write(LogLevel::Warn, error);
+                NotificationManager::Add(error, NotificationLevel::Error);
+                return false;
+            }
+            if (!dispatchFolderActivation(activation.activation, error)) {
+                if (error.empty()) error = "The registered folder handler became unavailable";
+                NotificationManager::Add(error, NotificationLevel::Error);
+                return false;
+            }
+            if (recordRecent) AddRecentProgram(activation.displayName.empty() ? activation.appId : activation.displayName);
+            Logger::write(LogLevel::Info, "Desktop folder activation delivered appId=" + activation.appId +
+                " path=" + activation.activation.folderPath);
+            return true;
+        }
+
         bool DesktopService::OpenFilesystemEntry(const std::string& path, bool isDirectory, std::string& error, bool recordRecent) {
             error.clear();
             if (path.empty()) {
@@ -5860,11 +5925,43 @@ namespace gxos {
                 NotificationManager::Add(error, NotificationLevel::Error);
                 return false;
             }
-            if (!isDirectory && !apps::IsValidDocumentActivationPath(path)) {
+            if (!isDirectory && path.size() > apps::kAppModelMaxDocumentPathBytes) {
                 error = "Invalid or overlong document path";
                 Logger::write(LogLevel::Warn, "Desktop filesystem open rejected: invalid or overlong document path");
                 NotificationManager::Add(error, NotificationLevel::Error);
                 return false;
+            }
+            std::string normalizedPath;
+            bool exists = false;
+            bool actualIsDirectory = false;
+            if (!apps::FileExplorer::InspectVirtualPath(path, normalizedPath, exists, actualIsDirectory, error)) {
+                if (error.empty()) error = "Invalid or overlong filesystem path";
+                Logger::write(LogLevel::Warn, "Desktop filesystem open rejected: " + error);
+                NotificationManager::Add(error, NotificationLevel::Error);
+                return false;
+            }
+            if (!exists && isDirectory) {
+                error = "Filesystem path not found: " + normalizedPath;
+                Logger::write(LogLevel::Warn, "Desktop filesystem open rejected: " + error);
+                NotificationManager::Add(error, NotificationLevel::Error);
+                return false;
+            }
+            if (actualIsDirectory) {
+                isDirectory = true;
+            } else {
+                if (exists && isDirectory) {
+                    Logger::write(LogLevel::Info, "Desktop filesystem type metadata differed from VFS; regular-file metadata wins path=" + path);
+                }
+                if (!exists) {
+                    Logger::write(LogLevel::Info, "Desktop file-open request has no current VFS entry; preserving document-handler resolution path=" + path);
+                }
+                isDirectory = false;
+                if (!apps::IsValidDocumentActivationPath(path)) {
+                    error = "Invalid or overlong document path";
+                    Logger::write(LogLevel::Warn, "Desktop filesystem open rejected: invalid or overlong document path");
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
             }
             Logger::write(LogLevel::Info, std::string("Desktop filesystem open requested path=") + path + " directory=" + (isDirectory ? "true" : "false"));
 
@@ -5893,13 +5990,7 @@ namespace gxos {
 
             switch (shadowRoute) {
             case FilesystemEntryLaunchTarget::FileExplorer:
-                if (apps::FileExplorer::Launch(path) == 0) {
-                    error = "Failed to open path in File Explorer";
-                    NotificationManager::Add(error, NotificationLevel::Error);
-                    return false;
-                }
-                if (recordRecent) AddRecentProgram("File Explorer");
-                return true;
+                return OpenFolder(path, error, recordRecent);
             case FilesystemEntryLaunchTarget::DocumentActivation:
                 if (!association.launchable() || !dispatchDocumentActivation(association.activation, error)) {
                     if (error.empty()) error = "The registered document handler is unavailable";
@@ -6068,6 +6159,16 @@ namespace gxos {
                 NotificationManager::Add(error, NotificationLevel::Error);
                 return false;
             }
+            std::string normalizedPath;
+            bool exists = false;
+            bool isDirectory = false;
+            if (!apps::FileExplorer::InspectVirtualPath(path, normalizedPath, exists, isDirectory, error) ||
+                !exists || isDirectory) {
+                if (error.empty()) error = !exists ? "Document path not found" : "A directory cannot be opened as a document";
+                Logger::write(LogLevel::Warn, "Open With rejected a non-file filesystem target path=" + path + ": " + error);
+                NotificationManager::Add(error, NotificationLevel::Error);
+                return false;
+            }
 
             ensureDefaultAppsRegistered();
             apps::FileAssociationResolution activation;
@@ -6205,16 +6306,13 @@ namespace gxos {
                         }
                     }
 
-                    uint64_t explorerPid = apps::FileExplorer::Launch(folderPath);
-                    if (explorerPid == 0) {
-                        error = "Could not open " + shellAction;
+                    if (!OpenFolder(folderPath, error, recordRecent)) {
+                        if (error.empty()) error = "Could not activate a folder handler for " + shellAction;
                         Logger::write(LogLevel::Warn, error);
-                        NotificationManager::Add(error, NotificationLevel::Error);
                         return false;
                     }
 
-                    Logger::write(LogLevel::Info, std::string("Launched folder shortcut: ") + shellAction + " path=" + folderPath + " pid=" + std::to_string(explorerPid));
-                    if (recordRecent) AddRecentProgram("File Explorer");
+                    Logger::write(LogLevel::Info, std::string("Activated folder shortcut through AppRegistry: ") + shellAction + " path=" + folderPath);
                     return true;
                 }
 
