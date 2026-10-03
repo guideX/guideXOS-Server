@@ -23,6 +23,7 @@
 #include "include/kernel/pit.h"
 #include "include/kernel/pci_audio.h"
 #include "include/kernel/usb_controller.h"
+#include "include/kernel/xhci.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/desktop_capabilities.h"
 #include "include/kernel/app_launch_target_resolver.h"
@@ -906,6 +907,12 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // visible even before a controller driver exists.  See
         // docs/MODERN_INPUT_INPUT1.md.
         kernel::usb::diagnostics::scan_host_controllers();
+
+        // xHCI controller bring-up: validate BAR, acquire ownership, reset,
+        // configure rings, start the controller, and observe root-port state.
+        // This is INPUT2 scope: no USB device enumeration or HID activation.
+        // See docs/MODERN_INPUT_INPUT2.md.
+        kernel::usb::xhci::controller::init();
 #if defined(GXOS_AUDIO_BOOT_SELFTEST)
         // Opt-in full DMA proof (QEMU proof builds only, never default:
         // it audibly exercises the hardware). See
