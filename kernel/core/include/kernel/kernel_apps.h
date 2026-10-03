@@ -1217,6 +1217,7 @@ private:
         INITIALIZE_DIALOG_CHOOSE_SCHEME,
         INITIALIZE_DIALOG_CONFIRM,
         INITIALIZE_DIALOG_CREATE_OPTIONS,
+        INITIALIZE_DIALOG_DELETE_CONFIRM,
         INITIALIZE_DIALOG_RUNNING,
         INITIALIZE_DIALOG_RESULT,
     };
@@ -1296,6 +1297,7 @@ private:
     int m_propertiesBtnId;
     int m_diagnosticsBtnId;
     int m_initializeBtnId;
+    int m_deleteBtnId;
     int m_mountBtnId;
     int m_unmountBtnId;
     int m_gptBtnId;
@@ -1307,6 +1309,7 @@ private:
     InitializeDialogState m_initializeDialogState;
     bool m_dialogIsCreate;
     bool m_dialogIsFormat;
+    bool m_dialogIsDelete;
     bool m_createSizeEdited;
     bool m_createNameEdited;
     uint8_t m_createInputFocus;
@@ -1317,6 +1320,9 @@ private:
     storage::InitializeDiskResult m_initializeResult;
     storage::CreatePartitionRequest m_createRequest;
     storage::CreatePartitionResult m_createResult;
+    storage::DeletePartitionRequest m_deleteRequest;
+    storage::DeletePartitionPlan m_deletePlan;
+    storage::DeletePartitionResult m_deleteResult;
     storage::Fat32FormatRequest m_formatRequest;
     storage::Fat32FormatResult m_formatResult;
     uint8_t m_lastStorageOperation;
@@ -1370,6 +1376,8 @@ private:
     void        runInitializeOperation();
     void        beginCreatePartitionOptions();
     void        runCreatePartitionOperation();
+    void        beginDeletePartitionConfirmation();
+    void        runDeletePartitionOperation();
     bool        updateCreateInputWidgets();
     void        beginFormatOptions();
     void        runFormatOperation();

@@ -29,6 +29,7 @@ param(
     [int]$RediscoveryTimeoutSeconds = 0,
     [switch]$Dm22LargeProof,
     [switch]$Dm24FourKnProof,
+    [switch]$Dm25PartitionDeleteProof,
     [switch]$QemuDebug,
     [switch]$SkipBuild
 )
@@ -241,7 +242,7 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
                 Stop-ProofQemu $process.Id $port $serialPath
                 throw "$RunName encountered a kernel fault; see $serialPath"
             }
-            if ($serial -match '(?m)^\[(?:DM24-QEMU|DM22-QEMU|DM15-QEMU|DM9-QEMU)\] (?:private-proof=FAIL|lifecycle=FAIL|proof=BLOCKED|reboot-rediscovery=FAIL|initialize=FAIL|create-partition=FAIL|format-fat32=FAIL|large-volume=FAIL|allocation-hint=FAIL|geometry=FAIL)') {
+            if ($serial -match '(?m)^\[(?:DM25-QEMU|DM24-QEMU|DM22-QEMU|DM15-QEMU|DM9-QEMU)\] (?:private-proof=FAIL|lifecycle=FAIL|delete-ready=FAIL|delete=FAIL|proof=BLOCKED|reboot-rediscovery=FAIL|initialize=FAIL|create-partition=FAIL|format-fat32=FAIL|large-volume=FAIL|allocation-hint=FAIL|geometry=FAIL)') {
                 $failureLine = $Matches[0]
                 Stop-ProofQemu $process.Id $port $serialPath
                 throw "$RunName reported '$failureLine'; see $serialPath"
@@ -265,6 +266,10 @@ if (($Dm22LargeProof -or $Dm24FourKnProof) -and $Stage -ne "Lifecycle") {
 if ($Dm22LargeProof -and $Dm24FourKnProof) {
     throw "Select only one of -Dm22LargeProof or -Dm24FourKnProof."
 }
+if ($Dm25PartitionDeleteProof -and ($Stage -ne "Lifecycle" -or
+        $Dm22LargeProof -or $Dm24FourKnProof)) {
+    throw "DM25 partition deletion uses its own AHCI Lifecycle proof mode."
+}
 if ($Dm22LargeProof -and $DiskSizeBytes -lt [UInt64]::Parse("9663676416")) {
     throw "DM22 image must be at least 9 GiB so the GPT partition can exceed 8 GiB."
 }
@@ -279,7 +284,8 @@ $OvmfFull = (Resolve-Path -LiteralPath $OvmfCode).Path
 $EspFull = (Resolve-Path -LiteralPath $EspSource).Path
 $repoOut = [IO.Path]::GetFullPath((Join-Path $Root "out"))
 if (-not $WorkDir) {
-    $workLabel = if ($Dm24FourKnProof) { "dm24-4kn-fat32" }
+    $workLabel = if ($Dm25PartitionDeleteProof) { "dm25-ahci-partition-delete" }
+        elseif ($Dm24FourKnProof) { "dm24-4kn-fat32" }
         elseif ($Dm22LargeProof) { "dm22-large-fat32" }
         else { "dm15-$($Stage.ToLowerInvariant())" }
     $WorkDir = "out\$workLabel-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
@@ -293,12 +299,14 @@ if (Test-Path -LiteralPath $WorkFull) {
     }
 } else { New-Item -ItemType Directory -Path $WorkFull -Force | Out-Null }
 
-$diskLabel = if ($Dm24FourKnProof) { "secondary-4kn-640m.raw" }
+$diskLabel = if ($Dm25PartitionDeleteProof) { "secondary-delete-600m.raw" }
+    elseif ($Dm24FourKnProof) { "secondary-4kn-640m.raw" }
     elseif ($Dm22LargeProof) { "secondary-large.raw" }
     else { "secondary-600m.raw" }
 $DiskPath = Join-Path $WorkFull $diskLabel
 $EspPath = Join-Path $WorkFull "esp"
-$manifestName = if ($Dm24FourKnProof) { "dm24-manifest.txt" }
+$manifestName = if ($Dm25PartitionDeleteProof) { "dm25-manifest.txt" }
+    elseif ($Dm24FourKnProof) { "dm24-manifest.txt" }
     elseif ($Dm22LargeProof) { "dm22-manifest.txt" }
     else { "dm15-manifest.txt" }
 $manifestPath = Join-Path $WorkFull $manifestName
@@ -315,7 +323,9 @@ try {
             $objectPath = Join-Path $Root "kernel\build\amd64\obj\core\$object"
             if (Test-Path -LiteralPath $objectPath) { Remove-Item -LiteralPath $objectPath -Force }
         }
-        $flags = if ($Dm24FourKnProof) {
+        $flags = if ($Dm25PartitionDeleteProof) {
+            "-DGXOS_DM15_QEMU_AHCI_PROOF -DGXOS_DM25_QEMU_PARTITION_DELETE_PROOF"
+        } elseif ($Dm24FourKnProof) {
             "-DGXOS_DM24_QEMU_FAT32_4KN_PROOF"
         } elseif ($Stage -eq "PrivateWrite") {
             "-DGXOS_DM15_QEMU_AHCI_PROOF -DGXOS_DM15_AHCI_PRIVATE_PROOF"
@@ -393,13 +403,16 @@ try {
     $qemuHash = (Get-FileHash -LiteralPath $QemuFull -Algorithm SHA256).Hash
     $ovmfHash = (Get-FileHash -LiteralPath $OvmfFull -Algorithm SHA256).Hash
     $qemuAtStart = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'")
-    $proofName = if ($Dm24FourKnProof) { "DM24-4KN-FAT32-USB" }
+    $proofName = if ($Dm25PartitionDeleteProof) { "DM25-AHCI-PARTITION-DELETE" }
+        elseif ($Dm24FourKnProof) { "DM24-4KN-FAT32-USB" }
         elseif ($Dm22LargeProof) { "DM22-LARGE-FAT32-AHCI" }
         else { "DM15-AHCI-$Stage" }
-    $manifestSchema = if ($Dm24FourKnProof) { "DM24-4KN-FAT32-1" }
+    $manifestSchema = if ($Dm25PartitionDeleteProof) { "DM25-AHCI-PARTITION-DELETE-1" }
+        elseif ($Dm24FourKnProof) { "DM24-4KN-FAT32-1" }
         elseif ($Dm22LargeProof) { "DM22-LARGE-FAT32-1" }
         else { "DM19-TRANSPORT-1" }
-    $proofIdentity = if ($Dm24FourKnProof) { "GUIDEXOS-DM24-QEMU-4KnFAT32" }
+    $proofIdentity = if ($Dm25PartitionDeleteProof) { "GUIDEXOS-DM25-QEMU-AHCI-PartitionDelete" }
+        elseif ($Dm24FourKnProof) { "GUIDEXOS-DM24-QEMU-4KnFAT32" }
         elseif ($Dm22LargeProof) { "GUIDEXOS-DM22-QEMU-LargeFAT32" }
         else { "GUIDEXOS-DM15-QEMU-$Stage" }
     @(
@@ -463,7 +476,8 @@ try {
             "serial=private-write-boot.serial.log"
         )
     } else {
-        $lifecycleMarker = if ($Dm24FourKnProof) { "[DM24-QEMU] lifecycle=PASS" }
+        $lifecycleMarker = if ($Dm25PartitionDeleteProof) { "[DM25-QEMU] delete-ready=PASS" }
+            elseif ($Dm24FourKnProof) { "[DM24-QEMU] lifecycle=PASS" }
             elseif ($Dm22LargeProof) { "[DM22-QEMU] lifecycle=PASS" }
             else { "[DM15-QEMU] lifecycle=PASS" }
         $firstTimeout = if ($Dm22LargeProof) { 1800 }
@@ -475,7 +489,20 @@ try {
         $firstSerial = $activeBoot.SerialPath
         Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
         $activeBoot = $null
-        $rediscoveryMarker = if ($Dm24FourKnProof) { "[DM24-QEMU] reboot-rediscovery=PASS" }
+        $preDeleteDiskPath = $null
+        if ($Dm25PartitionDeleteProof) {
+            $preDeleteDiskPath = Join-Path $WorkFull "secondary-pre-delete.raw"
+            if (Test-Path -LiteralPath $preDeleteDiskPath) {
+                throw "Refusing to overwrite pre-delete image evidence $preDeleteDiskPath"
+            }
+            Copy-Item -LiteralPath $DiskPath -Destination $preDeleteDiskPath
+            Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
+                "preDeleteImage=$preDeleteDiskPath",
+                "preDeleteImageSha256=$((Get-FileHash -LiteralPath $preDeleteDiskPath -Algorithm SHA256).Hash)"
+            )
+        }
+        $rediscoveryMarker = if ($Dm25PartitionDeleteProof) { "[DM25-QEMU] delete=PASS" }
+            elseif ($Dm24FourKnProof) { "[DM24-QEMU] reboot-rediscovery=PASS" }
             elseif ($Dm22LargeProof) { "[DM22-QEMU] reboot-rediscovery=PASS" }
             else { "[DM15-QEMU] reboot-rediscovery=PASS" }
         $rediscoveryTimeout = if ($Dm22LargeProof) { 300 }
@@ -487,16 +514,29 @@ try {
         $rediscoverySerial = $activeBoot.SerialPath
         Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
         $activeBoot = $null
+        $deleteRestartSerial = $null
+        if ($Dm25PartitionDeleteProof) {
+            $activeBoot = Start-ProofBoot "delete-restart-boot" `
+                "[DM25-QEMU] delete-restart=PASS" $EspPath $DiskPath $WorkFull `
+                $rediscoveryTimeout $manifestPath
+            $deleteRestartSerial = $activeBoot.SerialPath
+            Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
+            $activeBoot = $null
+        }
         if (-not $PythonExecutable) {
             $python = Get-Command python.exe -ErrorAction SilentlyContinue
             if (-not $python) { throw "Python 3 was not found; specify -PythonExecutable." }
             $PythonExecutable = $python.Source
         }
         $inspectionPath = Join-Path $WorkFull "disk-inspection.txt"
-        $verifier = if ($Dm24FourKnProof -or $Dm22LargeProof) {
+        $verifier = if ($Dm25PartitionDeleteProof) {
+            Join-Path $Root "scripts\verify-dm25-qemu-delete.py"
+        } elseif ($Dm24FourKnProof -or $Dm22LargeProof) {
             Join-Path $Root "scripts\verify-dm22-qemu-image.py"
         } else { Join-Path $Root "scripts\verify-dm9-qemu-image.py" }
-        if ($Dm24FourKnProof) {
+        if ($Dm25PartitionDeleteProof) {
+            $inspection = & $PythonExecutable $verifier $preDeleteDiskPath $DiskPath 2>&1
+        } elseif ($Dm24FourKnProof) {
             $inspection = & $PythonExecutable $verifier $DiskPath --sector-size 4096 2>&1
         } else {
             $inspection = & $PythonExecutable $verifier $DiskPath 2>&1
@@ -511,14 +551,16 @@ try {
             "secondaryFinalActualBytes=$(if ($Dm22LargeProof) { $finalActualBytes } else { 'not-recorded' })",
             "firstBootSerial=$([IO.Path]::GetFileName($firstSerial))",
             "rediscoverySerial=$([IO.Path]::GetFileName($rediscoverySerial))",
-            "result=PASS tier=$(if ($Dm24FourKnProof) { 'DM24-4Kn-FAT32-USB-high-cluster-96KiB-file-restart' } elseif ($Dm22LargeProof) { 'DM22-large-FAT32-AHCI-high-cluster-96KiB-file-restart' } else { '2-full-lifecycle-and-restart-rediscovery' })",
+            "deleteRestartSerial=$(if ($deleteRestartSerial) { [IO.Path]::GetFileName($deleteRestartSerial) } else { 'not-applicable' })",
+            "result=PASS tier=$(if ($Dm25PartitionDeleteProof) { 'DM25-AHCI-GPT-delete-restart-byte-identical-partition-data' } elseif ($Dm24FourKnProof) { 'DM24-4Kn-FAT32-USB-high-cluster-96KiB-file-restart' } elseif ($Dm22LargeProof) { 'DM22-large-FAT32-AHCI-high-cluster-96KiB-file-restart' } else { '2-full-lifecycle-and-restart-rediscovery' })",
             "failedStage=none",
             "writesOccurred=yes",
             "inspection=PASS read-only-GPT-FAT32-independent-verifier",
             "transportResult=PASS"
         )
     }
-    $passedProofName = if ($Dm24FourKnProof) { "DM24 4Kn FAT32 USB" }
+    $passedProofName = if ($Dm25PartitionDeleteProof) { "DM25 AHCI partition delete" }
+        elseif ($Dm24FourKnProof) { "DM24 4Kn FAT32 USB" }
         elseif ($Dm22LargeProof) { "DM22 large FAT32 AHCI" }
         else { "DM15 $Stage" }
     Write-Host "$passedProofName proof passed. Preserved artifacts: $WorkFull"

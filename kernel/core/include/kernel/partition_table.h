@@ -78,6 +78,10 @@ struct PartitionTableModel {
     // update the existing layout without assuming DM3's default geometry.
     uint32_t gptEntrySize;
     uint32_t gptEntryArraySectors;
+    uint32_t primaryGptHeaderCrc32;
+    uint32_t backupGptHeaderCrc32;
+    uint32_t primaryGptEntryArrayCrc32;
+    uint32_t backupGptEntryArrayCrc32;
     uint64_t primaryGptEntryArrayLba;
     uint64_t backupGptEntryArrayLba;
     uint64_t firstUsableLba;

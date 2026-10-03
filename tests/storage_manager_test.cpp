@@ -717,6 +717,231 @@ void build_gpt(FakeDisk& disk, GptFixture fixture = GptFixture::Valid)
     if (fixture == GptFixture::BothArrayCrcBad) sector(disk, backupArrayLba)[150] ^= 0x01;
 }
 
+uint16_t read_u16(const uint8_t* p);
+uint32_t read_u32(const uint8_t* p);
+uint64_t read_u64(const uint8_t* p);
+
+void refresh_gpt_fixture_crcs(FakeDisk& disk)
+{
+    const uint64_t backupHeaderLba = disk.sectorCount - 1;
+    const uint64_t backupArrayLba = read_u64(sector(disk, backupHeaderLba) + 72);
+    const uint64_t primaryArrayLba = read_u64(sector(disk, 1) + 72);
+    const uint32_t entryCount = read_u32(sector(disk, 1) + 80);
+    const uint32_t entrySize = read_u32(sector(disk, 1) + 84);
+    const size_t arrayBytes = static_cast<size_t>(entryCount) * entrySize;
+    uint8_t* primaryArray = sector(disk, primaryArrayLba);
+    const uint32_t arrayCrc = storage::crc32(primaryArray, arrayBytes);
+    write_u32(sector(disk, 1) + 88, arrayCrc);
+    write_u32(sector(disk, backupHeaderLba) + 88, arrayCrc);
+    for (uint64_t lba : {uint64_t(1), backupHeaderLba}) {
+        uint8_t* header = sector(disk, lba);
+        write_u32(header + 16, 0);
+        write_u32(header + 16, storage::crc32(header, read_u32(header + 12)));
+    }
+    (void)primaryArrayLba;
+    (void)backupArrayLba;
+}
+
+void build_gpt_three_partitions(FakeDisk& disk)
+{
+    build_gpt(disk);
+    const uint64_t firstUsable = read_u64(sector(disk, 1) + 40);
+    const uint64_t firstStart = read_u64(sector(disk, 2) + 32);
+    const uint64_t firstEnd = read_u64(sector(disk, 2) + 40);
+    const uint64_t secondStart = firstEnd + 9;
+    const uint64_t secondEnd = secondStart + 60;
+    const uint64_t thirdStart = secondEnd + 9;
+    const uint64_t thirdEnd = thirdStart + 60;
+    uint8_t entries[16384];
+    std::memcpy(entries, sector(disk, 2), sizeof(entries));
+    uint8_t* second = entries + 128;
+    uint8_t* third = entries + 256;
+    std::memset(second, 0, 128);
+    std::memset(third, 0, 128);
+    second[0] = 0x28;
+    third[0] = 0x28;
+    for (uint8_t i = 0; i < 16; ++i) {
+        second[16 + i] = static_cast<uint8_t>(0x50 + i);
+        third[16 + i] = static_cast<uint8_t>(0x70 + i);
+    }
+    write_u64(second + 32, secondStart);
+    write_u64(second + 40, secondEnd);
+    write_u64(third + 32, thirdStart);
+    write_u64(third + 40, thirdEnd);
+    const char* middleName = "Middle";
+    const char* lastName = "Last";
+    for (uint8_t i = 0; middleName[i]; ++i)
+        write_u16(second + 56 + i * 2, static_cast<uint16_t>(middleName[i]));
+    for (uint8_t i = 0; lastName[i]; ++i)
+        write_u16(third + 56 + i * 2, static_cast<uint16_t>(lastName[i]));
+    const uint64_t primaryArrayLba = read_u64(sector(disk, 1) + 72);
+    const uint64_t backupArrayLba = read_u64(sector(disk, disk.sectorCount - 1) + 72);
+    const uint32_t arraySectors = static_cast<uint32_t>(
+        (sizeof(entries) + disk.sectorSize - 1) / disk.sectorSize);
+    for (uint32_t i = 0; i < arraySectors; ++i) {
+        const size_t offset = static_cast<size_t>(i) * disk.sectorSize;
+        const size_t amount = sizeof(entries) - offset < disk.sectorSize
+            ? sizeof(entries) - offset : disk.sectorSize;
+        std::memcpy(sector(disk, primaryArrayLba + i), entries + offset, amount);
+        std::memcpy(sector(disk, backupArrayLba + i), entries + offset, amount);
+    }
+    refresh_gpt_fixture_crcs(disk);
+    (void)firstUsable;
+    (void)firstStart;
+}
+
+void build_mbr_three_partitions(FakeDisk& disk)
+{
+    std::fill(disk.bytes.begin(), disk.bytes.end(), 0);
+    uint8_t* mbr = sector(disk, 0);
+    for (uint32_t i = 0; i < disk.sectorSize; ++i)
+        mbr[i] = static_cast<uint8_t>(i * 29u + 0x31u);
+    std::memset(mbr + 446, 0, 64);
+    write_u32(mbr + 440, 0xA1B2C3D4u);
+    const uint32_t start = disk.sectorSize == 512 ? 2048u : 8u;
+    const uint32_t count = disk.sectorSize == 512 ? 64u : 8u;
+    set_mbr_partition(disk, 0, 0, 0x0C, start, count);
+    set_mbr_partition(disk, 1, 0, 0x0C, start + count + 8, count);
+    set_mbr_partition(disk, 2, 0, 0x0C, start + 2 * (count + 8), count);
+    set_mbr_signature(disk);
+    for (uint8_t slot = 0; slot < 3; ++slot) {
+        const uint32_t partitionStart = start + slot * (count + 8);
+        for (uint32_t sectorOffset = 0; sectorOffset < count; ++sectorOffset)
+            std::memset(sector(disk, partitionStart + sectorOffset),
+                static_cast<int>(0x31u + slot * 0x20u + sectorOffset),
+                disk.sectorSize);
+    }
+}
+
+bool verify_gpt_delete_independent(FakeDisk& disk,
+                                   const std::vector<uint8_t>& before,
+                                   const storage::PartitionEntry& deleted)
+{
+    const uint8_t* currentMbr = sector(disk, 0);
+    const uint8_t* oldMbr = before.data();
+    if (std::memcmp(currentMbr, oldMbr, disk.sectorSize) != 0 ||
+        currentMbr[510] != 0x55 || currentMbr[511] != 0xAA ||
+        currentMbr[450] != 0xEE) return false;
+    const uint64_t headerLbas[2] = {1, disk.sectorCount - 1};
+    const uint8_t* headers[2] = {sector(disk, headerLbas[0]),
+                                 sector(disk, headerLbas[1])};
+    uint64_t arrayLbas[2] = {0, 0};
+    uint32_t entryCount = 0, entrySize = 0;
+    size_t arrayBytes = 0;
+    for (uint8_t copy = 0; copy < 2; ++copy) {
+        const uint8_t* header = headers[copy];
+        if (std::memcmp(header, "EFI PART", 8) != 0) return false;
+        const uint32_t headerSize = read_u32(header + 12);
+        std::vector<uint8_t> headerCopy(header, header + disk.sectorSize);
+        const uint32_t expectedHeaderCrc = read_u32(header + 16);
+        write_u32(headerCopy.data() + 16, 0);
+        if (storage::crc32(headerCopy.data(), headerSize) != expectedHeaderCrc)
+            return false;
+        arrayLbas[copy] = read_u64(header + 72);
+        if (copy == 0) {
+            entryCount = read_u32(header + 80);
+            entrySize = read_u32(header + 84);
+            arrayBytes = static_cast<size_t>(entryCount) * entrySize;
+        } else if (entryCount != read_u32(header + 80) ||
+                   entrySize != read_u32(header + 84)) return false;
+        std::vector<uint8_t> array(arrayBytes);
+        for (size_t offset = 0; offset < arrayBytes; offset += disk.sectorSize) {
+            const size_t amount = arrayBytes - offset < disk.sectorSize
+                ? arrayBytes - offset : disk.sectorSize;
+            std::memcpy(array.data() + offset,
+                sector(disk, arrayLbas[copy] + offset / disk.sectorSize), amount);
+        }
+        if (storage::crc32(array.data(), array.size()) != read_u32(header + 88))
+            return false;
+        if (copy == 0) {
+            const size_t slotOffset = static_cast<size_t>(deleted.partitionNumber - 1) * entrySize;
+            if (slotOffset + entrySize > array.size() ||
+                !std::all_of(array.begin() + slotOffset,
+                    array.begin() + slotOffset + entrySize,
+                    [](uint8_t value) { return value == 0; })) return false;
+        }
+        const uint8_t* oldHeader = before.data() +
+            static_cast<size_t>(headerLbas[copy] * disk.sectorSize);
+        const uint64_t oldArrayLba = read_u64(oldHeader + 72);
+        std::vector<uint8_t> oldArray(arrayBytes);
+        for (size_t offset = 0; offset < arrayBytes; offset += disk.sectorSize) {
+            const size_t amount = arrayBytes - offset < disk.sectorSize
+                ? arrayBytes - offset : disk.sectorSize;
+            std::memcpy(oldArray.data() + offset,
+                before.data() + static_cast<size_t>(oldArrayLba * disk.sectorSize) + offset,
+                amount);
+        }
+        const size_t slotOffset = static_cast<size_t>(deleted.partitionNumber - 1) * entrySize;
+        if (std::memcmp(array.data(), oldArray.data(), slotOffset) != 0 ||
+            std::memcmp(array.data() + slotOffset + entrySize,
+                oldArray.data() + slotOffset + entrySize,
+                arrayBytes - slotOffset - entrySize) != 0) return false;
+        std::vector<uint8_t> headerBefore(oldHeader, oldHeader + disk.sectorSize);
+        for (uint32_t i = 0; i < disk.sectorSize; ++i) {
+            if ((i >= 16 && i < 20) || (i >= 88 && i < 92)) continue;
+            if (header[i] != headerBefore[i]) return false;
+        }
+    }
+    return arrayLbas[0] != arrayLbas[1];
+}
+
+bool verify_mbr_delete_independent(FakeDisk& disk,
+                                   const std::vector<uint8_t>& before,
+                                   const storage::PartitionEntry& deleted)
+{
+    const uint32_t entryOffset = 446u +
+        static_cast<uint32_t>(deleted.partitionNumber - 1) * 16u;
+    for (uint32_t i = 0; i < disk.sectorSize; ++i) {
+        const uint8_t expected = i >= entryOffset && i < entryOffset + 16u
+            ? 0 : before[i];
+        if (sector(disk, 0)[i] != expected) return false;
+    }
+    return sector(disk, 0)[510] == 0x55 && sector(disk, 0)[511] == 0xAA;
+}
+
+bool all_unwritten_sectors_unchanged(FakeDisk& disk,
+                                     const std::vector<uint8_t>& before)
+{
+    for (uint64_t lba = 0; lba < disk.sectorCount; ++lba) {
+        bool written = false;
+        for (const FakeWriteRecord& write : disk.writeLog) {
+            if (lba >= write.lba && lba - write.lba < write.count) {
+                written = true;
+                break;
+            }
+        }
+        if (!written && std::memcmp(sector(disk, lba),
+                before.data() + static_cast<size_t>(lba * disk.sectorSize),
+                disk.sectorSize) != 0) return false;
+    }
+    return true;
+}
+
+bool find_partition_number(const storage::PartitionTableModel& table,
+                           uint16_t number, storage::PartitionEntry& output)
+{
+    for (uint16_t i = 0; i < table.partitionCount; ++i) {
+        if (table.partitions[i].partitionNumber == number) {
+            output = table.partitions[i];
+            return true;
+        }
+    }
+    return false;
+}
+
+storage::DeletePartitionRequest make_delete_request(
+    uint8_t index, storage::PartitionScheme scheme,
+    const storage::PartitionEntry& partition)
+{
+    storage::DeletePartitionRequest request = {};
+    storage::capture_target_identity(index, request.targetSnapshot);
+    request.partitionScheme = scheme;
+    request.partitionSnapshot = partition;
+    request.expectedRegistryGeneration =
+        request.targetSnapshot.registryGeneration;
+    return request;
+}
+
 void build_empty_gpt(FakeDisk& disk)
 {
     std::fill(disk.bytes.begin(), disk.bytes.end(), 0);
@@ -4005,6 +4230,474 @@ static void run_nvme_logic_tests()
           "NVMe controller loss maps to no-media and unverified durability");
 }
 
+void run_delete_partition_tests()
+{
+    for (uint32_t sectorSize : {512u, 4096u}) {
+        FakeDisk disk(sectorSize, 4096);
+        build_gpt_three_partitions(disk);
+        const uint8_t index = register_fake(disk, true, true, true);
+        storage::TargetIdentity target = {};
+        storage::PartitionTableModel beforeTable = {};
+        storage::PartitionEntry selected = {};
+        storage::capture_target_identity(index, target);
+        const bool parsed = storage::parse_partition_table(index, beforeTable) &&
+            find_partition_number(beforeTable, 2, selected);
+        storage::UnallocatedRegion beforeGaps[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t beforeGapCount = 0;
+        const bool gapScan = parsed && storage::compute_unallocated_regions(
+            beforeTable, disk.sectorCount, sectorSize, beforeGaps,
+            storage::MAX_UNALLOCATED_REGIONS, beforeGapCount);
+        const std::vector<uint8_t> original = disk.bytes;
+        storage::DeletePartitionRequest request = make_delete_request(index,
+            storage::PARTITION_SCHEME_GPT, selected);
+        storage::DeletePartitionPlan plan = {};
+        storage::DeletePartitionResult result = {};
+        const storage::DeletePartitionStatus prepared = parsed
+            ? storage::prepare_delete_partition(request, plan, result)
+            : storage::DELETE_PARTITION_INVALID_REQUEST;
+        const bool noEarlyWrite = prepared ==
+                storage::DELETE_PARTITION_READY_FOR_CONFIRMATION &&
+            plan.confirmationReady && disk.writeAttempts == 0 &&
+            disk.writeLog.empty() && storage::storage_operation_active();
+        storage::DeletePartitionResult busyResult = {};
+        const storage::DeletePartitionStatus busy = storage::probe_delete_partition(
+            target, storage::PARTITION_SCHEME_GPT, selected, busyResult);
+        const bool cancelled = storage::cancel_delete_partition(plan) &&
+            disk.writeAttempts == 0 && !storage::storage_operation_active();
+        storage::DeletePartitionPlan confirmedPlan = {};
+        const storage::DeletePartitionStatus preparedAgain =
+            storage::prepare_delete_partition(request, confirmedPlan, result);
+        const storage::DeletePartitionStatus deleted = preparedAgain ==
+                storage::DELETE_PARTITION_READY_FOR_CONFIRMATION
+            ? storage::execute_delete_partition(confirmedPlan, result)
+            : preparedAgain;
+        storage::PartitionTableModel afterTable = {};
+        const bool reparsed = storage::parse_partition_table(index, afterTable);
+        storage::UnallocatedRegion afterGaps[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t afterGapCount = 0;
+        const bool afterGapScan = reparsed && storage::compute_unallocated_regions(
+            afterTable, disk.sectorCount, sectorSize, afterGaps,
+            storage::MAX_UNALLOCATED_REGIONS, afterGapCount);
+        const uint64_t offset = static_cast<uint64_t>(
+            selected.partitionNumber - 1) * beforeTable.gptEntrySize / sectorSize;
+        const uint64_t expected[4] = {
+            beforeTable.backupGptEntryArrayLba + offset,
+            disk.sectorCount - 1,
+            beforeTable.primaryGptEntryArrayLba + offset,
+            1,
+        };
+        bool exactWrites = disk.writeLog.size() == 4 &&
+            result.logicalSectorsWritten == 4 && result.writeRangeCount == 4;
+        for (uint8_t i = 0; exactWrites && i < 4; ++i)
+            exactWrites = disk.writeLog[i].lba == expected[i] &&
+                disk.writeLog[i].count == 1 &&
+                result.writeRanges[i].startLba == expected[i] &&
+                result.writeRanges[i].sectorCount == 1;
+        const bool success = deleted == storage::DELETE_PARTITION_SUCCESS &&
+            result.verificationPassed && reparsed && afterGapScan && gapScan &&
+            afterTable.state == storage::DISK_STATE_VALID_GPT &&
+            afterTable.partitionCount == 2 && afterGapCount + 1 == beforeGapCount &&
+            result.finalUnallocatedRegionCount + 1 == beforeGapCount && exactWrites &&
+            verify_gpt_delete_independent(disk, original, selected) &&
+            all_unwritten_sectors_unchanged(disk, original) &&
+            !storage::storage_operation_active();
+        check(noEarlyWrite && busy == storage::DELETE_PARTITION_OPERATION_BUSY &&
+              cancelled && preparedAgain ==
+                  storage::DELETE_PARTITION_READY_FOR_CONFIRMATION && success,
+              sectorSize == 512
+                ? "DM25 GPT512 requires confirmation, cancels safely, verifies both copies, exact writes and merged gaps"
+                : "DM25 GPT4Kn preserves neighboring entries in shared sectors and verifies bounded writes");
+        unregister_fake(index, disk);
+        const uint8_t restartedIndex = register_fake(disk, true, true, true);
+        storage::PartitionTableModel restarted = {};
+        check(storage::parse_partition_table(restartedIndex, restarted) &&
+              restarted.state == storage::DISK_STATE_VALID_GPT &&
+              restarted.partitionCount == 2,
+              sectorSize == 512
+                ? "DM25 GPT512 deletion persists after device-registration restart"
+                : "DM25 GPT4Kn deletion persists after device-registration restart");
+        unregister_fake(restartedIndex, disk);
+    }
+
+    for (uint32_t sectorSize : {512u, 4096u}) {
+        FakeDisk disk(sectorSize, 4096);
+        build_mbr_three_partitions(disk);
+        const uint8_t index = register_fake(disk, true, true, true);
+        storage::PartitionTableModel beforeTable = {};
+        storage::PartitionEntry selected = {};
+        const bool parsed = storage::parse_partition_table(index, beforeTable) &&
+            find_partition_number(beforeTable, 2, selected);
+        storage::UnallocatedRegion beforeGaps[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t beforeGapCount = 0;
+        const bool gapScan = parsed && storage::compute_unallocated_regions(
+            beforeTable, disk.sectorCount, sectorSize, beforeGaps,
+            storage::MAX_UNALLOCATED_REGIONS, beforeGapCount);
+        const std::vector<uint8_t> original = disk.bytes;
+        storage::DeletePartitionRequest request = make_delete_request(index,
+            storage::PARTITION_SCHEME_MBR, selected);
+        storage::DeletePartitionPlan plan = {};
+        storage::DeletePartitionResult result = {};
+        const storage::DeletePartitionStatus prepared = parsed
+            ? storage::prepare_delete_partition(request, plan, result)
+            : storage::DELETE_PARTITION_INVALID_REQUEST;
+        const bool noEarlyWrite = prepared ==
+                storage::DELETE_PARTITION_READY_FOR_CONFIRMATION &&
+            disk.writeAttempts == 0;
+        const storage::DeletePartitionStatus deleted =
+            storage::execute_delete_partition(plan, result);
+        storage::PartitionTableModel afterTable = {};
+        const bool reparsed = storage::parse_partition_table(index, afterTable);
+        storage::UnallocatedRegion afterGaps[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t afterGapCount = 0;
+        const bool afterGapScan = reparsed && storage::compute_unallocated_regions(
+            afterTable, disk.sectorCount, sectorSize, afterGaps,
+            storage::MAX_UNALLOCATED_REGIONS, afterGapCount);
+        check(noEarlyWrite && deleted == storage::DELETE_PARTITION_SUCCESS &&
+              result.verificationPassed && gapScan && afterGapScan &&
+              afterTable.state == storage::DISK_STATE_VALID_MBR &&
+              afterTable.partitionCount == 2 && afterGapCount + 1 == beforeGapCount &&
+              disk.writeLog.size() == 1 && disk.writeLog[0].lba == 0 &&
+              disk.writeLog[0].count == 1 && result.writeRangeCount == 1 &&
+              result.writeRanges[0].startLba == 0 &&
+              verify_mbr_delete_independent(disk, original, selected) &&
+              all_unwritten_sectors_unchanged(disk, original) &&
+              !storage::storage_operation_active(),
+              sectorSize == 512
+                ? "DM25 MBR512 clears one record and preserves signature, disk ID, data and gap accounting"
+                : "DM25 MBR4Kn preserves the full logical sector beyond the legacy 512-byte table");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk disk(512, 4096);
+        build_gpt_three_partitions(disk);
+        const uint8_t index = register_fake(disk, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::parse_partition_table(index, table);
+        storage::PartitionEntry selected = {};
+        find_partition_number(table, 2, selected);
+        storage::DeletePartitionRequest request = make_delete_request(index,
+            storage::PARTITION_SCHEME_GPT, selected);
+        storage::DeletePartitionPlan plan = {};
+        storage::DeletePartitionResult result = {};
+        const storage::DeletePartitionStatus prepared =
+            storage::prepare_delete_partition(request, plan, result);
+        const uint64_t primary = read_u64(sector(disk, 1) + 72);
+        const uint64_t backup = read_u64(sector(disk, disk.sectorCount - 1) + 72);
+        const uint64_t changedStart = selected.startLba + 500;
+        write_u64(sector(disk, primary) + 128 + 32, changedStart);
+        write_u64(sector(disk, primary) + 128 + 40, selected.endLba + 500);
+        write_u64(sector(disk, backup) + 128 + 32, changedStart);
+        write_u64(sector(disk, backup) + 128 + 40, selected.endLba + 500);
+        refresh_gpt_fixture_crcs(disk);
+        const storage::DeletePartitionStatus status =
+            storage::execute_delete_partition(plan, result);
+        check(prepared == storage::DELETE_PARTITION_READY_FOR_CONFIRMATION &&
+              status == storage::DELETE_PARTITION_STALE_SELECTION &&
+              disk.writeAttempts == 0 && result.failedBeforeWrite &&
+              !storage::storage_operation_active(),
+              "DM25 GPT reparse refuses a changed selection before writing metadata");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk disk(512, 4096);
+        build_mbr_three_partitions(disk);
+        const uint8_t index = register_fake(disk, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::parse_partition_table(index, table);
+        storage::PartitionEntry selected = {};
+        find_partition_number(table, 2, selected);
+        storage::DeletePartitionRequest request = make_delete_request(index,
+            storage::PARTITION_SCHEME_MBR, selected);
+        storage::DeletePartitionPlan plan = {};
+        storage::DeletePartitionResult result = {};
+        const storage::DeletePartitionStatus prepared =
+            storage::prepare_delete_partition(request, plan, result);
+        set_mbr_partition(disk, 1, 0, 0x0C,
+            static_cast<uint32_t>(selected.startLba + 500),
+            static_cast<uint32_t>(selected.sectorCount));
+        const storage::DeletePartitionStatus status =
+            storage::execute_delete_partition(plan, result);
+        check(prepared == storage::DELETE_PARTITION_READY_FOR_CONFIRMATION &&
+              status == storage::DELETE_PARTITION_STALE_SELECTION &&
+              disk.writeAttempts == 0 && result.failedBeforeWrite,
+              "DM25 MBR fingerprint refuses changed table bytes before writing");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk disk(512, 200000);
+        build_gpt_three_partitions(disk);
+        const uint64_t primary = read_u64(sector(disk, 1) + 72);
+        const uint64_t backup = read_u64(sector(disk, disk.sectorCount - 1) + 72);
+        const uint64_t starts[3] = {2048, 4096, 80000};
+        const uint64_t counts[3] = {2048, 72000, 2048};
+        for (uint8_t slot = 0; slot < 3; ++slot) {
+            write_u64(sector(disk, primary) + slot * 128 + 32, starts[slot]);
+            write_u64(sector(disk, primary) + slot * 128 + 40,
+                      starts[slot] + counts[slot] - 1);
+            write_u64(sector(disk, backup) + slot * 128 + 32, starts[slot]);
+            write_u64(sector(disk, backup) + slot * 128 + 40,
+                      starts[slot] + counts[slot] - 1);
+        }
+        refresh_gpt_fixture_crcs(disk);
+        std::memset(sector(disk, starts[1]), 0xA5, disk.sectorSize);
+        const uint8_t index = register_fake(disk, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::parse_partition_table(index, table);
+        storage::PartitionEntry oldPartition = {};
+        const bool foundOld = find_partition_number(table, 2, oldPartition);
+        uint8_t oldData[512];
+        std::memcpy(oldData, sector(disk, starts[1]), sizeof(oldData));
+        storage::DeletePartitionRequest deleteRequest = make_delete_request(index,
+            storage::PARTITION_SCHEME_GPT, oldPartition);
+        storage::DeletePartitionPlan deletePlan = {};
+        storage::DeletePartitionResult deleteResult = {};
+        const storage::DeletePartitionStatus prepared = foundOld
+            ? storage::prepare_delete_partition(deleteRequest, deletePlan,
+                                                deleteResult)
+            : storage::DELETE_PARTITION_INVALID_REQUEST;
+        const storage::DeletePartitionStatus deleted = prepared ==
+                storage::DELETE_PARTITION_READY_FOR_CONFIRMATION
+            ? storage::execute_delete_partition(deletePlan, deleteResult)
+            : prepared;
+        storage::PartitionTableModel afterDelete = {};
+        storage::parse_partition_table(index, afterDelete);
+        storage::UnallocatedRegion regions[storage::MAX_UNALLOCATED_REGIONS] = {};
+        uint16_t regionCount = 0;
+        const bool regionsReady = storage::compute_unallocated_regions(
+            afterDelete, disk.sectorCount, disk.sectorSize, regions,
+            storage::MAX_UNALLOCATED_REGIONS, regionCount);
+        int reusedGap = -1;
+        for (uint16_t i = 0; regionsReady && i < regionCount; ++i) {
+            if (regions[i].startLba <= oldPartition.startLba &&
+                regions[i].endLba >= oldPartition.endLba) {
+                reusedGap = i;
+                break;
+            }
+        }
+        storage::CreatePartitionRequest createRequest = make_create_request(
+            index, storage::PARTITION_SCHEME_GPT,
+            reusedGap >= 0 ? regions[reusedGap] : regions[0],
+            0, true, 0xD1);
+        storage::CreatePartitionResult createResult = {};
+        const storage::CreatePartitionStatus created = reusedGap >= 0
+            ? storage::create_partition(createRequest, createResult)
+            : storage::CREATE_PARTITION_INVALID_REQUEST;
+        const uint32_t writeAttemptsBeforeFormat = disk.writeAttempts;
+        const std::vector<uint8_t> beforeFormat = disk.bytes;
+        storage::Fat32FormatRequest formatRequest = make_format_request(index,
+            createResult.createdPartition, "DM25REFORMAT", 0xD1250001u);
+        storage::Fat32FormatResult formatResult = {};
+        const storage::Fat32FormatStatus formatted = created ==
+                storage::CREATE_PARTITION_SUCCESS
+            ? storage::format_fat32_partition(formatRequest, formatResult)
+            : storage::FAT32_FORMAT_INVALID_REQUEST;
+        storage::PartitionTableModel afterCreate = {};
+        const bool createParsed = storage::parse_partition_table(index,
+            afterCreate);
+        bool freshGuid = false;
+        for (uint16_t i = 0; i < afterCreate.partitionCount; ++i) {
+            if (afterCreate.partitions[i].partitionNumber ==
+                    createResult.createdPartition.partitionNumber &&
+                afterCreate.partitions[i].startLba == oldPartition.startLba &&
+                !std::equal(afterCreate.partitions[i].uniqueGuid,
+                    afterCreate.partitions[i].uniqueGuid + 16,
+                    oldPartition.uniqueGuid))
+                freshGuid = true;
+        }
+        check(deleted == storage::DELETE_PARTITION_SUCCESS && regionsReady &&
+              reusedGap >= 0 && created == storage::CREATE_PARTITION_SUCCESS &&
+              createParsed && freshGuid &&
+              createResult.createdPartition.startLba == oldPartition.startLba &&
+              std::memcmp(sector(disk, starts[1]), oldData, sizeof(oldData)) == 0 &&
+              formatted == storage::FAT32_FORMAT_AMBIGUOUS_EXISTING_DATA &&
+              disk.writeAttempts == writeAttemptsBeforeFormat &&
+              disk.bytes == beforeFormat,
+              "DM25 delete/recreate at the old LBA has a fresh GPT GUID, preserves old data, and KnownZero FAT32 formatting refuses it without writes");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk disk(512, 4096);
+        build_gpt_three_partitions(disk);
+        const uint8_t index = register_fake(disk, true, true, true);
+        storage::TargetIdentity target = {};
+        storage::PartitionTableModel table = {};
+        storage::capture_target_identity(index, target);
+        storage::parse_partition_table(index, table);
+        storage::PartitionEntry selected = {};
+        find_partition_number(table, 2, selected);
+        storage::DeletePartitionResult result = {};
+        vfs::test_set_mount(0, true, index, "/data");
+        const storage::DeletePartitionStatus mounted = storage::probe_delete_partition(
+            target, storage::PARTITION_SCHEME_GPT, selected, result);
+        vfs::test_clear_mounts();
+        vfs::test_set_mount(0, true, index, "/");
+        const storage::DeletePartitionStatus root = storage::probe_delete_partition(
+            target, storage::PARTITION_SCHEME_GPT, selected, result);
+        vfs::test_clear_mounts();
+        const storage::DeletePartitionStatus clear = storage::probe_delete_partition(
+            target, storage::PARTITION_SCHEME_GPT, selected, result);
+        check(mounted == storage::DELETE_PARTITION_MOUNTED &&
+              root == storage::DELETE_PARTITION_ROOT_BACKING &&
+              clear == storage::DELETE_PARTITION_READY_FOR_CONFIRMATION &&
+              disk.writeAttempts == 0,
+              "DM25 blocks active and root mounts and allows an unmounted target");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk disk(512, 4096);
+        build_gpt_three_partitions(disk);
+        bool parsed = false;
+        storage::PartitionTableModel table = parse_fixture(disk, parsed);
+        storage::PartitionEntry bootPartition = {}, peer = {};
+        find_partition_number(table, 1, bootPartition);
+        find_partition_number(table, 2, peer);
+        guideXOS::BootSourceDescriptor source = make_ahci_boot_source(1u);
+        uint8_t* hardDrive = source.DevicePath + 28;
+        write_u32(hardDrive + 4, bootPartition.partitionNumber);
+        write_u64(hardDrive + 8, bootPartition.startLba);
+        write_u64(hardDrive + 16, bootPartition.sectorCount);
+        std::memcpy(hardDrive + 24, bootPartition.uniqueGuid, 16);
+        hardDrive[41] = 2;
+        const bool sourceSet = storage::set_boot_source_descriptor(&source);
+        const uint8_t index = register_fake(disk, true, true, true, false, 0, 0,
+            block::BOOT_PROVENANCE_UNKNOWN, block::BDEV_AHCI, true, 0, 0, 5, 0,
+            false, 0, 0, 0, false, 0, 0, 0, 0, 0, true, 1);
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::DeletePartitionResult result = {};
+        const storage::DeletePartitionStatus boot = storage::probe_delete_partition(
+            target, storage::PARTITION_SCHEME_GPT, bootPartition, result);
+        const storage::DeletePartitionStatus peerStatus =
+            storage::probe_delete_partition(target,
+                storage::PARTITION_SCHEME_GPT, peer, result);
+        guideXOS::BootSourceDescriptor noMedia = make_ahci_boot_source(1u);
+        noMedia.DevicePath[28] = 0x7F;
+        noMedia.DevicePath[29] = 0xFF;
+        write_u16(noMedia.DevicePath + 30, 4);
+        noMedia.DevicePathLength = 32;
+        const bool noMediaAccepted = storage::set_boot_source_descriptor(&noMedia);
+        const storage::DeletePartitionStatus unknown = storage::probe_delete_partition(
+            target, storage::PARTITION_SCHEME_GPT, peer, result);
+        check(parsed && sourceSet && noMediaAccepted &&
+              boot == storage::DELETE_PARTITION_BOOT_BACKING &&
+              peerStatus == storage::DELETE_PARTITION_READY_FOR_CONFIRMATION &&
+              unknown == storage::DELETE_PARTITION_BOOT_IDENTITY_UNKNOWN &&
+              disk.writeAttempts == 0,
+              "DM25 scopes matching AHCI boot protection to the firmware partition and fails closed without media identity");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk disk(512, 4096);
+        build_gpt_three_partitions(disk);
+        const uint8_t index = register_fake(disk, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::parse_partition_table(index, table);
+        storage::PartitionEntry selected = {};
+        find_partition_number(table, 2, selected);
+        const std::vector<uint8_t> original = disk.bytes;
+        storage::DeletePartitionRequest request = make_delete_request(index,
+            storage::PARTITION_SCHEME_GPT, selected);
+        storage::DeletePartitionPlan plan = {};
+        storage::DeletePartitionResult result = {};
+        const storage::DeletePartitionStatus prepared =
+            storage::prepare_delete_partition(request, plan, result);
+        disk.failWriteAtCall1 = 3;
+        const storage::DeletePartitionStatus status =
+            storage::execute_delete_partition(plan, result);
+        check(prepared == storage::DELETE_PARTITION_READY_FOR_CONFIRMATION &&
+              status == storage::DELETE_PARTITION_IO_FAILED &&
+              result.rollbackAttempted && result.rollbackSucceeded &&
+              !result.finalStateUncertain && disk.bytes == original,
+              "DM25 GPT write failure restores and verifies original metadata");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk disk(512, 4096);
+        build_gpt_three_partitions(disk);
+        const uint8_t index = register_fake(disk, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::parse_partition_table(index, table);
+        storage::PartitionEntry selected = {};
+        find_partition_number(table, 2, selected);
+        const std::vector<uint8_t> original = disk.bytes;
+        storage::DeletePartitionRequest request = make_delete_request(index,
+            storage::PARTITION_SCHEME_GPT, selected);
+        storage::DeletePartitionPlan plan = {};
+        storage::DeletePartitionResult result = {};
+        const storage::DeletePartitionStatus prepared =
+            storage::prepare_delete_partition(request, plan, result);
+        disk.failFlushAtCall = 2;
+        const storage::DeletePartitionStatus status =
+            storage::execute_delete_partition(plan, result);
+        check(prepared == storage::DELETE_PARTITION_READY_FOR_CONFIRMATION &&
+              status == storage::DELETE_PARTITION_FLUSH_FAILED &&
+              result.rollbackAttempted && result.rollbackSucceeded &&
+              disk.bytes == original,
+              "DM25 GPT flush failure rolls back and verifies the original metadata");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk disk(512, 4096);
+        build_gpt_three_partitions(disk);
+        const uint8_t index = register_fake(disk, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::parse_partition_table(index, table);
+        storage::PartitionEntry selected = {};
+        find_partition_number(table, 2, selected);
+        const std::vector<uint8_t> original = disk.bytes;
+        storage::DeletePartitionRequest request = make_delete_request(index,
+            storage::PARTITION_SCHEME_GPT, selected);
+        storage::DeletePartitionPlan plan = {};
+        storage::DeletePartitionResult result = {};
+        const storage::DeletePartitionStatus prepared =
+            storage::prepare_delete_partition(request, plan, result);
+        disk.corruptWriteLbaOnce = table.backupGptEntryArrayLba;
+        disk.corruptWritePending = true;
+        const storage::DeletePartitionStatus status =
+            storage::execute_delete_partition(plan, result);
+        check(prepared == storage::DELETE_PARTITION_READY_FOR_CONFIRMATION &&
+              status == storage::DELETE_PARTITION_VERIFICATION_FAILED &&
+              result.rollbackAttempted && result.rollbackSucceeded &&
+              disk.bytes == original,
+              "DM25 corrupt GPT read-back triggers verified restoration");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk disk(512, 4096);
+        build_gpt_three_partitions(disk);
+        const uint8_t index = register_fake(disk, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::parse_partition_table(index, table);
+        storage::PartitionEntry selected = {};
+        find_partition_number(table, 2, selected);
+        storage::DeletePartitionRequest request = make_delete_request(index,
+            storage::PARTITION_SCHEME_GPT, selected);
+        storage::DeletePartitionPlan plan = {};
+        storage::DeletePartitionResult result = {};
+        const storage::DeletePartitionStatus prepared =
+            storage::prepare_delete_partition(request, plan, result);
+        disk.removeOnWriteAtCall = 2;
+        const storage::DeletePartitionStatus status =
+            storage::execute_delete_partition(plan, result);
+        check(prepared == storage::DELETE_PARTITION_READY_FOR_CONFIRMATION &&
+              status == storage::DELETE_PARTITION_ROLLBACK_FAILED &&
+              disk.removed && disk.writeAttempts == 2 &&
+              result.finalStateUncertain && !result.rollbackSucceeded &&
+              !storage::storage_operation_active() && block::get_device(index) == nullptr,
+              "DM25 removal during GPT writes stops on the pinned device and reports uncertain metadata");
+        g_fakeDisks[disk.driverId] = nullptr;
+    }
+}
+
 int main()
 {
     run_nvme_logic_tests();
@@ -4013,6 +4706,7 @@ int main()
     run_uhci_transfer_logic_tests();
     block::init();
     vfs::test_clear_mounts();
+    run_delete_partition_tests();
 
     check(storage::crc32("123456789", 9) == 0xCBF43926u, "CRC32 standard test vector");
     check(storage::valid_geometry(10, 512), "512-byte geometry accepted");
@@ -8333,6 +9027,19 @@ int main()
             std::strcmp(collisionFallback, collisionFallbackAgain) == 0;
         const vfs::PartitionMountResult mountAResult = vfs::mount_partition_detailed(
             "/mnt/a", index, partA.partitionNumber, parentRegistration, &partA);
+        storage::TargetIdentity deleteTarget = {};
+        storage::capture_target_identity(index, deleteTarget);
+        storage::DeletePartitionResult mountedDeleteA = {};
+        storage::DeletePartitionResult peerDeleteB = {};
+        const uint32_t deleteProbeWritesBefore = gptVfs.writeAttempts;
+        const storage::DeletePartitionStatus mountedDeleteAStatus =
+            storage::probe_delete_partition(deleteTarget,
+                                            storage::PARTITION_SCHEME_GPT,
+                                            partA, mountedDeleteA);
+        const storage::DeletePartitionStatus peerDeleteBStatus =
+            storage::probe_delete_partition(deleteTarget,
+                                            storage::PARTITION_SCHEME_GPT,
+                                            partB, peerDeleteB);
         const vfs::PartitionMountResult duplicateResult =
             vfs::mount_partition_detailed("/mnt/a-copy", index,
                 partA.partitionNumber, parentRegistration, &partA);
@@ -8364,6 +9071,10 @@ int main()
               mountProtection.safety == storage::DEVICE_MOUNTED &&
               mountProtection.partitionIdentityKnown,
               "VFS mounts exact GPT identity, rejects duplicates and occupied paths, and reports partition protection");
+        check(mountedDeleteAStatus == storage::DELETE_PARTITION_MOUNTED &&
+              peerDeleteBStatus == storage::DELETE_PARTITION_READY_FOR_CONFIRMATION &&
+              gptVfs.writeAttempts == deleteProbeWritesBefore,
+              "delete protects the exact mounted GPT partition while allowing its unmounted peer on the same disk");
 
         storage::Fat32FormatRequest blockedFormat = make_format_request(
             index, partA, "NOPE", 0x01020304u);

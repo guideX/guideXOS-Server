@@ -174,6 +174,161 @@ CreatePartitionStatus create_partition(
 const char* create_partition_status_name(CreatePartitionStatus status);
 const char* create_partition_stage_name(CreatePartitionStage stage);
 
+enum DeletePartitionStatus : uint8_t {
+    DELETE_PARTITION_READY_FOR_CONFIRMATION = 0,
+    DELETE_PARTITION_SUCCESS,
+    DELETE_PARTITION_OPERATION_BUSY,
+    DELETE_PARTITION_INVALID_REQUEST,
+    DELETE_PARTITION_DEVICE_MISSING,
+    DELETE_PARTITION_REGISTRY_CHANGED,
+    DELETE_PARTITION_IDENTITY_CHANGED,
+    DELETE_PARTITION_INVALID_GEOMETRY,
+    DELETE_PARTITION_READ_UNAVAILABLE,
+    DELETE_PARTITION_WRITE_UNAVAILABLE,
+    DELETE_PARTITION_READ_ONLY,
+    DELETE_PARTITION_DURABILITY_UNKNOWN,
+    DELETE_PARTITION_FLUSH_UNAVAILABLE,
+    DELETE_PARTITION_MOUNTED,
+    DELETE_PARTITION_MOUNT_STATE_UNKNOWN,
+    DELETE_PARTITION_ROOT_BACKING,
+    DELETE_PARTITION_BOOT_BACKING,
+    DELETE_PARTITION_BOOT_IDENTITY_UNKNOWN,
+    DELETE_PARTITION_INVALID_TABLE,
+    DELETE_PARTITION_GPT_DEGRADED,
+    DELETE_PARTITION_UNSUPPORTED_SCHEME,
+    DELETE_PARTITION_STALE_SELECTION,
+    DELETE_PARTITION_OPERATION_OWNERSHIP_INVALID,
+    DELETE_PARTITION_IO_FAILED,
+    DELETE_PARTITION_FLUSH_FAILED,
+    DELETE_PARTITION_VERIFICATION_FAILED,
+    DELETE_PARTITION_RESCAN_FAILED,
+    DELETE_PARTITION_ROLLBACK_FAILED,
+};
+
+enum DeletePartitionStage : uint8_t {
+    DELETE_PARTITION_STAGE_IDLE = 0,
+    DELETE_PARTITION_STAGE_ACQUIRE_LEASE,
+    DELETE_PARTITION_STAGE_PIN_TARGET,
+    DELETE_PARTITION_STAGE_PREFLIGHT,
+    DELETE_PARTITION_STAGE_WAITING_FOR_CONFIRMATION,
+    DELETE_PARTITION_STAGE_REVALIDATING,
+    DELETE_PARTITION_STAGE_SNAPSHOT,
+    DELETE_PARTITION_STAGE_PREPARE_METADATA,
+    DELETE_PARTITION_STAGE_WRITE_BACKUP_GPT,
+    DELETE_PARTITION_STAGE_VERIFY_BACKUP_GPT,
+    DELETE_PARTITION_STAGE_WRITE_PRIMARY_GPT,
+    DELETE_PARTITION_STAGE_WRITE_MBR,
+    DELETE_PARTITION_STAGE_FLUSH,
+    DELETE_PARTITION_STAGE_VERIFY,
+    DELETE_PARTITION_STAGE_RESCAN,
+    DELETE_PARTITION_STAGE_ROLLBACK_WRITE,
+    DELETE_PARTITION_STAGE_ROLLBACK_FLUSH,
+    DELETE_PARTITION_STAGE_ROLLBACK_VERIFY,
+    DELETE_PARTITION_STAGE_COMPLETED,
+    DELETE_PARTITION_STAGE_FAILED,
+    DELETE_PARTITION_STAGE_STATE_UNCERTAIN,
+};
+
+enum DeletePartitionWriteStage : uint32_t {
+    DELETE_PARTITION_WRITE_BACKUP_ARRAY = 1u << 0,
+    DELETE_PARTITION_WRITE_BACKUP_HEADER = 1u << 1,
+    DELETE_PARTITION_WRITE_PRIMARY_ARRAY = 1u << 2,
+    DELETE_PARTITION_WRITE_PRIMARY_HEADER = 1u << 3,
+    DELETE_PARTITION_WRITE_MBR_ENTRY = 1u << 4,
+};
+
+struct DeletePartitionRequest {
+    TargetIdentity targetSnapshot;
+    PartitionScheme partitionScheme;
+    PartitionEntry partitionSnapshot;
+    uint64_t expectedRegistryGeneration;
+};
+
+struct DeletePartitionPlan {
+    StorageOperationLease lease;
+    TargetIdentity targetSnapshot;
+    PartitionScheme partitionScheme;
+    PartitionEntry partitionSnapshot;
+    uint64_t expectedRegistryGeneration;
+    DiskState parserState;
+    uint16_t partitionCount;
+    uint16_t tableEntryCount;
+    uint32_t gptEntrySize;
+    uint32_t gptEntryArraySectors;
+    uint64_t primaryGptEntryArrayLba;
+    uint64_t backupGptEntryArrayLba;
+    uint64_t firstUsableLba;
+    uint64_t lastUsableLba;
+    uint32_t primaryGptHeaderCrc32;
+    uint32_t backupGptHeaderCrc32;
+    uint32_t primaryGptEntryArrayCrc32;
+    uint32_t backupGptEntryArrayCrc32;
+    uint32_t mbrTableCrc32;
+    uint32_t mbrDiskSignature;
+    uint8_t primaryDiskGuid[16];
+    uint8_t backupDiskGuid[16];
+    bool confirmationReady;
+};
+
+static const uint8_t DELETE_PARTITION_MAX_WRITE_RANGES = 16;
+
+struct DeletePartitionWriteRange {
+    uint64_t startLba;
+    uint32_t sectorCount;
+};
+
+struct DeletePartitionResult {
+    DeletePartitionStatus status;
+    DeletePartitionStatus failureStatus;
+    DeletePartitionStage stage;
+    DeletePartitionStage lastStage;
+    DeletePartitionStage firstFailedStage;
+    TargetIdentity targetIdentity;
+    PartitionScheme partitionScheme;
+    PartitionEntry deletedPartition;
+    uint32_t logicalSectorsRead;
+    uint32_t logicalSectorsWritten;
+    DeletePartitionWriteRange writeRanges[DELETE_PARTITION_MAX_WRITE_RANGES];
+    uint8_t writeRangeCount;
+    uint32_t writeStagesCompleted;
+    bool writeMayHaveReachedMedia;
+    bool failedBeforeWrite;
+    bool blockStatusValid;
+    block::Status blockStatus;
+    block::OperationKind failedOperation;
+    block::OperationDiagnostic failedBlockDiagnostic;
+    bool flushAttempted;
+    uint32_t flushAttempts;
+    block::FlushOutcome flushOutcome;
+    block::Status flushStatus;
+    bool verificationPassed;
+    DiskState finalDetectedState;
+    uint16_t finalPartitionCount;
+    uint16_t finalUnallocatedRegionCount;
+    bool rollbackAttempted;
+    bool rollbackSucceeded;
+    bool rollbackWriteAttempted;
+    block::Status rollbackWriteStatus;
+    bool rollbackFlushAttempted;
+    block::FlushOutcome rollbackFlushOutcome;
+    block::Status rollbackFlushStatus;
+    bool rollbackVerificationPassed;
+    bool finalStateUncertain;
+    char diagnostic[128];
+};
+
+DeletePartitionStatus probe_delete_partition(
+    const TargetIdentity& target, PartitionScheme scheme,
+    const PartitionEntry& partition, DeletePartitionResult& result);
+DeletePartitionStatus prepare_delete_partition(
+    const DeletePartitionRequest& request, DeletePartitionPlan& plan,
+    DeletePartitionResult& result);
+DeletePartitionStatus execute_delete_partition(
+    DeletePartitionPlan& plan, DeletePartitionResult& result);
+bool cancel_delete_partition(DeletePartitionPlan& plan);
+const char* delete_partition_status_name(DeletePartitionStatus status);
+const char* delete_partition_stage_name(DeletePartitionStage stage);
+
 } // namespace storage
 } // namespace kernel
 

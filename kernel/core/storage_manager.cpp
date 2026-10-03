@@ -30,6 +30,20 @@ static uint32_t read_u32(const uint8_t* p)
         (static_cast<uint32_t>(p[3]) << 24);
 }
 
+static uint64_t read_u64(const uint8_t* p)
+{
+    return static_cast<uint64_t>(read_u32(p)) |
+        (static_cast<uint64_t>(read_u32(p + 4)) << 32);
+}
+
+static bool bytes_equal(const uint8_t* left, const uint8_t* right,
+                        size_t length)
+{
+    for (size_t i = 0; i < length; ++i)
+        if (left[i] != right[i]) return false;
+    return true;
+}
+
 static const uint8_t* find_device_path_node(uint8_t type, uint8_t subtype,
                                            uint16_t minLength)
 {
@@ -459,6 +473,78 @@ MountProtection query_mount_protection(const TargetIdentity& target)
     return result;
 }
 
+static bool partition_identity_from_entry(const TargetIdentity& target,
+                                          PartitionScheme scheme,
+                                          const PartitionEntry& partition,
+                                          block::PartitionIdentity& identity)
+{
+    identity = {};
+    if (target.registrationId == 0 || partition.partitionNumber == 0 ||
+        partition.isGpt != (scheme == PARTITION_SCHEME_GPT) ||
+        (scheme != PARTITION_SCHEME_GPT && scheme != PARTITION_SCHEME_MBR) ||
+        partition.sectorCount == 0 || partition.startLba > partition.endLba ||
+        partition.endLba - partition.startLba + 1 != partition.sectorCount)
+        return false;
+    identity.valid = true;
+    identity.scheme = scheme;
+    identity.parentDeviceIndex = target.globalIndex;
+    identity.parentRegistrationId = target.registrationId;
+    identity.parentRegistryGeneration = target.registryGeneration;
+    identity.partitionNumber = partition.partitionNumber;
+    identity.mbrType = partition.mbrType;
+    if (scheme == PARTITION_SCHEME_GPT)
+        for (uint8_t i = 0; i < 16; ++i)
+            identity.uniqueGuid[i] = partition.uniqueGuid[i];
+    identity.startLba = partition.startLba;
+    identity.endLba = partition.endLba;
+    identity.sectorCount = partition.sectorCount;
+    return true;
+}
+
+MountProtection query_partition_mount_protection(
+    const TargetIdentity& target, PartitionScheme scheme,
+    const PartitionEntry& partition)
+{
+    MountProtection result = {DEVICE_IDENTITY_UNKNOWN, false};
+    if (revalidate_target_identity(target) != TARGET_VALID) return result;
+    block::PartitionIdentity selectedIdentity = {};
+    if (!partition_identity_from_entry(target, scheme, partition,
+                                       selectedIdentity)) return result;
+
+    result.safety = DEVICE_UNMOUNTED;
+    result.partitionIdentityKnown = true;
+    for (uint8_t i = 0; i < vfs::VFS_MAX_MOUNTS; ++i) {
+        const vfs::MountPoint* mount = vfs::get_mount_by_index(i);
+        if (!mount || !mount->active ||
+            mount->blockDevIndex != target.globalIndex ||
+            mount->parentRegistrationId != target.registrationId)
+            continue;
+
+        if (!mount->partitionMount) {
+            result.safety = is_root_path(mount->path)
+                ? DEVICE_ROOT_BACKING : DEVICE_MOUNTED;
+            result.partitionIdentityKnown = false;
+            break;
+        }
+        if (!mount->partitionIdentity.valid || !vfs::mount_identity_valid(i)) {
+            result.safety = DEVICE_IDENTITY_UNKNOWN;
+            result.partitionIdentityKnown = false;
+            break;
+        }
+        if (!block::same_partition_identity(mount->partitionIdentity,
+                                             selectedIdentity))
+            continue;
+        result.safety = is_root_path(mount->path)
+            ? DEVICE_ROOT_BACKING : DEVICE_MOUNTED;
+        break;
+    }
+    if (revalidate_target_identity(target) != TARGET_VALID) {
+        result.safety = DEVICE_IDENTITY_UNKNOWN;
+        result.partitionIdentityKnown = false;
+    }
+    return result;
+}
+
 BootProtection query_boot_protection(const TargetIdentity& target)
 {
     BootProtection result;
@@ -479,6 +565,86 @@ BootProtection query_boot_protection(const TargetIdentity& target)
             result.safety = BOOT_DEVICE_IDENTITY_UNKNOWN;
             break;
     }
+    if (revalidate_target_identity(target) != TARGET_VALID)
+        result.safety = BOOT_DEVICE_IDENTITY_UNKNOWN;
+    return result;
+}
+
+static bool same_partition_target(const PartitionEntry& left,
+                                  const PartitionEntry& right)
+{
+    if (left.partitionNumber != right.partitionNumber ||
+        left.isGpt != right.isGpt || left.startLba != right.startLba ||
+        left.endLba != right.endLba || left.sectorCount != right.sectorCount)
+        return false;
+    if (left.isGpt)
+        return bytes_equal(left.uniqueGuid, right.uniqueGuid, 16);
+    return left.mbrType == right.mbrType;
+}
+
+BootProtection query_partition_boot_protection(
+    const TargetIdentity& target, PartitionScheme scheme,
+    const PartitionEntry& partition, const PartitionTableModel& table)
+{
+    BootProtection result = {BOOT_DEVICE_IDENTITY_UNKNOWN};
+    if (revalidate_target_identity(target) != TARGET_VALID)
+        return result;
+    const BootProtection diskProtection = query_boot_protection(target);
+    if (diskProtection.safety != BOOT_DEVICE_IS_TARGET) return diskProtection;
+
+    // A transport match proves only the parent disk. Narrow it only when the
+    // firmware path has one complete HD media node that maps to exactly one
+    // entry in the still-valid table.
+    if (!s_bootSourceValid ||
+        table.state != (scheme == PARTITION_SCHEME_GPT
+            ? DISK_STATE_VALID_GPT : DISK_STATE_VALID_MBR) ||
+        table.scheme != scheme || table.hybridMbr ||
+        table.extendedPartitionsPresent ||
+        (scheme == PARTITION_SCHEME_GPT &&
+         (!table.primaryGptValid || !table.backupGptValid ||
+          !table.gptCopiesAgree))) return result;
+
+    const uint8_t* hardDrive = nullptr;
+    uint8_t hardDriveCount = 0;
+    uint32_t offset = 0;
+    while (offset < s_bootSource.DevicePathLength) {
+        const uint8_t* node = s_bootSource.DevicePath + offset;
+        const uint16_t length = read_u16(node + 2);
+        if (node[0] == 0x04u && node[1] == 0x01u) {
+            ++hardDriveCount;
+            hardDrive = node;
+            if (length != 42u) return result;
+        }
+        offset += length;
+    }
+    if (hardDriveCount != 1 || !hardDrive) return result;
+
+    const uint32_t partitionNumber = read_u32(hardDrive + 4);
+    const uint64_t startLba = read_u64(hardDrive + 8);
+    const uint64_t sectorCount = read_u64(hardDrive + 16);
+    const uint8_t signatureType = hardDrive[41];
+    PartitionEntry firmwarePartition = {};
+    uint16_t matches = 0;
+    for (uint16_t i = 0; i < table.partitionCount; ++i) {
+        const PartitionEntry& candidate = table.partitions[i];
+        if (candidate.partitionNumber != partitionNumber ||
+            candidate.startLba != startLba ||
+            candidate.sectorCount != sectorCount) continue;
+        if (scheme == PARTITION_SCHEME_GPT) {
+            if (signatureType != 2 ||
+                !bytes_equal(candidate.uniqueGuid, hardDrive + 24, 16))
+                continue;
+        } else {
+            if (signatureType != 1 ||
+                table.mbrDiskSignature != read_u32(hardDrive + 24))
+                continue;
+        }
+        firmwarePartition = candidate;
+        ++matches;
+    }
+    if (matches != 1) return result;
+    result.safety = same_partition_target(partition, firmwarePartition)
+        ? BOOT_DEVICE_IS_TARGET : BOOT_DEVICE_DEFINITELY_NOT_TARGET;
     if (revalidate_target_identity(target) != TARGET_VALID)
         result.safety = BOOT_DEVICE_IDENTITY_UNKNOWN;
     return result;

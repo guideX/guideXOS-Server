@@ -1445,6 +1445,1147 @@ CreatePartitionStatus create_partition(const CreatePartitionRequest& request,
     return result.status;
 }
 
+namespace {
+
+static const uint32_t DELETE_GPT_HEADER_CRC_OFFSET = 16;
+static const uint32_t DELETE_GPT_ARRAY_CRC_OFFSET = 88;
+static const uint32_t DELETE_GPT_MIN_HEADER_SIZE = 92;
+static const uint32_t DELETE_MBR_TABLE_OFFSET = 446;
+static const uint32_t DELETE_MBR_ENTRY_BYTES = 16;
+static const uint8_t DELETE_MAX_ENTRY_SECTORS = 2;
+
+struct DeleteMetadataSnapshot {
+    bool valid;
+    bool isGpt;
+    uint32_t sectorSize;
+    uint32_t arrayBytes;
+    uint32_t arraySectors;
+    uint32_t entrySize;
+    uint16_t entryCount;
+    uint16_t slot;
+    uint8_t touchedSectorCount;
+    uint64_t primaryHeaderLba;
+    uint64_t backupHeaderLba;
+    uint64_t primaryArrayLba[DELETE_MAX_ENTRY_SECTORS];
+    uint64_t backupArrayLba[DELETE_MAX_ENTRY_SECTORS];
+    uint8_t mbr[MAX_LOGICAL_SECTOR_SIZE];
+    uint8_t primaryHeader[MAX_LOGICAL_SECTOR_SIZE];
+    uint8_t backupHeader[MAX_LOGICAL_SECTOR_SIZE];
+    uint8_t primarySectors[DELETE_MAX_ENTRY_SECTORS][MAX_LOGICAL_SECTOR_SIZE];
+    uint8_t backupSectors[DELETE_MAX_ENTRY_SECTORS][MAX_LOGICAL_SECTOR_SIZE];
+};
+
+alignas(4096) static uint8_t s_deleteMbr[MAX_LOGICAL_SECTOR_SIZE];
+alignas(4096) static uint8_t s_deleteNewMbr[MAX_LOGICAL_SECTOR_SIZE];
+alignas(4096) static uint8_t s_deletePrimaryArray[GPT_MAX_ARRAY_BYTES];
+alignas(4096) static uint8_t s_deleteBackupArray[GPT_MAX_ARRAY_BYTES];
+alignas(4096) static uint8_t s_deleteNewPrimaryArray[GPT_MAX_ARRAY_BYTES];
+alignas(4096) static uint8_t s_deleteNewBackupArray[GPT_MAX_ARRAY_BYTES];
+alignas(4096) static uint8_t s_deleteNewPrimaryHeader[MAX_LOGICAL_SECTOR_SIZE];
+alignas(4096) static uint8_t s_deleteNewBackupHeader[MAX_LOGICAL_SECTOR_SIZE];
+alignas(4096) static PartitionTableModel s_deleteTable;
+alignas(4096) static PartitionTableModel s_deleteVerifiedTable;
+static DeleteMetadataSnapshot s_deleteSnapshot;
+static DeletePartitionPlan s_deletePreparedPlan;
+static bool s_deletePlanValid;
+
+static void reset_delete_result(DeletePartitionResult& result)
+{
+    clear_bytes(&result, sizeof(result));
+    result.status = DELETE_PARTITION_INVALID_REQUEST;
+    result.failureStatus = DELETE_PARTITION_INVALID_REQUEST;
+    result.stage = DELETE_PARTITION_STAGE_IDLE;
+    result.finalDetectedState = DISK_STATE_UNREADABLE;
+    result.failedBeforeWrite = true;
+    result.blockStatus = block::BLOCK_ERR_INVALID;
+    result.failedOperation = block::OPERATION_NONE;
+    result.flushOutcome = block::FLUSH_OUTCOME_INVALID;
+    result.flushStatus = block::BLOCK_ERR_INVALID;
+    result.rollbackWriteStatus = block::BLOCK_ERR_INVALID;
+    result.rollbackFlushOutcome = block::FLUSH_OUTCOME_INVALID;
+    result.rollbackFlushStatus = block::BLOCK_ERR_INVALID;
+}
+
+static void set_delete_diagnostic(DeletePartitionResult& result,
+                                  const char* message)
+{
+    size_t i = 0;
+    if (message) {
+        while (message[i] && i + 1 < sizeof(result.diagnostic)) {
+            result.diagnostic[i] = message[i];
+            ++i;
+        }
+    }
+    result.diagnostic[i] = '\0';
+}
+
+static DeletePartitionStatus delete_map_identity(RevalidationStatus status)
+{
+    switch (status) {
+        case TARGET_REGISTRY_CHANGED: return DELETE_PARTITION_REGISTRY_CHANGED;
+        case TARGET_DEVICE_MISSING: return DELETE_PARTITION_DEVICE_MISSING;
+        case TARGET_IDENTITY_MISMATCH: return DELETE_PARTITION_IDENTITY_CHANGED;
+        case TARGET_VALID: default: return DELETE_PARTITION_SUCCESS;
+    }
+}
+
+static bool delete_entry_equal(const PartitionEntry& left,
+                               const PartitionEntry& right)
+{
+    return entry_matches(left, right);
+}
+
+static const PartitionEntry* find_delete_entry(const PartitionTableModel& table,
+                                               const PartitionEntry& wanted)
+{
+    for (uint16_t i = 0; i < table.partitionCount; ++i)
+        if (delete_entry_equal(table.partitions[i], wanted))
+            return &table.partitions[i];
+    return nullptr;
+}
+
+static uint32_t mbr_table_fingerprint(const uint8_t* sector)
+{
+    return crc32(sector + 440, 72);
+}
+
+static void capture_delete_fingerprint(const PartitionTableModel& table,
+                                      DeletePartitionPlan& plan,
+                                      const uint8_t* mbrSector)
+{
+    plan.parserState = table.state;
+    plan.partitionCount = table.partitionCount;
+    plan.tableEntryCount = table.tableEntryCount;
+    plan.gptEntrySize = table.gptEntrySize;
+    plan.gptEntryArraySectors = table.gptEntryArraySectors;
+    plan.primaryGptEntryArrayLba = table.primaryGptEntryArrayLba;
+    plan.backupGptEntryArrayLba = table.backupGptEntryArrayLba;
+    plan.firstUsableLba = table.firstUsableLba;
+    plan.lastUsableLba = table.lastUsableLba;
+    plan.primaryGptHeaderCrc32 = table.primaryGptHeaderCrc32;
+    plan.backupGptHeaderCrc32 = table.backupGptHeaderCrc32;
+    plan.primaryGptEntryArrayCrc32 = table.primaryGptEntryArrayCrc32;
+    plan.backupGptEntryArrayCrc32 = table.backupGptEntryArrayCrc32;
+    plan.mbrTableCrc32 = mbrSector ? mbr_table_fingerprint(mbrSector) : 0;
+    plan.mbrDiskSignature = table.mbrDiskSignature;
+    copy_bytes(plan.primaryDiskGuid, table.primaryDiskGuid, 16);
+    copy_bytes(plan.backupDiskGuid, table.backupDiskGuid, 16);
+}
+
+static bool delete_fingerprint_matches(const DeletePartitionPlan& plan,
+                                       const PartitionTableModel& table,
+                                       const uint8_t* mbrSector)
+{
+    if (plan.parserState != table.state ||
+        plan.partitionCount != table.partitionCount ||
+        plan.tableEntryCount != table.tableEntryCount ||
+        plan.mbrDiskSignature != table.mbrDiskSignature) return false;
+    if (plan.partitionScheme == PARTITION_SCHEME_MBR)
+        return mbrSector && plan.mbrTableCrc32 ==
+            mbr_table_fingerprint(mbrSector);
+    return plan.gptEntrySize == table.gptEntrySize &&
+        plan.gptEntryArraySectors == table.gptEntryArraySectors &&
+        plan.primaryGptEntryArrayLba == table.primaryGptEntryArrayLba &&
+        plan.backupGptEntryArrayLba == table.backupGptEntryArrayLba &&
+        plan.firstUsableLba == table.firstUsableLba &&
+        plan.lastUsableLba == table.lastUsableLba &&
+        plan.primaryGptHeaderCrc32 == table.primaryGptHeaderCrc32 &&
+        plan.backupGptHeaderCrc32 == table.backupGptHeaderCrc32 &&
+        plan.primaryGptEntryArrayCrc32 == table.primaryGptEntryArrayCrc32 &&
+        plan.backupGptEntryArrayCrc32 == table.backupGptEntryArrayCrc32 &&
+        guid_equal(plan.primaryDiskGuid, table.primaryDiskGuid) &&
+        guid_equal(plan.backupDiskGuid, table.backupDiskGuid);
+}
+
+static DeletePartitionStatus validate_delete_target(
+    const TargetIdentity& target, PartitionScheme scheme,
+    const PartitionEntry& selected, const StorageOperationLease& lease,
+    PartitionTableModel& table, DeletePartitionResult& result)
+{
+    if (!storage_operation_lease_is_current(lease))
+        return DELETE_PARTITION_OPERATION_OWNERSHIP_INVALID;
+    const RevalidationStatus identity = revalidate_target_identity(target);
+    if (identity != TARGET_VALID) return delete_map_identity(identity);
+    DeviceCapabilities caps;
+    if (!query_device_capabilities(target.globalIndex, caps))
+        return DELETE_PARTITION_DEVICE_MISSING;
+    if (!caps.geometryValid || !caps.capacityValid ||
+        (caps.logicalSectorSize != 512 && caps.logicalSectorSize != 4096))
+        return DELETE_PARTITION_INVALID_GEOMETRY;
+    if (!caps.readable) return DELETE_PARTITION_READ_UNAVAILABLE;
+    if (!caps.writable) return DELETE_PARTITION_READ_ONLY;
+    if (caps.maxTransferBytes != 0 &&
+        caps.maxTransferBytes < caps.logicalSectorSize)
+        return DELETE_PARTITION_WRITE_UNAVAILABLE;
+    if (caps.persistence == PERSISTENCE_FLUSH_REQUIRED) {
+        if (!caps.flushSupported || !caps.flushSemanticsKnown)
+            return DELETE_PARTITION_FLUSH_UNAVAILABLE;
+    } else if (caps.persistence != PERSISTENCE_SYNCHRONOUS_DURABLE) {
+        return DELETE_PARTITION_DURABILITY_UNKNOWN;
+    }
+    if (caps.requiredBufferAlignment > MAX_LOGICAL_SECTOR_SIZE ||
+        (caps.requiredBufferAlignment > 1 &&
+         (caps.requiredBufferAlignment &
+          (caps.requiredBufferAlignment - 1)) != 0))
+        return DELETE_PARTITION_INVALID_GEOMETRY;
+
+    if (!parse_partition_table(target.globalIndex, table) ||
+        table.state == DISK_STATE_UNREADABLE)
+        return DELETE_PARTITION_READ_UNAVAILABLE;
+    if (table.state == DISK_STATE_GPT_DEGRADED)
+        return DELETE_PARTITION_GPT_DEGRADED;
+    if (table.state == DISK_STATE_INVALID_PARTITION_TABLE)
+        return DELETE_PARTITION_INVALID_TABLE;
+    if (table.state == DISK_STATE_UNSUPPORTED_PARTITION_SCHEME ||
+        table.scheme == PARTITION_SCHEME_UNSUPPORTED || table.hybridMbr ||
+        table.extendedPartitionsPresent)
+        return DELETE_PARTITION_UNSUPPORTED_SCHEME;
+    if (scheme != PARTITION_SCHEME_GPT && scheme != PARTITION_SCHEME_MBR)
+        return DELETE_PARTITION_UNSUPPORTED_SCHEME;
+    if (table.scheme != scheme ||
+        table.state != (scheme == PARTITION_SCHEME_GPT
+            ? DISK_STATE_VALID_GPT : DISK_STATE_VALID_MBR))
+        return DELETE_PARTITION_UNSUPPORTED_SCHEME;
+    if (scheme == PARTITION_SCHEME_GPT &&
+        (!table.primaryGptValid || !table.backupGptValid ||
+         !table.gptCopiesAgree || table.primaryGptEntryArrayLba == 0 ||
+         table.backupGptEntryArrayLba == 0 || table.gptEntrySize < 128 ||
+         table.gptEntrySize > GPT_MAX_ENTRY_SIZE ||
+         (table.gptEntrySize & 7u) != 0 || table.tableEntryCount == 0 ||
+         table.tableEntryCount > MAX_PARSED_PARTITIONS))
+        return DELETE_PARTITION_INVALID_TABLE;
+    if (!find_delete_entry(table, selected))
+        return DELETE_PARTITION_STALE_SELECTION;
+
+    const MountProtection mount = query_partition_mount_protection(
+        target, scheme, selected);
+    if (mount.safety == DEVICE_ROOT_BACKING)
+        return result.status = DELETE_PARTITION_ROOT_BACKING;
+    if (mount.safety == DEVICE_MOUNTED)
+        return DELETE_PARTITION_MOUNTED;
+    if (mount.safety != DEVICE_UNMOUNTED)
+        return DELETE_PARTITION_MOUNT_STATE_UNKNOWN;
+
+    const BootProtection boot = query_partition_boot_protection(
+        target, scheme, selected, table);
+    if (boot.safety == BOOT_DEVICE_IS_TARGET)
+        return DELETE_PARTITION_BOOT_BACKING;
+    if (boot.safety != BOOT_DEVICE_DEFINITELY_NOT_TARGET)
+        return DELETE_PARTITION_BOOT_IDENTITY_UNKNOWN;
+    if (revalidate_target_identity(target) != TARGET_VALID)
+        return delete_map_identity(revalidate_target_identity(target));
+    result.finalDetectedState = table.state;
+    result.finalPartitionCount = table.partitionCount;
+    return DELETE_PARTITION_READY_FOR_CONFIRMATION;
+}
+
+static bool same_delete_plan(const DeletePartitionPlan& left,
+                             const DeletePartitionPlan& right)
+{
+    return left.lease.ownerToken == right.lease.ownerToken &&
+        left.lease.targetPinned == right.lease.targetPinned &&
+        left.lease.pinnedIndex == right.lease.pinnedIndex &&
+        left.lease.pinnedRegistrationId == right.lease.pinnedRegistrationId &&
+        target_identities_equal(left.targetSnapshot, right.targetSnapshot) &&
+        left.partitionScheme == right.partitionScheme &&
+        delete_entry_equal(left.partitionSnapshot, right.partitionSnapshot) &&
+        left.expectedRegistryGeneration == right.expectedRegistryGeneration &&
+        left.parserState == right.parserState &&
+        left.partitionCount == right.partitionCount &&
+        left.tableEntryCount == right.tableEntryCount &&
+        left.gptEntrySize == right.gptEntrySize &&
+        left.gptEntryArraySectors == right.gptEntryArraySectors &&
+        left.primaryGptEntryArrayLba == right.primaryGptEntryArrayLba &&
+        left.backupGptEntryArrayLba == right.backupGptEntryArrayLba &&
+        left.firstUsableLba == right.firstUsableLba &&
+        left.lastUsableLba == right.lastUsableLba &&
+        left.primaryGptHeaderCrc32 == right.primaryGptHeaderCrc32 &&
+        left.backupGptHeaderCrc32 == right.backupGptHeaderCrc32 &&
+        left.primaryGptEntryArrayCrc32 == right.primaryGptEntryArrayCrc32 &&
+        left.backupGptEntryArrayCrc32 == right.backupGptEntryArrayCrc32 &&
+        left.mbrTableCrc32 == right.mbrTableCrc32 &&
+        left.mbrDiskSignature == right.mbrDiskSignature &&
+        guid_equal(left.primaryDiskGuid, right.primaryDiskGuid) &&
+        guid_equal(left.backupDiskGuid, right.backupDiskGuid) &&
+        left.confirmationReady == right.confirmationReady;
+}
+
+static bool capture_delete_snapshot(const TargetIdentity& target,
+                                    const PartitionTableModel& table,
+                                    uint32_t sectorSize,
+                                    DeletePartitionResult& result)
+{
+    clear_bytes(&s_deleteSnapshot, sizeof(s_deleteSnapshot));
+    s_deleteSnapshot.isGpt = table.scheme == PARTITION_SCHEME_GPT;
+    s_deleteSnapshot.sectorSize = sectorSize;
+    if (!s_deleteSnapshot.isGpt) {
+        if (!read_region(target.globalIndex, 0, 1, sectorSize,
+                         s_deleteSnapshot.mbr)) return false;
+        ++result.logicalSectorsRead;
+        s_deleteSnapshot.valid = true;
+        return true;
+    }
+
+    const uint64_t bytes64 = static_cast<uint64_t>(table.tableEntryCount) *
+        table.gptEntrySize;
+    const uint64_t padded64 = static_cast<uint64_t>(table.gptEntryArraySectors) *
+        sectorSize;
+    if (bytes64 == 0 || bytes64 > GPT_MAX_ARRAY_BYTES ||
+        padded64 > GPT_MAX_ARRAY_BYTES || bytes64 > padded64 ||
+        !table.partitionCount) return false;
+    s_deleteSnapshot.arrayBytes = static_cast<uint32_t>(bytes64);
+    s_deleteSnapshot.arraySectors = table.gptEntryArraySectors;
+    s_deleteSnapshot.entrySize = table.gptEntrySize;
+    s_deleteSnapshot.entryCount = table.tableEntryCount;
+    s_deleteSnapshot.primaryHeaderLba = 1;
+    s_deleteSnapshot.backupHeaderLba = target.totalLogicalSectors - 1;
+    if (!read_region(target.globalIndex, 1, 1, sectorSize,
+                     s_deleteSnapshot.primaryHeader) ||
+        !read_region(target.globalIndex, s_deleteSnapshot.backupHeaderLba,
+                     1, sectorSize, s_deleteSnapshot.backupHeader) ||
+        !read_region(target.globalIndex, table.primaryGptEntryArrayLba,
+                     table.gptEntryArraySectors, sectorSize,
+                     s_deletePrimaryArray) ||
+        !read_region(target.globalIndex, table.backupGptEntryArrayLba,
+                     table.gptEntryArraySectors, sectorSize,
+                     s_deleteBackupArray)) return false;
+    result.logicalSectorsRead += 2 + 2 * table.gptEntryArraySectors;
+    if (!bytes_equal(s_deletePrimaryArray, s_deleteBackupArray,
+                     s_deleteSnapshot.arrayBytes)) return false;
+
+    const PartitionEntry* selected = find_delete_entry(table,
+                                                        s_deletePreparedPlan.partitionSnapshot);
+    if (!selected || selected->partitionNumber == 0) return false;
+    const uint64_t entryStart =
+        static_cast<uint64_t>(selected->partitionNumber - 1) * table.gptEntrySize;
+    const uint64_t entryEnd = entryStart + table.gptEntrySize - 1;
+    const uint64_t firstSector = entryStart / sectorSize;
+    const uint64_t lastSector = entryEnd / sectorSize;
+    if (lastSector < firstSector || lastSector - firstSector + 1 >
+            DELETE_MAX_ENTRY_SECTORS || lastSector >= table.gptEntryArraySectors)
+        return false;
+    s_deleteSnapshot.slot = static_cast<uint16_t>(selected->partitionNumber - 1);
+    s_deleteSnapshot.touchedSectorCount =
+        static_cast<uint8_t>(lastSector - firstSector + 1);
+    for (uint8_t i = 0; i < s_deleteSnapshot.touchedSectorCount; ++i) {
+        s_deleteSnapshot.primaryArrayLba[i] =
+            table.primaryGptEntryArrayLba + firstSector + i;
+        s_deleteSnapshot.backupArrayLba[i] =
+            table.backupGptEntryArrayLba + firstSector + i;
+        copy_bytes(s_deleteSnapshot.primarySectors[i],
+            s_deletePrimaryArray + static_cast<size_t>(firstSector + i) * sectorSize,
+            sectorSize);
+        copy_bytes(s_deleteSnapshot.backupSectors[i],
+            s_deleteBackupArray + static_cast<size_t>(firstSector + i) * sectorSize,
+            sectorSize);
+    }
+    s_deleteSnapshot.valid = true;
+    return true;
+}
+
+static void prepare_delete_gpt(const PartitionTableModel& table,
+                               uint32_t sectorSize)
+{
+    const size_t padded = static_cast<size_t>(table.gptEntryArraySectors) *
+        sectorSize;
+    copy_bytes(s_deleteNewPrimaryArray, s_deletePrimaryArray, padded);
+    copy_bytes(s_deleteNewBackupArray, s_deleteBackupArray, padded);
+    uint8_t* primaryEntry = s_deleteNewPrimaryArray +
+        static_cast<size_t>(s_deleteSnapshot.slot) * s_deleteSnapshot.entrySize;
+    uint8_t* backupEntry = s_deleteNewBackupArray +
+        static_cast<size_t>(s_deleteSnapshot.slot) * s_deleteSnapshot.entrySize;
+    clear_bytes(primaryEntry, s_deleteSnapshot.entrySize);
+    clear_bytes(backupEntry, s_deleteSnapshot.entrySize);
+
+    copy_bytes(s_deleteNewPrimaryHeader, s_deleteSnapshot.primaryHeader,
+               sectorSize);
+    copy_bytes(s_deleteNewBackupHeader, s_deleteSnapshot.backupHeader,
+               sectorSize);
+    const uint32_t primarySize = read_u32(s_deleteNewPrimaryHeader + 12);
+    const uint32_t backupSize = read_u32(s_deleteNewBackupHeader + 12);
+    if (primarySize < DELETE_GPT_MIN_HEADER_SIZE || primarySize > sectorSize ||
+        backupSize < DELETE_GPT_MIN_HEADER_SIZE || backupSize > sectorSize) {
+        s_deleteSnapshot.valid = false;
+        return;
+    }
+    const uint32_t arrayCrc = crc32(s_deleteNewPrimaryArray,
+                                    s_deleteSnapshot.arrayBytes);
+    write_u32(s_deleteNewPrimaryHeader + DELETE_GPT_ARRAY_CRC_OFFSET, arrayCrc);
+    write_u32(s_deleteNewBackupHeader + DELETE_GPT_ARRAY_CRC_OFFSET, arrayCrc);
+    write_u32(s_deleteNewPrimaryHeader + DELETE_GPT_HEADER_CRC_OFFSET, 0);
+    write_u32(s_deleteNewBackupHeader + DELETE_GPT_HEADER_CRC_OFFSET, 0);
+    write_u32(s_deleteNewPrimaryHeader + DELETE_GPT_HEADER_CRC_OFFSET,
+              crc32(s_deleteNewPrimaryHeader, primarySize));
+    write_u32(s_deleteNewBackupHeader + DELETE_GPT_HEADER_CRC_OFFSET,
+              crc32(s_deleteNewBackupHeader, backupSize));
+}
+
+static void record_delete_write(DeletePartitionResult& result, uint64_t lba)
+{
+    if (result.writeRangeCount < DELETE_PARTITION_MAX_WRITE_RANGES) {
+        DeletePartitionWriteRange& range =
+            result.writeRanges[result.writeRangeCount++];
+        range.startLba = lba;
+        range.sectorCount = 1;
+    }
+    if (result.logicalSectorsWritten != UINT32_MAX)
+        ++result.logicalSectorsWritten;
+}
+
+static bool delete_write_sector(const TargetIdentity& target, uint64_t lba,
+                                const uint8_t* bytes,
+                                DeletePartitionResult& result,
+                                bool rollback)
+{
+    if (revalidate_target_identity(target) != TARGET_VALID) return false;
+    copy_bytes(s_ioSector, bytes, s_deleteSnapshot.sectorSize);
+    result.writeMayHaveReachedMedia = true;
+    record_delete_write(result, lba);
+    const block::Status status = write_sectors_safe(target.globalIndex, lba,
+        1, s_ioSector, s_deleteSnapshot.sectorSize);
+    if (status != block::BLOCK_OK) {
+        if (!rollback) {
+            result.failedOperation = block::OPERATION_WRITE;
+            if (block::last_operation_diagnostic(result.failedBlockDiagnostic)) {
+                result.blockStatusValid = true;
+                result.blockStatus = result.failedBlockDiagnostic.status;
+            }
+        } else {
+            result.rollbackWriteStatus = status;
+        }
+        return false;
+    }
+    if (rollback) {
+        result.rollbackWriteAttempted = true;
+        result.rollbackWriteStatus = block::BLOCK_OK;
+    }
+    return true;
+}
+
+static bool delete_flush(uint8_t device, DeletePartitionResult& result,
+                         bool rollback)
+{
+    const block::FlushReport report = block::flush_with_result(device);
+    if (rollback) {
+        result.rollbackFlushAttempted = true;
+        result.rollbackFlushOutcome = report.outcome;
+        result.rollbackFlushStatus = report.status;
+    } else {
+        result.flushAttempted = true;
+        ++result.flushAttempts;
+        result.flushOutcome = report.outcome;
+        result.flushStatus = report.status;
+    }
+    return trusted_flush(report);
+}
+
+static bool delete_read_sector(const TargetIdentity& target, uint64_t lba,
+                               uint8_t* bytes,
+                               DeletePartitionResult& result)
+{
+    if (read_logical_sector(target.globalIndex, lba, bytes,
+            s_deleteSnapshot.sectorSize) != block::BLOCK_OK) return false;
+    if (result.logicalSectorsRead != UINT32_MAX) ++result.logicalSectorsRead;
+    return true;
+}
+
+static bool verify_delete_gpt_copy(const TargetIdentity& target,
+                                   bool backup,
+                                   DeletePartitionResult& result)
+{
+    const uint32_t sectorSize = s_deleteSnapshot.sectorSize;
+    const uint64_t arrayLba = backup
+        ? s_deletePreparedPlan.backupGptEntryArrayLba
+        : s_deletePreparedPlan.primaryGptEntryArrayLba;
+    const uint8_t* expectedArray = backup ? s_deleteNewBackupArray
+                                           : s_deleteNewPrimaryArray;
+    const uint8_t* expectedHeader = backup ? s_deleteNewBackupHeader
+                                            : s_deleteNewPrimaryHeader;
+    uint8_t* actualArray = backup ? s_deleteBackupArray : s_deletePrimaryArray;
+    uint8_t* actualHeader = s_ioSector;
+    if (!read_region(target.globalIndex, arrayLba,
+            s_deleteSnapshot.arraySectors, sectorSize, actualArray) ||
+        !delete_read_sector(target, backup ? s_deleteSnapshot.backupHeaderLba
+                                           : s_deleteSnapshot.primaryHeaderLba,
+                           actualHeader, result)) return false;
+    result.logicalSectorsRead += s_deleteSnapshot.arraySectors;
+    const size_t padded = static_cast<size_t>(s_deleteSnapshot.arraySectors) *
+        sectorSize;
+    return bytes_equal(actualArray, expectedArray, padded) &&
+        bytes_equal(actualHeader, expectedHeader, sectorSize);
+}
+
+static bool old_delete_entries_unchanged(const PartitionTableModel& before,
+                                         const PartitionTableModel& after,
+                                         const PartitionEntry& deleted)
+{
+    bool foundDeleted = false;
+    for (uint16_t i = 0; i < before.partitionCount; ++i) {
+        const PartitionEntry& original = before.partitions[i];
+        if (delete_entry_equal(original, deleted)) {
+            foundDeleted = true;
+            continue;
+        }
+        bool found = false;
+        for (uint16_t j = 0; j < after.partitionCount; ++j) {
+            if (after.partitions[j].partitionNumber != original.partitionNumber)
+                continue;
+            found = entry_matches(original, after.partitions[j]);
+            break;
+        }
+        if (!found) return false;
+    }
+    return foundDeleted;
+}
+
+static bool delete_partition_absent(const PartitionTableModel& table,
+                                    const PartitionEntry& deleted)
+{
+    for (uint16_t i = 0; i < table.partitionCount; ++i)
+        if (delete_entry_equal(table.partitions[i], deleted)) return false;
+    return true;
+}
+
+static bool verify_delete_gpt_all(const TargetIdentity& target,
+                                  const PartitionTableModel& before,
+                                  DeletePartitionResult& result)
+{
+    if (!verify_delete_gpt_copy(target, false, result) ||
+        !verify_delete_gpt_copy(target, true, result)) return false;
+    if (!parse_partition_table(target.globalIndex, s_deleteVerifiedTable) ||
+        s_deleteVerifiedTable.state != DISK_STATE_VALID_GPT ||
+        !s_deleteVerifiedTable.primaryGptValid ||
+        !s_deleteVerifiedTable.backupGptValid ||
+        !s_deleteVerifiedTable.gptCopiesAgree ||
+        s_deleteVerifiedTable.partitionCount + 1 != before.partitionCount ||
+        s_deleteVerifiedTable.tableEntryCount != before.tableEntryCount ||
+        s_deleteVerifiedTable.gptEntrySize != before.gptEntrySize ||
+        s_deleteVerifiedTable.gptEntryArraySectors != before.gptEntryArraySectors ||
+        s_deleteVerifiedTable.primaryGptEntryArrayLba !=
+            before.primaryGptEntryArrayLba ||
+        s_deleteVerifiedTable.backupGptEntryArrayLba !=
+            before.backupGptEntryArrayLba ||
+        s_deleteVerifiedTable.firstUsableLba != before.firstUsableLba ||
+        s_deleteVerifiedTable.lastUsableLba != before.lastUsableLba ||
+        !guid_equal(s_deleteVerifiedTable.primaryDiskGuid,
+                    before.primaryDiskGuid) ||
+        !guid_equal(s_deleteVerifiedTable.backupDiskGuid,
+                    before.backupDiskGuid) ||
+        !old_delete_entries_unchanged(before, s_deleteVerifiedTable,
+                                      s_deletePreparedPlan.partitionSnapshot) ||
+        !delete_partition_absent(s_deleteVerifiedTable,
+                                 s_deletePreparedPlan.partitionSnapshot))
+        return false;
+    return true;
+}
+
+static bool verify_delete_mbr(const TargetIdentity& target,
+                              const PartitionTableModel& before,
+                              DeletePartitionResult& result)
+{
+    if (!delete_read_sector(target, 0, s_ioSector, result)) return false;
+    const uint32_t entryOffset = DELETE_MBR_TABLE_OFFSET +
+        static_cast<uint32_t>(s_deletePreparedPlan.partitionSnapshot.partitionNumber - 1) *
+        DELETE_MBR_ENTRY_BYTES;
+    for (uint32_t i = 0; i < s_deleteSnapshot.sectorSize; ++i) {
+        if (i >= entryOffset && i < entryOffset + DELETE_MBR_ENTRY_BYTES) {
+            if (s_ioSector[i] != 0) return false;
+        } else if (s_ioSector[i] != s_deleteSnapshot.mbr[i]) {
+            return false;
+        }
+    }
+    if (s_ioSector[510] != 0x55 || s_ioSector[511] != 0xAA ||
+        !parse_partition_table(target.globalIndex, s_deleteVerifiedTable) ||
+        s_deleteVerifiedTable.state != DISK_STATE_VALID_MBR ||
+        s_deleteVerifiedTable.mbrDiskSignature != before.mbrDiskSignature ||
+        s_deleteVerifiedTable.partitionCount + 1 != before.partitionCount ||
+        !old_delete_entries_unchanged(before, s_deleteVerifiedTable,
+                                      s_deletePreparedPlan.partitionSnapshot) ||
+        !delete_partition_absent(s_deleteVerifiedTable,
+                                 s_deletePreparedPlan.partitionSnapshot))
+        return false;
+    return true;
+}
+
+static bool verify_delete_snapshot(const TargetIdentity& target,
+                                   DeletePartitionResult& result)
+{
+    if (!s_deleteSnapshot.valid ||
+        revalidate_target_identity(target) != TARGET_VALID) return false;
+    if (!s_deleteSnapshot.isGpt) {
+        if (!delete_read_sector(target, 0, s_ioSector, result)) return false;
+        if (!bytes_equal(s_ioSector, s_deleteSnapshot.mbr,
+                         s_deleteSnapshot.sectorSize)) return false;
+    } else {
+        if (!delete_read_sector(target, s_deleteSnapshot.primaryHeaderLba,
+                s_ioSector, result) ||
+            !bytes_equal(s_ioSector, s_deleteSnapshot.primaryHeader,
+                         s_deleteSnapshot.sectorSize)) return false;
+        if (!delete_read_sector(target, s_deleteSnapshot.backupHeaderLba,
+                s_ioSector, result) ||
+            !bytes_equal(s_ioSector, s_deleteSnapshot.backupHeader,
+                         s_deleteSnapshot.sectorSize)) return false;
+        for (uint8_t i = 0; i < s_deleteSnapshot.touchedSectorCount; ++i) {
+            if (!delete_read_sector(target, s_deleteSnapshot.primaryArrayLba[i],
+                    s_ioSector, result) ||
+                !bytes_equal(s_ioSector, s_deleteSnapshot.primarySectors[i],
+                             s_deleteSnapshot.sectorSize)) return false;
+            if (!delete_read_sector(target, s_deleteSnapshot.backupArrayLba[i],
+                    s_ioSector, result) ||
+                !bytes_equal(s_ioSector, s_deleteSnapshot.backupSectors[i],
+                             s_deleteSnapshot.sectorSize)) return false;
+        }
+    }
+    return true;
+}
+
+static bool rollback_delete(const TargetIdentity& target,
+                            const PartitionTableModel& before,
+                            DeletePartitionResult& result)
+{
+    if (!result.writeMayHaveReachedMedia || !s_deleteSnapshot.valid ||
+        revalidate_target_identity(target) != TARGET_VALID) return false;
+    result.rollbackAttempted = true;
+    bool restored = true;
+    if (!s_deleteSnapshot.isGpt) {
+        result.stage = DELETE_PARTITION_STAGE_ROLLBACK_WRITE;
+        restored = delete_write_sector(target, 0, s_deleteSnapshot.mbr,
+                                       result, true);
+    } else {
+        result.stage = DELETE_PARTITION_STAGE_ROLLBACK_WRITE;
+        // Restore the backup copy first so a still-valid primary copy remains
+        // available while its peer is returned to the original generation.
+        for (uint8_t i = 0; i < s_deleteSnapshot.touchedSectorCount; ++i)
+            restored = delete_write_sector(target,
+                s_deleteSnapshot.backupArrayLba[i],
+                s_deleteSnapshot.backupSectors[i], result, true) && restored;
+        restored = delete_write_sector(target, s_deleteSnapshot.backupHeaderLba,
+            s_deleteSnapshot.backupHeader, result, true) && restored;
+        for (uint8_t i = 0; i < s_deleteSnapshot.touchedSectorCount; ++i)
+            restored = delete_write_sector(target,
+                s_deleteSnapshot.primaryArrayLba[i],
+                s_deleteSnapshot.primarySectors[i], result, true) && restored;
+        restored = delete_write_sector(target, s_deleteSnapshot.primaryHeaderLba,
+            s_deleteSnapshot.primaryHeader, result, true) && restored;
+    }
+    if (!restored || revalidate_target_identity(target) != TARGET_VALID)
+        return false;
+    result.stage = DELETE_PARTITION_STAGE_ROLLBACK_FLUSH;
+    if (!delete_flush(target.globalIndex, result, true)) return false;
+    result.stage = DELETE_PARTITION_STAGE_ROLLBACK_VERIFY;
+    if (!verify_delete_snapshot(target, result) ||
+        !parse_partition_table(target.globalIndex, s_deleteVerifiedTable) ||
+        s_deleteVerifiedTable.state != before.state ||
+        s_deleteVerifiedTable.partitionCount != before.partitionCount ||
+        !old_entries_unchanged(before, s_deleteVerifiedTable)) return false;
+    result.rollbackVerificationPassed = true;
+    result.finalDetectedState = s_deleteVerifiedTable.state;
+    result.finalPartitionCount = s_deleteVerifiedTable.partitionCount;
+    result.rollbackSucceeded = true;
+    return true;
+}
+
+static void fail_delete(StorageOperationLease& lease,
+                        const TargetIdentity& target,
+                        const PartitionTableModel& before,
+                        DeletePartitionResult& result,
+                        DeletePartitionStatus status)
+{
+    result.lastStage = result.stage;
+    result.firstFailedStage = result.firstFailedStage == DELETE_PARTITION_STAGE_IDLE
+        ? result.stage : result.firstFailedStage;
+    result.failureStatus = status;
+    result.status = status;
+    result.stage = DELETE_PARTITION_STAGE_FAILED;
+    result.failedBeforeWrite = !result.writeMayHaveReachedMedia;
+    set_delete_diagnostic(result, delete_partition_status_name(status));
+    if (result.writeMayHaveReachedMedia) {
+        result.rollbackSucceeded = rollback_delete(target, before, result);
+        if (!result.rollbackSucceeded) {
+            result.finalStateUncertain = true;
+            result.status = DELETE_PARTITION_ROLLBACK_FAILED;
+            result.stage = DELETE_PARTITION_STAGE_STATE_UNCERTAIN;
+            set_delete_diagnostic(result,
+                "Deletion failed and metadata rollback could not be verified; inspect the disk before use.");
+        }
+    }
+    if (revalidate_target_identity(target) != TARGET_VALID &&
+        result.writeMayHaveReachedMedia) {
+        result.finalStateUncertain = true;
+        result.status = DELETE_PARTITION_ROLLBACK_FAILED;
+        result.stage = DELETE_PARTITION_STAGE_STATE_UNCERTAIN;
+        set_delete_diagnostic(result,
+            "Disk identity changed during deletion; state is uncertain and replacement media was not written.");
+    }
+    complete_storage_operation_execution(lease);
+    clear_bytes(&s_deleteSnapshot, sizeof(s_deleteSnapshot));
+    s_deletePlanValid = false;
+    clear_bytes(&s_deletePreparedPlan, sizeof(s_deletePreparedPlan));
+}
+
+static bool delete_plan_snapshot_current(const DeletePartitionPlan& plan,
+                                         const PartitionTableModel& table,
+                                         DeletePartitionResult& result)
+{
+    uint8_t* mbr = nullptr;
+    if (plan.partitionScheme == PARTITION_SCHEME_MBR) {
+        if (read_logical_sector(plan.targetSnapshot.globalIndex, 0, s_deleteMbr,
+                plan.targetSnapshot.logicalSectorSize) != block::BLOCK_OK)
+            return false;
+        if (result.logicalSectorsRead != UINT32_MAX) ++result.logicalSectorsRead;
+        mbr = s_deleteMbr;
+    }
+    return delete_fingerprint_matches(plan, table, mbr);
+}
+
+static bool delete_snapshot_matches_media(const TargetIdentity& target,
+                                          DeletePartitionResult& result)
+{
+    if (!s_deleteSnapshot.valid || revalidate_target_identity(target) != TARGET_VALID)
+        return false;
+    if (!s_deleteSnapshot.isGpt) {
+        if (!delete_read_sector(target, 0, s_ioSector, result)) return false;
+        return bytes_equal(s_ioSector, s_deleteSnapshot.mbr,
+                           s_deleteSnapshot.sectorSize);
+    }
+    if (!delete_read_sector(target, s_deleteSnapshot.primaryHeaderLba,
+            s_ioSector, result) ||
+        !bytes_equal(s_ioSector, s_deleteSnapshot.primaryHeader,
+                     s_deleteSnapshot.sectorSize) ||
+        !delete_read_sector(target, s_deleteSnapshot.backupHeaderLba,
+            s_ioSector, result) ||
+        !bytes_equal(s_ioSector, s_deleteSnapshot.backupHeader,
+                     s_deleteSnapshot.sectorSize)) return false;
+    for (uint32_t i = 0; i < s_deleteSnapshot.arraySectors; ++i) {
+        if (!delete_read_sector(target,
+                s_deletePreparedPlan.primaryGptEntryArrayLba + i,
+                s_ioSector, result) ||
+            !bytes_equal(s_ioSector,
+                s_deletePrimaryArray + static_cast<size_t>(i) *
+                    s_deleteSnapshot.sectorSize,
+                s_deleteSnapshot.sectorSize)) return false;
+        if (!delete_read_sector(target,
+                s_deletePreparedPlan.backupGptEntryArrayLba + i,
+                s_ioSector, result) ||
+            !bytes_equal(s_ioSector,
+                s_deleteBackupArray + static_cast<size_t>(i) *
+                    s_deleteSnapshot.sectorSize,
+                s_deleteSnapshot.sectorSize)) return false;
+    }
+    return true;
+}
+
+} // namespace
+
+DeletePartitionStatus probe_delete_partition(
+    const TargetIdentity& target, PartitionScheme scheme,
+    const PartitionEntry& partition, DeletePartitionResult& result)
+{
+    reset_delete_result(result);
+    result.targetIdentity = target;
+    result.partitionScheme = scheme;
+    result.deletedPartition = partition;
+    StorageOperationLease lease = {};
+    const StorageOperationLockStatus lock = try_acquire_storage_operation(lease);
+    if (lock != STORAGE_OPERATION_LOCK_ACQUIRED) {
+        result.status = lock == STORAGE_OPERATION_LOCK_BUSY
+            ? DELETE_PARTITION_OPERATION_BUSY
+            : DELETE_PARTITION_OPERATION_OWNERSHIP_INVALID;
+        return result.status;
+    }
+    if (!pin_storage_operation_target(lease, target)) {
+        result.status = delete_map_identity(revalidate_target_identity(target));
+        if (result.status == DELETE_PARTITION_SUCCESS)
+            result.status = DELETE_PARTITION_IDENTITY_CHANGED;
+        release_storage_operation(lease);
+        return result.status;
+    }
+    const DeletePartitionStatus status = validate_delete_target(target, scheme,
+        partition, lease, s_deleteTable, result);
+    result.status = status;
+    release_storage_operation(lease);
+    return status;
+}
+
+DeletePartitionStatus prepare_delete_partition(
+    const DeletePartitionRequest& request, DeletePartitionPlan& plan,
+    DeletePartitionResult& result)
+{
+    reset_delete_result(result);
+    clear_bytes(&plan, sizeof(plan));
+    result.targetIdentity = request.targetSnapshot;
+    result.partitionScheme = request.partitionScheme;
+    result.deletedPartition = request.partitionSnapshot;
+    if (request.targetSnapshot.registrationId == 0 ||
+        request.expectedRegistryGeneration !=
+            request.targetSnapshot.registryGeneration ||
+        request.partitionSnapshot.partitionNumber == 0 ||
+        request.partitionSnapshot.sectorCount == 0 ||
+        (request.partitionScheme != PARTITION_SCHEME_GPT &&
+         request.partitionScheme != PARTITION_SCHEME_MBR)) {
+        result.status = DELETE_PARTITION_INVALID_REQUEST;
+        return result.status;
+    }
+    const StorageOperationLockStatus lock = try_acquire_storage_operation(plan.lease);
+    if (lock != STORAGE_OPERATION_LOCK_ACQUIRED) {
+        result.status = lock == STORAGE_OPERATION_LOCK_BUSY
+            ? DELETE_PARTITION_OPERATION_BUSY
+            : DELETE_PARTITION_OPERATION_OWNERSHIP_INVALID;
+        return result.status;
+    }
+    result.stage = DELETE_PARTITION_STAGE_PIN_TARGET;
+    if (!pin_storage_operation_target(plan.lease, request.targetSnapshot)) {
+        result.status = delete_map_identity(
+            revalidate_target_identity(request.targetSnapshot));
+        if (result.status == DELETE_PARTITION_SUCCESS)
+            result.status = DELETE_PARTITION_IDENTITY_CHANGED;
+        release_storage_operation(plan.lease);
+        return result.status;
+    }
+    result.stage = DELETE_PARTITION_STAGE_PREFLIGHT;
+    DeletePartitionStatus status = validate_delete_target(
+        request.targetSnapshot, request.partitionScheme,
+        request.partitionSnapshot, plan.lease, s_deleteTable, result);
+    if (status != DELETE_PARTITION_READY_FOR_CONFIRMATION) {
+        result.status = status;
+        release_storage_operation(plan.lease);
+        return status;
+    }
+    plan.targetSnapshot = request.targetSnapshot;
+    plan.partitionScheme = request.partitionScheme;
+    plan.partitionSnapshot = *find_delete_entry(s_deleteTable,
+                                                request.partitionSnapshot);
+    plan.expectedRegistryGeneration = request.expectedRegistryGeneration;
+    result.stage = DELETE_PARTITION_STAGE_SNAPSHOT;
+    if (request.partitionScheme == PARTITION_SCHEME_MBR) {
+        DeviceCapabilities caps;
+        if (!query_device_capabilities(request.targetSnapshot.globalIndex, caps) ||
+            read_logical_sector(request.targetSnapshot.globalIndex, 0, s_deleteMbr,
+                caps.logicalSectorSize) != block::BLOCK_OK) {
+            result.status = DELETE_PARTITION_READ_UNAVAILABLE;
+            release_storage_operation(plan.lease);
+            return result.status;
+        }
+        if (result.logicalSectorsRead != UINT32_MAX) ++result.logicalSectorsRead;
+    }
+    capture_delete_fingerprint(s_deleteTable, plan,
+        request.partitionScheme == PARTITION_SCHEME_MBR ? s_deleteMbr : nullptr);
+    plan.confirmationReady = true;
+    result.stage = DELETE_PARTITION_STAGE_WAITING_FOR_CONFIRMATION;
+    result.status = DELETE_PARTITION_READY_FOR_CONFIRMATION;
+    set_delete_diagnostic(result,
+        "Exact partition identity is current; explicit confirmation is required.");
+    s_deletePreparedPlan = plan;
+    s_deletePlanValid = true;
+    return result.status;
+}
+
+bool cancel_delete_partition(DeletePartitionPlan& plan)
+{
+    if (!s_deletePlanValid || !same_delete_plan(plan, s_deletePreparedPlan))
+        return false;
+    const bool released = release_storage_operation(plan.lease);
+    if (released) {
+        clear_bytes(&s_deletePreparedPlan, sizeof(s_deletePreparedPlan));
+        s_deletePlanValid = false;
+    }
+    clear_bytes(&plan, sizeof(plan));
+    return released;
+}
+
+DeletePartitionStatus execute_delete_partition(DeletePartitionPlan& plan,
+                                                DeletePartitionResult& result)
+{
+    reset_delete_result(result);
+    result.targetIdentity = plan.targetSnapshot;
+    result.partitionScheme = plan.partitionScheme;
+    result.deletedPartition = plan.partitionSnapshot;
+    if (!plan.confirmationReady || !s_deletePlanValid ||
+        !same_delete_plan(plan, s_deletePreparedPlan) ||
+        !storage_operation_lease_is_current(plan.lease)) {
+        result.status = DELETE_PARTITION_OPERATION_OWNERSHIP_INVALID;
+        result.failureStatus = result.status;
+        return result.status;
+    }
+    if (!begin_storage_operation_execution(plan.lease)) {
+        result.status = DELETE_PARTITION_OPERATION_OWNERSHIP_INVALID;
+        result.failureStatus = result.status;
+        return result.status;
+    }
+    result.stage = DELETE_PARTITION_STAGE_REVALIDATING;
+    DeletePartitionStatus status = validate_delete_target(plan.targetSnapshot,
+        plan.partitionScheme, plan.partitionSnapshot, plan.lease,
+        s_deleteTable, result);
+    if (status != DELETE_PARTITION_READY_FOR_CONFIRMATION) {
+        result.stage = DELETE_PARTITION_STAGE_FAILED;
+        result.status = status;
+        result.failureStatus = status;
+        set_delete_diagnostic(result, delete_partition_status_name(status));
+        complete_storage_operation_execution(plan.lease);
+        s_deletePlanValid = false;
+        clear_bytes(&s_deletePreparedPlan, sizeof(s_deletePreparedPlan));
+        clear_bytes(&plan, sizeof(plan));
+        return result.status;
+    }
+    DeviceCapabilities caps;
+    if (!query_device_capabilities(plan.targetSnapshot.globalIndex, caps) ||
+        revalidate_target_identity(plan.targetSnapshot) != TARGET_VALID) {
+        fail_delete(plan.lease, plan.targetSnapshot, s_deleteTable, result,
+            DELETE_PARTITION_IDENTITY_CHANGED);
+        clear_bytes(&plan, sizeof(plan));
+        return result.status;
+    }
+    result.stage = DELETE_PARTITION_STAGE_REVALIDATING;
+    if (!delete_plan_snapshot_current(plan, s_deleteTable, result)) {
+        fail_delete(plan.lease, plan.targetSnapshot, s_deleteTable, result,
+            DELETE_PARTITION_STALE_SELECTION);
+        clear_bytes(&plan, sizeof(plan));
+        return result.status;
+    }
+    if (plan.partitionScheme == PARTITION_SCHEME_MBR &&
+        !delete_fingerprint_matches(plan, s_deleteTable, s_deleteMbr)) {
+        fail_delete(plan.lease, plan.targetSnapshot, s_deleteTable, result,
+            DELETE_PARTITION_STALE_SELECTION);
+        clear_bytes(&plan, sizeof(plan));
+        return result.status;
+    }
+    s_deletePreparedPlan = plan;
+    s_originalTable = s_deleteTable;
+    result.stage = DELETE_PARTITION_STAGE_SNAPSHOT;
+    if (!capture_delete_snapshot(plan.targetSnapshot, s_deleteTable,
+            caps.logicalSectorSize, result)) {
+        fail_delete(plan.lease, plan.targetSnapshot, s_deleteTable, result,
+            DELETE_PARTITION_READ_UNAVAILABLE);
+        clear_bytes(&plan, sizeof(plan));
+        return result.status;
+    }
+    if (plan.partitionScheme == PARTITION_SCHEME_GPT) {
+        result.stage = DELETE_PARTITION_STAGE_PREPARE_METADATA;
+        prepare_delete_gpt(s_deleteTable, caps.logicalSectorSize);
+        if (!s_deleteSnapshot.valid) {
+            fail_delete(plan.lease, plan.targetSnapshot, s_deleteTable, result,
+                DELETE_PARTITION_INVALID_TABLE);
+            clear_bytes(&plan, sizeof(plan));
+            return result.status;
+        }
+    } else {
+        const uint32_t entryOffset = DELETE_MBR_TABLE_OFFSET +
+            static_cast<uint32_t>(plan.partitionSnapshot.partitionNumber - 1) *
+            DELETE_MBR_ENTRY_BYTES;
+        copy_bytes(s_deleteNewMbr, s_deleteSnapshot.mbr, caps.logicalSectorSize);
+        clear_bytes(s_deleteNewMbr + entryOffset, DELETE_MBR_ENTRY_BYTES);
+    }
+
+    result.stage = DELETE_PARTITION_STAGE_FLUSH;
+    if (!delete_flush(plan.targetSnapshot.globalIndex, result, false)) {
+        fail_delete(plan.lease, plan.targetSnapshot, s_deleteTable, result,
+            DELETE_PARTITION_FLUSH_FAILED);
+        clear_bytes(&plan, sizeof(plan));
+        return result.status;
+    }
+    status = validate_delete_target(plan.targetSnapshot, plan.partitionScheme,
+        plan.partitionSnapshot, plan.lease, s_deleteTable, result);
+    if (status != DELETE_PARTITION_READY_FOR_CONFIRMATION ||
+        !delete_plan_snapshot_current(plan, s_deleteTable, result) ||
+        !delete_snapshot_matches_media(plan.targetSnapshot, result)) {
+        if (status == DELETE_PARTITION_READY_FOR_CONFIRMATION)
+            status = revalidate_target_identity(plan.targetSnapshot) == TARGET_VALID
+                ? DELETE_PARTITION_STALE_SELECTION
+                : delete_map_identity(revalidate_target_identity(plan.targetSnapshot));
+        fail_delete(plan.lease, plan.targetSnapshot, s_originalTable, result, status);
+        clear_bytes(&plan, sizeof(plan));
+        return result.status;
+    }
+
+    if (plan.partitionScheme == PARTITION_SCHEME_GPT) {
+        result.stage = DELETE_PARTITION_STAGE_WRITE_BACKUP_GPT;
+        const uint32_t sectorSize = caps.logicalSectorSize;
+        const uint64_t entryStart = static_cast<uint64_t>(
+            plan.partitionSnapshot.partitionNumber - 1) * s_deleteSnapshot.entrySize;
+        const uint64_t firstSector = entryStart / sectorSize;
+        for (uint8_t i = 0; i < s_deleteSnapshot.touchedSectorCount; ++i) {
+            if (!delete_write_sector(plan.targetSnapshot,
+                    s_deleteSnapshot.backupArrayLba[i],
+                    s_deleteNewBackupArray +
+                        static_cast<size_t>(firstSector + i) * sectorSize,
+                    result, false)) {
+                fail_delete(plan.lease, plan.targetSnapshot, s_deleteTable,
+                    result, DELETE_PARTITION_IO_FAILED);
+                clear_bytes(&plan, sizeof(plan));
+                return result.status;
+            }
+        }
+        result.writeStagesCompleted |= DELETE_PARTITION_WRITE_BACKUP_ARRAY;
+        if (!delete_write_sector(plan.targetSnapshot,
+                s_deleteSnapshot.backupHeaderLba, s_deleteNewBackupHeader,
+                result, false) ||
+            !delete_flush(plan.targetSnapshot.globalIndex, result, false)) {
+            fail_delete(plan.lease, plan.targetSnapshot, s_deleteTable, result,
+                DELETE_PARTITION_FLUSH_FAILED);
+            clear_bytes(&plan, sizeof(plan));
+            return result.status;
+        }
+        result.writeStagesCompleted |= DELETE_PARTITION_WRITE_BACKUP_HEADER;
+        result.stage = DELETE_PARTITION_STAGE_VERIFY_BACKUP_GPT;
+        if (!verify_delete_gpt_copy(plan.targetSnapshot, true, result)) {
+            fail_delete(plan.lease, plan.targetSnapshot, s_deleteTable, result,
+                DELETE_PARTITION_VERIFICATION_FAILED);
+            clear_bytes(&plan, sizeof(plan));
+            return result.status;
+        }
+
+        result.stage = DELETE_PARTITION_STAGE_WRITE_PRIMARY_GPT;
+        for (uint8_t i = 0; i < s_deleteSnapshot.touchedSectorCount; ++i) {
+            if (!delete_write_sector(plan.targetSnapshot,
+                    s_deleteSnapshot.primaryArrayLba[i],
+                    s_deleteNewPrimaryArray +
+                        static_cast<size_t>(firstSector + i) * sectorSize,
+                    result, false)) {
+                fail_delete(plan.lease, plan.targetSnapshot, s_deleteTable,
+                    result, DELETE_PARTITION_IO_FAILED);
+                clear_bytes(&plan, sizeof(plan));
+                return result.status;
+            }
+        }
+        result.writeStagesCompleted |= DELETE_PARTITION_WRITE_PRIMARY_ARRAY;
+        if (!delete_write_sector(plan.targetSnapshot,
+                s_deleteSnapshot.primaryHeaderLba, s_deleteNewPrimaryHeader,
+                result, false) ||
+            !delete_flush(plan.targetSnapshot.globalIndex, result, false)) {
+            fail_delete(plan.lease, plan.targetSnapshot, s_deleteTable, result,
+                DELETE_PARTITION_FLUSH_FAILED);
+            clear_bytes(&plan, sizeof(plan));
+            return result.status;
+        }
+        result.writeStagesCompleted |= DELETE_PARTITION_WRITE_PRIMARY_HEADER;
+        result.stage = DELETE_PARTITION_STAGE_VERIFY;
+        if (!verify_delete_gpt_all(plan.targetSnapshot, s_deleteTable, result)) {
+            fail_delete(plan.lease, plan.targetSnapshot, s_deleteTable, result,
+                DELETE_PARTITION_VERIFICATION_FAILED);
+            clear_bytes(&plan, sizeof(plan));
+            return result.status;
+        }
+    } else {
+        result.stage = DELETE_PARTITION_STAGE_WRITE_MBR;
+        if (!delete_write_sector(plan.targetSnapshot, 0, s_deleteNewMbr,
+                                 result, false)) {
+            fail_delete(plan.lease, plan.targetSnapshot, s_deleteTable, result,
+                DELETE_PARTITION_IO_FAILED);
+            clear_bytes(&plan, sizeof(plan));
+            return result.status;
+        }
+        result.writeStagesCompleted |= DELETE_PARTITION_WRITE_MBR_ENTRY;
+        result.stage = DELETE_PARTITION_STAGE_FLUSH;
+        if (!delete_flush(plan.targetSnapshot.globalIndex, result, false)) {
+            fail_delete(plan.lease, plan.targetSnapshot, s_deleteTable, result,
+                DELETE_PARTITION_FLUSH_FAILED);
+            clear_bytes(&plan, sizeof(plan));
+            return result.status;
+        }
+        result.stage = DELETE_PARTITION_STAGE_VERIFY;
+        if (!verify_delete_mbr(plan.targetSnapshot, s_deleteTable, result)) {
+            fail_delete(plan.lease, plan.targetSnapshot, s_deleteTable, result,
+                DELETE_PARTITION_VERIFICATION_FAILED);
+            clear_bytes(&plan, sizeof(plan));
+            return result.status;
+        }
+    }
+
+    result.verificationPassed = true;
+    result.stage = DELETE_PARTITION_STAGE_RESCAN;
+    if (!parse_partition_table(plan.targetSnapshot.globalIndex,
+            s_deleteTable) ||
+        s_deleteTable.state != (plan.partitionScheme == PARTITION_SCHEME_GPT
+            ? DISK_STATE_VALID_GPT : DISK_STATE_VALID_MBR) ||
+        !compute_unallocated_regions(s_deleteTable, caps.totalLogicalSectors,
+            caps.logicalSectorSize, s_regions, MAX_UNALLOCATED_REGIONS,
+            result.finalUnallocatedRegionCount) ||
+        revalidate_target_identity(plan.targetSnapshot) != TARGET_VALID) {
+        fail_delete(plan.lease, plan.targetSnapshot, s_originalTable, result,
+            DELETE_PARTITION_RESCAN_FAILED);
+        clear_bytes(&plan, sizeof(plan));
+        return result.status;
+    }
+    result.finalDetectedState = s_deleteTable.state;
+    result.finalPartitionCount = s_deleteTable.partitionCount;
+    result.status = DELETE_PARTITION_SUCCESS;
+    result.failureStatus = DELETE_PARTITION_SUCCESS;
+    result.lastStage = DELETE_PARTITION_STAGE_COMPLETED;
+    result.stage = DELETE_PARTITION_STAGE_COMPLETED;
+    result.failedBeforeWrite = false;
+    set_delete_diagnostic(result,
+        "Partition table entry removed and verified; partition data sectors were not written.");
+    complete_storage_operation_execution(plan.lease);
+    clear_bytes(&s_deleteSnapshot, sizeof(s_deleteSnapshot));
+    clear_bytes(&s_deletePreparedPlan, sizeof(s_deletePreparedPlan));
+    s_deletePlanValid = false;
+    clear_bytes(&plan, sizeof(plan));
+    return result.status;
+}
+
+const char* delete_partition_status_name(DeletePartitionStatus status)
+{
+    switch (status) {
+        case DELETE_PARTITION_READY_FOR_CONFIRMATION: return "Ready for explicit confirmation";
+        case DELETE_PARTITION_SUCCESS: return "Partition entry removed and verified";
+        case DELETE_PARTITION_OPERATION_BUSY: return "Another storage operation is active";
+        case DELETE_PARTITION_INVALID_REQUEST: return "The partition deletion request is invalid";
+        case DELETE_PARTITION_DEVICE_MISSING: return "The disk is no longer present";
+        case DELETE_PARTITION_REGISTRY_CHANGED: return "Disk registry changed; refresh and reselect";
+        case DELETE_PARTITION_IDENTITY_CHANGED: return "Disk identity changed; refresh and reselect";
+        case DELETE_PARTITION_INVALID_GEOMETRY: return "Disk geometry is invalid or unsupported";
+        case DELETE_PARTITION_READ_UNAVAILABLE: return "Disk reads are unavailable";
+        case DELETE_PARTITION_WRITE_UNAVAILABLE: return "Metadata writes are unavailable";
+        case DELETE_PARTITION_READ_ONLY: return "Disk is read-only";
+        case DELETE_PARTITION_DURABILITY_UNKNOWN: return "Durable writes are not proven for this disk";
+        case DELETE_PARTITION_FLUSH_UNAVAILABLE: return "A trusted flush is unavailable";
+        case DELETE_PARTITION_MOUNTED: return "The selected partition is mounted; unmount it first";
+        case DELETE_PARTITION_MOUNT_STATE_UNKNOWN: return "The selected partition's mount relationship is unknown";
+        case DELETE_PARTITION_ROOT_BACKING: return "The selected partition backs the root filesystem";
+        case DELETE_PARTITION_BOOT_BACKING: return "The selected partition is the boot partition";
+        case DELETE_PARTITION_BOOT_IDENTITY_UNKNOWN: return "Boot partition identity is unknown";
+        case DELETE_PARTITION_INVALID_TABLE: return "Partition table is invalid";
+        case DELETE_PARTITION_GPT_DEGRADED: return "GPT copies are degraded or disagree";
+        case DELETE_PARTITION_UNSUPPORTED_SCHEME: return "This partition-table layout is unsupported";
+        case DELETE_PARTITION_STALE_SELECTION: return "Selected partition changed; refresh and reselect";
+        case DELETE_PARTITION_OPERATION_OWNERSHIP_INVALID: return "Storage operation lease is no longer valid";
+        case DELETE_PARTITION_IO_FAILED: return "Partition metadata write failed";
+        case DELETE_PARTITION_FLUSH_FAILED: return "Partition metadata flush failed";
+        case DELETE_PARTITION_VERIFICATION_FAILED: return "Partition metadata read-back verification failed";
+        case DELETE_PARTITION_RESCAN_FAILED: return "Partition table rescan failed";
+        case DELETE_PARTITION_ROLLBACK_FAILED: return "Deletion state is uncertain; inspect the disk before use";
+        default: return "Unknown partition deletion status";
+    }
+}
+
+const char* delete_partition_stage_name(DeletePartitionStage stage)
+{
+    switch (stage) {
+        case DELETE_PARTITION_STAGE_IDLE: return "Idle";
+        case DELETE_PARTITION_STAGE_ACQUIRE_LEASE: return "Acquire lease";
+        case DELETE_PARTITION_STAGE_PIN_TARGET: return "Pin target";
+        case DELETE_PARTITION_STAGE_PREFLIGHT: return "Preflight";
+        case DELETE_PARTITION_STAGE_WAITING_FOR_CONFIRMATION: return "Waiting for confirmation";
+        case DELETE_PARTITION_STAGE_REVALIDATING: return "Revalidate exact target";
+        case DELETE_PARTITION_STAGE_SNAPSHOT: return "Snapshot partition metadata";
+        case DELETE_PARTITION_STAGE_PREPARE_METADATA: return "Prepare GPT metadata";
+        case DELETE_PARTITION_STAGE_WRITE_BACKUP_GPT: return "Write and verify backup GPT";
+        case DELETE_PARTITION_STAGE_VERIFY_BACKUP_GPT: return "Verify backup GPT";
+        case DELETE_PARTITION_STAGE_WRITE_PRIMARY_GPT: return "Write primary GPT";
+        case DELETE_PARTITION_STAGE_WRITE_MBR: return "Write MBR";
+        case DELETE_PARTITION_STAGE_FLUSH: return "Flush metadata";
+        case DELETE_PARTITION_STAGE_VERIFY: return "Read back metadata";
+        case DELETE_PARTITION_STAGE_RESCAN: return "Rescan partition table";
+        case DELETE_PARTITION_STAGE_ROLLBACK_WRITE: return "Restore metadata";
+        case DELETE_PARTITION_STAGE_ROLLBACK_FLUSH: return "Flush rollback";
+        case DELETE_PARTITION_STAGE_ROLLBACK_VERIFY: return "Verify rollback";
+        case DELETE_PARTITION_STAGE_COMPLETED: return "Completed";
+        case DELETE_PARTITION_STAGE_FAILED: return "Failed";
+        case DELETE_PARTITION_STAGE_STATE_UNCERTAIN: return "State uncertain";
+        default: return "Unknown";
+    }
+}
+
 const char* create_partition_status_name(CreatePartitionStatus status)
 {
     switch (status) {

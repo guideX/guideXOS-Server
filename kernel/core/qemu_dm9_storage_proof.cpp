@@ -29,6 +29,8 @@ namespace {
 
 #if defined(GXOS_DM24_QEMU_FAT32_4KN_PROOF)
 #define QEMU_PROOF_TAG "[DM24-QEMU]"
+#elif defined(GXOS_DM25_QEMU_PARTITION_DELETE_PROOF)
+#define QEMU_PROOF_TAG "[DM25-QEMU]"
 #elif defined(GXOS_DM22_QEMU_FAT32_PROOF)
 #define QEMU_PROOF_TAG "[DM22-QEMU]"
 #elif defined(GXOS_DM17_SINGLE_BLOCK_PROOF) || \
@@ -67,8 +69,14 @@ static storage::CreatePartitionResult s_createResult = {};
 static storage::Fat32FormatRequest s_formatRequest = {};
 static storage::Fat32FormatResult s_formatResult = {};
 static storage::PartitionEntry s_proofPartition = {};
+static storage::DeletePartitionRequest s_deleteRequest = {};
+static storage::DeletePartitionPlan s_deletePlan = {};
+static storage::DeletePartitionResult s_deleteResult = {};
+static storage::PartitionTableModel s_deleteBeforeTable = {};
 alignas(4096) static uint8_t s_proofSectorA[storage::MAX_LOGICAL_SECTOR_SIZE];
 alignas(4096) static uint8_t s_proofSectorB[storage::MAX_LOGICAL_SECTOR_SIZE];
+alignas(4096) static uint8_t s_deleteDataBefore[storage::MAX_LOGICAL_SECTOR_SIZE];
+alignas(4096) static uint8_t s_deleteDataAfter[storage::MAX_LOGICAL_SECTOR_SIZE];
 
 static bool text_equal(const char* left, const char* right)
 {
@@ -1092,9 +1100,132 @@ static bool mount_proof_partition(const storage::TargetIdentity& identity,
         vfs::mount_count() == rootMountCount;
 }
 
-static void run_rediscovery(const storage::TargetIdentity& identity,
-                             const storage::PartitionTableModel& table,
-                             uint8_t rootMountCount)
+#if defined(GXOS_DM25_QEMU_PARTITION_DELETE_PROOF)
+static bool run_delete_partition(const storage::TargetIdentity& identity,
+                                 const storage::PartitionTableModel& before,
+                                 uint8_t rootMountCount)
+{
+    s_deleteBeforeTable = before;
+    storage::PartitionEntry selected = {};
+    bool found = false;
+    for (uint16_t i = 0; i < before.partitionCount; ++i) {
+        if (!text_equal(before.partitions[i].name, kPartitionName)) continue;
+        selected = before.partitions[i];
+        found = true;
+        break;
+    }
+    if (!found || before.scheme != storage::PARTITION_SCHEME_GPT ||
+        before.state != storage::DISK_STATE_VALID_GPT ||
+        !before.primaryGptValid || !before.backupGptValid ||
+        !before.gptCopiesAgree || vfs::mount_count() != rootMountCount ||
+        block::read_sectors(identity.globalIndex, selected.startLba, 1,
+            s_deleteDataBefore) != block::BLOCK_OK) {
+        serial::puts(QEMU_PROOF_TAG " delete=FAIL reason=preflight-or-data-snapshot\n");
+        return false;
+    }
+
+    s_deleteRequest = {};
+    s_deleteRequest.targetSnapshot = identity;
+    s_deleteRequest.partitionScheme = storage::PARTITION_SCHEME_GPT;
+    s_deleteRequest.partitionSnapshot = selected;
+    s_deleteRequest.expectedRegistryGeneration = identity.registryGeneration;
+    s_deletePlan = {};
+    s_deleteResult = {};
+    const storage::DeletePartitionStatus prepared =
+        storage::prepare_delete_partition(s_deleteRequest, s_deletePlan,
+                                          s_deleteResult);
+    if (prepared != storage::DELETE_PARTITION_READY_FOR_CONFIRMATION) {
+        serial::puts(QEMU_PROOF_TAG " delete=FAIL prepare=");
+        serial::puts(storage::delete_partition_status_name(prepared));
+        serial::putc('\n');
+        return false;
+    }
+
+    const storage::DeletePartitionStatus deleted =
+        storage::execute_delete_partition(s_deletePlan, s_deleteResult);
+    serial::puts(QEMU_PROOF_TAG " delete-result status=");
+    serial::puts(storage::delete_partition_status_name(deleted));
+    serial::puts(" stage=");
+    serial::puts(storage::delete_partition_stage_name(s_deleteResult.lastStage));
+    serial::puts(" sectorsRead=");
+    serial::put_hex32(s_deleteResult.logicalSectorsRead);
+    serial::puts(" sectorsWritten=");
+    serial::put_hex32(s_deleteResult.logicalSectorsWritten);
+    serial::puts(" flushAttempts=");
+    serial::put_hex32(s_deleteResult.flushAttempts);
+    serial::puts(" flushStatus=0x");
+    serial::put_hex8(static_cast<uint8_t>(s_deleteResult.flushStatus));
+    serial::puts(" verified=");
+    serial::puts(s_deleteResult.verificationPassed ? "yes" : "no");
+    serial::puts(" rollback=");
+    serial::puts(s_deleteResult.rollbackAttempted ? "yes" : "no");
+    serial::puts(" ranges=");
+    serial::put_hex8(s_deleteResult.writeRangeCount);
+    for (uint8_t i = 0; i < s_deleteResult.writeRangeCount; ++i) {
+        serial::puts(" [");
+        serial::put_hex64(s_deleteResult.writeRanges[i].startLba);
+        serial::putc(',');
+        serial::put_hex32(s_deleteResult.writeRanges[i].sectorCount);
+        serial::putc(']');
+    }
+    serial::putc('\n');
+    if (deleted != storage::DELETE_PARTITION_SUCCESS ||
+        !s_deleteResult.verificationPassed ||
+        s_deleteResult.finalStateUncertain ||
+        s_deleteResult.rollbackAttempted ||
+        s_deleteResult.logicalSectorsWritten != 4 ||
+        s_deleteResult.writeRangeCount != 4 ||
+        s_deleteResult.flushAttempts < 3 ||
+        s_deleteResult.flushStatus != block::BLOCK_OK ||
+        block::read_sectors(identity.globalIndex, selected.startLba, 1,
+            s_deleteDataAfter) != block::BLOCK_OK ||
+        !bytes_equal(s_deleteDataBefore, s_deleteDataAfter,
+                     before.scheme == storage::PARTITION_SCHEME_GPT
+                         ? identity.logicalSectorSize : 512u) ||
+        !storage::parse_partition_table(identity.globalIndex, s_table) ||
+        s_table.state != storage::DISK_STATE_VALID_GPT ||
+        !s_table.primaryGptValid || !s_table.backupGptValid ||
+        !s_table.gptCopiesAgree ||
+        s_table.partitionCount + 1 != s_deleteBeforeTable.partitionCount ||
+        vfs::mount_count() != rootMountCount) {
+        serial::puts(QEMU_PROOF_TAG " delete=FAIL reason=write-verify-rescan-or-data-check\n");
+        return false;
+    }
+    for (uint16_t i = 0; i < s_table.partitionCount; ++i) {
+        if (bytes_equal(s_table.partitions[i].uniqueGuid,
+                selected.uniqueGuid, 16)) {
+            serial::puts(QEMU_PROOF_TAG " delete=FAIL reason=deleted-GUID-still-present\n");
+            return false;
+        }
+    }
+    storage::UnallocatedRegion gaps[storage::MAX_UNALLOCATED_REGIONS] = {};
+    uint16_t gapCount = 0;
+    if (!storage::compute_unallocated_regions(s_table,
+            identity.totalLogicalSectors, identity.logicalSectorSize, gaps,
+            storage::MAX_UNALLOCATED_REGIONS, gapCount) || gapCount == 0) {
+        serial::puts(QEMU_PROOF_TAG " delete=FAIL reason=gap-rescan\n");
+        return false;
+    }
+    for (uint8_t i = 0; i < s_deleteResult.writeRangeCount; ++i) {
+        const storage::DeletePartitionWriteRange& range =
+            s_deleteResult.writeRanges[i];
+        const uint64_t end = range.startLba + range.sectorCount - 1;
+        if (range.sectorCount == 0 ||
+            !(end < selected.startLba || range.startLba > selected.endLba)) {
+            serial::puts(QEMU_PROOF_TAG " delete=FAIL reason=metadata-write-overlapped-partition-data\n");
+            return false;
+        }
+    }
+    serial::puts(QEMU_PROOF_TAG " delete=PASS scheme=GPT entry-removed=yes copies-valid=yes data-sector-sample=unchanged gaps=");
+    serial::put_hex32(gapCount);
+    serial::puts(" independent-full-data-image-diff=pending-host-verifier\n");
+    return true;
+}
+#endif
+
+static bool run_rediscovery(const storage::TargetIdentity& identity,
+                            const storage::PartitionTableModel& table,
+                            uint8_t rootMountCount)
 {
     if (table.state != storage::DISK_STATE_VALID_GPT ||
         !table.primaryGptValid || !table.backupGptValid ||
@@ -1104,7 +1235,7 @@ static void run_rediscovery(const storage::TargetIdentity& identity,
 #else
         serial::puts(QEMU_PROOF_TAG " reboot-rediscovery=BLOCKED reason=existing-disk-is-not-a-verified-GPT\n");
 #endif
-        return;
+        return false;
     }
 
     for (uint16_t i = 0; i < table.partitionCount; ++i) {
@@ -1121,7 +1252,7 @@ static void run_rediscovery(const storage::TargetIdentity& identity,
             ? QEMU_PROOF_TAG " reboot-rediscovery=PASS explicit-remount=PASS file-bytes=PASS mounts-clean=PASS\n"
             : QEMU_PROOF_TAG " reboot-rediscovery=FAIL explicit-remount-or-file-check-failed\n");
 #endif
-        return;
+        return mountedAndRead;
     }
 
 #if defined(GXOS_DM15_QEMU_AHCI_PROOF) || defined(GXOS_DM16_QEMU_NVME_PROOF)
@@ -1129,6 +1260,7 @@ static void run_rediscovery(const storage::TargetIdentity& identity,
 #else
     serial::puts(QEMU_PROOF_TAG " reboot-rediscovery=BLOCKED reason=proof-partition-not-found\n");
 #endif
+    return false;
 }
 
 static bool run_fresh_lifecycle(const block::BlockDevice& device,
@@ -1509,6 +1641,11 @@ static bool run_fresh_lifecycle(const block::BlockDevice& device,
         ? QEMU_PROOF_TAG " lifecycle=PASS initialize=PASS create-partition=PASS format-fat32=PASS mount=PASS mkdir=PASS file-write=PASS file-read=PASS unmount=PASS remount-read=PASS mounts-clean=PASS\n"
         : QEMU_PROOF_TAG " lifecycle=FAIL mount-or-file-operation-failed\n");
 #endif
+#if defined(GXOS_DM25_QEMU_PARTITION_DELETE_PROOF)
+    serial::puts(mountAndFileIo
+        ? QEMU_PROOF_TAG " delete-ready=PASS lifecycle=verified-and-unmounted\n"
+        : QEMU_PROOF_TAG " delete-ready=FAIL lifecycle=not-verified\n");
+#endif
     return mountAndFileIo;
 }
 
@@ -1617,6 +1754,15 @@ void run(bool rootStorageMounted)
     serial::puts(storage::disk_state_name(s_table.state));
     serial::putc('\n');
 
+#if defined(GXOS_DM25_QEMU_PARTITION_DELETE_PROOF)
+    if (s_table.state == storage::DISK_STATE_VALID_GPT &&
+        s_table.primaryGptValid && s_table.backupGptValid &&
+        s_table.gptCopiesAgree && s_table.partitionCount == 0) {
+        serial::puts(QEMU_PROOF_TAG " delete-restart=PASS valid-empty-GPT=yes mounts-clean=yes\n");
+        return;
+    }
+#endif
+
 #if defined(GXOS_DM17_SINGLE_BLOCK_PROOF) && \
     defined(GXOS_DM16_NVME_PRIVATE_PROOF)
     if (s_table.state != storage::DISK_STATE_NOT_INITIALIZED) {
@@ -1661,7 +1807,14 @@ void run(bool rootStorageMounted)
         return;
     }
 
-    run_rediscovery(identity, s_table, rootMountCount);
+    const bool rediscovered = run_rediscovery(identity, s_table, rootMountCount);
+#if defined(GXOS_DM25_QEMU_PARTITION_DELETE_PROOF)
+    if (!rediscovered ||
+        !run_delete_partition(identity, s_table, rootMountCount))
+        serial::puts(QEMU_PROOF_TAG " delete=FAIL reason=rediscovery-or-transaction\n");
+#else
+    (void)rediscovered;
+#endif
 }
 
 } // namespace qemu_dm9_storage_proof

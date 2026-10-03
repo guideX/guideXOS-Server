@@ -164,7 +164,19 @@ bool target_identities_equal(const TargetIdentity& left,
 RevalidationStatus revalidate_target_identity(const TargetIdentity& snapshot);
 
 MountProtection query_mount_protection(const TargetIdentity& target);
+// Partition-scoped protection used by delete operations. A validated mount of
+// another partition on the same disk does not block this partition. Whole-disk
+// or stale/ambiguous mounts fail closed.
+MountProtection query_partition_mount_protection(
+    const TargetIdentity& target, PartitionScheme scheme,
+    const PartitionEntry& partition);
 BootProtection query_boot_protection(const TargetIdentity& target);
+// Boot provenance is disk-scoped by the transports. This narrows a known boot
+// disk to its firmware-identified partition only when the UEFI hard-drive node
+// exactly matches a validated partition in the current table.
+BootProtection query_partition_boot_protection(
+    const TargetIdentity& target, PartitionScheme scheme,
+    const PartitionEntry& partition, const PartitionTableModel& table);
 // Called before storage discovery. Invalid/missing/legacy BootInfo leaves
 // provenance unknown. The setter exists for deterministic hosted tests.
 void initialize_boot_source(const guideXOS::BootInfo* bootInfo);

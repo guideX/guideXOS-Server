@@ -13,6 +13,7 @@ static const uint32_t MBR_SIGNATURE_OFFSET = 510;
 static const uint32_t GPT_HEADER_MIN_SIZE = 92;
 
 struct GptHeader {
+    uint32_t headerCrc;
     uint32_t revision;
     uint32_t headerSize;
     uint64_t currentLba;
@@ -194,6 +195,7 @@ static bool parse_gpt_header(uint8_t deviceIndex, uint64_t lba,
     }
 
     const uint32_t expectedCrc = read_u32(sector + 16);
+    header.headerCrc = expectedCrc;
     uint32_t crc = 0xFFFFFFFFu;
     crc = crc32_update(crc, sector, 16);
     const uint8_t zeros[4] = {0,0,0,0};
@@ -530,6 +532,14 @@ bool parse_partition_table(uint8_t deviceIndex, PartitionTableModel& model)
     model.protectiveMbr = protectiveMbr;
     if (primaryValid) copy_bytes(model.primaryDiskGuid, primaryHeader.diskGuid, 16);
     if (backupValid) copy_bytes(model.backupDiskGuid, backupHeader.diskGuid, 16);
+    if (primaryValid) {
+        model.primaryGptHeaderCrc32 = primaryHeader.headerCrc;
+        model.primaryGptEntryArrayCrc32 = primaryHeader.entriesCrc;
+    }
+    if (backupValid) {
+        model.backupGptHeaderCrc32 = backupHeader.headerCrc;
+        model.backupGptEntryArrayCrc32 = backupHeader.entriesCrc;
+    }
 
     if (primaryValid || backupValid || primarySignature || backupSignature || protectiveMbr) {
         model.scheme = PARTITION_SCHEME_GPT;

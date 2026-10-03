@@ -6271,12 +6271,14 @@ static const char* disk_manager_block_status_name(kernel::block::Status status)
 DiskManagerApp::DiskManagerApp()
     : m_diskCount(0), m_selectedDisk(0), m_refreshBtnId(-1),
       m_propertiesBtnId(-1), m_diagnosticsBtnId(-1), m_initializeBtnId(-1),
+      m_deleteBtnId(-1),
       m_mountBtnId(-1), m_unmountBtnId(-1),
       m_gptBtnId(-1), m_mbrBtnId(-1),
       m_confirmInitializeBtnId(-1), m_cancelInitializeBtnId(-1),
       m_createSizeTextBoxId(-1), m_createNameTextBoxId(-1),
       m_initializeDialogState(INITIALIZE_DIALOG_CLOSED),
-      m_dialogIsCreate(false), m_dialogIsFormat(false), m_createSizeEdited(false),
+      m_dialogIsCreate(false), m_dialogIsFormat(false), m_dialogIsDelete(false),
+      m_createSizeEdited(false),
       m_createNameEdited(false), m_createInputFocus(0),
       m_initializeScheme(storage::DEFAULT_INITIALIZE_SCHEME),
       m_mountDialogOpen(false), m_mountDialogDeviceIndex(0xFF),
@@ -6292,6 +6294,9 @@ DiskManagerApp::DiskManagerApp()
     memset(&m_initializeResult, 0, sizeof(m_initializeResult));
     memset(&m_createRequest, 0, sizeof(m_createRequest));
     memset(&m_createResult, 0, sizeof(m_createResult));
+    memset(&m_deleteRequest, 0, sizeof(m_deleteRequest));
+    memset(&m_deletePlan, 0, sizeof(m_deletePlan));
+    memset(&m_deleteResult, 0, sizeof(m_deleteResult));
     memset(&m_formatRequest, 0, sizeof(m_formatRequest));
     memset(&m_formatResult, 0, sizeof(m_formatResult));
     memset(&m_mountDialogPartition, 0, sizeof(m_mountDialogPartition));
@@ -6307,6 +6312,8 @@ DiskManagerApp::DiskManagerApp()
 DiskManagerApp::~DiskManagerApp() {
     if (m_initializePlan.confirmationReady)
         storage::cancel_initialize_disk(m_initializePlan);
+    if (m_deletePlan.confirmationReady)
+        storage::cancel_delete_partition(m_deletePlan);
 }
 
 bool DiskManagerApp::init() {
@@ -6332,6 +6339,7 @@ bool DiskManagerApp::init() {
     m_propertiesBtnId = addButton(98, 0, 90, 28, "Properties");
     m_diagnosticsBtnId = addButton(194, 0, 96, 28, "Diagnostics");
     m_initializeBtnId = addButton(296, 0, 150, 28, "Initialize Disk...");
+    m_deleteBtnId = addButton(652, 0, 92, 28, "Delete...");
     m_mountBtnId = addButton(452, 0, 100, 28, "Mount...");
     m_unmountBtnId = addButton(558, 0, 90, 28, "Unmount");
     m_gptBtnId = addButton(10, 0, 140, 28,
@@ -6354,6 +6362,8 @@ bool DiskManagerApp::init() {
 void DiskManagerApp::shutdown() {
     if (m_initializePlan.confirmationReady)
         storage::cancel_initialize_disk(m_initializePlan);
+    if (m_deletePlan.confirmationReady)
+        storage::cancel_delete_partition(m_deletePlan);
     m_initializeDialogState = INITIALIZE_DIALOG_CLOSED;
     m_state = app::AppState::Terminated;
 }
@@ -6809,6 +6819,7 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
     app::Widget* properties = getWidget(m_propertiesBtnId);
     app::Widget* diagnostics = getWidget(m_diagnosticsBtnId);
     app::Widget* initialize = getWidget(m_initializeBtnId);
+    app::Widget* deleteAction = getWidget(m_deleteBtnId);
     app::Widget* mountAction = getWidget(m_mountBtnId);
     app::Widget* unmountAction = getWidget(m_unmountBtnId);
     app::Widget* gpt = getWidget(m_gptBtnId);
@@ -6825,6 +6836,7 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
         if (initialize) { initialize->x = 10; initialize->y = rowY; initialize->w = 130; }
         if (mountAction) { mountAction->x = 146; mountAction->y = rowY; mountAction->w = 108; }
         if (unmountAction) { unmountAction->x = 260; unmountAction->y = rowY; unmountAction->w = 92; }
+        if (deleteAction) { deleteAction->x = 358; deleteAction->y = rowY; deleteAction->w = 92; }
     } else {
         if (refresh) { refresh->x = 10; refresh->y = rowY; refresh->w = 82; }
         if (properties) { properties->x = 98; properties->y = rowY; properties->w = 90; }
@@ -6832,6 +6844,7 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
         if (initialize) { initialize->x = 296; initialize->y = rowY; initialize->w = 150; }
         if (mountAction) { mountAction->x = 452; mountAction->y = rowY; mountAction->w = 100; }
         if (unmountAction) { unmountAction->x = 558; unmountAction->y = rowY; unmountAction->w = 90; }
+        if (deleteAction) { deleteAction->x = 652; deleteAction->y = rowY; deleteAction->w = 92; }
     }
     if (gpt) { gpt->x = 10; gpt->y = rowY; gpt->w = 140; }
     if (mbr) { mbr->x = 158; mbr->y = rowY; mbr->w = 150; }
@@ -6865,6 +6878,7 @@ void DiskManagerApp::updateInitializeControls() {
     app::Widget* properties = getWidget(m_propertiesBtnId);
     app::Widget* diagnostics = getWidget(m_diagnosticsBtnId);
     app::Widget* initialize = getWidget(m_initializeBtnId);
+    app::Widget* deleteAction = getWidget(m_deleteBtnId);
     app::Widget* mountAction = getWidget(m_mountBtnId);
     app::Widget* unmountAction = getWidget(m_unmountBtnId);
     app::Widget* gpt = getWidget(m_gptBtnId);
@@ -6887,6 +6901,8 @@ void DiskManagerApp::updateInitializeControls() {
         m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS;
     const bool formatOptions = m_dialogIsFormat &&
         m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS;
+    const bool deleteConfirm = m_dialogIsDelete &&
+        m_initializeDialogState == INITIALIZE_DIALOG_DELETE_CONFIRM;
     const storage::DiskState selectedState = haveSelection
         ? m_disks[m_selectedDisk].state : storage::DISK_STATE_UNREADABLE;
     const bool initializeAvailable = haveSelection && rawSelected &&
@@ -6897,6 +6913,7 @@ void DiskManagerApp::updateInitializeControls() {
     bool mountAvailable = false;
     bool showMountAction = false;
     bool showUnmountAction = false;
+    bool deleteAvailable = false;
     if (haveSelection && m_selectedObject == SELECTED_PARTITION &&
         m_selectedPart >= 0 && m_selectedPart < m_disks[m_selectedDisk].partCount) {
         const DiskEntry& disk = m_disks[m_selectedDisk];
@@ -6932,6 +6949,12 @@ void DiskManagerApp::updateInitializeControls() {
         showMountAction = strcmp(part.fsLabel, "FAT32") == 0 && !part.mounted;
         mountAvailable = showMountAction && supportedPartition;
         showUnmountAction = part.mounted;
+        deleteAvailable = validTable && disk.haveInfo &&
+            disk.identity.registrationId != 0 && disk.capabilities.writable &&
+            disk.capabilities.readable && durable &&
+            (disk.capabilities.logicalSectorSize == 512 ||
+             disk.capabilities.logicalSectorSize == 4096) &&
+            part.parsed.partitionNumber != 0;
     }
     if (refresh) {
         refresh->visible = dialogClosed;
@@ -6965,6 +6988,10 @@ void DiskManagerApp::updateInitializeControls() {
         setWidgetText(m_initializeBtnId, formatAvailable ? "Format..." :
             (selectedRegion ? "Create Partition..." : "Initialize Disk..."));
     }
+    if (deleteAction) {
+        deleteAction->visible = dialogClosed && m_selectedObject == SELECTED_PARTITION;
+        deleteAction->enabled = deleteAvailable && dialogClosed;
+    }
     if (mountAction) {
         mountAction->visible = dialogClosed && showMountAction;
         mountAction->enabled = mountAvailable;
@@ -6976,15 +7003,20 @@ void DiskManagerApp::updateInitializeControls() {
     if (gpt) { gpt->visible = choosing; gpt->enabled = choosing; }
     if (mbr) { mbr->visible = choosing; mbr->enabled = choosing; }
     if (confirm) {
-        confirm->visible = m_mountDialogOpen || confirming || createOptions || formatOptions;
+        confirm->visible = m_mountDialogOpen || confirming || createOptions ||
+            formatOptions || deleteConfirm;
         confirm->enabled = m_mountDialogOpen || (confirming
             ? (m_initializePlan.confirmationReady &&
                initializeLeaseCurrent)
-            : (createOptions ? updateCreateInputWidgets() :
-                (formatOptions && updateFormatLabelWidget())));
+            : (deleteConfirm
+                ? (m_deletePlan.confirmationReady &&
+                   storage::storage_operation_lease_is_current(m_deletePlan.lease))
+                : (createOptions ? updateCreateInputWidgets() :
+                    (formatOptions && updateFormatLabelWidget()))));
         setWidgetText(m_confirmInitializeBtnId,
-            m_mountDialogOpen ? "Mount" : (formatOptions ? "Format" :
-                (createOptions ? "Create" : "Initialize")));
+            m_mountDialogOpen ? "Mount" : (deleteConfirm ? "Delete Partition" :
+                (formatOptions ? "Format" :
+                    (createOptions ? "Create" : "Initialize"))));
     }
     if (sizeInput) {
         sizeInput->visible = createOptions;
@@ -7232,6 +7264,9 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             beginInitializeConfirmation(m_initializeScheme);
         } else if (enter && m_initializeDialogState == INITIALIZE_DIALOG_CONFIRM) {
             runInitializeOperation();
+        } else if (enter && m_initializeDialogState ==
+                   INITIALIZE_DIALOG_DELETE_CONFIRM) {
+            runDeletePartitionOperation();
         } else if (key == 13 && m_initializeDialogState ==
                    INITIALIZE_DIALOG_CREATE_OPTIONS) {
             if (m_dialogIsFormat) runFormatOperation();
@@ -7445,6 +7480,9 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
             updateInitializeControls();
             invalidate();
         }
+    } else if (widgetId == m_deleteBtnId &&
+               m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
+        beginDeletePartitionConfirmation();
     } else if (widgetId == m_propertiesBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
         m_detailsMode = DETAILS_PROPERTIES;
@@ -7466,6 +7504,9 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
     } else if (widgetId == m_confirmInitializeBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_CONFIRM) {
         runInitializeOperation();
+    } else if (widgetId == m_confirmInitializeBtnId &&
+               m_initializeDialogState == INITIALIZE_DIALOG_DELETE_CONFIRM) {
+        runDeletePartitionOperation();
     } else if (widgetId == m_confirmInitializeBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS) {
         if (m_dialogIsFormat) runFormatOperation();
@@ -7888,23 +7929,27 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         framebuffer::fill_rect(panelX, panelY, panelW, panelH, 0xFF252D3B);
         framebuffer::fill_rect(panelX, panelY, panelW, 23, 0xFF34465C);
         disk_manager_draw_clipped(panelX + 10, panelY + 7, panelW - 20,
-            m_dialogIsFormat
+            m_dialogIsDelete
+                ? (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
+                    ? "Delete Partition Result" : "Delete Partition")
+                : (m_dialogIsFormat
                 ? (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
                     ? "Format FAT32 Result" : "Format Partition as FAT32")
                 : (m_dialogIsCreate
                 ? (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
                     ? "Create Partition Result" : "Create Partition")
                 : (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
-                    ? "Initialize Disk Result" : "Initialize Disk")),
+                    ? "Initialize Disk Result" : "Initialize Disk"))),
             kText);
         uint32_t lineY = panelY + 32;
         const storage::TargetIdentity& identity =
-            (m_dialogIsFormat || m_dialogIsCreate || m_initializeDialogState !=
+            (m_dialogIsDelete || m_dialogIsFormat || m_dialogIsCreate || m_initializeDialogState !=
                 INITIALIZE_DIALOG_CHOOSE_SCHEME)
-                ? (m_dialogIsFormat ? m_formatResult.targetIdentity
+                ? (m_dialogIsDelete ? m_deleteResult.targetIdentity
+                  : (m_dialogIsFormat ? m_formatResult.targetIdentity
                   : (m_dialogIsCreate ? m_createResult.targetIdentity
                                     : m_initializeResult.targetIdentity)
-                  )
+                  ))
                 : disk.identity;
         char line[160], number[24], sizeText[32];
         strcopy(line, "Target: ", sizeof(line));
@@ -7928,7 +7973,116 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         strappend(line, " bytes", sizeof(line));
         disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20, line, kSubText);
         lineY += 17;
-        if (m_dialogIsFormat) {
+        if (m_dialogIsDelete) {
+            const storage::PartitionEntry& part = m_deleteRequest.partitionSnapshot;
+            char partitionNo[16], capacityText[32], startText[24], endText[24];
+            disk_manager_u64(part.partitionNumber, partitionNo, sizeof(partitionNo));
+            const uint64_t bytes = identity.logicalSectorSize != 0 &&
+                part.sectorCount <= UINT64_MAX / identity.logicalSectorSize
+                ? part.sectorCount * identity.logicalSectorSize : 0;
+            formatSizePrecise(bytes, capacityText, sizeof(capacityText));
+            strcopy(line, "Partition ", sizeof(line));
+            strappend(line, partitionNo, sizeof(line));
+            strappend(line, part.isGpt ? " | GPT" : " | MBR primary",
+                      sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kText);
+            lineY += 15;
+            strcopy(line, "Partition name: ", sizeof(line));
+            strappend(line, part.name[0] ? part.name : "(unnamed)", sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kText);
+            lineY += 15;
+            strcopy(line, "Filesystem: Unknown", sizeof(line));
+            const char* filesystem = "Unknown";
+            if (m_selectedDisk >= 0 && m_selectedDisk < m_diskCount &&
+                storage::disk_manager_same_disk_incarnation(identity,
+                    m_disks[m_selectedDisk].identity)) {
+                for (int i = 0; i < m_disks[m_selectedDisk].partCount; ++i) {
+                    if (storage::disk_manager_same_partition(part,
+                            m_disks[m_selectedDisk].parts[i].parsed)) {
+                        filesystem = m_disks[m_selectedDisk].parts[i].fsLabel;
+                        break;
+                    }
+                }
+            }
+            strcopy(line, "Filesystem: ", sizeof(line));
+            strappend(line, filesystem, sizeof(line));
+            strappend(line, " | Size: ", sizeof(line));
+            strappend(line, capacityText, sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kSubText);
+            lineY += 15;
+            disk_manager_u64(part.startLba, startText, sizeof(startText));
+            disk_manager_u64(part.endLba, endText, sizeof(endText));
+            strcopy(line, "Range: LBA ", sizeof(line));
+            strappend(line, startText, sizeof(line));
+            strappend(line, " through ", sizeof(line));
+            strappend(line, endText, sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kSubText);
+            lineY += 17;
+            if (m_initializeDialogState == INITIALIZE_DIALOG_DELETE_CONFIRM) {
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "Mount state: Unmounted (checked by storage safety).", kText);
+                lineY += 17;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "Delete removes this partition-table entry; it does not erase data.",
+                    0xFFFFD080);
+                lineY += 15;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "The partition becomes inaccessible through normal mounting.",
+                    0xFFFFD080);
+                lineY += 15;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "Its sectors remain on the disk. Confirm Delete Partition to continue.",
+                    kText);
+            } else if (m_initializeDialogState == INITIALIZE_DIALOG_RUNNING) {
+                strcopy(line, "Stage: ", sizeof(line));
+                strappend(line, storage::delete_partition_stage_name(
+                    m_deleteResult.stage), sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kText);
+            } else {
+                const bool success = m_deleteResult.status ==
+                    storage::DELETE_PARTITION_SUCCESS;
+                strcopy(line, success ? "Partition entry removed and verified." :
+                    storage::delete_partition_status_name(m_deleteResult.status),
+                    sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, success ? kText : 0xFFFFB0A0);
+                lineY += 16;
+                strcopy(line, "Final table: ", sizeof(line));
+                strappend(line, storage::disk_state_name(
+                    m_deleteResult.finalDetectedState), sizeof(line));
+                strappend(line, " | Partitions: ", sizeof(line));
+                disk_manager_u64(m_deleteResult.finalPartitionCount, number,
+                    sizeof(number));
+                strappend(line, number, sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kSubText);
+                lineY += 15;
+                strcopy(line, "Metadata sectors written: ", sizeof(line));
+                disk_manager_u64(m_deleteResult.logicalSectorsWritten, number,
+                    sizeof(number));
+                strappend(line, number, sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kSubText);
+                if (m_deleteResult.finalStateUncertain) {
+                    lineY += 16;
+                    disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                        "State is uncertain. Do not use the affected partition until inspected.",
+                        0xFFFFB0A0);
+                } else if (m_deleteResult.rollbackAttempted) {
+                    lineY += 16;
+                    disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                        m_deleteResult.rollbackSucceeded
+                            ? "Original partition metadata was restored and verified."
+                            : "Original partition metadata restoration is uncertain.",
+                        m_deleteResult.rollbackSucceeded ? kSubText : 0xFFFFB0A0);
+                }
+            }
+        } else if (m_dialogIsFormat) {
             if (m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS) {
                 const storage::PartitionEntry& part = m_formatRequest.partitionSnapshot;
                 char startText[24], endText[24], partitionNo[16], capacityText[32];
@@ -9072,6 +9226,87 @@ void DiskManagerApp::beginCreatePartitionOptions() {
     invalidate();
 }
 
+void DiskManagerApp::beginDeletePartitionConfirmation() {
+    if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED ||
+        m_selectedDisk < 0 || m_selectedDisk >= m_diskCount ||
+        m_selectedObject != SELECTED_PARTITION || m_selectedPart < 0 ||
+        m_selectedPart >= m_disks[m_selectedDisk].partCount) return;
+    const DiskEntry& disk = m_disks[m_selectedDisk];
+    const PartEntry& part = disk.parts[m_selectedPart];
+    memset(&m_deleteRequest, 0, sizeof(m_deleteRequest));
+    memset(&m_deletePlan, 0, sizeof(m_deletePlan));
+    memset(&m_deleteResult, 0, sizeof(m_deleteResult));
+    m_deleteRequest.targetSnapshot = disk.identity;
+    m_deleteRequest.partitionScheme = disk.scheme;
+    m_deleteRequest.partitionSnapshot = part.parsed;
+    m_deleteRequest.expectedRegistryGeneration = disk.identity.registryGeneration;
+    const storage::DeletePartitionStatus status =
+        storage::prepare_delete_partition(m_deleteRequest, m_deletePlan,
+                                          m_deleteResult);
+    if (status != storage::DELETE_PARTITION_READY_FOR_CONFIRMATION) {
+        strcopy(m_statusMessage, m_deleteResult.diagnostic[0]
+            ? m_deleteResult.diagnostic : storage::delete_partition_status_name(status),
+            sizeof(m_statusMessage));
+        if (status == storage::DELETE_PARTITION_STALE_SELECTION ||
+            status == storage::DELETE_PARTITION_IDENTITY_CHANGED ||
+            status == storage::DELETE_PARTITION_REGISTRY_CHANGED) {
+            m_selectedObject = SELECTED_DISK;
+            m_selectedPart = -1;
+            m_selectedRegion = -1;
+            m_selectedListItem = -1;
+            scanDisks();
+            strcopy(m_statusMessage,
+                "Selection changed; refreshed. Select the partition again.",
+                sizeof(m_statusMessage));
+        }
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
+    m_dialogIsCreate = false;
+    m_dialogIsFormat = false;
+    m_dialogIsDelete = true;
+    m_initializeMessage[0] = '\0';
+    m_initializeDialogState = INITIALIZE_DIALOG_DELETE_CONFIRM;
+    strcopy(m_statusMessage, "Review the exact partition before deletion.",
+            sizeof(m_statusMessage));
+    updateInitializeControls();
+    invalidate();
+}
+
+void DiskManagerApp::runDeletePartitionOperation() {
+    if (!m_dialogIsDelete || m_initializeDialogState !=
+            INITIALIZE_DIALOG_DELETE_CONFIRM ||
+        !m_deletePlan.confirmationReady) return;
+    m_initializeDialogState = INITIALIZE_DIALOG_RUNNING;
+    m_deleteResult.stage = storage::DELETE_PARTITION_STAGE_REVALIDATING;
+    updateInitializeControls();
+    invalidate();
+    const storage::DeletePartitionStatus status =
+        storage::execute_delete_partition(m_deletePlan, m_deleteResult);
+    (void)status;
+    m_lastStorageOperation = 4;
+    if (m_deleteResult.status != storage::DELETE_PARTITION_SUCCESS &&
+        m_deleteResult.failedBeforeWrite) {
+        strcopy(m_initializeMessage,
+            "Partition deletion failed before any metadata write.",
+            sizeof(m_initializeMessage));
+    } else {
+        strcopy(m_initializeMessage, m_deleteResult.diagnostic,
+                sizeof(m_initializeMessage));
+    }
+    scanDisks();
+    if (m_deleteResult.status == storage::DELETE_PARTITION_SUCCESS) {
+        m_selectedObject = SELECTED_DISK;
+        m_selectedPart = -1;
+        m_selectedRegion = -1;
+        m_selectedListItem = -1;
+    }
+    m_initializeDialogState = INITIALIZE_DIALOG_RESULT;
+    updateInitializeControls();
+    invalidate();
+}
+
 bool DiskManagerApp::updateCreateInputWidgets() {
     app::Widget* sizeInput = getWidget(m_createSizeTextBoxId);
     app::Widget* nameInput = getWidget(m_createNameTextBoxId);
@@ -9319,9 +9554,12 @@ void DiskManagerApp::runFormatOperation() {
 void DiskManagerApp::closeInitializeDialog() {
     if (m_initializePlan.confirmationReady)
         storage::cancel_initialize_disk(m_initializePlan);
+    if (m_deletePlan.confirmationReady)
+        storage::cancel_delete_partition(m_deletePlan);
     m_initializeDialogState = INITIALIZE_DIALOG_CLOSED;
     m_dialogIsCreate = false;
     m_dialogIsFormat = false;
+    m_dialogIsDelete = false;
     m_createInputFocus = 0;
     m_initializeMessage[0] = '\0';
     updateInitializeControls();
