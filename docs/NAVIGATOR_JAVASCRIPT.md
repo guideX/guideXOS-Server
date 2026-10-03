@@ -5850,11 +5850,12 @@ no direct child content = no structural Element child
                         AND no direct text child
 ```
 
-Future JS58 matching must also require complete metadata so structural-cap or
-stack-overflow cases fail closed. JS57 does not change JavaScript selector
-grammar: `:empty` remains unsupported in `querySelector()`,
-`querySelectorAll()`, and `matches()`. Existing CSS style matching keeps its
-prior render-summary behavior. No public JavaScript API was added.
+The following JS58 matcher requires complete metadata so structural-cap or
+stack-overflow cases fail closed. At the JS57 phase boundary, JavaScript
+`:empty` was still unsupported in `querySelector()`, `querySelectorAll()`, and
+`matches()`; the JS58 section below records its implementation. Existing CSS
+style matching keeps its prior render-summary behavior. No public JavaScript
+API was added.
 
 The native proof is `tests/navigator_javascript_js57_test.cpp`, run by
 `scripts/smoke-navigator-javascript-js57.ps1`. It directly inspects the
@@ -5862,8 +5863,9 @@ document-owned metadata for empty, text-only, whitespace-only, entity,
 Element-only, mixed, nested, hidden, comment, textarea, option, void, malformed,
 long-text, capacity, and document-replacement fixtures. It also executes the
 hosted regression fixture's scripts and checks existing `:root`, structural
-traversal, form, event, and fail-closed `:empty` behavior. The hosted page is
-`navigator-smoke/javascript-js57.html`; it adds no metadata debug property.
+traversal, form, Event, and the post-JS58 `:empty` compatibility behavior. The
+hosted page is `navigator-smoke/javascript-js57.html`; it adds no metadata
+debug property.
 
 ### JS57 closeout (2026-10-03)
 
@@ -5904,3 +5906,132 @@ presence and must continue to fail closed when metadata is incomplete. Full
 raw-text Element coverage requires a future representation change. `:empty`
 remains unsupported in JS57. `git diff --check` passed before the local source
 commit; generated artifacts are excluded from that commit.
+
+## JS58: authoritative `:empty` for represented Elements
+
+JS58 enables the nonfunctional `:empty` pseudo in the JavaScript selector
+parser and shared simple-selector matcher. This section supersedes the JS56 and
+JS57 phase-boundary notes above, which record that those earlier milestones
+left JavaScript `:empty` unsupported.
+
+The match rule is:
+
+```text
+current represented Element
+AND matching JS57 content record exists and is complete
+AND HtmlElementRef::childCount == 0
+AND structural parent-serial traversal finds no direct Element child
+AND HtmlElementContentMetadata::hasDirectTextChild == false
+```
+
+`HtmlElementRef::childCount` is finalized from the existing structural
+parent/child counters, and the matcher cross-checks it against the bounded
+structural parent-serial traversal. It also validates the parallel
+content-record vector, the record's serial, and its completeness bit. Missing,
+mismatched, or incomplete metadata fails closed. The record's
+`hasElementChild` summary is not used as a substitute for the structural
+Element-child model. In particular, a text-only Element has
+`childElementCount === 0` and still fails `:empty` because JS57 recorded its
+direct text.
+
+The matcher reads current document metadata for every call and stores no
+selector-specific emptiness state. It does not inspect rendered text, layout,
+visibility, raw HTML source, or the CSS engine's render-summary interpretation.
+Space, tab, CR, LF, indentation, and entity source bytes all count as direct
+text, including `&#32;` after it decodes to whitespace. Long text remains
+nonempty when its presentation summary is truncated. Hidden text and hidden
+Element children also disqualify emptiness. Comment-only Elements match when
+there is no other child content; comments and declarations do not set the
+direct-text bit. Descendant text is not copied to an ancestor: the ancestor
+fails because it has a structural Element child, while the text-owning child
+fails because it has direct text.
+
+Textarea and option source text counts even after their runtime form value or
+selection changes. An input value attribute or runtime value does not create
+text content. Checked, selected, disabled, focus, attributes, and style state
+do not affect the result. Represented void Elements such as input, img, and
+hr can match when they have no represented child or direct text; attributes
+such as `src` do not create children. `br` is not a represented structural
+Element in the current model. Script and style are also not represented as
+Elements, and their special raw-text buffers are not scanned or exposed to
+invent `:empty` matches. This limitation is intentional and remains until a
+separate document-model change represents those tags.
+
+The parser adds `Empty` to the existing one-byte pseudo enum. The descriptor
+layout does not grow. `:empty`, `:EMPTY`, and mixed ASCII case spellings are
+accepted as nonfunctional pseudos; `:empty()` and unknown names fail closed.
+The existing canonical order remains optional tag, ID, classes, one attribute
+predicate, and one trailing pseudo. The one-pseudo and one-relation bounds are
+unchanged, as are the 256-byte selector and four-member selector-list limits.
+
+The same matcher serves `querySelector()`, live-on-read `querySelectorAll()`,
+`matches()`, `closest()`, scoped queries, the existing one-relation grammar,
+and selector lists. Results keep structural document order, selector-list
+deduplication, and canonical generation/serial Element identity. Empty status
+is independent of `:root`, child-position pseudos, and nth-position pseudos.
+Stale Element `matches()` returns false and stale `closest()` returns null;
+old-generation collection handles retain the existing stale-host validation.
+
+Focused evidence is in `tests/navigator_javascript_js58_test.cpp` and
+`scripts/smoke-navigator-javascript-js58.ps1`. The tests cover parser grammar,
+all source-content categories, completeness fail-closed behavior, live
+collection reevaluation under test-only structural/text metadata changes,
+forms, void and unrepresented raw-text Elements, selector APIs, nested Event
+dispatch, stale Element handles, long-text truncation, and the 1,024-Element
+capacity boundary. Those test-only metadata changes do not add public DOM
+mutation APIs. The hosted fixture is
+`navigator-smoke/javascript-js58.html`; the production hosted aggregate also
+checks basic content semantics, `childElementCount` divergence, relations,
+selector lists, positional independence, forms, and Event metadata.
+
+The focused JS58 test reports **153/153** checks. The descriptor sizes remain
+36 bytes for a simple selector, 556 bytes for the four-member descriptor, 576
+bytes per collection record, and 73,728 bytes for the 128-record collection
+registry. `HtmlElementRef` remains 440 bytes; `HtmlElementContentMetadata`
+remains 24 bytes, or 24,576 bytes for 1,024 records. JS58 adds zero descriptor,
+content-record, or per-document metadata bytes. No selector cache or additional
+dynamic storage was introduced.
+
+### JS58 closeout (2026-10-03)
+
+JS58 is **Outcome A: complete for represented Elements**. The focused suite
+passed **153/153** checks, including the strict warning-as-error
+parser/adapter/runtime lane. The full JavaScript matrix passed **56/56 lanes**
+(the three base lanes plus JS6 through JS58). Focused JS36–JS57 regressions
+passed **4,639 checks**; JS58 adds 153 focused checks. Stress coverage includes
+1,000 repeated `matches(":empty")` calls, 1,000 repeated
+`querySelector(":empty")` calls, 320 held live-collection rereads, and a
+near-capacity mixed document of 961 represented Elements with 480 expected
+matches.
+
+All **five** hosted JS58 checks passed, including true-empty and comment-only
+matches, text/whitespace/entity/hidden/structural-child rejection, the
+`childElementCount === 0` text-only divergence, query/relation/list behavior,
+form and positional independence, and nested Event metadata preservation. The
+hosted aggregate reported **602 passed / 7 failed / 609 total**. Its seven
+failures remain the established CSS phase 3C, CSS phase 3G, CSS phase 6A, three
+CSS phase 6B checks, and CSS phase 6C; there were no new JS58 failures.
+`build.bat` and the strict lane passed.
+
+`build-kernel.bat` stopped before bootloader/kernel staging at the existing
+PacMan Native ELF link errors for
+`pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)`. The independent direct
+`mingw32-make ARCH=amd64 EXTRA_CFLAGS=` run stopped at the existing Mbed TLS
+configuration errors in `mbedtls_check_config.h:51` and `:64`. Neither blocker
+was changed. No fresh `ESP/kernel.elf` was produced and `qemu-system-x86_64`
+was unavailable, so QEMU proof is not claimed.
+
+The generated-artifact snapshot covered **328 files / 147,249,718 bytes**
+across ESP, wallpaper/package outputs, PacMan build objects, kernel outputs,
+and bootloader outputs. The kernel attempts changed **3 / 0 / 0** files
+(changed / missing / extra): three PacMan object files, all restored from the
+snapshot. The final hash/length audit verified **0 changed / 0 missing / 0
+extra** files against the snapshot. Generated outputs are excluded from the
+source change. `git diff --check` passed before commit.
+
+Script and style remain outside the selector domain because the structural
+model does not represent them as Elements; no raw-source or layout fallback
+was added. A useful next bounded milestone is **JS59 `:first-of-type`**, based
+on existing structural sibling traversal and tag identity, with no new
+per-document storage.

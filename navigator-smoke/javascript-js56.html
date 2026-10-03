@@ -3,6 +3,7 @@
 <head><title>Navigator JavaScript JS56</title></head>
 <body id="body">
 <h1>Navigator JavaScript JS56</h1>
+<div id="empty-slot" class="slot"></div>
 <div id="panel" class="panel">
   <button id="click-one">One</button>
   <button id="click-two">Two</button>
@@ -14,6 +15,7 @@ var js56State = document.getElementById("js56-state");
 var root = document.querySelector(":root");
 var body = document.getElementById("body");
 var panel = document.getElementById("panel");
+var emptySlot = document.getElementById("empty-slot");
 var firstButton = document.getElementById("click-one");
 var secondButton = document.getElementById("click-two");
 var rootIdentity = root === document.querySelector("html") &&
@@ -36,8 +38,10 @@ var rootLists = document.querySelectorAll(":root, .fallback").length === 2 &&
   document.querySelectorAll(":root, .fallback")[1] ===
     document.getElementById("fallback") &&
   document.querySelectorAll(":root, html:root").length === 1;
-var emptyDeferred = document.querySelector(":empty") === null &&
-  document.querySelectorAll(":EMPTY").length === 0;
+var emptySupported = emptySlot.matches(":empty") &&
+  document.querySelector(":EMPTY") === emptySlot &&
+  document.querySelectorAll(":empty").length === 1 &&
+  document.querySelector(":empty()") === null && !body.matches(":empty");
 var firstEvent = false;
 var secondEvent = false;
 var nestedEvent = false;
@@ -63,7 +67,7 @@ function js56Snapshot(label) {
   js56State.textContent = label + ":root=" + rootIdentity +
     ":queries=" + rootQueries + ":filters=" + rootFilters +
     ":traversal=" + rootTraversal + ":relations=" + rootRelations +
-    ":lists=" + rootLists + ":emptyDeferred=" + emptyDeferred +
+    ":lists=" + rootLists + ":emptySupported=" + emptySupported +
     ":event=" + firstEvent + ":secondEvent=" + secondEvent +
     ":nested=" + nestedEvent + ":metadata=" + eventMetadata;
 }

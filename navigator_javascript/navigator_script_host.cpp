@@ -701,6 +701,8 @@ bool parseStatePseudo(SourceView source, std::size_t colon,
             selector.statePseudo = NavigatorScriptStatePseudo::OnlyOfType;
         else if (equalsAsciiCaseInsensitive("root"))
             selector.statePseudo = NavigatorScriptStatePseudo::Root;
+        else if (equalsAsciiCaseInsensitive("empty"))
+            selector.statePseudo = NavigatorScriptStatePseudo::Empty;
         else
             return false;
         return true;
@@ -3453,6 +3455,25 @@ bool NavigatorScriptHostAdapter::selectorStatePseudoMatches(
         return document_->hasDocumentElement &&
             document_->documentElement.serial != 0u &&
             element.serial == document_->documentElement.serial;
+    case NavigatorScriptStatePseudo::Empty: {
+        // JS57 records direct source-text presence independently of layout.
+        // The content vector is parallel to structuralElements, with dense
+        // accepted serials; validate that bounded document invariant before
+        // using the serial-indexed record. Missing or incomplete authority
+        // fails closed. childCount and the parent-serial traversal both come
+        // from the existing structural Element model, separate from text.
+        if (document_->structuralElements.size() !=
+                document_->contentMetadata.size() ||
+            document_->contentMetadata.size() > limits_.maxDocumentNodes ||
+            element.serial > document_->contentMetadata.size()) return false;
+        const gxos::web::HtmlElementContentMetadata& content =
+            document_->contentMetadata[
+                static_cast<std::size_t>(element.serial - 1u)];
+        if (content.serial != element.serial ||
+            !content.contentMetadataComplete || element.childCount != 0u ||
+            content.hasDirectTextChild) return false;
+        return elementChildCount(element.serial) == 0u;
+    }
     case NavigatorScriptStatePseudo::FirstChild: {
         HostInstanceId parentSerial = 0u;
         HostInstanceId previousSerial = 0u;

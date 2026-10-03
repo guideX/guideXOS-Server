@@ -307,9 +307,10 @@ var root = document.querySelector(":root");
 var empty = document.querySelector("#empty");
 var mixed = document.querySelector("#mixed");
 var textOnly = document.querySelector("#text");
-var emptyStillUnsupported = document.querySelector(":empty") === null &&
-  document.querySelectorAll(":empty").length === 0 &&
-  empty.matches(":empty") === false;
+var emptyUsesJs57Authority = document.querySelector(":empty") === empty &&
+  document.querySelectorAll(":empty").length > 0 &&
+  empty.matches(":empty") && textOnly.childElementCount === 0 &&
+  !textOnly.matches(":empty");
 var elementTraversalOnly = textOnly.children.length === 0 &&
   textOnly.childElementCount === 0 && mixed.children.length === 1 &&
   mixed.childElementCount === 1 &&
@@ -329,7 +330,7 @@ var textareaProjectionUnchanged =
             value->booleanValue() == expected,
             std::string("JavaScript regression: ") + name);
     };
-    expectBoolean("emptyStillUnsupported", true);
+    expectBoolean("emptyUsesJs57Authority", true);
     expectBoolean("elementTraversalOnly", true);
     expectBoolean("rootAndRelationsUnchanged", true);
     expectBoolean("textareaProjectionUnchanged", true);

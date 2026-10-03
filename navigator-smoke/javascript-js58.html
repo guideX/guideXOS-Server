@@ -1,0 +1,108 @@
+<!doctype html>
+<html id="root">
+<head><title>Navigator JavaScript JS58</title></head>
+<body id="body">
+<h1>Navigator JavaScript JS58</h1>
+<div id="empty" class="slot" data-state="idle"></div><div id="text" class="slot">hello</div><div id="space" class="slot">   </div><div id="tab" class="slot">&#9;</div><div id="cr" class="slot">&#13;</div><div id="lf" class="slot">&#10;</div><div id="entity" class="slot">&amp;</div><div id="numeric" class="slot">&#32;</div><div id="newline" class="slot">
+</div><div id="comment" class="slot"><!--comment--></div><div id="child" class="slot"><span id="child-span"></span></div><div id="mixed" class="slot">before<span></span>after</div>
+<div id="outer"><span id="inner">text</span></div><div id="hidden-text" style="display:none">hidden</div><div id="hidden-parent"><span id="hidden-child" style="display:none"></span></div>
+<input id="input" value="seed"><input id="checkbox" type="checkbox" checked><textarea id="textarea">seed</textarea><select id="select"><option id="option">Label</option></select>
+<div id="position"><span id="empty-first"></span><span id="empty-second"></span><span id="nonempty-third">x</span></div>
+<div id="relation-group" class="group"><span id="relation-empty" class="slot"></span><span id="relation-empty-two" class="slot other"></span><span id="relation-other" class="other"></span></div>
+<input id="event-empty" type="button" value=""><input id="event-nested" type="button" value=""><pre id="result">initial</pre>
+<script>
+var js58Result = document.getElementById("result");
+var js58Empty = document.getElementById("empty");
+var js58Text = document.getElementById("text");
+var js58Comment = document.getElementById("comment");
+var js58Child = document.getElementById("child");
+var js58Mixed = document.getElementById("mixed");
+var js58Root = document.querySelector(":root");
+var js58Basic = js58Empty.matches(":empty") &&
+  !js58Text.matches(":empty") &&
+  !document.getElementById("space").matches(":empty") &&
+  !document.getElementById("tab").matches(":empty") &&
+  !document.getElementById("cr").matches(":empty") &&
+  !document.getElementById("lf").matches(":empty") &&
+  !document.getElementById("entity").matches(":empty") &&
+  !document.getElementById("numeric").matches(":empty") &&
+  !document.getElementById("newline").matches(":empty") &&
+  js58Comment.matches(":empty") && !js58Child.matches(":empty") &&
+  !js58Mixed.matches(":empty") &&
+  !document.getElementById("hidden-text").matches(":empty") &&
+  !document.getElementById("hidden-parent").matches(":empty");
+var js58Divergence = js58Text.childElementCount === 0 &&
+  !js58Text.matches(":empty") && js58Child.childElementCount === 1 &&
+  !js58Child.matches(":empty");
+var js58Queries = document.querySelector(":empty") === js58Empty &&
+  document.querySelector(".slot:empty") === js58Empty &&
+  document.querySelector("#empty:empty") === js58Empty &&
+  document.querySelector("div#empty.slot[data-state=idle]:empty") === js58Empty &&
+  document.querySelectorAll(".slot:empty").length === 4 &&
+  document.querySelectorAll(".slot:empty")[0] === js58Empty &&
+  document.querySelectorAll(".slot:empty")[1] === js58Comment &&
+  document.querySelectorAll(".slot:empty")[2] ===
+    document.getElementById("relation-empty") &&
+  document.querySelectorAll(".slot:empty")[3] ===
+    document.getElementById("relation-empty-two");
+var js58Relations = document.querySelector(".group > .slot:empty") ===
+  document.getElementById("relation-empty") &&
+  document.querySelector(".slot:empty + .other") ===
+    document.getElementById("relation-empty-two") &&
+  document.querySelector(".slot:empty + .slot:empty") ===
+    document.getElementById("relation-empty-two") &&
+  document.getElementById("inner").closest(".slot:empty") === null;
+var js58Lists = document.querySelectorAll(":root, .slot:empty").length === 5 &&
+  document.querySelectorAll(":root, .slot:empty")[0] === js58Root &&
+  document.querySelectorAll(":root, .slot:empty")[1] === js58Empty &&
+  document.querySelectorAll(".slot:empty, :root")[0] === js58Root &&
+  document.querySelectorAll(".slot:empty, #empty:empty").length === 4;
+var js58Position = document.getElementById("empty-second").matches(":empty") &&
+  !document.getElementById("empty-second").matches(":first-child") &&
+  document.getElementById("empty-first").matches(":empty:first-child") === false &&
+  document.getElementById("empty-first").matches(":empty");
+var js58Forms = document.getElementById("input").value === "seed" &&
+  document.getElementById("input").matches(":empty") &&
+  !document.getElementById("textarea").matches(":empty") &&
+  !document.getElementById("option").matches(":empty");
+var js58Parser = js58Empty.matches(":EMPTY") &&
+  js58Empty.matches(":Empty") && js58Empty.matches("*:empty") &&
+  js58Empty.matches("div:empty") && js58Empty.matches(".slot:empty") &&
+  js58Empty.matches("[data-state=idle]:empty") &&
+  document.querySelector(":empty()") === null &&
+  document.querySelector(":emptyx") === null &&
+  document.querySelector(":empty:first-child") === null &&
+  document.querySelector("div:first-child:empty") === null &&
+  document.querySelector(":empty, :root").matches(":root");
+var js58Event = false;
+var js58Nested = false;
+var js58Metadata = false;
+document.getElementById("event-empty").addEventListener("click", function (event) {
+  var target = event.target;
+  var current = event.currentTarget;
+  var phase = event.eventPhase;
+  js58Event = target.matches(":empty") &&
+    target.closest("input:empty") === target;
+  document.getElementById("event-nested").click();
+  js58Nested = event.target === target && event.currentTarget === current &&
+    event.eventPhase === phase;
+  js58Metadata = event.relatedTarget === null &&
+    event.defaultPrevented === false && phase === 2;
+  js58Snapshot("event");
+});
+document.getElementById("event-nested").addEventListener("click", function (event) {
+  js58Event = js58Event && event.target.matches("input:empty");
+});
+function js58Snapshot(label) {
+  js58Result.textContent = label + ":basic=" + js58Basic +
+    ":divergence=" + js58Divergence + ":child=" + js58Divergence +
+    ":query=" + js58Queries + ":relations=" + js58Relations +
+    ":lists=" + js58Lists + ":position=" + js58Position +
+    ":forms=" + js58Forms + ":parser=" + js58Parser +
+    ":event=" + js58Event + ":nested=" + js58Nested +
+    ":metadata=" + js58Metadata;
+}
+js58Snapshot("initial");
+</script>
+</body>
+</html>

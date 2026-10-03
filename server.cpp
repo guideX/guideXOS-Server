@@ -4520,7 +4520,7 @@ static std::string navigatorHostedSmokeDiagnostic() {
         js56Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js56FixtureUrl &&
         contains(js56InitialText, "Navigator JavaScript JS56") &&
         contains(js56InitialText,
-            "initial:root=true:queries=true:filters=true:traversal=true:relations=true:lists=true:emptyDeferred=true:event=false:secondEvent=false:nested=false:metadata=false") &&
+            "initial:root=true:queries=true:filters=true:traversal=true:relations=true:lists=true:emptySupported=true:event=false:secondEvent=false:nested=false:metadata=false") &&
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         std::string("loaded=") + yesNo(js56Loaded) + ",text=" +
         summarizeText(js56InitialText, 1200) + ",error=" +
@@ -4539,10 +4539,10 @@ static std::string navigatorHostedSmokeDiagnostic() {
         js56Loaded && contains(js56InitialText, ":lists=true:") &&
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "overlapping :root members deduplicate and query results retain structural document order");
-    add("JS56 hosted :empty remains fail-closed",
-        js56Loaded && contains(js56InitialText, ":emptyDeferred=true:") &&
+    add("JS56 hosted :empty now uses JS58 authority",
+        js56Loaded && contains(js56InitialText, ":emptySupported=true:") &&
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
-        "the JavaScript selector parser does not expose :empty without complete text-child authority");
+        "case-insensitive :empty selects a truly empty Element and still rejects the functional form");
     const bool js56FirstClick =
         gxos::apps::Navigator::SmokeClickFormControlById("click-one");
     const std::string js56AfterClick =
@@ -4565,7 +4565,7 @@ static std::string navigatorHostedSmokeDiagnostic() {
         js57Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js57FixtureUrl &&
         contains(js57InitialText, "Navigator JavaScript JS57") &&
         contains(js57InitialText,
-            "initial:root=true:structure=true:forms=true:emptyDeferred=true:event=false:target=true") &&
+            "initial:root=true:structure=true:forms=true:emptySupported=true:event=false:target=true") &&
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         std::string("loaded=") + yesNo(js57Loaded) + ",text=" +
         summarizeText(js57InitialText, 1400) + ",error=" +
@@ -4575,10 +4575,10 @@ static std::string navigatorHostedSmokeDiagnostic() {
             ":root=true:structure=true:") &&
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "root identity, children, childElementCount, and firstElementChild continue to expose structural Elements only");
-    add("JS57 hosted :empty remains fail-closed",
-        js57Loaded && contains(js57InitialText, ":emptyDeferred=true:") &&
+    add("JS57 hosted :empty uses direct-text authority",
+        js57Loaded && contains(js57InitialText, ":emptySupported=true:") &&
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
-        "document queries and matches retain the unsupported :empty behavior");
+        "the empty Element matches while text-only content fails despite childElementCount being zero");
     add("JS57 hosted textarea and option projections remain unchanged",
         js57Loaded && contains(js57InitialText, ":forms=true:") &&
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
@@ -4588,10 +4588,52 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeCurrentDocumentText();
     add("JS57 hosted Event target identity remains unchanged",
         js57Click && contains(js57AfterClick,
-            "event:root=true:structure=true:forms=true:emptyDeferred=true:event=true:target=true") &&
+            "event:root=true:structure=true:forms=true:emptySupported=true:event=true:target=true") &&
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         std::string("click=") + yesNo(js57Click) + ",text=" +
         summarizeText(js57AfterClick, 1400) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const std::string js58FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js58.html";
+    const bool js58Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js58FixtureUrl);
+    const std::string js58InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS58 hosted authoritative empty fixture loads and evaluates",
+        js58Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js58FixtureUrl &&
+        contains(js58InitialText, "Navigator JavaScript JS58") &&
+        contains(js58InitialText,
+            "initial:basic=true:divergence=true:child=true:query=true:relations=true:lists=true:position=true:forms=true:parser=true:event=false:nested=false:metadata=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js58Loaded) + ",text=" +
+        summarizeText(js58InitialText, 1800) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS58 hosted direct-text, comment, hidden, and child authority pass",
+        js58Loaded && contains(js58InitialText,
+            ":basic=true:divergence=true:child=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "empty/comment-only match; text, whitespace, entities, hidden content, mixed content, and structural children fail; childElementCount alone is insufficient");
+    add("JS58 hosted query, relations, lists, and structural position pass",
+        js58Loaded && contains(js58InitialText,
+            ":query=true:relations=true:lists=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "compounds, document order, scoped relations, and selector-list deduplication agree");
+    add("JS58 hosted parser, form, and position independence pass",
+        js58Loaded && contains(js58InitialText,
+            ":position=true:forms=true:parser=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "empty and child-position pseudos, input versus textarea/option content, case handling, and functional/second-pseudo rejection agree");
+    const bool js58Click = gxos::apps::Navigator::SmokeClickFormControlById(
+        "event-empty");
+    const std::string js58AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS58 hosted nested Event matching preserves Event metadata",
+        js58Click && contains(js58AfterClick,
+            "event:basic=true:divergence=true:child=true:query=true:relations=true:lists=true:position=true:forms=true:parser=true:event=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js58Click) + ",text=" +
+        summarizeText(js58AfterClick, 1800) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");

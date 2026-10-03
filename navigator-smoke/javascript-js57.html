@@ -58,16 +58,17 @@ var js57RootOk = js57Root === document.querySelector("html") &&
 var js57StructureOk = js57Mixed.children.length === 1 &&
   js57Mixed.childElementCount === 1 && js57Text.children.length === 0 &&
   js57Text.childElementCount === 0 && js57Empty.children.length === 0;
-var js57EmptyDeferred = document.querySelector(":empty") === null &&
-  document.querySelectorAll(":empty").length === 0 &&
-  js57Empty.matches(":empty") === false;
+var js57EmptySupported = js57Empty.matches(":empty") &&
+  !js57Text.matches(":empty") && js57Text.childElementCount === 0 &&
+  document.querySelector(":empty") === js57Empty &&
+  document.querySelectorAll(":empty").length > 0;
 var js57FormsOk = js57Textarea.value === "seed & value" &&
   js57Select.value === "Label";
 var js57Clicked = false;
 function js57Snapshot(label) {
   js57Result.textContent = label + ":root=" + js57RootOk +
     ":structure=" + js57StructureOk + ":forms=" + js57FormsOk +
-    ":emptyDeferred=" + js57EmptyDeferred + ":event=" + js57Clicked +
+    ":emptySupported=" + js57EmptySupported + ":event=" + js57Clicked +
     ":target=" + (js57Button !== null);
 }
 js57Button.addEventListener("click", function (event) {

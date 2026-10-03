@@ -98,7 +98,7 @@ std::vector<ElementSnapshot> snapshotStructure(
     return result;
 }
 
-void testRootSelectorCompositionAndFailClosedEmpty()
+void testRootSelectorCompositionAndJs58Empty()
 {
     RuntimeErrorCode error = RuntimeErrorCode::None;
     NavigatorScriptExecutionHarness harness;
@@ -108,6 +108,7 @@ var root = document.querySelector(":root");
 var body = document.getElementById("body");
 var panel = document.getElementById("panel");
 var fallback = document.getElementById("fallback");
+var emptySlot = document.getElementById("empty-slot");
 var pseudoOnly = root !== null && root.matches(":root") &&
   !body.matches(":root") && !panel.matches(":root");
 var caseInsensitive = root.matches(":ROOT") && root.matches(":Root") &&
@@ -147,18 +148,18 @@ var malformedFailsClosed = document.querySelector(":root()") === null &&
   document.querySelector(":root:first-child") === null &&
   document.querySelector("html:root:focus") === null &&
   document.querySelector(":root:hover") === null;
-var emptyUnsupported = document.querySelector(":empty") === null &&
-  document.querySelector(":EMPTY") === null &&
+var emptySupported = document.querySelector(":empty") === emptySlot &&
+  emptySlot.matches(":EMPTY") &&
   document.querySelector(":empty()") === null &&
-  document.querySelectorAll(":empty").length === 0 &&
+  document.querySelectorAll(":empty").length === 1 &&
   body.matches(":empty") === false;
 )JS");
-    expect(result.succeeded(), "root selectors and unsupported :empty execute");
+    expect(result.succeeded(), "root selectors and JS58 :empty execute");
     reportScriptFailure(result, "root composition");
     const char* names[] = {"pseudoOnly", "caseInsensitive", "universal", "tag",
         "compoundFilters", "wrongFilters", "queryApis", "matchesAndClosest",
         "rootVsChildPseudos", "relations", "selectorLists",
-        "malformedFailsClosed", "emptyUnsupported"};
+        "malformedFailsClosed", "emptySupported"};
     for (const char* name : names)
         expectBoolean(harness, name, true, std::string("root: ") + name);
 }
@@ -375,7 +376,7 @@ int main()
     std::ifstream input("navigator-smoke/javascript-js56.html", std::ios::binary);
     if (input) fixture.assign(std::istreambuf_iterator<char>(input),
         std::istreambuf_iterator<char>());
-    testRootSelectorCompositionAndFailClosedEmpty();
+    testRootSelectorCompositionAndJs58Empty();
     testCanonicalRootAuthorityAndParentlessNonRoot();
     testStressPurityEventsAndGenerationSafety();
     if (failures != 0) {

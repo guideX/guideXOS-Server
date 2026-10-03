@@ -131,6 +131,7 @@ enum class NavigatorScriptStatePseudo : std::uint8_t {
     NthOfType,
     NthLastOfType,
     Root,
+    Empty,
 };
 
 struct NavigatorScriptSimpleSelectorDescriptor {
