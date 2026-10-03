@@ -4,14 +4,18 @@ param(
     [string]$PythonExe = "",
     [int]$TimeoutSeconds = 900,
     [switch]$ReuseBuiltProofKernel,
-    [switch]$PhaseC160
+    [switch]$PhaseC160,
+    [switch]$PhaseC161
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+if ($PhaseC161) { $PhaseC160 = $true }
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = if ($PhaseC160) {
+    $EvidenceRoot = if ($PhaseC161) {
+        Join-Path $RepoRoot "out\dotnet\c161-managed-task-manager"
+    } elseif ($PhaseC160) {
         Join-Path $RepoRoot "out\dotnet\c160-application-snapshot"
     } else {
         Join-Path $RepoRoot "out\dotnet\c158-managed-calculator"
@@ -29,12 +33,12 @@ $espKernelPath = Join-Path $RepoRoot 'ESP\kernel.elf'
 $protectedRamdiskPath = Join-Path $RepoRoot 'ESP\ramdisk.img'
 $bootloaderPath = Join-Path $RepoRoot 'guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe'
 $buildRoot = Join-Path $EvidenceRoot 'build'
-$compositeRoot = Join-Path $buildRoot $(if ($PhaseC160) { 'composite-c160-proof' } else { 'composite' })
-$canonicalCompositeRoot = Join-Path $buildRoot 'composite-c160-production'
-$canonicalRamdisk = Join-Path $EvidenceRoot 'staging\ramdisk-c160-production.img'
+$compositeRoot = Join-Path $buildRoot $(if ($PhaseC161) { 'composite-c161-proof' } elseif ($PhaseC160) { 'composite-c160-proof' } else { 'composite' })
+$canonicalCompositeRoot = Join-Path $buildRoot $(if ($PhaseC161) { 'composite-c161-production' } else { 'composite-c160-production' })
+$canonicalRamdisk = Join-Path $EvidenceRoot $(if ($PhaseC161) { 'staging\ramdisk-c161-production.img' } else { 'staging\ramdisk-c160-production.img' })
 $runtimePackOutput = Join-Path $buildRoot 'runtime-pack'
 $stageRoot = Join-Path $EvidenceRoot 'staging\wallpaper-pack'
-$proofRamdisk = Join-Path $EvidenceRoot $(if ($PhaseC160) { 'staging\ramdisk-c160-proof.img' } else { 'staging\ramdisk-c158.img' })
+$proofRamdisk = Join-Path $EvidenceRoot $(if ($PhaseC161) { 'staging\ramdisk-c161-proof.img' } elseif ($PhaseC160) { 'staging\ramdisk-c160-proof.img' } else { 'staging\ramdisk-c158.img' })
 $proofKernel = Join-Path $EvidenceRoot 'proof-kernel.elf'
 $proofBackup = Join-Path $EvidenceRoot 'canonical\kernel.elf'
 $espKernelBackup = Join-Path $EvidenceRoot 'canonical\ESP-kernel.elf'
@@ -193,6 +197,10 @@ function New-Key([string]$Code, [bool]$Down) {
     return [ordered]@{ type = 'key'; data = [ordered]@{ down = $Down; key = [ordered]@{ type = 'qcode'; data = $Code } } }
 }
 
+function New-Wheel([int]$Delta) {
+    return [ordered]@{ type = 'btn'; data = [ordered]@{ button = $(if ($Delta -gt 0) { 'wheel-down' } else { 'wheel-up' }); down = $true } }
+}
+
 function Get-Serial([string]$Path) {
     if (Test-Path -LiteralPath $Path -PathType Leaf) {
         $raw = Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue
@@ -218,6 +226,10 @@ function Wait-Serial([string]$Path, [string]$Pattern, [int]$After = 0,
         }
         if ($text -match '(?m)^\[C102-MANAGED-OUTPUT\] C160-(?:MANAGED-SNAPSHOT-TESTS|SNAPSHOT)[^\r\n]*result=FAIL') {
             throw "C160 managed snapshot proof failed: $($matches[0])"
+        }
+        if ($text -match '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-[^\r\n]*result=FAIL' -or
+            $text -match '(?m)^\[C161-TM-[^\r\n]*result=FAIL') {
+            throw "C161 Managed Task Manager proof failed: $($matches[0])"
         }
         $tail = if ($After -le $text.Length) { $text.Substring($After) } else { '' }
         $match = [regex]::Match($tail, "(?m)$Pattern")
@@ -266,7 +278,7 @@ function Press-Key([string]$Code) {
 
 function Send-CalculatorLaunch([bool]$Initial, [int]$ScreenWidth,
                                [int]$ScreenHeight, [string]$SerialPath) {
-    $menuCount = 20 # 16 pinned entries plus 4 recent slots in the bounded table.
+    $menuCount = if ($PhaseC161) { 21 } else { 20 }
     $menuHeight = 30 + $menuCount * 22 + 36
     $workHeight = $ScreenHeight - 40
     $menuY = [Math]::Max(0, $workHeight - $menuHeight)
@@ -292,7 +304,7 @@ function Send-CalculatorLaunch([bool]$Initial, [int]$ScreenWidth,
 
 function Switch-CalculatorToNotes([int]$ScreenWidth, [int]$ScreenHeight,
                                  [string]$SerialPath) {
-    $menuCount = 20
+    $menuCount = if ($PhaseC161) { 21 } else { 20 }
     $menuHeight = 30 + $menuCount * 22 + 36
     $workHeight = $ScreenHeight - 40
     $menuY = [Math]::Max(0, $workHeight - $menuHeight)
@@ -316,6 +328,241 @@ function Switch-CalculatorToNotes([int]$ScreenWidth, [int]$ScreenHeight,
         # dispatch returns. Wait for the snapshot proving its new logical
         # identity replaced Calculator and is the focused application.
         [void](Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C160-SNAPSHOT appId=com\.guidexos\.apps\.managed\.notes source=3 instance=[0-9]+ count=[0-9]+ active=1 prev=gone distinct=1 result=PASS' $before 180)
+    }
+}
+
+function Send-ManagedNotesLaunch([int]$ScreenWidth, [int]$ScreenHeight,
+                                 [string]$SerialPath) {
+    $menuCount = if ($PhaseC161) { 21 } else { 20 }
+    $menuHeight = 30 + $menuCount * 22 + 36
+    $workHeight = $ScreenHeight - 40
+    $menuY = [Math]::Max(0, $workHeight - $menuHeight)
+    $contentY = $menuY + 31
+    $footerY = $menuY + 30 + $menuCount * 22
+    Click-Screen 50 ($ScreenHeight - 20)
+    Click-Screen 70 ($footerY + 18)
+    $before = (Get-Serial $SerialPath).Length
+    Click-Screen 115 ($contentY + 12 * 22 + 11)
+    [void](Wait-Serial $SerialPath '^\[APPMODEL-MANAGED-LAUNCH\] source=StartMenu appId=com\.guidexos\.apps\.managed\.notes selector=00000004 image=/system/apps/GXOSAPP\.ELF metadata=valid' $before 35)
+    [void](Wait-Serial $SerialPath '^\[C150-APP-LAUNCH\] id=com\.guidexos\.apps\.managed\.notes generation=[0-9A-Fa-f]+ selector=00000004 kind=normal' $before 35)
+    if ($PhaseC161) {
+        # The baseline marker is emitted by Ctrl+N, not by application startup.
+        # The relaunch suite confirms Notes finished its bounded startup checks.
+        [void](Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C157-NEW-STRESS cycles=25 same-instance=PASS history-reset=PASS clipboard-stable=PASS result=PASS' $before 180)
+    } else {
+        [void](Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C160-SNAPSHOT appId=com\.guidexos\.apps\.managed\.notes source=3 instance=[0-9]+ count=[0-9]+ active=1 previous=none result=PASS' $before 30)
+    }
+}
+
+function Invoke-NotesClipboardSmoke([string]$SerialPath) {
+    $before = (Get-Serial $SerialPath).Length
+    Send-QmpEvents @((New-Key 'ctrl' $true), (New-Key 'n' $true),
+        (New-Key 'n' $false), (New-Key 'ctrl' $false)) 90
+    [void](Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C157-NEW baseline=clean-untitled .*same-instance=true result=PASS' $before 20)
+    Send-Text 'c161'
+    Press-Key 'home'
+    Send-QmpEvents @((New-Key 'shift' $true), (New-Key 'right' $true),
+        (New-Key 'right' $false), (New-Key 'shift' $false)) 90
+    $copyStart = (Get-Serial $SerialPath).Length
+    Send-QmpEvents @((New-Key 'ctrl' $true), (New-Key 'c' $true),
+        (New-Key 'c' $false), (New-Key 'ctrl' $false)) 90
+    [void](Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C154-COPY length=1 result=PASS' $copyStart 20)
+}
+
+function Launch-ManagedTaskManager([int]$ScreenWidth, [int]$ScreenHeight,
+                                   [string]$SerialPath) {
+    $menuCount = 21
+    $menuHeight = 30 + $menuCount * 22 + 36
+    $workHeight = $ScreenHeight - 40
+    $menuY = [Math]::Max(0, $workHeight - $menuHeight)
+    $contentY = $menuY + 31
+    $footerY = $menuY + 30 + $menuCount * 22
+    Click-Screen 50 ($ScreenHeight - 20)
+    Click-Screen 70 ($footerY + 18)
+    $before = (Get-Serial $SerialPath).Length
+    # Fixed All Programs index 14 in the C161 alphabetic list.
+    Click-Screen 115 ($contentY + 14 * 22 + 11)
+    [void](Wait-Serial $SerialPath '^\[APPMODEL-MANAGED-LAUNCH\] source=StartMenu appId=com\.guidexos\.apps\.managed\.taskmanager selector=00000007 image=/system/apps/GXOSAPP\.ELF metadata=valid' $before 35)
+    [void](Wait-Serial $SerialPath '^\[C150-APP-LAUNCH\] id=com\.guidexos\.apps\.managed\.taskmanager generation=[0-9A-Fa-f]+ selector=00000007 kind=normal' $before 35)
+    $launch = Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C161-TM-LAUNCH id=7 reg=4 ctr=3 cap=3 max=20 snap=\d+ n=\d+ self=(\d+) active=1 result=PASS' $before 35
+    return $launch.Match.Groups[1].Value
+}
+
+function Invoke-TaskManagerRefresh([int]$ScreenWidth, [int]$ScreenHeight,
+                                   [string]$SerialPath) {
+    $before = (Get-Serial $SerialPath).Length
+    Send-QmpEvents @((New-Key 'ctrl' $true), (New-Key 'r' $true),
+        (New-Key 'r' $false), (New-Key 'ctrl' $false)) 55
+    return (Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C161-TM-R s=Ctrl\+R st=\d+ n=\d+ sel=([^ ]+) v=(\d+) ap=true self=(\d+) active=([01]) result=PASS' $before 20)
+}
+
+function Close-ManagedTaskManager([int]$ScreenWidth, [int]$ScreenHeight,
+                                  [string]$SerialPath) {
+    $windowX = [Math]::Max(0, [int](($ScreenWidth - 800) / 2))
+    $windowY = [Math]::Max(0, [int](($ScreenHeight - 370) / 2))
+    $before = (Get-Serial $SerialPath).Length
+    Click-Screen ($windowX + 216) ($windowY + 24 + 290)
+    [void](Wait-Serial $SerialPath '^\[C161-TM-CLOSE-DISPATCH\] selector=7 controls=0 result=PASS' $before 25)
+    [void](Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C161-TM-CLOSE controls=0 selection=none result=PASS' $before 15)
+}
+
+function Invoke-TaskManagerPointerWheelFocus([int]$ScreenWidth,
+    [int]$ScreenHeight, [string]$SerialPath) {
+    $windowX = [Math]::Max(0, [int](($ScreenWidth - 800) / 2))
+    $windowY = [Math]::Max(0, [int](($ScreenHeight - 370) / 2))
+    $before = (Get-Serial $SerialPath).Length
+    Click-Screen ($windowX + 25) ($windowY + 24 + 58 + 9 * 18 + 9)
+    $selected = Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C161-TM-SELECT source=pointer row=\d+ identity=(\d+:\d+) on=[01] result=PASS' $before 20
+    $wheelStart = (Get-Serial $SerialPath).Length
+    Send-QmpEvents @((New-Wheel 1)) 90
+    [void](Wait-Serial $SerialPath '^\[C137-NATIVE-INPUT\] kind=wheel delta=0*1 .*buttons-preserved=true result=PASS' $wheelStart 20)
+    $refresh = Invoke-TaskManagerRefresh $ScreenWidth $ScreenHeight $SerialPath
+    if ($refresh.Match.Groups[1].Value -ne $selected.Match.Groups[1].Value -or
+        [int]$refresh.Match.Groups[2].Value -lt 1) {
+        throw 'C161 pointer/wheel refresh did not retain the selected identity and scroll the list viewport.'
+    }
+
+    $refreshBefore = (Get-Serial $SerialPath).Length
+    $refreshButtonX = $windowX + 80
+    $refreshButtonY = $windowY + 24 + 290
+    Click-Screen $refreshButtonX $refreshButtonY
+    [void](Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C161-TM-R s=button/keyboard st=\d+ n=\d+ sel=[^ ]+ v=\d+ ap=true self=\d+ active=1 result=PASS' $refreshBefore 20)
+
+    $listFocusStart = (Get-Serial $SerialPath).Length
+    Click-Screen ($windowX + 25) ($windowY + 24 + 58 + 9 * 18 + 9)
+    [void](Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C161-TM-SELECT source=pointer row=\d+ identity=\d+:\d+ on=[01] result=PASS' $listFocusStart 15)
+    $focusStart = (Get-Serial $SerialPath).Length
+    Press-Key 'tab'
+    [void](Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C161-TM-FOCUS control=2 shift=false result=PASS' $focusStart 15)
+    $focusStart = (Get-Serial $SerialPath).Length
+    Send-QmpEvents @((New-Key 'shift' $true), (New-Key 'tab' $true),
+        (New-Key 'tab' $false), (New-Key 'shift' $false)) 90
+    [void](Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C161-TM-FOCUS control=1 shift=true result=PASS' $focusStart 15)
+}
+
+function Invoke-C161ProductionScenario([int]$Number, [int]$ScreenWidth,
+    [int]$ScreenHeight, [string]$SerialPath) {
+    $launchIds = [System.Collections.Generic.List[string]]::new()
+    $refreshCount = 0
+    $closeCount = 0
+    $finalSelected = 'none'
+    $finalViewport = -1
+
+    if ($Number -eq 1) {
+        Invoke-NotesClipboardSmoke $SerialPath
+        $identity = Launch-ManagedTaskManager $ScreenWidth $ScreenHeight $SerialPath
+        $launchIds.Add($identity)
+        Invoke-TaskManagerPointerWheelFocus $ScreenWidth $ScreenHeight $SerialPath
+        $refreshCount += 2
+        for ($refreshIndex = 0; $refreshIndex -lt 5; $refreshIndex++) {
+            $refresh = Invoke-TaskManagerRefresh $ScreenWidth $ScreenHeight $SerialPath
+            if ($refresh.Match.Groups[3].Value -ne $identity -or
+                $refresh.Match.Groups[4].Value -ne '1') {
+                throw 'C161 Task Manager self identity changed or became inactive during boot 1 refresh.'
+            }
+            $finalSelected = $refresh.Match.Groups[1].Value
+            $finalViewport = [int]$refresh.Match.Groups[2].Value
+            $refreshCount++
+        }
+        Close-ManagedTaskManager $ScreenWidth $ScreenHeight $SerialPath
+        $closeCount++
+    } elseif ($Number -eq 2) {
+        # Recreate a real active Calculator surface after the keyboard suite's
+        # deliberate close, then replace it with Managed Task Manager.
+        Send-CalculatorLaunch $true $ScreenWidth $ScreenHeight $SerialPath
+        $calcStart = (Get-Serial $SerialPath).Length
+        Press-Key '7'
+        Send-QmpEvents @((New-Key 'shift' $true), (New-Key '8' $true),
+            (New-Key '8' $false), (New-Key 'shift' $false)) 90
+        Press-Key '8'; Press-Key 'ret'
+        [void](Wait-Display $SerialPath '56' $calcStart 20)
+        $firstIdentity = Launch-ManagedTaskManager $ScreenWidth $ScreenHeight $SerialPath
+        $launchIds.Add($firstIdentity)
+        for ($refreshIndex = 0; $refreshIndex -lt 10; $refreshIndex++) {
+            $refresh = Invoke-TaskManagerRefresh $ScreenWidth $ScreenHeight $SerialPath
+            if ($refresh.Match.Groups[3].Value -ne $firstIdentity -or
+                $refresh.Match.Groups[4].Value -ne '1') {
+                throw 'C161 Task Manager self identity changed or became inactive during boot 2 refresh.'
+            }
+            $finalSelected = $refresh.Match.Groups[1].Value
+            $refreshCount++
+        }
+        Close-ManagedTaskManager $ScreenWidth $ScreenHeight $SerialPath
+        $closeCount++
+        $secondIdentity = Launch-ManagedTaskManager $ScreenWidth $ScreenHeight $SerialPath
+        $launchIds.Add($secondIdentity)
+        if ($secondIdentity -eq $firstIdentity) {
+            throw 'C161 Task Manager relaunch reused the previous lifetime identity.'
+        }
+        for ($refreshIndex = 0; $refreshIndex -lt 10; $refreshIndex++) {
+            $refresh = Invoke-TaskManagerRefresh $ScreenWidth $ScreenHeight $SerialPath
+            if ($refresh.Match.Groups[3].Value -ne $secondIdentity -or
+                $refresh.Match.Groups[4].Value -ne '1') {
+                throw 'C161 relaunched Task Manager self identity changed or became inactive.'
+            }
+            $finalSelected = $refresh.Match.Groups[1].Value
+            $refreshCount++
+        }
+        Close-ManagedTaskManager $ScreenWidth $ScreenHeight $SerialPath
+        $closeCount++
+    } elseif ($Number -eq 3) {
+        $seen = [System.Collections.Generic.HashSet[string]]::new(
+            [System.StringComparer]::Ordinal)
+        for ($cycle = 1; $cycle -le 25; $cycle++) {
+            $identity = Launch-ManagedTaskManager $ScreenWidth $ScreenHeight $SerialPath
+            if (-not $seen.Add($identity)) {
+                throw "C161 lifecycle cycle $cycle reused lifetime identity $identity."
+            }
+            $launchIds.Add($identity)
+            $refresh = Invoke-TaskManagerRefresh $ScreenWidth $ScreenHeight $SerialPath
+            if ($refresh.Match.Groups[3].Value -ne $identity -or
+                $refresh.Match.Groups[4].Value -ne '1') {
+                throw "C161 lifecycle cycle $cycle changed or deactivated its self identity."
+            }
+            $finalSelected = $refresh.Match.Groups[1].Value
+            $refreshCount++
+            Close-ManagedTaskManager $ScreenWidth $ScreenHeight $SerialPath
+            $closeCount++
+        }
+        # Notes -> Task Manager proves the app registry transition after churn.
+        Send-ManagedNotesLaunch $ScreenWidth $ScreenHeight $SerialPath
+        $finalIdentity = Launch-ManagedTaskManager $ScreenWidth $ScreenHeight $SerialPath
+        if (-not $seen.Add($finalIdentity)) {
+            throw 'C161 Task Manager identity did not change after a Notes transition.'
+        }
+        $launchIds.Add($finalIdentity)
+        for ($refreshIndex = 0; $refreshIndex -lt 100; $refreshIndex++) {
+            $refresh = Invoke-TaskManagerRefresh $ScreenWidth $ScreenHeight $SerialPath
+            if ($refresh.Match.Groups[3].Value -ne $finalIdentity -or
+                $refresh.Match.Groups[4].Value -ne '1') {
+                throw "C161 real refresh stress changed or deactivated self identity at refresh $($refreshIndex + 1)."
+            }
+            $finalSelected = $refresh.Match.Groups[1].Value
+            $finalViewport = [int]$refresh.Match.Groups[2].Value
+            $refreshCount++
+        }
+        # Keep the final valid Task Manager snapshot alive to capture state.
+    } else {
+        throw "Unknown C161 production boot number $Number."
+    }
+
+    if ($finalSelected -eq 'none') {
+        $last = [regex]::Matches((Get-Serial $SerialPath),
+            '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-R s=Ctrl\+R st=\d+ n=\d+ sel=([^ ]+) v=(\d+) ap=true self=(\d+) on=1 result=PASS')
+        if ($last.Count -gt 0) {
+            $finalSelected = $last[$last.Count - 1].Groups[1].Value
+            $finalViewport = [int]$last[$last.Count - 1].Groups[2].Value
+        }
+    }
+    return [pscustomobject]@{
+        LaunchIds = @($launchIds.ToArray())
+        LaunchCount = $launchIds.Count
+        CloseCount = $closeCount
+        RefreshCount = $refreshCount
+        FinalLifetimeId = if ($Number -eq 3) { $launchIds[$launchIds.Count - 1] } else { $null }
+        FinalSelectedIdentity = $finalSelected
+        FinalViewport = $finalViewport
+        ActiveAtEnd = $Number -eq 3
     }
 }
 
@@ -428,6 +675,7 @@ function Invoke-ProductionBoot([int]$Number, [string]$Scenario,
     $session = Start-Qemu $serial (Join-Path $root 'qemu.stdout.log') `
         (Join-Path $root 'qemu.stderr.log') $esp $Qemu $Ovmf
     $process = $session.Process
+    $c161Scenario = $null
     try {
         Write-Host ("C158 production boot {0}/3: waiting for the Notes baseline." -f $Number)
         [void](Wait-Serial $serial '^\[desktop\] bare-metal desktop icon init completed' 0 $TimeoutSeconds)
@@ -446,6 +694,10 @@ function Invoke-ProductionBoot([int]$Number, [string]$Scenario,
             [void](Wait-Serial $serial '^\[C160-NATIVE-SNAPSHOT-TESTS\] cases=[0-9A-Fa-f]+ stress=1000 failed=[0-9A-Fa-f]{8}:[0-9A-Fa-f]{8} real-records=PASS identity=PASS bounded=PASS read-only=PASS result=PASS' 0 $TimeoutSeconds)
             [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C160-MANAGED-SNAPSHOT-TESTS cases=[0-9]+ v1=NotSupported malformed=Rejected layout=PASS identity=PASS stress=1000 result=PASS' 0 $TimeoutSeconds)
             [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C160-SNAPSHOT appId=com\.guidexos\.apps\.managed\.notes source=3 instance=[0-9]+ count=[0-9]+ active=1 previous=none result=PASS' 0 $TimeoutSeconds)
+        }
+        if ($PhaseC161) {
+            [void](Wait-Serial $serial '^\[C161-TM-REGISTRY\] identity=com\.guidexos\.apps\.managed\.taskmanager selector=7 catalog=7 display=Managed-Task-Manager native-taskmanager=preserved native-calculator=preserved managed-calculator=distinct result=PASS' 0 $TimeoutSeconds)
+            [void](Wait-Serial $serial '^\[C161-LAUNCHER-COUNTS\] catalog=00000007 startEntries=00000011 pinned=00000010 allPrograms=00000014 native-taskmanager=preserved result=PASS' 0 30)
         }
         $screen = Get-Serial $serial
         $widthMatch = [regex]::Match($screen, '(?m)^\[DESKTOP CAP\] framebuffer_width=0x([0-9A-Fa-f]+)')
@@ -470,7 +722,8 @@ function Invoke-ProductionBoot([int]$Number, [string]$Scenario,
         Send-CalculatorLaunch $true $screenWidth $screenHeight $serial
         [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C158-CALC-CORE cases=\d+ state-bytes=21 result=PASS' 0 30)
         [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C158-CALC-UI cases=\d+ pointer=PASS keyboard=PASS focus=PASS exact-once=PASS result=PASS' 0 30)
-        [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C158-CALC-REGISTRY cases=\d+ entries=3 controls=18 cap=18 teardown=PASS relaunch=PASS result=PASS' 0 30)
+        $registryEntriesExpected = if ($PhaseC161) { 4 } else { 3 }
+        [void](Wait-Serial $serial ('^\[C102-MANAGED-OUTPUT\] C158-CALC-REGISTRY cases=\d+ entries={0} controls=18 cap=18 teardown=PASS relaunch=PASS result=PASS' -f $registryEntriesExpected) 0 30)
         [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C158-CALC-LIFECYCLE cycles=25 fresh=PASS one-surface=PASS registration=PASS capture=none clipboard=unchanged result=PASS' 0 30)
         [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C158-CALC-STRESS commands=\d+ bounded=PASS no-wrap=PASS result=PASS' 0 30)
         [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C158-CALC-FOCUS events=\d+ index=valid exact-once=PASS modifiers=clear result=PASS' 0 30)
@@ -570,6 +823,37 @@ function Invoke-ProductionBoot([int]$Number, [string]$Scenario,
             throw "Unknown C158 scenario '$Scenario'."
         }
 
+        if ($PhaseC161) {
+            Write-Host ("C161 production boot {0}/3: exercising real Managed Task Manager lifecycle and input." -f $Number)
+            $c161Scenario = Invoke-C161ProductionScenario $Number $screenWidth $screenHeight $serial
+            $all = Get-Serial $serial
+            $taskManagerTests = [regex]::Matches($all,
+                '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-TESTS cases=(\d+) initial=PASS selection=identity stress=1000 result=PASS')
+            $taskManagerRefreshes = [regex]::Matches($all,
+                '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-R s=Ctrl\+R [^\r\n]*result=PASS')
+            $taskManagerLaunches = [regex]::Matches($all,
+                '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-LAUNCH id=7 reg=4 ctr=3 cap=3 max=20 [^\r\n]*result=PASS')
+            $taskManagerCloses = [regex]::Matches($all,
+                '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-CLOSE controls=0 selection=none result=PASS')
+            $taskManagerClipboard = [regex]::Matches($all,
+                '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-CLIPBOARD stage=launch preserved=true result=PASS')
+            if ($taskManagerTests.Count -ne 1 -or
+                [int]$taskManagerTests[0].Groups[1].Value -lt 20 -or
+                $taskManagerLaunches.Count -lt $c161Scenario.LaunchCount -or
+                $taskManagerClipboard.Count -lt $c161Scenario.LaunchCount -or
+                $taskManagerCloses.Count -lt $c161Scenario.CloseCount -or
+                $taskManagerRefreshes.Count -lt 1) {
+                throw "C161 $Scenario proof lacks focused, registration, refresh, or lifecycle evidence."
+            }
+            if ($Number -eq 3 -and $taskManagerRefreshes.Count -lt 100) {
+                throw "C161 boot 3 performed only $($taskManagerRefreshes.Count) Ctrl+R refreshes; 100 are required."
+            }
+            if ($all -match '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-[^\r\n]*result=FAIL' -or
+                $all -match '(?m)^\[C161-TM-[^\r\n]*result=FAIL') {
+                throw "C161 $Scenario boot reported failed Task Manager evidence."
+            }
+        }
+
         $full = Get-Serial $serial
         if ($full -match '(?m)^\[C102-MANAGED-OUTPUT\] C158-CALC-[^\r\n]*result=FAIL' -or
             $full -match '(?m)^\[C158-CALC-APP-REGISTRY\][^\r\n]*result=FAIL') {
@@ -590,14 +874,17 @@ function Invoke-ProductionBoot([int]$Number, [string]$Scenario,
             if ($Number -eq 1 -and $noteSnapshots.Count -lt 2) {
                 throw 'C160 boot 1 did not capture the Notes lifetime both before and after the Calculator transition.'
             }
-            if ($Number -eq 3 -and $calculatorSnapshots.Count -lt 27) {
+            if ($Number -eq 3 -and -not $PhaseC161 -and
+                $calculatorSnapshots.Count -lt 27) {
                 throw "C160 boot 3 did not verify a new snapshot identity for each lifecycle cycle: $($calculatorSnapshots.Count)."
             }
         }
-        $controlDown = [regex]::Matches($full, '(?m)^\[C156-KEYBOARD\] event=control-left-down ').Count
-        $controlUp = [regex]::Matches($full, '(?m)^\[C156-KEYBOARD\] event=control-left-up ').Count
-        $shiftDown = [regex]::Matches($full, '(?m)^\[C129-KEYBOARD\] shift=down side=left ').Count
-        $shiftUp = [regex]::Matches($full, '(?m)^\[C129-KEYBOARD\] shift=up side=left ').Count
+        # Serial writers can append keyboard markers to desktop output lines.
+        # Count marker tokens independently of line starts.
+        $controlDown = [regex]::Matches($full, '\[C156-KEYBOARD\] event=control-left-down ').Count
+        $controlUp = [regex]::Matches($full, '\[C156-KEYBOARD\] event=control-left-up ').Count
+        $shiftDown = [regex]::Matches($full, '\[C129-KEYBOARD\] shift=down side=left ').Count
+        $shiftUp = [regex]::Matches($full, '\[C129-KEYBOARD\] shift=up side=left ').Count
         if ($controlDown -ne $controlUp -or $shiftDown -ne $shiftUp) {
             throw "C158 $Scenario boot left a keyboard modifier unbalanced."
         }
@@ -614,6 +901,10 @@ function Invoke-ProductionBoot([int]$Number, [string]$Scenario,
             ProofRamdiskSha256 = Get-Hash $proofRamdisk
             CalculatorLaunches = [regex]::Matches($full, '(?m)^\[C102-MANAGED-OUTPUT\] C158-CALC-LAUNCH id=managed-calculator ').Count
             CalculatorCloses = [regex]::Matches($full, '(?m)^\[C102-MANAGED-OUTPUT\] C158-CALC-CLOSE controls=0 ').Count
+            TaskManagerScenario = $c161Scenario
+            TaskManagerLaunches = [regex]::Matches($full, '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-LAUNCH id=7 ').Count
+            TaskManagerCloses = [regex]::Matches($full, '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-CLOSE controls=0 ').Count
+            TaskManagerRefreshes = [regex]::Matches($full, '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-R s=Ctrl\+R ').Count
             ControlDown = $controlDown
             ControlUp = $controlUp
             ShiftDown = $shiftDown
@@ -645,12 +936,40 @@ function Invoke-OrdinaryBoot([int]$Number, [string]$Qemu, [string]$Ovmf) {
     $session = Start-Qemu $serial (Join-Path $root 'qemu.stdout.log') `
         (Join-Path $root 'qemu.stderr.log') $esp $Qemu $Ovmf
     $process = $session.Process
+    $ordinaryTaskManagerId = $null
     try {
         [void](Wait-Serial $serial '^\[desktop\] bare-metal desktop icon init completed' 0 $TimeoutSeconds)
+        if ($PhaseC161) {
+            [void](Wait-Serial $serial '^\[NATIVEAOT-PRODUCTION-LAUNCH\] applicationId=com\.guidexos\.apps\.managed\.notes recordId=com\.guidexos\.apps\.managed\.notes image=/system/apps/GXOSAPP\.ELF selector=00000004' 0 $TimeoutSeconds)
+            [void](Wait-Serial $serial '^\[C161-TM-REGISTRY\] identity=com\.guidexos\.apps\.managed\.taskmanager selector=7 catalog=7 display=Managed-Task-Manager native-taskmanager=preserved native-calculator=preserved managed-calculator=distinct result=PASS' 0 30)
+            $screen = Get-Serial $serial
+            $widthMatch = [regex]::Match($screen, '(?m)^\[DESKTOP CAP\] framebuffer_width=0x([0-9A-Fa-f]+)')
+            $heightMatch = [regex]::Match($screen, '(?m)^\[DESKTOP CAP\] framebuffer_height=0x([0-9A-Fa-f]+)')
+            if (-not $widthMatch.Success -or -not $heightMatch.Success) {
+                throw 'C161 ordinary boot could not read the production desktop dimensions.'
+            }
+            $screenWidth = [Convert]::ToInt32($widthMatch.Groups[1].Value, 16)
+            $screenHeight = [Convert]::ToInt32($heightMatch.Groups[1].Value, 16)
+            $calibrationStart = (Get-Serial $serial).Length
+            Send-QmpEvents (New-RelativeMove 1 1) 50
+            $calibrated = Wait-Serial $serial '^\[C138-NATIVE-INPUT\] kind=pointer-move .*result=PASS' $calibrationStart 20
+            $notesPoint = Get-ClientPoint $calibrated.Text
+            $notesWindowX = [Math]::Max(0, [int](($screenWidth - 600) / 2))
+            $notesWindowY = [Math]::Max(0, [int](($screenHeight - 360) / 2))
+            $script:cursor = [pscustomobject]@{
+                X = $notesPoint.X + $notesWindowX
+                Y = $notesPoint.Y + $notesWindowY + 24
+            }
+            $ordinaryTaskManagerId = Launch-ManagedTaskManager $screenWidth $screenHeight $serial
+        }
         $text = Get-Serial $serial
         if ($text -notmatch '(?m)^\[KERNEL\] Boot method: UEFI BootInfo' -or
-            $text -match 'PageFault|triple.?fault|FAIL_FAST|fatal kernel failure|boot failure|C158-CALC|C160-(?:APP-IDENTITY|NATIVE-SNAPSHOT|MANAGED-SNAPSHOT|SNAPSHOT|TASKMANAGER|APPMANAGER)') {
+            $text -match 'PageFault|triple.?fault|FAIL_FAST|fatal kernel failure|boot failure|C158-CALC-(?!APP-REGISTRY\][^\r\n]*result=PASS)|C160-(?:APP-IDENTITY|NATIVE-SNAPSHOT|MANAGED-SNAPSHOT|SNAPSHOT|TASKMANAGER|APPMANAGER)') {
             throw "Ordinary boot $Number failed or contains phase proof output."
+        }
+        if ($PhaseC161 -and ($text -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-LAUNCH id=7 reg=4 ctr=3 cap=3 max=20 snap=\d+ n=\d+ self=\d+ active=1 result=PASS' -or
+                $text -match '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-TESTS ')) {
+            throw "C161 ordinary boot $Number did not keep the production Task Manager active or included proof-only instrumentation."
         }
         Stop-Qemu $session.Port $process $session.QmpLog
         $process.Refresh()
@@ -661,6 +980,8 @@ function Invoke-OrdinaryBoot([int]$Number, [string]$Qemu, [string]$Ovmf) {
             SerialSha256 = Get-Hash $serial
             KernelSha256 = Get-Hash (Join-Path $esp 'kernel.elf')
             RamdiskSha256 = Get-Hash (Join-Path $esp 'ramdisk.img')
+            TaskManagerLifetimeId = $ordinaryTaskManagerId
+            ActiveApplication = if ($PhaseC161) { 'com.guidexos.apps.managed.taskmanager' } else { $null }
             ExitCode = $process.ExitCode
         }
         Remove-Item -LiteralPath $esp -Recurse -Force
@@ -699,7 +1020,7 @@ function Restore-CanonicalFiles {
 }
 
 function Install-C160CanonicalProducts([string]$Python) {
-    $canonicalStageRoot = Join-Path $EvidenceRoot 'staging\wallpaper-pack-c160-production'
+    $canonicalStageRoot = Join-Path $EvidenceRoot $(if ($PhaseC161) { 'staging\wallpaper-pack-c161-production' } else { 'staging\wallpaper-pack-c160-production' })
     $canonicalCompositeElfPath = Join-Path $canonicalCompositeRoot 'artifacts\HostLogProof.elf'
     $managedBuildArguments = @('-ExecutionPolicy','Bypass','-File',$managedBuild,
         '-RepoRoot',$RepoRoot,'-OutputRoot',$canonicalCompositeRoot,
@@ -709,9 +1030,10 @@ function Install-C160CanonicalProducts([string]$Python) {
         '-ManagedProjectMode','C160Composite','-C155ManagedNotesSession',
         '-C156ControlModifierShortcuts','-C157ManagedNotesNewDocument',
         '-C158ManagedCalculator','-HeapConfiguration','Primary4MiB','-PythonExe',$Python)
+    if ($PhaseC161) { $managedBuildArguments += '-C161ManagedTaskManager' }
     Invoke-Checked 'powershell' $managedBuildArguments
     if (-not (Test-Path -LiteralPath $canonicalCompositeElfPath -PathType Leaf)) {
-        throw "C160 canonical NativeAOT composite missing: $canonicalCompositeElfPath"
+        throw "Canonical NativeAOT composite missing: $canonicalCompositeElfPath"
     }
     $script:canonicalCompositeElf = $canonicalCompositeElfPath
     $script:canonicalCompositeHash = Get-Hash $canonicalCompositeElfPath
@@ -724,12 +1046,12 @@ function Install-C160CanonicalProducts([string]$Python) {
         '-C151ManagedOpenFileDialog','-C152ManagedNotesSaveWorkflow',
         '-C155ManagedNotesSession','-C156ControlModifierShortcuts','-C157ManagedNotesNewDocument')
     if (-not (Test-Path -LiteralPath $canonicalRamdisk -PathType Leaf)) {
-        throw 'C160 canonical production ramdisk was not generated.'
+        throw 'Canonical production ramdisk was not generated.'
     }
     Invoke-Checked $make @('-C',(Join-Path $RepoRoot 'kernel'),'ARCH=amd64',
         "EXTRA_CFLAGS=$canonicalKernelFlags",'-B')
     if (-not (Test-Path -LiteralPath $kernelPath -PathType Leaf)) {
-        throw 'C160 canonical kernel build did not produce kernel.elf.'
+        throw 'Canonical kernel build did not produce kernel.elf.'
     }
     $script:postC160KernelHash = Get-Hash $kernelPath
     Copy-Item -LiteralPath $kernelPath -Destination $espKernelPath -Force
@@ -742,7 +1064,7 @@ function Install-C160CanonicalProducts([string]$Python) {
     $script:restored = (Get-Hash $espKernelPath) -eq $script:postC160KernelHash -and
         (Get-Hash $protectedRamdiskPath) -eq $script:postC160RamdiskHash
     if (-not $script:restored) {
-        throw 'C160 post-phase kernel/ESP/ramdisk hashes do not match the committed source build.'
+        throw 'Post-phase kernel/ESP/ramdisk hashes do not match the source build.'
     }
 }
 
@@ -776,6 +1098,20 @@ foreach ($path in @($kernelPath, $espKernelPath, $protectedRamdiskPath, $bootloa
 $canonicalKernelHash = Get-Hash $kernelPath
 $espKernelHash = Get-Hash $espKernelPath
 $ramdiskHash = Get-Hash $protectedRamdiskPath
+if ($PhaseC161) {
+    $sourceBranch = (& git -C $RepoRoot branch --show-current).Trim()
+    if ($sourceBranch -ne 'v1.1_DOTNET_SUPPORT') {
+        throw "C161 requires the audited v1.1_DOTNET_SUPPORT branch, found '$sourceBranch'."
+    }
+    if ($canonicalKernelHash -ne '0BA852C64EA33D30EAE57C5E612A25B8F4358FF85D460F23A402E41C5BD220F1' -or
+        $espKernelHash -ne $canonicalKernelHash -or
+        $ramdiskHash -ne '32B8D57DBD47E5DC9B95E97204A255D95593FCF4C38430C39CE812FA9F7B23D0') {
+        throw 'C161 starting kernel/ESP/ramdisk hashes differ from the authoritative C160 ABI-v2 production artifacts.'
+    }
+    if ($ReuseBuiltProofKernel) {
+        throw 'C161 cannot reuse a proof kernel from another phase; its ABI-v2 Task Manager registration must be built here.'
+    }
+}
 if (-not $PhaseC160) {
     $ordinaryKernelHash = $canonicalKernelHash
     $ordinaryRamdiskHash = $ramdiskHash
@@ -822,11 +1158,15 @@ $managedBuildArguments = @('-ExecutionPolicy','Bypass','-File',$managedBuild,
     '-C156ControlModifierShortcuts','-C157ManagedNotesNewDocument',
     '-C158ManagedCalculator','-HeapConfiguration','Primary4MiB','-PythonExe',$python)
 if ($PhaseC160) { $managedBuildArguments += '-C160ApplicationSnapshotProof' }
+if ($PhaseC161) {
+    $managedBuildArguments += '-C161ManagedTaskManager'
+    $managedBuildArguments += '-C161TaskManagerProof'
+}
 Invoke-Checked 'powershell' $managedBuildArguments
 $compositeElf = Join-Path $compositeRoot 'artifacts\HostLogProof.elf'
 if (-not (Test-Path -LiteralPath $compositeElf -PathType Leaf)) { throw "C158 NativeAOT ELF missing: $compositeElf" }
 $compositeHash = Get-Hash $compositeElf
-Write-Host ("{0} proof NativeAOT composite built: {1}" -f $(if ($PhaseC160) { 'C160' } else { 'C158' }), $compositeHash) -ForegroundColor Green
+Write-Host ("{0} proof NativeAOT composite built: {1}" -f $(if ($PhaseC161) { 'C161' } elseif ($PhaseC160) { 'C160' } else { 'C158' }), $compositeHash) -ForegroundColor Green
 
 $generator = Join-Path $RepoRoot 'scripts\generate-wallpaper-pack.ps1'
 Invoke-Checked 'powershell' @('-ExecutionPolicy','Bypass','-File',$generator,
@@ -865,8 +1205,10 @@ $flags = @(
     '-DGXOS_NATIVEAOT_C156_CONTROL_MODIFIER_SHORTCUTS',
     '-DGXOS_NATIVEAOT_C157_MANAGED_NOTES_NEW_DOCUMENT',
     '-DGXOS_NATIVEAOT_C158_MANAGED_CALCULATOR')
+if ($PhaseC161) { $flags += '-DGXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER' }
 $canonicalKernelFlags = $flags -join ' '
 if ($PhaseC160) { $flags += '-DGXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF' }
+if ($PhaseC161) { $flags += '-DGXOS_NATIVEAOT_C161_TASK_MANAGER_PROOF' }
 $flags = $flags -join ' '
 if ($ReuseBuiltProofKernel) {
     if (-not (Test-Path -LiteralPath $proofKernel -PathType Leaf)) {
@@ -874,15 +1216,15 @@ if ($ReuseBuiltProofKernel) {
     }
     Write-Host 'C158 reusing the already built and preserved C158 proof kernel.'
 } else {
-    Write-Host 'C158 building the production kernel with managed Calculator metadata and launch routing.'
+    Write-Host $(if ($PhaseC161) { 'C161 building the proof kernel with Managed Task Manager metadata and routing.' } elseif ($PhaseC160) { 'C160 building the proof kernel with ABI-v2 snapshot instrumentation.' } else { 'C158 building the production kernel with managed Calculator metadata and launch routing.' })
     Invoke-Checked $make @('-C',(Join-Path $RepoRoot 'kernel'),'ARCH=amd64',"EXTRA_CFLAGS=$flags",'-B')
-    if (-not (Test-Path -LiteralPath $kernelPath -PathType Leaf)) { throw 'C158 native kernel build did not produce kernel.elf.' }
+    if (-not (Test-Path -LiteralPath $kernelPath -PathType Leaf)) { throw 'Proof kernel build did not produce kernel.elf.' }
     Copy-Item -LiteralPath $kernelPath -Destination $proofKernel -Force
 }
 $proofKernelHash = Get-Hash $proofKernel
 $settingsRecord = Join-Path $EvidenceRoot 'GXSETT.BIN'
 New-C151SettingsRecord $settingsRecord
-Write-Host "C158 proof kernel SHA-256: $proofKernelHash"
+Write-Host ("{0} proof kernel SHA-256: {1}" -f $(if ($PhaseC161) { 'C161' } elseif ($PhaseC160) { 'C160' } else { 'C158' }), $proofKernelHash)
 
 $production = [System.Collections.Generic.List[object]]::new()
 $production.Add((Invoke-ProductionBoot 1 'pointer-arithmetic' $qemu $ovmf $settingsRecord)) | Out-Null
@@ -890,9 +1232,9 @@ $production.Add((Invoke-ProductionBoot 2 'keyboard-focus' $qemu $ovmf $settingsR
 $production.Add((Invoke-ProductionBoot 3 'error-recovery-lifecycle' $qemu $ovmf $settingsRecord)) | Out-Null
 
 if ($PhaseC160) {
-    Write-Host 'C160 installing the clean ABI-v2 production kernel and matching composite/ramdisk.' -ForegroundColor Yellow
+    Write-Host $(if ($PhaseC161) { 'C161 installing the clean ABI-v2 production kernel and matching composite/ramdisk.' } else { 'C160 installing the clean ABI-v2 production kernel and matching composite/ramdisk.' }) -ForegroundColor Yellow
     Install-C160CanonicalProducts $python
-    Write-Host 'C160 post-phase production hashes verified; beginning ordinary boots.' -ForegroundColor Green
+    Write-Host $(if ($PhaseC161) { 'C161 post-phase production hashes verified; beginning ordinary boots.' } else { 'C160 post-phase production hashes verified; beginning ordinary boots.' }) -ForegroundColor Green
 } else {
     Restore-CanonicalFiles
     if (-not $script:restored) { throw 'C158 failed byte-for-byte restoration before ordinary boots.' }
@@ -900,7 +1242,7 @@ if ($PhaseC160) {
 }
 $ordinary = [System.Collections.Generic.List[object]]::new()
 for ($boot = 1; $boot -le 3; $boot++) {
-    Write-Host ("C158 ordinary restoration boot {0}/3." -f $boot)
+    Write-Host ("{0} ordinary production boot {1}/3." -f $(if ($PhaseC161) { 'C161' } elseif ($PhaseC160) { 'C160' } else { 'C158' }), $boot)
     $ordinary.Add((Invoke-OrdinaryBoot $boot $qemu $ovmf)) | Out-Null
 }
 if ($PhaseC160) {
@@ -942,6 +1284,10 @@ for ($boot = 1; $boot -le 3; $boot++) {
         SerialSha256 = Get-Hash $serial
         CalculatorLaunches = [regex]::Matches($text, '(?m)^\[C102-MANAGED-OUTPUT\] C158-CALC-LAUNCH id=managed-calculator ').Count
         CalculatorCloses = [regex]::Matches($text, '(?m)^\[C102-MANAGED-OUTPUT\] C158-CALC-CLOSE controls=0 ').Count
+        TaskManagerScenario = if ($PhaseC161) { $production[$boot - 1].TaskManagerScenario } else { $null }
+        TaskManagerLaunches = [regex]::Matches($text, '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-LAUNCH id=7 ').Count
+        TaskManagerCloses = [regex]::Matches($text, '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-CLOSE controls=0 ').Count
+        TaskManagerCtrlRRefreshes = [regex]::Matches($text, '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-R s=Ctrl\+R ').Count
         ProofKernelSha256 = $proofKernelHash
         ProofRamdiskSha256 = $proofRamdiskHash
     }) | Out-Null
@@ -957,19 +1303,21 @@ for ($boot = 1; $boot -le 3; $boot++) {
         SerialSha256 = Get-Hash $serial
         KernelSha256 = $ordinaryKernelHash
         RamdiskSha256 = $ordinaryRamdiskHash
+        TaskManagerLifetimeId = $ordinary[$boot - 1].TaskManagerLifetimeId
+        ActiveApplication = $ordinary[$boot - 1].ActiveApplication
     }) | Out-Null
 }
 
 $boot2Text = Get-Serial (Join-Path $EvidenceRoot 'production-boot-02\serial.log')
 $boot3Text = Get-Serial (Join-Path $EvidenceRoot 'production-boot-03\serial.log')
-$controlDownEvents = [regex]::Matches($boot2Text, '(?m)^\[C156-KEYBOARD\] event=control-(?:left|right)-down ')
-$controlUpEvents = [regex]::Matches($boot2Text, '(?m)^\[C156-KEYBOARD\] event=control-(?:left|right)-up ')
+$controlDownEvents = [regex]::Matches($boot2Text, '\[C156-KEYBOARD\] event=control-(?:left|right)-down ')
+$controlUpEvents = [regex]::Matches($boot2Text, '\[C156-KEYBOARD\] event=control-(?:left|right)-up ')
 $lastControlAggregate = [regex]::Matches($boot2Text,
-    '(?m)^\[C156-KEYBOARD\] event=control-(?:left|right)-(?:down|up) [^\r\n]*aggregate=([01])')
-$shiftDownEvents = [regex]::Matches($boot3Text, '(?m)^\[C129-KEYBOARD\] shift=down side=left ')
-$shiftUpEvents = [regex]::Matches($boot3Text, '(?m)^\[C129-KEYBOARD\] shift=up side=left ')
+    '\[C156-KEYBOARD\] event=control-(?:left|right)-(?:down|up) [^\r\n]*aggregate=([01])')
+$shiftDownEvents = [regex]::Matches($boot3Text, '\[C129-KEYBOARD\] shift=down side=left ')
+$shiftUpEvents = [regex]::Matches($boot3Text, '\[C129-KEYBOARD\] shift=up side=left ')
 $lastShiftAggregate = [regex]::Matches($boot3Text,
-    '(?m)^\[C129-KEYBOARD\] shift=(?:down|up) side=left aggregate=([01])')
+    '\[C129-KEYBOARD\] shift=(?:down|up) side=left aggregate=([01])')
 $controlBalanced = $controlDownEvents.Count -gt 0 -and
     $controlDownEvents.Count -eq $controlUpEvents.Count -and
     $lastControlAggregate.Count -gt 0 -and
@@ -981,9 +1329,9 @@ $shiftBalanced = $shiftDownEvents.Count -gt 0 -and
 if (-not $controlBalanced -or -not $shiftBalanced) {
     throw 'C158 production keyboard modifier events are unbalanced or finish pressed.'
 }
-$phaseLabel = if ($PhaseC160) { 'C160' } else { 'C158' }
-$manifestFile = if ($PhaseC160) { 'c160-proof-manifest.json' } else { 'c158-proof-manifest.json' }
-$ordinaryManifestFile = if ($PhaseC160) { 'c160-ordinary-manifest.json' } else { 'c158-ordinary-restoration-manifest.json' }
+$phaseLabel = if ($PhaseC161) { 'C161' } elseif ($PhaseC160) { 'C160' } else { 'C158' }
+$manifestFile = if ($PhaseC161) { 'c161-proof-manifest.json' } elseif ($PhaseC160) { 'c160-proof-manifest.json' } else { 'c158-proof-manifest.json' }
+$ordinaryManifestFile = if ($PhaseC161) { 'c161-ordinary-manifest.json' } elseif ($PhaseC160) { 'c160-ordinary-manifest.json' } else { 'c158-ordinary-restoration-manifest.json' }
 $reportedCompositeElf = if ($PhaseC160) { $canonicalCompositeElf } else { $compositeElf }
 $reportedCompositeHash = if ($PhaseC160) { $canonicalCompositeHash } else { $compositeHash }
 $reportedAbiVersion = if ($PhaseC160) { 2 } else { 1 }
@@ -992,7 +1340,10 @@ $c160FinalSnapshot = $null
 if ($PhaseC160) {
     $finalCalculatorSnapshots = [regex]::Matches($boot3Text,
         '(?m)^\[C102-MANAGED-OUTPUT\] C160-SNAPSHOT appId=com\.guidexos\.apps\.managed\.calculator source=3 instance=([0-9]+) count=([0-9]+) active=1 [^\r\n]*result=PASS')
-    if ($finalCalculatorSnapshots.Count -lt 27) { throw 'C160 final stable Calculator identity evidence is incomplete.' }
+    $requiredCalculatorSnapshots = if ($PhaseC161) { 1 } else { 27 }
+    if ($finalCalculatorSnapshots.Count -lt $requiredCalculatorSnapshots) {
+        throw 'C160 final stable Calculator identity evidence is incomplete.'
+    }
     $lastSnapshot = $finalCalculatorSnapshots[$finalCalculatorSnapshots.Count - 1]
     $c160FinalSnapshot = [ordered]@{
         applicationId = 'com.guidexos.apps.managed.calculator'
@@ -1002,12 +1353,137 @@ if ($PhaseC160) {
         activeCount = 1
     }
 }
-$manifest = [ordered]@{
-    schemaVersion = 1
-    phase = $phaseLabel
-    outcome = 'A'
-    branch = 'v1.1_DOTNET_SUPPORT'
-    application = [ordered]@{
+$c161FinalSnapshot = $null
+$c161FocusedTestCases = 0
+$c161ProductionRefreshes = 0
+$c161ManagerLaunches = 0
+$c161ManagerCloses = 0
+if ($PhaseC161) {
+    $boot1Text = Get-Serial (Join-Path $EvidenceRoot 'production-boot-01\serial.log')
+    $managerTests = [regex]::Match($boot1Text,
+        '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-TESTS cases=(\d+) initial=PASS selection=identity stress=1000 result=PASS')
+    if (-not $managerTests.Success -or [int]$managerTests.Groups[1].Value -lt 20) {
+        throw 'C161 focused UI/snapshot suite did not pass at 20 or more cases with 1000 wrapper calls.'
+    }
+    $c161FocusedTestCases = [int]$managerTests.Groups[1].Value
+
+    $boot3TaskLaunches = [regex]::Matches($boot3Text,
+        '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-LAUNCH id=7 reg=4 ctr=3 cap=3 max=20 snap=\d+ n=(\d+) self=(\d+) active=1 result=PASS')
+    $boot3TaskCloses = [regex]::Matches($boot3Text,
+        '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-CLOSE controls=0 selection=none result=PASS')
+    $boot3TaskRefreshes = [regex]::Matches($boot3Text,
+        '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-R s=Ctrl\+R st=\d+ n=\d+ sel=([^ ]+) v=(\d+) ap=true self=(\d+) active=1 result=PASS')
+    if ($boot3TaskLaunches.Count -lt 26 -or $boot3TaskCloses.Count -lt 25 -or
+        $boot3TaskRefreshes.Count -lt 100) {
+        throw 'C161 boot 3 lacks the required 25 lifecycle cycles and 100 real refreshes.'
+    }
+    $boot3LifetimeIds = @($boot3TaskLaunches | ForEach-Object {
+        $_.Groups[2].Value
+    })
+    $uniqueBoot3LifetimeIds = @($boot3LifetimeIds | Select-Object -Unique)
+    if ($uniqueBoot3LifetimeIds.Count -ne $boot3LifetimeIds.Count) {
+        throw 'C161 boot 3 reused a Task Manager lifetime identity across launches.'
+    }
+
+    $lastManagerLaunch = $boot3TaskLaunches[$boot3TaskLaunches.Count - 1]
+    $lastManagerRefresh = $boot3TaskRefreshes[$boot3TaskRefreshes.Count - 1]
+    $managerLifetime = $lastManagerLaunch.Groups[2].Value
+    if ($lastManagerRefresh.Groups[3].Value -ne $managerLifetime -or
+        $lastManagerRefresh.Groups[1].Value -eq 'none') {
+        throw 'C161 final refresh did not retain the active final Task Manager identity and a selected row.'
+    }
+    $selectedParts = $lastManagerRefresh.Groups[1].Value.Split(':')
+    if ($selectedParts.Length -ne 2) {
+        throw 'C161 final selected identity is malformed.'
+    }
+    [uint64]$selectedNumeric = [uint64]::Parse($selectedParts[1],
+        [System.Globalization.CultureInfo]::InvariantCulture)
+    $selectedHex = $selectedNumeric.ToString('X16')
+    $detailMatches = [regex]::Matches($boot3Text,
+        '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-DETAIL source=(\d+) identity=([0-9A-F]{16}) name=(.*?) state=([^ ]+) active=(Yes|No) result=PASS')
+    $appIdMatches = [regex]::Matches($boot3Text,
+        '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-ID (\d+):([0-9A-F]{16})=(\S+)')
+    if ($detailMatches.Count -eq 0 -or $appIdMatches.Count -eq 0) {
+        throw 'C161 final detail pane evidence is missing.'
+    }
+    $finalDetail = $detailMatches[$detailMatches.Count - 1]
+    $finalAppId = $appIdMatches[$appIdMatches.Count - 1]
+    if ($finalDetail.Groups[1].Value -ne $selectedParts[0] -or
+        $finalDetail.Groups[2].Value -ne $selectedHex -or
+        $finalAppId.Groups[1].Value -ne $selectedParts[0] -or
+        $finalAppId.Groups[2].Value -ne $selectedHex) {
+        throw 'C161 final detail pane identity does not match the selected C160 lifetime identity.'
+    }
+    $c161ProductionRefreshes = $boot3TaskRefreshes.Count
+    $c161ManagerLaunches = $boot3TaskLaunches.Count
+    $c161ManagerCloses = $boot3TaskCloses.Count
+    $c161FinalSnapshot = [ordered]@{
+        applicationId = 'com.guidexos.apps.managed.taskmanager'
+        lifetimeId = [uint64]$managerLifetime
+        lifetimeHex = ([uint64]$managerLifetime).ToString('X16')
+        snapshotRecordCount = [uint32]$lastManagerLaunch.Groups[1].Value
+        activeRecordCount = 1
+        activeApplicationId = 'com.guidexos.apps.managed.taskmanager'
+        selectedIdentitySource = [uint32]$selectedParts[0]
+        selectedLifetimeId = $selectedNumeric
+        selectedLifetimeHex = $selectedHex
+        selectedName = $finalDetail.Groups[3].Value
+        selectedApplicationId = $finalAppId.Groups[3].Value
+        selectedState = $finalDetail.Groups[4].Value
+        selectedActive = $finalDetail.Groups[5].Value
+        viewport = [uint32]$lastManagerRefresh.Groups[2].Value
+        detailMatchesSelection = $true
+        selfLifetimeStableFor100Refreshes = $true
+    }
+}
+$applicationManifest = if ($PhaseC161) {
+    [ordered]@{
+        displayName = 'Managed Task Manager'
+        applicationId = 'com.guidexos.apps.managed.taskmanager'
+        selector = 7
+        runtimeManagedDescriptorsBeforeAfterC161 = '3 -> 4 fixed descriptors'
+        nativeAotMetadataCatalogBeforeAfterC161 = '6 -> 7 fixed descriptors'
+        startMenuEntriesBeforeAfterC161 = '16 -> 17'
+        startMenuPinnedEntriesBeforeAfterC161 = '15 -> 16'
+        allProgramsEntriesBeforeAfterC161 = '19 -> 20'
+        nativeTaskManagerId = 'gxos.builtin.taskmanager'
+        nativeTaskManagerPreserved = $true
+        nativeCalculatorId = 'gxos.builtin.calculator'
+        managedCalculatorId = 'com.guidexos.apps.managed.calculator'
+        nativeAndManagedCalculatorIdentityDistinct = $true
+        simultaneousCalculatorSurfaceClaim = $false
+        appManagerCapacity = 16
+        shellRecords = 1
+        managedLogicalSurfaceRecords = 1
+        c160SnapshotRecordCapacity = 18
+        listCapacity = 18
+        listLabelCapacityCharacters = 48
+        listLabelStorageCharacters = 864
+        listLabelStorageBytes = 1728
+        applicationIdDisplayed = $true
+        lifetimeIdDisplayed = 'full 64-bit fixed-width hexadecimal'
+        stateField = 'C160 AppState enum'
+        activeField = 'C160 active flag'
+        sourceField = 'AppManagerInstance, ShellSurface, ManagedLogicalApplication'
+        shellDisplay = 'Terminal; no application ID; shown as shell surface'
+        classificationField = 'C160 source only; no invented kind field'
+        omittedFields = @('CPU usage', 'memory usage', 'process/thread view')
+        ordering = 'preserves C160 snapshot order'
+        selectionIdentity = 'GuideXosApplicationInstanceId: source plus 64-bit lifetime ID'
+        refresh = 'one new GuideXosHost.TryGetApplicationSnapshot wrapper call; preserve selection only by C160 identity'
+        ctrlR = 'same RefreshAndRender action; split key character suppressed'
+        disappearingSelection = 'clear selection/details; do not bind to a replacement lifetime'
+        viewport = 'surviving selection is revealed; cleared selection resets to valid origin'
+        failureBehavior = 'bounded status; retain last valid snapshot and rows; first failure stays empty'
+        truncationBehavior = 'visible Showing copied of total applications status'
+        focusOrder = 'Application list -> Refresh -> Close; three registered controls'
+        refreshAllocation = 'fixed 18-record snapshot and 18 x 48-character row storage; spans and fixed labels; no growing collection or per-refresh row strings'
+        mutationAuthority = 'none; no end-task, kill, suspend, resume, or activate action'
+        settingsVersion = 2
+        persistentSettingsAdded = $false
+    }
+} else {
+    [ordered]@{
         displayName = 'Managed Calculator'
         applicationId = 'com.guidexos.apps.managed.calculator'
         selector = 6
@@ -1029,6 +1505,47 @@ $manifest = [ordered]@{
         clipboard = 'GuideXosClipboard.Shared unchanged across Calculator test, launch, and teardown'
         lifecycleCloseAction = 'existing Host ABI action dispatch; ABI unchanged'
     }
+}
+$manifest = [ordered]@{
+    schemaVersion = 1
+    phase = $phaseLabel
+    outcome = 'A'
+    branch = 'v1.1_DOTNET_SUPPORT'
+    c159BlockersResolved = if ($PhaseC161) { @('missing managed snapshot API: resolved by C160 ABI v2 wrapper', 'missing stable instance identity: resolved by C160 source plus 64-bit lifetime token', 'row-index selection ambiguity: resolved by identity-based selection') } else { @() }
+    c161Contract = if ($PhaseC161) { [ordered]@{
+        snapshotPath = 'Task Manager UI -> GuideXosHost.TryGetApplicationSnapshot -> ABI v2 callback -> AppManager'
+        usesAuthoritativeC160Wrapper = $true
+        directNativeCallbackFromApplication = $false
+        duplicateSnapshotModel = $false
+        secondApplicationRegistry = $false
+        rowIndexIsIdentity = $false
+        readOnly = $true
+        killOrEndTaskAuthority = $false
+        fakeCpuOrMemoryMetrics = $false
+        hostAbiVersion = 2
+        hostTableBytes = 112
+        v1PrefixBytes = 104
+        snapshotCallbackOffset = 104
+        recordBytes = 168
+        snapshotRecordCapacity = 18
+        snapshotBufferBytes = 3024
+        appManagerSlots = 16
+        settingsFormatVersion = 2
+        nativeTaskManagerPreserved = $true
+        nativeCalculatorPreserved = $true
+        shellTruth = 'Terminal is a ShellSurface record with no application ID; it is not described as a process'
+        managedSurfaceTruth = 'one active managed logical surface; replaced surfaces are not claimed to remain running'
+    } } else { $null }
+    application = $applicationManifest
+    taskManager = if ($PhaseC161) { [ordered]@{
+        focusedCases = $c161FocusedTestCases
+        wrapperSnapshotCallsPerFocusedStress = 1000
+        productionRefreshCountBoot3 = $c161ProductionRefreshes
+        lifecycleLaunchCountBoot3 = $c161ManagerLaunches
+        lifecycleCloseCountBoot3 = $c161ManagerCloses
+        lifecycleUniqueIdentitiesBoot3 = $true
+        finalSnapshot = $c161FinalSnapshot
+    } } else { $null }
     nativeAot = [ordered]@{
         compositeElf = $reportedCompositeElf
         compositeSha256 = $reportedCompositeHash
@@ -1038,23 +1555,33 @@ $manifest = [ordered]@{
         proofKernelSha256 = $proofKernelHash
         proofRamdisk = $proofRamdisk
         proofRamdiskSha256 = $proofRamdiskHash
+        c160StartingKernelSha256 = if ($PhaseC161) { $canonicalKernelHash } else { $null }
+        c160StartingEspKernelSha256 = if ($PhaseC161) { $espKernelHash } else { $null }
+        c160StartingRamdiskSha256 = if ($PhaseC161) { $ramdiskHash } else { $null }
+        c161CleanProductionKernelSha256 = if ($PhaseC161) { $postC160KernelHash } else { $null }
+        c161CleanProductionRamdiskSha256 = if ($PhaseC161) { $postC160RamdiskHash } else { $null }
         heap = 'Primary4MiB'
         abiVersion = $reportedAbiVersion
         abiTableBytes = $reportedAbiSize
         legacyPrefixBytes = 104
         snapshotCallbackOffset = 104
         settingsFormatVersion = 2
+        newHostCallAdded = $false
+        reflectionAdded = $false
+        proofOnlyInstrumentationExcludedFromCleanCompositeAndKernel = if ($PhaseC161) { $true } else { $null }
         floatingPointCalculatorSupport = $false
         c128LifecycleSuite = 'unverified; no result claimed'
     }
     regressions = [ordered]@{
         C156 = 'modifier decode 10/10; shortcut routing 15/15; live Calculator Ctrl+9 ignored; modifier balance verified'
-        C129 = 'focused 31/31 passed; standalone runner timed out before QMP input marker; production Calculator Tab and Shift+Tab passed with Shift released'
+        C129 = 'production Calculator and Task Manager Tab/Shift+Tab passed with Shift released; standalone C129 run not claimed by this runner'
         C150 = 'managed lifecycle 8/8; canonical return target 10/10; Calculator clean close/fresh launch and Notes -> Calculator -> Notes replacement verified'
         C154 = 'clipboard test PASS; Calculator lifetime kept shared clipboard unchanged'
-        C157 = 'Notes New-document suite PASS before App Model transition'
+        C157 = if ($PhaseC161) { 'Notes New-document suite plus production Ctrl+N, edit, Copy, Task Manager launch/refresh clipboard-preservation checks PASS; C154 Paste suite PASS separately' } else { 'Notes New-document suite PASS before App Model transition' }
         ButtonFocus = 'C158 focused routing suite covers all 18 controls, exact-once Space/Enter behavior, Tab and Shift+Tab'
-        C160 = if ($PhaseC160) { 'AppManager ABA and wrap proof PASS; native and managed snapshot stress 1000/1000; ABI v1 prefix and malformed-table fixtures PASS; shell, Calculator, Task Manager, Notes and managed logical application records verified' } else { 'not run' }
+        C160 = if ($PhaseC160) { 'AppManager identity 29/29; native snapshot 34/34 and 1000-call stress; managed snapshot 22/22 and 1000-call stress; ABI v1 prefix and malformed-table fixtures PASS; shell, Calculator, Task Manager, Notes and managed logical application records verified' } else { 'not run' }
+        C161 = if ($PhaseC161) { "focused UI/snapshot $c161FocusedTestCases cases PASS; 1000 wrapper calls PASS; boot 3 $c161ProductionRefreshes real Ctrl+R refreshes PASS; 25 unique Task Manager launches and 25 closes PASS; self identity stable and active; pointer selection, real wheel, Refresh button, Ctrl+R, Tab/Shift+Tab, close and relaunch PASS" } else { 'not run' }
+        C137 = if ($PhaseC161) { 'real QMP wheel-down moved the Task Manager ListBox viewport; shared NaturalScroll and ScrollLinesPerNotch policy used; standalone 46/46 result not claimed' } else { 'not run' }
     }
     productionBoots = @($productionRecords.ToArray())
     ordinaryBoots = @($ordinaryRecords.ToArray())
@@ -1069,19 +1596,25 @@ $manifest = [ordered]@{
         canonicalPostPhaseProductsVerified = if ($PhaseC160) { $script:restored } else { $null }
         preC160KernelSha256 = if ($PhaseC160) { $canonicalKernelHash } else { $null }
         postC160KernelSha256 = if ($PhaseC160) { $postC160KernelHash } else { $null }
+        preC161KernelSha256 = if ($PhaseC161) { $canonicalKernelHash } else { $null }
+        finalPostC161KernelSha256 = if ($PhaseC161) { $postC160KernelHash } else { $null }
         preC160RamdiskSha256 = if ($PhaseC160) { $ramdiskHash } else { $null }
         postC160RamdiskSha256 = if ($PhaseC160) { $postC160RamdiskHash } else { $null }
+        preC161RamdiskSha256 = if ($PhaseC161) { $ramdiskHash } else { $null }
+        finalPostC161RamdiskSha256 = if ($PhaseC161) { $postC160RamdiskHash } else { $null }
         espKernelMatchesPostC160 = if ($PhaseC160) { (Get-Hash $espKernelPath) -eq $postC160KernelHash } else { $null }
+        espKernelMatchesPostC161 = if ($PhaseC161) { (Get-Hash $espKernelPath) -eq $postC160KernelHash } else { $null }
         protectedRamdiskUpdatedForAbiV2 = if ($PhaseC160) { $postC160RamdiskHash -ne $ramdiskHash } else { $null }
+        protectedRamdiskUpdatedForC161Composite = if ($PhaseC161) { $postC160RamdiskHash -ne $ramdiskHash } else { $null }
         proofMediaIsolated = $true
     }
     finalState = [ordered]@{
         calculatorManagedGeneration = $script:finalCalculatorGeneration
         nativeLaunchGenerationHex = $script:finalNativeLaunchGeneration
-        activeApplicationId = 'com.guidexos.apps.managed.calculator'
+        activeApplicationId = if ($PhaseC161) { 'com.guidexos.apps.managed.taskmanager' } else { 'com.guidexos.apps.managed.calculator' }
         display = '0'
         phase = 'EnteringLeft'
-        registeredControls = 18
+        registeredControls = if ($PhaseC161) { 3 } else { 18 }
         control = 'released'
         controlEventsBalanced = $controlBalanced
         shift = 'released'
@@ -1093,13 +1626,16 @@ $manifest = [ordered]@{
         hostAbiVersion = $reportedAbiVersion
         hostAbiTableBytes = $reportedAbiSize
         applicationSnapshot = $c160FinalSnapshot
+        managedTaskManagerSnapshot = $c161FinalSnapshot
+        taskManagerControlCapacity = if ($PhaseC161) { 3 } else { $null }
+        sharedControlHostMaximum = if ($PhaseC161) { 20 } else { $null }
     }
 }
 $manifestPath = Join-Path $EvidenceRoot $manifestFile
 $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
 $ordinaryManifest = [ordered]@{
     schemaVersion = 1
-    phase = if ($PhaseC160) { 'C160-ordinary-post-phase' } else { 'C158-ordinary-restoration' }
+    phase = if ($PhaseC161) { 'C161-ordinary-post-phase' } elseif ($PhaseC160) { 'C160-ordinary-post-phase' } else { 'C158-ordinary-restoration' }
     status = 'PASS'
     protected = $manifest.restoration
     ordinaryBoots = @($ordinaryRecords.ToArray())

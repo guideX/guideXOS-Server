@@ -30,9 +30,14 @@ internal static class GuideXosManagedCalculatorC158Tests
             LogCaseLine(host, "C158-CALC-UI cases="u8, uiCases,
                 " pointer=PASS keyboard=PASS focus=PASS exact-once=PASS result=PASS"u8);
         else host?.TryLog("C158-CALC-UI result=FAIL"u8);
+        int expectedRegistryEntries = 3;
+#if HOSTLOGPROOF_C161_MANAGED_TASK_MANAGER
+        expectedRegistryEntries = 4;
+#endif
         if (registration)
             LogCaseLine(host, "C158-CALC-REGISTRY cases="u8, registrationCases,
-                " entries=3 controls=18 cap=18 teardown=PASS relaunch=PASS result=PASS"u8);
+                " entries="u8, expectedRegistryEntries,
+                " controls=18 cap=18 teardown=PASS relaunch=PASS result=PASS"u8);
         else host?.TryLog("C158-CALC-REGISTRY result=FAIL"u8);
         if (lifecycle && clipboardUnchanged)
             LogCaseLine(host, "C158-CALC-LIFECYCLE cycles="u8, lifecycleCycles,
@@ -336,8 +341,12 @@ internal static class GuideXosManagedCalculatorC158Tests
             out GuideXosApplicationDescriptor descriptor) &&
             descriptor.Name.AsSpan().SequenceEqual("Managed Calculator"u8) &&
             descriptor.Factory != null;
+        int expectedRegistryEntries = 3;
+#if HOSTLOGPROOF_C161_MANAGED_TASK_MANAGER
+        expectedRegistryEntries = 4;
+#endif
         passed &= Case(ref cases, lookup &&
-            GuideXosApplicationRegistry.RegistrationCount == 3 &&
+            GuideXosApplicationRegistry.RegistrationCount == expectedRegistryEntries &&
             ManagedCalculatorC158.ApplicationId ==
                 "com.guidexos.apps.managed.calculator" &&
             ManagedCalculatorC158.ApplicationSelector == 6u);
@@ -525,6 +534,20 @@ internal static class GuideXosManagedCalculatorC158Tests
         int position = 0;
         GuideXosText.Append(line, ref position, prefix);
         GuideXosText.AppendUnsigned(line, ref position, (uint)count);
+        GuideXosText.Append(line, ref position, suffix);
+        host?.TryLog(line[..position]);
+    }
+
+    private static void LogCaseLine(GuideXosHost host,
+        ReadOnlySpan<byte> prefix, int firstCount, ReadOnlySpan<byte> middle,
+        int secondCount, ReadOnlySpan<byte> suffix)
+    {
+        Span<byte> line = stackalloc byte[240];
+        int position = 0;
+        GuideXosText.Append(line, ref position, prefix);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)firstCount);
+        GuideXosText.Append(line, ref position, middle);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)secondCount);
         GuideXosText.Append(line, ref position, suffix);
         host?.TryLog(line[..position]);
     }

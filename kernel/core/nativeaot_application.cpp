@@ -527,6 +527,47 @@ bool runC158ManagedCalculatorRegistrationTest() {
 }
 #endif
 
+#if defined(GXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER)
+bool runC161ManagedTaskManagerRegistrationTest() {
+    const gxos::apps::BuiltInAppMetadata* managed =
+        gxos::apps::FindManagedNativeAotAppByIdentity(
+            "com.guidexos.apps.managed.taskmanager");
+    const gxos::apps::BuiltInAppMetadata* nativeTaskManager =
+        gxos::apps::FindBuiltInAppMetadataByAppId("gxos.builtin.taskmanager");
+    const gxos::apps::BuiltInAppMetadata* nativeCalculator =
+        gxos::apps::FindBuiltInAppMetadataByAppId("gxos.builtin.calculator");
+    const gxos::apps::BuiltInAppMetadata* managedCalculator =
+        gxos::apps::FindManagedNativeAotAppByIdentity(
+            "com.guidexos.apps.managed.calculator");
+    const bool passed = managed && nativeTaskManager && nativeCalculator &&
+        managedCalculator && gxos::apps::ManagedNativeAotCatalogIsValid() &&
+        gxos::apps::ManagedNativeAotCatalogCount() == 7u &&
+        gxos::apps::IsManagedNativeAotRecordValid(*managed) &&
+        managed->managedSelector == 7u &&
+        gxos::apps::detail::builtInTextEquals(
+            managed->displayName, "Managed Task Manager") &&
+        gxos::apps::detail::builtInTextEquals(
+            managed->launchName, "Managed Task Manager") &&
+        gxos::apps::detail::builtInTextEquals(
+            managed->managedCompositeImagePath,
+            kProductionCompositeImage) &&
+        gxos::apps::IsBuiltInAppAvailableInBareMetal(*managed) &&
+        gxos::apps::BuiltInAppHasKnownAlias(
+            *managed, "Managed Task Manager") &&
+        nativeTaskManager->launchKind == gxos::apps::BuiltInAppLaunchKind::Native &&
+        gxos::apps::detail::builtInTextEquals(
+            nativeTaskManager->appId, "gxos.builtin.taskmanager") &&
+        nativeCalculator->launchKind == gxos::apps::BuiltInAppLaunchKind::Native &&
+        managedCalculator->managedSelector == 6u &&
+        gxos::apps::detail::builtInTextEquals(
+            managedCalculator->appId,
+            "com.guidexos.apps.managed.calculator");
+    serial::puts("[C161-TM-REGISTRY] identity=com.guidexos.apps.managed.taskmanager selector=7 catalog=7 display=Managed-Task-Manager native-taskmanager=preserved native-calculator=preserved managed-calculator=distinct result=");
+    serial::puts(passed ? "PASS\n" : "FAIL\n");
+    return passed;
+}
+#endif
+
 #if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
 bool runC150ReturnTargetTests() {
     bool passed = true;
@@ -950,6 +991,18 @@ public:
             const int32_t teardownResult = invokeManagedAction(
                 6u, 0x01580001u);
             serial::puts("[C158-CALC-CLOSE-DISPATCH] selector=6 controls=0 result=");
+            serial::puts(teardownResult == 0 ? "PASS\n" : "FAIL\n");
+        }
+#endif
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION) && \
+    defined(GXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER)
+        if (!m_replacingSurface && m_selector == 7u &&
+            ManagedReturnTarget::identityEquals(
+                m_surfaceApplicationId,
+                "com.guidexos.apps.managed.taskmanager")) {
+            const int32_t teardownResult = invokeManagedAction(
+                7u, 0x01610001u);
+            serial::puts("[C161-TM-CLOSE-DISPATCH] selector=7 controls=0 result=");
             serial::puts(teardownResult == 0 ? "PASS\n" : "FAIL\n");
         }
 #endif
@@ -4046,6 +4099,16 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
                                       LaunchReport* report,
                                       const char* launchContext,
                                       uint32_t launchContextLength) {
+#if defined(GXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER)
+    static bool c161RegistrationTestRun = false;
+    if (!c161RegistrationTestRun) {
+        c161RegistrationTestRun = true;
+        if (!runC161ManagedTaskManagerRegistrationTest()) {
+            serial::puts("[C161-TM-REGISTRY] launch=blocked result=FAIL\n");
+            return LaunchStatus::ManagedFailed;
+        }
+    }
+#endif
 #if defined(GXOS_NATIVEAOT_C158_MANAGED_CALCULATOR)
     static bool c158RegistrationTestRun = false;
     if (!c158RegistrationTestRun) {

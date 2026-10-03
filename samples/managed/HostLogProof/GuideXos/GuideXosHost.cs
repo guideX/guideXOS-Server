@@ -215,7 +215,7 @@ public sealed unsafe class GuideXosHost
         {
             if (!snapshot.TryGetRecord(index,
                     out GuideXosApplicationSnapshotRecord record) ||
-                !ValidateSnapshotRecord(ref record)) return false;
+            !IsValidApplicationSnapshotRecord(ref record)) return false;
             if (record.IsActive) ++activeCount;
             for (uint priorIndex = 0u; priorIndex < index; ++priorIndex)
             {
@@ -227,7 +227,7 @@ public sealed unsafe class GuideXosHost
         return activeCount <= 1u && snapshot.reserved == 0u;
     }
 
-    private static bool ValidateSnapshotRecord(
+    internal static bool IsValidApplicationSnapshotRecord(
         ref GuideXosApplicationSnapshotRecord record)
     {
         if (record.recordVersion != GxAbi.ApplicationSnapshotRecordVersion ||

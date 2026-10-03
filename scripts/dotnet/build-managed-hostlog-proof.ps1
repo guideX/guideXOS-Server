@@ -21,6 +21,8 @@ param(
     [switch]$C157ManagedNotesNewDocument,
     [switch]$C158ManagedCalculator,
     [switch]$C160ApplicationSnapshotProof,
+    [switch]$C161ManagedTaskManager,
+    [switch]$C161TaskManagerProof,
     [ValidateSet("Production", "C104AppA", "C104AppB", "C107Composite", "C108ThreadStaticLifecycle", "ProductionComposite", "C112Composite", "C113Composite", "C114Composite", "C115Composite", "C116Composite", "C117Composite", "C118Composite", "C119Composite", "C120Composite", "C121Composite", "C122Composite", "C123Composite", "C124Composite", "C125Composite", "C126Composite", "C127Composite", "C128Composite", "C129Composite", "C131Composite", "C132Composite", "C133Composite", "C134Composite", "C135Composite", "C136Composite", "C137Composite", "C138Composite", "C139Composite", "C140Composite", "C141Composite", "C142Composite", "C143Composite", "C144Composite", "C145Composite", "C146Composite", "C147Composite", "C148Composite", "C149Composite", "C150Composite", "C151Composite", "C152Composite", "C153Composite", "C154Composite", "C158Composite", "C160Composite")]
     [string]$ManagedProjectMode = "",
     [ValidateSet("Primary64KiB", "Primary128KiB", "Primary256KiB", "Primary4MiB", "Small4KiB")]
@@ -445,6 +447,16 @@ try {
             throw "C160 snapshot proof requires a ProductionApplication C160Composite build."
         }
         $publishProperties += "-p:HostLogProofC160ApplicationSnapshotProof=true"
+    }
+    if ($C161ManagedTaskManager) {
+        $publishProperties += "-p:HostLogProofC161ManagedTaskManager=true"
+    }
+    if ($C161TaskManagerProof) {
+        if ($managedProjectMode -ne "C160Composite" -or -not $ProductionApplication -or
+            -not $C161ManagedTaskManager) {
+            throw "C161 Task Manager proof requires a ProductionApplication C160Composite build with the C161 app enabled."
+        }
+        $publishProperties += "-p:HostLogProofC161TaskManagerProof=true"
     }
     $publishBatch = @(
         "@echo off"

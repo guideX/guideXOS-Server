@@ -68,6 +68,10 @@ public static unsafe class GuideXosApplicationRegistry
         new(6u, "Managed Calculator"u8,
             static () => new Applications.ManagedCalculatorC158()),
 #endif
+#if HOSTLOGPROOF_C161_MANAGED_TASK_MANAGER
+        new(7u, "Managed Task Manager"u8,
+            static () => new Applications.ManagedTaskManagerC161()),
+#endif
     };
     private static readonly GuideXosManagedApplicationLifetime s_lifetime = new();
 #if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
@@ -264,6 +268,15 @@ public static unsafe class GuideXosApplicationRegistry
         if (selector == 6u && host.IsAction &&
             host.LaunchContext.ActionId ==
                 Applications.ManagedCalculatorC158.CloseActionId &&
+            result == GuideXosResult.Success)
+        {
+            s_lifetime.Clear(selector);
+        }
+#endif
+#if HOSTLOGPROOF_C161_MANAGED_TASK_MANAGER
+        if (selector == Applications.ManagedTaskManagerC161.ApplicationSelector &&
+            host.IsAction && host.LaunchContext.ActionId ==
+                Applications.ManagedTaskManagerC161.CloseActionId &&
             result == GuideXosResult.Success)
         {
             s_lifetime.Clear(selector);

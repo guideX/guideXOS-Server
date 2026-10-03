@@ -280,6 +280,12 @@
   <PropertyGroup Condition="'$(HostLogProofC160ApplicationSnapshotProof)' == 'true'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C160_APPLICATION_SNAPSHOT_PROOF</DefineConstants>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofC161ManagedTaskManager)' == 'true'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C161_MANAGED_TASK_MANAGER</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofC161TaskManagerProof)' == 'true'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C161_TASK_MANAGER_PROOF</DefineConstants>
+  </PropertyGroup>
   <ItemGroup Condition="'$(HostLogProofMode)' != 'C152Composite' and '$(HostLogProofMode)' != 'C153Composite' and '$(HostLogProofMode)' != 'C154Composite' and '$(HostLogProofMode)' != 'C160Composite' and '$(HostLogProofC155ManagedNotesSession)' != 'true' and '$(HostLogProofC156ControlModifierShortcuts)' != 'true'">
     <Compile Remove="Applications/ManagedNotesC152.cs" />
   </ItemGroup>

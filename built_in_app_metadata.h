@@ -152,6 +152,12 @@ static const char* const kManagedCalculatorAliases[] = {
 };
 #endif
 
+#if defined(GXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER)
+static const char* const kManagedTaskManagerAliases[] = {
+	"Managed Task Manager"
+};
+#endif
+
 static const char* const kOnScreenKeyboardAliases[] = {
 	"On Screen Keyboard"
 };
@@ -200,6 +206,9 @@ static const BuiltInAppMetadata kBuiltInAppMetadata[] = {
 #endif
 #if defined(GXOS_NATIVEAOT_C158_MANAGED_CALCULATOR)
 , 	{ "com.guidexos.apps.managed.calculator", "Managed Calculator", "Managed Calculator", nullptr, nullptr, "app.generic", "Utilities", "Managed signed Int64 calculator with bounded checked arithmetic.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedCalculatorAliases, sizeof(detail::kManagedCalculatorAliases) / sizeof(detail::kManagedCalculatorAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 6u, kManagedNativeAotCompositeImagePath }
+#endif
+#if defined(GXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER)
+, 	{ "com.guidexos.apps.managed.taskmanager", "Managed Task Manager", "Managed Task Manager", nullptr, nullptr, "app.taskmanager", "System", "Read-only managed observer over the bounded C160 application snapshot.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedTaskManagerAliases, sizeof(detail::kManagedTaskManagerAliases) / sizeof(detail::kManagedTaskManagerAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 7u, kManagedNativeAotCompositeImagePath }
 #endif
 };
 
@@ -324,6 +333,14 @@ inline bool ManagedNativeAotCatalogIsValid() {
 		}
 	}
 	return true;
+}
+
+inline size_t ManagedNativeAotCatalogCount() {
+	size_t count = 0;
+	for (size_t i = 0; i < kBuiltInAppMetadataCount; ++i) {
+		if (IsManagedNativeAotApp(kBuiltInAppMetadata[i])) ++count;
+	}
+	return count;
 }
 
 inline const BuiltInAppMetadata* FindManagedNativeAotAppByIdentity(const char* identity) {

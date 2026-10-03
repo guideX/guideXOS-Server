@@ -25,8 +25,8 @@ public static class GuideXosListBoxTests
             if (!focus) host.TryLog("C118-TEST-GROUP focus=FAIL"u8);
             if (!reset) host.TryLog("C118-TEST-GROUP reset=FAIL"u8);
             host.TryLog(result
-                ? "C118-TESTS cases=38 storage=PASS selection=PASS pointer=PASS viewport=PASS focus=PASS reset=PASS result=PASS"u8
-                : "C118-TESTS cases=38 result=FAIL"u8);
+                ? "C118-TESTS cases=41 storage=PASS selection=PASS pointer=PASS viewport=PASS focus=PASS reset=PASS result=PASS"u8
+                : "C118-TESTS cases=41 result=FAIL"u8);
         }
         return result;
     }
@@ -69,8 +69,24 @@ public static class GuideXosListBoxTests
         bool labelOverflow = labels.TryAdd("123456") ==
             GuideXosListBoxPopulationResult.Rejected && labels.ItemCount == 1 &&
             labels.SelectedLabel == "12345";
+        GuideXosListBox spanLabels = new(2, 5, 2, 12);
+        ReadOnlySpan<char> bounded = "span";
+        bool spanPopulation = spanLabels.TryAdd(bounded) ==
+            GuideXosListBoxPopulationResult.Added &&
+            spanLabels.ItemCount == 1 &&
+            spanLabels.SelectedLabel == "span";
+        ReadOnlySpan<char> tooLong = "123456";
+        bool spanOverflow = spanLabels.TryAdd(tooLong) ==
+            GuideXosListBoxPopulationResult.Rejected &&
+            spanLabels.ItemCount == 1 && spanLabels.SelectedLabel == "span";
+        spanLabels.ClearSelection();
+        spanLabels.Focus();
+        bool clearSelection = !spanLabels.HasSelection &&
+            spanLabels.SelectedIndex == -1 && spanLabels.ItemCount == 1 &&
+            spanLabels.FirstVisibleIndex == 0;
         return emptyState && emptyEnter && oneItem && population && clear &&
-            repopulate && maximum && overflow && maximumLabel && labelOverflow;
+            repopulate && maximum && overflow && maximumLabel && labelOverflow &&
+            spanPopulation && spanOverflow && clearSelection;
     }
 
     private static bool SelectionAndActivation()

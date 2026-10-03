@@ -297,6 +297,9 @@ public:
 #if defined(GXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF)
     static bool launchC160ProofApps();
 #endif
+#if defined(GXOS_NATIVEAOT_C161_TASK_MANAGER_PROOF)
+    static bool launchC161WheelProofApps();
+#endif
     
     // Get app info by name
     static const AppInfo* getAppInfo(const char* name);

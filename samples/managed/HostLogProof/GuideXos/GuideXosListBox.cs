@@ -155,10 +155,17 @@ public sealed class GuideXosListBox
     /// </summary>
     public GuideXosListBoxPopulationResult TryAdd(string label)
     {
+        return label == null
+            ? RejectPopulation()
+            : TryAdd(label.AsSpan());
+    }
+
+    /// <summary>Appends one label from caller-owned bounded storage.</summary>
+    public GuideXosListBoxPopulationResult TryAdd(ReadOnlySpan<char> label)
+    {
         if (_itemCount >= MaximumItemCount || !IsValidLabel(label))
         {
-            ++_rejectedOperationCount;
-            return GuideXosListBoxPopulationResult.Rejected;
+            return RejectPopulation();
         }
 
         int offset = _itemCount * _maximumLabelLength;
@@ -175,6 +182,13 @@ public sealed class GuideXosListBox
             EnsureSelectionVisible();
         }
         return GuideXosListBoxPopulationResult.Added;
+    }
+
+    /// <summary>Clears only selection while retaining rows and a valid viewport.</summary>
+    public void ClearSelection()
+    {
+        _selectedIndex = -1;
+        _viewport.Offset = 0;
     }
 
     public void Clear()
@@ -400,7 +414,11 @@ public sealed class GuideXosListBox
             _viewport.Offset = 0;
             return;
         }
-        if (_selectedIndex < 0) _selectedIndex = 0;
+        if (_selectedIndex < 0)
+        {
+            _viewport.Offset = 0;
+            return;
+        }
         _viewport.EnsureVisible(_selectedIndex);
     }
 
@@ -410,9 +428,15 @@ public sealed class GuideXosListBox
         return GuideXosListBoxResult.Rejected;
     }
 
-    private bool IsValidLabel(string label)
+    private GuideXosListBoxPopulationResult RejectPopulation()
     {
-        if (label == null || label.Length > _maximumLabelLength) return false;
+        ++_rejectedOperationCount;
+        return GuideXosListBoxPopulationResult.Rejected;
+    }
+
+    private bool IsValidLabel(ReadOnlySpan<char> label)
+    {
+        if (label.Length > _maximumLabelLength) return false;
         for (int index = 0; index < label.Length; index++)
         {
             if (label[index] < 0x20 || label[index] > 0x7E) return false;

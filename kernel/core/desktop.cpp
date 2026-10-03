@@ -36,6 +36,10 @@
 #include "include/kernel/time.h"
 #include "include/kernel/ramdisk.h"
 #include "include/kernel/block_device.h"
+#if defined(GXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER) && \
+    defined(GXOS_NATIVEAOT_C161_TASK_MANAGER_PROOF)
+#include "../../built_in_app_metadata.h"
+#endif
 #if defined(GXOS_BARE_METAL)
 #include "include/kernel/app_launch_target_resolver.h"
 #endif
@@ -1733,6 +1737,9 @@ static StartMenuApp s_startMenuApps[] = {
     {"Console",     true,  false, 0xFF78B450},  // pinned
     {"Trash",       true,  false, 0xFF9098A4},  // pinned
     {"TaskManager", true,  false, 0xFFB44646},  // pinned
+#if defined(GXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER)
+    {"Managed Task Manager", true, false, 0xFFB44646}, // bounded read-only managed observer
+#endif
     {"DiskManager", true,  false, 0xFFB48C46},  // pinned (orange-brown for disk)
     {"DisplayOptions", true, false, 0xFF606878}, // display options
     {"ControlPanel",   false, false, 0xFF808890}, // control surface
@@ -1772,6 +1779,9 @@ static const char* s_allProgramsList[] = {
 #endif
     "Managed Notes",
     "Managed Status",
+#if defined(GXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER)
+    "Managed Task Manager",
+#endif
     "Managed Workspace",
     "Notepad",
     "Paint",
@@ -1779,6 +1789,53 @@ static const char* s_allProgramsList[] = {
     "Trash",
 };
 static const int kAllProgramsCount = sizeof(s_allProgramsList) / sizeof(s_allProgramsList[0]);
+#if defined(GXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER) && \
+    defined(GXOS_NATIVEAOT_C161_TASK_MANAGER_PROOF) && defined(GXOS_BARE_METAL)
+static bool verifyC161LauncherCounts() {
+    uint32_t pinnedCount = 0;
+    uint32_t startEntryCount = 0;
+    bool hasManagedTaskManagerPin = false;
+    bool hasNativeTaskManagerPin = false;
+    for (int index = 0; index < kStartMenuAppCount; ++index) {
+        const bool isControlPanel = desktop_str_eq(
+            s_startMenuApps[index].name, "ControlPanel");
+        if (s_startMenuApps[index].pinned || isControlPanel)
+            ++startEntryCount;
+        if (!s_startMenuApps[index].pinned) continue;
+        ++pinnedCount;
+        hasManagedTaskManagerPin |= desktop_str_eq(
+            s_startMenuApps[index].name, "Managed Task Manager");
+        hasNativeTaskManagerPin |= desktop_str_eq(
+            s_startMenuApps[index].name, "TaskManager");
+    }
+    bool hasManagedTaskManagerProgram = false;
+    bool hasNativeTaskManagerProgram = false;
+    for (int index = 0; index < kAllProgramsCount; ++index) {
+        hasManagedTaskManagerProgram |= desktop_str_eq(
+            s_allProgramsList[index], "Managed Task Manager");
+        hasNativeTaskManagerProgram |= desktop_str_eq(
+            s_allProgramsList[index], "TaskManager");
+    }
+    const uint32_t catalogCount = static_cast<uint32_t>(
+        gxos::apps::ManagedNativeAotCatalogCount());
+    const bool passed = catalogCount == 7u && startEntryCount == 17u &&
+        pinnedCount == 16u &&
+        kAllProgramsCount == 20 && hasManagedTaskManagerPin &&
+        hasNativeTaskManagerPin && hasManagedTaskManagerProgram &&
+        hasNativeTaskManagerProgram;
+    serial::puts("[C161-LAUNCHER-COUNTS] catalog=");
+    serial::put_hex32(catalogCount);
+    serial::puts(" startEntries=");
+    serial::put_hex32(startEntryCount);
+    serial::puts(" pinned=");
+    serial::put_hex32(pinnedCount);
+    serial::puts(" allPrograms=");
+    serial::put_hex32(static_cast<uint32_t>(kAllProgramsCount));
+    serial::puts(" native-taskmanager=preserved result=");
+    serial::puts(passed ? "PASS\n" : "FAIL\n");
+    return passed;
+}
+#endif
 static const char* kStartMenuRecentProgramsPath = "/.startmenu_recent";
 
 struct AppModelDemoRow {
@@ -2290,7 +2347,11 @@ static int s_startMenuScroll = 0;       // Scroll offset for long lists
 static bool s_startMenuAllProgs = false; // Toggle between Recent Programs vs All Programs
 static char s_startMenuRecentPrograms[kMaxStartMenuRecent][64]; // Persisted recent programs for Start Menu
 static int s_startMenuRecentProgramCount = 0;
+#if defined(GXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER)
+static const int kStartMenuMaxRows = 15; // C161 All Programs row 14 remains pointer-reachable
+#else
 static const int kStartMenuMaxRows = 14; // Max visible rows before scrolling
+#endif
 static const int kStartMenuRowH = 22;    // Height of each menu row
 
 static bool start_menu_recent_contains(const char* value)
@@ -8362,6 +8423,10 @@ void init()
     reload_persisted_system_desktop_icons();
     load_persisted_app_shortcuts();
     load_persisted_start_menu_recent_programs();
+#if defined(GXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER) && \
+    defined(GXOS_NATIVEAOT_C161_TASK_MANAGER_PROOF) && defined(GXOS_BARE_METAL)
+    (void)verifyC161LauncherCounts();
+#endif
 #if defined(GXOS_BARE_METAL)
     serial::puts("[desktop] bare-metal desktop icon init starting\n");
 #endif
@@ -8396,6 +8461,9 @@ void init()
     init_taskbar_widgets();
 #if defined(GXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF)
     (void)app::AppManager::launchC160ProofApps();
+#endif
+#if defined(GXOS_NATIVEAOT_C161_TASK_MANAGER_PROOF)
+    (void)app::AppManager::launchC161WheelProofApps();
 #endif
     
     s_initialized = true;

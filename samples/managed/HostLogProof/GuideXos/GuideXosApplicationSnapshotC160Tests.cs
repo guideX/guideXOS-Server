@@ -294,6 +294,7 @@ internal static unsafe class GuideXosApplicationSnapshotC160Tests
             4u => "com.guidexos.apps.managed.notes"u8,
             5u => "com.guidexos.apps.managed.settingscenter"u8,
             6u => "com.guidexos.apps.managed.calculator"u8,
+            7u => "com.guidexos.apps.managed.taskmanager"u8,
             _ => ReadOnlySpan<byte>.Empty,
         };
         bool selfFound = false;
@@ -348,6 +349,7 @@ internal static unsafe class GuideXosApplicationSnapshotC160Tests
             4u => "com.guidexos.apps.managed.notes"u8,
             5u => "com.guidexos.apps.managed.settingscenter"u8,
             6u => "com.guidexos.apps.managed.calculator"u8,
+            7u => "com.guidexos.apps.managed.taskmanager"u8,
             _ => ReadOnlySpan<byte>.Empty,
         };
         if (expectedApplicationId.IsEmpty) return false;
@@ -446,6 +448,7 @@ internal static unsafe class GuideXosApplicationSnapshotC160Tests
             4u => "com.guidexos.apps.managed.notes"u8,
             5u => "com.guidexos.apps.managed.settingscenter"u8,
             6u => "com.guidexos.apps.managed.calculator"u8,
+            7u => "com.guidexos.apps.managed.taskmanager"u8,
             _ => ReadOnlySpan<byte>.Empty,
         };
         if (expected.IsEmpty) return false;
@@ -501,6 +504,7 @@ internal static unsafe class GuideXosApplicationSnapshotC160Tests
         {
             4u => "com.guidexos.apps.managed.notes"u8,
             5u => "com.guidexos.apps.managed.settingscenter"u8,
+            7u => "com.guidexos.apps.managed.taskmanager"u8,
             _ => "com.guidexos.apps.managed.calculator"u8,
         });
         Append(line, ref position, " source="u8);

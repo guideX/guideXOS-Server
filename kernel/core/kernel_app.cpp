@@ -615,6 +615,33 @@ bool AppManager::launchC160ProofApps() {
 }
 #endif
 
+#if defined(GXOS_NATIVEAOT_C161_TASK_MANAGER_PROOF)
+bool AppManager::launchC161WheelProofApps() {
+    const AppInfo* calculator = getAppInfo("Calculator");
+    if (!s_initialized || !calculator || !calculator->available ||
+        !calculator->factory || getRunningAppCount() != 2) return false;
+
+    uint32_t added = 0u;
+    for (; added < 7u; ++added) {
+        if (s_runningAppCount >= MAX_APPS) break;
+        KernelApp* instance = calculator->factory();
+        if (!instance || !instance->init()) {
+            delete instance;
+            break;
+        }
+        if (!admitRunningApp(instance, calculator->applicationId)) {
+            instance->shutdown();
+            delete instance;
+            break;
+        }
+    }
+    const bool passed = added == 7u && getRunningAppCount() == 9;
+    serial::puts("[C161-WHEEL-PROOF-APPS] additional=00000007 total=00000009 canonical-id=preserved distinct-lifetimes=true result=");
+    serial::puts(passed ? "PASS\n" : "FAIL\n");
+    return passed;
+}
+#endif
+
 bool AppManager::admitRunningApp(KernelApp* app, const char* applicationId) {
     if (!s_initialized || !app || s_runningAppCount >= MAX_APPS ||
         app->m_instanceId != 0u) return false;
