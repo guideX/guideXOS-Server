@@ -5760,3 +5760,147 @@ from the snapshot and their hashes verified. Final artifact delta was **0
 changed / 0 missing / 0 extra**. `git diff --check` passed. The source change is
 Outcome B: `:root` is complete and `:empty` remains fail-closed pending
 authoritative text-child state.
+
+## JS57: authoritative direct text-child presence; `:empty` deferred
+
+JS57 adds one parser-owned fact to the document's existing bounded
+`HtmlElementContentMetadata` record:
+
+```text
+hasDirectTextChild
+```
+
+This is a presence bit only. It does not retain text, create text nodes, or add
+one allocation per text run. It describes direct source character data owned
+by the represented Element. The parser sets it while consuming each nonempty
+character-data byte, using the current top of the open-Element stack. Repeated
+text bytes and runs are idempotent. Entity spellings such as `&amp;`, `&#32;`,
+and `&#x20;` therefore count before decoding, including entities that decode
+to whitespace.
+
+### Parser authority audit
+
+`parseHtml()` is both the HTML token scan and the forgiving parser entry point
+in `guide_web_html_parser.cpp`; there is no separate tokenizer object. At a
+`<`, it scans a tag through an unquoted `>` and dispatches to
+`handleOpenTag()` or `handleCloseTag()`. Represented start tags are committed
+by `registerStructuralElement()` and pushed onto `ParserState::openElements`.
+The record's `parentSerial` and the parent's structural child counter are the
+Element-child authority. Finalization copies those counters to
+`HtmlElementRef::childCount`.
+
+Before JS57, text stayed in `ParserState::textBuf` until `flushText()`. That
+function decodes entities and, for ordinary text, applies
+`trim(collapseWs(...))`. Only a nonempty normalized result updated the old
+render summary (`hasNonWhitespaceText` and bounded visible text bytes).
+Whitespace-only content could be discarded there, and render output could be
+omitted by special-element paths or bounded inline/layout storage. The new
+presence bit is set in the source-character loop before `flushText()` can
+normalize, trim, truncate, or discard that data.
+
+The owner is exactly `openElements.back()` at the character byte. The bit is
+not propagated to ancestors. Thus text under a nested `span` marks the span,
+while literal whitespace between tags marks the parent when the parser stack
+places that whitespace directly under it. If the represented stack has
+overflowed, the helper does not guess an owner; existing metadata is already
+marked incomplete for that bounded recovery path.
+
+Full `<!-- ... -->` comments are skipped before generic tag scanning, so a `>`
+inside a comment cannot leak the remainder into the text path. Unterminated
+comments consume the rest of input. Declarations beginning with `<!` remain
+ignored and do not create Element or text facts.
+
+Textarea and option are represented Elements, so their source text is captured
+in the same direct path while their existing default-value and option-label
+projections continue through `flushText()`. Script bodies use the bounded
+`scriptBuf`; style bodies use `textBuf` for CSS parsing. Script and style are
+not represented structural Elements in this Navigator model, so JS57 skips
+those special bodies instead of incorrectly assigning them to the containing
+body. `head`, `title`, and other metadata Elements likewise have no structural
+serial. This is the remaining raw-text representation limitation for any
+future API that may expose those Elements.
+
+### Element children, capacity, and memory
+
+JS57 adds no Element-child field. Direct Element children continue to come
+from the structural `parentSerial` relationship and finalized `childCount`;
+the existing content summary's `hasElementChild` and `elementChildCount` are
+kept in sync. The structural-cap check now happens before child counters or
+the parent's Element-child summary are updated, so a child rejected at the
+1,024-record limit cannot leave a false child fact. Accepted insertion and
+finalized child counts remain aligned.
+
+The new flag lives in the existing per-document vector, with one content
+record for each represented structural Element and the existing 1,024-record
+maximum. `HtmlElementRef` remains **440 bytes**. On the validated build,
+`HtmlElementContentMetadata` remains **24 bytes** before and after JS57 because
+the flag uses existing record padding. The maximum content-record storage
+remains **24,576 bytes per document**; the maximum increase is **0 bytes**.
+There is no per-run allocation or text buffer. Selector records also remain
+unchanged: **36-byte** simple selector, **556-byte** four-member descriptor,
+**576-byte** collection record, and **73,728-byte** 128-record registry.
+
+Every `parseHtml()` call starts with a fresh `ParserState` and empty metadata
+vectors. The flag is initialized false with its Element's new record and is
+not changed by style, class, hidden state, layout, selector matching, focus,
+or events. The future consumer contract for represented Elements is:
+
+```text
+no direct child content = no structural Element child
+                        AND no direct text child
+```
+
+Future JS58 matching must also require complete metadata so structural-cap or
+stack-overflow cases fail closed. JS57 does not change JavaScript selector
+grammar: `:empty` remains unsupported in `querySelector()`,
+`querySelectorAll()`, and `matches()`. Existing CSS style matching keeps its
+prior render-summary behavior. No public JavaScript API was added.
+
+The native proof is `tests/navigator_javascript_js57_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js57.ps1`. It directly inspects the
+document-owned metadata for empty, text-only, whitespace-only, entity,
+Element-only, mixed, nested, hidden, comment, textarea, option, void, malformed,
+long-text, capacity, and document-replacement fixtures. It also executes the
+hosted regression fixture's scripts and checks existing `:root`, structural
+traversal, form, event, and fail-closed `:empty` behavior. The hosted page is
+`navigator-smoke/javascript-js57.html`; it adds no metadata debug property.
+
+### JS57 closeout (2026-10-03)
+
+The focused JS57 suite passed **269/269** checks, including the strict
+warning-as-error parser/adapter/runtime lane. Record sizes were
+`HtmlElementRef=440` bytes and
+`HtmlElementContentMetadata=24` bytes; the bounded metadata maximum remained
+**1,024 records / 24,576 bytes**, with zero additional per-document bytes.
+
+The full JavaScript regression matrix passed **55/55 lanes**: the three base
+lanes plus JS6 through JS57. Focused JS36–JS56 regressions also passed with the
+counts recorded in the preceding JS56 closeout table; JS57 passed 269/269.
+All **five** new hosted JS57 checks passed. The hosted aggregate reported
+**597 passed / 7 failed / 604 total**. Its seven failures are the established
+CSS phase 3C, CSS phase 3G, CSS phase 6A, three CSS phase 6B checks, and CSS
+phase 6C; there are no new JS57 failures. The final production `build.bat`
+completed successfully after the parser's O(1) metadata lookup path was in
+place. The strict warning-as-error lane passed.
+
+The kernel wrapper again stopped at the existing PacMan Native ELF link errors
+for `pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)`. The direct
+`mingw32-make ARCH=amd64 EXTRA_CFLAGS=` lane independently stopped at the
+existing Mbed TLS configuration errors in `mbedtls_check_config.h:51` and
+`:64`. The wrapper changed three PacMan object files; those exact files were
+restored from a pre-kernel snapshot and verified. The snapshot covered **729
+files / 166,655,465 bytes**; final artifact delta was **0 changed / 0 missing /
+0 extra**. QEMU is not on PATH and `ESP/kernel.elf` is absent, so no QEMU proof
+is claimed.
+
+JS57 is **Outcome B (useful partial)**: ordinary represented Elements now
+have authoritative direct text presence, including whitespace and entities,
+before presentation normalization. The remaining limitation is that script
+and style are not represented structural Elements, so their special body
+buffers do not receive Element metadata. JS58 can implement `:empty` for
+represented Elements using structural Element children plus direct text
+presence and must continue to fail closed when metadata is incomplete. Full
+raw-text Element coverage requires a future representation change. `:empty`
+remains unsupported in JS57. `git diff --check` passed before the local source
+commit; generated artifacts are excluded from that commit.

@@ -4555,6 +4555,45 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js56AfterClick, 1200) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js57FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js57.html";
+    const bool js57Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js57FixtureUrl);
+    const std::string js57InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS57 hosted parser and selector regression fixture loads",
+        js57Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js57FixtureUrl &&
+        contains(js57InitialText, "Navigator JavaScript JS57") &&
+        contains(js57InitialText,
+            "initial:root=true:structure=true:forms=true:emptyDeferred=true:event=false:target=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js57Loaded) + ",text=" +
+        summarizeText(js57InitialText, 1400) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS57 hosted :root and Element-only traversal remain unchanged",
+        js57Loaded && contains(js57InitialText,
+            ":root=true:structure=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "root identity, children, childElementCount, and firstElementChild continue to expose structural Elements only");
+    add("JS57 hosted :empty remains fail-closed",
+        js57Loaded && contains(js57InitialText, ":emptyDeferred=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "document queries and matches retain the unsupported :empty behavior");
+    add("JS57 hosted textarea and option projections remain unchanged",
+        js57Loaded && contains(js57InitialText, ":forms=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "textarea default value and select option value remain available through existing form properties");
+    const bool js57Click = gxos::apps::Navigator::SmokeClickFormControlById("click");
+    const std::string js57AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS57 hosted Event target identity remains unchanged",
+        js57Click && contains(js57AfterClick,
+            "event:root=true:structure=true:forms=true:emptyDeferred=true:event=true:target=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js57Click) + ",text=" +
+        summarizeText(js57AfterClick, 1400) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

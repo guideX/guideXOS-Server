@@ -5728,6 +5728,32 @@ static HtmlElementContentMetadata* findContentMetadata(ParserState& st, uint64_t
 	return nullptr;
 }
 
+// Record direct character-data presence while the parser still has the raw
+// source byte and current ownership stack. Do not use flushText() here: it
+// collapses/trims ordinary whitespace and can discard layout text. Script and
+// style bodies have parser-specific buffers but are not represented as
+// structural Elements by this document model.
+static void markDirectTextChild(ParserState& st)
+{
+	if (st.inScript || st.inStyle || st.uncapturedOpenElementDepth != 0 ||
+		st.openElements.empty()) return;
+	const uint64_t ownerSerial = st.openElements.back().serial;
+	if (ownerSerial == 0) return;
+	// Accepted structural serials are assigned in document order starting at
+	// one, so the normal lookup is constant time. Keep the serial check and a
+	// bounded fallback for a future parser path that introduces a serial gap.
+	if (ownerSerial <= st.contentMetadata.size()) {
+		HtmlElementContentMetadata& metadata =
+			st.contentMetadata[static_cast<size_t>(ownerSerial - 1u)];
+		if (metadata.serial == ownerSerial) {
+			metadata.hasDirectTextChild = true;
+			return;
+		}
+	}
+	if (HtmlElementContentMetadata* metadata = findContentMetadata(st, ownerSerial))
+		metadata->hasDirectTextChild = true;
+}
+
 static const HtmlElementContentMetadata* findContentMetadata(const WebDocument& doc,
 	uint64_t serial)
 {
@@ -5933,6 +5959,13 @@ static HtmlElementRef registerStructuralElement(ParserState& st, HtmlElementRef 
 	}
 	element.serial = st.nextElementSerial++;
 	element.parentSerial = st.openElements.empty() ? 0 : st.openElements.back().serial;
+	if (st.structuralElements.size() >= kCssLiteMaxStructuralMetadata) {
+		saturatingIncrement(st.doc.cssDiagnostics.structuralMetadataClamps);
+		saturatingIncrement(st.doc.cssDiagnostics.siblingMetadataClamps);
+		if (HtmlElementContentMetadata* parentMetadata = findContentMetadata(st, element.parentSerial))
+			parentMetadata->contentMetadataComplete = false;
+		return element;
+	}
 	if (StructuralChildCounter* parent = findStructuralCounter(st, element.parentSerial)) {
 		element.previousSiblingSerial = parent->lastChildSerial;
 		if (parent->childCount < std::numeric_limits<uint16_t>::max()) {
@@ -5976,13 +6009,6 @@ static HtmlElementRef registerStructuralElement(ParserState& st, HtmlElementRef 
 		saturatingIncrement(st.doc.cssDiagnostics.siblingMetadataErrors);
 		if (HtmlElementContentMetadata* parentMetadata = findContentMetadata(st, element.parentSerial))
 			parentMetadata->contentMetadataComplete = false;
-	}
-	if (st.structuralElements.size() >= kCssLiteMaxStructuralMetadata) {
-		saturatingIncrement(st.doc.cssDiagnostics.structuralMetadataClamps);
-		saturatingIncrement(st.doc.cssDiagnostics.siblingMetadataClamps);
-		if (HtmlElementContentMetadata* parentMetadata = findContentMetadata(st, element.parentSerial))
-			parentMetadata->contentMetadataComplete = false;
-		return element;
 	}
 	retainPendingAttributes(st, element);
 	st.structuralElements.push_back(element);
@@ -7691,6 +7717,15 @@ WebDocument parseHtml(const std::string& pageUrl,
 		// Tag token
 		// ----------------------------------------------------------------
 		if (c == '<') {
+			// Consume a complete comment before the generic tag scan. That scan
+			// stops at the first '>', which can expose the rest of a comment as
+			// character data when the comment itself contains that byte.
+			if (htmlText.compare(i, 4u, "<!--") == 0) {
+				const size_t commentEnd = htmlText.find("-->", i + 4u);
+				i = commentEnd == std::string::npos
+					? len : commentEnd + 3u;
+				continue;
+			}
 			size_t tagStart = i + 1;
 			// Find closing '>',  respecting attribute strings.
 			size_t j = tagStart;
@@ -7737,6 +7772,7 @@ WebDocument parseHtml(const std::string& pageUrl,
 			if (st.scriptBuf.size() < kNavigatorMaxInlineScriptBytes)
 				st.scriptBuf.push_back(c);
 		} else {
+			markDirectTextChild(st);
 			// Inside <pre>, preserve all characters including newlines/spaces.
 			// Inside <style>, preserve the raw stylesheet so CSS-lite can parse
 			// it when </style> closes. Outside <pre>, flushText() will collapse

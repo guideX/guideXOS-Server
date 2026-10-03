@@ -1,0 +1,81 @@
+<!doctype html>
+<html id="root">
+<head>
+  <title>Navigator JavaScript JS57 child-content regression</title>
+  <style>
+    #hidden-text { display: none; }
+    .hidden-child { display: none; }
+  </style>
+  <script>var js57HeadScript = true;</script>
+</head>
+<body id="body">
+<h1>Navigator JavaScript JS57 child-content regression</h1>
+<div id="empty"></div>
+<div id="text">hello &amp; content</div>
+<div id="space">   </div>
+<div id="tab">&#9;</div>
+<div id="cr">&#13;</div>
+<div id="lf">&#10;</div>
+<div id="raw-tab">	</div>
+<div id="raw-cr"></div>
+<div id="raw-lf">
+</div>
+<div id="mixed-whitespace"> &#9;&#13;&#10; </div>
+<div id="named-entity">&amp;</div>
+<div id="decimal-entity">&#32;</div>
+<div id="hex-entity">&#x20;</div>
+<div id="element-only"><span id="element-only-child"></span></div>
+<div id="mixed">before<span id="mixed-child"></span>after</div>
+<div id="outer"><span id="nested">text</span></div>
+<div id="formatting">
+  <span id="formatting-child"></span>	</div>
+<div id="comment"><!-- comment > with <b>tag-like text</b> --></div>
+<div id="comment-around">before<!-- > remains inside comment -->after</div>
+<div id="hidden-text">hidden text</div>
+<div id="hidden-child-parent"><span id="hidden-child" class="hidden-child"></span></div>
+<input id="void-input">
+<img id="void-img">
+<br id="void-br">
+<hr id="void-hr">
+<form id="form">
+  <textarea id="textarea" name="memo">seed &amp; value</textarea>
+  <select id="select"><option id="option">Label</option></select>
+</form>
+<button id="click">click</button>
+<pre id="result">initial</pre>
+<script>var js57BodyScript = true;</script>
+<script>
+var js57Result = document.getElementById("result");
+var js57Root = document.querySelector(":root");
+var js57Empty = document.getElementById("empty");
+var js57Mixed = document.getElementById("mixed");
+var js57Text = document.getElementById("text");
+var js57Textarea = document.getElementById("textarea");
+var js57Select = document.getElementById("select");
+var js57Button = document.getElementById("click");
+var js57RootOk = js57Root === document.querySelector("html") &&
+  js57Root.matches(":root");
+var js57StructureOk = js57Mixed.children.length === 1 &&
+  js57Mixed.childElementCount === 1 && js57Text.children.length === 0 &&
+  js57Text.childElementCount === 0 && js57Empty.children.length === 0;
+var js57EmptyDeferred = document.querySelector(":empty") === null &&
+  document.querySelectorAll(":empty").length === 0 &&
+  js57Empty.matches(":empty") === false;
+var js57FormsOk = js57Textarea.value === "seed & value" &&
+  js57Select.value === "Label";
+var js57Clicked = false;
+function js57Snapshot(label) {
+  js57Result.textContent = label + ":root=" + js57RootOk +
+    ":structure=" + js57StructureOk + ":forms=" + js57FormsOk +
+    ":emptyDeferred=" + js57EmptyDeferred + ":event=" + js57Clicked +
+    ":target=" + (js57Button !== null);
+}
+js57Button.addEventListener("click", function (event) {
+  js57Clicked = event.target === js57Button &&
+    event.currentTarget === js57Button;
+  js57Snapshot("event");
+});
+js57Snapshot("initial");
+</script>
+</body>
+</html>

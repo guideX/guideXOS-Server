@@ -528,6 +528,9 @@ struct HtmlElementContentMetadata {
 	uint16_t elementChildCount = 0;
 	uint16_t visibleTextByteCount = 0;
 	bool     hasElementChild = false;
+	// Direct source character data owned by this Element. Unlike the render
+	// summary below, whitespace and text omitted from layout still count.
+	bool     hasDirectTextChild = false;
 	bool     hasNonWhitespaceText = false;
 	bool     hasImageOrMediaChild = false;
 	bool     hasVisibleBreak = false;
