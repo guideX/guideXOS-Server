@@ -1,6 +1,16 @@
 # guideXOS App Model Current-State Map
 
-Status: Phase 12 current state (2026-10-02). The Phase 5A/5B material below is historical; see [Phase 12 Navigator local HTML activation](APPMODEL_PHASE12_NAVIGATOR_LOCAL_HTML_ACTIVATION.md) for bounded local HTML/HTM activation, [Phase 11 ImageViewer PNG activation](APPMODEL_PHASE11_IMAGEVIEWER_DOCUMENT_ACTIVATION.md) for the hosted PNG migration, [Phase 10 Developer Studio document activation](APPMODEL_PHASE10_DEVELOPER_STUDIO_DOCUMENT_ACTIVATION.md) for NativeElf activation, [Phase 9 Settings Default Apps](APPMODEL_PHASE9_SETTINGS_DEFAULT_APPS.md) for the Settings surface, [Phase 8 default-app persistence](APPMODEL_PHASE8_DEFAULT_APP_PERSISTENCE.md) for the machine-global override owner, [Phase 7 capable handlers and Open With](APPMODEL_PHASE7_OPEN_WITH.md) for handler selection, and [Phase 6 file associations and document activation](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md) for the original owned-path contract.
+Status: Phase 13 current state (2026-10-02). The Phase 5A/5B material below is historical; see [Phase 13 ImageViewer JPEG migration](APPMODEL_PHASE13_IMAGEVIEWER_JPEG_MIGRATION.md) for the production JPEG path and legacy audit, [Phase 12 Navigator local HTML activation](APPMODEL_PHASE12_NAVIGATOR_LOCAL_HTML_ACTIVATION.md) for bounded local HTML/HTM activation, [Phase 11 ImageViewer PNG activation](APPMODEL_PHASE11_IMAGEVIEWER_DOCUMENT_ACTIVATION.md) for the initial hosted PNG migration, [Phase 10 Developer Studio document activation](APPMODEL_PHASE10_DEVELOPER_STUDIO_DOCUMENT_ACTIVATION.md) for NativeElf activation, [Phase 9 Settings Default Apps](APPMODEL_PHASE9_SETTINGS_DEFAULT_APPS.md) for the Settings surface, [Phase 8 default-app persistence](APPMODEL_PHASE8_DEFAULT_APP_PERSISTENCE.md) for the machine-global override owner, [Phase 7 capable handlers and Open With](APPMODEL_PHASE7_OPEN_WITH.md) for handler selection, and [Phase 6 file associations and document activation](APPMODEL_PHASE6_FILE_ASSOCIATIONS.md) for the original owned-path contract.
+
+## Phase 13 current document-handler state
+
+Hosted ImageViewer keeps canonical ID `gxos.builtin.imageviewer` and declares `.png`, `.jpg`, and `.jpeg` through AppRegistry. File Explorer normal Open follows the owned built-in document-dispatch path for all three formats; Open With and Settings Default Apps discover the same capabilities generically. ImageViewer is the built-in/effective default for each extension, with no configured override. Suffix matching is ASCII case-insensitive.
+
+The production ImageViewer entry now accepts PNG and JPEG paths and sends both through the existing bounded `ImageAdapter::LoadFromFile` implementation into one owned RGBA `Image` state. JPEG decoding reuses the shared `STBI_ONLY_JPEG` loader; no second decoder was added. The encoded limit is 4 MiB, dimensions are capped at 4096×4096, pixel count at 16,777,216, and decoded RGBA at 64 MiB. Content is validated by the decoder after extension-based AppRegistry resolution.
+
+Only `.bmp` and `.gif` remain on the hosted legacy direct route. Neither format has a production decoder in the ImageAdapter or ImageViewer loader, so those associations currently reach an unsupported-format screen rather than displaying an image. Phase 14 should remove those misleading legacy rows unless a bounded, production decoder capability is separately selected and proven; AppRegistry registration alone would not make them supported.
+
+See [the Phase 13 report](APPMODEL_PHASE13_IMAGEVIEWER_JPEG_MIGRATION.md) for exact JPEG variants, failure/bounds evidence, BMP/GIF audit, runtime results, build and regression results, and platform boundary.
 
 ## Phase 10 current document-handler state
 
@@ -8,7 +18,7 @@ Developer Studio keeps its existing canonical ID `com.guidexos.developerstudio` 
 
 See the [Phase 10 report](APPMODEL_PHASE10_DEVELOPER_STUDIO_DOCUMENT_ACTIVATION.md) for ownership, file/path bounds, runtime routing, Default Apps policy, validation results, and the bounded experimental-backend gate.
 
-## Phase 11 current document-handler state
+## Phase 11 PNG migration baseline (historical)
 
 Hosted ImageViewer keeps its canonical ID `gxos.builtin.imageviewer` and now declares `.png` through AppRegistry. A reusable built-in document dispatcher passes the same owned `AppActivationContext` contract used by the other handlers. File Explorer normal Open resolves the effective `.png` default through AppRegistry; Open With and Settings Default Apps enumerate the capability and default data. The built-in/effective handler is ImageViewer and there is no configured `.png` override. The old direct image route remains only for `.bmp`, `.jpg`, `.jpeg`, and `.gif`.
 
@@ -292,8 +302,8 @@ Status: hosted only
   - `openDesktopItem()` calls `DesktopService::OpenFilesystemEntry()`
 - `desktop_service.cpp`
   - directories -> `FileExplorer::Launch(path)`
-  - AppRegistry document activation -> the effective canonical handler (Notepad, Developer Studio when its experimental hosted backend is enabled, or ImageViewer for `.png`)
-  - legacy image fallback -> `ImageViewer::Launch(path)` for `.bmp`, `.jpg`, `.jpeg`, and `.gif`
+  - AppRegistry document activation -> the effective canonical handler (Notepad, Developer Studio when its experimental hosted backend is enabled, ImageViewer for `.png`/`.jpg`/`.jpeg`, or Navigator for `.html`/`.htm`)
+  - legacy image fallback -> `ImageViewer::Launch(path)` for `.bmp` and `.gif` (both currently decode as unsupported)
 
 Status: hosted only
 
@@ -628,6 +638,8 @@ The current evidence markers include:
 
 Status: complete, still narrow, no visible launch behavior change.
 
+This is the historical Phase 4B table. Phase 11 moved `.png` to AppRegistry and Phase 13 moved `.jpg`/`.jpeg`; the remaining hosted legacy image rows are `.bmp` and `.gif`.
+
 Phase 4B adds a small explicit file association table in `desktop_service.cpp`. The table is intentionally limited to safe routing only:
 
 - folders -> `File Explorer`
@@ -852,7 +864,7 @@ This is the final App Model v1 closeout state.
 - `appModelV1RecentProgramsAligned=true`
 - `appModelV1RiskyDestructiveTargetsExcluded=true`
 - `appModelV1TrashOpenOnlyBoundary=true`
-- `appModelV1ImagesRemainLegacy=true` (current hosted legacy rows are `.bmp`, `.jpg`, `.jpeg`, and `.gif`; `.png` moved to AppRegistry in Phase 11)
+- `appModelV1ImagesRemainLegacy=true` (historical Phase 5A rows were `.bmp`, `.jpg`, `.jpeg`, and `.gif`; current Phase 13 rows are `.bmp` and `.gif`, while `.png`/`.jpg`/`.jpeg` are AppRegistry capabilities)
 - `appModelV1OutOfScopeBoundary=true`
 - `appModelV1OutOfScopeScope=GXAppExecution|ELFLoading|PackageInstall|Sandboxing|Permissions|IDEBehavior|OpenWith|AppStore|UninstallUpdateLifecycle|TrashDestructiveActions`
 
@@ -896,7 +908,7 @@ File association v1 scope:
 
 - folders -> File Explorer
 - `.txt`, `.log`, `.ini`, `.cfg` -> Notepad
-- `.png`, `.bmp`, `.jpg`, `.gif`, `.jpeg` -> legacy Image Viewer path
+- `.png`, `.bmp`, `.jpg`, `.gif`, `.jpeg` -> legacy Image Viewer path (historical Phase 5A; Phases 11 and 13 later migrated PNG and JPEG)
 - unknown/risky -> unsupported fallback
 
 Shell object registry scope:

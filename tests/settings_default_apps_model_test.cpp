@@ -213,6 +213,18 @@ int main()
         htm->policy.effectiveDefaultAppId == "guidexos.navigator",
         "Settings discovers HTML and HTM from AppRegistry with Navigator as the unconfigured built-in default");
 
+    const DefaultAppsRow* jpg = findDefaultAppsRow(initial, ".jpg");
+    const DefaultAppsRow* jpeg = findDefaultAppsRow(initial, ".jpeg");
+    check(jpg && jpeg && jpg->policy.builtInDefaultAppId == "gxos.builtin.imageviewer" &&
+        jpg->policy.configuredOverrideAppId.empty() &&
+        jpg->policy.effectiveDefaultAppId == "gxos.builtin.imageviewer" &&
+        jpg->handlers.count == 1 && jpg->handlers.handlers[0].appId == "gxos.builtin.imageviewer" &&
+        jpeg->policy.builtInDefaultAppId == "gxos.builtin.imageviewer" &&
+        jpeg->policy.configuredOverrideAppId.empty() &&
+        jpeg->policy.effectiveDefaultAppId == "gxos.builtin.imageviewer" &&
+        jpeg->handlers.count == 1 && jpeg->handlers.handlers[0].appId == "gxos.builtin.imageviewer",
+        "Settings discovers JPG and JPEG generically with ImageViewer as built-in/effective and no override");
+
     const DefaultAppsRow* txt = findDefaultAppsRow(initial, ".txt");
     check(txt && txt->policy.builtInDefaultAppId == "gxos.builtin.notepad" &&
         txt->policy.configuredOverrideAppId.empty() &&

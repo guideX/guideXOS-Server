@@ -28,7 +28,9 @@ $FixtureLog = Join-Path $FixtureRoot "phase4b-safe-open.log"
 $FixtureIni = Join-Path $FixtureRoot "phase4b-safe-open.ini"
 $FixtureCfg = Join-Path $FixtureRoot "phase4b-safe-open.cfg"
 $FixturePng = Join-Path $FixtureRoot "phase4b-legacy-image.png"
+$FixtureBmp = Join-Path $FixtureRoot "phase4b-legacy-image.bmp"
 $FixtureJpg = Join-Path $FixtureRoot "phase4b-legacy-image.jpg"
+$FixtureJpeg = Join-Path $FixtureRoot "phase4b-legacy-image.jpeg"
 $FixtureUnknown = Join-Path $FixtureRoot "phase4b-unsupported.xyz"
 $FixtureExe = Join-Path $FixtureRoot "phase4b-risky.exe"
 $FixtureGxapp = Join-Path $FixtureRoot "phase4b-risky.gxapp"
@@ -175,9 +177,14 @@ This file should stay unsupported.
 Phase 4B ELF-style fixture
 This file should stay unsupported.
 "@
+    New-AsciiTextFile -Path $FixtureBmp -Text @"
+Phase 4B unsupported BMP fixture
+The legacy route is retained only for the Phase 13 decoder audit.
+"@
 
     Copy-Item -LiteralPath (Join-Path $Root "assets\Backgrounds\ameoba.png") -Destination $FixturePng -Force
     Copy-Item -LiteralPath (Join-Path $Root "bkup\appmodeldemo.jpg") -Destination $FixtureJpg -Force
+    Copy-Item -LiteralPath (Join-Path $Root "bkup\appmodeldemo.jpg") -Destination $FixtureJpeg -Force
     New-Item -ItemType Directory -Force -Path $FixtureFolder | Out-Null
 
     $desktopJsonBefore = Get-FileText (Join-Path $Root "desktop.json")
@@ -221,7 +228,7 @@ This file should stay unsupported.
 
     Assert-Contains $assocOutput "[FileAssociationV1]" "file association diagnostic section"
     Assert-Contains $assocOutput "registryResolved=true" "registry-backed handler resolution"
-    Assert-Contains $assocOutput "fileAssociationV1KeyMappings: directories->File Explorer (separate route); AppRegistry .txt/.log/.ini/.cfg->Notepad; AppRegistry .png->Image Viewer; .bmp/.jpg/.gif/.jpeg->Image Viewer (legacy direct path); unknown/risky->Unsupported" "key mappings"
+    Assert-Contains $assocOutput "fileAssociationV1KeyMappings: directories->File Explorer (separate route); AppRegistry .txt/.log/.ini/.cfg->Notepad; AppRegistry .png/.jpg/.jpeg->Image Viewer; .bmp/.gif->Image Viewer (legacy direct path; decoder unsupported); unknown/risky->Unsupported" "key mappings"
     Assert-Contains $assocOutput "appModelPhase6DirectoryActivationIsSeparate=true" "directory route remains separate from file associations"
     Assert-Contains $assocOutput "key=.txt kind=extension" "text table row"
     Assert-Contains $assocOutput "handlerAppId=gxos.builtin.notepad" "text table handler"
@@ -246,7 +253,9 @@ This file should stay unsupported.
         "desktop.open.resolve $FixtureIni",
         "desktop.open.resolve $FixtureCfg",
         "desktop.open.resolve $FixturePng",
+        "desktop.open.resolve $FixtureBmp",
         "desktop.open.resolve $FixtureJpg",
+        "desktop.open.resolve $FixtureJpeg",
         "desktop.open.resolve $FixtureUnknown",
         "desktop.open.resolve $FixtureExe",
         "desktop.open.resolve $FixtureGxapp",
@@ -259,12 +268,13 @@ This file should stay unsupported.
     Assert-Contains $resolveOutput "launchTarget: FileExplorer" "folder launch target"
     Assert-Contains $resolveOutput "status: supported" "folder status"
 
-    Assert-RegexCountAtLeast $resolveOutput 'associationKind: app-model-extension' 4 "App Model document extension kinds"
+    Assert-RegexCountAtLeast $resolveOutput 'associationKind: app-model-extension' 7 "App Model document extension kinds including PNG/JPG/JPEG"
+    Assert-RegexCountAtLeast $resolveOutput 'launchTarget: DocumentActivation' 7 "App Model document activation targets including JPG/JPEG"
     Assert-RegexCountAtLeast $resolveOutput 'associationKind: extension' 1 "remaining legacy image extension kinds"
     Assert-RegexCountAtLeast $resolveOutput 'handlerDisplayName: Notepad' 4 "text handlers"
     Assert-RegexCountAtLeast $resolveOutput 'launchTarget: DocumentActivation' 4 "text document activation targets"
-    Assert-RegexCountAtLeast $resolveOutput 'legacyDirectPath: true' 1 "non-PNG image legacy direct path"
-    Assert-RegexCountAtLeast $resolveOutput 'handlerDisplayName: Image Viewer' 2 "image handler display names"
+    Assert-True ([regex]::Matches($resolveOutput, 'legacyDirectPath: true').Count -eq 1) "only the BMP probe uses the remaining legacy image route"
+    Assert-RegexCountAtLeast $resolveOutput 'handlerDisplayName: Image Viewer' 4 "image handler display names"
     Assert-Contains $resolveOutput "associationKind: unknown-fallback" "unknown fallback kind"
     Assert-Contains $resolveOutput "launchTarget: Unsupported" "unknown fallback target"
     Assert-Contains $resolveOutput "associationKind: risky-fallback" "risky fallback kind"
@@ -280,7 +290,9 @@ This file should stay unsupported.
         "desktop.open `"$FixtureIni`"",
         "desktop.open `"$FixtureCfg`"",
         "desktop.open `"$FixturePng`"",
+        "desktop.open `"$FixtureBmp`"",
         "desktop.open `"$FixtureJpg`"",
+        "desktop.open `"$FixtureJpeg`"",
         "desktop.open `"$FixtureUnknown`"",
         "desktop.open `"$FixtureExe`"",
         "desktop.open `"$FixtureGxapp`"",
@@ -304,7 +316,9 @@ This file should stay unsupported.
         "desktop.open `"$FixtureIni`"",
         "desktop.open `"$FixtureCfg`"",
         "desktop.open `"$FixturePng`"",
-        "desktop.open `"$FixtureJpg`""
+        "desktop.open `"$FixtureBmp`"",
+        "desktop.open `"$FixtureJpg`"",
+        "desktop.open `"$FixtureJpeg`""
     )
 
     Assert-Contains $resetOutput "mode: reset" "reset gate transition"

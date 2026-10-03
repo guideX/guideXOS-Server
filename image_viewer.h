@@ -8,7 +8,7 @@
 
 namespace gxos { namespace apps {
 
-    /// Minimal hosted image viewer for PNG files.
+    /// Hosted image viewer for PNG and JPEG files.
     /// Features: open image from VFS/host path, fit-to-window rendering, zoom, pan, folder navigation,
     /// transparent backgrounds, and basic status text.
     class ImageViewer {
@@ -94,6 +94,7 @@ namespace gxos { namespace apps {
         static bool pointInsideCurrentImage(int x, int y);
         static std::string currentImagePositionText();
         static std::string modeText();
+        static bool isSupportedImagePath(const std::string& path);
         static bool isPngPath(const std::string& path);
         static bool safeEqualsPath(const std::string& a, const std::string& b);
         static std::string normalizeFolderPath(const std::string& path);

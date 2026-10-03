@@ -4,7 +4,9 @@
 #include "jpeg_test_fixtures.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -19,10 +21,28 @@ using gxos::gui::JpegProbeStatus;
 
 namespace {
 
+int checks = 0;
+int failures = 0;
+
 bool expect(bool condition, const char* label)
 {
+    ++checks;
     if (!condition) std::cerr << "FAIL: " << label << "\n";
+    if (!condition) ++failures;
     return condition;
+}
+
+uint64_t pixelHash(const gxos::gui::ImageBitmap& bitmap)
+{
+    if (!bitmap.image || !bitmap.image->isValid()) return 0;
+    const size_t byteCount = static_cast<size_t>(bitmap.image->Width) *
+        static_cast<size_t>(bitmap.image->Height) * static_cast<size_t>(bitmap.image->Channels);
+    uint64_t hash = 14695981039346656037ull;
+    for (size_t i = 0; i < byteCount; ++i) {
+        hash ^= bitmap.image->Pixels[i];
+        hash *= 1099511628211ull;
+    }
+    return hash;
 }
 
 std::vector<uint8_t> readFixture(const char* path)
@@ -144,7 +164,9 @@ int main()
                      info.progressive == isProgressive, "JPEG mode header fields");
         const auto decoded = ImageAdapter::LoadFromBytes(bytes, label, limitsFor(width, height));
         ok &= expect(decoded.status == ImageLoadStatus::Ok && decoded.width == static_cast<int>(width) &&
-                     decoded.height == static_cast<int>(height) && decoded.format == gxos::gui::ImageFormat::Jpeg,
+                     decoded.height == static_cast<int>(height) && decoded.format == gxos::gui::ImageFormat::Jpeg &&
+                     decoded.image && decoded.image->isValid() && decoded.image->Channels == 4 &&
+                     decoded.image->Pixels[3] == 255 && pixelHash(decoded) != 0,
                      "JPEG mode decodes through ImageAdapter");
     };
 
@@ -164,9 +186,33 @@ int main()
 
     const ImageSafetyLimits exactLimits = limitsFor(326, 86);
     const auto decoded = ImageAdapter::LoadFromBytes(fixture, "fixture.jpg", exactLimits);
-    ok &= expect(decoded.status == ImageLoadStatus::Ok && decoded.width == 326 && decoded.height == 86,
-                 "baseline JPEG decodes through ImageAdapter");
+    ok &= expect(decoded.status == ImageLoadStatus::Ok && decoded.width == 326 && decoded.height == 86 &&
+                 decoded.image && decoded.image->isValid() && decoded.image->Channels == 4 &&
+                 decoded.image->Pixels[3] == 255 && pixelHash(decoded) == 0x8adec27d637a1e32ull,
+                 "baseline JPEG decodes to owned RGBA pixels matching the deterministic pixel hash");
     ok &= expect(decoded.format == gxos::gui::ImageFormat::Jpeg, "JPEG format ownership is retained");
+
+    const auto fileLoadedJpg = ImageAdapter::LoadFromFile("/bkup/appdemo.jpg");
+    ok &= expect(fileLoadedJpg.status == ImageLoadStatus::Ok && fileLoadedJpg.width == 326 &&
+                 fileLoadedJpg.height == 86 && fileLoadedJpg.format == gxos::gui::ImageFormat::Jpeg &&
+                 pixelHash(fileLoadedJpg) == pixelHash(decoded),
+                 "production VFS/file loader decodes the known-good JPG to the same owned pixel state");
+
+    const std::filesystem::path jpegFixtureDirectory = std::filesystem::path("tmp") /
+        ("phase13-jpeg-loader-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const std::filesystem::path nestedJpegDirectory = jpegFixtureDirectory / "nested folder";
+    std::filesystem::create_directories(nestedJpegDirectory);
+    const std::filesystem::path jpegFixturePath = nestedJpegDirectory / "mixed.JpEg";
+    std::filesystem::copy_file("bkup/appdemo.jpg", jpegFixturePath, std::filesystem::copy_options::overwrite_existing);
+    const std::string jpegVirtualPath = "/" + jpegFixturePath.generic_string();
+    const auto fileLoadedJpeg = ImageAdapter::LoadFromFile(jpegVirtualPath);
+    ok &= expect(fileLoadedJpeg.status == ImageLoadStatus::Ok && fileLoadedJpeg.width == 326 &&
+                 fileLoadedJpeg.height == 86 && fileLoadedJpeg.format == gxos::gui::ImageFormat::Jpeg &&
+                 fileLoadedJpeg.source == jpegVirtualPath && pixelHash(fileLoadedJpeg) == pixelHash(decoded),
+                 "production file loader accepts a mixed-case nested .jpeg path and preserves decoded pixels");
+    ok &= expect(ImageAdapter::LoadFromFile("/unsupported.bmp").status == ImageLoadStatus::UnsupportedFormat &&
+                 ImageAdapter::LoadFromFile("/unsupported.gif").status == ImageLoadStatus::UnsupportedFormat,
+                 "shared production adapter has no BMP or GIF file-loader capability");
 
     const auto metadataDecoded = ImageAdapter::LoadFromBytes(withMetadata(fixture), "metadata.jpg", exactLimits);
     ok &= expect(metadataDecoded.status == ImageLoadStatus::Ok,
@@ -333,6 +379,10 @@ int main()
                      "valid JPEG recovers after malformed decode");
     }
 
+    std::error_code ignored;
+    std::filesystem::remove_all(jpegFixtureDirectory, ignored);
+    std::cout << "jpegCodecChecks=" << (checks - failures) << "/" << checks << "\n";
+    std::cout << "jpegPixelHash=" << std::hex << pixelHash(decoded) << std::dec << "\n";
     std::cout << (ok ? "JPEG codec tests PASS\n" : "JPEG codec tests FAIL\n");
     return ok ? 0 : 1;
 }

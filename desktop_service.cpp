@@ -273,9 +273,7 @@ namespace gxos {
 
             static const FileAssociationV1Record kFileAssociationV1Table[] = {
                 { ".bmp", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
-                { ".jpg", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
                 { ".gif", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
-                { ".jpeg", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
                 { "<unknown>", FileAssociationV1Kind::UnknownFallback, nullptr, "Unsupported", nullptr, false, true, false, false, false, false, false, "Unknown extensions remain fallback-only" },
                 { ".exe", FileAssociationV1Kind::RiskyFallback, nullptr, "Unsupported", nullptr, false, true, false, false, false, true, false, "Executable-style extensions remain unsupported" },
                 { ".gxapp", FileAssociationV1Kind::RiskyFallback, nullptr, "Unsupported", nullptr, false, true, false, false, false, true, false, "Package-style extensions remain unsupported" },
@@ -1753,7 +1751,7 @@ namespace gxos {
             summary.handlersResolveToRegistry = summary.registryMismatch == 0;
             summary.textFilesOpenWithNotepad = summary.textAssociations == 4 && allRequiredTextAssociationsResolve && summary.registryMismatch == 0 && summary.registryResolved == supportedRegistryAssociations;
             summary.foldersOpenWithFileExplorer = summary.folderAssociations == 1 && summary.registryMismatch == 0 && summary.registryResolved == supportedRegistryAssociations;
-            summary.imagesRemainLegacy = summary.imageLegacyAssociations == 4;
+            summary.imagesRemainLegacy = summary.imageLegacyAssociations == 2;
             summary.unknownExtensionsFallback = summary.unknownFallbackAssociations == 1;
             summary.riskyExtensionsNotActiveDispatchOwned = summary.riskyFallbackAssociations == 3;
             summary.folderAssociationRegistered = summary.folderAssociations == 1 && summary.handlersResolveToRegistry;
@@ -1763,7 +1761,7 @@ namespace gxos {
 
         static std::string fileAssociationV1CompactSummaryLine(const FileAssociationV1CoverageSummary& summary) {
             std::ostringstream oss;
-            oss << "fileAssociationV1: " << statusText(summary.tableExists && summary.registryMismatch == 0 && summary.textAssociations == 4 && summary.folderAssociations == 1 && summary.imageLegacyAssociations == 4 && summary.imageViewerAppModelAssociations == 1 && summary.unknownFallbackAssociations == 1 && summary.riskyFallbackAssociations == 3)
+            oss << "fileAssociationV1: " << statusText(summary.tableExists && summary.registryMismatch == 0 && summary.textAssociations == 4 && summary.folderAssociations == 1 && summary.imageLegacyAssociations == 2 && summary.imageViewerAppModelAssociations == 3 && summary.unknownFallbackAssociations == 1 && summary.riskyFallbackAssociations == 3)
                 << " entries=" << summary.total
                 << " directoryRoutes=" << summary.folderAssociations
                 << " text=" << summary.textAssociations
@@ -1780,7 +1778,7 @@ namespace gxos {
         }
 
         static std::string fileAssociationV1KeyMappingsLine() {
-            return "fileAssociationV1KeyMappings: directories->File Explorer (separate route); AppRegistry .txt/.log/.ini/.cfg->Notepad; AppRegistry .png->Image Viewer; .bmp/.jpg/.gif/.jpeg->Image Viewer (legacy direct path); unknown/risky->Unsupported\n";
+            return "fileAssociationV1KeyMappings: directories->File Explorer (separate route); AppRegistry .txt/.log/.ini/.cfg->Notepad; AppRegistry .png/.jpg/.jpeg->Image Viewer; .bmp/.gif->Image Viewer (legacy direct path; decoder unsupported); unknown/risky->Unsupported\n";
         }
 
         static std::string fileAssociationV1MarkersLine(const FileAssociationV1CoverageSummary& summary) {

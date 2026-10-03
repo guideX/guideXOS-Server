@@ -645,9 +645,14 @@ bool ImageViewer::safeEqualsPath(const std::string& a, const std::string& b) {
     return normalizeCaseForSort(a) == normalizeCaseForSort(b);
 }
 
-bool ImageViewer::isPngPath(const std::string& path) {
+bool ImageViewer::isSupportedImagePath(const std::string& path) {
     std::string ext = std::filesystem::path(path).extension().string();
-    return lowerCopy(ext) == ".png";
+    ext = lowerCopy(ext);
+    return ext == ".png" || ext == ".jpg" || ext == ".jpeg";
+}
+
+bool ImageViewer::isPngPath(const std::string& path) {
+    return lowerCopy(std::filesystem::path(path).extension().string()) == ".png";
 }
 
 float ImageViewer::fitScaleForClientArea(int clientWidth, int clientHeight) {
@@ -893,7 +898,7 @@ void ImageViewer::setNoticeText(const std::string& text) {
 
 void ImageViewer::showUnsupportedFormat(const std::string& path) {
     const bool hadImage = static_cast<bool>(s_image);
-    s_errorText = "Unsupported image format: only PNG is supported in this version";
+    s_errorText = "Unsupported image format: supported formats are PNG and JPEG";
     s_noticeText.clear();
 
     if (!hadImage) {
@@ -945,7 +950,7 @@ bool ImageViewer::refreshFolderImageList(const std::string& path) {
         std::error_code entryEc;
         if (!entry.is_regular_file(entryEc) || entryEc) continue;
         const std::string candidate = entry.path().string();
-        if (!isPngPath(candidate)) continue;
+        if (!isSupportedImagePath(candidate)) continue;
         s_folderImages.push_back(candidate);
     }
 
@@ -1065,7 +1070,8 @@ bool ImageViewer::loadImagePath(const std::string& path, bool refreshFolderList,
     refreshWindowTitle();
     updateDisplay();
 
-    Logger::write(LogLevel::Info, "ImageViewer loaded PNG: " + s_filePath +
+    const char* formatName = loaded.format == gui::ImageFormat::Jpeg ? "JPEG" : "PNG";
+    Logger::write(LogLevel::Info, std::string("ImageViewer loaded ") + formatName + ": " + s_filePath +
         " (" + std::to_string(s_originalW) + "x" + std::to_string(s_originalH) + ")" +
         " transparency=" + (s_hasTransparency ? "true" : "false") +
         " folderImages=" + std::to_string(s_folderImages.size()));
@@ -1129,7 +1135,7 @@ void ImageViewer::openImageFromDialog() {
         if (path.empty()) {
             return;
         }
-        if (!isPngPath(path)) {
+        if (!isSupportedImagePath(path)) {
             showUnsupportedFormat(path);
             return;
         }
@@ -1221,7 +1227,7 @@ int ImageViewer::main(int argc, char** argv) {
     }
 
     if (!s_filePath.empty()) {
-        if (!isPngPath(s_filePath)) {
+        if (!isSupportedImagePath(s_filePath)) {
             showUnsupportedFormat(s_filePath);
         } else {
             loadImagePath(s_filePath, true, false);

@@ -225,7 +225,7 @@ try {
     Send-ServerCommand "gui.start"
     Start-Sleep -Milliseconds 500
     Send-ServerCommand "desktop.appmodel.file-associations"
-    Wait-OutputCount ([regex]::Escape("AppRegistry .png->Image Viewer")) 1
+    Wait-OutputCount ([regex]::Escape("AppRegistry .png/.jpg/.jpeg->Image Viewer")) 1
     # The diagnostic command reads one whitespace-delimited token and does not strip quotes.
     Send-ServerCommand ("desktop.open.resolve {0}" -f $NormalCases[0].VirtualPath)
     Wait-OutputCount ([regex]::Escape("launchTarget: DocumentActivation")) 1

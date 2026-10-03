@@ -40,8 +40,8 @@ int main() {
     AppRegistry registry(false, storePath);
     registry.RegisterBuiltInAppsAsManifests({ "Notepad", "Image Viewer", "guideXOS Navigator" });
 
-    check(registry.GetFileAssociations().size() == 7,
-        "built-in registry adds PNG plus HTML and HTM capabilities beside Notepad's four text types");
+    check(registry.GetFileAssociations().size() == 9,
+        "built-in registry adds PNG, JPG, JPEG, HTML and HTM capabilities beside Notepad's four text types");
 
     const FileAssociationResolution lower = registry.ResolveFileAssociation("/images/nested/picture.png");
     const FileAssociationResolution upper = registry.ResolveFileAssociation("/images/nested/picture.PNG");
@@ -63,6 +63,33 @@ int main() {
         defaults.configuredOverrideAppId.empty() && defaults.effectiveDefaultAppId == "gxos.builtin.imageviewer" &&
         defaults.effectiveDefaultAvailable,
         "PNG policy reports ImageViewer as built-in/effective default without a configured override");
+
+    const std::vector<std::string> jpegCasePaths = {
+        "/images/photo.jpg", "/images/photo.JPG", "/images/photo.JpG",
+        "/images/photo.jpeg", "/images/photo.JPEG", "/images/photo.JpEg"
+    };
+    bool jpegExtensionsResolveCaseInsensitively = true;
+    for (const std::string& path : jpegCasePaths) {
+        const FileAssociationResolution resolution = registry.ResolveFileAssociation(path);
+        jpegExtensionsResolveCaseInsensitively = jpegExtensionsResolveCaseInsensitively &&
+            resolution.launchable() && resolution.appId == "gxos.builtin.imageviewer" &&
+            resolution.activation.documentPath == path;
+    }
+    const DocumentHandlerList jpgHandlers = registry.EnumerateCapableHandlers(".JPG");
+    const DocumentHandlerList jpegHandlers = registry.EnumerateCapableHandlers(".JPEG");
+    const DefaultHandlerInfo jpgDefaults = registry.GetDefaultHandlerInfo(".JpG");
+    const DefaultHandlerInfo jpegDefaults = registry.GetDefaultHandlerInfo(".JpEg");
+    check(jpegExtensionsResolveCaseInsensitively,
+        "JPG/JPEG AppRegistry resolution preserves all six lower, upper, and mixed-case suffix paths");
+    check(jpgHandlers.validExtension && jpgHandlers.count == 1 && jpgHandlers.handlers[0].isDefault &&
+        jpgHandlers.handlers[0].appId == "gxos.builtin.imageviewer" &&
+        jpegHandlers.validExtension && jpegHandlers.count == 1 && jpegHandlers.handlers[0].isDefault &&
+        jpegHandlers.handlers[0].appId == "gxos.builtin.imageviewer" &&
+        jpgDefaults.builtInDefaultAppId == "gxos.builtin.imageviewer" &&
+        jpgDefaults.configuredOverrideAppId.empty() && jpgDefaults.effectiveDefaultAppId == "gxos.builtin.imageviewer" &&
+        jpegDefaults.builtInDefaultAppId == "gxos.builtin.imageviewer" &&
+        jpegDefaults.configuredOverrideAppId.empty() && jpegDefaults.effectiveDefaultAppId == "gxos.builtin.imageviewer",
+        "JPG and JPEG each enumerate ImageViewer as the sole built-in/effective default with no override");
 
     const DocumentHandlerList htmlHandlers = registry.EnumerateCapableHandlers(".HTML");
     const DefaultHandlerInfo htmlDefaults = registry.GetDefaultHandlerInfo(".html");
@@ -129,6 +156,21 @@ int main() {
     }
     check(htmlLifecycleCyclesSucceeded && dispatchCalls == 201,
         "100 Navigator HTML/HTM model and generic-dispatcher cycles preserve distinct owned paths");
+    const int navigatorLifecycleDispatchCalls = dispatchCalls - 101;
+
+    bool jpegLifecycleCyclesSucceeded = true;
+    for (size_t i = 0; i < 100; ++i) {
+        const std::string extension = (i % 2 == 0) ? ".jpg" : ".JpEg";
+        const std::string path = "/images/nested/jpeg-cycle-" + std::to_string(i) + extension;
+        const FileAssociationResolution cycle = registry.ResolveFileAssociation(path);
+        if (!cycle.launchable() || cycle.appId != "gxos.builtin.imageviewer" ||
+            !dispatcher.Dispatch(registry, cycle.activation, error) || receivedActivation.documentPath != path) {
+            jpegLifecycleCyclesSucceeded = false;
+            break;
+        }
+    }
+    check(jpegLifecycleCyclesSucceeded && dispatchCalls == 301,
+        "100 alternating JPG/JPEG model and generic-dispatcher cycles preserve distinct owned paths");
 
     AppActivationContext unsupportedKind = ownedResolution.activation;
     unsupportedKind.kind = AppActivationKind::Application;
@@ -164,6 +206,7 @@ int main() {
     std::filesystem::remove(storePath.string() + ".missing", ignored);
     std::cout << "builtInDocumentDispatcherChecks=" << (checks - failures) << "/" << checks << "\n";
     std::cout << "builtInDocumentDispatcherPngLifecycleCycles=100/100\n";
-    std::cout << "builtInDocumentDispatcherNavigatorLifecycleCycles=" << (dispatchCalls - 101) << "/100\n";
+    std::cout << "builtInDocumentDispatcherNavigatorLifecycleCycles=" << navigatorLifecycleDispatchCalls << "/100\n";
+    std::cout << "builtInDocumentDispatcherJpegLifecycleCycles=" << (dispatchCalls - 201) << "/100\n";
     return failures == 0 ? 0 : 1;
 }
