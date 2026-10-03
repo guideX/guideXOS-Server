@@ -779,14 +779,28 @@ gx_result Poll(NativeAppRuntimeContext& owner, gx_development_run_handle handle,
         slot->deployment.state = GX_DEVELOPMENT_RUN_CLEANING_UP;
         unregisterDeployment(slot->deployment);
         slot->deployment.cleanupComplete = true;
-        slot->deployment.error = exitCode == GX_OK ? GX_DEVELOPMENT_RUN_ERROR_NONE : GX_DEVELOPMENT_RUN_ERROR_LAUNCH_FAILED;
-        slot->deployment.errorMessage = exitCode == GX_OK ? std::string() : "native application exited with failure";
+        NativeAppProcessInfo targetRuntime = {};
+        const bool runtimeObserved = slot->deployment.nativeRuntimeId != 0 &&
+            NativeAppProcessTable::Find(slot->deployment.nativeRuntimeId, targetRuntime);
+        const bool targetReturnedNormally = statusAvailable && runtimeObserved &&
+            targetRuntime.lifecycleState == NativeAppLifecycleState::Exited;
+        slot->deployment.error = targetReturnedNormally ? GX_DEVELOPMENT_RUN_ERROR_NONE :
+            GX_DEVELOPMENT_RUN_ERROR_LAUNCH_FAILED;
+        slot->deployment.errorMessage = targetReturnedNormally ? std::string() :
+            (runtimeObserved && !targetRuntime.failureReason.empty() ? targetRuntime.failureReason :
+             "native application runtime failed before normal target exit");
         // EXITED is the durable observation boundary.  The deployment record
         // remains owned by this handle until the caller consumes the terminal
         // metadata and invokes Release; completion publication must not require
         // another process/debugger poll or destroy the identity early.
-        slot->deployment.state = exitCode == GX_OK ? GX_DEVELOPMENT_RUN_EXITED : GX_DEVELOPMENT_RUN_FAILED;
-        Logger::write(LogLevel::Info, "[DevelopmentRun] application exited appId=" + slot->deployment.applicationId + " exitCode=" + std::to_string(exitCode) + " cleanup=PASS");
+        slot->deployment.state = targetReturnedNormally ? GX_DEVELOPMENT_RUN_EXITED : GX_DEVELOPMENT_RUN_FAILED;
+        Logger::write(targetReturnedNormally ? LogLevel::Info : LogLevel::Warn,
+            "[DevelopmentRun] application exited appId=" + slot->deployment.applicationId +
+            " processId=" + std::to_string(processId) +
+            " runtimeId=" + std::to_string(slot->deployment.nativeRuntimeId) +
+            " exitCode=" + std::to_string(exitCode) +
+            " classification=" + (targetReturnedNormally ? std::string("normal-return") : std::string("runtime-failure")) +
+            " cleanup=PASS");
     } else if (slot->deployment.windowCount > 0 || (slot->deployment.debugControlled &&
                                                         slot->deployment.debugExecutionReleased &&
                                                         slot->deployment.nativeRuntimeId != 0)) {

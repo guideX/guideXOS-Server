@@ -415,14 +415,17 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     runtimeContext.activeGxContext = nullptr;
     if (runtimeContext.debugLaunchGate) NativeAppDebugger::UnregisterRuntime(runtimeContext.runtimeId);
     if (runtimeContext.lastWaitResult == GX_ERROR_TIMEOUT && result.exitCode == GX_OK) addDiagnostic(result, "wait_for_close timed out; cleaning up remaining owned windows");
-    NativeAppRuntime::Cleanup(runtimeContext, (executionFailed || result.exitCode != GX_OK) ? NativeAppLifecycleState::Failed : NativeAppLifecycleState::Exited, result.exitCode, failureReason);
+    // gx_main's int32 result is application data.  Only an exception raised
+    // while executing the image is a NativeElf runtime failure; a normal
+    // return such as 1 or 7 still completes the runtime lifecycle normally.
+    NativeAppRuntime::Cleanup(runtimeContext, executionFailed ? NativeAppLifecycleState::Failed : NativeAppLifecycleState::Exited, result.exitCode, failureReason);
     const gxos::ProcessTombstoneRecord tombstone = makeNativeTombstoneRecord(runtimeContext, executionFailed, failureReason);
     if (ProcessTable::claimTombstoneCapture(tombstone.pid)) {
         ProcessTable::recordTombstone(tombstone);
     }
     NativeAppProcessTable::UpdateFromRuntime(runtimeContext);
     NativeAppProcessTable::MarkCompleted(runtimeContext.runtimeId, runtimeContext.lifecycleState, runtimeContext.exitCode, runtimeContext.failureReason);
-    result.success = result.exitCode == GX_OK && !executionFailed;
+    result.success = !executionFailed;
     result.hostLogCallCount = runtimeContext.hostLogCallCount;
     result.lastHostLogMessage = runtimeContext.lastHostLogMessage;
     result.apiVersionReturned = runtimeContext.lastApiVersionReturned;
