@@ -4452,6 +4452,64 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js54AfterLastClick, 1400) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js55FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js55.html";
+    const bool js55Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js55FixtureUrl);
+    const std::string js55InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS55 hosted nth structural-pseudo fixture loads and evaluates",
+        js55Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js55FixtureUrl &&
+        contains(js55InitialText, "Navigator JavaScript JS55") &&
+        contains(js55InitialText,
+            "initial:mixed=true:soleChild=true:nth=true:reverse=true:oddEven=true:anb=true:type=true:cross=true:parser=true:filters=true:hidden=true:root=true:form=true:traversal=true:relations=true:lists=true:event=false:lastEvent=false:nested=false:metadata=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js55Loaded) + ",text=" +
+        summarizeText(js55InitialText, 1800) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS55 hosted forward and reverse child indexes are 1-based",
+        js55Loaded && contains(js55InitialText,
+            ":nth=true:reverse=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "the first, second, and fifth children agree with the first, second, and fifth positions from the end");
+    add("JS55 hosted odd, even, and An+B formulas pass",
+        js55Loaded && contains(js55InitialText,
+            ":oddEven=true:anb=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "odd/even, 2n+1, 2n, whitespace around offsets, and the finite -n+3 prefix produce the expected five-item sets");
+    add("JS55 hosted of-type positions diverge from child positions",
+        js55Loaded && contains(js55InitialText,
+            ":type=true:cross=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "mixed span/button siblings have independent all-child and same-tag positions, and JS53/JS54 index-one pseudos agree");
+    add("JS55 hosted parser, compound filters, and hidden/root rules pass",
+        js55Loaded && contains(js55InitialText,
+            ":parser=true:filters=true:hidden=true:root=true:form=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "functional syntax composes in canonical order, malformed forms and a second pseudo fail closed, hidden Elements count, roots do not match, and form ownership is irrelevant");
+    add("JS55 hosted selector APIs, relations, and selector-list dedup pass",
+        js55Loaded && contains(js55InitialText,
+            ":traversal=true:relations=true:lists=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "querySelector, querySelectorAll, scoped queries, closest, all supported one-relation forms, structural order, and overlapping nth list members pass");
+    const bool js55FirstClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("button-first");
+    const std::string js55AfterFirstClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js55LastClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("button-last");
+    const std::string js55AfterLastClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS55 hosted nested Event matching preserves metadata",
+        js55FirstClick && js55LastClick &&
+        contains(js55AfterLastClick,
+            "event:mixed=true:soleChild=true:nth=true:reverse=true:oddEven=true:anb=true:type=true:cross=true:parser=true:filters=true:hidden=true:root=true:form=true:traversal=true:relations=true:lists=true:event=true:lastEvent=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("firstClick=") + yesNo(js55FirstClick) +
+        ",lastClick=" + yesNo(js55LastClick) + ",text=" +
+        summarizeText(js55AfterLastClick, 1800) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

@@ -59,6 +59,8 @@ constexpr std::size_t kNavigatorScriptMaxSelectorAttributeNameLength = 64u;
 constexpr std::size_t kNavigatorScriptMaxSelectorAttributeValueLength = 128u;
 constexpr std::size_t kNavigatorScriptMaxClassQueryTokens = 8u;
 constexpr std::size_t kNavigatorScriptMaxSelectorCollections = 128u;
+constexpr std::size_t kNavigatorScriptMaxNthArgumentLength = 32u;
+constexpr std::int16_t kNavigatorScriptMaxNthMagnitude = 32767;
 constexpr std::size_t kNavigatorScriptMaxFormValueBytes = 256u;
 constexpr std::uint32_t kNavigatorClickListenerOnceFlag = 1u;
 constexpr std::uint32_t kNavigatorClickListenerCaptureFlag = 2u;
@@ -124,6 +126,10 @@ enum class NavigatorScriptStatePseudo : std::uint8_t {
     FirstOfType,
     LastOfType,
     OnlyOfType,
+    NthChild,
+    NthLastChild,
+    NthOfType,
+    NthLastOfType,
 };
 
 struct NavigatorScriptSimpleSelectorDescriptor {
@@ -148,6 +154,8 @@ struct NavigatorScriptSimpleSelectorDescriptor {
     std::uint8_t attributeValueLength = 0;
     NavigatorScriptStatePseudo statePseudo =
         NavigatorScriptStatePseudo::None;
+    std::int16_t nthA = 0;
+    std::int16_t nthB = 0;
 };
 
 struct NavigatorScriptSelectorMemberDescriptor {
@@ -421,7 +429,10 @@ private:
         const NavigatorScriptSelectorDescriptor& storage) const;
     bool selectorStatePseudoMatches(
         const gxos::web::HtmlElementRef& element,
-        NavigatorScriptStatePseudo pseudo) const;
+        const NavigatorScriptSimpleSelectorDescriptor& selector) const;
+    bool resolveStructuralIndex(
+        const gxos::web::HtmlElementRef& element, bool sameType,
+        bool fromEnd, std::size_t& index) const;
     bool selectorMemberElementMatches(
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSelectorMemberDescriptor& selector,

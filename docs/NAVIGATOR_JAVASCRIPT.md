@@ -5537,8 +5537,110 @@ wrapper changed `game.o`, `main.o`, and `renderer.o`; they were restored from
 the snapshot and their lengths and SHA-256 hashes verified. Final comparison
 found **zero changed, zero missing, and zero extra files**.
 
-JS54 does not add `nth-*`, `:empty`, `:root`, functional pseudos,
+JS54 did not add `nth-*`, `:empty`, `:root`, functional pseudos,
 pseudo-elements, multiple pseudos on one simple selector, more relation depth,
-or public DOM insertion/removal. A bounded `:nth-child()` / `:nth-last-child()`
-phase is a possible JS55 direction; it should define its accepted formula
-grammar and arithmetic bounds before implementation.
+or public DOM insertion/removal. JS55 adds only the four bounded nth
+structural pseudos documented below.
+
+## JS55: bounded An+B structural pseudo-classes
+
+JS55 adds `:nth-child()`, `:nth-last-child()`, `:nth-of-type()`, and
+`:nth-last-of-type()` to the existing simple-selector parser and shared
+matcher. Each simple selector still has at most one pseudo, and its position
+remains after the optional tag, ID, classes, and attribute predicate. The
+overall selector-list input remains capped at 256 bytes. The expression
+inside an nth pseudo is capped at 32 source bytes, including whitespace.
+
+The bounded parser accepts signed integer constants, `odd`, `even`, `n`,
+signed integer coefficients such as `-2n`, and signed integer offsets such as
+`2n + 1`, `n-2`, and `-n+3`. `odd` is `(2, 1)`, `even` is `(2, 0)`, and bare
+`n` is `(1, 0)`. Pseudo names and the `odd`, `even`, and `n` tokens use ASCII
+case folding. ASCII whitespace is trimmed around the expression and allowed
+around the offset sign and its integer; whitespace inside a coefficient or
+integer is rejected. Nested parentheses, empty arguments, decimals, exponent
+and hexadecimal forms, multiplication, commas, `of <selector>`, trailing
+tokens, and malformed signs fail closed. Zero and negative constants are
+valid expressions that match no positive structural index.
+
+The normalized coefficients are stored directly in each bounded simple
+selector descriptor as signed 16-bit `A` and `B`, each limited to -32767
+through 32767. Decimal accumulation is checked before every step. Matching
+uses 32-bit integer deltas: for `A == 0`, the index must equal `B`; for
+positive `A`, `index - B` must be nonnegative and divisible by `A`; for
+negative `A`, `B - index` must be nonnegative and divisible by `-A`. Indexes
+are positive and 1-based. No `n` iteration or floating-point math is used.
+
+One shared bounded structural-index helper resolves a valid nonzero parent
+and scans at most `min(maxDocumentNodes, structuralElements.size())` Elements.
+It checks the candidate's membership, every same-parent child's `childIndex`,
+`siblingCount`, and `previousSiblingSerial`, and the parent's `childCount`.
+Any missing candidate or inconsistent order metadata fails closed. All-child
+forms count every structural Element sibling. Of-type forms count siblings
+whose current tags compare equal through the existing case-insensitive
+`selectorTagEquals()` helper. The helper calculates reverse positions from the
+validated forward counts. Roots and other parentless Elements never match.
+Hidden structural Elements count, and form ownership, text, comments, and
+layout order do not participate. Class and attribute predicates filter the
+candidate after type position has been calculated; they do not redefine it.
+
+The relation and selector-list scanners now recognize the bounded functional
+parenthesis span so `+`, whitespace, and commas inside an nth expression do
+not get mistaken for selector relations or list separators. The functional
+pseudo parser still rejects nested or extra parentheses and preserves the
+existing one-relation limit. Parsed `A/B` values live in the descriptor, so
+held collections reevaluate the current structural tree and do not retain
+caller-source pointers.
+
+The simple descriptor grows from **32 to 36 bytes** for the two explicit
+coefficients. The four-member selector descriptor grows from **524 to 556
+bytes**. A selector collection record grows from **544 to 576 bytes** and the
+fixed 128-record registry grows from **69,632 to 73,728 bytes**, a **4,096
+byte** increase. No per-match allocation, selector-side index cache, or
+unbounded expression storage was added.
+
+The focused proof is `tests/navigator_javascript_js55_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js55.ps1`. It covers An+B parsing and
+malformed forms, overflow and length bounds, all four index directions,
+compounds, relations, selector lists, live reordering, parent and sibling
+metadata corruption, hidden/form-owned Elements, events, nested dispatch,
+generation reuse, purity, and near-capacity matching. The focused suite passes
+**340/340 checks**, including the strict warning-as-error parser/adapter/runtime
+lane. The near-capacity test uses 1,021 siblings, runs 1,000 repeated nth and
+of-type matches, and rereads held nth collections 300 times.
+
+The production hosted fixture is `navigator-smoke/javascript-js55.html` and
+the seven JS55 hosted checks are part of `server.cpp`'s Navigator smoke
+aggregate. They cover forward and reverse indexes, odd/even and An+B,
+mixed-tag of-type behavior, JS53/JS54 equivalence, parser and compound
+behavior, query/relation/list integration, and nested Event matching with
+metadata preservation. All seven JS55 hosted checks pass. The aggregate
+reports **586 passed / 7 failed / 593 total**; the seven failures remain CSS
+3C, CSS 3G, CSS 6A, CSS 6B's three checks, and CSS 6C. `build.bat` passes.
+
+The full live JavaScript matrix—lexer, parser, runtime, and JS6 through JS55—
+passes **53/53 lanes**. JS36–JS43 report 114/114, 180/180, 152/152, 218/218,
+155/155, 220/220, 235/235, and 277/277. JS44–JS53 report 183/183, 184/184,
+220/220, 137/137, 136/136, 150/150, 313/313, 278/278, 319/319, and 211/211;
+JS54 reports 238/238 and JS55 reports 340/340. The JS52 parser regression now
+checks rejection of still-unsupported functional pseudos without expecting
+`:nth-child()` to be rejected.
+
+The production build succeeds. `build-kernel.bat` reaches the existing
+PacMan Native ELF link failures for `pacman_audio_load_resources(gx_app_context*)`
+and `pacman_audio_submit(void*, PacManSoundId)`. The independent
+`mingw32-make ARCH=amd64 EXTRA_CFLAGS=` kernel lane reaches the existing Mbed
+TLS configuration errors at `mbedtls_check_config.h:51` and `:64`. PacMan and
+Mbed TLS sources were not modified. Neither attempt produced a fresh kernel,
+so QEMU proof is not claimed.
+
+Before the kernel attempts, the generated-output audit snapshotted 381 files
+totaling 133,934,645 bytes across `ESP/`, `out/wallpaper-pack/`, the PacMan
+package and AMD64 objects, `kernel/build/`, and the BootLoader and Server
+Release outputs. The kernel attempts regenerated `game.o`, `main.o`, and
+`renderer.o`; those three known outputs were restored from the snapshot and
+their lengths and SHA-256 hashes verified. The final audit found **zero
+changed, zero missing, and zero extra files**.
+
+JS55 does not add `of <selector>` nth forms, other functional pseudo-classes,
+multiple pseudos per simple selector, additional relation depth, or public DOM
+insertion/removal APIs.

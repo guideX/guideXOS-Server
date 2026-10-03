@@ -1,0 +1,197 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS55</title></head>
+<body>
+<h1>Navigator JavaScript JS55</h1>
+<div id="panel" class="group" data-zone="primary">
+  <span id="span-before" class="marker" data-role="before">Before</span>
+  <BUTTON id="button-first" class="item target" data-role="primary">First button</BUTTON>
+  <i id="icon" class="icon">Icon</i>
+  <button id="button-last" class="item" data-role="secondary">Last button</button>
+  <span id="span-last">Last span</span>
+</div>
+<div id="single-parent"><button id="only-button" class="item" data-role="solo">Only button</button></div>
+<div id="three-parent">
+  <button id="three-first"></button>
+  <span id="three-gap"></span>
+  <button id="three-middle"></button>
+  <button id="three-last"></button>
+</div>
+<div id="mixed-parent">
+  <span id="mixed-before"></span>
+  <button id="only-type-button"></button>
+  <input id="mixed-after" type="text">
+</div>
+<div id="hidden-parent">
+  <button id="hidden-button" style="display:none">Hidden</button>
+  <span id="hidden-gap"></span>
+  <button id="visible-button">Visible</button>
+</div>
+<div id="class-parent">
+  <button id="class-target" class="target" data-role="primary"></button>
+  <button id="class-peer" class="peer" data-role="secondary"></button>
+</div>
+<div id="attribute-parent">
+  <button id="attribute-target" data-role="target"></button>
+  <button id="attribute-peer" data-role="peer"></button>
+</div>
+<div id="outside-parent">
+  <input id="form-owned" form="form-owner" type="text">
+</div>
+<form id="form-owner"></form>
+<div id="series" class="group">
+  <div id="n1" class="entry">1</div>
+  <div id="n2" class="entry">2</div>
+  <div id="n3" class="entry">3</div>
+  <div id="n4" class="entry">4</div>
+  <div id="n5" class="entry">5</div>
+</div>
+<p id="js55-state">initial</p>
+<script>
+var js55State = document.getElementById("js55-state");
+var panel = document.getElementById("panel");
+var firstButton = document.getElementById("button-first");
+var lastButton = document.getElementById("button-last");
+var onlyButton = document.getElementById("only-button");
+var onlyTypeButton = document.getElementById("only-type-button");
+var series = document.getElementById("series");
+var n1 = document.getElementById("n1");
+var n2 = document.getElementById("n2");
+var n3 = document.getElementById("n3");
+var n4 = document.getElementById("n4");
+var n5 = document.getElementById("n5");
+var firstEvent = false;
+var lastEvent = false;
+var nestedEvent = false;
+var eventMetadata = false;
+var mixed = firstButton.matches(":first-of-type") &&
+  !firstButton.matches(":first-child") &&
+  lastButton.matches(":last-of-type") &&
+  !lastButton.matches(":last-child") &&
+  onlyTypeButton.matches(":only-of-type") &&
+  !onlyTypeButton.matches(":only-child");
+var soleChild = onlyButton.matches(":first-child") &&
+  onlyButton.matches(":last-child") && onlyButton.matches(":only-child") &&
+  onlyButton.matches(":first-of-type") &&
+  onlyButton.matches(":last-of-type") &&
+  onlyButton.matches(":only-of-type");
+var nthBasic = n1.matches(":nth-child(1)") &&
+  n2.matches(":nth-child(2)") && n5.matches(":nth-child(5)") &&
+  document.querySelector("#n3:nth-child(3)") === n3;
+var nthReverse = n5.matches(":nth-last-child(1)") &&
+  n4.matches(":nth-last-child(2)") && n1.matches(":nth-last-child(5)");
+var nthOddEven = series.querySelectorAll("div:nth-child(odd)").length === 3 &&
+  series.querySelectorAll("div:nth-child(odd)")[0] === n1 &&
+  series.querySelectorAll("div:nth-child(odd)")[1] === n3 &&
+  series.querySelectorAll("div:nth-child(odd)")[2] === n5 &&
+  series.querySelectorAll("div:nth-child(even)").length === 2 &&
+  series.querySelectorAll("div:nth-child(even)")[1] === n4;
+var nthAnB = series.querySelectorAll("div:nth-child(2n+1)").length === 3 &&
+  series.querySelectorAll("div:nth-child(2n)").length === 2 &&
+  series.querySelectorAll("div:nth-child(-n+3)").length === 3 &&
+  n3.matches(":nth-child(2n + 1)") && !n4.matches(":nth-child(-n+3)");
+var nthOfType = firstButton.matches(":nth-child(2)") &&
+  firstButton.matches(":nth-of-type(1)") &&
+  lastButton.matches(":nth-child(4)") &&
+  lastButton.matches(":nth-of-type(2)") &&
+  lastButton.matches(":nth-last-of-type(1)");
+var nthCross = n1.matches(":first-child") === n1.matches(":nth-child(1)") &&
+  n5.matches(":last-child") === n5.matches(":nth-last-child(1)") &&
+  firstButton.matches(":first-of-type") ===
+    firstButton.matches(":nth-of-type(1)") &&
+  lastButton.matches(":last-of-type") ===
+    lastButton.matches(":nth-last-of-type(1)");
+var parser = firstButton.matches(":FIRST-OF-TYPE") &&
+  firstButton.matches(":First-Of-Type") &&
+  firstButton.matches("*:first-of-type") &&
+  firstButton.matches("BUTTON:first-of-type") &&
+  firstButton.matches("#button-first:first-of-type") &&
+  firstButton.matches(".target:first-of-type") &&
+  firstButton.matches("[data-role=primary]:first-of-type") &&
+  firstButton.matches("button#button-first.item.target[data-role=primary]:first-of-type") &&
+  document.querySelector(":firstoftype") === null &&
+  document.querySelector(":first--of-type") === null &&
+  document.querySelector(":first-of-type-extra") === null &&
+  document.querySelector(":first-of-type()") === null &&
+  document.querySelector("button:first-of-type:last-of-type") === null &&
+  firstButton.matches("BUTTON#button-first.item.target[data-role=primary]:nth-child(2)") &&
+  document.querySelector(":nth-child(2n+foo)") === null &&
+  document.querySelector(":nth-child((2))") === null &&
+  document.querySelector(":nth-child(1):focus") === null;
+var typeFilters = !document.getElementById("class-target").matches(".target:only-of-type") &&
+  !document.getElementById("attribute-target").matches("[data-role=target]:only-of-type") &&
+  document.getElementById("class-peer").matches(".peer:nth-of-type(2)") &&
+  !document.getElementById("class-peer").matches(".peer:nth-of-type(1)");
+var hiddenStructural = !document.getElementById("visible-button").matches(":first-of-type") &&
+  !document.getElementById("hidden-button").matches(":last-of-type") &&
+  document.getElementById("hidden-button").matches(":nth-child(1)") &&
+  document.getElementById("visible-button").matches(":nth-child(3)");
+var rootSafe = document.querySelector("html").parentElement === null &&
+  !document.querySelector("html").matches(":first-of-type") &&
+  !document.querySelector("html").matches(":last-of-type") &&
+  !document.querySelector("html").matches(":only-of-type") &&
+  !document.querySelector("html").matches(":nth-child(1)") &&
+  !document.querySelector("html").matches(":nth-last-child(1)") &&
+  !document.querySelector("html").matches(":nth-of-type(1)") &&
+  !document.querySelector("html").matches(":nth-last-of-type(1)");
+var formIndependent = document.getElementById("form-owned").matches(":only-of-type") &&
+  document.getElementById("form-owned").parentElement ===
+    document.getElementById("outside-parent") &&
+  document.getElementById("form-owned").matches(":nth-child(1)");
+var traversal = panel.children.length === 5 &&
+  panel.firstElementChild === document.getElementById("span-before") &&
+  panel.lastElementChild === document.getElementById("span-last") &&
+  panel.querySelector(":first-of-type") === document.getElementById("span-before") &&
+  panel.querySelectorAll("button:last-of-type").length === 1 &&
+  panel.querySelectorAll("button:last-of-type")[0] === lastButton &&
+  panel.querySelector("button:nth-of-type(2)") === lastButton;
+var relations = document.querySelector(".group:first-of-type button:last-of-type") === lastButton &&
+  document.querySelector("#panel:first-of-type > button:last-of-type") === lastButton &&
+  document.querySelector("#icon:first-of-type + button:last-of-type") === lastButton &&
+  document.querySelector("#span-before:first-of-type ~ button:last-of-type") === lastButton &&
+  lastButton.closest(".group:first-of-type") === panel &&
+  document.querySelector("#panel:nth-of-type(1) > #button-first:nth-child(2)") === firstButton &&
+  document.querySelector("#n1:nth-child(1) + #n2:nth-child(2)") === n2 &&
+  document.querySelector("#n1:nth-child(2n+1) ~ #n5:nth-last-child(1)") === n5;
+var lists = document.querySelectorAll("#only-button:first-child, #only-button:only-of-type").length === 1 &&
+  document.querySelectorAll("button:first-of-type, button:last-of-type")[0] === firstButton &&
+  document.querySelectorAll("button:first-of-type, button:last-of-type")[1] === lastButton &&
+  document.querySelectorAll("#button-last:last-of-type, #button-first:first-of-type")[0] === firstButton &&
+  document.querySelector("#button-last:last-of-type, #button-first:first-of-type") === firstButton &&
+  series.querySelectorAll("div:nth-child(odd), #n1:nth-child(1)").length === 3 &&
+  series.querySelectorAll("div:nth-child(odd), #n1:nth-child(1)")[2] === n5;
+firstButton.addEventListener("click", function (event) {
+  var target = event.target;
+  var current = event.currentTarget;
+  var phase = event.eventPhase;
+  firstEvent = target.matches(":first-of-type") &&
+    !target.matches(":first-child") &&
+    target.matches(":nth-child(2)") && target.matches(":nth-of-type(1)") &&
+    target.closest(".group:first-of-type") === panel;
+  lastButton.click();
+  nestedEvent = event.target === target && event.currentTarget === current &&
+    event.eventPhase === phase;
+  eventMetadata = event.relatedTarget === null &&
+    event.defaultPrevented === false && current === firstButton && phase === 2;
+  js55Snapshot("event");
+});
+lastButton.addEventListener("click", function (event) {
+  lastEvent = event.target.matches(":last-of-type") &&
+    !event.target.matches(":last-child") &&
+    event.target.matches(":nth-child(4)") &&
+    event.target.matches(":nth-last-of-type(1)");
+  js55Snapshot("event");
+});
+function js55Snapshot(label) {
+  js55State.textContent = label + ":mixed=" + mixed + ":soleChild=" + soleChild +
+    ":nth=" + nthBasic + ":reverse=" + nthReverse + ":oddEven=" + nthOddEven +
+    ":anb=" + nthAnB + ":type=" + nthOfType + ":cross=" + nthCross +
+    ":parser=" + parser + ":filters=" + typeFilters + ":hidden=" + hiddenStructural +
+    ":root=" + rootSafe + ":form=" + formIndependent + ":traversal=" + traversal +
+    ":relations=" + relations + ":lists=" + lists + ":event=" + firstEvent +
+    ":lastEvent=" + lastEvent + ":nested=" + nestedEvent + ":metadata=" + eventMetadata;
+}
+js55Snapshot("initial");
+</script>
+</body>
+</html>

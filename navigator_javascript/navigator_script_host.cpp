@@ -537,59 +537,192 @@ bool parseAttributePredicate(SourceView source, std::size_t open,
     return true;
 }
 
-bool parseStatePseudo(SourceView source, std::size_t colon,
-    std::size_t end, NavigatorScriptStatePseudo& pseudo)
+bool parseNthInteger(SourceView source, std::size_t begin, std::size_t end,
+    bool allowSign, std::int16_t& value)
 {
-    if (colon >= end || source.data[colon] != ':' || colon + 1u >= end)
+    if (source.data == nullptr || begin >= end) return false;
+    std::size_t position = begin;
+    bool negative = false;
+    if (source.data[position] == '+' || source.data[position] == '-') {
+        if (!allowSign) return false;
+        negative = source.data[position] == '-';
+        ++position;
+    }
+    if (position == end) return false;
+
+    std::uint32_t magnitude = 0u;
+    constexpr std::uint32_t maximum =
+        static_cast<std::uint32_t>(kNavigatorScriptMaxNthMagnitude);
+    for (; position < end; ++position) {
+        const unsigned char character =
+            static_cast<unsigned char>(source.data[position]);
+        if (character < static_cast<unsigned char>('0') ||
+            character > static_cast<unsigned char>('9')) return false;
+        const std::uint32_t digit = static_cast<std::uint32_t>(
+            character - static_cast<unsigned char>('0'));
+        if (magnitude > (maximum - digit) / 10u) return false;
+        magnitude = magnitude * 10u + digit;
+    }
+    const std::int32_t signedValue = negative
+        ? -static_cast<std::int32_t>(magnitude)
+        : static_cast<std::int32_t>(magnitude);
+    value = static_cast<std::int16_t>(signedValue);
+    return true;
+}
+
+bool parseNthExpression(SourceView argument, std::int16_t& a,
+    std::int16_t& b)
+{
+    if (argument.data == nullptr || argument.length == 0u ||
+        argument.length > kNavigatorScriptMaxNthArgumentLength) return false;
+
+    std::size_t begin = 0u;
+    std::size_t end = argument.length;
+    while (begin < end && isSelectorAsciiWhitespace(argument.data[begin]))
+        ++begin;
+    while (end > begin && isSelectorAsciiWhitespace(argument.data[end - 1u]))
+        --end;
+    if (begin == end) return false;
+
+    const auto equalsKeyword = [&argument, begin, end](const char* keyword) {
+        const std::size_t keywordLength =
+            std::char_traits<char>::length(keyword);
+        if (end - begin != keywordLength) return false;
+        for (std::size_t index = 0u; index < keywordLength; ++index) {
+            if (lowerAscii(static_cast<unsigned char>(
+                    argument.data[begin + index])) !=
+                static_cast<unsigned char>(keyword[index])) return false;
+        }
+        return true;
+    };
+    if (equalsKeyword("odd")) {
+        a = 2;
+        b = 1;
+        return true;
+    }
+    if (equalsKeyword("even")) {
+        a = 2;
+        b = 0;
+        return true;
+    }
+
+    std::size_t nPosition = end;
+    for (std::size_t index = begin; index < end; ++index) {
+        const unsigned char character = static_cast<unsigned char>(
+            argument.data[index]);
+        if (character != static_cast<unsigned char>('n') &&
+            character != static_cast<unsigned char>('N')) continue;
+        if (nPosition != end) return false;
+        nPosition = index;
+    }
+    if (nPosition == end) {
+        a = 0;
+        return parseNthInteger(argument, begin, end, true, b);
+    }
+
+    if (nPosition == begin) {
+        a = 1;
+    } else if (nPosition == begin + 1u &&
+        (argument.data[begin] == '+' || argument.data[begin] == '-')) {
+        a = argument.data[begin] == '-' ? -1 : 1;
+    } else if (!parseNthInteger(argument, begin, nPosition, true, a)) {
         return false;
-    const std::size_t length = end - colon - 1u;
+    }
+
+    std::size_t offsetBegin = nPosition + 1u;
+    while (offsetBegin < end &&
+        isSelectorAsciiWhitespace(argument.data[offsetBegin])) ++offsetBegin;
+    if (offsetBegin == end) {
+        b = 0;
+        return true;
+    }
+    const char sign = argument.data[offsetBegin];
+    if (sign != '+' && sign != '-') return false;
+    std::size_t digitsBegin = offsetBegin + 1u;
+    while (digitsBegin < end &&
+        isSelectorAsciiWhitespace(argument.data[digitsBegin])) ++digitsBegin;
+    if (digitsBegin == end) return false;
+
+    std::int16_t magnitude = 0;
+    if (!parseNthInteger(argument, digitsBegin, end, false, magnitude))
+        return false;
+    b = sign == '-'
+        ? static_cast<std::int16_t>(-static_cast<std::int32_t>(magnitude))
+        : magnitude;
+    return true;
+}
+
+bool parseStatePseudo(SourceView source, std::size_t colon,
+    std::size_t end, NavigatorScriptSimpleSelectorDescriptor& selector)
+{
+    if (source.data == nullptr || colon >= end || source.data[colon] != ':' ||
+        colon + 1u >= end) return false;
+
+    std::size_t open = end;
+    for (std::size_t index = colon + 1u; index < end; ++index) {
+        if (source.data[index] == '(') {
+            open = index;
+            break;
+        }
+    }
+    const std::size_t nameEnd = open;
+    const std::size_t nameLength = nameEnd - colon - 1u;
     const char* name = source.data + colon + 1u;
-    const auto equalsAsciiCaseInsensitive = [name, length](const char* expected) {
-        const std::size_t expectedLength = std::char_traits<char>::length(expected);
-        if (length != expectedLength) return false;
-        for (std::size_t index = 0u; index < length; ++index) {
+    const auto equalsAsciiCaseInsensitive = [name, nameLength](
+            const char* expected) {
+        const std::size_t expectedLength =
+            std::char_traits<char>::length(expected);
+        if (nameLength != expectedLength) return false;
+        for (std::size_t index = 0u; index < nameLength; ++index) {
             if (lowerAscii(static_cast<unsigned char>(name[index])) !=
                 static_cast<unsigned char>(expected[index])) return false;
         }
         return true;
     };
-    if (equalsAsciiCaseInsensitive("checked")) {
-        pseudo = NavigatorScriptStatePseudo::Checked;
+
+    if (open == end) {
+        if (equalsAsciiCaseInsensitive("checked"))
+            selector.statePseudo = NavigatorScriptStatePseudo::Checked;
+        else if (equalsAsciiCaseInsensitive("disabled"))
+            selector.statePseudo = NavigatorScriptStatePseudo::Disabled;
+        else if (equalsAsciiCaseInsensitive("focus"))
+            selector.statePseudo = NavigatorScriptStatePseudo::Focus;
+        else if (equalsAsciiCaseInsensitive("first-child"))
+            selector.statePseudo = NavigatorScriptStatePseudo::FirstChild;
+        else if (equalsAsciiCaseInsensitive("last-child"))
+            selector.statePseudo = NavigatorScriptStatePseudo::LastChild;
+        else if (equalsAsciiCaseInsensitive("only-child"))
+            selector.statePseudo = NavigatorScriptStatePseudo::OnlyChild;
+        else if (equalsAsciiCaseInsensitive("first-of-type"))
+            selector.statePseudo = NavigatorScriptStatePseudo::FirstOfType;
+        else if (equalsAsciiCaseInsensitive("last-of-type"))
+            selector.statePseudo = NavigatorScriptStatePseudo::LastOfType;
+        else if (equalsAsciiCaseInsensitive("only-of-type"))
+            selector.statePseudo = NavigatorScriptStatePseudo::OnlyOfType;
+        else
+            return false;
         return true;
     }
-    if (equalsAsciiCaseInsensitive("disabled")) {
-        pseudo = NavigatorScriptStatePseudo::Disabled;
-        return true;
+
+    if (end <= open + 1u || source.data[end - 1u] != ')') return false;
+    for (std::size_t index = open + 1u; index + 1u < end; ++index) {
+        if (source.data[index] == '(' || source.data[index] == ')')
+            return false;
     }
-    if (equalsAsciiCaseInsensitive("focus")) {
-        pseudo = NavigatorScriptStatePseudo::Focus;
-        return true;
-    }
-    if (equalsAsciiCaseInsensitive("first-child")) {
-        pseudo = NavigatorScriptStatePseudo::FirstChild;
-        return true;
-    }
-    if (equalsAsciiCaseInsensitive("last-child")) {
-        pseudo = NavigatorScriptStatePseudo::LastChild;
-        return true;
-    }
-    if (equalsAsciiCaseInsensitive("only-child")) {
-        pseudo = NavigatorScriptStatePseudo::OnlyChild;
-        return true;
-    }
-    if (equalsAsciiCaseInsensitive("first-of-type")) {
-        pseudo = NavigatorScriptStatePseudo::FirstOfType;
-        return true;
-    }
-    if (equalsAsciiCaseInsensitive("last-of-type")) {
-        pseudo = NavigatorScriptStatePseudo::LastOfType;
-        return true;
-    }
-    if (equalsAsciiCaseInsensitive("only-of-type")) {
-        pseudo = NavigatorScriptStatePseudo::OnlyOfType;
-        return true;
-    }
-    return false;
+
+    if (equalsAsciiCaseInsensitive("nth-child"))
+        selector.statePseudo = NavigatorScriptStatePseudo::NthChild;
+    else if (equalsAsciiCaseInsensitive("nth-last-child"))
+        selector.statePseudo = NavigatorScriptStatePseudo::NthLastChild;
+    else if (equalsAsciiCaseInsensitive("nth-of-type"))
+        selector.statePseudo = NavigatorScriptStatePseudo::NthOfType;
+    else if (equalsAsciiCaseInsensitive("nth-last-of-type"))
+        selector.statePseudo = NavigatorScriptStatePseudo::NthLastOfType;
+    else
+        return false;
+
+    return parseNthExpression(SourceView(source.data + open + 1u,
+        end - open - 2u), selector.nthA, selector.nthB);
 }
 
 bool parseSimpleSelector(SourceView source, std::size_t begin,
@@ -646,7 +779,7 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
     }
 
     if (position < end && source.data[position] == ':') {
-        if (!parseStatePseudo(source, position, end, selector.statePseudo))
+        if (!parseStatePseudo(source, position, end, selector))
             return false;
         position = end;
     }
@@ -681,6 +814,7 @@ bool parseBoundedSelectorMember(SourceView source,
     std::size_t relationCount = 0u;
     bool insideAttribute = false;
     char quote = '\0';
+    std::size_t functionalDepth = 0u;
     for (std::size_t index = begin; index < end; ++index) {
         const char character = source.data[index];
         if (insideAttribute) {
@@ -693,6 +827,15 @@ bool parseBoundedSelectorMember(SourceView source,
             }
             continue;
         }
+        if (character == '(') {
+            ++functionalDepth;
+            continue;
+        }
+        if (character == ')' && functionalDepth != 0u) {
+            --functionalDepth;
+            continue;
+        }
+        if (functionalDepth != 0u) continue;
         if (character == '[') {
             insideAttribute = true;
             continue;
@@ -751,6 +894,7 @@ bool parseBoundedSelector(SourceView source,
     std::size_t memberBegin = 0u;
     bool insideAttribute = false;
     char quote = '\0';
+    std::size_t functionalDepth = 0u;
     for (std::size_t index = 0u; index < source.length; ++index) {
         const char character = source.data[index];
         if (insideAttribute) {
@@ -763,6 +907,15 @@ bool parseBoundedSelector(SourceView source,
             }
             continue;
         }
+        if (character == '(') {
+            ++functionalDepth;
+            continue;
+        }
+        if (character == ')' && functionalDepth != 0u) {
+            --functionalDepth;
+            continue;
+        }
+        if (functionalDepth != 0u) continue;
         if (character == '[') {
             insideAttribute = true;
             continue;
@@ -3131,6 +3284,8 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
             leftSimple.hasAttributePredicate !=
                 rightSimple.hasAttributePredicate ||
             leftSimple.statePseudo != rightSimple.statePseudo ||
+            leftSimple.nthA != rightSimple.nthA ||
+            leftSimple.nthB != rightSimple.nthB ||
             leftSimple.attributeValuePresent !=
                 rightSimple.attributeValuePresent ||
             leftSimple.classTokenCount > kNavigatorScriptMaxClassQueryTokens ||
@@ -3225,7 +3380,7 @@ bool NavigatorScriptHostAdapter::selectorSimpleElementMatches(
                     selector.attributeValueLength))) return false;
     }
     if (selector.statePseudo != NavigatorScriptStatePseudo::None &&
-        !selectorStatePseudoMatches(element, selector.statePseudo))
+        !selectorStatePseudoMatches(element, selector))
         return false;
     return selector.tagLength != 0u || selector.idLength != 0u ||
         selector.classTokenCount != 0u || selector.hasAttributePredicate ||
@@ -3235,8 +3390,9 @@ bool NavigatorScriptHostAdapter::selectorSimpleElementMatches(
 
 bool NavigatorScriptHostAdapter::selectorStatePseudoMatches(
     const gxos::web::HtmlElementRef& element,
-    NavigatorScriptStatePseudo pseudo) const
+    const NavigatorScriptSimpleSelectorDescriptor& selector) const
 {
+    const NavigatorScriptStatePseudo pseudo = selector.statePseudo;
     if (document_ == nullptr || element.serial == 0u ||
         findElement(element.serial) != &element) return false;
 
@@ -3388,8 +3544,101 @@ bool NavigatorScriptHostAdapter::selectorStatePseudoMatches(
             return false;
         }
     }
+    case NavigatorScriptStatePseudo::NthChild:
+    case NavigatorScriptStatePseudo::NthLastChild:
+    case NavigatorScriptStatePseudo::NthOfType:
+    case NavigatorScriptStatePseudo::NthLastOfType: {
+        std::size_t index = 0u;
+        const bool sameType = pseudo == NavigatorScriptStatePseudo::NthOfType ||
+            pseudo == NavigatorScriptStatePseudo::NthLastOfType;
+        const bool fromEnd = pseudo ==
+                NavigatorScriptStatePseudo::NthLastChild ||
+            pseudo == NavigatorScriptStatePseudo::NthLastOfType;
+        if (!resolveStructuralIndex(element, sameType, fromEnd, index))
+            return false;
+
+        const std::int32_t a = selector.nthA;
+        const std::int32_t b = selector.nthB;
+        if (index == 0u) return false;
+        if (a == 0) return static_cast<std::int32_t>(index) == b;
+        if (a > 0) {
+            const std::int32_t delta = static_cast<std::int32_t>(index) - b;
+            return delta >= 0 && delta % a == 0;
+        }
+        const std::int32_t delta = b - static_cast<std::int32_t>(index);
+        const std::int32_t step = -a;
+        return delta >= 0 && delta % step == 0;
+    }
     }
     return false;
+}
+
+bool NavigatorScriptHostAdapter::resolveStructuralIndex(
+    const gxos::web::HtmlElementRef& element, bool sameType, bool fromEnd,
+    std::size_t& index) const
+{
+    index = 0u;
+    HostInstanceId parentSerial = 0u;
+    if (document_ == nullptr || element.serial == 0u ||
+        element.tagName.empty() || findElement(element.serial) != &element ||
+        !resolveStructuralParentSerial(element.serial, parentSerial) ||
+        parentSerial == 0u) return false;
+
+    const gxos::web::HtmlElementRef* parent = findElement(parentSerial);
+    if (parent == nullptr) return false;
+    const std::size_t bound = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+    const SourceView candidateTag(element.tagName.data(),
+        element.tagName.size());
+    std::size_t childCount = 0u;
+    std::size_t forwardChildIndex = 0u;
+    std::size_t sameTypeCount = 0u;
+    std::size_t forwardTypeIndex = 0u;
+    std::size_t sameTypeAfter = 0u;
+    bool candidateFound = false;
+    HostInstanceId previousSiblingSerial = 0u;
+
+    for (std::size_t position = 0u; position < bound; ++position) {
+        const gxos::web::HtmlElementRef& sibling =
+            document_->structuralElements[position];
+        if (sibling.parentSerial != parentSerial) continue;
+        if (sibling.serial == 0u ||
+            childCount >= std::numeric_limits<std::uint16_t>::max())
+            return false;
+        ++childCount;
+        if (sibling.childIndex != childCount ||
+            sibling.siblingCount != element.siblingCount ||
+            sibling.previousSiblingSerial != previousSiblingSerial)
+            return false;
+
+        const bool isCandidate = &sibling == &element;
+        if (isCandidate) {
+            if (candidateFound || sibling.serial != element.serial) return false;
+            candidateFound = true;
+            forwardChildIndex = childCount;
+        }
+        if (!sameType || selectorTagEquals(sibling.tagName, candidateTag)) {
+            ++sameTypeCount;
+            if (isCandidate) forwardTypeIndex = sameTypeCount;
+            else if (candidateFound) ++sameTypeAfter;
+        }
+        previousSiblingSerial = sibling.serial;
+    }
+
+    if (!candidateFound || childCount == 0u ||
+        parent->childCount != childCount ||
+        element.siblingCount != childCount ||
+        element.childIndex != forwardChildIndex) return false;
+
+    if (!sameType) {
+        index = fromEnd ? childCount - forwardChildIndex + 1u :
+            forwardChildIndex;
+    } else {
+        if (forwardTypeIndex == 0u || sameTypeCount < forwardTypeIndex)
+            return false;
+        index = fromEnd ? sameTypeAfter + 1u : forwardTypeIndex;
+    }
+    return index != 0u && index <= bound;
 }
 
 bool NavigatorScriptHostAdapter::selectorMemberElementMatches(

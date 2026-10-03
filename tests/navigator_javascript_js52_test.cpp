@@ -152,9 +152,9 @@ var parserListDeduplicates = parserList.length === 3 &&
 var parserUnknown = document.querySelector(":hover") === null &&
   document.querySelectorAll(":enabled").length === 0 &&
   !agree.matches(":active") && agree.closest(":first-of-type") === agree;
-var parserFunctionRejected = document.querySelector(":not(input)") === null &&
+var parserUnsupportedFunctionRejected =
+  document.querySelector(":not(input)") === null &&
   document.querySelector(":is(input)") === null &&
-  document.querySelector(":nth-child(1)") === null &&
   document.querySelector(":checked()") === null;
 var parserSecondPseudoRejected = document.querySelector("input:checked:focus") === null &&
   !agree.matches("input:checked:focus") &&
@@ -179,7 +179,7 @@ var parserListAllOrNothing = document.querySelector(
         "parserFullCompound", "parserWrongTag", "parserWrongClass",
         "parserWrongAttribute", "parserIdStillCaseSensitive",
         "parserClassStillCaseSensitive", "parserListDeduplicates",
-        "parserUnknown", "parserFunctionRejected",
+        "parserUnknown", "parserUnsupportedFunctionRejected",
         "parserSecondPseudoRejected", "parserCanonicalOrder",
         "parserMalformedColon", "parserUniversalPseudo",
         "parserUniversalAttributeStillRejected", "parserListAllOrNothing",
