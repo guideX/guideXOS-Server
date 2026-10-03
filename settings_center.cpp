@@ -111,6 +111,27 @@ public:
     {
         return DesktopService::ClearDefaultDocumentHandler(extension);
     }
+    std::vector<std::string> knownProtocols() override
+    {
+        return DesktopService::GetKnownProtocols();
+    }
+    ProtocolDefaultHandlerInfo protocolDefaultHandlerInfo(const std::string& scheme) override
+    {
+        return DesktopService::GetDefaultProtocolHandlerInfo(scheme);
+    }
+    ProtocolHandlerList capableProtocolHandlers(const std::string& scheme) override
+    {
+        return DesktopService::GetProtocolHandlers(scheme);
+    }
+    DefaultHandlerMutationResult setDefaultProtocolHandler(
+        const std::string& scheme, const std::string& canonicalAppId) override
+    {
+        return DesktopService::SetDefaultProtocolHandler(scheme, canonicalAppId);
+    }
+    DefaultHandlerMutationResult clearDefaultProtocolHandler(const std::string& scheme) override
+    {
+        return DesktopService::ClearDefaultProtocolHandler(scheme);
+    }
 
 private:
     const AppInventory& m_inventory;
@@ -986,7 +1007,7 @@ private:
         if (m_focusedItem.kind == FocusItem::Kind::Control &&
             m_focusedItem.control == FocusControl::DefaultAppEntry && m_focusedItem.index >= 0 &&
             static_cast<size_t>(m_focusedItem.index) < m_defaultAppsModel.snapshot().count) {
-            focusedExtension = m_defaultAppsModel.snapshot().rows[static_cast<size_t>(m_focusedItem.index)].extension;
+            focusedExtension = defaultAppsRowKey(m_defaultAppsModel.snapshot().rows[static_cast<size_t>(m_focusedItem.index)]);
         }
         if (m_defaultAppsPickerOpen && m_focusedItem.kind == FocusItem::Kind::Control &&
             m_focusedItem.control == FocusControl::DefaultAppHandler && m_focusedItem.index >= 0) {
@@ -995,7 +1016,7 @@ private:
                 const DefaultAppsRow* oldRow = findDefaultAppsRow(
                     m_defaultAppsModel.snapshot(), m_selectedDefaultExtension);
                 if (oldRow) {
-                    const DocumentHandlerInfo& handler = oldRow->handlers.handlers[
+                    const DefaultAppsHandlerInfo& handler = oldRow->handlers.handlers[
                         oldChoices[static_cast<size_t>(m_focusedItem.index)]];
                     focusedHandlerId = handler.appId;
                     focusedHandlerOwner = handler.registrationOwner;
@@ -1013,12 +1034,15 @@ private:
                 " total=" + std::to_string(refreshed.totalCount));
             for (size_t i = 0; i < refreshed.count; ++i) {
                 const DefaultAppsRow& row = refreshed.rows[i];
-                Logger::write(LogLevel::Info, "[SettingsDefaultAppsModel] row extension=" + row.extension +
+                const std::string rowIdentity = defaultAppsRowKey(row);
+                Logger::write(LogLevel::Info, std::string("[SettingsDefaultAppsModel] row ") +
+                    (row.protocol ? "protocol=" : "extension=") + row.extension +
                     " builtInDefault=" + (row.policy.builtInDefaultAppId.empty() ? std::string("none") : row.policy.builtInDefaultAppId) +
                     " configuredOverride=" + (row.policy.configuredOverrideAppId.empty() ? std::string("none") : row.policy.configuredOverrideAppId) +
                     " effectiveDefault=" + (row.policy.effectiveDefaultAppId.empty() ? std::string("none") : row.policy.effectiveDefaultAppId) +
                     " effectiveDisplayName=" + (row.effectiveDisplayName.empty() ? std::string("none") : row.effectiveDisplayName) +
-                    " handlers=" + std::to_string(row.handlers.availableHandlerCount));
+                    " handlers=" + std::to_string(row.handlers.availableHandlerCount) +
+                    " key=" + rowIdentity);
             }
         }
         if (!refreshed.available) m_defaultAppsStatus = "Default app information is unavailable.";
@@ -1026,7 +1050,7 @@ private:
             m_selectedDefaultExtension.clear();
             if (m_defaultAppsPickerOpen) {
                 m_defaultAppsPickerOpen = false;
-                m_defaultAppsStatus = "This file type is no longer available.";
+                m_defaultAppsStatus = "This default handler key is no longer available.";
             }
         }
         if (!focusedExtension.empty()) {
@@ -1073,7 +1097,7 @@ private:
         if (rowIndex < 0 || !gxos::apps::settings::openDefaultAppsPicker(m_defaultAppsModel.snapshot(),
                 static_cast<size_t>(rowIndex), m_selectedDefaultExtension,
                 m_defaultAppsPickerOpen, m_defaultAppsPickerScroll)) {
-            m_defaultAppsStatus = "This file type is no longer available.";
+            m_defaultAppsStatus = "This default handler key is no longer available.";
             return;
         }
         const std::vector<size_t> choices = currentDefaultHandlerIndices();
@@ -1108,7 +1132,7 @@ private:
             m_defaultAppsModel.snapshot(), m_selectedDefaultExtension);
         const std::vector<size_t> beforeChoices = currentDefaultHandlerIndices();
         if (before && eligibleIndex < beforeChoices.size()) {
-            const DocumentHandlerInfo& selected = before->handlers.handlers[beforeChoices[eligibleIndex]];
+                    const DefaultAppsHandlerInfo& selected = before->handlers.handlers[beforeChoices[eligibleIndex]];
             requestedAppId = selected.appId;
             requestedOwner = selected.registrationOwner;
             requestedGeneration = selected.registrationGeneration;
@@ -2152,8 +2176,9 @@ private:
                 break;
             case FocusControl::DefaultAppEntry:
                 if (item.index >= 0 && static_cast<size_t>(item.index) < m_defaultAppsModel.snapshot().count) {
-                    const std::string extension = m_defaultAppsModel.snapshot().rows[static_cast<size_t>(item.index)].extension;
-                    openDefaultAppsPicker(extension);
+                    const std::string key = defaultAppsRowKey(
+                        m_defaultAppsModel.snapshot().rows[static_cast<size_t>(item.index)]);
+                    openDefaultAppsPicker(key);
                 }
                 break;
             case FocusControl::DefaultAppHandler:
@@ -3126,7 +3151,7 @@ private:
         const int bottom = m_defaultAppsPickerOpen ? defaultAppsPickerBottom() : defaultAppsListBottom();
         const DefaultAppsSnapshot& snapshot = m_defaultAppsModel.snapshot();
         const std::string context = snapshot.available
-            ? "Default apps apply system-wide on guideXOS."
+            ? "System defaults for file types and URI protocols."
             : "Default app information is unavailable.";
         drawText(x + 8, appsTabsY() + appsTabsHeight() + 4,
             fitText(context, static_cast<size_t>(std::max(18, (width - 20) / 8))),
@@ -3135,7 +3160,7 @@ private:
         if (m_defaultAppsPickerOpen) {
             const DefaultAppsRow* row = findDefaultAppsRow(snapshot, m_selectedDefaultExtension);
             drawText(x + 8, appsTabsY() + appsTabsHeight() + 22,
-                fitText("Choose a default app for " + m_selectedDefaultExtension,
+                fitText("Choose a default app for " + (row ? defaultAppsRowLabel(*row) : m_selectedDefaultExtension),
                     static_cast<size_t>(std::max(18, (width - 20) / 8))), textColor());
             const int top = defaultAppsPickerTop();
             drawRect(x + 4, top - 4, width - 8, std::max(1, bottom - top + 10), cardColor());
@@ -3148,7 +3173,9 @@ private:
             if (!snapshot.available) {
                 drawText(x + 18, top + 42, "Default app information is unavailable.", mutedTextColor());
             } else if (!row || choices.empty()) {
-                drawText(x + 18, top + 42, "No available app can open this file type.", mutedTextColor());
+                drawText(x + 18, top + 42, row && row->protocol
+                    ? "No available app handles this protocol."
+                    : "No available app can open this file type.", mutedTextColor());
             } else {
                 const size_t first = static_cast<size_t>(m_defaultAppsPickerScroll);
                 const size_t end = std::min(choices.size(), first + static_cast<size_t>(defaultAppsPickerVisibleRows()));
@@ -3188,7 +3215,7 @@ private:
 
         const int top = defaultAppsListTop();
         std::string countLine = snapshot.available
-            ? std::to_string(snapshot.count) + (snapshot.count == 1 ? " file type" : " file types")
+            ? std::to_string(snapshot.count) + (snapshot.count == 1 ? " handler key" : " handler keys")
             : std::string("No App Model snapshot");
         if (snapshot.truncated)
             countLine += " shown of " + std::to_string(snapshot.totalCount) + " · list truncated";
@@ -3203,7 +3230,7 @@ private:
             return;
         }
         if (snapshot.count == 0) {
-            drawText(x + 20, top + 24, "No file-type associations are currently registered.", mutedTextColor());
+            drawText(x + 20, top + 24, "No default handler keys are currently registered.", mutedTextColor());
             return;
         }
 
@@ -3227,7 +3254,7 @@ private:
                 ? defaultAppHandlerName(row, row.policy.effectiveDefaultAppId) : std::string();
             if (effectiveName.empty()) effectiveName = row.policy.effectiveDefaultAvailable
                 ? "Application unavailable" : "No available app";
-            drawText(x + 20, rowY + 5, fitText(row.extension, extensionLimit), textColor());
+            drawText(x + 20, rowY + 5, fitText(defaultAppsRowLabel(row), extensionLimit), textColor());
             drawText(x + 20 + static_cast<int>(extensionLimit) * 8 + 12, rowY + 5,
                 fitText("Current: " + effectiveName, appLimit), textColor());
             drawText(x + 20, rowY + (smallSettingsLayout() ? 26 : 30),
@@ -3237,7 +3264,7 @@ private:
         }
         if (snapshot.count > static_cast<size_t>(defaultAppsVisibleRows()))
             drawText(x + 14, defaultAppsListBottom() - 17,
-                "Use the mouse wheel or arrow keys to browse file types.", mutedTextColor());
+                "Use the mouse wheel or arrow keys to browse file types and protocols.", mutedTextColor());
     }
 
     void renderAppDetails()

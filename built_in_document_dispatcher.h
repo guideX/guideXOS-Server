@@ -8,10 +8,9 @@
 
 namespace gxos { namespace apps {
 
-// Routes canonical built-in app identities to their document activation entry
-// points. Extensions and document contents stay outside this dispatcher;
-// AppRegistry resolves capability and default policy first.
-class BuiltInDocumentDispatcher {
+// Routes canonical built-in app identities to their activation entry points.
+// Handler discovery and default selection stay in AppRegistry.
+class BuiltInActivationDispatcher {
 public:
     using Handler = bool (*)(const AppActivationContext& activation, std::string& error);
 
@@ -28,13 +27,12 @@ public:
                   const AppActivationContext& activation,
                   std::string& error) const {
         error.clear();
-        if (activation.kind != AppActivationKind::Document) {
-            error = "Built-in document dispatcher rejects non-document activation";
-            return false;
-        }
-        if (activation.appId.empty() || activation.appId.size() > kAppModelMaxAppIdBytes ||
-            !IsValidDocumentActivationPath(activation.documentPath)) {
-            error = "Built-in document activation target is invalid or overlong";
+        const bool document = activation.kind == AppActivationKind::Document;
+        const bool uri = activation.kind == AppActivationKind::Uri;
+        if ((!document && !uri) || activation.appId.empty() || activation.appId.size() > kAppModelMaxAppIdBytes ||
+            (document && !IsValidDocumentActivationPath(activation.documentPath)) ||
+            (uri && !IsValidUriActivationUri(activation.uri))) {
+            error = "Built-in activation target is invalid, unsupported, or overlong";
             return false;
         }
 
@@ -47,8 +45,10 @@ public:
             error = "Built-in document dispatcher rejected a non-built-in target";
             return false;
         }
-        if (!registry.IsDocumentActivationCurrent(activation)) {
-            error = "Built-in document activation target is stale or unavailable";
+        const bool current = document ? registry.IsDocumentActivationCurrent(activation)
+                                      : registry.IsUriActivationCurrent(activation);
+        if (!current) {
+            error = "Built-in activation target is stale or unavailable";
             return false;
         }
 
@@ -58,7 +58,7 @@ public:
             if (error.empty()) error = "Built-in document activation handler failed";
             return false;
         }
-        error = "No built-in document activation dispatcher is registered for this application";
+        error = "No built-in activation dispatcher is registered for this application";
         return false;
     }
 
@@ -70,5 +70,8 @@ private:
 
     std::vector<Entry> m_entries;
 };
+
+// Source compatibility for existing document-only tests and callers.
+using BuiltInDocumentDispatcher = BuiltInActivationDispatcher;
 
 }} // namespace gxos::apps

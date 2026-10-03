@@ -15,9 +15,11 @@ constexpr size_t kAppModelDefaultHandlerConfigMaxBytes = 32 * 1024;
 struct DefaultHandlerOverride {
     std::string extension;
     std::string appId;
+    enum class KeyKind { Extension = 0, Protocol };
+    KeyKind keyKind = KeyKind::Extension;
 
     bool operator==(const DefaultHandlerOverride& other) const {
-        return extension == other.extension && appId == other.appId;
+        return extension == other.extension && appId == other.appId && keyKind == other.keyKind;
     }
 };
 
@@ -54,6 +56,7 @@ public:
     bool Reload(std::string& error);
     const std::vector<DefaultHandlerOverride>& Overrides() const { return m_overrides; }
     const DefaultHandlerOverride* Find(const std::string& normalizedExtension) const;
+    const DefaultHandlerOverride* Find(const std::string& key, DefaultHandlerOverride::KeyKind kind) const;
     const DefaultHandlerStoreDiagnostics& Diagnostics() const { return m_diagnostics; }
 
     // Commits a complete replacement, then rereads and validates the durable

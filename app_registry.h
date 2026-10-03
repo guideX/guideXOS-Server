@@ -46,12 +46,25 @@ enum class FileAssociationResolutionStatus {
     RegistryCapacityExceeded
 };
 
+enum class UriActivationResolutionStatus {
+    Resolved = 0,
+    InvalidUri,
+    InvalidScheme,
+    NoHandler,
+    HandlerMissing,
+    HandlerStale,
+    HandlerDoesNotSupportProtocol,
+    HandlerUnavailable,
+    RegistryCapacityExceeded
+};
+
 enum class ConfiguredDefaultHandlerStatus {
     NotConfigured = 0,
     Available,
     RegistrationMissing,
     CapabilityMissing,
     DocumentActivationUnsupported,
+    ProtocolActivationUnsupported,
     TemporarilyUnavailable,
     NonDurableRegistration,
     RegistryCapacityExceeded
@@ -60,9 +73,12 @@ enum class ConfiguredDefaultHandlerStatus {
 enum class DefaultHandlerMutationStatus {
     Success = 0,
     InvalidExtension,
+    InvalidProtocol,
     UnknownApplication,
     CapabilityMissing,
+    ProtocolCapabilityMissing,
     DocumentActivationUnsupported,
+    ProtocolActivationUnsupported,
     HandlerUnavailable,
     NonDurableRegistration,
     CapacityExceeded,
@@ -82,6 +98,8 @@ struct DefaultHandlerInfo {
 struct DefaultHandlerMutationResult {
     DefaultHandlerMutationStatus status = DefaultHandlerMutationStatus::Success;
     std::string extension;
+    std::string key;
+    bool protocolKey = false;
     std::string appId;
     std::string reason;
 
@@ -109,6 +127,57 @@ struct FileAssociationResolution {
     std::string reason;
 
     bool launchable() const { return status == FileAssociationResolutionStatus::Resolved; }
+};
+
+struct ProtocolHandlerInfo {
+    std::string appId;
+    std::string displayName;
+    uint64_t registrationOwner = 0;
+    uint64_t registrationGeneration = 0;
+    bool supportsProtocolActivation = false;
+    bool registrationCurrent = false;
+    bool backendAvailable = false;
+    bool available = false;
+    bool isDefault = false;
+};
+
+struct ProtocolHandlerList {
+    std::string scheme;
+    std::array<ProtocolHandlerInfo, kAppModelMaxProtocolHandlersPerScheme> handlers{};
+    size_t count = 0;
+    size_t declaredHandlerCount = 0;
+    size_t availableHandlerCount = 0;
+    bool truncated = false;
+    bool validScheme = false;
+};
+
+struct ProtocolDefaultHandlerInfo {
+    std::string scheme;
+    std::string builtInDefaultAppId;
+    std::string configuredOverrideAppId;
+    std::string effectiveDefaultAppId;
+    ConfiguredDefaultHandlerStatus configuredStatus = ConfiguredDefaultHandlerStatus::NotConfigured;
+    bool effectiveDefaultAvailable = false;
+};
+
+struct UriActivationResolution {
+    UriActivationResolutionStatus status = UriActivationResolutionStatus::NoHandler;
+    std::string scheme;
+    std::string appId;
+    std::string displayName;
+    AppActivationContext activation;
+    std::string reason;
+
+    bool launchable() const { return status == UriActivationResolutionStatus::Resolved; }
+};
+
+struct ProtocolHandlerRecord {
+    std::string scheme;
+    std::string appId;
+    uint64_t registrationOwner = 0;
+    uint64_t registrationGeneration = 0;
+    bool supportsProtocolActivation = false;
+    bool backendAvailable = false;
 };
 
 // Value-owned handler identity captured when a menu is built. owner/generation
@@ -147,6 +216,7 @@ struct RegisteredApp {
     // Runtime-owned capability: the current backend has a production route
     // that can launch this registration with a document activation context.
     bool documentActivationBackendAvailable = false;
+    bool protocolActivationBackendAvailable = false;
 
     const AppEntry* FindCompatibleEntry(const std::string& currentArchitecture) const;
 };
@@ -210,6 +280,7 @@ public:
 #if defined(GXOS_APPMODEL_TESTING)
     bool RegisterTestDurableApp(const RegisteredApp& app, std::string& error);
     bool SetTestDocumentActivationBackend(const std::string& appId, bool available);
+    bool SetTestProtocolActivationBackend(const std::string& appId, bool available);
 #endif
 
     const std::vector<RegisteredApp>& GetAllApps() const;
@@ -241,10 +312,23 @@ public:
     const std::vector<FileAssociationRecord>& GetFileAssociations() const;
     bool FileAssociationCapacityExceeded() const;
 
+    ProtocolHandlerList EnumerateCapableProtocolHandlers(const std::string& scheme) const;
+    UriActivationResolution ResolveUriActivation(const std::string& uri) const;
+    UriActivationResolution ResolveUriActivation(const ProtocolHandlerInfo& handler, const std::string& uri) const;
+    ProtocolDefaultHandlerInfo GetDefaultProtocolHandlerInfo(const std::string& scheme) const;
+    DefaultHandlerMutationResult SetDefaultProtocolHandler(const std::string& scheme, const std::string& canonicalAppId);
+    DefaultHandlerMutationResult ClearDefaultProtocolHandler(const std::string& scheme);
+    std::vector<std::string> GetKnownProtocols() const;
+    bool IsUriActivationCurrent(const AppActivationContext& activation) const;
+    bool SetProtocolActivationBackendAvailable(const std::string& canonicalAppId, bool available);
+    const std::vector<ProtocolHandlerRecord>& GetProtocolHandlers() const;
+    bool ProtocolHandlerCapacityExceeded() const;
+
     static std::vector<AppRegistrySource> DefaultSources();
     static const char* ToString(AppSourceKind kind);
     static const char* ToString(DisplayNameResolutionStatus status);
     static const char* ToString(FileAssociationResolutionStatus status);
+    static const char* ToString(UriActivationResolutionStatus status);
     static const char* ToString(ConfiguredDefaultHandlerStatus status);
     static const char* ToString(DefaultHandlerMutationStatus status);
     static int DisplayNameSourcePriority(AppSourceKind kind);
@@ -258,7 +342,9 @@ private:
     FileAssociationResolution ResolveFileAssociationForExtension(const std::string& path,
                                                                  const std::string& extension) const;
     bool HasDeclaredCapability(const RegisteredApp& app, const std::string& normalizedExtension) const;
+    bool HasDeclaredProtocol(const RegisteredApp& app, const std::string& normalizedScheme) const;
     void RebuildFileAssociations();
+    void RebuildProtocolHandlers();
 
     bool m_preferSystemAppsOverUserApps = false;
     std::vector<AppRegistrySource> m_sources;
@@ -266,6 +352,8 @@ private:
     std::map<std::string, size_t> m_appsById;
     std::vector<FileAssociationRecord> m_fileAssociations;
     bool m_fileAssociationCapacityExceeded = false;
+    std::vector<ProtocolHandlerRecord> m_protocolHandlers;
+    bool m_protocolHandlerCapacityExceeded = false;
     DefaultAppHandlerStore m_defaultHandlerStore;
 };
 

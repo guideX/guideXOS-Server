@@ -76,6 +76,10 @@ std::string builtInDefaultAppId(const std::string& extension) {
     return std::string();
 }
 
+std::string builtInDefaultProtocolAppId(const std::string& scheme) {
+    return (scheme == "http" || scheme == "https") ? "guidexos.navigator" : std::string();
+}
+
 enum class PathExtensionStatus { Valid, NoExtension, InvalidPath, InvalidExtension };
 
 PathExtensionStatus extensionFromPath(const std::string& path, std::string& extension) {
@@ -144,6 +148,9 @@ RegisteredApp makeBuiltInApp(const BuiltInAppMetadata& metadata) {
             { ".html", "text/html", "HTML document" },
             { ".htm", "text/html", "HTML document" }
         };
+        app.manifest.protocols = { "http", "https" };
+        app.manifest.supportsProtocolActivation = true;
+        app.protocolActivationBackendAvailable = true;
     }
 
     app.manifest.permissions.push_back("desktop.window");
@@ -219,6 +226,8 @@ void AppRegistry::Clear() {
     m_appsById.clear();
     m_fileAssociations.clear();
     m_fileAssociationCapacityExceeded = false;
+    m_protocolHandlers.clear();
+    m_protocolHandlerCapacityExceeded = false;
 }
 
 void AppRegistry::SetSources(const std::vector<AppRegistrySource>& sources) {
@@ -522,6 +531,381 @@ DocumentHandlerList AppRegistry::EnumerateCapableHandlersForPath(const std::stri
     return EnumerateCapableHandlers(extension);
 }
 
+ProtocolHandlerList AppRegistry::EnumerateCapableProtocolHandlers(const std::string& requestedScheme) const {
+    ProtocolHandlerList result;
+    if (!NormalizeProtocolScheme(requestedScheme, result.scheme)) return result;
+    result.validScheme = true;
+
+    std::vector<ProtocolHandlerInfo> candidates;
+    candidates.reserve(std::min(m_protocolHandlers.size(), kAppModelMaxProtocolRecords));
+    for (const ProtocolHandlerRecord& record : m_protocolHandlers) {
+        if (record.scheme != result.scheme) continue;
+        const auto appIt = m_appsById.find(record.appId);
+        const RegisteredApp* app = appIt == m_appsById.end() || appIt->second >= m_apps.size()
+            ? nullptr : &m_apps[appIt->second];
+        ProtocolHandlerInfo handler;
+        handler.appId = record.appId;
+        handler.registrationOwner = record.registrationOwner;
+        handler.registrationGeneration = record.registrationGeneration;
+        handler.registrationCurrent = app && app->temporaryOwnerRuntimeId == record.registrationOwner &&
+            app->temporaryGeneration == record.registrationGeneration;
+        if (app) {
+            handler.displayName = app->manifest.displayName;
+            handler.supportsProtocolActivation = record.supportsProtocolActivation && app->manifest.supportsProtocolActivation;
+            handler.backendAvailable = record.backendAvailable && app->protocolActivationBackendAvailable;
+        } else {
+            handler.supportsProtocolActivation = record.supportsProtocolActivation;
+        }
+        handler.available = handler.registrationCurrent && handler.supportsProtocolActivation && handler.backendAvailable;
+        const bool duplicate = std::any_of(candidates.begin(), candidates.end(), [&](const ProtocolHandlerInfo& existing) {
+            return existing.appId == handler.appId && existing.registrationOwner == handler.registrationOwner &&
+                existing.registrationGeneration == handler.registrationGeneration;
+        });
+        if (!duplicate) candidates.push_back(std::move(handler));
+    }
+
+    result.declaredHandlerCount = candidates.size();
+    result.availableHandlerCount = static_cast<size_t>(std::count_if(candidates.begin(), candidates.end(),
+        [](const ProtocolHandlerInfo& handler) { return handler.available; }));
+    const DefaultHandlerOverride* configured = m_defaultHandlerStore.Find(
+        result.scheme, DefaultHandlerOverride::KeyKind::Protocol);
+    const std::string configuredId = configured ? configured->appId : std::string();
+    const std::string preferredId = builtInDefaultProtocolAppId(result.scheme);
+    const auto isDurableAvailable = [&](const ProtocolHandlerInfo& handler) {
+        if (!handler.available) return false;
+        const RegisteredApp* app = FindById(handler.appId);
+        return app && !app->temporaryDevelopment && app->sourceKind != AppSourceKind::DevelopmentTemporary;
+    };
+    auto selected = candidates.end();
+    if (!configuredId.empty()) {
+        selected = std::find_if(candidates.begin(), candidates.end(), [&](const ProtocolHandlerInfo& handler) {
+            return handler.appId == configuredId && isDurableAvailable(handler);
+        });
+    }
+    if (selected == candidates.end() && !preferredId.empty()) {
+        selected = std::find_if(candidates.begin(), candidates.end(), [&](const ProtocolHandlerInfo& handler) {
+            return handler.appId == preferredId && handler.available;
+        });
+    }
+    if (selected == candidates.end()) {
+        selected = std::find_if(candidates.begin(), candidates.end(),
+            [](const ProtocolHandlerInfo& handler) { return handler.available; });
+    }
+    if (selected == candidates.end() && !preferredId.empty()) {
+        selected = std::find_if(candidates.begin(), candidates.end(), [&](const ProtocolHandlerInfo& handler) {
+            return handler.appId == preferredId;
+        });
+    }
+    if (selected == candidates.end() && !candidates.empty()) selected = candidates.begin();
+    if (selected != candidates.end()) selected->isDefault = true;
+
+    std::sort(candidates.begin(), candidates.end(), [](const ProtocolHandlerInfo& left, const ProtocolHandlerInfo& right) {
+        if (left.isDefault != right.isDefault) return left.isDefault;
+        if (left.available != right.available) return left.available;
+        if (left.appId != right.appId) return left.appId < right.appId;
+        if (left.registrationOwner != right.registrationOwner) return left.registrationOwner < right.registrationOwner;
+        return left.registrationGeneration < right.registrationGeneration;
+    });
+    result.count = std::min(candidates.size(), result.handlers.size());
+    result.truncated = candidates.size() > result.handlers.size();
+    for (size_t i = 0; i < result.count; ++i) result.handlers[i] = std::move(candidates[i]);
+    return result;
+}
+
+UriActivationResolution AppRegistry::ResolveUriActivation(const std::string& uri) const {
+    UriActivationResolution result;
+    if (uri.empty() || uri.size() > kAppModelMaxUriBytes ||
+        std::any_of(uri.begin(), uri.end(), [](unsigned char ch) { return ch == 0 || ch < 0x20u || ch == 0x7fu; })) {
+        result.status = UriActivationResolutionStatus::InvalidUri;
+        result.reason = "URI is empty, contains control characters, or exceeds the URI byte bound";
+        return result;
+    }
+    if (!GetUriActivationScheme(uri, result.scheme)) {
+        result.status = UriActivationResolutionStatus::InvalidScheme;
+        result.reason = "URI must start with a valid bounded ASCII protocol scheme and colon";
+        return result;
+    }
+    const ProtocolHandlerList handlers = EnumerateCapableProtocolHandlers(result.scheme);
+    if (!handlers.validScheme) {
+        result.status = UriActivationResolutionStatus::InvalidScheme;
+        result.reason = "protocol scheme is malformed or over capacity";
+        return result;
+    }
+    const ProtocolHandlerInfo* selected = nullptr;
+    for (size_t i = 0; i < handlers.count; ++i) {
+        if (handlers.handlers[i].isDefault) {
+            selected = &handlers.handlers[i];
+            break;
+        }
+    }
+    if (!selected) {
+        result.status = m_protocolHandlerCapacityExceeded
+            ? UriActivationResolutionStatus::RegistryCapacityExceeded : UriActivationResolutionStatus::NoHandler;
+        result.reason = m_protocolHandlerCapacityExceeded
+            ? "protocol registry capacity was reached; unresolved schemes fail closed"
+            : "no registered application declared this protocol";
+        return result;
+    }
+    return ResolveUriActivation(*selected, uri);
+}
+
+UriActivationResolution AppRegistry::ResolveUriActivation(const ProtocolHandlerInfo& handler,
+                                                           const std::string& uri) const {
+    UriActivationResolution result;
+    if (uri.empty() || uri.size() > kAppModelMaxUriBytes ||
+        std::any_of(uri.begin(), uri.end(), [](unsigned char ch) { return ch == 0 || ch < 0x20u || ch == 0x7fu; })) {
+        result.status = UriActivationResolutionStatus::InvalidUri;
+        result.reason = "URI is empty, contains control characters, or exceeds the URI byte bound";
+        return result;
+    }
+    if (!GetUriActivationScheme(uri, result.scheme)) {
+        result.status = UriActivationResolutionStatus::InvalidScheme;
+        result.reason = "URI must start with a valid bounded ASCII protocol scheme and colon";
+        return result;
+    }
+    if (handler.appId.empty() || handler.appId.size() > kAppModelMaxAppIdBytes) {
+        result.status = UriActivationResolutionStatus::HandlerMissing;
+        result.reason = "canonical application ID is empty or over capacity";
+        return result;
+    }
+    const RegisteredApp* app = FindById(handler.appId);
+    if (!app) {
+        result.status = UriActivationResolutionStatus::HandlerMissing;
+        result.reason = "selected canonical application ID is not registered";
+        return result;
+    }
+    result.appId = handler.appId;
+    result.displayName = app->manifest.displayName;
+    if (app->temporaryOwnerRuntimeId != handler.registrationOwner ||
+        app->temporaryGeneration != handler.registrationGeneration) {
+        result.status = UriActivationResolutionStatus::HandlerStale;
+        result.reason = "selected handler registration owner or generation changed after enumeration";
+        return result;
+    }
+    const auto declaration = std::find_if(m_protocolHandlers.begin(), m_protocolHandlers.end(), [&](const ProtocolHandlerRecord& record) {
+        return record.scheme == result.scheme && record.appId == handler.appId &&
+            record.registrationOwner == handler.registrationOwner && record.registrationGeneration == handler.registrationGeneration;
+    });
+    if (declaration == m_protocolHandlers.end() || !app->manifest.supportsProtocolActivation ||
+        !declaration->supportsProtocolActivation) {
+        result.status = UriActivationResolutionStatus::HandlerDoesNotSupportProtocol;
+        result.reason = "selected application does not currently declare support for this protocol";
+        return result;
+    }
+    if (!app->protocolActivationBackendAvailable || !declaration->backendAvailable) {
+        result.status = UriActivationResolutionStatus::HandlerUnavailable;
+        result.reason = "current runtime has no protocol activation dispatcher for this application";
+        return result;
+    }
+    result.status = UriActivationResolutionStatus::Resolved;
+    result.activation.kind = AppActivationKind::Uri;
+    result.activation.appId = app->manifest.id;
+    result.activation.uri = uri;
+    result.activation.registrationOwner = app->temporaryOwnerRuntimeId;
+    result.activation.registrationGeneration = app->temporaryGeneration;
+    result.reason = "URI resolved to the current capable registration with an owned URI value";
+    return result;
+}
+
+ProtocolDefaultHandlerInfo AppRegistry::GetDefaultProtocolHandlerInfo(const std::string& requestedScheme) const {
+    ProtocolDefaultHandlerInfo info;
+    if (!NormalizeProtocolScheme(requestedScheme, info.scheme)) return info;
+    info.builtInDefaultAppId = builtInDefaultProtocolAppId(info.scheme);
+    const DefaultHandlerOverride* configured = m_defaultHandlerStore.Find(
+        info.scheme, DefaultHandlerOverride::KeyKind::Protocol);
+    if (configured) {
+        info.configuredOverrideAppId = configured->appId;
+        const RegisteredApp* app = FindById(configured->appId);
+        if (!app) info.configuredStatus = ConfiguredDefaultHandlerStatus::RegistrationMissing;
+        else if (app->temporaryDevelopment || app->sourceKind == AppSourceKind::DevelopmentTemporary)
+            info.configuredStatus = ConfiguredDefaultHandlerStatus::NonDurableRegistration;
+        else if (!HasDeclaredProtocol(*app, info.scheme))
+            info.configuredStatus = ConfiguredDefaultHandlerStatus::CapabilityMissing;
+        else if (!app->manifest.supportsProtocolActivation)
+            info.configuredStatus = ConfiguredDefaultHandlerStatus::ProtocolActivationUnsupported;
+        else if (!app->protocolActivationBackendAvailable)
+            info.configuredStatus = ConfiguredDefaultHandlerStatus::TemporarilyUnavailable;
+        else {
+            const bool indexed = std::any_of(m_protocolHandlers.begin(), m_protocolHandlers.end(), [&](const ProtocolHandlerRecord& record) {
+                return record.scheme == info.scheme && record.appId == configured->appId &&
+                    record.registrationOwner == app->temporaryOwnerRuntimeId && record.registrationGeneration == app->temporaryGeneration;
+            });
+            info.configuredStatus = indexed ? ConfiguredDefaultHandlerStatus::Available
+                : (m_protocolHandlerCapacityExceeded ? ConfiguredDefaultHandlerStatus::RegistryCapacityExceeded
+                                                     : ConfiguredDefaultHandlerStatus::CapabilityMissing);
+        }
+    }
+    const ProtocolHandlerList handlers = EnumerateCapableProtocolHandlers(info.scheme);
+    for (size_t i = 0; i < handlers.count; ++i) {
+        if (handlers.handlers[i].isDefault) {
+            info.effectiveDefaultAppId = handlers.handlers[i].appId;
+            info.effectiveDefaultAvailable = handlers.handlers[i].available;
+            break;
+        }
+    }
+    return info;
+}
+
+DefaultHandlerMutationResult AppRegistry::SetDefaultProtocolHandler(const std::string& requestedScheme,
+                                                                    const std::string& canonicalAppId) {
+    DefaultHandlerMutationResult result;
+    std::string scheme;
+    if (!NormalizeProtocolScheme(requestedScheme, scheme)) {
+        result.status = DefaultHandlerMutationStatus::InvalidProtocol;
+        result.reason = "protocol scheme is malformed or over capacity";
+        return result;
+    }
+    result.key = scheme;
+    result.protocolKey = true;
+    result.appId = canonicalAppId;
+    std::string reloadError;
+    if (!m_defaultHandlerStore.Reload(reloadError)) {
+        result.status = DefaultHandlerMutationStatus::PersistenceFailure;
+        result.reason = reloadError.empty() ? "authoritative default-handler configuration could not be reread" : reloadError;
+        return result;
+    }
+    const RegisteredApp* app = FindById(canonicalAppId);
+    if (!app) {
+        result.status = DefaultHandlerMutationStatus::UnknownApplication;
+        result.reason = "canonical App Model ID is not currently registered";
+        return result;
+    }
+    if (app->temporaryDevelopment || app->sourceKind == AppSourceKind::DevelopmentTemporary) {
+        result.status = DefaultHandlerMutationStatus::NonDurableRegistration;
+        result.reason = "temporary development registrations cannot become durable machine defaults";
+        return result;
+    }
+    if (!HasDeclaredProtocol(*app, scheme)) {
+        result.status = DefaultHandlerMutationStatus::ProtocolCapabilityMissing;
+        result.reason = "application does not currently declare this normalized protocol";
+        return result;
+    }
+    if (!app->manifest.supportsProtocolActivation) {
+        result.status = DefaultHandlerMutationStatus::ProtocolActivationUnsupported;
+        result.reason = "application does not declare protocol activation support";
+        return result;
+    }
+    if (!app->protocolActivationBackendAvailable) {
+        result.status = DefaultHandlerMutationStatus::HandlerUnavailable;
+        result.reason = "current hosted backend cannot dispatch protocol activation to this application";
+        return result;
+    }
+    const bool indexed = std::any_of(m_protocolHandlers.begin(), m_protocolHandlers.end(), [&](const ProtocolHandlerRecord& record) {
+        return record.scheme == scheme && record.appId == canonicalAppId &&
+            record.registrationOwner == app->temporaryOwnerRuntimeId && record.registrationGeneration == app->temporaryGeneration;
+    });
+    if (!indexed) {
+        result.status = m_protocolHandlerCapacityExceeded ? DefaultHandlerMutationStatus::CapacityExceeded
+                                                         : DefaultHandlerMutationStatus::ProtocolCapabilityMissing;
+        result.reason = m_protocolHandlerCapacityExceeded
+            ? "the bounded AppRegistry protocol index cannot safely resolve this capability"
+            : "the declared capability is not present in the current AppRegistry index";
+        return result;
+    }
+    std::vector<DefaultHandlerOverride> updated = m_defaultHandlerStore.Overrides();
+    auto existing = std::find_if(updated.begin(), updated.end(), [&](const DefaultHandlerOverride& entry) {
+        return entry.keyKind == DefaultHandlerOverride::KeyKind::Protocol && entry.extension == scheme;
+    });
+    if (existing == updated.end()) {
+        if (updated.size() >= kAppModelMaxDefaultHandlerOverrides) {
+            result.status = DefaultHandlerMutationStatus::CapacityExceeded;
+            result.reason = "machine default-handler override capacity is full";
+            return result;
+        }
+        updated.push_back({ scheme, canonicalAppId, DefaultHandlerOverride::KeyKind::Protocol });
+    } else existing->appId = canonicalAppId;
+    std::string error;
+    if (!m_defaultHandlerStore.Commit(updated, error)) {
+        result.status = m_defaultHandlerStore.Diagnostics().lastWriteStatus == DefaultHandlerStoreWriteStatus::VerificationFailed
+            ? DefaultHandlerMutationStatus::VerificationFailure : DefaultHandlerMutationStatus::PersistenceFailure;
+        result.reason = error;
+        return result;
+    }
+    const ProtocolDefaultHandlerInfo verified = GetDefaultProtocolHandlerInfo(scheme);
+    if (verified.configuredOverrideAppId != canonicalAppId || verified.effectiveDefaultAppId != canonicalAppId ||
+        verified.configuredStatus != ConfiguredDefaultHandlerStatus::Available) {
+        result.status = DefaultHandlerMutationStatus::VerificationFailure;
+        result.reason = "durable protocol override reread did not resolve to the requested current handler";
+    }
+    return result;
+}
+
+DefaultHandlerMutationResult AppRegistry::ClearDefaultProtocolHandler(const std::string& requestedScheme) {
+    DefaultHandlerMutationResult result;
+    std::string scheme;
+    if (!NormalizeProtocolScheme(requestedScheme, scheme)) {
+        result.status = DefaultHandlerMutationStatus::InvalidProtocol;
+        result.reason = "protocol scheme is malformed or over capacity";
+        return result;
+    }
+    result.key = scheme;
+    result.protocolKey = true;
+    std::string reloadError;
+    if (!m_defaultHandlerStore.Reload(reloadError)) {
+        result.status = DefaultHandlerMutationStatus::PersistenceFailure;
+        result.reason = reloadError.empty() ? "authoritative default-handler configuration could not be reread" : reloadError;
+        return result;
+    }
+    std::vector<DefaultHandlerOverride> updated = m_defaultHandlerStore.Overrides();
+    const size_t oldSize = updated.size();
+    updated.erase(std::remove_if(updated.begin(), updated.end(), [&](const DefaultHandlerOverride& entry) {
+        return entry.keyKind == DefaultHandlerOverride::KeyKind::Protocol && entry.extension == scheme;
+    }), updated.end());
+    if (updated.size() != oldSize) {
+        std::string error;
+        if (!m_defaultHandlerStore.Commit(updated, error)) {
+            result.status = m_defaultHandlerStore.Diagnostics().lastWriteStatus == DefaultHandlerStoreWriteStatus::VerificationFailed
+                ? DefaultHandlerMutationStatus::VerificationFailure : DefaultHandlerMutationStatus::PersistenceFailure;
+            result.reason = error;
+            return result;
+        }
+    }
+    if (m_defaultHandlerStore.Find(scheme, DefaultHandlerOverride::KeyKind::Protocol)) {
+        result.status = DefaultHandlerMutationStatus::VerificationFailure;
+        result.reason = "cleared protocol override remained present after authoritative reread";
+    }
+    return result;
+}
+
+std::vector<std::string> AppRegistry::GetKnownProtocols() const {
+    std::vector<std::string> protocols;
+    protocols.reserve(m_protocolHandlers.size() + 2);
+    for (const ProtocolHandlerRecord& record : m_protocolHandlers) protocols.push_back(record.scheme);
+    for (const DefaultHandlerOverride& record : m_defaultHandlerStore.Overrides())
+        if (record.keyKind == DefaultHandlerOverride::KeyKind::Protocol) protocols.push_back(record.extension);
+    protocols.push_back("http");
+    protocols.push_back("https");
+    std::sort(protocols.begin(), protocols.end());
+    protocols.erase(std::unique(protocols.begin(), protocols.end()), protocols.end());
+    return protocols;
+}
+
+bool AppRegistry::IsUriActivationCurrent(const AppActivationContext& activation) const {
+    if (activation.kind != AppActivationKind::Uri || activation.appId.empty() ||
+        activation.appId.size() > kAppModelMaxAppIdBytes || !IsValidUriActivationUri(activation.uri)) return false;
+    ProtocolHandlerInfo expected;
+    expected.appId = activation.appId;
+    expected.registrationOwner = activation.registrationOwner;
+    expected.registrationGeneration = activation.registrationGeneration;
+    const UriActivationResolution current = ResolveUriActivation(expected, activation.uri);
+    return current.launchable() && current.appId == activation.appId &&
+        current.activation.registrationOwner == activation.registrationOwner &&
+        current.activation.registrationGeneration == activation.registrationGeneration && current.activation.uri == activation.uri;
+}
+
+bool AppRegistry::SetProtocolActivationBackendAvailable(const std::string& canonicalAppId, bool available) {
+    const auto found = m_appsById.find(canonicalAppId);
+    if (found == m_appsById.end() || found->second >= m_apps.size()) return false;
+    RegisteredApp& app = m_apps[found->second];
+    if (available && (!app.manifest.supportsProtocolActivation || app.manifest.protocols.empty())) return false;
+    app.protocolActivationBackendAvailable = available;
+    RebuildProtocolHandlers();
+    return true;
+}
+
+const std::vector<ProtocolHandlerRecord>& AppRegistry::GetProtocolHandlers() const { return m_protocolHandlers; }
+bool AppRegistry::ProtocolHandlerCapacityExceeded() const { return m_protocolHandlerCapacityExceeded; }
+
 DefaultHandlerMutationResult AppRegistry::SetDefaultHandler(const std::string& requestedExtension,
                                                             const std::string& canonicalAppId) {
     DefaultHandlerMutationResult result;
@@ -692,7 +1076,8 @@ std::vector<std::string> AppRegistry::GetKnownDocumentExtensions() const {
     std::vector<std::string> extensions;
     extensions.reserve(m_fileAssociations.size() + m_defaultHandlerStore.Overrides().size() + 4);
     for (const FileAssociationRecord& record : m_fileAssociations) extensions.push_back(record.extension);
-    for (const DefaultHandlerOverride& record : m_defaultHandlerStore.Overrides()) extensions.push_back(record.extension);
+    for (const DefaultHandlerOverride& record : m_defaultHandlerStore.Overrides())
+        if (record.keyKind == DefaultHandlerOverride::KeyKind::Extension) extensions.push_back(record.extension);
     extensions.insert(extensions.end(), { ".txt", ".log", ".ini", ".cfg" });
     std::sort(extensions.begin(), extensions.end());
     extensions.erase(std::unique(extensions.begin(), extensions.end()), extensions.end());
@@ -712,6 +1097,14 @@ bool AppRegistry::HasDeclaredCapability(const RegisteredApp& app, const std::str
         [&](const FileAssociation& association) {
             std::string normalized;
             return NormalizeDocumentExtension(association.extension, normalized) && normalized == normalizedExtension;
+        });
+}
+
+bool AppRegistry::HasDeclaredProtocol(const RegisteredApp& app, const std::string& normalizedScheme) const {
+    return std::any_of(app.manifest.protocols.begin(), app.manifest.protocols.end(),
+        [&](const std::string& declaration) {
+            std::string normalized;
+            return NormalizeProtocolScheme(declaration, normalized) && normalized == normalizedScheme;
         });
 }
 
@@ -924,6 +1317,40 @@ void AppRegistry::RebuildFileAssociations() {
         candidates[i].ambiguous = false;
         m_fileAssociations.push_back(candidates[i]);
     }
+    RebuildProtocolHandlers();
+}
+
+void AppRegistry::RebuildProtocolHandlers() {
+    std::vector<ProtocolHandlerRecord> candidates;
+    candidates.reserve(std::min(m_apps.size() * kAppModelMaxProtocolsPerApp,
+        kAppModelMaxRegistryApps * kAppModelMaxProtocolsPerApp));
+    for (const RegisteredApp& app : m_apps) {
+        for (const std::string& declaration : app.manifest.protocols) {
+            ProtocolHandlerRecord record;
+            if (!NormalizeProtocolScheme(declaration, record.scheme)) continue;
+            record.appId = app.manifest.id;
+            record.registrationOwner = app.temporaryOwnerRuntimeId;
+            record.registrationGeneration = app.temporaryGeneration;
+            record.supportsProtocolActivation = app.manifest.supportsProtocolActivation;
+            record.backendAvailable = app.protocolActivationBackendAvailable;
+            candidates.push_back(std::move(record));
+        }
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const ProtocolHandlerRecord& left, const ProtocolHandlerRecord& right) {
+        if (left.scheme != right.scheme) return left.scheme < right.scheme;
+        if (left.appId != right.appId) return left.appId < right.appId;
+        if (left.registrationOwner != right.registrationOwner) return left.registrationOwner < right.registrationOwner;
+        return left.registrationGeneration < right.registrationGeneration;
+    });
+    candidates.erase(std::unique(candidates.begin(), candidates.end(), [](const ProtocolHandlerRecord& left, const ProtocolHandlerRecord& right) {
+        return left.scheme == right.scheme && left.appId == right.appId &&
+            left.registrationOwner == right.registrationOwner && left.registrationGeneration == right.registrationGeneration;
+    }), candidates.end());
+    m_protocolHandlerCapacityExceeded = candidates.size() > kAppModelMaxProtocolRecords;
+    m_protocolHandlers.clear();
+    m_protocolHandlers.reserve(std::min(candidates.size(), kAppModelMaxProtocolRecords));
+    for (size_t i = 0; i < candidates.size() && i < kAppModelMaxProtocolRecords; ++i)
+        m_protocolHandlers.push_back(std::move(candidates[i]));
 }
 
 std::vector<AppRegistrySource> AppRegistry::DefaultSources() {
@@ -1030,6 +1457,14 @@ bool AppRegistry::SetTestDocumentActivationBackend(const std::string& appId, boo
     if (found == m_appsById.end() || found->second >= m_apps.size()) return false;
     m_apps[found->second].documentActivationBackendAvailable = available;
     RebuildFileAssociations();
+    return true;
+}
+
+bool AppRegistry::SetTestProtocolActivationBackend(const std::string& appId, bool available) {
+    auto found = m_appsById.find(appId);
+    if (found == m_appsById.end() || found->second >= m_apps.size()) return false;
+    m_apps[found->second].protocolActivationBackendAvailable = available;
+    RebuildProtocolHandlers();
     return true;
 }
 #endif
@@ -1140,12 +1575,28 @@ const char* AppRegistry::ToString(FileAssociationResolutionStatus status) {
     }
 }
 
+const char* AppRegistry::ToString(UriActivationResolutionStatus status) {
+    switch (status) {
+    case UriActivationResolutionStatus::Resolved: return "resolved";
+    case UriActivationResolutionStatus::InvalidUri: return "invalid-uri";
+    case UriActivationResolutionStatus::InvalidScheme: return "invalid-scheme";
+    case UriActivationResolutionStatus::NoHandler: return "no-handler";
+    case UriActivationResolutionStatus::HandlerMissing: return "handler-missing";
+    case UriActivationResolutionStatus::HandlerStale: return "handler-stale";
+    case UriActivationResolutionStatus::HandlerDoesNotSupportProtocol: return "handler-no-protocol-activation";
+    case UriActivationResolutionStatus::HandlerUnavailable: return "handler-unavailable";
+    case UriActivationResolutionStatus::RegistryCapacityExceeded: return "capacity-exceeded";
+    default: return "unknown";
+    }
+}
+
 const char* AppRegistry::ToString(ConfiguredDefaultHandlerStatus status) {
     switch (status) {
     case ConfiguredDefaultHandlerStatus::Available: return "available";
     case ConfiguredDefaultHandlerStatus::RegistrationMissing: return "registration-missing";
     case ConfiguredDefaultHandlerStatus::CapabilityMissing: return "capability-missing";
     case ConfiguredDefaultHandlerStatus::DocumentActivationUnsupported: return "document-activation-unsupported";
+    case ConfiguredDefaultHandlerStatus::ProtocolActivationUnsupported: return "protocol-activation-unsupported";
     case ConfiguredDefaultHandlerStatus::TemporarilyUnavailable: return "temporarily-unavailable";
     case ConfiguredDefaultHandlerStatus::NonDurableRegistration: return "non-durable-registration";
     case ConfiguredDefaultHandlerStatus::RegistryCapacityExceeded: return "registry-capacity-exceeded";
@@ -1157,9 +1608,12 @@ const char* AppRegistry::ToString(ConfiguredDefaultHandlerStatus status) {
 const char* AppRegistry::ToString(DefaultHandlerMutationStatus status) {
     switch (status) {
     case DefaultHandlerMutationStatus::InvalidExtension: return "invalid-extension";
+    case DefaultHandlerMutationStatus::InvalidProtocol: return "invalid-protocol";
     case DefaultHandlerMutationStatus::UnknownApplication: return "unknown-application";
     case DefaultHandlerMutationStatus::CapabilityMissing: return "capability-missing";
+    case DefaultHandlerMutationStatus::ProtocolCapabilityMissing: return "protocol-capability-missing";
     case DefaultHandlerMutationStatus::DocumentActivationUnsupported: return "document-activation-unsupported";
+    case DefaultHandlerMutationStatus::ProtocolActivationUnsupported: return "protocol-activation-unsupported";
     case DefaultHandlerMutationStatus::HandlerUnavailable: return "handler-unavailable";
     case DefaultHandlerMutationStatus::NonDurableRegistration: return "non-durable-registration";
     case DefaultHandlerMutationStatus::CapacityExceeded: return "capacity-exceeded";

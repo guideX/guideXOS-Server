@@ -1,5 +1,6 @@
 #include "navigator.h"
 
+#include "desktop_service.h"
 #include "desktop_theme.h"
 
 #include "gui_protocol.h"
@@ -15,6 +16,7 @@
 #include "navigator_file_io.h"
 #include "navigator_html_parser.h"
 #include "navigator_local_document.h"
+#include "navigator_uri_routing.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -2625,7 +2627,20 @@ namespace {
 
 	static bool isRemoteHttpUrl(const std::string& url)
 	{
-		return url.rfind("http://", 0) == 0 || url.rfind("https://", 0) == 0;
+		if (url.size() < 7) return false;
+		const auto asciiEqualFold = [](char left, char right) {
+			const unsigned char a = static_cast<unsigned char>(left);
+			const unsigned char b = static_cast<unsigned char>(right);
+			const unsigned char foldedA = (a >= 'A' && a <= 'Z') ? static_cast<unsigned char>(a - 'A' + 'a') : a;
+			const unsigned char foldedB = (b >= 'A' && b <= 'Z') ? static_cast<unsigned char>(b - 'A' + 'a') : b;
+			return foldedA == foldedB;
+		};
+		const auto prefixMatches = [&](const char* prefix, size_t length) {
+			if (url.size() < length) return false;
+			for (size_t i = 0; i < length; ++i) if (!asciiEqualFold(url[i], prefix[i])) return false;
+			return true;
+		};
+		return prefixMatches("http://", 7) || prefixMatches("https://", 8);
 	}
 
 	static std::string fileNameFromUrlPath(const std::string& url)
@@ -14902,10 +14917,19 @@ uint64_t Navigator::Launch()
 uint64_t Navigator::LaunchWithActivation(const AppActivationContext& activation)
 {
 	std::string documentUrl;
-	if (activation.kind != AppActivationKind::Document ||
-		activation.appId != kNavigatorCanonicalAppId ||
-		!NavigatorLocalHtmlPathToUrl(activation.documentPath, documentUrl)) {
-		Logger::write(LogLevel::Warn, "Navigator rejected an invalid or unsupported App Model document activation");
+	if (activation.appId != kNavigatorCanonicalAppId) {
+		Logger::write(LogLevel::Warn, "Navigator rejected an App Model activation for another canonical application ID");
+		return 0;
+	}
+	if (activation.kind == AppActivationKind::Document) {
+		if (!NavigatorLocalHtmlPathToUrl(activation.documentPath, documentUrl)) {
+			Logger::write(LogLevel::Warn, "Navigator rejected an invalid or unsupported App Model document activation");
+			return 0;
+		}
+	} else if (activation.kind == AppActivationKind::Uri && IsValidUriActivationUri(activation.uri)) {
+		documentUrl = activation.uri;
+	} else {
+		Logger::write(LogLevel::Warn, "Navigator rejected an invalid or unsupported App Model URI activation");
 		return 0;
 	}
 	std::lock_guard<std::mutex> lock(s_navigatorLaunchMutex);
@@ -16383,6 +16407,16 @@ int Navigator::main(int, char**)
 		}
 		Logger::write(LogLevel::Info, "Navigator received App Model document activation appId=" + activation.appId +
 			" path=" + activation.documentPath + " owner=" + std::to_string(activation.registrationOwner) +
+			" generation=" + std::to_string(activation.registrationGeneration));
+	} else if (activation.kind == AppActivationKind::Uri) {
+		if (activation.appId != kNavigatorCanonicalAppId || !IsValidUriActivationUri(activation.uri)) {
+			Logger::write(LogLevel::Error, "Navigator rejected a mismatched, unsupported, or invalid owned URI activation");
+			releaseNavigatorProcessReservation();
+			return 1;
+		}
+		activationUrl = activation.uri;
+		Logger::write(LogLevel::Info, "Navigator received App Model URI activation appId=" + activation.appId +
+			" uri=" + activation.uri + " owner=" + std::to_string(activation.registrationOwner) +
 			" generation=" + std::to_string(activation.registrationGeneration));
 	}
 	Logger::write(LogLevel::Info, "guideXOS Navigator starting");
@@ -18535,7 +18569,16 @@ void Navigator::handleDocumentClick(HitTarget target, int linkBlockIndex)
 		linkBlockIndex >= 0 &&
 		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
 	{
-		navigateTo(s_currentDoc.blocks[linkBlockIndex].url);
+		const std::string targetUrl = s_currentDoc.blocks[linkBlockIndex].url;
+		std::string scheme;
+		const NavigatorUriRouteKind route = ClassifyNavigatorUriRoute(targetUrl, scheme);
+		if (route == NavigatorUriRouteKind::AppModelProtocol) {
+			std::string error;
+			if (!DesktopService::OpenUri(targetUrl, error))
+				updateStatus(error.empty() ? "No application can handle this protocol." : error);
+			return;
+		}
+		navigateTo(targetUrl);
 	} else if (target == HitTarget::FormLabel &&
 		linkBlockIndex >= 0 &&
 		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))

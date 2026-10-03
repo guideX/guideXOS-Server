@@ -4524,7 +4524,7 @@ static void help(){
                  " gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>\n"
                  " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id> | gui.sync <id> <frameGeneration> [frameSequence] [freeze] | gui.unfreeze <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
-                 " desktop.wallpaper <path> | desktop.background.remove <id> | desktop.launch <action> | desktop.open <path> [dir] | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.appmodel.active-typed-dispatch-gate [force-on|force-off|reset] | desktop.appmodel.active-typed-dispatch-default-on-candidate [on|off|reset] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig | desktop.display.summary | desktop.display.viewport [1|2]\n"
+                 " desktop.wallpaper <path> | desktop.background.remove <id> | desktop.launch <action> | desktop.open <path> [dir] | desktop.open.uri <uri> | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.appmodel.active-typed-dispatch-gate [force-on|force-off|reset] | desktop.appmodel.active-typed-dispatch-default-on-candidate [on|off|reset] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig | desktop.display.summary | desktop.display.viewport [1|2]\n"
                  " desktop.apps | desktop.apps.verbose | desktop.windows.owners | desktop.startup.regression | desktop.appmodel.summary | desktop.appmodel.inventory | desktop.appmodel.coverage | desktop.appmodel.file-associations | desktop.appmodel.shell-objects | desktop.appmodel.typed-dispatch-gate [force-off] | desktop.pinned | desktop.recent | desktop.recent.remove <name> | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
                   " nativeapp.capabilities | nativeapp.inspect <app> | nativeapp.smoketest <app> | nativeapp.processes | nativeapp.debuglog [count]\n"
                  " taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>\n"
@@ -4877,6 +4877,20 @@ using namespace gxos;
              } else {
                  std::cout<<"Desktop open failed: "<<err<<std::endl;
              }
+         }
+         else if (cmd=="desktop.open.uri"){
+            if(!requireCompositor()) continue;
+            std::string uri;
+            std::getline(iss, uri);
+            if(uri.size()>0 && uri[0]==' ') uri.erase(0,1);
+            if(uri.size()>=2 && uri.front()=='"' && uri.back()=='"') uri=uri.substr(1, uri.size()-2);
+            if(uri.empty()){ std::cout<<"desktop.open.uri <uri>"<<std::endl; continue; }
+            std::string err;
+            if (gui::DesktopService::OpenUri(uri, err)) {
+                std::cout<<"Desktop URI activation successful: "<<uri<<std::endl;
+            } else {
+                std::cout<<"Desktop URI activation failed: "<<err<<std::endl;
+            }
          }
          else if (cmd=="desktop.pin" || cmd=="desktop.unpin"){
             if(!requireCompositor()) continue;

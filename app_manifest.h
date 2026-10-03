@@ -54,7 +54,9 @@ struct AppManifest {
     std::vector<AppEntry> entries;
     std::vector<std::string> permissions;
     std::vector<FileAssociation> fileAssociations;
+    std::vector<std::string> protocols;
     bool supportsDocumentActivation = false;
+    bool supportsProtocolActivation = false;
     DefaultWindow defaultWindow;
     std::map<std::string, std::string> desktopRegistryHints;
 };

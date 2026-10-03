@@ -10,7 +10,8 @@ namespace apps {
 
 enum class AppActivationKind {
     Application = 0,
-    Document
+    Document,
+    Uri
 };
 
 // Owned activation data carried by launch storage for the lifetime of the app.
@@ -19,6 +20,7 @@ struct AppActivationContext {
     AppActivationKind kind = AppActivationKind::Application;
     std::string appId;
     std::string documentPath;
+    std::string uri;
     uint64_t registrationOwner = 0;
     uint64_t registrationGeneration = 0;
 };
@@ -29,6 +31,40 @@ inline bool IsValidDocumentActivationPath(const std::string& path) {
         if (byte == 0 || byte < 0x20u || byte == 0x7fu) return false;
     }
     return true;
+}
+
+inline bool NormalizeProtocolScheme(const std::string& scheme, std::string& normalized) {
+    normalized.clear();
+    if (scheme.empty() || scheme.size() > kAppModelMaxProtocolSchemeBytes) return false;
+    normalized.reserve(scheme.size());
+    for (size_t i = 0; i < scheme.size(); ++i) {
+        unsigned char ch = static_cast<unsigned char>(scheme[i]);
+        const bool alpha = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+        const bool digit = ch >= '0' && ch <= '9';
+        if (i == 0 ? !alpha : (!alpha && !digit && ch != '+' && ch != '-' && ch != '.')) {
+            normalized.clear();
+            return false;
+        }
+        if (ch >= 'A' && ch <= 'Z') ch = static_cast<unsigned char>(ch - 'A' + 'a');
+        normalized.push_back(static_cast<char>(ch));
+    }
+    return true;
+}
+
+inline bool GetUriActivationScheme(const std::string& uri, std::string& scheme) {
+    scheme.clear();
+    if (uri.empty() || uri.size() > kAppModelMaxUriBytes) return false;
+    for (unsigned char byte : uri) {
+        if (byte == 0 || byte < 0x20u || byte == 0x7fu) return false;
+    }
+    const size_t colon = uri.find(':');
+    if (colon == std::string::npos) return false;
+    return NormalizeProtocolScheme(uri.substr(0, colon), scheme);
+}
+
+inline bool IsValidUriActivationUri(const std::string& uri) {
+    std::string ignored;
+    return GetUriActivationScheme(uri, ignored);
 }
 
 } // namespace apps

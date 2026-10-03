@@ -1,5 +1,6 @@
 #include "app_manifest_validator.h"
 #include "app_model_limits.h"
+#include "app_activation.h"
 
 #include <algorithm>
 #include <cctype>
@@ -104,6 +105,7 @@ AppManifestValidationResult AppManifestValidator::Validate(const AppManifest& ma
     if (manifest.supportedArchitectures.size() > kAppModelMaxEntriesPerManifest ||
         manifest.permissions.size() > kAppModelMaxEntriesPerManifest ||
         manifest.fileAssociations.size() > kAppModelMaxFileAssociationsPerApp ||
+        manifest.protocols.size() > kAppModelMaxProtocolsPerApp ||
         manifest.desktopRegistryHints.size() > kAppModelMaxEntriesPerManifest) {
         addError(result.errors, "Manifest metadata count exceeds the App Model bound.");
     }
@@ -158,6 +160,24 @@ AppManifestValidationResult AppManifestValidator::Validate(const AppManifest& ma
             hasControlCharacter(association.contentType) || hasControlCharacter(association.description)) {
             addError(result.errors, "File association metadata exceeds the App Model bound.");
         }
+    }
+
+    std::vector<std::string> normalizedProtocols;
+    normalizedProtocols.reserve(manifest.protocols.size());
+    for (const std::string& protocol : manifest.protocols) {
+        std::string normalized;
+        if (!NormalizeProtocolScheme(protocol, normalized)) {
+            addError(result.errors, "Invalid or overlong protocol scheme: " + protocol);
+            continue;
+        }
+        if (std::find(normalizedProtocols.begin(), normalizedProtocols.end(), normalized) != normalizedProtocols.end()) {
+            addError(result.errors, "Duplicate protocol scheme after ASCII case normalization: " + protocol);
+            continue;
+        }
+        normalizedProtocols.push_back(std::move(normalized));
+    }
+    if (!manifest.protocols.empty() && !manifest.supportsProtocolActivation) {
+        addError(result.errors, "Protocol declarations require supportsProtocolActivation=true.");
     }
 
     result.valid = result.errors.empty();

@@ -64,10 +64,12 @@ public sealed class Phase11ImageViewerRunner : IDisposable {
     public string Output() { lock (outputLock) return output.ToString(); }
     public int Count(string pattern) {
         lock (outputLock) {
-            int previous = scannedLengths.TryGetValue(pattern, out int prior) ? prior : 0;
+            int prior;
+            int previous = scannedLengths.TryGetValue(pattern, out prior) ? prior : 0;
             int start = Math.Max(0, previous - 512);
             string tail = output.ToString(start, output.Length - start);
-            int count = matchCounts.TryGetValue(pattern, out int existing) ? existing : 0;
+            int existing;
+            int count = matchCounts.TryGetValue(pattern, out existing) ? existing : 0;
             foreach (Match match in Regex.Matches(tail, pattern))
                 if (start + match.Index + match.Length > previous) count++;
             matchCounts[pattern] = count;

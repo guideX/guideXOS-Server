@@ -14,6 +14,8 @@ namespace apps {
 namespace settings {
 
 constexpr size_t kMaxSettingsDefaultAppExtensions = 32;
+constexpr size_t kMaxSettingsDefaultAppProtocols = 16;
+constexpr size_t kMaxSettingsDefaultAppRows = kMaxSettingsDefaultAppExtensions + kMaxSettingsDefaultAppProtocols;
 
 inline int settingsDefaultAppsTabsY(int contentY) { return contentY + 68; }
 inline int settingsDefaultAppsTabsHeight(bool compact) { return compact ? 26 : 30; }
@@ -86,6 +88,26 @@ inline DefaultAppsPickerFocus nextDefaultAppsPickerFocus(DefaultAppsPickerFocus 
     return { DefaultAppsPickerFocusKind::Cancel, 0 };
 }
 
+struct DefaultAppsHandlerInfo {
+    std::string appId;
+    std::string displayName;
+    uint64_t registrationOwner = 0;
+    uint64_t registrationGeneration = 0;
+    bool supportsActivation = false;
+    bool registrationCurrent = false;
+    bool backendAvailable = false;
+    bool available = false;
+    bool isDefault = false;
+};
+
+struct DefaultAppsHandlerList {
+    std::array<DefaultAppsHandlerInfo, kAppModelMaxDocumentHandlersPerExtension> handlers{};
+    size_t count = 0;
+    size_t declaredHandlerCount = 0;
+    size_t availableHandlerCount = 0;
+    bool truncated = false;
+};
+
 class DefaultAppsBackend {
 public:
     virtual ~DefaultAppsBackend() = default;
@@ -98,19 +120,25 @@ public:
     virtual DefaultHandlerMutationResult setDefaultHandler(
         const std::string& extension, const std::string& canonicalAppId) = 0;
     virtual DefaultHandlerMutationResult clearDefaultHandler(const std::string& extension) = 0;
+    virtual std::vector<std::string> knownProtocols() { return {}; }
+    virtual ProtocolDefaultHandlerInfo protocolDefaultHandlerInfo(const std::string&) { return {}; }
+    virtual ProtocolHandlerList capableProtocolHandlers(const std::string&) { return {}; }
+    virtual DefaultHandlerMutationResult setDefaultProtocolHandler(const std::string&, const std::string&) { return {}; }
+    virtual DefaultHandlerMutationResult clearDefaultProtocolHandler(const std::string&) { return {}; }
 };
 
 struct DefaultAppsRow {
+    bool protocol = false;
     std::string extension;
     DefaultHandlerInfo policy{};
-    DocumentHandlerList handlers{};
+    DefaultAppsHandlerList handlers{};
     std::string builtInDisplayName;
     std::string configuredDisplayName;
     std::string effectiveDisplayName;
 };
 
 struct DefaultAppsSnapshot {
-    std::array<DefaultAppsRow, kMaxSettingsDefaultAppExtensions> rows{};
+    std::array<DefaultAppsRow, kMaxSettingsDefaultAppRows> rows{};
     size_t count{0};
     size_t totalCount{0};
     bool truncated{false};
@@ -127,16 +155,30 @@ inline FocusControl initialDefaultAppsFocusControl(const DefaultAppsSnapshot& sn
 inline const DefaultAppsRow* findDefaultAppsRow(const DefaultAppsSnapshot& snapshot,
                                                 const std::string& extension)
 {
+    const bool protocol = extension.rfind("protocol:", 0) == 0;
+    const std::string key = protocol ? extension.substr(9) : extension;
     for (size_t i = 0; i < snapshot.count; ++i)
-        if (snapshot.rows[i].extension == extension) return &snapshot.rows[i];
+        if (snapshot.rows[i].protocol == protocol && snapshot.rows[i].extension == key) return &snapshot.rows[i];
     return nullptr;
+}
+
+inline std::string defaultAppsRowKey(const DefaultAppsRow& row)
+{
+    return row.protocol ? "protocol:" + row.extension : row.extension;
+}
+
+inline std::string defaultAppsRowLabel(const DefaultAppsRow& row)
+{
+    return row.protocol ? row.extension + ":" : row.extension;
 }
 
 inline int findDefaultAppsRowIndex(const DefaultAppsSnapshot& snapshot,
                                    const std::string& extension)
 {
+    const bool protocol = extension.rfind("protocol:", 0) == 0;
+    const std::string key = protocol ? extension.substr(9) : extension;
     for (size_t i = 0; i < snapshot.count; ++i)
-        if (snapshot.rows[i].extension == extension) return static_cast<int>(i);
+        if (snapshot.rows[i].protocol == protocol && snapshot.rows[i].extension == key) return static_cast<int>(i);
     return -1;
 }
 
@@ -145,7 +187,7 @@ inline bool openDefaultAppsPicker(const DefaultAppsSnapshot& snapshot, size_t ro
                                   int& pickerScroll)
 {
     if (!snapshot.available || rowIndex >= snapshot.count) return false;
-    selectedExtension = snapshot.rows[rowIndex].extension;
+    selectedExtension = defaultAppsRowKey(snapshot.rows[rowIndex]);
     pickerOpen = true;
     pickerScroll = 0;
     return true;
@@ -160,11 +202,11 @@ inline int closeDefaultAppsPicker(const DefaultAppsSnapshot& snapshot,
     return findDefaultAppsRowIndex(snapshot, selectedExtension);
 }
 
-inline bool isEligibleDefaultAppHandler(const DocumentHandlerInfo& handler,
+inline bool isEligibleDefaultAppHandler(const DefaultAppsHandlerInfo& handler,
                                        DefaultAppsBackend& backend)
 {
     return !handler.appId.empty() && handler.registrationCurrent &&
-        handler.supportsDocumentActivation && handler.available &&
+        handler.supportsActivation && handler.available &&
         handler.registrationOwner == 0 && handler.registrationGeneration == 0 &&
         backend.isDurableApp(handler.appId);
 }
@@ -187,7 +229,7 @@ inline int eligibleDefaultAppHandlerIndexByIdentity(const DefaultAppsRow& row,
 {
     const std::vector<size_t> eligible = eligibleDefaultAppHandlerIndices(row, backend);
     for (size_t i = 0; i < eligible.size(); ++i) {
-        const DocumentHandlerInfo& handler = row.handlers.handlers[eligible[i]];
+        const DefaultAppsHandlerInfo& handler = row.handlers.handlers[eligible[i]];
         if (handler.appId == appId && handler.registrationOwner == registrationOwner &&
             handler.registrationGeneration == registrationGeneration) return static_cast<int>(i);
     }
@@ -198,7 +240,7 @@ inline std::string formatDefaultAppHandlerChoice(const DefaultAppsRow& row, size
                                                 DefaultAppsBackend& backend, size_t maxCharacters)
 {
     if (handlerIndex >= row.handlers.count) return std::string();
-    const DocumentHandlerInfo& handler = row.handlers.handlers[handlerIndex];
+    const DefaultAppsHandlerInfo& handler = row.handlers.handlers[handlerIndex];
     std::string label = handler.displayName;
     if (label.empty()) label = backend.displayName(handler.appId);
     if (label.empty()) label = "Application unavailable";
@@ -206,7 +248,7 @@ inline std::string formatDefaultAppHandlerChoice(const DefaultAppsRow& row, size
     const std::string normalizedLabel = lowerAscii(label);
     size_t sameLabelCount = 0;
     for (size_t i = 0; i < row.handlers.count; ++i) {
-        const DocumentHandlerInfo& candidate = row.handlers.handlers[i];
+        const DefaultAppsHandlerInfo& candidate = row.handlers.handlers[i];
         if (isEligibleDefaultAppHandler(candidate, backend) &&
             lowerAscii(candidate.displayName) == normalizedLabel) ++sameLabelCount;
     }
@@ -235,15 +277,76 @@ public:
         std::sort(extensions.begin(), extensions.end());
         extensions.erase(std::unique(extensions.begin(), extensions.end()), extensions.end());
 
+        std::vector<std::string> protocols;
+        for (const std::string& scheme : backend.knownProtocols()) {
+            std::string normalized;
+            if (NormalizeProtocolScheme(scheme, normalized)) protocols.push_back(std::move(normalized));
+        }
+        std::sort(protocols.begin(), protocols.end());
+        protocols.erase(std::unique(protocols.begin(), protocols.end()), protocols.end());
+
         refreshed.available = true;
-        refreshed.totalCount = extensions.size();
-        refreshed.count = std::min(extensions.size(), kMaxSettingsDefaultAppExtensions);
-        refreshed.truncated = extensions.size() > kMaxSettingsDefaultAppExtensions;
-        for (size_t i = 0; i < refreshed.count; ++i) {
+        refreshed.totalCount = extensions.size() + protocols.size();
+        const size_t extensionCount = std::min(extensions.size(), kMaxSettingsDefaultAppExtensions);
+        const size_t protocolCount = std::min(protocols.size(), kMaxSettingsDefaultAppProtocols);
+        refreshed.truncated = extensions.size() > kMaxSettingsDefaultAppExtensions ||
+            protocols.size() > kMaxSettingsDefaultAppProtocols;
+        refreshed.count = extensionCount + protocolCount;
+        for (size_t i = 0; i < extensionCount; ++i) {
             DefaultAppsRow& row = refreshed.rows[i];
             row.extension = extensions[i];
             row.policy = backend.defaultHandlerInfo(row.extension);
-            row.handlers = backend.capableHandlers(row.extension);
+            const DocumentHandlerList handlers = backend.capableHandlers(row.extension);
+            row.handlers.count = std::min(handlers.count, row.handlers.handlers.size());
+            row.handlers.declaredHandlerCount = handlers.declaredHandlerCount;
+            row.handlers.availableHandlerCount = handlers.availableHandlerCount;
+            row.handlers.truncated = handlers.truncated;
+            for (size_t index = 0; index < row.handlers.count; ++index) {
+                const DocumentHandlerInfo& source = handlers.handlers[index];
+                DefaultAppsHandlerInfo& target = row.handlers.handlers[index];
+                target.appId = source.appId;
+                target.displayName = source.displayName;
+                target.registrationOwner = source.registrationOwner;
+                target.registrationGeneration = source.registrationGeneration;
+                target.supportsActivation = source.supportsDocumentActivation;
+                target.registrationCurrent = source.registrationCurrent;
+                target.backendAvailable = source.backendAvailable;
+                target.available = source.available;
+                target.isDefault = source.isDefault;
+            }
+            row.builtInDisplayName = backend.displayName(row.policy.builtInDefaultAppId);
+            row.configuredDisplayName = backend.displayName(row.policy.configuredOverrideAppId);
+            row.effectiveDisplayName = backend.displayName(row.policy.effectiveDefaultAppId);
+        }
+        for (size_t i = 0; i < protocolCount; ++i) {
+            DefaultAppsRow& row = refreshed.rows[extensionCount + i];
+            row.protocol = true;
+            row.extension = protocols[i];
+            const ProtocolDefaultHandlerInfo policy = backend.protocolDefaultHandlerInfo(row.extension);
+            row.policy.extension = row.extension;
+            row.policy.builtInDefaultAppId = policy.builtInDefaultAppId;
+            row.policy.configuredOverrideAppId = policy.configuredOverrideAppId;
+            row.policy.effectiveDefaultAppId = policy.effectiveDefaultAppId;
+            row.policy.configuredStatus = policy.configuredStatus;
+            row.policy.effectiveDefaultAvailable = policy.effectiveDefaultAvailable;
+            const ProtocolHandlerList handlers = backend.capableProtocolHandlers(row.extension);
+            row.handlers.count = std::min(handlers.count, row.handlers.handlers.size());
+            row.handlers.declaredHandlerCount = handlers.declaredHandlerCount;
+            row.handlers.availableHandlerCount = handlers.availableHandlerCount;
+            row.handlers.truncated = handlers.truncated;
+            for (size_t index = 0; index < row.handlers.count; ++index) {
+                const ProtocolHandlerInfo& source = handlers.handlers[index];
+                DefaultAppsHandlerInfo& target = row.handlers.handlers[index];
+                target.appId = source.appId;
+                target.displayName = source.displayName;
+                target.registrationOwner = source.registrationOwner;
+                target.registrationGeneration = source.registrationGeneration;
+                target.supportsActivation = source.supportsProtocolActivation;
+                target.registrationCurrent = source.registrationCurrent;
+                target.backendAvailable = source.backendAvailable;
+                target.available = source.available;
+                target.isDefault = source.isDefault;
+            }
             row.builtInDisplayName = backend.displayName(row.policy.builtInDefaultAppId);
             row.configuredDisplayName = backend.displayName(row.policy.configuredOverrideAppId);
             row.effectiveDisplayName = backend.displayName(row.policy.effectiveDefaultAppId);
@@ -259,14 +362,17 @@ public:
                                                 size_t eligibleChoiceIndex)
     {
         const DefaultAppsRow* row = findDefaultAppsRow(m_snapshot, extension);
-        if (!m_snapshot.available || !row) return failure(extension, "File type is no longer available.");
+        if (!m_snapshot.available || !row) return failure(extension, "This default handler key is no longer available.");
         const std::vector<size_t> eligible = eligibleDefaultAppHandlerIndices(*row, backend);
         if (eligibleChoiceIndex >= eligible.size()) return failure(extension, "That application is no longer available.");
 
-        const DocumentHandlerInfo selected = row->handlers.handlers[eligible[eligibleChoiceIndex]];
+        const DefaultAppsHandlerInfo selected = row->handlers.handlers[eligible[eligibleChoiceIndex]];
         const std::string selectedExtension = row->extension;
+        const std::string typedKey = defaultAppsRowKey(*row);
         DefaultHandlerMutationResult result;
-        result.extension = selectedExtension;
+        result.extension = row->protocol ? std::string() : selectedExtension;
+        result.key = selectedExtension;
+        result.protocolKey = row->protocol;
         result.appId = selected.appId;
         if (row->policy.configuredOverrideAppId.empty() &&
             !row->policy.builtInDefaultAppId.empty() &&
@@ -277,10 +383,12 @@ public:
             return result;
         }
 
-        result = backend.setDefaultHandler(selectedExtension, selected.appId);
+        result = row->protocol
+            ? backend.setDefaultProtocolHandler(selectedExtension, selected.appId)
+            : backend.setDefaultHandler(selectedExtension, selected.appId);
         refresh(backend);
         if (result.succeeded()) {
-            const DefaultAppsRow* verified = findDefaultAppsRow(m_snapshot, selectedExtension);
+            const DefaultAppsRow* verified = findDefaultAppsRow(m_snapshot, typedKey);
             if (!verified || verified->policy.configuredOverrideAppId != selected.appId ||
                 verified->policy.effectiveDefaultAppId != selected.appId ||
                 verified->policy.configuredStatus != ConfiguredDefaultHandlerStatus::Available ||
@@ -296,12 +404,15 @@ public:
                                                        const std::string& extension)
     {
         const DefaultAppsRow* row = findDefaultAppsRow(m_snapshot, extension);
-        if (!m_snapshot.available || !row) return failure(extension, "File type is no longer available.");
+        if (!m_snapshot.available || !row) return failure(extension, "This default handler key is no longer available.");
         const std::string selectedExtension = row->extension;
+        const std::string typedKey = defaultAppsRowKey(*row);
         const std::string effectiveAppId = row->policy.effectiveDefaultAppId;
         if (row->policy.configuredOverrideAppId.empty()) {
             DefaultHandlerMutationResult result;
-            result.extension = selectedExtension;
+            result.extension = row->protocol ? std::string() : selectedExtension;
+            result.key = selectedExtension;
+            result.protocolKey = row->protocol;
             result.appId = effectiveAppId;
             result.status = DefaultHandlerMutationStatus::Success;
             result.reason = "No configured override is present.";
@@ -309,10 +420,12 @@ public:
             return result;
         }
 
-        DefaultHandlerMutationResult result = backend.clearDefaultHandler(selectedExtension);
+        DefaultHandlerMutationResult result = row->protocol
+            ? backend.clearDefaultProtocolHandler(selectedExtension)
+            : backend.clearDefaultHandler(selectedExtension);
         refresh(backend);
         if (result.succeeded()) {
-            const DefaultAppsRow* verified = findDefaultAppsRow(m_snapshot, selectedExtension);
+            const DefaultAppsRow* verified = findDefaultAppsRow(m_snapshot, typedKey);
             if (!verified || !verified->policy.configuredOverrideAppId.empty()) {
                 result.status = DefaultHandlerMutationStatus::VerificationFailure;
                 result.reason = "The configured default could not be cleared.";
@@ -326,14 +439,17 @@ private:
     {
         DefaultHandlerMutationResult result;
         result.status = DefaultHandlerMutationStatus::VerificationFailure;
-        result.extension = extension;
+        const bool protocol = extension.rfind("protocol:", 0) == 0;
+        result.extension = protocol ? std::string() : extension;
+        result.key = protocol ? extension.substr(9) : extension;
+        result.protocolKey = protocol;
         result.reason = reason;
         return result;
     }
 
     static bool sameRow(const DefaultAppsRow& left, const DefaultAppsRow& right)
     {
-        if (left.extension != right.extension ||
+        if (left.protocol != right.protocol || left.extension != right.extension ||
             left.policy.extension != right.policy.extension ||
             left.policy.builtInDefaultAppId != right.policy.builtInDefaultAppId ||
             left.policy.configuredOverrideAppId != right.policy.configuredOverrideAppId ||
@@ -345,12 +461,12 @@ private:
             left.handlers.availableHandlerCount != right.handlers.availableHandlerCount ||
             left.handlers.truncated != right.handlers.truncated) return false;
         for (size_t i = 0; i < left.handlers.count; ++i) {
-            const DocumentHandlerInfo& a = left.handlers.handlers[i];
-            const DocumentHandlerInfo& b = right.handlers.handlers[i];
+            const DefaultAppsHandlerInfo& a = left.handlers.handlers[i];
+            const DefaultAppsHandlerInfo& b = right.handlers.handlers[i];
             if (a.appId != b.appId || a.displayName != b.displayName ||
                 a.registrationOwner != b.registrationOwner ||
                 a.registrationGeneration != b.registrationGeneration ||
-                a.supportsDocumentActivation != b.supportsDocumentActivation ||
+                a.supportsActivation != b.supportsActivation ||
                 a.registrationCurrent != b.registrationCurrent ||
                 a.backendAvailable != b.backendAvailable || a.available != b.available ||
                 a.isDefault != b.isDefault) return false;

@@ -26,7 +26,8 @@ namespace gxos {
 namespace apps {
 namespace {
 
-constexpr const char* kConfigHeader = "GXOS-APP-DEFAULTS 1\n";
+constexpr const char* kConfigHeaderV1 = "GXOS-APP-DEFAULTS 1\n";
+constexpr const char* kConfigHeaderV2 = "GXOS-APP-DEFAULTS 2\n";
 std::mutex s_defaultHandlerStoreMutex;
 
 uint32_t fnv1a(const std::string& value) {
@@ -174,24 +175,36 @@ std::vector<DefaultHandlerOverride> canonicalized(const std::vector<DefaultHandl
     }
     std::vector<DefaultHandlerOverride> result;
     result.reserve(values.size());
-    std::set<std::string> extensions;
+    std::set<std::string> keys;
     for (const DefaultHandlerOverride& value : values) {
         std::string normalized;
-        if (!NormalizeDocumentExtension(value.extension, normalized) || normalized != value.extension) {
-            error = "default-handler extension must already be normalized";
+        if (value.keyKind == DefaultHandlerOverride::KeyKind::Extension) {
+            if (!NormalizeDocumentExtension(value.extension, normalized) || normalized != value.extension) {
+                error = "default-handler extension must already be normalized";
+                return {};
+            }
+        } else if (value.keyKind == DefaultHandlerOverride::KeyKind::Protocol) {
+            if (!NormalizeProtocolScheme(value.extension, normalized) || normalized != value.extension) {
+                error = "default-handler protocol must already be normalized";
+                return {};
+            }
+        } else {
+            error = "default-handler key namespace is invalid";
             return {};
         }
         if (value.appId.empty() || value.appId.size() > kAppModelMaxAppIdBytes || hasControl(value.appId)) {
             error = "default-handler canonical App ID is invalid or over capacity";
             return {};
         }
-        if (!extensions.insert(value.extension).second) {
-            error = "duplicate default-handler extension";
+        const std::string typedKey = (value.keyKind == DefaultHandlerOverride::KeyKind::Protocol ? "protocol:" : "extension:") + value.extension;
+        if (!keys.insert(typedKey).second) {
+            error = "duplicate typed default-handler key";
             return {};
         }
         result.push_back(value);
     }
     std::sort(result.begin(), result.end(), [](const DefaultHandlerOverride& left, const DefaultHandlerOverride& right) {
+        if (left.keyKind != right.keyKind) return left.keyKind < right.keyKind;
         return left.extension < right.extension;
     });
     valid = true;
@@ -220,11 +233,15 @@ bool DefaultAppHandlerStore::Reload(std::string& error) {
 }
 
 const DefaultHandlerOverride* DefaultAppHandlerStore::Find(const std::string& normalizedExtension) const {
-    const auto found = std::lower_bound(m_overrides.begin(), m_overrides.end(), normalizedExtension,
-        [](const DefaultHandlerOverride& record, const std::string& extension) {
-            return record.extension < extension;
-        });
-    return found != m_overrides.end() && found->extension == normalizedExtension ? &*found : nullptr;
+    return Find(normalizedExtension, DefaultHandlerOverride::KeyKind::Extension);
+}
+
+const DefaultHandlerOverride* DefaultAppHandlerStore::Find(
+    const std::string& key, DefaultHandlerOverride::KeyKind kind) const {
+    const auto found = std::find_if(m_overrides.begin(), m_overrides.end(), [&](const DefaultHandlerOverride& record) {
+        return record.keyKind == kind && record.extension == key;
+    });
+    return found == m_overrides.end() ? nullptr : &*found;
 }
 
 bool DefaultAppHandlerStore::Commit(const std::vector<DefaultHandlerOverride>& overrides, std::string& error) {
@@ -298,7 +315,9 @@ bool DefaultAppHandlerStore::ParseText(const std::string& text,
         error = "default-handler configuration is empty or over capacity";
         return false;
     }
-    if (text.compare(0, std::char_traits<char>::length(kConfigHeader), kConfigHeader) != 0) {
+    const bool version1 = text.compare(0, std::char_traits<char>::length(kConfigHeaderV1), kConfigHeaderV1) == 0;
+    const bool version2 = text.compare(0, std::char_traits<char>::length(kConfigHeaderV2), kConfigHeaderV2) == 0;
+    if (!version1 && !version2) {
         error = "default-handler configuration header is invalid";
         return false;
     }
@@ -335,7 +354,8 @@ bool DefaultAppHandlerStore::ParseText(const std::string& text,
         else { error = "default-handler configuration checksum is malformed"; return false; }
         expectedChecksum = (expectedChecksum << 4) | digit;
     }
-    const size_t bodyStart = std::char_traits<char>::length(kConfigHeader);
+    const size_t bodyStart = version1 ? std::char_traits<char>::length(kConfigHeaderV1)
+                                      : std::char_traits<char>::length(kConfigHeaderV2);
     const std::string body = text.substr(bodyStart, footerStart - bodyStart);
     if (fnv1a(body) != expectedChecksum) {
         error = "default-handler configuration checksum mismatch";
@@ -356,29 +376,43 @@ bool DefaultAppHandlerStore::ParseText(const std::string& text,
     }
 
     std::map<std::string, DefaultHandlerOverride> parsed;
-    std::set<std::string> duplicateExtensions;
+    std::set<std::string> duplicateKeys;
     for (const std::string& recordLine : lines) {
         const size_t separator = recordLine.find('=');
         if (separator == std::string::npos || separator == 0 || separator + 1 >= recordLine.size()) {
             ++invalidRecordCount;
             continue;
         }
-        const std::string rawExtension = recordLine.substr(0, separator);
+        std::string rawKey = recordLine.substr(0, separator);
         const std::string appId = recordLine.substr(separator + 1);
+        DefaultHandlerOverride::KeyKind kind = DefaultHandlerOverride::KeyKind::Extension;
+        if (version2) {
+            if (rawKey.rfind("extension:", 0) == 0) rawKey.erase(0, 10);
+            else if (rawKey.rfind("protocol:", 0) == 0) {
+                rawKey.erase(0, 9);
+                kind = DefaultHandlerOverride::KeyKind::Protocol;
+            } else {
+                ++invalidRecordCount;
+                continue;
+            }
+        }
         std::string normalized;
-        if (!NormalizeDocumentExtension(rawExtension, normalized) || normalized != rawExtension ||
+        const bool keyValid = kind == DefaultHandlerOverride::KeyKind::Protocol
+            ? NormalizeProtocolScheme(rawKey, normalized) : NormalizeDocumentExtension(rawKey, normalized);
+        if (!keyValid || normalized != rawKey || appId.empty() ||
             appId.size() > kAppModelMaxAppIdBytes || hasControl(appId)) {
             ++invalidRecordCount;
             continue;
         }
-        if (duplicateExtensions.find(normalized) != duplicateExtensions.end()) {
+        const std::string typedKey = (kind == DefaultHandlerOverride::KeyKind::Protocol ? "protocol:" : "extension:") + normalized;
+        if (duplicateKeys.find(typedKey) != duplicateKeys.end()) {
             ++invalidRecordCount;
             continue;
         }
-        auto inserted = parsed.emplace(normalized, DefaultHandlerOverride{normalized, appId});
+        auto inserted = parsed.emplace(typedKey, DefaultHandlerOverride{normalized, appId, kind});
         if (!inserted.second) {
-            parsed.erase(normalized);
-            duplicateExtensions.insert(normalized);
+            parsed.erase(typedKey);
+            duplicateKeys.insert(typedKey);
             invalidRecordCount += 2;
         }
     }
@@ -396,15 +430,21 @@ bool DefaultAppHandlerStore::Serialize(const std::vector<DefaultHandlerOverride>
     const std::vector<DefaultHandlerOverride> records = canonicalized(overrides, valid, error);
     if (!valid) return false;
 
+    const bool hasProtocol = std::any_of(records.begin(), records.end(), [](const DefaultHandlerOverride& record) {
+        return record.keyKind == DefaultHandlerOverride::KeyKind::Protocol;
+    });
     std::string body;
     for (const DefaultHandlerOverride& record : records) {
+        if (hasProtocol) {
+            body += record.keyKind == DefaultHandlerOverride::KeyKind::Protocol ? "protocol:" : "extension:";
+        }
         body += record.extension;
         body += '=';
         body += record.appId;
         body += '\n';
     }
     std::ostringstream output;
-    output << kConfigHeader << body << "END " << records.size() << ' ';
+    output << (hasProtocol ? kConfigHeaderV2 : kConfigHeaderV1) << body << "END " << records.size() << ' ';
     output.width(8);
     output.fill('0');
     output << std::hex << std::uppercase << fnv1a(body) << "\n";

@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "guide_web_content_decoder.h"
+#include "app_model_limits.h"
 
 namespace gxos {
 namespace web {
@@ -21,7 +22,7 @@ static const int kHttpSharedDecodedDocumentSegmentBytes = 16 * 1024;
 static const int kHttpSharedMaxDecodedDocumentSegments = 32;
 static const int kHttpSharedMaxDecodedDocumentBytes =
     kHttpSharedDecodedDocumentSegmentBytes * kHttpSharedMaxDecodedDocumentSegments;
-static const int kHttpSharedMaxUrlBytes = 2048;
+static const int kHttpSharedMaxUrlBytes = static_cast<int>(gxos::apps::kAppModelMaxUriBytes);
 static const int kHttpSharedMaxHostnameBytes = 253;
 static const int kHttpSharedMaxRemoteResources = 32;
 static const int kHttpSharedConnectTimeoutMs = 5000;

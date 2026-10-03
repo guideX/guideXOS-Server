@@ -5683,18 +5683,18 @@ namespace gxos {
             return false;
         }
 
-        static bool dispatchNavigatorDocumentActivation(const apps::AppActivationContext& activation, std::string& error) {
+        static bool dispatchNavigatorActivation(const apps::AppActivationContext& activation, std::string& error) {
             if (apps::Navigator::LaunchWithActivation(activation) != 0) return true;
-            error = "Failed to launch the registered document handler";
+            error = "Failed to launch the registered Navigator activation";
             return false;
         }
 
-        static const apps::BuiltInDocumentDispatcher& builtInDocumentDispatcher() {
-            static const apps::BuiltInDocumentDispatcher dispatcher = [] {
-                apps::BuiltInDocumentDispatcher value;
+        static const apps::BuiltInActivationDispatcher& builtInDocumentDispatcher() {
+            static const apps::BuiltInActivationDispatcher dispatcher = [] {
+                apps::BuiltInActivationDispatcher value;
                 (void)value.RegisterHandler("gxos.builtin.notepad", &dispatchNotepadDocumentActivation);
                 (void)value.RegisterHandler("gxos.builtin.imageviewer", &dispatchImageViewerDocumentActivation);
-                (void)value.RegisterHandler("guidexos.navigator", &dispatchNavigatorDocumentActivation);
+                (void)value.RegisterHandler("guidexos.navigator", &dispatchNavigatorActivation);
                 return value;
             }();
             return dispatcher;
@@ -5764,6 +5764,31 @@ namespace gxos {
             if (nativeHandler && launchNativeElfProcess(selectedApp, nativeDecision, false, nativeActivation) != 0) return true;
             error = "Failed to launch the registered document handler";
             return false;
+        }
+
+        static bool dispatchUriActivation(const apps::AppActivationContext& activation, std::string& error) {
+            {
+                std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+                if (!s_appRegistry.IsUriActivationCurrent(activation)) {
+                    error = "URI activation became stale before dispatch";
+                    return false;
+                }
+                const apps::RegisteredApp* registered = s_appRegistry.FindById(activation.appId);
+                if (!registered) {
+                    error = "URI activation registration disappeared before dispatch";
+                    return false;
+                }
+                if (registered->manifest.kind != apps::AppKind::BuiltIn) {
+                    error = "The registered application has no current NativeElf URI activation ABI";
+                    return false;
+                }
+                const bool dispatched = builtInDocumentDispatcher().Dispatch(s_appRegistry, activation, error);
+                if (dispatched) {
+                    Logger::write(LogLevel::Info, "Built-in dispatcher delivered canonical owned URI activation appId=" +
+                        activation.appId + " uri=" + activation.uri);
+                }
+                return dispatched;
+            }
         }
 
         static bool tryExecuteActiveTypedDispatchFilesystemEntry(
@@ -5944,6 +5969,92 @@ namespace gxos {
             ensureDefaultAppsRegistered();
             std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
             return s_appRegistry.GetDefaultHandlerStoreDiagnostics();
+        }
+
+        bool DesktopService::OpenUri(const std::string& uri, std::string& error, bool recordRecent) {
+            error.clear();
+            ensureDefaultAppsRegistered();
+            apps::UriActivationResolution activation;
+            {
+                std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+                activation = s_appRegistry.ResolveUriActivation(uri);
+            }
+            if (!activation.launchable()) {
+                error = std::string("URI activation rejected (") +
+                    apps::AppRegistry::ToString(activation.status) + "): " + activation.reason;
+                Logger::write(LogLevel::Warn, error);
+                NotificationManager::Add(error, NotificationLevel::Error);
+                return false;
+            }
+            if (!dispatchUriActivation(activation.activation, error)) {
+                if (error.empty()) error = "The registered URI handler became unavailable";
+                NotificationManager::Add(error, NotificationLevel::Error);
+                return false;
+            }
+            if (recordRecent) AddRecentProgram(activation.displayName.empty() ? activation.appId : activation.displayName);
+            Logger::write(LogLevel::Info, "Desktop URI activation delivered scheme=" + activation.scheme +
+                " appId=" + activation.appId + " uri=" + activation.activation.uri);
+            return true;
+        }
+
+        bool DesktopService::OpenUriWithHandler(const apps::ProtocolHandlerInfo& handler,
+                                                const std::string& uri,
+                                                std::string& error,
+                                                bool recordRecent) {
+            error.clear();
+            ensureDefaultAppsRegistered();
+            apps::UriActivationResolution activation;
+            {
+                std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+                activation = s_appRegistry.ResolveUriActivation(handler, uri);
+            }
+            if (!activation.launchable()) {
+                error = std::string("URI handler selection rejected (") +
+                    apps::AppRegistry::ToString(activation.status) + "): " + activation.reason;
+                Logger::write(LogLevel::Warn, error);
+                NotificationManager::Add(error, NotificationLevel::Error);
+                return false;
+            }
+            if (!dispatchUriActivation(activation.activation, error)) {
+                if (error.empty()) error = "The selected URI handler is no longer available";
+                NotificationManager::Add(error, NotificationLevel::Error);
+                return false;
+            }
+            if (recordRecent) AddRecentProgram(activation.displayName.empty() ? activation.appId : activation.displayName);
+            Logger::write(LogLevel::Info, "One-time URI activation delivered canonical appId=" + activation.appId +
+                " scheme=" + activation.scheme + " uri=" + activation.activation.uri);
+            return true;
+        }
+
+        apps::ProtocolHandlerList DesktopService::GetProtocolHandlers(const std::string& scheme) {
+            ensureDefaultAppsRegistered();
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+            return s_appRegistry.EnumerateCapableProtocolHandlers(scheme);
+        }
+
+        apps::ProtocolDefaultHandlerInfo DesktopService::GetDefaultProtocolHandlerInfo(const std::string& scheme) {
+            ensureDefaultAppsRegistered();
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+            return s_appRegistry.GetDefaultProtocolHandlerInfo(scheme);
+        }
+
+        apps::DefaultHandlerMutationResult DesktopService::SetDefaultProtocolHandler(
+            const std::string& scheme, const std::string& canonicalAppId) {
+            ensureDefaultAppsRegistered();
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+            return s_appRegistry.SetDefaultProtocolHandler(scheme, canonicalAppId);
+        }
+
+        apps::DefaultHandlerMutationResult DesktopService::ClearDefaultProtocolHandler(const std::string& scheme) {
+            ensureDefaultAppsRegistered();
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+            return s_appRegistry.ClearDefaultProtocolHandler(scheme);
+        }
+
+        std::vector<std::string> DesktopService::GetKnownProtocols() {
+            ensureDefaultAppsRegistered();
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+            return s_appRegistry.GetKnownProtocols();
         }
 
         bool DesktopService::OpenFilesystemEntryWithHandler(const apps::DocumentHandlerInfo& handler,

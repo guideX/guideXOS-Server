@@ -265,8 +265,13 @@ void populateFileAssociations(const JsonValue& root, AppManifest& manifest) {
     }
 }
 
+void populateProtocols(const JsonValue& root, AppManifest& manifest) {
+    manifest.protocols = stringArrayProperty(root, "protocols");
+}
+
 void populateActivationCapabilities(const JsonValue& root, AppManifest& manifest) {
     manifest.supportsDocumentActivation = boolProperty(root, "supportsDocumentActivation", false);
+    manifest.supportsProtocolActivation = boolProperty(root, "supportsProtocolActivation", false);
 }
 
 void populateDefaultWindow(const JsonValue& root, AppManifest& manifest) {
@@ -301,6 +306,7 @@ AppManifest manifestFromJson(const JsonValue& root) {
     manifest.permissions = stringArrayProperty(root, "permissions");
     populateEntries(root, manifest);
     populateFileAssociations(root, manifest);
+    populateProtocols(root, manifest);
     populateActivationCapabilities(root, manifest);
     populateDefaultWindow(root, manifest);
     populateDesktopRegistryHints(root, manifest);
