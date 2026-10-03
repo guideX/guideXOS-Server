@@ -53,6 +53,7 @@
 #include "gxm_loader.h"
 #include "gxos_tls_prerequisites.h"
 #include "desktop_config.h"
+#include "app_registry.h"
 #include "desktop_service.h"
 #include "background_service.h"
 #include "notepad.h"
@@ -4524,7 +4525,7 @@ static void help(){
                  " gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>\n"
                  " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id> | gui.sync <id> <frameGeneration> [frameSequence] [freeze] | gui.unfreeze <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
-                 " desktop.wallpaper <path> | desktop.background.remove <id> | desktop.launch <action> | desktop.open <path> [dir] | desktop.open.folder <path> | desktop.open.uri <uri> | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.appmodel.active-typed-dispatch-gate [force-on|force-off|reset] | desktop.appmodel.active-typed-dispatch-default-on-candidate [on|off|reset] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig | desktop.display.summary | desktop.display.viewport [1|2]\n"
+                 " desktop.wallpaper <path> | desktop.background.remove <id> | desktop.launch <action> | desktop.open <path> [dir] | desktop.open.folder <path> | desktop.open.uri <uri> | desktop.app.actions <canonical-app-id> | desktop.app.action <canonical-app-id> <action-id> | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.appmodel.active-typed-dispatch-gate [force-on|force-off|reset] | desktop.appmodel.active-typed-dispatch-default-on-candidate [on|off|reset] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig | desktop.display.summary | desktop.display.viewport [1|2]\n"
                  " desktop.apps | desktop.apps.verbose | desktop.windows.owners | desktop.startup.regression | desktop.appmodel.summary | desktop.appmodel.inventory | desktop.appmodel.coverage | desktop.appmodel.file-associations | desktop.appmodel.shell-objects | desktop.appmodel.typed-dispatch-gate [force-off] | desktop.pinned | desktop.recent | desktop.recent.remove <name> | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
                   " nativeapp.capabilities | nativeapp.inspect <app> | nativeapp.smoketest <app> | nativeapp.processes | nativeapp.debuglog [count]\n"
                  " taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>\n"
@@ -4844,6 +4845,40 @@ using namespace gxos;
         }
         else if (cmd=="desktop.launch.types"){
             std::cout << gui::DesktopService::LaunchTargetTypeCoverageDiagnostic();
+        }
+        else if (cmd=="desktop.app.actions"){
+            std::string appId;
+            iss >> appId;
+            if (appId.empty()) { std::cout << "desktop.app.actions <canonical-app-id>" << std::endl; continue; }
+            const apps::AppActionList actions = gui::DesktopService::GetAppActions(appId);
+            if (!actions.appFound) {
+                std::cout << "App action enumeration failed: unknown canonical app ID " << appId << std::endl;
+                continue;
+            }
+            std::cout << "APP_ACTIONS_BEGIN appId=" << actions.appId
+                      << " declared=" << actions.declaredActionCount
+                      << " available=" << actions.availableActionCount << std::endl;
+            for (size_t i = 0; i < actions.count; ++i) {
+                const apps::AppActionInfo& action = actions.actions[i];
+                std::cout << "action id=" << action.actionId << " label=" << action.label
+                          << " generation=" << action.registrationGeneration << std::endl;
+            }
+            std::cout << "APP_ACTIONS_END" << std::endl;
+        }
+        else if (cmd=="desktop.app.action"){
+            std::string appId;
+            std::string actionId;
+            iss >> appId >> actionId;
+            if (appId.empty() || actionId.empty()) {
+                std::cout << "desktop.app.action <canonical-app-id> <action-id>" << std::endl;
+                continue;
+            }
+            const apps::AppActionInvocationResult invocation = gui::DesktopService::InvokeAppAction(appId, actionId);
+            if (invocation.succeeded())
+                std::cout << "Desktop app action accepted: appId=" << appId << " actionId=" << actionId << std::endl;
+            else
+                std::cout << "Desktop app action failed (" << apps::AppRegistry::ToString(invocation.status)
+                          << "): " << invocation.reason << std::endl;
         }
         else if (cmd=="desktop.launch"){
             if(!requireCompositor()) continue;

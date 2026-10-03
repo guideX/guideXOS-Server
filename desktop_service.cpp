@@ -5691,6 +5691,17 @@ namespace gxos {
             return false;
         }
 
+        static bool dispatchNavigatorAppAction(const apps::AppActionInfo& action,
+                                               bool& launchedNewProcess,
+                                               std::string& error) {
+            if (action.appId != "guidexos.navigator") {
+                error = "Navigator rejected an action for another canonical application ID";
+                return false;
+            }
+            return apps::Navigator::InvokeAppAction(action.actionId, action.registrationGeneration,
+                launchedNewProcess, error);
+        }
+
         static const apps::BuiltInActivationDispatcher& builtInActivationDispatcher() {
             static const apps::BuiltInActivationDispatcher dispatcher = [] {
                 apps::BuiltInActivationDispatcher value;
@@ -5698,6 +5709,15 @@ namespace gxos {
                 (void)value.RegisterHandler("gxos.builtin.imageviewer", &dispatchImageViewerDocumentActivation);
                 (void)value.RegisterHandler("guidexos.navigator", &dispatchNavigatorActivation);
                 (void)value.RegisterHandler("gxos.builtin.fileexplorer", &dispatchFileExplorerFolderActivation);
+                return value;
+            }();
+            return dispatcher;
+        }
+
+        static const apps::BuiltInAppActionDispatcher& builtInAppActionDispatcher() {
+            static const apps::BuiltInAppActionDispatcher dispatcher = [] {
+                apps::BuiltInAppActionDispatcher value;
+                (void)value.RegisterHandler("guidexos.navigator", &dispatchNavigatorAppAction);
                 return value;
             }();
             return dispatcher;
@@ -6121,6 +6141,100 @@ namespace gxos {
             ensureDefaultAppsRegistered();
             std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
             return s_appRegistry.EnumerateCapableProtocolHandlers(scheme);
+        }
+
+        apps::AppActionList DesktopService::GetAppActions(const std::string& canonicalAppId) {
+            ensureDefaultAppsRegistered();
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+            return s_appRegistry.EnumerateAppActions(canonicalAppId);
+        }
+
+        static apps::AppActionInvocationResult invokeAppAction(const std::string& canonicalAppId,
+                                                               const std::string& actionId,
+                                                               uint64_t expectedGeneration,
+                                                               const std::string* expectedLabel,
+                                                               bool recordRecent) {
+            apps::AppActionInvocationResult result;
+            result.appId = canonicalAppId;
+            result.actionId = actionId;
+            ensureDefaultAppsRegistered();
+            bool dispatched = false;
+            bool launchedNewProcess = false;
+            std::string displayName;
+            bool shouldRecordRecent = false;
+            {
+                std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+                const apps::AppActionResolution resolution = s_appRegistry.ResolveAppAction(
+                    canonicalAppId, actionId, expectedGeneration);
+                if (!resolution.invocable()) {
+                    result.status = resolution.status == apps::AppActionResolutionStatus::InvalidAppId ||
+                        resolution.status == apps::AppActionResolutionStatus::UnknownApp
+                        ? apps::AppActionInvocationStatus::AppUnavailable
+                        : (resolution.status == apps::AppActionResolutionStatus::RegistrationStale
+                            ? apps::AppActionInvocationStatus::StaleRegistration
+                            : apps::AppActionInvocationStatus::ActionUnavailable);
+                    result.reason = std::string("App action rejected (") +
+                        apps::AppRegistry::ToString(resolution.status) + "): " + resolution.reason;
+                    return result;
+                }
+                result.appId = resolution.action.appId;
+                result.actionId = resolution.action.actionId;
+                if (expectedLabel && resolution.action.label != *expectedLabel) {
+                    result.status = apps::AppActionInvocationStatus::StaleRegistration;
+                    result.reason = "App action presentation changed after enumeration";
+                    return result;
+                }
+                if (!s_appRegistry.IsAppActionCurrent(resolution.action)) {
+                    result.status = apps::AppActionInvocationStatus::StaleRegistration;
+                    result.reason = "App action registration changed before dispatch";
+                    return result;
+                }
+                const apps::RegisteredApp* app = s_appRegistry.FindById(resolution.action.appId);
+                if (!app || app->manifest.kind != apps::AppKind::BuiltIn) {
+                    result.status = apps::AppActionInvocationStatus::ActionUnavailable;
+                    result.reason = "The registered application has no current action dispatcher";
+                    return result;
+                }
+                displayName = app->manifest.displayName;
+                const auto recentHint = app->manifest.desktopRegistryHints.find("recordRecentPrograms");
+                shouldRecordRecent = recentHint != app->manifest.desktopRegistryHints.end() && recentHint->second == "true";
+                dispatched = builtInAppActionDispatcher().Dispatch(
+                    s_appRegistry, resolution.action, launchedNewProcess, result.reason);
+            }
+            if (!dispatched) {
+                result.status = apps::AppActionInvocationStatus::DispatchFailure;
+                if (result.reason.empty()) result.reason = "The registered app action handler is unavailable";
+                return result;
+            }
+            if (launchedNewProcess && recordRecent && shouldRecordRecent)
+                DesktopService::AddRecentProgram(displayName.empty() ? canonicalAppId : displayName);
+            Logger::write(LogLevel::Info, "Desktop App Model action delivered appId=" + canonicalAppId +
+                " actionId=" + actionId + " launchedNewProcess=" + (launchedNewProcess ? "true" : "false"));
+            result.status = apps::AppActionInvocationStatus::Success;
+            result.launchedNewProcess = launchedNewProcess;
+            return result;
+        }
+
+        apps::AppActionInvocationResult DesktopService::InvokeAppAction(const std::string& canonicalAppId,
+                                                                        const std::string& actionId,
+                                                                        bool recordRecent) {
+            return invokeAppAction(canonicalAppId, actionId, 0, nullptr, recordRecent);
+        }
+
+        apps::AppActionInvocationResult DesktopService::InvokeAppAction(const apps::AppActionInfo& action,
+                                                                        bool recordRecent) {
+            return invokeAppAction(action.appId, action.actionId, action.registrationGeneration,
+                &action.label, recordRecent);
+        }
+
+        bool DesktopService::IsAppActionCurrent(const std::string& canonicalAppId,
+                                                const std::string& actionId,
+                                                uint64_t registrationGeneration) {
+            ensureDefaultAppsRegistered();
+            std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
+            const apps::AppActionResolution resolution = s_appRegistry.ResolveAppAction(
+                canonicalAppId, actionId, registrationGeneration);
+            return resolution.invocable() && s_appRegistry.IsAppActionCurrent(resolution.action);
         }
 
         apps::ProtocolDefaultHandlerInfo DesktopService::GetDefaultProtocolHandlerInfo(const std::string& scheme) {

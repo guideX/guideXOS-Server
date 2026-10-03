@@ -822,6 +822,8 @@ class Navigator {
 public:
 	static uint64_t Launch();
 	static uint64_t LaunchWithActivation(const AppActivationContext& activation);
+	static bool InvokeAppAction(const std::string& actionId, uint64_t registrationGeneration,
+		bool& launchedNewProcess, std::string& error);
 	static bool SmokeNavigateTo(const std::string& url);
 	static bool SmokeNavigateToQuiet(const std::string& url);
 	static bool SmokeNavigateToWithHistory(const std::string& url);

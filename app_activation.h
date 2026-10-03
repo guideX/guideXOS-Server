@@ -43,6 +43,26 @@ inline bool IsValidFolderActivationPath(const std::string& path) {
     return true;
 }
 
+// App action IDs are canonical machine identities, never display labels or
+// function names. Grammar: 1..48 ASCII bytes, lowercase letters/digits with
+// single interior hyphens; first and last bytes must be alphanumeric.
+inline bool IsValidAppActionId(const std::string& id) {
+    if (id.empty() || id.size() > kAppModelMaxActionIdBytes) return false;
+    bool previousHyphen = false;
+    for (size_t i = 0; i < id.size(); ++i) {
+        const unsigned char byte = static_cast<unsigned char>(id[i]);
+        const bool alpha = byte >= 'a' && byte <= 'z';
+        const bool digit = byte >= '0' && byte <= '9';
+        if (alpha || digit) {
+            previousHyphen = false;
+            continue;
+        }
+        if (byte != '-' || i == 0 || i + 1 == id.size() || previousHyphen) return false;
+        previousHyphen = true;
+    }
+    return true;
+}
+
 inline bool NormalizeProtocolScheme(const std::string& scheme, std::string& normalized) {
     normalized.clear();
     if (scheme.empty() || scheme.size() > kAppModelMaxProtocolSchemeBytes) return false;

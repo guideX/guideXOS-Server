@@ -47,7 +47,8 @@ namespace gxos {
             MT_ClearFocus = 33,                // payload: window id losing focus
             MT_SyncFrame = 34,                 // payload: <window id>|<expected generation>|<expected app sequence>|<freeze>
             MT_UnfreezeFrame = 35,              // payload: window id; validation capture helper only
-            MT_DrawTextAtStyled = 36            // payload: <winId>|<x>|<y>|<r>|<g>|<b>|<fontSize>|<weight>|<slant>|<family>|<text>
+            MT_DrawTextAtStyled = 36,           // payload: <winId>|<x>|<y>|<r>|<g>|<b>|<fontSize>|<weight>|<slant>|<family>|<text>
+            MT_AppAction = 37                    // directed process mailbox payload: <registration generation>|<canonical action ID>
         };
         struct WindowDesc { uint64_t id; std::string title; int w; int h; };
         struct Rect { int x; int y; int w; int h; };

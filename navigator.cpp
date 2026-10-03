@@ -14946,6 +14946,46 @@ uint64_t Navigator::LaunchWithActivation(const AppActivationContext& activation)
 	return pid;
 }
 
+bool Navigator::InvokeAppAction(const std::string& actionId,
+	uint64_t registrationGeneration,
+	bool& launchedNewProcess,
+	std::string& error)
+{
+	launchedNewProcess = false;
+	error.clear();
+	if (!IsValidAppActionId(actionId) || actionId != "open-home" || registrationGeneration == 0) {
+		error = "Navigator does not implement this declared action ID";
+		return false;
+	}
+
+	for (uint64_t pid : ProcessTable::list()) {
+		std::string processName;
+		std::string processAppId;
+		bool running = false;
+		int exitCode = 0;
+		if (!ProcessTable::getIdentity(pid, processName, processAppId) || processAppId != kNavigatorCanonicalAppId ||
+			!ProcessTable::getStatus(pid, running, exitCode) || !running) continue;
+
+		ipc::Message request;
+		request.type = static_cast<uint32_t>(gui::MsgType::MT_AppAction);
+		const std::string payload = std::to_string(registrationGeneration) + "|" + actionId;
+		request.data.assign(payload.begin(), payload.end());
+		if (!ProcessTable::send(pid, std::move(request))) {
+			error = "Navigator exited before its action request could be queued";
+			return false;
+		}
+		return true;
+	}
+
+	const uint64_t pid = Launch();
+	if (pid == 0) {
+		error = "Navigator could not be launched for its Home action";
+		return false;
+	}
+	launchedNewProcess = true;
+	return true;
+}
+
 bool Navigator::SmokeNavigateTo(const std::string& url)
 {
 	if (s_windowId == 0) return false;
@@ -16586,6 +16626,30 @@ int Navigator::main(int, char**)
 				if (closedId == s_windowId) running = false;
 			} catch (...) {
 				running = false;
+			}
+			break;
+		}
+		case MsgType::MT_AppAction: {
+			const AppActivationContext currentActivation = ProcessTable::CurrentActivationContext();
+			const size_t separator = payload.find('|');
+			if (currentActivation.appId != kNavigatorCanonicalAppId || separator == std::string::npos) break;
+			uint64_t actionGeneration = 0;
+			const std::string actionId = payload.substr(separator + 1);
+			try {
+				actionGeneration = std::stoull(payload.substr(0, separator));
+			} catch (...) {
+				break;
+			}
+			if (!IsValidAppActionId(actionId) || !DesktopService::IsAppActionCurrent(
+				currentActivation.appId, actionId, actionGeneration)) {
+				Logger::write(LogLevel::Warn, "Navigator discarded a stale App Model action request");
+				break;
+			}
+			if (actionId == "open-home") {
+				handleToolbarAction(kWidgetIdHome);
+				Logger::write(LogLevel::Info, "Navigator consumed App Model action appId=" + currentActivation.appId +
+					" actionId=" + actionId + " generation=" + std::to_string(actionGeneration) +
+					" window=" + std::to_string(s_windowId) + " currentUrl=" + s_currentDoc.url);
 			}
 			break;
 		}

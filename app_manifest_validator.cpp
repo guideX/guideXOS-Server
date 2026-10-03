@@ -106,6 +106,7 @@ AppManifestValidationResult AppManifestValidator::Validate(const AppManifest& ma
         manifest.permissions.size() > kAppModelMaxEntriesPerManifest ||
         manifest.fileAssociations.size() > kAppModelMaxFileAssociationsPerApp ||
         manifest.protocols.size() > kAppModelMaxProtocolsPerApp ||
+        manifest.actions.size() > kAppModelMaxActionsPerApp ||
         manifest.desktopRegistryHints.size() > kAppModelMaxEntriesPerManifest) {
         addError(result.errors, "Manifest metadata count exceeds the App Model bound.");
     }
@@ -178,6 +179,21 @@ AppManifestValidationResult AppManifestValidator::Validate(const AppManifest& ma
     }
     if (!manifest.protocols.empty() && !manifest.supportsProtocolActivation) {
         addError(result.errors, "Protocol declarations require supportsProtocolActivation=true.");
+    }
+
+    std::vector<std::string> actionIds;
+    actionIds.reserve(manifest.actions.size());
+    for (const AppActionDeclaration& action : manifest.actions) {
+        if (!IsValidAppActionId(action.id)) {
+            addError(result.errors, "Invalid or overlong application action ID: " + action.id);
+        } else if (std::find(actionIds.begin(), actionIds.end(), action.id) != actionIds.end()) {
+            addError(result.errors, "Duplicate application action ID: " + action.id);
+        } else {
+            actionIds.push_back(action.id);
+        }
+        if (action.label.empty() || action.label.size() > kAppModelMaxActionLabelBytes || hasControlCharacter(action.label)) {
+            addError(result.errors, "Application action label is empty, contains controls, or exceeds the App Model bound.");
+        }
     }
 
     result.valid = result.errors.empty();

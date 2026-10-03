@@ -38,6 +38,9 @@ struct BuiltInAppMetadata {
 	bool acceptsFolderTargets = false;
 	bool systemShellObject = false;
 	bool riskyForActiveTypedDispatch = false;
+	const char* const* actionIds = nullptr;
+	const char* const* actionLabels = nullptr;
+	size_t actionCount = 0;
 };
 
 namespace detail {
@@ -96,6 +99,9 @@ static const char* const kShutdownDialogAliases[] = {
 	"Shutdown Dialog"
 };
 
+static const char* const kNavigatorActionIds[] = { "open-home" };
+static const char* const kNavigatorActionLabels[] = { "Home" };
+
 } // namespace detail
 
 static const BuiltInAppMetadata kBuiltInAppMetadata[] = {
@@ -116,7 +122,7 @@ static const BuiltInAppMetadata kBuiltInAppMetadata[] = {
 	{ "gxos.builtin.controlpanel", "ControlPanel", "ControlPanel", nullptr, nullptr, "app.controlpanel", "System", "Built-in guideXOS control panel.", BuiltInAvailabilityHosted, 0, 0, 0, false, false, detail::kControlPanelAliases, sizeof(detail::kControlPanelAliases) / sizeof(detail::kControlPanelAliases[0]), true, true, true, false, false, true, false },
 	{ "gxos.builtin.settings", "Settings", "Settings", nullptr, nullptr, "app.settings", "System", "Unified guideXOS settings application.", BuiltInAvailabilityHosted, 0, 980, 700, true, false, detail::kUnifiedSettingsAliases, sizeof(detail::kUnifiedSettingsAliases) / sizeof(detail::kUnifiedSettingsAliases[0]), true, true, true, false, false, false, false },
 	{ "gxos.builtin.displayoptions", "DisplayOptions", "DisplayOptions", "DisplayOptions", nullptr, "app.settings", "System", "Built-in guideXOS display options.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFF606878u, 0, 0, false, false, detail::kDisplayOptionsAliases, sizeof(detail::kDisplayOptionsAliases) / sizeof(detail::kDisplayOptionsAliases[0]), true, true, true, false, false, true, false },
-	{ "guidexos.navigator", "guideXOS Navigator", "guideXOS Navigator", "guideXOS Navigator", nullptr, "app.navigator", "Internet", "Native guideXOS Navigator browser bundled with the OS app model.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFF4678BEu, 920, 640, false, false, nullptr, 0, true, true, true, false, false, false, false },
+	{ "guidexos.navigator", "guideXOS Navigator", "guideXOS Navigator", "guideXOS Navigator", nullptr, "app.navigator", "Internet", "Native guideXOS Navigator browser bundled with the OS app model.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFF4678BEu, 920, 640, false, false, nullptr, 0, true, true, true, false, false, false, false, detail::kNavigatorActionIds, detail::kNavigatorActionLabels, 1 },
 	{ "gxos.builtin.appmodeldemo", "App Model Demo", "App Model Demo", nullptr, nullptr, "app.generic", "Diagnostics", "Built-in guideXOS app-model diagnostics viewer.", BuiltInAvailabilityHosted, 0, 0, 0, false, false, detail::kAppModelAliases, sizeof(detail::kAppModelAliases) / sizeof(detail::kAppModelAliases[0]), true, true, true, false, false, false, false },
 	{ "gxos.builtin.nativeappdebugviewer", "Native App Debug Viewer", "Native App Debug Viewer", nullptr, nullptr, "app.generic", "Diagnostics", "Built-in guideXOS native app diagnostics viewer.", BuiltInAvailabilityHosted, 0, 0, 0, false, false, nullptr, 0, false, false, false, false, false, true, true },
 	{ "gxos.builtin.hdinstaller", "HDInstaller", "HDInstaller", nullptr, nullptr, "app.installer", "Installer", "Built-in guideXOS installer entry for supported runtime targets.", BuiltInAvailabilityHosted, 0, 0, 0, false, false, nullptr, 0, true, false, false, false, false, true, true }

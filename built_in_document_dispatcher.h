@@ -76,4 +76,57 @@ private:
 // Source compatibility for existing document-only tests and callers.
 using BuiltInDocumentDispatcher = BuiltInActivationDispatcher;
 
+// App actions are requests to application-owned commands, distinct from
+// typed document/URI/folder launch activations. The dispatcher routes by the
+// canonical app registration and passes only a declared bounded action ID.
+class BuiltInAppActionDispatcher {
+public:
+    using Handler = bool (*)(const AppActionInfo& action, bool& launchedNewProcess, std::string& error);
+
+    bool RegisterHandler(std::string canonicalAppId, Handler handler) {
+        if (canonicalAppId.empty() || canonicalAppId.size() > kAppModelMaxAppIdBytes || !handler) return false;
+        for (const Entry& entry : m_entries) if (entry.appId == canonicalAppId) return false;
+        m_entries.push_back({ std::move(canonicalAppId), handler });
+        return true;
+    }
+
+    bool Dispatch(const AppRegistry& registry,
+                  const AppActionInfo& action,
+                  bool& launchedNewProcess,
+                  std::string& error) const {
+        error.clear();
+        launchedNewProcess = false;
+        if (action.appId.empty() || action.appId.size() > kAppModelMaxAppIdBytes ||
+            !IsValidAppActionId(action.actionId) || action.label.empty() ||
+            action.label.size() > kAppModelMaxActionLabelBytes) {
+            error = "App action target is malformed or over capacity";
+            return false;
+        }
+        const RegisteredApp* app = registry.FindById(action.appId);
+        if (!app || app->manifest.kind != AppKind::BuiltIn) {
+            error = "Built-in app action dispatcher rejected a missing or non-built-in target";
+            return false;
+        }
+        if (!registry.IsAppActionCurrent(action)) {
+            error = "App action target is stale or unavailable";
+            return false;
+        }
+        for (const Entry& entry : m_entries) {
+            if (entry.appId != action.appId) continue;
+            if (entry.handler(action, launchedNewProcess, error)) return true;
+            if (error.empty()) error = "Built-in app action handler failed";
+            return false;
+        }
+        error = "No built-in app action dispatcher is registered for this application";
+        return false;
+    }
+
+private:
+    struct Entry {
+        std::string appId;
+        Handler handler = nullptr;
+    };
+    std::vector<Entry> m_entries;
+};
+
 }} // namespace gxos::apps

@@ -33,6 +33,11 @@ struct FileAssociation {
     std::string description;
 };
 
+struct AppActionDeclaration {
+    std::string id;
+    std::string label;
+};
+
 struct DefaultWindow {
     int width = 0;
     int height = 0;
@@ -55,6 +60,7 @@ struct AppManifest {
     std::vector<std::string> permissions;
     std::vector<FileAssociation> fileAssociations;
     std::vector<std::string> protocols;
+    std::vector<AppActionDeclaration> actions;
     bool supportsDocumentActivation = false;
     bool supportsProtocolActivation = false;
     bool supportsFolderActivation = false;

@@ -69,6 +69,24 @@ enum class FolderActivationResolutionStatus {
     RegistryCapacityExceeded
 };
 
+enum class AppActionResolutionStatus {
+    Resolved = 0,
+    InvalidAppId,
+    InvalidActionId,
+    UnknownApp,
+    ActionNotDeclared,
+    RegistrationStale,
+    HandlerUnavailable
+};
+
+enum class AppActionInvocationStatus {
+    Success = 0,
+    AppUnavailable,
+    ActionUnavailable,
+    StaleRegistration,
+    DispatchFailure
+};
+
 enum class ConfiguredDefaultHandlerStatus {
     NotConfigured = 0,
     Available,
@@ -220,6 +238,46 @@ struct FolderActivationResolution {
     bool launchable() const { return status == FolderActivationResolutionStatus::Resolved; }
 };
 
+// Value-owned snapshot captured by generic shell surfaces. Registry-assigned
+// generations cover durable as well as temporary registrations.
+struct AppActionInfo {
+    std::string appId;
+    std::string actionId;
+    std::string label;
+    uint64_t registrationGeneration = 0;
+    bool registrationCurrent = false;
+    bool backendAvailable = false;
+    bool available = false;
+};
+
+struct AppActionList {
+    std::string appId;
+    std::array<AppActionInfo, kAppModelMaxActionsPerApp> actions{};
+    size_t count = 0;
+    size_t declaredActionCount = 0;
+    size_t availableActionCount = 0;
+    bool appFound = false;
+    bool truncated = false;
+};
+
+struct AppActionResolution {
+    AppActionResolutionStatus status = AppActionResolutionStatus::UnknownApp;
+    AppActionInfo action;
+    std::string reason;
+
+    bool invocable() const { return status == AppActionResolutionStatus::Resolved; }
+};
+
+struct AppActionInvocationResult {
+    AppActionInvocationStatus status = AppActionInvocationStatus::ActionUnavailable;
+    std::string appId;
+    std::string actionId;
+    std::string reason;
+    bool launchedNewProcess = false;
+
+    bool succeeded() const { return status == AppActionInvocationStatus::Success; }
+};
+
 struct ProtocolHandlerRecord {
     std::string scheme;
     std::string appId;
@@ -262,11 +320,13 @@ struct RegisteredApp {
     bool temporaryDevelopment = false;
     uint64_t temporaryOwnerRuntimeId = 0;
     uint64_t temporaryGeneration = 0;
+    uint64_t registrationGeneration = 0;
     // Runtime-owned capability: the current backend has a production route
     // that can launch this registration with a document activation context.
     bool documentActivationBackendAvailable = false;
     bool protocolActivationBackendAvailable = false;
     bool folderActivationBackendAvailable = false;
+    bool appActionBackendAvailable = false;
 
     const AppEntry* FindCompatibleEntry(const std::string& currentArchitecture) const;
 };
@@ -332,6 +392,7 @@ public:
     bool SetTestDocumentActivationBackend(const std::string& appId, bool available);
     bool SetTestProtocolActivationBackend(const std::string& appId, bool available);
     bool SetTestFolderActivationBackend(const std::string& appId, bool available);
+    bool SetTestAppActionBackend(const std::string& appId, bool available);
 #endif
 
     const std::vector<RegisteredApp>& GetAllApps() const;
@@ -383,12 +444,21 @@ public:
     const std::vector<FolderHandlerRecord>& GetFolderHandlers() const;
     bool FolderHandlerCapacityExceeded() const;
 
+    AppActionList EnumerateAppActions(const std::string& canonicalAppId) const;
+    AppActionResolution ResolveAppAction(const std::string& canonicalAppId,
+                                         const std::string& actionId,
+                                         uint64_t expectedRegistrationGeneration = 0) const;
+    bool IsAppActionCurrent(const AppActionInfo& action) const;
+    bool SetAppActionBackendAvailable(const std::string& canonicalAppId, bool available);
+
     static std::vector<AppRegistrySource> DefaultSources();
     static const char* ToString(AppSourceKind kind);
     static const char* ToString(DisplayNameResolutionStatus status);
     static const char* ToString(FileAssociationResolutionStatus status);
     static const char* ToString(UriActivationResolutionStatus status);
     static const char* ToString(FolderActivationResolutionStatus status);
+    static const char* ToString(AppActionResolutionStatus status);
+    static const char* ToString(AppActionInvocationStatus status);
     static const char* ToString(ConfiguredDefaultHandlerStatus status);
     static const char* ToString(DefaultHandlerMutationStatus status);
     static int DisplayNameSourcePriority(AppSourceKind kind);
@@ -417,6 +487,7 @@ private:
     bool m_protocolHandlerCapacityExceeded = false;
     std::vector<FolderHandlerRecord> m_folderHandlers;
     bool m_folderHandlerCapacityExceeded = false;
+    uint64_t m_nextRegistrationGeneration = 1;
     DefaultAppHandlerStore m_defaultHandlerStore;
 };
 

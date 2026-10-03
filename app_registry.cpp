@@ -116,6 +116,14 @@ RegisteredApp makeBuiltInApp(const BuiltInAppMetadata& metadata) {
     app.manifest.defaultWindow.resizable = metadata.defaultWindowResizable;
     app.manifest.supportedArchitectures.push_back("any");
 
+    if (metadata.actionIds && metadata.actionLabels && metadata.actionCount <= kAppModelMaxActionsPerApp) {
+        for (size_t i = 0; i < metadata.actionCount; ++i) {
+            if (!metadata.actionIds[i] || !metadata.actionLabels[i]) continue;
+            app.manifest.actions.push_back({ metadata.actionIds[i], metadata.actionLabels[i] });
+        }
+        app.appActionBackendAvailable = !app.manifest.actions.empty();
+    }
+
     AppEntry entry;
     entry.architecture = "any";
     entry.path = std::string("builtin/") + app.manifest.displayName;
@@ -1060,6 +1068,112 @@ bool AppRegistry::SetFolderActivationBackendAvailable(const std::string& canonic
 const std::vector<FolderHandlerRecord>& AppRegistry::GetFolderHandlers() const { return m_folderHandlers; }
 bool AppRegistry::FolderHandlerCapacityExceeded() const { return m_folderHandlerCapacityExceeded; }
 
+AppActionList AppRegistry::EnumerateAppActions(const std::string& canonicalAppId) const {
+    AppActionList result;
+    if (canonicalAppId.empty() || canonicalAppId.size() > kAppModelMaxAppIdBytes) return result;
+    const RegisteredApp* app = FindById(canonicalAppId);
+    if (!app) return result;
+
+    result.appFound = true;
+    result.appId = app->manifest.id;
+    result.declaredActionCount = app->manifest.actions.size();
+    if (!app->appActionBackendAvailable || app->registrationGeneration == 0) return result;
+
+    std::vector<AppActionInfo> available;
+    available.reserve(std::min(app->manifest.actions.size(), kAppModelMaxActionsPerApp));
+    for (const AppActionDeclaration& declaration : app->manifest.actions) {
+        if (!IsValidAppActionId(declaration.id) || declaration.label.empty() ||
+            declaration.label.size() > kAppModelMaxActionLabelBytes) continue;
+        AppActionInfo action;
+        action.appId = app->manifest.id;
+        action.actionId = declaration.id;
+        action.label = declaration.label;
+        action.registrationGeneration = app->registrationGeneration;
+        action.registrationCurrent = true;
+        action.backendAvailable = true;
+        action.available = true;
+        available.push_back(std::move(action));
+    }
+    std::sort(available.begin(), available.end(), [](const AppActionInfo& left, const AppActionInfo& right) {
+        return left.actionId < right.actionId;
+    });
+    result.availableActionCount = available.size();
+    result.count = std::min(available.size(), result.actions.size());
+    result.truncated = available.size() > result.actions.size();
+    for (size_t i = 0; i < result.count; ++i) result.actions[i] = std::move(available[i]);
+    return result;
+}
+
+AppActionResolution AppRegistry::ResolveAppAction(const std::string& canonicalAppId,
+                                                  const std::string& actionId,
+                                                  uint64_t expectedRegistrationGeneration) const {
+    AppActionResolution result;
+    if (canonicalAppId.empty() || canonicalAppId.size() > kAppModelMaxAppIdBytes) {
+        result.status = AppActionResolutionStatus::InvalidAppId;
+        result.reason = "canonical application ID is empty or over capacity";
+        return result;
+    }
+    if (!IsValidAppActionId(actionId)) {
+        result.status = AppActionResolutionStatus::InvalidActionId;
+        result.reason = "application action ID is malformed or over capacity";
+        return result;
+    }
+    const RegisteredApp* app = FindById(canonicalAppId);
+    if (!app) {
+        result.status = AppActionResolutionStatus::UnknownApp;
+        result.reason = "canonical application ID is not registered";
+        return result;
+    }
+    if (expectedRegistrationGeneration != 0 &&
+        expectedRegistrationGeneration != app->registrationGeneration) {
+        result.status = AppActionResolutionStatus::RegistrationStale;
+        result.reason = "application registration generation changed after action enumeration";
+        return result;
+    }
+    const auto declaration = std::find_if(app->manifest.actions.begin(), app->manifest.actions.end(),
+        [&](const AppActionDeclaration& candidate) { return candidate.id == actionId; });
+    if (declaration == app->manifest.actions.end()) {
+        result.status = AppActionResolutionStatus::ActionNotDeclared;
+        result.reason = "application does not currently declare this action ID";
+        return result;
+    }
+    result.action.appId = app->manifest.id;
+    result.action.actionId = declaration->id;
+    result.action.label = declaration->label;
+    result.action.registrationGeneration = app->registrationGeneration;
+    result.action.registrationCurrent = app->registrationGeneration != 0;
+    result.action.backendAvailable = app->appActionBackendAvailable;
+    result.action.available = result.action.registrationCurrent && result.action.backendAvailable;
+    if (!result.action.registrationCurrent) {
+        result.status = AppActionResolutionStatus::RegistrationStale;
+        result.reason = "application registration has no current registry generation";
+    } else if (!result.action.backendAvailable) {
+        result.status = AppActionResolutionStatus::HandlerUnavailable;
+        result.reason = "the registered application has no current action dispatcher";
+    } else {
+        result.status = AppActionResolutionStatus::Resolved;
+    }
+    return result;
+}
+
+bool AppRegistry::IsAppActionCurrent(const AppActionInfo& action) const {
+    if (!action.available || !action.registrationCurrent || action.registrationGeneration == 0) return false;
+    const AppActionResolution current = ResolveAppAction(action.appId, action.actionId, action.registrationGeneration);
+    return current.invocable() && current.action.label == action.label;
+}
+
+bool AppRegistry::SetAppActionBackendAvailable(const std::string& canonicalAppId, bool available) {
+    const auto found = m_appsById.find(canonicalAppId);
+    if (found == m_appsById.end() || found->second >= m_apps.size()) return false;
+    RegisteredApp& app = m_apps[found->second];
+    if (available && app.manifest.actions.empty()) return false;
+    if (app.appActionBackendAvailable == available) return true;
+    if (m_nextRegistrationGeneration == 0 || m_nextRegistrationGeneration == std::numeric_limits<uint64_t>::max()) return false;
+    app.appActionBackendAvailable = available;
+    app.registrationGeneration = m_nextRegistrationGeneration++;
+    return true;
+}
+
 bool AppRegistry::SetProtocolActivationBackendAvailable(const std::string& canonicalAppId, bool available) {
     const auto found = m_appsById.find(canonicalAppId);
     if (found == m_appsById.end() || found->second >= m_apps.size()) return false;
@@ -1603,8 +1717,15 @@ bool AppRegistry::RegisterTemporaryDevelopmentApp(const RegisteredApp& app, std:
         return false;
     }
 
+    if (m_nextRegistrationGeneration == 0 || m_nextRegistrationGeneration == std::numeric_limits<uint64_t>::max()) {
+        error = "APP_REGISTRATION_GENERATION_EXHAUSTED";
+        return false;
+    }
+
     m_appsById[app.manifest.id] = m_apps.size();
-    m_apps.push_back(app);
+    RegisteredApp accepted = app;
+    accepted.registrationGeneration = m_nextRegistrationGeneration++;
+    m_apps.push_back(std::move(accepted));
     RebuildFileAssociations();
     return true;
 }
@@ -1664,6 +1785,10 @@ bool AppRegistry::SetTestProtocolActivationBackend(const std::string& appId, boo
 bool AppRegistry::SetTestFolderActivationBackend(const std::string& appId, bool available) {
     return SetFolderActivationBackendAvailable(appId, available);
 }
+
+bool AppRegistry::SetTestAppActionBackend(const std::string& appId, bool available) {
+    return SetAppActionBackendAvailable(appId, available);
+}
 #endif
 
 const char* AppRegistry::ToString(AppSourceKind kind) {
@@ -1704,6 +1829,7 @@ bool AppRegistry::RegisterApp(const RegisteredApp& app, AppScanResult& result) {
     if (app.manifest.id.empty() || app.manifest.id.size() > kAppModelMaxAppIdBytes ||
         app.manifest.displayName.empty() || app.manifest.displayName.size() > kAppModelMaxDisplayNameBytes ||
         app.manifest.entries.size() > kAppModelMaxEntriesPerManifest ||
+        app.manifest.actions.size() > kAppModelMaxActionsPerApp ||
         app.manifestPath.generic_string().size() > kAppModelMaxEntryPathBytes ||
         app.appDirectory.generic_string().size() > kAppModelMaxEntryPathBytes) {
         result.invalidApps.push_back(makeIssue(app.sourceKind, app.manifestPath, app.manifest.id,
@@ -1715,8 +1841,14 @@ bool AppRegistry::RegisterApp(const RegisteredApp& app, AppScanResult& result) {
         std::vector<std::string> errors = { "Duplicate app id: " + app.manifest.id };
         result.duplicateApps.push_back(makeIssue(app.sourceKind, app.manifestPath, app.manifest.id, errors));
         if (!ShouldReplaceDuplicate(m_apps[existing->second], app)) return false;
-
-        m_apps[existing->second] = app;
+        if (m_nextRegistrationGeneration == 0 || m_nextRegistrationGeneration == std::numeric_limits<uint64_t>::max()) {
+            result.invalidApps.push_back(makeIssue(app.sourceKind, app.manifestPath, app.manifest.id,
+                { "App Model registration generation capacity reached" }));
+            return false;
+        }
+        RegisteredApp accepted = app;
+        accepted.registrationGeneration = m_nextRegistrationGeneration++;
+        m_apps[existing->second] = std::move(accepted);
         return true;
     }
 
@@ -1732,8 +1864,16 @@ bool AppRegistry::RegisterApp(const RegisteredApp& app, AppScanResult& result) {
         return false;
     }
 
+    if (m_nextRegistrationGeneration == 0 || m_nextRegistrationGeneration == std::numeric_limits<uint64_t>::max()) {
+        result.invalidApps.push_back(makeIssue(app.sourceKind, app.manifestPath, app.manifest.id,
+            { "App Model registration generation capacity reached" }));
+        return false;
+    }
+
     m_appsById[app.manifest.id] = m_apps.size();
-    m_apps.push_back(app);
+    RegisteredApp accepted = app;
+    accepted.registrationGeneration = m_nextRegistrationGeneration++;
+    m_apps.push_back(std::move(accepted));
     return true;
 }
 
@@ -1797,6 +1937,30 @@ const char* AppRegistry::ToString(FolderActivationResolutionStatus status) {
     case FolderActivationResolutionStatus::HandlerDoesNotSupportFolders: return "handler-does-not-support-folders";
     case FolderActivationResolutionStatus::HandlerUnavailable: return "handler-unavailable";
     case FolderActivationResolutionStatus::RegistryCapacityExceeded: return "registry-capacity-exceeded";
+    default: return "unknown";
+    }
+}
+
+const char* AppRegistry::ToString(AppActionResolutionStatus status) {
+    switch (status) {
+    case AppActionResolutionStatus::Resolved: return "resolved";
+    case AppActionResolutionStatus::InvalidAppId: return "invalid-app-id";
+    case AppActionResolutionStatus::InvalidActionId: return "invalid-action-id";
+    case AppActionResolutionStatus::UnknownApp: return "unknown-app";
+    case AppActionResolutionStatus::ActionNotDeclared: return "action-not-declared";
+    case AppActionResolutionStatus::RegistrationStale: return "registration-stale";
+    case AppActionResolutionStatus::HandlerUnavailable: return "handler-unavailable";
+    default: return "unknown";
+    }
+}
+
+const char* AppRegistry::ToString(AppActionInvocationStatus status) {
+    switch (status) {
+    case AppActionInvocationStatus::Success: return "success";
+    case AppActionInvocationStatus::AppUnavailable: return "app-unavailable";
+    case AppActionInvocationStatus::ActionUnavailable: return "action-unavailable";
+    case AppActionInvocationStatus::StaleRegistration: return "stale-registration";
+    case AppActionInvocationStatus::DispatchFailure: return "dispatch-failure";
     default: return "unknown";
     }
 }

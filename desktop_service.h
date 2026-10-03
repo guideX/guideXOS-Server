@@ -7,7 +7,7 @@
 #include <vector>
 #include <cstdint>
 
-namespace gxos { namespace apps { struct RegisteredApp; struct DocumentHandlerInfo; struct DocumentHandlerList; struct ProtocolHandlerInfo; struct ProtocolHandlerList; struct ProtocolDefaultHandlerInfo; struct UriActivationResolution; struct DefaultHandlerInfo; struct DefaultHandlerMutationResult; struct DefaultHandlerStoreDiagnostics; } namespace gui {
+namespace gxos { namespace apps { struct RegisteredApp; struct DocumentHandlerInfo; struct DocumentHandlerList; struct ProtocolHandlerInfo; struct ProtocolHandlerList; struct ProtocolDefaultHandlerInfo; struct UriActivationResolution; struct AppActionList; struct AppActionInfo; struct AppActionInvocationResult; struct DefaultHandlerInfo; struct DefaultHandlerMutationResult; struct DefaultHandlerStoreDiagnostics; } namespace gui {
     // Pinned item types matching C# implementation
     enum class PinnedKind : uint8_t {
         App = 0,        // Application name (e.g., "Calculator")
@@ -155,6 +155,14 @@ namespace gxos { namespace apps { struct RegisteredApp; struct DocumentHandlerIn
         static bool OpenUri(const std::string& uri, std::string& error, bool recordRecent = true);
         static bool OpenUriWithHandler(const apps::ProtocolHandlerInfo& handler, const std::string& uri, std::string& error, bool recordRecent = true);
         static apps::ProtocolHandlerList GetProtocolHandlers(const std::string& scheme);
+        static apps::AppActionList GetAppActions(const std::string& canonicalAppId);
+        static apps::AppActionInvocationResult InvokeAppAction(const std::string& canonicalAppId,
+                                                               const std::string& actionId,
+                                                               bool recordRecent = true);
+        static apps::AppActionInvocationResult InvokeAppAction(const apps::AppActionInfo& action,
+                                                               bool recordRecent = true);
+        static bool IsAppActionCurrent(const std::string& canonicalAppId, const std::string& actionId,
+                                       uint64_t registrationGeneration);
         static apps::ProtocolDefaultHandlerInfo GetDefaultProtocolHandlerInfo(const std::string& scheme);
         static apps::DefaultHandlerMutationResult SetDefaultProtocolHandler(const std::string& scheme, const std::string& canonicalAppId);
         static apps::DefaultHandlerMutationResult ClearDefaultProtocolHandler(const std::string& scheme);

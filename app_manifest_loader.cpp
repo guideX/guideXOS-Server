@@ -269,6 +269,18 @@ void populateProtocols(const JsonValue& root, AppManifest& manifest) {
     manifest.protocols = stringArrayProperty(root, "protocols");
 }
 
+void populateActions(const JsonValue& root, AppManifest& manifest) {
+    const JsonValue* actions = root.get("actions");
+    if (!actions || !actions->isArray()) return;
+    for (const JsonValue& item : actions->arrayValue) {
+        if (!item.isObject()) continue;
+        AppActionDeclaration action;
+        action.id = stringProperty(item, "id");
+        action.label = stringProperty(item, "label");
+        manifest.actions.push_back(std::move(action));
+    }
+}
+
 void populateActivationCapabilities(const JsonValue& root, AppManifest& manifest) {
     manifest.supportsDocumentActivation = boolProperty(root, "supportsDocumentActivation", false);
     manifest.supportsProtocolActivation = boolProperty(root, "supportsProtocolActivation", false);
@@ -308,6 +320,7 @@ AppManifest manifestFromJson(const JsonValue& root) {
     populateEntries(root, manifest);
     populateFileAssociations(root, manifest);
     populateProtocols(root, manifest);
+    populateActions(root, manifest);
     populateActivationCapabilities(root, manifest);
     populateDefaultWindow(root, manifest);
     populateDesktopRegistryHints(root, manifest);

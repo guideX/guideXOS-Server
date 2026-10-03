@@ -25,8 +25,15 @@ constexpr size_t kAppModelMaxDocumentHandlersPerExtension = 16;
 constexpr size_t kAppModelMaxProtocolHandlersPerScheme = 16;
 constexpr size_t kAppModelMaxFolderHandlerRecords = 256;
 constexpr size_t kAppModelMaxFolderHandlers = 16;
+// App actions are small manifest-owned declarations. Enumeration is fixed at
+// the per-app bound; the registry-wide theoretical maximum is the product of
+// the app and per-app declaration limits.
+constexpr size_t kAppModelMaxActionIdBytes = 48;
+constexpr size_t kAppModelMaxActionLabelBytes = 64;
+constexpr size_t kAppModelMaxActionsPerApp = 12;
 constexpr size_t kAppModelMaxEntriesPerManifest = 64;
 constexpr size_t kAppModelMaxRegistryApps = 512;
+constexpr size_t kAppModelMaxActionRecords = kAppModelMaxRegistryApps * kAppModelMaxActionsPerApp;
 constexpr size_t kAppModelMaxManifestBytes = 1024 * 1024;
 
 } }
