@@ -150,6 +150,9 @@ static const uint8_t s_font[95][8] = {
 // ============================================================
 
 static ShellState s_state = ShellState::Closed;
+static uint64_t s_instanceGeneration = 0u;
+static uint64_t s_nextInstanceGeneration = 1u;
+static bool s_instanceGenerationExhausted = false;
 static char s_cmdBuffer[MAX_CMD_LENGTH];
 static uint32_t s_cmdLen = 0;
 static uint32_t s_cursorPos = 0;
@@ -3256,8 +3259,21 @@ bool is_open() {
     return s_state != ShellState::Closed;
 }
 
+uint64_t get_instance_generation() {
+    return is_open() ? s_instanceGeneration : 0u;
+}
+
 void open() {
     if (s_state == ShellState::Closed) {
+        if (s_instanceGenerationExhausted || s_nextInstanceGeneration == 0u) {
+            return;
+        }
+        s_instanceGeneration = s_nextInstanceGeneration;
+        if (s_nextInstanceGeneration == UINT64_MAX) {
+            s_instanceGenerationExhausted = true;
+        } else {
+            ++s_nextInstanceGeneration;
+        }
         s_state = ShellState::Open;
         s_cmdLen = 0;
         s_cursorPos = 0;

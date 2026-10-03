@@ -20,7 +20,8 @@ param(
     [switch]$C156ControlModifierShortcuts,
     [switch]$C157ManagedNotesNewDocument,
     [switch]$C158ManagedCalculator,
-    [ValidateSet("Production", "C104AppA", "C104AppB", "C107Composite", "C108ThreadStaticLifecycle", "ProductionComposite", "C112Composite", "C113Composite", "C114Composite", "C115Composite", "C116Composite", "C117Composite", "C118Composite", "C119Composite", "C120Composite", "C121Composite", "C122Composite", "C123Composite", "C124Composite", "C125Composite", "C126Composite", "C127Composite", "C128Composite", "C129Composite", "C131Composite", "C132Composite", "C133Composite", "C134Composite", "C135Composite", "C136Composite", "C137Composite", "C138Composite", "C139Composite", "C140Composite", "C141Composite", "C142Composite", "C143Composite", "C144Composite", "C145Composite", "C146Composite", "C147Composite", "C148Composite", "C149Composite", "C150Composite", "C151Composite", "C152Composite", "C153Composite", "C154Composite", "C158Composite")]
+    [switch]$C160ApplicationSnapshotProof,
+    [ValidateSet("Production", "C104AppA", "C104AppB", "C107Composite", "C108ThreadStaticLifecycle", "ProductionComposite", "C112Composite", "C113Composite", "C114Composite", "C115Composite", "C116Composite", "C117Composite", "C118Composite", "C119Composite", "C120Composite", "C121Composite", "C122Composite", "C123Composite", "C124Composite", "C125Composite", "C126Composite", "C127Composite", "C128Composite", "C129Composite", "C131Composite", "C132Composite", "C133Composite", "C134Composite", "C135Composite", "C136Composite", "C137Composite", "C138Composite", "C139Composite", "C140Composite", "C141Composite", "C142Composite", "C143Composite", "C144Composite", "C145Composite", "C146Composite", "C147Composite", "C148Composite", "C149Composite", "C150Composite", "C151Composite", "C152Composite", "C153Composite", "C154Composite", "C158Composite", "C160Composite")]
     [string]$ManagedProjectMode = "",
     [ValidateSet("Primary64KiB", "Primary128KiB", "Primary256KiB", "Primary4MiB", "Small4KiB")]
     [string]$HeapConfiguration = "Primary64KiB",
@@ -438,6 +439,12 @@ try {
             throw "C158 Managed Calculator requires the C155 session, C156 shortcut, and C157 Notes features in the composite."
         }
         $publishProperties += "-p:HostLogProofC158ManagedCalculator=true"
+    }
+    if ($C160ApplicationSnapshotProof) {
+        if ($managedProjectMode -ne "C160Composite" -or -not $ProductionApplication) {
+            throw "C160 snapshot proof requires a ProductionApplication C160Composite build."
+        }
+        $publishProperties += "-p:HostLogProofC160ApplicationSnapshotProof=true"
     }
     $publishBatch = @(
         "@echo off"

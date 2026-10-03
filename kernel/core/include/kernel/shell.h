@@ -48,6 +48,10 @@ void init();
 // Check if shell is open
 bool is_open();
 
+// Monotonic identity for the current open shell-surface lifetime; zero means
+// no shell surface is open or the lifetime identity was unavailable.
+uint64_t get_instance_generation();
+
 // Open the shell window
 void open();
 

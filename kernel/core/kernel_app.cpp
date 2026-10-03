@@ -25,6 +25,59 @@ KernelApp* AppManager::s_runningApps[MAX_APPS];
 int AppManager::s_runningAppCount = 0;
 bool AppManager::s_initialized = false;
 
+static void strcopy(char* dst, const char* src, int maxLen);
+static bool streq(const char* a, const char* b);
+
+namespace {
+
+class ApplicationInstanceIdAllocator {
+public:
+    constexpr explicit ApplicationInstanceIdAllocator(uint64_t first = 1u)
+        : m_next(first), m_exhausted(first == 0u) {}
+
+    bool allocate(uint64_t* outId) {
+        if (!outId || m_exhausted || m_next == 0u) return false;
+        *outId = m_next;
+        if (m_next == UINT64_MAX) {
+            m_exhausted = true;
+        } else {
+            ++m_next;
+        }
+        return true;
+    }
+
+private:
+    uint64_t m_next;
+    bool m_exhausted;
+};
+
+ApplicationInstanceIdAllocator s_instanceIdAllocator;
+
+#if defined(GXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF)
+class C160IdentityTestApp final : public KernelApp {
+public:
+    explicit C160IdentityTestApp(const char* name) {
+        strcopy(m_name, name, MAX_APP_NAME);
+        m_state = AppState::Running;
+    }
+
+    bool init() override { return true; }
+    void shutdown() override {}
+    void draw(uint32_t, uint32_t, uint32_t, uint32_t) override {}
+    void terminate() { m_state = AppState::Terminated; }
+    void setTestName(const char* name) { strcopy(m_name, name, MAX_APP_NAME); }
+};
+
+static int c160IdentityCases = 0;
+
+static bool c160IdentityCase(bool passed) {
+    ++c160IdentityCases;
+    return passed;
+}
+#endif
+
+} // namespace
+
 AppLaunchLog AppLogger::s_logs[AppLogger::MAX_LOGS];
 int AppLogger::s_logCount = 0;
 int AppLogger::s_logHead = 0;
@@ -56,8 +109,9 @@ static bool streq(const char* a, const char* b) {
 // KernelApp implementation
 // ============================================================
 
-KernelApp::KernelApp() : m_state(AppState::NotLoaded), m_window(nullptr) {
+KernelApp::KernelApp() : m_instanceId(0u), m_state(AppState::NotLoaded), m_window(nullptr) {
     m_name[0] = '\0';
+    m_applicationId[0] = '\0';
 }
 
 KernelApp::~KernelApp() {
@@ -295,6 +349,7 @@ void AppManager::init() {
     // (e.g., kernel/UEFI environments where .bss might not be zeroed)
     for (int i = 0; i < MAX_APPS; i++) {
         s_registeredApps[i].name[0] = '\0';
+        s_registeredApps[i].applicationId[0] = '\0';
         s_registeredApps[i].available = false;
         s_registeredApps[i].factory = nullptr;
         s_runningApps[i] = nullptr;
@@ -303,11 +358,24 @@ void AppManager::init() {
     s_registeredAppCount = 0;
     s_runningAppCount = 0;
     s_initialized = true;
+#if defined(GXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF)
+    if (!runC160IdentityFocusedTests()) {
+        serial::puts("[C160-APP-IDENTITY-TESTS] result=FAIL\n");
+    }
+#endif
 }
 
-bool AppManager::registerApp(const char* name, uint32_t iconColor, KernelApp* (*factory)()) {
+bool AppManager::registerApp(const char* name, const char* applicationId,
+                             uint32_t iconColor, KernelApp* (*factory)()) {
     if (!s_initialized || !name || !factory) {
         return false;
+    }
+
+    int applicationIdLength = 0;
+    if (applicationId) {
+        while (applicationId[applicationIdLength] &&
+               applicationIdLength < MAX_APP_ID) ++applicationIdLength;
+        if (applicationIdLength >= MAX_APP_ID) return false;
     }
     
     // Check if already registered
@@ -323,6 +391,7 @@ bool AppManager::registerApp(const char* name, uint32_t iconColor, KernelApp* (*
     
     AppInfo& info = s_registeredApps[s_registeredAppCount++];
     strcopy(info.name, name, MAX_APP_NAME);
+    strcopy(info.applicationId, applicationId ? applicationId : "", MAX_APP_ID);
     info.iconColor = iconColor;
     info.available = true;
     info.factory = factory;
@@ -391,8 +460,14 @@ bool AppManager::launchApp(const char* name) {
         return false;
     }
     
-    // Add to running list
-    s_runningApps[s_runningAppCount++] = app;
+    // Identity is assigned exactly once after initialization succeeds and
+    // immediately before the instance becomes authoritative in the list.
+    if (!admitRunningApp(app, info->applicationId)) {
+        app->shutdown();
+        delete app;
+        AppLogger::logLaunch(name, LaunchResult::OutOfResources);
+        return false;
+    }
     
     AppLogger::logLaunch(name, LaunchResult::Success);
     kernel::desktop::record_recent_program(name);
@@ -454,8 +529,14 @@ bool AppManager::launchAppWithParam(const char* name, const char* param) {
         return false;
     }
     
-    // Add to running list
-    s_runningApps[s_runningAppCount++] = app;
+    // Identity is assigned exactly once after initialization succeeds and
+    // immediately before the instance becomes authoritative in the list.
+    if (!admitRunningApp(app, info->applicationId)) {
+        app->shutdown();
+        delete app;
+        AppLogger::logLaunch(name, LaunchResult::OutOfResources);
+        return false;
+    }
     
     AppLogger::logLaunch(name, LaunchResult::Success);
     kernel::desktop::record_recent_program(name);
@@ -492,6 +573,167 @@ KernelApp* AppManager::getRunningApp(int index) {
     }
     return s_runningApps[index];
 }
+
+bool AppManager::isRunningInstanceId(uint64_t instanceId) {
+    if (instanceId == 0u) return false;
+    for (int index = 0; index < s_runningAppCount; ++index) {
+        const KernelApp* app = s_runningApps[index];
+        if (app && app->getInstanceId() == instanceId &&
+            app->getState() != AppState::Terminated) return true;
+    }
+    return false;
+}
+
+#if defined(GXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF)
+bool AppManager::launchC160ProofApps() {
+    if (!s_initialized || getRunningAppCount() != 0) return false;
+    const char* names[] = { "Calculator", "TaskManager" };
+    for (const char* name : names) {
+        const AppInfo* info = getAppInfo(name);
+        if (!info || !info->available || !info->factory ||
+            s_runningAppCount >= MAX_APPS) return false;
+        KernelApp* instance = info->factory();
+        if (!instance || !instance->init()) {
+            delete instance;
+            return false;
+        }
+        if (!admitRunningApp(instance, info->applicationId)) {
+            instance->shutdown();
+            delete instance;
+            return false;
+        }
+    }
+    const bool passed = getRunningAppCount() == 2 &&
+        isRunningInstanceId(getRunningApp(0)->getInstanceId()) &&
+        isRunningInstanceId(getRunningApp(1)->getInstanceId());
+    // Keep one genuine shell lifetime open in proof boots so the snapshot
+    // validates its distinct source without fabricating an AppManager row.
+    desktop::open_terminal();
+    serial::puts("[C160-APPMANAGER-PROOF-APPS] calculator=PASS taskmanager=PASS recentWrites=none result=");
+    serial::puts(passed ? "PASS\n" : "FAIL\n");
+    return passed;
+}
+#endif
+
+bool AppManager::admitRunningApp(KernelApp* app, const char* applicationId) {
+    if (!s_initialized || !app || s_runningAppCount >= MAX_APPS ||
+        app->m_instanceId != 0u) return false;
+    int applicationIdLength = 0;
+    if (applicationId) {
+        while (applicationId[applicationIdLength] &&
+               applicationIdLength < MAX_APP_ID) ++applicationIdLength;
+        if (applicationIdLength >= MAX_APP_ID) return false;
+    }
+    uint64_t instanceId = 0u;
+    if (!s_instanceIdAllocator.allocate(&instanceId) || instanceId == 0u) {
+        return false;
+    }
+    strcopy(app->m_applicationId,
+        applicationId ? applicationId : "", MAX_APP_ID);
+    app->m_instanceId = instanceId;
+    s_runningApps[s_runningAppCount++] = app;
+    return true;
+}
+
+#if defined(GXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF)
+bool AppManager::runC160IdentityFocusedTests() {
+    if (s_runningAppCount != 0) return false;
+    c160IdentityCases = 0;
+    bool passed = true;
+
+    ApplicationInstanceIdAllocator ordinary;
+    uint64_t firstToken = 0u;
+    uint64_t secondToken = 0u;
+    passed &= c160IdentityCase(ordinary.allocate(&firstToken) && firstToken != 0u);
+    passed &= c160IdentityCase(ordinary.allocate(&secondToken) && secondToken > firstToken);
+    passed &= c160IdentityCase(!ordinary.allocate(nullptr));
+    ApplicationInstanceIdAllocator wrapped(UINT64_MAX);
+    uint64_t lastToken = 0u;
+    passed &= c160IdentityCase(wrapped.allocate(&lastToken) && lastToken == UINT64_MAX);
+    uint64_t afterWrap = 0u;
+    passed &= c160IdentityCase(!wrapped.allocate(&afterWrap) && afterWrap == 0u);
+    ApplicationInstanceIdAllocator invalidZero(0u);
+    passed &= c160IdentityCase(!invalidZero.allocate(&afterWrap));
+
+    passed &= c160IdentityCase(!isRunningInstanceId(0u));
+    passed &= c160IdentityCase(!admitRunningApp(nullptr, nullptr));
+    C160IdentityTestApp* appA = new C160IdentityTestApp("C160 Test A");
+    passed &= c160IdentityCase(appA != nullptr &&
+        admitRunningApp(appA, "gxos.test.application-a"));
+    const uint64_t appAId = appA ? appA->getInstanceId() : 0u;
+    passed &= c160IdentityCase(appAId != 0u && isRunningInstanceId(appAId));
+    passed &= c160IdentityCase(appA && appA->getApplicationId() &&
+        streq(appA->getApplicationId(), "gxos.test.application-a"));
+    passed &= c160IdentityCase(appA && appA->getName() &&
+        streq(appA->getName(), "C160 Test A"));
+    passed &= c160IdentityCase(getRunningAppCount() == 1 && getRunningApp(0) == appA);
+    if (appA) {
+        const uint64_t beforeRefresh = appA->getInstanceId();
+        update();
+        passed &= c160IdentityCase(appA->getInstanceId() == beforeRefresh);
+        passed &= c160IdentityCase(!admitRunningApp(appA, "gxos.test.changed"));
+        passed &= c160IdentityCase(appA->getInstanceId() == beforeRefresh &&
+            streq(appA->getApplicationId(), "gxos.test.application-a"));
+        closeApp(appA);
+    }
+    passed &= c160IdentityCase(getRunningAppCount() == 0);
+    passed &= c160IdentityCase(!isRunningInstanceId(appAId));
+
+    C160IdentityTestApp* appB = new C160IdentityTestApp("C160 Test B");
+    passed &= c160IdentityCase(appB != nullptr &&
+        admitRunningApp(appB, "gxos.test.application-b"));
+    const uint64_t appBId = appB ? appB->getInstanceId() : 0u;
+    passed &= c160IdentityCase(getRunningAppCount() == 1 && getRunningApp(0) == appB);
+    passed &= c160IdentityCase(appBId != 0u && appBId != appAId && appBId > appAId);
+    passed &= c160IdentityCase(!isRunningInstanceId(appAId) && isRunningInstanceId(appBId));
+    passed &= c160IdentityCase(appB &&
+        streq(appB->getApplicationId(), "gxos.test.application-b"));
+    if (appB) {
+        appB->terminate();
+        passed &= c160IdentityCase(!isRunningInstanceId(appBId));
+        update();
+    }
+    passed &= c160IdentityCase(getRunningAppCount() == 0 &&
+        !isRunningInstanceId(appBId));
+
+    KernelApp* full[MAX_APPS] = {};
+    uint64_t fullIds[MAX_APPS] = {};
+    for (int index = 0; index < MAX_APPS; ++index) {
+        full[index] = new C160IdentityTestApp("C160 Full");
+        if (!full[index] || !admitRunningApp(full[index], "gxos.test.full")) {
+            passed = false;
+            break;
+        }
+        fullIds[index] = full[index]->getInstanceId();
+    }
+    passed &= c160IdentityCase(getRunningAppCount() == MAX_APPS);
+    C160IdentityTestApp* overflow = new C160IdentityTestApp("C160 Overflow");
+    passed &= c160IdentityCase(overflow &&
+        !admitRunningApp(overflow, "gxos.test.overflow"));
+    delete overflow;
+    for (int index = s_runningAppCount - 1; index >= 0; --index) {
+        KernelApp* item = s_runningApps[index];
+        closeApp(item);
+    }
+    bool everyFullIdUnique = true;
+    bool everyFullIdInvalidated = true;
+    for (int left = 0; left < MAX_APPS; ++left) {
+        if (fullIds[left] == 0u) everyFullIdUnique = false;
+        if (isRunningInstanceId(fullIds[left])) everyFullIdInvalidated = false;
+        for (int right = left + 1; right < MAX_APPS; ++right) {
+            if (fullIds[left] == fullIds[right]) everyFullIdUnique = false;
+        }
+    }
+    passed &= c160IdentityCase(everyFullIdUnique);
+    passed &= c160IdentityCase(everyFullIdInvalidated && getRunningAppCount() == 0);
+
+    serial::puts("[C160-APP-IDENTITY-TESTS] cases=");
+    serial::put_hex32(static_cast<uint32_t>(c160IdentityCases));
+    serial::puts(" max-live=16 reuse=distinct wrap=fail-closed result=");
+    serial::puts(passed && c160IdentityCases >= 20 ? "PASS\n" : "FAIL\n");
+    return passed && c160IdentityCases >= 20;
+}
+#endif
 
 const AppInfo* AppManager::getAppInfo(const char* name) {
     if (!name) return nullptr;

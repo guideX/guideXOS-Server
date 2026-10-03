@@ -16,6 +16,7 @@ public sealed unsafe class GuideXosHost
     private const nuint FileWriteOffset = 80u;
     private const nuint DirectoryListOffset = 88u;
     private const nuint FileStatOffset = 96u;
+    private const nuint ApplicationSnapshotOffset = 104u;
     private NativeGxAppContext* _context;
     private NativeHostCallTable* _host;
     private static readonly GuideXosLaunchContext s_dispatchContext =
@@ -59,7 +60,8 @@ public sealed unsafe class GuideXosHost
             return false;
         }
 
-        if (context->host->version != GxAbi.HostAbiVersion ||
+        if (context->host->version < GxAbi.HostAbiV1Version ||
+            context->host->version > GxAbi.HostAbiVersion ||
             context->host->size < GxAbi.HostCallTableV1Size)
         {
             result = GuideXosResult.AbiIncompatible;
@@ -113,6 +115,156 @@ public sealed unsafe class GuideXosHost
 
         surface = new GuideXosSurface(this, window);
         return GuideXosResult.Success;
+    }
+
+    /// <summary>Copies the current bounded application inventory from the host.</summary>
+    public GuideXosApplicationSnapshotResult TryGetApplicationSnapshot(
+        out GuideXosApplicationSnapshot snapshot)
+    {
+        return TryGetApplicationSnapshot(_context, _host, out snapshot);
+    }
+
+    /// <summary>Copies a bounded prefix of the current application inventory.</summary>
+    public GuideXosApplicationSnapshotResult TryGetApplicationSnapshot(
+        uint capacity, out GuideXosApplicationSnapshot snapshot)
+    {
+        return TryGetApplicationSnapshot(_context, _host, capacity, out snapshot);
+    }
+
+    internal static GuideXosApplicationSnapshotResult TryGetApplicationSnapshot(
+        NativeGxAppContext* context,
+        NativeHostCallTable* table,
+        out GuideXosApplicationSnapshot snapshot)
+    {
+        return TryGetApplicationSnapshot(context, table,
+            GxAbi.ApplicationSnapshotCapacity, out snapshot);
+    }
+
+    internal static GuideXosApplicationSnapshotResult TryGetApplicationSnapshot(
+        NativeGxAppContext* context,
+        NativeHostCallTable* table,
+        uint capacity,
+        out GuideXosApplicationSnapshot snapshot)
+    {
+        snapshot = default;
+        if (context == null || table == null)
+            return GuideXosApplicationSnapshotResult.InvalidArgument;
+        if (capacity > GxAbi.ApplicationSnapshotCapacity)
+            return GuideXosApplicationSnapshotResult.InvalidArgument;
+        if (table->version < 2u ||
+            table->size < GxAbi.ApplicationSnapshotOffset + (uint)sizeof(ulong))
+            return GuideXosApplicationSnapshotResult.NotSupported;
+        if ((table->capabilities & GxAbi.CapabilityApplicationSnapshot) == 0u)
+            return GuideXosApplicationSnapshotResult.CapabilityUnavailable;
+        if (table->applicationSnapshot == null)
+            return GuideXosApplicationSnapshotResult.NotSupported;
+
+        uint totalCount = 0u;
+        uint copiedCount = 0u;
+        int nativeResult;
+        fixed (ulong* storage = snapshot.recordStorage)
+        {
+            nativeResult = table->applicationSnapshot(context,
+                (NativeApplicationSnapshotRecord*)storage,
+                capacity, &totalCount, &copiedCount);
+        }
+        if (nativeResult == -2)
+            return GuideXosApplicationSnapshotResult.InvalidArgument;
+        if (nativeResult == -3)
+            return GuideXosApplicationSnapshotResult.CapabilityUnavailable;
+        if (nativeResult == -5)
+            return GuideXosApplicationSnapshotResult.NotSupported;
+        if (nativeResult != 0 && nativeResult != 1)
+            return GuideXosApplicationSnapshotResult.NativeFailure;
+        if (!IsValidApplicationSnapshotCountTuple(nativeResult,
+                totalCount, copiedCount))
+            return GuideXosApplicationSnapshotResult.InvalidData;
+
+        snapshot.totalCount = totalCount;
+        snapshot.copiedCount = copiedCount;
+        snapshot.nativeResult = nativeResult;
+        if (!ValidateSnapshotRecords(ref snapshot))
+        {
+            snapshot = default;
+            return GuideXosApplicationSnapshotResult.InvalidData;
+        }
+        return nativeResult == 1
+            ? GuideXosApplicationSnapshotResult.Truncated
+            : GuideXosApplicationSnapshotResult.Success;
+    }
+
+    internal static bool IsValidApplicationSnapshotCountTuple(
+        int nativeResult, uint totalCount, uint copiedCount)
+    {
+        if (totalCount > GxAbi.ApplicationSnapshotCapacity ||
+            copiedCount > GxAbi.ApplicationSnapshotCapacity ||
+            copiedCount > totalCount) return false;
+        return nativeResult switch
+        {
+            0 => copiedCount == totalCount,
+            1 => copiedCount < totalCount,
+            _ => false,
+        };
+    }
+
+    private static bool ValidateSnapshotRecords(
+        ref GuideXosApplicationSnapshot snapshot)
+    {
+        uint activeCount = 0u;
+        for (uint index = 0u; index < snapshot.copiedCount; ++index)
+        {
+            if (!snapshot.TryGetRecord(index,
+                    out GuideXosApplicationSnapshotRecord record) ||
+                !ValidateSnapshotRecord(ref record)) return false;
+            if (record.IsActive) ++activeCount;
+            for (uint priorIndex = 0u; priorIndex < index; ++priorIndex)
+            {
+                if (!snapshot.TryGetRecord(priorIndex,
+                        out GuideXosApplicationSnapshotRecord prior) ||
+                    prior.Identity == record.Identity) return false;
+            }
+        }
+        return activeCount <= 1u && snapshot.reserved == 0u;
+    }
+
+    private static bool ValidateSnapshotRecord(
+        ref GuideXosApplicationSnapshotRecord record)
+    {
+        if (record.recordVersion != GxAbi.ApplicationSnapshotRecordVersion ||
+            record.instanceId == 0u ||
+            (uint)record.source < (uint)GuideXosApplicationSnapshotSource.AppManagerInstance ||
+            (uint)record.source > (uint)GuideXosApplicationSnapshotSource.ManagedLogicalApplication ||
+            (uint)record.state > (uint)GuideXosApplicationSnapshotState.Terminated ||
+            (record.flags & ~1u) != 0u || record.reserved0 != 0u ||
+            record.reserved1 != 0u ||
+            record.displayNameLength >= GxAbi.ApplicationSnapshotDisplayNameBytes ||
+            record.applicationIdLength >= GxAbi.ApplicationSnapshotApplicationIdBytes)
+            return false;
+
+        bool nameTerminated = false;
+        bool appIdTerminated = record.applicationIdLength == 0u;
+        fixed (byte* name = record.displayName)
+        fixed (byte* appId = record.applicationId)
+        {
+            nameTerminated = name[record.displayNameLength] == 0u;
+            if (record.applicationIdLength != 0u)
+                appIdTerminated = appId[record.applicationIdLength] == 0u;
+            for (uint index = 0u; index < record.displayNameLength; ++index)
+            {
+                if (name[index] < 0x20u || name[index] > 0x7Eu) return false;
+            }
+            for (uint index = 0u; index < record.applicationIdLength; ++index)
+            {
+                if (appId[index] < 0x20u || appId[index] > 0x7Eu) return false;
+            }
+        }
+        if (!nameTerminated || !appIdTerminated || record.displayNameLength == 0u)
+            return false;
+        if (record.source == GuideXosApplicationSnapshotSource.ManagedLogicalApplication &&
+            record.applicationIdLength == 0u) return false;
+        if (record.source == GuideXosApplicationSnapshotSource.ShellSurface &&
+            record.applicationIdLength != 0u) return false;
+        return true;
     }
 
     public GuideXosResult TryGetSurface(ulong window, out GuideXosSurface surface)

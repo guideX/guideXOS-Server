@@ -12,6 +12,7 @@
 #define KERNEL_KERNEL_APP_H
 
 #include "kernel/types.h"
+#include "kernel/application_snapshot.h"
 
 namespace kernel {
 namespace app {
@@ -22,6 +23,7 @@ namespace app {
 
 static const int MAX_APPS = 16;
 static const int MAX_APP_NAME = 32;
+static const int MAX_APP_ID = 96;
 static const int MAX_WINDOWS = 8;
 static const int MAX_TITLE_LEN = 64;
 
@@ -143,12 +145,14 @@ struct KernelWindow {
 
 struct AppInfo {
     char name[MAX_APP_NAME];
+    char applicationId[MAX_APP_ID];
     uint32_t iconColor;
     bool available;  // true if app can run in kernel mode
     KernelApp* (*factory)();  // Factory function to create app instance
     
     AppInfo() : iconColor(0xFF4690C8), available(false), factory(nullptr) {
         name[0] = '\0';
+        applicationId[0] = '\0';
     }
 };
 
@@ -227,6 +231,8 @@ public:
     // State
     AppState getState() const { return m_state; }
     const char* getName() const { return m_name; }
+    const char* getApplicationId() const { return m_applicationId; }
+    uint64_t getInstanceId() const { return m_instanceId; }
     KernelWindow* getWindow() { return m_window; }
     
     // Window management helpers
@@ -249,6 +255,8 @@ public:
     
 protected:
     char m_name[MAX_APP_NAME];
+    char m_applicationId[MAX_APP_ID];
+    uint64_t m_instanceId;
     AppState m_state;
     KernelWindow* m_window;
     
@@ -265,7 +273,8 @@ public:
     static void init();
     
     // Register an app that can run in kernel mode
-    static bool registerApp(const char* name, uint32_t iconColor, KernelApp* (*factory)());
+    static bool registerApp(const char* name, const char* applicationId,
+                            uint32_t iconColor, KernelApp* (*factory)());
     
     // Check if an app is available in kernel mode
     static bool isAppAvailable(const char* name);
@@ -284,6 +293,10 @@ public:
     
     // Get running app by index
     static KernelApp* getRunningApp(int index);
+    static bool isRunningInstanceId(uint64_t instanceId);
+#if defined(GXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF)
+    static bool launchC160ProofApps();
+#endif
     
     // Get app info by name
     static const AppInfo* getAppInfo(const char* name);
@@ -298,6 +311,10 @@ public:
     static bool isBareMetal();
     
 private:
+    static bool admitRunningApp(KernelApp* app, const char* applicationId);
+#if defined(GXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF)
+    static bool runC160IdentityFocusedTests();
+#endif
     static AppInfo s_registeredApps[MAX_APPS];
     static int s_registeredAppCount;
     static KernelApp* s_runningApps[MAX_APPS];

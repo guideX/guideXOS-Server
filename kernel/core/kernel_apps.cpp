@@ -3556,6 +3556,28 @@ void TaskManagerApp::update() {
 }
 
 void TaskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+#if defined(GXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF)
+    static bool c160DrawProofLogged = false;
+    if (!c160DrawProofLogged) {
+        c160DrawProofLogged = true;
+        bool nativeCalculatorRow = false;
+        for (int index = 0; index < m_entryCount; ++index) {
+            static const char expected[] = "Calculator";
+            int character = 0;
+            while (m_entries[index].name[character] == expected[character] &&
+                   expected[character] != '\0') ++character;
+            if (expected[character] == '\0' &&
+                m_entries[index].name[character] == '\0' &&
+                m_entries[index].running) nativeCalculatorRow = true;
+        }
+        serial::puts("[C160-TASKMANAGER-REGRESSION] renderedRows=");
+        serial::put_hex32(static_cast<uint32_t>(m_entryCount));
+        serial::puts(" nativeCalculatorRow=");
+        serial::puts(nativeCalculatorRow ? "true" : "false");
+        serial::puts(" result=");
+        serial::puts(nativeCalculatorRow ? "PASS\n" : "FAIL\n");
+    }
+#endif
     drawRoundedPanel(x + 10, y + 10, w - 20, h - 20, rgb(24, 26, 31), rgb(54, 60, 74));
     appDrawText(x + 18, y + 14, "Task Manager", rgb(240, 244, 250));
 
@@ -11844,9 +11866,11 @@ void registerKernelApps() {
         else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "DiskManager")) factory = DiskManagerApp::create;
 
         if (!factory) continue;
-        app::AppManager::registerApp(metadata.kernelAppName, metadata.kernelIconColor, factory);
+        app::AppManager::registerApp(metadata.kernelAppName, metadata.appId,
+                                    metadata.kernelIconColor, factory);
         if (metadata.kernelLegacyAlias && metadata.kernelLegacyAlias[0]) {
-            app::AppManager::registerApp(metadata.kernelLegacyAlias, metadata.kernelIconColor, factory);
+            app::AppManager::registerApp(metadata.kernelLegacyAlias, metadata.appId,
+                                        metadata.kernelIconColor, factory);
         }
     }
 }

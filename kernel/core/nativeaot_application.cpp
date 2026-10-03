@@ -10,6 +10,7 @@
 #include "include/kernel/pit.h"
 #include "include/kernel/process.h"
 #include "include/kernel/ps2keyboard.h"
+#include "include/kernel/shell.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/vfs.h"
 #include "built_in_app_metadata.h"
@@ -61,13 +62,14 @@ constexpr uint32_t kVmemCommit = 0x1000u;
 constexpr uint32_t kVmemRelease = 0x8000u;
 constexpr int32_t kInvalidApplicationIdReturn = -4;
 constexpr const char* kProductionCompositeImage = gxos::apps::kManagedNativeAotCompositeImagePath;
-// C113 and C114 append optional file-service callbacks to the C112 v1 prefix.
-// The version remains v1 because prefix clients are still valid consumers;
-// table size and capability bits gate each appended field.
-constexpr uint32_t kManagedHostAbiVersion = 1u;
-constexpr uint32_t kManagedHostAbiV1Size = 72u;
+// ABI v2 appends one read-only application snapshot callback after the
+// complete 104-byte ABI-v1 table. The first 104 bytes remain unchanged.
+constexpr uint32_t kManagedHostAbiVersion = 2u;
+constexpr uint32_t kManagedHostAbiV1CoreSize = 72u;
+constexpr uint32_t kManagedHostAbiV1Size = 104u;
 constexpr uint32_t kManagedHostC113Size = 88u;
-constexpr uint32_t kManagedHostTableSize = 104u;
+constexpr uint32_t kManagedHostTableSize = 112u;
+constexpr uint32_t kManagedApplicationSnapshotOffset = 104u;
 constexpr uint64_t kManagedCapabilitySurface = 1ull << 0;
 constexpr uint64_t kManagedCapabilityText = 1ull << 1;
 constexpr uint64_t kManagedCapabilityPrimitive = 1ull << 2;
@@ -79,13 +81,14 @@ constexpr uint64_t kManagedCapabilityFileRead = 1ull << 7;
 constexpr uint64_t kManagedCapabilityFileWrite = 1ull << 8;
 constexpr uint64_t kManagedCapabilityDirectoryList = 1ull << 9;
 constexpr uint64_t kManagedCapabilityFileStat = 1ull << 10;
+constexpr uint64_t kManagedCapabilityApplicationSnapshot = 1ull << 11;
 constexpr uint64_t kManagedCapabilities =
     kManagedCapabilitySurface | kManagedCapabilityText |
     kManagedCapabilityPrimitive | kManagedCapabilityAction |
     kManagedCapabilityClose | kManagedCapabilityLaunchContext |
     kManagedCapabilityLog | kManagedCapabilityFileRead |
     kManagedCapabilityFileWrite | kManagedCapabilityDirectoryList |
-    kManagedCapabilityFileStat;
+    kManagedCapabilityFileStat | kManagedCapabilityApplicationSnapshot;
 constexpr uint32_t kManagedFilePathMaxBytes = 96u;
 constexpr uint32_t kManagedFileMaxBytes = 16u * 1024u;
 constexpr uint32_t kManagedDirectoryMaxEntries = 64u;
@@ -275,6 +278,12 @@ struct NativeHostCallTable {
     int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *fileStat)(
         NativeGxAppContext* context, uint8_t* path, uint32_t pathLength,
         uint8_t* outInfo, uint32_t infoSize);
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *applicationSnapshot)(
+        NativeGxAppContext* context,
+        app::ApplicationSnapshotRecord* records,
+        uint32_t capacity,
+        uint32_t* outTotalCount,
+        uint32_t* outCopiedCount);
 };
 
 struct ManagedDirectoryEntryAbi {
@@ -326,9 +335,33 @@ struct ResidentApplication {
     uint32_t sequence;
 };
 
-static_assert(sizeof(NativeHostCallTable) == 104, "C114 host callback ABI drift");
-static_assert(kManagedHostTableSize >= kManagedHostAbiV1Size,
-              "C113 host table must retain the C112 v1 prefix");
+static_assert(sizeof(NativeHostCallTable) == 112, "C160 host callback ABI drift");
+static_assert(offsetof(NativeHostCallTable, log) == 8,
+              "ABI-v1 log callback offset drift");
+static_assert(offsetof(NativeHostCallTable, requestWindow) == 16,
+              "ABI-v1 request-window callback offset drift");
+static_assert(offsetof(NativeHostCallTable, drawText) == 24,
+              "ABI-v1 draw-text callback offset drift");
+static_assert(offsetof(NativeHostCallTable, drawRect) == 32,
+              "ABI-v1 draw-rect callback offset drift");
+static_assert(offsetof(NativeHostCallTable, addButton) == 40,
+              "ABI-v1 add-button callback offset drift");
+static_assert(offsetof(NativeHostCallTable, closeWindow) == 48,
+              "ABI-v1 close-window callback offset drift");
+static_assert(offsetof(NativeHostCallTable, capabilities) == 56,
+              "ABI-v1 capability field offset drift");
+static_assert(offsetof(NativeHostCallTable, addActionButton) == 64,
+              "ABI-v1 action callback offset drift");
+static_assert(offsetof(NativeHostCallTable, fileStat) == 96,
+              "C114 legacy callback offset drift");
+static_assert(offsetof(NativeHostCallTable, applicationSnapshot) ==
+                  kManagedApplicationSnapshotOffset,
+              "C160 callback must append at ABI-v1 table end");
+static_assert(kManagedHostTableSize ==
+                  kManagedApplicationSnapshotOffset + sizeof(void*),
+              "C160 ABI-v2 table size drift");
+static_assert(kManagedHostAbiV1Size == kManagedApplicationSnapshotOffset,
+              "C160 ABI-v1 prefix size drift");
 static_assert(offsetof(NativeHostCallTable, fileReadAll) == 72,
               "C113 file-read callback offset drift");
 static_assert(offsetof(NativeHostCallTable, fileWriteAll) == 80,
@@ -424,6 +457,9 @@ bool g_c152FailNextNotesWrite = false;
 #endif
 uint32_t g_managedSurfaceGeneration = 0u;
 uint32_t g_managedApplicationLaunchGeneration = 0u;
+uint64_t g_managedActiveSnapshotInstanceId = 0u;
+uint64_t g_nextManagedSnapshotInstanceId = 1u;
+bool g_managedSnapshotInstanceIdsExhausted = false;
 #if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
 bool g_c150ContractTestsRun = false;
 #endif
@@ -439,6 +475,18 @@ bool copyManagedIdentity(const char* source, char* destination, uint32_t capacit
     if (source[length] != '\0') return false;
     for (uint32_t index = 0u; index <= length; ++index)
         destination[index] = source[index];
+    return true;
+}
+
+bool allocateManagedSnapshotInstanceId(uint64_t* outInstanceId) {
+    if (!outInstanceId || g_managedSnapshotInstanceIdsExhausted ||
+        g_nextManagedSnapshotInstanceId == 0u) return false;
+    *outInstanceId = g_nextManagedSnapshotInstanceId;
+    if (g_nextManagedSnapshotInstanceId == UINT64_MAX) {
+        g_managedSnapshotInstanceIdsExhausted = true;
+    } else {
+        ++g_nextManagedSnapshotInstanceId;
+    }
     return true;
 }
 
@@ -524,6 +572,7 @@ bool runC150ReturnTargetTests() {
 
 void clearManagedActiveApplicationId() {
     g_managedActiveApplicationId[0] = '\0';
+    g_managedActiveSnapshotInstanceId = 0u;
 }
 #endif
 bool g_c116InputDispatchActive = false;
@@ -2105,6 +2154,396 @@ bool activeSurfaceContext(NativeGxAppContext* context) {
         context->host->size >= sizeof(NativeHostCallTable);
 }
 
+constexpr int32_t kSnapshotResultSuccess = 0;
+constexpr int32_t kSnapshotResultTruncated = 1;
+constexpr int32_t kSnapshotResultInvalidArgument = -2;
+constexpr int32_t kSnapshotResultCapabilityUnavailable = -3;
+constexpr int32_t kSnapshotResultInvalidContext = -4;
+constexpr int32_t kSnapshotResultNotSupported = -5;
+constexpr int32_t kSnapshotResultInvalidState = -6;
+
+#if defined(GXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF)
+bool g_c160NativeSnapshotTestsRun = false;
+bool runC160NativeSnapshotFocusedTests(NativeGxAppContext* context);
+#endif
+
+bool snapshotRangesOverlap(uintptr_t left, uintptr_t leftSize,
+                          uintptr_t right, uintptr_t rightSize) {
+    if (leftSize == 0u || rightSize == 0u) return false;
+    if (left > UINTPTR_MAX - leftSize || right > UINTPTR_MAX - rightSize) {
+        return true;
+    }
+    return left < right + rightSize && right < left + leftSize;
+}
+
+bool copySnapshotText(const char* source, uint8_t* destination,
+                      uint32_t capacity, uint32_t* outLength) {
+    if (!source || !destination || capacity == 0u || !outLength) return false;
+    uint32_t length = 0u;
+    while (length < capacity && source[length] != '\0') {
+        const uint8_t value = static_cast<uint8_t>(source[length]);
+        // App names and canonical app IDs in the current AppManager/catalog
+        // use printable ASCII, the bounded UTF-8 subset used by the host ABI.
+        if (value < 0x20u || value > 0x7Eu) return false;
+        ++length;
+    }
+    if (length >= capacity) return false;
+    for (uint32_t index = 0u; index < length; ++index) {
+        destination[index] = static_cast<uint8_t>(source[index]);
+    }
+    destination[length] = 0u;
+    *outLength = length;
+    return true;
+}
+
+bool fillSnapshotRecord(app::ApplicationSnapshotRecord* record,
+                        app::ApplicationSnapshotSource source,
+                        uint64_t instanceId,
+                        app::ApplicationSnapshotState state,
+                        bool active,
+                        const char* displayName,
+                        const char* applicationId) {
+    if (!record || instanceId == 0u || !displayName) return false;
+    *record = app::ApplicationSnapshotRecord{};
+    record->recordVersion = app::kApplicationSnapshotRecordVersion;
+    record->source = static_cast<uint32_t>(source);
+    record->instanceId = instanceId;
+    record->state = static_cast<uint32_t>(state);
+    record->flags = active ? app::ApplicationSnapshotFlagActive
+                           : app::ApplicationSnapshotFlagNone;
+    if (!copySnapshotText(displayName, record->displayName,
+            sizeof(record->displayName), &record->displayNameLength)) return false;
+    if (applicationId && applicationId[0] != '\0' &&
+        !copySnapshotText(applicationId, record->applicationId,
+            sizeof(record->applicationId), &record->applicationIdLength)) {
+        return false;
+    }
+    return true;
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedApplicationSnapshot(
+    NativeGxAppContext* context,
+    app::ApplicationSnapshotRecord* records,
+    uint32_t capacity,
+    uint32_t* outTotalCount,
+    uint32_t* outCopiedCount) {
+    if (!activeSurfaceContext(context)) return kSnapshotResultInvalidContext;
+    if (context->host->version < 2u ||
+        context->host->size < kManagedApplicationSnapshotOffset + sizeof(void*)) {
+        return kSnapshotResultNotSupported;
+    }
+    if ((context->host->capabilities &
+            kManagedCapabilityApplicationSnapshot) == 0u) {
+        return kSnapshotResultCapabilityUnavailable;
+    }
+    if (!outTotalCount || !outCopiedCount || outTotalCount == outCopiedCount ||
+        (reinterpret_cast<uintptr_t>(outTotalCount) & (alignof(uint32_t) - 1u)) != 0u ||
+        (reinterpret_cast<uintptr_t>(outCopiedCount) & (alignof(uint32_t) - 1u)) != 0u ||
+        capacity > app::kApplicationSnapshotCapacity ||
+        (capacity != 0u && (!records ||
+            (reinterpret_cast<uintptr_t>(records) &
+                (alignof(app::ApplicationSnapshotRecord) - 1u)) != 0u))) {
+        return kSnapshotResultInvalidArgument;
+    }
+
+    const uintptr_t recordsAddress = reinterpret_cast<uintptr_t>(records);
+    const uintptr_t recordBytes = static_cast<uintptr_t>(capacity) *
+        sizeof(app::ApplicationSnapshotRecord);
+    const uintptr_t totalAddress = reinterpret_cast<uintptr_t>(outTotalCount);
+    const uintptr_t copiedAddress = reinterpret_cast<uintptr_t>(outCopiedCount);
+    const uintptr_t contextAddress = reinterpret_cast<uintptr_t>(context);
+    const uintptr_t hostAddress = reinterpret_cast<uintptr_t>(context->host);
+    const uintptr_t launchContextAddress = reinterpret_cast<uintptr_t>(
+        context->launchContext);
+    if (snapshotRangesOverlap(totalAddress, sizeof(uint32_t),
+            copiedAddress, sizeof(uint32_t)) ||
+        snapshotRangesOverlap(recordsAddress, recordBytes,
+            totalAddress, sizeof(uint32_t)) ||
+        snapshotRangesOverlap(recordsAddress, recordBytes,
+            copiedAddress, sizeof(uint32_t)) ||
+        snapshotRangesOverlap(recordsAddress, recordBytes,
+            contextAddress, sizeof(*context)) ||
+        snapshotRangesOverlap(recordsAddress, recordBytes,
+            hostAddress, sizeof(*context->host)) ||
+        snapshotRangesOverlap(totalAddress, sizeof(uint32_t),
+            contextAddress, sizeof(*context)) ||
+        snapshotRangesOverlap(copiedAddress, sizeof(uint32_t),
+            contextAddress, sizeof(*context)) ||
+        snapshotRangesOverlap(totalAddress, sizeof(uint32_t),
+            hostAddress, sizeof(*context->host)) ||
+        snapshotRangesOverlap(copiedAddress, sizeof(uint32_t),
+            hostAddress, sizeof(*context->host)) ||
+        snapshotRangesOverlap(recordsAddress, recordBytes,
+            launchContextAddress, context->launchContextLength) ||
+        snapshotRangesOverlap(totalAddress, sizeof(uint32_t),
+            launchContextAddress, context->launchContextLength) ||
+        snapshotRangesOverlap(copiedAddress, sizeof(uint32_t),
+            launchContextAddress, context->launchContextLength)) {
+        return kSnapshotResultInvalidArgument;
+    }
+
+#if defined(GXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF)
+    if (!g_c160NativeSnapshotTestsRun) {
+        g_c160NativeSnapshotTestsRun = true;
+        if (!runC160NativeSnapshotFocusedTests(context)) {
+            return kSnapshotResultInvalidState;
+        }
+    }
+#endif
+
+    app::ApplicationSnapshotRecord staged[app::kApplicationSnapshotCapacity] = {};
+    uint32_t totalCount = 0u;
+    const int appCount = app::AppManager::getRunningAppCount();
+    if (appCount < 0 ||
+        appCount > static_cast<int>(app::kApplicationSnapshotAppManagerCapacity)) {
+        return kSnapshotResultInvalidState;
+    }
+    app::KernelWindow* focused = compositor::KernelCompositor::getFocusedWindow();
+    const bool shellActive = desktop::is_shell_surface_active();
+    for (int index = 0; index < appCount; ++index) {
+        app::KernelApp* instance = app::AppManager::getRunningApp(index);
+        if (!instance || instance->getInstanceId() == 0u) {
+            return kSnapshotResultInvalidState;
+        }
+        const bool active = !shellActive && focused != nullptr &&
+            focused->owner == instance;
+        if (!fillSnapshotRecord(&staged[totalCount],
+                app::ApplicationSnapshotSource::AppManagerInstance,
+                instance->getInstanceId(),
+                static_cast<app::ApplicationSnapshotState>(instance->getState()),
+                active, instance->getName(), instance->getApplicationId())) {
+            return kSnapshotResultInvalidState;
+        }
+        ++totalCount;
+    }
+
+    const uint64_t shellGeneration = shell::get_instance_generation();
+    if (shellGeneration != 0u) {
+        if (totalCount >= app::kApplicationSnapshotCapacity ||
+            !fillSnapshotRecord(&staged[totalCount],
+                app::ApplicationSnapshotSource::ShellSurface,
+                shellGeneration,
+                app::ApplicationSnapshotState::Running,
+                desktop::is_shell_surface_active(),
+                "Terminal", nullptr)) {
+            return kSnapshotResultInvalidState;
+        }
+        ++totalCount;
+    }
+
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+    if (g_managedActiveApplicationId[0] != '\0') {
+        const gxos::apps::BuiltInAppMetadata* metadata =
+            gxos::apps::FindManagedNativeAotAppByIdentity(
+                g_managedActiveApplicationId);
+        if (!metadata || g_managedActiveSnapshotInstanceId == 0u ||
+            totalCount >= app::kApplicationSnapshotCapacity) {
+            return kSnapshotResultInvalidState;
+        }
+        app::KernelWindow* managedWindow = g_managedSurface
+            ? g_managedSurface->getWindow() : nullptr;
+        const bool active = !shellActive && managedWindow != nullptr &&
+            focused == managedWindow && managedWindow->owner == g_managedSurface;
+        if (!fillSnapshotRecord(&staged[totalCount],
+                app::ApplicationSnapshotSource::ManagedLogicalApplication,
+                g_managedActiveSnapshotInstanceId,
+                app::ApplicationSnapshotState::Running,
+                active, metadata->displayName, metadata->appId)) {
+            return kSnapshotResultInvalidState;
+        }
+        ++totalCount;
+    }
+#endif
+
+    if (totalCount > app::kApplicationSnapshotCapacity) {
+        return kSnapshotResultInvalidState;
+    }
+    const uint32_t copiedCount = capacity < totalCount ? capacity : totalCount;
+    *outTotalCount = totalCount;
+    *outCopiedCount = copiedCount;
+    for (uint32_t index = 0u; index < copiedCount; ++index) {
+        records[index] = staged[index];
+    }
+    return copiedCount < totalCount
+        ? kSnapshotResultTruncated : kSnapshotResultSuccess;
+}
+
+#if defined(GXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF)
+bool recordsEqual(const app::ApplicationSnapshotRecord* left,
+                  const app::ApplicationSnapshotRecord* right,
+                  uint32_t count) {
+    const uint8_t* leftBytes = reinterpret_cast<const uint8_t*>(left);
+    const uint8_t* rightBytes = reinterpret_cast<const uint8_t*>(right);
+    const size_t bytes = static_cast<size_t>(count) * sizeof(*left);
+    for (size_t index = 0u; index < bytes; ++index) {
+        if (leftBytes[index] != rightBytes[index]) return false;
+    }
+    return true;
+}
+
+bool runC160NativeSnapshotFocusedTests(NativeGxAppContext* context) {
+    int cases = 0;
+    bool passed = true;
+    uint32_t failedCasesLow = 0u;
+    uint32_t failedCasesHigh = 0u;
+    auto check = [&cases, &passed, &failedCasesLow, &failedCasesHigh](bool result) {
+        ++cases;
+        if (!result) {
+            const int bit = cases - 1;
+            if (bit < 32) failedCasesLow |= 1u << bit;
+            else if (bit < 64) failedCasesHigh |= 1u << (bit - 32);
+        }
+        passed = passed && result;
+    };
+    alignas(8) app::ApplicationSnapshotRecord first[
+        app::kApplicationSnapshotCapacity] = {};
+    alignas(8) app::ApplicationSnapshotRecord repeated[
+        app::kApplicationSnapshotCapacity] = {};
+    alignas(8) app::ApplicationSnapshotRecord one[
+        app::kApplicationSnapshotCapacity] = {};
+    uint32_t beforeTotal = 0xFFFFFFFFu;
+    uint32_t beforeCopied = 0xFFFFFFFFu;
+    const int beforeApps = app::AppManager::getRunningAppCount();
+    const int32_t fullResult = managedApplicationSnapshot(context, first,
+        app::kApplicationSnapshotCapacity, &beforeTotal, &beforeCopied);
+    check(fullResult == kSnapshotResultSuccess && beforeTotal > 0u &&
+        beforeTotal == beforeCopied);
+    check(beforeTotal <= app::kApplicationSnapshotCapacity);
+    check(managedApplicationSnapshot(context, repeated,
+        app::kApplicationSnapshotCapacity, &beforeTotal, &beforeCopied) ==
+            kSnapshotResultSuccess);
+    check(recordsEqual(first, repeated, beforeCopied));
+    check(first[beforeCopied - 1u].recordVersion ==
+        app::kApplicationSnapshotRecordVersion);
+
+    uint32_t probedTotal = 0u;
+    uint32_t probedCopied = 99u;
+    const int32_t zeroProbe = managedApplicationSnapshot(context, nullptr, 0u,
+        &probedTotal, &probedCopied);
+    check(zeroProbe == (probedTotal == 0u
+        ? kSnapshotResultSuccess : kSnapshotResultTruncated));
+    check(probedTotal == beforeTotal && probedCopied == 0u);
+    uint32_t oneTotal = 0u;
+    uint32_t oneCopied = 0u;
+    const int32_t oneResult = managedApplicationSnapshot(context, one, 1u,
+        &oneTotal, &oneCopied);
+    check(oneTotal == beforeTotal && oneCopied == 1u);
+    check(oneResult == (beforeTotal > 1u
+        ? kSnapshotResultTruncated : kSnapshotResultSuccess));
+    check(one[0].instanceId == first[0].instanceId &&
+        one[0].source == first[0].source);
+    check(managedApplicationSnapshot(context, first,
+        app::kApplicationSnapshotCapacity + 1u, &oneTotal, &oneCopied) ==
+            kSnapshotResultInvalidArgument);
+    check(managedApplicationSnapshot(context, nullptr, 1u,
+        &oneTotal, &oneCopied) == kSnapshotResultInvalidArgument);
+    check(managedApplicationSnapshot(context, first, 1u,
+        nullptr, &oneCopied) == kSnapshotResultInvalidArgument);
+    check(managedApplicationSnapshot(context, first, 1u,
+        &oneTotal, nullptr) == kSnapshotResultInvalidArgument);
+    check(managedApplicationSnapshot(context, first, 1u,
+        &oneTotal, &oneTotal) == kSnapshotResultInvalidArgument);
+
+    alignas(8) uint8_t misalignedRecords[sizeof(app::ApplicationSnapshotRecord) + 8u] = {};
+    alignas(8) uint8_t misalignedTotal[sizeof(uint32_t) + 1u] = {};
+    alignas(8) uint8_t misalignedCopied[sizeof(uint32_t) + 1u] = {};
+    check(managedApplicationSnapshot(context,
+        reinterpret_cast<app::ApplicationSnapshotRecord*>(misalignedRecords + 1u),
+        1u, &oneTotal, &oneCopied) == kSnapshotResultInvalidArgument);
+    check(managedApplicationSnapshot(context, one,
+        1u, reinterpret_cast<uint32_t*>(misalignedTotal + 1u), &oneCopied) ==
+            kSnapshotResultInvalidArgument);
+    check(managedApplicationSnapshot(context, one,
+        1u, &oneTotal, reinterpret_cast<uint32_t*>(misalignedCopied + 1u)) ==
+            kSnapshotResultInvalidArgument);
+    check(managedApplicationSnapshot(context, first, 1u,
+        reinterpret_cast<uint32_t*>(first), &oneCopied) ==
+            kSnapshotResultInvalidArgument);
+    check(managedApplicationSnapshot(context, first, 1u,
+        &oneTotal, reinterpret_cast<uint32_t*>(
+            reinterpret_cast<uint8_t*>(first) + sizeof(uint32_t))) ==
+            kSnapshotResultInvalidArgument);
+    check(managedApplicationSnapshot(context,
+        reinterpret_cast<app::ApplicationSnapshotRecord*>(context->host),
+        1u, &oneTotal, &oneCopied) == kSnapshotResultInvalidArgument);
+    check(managedApplicationSnapshot(context, first, 1u,
+        reinterpret_cast<uint32_t*>(context->host), &oneCopied) ==
+            kSnapshotResultInvalidArgument);
+    check(managedApplicationSnapshot(context,
+        reinterpret_cast<app::ApplicationSnapshotRecord*>(context),
+        1u, &oneTotal, &oneCopied) == kSnapshotResultInvalidArgument);
+
+    bool identityValid = true;
+    bool appIdBoundsValid = true;
+    bool nameBoundsValid = true;
+    bool fieldsValid = true;
+    bool appManagerSeen = false;
+    bool managedSeen = false;
+    bool shellSeen = false;
+    uint32_t activeCount = 0u;
+    const uint64_t beforeShellGeneration = shell::get_instance_generation();
+    for (uint32_t index = 0u; index < beforeCopied; ++index) {
+        const app::ApplicationSnapshotRecord& record = first[index];
+        if (record.instanceId == 0u) identityValid = false;
+        if (record.applicationIdLength >= sizeof(record.applicationId) ||
+            record.applicationId[record.applicationIdLength] != 0u) {
+            appIdBoundsValid = false;
+        }
+        if (record.displayNameLength >= sizeof(record.displayName) ||
+            record.displayName[record.displayNameLength] != 0u) {
+            nameBoundsValid = false;
+        }
+        if (record.recordVersion != app::kApplicationSnapshotRecordVersion ||
+            record.reserved0 != 0u || record.reserved1 != 0u ||
+            record.state > static_cast<uint32_t>(
+                app::ApplicationSnapshotState::Terminated) ||
+            (record.flags & ~app::ApplicationSnapshotFlagActive) != 0u) {
+            fieldsValid = false;
+        }
+        if (record.flags & app::ApplicationSnapshotFlagActive) ++activeCount;
+        if (record.source == static_cast<uint32_t>(
+                app::ApplicationSnapshotSource::AppManagerInstance)) appManagerSeen = true;
+        if (record.source == static_cast<uint32_t>(
+                app::ApplicationSnapshotSource::ManagedLogicalApplication)) managedSeen = true;
+        if (record.source == static_cast<uint32_t>(
+                app::ApplicationSnapshotSource::ShellSurface)) shellSeen = true;
+    }
+    check(identityValid);
+    check(appIdBoundsValid);
+    check(nameBoundsValid);
+    check(fieldsValid);
+    check(managedSeen);
+    check(activeCount == 1u);
+    check(app::AppManager::getRunningAppCount() == beforeApps);
+    check(shell::get_instance_generation() == beforeShellGeneration);
+    check(appManagerSeen);
+    check(shellSeen);
+
+    for (uint32_t call = 0u; call < 1000u; ++call) {
+        uint32_t stressTotal = 0u;
+        uint32_t stressCopied = 0u;
+        if (managedApplicationSnapshot(context, repeated,
+                app::kApplicationSnapshotCapacity,
+                &stressTotal, &stressCopied) != kSnapshotResultSuccess ||
+            stressTotal != beforeTotal || stressCopied != beforeCopied ||
+            !recordsEqual(first, repeated, beforeCopied)) {
+            passed = false;
+            break;
+        }
+    }
+    check(passed);
+    serial::puts("[C160-NATIVE-SNAPSHOT-TESTS] cases=");
+    serial::put_hex32(static_cast<uint32_t>(cases));
+    serial::puts(" stress=1000 failed=");
+    serial::put_hex32(failedCasesLow);
+    serial::puts(":");
+    serial::put_hex32(failedCasesHigh);
+    serial::puts(" real-records=PASS identity=PASS bounded=PASS read-only=PASS result=");
+    serial::puts(passed && cases >= 20 ? "PASS\n" : "FAIL\n");
+    return passed && cases >= 20;
+}
+#endif
+
 bool copyManagedFilePath(const uint8_t* path, uint32_t pathLength,
                          char* output, uint32_t outputSize) {
     if (!path || !output || pathLength == 0u ||
@@ -3073,7 +3512,9 @@ int32_t invokeManagedWithHostMetadata(
         (capabilities & kManagedCapabilityDirectoryList) != 0u
             ? managedDirectoryList : nullptr,
         (capabilities & kManagedCapabilityFileStat) != 0u
-            ? managedFileStat : nullptr };
+            ? managedFileStat : nullptr,
+        (capabilities & kManagedCapabilityApplicationSnapshot) != 0u
+            ? managedApplicationSnapshot : nullptr };
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
         reinterpret_cast<void*>(static_cast<uintptr_t>(selector)),
@@ -3274,7 +3715,7 @@ LaunchStatus launchResident(const char* path, uint32_t logicalAppId,
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
         managedCloseWindow, kManagedCapabilities, managedAddActionButton,
         managedFileReadAll, managedFileWriteAll, managedDirectoryList,
-        managedFileStat };
+        managedFileStat, managedApplicationSnapshot };
     serial::puts("[C112-HOST] version=");
     serial::put_hex32(kManagedHostAbiVersion);
     serial::puts(" capabilities=");
@@ -3495,7 +3936,7 @@ LaunchStatus launchInternal(const char* path, uint32_t logicalAppId,
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
         managedCloseWindow, kManagedCapabilities, managedAddActionButton,
         managedFileReadAll, managedFileWriteAll, managedDirectoryList,
-        managedFileStat };
+        managedFileStat, managedApplicationSnapshot };
     serial::puts("[C112-HOST] version=");
     serial::put_hex32(kManagedHostAbiVersion);
     serial::puts(" capabilities=");
@@ -3646,8 +4087,14 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
     char previousIdentity[kManagedApplicationIdentityCapacity] = {};
     (void)copyManagedIdentity(g_managedActiveApplicationId, previousIdentity,
         sizeof(previousIdentity));
+    const uint64_t previousSnapshotInstanceId =
+        g_managedActiveSnapshotInstanceId;
     const uint64_t previousWindow = g_managedSurface
         ? g_managedSurface->windowId() : 0u;
+    uint64_t nextSnapshotInstanceId = 0u;
+    if (!allocateManagedSnapshotInstanceId(&nextSnapshotInstanceId)) {
+        return LaunchStatus::ManagedFailed;
+    }
     if (!g_managedLaunchingSettingsFromNotes && !g_managedReturnLaunchActive)
         g_managedReturnTarget.clear();
     if (!copyManagedIdentity(metadata->appId, g_managedActiveApplicationId,
@@ -3655,6 +4102,7 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
         clearManagedActiveApplicationId();
         return LaunchStatus::InvalidApplicationId;
     }
+    g_managedActiveSnapshotInstanceId = nextSnapshotInstanceId;
 #if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
     const uint32_t launchGeneration = ++g_managedApplicationLaunchGeneration;
     serial::puts("[C150-APP-LAUNCH] id=");
@@ -3689,6 +4137,7 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
         if (previousWindow != 0u && currentWindow == previousWindow) {
             (void)copyManagedIdentity(previousIdentity,
                 g_managedActiveApplicationId, sizeof(g_managedActiveApplicationId));
+            g_managedActiveSnapshotInstanceId = previousSnapshotInstanceId;
         } else {
             clearManagedActiveApplicationId();
         }
@@ -3797,7 +4246,7 @@ LaunchStatus probeFileServiceNegativeTests(LaunchReport* report) {
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
         managedCloseWindow, kManagedCapabilities, managedAddActionButton,
         managedFileReadAll, managedFileWriteAll, managedDirectoryList,
-        managedFileStat };
+        managedFileStat, managedApplicationSnapshot };
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
         reinterpret_cast<void*>(static_cast<uintptr_t>(4u)), nullptr, 0u, 0u};
@@ -3901,7 +4350,7 @@ LaunchStatus probeDirectoryServiceNegativeTests(LaunchReport* report) {
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
         managedCloseWindow, kManagedCapabilities, managedAddActionButton,
         managedFileReadAll, managedFileWriteAll, managedDirectoryList,
-        managedFileStat };
+        managedFileStat, managedApplicationSnapshot };
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
         reinterpret_cast<void*>(static_cast<uintptr_t>(4u)), nullptr, 0u, 0u};
@@ -3982,7 +4431,7 @@ LaunchStatus probeDirectoryCapacityTests(LaunchReport* report) {
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
         managedCloseWindow, kManagedCapabilities, managedAddActionButton,
         managedFileReadAll, managedFileWriteAll, managedDirectoryList,
-        managedFileStat };
+        managedFileStat, managedApplicationSnapshot };
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
         reinterpret_cast<void*>(static_cast<uintptr_t>(4u)), nullptr, 0u, 0u};

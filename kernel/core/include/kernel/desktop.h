@@ -170,6 +170,9 @@ bool is_bare_metal_mode();
 // Get count of running GUI apps (excludes shell)
 int get_running_app_count();
 
+// True only while the terminal shell surface is visible and foregrounded.
+bool is_shell_surface_active();
+
 // ================================================================
 // Testing & Diagnostics
 // ================================================================

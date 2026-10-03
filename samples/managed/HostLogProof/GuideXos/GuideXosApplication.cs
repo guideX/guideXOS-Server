@@ -238,6 +238,28 @@ public static unsafe class GuideXosApplicationRegistry
             : host.IsAction
                 ? application.HandleAction(host, host.LaunchContext.ActionId)
                 : application.Launch(host);
+#if HOSTLOGPROOF_C160_APPLICATION_SNAPSHOT_PROOF
+        if (result == GuideXosResult.Success && isNewLaunch &&
+            !host.IsCapabilityProbe && !host.IsAbiProbe)
+        {
+            if (!GuideXosApplicationSnapshotC160Tests.Run(host, selector) ||
+                !GuideXosApplicationSnapshotC160Tests.VerifyProductionLaunch(
+                    host, selector, out _, out _))
+            {
+                host.TryLog("C160-SNAPSHOT result=FAIL"u8);
+                return GxAbi.ErrorInvalidArgument;
+            }
+        }
+        else if (result == GuideXosResult.Success &&
+            (host.LaunchContext.IsInput || host.IsAction) &&
+            !host.IsCapabilityProbe && !host.IsAbiProbe &&
+            !GuideXosApplicationSnapshotC160Tests.VerifyProductionDispatch(
+                host, selector))
+        {
+            host.TryLog("C160-SNAPSHOT result=FAIL"u8);
+            return GxAbi.ErrorInvalidArgument;
+        }
+#endif
 #if HOSTLOGPROOF_C158_MANAGED_CALCULATOR
         if (selector == 6u && host.IsAction &&
             host.LaunchContext.ActionId ==

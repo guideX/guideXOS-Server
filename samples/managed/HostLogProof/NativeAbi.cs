@@ -1,14 +1,16 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace HostLogProof;
 
 public static class GxAbi
 {
     public const uint ApiVersion = 0u;
-    // C113 is an append-only extension of the C112 v1 table.  Keeping the
-    // version stable lets older C112 clients consume the original prefix.
-    public const uint HostAbiVersion = 1u;
+    // ABI v2 appends the read-only application-snapshot callback after the
+    // complete 104-byte v1 table. ABI-v1 consumers still use their prefix.
+    public const uint HostAbiVersion = 2u;
+    public const uint HostAbiV1Version = 1u;
     public const uint CompositeAppInvalid = 0u;
     public const uint CompositeAppA = 1u;
     public const uint CompositeAppB = 2u;
@@ -18,9 +20,19 @@ public static class GxAbi
     public const uint HostCallTablePrefixSize = 16u;
     public const uint HostCallTableV1Size = 72u;
     public const uint C113HostCallTableSize = 88u;
-    public const uint HostCallTableSize = 104u;
+    public const uint HostCallTableV1FullSize = 104u;
+    public const uint HostCallTableSize = 112u;
+    public const uint ApplicationSnapshotOffset = 104u;
+    public const uint ApplicationSnapshotRecordVersion = 1u;
+    public const uint ApplicationSnapshotRecordSize = 168u;
+    public const uint ApplicationSnapshotCapacity = 18u;
+    public const uint ApplicationSnapshotDisplayNameBytes = 32u;
+    public const uint ApplicationSnapshotApplicationIdBytes = 96u;
+    public const uint ApplicationSnapshotBufferBytes =
+        ApplicationSnapshotRecordSize * ApplicationSnapshotCapacity;
     public const uint DirectoryListOffset = 88u;
     public const uint FileStatOffset = 96u;
+    public const ulong CapabilityApplicationSnapshot = 1ul << 11;
     public const uint FilePathMaxBytes = 96u;
     public const uint MaxFileBytes = 16u * 1024u;
     public const uint MaxDirectoryEntries = 64u;
@@ -73,6 +85,7 @@ public enum GuideXosCapability : ulong
     FileWrite = 1ul << 8,
     DirectoryList = 1ul << 9,
     FileStat = 1ul << 10,
+    ApplicationSnapshot = 1ul << 11,
 }
 
 public enum GuideXosResult
@@ -117,6 +130,143 @@ public unsafe struct NativeHostCallTable
     public delegate* unmanaged<NativeGxAppContext*, byte*, uint, byte*, uint, int> fileWriteAll;
     public delegate* unmanaged<NativeGxAppContext*, byte*, uint, byte*, uint, uint, uint*, uint*, int> directoryList;
     public delegate* unmanaged<NativeGxAppContext*, byte*, uint, byte*, uint, int> fileStat;
+    public delegate* unmanaged<NativeGxAppContext*, NativeApplicationSnapshotRecord*, uint, uint*, uint*, int> applicationSnapshot;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 8, Size = (int)GxAbi.ApplicationSnapshotRecordSize)]
+public unsafe struct NativeApplicationSnapshotRecord
+{
+    public uint recordVersion;
+    public uint source;
+    public ulong instanceId;
+    public uint state;
+    public uint flags;
+    public uint displayNameLength;
+    public uint applicationIdLength;
+    public uint reserved0;
+    public uint reserved1;
+    public fixed byte displayName[(int)GxAbi.ApplicationSnapshotDisplayNameBytes];
+    public fixed byte applicationId[(int)GxAbi.ApplicationSnapshotApplicationIdBytes];
+}
+
+public enum GuideXosApplicationSnapshotSource : uint
+{
+    AppManagerInstance = 1,
+    ShellSurface = 2,
+    ManagedLogicalApplication = 3,
+}
+
+public enum GuideXosApplicationSnapshotState : uint
+{
+    NotLoaded = 0,
+    Running = 1,
+    Suspended = 2,
+    Terminated = 3,
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 8)]
+public unsafe struct GuideXosApplicationSnapshotRecord
+{
+    public uint recordVersion;
+    public GuideXosApplicationSnapshotSource source;
+    public ulong instanceId;
+    public GuideXosApplicationSnapshotState state;
+    public uint flags;
+    public uint displayNameLength;
+    public uint applicationIdLength;
+    public uint reserved0;
+    public uint reserved1;
+    public fixed byte displayName[(int)GxAbi.ApplicationSnapshotDisplayNameBytes];
+    public fixed byte applicationId[(int)GxAbi.ApplicationSnapshotApplicationIdBytes];
+
+    public readonly GuideXosApplicationInstanceId Identity =>
+        new(source, instanceId);
+    public readonly bool IsActive => (flags & 1u) != 0u;
+
+    public readonly string GetDisplayName()
+    {
+        if (displayNameLength >= GxAbi.ApplicationSnapshotDisplayNameBytes)
+            return string.Empty;
+        fixed (byte* value = displayName)
+        {
+            return Encoding.ASCII.GetString(new ReadOnlySpan<byte>(value,
+                (int)displayNameLength));
+        }
+    }
+
+    public readonly string GetApplicationId()
+    {
+        if (applicationIdLength >= GxAbi.ApplicationSnapshotApplicationIdBytes)
+            return string.Empty;
+        fixed (byte* value = applicationId)
+        {
+            return Encoding.ASCII.GetString(new ReadOnlySpan<byte>(value,
+                (int)applicationIdLength));
+        }
+    }
+}
+
+public readonly struct GuideXosApplicationInstanceId : IEquatable<GuideXosApplicationInstanceId>
+{
+    public GuideXosApplicationInstanceId(
+        GuideXosApplicationSnapshotSource source, ulong value)
+    {
+        Source = source;
+        Value = value;
+    }
+
+    public GuideXosApplicationSnapshotSource Source { get; }
+    public ulong Value { get; }
+    public bool Equals(GuideXosApplicationInstanceId other) =>
+        Source == other.Source && Value == other.Value;
+    public override bool Equals(object obj) =>
+        obj is GuideXosApplicationInstanceId other && Equals(other);
+    public override int GetHashCode() => unchecked(
+        (int)(Value ^ (Value >> 32)) ^ (int)Source);
+    public static bool operator ==(GuideXosApplicationInstanceId left,
+        GuideXosApplicationInstanceId right) => left.Equals(right);
+    public static bool operator !=(GuideXosApplicationInstanceId left,
+        GuideXosApplicationInstanceId right) => !left.Equals(right);
+}
+
+public enum GuideXosApplicationSnapshotResult
+{
+    Success = 0,
+    NotSupported = 1,
+    CapabilityUnavailable = 2,
+    InvalidData = 3,
+    Truncated = 4,
+    NativeFailure = 5,
+    InvalidArgument = 6,
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 8)]
+public unsafe struct GuideXosApplicationSnapshot
+{
+    internal uint totalCount;
+    internal uint copiedCount;
+    internal int nativeResult;
+    internal uint reserved;
+    // Fixed ulong storage forces an 8-byte-aligned record array while keeping
+    // the exact 3024-byte native record capacity.
+    internal fixed ulong recordStorage[(int)(GxAbi.ApplicationSnapshotBufferBytes / sizeof(ulong))];
+
+    public readonly uint TotalCount => totalCount;
+    public readonly uint Count => copiedCount;
+    public readonly bool IsTruncated => nativeResult == 1;
+
+    public readonly bool TryGetRecord(uint index,
+        out GuideXosApplicationSnapshotRecord record)
+    {
+        record = default;
+        if (index >= copiedCount) return false;
+        fixed (ulong* storage = recordStorage)
+        {
+            record = *(GuideXosApplicationSnapshotRecord*)((byte*)storage +
+                (int)(index * GxAbi.ApplicationSnapshotRecordSize));
+        }
+        return true;
+    }
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]

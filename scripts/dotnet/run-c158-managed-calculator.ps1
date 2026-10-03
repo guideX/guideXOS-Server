@@ -3,14 +3,19 @@ param(
     [string]$EvidenceRoot = "",
     [string]$PythonExe = "",
     [int]$TimeoutSeconds = 900,
-    [switch]$ReuseBuiltProofKernel
+    [switch]$ReuseBuiltProofKernel,
+    [switch]$PhaseC160
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = Join-Path $RepoRoot "out\dotnet\c158-managed-calculator"
+    $EvidenceRoot = if ($PhaseC160) {
+        Join-Path $RepoRoot "out\dotnet\c160-application-snapshot"
+    } else {
+        Join-Path $RepoRoot "out\dotnet\c158-managed-calculator"
+    }
 }
 $EvidenceRoot = [System.IO.Path]::GetFullPath($EvidenceRoot)
 $allowedRoot = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "out\dotnet")).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
@@ -24,10 +29,12 @@ $espKernelPath = Join-Path $RepoRoot 'ESP\kernel.elf'
 $protectedRamdiskPath = Join-Path $RepoRoot 'ESP\ramdisk.img'
 $bootloaderPath = Join-Path $RepoRoot 'guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe'
 $buildRoot = Join-Path $EvidenceRoot 'build'
-$compositeRoot = Join-Path $buildRoot 'composite'
+$compositeRoot = Join-Path $buildRoot $(if ($PhaseC160) { 'composite-c160-proof' } else { 'composite' })
+$canonicalCompositeRoot = Join-Path $buildRoot 'composite-c160-production'
+$canonicalRamdisk = Join-Path $EvidenceRoot 'staging\ramdisk-c160-production.img'
 $runtimePackOutput = Join-Path $buildRoot 'runtime-pack'
 $stageRoot = Join-Path $EvidenceRoot 'staging\wallpaper-pack'
-$proofRamdisk = Join-Path $EvidenceRoot 'staging\ramdisk-c158.img'
+$proofRamdisk = Join-Path $EvidenceRoot $(if ($PhaseC160) { 'staging\ramdisk-c160-proof.img' } else { 'staging\ramdisk-c158.img' })
 $proofKernel = Join-Path $EvidenceRoot 'proof-kernel.elf'
 $proofBackup = Join-Path $EvidenceRoot 'canonical\kernel.elf'
 $espKernelBackup = Join-Path $EvidenceRoot 'canonical\ESP-kernel.elf'
@@ -42,6 +49,14 @@ $script:activeSerial = $null
 $script:activePort = 0
 $script:activeQmpLog = $null
 $script:cursor = $null
+$ordinaryKernelSource = $proofBackup
+$ordinaryRamdiskSource = $ramdiskBackup
+$ordinaryKernelHash = $null
+$ordinaryRamdiskHash = $null
+$postC160KernelHash = $null
+$postC160RamdiskHash = $null
+$canonicalCompositeElf = $null
+$canonicalCompositeHash = $null
 
 function Invoke-Checked([string]$File, [string[]]$Arguments) {
     & $File @Arguments
@@ -198,6 +213,12 @@ function Wait-Serial([string]$Path, [string]$Pattern, [int]$After = 0,
         if ($text -match '(?m)^\[C158-CALC-APP-REGISTRY\][^\r\n]*result=FAIL') {
             throw 'The Native Calculator preservation or managed registration check failed.'
         }
+        if ($text -match '(?m)^\[C160-NATIVE-SNAPSHOT-TESTS\][^\r\n]*result=FAIL') {
+            throw "C160 native snapshot proof failed: $($matches[0])"
+        }
+        if ($text -match '(?m)^\[C102-MANAGED-OUTPUT\] C160-(?:MANAGED-SNAPSHOT-TESTS|SNAPSHOT)[^\r\n]*result=FAIL') {
+            throw "C160 managed snapshot proof failed: $($matches[0])"
+        }
         $tail = if ($After -le $text.Length) { $text.Substring($After) } else { '' }
         $match = [regex]::Match($tail, "(?m)$Pattern")
         if ($match.Success) { return [pscustomobject]@{ Text = $text; Match = $match; Index = $text.Length } }
@@ -290,6 +311,12 @@ function Switch-CalculatorToNotes([int]$ScreenWidth, [int]$ScreenHeight,
     # replaced; C111 records the close before the next C150 surface is created.
     [void](Wait-Serial $SerialPath '^\[C111-SURFACE\] action=close result=PASS' $before 20)
     [void](Wait-Serial $SerialPath '^\[C150-SURFACE\] action=create appId=com\.guidexos\.apps\.managed\.notes generation=[0-9A-Fa-f]+ window=[0-9A-Fa-f]+ result=PASS' $before 20)
+    if ($PhaseC160) {
+        # Notes performs its ordinary startup checks before the managed
+        # dispatch returns. Wait for the snapshot proving its new logical
+        # identity replaced Calculator and is the focused application.
+        [void](Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C160-SNAPSHOT appId=com\.guidexos\.apps\.managed\.notes source=3 instance=[0-9]+ count=[0-9]+ active=1 prev=gone distinct=1 result=PASS' $before 180)
+    }
 }
 
 function Get-CalculatorScreenPoint([int]$Index, [int]$ScreenWidth,
@@ -370,8 +397,9 @@ function Start-Qemu([string]$SerialPath, [string]$StdoutPath,
     $port = Get-AvailableQmpPort
     $qmpLog = [System.IO.Path]::ChangeExtension($SerialPath, '.qmp.log')
     Remove-Item -LiteralPath $SerialPath,$StdoutPath,$StderrPath,$qmpLog -Force -ErrorAction SilentlyContinue
+    $accelerator = if ($PhaseC160) { 'whpx' } else { 'tcg,thread=single' }
     $arguments = @(
-        '-accel','tcg,thread=single','-machine','pc','-smp','1',
+        '-accel',$accelerator,'-machine','pc','-smp','1',
         '-drive',('if=pflash,format=raw,readonly=on,file="{0}"' -f $Ovmf),
         '-drive',('file=fat:rw:"{0}",format=raw,if=ide,index=0' -f $Esp),
         '-m','1024M','-vga','std','-display','none',
@@ -411,6 +439,14 @@ function Invoke-ProductionBoot([int]$Number, [string]$Scenario,
         [void](Wait-Serial $serial '^\[C150-RETURN-TARGET-TESTS\] cases=10 capacity=1 identity=canonical self=reject invalid=reject result=PASS' 0 $TimeoutSeconds)
         [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C157-NEW-TESTS cases=\d+ result=PASS' 0 $TimeoutSeconds)
         [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C154-REGRESSIONS clipboard=PASS result=PASS' 0 $TimeoutSeconds)
+        if ($PhaseC160) {
+            [void](Wait-Serial $serial '^\[C160-APP-IDENTITY-TESTS\] cases=[0-9A-Fa-f]+ max-live=16 reuse=distinct wrap=fail-closed result=PASS' 0 $TimeoutSeconds)
+            [void](Wait-Serial $serial '^\[C160-APPMANAGER-PROOF-APPS\] calculator=PASS taskmanager=PASS recentWrites=none result=PASS' 0 $TimeoutSeconds)
+            [void](Wait-Serial $serial '^\[C160-TASKMANAGER-REGRESSION\] renderedRows=[0-9A-Fa-f]+ nativeCalculatorRow=true result=PASS' 0 $TimeoutSeconds)
+            [void](Wait-Serial $serial '^\[C160-NATIVE-SNAPSHOT-TESTS\] cases=[0-9A-Fa-f]+ stress=1000 failed=[0-9A-Fa-f]{8}:[0-9A-Fa-f]{8} real-records=PASS identity=PASS bounded=PASS read-only=PASS result=PASS' 0 $TimeoutSeconds)
+            [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C160-MANAGED-SNAPSHOT-TESTS cases=[0-9]+ v1=NotSupported malformed=Rejected layout=PASS identity=PASS stress=1000 result=PASS' 0 $TimeoutSeconds)
+            [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C160-SNAPSHOT appId=com\.guidexos\.apps\.managed\.notes source=3 instance=[0-9]+ count=[0-9]+ active=1 previous=none result=PASS' 0 $TimeoutSeconds)
+        }
         $screen = Get-Serial $serial
         $widthMatch = [regex]::Match($screen, '(?m)^\[DESKTOP CAP\] framebuffer_width=0x([0-9A-Fa-f]+)')
         $heightMatch = [regex]::Match($screen, '(?m)^\[DESKTOP CAP\] framebuffer_height=0x([0-9A-Fa-f]+)')
@@ -539,6 +575,25 @@ function Invoke-ProductionBoot([int]$Number, [string]$Scenario,
             $full -match '(?m)^\[C158-CALC-APP-REGISTRY\][^\r\n]*result=FAIL') {
             throw "C158 $Scenario boot contains failed Calculator proof evidence."
         }
+        if ($PhaseC160) {
+            if ($full -match '(?m)^\[C102-MANAGED-OUTPUT\] C160-(?:MANAGED-SNAPSHOT-TESTS|SNAPSHOT)[^\r\n]*result=FAIL' -or
+                $full -match '(?m)^\[C160-(?:APP-IDENTITY-TESTS|APPMANAGER-PROOF-APPS|TASKMANAGER-REGRESSION|NATIVE-SNAPSHOT-TESTS)[^\r\n]*result=FAIL') {
+                throw "C160 $Scenario boot contains failed identity, snapshot, or Task Manager evidence."
+            }
+            $noteSnapshots = [regex]::Matches($full,
+                '(?m)^\[C102-MANAGED-OUTPUT\] C160-SNAPSHOT appId=com\.guidexos\.apps\.managed\.notes source=3 instance=[0-9]+ count=[0-9]+ active=1 [^\r\n]*result=PASS')
+            $calculatorSnapshots = [regex]::Matches($full,
+                '(?m)^\[C102-MANAGED-OUTPUT\] C160-SNAPSHOT appId=com\.guidexos\.apps\.managed\.calculator source=3 instance=[0-9]+ count=[0-9]+ active=1 [^\r\n]*result=PASS')
+            if ($noteSnapshots.Count -lt 1 -or $calculatorSnapshots.Count -lt 1) {
+                throw "C160 $Scenario boot did not capture active Notes and Calculator lifetimes."
+            }
+            if ($Number -eq 1 -and $noteSnapshots.Count -lt 2) {
+                throw 'C160 boot 1 did not capture the Notes lifetime both before and after the Calculator transition.'
+            }
+            if ($Number -eq 3 -and $calculatorSnapshots.Count -lt 27) {
+                throw "C160 boot 3 did not verify a new snapshot identity for each lifecycle cycle: $($calculatorSnapshots.Count)."
+            }
+        }
         $controlDown = [regex]::Matches($full, '(?m)^\[C156-KEYBOARD\] event=control-left-down ').Count
         $controlUp = [regex]::Matches($full, '(?m)^\[C156-KEYBOARD\] event=control-left-up ').Count
         $shiftDown = [regex]::Matches($full, '(?m)^\[C129-KEYBOARD\] shift=down side=left ').Count
@@ -552,6 +607,7 @@ function Invoke-ProductionBoot([int]$Number, [string]$Scenario,
             Boot = $Number
             Scenario = $Scenario
             Status = 'PASS'
+            QemuAccelerator = if ($PhaseC160) { 'whpx' } else { 'tcg,thread=single' }
             SerialPath = $serial
             SerialSha256 = Get-Hash $serial
             ProofKernelSha256 = Get-Hash $proofKernel
@@ -584,7 +640,7 @@ function Invoke-OrdinaryBoot([int]$Number, [string]$Qemu, [string]$Ovmf) {
     $root = Join-Path $EvidenceRoot ("ordinary-boot-{0:D2}" -f $Number)
     New-Item -ItemType Directory -Force -Path $root | Out-Null
     $esp = Join-Path $root 'ESP'
-    Stage-Esp $esp $proofBackup $ramdiskBackup
+    Stage-Esp $esp $ordinaryKernelSource $ordinaryRamdiskSource
     $serial = Join-Path $root 'serial.log'
     $session = Start-Qemu $serial (Join-Path $root 'qemu.stdout.log') `
         (Join-Path $root 'qemu.stderr.log') $esp $Qemu $Ovmf
@@ -593,8 +649,8 @@ function Invoke-OrdinaryBoot([int]$Number, [string]$Qemu, [string]$Ovmf) {
         [void](Wait-Serial $serial '^\[desktop\] bare-metal desktop icon init completed' 0 $TimeoutSeconds)
         $text = Get-Serial $serial
         if ($text -notmatch '(?m)^\[KERNEL\] Boot method: UEFI BootInfo' -or
-            $text -match 'PageFault|triple.?fault|FAIL_FAST|fatal kernel failure|boot failure|C158-CALC') {
-            throw "C158 ordinary restoration boot $Number failed or contains C158 proof output."
+            $text -match 'PageFault|triple.?fault|FAIL_FAST|fatal kernel failure|boot failure|C158-CALC|C160-(?:APP-IDENTITY|NATIVE-SNAPSHOT|MANAGED-SNAPSHOT|SNAPSHOT|TASKMANAGER|APPMANAGER)') {
+            throw "Ordinary boot $Number failed or contains phase proof output."
         }
         Stop-Qemu $session.Port $process $session.QmpLog
         $process.Refresh()
@@ -642,6 +698,54 @@ function Restore-CanonicalFiles {
     }
 }
 
+function Install-C160CanonicalProducts([string]$Python) {
+    $canonicalStageRoot = Join-Path $EvidenceRoot 'staging\wallpaper-pack-c160-production'
+    $canonicalCompositeElfPath = Join-Path $canonicalCompositeRoot 'artifacts\HostLogProof.elf'
+    $managedBuildArguments = @('-ExecutionPolicy','Bypass','-File',$managedBuild,
+        '-RepoRoot',$RepoRoot,'-OutputRoot',$canonicalCompositeRoot,
+        '-RuntimePackRoot',(Join-Path $RepoRoot 'tools\dotnet\runtime-pack'),
+        '-RuntimePackOutputRoot',$runtimePackOutput,'-UseGuideXosRuntimePack',
+        '-ProductionApplication','-PersistentCompositeLifecycle','-AllocationMode','Allocating',
+        '-ManagedProjectMode','C160Composite','-C155ManagedNotesSession',
+        '-C156ControlModifierShortcuts','-C157ManagedNotesNewDocument',
+        '-C158ManagedCalculator','-HeapConfiguration','Primary4MiB','-PythonExe',$Python)
+    Invoke-Checked 'powershell' $managedBuildArguments
+    if (-not (Test-Path -LiteralPath $canonicalCompositeElfPath -PathType Leaf)) {
+        throw "C160 canonical NativeAOT composite missing: $canonicalCompositeElfPath"
+    }
+    $script:canonicalCompositeElf = $canonicalCompositeElfPath
+    $script:canonicalCompositeHash = Get-Hash $canonicalCompositeElfPath
+    $generator = Join-Path $RepoRoot 'scripts\generate-wallpaper-pack.ps1'
+    Invoke-Checked 'powershell' @('-ExecutionPolicy','Bypass','-File',$generator,
+        '-OutputDir',$canonicalStageRoot,'-OutputImage',$canonicalRamdisk,
+        '-C104AppAPath',$canonicalCompositeElfPath,
+        '-ProductionCompositeApplicationPath',$canonicalCompositeElfPath,
+        '-C114ManagedDirectoryServices','-C117ManagedTextArea','-C118ManagedListBox',
+        '-C151ManagedOpenFileDialog','-C152ManagedNotesSaveWorkflow',
+        '-C155ManagedNotesSession','-C156ControlModifierShortcuts','-C157ManagedNotesNewDocument')
+    if (-not (Test-Path -LiteralPath $canonicalRamdisk -PathType Leaf)) {
+        throw 'C160 canonical production ramdisk was not generated.'
+    }
+    Invoke-Checked $make @('-C',(Join-Path $RepoRoot 'kernel'),'ARCH=amd64',
+        "EXTRA_CFLAGS=$canonicalKernelFlags",'-B')
+    if (-not (Test-Path -LiteralPath $kernelPath -PathType Leaf)) {
+        throw 'C160 canonical kernel build did not produce kernel.elf.'
+    }
+    $script:postC160KernelHash = Get-Hash $kernelPath
+    Copy-Item -LiteralPath $kernelPath -Destination $espKernelPath -Force
+    Copy-Item -LiteralPath $canonicalRamdisk -Destination $protectedRamdiskPath -Force
+    $script:postC160RamdiskHash = Get-Hash $protectedRamdiskPath
+    $script:ordinaryKernelSource = $kernelPath
+    $script:ordinaryRamdiskSource = $protectedRamdiskPath
+    $script:ordinaryKernelHash = $script:postC160KernelHash
+    $script:ordinaryRamdiskHash = $script:postC160RamdiskHash
+    $script:restored = (Get-Hash $espKernelPath) -eq $script:postC160KernelHash -and
+        (Get-Hash $protectedRamdiskPath) -eq $script:postC160RamdiskHash
+    if (-not $script:restored) {
+        throw 'C160 post-phase kernel/ESP/ramdisk hashes do not match the committed source build.'
+    }
+}
+
 function New-C151SettingsRecord([string]$Path) {
     [byte[]]$bytes = [byte[]]::new(26)
     [byte[]]$magic = [System.Text.Encoding]::ASCII.GetBytes('GXSC')
@@ -672,6 +776,10 @@ foreach ($path in @($kernelPath, $espKernelPath, $protectedRamdiskPath, $bootloa
 $canonicalKernelHash = Get-Hash $kernelPath
 $espKernelHash = Get-Hash $espKernelPath
 $ramdiskHash = Get-Hash $protectedRamdiskPath
+if (-not $PhaseC160) {
+    $ordinaryKernelHash = $canonicalKernelHash
+    $ordinaryRamdiskHash = $ramdiskHash
+}
 if ($canonicalKernelHash -ne $espKernelHash) {
     throw 'Canonical kernel and ESP kernel differ; no proof assets were changed.'
 }
@@ -705,18 +813,20 @@ $ovmf = Get-Tool 'ovmf' @('C:\Program Files\qemu\share\edk2-x86_64-code.fd')
 $make = Get-Tool 'mingw32-make' @('C:\mingw64\bin\mingw32-make.exe')
 
 $managedBuild = Join-Path $RepoRoot 'scripts\dotnet\build-managed-hostlog-proof.ps1'
-Invoke-Checked 'powershell' @('-ExecutionPolicy','Bypass','-File',$managedBuild,
+$managedBuildArguments = @('-ExecutionPolicy','Bypass','-File',$managedBuild,
     '-RepoRoot',$RepoRoot,'-OutputRoot',$compositeRoot,
     '-RuntimePackRoot',(Join-Path $RepoRoot 'tools\dotnet\runtime-pack'),
     '-RuntimePackOutputRoot',$runtimePackOutput,'-UseGuideXosRuntimePack',
     '-ProductionApplication','-PersistentCompositeLifecycle','-AllocationMode','Allocating',
-    '-ManagedProjectMode','C154Composite','-C155ManagedNotesSession',
+    '-ManagedProjectMode',$(if ($PhaseC160) { 'C160Composite' } else { 'C154Composite' }),'-C155ManagedNotesSession',
     '-C156ControlModifierShortcuts','-C157ManagedNotesNewDocument',
     '-C158ManagedCalculator','-HeapConfiguration','Primary4MiB','-PythonExe',$python)
+if ($PhaseC160) { $managedBuildArguments += '-C160ApplicationSnapshotProof' }
+Invoke-Checked 'powershell' $managedBuildArguments
 $compositeElf = Join-Path $compositeRoot 'artifacts\HostLogProof.elf'
 if (-not (Test-Path -LiteralPath $compositeElf -PathType Leaf)) { throw "C158 NativeAOT ELF missing: $compositeElf" }
 $compositeHash = Get-Hash $compositeElf
-Write-Host "C158 production NativeAOT composite built: $compositeHash" -ForegroundColor Green
+Write-Host ("{0} proof NativeAOT composite built: {1}" -f $(if ($PhaseC160) { 'C160' } else { 'C158' }), $compositeHash) -ForegroundColor Green
 
 $generator = Join-Path $RepoRoot 'scripts\generate-wallpaper-pack.ps1'
 Invoke-Checked 'powershell' @('-ExecutionPolicy','Bypass','-File',$generator,
@@ -754,7 +864,10 @@ $flags = @(
     '-DGXOS_NATIVEAOT_C155_MANAGED_NOTES_SESSION',
     '-DGXOS_NATIVEAOT_C156_CONTROL_MODIFIER_SHORTCUTS',
     '-DGXOS_NATIVEAOT_C157_MANAGED_NOTES_NEW_DOCUMENT',
-    '-DGXOS_NATIVEAOT_C158_MANAGED_CALCULATOR') -join ' '
+    '-DGXOS_NATIVEAOT_C158_MANAGED_CALCULATOR')
+$canonicalKernelFlags = $flags -join ' '
+if ($PhaseC160) { $flags += '-DGXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF' }
+$flags = $flags -join ' '
 if ($ReuseBuiltProofKernel) {
     if (-not (Test-Path -LiteralPath $proofKernel -PathType Leaf)) {
         throw "-ReuseBuiltProofKernel requires a prior proof kernel at $proofKernel"
@@ -776,15 +889,27 @@ $production.Add((Invoke-ProductionBoot 1 'pointer-arithmetic' $qemu $ovmf $setti
 $production.Add((Invoke-ProductionBoot 2 'keyboard-focus' $qemu $ovmf $settingsRecord)) | Out-Null
 $production.Add((Invoke-ProductionBoot 3 'error-recovery-lifecycle' $qemu $ovmf $settingsRecord)) | Out-Null
 
-Restore-CanonicalFiles
-if (-not $script:restored) { throw 'C158 failed byte-for-byte restoration before ordinary boots.' }
-Write-Host 'C158 protected kernel and ramdisk hashes restored; beginning ordinary boots.' -ForegroundColor Green
+if ($PhaseC160) {
+    Write-Host 'C160 installing the clean ABI-v2 production kernel and matching composite/ramdisk.' -ForegroundColor Yellow
+    Install-C160CanonicalProducts $python
+    Write-Host 'C160 post-phase production hashes verified; beginning ordinary boots.' -ForegroundColor Green
+} else {
+    Restore-CanonicalFiles
+    if (-not $script:restored) { throw 'C158 failed byte-for-byte restoration before ordinary boots.' }
+    Write-Host 'C158 protected kernel and ramdisk hashes restored; beginning ordinary boots.' -ForegroundColor Green
+}
 $ordinary = [System.Collections.Generic.List[object]]::new()
 for ($boot = 1; $boot -le 3; $boot++) {
     Write-Host ("C158 ordinary restoration boot {0}/3." -f $boot)
     $ordinary.Add((Invoke-OrdinaryBoot $boot $qemu $ovmf)) | Out-Null
 }
-if ((Get-Hash $kernelPath) -ne $canonicalKernelHash -or
+if ($PhaseC160) {
+    if ((Get-Hash $kernelPath) -ne $postC160KernelHash -or
+        (Get-Hash $espKernelPath) -ne $postC160KernelHash -or
+        (Get-Hash $protectedRamdiskPath) -ne $postC160RamdiskHash) {
+        throw 'C160 ordinary boots changed the new canonical production artifacts.'
+    }
+} elseif ((Get-Hash $kernelPath) -ne $canonicalKernelHash -or
     (Get-Hash $espKernelPath) -ne $espKernelHash -or
     (Get-Hash $protectedRamdiskPath) -ne $ramdiskHash) {
     throw 'C158 ordinary boots changed a restored protected artifact.'
@@ -812,6 +937,7 @@ for ($boot = 1; $boot -le 3; $boot++) {
         Boot = $boot
         Scenario = @('pointer-arithmetic','keyboard-focus','error-recovery-lifecycle')[$boot - 1]
         Status = 'PASS'
+        QemuAccelerator = if ($PhaseC160) { 'whpx' } else { 'tcg,thread=single' }
         SerialPath = $serial
         SerialSha256 = Get-Hash $serial
         CalculatorLaunches = [regex]::Matches($text, '(?m)^\[C102-MANAGED-OUTPUT\] C158-CALC-LAUNCH id=managed-calculator ').Count
@@ -826,10 +952,11 @@ for ($boot = 1; $boot -le 3; $boot++) {
     $ordinaryRecords.Add([ordered]@{
         Boot = $boot
         Status = 'PASS'
+        QemuAccelerator = if ($PhaseC160) { 'whpx' } else { 'tcg,thread=single' }
         SerialPath = $serial
         SerialSha256 = Get-Hash $serial
-        KernelSha256 = $canonicalKernelHash
-        RamdiskSha256 = $ramdiskHash
+        KernelSha256 = $ordinaryKernelHash
+        RamdiskSha256 = $ordinaryRamdiskHash
     }) | Out-Null
 }
 
@@ -854,9 +981,30 @@ $shiftBalanced = $shiftDownEvents.Count -gt 0 -and
 if (-not $controlBalanced -or -not $shiftBalanced) {
     throw 'C158 production keyboard modifier events are unbalanced or finish pressed.'
 }
+$phaseLabel = if ($PhaseC160) { 'C160' } else { 'C158' }
+$manifestFile = if ($PhaseC160) { 'c160-proof-manifest.json' } else { 'c158-proof-manifest.json' }
+$ordinaryManifestFile = if ($PhaseC160) { 'c160-ordinary-manifest.json' } else { 'c158-ordinary-restoration-manifest.json' }
+$reportedCompositeElf = if ($PhaseC160) { $canonicalCompositeElf } else { $compositeElf }
+$reportedCompositeHash = if ($PhaseC160) { $canonicalCompositeHash } else { $compositeHash }
+$reportedAbiVersion = if ($PhaseC160) { 2 } else { 1 }
+$reportedAbiSize = if ($PhaseC160) { 112 } else { 104 }
+$c160FinalSnapshot = $null
+if ($PhaseC160) {
+    $finalCalculatorSnapshots = [regex]::Matches($boot3Text,
+        '(?m)^\[C102-MANAGED-OUTPUT\] C160-SNAPSHOT appId=com\.guidexos\.apps\.managed\.calculator source=3 instance=([0-9]+) count=([0-9]+) active=1 [^\r\n]*result=PASS')
+    if ($finalCalculatorSnapshots.Count -lt 27) { throw 'C160 final stable Calculator identity evidence is incomplete.' }
+    $lastSnapshot = $finalCalculatorSnapshots[$finalCalculatorSnapshots.Count - 1]
+    $c160FinalSnapshot = [ordered]@{
+        applicationId = 'com.guidexos.apps.managed.calculator'
+        source = 'ManagedLogicalApplication'
+        instanceId = [uint64]$lastSnapshot.Groups[1].Value
+        totalCount = [uint32]$lastSnapshot.Groups[2].Value
+        activeCount = 1
+    }
+}
 $manifest = [ordered]@{
     schemaVersion = 1
-    phase = 'C158'
+    phase = $phaseLabel
     outcome = 'A'
     branch = 'v1.1_DOTNET_SUPPORT'
     application = [ordered]@{
@@ -882,15 +1030,19 @@ $manifest = [ordered]@{
         lifecycleCloseAction = 'existing Host ABI action dispatch; ABI unchanged'
     }
     nativeAot = [ordered]@{
-        compositeElf = $compositeElf
-        compositeSha256 = $compositeHash
+        compositeElf = $reportedCompositeElf
+        compositeSha256 = $reportedCompositeHash
+        proofCompositeElf = $compositeElf
+        proofCompositeSha256 = $compositeHash
         proofKernel = $proofKernel
         proofKernelSha256 = $proofKernelHash
         proofRamdisk = $proofRamdisk
         proofRamdiskSha256 = $proofRamdiskHash
         heap = 'Primary4MiB'
-        abiVersion = 1
-        abiTableBytes = 104
+        abiVersion = $reportedAbiVersion
+        abiTableBytes = $reportedAbiSize
+        legacyPrefixBytes = 104
+        snapshotCallbackOffset = 104
         settingsFormatVersion = 2
         floatingPointCalculatorSupport = $false
         c128LifecycleSuite = 'unverified; no result claimed'
@@ -902,6 +1054,7 @@ $manifest = [ordered]@{
         C154 = 'clipboard test PASS; Calculator lifetime kept shared clipboard unchanged'
         C157 = 'Notes New-document suite PASS before App Model transition'
         ButtonFocus = 'C158 focused routing suite covers all 18 controls, exact-once Space/Enter behavior, Tab and Shift+Tab'
+        C160 = if ($PhaseC160) { 'AppManager ABA and wrap proof PASS; native and managed snapshot stress 1000/1000; ABI v1 prefix and malformed-table fixtures PASS; shell, Calculator, Task Manager, Notes and managed logical application records verified' } else { 'not run' }
     }
     productionBoots = @($productionRecords.ToArray())
     ordinaryBoots = @($ordinaryRecords.ToArray())
@@ -912,7 +1065,14 @@ $manifest = [ordered]@{
         canonicalKernelAfter = Get-Hash $kernelPath
         espKernelAfter = Get-Hash $espKernelPath
         protectedRamdiskAfter = Get-Hash $protectedRamdiskPath
-        restoredByteForByte = $script:restored
+        restoredByteForByte = if ($PhaseC160) { $false } else { $script:restored }
+        canonicalPostPhaseProductsVerified = if ($PhaseC160) { $script:restored } else { $null }
+        preC160KernelSha256 = if ($PhaseC160) { $canonicalKernelHash } else { $null }
+        postC160KernelSha256 = if ($PhaseC160) { $postC160KernelHash } else { $null }
+        preC160RamdiskSha256 = if ($PhaseC160) { $ramdiskHash } else { $null }
+        postC160RamdiskSha256 = if ($PhaseC160) { $postC160RamdiskHash } else { $null }
+        espKernelMatchesPostC160 = if ($PhaseC160) { (Get-Hash $espKernelPath) -eq $postC160KernelHash } else { $null }
+        protectedRamdiskUpdatedForAbiV2 = if ($PhaseC160) { $postC160RamdiskHash -ne $ramdiskHash } else { $null }
         proofMediaIsolated = $true
     }
     finalState = [ordered]@{
@@ -930,19 +1090,20 @@ $manifest = [ordered]@{
         popupCapture = 'none'
         dragOwner = 'none'
         settingsFormatVersion = 2
-        hostAbiVersion = 1
-        hostAbiTableBytes = 104
+        hostAbiVersion = $reportedAbiVersion
+        hostAbiTableBytes = $reportedAbiSize
+        applicationSnapshot = $c160FinalSnapshot
     }
 }
-$manifestPath = Join-Path $EvidenceRoot 'c158-proof-manifest.json'
+$manifestPath = Join-Path $EvidenceRoot $manifestFile
 $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
 $ordinaryManifest = [ordered]@{
     schemaVersion = 1
-    phase = 'C158-ordinary-restoration'
+    phase = if ($PhaseC160) { 'C160-ordinary-post-phase' } else { 'C158-ordinary-restoration' }
     status = 'PASS'
     protected = $manifest.restoration
     ordinaryBoots = @($ordinaryRecords.ToArray())
 }
-$ordinaryManifestPath = Join-Path $EvidenceRoot 'c158-ordinary-restoration-manifest.json'
+$ordinaryManifestPath = Join-Path $EvidenceRoot $ordinaryManifestFile
 $ordinaryManifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ordinaryManifestPath -Encoding ASCII
-Write-Host "C158 outcome=A production=3/3 ordinary=3/3 evidence=$EvidenceRoot manifest=$manifestPath ordinaryManifest=$ordinaryManifestPath" -ForegroundColor Green
+Write-Host "$phaseLabel outcome=A production=3/3 ordinary=3/3 evidence=$EvidenceRoot manifest=$manifestPath ordinaryManifest=$ordinaryManifestPath" -ForegroundColor Green

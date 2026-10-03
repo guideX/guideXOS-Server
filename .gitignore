@@ -53,6 +53,7 @@
 /tools/dotnet/__pycache__/
 /out/runtime/
 /samples/managed/HostLogProof/obj/
+/samples/managed/HostLogProof/out/
 /scripts/fixtures/public-roots/*.local
 /bkup/gfx
 /out

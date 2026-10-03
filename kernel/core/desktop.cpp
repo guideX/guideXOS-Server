@@ -8394,6 +8394,9 @@ void init()
     compositor::TaskbarManager::init(s_screenW, s_screenH, kTaskbarH, 
                                      4 + kStartBtnW + 8);
     init_taskbar_widgets();
+#if defined(GXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF)
+    (void)app::AppManager::launchC160ProofApps();
+#endif
     
     s_initialized = true;
     desktop_capabilities::log_current(false, false);
@@ -10446,6 +10449,16 @@ static bool handle_alt_f4_shortcut(bool leftAltPressed, bool rightAltPressed)
 int get_running_app_count()
 {
     return app::AppManager::getRunningAppCount();
+}
+
+bool is_shell_surface_active()
+{
+    // A compositor-owned application window can take focus without going
+    // through the desktop's shell mouse handler (for example, managed app
+    // launch). In that case the cached shell flag may still be true; the
+    // compositor focus is the authoritative foreground state.
+    return shell::is_open() && !s_shellMinimized && s_shellActive &&
+        compositor::KernelCompositor::getFocusedWindow() == nullptr;
 }
 
 void handle_key(uint32_t key)
