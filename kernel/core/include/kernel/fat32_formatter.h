@@ -82,6 +82,7 @@ enum Fat32ReformatState : uint8_t {
     FAT32_REFORMAT_IN_PROGRESS,
     FAT32_REFORMAT_NEW_FILESYSTEM_WRITTEN_NOT_DURABLE,
     FAT32_REFORMAT_DURABLE,
+    FAT32_REFORMAT_DURABLE_BUT_REFRESH_FAILED,
 };
 
 enum Fat32FormatStage : uint8_t {
@@ -163,6 +164,7 @@ struct Fat32FormatRequest {
 #if defined(KERNEL_STORAGE_TEST)
     bool testVolumeIdProvided;
     uint32_t testVolumeId;
+    bool testForceRescanFailure;
 #endif
 };
 
@@ -232,6 +234,7 @@ struct Fat32FormatResult {
     uint64_t rootClusterBytesWritten;
     uint64_t reformatBytesWritten;
     uint64_t reformatElapsedTicks;
+    uint32_t reformatReadRequests;
     uint32_t reformatWriteRequests;
     char diagnostic[160];
 };

@@ -7,6 +7,8 @@
 #if defined(GXOS_DM23_SCAN_DIAGNOSTICS) && \
     (defined(__GNUC__) || defined(__clang__))
 #include "include/kernel/serial_debug.h"
+#elif defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
+#include "include/kernel/serial_debug.h"
 #endif
 
 namespace kernel {
@@ -52,6 +54,28 @@ alignas(4096) static uint8_t s_zeroScanBuffer[kZeroScanBufferBytes];
 static Fat32RollbackRecord s_rollbackRecords[FAT32_FORMAT_MAX_ROLLBACK_ENTRIES];
 alignas(4096) static PartitionTableModel s_partitionTable;
 static uint32_t s_rollbackRecordCount;
+static bool s_quickReadAccountingActive;
+static uint32_t s_quickReadRequests;
+
+static void account_quick_read_request()
+{
+    if (s_quickReadAccountingActive && s_quickReadRequests != UINT32_MAX)
+        ++s_quickReadRequests;
+}
+
+struct QuickReadAccounting {
+    Fat32FormatResult& result;
+    QuickReadAccounting(Fat32FormatResult& value) : result(value)
+    {
+        s_quickReadRequests = 0;
+        s_quickReadAccountingActive = true;
+    }
+    ~QuickReadAccounting()
+    {
+        result.reformatReadRequests = s_quickReadRequests;
+        s_quickReadAccountingActive = false;
+    }
+};
 
 static void clear_bytes(void* destination, size_t bytes)
 {
@@ -799,6 +823,7 @@ static block::Status read_partition_sector(const TargetIdentity& target,
                                            uint64_t relative,
                                            uint8_t* output)
 {
+    account_quick_read_request();
     if (!output || !relative_range_valid(geometry, relative, 1) ||
         relative >= partition.sectorCount) return block::BLOCK_ERR_INVALID;
     uint64_t absolute = 0;
@@ -1222,6 +1247,9 @@ static bool verify_fat32_structure(const TargetIdentity& target,
 static bool rescan_partition(const Fat32FormatRequest& request,
                              const PartitionEntry& expected)
 {
+#if defined(KERNEL_STORAGE_TEST)
+    if (request.testForceRescanFailure) return false;
+#endif
     if (!parse_partition_table(request.targetSnapshot.globalIndex,
                                s_partitionTable)) return false;
     const DiskState expectedState = request.partitionScheme == PARTITION_SCHEME_GPT
@@ -1568,6 +1596,7 @@ static bool quick_verify_fats(const Fat32FormatRequest& request,
         while (left != 0) {
             const uint32_t batch = left < maxBatchSectors ? left : maxBatchSectors;
             uint64_t absolute = 0;
+            account_quick_read_request();
             if (!rollback_context_valid(request, request.targetSnapshot,
                     check.currentPartition, check.geometry, lease) ||
                 !add_u64(check.currentPartition.startLba, cursor, absolute) ||
@@ -1685,6 +1714,7 @@ static Fat32FormatStatus execute_quick_reformat_locked(
     const Fat32FormatRequest& request, Fat32FormatResult& result,
     StorageOperationLease& lease)
 {
+    QuickReadAccounting readAccounting(result);
     const uint64_t startTicks = scan_clock_ticks();
     PartitionCheck check = {};
     QuickReformatSource source = {};
@@ -1823,6 +1853,9 @@ static Fat32FormatStatus execute_quick_reformat_locked(
             }
         }
     }
+#if defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
+    if (ok) serial::puts("[DM27-QEMU] point=old-filesystem-invalidated flush=PASS\n");
+#endif
 
     // Clear the complete new reserved region except the primary publication
     // sector and the retry marker. The marker remains until the new primary
@@ -1842,6 +1875,9 @@ static Fat32FormatStatus execute_quick_reformat_locked(
     if (ok) {
         result.stage = FAT32_FORMAT_STAGE_WRITE_FAT;
         result.lastStage = result.stage;
+#if defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
+        serial::puts("[DM27-QEMU] point=fat1-clear-begins\n");
+#endif
         ok = quick_zero_range(request, check, lease,
             check.geometry.firstFatSector, check.geometry.fatSizeSectors,
             QUICK_WRITE_FAT1_ZERO, maxBatchSectors, result);
@@ -1936,6 +1972,9 @@ static Fat32FormatStatus execute_quick_reformat_locked(
         // The primary BPB is the final filesystem-authority publication.
         result.stage = FAT32_FORMAT_STAGE_WRITE_BOOT_SECTOR;
         result.lastStage = result.stage;
+#if defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
+        serial::puts("[DM27-QEMU] point=primary-publication-begins\n");
+#endif
         build_boot_sector(check.geometry, label, s_ioSector,
                           check.geometry.bytesPerSector);
         primaryPublicationAttempted = true;
@@ -1953,6 +1992,10 @@ static Fat32FormatStatus execute_quick_reformat_locked(
         result.flushOutcome = flush.outcome;
         result.flushStatus = flush.status;
         result.persistenceTrusted = trusted_flush(flush);
+#if defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
+        if (result.persistenceTrusted)
+            serial::puts("[DM27-QEMU] point=final-flush-complete status=PASS\n");
+#endif
         if (!result.persistenceTrusted) {
             result.failedOperation = block::OPERATION_FLUSH;
             (void)capture_current_io_result(result);
@@ -2039,6 +2082,21 @@ static Fat32FormatStatus execute_quick_reformat_locked(
             FAT32_FORMAT_STAGE_IDLE ? result.stage : result.firstFailedStage;
         result.stage = FAT32_FORMAT_STAGE_FAILED;
         result.failedBeforeWrite = !result.writeMayHaveReachedMedia;
+        if (result.failureStatus == FAT32_FORMAT_RESCAN_FAILED &&
+            result.verificationPassed && result.persistenceTrusted &&
+            result.reformatInvalidationFlushPassed) {
+            // The new filesystem and marker cleanup have both been flushed
+            // and reread successfully. A failed in-memory rescan is a refresh
+            // problem; keep that distinct from a failed reformat.
+            result.status = FAT32_FORMAT_RESCAN_FAILED;
+            result.finalProbeState = FAT32_FINAL_PROBE_FAT32;
+            result.reformatState =
+                FAT32_REFORMAT_DURABLE_BUT_REFRESH_FAILED;
+            set_diagnostic(result,
+                "The new FAT32 filesystem is durable and verified, but the runtime rescan failed. Refresh storage state or restart to rediscover it.");
+            complete_storage_operation_execution(lease);
+            return result.status;
+        }
         if (result.reformatState >= FAT32_REFORMAT_IN_PROGRESS) {
             result.status = FAT32_FORMAT_REFORMAT_INCOMPLETE;
             result.finalProbeState = result.verificationPassed
@@ -2370,6 +2428,7 @@ static Fat32FormatStatus run_quick_reformat_with_lease(
         release_storage_operation(lease);
     if (status != FAT32_FORMAT_READY && status != FAT32_FORMAT_SUCCESS &&
         status != FAT32_FORMAT_REFORMAT_INCOMPLETE &&
+        result.reformatState != FAT32_REFORMAT_DURABLE_BUT_REFRESH_FAILED &&
         result.stage != FAT32_FORMAT_STAGE_STATE_UNCERTAIN) {
         result.status = status;
         if (result.stage != FAT32_FORMAT_STAGE_FAILED)
@@ -2730,6 +2789,8 @@ const char* fat32_reformat_state_name(Fat32ReformatState state)
         case FAT32_REFORMAT_NEW_FILESYSTEM_WRITTEN_NOT_DURABLE:
             return "NewFilesystemWrittenButNotDurable";
         case FAT32_REFORMAT_DURABLE: return "Durable";
+        case FAT32_REFORMAT_DURABLE_BUT_REFRESH_FAILED:
+            return "DurableButRefreshFailed";
         default: return "Unknown";
     }
 }

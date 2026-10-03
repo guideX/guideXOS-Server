@@ -39,6 +39,8 @@ namespace {
 struct FakeWriteRecord {
     uint64_t lba;
     uint32_t count;
+    uint32_t ioOrdinal;
+    uint32_t writesAtCall;
 };
 
 struct FakeDisk {
@@ -62,7 +64,9 @@ struct FakeDisk {
     uint64_t mutatePartitionOnReadLba;
     uint64_t mutatePartitionStartTo;
     uint64_t failLbaAfterWrite;
+    uint32_t failLbaAfterWriteAtCall;
     uint32_t failReadAtCall;
+    uint32_t removeOnReadAtCall;
     bool failFlush;
     uint32_t failFlushAtCall;
     uint32_t failFlushAtCall2;
@@ -71,6 +75,8 @@ struct FakeDisk {
     uint32_t failWriteAtCall2;
     block::Status failWriteStatus;
     uint32_t removeOnWriteAtCall;
+    FakeDisk* replacementOnRemoval;
+    bool replacementRegisteredDuringRemoval;
     uint64_t corruptWriteLbaOnce;
     uint32_t corruptWriteByteOffset;
     uint32_t corruptWriteAfterCall;
@@ -102,11 +108,13 @@ struct FakeDisk {
           replacementDuringScan(nullptr), replacementIndex(0xFF),
           replacementRegisteredDuringScan(false),
           mutatePartitionOnReadLba(UINT64_MAX), mutatePartitionStartTo(0),
-          failLbaAfterWrite(UINT64_MAX), failReadAtCall(0), failFlush(false),
+          failLbaAfterWrite(UINT64_MAX), failLbaAfterWriteAtCall(0),
+          failReadAtCall(0), removeOnReadAtCall(0), failFlush(false),
           failFlushAtCall(0), failFlushAtCall2(0),
           failFlushStatus(block::BLOCK_ERR_IO),
           failWriteAtCall1(0), failWriteAtCall2(0),
           failWriteStatus(block::BLOCK_ERR_IO), removeOnWriteAtCall(0),
+          replacementOnRemoval(nullptr), replacementRegisteredDuringRemoval(false),
           corruptWriteLbaOnce(UINT64_MAX), corruptWriteByteOffset(16),
           corruptWriteAfterCall(0), corruptWritePending(false),
           reads(0), writes(0), writeAttempts(0), flushes(0),
@@ -119,6 +127,8 @@ FakeDisk* g_fakeDisks[256] = {};
 uint16_t g_nextDriverId = 1;
 int g_checks = 0;
 int g_failures = 0;
+
+void register_fake_replacement_after_removal(FakeDisk* removed);
 
 void check(bool condition, const char* label)
 {
@@ -133,10 +143,18 @@ block::Status fake_read(uint8_t driverId, uint64_t lba, uint32_t count, void* bu
 {
     FakeDisk* disk = g_fakeDisks[driverId];
     if (!disk) return block::BLOCK_ERR_IO;
-    disk->readLog.push_back({lba, count});
+    disk->readLog.push_back({lba, count, disk->reads + 1u,
+                             disk->writeAttempts});
     if (!buffer || count == 0 || lba > disk->sectorCount ||
         count > disk->sectorCount - lba)
         return block::BLOCK_ERR_IO;
+    if (disk->removeOnReadAtCall != 0 &&
+        disk->reads + 1u == disk->removeOnReadAtCall) {
+        disk->removed = block::mark_device_offline(
+            disk->registryIndex, disk->registrationId);
+        register_fake_replacement_after_removal(disk);
+        return block::BLOCK_ERR_NO_MEDIA;
+    }
     if (disk->attemptMountDuringScanRead &&
         lba == disk->failReadAtLba &&
         count >= disk->failReadAtLbaMinCount) {
@@ -183,7 +201,9 @@ block::Status fake_read(uint8_t driverId, uint64_t lba, uint32_t count, void* bu
     if (disk->failReads || lba == disk->failLba ||
         (lba == disk->failReadAtLba &&
          count >= disk->failReadAtLbaMinCount) ||
-        (disk->writeAttempts != 0 && lba == disk->failLbaAfterWrite) ||
+        (disk->writeAttempts != 0 && lba == disk->failLbaAfterWrite &&
+         (disk->failLbaAfterWriteAtCall == 0 ||
+          disk->writeAttempts >= disk->failLbaAfterWriteAtCall)) ||
         (disk->failReadAtCall != 0 && disk->reads + 1 == disk->failReadAtCall))
         return disk->failReadStatus;
     ++disk->reads;
@@ -233,7 +253,8 @@ block::Status fake_write(uint8_t driverId, uint64_t lba, uint32_t count,
 {
     FakeDisk* disk = g_fakeDisks[driverId];
     if (!disk || !buffer || count == 0) return block::BLOCK_ERR_IO;
-    disk->writeLog.push_back({lba, count});
+    disk->writeLog.push_back({lba, count, disk->writeAttempts + 1u,
+                              disk->writeAttempts});
     if (lba > disk->sectorCount || count > disk->sectorCount - lba)
         return block::BLOCK_ERR_IO;
     ++disk->writeAttempts;
@@ -241,6 +262,7 @@ block::Status fake_write(uint8_t driverId, uint64_t lba, uint32_t count,
         disk->writeAttempts == disk->removeOnWriteAtCall) {
         disk->removed = block::mark_device_offline(
             disk->registryIndex, disk->registrationId);
+        register_fake_replacement_after_removal(disk);
         return block::BLOCK_ERR_NO_MEDIA;
     }
     if (disk->writeAttempts == disk->failWriteAtCall1 ||
@@ -298,6 +320,7 @@ block::Status fake_flush(uint8_t driverId)
         (disk->removeOnFlushAt == 0 || disk->flushes == disk->removeOnFlushAt)) {
         disk->removed = block::mark_device_offline(
             disk->registryIndex, disk->registrationId);
+        register_fake_replacement_after_removal(disk);
         return block::BLOCK_ERR_NO_MEDIA;
     }
     return disk->failFlush ||
@@ -369,6 +392,20 @@ uint8_t register_fake(FakeDisk& disk, bool writable = false,
             disk.registrationId = registered.registrationId;
     }
     return index;
+}
+
+void register_fake_replacement_after_removal(FakeDisk* removed)
+{
+    if (!removed || !removed->replacementOnRemoval) return;
+    FakeDisk* replacement = removed->replacementOnRemoval;
+    const uint8_t replacementIndex = register_fake(*replacement, true, true,
+        true, false, 0, 1024u * 1024u,
+        block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT,
+        block::BDEV_USB_MASS);
+    if (replacementIndex != 0xFF) {
+        removed->replacementIndex = replacementIndex;
+        removed->replacementRegisteredDuringRemoval = true;
+    }
 }
 
 bool unregister_fake(uint8_t index, FakeDisk& disk)
@@ -10123,7 +10160,7 @@ int main()
             unregister_fake(index, fourKnGpt);
         fs_fat::init();
         vfs::test_clear_mounts();
-        const uint8_t restartedIndex = removed
+        uint8_t restartedIndex = removed
             ? register_fake(fourKnGpt, true, true, true, false, 0,
                 1024u * 1024u)
             : 0xFF;
@@ -10210,6 +10247,38 @@ int main()
                     interruptedQuick)
                 : storage::FAT32_FORMAT_INVALID_REQUEST;
         fourKnGpt.failWriteAtCall1 = 0;
+        const bool interruptedTargetRemoved = unregister_fake(restartedIndex,
+            fourKnGpt);
+        fs_fat::init();
+        vfs::test_clear_mounts();
+        const uint8_t interruptedRestartIndex = interruptedTargetRemoved
+            ? register_fake(fourKnGpt, true, true, true, false, 0,
+                1024u * 1024u)
+            : 0xFF;
+        storage::PartitionTableModel interruptedRestartTable = {};
+        storage::PartitionEntry interruptedRestartPartition = {};
+        const bool interruptedRestartIdentity = interruptedRestartIndex != 0xFF &&
+            parse_first_partition(interruptedRestartIndex,
+                interruptedRestartTable, interruptedRestartPartition) &&
+            interruptedRestartPartition.startLba == restartedPartition.startLba &&
+            interruptedRestartPartition.endLba == restartedPartition.endLba &&
+            std::memcmp(interruptedRestartPartition.uniqueGuid,
+                restartedPartition.uniqueGuid, 16) == 0;
+        restartedIndex = interruptedRestartIndex;
+        restartedPartition = interruptedRestartPartition;
+        quickRequest = make_format_request(restartedIndex,
+            restartedPartition, "FRESH", 0xD2602601u);
+        storage::Fat32FormatRequest mismatchedMarkerRequest = quickRequest;
+        mismatchedMarkerRequest.gptDiskGuid[0] ^= 0x80u;
+        storage::Fat32FormatResult mismatchedMarkerProbe = {};
+        const storage::Fat32FormatStatus mismatchedMarkerStatus =
+            storage::probe_fat32_quick_reformat_partition(
+                mismatchedMarkerRequest, mismatchedMarkerProbe);
+        check(interruptedRestartIdentity &&
+              mismatchedMarkerStatus != storage::FAT32_FORMAT_READY &&
+              mismatchedMarkerStatus != storage::FAT32_FORMAT_SUCCESS &&
+              mismatchedMarkerProbe.failedBeforeWrite,
+              "an interrupted Quick Reformat marker survives device re-registration but a mismatched GPT disk identity cannot authorize retry");
         storage::Fat32FormatResult retryProbe = {};
         const storage::Fat32FormatStatus retryProbeStatus =
             restartedIndex != 0xFF
@@ -10222,9 +10291,12 @@ int main()
               interruptedQuick.failureStatus == storage::FAT32_FORMAT_METADATA_WRITE_FAILED &&
               retryProbeStatus == storage::FAT32_FORMAT_READY && retryProbe.reformatRetry &&
               retryProbe.existingState == storage::FAT32_EXISTING_INTERRUPTED_REFORMAT,
-              "failure during FAT2 clearing reports an incomplete reformat and exposes identity-bound retry without requiring the old FAT32 probe");
+              "failure during FAT2 clearing reports an incomplete reformat and a cold re-registration recognizes identity-bound retry without requiring the old FAT32 probe");
 
         fourKnGpt.writeLog.clear();
+        fourKnGpt.readLog.clear();
+        const uint32_t quickBaselineReads = fourKnGpt.reads;
+        const uint32_t quickBaselineWrites = fourKnGpt.writeAttempts;
         storage::Fat32FormatResult quickResult = {};
         const uint32_t oldVolumeId = read_u32(sector(fourKnGpt,
             restartedPartition.startLba) + 67);
@@ -10232,6 +10304,8 @@ int main()
                 storage::FAT32_FORMAT_READY
             ? storage::quick_reformat_fat32_partition(quickRequest, quickResult)
             : storage::FAT32_FORMAT_INVALID_REQUEST;
+        const std::vector<FakeWriteRecord> quickWriteTrace = fourKnGpt.writeLog;
+        const std::vector<FakeWriteRecord> quickReadTrace = fourKnGpt.readLog;
         storage::PartitionTableModel quickTable = {};
         const bool partitionIdentityPreserved = quickStatus ==
                 storage::FAT32_FORMAT_SUCCESS &&
@@ -10475,8 +10549,292 @@ int main()
               verifyStageRetryProbeStatus == storage::FAT32_FORMAT_READY &&
               verifyStageRetryStatus == storage::FAT32_FORMAT_SUCCESS,
               "corrupt final-primary read-back is incomplete after publication and marker-authorized retry restores a verified FAT32 volume");
-        if (quickRestartedIndex != 0xFF)
-            unregister_fake(quickRestartedIndex, fourKnGpt);
+
+        storage::Fat32FormatRequest refreshFailureRequest = stageFailureRequest;
+        refreshFailureRequest.testForceRescanFailure = true;
+        storage::Fat32FormatResult refreshFailure = {};
+        const storage::Fat32FormatStatus refreshFailureStatus =
+            storage::quick_reformat_fat32_partition(refreshFailureRequest,
+                refreshFailure);
+        storage::Fat32FormatResult refreshRetryProbe = {};
+        const storage::Fat32FormatStatus refreshRetryProbeStatus =
+            storage::probe_fat32_quick_reformat_partition(stageFailureRequest,
+                refreshRetryProbe);
+        storage::Fat32FormatResult refreshRetry = {};
+        const storage::Fat32FormatStatus refreshRetryStatus =
+            refreshRetryProbeStatus == storage::FAT32_FORMAT_READY
+                ? storage::quick_reformat_fat32_partition(stageFailureRequest,
+                    refreshRetry)
+                : refreshRetryProbeStatus;
+        check(refreshFailureStatus == storage::FAT32_FORMAT_RESCAN_FAILED &&
+              refreshFailure.failureStatus ==
+                  storage::FAT32_FORMAT_RESCAN_FAILED &&
+              refreshFailure.reformatState ==
+                  storage::FAT32_REFORMAT_DURABLE_BUT_REFRESH_FAILED &&
+              refreshFailure.finalProbeState == storage::FAT32_FINAL_PROBE_FAT32 &&
+              refreshFailure.verificationPassed &&
+              std::strstr(refreshFailure.diagnostic, "durable") != nullptr &&
+              std::strstr(refreshFailure.diagnostic, "rescan") != nullptr &&
+              refreshRetryProbeStatus == storage::FAT32_FORMAT_READY &&
+              !refreshRetryProbe.reformatRetry &&
+              refreshRetryStatus == storage::FAT32_FORMAT_SUCCESS,
+              "post-commit rescan failure reports durable verified FAT32 with refresh failure and permits an explicit valid-filesystem retry");
+
+        FakeDisk removalReplacement(4096, fourKnGpt.sectorCount, false);
+        uint8_t matrixIndex = quickRestartedIndex;
+        storage::PartitionEntry matrixPartition = quickRestartPartition;
+        storage::Fat32FormatRequest matrixRequest = stageFailureRequest;
+        auto refreshQuickTarget = [&]() {
+            if (matrixIndex != 0xFF) {
+                if (block::registration_is_present(matrixIndex,
+                        fourKnGpt.registrationId)) {
+                    if (!unregister_fake(matrixIndex, fourKnGpt)) return false;
+                } else {
+                    g_fakeDisks[fourKnGpt.driverId] = nullptr;
+                }
+                matrixIndex = 0xFF;
+            }
+            if (fourKnGpt.replacementIndex != 0xFF) {
+                if (!unregister_fake(fourKnGpt.replacementIndex,
+                        removalReplacement)) return false;
+                fourKnGpt.replacementIndex = 0xFF;
+                removalReplacement.registryIndex = 0xFF;
+            }
+            fourKnGpt.failReads = false;
+            fourKnGpt.failReadAtCall = 0;
+            fourKnGpt.failLba = UINT64_MAX;
+            fourKnGpt.failLbaAfterWrite = UINT64_MAX;
+            fourKnGpt.failLbaAfterWriteAtCall = 0;
+            fourKnGpt.failWriteAtCall1 = 0;
+            fourKnGpt.failWriteAtCall2 = 0;
+            fourKnGpt.failFlushAtCall = 0;
+            fourKnGpt.failFlushAtCall2 = 0;
+            fourKnGpt.removeOnReadAtCall = 0;
+            fourKnGpt.removeOnWriteAtCall = 0;
+            fourKnGpt.removeOnFlush = false;
+            fourKnGpt.removeOnFlushAt = 0;
+            fourKnGpt.replacementOnRemoval = nullptr;
+            fourKnGpt.replacementRegisteredDuringRemoval = false;
+            fourKnGpt.removed = false;
+            fs_fat::init();
+            vfs::test_clear_mounts();
+            matrixIndex = register_fake(fourKnGpt, true, true, true, false,
+                0, 1024u * 1024u);
+            storage::PartitionTableModel matrixTable = {};
+            if (matrixIndex == 0xFF || !parse_first_partition(matrixIndex,
+                    matrixTable, matrixPartition) ||
+                matrixTable.state != storage::DISK_STATE_VALID_GPT)
+                return false;
+            matrixRequest = make_format_request(matrixIndex, matrixPartition,
+                "DM27RETRY", 0xD2702701u);
+            return true;
+        };
+        auto retryQuickAfterInjectedFailure = [&]() {
+            if (!refreshQuickTarget()) return false;
+            storage::Fat32FormatResult probe = {};
+            const storage::Fat32FormatStatus probeStatus =
+                storage::probe_fat32_quick_reformat_partition(matrixRequest,
+                    probe);
+            if (probeStatus != storage::FAT32_FORMAT_READY) return false;
+            storage::Fat32FormatResult retry = {};
+            return storage::quick_reformat_fat32_partition(matrixRequest,
+                    retry) == storage::FAT32_FORMAT_SUCCESS &&
+                retry.reformatState == storage::FAT32_REFORMAT_DURABLE &&
+                retry.verificationPassed;
+        };
+
+        uint32_t publicationWriteOrdinal = 0;
+        uint32_t primaryWriteCount = 0;
+        for (const FakeWriteRecord& write : quickWriteTrace) {
+            if (write.lba != quickRestartPartition.startLba) continue;
+            if (++primaryWriteCount == 2) {
+                publicationWriteOrdinal = write.ioOrdinal;
+                break;
+            }
+        }
+        uint32_t beforePublicationReadOrdinal = 0;
+        if (publicationWriteOrdinal != 0) {
+            for (const FakeWriteRecord& read : quickReadTrace) {
+                if (read.writesAtCall == publicationWriteOrdinal - 1u &&
+                    read.ioOrdinal > beforePublicationReadOrdinal)
+                    beforePublicationReadOrdinal = read.ioOrdinal;
+            }
+        }
+        const uint64_t fat1Start = quickRestartPartition.startLba +
+            quickResult.geometry.firstFatSector;
+        const uint64_t fat1End = fat1Start + quickResult.geometry.fatSizeSectors;
+        const uint64_t fat2Start = quickRestartPartition.startLba +
+            quickResult.geometry.secondFatSector;
+        const uint64_t fat2End = fat2Start + quickResult.geometry.fatSizeSectors;
+        uint64_t rootRelative = quickResult.geometry.firstDataSector +
+            static_cast<uint64_t>(quickResult.geometry.rootCluster - 2u) *
+                quickResult.geometry.sectorsPerCluster;
+        const uint64_t rootStart = quickRestartPartition.startLba + rootRelative;
+        const uint64_t rootEnd = rootStart + quickResult.geometry.sectorsPerCluster;
+        auto writeOffsetForRange = [&](uint64_t start, uint64_t end) {
+            for (const FakeWriteRecord& write : quickWriteTrace) {
+                if (write.lba < end && write.lba + write.count > start)
+                    return write.ioOrdinal - quickBaselineWrites;
+            }
+            return 0u;
+        };
+        uint32_t fat1ReadRelativeWrites = 0;
+        uint32_t finalBootReadRelativeWrites = 0;
+        for (const FakeWriteRecord& read : quickReadTrace) {
+            if (read.lba == fat1Start &&
+                read.writesAtCall > quickBaselineWrites &&
+                fat1ReadRelativeWrites == 0)
+                fat1ReadRelativeWrites = read.writesAtCall - quickBaselineWrites;
+            if (publicationWriteOrdinal != 0 &&
+                read.lba == quickRestartPartition.startLba &&
+                read.writesAtCall == publicationWriteOrdinal) {
+                finalBootReadRelativeWrites =
+                    read.writesAtCall - quickBaselineWrites;
+                break;
+            }
+        }
+
+        auto removalTrial = [&](uint32_t relativeWrite,
+                                uint32_t relativeRead,
+                                uint32_t relativeFlush,
+                                bool attachReplacement) {
+            if (!refreshQuickTarget()) return false;
+            const storage::TargetIdentity removedIdentity =
+                matrixRequest.targetSnapshot;
+            if (relativeWrite != 0)
+                fourKnGpt.removeOnWriteAtCall =
+                    fourKnGpt.writeAttempts + relativeWrite;
+            if (relativeRead != 0)
+                fourKnGpt.removeOnReadAtCall =
+                    fourKnGpt.reads + relativeRead;
+            if (relativeFlush != 0) {
+                fourKnGpt.removeOnFlush = true;
+                fourKnGpt.removeOnFlushAt =
+                    fourKnGpt.flushes + relativeFlush;
+            }
+            if (attachReplacement)
+                fourKnGpt.replacementOnRemoval = &removalReplacement;
+            storage::Fat32FormatResult failure = {};
+            const storage::Fat32FormatStatus failureStatus =
+                storage::quick_reformat_fat32_partition(matrixRequest, failure);
+            const bool exactIncarnationInvalidated = fourKnGpt.removed &&
+                storage::revalidate_target_identity(removedIdentity) !=
+                    storage::TARGET_VALID;
+            const bool replacementProtected = !attachReplacement ||
+                (fourKnGpt.replacementRegisteredDuringRemoval &&
+                 removalReplacement.writeAttempts == 0);
+            const bool retrySucceeded =
+                retryQuickAfterInjectedFailure();
+            return failureStatus == storage::FAT32_FORMAT_REFORMAT_INCOMPLETE &&
+                failure.reformatState >= storage::FAT32_REFORMAT_IN_PROGRESS &&
+                exactIncarnationInvalidated && replacementProtected &&
+                retrySucceeded && matrixRequest.targetSnapshot.registrationId !=
+                    removedIdentity.registrationId;
+        };
+
+        const uint32_t firstQuickWrite = quickWriteTrace.empty() ? 0u :
+            quickWriteTrace.front().ioOrdinal - quickBaselineWrites;
+        const uint32_t postInvalidationWrite = quickWriteTrace.size() > 3
+            ? quickWriteTrace[3].ioOrdinal - quickBaselineWrites : 0u;
+        check(firstQuickWrite != 0 &&
+              removalTrial(firstQuickWrite, 0, 0, false),
+              "removal before old boot invalidation cannot report success and the old FAT32 remains explicitly retryable");
+        check(postInvalidationWrite != 0 &&
+              removalTrial(postInvalidationWrite, 0, 0, false),
+              "removal after invalidation Flush stops the pinned incarnation and a fresh registration can retry");
+        const uint32_t fat1WriteOffset = writeOffsetForRange(fat1Start, fat1End);
+        check(fat1WriteOffset != 0 &&
+              removalTrial(fat1WriteOffset, 0, 0, true),
+              "removal during FAT1 clearing stops writes before a registered replacement device and retry succeeds on a fresh incarnation");
+        const uint32_t fat2WriteOffset = writeOffsetForRange(fat2Start, fat2End);
+        check(fat2WriteOffset != 0 &&
+              removalTrial(fat2WriteOffset, 0, 0, false),
+              "removal during FAT2 clearing returns incomplete and retry clears both copies again");
+        const uint32_t rootWriteOffset = writeOffsetForRange(rootStart, rootEnd);
+        check(rootWriteOffset != 0 &&
+              removalTrial(rootWriteOffset, 0, 0, false),
+              "removal during root-cluster clearing returns incomplete and the identity-bound retry succeeds");
+        const uint32_t beforePublicationReadOffset =
+            beforePublicationReadOrdinal > quickBaselineReads
+                ? beforePublicationReadOrdinal - quickBaselineReads : 0u;
+        check(beforePublicationReadOffset != 0 &&
+              removalTrial(0, beforePublicationReadOffset, 0, false),
+              "removal during final prepublication verification prevents primary BPB publication and permits retry");
+        check(removalTrial(0, 0, 3, false),
+              "removal after primary publication but before its final Flush is not reported as success and remains retryable");
+
+        bool preflightReadUnchanged = refreshQuickTarget();
+        if (preflightReadUnchanged) {
+            std::vector<uint8_t> oldPrimary(4096), oldBackup(4096), afterPrimary(4096), afterBackup(4096);
+            const uint64_t oldBackupLba = matrixPartition.startLba +
+                quickResult.geometry.backupBootSector;
+            const bool capturedOldBoot = fake_sector_copy(fourKnGpt,
+                matrixPartition.startLba, oldPrimary.data()) &&
+                fake_sector_copy(fourKnGpt, oldBackupLba, oldBackup.data());
+            const uint32_t attemptsBeforeReadFailure = fourKnGpt.writeAttempts;
+            fourKnGpt.failReads = true;
+            storage::Fat32FormatResult preflightReadFailure = {};
+            const storage::Fat32FormatStatus preflightReadStatus =
+                storage::quick_reformat_fat32_partition(matrixRequest,
+                    preflightReadFailure);
+            fourKnGpt.failReads = false;
+            preflightReadUnchanged = capturedOldBoot &&
+                preflightReadStatus == storage::FAT32_FORMAT_READ_UNAVAILABLE &&
+                preflightReadFailure.failedBeforeWrite &&
+                fourKnGpt.writeAttempts == attemptsBeforeReadFailure &&
+                fake_sector_copy(fourKnGpt, matrixPartition.startLba,
+                    afterPrimary.data()) && afterPrimary == oldPrimary &&
+                fake_sector_copy(fourKnGpt, oldBackupLba,
+                    afterBackup.data()) && afterBackup == oldBackup &&
+                retryQuickAfterInjectedFailure();
+        }
+        check(preflightReadUnchanged,
+              "preflight read failure occurs before the destructive commit and leaves both old boot copies unchanged");
+
+        auto verificationReadFailureTrial = [&](uint64_t failedLba,
+                                                uint32_t relativeWrites,
+                                                storage::Fat32ReformatState expectedState) {
+            if (!refreshQuickTarget() || relativeWrites == 0) return false;
+            const uint32_t attemptsBefore = fourKnGpt.writeAttempts;
+            fourKnGpt.failLbaAfterWrite = failedLba;
+            fourKnGpt.failLbaAfterWriteAtCall = attemptsBefore + relativeWrites;
+            storage::Fat32FormatResult failure = {};
+            const storage::Fat32FormatStatus failureStatus =
+                storage::quick_reformat_fat32_partition(matrixRequest, failure);
+            fourKnGpt.failLbaAfterWrite = UINT64_MAX;
+            fourKnGpt.failLbaAfterWriteAtCall = 0;
+            const bool truthful =
+                failureStatus == storage::FAT32_FORMAT_REFORMAT_INCOMPLETE &&
+                failure.failureStatus ==
+                    storage::FAT32_FORMAT_VERIFICATION_FAILED &&
+                failure.reformatState == expectedState &&
+                !failure.verificationPassed;
+            return truthful && retryQuickAfterInjectedFailure();
+        };
+        check(verificationReadFailureTrial(matrixPartition.startLba, 3u,
+                  storage::FAT32_REFORMAT_IN_PROGRESS),
+              "invalidation verification read failure is classified as incomplete after the destructive commit and retries safely");
+        check(fat1ReadRelativeWrites != 0 &&
+              verificationReadFailureTrial(fat1Start, fat1ReadRelativeWrites,
+                  storage::FAT32_REFORMAT_IN_PROGRESS),
+              "FAT verification read failure cannot claim success and retries with full FAT initialization");
+        check(finalBootReadRelativeWrites != 0 &&
+              verificationReadFailureTrial(matrixPartition.startLba,
+                  finalBootReadRelativeWrites,
+                  storage::FAT32_REFORMAT_NEW_FILESYSTEM_WRITTEN_NOT_DURABLE),
+              "final BPB verification read failure remains a non-durable incomplete operation and retries safely");
+
+        if (matrixIndex != 0xFF) {
+            (void)unregister_fake(matrixIndex, fourKnGpt);
+            matrixIndex = 0xFF;
+        }
+        if (fourKnGpt.replacementIndex != 0xFF) {
+            (void)unregister_fake(fourKnGpt.replacementIndex,
+                removalReplacement);
+            fourKnGpt.replacementIndex = 0xFF;
+            removalReplacement.registryIndex = 0xFF;
+        }
+
     }
 
     run_usb_mass_storage_tests();
