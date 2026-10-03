@@ -627,6 +627,21 @@ static uint64_t GX_CALL host_bare_get_ticks_ms(gx_app_context* context)
     return app_context_valid(context) ? pit::ticks() * 10ULL : 0;
 }
 
+static gx_result GX_CALL host_bare_get_document_activation_path(gx_app_context* context,
+                                                                 char* path,
+                                                                 uint32_t pathCapacity,
+                                                                 uint32_t* requiredBytes)
+{
+    if (!app_context_valid(context) || !requiredBytes ||
+        !app_pointer_range(requiredBytes, sizeof(*requiredBytes)) ||
+        (pathCapacity > 0 && (!path || !app_pointer_range(path, pathCapacity)))) {
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    *requiredBytes = 0;
+    if (pathCapacity > 0) path[0] = '\0';
+    return GX_ERROR_UNSUPPORTED;
+}
+
 static void put_decimal_u64(uint64_t value);
 
 static gx_handle GX_CALL host_native_window_create(gx_app_context* context,
@@ -1214,6 +1229,7 @@ static void initialize_app_context()
         host_bare_development_debug_inspect_variables;
     s_appRuntime.hostCalls.bare_metal_development_debug_evaluate_expression =
         host_bare_development_debug_evaluate_expression;
+    s_appRuntime.hostCalls.get_document_activation_path = host_bare_get_document_activation_path;
 
     s_appRuntime.appContext = {};
     s_appRuntime.appContext.size = sizeof(gx_app_context);

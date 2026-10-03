@@ -195,6 +195,19 @@ typedef struct gx_host_calls {
     gx_result (GX_CALL *bare_metal_development_debug_evaluate_expression)(gx_app_context* ctx,
                                                                            const gx_development_debug_request* request,
                                                                            gx_development_debug_expression* result);
+    /* Optional App Model document activation. This is an append-only tail
+     * slot and callers must check size before reading it. A provider copies
+     * the UTF-8 path into the caller-owned bounded buffer; requiredBytes
+     * includes the trailing NUL. GX_OK with requiredBytes == 0 means there
+     * is no document target. If the buffer is too small, the provider sets
+     * requiredBytes and returns no truncated path. Providers without an
+     * activation context may omit the slot or return GX_ERROR_UNSUPPORTED.
+     * The callback is synchronous, requires a live application context, and
+     * must not retain the caller's output buffer. */
+    gx_result (GX_CALL *get_document_activation_path)(gx_app_context* ctx,
+                                                       char* path,
+                                                       uint32_t pathCapacity,
+                                                       uint32_t* requiredBytes);
 } gx_host_calls;
 
 #ifdef __cplusplus
