@@ -565,6 +565,18 @@ bool parseStatePseudo(SourceView source, std::size_t colon,
         pseudo = NavigatorScriptStatePseudo::Focus;
         return true;
     }
+    if (equalsAsciiCaseInsensitive("first-child")) {
+        pseudo = NavigatorScriptStatePseudo::FirstChild;
+        return true;
+    }
+    if (equalsAsciiCaseInsensitive("last-child")) {
+        pseudo = NavigatorScriptStatePseudo::LastChild;
+        return true;
+    }
+    if (equalsAsciiCaseInsensitive("only-child")) {
+        pseudo = NavigatorScriptStatePseudo::OnlyChild;
+        return true;
+    }
     return false;
 }
 
@@ -3264,6 +3276,48 @@ bool NavigatorScriptHostAdapter::selectorStatePseudoMatches(
         // activeElementSerial() is the adapter's canonical projection of the
         // generation-checked focused serial and supported focused control.
         return activeElementSerial() == element.serial;
+    case NavigatorScriptStatePseudo::FirstChild: {
+        HostInstanceId parentSerial = 0u;
+        HostInstanceId previousSerial = 0u;
+        HostInstanceId firstChildSerial = 0u;
+        return resolveStructuralParentSerial(element.serial, parentSerial) &&
+            parentSerial != 0u &&
+            elementChildAt(parentSerial, 0u, firstChildSerial) &&
+            firstChildSerial == element.serial &&
+            !elementSiblingAt(element.serial, false, previousSerial) &&
+            previousSerial == 0u;
+    }
+    case NavigatorScriptStatePseudo::LastChild: {
+        HostInstanceId parentSerial = 0u;
+        HostInstanceId nextSerial = 0u;
+        HostInstanceId lastChildSerial = 0u;
+        if (!resolveStructuralParentSerial(element.serial, parentSerial) ||
+            parentSerial == 0u) return false;
+        const std::size_t childCount = elementChildCount(parentSerial);
+        return childCount != 0u &&
+            elementChildAt(parentSerial, childCount - 1u, lastChildSerial) &&
+            lastChildSerial == element.serial &&
+            !elementSiblingAt(element.serial, true, nextSerial) &&
+            nextSerial == 0u;
+    }
+    case NavigatorScriptStatePseudo::OnlyChild: {
+        HostInstanceId parentSerial = 0u;
+        HostInstanceId previousSerial = 0u;
+        HostInstanceId nextSerial = 0u;
+        HostInstanceId firstChildSerial = 0u;
+        HostInstanceId lastChildSerial = 0u;
+        if (!resolveStructuralParentSerial(element.serial, parentSerial) ||
+            parentSerial == 0u || elementChildCount(parentSerial) != 1u)
+            return false;
+        return elementChildAt(parentSerial, 0u, firstChildSerial) &&
+            firstChildSerial == element.serial &&
+            elementChildAt(parentSerial, 0u, lastChildSerial) &&
+            lastChildSerial == element.serial &&
+            !elementSiblingAt(element.serial, false, previousSerial) &&
+            previousSerial == 0u &&
+            !elementSiblingAt(element.serial, true, nextSerial) &&
+            nextSerial == 0u;
+    }
     }
     return false;
 }

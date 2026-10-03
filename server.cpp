@@ -4337,6 +4337,65 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js52AfterClick, 1100) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js53FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js53.html";
+    const bool js53Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js53FixtureUrl);
+    const std::string js53InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS53 hosted structural-pseudo fixture loads and evaluates",
+        js53Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js53FixtureUrl &&
+        contains(js53InitialText, "Navigator JavaScript JS53") &&
+        contains(js53InitialText,
+            "initial:basic=true:only=true:traversal=true:compounds=true:parser=true:root=true:hidden=true:relations=true:lists=true:form=true:event=false:lastEvent=false:nested=false:metadata=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js53Loaded) + ",text=" +
+        summarizeText(js53InitialText, 1200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS53 hosted first, last, and only child match authoritative traversal",
+        js53Loaded && contains(js53InitialText,
+            ":basic=true:only=true:traversal=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "first/middle/last and sole-child results agree with parentElement, children, sibling properties, and childElementCount");
+    add("JS53 hosted parser compounds and exact pseudo names pass",
+        js53Loaded && contains(js53InitialText,
+            ":compounds=true:parser=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "pseudo-only, universal, tag, ID, class, attribute, complete compound, ASCII-case, malformed-name, functional, and second-pseudo checks pass");
+    add("JS53 hosted root, hidden Element, and form ownership semantics pass",
+        js53Loaded && contains(js53InitialText,
+            ":root=true:hidden=true:") &&
+        contains(js53InitialText, ":form=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "root/no-parent Elements fail closed, hidden represented Elements count structurally, and form ownership leaves structural parentage unchanged");
+    add("JS53 hosted relations, query APIs, closest, and list dedup pass",
+        js53Loaded && contains(js53InitialText,
+            ":relations=true:lists=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "descendant/child/adjacent/general-sibling selectors, scoped queries, closest, structural ordering, and sole-child list overlap all pass");
+    const bool js53FirstClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("first");
+    const std::string js53AfterFirstClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS53 hosted first-child Event matching survives nested dispatch",
+        js53FirstClick && contains(js53AfterFirstClick,
+            "event:basic=true:only=true:traversal=true:compounds=true:parser=true:root=true:hidden=true:relations=true:lists=true:form=true:event=true:lastEvent=false:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js53FirstClick) + ",text=" +
+        summarizeText(js53AfterFirstClick, 1200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    const bool js53LastClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("last");
+    const std::string js53AfterLastClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS53 hosted last-child Event matching preserves Event metadata",
+        js53LastClick && contains(js53AfterLastClick,
+            "event:basic=true:only=true:traversal=true:compounds=true:parser=true:root=true:hidden=true:relations=true:lists=true:form=true:event=true:lastEvent=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js53LastClick) + ",text=" +
+        summarizeText(js53AfterLastClick, 1200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

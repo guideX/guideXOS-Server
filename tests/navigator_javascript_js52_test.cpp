@@ -151,7 +151,7 @@ var parserListDeduplicates = parserList.length === 3 &&
   parserList[2] === document.getElementById("option-a");
 var parserUnknown = document.querySelector(":hover") === null &&
   document.querySelectorAll(":enabled").length === 0 &&
-  !agree.matches(":active") && agree.closest(":first-child") === null;
+  !agree.matches(":active") && agree.closest(":first-of-type") === null;
 var parserFunctionRejected = document.querySelector(":not(input)") === null &&
   document.querySelector(":is(input)") === null &&
   document.querySelector(":nth-child(1)") === null &&

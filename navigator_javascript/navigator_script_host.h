@@ -118,6 +118,9 @@ enum class NavigatorScriptStatePseudo : std::uint8_t {
     Checked,
     Disabled,
     Focus,
+    FirstChild,
+    LastChild,
+    OnlyChild,
 };
 
 struct NavigatorScriptSimpleSelectorDescriptor {

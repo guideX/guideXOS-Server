@@ -1,0 +1,122 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS53</title></head>
+<body>
+<div id="panel" class="panel">
+  <button id="first" class="item action" data-role="primary">First</button>
+  <input id="middle" class="item field" type="text" value="middle">
+  <button id="last" class="item action">Last</button>
+</div>
+<h1>Navigator JavaScript JS53</h1>
+<div id="single-parent" class="group">
+  <span id="only" class="item" data-role="primary">Only</span>
+</div>
+<div id="nested-parent" class="group">
+  <div id="nested-first" class="entry">
+    <button id="nested-button" class="action">Nested</button>
+  </div>
+  <div id="nested-last" class="entry">Last entry</div>
+</div>
+<div id="hidden-parent">
+  <span id="hidden" style="display:none">Hidden</span>
+  <span id="visible">Visible</span>
+</div>
+<form id="form-owner"></form>
+<div id="outside-parent">
+  <input id="form-owned" form="form-owner" type="text">
+</div>
+<p id="js53-state">initial</p>
+<script>
+var js53State = document.getElementById("js53-state");
+var panel = document.getElementById("panel");
+var first = document.getElementById("first");
+var middle = document.getElementById("middle");
+var last = document.getElementById("last");
+var only = document.getElementById("only");
+var nestedButton = document.getElementById("nested-button");
+var nestedFirst = document.getElementById("nested-first");
+var firstCollection = document.querySelectorAll(":first-child");
+var lastCollection = document.querySelectorAll(":last-child");
+var onlyCollection = document.querySelectorAll(":only-child");
+var listCollection = document.querySelectorAll(":first-child, :last-child");
+var firstEvent = false;
+var lastEvent = false;
+var eventNested = false;
+var eventMetadata = false;
+var basic = first.matches(":first-child") && !first.matches(":last-child") &&
+  !middle.matches(":first-child") && !middle.matches(":last-child") &&
+  last.matches(":last-child") && !last.matches(":first-child");
+var onlyState = only.matches(":only-child") && only.matches(":first-child") &&
+  only.matches(":last-child");
+var traversal = panel.firstElementChild === first &&
+  panel.lastElementChild === last && panel.childElementCount === 3 &&
+  first.previousElementSibling === null && last.nextElementSibling === null &&
+  panel.children[0] === first && panel.children[2] === last;
+var compounds = first.matches("button:first-child") &&
+  first.matches("#first:first-child") && first.matches(".item:first-child") &&
+  first.matches("[data-role=primary]:first-child") &&
+  first.matches("button#first.item.action[data-role=primary]:first-child");
+var parserRules = first.matches(":FIRST-CHILD") && first.matches(":First-Child") &&
+  document.querySelector(":firstchild") === null &&
+  document.querySelector(":first--child") === null &&
+  document.querySelector(":first-child-extra") === null &&
+  document.querySelector(":first-child()") === null &&
+  document.querySelector(":last-child()") === null &&
+  document.querySelector(":only-child()") === null &&
+  document.querySelector("#first:first-child:last-child") === null;
+var root = document.querySelector("html");
+var rootSafe = root !== null && root.parentElement === null &&
+  !root.matches(":first-child") && !root.matches(":last-child") &&
+  !root.matches(":only-child");
+var hiddenStructural = document.getElementById("hidden").matches(":first-child") &&
+  document.getElementById("visible").matches(":last-child");
+var relations = document.querySelector(".panel:first-child > .item:first-child") === first &&
+  document.querySelector(".panel:first-child .item:last-child") === last &&
+  document.querySelector(".item:first-child + input") === middle &&
+  document.querySelector("input + .item:last-child") === last &&
+  document.querySelector(".item:first-child ~ .item:last-child") === last &&
+  nestedButton.closest(".entry:first-child") === nestedFirst &&
+  only.closest(":only-child") === only;
+var queryLists = document.querySelector("#last, #first") === first &&
+  document.querySelectorAll("#last, #first").length === 2 &&
+  document.querySelectorAll("#last, #first")[0] === first &&
+  document.querySelectorAll("#last, #first")[1] === last &&
+  document.querySelectorAll("#only:first-child, #only:last-child").length === 1 &&
+  panel.querySelectorAll(".item:first-child, .item:last-child").length === 2 &&
+  panel.querySelector("#panel:first-child") === null;
+var formIndependent = document.getElementById("form-owned").parentElement ===
+  document.getElementById("outside-parent") &&
+  document.getElementById("form-owned").matches(":only-child");
+first.addEventListener("click", function (event) {
+  var target = event.target;
+  var current = event.currentTarget;
+  var phase = event.eventPhase;
+  firstEvent = target === first && target.matches(":first-child") &&
+    target.closest(".panel:first-child") === panel;
+  middle.click();
+  eventNested = event.target === target && event.currentTarget === current &&
+    event.eventPhase === phase;
+  eventMetadata = event.relatedTarget === null &&
+    event.defaultPrevented === false && current === first && phase === 2;
+  js53Snapshot("event");
+});
+last.addEventListener("click", function (event) {
+  lastEvent = event.target.matches(":last-child");
+  js53Snapshot("event");
+});
+middle.addEventListener("click", function (event) {
+  eventNested = event.target === middle && !event.target.matches(":first-child");
+});
+function js53Snapshot(label) {
+  js53State.textContent = label + ":basic=" + basic + ":only=" + onlyState +
+    ":traversal=" + traversal + ":compounds=" + compounds +
+    ":parser=" + parserRules + ":root=" + rootSafe +
+    ":hidden=" + hiddenStructural + ":relations=" + relations +
+    ":lists=" + queryLists + ":form=" + formIndependent +
+    ":event=" + firstEvent + ":lastEvent=" + lastEvent +
+    ":nested=" + eventNested + ":metadata=" + eventMetadata;
+}
+js53Snapshot("initial");
+</script>
+</body>
+</html>

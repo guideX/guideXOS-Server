@@ -5342,3 +5342,102 @@ folders. The wrapper regenerated `game.o`, `main.o`, and `renderer.o`; each was
 restored from its pre-attempt copy. Final comparison found zero changed files,
 zero missing files, and zero extras. Generated outputs are excluded from the
 JS52 source commit.
+
+## JS53: bounded structural child pseudo-classes
+
+JS53 adds the zero-argument pseudo-classes `:first-child`, `:last-child`, and
+`:only-child` to the shared selector matcher. The pseudo value is stored in the
+existing `NavigatorScriptStatePseudo` enum; no second pseudo field, child
+index, or selector-side cache is added. The parser compares pseudo keywords
+ASCII-case-insensitively and requires an exact name, so mixed-case
+`:First-Child` works while malformed hyphen spellings, functional forms,
+unknown names, and a second pseudo on one simple selector fail closed.
+
+Child position uses only the current document's represented structural
+Elements. Text, comments, parser tokens, layout visibility, and form ownership
+do not participate. A hidden but represented Element still occupies its
+structural position. Each match first validates the current Element and a
+valid, nonzero structural parent. Therefore a document/root Element with no
+parent matches none of these pseudos, even when it has no sibling. A
+self-parent or missing-parent serial also fails closed.
+
+The matcher reuses `resolveStructuralParentSerial`, `elementSiblingAt`,
+`elementChildAt`, and `elementChildCount`, the bounded helpers already used by
+parent/sibling traversal and relation selectors:
+
+- `:first-child` requires a valid parent, the candidate to be that parent's
+  first structural Element child, and no previous Element sibling.
+- `:last-child` requires a valid parent, the candidate to be that parent's
+  last structural Element child, and no next Element sibling.
+- `:only-child` requires a valid parent with exactly one Element child, that
+  child to be the candidate, and no previous or next Element sibling.
+
+The tree's structural order is authoritative. Thus `firstElementChild`,
+`lastElementChild`, `previousElementSibling`, `nextElementSibling`,
+`childElementCount`, and `children` agree with the pseudo results. A sole
+structural child can match all three pseudos independently. `formControl`'s
+`parentFormSerial`, form membership, and named controls never supply a
+structural parent.
+
+The existing compound-selector order and bounds remain in force: optional
+tag, optional ID, class tokens, optional attribute predicate, then one
+pseudo; pseudo-only and `*` plus pseudo forms are supported. The three pseudos
+compose with tag, ID, class, and attribute selectors and work on either side
+of the existing one-relation selector grammar. One-to-four member selector
+lists retain document-order matching and deduplicate a sole child that matches
+both `:first-child` and `:last-child`. `querySelector()`, live
+`querySelectorAll()` collections, scoped queries, `matches()`, and `closest()`
+all use the same matcher. Held collections re-read current structure on each
+access; JS53 does not add public DOM insertion or removal.
+
+Generation-checked canonical Element identity is validated before structural
+lookups. Stale `matches()` returns false, stale `closest()` returns null, and
+stale collections retain the existing fail-closed behavior even if a new
+document reuses an old serial. Pseudo matching is read-only and does not alter
+parent/sibling metadata, attributes, form state, focus, generation, or Event
+state.
+
+The focused suite is `tests/navigator_javascript_js53_test.cpp`, run with
+`scripts/smoke-navigator-javascript-js53.ps1`. It covers parser rejection and
+the 256-byte selector cap, all three structural rules, root/no-parent behavior,
+hidden Elements, form-owner independence, traversal consistency, selector
+composition and relations, list ordering/deduplication, scoped queries,
+`matches()` and `closest()`, live collection reevaluation after a synthetic
+parent reassignment, malformed parent metadata, 1,000 repeated matches per
+pseudo, 300 held-collection rereads, nested click dispatch, Event metadata,
+stale handles, serial reuse, and first/last matching among 1,000 structural
+siblings within the 1,024-node bound. The focused suite passes 211/211 checks;
+the strict `-Wall -Wextra -Werror -pedantic` adapter/runtime lane passes.
+
+The production `build.bat` build passes. The full JavaScript matrix, including
+lexer, parser, runtime, JS6–JS52, and JS53, passes 51/51 lanes. The JS36–JS52
+focused regressions all pass; JS36–JS43 report 114/114, 180/180, 152/152,
+218/218, 155/155, 220/220, 235/235, and 277/277 checks, respectively. JS44,
+JS45, JS46, JS47, JS48, JS49, JS50, JS51, and JS52 report 183/183, 184/184,
+220/220, 137/137, 136/136, 150/150, 313/313, 278/278, and 319/319 checks.
+
+The production hosted aggregate passes all seven JS53 checks, including root
+failure, traversal agreement, relation matching, selector-list deduplication,
+and first/last Event matching through nested dispatch. The aggregate reports
+572 passed / 7 failed / 579 total. Its seven failures remain CSS 3C, CSS 3G,
+CSS 6A, three CSS 6B checks, and CSS 6C; there are no new JS53 failures.
+
+The JS53 kernel wrapper stops at the existing PacMan Native ELF link errors
+for `pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)`. The independent direct kernel lane
+fails at `mbedtls_check_config.h:51` and `:64`, for partial ECC curve
+acceleration and missing ECDHE-RSA prerequisites. Neither dependency was
+modified. No fresh kernel was produced, so no QEMU proof is claimed.
+
+Before those kernel attempts, the generated-output audit snapshotted 316 files
+totaling 147,184,909 bytes across `ESP/`, `out/`, PacMan, the amd64 PacMan
+objects, `kernel/build/`, and both bootloader Release folders. The wrapper
+changed `game.o`, `renderer.o`, and `main.o`; all three were restored from the
+snapshot. Final comparison found zero changed, zero missing, and zero extra
+files. Generated artifacts are excluded from the JS53 source commit.
+
+JS53 does not add `:first-of-type`, `:last-of-type`, `:only-of-type`, any
+`nth-*` pseudo, `:empty`, `:root`, functional pseudos, pseudo-elements,
+multiple pseudos on one simple selector, more relation depth, or public DOM
+insertion/removal APIs. This remains a bounded structural subset of CSS
+selectors.
