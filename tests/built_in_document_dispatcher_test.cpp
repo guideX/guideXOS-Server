@@ -175,13 +175,13 @@ int main() {
     AppActivationContext unsupportedKind = ownedResolution.activation;
     unsupportedKind.kind = AppActivationKind::Application;
     check(!dispatcher.Dispatch(registry, unsupportedKind, error) &&
-        error == "Built-in document dispatcher rejects non-document activation",
+        error == "Built-in activation target is invalid, unsupported, or overlong",
         "generic dispatcher rejects unsupported activation kinds");
 
     AppActivationContext stale = ownedResolution.activation;
     ++stale.registrationGeneration;
     check(!dispatcher.Dispatch(registry, stale, error) &&
-        error == "Built-in document activation target is stale or unavailable",
+        error == "Built-in activation target is stale or unavailable",
         "generic dispatcher rejects a stale registration target");
 
     AppRegistry missingRegistry(false, storePath.string() + ".missing");
@@ -193,12 +193,12 @@ int main() {
     AppActivationContext overlong = ownedResolution.activation;
     overlong.documentPath.assign(kAppModelMaxDocumentPathBytes + 1, 'x');
     check(!dispatcher.Dispatch(registry, overlong, error) &&
-        error == "Built-in document activation target is invalid or overlong",
+        error == "Built-in activation target is invalid, unsupported, or overlong",
         "generic dispatcher rejects a document path beyond the shared 4096-byte bound");
 
     BuiltInDocumentDispatcher noHandler;
     check(!noHandler.Dispatch(registry, ownedResolution.activation, error) &&
-        error == "No built-in document activation dispatcher is registered for this application",
+        error == "No built-in activation dispatcher is registered for this application",
         "generic dispatcher fails closed when a current built-in has no launch adapter");
 
     std::error_code ignored;

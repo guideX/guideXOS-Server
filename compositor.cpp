@@ -2336,6 +2336,14 @@ namespace gxos {
             return labels[index];
         }
 
+        static std::string startMenuCanonicalAppIdAt(const std::vector<std::string>& labels,
+                                                     const std::vector<std::string>& targetIds,
+                                                     int index) {
+            if (index < 0 || index >= static_cast<int>(labels.size()) ||
+                index >= static_cast<int>(targetIds.size())) return std::string();
+            return targetIds[index];
+        }
+
         static const char* kHostedTrashPath = "/Trash";
         static const char* kHostedTrashInfoSuffix = ".trashinfo";
 
@@ -3351,6 +3359,15 @@ namespace gxos {
             // The list stores the canonical App Model id when resolution succeeds.  An
             // ambiguous legacy label remains visible but is intentionally not launched.
             launchAction(appName);
+            g_startMenuVisible = false;
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            requestRepaint();
+#else
+            g_needsRedraw = true;
+#endif
+        }
+
+        void Compositor::closeStartMenu() {
             g_startMenuVisible = false;
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             requestRepaint();
@@ -5526,9 +5543,12 @@ namespace gxos {
                             std::string action = g_startMenuAllProgs
                                 ? startMenuActionAt(g_startMenuAllProgsSorted, g_startMenuAllProgsTargetIds, idx)
                                 : startMenuActionAt(g_startMenuPinnedRecent, g_startMenuPinnedRecentTargetIds, idx);
+                            const std::string canonicalAppId = g_startMenuAllProgs
+                                ? startMenuCanonicalAppIdAt(g_startMenuAllProgsSorted, g_startMenuAllProgsTargetIds, idx)
+                                : startMenuCanonicalAppIdAt(g_startMenuPinnedRecent, g_startMenuPinnedRecentTargetIds, idx);
                             Logger::write(LogLevel::Info, "Start Menu context menu creation requested for app: " + action);
                             g_startMenuSel = idx;
-                            RightClickMenu::ShowForStartMenuApp(mx, my, action);
+                            RightClickMenu::ShowForStartMenuApp(mx, my, action, canonicalAppId);
                             requestRepaint();
                             return 0;
                         }

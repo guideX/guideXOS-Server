@@ -2,6 +2,7 @@
 #pragma once
 #include "process.h"
 #include "ipc_bus.h"
+#include "start_menu_action_model.h"
 #include <string>
 #include <vector>
 
@@ -21,7 +22,8 @@ namespace gxos { namespace gui {
         /// Show the right-click menu at the given screen coordinates
         static void Show(int x, int y);
         static void ShowForDesktopItem(int x, int y, int desktopItemIndex);
-        static void ShowForStartMenuApp(int x, int y, const std::string& appName);
+        static void ShowForStartMenuApp(int x, int y, const std::string& appName,
+                                        const std::string& canonicalAppId);
 
         /// Hide the menu
         static void Hide();
@@ -49,6 +51,8 @@ namespace gxos { namespace gui {
             bool hasSubmenu;
             bool checked;
             bool separator;
+            bool appAction;
+            apps::AppActionInfo actionSnapshot;
         };
 
         static void buildItems();
@@ -63,6 +67,7 @@ namespace gxos { namespace gui {
         static std::string s_desktopItemTargetLabel;
         static bool s_desktopItemTargetIsDirectory;
         static std::string s_startMenuAppName;
+        static std::string s_startMenuAppId;
         static bool s_iconSubmenuVisible;
         static int s_iconSubmenuIndex;
 

@@ -172,6 +172,7 @@ namespace gxos { namespace gui {
         static void arrangeHostedDesktopIcons();
         static void openDesktopItem(int index);
         static void openStartMenuApp(const std::string& appName);
+        static void closeStartMenu();
         static bool pinStartMenuAppToDesktop(const std::string& appName);
         static bool unpinStartMenuAppFromDesktop(const std::string& appName);
         static bool isStartMenuAppPinnedToDesktop(const std::string& appName);

@@ -8,6 +8,7 @@
 #include "file_explorer.h"
 #include "notification_manager.h"
 #include "kernel/core/include/kernel/system_font.h"
+#include <algorithm>
 #include <cstring>
 
 namespace gxos { namespace gui {
@@ -46,6 +47,7 @@ std::string RightClickMenu::s_desktopItemTargetPath;
 std::string RightClickMenu::s_desktopItemTargetLabel;
 bool RightClickMenu::s_desktopItemTargetIsDirectory = false;
 std::string RightClickMenu::s_startMenuAppName;
+std::string RightClickMenu::s_startMenuAppId;
 bool RightClickMenu::s_iconSubmenuVisible = false;
 int RightClickMenu::s_iconSubmenuIndex = -1;
 
@@ -58,6 +60,7 @@ void RightClickMenu::Show(int x, int y) {
     s_desktopItemTargetLabel.clear();
     s_desktopItemTargetIsDirectory = false;
     s_startMenuAppName.clear();
+    s_startMenuAppId.clear();
     s_iconSubmenuVisible = false;
     buildItems();
     Logger::write(LogLevel::Info, "RightClickMenu shown");
@@ -80,12 +83,14 @@ void RightClickMenu::ShowForDesktopItem(int x, int y, int desktopItemIndex) {
         }
     }
     s_startMenuAppName.clear();
+    s_startMenuAppId.clear();
     s_iconSubmenuVisible = false;
     buildItems();
     Logger::write(LogLevel::Info, "RightClickMenu shown for desktop item");
 }
 
-void RightClickMenu::ShowForStartMenuApp(int x, int y, const std::string& appName) {
+void RightClickMenu::ShowForStartMenuApp(int x, int y, const std::string& appName,
+                                         const std::string& canonicalAppId) {
     s_x = x;
     s_y = y;
     s_visible = true;
@@ -94,8 +99,18 @@ void RightClickMenu::ShowForStartMenuApp(int x, int y, const std::string& appNam
     s_desktopItemTargetLabel.clear();
     s_desktopItemTargetIsDirectory = false;
     s_startMenuAppName = appName;
+    s_startMenuAppId = canonicalAppId;
     s_iconSubmenuVisible = false;
     buildItems();
+    const ActiveDisplayConfiguration display = Compositor::activeDisplayConfiguration();
+    if (display.valid()) {
+        const int left = display.virtualDesktop.left;
+        const int top = display.virtualDesktop.top;
+        s_x = left + ClampStartMenuContextOrigin(
+            s_x - left, display.virtualDesktop.width(), kMenuW);
+        s_y = top + ClampStartMenuContextOrigin(
+            s_y - top, display.virtualDesktop.height(), menuHeight());
+    }
     Logger::write(LogLevel::Info, "Start Menu context menu created for app: " + appName);
 }
 
@@ -106,6 +121,7 @@ void RightClickMenu::Hide() {
     s_desktopItemTargetLabel.clear();
     s_desktopItemTargetIsDirectory = false;
     s_startMenuAppName.clear();
+    s_startMenuAppId.clear();
     s_iconSubmenuVisible = false;
     s_items.clear();
 }
@@ -138,11 +154,21 @@ bool RightClickMenu::ContainsPoint(int mx, int my) {
 void RightClickMenu::buildItems() {
     s_items.clear();
     if (!s_startMenuAppName.empty()) {
-        s_items.push_back({"Open", false, false, false});
-        s_items.push_back({Compositor::isStartMenuAppPinnedToDesktop(s_startMenuAppName) ? "Unpin from Desktop" : "Pin to Desktop", false, false, false});
-        if (!Compositor::isStartMenuAllProgramsView()) {
-            s_items.push_back({"", false, false, true});
-            s_items.push_back({"Remove from This List", false, false, false});
+        const apps::AppActionList snapshot = s_startMenuAppId.empty()
+            ? apps::AppActionList{}
+            : DesktopService::GetAppActions(s_startMenuAppId);
+        const StartMenuAppContextMenu model = BuildStartMenuAppContextMenu(
+            snapshot,
+            Compositor::isStartMenuAllProgramsView(),
+            Compositor::isStartMenuAppPinnedToDesktop(s_startMenuAppName));
+        for (const StartMenuAppContextRow& row : model.rows) {
+            MenuItem item{ row.label, false, false,
+                row.kind == StartMenuAppContextRowKind::Separator };
+            if (row.kind == StartMenuAppContextRowKind::AppAction) {
+                item.appAction = true;
+                item.actionSnapshot = row.action;
+            }
+            s_items.push_back(std::move(item));
         }
         return;
     }
@@ -233,6 +259,27 @@ bool RightClickMenu::HandleClick(int mx, int my) {
     if (mx >= s_x && mx <= s_x + kMenuW && my >= s_y && my <= s_y + menuH) {
         int idx = (my - s_y) / kItemH;
         if (idx >= 0 && idx < (int)s_items.size()) {
+            if (s_items[idx].appAction) {
+                const apps::AppActionInfo selectedAction = s_items[idx].actionSnapshot;
+                const apps::AppActionInvocationResult result =
+                    DesktopService::InvokeAppAction(selectedAction);
+                if (result.succeeded()) {
+                    Compositor::closeStartMenu();
+                    Logger::write(LogLevel::Info,
+                        "Start Menu application action invoked appId=" + result.appId +
+                        " actionId=" + result.actionId +
+                        (result.launchedNewProcess ? " launched=1" : " launched=0"));
+                } else {
+                    Logger::write(LogLevel::Warn,
+                        "Start Menu application action failed appId=" + selectedAction.appId +
+                        " actionId=" + selectedAction.actionId +
+                        " status=" + apps::AppRegistry::ToString(result.status) +
+                        " reason=" + result.reason);
+                    NotificationManager::Add("Application action could not be completed", NotificationLevel::Error);
+                }
+                Hide();
+                return true;
+            }
             if (s_items[idx].separator) {
                 Hide();
                 return true;
@@ -454,9 +501,12 @@ void RightClickMenu::Draw(HDC dc) {
             SystemFont::DrawText(dc, s_x + kPadding, textY, "[x]", 3, RGB(220, 220, 220), FontRole::Default);
         }
 
+        const int savedDc = SaveDC(dc);
+        IntersectClipRect(dc, s_x + kPadding + 22, iy, s_x + kMenuW - 4, iy + kItemH);
         SystemFont::DrawText(dc, s_x + kPadding + 22, textY,
                              s_items[i].label.c_str(), (int)s_items[i].label.size(),
                              RGB(220, 220, 220), FontRole::Default);
+        if (savedDc != 0) RestoreDC(dc, savedDc);
 
         // Submenu arrow indicator
         if (s_items[i].hasSubmenu) {
