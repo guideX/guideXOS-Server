@@ -1234,6 +1234,7 @@ private:
         uint32_t fatCount;
         uint64_t filesystemCapacityBytes;
         bool fat32PropertiesValid;
+        bool reformatInterrupted;
         bool mounted;
         bool mountIdentityValid;
         bool mountReadOnly;

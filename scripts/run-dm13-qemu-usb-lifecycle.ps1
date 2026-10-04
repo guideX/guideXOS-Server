@@ -130,7 +130,9 @@ function Start-Dm13Qemu([string]$RunName) {
     $qmpLog = Join-Path $WorkFull "$RunName.qmp.log"
     $listener = [System.Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     $listener.Start(); $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port; $listener.Stop()
-    $arguments = @("-accel",$QemuAccelerator,
+    $arguments = @()
+    if ($QemuAccelerator) { $arguments += @("-accel",$QemuAccelerator) }
+    $arguments += @(
       "-drive","if=pflash,format=raw,readonly=on,file=$OvmfFull",
       "-machine","pc,usb=off","-device","piix3-usb-uhci,id=uhci",
       "-drive","file=fat:rw:$espStage,format=raw",

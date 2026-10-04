@@ -35,6 +35,8 @@ static const size_t VFS_MAX_PATH = 256;
 static const size_t VFS_MAX_FILENAME = 128;
 static const size_t VFS_MAX_MOUNTS = 8;
 static const size_t VFS_MAX_OPEN_FILES = 32;
+using HandleToken = uint64_t;
+static const HandleToken INVALID_HANDLE = 0xFFu;
 
 // ================================================================
 // Filesystem types
@@ -204,6 +206,7 @@ struct PartitionMountResult {
 
 struct FileHandle {
     bool     open;
+    HandleToken token;               // Opaque, never-reused VFS handle token
     uint8_t  mountIndex;              // Which mount point
     uint16_t flags;                   // Open flags
     uint64_t position;                // Current read/write position
@@ -218,6 +221,7 @@ struct FileHandle {
 
 struct DirIterator {
     bool     active;
+    HandleToken token;               // Opaque, never-reused iterator token
     uint8_t  mountIndex;
     char     path[VFS_MAX_PATH];
     uint32_t index;                   // Current entry index
@@ -304,49 +308,49 @@ void join_path(const char* base, const char* name, char* output, size_t outputSi
 // Public API — File Operations
 // ================================================================
 
-// Open a file.  Returns file handle index, or 0xFF on failure.
-uint8_t open(const char* path, uint16_t flags);
+// Open a file. Returns an opaque handle token, or INVALID_HANDLE on failure.
+HandleToken open(const char* path, uint16_t flags);
 
 // Close a file.
-Status close(uint8_t handle);
+Status close(HandleToken handle);
 
 // Read from a file.  Returns bytes read, or negative on error.
-int32_t read(uint8_t handle, void* buffer, uint32_t size);
+int32_t read(HandleToken handle, void* buffer, uint32_t size);
 
 // Write to a file.  Returns bytes written, or negative on error.
-int32_t write(uint8_t handle, const void* buffer, uint32_t size);
+int32_t write(HandleToken handle, const void* buffer, uint32_t size);
 
 // Seek within a file.
-Status seek(uint8_t handle, int64_t offset, SeekOrigin origin);
+Status seek(HandleToken handle, int64_t offset, SeekOrigin origin);
 
 // Get current file position.
-int64_t tell(uint8_t handle);
+int64_t tell(HandleToken handle);
 
 // Get file size.
-int64_t file_size(uint8_t handle);
+int64_t file_size(HandleToken handle);
 
 // Flush file buffers.
-Status flush(uint8_t handle);
+Status flush(HandleToken handle);
 
 // Get file handle info.
-const FileHandle* get_handle(uint8_t handle);
+const FileHandle* get_handle(HandleToken handle);
 
 // ================================================================
 // Public API — Directory Operations
 // ================================================================
 
 // Open a directory for iteration.
-// Returns iterator index, or 0xFF on failure.
-uint8_t opendir(const char* path);
+// Returns an opaque iterator token, or INVALID_HANDLE on failure.
+HandleToken opendir(const char* path);
 
 // Read next directory entry.
 // Returns true if entry was read, false if end of directory.
-bool readdir(uint8_t iterator, DirEntry* entry);
+bool readdir(HandleToken iterator, DirEntry* entry);
 // Distinguishes normal end-of-directory from media loss and I/O failure.
-Status readdir_detailed(uint8_t iterator, DirEntry* entry, bool& hasEntry);
+Status readdir_detailed(HandleToken iterator, DirEntry* entry, bool& hasEntry);
 
 // Close directory iterator.
-void closedir(uint8_t iterator);
+void closedir(HandleToken iterator);
 
 // Create a directory.
 Status mkdir(const char* path);

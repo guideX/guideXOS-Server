@@ -1302,13 +1302,43 @@ static bool make_volume_id(const Fat32FormatRequest& request,
 // operation lease on every invocation instead of being persisted here.
 static const uint32_t kQuickMarkerFirstSector = 8u;
 static const uint32_t kQuickMarkerLastSector = 31u;
-static const uint32_t kQuickMarkerVersion = 1u;
+static const uint32_t kQuickMarkerLegacyVersion = 1u;
+static const uint32_t kQuickMarkerVersion = 2u;
 static const uint32_t kQuickMarkerChecksumOffset = 120u;
+static const uint32_t kQuickMarkerTableFingerprintOffset = 120u;
+static const uint32_t kQuickMarkerStateOffset = 124u;
+static const uint32_t kQuickMarkerV2ChecksumOffset = 128u;
+static const uint32_t kQuickMarkerStatePrepared = 1u;
+static const uint32_t kQuickMarkerStatePointOfNoReturn = 2u;
 static const char kQuickMarkerMagic[8] = {'G','X','D','M','2','6','R','F'};
+
+#if defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
+static void quick_reformat_proof_stage(const char* stage)
+{
+    serial::puts("[DM28-QRF] stage=");
+    serial::puts(stage);
+    serial::putc('\n');
+}
+#endif
+
+#if defined(GXOS_DM28_QEMU_REFORMAT_INTERRUPT_PROOF)
+static void quick_reformat_interrupt_pause()
+{
+    // The proof host waits for the stage marker, removes the emulated USB disk,
+    // and waits for QEMU's DEVICE_DELETED acknowledgement during this bounded
+    // window. Production builds do not include this pause.
+    const uint64_t start = pit::ticks();
+    while (pit::ticks() - start < 500u)
+        __asm__ __volatile__("pause");
+}
+#endif
 
 struct QuickReformatSource {
     bool retry;
     uint32_t markerSector;
+    uint32_t markerVersion;
+    uint32_t markerState;
+    uint32_t tableFingerprint;
     uint32_t oldBackupBootSector;
     uint32_t oldVolumeId;
     uint32_t oldFsInfoSector;
@@ -1334,22 +1364,65 @@ static uint32_t quick_marker_checksum(const uint8_t* bytes, uint32_t count)
     return hash;
 }
 
+static bool quick_table_fingerprint(const Fat32FormatRequest& request,
+    uint32_t sectorSize, uint32_t& fingerprint)
+{
+    fingerprint = 0;
+    if (!parse_partition_table(request.targetSnapshot.globalIndex,
+            s_partitionTable)) return false;
+    if (request.partitionScheme == PARTITION_SCHEME_GPT) {
+        if (s_partitionTable.state != DISK_STATE_VALID_GPT ||
+            !s_partitionTable.primaryGptValid ||
+            !s_partitionTable.backupGptValid ||
+            !s_partitionTable.gptCopiesAgree ||
+            s_partitionTable.primaryGptEntryArrayCrc32 == 0 ||
+            s_partitionTable.primaryGptEntryArrayCrc32 !=
+                s_partitionTable.backupGptEntryArrayCrc32) return false;
+        fingerprint = s_partitionTable.primaryGptEntryArrayCrc32;
+        return true;
+    }
+    if (request.partitionScheme != PARTITION_SCHEME_MBR ||
+        sectorSize > sizeof(s_ioSector) ||
+        block::read_sectors(request.targetSnapshot.globalIndex, 0, 1,
+            s_ioSector) != block::BLOCK_OK) return false;
+    fingerprint = crc32(s_ioSector, sectorSize);
+    return fingerprint != 0;
+}
+
 static bool quick_marker_identity_matches(const uint8_t* marker,
     const Fat32FormatRequest& request, const PartitionEntry& partition,
     uint32_t sectorSize, uint32_t markerSector)
 {
     if (!marker || !bytes_equal(marker, reinterpret_cast<const uint8_t*>(
             kQuickMarkerMagic), sizeof(kQuickMarkerMagic)) ||
-        read_u32(marker + 8) != kQuickMarkerVersion ||
         read_u32(marker + 12) != static_cast<uint32_t>(request.partitionScheme) ||
         read_u64(marker + 16) != partition.startLba ||
         read_u64(marker + 24) != partition.sectorCount ||
         read_u32(marker + 32) != sectorSize ||
         read_u32(marker + 36) != partition.partitionNumber ||
-        read_u32(marker + 116) != markerSector ||
-        read_u32(marker + kQuickMarkerChecksumOffset) !=
-            quick_marker_checksum(marker, kQuickMarkerChecksumOffset))
+        read_u32(marker + 116) != markerSector)
         return false;
+    const uint32_t version = read_u32(marker + 8);
+    if (version == kQuickMarkerLegacyVersion) {
+        if (read_u32(marker + kQuickMarkerChecksumOffset) !=
+                quick_marker_checksum(marker, kQuickMarkerChecksumOffset))
+            return false;
+    } else if (version == kQuickMarkerVersion) {
+        uint32_t currentFingerprint = 0;
+        if (!quick_table_fingerprint(request, sectorSize,
+                currentFingerprint) ||
+            read_u32(marker + kQuickMarkerTableFingerprintOffset) !=
+                currentFingerprint ||
+            (read_u32(marker + kQuickMarkerStateOffset) !=
+                 kQuickMarkerStatePrepared &&
+             read_u32(marker + kQuickMarkerStateOffset) !=
+                 kQuickMarkerStatePointOfNoReturn) ||
+            read_u32(marker + kQuickMarkerV2ChecksumOffset) !=
+                quick_marker_checksum(marker, kQuickMarkerV2ChecksumOffset))
+            return false;
+    } else {
+        return false;
+    }
     if (request.partitionScheme == PARTITION_SCHEME_GPT)
         return bytes_equal(marker + 48, partition.uniqueGuid, 16) &&
             bytes_equal(marker + 64, partition.typeGuid, 16) &&
@@ -1361,7 +1434,8 @@ static bool quick_marker_identity_matches(const uint8_t* marker,
 
 static void build_quick_marker(uint8_t* sector, uint32_t sectorSize,
     const Fat32FormatRequest& request, const PartitionEntry& partition,
-    uint32_t markerSector, const QuickReformatSource& source)
+    uint32_t markerSector, const QuickReformatSource& source,
+    uint32_t tableFingerprint, uint32_t markerState)
 {
     clear_bytes(sector, sectorSize);
     copy_bytes(sector, kQuickMarkerMagic, sizeof(kQuickMarkerMagic));
@@ -1383,8 +1457,10 @@ static void build_quick_marker(uint8_t* sector, uint32_t sectorSize,
     write_u32(sector + 100, source.oldVolumeId);
     copy_bytes(sector + 104, source.oldLabel, sizeof(source.oldLabel));
     write_u32(sector + 116, markerSector);
-    write_u32(sector + kQuickMarkerChecksumOffset,
-        quick_marker_checksum(sector, kQuickMarkerChecksumOffset));
+    write_u32(sector + kQuickMarkerTableFingerprintOffset, tableFingerprint);
+    write_u32(sector + kQuickMarkerStateOffset, markerState);
+    write_u32(sector + kQuickMarkerV2ChecksumOffset,
+        quick_marker_checksum(sector, kQuickMarkerV2ChecksumOffset));
 }
 
 static bool read_quick_marker(const Fat32FormatRequest& request,
@@ -1399,6 +1475,13 @@ static bool read_quick_marker(const Fat32FormatRequest& request,
                 geometry.bytesPerSector, sector)) continue;
         source.retry = true;
         source.markerSector = sector;
+        source.markerVersion = read_u32(s_ioSector + 8);
+        source.markerState = source.markerVersion == kQuickMarkerVersion
+            ? read_u32(s_ioSector + kQuickMarkerStateOffset)
+            : kQuickMarkerStatePrepared;
+        source.tableFingerprint = source.markerVersion ==
+                kQuickMarkerVersion
+            ? read_u32(s_ioSector + kQuickMarkerTableFingerprintOffset) : 0;
         source.oldBackupBootSector = read_u32(s_ioSector + 96);
         source.oldVolumeId = read_u32(s_ioSector + 100);
         copy_bytes(source.oldLabel, s_ioSector + 104,
@@ -1754,6 +1837,11 @@ static Fat32FormatStatus execute_quick_reformat_locked(
     result.geometry = check.geometry;
 
     const DeviceCapabilities& caps = check.capabilities;
+    uint32_t tableFingerprint = source.tableFingerprint;
+    if (source.retry && source.markerVersion == kQuickMarkerLegacyVersion &&
+        !quick_table_fingerprint(request, check.geometry.bytesPerSector,
+            tableFingerprint))
+        return FAT32_FORMAT_REFORMAT_MARKER_FAILED;
     const uint32_t maxBatchSectors = fat32_scan_batch_sectors(
         check.geometry.bytesPerSector, caps.maxTransferBytes);
     if (maxBatchSectors == 0) return FAT32_FORMAT_INVALID_GEOMETRY;
@@ -1773,13 +1861,22 @@ static Fat32FormatStatus execute_quick_reformat_locked(
             result.status = FAT32_FORMAT_REFORMAT_MARKER_FAILED;
             ok = false;
         }
+        if (ok && !quick_table_fingerprint(request,
+                check.geometry.bytesPerSector, tableFingerprint)) {
+            result.status = FAT32_FORMAT_REFORMAT_MARKER_FAILED;
+            ok = false;
+        }
     }
 
     if (ok) {
         result.stage = FAT32_FORMAT_STAGE_WRITE_BACKUP_METADATA;
         result.lastStage = result.stage;
+#if defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
+        quick_reformat_proof_stage("QRF_INVALIDATION_BEGIN");
+#endif
         build_quick_marker(s_ioSector, check.geometry.bytesPerSector,
-            request, check.currentPartition, markerSector, source);
+            request, check.currentPartition, markerSector, source,
+            tableFingerprint, kQuickMarkerStatePrepared);
         ok = quick_write_range(request, check, lease, markerSector, 1,
             s_ioSector, QUICK_WRITE_RESERVED, result);
     }
@@ -1853,8 +1950,47 @@ static Fat32FormatStatus execute_quick_reformat_locked(
             }
         }
     }
+    // Persist an explicit point-of-no-return state only after both old boot
+    // copies are invalid and that invalidation has reached durable media.
+    if (ok) {
+        build_quick_marker(s_ioSector, check.geometry.bytesPerSector,
+            request, check.currentPartition, markerSector, source,
+            tableFingerprint, kQuickMarkerStatePointOfNoReturn);
+        ok = quick_write_range(request, check, lease, markerSector, 1,
+            s_ioSector, QUICK_WRITE_RESERVED, result);
+    }
+    if (ok) {
+        result.stage = FAT32_FORMAT_STAGE_FLUSH;
+        result.lastStage = result.stage;
+        result.flushAttempted = true;
+        ++result.flushAttempts;
+        const block::FlushReport markerFlush =
+            block::flush_with_result(request.targetSnapshot.globalIndex);
+        result.flushOutcome = markerFlush.outcome;
+        result.flushStatus = markerFlush.status;
+        if (!trusted_flush(markerFlush)) {
+            result.failedOperation = block::OPERATION_FLUSH;
+            (void)capture_current_io_result(result);
+            result.status = markerFlush.semanticsKnown
+                ? FAT32_FORMAT_FLUSH_FAILED : FAT32_FORMAT_FLUSH_UNAVAILABLE;
+            ok = false;
+        }
+    }
+    if (ok && (read_partition_sector(request.targetSnapshot,
+            check.currentPartition, check.geometry, markerSector,
+            s_verifySector) != block::BLOCK_OK ||
+        !quick_marker_identity_matches(s_verifySector, request,
+            check.currentPartition, check.geometry.bytesPerSector,
+            markerSector) ||
+        read_u32(s_verifySector + kQuickMarkerStateOffset) !=
+            kQuickMarkerStatePointOfNoReturn)) {
+        result.failedOperation = block::OPERATION_READ;
+        (void)capture_current_io_result(result);
+        result.status = FAT32_FORMAT_VERIFICATION_FAILED;
+        ok = false;
+    }
 #if defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
-    if (ok) serial::puts("[DM27-QEMU] point=old-filesystem-invalidated flush=PASS\n");
+    if (ok) quick_reformat_proof_stage("QRF_INVALIDATION_DURABLE");
 #endif
 
     // Clear the complete new reserved region except the primary publication
@@ -1876,19 +2012,31 @@ static Fat32FormatStatus execute_quick_reformat_locked(
         result.stage = FAT32_FORMAT_STAGE_WRITE_FAT;
         result.lastStage = result.stage;
 #if defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
-        serial::puts("[DM27-QEMU] point=fat1-clear-begins\n");
+        quick_reformat_proof_stage("QRF_FAT1_BEGIN");
+#endif
+#if defined(GXOS_DM28_QEMU_REFORMAT_INTERRUPT_PROOF)
+        quick_reformat_interrupt_pause();
 #endif
         ok = quick_zero_range(request, check, lease,
             check.geometry.firstFatSector, check.geometry.fatSizeSectors,
             QUICK_WRITE_FAT1_ZERO, maxBatchSectors, result);
     }
+#if defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
+    if (ok) quick_reformat_proof_stage("QRF_FAT1_COMPLETE");
+#endif
     if (ok) {
         result.stage = FAT32_FORMAT_STAGE_WRITE_FAT;
         result.lastStage = result.stage;
+#if defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
+        quick_reformat_proof_stage("QRF_FAT2_BEGIN");
+#endif
         ok = quick_zero_range(request, check, lease,
             check.geometry.secondFatSector, check.geometry.fatSizeSectors,
             QUICK_WRITE_FAT2_ZERO, maxBatchSectors, result);
     }
+#if defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
+    if (ok) quick_reformat_proof_stage("QRF_FAT2_COMPLETE");
+#endif
     if (ok) {
         result.stage = FAT32_FORMAT_STAGE_WRITE_FAT;
         result.lastStage = result.stage;
@@ -1919,6 +2067,9 @@ static Fat32FormatStatus execute_quick_reformat_locked(
                 s_ioSector, QUICK_WRITE_ROOT, result);
         }
     }
+#if defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
+    if (ok) quick_reformat_proof_stage("QRF_ROOT_COMPLETE");
+#endif
     if (ok) {
         result.stage = FAT32_FORMAT_STAGE_WRITE_FSINFO;
         result.lastStage = result.stage;
@@ -1973,13 +2124,16 @@ static Fat32FormatStatus execute_quick_reformat_locked(
         result.stage = FAT32_FORMAT_STAGE_WRITE_BOOT_SECTOR;
         result.lastStage = result.stage;
 #if defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
-        serial::puts("[DM27-QEMU] point=primary-publication-begins\n");
+        quick_reformat_proof_stage("QRF_PUBLICATION_BEGIN");
 #endif
         build_boot_sector(check.geometry, label, s_ioSector,
                           check.geometry.bytesPerSector);
         primaryPublicationAttempted = true;
         ok = quick_write_range(request, check, lease, 0, 1, s_ioSector,
             QUICK_WRITE_RESERVED, result);
+#if defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
+        if (ok) quick_reformat_proof_stage("QRF_PRIMARY_WRITTEN");
+#endif
     }
     if (ok) {
         result.reformatState = FAT32_REFORMAT_NEW_FILESYSTEM_WRITTEN_NOT_DURABLE;
@@ -1994,7 +2148,7 @@ static Fat32FormatStatus execute_quick_reformat_locked(
         result.persistenceTrusted = trusted_flush(flush);
 #if defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
         if (result.persistenceTrusted)
-            serial::puts("[DM27-QEMU] point=final-flush-complete status=PASS\n");
+            quick_reformat_proof_stage("QRF_FINAL_FLUSH_COMPLETE");
 #endif
         if (!result.persistenceTrusted) {
             result.failedOperation = block::OPERATION_FLUSH;

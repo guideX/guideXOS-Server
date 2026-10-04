@@ -21,6 +21,7 @@ param(
     [string]$PythonExecutable = "",
     [string]$EspCacheDirectory = "",
     [string]$KernelImage = "",
+    [string]$PreparedImagePath = "",
     [int]$AttemptNumber = 1,
     [UInt64]$DiskSizeBytes = 629145600,
     [ValidateRange(0, 86400)]
@@ -31,6 +32,7 @@ param(
     [switch]$Dm24FourKnProof,
     [switch]$Dm25PartitionDeleteProof,
     [switch]$Dm27QuickReformatProof,
+    [switch]$Dm28InterruptProof,
     [switch]$QemuDebug,
     [switch]$SkipBuild
 )
@@ -105,6 +107,24 @@ function Save-Dm22ImageAllocation([string]$DiskPath, [string]$OutputPath,
         $ranges
     ) | Set-Content -LiteralPath (Join-Path $OutputPath "image-allocation-$Phase.txt") -Encoding ascii
     return $actualBytes
+}
+
+function Copy-RawImageSparse([string]$SourcePath, [string]$DestinationPath) {
+    if (Test-Path -LiteralPath $DestinationPath) {
+        throw "Refusing to overwrite image checkpoint $DestinationPath"
+    }
+    $qemuImg = Join-Path (Split-Path -Parent $QemuFull) "qemu-img.exe"
+    if (-not (Test-Path -LiteralPath $qemuImg)) {
+        throw "qemu-img.exe is required to preserve sparse proof checkpoints."
+    }
+    & $qemuImg convert -f raw -O raw -S 4096 $SourcePath $DestinationPath 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "qemu-img could not create sparse checkpoint $DestinationPath."
+    }
+    if ((Get-Item -LiteralPath $SourcePath).Length -ne
+        (Get-Item -LiteralPath $DestinationPath).Length) {
+        throw "Sparse proof checkpoint length differs from its source."
+    }
 }
 
 function Ensure-EspCache([string]$Source, [string]$Cache,
@@ -200,13 +220,18 @@ function Stop-ProofQemu([int]$ProcessId, [int]$Port,
 function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
                          [string]$EspPath, [string]$DiskPath,
                          [string]$OutputPath, [int]$TimeoutSeconds,
-                         [string]$ManifestPath) {
+                         [string]$ManifestPath,
+                         [string]$WaitForStageMarker = "") {
     $serialPath = Join-Path $OutputPath "$RunName.serial.log"
     $stderrPath = Join-Path $OutputPath "$RunName.stderr.log"
     $stdoutPath = Join-Path $OutputPath "$RunName.stdout.log"
     $debugPath = Join-Path $OutputPath "$RunName.qemu-debug.log"
     Remove-Item -LiteralPath $serialPath,$stderrPath,$stdoutPath -Force -ErrorAction SilentlyContinue
     $port = Get-FreeLoopbackPort
+    $qmpPort = 0
+    if ($Dm28InterruptProof) {
+        do { $qmpPort = Get-FreeLoopbackPort } while ($qmpPort -eq $port)
+    }
     $arguments = @(
         "-drive", "if=pflash,format=raw,readonly=on,file=$OvmfFull",
         "-machine", $(if ($Dm24FourKnProof) { "pc,usb=off" } else { "q35,usb=off" }),
@@ -221,6 +246,9 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
         "-monitor", "tcp:127.0.0.1:$port,server,nowait",
         "-rtc", "base=utc,clock=host", "-no-reboot"
     )
+    if ($Dm28InterruptProof) {
+        $arguments += @("-qmp", "tcp:127.0.0.1:$qmpPort,server,nowait")
+    }
     if ($Dm24FourKnProof) {
         $arguments += @(
             "-device", "piix3-usb-uhci,id=uhci",
@@ -246,6 +274,7 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
             "qemu.$RunName.commandLine=$($processInfo.CommandLine)",
             "qemu.$RunName.serial=$serialPath",
             "qemu.$RunName.monitorPort=$port",
+            "qemu.$RunName.qmpPort=$(if ($qmpPort -gt 0) { $qmpPort } else { 'not-applicable' })",
             "qemu.$RunName.otherProcessesAtStart=$($otherQemu.Count)",
             "qemu.$RunName.otherPidsAtStart=$(($otherQemu | ForEach-Object { $_.ProcessId }) -join ',')"
         )
@@ -258,14 +287,21 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
                 Stop-ProofQemu $process.Id $port $serialPath
                 throw "$RunName encountered a kernel fault; see $serialPath"
             }
-            if ($serial -match '(?m)^\[(?:DM27-QEMU|DM25-QEMU|DM24-QEMU|DM22-QEMU|DM15-QEMU|DM9-QEMU)\] (?:private-proof=FAIL|lifecycle=FAIL|quick-reformat=FAIL|delete-ready=FAIL|delete=FAIL|proof=BLOCKED|reboot-rediscovery=FAIL|initialize=FAIL|create-partition=FAIL|format-fat32=FAIL|large-volume=FAIL|allocation-hint=FAIL|geometry=FAIL)') {
+            if ($serial -match '(?m)^\[(?:DM27-QEMU|DM25-QEMU|DM24-QEMU|DM22-QEMU|DM15-QEMU|DM9-QEMU)\] (?:private-proof=FAIL|lifecycle=FAIL|quick-reformat=FAIL|delete-ready=FAIL|delete=FAIL|proof=BLOCKED|reboot-rediscovery=FAIL|initialize=FAIL|create-partition=FAIL|format-fat32=FAIL|large-volume=FAIL|allocation-hint=FAIL|geometry=FAIL)' -or
+                $serial -match '(?m)^\[DM28-QRF\] (?:cold-restart|retry-after-cold-restart|interruption)=FAIL') {
                 $failureLine = $Matches[0]
                 Stop-ProofQemu $process.Id $port $serialPath
                 throw "$RunName reported '$failureLine'; see $serialPath"
             }
+            if ($WaitForStageMarker -and $serial -and
+                $serial.Contains($WaitForStageMarker)) {
+                return [pscustomobject]@{ ProcessId=$process.Id; Port=$port;
+                    QmpPort=$qmpPort; SerialPath=$serialPath }
+            }
             if ($serial -and $serial.Contains($SuccessMarker) -and
                 $serial.Contains("[KERNEL] Entering main loop")) {
-                return [pscustomobject]@{ ProcessId=$process.Id; Port=$port; SerialPath=$serialPath }
+                return [pscustomobject]@{ ProcessId=$process.Id; Port=$port;
+                    QmpPort=$qmpPort; SerialPath=$serialPath }
             }
         }
         if ($process.HasExited) { break }
@@ -274,6 +310,120 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
     $stderr = Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue
     if (-not $process.HasExited) { Stop-ProofQemu $process.Id $port $serialPath }
     throw "$RunName timed out or exited before '$SuccessMarker'. $stderrPath $serialPath"
+}
+
+$script:ProofQmp = $null
+$script:ProofQmpId = 0
+function Read-ProofQmpMessage($Run, [int]$TimeoutMilliseconds = 1000) {
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        try {
+            $line = $Run.Reader.ReadLine()
+            if ($null -ne $line) {
+                Add-Content -LiteralPath $Run.LogPath -Encoding utf8 -Value $line
+                return $line
+            }
+            throw "QMP socket closed."
+        } catch [IO.IOException] {
+            if ($Run.Process.HasExited) { throw "QEMU exited while reading QMP." }
+        }
+    }
+    return $null
+}
+
+function Send-ProofQmp([string]$Execute, [hashtable]$Arguments = @{}) {
+    $script:ProofQmpId++
+    $id = "dm28-$($script:ProofQmpId)"
+    $command = [ordered]@{ execute=$Execute; id=$id }
+    if ($Arguments.Count) { $command.arguments=$Arguments }
+    $json = $command | ConvertTo-Json -Compress -Depth 12
+    Add-Content -LiteralPath $script:ProofQmp.LogPath -Encoding utf8 -Value $json
+    $script:ProofQmp.Writer.WriteLine($json)
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $line = Read-ProofQmpMessage $script:ProofQmp 1000
+        if ($null -eq $line) { continue }
+        $message = $line | ConvertFrom-Json
+        if ($message.event) { $script:ProofQmp.Events.Enqueue($message); continue }
+        if ($message.id -eq $id) {
+            if ($message.error) {
+                throw "QMP $Execute failed: $($message.error | ConvertTo-Json -Compress)"
+            }
+            return $message.return
+        }
+    }
+    throw "Timed out waiting for QMP command $Execute."
+}
+
+function Connect-ProofQmp($Boot, [string]$LogPath) {
+    $client = [Net.Sockets.TcpClient]::new()
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        try { $client.Connect("127.0.0.1", $Boot.QmpPort); break }
+        catch {
+            if (-not (Get-Process -Id $Boot.ProcessId -ErrorAction SilentlyContinue)) {
+                throw "QEMU exited before opening its QMP endpoint."
+            }
+            Start-Sleep -Milliseconds 100
+        }
+    }
+    if (-not $client.Connected) { throw "QMP did not listen before the bounded deadline." }
+    $stream = $client.GetStream()
+    $stream.ReadTimeout = 1000
+    $reader = [IO.StreamReader]::new($stream,[Text.Encoding]::ASCII,$false,4096,$true)
+    $writer = [IO.StreamWriter]::new($stream,[Text.Encoding]::ASCII,4096,$true)
+    $writer.AutoFlush = $true
+    $script:ProofQmp = [pscustomobject]@{
+        Process=[System.Diagnostics.Process]::GetProcessById($Boot.ProcessId)
+        Client=$client; Stream=$stream; Reader=$reader; Writer=$writer
+        Events=[Collections.Generic.Queue[object]]::new(); LogPath=$LogPath
+    }
+    $greeting = Read-ProofQmpMessage $script:ProofQmp 5000
+    if (-not $greeting -or -not ($greeting | ConvertFrom-Json).QMP) {
+        throw "Invalid QMP greeting."
+    }
+    [void](Send-ProofQmp "qmp_capabilities")
+}
+
+function Wait-ProofDeviceDeleted([string]$DeviceId) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        while ($script:ProofQmp.Events.Count -gt 0) {
+            $event = $script:ProofQmp.Events.Dequeue()
+            if ($event.event -eq "DEVICE_DELETED" -and
+                $event.data.device -eq $DeviceId) { return $event }
+        }
+        $line = Read-ProofQmpMessage $script:ProofQmp 1000
+        if ($null -eq $line) { continue }
+        $message = $line | ConvertFrom-Json
+        if ($message.event) { $script:ProofQmp.Events.Enqueue($message) }
+        elseif ($message.error) {
+            throw "QMP event read failed: $($message.error | ConvertTo-Json -Compress)"
+        }
+    }
+    throw "Timed out waiting for DEVICE_DELETED for $DeviceId."
+}
+
+function Close-ProofQmp {
+    if ($script:ProofQmp) {
+        $script:ProofQmp.Client.Dispose()
+        $script:ProofQmp = $null
+    }
+}
+
+function Wait-ProofSerialMarker($Boot, [string]$Marker,
+                                [int]$TimeoutSeconds = 30) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $serial = Get-Content -LiteralPath $Boot.SerialPath -Raw `
+            -ErrorAction SilentlyContinue
+        if ($serial -and $serial.Contains($Marker)) { return $serial }
+        if (-not (Get-Process -Id $Boot.ProcessId -ErrorAction SilentlyContinue)) {
+            throw "QEMU exited before serial marker '$Marker'."
+        }
+        Start-Sleep -Milliseconds 200
+    }
+    throw "Timed out waiting for serial marker '$Marker'."
 }
 
 if (($Dm22LargeProof -or $Dm24FourKnProof) -and $Stage -ne "Lifecycle") {
@@ -289,8 +439,13 @@ if ($Dm25PartitionDeleteProof -and ($Stage -ne "Lifecycle" -or
 if ($Dm27QuickReformatProof -and $Stage -ne "Lifecycle") {
     throw "DM27 Quick Reformat requires the Lifecycle proof mode."
 }
-if ($Dm27QuickReformatProof -and $Dm22LargeProof) {
-    throw "DM27 large-volume Quick Reformat is not wired into this proof runner."
+if ($Dm28InterruptProof -and ($Stage -ne "Lifecycle" -or
+        -not $Dm27QuickReformatProof -or -not $Dm24FourKnProof -or
+        $Dm22LargeProof)) {
+    throw "DM28 interruption proof requires the 4Kn USB Quick Reformat lifecycle."
+}
+if ($PreparedImagePath -and -not $Dm27QuickReformatProof) {
+    throw "PreparedImagePath requires a Quick Reformat proof."
 }
 if ($Dm22LargeProof -and $DiskSizeBytes -lt [UInt64]::Parse("9663676416")) {
     throw "DM22 image must be at least 9 GiB so the GPT partition can exceed 8 GiB."
@@ -311,7 +466,9 @@ $OvmfFull = (Resolve-Path -LiteralPath $OvmfCode).Path
 $EspFull = (Resolve-Path -LiteralPath $EspSource).Path
 $repoOut = [IO.Path]::GetFullPath((Join-Path $Root "out"))
 if (-not $WorkDir) {
-    $workLabel = if ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "dm27-4kn-usb-quick-reformat" }
+$workLabel = if ($Dm28InterruptProof) { "dm28-usb-quick-reformat-interruption" }
+    elseif ($Dm27QuickReformatProof -and $Dm22LargeProof) { "dm28-10g-ahci-quick-reformat" }
+        elseif ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "dm27-4kn-usb-quick-reformat" }
         elseif ($Dm27QuickReformatProof) { "dm27-ahci-quick-reformat" }
         elseif ($Dm25PartitionDeleteProof) { "dm25-ahci-partition-delete" }
         elseif ($Dm24FourKnProof) { "dm24-4kn-fat32" }
@@ -328,7 +485,9 @@ if (Test-Path -LiteralPath $WorkFull) {
     }
 } else { New-Item -ItemType Directory -Path $WorkFull -Force | Out-Null }
 
-$diskLabel = if ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "secondary-quick-reformat-4kn-$([uint64]($DiskSizeBytes / 1048576))m.raw" }
+$diskLabel = if ($Dm28InterruptProof) { "secondary-dm28-interrupt-4kn.raw" }
+    elseif ($Dm27QuickReformatProof -and $Dm22LargeProof) { "secondary-quick-reformat-10g.raw" }
+    elseif ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "secondary-quick-reformat-4kn-$([uint64]($DiskSizeBytes / 1048576))m.raw" }
     elseif ($Dm27QuickReformatProof) { "secondary-quick-reformat-600m.raw" }
     elseif ($Dm25PartitionDeleteProof) { "secondary-delete-600m.raw" }
     elseif ($Dm24FourKnProof) { "secondary-4kn-640m.raw" }
@@ -336,7 +495,9 @@ $diskLabel = if ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "secondary-qui
     else { "secondary-600m.raw" }
 $DiskPath = Join-Path $WorkFull $diskLabel
 $EspPath = Join-Path $WorkFull "esp"
-$manifestName = if ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "dm27-4kn-manifest.txt" }
+$manifestName = if ($Dm28InterruptProof) { "dm28-interruption-manifest.txt" }
+    elseif ($Dm27QuickReformatProof -and $Dm22LargeProof) { "dm28-10g-manifest.txt" }
+    elseif ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "dm27-4kn-manifest.txt" }
     elseif ($Dm27QuickReformatProof) { "dm27-manifest.txt" }
     elseif ($Dm25PartitionDeleteProof) { "dm25-manifest.txt" }
     elseif ($Dm24FourKnProof) { "dm24-manifest.txt" }
@@ -356,7 +517,9 @@ try {
             $objectPath = Join-Path $Root "kernel\build\amd64\obj\core\$object"
             if (Test-Path -LiteralPath $objectPath) { Remove-Item -LiteralPath $objectPath -Force }
         }
-        $flags = if ($Dm27QuickReformatProof -and $Dm24FourKnProof) {
+        $flags = if ($Dm28InterruptProof) {
+            "-DGXOS_DM24_QEMU_FAT32_4KN_PROOF -DGXOS_DM27_QEMU_QUICK_REFORMAT_PROOF -DGXOS_DM28_QEMU_REFORMAT_INTERRUPT_PROOF"
+        } elseif ($Dm27QuickReformatProof -and $Dm24FourKnProof) {
             "-DGXOS_DM24_QEMU_FAT32_4KN_PROOF -DGXOS_DM27_QEMU_QUICK_REFORMAT_PROOF"
         } elseif ($Dm27QuickReformatProof) {
             "-DGXOS_DM15_QEMU_AHCI_PROOF -DGXOS_DM27_QEMU_QUICK_REFORMAT_PROOF"
@@ -418,17 +581,33 @@ try {
     }
 
     if (Test-Path -LiteralPath $DiskPath) { throw "Refusing to overwrite proof image $DiskPath" }
-    $sparseTool = Join-Path $env:SystemRoot "System32\fsutil.exe"
-    if (-not (Test-Path -LiteralPath $sparseTool)) { throw "fsutil.exe is required to create a sparse raw proof image." }
-    $diskStream = [IO.File]::Open($DiskPath, [IO.FileMode]::CreateNew,
-        [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
-    $diskStream.Dispose()
-    & $sparseTool sparse setflag $DiskPath 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Unable to mark the new raw proof image sparse (fsutil exit $LASTEXITCODE)." }
-    $diskStream = [IO.File]::Open($DiskPath, [IO.FileMode]::Open,
-        [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
-    $diskStream.SetLength([int64]$DiskSizeBytes)
-    $diskStream.Dispose()
+    $preparedImageFull = $null
+    if ($PreparedImagePath) {
+        $preparedImageFull = if ([IO.Path]::IsPathRooted($PreparedImagePath)) {
+            [IO.Path]::GetFullPath($PreparedImagePath)
+        } else {
+            [IO.Path]::GetFullPath((Join-Path $Root $PreparedImagePath))
+        }
+        if (-not (Test-Path -LiteralPath $preparedImageFull -PathType Leaf)) {
+            throw "PreparedImagePath does not name an existing raw image."
+        }
+        if ((Get-Item -LiteralPath $preparedImageFull).Length -ne [int64]$DiskSizeBytes) {
+            throw "Prepared image length must match DiskSizeBytes exactly."
+        }
+        Copy-RawImageSparse $preparedImageFull $DiskPath
+    } else {
+        $sparseTool = Join-Path $env:SystemRoot "System32\fsutil.exe"
+        if (-not (Test-Path -LiteralPath $sparseTool)) { throw "fsutil.exe is required to create a sparse raw proof image." }
+        $diskStream = [IO.File]::Open($DiskPath, [IO.FileMode]::CreateNew,
+            [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+        $diskStream.Dispose()
+        & $sparseTool sparse setflag $DiskPath 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Unable to mark the new raw proof image sparse (fsutil exit $LASTEXITCODE)." }
+        $diskStream = [IO.File]::Open($DiskPath, [IO.FileMode]::Open,
+            [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+        $diskStream.SetLength([int64]$DiskSizeBytes)
+        $diskStream.Dispose()
+    }
     $bootHash = (Get-FileHash -LiteralPath (Join-Path $bootPath "BOOTX64.EFI") -Algorithm SHA256).Hash
     $kernelHash = (Get-FileHash -LiteralPath (Join-Path $EspPath "kernel.elf") -Algorithm SHA256).Hash
     $kernelBytes = (Get-Item -LiteralPath (Join-Path $EspPath "kernel.elf")).Length
@@ -440,19 +619,25 @@ try {
     $qemuHash = (Get-FileHash -LiteralPath $QemuFull -Algorithm SHA256).Hash
     $ovmfHash = (Get-FileHash -LiteralPath $OvmfFull -Algorithm SHA256).Hash
     $qemuAtStart = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'")
-    $proofName = if ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "DM27-4KN-USB-QUICK-REFORMAT" }
+    $proofName = if ($Dm28InterruptProof) { "DM28-4KN-USB-QUICK-REFORMAT-INTERRUPTION-RETRY" }
+        elseif ($Dm27QuickReformatProof -and $Dm22LargeProof) { "DM28-10G-AHCI-QUICK-REFORMAT" }
+        elseif ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "DM27-4KN-USB-QUICK-REFORMAT" }
         elseif ($Dm27QuickReformatProof) { "DM27-AHCI-QUICK-REFORMAT" }
         elseif ($Dm25PartitionDeleteProof) { "DM25-AHCI-PARTITION-DELETE" }
         elseif ($Dm24FourKnProof) { "DM24-4KN-FAT32-USB" }
         elseif ($Dm22LargeProof) { "DM22-LARGE-FAT32-AHCI" }
         else { "DM15-AHCI-$Stage" }
-    $manifestSchema = if ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "DM27-4KN-USB-QUICK-REFORMAT-1" }
+    $manifestSchema = if ($Dm28InterruptProof) { "DM28-4KN-USB-INTERRUPTION-RETRY-1" }
+        elseif ($Dm27QuickReformatProof -and $Dm22LargeProof) { "DM28-10G-AHCI-QUICK-REFORMAT-1" }
+        elseif ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "DM27-4KN-USB-QUICK-REFORMAT-1" }
         elseif ($Dm27QuickReformatProof) { "DM27-AHCI-QUICK-REFORMAT-1" }
         elseif ($Dm25PartitionDeleteProof) { "DM25-AHCI-PARTITION-DELETE-1" }
         elseif ($Dm24FourKnProof) { "DM24-4KN-FAT32-1" }
         elseif ($Dm22LargeProof) { "DM22-LARGE-FAT32-1" }
         else { "DM19-TRANSPORT-1" }
-    $proofIdentity = if ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "GUIDEXOS-DM27-QEMU-4Kn-USB-QuickReformat" }
+    $proofIdentity = if ($Dm28InterruptProof) { "GUIDEXOS-DM28-QEMU-4Kn-USB-QuickReformat-InterruptionRetry" }
+        elseif ($Dm27QuickReformatProof -and $Dm22LargeProof) { "GUIDEXOS-DM28-QEMU-10GiB-AHCI-QuickReformat" }
+        elseif ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "GUIDEXOS-DM27-QEMU-4Kn-USB-QuickReformat" }
         elseif ($Dm27QuickReformatProof) { "GUIDEXOS-DM27-QEMU-AHCI-QuickReformat" }
         elseif ($Dm25PartitionDeleteProof) { "GUIDEXOS-DM25-QEMU-AHCI-PartitionDelete" }
         elseif ($Dm24FourKnProof) { "GUIDEXOS-DM24-QEMU-4KnFAT32" }
@@ -483,6 +668,8 @@ try {
         "secondaryCapacityBytes=$((Get-Item -LiteralPath $DiskPath).Length)",
         "secondaryRequestedBytes=$DiskSizeBytes",
         "secondaryInitialSha256=$initialHash",
+        "preparedImagePath=$(if ($preparedImageFull) { $preparedImageFull } else { 'not-used' })",
+        "preparedImageSha256=$(if ($preparedImageFull) { $initialHash } else { 'not-used' })",
         "secondaryInitialActualBytes=$(if ($Dm22LargeProof) { $initialActualBytes } else { 'not-recorded' })",
         "storageImageBytes=$((Get-Item -LiteralPath $DiskPath).Length)",
         "storageImageSha256Before=$initialHash",
@@ -529,21 +716,33 @@ try {
             elseif ($Dm24FourKnProof) { 2700 }
             elseif ($FirstBootTimeoutSeconds -gt 0) { $FirstBootTimeoutSeconds }
             else { 300 }
-        $activeBoot = Start-ProofBoot "first-boot" $lifecycleMarker $EspPath $DiskPath $WorkFull $firstTimeout $manifestPath
-        $firstSerial = $activeBoot.SerialPath
-        Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
-        $activeBoot = $null
         $preReformatDiskPath = $null
         if ($Dm27QuickReformatProof) {
             $preReformatDiskPath = Join-Path $WorkFull "secondary-pre-reformat.raw"
             if (Test-Path -LiteralPath $preReformatDiskPath) {
                 throw "Refusing to overwrite pre-reformat image evidence $preReformatDiskPath"
             }
-            Copy-Item -LiteralPath $DiskPath -Destination $preReformatDiskPath
+            if ($preparedImageFull) {
+                Copy-RawImageSparse $DiskPath $preReformatDiskPath
+                $firstSerial = "not-run-prepared-fixture"
+                Add-Content -LiteralPath $manifestPath -Encoding ascii -Value `
+                    "firstBoot=skipped-prepared-image-source=$preparedImageFull"
+            } else {
+                $activeBoot = Start-ProofBoot "first-boot" $lifecycleMarker $EspPath $DiskPath $WorkFull $firstTimeout $manifestPath
+                $firstSerial = $activeBoot.SerialPath
+                Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
+                $activeBoot = $null
+                Copy-RawImageSparse $DiskPath $preReformatDiskPath
+            }
             Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
                 "preReformatImage=$preReformatDiskPath",
                 "preReformatImageSha256=$((Get-FileHash -LiteralPath $preReformatDiskPath -Algorithm SHA256).Hash)"
             )
+        } else {
+            $activeBoot = Start-ProofBoot "first-boot" $lifecycleMarker $EspPath $DiskPath $WorkFull $firstTimeout $manifestPath
+            $firstSerial = $activeBoot.SerialPath
+            Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
+            $activeBoot = $null
         }
         $preDeleteDiskPath = $null
         if ($Dm25PartitionDeleteProof) {
@@ -551,13 +750,14 @@ try {
             if (Test-Path -LiteralPath $preDeleteDiskPath) {
                 throw "Refusing to overwrite pre-delete image evidence $preDeleteDiskPath"
             }
-            Copy-Item -LiteralPath $DiskPath -Destination $preDeleteDiskPath
+            Copy-RawImageSparse $DiskPath $preDeleteDiskPath
             Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
                 "preDeleteImage=$preDeleteDiskPath",
                 "preDeleteImageSha256=$((Get-FileHash -LiteralPath $preDeleteDiskPath -Algorithm SHA256).Hash)"
             )
         }
-        $rediscoveryMarker = if ($Dm25PartitionDeleteProof) { "[DM25-QEMU] delete=PASS" }
+        $rediscoveryMarker = if ($Dm28InterruptProof) { "[DM28-QRF] retry-after-cold-restart=PASS" }
+            elseif ($Dm25PartitionDeleteProof) { "[DM25-QEMU] delete=PASS" }
             elseif ($Dm27QuickReformatProof) { "[DM27-QEMU] quick-reformat=PASS" }
             elseif ($Dm24FourKnProof) { "[DM24-QEMU] reboot-rediscovery=PASS" }
             elseif ($Dm22LargeProof) { "[DM22-QEMU] reboot-rediscovery=PASS" }
@@ -567,7 +767,132 @@ try {
             elseif ($Dm24FourKnProof) { 600 }
             elseif ($RediscoveryTimeoutSeconds -gt 0) { $RediscoveryTimeoutSeconds }
             else { 180 }
-        $activeBoot = Start-ProofBoot "rediscovery-boot" $rediscoveryMarker $EspPath $DiskPath $WorkFull $rediscoveryTimeout $manifestPath
+        if ($Dm28InterruptProof) {
+            $replacementPath = Join-Path $WorkFull "dm28-replacement.raw"
+            if (Test-Path -LiteralPath $replacementPath) {
+                throw "Refusing to overwrite replacement-media evidence $replacementPath"
+            }
+            $replacementStream = [IO.File]::Open($replacementPath,
+                [IO.FileMode]::CreateNew, [IO.FileAccess]::Write,
+                [IO.FileShare]::ReadWrite)
+            $replacementStream.Dispose()
+            $sparseTool = Join-Path $env:SystemRoot "System32\fsutil.exe"
+            & $sparseTool sparse setflag $replacementPath 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "Unable to mark replacement image sparse."
+            }
+            $replacementStream = [IO.File]::Open($replacementPath,
+                [IO.FileMode]::Open, [IO.FileAccess]::Write,
+                [IO.FileShare]::ReadWrite)
+            $replacementStream.SetLength([int64]$DiskSizeBytes)
+            $replacementStream.Dispose()
+            $replacementHashBefore = (Get-FileHash -LiteralPath $replacementPath `
+                -Algorithm SHA256).Hash
+
+            $activeBoot = Start-ProofBoot "interrupt-reformat-boot" "" `
+                $EspPath $DiskPath $WorkFull $rediscoveryTimeout $manifestPath `
+                "QRF_FAT1_BEGIN"
+            $interruptedSerial = $activeBoot.SerialPath
+            $qmpLogPath = Join-Path $WorkFull "interruption-qmp.jsonl"
+            Set-Content -LiteralPath $qmpLogPath -Value "" -Encoding utf8
+            Connect-ProofQmp $activeBoot $qmpLogPath
+            [void](Send-ProofQmp "device_del" @{ id="dm24disk" })
+            $deviceDeleted = Wait-ProofDeviceDeleted "dm24disk"
+            Add-Content -LiteralPath $manifestPath -Encoding ascii -Value `
+                "qmp.interruption.deviceDeleted=$($deviceDeleted | ConvertTo-Json -Compress -Depth 8)"
+            $interruptResult = Wait-ProofSerialMarker $activeBoot `
+                "[DM28-QRF] interruption=PASS" 45
+
+            $driveLine = "drive_add 0 if=none,id=dm28replacementdrive,file=$replacementPath,format=raw,cache=writeback"
+            $driveResult = Send-ProofQmp "human-monitor-command" `
+                @{ "command-line"=$driveLine }
+            if ($driveResult -match "Error:") {
+                throw "QMP could not add replacement backing: $driveResult"
+            }
+            [void](Send-ProofQmp "device_add" @{
+                driver="usb-storage"; id="dm28replacement"; bus="uhci.0";
+                port="1"; drive="dm28replacementdrive"; removable=$true;
+                serial="DM28REPLACEMENT"; logical_block_size=4096;
+                physical_block_size=4096
+            })
+            Start-Sleep -Seconds 2
+            $replacementBlockStats = @(
+                Send-ProofQmp "query-blockstats" |
+                    Where-Object { $_.device -eq "dm28replacementdrive" }
+            )
+            if ($replacementBlockStats.Count -ne 1 -or
+                -not $replacementBlockStats[0].stats) {
+                throw "QMP did not report block statistics for replacement media."
+            }
+            $replacementWriteOperations = [uint64]$replacementBlockStats[0].stats.wr_operations
+            $replacementWriteBytes = [uint64]$replacementBlockStats[0].stats.wr_bytes
+            if ($replacementWriteOperations -ne 0 -or $replacementWriteBytes -ne 0) {
+                throw "QEMU recorded writes to the replacement media."
+            }
+            Close-ProofQmp
+            Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port `
+                $activeBoot.SerialPath
+            $activeBoot = $null
+            $replacementHashAfter = (Get-FileHash -LiteralPath $replacementPath `
+                -Algorithm SHA256).Hash
+            if ($replacementHashAfter -ne $replacementHashBefore) {
+                throw "The detached Quick Reformat changed replacement media."
+            }
+            Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
+                "interruptionStage=QRF_FAT1_BEGIN after-invalidation-flush",
+                "interruptionSerial=$([IO.Path]::GetFileName($interruptedSerial))",
+                "interruptionResult=PASS guest-reported-incomplete-no-success-claim",
+                "replacementImage=$replacementPath",
+                "replacementSha256Before=$replacementHashBefore",
+                "replacementSha256After=$replacementHashAfter",
+                "replacementWriteOperations=$replacementWriteOperations",
+                "replacementWriteBytes=$replacementWriteBytes",
+                "replacementBlockStats=$($replacementBlockStats[0] | ConvertTo-Json -Compress -Depth 12)",
+                "replacementMediaUnchanged=yes",
+                "qmpTranscript=$qmpLogPath"
+            )
+
+            $interruptedDiskPath = Join-Path $WorkFull "secondary-interrupted.raw"
+            $interruptedSourceHash = (Get-FileHash -LiteralPath $DiskPath `
+                -Algorithm SHA256).Hash
+            Copy-RawImageSparse $DiskPath $interruptedDiskPath
+            $interruptedImageHash = (Get-FileHash -LiteralPath $interruptedDiskPath `
+                -Algorithm SHA256).Hash
+            if ($interruptedImageHash -ne $interruptedSourceHash) {
+                throw "Interrupted checkpoint is not byte-identical to the backing image used for cold restart."
+            }
+            Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
+                "interruptedImage=$interruptedDiskPath",
+                "interruptedImageSha256=$interruptedImageHash",
+                "coldRestartSourceImageSha256=$interruptedSourceHash",
+                "coldRestartUsesSameInterruptedBacking=yes"
+            )
+            $interruptedInspectionPath = Join-Path $WorkFull `
+                "interrupted-image-inspection.txt"
+            if (-not $PythonExecutable) {
+                $python = Get-Command python.exe -ErrorAction SilentlyContinue
+                if (-not $python) { throw "Python 3 was not found; specify -PythonExecutable." }
+                $PythonExecutable = $python.Source
+            }
+            $interruptedInspection = & $PythonExecutable `
+                (Join-Path $Root "scripts\verify-dm28-qemu-interrupted.py") `
+                $preReformatDiskPath $interruptedDiskPath 2>&1
+            $interruptedInspection | Set-Content -LiteralPath `
+                $interruptedInspectionPath -Encoding utf8
+            if ($LASTEXITCODE -ne 0) {
+                throw "Independent interrupted-image verification failed; see $interruptedInspectionPath"
+            }
+            Add-Content -LiteralPath $manifestPath -Encoding ascii -Value `
+                "interruptedImageInspection=PASS path=$interruptedInspectionPath"
+
+            $activeBoot = Start-ProofBoot "recovery-retry-boot" `
+                $rediscoveryMarker $EspPath $DiskPath $WorkFull `
+                $rediscoveryTimeout $manifestPath
+        } else {
+            $activeBoot = Start-ProofBoot "rediscovery-boot" `
+                $rediscoveryMarker $EspPath $DiskPath $WorkFull `
+                $rediscoveryTimeout $manifestPath
+        }
         $rediscoverySerial = $activeBoot.SerialPath
         Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
         $activeBoot = $null
@@ -578,7 +903,7 @@ try {
             if (Test-Path -LiteralPath $postReformatDiskPath) {
                 throw "Refusing to overwrite post-reformat image evidence $postReformatDiskPath"
             }
-            Copy-Item -LiteralPath $DiskPath -Destination $postReformatDiskPath
+            Copy-RawImageSparse $DiskPath $postReformatDiskPath
             Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
                 "postReformatImage=$postReformatDiskPath",
                 "postReformatImageSha256=$((Get-FileHash -LiteralPath $postReformatDiskPath -Algorithm SHA256).Hash)"
@@ -613,7 +938,9 @@ try {
             Join-Path $Root "scripts\verify-dm22-qemu-image.py"
         } else { Join-Path $Root "scripts\verify-dm9-qemu-image.py" }
         if ($Dm27QuickReformatProof) {
-            if ($Dm24FourKnProof) {
+            if ($Dm22LargeProof) {
+                $inspection = & $PythonExecutable $verifier $preReformatDiskPath $postReformatDiskPath $DiskPath --large-payload 2>&1
+            } elseif ($Dm24FourKnProof) {
                 $inspection = & $PythonExecutable $verifier $preReformatDiskPath $postReformatDiskPath $DiskPath --sector-size 4096 2>&1
             } else {
                 $inspection = & $PythonExecutable $verifier $preReformatDiskPath $postReformatDiskPath $DiskPath 2>&1
@@ -637,14 +964,16 @@ try {
             "rediscoverySerial=$([IO.Path]::GetFileName($rediscoverySerial))",
             "coldRestartSerial=$(if ($rebootRediscoverySerial) { [IO.Path]::GetFileName($rebootRediscoverySerial) } else { 'not-applicable' })",
             "deleteRestartSerial=$(if ($deleteRestartSerial) { [IO.Path]::GetFileName($deleteRestartSerial) } else { 'not-applicable' })",
-            "result=PASS tier=$(if ($Dm27QuickReformatProof -and $Dm24FourKnProof) { 'DM27-4Kn-USB-quick-reformat-cold-restart-byte-verified' } elseif ($Dm27QuickReformatProof) { 'DM27-AHCI-quick-reformat-cold-restart-byte-verified' } elseif ($Dm25PartitionDeleteProof) { 'DM25-AHCI-GPT-delete-restart-byte-identical-partition-data' } elseif ($Dm24FourKnProof) { 'DM24-4Kn-FAT32-USB-high-cluster-96KiB-file-restart' } elseif ($Dm22LargeProof) { 'DM22-large-FAT32-AHCI-high-cluster-96KiB-file-restart' } else { '2-full-lifecycle-and-restart-rediscovery' })",
+            "result=PASS tier=$(if ($Dm28InterruptProof) { 'DM28-USB-real-removal-cold-restart-marker-retry-post-retry-restart' } elseif ($Dm27QuickReformatProof -and $Dm24FourKnProof) { 'DM27-4Kn-USB-quick-reformat-cold-restart-byte-verified' } elseif ($Dm27QuickReformatProof) { 'DM27-AHCI-quick-reformat-cold-restart-byte-verified' } elseif ($Dm25PartitionDeleteProof) { 'DM25-AHCI-GPT-delete-restart-byte-identical-partition-data' } elseif ($Dm24FourKnProof) { 'DM24-4Kn-FAT32-USB-high-cluster-96KiB-file-restart' } elseif ($Dm22LargeProof) { 'DM22-large-FAT32-AHCI-high-cluster-96KiB-file-restart' } else { '2-full-lifecycle-and-restart-rediscovery' })",
             "failedStage=none",
             "writesOccurred=yes",
             "inspection=PASS read-only-GPT-FAT32-independent-verifier",
             "transportResult=PASS"
         )
     }
-    $passedProofName = if ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "DM27 4Kn USB Quick Reformat" }
+    $passedProofName = if ($Dm28InterruptProof) { "DM28 4Kn USB Quick Reformat interruption and recovery" }
+        elseif ($Dm27QuickReformatProof -and $Dm22LargeProof) { "DM28 10 GiB AHCI Quick Reformat" }
+        elseif ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "DM27 4Kn USB Quick Reformat" }
         elseif ($Dm27QuickReformatProof) { "DM27 AHCI Quick Reformat" }
         elseif ($Dm25PartitionDeleteProof) { "DM25 AHCI partition delete" }
         elseif ($Dm24FourKnProof) { "DM24 4Kn FAT32 USB" }

@@ -1022,7 +1022,7 @@ static bool verify_private_ahci_write_and_flush(
 
 static bool read_proof_file()
 {
-    const uint8_t handle = vfs::open(kProofFilePath, vfs::OPEN_READ);
+    const vfs::HandleToken handle = vfs::open(kProofFilePath, vfs::OPEN_READ);
     if (handle == 0xFFu) return false;
 
 #if defined(GXOS_DM22_QEMU_FAT32_PROOF) || \
@@ -1071,7 +1071,7 @@ static uint8_t dm27_multi_payload_byte(uint32_t index)
 
 static bool read_dm27_multicluster_file()
 {
-    const uint8_t handle = vfs::open(kDm27MultiFilePath, vfs::OPEN_READ);
+    const vfs::HandleToken handle = vfs::open(kDm27MultiFilePath, vfs::OPEN_READ);
     if (handle == 0xFFu) return false;
     uint8_t buffer[4096];
     uint32_t offset = 0;
@@ -1172,7 +1172,7 @@ static uint32_t dm27_read_u32(const uint8_t* bytes)
 
 static bool read_fresh_proof_file()
 {
-    const uint8_t handle = vfs::open(kFreshFilePath, vfs::OPEN_READ);
+    const vfs::HandleToken handle = vfs::open(kFreshFilePath, vfs::OPEN_READ);
     if (handle == 0xFFu) return false;
 #if defined(GXOS_DM22_QEMU_FAT32_PROOF) || \
     defined(GXOS_DM24_QEMU_FAT32_4KN_PROOF)
@@ -1369,6 +1369,29 @@ static bool run_quick_reformat(const storage::TargetIdentity& identity,
     const storage::Fat32FormatStatus reformatted =
         storage::quick_reformat_fat32_partition(s_formatRequest,
             s_formatResult);
+#if defined(GXOS_DM28_QEMU_REFORMAT_INTERRUPT_PROOF)
+    if (reformatted == storage::FAT32_FORMAT_REFORMAT_INCOMPLETE &&
+        s_formatResult.reformatState >= storage::FAT32_REFORMAT_IN_PROGRESS &&
+        s_formatResult.lastStage == storage::FAT32_FORMAT_STAGE_WRITE_FAT) {
+        serial::puts("[DM28-QRF] interruption=PASS status=");
+        serial::puts(storage::fat32_format_status_name(reformatted));
+        serial::puts(" state=");
+        serial::puts(storage::fat32_reformat_state_name(
+            s_formatResult.reformatState));
+        serial::puts(" stage=");
+        serial::puts(storage::fat32_format_stage_name(
+            s_formatResult.lastStage));
+        serial::puts(" failedOperation=");
+        if (s_formatResult.failedBlockDiagnostic.valid &&
+            s_formatResult.failedBlockDiagnostic.operation ==
+                block::OPERATION_WRITE)
+            serial::puts("write");
+        else
+            serial::puts("unknown");
+        serial::puts(" no-success-claim=yes recovery=restart-required\n");
+        return true;
+    }
+#endif
     if (reformatted != storage::FAT32_FORMAT_SUCCESS ||
         s_formatResult.reformatState != storage::FAT32_REFORMAT_DURABLE ||
         !s_formatResult.verificationPassed ||
@@ -1432,6 +1455,17 @@ static bool run_quick_reformat(const storage::TargetIdentity& identity,
     }
     serial::puts(QEMU_PROOF_TAG " quick-reformat-accounting sectorSize=");
     serial::put_hex32(identity.logicalSectorSize);
+    serial::puts(" partitionBytes=");
+    serial::put_hex64(partition.sectorCount * identity.logicalSectorSize);
+    serial::puts(" sectorsPerCluster=");
+    serial::put_hex32(s_formatResult.geometry.sectorsPerCluster);
+    serial::puts(" clusterBytes=");
+    serial::put_hex32(s_formatResult.geometry.clusterSizeBytes);
+    serial::puts(" fatSectorsPerCopy=");
+    serial::put_hex32(s_formatResult.geometry.fatSizeSectors);
+    serial::puts(" fatBytesPerCopy=");
+    serial::put_hex64(static_cast<uint64_t>(
+        s_formatResult.geometry.fatSizeSectors) * identity.logicalSectorSize);
     serial::puts(" partitionStart=");
     serial::put_hex64(partition.startLba);
     serial::puts(" partitionEnd=");
@@ -1450,8 +1484,14 @@ static bool run_quick_reformat(const storage::TargetIdentity& identity,
     serial::puts(" oldMultiDataLba=");
     serial::put_hex64(oldMultiDataLba);
     serial::puts(" fat1Bytes=");
+    serial::put_hex64(s_formatResult.fat1BytesCleared +
+                      identity.logicalSectorSize);
+    serial::puts(" fat1ZeroBytes=");
     serial::put_hex64(s_formatResult.fat1BytesCleared);
     serial::puts(" fat2Bytes=");
+    serial::put_hex64(s_formatResult.fat2BytesCleared +
+                      identity.logicalSectorSize);
+    serial::puts(" fat2ZeroBytes=");
     serial::put_hex64(s_formatResult.fat2BytesCleared);
     serial::puts(" reservedBytes=");
     serial::put_hex64(s_formatResult.reservedBytesWritten);
@@ -1459,13 +1499,21 @@ static bool run_quick_reformat(const storage::TargetIdentity& identity,
     serial::put_hex64(s_formatResult.rootClusterBytesWritten);
     serial::puts(" totalBytes=");
     serial::put_hex64(s_formatResult.reformatBytesWritten);
+    serial::puts(" totalMetadataBytes=");
+    serial::put_hex64(s_formatResult.reformatBytesWritten);
     serial::puts(" writeRequests=");
     serial::put_hex32(s_formatResult.reformatWriteRequests);
     serial::puts(" flushes=");
     serial::put_hex32(s_formatResult.flushAttempts);
     serial::puts(" elapsedTicks=");
     serial::put_hex64(s_formatResult.reformatElapsedTicks);
-    serial::puts(" scanRequests=");
+    serial::puts(" pitHz=100 elapsedMilliseconds=");
+    serial::put_hex64(s_formatResult.reformatElapsedTicks * 10u);
+    serial::puts(" effectiveWriteBytesPerSecond=");
+    serial::put_hex64(s_formatResult.reformatElapsedTicks == 0 ? 0u :
+        (s_formatResult.reformatBytesWritten * 100u) /
+            s_formatResult.reformatElapsedTicks);
+    serial::puts(" blankScanRequests=");
     serial::put_hex32(s_formatResult.scanReadRequests);
     serial::puts(" readRequests=");
     serial::put_hex32(s_formatResult.reformatReadRequests);
@@ -1477,9 +1525,9 @@ static bool run_quick_reformat(const storage::TargetIdentity& identity,
         kProofMountPath, identity.globalIndex, partition.partitionNumber,
         identity.registrationId, &partition);
     if (freshMount.error != vfs::PARTITION_MOUNT_OK) return false;
-    const uint8_t staleOldFile = vfs::open(kProofFilePath, vfs::OPEN_READ);
+    const vfs::HandleToken staleOldFile = vfs::open(kProofFilePath, vfs::OPEN_READ);
     if (staleOldFile != 0xFFu) (void)vfs::close(staleOldFile);
-    const uint8_t staleOldDirectory = vfs::opendir(kProofDirectoryPath);
+    const vfs::HandleToken staleOldDirectory = vfs::opendir(kProofDirectoryPath);
     if (staleOldDirectory != 0xFFu) (void)vfs::closedir(staleOldDirectory);
 #if defined(GXOS_DM22_QEMU_FAT32_PROOF) || \
     defined(GXOS_DM24_QEMU_FAT32_4KN_PROOF)
@@ -1517,6 +1565,211 @@ static bool run_quick_reformat(const storage::TargetIdentity& identity,
     return true;
 }
 
+#if defined(GXOS_DM28_QEMU_REFORMAT_INTERRUPT_PROOF)
+static bool run_dm28_interrupted_retry(
+    const storage::TargetIdentity& identity,
+    const storage::PartitionEntry& partition,
+    const storage::PartitionTableModel& before,
+    uint8_t rootMountCount)
+{
+    s_formatRequest = {};
+    s_formatRequest.targetSnapshot = identity;
+    s_formatRequest.partitionScheme = storage::PARTITION_SCHEME_GPT;
+    s_formatRequest.partitionSnapshot = partition;
+    for (uint8_t i = 0; i < sizeof(s_formatRequest.gptDiskGuid); ++i)
+        s_formatRequest.gptDiskGuid[i] = before.primaryDiskGuid[i];
+    copy_text(s_formatRequest.volumeLabel, sizeof(s_formatRequest.volumeLabel),
+              "DM27FRESH");
+    s_formatRequest.expectedRegistryGeneration = identity.registryGeneration;
+
+    storage::Fat32FormatResult recoveryProbe = {};
+    const storage::Fat32FormatStatus recoveryStatus =
+        storage::probe_fat32_quick_reformat_partition(s_formatRequest,
+            recoveryProbe);
+    if (recoveryStatus != storage::FAT32_FORMAT_READY ||
+        recoveryProbe.existingState !=
+            storage::FAT32_EXISTING_INTERRUPTED_REFORMAT) {
+        serial::puts("[DM28-QRF] cold-restart=FAIL reason=interrupted-marker-not-reconstructed status=");
+        serial::puts(storage::fat32_format_status_name(recoveryStatus));
+        serial::puts(" existing=");
+        serial::puts(storage::fat32_existing_state_name(
+            recoveryProbe.existingState));
+        serial::putc('\n');
+        return false;
+    }
+
+    uint32_t markerSector = 0;
+    uint32_t oldVolumeId = 0;
+    uint32_t backupBootSector = 0;
+    bool markerPointOfNoReturn = false;
+    alignas(4096) uint8_t markerBytes[storage::MAX_LOGICAL_SECTOR_SIZE] = {};
+    for (uint32_t relative = 8u; relative <= 31u; ++relative) {
+        if (block::read_sectors(identity.globalIndex,
+                partition.startLba + relative, 1, markerBytes) !=
+                block::BLOCK_OK ||
+            !bytes_equal(markerBytes, "GXDM26RF", 8u) ||
+            dm27_read_u32(markerBytes + 8u) != 2u ||
+            dm27_read_u32(markerBytes + 124u) != 2u ||
+            dm27_read_u32(markerBytes + 116u) != relative)
+            continue;
+        markerSector = relative;
+        backupBootSector = dm27_read_u32(markerBytes + 96u);
+        oldVolumeId = dm27_read_u32(markerBytes + 100u);
+        markerPointOfNoReturn = true;
+        break;
+    }
+
+    const block::Status primaryRead = block::read_sectors(
+        identity.globalIndex, partition.startLba, 1, s_proofSectorA);
+    const block::Status backupRead = backupBootSector != 0
+        ? block::read_sectors(identity.globalIndex,
+            partition.startLba + backupBootSector, 1, s_proofSectorB)
+        : block::BLOCK_ERR_INVALID;
+    const bool bootAuthorityInvalid = primaryRead == block::BLOCK_OK &&
+        backupRead == block::BLOCK_OK &&
+        !(s_proofSectorA[510] == 0x55u && s_proofSectorA[511] == 0xAAu) &&
+        !(s_proofSectorB[510] == 0x55u && s_proofSectorB[511] == 0xAAu);
+    const vfs::PartitionMountResult interruptedMount =
+        vfs::mount_partition_detailed(kProofMountPath, identity.globalIndex,
+            partition.partitionNumber, identity.registrationId, &partition);
+    if (interruptedMount.error == vfs::PARTITION_MOUNT_OK)
+        (void)vfs::unmount(kProofMountPath);
+    if (!markerPointOfNoReturn || markerSector == 0 || oldVolumeId == 0 ||
+        !bootAuthorityInvalid ||
+        interruptedMount.error == vfs::PARTITION_MOUNT_OK ||
+        vfs::mount_count() != rootMountCount) {
+        serial::puts("[DM28-QRF] cold-restart=FAIL reason=marker-or-invalid-boot-authority-check\n");
+        return false;
+    }
+    serial::puts("[DM28-QRF] cold-restart=PASS classification=Reformat-interrupted markerVersion=2 markerSector=");
+    serial::put_hex32(markerSector);
+    serial::puts(" markerState=point-of-no-return primaryBPB=invalid backupBPB=invalid autoMount=no retry=explicit\n");
+
+    // The proof harness explicitly starts a new storage operation only after
+    // reconstructing and validating the on-disk retry marker on this boot.
+    s_formatResult = {};
+    const storage::Fat32FormatStatus retried =
+        storage::quick_reformat_fat32_partition(s_formatRequest,
+            s_formatResult);
+    if (retried != storage::FAT32_FORMAT_SUCCESS ||
+        s_formatResult.existingState !=
+            storage::FAT32_EXISTING_INTERRUPTED_REFORMAT ||
+        s_formatResult.reformatState != storage::FAT32_REFORMAT_DURABLE ||
+        !s_formatResult.verificationPassed ||
+        s_formatResult.scanReadRequests != 0 ||
+        s_formatResult.scanBytesRead != 0) {
+        serial::puts("[DM28-QRF] retry-after-cold-restart=FAIL status=");
+        serial::puts(storage::fat32_format_status_name(retried));
+        serial::puts(" state=");
+        serial::puts(storage::fat32_reformat_state_name(
+            s_formatResult.reformatState));
+        serial::putc('\n');
+        return false;
+    }
+
+    storage::PartitionTableModel after = {};
+    const bool tableRescanned = storage::parse_partition_table(
+        identity.globalIndex, after);
+    storage::PartitionEntry afterPartition = {};
+    bool samePartition = tableRescanned &&
+        after.state == storage::DISK_STATE_VALID_GPT &&
+        after.primaryGptValid && after.backupGptValid &&
+        after.gptCopiesAgree &&
+        bytes_equal(after.primaryDiskGuid, before.primaryDiskGuid, 16);
+    bool found = false;
+    for (uint16_t i = 0; i < after.partitionCount && samePartition; ++i) {
+        if (!bytes_equal(after.partitions[i].uniqueGuid,
+                partition.uniqueGuid, 16)) continue;
+        afterPartition = after.partitions[i];
+        found = true;
+    }
+    samePartition = samePartition && found &&
+        afterPartition.startLba == partition.startLba &&
+        afterPartition.endLba == partition.endLba;
+
+    if (block::read_sectors(identity.globalIndex, partition.startLba, 1,
+            s_proofSectorA) != block::BLOCK_OK) return false;
+    const uint32_t newVolumeId = dm27_read_u32(s_proofSectorA + 67u);
+    const bool newLabel = bytes_equal(s_proofSectorA + 71u,
+                                      "DM27FRESH  ", 11u);
+    storage::Fat32FormatResult completedProbe = {};
+    const storage::Fat32FormatStatus completedStatus =
+        storage::probe_fat32_quick_reformat_partition(s_formatRequest,
+            completedProbe);
+    bool markerCleared = true;
+    for (uint32_t relative = 8u; relative <= 31u; ++relative) {
+        if (block::read_sectors(identity.globalIndex,
+                partition.startLba + relative, 1, markerBytes) !=
+                block::BLOCK_OK) {
+            markerCleared = false;
+            break;
+        }
+        if (bytes_equal(markerBytes, "GXDM26RF", 8u)) {
+            markerCleared = false;
+            break;
+        }
+    }
+    if (!samePartition || !newLabel || newVolumeId == 0 ||
+        newVolumeId == oldVolumeId || !markerCleared ||
+        completedStatus != storage::FAT32_FORMAT_READY ||
+        completedProbe.existingState !=
+            storage::FAT32_EXISTING_RECOGNIZED_FILESYSTEM) {
+        serial::puts("[DM28-QRF] retry-after-cold-restart=FAIL reason=publication-marker-clear-or-rescan\n");
+        return false;
+    }
+
+    const vfs::PartitionMountResult freshMount = vfs::mount_partition_detailed(
+        kProofMountPath, identity.globalIndex, partition.partitionNumber,
+        identity.registrationId, &afterPartition);
+    if (freshMount.error != vfs::PARTITION_MOUNT_OK) return false;
+    const vfs::HandleToken staleOldFile = vfs::open(kProofFilePath, vfs::OPEN_READ);
+    if (staleOldFile != 0xFFu) (void)vfs::close(staleOldFile);
+    const vfs::HandleToken staleOldDirectory = vfs::opendir(kProofDirectoryPath);
+    if (staleOldDirectory != 0xFFu) (void)vfs::closedir(staleOldDirectory);
+#if defined(GXOS_DM22_QEMU_FAT32_PROOF) || \
+    defined(GXOS_DM24_QEMU_FAT32_4KN_PROOF)
+    for (uint32_t i = 0; i < kDm22PayloadBytes; ++i)
+        s_dm22Payload[i] = static_cast<uint8_t>(
+            i * 37u + (i >> 8) * 13u + 0x5Au);
+    const void* freshPayload = s_dm22Payload;
+    const uint32_t freshPayloadBytes = kDm22PayloadBytes;
+#else
+    const void* freshPayload = kPayload;
+    const uint32_t freshPayloadBytes =
+        static_cast<uint32_t>(sizeof(kPayload) - 1u);
+#endif
+    const int32_t freshWrite = staleOldFile == 0xFFu &&
+            staleOldDirectory == 0xFFu
+        ? vfs::create_file(kFreshFilePath, freshPayload, freshPayloadBytes)
+        : -1;
+    const bool freshRead = freshWrite ==
+            static_cast<int32_t>(freshPayloadBytes) && read_fresh_proof_file();
+    const vfs::Status firstUnmount = vfs::unmount(kProofMountPath);
+    const vfs::PartitionMountResult remounted = firstUnmount == vfs::VFS_OK
+        ? vfs::mount_partition_detailed(kProofMountPath, identity.globalIndex,
+            partition.partitionNumber, identity.registrationId, &afterPartition)
+        : vfs::PartitionMountResult{0xFF,
+            vfs::PARTITION_MOUNT_DEVICE_UNAVAILABLE};
+    const bool remountRead = remounted.error == vfs::PARTITION_MOUNT_OK &&
+        vfs::mount_identity_valid(remounted.mountIndex) &&
+        read_fresh_proof_file();
+    const vfs::Status secondUnmount = remounted.error == vfs::PARTITION_MOUNT_OK
+        ? vfs::unmount(kProofMountPath) : vfs::VFS_ERR_INVALID;
+    if (staleOldFile != 0xFFu || staleOldDirectory != 0xFFu || !freshRead ||
+        firstUnmount != vfs::VFS_OK || !remountRead ||
+        secondUnmount != vfs::VFS_OK || vfs::mount_count() != rootMountCount) {
+        serial::puts("[DM28-QRF] retry-after-cold-restart=FAIL reason=fresh-file-or-remount\n");
+        return false;
+    }
+    serial::puts("[DM28-QRF] retry-after-cold-restart=PASS newLabel=DM27FRESH oldVolumeId=");
+    serial::put_hex32(oldVolumeId);
+    serial::puts(" newVolumeId=");
+    serial::put_hex32(newVolumeId);
+    serial::puts(" markerCleared=yes mount=PASS freshFile=PASS remount=PASS mounts-clean=yes\n");
+    return true;
+}
+#endif
+
 static bool run_dm27_rediscovery(const storage::TargetIdentity& identity,
                                  const storage::PartitionTableModel& table,
                                  uint8_t rootMountCount)
@@ -1535,6 +1788,29 @@ static bool run_dm27_rediscovery(const storage::TargetIdentity& identity,
         serial::puts(QEMU_PROOF_TAG " reboot-rediscovery=FAIL reason=partition-or-BPB-missing\n");
         return false;
     }
+#if defined(GXOS_DM28_QEMU_REFORMAT_INTERRUPT_PROOF)
+    if (!bytes_equal(s_proofSectorA + 71, "DM27FRESH  ", 11)) {
+        s_formatRequest = {};
+        s_formatRequest.targetSnapshot = identity;
+        s_formatRequest.partitionScheme = storage::PARTITION_SCHEME_GPT;
+        s_formatRequest.partitionSnapshot = partition;
+        for (uint8_t i = 0; i < sizeof(s_formatRequest.gptDiskGuid); ++i)
+            s_formatRequest.gptDiskGuid[i] = table.primaryDiskGuid[i];
+        copy_text(s_formatRequest.volumeLabel,
+            sizeof(s_formatRequest.volumeLabel), "DM27FRESH");
+        s_formatRequest.expectedRegistryGeneration = identity.registryGeneration;
+
+        storage::Fat32FormatResult bootProbe = {};
+        const storage::Fat32FormatStatus bootStatus =
+            storage::probe_fat32_quick_reformat_partition(s_formatRequest,
+                bootProbe);
+        if (bootStatus == storage::FAT32_FORMAT_READY &&
+            bootProbe.existingState ==
+                storage::FAT32_EXISTING_INTERRUPTED_REFORMAT)
+            return run_dm28_interrupted_retry(identity, partition, table,
+                                              rootMountCount);
+    }
+#endif
     if (bytes_equal(s_proofSectorA + 71, "DM27FRESH  ", 11)) {
         const uint32_t volumeId = dm27_read_u32(s_proofSectorA + 67);
         const vfs::PartitionMountResult mounted = vfs::mount_partition_detailed(

@@ -94,7 +94,7 @@ static bool mount_and_read(const block::BlockDevice& device,
         kMountPath, identity.globalIndex, partition.partitionNumber,
         identity.registrationId, &partition);
     if (mounted.error != vfs::PARTITION_MOUNT_OK) return false;
-    const uint8_t handle = vfs::open(kFilePath, vfs::OPEN_READ);
+    const vfs::HandleToken handle = vfs::open(kFilePath, vfs::OPEN_READ);
     uint8_t contents[64] = {};
     const int32_t count = handle == 0xFFu ? vfs::VFS_ERR_IO
         : vfs::read(handle, contents, expectedLength);
@@ -197,9 +197,9 @@ static void run_proof()
         vfs::mount_partition_detailed(kMountPath, sameIdentity.globalIndex,
             firstReinsertPartition.partitionNumber, sameIdentity.registrationId,
             &firstReinsertPartition);
-    const uint8_t file = initialMount.error == vfs::PARTITION_MOUNT_OK
+    const vfs::HandleToken file = initialMount.error == vfs::PARTITION_MOUNT_OK
         ? vfs::open(kFilePath, vfs::OPEN_RDWR) : 0xFFu;
-    const uint8_t directory = initialMount.error == vfs::PARTITION_MOUNT_OK
+    const vfs::HandleToken directory = initialMount.error == vfs::PARTITION_MOUNT_OK
         ? vfs::opendir(kDirectoryPath) : 0xFFu;
     uint8_t initialBytes[64] = {};
     const int32_t initialRead = file == 0xFFu ? vfs::VFS_ERR_IO
@@ -292,7 +292,7 @@ static void run_proof()
         vfs::mount_partition_detailed(kMountPath, identityB.globalIndex,
             partitionB.partitionNumber, identityB.registrationId,
             &partitionB);
-    const uint8_t writeHandle = vfsWriteMount.error == vfs::PARTITION_MOUNT_OK
+    const vfs::HandleToken writeHandle = vfsWriteMount.error == vfs::PARTITION_MOUNT_OK
         ? vfs::open(kFilePath, vfs::OPEN_RDWR) : 0xFFu;
     static uint8_t s_vfsWrite[4096];
     for (uint32_t i = 0; i < sizeof(s_vfsWrite); ++i)

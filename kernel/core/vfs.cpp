@@ -29,6 +29,9 @@ static FileHandle   s_files[VFS_MAX_OPEN_FILES];
 static DirIterator  s_dirs[VFS_MAX_OPEN_FILES];
 static uint8_t      s_mountCount = 0;
 static bool         s_initialized = false;
+// Tokens are monotonic across unmounts and test resets so stale handles can
+// never become valid again when a table slot is reused.
+static HandleToken  s_nextHandleToken = 0x100u;
 static storage::PartitionTableModel s_partitionTableScratch;
 // Filesystem detection reads one complete device logical sector. Reuse this
 // bounded scratch instead of putting a 4 KiB sector on the kernel stack.
@@ -47,6 +50,30 @@ static void memzero(void* dst, size_t len)
     for (size_t i = 0; i < len; ++i) {
         p[i] = 0;
     }
+}
+
+static HandleToken allocate_handle_token()
+{
+    const HandleToken exhausted = ~static_cast<HandleToken>(0);
+    if (s_nextHandleToken == INVALID_HANDLE || s_nextHandleToken == exhausted)
+        return INVALID_HANDLE;
+    return s_nextHandleToken++;
+}
+
+static uint8_t find_file_slot(HandleToken token)
+{
+    if (token == INVALID_HANDLE) return 0xFF;
+    for (uint8_t i = 0; i < VFS_MAX_OPEN_FILES; ++i)
+        if (s_files[i].open && s_files[i].token == token) return i;
+    return 0xFF;
+}
+
+static uint8_t find_directory_slot(HandleToken token)
+{
+    if (token == INVALID_HANDLE) return 0xFF;
+    for (uint8_t i = 0; i < VFS_MAX_OPEN_FILES; ++i)
+        if (s_dirs[i].active && s_dirs[i].token == token) return i;
+    return 0xFF;
 }
 
 // May be used for future file copying operations
@@ -1318,9 +1345,9 @@ void join_path(const char* base, const char* name, char* output, size_t outputSi
 // Public API — File Operations
 // ================================================================
 
-uint8_t open(const char* path, uint16_t flags)
+HandleToken open(const char* path, uint16_t flags)
 {
-    if (!path) return 0xFF;
+    if (!path) return INVALID_HANDLE;
     
     MountPoint* mount = find_mount_for_path(path);
     if (!mount) {
@@ -1329,24 +1356,24 @@ uint8_t open(const char* path, uint16_t flags)
         serial::puts(path);
         serial::puts("\n");
 #endif
-        return 0xFF;
+        return INVALID_HANDLE;
     }
-    if (mount_io_status(mount) != VFS_OK) return 0xFF;
+    if (mount_io_status(mount) != VFS_OK) return INVALID_HANDLE;
     
     // Find free file handle
-    uint8_t handle = 0xFF;
+    uint8_t fileSlot = 0xFF;
     for (uint8_t i = 0; i < VFS_MAX_OPEN_FILES; ++i) {
         if (!s_files[i].open) {
-            handle = i;
+            fileSlot = i;
             break;
         }
     }
     
-    if (handle == 0xFF) {
+    if (fileSlot == 0xFF) {
 #if defined(__GNUC__) || defined(__clang__)
         serial::puts("[VFS] ERROR: No free file handles\n");
 #endif
-        return 0xFF;
+        return INVALID_HANDLE;
     }
     
     // Get path relative to mount point
@@ -1365,7 +1392,7 @@ uint8_t open(const char* path, uint16_t flags)
             fs_fat::DirEntry entry;
             if (fs_fat::lookup_path(mount->fsVolumeIndex, relPath, &entry)) {
                 if ((flags & OPEN_CREATE) && (flags & OPEN_EXCL)) {
-                    return 0xFF;
+                    return INVALID_HANDLE;
                 }
                 // Check if it's a directory when we want a file
                 if (entry.isDir && (flags & OPEN_WRITE)) {
@@ -1373,7 +1400,7 @@ uint8_t open(const char* path, uint16_t flags)
 #if defined(__GNUC__) || defined(__clang__)
                     serial::puts("[VFS] ERROR: Cannot open directory for writing\n");
 #endif
-                    return 0xFF;
+                    return INVALID_HANDLE;
                 }
                 
             } else {
@@ -1392,10 +1419,10 @@ uint8_t open(const char* path, uint16_t flags)
                         serial::put_hex8(static_cast<uint8_t>(blockStatus));
                         serial::puts("\n");
 #endif
-                        return 0xFF;
+                        return INVALID_HANDLE;
                     }
                     if (!fs_fat::lookup_path(mount->fsVolumeIndex, relPath, &entry)) {
-                        return 0xFF;
+                        return INVALID_HANDLE;
                     }
                 } else {
 #if defined(__GNUC__) || defined(__clang__)
@@ -1403,12 +1430,12 @@ uint8_t open(const char* path, uint16_t flags)
                     serial::puts(path);
                     serial::puts("\n");
 #endif
-                    return 0xFF;
+                    return INVALID_HANDLE;
                 }
             }
 
             // Open the existing or newly-created file.
-            if (entry.isDir && (flags & OPEN_WRITE)) return 0xFF;
+            if (entry.isDir && (flags & OPEN_WRITE)) return INVALID_HANDLE;
             fsHandle = fs_fat::open_file(mount->fsVolumeIndex,
                                          entry.firstCluster,
                                          entry.fileSize,
@@ -1432,23 +1459,30 @@ uint8_t open(const char* path, uint16_t flags)
 #if defined(__GNUC__) || defined(__clang__)
             serial::puts("[VFS] ext4 path lookup not fully implemented\n");
 #endif
-            return 0xFF;
+            return INVALID_HANDLE;
         }
             
         default:
 #if defined(__GNUC__) || defined(__clang__)
             serial::puts("[VFS] ERROR: Unsupported filesystem type\n");
 #endif
-            return 0xFF;
+            return INVALID_HANDLE;
     }
     
     if (!found) {
-        return 0xFF;
+        return INVALID_HANDLE;
+    }
+
+    const HandleToken token = allocate_handle_token();
+    if (token == INVALID_HANDLE) {
+        if (fsHandle != 0xFF) fs_fat::close_file(fsHandle);
+        return INVALID_HANDLE;
     }
     
     // Initialize handle
-    FileHandle& fh = s_files[handle];
+    FileHandle& fh = s_files[fileSlot];
     fh.open = true;
+    fh.token = token;
     fh.mountIndex = static_cast<uint8_t>(mount - s_mounts);
     fh.flags = flags;
     fh.position = 0;
@@ -1456,15 +1490,15 @@ uint8_t open(const char* path, uint16_t flags)
     fh.fsFileHandle = fsHandle;
     strcopy(fh.path, path, sizeof(fh.path));
     
-    return handle;
+    return token;
 }
 
-Status close(uint8_t handle)
+Status close(HandleToken handle)
 {
-    if (handle >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
-    if (!s_files[handle].open) return VFS_ERR_INVALID;
+    const uint8_t fileSlot = find_file_slot(handle);
+    if (fileSlot == 0xFF) return VFS_ERR_INVALID;
     
-    FileHandle& fh = s_files[handle];
+    FileHandle& fh = s_files[fileSlot];
     Status flushStatus = mount_io_status(&s_mounts[fh.mountIndex]);
     // Close via filesystem driver
     MountPoint* mount = &s_mounts[fh.mountIndex];
@@ -1493,13 +1527,13 @@ Status close(uint8_t handle)
     return flushStatus;
 }
 
-int32_t read(uint8_t handle, void* buffer, uint32_t size)
+int32_t read(HandleToken handle, void* buffer, uint32_t size)
 {
-    if (handle >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
-    if (!s_files[handle].open) return VFS_ERR_INVALID;
+    const uint8_t fileSlot = find_file_slot(handle);
+    if (fileSlot == 0xFF) return VFS_ERR_INVALID;
     if (!buffer || size == 0) return VFS_ERR_INVALID;
     
-    FileHandle& fh = s_files[handle];
+    FileHandle& fh = s_files[fileSlot];
     
     if (!(fh.flags & OPEN_READ)) {
         return VFS_ERR_INVALID;
@@ -1541,13 +1575,13 @@ int32_t read(uint8_t handle, void* buffer, uint32_t size)
     return bytesRead;
 }
 
-int32_t write(uint8_t handle, const void* buffer, uint32_t size)
+int32_t write(HandleToken handle, const void* buffer, uint32_t size)
 {
-    if (handle >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
-    if (!s_files[handle].open) return VFS_ERR_INVALID;
+    const uint8_t fileSlot = find_file_slot(handle);
+    if (fileSlot == 0xFF) return VFS_ERR_INVALID;
     if (!buffer || size == 0) return VFS_ERR_INVALID;
     
-    FileHandle& fh = s_files[handle];
+    FileHandle& fh = s_files[fileSlot];
     
     if (!(fh.flags & OPEN_WRITE)) {
         return VFS_ERR_INVALID;
@@ -1601,12 +1635,12 @@ int32_t write(uint8_t handle, const void* buffer, uint32_t size)
     return bytesWritten;
 }
 
-Status seek(uint8_t handle, int64_t offset, SeekOrigin origin)
+Status seek(HandleToken handle, int64_t offset, SeekOrigin origin)
 {
-    if (handle >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
-    if (!s_files[handle].open) return VFS_ERR_INVALID;
+    const uint8_t fileSlot = find_file_slot(handle);
+    if (fileSlot == 0xFF) return VFS_ERR_INVALID;
     
-    FileHandle& fh = s_files[handle];
+    FileHandle& fh = s_files[fileSlot];
     int64_t newPos = 0;
     
     switch (origin) {
@@ -1647,25 +1681,25 @@ Status seek(uint8_t handle, int64_t offset, SeekOrigin origin)
     return VFS_OK;
 }
 
-int64_t tell(uint8_t handle)
+int64_t tell(HandleToken handle)
 {
-    if (handle >= VFS_MAX_OPEN_FILES) return -1;
-    if (!s_files[handle].open) return -1;
-    return static_cast<int64_t>(s_files[handle].position);
+    const uint8_t fileSlot = find_file_slot(handle);
+    if (fileSlot == 0xFF) return -1;
+    return static_cast<int64_t>(s_files[fileSlot].position);
 }
 
-int64_t file_size(uint8_t handle)
+int64_t file_size(HandleToken handle)
 {
-    if (handle >= VFS_MAX_OPEN_FILES) return -1;
-    if (!s_files[handle].open) return -1;
-    return static_cast<int64_t>(s_files[handle].size);
+    const uint8_t fileSlot = find_file_slot(handle);
+    if (fileSlot == 0xFF) return -1;
+    return static_cast<int64_t>(s_files[fileSlot].size);
 }
 
-Status flush(uint8_t handle)
+Status flush(HandleToken handle)
 {
-    if (handle >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
-    if (!s_files[handle].open) return VFS_ERR_INVALID;
-    MountPoint* mount = &s_mounts[s_files[handle].mountIndex];
+    const uint8_t fileSlot = find_file_slot(handle);
+    if (fileSlot == 0xFF) return VFS_ERR_INVALID;
+    MountPoint* mount = &s_mounts[s_files[fileSlot].mountIndex];
     const Status backingStatus = mount_io_status(mount);
     if (backingStatus != VFS_OK) return backingStatus;
     if (mount->fsType != FS_TYPE_FAT32) return VFS_OK;
@@ -1674,39 +1708,41 @@ Status flush(uint8_t handle)
         ? VFS_OK : map_block_status(blockStatus);
 }
 
-const FileHandle* get_handle(uint8_t handle)
+const FileHandle* get_handle(HandleToken handle)
 {
-    if (handle >= VFS_MAX_OPEN_FILES) return nullptr;
-    if (!s_files[handle].open) return nullptr;
-    return &s_files[handle];
+    const uint8_t fileSlot = find_file_slot(handle);
+    return fileSlot == 0xFF ? nullptr : &s_files[fileSlot];
 }
 
 // ================================================================
 // Public API — Directory Operations
 // ================================================================
 
-uint8_t opendir(const char* path)
+HandleToken opendir(const char* path)
 {
-    if (!path) return 0xFF;
+    if (!path) return INVALID_HANDLE;
     
     MountPoint* mount = find_mount_for_path(path);
-    if (!mount) return 0xFF;
-    if (mount_io_status(mount) != VFS_OK) return 0xFF;
+    if (!mount) return INVALID_HANDLE;
+    if (mount_io_status(mount) != VFS_OK) return INVALID_HANDLE;
     
     // Find free iterator
-    uint8_t iter = 0xFF;
+    uint8_t iterSlot = 0xFF;
     for (uint8_t i = 0; i < VFS_MAX_OPEN_FILES; ++i) {
         if (!s_dirs[i].active) {
-            iter = i;
+            iterSlot = i;
             break;
         }
     }
     
-    if (iter == 0xFF) return 0xFF;
+    if (iterSlot == 0xFF) return INVALID_HANDLE;
+    const HandleToken token = allocate_handle_token();
+    if (token == INVALID_HANDLE) return INVALID_HANDLE;
     
     // Initialize iterator
-    DirIterator& di = s_dirs[iter];
+    DirIterator& di = s_dirs[iterSlot];
     di.active = true;
+    di.token = token;
     di.mountIndex = static_cast<uint8_t>(mount - s_mounts);
     strcopy(di.path, path, sizeof(di.path));
     di.index = 0;
@@ -1723,26 +1759,26 @@ uint8_t opendir(const char* path)
                 (relPath[0] == '/' && relPath[1] == '\0')) {
                 if (!fs_fat::open_root_dir(mount->fsVolumeIndex)) {
                     di.active = false;
-                    return 0xFF;
+                    return INVALID_HANDLE;
                 }
             } else {
                 // Lookup the directory by path
                 fs_fat::DirEntry dirEntry;
                 if (!fs_fat::lookup_path(mount->fsVolumeIndex, relPath, &dirEntry)) {
                     di.active = false;
-                    return 0xFF;  // Directory not found
+                    return INVALID_HANDLE;  // Directory not found
                 }
                 
                 // Must be a directory
                 if (!dirEntry.isDir) {
                     di.active = false;
-                    return 0xFF;  // Not a directory
+                    return INVALID_HANDLE;  // Not a directory
                 }
                 
                 // Open the directory by its cluster
                 if (!fs_fat::open_dir(mount->fsVolumeIndex, dirEntry.firstCluster)) {
                     di.active = false;
-                    return 0xFF;
+                    return INVALID_HANDLE;
                 }
             }
             break;
@@ -1759,26 +1795,26 @@ uint8_t opendir(const char* path)
             
         default:
             di.active = false;
-            return 0xFF;
+            return INVALID_HANDLE;
     }
     
-    return iter;
+    return token;
 }
 
-bool readdir(uint8_t iterator, DirEntry* entry)
+bool readdir(HandleToken iterator, DirEntry* entry)
 {
     bool hasEntry = false;
     return readdir_detailed(iterator, entry, hasEntry) == VFS_OK && hasEntry;
 }
 
-Status readdir_detailed(uint8_t iterator, DirEntry* entry, bool& hasEntry)
+Status readdir_detailed(HandleToken iterator, DirEntry* entry, bool& hasEntry)
 {
     hasEntry = false;
-    if (iterator >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
-    if (!s_dirs[iterator].active) return VFS_ERR_INVALID;
+    const uint8_t iterSlot = find_directory_slot(iterator);
+    if (iterSlot == 0xFF) return VFS_ERR_INVALID;
     if (!entry) return VFS_ERR_INVALID;
 
-    DirIterator& di = s_dirs[iterator];
+    DirIterator& di = s_dirs[iterSlot];
     MountPoint* mount = &s_mounts[di.mountIndex];
     const Status backingStatus = mount_io_status(mount);
     if (backingStatus != VFS_OK) return backingStatus;
@@ -1836,17 +1872,18 @@ Status readdir_detailed(uint8_t iterator, DirEntry* entry, bool& hasEntry)
     }
 }
 
-void closedir(uint8_t iterator)
+void closedir(HandleToken iterator)
 {
-    if (iterator >= VFS_MAX_OPEN_FILES) return;
-    if (s_dirs[iterator].active) {
-        MountPoint& mount = s_mounts[s_dirs[iterator].mountIndex];
+    const uint8_t iterSlot = find_directory_slot(iterator);
+    if (iterSlot == 0xFF) return;
+    if (s_dirs[iterSlot].active) {
+        MountPoint& mount = s_mounts[s_dirs[iterSlot].mountIndex];
         if (mount.active && (mount.fsType == FS_TYPE_FAT32 ||
                              mount.fsType == FS_TYPE_EXFAT)) {
             fs_fat::close_dir(mount.fsVolumeIndex);
         }
     }
-    s_dirs[iterator].active = false;
+    s_dirs[iterSlot].active = false;
 }
 
 Status mkdir(const char* path)
@@ -2074,8 +2111,8 @@ Status rename(const char* oldPath, const char* newPath)
 
 int32_t read_file(const char* path, void* buffer, uint32_t maxSize)
 {
-    uint8_t handle = open(path, OPEN_READ);
-    if (handle == 0xFF) return VFS_ERR_NOT_FOUND;
+    const HandleToken handle = open(path, OPEN_READ);
+    if (handle == INVALID_HANDLE) return VFS_ERR_NOT_FOUND;
     
     int32_t bytesRead = read(handle, buffer, maxSize);
     close(handle);
@@ -2171,8 +2208,8 @@ int32_t create_file(const char* path, const void* buffer, uint32_t size)
 
 int32_t append_file(const char* path, const void* buffer, uint32_t size)
 {
-    uint8_t handle = open(path, OPEN_WRITE | OPEN_APPEND | OPEN_CREATE);
-    if (handle == 0xFF) return VFS_ERR_INVALID;
+    const HandleToken handle = open(path, OPEN_WRITE | OPEN_APPEND | OPEN_CREATE);
+    if (handle == INVALID_HANDLE) return VFS_ERR_INVALID;
     
     int32_t bytesWritten = write(handle, buffer, size);
     close(handle);

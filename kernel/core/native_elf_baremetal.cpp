@@ -597,7 +597,7 @@ static bool package_path(const Package* package, const char* relative, char* out
 static bool read_at(const char* path, uint64_t offset, void* buffer, uint32_t length, uint32_t* outRead) {
     if (outRead) *outRead = 0;
     if (!path || !buffer || length == 0) return false;
-    const uint8_t handle = vfs::open(path, vfs::OPEN_READ);
+    const vfs::HandleToken handle = vfs::open(path, vfs::OPEN_READ);
     if (handle == 0xFF) return false;
     bool okay = vfs::seek(handle, static_cast<int64_t>(offset), vfs::SEEK_SET) == vfs::VFS_OK;
     uint32_t total = 0;
@@ -677,7 +677,7 @@ void discover() {
     s_packageCount = 0;
     s_discovered = true;
     serial::puts("[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS\n");
-    const uint8_t iterator = vfs::opendir("/Apps");
+    const vfs::HandleToken iterator = vfs::opendir("/Apps");
     if (iterator == 0xFF) {
         // VFS can be mounted after early desktop probes.  Do not permanently
         // cache a negative result from a not-yet-mounted package root.
@@ -1244,7 +1244,7 @@ static gx_result GX_CALL host_file_read(gx_app_context* context, const char* rel
     if (!package_path(runtime->package, relative, path, sizeof(path))) {
         return abi_result(runtime, NativeAbiOperation::ReadResource, GX_ERROR_PERMISSION_DENIED);
     }
-    const uint8_t handle = vfs::open(path, vfs::OPEN_READ);
+    const vfs::HandleToken handle = vfs::open(path, vfs::OPEN_READ);
     if (handle == 0xFF) return abi_result(runtime, NativeAbiOperation::ReadResource, GX_ERROR_FAILED);
     const int64_t size = vfs::file_size(handle);
     if (size < 0 || offset > static_cast<uint64_t>(size) ||

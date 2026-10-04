@@ -2661,7 +2661,7 @@ void run_usb_mass_storage_tests()
         : vfs::PartitionMountResult{0xFF, vfs::PARTITION_MOUNT_TABLE_INVALID};
     uint8_t mountIndex = vfs::mount_index_for_path("/usb");
     const vfs::MountPoint* mount = vfs::get_mount_by_index(mountIndex);
-    const uint8_t directory = vfs::opendir("/usb");
+    const vfs::HandleToken directory = vfs::opendir("/usb");
     bool rootEntryFound = false;
     if (directory != 0xFF) {
         vfs::DirEntry entry = {};
@@ -2671,7 +2671,7 @@ void run_usb_mass_storage_tests()
                 rootEntryFound = true;
         (void)vfs::closedir(directory);
     }
-    const uint8_t fileHandle = vfs::open("/usb/readme.bin", vfs::OPEN_READ);
+    const vfs::HandleToken fileHandle = vfs::open("/usb/readme.bin", vfs::OPEN_READ);
     std::vector<uint8_t> fileReadback(fileBytes.size());
     const int32_t fileRead = fileHandle == 0xFF ? vfs::VFS_ERR_IO
         : vfs::read(fileHandle, fileReadback.data(),
@@ -2681,7 +2681,7 @@ void run_usb_mass_storage_tests()
     if (fileHandle != 0xFF) (void)vfs::close(fileHandle);
     const int32_t writableFileCreate = vfs::create_file("/usb/writable.bin",
         fileBytes.data(), static_cast<uint32_t>(fileBytes.size()));
-    const uint8_t writableHandle = vfs::open("/usb/writable.bin", vfs::OPEN_READ);
+    const vfs::HandleToken writableHandle = vfs::open("/usb/writable.bin", vfs::OPEN_READ);
     std::vector<uint8_t> writableReadback(fileBytes.size());
     const int32_t writableRead = writableHandle == 0xFF ? vfs::VFS_ERR_IO
         : vfs::read(writableHandle, writableReadback.data(),
@@ -2697,7 +2697,7 @@ void run_usb_mass_storage_tests()
     const vfs::PartitionMountResult cleanRemount =
         vfs::mount_partition_detailed("/usb-remounted", blockIndex,
             usbPartition.partitionNumber, device.registrationId, &usbPartition);
-    const uint8_t remountedWritableHandle =
+    const vfs::HandleToken remountedWritableHandle =
         cleanRemount.error == vfs::PARTITION_MOUNT_OK
             ? vfs::open("/usb-remounted/writable.bin", vfs::OPEN_READ) : 0xFF;
     std::vector<uint8_t> remountedWritableBytes(fileBytes.size());
@@ -2774,7 +2774,7 @@ void run_usb_mass_storage_tests()
     const uint64_t oldRegistration = device.registrationId;
     const block::Status disconnectedIo = block::read_endpoint(externalEndpoint,
         0, 1, sectorBuffer);
-    const uint8_t openAtRemoval = vfs::open("/usb-remounted/readme.bin", vfs::OPEN_READ);
+    const vfs::HandleToken openAtRemoval = vfs::open("/usb-remounted/readme.bin", vfs::OPEN_READ);
     (void)usb_storage::release(7);
     const block::Status afterReleaseIo = block::read_endpoint(externalEndpoint,
         0, 1, sectorBuffer);
@@ -2839,14 +2839,14 @@ void run_usb_mass_storage_tests()
             usbPartition.partitionNumber, sameDevice.registrationId,
             &usbPartition)
         : vfs::PartitionMountResult{0xFF, vfs::PARTITION_MOUNT_DEVICE_UNAVAILABLE};
-    const uint8_t reinsertedHandle = remount.error == vfs::PARTITION_MOUNT_OK
+    const vfs::HandleToken reinsertedHandle = remount.error == vfs::PARTITION_MOUNT_OK
         ? vfs::open("/usb-reinserted/readme.bin", vfs::OPEN_READ) : 0xFF;
     std::vector<uint8_t> reinsertedBytes(fileBytes.size());
     const int32_t reinsertedRead = reinsertedHandle == 0xFF ? vfs::VFS_ERR_IO
         : vfs::read(reinsertedHandle, reinsertedBytes.data(),
                     static_cast<uint32_t>(reinsertedBytes.size()));
     if (reinsertedHandle != 0xFF) (void)vfs::close(reinsertedHandle);
-    const uint8_t reinsertedWritableHandle =
+    const vfs::HandleToken reinsertedWritableHandle =
         remount.error == vfs::PARTITION_MOUNT_OK
             ? vfs::open("/usb-reinserted/writable.bin", vfs::OPEN_READ) : 0xFF;
     std::vector<uint8_t> reinsertedWritableBytes(fileBytes.size());
@@ -3331,7 +3331,7 @@ void run_usb_mass_storage_tests()
             vfs::mount_partition_detailed("/usb-stress", index,
                 table.partitions[0].partitionNumber, current.registrationId,
                 &table.partitions[0]);
-        uint8_t handle = stressMount.error == vfs::PARTITION_MOUNT_OK
+        vfs::HandleToken handle = stressMount.error == vfs::PARTITION_MOUNT_OK
             ? vfs::open("/usb-stress/readme.bin", vfs::OPEN_READ) : 0xFF;
         std::vector<uint8_t> readback(fileBytes.size());
         const int32_t amount = handle == 0xFF ? vfs::VFS_ERR_IO
@@ -9243,7 +9243,7 @@ int main()
             gptVfs.bytes.begin() + static_cast<size_t>(partA.endLba + 2) * 512);
         gptVfs.writeLog.clear();
         const uint32_t flushesBeforeFiles = gptVfs.flushes;
-        const uint8_t rootIterator = vfs::opendir(rootA.c_str());
+        const vfs::HandleToken rootIterator = vfs::opendir(rootA.c_str());
         bool rootEnumerated = rootIterator != 0xFF;
         if (rootIterator != 0xFF) {
             vfs::DirEntry entry = {};
@@ -9281,7 +9281,7 @@ int main()
               writesBStayBounded,
               "second simultaneous VFS mount writes only into GPT partition B");
 
-        uint8_t readHandle = vfs::open(fileA.c_str(), vfs::OPEN_READ);
+        vfs::HandleToken readHandle = vfs::open(fileA.c_str(), vfs::OPEN_READ);
         std::vector<uint8_t> readbackA(payloadA.size());
         const int32_t bytesReadA = readHandle == 0xFF ? vfs::VFS_ERR_IO
             : vfs::read(readHandle, readbackA.data(),
@@ -9290,7 +9290,7 @@ int main()
             readbackA == payloadA;
         const vfs::Status closeReadA = readHandle == 0xFF
             ? vfs::VFS_ERR_INVALID : vfs::close(readHandle);
-        const uint8_t dirIterator = vfs::opendir(dirA.c_str());
+        const vfs::HandleToken dirIterator = vfs::opendir(dirA.c_str());
         bool directoryListedFile = false;
         if (dirIterator != 0xFF) {
             vfs::DirEntry entry = {};
@@ -9300,11 +9300,11 @@ int main()
                     directoryListedFile = true;
             vfs::closedir(dirIterator);
         }
-        const uint8_t busyHandle = vfs::open(fileA.c_str(), vfs::OPEN_READ);
+        const vfs::HandleToken busyHandle = vfs::open(fileA.c_str(), vfs::OPEN_READ);
         const vfs::Status busyUnmount = vfs::unmount(rootA.c_str());
         const vfs::Status closeBusyFile = busyHandle == 0xFF
             ? vfs::VFS_ERR_INVALID : vfs::close(busyHandle);
-        const uint8_t busyDirectory = vfs::opendir(rootA.c_str());
+        const vfs::HandleToken busyDirectory = vfs::opendir(rootA.c_str());
         const vfs::Status busyDirectoryUnmount = vfs::unmount(rootA.c_str());
         if (busyDirectory != 0xFF) vfs::closedir(busyDirectory);
         check(contentAExact && closeReadA == vfs::VFS_OK && directoryListedFile &&
@@ -9352,7 +9352,7 @@ int main()
               "VFS FAT writes issue parent flushes after completed sector writes");
 
         const vfs::Status unmountAStatus = vfs::unmount(rootA.c_str());
-        uint8_t readHandleB = vfs::open(fileB.c_str(), vfs::OPEN_READ);
+        vfs::HandleToken readHandleB = vfs::open(fileB.c_str(), vfs::OPEN_READ);
         std::vector<uint8_t> readbackB(payloadB.size());
         const int32_t bytesReadB = readHandleB == 0xFF ? vfs::VFS_ERR_IO
             : vfs::read(readHandleB, readbackB.data(),
@@ -9386,7 +9386,7 @@ int main()
             const vfs::PartitionMountResult stressMount =
                 vfs::mount_partition_detailed("/mnt/a", index,
                     partA.partitionNumber, parentRegistration, &partA);
-            uint8_t stressHandle = vfs::open(fileA.c_str(), vfs::OPEN_READ);
+            vfs::HandleToken stressHandle = vfs::open(fileA.c_str(), vfs::OPEN_READ);
             std::vector<uint8_t> stressRead(payloadA.size());
             const int32_t stressBytes = stressHandle == 0xFF
                 ? vfs::VFS_ERR_IO
@@ -9414,9 +9414,9 @@ int main()
             vfs::get_mount_by_index(lossMountIndex);
         const block::PartitionViewHandle lossView = lossMountPoint
             ? lossMountPoint->partitionView : block::PartitionViewHandle{};
-        const uint8_t openLossHandle =
+        const vfs::HandleToken openLossHandle =
             vfs::open("/mnt/loss/test/hello.txt", vfs::OPEN_READ);
-        const uint8_t lossIterator = vfs::opendir("/mnt/loss/test");
+        const vfs::HandleToken lossIterator = vfs::opendir("/mnt/loss/test");
         bool iteratorPrimed = false;
         if (lossIterator != 0xFF) {
             vfs::DirEntry firstEntry{};
@@ -9543,7 +9543,7 @@ int main()
         mbrVfs.writeLog.clear();
         const int32_t created = vfs::create_file("/mnt/mbr/round.bin",
             payload.data(), static_cast<uint32_t>(payload.size()));
-        uint8_t handle = vfs::open("/mnt/mbr/round.bin", vfs::OPEN_READ);
+        vfs::HandleToken handle = vfs::open("/mnt/mbr/round.bin", vfs::OPEN_READ);
         std::vector<uint8_t> readback(payload.size());
         const int32_t bytesRead = handle == 0xFF ? vfs::VFS_ERR_IO
             : vfs::read(handle, readback.data(),
@@ -10044,7 +10044,7 @@ int main()
                 vfs::PARTITION_MOUNT_OK
             ? fs_fat::get_volume(vfs::get_mount_by_index(mountIndex)->fsVolumeIndex)
             : nullptr;
-        const uint8_t rootIterator = mountResult.error == vfs::PARTITION_MOUNT_OK
+        const vfs::HandleToken rootIterator = mountResult.error == vfs::PARTITION_MOUNT_OK
             ? vfs::opendir("/mnt/dm24") : 0xFF;
         bool rootEnumerated = rootIterator != 0xFF;
         if (rootIterator != 0xFF) {
@@ -10070,7 +10070,7 @@ int main()
             denseCreated = vfs::create_file(path, &value, 1) == 1;
         }
         uint32_t denseFiles = 0;
-        const uint8_t denseIterator = denseCreated
+        const vfs::HandleToken denseIterator = denseCreated
             ? vfs::opendir("/mnt/dm24/dense") : 0xFF;
         bool denseEnumerated = denseIterator != 0xFF;
         if (denseIterator != 0xFF) {
@@ -10090,7 +10090,7 @@ int main()
         const int32_t partialCreated = vfs::create_file(
             "/mnt/dm24/partial.bin", partialExpected.data(),
             static_cast<uint32_t>(partialExpected.size()));
-        const uint8_t partialHandle = partialCreated ==
+        const vfs::HandleToken partialHandle = partialCreated ==
                 static_cast<int32_t>(partialExpected.size())
             ? vfs::open("/mnt/dm24/partial.bin", vfs::OPEN_RDWR) : 0xFF;
         const uint32_t partialLengths[] = {1u, 31u, 512u, 513u, 4095u,
@@ -10117,7 +10117,7 @@ int main()
         if (partialHandle != 0xFF &&
             vfs::close(partialHandle) != vfs::VFS_OK) partialWrites = false;
         auto readFile = [](const char* path, std::vector<uint8_t>& output) {
-            const uint8_t handle = vfs::open(path, vfs::OPEN_READ);
+            const vfs::HandleToken handle = vfs::open(path, vfs::OPEN_READ);
             if (handle == 0xFF) return false;
             const int64_t fileBytes = vfs::file_size(handle);
             if (fileBytes < 0 || fileBytes > 1024 * 1024) {
@@ -10184,7 +10184,7 @@ int main()
                 vfs::PARTITION_MOUNT_DEVICE_UNAVAILABLE};
         std::vector<uint8_t> partialAfterRestart, multiAfterRestart;
         uint32_t denseFilesAfterRestart = 0;
-        const uint8_t restartedDenseIterator = restartedMount.error ==
+        const vfs::HandleToken restartedDenseIterator = restartedMount.error ==
                 vfs::PARTITION_MOUNT_OK
             ? vfs::opendir("/mnt/dm24/dense") : 0xFF;
         bool denseDirectoryPersisted = restartedDenseIterator != 0xFF;
@@ -10214,6 +10214,37 @@ int main()
               restartFilesPersisted && restartedUnmount == vfs::VFS_OK,
               "4Kn GPT/FAT32 unmount, device-registration restart, partition-identity remount, and persistent exact reads all pass");
 
+        const vfs::PartitionMountResult oldIncarnationMount =
+            restartedIdentity && restartedDeviceCaptured
+                ? vfs::mount_partition_detailed("/mnt/dm26", restartedIndex,
+                    restartedPartition.partitionNumber,
+                    restartedDevice.registrationId, &restartedPartition)
+                : vfs::PartitionMountResult{0xFF,
+                    vfs::PARTITION_MOUNT_DEVICE_UNAVAILABLE};
+        vfs::HandleToken oldIncarnationFile = vfs::INVALID_HANDLE;
+        vfs::HandleToken oldIncarnationDirectory = vfs::INVALID_HANDLE;
+        bool oldIncarnationReferencesInvalidated = false;
+        if (oldIncarnationMount.error == vfs::PARTITION_MOUNT_OK) {
+            oldIncarnationFile = vfs::open("/mnt/dm26/multi.bin",
+                vfs::OPEN_READ);
+            oldIncarnationDirectory = vfs::opendir("/mnt/dm26/dense");
+            const bool openedOldObjects =
+                oldIncarnationFile != vfs::INVALID_HANDLE &&
+                oldIncarnationDirectory != vfs::INVALID_HANDLE;
+            const vfs::Status oldFileClose = oldIncarnationFile !=
+                    vfs::INVALID_HANDLE
+                ? vfs::close(oldIncarnationFile) : vfs::VFS_ERR_INVALID;
+            if (oldIncarnationDirectory != vfs::INVALID_HANDLE)
+                vfs::closedir(oldIncarnationDirectory);
+            const vfs::Status oldMountClose = vfs::unmount("/mnt/dm26");
+            oldIncarnationReferencesInvalidated = openedOldObjects &&
+                oldFileClose == vfs::VFS_OK && oldMountClose == vfs::VFS_OK;
+        }
+        check(oldIncarnationReferencesInvalidated &&
+              oldIncarnationFile != vfs::INVALID_HANDLE &&
+              oldIncarnationDirectory != vfs::INVALID_HANDLE,
+              "old FAT file and directory references are closed and their mount is released before Quick Reformat");
+
         // Put a recognizable remnant in a data cluster immediately after the
         // new root cluster. The test verifies it survives both a failed
         // mid-FAT reformat and its explicit marker-authorized retry.
@@ -10237,7 +10268,7 @@ int main()
         const bool dataCanaryCaptured = dataCanaryRange &&
             fake_sector_copy(fourKnGpt, dataCanaryLba,
                              dataCanaryBefore.data());
-        const uint32_t failedQuickWrite = fourKnGpt.writeAttempts + 6u;
+        const uint32_t failedQuickWrite = fourKnGpt.writeAttempts + 7u;
         fourKnGpt.failWriteAtCall1 = failedQuickWrite;
         fourKnGpt.writeLog.clear();
         storage::Fat32FormatResult interruptedQuick = {};
@@ -10279,6 +10310,61 @@ int main()
               mismatchedMarkerStatus != storage::FAT32_FORMAT_SUCCESS &&
               mismatchedMarkerProbe.failedBeforeWrite,
               "an interrupted Quick Reformat marker survives device re-registration but a mismatched GPT disk identity cannot authorize retry");
+        const uint64_t markerLba = restartedPartition.startLba + 31u;
+        std::vector<uint8_t> savedMarker(4096);
+        std::memcpy(savedMarker.data(), sector(fourKnGpt, markerLba),
+                    savedMarker.size());
+        bool markerSignatureValid = std::memcmp(savedMarker.data(),
+            "GXDM26RF", 8) == 0 && read_u32(savedMarker.data() + 8) == 2u;
+        if (markerSignatureValid) {
+            uint8_t* alteredMarker = sector(fourKnGpt, markerLba);
+            write_u32(alteredMarker + 120, read_u32(alteredMarker + 120) ^ 1u);
+            uint32_t checksum = 2166136261u;
+            for (uint32_t i = 0; i < 128u; ++i) {
+                checksum ^= alteredMarker[i];
+                checksum *= 16777619u;
+            }
+            write_u32(alteredMarker + 128, checksum);
+        }
+        storage::Fat32FormatResult alteredFingerprintProbe = {};
+        const storage::Fat32FormatStatus alteredFingerprintStatus =
+            markerSignatureValid
+                ? storage::probe_fat32_quick_reformat_partition(quickRequest,
+                    alteredFingerprintProbe)
+                : storage::FAT32_FORMAT_INVALID_REQUEST;
+        std::memcpy(sector(fourKnGpt, markerLba), savedMarker.data(),
+                    savedMarker.size());
+        check(markerSignatureValid &&
+              alteredFingerprintStatus != storage::FAT32_FORMAT_READY &&
+              alteredFingerprintStatus != storage::FAT32_FORMAT_SUCCESS &&
+              alteredFingerprintProbe.failedBeforeWrite,
+              "an interrupted marker with a changed GPT table fingerprint cannot authorize retry");
+        const uint32_t markerIdentityOffsets[] = {16u, 24u, 48u, 64u};
+        bool markerIdentityMutationsRejected = markerSignatureValid;
+        for (uint32_t offset : markerIdentityOffsets) {
+            std::memcpy(sector(fourKnGpt, markerLba), savedMarker.data(),
+                        savedMarker.size());
+            uint8_t* alteredMarker = sector(fourKnGpt, markerLba);
+            alteredMarker[offset] ^= 1u;
+            uint32_t checksum = 2166136261u;
+            for (uint32_t i = 0; i < 128u; ++i) {
+                checksum ^= alteredMarker[i];
+                checksum *= 16777619u;
+            }
+            write_u32(alteredMarker + 128u, checksum);
+            storage::Fat32FormatResult mismatchedIdentityProbe = {};
+            const storage::Fat32FormatStatus mismatchedIdentityStatus =
+                storage::probe_fat32_quick_reformat_partition(quickRequest,
+                    mismatchedIdentityProbe);
+            markerIdentityMutationsRejected = markerIdentityMutationsRejected &&
+                mismatchedIdentityStatus != storage::FAT32_FORMAT_READY &&
+                mismatchedIdentityStatus != storage::FAT32_FORMAT_SUCCESS &&
+                mismatchedIdentityProbe.failedBeforeWrite;
+        }
+        std::memcpy(sector(fourKnGpt, markerLba), savedMarker.data(),
+                    savedMarker.size());
+        check(markerIdentityMutationsRejected,
+              "an interrupted marker with a changed partition start, extent, unique GUID, or type GUID cannot authorize retry");
         storage::Fat32FormatResult retryProbe = {};
         const storage::Fat32FormatStatus retryProbeStatus =
             restartedIndex != 0xFF
@@ -10400,25 +10486,46 @@ int main()
                     quickRestartDevice.registrationId, &quickRestartPartition)
                 : vfs::PartitionMountResult{0xFF,
                     vfs::PARTITION_MOUNT_DEVICE_UNAVAILABLE};
-        const uint8_t staleOldFile = quickRestartMount.error ==
+        const vfs::HandleToken staleOldFile = quickRestartMount.error ==
                 vfs::PARTITION_MOUNT_OK
             ? vfs::open("/mnt/dm26/multi.bin", vfs::OPEN_READ) : 0xFF;
         const int32_t freshFileWrite = quickRestartMount.error ==
                 vfs::PARTITION_MOUNT_OK
             ? vfs::create_file("/mnt/dm26/fresh.txt", "fresh", 5) : -1;
-        const uint8_t freshFileHandle = freshFileWrite == 5
+        const vfs::HandleToken freshFileHandle = freshFileWrite == 5
             ? vfs::open("/mnt/dm26/fresh.txt", vfs::OPEN_READ) : 0xFF;
         char freshFileBytes[5] = {};
         const bool freshFileRead = freshFileHandle != 0xFF &&
             vfs::read(freshFileHandle, freshFileBytes, sizeof(freshFileBytes)) == 5 &&
             std::memcmp(freshFileBytes, "fresh", sizeof(freshFileBytes)) == 0;
+        const vfs::HandleToken freshDirectory = quickRestartMount.error ==
+                vfs::PARTITION_MOUNT_OK
+            ? vfs::opendir("/mnt/dm26") : vfs::INVALID_HANDLE;
+        vfs::DirEntry staleDirectoryEntry{};
+        bool staleDirectoryHasEntry = false;
+        const vfs::Status staleDirectoryStatus =
+            vfs::readdir_detailed(oldIncarnationDirectory,
+                &staleDirectoryEntry, staleDirectoryHasEntry);
+        uint8_t staleFileByte = 0;
+        const int32_t staleFileRead = vfs::read(oldIncarnationFile,
+            &staleFileByte, sizeof(staleFileByte));
+        const bool staleIncarnationRejected = freshFileHandle !=
+                vfs::INVALID_HANDLE && freshDirectory != vfs::INVALID_HANDLE &&
+            freshFileHandle != oldIncarnationFile &&
+            freshDirectory != oldIncarnationDirectory &&
+            staleFileRead == vfs::VFS_ERR_INVALID &&
+            staleDirectoryStatus == vfs::VFS_ERR_INVALID &&
+            !staleDirectoryHasEntry;
+        if (freshDirectory != vfs::INVALID_HANDLE)
+            vfs::closedir(freshDirectory);
         if (freshFileHandle != 0xFF) (void)vfs::close(freshFileHandle);
         const vfs::Status quickRestartUnmount = quickRestartMount.error ==
                 vfs::PARTITION_MOUNT_OK
             ? vfs::unmount("/mnt/dm26") : vfs::VFS_ERR_INVALID;
         check(quickRemoved && quickRestartIdentity &&
               quickRestartMount.error == vfs::PARTITION_MOUNT_OK &&
-              staleOldFile == 0xFF && freshFileRead &&
+              staleOldFile == vfs::INVALID_HANDLE && freshFileRead &&
+              staleIncarnationRejected &&
               quickRestartUnmount == vfs::VFS_OK &&
               quickBeforeRestart.registrationId !=
                   quickRestartDevice.registrationId,
@@ -10469,7 +10576,7 @@ int main()
 
         bool quickFlushFailureClassification = quickRestartedIndex != 0xFF;
         bool quickFlushFailuresRetry = quickFlushFailureClassification;
-        const uint32_t flushOrdinals[] = {1u, 2u, 3u, 4u};
+        const uint32_t flushOrdinals[] = {1u, 2u, 3u, 4u, 5u};
         for (uint32_t ordinal : flushOrdinals) {
             fourKnGpt.failFlushAtCall = fourKnGpt.flushes + ordinal;
             storage::Fat32FormatResult failedFlush = {};
@@ -10484,7 +10591,7 @@ int main()
             if (ordinal == 1u)
                 quickFlushFailureClassification = quickFlushFailureClassification &&
                     !failedFlush.reformatInvalidationFlushPassed;
-            if (ordinal >= 3u)
+            if (ordinal >= 4u)
                 quickFlushFailureClassification = quickFlushFailureClassification &&
                     failedFlush.reformatState ==
                         storage::FAT32_REFORMAT_NEW_FILESYSTEM_WRITTEN_NOT_DURABLE;

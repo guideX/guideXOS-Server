@@ -3021,7 +3021,7 @@ static void enumerate_desktop_folder_items()
 
     serial::puts("[desktop] Desktop folder enumeration started\n");
     const char* desktopPath = bare_metal_desktop_current_directory_path();
-    uint8_t dir = vfs::opendir(desktopPath);
+    vfs::HandleToken dir = vfs::opendir(desktopPath);
     if (dir == 0xFF) {
         serial::puts("[desktop] Desktop folder enumeration failed\n");
         log_desktop_folder_scan_summary(0, 0, 0);
@@ -6006,7 +6006,7 @@ static void desktop_trash_root_for_mount(const char* mountPath, char* out, int o
 
 static bool desktop_trash_root_has_items(const char* trashRoot)
 {
-    uint8_t dir = vfs::opendir(trashRoot);
+    vfs::HandleToken dir = vfs::opendir(trashRoot);
     if (dir == 0xFF) return false;
     bool hasItems = false;
     vfs::DirEntry entry{};
@@ -8444,7 +8444,7 @@ static void save_icon_positions()
         desktop_append_text(buffer, &pos, sizeof(buffer), "\n");
     }
     
-    uint8_t handle = vfs::open("/.desktop_icons", vfs::OPEN_WRITE);
+    vfs::HandleToken handle = vfs::open("/.desktop_icons", vfs::OPEN_WRITE);
     if (handle != 0xFF) {
         vfs::write(handle, buffer, pos);
         vfs::close(handle);
@@ -8461,7 +8461,7 @@ static bool load_icon_positions()
         return false;
     }
 
-    uint8_t handle = vfs::open("/.desktop_icons", vfs::OPEN_READ);
+    vfs::HandleToken handle = vfs::open("/.desktop_icons", vfs::OPEN_READ);
     if (handle == 0xFF) return false;
     
     char buffer[4096];

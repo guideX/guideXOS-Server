@@ -704,7 +704,7 @@ static void kernel_trash_root_for_mount(const char* mountPath, char* out, int ou
 static bool kernel_trash_root_has_items(const char* trashRoot)
 {
     vfs::DirEntry entry{};
-    uint8_t dir = vfs::opendir(trashRoot);
+    vfs::HandleToken dir = vfs::opendir(trashRoot);
     if (dir == 0xFF) return false;
     bool hasItems = false;
     while (vfs::readdir(dir, &entry)) {
@@ -1615,7 +1615,7 @@ int NotepadApp::getLineStart(int lineIndex) const {
 bool NotepadApp::loadFile(const char* path) {
     if (!path || path[0] == '\0') return false;
     
-    uint8_t handle = vfs::open(path, vfs::OPEN_READ);
+    vfs::HandleToken handle = vfs::open(path, vfs::OPEN_READ);
     if (handle == 0xFF) return false;
     
     int32_t bytesRead = vfs::read(handle, m_text, MAX_TEXT_LENGTH - 1);
@@ -1714,7 +1714,7 @@ void NotepadApp::refreshSaveDialog() {
             entry.isFile = false;
         }
     } else {
-        uint8_t dir = vfs::opendir(m_saveDialogPath);
+        vfs::HandleToken dir = vfs::opendir(m_saveDialogPath);
         if (dir != 0xFF) {
             vfs::DirEntry de{};
             while (vfs::readdir(dir, &de) && m_saveEntryCount < MAX_SAVE_ENTRIES) {
@@ -5226,7 +5226,7 @@ void FileExplorerApp::refresh() {
     m_lastClickIndex = -1;
     m_lastClickTick = 0;
     closeTransientUi();
-    uint8_t dir = vfs::opendir(m_currentPath);
+    vfs::HandleToken dir = vfs::opendir(m_currentPath);
     if (dir == 0xFF) {
         const vfs::MountPoint* mount = vfs::get_mount(m_currentPath);
         const uint8_t mountIndex = mount
@@ -6626,6 +6626,28 @@ void DiskManagerApp::readPartitionTable(DiskEntry& disk) {
         strcopy(target.fsLabel, detectFs(disk.devIndex, source.startLba,
                                         source.sectorCount, target),
                 sizeof(target.fsLabel));
+        if (strcmp(target.fsLabel, "Unknown") == 0) {
+            storage::Fat32FormatRequest markerProbe = {};
+            markerProbe.targetSnapshot = disk.identity;
+            markerProbe.partitionScheme = disk.scheme;
+            markerProbe.partitionSnapshot = source;
+            if (disk.scheme == storage::PARTITION_SCHEME_GPT)
+                memcpy(markerProbe.gptDiskGuid, disk.primaryDiskGuid,
+                       sizeof(markerProbe.gptDiskGuid));
+            else
+                markerProbe.mbrDiskSignature = disk.mbrDiskSignature;
+            markerProbe.expectedRegistryGeneration =
+                disk.identity.registryGeneration;
+            storage::Fat32FormatResult markerResult = {};
+            if (storage::probe_fat32_quick_reformat_partition(markerProbe,
+                    markerResult) == storage::FAT32_FORMAT_READY &&
+                markerResult.existingState ==
+                    storage::FAT32_EXISTING_INTERRUPTED_REFORMAT) {
+                target.reformatInterrupted = true;
+                strcopy(target.fsLabel, "Reformat interrupted",
+                        sizeof(target.fsLabel));
+            }
+        }
     }
 
     // The parser validates entries in table order; the UI presents them in
@@ -6920,7 +6942,9 @@ void DiskManagerApp::updateInitializeControls() {
         const DiskEntry& disk = m_disks[m_selectedDisk];
         const PartEntry& part = disk.parts[m_selectedPart];
         const bool existingFat32 = strcmp(part.fsLabel, "FAT32") == 0;
-        const bool possibleFs = existingFat32 ||
+        const bool interruptedReformat = part.reformatInterrupted ||
+            strcmp(part.fsLabel, "Reformat interrupted") == 0;
+        const bool possibleFs = existingFat32 || interruptedReformat ||
             strcmp(part.fsLabel, "Unformatted") == 0 ||
             strcmp(part.fsLabel, "Unknown") == 0;
         const bool validTable = disk.scheme == storage::PARTITION_SCHEME_GPT
@@ -6992,8 +7016,9 @@ void DiskManagerApp::updateInitializeControls() {
             m_selectedObject == SELECTED_PARTITION && m_selectedDisk >= 0 &&
             m_selectedDisk < m_diskCount && m_selectedPart >= 0 &&
             m_selectedPart < m_disks[m_selectedDisk].partCount &&
-            strcmp(m_disks[m_selectedDisk].parts[m_selectedPart].fsLabel,
-                   "FAT32") == 0;
+            (strcmp(m_disks[m_selectedDisk].parts[m_selectedPart].fsLabel,
+                    "FAT32") == 0 ||
+             m_disks[m_selectedDisk].parts[m_selectedPart].reformatInterrupted);
         setWidgetText(m_initializeBtnId, formatAvailable
             ? (reformatSelected ? "Reformat..." : "Format...") :
             (selectedRegion ? "Create Partition..." : "Initialize Disk..."));
@@ -9474,8 +9499,11 @@ void DiskManagerApp::beginFormatOptions() {
     DiskEntry& disk = m_disks[m_selectedDisk];
     const PartEntry& selected = disk.parts[m_selectedPart];
     const bool existingFat32 = strcmp(selected.fsLabel, "FAT32") == 0;
+    const bool interruptedReformat = selected.reformatInterrupted ||
+        strcmp(selected.fsLabel, "Reformat interrupted") == 0;
     if ((strcmp(selected.fsLabel, "Unformatted") != 0 &&
-         strcmp(selected.fsLabel, "Unknown") != 0 && !existingFat32) ||
+         strcmp(selected.fsLabel, "Unknown") != 0 && !existingFat32 &&
+         !interruptedReformat) ||
         !disk.haveInfo ||
         disk.identity.registrationId == 0) return;
 
@@ -9502,17 +9530,15 @@ void DiskManagerApp::beginFormatOptions() {
     m_dialogIsFormat = true;
     m_dialogIsReformat = false;
 
-    storage::Fat32FormatStatus status = storage::FAT32_FORMAT_REFORMAT_TARGET_UNSUPPORTED;
-    if (existingFat32 || strcmp(selected.fsLabel, "Unformatted") == 0) {
-        status = storage::probe_fat32_quick_reformat_partition(
+    storage::Fat32FormatStatus status =
+        storage::probe_fat32_quick_reformat_partition(
             m_formatRequest, m_formatResult);
-        if (status == storage::FAT32_FORMAT_READY) {
-            m_dialogIsReformat = true;
-            strcopy(m_createNameText, m_formatResult.oldVolumeLabel,
-                    sizeof(m_createNameText));
-        }
+    if (status == storage::FAT32_FORMAT_READY) {
+        m_dialogIsReformat = true;
+        strcopy(m_createNameText, m_formatResult.oldVolumeLabel,
+                sizeof(m_createNameText));
     }
-    if (!m_dialogIsReformat && !existingFat32)
+    if (!m_dialogIsReformat && !existingFat32 && !interruptedReformat)
         status = storage::probe_fat32_format_partition(
             m_formatRequest, m_formatResult);
     if (status != storage::FAT32_FORMAT_READY) {
@@ -9944,7 +9970,7 @@ void TrashApp::refreshEntries()
 
         char trashRoot[256];
         kernel_trash_root_for_mount(mp->path, trashRoot, sizeof(trashRoot));
-        uint8_t dir = vfs::opendir(trashRoot);
+        vfs::HandleToken dir = vfs::opendir(trashRoot);
         if (dir == 0xFF) continue;
 
         vfs::DirEntry entry{};
@@ -10065,7 +10091,7 @@ bool TrashApp::purgeContents(int* deletedCount)
         if (!mp || !mp->active) continue;
         char trashRoot[256];
         kernel_trash_root_for_mount(mp->path, trashRoot, sizeof(trashRoot));
-        uint8_t dir = vfs::opendir(trashRoot);
+        vfs::HandleToken dir = vfs::opendir(trashRoot);
         if (dir == 0xFF) continue;
         vfs::DirEntry entry{};
         while (vfs::readdir(dir, &entry)) {

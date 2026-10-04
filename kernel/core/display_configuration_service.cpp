@@ -824,7 +824,7 @@ static bool persisted_configuration_file_present()
     // formatted validation artifact can legitimately have no display.cfg;
     // enumerating the bounded root directory lets startup restore distinguish
     // that case without following an uninitialized free-cluster link.
-    const uint8_t iterator = kernel::vfs::opendir("/");
+    const kernel::vfs::HandleToken iterator = kernel::vfs::opendir("/");
     if (iterator == 0xFFu) return false;
 
     bool present = false;

@@ -161,7 +161,9 @@ $qemuAtStart = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64
 
 $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
 $listener.Start(); $qmpPort = ([Net.IPEndPoint]$listener.LocalEndpoint).Port; $listener.Stop()
-$arguments = @("-accel",$QemuAccelerator,
+$arguments = @()
+if ($QemuAccelerator) { $arguments += @("-accel",$QemuAccelerator) }
+$arguments += @(
   "-drive","if=pflash,format=raw,readonly=on,file=$OvmfFull",
   "-machine","pc,usb=off","-device","piix3-usb-uhci,id=uhci",
   "-drive","file=fat:rw:$espStage,format=raw",

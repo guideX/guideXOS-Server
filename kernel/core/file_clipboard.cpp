@@ -479,7 +479,7 @@ static bool destination_is_valid(const char* destinationDirectory, char* normali
 
 static bool read_directory_entry_at(const char* path, size_t wantedIndex, vfs::DirEntry* out) {
     if (!path || !out) return false;
-    uint8_t iterator = vfs::opendir(path);
+    vfs::HandleToken iterator = vfs::opendir(path);
     if (iterator == 0xFF) return false;
 
     size_t index = 0;
@@ -519,7 +519,7 @@ static vfs::Status inspect_trash_directory(const char* path, size_t* outCount) {
     if (outCount) *outCount = 0;
     if (!path || !path[0]) return vfs::VFS_ERR_INVALID;
 
-    const uint8_t iterator = vfs::opendir(path);
+    const vfs::HandleToken iterator = vfs::opendir(path);
     if (iterator == 0xFF) return vfs::VFS_ERR_IO;
 
     size_t count = 0;
@@ -648,7 +648,7 @@ static PasteResult copy_file_contents(const char* sourcePath, const char* destin
     set_diagnostic_stage(PasteStage::SourceOpenRead);
     trace_marker("FPASTE_SOURCE_OPEN");
     trace_text("DESKTOP_PASTE_SOURCE_OPEN", sourcePath);
-    const uint8_t sourceHandle = vfs::open(sourcePath, vfs::OPEN_READ);
+    const vfs::HandleToken sourceHandle = vfs::open(sourcePath, vfs::OPEN_READ);
     if (sourceHandle == 0xFF) {
         set_diagnostic_failure(PasteStage::SourceOpenRead, PasteResult::SourceMissing,
                                vfs::VFS_ERR_NOT_FOUND, "FAT_FILE_WRITE_NOT_FOUND");
@@ -670,7 +670,7 @@ static PasteResult copy_file_contents(const char* sourcePath, const char* destin
                                fs_fat::traversal_status_name(fs_fat::last_traversal_status()));
         return PasteResult::Failed;
     }
-    const uint8_t destinationHandle = vfs::open(destinationPath, vfs::OPEN_WRITE);
+    const vfs::HandleToken destinationHandle = vfs::open(destinationPath, vfs::OPEN_WRITE);
     if (destinationHandle == 0xFF) {
         vfs::close(sourceHandle);
         vfs::unlink(destinationPath);
@@ -2044,7 +2044,7 @@ static bool smoke_text_equals(const char* left, const char* right) {
 
 static bool smoke_write_pattern_file(const char* path, size_t byteCount) {
     if (!path || byteCount > 0xFFFFFFFFull) return false;
-    const uint8_t handle = vfs::open(path,
+    const vfs::HandleToken handle = vfs::open(path,
         vfs::OPEN_WRITE | vfs::OPEN_CREATE | vfs::OPEN_EXCL);
     if (handle == 0xFF) return false;
     size_t offset = 0;
@@ -2074,7 +2074,7 @@ static bool smoke_file_matches_pattern(const char* path, size_t expectedSize) {
     if (vfs::stat(path, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR ||
         info.size != expectedSize) return false;
 
-    const uint8_t handle = vfs::open(path, vfs::OPEN_READ);
+    const vfs::HandleToken handle = vfs::open(path, vfs::OPEN_READ);
     if (handle == 0xFF) return false;
     uint8_t bytes[4096];
     size_t offset = 0;
@@ -2222,7 +2222,7 @@ static bool smoke_direct_trash_create_probe(const char* trashRoot) {
     static const uint8_t probeBytes[] = {'O', 'K', '\n'};
     const int32_t created = vfs::create_file(probePath, probeBytes, sizeof(probeBytes));
     if (created != static_cast<int32_t>(sizeof(probeBytes))) return false;
-    const uint8_t handle = vfs::open(probePath, vfs::OPEN_READ);
+    const vfs::HandleToken handle = vfs::open(probePath, vfs::OPEN_READ);
     if (handle == 0xFF) {
         vfs::unlink(probePath);
         return false;
@@ -2330,7 +2330,7 @@ static bool smoke_trash_empty_folder_case() {
 static bool smoke_find_read_only_file(char* outPath, size_t outPathSize) {
     if (!outPath || outPathSize == 0) return false;
     outPath[0] = '\0';
-    const uint8_t iterator = vfs::opendir("/system/wall");
+    const vfs::HandleToken iterator = vfs::opendir("/system/wall");
     if (iterator == 0xFF) return false;
     vfs::DirEntry entry{};
     while (vfs::readdir(iterator, &entry)) {

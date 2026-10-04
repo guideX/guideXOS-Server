@@ -153,7 +153,7 @@ static bool find_proof_partition(const storage::TargetIdentity& target)
 
 static bool read_payload()
 {
-    const uint8_t handle = vfs::open(kFilePath, vfs::OPEN_READ);
+    const vfs::HandleToken handle = vfs::open(kFilePath, vfs::OPEN_READ);
     if (handle == 0xFFu) return false;
     char bytes[sizeof(kPayload)] = {};
     const int32_t count = vfs::read(handle, bytes,

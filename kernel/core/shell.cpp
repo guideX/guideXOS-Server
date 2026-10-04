@@ -459,7 +459,7 @@ static void cmd_ls(const char* path) {
     }
     
     // Try to open directory via VFS
-    uint8_t dirHandle = vfs::opendir(targetPath);
+    vfs::HandleToken dirHandle = vfs::opendir(targetPath);
     if (dirHandle == 0xFF) {
         // VFS not mounted or directory not found - show fallback
         output_string("ls: cannot access '");
@@ -516,7 +516,7 @@ static void cmd_ll(const char* path) {
     }
     
     // Try to open directory via VFS
-    uint8_t dirHandle = vfs::opendir(targetPath);
+    vfs::HandleToken dirHandle = vfs::opendir(targetPath);
     if (dirHandle == 0xFF) {
         output_string("ls: cannot access '");
         output_string(targetPath);
@@ -672,7 +672,7 @@ static void cmd_cat(const char* filename) {
     }
     
     // Try to open file via VFS
-    uint8_t handle = vfs::open(fullPath, vfs::OPEN_READ);
+    vfs::HandleToken handle = vfs::open(fullPath, vfs::OPEN_READ);
     if (handle == 0xFF) {
         output_string("cat: ");
         output_string(fullPath);
@@ -1270,7 +1270,7 @@ static void cmd_vfsls(const char* path) {
     output_string(targetPath);
     output_string("\n\n");
     
-    uint8_t dirHandle = vfs::opendir(targetPath);
+    vfs::HandleToken dirHandle = vfs::opendir(targetPath);
     if (dirHandle == 0xFF) {
         output_string("Cannot open directory\n");
         return;
@@ -1333,7 +1333,7 @@ static void cmd_vfscat(const char* path) {
     output_string(path);
     output_string("\n\n");
     
-    uint8_t handle = vfs::open(path, vfs::OPEN_READ);
+    vfs::HandleToken handle = vfs::open(path, vfs::OPEN_READ);
     if (handle == 0xFF) {
         output_string("Cannot open file\n");
         return;
@@ -1474,7 +1474,7 @@ static void cmd_vfstest() {
     output_string("\n3. Testing file read...\n");
     output_string("   Attempting to open /test.txt...\n");
     
-    uint8_t handle = vfs::open("/test.txt", vfs::OPEN_READ);
+    vfs::HandleToken handle = vfs::open("/test.txt", vfs::OPEN_READ);
     if (handle != 0xFF) {
         char buf[64];
         int32_t bytesRead = vfs::read(handle, buf, 63);

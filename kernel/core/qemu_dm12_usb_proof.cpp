@@ -49,7 +49,7 @@ static bool payload_matches(const char* actual, uint32_t size)
 
 static bool directory_contains_proof()
 {
-    const uint8_t iterator = vfs::opendir(kMountPath);
+    const vfs::HandleToken iterator = vfs::opendir(kMountPath);
     if (iterator == 0xFFu) {
         serial::puts("[DM12-QEMU-USB] root-directory=open-failed\n");
         return false;
@@ -75,7 +75,7 @@ static bool directory_contains_proof()
 
 static bool read_proof_file()
 {
-    const uint8_t handle = vfs::open(kProofFilePath, vfs::OPEN_READ);
+    const vfs::HandleToken handle = vfs::open(kProofFilePath, vfs::OPEN_READ);
     if (handle == 0xFFu) {
         serial::puts("[DM12-QEMU-USB] proof-file=open-failed\n");
         return false;

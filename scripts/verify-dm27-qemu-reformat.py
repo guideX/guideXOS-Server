@@ -254,7 +254,8 @@ def unchanged_except(before: Image, after: Image, allowed: list[tuple[int, int]]
 
 
 def verify(before_path: Path, after_path: Path, final_path: Path,
-           sector_size: int = DEFAULT_SECTOR_SIZE) -> list[str]:
+           sector_size: int = DEFAULT_SECTOR_SIZE,
+           large_payload: bool = False) -> list[str]:
     before = Image(before_path, sector_size)
     after = Image(after_path, sector_size)
     final = Image(final_path, sector_size)
@@ -282,7 +283,8 @@ def verify(before_path: Path, after_path: Path, final_path: Path,
         directory_entries = old["short_entries"](entry_cluster(old_dir))
         old_file = find_short(directory_entries, b"PROOF   BIN")
         old_content, old_file_clusters = file_contents(old, old_file)
-        old_expected = OLD_PAYLOAD if sector_size == 512 else multi_payload(MULTI_BYTES)
+        old_expected = (multi_payload(MULTI_BYTES) if large_payload or
+                        sector_size == 4096 else OLD_PAYLOAD)
         require(old_content == old_expected, "pre-reformat fixture payload is incorrect")
         multi_file = find_short(directory_entries, b"MULTI   BIN")
         multi_content, multi_clusters = file_contents(old, multi_file)
@@ -322,7 +324,8 @@ def verify(before_path: Path, after_path: Path, final_path: Path,
         require(len(file_entries) == 1 and not (fresh_file[11] & 0x10),
                 "fresh root contains unexpected old paths or a non-file entry")
         new_content, new_file_clusters = file_contents(fresh, fresh_file)
-        new_expected = NEW_PAYLOAD if sector_size == 512 else multi_payload(MULTI_BYTES)
+        new_expected = (multi_payload(MULTI_BYTES) if large_payload or
+                        sector_size == 4096 else NEW_PAYLOAD)
         require(new_content == new_expected, "fresh file payload is incorrect")
         cluster_bytes = sector_size * fresh["spc"]
         expected_file_clusters = (len(new_expected) + cluster_bytes - 1) // cluster_bytes
@@ -393,9 +396,12 @@ def main() -> int:
     parser.add_argument("final", type=Path, help="read-only post-cold-restart raw image")
     parser.add_argument("--sector-size", type=int, choices=(512, 4096),
                         default=DEFAULT_SECTOR_SIZE)
+    parser.add_argument("--large-payload", action="store_true",
+                        help="expect the 96 KiB deterministic DM22 fixture/fresh payload")
     args = parser.parse_args()
     try:
-        for line in verify(args.before, args.after, args.final, args.sector_size):
+        for line in verify(args.before, args.after, args.final, args.sector_size,
+                           args.large_payload):
             print(line)
     except (OSError, VerificationError) as error:
         parser.error(str(error))
