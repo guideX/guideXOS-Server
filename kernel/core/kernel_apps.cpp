@@ -6345,7 +6345,7 @@ bool DiskManagerApp::init() {
     m_propertiesBtnId = addButton(98, 0, 90, 28, "Properties");
     m_diagnosticsBtnId = addButton(194, 0, 96, 28, "Diagnostics");
     m_initializeBtnId = addButton(296, 0, 150, 28, "Initialize Disk...");
-    m_deleteBtnId = addButton(652, 0, 92, 28, "Delete...");
+    m_deleteBtnId = addButton(652, 0, 116, 28, "Delete Partition...");
     m_mountBtnId = addButton(452, 0, 100, 28, "Mount...");
     m_unmountBtnId = addButton(558, 0, 90, 28, "Unmount");
     m_gptBtnId = addButton(10, 0, 140, 28,
@@ -6881,7 +6881,7 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
         if (initialize) { initialize->x = 10; initialize->y = rowY; initialize->w = 130; }
         if (mountAction) { mountAction->x = 146; mountAction->y = rowY; mountAction->w = 108; }
         if (unmountAction) { unmountAction->x = 260; unmountAction->y = rowY; unmountAction->w = 92; }
-        if (deleteAction) { deleteAction->x = 358; deleteAction->y = rowY; deleteAction->w = 92; }
+        if (deleteAction) { deleteAction->x = 358; deleteAction->y = rowY; deleteAction->w = 116; }
     } else {
         if (refresh) { refresh->x = 10; refresh->y = rowY; refresh->w = 82; }
         if (properties) { properties->x = 98; properties->y = rowY; properties->w = 90; }
@@ -6889,7 +6889,7 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
         if (initialize) { initialize->x = 296; initialize->y = rowY; initialize->w = 150; }
         if (mountAction) { mountAction->x = 452; mountAction->y = rowY; mountAction->w = 100; }
         if (unmountAction) { unmountAction->x = 558; unmountAction->y = rowY; unmountAction->w = 90; }
-        if (deleteAction) { deleteAction->x = 652; deleteAction->y = rowY; deleteAction->w = 92; }
+        if (deleteAction) { deleteAction->x = 652; deleteAction->y = rowY; deleteAction->w = 116; }
     }
     if (gpt) { gpt->x = 10; gpt->y = rowY; gpt->w = 140; }
     if (mbr) { mbr->x = 158; mbr->y = rowY; mbr->w = 150; }
@@ -7064,7 +7064,7 @@ void DiskManagerApp::updateInitializeControls() {
              m_disks[m_selectedDisk].parts[m_selectedPart].reformatInterrupted);
         setWidgetText(m_initializeBtnId, showGptRepair ? "Repair GPT..." :
             (formatAvailable
-                ? (reformatSelected ? "Reformat..." : "Format...") :
+                ? (reformatSelected ? "Quick Reformat..." : "Format FAT32...") :
                 (selectedRegion ? "Create Partition..." : "Initialize Disk...")));
     }
     if (deleteAction) {
@@ -7097,7 +7097,7 @@ void DiskManagerApp::updateInitializeControls() {
         setWidgetText(m_confirmInitializeBtnId,
             m_mountDialogOpen ? "Mount" : (gptRepairConfirm ? "Repair GPT" :
                 (deleteConfirm ? "Delete Partition" :
-                    (formatOptions ? (m_dialogIsReformat ? "Reformat FAT32" : "Format") :
+                    (formatOptions ? (m_dialogIsReformat ? "Quick Reformat" : "Format FAT32") :
                         (createOptions ? "Create" : "Initialize")))));
     }
     if (sizeInput) {
@@ -8659,13 +8659,14 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20, line, kText);
             lineY += 14;
             disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
-                "Confirm to initialize this exact disk. Escape cancels.", kText);
+                "Partition metadata will be replaced; existing partitions become inaccessible.",
+                0xFFFFD080);
             lineY += 14;
             disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
-                "No partition creation, filesystem format, or repair is performed.", kSubText);
+                "This does not securely erase old sectors. Escape cancels.", kText);
             lineY += 14;
             disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
-                "Awaiting confirmation", kSubText);
+                "No partition creation, filesystem format, or GPT repair is performed.", kSubText);
         } else if (!m_dialogIsCreate && !m_dialogIsFormat &&
                    m_initializeDialogState == INITIALIZE_DIALOG_RUNNING) {
             strcopy(line, "Stage: ", sizeof(line));
