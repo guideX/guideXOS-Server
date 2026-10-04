@@ -4673,6 +4673,44 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js59AfterClick, 1500) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js60FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js60.html";
+    const bool js60Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js60FixtureUrl);
+    const std::string js60InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS60 hosted bounded :is() fixture loads and evaluates",
+        js60Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js60FixtureUrl &&
+        contains(js60InitialText, "Navigator JavaScript JS60") &&
+        contains(js60InitialText,
+            "initial:is=true:equivalence=true:queries=true:relations=true:lists=true:malformed=true:live=true:not=true:attrs=true:queries=true:pseudo=true:relations=true:lists=true:live=true:malformed=true:event=false:nested=false:metadata=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js60Loaded) + ",text=" +
+        summarizeText(js60InitialText, 1800) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS60 hosted positive matching and JS59 complement pass",
+        js60Loaded && contains(js60InitialText,
+            ":is=true:equivalence=true:") &&
+        contains(js60InitialText, ":not=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "tag, universal, ID, class, attribute, checked/disabled, :root, and :empty predicates use direct positive matching and remain complementary to :not() for valid Elements");
+    add("JS60 hosted live collections, relations, lists, and bounds pass",
+        js60Loaded && contains(js60InitialText,
+            ":queries=true:relations=true:lists=true:malformed=true:live=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "scoped queries, closest, outer relations and selector lists, held attribute collections, and rejection of inner lists/relations/nesting are verified");
+    const bool js60Click = gxos::apps::Navigator::SmokeClickFormControlById(
+        "event-target");
+    const std::string js60AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS60 hosted Event matching and nested dispatch preserve metadata",
+        js60Click && contains(js60AfterClick,
+            "event:is=true:equivalence=true:queries=true:relations=true:lists=true:malformed=true:live=true:not=true:attrs=true:queries=true:pseudo=true:relations=true:lists=true:live=true:malformed=true:event=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js60Click) + ",text=" +
+        summarizeText(js60AfterClick, 1800) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

@@ -732,28 +732,38 @@ bool parseStatePseudo(SourceView source, std::size_t colon,
         end - open - 2u), nthA, nthB);
 }
 
-bool isNotPseudoFunction(SourceView source, std::size_t colon,
-    std::size_t end, std::size_t& open)
+NavigatorScriptStatePseudo logicalPseudoFunction(SourceView source,
+    std::size_t colon, std::size_t end, std::size_t& open)
 {
     open = end;
     if (source.data == nullptr || colon >= end || source.data[colon] != ':')
-        return false;
+        return NavigatorScriptStatePseudo::None;
     for (std::size_t index = colon + 1u; index < end; ++index) {
         if (source.data[index] == '(') {
             open = index;
             break;
         }
     }
-    if (open == end || open - colon - 1u != 3u) return false;
-    return lowerAscii(static_cast<unsigned char>(source.data[colon + 1u])) ==
+    if (open == end) return NavigatorScriptStatePseudo::None;
+    const std::size_t nameLength = open - colon - 1u;
+    if (nameLength == 3u &&
+        lowerAscii(static_cast<unsigned char>(source.data[colon + 1u])) ==
             static_cast<unsigned char>('n') &&
         lowerAscii(static_cast<unsigned char>(source.data[colon + 2u])) ==
             static_cast<unsigned char>('o') &&
         lowerAscii(static_cast<unsigned char>(source.data[colon + 3u])) ==
-            static_cast<unsigned char>('t');
+            static_cast<unsigned char>('t'))
+        return NavigatorScriptStatePseudo::Not;
+    if (nameLength == 2u &&
+        lowerAscii(static_cast<unsigned char>(source.data[colon + 1u])) ==
+            static_cast<unsigned char>('i') &&
+        lowerAscii(static_cast<unsigned char>(source.data[colon + 2u])) ==
+            static_cast<unsigned char>('s'))
+        return NavigatorScriptStatePseudo::Is;
+    return NavigatorScriptStatePseudo::None;
 }
 
-bool findNotArgumentClose(SourceView source, std::size_t open,
+bool findLogicalArgumentClose(SourceView source, std::size_t open,
     std::size_t end, std::size_t& close)
 {
     close = end;
@@ -792,8 +802,8 @@ bool parseSimpleSelectorCore(SourceView source, std::size_t begin,
     std::size_t end, NavigatorScriptSelectorDescriptor& storage,
     NavigatorScriptSimpleSelectorCoreDescriptor& selector,
     std::int16_t& nthA, std::int16_t& nthB,
-    NavigatorScriptSimpleSelectorCoreDescriptor* notSelector,
-    bool allowNot, bool allowFunctionalPseudo)
+    NavigatorScriptSimpleSelectorCoreDescriptor* logicalSelector,
+    bool allowLogicalPseudo, bool allowFunctionalPseudo)
 {
     if (begin == end) return false;
 
@@ -845,13 +855,15 @@ bool parseSimpleSelectorCore(SourceView source, std::size_t begin,
     }
 
     if (position < end && source.data[position] == ':') {
-        std::size_t notOpen = end;
-        if (isNotPseudoFunction(source, position, end, notOpen)) {
-            if (!allowNot || notSelector == nullptr) return false;
+        std::size_t logicalOpen = end;
+        const NavigatorScriptStatePseudo logicalPseudo =
+            logicalPseudoFunction(source, position, end, logicalOpen);
+        if (logicalPseudo != NavigatorScriptStatePseudo::None) {
+            if (!allowLogicalPseudo || logicalSelector == nullptr) return false;
             std::size_t close = end;
-            if (!findNotArgumentClose(source, notOpen, end, close))
+            if (!findLogicalArgumentClose(source, logicalOpen, end, close))
                 return false;
-            std::size_t innerBegin = notOpen + 1u;
+            std::size_t innerBegin = logicalOpen + 1u;
             std::size_t innerEnd = close;
             while (innerBegin < innerEnd &&
                 isSelectorAsciiWhitespace(source.data[innerBegin]))
@@ -862,9 +874,9 @@ bool parseSimpleSelectorCore(SourceView source, std::size_t begin,
             std::int16_t innerNthA = 0;
             std::int16_t innerNthB = 0;
             if (innerBegin == innerEnd || !parseSimpleSelectorCore(source,
-                    innerBegin, innerEnd, storage, *notSelector, innerNthA,
+                    innerBegin, innerEnd, storage, *logicalSelector, innerNthA,
                     innerNthB, nullptr, false, false)) return false;
-            selector.statePseudo = NavigatorScriptStatePseudo::Not;
+            selector.statePseudo = logicalPseudo;
             position = close + 1u;
         } else {
             if (!parseStatePseudo(source, position, end, selector, nthA,
@@ -887,7 +899,7 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
     NavigatorScriptSimpleSelectorDescriptor& selector)
 {
     return parseSimpleSelectorCore(source, begin, end, storage, selector,
-        selector.nthA, selector.nthB, &selector.notSelector, true, true);
+        selector.nthA, selector.nthB, &selector.logicalSelector, true, true);
 }
 
 bool parseBoundedSelectorMember(SourceView source,
@@ -3429,9 +3441,11 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
         if (leftSimple.nthA != rightSimple.nthA ||
             leftSimple.nthB != rightSimple.nthB ||
             !coreEqual(left, leftSimple, right, rightSimple)) return false;
-        return leftSimple.statePseudo != NavigatorScriptStatePseudo::Not ||
-            coreEqual(left, leftSimple.notSelector, right,
-                rightSimple.notSelector);
+        const bool hasLogicalPseudo =
+            leftSimple.statePseudo == NavigatorScriptStatePseudo::Not ||
+            leftSimple.statePseudo == NavigatorScriptStatePseudo::Is;
+        return !hasLogicalPseudo || coreEqual(left, leftSimple.logicalSelector,
+            right, rightSimple.logicalSelector);
     };
     for (std::size_t index = 0u; index < left.memberCount; ++index) {
         const NavigatorScriptSelectorMemberDescriptor& leftMember =
@@ -3531,7 +3545,8 @@ NavigatorScriptHostAdapter::selectorCoreElementMatchResult(
             selector.hasAttributePredicate || selector.universal;
         return hasSimpleCondition ? MatchResult::Match : MatchResult::Invalid;
     }
-    if (selector.statePseudo == NavigatorScriptStatePseudo::Not)
+    if (selector.statePseudo == NavigatorScriptStatePseudo::Not ||
+        selector.statePseudo == NavigatorScriptStatePseudo::Is)
         return MatchResult::Invalid;
     if (!strictPseudoValidation)
         return selectorStatePseudoMatches(element, selector, nthA, nthB)
@@ -3547,17 +3562,21 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
 {
     using MatchResult = NavigatorScriptSelectorMatchResult;
     const NavigatorScriptSimpleSelectorCoreDescriptor& core = selector;
-    if (core.statePseudo != NavigatorScriptStatePseudo::Not)
+    const bool isLogicalPseudo =
+        core.statePseudo == NavigatorScriptStatePseudo::Not ||
+        core.statePseudo == NavigatorScriptStatePseudo::Is;
+    if (!isLogicalPseudo)
         return selectorCoreElementMatchResult(element, core, selector.nthA,
             selector.nthB, storage);
 
     const MatchResult conditions = selectorCoreConditionsMatchResult(element,
         core, storage);
     if (conditions != MatchResult::Match) return conditions;
-    if (!selector.notSelector.valid) return MatchResult::Invalid;
+    if (!selector.logicalSelector.valid) return MatchResult::Invalid;
     const MatchResult inner = selectorCoreElementMatchResult(element,
-        selector.notSelector, 0, 0, storage, true);
+        selector.logicalSelector, 0, 0, storage, true);
     if (inner == MatchResult::Invalid) return MatchResult::Invalid;
+    if (core.statePseudo == NavigatorScriptStatePseudo::Is) return inner;
     return inner == MatchResult::Match ? MatchResult::NoMatch :
         MatchResult::Match;
 }
@@ -3582,11 +3601,13 @@ NavigatorScriptHostAdapter::selectorStatePseudoMatchResult(
     if (document_ == nullptr || element.serial == 0u ||
         findElement(element.serial) != &element ||
         pseudo == NavigatorScriptStatePseudo::None ||
-        pseudo == NavigatorScriptStatePseudo::Not)
+        pseudo == NavigatorScriptStatePseudo::Not ||
+        pseudo == NavigatorScriptStatePseudo::Is)
         return MatchResult::Invalid;
 
     // A false legacy pseudo result can mean either a real non-match or
-    // incomplete authority. Reject the latter before :not() can invert it.
+    // incomplete authority. Preserve Invalid so :not() cannot invert it and
+    // :is() cannot treat it as an ordinary non-match.
     if (pseudo == NavigatorScriptStatePseudo::Empty) {
         if (document_->structuralElements.size() !=
                 document_->contentMetadata.size() ||
@@ -3903,6 +3924,7 @@ bool NavigatorScriptHostAdapter::selectorStatePseudoMatches(
         return delta >= 0 && delta % step == 0;
     }
     case NavigatorScriptStatePseudo::Not:
+    case NavigatorScriptStatePseudo::Is:
         return false;
     }
     return false;

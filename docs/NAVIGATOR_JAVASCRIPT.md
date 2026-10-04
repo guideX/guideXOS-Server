@@ -6127,6 +6127,109 @@ lengths verified **0 changed / 0 missing / 0 extra** files. No fresh
 is not claimed. `git diff --check` passed before commit; generated outputs are
 excluded from the source commit.
 
-A bounded JS60 direction is `:is()` over one supported simple selector, using
-the same fixed-capacity grammar and rejecting inner lists, combinators, and
-nested functional pseudos.
+## JS60: bounded `:is()` pseudo-class
+
+JS60 adds positive `:is(argument)` matching for one bounded non-relational
+simple selector. For a valid current Element `E`, `E.matches(":is(S)")` has
+the same result as `E.matches("S")`; `:is(S)` and `:not(S)` are complements
+for valid candidates. Stale Elements and invalid serials fail closed before
+the inner selector is evaluated, so stale candidates do not satisfy either
+side of the complement.
+
+The parser reuses JS59's `NavigatorScriptSimpleSelectorCoreDescriptor` and
+shared restricted-core parser. The outer descriptor stores one
+`logicalSelector` core and marks the outer pseudo as `Not` or `Is`. The core
+contains no nested logical pseudo or nth-expression state. The functional
+argument scanner handles quoted attribute values and returns the first
+unquoted closing parenthesis. Parsing trims the same ASCII whitespace as
+`:not()`, parses the argument once, and retains its fields in the selector's
+existing 256-byte text buffer. Matching uses the same tri-state core matcher:
+`:is()` returns a valid inner result directly, while `:not()` inverts only a
+valid result. Invalid or stale inner evaluation is never inverted. Matching
+does not reparse source text.
+
+The supported argument grammar is one optional tag or universal selector,
+one optional ID, zero or more class tokens, one optional attribute-presence
+or equality predicate, and one supported nonfunctional pseudo. The pseudo
+subset is `:checked`, `:disabled`, `:focus`, `:first-child`, `:last-child`,
+`:only-child`, `:first-of-type`, `:last-of-type`, `:only-of-type`, `:root`,
+and `:empty`. Pseudo names are ASCII case-insensitive. This includes
+`:is(:root)` and `:is(:empty)` and reads current form, focus, attribute, and
+content metadata each time the selector is matched. Held collections remain
+live-on-read. The existing eight-class-token cap, 64-byte attribute-name cap,
+128-byte attribute-value cap, and 256-byte total selector-source cap remain
+shared with `:not()`; the argument consumes the same source and descriptor
+buffer.
+
+JS60 deliberately rejects empty arguments, inner selector lists, inner
+relations or descendant whitespace, nested `:is()` or `:not()`, and nth
+functional pseudos inside `:is()`. Outer relations, outer selector lists,
+scoped queries, `querySelector()`, `querySelectorAll()`, `matches()`, and
+`closest()` use the existing matcher and preserve document order, deduplication,
+and canonical Element identity. The outer simple selector still has one
+pseudo slot, so a second outer pseudo is rejected. This is a bounded subset,
+not full Selectors Level 4 `:is()` behavior.
+
+Functional nesting depth remains **1**. The parser makes one bounded helper
+re-entry to parse the argument, and its `allowLogicalPseudo=false` guard
+rejects nested logical pseudos before another re-entry. Matching is
+nonrecursive. The shared core remains 32 bytes; a complete simple selector is
+68 bytes, the four-member selector descriptor is 812 bytes, and each
+collection record is 832 bytes. These sizes are unchanged from JS59, so JS60
+adds **0 bytes** per descriptor, collection, or registry. The 128-record
+registry remains 106,496 bytes (32,768 bytes above the JS58 baseline because
+of JS59's original inner core). `HtmlElementRef` remains 440 bytes and content
+metadata remains 24 bytes; JS60 adds no document storage.
+
+The focused JS60 suite passed **1,377/1,377 checks**, including malformed
+input repeats, 1,000 repeated `matches(":is(.x)")`,
+`matches(":is(:empty)")`, and `matches(":is(:focus)")` reads, 320 held
+collection rereads, 256-byte boundary cases, valid-candidate complement
+checks, stale generation and serial-reuse checks, nested Event dispatch, and
+the warning-as-error strict parser/adapter/runtime lane. JS52 passed
+319/319 and JS59 passed 621/621 during JS60 validation.
+
+### JS60 closeout (2026-10-03)
+
+The duplicate/stale gate found no authoritative phase marker and no existing
+JS60 implementation or artifacts. The starting branch was
+`NAVIGATOR_JAVASCRIPT_SUPPORT` at
+`ffed6ecf80ea9929ed922e96fc8d0624117090f5` (`navigator: add JS59 bounded not
+pseudo-class`), with a clean worktree and `1 ahead / 0 behind`
+`origin/NAVIGATOR_JAVASCRIPT_SUPPORT`. The ending commit and divergence are
+reported in the JS60 source commit.
+
+The full JavaScript matrix passed **58/58 lanes**, the three base
+lexer/parser/runtime lanes plus JS6 through JS60. JS36–JS59 passed **5,413
+checks** across their focused suites: JS36 114, JS37 180, JS38 152, JS39 218,
+JS40 155, JS41 220, JS42 235, JS43 277, JS44 183, JS45 184, JS46 220, JS47
+137, JS48 136, JS49 150, JS50 313, JS51 278, JS52 319, JS53 211, JS54 238,
+JS55 340, JS56 110, JS57 269, JS58 153, and JS59 621. JS60 passed
+**1,377/1,377**. `git diff --check` passed.
+
+All **four** hosted JS60 checks passed. They cover fixture evaluation,
+positive semantics and JS59 complement, live collections and attribute
+mutation, scoped queries, relations, outer selector lists, malformed grammar,
+and Event matching with nested dispatch and metadata preservation. The hosted
+aggregate reported **610 passed / 7 failed / 617 total**. The seven failures
+are the existing CSS phase 3C, CSS phase 3G, CSS phase 6A, three CSS phase 6B
+checks, and CSS phase 6C; no new JS60 hosted check failed. `build.bat` produced
+the server executable used by the hosted run.
+
+`build-kernel.bat` stopped at the existing PacMan Native ELF link errors for
+`pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)`. The independent
+`mingw32-make ARCH=amd64 EXTRA_CFLAGS=` lane from `kernel/` stopped at the
+existing Mbed TLS errors in `mbedtls_check_config.h:51` and `:64`. Neither
+blocker was changed. The generated-artifact snapshot covered **712 files /
+157,343,180 bytes**. The kernel attempts changed three PacMan objects; all
+three were restored from the clean starting revision. Hash and length
+verification ended at **0 changed / 0 missing / 0 extra**. No fresh
+`ESP/kernel.elf` exists and `qemu-system-x86_64` is unavailable, so QEMU proof
+is not claimed.
+
+The recommended JS61 direction is bounded `:where()` over the same one-core
+grammar, adding a new logical pseudo kind without growing the descriptor or
+introducing nested selector trees. Inner lists and nested logical pseudos
+should remain deferred until a separate descriptor and memory review. JS60
+was not pushed.
