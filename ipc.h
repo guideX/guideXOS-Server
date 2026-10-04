@@ -27,6 +27,13 @@ namespace gxos { namespace ipc {
             _q.emplace_back(std::move(m));
             lk.unlock(); _cv.notify_all();
         }
+        bool try_push(Message&& m){
+            std::lock_guard<std::mutex> lk(_mu);
+            if (_q.size() >= _cap) return false;
+            _q.emplace_back(std::move(m));
+            _cv.notify_all();
+            return true;
+        }
         // Input and window-lifecycle messages use a separate small FIFO lane.
         // A compositor or hosted app can be busy publishing a bounded render
         // burst, but real input must not wait behind that normal mailbox.

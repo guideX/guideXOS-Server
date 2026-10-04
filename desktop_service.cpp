@@ -6162,6 +6162,7 @@ namespace gxos {
             bool launchedNewProcess = false;
             std::string displayName;
             bool shouldRecordRecent = false;
+            apps::AppActionInfo actionToDispatch;
             {
                 std::lock_guard<std::mutex> lock(s_appRegistrySnapshotMutex);
                 const apps::AppActionResolution resolution = s_appRegistry.ResolveAppAction(
@@ -6198,9 +6199,14 @@ namespace gxos {
                 displayName = app->manifest.displayName;
                 const auto recentHint = app->manifest.desktopRegistryHints.find("recordRecentPrograms");
                 shouldRecordRecent = recentHint != app->manifest.desktopRegistryHints.end() && recentHint->second == "true";
-                dispatched = builtInAppActionDispatcher().Dispatch(
-                    s_appRegistry, resolution.action, launchedNewProcess, result.reason);
+                actionToDispatch = resolution.action;
             }
+            // App handlers may wait for their UI thread to consume a request.
+            // Keep AppRegistry locked only for snapshot validation and invoke
+            // the handler after releasing the lock; the target revalidates the
+            // same registration generation before executing the action.
+            dispatched = builtInAppActionDispatcher().DispatchValidated(
+                actionToDispatch, launchedNewProcess, result.reason);
             if (!dispatched) {
                 result.status = apps::AppActionInvocationStatus::DispatchFailure;
                 if (result.reason.empty()) result.reason = "The registered app action handler is unavailable";

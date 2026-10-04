@@ -111,6 +111,25 @@ public:
             error = "App action target is stale or unavailable";
             return false;
         }
+        return DispatchValidated(action, launchedNewProcess, error);
+    }
+
+    // DesktopService calls this only after resolving and revalidating the
+    // value-owned snapshot while holding the AppRegistry lock. The application
+    // handler may wait for its UI thread, so it must run after that lock is
+    // released; the target performs its own generation revalidation as well.
+    bool DispatchValidated(const AppActionInfo& action,
+                           bool& launchedNewProcess,
+                           std::string& error) const {
+        error.clear();
+        launchedNewProcess = false;
+        if (action.appId.empty() || action.appId.size() > kAppModelMaxAppIdBytes ||
+            !IsValidAppActionId(action.actionId) || action.label.empty() ||
+            action.label.size() > kAppModelMaxActionLabelBytes ||
+            action.registrationGeneration == 0) {
+            error = "App action target is malformed or over capacity";
+            return false;
+        }
         for (const Entry& entry : m_entries) {
             if (entry.appId != action.appId) continue;
             if (entry.handler(action, launchedNewProcess, error)) return true;

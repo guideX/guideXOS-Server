@@ -1,5 +1,6 @@
 #include "navigator.h"
 
+#include "allocator.h"
 #include "desktop_service.h"
 #include "desktop_theme.h"
 
@@ -17,6 +18,8 @@
 #include "navigator_html_parser.h"
 #include "navigator_local_document.h"
 #include "navigator_uri_routing.h"
+#include "navigator_app_action_delivery.h"
+#include "process.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -38,6 +41,45 @@ namespace apps {
 namespace {
 std::mutex s_navigatorLaunchMutex;
 bool s_navigatorProcessActive = false;
+NavigatorAppActionDelivery s_navigatorAppActionDelivery;
+constexpr uint64_t kNavigatorActionAckTimeoutMs = 10000;
+
+bool parsePositiveUint64(const std::string& value, uint64_t& result)
+{
+	if (value.empty()) return false;
+	try {
+		size_t parsed = 0;
+		const unsigned long long numeric = std::stoull(value, &parsed, 10);
+		if (parsed != value.size() || numeric == 0) return false;
+		result = static_cast<uint64_t>(numeric);
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool parseNavigatorActionRequest(const std::string& payload,
+	NavigatorAppActionDelivery::Request& request,
+	std::string& actionId)
+{
+	const size_t first = payload.find('|');
+	const size_t second = first == std::string::npos ? first : payload.find('|', first + 1);
+	const size_t third = second == std::string::npos ? second : payload.find('|', second + 1);
+	if (first == std::string::npos || second == std::string::npos || third == std::string::npos ||
+		payload.find('|', third + 1) != std::string::npos) return false;
+	return parsePositiveUint64(payload.substr(0, first), request.targetPid) &&
+		parsePositiveUint64(payload.substr(first + 1, second - first - 1), request.registrationGeneration) &&
+		parsePositiveUint64(payload.substr(second + 1, third - second - 1), request.token) &&
+		([&] { actionId = payload.substr(third + 1); return !actionId.empty(); })();
+}
+
+std::string formatNavigatorActionRequest(const NavigatorAppActionDelivery::Request& request,
+	const std::string& actionId)
+{
+	return std::to_string(request.targetPid) + "|" +
+		std::to_string(request.registrationGeneration) + "|" +
+		std::to_string(request.token) + "|" + actionId;
+}
 
 void releaseNavigatorProcessReservation()
 {
@@ -14957,6 +14999,57 @@ bool Navigator::InvokeAppAction(const std::string& actionId,
 		error = "Navigator does not implement this declared action ID";
 		return false;
 	}
+	if (!DesktopService::IsAppActionCurrent(kNavigatorCanonicalAppId, actionId, registrationGeneration)) {
+		error = "Navigator action registration changed before delivery";
+		return false;
+	}
+
+	auto deliverToInstance = [&](uint64_t targetPid) {
+		NavigatorAppActionDelivery::Request request;
+		if (!s_navigatorAppActionDelivery.Reserve(targetPid, registrationGeneration, request)) {
+			error = "Navigator action acknowledgement capacity is full or its token space is exhausted";
+			return false;
+		}
+
+		ipc::Message message;
+		message.srcPid = Allocator::currentPid();
+		message.dstPid = targetPid;
+		message.type = static_cast<uint32_t>(gui::MsgType::MT_AppAction);
+		const std::string payload = formatNavigatorActionRequest(request, actionId);
+		message.data.assign(payload.begin(), payload.end());
+		if (!ProcessTable::try_send(targetPid, std::move(message))) {
+			s_navigatorAppActionDelivery.Cancel(request);
+			bool targetStillRunning = false;
+			int exitCode = 0;
+			if (ProcessTable::getStatus(targetPid, targetStillRunning, exitCode) && targetStillRunning)
+				error = "Navigator action mailbox is full; request was rejected before queueing";
+			else
+				error = "Navigator exited before its action request could be queued";
+			Logger::write(LogLevel::Warn, std::string("Navigator App Model action enqueue failed appId=") +
+				kNavigatorCanonicalAppId + " targetPid=" + std::to_string(targetPid) +
+				" requestToken=" + std::to_string(request.token) + " reason=" + error);
+			return false;
+		}
+
+		Logger::write(LogLevel::Info, std::string("Navigator queued App Model action appId=") +
+			kNavigatorCanonicalAppId + " targetPid=" + std::to_string(targetPid) +
+			" requestToken=" + std::to_string(request.token) +
+			" generation=" + std::to_string(registrationGeneration));
+		const NavigatorAppActionDelivery::WaitResult delivery = s_navigatorAppActionDelivery.Wait(
+			request, std::chrono::milliseconds(kNavigatorActionAckTimeoutMs));
+		if (delivery == NavigatorAppActionDelivery::WaitResult::Consumed) return true;
+		if (delivery == NavigatorAppActionDelivery::WaitResult::Rejected)
+			error = "Navigator rejected the queued action before consumption";
+		else if (delivery == NavigatorAppActionDelivery::WaitResult::TimedOut)
+			error = "Navigator did not consume the action within " +
+				std::to_string(kNavigatorActionAckTimeoutMs) + " ms";
+		else
+			error = "Navigator action acknowledgement was no longer pending";
+		Logger::write(LogLevel::Warn, std::string("Navigator App Model action not consumed appId=") +
+			kNavigatorCanonicalAppId + " targetPid=" + std::to_string(targetPid) +
+			" requestToken=" + std::to_string(request.token) + " reason=" + error);
+		return false;
+	};
 
 	for (uint64_t pid : ProcessTable::list()) {
 		std::string processName;
@@ -14965,16 +15058,9 @@ bool Navigator::InvokeAppAction(const std::string& actionId,
 		int exitCode = 0;
 		if (!ProcessTable::getIdentity(pid, processName, processAppId) || processAppId != kNavigatorCanonicalAppId ||
 			!ProcessTable::getStatus(pid, running, exitCode) || !running) continue;
-
-		ipc::Message request;
-		request.type = static_cast<uint32_t>(gui::MsgType::MT_AppAction);
-		const std::string payload = std::to_string(registrationGeneration) + "|" + actionId;
-		request.data.assign(payload.begin(), payload.end());
-		if (!ProcessTable::send(pid, std::move(request))) {
-			error = "Navigator exited before its action request could be queued";
-			return false;
-		}
-		return true;
+		// Once an instance was selected, delivery failure is final; never launch
+		// a second Navigator as a fallback for a close race or timeout.
+		return deliverToInstance(pid);
 	}
 
 	const uint64_t pid = Launch();
@@ -14983,7 +15069,9 @@ bool Navigator::InvokeAppAction(const std::string& actionId,
 		return false;
 	}
 	launchedNewProcess = true;
-	return true;
+	// The new process follows its ordinary startup path to Home, then consumes
+	// this same action through the UI loop before the caller reports success.
+	return deliverToInstance(pid);
 }
 
 bool Navigator::SmokeNavigateTo(const std::string& url)
@@ -16631,25 +16719,46 @@ int Navigator::main(int, char**)
 		}
 		case MsgType::MT_AppAction: {
 			const AppActivationContext currentActivation = ProcessTable::CurrentActivationContext();
-			const size_t separator = payload.find('|');
-			if (currentActivation.appId != kNavigatorCanonicalAppId || separator == std::string::npos) break;
-			uint64_t actionGeneration = 0;
-			const std::string actionId = payload.substr(separator + 1);
-			try {
-				actionGeneration = std::stoull(payload.substr(0, separator));
-			} catch (...) {
+			NavigatorAppActionDelivery::Request request;
+			std::string actionId;
+			if (!parseNavigatorActionRequest(payload, request, actionId)) {
+				Logger::write(LogLevel::Warn, "Navigator discarded a malformed App Model action request");
 				break;
 			}
-			if (!IsValidAppActionId(actionId) || !DesktopService::IsAppActionCurrent(
-				currentActivation.appId, actionId, actionGeneration)) {
-				Logger::write(LogLevel::Warn, "Navigator discarded a stale App Model action request");
+			const uint64_t consumingPid = Allocator::currentPid();
+			if (currentActivation.appId != kNavigatorCanonicalAppId || request.targetPid != consumingPid) {
+				if (request.targetPid == consumingPid) s_navigatorAppActionDelivery.Reject(request);
+				Logger::write(LogLevel::Warn, "Navigator discarded an App Model action for a different process identity");
 				break;
 			}
-			if (actionId == "open-home") {
-				handleToolbarAction(kWidgetIdHome);
+			if (!IsValidAppActionId(actionId) || actionId != "open-home" || !DesktopService::IsAppActionCurrent(
+				currentActivation.appId, actionId, request.registrationGeneration)) {
+				s_navigatorAppActionDelivery.Reject(request);
+				Logger::write(LogLevel::Warn, "Navigator rejected a stale or unsupported App Model action request");
+				break;
+			}
+			if (!s_navigatorAppActionDelivery.BeginConsumption(request)) {
+				Logger::write(LogLevel::Warn, "Navigator discarded an expired or mismatched App Model action token");
+				break;
+			}
+
+			// Consumption is the application-owned UI-thread handler call. The
+			// acknowledgement follows the authoritative toolbar implementation;
+			// it does not wait for visual presentation or asynchronous navigation.
+			handleToolbarAction(kWidgetIdHome);
+			if (s_navigatorAppActionDelivery.AcknowledgeConsumed(request)) {
 				Logger::write(LogLevel::Info, "Navigator consumed App Model action appId=" + currentActivation.appId +
-					" actionId=" + actionId + " generation=" + std::to_string(actionGeneration) +
+					" actionId=" + actionId + " generation=" + std::to_string(request.registrationGeneration) +
+					" targetPid=" + std::to_string(request.targetPid) +
+					" consumingPid=" + std::to_string(consumingPid) +
+					" acknowledgingPid=" + std::to_string(consumingPid) +
+					" requestToken=" + std::to_string(request.token) +
 					" window=" + std::to_string(s_windowId) + " currentUrl=" + s_currentDoc.url);
+			} else {
+				Logger::write(LogLevel::Warn, std::string("Navigator completed an App Model action after its acknowledgement expired") +
+					" targetPid=" + std::to_string(request.targetPid) +
+					" consumingPid=" + std::to_string(consumingPid) +
+					" requestToken=" + std::to_string(request.token));
 			}
 			break;
 		}

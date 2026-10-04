@@ -298,6 +298,17 @@ namespace gxos {
         proc->mbox.push(std::move(msg));
         return true;
     }
+    bool ProcessTable::try_send(uint64_t dstPid, ipc::Message&& msg){
+        std::shared_ptr<Process> proc;
+        {
+            std::lock_guard<std::mutex> _g(g_lock);
+            auto it = g_proc.find(dstPid);
+            if (it == g_proc.end()) return false;
+            proc = it->second;
+        }
+        if (!proc || proc->finished.load(std::memory_order_acquire)) return false;
+        return proc->mbox.try_push(std::move(msg));
+    }
     bool ProcessTable::try_recv(uint64_t pid, ipc::Message& out){ std::lock_guard<std::mutex> _g(g_lock); auto it=g_proc.find(pid); if (it==g_proc.end()) return false; return it->second->mbox.try_pop(out); }
     bool ProcessTable::try_recv_type(uint64_t pid, uint32_t type, ipc::Message& out){
         std::lock_guard<std::mutex> _g(g_lock);
