@@ -8087,7 +8087,7 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             strcopy(line, direction, sizeof(line));
             disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
                 line, kText);
-            lineY += 17;
+            lineY += 24;
             strcopy(line, "Damaged copy: ", sizeof(line));
             strappend(line, storage::gpt_copy_state_name(
                 m_gptRepairPlan.damagedCopyState), sizeof(line));
@@ -8102,7 +8102,7 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             strappend(line, number, sizeof(line));
             disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
                 line, kSubText);
-            lineY += 17;
+            lineY += 24;
             strcopy(line, "Partitions: ", sizeof(line));
             disk_manager_u64(m_gptRepairPlan.partitionCount, number,
                 sizeof(number));
@@ -8110,19 +8110,22 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             strappend(line, " | Mounted partitions: none", sizeof(line));
             disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
                 line, kSubText);
-            lineY += 19;
+            lineY += 24;
             if (confirmingRepair) {
                 disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
                     "Only the damaged GPT entry array and header will be written.",
                     0xFFFFD080);
-                lineY += 16;
+                lineY += 24;
                 disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
                     "Partition data will not be modified. Protective MBR is preserved.",
                     0xFFFFD080);
-                lineY += 16;
+                lineY += 24;
                 disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
-                    "All partitions must stay unmounted. Confirm only after reviewing the target.",
+                    "All partitions must stay unmounted.",
                     kText);
+                lineY += 24;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "Confirm only after reviewing the target.", kText);
             } else if (m_initializeDialogState == INITIALIZE_DIALOG_RUNNING) {
                 strcopy(line, "Stage: ", sizeof(line));
                 strappend(line, storage::gpt_repair_stage_name(

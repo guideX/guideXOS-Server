@@ -1,6 +1,6 @@
 # Disk Manager Phase DM32 — Graphical Repair Qualification
 
-**Outcome B.** DM32 completed current-source storage regressions, requested build attempts, a real AHCI512 repair transaction, and a real guideXOS graphical confirmation/cancel exercise. The GUI Cancel/Return gate passed with zero media writes; the final graphical Confirm click did not land, so post-repair GUI refresh, healthy-action hiding, selection retention, and cold GUI restart remain open. Do not advance `.phase` or call DM32 closed.
+**Outcome B.** The first DM32 attempt is recorded below. The DM32 continuation fixed the visible Repair GPT confirmation warning overlap and repeated current-source storage/build qualification. It also cold-restarted the graphical fixture, which remained GPT Degraded, but could not complete a fresh real GUI Cancel/Confirm sequence because the cold boot did not restore the Disk Manager window and QMP PS/2 input could not reliably position the pointer. No graphical repair success or live Healthy refresh is claimed. Do not advance `.phase` or call DM32 closed.
 
 ## Gate and starting state
 
@@ -37,3 +37,32 @@ The rendered confirmation warning lines around the unmounted-partition statement
 ## Closeout decision
 
 DM32 is **Outcome B** because the final graphical Confirm, successful UI refresh, healthy-state action disappearance, selection retention, and cold GUI restart gates remain incomplete. `.phase` remains at DM31/DM32. A separate follow-up should complete the actual GUI Confirm using reliable pointer mapping, capture media counters and independent verification, then capture healthy refresh and cold restart before any Outcome A decision.
+
+## DM32 continuation — 2026-10-04
+
+The continuation began from `4a3f934c622d33be5018aa35b16c301dc3b8cbfa` on `DISK_MANAGER_IMPROVEMENTS`, with `.phase` still at DM31/DM32 and the existing Outcome B report above. History contained no later DM32 Outcome A report or commit. Fetch was attempted once and failed with `git@github.com: Permission denied (publickey)`; upstream freshness is unknown. The pre-existing `.gitignore` modification and untracked `kernel/out/` were preserved, and all ignored `out/dm32-*` evidence was retained.
+
+### Dialog repair and interaction audit
+
+The overlap came from the long unmounted-partition warning being drawn as one clipped line at a fixed Y position. The Repair GPT branch now draws the warnings as separate rows and uses 24-pixel spacing through its detail and confirmation text. This is a bounded change in `kernel/core/kernel_apps.cpp`; the shared modal height, button placement, and Initialize Disk, Quick Reformat, and Delete Partition layouts were not changed. Source inspection confirms background Disk Manager list/map mouse input returns while a dialog is open, and the action handler only routes a visible, enabled Repair GPT confirmation control to `runGptRepairOperation`. Existing deterministic policy tests cover the healthy, conflict, unrecoverable, mounted, and stale-action gates.
+
+The corrected kernel and Release bootloader were built. A proof build with `GXOS_DM32_QEMU_GUI_AUTOLAUNCH` launched the normal Disk Manager app after desktop startup; serial reported resolver dispatch to `gxos.builtin.diskmanager` and launch PASS. The degraded 512-byte USB fixture was hot-plugged after firmware startup and registered as a 600 MiB writable device. The prior rendered dialog still showed overlap, which prompted a further spacing increase and rebuild. In the final run, QMP keyboard and pointer input did not refresh the Disk Manager inventory after USB registration, so a screenshot of the revised dialog was not obtained. Consequently corrected visual non-overlap, reopened confirmation, graphical Cancel after the final spacing change, background-click suppression, and Escape behavior are not newly qualified. The one-off proof launch hook was removed from `kernel/core/main.cpp` after the run; production behavior is unchanged.
+
+### Current-source runtime and verification
+
+The existing `out/dm32-ahci512-runtime-retry/` campaign is current-source DM32 evidence produced earlier on this HEAD: AHCI512 real runtime repair passed in both directions. Each transaction wrote 32 GPT array sectors and one GPT header sector (16,896 total bytes) and reported two Flushes. The independent verifier reported Healthy GPT after each cold restart, with PMBR valid and unchanged and all three partition identities intact. The fixture manifest includes data-canary hashes for all three partitions. The recorded successful directions are BackupFromPrimary and PrimaryFromBackup. The separate USB graphical fixture remains Degraded; no Confirm transaction was issued in this continuation.
+
+### Regression/builds
+
+- `scripts/run-storage-manager-tests.ps1`: **978 checks, 0 failures**; USB trace classifier passed 7/7 and its fixture checks passed.
+- Current-source AMD64 production kernel build (`mingw32-make -C kernel ARCH=amd64 -j4`): passed, including recompilation of `kernel/core/kernel_apps.cpp`.
+- UEFI x64 Release bootloader build: passed.
+- `cmd /c build.bat`: the single continuation attempt compiled through the hosted source set and returned exit code 1. The bounded tool output did not retain a final diagnostic, so the failure is not attributed to Disk Manager. No build process remains running in this repository.
+- `build.ps1 -Arch amd64`: failed at the known PacMan Native ELF link step (`pacman_audio_load_resources(gx_app_context*)`, `pacman_audio_submit(void*, PacManSoundId)`); PacMan was not changed. Log: `out/dm32-qualification-20261004/build-ps-amd64-continuation.log`.
+- No storage backend source changed, so the prior real 4Kn DM30 transaction evidence remains applicable. NVMe write and Flush gates remain `NVME_WRITE_PROVEN=0`, `NVME_FLUSH_PROVEN=0`.
+
+### Continuation decision
+
+The source spacing change is compiled into the proof kernel, but the revised dialog screenshot has not been accepted. The corrected graphical Cancel/Confirm, duplicate-submit, live Healthy refresh/action disappearance, selection retention, and post-graphical-repair cold restart gates remain open. Mounted-state visual qualification and conflict/unrecoverable visual captures were not added. DM32 remains **Outcome B**, and `.phase` remains `last_completed=DM31`, `next_expected=DM32`. Do not advance to DM33.
+
+Continuation logs and render attempts are preserved under `out/dm32-qualification-20261004/`, including `kernel-amd64-dialog-fix.log`, `uefi-x64-release-continuation.log`, `storage-suite-20261004-continue.log`, `repair-dialog3.png` (overlap observed before the final spacing rebuild), `final-dialog.serial.log`, `hotplug-fixture-verification.json`, and the QMP/counter captures. The successful AHCI runtime campaign and independent verifier outputs remain under `out/dm32-ahci512-runtime-retry/`.
