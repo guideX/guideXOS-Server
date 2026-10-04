@@ -44,6 +44,22 @@ inline bool disk_manager_create_partition_action_enabled(
         validatedUnallocatedModel && preflightAvailable;
 }
 
+inline bool disk_manager_gpt_repair_action_visible(
+    bool hasSelection, bool selectedDisk, DiskState state,
+    bool primaryValid, bool backupValid, bool copiesConflict,
+    bool diagnosisDisplayable, bool dialogClosed)
+{
+    return dialogClosed && hasSelection && selectedDisk &&
+        state == DISK_STATE_GPT_DEGRADED && primaryValid != backupValid &&
+        !copiesConflict && diagnosisDisplayable;
+}
+
+inline bool disk_manager_gpt_repair_action_enabled(
+    bool visible, bool repairAvailable)
+{
+    return visible && repairAvailable;
+}
+
 inline bool disk_manager_action_enabled(DiskManagerAction action,
                                         bool hasSelection, DiskState state,
                                         bool initializeAvailable,

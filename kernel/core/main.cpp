@@ -71,7 +71,8 @@
     defined(GXOS_DM15_QEMU_AHCI_PROOF) || \
     defined(GXOS_DM16_QEMU_NVME_PROOF) || \
     defined(GXOS_DM24_QEMU_FAT32_4KN_PROOF) || \
-    defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF)
+    defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF) || \
+    defined(GXOS_DM30_QEMU_GPT_REPAIR_PROOF)
 #include "include/kernel/qemu_dm9_storage_proof.h"
 #endif
 #if defined(GXOS_DM12_QEMU_USB_PROOF)
@@ -986,7 +987,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 
         // AHCI shares the common block registry with ATA and other transports.
         // Register only valid direct SATA disks discovered through PCI.
-#if defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF)
+#if defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF) || \
+    defined(GXOS_DM30_QEMU_GPT_REPAIR_PROOF)
         kernel::serial::puts("[DM29-QEMU] host-corruption-window=READY\n");
         const uint64_t dm29WindowStart = kernel::pit::ticks();
         uint64_t dm29WindowSpins = 0;
@@ -1038,7 +1040,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     defined(GXOS_DM15_QEMU_AHCI_PROOF) || \
     defined(GXOS_DM16_QEMU_NVME_PROOF) || \
     defined(GXOS_DM24_QEMU_FAT32_4KN_PROOF) || \
-    defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF)
+    defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF) || \
+    defined(GXOS_DM30_QEMU_GPT_REPAIR_PROOF)
         kernel::qemu_dm9_storage_proof::run(mounted);
 #endif
 #if defined(GXOS_DM12_QEMU_USB_PROOF)

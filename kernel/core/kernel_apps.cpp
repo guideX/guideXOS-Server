@@ -6956,21 +6956,22 @@ void DiskManagerApp::updateInitializeControls() {
         ? m_disks[m_selectedDisk].state : storage::DISK_STATE_UNREADABLE;
     const bool initializeAvailable = haveSelection && rawSelected &&
         m_disks[m_selectedDisk].initializeAvailable;
-    const bool gptRepairShape = haveSelection &&
-        m_selectedObject == SELECTED_DISK &&
-        m_disks[m_selectedDisk].state == storage::DISK_STATE_GPT_DEGRADED &&
-        m_disks[m_selectedDisk].primaryGptValid !=
-            m_disks[m_selectedDisk].backupGptValid &&
-        !m_disks[m_selectedDisk].gptCopiesConflict;
-    const bool showGptRepair = gptRepairShape &&
+    const bool repairDiagnosisDisplayable = haveSelection &&
         m_disks[m_selectedDisk].gptRepairStatus !=
             storage::GPT_REPAIR_GEOMETRY_MISMATCH &&
         m_disks[m_selectedDisk].gptRepairStatus !=
             storage::GPT_REPAIR_UNSUPPORTED_COPY &&
         m_disks[m_selectedDisk].gptRepairStatus !=
             storage::GPT_REPAIR_UNREADABLE_COPY;
-    const bool gptRepairAvailable = showGptRepair &&
-        m_disks[m_selectedDisk].gptRepairAvailable;
+    const bool showGptRepair = storage::disk_manager_gpt_repair_action_visible(
+        haveSelection, m_selectedObject == SELECTED_DISK, selectedState,
+        haveSelection && m_disks[m_selectedDisk].primaryGptValid,
+        haveSelection && m_disks[m_selectedDisk].backupGptValid,
+        haveSelection && m_disks[m_selectedDisk].gptCopiesConflict,
+        repairDiagnosisDisplayable, dialogClosed);
+    const bool gptRepairAvailable = storage::disk_manager_gpt_repair_action_enabled(
+        showGptRepair, haveSelection &&
+            m_disks[m_selectedDisk].gptRepairAvailable);
     const bool createAvailable = selectedRegion &&
         m_disks[m_selectedDisk].createPartitionAvailable;
     bool formatAvailable = false;

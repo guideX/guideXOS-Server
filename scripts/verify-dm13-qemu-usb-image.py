@@ -48,7 +48,13 @@ def main() -> int:
     parser.add_argument("image", type=Path, help="read-only raw disk image")
     parser.add_argument("--check-blank", action="store_true",
                         help="require that the raw image is entirely zeroed")
+    parser.add_argument("--allow-payload-changes", action="store_true",
+                        help="verify structure without requiring the proof-file bytes; use after interrupted writes")
+    parser.add_argument("--allow-nonzero-lba", type=int, action="append", default=[],
+                        help="allow a specific LBA intentionally dirtied by the interrupted-write proof")
     args = parser.parse_args()
+    if args.allow_nonzero_lba and not args.allow_payload_changes:
+        parser.error("--allow-nonzero-lba requires --allow-payload-changes")
 
     image_path = args.image.resolve(strict=True)
     if args.check_blank:
@@ -295,7 +301,9 @@ def main() -> int:
         require(len(file_chain) == (file_size + cluster_size - 1) // cluster_size,
                 "proof file cluster chain length disagrees with its size")
         contents = b"".join(cluster_bytes(cluster) for cluster in file_chain)[:file_size]
-        require(contents == PAYLOAD, "proof file contents differ from the deterministic payload")
+        if not args.allow_payload_changes:
+            require(contents == PAYLOAD,
+                    "proof file contents differ from the deterministic payload")
 
         # The raw image began entirely zeroed. Only FAT metadata and clusters
         # reachable from the root, proof directory, and proof file may contain
@@ -316,7 +324,7 @@ def main() -> int:
                     "FAT32 data region is truncated during isolation check")
             for offset in range(count):
                 lba = cursor_lba + offset
-                if lba in allowed_data_sectors:
+                if lba in allowed_data_sectors or lba in args.allow_nonzero_lba:
                     continue
                 sector = data[offset * SECTOR_SIZE:(offset + 1) * SECTOR_SIZE]
                 require(not any(sector),
@@ -334,7 +342,11 @@ def main() -> int:
         print(f"leading_canary_gap=PASS first_lba={primary_array_end} last_lba={start_lba - 1} bytes={gap_bytes}")
         print(f"fat32_bpb=PASS bps={bytes_per_sector} spc={sectors_per_cluster} clusters={cluster_count} label=DM13PROOF")
         print(f"fsinfo=PASS primary_free_hint={primary_free_count} backup_fsinfo_signatures=PASS backup_boot=PASS fat_mirror=PASS")
-        print(f"root_directory=PASS dm13_directory=PASS proof_file=PASS payload_bytes={file_size}")
+        payload_check = (" payload_contents=not-checked-after-interruption"
+                         if args.allow_payload_changes else " payload_contents=PASS")
+        print(f"root_directory=PASS dm13_directory=PASS proof_file=PASS payload_bytes={file_size}{payload_check}")
+        if args.allow_nonzero_lba:
+            print("intentionalDirtyLbas=" + ",".join(str(lba) for lba in args.allow_nonzero_lba))
         print("metadata_isolation=PASS gaps_zero=PASS unallocated_data_zero=PASS")
         print("result=PASS read_only_inspection=yes")
 

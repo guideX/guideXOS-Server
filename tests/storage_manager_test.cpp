@@ -4881,6 +4881,36 @@ void run_gpt_repair_tests()
     }
 
     {
+        FakeDisk cancelled(512, 4096);
+        build_gpt(cancelled);
+        const uint64_t backupHeaderLba = cancelled.sectorCount - 1;
+        const uint64_t backupArrayLba = read_u64(
+            sector(cancelled, backupHeaderLba) + 72);
+        sector(cancelled, backupArrayLba)[56] ^= 0x01;
+        const uint8_t index = register_fake(cancelled, true, true, true);
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::GptRepairRequest request = {target,
+            target.registryGeneration};
+        storage::GptRepairPlan plan = {};
+        storage::GptRepairResult result = {};
+        const storage::GptRepairStatus prepared = storage::prepare_gpt_repair(
+            request, plan, result);
+        const bool cancelledPlan = prepared ==
+                storage::GPT_REPAIR_READY_FOR_CONFIRMATION &&
+            storage::cancel_gpt_repair(plan);
+        storage::PartitionTableModel afterCancel = {};
+        const bool parsed = storage::parse_partition_table(index, afterCancel);
+        check(cancelledPlan && parsed &&
+              afterCancel.state == storage::DISK_STATE_GPT_DEGRADED &&
+              afterCancel.primaryGptValid && !afterCancel.backupGptValid &&
+              cancelled.writeAttempts == 0 && cancelled.flushes == 0 &&
+              !storage::storage_operation_active(),
+              "DM30 cancelling GPT repair confirmation releases its lease with zero writes or Flushes and leaves degraded state intact");
+        unregister_fake(index, cancelled);
+    }
+
+    {
         FakeDisk degraded(512, 4096);
         build_gpt(degraded, GptFixture::PrimaryHeaderCrcBad);
         const uint8_t index = register_fake(degraded, true, true, true);
@@ -5818,6 +5848,43 @@ int main()
               storage::DISK_MANAGER_ACTION_REFRESH, true,
               storage::DISK_STATE_VALID_GPT, false, false),
           "contextual read-only actions require selection and closed dialogs as appropriate");
+
+    const bool healthyRepairHidden =
+        !storage::disk_manager_gpt_repair_action_visible(true, true,
+            storage::DISK_STATE_VALID_GPT, true, true, false, true, true);
+    const bool primaryDegradedRepairVisible =
+        storage::disk_manager_gpt_repair_action_visible(true, true,
+            storage::DISK_STATE_GPT_DEGRADED, true, false, false, true, true);
+    const bool backupDegradedRepairVisible =
+        storage::disk_manager_gpt_repair_action_visible(true, true,
+            storage::DISK_STATE_GPT_DEGRADED, false, true, false, true, true);
+    const bool conflictRepairHidden =
+        !storage::disk_manager_gpt_repair_action_visible(true, true,
+            storage::DISK_STATE_GPT_DEGRADED, true, true, true, true, true);
+    const bool unrecoverableRepairHidden =
+        !storage::disk_manager_gpt_repair_action_visible(true, true,
+            storage::DISK_STATE_INVALID_PARTITION_TABLE, false, false,
+            false, true, true);
+    check(healthyRepairHidden && primaryDegradedRepairVisible &&
+          backupDegradedRepairVisible && conflictRepairHidden &&
+          unrecoverableRepairHidden,
+          "DM30 Disk Manager exposes Repair GPT only for one-authority degraded GPT and hides it for healthy, conflicting, or unrecoverable copies");
+    const bool readOnlyActionVisibleButBlocked =
+        storage::disk_manager_gpt_repair_action_visible(true, true,
+            storage::DISK_STATE_GPT_DEGRADED, true, false, false, true, true) &&
+        !storage::disk_manager_gpt_repair_action_enabled(true, false);
+    const bool mountedActionVisibleButBlocked =
+        storage::disk_manager_gpt_repair_action_visible(true, true,
+            storage::DISK_STATE_GPT_DEGRADED, false, true, false, true, true) &&
+        !storage::disk_manager_gpt_repair_action_enabled(true, false);
+    const bool closedDialogRequired =
+        !storage::disk_manager_gpt_repair_action_visible(true, true,
+            storage::DISK_STATE_GPT_DEGRADED, true, false, false, true, false) &&
+        !storage::disk_manager_gpt_repair_action_visible(true, false,
+            storage::DISK_STATE_GPT_DEGRADED, true, false, false, true, true);
+    check(readOnlyActionVisibleButBlocked && mountedActionVisibleButBlocked &&
+          closedDialogRequired,
+          "DM30 Repair GPT shows a blocked preflight state, stays disabled for read-only or mounted media, and requires disk selection with closed dialogs");
 
     check(std::strcmp(storage::disk_manager_mount_summary(
               storage::DEVICE_ROOT_BACKING), "Root backing device") == 0 &&

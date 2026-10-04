@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Corrupt one byte in a disposable 512-byte-sector GPT entry array."""
+"""Corrupt one active GPT entry byte in a disposable raw image."""
 
 from __future__ import annotations
 
@@ -23,18 +23,20 @@ def main() -> int:
     parser.add_argument("image", help="disposable raw image; modified in place")
     parser.add_argument("--side", choices=("Primary", "Backup"),
                         default="Backup", help="GPT side whose array to damage")
+    parser.add_argument("--sector-size", type=int, choices=(512, 4096),
+                        default=512, help="device logical-sector size")
     args = parser.parse_args()
     size = os.path.getsize(args.image)
-    sector_size = 512
+    sector_size = args.sector_size
     if size == 0 or size % sector_size:
-        raise SystemExit("image size is not a multiple of 512 bytes")
+        raise SystemExit(f"image size is not a multiple of {sector_size} bytes")
     total_sectors = size // sector_size
     with open(args.image, "r+b", buffering=0) as image:
         header_lba = 1 if args.side == "Primary" else total_sectors - 1
         image.seek(header_lba * sector_size)
         header = image.read(sector_size)
         if len(header) != sector_size or header[:8] != b"EFI PART":
-            raise SystemExit("backup GPT header signature is missing")
+            raise SystemExit(f"{args.side.lower()} GPT header signature is missing")
         if u64(header, 24) != header_lba:
             raise SystemExit(f"{args.side.lower()} GPT header is not at expected LBA {header_lba}")
         array_lba = u64(header, 72)
@@ -72,6 +74,7 @@ def main() -> int:
         "array_lba": array_lba,
         "entry_count": entry_count,
         "entry_size": entry_size,
+        "array_sectors": (array_bytes + sector_size - 1) // sector_size,
         "corrupted_entry_number": active + 1,
         "corrupted_byte_offset": offset,
         "corrupted_byte_lba": offset // sector_size,

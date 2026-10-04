@@ -371,7 +371,7 @@ try {
     $verifyA = @((Get-Content -LiteralPath $verifyAStdout -ErrorAction SilentlyContinue) +
         (Get-Content -LiteralPath $verifyAStderr -ErrorAction SilentlyContinue))
     $verifyBProcess = Start-Process -FilePath $python.Source `
-        -ArgumentList @($verify,$imageB) -WorkingDirectory $Root `
+        -ArgumentList @($verify,$imageB,"--allow-payload-changes","--allow-nonzero-lba","90000") -WorkingDirectory $Root `
         -WindowStyle Hidden -PassThru -Wait `
         -RedirectStandardOutput $verifyBStdout -RedirectStandardError $verifyBStderr
     $verifyBExit = $verifyBProcess.ExitCode
@@ -379,7 +379,7 @@ try {
         (Get-Content -LiteralPath $verifyBStderr -ErrorAction SilentlyContinue))
     Add-Content -LiteralPath $inspection -Encoding ascii -Value @(
       "mediaA.dm13VerifierExit=$verifyAExit", "mediaA.dm13Verifier=$($verifyA -join '; ')",
-      "mediaB.dm13VerifierExit=$verifyBExit", "mediaB.dm13Verifier=$($verifyB -join '; ')")
+      "mediaB.postInterruptionMetadataVerifierExit=$verifyBExit", "mediaB.postInterruptionMetadataVerifier=$($verifyB -join '; ')")
     Add-Content -LiteralPath $manifest -Encoding ascii -Value @(
       "mediaASha256After=$hashAEnd", "mediaBSha256After=$hashBEnd",
       "rawInspection=$inspection", "dm14FailureMarkerCount=$($failure.Count)",

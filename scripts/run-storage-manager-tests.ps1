@@ -40,6 +40,9 @@ try {
 
     & $python.Source (Join-Path $repoRoot 'tests/verify_dm29_gpt_test.py')
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    & $python.Source (Join-Path $repoRoot 'tests/dm30_gpt_fixture_test.py')
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {
     Remove-Item -LiteralPath $testExe -Force -ErrorAction SilentlyContinue
 }

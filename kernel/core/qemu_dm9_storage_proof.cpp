@@ -5,7 +5,8 @@
     defined(GXOS_DM16_QEMU_NVME_PROOF) || \
     defined(GXOS_DM24_QEMU_FAT32_4KN_PROOF) || \
     defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF) || \
-    defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF)
+    defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF) || \
+    defined(GXOS_DM30_QEMU_GPT_REPAIR_PROOF)
 
 #include "include/kernel/block_device.h"
 #include "include/kernel/ata.h"
@@ -19,7 +20,8 @@
 #include "include/kernel/disk_initialization.h"
 #include "include/kernel/disk_manager_model.h"
 #include "include/kernel/fat32_formatter.h"
-#if defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF)
+#if defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF) || \
+    defined(GXOS_DM30_QEMU_GPT_REPAIR_PROOF)
 #include "include/kernel/gpt_repair.h"
 #endif
 #include "include/kernel/partition_operations.h"
@@ -32,7 +34,8 @@ namespace kernel {
 namespace qemu_dm9_storage_proof {
 namespace {
 
-#if defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF)
+#if defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF) || \
+    defined(GXOS_DM30_QEMU_GPT_REPAIR_PROOF)
 #define QEMU_PROOF_TAG "[DM29-QEMU]"
 #elif defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
 #define QEMU_PROOF_TAG "[DM27-QEMU]"
@@ -90,10 +93,21 @@ static storage::DeletePartitionRequest s_deleteRequest = {};
 static storage::DeletePartitionPlan s_deletePlan = {};
 static storage::DeletePartitionResult s_deleteResult = {};
 static storage::PartitionTableModel s_deleteBeforeTable = {};
-#if defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF)
+#if defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF) || \
+    defined(GXOS_DM30_QEMU_GPT_REPAIR_PROOF)
 static storage::GptRepairRequest s_dm29RepairRequest = {};
 static storage::GptRepairPlan s_dm29RepairPlan = {};
 static storage::GptRepairResult s_dm29RepairResult = {};
+#endif
+#if defined(GXOS_DM30_QEMU_GPT_REPAIR_PROOF)
+static storage::PartitionTableModel s_dm30BeforeTable = {};
+static storage::PartitionTableModel s_dm30AfterTable = {};
+static storage::UnallocatedRegion s_dm30BeforeGaps[
+    storage::MAX_UNALLOCATED_REGIONS] = {};
+static storage::UnallocatedRegion s_dm30AfterGaps[
+    storage::MAX_UNALLOCATED_REGIONS] = {};
+static uint8_t s_dm30Canaries[3][3][storage::MAX_LOGICAL_SECTOR_SIZE] = {};
+static uint8_t s_dm30CanaryAfter[storage::MAX_LOGICAL_SECTOR_SIZE] = {};
 #endif
 alignas(4096) static uint8_t s_proofSectorA[storage::MAX_LOGICAL_SECTOR_SIZE];
 alignas(4096) static uint8_t s_proofSectorB[storage::MAX_LOGICAL_SECTOR_SIZE];
@@ -2020,7 +2034,91 @@ static bool run_rediscovery(const storage::TargetIdentity& identity,
     return false;
 }
 
-#if defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF)
+#if defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF) || \
+    defined(GXOS_DM30_QEMU_GPT_REPAIR_PROOF)
+#if defined(GXOS_DM30_QEMU_GPT_REPAIR_PROOF)
+static uint16_t s_dm30BeforeGapCount = 0;
+
+static bool dm30_capture_canaries(
+    const storage::TargetIdentity& identity,
+    const storage::PartitionTableModel& table,
+    uint8_t destination[3][3][storage::MAX_LOGICAL_SECTOR_SIZE])
+{
+    if (table.partitionCount != 3) return false;
+    for (uint16_t i = 0; i < 3; ++i) {
+        const storage::PartitionEntry& part = table.partitions[i];
+        if (!part.isGpt || part.sectorCount < 3 ||
+            part.partitionNumber != i + 1) return false;
+        const uint64_t lbas[3] = {
+            part.startLba,
+            part.startLba + (part.endLba - part.startLba) / 2,
+            part.endLba
+        };
+        for (uint8_t n = 0; n < 3; ++n) {
+            const block::Status readStatus = block::read_sectors(
+                identity.globalIndex, lbas[n], 1, destination[i][n]);
+            if (readStatus != block::BLOCK_OK) {
+                serial::puts(QEMU_PROOF_TAG " canary-read=FAIL partition=");
+                serial::put_hex32(i);
+                serial::puts(" position=");
+                serial::put_hex32(n);
+                serial::puts(" lba=");
+                serial::put_hex64(lbas[n]);
+                serial::puts(" status=");
+                serial::put_hex32(static_cast<uint32_t>(readStatus));
+                serial::putc('\n');
+                return false;
+            }
+            if (!bytes_equal(destination[i][n], "DM30-CANARY-", 12)) {
+                serial::puts(QEMU_PROOF_TAG " canary-signature=FAIL partition=");
+                serial::put_hex32(i);
+                serial::puts(" position=");
+                serial::put_hex32(n);
+                serial::puts(" lba=");
+                serial::put_hex64(lbas[n]);
+                serial::puts(" firstBytes=");
+                for (uint8_t byte = 0; byte < 12; ++byte)
+                    serial::put_hex8(destination[i][n][byte]);
+                serial::putc('\n');
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static bool dm30_partition_metadata_equal(
+    const storage::PartitionEntry& left,
+    const storage::PartitionEntry& right)
+{
+    return left.partitionNumber == right.partitionNumber && left.isGpt &&
+        right.isGpt && left.startLba == right.startLba &&
+        left.endLba == right.endLba && left.sectorCount == right.sectorCount &&
+        left.attributes == right.attributes &&
+        bytes_equal(left.typeGuid, right.typeGuid, sizeof(left.typeGuid)) &&
+        bytes_equal(left.uniqueGuid, right.uniqueGuid, sizeof(left.uniqueGuid)) &&
+        text_equal(left.name, right.name);
+}
+
+static bool dm30_gaps_equal(uint16_t afterCount)
+{
+    if (afterCount != s_dm30BeforeGapCount) return false;
+    for (uint16_t i = 0; i < afterCount; ++i) {
+        const storage::UnallocatedRegion& before = s_dm30BeforeGaps[i];
+        const storage::UnallocatedRegion& after = s_dm30AfterGaps[i];
+        if (before.startLba != after.startLba ||
+            before.endLba != after.endLba ||
+            before.sectorCount != after.sectorCount ||
+            before.capacityBytes != after.capacityBytes ||
+            before.alignmentSectors != after.alignmentSectors ||
+            before.startAlignedTo1MiB != after.startAlignedTo1MiB ||
+            before.insideUsableRange != after.insideUsableRange)
+            return false;
+    }
+    return true;
+}
+#endif
+
 static bool run_dm29_repair(const storage::TargetIdentity& identity,
                             const storage::PartitionTableModel& table,
                             uint8_t rootMountCount)
@@ -2040,6 +2138,26 @@ static bool run_dm29_repair(const storage::TargetIdentity& identity,
     serial::puts(" partitions=");
     serial::put_hex32(table.partitionCount);
     serial::puts(" conflict=no\n");
+
+#if defined(GXOS_DM30_QEMU_GPT_REPAIR_PROOF)
+    const bool gapsCaptured = storage::compute_unallocated_regions(table,
+            identity.totalLogicalSectors, identity.logicalSectorSize,
+            s_dm30BeforeGaps, storage::MAX_UNALLOCATED_REGIONS,
+            s_dm30BeforeGapCount);
+    const bool canariesCaptured = dm30_capture_canaries(
+        identity, table, s_dm30Canaries);
+    if (table.partitionCount != 3 || !gapsCaptured || !canariesCaptured) {
+        serial::puts(QEMU_PROOF_TAG " multi-partition=FAIL entries=");
+        serial::put_hex32(table.partitionCount);
+        serial::puts(" gaps=");
+        serial::puts(gapsCaptured ? "PASS" : "FAIL");
+        serial::puts(" canaries=");
+        serial::puts(canariesCaptured ? "PASS\n" : "FAIL\n");
+        return false;
+    }
+    s_dm30BeforeTable = table;
+    serial::puts(QEMU_PROOF_TAG " multi-partition=PASS entries=3 gap-map=Captured canaries=9\n");
+#endif
 
     s_dm29RepairRequest = {};
     s_dm29RepairRequest.targetSnapshot = identity;
@@ -2076,7 +2194,7 @@ static bool run_dm29_repair(const storage::TargetIdentity& identity,
         !s_dm29RepairResult.partitionDataUntouched ||
         s_dm29RepairResult.finalPrimaryState != storage::GPT_COPY_VALID ||
         s_dm29RepairResult.finalBackupState != storage::GPT_COPY_VALID ||
-        s_dm29RepairResult.flushAttempts < 2 ||
+        s_dm29RepairResult.flushAttempts != 2 ||
         s_dm29RepairResult.logicalSectorsWritten !=
             s_dm29RepairPlan.entryArraySectors + 1u) {
         serial::puts(QEMU_PROOF_TAG " repair=FAIL status=");
@@ -2086,6 +2204,56 @@ static bool run_dm29_repair(const storage::TargetIdentity& identity,
         serial::putc('\n');
         return false;
     }
+#if defined(GXOS_DM30_QEMU_GPT_REPAIR_PROOF)
+    uint16_t afterGapCount = 0;
+    bool entriesPreserved = storage::parse_partition_table(
+        identity.globalIndex, s_dm30AfterTable) &&
+        s_dm30AfterTable.state == storage::DISK_STATE_VALID_GPT &&
+        s_dm30AfterTable.partitionCount == 3 &&
+        s_dm30AfterTable.gptCopiesAgree;
+    for (uint16_t i = 0; entriesPreserved && i < 3; ++i)
+        entriesPreserved = dm30_partition_metadata_equal(
+            s_dm30BeforeTable.partitions[i], s_dm30AfterTable.partitions[i]);
+    const bool gapsPreserved = entriesPreserved &&
+        storage::compute_unallocated_regions(s_dm30AfterTable,
+            identity.totalLogicalSectors, identity.logicalSectorSize,
+            s_dm30AfterGaps, storage::MAX_UNALLOCATED_REGIONS,
+            afterGapCount) && dm30_gaps_equal(afterGapCount);
+    bool canariesPreserved = gapsPreserved;
+    for (uint16_t i = 0; canariesPreserved && i < 3; ++i) {
+        const storage::PartitionEntry& part = s_dm30AfterTable.partitions[i];
+        const uint64_t lbas[3] = {part.startLba,
+            part.startLba + (part.endLba - part.startLba) / 2,
+            part.endLba};
+        for (uint8_t n = 0; n < 3; ++n) {
+            if (block::read_sectors(identity.globalIndex, lbas[n], 1,
+                    s_dm30CanaryAfter) != block::BLOCK_OK ||
+                !bytes_equal(s_dm30CanaryAfter, s_dm30Canaries[i][n],
+                    identity.logicalSectorSize)) {
+                canariesPreserved = false;
+                break;
+            }
+        }
+    }
+    const uint64_t expectedBytes =
+        static_cast<uint64_t>(s_dm29RepairPlan.entryArraySectors + 1u) *
+        identity.logicalSectorSize;
+    const bool writeGeometryValid =
+        s_dm29RepairResult.logicalSectorsWritten ==
+            s_dm29RepairPlan.entryArraySectors + 1u &&
+        s_dm29RepairResult.bytesWritten == expectedBytes &&
+        s_dm29RepairResult.bytesWritten ==
+            static_cast<uint64_t>(s_dm29RepairResult.logicalSectorsWritten) *
+                identity.logicalSectorSize &&
+        (identity.logicalSectorSize != 4096u ||
+         s_dm29RepairPlan.entryArraySectors == 4u);
+    if (!entriesPreserved || !gapsPreserved || !canariesPreserved ||
+        !writeGeometryValid) {
+        serial::puts(QEMU_PROOF_TAG " repair=FAIL multi-partition-preservation=no\n");
+        return false;
+    }
+    serial::puts(QEMU_PROOF_TAG " preservation=PASS entries=3 neighbors=Restored gap-map=Unchanged partition-entry-identities=Preserved data-canaries=9 PMBR=Preserved\n");
+#endif
     serial::puts(QEMU_PROOF_TAG " repair=PASS direction=");
     serial::puts(direction);
     serial::puts(" authoritative-copy=Preserved partition-identities=Preserved pmbr=Preserved partition-data=Untouched flushes=");
@@ -2096,6 +2264,15 @@ static bool run_dm29_repair(const storage::TargetIdentity& identity,
     serial::put_hex32(s_dm29RepairResult.logicalSectorsWritten);
     serial::puts(" bytesWritten=");
     serial::put_hex64(s_dm29RepairResult.bytesWritten);
+    serial::puts(" logicalSectorSize=");
+    serial::put_hex32(identity.logicalSectorSize);
+    serial::puts(" arraySectors=");
+    serial::put_hex32(s_dm29RepairPlan.entryArraySectors);
+    serial::puts(" headerSectors=1");
+#if defined(GXOS_DM30_QEMU_GPT_REPAIR_PROOF)
+    if (identity.logicalSectorSize == 4096u)
+        serial::puts(" zero512ByteWrites=yes");
+#endif
     serial::putc('\n');
     return true;
 }
@@ -2110,6 +2287,14 @@ static bool run_dm29_restart(const storage::TargetIdentity& identity,
         serial::puts(QEMU_PROOF_TAG " restart=FAIL reason=GPT-pair-not-healthy\n");
         return false;
     }
+#if defined(GXOS_DM30_QEMU_GPT_REPAIR_PROOF)
+    const bool fixtureIntact = table.partitionCount == 3 &&
+        dm30_capture_canaries(identity, table, s_dm30Canaries);
+    serial::puts(fixtureIntact
+        ? QEMU_PROOF_TAG " restart=PASS healthy-pair=yes entries=3 data-canaries=9 coldRestart=yes\n"
+        : QEMU_PROOF_TAG " restart=FAIL reason=three-entry-or-canary-check\n");
+    return fixtureIntact;
+#endif
     for (uint16_t i = 0; i < table.partitionCount; ++i) {
         const storage::PartitionEntry& partition = table.partitions[i];
         if (!text_equal(partition.name, kPartitionName)) continue;
@@ -2618,6 +2803,25 @@ void run(bool rootStorageMounted)
     }
     serial::puts(QEMU_PROOF_TAG " target-table-parse=complete state=");
     serial::puts(storage::disk_state_name(s_table.state));
+#if defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF) || \
+    defined(GXOS_DM30_QEMU_GPT_REPAIR_PROOF)
+    serial::puts(" primary=");
+    serial::puts(storage::gpt_copy_state_name(s_table.primaryGptCopyState));
+    serial::puts(s_table.primaryGptValid ? "(valid)" : "(invalid)");
+    serial::puts(" backup=");
+    serial::puts(storage::gpt_copy_state_name(s_table.backupGptCopyState));
+    serial::puts(s_table.backupGptValid ? "(valid)" : "(invalid)");
+    serial::puts(" agree=");
+    serial::puts(s_table.gptCopiesAgree ? "yes" : "no");
+    serial::puts(" conflict=");
+    serial::puts(s_table.gptCopiesConflict ? "yes" : "no");
+    serial::puts(" partitions=");
+    serial::put_hex32(s_table.partitionCount);
+    serial::puts(" primary-error=");
+    serial::put_hex32(static_cast<uint32_t>(s_table.primaryGptError));
+    serial::puts(" backup-error=");
+    serial::put_hex32(static_cast<uint32_t>(s_table.backupGptError));
+#endif
     serial::putc('\n');
 
 #if defined(GXOS_DM25_QEMU_PARTITION_DELETE_PROOF)
@@ -2673,7 +2877,8 @@ void run(bool rootStorageMounted)
         return;
     }
 
-#if defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF)
+#if defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF) || \
+    defined(GXOS_DM30_QEMU_GPT_REPAIR_PROOF)
     if (s_table.state == storage::DISK_STATE_GPT_DEGRADED) {
         (void)run_dm29_repair(identity, s_table, rootMountCount);
         return;

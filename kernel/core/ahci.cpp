@@ -976,6 +976,17 @@ static block::Status read_sectors(uint8_t driverIndex, uint64_t lba,
 static block::Status write_sectors(uint8_t driverIndex, uint64_t lba,
                                    uint32_t count, const void* buffer)
 {
+#if defined(GXOS_DM30_QEMU_GPT_REPAIR_PROOF)
+    if (driverIndex == 1u) {
+        serial::puts("[DM30-AHCI-WRITE] device=");
+        serial::put_hex8(driverIndex);
+        serial::puts(" lba=");
+        serial::put_hex64(lba);
+        serial::puts(" count=");
+        serial::put_hex32(count);
+        serial::putc('\n');
+    }
+#endif
     return transfer(driverIndex, lba, count, nullptr, buffer, true);
 }
 
