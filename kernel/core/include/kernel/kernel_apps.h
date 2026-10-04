@@ -16,6 +16,7 @@
 #include "kernel/storage_manager.h"
 #include "kernel/disk_initialization.h"
 #include "kernel/partition_operations.h"
+#include "kernel/gpt_repair.h"
 #include "kernel/fat32_formatter.h"
 #include "kernel/disk_manager_model.h"
 #include "kernel/desktop.h"
@@ -1218,6 +1219,7 @@ private:
         INITIALIZE_DIALOG_CONFIRM,
         INITIALIZE_DIALOG_CREATE_OPTIONS,
         INITIALIZE_DIALOG_DELETE_CONFIRM,
+        INITIALIZE_DIALOG_GPT_REPAIR_CONFIRM,
         INITIALIZE_DIALOG_RUNNING,
         INITIALIZE_DIALOG_RESULT,
     };
@@ -1271,6 +1273,12 @@ private:
         bool primaryGptValid;
         bool backupGptValid;
         bool gptCopiesAgree;
+        bool gptCopiesConflict;
+        bool protectiveMbrValid;
+        storage::GptCopyState primaryGptCopyState;
+        storage::GptCopyState backupGptCopyState;
+        storage::GptRepairStatus gptRepairStatus;
+        bool gptRepairAvailable;
         uint8_t primaryDiskGuid[16];
         uint8_t backupDiskGuid[16];
         uint32_t mbrDiskSignature;
@@ -1312,6 +1320,7 @@ private:
     bool m_dialogIsFormat;
     bool m_dialogIsReformat;
     bool m_dialogIsDelete;
+    bool m_dialogIsGptRepair;
     bool m_createSizeEdited;
     bool m_createNameEdited;
     uint8_t m_createInputFocus;
@@ -1325,6 +1334,8 @@ private:
     storage::DeletePartitionRequest m_deleteRequest;
     storage::DeletePartitionPlan m_deletePlan;
     storage::DeletePartitionResult m_deleteResult;
+    storage::GptRepairPlan m_gptRepairPlan;
+    storage::GptRepairResult m_gptRepairResult;
     storage::Fat32FormatRequest m_formatRequest;
     storage::Fat32FormatResult m_formatResult;
     uint8_t m_lastStorageOperation;
@@ -1380,6 +1391,8 @@ private:
     void        runCreatePartitionOperation();
     void        beginDeletePartitionConfirmation();
     void        runDeletePartitionOperation();
+    void        beginGptRepairConfirmation();
+    void        runGptRepairOperation();
     bool        updateCreateInputWidgets();
     void        beginFormatOptions();
     void        runFormatOperation();

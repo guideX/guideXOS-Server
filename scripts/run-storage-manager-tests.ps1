@@ -20,6 +20,7 @@ try {
         kernel/core/partition_block_view.cpp `
         kernel/core/storage_manager.cpp `
         kernel/core/partition_table.cpp `
+        kernel/core/gpt_repair.cpp `
         kernel/core/disk_initialization.cpp `
         kernel/core/partition_operations.cpp `
         kernel/core/fat32_formatter.cpp `
@@ -35,6 +36,9 @@ try {
 
     $python = Get-Command python -ErrorAction Stop
     & $python.Source (Join-Path $repoRoot 'tests/classify_dm20_usb_trace_test.py')
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    & $python.Source (Join-Path $repoRoot 'tests/verify_dm29_gpt_test.py')
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {
     Remove-Item -LiteralPath $testExe -Force -ErrorAction SilentlyContinue

@@ -220,7 +220,11 @@ static bool parse_gpt_header(uint8_t deviceIndex, uint64_t lba,
     const uint64_t lastLba = totalSectors - 1;
     const uint64_t expectedCurrent = primary ? 1 : lastLba;
     const uint64_t expectedBackup = primary ? lastLba : 1;
-    if (header.currentLba != expectedCurrent || header.backupLba != expectedBackup ||
+    if (header.currentLba != expectedCurrent || header.backupLba != expectedBackup) {
+        error = PARTITION_ERROR_GPT_GEOMETRY_MISMATCH;
+        return false;
+    }
+    if (
         bytes_zero(header.diskGuid, sizeof(header.diskGuid)) ||
         header.firstUsableLba < 2 ||
         header.firstUsableLba > header.lastUsableLba ||
@@ -366,6 +370,57 @@ static bool headers_agree(const GptHeader& a, const GptHeader& b)
            bytes_equal(a.diskGuid, b.diskGuid, sizeof(a.diskGuid));
 }
 
+static bool arrays_equal(uint8_t deviceIndex, const GptHeader& a,
+                         const GptHeader& b, uint32_t sectorSize,
+                         bool& unreadable)
+{
+    unreadable = false;
+    if (a.entryCount != b.entryCount || a.entrySize != b.entrySize) return false;
+    const uint64_t arrayBytes = static_cast<uint64_t>(a.entryCount) * a.entrySize;
+    const uint64_t arraySectors = (arrayBytes + sectorSize - 1) / sectorSize;
+    alignas(4096) uint8_t left[MAX_LOGICAL_SECTOR_SIZE];
+    alignas(4096) uint8_t right[MAX_LOGICAL_SECTOR_SIZE];
+    uint64_t remaining = arrayBytes;
+    for (uint64_t offset = 0; offset < arraySectors; ++offset) {
+        if (!read_sector(deviceIndex, a.entriesLba + offset, left, sectorSize)) {
+            unreadable = true;
+            return false;
+        }
+        if (!read_sector(deviceIndex, b.entriesLba + offset, right, sectorSize)) {
+            unreadable = true;
+            return false;
+        }
+        const uint32_t count = static_cast<uint32_t>(
+            remaining < sectorSize ? remaining : sectorSize);
+        if (!bytes_equal(left, right, count)) return false;
+        remaining -= count;
+    }
+    return remaining == 0;
+}
+
+static GptCopyState gpt_copy_state(PartitionError error,
+                                   bool signatureFound, bool valid)
+{
+    if (valid) return GPT_COPY_VALID;
+    if (!signatureFound && error == PARTITION_ERROR_NONE)
+        return GPT_COPY_NOT_PRESENT;
+    switch (error) {
+        case PARTITION_ERROR_READ_FAILED: return GPT_COPY_UNREADABLE;
+        case PARTITION_ERROR_GPT_HEADER_CRC: return GPT_COPY_HEADER_CRC_INVALID;
+        case PARTITION_ERROR_GPT_ARRAY_CRC: return GPT_COPY_ARRAY_CRC_INVALID;
+        case PARTITION_ERROR_GPT_ARRAY: return GPT_COPY_BOUNDS_INVALID;
+        case PARTITION_ERROR_GPT_ENTRY: return GPT_COPY_ARRAY_INVALID;
+        case PARTITION_ERROR_GPT_OVERLAP: return GPT_COPY_BOUNDS_INVALID;
+        case PARTITION_ERROR_UNSUPPORTED_GPT_REVISION:
+        case PARTITION_ERROR_TOO_MANY_PARTITIONS:
+            return GPT_COPY_UNSUPPORTED;
+        case PARTITION_ERROR_GPT_GEOMETRY_MISMATCH:
+            return GPT_COPY_GEOMETRY_MISMATCH;
+        case PARTITION_ERROR_GPT_HEADER:
+        default: return GPT_COPY_HEADER_INVALID;
+    }
+}
+
 static RawProbeResult raw_heuristic(uint8_t deviceIndex, uint64_t totalSectors,
                                     uint32_t sectorSize)
 {
@@ -506,11 +561,14 @@ bool parse_partition_table(uint8_t deviceIndex, PartitionTableModel& model)
                               mbrSector[MBR_SIGNATURE_OFFSET + 1] == 0xAA;
     model.mbrDiskSignature = read_u32(mbrSector + 440);
     bool mbrStructurallyValid = false;
-    bool protectiveMbr = false;
+    bool protectiveMbr = mbrSector[MBR_PARTITION_TABLE_OFFSET + 4] == 0xEE;
     if (mbrSignature) {
         mbrStructurallyValid = parse_mbr(mbrSector, totalSectors, model);
-        protectiveMbr = model.protectiveMbr;
+        protectiveMbr = protectiveMbr || model.protectiveMbr;
+        model.protectiveMbr = protectiveMbr;
     }
+    model.protectiveMbrValid = mbrSignature && mbrStructurallyValid &&
+        protectiveMbr && !model.hybridMbr;
 
     GptHeader primaryHeader;
     GptHeader backupHeader;
@@ -526,6 +584,13 @@ bool parse_partition_table(uint8_t deviceIndex, PartitionTableModel& model)
     bool backupValid = read_gpt_copy(deviceIndex, totalSectors - 1, false,
         totalSectors, sectorSize, primaryValid ? nullptr : model.partitions,
         backupCount, backupHeader, backupError, backupSignature);
+
+    model.primaryGptCopyState = gpt_copy_state(
+        primaryError, primarySignature, primaryValid);
+    model.backupGptCopyState = gpt_copy_state(
+        backupError, backupSignature, backupValid);
+    model.primaryGptError = primaryError;
+    model.backupGptError = backupError;
 
     model.primaryGptValid = primaryValid;
     model.backupGptValid = backupValid;
@@ -588,8 +653,15 @@ bool parse_partition_table(uint8_t deviceIndex, PartitionTableModel& model)
             return true;
         }
 
-        model.gptCopiesAgree = primaryValid && backupValid &&
-                               headers_agree(primaryHeader, backupHeader);
+        const bool headerSemanticsAgree = primaryValid && backupValid &&
+            headers_agree(primaryHeader, backupHeader);
+        bool comparisonUnreadable = false;
+        const bool arraySemanticsAgree = headerSemanticsAgree &&
+            arrays_equal(deviceIndex, primaryHeader, backupHeader, sectorSize,
+                         comparisonUnreadable);
+        model.gptCopiesAgree = headerSemanticsAgree && arraySemanticsAgree;
+        model.gptCopiesConflict = primaryValid && backupValid &&
+            !model.gptCopiesAgree && !comparisonUnreadable;
         if (model.hybridMbr) {
             model.state = DISK_STATE_UNSUPPORTED_PARTITION_SCHEME;
             model.scheme = PARTITION_SCHEME_UNSUPPORTED;
@@ -600,11 +672,25 @@ bool parse_partition_table(uint8_t deviceIndex, PartitionTableModel& model)
             model.error = PARTITION_ERROR_NONE;
         } else {
             model.state = DISK_STATE_GPT_DEGRADED;
-            model.error = protectiveMbr && !mbrStructurallyValid
+            model.error = comparisonUnreadable
+                ? PARTITION_ERROR_READ_FAILED
+                : (protectiveMbr && !mbrStructurallyValid
                 ? PARTITION_ERROR_MALFORMED_MBR
                 : (primaryValid && backupValid
                     ? PARTITION_ERROR_GPT_COPIES_DISAGREE
-                    : (primaryError != PARTITION_ERROR_NONE ? primaryError : backupError));
+                    : (primaryError != PARTITION_ERROR_NONE ? primaryError : backupError)));
+            if (primaryValid && backupValid && !comparisonUnreadable)
+                model.gptCopiesConflict = true;
+            if (primaryError == PARTITION_ERROR_GPT_GEOMETRY_MISMATCH ||
+                backupError == PARTITION_ERROR_GPT_GEOMETRY_MISMATCH)
+                model.error = PARTITION_ERROR_GPT_GEOMETRY_MISMATCH;
+        }
+        if (model.gptCopiesConflict || comparisonUnreadable) {
+            // Two independently valid but different tables have no
+            // authoritative partition layout. Keep diagnostics, but do not
+            // expose either side's partitions to enumeration or mutation.
+            model.partitionCount = 0;
+            clear_bytes(model.partitions, sizeof(model.partitions));
         }
         return true;
     }

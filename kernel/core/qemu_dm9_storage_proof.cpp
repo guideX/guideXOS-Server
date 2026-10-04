@@ -4,7 +4,8 @@
     defined(GXOS_DM15_QEMU_AHCI_PROOF) || \
     defined(GXOS_DM16_QEMU_NVME_PROOF) || \
     defined(GXOS_DM24_QEMU_FAT32_4KN_PROOF) || \
-    defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
+    defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF) || \
+    defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF)
 
 #include "include/kernel/block_device.h"
 #include "include/kernel/ata.h"
@@ -18,6 +19,9 @@
 #include "include/kernel/disk_initialization.h"
 #include "include/kernel/disk_manager_model.h"
 #include "include/kernel/fat32_formatter.h"
+#if defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF)
+#include "include/kernel/gpt_repair.h"
+#endif
 #include "include/kernel/partition_operations.h"
 #include "include/kernel/partition_table.h"
 #include "include/kernel/serial_debug.h"
@@ -28,7 +32,9 @@ namespace kernel {
 namespace qemu_dm9_storage_proof {
 namespace {
 
-#if defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
+#if defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF)
+#define QEMU_PROOF_TAG "[DM29-QEMU]"
+#elif defined(GXOS_DM27_QEMU_QUICK_REFORMAT_PROOF)
 #define QEMU_PROOF_TAG "[DM27-QEMU]"
 #elif defined(GXOS_DM24_QEMU_FAT32_4KN_PROOF)
 #define QEMU_PROOF_TAG "[DM24-QEMU]"
@@ -84,6 +90,11 @@ static storage::DeletePartitionRequest s_deleteRequest = {};
 static storage::DeletePartitionPlan s_deletePlan = {};
 static storage::DeletePartitionResult s_deleteResult = {};
 static storage::PartitionTableModel s_deleteBeforeTable = {};
+#if defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF)
+static storage::GptRepairRequest s_dm29RepairRequest = {};
+static storage::GptRepairPlan s_dm29RepairPlan = {};
+static storage::GptRepairResult s_dm29RepairResult = {};
+#endif
 alignas(4096) static uint8_t s_proofSectorA[storage::MAX_LOGICAL_SECTOR_SIZE];
 alignas(4096) static uint8_t s_proofSectorB[storage::MAX_LOGICAL_SECTOR_SIZE];
 alignas(4096) static uint8_t s_deleteDataBefore[storage::MAX_LOGICAL_SECTOR_SIZE];
@@ -2009,6 +2020,111 @@ static bool run_rediscovery(const storage::TargetIdentity& identity,
     return false;
 }
 
+#if defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF)
+static bool run_dm29_repair(const storage::TargetIdentity& identity,
+                            const storage::PartitionTableModel& table,
+                            uint8_t rootMountCount)
+{
+    if (table.state != storage::DISK_STATE_GPT_DEGRADED ||
+        (table.primaryGptValid == table.backupGptValid) ||
+        table.gptCopiesConflict || table.partitionCount == 0 ||
+        rootMountCount == 0 || vfs::mount_count() != rootMountCount) {
+        serial::puts(QEMU_PROOF_TAG " repair=FAIL reason=expected-single-authority-and-unmounted-volume\n");
+        return false;
+    }
+
+    serial::puts(QEMU_PROOF_TAG " degraded=PASS primary=");
+    serial::puts(storage::gpt_copy_state_name(table.primaryGptCopyState));
+    serial::puts(" backup=");
+    serial::puts(storage::gpt_copy_state_name(table.backupGptCopyState));
+    serial::puts(" partitions=");
+    serial::put_hex32(table.partitionCount);
+    serial::puts(" conflict=no\n");
+
+    s_dm29RepairRequest = {};
+    s_dm29RepairRequest.targetSnapshot = identity;
+    s_dm29RepairRequest.expectedRegistryGeneration = identity.registryGeneration;
+    s_dm29RepairPlan = {};
+    s_dm29RepairResult = {};
+    const storage::GptRepairStatus prepared = storage::prepare_gpt_repair(
+        s_dm29RepairRequest, s_dm29RepairPlan, s_dm29RepairResult);
+    if (prepared != storage::GPT_REPAIR_READY_FOR_CONFIRMATION ||
+        s_dm29RepairPlan.direction != (table.primaryGptValid
+            ? storage::GPT_REPAIR_BACKUP_FROM_PRIMARY
+            : storage::GPT_REPAIR_PRIMARY_FROM_BACKUP)) {
+        serial::puts(QEMU_PROOF_TAG " repair=FAIL prepare=");
+        serial::puts(storage::gpt_repair_status_name(prepared));
+        serial::putc('\n');
+        return false;
+    }
+
+    const char* direction = s_dm29RepairPlan.direction ==
+        storage::GPT_REPAIR_BACKUP_FROM_PRIMARY
+            ? "BackupFromPrimary" : "PrimaryFromBackup";
+    serial::puts(QEMU_PROOF_TAG " confirmation=PASS direction=");
+    serial::puts(direction);
+    serial::puts(" fingerprint=0x");
+    serial::put_hex64(s_dm29RepairPlan.authoritativeFingerprint);
+    serial::putc('\n');
+    const storage::GptRepairStatus repaired = storage::execute_gpt_repair(
+        s_dm29RepairPlan, s_dm29RepairResult);
+    if (repaired != storage::GPT_REPAIR_SUCCESS ||
+        !s_dm29RepairResult.finalVerificationPassed ||
+        !s_dm29RepairResult.authoritativeCopyPreserved ||
+        !s_dm29RepairResult.partitionIdentitiesPreserved ||
+        !s_dm29RepairResult.protectiveMbrPreserved ||
+        !s_dm29RepairResult.partitionDataUntouched ||
+        s_dm29RepairResult.finalPrimaryState != storage::GPT_COPY_VALID ||
+        s_dm29RepairResult.finalBackupState != storage::GPT_COPY_VALID ||
+        s_dm29RepairResult.flushAttempts < 2 ||
+        s_dm29RepairResult.logicalSectorsWritten !=
+            s_dm29RepairPlan.entryArraySectors + 1u) {
+        serial::puts(QEMU_PROOF_TAG " repair=FAIL status=");
+        serial::puts(storage::gpt_repair_status_name(repaired));
+        serial::puts(" stage=");
+        serial::puts(storage::gpt_repair_stage_name(s_dm29RepairResult.lastStage));
+        serial::putc('\n');
+        return false;
+    }
+    serial::puts(QEMU_PROOF_TAG " repair=PASS direction=");
+    serial::puts(direction);
+    serial::puts(" authoritative-copy=Preserved partition-identities=Preserved pmbr=Preserved partition-data=Untouched flushes=");
+    serial::put_hex32(s_dm29RepairResult.flushAttempts);
+    serial::puts(" sectorsRead=");
+    serial::put_hex32(s_dm29RepairResult.logicalSectorsRead);
+    serial::puts(" sectorsWritten=");
+    serial::put_hex32(s_dm29RepairResult.logicalSectorsWritten);
+    serial::puts(" bytesWritten=");
+    serial::put_hex64(s_dm29RepairResult.bytesWritten);
+    serial::putc('\n');
+    return true;
+}
+
+static bool run_dm29_restart(const storage::TargetIdentity& identity,
+                             const storage::PartitionTableModel& table,
+                             uint8_t rootMountCount)
+{
+    if (table.state != storage::DISK_STATE_VALID_GPT ||
+        !table.primaryGptValid || !table.backupGptValid ||
+        !table.gptCopiesAgree || table.gptCopiesConflict) {
+        serial::puts(QEMU_PROOF_TAG " restart=FAIL reason=GPT-pair-not-healthy\n");
+        return false;
+    }
+    for (uint16_t i = 0; i < table.partitionCount; ++i) {
+        const storage::PartitionEntry& partition = table.partitions[i];
+        if (!text_equal(partition.name, kPartitionName)) continue;
+        const bool remounted = mount_proof_partition(identity, partition,
+            false, rootMountCount);
+        serial::puts(remounted
+            ? QEMU_PROOF_TAG " restart=PASS healthy-pair=yes file-bytes=PASS mounts-clean=yes coldRestart=yes\n"
+            : QEMU_PROOF_TAG " restart=FAIL reason=remount-or-file-check\n");
+        return remounted;
+    }
+    serial::puts(QEMU_PROOF_TAG " restart=FAIL reason=proof-partition-not-found\n");
+    return false;
+}
+#endif
+
 static bool run_fresh_lifecycle(const block::BlockDevice& device,
                                 const storage::TargetIdentity& identity,
                                 uint8_t rootMountCount)
@@ -2556,6 +2672,19 @@ void run(bool rootStorageMounted)
         (void)run_fresh_lifecycle(device, identity, rootMountCount);
         return;
     }
+
+#if defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF)
+    if (s_table.state == storage::DISK_STATE_GPT_DEGRADED) {
+        (void)run_dm29_repair(identity, s_table, rootMountCount);
+        return;
+    }
+    if (s_table.state == storage::DISK_STATE_VALID_GPT) {
+        (void)run_dm29_restart(identity, s_table, rootMountCount);
+        return;
+    }
+    serial::puts(QEMU_PROOF_TAG " repair=FAIL reason=unexpected-GPT-state\n");
+    return;
+#endif
 
     const bool rediscovered = run_rediscovery(identity, s_table, rootMountCount);
 #if defined(GXOS_DM25_QEMU_PARTITION_DELETE_PROOF)

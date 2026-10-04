@@ -33,6 +33,7 @@ param(
     [switch]$Dm25PartitionDeleteProof,
     [switch]$Dm27QuickReformatProof,
     [switch]$Dm28InterruptProof,
+    [switch]$Dm29GptRepairProof,
     [switch]$QemuDebug,
     [switch]$SkipBuild
 )
@@ -229,7 +230,7 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
     Remove-Item -LiteralPath $serialPath,$stderrPath,$stdoutPath -Force -ErrorAction SilentlyContinue
     $port = Get-FreeLoopbackPort
     $qmpPort = 0
-    if ($Dm28InterruptProof) {
+    if ($Dm28InterruptProof -or $Dm29GptRepairProof) {
         do { $qmpPort = Get-FreeLoopbackPort } while ($qmpPort -eq $port)
     }
     $arguments = @(
@@ -246,7 +247,7 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
         "-monitor", "tcp:127.0.0.1:$port,server,nowait",
         "-rtc", "base=utc,clock=host", "-no-reboot"
     )
-    if ($Dm28InterruptProof) {
+    if ($Dm28InterruptProof -or $Dm29GptRepairProof) {
         $arguments += @("-qmp", "tcp:127.0.0.1:$qmpPort,server,nowait")
     }
     if ($Dm24FourKnProof) {
@@ -287,7 +288,7 @@ function Start-ProofBoot([string]$RunName, [string]$SuccessMarker,
                 Stop-ProofQemu $process.Id $port $serialPath
                 throw "$RunName encountered a kernel fault; see $serialPath"
             }
-            if ($serial -match '(?m)^\[(?:DM27-QEMU|DM25-QEMU|DM24-QEMU|DM22-QEMU|DM15-QEMU|DM9-QEMU)\] (?:private-proof=FAIL|lifecycle=FAIL|quick-reformat=FAIL|delete-ready=FAIL|delete=FAIL|proof=BLOCKED|reboot-rediscovery=FAIL|initialize=FAIL|create-partition=FAIL|format-fat32=FAIL|large-volume=FAIL|allocation-hint=FAIL|geometry=FAIL)' -or
+            if ($serial -match '(?m)^\[(?:DM29-QEMU|DM27-QEMU|DM25-QEMU|DM24-QEMU|DM22-QEMU|DM15-QEMU|DM9-QEMU)\] (?:private-proof=FAIL|lifecycle=FAIL|repair=FAIL|restart=FAIL|quick-reformat=FAIL|delete-ready=FAIL|delete=FAIL|proof=BLOCKED|reboot-rediscovery=FAIL|initialize=FAIL|create-partition=FAIL|format-fat32=FAIL|large-volume=FAIL|allocation-hint=FAIL|geometry=FAIL)' -or
                 $serial -match '(?m)^\[DM28-QRF\] (?:cold-restart|retry-after-cold-restart|interruption)=FAIL') {
                 $failureLine = $Matches[0]
                 Stop-ProofQemu $process.Id $port $serialPath
@@ -444,6 +445,11 @@ if ($Dm28InterruptProof -and ($Stage -ne "Lifecycle" -or
         $Dm22LargeProof)) {
     throw "DM28 interruption proof requires the 4Kn USB Quick Reformat lifecycle."
 }
+if ($Dm29GptRepairProof -and ($Stage -ne "Lifecycle" -or
+        $Dm22LargeProof -or $Dm24FourKnProof -or $Dm25PartitionDeleteProof -or
+        $Dm27QuickReformatProof -or $Dm28InterruptProof -or $PreparedImagePath)) {
+    throw "DM29 GPT repair proof requires its own fresh 512-byte AHCI Lifecycle image."
+}
 if ($PreparedImagePath -and -not $Dm27QuickReformatProof) {
     throw "PreparedImagePath requires a Quick Reformat proof."
 }
@@ -466,7 +472,8 @@ $OvmfFull = (Resolve-Path -LiteralPath $OvmfCode).Path
 $EspFull = (Resolve-Path -LiteralPath $EspSource).Path
 $repoOut = [IO.Path]::GetFullPath((Join-Path $Root "out"))
 if (-not $WorkDir) {
-$workLabel = if ($Dm28InterruptProof) { "dm28-usb-quick-reformat-interruption" }
+$workLabel = if ($Dm29GptRepairProof) { "dm29-ahci-gpt-repair" }
+    elseif ($Dm28InterruptProof) { "dm28-usb-quick-reformat-interruption" }
     elseif ($Dm27QuickReformatProof -and $Dm22LargeProof) { "dm28-10g-ahci-quick-reformat" }
         elseif ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "dm27-4kn-usb-quick-reformat" }
         elseif ($Dm27QuickReformatProof) { "dm27-ahci-quick-reformat" }
@@ -485,7 +492,8 @@ if (Test-Path -LiteralPath $WorkFull) {
     }
 } else { New-Item -ItemType Directory -Path $WorkFull -Force | Out-Null }
 
-$diskLabel = if ($Dm28InterruptProof) { "secondary-dm28-interrupt-4kn.raw" }
+$diskLabel = if ($Dm29GptRepairProof) { "secondary-dm29-gpt-repair-600m.raw" }
+    elseif ($Dm28InterruptProof) { "secondary-dm28-interrupt-4kn.raw" }
     elseif ($Dm27QuickReformatProof -and $Dm22LargeProof) { "secondary-quick-reformat-10g.raw" }
     elseif ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "secondary-quick-reformat-4kn-$([uint64]($DiskSizeBytes / 1048576))m.raw" }
     elseif ($Dm27QuickReformatProof) { "secondary-quick-reformat-600m.raw" }
@@ -495,7 +503,8 @@ $diskLabel = if ($Dm28InterruptProof) { "secondary-dm28-interrupt-4kn.raw" }
     else { "secondary-600m.raw" }
 $DiskPath = Join-Path $WorkFull $diskLabel
 $EspPath = Join-Path $WorkFull "esp"
-$manifestName = if ($Dm28InterruptProof) { "dm28-interruption-manifest.txt" }
+$manifestName = if ($Dm29GptRepairProof) { "dm29-gpt-repair-manifest.txt" }
+    elseif ($Dm28InterruptProof) { "dm28-interruption-manifest.txt" }
     elseif ($Dm27QuickReformatProof -and $Dm22LargeProof) { "dm28-10g-manifest.txt" }
     elseif ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "dm27-4kn-manifest.txt" }
     elseif ($Dm27QuickReformatProof) { "dm27-manifest.txt" }
@@ -517,7 +526,9 @@ try {
             $objectPath = Join-Path $Root "kernel\build\amd64\obj\core\$object"
             if (Test-Path -LiteralPath $objectPath) { Remove-Item -LiteralPath $objectPath -Force }
         }
-        $flags = if ($Dm28InterruptProof) {
+        $flags = if ($Dm29GptRepairProof) {
+            "-DGXOS_DM15_QEMU_AHCI_PROOF -DGXOS_DM29_QEMU_GPT_REPAIR_PROOF"
+        } elseif ($Dm28InterruptProof) {
             "-DGXOS_DM24_QEMU_FAT32_4KN_PROOF -DGXOS_DM27_QEMU_QUICK_REFORMAT_PROOF -DGXOS_DM28_QEMU_REFORMAT_INTERRUPT_PROOF"
         } elseif ($Dm27QuickReformatProof -and $Dm24FourKnProof) {
             "-DGXOS_DM24_QEMU_FAT32_4KN_PROOF -DGXOS_DM27_QEMU_QUICK_REFORMAT_PROOF"
@@ -619,7 +630,8 @@ try {
     $qemuHash = (Get-FileHash -LiteralPath $QemuFull -Algorithm SHA256).Hash
     $ovmfHash = (Get-FileHash -LiteralPath $OvmfFull -Algorithm SHA256).Hash
     $qemuAtStart = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'")
-    $proofName = if ($Dm28InterruptProof) { "DM28-4KN-USB-QUICK-REFORMAT-INTERRUPTION-RETRY" }
+    $proofName = if ($Dm29GptRepairProof) { "DM29-512-AHCI-GPT-REPAIR-RESTART" }
+        elseif ($Dm28InterruptProof) { "DM28-4KN-USB-QUICK-REFORMAT-INTERRUPTION-RETRY" }
         elseif ($Dm27QuickReformatProof -and $Dm22LargeProof) { "DM28-10G-AHCI-QUICK-REFORMAT" }
         elseif ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "DM27-4KN-USB-QUICK-REFORMAT" }
         elseif ($Dm27QuickReformatProof) { "DM27-AHCI-QUICK-REFORMAT" }
@@ -627,7 +639,8 @@ try {
         elseif ($Dm24FourKnProof) { "DM24-4KN-FAT32-USB" }
         elseif ($Dm22LargeProof) { "DM22-LARGE-FAT32-AHCI" }
         else { "DM15-AHCI-$Stage" }
-    $manifestSchema = if ($Dm28InterruptProof) { "DM28-4KN-USB-INTERRUPTION-RETRY-1" }
+    $manifestSchema = if ($Dm29GptRepairProof) { "DM29-512-AHCI-GPT-REPAIR-1" }
+        elseif ($Dm28InterruptProof) { "DM28-4KN-USB-INTERRUPTION-RETRY-1" }
         elseif ($Dm27QuickReformatProof -and $Dm22LargeProof) { "DM28-10G-AHCI-QUICK-REFORMAT-1" }
         elseif ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "DM27-4KN-USB-QUICK-REFORMAT-1" }
         elseif ($Dm27QuickReformatProof) { "DM27-AHCI-QUICK-REFORMAT-1" }
@@ -635,7 +648,8 @@ try {
         elseif ($Dm24FourKnProof) { "DM24-4KN-FAT32-1" }
         elseif ($Dm22LargeProof) { "DM22-LARGE-FAT32-1" }
         else { "DM19-TRANSPORT-1" }
-    $proofIdentity = if ($Dm28InterruptProof) { "GUIDEXOS-DM28-QEMU-4Kn-USB-QuickReformat-InterruptionRetry" }
+    $proofIdentity = if ($Dm29GptRepairProof) { "GUIDEXOS-DM29-QEMU-512-AHCI-GPT-Repair" }
+        elseif ($Dm28InterruptProof) { "GUIDEXOS-DM28-QEMU-4Kn-USB-QuickReformat-InterruptionRetry" }
         elseif ($Dm27QuickReformatProof -and $Dm22LargeProof) { "GUIDEXOS-DM28-QEMU-10GiB-AHCI-QuickReformat" }
         elseif ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "GUIDEXOS-DM27-QEMU-4Kn-USB-QuickReformat" }
         elseif ($Dm27QuickReformatProof) { "GUIDEXOS-DM27-QEMU-AHCI-QuickReformat" }
@@ -706,7 +720,8 @@ try {
             "serial=private-write-boot.serial.log"
         )
     } else {
-        $lifecycleMarker = if ($Dm25PartitionDeleteProof) { "[DM25-QEMU] delete-ready=PASS" }
+    $lifecycleMarker = if ($Dm29GptRepairProof) { "[DM29-QEMU] lifecycle=PASS" }
+            elseif ($Dm25PartitionDeleteProof) { "[DM25-QEMU] delete-ready=PASS" }
             elseif ($Dm27QuickReformatProof) { "[DM27-QEMU] lifecycle=PASS" }
             elseif ($Dm24FourKnProof) { "[DM24-QEMU] lifecycle=PASS" }
             elseif ($Dm22LargeProof) { "[DM22-QEMU] lifecycle=PASS" }
@@ -756,7 +771,8 @@ try {
                 "preDeleteImageSha256=$((Get-FileHash -LiteralPath $preDeleteDiskPath -Algorithm SHA256).Hash)"
             )
         }
-        $rediscoveryMarker = if ($Dm28InterruptProof) { "[DM28-QRF] retry-after-cold-restart=PASS" }
+        $rediscoveryMarker = if ($Dm29GptRepairProof) { "[DM29-QEMU] repair=PASS direction=BackupFromPrimary" }
+            elseif ($Dm28InterruptProof) { "[DM28-QRF] retry-after-cold-restart=PASS" }
             elseif ($Dm25PartitionDeleteProof) { "[DM25-QEMU] delete=PASS" }
             elseif ($Dm27QuickReformatProof) { "[DM27-QEMU] quick-reformat=PASS" }
             elseif ($Dm24FourKnProof) { "[DM24-QEMU] reboot-rediscovery=PASS" }
@@ -767,7 +783,187 @@ try {
             elseif ($Dm24FourKnProof) { 600 }
             elseif ($RediscoveryTimeoutSeconds -gt 0) { $RediscoveryTimeoutSeconds }
             else { 180 }
-        if ($Dm28InterruptProof) {
+        $dm29HealthyPath = $null
+        $dm29DegradedPath = $null
+        $dm29RepairSerial = $null
+        $dm29RestartSerial = $null
+        $dm29ReverseDegradedPath = $null
+        $dm29ReverseRepairSerial = $null
+        $dm29ReverseRestartSerial = $null
+        if ($Dm29GptRepairProof) {
+            $dm29HealthyPath = Join-Path $WorkFull "secondary-healthy.raw"
+            Copy-RawImageSparse $DiskPath $dm29HealthyPath
+            $dm29DegradedPath = Join-Path $WorkFull "secondary-degraded.raw"
+            Copy-RawImageSparse $dm29HealthyPath $dm29DegradedPath
+            if (-not $PythonExecutable) {
+                $python = Get-Command python.exe -ErrorAction SilentlyContinue
+                if (-not $python) { throw "Python 3 was not found; specify -PythonExecutable." }
+                $PythonExecutable = $python.Source
+            }
+            $corruptOutput = & $PythonExecutable `
+                (Join-Path $Root "scripts\corrupt-dm29-qemu-backup-array.py") `
+                $dm29DegradedPath 2>&1
+            $corruptExit = $LASTEXITCODE
+            $corruptOutput | Set-Content -LiteralPath `
+                (Join-Path $WorkFull "backup-array-corruption.json") -Encoding utf8
+            if ($corruptExit -ne 0) { throw "DM29 could not corrupt the disposable backup GPT array." }
+
+            $degradedInspectionPath = Join-Path $WorkFull "degraded-image-inspection.json"
+            $degradedOutput = & $PythonExecutable `
+                (Join-Path $Root "scripts\verify-dm29-gpt.py") `
+                $dm29DegradedPath --sector-size 512 2>&1
+            $degradedExit = $LASTEXITCODE
+            $degradedText = $degradedOutput -join [Environment]::NewLine
+            $degradedText | Set-Content -LiteralPath $degradedInspectionPath -Encoding utf8
+            if ($degradedExit -ne 1) { throw "DM29 corruption did not yield the expected degraded verifier status." }
+            $degraded = $degradedText | ConvertFrom-Json
+            if ($degraded.redundancy -ne "Degraded" -or
+                $degraded.authoritative_copy -ne "Primary" -or
+                $degraded.backup.state -ne "ArrayCrcInvalid") {
+                throw "DM29 backup-array corruption did not preserve a single primary authority."
+            }
+            Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
+                "healthyImage=$dm29HealthyPath",
+                "healthyImageSha256=$((Get-FileHash -LiteralPath $dm29HealthyPath -Algorithm SHA256).Hash)",
+                "degradedImage=$dm29DegradedPath",
+                "degradedImageSha256=$((Get-FileHash -LiteralPath $dm29DegradedPath -Algorithm SHA256).Hash)",
+                "corruption=backup-active-entry-array-byte",
+                "degradedIndependentVerifier=PASS primary=Valid backup=ArrayCrcInvalid authoritative=Primary",
+                "degradedInspection=$degradedInspectionPath"
+            )
+            $dm29DegradedRuntimePath = Join-Path $WorkFull "secondary-degraded-runtime.raw"
+            Copy-RawImageSparse $dm29HealthyPath $dm29DegradedRuntimePath
+            $DiskPath = $dm29DegradedRuntimePath
+            $activeBoot = Start-ProofBoot "repair-boot" "" `
+                $EspPath $DiskPath $WorkFull 300 $manifestPath `
+                "[DM29-QEMU] host-corruption-window=READY"
+            Connect-ProofQmp $activeBoot `
+                (Join-Path $WorkFull "backup-repair-qmp.jsonl")
+            [void](Send-ProofQmp "stop")
+            $runtimeCorruptOutput = & $PythonExecutable `
+                (Join-Path $Root "scripts\corrupt-dm29-qemu-backup-array.py") `
+                $DiskPath 2>&1
+            $runtimeCorruptExit = $LASTEXITCODE
+            $runtimeCorruptOutput | Set-Content -LiteralPath `
+                (Join-Path $WorkFull "backup-runtime-corruption.json") -Encoding utf8
+            if ($runtimeCorruptExit -ne 0) { throw "DM29 could not corrupt the paused QEMU backup array." }
+            $runtimeInspection = & $PythonExecutable `
+                (Join-Path $Root "scripts\verify-dm29-gpt.py") `
+                $DiskPath --sector-size 512 2>&1
+            $runtimeInspectionExit = $LASTEXITCODE
+            $runtimeInspectionText = $runtimeInspection -join [Environment]::NewLine
+            if ($runtimeInspectionExit -ne 1) { throw "DM29 paused QEMU target did not become degraded." }
+            $runtimeInspectionReport = $runtimeInspectionText | ConvertFrom-Json
+            if ($runtimeInspectionReport.authoritative_copy -ne "Primary" -or
+                $runtimeInspectionReport.backup.state -ne "ArrayCrcInvalid" -or
+                $runtimeInspectionReport.disk_guid -ne $degraded.disk_guid -or
+                $runtimeInspectionReport.primary.entry_array_sha256 -ne
+                    $degraded.primary.entry_array_sha256 -or
+                ($runtimeInspectionReport.partitions | ConvertTo-Json -Compress -Depth 8) -ne
+                    ($degraded.partitions | ConvertTo-Json -Compress -Depth 8)) {
+                throw "DM29 live backup corruption differs from the verified fixture."
+            }
+            [void](Send-ProofQmp "cont")
+            Close-ProofQmp
+            $null = Wait-ProofSerialMarker $activeBoot `
+                "[DM29-QEMU] repair=PASS direction=BackupFromPrimary" $rediscoveryTimeout
+            $dm29RepairSerial = $activeBoot.SerialPath
+            Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
+            $activeBoot = $null
+            $repairedPath = Join-Path $WorkFull "secondary-repaired.raw"
+            Copy-RawImageSparse $DiskPath $repairedPath
+            Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
+                "repairedImage=$repairedPath",
+                "repairSerial=$([IO.Path]::GetFileName($dm29RepairSerial))"
+            )
+            $activeBoot = Start-ProofBoot "repair-cold-restart-boot" `
+                "[DM29-QEMU] restart=PASS" $EspPath $DiskPath $WorkFull `
+                $rediscoveryTimeout $manifestPath
+            $dm29RestartSerial = $activeBoot.SerialPath
+            Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
+            $activeBoot = $null
+
+            $backupRepairedPath = Join-Path $WorkFull "secondary-backup-repaired.raw"
+            Copy-RawImageSparse $DiskPath $backupRepairedPath
+            $dm29ReverseDegradedPath = Join-Path $WorkFull "secondary-primary-degraded.raw"
+            Copy-RawImageSparse $backupRepairedPath $dm29ReverseDegradedPath
+            $reverseCorruptOutput = & $PythonExecutable `
+                (Join-Path $Root "scripts\corrupt-dm29-qemu-backup-array.py") `
+                --side Primary $dm29ReverseDegradedPath 2>&1
+            $reverseCorruptExit = $LASTEXITCODE
+            $reverseCorruptOutput | Set-Content -LiteralPath `
+                (Join-Path $WorkFull "primary-array-corruption.json") -Encoding utf8
+            if ($reverseCorruptExit -ne 0) { throw "DM29 could not corrupt the disposable primary GPT array." }
+            $reverseDegradedPath = Join-Path $WorkFull "primary-degraded-image-inspection.json"
+            $reverseDegradedOutput = & $PythonExecutable `
+                (Join-Path $Root "scripts\verify-dm29-gpt.py") `
+                $dm29ReverseDegradedPath --sector-size 512 2>&1
+            $reverseDegradedExit = $LASTEXITCODE
+            $reverseDegradedText = $reverseDegradedOutput -join [Environment]::NewLine
+            $reverseDegradedText | Set-Content -LiteralPath $reverseDegradedPath -Encoding utf8
+            if ($reverseDegradedExit -ne 1) { throw "DM29 primary corruption did not yield the expected degraded verifier status." }
+            $reverseDegraded = $reverseDegradedText | ConvertFrom-Json
+            if ($reverseDegraded.redundancy -ne "Degraded" -or
+                $reverseDegraded.authoritative_copy -ne "Backup" -or
+                $reverseDegraded.primary.state -ne "ArrayCrcInvalid") {
+                throw "DM29 primary-array corruption did not preserve a single backup authority."
+            }
+            Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
+                "backupRepairImage=$backupRepairedPath",
+                "primaryDegradedImage=$dm29ReverseDegradedPath",
+                "primaryDegradedImageSha256=$((Get-FileHash -LiteralPath $dm29ReverseDegradedPath -Algorithm SHA256).Hash)",
+                "reverseCorruption=primary-active-entry-array-byte",
+                "reverseDegradedIndependentVerifier=PASS primary=ArrayCrcInvalid backup=Valid authoritative=Backup",
+                "reverseDegradedInspection=$reverseDegradedPath"
+            )
+            $dm29ReverseRuntimePath = Join-Path $WorkFull "secondary-primary-degraded-runtime.raw"
+            Copy-RawImageSparse $backupRepairedPath $dm29ReverseRuntimePath
+            $DiskPath = $dm29ReverseRuntimePath
+            $activeBoot = Start-ProofBoot "reverse-repair-boot" "" `
+                $EspPath $DiskPath $WorkFull 300 $manifestPath `
+                "[DM29-QEMU] host-corruption-window=READY"
+            Connect-ProofQmp $activeBoot `
+                (Join-Path $WorkFull "primary-repair-qmp.jsonl")
+            [void](Send-ProofQmp "stop")
+            $reverseRuntimeCorruptOutput = & $PythonExecutable `
+                (Join-Path $Root "scripts\corrupt-dm29-qemu-backup-array.py") `
+                --side Primary $DiskPath 2>&1
+            $reverseRuntimeCorruptExit = $LASTEXITCODE
+            $reverseRuntimeCorruptOutput | Set-Content -LiteralPath `
+                (Join-Path $WorkFull "primary-runtime-corruption.json") -Encoding utf8
+            if ($reverseRuntimeCorruptExit -ne 0) { throw "DM29 could not corrupt the paused QEMU primary array." }
+            $reverseRuntimeInspection = & $PythonExecutable `
+                (Join-Path $Root "scripts\verify-dm29-gpt.py") `
+                $DiskPath --sector-size 512 2>&1
+            $reverseRuntimeInspectionExit = $LASTEXITCODE
+            $reverseRuntimeInspectionText = $reverseRuntimeInspection -join [Environment]::NewLine
+            if ($reverseRuntimeInspectionExit -ne 1) { throw "DM29 paused QEMU target did not become degraded in reverse direction." }
+            $reverseRuntimeInspectionReport = $reverseRuntimeInspectionText | ConvertFrom-Json
+            if ($reverseRuntimeInspectionReport.authoritative_copy -ne "Backup" -or
+                $reverseRuntimeInspectionReport.primary.state -ne "ArrayCrcInvalid" -or
+                $reverseRuntimeInspectionReport.disk_guid -ne $reverseDegraded.disk_guid -or
+                $reverseRuntimeInspectionReport.backup.entry_array_sha256 -ne
+                    $reverseDegraded.backup.entry_array_sha256 -or
+                ($reverseRuntimeInspectionReport.partitions | ConvertTo-Json -Compress -Depth 8) -ne
+                    ($reverseDegraded.partitions | ConvertTo-Json -Compress -Depth 8)) {
+                throw "DM29 live primary corruption differs from the verified fixture."
+            }
+            [void](Send-ProofQmp "cont")
+            Close-ProofQmp
+            $null = Wait-ProofSerialMarker $activeBoot `
+                "[DM29-QEMU] repair=PASS direction=PrimaryFromBackup" $rediscoveryTimeout
+            $dm29ReverseRepairSerial = $activeBoot.SerialPath
+            Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
+            $activeBoot = $null
+            $reverseRepairedPath = Join-Path $WorkFull "secondary-primary-repaired.raw"
+            Copy-RawImageSparse $DiskPath $reverseRepairedPath
+            $activeBoot = Start-ProofBoot "reverse-repair-cold-restart-boot" `
+                "[DM29-QEMU] restart=PASS" $EspPath $DiskPath $WorkFull `
+                $rediscoveryTimeout $manifestPath
+            $dm29ReverseRestartSerial = $activeBoot.SerialPath
+            Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
+            $activeBoot = $null
+        } elseif ($Dm28InterruptProof) {
             $replacementPath = Join-Path $WorkFull "dm28-replacement.raw"
             if (Test-Path -LiteralPath $replacementPath) {
                 throw "Refusing to overwrite replacement-media evidence $replacementPath"
@@ -888,14 +1084,18 @@ try {
             $activeBoot = Start-ProofBoot "recovery-retry-boot" `
                 $rediscoveryMarker $EspPath $DiskPath $WorkFull `
                 $rediscoveryTimeout $manifestPath
+        } elseif ($Dm29GptRepairProof) {
+            $rediscoverySerial = $dm29RepairSerial
         } else {
             $activeBoot = Start-ProofBoot "rediscovery-boot" `
                 $rediscoveryMarker $EspPath $DiskPath $WorkFull `
                 $rediscoveryTimeout $manifestPath
         }
-        $rediscoverySerial = $activeBoot.SerialPath
-        Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
-        $activeBoot = $null
+        if (-not $Dm29GptRepairProof) {
+            $rediscoverySerial = $activeBoot.SerialPath
+            Stop-ProofQemu $activeBoot.ProcessId $activeBoot.Port $activeBoot.SerialPath
+            $activeBoot = $null
+        }
         $postReformatDiskPath = $null
         $rebootRediscoverySerial = $null
         if ($Dm27QuickReformatProof) {
@@ -930,14 +1130,32 @@ try {
             $PythonExecutable = $python.Source
         }
         $inspectionPath = Join-Path $WorkFull "disk-inspection.txt"
-        $verifier = if ($Dm27QuickReformatProof) {
+        $verifier = if ($Dm29GptRepairProof) {
+            Join-Path $Root "scripts\verify-dm29-gpt.py"
+        } elseif ($Dm27QuickReformatProof) {
             Join-Path $Root "scripts\verify-dm27-qemu-reformat.py"
         } elseif ($Dm25PartitionDeleteProof) {
             Join-Path $Root "scripts\verify-dm25-qemu-delete.py"
         } elseif ($Dm24FourKnProof -or $Dm22LargeProof) {
             Join-Path $Root "scripts\verify-dm22-qemu-image.py"
         } else { Join-Path $Root "scripts\verify-dm9-qemu-image.py" }
-        if ($Dm27QuickReformatProof) {
+        if ($Dm29GptRepairProof) {
+            $backupInspectionPath = Join-Path $WorkFull "backup-repair-inspection.json"
+            $backupInspection = & $PythonExecutable $verifier $backupRepairedPath `
+                --sector-size 512 --before $dm29DegradedPath 2>&1
+            $backupInspectionExit = $LASTEXITCODE
+            $backupInspectionText = $backupInspection -join [Environment]::NewLine
+            $backupInspectionText | Set-Content -LiteralPath $backupInspectionPath -Encoding utf8
+            if ($backupInspectionExit -ne 0) { throw "DM29 backup-authoritative image comparison failed." }
+            $backupReport = $backupInspectionText | ConvertFrom-Json
+            if ($backupReport.before.backup_state -ne "ArrayCrcInvalid" -or
+                -not $backupReport.protective_mbr_unchanged -or
+                -not $backupReport.changed_ranges.metadata_only) {
+                throw "DM29 backup repair did not preserve the PMBR or restrict changes to GPT metadata."
+            }
+            $inspection = & $PythonExecutable $verifier $DiskPath `
+                --sector-size 512 --before $dm29ReverseDegradedPath 2>&1
+        } elseif ($Dm27QuickReformatProof) {
             if ($Dm22LargeProof) {
                 $inspection = & $PythonExecutable $verifier $preReformatDiskPath $postReformatDiskPath $DiskPath --large-payload 2>&1
             } elseif ($Dm24FourKnProof) {
@@ -954,6 +1172,25 @@ try {
         }
         $inspection | Set-Content -LiteralPath $inspectionPath -Encoding utf8
         if ($LASTEXITCODE -ne 0) { throw "Independent raw-image verification failed; see $inspectionPath" }
+        if ($Dm29GptRepairProof) {
+            $finalInspection = (Get-Content -LiteralPath $inspectionPath -Raw) | ConvertFrom-Json
+            if ($finalInspection.redundancy -ne "Healthy" -or
+                -not $finalInspection.normalized_copies_equal -or
+                -not $finalInspection.protective_mbr_unchanged -or
+                -not $finalInspection.changed_ranges.metadata_only -or
+                $finalInspection.before.primary_state -ne "ArrayCrcInvalid") {
+                throw "DM29 reverse-direction independent verification did not prove metadata-only restoration."
+            }
+            Add-Content -LiteralPath $manifestPath -Encoding ascii -Value @(
+                "backupRepairRestartSerial=$([IO.Path]::GetFileName($dm29RestartSerial))",
+                "backupRepairIndependentVerifier=PASS healthy=yes normalized=yes pmbr-unchanged=yes metadata-only=yes",
+                "backupRepairChangedRanges=$($backupReport.changed_ranges.ranges | ConvertTo-Json -Compress -Depth 8)",
+                "reverseRepairSerial=$([IO.Path]::GetFileName($dm29ReverseRepairSerial))",
+                "reverseRepairRestartSerial=$([IO.Path]::GetFileName($dm29ReverseRestartSerial))",
+                "reverseRepairIndependentVerifier=PASS healthy=yes normalized=yes pmbr-unchanged=yes metadata-only=yes",
+                "reverseRepairChangedRanges=$($finalInspection.changed_ranges.ranges | ConvertTo-Json -Compress -Depth 8)"
+            )
+        }
         $finalActualBytes = if ($Dm22LargeProof) {
             Save-Dm22ImageAllocation $DiskPath $WorkFull "final"
         } else { 0 }
@@ -961,17 +1198,18 @@ try {
             "secondaryFinalSha256=$((Get-FileHash -LiteralPath $DiskPath -Algorithm SHA256).Hash)",
             "secondaryFinalActualBytes=$(if ($Dm22LargeProof) { $finalActualBytes } else { 'not-recorded' })",
             "firstBootSerial=$([IO.Path]::GetFileName($firstSerial))",
-            "rediscoverySerial=$([IO.Path]::GetFileName($rediscoverySerial))",
+            "rediscoverySerial=$(if ($Dm29GptRepairProof) { [IO.Path]::GetFileName($dm29RepairSerial) } else { [IO.Path]::GetFileName($rediscoverySerial) })",
             "coldRestartSerial=$(if ($rebootRediscoverySerial) { [IO.Path]::GetFileName($rebootRediscoverySerial) } else { 'not-applicable' })",
             "deleteRestartSerial=$(if ($deleteRestartSerial) { [IO.Path]::GetFileName($deleteRestartSerial) } else { 'not-applicable' })",
-            "result=PASS tier=$(if ($Dm28InterruptProof) { 'DM28-USB-real-removal-cold-restart-marker-retry-post-retry-restart' } elseif ($Dm27QuickReformatProof -and $Dm24FourKnProof) { 'DM27-4Kn-USB-quick-reformat-cold-restart-byte-verified' } elseif ($Dm27QuickReformatProof) { 'DM27-AHCI-quick-reformat-cold-restart-byte-verified' } elseif ($Dm25PartitionDeleteProof) { 'DM25-AHCI-GPT-delete-restart-byte-identical-partition-data' } elseif ($Dm24FourKnProof) { 'DM24-4Kn-FAT32-USB-high-cluster-96KiB-file-restart' } elseif ($Dm22LargeProof) { 'DM22-large-FAT32-AHCI-high-cluster-96KiB-file-restart' } else { '2-full-lifecycle-and-restart-rediscovery' })",
+            "result=PASS tier=$(if ($Dm29GptRepairProof) { 'DM29-512-AHCI-bidirectional-repair-cold-restart-independent-diff' } elseif ($Dm28InterruptProof) { 'DM28-USB-real-removal-cold-restart-marker-retry-post-retry-restart' } elseif ($Dm27QuickReformatProof -and $Dm24FourKnProof) { 'DM27-4Kn-USB-quick-reformat-cold-restart-byte-verified' } elseif ($Dm27QuickReformatProof) { 'DM27-AHCI-quick-reformat-cold-restart-byte-verified' } elseif ($Dm25PartitionDeleteProof) { 'DM25-AHCI-GPT-delete-restart-byte-identical-partition-data' } elseif ($Dm24FourKnProof) { 'DM24-4Kn-FAT32-USB-high-cluster-96KiB-file-restart' } elseif ($Dm22LargeProof) { 'DM22-large-FAT32-AHCI-high-cluster-96KiB-file-restart' } else { '2-full-lifecycle-and-restart-rediscovery' })",
             "failedStage=none",
             "writesOccurred=yes",
-            "inspection=PASS read-only-GPT-FAT32-independent-verifier",
+            "inspection=$(if ($Dm29GptRepairProof) { 'PASS read-only GPT verifier; metadata-only diff for both repair directions' } else { 'PASS read-only-GPT-FAT32-independent-verifier' })",
             "transportResult=PASS"
         )
     }
-    $passedProofName = if ($Dm28InterruptProof) { "DM28 4Kn USB Quick Reformat interruption and recovery" }
+    $passedProofName = if ($Dm29GptRepairProof) { "DM29 512-byte AHCI bidirectional GPT repair, cold restart, and independent verification" }
+        elseif ($Dm28InterruptProof) { "DM28 4Kn USB Quick Reformat interruption and recovery" }
         elseif ($Dm27QuickReformatProof -and $Dm22LargeProof) { "DM28 10 GiB AHCI Quick Reformat" }
         elseif ($Dm27QuickReformatProof -and $Dm24FourKnProof) { "DM27 4Kn USB Quick Reformat" }
         elseif ($Dm27QuickReformatProof) { "DM27 AHCI Quick Reformat" }

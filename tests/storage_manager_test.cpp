@@ -5,6 +5,7 @@
 #include "../kernel/core/include/kernel/storage_manager.h"
 #include "../kernel/core/include/kernel/disk_initialization.h"
 #include "../kernel/core/include/kernel/partition_operations.h"
+#include "../kernel/core/include/kernel/gpt_repair.h"
 #include "../kernel/core/include/kernel/fat32_formatter.h"
 #include "../kernel/core/include/kernel/fs_fat.h"
 #include "../kernel/core/include/kernel/disk_manager_model.h"
@@ -771,8 +772,17 @@ void refresh_gpt_fixture_crcs(FakeDisk& disk)
     const uint32_t entryCount = read_u32(sector(disk, 1) + 80);
     const uint32_t entrySize = read_u32(sector(disk, 1) + 84);
     const size_t arrayBytes = static_cast<size_t>(entryCount) * entrySize;
-    uint8_t* primaryArray = sector(disk, primaryArrayLba);
-    const uint32_t arrayCrc = storage::crc32(primaryArray, arrayBytes);
+    std::vector<uint8_t> primaryArray(arrayBytes);
+    const uint64_t arraySectors = (arrayBytes + disk.sectorSize - 1) /
+                                  disk.sectorSize;
+    for (uint64_t i = 0; i < arraySectors; ++i) {
+        const size_t offset = static_cast<size_t>(i * disk.sectorSize);
+        const size_t amount = arrayBytes - offset < disk.sectorSize
+            ? arrayBytes - offset : disk.sectorSize;
+        std::memcpy(primaryArray.data() + offset,
+                    sector(disk, primaryArrayLba + i), amount);
+    }
+    const uint32_t arrayCrc = storage::crc32(primaryArray.data(), arrayBytes);
     write_u32(sector(disk, 1) + 88, arrayCrc);
     write_u32(sector(disk, backupHeaderLba) + 88, arrayCrc);
     for (uint64_t lba : {uint64_t(1), backupHeaderLba}) {
@@ -780,7 +790,6 @@ void refresh_gpt_fixture_crcs(FakeDisk& disk)
         write_u32(header + 16, 0);
         write_u32(header + 16, storage::crc32(header, read_u32(header + 12)));
     }
-    (void)primaryArrayLba;
     (void)backupArrayLba;
 }
 
@@ -4740,6 +4749,764 @@ void run_delete_partition_tests()
     }
 }
 
+bool gpt_repair_diff_is_limited_to_damaged_copy(
+    const FakeDisk& disk, const std::vector<uint8_t>& before,
+    uint64_t damagedArrayLba, uint32_t arraySectors,
+    uint64_t damagedHeaderLba)
+{
+    for (uint64_t lba = 0; lba < disk.sectorCount; ++lba) {
+        const bool allowed =
+            (lba >= damagedArrayLba && lba < damagedArrayLba + arraySectors) ||
+            lba == damagedHeaderLba;
+        if (allowed) continue;
+        const size_t offset = static_cast<size_t>(lba * disk.sectorSize);
+        if (!std::equal(disk.bytes.begin() + offset,
+                        disk.bytes.begin() + offset + disk.sectorSize,
+                        before.begin() + offset)) return false;
+    }
+    return true;
+}
+
+void run_gpt_repair_success_case(uint32_t sectorSize, uint64_t sectorCount,
+                                 GptFixture fixture,
+                                 bool repairBackup, bool backupArrayBad,
+                                 const char* label,
+                                 bool primaryHeaderMissing = false,
+                                 bool backupHeaderMissing = false,
+                                 bool activeArrayBad = false,
+                                 bool damagedArrayCrcFieldOnly = false)
+{
+    FakeDisk disk(sectorSize, sectorCount);
+    build_gpt(disk, fixture);
+    const uint64_t arraySectors = (128u * 128u + sectorSize - 1) / sectorSize;
+    const uint64_t backupHeaderLba = sectorCount - 1;
+    const uint64_t backupArrayLba = backupHeaderLba - arraySectors;
+    if (backupArrayBad) sector(disk, backupArrayLba)[150] ^= 0x01;
+    if (activeArrayBad) sector(disk, repairBackup ? backupArrayLba : 2)[0] ^= 0x01;
+    if (primaryHeaderMissing) std::memset(sector(disk, 1), 0, 8);
+    if (backupHeaderMissing) std::memset(sector(disk, backupHeaderLba), 0, 8);
+    if (damagedArrayCrcFieldOnly) {
+        uint8_t* damagedHeader = sector(disk,
+            repairBackup ? backupHeaderLba : 1);
+        write_u32(damagedHeader + 88, read_u32(damagedHeader + 88) ^ 1u);
+        write_u32(damagedHeader + 16, 0);
+        write_u32(damagedHeader + 16,
+            storage::crc32(damagedHeader, read_u32(damagedHeader + 12)));
+    }
+
+    storage::PartitionTableModel beforeTable = {};
+    const uint8_t index = register_fake(disk, true, true, true, false,
+        0, 1024u * 1024u);
+    const bool capturedTable = storage::parse_partition_table(index, beforeTable);
+    storage::TargetIdentity target = {};
+    const bool capturedTarget = storage::capture_target_identity(index, target);
+    std::vector<uint8_t> before = disk.bytes;
+
+    storage::GptRepairResult probe = {};
+    const storage::GptRepairStatus probed = capturedTarget
+        ? storage::probe_gpt_repair(target, probe)
+        : storage::GPT_REPAIR_DEVICE_MISSING;
+    const storage::GptRepairDirection direction = repairBackup
+        ? storage::GPT_REPAIR_BACKUP_FROM_PRIMARY
+        : storage::GPT_REPAIR_PRIMARY_FROM_BACKUP;
+    check(capturedTable && capturedTarget && probed == storage::GPT_REPAIR_SUCCESS &&
+          probe.direction == direction,
+          label);
+
+    storage::GptRepairRequest request = {};
+    request.targetSnapshot = target;
+    request.expectedRegistryGeneration = target.registryGeneration;
+    storage::GptRepairPlan plan = {};
+    storage::GptRepairResult preparedResult = {};
+    const storage::GptRepairStatus prepared = storage::prepare_gpt_repair(
+        request, plan, preparedResult);
+    check(prepared == storage::GPT_REPAIR_READY_FOR_CONFIRMATION &&
+          plan.confirmationReady && disk.writeAttempts == 0 &&
+          storage::storage_operation_active(),
+          "DM29 repair diagnosis holds a pinned confirmation lease and performs no writes");
+
+    storage::GptRepairResult result = {};
+    const storage::GptRepairStatus executed = prepared ==
+            storage::GPT_REPAIR_READY_FOR_CONFIRMATION
+        ? storage::execute_gpt_repair(plan, result) : prepared;
+    const uint64_t damagedArrayLba = repairBackup ? backupArrayLba : 2;
+    const uint64_t damagedHeaderLba = repairBackup ? backupHeaderLba : 1;
+    storage::PartitionTableModel afterTable = {};
+    const bool afterParsed = storage::parse_partition_table(index, afterTable);
+    const bool orderedWrites = disk.writeLog.size() == 2 &&
+        disk.writeLog[0].lba == damagedArrayLba &&
+        disk.writeLog[0].count == arraySectors &&
+        disk.writeLog[1].lba == damagedHeaderLba &&
+        disk.writeLog[1].count == 1;
+    check(executed == storage::GPT_REPAIR_SUCCESS && orderedWrites &&
+          result.logicalSectorsWritten == arraySectors + 1 &&
+          result.bytesWritten == (arraySectors + 1) * sectorSize &&
+          result.flushAttempts == 2 && disk.flushWriteCounts.size() == 2 &&
+          disk.flushWriteCounts[0] == 0 && disk.flushWriteCounts[1] == 2,
+          "DM29 repair writes the damaged array first, header last, and Flushes before and after publication");
+    bool partitionsPreserved = beforeTable.partitionCount == afterTable.partitionCount;
+    for (uint16_t i = 0; partitionsPreserved && i < beforeTable.partitionCount; ++i)
+        partitionsPreserved = storage::disk_manager_same_partition(
+            beforeTable.partitions[i], afterTable.partitions[i]);
+    check(afterParsed && afterTable.state == storage::DISK_STATE_VALID_GPT &&
+          afterTable.primaryGptValid && afterTable.backupGptValid &&
+          afterTable.gptCopiesAgree && !afterTable.gptCopiesConflict &&
+          partitionsPreserved &&
+          result.authoritativeCopyPreserved &&
+          result.partitionIdentitiesPreserved &&
+          result.protectiveMbrPreserved && result.partitionDataUntouched &&
+          result.finalVerificationPassed,
+          "DM29 repair preserves the authoritative copy, partition identity, protective MBR, and partition data");
+    check(gpt_repair_diff_is_limited_to_damaged_copy(disk, before,
+              damagedArrayLba, static_cast<uint32_t>(arraySectors),
+              damagedHeaderLba) &&
+          !storage::storage_operation_active(),
+          "DM29 byte diff shows that only the damaged GPT metadata ranges changed");
+    unregister_fake(index, disk);
+}
+
+void run_gpt_repair_tests()
+{
+    {
+        FakeDisk healthy(512, 4096);
+        build_gpt(healthy);
+        const uint8_t index = register_fake(healthy, true, true, true);
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::GptRepairResult result = {};
+        check(storage::probe_gpt_repair(target, result) ==
+                  storage::GPT_REPAIR_GPT_HEALTHY && healthy.writeAttempts == 0,
+              "DM29 healthy matching GPT pair has no repair action and no writes");
+        unregister_fake(index, healthy);
+    }
+
+    {
+        FakeDisk degraded(512, 4096);
+        build_gpt(degraded, GptFixture::PrimaryHeaderCrcBad);
+        const uint8_t index = register_fake(degraded, true, true, true);
+        storage::PartitionTableModel table = {};
+        const bool parsed = storage::parse_partition_table(index, table);
+        storage::PartitionEntry partition = {};
+        const bool havePartition = parsed && find_partition_number(
+            table, 1, partition);
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::DeletePartitionResult deleteResult = {};
+        const storage::DeletePartitionStatus deleteStatus = havePartition
+            ? storage::probe_delete_partition(target,
+                storage::PARTITION_SCHEME_GPT, partition, deleteResult)
+            : storage::DELETE_PARTITION_INVALID_TABLE;
+        storage::Fat32FormatRequest formatRequest = make_format_request(
+            index, partition, "DM29", 0xD2902900u);
+        storage::Fat32FormatResult formatResult = {};
+        const storage::Fat32FormatStatus formatStatus = havePartition
+            ? storage::probe_fat32_format_partition(formatRequest, formatResult)
+            : storage::FAT32_FORMAT_INVALID_TABLE;
+        storage::Fat32FormatResult reformatResult = {};
+        const storage::Fat32FormatStatus reformatStatus = havePartition
+            ? storage::probe_fat32_quick_reformat_partition(formatRequest,
+                reformatResult)
+            : storage::FAT32_FORMAT_INVALID_TABLE;
+        check(havePartition && deleteStatus ==
+                  storage::DELETE_PARTITION_GPT_DEGRADED &&
+              formatStatus == storage::FAT32_FORMAT_INVALID_TABLE &&
+              reformatStatus == storage::FAT32_FORMAT_INVALID_TABLE &&
+              degraded.writeAttempts == 0,
+              "DM29 degraded GPT requires repair before Delete, Format, or Quick Reformat");
+        unregister_fake(index, degraded);
+    }
+
+    run_gpt_repair_success_case(512, 4096, GptFixture::BackupHeaderCrcBad,
+        true, false,
+        "DM29 primary-valid / backup-header-CRC-invalid selects primary authority");
+    run_gpt_repair_success_case(512, 4096, GptFixture::PrimaryHeaderCrcBad,
+        false, false,
+        "DM29 backup-valid / primary-header-CRC-invalid selects backup authority");
+    run_gpt_repair_success_case(512, 4096, GptFixture::PrimaryArrayCrcBad,
+        false, false,
+        "DM29 repairs one invalid primary array CRC from the complete backup copy");
+    run_gpt_repair_success_case(512, 4096, GptFixture::Valid,
+        true, true,
+        "DM29 repairs one invalid backup array CRC from the complete primary copy");
+    run_gpt_repair_success_case(4096, 256, GptFixture::BackupHeaderCrcBad,
+        true, false,
+        "DM29 4Kn backup repair writes whole logical sectors and verifies both copies");
+    run_gpt_repair_success_case(4096, 256, GptFixture::PrimaryHeaderCrcBad,
+        false, false,
+        "DM29 4Kn primary repair writes whole logical sectors and verifies both copies");
+    run_gpt_repair_success_case(512, 4096, GptFixture::Valid,
+        true, false,
+        "DM29 valid primary reconstructs a missing backup header signature",
+        false, true);
+    run_gpt_repair_success_case(512, 4096, GptFixture::Valid,
+        false, false,
+        "DM29 valid backup reconstructs a missing primary header signature",
+        true, false);
+    run_gpt_repair_success_case(512, 4096, GptFixture::Valid,
+        true, false,
+        "DM29 active partition-entry corruption is reconstructed from authority",
+        false, false, true);
+    run_gpt_repair_success_case(512, 4096, GptFixture::Valid,
+        true, false,
+        "DM29 entry-array CRC field corruption reconstructs the complete backup copy",
+        false, false, false, true);
+
+    {
+        const uint64_t largeSectors = 10ull * 1024u * 1024u * 1024u / 512u;
+        FakeDisk large(512, largeSectors, false);
+        build_gpt(large);
+        const uint64_t primaryArrayLba = read_u64(sector(large, 1) + 72);
+        const uint64_t backupHeaderLba = large.sectorCount - 1;
+        const uint64_t backupArrayLba = read_u64(
+            sector(large, backupHeaderLba) + 72);
+        const uint32_t arrayBytes = read_u32(sector(large, 1) + 80) *
+                                    read_u32(sector(large, 1) + 84);
+        const uint32_t arraySectors = (arrayBytes + large.sectorSize - 1) /
+                                      large.sectorSize;
+        std::vector<uint8_t> entries(arrayBytes);
+        for (uint32_t i = 0; i < arraySectors; ++i) {
+            const size_t offset = static_cast<size_t>(i) * large.sectorSize;
+            const size_t amount = arrayBytes - offset < large.sectorSize
+                ? arrayBytes - offset : large.sectorSize;
+            std::memcpy(entries.data() + offset,
+                        sector(large, primaryArrayLba + i), amount);
+        }
+        const uint64_t middleStart = largeSectors / 2;
+        const uint64_t finalStart = read_u64(sector(large, 1) + 48) - 1024;
+        for (uint16_t slot = 1; slot < 3; ++slot) {
+            uint8_t* entry = entries.data() + static_cast<size_t>(slot) * 128;
+            std::memset(entry, 0, 128);
+            entry[0] = 0x28;
+            for (uint8_t i = 0; i < 16; ++i)
+                entry[16 + i] = static_cast<uint8_t>(0x40 + slot * 16 + i);
+            const uint64_t start = slot == 1 ? middleStart : finalStart;
+            write_u64(entry + 32, start);
+            write_u64(entry + 40, start + 63);
+        }
+        for (uint32_t i = 0; i < arraySectors; ++i) {
+            const size_t offset = static_cast<size_t>(i) * large.sectorSize;
+            const size_t amount = arrayBytes - offset < large.sectorSize
+                ? arrayBytes - offset : large.sectorSize;
+            std::memcpy(sector(large, primaryArrayLba + i),
+                        entries.data() + offset, amount);
+            std::memcpy(sector(large, backupArrayLba + i),
+                        entries.data() + offset, amount);
+        }
+        refresh_gpt_fixture_crcs(large);
+        sector(large, backupHeaderLba)[16] ^= 0x80;
+
+        storage::PartitionTableModel beforeTable = {};
+        const uint8_t index = register_fake(large, true, true, true,
+            false, 0, 1024u * 1024u);
+        const bool beforeParsed = storage::parse_partition_table(index, beforeTable);
+        const uint64_t firstStart = beforeTable.partitionCount
+            ? beforeTable.partitions[0].startLba : 0;
+        for (uint32_t i = 0; i < large.sectorSize; ++i) {
+            sector(large, firstStart)[i] = 0xA7;
+            sector(large, middleStart)[i] = 0xB6;
+            sector(large, finalStart)[i] = 0xC5;
+        }
+        const std::vector<uint8_t> mbrBefore = large.sparseMbr;
+        const std::vector<uint8_t> firstCanary =
+            std::vector<uint8_t>(sector(large, firstStart),
+                                 sector(large, firstStart) + large.sectorSize);
+        const std::vector<uint8_t> middleCanary =
+            std::vector<uint8_t>(sector(large, middleStart),
+                                 sector(large, middleStart) + large.sectorSize);
+        const std::vector<uint8_t> finalCanary =
+            std::vector<uint8_t>(sector(large, finalStart),
+                                 sector(large, finalStart) + large.sectorSize);
+        const std::unordered_map<uint64_t, std::vector<uint8_t>> beforeSparse =
+            large.sparseSectors;
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::GptRepairRequest request = {target, target.registryGeneration};
+        storage::GptRepairPlan plan = {};
+        storage::GptRepairResult result = {};
+        const uint32_t readsBeforeRepair = large.reads;
+        const storage::GptRepairStatus prepared = storage::prepare_gpt_repair(
+            request, plan, result);
+        const storage::GptRepairStatus repaired = prepared ==
+                storage::GPT_REPAIR_READY_FOR_CONFIRMATION
+            ? storage::execute_gpt_repair(plan, result) : prepared;
+        const uint32_t operationReadSectors = large.reads - readsBeforeRepair;
+        bool onlyBackupMetadataChanged = true;
+        for (const auto& oldSector : beforeSparse) {
+            auto current = large.sparseSectors.find(oldSector.first);
+            const bool same = current != large.sparseSectors.end() &&
+                              current->second == oldSector.second;
+            const bool allowed =
+                (oldSector.first >= backupArrayLba &&
+                 oldSector.first < backupArrayLba + arraySectors) ||
+                oldSector.first == backupHeaderLba;
+            if (!same && !allowed) onlyBackupMetadataChanged = false;
+        }
+        for (const auto& current : large.sparseSectors) {
+            if (beforeSparse.find(current.first) != beforeSparse.end()) continue;
+            const bool allowed =
+                (current.first >= backupArrayLba &&
+                 current.first < backupArrayLba + arraySectors) ||
+                current.first == backupHeaderLba;
+            if (allowed && !current.second.empty()) {
+                // A previously implicit zero sector may only be materialized
+                // inside the exact damaged metadata range.
+            } else if (!allowed) {
+                onlyBackupMetadataChanged = false;
+            }
+        }
+        storage::PartitionTableModel afterTable = {};
+        const bool afterParsed = storage::parse_partition_table(index, afterTable);
+        bool samePartitions = beforeTable.partitionCount == 3 &&
+            afterTable.partitionCount == beforeTable.partitionCount;
+        for (uint16_t i = 0; samePartitions && i < beforeTable.partitionCount; ++i)
+            samePartitions = storage::disk_manager_same_partition(
+                beforeTable.partitions[i], afterTable.partitions[i]);
+        check(beforeParsed && repaired == storage::GPT_REPAIR_SUCCESS &&
+              operationReadSectors < 2048 && large.writeLog.size() == 2 &&
+              large.writeLog[0].lba == backupArrayLba &&
+              large.writeLog[0].count == arraySectors &&
+              large.writeLog[1].lba == backupHeaderLba &&
+              result.logicalSectorsWritten == arraySectors + 1 &&
+              result.bytesWritten == (arraySectors + 1) * large.sectorSize &&
+              afterParsed && afterTable.gptCopiesAgree && samePartitions &&
+              onlyBackupMetadataChanged && large.sparseMbr == mbrBefore &&
+              std::equal(firstCanary.begin(), firstCanary.end(),
+                  sector(large, firstStart)) &&
+              std::equal(middleCanary.begin(), middleCanary.end(),
+                  sector(large, middleStart)) &&
+              std::equal(finalCanary.begin(), finalCanary.end(),
+                  sector(large, finalStart)),
+              "DM29 10 GiB sparse repair is metadata-bounded, writes 33 GPT sectors, and preserves first/middle/final partition canaries");
+        std::printf("DM29 GPT repair 10 GiB sparse proof: read_sectors=%u write_sectors=%u bytes_written=%llu flushes=%u\n",
+            operationReadSectors, result.logicalSectorsWritten,
+            static_cast<unsigned long long>(result.bytesWritten),
+            result.flushAttempts);
+        unregister_fake(index, large);
+    }
+
+    {
+        FakeDisk three(512, 8192);
+        build_gpt_three_partitions(three);
+        std::memset(sector(three, three.sectorCount - 1), 0, 8);
+        const uint8_t index = register_fake(three, true, true, true, false,
+            0, 1024u * 1024u);
+        storage::PartitionTableModel beforeTable = {};
+        storage::parse_partition_table(index, beforeTable);
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::GptRepairRequest request = {target, target.registryGeneration};
+        storage::GptRepairPlan plan = {};
+        storage::GptRepairResult result = {};
+        const storage::GptRepairStatus prepared = storage::prepare_gpt_repair(
+            request, plan, result);
+        const storage::GptRepairStatus repaired = prepared ==
+                storage::GPT_REPAIR_READY_FOR_CONFIRMATION
+            ? storage::execute_gpt_repair(plan, result) : prepared;
+        storage::PartitionTableModel afterTable = {};
+        const bool parsed = storage::parse_partition_table(index, afterTable);
+        bool same = beforeTable.partitionCount == 3 &&
+            afterTable.partitionCount == beforeTable.partitionCount;
+        for (uint16_t i = 0; same && i < beforeTable.partitionCount; ++i)
+            same = storage::disk_manager_same_partition(
+                beforeTable.partitions[i], afterTable.partitions[i]);
+        check(repaired == storage::GPT_REPAIR_SUCCESS && parsed && same &&
+              afterTable.gptCopiesAgree && result.partitionIdentitiesPreserved,
+              "DM29 three-partition repair preserves every entry identity and ordering");
+        unregister_fake(index, three);
+    }
+
+    {
+        FakeDisk damaged(512, 4096);
+        build_gpt(damaged);
+        std::memset(sector(damaged, damaged.sectorCount - 1), 0, 8);
+        const uint8_t index = register_fake(damaged, true, true, true);
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::GptRepairResult result = {};
+        check(storage::probe_gpt_repair(target, result) ==
+                  storage::GPT_REPAIR_SUCCESS &&
+              result.damagedCopyState == storage::GPT_COPY_NOT_PRESENT,
+              "DM29 missing backup signature is a repairable damaged-copy state when primary is valid");
+        unregister_fake(index, damaged);
+    }
+
+    {
+        FakeDisk bothBad(512, 4096);
+        build_gpt(bothBad, GptFixture::BothArrayCrcBad);
+        const uint8_t index = register_fake(bothBad, true, true, true);
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::GptRepairResult result = {};
+        check(storage::probe_gpt_repair(target, result) ==
+                  storage::GPT_REPAIR_NO_AUTHORITATIVE_COPY &&
+              bothBad.writeAttempts == 0,
+              "DM29 both-invalid GPT has no automatic repair source");
+        unregister_fake(index, bothBad);
+    }
+
+    {
+        FakeDisk conflict(512, 4096);
+        build_gpt(conflict, GptFixture::CopiesDisagree);
+        storage::PartitionTableModel model = {};
+        const uint8_t index = register_fake(conflict, true, true, true);
+        const bool parsed = storage::parse_partition_table(index, model);
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::GptRepairResult result = {};
+        check(parsed && model.gptCopiesConflict && model.partitionCount == 0 &&
+              storage::probe_gpt_repair(target, result) ==
+                  storage::GPT_REPAIR_CONFLICT && conflict.writeAttempts == 0,
+              "DM29 valid but conflicting copies withhold partitions and require manual recovery");
+        unregister_fake(index, conflict);
+    }
+
+    {
+        FakeDisk arrayConflict(512, 4096);
+        build_gpt(arrayConflict);
+        const uint64_t backupHeaderLba = arrayConflict.sectorCount - 1;
+        const uint64_t backupArrayLba = read_u64(
+            sector(arrayConflict, backupHeaderLba) + 72);
+        uint8_t* backupArray = sector(arrayConflict, backupArrayLba);
+        backupArray[16] ^= 0x40; // A different, still nonzero unique partition GUID.
+        const uint32_t entryCount = read_u32(
+            sector(arrayConflict, backupHeaderLba) + 80);
+        const uint32_t entrySize = read_u32(
+            sector(arrayConflict, backupHeaderLba) + 84);
+        write_u32(sector(arrayConflict, backupHeaderLba) + 88,
+            storage::crc32(backupArray,
+                static_cast<size_t>(entryCount) * entrySize));
+        write_u32(sector(arrayConflict, backupHeaderLba) + 16, 0);
+        write_u32(sector(arrayConflict, backupHeaderLba) + 16,
+            storage::crc32(sector(arrayConflict, backupHeaderLba), 92));
+        const uint8_t index = register_fake(arrayConflict, true, true, true);
+        storage::PartitionTableModel model = {};
+        const bool parsed = storage::parse_partition_table(index, model);
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::GptRepairResult result = {};
+        check(parsed && model.primaryGptValid && model.backupGptValid &&
+              model.primaryGptCopyState == storage::GPT_COPY_VALID &&
+              model.backupGptCopyState == storage::GPT_COPY_VALID &&
+              model.gptCopiesConflict && model.partitionCount == 0 &&
+              storage::probe_gpt_repair(target, result) ==
+                  storage::GPT_REPAIR_CONFLICT && arrayConflict.writeAttempts == 0,
+              "DM29 CRC-valid split-brain partition arrays are a conflict with no authority");
+        unregister_fake(index, arrayConflict);
+    }
+
+    {
+        FakeDisk readOnly(512, 4096);
+        build_gpt(readOnly, GptFixture::BackupHeaderCrcBad);
+        const uint8_t index = register_fake(readOnly, false, false, false);
+        storage::PartitionTableModel readable = {};
+        const bool parsed = storage::parse_partition_table(index, readable);
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::GptRepairResult result = {};
+        check(parsed && readable.state == storage::DISK_STATE_GPT_DEGRADED &&
+              readable.primaryGptValid && readable.partitionCount == 1 &&
+              storage::probe_gpt_repair(target, result) ==
+                  storage::GPT_REPAIR_READ_ONLY && readOnly.writeAttempts == 0,
+              "DM29 degraded read-only layout remains readable while repair is blocked");
+        unregister_fake(index, readOnly);
+    }
+
+    {
+        FakeDisk mounted(512, 4096);
+        build_gpt(mounted, GptFixture::BackupHeaderCrcBad);
+        const uint8_t index = register_fake(mounted, true, true, true);
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::GptRepairRequest request = {target, target.registryGeneration};
+        storage::GptRepairPlan plan = {};
+        storage::GptRepairResult result = {};
+        const storage::GptRepairStatus prepared = storage::prepare_gpt_repair(
+            request, plan, result);
+        vfs::test_set_mount(7, true, index, "/data");
+        const storage::GptRepairStatus executed = prepared ==
+                storage::GPT_REPAIR_READY_FOR_CONFIRMATION
+            ? storage::execute_gpt_repair(plan, result) : prepared;
+        check(prepared == storage::GPT_REPAIR_READY_FOR_CONFIRMATION &&
+              executed == storage::GPT_REPAIR_MOUNTED && mounted.writeAttempts == 0,
+              "DM29 mounted-volume change after diagnosis blocks repair before any write");
+        vfs::test_clear_mounts();
+        unregister_fake(index, mounted);
+    }
+
+    {
+        FakeDisk bootDisk(512, 4096), unknownBoot(512, 4096), nvme(512, 4096);
+        build_gpt(bootDisk, GptFixture::BackupHeaderCrcBad);
+        build_gpt(unknownBoot, GptFixture::BackupHeaderCrcBad);
+        build_gpt(nvme, GptFixture::BackupHeaderCrcBad);
+        const uint8_t bootIndex = register_fake(bootDisk, true, true, true,
+            false, 0, 0, block::BOOT_PROVENANCE_BOOT_BACKING);
+        const uint8_t unknownIndex = register_fake(unknownBoot, true, true, true,
+            false, 0, 0, block::BOOT_PROVENANCE_UNKNOWN);
+        const uint8_t nvmeIndex = register_fake(nvme, false, false, false,
+            false, 0, 0, block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT,
+            block::BDEV_NVME);
+        storage::TargetIdentity bootTarget = {}, unknownTarget = {}, nvmeTarget = {};
+        storage::capture_target_identity(bootIndex, bootTarget);
+        storage::capture_target_identity(unknownIndex, unknownTarget);
+        storage::capture_target_identity(nvmeIndex, nvmeTarget);
+        storage::GptRepairResult bootResult = {}, unknownResult = {}, nvmeResult = {};
+        storage::DeviceCapabilities nvmeCapabilities = {};
+        const bool nvmeReadOnly = storage::query_device_capabilities(
+            nvmeIndex, nvmeCapabilities) && nvmeCapabilities.readable &&
+            !nvmeCapabilities.writable;
+        check(storage::probe_gpt_repair(bootTarget, bootResult) ==
+                  storage::GPT_REPAIR_BOOT_BACKING &&
+              storage::probe_gpt_repair(unknownTarget, unknownResult) ==
+                  storage::GPT_REPAIR_BOOT_IDENTITY_UNKNOWN && nvmeReadOnly &&
+              storage::probe_gpt_repair(nvmeTarget, nvmeResult) ==
+                  storage::GPT_REPAIR_READ_ONLY && bootDisk.writeAttempts == 0 &&
+              unknownBoot.writeAttempts == 0 && nvme.writeAttempts == 0,
+              "DM29 boot, unknown boot provenance, and read-only NVMe gates never issue repair writes");
+        unregister_fake(bootIndex, bootDisk);
+        unregister_fake(unknownIndex, unknownBoot);
+        unregister_fake(nvmeIndex, nvme);
+    }
+
+    {
+        FakeDisk geometry(512, 4096);
+        build_gpt(geometry);
+        write_u64(sector(geometry, 1) + 32, geometry.sectorCount - 2);
+        refresh_gpt_fixture_crcs(geometry);
+        const uint8_t index = register_fake(geometry, true, true, true);
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::GptRepairResult result = {};
+        check(storage::probe_gpt_repair(target, result) ==
+                  storage::GPT_REPAIR_GEOMETRY_MISMATCH &&
+              geometry.writeAttempts == 0,
+              "DM29 device-size/peer-LBA mismatch is reported and never relocated automatically");
+        unregister_fake(index, geometry);
+    }
+
+    {
+        FakeDisk stale(512, 4096);
+        build_gpt(stale, GptFixture::BackupHeaderCrcBad);
+        const uint8_t index = register_fake(stale, true, true, true);
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::GptRepairRequest request = {target, target.registryGeneration};
+        storage::GptRepairPlan plan = {};
+        storage::GptRepairResult result = {};
+        const storage::GptRepairStatus prepared = storage::prepare_gpt_repair(
+            request, plan, result);
+        sector(stale, 2)[128 + 16] ^= 0x02;
+        refresh_gpt_fixture_crcs(stale);
+        const storage::GptRepairStatus executed = prepared ==
+                storage::GPT_REPAIR_READY_FOR_CONFIRMATION
+            ? storage::execute_gpt_repair(plan, result) : prepared;
+        check(executed == storage::GPT_REPAIR_STALE_SNAPSHOT &&
+              stale.writeAttempts == 0 && !storage::storage_operation_active(),
+              "DM29 changed authoritative fingerprint after confirmation aborts without writes");
+        unregister_fake(index, stale);
+    }
+
+    {
+        FakeDisk interrupted(512, 4096);
+        build_gpt(interrupted, GptFixture::BackupHeaderCrcBad);
+        const std::vector<uint8_t> original = interrupted.bytes;
+        const uint8_t index = register_fake(interrupted, true, true, true,
+            false, 0, 1024u * 1024u);
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::GptRepairRequest request = {target, target.registryGeneration};
+        storage::GptRepairPlan plan = {};
+        storage::GptRepairResult result = {};
+        const storage::GptRepairStatus prepared = storage::prepare_gpt_repair(
+            request, plan, result);
+        interrupted.failWriteAtCall1 = interrupted.writeAttempts + 2;
+        const storage::GptRepairStatus failed = prepared ==
+                storage::GPT_REPAIR_READY_FOR_CONFIRMATION
+            ? storage::execute_gpt_repair(plan, result) : prepared;
+        storage::PartitionTableModel afterFailure = {};
+        const bool stillDegraded = storage::parse_partition_table(
+            index, afterFailure) &&
+            afterFailure.state == storage::DISK_STATE_GPT_DEGRADED &&
+            afterFailure.primaryGptValid && !afterFailure.backupGptValid;
+        const uint64_t backupHeaderLba = interrupted.sectorCount - 1;
+        const uint64_t backupArrayLba = read_u64(
+            sector(interrupted, backupHeaderLba) + 72);
+        check(prepared == storage::GPT_REPAIR_READY_FOR_CONFIRMATION &&
+              failed == storage::GPT_REPAIR_IO_FAILED && stillDegraded &&
+              result.finalStateUncertain &&
+              interrupted.writeLog.size() == 2 &&
+              interrupted.writeLog[0].lba == backupArrayLba &&
+              interrupted.writeLog[1].lba == backupHeaderLba &&
+              std::equal(interrupted.bytes.begin() + interrupted.sectorSize,
+                  interrupted.bytes.begin() + 34u * interrupted.sectorSize,
+                  original.begin() + interrupted.sectorSize),
+              "DM29 interruption at backup-header publication preserves primary authority and remains degraded");
+
+        interrupted.failWriteAtCall1 = 0;
+        storage::TargetIdentity retryTarget = {};
+        storage::capture_target_identity(index, retryTarget);
+        storage::GptRepairRequest retryRequest = {
+            retryTarget, retryTarget.registryGeneration};
+        storage::GptRepairPlan retryPlan = {};
+        storage::GptRepairResult retryResult = {};
+        const storage::GptRepairStatus retryPrepared = storage::prepare_gpt_repair(
+            retryRequest, retryPlan, retryResult);
+        const storage::GptRepairStatus retried = retryPrepared ==
+                storage::GPT_REPAIR_READY_FOR_CONFIRMATION
+            ? storage::execute_gpt_repair(retryPlan, retryResult) : retryPrepared;
+        check(retried == storage::GPT_REPAIR_SUCCESS &&
+              retryResult.finalVerificationPassed,
+              "DM29 retry after header-write interruption succeeds from unchanged authority");
+        unregister_fake(index, interrupted);
+    }
+
+    {
+        FakeDisk corruptVerification(512, 4096);
+        build_gpt(corruptVerification, GptFixture::BackupHeaderCrcBad);
+        const uint8_t index = register_fake(corruptVerification, true, true, true,
+            false, 0, 1024u * 1024u);
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::GptRepairRequest request = {target, target.registryGeneration};
+        storage::GptRepairPlan plan = {};
+        storage::GptRepairResult result = {};
+        const storage::GptRepairStatus prepared = storage::prepare_gpt_repair(
+            request, plan, result);
+        corruptVerification.corruptWriteLbaOnce = plan.damagedEntryArrayLba;
+        corruptVerification.corruptWritePending = true;
+        const storage::GptRepairStatus failed = prepared ==
+                storage::GPT_REPAIR_READY_FOR_CONFIRMATION
+            ? storage::execute_gpt_repair(plan, result) : prepared;
+        storage::PartitionTableModel afterFailure = {};
+        const bool degraded = storage::parse_partition_table(
+            index, afterFailure) &&
+            afterFailure.state == storage::DISK_STATE_GPT_DEGRADED &&
+            afterFailure.primaryGptValid && !afterFailure.backupGptValid;
+        check(failed == storage::GPT_REPAIR_VERIFICATION_FAILED && degraded &&
+              corruptVerification.writeLog.size() == 1 &&
+              corruptVerification.writeLog[0].lba == plan.damagedEntryArrayLba &&
+              result.finalStateUncertain && !result.finalVerificationPassed,
+              "DM29 corrupted array read-back stops before header publication and never reports Healthy");
+        corruptVerification.corruptWritePending = false;
+        storage::TargetIdentity retryTarget = {};
+        storage::capture_target_identity(index, retryTarget);
+        storage::GptRepairRequest retryRequest = {
+            retryTarget, retryTarget.registryGeneration};
+        storage::GptRepairPlan retryPlan = {};
+        storage::GptRepairResult retryResult = {};
+        const storage::GptRepairStatus retryPrepared = storage::prepare_gpt_repair(
+            retryRequest, retryPlan, retryResult);
+        const storage::GptRepairStatus retried = retryPrepared ==
+                storage::GPT_REPAIR_READY_FOR_CONFIRMATION
+            ? storage::execute_gpt_repair(retryPlan, retryResult) : retryPrepared;
+        check(retried == storage::GPT_REPAIR_SUCCESS &&
+              retryResult.finalVerificationPassed,
+              "DM29 array-verification failure is recoverable by a fresh confirmed retry");
+        unregister_fake(index, corruptVerification);
+    }
+
+    {
+        FakeDisk flushFailure(512, 4096);
+        build_gpt(flushFailure, GptFixture::BackupHeaderCrcBad);
+        const uint8_t index = register_fake(flushFailure, true, true, true,
+            false, 0, 1024u * 1024u);
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::GptRepairRequest request = {target, target.registryGeneration};
+        storage::GptRepairPlan plan = {};
+        storage::GptRepairResult result = {};
+        const storage::GptRepairStatus prepared = storage::prepare_gpt_repair(
+            request, plan, result);
+        flushFailure.failFlushAtCall = flushFailure.flushes + 2;
+        const storage::GptRepairStatus failed = prepared ==
+                storage::GPT_REPAIR_READY_FOR_CONFIRMATION
+            ? storage::execute_gpt_repair(plan, result) : prepared;
+        check(failed == storage::GPT_REPAIR_FLUSH_FAILED &&
+              result.flushAttempts == 2 && result.writeMayHaveReachedMedia &&
+              !result.finalVerificationPassed && flushFailure.writeLog.size() == 2 &&
+              !storage::storage_operation_active(),
+              "DM29 failed post-publication Flush prevents a durable-success claim");
+        unregister_fake(index, flushFailure);
+    }
+
+    {
+        FakeDisk diskA(512, 4096), diskB(512, 4096);
+        build_gpt(diskA, GptFixture::BackupHeaderCrcBad);
+        build_gpt(diskB, GptFixture::BackupHeaderCrcBad);
+        const uint8_t indexA = register_fake(diskA, true, true, true);
+        storage::TargetIdentity targetA = {};
+        storage::capture_target_identity(indexA, targetA);
+        storage::GptRepairRequest request = {targetA, targetA.registryGeneration};
+        storage::GptRepairPlan plan = {};
+        storage::GptRepairResult result = {};
+        const storage::GptRepairStatus prepared = storage::prepare_gpt_repair(
+            request, plan, result);
+        block::mark_device_offline(indexA, diskA.registrationId);
+        const uint8_t indexB = register_fake(diskB, true, true, true);
+        const storage::GptRepairStatus executed = prepared ==
+                storage::GPT_REPAIR_READY_FOR_CONFIRMATION
+            ? storage::execute_gpt_repair(plan, result) : prepared;
+        check(executed == storage::GPT_REPAIR_IDENTITY_CHANGED &&
+              diskB.writeAttempts == 0 &&
+              !storage::storage_operation_active(),
+              "DM29 replacement disk with the same capacity cannot receive a stale repair request");
+        unregister_fake(indexB, diskB);
+        g_fakeDisks[diskA.driverId] = nullptr;
+    }
+
+    {
+        FakeDisk disk(512, 4096), replacement(512, 4096);
+        build_gpt(disk, GptFixture::BackupHeaderCrcBad);
+        build_gpt(replacement);
+        const std::vector<uint8_t> before = disk.bytes;
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 512);
+        disk.replacementOnRemoval = &replacement;
+        disk.removeOnWriteAtCall = 2;
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::GptRepairRequest request = {target, target.registryGeneration};
+        storage::GptRepairPlan plan = {};
+        storage::GptRepairResult interrupted = {};
+        const storage::GptRepairStatus prepared = storage::prepare_gpt_repair(
+            request, plan, interrupted);
+        const storage::GptRepairStatus failed = prepared ==
+                storage::GPT_REPAIR_READY_FOR_CONFIRMATION
+            ? storage::execute_gpt_repair(plan, interrupted) : prepared;
+        const bool interruptedSafely = failed == storage::GPT_REPAIR_IO_FAILED &&
+            interrupted.writeMayHaveReachedMedia && interrupted.finalStateUncertain &&
+            disk.replacementRegisteredDuringRemoval && replacement.writeAttempts == 0 &&
+            std::equal(disk.bytes.begin() + disk.sectorSize,
+                disk.bytes.begin() + 34u * disk.sectorSize,
+                before.begin() + disk.sectorSize);
+        check(interruptedSafely,
+              "DM29 interrupted backup-array repair keeps authoritative primary and protects replacement media");
+        if (disk.replacementIndex != 0xFF) {
+            unregister_fake(disk.replacementIndex, replacement);
+            disk.replacementIndex = 0xFF;
+        }
+        disk.removeOnWriteAtCall = 0;
+        disk.replacementOnRemoval = nullptr;
+        const uint8_t retryIndex = register_fake(disk, true, true, true,
+            false, 0, 1024u * 1024u);
+        storage::TargetIdentity retryTarget = {};
+        storage::capture_target_identity(retryIndex, retryTarget);
+        storage::GptRepairRequest retryRequest = {
+            retryTarget, retryTarget.registryGeneration};
+        storage::GptRepairPlan retryPlan = {};
+        storage::GptRepairResult retryResult = {};
+        const storage::GptRepairStatus retryPrepared = storage::prepare_gpt_repair(
+            retryRequest, retryPlan, retryResult);
+        const storage::GptRepairStatus retried = retryPrepared ==
+                storage::GPT_REPAIR_READY_FOR_CONFIRMATION
+            ? storage::execute_gpt_repair(retryPlan, retryResult) : retryPrepared;
+        check(retried == storage::GPT_REPAIR_SUCCESS &&
+              retryResult.finalVerificationPassed && replacement.writeAttempts == 0,
+              "DM29 repair retry succeeds from the untouched authoritative GPT copy");
+        unregister_fake(retryIndex, disk);
+        g_fakeDisks[disk.driverId] = nullptr;
+    }
+}
+
 int main()
 {
     run_nvme_logic_tests();
@@ -4748,6 +5515,7 @@ int main()
     run_uhci_transfer_logic_tests();
     block::init();
     vfs::test_clear_mounts();
+    run_gpt_repair_tests();
     run_delete_partition_tests();
 
     check(storage::crc32("123456789", 9) == 0xCBF43926u, "CRC32 standard test vector");
@@ -4980,6 +5748,9 @@ int main()
           std::strcmp(storage::disk_manager_state_summary(
               storage::DISK_STATE_INVALID_PARTITION_TABLE, false, false),
               "Invalid Partition Table") == 0 &&
+          std::strcmp(storage::disk_manager_state_summary(
+              storage::DISK_STATE_INVALID_PARTITION_TABLE, false, false,
+              false, true), "GPT damaged | No authoritative copy") == 0 &&
           std::strcmp(storage::disk_manager_state_summary(
               storage::DISK_STATE_GPT_DEGRADED, true, false),
               "GPT | Primary valid, backup invalid") == 0 &&

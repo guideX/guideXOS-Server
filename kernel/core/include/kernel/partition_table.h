@@ -44,10 +44,27 @@ enum PartitionError : uint8_t {
     PARTITION_ERROR_GPT_ENTRY,
     PARTITION_ERROR_GPT_OVERLAP,
     PARTITION_ERROR_GPT_COPIES_DISAGREE,
+    PARTITION_ERROR_GPT_GEOMETRY_MISMATCH,
     PARTITION_ERROR_UNSUPPORTED_GPT_REVISION,
     PARTITION_ERROR_TOO_MANY_PARTITIONS,
     PARTITION_ERROR_EXTENDED_PARTITIONS_UNSUPPORTED,
     PARTITION_ERROR_AMBIGUOUS_RAW_STATE,
+};
+
+// Per-copy diagnostics keep CRC failures, unreadable media, unsupported
+// metadata, and device-size mismatches distinct. Only one fully valid copy
+// can authorize repair of its peer.
+enum GptCopyState : uint8_t {
+    GPT_COPY_NOT_PRESENT = 0,
+    GPT_COPY_VALID,
+    GPT_COPY_HEADER_INVALID,
+    GPT_COPY_HEADER_CRC_INVALID,
+    GPT_COPY_ARRAY_INVALID,
+    GPT_COPY_ARRAY_CRC_INVALID,
+    GPT_COPY_BOUNDS_INVALID,
+    GPT_COPY_UNREADABLE,
+    GPT_COPY_UNSUPPORTED,
+    GPT_COPY_GEOMETRY_MISMATCH,
 };
 
 struct PartitionEntry {
@@ -92,6 +109,12 @@ struct PartitionTableModel {
     bool primaryGptValid;
     bool backupGptValid;
     bool gptCopiesAgree;
+    bool gptCopiesConflict;
+    bool protectiveMbrValid;
+    GptCopyState primaryGptCopyState;
+    GptCopyState backupGptCopyState;
+    PartitionError primaryGptError;
+    PartitionError backupGptError;
     uint8_t primaryDiskGuid[16];
     uint8_t backupDiskGuid[16];
     uint32_t mbrDiskSignature;

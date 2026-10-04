@@ -107,7 +107,9 @@ inline bool disk_manager_same_partition(const PartitionEntry& left,
 
 inline const char* disk_manager_state_summary(DiskState state,
                                                bool primaryGptValid,
-                                               bool backupGptValid)
+                                               bool backupGptValid,
+                                               bool gptCopiesConflict = false,
+                                               bool gptMetadataDetected = false)
 {
     switch (state) {
         case DISK_STATE_NOT_INITIALIZED: return "Not Initialized";
@@ -115,12 +117,17 @@ inline const char* disk_manager_state_summary(DiskState state,
         case DISK_STATE_VALID_MBR: return "Online | MBR";
         case DISK_STATE_VALID_GPT: return "Online | GPT";
         case DISK_STATE_GPT_DEGRADED:
+            if (gptCopiesConflict)
+                return "GPT conflict | Manual recovery required";
             if (primaryGptValid && !backupGptValid)
                 return "GPT | Primary valid, backup invalid";
             if (!primaryGptValid && backupGptValid)
                 return "GPT | Primary invalid, backup valid";
-            return "GPT | Copies disagree or protective MBR is invalid";
-        case DISK_STATE_INVALID_PARTITION_TABLE: return "Invalid Partition Table";
+            return "GPT degraded | Inspect GPT diagnostics";
+        case DISK_STATE_INVALID_PARTITION_TABLE:
+            return gptMetadataDetected
+                ? "GPT damaged | No authoritative copy"
+                : "Invalid Partition Table";
         case DISK_STATE_UNSUPPORTED_PARTITION_SCHEME:
             return "Unsupported Partition Scheme";
         default: return "Unknown";

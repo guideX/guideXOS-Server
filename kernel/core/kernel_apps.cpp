@@ -6279,6 +6279,7 @@ DiskManagerApp::DiskManagerApp()
       m_initializeDialogState(INITIALIZE_DIALOG_CLOSED),
       m_dialogIsCreate(false), m_dialogIsFormat(false),
       m_dialogIsReformat(false), m_dialogIsDelete(false),
+      m_dialogIsGptRepair(false),
       m_createSizeEdited(false),
       m_createNameEdited(false), m_createInputFocus(0),
       m_initializeScheme(storage::DEFAULT_INITIALIZE_SCHEME),
@@ -6298,6 +6299,8 @@ DiskManagerApp::DiskManagerApp()
     memset(&m_deleteRequest, 0, sizeof(m_deleteRequest));
     memset(&m_deletePlan, 0, sizeof(m_deletePlan));
     memset(&m_deleteResult, 0, sizeof(m_deleteResult));
+    memset(&m_gptRepairPlan, 0, sizeof(m_gptRepairPlan));
+    memset(&m_gptRepairResult, 0, sizeof(m_gptRepairResult));
     memset(&m_formatRequest, 0, sizeof(m_formatRequest));
     memset(&m_formatResult, 0, sizeof(m_formatResult));
     memset(&m_mountDialogPartition, 0, sizeof(m_mountDialogPartition));
@@ -6315,6 +6318,8 @@ DiskManagerApp::~DiskManagerApp() {
         storage::cancel_initialize_disk(m_initializePlan);
     if (m_deletePlan.confirmationReady)
         storage::cancel_delete_partition(m_deletePlan);
+    if (m_gptRepairPlan.confirmationReady)
+        storage::cancel_gpt_repair(m_gptRepairPlan);
 }
 
 bool DiskManagerApp::init() {
@@ -6365,6 +6370,8 @@ void DiskManagerApp::shutdown() {
         storage::cancel_initialize_disk(m_initializePlan);
     if (m_deletePlan.confirmationReady)
         storage::cancel_delete_partition(m_deletePlan);
+    if (m_gptRepairPlan.confirmationReady)
+        storage::cancel_gpt_repair(m_gptRepairPlan);
     m_initializeDialogState = INITIALIZE_DIALOG_CLOSED;
     m_state = app::AppState::Terminated;
 }
@@ -6596,6 +6603,21 @@ void DiskManagerApp::readPartitionTable(DiskEntry& disk) {
     disk.primaryGptValid = table.primaryGptValid;
     disk.backupGptValid = table.backupGptValid;
     disk.gptCopiesAgree = table.gptCopiesAgree;
+    disk.gptCopiesConflict = table.gptCopiesConflict;
+    disk.protectiveMbrValid = table.protectiveMbrValid;
+    disk.primaryGptCopyState = table.primaryGptCopyState;
+    disk.backupGptCopyState = table.backupGptCopyState;
+    disk.gptRepairAvailable = false;
+    disk.gptRepairStatus = storage::GPT_REPAIR_NO_AUTHORITATIVE_COPY;
+    if (table.state == storage::DISK_STATE_GPT_DEGRADED &&
+        table.primaryGptValid != table.backupGptValid &&
+        !table.gptCopiesConflict) {
+        storage::GptRepairResult repairProbe = {};
+        disk.gptRepairStatus = storage::probe_gpt_repair(disk.identity,
+                                                          repairProbe);
+        disk.gptRepairAvailable = disk.gptRepairStatus ==
+            storage::GPT_REPAIR_SUCCESS;
+    }
     memcpy(disk.primaryDiskGuid, table.primaryDiskGuid,
            sizeof(disk.primaryDiskGuid));
     memcpy(disk.backupDiskGuid, table.backupDiskGuid,
@@ -6926,10 +6948,29 @@ void DiskManagerApp::updateInitializeControls() {
         m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS;
     const bool deleteConfirm = m_dialogIsDelete &&
         m_initializeDialogState == INITIALIZE_DIALOG_DELETE_CONFIRM;
+    const bool gptRepairConfirm = m_dialogIsGptRepair &&
+        m_initializeDialogState == INITIALIZE_DIALOG_GPT_REPAIR_CONFIRM;
+    const bool gptRepairLeaseCurrent = storage::storage_operation_lease_is_current(
+        m_gptRepairPlan.lease);
     const storage::DiskState selectedState = haveSelection
         ? m_disks[m_selectedDisk].state : storage::DISK_STATE_UNREADABLE;
     const bool initializeAvailable = haveSelection && rawSelected &&
         m_disks[m_selectedDisk].initializeAvailable;
+    const bool gptRepairShape = haveSelection &&
+        m_selectedObject == SELECTED_DISK &&
+        m_disks[m_selectedDisk].state == storage::DISK_STATE_GPT_DEGRADED &&
+        m_disks[m_selectedDisk].primaryGptValid !=
+            m_disks[m_selectedDisk].backupGptValid &&
+        !m_disks[m_selectedDisk].gptCopiesConflict;
+    const bool showGptRepair = gptRepairShape &&
+        m_disks[m_selectedDisk].gptRepairStatus !=
+            storage::GPT_REPAIR_GEOMETRY_MISMATCH &&
+        m_disks[m_selectedDisk].gptRepairStatus !=
+            storage::GPT_REPAIR_UNSUPPORTED_COPY &&
+        m_disks[m_selectedDisk].gptRepairStatus !=
+            storage::GPT_REPAIR_UNREADABLE_COPY;
+    const bool gptRepairAvailable = showGptRepair &&
+        m_disks[m_selectedDisk].gptRepairAvailable;
     const bool createAvailable = selectedRegion &&
         m_disks[m_selectedDisk].createPartitionAvailable;
     bool formatAvailable = false;
@@ -7010,8 +7051,9 @@ void DiskManagerApp::updateInitializeControls() {
             haveSelection && m_disks[m_selectedDisk].unallocatedModelValid,
             createAvailable, dialogClosed);
         initialize->visible = dialogClosed &&
-            (rawSelected || enableCreate || formatAvailable);
-        initialize->enabled = enableInitialize || enableCreate || formatAvailable;
+            (rawSelected || enableCreate || formatAvailable || showGptRepair);
+        initialize->enabled = enableInitialize || enableCreate || formatAvailable ||
+            gptRepairAvailable;
         const bool reformatSelected = haveSelection &&
             m_selectedObject == SELECTED_PARTITION && m_selectedDisk >= 0 &&
             m_selectedDisk < m_diskCount && m_selectedPart >= 0 &&
@@ -7019,9 +7061,10 @@ void DiskManagerApp::updateInitializeControls() {
             (strcmp(m_disks[m_selectedDisk].parts[m_selectedPart].fsLabel,
                     "FAT32") == 0 ||
              m_disks[m_selectedDisk].parts[m_selectedPart].reformatInterrupted);
-        setWidgetText(m_initializeBtnId, formatAvailable
-            ? (reformatSelected ? "Reformat..." : "Format...") :
-            (selectedRegion ? "Create Partition..." : "Initialize Disk..."));
+        setWidgetText(m_initializeBtnId, showGptRepair ? "Repair GPT..." :
+            (formatAvailable
+                ? (reformatSelected ? "Reformat..." : "Format...") :
+                (selectedRegion ? "Create Partition..." : "Initialize Disk...")));
     }
     if (deleteAction) {
         deleteAction->visible = dialogClosed && m_selectedObject == SELECTED_PARTITION;
@@ -7039,19 +7082,22 @@ void DiskManagerApp::updateInitializeControls() {
     if (mbr) { mbr->visible = choosing; mbr->enabled = choosing; }
     if (confirm) {
         confirm->visible = m_mountDialogOpen || confirming || createOptions ||
-            formatOptions || deleteConfirm;
+            formatOptions || deleteConfirm || gptRepairConfirm;
         confirm->enabled = m_mountDialogOpen || (confirming
             ? (m_initializePlan.confirmationReady &&
                initializeLeaseCurrent)
+            : (gptRepairConfirm
+                ? (m_gptRepairPlan.confirmationReady && gptRepairLeaseCurrent)
             : (deleteConfirm
                 ? (m_deletePlan.confirmationReady &&
                    storage::storage_operation_lease_is_current(m_deletePlan.lease))
                 : (createOptions ? updateCreateInputWidgets() :
-                    (formatOptions && updateFormatLabelWidget()))));
+                    (formatOptions && updateFormatLabelWidget())))));
         setWidgetText(m_confirmInitializeBtnId,
-            m_mountDialogOpen ? "Mount" : (deleteConfirm ? "Delete Partition" :
-                (formatOptions ? (m_dialogIsReformat ? "Reformat FAT32" : "Format") :
-                    (createOptions ? "Create" : "Initialize"))));
+            m_mountDialogOpen ? "Mount" : (gptRepairConfirm ? "Repair GPT" :
+                (deleteConfirm ? "Delete Partition" :
+                    (formatOptions ? (m_dialogIsReformat ? "Reformat FAT32" : "Format") :
+                        (createOptions ? "Create" : "Initialize")))));
     }
     if (sizeInput) {
         sizeInput->visible = createOptions;
@@ -7491,6 +7537,10 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
     } else if (widgetId == m_initializeBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
         if (m_selectedDisk >= 0 && m_selectedDisk < m_diskCount &&
+            m_disks[m_selectedDisk].state == storage::DISK_STATE_GPT_DEGRADED &&
+            m_disks[m_selectedDisk].gptRepairAvailable) {
+            beginGptRepairConfirmation();
+        } else if (m_selectedDisk >= 0 && m_selectedDisk < m_diskCount &&
             m_selectedObject == SELECTED_UNALLOCATED &&
             m_disks[m_selectedDisk].createPartitionAvailable) {
             beginCreatePartitionOptions();
@@ -7542,6 +7592,9 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
     } else if (widgetId == m_confirmInitializeBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_DELETE_CONFIRM) {
         runDeletePartitionOperation();
+    } else if (widgetId == m_confirmInitializeBtnId &&
+               m_initializeDialogState == INITIALIZE_DIALOG_GPT_REPAIR_CONFIRM) {
+        runGptRepairOperation();
     } else if (widgetId == m_confirmInitializeBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS) {
         if (m_dialogIsFormat) runFormatOperation();
@@ -7605,7 +7658,11 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                                   m_disks[i].name, kText);
         const char* state = storage::disk_manager_state_summary(
             m_disks[i].state, m_disks[i].primaryGptValid,
-            m_disks[i].backupGptValid);
+            m_disks[i].backupGptValid, m_disks[i].gptCopiesConflict,
+            m_disks[i].scheme == storage::PARTITION_SCHEME_GPT ||
+            m_disks[i].protectiveMbr ||
+            m_disks[i].primaryGptCopyState != storage::GPT_COPY_NOT_PRESENT ||
+            m_disks[i].backupGptCopyState != storage::GPT_COPY_NOT_PRESENT);
         disk_manager_draw_clipped(x + 8, rowY + 16, leftW - 18, state, kSubText);
     }
     if (m_diskCount == 0) {
@@ -7683,7 +7740,11 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 
     const DiskEntry& disk = m_disks[m_selectedDisk];
     const char* stateLine = storage::disk_manager_state_summary(
-        disk.state, disk.primaryGptValid, disk.backupGptValid);
+        disk.state, disk.primaryGptValid, disk.backupGptValid,
+        disk.gptCopiesConflict,
+        disk.scheme == storage::PARTITION_SCHEME_GPT || disk.protectiveMbr ||
+        disk.primaryGptCopyState != storage::GPT_COPY_NOT_PRESENT ||
+        disk.backupGptCopyState != storage::GPT_COPY_NOT_PRESENT);
     disk_manager_draw_clipped(rightX + 4, y + 28, rightW - 8, disk.name, kText);
     disk_manager_draw_clipped(rightX + 4, y + 40, rightW - 8, stateLine,
         disk.state == storage::DISK_STATE_INVALID_PARTITION_TABLE ? 0xFFFFB0A0 : kText);
@@ -7964,7 +8025,10 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         framebuffer::fill_rect(panelX, panelY, panelW, panelH, 0xFF252D3B);
         framebuffer::fill_rect(panelX, panelY, panelW, 23, 0xFF34465C);
         disk_manager_draw_clipped(panelX + 10, panelY + 7, panelW - 20,
-            m_dialogIsDelete
+            m_dialogIsGptRepair
+                ? (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
+                    ? "GPT Repair Result" : "Repair GPT Redundancy")
+                : (m_dialogIsDelete
                 ? (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
                     ? "Delete Partition Result" : "Delete Partition")
                 : (m_dialogIsFormat
@@ -7977,17 +8041,18 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                 ? (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
                     ? "Create Partition Result" : "Create Partition")
                 : (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
-                    ? "Initialize Disk Result" : "Initialize Disk"))),
+                    ? "Initialize Disk Result" : "Initialize Disk")))),
             kText);
         uint32_t lineY = panelY + 32;
         const storage::TargetIdentity& identity =
-            (m_dialogIsDelete || m_dialogIsFormat || m_dialogIsCreate || m_initializeDialogState !=
+            (m_dialogIsGptRepair || m_dialogIsDelete || m_dialogIsFormat || m_dialogIsCreate || m_initializeDialogState !=
                 INITIALIZE_DIALOG_CHOOSE_SCHEME)
-                ? (m_dialogIsDelete ? m_deleteResult.targetIdentity
+                ? (m_dialogIsGptRepair ? m_gptRepairResult.targetIdentity
+                  : (m_dialogIsDelete ? m_deleteResult.targetIdentity
                   : (m_dialogIsFormat ? m_formatResult.targetIdentity
                   : (m_dialogIsCreate ? m_createResult.targetIdentity
                                     : m_initializeResult.targetIdentity)
-                  ))
+                  )))
                 : disk.identity;
         char line[160], number[24], sizeText[32];
         strcopy(line, "Target: ", sizeof(line));
@@ -8011,7 +8076,109 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         strappend(line, " bytes", sizeof(line));
         disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20, line, kSubText);
         lineY += 17;
-        if (m_dialogIsDelete) {
+        if (m_dialogIsGptRepair) {
+            const bool confirmingRepair = m_initializeDialogState ==
+                INITIALIZE_DIALOG_GPT_REPAIR_CONFIRM;
+            const char* direction = m_gptRepairPlan.direction ==
+                    storage::GPT_REPAIR_BACKUP_FROM_PRIMARY
+                ? "Repair backup GPT using the valid primary GPT"
+                : "Repair primary GPT using the valid backup GPT";
+            strcopy(line, direction, sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kText);
+            lineY += 17;
+            strcopy(line, "Damaged copy: ", sizeof(line));
+            strappend(line, storage::gpt_copy_state_name(
+                m_gptRepairPlan.damagedCopyState), sizeof(line));
+            strappend(line, " | Authoritative fingerprint: ", sizeof(line));
+            disk_manager_hex32(static_cast<uint32_t>(
+                m_gptRepairPlan.authoritativeFingerprint >> 32), number,
+                sizeof(number));
+            strappend(line, number, sizeof(line));
+            disk_manager_hex32(static_cast<uint32_t>(
+                m_gptRepairPlan.authoritativeFingerprint), number,
+                sizeof(number));
+            strappend(line, number, sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kSubText);
+            lineY += 17;
+            strcopy(line, "Partitions: ", sizeof(line));
+            disk_manager_u64(m_gptRepairPlan.partitionCount, number,
+                sizeof(number));
+            strappend(line, number, sizeof(line));
+            strappend(line, " | Mounted partitions: none", sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kSubText);
+            lineY += 19;
+            if (confirmingRepair) {
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "Only the damaged GPT entry array and header will be written.",
+                    0xFFFFD080);
+                lineY += 16;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "Partition data will not be modified. Protective MBR is preserved.",
+                    0xFFFFD080);
+                lineY += 16;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "All partitions must stay unmounted. Confirm only after reviewing the target.",
+                    kText);
+            } else if (m_initializeDialogState == INITIALIZE_DIALOG_RUNNING) {
+                strcopy(line, "Stage: ", sizeof(line));
+                strappend(line, storage::gpt_repair_stage_name(
+                    m_gptRepairResult.stage), sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kText);
+            } else {
+                const bool success = m_gptRepairResult.status ==
+                    storage::GPT_REPAIR_SUCCESS;
+                strcopy(line, success ? "Both GPT copies are Healthy." :
+                    storage::gpt_repair_status_name(m_gptRepairResult.status),
+                    sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, success ? kText : 0xFFFFB0A0);
+                lineY += 16;
+                strcopy(line, "Metadata written: ", sizeof(line));
+                disk_manager_u64(m_gptRepairResult.logicalSectorsWritten,
+                    number, sizeof(number));
+                strappend(line, number, sizeof(line));
+                strappend(line, " sectors / ", sizeof(line));
+                disk_manager_u64(m_gptRepairResult.bytesWritten,
+                    number, sizeof(number));
+                strappend(line, number, sizeof(line));
+                strappend(line, " bytes | Flushes: ", sizeof(line));
+                disk_manager_u64(m_gptRepairResult.flushAttempts,
+                    number, sizeof(number));
+                strappend(line, number, sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kSubText);
+                lineY += 16;
+                strcopy(line, "Read: ", sizeof(line));
+                disk_manager_u64(m_gptRepairResult.logicalSectorsRead,
+                    number, sizeof(number));
+                strappend(line, number, sizeof(line));
+                strappend(line, " sectors | Authoritative copy unchanged: ",
+                    sizeof(line));
+                strappend(line, m_gptRepairResult.authoritativeCopyPreserved
+                    ? "Yes" : "No", sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kSubText);
+                lineY += 16;
+                strcopy(line, "Partition identities: ", sizeof(line));
+                strappend(line, m_gptRepairResult.partitionIdentitiesPreserved
+                    ? "Preserved" : "Not verified", sizeof(line));
+                strappend(line, " | Partition data: ", sizeof(line));
+                strappend(line, m_gptRepairResult.partitionDataUntouched
+                    ? "Untouched" : "Not verified", sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, success ? kSubText : 0xFFFFB0A0);
+                if (m_gptRepairResult.finalStateUncertain) {
+                    lineY += 16;
+                    disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                        "Repair may be incomplete. The healthy source copy was not written; refresh and retry.",
+                        0xFFFFB0A0);
+                }
+            }
+        } else if (m_dialogIsDelete) {
             const storage::PartitionEntry& part = m_deleteRequest.partitionSnapshot;
             char partitionNo[16], capacityText[32], startText[24], endText[24];
             disk_manager_u64(part.partitionNumber, partitionNo, sizeof(partitionNo));
@@ -8878,6 +9045,7 @@ void DiskManagerApp::drawDetails(uint32_t x, uint32_t y, uint32_t w,
             case storage::PARTITION_ERROR_GPT_ENTRY: parserError = "GPT entry invalid"; break;
             case storage::PARTITION_ERROR_GPT_OVERLAP: parserError = "GPT overlap"; break;
             case storage::PARTITION_ERROR_GPT_COPIES_DISAGREE: parserError = "GPT copies disagree"; break;
+            case storage::PARTITION_ERROR_GPT_GEOMETRY_MISMATCH: parserError = "GPT geometry does not match current device size"; break;
             case storage::PARTITION_ERROR_UNSUPPORTED_GPT_REVISION: parserError = "Unsupported GPT revision"; break;
             case storage::PARTITION_ERROR_TOO_MANY_PARTITIONS: parserError = "GPT count unsupported"; break;
             case storage::PARTITION_ERROR_EXTENDED_PARTITIONS_UNSUPPORTED: parserError = "Extended/logical unsupported"; break;
@@ -8888,14 +9056,39 @@ void DiskManagerApp::drawDetails(uint32_t x, uint32_t y, uint32_t w,
             disk.parserError == storage::PARTITION_ERROR_NONE)
             parserError = "No parser result available";
         add(right, rightCount, "Parser result", parserError);
-        if (disk.scheme == storage::PARTITION_SCHEME_GPT) {
-            add(right, rightCount, "GPT primary", disk.primaryGptValid ? "Valid" : "Invalid / unreadable");
-            add(right, rightCount, "GPT backup", disk.backupGptValid ? "Valid" : "Invalid / unreadable");
+        const bool gptMetadataDetected =
+            disk.scheme == storage::PARTITION_SCHEME_GPT || disk.protectiveMbr ||
+            disk.primaryGptCopyState != storage::GPT_COPY_NOT_PRESENT ||
+            disk.backupGptCopyState != storage::GPT_COPY_NOT_PRESENT;
+        if (gptMetadataDetected) {
+            add(right, rightCount, "GPT primary",
+                storage::gpt_copy_state_name(disk.primaryGptCopyState));
+            add(right, rightCount, "GPT backup",
+                storage::gpt_copy_state_name(disk.backupGptCopyState));
             const char* copies = disk.primaryGptValid && disk.backupGptValid
-                ? (disk.gptCopiesAgree ? "Agree" : "Disagree")
+                ? (disk.gptCopiesAgree ? "Healthy and equivalent" :
+                    (disk.gptCopiesConflict
+                        ? "Conflict; manual recovery required"
+                        : "Comparison unreadable"))
                 : "Comparison unavailable";
             add(right, rightCount, "GPT copies", copies);
-            add(right, rightCount, "Protective MBR", disk.protectiveMbr ? "Present" : "Missing");
+            const char* redundancy = disk.gptCopiesConflict
+                ? "Conflict; manual recovery required"
+                : (disk.primaryGptValid && disk.backupGptValid
+                    ? (disk.gptCopiesAgree ? "Healthy" : "Comparison unreadable")
+                    : (disk.primaryGptValid
+                        ? "Degraded; primary is authoritative"
+                        : (disk.backupGptValid
+                            ? "Degraded; backup is authoritative"
+                            : "Unrecoverable; no authoritative copy")));
+            add(right, rightCount, "GPT redundancy", redundancy);
+            add(right, rightCount, "Protective MBR", !disk.protectiveMbr
+                ? "Missing" : (disk.protectiveMbrValid ? "Valid" : "Invalid"));
+            if (disk.state == storage::DISK_STATE_GPT_DEGRADED &&
+                disk.primaryGptValid != disk.backupGptValid)
+                add(right, rightCount, "Repair GPT", disk.gptRepairAvailable
+                    ? "Available after separate confirmation"
+                    : storage::gpt_repair_status_name(disk.gptRepairStatus));
         } else if (disk.scheme == storage::PARTITION_SCHEME_MBR) {
             add(right, rightCount, "MBR partitions", "Validated primary entries");
             add(right, rightCount, "Extended/logical", disk.extendedPartitionsPresent
@@ -9031,6 +9224,24 @@ void DiskManagerApp::drawDetails(uint32_t x, uint32_t y, uint32_t w,
             rollbackSucceeded = m_formatResult.rollbackSucceeded;
             if (m_formatResult.failedBlockDiagnostic.valid)
                 failedIo = &m_formatResult.failedBlockDiagnostic;
+        } else if (m_lastStorageOperation == 5) {
+            operationTarget = m_gptRepairResult.targetIdentity;
+            targetMatchesDisk = storage::disk_manager_same_disk_incarnation(
+                operationTarget, disk.identity);
+            operationName = "Repair GPT";
+            operationStatus = storage::gpt_repair_status_name(
+                m_gptRepairResult.status);
+            operationFailureStatus = storage::gpt_repair_status_name(
+                m_gptRepairResult.failureStatus);
+            failedStage = m_gptRepairResult.firstFailedStage ==
+                    storage::GPT_REPAIR_STAGE_IDLE
+                ? "None" : storage::gpt_repair_stage_name(
+                    m_gptRepairResult.firstFailedStage);
+            writesCompleted = m_gptRepairResult.logicalSectorsWritten;
+            writeMayHaveReachedMedia =
+                m_gptRepairResult.writeMayHaveReachedMedia;
+            flushAttempted = m_gptRepairResult.flushAttempts != 0;
+            operationFlushStatus = m_gptRepairResult.flushStatus;
         }
         if (operationName && targetMatchesDisk) {
             add(right, rightCount, "Last storage operation", operationName);
@@ -9362,6 +9573,59 @@ void DiskManagerApp::runDeletePartitionOperation() {
     invalidate();
 }
 
+void DiskManagerApp::beginGptRepairConfirmation() {
+    if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED ||
+        m_selectedDisk < 0 || m_selectedDisk >= m_diskCount ||
+        m_selectedObject != SELECTED_DISK) return;
+    const DiskEntry& disk = m_disks[m_selectedDisk];
+    if (!disk.gptRepairAvailable) return;
+    memset(&m_gptRepairPlan, 0, sizeof(m_gptRepairPlan));
+    memset(&m_gptRepairResult, 0, sizeof(m_gptRepairResult));
+    storage::GptRepairRequest request = {};
+    request.targetSnapshot = disk.identity;
+    request.expectedRegistryGeneration = disk.identity.registryGeneration;
+    const storage::GptRepairStatus status = storage::prepare_gpt_repair(
+        request, m_gptRepairPlan, m_gptRepairResult);
+    if (status != storage::GPT_REPAIR_READY_FOR_CONFIRMATION) {
+        strcopy(m_statusMessage, m_gptRepairResult.diagnostic[0]
+            ? m_gptRepairResult.diagnostic : storage::gpt_repair_status_name(status),
+            sizeof(m_statusMessage));
+        scanDisks();
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
+    m_dialogIsGptRepair = true;
+    m_dialogIsDelete = false;
+    m_dialogIsCreate = false;
+    m_dialogIsFormat = false;
+    m_dialogIsReformat = false;
+    m_initializeMessage[0] = '\0';
+    m_initializeDialogState = INITIALIZE_DIALOG_GPT_REPAIR_CONFIRM;
+    strcopy(m_statusMessage, "Review the damaged side and authoritative GPT copy.",
+            sizeof(m_statusMessage));
+    updateInitializeControls();
+    invalidate();
+}
+
+void DiskManagerApp::runGptRepairOperation() {
+    if (!m_dialogIsGptRepair || m_initializeDialogState !=
+            INITIALIZE_DIALOG_GPT_REPAIR_CONFIRM ||
+        !m_gptRepairPlan.confirmationReady) return;
+    m_initializeDialogState = INITIALIZE_DIALOG_RUNNING;
+    m_gptRepairResult.stage = storage::GPT_REPAIR_STAGE_REVALIDATING;
+    updateInitializeControls();
+    invalidate();
+    storage::execute_gpt_repair(m_gptRepairPlan, m_gptRepairResult);
+    m_lastStorageOperation = 5;
+    strcopy(m_initializeMessage, m_gptRepairResult.diagnostic,
+            sizeof(m_initializeMessage));
+    scanDisks();
+    m_initializeDialogState = INITIALIZE_DIALOG_RESULT;
+    updateInitializeControls();
+    invalidate();
+}
+
 bool DiskManagerApp::updateCreateInputWidgets() {
     app::Widget* sizeInput = getWidget(m_createSizeTextBoxId);
     app::Widget* nameInput = getWidget(m_createNameTextBoxId);
@@ -9635,11 +9899,14 @@ void DiskManagerApp::closeInitializeDialog() {
         storage::cancel_initialize_disk(m_initializePlan);
     if (m_deletePlan.confirmationReady)
         storage::cancel_delete_partition(m_deletePlan);
+    if (m_gptRepairPlan.confirmationReady)
+        storage::cancel_gpt_repair(m_gptRepairPlan);
     m_initializeDialogState = INITIALIZE_DIALOG_CLOSED;
     m_dialogIsCreate = false;
     m_dialogIsFormat = false;
     m_dialogIsReformat = false;
     m_dialogIsDelete = false;
+    m_dialogIsGptRepair = false;
     m_createInputFocus = 0;
     m_initializeMessage[0] = '\0';
     updateInitializeControls();

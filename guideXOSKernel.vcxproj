@@ -305,6 +305,7 @@
     <ClCompile Include="kernel\core\virtio_rng.cpp" />
     <ClCompile Include="kernel\core\storage_manager.cpp" />
     <ClCompile Include="kernel\core\partition_table.cpp" />
+    <ClCompile Include="kernel\core\gpt_repair.cpp" />
     <ClCompile Include="kernel\core\disk_initialization.cpp" />
     <ClCompile Include="kernel\core\partition_operations.cpp" />
     <ClCompile Include="kernel\core\fat32_formatter.cpp" />
