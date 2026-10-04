@@ -153,16 +153,19 @@ sibling PacMan source now requires `sdk/include/guidexos/audio.h`, which is not
 present in this checkout, so its independent package rebuild cannot currently
 link. The build identity and ISO manifest record the package-reuse mode.
 
-Artifact fields will be filled after canonical build and ISO verification:
-
-- ISO path: pending
-- Size: pending
-- SHA-256: pending
-- Manifest / sidecar: pending
-- Manifest build identity and source commit: pending
-- ESP `build-identity.txt` ID: pending
-- Kernel SHA-256: pending
-- QEMU boot/readiness result and serial-log path: pending
+- ISO: `dist/guideXOS-Server-v0.1.0-phase25-aida-i219-spt-tx-snoop-amd64.iso`
+- Size: `91,293,696` bytes
+- SHA-256: `7450263cfed9d8e951b85bd2b68fd7b0d82911f6f8e41780d5e315a4fd7c60e5`
+- SHA-256 sidecar: `dist/guideXOS-Server-v0.1.0-phase25-aida-i219-spt-tx-snoop-amd64.iso.sha256`
+- Manifest: `dist/guideXOS-Server-v0.1.0-phase25-aida-i219-spt-tx-snoop-amd64.manifest.json`
+- Manifest build identity: `GXOS-P7-4-66a510f5708c-0393d81b-80a9-41a2-ae1a-59269196179c`
+- Manifest source commit: `66a510f5708c67ee28fe6a9db8dc01ff22b4db86`
+- ESP `build-identity.txt` ID: `GXOS-P7-4-371bbe10419941599b8cc89f7f4f977f`
+- Kernel SHA-256: `c8632230ce6a79588882f9d2893e88b49522a86f12c99384f41bdbb90f044877`
+- Structural verification: PASS; UEFI El Torito platform ID `0xEF`, bootable no-emulation image.
+- Build settings: AMD64, Phase 5 stage 8, Phase 6 stage 0, Phase 7 stage 4, constrained-low TX DMA experiment; tracked PacMan package reused.
+- QEMU: all seven firmware, bootloader, kernel, ramdisk, desktop-ready, and main-loop markers observed. Serial log: `out/release-iso/qemu-test-927fb90741894f5db2a61d69a8020307/serial.log`
+- QEMU serial log SHA-256: `35252377e720588b4f668e15147112351fef06d5f67b4dba4fbf8e85240a78c0`
 
 The phase marker is intentionally not advanced while AIDA_LPT physical
 evidence is pending. Next expected phase: **PHASE25 physical test completion**.
