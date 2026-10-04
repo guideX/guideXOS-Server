@@ -132,9 +132,10 @@ enum class NavigatorScriptStatePseudo : std::uint8_t {
     NthLastOfType,
     Root,
     Empty,
+    Not,
 };
 
-struct NavigatorScriptSimpleSelectorDescriptor {
+struct NavigatorScriptSimpleSelectorCoreDescriptor {
     bool valid = false;
     bool universal = false;
     std::uint8_t tagOffset = 0;
@@ -156,8 +157,24 @@ struct NavigatorScriptSimpleSelectorDescriptor {
     std::uint8_t attributeValueLength = 0;
     NavigatorScriptStatePseudo statePseudo =
         NavigatorScriptStatePseudo::None;
+};
+
+struct NavigatorScriptSimpleSelectorDescriptor :
+    NavigatorScriptSimpleSelectorCoreDescriptor {
+    using ClassTokenRange =
+        NavigatorScriptSimpleSelectorCoreDescriptor::ClassTokenRange;
     std::int16_t nthA = 0;
     std::int16_t nthB = 0;
+    // :not() stores exactly one nonfunctional inner simple selector. The core
+    // has no nested negation or nth-expression fields, so this is bounded and
+    // cannot form a recursive descriptor.
+    NavigatorScriptSimpleSelectorCoreDescriptor notSelector;
+};
+
+enum class NavigatorScriptSelectorMatchResult : std::uint8_t {
+    Invalid = 0u,
+    NoMatch,
+    Match,
 };
 
 struct NavigatorScriptSelectorMemberDescriptor {
@@ -425,13 +442,32 @@ private:
     bool selectorDescriptorEquals(
         const NavigatorScriptSelectorDescriptor& left,
         const NavigatorScriptSelectorDescriptor& right) const;
+    NavigatorScriptSelectorMatchResult selectorCoreConditionsMatchResult(
+        const gxos::web::HtmlElementRef& element,
+        const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
+        const NavigatorScriptSelectorDescriptor& storage) const;
+    NavigatorScriptSelectorMatchResult selectorCoreElementMatchResult(
+        const gxos::web::HtmlElementRef& element,
+        const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
+        std::int16_t nthA, std::int16_t nthB,
+        const NavigatorScriptSelectorDescriptor& storage,
+        bool strictPseudoValidation = false) const;
+    NavigatorScriptSelectorMatchResult selectorSimpleElementMatchResult(
+        const gxos::web::HtmlElementRef& element,
+        const NavigatorScriptSimpleSelectorDescriptor& selector,
+        const NavigatorScriptSelectorDescriptor& storage) const;
     bool selectorSimpleElementMatches(
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSimpleSelectorDescriptor& selector,
         const NavigatorScriptSelectorDescriptor& storage) const;
+    NavigatorScriptSelectorMatchResult selectorStatePseudoMatchResult(
+        const gxos::web::HtmlElementRef& element,
+        const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
+        std::int16_t nthA, std::int16_t nthB) const;
     bool selectorStatePseudoMatches(
         const gxos::web::HtmlElementRef& element,
-        const NavigatorScriptSimpleSelectorDescriptor& selector) const;
+        const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
+        std::int16_t nthA, std::int16_t nthB) const;
     bool resolveStructuralIndex(
         const gxos::web::HtmlElementRef& element, bool sameType,
         bool fromEnd, std::size_t& index) const;

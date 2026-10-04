@@ -4636,6 +4636,43 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js58AfterClick, 1800) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js59FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js59.html";
+    const bool js59Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js59FixtureUrl);
+    const std::string js59InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS59 hosted bounded :not() fixture loads and evaluates",
+        js59Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js59FixtureUrl &&
+        contains(js59InitialText, "Navigator JavaScript JS59") &&
+        contains(js59InitialText,
+            "initial:not=true:attrs=true:queries=true:pseudo=true:relations=true:lists=true:live=true:malformed=true:event=false:nested=false:metadata=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js59Loaded) + ",text=" +
+        summarizeText(js59InitialText, 1500) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS59 hosted simple-selector negation and parser bounds pass",
+        js59Loaded && contains(js59InitialText,
+            ":not=true:attrs=true:queries=true:pseudo=true:relations=true:lists=true:live=true:malformed=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "tag, ID, class, attribute, :root, :empty, checked, disabled, and structural pseudos match through one bounded simple argument; nested functions and malformed argument grammar fail closed");
+    add("JS59 hosted selector queries and scoped matching pass",
+        js59Loaded && contains(js59InitialText,
+            ":queries=true:pseudo=true:relations=true:lists=true:live=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "querySelector, querySelectorAll, and scoped queries apply :not() while preserving selector-list and structural order");
+    const bool js59Click = gxos::apps::Navigator::SmokeClickFormControlById(
+        "event-target");
+    const std::string js59AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS59 hosted Event matching and nested dispatch preserve metadata",
+        js59Click && contains(js59AfterClick,
+            "event:not=true:attrs=true:queries=true:pseudo=true:relations=true:lists=true:live=true:malformed=true:event=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js59Click) + ",text=" +
+        summarizeText(js59AfterClick, 1500) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

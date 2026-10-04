@@ -500,7 +500,7 @@ document.getElementById("event-empty").addEventListener("click", function (event
   var target = event.target;
   var current = event.currentTarget;
   var phase = event.eventPhase;
-  eventEmptyMatch = target.matches(":empty") && target.closest("button:empty") === target;
+  eventEmptyMatch = target.matches(":empty") && target.closest("input:empty") === target;
   document.getElementById("event-nested").click();
   nestedEventPreserved = event.target === target &&
     event.currentTarget === current && event.eventPhase === phase;
@@ -687,10 +687,10 @@ int main()
     const std::size_t selectorDescriptor = sizeof(
         gxos::javascript::NavigatorScriptSelectorDescriptor);
     const std::size_t collectionRecord = (16u + selectorDescriptor + 7u) / 8u * 8u;
-    expect(simpleSelector == 36u && selectorDescriptor == 556u &&
-        collectionRecord == 576u && collectionRecord *
-            gxos::javascript::kNavigatorScriptMaxSelectorCollections == 73728u,
-        "JS58 pseudo reuses the existing descriptor and collection storage");
+    expect(simpleSelector == 68u && selectorDescriptor == 812u &&
+        collectionRecord == 832u && collectionRecord *
+            gxos::javascript::kNavigatorScriptMaxSelectorCollections == 106496u,
+        "JS59 adds a bounded inner core while preserving fixed collection storage");
 
     if (failures != 0) {
         std::cerr << failures << " JS58 test failure(s) across " << checks

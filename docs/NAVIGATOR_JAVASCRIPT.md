@@ -6032,6 +6032,101 @@ source change. `git diff --check` passed before commit.
 
 Script and style remain outside the selector domain because the structural
 model does not represent them as Elements; no raw-source or layout fallback
-was added. A useful next bounded milestone is **JS59 `:first-of-type`**, based
-on existing structural sibling traversal and tag identity, with no new
-per-document storage.
+was added. The next bounded milestone is **JS59: one-level `:not()` over a single supported simple selector**.
+
+## JS59: bounded `:not()` pseudo-class
+
+JS59 implements the nonfunctional selector pseudo `:not(argument)` for one
+supported simple selector argument. The argument is parsed when the complete
+selector is parsed and retained inline in the fixed-size selector descriptor.
+Matching does not reparse selector text. The argument may contain the existing
+optional tag or universal selector, ID, bounded class tokens, one attribute
+predicate, or one supported nonfunctional state pseudo. Existing outer
+compounds, one-relation selectors, and selector lists can use `:not()` within
+their current bounds.
+
+The argument cannot contain a selector list, a relation or combinator, another
+`:not()`, a functional nth pseudo, an empty argument, or an unsupported
+functional pseudo. The existing single trailing outer-pseudo rule remains in
+force. A selector such as `button:disabled:not(.primary)` therefore remains
+outside the grammar; callers can express one inner pseudo with other simple
+conditions inside the negation, for example `:not(button.primary)`.
+ASCII pseudo-name case handling and whitespace around the argument follow the
+existing parser rules. The complete selector remains limited to 256 bytes.
+
+The parser stores one `NavigatorScriptSimpleSelectorCoreDescriptor` beside
+each complete simple-selector descriptor. The core has no nth parameters and
+cannot contain another negation descriptor, so functional depth is fixed at
+one. Parsing re-enters the simple-core helper once for the argument; the
+`allowNot=false` guard rejects nested `:not()` and functional nth forms before
+another helper re-entry. Matching does not recurse. Matching returns
+`Invalid`, `NoMatch`, or `Match`; only a valid inner `NoMatch` is inverted to
+`Match`. Invalid or stale Elements, incomplete `:empty` content metadata,
+incoherent structural position metadata, invalid focus generations, and
+missing root authority do not become matches through negation. `:not()` shares
+the ordinary matcher for attributes, `:root`, `:empty`, form state, focus, and
+structural position.
+
+The same matcher serves `querySelector()`, live-on-read
+`querySelectorAll()`, `matches()`, `closest()`, scoped queries, relations,
+selector lists, and Event callbacks. Existing document order, list
+deduplication, canonical generation/serial identity, and stale-wrapper
+validation remain in force. Lists are outer syntax only; they are rejected
+inside the negation argument.
+
+The size accounting is **36 → 68 bytes** for one simple selector, **556 →
+812 bytes** for the four-member selector descriptor, **576 → 832 bytes** per
+collection record, and **73,728 → 106,496 bytes** for the 128-record registry.
+The fixed core is 32 bytes; the registry grows by **32,768 bytes**. These
+sizes are bounded by the existing four members and their eight embedded
+simple-selector slots. `HtmlElementRef` remains 440 bytes and each JS57/JS58
+content record remains 24 bytes. No per-document record or cache was added.
+
+Focused implementation and parser/runtime coverage live in
+`tests/navigator_javascript_js59_test.cpp` and
+`scripts/smoke-navigator-javascript-js59.ps1`. The hosted page is
+`navigator-smoke/javascript-js59.html`, and the production hosted aggregate
+contains dedicated JS59 checks. The former JS52 assertion that `:not()` was
+unsupported was narrowed to still-unsupported functional forms, so the full
+historical matrix continues to verify the new shared parser behavior.
+
+### JS59 closeout (2026-10-03)
+
+JS59 is **Outcome A: complete for the represented selector and Element model**.
+The focused suite passed **621/621** checks, including the warning-as-error
+bare-metal compile and strict parser/adapter/runtime syntax lane. The parser
+allows one bounded helper re-entry for the argument; nested functional input
+is rejected before another re-entry, functional depth is **1**, matching does
+not recurse, and match-time reparsing is **none**. The malformed sweep ran 40
+repeats across its bounded invalid-input set. Stress passed 1,000 repeated
+matches for class, `:empty`, and `:focus` negation, plus 320 held live-collection
+rereads.
+
+The full JavaScript matrix passed **57/57 lanes**: the three base lanes plus
+JS6 through JS59. Focused JS36–JS58 regressions passed **4,792 checks**; JS59
+adds 621, for **5,413 combined checks**. JS52's former `:not()` rejection
+assertion now continues to cover unsupported functional forms.
+
+All **four** new hosted JS59 checks passed. They cover basic and compound
+negation, tag/attribute/state/`:empty`/`:root` pseudos, live attribute
+collections, relations, selector-list order and deduplication, malformed
+grammar, and nested Event dispatch. The hosted aggregate reported **606
+passed / 7 failed / 613 total**. The seven failures are the existing CSS phase
+3C, CSS phase 3G, CSS phase 6A, three CSS phase 6B checks, and CSS phase 6C;
+there were no new JS59 failures. `build.bat` passed.
+
+The kernel wrapper stopped at the existing PacMan Native ELF link errors for
+`pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)`. The independent direct
+`mingw32-make ARCH=amd64 EXTRA_CFLAGS=` lane stopped at the existing Mbed TLS
+configuration errors in `mbedtls_check_config.h:51` and `:64`. Neither blocker
+was changed. The before/after artifact audit covered **409 files / 132,423,955
+bytes**; three PacMan objects were restored from the snapshot. Final hashes and
+lengths verified **0 changed / 0 missing / 0 extra** files. No fresh
+`ESP/kernel.elf` exists and `qemu-system-x86_64` is unavailable, so QEMU proof
+is not claimed. `git diff --check` passed before commit; generated outputs are
+excluded from the source commit.
+
+A bounded JS60 direction is `:is()` over one supported simple selector, using
+the same fixed-capacity grammar and rejecting inner lists, combinators, and
+nested functional pseudos.

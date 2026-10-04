@@ -374,7 +374,7 @@ bool storeSelectorClassTokens(SourceView source,
     std::array<SelectorSourceRange,
         kNavigatorScriptMaxClassQueryTokens>& tokens,
     std::size_t tokenCount, NavigatorScriptSelectorDescriptor& storage,
-    NavigatorScriptSimpleSelectorDescriptor& selector)
+    NavigatorScriptSimpleSelectorCoreDescriptor& selector)
 {
     if (tokenCount == 0u ||
         tokenCount > kNavigatorScriptMaxClassQueryTokens) return false;
@@ -413,7 +413,7 @@ bool storeSelectorClassTokens(SourceView source,
 
 bool parseCompoundClassTokens(SourceView source, std::size_t begin,
     std::size_t end, NavigatorScriptSelectorDescriptor& storage,
-    NavigatorScriptSimpleSelectorDescriptor& selector)
+    NavigatorScriptSimpleSelectorCoreDescriptor& selector)
 {
     std::array<SelectorSourceRange,
         kNavigatorScriptMaxClassQueryTokens> tokens{};
@@ -449,7 +449,7 @@ bool isSelectorAttributeValueCharacter(char character)
 
 bool parseAttributePredicate(SourceView source, std::size_t open,
     std::size_t end, NavigatorScriptSelectorDescriptor& storage,
-    NavigatorScriptSimpleSelectorDescriptor& selector,
+    NavigatorScriptSimpleSelectorCoreDescriptor& selector,
     std::size_t& afterPredicate)
 {
     if (open >= end || source.data[open] != '[' ||
@@ -653,7 +653,9 @@ bool parseNthExpression(SourceView argument, std::int16_t& a,
 }
 
 bool parseStatePseudo(SourceView source, std::size_t colon,
-    std::size_t end, NavigatorScriptSimpleSelectorDescriptor& selector)
+    std::size_t end, NavigatorScriptSimpleSelectorCoreDescriptor& selector,
+    std::int16_t& nthA, std::int16_t& nthB,
+    bool allowFunctionalPseudo)
 {
     if (source.data == nullptr || colon >= end || source.data[colon] != ':' ||
         colon + 1u >= end) return false;
@@ -708,7 +710,8 @@ bool parseStatePseudo(SourceView source, std::size_t colon,
         return true;
     }
 
-    if (end <= open + 1u || source.data[end - 1u] != ')') return false;
+    if (!allowFunctionalPseudo || end <= open + 1u ||
+        source.data[end - 1u] != ')') return false;
     for (std::size_t index = open + 1u; index + 1u < end; ++index) {
         if (source.data[index] == '(' || source.data[index] == ')')
             return false;
@@ -726,12 +729,71 @@ bool parseStatePseudo(SourceView source, std::size_t colon,
         return false;
 
     return parseNthExpression(SourceView(source.data + open + 1u,
-        end - open - 2u), selector.nthA, selector.nthB);
+        end - open - 2u), nthA, nthB);
 }
 
-bool parseSimpleSelector(SourceView source, std::size_t begin,
+bool isNotPseudoFunction(SourceView source, std::size_t colon,
+    std::size_t end, std::size_t& open)
+{
+    open = end;
+    if (source.data == nullptr || colon >= end || source.data[colon] != ':')
+        return false;
+    for (std::size_t index = colon + 1u; index < end; ++index) {
+        if (source.data[index] == '(') {
+            open = index;
+            break;
+        }
+    }
+    if (open == end || open - colon - 1u != 3u) return false;
+    return lowerAscii(static_cast<unsigned char>(source.data[colon + 1u])) ==
+            static_cast<unsigned char>('n') &&
+        lowerAscii(static_cast<unsigned char>(source.data[colon + 2u])) ==
+            static_cast<unsigned char>('o') &&
+        lowerAscii(static_cast<unsigned char>(source.data[colon + 3u])) ==
+            static_cast<unsigned char>('t');
+}
+
+bool findNotArgumentClose(SourceView source, std::size_t open,
+    std::size_t end, std::size_t& close)
+{
+    close = end;
+    if (source.data == nullptr || open >= end || source.data[open] != '(')
+        return false;
+    bool insideAttribute = false;
+    char quote = '\0';
+    for (std::size_t index = open + 1u; index < end; ++index) {
+        const char character = source.data[index];
+        if (insideAttribute) {
+            if (quote != '\0') {
+                if (character == quote) quote = '\0';
+            } else if (character == '"' || character == '\'') {
+                quote = character;
+            } else if (character == '[') {
+                return false;
+            } else if (character == ']') {
+                insideAttribute = false;
+            }
+            continue;
+        }
+        if (character == '[') {
+            insideAttribute = true;
+            continue;
+        }
+        if (character == '(') return false;
+        if (character == ')') {
+            close = index;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool parseSimpleSelectorCore(SourceView source, std::size_t begin,
     std::size_t end, NavigatorScriptSelectorDescriptor& storage,
-    NavigatorScriptSimpleSelectorDescriptor& selector)
+    NavigatorScriptSimpleSelectorCoreDescriptor& selector,
+    std::int16_t& nthA, std::int16_t& nthB,
+    NavigatorScriptSimpleSelectorCoreDescriptor* notSelector,
+    bool allowNot, bool allowFunctionalPseudo)
 {
     if (begin == end) return false;
 
@@ -783,9 +845,32 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
     }
 
     if (position < end && source.data[position] == ':') {
-        if (!parseStatePseudo(source, position, end, selector))
-            return false;
-        position = end;
+        std::size_t notOpen = end;
+        if (isNotPseudoFunction(source, position, end, notOpen)) {
+            if (!allowNot || notSelector == nullptr) return false;
+            std::size_t close = end;
+            if (!findNotArgumentClose(source, notOpen, end, close))
+                return false;
+            std::size_t innerBegin = notOpen + 1u;
+            std::size_t innerEnd = close;
+            while (innerBegin < innerEnd &&
+                isSelectorAsciiWhitespace(source.data[innerBegin]))
+                ++innerBegin;
+            while (innerEnd > innerBegin &&
+                isSelectorAsciiWhitespace(source.data[innerEnd - 1u]))
+                --innerEnd;
+            std::int16_t innerNthA = 0;
+            std::int16_t innerNthB = 0;
+            if (innerBegin == innerEnd || !parseSimpleSelectorCore(source,
+                    innerBegin, innerEnd, storage, *notSelector, innerNthA,
+                    innerNthB, nullptr, false, false)) return false;
+            selector.statePseudo = NavigatorScriptStatePseudo::Not;
+            position = close + 1u;
+        } else {
+            if (!parseStatePseudo(source, position, end, selector, nthA,
+                    nthB, allowFunctionalPseudo)) return false;
+            position = end;
+        }
     }
 
     if (position != end || (selector.tagLength == 0u &&
@@ -795,6 +880,14 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
         return false;
     selector.valid = true;
     return true;
+}
+
+bool parseSimpleSelector(SourceView source, std::size_t begin,
+    std::size_t end, NavigatorScriptSelectorDescriptor& storage,
+    NavigatorScriptSimpleSelectorDescriptor& selector)
+{
+    return parseSimpleSelectorCore(source, begin, end, storage, selector,
+        selector.nthA, selector.nthB, &selector.notSelector, true, true);
 }
 
 bool parseBoundedSelectorMember(SourceView source,
@@ -1041,14 +1134,14 @@ bool classTokenMatches(const std::string& className, SourceView selector)
 }
 
 bool classTokenSetMatches(const std::string& className,
-    const NavigatorScriptSimpleSelectorDescriptor& selector,
+    const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
     const NavigatorScriptSelectorDescriptor& storage)
 {
     if (selector.classTokenCount == 0u ||
         selector.classTokenCount > kNavigatorScriptMaxClassQueryTokens)
         return false;
     for (std::size_t index = 0; index < selector.classTokenCount; ++index) {
-        const NavigatorScriptSimpleSelectorDescriptor::ClassTokenRange& token =
+        const NavigatorScriptSimpleSelectorCoreDescriptor::ClassTokenRange& token =
             selector.classTokens[index];
         if (!classTokenMatches(className,
                 selectorPart(storage, token.offset, token.length))) return false;
@@ -3276,10 +3369,10 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
     if (left.memberCount != right.memberCount ||
         left.memberCount > kNavigatorScriptMaxSelectorListMembers)
         return false;
-    const auto simpleEqual = [](const NavigatorScriptSelectorDescriptor& left,
-        const NavigatorScriptSimpleSelectorDescriptor& leftSimple,
+    const auto coreEqual = [](const NavigatorScriptSelectorDescriptor& left,
+        const NavigatorScriptSimpleSelectorCoreDescriptor& leftSimple,
         const NavigatorScriptSelectorDescriptor& right,
-        const NavigatorScriptSimpleSelectorDescriptor& rightSimple) {
+        const NavigatorScriptSimpleSelectorCoreDescriptor& rightSimple) {
         if (leftSimple.valid != rightSimple.valid ||
             leftSimple.universal != rightSimple.universal ||
             leftSimple.tagLength != rightSimple.tagLength ||
@@ -3288,8 +3381,6 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
             leftSimple.hasAttributePredicate !=
                 rightSimple.hasAttributePredicate ||
             leftSimple.statePseudo != rightSimple.statePseudo ||
-            leftSimple.nthA != rightSimple.nthA ||
-            leftSimple.nthB != rightSimple.nthB ||
             leftSimple.attributeValuePresent !=
                 rightSimple.attributeValuePresent ||
             leftSimple.classTokenCount > kNavigatorScriptMaxClassQueryTokens ||
@@ -3330,6 +3421,18 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
                         rightSimple.attributeValueLength)))) return false;
         return true;
     };
+    const auto simpleEqual = [&coreEqual](
+        const NavigatorScriptSelectorDescriptor& left,
+        const NavigatorScriptSimpleSelectorDescriptor& leftSimple,
+        const NavigatorScriptSelectorDescriptor& right,
+        const NavigatorScriptSimpleSelectorDescriptor& rightSimple) {
+        if (leftSimple.nthA != rightSimple.nthA ||
+            leftSimple.nthB != rightSimple.nthB ||
+            !coreEqual(left, leftSimple, right, rightSimple)) return false;
+        return leftSimple.statePseudo != NavigatorScriptStatePseudo::Not ||
+            coreEqual(left, leftSimple.notSelector, right,
+                rightSimple.notSelector);
+    };
     for (std::size_t index = 0u; index < left.memberCount; ++index) {
         const NavigatorScriptSelectorMemberDescriptor& leftMember =
             left.members[index];
@@ -3344,57 +3447,257 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
     return true;
 }
 
-bool NavigatorScriptHostAdapter::selectorSimpleElementMatches(
+NavigatorScriptSelectorMatchResult
+NavigatorScriptHostAdapter::selectorCoreConditionsMatchResult(
     const gxos::web::HtmlElementRef& element,
-    const NavigatorScriptSimpleSelectorDescriptor& selector,
+    const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
     const NavigatorScriptSelectorDescriptor& storage) const
 {
-    if (!selector.valid || element.serial == 0u || element.tagName.empty())
-        return false;
-    if (document_ == nullptr || findElement(element.serial) != &element)
-        return false;
+    using MatchResult = NavigatorScriptSelectorMatchResult;
+    if (!selector.valid || storage.textLength >
+            kNavigatorScriptMaxSelectorLength || element.serial == 0u ||
+        element.tagName.empty() ||
+        document_ == nullptr || findElement(element.serial) != &element)
+        return MatchResult::Invalid;
+    const auto partIsBounded = [&storage](std::uint16_t offset,
+            std::uint16_t length) {
+        return offset <= storage.textLength &&
+            length <= storage.textLength - offset;
+    };
+    if (selector.classTokenCount > kNavigatorScriptMaxClassQueryTokens ||
+        !partIsBounded(selector.tagOffset, selector.tagLength) ||
+        !partIsBounded(selector.idOffset, selector.idLength) ||
+        (selector.hasAttributePredicate &&
+            (selector.attributeNameLength == 0u ||
+                selector.attributeNameLength >
+                    kNavigatorScriptMaxSelectorAttributeNameLength ||
+                selector.attributeValueLength >
+                    kNavigatorScriptMaxSelectorAttributeValueLength ||
+                !partIsBounded(selector.attributeNameOffset,
+                    selector.attributeNameLength) ||
+                !partIsBounded(selector.attributeValueOffset,
+                    selector.attributeValueLength))))
+        return MatchResult::Invalid;
+    for (std::size_t index = 0u; index < selector.classTokenCount; ++index) {
+        const NavigatorScriptSimpleSelectorCoreDescriptor::ClassTokenRange& token =
+            selector.classTokens[index];
+        if (token.length == 0u ||
+            !partIsBounded(token.offset, token.length))
+            return MatchResult::Invalid;
+    }
 
     const SourceView tag = selectorPart(storage, selector.tagOffset,
         selector.tagLength);
     const SourceView id = selectorPart(storage, selector.idOffset,
         selector.idLength);
     if (selector.tagLength != 0u &&
-        !selectorTagEquals(element.tagName, tag)) return false;
+        !selectorTagEquals(element.tagName, tag)) return MatchResult::NoMatch;
     if (selector.idLength != 0u &&
         !selectorTextEquals(SourceView(element.id.data(), element.id.size()),
-            id)) return false;
+            id)) return MatchResult::NoMatch;
     if (selector.classTokenCount != 0u &&
         !classTokenSetMatches(element.className, selector, storage))
-        return false;
+        return MatchResult::NoMatch;
     if (selector.hasAttributePredicate) {
-        if (selector.attributeNameLength == 0u ||
-            selector.attributeNameLength >
-                kNavigatorScriptMaxSelectorAttributeNameLength ||
-            (selector.attributeValuePresent &&
-                selector.attributeValueLength >
-                    kNavigatorScriptMaxSelectorAttributeValueLength))
-            return false;
         SourceView retainedValue;
         if (!resolveElementAttribute(element.serial,
                 selectorPart(storage, selector.attributeNameOffset,
-                    selector.attributeNameLength), retainedValue)) return false;
+                    selector.attributeNameLength), retainedValue))
+            return MatchResult::NoMatch;
         if (selector.attributeValuePresent &&
             !selectorTextEquals(retainedValue,
                 selectorPart(storage, selector.attributeValueOffset,
-                    selector.attributeValueLength))) return false;
+                    selector.attributeValueLength)))
+            return MatchResult::NoMatch;
     }
-    if (selector.statePseudo != NavigatorScriptStatePseudo::None &&
-        !selectorStatePseudoMatches(element, selector))
-        return false;
-    return selector.tagLength != 0u || selector.idLength != 0u ||
-        selector.classTokenCount != 0u || selector.hasAttributePredicate ||
-        selector.universal ||
-        selector.statePseudo != NavigatorScriptStatePseudo::None;
+    return MatchResult::Match;
+}
+
+NavigatorScriptSelectorMatchResult
+NavigatorScriptHostAdapter::selectorCoreElementMatchResult(
+    const gxos::web::HtmlElementRef& element,
+    const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
+    std::int16_t nthA, std::int16_t nthB,
+    const NavigatorScriptSelectorDescriptor& storage,
+    bool strictPseudoValidation) const
+{
+    using MatchResult = NavigatorScriptSelectorMatchResult;
+    const MatchResult conditions = selectorCoreConditionsMatchResult(element,
+        selector, storage);
+    if (conditions != MatchResult::Match) return conditions;
+    if (selector.statePseudo == NavigatorScriptStatePseudo::None) {
+        const bool hasSimpleCondition = selector.tagLength != 0u ||
+            selector.idLength != 0u || selector.classTokenCount != 0u ||
+            selector.hasAttributePredicate || selector.universal;
+        return hasSimpleCondition ? MatchResult::Match : MatchResult::Invalid;
+    }
+    if (selector.statePseudo == NavigatorScriptStatePseudo::Not)
+        return MatchResult::Invalid;
+    if (!strictPseudoValidation)
+        return selectorStatePseudoMatches(element, selector, nthA, nthB)
+            ? MatchResult::Match : MatchResult::NoMatch;
+    return selectorStatePseudoMatchResult(element, selector, nthA, nthB);
+}
+
+NavigatorScriptSelectorMatchResult
+NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
+    const gxos::web::HtmlElementRef& element,
+    const NavigatorScriptSimpleSelectorDescriptor& selector,
+    const NavigatorScriptSelectorDescriptor& storage) const
+{
+    using MatchResult = NavigatorScriptSelectorMatchResult;
+    const NavigatorScriptSimpleSelectorCoreDescriptor& core = selector;
+    if (core.statePseudo != NavigatorScriptStatePseudo::Not)
+        return selectorCoreElementMatchResult(element, core, selector.nthA,
+            selector.nthB, storage);
+
+    const MatchResult conditions = selectorCoreConditionsMatchResult(element,
+        core, storage);
+    if (conditions != MatchResult::Match) return conditions;
+    if (!selector.notSelector.valid) return MatchResult::Invalid;
+    const MatchResult inner = selectorCoreElementMatchResult(element,
+        selector.notSelector, 0, 0, storage, true);
+    if (inner == MatchResult::Invalid) return MatchResult::Invalid;
+    return inner == MatchResult::Match ? MatchResult::NoMatch :
+        MatchResult::Match;
+}
+
+bool NavigatorScriptHostAdapter::selectorSimpleElementMatches(
+    const gxos::web::HtmlElementRef& element,
+    const NavigatorScriptSimpleSelectorDescriptor& selector,
+    const NavigatorScriptSelectorDescriptor& storage) const
+{
+    return selectorSimpleElementMatchResult(element, selector, storage) ==
+        NavigatorScriptSelectorMatchResult::Match;
+}
+
+NavigatorScriptSelectorMatchResult
+NavigatorScriptHostAdapter::selectorStatePseudoMatchResult(
+    const gxos::web::HtmlElementRef& element,
+    const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
+    std::int16_t nthA, std::int16_t nthB) const
+{
+    using MatchResult = NavigatorScriptSelectorMatchResult;
+    const NavigatorScriptStatePseudo pseudo = selector.statePseudo;
+    if (document_ == nullptr || element.serial == 0u ||
+        findElement(element.serial) != &element ||
+        pseudo == NavigatorScriptStatePseudo::None ||
+        pseudo == NavigatorScriptStatePseudo::Not)
+        return MatchResult::Invalid;
+
+    // A false legacy pseudo result can mean either a real non-match or
+    // incomplete authority. Reject the latter before :not() can invert it.
+    if (pseudo == NavigatorScriptStatePseudo::Empty) {
+        if (document_->structuralElements.size() !=
+                document_->contentMetadata.size() ||
+            document_->contentMetadata.size() > limits_.maxDocumentNodes ||
+            element.serial > document_->contentMetadata.size())
+            return MatchResult::Invalid;
+        const gxos::web::HtmlElementContentMetadata& content =
+            document_->contentMetadata[
+                static_cast<std::size_t>(element.serial - 1u)];
+        if (content.serial != element.serial ||
+            !content.contentMetadataComplete) return MatchResult::Invalid;
+        const std::size_t structuralChildCount =
+            elementChildCount(element.serial);
+        if (element.childCount != structuralChildCount ||
+            content.elementChildCount != structuralChildCount)
+            return MatchResult::Invalid;
+    } else if (pseudo == NavigatorScriptStatePseudo::Disabled) {
+        if (element.tagName == "option") {
+            HostInstanceId selectSerial = 0u;
+            std::size_t optionIndex = 0u;
+            if (!optionIndexFor(element.serial, selectSerial, optionIndex) ||
+                formControlBlock(selectSerial) == nullptr)
+                return MatchResult::Invalid;
+        } else if (element.tagName == "fieldset" ||
+                element.tagName == "input" ||
+                element.tagName == "button" ||
+                element.tagName == "textarea" ||
+                element.tagName == "select") {
+            if (!element.formControl.metadataComplete)
+                return MatchResult::Invalid;
+            const bool supported = element.tagName == "fieldset" ||
+                element.formControl.supported;
+            if (supported && element.tagName != "fieldset" &&
+                formRuntimeState(element.serial) == nullptr)
+                return MatchResult::Invalid;
+        }
+    } else if (pseudo == NavigatorScriptStatePseudo::Checked) {
+        if (element.tagName == "input" &&
+            isCheckableFormElement(element.serial) &&
+            formRuntimeState(element.serial) == nullptr)
+            return MatchResult::Invalid;
+        if (element.tagName == "option") {
+            HostInstanceId selectSerial = 0u;
+            std::size_t optionIndex = 0u;
+            if (!optionIndexFor(element.serial, selectSerial, optionIndex) ||
+                formControlBlock(selectSerial) == nullptr)
+                return MatchResult::Invalid;
+        }
+    } else if (pseudo == NavigatorScriptStatePseudo::Focus) {
+        const gxos::web::FormRuntimeStateTable& runtime =
+            document_->formRuntimeState;
+        if (!runtime.initialized || runtime.documentGeneration == 0u)
+            return MatchResult::Invalid;
+        if (runtime.focusValid) {
+            if (runtime.focusedLogicalSerial == 0u ||
+                runtime.focusedDocumentGeneration !=
+                    runtime.documentGeneration ||
+                findElement(runtime.focusedLogicalSerial) == nullptr)
+                return MatchResult::Invalid;
+        } else if (runtime.focusedLogicalSerial != 0u ||
+                runtime.focusedDocumentGeneration != 0u) {
+            return MatchResult::Invalid;
+        }
+    } else if (pseudo == NavigatorScriptStatePseudo::Root) {
+        if (!document_->hasDocumentElement ||
+            document_->documentElement.serial == 0u)
+            return MatchResult::Invalid;
+        const gxos::web::HtmlElementRef* root =
+            findElement(document_->documentElement.serial);
+        if (root == nullptr || root->parentSerial != 0u)
+            return MatchResult::Invalid;
+    } else if (pseudo == NavigatorScriptStatePseudo::FirstChild ||
+            pseudo == NavigatorScriptStatePseudo::LastChild ||
+            pseudo == NavigatorScriptStatePseudo::OnlyChild ||
+            pseudo == NavigatorScriptStatePseudo::FirstOfType ||
+            pseudo == NavigatorScriptStatePseudo::LastOfType ||
+            pseudo == NavigatorScriptStatePseudo::OnlyOfType ||
+            pseudo == NavigatorScriptStatePseudo::NthChild ||
+            pseudo == NavigatorScriptStatePseudo::NthLastChild ||
+            pseudo == NavigatorScriptStatePseudo::NthOfType ||
+            pseudo == NavigatorScriptStatePseudo::NthLastOfType) {
+        if (document_->structuralElements.size() > limits_.maxDocumentNodes)
+            return MatchResult::Invalid;
+        HostInstanceId parentSerial = 0u;
+        if (!resolveStructuralParentSerial(element.serial, parentSerial))
+            return MatchResult::Invalid;
+        if (parentSerial == 0u) {
+            if (document_->hasDocumentElement &&
+                document_->documentElement.serial == element.serial)
+                return MatchResult::NoMatch;
+            return MatchResult::Invalid;
+        }
+        const bool sameType = pseudo ==
+                NavigatorScriptStatePseudo::FirstOfType ||
+            pseudo == NavigatorScriptStatePseudo::LastOfType ||
+            pseudo == NavigatorScriptStatePseudo::OnlyOfType ||
+            pseudo == NavigatorScriptStatePseudo::NthOfType ||
+            pseudo == NavigatorScriptStatePseudo::NthLastOfType;
+        std::size_t structuralIndex = 0u;
+        if (!resolveStructuralIndex(element, sameType, false,
+                structuralIndex)) return MatchResult::Invalid;
+    }
+
+    return selectorStatePseudoMatches(element, selector, nthA, nthB)
+        ? MatchResult::Match : MatchResult::NoMatch;
 }
 
 bool NavigatorScriptHostAdapter::selectorStatePseudoMatches(
     const gxos::web::HtmlElementRef& element,
-    const NavigatorScriptSimpleSelectorDescriptor& selector) const
+    const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
+    std::int16_t nthA, std::int16_t nthB) const
 {
     const NavigatorScriptStatePseudo pseudo = selector.statePseudo;
     if (document_ == nullptr || element.serial == 0u ||
@@ -3587,8 +3890,8 @@ bool NavigatorScriptHostAdapter::selectorStatePseudoMatches(
         if (!resolveStructuralIndex(element, sameType, fromEnd, index))
             return false;
 
-        const std::int32_t a = selector.nthA;
-        const std::int32_t b = selector.nthB;
+        const std::int32_t a = nthA;
+        const std::int32_t b = nthB;
         if (index == 0u) return false;
         if (a == 0) return static_cast<std::int32_t>(index) == b;
         if (a > 0) {
@@ -3599,6 +3902,8 @@ bool NavigatorScriptHostAdapter::selectorStatePseudoMatches(
         const std::int32_t step = -a;
         return delta >= 0 && delta % step == 0;
     }
+    case NavigatorScriptStatePseudo::Not:
+        return false;
     }
     return false;
 }

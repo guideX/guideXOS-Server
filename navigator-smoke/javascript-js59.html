@@ -1,0 +1,115 @@
+<!doctype html>
+<html id="root">
+<head><title>Navigator JavaScript JS59</title></head>
+<body id="body">
+<h1>Navigator JavaScript JS59</h1>
+<div id="panel" class="panel active" data-role="save">
+  <button id="primary" class="action primary" data-role="submit">Save</button>
+  <button id="secondary" class="action" data-state="pending">Next</button>
+  <div id="primary-div" class="primary"></div>
+  <div id="item-ready" class="item" data-state="ready"></div>
+  <div id="item-pending" class="item" data-state="pending" data-label=")"></div>
+  <div id="item-disabled" class="item disabled" data-state="busy"></div>
+  <input id="checked" type="checkbox" checked>
+  <input id="unchecked" type="checkbox">
+  <input id="disabled-input" type="checkbox" disabled>
+  <fieldset id="disabled-group" disabled><input id="inherited-disabled" type="text"></fieldset>
+  <input id="field-a" class="field" type="text">
+  <input id="field-b" class="field" type="text">
+  <label id="label" class="label">Name</label><input id="related-input" type="text">
+  <span id="marker" class="marker"></span><span id="sibling-a" class="item"></span>
+  <span id="sibling-b" class="item"></span>
+  <div id="positions"><span id="first-child" class="position"></span><span id="middle-child" class="position"></span><span id="last-child" class="position"></span></div>
+  <div id="types"><span id="type-first"></span><b id="type-b"></b><span id="type-last"></span></div>
+  <div id="only-parent"><b id="only-child"></b></div>
+  <div id="empty" class="slot" data-empty=""></div><div id="text" class="slot">hello</div>
+  <div id="space" class="slot">   </div><div id="comment" class="slot"><!--comment--></div>
+  <div id="child" class="slot"><i></i></div>
+  <div id="quoted" data-label=")" data-note="two words"></div>
+  <input id="event-target" type="button" value="Run">
+  <input id="event-nested" type="button" value="Nested">
+</div>
+<pre id="result">initial</pre>
+<script>
+var js59Not = document.getElementById("item-pending").matches(":not(.disabled)") &&
+  !document.getElementById("item-disabled").matches(":not(.disabled)") &&
+  document.getElementById("root").matches(":not(div)") &&
+  !document.getElementById("panel").matches(":not(#panel)") &&
+  document.getElementById("primary-div").matches(":not(button.primary)") &&
+  !document.getElementById("primary").matches(":not(button.primary)") &&
+  document.getElementById("empty").matches(":NOT( :EMPTY )") === false;
+var js59Attributes = document.getElementById("item-pending").matches(
+  ":not([data-state=ready])") &&
+  !document.getElementById("item-ready").matches(
+    ":not([data-state=ready])");
+var js59Queries = document.querySelector("button:not(.primary)") ===
+  document.getElementById("secondary") &&
+  document.querySelectorAll(".item:not([data-state=ready])").length === 4 &&
+  document.getElementById("panel").querySelector(".item:not(.disabled)") ===
+    document.getElementById("item-ready") &&
+  document.getElementById("panel").querySelector(".panel") === null;
+var js59Pseudo = document.getElementById("root").matches(":not(:root)") === false &&
+  document.getElementById("panel").matches(":not(:root)") &&
+  document.getElementById("text").matches(":not(:empty)") &&
+  !document.getElementById("empty").matches(":not(:empty)") &&
+  document.getElementById("unchecked").matches(":not(:checked)") &&
+  !document.getElementById("checked").matches(":not(:checked)") &&
+  document.getElementById("secondary").matches(":not(:disabled)") &&
+  !document.getElementById("disabled-input").matches(":not(:disabled)") &&
+  !document.getElementById("inherited-disabled").matches(
+    ":not(:disabled)");
+var js59Relations = document.querySelector(
+  ".panel:not(.disabled) > button:not(.primary)") ===
+    document.getElementById("secondary") &&
+  document.querySelector(".marker:not(.disabled) ~ .item:not(.disabled)") ===
+    document.getElementById("sibling-a");
+var js59List = document.querySelectorAll(
+  "button:not(.disabled), #primary:not(.disabled)");
+var js59Lists = js59List.length === 2 &&
+  js59List[0] === document.getElementById("primary") &&
+  js59List[1] === document.getElementById("secondary");
+var js59LiveItems = document.querySelectorAll(
+  ".item:not([data-state=ready])");
+var js59LiveAttributes = js59LiveItems.length === 4;
+document.getElementById("item-pending").setAttribute("data-state", "ready");
+js59LiveAttributes = js59LiveAttributes && js59LiveItems.length === 3 &&
+  document.getElementById("item-pending").matches(
+    ":not([data-state=ready])") === false;
+document.getElementById("item-pending").setAttribute("data-state", "pending");
+js59LiveAttributes = js59LiveAttributes && js59LiveItems.length === 4;
+var js59Malformed = document.querySelector(":not(.a,.b)") === null &&
+  document.querySelector(":not(.a > .b)") === null &&
+  document.querySelector(":not(:not(.a))") === null &&
+  document.querySelector(":not(:nth-child(2))") === null &&
+  document.querySelector(":not(.a):focus") === null;
+var js59Event = false;
+var js59Nested = false;
+var js59Metadata = false;
+document.getElementById("event-target").addEventListener("click", function (event) {
+  var target = event.target;
+  var current = event.currentTarget;
+  var phase = event.eventPhase;
+  js59Event = target.matches(":not(:disabled)") &&
+    target.closest(".panel:not(.disabled)") === document.getElementById("panel");
+  document.getElementById("event-nested").click();
+  js59Nested = event.target === target && event.currentTarget === current &&
+    event.eventPhase === phase;
+  js59Metadata = event.relatedTarget === null &&
+    event.defaultPrevented === false && phase === 2;
+  js59Snapshot("event");
+});
+document.getElementById("event-nested").addEventListener("click", function (event) {
+  js59Event = js59Event && event.target.matches("input:not(:disabled)");
+});
+function js59Snapshot(label) {
+  document.getElementById("result").textContent = label + ":not=" + js59Not +
+  ":attrs=" + js59Attributes + ":queries=" + js59Queries +
+  ":pseudo=" + js59Pseudo + ":relations=" + js59Relations +
+  ":lists=" + js59Lists + ":live=" + js59LiveAttributes +
+  ":malformed=" + js59Malformed + ":event=" + js59Event +
+  ":nested=" + js59Nested + ":metadata=" + js59Metadata;
+}
+js59Snapshot("initial");
+</script>
+</body>
+</html>
