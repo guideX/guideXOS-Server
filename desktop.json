@@ -1,5 +1,5 @@
 {
-  "wallpaper": "/system/wallpapers/ameobagx.png",
+  "wallpaper": "",
   "desktop.wallpaper.id": "legacy_ameobagx",
   "desktop.theme.id": "classic",
   "desktop.background.scale": "fill",
@@ -10,10 +10,10 @@
   "desktop.display.resolution": "1024x768",
   "desktop.clock.timeZoneId": "pacific",
   "desktop.clock.use24HourTime": false,
-  "pinned": ["App Model Demo","Future GXApp Package","Hello World","HelloWorld ELF","Native App Debug Viewer","Resource Viewer","Nexgen PacMan","ComputerFiles","Trash","guideXOS Developer Studio","Audio Beep","PacMan PGM1 Ready Input Validation","Missile Command (MC5)"],
-  "pinnedAppIds": ["gxos.builtin.appmodeldemo","com.guidexos.examples.futuregxapp","com.guidexos.helloworld","com.guidexos.examples.helloworld","gxos.builtin.nativeappdebugviewer","com.guidexos.resourceviewer","com.guidexos.pacman","","gxos.builtin.trash","com.guidexos.developerstudio","com.guidexos.audiobeep","com.guidexos.pacman.pgm1.ready-input-validation","com.guidexos.missilecommand"],
-  "recent": ["guideXOS Navigator","File Explorer","Missile Command (MC5)","guideXOS Developer Studio","Notepad","DisplayOptions","ControlPanel","Nexgen PacMan","Resource Viewer"],
-  "recentAppIds": ["guidexos.navigator","gxos.builtin.fileexplorer","com.guidexos.missilecommand","com.guidexos.developerstudio","gxos.builtin.notepad","gxos.builtin.displayoptions","gxos.builtin.controlpanel","com.guidexos.pacman","com.guidexos.resourceviewer"],
+  "pinned": ["App Model Demo","Native App Debug Viewer","Hello World","Resource Viewer","Audio Beep","Future GXApp Package","HelloWorld ELF","Missile Command (MC5)","Nexgen PacMan","PacMan PGM1 Ready Input Validation","guideXOS Developer Studio"],
+  "pinnedAppIds": ["gxos.builtin.appmodeldemo","gxos.builtin.nativeappdebugviewer","com.guidexos.helloworld","com.guidexos.resourceviewer","com.guidexos.audiobeep","com.guidexos.examples.futuregxapp","com.guidexos.examples.helloworld","com.guidexos.missilecommand","com.guidexos.pacman","com.guidexos.pacman.pgm1.ready-input-validation","com.guidexos.developerstudio"],
+  "recent": ["Notepad","File Explorer"],
+  "recentAppIds": ["gxos.builtin.notepad","gxos.builtin.fileexplorer"],
   "desktopShortcuts": [
   ],
   "showDesktopTrash": true,
