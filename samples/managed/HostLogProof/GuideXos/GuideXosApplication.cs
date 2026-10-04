@@ -72,6 +72,10 @@ public static unsafe class GuideXosApplicationRegistry
         new(7u, "Managed Task Manager"u8,
             static () => new Applications.ManagedTaskManagerC161()),
 #endif
+#if HOSTLOGPROOF_C163_MANAGED_FILE_EXPLORER
+        new(8u, "Managed File Explorer"u8,
+            static () => new Applications.ManagedFileExplorerC163()),
+#endif
     };
     private static readonly GuideXosManagedApplicationLifetime s_lifetime = new();
 #if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
@@ -256,12 +260,31 @@ public static unsafe class GuideXosApplicationRegistry
         }
         else if (result == GuideXosResult.Success &&
             (host.LaunchContext.IsInput || host.IsAction) &&
-            !host.IsCapabilityProbe && !host.IsAbiProbe &&
-            !GuideXosApplicationSnapshotC160Tests.VerifyProductionDispatch(
-                host, selector))
+            !host.IsCapabilityProbe && !host.IsAbiProbe)
         {
-            host.TryLog("C160-SNAPSHOT result=FAIL"u8);
-            return GxAbi.ErrorInvalidArgument;
+            bool fileExplorerClosed = false;
+            bool verified = false;
+#if HOSTLOGPROOF_C163_MANAGED_FILE_EXPLORER
+            if (selector == Applications.ManagedFileExplorerC163.ApplicationSelector &&
+                application is Applications.ManagedFileExplorerC163 fileExplorer &&
+                fileExplorer.CloseRequested)
+            {
+                verified = GuideXosApplicationSnapshotC160Tests.
+                    VerifyProductionClose(host, selector);
+                fileExplorerClosed = verified;
+            }
+            else
+#endif
+            {
+                verified = GuideXosApplicationSnapshotC160Tests.
+                    VerifyProductionDispatch(host, selector);
+            }
+            if (!verified)
+            {
+                host.TryLog("C160-SNAPSHOT result=FAIL"u8);
+                return GxAbi.ErrorInvalidArgument;
+            }
+            if (fileExplorerClosed) s_lifetime.Clear(selector);
         }
 #endif
 #if HOSTLOGPROOF_C158_MANAGED_CALCULATOR

@@ -369,9 +369,13 @@ internal static unsafe class GuideXosManagedTaskManagerC161Tests
     private static bool TestRegistrationAndSources()
     {
         GuideXosTaskManagerControllerC161 controller = new();
+        int expectedRegistryEntries = 4;
+#if HOSTLOGPROOF_C163_MANAGED_FILE_EXPLORER
+        expectedRegistryEntries = 5;
+#endif
         bool registered = controller.InitializeControls() &&
             controller.ControlCount == 4 && controller.ControlMaximum == 4 &&
-            GuideXosApplicationRegistry.RegistrationCount == 4 &&
+            GuideXosApplicationRegistry.RegistrationCount == expectedRegistryEntries &&
             controller.Controls.MaximumControlCount == 4 &&
             controller.SharedControlMaximum ==
                 GuideXosControlHost.MaximumSupportedControlCount &&

@@ -12,10 +12,12 @@ internal static unsafe class GuideXosApplicationSnapshotC160Tests
     private static bool s_hasSettingsIdentity;
     private static bool s_hasCalculatorIdentity;
     private static bool s_hasTaskManagerIdentity;
+    private static bool s_hasFileExplorerIdentity;
     private static GuideXosApplicationInstanceId s_notesIdentity;
     private static GuideXosApplicationInstanceId s_settingsIdentity;
     private static GuideXosApplicationInstanceId s_calculatorIdentity;
     private static GuideXosApplicationInstanceId s_taskManagerIdentity;
+    private static GuideXosApplicationInstanceId s_fileExplorerIdentity;
 
     public static bool Run(GuideXosHost host, uint selector)
     {
@@ -311,6 +313,7 @@ internal static unsafe class GuideXosApplicationSnapshotC160Tests
             5u => "com.guidexos.apps.managed.settingscenter"u8,
             6u => "com.guidexos.apps.managed.calculator"u8,
             7u => "com.guidexos.apps.managed.taskmanager"u8,
+            8u => "com.guidexos.apps.managed.fileexplorer"u8,
             _ => ReadOnlySpan<byte>.Empty,
         };
         bool selfFound = false;
@@ -375,6 +378,7 @@ internal static unsafe class GuideXosApplicationSnapshotC160Tests
             5u => "com.guidexos.apps.managed.settingscenter"u8,
             6u => "com.guidexos.apps.managed.calculator"u8,
             7u => "com.guidexos.apps.managed.taskmanager"u8,
+            8u => "com.guidexos.apps.managed.fileexplorer"u8,
             _ => ReadOnlySpan<byte>.Empty,
         };
         if (expectedApplicationId.IsEmpty) return false;
@@ -397,6 +401,36 @@ internal static unsafe class GuideXosApplicationSnapshotC160Tests
         // the active flag. Background-surface dispatch still validates its
         // exact lifetime and the snapshot's single-active invariant.
         return found && activeCount == 1u;
+    }
+
+    public static bool VerifyProductionClose(GuideXosHost host, uint selector)
+    {
+        if (selector != 8u || host == null ||
+            !TryGetPreviousManagedIdentity(selector,
+                out GuideXosApplicationInstanceId expectedIdentity) ||
+            host.TryGetApplicationSnapshot(out GuideXosApplicationSnapshot snapshot) !=
+                GuideXosApplicationSnapshotResult.Success ||
+            host.TryGetApplicationSnapshot(out GuideXosApplicationSnapshot repeated) !=
+                GuideXosApplicationSnapshotResult.Success ||
+            !SameSnapshot(snapshot, repeated)) return false;
+
+        uint activeCount = 0u;
+        for (uint index = 0u; index < snapshot.Count; ++index)
+        {
+            if (!snapshot.TryGetRecord(index,
+                    out GuideXosApplicationSnapshotRecord record)) return false;
+            if (record.IsActive) ++activeCount;
+            if (record.Identity == expectedIdentity) return false;
+        }
+        if (activeCount != 1u) return false;
+
+        Span<byte> line = stackalloc byte[112];
+        int position = 0;
+        Append(line, ref position, "C160-SNAPSHOT id=fileexplorer source=3 instance="u8);
+        AppendUnsigned64(line, ref position, expectedIdentity.Value);
+        Append(line, ref position, " closed=1 result=PASS"u8);
+        host.TryLog(line[..position]);
+        return true;
     }
 
     private static NativeHostCallTable MakeV2Table()
@@ -479,6 +513,7 @@ internal static unsafe class GuideXosApplicationSnapshotC160Tests
             5u => "com.guidexos.apps.managed.settingscenter"u8,
             6u => "com.guidexos.apps.managed.calculator"u8,
             7u => "com.guidexos.apps.managed.taskmanager"u8,
+            8u => "com.guidexos.apps.managed.fileexplorer"u8,
             _ => ReadOnlySpan<byte>.Empty,
         };
         if (expected.IsEmpty) return false;
@@ -505,6 +540,7 @@ internal static unsafe class GuideXosApplicationSnapshotC160Tests
             case 5u: identity = s_settingsIdentity; return s_hasSettingsIdentity;
             case 6u: identity = s_calculatorIdentity; return s_hasCalculatorIdentity;
             case 7u: identity = s_taskManagerIdentity; return s_hasTaskManagerIdentity;
+            case 8u: identity = s_fileExplorerIdentity; return s_hasFileExplorerIdentity;
             default: identity = default; return false;
         }
     }
@@ -518,6 +554,7 @@ internal static unsafe class GuideXosApplicationSnapshotC160Tests
             case 5u: s_settingsIdentity = identity; s_hasSettingsIdentity = true; break;
             case 6u: s_calculatorIdentity = identity; s_hasCalculatorIdentity = true; break;
             case 7u: s_taskManagerIdentity = identity; s_hasTaskManagerIdentity = true; break;
+            case 8u: s_fileExplorerIdentity = identity; s_hasFileExplorerIdentity = true; break;
         }
     }
 
@@ -561,6 +598,7 @@ internal static unsafe class GuideXosApplicationSnapshotC160Tests
             4u => "com.guidexos.apps.managed.notes"u8,
             5u => "com.guidexos.apps.managed.settingscenter"u8,
             7u => "com.guidexos.apps.managed.taskmanager"u8,
+            8u => "com.guidexos.apps.managed.fileexplorer"u8,
             _ => "com.guidexos.apps.managed.calculator"u8,
         });
         Append(line, ref position, " source="u8);

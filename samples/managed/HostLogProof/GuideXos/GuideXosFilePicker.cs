@@ -177,7 +177,9 @@ public static class GuideXosPickerPath
         }
         if (!IsPrintablePath(directory) || directory.IndexOf('\\') >= 0 ||
             directory.IndexOf("//", StringComparison.Ordinal) >= 0 ||
-            ContainsTraversal(directory))
+            ContainsTraversal(directory) ||
+            directory.IndexOf("/./", StringComparison.Ordinal) >= 0 ||
+            directory.EndsWith("/.", StringComparison.Ordinal))
         {
             return GuideXosPickerPathStatus.InvalidDirectory;
         }

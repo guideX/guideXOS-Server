@@ -553,9 +553,15 @@ bool runC161ManagedTaskManagerRegistrationTest() {
     const gxos::apps::BuiltInAppMetadata* managedCalculator =
         gxos::apps::FindManagedNativeAotAppByIdentity(
             "com.guidexos.apps.managed.calculator");
+    const uint32_t expectedCatalogCount =
+#if defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
+        8u;
+#else
+        7u;
+#endif
     const bool passed = managed && nativeTaskManager && nativeCalculator &&
         managedCalculator && gxos::apps::ManagedNativeAotCatalogIsValid() &&
-        gxos::apps::ManagedNativeAotCatalogCount() == 7u &&
+        gxos::apps::ManagedNativeAotCatalogCount() == expectedCatalogCount &&
         gxos::apps::IsManagedNativeAotRecordValid(*managed) &&
         managed->managedSelector == 7u &&
         gxos::apps::detail::builtInTextEquals(
@@ -576,7 +582,47 @@ bool runC161ManagedTaskManagerRegistrationTest() {
         gxos::apps::detail::builtInTextEquals(
             managedCalculator->appId,
             "com.guidexos.apps.managed.calculator");
+#if defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
+    serial::puts("[C163-TM-REGISTRY] identity=com.guidexos.apps.managed.taskmanager selector=7 catalog=8 display=Managed-Task-Manager native-taskmanager=preserved native-calculator=preserved managed-calculator=distinct result=");
+#else
     serial::puts("[C161-TM-REGISTRY] identity=com.guidexos.apps.managed.taskmanager selector=7 catalog=7 display=Managed-Task-Manager native-taskmanager=preserved native-calculator=preserved managed-calculator=distinct result=");
+#endif
+    serial::puts(passed ? "PASS\n" : "FAIL\n");
+    return passed;
+}
+#endif
+
+#if defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER_PROOF)
+bool runC163ManagedFileExplorerRegistrationTest() {
+    const gxos::apps::BuiltInAppMetadata* managed =
+        gxos::apps::FindManagedNativeAotAppByIdentity(
+            "com.guidexos.apps.managed.fileexplorer");
+    const gxos::apps::BuiltInAppMetadata* native =
+        gxos::apps::FindBuiltInAppMetadataByAppId(
+            "gxos.builtin.fileexplorer");
+    const gxos::apps::BuiltInAppMetadata* managedTaskManager =
+        gxos::apps::FindManagedNativeAotAppByIdentity(
+            "com.guidexos.apps.managed.taskmanager");
+    const bool passed = managed && native && managedTaskManager &&
+        gxos::apps::ManagedNativeAotCatalogIsValid() &&
+        gxos::apps::ManagedNativeAotCatalogCount() == 8u &&
+        gxos::apps::IsManagedNativeAotRecordValid(*managed) &&
+        managed->managedSelector == 8u &&
+        gxos::apps::detail::builtInTextEquals(
+            managed->displayName, "Managed File Explorer") &&
+        gxos::apps::detail::builtInTextEquals(
+            managed->launchName, "Managed File Explorer") &&
+        gxos::apps::IsBuiltInAppAvailableInBareMetal(*managed) &&
+        gxos::apps::BuiltInAppHasKnownAlias(*managed,
+            "Managed File Explorer") &&
+        gxos::apps::detail::builtInTextEquals(
+            managed->managedCompositeImagePath,
+            kProductionCompositeImage) &&
+        native->launchKind != gxos::apps::BuiltInAppLaunchKind::ManagedNativeAot &&
+        gxos::apps::detail::builtInTextEquals(
+            native->appId, "gxos.builtin.fileexplorer") &&
+        managedTaskManager->managedSelector == 7u;
+    serial::puts("[C163-FILE-EXPLORER-REGISTRY] managed=com.guidexos.apps.managed.fileexplorer selector=8 catalog=8 native=gxos.builtin.fileexplorer distinct=true result=");
     serial::puts(passed ? "PASS\n" : "FAIL\n");
     return passed;
 }
@@ -4401,6 +4447,16 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
         c161RegistrationTestRun = true;
         if (!runC161ManagedTaskManagerRegistrationTest()) {
             serial::puts("[C161-TM-REGISTRY] launch=blocked result=FAIL\n");
+            return LaunchStatus::ManagedFailed;
+        }
+    }
+#endif
+#if defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER_PROOF)
+    static bool c163RegistrationTestRun = false;
+    if (!c163RegistrationTestRun) {
+        c163RegistrationTestRun = true;
+        if (!runC163ManagedFileExplorerRegistrationTest()) {
+            serial::puts("[C163-FILE-EXPLORER-REGISTRY] launch=blocked result=FAIL\n");
             return LaunchStatus::ManagedFailed;
         }
     }

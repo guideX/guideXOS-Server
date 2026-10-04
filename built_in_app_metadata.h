@@ -158,6 +158,12 @@ static const char* const kManagedTaskManagerAliases[] = {
 };
 #endif
 
+#if defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
+static const char* const kManagedFileExplorerAliases[] = {
+	"Managed File Explorer"
+};
+#endif
+
 static const char* const kOnScreenKeyboardAliases[] = {
 	"On Screen Keyboard"
 };
@@ -209,6 +215,9 @@ static const BuiltInAppMetadata kBuiltInAppMetadata[] = {
 #endif
 #if defined(GXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER)
 , 	{ "com.guidexos.apps.managed.taskmanager", "Managed Task Manager", "Managed Task Manager", nullptr, nullptr, "app.taskmanager", "System", "Read-only managed observer over the bounded C160 application snapshot.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedTaskManagerAliases, sizeof(detail::kManagedTaskManagerAliases) / sizeof(detail::kManagedTaskManagerAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 7u, kManagedNativeAotCompositeImagePath }
+#endif
+#if defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
+, 	{ "com.guidexos.apps.managed.fileexplorer", "Managed File Explorer", "Managed File Explorer", nullptr, nullptr, "app.files", "System", "Read-only managed browser over the bounded VFS directory service.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedFileExplorerAliases, sizeof(detail::kManagedFileExplorerAliases) / sizeof(detail::kManagedFileExplorerAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 8u, kManagedNativeAotCompositeImagePath }
 #endif
 };
 

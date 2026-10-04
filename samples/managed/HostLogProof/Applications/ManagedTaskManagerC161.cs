@@ -19,7 +19,7 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
 #if HOSTLOGPROOF_C161_TASK_MANAGER_PROOF
     private static bool s_proofTestsRun;
 #endif
-#if HOSTLOGPROOF_C162_MANAGED_TASK_MANAGER_CLOSE
+#if HOSTLOGPROOF_C162_TASK_MANAGER_CLOSE_PROOF
     private static bool s_closeProofTestsRun;
 #endif
     private readonly GuideXosTaskManagerControllerC161 _controller = new();
@@ -39,7 +39,7 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
     public override GuideXosResult Launch(GuideXosHost host)
     {
         if (host.Selector != ApplicationSelector ||
-            GuideXosApplicationRegistry.RegistrationCount != 4)
+            !GuideXosApplicationRegistry.TryFind(ApplicationSelector, out _))
             return GuideXosResult.InvalidArgument;
 
 #if HOSTLOGPROOF_C161_TASK_MANAGER_PROOF
@@ -59,7 +59,7 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
         }
 #endif
 
-#if HOSTLOGPROOF_C162_MANAGED_TASK_MANAGER_CLOSE
+#if HOSTLOGPROOF_C162_TASK_MANAGER_CLOSE_PROOF
         if (!s_closeProofTestsRun)
         {
             s_closeProofTestsRun = true;
@@ -87,7 +87,7 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
         GuideXosApplicationSnapshotResult snapshotResult =
             host.TryGetApplicationSnapshot(out GuideXosApplicationSnapshot snapshot);
         _controller.ApplySnapshot(snapshotResult, in snapshot);
-#if HOSTLOGPROOF_C162_MANAGED_TASK_MANAGER_CLOSE
+#if HOSTLOGPROOF_C162_TASK_MANAGER_CLOSE_PROOF
         if (!GuideXosApplicationControlC162Tests.RunNativeBoundary(host))
         {
             host.TryLog("C162-CLOSE-NATIVE-BOUNDARY result=FAIL"u8);

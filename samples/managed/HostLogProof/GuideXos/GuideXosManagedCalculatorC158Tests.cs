@@ -31,7 +31,9 @@ internal static class GuideXosManagedCalculatorC158Tests
                 " pointer=PASS keyboard=PASS focus=PASS exact-once=PASS result=PASS"u8);
         else host?.TryLog("C158-CALC-UI result=FAIL"u8);
         int expectedRegistryEntries = 3;
-#if HOSTLOGPROOF_C161_MANAGED_TASK_MANAGER
+#if HOSTLOGPROOF_C163_MANAGED_FILE_EXPLORER
+        expectedRegistryEntries = 5;
+#elif HOSTLOGPROOF_C161_MANAGED_TASK_MANAGER
         expectedRegistryEntries = 4;
 #endif
         if (registration)
@@ -342,7 +344,9 @@ internal static class GuideXosManagedCalculatorC158Tests
             descriptor.Name.AsSpan().SequenceEqual("Managed Calculator"u8) &&
             descriptor.Factory != null;
         int expectedRegistryEntries = 3;
-#if HOSTLOGPROOF_C161_MANAGED_TASK_MANAGER
+#if HOSTLOGPROOF_C163_MANAGED_FILE_EXPLORER
+        expectedRegistryEntries = 5;
+#elif HOSTLOGPROOF_C161_MANAGED_TASK_MANAGER
         expectedRegistryEntries = 4;
 #endif
         passed &= Case(ref cases, lookup &&

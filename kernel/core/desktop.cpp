@@ -1740,6 +1740,9 @@ static StartMenuApp s_startMenuApps[] = {
 #if defined(GXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER)
     {"Managed Task Manager", true, false, 0xFFB44646}, // bounded read-only managed observer
 #endif
+#if defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
+    {"Managed File Explorer", true, false, 0xFFC8B43C}, // bounded read-only VFS browser
+#endif
     {"DiskManager", true,  false, 0xFFB48C46},  // pinned (orange-brown for disk)
     {"DisplayOptions", true, false, 0xFF606878}, // display options
     {"ControlPanel",   false, false, 0xFF808890}, // control surface
@@ -1782,6 +1785,9 @@ static const char* s_allProgramsList[] = {
 #if defined(GXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER)
     "Managed Task Manager",
 #endif
+#if defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
+    "Managed File Explorer",
+#endif
     "Managed Workspace",
     "Notepad",
     "Paint",
@@ -1796,6 +1802,7 @@ static bool verifyC161LauncherCounts() {
     uint32_t startEntryCount = 0;
     bool hasManagedTaskManagerPin = false;
     bool hasNativeTaskManagerPin = false;
+    bool hasManagedFileExplorerPin = false;
     for (int index = 0; index < kStartMenuAppCount; ++index) {
         const bool isControlPanel = desktop_str_eq(
             s_startMenuApps[index].name, "ControlPanel");
@@ -1805,25 +1812,40 @@ static bool verifyC161LauncherCounts() {
         ++pinnedCount;
         hasManagedTaskManagerPin |= desktop_str_eq(
             s_startMenuApps[index].name, "Managed Task Manager");
+        hasManagedFileExplorerPin |= desktop_str_eq(
+            s_startMenuApps[index].name, "Managed File Explorer");
         hasNativeTaskManagerPin |= desktop_str_eq(
             s_startMenuApps[index].name, "TaskManager");
     }
     bool hasManagedTaskManagerProgram = false;
     bool hasNativeTaskManagerProgram = false;
+    bool hasManagedFileExplorerProgram = false;
     for (int index = 0; index < kAllProgramsCount; ++index) {
         hasManagedTaskManagerProgram |= desktop_str_eq(
             s_allProgramsList[index], "Managed Task Manager");
         hasNativeTaskManagerProgram |= desktop_str_eq(
             s_allProgramsList[index], "TaskManager");
+        hasManagedFileExplorerProgram |= desktop_str_eq(
+            s_allProgramsList[index], "Managed File Explorer");
     }
     const uint32_t catalogCount = static_cast<uint32_t>(
         gxos::apps::ManagedNativeAotCatalogCount());
-    const bool passed = catalogCount == 7u && startEntryCount == 17u &&
-        pinnedCount == 16u &&
-        kAllProgramsCount == 20 && hasManagedTaskManagerPin &&
-        hasNativeTaskManagerPin && hasManagedTaskManagerProgram &&
-        hasNativeTaskManagerProgram;
+    const bool passed =
+#if defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
+        catalogCount == 8u && startEntryCount == 18u && pinnedCount == 17u &&
+        kAllProgramsCount == 21 && hasManagedFileExplorerPin &&
+        hasManagedFileExplorerProgram &&
+#else
+        catalogCount == 7u && startEntryCount == 17u && pinnedCount == 16u &&
+        kAllProgramsCount == 20 &&
+#endif
+        hasManagedTaskManagerPin && hasNativeTaskManagerPin &&
+        hasManagedTaskManagerProgram && hasNativeTaskManagerProgram;
+#if defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
+    serial::puts("[C163-LAUNCHER-COUNTS] catalog=");
+#else
     serial::puts("[C161-LAUNCHER-COUNTS] catalog=");
+#endif
     serial::put_hex32(catalogCount);
     serial::puts(" startEntries=");
     serial::put_hex32(startEntryCount);
@@ -2347,7 +2369,9 @@ static int s_startMenuScroll = 0;       // Scroll offset for long lists
 static bool s_startMenuAllProgs = false; // Toggle between Recent Programs vs All Programs
 static char s_startMenuRecentPrograms[kMaxStartMenuRecent][64]; // Persisted recent programs for Start Menu
 static int s_startMenuRecentProgramCount = 0;
-#if defined(GXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER)
+#if defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
+static const int kStartMenuMaxRows = 16; // C163 All Programs row 15 remains pointer-reachable
+#elif defined(GXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER)
 static const int kStartMenuMaxRows = 15; // C161 All Programs row 14 remains pointer-reachable
 #else
 static const int kStartMenuMaxRows = 14; // Max visible rows before scrolling
