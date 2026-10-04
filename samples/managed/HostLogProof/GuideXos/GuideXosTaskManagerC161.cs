@@ -8,6 +8,45 @@ internal enum GuideXosTaskManagerCommandC161
     None = 0,
     Refresh = 1,
     Close = 2,
+    CloseApplication = 3,
+}
+
+/// <summary>Identity and display text frozen when the modal opens.</summary>
+internal sealed class GuideXosPendingCloseTargetC162
+{
+    private GuideXosApplicationInstanceId _identity;
+    private string _displayName;
+
+    public bool HasTarget => _identity.Value != 0u;
+    public GuideXosApplicationInstanceId Identity => _identity;
+    public string DisplayName => _displayName ?? string.Empty;
+
+    public bool Capture(GuideXosApplicationInstanceId identity,
+        string displayName)
+    {
+        if (identity.Value == 0u ||
+            identity.Source is not (
+                GuideXosApplicationSnapshotSource.AppManagerInstance or
+                GuideXosApplicationSnapshotSource.ManagedLogicalApplication))
+            return false;
+        _identity = identity;
+        _displayName = displayName ?? string.Empty;
+        return true;
+    }
+
+    public bool TryGet(out GuideXosApplicationInstanceId identity,
+        out string displayName)
+    {
+        identity = _identity;
+        displayName = DisplayName;
+        return HasTarget;
+    }
+
+    public void Clear()
+    {
+        _identity = default;
+        _displayName = null;
+    }
 }
 
 /// <summary>
@@ -18,16 +57,18 @@ internal enum GuideXosTaskManagerCommandC161
 internal sealed unsafe class GuideXosTaskManagerControllerC161
 {
     public const int ApplicationCapacity = (int)GxAbi.ApplicationSnapshotCapacity;
-    public const int ControlCapacity = 3;
+    public const int ControlCapacity = 4;
     public const int ListControlId = 1;
     public const int RefreshControlId = 2;
-    public const int CloseControlId = 3;
+    public const int CloseApplicationControlId = 3;
+    public const int CloseControlId = 4;
     public const int ListX = 20;
     public const int ListY = 58;
     public const int ListWidthCharacters = 45;
     public const int ListVisibleRows = 10;
     public const int RefreshX = 20;
-    public const int CloseX = 156;
+    public const int CloseApplicationX = 156;
+    public const int CloseX = 324;
     public const int ButtonY = 276;
 
     private readonly GuideXosListBox _list = new(
@@ -35,8 +76,10 @@ internal sealed unsafe class GuideXosTaskManagerControllerC161
         ListX, ListY);
     private readonly GuideXosButton _refreshButton = new(
         RefreshX, ButtonY, 120, 28, "Refresh");
+    private readonly GuideXosButton _closeApplicationButton = new(
+        CloseApplicationX, ButtonY, 156, 28, "Close Application");
     private readonly GuideXosButton _closeButton = new(
-        CloseX, ButtonY, 120, 28, "Close");
+        CloseX, ButtonY, 132, 28, "Close Task Manager");
     private readonly GuideXosControlHost _controls = new(ControlCapacity);
     private readonly GuideXosLabel _name = new(400, 60, 400, "", 50);
     private readonly GuideXosLabel _applicationId = new(400, 78, 400, "", 50);
@@ -68,6 +111,7 @@ internal sealed unsafe class GuideXosTaskManagerControllerC161
     public GuideXosListBox List => _list;
     public GuideXosButton RefreshButton => _refreshButton;
     public GuideXosButton CloseButton => _closeButton;
+    public GuideXosButton CloseApplicationButton => _closeApplicationButton;
     public GuideXosControlHost Controls => _controls;
     public int ControlCount => _controls.RegistrationCount;
     public int ControlMaximum => _controls.MaximumControlCount;
@@ -92,17 +136,23 @@ internal sealed unsafe class GuideXosTaskManagerControllerC161
     public string SelectedSourceText => _source.Text;
     public string StatusText => _snapshotStatus.Text;
 
+    public void SetOperationStatus(ReadOnlySpan<char> status) => SetStatus(status);
+
     public bool InitializeControls()
     {
         _controls.Reset();
         _list.Reset();
         _refreshButton.Reset();
+        _closeApplicationButton.Reset();
         _closeButton.Reset();
+        _closeApplicationButton.SetEnabled(false);
         bool registered =
             _controls.TryRegisterListBox(ListControlId, _list) ==
                 GuideXosControlHostResult.Registered &&
             _controls.TryRegisterButton(RefreshControlId, _refreshButton) ==
                 GuideXosControlHostResult.Registered &&
+            _controls.TryRegisterButton(CloseApplicationControlId,
+                _closeApplicationButton) == GuideXosControlHostResult.Registered &&
             _controls.TryRegisterButton(CloseControlId, _closeButton) ==
                 GuideXosControlHostResult.Registered &&
             _controls.TryFocus(ListControlId) ==
@@ -148,7 +198,6 @@ internal sealed unsafe class GuideXosTaskManagerControllerC161
                 return false;
             }
         }
-
         bool hadSnapshot = _hasSnapshot;
         bool hadSelection = TryGetSelectedRecord(out _, out _);
         GuideXosApplicationInstanceId priorIdentity = hadSelection
@@ -178,7 +227,6 @@ internal sealed unsafe class GuideXosTaskManagerControllerC161
                 return false;
             }
         }
-
         int preservedIndex = -1;
         if (hadSelection)
         {
@@ -227,6 +275,7 @@ internal sealed unsafe class GuideXosTaskManagerControllerC161
 
         SyncDetails();
         SetSnapshotStatus(snapshot);
+        UpdateCloseApplicationEnabled();
         return true;
     }
 
@@ -253,6 +302,7 @@ internal sealed unsafe class GuideXosTaskManagerControllerC161
         _selectedIdentity = record.Identity;
         _hasSelectedIdentity = true;
         SyncDetails();
+        UpdateCloseApplicationEnabled();
     }
 
     public GuideXosTaskManagerCommandC161 RouteInput(GuideXosInputEvent input)
@@ -302,6 +352,14 @@ internal sealed unsafe class GuideXosTaskManagerControllerC161
                 result = _controls.FocusAndRoutePointer(target,
                     input.X, input.Y);
             }
+            else if (Inside(input.X, input.Y, CloseApplicationX, ButtonY,
+                    _closeApplicationButton.Width,
+                    _closeApplicationButton.Height))
+            {
+                target = CloseApplicationControlId;
+                result = _controls.FocusAndRoutePointer(target,
+                    input.X, input.Y);
+            }
             if (target == ListControlId) SyncSelectionFromList();
             return ActivatedCommand(target, result);
         }
@@ -331,7 +389,9 @@ internal sealed unsafe class GuideXosTaskManagerControllerC161
         _controls.Reset();
         _list.Reset();
         _refreshButton.Reset();
+        _closeApplicationButton.Reset();
         _closeButton.Reset();
+        _closeApplicationButton.SetEnabled(false);
         _snapshot = default;
         _selectedIdentity = default;
         _hasSnapshot = false;
@@ -356,6 +416,7 @@ internal sealed unsafe class GuideXosTaskManagerControllerC161
             RenderDetails(surface) != GuideXosResult.Success ||
             _snapshotStatus.Render(surface) != GuideXosResult.Success ||
             _refreshButton.Render(surface) != GuideXosResult.Success ||
+            _closeApplicationButton.Render(surface) != GuideXosResult.Success ||
             _closeButton.Render(surface) != GuideXosResult.Success)
         {
             return GuideXosResult.InvalidArgument;
@@ -386,7 +447,29 @@ internal sealed unsafe class GuideXosTaskManagerControllerC161
             ? GuideXosTaskManagerCommandC161.Refresh
             : target == CloseControlId
                 ? GuideXosTaskManagerCommandC161.Close
+                : target == CloseApplicationControlId
+                    ? GuideXosTaskManagerCommandC161.CloseApplication
                 : GuideXosTaskManagerCommandC161.None;
+    }
+
+    private void UpdateCloseApplicationEnabled()
+    {
+        bool eligible = TryGetSelectedRecord(
+            out GuideXosApplicationSnapshotRecord record, out _) &&
+            record.instanceId != 0u &&
+            record.state == GuideXosApplicationSnapshotState.Running &&
+            (record.source == GuideXosApplicationSnapshotSource.AppManagerInstance ||
+                (record.source ==
+                    GuideXosApplicationSnapshotSource.ManagedLogicalApplication &&
+                 string.Equals(record.GetApplicationId(),
+                    "com.guidexos.apps.managed.calculator",
+                    StringComparison.Ordinal))) &&
+            (record.source !=
+                GuideXosApplicationSnapshotSource.ManagedLogicalApplication ||
+             !string.Equals(record.GetApplicationId(),
+                "com.guidexos.apps.managed.taskmanager",
+                StringComparison.Ordinal));
+        _closeApplicationButton.SetEnabled(eligible);
     }
 
     private GuideXosResult RenderDetails(GuideXosSurface surface)

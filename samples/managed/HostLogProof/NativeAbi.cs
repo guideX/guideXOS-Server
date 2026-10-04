@@ -7,10 +7,11 @@ namespace HostLogProof;
 public static class GxAbi
 {
     public const uint ApiVersion = 0u;
-    // ABI v2 appends the read-only application-snapshot callback after the
-    // complete 104-byte v1 table. ABI-v1 consumers still use their prefix.
-    public const uint HostAbiVersion = 2u;
+    // ABI v2 appends the snapshot callback at 104; ABI v3 appends exact
+    // application-instance close at 112. Earlier prefixes remain unchanged.
+    public const uint HostAbiVersion = 3u;
     public const uint HostAbiV1Version = 1u;
+    public const uint HostAbiV2Version = 2u;
     public const uint CompositeAppInvalid = 0u;
     public const uint CompositeAppA = 1u;
     public const uint CompositeAppB = 2u;
@@ -21,11 +22,13 @@ public static class GxAbi
     public const uint HostCallTableV1Size = 72u;
     public const uint C113HostCallTableSize = 88u;
     public const uint HostCallTableV1FullSize = 104u;
-    public const uint HostCallTableSize = 112u;
+    public const uint HostCallTableV2Size = 112u;
+    public const uint HostCallTableSize = 120u;
     public const uint ApplicationSnapshotOffset = 104u;
+    public const uint ApplicationCloseOffset = 112u;
     public const uint ApplicationSnapshotRecordVersion = 1u;
     public const uint ApplicationSnapshotRecordSize = 168u;
-    public const uint ApplicationSnapshotCapacity = 18u;
+    public const uint ApplicationSnapshotCapacity = 20u;
     public const uint ApplicationSnapshotDisplayNameBytes = 32u;
     public const uint ApplicationSnapshotApplicationIdBytes = 96u;
     public const uint ApplicationSnapshotBufferBytes =
@@ -33,6 +36,7 @@ public static class GxAbi
     public const uint DirectoryListOffset = 88u;
     public const uint FileStatOffset = 96u;
     public const ulong CapabilityApplicationSnapshot = 1ul << 11;
+    public const ulong CapabilityApplicationClose = 1ul << 12;
     public const uint FilePathMaxBytes = 96u;
     public const uint MaxFileBytes = 16u * 1024u;
     public const uint MaxDirectoryEntries = 64u;
@@ -86,6 +90,7 @@ public enum GuideXosCapability : ulong
     DirectoryList = 1ul << 9,
     FileStat = 1ul << 10,
     ApplicationSnapshot = 1ul << 11,
+    ApplicationClose = 1ul << 12,
 }
 
 public enum GuideXosResult
@@ -131,6 +136,7 @@ public unsafe struct NativeHostCallTable
     public delegate* unmanaged<NativeGxAppContext*, byte*, uint, byte*, uint, uint, uint*, uint*, int> directoryList;
     public delegate* unmanaged<NativeGxAppContext*, byte*, uint, byte*, uint, int> fileStat;
     public delegate* unmanaged<NativeGxAppContext*, NativeApplicationSnapshotRecord*, uint, uint*, uint*, int> applicationSnapshot;
+    public delegate* unmanaged<NativeGxAppContext*, uint, ulong, int> closeApplication;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 8, Size = (int)GxAbi.ApplicationSnapshotRecordSize)]
@@ -238,6 +244,20 @@ public enum GuideXosApplicationSnapshotResult
     Truncated = 4,
     NativeFailure = 5,
     InvalidArgument = 6,
+}
+
+public enum GuideXosApplicationCloseResult
+{
+    Success = 0,
+    NotSupported = 1,
+    CapabilityUnavailable = 2,
+    InvalidArgument = 3,
+    NotFound = 4,
+    StaleIdentity = 5,
+    Protected = 6,
+    CloseFailed = 7,
+    NativeFailure = 8,
+    Pending = 9,
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 8)]

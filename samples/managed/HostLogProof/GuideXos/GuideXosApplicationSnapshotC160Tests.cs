@@ -8,8 +8,14 @@ internal static unsafe class GuideXosApplicationSnapshotC160Tests
     private static bool s_testsRun;
     private static uint s_failedCasesLow;
     private static uint s_failedCasesHigh;
-    private static bool s_hasPreviousManagedIdentity;
-    private static GuideXosApplicationInstanceId s_previousManagedIdentity;
+    private static bool s_hasNotesIdentity;
+    private static bool s_hasSettingsIdentity;
+    private static bool s_hasCalculatorIdentity;
+    private static bool s_hasTaskManagerIdentity;
+    private static GuideXosApplicationInstanceId s_notesIdentity;
+    private static GuideXosApplicationInstanceId s_settingsIdentity;
+    private static GuideXosApplicationInstanceId s_calculatorIdentity;
+    private static GuideXosApplicationInstanceId s_taskManagerIdentity;
 
     public static bool Run(GuideXosHost host, uint selector)
     {
@@ -82,6 +88,10 @@ internal static unsafe class GuideXosApplicationSnapshotC160Tests
                     GxAbi.ApplicationSnapshotOffset &&
             GxAbi.HostCallTableV1FullSize == GxAbi.ApplicationSnapshotOffset &&
             GxAbi.ApplicationSnapshotOffset + sizeof(ulong) ==
+                GxAbi.HostCallTableV2Size &&
+            FieldOffset(tablePointer, &tablePointer->closeApplication) ==
+                GxAbi.ApplicationCloseOffset &&
+            GxAbi.ApplicationCloseOffset + sizeof(ulong) ==
                 GxAbi.HostCallTableSize &&
             sizeof(GuideXosApplicationSnapshot) ==
                 16 + (int)GxAbi.ApplicationSnapshotBufferBytes;
@@ -180,11 +190,17 @@ internal static unsafe class GuideXosApplicationSnapshotC160Tests
             GxAbi.ApplicationSnapshotCapacity + 1u, out _) ==
             GuideXosApplicationSnapshotResult.InvalidArgument);
         passed &= Case(ref cases,
-            GuideXosHost.IsValidApplicationSnapshotCountTuple(0, 18u, 18u) &&
-            GuideXosHost.IsValidApplicationSnapshotCountTuple(1, 18u, 17u) &&
+            GuideXosHost.IsValidApplicationSnapshotCountTuple(
+                0, GxAbi.ApplicationSnapshotCapacity,
+                GxAbi.ApplicationSnapshotCapacity) &&
+            GuideXosHost.IsValidApplicationSnapshotCountTuple(
+                1, GxAbi.ApplicationSnapshotCapacity,
+                GxAbi.ApplicationSnapshotCapacity - 1u) &&
             !GuideXosHost.IsValidApplicationSnapshotCountTuple(0, 1u, 0u) &&
             !GuideXosHost.IsValidApplicationSnapshotCountTuple(0, 1u, 2u) &&
-            !GuideXosHost.IsValidApplicationSnapshotCountTuple(0, 19u, 19u) &&
+            !GuideXosHost.IsValidApplicationSnapshotCountTuple(
+                0, GxAbi.ApplicationSnapshotCapacity + 1u,
+                GxAbi.ApplicationSnapshotCapacity + 1u) &&
             !GuideXosHost.IsValidApplicationSnapshotCountTuple(1, 1u, 1u));
         host.TryLog("C160-MANAGED-SNAPSHOT-PHASE=abi"u8);
 
@@ -306,38 +322,47 @@ internal static unsafe class GuideXosApplicationSnapshotC160Tests
             if (record.IsActive) ++activeCount;
             if (record.source != GuideXosApplicationSnapshotSource.ManagedLogicalApplication)
                 continue;
-            if (!ApplicationIdEquals(ref record, expectedApplicationId) ||
-                !record.IsActive) return false;
-            managedIdentity = record.Identity;
-            selfFound = true;
+            if (ApplicationIdEquals(ref record, expectedApplicationId))
+            {
+                if (!record.IsActive) return false;
+                managedIdentity = record.Identity;
+                selfFound = true;
+            }
+            else if (record.IsActive)
+            {
+                return false;
+            }
         }
 
         bool transition = selfFound && activeCount == 1u && expectedApplicationId.Length != 0;
-        if (transition && s_hasPreviousManagedIdentity)
+        bool replacingKnownIdentity = false;
+        if (transition && TryGetPreviousManagedIdentity(selector,
+                out GuideXosApplicationInstanceId previousIdentity))
         {
-            transition = managedIdentity != s_previousManagedIdentity;
+            replacingKnownIdentity = true;
+            transition = managedIdentity != previousIdentity;
             for (uint index = 0u; transition && index < snapshot.Count; ++index)
             {
                 if (snapshot.TryGetRecord(index,
                         out GuideXosApplicationSnapshotRecord record) &&
-                    record.Identity == s_previousManagedIdentity)
+                    record.Identity == previousIdentity)
                     transition = false;
             }
         }
         if (transition)
         {
-            s_previousManagedIdentity = managedIdentity;
-            s_hasPreviousManagedIdentity = true;
+            SetManagedIdentity(selector, managedIdentity);
             LogProductionIdentity(host, selector,
                 managedIdentity, snapshot.TotalCount, activeCount,
-                s_hasPreviousManagedIdentity && managedIdentity.Value > 1u);
+                replacingKnownIdentity);
         }
         return transition;
     }
 
     public static bool VerifyProductionDispatch(GuideXosHost host, uint selector)
     {
-        if (host == null || !s_hasPreviousManagedIdentity ||
+        if (host == null || !TryGetPreviousManagedIdentity(selector,
+                out GuideXosApplicationInstanceId expectedIdentity) ||
             host.TryGetApplicationSnapshot(out GuideXosApplicationSnapshot snapshot) !=
                 GuideXosApplicationSnapshotResult.Success ||
             host.TryGetApplicationSnapshot(out GuideXosApplicationSnapshot repeated) !=
@@ -362,18 +387,23 @@ internal static unsafe class GuideXosApplicationSnapshotC160Tests
             if (record.IsActive) ++activeCount;
             if (record.source != GuideXosApplicationSnapshotSource.ManagedLogicalApplication)
                 continue;
-            if (record.Identity != s_previousManagedIdentity || !record.IsActive ||
-                !ApplicationIdEquals(ref record, expectedApplicationId)) return false;
-            found = true;
+            if (record.Identity == expectedIdentity)
+            {
+                if (!ApplicationIdEquals(ref record, expectedApplicationId)) return false;
+                found = true;
+            }
         }
+        // Several managed surfaces may remain live; only the focused one has
+        // the active flag. Background-surface dispatch still validates its
+        // exact lifetime and the snapshot's single-active invariant.
         return found && activeCount == 1u;
     }
 
     private static NativeHostCallTable MakeV2Table()
     {
         NativeHostCallTable table = default;
-        table.size = GxAbi.HostCallTableSize;
-        table.version = GxAbi.HostAbiVersion;
+        table.size = GxAbi.HostCallTableV2Size;
+        table.version = GxAbi.HostAbiV2Version;
         table.capabilities = GxAbi.CapabilityApplicationSnapshot;
         return table;
     }
@@ -459,10 +489,36 @@ internal static unsafe class GuideXosApplicationSnapshotC160Tests
             if (!snapshot.TryGetRecord(index,
                     out GuideXosApplicationSnapshotRecord record)) return false;
             if (record.IsActive) ++activeCount;
-            if (record.source == GuideXosApplicationSnapshotSource.ManagedLogicalApplication)
-                found = record.IsActive && ApplicationIdEquals(ref record, expected);
+            if (record.source == GuideXosApplicationSnapshotSource.ManagedLogicalApplication &&
+                ApplicationIdEquals(ref record, expected))
+                found = record.IsActive;
         }
         return found && activeCount == 1u;
+    }
+
+    private static bool TryGetPreviousManagedIdentity(uint selector,
+        out GuideXosApplicationInstanceId identity)
+    {
+        switch (selector)
+        {
+            case 4u: identity = s_notesIdentity; return s_hasNotesIdentity;
+            case 5u: identity = s_settingsIdentity; return s_hasSettingsIdentity;
+            case 6u: identity = s_calculatorIdentity; return s_hasCalculatorIdentity;
+            case 7u: identity = s_taskManagerIdentity; return s_hasTaskManagerIdentity;
+            default: identity = default; return false;
+        }
+    }
+
+    private static void SetManagedIdentity(uint selector,
+        GuideXosApplicationInstanceId identity)
+    {
+        switch (selector)
+        {
+            case 4u: s_notesIdentity = identity; s_hasNotesIdentity = true; break;
+            case 5u: s_settingsIdentity = identity; s_hasSettingsIdentity = true; break;
+            case 6u: s_calculatorIdentity = identity; s_hasCalculatorIdentity = true; break;
+            case 7u: s_taskManagerIdentity = identity; s_hasTaskManagerIdentity = true; break;
+        }
     }
 
     private static bool ApplicationIdEquals(

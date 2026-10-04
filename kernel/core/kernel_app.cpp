@@ -76,6 +76,54 @@ static bool c160IdentityCase(bool passed) {
 }
 #endif
 
+#if defined(GXOS_NATIVEAOT_C162_MANAGED_TASK_MANAGER_CLOSE_PROOF)
+static uint32_t c162ShutdownCount = 0u;
+static uint32_t c162ClosedCount = 0u;
+
+class C162CloseTestApp final : public KernelApp {
+public:
+    C162CloseTestApp(const char* name, bool allowClose = true)
+        : m_allowClose(allowClose) {
+        strcopy(m_name, name, MAX_APP_NAME);
+        m_state = AppState::Running;
+    }
+
+    bool init() override { return true; }
+    void shutdown() override { ++c162ShutdownCount; }
+    void draw(uint32_t, uint32_t, uint32_t, uint32_t) override {}
+    bool onWindowCloseRequested() override { return m_allowClose; }
+    void onWindowClosed() override { ++c162ClosedCount; }
+
+    bool attachWindow() {
+        if (m_window) return false;
+        m_window = new KernelWindow();
+        if (!m_window) return false;
+        m_window->owner = this;
+        m_window->w = 240;
+        m_window->h = 140;
+        strcopy(m_window->title, m_name, MAX_TITLE_LEN);
+        if (!compositor::KernelCompositor::registerWindow(m_window)) {
+            delete m_window;
+            m_window = nullptr;
+            return false;
+        }
+        return true;
+    }
+
+    void allowClose(bool value) { m_allowClose = value; }
+
+private:
+    bool m_allowClose;
+};
+
+static uint32_t c162CloseCases = 0u;
+
+static bool c162CloseCase(bool passed) {
+    ++c162CloseCases;
+    return passed;
+}
+#endif
+
 } // namespace
 
 AppLaunchLog AppLogger::s_logs[AppLogger::MAX_LOGS];
@@ -563,6 +611,35 @@ void AppManager::closeApp(KernelApp* app) {
     }
 }
 
+void AppManager::removeTerminatedAppAt(int index) {
+    if (index < 0 || index >= s_runningAppCount) return;
+    KernelApp* app = s_runningApps[index];
+    if (!app || app->getState() != AppState::Terminated) return;
+    for (int next = index; next < s_runningAppCount - 1; ++next)
+        s_runningApps[next] = s_runningApps[next + 1];
+    s_runningApps[--s_runningAppCount] = nullptr;
+    delete app;
+}
+
+ApplicationCloseResult AppManager::closeApplicationInstance(
+    ApplicationSnapshotSource source, uint64_t instanceId) {
+    if (source != ApplicationSnapshotSource::AppManagerInstance ||
+        instanceId == 0u) return ApplicationCloseResult::InvalidArgument;
+    if (!s_initialized) return ApplicationCloseResult::NotFound;
+
+    for (int index = 0; index < s_runningAppCount; ++index) {
+        KernelApp* app = s_runningApps[index];
+        if (!app || app->getInstanceId() != instanceId ||
+            app->getState() == AppState::Terminated) continue;
+        if (!app->requestClose() || app->getState() != AppState::Terminated)
+            return ApplicationCloseResult::CloseFailed;
+        removeTerminatedAppAt(index);
+        desktop_request_redraw();
+        return ApplicationCloseResult::Success;
+    }
+    return ApplicationCloseResult::NotFound;
+}
+
 int AppManager::getRunningAppCount() {
     return s_runningAppCount;
 }
@@ -639,6 +716,222 @@ bool AppManager::launchC161WheelProofApps() {
     serial::puts("[C161-WHEEL-PROOF-APPS] additional=00000007 total=00000009 canonical-id=preserved distinct-lifetimes=true result=");
     serial::puts(passed ? "PASS\n" : "FAIL\n");
     return passed;
+}
+#endif
+
+#if defined(GXOS_NATIVEAOT_C162_MANAGED_TASK_MANAGER_CLOSE_PROOF)
+bool AppManager::runC162CloseFocusedTests() {
+    if (!s_initialized || s_runningAppCount != 0) return false;
+    c162CloseCases = 0u;
+    c162ShutdownCount = 0u;
+    c162ClosedCount = 0u;
+    bool passed = true;
+    const int initialCount = getRunningAppCount();
+
+    passed &= c162CloseCase(closeApplicationInstance(
+        ApplicationSnapshotSource::AppManagerInstance, 0u) ==
+        ApplicationCloseResult::InvalidArgument);
+    passed &= c162CloseCase(closeApplicationInstance(
+        ApplicationSnapshotSource::ShellSurface, 1u) ==
+        ApplicationCloseResult::InvalidArgument);
+    passed &= c162CloseCase(closeApplicationInstance(
+        ApplicationSnapshotSource::ManagedLogicalApplication, 1u) ==
+        ApplicationCloseResult::InvalidArgument);
+    passed &= c162CloseCase(closeApplicationInstance(
+        ApplicationSnapshotSource::AppManagerInstance, UINT64_MAX) ==
+        ApplicationCloseResult::NotFound);
+    passed &= c162CloseCase(getRunningAppCount() == initialCount);
+
+    C162CloseTestApp* first = new C162CloseTestApp("C162 AppManager Native");
+    const bool firstReady = first && first->attachWindow() &&
+        admitRunningApp(first, "gxos.builtin.calculator");
+    if (!firstReady && first && first->getInstanceId() == 0u) delete first;
+    const uint64_t firstId = firstReady ? first->getInstanceId() : 0u;
+    passed &= c162CloseCase(firstReady && firstId != 0u &&
+        getRunningAppCount() == initialCount + 1);
+    passed &= c162CloseCase(closeApplicationInstance(
+        ApplicationSnapshotSource::AppManagerInstance, firstId + 1u) ==
+        ApplicationCloseResult::NotFound);
+    passed &= c162CloseCase(closeApplicationInstance(
+        ApplicationSnapshotSource::AppManagerInstance, firstId) ==
+        ApplicationCloseResult::Success);
+    passed &= c162CloseCase(getRunningAppCount() == initialCount &&
+        !isRunningInstanceId(firstId));
+    passed &= c162CloseCase(c162ShutdownCount == 1u &&
+        c162ClosedCount == 1u);
+    passed &= c162CloseCase(closeApplicationInstance(
+        ApplicationSnapshotSource::AppManagerInstance, firstId) ==
+        ApplicationCloseResult::NotFound);
+
+    C162CloseTestApp* replacement = new C162CloseTestApp(
+        "C162 AppManager Managed");
+    const bool replacementReady = replacement && replacement->attachWindow() &&
+        admitRunningApp(replacement,
+            "com.guidexos.apps.managed.calculator");
+    if (!replacementReady && replacement &&
+        replacement->getInstanceId() == 0u) delete replacement;
+    const uint64_t replacementId = replacementReady
+        ? replacement->getInstanceId() : 0u;
+    passed &= c162CloseCase(replacementReady && replacementId != 0u &&
+        replacementId != firstId && getRunningAppCount() == initialCount + 1);
+    passed &= c162CloseCase(closeApplicationInstance(
+        ApplicationSnapshotSource::AppManagerInstance, firstId) ==
+        ApplicationCloseResult::NotFound);
+    passed &= c162CloseCase(replacementReady &&
+        isRunningInstanceId(replacementId) &&
+        getRunningAppCount() == initialCount + 1);
+    passed &= c162CloseCase(closeApplicationInstance(
+        ApplicationSnapshotSource::AppManagerInstance, replacementId) ==
+        ApplicationCloseResult::Success);
+    passed &= c162CloseCase(getRunningAppCount() == initialCount &&
+        !isRunningInstanceId(replacementId));
+
+    C162CloseTestApp* veto = new C162CloseTestApp(
+        "C162 AppManager Veto", false);
+    const bool vetoReady = veto && veto->attachWindow() &&
+        admitRunningApp(veto, "gxos.test.close-veto");
+    if (!vetoReady && veto && veto->getInstanceId() == 0u) delete veto;
+    const uint64_t vetoId = vetoReady ? veto->getInstanceId() : 0u;
+    const uint32_t shutdownsBeforeVeto = c162ShutdownCount;
+    passed &= c162CloseCase(vetoReady &&
+        closeApplicationInstance(ApplicationSnapshotSource::AppManagerInstance,
+            vetoId) == ApplicationCloseResult::CloseFailed);
+    passed &= c162CloseCase(vetoReady && isRunningInstanceId(vetoId) &&
+        veto->getWindow() != nullptr &&
+        c162ShutdownCount == shutdownsBeforeVeto);
+    if (vetoReady) veto->allowClose(true);
+    passed &= c162CloseCase(vetoReady && closeApplicationInstance(
+        ApplicationSnapshotSource::AppManagerInstance, vetoId) ==
+        ApplicationCloseResult::Success);
+    passed &= c162CloseCase(getRunningAppCount() == initialCount &&
+        !isRunningInstanceId(vetoId) &&
+        c162ShutdownCount == shutdownsBeforeVeto + 1u);
+
+    C162CloseTestApp* fallback = new C162CloseTestApp(
+        "C162 Active Fallback");
+    C162CloseTestApp* focused = new C162CloseTestApp(
+        "C162 Active Close");
+    const bool fallbackReady = fallback && fallback->attachWindow() &&
+        admitRunningApp(fallback, "gxos.test.active-fallback");
+    const uint64_t fallbackId = fallbackReady
+        ? fallback->getInstanceId() : 0u;
+    const bool focusedReady = focused && focused->attachWindow() &&
+        admitRunningApp(focused, "gxos.test.active-close");
+    const uint64_t focusedId = focusedReady
+        ? focused->getInstanceId() : 0u;
+    if (!fallbackReady && fallback && fallback->getInstanceId() == 0u)
+        delete fallback;
+    if (!focusedReady && focused && focused->getInstanceId() == 0u)
+        delete focused;
+    passed &= c162CloseCase(fallbackReady && focusedReady &&
+        compositor::KernelCompositor::getFocusedWindow() ==
+            focused->getWindow());
+    passed &= c162CloseCase(focusedReady && closeApplicationInstance(
+        ApplicationSnapshotSource::AppManagerInstance, focusedId) ==
+        ApplicationCloseResult::Success);
+    passed &= c162CloseCase(fallbackReady &&
+        compositor::KernelCompositor::getFocusedWindow() ==
+            fallback->getWindow() && isRunningInstanceId(fallbackId));
+    passed &= c162CloseCase(fallbackReady && closeApplicationInstance(
+        ApplicationSnapshotSource::AppManagerInstance, fallbackId) ==
+        ApplicationCloseResult::Success);
+    passed &= c162CloseCase(getRunningAppCount() == initialCount);
+
+    const AppInfo* calculatorInfo = getAppInfo("Calculator");
+    const bool calculatorRegistered = calculatorInfo &&
+        calculatorInfo->available && calculatorInfo->factory;
+    passed &= c162CloseCase(calculatorRegistered);
+    auto createAndCalculate56 = [](const AppInfo* info, uint64_t* outId) {
+        if (!info || !info->factory || !outId) return false;
+        KernelApp* calculator = info->factory();
+        if (!calculator || !calculator->init() ||
+            !admitRunningApp(calculator, info->applicationId)) {
+            if (calculator && calculator->getInstanceId() == 0u) {
+                calculator->shutdown();
+                delete calculator;
+            }
+            return false;
+        }
+        *outId = calculator->getInstanceId();
+        const char keys[] = { '7', '*', '8', '=' };
+        for (char key : keys)
+            compositor::KernelCompositor::handleKeyChar(key);
+        Widget* display = calculator->getWidget(0);
+        return display && streq(display->text, "56");
+    };
+    bool nativeCalculatorPassed = true;
+    uint64_t nativeCalculatorId = 0u;
+    const bool nativeCalculatorStarted = calculatorRegistered &&
+        createAndCalculate56(calculatorInfo, &nativeCalculatorId);
+    nativeCalculatorPassed &= nativeCalculatorStarted &&
+        nativeCalculatorId != 0u && isRunningInstanceId(nativeCalculatorId);
+    nativeCalculatorPassed &= nativeCalculatorStarted &&
+        closeApplicationInstance(ApplicationSnapshotSource::AppManagerInstance,
+            nativeCalculatorId) == ApplicationCloseResult::Success &&
+        !isRunningInstanceId(nativeCalculatorId) &&
+        getRunningAppCount() == initialCount;
+    passed &= c162CloseCase(nativeCalculatorPassed);
+    uint64_t relaunchedCalculatorId = 0u;
+    const bool nativeCalculatorRelaunched = calculatorRegistered &&
+        createAndCalculate56(calculatorInfo, &relaunchedCalculatorId);
+    nativeCalculatorPassed &= nativeCalculatorRelaunched &&
+        relaunchedCalculatorId != 0u &&
+        relaunchedCalculatorId != nativeCalculatorId &&
+        isRunningInstanceId(relaunchedCalculatorId);
+    passed &= c162CloseCase(nativeCalculatorPassed);
+    nativeCalculatorPassed &= nativeCalculatorRelaunched &&
+        closeApplicationInstance(ApplicationSnapshotSource::AppManagerInstance,
+            relaunchedCalculatorId) == ApplicationCloseResult::Success &&
+        !isRunningInstanceId(relaunchedCalculatorId) &&
+        getRunningAppCount() == initialCount;
+    passed &= c162CloseCase(nativeCalculatorPassed);
+    serial::puts("[C162-NATIVE-CALCULATOR] close=relaunch identities=distinct operation=7*8=56 result=");
+    serial::puts(nativeCalculatorPassed ? "PASS\n" : "FAIL\n");
+
+    bool stressPassed = true;
+    const uint32_t shutdownsBeforeStress = c162ShutdownCount;
+    const uint32_t closesBeforeStress = c162ClosedCount;
+    for (uint32_t iteration = 0u; iteration < 100u; ++iteration) {
+        C162CloseTestApp* app = new C162CloseTestApp("C162 Close Stress");
+        if (!app || !app->attachWindow() ||
+            !admitRunningApp(app, "gxos.test.close-stress")) {
+            if (app && !app->getInstanceId()) delete app;
+            stressPassed = false;
+            break;
+        }
+        const uint64_t id = app->getInstanceId();
+        if ((iteration % 4u) == 1u) {
+            stressPassed &= closeApplicationInstance(
+                ApplicationSnapshotSource::ShellSurface, id) ==
+                ApplicationCloseResult::InvalidArgument;
+            stressPassed &= isRunningInstanceId(id);
+        }
+        if ((iteration % 4u) == 2u) app->allowClose(false);
+        ApplicationCloseResult result = closeApplicationInstance(
+            ApplicationSnapshotSource::AppManagerInstance, id);
+        if ((iteration % 4u) == 2u) {
+            stressPassed &= result == ApplicationCloseResult::CloseFailed;
+            app->allowClose(true);
+            result = closeApplicationInstance(
+                ApplicationSnapshotSource::AppManagerInstance, id);
+        }
+        stressPassed &= result == ApplicationCloseResult::Success;
+        stressPassed &= !isRunningInstanceId(id) &&
+            getRunningAppCount() == initialCount;
+        stressPassed &= closeApplicationInstance(
+            ApplicationSnapshotSource::AppManagerInstance, id) ==
+            ApplicationCloseResult::NotFound;
+    }
+    stressPassed &= c162ShutdownCount == shutdownsBeforeStress + 100u &&
+        c162ClosedCount == closesBeforeStress + 100u;
+    passed &= c162CloseCase(stressPassed);
+    passed &= c162CloseCase(getRunningAppCount() == initialCount);
+
+    serial::puts("[C162-APP-CLOSE-TESTS] cases=");
+    serial::put_hex32(c162CloseCases);
+    serial::puts(" stress=100 identity-revalidation=checked lifecycle=checked result=");
+    serial::puts(passed && c162CloseCases >= 18u ? "PASS\n" : "FAIL\n");
+    return passed && c162CloseCases >= 18u;
 }
 #endif
 
@@ -784,17 +1077,9 @@ void AppManager::update() {
         if (s_runningApps[i]) {
             // Check if app has been terminated (window was closed)
             if (s_runningApps[i]->getState() == AppState::Terminated) {
-                // Clean up the app
-                KernelApp* app = s_runningApps[i];
-                
-                // Shift remaining apps
-                for (int j = i; j < s_runningAppCount - 1; j++) {
-                    s_runningApps[j] = s_runningApps[j + 1];
-                }
-                s_runningApps[--s_runningAppCount] = nullptr;
-                
-                // Delete the app object
-                delete app;
+                // requestClose() owns shutdown; this path only compacts and
+                // releases an object that another lifecycle path terminated.
+                removeTerminatedAppAt(i);
             } else {
                 s_runningApps[i]->update();
             }

@@ -8456,6 +8456,11 @@ void init()
     ipc::IpcManager::init();
     apps::registerKernelApps();
     compositor::KernelCompositor::init(s_screenW, s_screenH, kTaskbarH);
+#if defined(GXOS_NATIVEAOT_C162_MANAGED_TASK_MANAGER_CLOSE_PROOF)
+    if (!app::AppManager::runC162CloseFocusedTests()) {
+        serial::puts("[C162-APP-CLOSE-TESTS] result=FAIL\n");
+    }
+#endif
     compositor::TaskbarManager::init(s_screenW, s_screenH, kTaskbarH, 
                                      4 + kStartBtnW + 8);
     init_taskbar_widgets();

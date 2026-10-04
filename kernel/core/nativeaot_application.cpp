@@ -61,15 +61,18 @@ constexpr uint32_t kElfFlagRead = 4u;
 constexpr uint32_t kVmemCommit = 0x1000u;
 constexpr uint32_t kVmemRelease = 0x8000u;
 constexpr int32_t kInvalidApplicationIdReturn = -4;
+constexpr uint32_t kManagedTaskManagerCloseCompletedActionId = 0x01620001u;
 constexpr const char* kProductionCompositeImage = gxos::apps::kManagedNativeAotCompositeImagePath;
-// ABI v2 appends one read-only application snapshot callback after the
-// complete 104-byte ABI-v1 table. The first 104 bytes remain unchanged.
-constexpr uint32_t kManagedHostAbiVersion = 2u;
+// ABI v2 appended the snapshot callback at 104; ABI v3 appends exact-identity
+// close at 112. Both historical prefixes remain byte-for-byte stable.
+constexpr uint32_t kManagedHostAbiVersion = 3u;
 constexpr uint32_t kManagedHostAbiV1CoreSize = 72u;
 constexpr uint32_t kManagedHostAbiV1Size = 104u;
 constexpr uint32_t kManagedHostC113Size = 88u;
-constexpr uint32_t kManagedHostTableSize = 112u;
+constexpr uint32_t kManagedHostTableSize = 120u;
+constexpr uint32_t kManagedHostTableV2Size = 112u;
 constexpr uint32_t kManagedApplicationSnapshotOffset = 104u;
+constexpr uint32_t kManagedApplicationCloseOffset = 112u;
 constexpr uint64_t kManagedCapabilitySurface = 1ull << 0;
 constexpr uint64_t kManagedCapabilityText = 1ull << 1;
 constexpr uint64_t kManagedCapabilityPrimitive = 1ull << 2;
@@ -82,13 +85,15 @@ constexpr uint64_t kManagedCapabilityFileWrite = 1ull << 8;
 constexpr uint64_t kManagedCapabilityDirectoryList = 1ull << 9;
 constexpr uint64_t kManagedCapabilityFileStat = 1ull << 10;
 constexpr uint64_t kManagedCapabilityApplicationSnapshot = 1ull << 11;
+constexpr uint64_t kManagedCapabilityApplicationClose = 1ull << 12;
 constexpr uint64_t kManagedCapabilities =
     kManagedCapabilitySurface | kManagedCapabilityText |
     kManagedCapabilityPrimitive | kManagedCapabilityAction |
     kManagedCapabilityClose | kManagedCapabilityLaunchContext |
     kManagedCapabilityLog | kManagedCapabilityFileRead |
     kManagedCapabilityFileWrite | kManagedCapabilityDirectoryList |
-    kManagedCapabilityFileStat | kManagedCapabilityApplicationSnapshot;
+    kManagedCapabilityFileStat | kManagedCapabilityApplicationSnapshot |
+    kManagedCapabilityApplicationClose;
 constexpr uint32_t kManagedFilePathMaxBytes = 96u;
 constexpr uint32_t kManagedFileMaxBytes = 16u * 1024u;
 constexpr uint32_t kManagedDirectoryMaxEntries = 64u;
@@ -284,6 +289,8 @@ struct NativeHostCallTable {
         uint32_t capacity,
         uint32_t* outTotalCount,
         uint32_t* outCopiedCount);
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *closeApplication)(
+        NativeGxAppContext* context, uint32_t source, uint64_t instanceId);
 };
 
 struct ManagedDirectoryEntryAbi {
@@ -335,7 +342,7 @@ struct ResidentApplication {
     uint32_t sequence;
 };
 
-static_assert(sizeof(NativeHostCallTable) == 112, "C160 host callback ABI drift");
+static_assert(sizeof(NativeHostCallTable) == 120, "C162 host callback ABI drift");
 static_assert(offsetof(NativeHostCallTable, log) == 8,
               "ABI-v1 log callback offset drift");
 static_assert(offsetof(NativeHostCallTable, requestWindow) == 16,
@@ -357,9 +364,15 @@ static_assert(offsetof(NativeHostCallTable, fileStat) == 96,
 static_assert(offsetof(NativeHostCallTable, applicationSnapshot) ==
                   kManagedApplicationSnapshotOffset,
               "C160 callback must append at ABI-v1 table end");
-static_assert(kManagedHostTableSize ==
+static_assert(offsetof(NativeHostCallTable, closeApplication) ==
+                  kManagedApplicationCloseOffset,
+              "C162 close callback offset drift");
+static_assert(kManagedHostTableV2Size ==
                   kManagedApplicationSnapshotOffset + sizeof(void*),
               "C160 ABI-v2 table size drift");
+static_assert(kManagedHostTableSize ==
+                  kManagedApplicationCloseOffset + sizeof(void*),
+              "C162 ABI-v3 table size drift");
 static_assert(kManagedHostAbiV1Size == kManagedApplicationSnapshotOffset,
               "C160 ABI-v1 prefix size drift");
 static_assert(offsetof(NativeHostCallTable, fileReadAll) == 72,
@@ -467,6 +480,7 @@ bool g_c150ContractTestsRun = false;
 bool launchSettingsCenterFromNotes();
 void completeManagedReturnIfPending();
 void clearManagedActiveApplicationId();
+void completeC162DeferredApplicationClose();
 
 bool copyManagedIdentity(const char* source, char* destination, uint32_t capacity) {
     if (!source || !destination || capacity == 0u) return false;
@@ -634,10 +648,9 @@ struct ManagedSurfaceRect {
     uint32_t color;
 };
 
-// The managed bridge deliberately reuses the existing bare-metal application
-// and compositor surface.  This adapter owns one logical window at a time;
-// the NativeAOT image remains resident while the window may be closed and
-// recreated on a later logical launch.
+// The managed bridge reuses the bare-metal application and compositor model.
+// Three fixed adapters allow Notes, Managed Calculator, and Managed Task
+// Manager to remain open together while sharing the resident NativeAOT image.
 class NativeAotManagedSurface final : public app::KernelApp {
 public:
     NativeAotManagedSurface()
@@ -1060,8 +1073,10 @@ public:
 #if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
         const bool returnPending = g_managedReturnLaunchPending &&
             g_activeManagedContext == nullptr;
-        m_surfaceApplicationId[0] = '\0';
         if (returnPending) completeManagedReturnIfPending();
+        m_surfaceApplicationId[0] = '\0';
+        m_snapshotInstanceId = 0u;
+        m_selector = 0u;
 #endif
     }
 
@@ -1105,11 +1120,7 @@ public:
         m_actionBindingCount = 0;
         setTitle(title);
         compositor::KernelCompositor::setFocus(m_window->id);
- #if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
-        if (!copyManagedIdentity(g_managedActiveApplicationId,
-                m_surfaceApplicationId, sizeof(m_surfaceApplicationId))) {
-            m_surfaceApplicationId[0] = '\0';
-        }
+  #if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
         m_surfaceGeneration = ++g_managedSurfaceGeneration;
 #if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
         serial::puts("[C150-SURFACE] action=create appId=");
@@ -1128,6 +1139,35 @@ public:
     void setSelector(uint32_t selector) {
         m_selector = selector;
     }
+
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+    bool prepareApplication(const char* identity, uint64_t snapshotInstanceId,
+                            uint32_t selector) {
+        if (m_window || !identity || snapshotInstanceId == 0u || selector == 0u ||
+            !copyManagedIdentity(identity, m_surfaceApplicationId,
+                sizeof(m_surfaceApplicationId))) return false;
+        m_snapshotInstanceId = snapshotInstanceId;
+        m_selector = selector;
+        return true;
+    }
+
+    void abandonPreparedApplication() {
+        if (m_window) return;
+        m_surfaceApplicationId[0] = '\0';
+        m_snapshotInstanceId = 0u;
+        m_selector = 0u;
+    }
+
+    bool hasApplication() const { return m_surfaceApplicationId[0] != '\0'; }
+    bool hasApplicationIdentity(const char* identity) const {
+        return identity && hasApplication() &&
+            ManagedReturnTarget::identityEquals(m_surfaceApplicationId, identity);
+    }
+    const char* applicationId() const { return m_surfaceApplicationId; }
+    uint64_t snapshotInstanceId() const { return m_snapshotInstanceId; }
+#endif
+
+    uint32_t selector() const { return m_selector; }
 
     bool owns(uint64_t window) const {
         return m_window != nullptr && m_window->id == static_cast<uint32_t>(window);
@@ -1263,6 +1303,7 @@ private:
 #if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
     char m_surfaceApplicationId[kManagedApplicationIdentityCapacity] = {};
     uint32_t m_surfaceGeneration = 0u;
+    uint64_t m_snapshotInstanceId = 0u;
     bool m_replacingSurface = false;
 #endif
     ManagedActionBinding m_actionBindings[8] = {};
@@ -1272,13 +1313,93 @@ private:
 // Bare-metal startup does not run the hosted C++ global-constructor array.
 // Allocate this polymorphic adapter explicitly so KernelWindow::owner has a
 // real vtable before the compositor dispatches draw/input/close callbacks.
-NativeAotManagedSurface* g_managedSurface = nullptr;
+NativeAotManagedSurface* g_managedSurfaces[
+    app::kApplicationSnapshotManagedCapacity] = {};
+NativeAotManagedSurface* g_managedInvocationSurface = nullptr;
+uint32_t g_managedLastSelector = 0u;
+
+enum class C162DeferredCloseState : uint32_t {
+    Empty = 0u,
+    Pending = 1u,
+    Executing = 2u,
+    Completed = 3u,
+};
+
+struct C162DeferredCloseRequest {
+    C162DeferredCloseState state;
+    uint32_t source;
+    uint32_t requesterSelector;
+    uint64_t targetInstanceId;
+    uint64_t requesterInstanceId;
+    int32_t result;
+};
+
+C162DeferredCloseRequest g_c162DeferredClose{};
+
+NativeAotManagedSurface* managedSurfaceSlot(uint32_t index) {
+    if (index >= app::kApplicationSnapshotManagedCapacity) return nullptr;
+    if (!g_managedSurfaces[index])
+        g_managedSurfaces[index] = new NativeAotManagedSurface();
+    return g_managedSurfaces[index];
+}
+
+NativeAotManagedSurface* managedSurfaceForSelector(uint32_t selector) {
+    for (uint32_t index = 0u;
+         index < app::kApplicationSnapshotManagedCapacity; ++index) {
+        NativeAotManagedSurface* surface = g_managedSurfaces[index];
+        if (surface && surface->selector() == selector &&
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+            surface->hasApplication()
+#else
+            surface->windowId() != 0u
+#endif
+            ) return surface;
+    }
+    return nullptr;
+}
+
+NativeAotManagedSurface* managedSurfaceForApplication(const char* identity) {
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+    if (!identity) return nullptr;
+    for (uint32_t index = 0u;
+         index < app::kApplicationSnapshotManagedCapacity; ++index) {
+        NativeAotManagedSurface* surface = g_managedSurfaces[index];
+        if (surface && surface->hasApplicationIdentity(identity)) return surface;
+    }
+#else
+    (void)identity;
+#endif
+    return nullptr;
+}
+
+NativeAotManagedSurface* reserveManagedSurface(
+    const char* identity, uint64_t snapshotInstanceId, uint32_t selector) {
+    for (uint32_t index = 0u;
+         index < app::kApplicationSnapshotManagedCapacity; ++index) {
+        NativeAotManagedSurface* surface = managedSurfaceSlot(index);
+        if (!surface) return nullptr;
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+        if (surface->windowId() == 0u && !surface->hasApplication() &&
+            surface->prepareApplication(identity, snapshotInstanceId, selector)) {
+            return surface;
+        }
+#else
+        (void)identity;
+        (void)snapshotInstanceId;
+        surface->setSelector(selector);
+        return surface;
+#endif
+    }
+    return nullptr;
+}
 
 NativeAotManagedSurface* managedSurface() {
-    if (!g_managedSurface) {
-        g_managedSurface = new NativeAotManagedSurface();
-    }
-    return g_managedSurface;
+    if (g_managedInvocationSurface) return g_managedInvocationSurface;
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+    return managedSurfaceForSelector(g_managedLastSelector);
+#else
+    return managedSurfaceSlot(0u);
+#endif
 }
 
 #if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
@@ -1296,7 +1417,7 @@ bool launchSettingsCenterFromNotes() {
         gxos::apps::FindManagedNativeAotAppByIdentity(kManagedNotesApplicationId);
     const gxos::apps::BuiltInAppMetadata* settings =
         gxos::apps::FindManagedNativeAotAppByIdentity(kManagedSettingsApplicationId);
-    NativeAotManagedSurface* surface = managedSurface();
+    NativeAotManagedSurface* surface = managedSurfaceForSelector(4u);
     if (!notes || !settings || !managedIdentityResolvable(notes->appId) ||
         !managedIdentityResolvable(settings->appId) ||
         notes->managedSelector != 4u || settings->managedSelector != 5u ||
@@ -1335,6 +1456,14 @@ bool launchSettingsCenterFromNotes() {
 #if defined(GXOS_NATIVEAOT_C155_MANAGED_NOTES_SESSION)
     serial::puts("[C155-RETURN-PAIR] target=Notes session=armed result=PASS\n");
 #endif
+
+    // Preserve C150's fresh-instance return behavior: Notes is closed through
+    // its ordinary close contract before Settings takes the next window slot.
+    if (!surface->requestClose()) {
+        g_managedReturnTarget.clear();
+        g_managedReturnLaunchPending = false;
+        return false;
+    }
 
     g_managedLaunchingSettingsFromNotes = true;
     const bool launched = desktop::launch_app_with_context(
@@ -1382,7 +1511,7 @@ void completeManagedReturnIfPending() {
 #if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
         serial::puts("[C150-RETURN-FAIL] reason=invalid-or-self-identity fallback=shell\n");
 #endif
-        NativeAotManagedSurface* surface = managedSurface();
+        NativeAotManagedSurface* surface = managedSurfaceForSelector(5u);
         if (surface && surface->windowId() != 0u) surface->requestClose();
         clearManagedActiveApplicationId();
         desktop::open_terminal();
@@ -1411,7 +1540,7 @@ void completeManagedReturnIfPending() {
         serial::puts("[C150-RETURN-RESULT] id=");
         serial::puts(identity);
         serial::puts(" normal-launch=PASS target=none\n");
-        NativeAotManagedSurface* returnedSurface = managedSurface();
+        NativeAotManagedSurface* returnedSurface = managedSurfaceForSelector(4u);
         serial::puts("[C150-RETURN-ACTION] settings=");
         serial::puts(returnedSurface && returnedSurface->hasC150SettingsAction()
             ? "registered result=PASS\n" : "missing result=FAIL\n");
@@ -1422,7 +1551,7 @@ void completeManagedReturnIfPending() {
 #if defined(GXOS_NATIVEAOT_C155_MANAGED_NOTES_SESSION)
     clearManagedNotesReturnSession();
 #endif
-    NativeAotManagedSurface* surface = managedSurface();
+    NativeAotManagedSurface* surface = managedSurfaceForSelector(5u);
     if (surface && surface->windowId() != 0u) surface->requestClose();
     clearManagedActiveApplicationId();
     desktop::open_terminal();
@@ -2204,7 +2333,7 @@ uint32_t boundedCStringLength(const uint8_t* text, uint32_t maximum) {
 bool activeSurfaceContext(NativeGxAppContext* context) {
     return context != nullptr && context == g_activeManagedContext &&
         context->size >= sizeof(NativeGxAppContext) && context->host != nullptr &&
-        context->host->size >= sizeof(NativeHostCallTable);
+        context->host->size >= kManagedHostTableV2Size;
 }
 
 constexpr int32_t kSnapshotResultSuccess = 0;
@@ -2280,7 +2409,9 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedApplicationSnapshot(
     uint32_t capacity,
     uint32_t* outTotalCount,
     uint32_t* outCopiedCount) {
-    if (!activeSurfaceContext(context)) return kSnapshotResultInvalidContext;
+    if (!activeSurfaceContext(context)) {
+        return kSnapshotResultInvalidContext;
+    }
     if (context->host->version < 2u ||
         context->host->size < kManagedApplicationSnapshotOffset + sizeof(void*)) {
         return kSnapshotResultNotSupported;
@@ -2385,21 +2516,24 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedApplicationSnapshot(
     }
 
 #if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
-    if (g_managedActiveApplicationId[0] != '\0') {
+    for (uint32_t slot = 0u;
+         slot < app::kApplicationSnapshotManagedCapacity; ++slot) {
+        NativeAotManagedSurface* surface = g_managedSurfaces[slot];
+        if (!surface || surface->windowId() == 0u ||
+            !surface->hasApplication()) continue;
         const gxos::apps::BuiltInAppMetadata* metadata =
             gxos::apps::FindManagedNativeAotAppByIdentity(
-                g_managedActiveApplicationId);
-        if (!metadata || g_managedActiveSnapshotInstanceId == 0u ||
+                surface->applicationId());
+        if (!metadata || surface->snapshotInstanceId() == 0u ||
             totalCount >= app::kApplicationSnapshotCapacity) {
             return kSnapshotResultInvalidState;
         }
-        app::KernelWindow* managedWindow = g_managedSurface
-            ? g_managedSurface->getWindow() : nullptr;
-        const bool active = !shellActive && managedWindow != nullptr &&
-            focused == managedWindow && managedWindow->owner == g_managedSurface;
+        app::KernelWindow* managedWindow = surface->getWindow();
+        const bool active = !shellActive && focused == managedWindow &&
+            managedWindow->owner == surface;
         if (!fillSnapshotRecord(&staged[totalCount],
                 app::ApplicationSnapshotSource::ManagedLogicalApplication,
-                g_managedActiveSnapshotInstanceId,
+                surface->snapshotInstanceId(),
                 app::ApplicationSnapshotState::Running,
                 active, metadata->displayName, metadata->appId)) {
             return kSnapshotResultInvalidState;
@@ -2417,8 +2551,151 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedApplicationSnapshot(
     for (uint32_t index = 0u; index < copiedCount; ++index) {
         records[index] = staged[index];
     }
-    return copiedCount < totalCount
+    const int32_t result = copiedCount < totalCount
         ? kSnapshotResultTruncated : kSnapshotResultSuccess;
+    return result;
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedCloseApplication(
+    NativeGxAppContext* context, uint32_t source, uint64_t instanceId) {
+    if (!activeSurfaceContext(context) || instanceId == 0u)
+        return static_cast<int32_t>(app::ApplicationCloseResult::InvalidArgument);
+    if (context->host->version < 3u ||
+        context->host->size < kManagedHostTableSize)
+        return -5; // ABI feature is not supported by this host table.
+    if ((context->host->capabilities & kManagedCapabilityApplicationClose) == 0u)
+        return -3;
+
+    const auto snapshotSource =
+        static_cast<app::ApplicationSnapshotSource>(source);
+    if (snapshotSource == app::ApplicationSnapshotSource::AppManagerInstance) {
+        return static_cast<int32_t>(app::AppManager::closeApplicationInstance(
+            snapshotSource, instanceId));
+    }
+    if (snapshotSource == app::ApplicationSnapshotSource::ShellSurface) {
+        return shell::get_instance_generation() == instanceId
+            ? static_cast<int32_t>(app::ApplicationCloseResult::Protected)
+            : static_cast<int32_t>(app::ApplicationCloseResult::NotFound);
+    }
+    if (snapshotSource !=
+        app::ApplicationSnapshotSource::ManagedLogicalApplication) {
+        return static_cast<int32_t>(app::ApplicationCloseResult::InvalidArgument);
+    }
+
+    const uint32_t callerSelector = static_cast<uint32_t>(
+        reinterpret_cast<uintptr_t>(context->userData));
+    NativeAotManagedSurface* requester =
+        managedSurfaceForSelector(callerSelector);
+    if (!requester || requester->snapshotInstanceId() == 0u ||
+        !ManagedReturnTarget::identityEquals(requester->applicationId(),
+            "com.guidexos.apps.managed.taskmanager")) {
+        return static_cast<int32_t>(app::ApplicationCloseResult::Protected);
+    }
+    C162DeferredCloseRequest& deferred = g_c162DeferredClose;
+    if (deferred.state == C162DeferredCloseState::Completed) {
+        if (deferred.source == source &&
+            deferred.requesterSelector == callerSelector &&
+            deferred.requesterInstanceId == requester->snapshotInstanceId() &&
+            deferred.targetInstanceId == instanceId) {
+            const int32_t result = deferred.result;
+            deferred = C162DeferredCloseRequest{};
+            return result;
+        }
+        // A completed response that its original caller never polled cannot
+        // hold this single bounded completion slot hostage forever.
+        deferred = C162DeferredCloseRequest{};
+    }
+    if (deferred.state == C162DeferredCloseState::Pending ||
+        deferred.state == C162DeferredCloseState::Executing) {
+        return deferred.source == source &&
+                deferred.requesterSelector == callerSelector &&
+                deferred.requesterInstanceId == requester->snapshotInstanceId() &&
+                deferred.targetInstanceId == instanceId
+            ? -14 // One exact close is still being completed after dispatch.
+            : static_cast<int32_t>(app::ApplicationCloseResult::CloseFailed);
+    }
+
+    for (uint32_t slot = 0u;
+         slot < app::kApplicationSnapshotManagedCapacity; ++slot) {
+        NativeAotManagedSurface* surface = g_managedSurfaces[slot];
+        if (!surface || surface->windowId() == 0u ||
+            !surface->hasApplication()) continue;
+        if (surface->snapshotInstanceId() != instanceId) continue;
+        if (surface->selector() == callerSelector)
+            return static_cast<int32_t>(app::ApplicationCloseResult::Protected);
+        // C162 exposes one deliberately bounded managed mutation target. The
+        // calculator is stateless; managed documents and system surfaces keep
+        // their own close/dirty-state paths.
+        if (!ManagedReturnTarget::identityEquals(surface->applicationId(),
+                "com.guidexos.apps.managed.calculator")) {
+            return static_cast<int32_t>(app::ApplicationCloseResult::Protected);
+        }
+        deferred.state = C162DeferredCloseState::Pending;
+        deferred.source = source;
+        deferred.requesterSelector = callerSelector;
+        deferred.targetInstanceId = instanceId;
+        deferred.requesterInstanceId = requester->snapshotInstanceId();
+        deferred.result = -14;
+        return -14;
+    }
+    return static_cast<int32_t>(app::ApplicationCloseResult::NotFound);
+}
+
+void completeC162DeferredApplicationClose() {
+    C162DeferredCloseRequest& request = g_c162DeferredClose;
+    if (request.state != C162DeferredCloseState::Pending) return;
+
+    // Mark before invoking the canonical close path. Its normal managed
+    // teardown callback enters NativeAOT sequentially and must not recursively
+    // consume or execute this pending operation.
+    request.state = C162DeferredCloseState::Executing;
+    int32_t result = static_cast<int32_t>(app::ApplicationCloseResult::NotFound);
+    NativeAotManagedSurface* requester =
+        managedSurfaceForSelector(request.requesterSelector);
+    if (!requester || requester->snapshotInstanceId() !=
+            request.requesterInstanceId ||
+        !ManagedReturnTarget::identityEquals(requester->applicationId(),
+            "com.guidexos.apps.managed.taskmanager")) {
+        result = static_cast<int32_t>(app::ApplicationCloseResult::Protected);
+    } else if (request.source != static_cast<uint32_t>(
+                   app::ApplicationSnapshotSource::ManagedLogicalApplication) ||
+               request.targetInstanceId == 0u) {
+        result = static_cast<int32_t>(app::ApplicationCloseResult::InvalidArgument);
+    } else {
+        NativeAotManagedSurface* target = nullptr;
+        for (uint32_t slot = 0u;
+             slot < app::kApplicationSnapshotManagedCapacity; ++slot) {
+            NativeAotManagedSurface* candidate = g_managedSurfaces[slot];
+            if (!candidate || candidate->windowId() == 0u ||
+                !candidate->hasApplication() ||
+                candidate->snapshotInstanceId() != request.targetInstanceId) {
+                continue;
+            }
+            target = candidate;
+            break;
+        }
+        if (target && target->selector() != request.requesterSelector &&
+            ManagedReturnTarget::identityEquals(target->applicationId(),
+                "com.guidexos.apps.managed.calculator")) {
+            result = target->requestClose()
+                ? static_cast<int32_t>(app::ApplicationCloseResult::Success)
+                : static_cast<int32_t>(app::ApplicationCloseResult::CloseFailed);
+        } else if (target) {
+            result = static_cast<int32_t>(app::ApplicationCloseResult::Protected);
+        }
+    }
+
+    // requestClose may have re-entered NativeAOT and updated unrelated globals;
+    // publish completion only after the normal close lifecycle has returned.
+    request.result = result;
+    request.state = C162DeferredCloseState::Completed;
+    const uint32_t requesterSelector = request.requesterSelector;
+    // Notify the original Task Manager after ManagedMain has returned. This is
+    // a sequential NativeAOT entry, and lets it consume the exact completion
+    // and rebuild from C160 immediately. If notification fails, the retained
+    // completion remains available to the next input poll.
+    (void)invokeManagedAction(requesterSelector,
+        kManagedTaskManagerCloseCompletedActionId);
 }
 
 #if defined(GXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF)
@@ -3076,11 +3353,12 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedRequestWindow(
         return -2;
     }
     NativeAotManagedSurface* surface = managedSurface();
-    if (!surface || !surface->open(reinterpret_cast<const char*>(title), width, height)) {
-        return -4;
-    }
+    if (!surface) return -4;
     surface->setSelector(static_cast<uint32_t>(
         reinterpret_cast<uintptr_t>(context->userData)));
+    if (!surface->open(reinterpret_cast<const char*>(title), width, height)) {
+        return -4;
+    }
     *outWindow = surface->windowId();
     serial::puts("[C111-SURFACE] action=create title=");
     serial::puts(reinterpret_cast<const char*>(title));
@@ -3567,7 +3845,9 @@ int32_t invokeManagedWithHostMetadata(
         (capabilities & kManagedCapabilityFileStat) != 0u
             ? managedFileStat : nullptr,
         (capabilities & kManagedCapabilityApplicationSnapshot) != 0u
-            ? managedApplicationSnapshot : nullptr };
+            ? managedApplicationSnapshot : nullptr,
+        (capabilities & kManagedCapabilityApplicationClose) != 0u
+            ? managedCloseApplication : nullptr };
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
         reinterpret_cast<void*>(static_cast<uintptr_t>(selector)),
@@ -3581,14 +3861,30 @@ int32_t invokeManagedWithHostMetadata(
         reinterpret_cast<void*>(static_cast<uintptr_t>(3u)),
         &context, startupInstallTls, startupMarker};
     using Entry = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void*);
+    NativeGxAppContext* previousActiveManagedContext =
+        g_activeManagedContext;
+    const uint32_t previousLastSelector = g_managedLastSelector;
+    NativeAotManagedSurface* previousInvocationSurface =
+        g_managedInvocationSurface;
+    g_managedInvocationSurface = managedSurfaceForSelector(selector);
+    g_managedLastSelector = selector;
     g_activeManagedContext = &context;
     arch::amd64::disable_interrupts();
     const int32_t managedReturn = reinterpret_cast<Entry>(
         g_application.entryPoint)(&startup);
     arch::amd64::enable_interrupts();
-    g_activeManagedContext = nullptr;
+    g_activeManagedContext = previousActiveManagedContext;
+    g_managedInvocationSurface = previousInvocationSurface;
+    if (previousActiveManagedContext != nullptr)
+        g_managedLastSelector = previousLastSelector;
 #if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
-    completeManagedReturnIfPending();
+    // Finish C162 Managed Calculator teardown only after the requesting
+    // NativeAOT entrypoint has returned. The target's ordinary close callback
+    // can then enter the composite sequentially without nested managed frames.
+    if (previousActiveManagedContext == nullptr) {
+        completeC162DeferredApplicationClose();
+        completeManagedReturnIfPending();
+    }
 #endif
     return managedReturn;
 }
@@ -3768,7 +4064,7 @@ LaunchStatus launchResident(const char* path, uint32_t logicalAppId,
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
         managedCloseWindow, kManagedCapabilities, managedAddActionButton,
         managedFileReadAll, managedFileWriteAll, managedDirectoryList,
-        managedFileStat, managedApplicationSnapshot };
+        managedFileStat, managedApplicationSnapshot, managedCloseApplication };
     serial::puts("[C112-HOST] version=");
     serial::put_hex32(kManagedHostAbiVersion);
     serial::puts(" capabilities=");
@@ -3989,7 +4285,7 @@ LaunchStatus launchInternal(const char* path, uint32_t logicalAppId,
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
         managedCloseWindow, kManagedCapabilities, managedAddActionButton,
         managedFileReadAll, managedFileWriteAll, managedDirectoryList,
-        managedFileStat, managedApplicationSnapshot };
+        managedFileStat, managedApplicationSnapshot, managedCloseApplication };
     serial::puts("[C112-HOST] version=");
     serial::put_hex32(kManagedHostAbiVersion);
     serial::puts(" capabilities=");
@@ -4147,15 +4443,39 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
 
     const uint32_t selector = metadata->managedSelector;
 #if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+    NativeAotManagedSurface* targetSurface =
+        managedSurfaceForApplication(metadata->appId);
+    if (targetSurface && targetSurface->windowId() != 0u) {
+        compositor::KernelCompositor::setFocus(
+            static_cast<uint32_t>(targetSurface->windowId()));
+        g_managedLastSelector = selector;
+#if defined(GXOS_NATIVEAOT_C162_MANAGED_TASK_MANAGER_CLOSE)
+        serial::puts("[C162-MANAGED-FOCUS] appId=");
+        serial::puts(metadata->appId);
+        serial::puts(" source=3 instance=");
+        serial::put_hex64(targetSurface->snapshotInstanceId());
+        serial::puts(" selector=");
+        serial::put_hex32(selector);
+        serial::puts(" existing=true result=PASS\n");
+#endif
+        report->status = LaunchStatus::Success;
+        return report->status;
+    }
     char previousIdentity[kManagedApplicationIdentityCapacity] = {};
     (void)copyManagedIdentity(g_managedActiveApplicationId, previousIdentity,
         sizeof(previousIdentity));
     const uint64_t previousSnapshotInstanceId =
         g_managedActiveSnapshotInstanceId;
-    const uint64_t previousWindow = g_managedSurface
-        ? g_managedSurface->windowId() : 0u;
     uint64_t nextSnapshotInstanceId = 0u;
     if (!allocateManagedSnapshotInstanceId(&nextSnapshotInstanceId)) {
+        return LaunchStatus::ManagedFailed;
+    }
+    targetSurface = reserveManagedSurface(metadata->appId,
+        nextSnapshotInstanceId, selector);
+    if (!targetSurface) {
+        serial::puts("[NATIVEAOT-APPMODEL] applicationId=");
+        serial::puts(metadata->appId);
+        serial::puts(" status=managed-surface-capacity\n");
         return LaunchStatus::ManagedFailed;
     }
     if (!g_managedLaunchingSettingsFromNotes && !g_managedReturnLaunchActive)
@@ -4190,20 +4510,21 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
     serial::puts(" selector=");
     serial::put_hex32(selector);
     serial::puts("\n");
+    NativeAotManagedSurface* previousInvocationSurface =
+        g_managedInvocationSurface;
+    g_managedInvocationSurface = targetSurface;
+    g_managedLastSelector = selector;
     const LaunchStatus status = launchLogical(
         kProductionCompositeImage, selector, report,
         launchContext, launchContextLength);
+    g_managedInvocationSurface = previousInvocationSurface;
 #if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
     if (status != LaunchStatus::Success) {
-        const uint64_t currentWindow = g_managedSurface
-            ? g_managedSurface->windowId() : 0u;
-        if (previousWindow != 0u && currentWindow == previousWindow) {
-            (void)copyManagedIdentity(previousIdentity,
-                g_managedActiveApplicationId, sizeof(g_managedActiveApplicationId));
-            g_managedActiveSnapshotInstanceId = previousSnapshotInstanceId;
-        } else {
-            clearManagedActiveApplicationId();
-        }
+        if (targetSurface->windowId() != 0u) targetSurface->requestClose();
+        targetSurface->abandonPreparedApplication();
+        (void)copyManagedIdentity(previousIdentity,
+            g_managedActiveApplicationId, sizeof(g_managedActiveApplicationId));
+        g_managedActiveSnapshotInstanceId = previousSnapshotInstanceId;
     }
 #if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
     else if (g_managedReturnLaunchActive) {
@@ -4212,8 +4533,7 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
         serial::puts(" appId=");
         serial::puts(metadata->appId);
         serial::puts(" surface-generation=");
-        serial::put_hex32(g_managedSurface
-            ? g_managedSurface->surfaceGeneration() : 0u);
+        serial::put_hex32(targetSurface->surfaceGeneration());
         serial::puts(" instance=fresh target=none registration=bounded result=PASS\n");
     }
 #endif
@@ -4309,7 +4629,7 @@ LaunchStatus probeFileServiceNegativeTests(LaunchReport* report) {
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
         managedCloseWindow, kManagedCapabilities, managedAddActionButton,
         managedFileReadAll, managedFileWriteAll, managedDirectoryList,
-        managedFileStat, managedApplicationSnapshot };
+        managedFileStat, managedApplicationSnapshot, managedCloseApplication };
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
         reinterpret_cast<void*>(static_cast<uintptr_t>(4u)), nullptr, 0u, 0u};
@@ -4413,7 +4733,7 @@ LaunchStatus probeDirectoryServiceNegativeTests(LaunchReport* report) {
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
         managedCloseWindow, kManagedCapabilities, managedAddActionButton,
         managedFileReadAll, managedFileWriteAll, managedDirectoryList,
-        managedFileStat, managedApplicationSnapshot };
+        managedFileStat, managedApplicationSnapshot, managedCloseApplication };
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
         reinterpret_cast<void*>(static_cast<uintptr_t>(4u)), nullptr, 0u, 0u};
@@ -4494,7 +4814,7 @@ LaunchStatus probeDirectoryCapacityTests(LaunchReport* report) {
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
         managedCloseWindow, kManagedCapabilities, managedAddActionButton,
         managedFileReadAll, managedFileWriteAll, managedDirectoryList,
-        managedFileStat, managedApplicationSnapshot };
+        managedFileStat, managedApplicationSnapshot, managedCloseApplication };
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
         reinterpret_cast<void*>(static_cast<uintptr_t>(4u)), nullptr, 0u, 0u};

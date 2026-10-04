@@ -9,7 +9,10 @@ namespace app {
 
 static constexpr uint32_t kApplicationSnapshotRecordVersion = 1u;
 static constexpr uint32_t kApplicationSnapshotAppManagerCapacity = 16u;
-static constexpr uint32_t kApplicationSnapshotCapacity = 18u;
+static constexpr uint32_t kApplicationSnapshotManagedCapacity = 3u;
+// C162 permits Notes, Managed Calculator, and Managed Task Manager to coexist
+// while preserving the full bounded AppManager and shell snapshot sources.
+static constexpr uint32_t kApplicationSnapshotCapacity = 20u;
 static constexpr uint32_t kApplicationSnapshotDisplayNameBytes = 32u;
 static constexpr uint32_t kApplicationSnapshotApplicationIdBytes = 96u;
 

@@ -200,7 +200,7 @@ public static unsafe class GuideXosApplicationRegistry
             s_lifecycleTestsRun = true;
             bool lifecycleTests = GuideXosManagedApplicationC150Tests.Run();
             host.TryLog(lifecycleTests
-                ? "C150-MANAGED-LIFECYCLE-TESTS cases=8 fresh=PASS active=one result=PASS"u8
+                ? "C150-MANAGED-LIFECYCLE-TESTS cases=8 coexist=true capacity=3 result=PASS"u8
                 : "C150-MANAGED-LIFECYCLE-TESTS result=FAIL"u8);
             if (!lifecycleTests) return GxAbi.ErrorInvalidArgument;
         }

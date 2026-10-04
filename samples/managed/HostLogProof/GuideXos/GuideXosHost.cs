@@ -131,6 +131,13 @@ public sealed unsafe class GuideXosHost
         return TryGetApplicationSnapshot(_context, _host, capacity, out snapshot);
     }
 
+    public GuideXosApplicationCloseResult TryCloseApplication(
+        GuideXosApplicationInstanceId identity)
+    {
+        return GuideXosApplicationControl.TryCloseApplication(
+            _context, _host, identity);
+    }
+
     internal static GuideXosApplicationSnapshotResult TryGetApplicationSnapshot(
         NativeGxAppContext* context,
         NativeHostCallTable* table,
@@ -563,5 +570,56 @@ public sealed unsafe class GuideXosHost
     private bool HasHostField(nuint offset)
     {
         return _host != null && _host->size >= offset + (nuint)sizeof(ulong);
+    }
+}
+
+/// <summary>
+/// Narrow C162 mutation wrapper. The caller supplies the full C160 identity;
+/// ABI-v2 tables are rejected before the appended callback field is read.
+/// </summary>
+public static unsafe class GuideXosApplicationControl
+{
+    public static GuideXosApplicationCloseResult TryCloseApplication(
+        GuideXosHost host, GuideXosApplicationInstanceId identity)
+    {
+        if (host == null) return GuideXosApplicationCloseResult.InvalidArgument;
+        return TryCloseApplication(host.Context, host.HostTable, identity);
+    }
+
+    internal static GuideXosApplicationCloseResult TryCloseApplication(
+        NativeGxAppContext* context, NativeHostCallTable* table,
+        GuideXosApplicationInstanceId identity)
+    {
+        if (context == null || table == null || identity.Value == 0u ||
+            identity.Source is not (
+                GuideXosApplicationSnapshotSource.AppManagerInstance or
+                GuideXosApplicationSnapshotSource.ShellSurface or
+                GuideXosApplicationSnapshotSource.ManagedLogicalApplication))
+        {
+            return GuideXosApplicationCloseResult.InvalidArgument;
+        }
+
+        if (table->version < 3u || table->size < GxAbi.HostCallTableSize)
+            return GuideXosApplicationCloseResult.NotSupported;
+        if ((table->capabilities & GxAbi.CapabilityApplicationClose) == 0u)
+            return GuideXosApplicationCloseResult.CapabilityUnavailable;
+        if (table->closeApplication == null)
+            return GuideXosApplicationCloseResult.NotSupported;
+
+        int nativeResult = table->closeApplication(
+            context, (uint)identity.Source, identity.Value);
+        return nativeResult switch
+        {
+            0 => GuideXosApplicationCloseResult.Success,
+            -2 => GuideXosApplicationCloseResult.InvalidArgument,
+            -3 => GuideXosApplicationCloseResult.CapabilityUnavailable,
+            -5 => GuideXosApplicationCloseResult.NotSupported,
+            -10 => GuideXosApplicationCloseResult.NotFound,
+            -11 => GuideXosApplicationCloseResult.Protected,
+            -12 => GuideXosApplicationCloseResult.CloseFailed,
+            -13 => GuideXosApplicationCloseResult.StaleIdentity,
+            -14 => GuideXosApplicationCloseResult.Pending,
+            _ => GuideXosApplicationCloseResult.NativeFailure,
+        };
     }
 }

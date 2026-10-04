@@ -4,22 +4,34 @@ using System;
 namespace HostLogProof.Applications;
 
 /// <summary>
-/// Read-only observer over the bounded C160 AppManager/shell/managed-surface
-/// snapshot. It owns presentation controls only; it has no app mutation API.
+/// Bounded observer over the C160 application snapshot with one C162
+/// exact-identity close operation. C160 remains read-only.
 /// </summary>
 public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
 {
     public const string ApplicationId = "com.guidexos.apps.managed.taskmanager";
     public const uint ApplicationSelector = 7u;
     public const uint CloseActionId = 0x01610001u;
+    public const uint CloseCompletedActionId = 0x01620001u;
     public const int SurfaceWidth = 800;
     public const int SurfaceHeight = 370;
 
 #if HOSTLOGPROOF_C161_TASK_MANAGER_PROOF
     private static bool s_proofTestsRun;
 #endif
+#if HOSTLOGPROOF_C162_MANAGED_TASK_MANAGER_CLOSE
+    private static bool s_closeProofTestsRun;
+#endif
     private readonly GuideXosTaskManagerControllerC161 _controller = new();
+    private readonly GuideXosDialog _closeDialog = new(
+        200, 104, 400, 160, "Confirm application close", 2);
+    private readonly GuideXosButton _confirmCloseButton = new(
+        300, 232, 100, 20, "Close");
+    private readonly GuideXosButton _cancelCloseButton = new(
+        412, 232, 100, 20, "Cancel");
     private ulong _window;
+    private readonly GuideXosPendingCloseTargetC162 _pendingCloseTarget = new();
+    private bool _closePending;
 
     internal int ControlCount => _controller.ControlCount;
     internal GuideXosTaskManagerControllerC161 Controller => _controller;
@@ -47,6 +59,18 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
         }
 #endif
 
+#if HOSTLOGPROOF_C162_MANAGED_TASK_MANAGER_CLOSE
+        if (!s_closeProofTestsRun)
+        {
+            s_closeProofTestsRun = true;
+            if (!GuideXosApplicationControlC162Tests.Run(host))
+            {
+                host.TryLog("C162-TM-CLOSE-ABI result=FAIL"u8);
+                return GuideXosResult.InvalidArgument;
+            }
+        }
+#endif
+
         if (!_controller.InitializeControls())
             return GuideXosResult.InvalidArgument;
 
@@ -63,6 +87,13 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
         GuideXosApplicationSnapshotResult snapshotResult =
             host.TryGetApplicationSnapshot(out GuideXosApplicationSnapshot snapshot);
         _controller.ApplySnapshot(snapshotResult, in snapshot);
+#if HOSTLOGPROOF_C162_MANAGED_TASK_MANAGER_CLOSE
+        if (!GuideXosApplicationControlC162Tests.RunNativeBoundary(host))
+        {
+            host.TryLog("C162-CLOSE-NATIVE-BOUNDARY result=FAIL"u8);
+            return GuideXosResult.InvalidArgument;
+        }
+#endif
         if (_controller.Render(surface) != GuideXosResult.Success)
         {
             _controller.Reset();
@@ -95,7 +126,29 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
             return GuideXosResult.SurfaceCreationFailed;
         }
 
+        if (_closeDialog.IsOpen)
+        {
+            _closeDialog.HandleInput(input);
+            if (!_closeDialog.IsOpen)
+            {
+                if (_closeDialog.Result == GuideXosDialogResult.Yes)
+                    CompleteCloseApplication(host);
+                else
+                    CancelCloseApplication(host);
+            }
+            return RenderWithDialog(surface);
+        }
+
+        // This input fallback consumes a bounded close completion if the
+        // native after-dispatch notification could not be delivered.
+        if (_closePending)
+        {
+            PollPendingCloseApplication(host);
+            return _controller.Render(surface);
+        }
+
         GuideXosTaskManagerCommandC161 command = _controller.RouteInput(input);
+
         if (input.Kind == GuideXosInputKind.PointerDown &&
             input.Button == GuideXosPointerButton.Primary &&
             input.X >= GuideXosTaskManagerControllerC161.ListX &&
@@ -127,6 +180,13 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
             RefreshAndRender(host, surface, input.Control
                 ? "Ctrl+R"u8 : "button/keyboard"u8);
         }
+        else if (command == GuideXosTaskManagerCommandC161.CloseApplication)
+        {
+            if (!OpenCloseConfirmation(host, surface))
+                _controller.SetOperationStatus(
+                    "Select an eligible application".AsSpan());
+            return RenderWithDialog(surface);
+        }
         else if (command == GuideXosTaskManagerCommandC161.Close)
         {
             // The native close callback dispatches CloseActionId after the
@@ -143,8 +203,22 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
 
     public override GuideXosResult HandleAction(GuideXosHost host, uint actionId)
     {
+        if (actionId == CloseCompletedActionId)
+        {
+            if (!_closePending) return GuideXosResult.Success;
+            if (host.TryGetSurface(_window, out GuideXosSurface surface) !=
+                    GuideXosResult.Success || surface == null)
+                return GuideXosResult.SurfaceCreationFailed;
+            PollPendingCloseApplication(host);
+            return _controller.Render(surface);
+        }
+
         if (actionId != CloseActionId) return GuideXosResult.InvalidAction;
         _controller.Reset();
+        _pendingCloseTarget.Clear();
+        _closePending = false;
+        if (_closeDialog.IsOpen)
+            _closeDialog.Close(GuideXosDialogResult.Cancel);
         _window = 0u;
         host.TryLog("C161-TM-CLOSE controls=0 selection=none result=PASS"u8);
         return GuideXosResult.Success;
@@ -152,8 +226,236 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
 
     public override void OnTearingDown()
     {
+        if (_closeDialog.IsOpen)
+            _closeDialog.Close(GuideXosDialogResult.Cancel);
+        _pendingCloseTarget.Clear();
+        _closePending = false;
         _controller.Reset();
         _window = 0u;
+    }
+
+    private bool OpenCloseConfirmation(GuideXosHost host,
+        GuideXosSurface surface)
+    {
+        if (!_controller.CloseApplicationButton.EffectiveEnabled ||
+            !_controller.TryGetSelectedRecord(
+                out GuideXosApplicationSnapshotRecord record, out _))
+            return false;
+
+        if (!_pendingCloseTarget.Capture(record.Identity,
+                record.GetDisplayName())) return false;
+        string message = "Close \"" + _pendingCloseTarget.DisplayName +
+            "\"?\nUnsaved changes may be lost.";
+        if (!_closeDialog.TrySetTitle("Confirm application close") ||
+            !_closeDialog.TrySetMessage(message) ||
+            !_closeDialog.TryClearMembers() ||
+            !_confirmCloseButton.TrySetBounds(300, 232, 100, 20) ||
+            !_confirmCloseButton.SetLabel("Close") ||
+            !_cancelCloseButton.TrySetBounds(412, 232, 100, 20) ||
+            !_cancelCloseButton.SetLabel("Cancel") ||
+            !_closeDialog.TryAddMember(_confirmCloseButton) ||
+            !_closeDialog.TrySetButtonResult(
+                _confirmCloseButton, GuideXosDialogResult.Yes) ||
+            !_closeDialog.TryAddMember(_cancelCloseButton) ||
+            !_closeDialog.TrySetButtonResult(
+                _cancelCloseButton, GuideXosDialogResult.Cancel) ||
+            !_closeDialog.TrySetDefaultButton(_confirmCloseButton) ||
+            !_closeDialog.TrySetCancelResult(GuideXosDialogResult.Cancel) ||
+            !_closeDialog.Open(_controller.Controls))
+        {
+            _pendingCloseTarget.Clear();
+            return false;
+        }
+
+        host.TryLog("C162-TM-CONFIRM open=true identity=captured modal=true result=PASS"u8);
+        return RenderWithDialog(surface) == GuideXosResult.Success;
+    }
+
+    private void CompleteCloseApplication(GuideXosHost host)
+    {
+        if (!_pendingCloseTarget.TryGet(
+                out GuideXosApplicationInstanceId identity, out _))
+        {
+            _controller.SetOperationStatus(
+                "No close request is pending".AsSpan());
+            return;
+        }
+
+        GuideXosApplicationCloseResult closeResult = identity.Value == 0u
+            ? GuideXosApplicationCloseResult.InvalidArgument
+            : host.TryCloseApplication(identity);
+        if (closeResult == GuideXosApplicationCloseResult.Pending)
+        {
+            _closePending = true;
+            _controller.SetOperationStatus(
+                "Application close is in progress".AsSpan());
+            LogPendingClose(host, identity);
+            return;
+        }
+
+        _pendingCloseTarget.Clear();
+        ApplyCloseResult(host, identity, closeResult);
+    }
+
+    private void PollPendingCloseApplication(GuideXosHost host)
+    {
+        if (!_closePending || !_pendingCloseTarget.TryGet(
+                out GuideXosApplicationInstanceId identity, out _)) return;
+
+        GuideXosApplicationCloseResult closeResult =
+            host.TryCloseApplication(identity);
+        if (closeResult == GuideXosApplicationCloseResult.Pending)
+        {
+            _controller.SetOperationStatus(
+                "Application close is in progress".AsSpan());
+            return;
+        }
+
+        _closePending = false;
+        _pendingCloseTarget.Clear();
+        ApplyCloseResult(host, identity, closeResult);
+    }
+
+    private void ApplyCloseResult(GuideXosHost host,
+        GuideXosApplicationInstanceId identity,
+        GuideXosApplicationCloseResult closeResult)
+    {
+        GuideXosApplicationSnapshotResult refreshResult =
+            host.TryGetApplicationSnapshot(out GuideXosApplicationSnapshot snapshot);
+        bool applied = _controller.ApplySnapshot(refreshResult, in snapshot);
+        bool remains = applied && SnapshotContains(in snapshot, identity);
+
+        bool freshComplete = refreshResult ==
+            GuideXosApplicationSnapshotResult.Success && applied;
+        if (closeResult == GuideXosApplicationCloseResult.Success &&
+            freshComplete && !remains)
+        {
+            _controller.SetOperationStatus("Application closed".AsSpan());
+        }
+        else if (freshComplete &&
+                 closeResult is GuideXosApplicationCloseResult.NotFound or
+                    GuideXosApplicationCloseResult.StaleIdentity)
+        {
+            _controller.SetOperationStatus(
+                "Application is no longer available".AsSpan());
+        }
+        else if (closeResult == GuideXosApplicationCloseResult.Success && remains)
+        {
+            _controller.SetOperationStatus(
+                "Close accepted; target remains in snapshot".AsSpan());
+        }
+        else if (closeResult == GuideXosApplicationCloseResult.Success &&
+                 !freshComplete)
+        {
+            _controller.SetOperationStatus(
+                "Closed; application list refresh failed".AsSpan());
+        }
+        else
+        {
+            _controller.SetOperationStatus(CloseErrorStatus(closeResult));
+        }
+
+        bool closeOutcomeValidated = freshComplete &&
+            (closeResult == GuideXosApplicationCloseResult.Success
+                ? !remains
+                : closeResult is GuideXosApplicationCloseResult.NotFound or
+                    GuideXosApplicationCloseResult.StaleIdentity
+                    ? !remains
+                    : remains);
+
+        Span<byte> line = stackalloc byte[128];
+        int position = 0;
+        GuideXosText.Append(line, ref position,
+            "C162-TM-CLOSE identity="u8);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)identity.Source);
+        GuideXosText.Append(line, ref position, ":"u8);
+        AppendIdentityValue(line, ref position, identity.Value);
+        GuideXosText.Append(line, ref position, " result="u8);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)closeResult);
+        GuideXosText.Append(line, ref position, " fresh="u8);
+        GuideXosText.Append(line, ref position,
+            applied ? "true"u8 : "false"u8);
+        GuideXosText.Append(line, ref position, " remains="u8);
+        GuideXosText.Append(line, ref position, remains ? "true"u8 : "false"u8);
+        GuideXosText.Append(line, ref position, " result="u8);
+        GuideXosText.Append(line, ref position,
+            closeOutcomeValidated ? "PASS"u8 : "FAIL"u8);
+        host.TryLog(line[..position]);
+        LogSelectedDetail(host);
+    }
+
+    private static void LogPendingClose(GuideXosHost host,
+        GuideXosApplicationInstanceId identity)
+    {
+        Span<byte> line = stackalloc byte[96];
+        int position = 0;
+        GuideXosText.Append(line, ref position,
+            "C162-TM-CLOSE-PENDING identity="u8);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)identity.Source);
+        GuideXosText.Append(line, ref position, ":"u8);
+        AppendIdentityValue(line, ref position, identity.Value);
+        GuideXosText.Append(line, ref position, " result=Pending"u8);
+        host.TryLog(line[..position]);
+    }
+
+    private void CancelCloseApplication(GuideXosHost host)
+    {
+        _pendingCloseTarget.Clear();
+        _closePending = false;
+        _controller.SetOperationStatus("Close cancelled".AsSpan());
+        host.TryLog("C162-TM-CANCEL mutation=none selection=preserved result=PASS"u8);
+    }
+
+    private GuideXosResult RenderWithDialog(GuideXosSurface surface)
+    {
+        GuideXosResult rendered = _controller.Render(surface);
+        return rendered != GuideXosResult.Success ? rendered :
+            _closeDialog.Render(surface);
+    }
+
+    private static bool SnapshotContains(
+        in GuideXosApplicationSnapshot snapshot,
+        GuideXosApplicationInstanceId identity)
+    {
+        for (uint index = 0u; index < snapshot.Count; ++index)
+        {
+            if (snapshot.TryGetRecord(index,
+                    out GuideXosApplicationSnapshotRecord record) &&
+                record.Identity == identity) return true;
+        }
+        return false;
+    }
+
+    private static ReadOnlySpan<char> CloseErrorStatus(
+        GuideXosApplicationCloseResult result) => result switch
+    {
+        GuideXosApplicationCloseResult.NotSupported =>
+            "Application close requires host ABI v3".AsSpan(),
+        GuideXosApplicationCloseResult.CapabilityUnavailable =>
+            "Application close capability unavailable".AsSpan(),
+        GuideXosApplicationCloseResult.Protected =>
+            "This application is protected".AsSpan(),
+        GuideXosApplicationCloseResult.Pending =>
+            "Application close is in progress".AsSpan(),
+        GuideXosApplicationCloseResult.CloseFailed =>
+            "Application did not close".AsSpan(),
+        GuideXosApplicationCloseResult.InvalidArgument =>
+            "Application close request was invalid".AsSpan(),
+        _ => "Application close failed".AsSpan(),
+    };
+
+    private static void AppendIdentityValue(Span<byte> destination,
+        ref int position, ulong value)
+    {
+        Span<byte> digits = stackalloc byte[20];
+        int count = 0;
+        do
+        {
+            digits[count++] = (byte)('0' + value % 10u);
+            value /= 10u;
+        } while (value != 0u);
+        while (count != 0 && position < destination.Length)
+            destination[position++] = digits[--count];
     }
 
     private void RefreshAndRender(GuideXosHost host,
@@ -327,6 +629,7 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
             GuideXosText.Append(line, ref position,
                 "selection=none result=PASS"u8);
             host.TryLog(line[..position]);
+            LogCloseApplicationEligibility(host);
             return;
         }
 
@@ -358,6 +661,34 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
             AppendRecordText(ref record, false, appIdLine,
                 ref appIdPosition);
         host.TryLog(appIdLine[..appIdPosition]);
+        LogCloseApplicationEligibility(host);
+    }
+
+    private void LogCloseApplicationEligibility(GuideXosHost host)
+    {
+        Span<byte> line = stackalloc byte[88];
+        int position = 0;
+        GuideXosText.Append(line, ref position,
+            "C162-TM-CLOSE-ELIGIBILITY identity="u8);
+        if (_controller.TryGetSelectedRecord(
+                out GuideXosApplicationSnapshotRecord record, out _))
+        {
+            GuideXosText.AppendUnsigned(line, ref position,
+                (uint)record.source);
+            GuideXosText.Append(line, ref position, ":"u8);
+            AppendIdentityValue(line, ref position, record.instanceId);
+            GuideXosText.Append(line, ref position, " enabled="u8);
+            GuideXosText.Append(line, ref position,
+                _controller.CloseApplicationButton.EffectiveEnabled
+                    ? "true"u8 : "false"u8);
+        }
+        else
+        {
+            GuideXosText.Append(line, ref position,
+                "none enabled=false"u8);
+        }
+        GuideXosText.Append(line, ref position, " result=PASS"u8);
+        host.TryLog(line[..position]);
     }
 
     private static void AppendRecordText(

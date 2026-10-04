@@ -4,47 +4,77 @@ namespace HostLogProof;
 
 #if HOSTLOGPROOF_MANAGED_APP_RETURN
 /// <summary>
-/// The managed App Model keeps only its current application object. Starting
-/// another app replaces that reference, so a return creates a new instance.
+/// The managed App Model keeps three bounded logical application objects so
+/// Notes, Managed Calculator, and Managed Task Manager can coexist.
 /// </summary>
 internal sealed class GuideXosManagedApplicationLifetime
 {
-    private GuideXosApplication _active;
-    private uint _activeSelector;
+    private const int Capacity = 3;
+    private readonly Entry[] _entries = new Entry[Capacity];
     private uint _generation;
+
+    private struct Entry
+    {
+        public uint Selector;
+        public GuideXosApplication Application;
+    }
 
     public bool TryStart(
         GuideXosApplicationDescriptor descriptor,
         out GuideXosApplication application,
         out uint generation)
     {
-        _active?.OnTearingDown();
-        _active = null;
-        _activeSelector = 0u;
+        int entryIndex = FindEntry(descriptor.Selector);
+        if (entryIndex < 0) entryIndex = FindFreeEntry();
+        if (entryIndex < 0)
+        {
+            application = null;
+            generation = _generation;
+            return false;
+        }
+
+        _entries[entryIndex].Application?.OnTearingDown();
+        _entries[entryIndex] = default;
         application = descriptor.Factory?.Invoke();
         if (application == null)
         {
             generation = _generation;
             return false;
         }
-        _active = application;
-        _activeSelector = descriptor.Selector;
+        _entries[entryIndex].Selector = descriptor.Selector;
+        _entries[entryIndex].Application = application;
         generation = ++_generation;
         return true;
     }
 
     public bool TryGet(uint selector, out GuideXosApplication application)
     {
-        application = _activeSelector == selector ? _active : null;
+        int entryIndex = FindEntry(selector);
+        application = entryIndex >= 0 ? _entries[entryIndex].Application : null;
         return application != null;
     }
 
     public void Clear(uint selector)
     {
-        if (_activeSelector != selector) return;
-        _active?.OnTearingDown();
-        _active = null;
-        _activeSelector = 0u;
+        int entryIndex = FindEntry(selector);
+        if (entryIndex < 0) return;
+        _entries[entryIndex].Application?.OnTearingDown();
+        _entries[entryIndex] = default;
+    }
+
+    private int FindEntry(uint selector)
+    {
+        for (int index = 0; index < _entries.Length; index++)
+            if (_entries[index].Selector == selector &&
+                _entries[index].Application != null) return index;
+        return -1;
+    }
+
+    private int FindFreeEntry()
+    {
+        for (int index = 0; index < _entries.Length; index++)
+            if (_entries[index].Application == null) return index;
+        return -1;
     }
 }
 #endif
@@ -72,21 +102,49 @@ internal static class GuideXosManagedApplicationC150Tests
             out uint firstGeneration) && firstGeneration == 1u;
         bool currentAvailable = lifetime.TryGet(4u, out GuideXosApplication current) &&
             ReferenceEquals(first, current);
-        bool wrongIdentityRejected = !lifetime.TryGet(5u, out _);
-        bool replacement = lifetime.TryStart(settings,
+        bool initiallyDistinct = !lifetime.TryGet(5u, out _);
+        bool secondStart = lifetime.TryStart(settings,
             out GuideXosApplication second, out uint secondGeneration) &&
             secondGeneration == 2u && !ReferenceEquals(first, second);
-        bool oldInstanceReleased = !lifetime.TryGet(4u, out _) &&
-            lifetime.TryGet(5u, out current) && ReferenceEquals(second, current);
-        lifetime.Clear(4u);
-        bool unrelatedClearIgnored = lifetime.TryGet(5u, out current) &&
+        bool bothAvailable = lifetime.TryGet(4u, out current) &&
+            ReferenceEquals(first, current) && lifetime.TryGet(5u, out current) &&
             ReferenceEquals(second, current);
+        GuideXosApplicationDescriptor calculator = new(
+            6u, "Managed Calculator"u8, static () => new TestApplication());
+        bool calculatorStart = lifetime.TryStart(calculator,
+            out GuideXosApplication third, out uint thirdGeneration) &&
+            thirdGeneration == 3u && !ReferenceEquals(first, third) &&
+            !ReferenceEquals(second, third);
+        bool threeAvailable = lifetime.TryGet(4u, out current) &&
+            ReferenceEquals(first, current) && lifetime.TryGet(5u, out current) &&
+            ReferenceEquals(second, current) && lifetime.TryGet(6u, out current) &&
+            ReferenceEquals(third, current);
+        GuideXosApplicationDescriptor taskManager = new(
+            7u, "Managed Task Manager"u8,
+            static () => new TestApplication());
+        bool capacityRejected = !lifetime.TryStart(taskManager, out _, out _);
+        // Release the intermediate Settings surface, retaining Notes and
+        // Managed Calculator while Task Manager takes the newly free slot.
         lifetime.Clear(5u);
-        lifetime.Clear(5u);
-        bool cleared = !lifetime.TryGet(5u, out _);
+        bool coexistence = lifetime.TryGet(4u, out current) &&
+            ReferenceEquals(first, current) && lifetime.TryGet(6u, out current) &&
+            ReferenceEquals(third, current) && !lifetime.TryGet(5u, out _);
+        bool recycledSlotFresh = lifetime.TryStart(taskManager,
+            out GuideXosApplication fourth, out uint fourthGeneration) &&
+            fourthGeneration == 4u && lifetime.TryGet(7u, out current) &&
+            ReferenceEquals(fourth, current) && lifetime.TryGet(4u, out current) &&
+            ReferenceEquals(first, current) && lifetime.TryGet(6u, out current) &&
+            ReferenceEquals(third, current);
+        lifetime.Clear(7u);
+        lifetime.Clear(7u);
+        lifetime.Clear(4u);
+        lifetime.Clear(6u);
+        bool cleared = !lifetime.TryGet(5u, out _) && !lifetime.TryGet(6u, out _) &&
+            !lifetime.TryGet(7u, out _) && !lifetime.TryGet(4u, out _);
 
-        return empty && firstStart && currentAvailable && wrongIdentityRejected &&
-            replacement && oldInstanceReleased && unrelatedClearIgnored && cleared;
+        return empty && firstStart && currentAvailable && initiallyDistinct &&
+            secondStart && bothAvailable && calculatorStart && threeAvailable &&
+            capacityRejected && coexistence && recycledSlotFresh && cleared;
     }
 }
 #endif

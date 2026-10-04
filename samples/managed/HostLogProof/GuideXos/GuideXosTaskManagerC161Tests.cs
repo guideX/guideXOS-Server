@@ -15,6 +15,7 @@ internal static unsafe class GuideXosManagedTaskManagerC161Tests
         int cases = 0;
         bool passed = true;
         passed &= Case(ref cases, TestInitialAndDetails());
+        passed &= TestCloseEligibility(ref cases);
         passed &= Case(ref cases, TestEmptyAndMaximum());
         passed &= Case(ref cases, TestTruncation());
         passed &= Case(ref cases, TestIdentityAndReorder());
@@ -59,6 +60,7 @@ internal static unsafe class GuideXosManagedTaskManagerC161Tests
                 GuideXosApplicationSnapshotState.Running)));
         return controller.RowCount == 1 && controller.SelectedIndex == 0 &&
             controller.HasSelection &&
+            !controller.CloseApplicationButton.EffectiveEnabled &&
             controller.SelectedIdentity.Value == 0x100UL &&
             controller.SelectedIdentity.Source ==
                 GuideXosApplicationSnapshotSource.ManagedLogicalApplication &&
@@ -70,6 +72,45 @@ internal static unsafe class GuideXosManagedTaskManagerC161Tests
             controller.SelectedSourceText == "Source: Managed app";
     }
 
+    private static bool TestCloseEligibility(ref int cases)
+    {
+        GuideXosTaskManagerControllerC161 none = ReadyController(
+            CreateSnapshot(0, 0, false));
+        bool passed = Case(ref cases,
+            !none.CloseApplicationButton.EffectiveEnabled);
+        GuideXosTaskManagerControllerC161 native = ReadyController(
+            CreateSnapshot(1, 1, false,
+                (1, 10UL, "gxos.builtin.calculator", "Calculator", false,
+                    GuideXosApplicationSnapshotState.Running)));
+        passed &= Case(ref cases,
+            native.CloseApplicationButton.EffectiveEnabled);
+        GuideXosTaskManagerControllerC161 shell = ReadyController(
+            CreateSnapshot(1, 1, false,
+                (2, 11UL, "", "Terminal", false,
+                    GuideXosApplicationSnapshotState.Running)));
+        passed &= Case(ref cases,
+            !shell.CloseApplicationButton.EffectiveEnabled);
+        GuideXosTaskManagerControllerC161 calculator = ReadyController(
+            CreateSnapshot(1, 1, false,
+                (3, 12UL, CalculatorId, "Managed Calculator", false,
+                    GuideXosApplicationSnapshotState.Running)));
+        passed &= Case(ref cases,
+            calculator.CloseApplicationButton.EffectiveEnabled);
+        GuideXosTaskManagerControllerC161 notes = ReadyController(
+            CreateSnapshot(1, 1, false,
+                (3, 13UL, "com.guidexos.apps.managed.notes", "Notes", false,
+                    GuideXosApplicationSnapshotState.Running)));
+        passed &= Case(ref cases,
+            !notes.CloseApplicationButton.EffectiveEnabled);
+        GuideXosTaskManagerControllerC161 terminated = ReadyController(
+            CreateSnapshot(1, 1, false,
+                (1, 14UL, "gxos.builtin.calculator", "Calculator", false,
+                    GuideXosApplicationSnapshotState.Terminated)));
+        passed &= Case(ref cases,
+            !terminated.CloseApplicationButton.EffectiveEnabled);
+        return passed;
+    }
+
     private static bool TestEmptyAndMaximum()
     {
         GuideXosTaskManagerControllerC161 empty = ReadyController(
@@ -78,9 +119,12 @@ internal static unsafe class GuideXosManagedTaskManagerC161Tests
             empty.SelectedIndex == -1 &&
             empty.StatusText == "No applications in snapshot";
 
-        GuideXosApplicationSnapshot maximum = CreateSnapshot(18, 18, false);
+        GuideXosApplicationSnapshot maximum = CreateSnapshot(
+            GuideXosTaskManagerControllerC161.ApplicationCapacity,
+            GuideXosTaskManagerControllerC161.ApplicationCapacity, false);
         GuideXosTaskManagerControllerC161 full = ReadyController(maximum);
-        return emptyPass && full.RowCount == 18 &&
+        return emptyPass && full.RowCount ==
+                GuideXosTaskManagerControllerC161.ApplicationCapacity &&
             full.List.MaximumItemCount ==
                 GxAbi.ApplicationSnapshotCapacity &&
             full.List.RejectedOperationCount == 0u;
@@ -195,8 +239,8 @@ internal static unsafe class GuideXosManagedTaskManagerC161Tests
             controller.RouteInput(
                 GuideXosInputEvent.ForKeyDown(GuideXosTextInputKey.Tab)) ==
                 GuideXosTaskManagerCommandC161.None &&
-            controller.Controls.ActiveControlId ==
-                GuideXosTaskManagerControllerC161.CloseControlId;
+                controller.Controls.ActiveControlId ==
+                GuideXosTaskManagerControllerC161.CloseApplicationControlId;
         bool shiftTabFromCloseToRefresh = controller.RouteInput(
                 GuideXosInputEvent.ForKeyDown(GuideXosTextInputKey.Tab, true)) ==
                 GuideXosTaskManagerCommandC161.None &&
@@ -326,12 +370,13 @@ internal static unsafe class GuideXosManagedTaskManagerC161Tests
     {
         GuideXosTaskManagerControllerC161 controller = new();
         bool registered = controller.InitializeControls() &&
-            controller.ControlCount == 3 && controller.ControlMaximum == 3 &&
+            controller.ControlCount == 4 && controller.ControlMaximum == 4 &&
             GuideXosApplicationRegistry.RegistrationCount == 4 &&
-            controller.Controls.MaximumControlCount == 3 &&
+            controller.Controls.MaximumControlCount == 4 &&
             controller.SharedControlMaximum ==
                 GuideXosControlHost.MaximumSupportedControlCount &&
-            controller.List.MaximumItemCount == 18;
+            controller.List.MaximumItemCount ==
+                GuideXosTaskManagerControllerC161.ApplicationCapacity;
         GuideXosTaskManagerControllerC161 sources = ReadyController(
             CreateSnapshot(3, 3, false,
                 (1, 1UL, "gxos.builtin.calculator", "Calculator", false,
@@ -543,7 +588,7 @@ internal static unsafe class GuideXosManagedTaskManagerC161Tests
             if (iteration == 0 || iteration == 999)
                 passed &= controller.SelectedIdentity == initial;
         }
-        passed &= controller.ControlCount == 3 &&
+        passed &= controller.ControlCount == 4 &&
             controller.List.RejectedOperationCount == 0u;
         return Case(ref cases, passed);
     }

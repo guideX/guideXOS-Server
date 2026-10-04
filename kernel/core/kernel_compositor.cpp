@@ -307,23 +307,24 @@ void KernelCompositor::setFocus(uint32_t windowId) {
 
 void KernelCompositor::bringToFront(uint32_t windowId) {
     int idx = findWindowIndex(windowId);
-    if (idx < 0 || idx >= s_windowCount - 1) {
-        return;  // Already at front or not found
-    }
-    
-    // Swap with last valid entry
-    WindowEntry temp = s_windows[idx];
-    for (int i = idx; i < MAX_WINDOWS - 1; i++) {
-        s_windows[i] = s_windows[i + 1];
-    }
-    
-    // Find last valid position and insert there
-    for (int i = MAX_WINDOWS - 1; i >= 0; i--) {
-        if (!s_windows[i].valid || i == MAX_WINDOWS - 1) {
-            s_windows[i] = temp;
+    if (idx < 0) return;
+
+    // Window slots are reused after closes, so s_windowCount is not the
+    // highest occupied z-order index. Use the actual last live slot to keep
+    // focus and hit testing aligned when the registry contains holes.
+    int lastValid = -1;
+    for (int i = MAX_WINDOWS - 1; i >= 0; --i) {
+        if (s_windows[i].valid && s_windows[i].window) {
+            lastValid = i;
             break;
         }
     }
+    if (idx >= lastValid) return;
+
+    WindowEntry moving = s_windows[idx];
+    for (int i = idx; i < lastValid; ++i)
+        s_windows[i] = s_windows[i + 1];
+    s_windows[lastValid] = moving;
 }
 
 void KernelCompositor::minimizeWindow(uint32_t windowId) {

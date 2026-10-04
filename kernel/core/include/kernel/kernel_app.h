@@ -45,6 +45,15 @@ enum class AppState {
     Terminated
 };
 
+enum class ApplicationCloseResult : int32_t {
+    Success = 0,
+    InvalidArgument = -2,
+    NotFound = -10,
+    Protected = -11,
+    CloseFailed = -12,
+    StaleIdentity = -13,
+};
+
 // ============================================================
 // Window flags
 // ============================================================
@@ -287,6 +296,12 @@ public:
     
     // Close an app
     static void closeApp(KernelApp* app);
+
+    // Resolve and close exactly one live AppManager lifetime. This is the
+    // value-only mutation boundary used by managed Task Manager; it follows
+    // the application's normal window-close/veto/teardown path.
+    static ApplicationCloseResult closeApplicationInstance(
+        ApplicationSnapshotSource source, uint64_t instanceId);
     
     // Get running app count
     static int getRunningAppCount();
@@ -299,6 +314,9 @@ public:
 #endif
 #if defined(GXOS_NATIVEAOT_C161_TASK_MANAGER_PROOF)
     static bool launchC161WheelProofApps();
+#endif
+#if defined(GXOS_NATIVEAOT_C162_MANAGED_TASK_MANAGER_CLOSE_PROOF)
+    static bool runC162CloseFocusedTests();
 #endif
     
     // Get app info by name
@@ -315,6 +333,7 @@ public:
     
 private:
     static bool admitRunningApp(KernelApp* app, const char* applicationId);
+    static void removeTerminatedAppAt(int index);
 #if defined(GXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF)
     static bool runC160IdentityFocusedTests();
 #endif
