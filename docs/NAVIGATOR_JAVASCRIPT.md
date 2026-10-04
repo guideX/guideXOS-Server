@@ -6228,8 +6228,133 @@ verification ended at **0 changed / 0 missing / 0 extra**. No fresh
 `ESP/kernel.elf` exists and `qemu-system-x86_64` is unavailable, so QEMU proof
 is not claimed.
 
-The recommended JS61 direction is bounded `:where()` over the same one-core
-grammar, adding a new logical pseudo kind without growing the descriptor or
-introducing nested selector trees. Inner lists and nested logical pseudos
-should remain deferred until a separate descriptor and memory review. JS60
-was not pushed.
+The recommended next phase at JS60 was bounded `:where()` over the same
+one-core grammar, adding a new logical pseudo kind without growing the
+descriptor or introducing nested selector trees. Inner lists and nested
+logical pseudos were deferred until a separate descriptor and memory review.
+JS60 was not pushed.
+
+## JS61: bounded `:where()` pseudo-class
+
+JS61 adds matching for `:where(argument)` using the same fixed-capacity
+logical-selector core introduced by JS59 and reused by JS60. The existing
+`NavigatorScriptSimpleSelectorCoreDescriptor` remains the single 32-byte inner
+representation. The outer pseudo kind is `Not`, `Is`, or `Where`; `:where()`
+does not have a separate descriptor, parser, or matcher. The parser retains
+the argument fields at selector-parse time, and matching reads those fields
+and current document state without reparsing selector text.
+
+For every valid, current Element `E` and supported inner selector `S`,
+`E.matches(":where(S)")` equals both `E.matches(":is(S)")` and
+`E.matches("S")`. The shared tri-state matcher checks candidate validity
+before evaluating the inner core. `:is()` and `:where()` return a valid inner
+match result; `:not()` inverts only a valid result. Stale Elements and invalid
+serials therefore return false for all three forms. The valid-candidate
+complement identity does not apply to stale or invalid Elements.
+
+The one supported inner selector is a non-relational simple selector with an
+optional tag or universal selector, optional ID, zero to eight class tokens,
+one optional attribute-presence or equality predicate, and one optional
+supported nonfunctional pseudo. The supported pseudo set is `:checked`,
+`:disabled`, `:focus`, `:first-child`, `:last-child`, `:only-child`,
+`:first-of-type`, `:last-of-type`, `:only-of-type`, `:root`, and `:empty`.
+Pseudo names are ASCII case-insensitive. Attribute names remain capped at 64
+bytes, attribute values at 128 bytes, and the complete selector including the
+argument at 256 bytes. Attribute, form, focus, structural, and content state
+is read at match time; held collections remain live-on-read.
+
+Only one inner selector is accepted. Inner comma lists, combinators, empty or
+whitespace-only arguments, nested `:where()`, `:is()`, or `:not()`, nested
+functional nth pseudos, malformed parentheses, and a second outer pseudo are
+rejected. Outer selector lists, the existing one-relation forms, outer
+compounds, scoped queries, `querySelector()`, `querySelectorAll()`, `matches()`,
+`closest()`, and Event callbacks use the existing selector matcher and retain
+their bounds, ordering, deduplication, and canonical Element identity. The
+functional argument parser makes one bounded helper re-entry; nested
+functional syntax is rejected before another re-entry. Maximum functional
+nesting depth remains **1**, and matching is nonrecursive.
+
+`:where()` matching is implemented. CSS specificity behavior is not yet modeled
+by Navigator and is therefore deferred. No specificity values, selector
+specificity storage, cascade weighting, or CSS cascade behavior are modeled by
+this phase. This is bounded matching support, not full CSS Selectors Level 4
+`:where()` support.
+
+The core remains **32 bytes**, a complete simple selector **68 bytes**, the
+four-member descriptor **812 bytes**, each collection record **832 bytes**,
+and the 128-record collection registry **106,496 bytes**. JS61 adds **0 bytes**
+to the shared core, descriptor, collection record, or registry. `HtmlElementRef`
+remains 440 bytes and content metadata remains 24 bytes. No per-document cache
+or heap allocation was added.
+
+The focused JS61 test and hosted fixture are
+`tests/navigator_javascript_js61_test.cpp`,
+`scripts/smoke-navigator-javascript-js61.ps1`, and
+`navigator-smoke/javascript-js61.html`. The JS52 historical rejection check
+now covers only still-unsupported `:checked()` function syntax. JS61's focused
+suite verifies `:where(S) == :is(S) == S` for supported selectors, malformed
+input, live attribute and state reads, stale generations and serial reuse,
+outer relations and lists, scoped queries, Event matching, purity, stress, and
+the fixed memory bounds.
+
+The documented kernel blockers remain independent of JS61. The production
+kernel wrapper fails at existing PacMan Native ELF symbols
+`pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)`. The direct kernel lane fails at
+existing Mbed TLS configuration checks in `mbedtls_check_config.h:51` and
+`:64`. Neither subsystem is changed for JS61. A QEMU result is claimed only if
+a fresh kernel is produced and QEMU is available.
+
+### JS61 closeout (2026-10-04)
+
+JS61 is **Outcome A: complete for the represented selector and Element
+model**. The duplicate/stale gate found no authoritative phase marker. The
+documentation identified JS60 as complete and JS61 as the recommended next
+phase; no existing `:where()` implementation was present. The starting branch
+was `NAVIGATOR_JAVASCRIPT_SUPPORT` at
+`c7a6f44ffb5a22452f63a07870038d8b013c6359` (`navigator: add JS60 bounded is
+pseudo-class`), with a clean worktree and **0 ahead / 0 behind**
+`origin/NAVIGATOR_JAVASCRIPT_SUPPORT`.
+
+The focused JS61 suite passed **2,077/2,077 checks**. It verified positive
+matching and equivalence with both standalone selectors and `:is()`, the
+valid-candidate complement with `:not()`, the full supported pseudo subset,
+live attribute/form/focus/content reads, stale and invalid serial behavior,
+serial reuse, selector composition, event matching, malformed-input repeats,
+stress, and unchanged descriptor bounds. Functional depth is **1**, parsing
+uses one bounded helper re-entry, matching is nonrecursive, and match-time
+reparsing is **none**. The shared core is 32 bytes, the simple selector 68
+bytes, the four-member descriptor 812 bytes, each collection record 832 bytes,
+and the 128-record registry 106,496 bytes. JS61 adds **0 bytes**; Element and
+content records remain 440 and 24 bytes.
+
+The full JavaScript matrix passed **59/59 lanes**, including the three base
+lexer/parser/runtime lanes and JS6 through JS61. JS36–JS60 passed all **25
+focused regression lanes** (6,790 checks using the documented JS36–JS59 and
+JS60 counts). JS52 passed 319/319, JS58 153/153, JS59 621/621, JS60 1,377/1,377,
+and JS61 2,077/2,077. The JS61 warning-as-error strict parser/adapter/runtime
+lane passed.
+
+All **four JS61 hosted checks passed**, including the direct valid-candidate
+`:where()`/`:not()` complement proof. The hosted aggregate reported **614
+passed / 7 failed / 621 total**. The failures remain the existing CSS phase
+3C, CSS phase 3G, CSS phase 6A, three CSS phase 6B checks, and CSS phase 6C;
+there were no JS61 hosted failures. The production `build.bat` passed.
+
+`build-kernel.bat` stopped at the existing undefined PacMan symbols
+`pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)`. The independent direct
+`mingw32-make ARCH=amd64 EXTRA_CFLAGS=` lane stopped at the existing Mbed TLS
+configuration errors in `mbedtls_check_config.h:51` and `:64`. No PacMan or
+Mbed TLS source was changed. The generated-output snapshot covered **906
+files / 206,759,785 bytes**. The three changed PacMan objects
+`game.o`, `main.o`, and `renderer.o` were restored; final SHA-256 and length
+comparison reported **0 changed / 0 missing / 0 extra**. No fresh
+`ESP/kernel.elf` was produced and `qemu-system-x86_64` is unavailable, so QEMU
+proof is not claimed.
+
+`git diff --check` passed before commit. The source commit is local and was not
+pushed; generated artifacts are excluded. The recommended JS62 direction is
+to keep selector grammar bounded and separately review any proposal for inner
+selector lists or a real specificity/cascade model. JS61 makes no specificity
+or cascade claim.

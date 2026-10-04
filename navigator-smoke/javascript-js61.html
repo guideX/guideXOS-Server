@@ -1,0 +1,270 @@
+<!doctype html>
+<html id="root">
+<head><title>Navigator JavaScript JS61</title></head>
+<body id="body">
+<h1>Navigator JavaScript JS61</h1>
+<div id="panel" class="panel active" data-role="save">
+  <button id="primary" class="action primary" data-role="submit">Save</button>
+  <button id="secondary" class="action" data-state="pending">Next</button>
+  <div id="primary-div" class="primary"></div>
+  <div id="item-ready" class="item" data-state="ready"></div>
+  <div id="item-pending" class="item" data-state="pending" data-label=")"></div>
+  <div id="item-disabled" class="item disabled" data-state="busy"></div>
+  <input id="checked" type="checkbox" checked>
+  <input id="unchecked" type="checkbox">
+  <input id="disabled-input" type="checkbox" disabled>
+  <fieldset id="disabled-group" disabled><input id="inherited-disabled" type="text"></fieldset>
+  <input id="field-a" class="field" type="text">
+  <input id="field-b" class="field" type="text">
+  <label id="label" class="label">Name</label><input id="related-input" type="text">
+  <span id="marker" class="marker"></span><span id="sibling-a" class="item"></span>
+  <span id="sibling-b" class="item"></span>
+  <div id="positions"><span id="first-child" class="position"></span><span id="middle-child" class="position"></span><span id="last-child" class="position"></span></div>
+  <div id="types"><span id="type-first"></span><b id="type-b"></b><span id="type-last"></span></div>
+  <div id="only-parent"><b id="only-child"></b></div>
+  <div id="empty" class="slot" data-empty=""></div><div id="text" class="slot">hello</div>
+  <div id="space" class="slot">   </div><div id="comment" class="slot"><!--comment--></div>
+  <div id="child" class="slot"><i></i></div>
+  <div id="quoted" data-label=")" data-note="two words"></div>
+  <input id="event-target" type="button" value="Run">
+  <input id="event-nested" type="button" value="Nested">
+</div>
+<pre id="result">initial</pre>
+<script>
+var js61IsBasic = document.getElementById("primary").matches(":is(.primary)") &&
+  !document.getElementById("secondary").matches(":IS(.primary)") &&
+  document.getElementById("root").matches(":Is(html)") &&
+  document.getElementById("root").matches(":is(*)") &&
+  document.getElementById("primary").matches(":is(#primary)") &&
+  document.getElementById("item-pending").matches(":is(.item.disabled)") === false;
+var js61IsEquivalence =
+  document.getElementById("primary").matches("button") ===
+    document.getElementById("primary").matches(":is(button)") &&
+  document.getElementById("primary").matches("#primary") ===
+    document.getElementById("primary").matches(":is(#primary)") &&
+  document.getElementById("primary").matches(".primary") ===
+    document.getElementById("primary").matches(":is(.primary)") &&
+  document.getElementById("item-pending").matches("[data-state=pending]") ===
+    document.getElementById("item-pending").matches(":is([data-state=pending])") &&
+  document.getElementById("root").matches(":root") ===
+    document.getElementById("root").matches(":is(:root)") &&
+  document.getElementById("empty").matches(":empty") ===
+    document.getElementById("empty").matches(":is(:empty)");
+var js61IsQueries = document.querySelector("button:is(.primary)") ===
+  document.getElementById("primary") &&
+  document.querySelectorAll(".item:is([data-state=pending])").length === 1 &&
+  document.getElementById("panel").querySelector("button:is(.primary)") ===
+    document.getElementById("primary") &&
+  document.getElementById("secondary").closest(".panel:is(.active)") ===
+    document.getElementById("panel");
+var js61IsRelations = document.querySelector(
+  ".panel:is(.active) > button:is(.primary)") ===
+    document.getElementById("primary") &&
+  document.querySelector(".marker:is(:empty) ~ .item:is(.item)") ===
+    document.getElementById("sibling-a");
+var js61IsLists = document.querySelectorAll(
+  "button:is(.primary), #primary:is(button), button:is(.primary)").length === 1 &&
+  document.querySelectorAll("button:is(.primary), button:is(.action)")[0] ===
+    document.getElementById("primary") &&
+  document.querySelectorAll("button:is(.primary), button:is(.action)")[1] ===
+    document.getElementById("secondary");
+var js61IsMalformed = document.querySelector(":is()") === null &&
+  document.querySelector(":is( )") === null &&
+  document.querySelector(":is(.a,.b)") === null &&
+  document.querySelector(":is(.a > .b)") === null &&
+  document.querySelector(":is(.a .b)") === null &&
+  document.querySelector(":is(.a + .b)") === null &&
+  document.querySelector(":is(.a ~ .b)") === null &&
+  document.querySelector(":is(:is(.a))") === null &&
+  document.querySelector(":is(:not(.a))") === null &&
+  document.querySelector(":is(:nth-child(2))") === null &&
+  document.querySelector(":is(.a") === null &&
+  document.querySelector(":is(.a))") === null &&
+  document.querySelector(":is(.a):focus") === null;
+var js61IsLiveItems = document.querySelectorAll(".item:is([data-state=ready])");
+var js61IsLive = js61IsLiveItems.length === 1;
+document.getElementById("item-pending").setAttribute("data-state", "ready");
+js61IsLive = js61IsLive && js61IsLiveItems.length === 2 &&
+  document.getElementById("item-pending").matches(":is([data-state=ready])");
+document.getElementById("item-pending").setAttribute("data-state", "pending");
+js61IsLive = js61IsLive && js61IsLiveItems.length === 1;
+var js61WhereBasic = document.getElementById("primary").matches(":where(.primary)") &&
+  !document.getElementById("secondary").matches(":WHERE(.primary)") &&
+  document.getElementById("root").matches(":Where(html)") &&
+  document.getElementById("root").matches(":where(*)") &&
+  document.getElementById("primary").matches(":where(#primary)") &&
+  document.getElementById("primary").matches(":where(.action.primary)") &&
+  document.getElementById("primary").matches(
+    ":where(button#primary.action.primary[data-role=submit])") &&
+  document.getElementById("empty").matches(":where([data-empty])") &&
+  document.getElementById("item-pending").matches(
+    ":where([data-state=pending])") &&
+  document.getElementById("quoted").matches(":where([data-label=\")\"])");
+var js61WhereEquivalence =
+  document.getElementById("primary").matches("button") ===
+    document.getElementById("primary").matches(":where(button)") &&
+  document.getElementById("primary").matches("#primary") ===
+    document.getElementById("primary").matches(":where(#primary)") &&
+  document.getElementById("primary").matches(".primary") ===
+    document.getElementById("primary").matches(":where(.primary)") &&
+  document.getElementById("item-pending").matches("[data-state=pending]") ===
+    document.getElementById("item-pending").matches(
+      ":where([data-state=pending])") &&
+  document.getElementById("checked").matches(":checked") ===
+    document.getElementById("checked").matches(":where(:checked)") &&
+  document.getElementById("disabled-input").matches(":disabled") ===
+    document.getElementById("disabled-input").matches(":where(:disabled)") &&
+  document.getElementById("root").matches(":root") ===
+    document.getElementById("root").matches(":where(:root)") &&
+  document.getElementById("empty").matches(":empty") ===
+    document.getElementById("empty").matches(":where(:empty)") &&
+  document.getElementById("primary").matches(":where(.primary)") ===
+    document.getElementById("primary").matches(":is(.primary)");
+var js61WhereComplement =
+  document.getElementById("primary").matches(":where(.primary)") !==
+    document.getElementById("primary").matches(":not(.primary)") &&
+  document.getElementById("secondary").matches(":where(.primary)") !==
+    document.getElementById("secondary").matches(":not(.primary)") &&
+  document.getElementById("item-pending").matches(
+    ":where([data-state=pending])") !==
+    document.getElementById("item-pending").matches(
+      ":not([data-state=pending])") &&
+  document.getElementById("empty").matches(":where(:empty)") !==
+    document.getElementById("empty").matches(":not(:empty)");
+var js61WhereQueries = document.querySelector("button:where(.primary)") ===
+  document.getElementById("primary") &&
+  document.querySelectorAll(".item:where([data-state=pending])").length === 1 &&
+  document.getElementById("panel").querySelector("button:where(.primary)") ===
+    document.getElementById("primary") &&
+  document.getElementById("secondary").closest(".panel:where(.active)") ===
+    document.getElementById("panel");
+var js61WhereRelations = document.querySelector(
+  ".panel:where(.active) > button:where(.primary)") ===
+    document.getElementById("primary") &&
+  document.querySelector(".marker:where(:empty) ~ .item:where(.item)") ===
+    document.getElementById("sibling-a");
+var js61WhereLists = document.querySelectorAll(
+  "button:where(.primary), #primary:where(button), button:where(.primary)").length === 1 &&
+  document.querySelectorAll("button:where(.primary), button:where(.action)")[0] ===
+    document.getElementById("primary") &&
+  document.querySelectorAll("button:where(.primary), button:where(.action)")[1] ===
+    document.getElementById("secondary");
+var js61WhereMalformed = document.querySelector(":where()") === null &&
+  document.querySelector(":where( )") === null &&
+  document.querySelector(":where(.a,.b)") === null &&
+  document.querySelector(":where(.a > .b)") === null &&
+  document.querySelector(":where(.a .b)") === null &&
+  document.querySelector(":where(.a + .b)") === null &&
+  document.querySelector(":where(.a ~ .b)") === null &&
+  document.querySelector(":where(:where(.a))") === null &&
+  document.querySelector(":where(:is(.a))") === null &&
+  document.querySelector(":where(:not(.a))") === null &&
+  document.querySelector(":where(:nth-child(2))") === null &&
+  document.querySelector(":where(.a") === null &&
+  document.querySelector(":where(.a))") === null &&
+  document.querySelector(":where((.a))") === null &&
+  document.querySelector(":where(.a):focus") === null &&
+  document.querySelector("button:focus:where(.a)") === null;
+var js61WhereLiveItems = document.querySelectorAll(
+  ".item:where([data-state=ready])");
+var js61WhereLive = js61WhereLiveItems.length === 1;
+document.getElementById("item-pending").setAttribute("data-state", "ready");
+js61WhereLive = js61WhereLive && js61WhereLiveItems.length === 2 &&
+  document.getElementById("item-pending").matches(
+    ":where([data-state=ready])");
+document.getElementById("item-pending").setAttribute("data-state", "pending");
+js61WhereLive = js61WhereLive && js61WhereLiveItems.length === 1;
+var js61Not = document.getElementById("item-pending").matches(":not(.disabled)") &&
+  !document.getElementById("item-disabled").matches(":not(.disabled)") &&
+  document.getElementById("root").matches(":not(div)") &&
+  !document.getElementById("panel").matches(":not(#panel)") &&
+  document.getElementById("primary-div").matches(":not(button.primary)") &&
+  !document.getElementById("primary").matches(":not(button.primary)") &&
+  document.getElementById("empty").matches(":NOT( :EMPTY )") === false;
+var js61Attributes = document.getElementById("item-pending").matches(
+  ":not([data-state=ready])") &&
+  !document.getElementById("item-ready").matches(
+    ":not([data-state=ready])");
+var js61Queries = document.querySelector("button:not(.primary)") ===
+  document.getElementById("secondary") &&
+  document.querySelectorAll(".item:not([data-state=ready])").length === 4 &&
+  document.getElementById("panel").querySelector(".item:not(.disabled)") ===
+    document.getElementById("item-ready") &&
+  document.getElementById("panel").querySelector(".panel") === null;
+var js61Pseudo = document.getElementById("root").matches(":not(:root)") === false &&
+  document.getElementById("panel").matches(":not(:root)") &&
+  document.getElementById("text").matches(":not(:empty)") &&
+  !document.getElementById("empty").matches(":not(:empty)") &&
+  document.getElementById("unchecked").matches(":not(:checked)") &&
+  !document.getElementById("checked").matches(":not(:checked)") &&
+  document.getElementById("secondary").matches(":not(:disabled)") &&
+  !document.getElementById("disabled-input").matches(":not(:disabled)") &&
+  !document.getElementById("inherited-disabled").matches(
+    ":not(:disabled)");
+var js61Relations = document.querySelector(
+  ".panel:not(.disabled) > button:not(.primary)") ===
+    document.getElementById("secondary") &&
+  document.querySelector(".marker:not(.disabled) ~ .item:not(.disabled)") ===
+    document.getElementById("sibling-a");
+var js61List = document.querySelectorAll(
+  "button:not(.disabled), #primary:not(.disabled)");
+var js61Lists = js61List.length === 2 &&
+  js61List[0] === document.getElementById("primary") &&
+  js61List[1] === document.getElementById("secondary");
+var js61LiveItems = document.querySelectorAll(
+  ".item:not([data-state=ready])");
+var js61LiveAttributes = js61LiveItems.length === 4;
+document.getElementById("item-pending").setAttribute("data-state", "ready");
+js61LiveAttributes = js61LiveAttributes && js61LiveItems.length === 3 &&
+  document.getElementById("item-pending").matches(
+    ":not([data-state=ready])") === false;
+document.getElementById("item-pending").setAttribute("data-state", "pending");
+js61LiveAttributes = js61LiveAttributes && js61LiveItems.length === 4;
+var js61Malformed = document.querySelector(":not(.a,.b)") === null &&
+  document.querySelector(":not(.a > .b)") === null &&
+  document.querySelector(":not(:not(.a))") === null &&
+  document.querySelector(":not(:nth-child(2))") === null &&
+  document.querySelector(":not(.a):focus") === null;
+var js61Event = false;
+var js61Nested = false;
+var js61Metadata = false;
+document.getElementById("event-target").addEventListener("click", function (event) {
+  var target = event.target;
+  var current = event.currentTarget;
+  var phase = event.eventPhase;
+  js61Event = target.matches(":not(:disabled)") &&
+    target.matches(":is(input)") &&
+    target.matches(":where(input)") &&
+    target.closest(".panel:not(.disabled)") === document.getElementById("panel") &&
+    target.closest(".panel:is(.active)") === document.getElementById("panel") &&
+    target.closest(".panel:where(.active)") === document.getElementById("panel");
+  document.getElementById("event-nested").click();
+  js61Nested = event.target === target && event.currentTarget === current &&
+    event.eventPhase === phase;
+  js61Metadata = event.relatedTarget === null &&
+    event.defaultPrevented === false && phase === 2;
+  js61Snapshot("event");
+});
+document.getElementById("event-nested").addEventListener("click", function (event) {
+  js61Event = js61Event && event.target.matches("input:not(:disabled)");
+});
+function js61Snapshot(label) {
+  document.getElementById("result").textContent = label + ":is=" + js61IsBasic +
+  ":where=" + js61WhereBasic + ":whereeq=" + js61WhereEquivalence +
+  ":wherenot=" + js61WhereComplement +
+  ":wherequeries=" + js61WhereQueries + ":whererelations=" + js61WhereRelations +
+  ":wherelists=" + js61WhereLists + ":wheremalformed=" + js61WhereMalformed +
+  ":wherelive=" + js61WhereLive +
+  ":equivalence=" + js61IsEquivalence + ":queries=" + js61IsQueries +
+  ":relations=" + js61IsRelations + ":lists=" + js61IsLists +
+  ":malformed=" + js61IsMalformed + ":live=" + js61IsLive + ":not=" + js61Not +
+  ":attrs=" + js61Attributes + ":queries=" + js61Queries +
+  ":pseudo=" + js61Pseudo + ":relations=" + js61Relations +
+  ":lists=" + js61Lists + ":live=" + js61LiveAttributes +
+  ":malformed=" + js61Malformed + ":event=" + js61Event +
+  ":nested=" + js61Nested + ":metadata=" + js61Metadata;
+}
+js61Snapshot("initial");
+</script>
+</body>
+</html>

@@ -760,6 +760,18 @@ NavigatorScriptStatePseudo logicalPseudoFunction(SourceView source,
         lowerAscii(static_cast<unsigned char>(source.data[colon + 2u])) ==
             static_cast<unsigned char>('s'))
         return NavigatorScriptStatePseudo::Is;
+    if (nameLength == 5u &&
+        lowerAscii(static_cast<unsigned char>(source.data[colon + 1u])) ==
+            static_cast<unsigned char>('w') &&
+        lowerAscii(static_cast<unsigned char>(source.data[colon + 2u])) ==
+            static_cast<unsigned char>('h') &&
+        lowerAscii(static_cast<unsigned char>(source.data[colon + 3u])) ==
+            static_cast<unsigned char>('e') &&
+        lowerAscii(static_cast<unsigned char>(source.data[colon + 4u])) ==
+            static_cast<unsigned char>('r') &&
+        lowerAscii(static_cast<unsigned char>(source.data[colon + 5u])) ==
+            static_cast<unsigned char>('e'))
+        return NavigatorScriptStatePseudo::Where;
     return NavigatorScriptStatePseudo::None;
 }
 
@@ -3443,7 +3455,8 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
             !coreEqual(left, leftSimple, right, rightSimple)) return false;
         const bool hasLogicalPseudo =
             leftSimple.statePseudo == NavigatorScriptStatePseudo::Not ||
-            leftSimple.statePseudo == NavigatorScriptStatePseudo::Is;
+            leftSimple.statePseudo == NavigatorScriptStatePseudo::Is ||
+            leftSimple.statePseudo == NavigatorScriptStatePseudo::Where;
         return !hasLogicalPseudo || coreEqual(left, leftSimple.logicalSelector,
             right, rightSimple.logicalSelector);
     };
@@ -3546,7 +3559,8 @@ NavigatorScriptHostAdapter::selectorCoreElementMatchResult(
         return hasSimpleCondition ? MatchResult::Match : MatchResult::Invalid;
     }
     if (selector.statePseudo == NavigatorScriptStatePseudo::Not ||
-        selector.statePseudo == NavigatorScriptStatePseudo::Is)
+        selector.statePseudo == NavigatorScriptStatePseudo::Is ||
+        selector.statePseudo == NavigatorScriptStatePseudo::Where)
         return MatchResult::Invalid;
     if (!strictPseudoValidation)
         return selectorStatePseudoMatches(element, selector, nthA, nthB)
@@ -3564,7 +3578,8 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
     const NavigatorScriptSimpleSelectorCoreDescriptor& core = selector;
     const bool isLogicalPseudo =
         core.statePseudo == NavigatorScriptStatePseudo::Not ||
-        core.statePseudo == NavigatorScriptStatePseudo::Is;
+        core.statePseudo == NavigatorScriptStatePseudo::Is ||
+        core.statePseudo == NavigatorScriptStatePseudo::Where;
     if (!isLogicalPseudo)
         return selectorCoreElementMatchResult(element, core, selector.nthA,
             selector.nthB, storage);
@@ -3576,7 +3591,7 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
     const MatchResult inner = selectorCoreElementMatchResult(element,
         selector.logicalSelector, 0, 0, storage, true);
     if (inner == MatchResult::Invalid) return MatchResult::Invalid;
-    if (core.statePseudo == NavigatorScriptStatePseudo::Is) return inner;
+    if (core.statePseudo != NavigatorScriptStatePseudo::Not) return inner;
     return inner == MatchResult::Match ? MatchResult::NoMatch :
         MatchResult::Match;
 }
@@ -3602,7 +3617,8 @@ NavigatorScriptHostAdapter::selectorStatePseudoMatchResult(
         findElement(element.serial) != &element ||
         pseudo == NavigatorScriptStatePseudo::None ||
         pseudo == NavigatorScriptStatePseudo::Not ||
-        pseudo == NavigatorScriptStatePseudo::Is)
+        pseudo == NavigatorScriptStatePseudo::Is ||
+        pseudo == NavigatorScriptStatePseudo::Where)
         return MatchResult::Invalid;
 
     // A false legacy pseudo result can mean either a real non-match or
@@ -3925,6 +3941,7 @@ bool NavigatorScriptHostAdapter::selectorStatePseudoMatches(
     }
     case NavigatorScriptStatePseudo::Not:
     case NavigatorScriptStatePseudo::Is:
+    case NavigatorScriptStatePseudo::Where:
         return false;
     }
     return false;

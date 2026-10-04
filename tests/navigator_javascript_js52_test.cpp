@@ -153,7 +153,6 @@ var parserUnknown = document.querySelector(":hover") === null &&
   document.querySelectorAll(":enabled").length === 0 &&
   !agree.matches(":active") && agree.closest(":first-of-type") === agree;
 var parserUnsupportedFunctionRejected =
-  document.querySelector(":where(input)") === null &&
   document.querySelector(":checked()") === null;
 var parserSecondPseudoRejected = document.querySelector("input:checked:focus") === null &&
   !agree.matches("input:checked:focus") &&

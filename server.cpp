@@ -4711,6 +4711,44 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js60AfterClick, 1800) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js61FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js61.html";
+    const bool js61Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js61FixtureUrl);
+    const std::string js61InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS61 hosted bounded :where() fixture loads and evaluates",
+        js61Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js61FixtureUrl &&
+        contains(js61InitialText, "Navigator JavaScript JS61") &&
+        contains(js61InitialText,
+            "initial:is=true:where=true:whereeq=true:wherenot=true:wherequeries=true:whererelations=true:wherelists=true:wheremalformed=true:wherelive=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js61Loaded) + ",text=" +
+        summarizeText(js61InitialText, 2200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS61 hosted standalone and :is() matching equivalence passes",
+        js61Loaded && contains(js61InitialText,
+            ":where=true:whereeq=true:wherenot=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "bounded tag, universal, ID, class, attribute, state, :root, and :empty matches agree with standalone selectors and :is(); valid candidates also complement :not()");
+    add("JS61 hosted collections, relations, lists, and malformed bounds pass",
+        js61Loaded && contains(js61InitialText,
+            ":wherequeries=true:whererelations=true:wherelists=true:wheremalformed=true:wherelive=true:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "scoped queries, live attribute collections, outer relations and lists work; inner lists, combinators, nested functions, empty arguments, and malformed parentheses fail closed");
+    const bool js61Click = gxos::apps::Navigator::SmokeClickFormControlById(
+        "event-target");
+    const std::string js61AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS61 hosted Event matching and nested dispatch preserve metadata",
+        js61Click && contains(js61AfterClick,
+            "event:is=true:where=true:whereeq=true:wherenot=true:wherequeries=true:whererelations=true:wherelists=true:wheremalformed=true:wherelive=true:") &&
+        contains(js61AfterClick, ":event=true:nested=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js61Click) + ",text=" +
+        summarizeText(js61AfterClick, 2200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();
