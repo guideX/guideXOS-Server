@@ -115,6 +115,7 @@ static TxRegisterSnapshot read_tx_registers()
 #if ARCH_HAS_PORT_IO
     if (!s_device.mmioMapped) return snapshot;
     snapshot.status = mmio_read32(s_device.mmioBase, E1000_STATUS);
+    snapshot.ctrl = mmio_read32(s_device.mmioBase, E1000_CTRL);
     snapshot.tdbal = mmio_read32(s_device.mmioBase, E1000_TDBAL);
     snapshot.tdbah = mmio_read32(s_device.mmioBase, E1000_TDBAH);
     snapshot.tdlen = mmio_read32(s_device.mmioBase, E1000_TDLEN);
@@ -122,6 +123,8 @@ static TxRegisterSnapshot read_tx_registers()
     snapshot.tdt = mmio_read32(s_device.mmioBase, E1000_TDT);
     snapshot.tctl = mmio_read32(s_device.mmioBase, E1000_TCTL);
     snapshot.tipg = mmio_read32(s_device.mmioBase, E1000_TIPG);
+    snapshot.tidv = mmio_read32(s_device.mmioBase, E1000_TIDV);
+    snapshot.tadv = mmio_read32(s_device.mmioBase, E1000_TADV);
     snapshot.txdctl = mmio_read32(s_device.mmioBase, E1000_TXDCTL);
     snapshot.tarc0 = mmio_read32(s_device.mmioBase, E1000_TARC0);
     snapshot.iosfpc = mmio_read32(s_device.mmioBase, E1000_IOSFPC);
@@ -130,6 +133,8 @@ static TxRegisterSnapshot read_tx_registers()
     snapshot.ctrlExt = mmio_read32(s_device.mmioBase, E1000_CTRL_EXT);
     snapshot.pba = mmio_read32(s_device.mmioBase, E1000_PBA);
     snapshot.fwsm = mmio_read32(s_device.mmioBase, E1000_FWSM);
+    snapshot.rfctl = mmio_read32(s_device.mmioBase, E1000_RFCTL);
+    snapshot.gcr = mmio_read32(s_device.mmioBase, E1000_GCR);
     snapshot.pciCommand = pci_read16(s_device.pciBus, s_device.pciSlot,
                                      s_device.pciFunc, 0x04);
     snapshot.valid = true;
@@ -3701,6 +3706,8 @@ static Status submit_frame(const uint8_t* data, uint16_t len)
     s_device.tx.descriptorPublished = false;
     s_device.tx.bufferAddressMatches = false;
     s_device.tx.doorbellReadbackMatches = false;
+    s_device.tx.immediateTdtReadback = 0u;
+    s_device.tx.immediateTdtReadbackValid = false;
     s_device.tx.failureReason = TxFailureReason::None;
     snapshot_tx_registers(&s_device.tx.beforeRegisters);
 
@@ -3846,6 +3853,98 @@ static Status submit_frame(const uint8_t* data, uint16_t len)
         s_txDescs[oldTx], &s_device.tx.lastDescriptorRaw0PreTdt,
         &s_device.tx.lastDescriptorRaw1PreTdt);
 
+    if (s_device.pcieTxSnoop.started &&
+        s_device.pcieTxSnoop.freshStateValid) {
+        const TxRegisterSnapshot& snapshot =
+            s_device.tx.preDoorbellRegisters;
+        const uint64_t raw0 = s_device.tx.lastDescriptorRaw0PreTdt;
+        const uint64_t raw1 = s_device.tx.lastDescriptorRaw1PreTdt;
+        const uint16_t descriptorLength = static_cast<uint16_t>(raw1);
+        const uint8_t descriptorCso = static_cast<uint8_t>(raw1 >> 16);
+        const uint8_t descriptorCommand = static_cast<uint8_t>(raw1 >> 24);
+        const uint8_t descriptorStatus = static_cast<uint8_t>(raw1 >> 32);
+        const uint8_t descriptorCss = static_cast<uint8_t>(raw1 >> 40);
+        const uint16_t descriptorSpecial = static_cast<uint16_t>(raw1 >> 48);
+
+        serial::puts("[AIDA-I219-P25] pre-TDT link=");
+        serial::puts(link_state_name(s_device.link));
+        serial::puts(" PCI-CMD=0x");
+        serial::put_hex32(snapshot.pciCommand);
+        serial::puts(" STATUS=0x");
+        serial::put_hex32(snapshot.status);
+        serial::puts(" CTRL=0x");
+        serial::put_hex32(snapshot.ctrl);
+        serial::puts(" CTRL_EXT=0x");
+        serial::put_hex32(snapshot.ctrlExt);
+        serial::puts(" FWSM=0x");
+        serial::put_hex32(snapshot.fwsm);
+        serial::puts(" TCTL=0x");
+        serial::put_hex32(snapshot.tctl);
+        serial::puts(" TCTL_EXT=N/A-SPT-e1000e");
+        serial::puts(" TXDCTL0=0x");
+        serial::put_hex32(snapshot.txdctl);
+        serial::puts(" TXDCTL1=0x");
+        serial::put_hex32(snapshot.txdctl1);
+        serial::puts(" TARC0=0x");
+        serial::put_hex32(snapshot.tarc0);
+        serial::puts(" TARC1=0x");
+        serial::put_hex32(snapshot.tarc1);
+        serial::puts(" IOSFPC=0x");
+        serial::put_hex32(snapshot.iosfpc);
+        serial::puts(" GCR=0x");
+        serial::put_hex32(snapshot.gcr);
+        serial::puts(" RFCTL=0x");
+        serial::put_hex32(snapshot.rfctl);
+        serial::puts(" PBA=0x");
+        serial::put_hex32(snapshot.pba);
+        serial::puts(" TIDV=0x");
+        serial::put_hex32(snapshot.tidv);
+        serial::puts(" TADV=0x");
+        serial::put_hex32(snapshot.tadv);
+        serial::puts(" TDBAL=0x");
+        serial::put_hex32(snapshot.tdbal);
+        serial::puts(" TDBAH=0x");
+        serial::put_hex32(snapshot.tdbah);
+        serial::puts(" TDLEN=0x");
+        serial::put_hex32(snapshot.tdlen);
+        serial::puts(" TDH=0x");
+        serial::put_hex32(snapshot.tdh);
+        serial::puts(" TDT=0x");
+        serial::put_hex32(snapshot.tdt);
+        serial::puts(" ring-PA=0x");
+        serial::put_hex64(s_device.tx.descriptorRingAddress);
+        serial::puts(" buffer-PA=0x");
+        serial::put_hex64(s_device.tx.lastBufferAddress);
+        serial::putc('\n');
+
+        serial::puts("[AIDA-I219-P25] descriptor-format=legacy-16-byte-little-endian raw16=");
+        for (uint8_t byte = 0; byte < 8u; ++byte)
+            serial::put_hex8(static_cast<uint8_t>(raw0 >> (byte * 8u)));
+        for (uint8_t byte = 0; byte < 8u; ++byte)
+            serial::put_hex8(static_cast<uint8_t>(raw1 >> (byte * 8u)));
+        serial::puts(" buffer=0x");
+        serial::put_hex64(raw0);
+        serial::puts(" length=");
+        serial::put_hex32(descriptorLength);
+        serial::puts(" cso=0x");
+        serial::put_hex8(descriptorCso);
+        serial::puts(" cmd=0x");
+        serial::put_hex8(descriptorCommand);
+        serial::puts(" status=0x");
+        serial::put_hex8(descriptorStatus);
+        serial::puts(" css=0x");
+        serial::put_hex8(descriptorCss);
+        serial::puts(" special=0x");
+        serial::put_hex32(descriptorSpecial);
+        serial::puts(" EOP=");
+        serial::puts((descriptorCommand & E1000_TXD_CMD_EOP) ? "1" : "0");
+        serial::puts(" IFCS=");
+        serial::puts((descriptorCommand & E1000_TXD_CMD_IFCS) ? "1" : "0");
+        serial::puts(" RS=");
+        serial::puts((descriptorCommand & E1000_TXD_CMD_RS) ? "1\n" : "0\n");
+        serial::puts("[AIDA-I219-P25] publication-order=sfence; TDT-MMIO-write; immediate-TDT-MMIO-readback\n");
+    }
+
     // Advance tail pointer to submit the descriptor
     s_txCur = (s_txCur + 1) % NUM_TX_DESC;
     s_device.tx.tdtWritten = s_txCur;
@@ -3855,6 +3954,17 @@ static Status submit_frame(const uint8_t* data, uint16_t len)
     s_device.tx.publishBarrierBeforeTdt = true;
     dma_publish_barrier();
     mmio_write32(s_device.mmioBase, E1000_TDT, s_txCur);
+    s_device.tx.immediateTdtReadback = static_cast<uint16_t>(
+        mmio_read32(s_device.mmioBase, E1000_TDT) & 0xFFFFu);
+    s_device.tx.immediateTdtReadbackValid = true;
+    if (s_device.pcieTxSnoop.started &&
+        s_device.pcieTxSnoop.freshStateValid) {
+        serial::puts("[AIDA-I219-P25] TDT-write=0x");
+        serial::put_hex32(s_txCur);
+        serial::puts(" immediate-readback=0x");
+        serial::put_hex32(s_device.tx.immediateTdtReadback);
+        serial::putc('\n');
+    }
     dma_completion_barrier();
     if (is_i219_device(s_device.deviceId) && s_txBuffer != nullptr) {
         for (uint32_t i = 0; i < sizeof(s_device.tx.packetFirst32AfterTdt); ++i) {
@@ -3870,8 +3980,8 @@ static Status submit_frame(const uint8_t* data, uint16_t len)
     s_device.tx.tailAfter = static_cast<uint16_t>(
         s_device.tx.afterDoorbellRegisters.tdt & 0xFFFFu);
     s_device.tx.doorbellReadbackMatches =
-        s_device.tx.afterDoorbellRegisters.valid &&
-        s_device.tx.tailAfter == s_txCur;
+        s_device.tx.immediateTdtReadbackValid &&
+        s_device.tx.immediateTdtReadback == s_txCur;
     if (!s_device.tx.doorbellReadbackMatches) {
         serial::puts("[NIC] TX doorbell readback did not match\n");
         s_device.stats.txErrors++;
@@ -4163,6 +4273,116 @@ bool run_i219_iommu_tx_observation()
     } else {
         diagnostics.classification = vtd::Classification::Unavailable;
     }
+    diagnostics.failure = result == NIC_OK
+        ? "none" : tx_failure_reason_name(s_device.tx.failureReason);
+    return true;
+}
+
+// ================================================================
+// Phase 25 controlled TX DMA snoop experiment
+// ================================================================
+
+bool run_i219_spt_tx_snoop_experiment()
+{
+    I219PcieTxSnoopDiagnostics& diagnostics = s_device.pcieTxSnoop;
+    diagnostics.noRetry = true;
+    if (diagnostics.started) {
+        diagnostics.failure = "Phase 25 attempt already started; reboot before another experiment";
+        return false;
+    }
+    diagnostics.failure = "I219 device is not active and ready";
+
+    if (!s_initialised || !s_device.active ||
+        !is_i219_device(s_device.deviceId) || !s_device.mmioMapped ||
+        s_device.mmioBase == 0u) {
+        return false;
+    }
+    if (!tx_dma_experiment_active(s_txDmaMode) ||
+        !s_txDmaRegionHandoffValid || !s_device.txRingInitialized ||
+        !s_device.resetDiagnostics.resetCompleted ||
+        !s_device.resetDiagnostics.rearmCompleted) {
+        diagnostics.failure =
+            "Phase 20 reset/rearm and constrained-low TX prerequisites are incomplete";
+        return false;
+    }
+    if (s_txPoisoned || s_device.tx.ringPoisoned) {
+        diagnostics.failure = "TX ring is already poisoned; no retry permitted";
+        return false;
+    }
+
+    // Latch the one-shot guard before touching GCR. Even a failed write or
+    // rejected descriptor cannot be repeated on this boot.
+    diagnostics.started = true;
+    diagnostics.registersBefore = read_tx_registers();
+    if (!diagnostics.registersBefore.valid ||
+        diagnostics.registersBefore.gcr == 0xFFFFFFFFu) {
+        diagnostics.failure = "pre-candidate TX/GCR snapshot is unavailable";
+        return false;
+    }
+    diagnostics.freshStateValid = true;
+    diagnostics.linkBefore = s_device.link;
+
+    diagnostics.gcrBefore = diagnostics.registersBefore.gcr;
+    diagnostics.gcrRequested = i219_spt_tx_snoop_configuration(
+        diagnostics.gcrBefore);
+    diagnostics.candidateChanged = i219_spt_tx_snoop_change_required(
+        diagnostics.gcrBefore);
+    if (!diagnostics.candidateChanged) {
+        // Do not publish a descriptor for a no-op experiment. Preserve the
+        // one-shot latch and report that this machine already matches the
+        // Linux SPT TX snoop policy.
+        diagnostics.gcrReadback = mmio_read32(s_device.mmioBase, E1000_GCR);
+        diagnostics.candidateReadbackValid =
+            i219_spt_tx_snoop_configuration_valid(diagnostics.gcrReadback);
+        diagnostics.unrelatedBitsPreserved =
+            ((diagnostics.gcrBefore ^ diagnostics.gcrReadback) &
+             ~E1000_GCR_TX_NO_SNOOP_MASK) == 0u;
+        diagnostics.candidateReadbackValid =
+            diagnostics.candidateReadbackValid &&
+            diagnostics.unrelatedBitsPreserved;
+        diagnostics.failure = diagnostics.candidateReadbackValid
+            ? "GCR TX no-snoop controls already clear; no experiment applied"
+            : "GCR readback changed before the no-op candidate check";
+        return false;
+    }
+    mmio_write32(s_device.mmioBase, E1000_GCR, diagnostics.gcrRequested);
+    diagnostics.gcrReadback = mmio_read32(s_device.mmioBase, E1000_GCR);
+    diagnostics.unrelatedBitsPreserved =
+        ((diagnostics.gcrBefore ^ diagnostics.gcrReadback) &
+         ~E1000_GCR_TX_NO_SNOOP_MASK) == 0u;
+    diagnostics.candidateReadbackValid =
+        i219_spt_tx_snoop_configuration_valid(diagnostics.gcrReadback) &&
+        diagnostics.unrelatedBitsPreserved;
+
+    serial::puts("[AIDA-I219-P25] GCR-TX-snoop before=0x");
+    serial::put_hex32(diagnostics.gcrBefore);
+    serial::puts(" requested=0x");
+    serial::put_hex32(diagnostics.gcrRequested);
+    serial::puts(" readback=0x");
+    serial::put_hex32(diagnostics.gcrReadback);
+    serial::puts(" tx-no-snoop-cleared=");
+    serial::puts(diagnostics.candidateReadbackValid ? "yes" : "no");
+    serial::puts(" unrelated-preserved=");
+    serial::puts(diagnostics.unrelatedBitsPreserved ? "yes\n" : "no\n");
+
+    if (!diagnostics.candidateReadbackValid) {
+        diagnostics.failure = "GCR TX no-snoop candidate failed readback; TX not attempted";
+        return false;
+    }
+
+    // Use the existing bounded normal raw-TX boundary once. It owns the only
+    // descriptor publication, reports an immediate TDT readback, and poisons
+    // the ring after timeout rather than retrying.
+    diagnostics.attempted = true;
+    const Status result = send_raw_diagnostic_frame(TxRawPath::Normal);
+    diagnostics.result = result;
+    diagnostics.poisonPreserved = result != NIC_OK
+        ? s_txPoisoned && s_device.tx.ringPoisoned
+        : !s_txPoisoned;
+    diagnostics.registersAfter = read_tx_registers();
+    diagnostics.gcrFinal = diagnostics.registersAfter.valid
+        ? diagnostics.registersAfter.gcr
+        : mmio_read32(s_device.mmioBase, E1000_GCR);
     diagnostics.failure = result == NIC_OK
         ? "none" : tx_failure_reason_name(s_device.tx.failureReason);
     return true;

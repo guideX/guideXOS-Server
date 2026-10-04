@@ -49,7 +49,13 @@ Require $nicSource 'freshStateRequired' 'fresh reset/rearm prerequisite is missi
 Require $nicSource 's_device.resetDiagnostics.rearmCompleted' 'Phase 20 rearm prerequisite is missing'
 Require $nicSource 's_txPoisoned' 'poison guard is missing from VT-d observation'
 Require $nicSource 'send_raw_diagnostic_frame\(TxRawPath::Normal\)' 'normal raw-TX boundary is missing'
-if ($nicSource -match 'run_i219_iommu_tx_observation\([\s\S]*send_raw_diagnostic_frame\(TxRawPath::Normal\)[\s\S]*send_raw_diagnostic_frame\(TxRawPath::Normal\)') {
+$observationStart = $nicSource.IndexOf('bool run_i219_iommu_tx_observation()')
+$observationEnd = $nicSource.IndexOf('// ================================================================', $observationStart)
+if ($observationStart -lt 0 -or $observationEnd -le $observationStart) {
+    throw 'Phase 21 VT-d observation source region was not found'
+}
+$observation = $nicSource.Substring($observationStart, $observationEnd - $observationStart)
+if ($observation -match 'send_raw_diagnostic_frame\(TxRawPath::Normal\)[\s\S]*send_raw_diagnostic_frame\(TxRawPath::Normal\)') {
     throw 'Phase 21 VT-d observation contains a retry'
 }
 if ($nicSource -match 'E1000_TXD_CMD_DEXT') {

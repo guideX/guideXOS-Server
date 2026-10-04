@@ -24,7 +24,8 @@ param(
     [int]$I219Phase6Stage = 0,
     [ValidateRange(0, 4)]
     [int]$I219Phase7Stage = 0,
-    [switch]$I219TxDmaPlacementExperiment
+    [switch]$I219TxDmaPlacementExperiment,
+    [switch]$SkipPacManPackageBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -38,6 +39,7 @@ Write-Host "  I219 Phase 5 stage: $I219Phase5Stage" -ForegroundColor Cyan
 Write-Host "  I219 Phase 6 micro-stage: $I219Phase6Stage" -ForegroundColor Cyan
 Write-Host "  I219 Phase 7 stage: $I219Phase7Stage ($(@('reset-only','mac','phy','dma','register')[$I219Phase7Stage]))" -ForegroundColor Cyan
 Write-Host "  I219 TX DMA placement experiment: $($I219TxDmaPlacementExperiment.IsPresent)" -ForegroundColor Cyan
+Write-Host "  Skip PacMan package rebuild: $($SkipPacManPackageBuild.IsPresent)" -ForegroundColor Cyan
 Write-Host ""
 
 $RootDir = $PSScriptRoot
@@ -156,7 +158,17 @@ if ($Clean) {
 }
 
 Write-Host "[1c/6] Building PacMan Native ELF package..." -ForegroundColor Yellow
-Build-PacmanPackage
+if ($SkipPacManPackageBuild) {
+    $existingPacmanManifest = Join-Path $RootDir "Apps\PacMan\app.json"
+    $existingPacmanElf = Join-Path $RootDir "Apps\PacMan\bin\amd64\pacman.elf"
+    if (!(Test-Path -LiteralPath $existingPacmanManifest -PathType Leaf) -or
+        !(Test-Path -LiteralPath $existingPacmanElf -PathType Leaf)) {
+        throw "PacMan package rebuild was skipped, but the tracked package is incomplete."
+    }
+    Write-Host "      Reusing the existing tracked AMD64 NativeElf package." -ForegroundColor DarkGray
+} else {
+    Build-PacmanPackage
+}
 Write-Host ""
 
 # Build the boot-time runtime filesystem after the package build so a clean
@@ -461,6 +473,7 @@ elseif (Test-Path $KernelBin) {
         "phase7I219Stage=$I219Phase7Stage"
         "phase7I219StageName=$(@('reset-only','mac','phy','dma','register')[$I219Phase7Stage])"
         "i219TxDmaPlacementExperiment=$([bool]$I219TxDmaPlacementExperiment.IsPresent)"
+        "pacmanPackageBuildSkipped=$([bool]$SkipPacManPackageBuild.IsPresent)"
         "uniqueBuildId=GXOS-P7-$I219Phase7Stage-$([Guid]::NewGuid().ToString('N'))"
         "imageRoot=$ESPDir"
         "bootloaderSource=$BootloaderBin"

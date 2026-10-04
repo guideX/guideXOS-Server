@@ -7,6 +7,7 @@ param(
 
     [switch]$Clean,
     [switch]$SkipBuild,
+    [switch]$SkipPacManPackageBuild,
     [switch]$RequireCleanWorktree,
     [switch]$Force,
     [switch]$BootstrapTools,
@@ -428,11 +429,13 @@ function Invoke-CanonicalBuild {
                    '-I219Phase6Stage', [string]$I219Phase6Stage,
                    '-I219Phase7Stage', [string]$I219Phase7Stage)
     if ($I219TxDmaPlacementExperiment) { $buildArgs += '-I219TxDmaPlacementExperiment' }
+    if ($SkipPacManPackageBuild) { $buildArgs += '-SkipPacManPackageBuild' }
     if ($Clean) { $buildArgs = @('-Clean', '-Arch', $Arch,
                                   '-I219Phase5Stage', [string]$I219Phase5Stage,
                                   '-I219Phase6Stage', [string]$I219Phase6Stage,
                                   '-I219Phase7Stage', [string]$I219Phase7Stage)
         if ($I219TxDmaPlacementExperiment) { $buildArgs += '-I219TxDmaPlacementExperiment' }
+        if ($SkipPacManPackageBuild) { $buildArgs += '-SkipPacManPackageBuild' }
     }
     Write-Host "[release-iso] invoking canonical build.ps1 with supported arguments" -ForegroundColor Cyan
     Invoke-ExternalChecked -FilePath $powershell.Source -Arguments (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $BuildScript) + $buildArgs) | Out-Null
@@ -512,6 +515,11 @@ try {
         if ($txDmaExperimentMatch.Success -and
             ([bool]::Parse($txDmaExperimentMatch.Groups[1].Value) -ne $I219TxDmaPlacementExperiment.IsPresent)) {
             Fail "ESP build identity TX DMA experiment flag does not match the requested packaging mode. Rebuild without -SkipBuild."
+        }
+        $pacmanBuildSkippedMatch = [regex]::Match($identityText, '(?m)^pacmanPackageBuildSkipped=(True|False)\s*$')
+        if ($pacmanBuildSkippedMatch.Success -and
+            ([bool]::Parse($pacmanBuildSkippedMatch.Groups[1].Value) -ne $SkipPacManPackageBuild.IsPresent)) {
+            Fail "ESP build identity PacMan package build mode does not match the requested packaging mode. Rebuild without -SkipBuild."
         }
     }
 
@@ -609,7 +617,7 @@ try {
         fs = '2.4.16'
         pycdlib = '1.16.0'
         isoBackend = $IsoBackend
-        canonicalBuild = 'build.ps1 -Arch amd64 -I219Phase5Stage ' + $I219Phase5Stage + ' -I219Phase6Stage ' + $I219Phase6Stage + ' -I219Phase7Stage ' + $I219Phase7Stage + $(if ($I219TxDmaPlacementExperiment) { ' -I219TxDmaPlacementExperiment' } else { '' }) + $(if ($Clean) { ' -Clean' } else { '' })
+        canonicalBuild = 'build.ps1 -Arch amd64 -I219Phase5Stage ' + $I219Phase5Stage + ' -I219Phase6Stage ' + $I219Phase6Stage + ' -I219Phase7Stage ' + $I219Phase7Stage + $(if ($I219TxDmaPlacementExperiment) { ' -I219TxDmaPlacementExperiment' } else { '' }) + $(if ($SkipPacManPackageBuild) { ' -SkipPacManPackageBuild' } else { '' }) + $(if ($Clean) { ' -Clean' } else { '' })
     }
     if ($IsoBackend -eq 'Oscdimg') {
         $toolRecords.oscdimg = Get-ToolRecord $oscdimg $oscdimgVersion
@@ -625,6 +633,7 @@ try {
         i219Phase7Stage = $I219Phase7Stage
         i219Phase7StageName = $I219Phase7StageName
         i219TxDmaPlacementExperiment = [bool]$I219TxDmaPlacementExperiment.IsPresent
+        pacmanPackageBuildSkipped = [bool]$SkipPacManPackageBuild.IsPresent
         uniqueBuildId = $uniqueBuildId
         isoBackend = $IsoBackend
         isoFilename = $isoName

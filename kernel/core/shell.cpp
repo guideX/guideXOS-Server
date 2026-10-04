@@ -2985,6 +2985,54 @@ static void nicinfo_print_tx_dma_registers(
     uint_hex_to_str(snapshot.pciCommand, 4, hexStr);
     output_string(hexStr);
     output_string(snapshot.valid ? " valid=yes\n" : " valid=no\n");
+
+    output_string(label);
+    output_string(" STATUS=0x");
+    uint_hex_to_str(snapshot.status, 8, hexStr);
+    output_string(hexStr);
+    output_string(" CTRL=0x");
+    uint_hex_to_str(snapshot.ctrl, 8, hexStr);
+    output_string(hexStr);
+    output_string(" CTRL_EXT=0x");
+    uint_hex_to_str(snapshot.ctrlExt, 8, hexStr);
+    output_string(hexStr);
+    output_string(" FWSM=0x");
+    uint_hex_to_str(snapshot.fwsm, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TCTL_EXT=N/A-SPT-e1000e\n");
+
+    output_string(label);
+    output_string(" TIPG=0x");
+    uint_hex_to_str(snapshot.tipg, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TIDV=0x");
+    uint_hex_to_str(snapshot.tidv, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TADV=0x");
+    uint_hex_to_str(snapshot.tadv, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TXDCTL1=0x");
+    uint_hex_to_str(snapshot.txdctl1, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TARC0=0x");
+    uint_hex_to_str(snapshot.tarc0, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TARC1=0x");
+    uint_hex_to_str(snapshot.tarc1, 8, hexStr);
+    output_string(hexStr);
+    output_string(" IOSFPC=0x");
+    uint_hex_to_str(snapshot.iosfpc, 8, hexStr);
+    output_string(hexStr);
+    output_string(" RFCTL=0x");
+    uint_hex_to_str(snapshot.rfctl, 8, hexStr);
+    output_string(hexStr);
+    output_string(" GCR=0x");
+    uint_hex_to_str(snapshot.gcr, 8, hexStr);
+    output_string(hexStr);
+    output_string(" PBA=0x");
+    uint_hex_to_str(snapshot.pba, 8, hexStr);
+    output_string(hexStr);
+    output_string("\n");
 }
 
 static void nicinfo_print_tx_dma_packet_prefix(
@@ -3020,6 +3068,49 @@ static void nicinfo_print_tx_descriptor_bytes(const char* label,
         output_string(hexStr);
     }
     output_string("\n");
+}
+
+static void nicinfo_print_tx_descriptor_decoded(const char* label,
+                                                uint64_t raw0,
+                                                uint64_t raw1)
+{
+    char hexStr[17];
+    char numStr[16];
+    const uint16_t length = static_cast<uint16_t>(raw1);
+    const uint8_t cso = static_cast<uint8_t>(raw1 >> 16);
+    const uint8_t command = static_cast<uint8_t>(raw1 >> 24);
+    const uint8_t status = static_cast<uint8_t>(raw1 >> 32);
+    const uint8_t css = static_cast<uint8_t>(raw1 >> 40);
+    const uint16_t special = static_cast<uint16_t>(raw1 >> 48);
+
+    output_string(label);
+    output_string(" format=legacy-data-16-byte-little-endian buffer=0x");
+    uint_hex64_to_str(raw0, hexStr);
+    output_string(hexStr);
+    output_string(" length=");
+    uint_to_str(length, numStr);
+    output_string(numStr);
+    output_string(" cso=0x");
+    uint_hex_to_str(cso, 2, hexStr);
+    output_string(hexStr);
+    output_string(" cmd=0x");
+    uint_hex_to_str(command, 2, hexStr);
+    output_string(hexStr);
+    output_string(" status=0x");
+    uint_hex_to_str(status, 2, hexStr);
+    output_string(hexStr);
+    output_string(" css=0x");
+    uint_hex_to_str(css, 2, hexStr);
+    output_string(hexStr);
+    output_string(" special=0x");
+    uint_hex_to_str(special, 4, hexStr);
+    output_string(hexStr);
+    output_string(" EOP=");
+    output_string((command & nic::E1000_TXD_CMD_EOP) ? "yes" : "no");
+    output_string(" IFCS=");
+    output_string((command & nic::E1000_TXD_CMD_IFCS) ? "yes" : "no");
+    output_string(" RS=");
+    output_string((command & nic::E1000_TXD_CMD_RS) ? "yes\n" : "no\n");
 }
 
 static bool nicinfo_dma_range_below_4g(uint64_t address, uint64_t length)
@@ -3221,8 +3312,8 @@ static void cmd_nicinfo_tx_iommu()
     uint_to_str(tx.tdtWritten, numStr);
     output_string(numStr);
     output_string(" immediate-readback=");
-    if (tx.afterDoorbellRegisters.valid) {
-        uint_to_str(tx.afterDoorbellRegisters.tdt, numStr);
+    if (tx.immediateTdtReadbackValid) {
+        uint_to_str(tx.immediateTdtReadback, numStr);
         output_string(numStr);
     } else {
         output_string("unavailable");
@@ -3309,6 +3400,9 @@ static void cmd_nicinfo_tx_iommu()
     nicinfo_print_tx_descriptor_bytes("descriptor-pre-TDT=raw16:",
                                       tx.lastDescriptorRaw0PreTdt,
                                       tx.lastDescriptorRaw1PreTdt);
+    nicinfo_print_tx_descriptor_decoded("descriptor-pre-TDT-decoded:",
+                                        tx.lastDescriptorRaw0PreTdt,
+                                        tx.lastDescriptorRaw1PreTdt);
     nicinfo_print_tx_dma_packet_prefix(
         "buffer-pre-TDT-first32=", tx.packetFirst32BeforeTdt,
         tx.packetPrefixBeforeTdtValid);
@@ -3364,6 +3458,139 @@ static void cmd_nicinfo_tx_iommu()
 
 // Exactly twelve logical lines. This is intentionally cache-only: the word
 // run is required before any destructive reset/rearm operation is allowed.
+static void cmd_nicinfo_tx_phase25()
+{
+    output_string("NIC TX Phase 25 SPT snoop experiment\n");
+    const bool executed = nic::run_i219_spt_tx_snoop_experiment();
+    const nic::NICDevice* dev = nic::get_device();
+    const nic::I219PcieTxSnoopDiagnostics empty = {};
+    const nic::I219PcieTxSnoopDiagnostics& candidate =
+        dev ? dev->pcieTxSnoop : empty;
+    const nic::TxDiagnostics emptyTx = {};
+    const nic::TxDiagnostics& tx = dev ? dev->tx : emptyTx;
+    char hexStr[17];
+    char numStr[16];
+
+    output_string("fresh-reset-rearm-required=yes valid=");
+    output_string(candidate.freshStateValid ? "yes\n" : "no\n");
+    output_string("link-before=");
+    output_string(nic::link_state_name(candidate.linkBefore));
+    output_string("\n");
+    nicinfo_print_tx_dma_registers("before-candidate",
+                                   candidate.registersBefore);
+
+    output_string("candidate=GCR.TXD_NO_SNOOP|TXDSCW_NO_SNOOP|TXDSCR_NO_SNOOP\n");
+    output_string("GCR old=0x");
+    uint_hex_to_str(candidate.gcrBefore, 8, hexStr);
+    output_string(hexStr);
+    output_string(" requested=0x");
+    uint_hex_to_str(candidate.gcrRequested, 8, hexStr);
+    output_string(hexStr);
+    output_string(" change-required=");
+    output_string(candidate.candidateChanged ? "yes" : "no");
+    output_string(" readback=0x");
+    uint_hex_to_str(candidate.gcrReadback, 8, hexStr);
+    output_string(hexStr);
+    output_string(" candidate-readback=");
+    output_string(candidate.candidateReadbackValid ? "PASS" : "FAIL");
+    output_string(" unrelated-bits-preserved=");
+    output_string(candidate.unrelatedBitsPreserved ? "yes\n" : "no\n");
+
+    if (candidate.attempted) {
+        const nic::TxRegisterSnapshot& preTdt = tx.preDoorbellRegisters;
+        const bool tdbaMatches = preTdt.valid &&
+            nic::dma_address_register_value(preTdt.tdbal, preTdt.tdbah) ==
+                tx.descriptorRingAddress;
+        const bool headMoved = preTdt.valid && candidate.registersAfter.valid &&
+            ((preTdt.tdh & 0xFFFFu) !=
+             (candidate.registersAfter.tdh & 0xFFFFu));
+        const bool descriptorDone =
+            (tx.lastDescriptorStatus & nic::E1000_TXD_STAT_DD) != 0u;
+        const char* outcome = "OUTCOME_B_CANDIDATE_APPLIED_TX_NOT_CONSUMED";
+        if (descriptorDone || headMoved) {
+            outcome = "OUTCOME_A_TX_CONSUMPTION_PROVEN";
+        } else if (!candidate.candidateReadbackValid) {
+            outcome = "OUTCOME_D_CANDIDATE_NOT_APPLIED";
+        }
+
+        nicinfo_print_tx_dma_registers("pre-TDT", preTdt);
+        output_string("TDBA == TX_RING_DMA_ADDRESS: ");
+        output_string(tdbaMatches ? "YES\n" : "NO\n");
+        output_string("ring-PA=0x");
+        uint_hex64_to_str(tx.descriptorRingAddress, hexStr);
+        output_string(hexStr);
+        output_string(" packet-buffer-PA=0x");
+        uint_hex64_to_str(tx.lastBufferAddress, hexStr);
+        output_string(hexStr);
+        output_string("\n");
+        nicinfo_print_tx_descriptor_bytes("descriptor-pre-TDT-raw16=",
+                                          tx.lastDescriptorRaw0PreTdt,
+                                          tx.lastDescriptorRaw1PreTdt);
+        nicinfo_print_tx_descriptor_decoded("descriptor-pre-TDT-decoded:",
+                                            tx.lastDescriptorRaw0PreTdt,
+                                            tx.lastDescriptorRaw1PreTdt);
+        nicinfo_print_tx_dma_packet_prefix("packet-pre-TDT-first32=",
+                                           tx.packetFirst32BeforeTdt,
+                                           tx.packetPrefixBeforeTdtValid);
+        output_string("TDT-write-count=1 value=");
+        uint_to_str(tx.tdtWritten, numStr);
+        output_string(numStr);
+        output_string(" immediate-readback=");
+        if (tx.immediateTdtReadbackValid) {
+            uint_to_str(tx.immediateTdtReadback, numStr);
+            output_string(numStr);
+        } else {
+            output_string("unavailable");
+        }
+        output_string(" observed=");
+        output_string(tx.doorbellReadbackMatches ? "yes\n" : "no\n");
+        nicinfo_print_tx_dma_registers("final-TX",
+                                       candidate.registersAfter);
+        nicinfo_print_tx_descriptor_bytes("descriptor-final-raw16=",
+                                          tx.lastDescriptorRaw0Final,
+                                          tx.lastDescriptorRaw1Final);
+        nicinfo_print_tx_descriptor_decoded("descriptor-final-decoded:",
+                                            tx.lastDescriptorRaw0Final,
+                                            tx.lastDescriptorRaw1Final);
+        output_string("final-TDH=0x");
+        uint_hex_to_str(candidate.registersAfter.tdh, 8, hexStr);
+        output_string(hexStr);
+        output_string(" final-TDT=0x");
+        uint_hex_to_str(candidate.registersAfter.tdt, 8, hexStr);
+        output_string(hexStr);
+        output_string(" DD=");
+        output_string(descriptorDone ? "yes\n" : "no\n");
+        output_string("GCR-final-readback=0x");
+        uint_hex_to_str(candidate.gcrFinal, 8, hexStr);
+        output_string(hexStr);
+        output_string("\nclassification=");
+        output_string(outcome);
+        output_string(" result=");
+        output_string(candidate.result == nic::NIC_OK ? "complete" : "fail");
+        output_string(" no-retry=yes poison-preserved=");
+        output_string(candidate.poisonPreserved ? "yes\n" : "no\n");
+    } else {
+        output_string("attempt=none classification=");
+        if (candidate.started && candidate.freshStateValid &&
+            !candidate.candidateChanged &&
+            candidate.candidateReadbackValid) {
+            output_string("OUTCOME_D_CANDIDATE_ALREADY_COMPLIANT");
+        } else if (candidate.started && candidate.freshStateValid &&
+                   !candidate.candidateReadbackValid) {
+            output_string("OUTCOME_D_CANDIDATE_NOT_APPLIED");
+        } else {
+            output_string("NOT_ATTEMPTED");
+        }
+        output_string("\n");
+    }
+
+    output_string("executed=");
+    output_string(executed ? "yes" : "no");
+    output_string(" failure=");
+    output_string(candidate.failure ? candidate.failure : "unknown");
+    output_string("\n");
+}
+
 static void cmd_nicinfo_tx_reset_brief()
 {
     const nic::NICDevice* dev = nic::get_device();
@@ -6181,8 +6408,10 @@ static void execute_command(const char* cmd) {
             cmd_nicinfo_dma_brief();
         } else if (nicInfoMode == NICINFO_MODE_TX_IOMMU) {
             cmd_nicinfo_tx_iommu();
+        } else if (nicInfoMode == NICINFO_MODE_TX_PHASE25) {
+            cmd_nicinfo_tx_phase25();
         } else {
-            output_string("Usage: nicinfo [brief|link|dma [brief]|tx [brief|owner|iommu|reset [brief|run]|rearm|lifecycle|raw [direct|status]]]\n");
+            output_string("Usage: nicinfo [brief|link|dma [brief]|tx [brief|owner|iommu|phase25|reset [brief|run]|rearm|lifecycle|raw [direct|status]]]\n");
             output_string("  brief: recorded NIC initialization/link state only\n");
             output_string("  link: one bounded, read-only current link refresh\n");
             output_string("  dma: read-only ACPI DMAR/VT-d audit; no IOMMU writes\n");
@@ -6190,6 +6419,7 @@ static void execute_command(const char* cmd) {
             output_string("  tx: one TX descriptor and bounded register snapshot\n");
             output_string("  tx brief: compact one-screen TX evidence\n");
             output_string("  tx iommu: one normal raw-TX attempt with VT-d fault capture; never retries\n");
+            output_string("  tx phase25: one I219 TX snoop-policy experiment; never retries\n");
             output_string("  tx owner: CTRL_EXT.DRV_LOAD ownership evidence\n");
             output_string("  tx reset: I219/SPT pre-reset flush audit; retained/latest (READ-ONLY; does not reset)\n");
             output_string("  tx reset brief: 12-line retained reset summary (READ-ONLY)\n");

@@ -168,6 +168,8 @@ static const uint32_t E1000_IMC      = 0x00D8;  // Interrupt Mask Clear
 static const uint32_t E1000_RCTL     = 0x0100;  // Receive Control
 static const uint32_t E1000_TCTL     = 0x0400;  // Transmit Control
 static const uint32_t E1000_TIPG     = 0x0410;  // Transmit IPG
+static const uint32_t E1000_TIDV     = 0x3820;  // TX interrupt delay
+static const uint32_t E1000_TADV     = 0x382C;  // TX absolute interrupt delay
 static const uint32_t E1000_RDBAL    = 0x2800;  // RX Descriptor Base Low
 static const uint32_t E1000_RDBAH    = 0x2804;  // RX Descriptor Base High
 static const uint32_t E1000_RDLEN    = 0x2808;  // RX Descriptor Length
@@ -185,8 +187,15 @@ static const uint32_t E1000_TARC0    = 0x3840;  // TX Arbitration Counter Q0
 static const uint32_t E1000_TARC1    = 0x3940;  // TX Arbitration Counter Q1
 static const uint32_t E1000_RFCTL    = 0x5008;  // Receive Filter Control
 static const uint32_t E1000_IOSFPC   = 0x0F28;  // I219 TX DMA erratum control
+static const uint32_t E1000_GCR      = 0x5B00;  // PCIe DMA control
 static const uint32_t E1000_FEXTNVM11 = 0x5BBC; // Future Extended NVM 11
 static const uint32_t E1000_FWSM     = 0x5B54;  // Firmware Semaphore
+static const uint32_t E1000_GCR_TXD_NO_SNOOP = (1u << 3);
+static const uint32_t E1000_GCR_TXDSCW_NO_SNOOP = (1u << 4);
+static const uint32_t E1000_GCR_TXDSCR_NO_SNOOP = (1u << 5);
+static const uint32_t E1000_GCR_TX_NO_SNOOP_MASK =
+    E1000_GCR_TXD_NO_SNOOP | E1000_GCR_TXDSCW_NO_SNOOP |
+    E1000_GCR_TXDSCR_NO_SNOOP;
 static const uint16_t PCI_CONFIG_DESC_RING_STATUS = 0x00E4;
 static const uint16_t PCI_CONFIG_FLUSH_DESC_REQUIRED = 0x0100;
 static const uint32_t E1000_FEXTNVM11_DISABLE_MULR_FIX = 0x00002000u;
@@ -265,6 +274,24 @@ inline bool i219_spt_txdctl_configuration_valid(uint32_t value)
            (value & E1000_TXDCTL_GRAN) != 0u &&
            (value & E1000_TXDCTL_PTHRESH_MASK) == 0x1Fu &&
            ((value & E1000_TXDCTL_WTHRESH_MASK) >> 16) == 1u;
+}
+
+// Linux e1000e's SPT/PCH PCIe setup clears the TX descriptor/data no-snoop
+// controls as part of PCIE_NO_SNOOP_ALL. Keep this experiment limited to the
+// three TX controls so RX policy and unrelated GCR bits remain untouched.
+inline uint32_t i219_spt_tx_snoop_configuration(uint32_t current)
+{
+    return current & ~E1000_GCR_TX_NO_SNOOP_MASK;
+}
+
+inline bool i219_spt_tx_snoop_change_required(uint32_t current)
+{
+    return (current & E1000_GCR_TX_NO_SNOOP_MASK) != 0u;
+}
+
+inline bool i219_spt_tx_snoop_configuration_valid(uint32_t value)
+{
+    return (value & E1000_GCR_TX_NO_SNOOP_MASK) == 0u;
 }
 
 // I219/PCH SPT silicon workaround used by upstream e1000e. It reduces the
@@ -1429,6 +1456,7 @@ struct TxRawDiagnostics {
 
 struct TxRegisterSnapshot {
     uint32_t status;
+    uint32_t ctrl;
     uint32_t tdbal;
     uint32_t tdbah;
     uint32_t tdlen;
@@ -1436,6 +1464,8 @@ struct TxRegisterSnapshot {
     uint32_t tdt;
     uint32_t tctl;
     uint32_t tipg;
+    uint32_t tidv;
+    uint32_t tadv;
     uint32_t txdctl;
     uint32_t tarc0;
     uint32_t iosfpc;
@@ -1444,6 +1474,8 @@ struct TxRegisterSnapshot {
     uint32_t ctrlExt;
     uint32_t pba;
     uint32_t fwsm;
+    uint32_t rfctl;
+    uint32_t gcr;
     uint16_t pciCommand;
     bool     valid;
 };
@@ -1470,6 +1502,7 @@ struct TxDiagnostics {
     uint16_t tailAfter;
     uint16_t lastLength;
     uint16_t tdtWritten;
+    uint16_t immediateTdtReadback;
     uint64_t kernelPhysicalBase;
     uint64_t kernelImageVirtualStart;
     uint64_t kernelImageVirtualEnd;
@@ -1533,6 +1566,7 @@ struct TxDiagnostics {
     bool     bufferAddressMatches;
     bool     txEngineEnabled;
     bool     doorbellReadbackMatches;
+    bool     immediateTdtReadbackValid;
     bool     ringPoisoned;
     bool     ringRegistersPersisted;
     TxFailureReason failureReason;
@@ -1541,6 +1575,26 @@ struct TxDiagnostics {
     TxRegisterSnapshot preDoorbellRegisters;
     TxRegisterSnapshot afterDoorbellRegisters;
     TxRegisterSnapshot finalRegisters;
+};
+
+struct I219PcieTxSnoopDiagnostics {
+    bool started;
+    bool freshStateValid;
+    bool candidateChanged;
+    bool candidateReadbackValid;
+    bool unrelatedBitsPreserved;
+    bool attempted;
+    bool noRetry;
+    bool poisonPreserved;
+    Status result;
+    const char* failure;
+    LinkState linkBefore;
+    uint32_t gcrBefore;
+    uint32_t gcrRequested;
+    uint32_t gcrReadback;
+    uint32_t gcrFinal;
+    TxRegisterSnapshot registersBefore;
+    TxRegisterSnapshot registersAfter;
 };
 
 // Phase 21 is a single-attempt, read-only VT-d observation around the
@@ -1674,6 +1728,7 @@ struct NICDevice {
     NetStats    stats;
     TxDiagnostics tx;
     I219IommuDiagnostics iommu;
+    I219PcieTxSnoopDiagnostics pcieTxSnoop;
     I219HwControlDiagnostics hwControl;
     I219ResetDiagnostics resetDiagnostics;
     char        name[32];       // e.g. "eth0"
@@ -1966,6 +2021,11 @@ bool run_i219_post_reset_rearm();
 // TX attempt. Refuses to run unless the caller has completed the Phase 20
 // reset/rearm boundary; never retries a poisoned or timed-out descriptor.
 bool run_i219_iommu_tx_observation();
+
+// Apply the single Phase 25 TX DMA snoop-policy experiment and publish one
+// constrained-low raw frame. Requires the completed reset/rearm boundary and
+// refuses a second attempt or a poisoned ring.
+bool run_i219_spt_tx_snoop_experiment();
 
 // Receive a raw Ethernet frame into 'buffer'.
 // On success, writes the frame (including 14-byte header, excluding
