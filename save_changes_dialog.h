@@ -23,7 +23,8 @@ namespace gxos { namespace dialogs {
         static void Show(int ownerX, int ownerY, 
                         std::function<void()> onSave,
                         std::function<void()> onDontSave,
-                        std::function<void()> onCancel);
+                        std::function<void()> onCancel,
+                        std::function<void()> onClosed = {});
         
     private:
         // Main entry point for dialog process
@@ -33,10 +34,10 @@ namespace gxos { namespace dialogs {
         static void redraw();
         
         // State
-        static uint64_t s_windowId;
-        static std::function<void()> s_onSave;
-        static std::function<void()> s_onDontSave;
-        static std::function<void()> s_onCancel;
+        static thread_local uint64_t s_windowId;
+        static thread_local std::function<void()> s_onSave;
+        static thread_local std::function<void()> s_onDontSave;
+        static thread_local std::function<void()> s_onCancel;
     };
     
 }} // namespace gxos::dialogs

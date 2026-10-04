@@ -15,29 +15,39 @@ namespace gxos { namespace dialogs {
 
 using namespace gxos::gui;
 
-uint64_t OpenDialog::s_windowId = 0;
-std::string OpenDialog::s_currentPath;
-std::vector<VfsEntryInfo> OpenDialog::s_entries;
-int OpenDialog::s_selectedIndex = 0;
-int OpenDialog::s_scrollOffset = 0;
-std::function<void(const std::string&)> OpenDialog::s_onOpen;
-bool OpenDialog::s_done = false;
-int OpenDialog::s_lastKeyCode = 0;
-bool OpenDialog::s_keyDown = false;
-
-// Static storage for launch parameters
-static std::string s_launchPath;
-static std::function<void(const std::string&)> s_launchOnOpen;
+thread_local uint64_t OpenDialog::s_windowId = 0;
+thread_local std::string OpenDialog::s_currentPath;
+thread_local std::vector<VfsEntryInfo> OpenDialog::s_entries;
+thread_local int OpenDialog::s_selectedIndex = 0;
+thread_local int OpenDialog::s_scrollOffset = 0;
+thread_local std::function<void(const std::string&)> OpenDialog::s_onOpen;
+thread_local bool OpenDialog::s_done = false;
+thread_local int OpenDialog::s_lastKeyCode = 0;
+thread_local bool OpenDialog::s_keyDown = false;
 
 void OpenDialog::Show(int /*ownerX*/, int /*ownerY*/,
                       const std::string& startPath,
-                      std::function<void(const std::string&)> onOpen) {
-    s_launchPath = startPath;
-    s_launchOnOpen = onOpen;
-    s_done = false;
-    s_lastKeyCode = 0;
-    s_keyDown = false;
-    ProcessSpec spec{"OpenDialog", &OpenDialog::main};
+                      std::function<void(const std::string&)> onOpen,
+                      std::function<void()> onClosed) {
+    ProcessSpec spec{"OpenDialog", [startPath, onOpen = std::move(onOpen), onClosed = std::move(onClosed)](int argc, char** argv) mutable {
+        s_windowId = 0;
+        s_currentPath = startPath.empty() ? "/" : startPath;
+        s_entries.clear();
+        s_selectedIndex = 0;
+        s_scrollOffset = 0;
+        s_onOpen = std::move(onOpen);
+        s_done = false;
+        s_lastKeyCode = 0;
+        s_keyDown = false;
+
+        const int result = main(argc, argv);
+        if (onClosed) onClosed();
+        s_onOpen = {};
+        s_entries.clear();
+        s_currentPath.clear();
+        s_windowId = 0;
+        return result;
+    }};
     spec.appId = "gxos.dialog.opendialog";
     ProcessTable::spawn(spec, {});
 }
@@ -45,9 +55,6 @@ void OpenDialog::Show(int /*ownerX*/, int /*ownerY*/,
 int OpenDialog::main(int /*argc*/, char** /*argv*/) {
     Logger::write(LogLevel::Info, "OpenDialog starting");
 
-    s_onOpen = s_launchOnOpen;
-    s_currentPath = s_launchPath;
-    if (s_currentPath.empty()) s_currentPath = "/";
     s_selectedIndex = 0;
     s_scrollOffset = 0;
 
@@ -81,6 +88,12 @@ int OpenDialog::main(int /*argc*/, char** /*argv*/) {
                 int keyCode = 0;
                 try { keyCode = std::stoi(payload); } catch (...) {}
                 handleKeyPress(keyCode);
+            }
+            if (ev.type == static_cast<uint32_t>(MsgType::MT_Close)) {
+                std::string payload(ev.data.begin(), ev.data.end());
+                try {
+                    if (std::stoull(payload) == s_windowId) s_done = true;
+                } catch (...) {}
             }
             if (ev.type == static_cast<uint32_t>(MsgType::MT_WidgetEvt)) {
                 std::string payload(ev.data.begin(), ev.data.end());

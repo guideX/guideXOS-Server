@@ -20,7 +20,8 @@ namespace gxos { namespace dialogs {
         /// @param onOpen Callback invoked with full file path when Open is clicked
         static void Show(int ownerX, int ownerY,
                          const std::string& startPath,
-                         std::function<void(const std::string&)> onOpen);
+                         std::function<void(const std::string&)> onOpen,
+                         std::function<void()> onClosed = {});
 
     private:
         static int main(int argc, char** argv);
@@ -38,15 +39,15 @@ namespace gxos { namespace dialogs {
         static void redraw();
 
         // State
-        static uint64_t s_windowId;
-        static std::string s_currentPath;
-        static std::vector<VfsEntryInfo> s_entries;
-        static int s_selectedIndex;
-        static int s_scrollOffset;
-        static std::function<void(const std::string&)> s_onOpen;
-        static bool s_done;
-        static int s_lastKeyCode;
-        static bool s_keyDown;
+        static thread_local uint64_t s_windowId;
+        static thread_local std::string s_currentPath;
+        static thread_local std::vector<VfsEntryInfo> s_entries;
+        static thread_local int s_selectedIndex;
+        static thread_local int s_scrollOffset;
+        static thread_local std::function<void(const std::string&)> s_onOpen;
+        static thread_local bool s_done;
+        static thread_local int s_lastKeyCode;
+        static thread_local bool s_keyDown;
 
         // Layout
         static constexpr int kDialogW = 440;

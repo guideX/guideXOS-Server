@@ -5,6 +5,11 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <atomic>
+#include <deque>
+#include <functional>
+#include <mutex>
+#include <memory>
 
 namespace gxos { namespace apps {
     
@@ -25,6 +30,16 @@ namespace gxos { namespace apps {
         static uint64_t LaunchWithActivation(const AppActivationContext& activation);
         
     private:
+        enum class DialogResultKind { OpenPath, SavePath, SavePathAndClose };
+        struct DialogResult {
+            DialogResultKind kind;
+            std::string path;
+        };
+        struct DialogResultQueue {
+            std::mutex mutex;
+            std::deque<DialogResult> pending;
+        };
+
         // Main entry point for Notepad process
         static int main(int argc, char** argv);
         int run(int argc, char** argv);
@@ -68,10 +83,14 @@ namespace gxos { namespace apps {
         void newFile();
         void openFile();         // Load current s_filePath
         void openFileDialog();   // Show Open dialog to pick file
-        void loadFile(const std::string& path);  // Load specific file
+        bool loadFile(const std::string& path);  // Load specific file
         void saveFile();
         void saveFileAs();
         void closeWithPrompt();
+        std::function<void()> modalDialogCompletion();
+        static void enqueueDialogResult(const std::shared_ptr<DialogResultQueue>& queue,
+                                        DialogResultKind kind,
+                                        const std::string& path);
         
         // UI operations
         void toggleWrap();
@@ -121,9 +140,10 @@ namespace gxos { namespace apps {
         bool s_capsLockOn;
         int s_lastKeyCode;
         bool s_keyDown;
-        bool s_pendingClose;
-        int s_pendingModalLaunches;
-        std::vector<uint64_t> s_modalDialogWindowIds;
+        std::atomic<bool> s_pendingClose;
+        std::atomic<int> s_closePromptResult;
+        std::shared_ptr<std::atomic<int>> s_activeModalDialogs;
+        std::shared_ptr<DialogResultQueue> s_dialogResults;
         
         // Context menu state
         bool s_contextMenuVisible;

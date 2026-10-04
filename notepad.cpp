@@ -30,6 +30,10 @@ namespace gxos { namespace apps {
         constexpr int kEditorVisibleLines = kEditorHeight / kEditorLineHeight;
         constexpr int kEditorMaxDisplayCols = 100;
         constexpr int kStatusY = kEditorY + kEditorHeight + 8;
+        constexpr int kClosePromptNone = 0;
+        constexpr int kClosePromptSave = 1;
+        constexpr int kClosePromptDiscard = 2;
+        constexpr int kClosePromptCancel = 3;
 
         uint32_t packRgb(uint8_t r, uint8_t g, uint8_t b) {
             return (0xFFu << 24) | (static_cast<uint32_t>(r) << 16) | (static_cast<uint32_t>(g) << 8) | static_cast<uint32_t>(b);
@@ -216,11 +220,12 @@ namespace gxos { namespace apps {
             s_capsLockOn = false;
             s_keyDown = false;
             s_lastKeyCode = 0;
-            s_pendingClose = false;
+            s_pendingClose.store(false, std::memory_order_release);
+            s_closePromptResult.store(kClosePromptNone, std::memory_order_release);
             s_undoStack.clear();
             s_redoStack.clear();
-            s_pendingModalLaunches = 0;
-            s_modalDialogWindowIds.clear();
+            s_activeModalDialogs = std::make_shared<std::atomic<int>>(0);
+            s_dialogResults = std::make_shared<DialogResultQueue>();
             s_fileMenuVisible = false;
             s_fileMenuX = 4;
             s_fileMenuY = 28;
@@ -270,6 +275,62 @@ namespace gxos { namespace apps {
             // Main event loop
             bool running = true;
             while (running) {
+                std::deque<DialogResult> dialogResults;
+                if (s_dialogResults) {
+                    std::lock_guard<std::mutex> lock(s_dialogResults->mutex);
+                    dialogResults.swap(s_dialogResults->pending);
+                }
+                for (const DialogResult& result : dialogResults) {
+                    if (result.kind == DialogResultKind::OpenPath) {
+                        if (!loadFile(result.path)) {
+                            Logger::write(LogLevel::Warn, "Notepad: Open dialog selected a file that could not be loaded");
+                        }
+                    } else {
+                        s_filePath = result.path;
+                        saveFile();
+                        if (result.kind == DialogResultKind::SavePathAndClose) {
+                            s_pendingClose.store(true, std::memory_order_release);
+                        }
+                    }
+                }
+
+                const int closePromptResult = s_closePromptResult.exchange(kClosePromptNone, std::memory_order_acq_rel);
+                if (closePromptResult == kClosePromptSave) {
+                    if (s_filePath.empty()) {
+                        auto modalClosed = modalDialogCompletion();
+                        const auto dialogResults = s_dialogResults;
+                        SaveDialog::Show(100, 100, "data/", "untitled.txt",
+                            [dialogResults](const std::string& path) {
+                                enqueueDialogResult(dialogResults, DialogResultKind::SavePathAndClose, path);
+                            },
+                            std::move(modalClosed)
+                        );
+                    } else {
+                        saveFile();
+                        s_pendingClose.store(true, std::memory_order_release);
+                    }
+                } else if (closePromptResult == kClosePromptDiscard) {
+                    s_pendingClose.store(true, std::memory_order_release);
+                } else if (closePromptResult == kClosePromptCancel) {
+                    Logger::write(LogLevel::Info, "Notepad: Close prompt cancelled");
+                    // The compositor has already removed the window that received MT_Close.
+                    // Recreate it so Cancel preserves the current dirty document and editor state.
+                    s_windowId = 0;
+                    ipc::Message createMsg;
+                    createMsg.type = static_cast<uint32_t>(MsgType::MT_Create);
+                    std::string title = s_filePath.empty() ? "Untitled" : s_filePath;
+                    if (s_modified) title += "*";
+                    title += " - Notepad";
+                    const std::string createPayload = title + "|640|480";
+                    createMsg.data.assign(createPayload.begin(), createPayload.end());
+                    ipc::Bus::publish("gui.input", std::move(createMsg), false);
+                }
+                if (s_pendingClose.load(std::memory_order_acquire)) {
+                    Logger::write(LogLevel::Info, "Notepad: Closing after save changes decision");
+                    running = false;
+                    break;
+                }
+
                 ipc::Message msg;
                 if (ipc::Bus::pop(kGuiChanOut, msg, 100)) {
                     MsgType msgType = (MsgType)msg.type;
@@ -318,14 +379,18 @@ namespace gxos { namespace apps {
                                         if (!pendingDocumentPath.empty()) {
                                             const std::string documentPath = pendingDocumentPath;
                                             pendingDocumentPath.clear();
-                                            loadFile(documentPath);
+                                            if (!loadFile(documentPath)) {
+                                                Logger::write(LogLevel::Warn, "Notepad: Document activation failed; closing unowned editor window");
+                                                ipc::Message closeMsg;
+                                                closeMsg.type = static_cast<uint32_t>(MsgType::MT_Close);
+                                                const std::string closePayload = std::to_string(s_windowId);
+                                                closeMsg.data.assign(closePayload.begin(), closePayload.end());
+                                                ipc::Bus::publish("gui.input", std::move(closeMsg), false);
+                                                running = false;
+                                            } else {
+                                                // loadFile schedules a title refresh after the next compositor poll.
+                                            }
                                         }
-                                    } else if (s_pendingModalLaunches > 0 && createdId != s_windowId) {
-                                        s_modalDialogWindowIds.push_back(createdId);
-                                        s_pendingModalLaunches--;
-                                        s_keyDown = false;
-                                        s_lastKeyCode = 0;
-                                        Logger::write(LogLevel::Info, std::string("Notepad: Registered modal dialog window ") + std::to_string(createdId));
                                     }
                                 } catch (const std::exception& e) {
                                     Logger::write(LogLevel::Error, std::string("Notepad: Failed to parse window ID: ") + e.what() + " payload: " + payload);
@@ -343,7 +408,7 @@ namespace gxos { namespace apps {
                                 try {
                                     uint64_t closedId = std::stoull(payload);
                                     if (closedId == s_windowId) {
-                                        if (s_modified && !s_pendingClose) {
+                                        if (s_modified && !s_pendingClose.load(std::memory_order_acquire)) {
                                             // Has unsaved changes - show dialog
                                             Logger::write(LogLevel::Info, "Notepad: Unsaved changes - showing dialog...");
                                             closeWithPrompt();
@@ -351,14 +416,6 @@ namespace gxos { namespace apps {
                                             // No unsaved changes or already confirmed - close now
                                             Logger::write(LogLevel::Info, "Notepad closing...");
                                             running = false;
-                                        }
-                                    } else {
-                                        auto it = std::find(s_modalDialogWindowIds.begin(), s_modalDialogWindowIds.end(), closedId);
-                                        if (it != s_modalDialogWindowIds.end()) {
-                                            s_modalDialogWindowIds.erase(it);
-                                            s_keyDown = false;
-                                            s_lastKeyCode = 0;
-                                            Logger::write(LogLevel::Info, std::string("Notepad: Modal dialog closed: ") + std::to_string(closedId));
                                         }
                                     }
                                 } catch (const std::exception& e) {
@@ -369,7 +426,7 @@ namespace gxos { namespace apps {
                         }
                         
                         case MsgType::MT_InputKey: {
-                            if (s_pendingModalLaunches > 0 || !s_modalDialogWindowIds.empty()) {
+                            if (s_activeModalDialogs && s_activeModalDialogs->load(std::memory_order_acquire) > 0) {
                                 break;
                             }
 
@@ -379,7 +436,9 @@ namespace gxos { namespace apps {
                             if (sep != std::string::npos && sep > 0) {
                                 try {
                                     int keyCode = std::stoi(payload.substr(0, sep));
-                                    std::string action = payload.substr(sep + 1);
+                                    const std::string keyFields = payload.substr(sep + 1);
+                                    const size_t actionEnd = keyFields.find('|');
+                                    const std::string action = keyFields.substr(0, actionEnd);
                                     
                                     // Key debouncing - ignore repeated key down events
                                     if (action == "down") {
@@ -572,7 +631,7 @@ namespace gxos { namespace apps {
                         }
                         
                         case MsgType::MT_WidgetEvt: {
-                            if (s_pendingModalLaunches > 0 || !s_modalDialogWindowIds.empty()) {
+                            if (s_activeModalDialogs && s_activeModalDialogs->load(std::memory_order_acquire) > 0) {
                                 break;
                             }
 
@@ -615,7 +674,7 @@ namespace gxos { namespace apps {
                         }
                         
                         case MsgType::MT_InputMouse: {
-                            if (s_pendingModalLaunches > 0 || !s_modalDialogWindowIds.empty()) {
+                            if (s_activeModalDialogs && s_activeModalDialogs->load(std::memory_order_acquire) > 0) {
                                 break;
                             }
 
@@ -1082,38 +1141,39 @@ namespace gxos { namespace apps {
         Logger::write(LogLevel::Info, "Notepad: Opening file dialog...");
         int ownerX = 100;
         int ownerY = 100;
-        s_pendingModalLaunches++;
         s_keyDown = false;
         s_lastKeyCode = 0;
+        const auto dialogResults = s_dialogResults;
         OpenDialog::Show(ownerX, ownerY, "data/",
-            [this](const std::string& path) {
-                loadFile(path);
-            }
+            [dialogResults](const std::string& path) {
+                enqueueDialogResult(dialogResults, DialogResultKind::OpenPath, path);
+            },
+            modalDialogCompletion()
         );
     }
     
-    void Notepad::loadFile(const std::string& path) {
-        if (path.empty()) return;
+    bool Notepad::loadFile(const std::string& path) {
+        if (path.empty()) return false;
         
         std::vector<uint8_t> data;
 #ifndef _WIN32
         kernel::vfs::FileInfo info{};
         if (kernel::vfs::stat(path.c_str(), &info) != kernel::vfs::VFS_OK || info.type == kernel::vfs::FILE_TYPE_DIRECTORY) {
             Logger::write(LogLevel::Error, std::string("Notepad: Failed to stat file: ") + path);
-            return;
+            return false;
         }
 
         data.resize(static_cast<size_t>(info.size));
         int32_t bytesRead = kernel::vfs::read_file(path.c_str(), data.data(), static_cast<uint32_t>(data.size()));
         if (bytesRead < 0) {
             Logger::write(LogLevel::Error, std::string("Notepad: Failed to read file: ") + path);
-            return;
+            return false;
         }
         data.resize(static_cast<size_t>(bytesRead));
 #else
         if (!Vfs::instance().readFile(path, data)) {
             Logger::write(LogLevel::Error, std::string("Notepad: Failed to read file: ") + path);
-            return;
+            return false;
         }
 #endif
         
@@ -1150,6 +1210,7 @@ namespace gxos { namespace apps {
         updateTitle();
         redrawContent();
         updateStatusBar();
+        return true;
     }
     
     void Notepad::saveFile() {
@@ -1201,7 +1262,6 @@ namespace gxos { namespace apps {
         // TODO: Get window position - for now use defaults
         int ownerX = 100;
         int ownerY = 100;
-        s_pendingModalLaunches++;
         s_keyDown = false;
         s_lastKeyCode = 0;
         
@@ -1216,12 +1276,12 @@ namespace gxos { namespace apps {
             }
         }
         
+        const auto dialogResults = s_dialogResults;
         SaveDialog::Show(ownerX, ownerY, "drives", fileName,
-            [this](const std::string& path) {
-                // Save callback
-                s_filePath = path;
-                saveFile();
-            }
+            [dialogResults](const std::string& path) {
+                enqueueDialogResult(dialogResults, DialogResultKind::SavePath, path);
+            },
+            modalDialogCompletion()
         );
     }
     
@@ -1232,7 +1292,6 @@ namespace gxos { namespace apps {
         // TODO: Get window position - for now use defaults
         int ownerX = 100;
         int ownerY = 100;
-        s_pendingModalLaunches++;
         s_keyDown = false;
         s_lastKeyCode = 0;
         
@@ -1240,37 +1299,42 @@ namespace gxos { namespace apps {
             [this]() {
                 // Save clicked
                 Logger::write(LogLevel::Info, "SaveChangesDialog: User chose Save");
-                if (s_filePath.empty()) {
-                    // Need to show SaveDialog first
-                    s_pendingModalLaunches++;
-                    SaveDialog::Show(100, 100, "data/", "untitled.txt",
-                        [this](const std::string& path) {
-                            s_filePath = path;
-                            saveFile();
-                            s_pendingClose = true;
-                            // Window will close after this
-                        }
-                    );
-                } else {
-                    // Save to existing file
-                    saveFile();
-                    s_pendingClose = true;
-                    // Window will close after this
-                }
+                s_closePromptResult.store(kClosePromptSave, std::memory_order_release);
             },
             [this]() {
                 // Don't Save clicked
                 Logger::write(LogLevel::Info, "SaveChangesDialog: User chose Don't Save");
-                s_pendingClose = true;
-                s_modified = false;  // Clear modified flag so close proceeds
-                // Window will close after this
+                s_closePromptResult.store(kClosePromptDiscard, std::memory_order_release);
             },
             [this]() {
                 // Cancel clicked
                 Logger::write(LogLevel::Info, "SaveChangesDialog: User chose Cancel");
-                // Do nothing - window stays open
-            }
+                s_closePromptResult.store(kClosePromptCancel, std::memory_order_release);
+            },
+            modalDialogCompletion()
         );
+    }
+
+    std::function<void()> Notepad::modalDialogCompletion() {
+        if (!s_activeModalDialogs) {
+            s_activeModalDialogs = std::make_shared<std::atomic<int>>(0);
+        }
+        const auto activeDialogs = s_activeModalDialogs;
+        activeDialogs->fetch_add(1, std::memory_order_acq_rel);
+        return [activeDialogs]() {
+            int active = activeDialogs->load(std::memory_order_acquire);
+            while (active > 0 && !activeDialogs->compare_exchange_weak(
+                active, active - 1, std::memory_order_acq_rel, std::memory_order_acquire)) {
+            }
+        };
+    }
+
+    void Notepad::enqueueDialogResult(const std::shared_ptr<DialogResultQueue>& queue,
+                                      DialogResultKind kind,
+                                      const std::string& path) {
+        if (!queue) return;
+        std::lock_guard<std::mutex> lock(queue->mutex);
+        queue->pending.push_back(DialogResult{kind, path});
     }
     
     void Notepad::updateTitle() {
@@ -1396,6 +1460,11 @@ namespace gxos { namespace apps {
         drawContextMenu();
         drawFileMenu();
         drawEditMenu();
+
+        // A clear-text message coalesces queued presentation updates for this
+        // window, including MT_SetTitle. Reapply the current title after the
+        // redraw so the compositor cannot retain a stale document/dirty title.
+        updateTitle();
     }
     
     void Notepad::updateStatusBar() {

@@ -8,21 +8,31 @@ namespace gxos { namespace dialogs {
     using namespace gxos::gui;
     
     // Static member initialization
-    uint64_t SaveChangesDialog::s_windowId = 0;
-    std::function<void()> SaveChangesDialog::s_onSave = nullptr;
-    std::function<void()> SaveChangesDialog::s_onDontSave = nullptr;
-    std::function<void()> SaveChangesDialog::s_onCancel = nullptr;
+    thread_local uint64_t SaveChangesDialog::s_windowId = 0;
+    thread_local std::function<void()> SaveChangesDialog::s_onSave = nullptr;
+    thread_local std::function<void()> SaveChangesDialog::s_onDontSave = nullptr;
+    thread_local std::function<void()> SaveChangesDialog::s_onCancel = nullptr;
     
     void SaveChangesDialog::Show(int ownerX, int ownerY,
                                  std::function<void()> onSave,
                                  std::function<void()> onDontSave,
-                                 std::function<void()> onCancel) {
-        s_onSave = onSave;
-        s_onDontSave = onDontSave;
-        s_onCancel = onCancel;
-        
+                                 std::function<void()> onCancel,
+                                 std::function<void()> onClosed) {
         // Launch dialog as a new process
-        ProcessSpec spec{"save_changes_dialog", SaveChangesDialog::main};
+        ProcessSpec spec{"save_changes_dialog", [onSave = std::move(onSave), onDontSave = std::move(onDontSave), onCancel = std::move(onCancel), onClosed = std::move(onClosed)](int argc, char** argv) mutable {
+            s_windowId = 0;
+            s_onSave = std::move(onSave);
+            s_onDontSave = std::move(onDontSave);
+            s_onCancel = std::move(onCancel);
+
+            const int result = main(argc, argv);
+            if (onClosed) onClosed();
+            s_onSave = {};
+            s_onDontSave = {};
+            s_onCancel = {};
+            s_windowId = 0;
+            return result;
+        }};
         spec.appId = "gxos.dialog.savechangesdialog";
         std::string xStr = std::to_string(ownerX + 40);
         std::string yStr = std::to_string(ownerY + 40);
@@ -50,7 +60,10 @@ namespace gxos { namespace dialogs {
             ipc::Message createMsg;
             createMsg.type = (uint32_t)MsgType::MT_Create;
             std::ostringstream oss;
-            oss << "Unsaved Changes|380|160|" << x << "|" << y;
+            // The button row ends at y=148 inside the client area. Include the
+            // title bar and padding in the outer bounds so those controls are
+            // also reachable by compositor hit testing.
+            oss << "Unsaved Changes|380|200|" << x << "|" << y;
             std::string payload = oss.str();
             createMsg.data.assign(payload.begin(), payload.end());
             ipc::Bus::publish(kGuiChanIn, std::move(createMsg), false);
@@ -85,7 +98,7 @@ namespace gxos { namespace dialogs {
                                     };
                                     
                                     // Add three buttons at bottom
-                                    int btnY = 120;  // Near bottom of 160px window
+                                    int btnY = 120;  // Near bottom of 200px window
                                     addButton(1, 10, btnY, 90, 28, "Save");
                                     addButton(2, 108, btnY, 110, 28, "Don't Save");
                                     addButton(3, 226, btnY, 90, 28, "Cancel");
@@ -162,6 +175,14 @@ namespace gxos { namespace dialogs {
                             break;
                     }
                 }
+            }
+
+            if (s_windowId != 0) {
+                ipc::Message closeMsg;
+                closeMsg.type = static_cast<uint32_t>(MsgType::MT_Close);
+                const std::string closePayload = std::to_string(s_windowId);
+                closeMsg.data.assign(closePayload.begin(), closePayload.end());
+                ipc::Bus::publish(kGuiChanIn, std::move(closeMsg), false);
             }
             
             Logger::write(LogLevel::Info, "SaveChangesDialog stopped");

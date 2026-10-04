@@ -14,32 +14,46 @@ namespace gxos { namespace dialogs {
     using namespace gxos::gui;
     
     // Static member initialization
-    uint64_t SaveDialog::s_windowId = 0;
-    std::string SaveDialog::s_currentPath = "";
-    std::string SaveDialog::s_fileName = "";
-    std::vector<VfsEntryInfo> SaveDialog::s_entries;
-    int SaveDialog::s_selectedIndex = 0;
-    int SaveDialog::s_scrollOffset = 0;
-    bool SaveDialog::s_fileNameFocus = true;
-    bool SaveDialog::s_showingDrives = false;
-    std::function<void(const std::string&)> SaveDialog::s_onSave = nullptr;
-    int SaveDialog::s_lastKeyCode = 0;
-    bool SaveDialog::s_keyDown = false;
+    thread_local uint64_t SaveDialog::s_windowId = 0;
+    thread_local std::string SaveDialog::s_currentPath = "";
+    thread_local std::string SaveDialog::s_fileName = "";
+    thread_local std::vector<VfsEntryInfo> SaveDialog::s_entries;
+    thread_local int SaveDialog::s_selectedIndex = 0;
+    thread_local int SaveDialog::s_scrollOffset = 0;
+    thread_local bool SaveDialog::s_fileNameFocus = true;
+    thread_local bool SaveDialog::s_showingDrives = false;
+    thread_local std::function<void(const std::string&)> SaveDialog::s_onSave = nullptr;
+    thread_local int SaveDialog::s_lastKeyCode = 0;
+    thread_local bool SaveDialog::s_keyDown = false;
     
     void SaveDialog::Show(int ownerX, int ownerY,
                          const std::string& startPath,
                          const std::string& defaultFileName,
-                         std::function<void(const std::string&)> onSave) {
-        s_currentPath = startPath;
-        s_fileName = defaultFileName.empty() ? "untitled.txt" : defaultFileName;
-        s_onSave = onSave;
-        s_fileNameFocus = true;
-        s_showingDrives = s_currentPath.empty() || s_currentPath == "drives";
-        s_selectedIndex = 0;
-        s_scrollOffset = 0;
-        
+                         std::function<void(const std::string&)> onSave,
+                         std::function<void()> onClosed) {
         // Launch dialog as a new process
-        ProcessSpec spec{"save_dialog", SaveDialog::main};
+        ProcessSpec spec{"save_dialog", [startPath, defaultFileName, onSave = std::move(onSave), onClosed = std::move(onClosed)](int argc, char** argv) mutable {
+            s_windowId = 0;
+            s_currentPath = startPath;
+            s_fileName = defaultFileName.empty() ? "untitled.txt" : defaultFileName;
+            s_entries.clear();
+            s_selectedIndex = 0;
+            s_scrollOffset = 0;
+            s_fileNameFocus = true;
+            s_showingDrives = s_currentPath.empty() || s_currentPath == "drives";
+            s_onSave = std::move(onSave);
+            s_lastKeyCode = 0;
+            s_keyDown = false;
+
+            const int result = main(argc, argv);
+            if (onClosed) onClosed();
+            s_onSave = {};
+            s_entries.clear();
+            s_currentPath.clear();
+            s_fileName.clear();
+            s_windowId = 0;
+            return result;
+        }};
         spec.appId = "gxos.dialog.savedialog";
         std::string xStr = std::to_string(ownerX + 40);
         std::string yStr = std::to_string(ownerY + 40);
