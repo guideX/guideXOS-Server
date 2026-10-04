@@ -6358,3 +6358,69 @@ pushed; generated artifacts are excluded. The recommended JS62 direction is
 to keep selector grammar bounded and separately review any proposal for inner
 selector lists or a real specificity/cascade model. JS61 makes no specificity
 or cascade claim.
+
+### JS62 relative selector evaluation foundation (2026-10-04)
+
+JS62 adds an internal `NavigatorScriptRelativeSelectorRelation` and a private
+`selectorRelativeElementMatchResult()` helper. It accepts a current-generation
+Element handle, one relation, a pre-parsed `NavigatorScriptSimpleSelectorCoreDescriptor`,
+and existing selector storage. It delegates target matching to
+`selectorCoreElementMatchResult()`; traversal does not parse selector text,
+allocate, cache results, or create a second tree. The helper is not connected
+to the JavaScript parser, Element methods, or selector query API. `:has()` and
+relative arguments such as `>`, `+`, and `~` remain unsupported, and
+specificity/cascade behavior remains unmodeled.
+
+The relation rules are:
+
+* `Descendant` examines every represented structural Element except the anchor
+  and follows each candidate's `parentSerial` chain until it reaches the
+  anchor, a parentless root, or the document node bound. The anchor is strictly
+  excluded as a target.
+* `Child` scans the structural vector and accepts only Elements whose direct
+  `parentSerial` equals the anchor serial.
+* `AdjacentSibling` and `GeneralSibling` scan forward from the anchor's vector
+  position, accepting only Elements with the same nonzero structural parent.
+  The adjacent relation stops at the first following same-parent Element;
+  general sibling continues through those following same-parent Elements.
+  Earlier Elements, descendants, and Elements under other parents cannot
+  satisfy either relation.
+
+The existing `WebDocument::structuralElements` vector, serials, and
+`parentSerial` remain authoritative. Text, comments, layout, and form-owner
+metadata are not consulted. Hidden Elements remain eligible when present in
+that vector. A parentless anchor can have children; it has no sibling relation
+without a nonzero shared parent. Root and leaf behavior follows directly from
+these rules. Anchor handles with an old generation, wrong host kind, missing
+serial, or over-capacity document fail closed. Anchor ancestry is checked to a
+parentless root before traversal. Missing parents, self-parent links, and
+cycles are bounded by the structural node limit and return `Invalid`.
+
+Traversal loops cap at `min(limits.maxDocumentNodes,
+structuralElements.size())`, and the document is rejected if it exceeds either
+the configured or global 1024-node cap. Descendant relation examines at most
+1024 candidates and at most 1024 parent hops for each candidate. Each parent
+resolution uses the existing bounded serial lookup over at most 1024 records;
+therefore its conservative worst-case structural lookup bound is O(N^3), with
+the ancestry walk alone making at most two 1024-record lookups per candidate
+hop (2,147,483,648 record comparisons for the 1024-node cap), before
+anchor/candidate validation and shared-pseudo matcher work.
+Child and sibling relation scans examine at most 1024 vector
+entries; their serial validation and shared matcher retain their own existing
+bounds. The helper adds no persistent bytes to selector descriptors,
+collections, document records, or registries, and adds no fixed scratch array.
+This deliberately records the current conservative cost for future review
+before any `:has()` syntax is considered.
+
+The focused JS62 test is `tests/navigator_javascript_js62_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js62.ps1`. It proves descendant versus
+child, forward adjacent and general sibling matches, stale-generation
+rejection, and unsupported public `:has()`. The JS61 regression remains
+2,077/2,077. Broader structural corruption, mutation/state pseudo cross-checks,
+near-capacity stress, all older JS focused lanes, hosted checks, the production
+build, and kernel/QEMU lanes are not claimed by this focused JS62 run.
+
+JS63 may map a carefully bounded single-relative-selector `:has()` grammar to
+this primitive only after reducing or explicitly accepting the descendant
+lookup bound and adding parser-facing malformed-input, mutation, corruption,
+and hosted coverage. No such public syntax is part of JS62.

@@ -3569,6 +3569,121 @@ NavigatorScriptHostAdapter::selectorCoreElementMatchResult(
 }
 
 NavigatorScriptSelectorMatchResult
+NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
+    const HostObjectReference& anchor,
+    NavigatorScriptRelativeSelectorRelation relation,
+    const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
+    std::int16_t nthA, std::int16_t nthB,
+    const NavigatorScriptSelectorDescriptor& storage) const
+{
+    using MatchResult = NavigatorScriptSelectorMatchResult;
+    if (document_ == nullptr || !anchor.valid() ||
+        anchor.kind != kNavigatorElementHostKind ||
+        anchor.generation != generation_ ||
+        document_->structuralElements.size() > limits_.maxDocumentNodes ||
+        document_->structuralElements.size() > kNavigatorScriptMaxDocumentNodes ||
+        !selector.valid)
+        return MatchResult::Invalid;
+
+    const gxos::web::HtmlElementRef* anchorElement =
+        findElement(anchor.instanceId);
+    if (anchorElement == nullptr || anchorElement->serial == 0u)
+        return MatchResult::Invalid;
+    const std::size_t count = document_->structuralElements.size();
+    std::size_t anchorPosition = count;
+    for (std::size_t position = 0u; position < count; ++position) {
+        if (&document_->structuralElements[position] == anchorElement) {
+            anchorPosition = position;
+            break;
+        }
+    }
+    if (anchorPosition == count) return MatchResult::Invalid;
+
+    // Validate the anchor's complete parent chain before using it as an
+    // authority boundary. The node cap bounds malformed cycles without
+    // recursion or scratch storage.
+    HostInstanceId anchorAncestor = anchor.instanceId;
+    bool reachedRoot = false;
+    for (std::size_t hop = 0u; hop < count; ++hop) {
+        HostInstanceId parentSerial = 0u;
+        if (!resolveStructuralParentSerial(anchorAncestor, parentSerial))
+            return MatchResult::Invalid;
+        if (parentSerial == 0u) {
+            reachedRoot = true;
+            break;
+        }
+        anchorAncestor = parentSerial;
+    }
+    if (!reachedRoot) return MatchResult::Invalid;
+
+    const auto candidateMatches = [&](
+        const gxos::web::HtmlElementRef& candidate) {
+        return selectorCoreElementMatchResult(candidate, selector, nthA,
+            nthB, storage, true);
+    };
+
+    if (relation == NavigatorScriptRelativeSelectorRelation::Descendant ||
+        relation == NavigatorScriptRelativeSelectorRelation::Child) {
+        for (std::size_t position = 0u; position < count; ++position) {
+            const gxos::web::HtmlElementRef& candidate =
+                document_->structuralElements[position];
+            if (candidate.serial == 0u || candidate.serial == anchor.instanceId)
+                continue;
+            if (findElement(candidate.serial) != &candidate)
+                return MatchResult::Invalid;
+            bool eligible = false;
+            if (relation == NavigatorScriptRelativeSelectorRelation::Child) {
+                HostInstanceId parentSerial = 0u;
+                if (!resolveStructuralParentSerial(candidate.serial,
+                        parentSerial)) return MatchResult::Invalid;
+                eligible = parentSerial == anchor.instanceId;
+            } else {
+                HostInstanceId currentSerial = candidate.serial;
+                for (std::size_t hop = 0u; hop < count; ++hop) {
+                    HostInstanceId parentSerial = 0u;
+                    if (!resolveStructuralParentSerial(currentSerial,
+                            parentSerial)) return MatchResult::Invalid;
+                    if (parentSerial == 0u) break;
+                    if (parentSerial == anchor.instanceId) {
+                        eligible = true;
+                        break;
+                    }
+                    currentSerial = parentSerial;
+                    if (hop + 1u == count) return MatchResult::Invalid;
+                }
+            }
+            if (!eligible) continue;
+            const MatchResult matched = candidateMatches(candidate);
+            if (matched == MatchResult::Invalid) return MatchResult::Invalid;
+            if (matched == MatchResult::Match) return MatchResult::Match;
+        }
+        return MatchResult::NoMatch;
+    }
+
+    if (relation != NavigatorScriptRelativeSelectorRelation::AdjacentSibling &&
+        relation != NavigatorScriptRelativeSelectorRelation::GeneralSibling)
+        return MatchResult::Invalid;
+    HostInstanceId parentSerial = 0u;
+    if (!resolveStructuralParentSerial(anchor.instanceId, parentSerial) ||
+        parentSerial == 0u) return MatchResult::NoMatch;
+    for (std::size_t position = anchorPosition + 1u; position < count;
+            ++position) {
+        const gxos::web::HtmlElementRef& candidate =
+            document_->structuralElements[position];
+        if (candidate.serial == 0u || candidate.serial == anchor.instanceId ||
+            candidate.parentSerial != parentSerial) continue;
+        if (findElement(candidate.serial) != &candidate)
+            return MatchResult::Invalid;
+        const MatchResult matched = candidateMatches(candidate);
+        if (matched == MatchResult::Invalid) return MatchResult::Invalid;
+        if (matched == MatchResult::Match) return MatchResult::Match;
+        if (relation == NavigatorScriptRelativeSelectorRelation::AdjacentSibling)
+            return MatchResult::NoMatch;
+    }
+    return MatchResult::NoMatch;
+}
+
+NavigatorScriptSelectorMatchResult
 NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
     const gxos::web::HtmlElementRef& element,
     const NavigatorScriptSimpleSelectorDescriptor& selector,

@@ -179,6 +179,15 @@ enum class NavigatorScriptSelectorMatchResult : std::uint8_t {
     Match,
 };
 
+// Internal JS62 relation accepted by the bounded relative-selector evaluator.
+// It is intentionally not wired to selector text or a JavaScript host method.
+enum class NavigatorScriptRelativeSelectorRelation : std::uint8_t {
+    Descendant = 0u,
+    Child,
+    AdjacentSibling,
+    GeneralSibling,
+};
+
 struct NavigatorScriptSelectorMemberDescriptor {
     NavigatorScriptSelectorRelation relation =
         NavigatorScriptSelectorRelation::None;
@@ -300,6 +309,7 @@ public:
     void clearClickHandlers();
 
 private:
+    friend struct NavigatorScriptRelativeSelectorTestAccess;
     struct ClickHandlerRecord {
         HostInstanceId serial = 0;
         RuntimeFunctionId onclickFunction = kInvalidRuntimeFunctionId;
@@ -454,6 +464,12 @@ private:
         std::int16_t nthA, std::int16_t nthB,
         const NavigatorScriptSelectorDescriptor& storage,
         bool strictPseudoValidation = false) const;
+    NavigatorScriptSelectorMatchResult selectorRelativeElementMatchResult(
+        const HostObjectReference& anchor,
+        NavigatorScriptRelativeSelectorRelation relation,
+        const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
+        std::int16_t nthA, std::int16_t nthB,
+        const NavigatorScriptSelectorDescriptor& storage) const;
     NavigatorScriptSelectorMatchResult selectorSimpleElementMatchResult(
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSimpleSelectorDescriptor& selector,
