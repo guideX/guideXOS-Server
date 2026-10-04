@@ -58,9 +58,6 @@ namespace gxos { namespace apps {
         constexpr int kContextMenuItemH = 24;
         constexpr uint64_t kDoubleClickThresholdMs = 450;
 
-        uint64_t s_lastEntryClickTick = 0;
-        int s_lastEntryClickRow = -1;
-
         enum class ContextMenuAction {
             Open = 0,
             PinToDesktop = 1,
@@ -522,42 +519,6 @@ namespace gxos { namespace apps {
         };
     }
 
-    uint64_t FileExplorer::s_windowId = 0;
-    std::unique_ptr<IExplorerFileSystem> FileExplorer::s_fileSystem;
-    std::string FileExplorer::s_currentPath = "/";
-    std::vector<ExplorerFileEntry> FileExplorer::s_entries;
-    std::vector<ExplorerFileEntry> FileExplorer::s_roots;
-    std::vector<std::string> FileExplorer::s_backHistory;
-    std::vector<std::string> FileExplorer::s_forwardHistory;
-    int FileExplorer::s_selectedIndex = 0;
-    int FileExplorer::s_scrollOffset = 0;
-    int FileExplorer::s_hoveredIndex = -1;
-    bool FileExplorer::s_draggingFileListScrollbar = false;
-    int FileExplorer::s_fileListScrollbarDragStartY = 0;
-    int FileExplorer::s_fileListScrollbarDragStartOffsetRows = 0;
-    int FileExplorer::s_rootSelectedIndex = 0;
-    int FileExplorer::s_lastKeyCode = 0;
-    bool FileExplorer::s_keyDown = false;
-    bool FileExplorer::s_loading = false;
-    bool FileExplorer::s_hasMoreEntries = false;
-    std::string FileExplorer::s_status = "Ready";
-    int FileExplorer::s_promptMode = PromptNone;
-    std::string FileExplorer::s_promptTitle;
-    std::string FileExplorer::s_promptValue;
-    bool FileExplorer::s_showDeleteConfirmation = false;
-    std::string FileExplorer::s_deleteTargetPath;
-    bool FileExplorer::s_deleteTargetIsDirectory = false;
-    bool FileExplorer::s_contextMenuOpen = false;
-    bool FileExplorer::s_openWithSubmenuOpen = false;
-    int FileExplorer::s_contextMenuX = 0;
-    int FileExplorer::s_contextMenuY = 0;
-    int FileExplorer::s_contextMenuHover = -1;
-    int FileExplorer::s_openWithSubmenuHover = -1;
-    std::vector<int> FileExplorer::s_contextMenuActions;
-    FileExplorerOpenWithMenuSnapshot FileExplorer::s_contextMenuOpenWith;
-    std::string FileExplorer::s_contextMenuDestinationPath;
-    uint64_t FileExplorer::s_lastFileOperationGeneration = 0;
-
     uint64_t FileExplorer::Launch(const std::string& startPath) {
         ProcessSpec spec{"file_explorer", FileExplorer::main};
         spec.appId = "gxos.builtin.fileexplorer";
@@ -634,6 +595,11 @@ namespace gxos { namespace apps {
     }
 
     int FileExplorer::main(int argc, char** argv) {
+        FileExplorer explorer;
+        return explorer.run(argc, argv);
+    }
+
+    int FileExplorer::run(int argc, char** argv) {
         Logger::write(LogLevel::Info, "FileExplorer starting...");
 
         s_windowId = 0;
