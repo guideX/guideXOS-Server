@@ -1,6 +1,30 @@
 # Disk Manager Phase DM32 — Graphical Repair Qualification
 
-**Outcome B.** The first DM32 attempt is recorded below. The DM32 continuation fixed the visible Repair GPT confirmation warning overlap and repeated current-source storage/build qualification. It also cold-restarted the graphical fixture, which remained GPT Degraded, but could not complete a fresh real GUI Cancel/Confirm sequence because the cold boot did not restore the Disk Manager window and QMP PS/2 input could not reliably position the pointer. No graphical repair success or live Healthy refresh is claimed. Do not advance `.phase` or call DM32 closed.
+**Final outcome: A.** The earlier Outcome B attempts below are historical. The final continuation completed the current-source AHCI512 GUI Escape, actual Cancel, and actual Confirm flow; observed one production repair transaction, live Healthy refresh and action disappearance, retained target selection, cold-restart Healthy state, and independent metadata/canary verification. `.phase` advances from DM31→DM32 to DM32→DM33.
+
+### Updated-baseline continuation — 2026-10-05
+
+This continuation resumed after an earlier attempt stopped because its expected repository baseline was stale. The reconciled starting point is `25d60e927c1cf7490950d9f3c616dd33b99f00e3`, branch `DISK_MANAGER_IMPROVEMENTS`, with a clean worktree and `.phase` at `last_completed=DM31`, `next_expected=DM32`. Cached ahead/behind was `0/0`. A single normal fetch failed with `git@github.com: Permission denied (publickey)`; remote freshness is unknown. The current HEAD is a normal descendant of `4a3f934c`, `812b4ccd`, and `6b6f3d3e`, in that order, with no later DM32 Outcome A in repository history.
+
+The committed modal implementation was verified before qualification: desktop Escape is sent to an app with an active modal; Disk Manager then cancels/closes the dialog and consumes the event. Repair confirmation focus starts on Cancel; Tab cycles Cancel→Repair GPT→Cancel; Enter and Space dispatch through the regular widget click handler; and focused-button color is visible. Shift+Tab remains intentionally unimplemented. The source audit passed, but the runtime behavior was not accepted in this continuation.
+
+#### Current-source checks and fixture
+
+- `scripts/run-storage-manager-tests.ps1`: **978 checks, 0 failures**; USB trace classifier 7/7; verifier and fixture Python checks each 1/1.
+- `mingw32-make -C kernel ARCH=amd64 -j4`: passed for the production kernel.
+- `cmd /c build.bat`: passed; full captured output ends with `Build successful: guideXOSServer.exe` and exit code 0.
+- UEFI x64 Release: bootloader build passed. The script was run with `-SkipKernel` after the explicit production AMD64 kernel build; it warned that its ESP copy reused an existing kernel image.
+- `build.ps1 -Arch amd64`: failed at the known unrelated PacMan linker symbols `pacman_audio_load_resources(gx_app_context*)` and `pacman_audio_submit(void*, PacManSoundId)`. The three generated tracked PacMan objects it touched were restored. No Disk Manager-owned failure appeared.
+- The current-source AHCI512 DM30 runner passed both repair directions. Each reports 32 array sectors plus one header sector, 33 sectors / 16,896 bytes, and two Flushes, with partition data untouched. Both cold restarts reported Healthy with three entries and nine data canaries. Independent verification reported normalized GPT copies equal, metadata-only changed ranges, unchanged PMBR, disk GUID and partition identities/extents preserved. This is backend evidence, not GUI-confirm evidence.
+- A fresh disposable 600 MiB AHCI512 three-partition fixture under `out/dm32-qualification-20261005/` was independently verified Degraded, Primary authoritative, Backup array CRC invalid, with all three partition entries and canaries intact. No physical host media was attached.
+
+#### GUI attempt and open gates
+
+A temporary `GXOS_DM32_QEMU_GUI_AUTOLAUNCH` proof-only hook was added to `main.cpp`, built, and removed; it only called the normal `desktop::launch_app("DiskManager")` path after input initialization. The current-source guest serial reported `Disk Manager launch=PASS` and AHCI enumeration. However, this GUI-only build lacked the DM30 pre-registration pause marker, and the QEMU 11 QMP listener accepted a TCP connection but did not complete its protocol greeting. No media corruption was performed after registration, no usable GUI screenshot/input sequence was captured, and the guest was stopped without Repair activation. The temporary source file was restored byte-for-byte; the proof hook is not retained.
+
+Therefore Escape, zero-write/zero-Flush Escape, initial Cancel focus at runtime, Tab focus, actual Cancel activation, fresh reopen, actual Confirm activation, GUI→service telemetry, one-submit runtime behavior, live Healthy refresh, Repair disappearance, live selection retention, and repaired-image cold GUI restart remain unqualified. Existing deterministic mounted/conflict/unrecoverable/read-only and stale-action coverage remains applicable; NVMe remains gated (`NVME_WRITE_PROVEN=0`, `NVME_FLUSH_PROVEN=0`). 4Kn evidence was not rerun. `.phase` remains DM31→DM32; DM33 has not begun. No commit, phase advance, or push was made.
+
+Evidence and logs: ignored `out/dm32-qualification-20261005/`, especially `storage-suite-current-head.log`, `kernel-gui-proof-build.log`, `build-bat-final.log`, `uefi-x64-release-final.log`, `build-ps-amd64-current-head.log`, `gui-current.serial.log`, `gui-live-degraded-verification.json`, and `service-backend/manifest.json` plus repair/restart logs. Final worktree is clean; cached ahead/behind remains 0/0, with upstream freshness unknown.
 
 ## Gate and starting state
 
@@ -104,4 +128,50 @@ No fresh guest was run for this continuation. The existing DM32 proof launch was
 - `build.ps1 -Arch amd64`: failed at the known PacMan Native ELF link stage. No Disk Manager-owned error was reported. Three generated tracked PacMan object files touched by this attempt were restored to HEAD.
 - NVMe remains read-only: `NVME_WRITE_PROVEN=0`, `NVME_FLUSH_PROVEN=0`. No GPT geometry/backend code changed; no physical host media was used.
 
-Logs are retained under ignored `out/dm32-qualification-20261004/`: `storage-suite-escape-focus.log`, `build-bat-escape-focus.log`, `uefi-release-escape-focus.log`, and `build-ps-amd64-escape-focus.log`. The only tracked product changes in this continuation are the modal Escape routing and bounded modal keyboard focus implementation. `git diff --check` is clean. The final worktree still contains the preserved user `.gitignore` modification and `kernel/out/` plus the four intended production/documentation modifications; `.phase` remains unchanged. DM32 remains **Outcome B**. No commit or phase advance was made, and DM33 has not begun.
+Logs are retained under ignored `out/dm32-qualification-20261004/`: `storage-suite-escape-focus.log`, `build-bat-escape-focus.log`, `uefi-release-escape-focus.log`, and `build-ps-amd64-escape-focus.log`. This was the final Outcome B report at that point in history; it is superseded by the 2026-10-05 final continuation below.
+
+## Final continuation — QMP harness and real GUI repair acceptance — 2026-10-05
+
+### Gate and starting state
+
+- Repository: `D:\dev\guideXOSServer_DiskManagerImprovements`; branch `DISK_MANAGER_IMPROVEMENTS`.
+- Starting HEAD: `25d60e927c1cf7490950d9f3c616dd33b99f00e3`; the three expected DM32 commits were already in ancestry.
+- Starting `.phase`: `last_completed=DM31`, `next_expected=DM32`.
+- The starting worktree was already modified in `docs/DISK_MANAGER_PHASE_DM32_GRAPHICAL_REPAIR_CLOSURE.md` and `docs/DISKMANAGER_IMPLEMENTATION.md`; both edits were preserved and folded into this report. No `.gitignore` edit was present at start. Existing ignored `out/dm32-*` evidence was retained.
+- No DM32 Outcome A existed at the starting HEAD.
+
+### QMP harness and fixture
+
+The disposable QMP preflight passed on one persistent QMP connection: greeting, `qmp_capabilities`, `query-status`, `screendump`, harmless Tab input, a second status query, and a second screendump. The failed earlier helper used a PowerShell stream writer that emitted malformed JSON. The qualification harness was changed to explicit UTF-8 JSON-lines over a persistent Python socket, with event messages consumed before matching command responses. QEMU remained controllable across the full GUI sequence.
+
+The temporary current-source proof image used only a pre-registration pause and `desktop::launch_app("DiskManager")` after normal input initialization. It did not invoke Repair GPT, prepare confirmation state, call the storage service, or manipulate modal focus. The hook was removed from `kernel/core/main.cpp` before final builds. The guest booted from a healthy fixture, paused before AHCI registration, then the host corrupted exactly one byte in the Backup entry array and independently verified the live image as Degraded before resuming. Evidence records valid PMBR, disk GUID `a209d030-6e35-41f0-a030-d15c05f13030`, Primary authority, Backup array CRC invalid/header valid, three partition GUIDs/extents, two gaps, and nine canary hashes. No physical host media was used.
+
+Serial confirmed normal launch resolver dispatch to `gxos.builtin.diskmanager` and launch success. The first screen showed the boot disk; QMP Down selected `ahci0p1`, whose inventory showed GPT Degraded, three partitions, and Repair GPT. The real PS/2 path supplies Tab as character 9 and Enter as newline 10, while the previous handlers recognized only `shell::KEY_TAB` and key 13/32. Space was routed through `onKeyChar`, so it also needed to reach the existing widget handler. `kernel/core/kernel_apps.cpp` now normalizes these inputs and routes Space to the existing action handler; this is the only production change in this continuation.
+
+### Runtime acceptance
+
+- Repair GPT opened through real keyboard pane navigation and Enter. The modal had corrected non-overlapping text, Cancel visibly focused, and the expected target, damaged side, authoritative fingerprint, partition count, and unmounted state.
+- Escape closed only the modal. Disk Manager stayed open on the same selected AHCI disk; GPT remained Degraded and Repair GPT remained available. QEMU target block counters showed zero write operations/bytes and zero Flushes before and after Escape.
+- A fresh confirmation reopened. One Tab visibly moved focus Cancel→Repair GPT; a second Tab returned Repair GPT→Cancel. Enter activated the real focused Cancel widget. The parent window remained open with the same target Degraded and three partitions visible. Target writes and Flushes remained zero across Cancel.
+- A new confirmation opened with Cancel initially focused. One Tab visibly focused Repair GPT. One QMP Enter down/up pair activated that actual widget; no proof callback or direct service call was used.
+- The same-window GPT Repair Result showed 33 metadata sectors / 16,896 bytes and two Flushes, authoritative copy unchanged, partition identities preserved, and partition data untouched. QEMU target-device counters independently reported a delta of two writes, 16,896 bytes, two Flushes, and zero failed writes/Flushes. One Confirm key pair was sent; these exact single-transaction counters match the one repair operation.
+- Live refresh retained the selected `ahci0p1` disk, showed Primary and Backup GPT valid/Healthy, retained all three partitions and all four unallocated regions, and removed the Repair GPT action. Diagnostics showed Last storage operation `Repair GPT`, Final outcome `Success`, Failed stage `None`, Writes completed `33`, and Flush attempted `Yes`.
+- QEMU shut down cleanly. The same repaired image cold-restarted, Disk Manager launched normally, and the selected AHCI disk rendered Healthy with three partitions and no Repair GPT action. The same gaps remained visible.
+
+### Independent verification and gates
+
+After the restart guest shut down, `verify-dm29-gpt.py` reported primary and backup copies Valid, both CRCs valid, normalized copies equal, PMBR unchanged, disk GUID unchanged, and metadata-only changes. All three partition GUIDs/extents and all nine canaries matched the healthy baseline. The repaired image compared byte-for-byte equal to the healthy baseline; the verifier listed no changed ranges.
+
+- Storage suite: **978 checks, 0 failures**; USB tests are included, the classifier passed 7/7, and fixture/verifier checks passed.
+- AMD64 kernel build: passed after the production input fix.
+- `build.bat`: passed and emitted `Build successful: guideXOSServer.exe`.
+- UEFI x64 Release: passed.
+- `build.ps1 -Arch amd64`: failed only at the known unrelated PacMan symbols `pacman_audio_load_resources(gx_app_context*)` and `pacman_audio_submit(void*, PacManSoundId)`. Three tracked generated PacMan objects touched by that attempt were restored byte-for-byte; no PacMan source was changed.
+- Existing DM30 4Kn evidence remains applicable; no new 4Kn GUI fixture was run. Deterministic mounted/conflict/unrecoverable/read-only safety coverage remains green in the current storage suite and existing service coverage.
+- NVMe stays read-only: `NVME_WRITE_PROVEN=0`, `NVME_FLUSH_PROVEN=0`.
+- No host physical media was used.
+- Evidence: ignored `out/dm32-qualification-20261005/gui-proof-current/`, including QMP transcripts, serial logs, screenshots, fixture/verifier reports, QEMU blockstats, and cold-restart records.
+
+### Closure
+
+Outcome A is satisfied. `.phase` advances to `last_completed=DM32`, `next_expected=DM33`. The starting documentation modifications were preserved; no clean-start claim is made. A normal fetch failed with `Permission denied (publickey)`, so upstream freshness is unknown. Temporary launch/pause proof code is absent from production source. DM33 may begin after this DM32 closure is committed.

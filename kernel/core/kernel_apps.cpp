@@ -7308,7 +7308,8 @@ void DiskManagerApp::activateKeyboardAction() {
 
 void DiskManagerApp::onKeyDown(uint32_t key) {
     const bool escape = key == 27;
-    const bool enter = key == 13 || key == 32;
+    const bool enter = key == '\n' || key == 13 || key == 32;
+    const bool tab = key == '\t' || key == shell::KEY_TAB;
     if (m_mountDialogOpen) {
         if (escape) {
             m_mountDialogOpen = false;
@@ -7323,13 +7324,13 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
     if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED) {
         if (escape) {
             closeInitializeDialog();
-        } else if (m_dialogIsGptRepair && key == shell::KEY_TAB) {
+        } else if (m_dialogIsGptRepair && tab) {
             m_gptRepairButtonFocus = static_cast<uint8_t>(
                 (m_gptRepairButtonFocus + 1) % 2);
             updateInitializeControls();
             invalidate();
         } else if (m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS &&
-                   key == shell::KEY_TAB) {
+                   tab) {
             if (m_dialogIsFormat) m_createInputFocus = 1;
             else if (m_selectedDisk >= 0 && m_selectedDisk < m_diskCount &&
                 m_disks[m_selectedDisk].scheme == storage::PARTITION_SCHEME_GPT)
@@ -7393,7 +7394,7 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
         probeSelectedRegion();
         updateInitializeControls();
         invalidate();
-    } else if (key == shell::KEY_TAB) {
+    } else if (tab) {
         m_keyboardPane = static_cast<KeyboardPane>(
             (static_cast<uint8_t>(m_keyboardPane) + 1) % 4);
         invalidate();
@@ -7425,6 +7426,14 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
 }
 
 void DiskManagerApp::onKeyChar(char c) {
+    if (c == ' ' &&
+        ((m_dialogIsGptRepair && m_initializeDialogState ==
+            INITIALIZE_DIALOG_GPT_REPAIR_CONFIRM) ||
+         (m_initializeDialogState == INITIALIZE_DIALOG_CLOSED &&
+          m_keyboardPane == KEYBOARD_ACTIONS))) {
+        onKeyDown(32);
+        return;
+    }
     if (m_mountDialogOpen || (!m_dialogIsCreate && !m_dialogIsFormat) || m_initializeDialogState !=
             INITIALIZE_DIALOG_CREATE_OPTIONS || c < 0x20 || c > 0x7E) return;
     const bool sizeField = !m_dialogIsFormat && m_createInputFocus == 0;
