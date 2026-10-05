@@ -56,6 +56,63 @@ static uint8_t s_artifact[COMPILER_MAX_OUTPUT_BYTES];
 static const uint32_t kBuildServiceStackSize = 128u * 1024u;
 alignas(16) static uint8_t s_buildServiceStack[kBuildServiceStackSize];
 static uint32_t s_phase28vBuildTraceCount = 0;
+static uint32_t s_phase29yDirectoryTraceCount = 0;
+static uint32_t text_length(const char* value, uint32_t capacity);
+
+static void bounded_serial_text(const char* value, uint32_t capacity)
+{
+    if (!value) { serial::puts("<null>"); return; }
+    for (uint32_t i = 0; i < capacity && value[i] != '\0'; ++i) serial::putc(value[i]);
+}
+
+static const char* vfs_status_name(vfs::Status status)
+{
+    switch (status) {
+    case vfs::VFS_OK: return "VFS_OK";
+    case vfs::VFS_ERR_NOT_FOUND: return "VFS_ERR_NOT_FOUND";
+    case vfs::VFS_ERR_EXISTS: return "VFS_ERR_EXISTS";
+    case vfs::VFS_ERR_NOT_DIR: return "VFS_ERR_NOT_DIR";
+    case vfs::VFS_ERR_IS_DIR: return "VFS_ERR_IS_DIR";
+    case vfs::VFS_ERR_NOT_EMPTY: return "VFS_ERR_NOT_EMPTY";
+    case vfs::VFS_ERR_NO_SPACE: return "VFS_ERR_NO_SPACE";
+    case vfs::VFS_ERR_READ_ONLY: return "VFS_ERR_READ_ONLY";
+    case vfs::VFS_ERR_INVALID: return "VFS_ERR_INVALID";
+    case vfs::VFS_ERR_IO: return "VFS_ERR_IO";
+    case vfs::VFS_ERR_NOT_MOUNT: return "VFS_ERR_NOT_MOUNT";
+    case vfs::VFS_ERR_BUSY: return "VFS_ERR_BUSY";
+    case vfs::VFS_ERR_TOO_MANY: return "VFS_ERR_TOO_MANY";
+    case vfs::VFS_ERR_NOT_SUPPORTED: return "VFS_ERR_NOT_SUPPORTED";
+    default: return "VFS_ERR_UNKNOWN";
+    }
+}
+
+static void phase29y_directory_trace(const gx_build_request* request, const char* operation,
+                                     const char* root, const char* path,
+                                     bool pathBuilt, uint32_t capacity,
+                                     const char* stage, vfs::Status status,
+                                     const char* classification,
+                                     uint32_t requiredPathBytes = 0)
+{
+    if (s_phase29yDirectoryTraceCount >= 128U) return;
+    ++s_phase29yDirectoryTraceCount;
+    serial::puts("DEVELOPER_STUDIO_PHASE29Y_DIRECTORY op="); serial::puts(operation ? operation : "unknown");
+    serial::puts(" build_handle="); serial::put_hex64(s_job.handle);
+    serial::puts(" project_id="); bounded_serial_text(request ? request->projectId : nullptr, 127U);
+    serial::puts(" debug_request_id=<unavailable> project_generation=<unavailable>");
+    serial::puts(" root="); bounded_serial_text(root, kMaxResolvedPath);
+    serial::puts(" root_len="); serial::put_hex32(text_length(root, kMaxResolvedPath));
+    serial::puts(" root_absolute="); serial::puts(root && (root[0] == '/' || (root[0] && root[1] == ':')) ? "1" : "0");
+    serial::puts(" path="); bounded_serial_text(path, capacity);
+    serial::puts(" path_len="); serial::put_hex32(text_length(path, capacity));
+    serial::puts(" path_capacity="); serial::put_hex32(capacity);
+    serial::puts(" required_path_bytes="); serial::put_hex32(requiredPathBytes);
+    serial::puts(" path_truncated="); serial::puts(requiredPathBytes > capacity ? "1" : "0");
+    serial::puts(" path_built="); serial::puts(pathBuilt ? "1" : "0");
+    serial::puts(" stage="); serial::puts(stage ? stage : "unknown");
+    serial::puts(" vfs_result="); serial::puts(vfs_status_name(status)); serial::puts("(");
+    serial::put_hex32(static_cast<uint32_t>(static_cast<int32_t>(status))); serial::puts(")");
+    serial::puts(" classification="); serial::puts(classification ? classification : "unknown"); serial::putc('\n');
+}
 
 static void phase28v_build_trace(const char* event)
 {
@@ -146,9 +203,18 @@ static bool safe_output_name(const char* value)
     return true;
 }
 
-static bool join_path(const char* root, const char* relative, char* output, uint32_t capacity)
+static bool join_path(const char* root, const char* relative, char* output, uint32_t capacity,
+                      uint32_t* outRequiredBytes = nullptr)
 {
+    if (outRequiredBytes) *outRequiredBytes = 0;
     if (!root || !relative || !output || !safe_relative(relative)) return false;
+    const uint32_t rootBytes = text_length(root, kMaxResolvedPath);
+    const uint32_t relativeBytes = text_length(relative, kMaxResolvedPath);
+    if (rootBytes == 0 || rootBytes >= kMaxResolvedPath || relativeBytes >= kMaxResolvedPath) return false;
+    const bool separatorNeeded = root[rootBytes - 1] != '/';
+    const uint32_t requiredBytes = rootBytes + (separatorNeeded ? 1U : 0U) + relativeBytes + 1U;
+    if (outRequiredBytes) *outRequiredBytes = requiredBytes;
+    if (requiredBytes > capacity) return false;
     if (!copy_text(output, capacity, root)) return false;
     const uint32_t length = text_length(output, capacity);
     if (length == 0 || length + 1 >= capacity) return false;
@@ -400,21 +466,55 @@ static bool choose_sources(const char* root, const char* sourceRoot, const char*
     return true;
 }
 
-static bool ensure_directory(const char* path)
+static bool ensure_directory(const char* root, const char* path, const char* operation,
+                             const gx_build_request* request, bool pathBuilt = true,
+                             uint32_t requiredPathBytes = 0)
 {
+    if (pathBuilt && requiredPathBytes == 0) requiredPathBytes = text_length(path, kMaxResolvedPath) + 1U;
+    if (!pathBuilt || !path) {
+        phase29y_directory_trace(request, operation, root, path, false, kMaxResolvedPath,
+                                 "path-build", vfs::VFS_ERR_INVALID,
+                                 requiredPathBytes > kMaxResolvedPath ? "path-capacity-exceeded" : "path-construction-failed",
+                                 requiredPathBytes);
+        return false;
+    }
     vfs::FileInfo info = {};
-    if (vfs::stat(path, &info) == vfs::VFS_OK) return info.type == vfs::FILE_TYPE_DIRECTORY;
-    return vfs::mkdir(path) == vfs::VFS_OK;
+    const vfs::Status statStatus = vfs::stat(path, &info);
+    if (statStatus == vfs::VFS_OK) {
+        const bool isDirectory = info.type == vfs::FILE_TYPE_DIRECTORY;
+        phase29y_directory_trace(request, operation, root, path, true, kMaxResolvedPath,
+                                 "pre-stat", statStatus,
+                                 isDirectory ? "exists-directory" : "exists-non-directory",
+                                 requiredPathBytes);
+        return isDirectory;
+    }
+    phase29y_directory_trace(request, operation, root, path, true, kMaxResolvedPath,
+                             "pre-stat", statStatus,
+                             statStatus == vfs::VFS_ERR_NOT_FOUND ? "not-found" : "lookup-failed",
+                             requiredPathBytes);
+    const vfs::Status mkdirStatus = vfs::mkdir(path);
+    phase29y_directory_trace(request, operation, root, path, true, kMaxResolvedPath,
+                             "mkdir", mkdirStatus,
+                             mkdirStatus == vfs::VFS_OK ? "created" :
+                             (mkdirStatus == vfs::VFS_ERR_EXISTS ? "already-exists" : "create-failed"),
+                             requiredPathBytes);
+    return mkdirStatus == vfs::VFS_OK;
 }
 
-static bool ensure_output_directory(const char* root)
+static bool ensure_output_directory(const char* root, const gx_build_request* request)
 {
     char path[kMaxResolvedPath] = {};
-    return join_path(root, "build", path, sizeof(path)) && ensure_directory(path) &&
-        join_path(root, "build/bin", path, sizeof(path)) && ensure_directory(path) &&
-        join_path(root, "build/bin/amd64", path, sizeof(path)) && ensure_directory(path) &&
-        join_path(root, "build/obj", path, sizeof(path)) && ensure_directory(path) &&
-        join_path(root, "build/obj/amd64", path, sizeof(path)) && ensure_directory(path);
+    uint32_t requiredBytes = 0;
+    bool built = join_path(root, "build", path, sizeof(path), &requiredBytes);
+    if (!ensure_directory(root, path, "build-root", request, built, requiredBytes)) return false;
+    built = join_path(root, "build/bin", path, sizeof(path), &requiredBytes);
+    if (!ensure_directory(root, path, "output-directory", request, built, requiredBytes)) return false;
+    built = join_path(root, "build/bin/amd64", path, sizeof(path), &requiredBytes);
+    if (!ensure_directory(root, path, "amd64-output-directory", request, built, requiredBytes)) return false;
+    built = join_path(root, "build/obj", path, sizeof(path), &requiredBytes);
+    if (!ensure_directory(root, path, "intermediate-directory", request, built, requiredBytes)) return false;
+    built = join_path(root, "build/obj/amd64", path, sizeof(path), &requiredBytes);
+    return ensure_directory(root, path, "object-directory", request, built, requiredBytes);
 }
 
 static bool object_path_for_source(const char* root, const char* relative,
@@ -442,12 +542,21 @@ static bool object_path_for_source(const char* root, const char* relative,
     return true;
 }
 
-static bool ensure_object_source_directory(const char* root, const char* relative)
+static bool ensure_object_source_directory(const char* root, const char* relative,
+                                          const gx_build_request* request)
 {
-    if (!root || !relative || !safe_relative(relative)) return false;
+    if (!root || !relative || !safe_relative(relative)) {
+        phase29y_directory_trace(request, "source-object-cache-directory", root, relative,
+                                 false, kMaxResolvedPath, "path-build", vfs::VFS_ERR_INVALID,
+                                 "source-component-rejected");
+        return false;
+    }
     char directory[kMaxResolvedPath] = {};
-    if (!join_path(root, "build/obj/amd64", directory, sizeof(directory)) ||
-        !append_text(directory, sizeof(directory), "/")) return false;
+    uint32_t requiredBytes = 0;
+    bool built = join_path(root, "build/obj/amd64", directory, sizeof(directory), &requiredBytes) &&
+        append_text(directory, sizeof(directory), "/");
+    if (!built) return ensure_directory(root, directory, "source-object-cache-directory", request, false,
+                                         requiredBytes ? requiredBytes + 1U : 0U);
     const uint32_t relativeBytes = text_length(relative, kMaxResolvedPath);
     uint32_t lastSlash = 0xFFFFFFFFU;
     for (uint32_t i = 0; i < relativeBytes; ++i)
@@ -455,16 +564,20 @@ static bool ensure_object_source_directory(const char* root, const char* relativ
     if (lastSlash == 0xFFFFFFFFU) return true;
     for (uint32_t i = 0; i < lastSlash; ++i) {
         if (relative[i] == '/' || relative[i] == '\\') {
-            if (!ensure_directory(directory)) return false;
-            if (!append_text(directory, sizeof(directory), "/")) return false;
+            if (!ensure_directory(root, directory, "source-object-cache-directory", request)) return false;
+            if (!append_text(directory, sizeof(directory), "/"))
+                return ensure_directory(root, directory, "source-object-cache-directory", request, false,
+                                        text_length(directory, sizeof(directory)) + 2U);
         } else {
             char one[2] = { relative[i], '\0' };
-            if (!append_text(directory, sizeof(directory), one)) return false;
+            if (!append_text(directory, sizeof(directory), one))
+                return ensure_directory(root, directory, "source-object-cache-directory", request, false,
+                                        text_length(directory, sizeof(directory)) + 2U);
         }
     }
     // Keep directory paths slash-free so FAT 8.3 path parsing sees the same
     // component sequence during creation and later object publication.
-    return ensure_directory(directory);
+    return ensure_directory(root, directory, "source-object-cache-directory", request);
 }
 
 static bool metadata_matches(const char* root, const gx_build_request* request,
@@ -532,12 +645,21 @@ static void run_build_core(const gx_build_request* request)
         return;
     }
     phase28v_build_trace("METADATA_READY");
-    if (!ensure_output_directory(request->projectRoot)) {
+    vfs::FileInfo rootInfo = {};
+    const vfs::Status rootStatus = vfs::stat(request->projectRoot, &rootInfo);
+    phase29y_directory_trace(request, "owned-project-root", request->projectRoot,
+                             request->projectRoot, true, kMaxResolvedPath,
+                             "root-stat", rootStatus,
+                             rootStatus == vfs::VFS_OK
+                                ? (rootInfo.type == vfs::FILE_TYPE_DIRECTORY ? "exists-directory" : "exists-non-directory")
+                                : (rootStatus == vfs::VFS_ERR_NOT_FOUND ? "not-found" : "lookup-failed"),
+                             text_length(request->projectRoot, kMaxResolvedPath) + 1U);
+    if (!ensure_output_directory(request->projectRoot, request)) {
         failure(GX_BUILD_ERROR_INVALID_PROJECT_ROOT, "project build output directories could not be created");
         return;
     }
     for (uint32_t i = 0; i < selection.count; ++i) {
-        if (!ensure_object_source_directory(request->projectRoot, selection.relatives[i]) ||
+        if (!ensure_object_source_directory(request->projectRoot, selection.relatives[i], request) ||
             !object_path_for_source(request->projectRoot, selection.relatives[i],
                                     selection.objectPaths[i], sizeof(selection.objectPaths[i]))) {
             failure(GX_BUILD_ERROR_INVALID_PROJECT_ROOT, "project object-cache directories could not be created");

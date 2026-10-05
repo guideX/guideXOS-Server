@@ -74,6 +74,7 @@ param(
     [switch]$Phase29COnly,
     [switch]$Phase29LOwnershipOnly,
     [switch]$Phase29LFullAcceptance,
+    [switch]$Phase29YUseStagedDeveloperStudioPackage,
     [switch]$QemuExceptionTrace,
     [switch]$Phase29ISentinelOnly,
     [switch]$Phase29EManifestOnly
@@ -81,6 +82,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 Import-Module (Join-Path $PSScriptRoot "Phase29J.BootEvidence.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot "Phase29L.OwnershipEvidence.psm1") -Force
 # Phase 27G includes the complete earlier integration chain.  The focused M
 # mode deliberately keeps only the baseline C/D route plus the M smoke so a
 # flaky optional earlier IDE repeat cannot mask the recursion proof.
@@ -553,6 +555,8 @@ function Assert-Phase28ZBootImage([int]$runNumber, [string]$imageRoot, [string]$
         TreeSha256 = $treeHash
         KernelPath = [IO.Path]::GetFullPath((Join-Path $imageRoot "kernel.elf"))
         KernelSha256 = $kernelHash
+        DeveloperStudioPath = [IO.Path]::GetFullPath((Join-Path $imageRoot "Apps/DeveloperStudio/bin/amd64/developerstudio.elf"))
+        DeveloperStudioSha256 = $studioHash
         LoaderPath = [IO.Path]::GetFullPath((Join-Path $imageRoot "EFI/BOOT/BOOTX64.EFI"))
         LoaderSha256 = (Get-Phase28ZHash (Join-Path $imageRoot "EFI/BOOT/BOOTX64.EFI") "UEFI loader artifact")
         SentinelPath = [IO.Path]::GetFullPath($sentinel)
@@ -891,10 +895,10 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
         throw "P29J immutable-stage check failed on boot ${runNumber}: ESP tree changed after final audit"
     }
     if ($finalEspAudit) {
-        Write-P29JHostTrace $hostTracePath 'P29J HOST 02 esp_audit_pass' ("boot={0} stage_id={1} esp={2} tree_sha256={3} pre_spawn_tree_sha256={4} kernel={5} kernel_sha256={6} loader={7} loader_sha256={8} sentinel={9} sentinel_sha256={10} host_mutations_after_audit=0" -f
+        Write-P29JHostTrace $hostTracePath 'P29J HOST 02 esp_audit_pass' ("boot={0} stage_id={1} esp={2} tree_sha256={3} pre_spawn_tree_sha256={4} kernel={5} kernel_sha256={6} loader={7} loader_sha256={8} developer_studio={9} developer_studio_sha256={10} sentinel={11} sentinel_sha256={12} host_mutations_after_audit=0" -f
             $runNumber, $finalEspAudit.StageId, $resolvedEspPath, $finalEspAudit.TreeSha256, $preSpawnTreeHash,
             $finalEspAudit.KernelPath, $finalEspAudit.KernelSha256, $finalEspAudit.LoaderPath, $finalEspAudit.LoaderSha256,
-            $finalEspAudit.SentinelPath, $finalEspAudit.SentinelSha256)
+            $finalEspAudit.DeveloperStudioPath, $finalEspAudit.DeveloperStudioSha256, $finalEspAudit.SentinelPath, $finalEspAudit.SentinelSha256)
     }
     if ($Phase29ISentinelOnly -or $Phase29LOwnershipGate) {
         $qemuArguments = New-P29JQemuArguments -OvmfCodePath ([IO.Path]::GetFullPath($ovmfCodePath)) `
@@ -1004,8 +1008,10 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                         $sawLoaderMarker = $true
                         Write-P29JHostTrace $hostTracePath 'P29J HOST 08 guest_loader_marker' ("boot={0} marker=uefi_loader_entry" -f $runNumber)
                     }
-                    $phase29lOwnerMismatchObserved = $Phase29LOwnershipGate -and
-                        $serialProbe -match 'DEVELOPER_STUDIO_PHASE29L_OWNER checkpoint=([^ ]+) state=([^ ]+) result=(?!CURRENT|TRANSACTION_NOT_ACTIVE)([^ ]+)'
+                    $phase29lOwnerMismatch = if ($Phase29LOwnershipGate) {
+                        Find-Phase29LOwnerMismatch -SerialText $serialProbe
+                    } else { $null }
+                    $phase29lOwnerMismatchObserved = $null -ne $phase29lOwnerMismatch
                     if ($serialProbe -and (($Phase29EManifestOnly -and
                             $serialProbe.Contains("DEVELOPER_STUDIO_PHASE28V_EVENT_DEBUG_START_REQUEST_ISSUED")) -or
                         $phase29lOwnerMismatchObserved -or
@@ -1064,8 +1070,9 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
         $debugconBytes = if (Test-Path -LiteralPath $debugconPath) { (Get-Item -LiteralPath $debugconPath).Length } else { 0 }
         $cpuResetCount = [regex]::Matches($qemuDebug, '(?m)^CPU Reset').Count
         if ($finalEspAudit) {
-            Write-P29JHostTrace $hostTracePath 'P29J HOST 10 process_result' ("boot={0} pid={1} alive_at_timeout={2} exited_before_harness_stop={3} harness_stop={4} exit_code={5} reset_records={6}" -f
-                $runNumber, $process.Id, [int]$aliveAtDeadline, [int]$exitedBeforeHarnessStop, $harnessStopReason, $qemuExitCode, $cpuResetCount)
+            Write-P29JHostTrace $hostTracePath 'P29J HOST 10 process_result' ("boot={0} pid={1} alive_at_timeout={2} exited_before_harness_stop={3} harness_stop={4} exit_code={5} process_reaped={6} stdout_task_drained={7} stderr_task_drained={8} reset_records={9}" -f
+                $runNumber, $process.Id, [int]$aliveAtDeadline, [int]$exitedBeforeHarnessStop, $harnessStopReason, $qemuExitCode,
+                [int]$process.HasExited, [int]$stdoutTask.IsCompleted, [int]$stderrTask.IsCompleted, $cpuResetCount)
             Write-P29JHostTrace $hostTracePath 'P29J HOST 11 captured_evidence' ("boot={0} serial_exists={1} serial_bytes={2} stdout_bytes={3} stderr_bytes={4} debugcon_exists={5} debugcon_bytes={6} qemu_debug_exists={7}" -f
                 $runNumber, [int](Test-Path -LiteralPath $serialPath), $serialBytes,
                 [Text.Encoding]::UTF8.GetByteCount($stdout), [Text.Encoding]::UTF8.GetByteCount($stderr),
@@ -3145,13 +3152,31 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
             }
         }
         if ($missingMarkers.Count -ne 0) {
+            if ($Phase29LOwnershipGate) {
+                $phase29lFailureDomain = if ($serial -match 'invalid_project_root') {
+                    'INVALID_PROJECT_ROOT'
+                } elseif ($phase29lOwnerMismatch = Find-Phase29LOwnerMismatch -SerialText $serial) {
+                    'PROJECT_LOAD_OWNERSHIP_FAILURE'
+                } elseif (!$serial.Contains('P28Z APP 00 gx_main_entry_raw') -and
+                          $serial.Contains('[KERNEL] Entering main loop (waiting for input)...')) {
+                    if ($aliveAtDeadline) { 'APPLICATION_LAUNCH_DISPATCH_TIMEOUT' } else { 'APPLICATION_LAUNCH_DISPATCH_NOT_REACHED' }
+                } elseif (!$serial.Contains('P28Z APP 00 gx_main_entry_raw')) {
+                    if ($aliveAtDeadline) { 'DEVELOPER_STUDIO_ENTRY_TIMEOUT' } else { 'DEVELOPER_STUDIO_ENTRY_NOT_REACHED' }
+                } elseif (!$serial.Contains('DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_READY')) {
+                    'PROJECT_LOAD_TIMEOUT_OR_FAILURE'
+                } else {
+                    'OWNERSHIP_EVIDENCE_VALIDATION_FAILURE'
+                }
+                Write-Host ("PHASE29L CLASSIFICATION boot={0} domain={1} timeout_owner=Invoke-QemuProofBoot timeout_seconds={2} qemu_alive_at_timeout={3} harness_stop={4} first_missing={5}" -f
+                    $runNumber, $phase29lFailureDomain, $TimeoutSeconds, [int]$aliveAtDeadline, $harnessStopReason, $missingMarkers[0]) -ForegroundColor Yellow
+            }
             if ($Phase29LOwnershipGate -and $missingMarkers.Count -gt 0 -and $missingMarkers[0] -match '^Phase29L' -and
                 ($serial.Contains('DEVELOPER_STUDIO_PHASE28Q_PROJECT_READY') -or
                  $serial.Contains('DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_READY') -or
                  $serial.Contains('P28Z APP 06 project_ready'))) {
                 Write-Host "PHASE29L CLASSIFICATION boot=$runNumber domain=EVIDENCE_VALIDATION_FAILURE production_ready=1 first_missing=$($missingMarkers[0])" -ForegroundColor Yellow
-            } elseif ($Phase29LOwnershipGate -and $serial -match 'DEVELOPER_STUDIO_PHASE29L_OWNER checkpoint=([^ ]+) state=([^ ]+) result=(?!CURRENT|TRANSACTION_NOT_ACTIVE)([^ ]+)') {
-                Write-Host "PHASE29L CLASSIFICATION boot=$runNumber domain=PROJECT_LOAD_OWNERSHIP_FAILURE checkpoint=$($Matches[1]) reason=$($Matches[3])" -ForegroundColor Yellow
+            } elseif ($Phase29LOwnershipGate -and ($phase29lOwnerMismatch = Find-Phase29LOwnerMismatch -SerialText $serial)) {
+                Write-Host "PHASE29L CLASSIFICATION boot=$runNumber domain=PROJECT_LOAD_OWNERSHIP_FAILURE checkpoint=$($phase29lOwnerMismatch.Groups[1].Value) reason=$($phase29lOwnerMismatch.Groups[3].Value)" -ForegroundColor Yellow
             }
             if ($Phase28QOnly -and $serial -notmatch [regex]::Escape("P28Z APP 00 gx_main_entry_raw") -and
                 $serial -notmatch [regex]::Escape("P28Z BOOT 05 gx_main_invoke")) {
@@ -4107,15 +4132,22 @@ try {
             !(Test-Path -LiteralPath (Join-Path $phase28EspDirectory "src/helper.cpp") -PathType Leaf)) {
             throw "Phase 28O/28M project fixture was not staged into ESP"
         }
-        if (!(Test-Path -LiteralPath $developerStudioPackageDirectory -PathType Container) -or
-            !(Test-Path -LiteralPath (Join-Path $developerStudioPackageDirectory "app.json") -PathType Leaf) -or
-            !(Test-Path -LiteralPath (Join-Path $developerStudioPackageDirectory "bin/amd64/developerstudio.elf") -PathType Leaf)) {
-            throw "Packaged Developer Studio is missing; build it before Phase 28M"
-        }
         $phase28mEspPackage = Join-Path $espDirectory "Apps/DeveloperStudio"
-        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $phase28mEspPackage) | Out-Null
-        if (Test-Path -LiteralPath $phase28mEspPackage) { Remove-Item -LiteralPath $phase28mEspPackage -Recurse -Force }
-        Copy-Item $developerStudioPackageDirectory $phase28mEspPackage -Recurse -Force
+        if ($Phase29YUseStagedDeveloperStudioPackage) {
+            if (!(Test-Path -LiteralPath (Join-Path $phase28mEspPackage "app.json") -PathType Leaf) -or
+                !(Test-Path -LiteralPath (Join-Path $phase28mEspPackage "bin/amd64/developerstudio.elf") -PathType Leaf)) {
+                throw "Phase 29Y staged Developer Studio AMD64 package is missing from ESP"
+            }
+        } else {
+            if (!(Test-Path -LiteralPath $developerStudioPackageDirectory -PathType Container) -or
+                !(Test-Path -LiteralPath (Join-Path $developerStudioPackageDirectory "app.json") -PathType Leaf) -or
+                !(Test-Path -LiteralPath (Join-Path $developerStudioPackageDirectory "bin/amd64/developerstudio.elf") -PathType Leaf)) {
+                throw "Packaged Developer Studio is missing; build it before Phase 28M"
+            }
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $phase28mEspPackage) | Out-Null
+            if (Test-Path -LiteralPath $phase28mEspPackage) { Remove-Item -LiteralPath $phase28mEspPackage -Recurse -Force }
+            Copy-Item $developerStudioPackageDirectory $phase28mEspPackage -Recurse -Force
+        }
         if ($Phase28QOnly) {
             if (!$diagnosticSentinelGuestPath -or !$diagnosticSentinelContent) {
                 throw "P29I canonical sentinel definition is missing or invalid: $diagnosticSentinelDefinition"
@@ -4576,8 +4608,8 @@ try {
         Copy-Item $espDirectory $activeEspDirectory -Recurse -Force
         if ($Phase29ISentinelOnly -or $Phase29LOwnershipGate) {
             $hostTracePath = Join-Path $tempDirectory ("boot{0}.host-trace.log" -f $run)
-            Write-P29JHostTrace $hostTracePath 'P29J HOST 01 stage_created' ("boot={0} stage_id={1} esp={2} source={3}" -f
-                $run, $activeEspStageId, [IO.Path]::GetFullPath($activeEspDirectory), [IO.Path]::GetFullPath($espDirectory))
+            Write-P29JHostTrace $hostTracePath 'P29J HOST 01 stage_created' ("boot={0} stage_id={1} runner_pid={2} runner_start_utc={3} esp={4} source={5}" -f
+                $run, $activeEspStageId, $PID, [DateTime]::UtcNow.ToString('o'), [IO.Path]::GetFullPath($activeEspDirectory), [IO.Path]::GetFullPath($espDirectory))
         }
         if ($Phase28QOnly) {
             if (!$diagnosticSentinelGuestPath -or !$diagnosticSentinelContent) {
