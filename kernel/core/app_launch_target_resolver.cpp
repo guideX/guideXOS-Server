@@ -43,6 +43,28 @@ constexpr const char* kManagedNotesApplicationId =
 constexpr FileAssociationRecord kFileAssociations[kFileAssociationCapacity] = {
     { ".txt", kManagedNotesApplicationId },
 };
+constexpr char kAssociationPersistencePath[] = "/GXASSOC.BIN";
+constexpr uint32_t kAssociationMagic = 0x31415347u; // GSA1
+constexpr uint16_t kAssociationVersion = 1u;
+constexpr uint32_t kAssociationOverrideCapacity = 1u;
+enum class PersistedOverrideState : uint32_t { Application = 1u, Disabled = 2u };
+struct AssociationOverrideRecord {
+    char extension[16];
+    uint32_t state;
+    char applicationId[96];
+};
+struct AssociationPersistenceImage {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t recordCount;
+    AssociationOverrideRecord records[kAssociationOverrideCapacity];
+};
+static_assert(sizeof(AssociationOverrideRecord) == 116u, "C166 record layout drift");
+static_assert(sizeof(AssociationPersistenceImage) == 124u, "C166 image layout drift");
+AssociationOverrideRecord s_override{};
+bool s_hasOverride = false;
+bool s_associationsInitialized = false;
+bool s_invalidPersistedState = false;
 static_assert(sizeof(kFileAssociations) ==
     kFileAssociationCapacity * sizeof(FileAssociationRecord),
     "file association table must retain its fixed capacity");
@@ -100,6 +122,12 @@ bool hasDuplicateAssociationExtensions() {
 }
 } // namespace
 
+bool normalizedKnownExtension(const char* extension, char output[16]);
+const char* compiledAssociation(const char* extension);
+bool copyBounded(char* destination, uint32_t capacity, const char* source);
+bool persistCandidate(const AssociationPersistenceImage& image);
+void loadAssociationOverrides();
+
 FileAssociationResolution resolveFileAssociation(
     const char* path, bool isRegularFile, bool isDirectory) {
     uint32_t pathLength = 0u;
@@ -122,10 +150,17 @@ FileAssociationResolution resolveFileAssociation(
     if (!lastDot || lastDot == leaf)
         return { FileAssociationStatus::Unsupported, nullptr };
 
+    loadAssociationOverrides();
     for (uint32_t index = 0u; index < kFileAssociationCapacity; ++index) {
         const FileAssociationRecord& record = kFileAssociations[index];
         if (record.extension && record.applicationId &&
             asciiEqualsIgnoreCase(lastDot, record.extension)) {
+            if (s_hasOverride && asciiEqualsIgnoreCase(s_override.extension,
+                    record.extension)) {
+                if (s_override.state == static_cast<uint32_t>(PersistedOverrideState::Disabled))
+                    return { FileAssociationStatus::Unsupported, nullptr };
+                return { FileAssociationStatus::Resolved, s_override.applicationId };
+            }
             return { FileAssociationStatus::Resolved, record.applicationId };
         }
     }
@@ -361,6 +396,184 @@ static void fill_from_metadata(gxos::apps::LaunchTarget& target, const gxos::app
     target.bareMetalAvailable = gxos::apps::IsBuiltInAppAvailableInBareMetal(metadata) &&
         target.dispatchLaunchName[0] &&
         app::AppManager::isAppAvailable(target.dispatchLaunchName);
+}
+
+bool boundedEqualsIgnoreCase(const char* left, const char* right, uint32_t capacity) {
+    if (!left || !right) return false;
+    for (uint32_t i = 0u; i < capacity; ++i) {
+        char a = left[i], b = right[i];
+        if (a >= 'A' && a <= 'Z') a = static_cast<char>(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z') b = static_cast<char>(b - 'A' + 'a');
+        if (a != b) return false;
+        if (a == '\0') return true;
+    }
+    return false;
+}
+
+bool fixedEqualsCanonical(const char* field, uint32_t capacity,
+                          const char* canonical) {
+    uint32_t i = 0u;
+    for (; i < capacity && canonical[i]; ++i)
+        if (field[i] != canonical[i]) return false;
+    if (i == capacity) return false;
+    for (; i < capacity; ++i) if (field[i] != '\0') return false;
+    return true;
+}
+
+void initializeFileAssociations() { loadAssociationOverrides(); }
+bool fileAssociationPersistenceRejected() { loadAssociationOverrides(); return s_invalidPersistedState; }
+
+AssociationServiceStatus fileAssociationService(
+    const AssociationServiceRequest* request,
+    AssociationServiceResponse* response) {
+    if (!request || !response) return AssociationServiceStatus::InvalidArgument;
+    loadAssociationOverrides();
+    *response = {};
+    if (request->operation > static_cast<uint32_t>(AssociationOperation::Reset)) {
+        response->status = static_cast<uint32_t>(AssociationServiceStatus::InvalidArgument);
+        return AssociationServiceStatus::InvalidArgument;
+    }
+    char extension[16]{};
+    if (!normalizedKnownExtension(request->extension, extension)) {
+        response->status = static_cast<uint32_t>(AssociationServiceStatus::UnknownExtension);
+        return AssociationServiceStatus::UnknownExtension;
+    }
+    copyBounded(response->normalizedExtension,
+        sizeof(response->normalizedExtension), extension);
+    const AssociationOperation operation = static_cast<AssociationOperation>(request->operation);
+    if (operation == AssociationOperation::SetOverride &&
+        !boundedEqualsIgnoreCase(request->applicationId, kManagedNotesApplicationId,
+            sizeof(request->applicationId))) {
+        response->status = static_cast<uint32_t>(AssociationServiceStatus::IneligibleHandler);
+        return AssociationServiceStatus::IneligibleHandler;
+    }
+    const char* compiled = compiledAssociation(extension);
+    if (compiled && !copyBounded(response->compiledDefaultAppId,
+            sizeof(response->compiledDefaultAppId), compiled))
+        return AssociationServiceStatus::InvalidPersistedState;
+    if (operation != AssociationOperation::Query) {
+        AssociationPersistenceImage candidate{};
+        candidate.magic = kAssociationMagic;
+        candidate.version = kAssociationVersion;
+        if (operation == AssociationOperation::SetOverride || operation == AssociationOperation::Disable) {
+            candidate.recordCount = 1u;
+            copyBounded(candidate.records[0].extension,
+                sizeof(candidate.records[0].extension), extension);
+            if (operation == AssociationOperation::SetOverride) {
+                candidate.records[0].state = static_cast<uint32_t>(PersistedOverrideState::Application);
+                copyBounded(candidate.records[0].applicationId,
+                    sizeof(candidate.records[0].applicationId), kManagedNotesApplicationId);
+            } else {
+                candidate.records[0].state = static_cast<uint32_t>(PersistedOverrideState::Disabled);
+            }
+        }
+        if (!persistCandidate(candidate)) {
+            response->status = static_cast<uint32_t>(AssociationServiceStatus::PersistenceFailed);
+            return AssociationServiceStatus::PersistenceFailed;
+        }
+        s_hasOverride = candidate.recordCount != 0u;
+        s_override = s_hasOverride ? candidate.records[0] : AssociationOverrideRecord{};
+    }
+    if (s_hasOverride) {
+        response->overrideState = s_override.state == static_cast<uint32_t>(PersistedOverrideState::Disabled)
+            ? static_cast<uint32_t>(AssociationOverrideState::Disabled)
+            : static_cast<uint32_t>(AssociationOverrideState::ApplicationOverride);
+        if (response->overrideState == static_cast<uint32_t>(AssociationOverrideState::ApplicationOverride))
+            copyBounded(response->overrideAppId, sizeof(response->overrideAppId), s_override.applicationId);
+        if (response->overrideState != static_cast<uint32_t>(AssociationOverrideState::Disabled))
+            copyBounded(response->effectiveAppId, sizeof(response->effectiveAppId), s_override.applicationId);
+    } else if (compiled) {
+        response->overrideState = static_cast<uint32_t>(AssociationOverrideState::NoOverride);
+        copyBounded(response->effectiveAppId, sizeof(response->effectiveAppId), compiled);
+    }
+    response->hasEffectiveAssociation = response->effectiveAppId[0] ? 1u : 0u;
+    response->status = static_cast<uint32_t>(AssociationServiceStatus::Success);
+    return AssociationServiceStatus::Success;
+}
+
+bool copyBounded(char* destination, uint32_t capacity, const char* source) {
+    if (!destination || capacity == 0u || !source) return false;
+    uint32_t i = 0u;
+    while (source[i] && i + 1u < capacity) { destination[i] = source[i]; ++i; }
+    if (source[i]) return false;
+    destination[i] = '\0';
+    while (++i < capacity) destination[i] = '\0';
+    return true;
+}
+
+const char* compiledAssociation(const char* extension) {
+    for (uint32_t i = 0u; i < kFileAssociationCapacity; ++i)
+        if (kFileAssociations[i].extension &&
+            asciiEqualsIgnoreCase(extension, kFileAssociations[i].extension))
+            return kFileAssociations[i].applicationId;
+    return nullptr;
+}
+
+bool normalizedKnownExtension(const char* extension, char output[16]) {
+    if (!extension) return false;
+    uint32_t length = 0u;
+    while (length < 16u && extension[length]) ++length;
+    if (length < 2u || length >= 16u || extension[0] != '.') return false;
+    for (uint32_t i = 1u; i < length; ++i) {
+        char c = extension[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9'))) return false;
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        output[i] = c;
+    }
+    output[0] = '.'; output[length] = '\0';
+    return compiledAssociation(output) != nullptr;
+}
+
+bool validateImage(const AssociationPersistenceImage& image) {
+    if (image.magic != kAssociationMagic || image.version != kAssociationVersion ||
+        image.recordCount > kAssociationOverrideCapacity) return false;
+    if (image.recordCount == 0u) return true;
+    char normalized[16]{};
+    if (!normalizedKnownExtension(image.records[0].extension, normalized) ||
+        !fixedEqualsCanonical(image.records[0].extension,
+            sizeof(image.records[0].extension), normalized)) return false;
+    if (image.records[0].state == static_cast<uint32_t>(PersistedOverrideState::Disabled)) {
+        for (uint32_t i = 0u; i < sizeof(image.records[0].applicationId); ++i)
+            if (image.records[0].applicationId[i] != '\0') return false;
+        return true;
+    }
+    if (image.records[0].state != static_cast<uint32_t>(PersistedOverrideState::Application))
+        return false;
+    return fixedEqualsCanonical(image.records[0].applicationId,
+        sizeof(image.records[0].applicationId), kManagedNotesApplicationId);
+}
+
+bool persistCandidate(const AssociationPersistenceImage& image) {
+    if (vfs::write_file(kAssociationPersistencePath, &image, sizeof(image)) !=
+        static_cast<int32_t>(sizeof(image))) return false;
+    AssociationPersistenceImage readback{};
+    const int32_t count = vfs::read_file(kAssociationPersistencePath, &readback,
+        sizeof(readback));
+    return count == static_cast<int32_t>(sizeof(readback)) &&
+        validateImage(readback) && __builtin_memcmp(&image, &readback, sizeof(image)) == 0;
+}
+
+void loadAssociationOverrides() {
+    if (s_associationsInitialized) return;
+    s_associationsInitialized = true;
+    s_hasOverride = false;
+    s_override = {};
+    vfs::FileInfo info{};
+    const vfs::Status status = vfs::stat(kAssociationPersistencePath, &info);
+    if (status == vfs::VFS_ERR_NOT_FOUND || status == vfs::VFS_ERR_NOT_MOUNT) return;
+    if (status != vfs::VFS_OK) { s_invalidPersistedState = true; return; }
+    if (info.type != vfs::FILE_TYPE_REGULAR || info.size != sizeof(AssociationPersistenceImage)) {
+        s_invalidPersistedState = true; return;
+    }
+    AssociationPersistenceImage image{};
+    if (vfs::read_file(kAssociationPersistencePath, &image, sizeof(image)) !=
+        static_cast<int32_t>(sizeof(image)) || !validateImage(image)) {
+        s_invalidPersistedState = true; return;
+    }
+    if (image.recordCount == 0u) return;
+    s_override = image.records[0];
+    s_hasOverride = true;
 }
 
 static bool is_shell_label(const char* label)

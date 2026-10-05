@@ -7,11 +7,12 @@ namespace HostLogProof;
 public static class GxAbi
 {
     public const uint ApiVersion = 0u;
-    // ABI v2 appends the snapshot callback at 104; ABI v3 appends exact
-    // application-instance close at 112. Earlier prefixes remain unchanged.
-    public const uint HostAbiVersion = 3u;
+    // ABI v2 appends snapshot at 104; v3 appends close at 112; v4 appends
+    // the App Model association service at 120. Earlier prefixes are stable.
+    public const uint HostAbiVersion = 4u;
     public const uint HostAbiV1Version = 1u;
     public const uint HostAbiV2Version = 2u;
+    public const uint HostAbiV3Version = 3u;
     public const uint CompositeAppInvalid = 0u;
     public const uint CompositeAppA = 1u;
     public const uint CompositeAppB = 2u;
@@ -24,9 +25,11 @@ public static class GxAbi
     public const uint C113HostCallTableSize = 88u;
     public const uint HostCallTableV1FullSize = 104u;
     public const uint HostCallTableV2Size = 112u;
-    public const uint HostCallTableSize = 120u;
+    public const uint HostCallTableV3Size = 120u;
+    public const uint HostCallTableSize = 128u;
     public const uint ApplicationSnapshotOffset = 104u;
     public const uint ApplicationCloseOffset = 112u;
+    public const uint AssociationServiceOffset = 120u;
     public const uint ApplicationSnapshotRecordVersion = 1u;
     public const uint ApplicationSnapshotRecordSize = 168u;
     public const uint ApplicationSnapshotCapacity = 20u;
@@ -38,6 +41,7 @@ public static class GxAbi
     public const uint FileStatOffset = 96u;
     public const ulong CapabilityApplicationSnapshot = 1ul << 11;
     public const ulong CapabilityApplicationClose = 1ul << 12;
+    public const ulong CapabilityAssociationService = 1ul << 13;
     public const uint FilePathMaxBytes = 96u;
     public const uint MaxFileBytes = 16u * 1024u;
     public const uint MaxDirectoryEntries = 64u;
@@ -94,6 +98,7 @@ public enum GuideXosCapability : ulong
     FileStat = 1ul << 10,
     ApplicationSnapshot = 1ul << 11,
     ApplicationClose = 1ul << 12,
+    AssociationService = 1ul << 13,
 }
 
 public enum GuideXosResult
@@ -153,6 +158,27 @@ public unsafe struct NativeHostCallTable
     public delegate* unmanaged<NativeGxAppContext*, byte*, uint, byte*, uint, int> fileStat;
     public delegate* unmanaged<NativeGxAppContext*, NativeApplicationSnapshotRecord*, uint, uint*, uint*, int> applicationSnapshot;
     public delegate* unmanaged<NativeGxAppContext*, uint, ulong, int> closeApplication;
+    public delegate* unmanaged<NativeGxAppContext*, NativeAssociationServiceRequest*, NativeAssociationServiceResponse*, int> associationService;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 4, Size = 116)]
+public unsafe struct NativeAssociationServiceRequest
+{
+    public uint operation;
+    public fixed byte extension[16];
+    public fixed byte applicationId[96];
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 4, Size = 316)]
+public unsafe struct NativeAssociationServiceResponse
+{
+    public uint status;
+    public uint overrideState;
+    public fixed byte normalizedExtension[16];
+    public fixed byte compiledDefaultAppId[96];
+    public fixed byte overrideAppId[96];
+    public fixed byte effectiveAppId[96];
+    public uint hasEffectiveAssociation;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 8, Size = (int)GxAbi.ApplicationSnapshotRecordSize)]

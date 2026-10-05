@@ -139,6 +139,22 @@ public sealed unsafe class GuideXosHost
             _context, _host, identity);
     }
 
+    public GuideXosAssociationResult QueryFileAssociation(
+        ReadOnlySpan<byte> extension) =>
+        GuideXosFileAssociations.Query(_context, _host, extension);
+
+    public GuideXosAssociationResult SetFileAssociation(
+        ReadOnlySpan<byte> extension, ReadOnlySpan<byte> applicationId) =>
+        GuideXosFileAssociations.SetDefault(_context, _host, extension, applicationId);
+
+    public GuideXosAssociationResult DisableFileAssociation(
+        ReadOnlySpan<byte> extension) =>
+        GuideXosFileAssociations.Disable(_context, _host, extension);
+
+    public GuideXosAssociationResult ResetFileAssociation(
+        ReadOnlySpan<byte> extension) =>
+        GuideXosFileAssociations.Reset(_context, _host, extension);
+
     /// <summary>Requests bounded OS file activation for the current Explorer dispatch.</summary>
     public GuideXosFileActivationResult TryRequestFileActivation(
         ReadOnlySpan<byte> canonicalPath)
@@ -641,7 +657,7 @@ public static unsafe class GuideXosApplicationControl
             return GuideXosApplicationCloseResult.InvalidArgument;
         }
 
-        if (table->version < 3u || table->size < GxAbi.HostCallTableSize)
+        if (table->version < 3u || table->size < GxAbi.HostCallTableV3Size)
             return GuideXosApplicationCloseResult.NotSupported;
         if ((table->capabilities & GxAbi.CapabilityApplicationClose) == 0u)
             return GuideXosApplicationCloseResult.CapabilityUnavailable;

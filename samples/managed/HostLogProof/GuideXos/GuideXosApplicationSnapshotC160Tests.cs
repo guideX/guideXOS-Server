@@ -94,6 +94,10 @@ internal static unsafe class GuideXosApplicationSnapshotC160Tests
             FieldOffset(tablePointer, &tablePointer->closeApplication) ==
                 GxAbi.ApplicationCloseOffset &&
             GxAbi.ApplicationCloseOffset + sizeof(ulong) ==
+                GxAbi.HostCallTableV3Size &&
+            FieldOffset(tablePointer, &tablePointer->associationService) ==
+                GxAbi.AssociationServiceOffset &&
+            GxAbi.AssociationServiceOffset + sizeof(ulong) ==
                 GxAbi.HostCallTableSize &&
             sizeof(GuideXosApplicationSnapshot) ==
                 16 + (int)GxAbi.ApplicationSnapshotBufferBytes;

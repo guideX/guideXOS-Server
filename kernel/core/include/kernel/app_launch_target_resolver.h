@@ -24,6 +24,33 @@ struct FileAssociationResolution {
     const char* applicationId;
 };
 
+enum class AssociationServiceStatus : uint32_t {
+    Success = 0, NotSupported = 1, InvalidArgument = 2,
+    UnknownExtension = 3, IneligibleHandler = 4,
+    CapacityExceeded = 5, PersistenceFailed = 6,
+    InvalidPersistedState = 7,
+};
+enum class AssociationOverrideState : uint32_t {
+    NoOverride = 0, ApplicationOverride = 1, Disabled = 2,
+};
+enum class AssociationOperation : uint32_t {
+    Query = 0, SetOverride = 1, Disable = 2, Reset = 3,
+};
+struct AssociationServiceRequest {
+    uint32_t operation;
+    char extension[16];
+    char applicationId[96];
+};
+struct AssociationServiceResponse {
+    uint32_t status;
+    uint32_t overrideState;
+    char normalizedExtension[16];
+    char compiledDefaultAppId[96];
+    char overrideAppId[96];
+    char effectiveAppId[96];
+    uint32_t hasEffectiveAssociation;
+};
+
 static constexpr uint32_t kFileAssociationCapacity = 16u;
 static constexpr uint32_t kFileAssociationPathCapacity = 96u;
 
@@ -37,6 +64,11 @@ uint32_t fileAssociationCapacity();
 uint32_t fileAssociationTableBytes();
 bool runC164FileAssociationTests(uint32_t* outCases,
                                 uint32_t* outFailureMask);
+AssociationServiceStatus fileAssociationService(
+    const AssociationServiceRequest* request,
+    AssociationServiceResponse* response);
+void initializeFileAssociations();
+bool fileAssociationPersistenceRejected();
 
 gxos::apps::LaunchTarget resolveLaunchTarget(const char* label);
 void printLaunchTargetDiagnostic(const gxos::apps::LaunchTarget& target, LaunchTargetDiagnosticWriter write);

@@ -35,7 +35,7 @@ internal static unsafe class GuideXosApplicationControlC162Tests
             GxAbi.ApplicationSnapshotOffset + sizeof(ulong) ==
                 GxAbi.HostCallTableV2Size &&
             GxAbi.ApplicationCloseOffset + sizeof(ulong) ==
-                GxAbi.HostCallTableSize;
+                GxAbi.HostCallTableV3Size;
         passed &= Case(ref cases, layout);
 
         NativeGxAppContext context = default;
@@ -56,7 +56,7 @@ internal static unsafe class GuideXosApplicationControlC162Tests
                 GuideXosApplicationCloseResult.NotSupported && s_callCount == 0);
 
         NativeHostCallTable shortV3 = MakeTable(3u,
-            GxAbi.HostCallTableSize - 1u,
+            GxAbi.HostCallTableV3Size - 1u,
             GxAbi.CapabilityApplicationClose, &CloseStub);
         context.host = &shortV3;
         passed &= Case(ref cases,
@@ -74,7 +74,7 @@ internal static unsafe class GuideXosApplicationControlC162Tests
                 GuideXosApplicationCloseResult.NotSupported && s_callCount == 0);
 
         NativeHostCallTable noCapability = MakeTable(3u,
-            GxAbi.HostCallTableSize, 0u, &CloseStub);
+            GxAbi.HostCallTableV3Size, 0u, &CloseStub);
         context.host = &noCapability;
         passed &= Case(ref cases,
             GuideXosApplicationControl.TryCloseApplication(
@@ -83,7 +83,7 @@ internal static unsafe class GuideXosApplicationControlC162Tests
                 s_callCount == 0);
 
         NativeHostCallTable noCallback = MakeTable(3u,
-            GxAbi.HostCallTableSize, GxAbi.CapabilityApplicationClose, null);
+            GxAbi.HostCallTableV3Size, GxAbi.CapabilityApplicationClose, null);
         context.host = &noCallback;
         passed &= Case(ref cases,
             GuideXosApplicationControl.TryCloseApplication(
@@ -91,7 +91,7 @@ internal static unsafe class GuideXosApplicationControlC162Tests
                 GuideXosApplicationCloseResult.NotSupported && s_callCount == 0);
 
         NativeHostCallTable v3 = MakeTable(3u,
-            GxAbi.HostCallTableSize, GxAbi.CapabilityApplicationClose,
+            GxAbi.HostCallTableV3Size, GxAbi.CapabilityApplicationClose,
             &CloseStub);
         context.host = &v3;
         s_stubResult = 0;
@@ -139,7 +139,7 @@ internal static unsafe class GuideXosApplicationControlC162Tests
             s_callCount == callsBeforeInvalid);
 
         NativeHostCallTable unknown = MakeTable(99u,
-            GxAbi.HostCallTableSize, GxAbi.CapabilityApplicationClose,
+            GxAbi.HostCallTableV3Size, GxAbi.CapabilityApplicationClose,
             &CloseStub);
         context.host = &unknown;
         s_stubResult = 0;
@@ -239,7 +239,7 @@ internal static unsafe class GuideXosApplicationControlC162Tests
         s_callCount = 0;
         NativeGxAppContext context = default;
         context.size = (uint)sizeof(NativeGxAppContext);
-        NativeHostCallTable table = MakeTable(3u, GxAbi.HostCallTableSize,
+        NativeHostCallTable table = MakeTable(3u, GxAbi.HostCallTableV3Size,
             GxAbi.CapabilityApplicationClose, &CloseStub);
         context.host = &table;
         bool retained = pending.TryGet(

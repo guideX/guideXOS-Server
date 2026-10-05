@@ -68,16 +68,18 @@ constexpr int32_t kInvalidApplicationIdReturn = -4;
 constexpr uint32_t kManagedTaskManagerCloseCompletedActionId = 0x01620001u;
 constexpr uint32_t kManagedApplicationLifetimeCloseActionId = 0x01500002u;
 constexpr const char* kProductionCompositeImage = gxos::apps::kManagedNativeAotCompositeImagePath;
-// ABI v2 appended the snapshot callback at 104; ABI v3 appends exact-identity
-// close at 112. Both historical prefixes remain byte-for-byte stable.
-constexpr uint32_t kManagedHostAbiVersion = 3u;
+// ABI v2 appended snapshot at 104; v3 appends close at 112; v4 appends the
+// value-only association service at 120. All historical prefixes are stable.
+constexpr uint32_t kManagedHostAbiVersion = 4u;
 constexpr uint32_t kManagedHostAbiV1CoreSize = 72u;
 constexpr uint32_t kManagedHostAbiV1Size = 104u;
 constexpr uint32_t kManagedHostC113Size = 88u;
-constexpr uint32_t kManagedHostTableSize = 120u;
+constexpr uint32_t kManagedHostTableSize = 128u;
 constexpr uint32_t kManagedHostTableV2Size = 112u;
+constexpr uint32_t kManagedHostTableV3Size = 120u;
 constexpr uint32_t kManagedApplicationSnapshotOffset = 104u;
 constexpr uint32_t kManagedApplicationCloseOffset = 112u;
+constexpr uint32_t kManagedAssociationServiceOffset = 120u;
 constexpr uint64_t kManagedCapabilitySurface = 1ull << 0;
 constexpr uint64_t kManagedCapabilityText = 1ull << 1;
 constexpr uint64_t kManagedCapabilityPrimitive = 1ull << 2;
@@ -91,6 +93,7 @@ constexpr uint64_t kManagedCapabilityDirectoryList = 1ull << 9;
 constexpr uint64_t kManagedCapabilityFileStat = 1ull << 10;
 constexpr uint64_t kManagedCapabilityApplicationSnapshot = 1ull << 11;
 constexpr uint64_t kManagedCapabilityApplicationClose = 1ull << 12;
+constexpr uint64_t kManagedCapabilityAssociationService = 1ull << 13;
 constexpr uint64_t kManagedCapabilities =
     kManagedCapabilitySurface | kManagedCapabilityText |
     kManagedCapabilityPrimitive | kManagedCapabilityAction |
@@ -98,7 +101,7 @@ constexpr uint64_t kManagedCapabilities =
     kManagedCapabilityLog | kManagedCapabilityFileRead |
     kManagedCapabilityFileWrite | kManagedCapabilityDirectoryList |
     kManagedCapabilityFileStat | kManagedCapabilityApplicationSnapshot |
-    kManagedCapabilityApplicationClose;
+    kManagedCapabilityApplicationClose | kManagedCapabilityAssociationService;
 constexpr uint32_t kManagedFilePathMaxBytes = 96u;
 constexpr uint32_t kManagedFileMaxBytes = 16u * 1024u;
 constexpr uint32_t kManagedDirectoryMaxEntries = 64u;
@@ -308,6 +311,10 @@ struct NativeHostCallTable {
         uint32_t* outCopiedCount);
     int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *closeApplication)(
         NativeGxAppContext* context, uint32_t source, uint64_t instanceId);
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *associationService)(
+        NativeGxAppContext* context,
+        const appmodel::AssociationServiceRequest* request,
+        appmodel::AssociationServiceResponse* response);
 };
 
 struct ManagedDirectoryEntryAbi {
@@ -364,7 +371,7 @@ struct ResidentApplication {
     uint32_t sequence;
 };
 
-static_assert(sizeof(NativeHostCallTable) == 120, "C162 host callback ABI drift");
+static_assert(sizeof(NativeHostCallTable) == 128, "C166 host callback ABI drift");
 static_assert(offsetof(NativeHostCallTable, log) == 8,
               "ABI-v1 log callback offset drift");
 static_assert(offsetof(NativeHostCallTable, requestWindow) == 16,
@@ -389,12 +396,22 @@ static_assert(offsetof(NativeHostCallTable, applicationSnapshot) ==
 static_assert(offsetof(NativeHostCallTable, closeApplication) ==
                   kManagedApplicationCloseOffset,
               "C162 close callback offset drift");
+static_assert(offsetof(NativeHostCallTable, associationService) ==
+                  kManagedAssociationServiceOffset,
+              "C166 association callback offset drift");
 static_assert(kManagedHostTableV2Size ==
                   kManagedApplicationSnapshotOffset + sizeof(void*),
               "C160 ABI-v2 table size drift");
-static_assert(kManagedHostTableSize ==
+static_assert(kManagedHostTableV3Size ==
                   kManagedApplicationCloseOffset + sizeof(void*),
               "C162 ABI-v3 table size drift");
+static_assert(kManagedHostTableSize ==
+                  kManagedAssociationServiceOffset + sizeof(void*),
+              "C166 ABI-v4 table size drift");
+static_assert(sizeof(appmodel::AssociationServiceRequest) == 116u,
+              "C166 request layout drift");
+static_assert(sizeof(appmodel::AssociationServiceResponse) == 316u,
+              "C166 response layout drift");
 static_assert(kManagedHostAbiV1Size == kManagedApplicationSnapshotOffset,
               "C160 ABI-v1 prefix size drift");
 static_assert(offsetof(NativeHostCallTable, fileReadAll) == 72,
@@ -2650,7 +2667,7 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedCloseApplication(
     if (!activeSurfaceContext(context) || instanceId == 0u)
         return static_cast<int32_t>(app::ApplicationCloseResult::InvalidArgument);
     if (context->host->version < 3u ||
-        context->host->size < kManagedHostTableSize)
+        context->host->size < kManagedHostTableV3Size)
         return -5; // ABI feature is not supported by this host table.
     if ((context->host->capabilities & kManagedCapabilityApplicationClose) == 0u)
         return -3;
@@ -2728,6 +2745,18 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedCloseApplication(
         return -14;
     }
     return static_cast<int32_t>(app::ApplicationCloseResult::NotFound);
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedAssociationService(
+    NativeGxAppContext* context,
+    const appmodel::AssociationServiceRequest* request,
+    appmodel::AssociationServiceResponse* response) {
+    if (!context || !context->host || !request || !response) return -2;
+    if (context->host->version < 4u || context->host->size < kManagedHostTableSize)
+        return -5;
+    if ((context->host->capabilities & kManagedCapabilityAssociationService) == 0u)
+        return -3;
+    return static_cast<int32_t>(appmodel::fileAssociationService(request, response));
 }
 
 void completeC162DeferredApplicationClose() {
@@ -4044,7 +4073,9 @@ int32_t invokeManagedWithHostMetadata(
         (capabilities & kManagedCapabilityApplicationSnapshot) != 0u
             ? managedApplicationSnapshot : nullptr,
         (capabilities & kManagedCapabilityApplicationClose) != 0u
-            ? managedCloseApplication : nullptr };
+            ? managedCloseApplication : nullptr,
+        (capabilities & kManagedCapabilityAssociationService) != 0u
+            ? managedAssociationService : nullptr };
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
         reinterpret_cast<void*>(static_cast<uintptr_t>(selector)),
@@ -4271,7 +4302,8 @@ LaunchStatus launchResident(const char* path, uint32_t logicalAppId,
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
         managedCloseWindow, kManagedCapabilities, managedAddActionButton,
         managedFileReadAll, managedFileWriteAll, managedDirectoryList,
-        managedFileStat, managedApplicationSnapshot, managedCloseApplication };
+        managedFileStat, managedApplicationSnapshot, managedCloseApplication,
+        managedAssociationService };
     serial::puts("[C112-HOST] version=");
     serial::put_hex32(kManagedHostAbiVersion);
     serial::puts(" capabilities=");
@@ -4502,7 +4534,8 @@ LaunchStatus launchInternal(const char* path, uint32_t logicalAppId,
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
         managedCloseWindow, kManagedCapabilities, managedAddActionButton,
         managedFileReadAll, managedFileWriteAll, managedDirectoryList,
-        managedFileStat, managedApplicationSnapshot, managedCloseApplication };
+        managedFileStat, managedApplicationSnapshot, managedCloseApplication,
+        managedAssociationService };
     serial::puts("[C112-HOST] version=");
     serial::put_hex32(kManagedHostAbiVersion);
     serial::puts(" capabilities=");
@@ -4906,7 +4939,8 @@ LaunchStatus probeFileServiceNegativeTests(LaunchReport* report) {
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
         managedCloseWindow, kManagedCapabilities, managedAddActionButton,
         managedFileReadAll, managedFileWriteAll, managedDirectoryList,
-        managedFileStat, managedApplicationSnapshot, managedCloseApplication };
+        managedFileStat, managedApplicationSnapshot, managedCloseApplication,
+        managedAssociationService };
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
         reinterpret_cast<void*>(static_cast<uintptr_t>(4u)), nullptr, 0u, 0u,
@@ -5011,7 +5045,8 @@ LaunchStatus probeDirectoryServiceNegativeTests(LaunchReport* report) {
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
         managedCloseWindow, kManagedCapabilities, managedAddActionButton,
         managedFileReadAll, managedFileWriteAll, managedDirectoryList,
-        managedFileStat, managedApplicationSnapshot, managedCloseApplication };
+        managedFileStat, managedApplicationSnapshot, managedCloseApplication,
+        managedAssociationService };
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
         reinterpret_cast<void*>(static_cast<uintptr_t>(4u)), nullptr, 0u, 0u,
@@ -5093,7 +5128,8 @@ LaunchStatus probeDirectoryCapacityTests(LaunchReport* report) {
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
         managedCloseWindow, kManagedCapabilities, managedAddActionButton,
         managedFileReadAll, managedFileWriteAll, managedDirectoryList,
-        managedFileStat, managedApplicationSnapshot, managedCloseApplication };
+        managedFileStat, managedApplicationSnapshot, managedCloseApplication,
+        managedAssociationService };
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
         reinterpret_cast<void*>(static_cast<uintptr_t>(4u)), nullptr, 0u, 0u,

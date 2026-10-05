@@ -739,6 +739,12 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         if (!mounted && kernel::block::device_count() > 0) {
             kernel::serial::puts("[KERNEL] WARNING: No filesystem could be mounted automatically\n");
         }
+        // C166 loads the App Model association override image before any
+        // application or File Explorer activation can consult the resolver.
+        kernel::appmodel::initializeFileAssociations();
+        if (kernel::appmodel::fileAssociationPersistenceRejected()) {
+            kernel::serial::puts("[APP-MODEL] association-persistence=invalid-ignored\n");
+        }
 
         if (is_bootinfo && bootinfo && bootinfo->RamdiskBase != 0 && bootinfo->RamdiskSize != 0) {
             kernel::serial::puts("[KERNEL] Boot wallpaper pack found in ramdisk.img\n");
