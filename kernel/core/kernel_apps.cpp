@@ -6280,6 +6280,7 @@ DiskManagerApp::DiskManagerApp()
       m_dialogIsCreate(false), m_dialogIsFormat(false),
       m_dialogIsReformat(false), m_dialogIsDelete(false),
       m_dialogIsGptRepair(false),
+      m_gptRepairButtonFocus(0),
       m_createSizeEdited(false),
       m_createNameEdited(false), m_createInputFocus(0),
       m_initializeScheme(storage::DEFAULT_INITIALIZE_SCHEME),
@@ -7100,6 +7101,20 @@ void DiskManagerApp::updateInitializeControls() {
                     (formatOptions ? (m_dialogIsReformat ? "Quick Reformat" : "Format FAT32") :
                         (createOptions ? "Create" : "Initialize")))));
     }
+    if (m_dialogIsGptRepair && gptRepairConfirm) {
+        app::Widget* focused = m_gptRepairButtonFocus == 0 ? cancel : confirm;
+        if (focused && focused->visible && focused->enabled)
+            focused->bgColor = 0xFF34465C;
+        app::Widget* other = m_gptRepairButtonFocus == 0 ? confirm : cancel;
+        if (other) other->bgColor = 0xFF505060;
+        if (cancel) cancel->bgColor = m_gptRepairButtonFocus == 0
+            ? 0xFF34465C : 0xFF505060;
+        if (confirm) confirm->bgColor = m_gptRepairButtonFocus == 1
+            ? 0xFF34465C : 0xFF505060;
+    } else {
+        if (confirm) confirm->bgColor = 0xFF505060;
+        if (cancel) cancel->bgColor = 0xFF505060;
+    }
     if (sizeInput) {
         sizeInput->visible = createOptions;
         sizeInput->enabled = createOptions;
@@ -7308,6 +7323,11 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
     if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED) {
         if (escape) {
             closeInitializeDialog();
+        } else if (m_dialogIsGptRepair && key == shell::KEY_TAB) {
+            m_gptRepairButtonFocus = static_cast<uint8_t>(
+                (m_gptRepairButtonFocus + 1) % 2);
+            updateInitializeControls();
+            invalidate();
         } else if (m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS &&
                    key == shell::KEY_TAB) {
             if (m_dialogIsFormat) m_createInputFocus = 1;
@@ -7344,6 +7364,10 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             invalidate();
         } else if (enter && m_initializeDialogState == INITIALIZE_DIALOG_CHOOSE_SCHEME) {
             beginInitializeConfirmation(m_initializeScheme);
+        } else if (m_dialogIsGptRepair && enter &&
+                   m_initializeDialogState == INITIALIZE_DIALOG_GPT_REPAIR_CONFIRM) {
+            onWidgetClick(m_gptRepairButtonFocus == 0
+                ? m_cancelInitializeBtnId : m_confirmInitializeBtnId);
         } else if (enter && m_initializeDialogState == INITIALIZE_DIALOG_CONFIRM) {
             runInitializeOperation();
         } else if (enter && m_initializeDialogState ==
@@ -9603,6 +9627,7 @@ void DiskManagerApp::beginGptRepairConfirmation() {
         return;
     }
     m_dialogIsGptRepair = true;
+    m_gptRepairButtonFocus = 0;
     m_dialogIsDelete = false;
     m_dialogIsCreate = false;
     m_dialogIsFormat = false;
@@ -9914,6 +9939,7 @@ void DiskManagerApp::closeInitializeDialog() {
     m_dialogIsReformat = false;
     m_dialogIsDelete = false;
     m_dialogIsGptRepair = false;
+    m_gptRepairButtonFocus = 0;
     m_createInputFocus = 0;
     m_initializeMessage[0] = '\0';
     updateInitializeControls();

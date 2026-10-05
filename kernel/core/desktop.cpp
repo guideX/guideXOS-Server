@@ -11063,9 +11063,14 @@ void handle_key(uint32_t key)
     if (compositor::KernelCompositor::hasWindows()) {
         app::KernelWindow* focused = compositor::KernelCompositor::getFocusedWindow();
         if (focused) {
-            // Escape closes app window
+            // Give modal app UI the first chance to consume Escape. Apps without
+            // an active modal retain the desktop's close-window shortcut.
             if (key == 27) {  // ESC
-                compositor::KernelCompositor::closeWindow(focused->id);
+                if (focused->owner && focused->owner->hasModalDialog()) {
+                    compositor::KernelCompositor::handleKeyDown(key);
+                } else {
+                    compositor::KernelCompositor::closeWindow(focused->id);
+                }
                 draw();
                 return;
             }

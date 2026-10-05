@@ -209,6 +209,7 @@ public:
     virtual void onMouseUp(int x, int y, uint8_t button) {}
     virtual void onMouseWheel(int x, int y, int wheelDelta) {}
     virtual void onKeyDown(uint32_t key) {}
+    virtual bool hasModalDialog() const { return false; }
     virtual void onKeyUp(uint32_t key) {}
     virtual void onKeyChar(char c) {}
     virtual void onWidgetClick(int widgetId) {}

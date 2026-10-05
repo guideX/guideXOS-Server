@@ -1184,6 +1184,10 @@ public:
     virtual void onMouseDown(int x, int y, uint8_t button) override;
     virtual void onMouseWheel(int x, int y, int wheelDelta) override;
     virtual void onKeyDown(uint32_t key) override;
+    virtual bool hasModalDialog() const override {
+        return m_mountDialogOpen ||
+            m_initializeDialogState != INITIALIZE_DIALOG_CLOSED;
+    }
     virtual void onKeyChar(char c) override;
     virtual void onWidgetClick(int widgetId) override;
 
@@ -1321,6 +1325,7 @@ private:
     bool m_dialogIsReformat;
     bool m_dialogIsDelete;
     bool m_dialogIsGptRepair;
+    uint8_t m_gptRepairButtonFocus;
     bool m_createSizeEdited;
     bool m_createNameEdited;
     uint8_t m_createInputFocus;
