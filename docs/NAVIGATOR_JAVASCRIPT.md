@@ -6594,3 +6594,66 @@ reentrancy, and full evaluator-purity checks remain unqualified. Those are the
 remaining blockers. No public `:has()` syntax was added.
 
 **NOT YET SAFE TO PROCEED TO JS63**
+
+### JS62R3 relative selector behavioral qualification (2026-10-05)
+
+JS62R3 keeps the JS62R2 relative evaluator and public selector grammar
+unchanged. The new native lane, `tests/navigator_javascript_js62r3_test.cpp`,
+is run by `scripts/smoke-navigator-javascript-js62r3.ps1`. It passes 1,293
+focused checks, including the inherited generation/corruption/attribute/focus
+coverage, radio and disabled-state cases, cross-checks, and state snapshots.
+The ordinary and strict warning-as-error source builds pass. All four public
+`:has()` forms and standalone leading combinators remain rejected.
+
+The radio fixture starts with an unchecked two-member `mode` group. JavaScript
+sets radio A through the existing checked setter; then the normal focused
+control activation path checks radio B, clears A, and leaves the independent
+`other` group independent. ID-qualified relative `:checked` results follow A
+and B, and replacing the document rejects the old radio handle and leaves the
+replacement radio unchecked. The disabled fixture proves a disabled fieldset
+projects `:disabled` to its eligible descendant, an explicitly disabled
+control matches, and a control outside the fieldset does not. Repeated calls
+observe native changes to canonical disabled state without a cache. Navigator
+still has no supported JavaScript disabled-state setter: JavaScript `disabled`
+attribute writes remain deferred no-ops under JS52, so freshness is established
+through the existing native runtime authority.
+
+The lane compares 256 unique-ID anchor/target/relation cases against separate
+parent-chain and forward-sibling walks. It also compares representative
+Descendant, Child, AdjacentSibling, and GeneralSibling results with ordinary
+CSS combinator queries; Child with `parentElement`; AdjacentSibling with
+`nextElementSibling`; GeneralSibling with a repeated `nextElementSibling`
+walk; and Descendant with public `contains()` (which includes self, while
+relative Descendant excludes it). These oracles are separate from the relative
+helper, though the CSS engine and helper both ultimately use the same
+authoritative structural Element records. The traversal-property and
+parent-chain checks supplement that shared low-level representation.
+
+Purity snapshots show no change to the full selector core bytes, structural
+Element bytes/order, form runtime state (including focus/checked/disabled),
+content metadata, document generation, selector collection occupancy, or
+listener count. Separate caller-owned counter sets produce matching isolated
+counts; a no-counter call returns the same result. The helper and production
+build remain free of relative-result cache or heap scratch. Production data
+sizes remain at the JS62R2 values: core 32, simple selector 68, selector 812,
+collection record 832, registry 106,496, HtmlElementRef 440, content record
+24 bytes; diagnostics remain 64 bytes per native caller and add zero
+production storage.
+
+The performance sanity subset reproduced the JS62R2 near-capacity late-true
+and false counts exactly: 4,102 record inspections, 1,027 parent hops, 2,051
+serial/index resolutions, and 1,021 selector evaluations in each call. A
+64-anchor outer-candidate sample used 581,942 record inspections (about 9,093
+per anchor), consistent with the JS62R2 9,012-record full-false average. The
+algorithm was not changed and those counts do not justify optimization.
+
+**Outcome B: NOT YET SAFE TO PROCEED TO JS63.** JS62R3 does not yet prove
+relative evaluation from inside event handlers or nested dispatch. Event
+target/currentTarget/phase/relatedTarget/defaultPrevented preservation during
+relative evaluation, and reentrant relative calls with different anchors,
+selectors, relations, and counter sets, remain unqualified. No test-only
+JavaScript API was added to bridge that gap. Public `:has()` remains
+unsupported. The direct relative evaluator has no callback/reentrant entry
+point in this phase, so completing this item requires a native test seam that
+can execute evaluator calls at event-handler boundaries without exposing a
+JavaScript API or changing production behavior.
