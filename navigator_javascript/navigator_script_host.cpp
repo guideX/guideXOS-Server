@@ -3590,6 +3590,22 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
     if (anchorElement == nullptr || anchorElement->serial == 0u)
         return MatchResult::Invalid;
     const std::size_t count = document_->structuralElements.size();
+    // Structural serials are assigned from one, in insertion order, and each
+    // accepted structural Element is appended exactly once. Validate that
+    // authority before relying on serial-1 indexing below. This single scan
+    // also makes malformed, duplicate, or capacity-corrupted registries fail
+    // closed without introducing a persistent index.
+    for (std::size_t position = 0u; position < count; ++position) {
+        if (document_->structuralElements[position].serial != position + 1u)
+            return MatchResult::Invalid;
+    }
+    const auto structuralElement = [&](HostInstanceId serial)
+        -> const gxos::web::HtmlElementRef* {
+        if (serial == 0u || serial > count) return nullptr;
+        const gxos::web::HtmlElementRef& element =
+            document_->structuralElements[static_cast<std::size_t>(serial - 1u)];
+        return element.serial == serial ? &element : nullptr;
+    };
     std::size_t anchorPosition = count;
     for (std::size_t position = 0u; position < count; ++position) {
         if (&document_->structuralElements[position] == anchorElement) {
@@ -3606,7 +3622,12 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
     bool reachedRoot = false;
     for (std::size_t hop = 0u; hop < count; ++hop) {
         HostInstanceId parentSerial = 0u;
-        if (!resolveStructuralParentSerial(anchorAncestor, parentSerial))
+        const gxos::web::HtmlElementRef* ancestor =
+            structuralElement(anchorAncestor);
+        if (ancestor == nullptr || ancestor->parentSerial == ancestor->serial)
+            return MatchResult::Invalid;
+        parentSerial = ancestor->parentSerial;
+        if (parentSerial != 0u && structuralElement(parentSerial) == nullptr)
             return MatchResult::Invalid;
         if (parentSerial == 0u) {
             reachedRoot = true;
@@ -3629,20 +3650,25 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
                 document_->structuralElements[position];
             if (candidate.serial == 0u || candidate.serial == anchor.instanceId)
                 continue;
-            if (findElement(candidate.serial) != &candidate)
-                return MatchResult::Invalid;
             bool eligible = false;
             if (relation == NavigatorScriptRelativeSelectorRelation::Child) {
-                HostInstanceId parentSerial = 0u;
-                if (!resolveStructuralParentSerial(candidate.serial,
-                        parentSerial)) return MatchResult::Invalid;
-                eligible = parentSerial == anchor.instanceId;
+                if (candidate.parentSerial == candidate.serial ||
+                    (candidate.parentSerial != 0u &&
+                        structuralElement(candidate.parentSerial) == nullptr))
+                    return MatchResult::Invalid;
+                eligible = candidate.parentSerial == anchor.instanceId;
             } else {
                 HostInstanceId currentSerial = candidate.serial;
                 for (std::size_t hop = 0u; hop < count; ++hop) {
-                    HostInstanceId parentSerial = 0u;
-                    if (!resolveStructuralParentSerial(currentSerial,
-                            parentSerial)) return MatchResult::Invalid;
+                    const gxos::web::HtmlElementRef* current =
+                        structuralElement(currentSerial);
+                    if (current == nullptr ||
+                        current->parentSerial == current->serial)
+                        return MatchResult::Invalid;
+                    const HostInstanceId parentSerial = current->parentSerial;
+                    if (parentSerial != 0u &&
+                        structuralElement(parentSerial) == nullptr)
+                        return MatchResult::Invalid;
                     if (parentSerial == 0u) break;
                     if (parentSerial == anchor.instanceId) {
                         eligible = true;
@@ -3664,15 +3690,22 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
         relation != NavigatorScriptRelativeSelectorRelation::GeneralSibling)
         return MatchResult::Invalid;
     HostInstanceId parentSerial = 0u;
-    if (!resolveStructuralParentSerial(anchor.instanceId, parentSerial) ||
-        parentSerial == 0u) return MatchResult::NoMatch;
+    const gxos::web::HtmlElementRef* anchorStructural =
+        structuralElement(anchor.instanceId);
+    if (anchorStructural == nullptr ||
+        anchorStructural->parentSerial == anchorStructural->serial)
+        return MatchResult::Invalid;
+    parentSerial = anchorStructural->parentSerial;
+    if (parentSerial != 0u && structuralElement(parentSerial) == nullptr)
+        return MatchResult::Invalid;
+    if (parentSerial == 0u) return MatchResult::NoMatch;
     for (std::size_t position = anchorPosition + 1u; position < count;
             ++position) {
         const gxos::web::HtmlElementRef& candidate =
             document_->structuralElements[position];
         if (candidate.serial == 0u || candidate.serial == anchor.instanceId ||
             candidate.parentSerial != parentSerial) continue;
-        if (findElement(candidate.serial) != &candidate)
+        if (structuralElement(candidate.serial) != &candidate)
             return MatchResult::Invalid;
         const MatchResult matched = candidateMatches(candidate);
         if (matched == MatchResult::Invalid) return MatchResult::Invalid;

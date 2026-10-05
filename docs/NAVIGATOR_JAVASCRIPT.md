@@ -6424,3 +6424,68 @@ JS63 may map a carefully bounded single-relative-selector `:has()` grammar to
 this primitive only after reducing or explicitly accepting the descendant
 lookup bound and adding parser-facing malformed-input, mutation, corruption,
 and hosted coverage. No such public syntax is part of JS62.
+
+### JS62R relative selector hardening (2026-10-04)
+
+JS62R audits the internal evaluator before any public `:has()` work. The
+original Descendant loop examined up to N structural candidates. For each
+candidate it followed up to N parent links. Each parent link called
+`resolveStructuralParentSerial()`, which performed a linear `findElement()`
+scan for the current serial and another linear scan to validate its parent.
+The concrete ancestry path was therefore candidate scan × parent hops × two
+serial scans: at N=1024, up to 2,147,483,648 structural record comparisons,
+before anchor, target, and selector matcher work.
+
+The hardening change uses the parser's existing structural authority: accepted
+structural Elements receive serials starting at one in insertion order and
+are appended once to `structuralElements`. Each relative evaluation validates
+that every represented record still has `serial == vector index + 1`; malformed
+or conflicting serial metadata fails closed. It then resolves structural
+parents using `serial - 1` direct indexing. No index is retained between
+calls, no document structure or descriptor grows, and no heap or stack
+scratch storage is added. Anchor ancestry and each candidate ancestry remain
+bounded to N links, cycles and invalid parent serials return Invalid, and
+Descendant still excludes its anchor.
+
+The relation traversal bounds are now: Descendant O(N²) ancestry work across
+at most N candidates; Child O(N) candidate checks; AdjacentSibling and
+GeneralSibling O(N) forward vector scans. The shared selector matcher retains
+its own bounded lookup work; in particular an attribute predicate may scan
+the structural vector for each eligible candidate. Thus one relative call is
+bounded by O(N²), while an outer selector evaluating N anchors can still do
+O(N³) total work. At the 1024-record cap that multi-anchor upper bound has not
+been demonstrated acceptable. JS63 remains blocked pending test-only work
+counters and a measured outer-candidate simulation, broader mutation and
+corruption coverage, and full regression qualification.
+
+The new focused `tests/navigator_javascript_js62r_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js62r.ps1`, reaches exactly 1024 structural
+records, checks a matching final descendant, rejects self-parent and
+two-node-cycle corruption, and confirms all four public `:has()` forms remain
+unsupported. Its current result is 10/10, including the strict
+warning-as-error compilation. The original JS62 test remains 15/15.
+
+The focused JS36–JS62 regression set passed, including JS61 at 2,077/2,077,
+JS62 at 15/15, and JS62R at 10/10. The complete historical JavaScript matrix
+passed 60/60 lanes (lexer, parser, runtime, and JS6–JS62). The production
+`build.bat` passed. The hosted aggregate reported 614 passed and the same
+seven known CSS failures (3C, 3G, 6A, three 6B checks, and 6C), with no new
+failure. The strict warning-as-error lane passed as part of the JS62R smoke.
+
+The kernel wrapper remains blocked by the existing PacMan undefined symbols
+`pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)`. The direct amd64 make lane remains
+blocked by the existing Mbed TLS configuration errors at
+`mbedtls_check_config.h:51` and `:64`; neither blocker was modified. No fresh
+kernel was produced, so QEMU is not claimed. Kernel attempts regenerated three
+tracked PacMan object files; those were restored to their committed contents.
+The post-run worktree contains only the four JS62R source/test/documentation
+files described above.
+
+The focused evidence still does not include test-only operation counters,
+outer-candidate cost measurements, the requested deep/wide relation stress,
+full live-state/lifecycle/purity cross-checks, or a pre-run snapshot of ignored
+generated artifact trees. No public `:has()` is supported. Because total work
+across many outer candidates remains O(N³) in the conservative bound and has
+not been measured at capacity, JS62R is Outcome B: NOT YET SAFE TO PROCEED TO
+JS63.
