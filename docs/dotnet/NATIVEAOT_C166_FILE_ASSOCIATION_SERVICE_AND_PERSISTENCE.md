@@ -92,3 +92,155 @@ is synchronous in this repository; it has no separate flush callback.
 No Settings UI was added. No proof-only association override was installed.
 The production `.txt` state has not been proven by a fresh boot; with no
 association image, compiled Managed Notes remains the intended default.
+
+## C166R validation continuation (2026-10-05)
+
+### Result
+
+C166 remains **not accepted**. This continuation stopped before proof-media installation
+or any QEMU mutation/reboot sequence. No C166R commit was created. The C165 audit
+and C166 implementation commit remain unchanged.
+
+### Gate and artifact-lineage findings
+
+The inherited C164 runner (`scripts/dotnet/run-c158-managed-calculator.ps1 -PhaseC164`)
+requires the current canonical kernel, ESP kernel, and ramdisk to equal the C163
+manifest's post-phase hashes before it reaches any C164/C166-specific build or boot
+logic. That is stale for C164 and C166. C163 records kernel
+`02817323329C5CA7A6B0DAB67C8709CD60CDED9B3A4F2B096C9D1194E503BE4B` and ramdisk
+`7D8EB9AABC6016BD2C8EBC2F33F5805BEDEE3F15368F9F31C4335C3D80E43266`.
+
+The accepted C164 manifest (`out/dotnet/c164-file-activation/c164-proof-manifest.json`)
+claims ordinary clean kernel `AAE19D63090854CB6389A8311FF797E406E4C016058FE9559F4A9EB584D3E1FB`
+and ramdisk `5CEC7F5FF2B43AE223A9793232BE0740E33FE357FA8B07869A941BAB54A2B41D`.
+Its six boot records use that pair, but the saved C164 canonical kernel and ESP-kernel
+backups both hash to the C163 kernel (`028173...`), and the current protected ESP kernel
+also hashes to `028173...`. The saved C164 ramdisk backup and current ESP ramdisk hash
+to `7D8EB9...`, while the C164 accepted manifest claims `5CEC7F...`. Thus the C164
+manifest's ordinary boot hash fields are not corroborated by its saved artifact backups
+or current protected media. The actual C164 clean artifacts named by the manifest are
+not available in the inspected evidence tree. C163 historical hashes, C164 claimed
+ordinary hashes, the current C166-linked kernel (`F32ECE...` observed before the proof
+link), and C166 proof/clean products cannot be safely treated as interchangeable.
+
+No hash check was removed and no artifact was installed. The proper next harness repair
+must verify accepted predecessor source identity and require actual product files whose
+hashes match the predecessor manifest; it must also avoid C164-specific stress/final-state
+conditions for C166. The existing combined runner is not yet a C166 runner.
+
+### Validation attempted
+
+- Managed C166-era NativeAOT proof composite build: succeeded after the first attempt
+  found and fixed a missing `using System` in an experimental wrapper test. The test was
+  then removed because it had not been executed; this compile is not an ABI or wrapper
+  test pass and the final source does not contain that experimental test.
+- C166-era kernel AMD64 link with the C164 proof defines: succeeded. The resulting
+  ignored `kernel/build/amd64/bin/kernel.elf` was restored from the existing C164
+  canonical backup. Current canonical kernel and ESP kernel both hash to
+  `02817323329C5CA7A6B0DAB67C8709CD60CDED9B3A4F2B096C9D1194E503BE4B`; ESP ramdisk
+  hashes to `5CEC7F5FF2B43AE223A9793232BE0740E33FE357FA8B07869A941BAB54A2B41D`.
+- Existing C164 serial evidence was inspected, not freshly rerun: native resolver 28
+  cases plus 1,000 resolutions; managed C160 snapshot 22/22 plus 1,000 calls; C162 ABI
+  close wrapper 18 cases; C163 Explorer 48 cases plus 1,000 refreshes and 100 navigation
+  operations; C164 activation context 30 cases; Notes state 32 cases. These remain
+  historical predecessor evidence only.
+- `git diff --check` passed after cleanup. PowerShell parsing passed for the experimental
+  runner edit before it was reverted.
+
+### Persistence architecture risk
+
+Native persistence currently calls `vfs::write_file` followed by a fixed-image readback,
+then commits runtime state. There is no separate flush primitive in this path; VFS
+`flush()` is a no-op because writes are synchronous. However, the FAT `overwrite_path`
+implementation writes candidate bytes into the existing file's cluster chain before
+updating its directory entry and has no atomic replace/rollback. A storage error during
+overwrite can therefore damage the previous persisted image. Runtime state remains
+unchanged when `persistCandidate` reports failure, but the stronger requested guarantee
+that the old persisted state remains authoritative is not established and may be false.
+This requires a crash-safe VFS/FAT replacement strategy or a separately validated
+redundant/dual-slot persistence design before Outcome A can be considered.
+
+### Unverified C166R requirements
+
+No fresh native service suite, managed wrapper suite, ABI-v4 executed layout suite,
+persistence format/corruption/failure-injection suite, 1,000 mutation stress, resolver
+state stress, real `/GXASSOC.BIN` write/readback evidence, reboot reload proof, File
+Explorer Disabled/Reset parity, three proof boots, three ordinary boots, Settings smoke,
+or clean production installation was run. No C166 acceptance evidence is claimed.
+Settings v2 remains source-defined and unmodified; C128 remains unverified. No Default Apps
+UI was added by this continuation.
+
+## C166R2 recovery and dual-slot implementation (2026-10-05)
+
+### Starting state and protected media
+
+The implementation started at `1688a98deb1aa8714591bd09418fa22362307a86`
+on `v1.1_DOTNET_SUPPORT`, tracking `origin/v1.1_DOTNET_SUPPORT`. The initial
+status showed only this document modified; that existing C166R history was
+preserved and extended. Initial ahead/behind was 0/0 (the earlier C166R report
+of 1/0 was stale).
+
+Before any proof-media installation, byte-for-byte backups were written under
+`out/dotnet/c166r2-artifact-lineage/pre-run-protected/` and verified against
+the source SHA-256:
+
+| Pre-run protected product | SHA-256 |
+| --- | --- |
+| canonical `kernel/build/amd64/bin/kernel.elf` | `02817323329C5CA7A6B0DAB67C8709CD60CDED9B3A4F2B096C9D1194E503BE4B` |
+| `ESP/kernel.elf` | `02817323329C5CA7A6B0DAB67C8709CD60CDED9B3A4F2B096C9D1194E503BE4B` |
+| `ESP/ramdisk.img` | `5CEC7F5FF2B43AE223A9793232BE0740E33FE357FA8B07869A941BAB54A2B41D` |
+
+These are pre-run rollback bytes only; they are not called C164 canonical
+products. No proof product was installed, so no restoration was necessary.
+
+### Historical artifact discrepancy and authority
+
+Historical C163 kernel/ramdisk hashes remain as recorded in their manifest.
+The C164 manifest's claimed ordinary kernel and ramdisk hashes are not
+corroborated by its saved canonical backups or the protected media: its kernel
+backup and protected kernels match the historical C163 kernel, while its
+ramdisk backup/protected ramdisk match a value different from the C164 manifest
+claim. The discrepancy is retained as evidence; neither manifest was changed.
+Accordingly, C163 and C164 artifact hashes are retired as C166R2 build gates.
+The intended authority is the committed source state, fresh proof products,
+verified pre-run rollback backups, and fresh clean production products.
+
+The inherited runner still contains a C164-specific C163 artifact-lineage
+check and was not converted into a C166R2 proof runner in this continuation.
+No fresh build, QEMU boot, or clean production install has therefore been
+claimed. This infrastructure work remains an acceptance blocker.
+
+### Association persistence format v2
+
+The single-file `/GXASSOC.BIN` v1 overwrite path was replaced in native source
+with `/GXAS0.BIN` and `/GXAS1.BIN`. The legacy v1 file is ignored; no automatic
+migration is performed. Runtime authority remains `kernel::appmodel`, and the
+managed service continues to call the native ABI rather than editing files.
+
+Each slot has a fixed 136-byte image: a 16-byte header (`GSA2`, version 2,
+record count, and 64-bit generation), the existing 116-byte override record,
+and a 4-byte integrity field. The integrity field is CRC-32/ISO-HDLC
+(reflected polynomial `0xEDB88320`, initial and final XOR `0xFFFFFFFF`) over
+the preceding 132 bytes. Total slot footprint is 272 bytes. Generations start
+at 1 and increase monotonically; at `UINT64_MAX`, another mutation is rejected
+as persistence failure rather than wrapping.
+
+Startup validates each slot independently, chooses the only valid image or
+the valid image with the highest generation, and deterministically chooses A
+on equal generations. Missing slots mean compiled defaults. A corrupt slot is
+ignored when the other is valid; if neither is valid, compiled defaults remain
+usable. A mutation writes only the other slot, reads back the exact fixed image,
+validates it and compares all bytes before committing runtime state. Thus a
+partial candidate write cannot overwrite the slot selected as current before
+that transaction. This does not claim FAT atomic replacement or power-loss
+linearizability; an I/O failure after a complete new image reached storage can
+leave acknowledgement ambiguous.
+
+A freestanding GCC syntax-only compile of `app_launch_target_resolver.cpp` passed. A full kernel link and the required
+fault-injection matrix, 30+ focused slot cases, generation exhaustion fixture,
+1,000-mutation stress, managed wrapper/ABI tests, reboot persistence, real FAT
+recovery, explorer parity, regression suites, proof boots, and three ordinary
+boots remain unverified. No test totals or Outcome A claim are made. The final
+C166 disposition is **not accepted** pending those gates. Host ABI target
+remains v4/128 bytes with callbacks at 104/112/120; Settings remains v2; C128
+remains unverified; no Default Apps UI was added.

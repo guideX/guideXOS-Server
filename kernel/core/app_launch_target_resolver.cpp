@@ -43,9 +43,9 @@ constexpr const char* kManagedNotesApplicationId =
 constexpr FileAssociationRecord kFileAssociations[kFileAssociationCapacity] = {
     { ".txt", kManagedNotesApplicationId },
 };
-constexpr char kAssociationPersistencePath[] = "/GXASSOC.BIN";
-constexpr uint32_t kAssociationMagic = 0x31415347u; // GSA1
-constexpr uint16_t kAssociationVersion = 1u;
+constexpr char kAssociationSlotPaths[2][12] = { "/GXAS0.BIN", "/GXAS1.BIN" };
+constexpr uint32_t kAssociationMagic = 0x32415347u; // GSA2
+constexpr uint16_t kAssociationVersion = 2u;
 constexpr uint32_t kAssociationOverrideCapacity = 1u;
 enum class PersistedOverrideState : uint32_t { Application = 1u, Disabled = 2u };
 struct AssociationOverrideRecord {
@@ -57,14 +57,20 @@ struct AssociationPersistenceImage {
     uint32_t magic;
     uint16_t version;
     uint16_t recordCount;
+    uint64_t generation;
     AssociationOverrideRecord records[kAssociationOverrideCapacity];
+    uint32_t integrity;
 };
 static_assert(sizeof(AssociationOverrideRecord) == 116u, "C166 record layout drift");
-static_assert(sizeof(AssociationPersistenceImage) == 124u, "C166 image layout drift");
+static_assert(offsetof(AssociationPersistenceImage, records) == 16u, "C166 v2 header layout drift");
+static_assert(offsetof(AssociationPersistenceImage, integrity) == 132u, "C166 v2 integrity offset drift");
+static_assert(sizeof(AssociationPersistenceImage) == 136u, "C166 v2 image layout drift");
 AssociationOverrideRecord s_override{};
 bool s_hasOverride = false;
 bool s_associationsInitialized = false;
 bool s_invalidPersistedState = false;
+uint64_t s_activeGeneration = 0u;
+int32_t s_activeSlot = -1;
 static_assert(sizeof(kFileAssociations) ==
     kFileAssociationCapacity * sizeof(FileAssociationRecord),
     "file association table must retain its fixed capacity");
@@ -125,7 +131,7 @@ bool hasDuplicateAssociationExtensions() {
 bool normalizedKnownExtension(const char* extension, char output[16]);
 const char* compiledAssociation(const char* extension);
 bool copyBounded(char* destination, uint32_t capacity, const char* source);
-bool persistCandidate(const AssociationPersistenceImage& image);
+bool persistCandidate(AssociationPersistenceImage* image);
 void loadAssociationOverrides();
 
 FileAssociationResolution resolveFileAssociation(
@@ -467,7 +473,7 @@ AssociationServiceStatus fileAssociationService(
                 candidate.records[0].state = static_cast<uint32_t>(PersistedOverrideState::Disabled);
             }
         }
-        if (!persistCandidate(candidate)) {
+        if (!persistCandidate(&candidate)) {
             response->status = static_cast<uint32_t>(AssociationServiceStatus::PersistenceFailed);
             return AssociationServiceStatus::PersistenceFailed;
         }
@@ -527,8 +533,22 @@ bool normalizedKnownExtension(const char* extension, char output[16]) {
 
 bool validateImage(const AssociationPersistenceImage& image) {
     if (image.magic != kAssociationMagic || image.version != kAssociationVersion ||
-        image.recordCount > kAssociationOverrideCapacity) return false;
-    if (image.recordCount == 0u) return true;
+        image.recordCount > kAssociationOverrideCapacity || image.generation == 0u)
+        return false;
+    uint32_t crc = 0xFFFFFFFFu;
+    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&image);
+    for (uint32_t i = 0u; i < offsetof(AssociationPersistenceImage, integrity); ++i) {
+        crc ^= bytes[i];
+        for (uint32_t bit = 0u; bit < 8u; ++bit)
+            crc = (crc >> 1u) ^ ((crc & 1u) ? 0xEDB88320u : 0u);
+    }
+    if ((crc ^ 0xFFFFFFFFu) != image.integrity) return false;
+    if (image.recordCount == 0u) {
+        const uint8_t* record = reinterpret_cast<const uint8_t*>(&image.records[0]);
+        for (uint32_t i = 0u; i < sizeof(image.records[0]); ++i)
+            if (record[i] != 0u) return false;
+        return true;
+    }
     char normalized[16]{};
     if (!normalizedKnownExtension(image.records[0].extension, normalized) ||
         !fixedEqualsCanonical(image.records[0].extension,
@@ -544,14 +564,46 @@ bool validateImage(const AssociationPersistenceImage& image) {
         sizeof(image.records[0].applicationId), kManagedNotesApplicationId);
 }
 
-bool persistCandidate(const AssociationPersistenceImage& image) {
-    if (vfs::write_file(kAssociationPersistencePath, &image, sizeof(image)) !=
-        static_cast<int32_t>(sizeof(image))) return false;
+bool readAssociationSlot(uint32_t slot, AssociationPersistenceImage* image,
+                         bool* present) {
+    if (!image || !present || slot > 1u) return false;
+    *present = false;
+    vfs::FileInfo info{};
+    const vfs::Status status = vfs::stat(kAssociationSlotPaths[slot], &info);
+    if (status == vfs::VFS_ERR_NOT_FOUND || status == vfs::VFS_ERR_NOT_MOUNT)
+        return false;
+    *present = true;
+    if (status != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR ||
+        info.size != sizeof(*image)) return false;
+    return vfs::read_file(kAssociationSlotPaths[slot], image, sizeof(*image)) ==
+        static_cast<int32_t>(sizeof(*image)) && validateImage(*image);
+}
+
+bool persistCandidate(AssociationPersistenceImage* image) {
+    if (!image || s_activeGeneration == UINT64_MAX) return false;
+    image->generation = s_activeGeneration + 1u;
+    image->integrity = 0u;
+    uint32_t crc = 0xFFFFFFFFu;
+    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(image);
+    for (uint32_t i = 0u; i < offsetof(AssociationPersistenceImage, integrity); ++i) {
+        crc ^= bytes[i];
+        for (uint32_t bit = 0u; bit < 8u; ++bit)
+            crc = (crc >> 1u) ^ ((crc & 1u) ? 0xEDB88320u : 0u);
+    }
+    image->integrity = crc ^ 0xFFFFFFFFu;
+    const uint32_t target = s_activeSlot < 0 ? 0u :
+        static_cast<uint32_t>(1 - s_activeSlot);
+    if (vfs::write_file(kAssociationSlotPaths[target], image, sizeof(*image)) !=
+        static_cast<int32_t>(sizeof(*image))) return false;
     AssociationPersistenceImage readback{};
-    const int32_t count = vfs::read_file(kAssociationPersistencePath, &readback,
+    const int32_t count = vfs::read_file(kAssociationSlotPaths[target], &readback,
         sizeof(readback));
-    return count == static_cast<int32_t>(sizeof(readback)) &&
-        validateImage(readback) && __builtin_memcmp(&image, &readback, sizeof(image)) == 0;
+    if (count != static_cast<int32_t>(sizeof(readback)) ||
+        !validateImage(readback) ||
+        __builtin_memcmp(image, &readback, sizeof(*image)) != 0) return false;
+    s_activeGeneration = image->generation;
+    s_activeSlot = static_cast<int32_t>(target);
+    return true;
 }
 
 void loadAssociationOverrides() {
@@ -559,21 +611,24 @@ void loadAssociationOverrides() {
     s_associationsInitialized = true;
     s_hasOverride = false;
     s_override = {};
-    vfs::FileInfo info{};
-    const vfs::Status status = vfs::stat(kAssociationPersistencePath, &info);
-    if (status == vfs::VFS_ERR_NOT_FOUND || status == vfs::VFS_ERR_NOT_MOUNT) return;
-    if (status != vfs::VFS_OK) { s_invalidPersistedState = true; return; }
-    if (info.type != vfs::FILE_TYPE_REGULAR || info.size != sizeof(AssociationPersistenceImage)) {
-        s_invalidPersistedState = true; return;
+    AssociationPersistenceImage images[2]{};
+    bool present[2] = { false, false };
+    const bool valid[2] = {
+        readAssociationSlot(0u, &images[0], &present[0]),
+        readAssociationSlot(1u, &images[1], &present[1])
+    };
+    if (present[0] && !valid[0]) s_invalidPersistedState = true;
+    if (present[1] && !valid[1]) s_invalidPersistedState = true;
+    if (!valid[0] && !valid[1]) return;
+    uint32_t selected = valid[0] ? 0u : 1u;
+    if (valid[0] && valid[1])
+        selected = images[1].generation > images[0].generation ? 1u : 0u;
+    s_activeSlot = static_cast<int32_t>(selected);
+    s_activeGeneration = images[selected].generation;
+    if (images[selected].recordCount != 0u) {
+        s_override = images[selected].records[0];
+        s_hasOverride = true;
     }
-    AssociationPersistenceImage image{};
-    if (vfs::read_file(kAssociationPersistencePath, &image, sizeof(image)) !=
-        static_cast<int32_t>(sizeof(image)) || !validateImage(image)) {
-        s_invalidPersistedState = true; return;
-    }
-    if (image.recordCount == 0u) return;
-    s_override = image.records[0];
-    s_hasOverride = true;
 }
 
 static bool is_shell_label(const char* label)
