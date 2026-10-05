@@ -7,17 +7,21 @@ param(
     [switch]$PhaseC160,
     [switch]$PhaseC161,
     [switch]$PhaseC162,
-    [switch]$PhaseC163
+    [switch]$PhaseC163,
+    [switch]$PhaseC164
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+if ($PhaseC164) { $PhaseC163 = $true }
 if ($PhaseC163) { $PhaseC162 = $true }
 if ($PhaseC162) { $PhaseC161 = $true }
 if ($PhaseC161) { $PhaseC160 = $true }
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = if ($PhaseC163) {
+    $EvidenceRoot = if ($PhaseC164) {
+        Join-Path $RepoRoot "out\dotnet\c164-file-activation"
+    } elseif ($PhaseC163) {
         Join-Path $RepoRoot "out\dotnet\c163-managed-file-explorer"
     } elseif ($PhaseC162) {
         Join-Path $RepoRoot "out\dotnet\c162-managed-task-manager-close"
@@ -41,12 +45,12 @@ $espKernelPath = Join-Path $RepoRoot 'ESP\kernel.elf'
 $protectedRamdiskPath = Join-Path $RepoRoot 'ESP\ramdisk.img'
 $bootloaderPath = Join-Path $RepoRoot 'guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe'
 $buildRoot = Join-Path $EvidenceRoot 'build'
-$compositeRoot = Join-Path $buildRoot $(if ($PhaseC163) { 'composite-c163-proof' } elseif ($PhaseC162) { 'composite-c162-proof' } elseif ($PhaseC161) { 'composite-c161-proof' } elseif ($PhaseC160) { 'composite-c160-proof' } else { 'composite' })
-$canonicalCompositeRoot = Join-Path $buildRoot $(if ($PhaseC163) { 'composite-c163-production' } elseif ($PhaseC162) { 'composite-c162-production' } elseif ($PhaseC161) { 'composite-c161-production' } else { 'composite-c160-production' })
-$canonicalRamdisk = Join-Path $EvidenceRoot $(if ($PhaseC163) { 'staging\ramdisk-c163-production.img' } elseif ($PhaseC162) { 'staging\ramdisk-c162-production.img' } elseif ($PhaseC161) { 'staging\ramdisk-c161-production.img' } else { 'staging\ramdisk-c160-production.img' })
+$compositeRoot = Join-Path $buildRoot $(if ($PhaseC164) { 'composite-c164-proof' } elseif ($PhaseC163) { 'composite-c163-proof' } elseif ($PhaseC162) { 'composite-c162-proof' } elseif ($PhaseC161) { 'composite-c161-proof' } elseif ($PhaseC160) { 'composite-c160-proof' } else { 'composite' })
+$canonicalCompositeRoot = Join-Path $buildRoot $(if ($PhaseC164) { 'composite-c164-production' } elseif ($PhaseC163) { 'composite-c163-production' } elseif ($PhaseC162) { 'composite-c162-production' } elseif ($PhaseC161) { 'composite-c161-production' } else { 'composite-c160-production' })
+$canonicalRamdisk = Join-Path $EvidenceRoot $(if ($PhaseC164) { 'staging\ramdisk-c164-production.img' } elseif ($PhaseC163) { 'staging\ramdisk-c163-production.img' } elseif ($PhaseC162) { 'staging\ramdisk-c162-production.img' } elseif ($PhaseC161) { 'staging\ramdisk-c161-production.img' } else { 'staging\ramdisk-c160-production.img' })
 $runtimePackOutput = Join-Path $buildRoot 'runtime-pack'
 $stageRoot = Join-Path $EvidenceRoot 'staging\wallpaper-pack'
-$proofRamdisk = Join-Path $EvidenceRoot $(if ($PhaseC163) { 'staging\ramdisk-c163-proof.img' } elseif ($PhaseC162) { 'staging\ramdisk-c162-proof.img' } elseif ($PhaseC161) { 'staging\ramdisk-c161-proof.img' } elseif ($PhaseC160) { 'staging\ramdisk-c160-proof.img' } else { 'staging\ramdisk-c158.img' })
+$proofRamdisk = Join-Path $EvidenceRoot $(if ($PhaseC164) { 'staging\ramdisk-c164-proof.img' } elseif ($PhaseC163) { 'staging\ramdisk-c163-proof.img' } elseif ($PhaseC162) { 'staging\ramdisk-c162-proof.img' } elseif ($PhaseC161) { 'staging\ramdisk-c161-proof.img' } elseif ($PhaseC160) { 'staging\ramdisk-c160-proof.img' } else { 'staging\ramdisk-c158.img' })
 $proofKernel = Join-Path $EvidenceRoot 'proof-kernel.elf'
 $proofBackup = Join-Path $EvidenceRoot 'canonical\kernel.elf'
 $espKernelBackup = Join-Path $EvidenceRoot 'canonical\ESP-kernel.elf'
@@ -426,9 +430,23 @@ function Launch-ManagedFileExplorer([int]$ScreenWidth, [int]$ScreenHeight,
     # C163 appears at fixed All Programs index 15 after Task Manager.
     Click-Screen 115 ($contentY + 15 * 22 + 11)
     [void](Wait-Serial $SerialPath '^\[APPMODEL-MANAGED-LAUNCH\] source=StartMenu appId=com\.guidexos\.apps\.managed\.fileexplorer selector=00000008 image=/system/apps/GXOSAPP\.ELF metadata=valid' $before 35)
-    $launch = Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C163-EXPLORER id=com\.guidexos\.apps\.managed\.fileexplorer sel=8 path=/system/apps n=\d+ cap=64 ctl=5 abi=3/120 ro=1 result=PASS' $before 300
-    $instance = Wait-Serial $SerialPath '^\[C150-APP-LAUNCH\] id=com\.guidexos\.apps\.managed\.fileexplorer generation=([0-9A-Fa-f]+) selector=00000008 kind=normal' $before 12
-    return $instance.Match.Groups[1].Value
+    $activation = Wait-Serial $SerialPath ('^\[C150-APP-LAUNCH\] id=com\.guidexos\.apps\.managed\.fileexplorer generation=([0-9A-Fa-f]+) selector=00000008 kind=normal|^\[C162-MANAGED-FOCUS\] appId=com\.guidexos\.apps\.managed\.fileexplorer source=3 instance=[0-9A-Fa-f]{16} selector=00000008 existing=true result=PASS|^\[C150-LIFETIME-START\] result=FAIL capacity=3') $before 45
+    if ($activation.Match.Value.StartsWith('[C150-LIFETIME-START]', [System.StringComparison]::Ordinal)) {
+        throw 'Managed File Explorer launch was rejected because the bounded App Model lifetime table is full.'
+    }
+    if ($activation.Match.Value.StartsWith('[C162-MANAGED-FOCUS]', [System.StringComparison]::Ordinal)) {
+        # An earlier C163 pass may have left the final Explorer lifetime
+        # open. App Model focuses that exact existing instance instead of
+        # constructing another one; return its recorded launch generation.
+        $launches = [regex]::Matches((Get-Serial $SerialPath),
+            '(?m)^\[C150-APP-LAUNCH\] id=com\.guidexos\.apps\.managed\.fileexplorer generation=([0-9A-Fa-f]+) selector=00000008 kind=normal')
+        if ($launches.Count -eq 0) {
+            throw 'C163 focused an existing File Explorer without a recorded lifetime.'
+        }
+        return $launches[$launches.Count - 1].Groups[1].Value
+    }
+    [void](Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C163-EXPLORER id=com\.guidexos\.apps\.managed\.fileexplorer sel=8 path=/system/apps n=\d+ cap=64 ctl=5 abi=3/120 ro=1 result=PASS' $before 300)
+    return $activation.Match.Groups[1].Value
 }
 
 function Get-ManagedFileExplorerWindowOrigin([int]$ScreenWidth,
@@ -472,6 +490,180 @@ function Close-ManagedFileExplorer([int]$ScreenWidth, [int]$ScreenHeight,
         }
     }
     throw 'Managed File Explorer did not close after three pointer activations.'
+}
+
+function Select-ManagedFileExplorerEntryByName([string]$ExpectedPath,
+    [string]$ExpectedName, [string]$ExpectedType,
+    [int]$ScreenWidth, [int]$ScreenHeight, [string]$SerialPath) {
+    $escapedPath = [regex]::Escape($ExpectedPath)
+    $escapedName = [regex]::Escape($ExpectedName)
+    for ($row = 0; $row -lt 20; $row++) {
+        $before = (Get-Serial $SerialPath).Length
+        Click-ManagedFileExplorerRow $row $ScreenWidth $ScreenHeight
+        Start-Sleep -Milliseconds 250
+        $tail = (Get-Serial $SerialPath).Substring($before)
+        $pattern = '(?m)^\[C102-MANAGED-OUTPUT\] C163-STATE ev=input k=\d+ path=' +
+            $escapedPath + ' n=\d+ sel=' + $escapedName + ' type=' +
+            [regex]::Escape($ExpectedType) + ' size=[^ ]+ view=\d+ status='
+        if ($tail -match $pattern) { return }
+    }
+    throw "Managed File Explorer could not select '$ExpectedName' in '$ExpectedPath'."
+}
+
+function Close-ManagedNotes([string]$SerialPath) {
+    $before = (Get-Serial $SerialPath).Length
+    Send-QmpEvents @((New-Key 'alt' $true), (New-Key 'f4' $true),
+        (New-Key 'f4' $false), (New-Key 'alt' $false)) 110
+    [void](Wait-Serial $SerialPath '^\[C150-SURFACE\] action=destroy appId=com\.guidexos\.apps\.managed\.notes generation=[0-9A-Fa-f]+ window=[0-9A-Fa-f]+ reason=close-or-replace' $before 20)
+}
+
+function Activate-C164Fixture([string]$FileName, [bool]$UseEnter,
+    [int]$ScreenWidth, [int]$ScreenHeight, [string]$SerialPath,
+    [string]$ExistingFileExplorerId = '') {
+    $fileExplorerId = if ($ExistingFileExplorerId) {
+        $ExistingFileExplorerId
+    } else {
+        Launch-ManagedFileExplorer $ScreenWidth $ScreenHeight $SerialPath
+    }
+    Select-ManagedFileExplorerEntryByName '/system/apps' 'C164' 'Directory' `
+        $ScreenWidth $ScreenHeight $SerialPath
+    Click-ManagedFileExplorerButton 'Open' $ScreenWidth $ScreenHeight
+    Start-Sleep -Milliseconds 300
+    Select-ManagedFileExplorerEntryByName '/system/apps/C164' $FileName 'File' `
+        $ScreenWidth $ScreenHeight $SerialPath
+    $state = [regex]::Matches((Get-Serial $SerialPath),
+        '(?m)^\[C102-MANAGED-OUTPUT\] C163-STATE ev=input k=\d+ path=/system/apps/C164 n=\d+ sel=' +
+        [regex]::Escape($FileName) + ' type=File size=(\d+) view=\d+ status=File selected')
+    if ($state.Count -eq 0) { throw "No exact selected-file detail for '$FileName'." }
+    $openStart = (Get-Serial $SerialPath).Length
+    if ($UseEnter) {
+        Press-Key 'ret'
+    } else {
+        Click-ManagedFileExplorerButton 'Open' $ScreenWidth $ScreenHeight
+    }
+    $path = "/system/apps/C164/$FileName"
+    [void](Wait-Serial $SerialPath ('^\[C102-MANAGED-OUTPUT\] C164-NOTES-ACT path=' +
+        [regex]::Escape($path) + ' bytes=\d+ clean=1 undo=0 redo=0 caret=0 anchor=0 view=0 result=PASS') $openStart 90)
+    [void](Wait-Serial $SerialPath ('^\[C102-MANAGED-OUTPUT\] C164-NOTES-CONTENT exact=true source=VFS result=PASS') $openStart 20)
+    $target = Wait-Serial $SerialPath ('^\[C164-ACTIVATION\] source=ManagedFileExplorer instance=[0-9A-Fa-f]+ target=com\.guidexos\.apps\.managed\.notes path=' +
+        [regex]::Escape($path) + ' fresh=true source-closed=true result=PASS') $openStart 180
+    $launch = Wait-Serial $SerialPath '^\[C150-APP-LAUNCH\] id=com\.guidexos\.apps\.managed\.notes generation=([0-9A-Fa-f]+) selector=00000004 kind=document' $openStart 15
+    return [pscustomobject]@{
+        FileExplorerId = $fileExplorerId
+        NotesGeneration = $launch.Match.Groups[1].Value
+        Path = $path
+        SelectedSize = [int]$state[$state.Count - 1].Groups[1].Value
+        Activation = $target.Match.Value
+    }
+}
+
+function Click-ManagedNotesDocument([int]$ScreenWidth, [int]$ScreenHeight) {
+    $windowX = [Math]::Max(0, [int](($ScreenWidth - 600) / 2))
+    $windowY = [Math]::Max(0, [int](($ScreenHeight - 360) / 2))
+    Click-Screen ($windowX + 70) ($windowY + 24 + 92)
+}
+
+function Invoke-C164ManagedFileActivationScenario([int]$Number,
+    [int]$ScreenWidth, [int]$ScreenHeight, [string]$SerialPath) {
+    if ($Number -eq 1) {
+        $activation = Activate-C164Fixture 'hello.txt' $true `
+            $ScreenWidth $ScreenHeight $SerialPath
+        if ($activation.SelectedSize -ne 15) {
+            throw "C164 hello fixture has unexpected VFS size $($activation.SelectedSize)."
+        }
+        Click-ManagedNotesDocument $ScreenWidth $ScreenHeight
+        Press-Key 'end'
+        $editStart = (Get-Serial $SerialPath).Length
+        Send-Text 'x'
+        [void](Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C164-DOC event=input path=/system/apps/C164/hello\.txt len=16 dirty=1 undo=1 redo=0 caret=16 anchor=16 view=0 result=PASS' $editStart 15)
+        $undoStart = (Get-Serial $SerialPath).Length
+        Send-QmpEvents @((New-Key 'ctrl' $true), (New-Key 'z' $true),
+            (New-Key 'z' $false), (New-Key 'ctrl' $false)) 90
+        [void](Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C164-DOC event=shortcut path=/system/apps/C164/hello\.txt len=15 dirty=0 undo=0 redo=1 caret=15 anchor=15 view=0 result=PASS' $undoStart 15)
+        Close-ManagedNotes $SerialPath
+        return [pscustomobject]@{ Activations = 1; DistinctNotes = 1; FinalPath = $activation.Path; Save = $false; Unsupported = $false }
+    }
+    if ($Number -eq 2) {
+        $activation = Activate-C164Fixture 'save.txt' $false `
+            $ScreenWidth $ScreenHeight $SerialPath
+        Click-ManagedNotesDocument $ScreenWidth $ScreenHeight
+        Press-Key 'end'
+        Send-Text 'x'
+        $saveStart = (Get-Serial $SerialPath).Length
+        Send-QmpEvents @((New-Key 'ctrl' $true), (New-Key 's' $true),
+            (New-Key 's' $false), (New-Key 'ctrl' $false)) 90
+        [void](Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C152-SAVE result=PASS verify=read-back exact=true bytes=bounded dirty=false' $saveStart 20)
+        [void](Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C164-DOC event=shortcut path=/system/apps/C164/save\.txt len=\d+ dirty=0 undo=1 redo=0 caret=\d+ anchor=\d+ view=0 result=PASS' $saveStart 15)
+        Close-ManagedNotes $SerialPath
+
+        $reload = Activate-C164Fixture 'save.txt' $false `
+            $ScreenWidth $ScreenHeight $SerialPath
+        if ($reload.NotesGeneration -eq $activation.NotesGeneration) {
+            throw 'C164 boot 2 reopened the file into the old Notes lifetime.'
+        }
+        Close-ManagedNotes $SerialPath
+
+        $fileExplorerId = Launch-ManagedFileExplorer $ScreenWidth $ScreenHeight $SerialPath
+        Select-ManagedFileExplorerEntryByName '/system/apps' 'C164' 'Directory' `
+            $ScreenWidth $ScreenHeight $SerialPath
+        Click-ManagedFileExplorerButton 'Open' $ScreenWidth $ScreenHeight
+        Start-Sleep -Milliseconds 300
+        Select-ManagedFileExplorerEntryByName '/system/apps/C164' 'noapp.bin' 'File' `
+            $ScreenWidth $ScreenHeight $SerialPath
+        $unsupportedStart = (Get-Serial $SerialPath).Length
+        Press-Key 'ret'
+        [void](Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C164-FILE-ACTIVATION path=/system/apps/C164/noapp\.bin result=unsupported source-retained=true selection=preserved' $unsupportedStart 15)
+        return [pscustomobject]@{ Activations = 2; DistinctNotes = 2; FinalPath = $reload.Path; Save = $true; Unsupported = $true; FileExplorerId = $fileExplorerId }
+    }
+    if ($Number -eq 3) {
+        # Create a real C155 return candidate from the current clean named
+        # Notes document, then replace Settings Center with File Explorer.
+        # This leaves the one-shot session pending when C164 explicitly opens
+        # mixed.TXT, exercising the requested-path precedence at the App Model
+        # boundary rather than relying on another proof's incidental state.
+        $notesX = [Math]::Max(0, [int](($ScreenWidth - 600) / 2))
+        $notesY = [Math]::Max(0, [int](($ScreenHeight - 360) / 2))
+        $sessionStart = (Get-Serial $SerialPath).Length
+        Click-Screen ($notesX + 475) ($notesY + 24 + 294)
+        [void](Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C155-SESSION-ARMED generation=\d+ path=named caret=\d+ anchor=\d+ viewport=\d+ fixed-bytes=118 result=PASS' $sessionStart 20)
+        [void](Wait-Serial $SerialPath '^\[C155-RETURN-PAIR\] target=Notes session=armed result=PASS' $sessionStart 15)
+        [void](Wait-Serial $SerialPath '^\[C150-SETTINGS-LAUNCH\] source=Notes path=AppModel result=PASS' $sessionStart 30)
+        $staleSessionExplorerId = Launch-ManagedFileExplorer `
+            $ScreenWidth $ScreenHeight $SerialPath
+
+        $seenNotes = [System.Collections.Generic.HashSet[string]]::new(
+            [System.StringComparer]::OrdinalIgnoreCase)
+        $seenExplorers = [System.Collections.Generic.HashSet[string]]::new(
+            [System.StringComparer]::OrdinalIgnoreCase)
+        $lastActivation = $null
+        for ($cycle = 1; $cycle -le 25; $cycle++) {
+            if ($cycle -eq 1) {
+                $lastActivation = Activate-C164Fixture 'mixed.TXT' $true `
+                    $ScreenWidth $ScreenHeight $SerialPath `
+                    $staleSessionExplorerId
+            } else {
+                $lastActivation = Activate-C164Fixture 'mixed.TXT' $true `
+                    $ScreenWidth $ScreenHeight $SerialPath
+            }
+            if (-not $seenNotes.Add($lastActivation.NotesGeneration) -or
+                -not $seenExplorers.Add($lastActivation.FileExplorerId)) {
+                throw "C164 activation cycle $cycle reused a Notes or File Explorer lifetime."
+            }
+            Close-ManagedNotes $SerialPath
+        }
+        Launch-ManagedFileExplorer $ScreenWidth $ScreenHeight $SerialPath | Out-Null
+        return [pscustomobject]@{
+            Activations = $seenNotes.Count
+            DistinctNotes = $seenNotes.Count
+            DistinctExplorers = $seenExplorers.Count
+            FinalPath = $lastActivation.Path
+            Save = $false
+            Unsupported = $false
+            Precedence = (Get-Serial $SerialPath) -match '(?m)^\[C102-MANAGED-OUTPUT\] C164-PRECEDENCE explicit=document stale-session=cleared requested-path=authoritative result=PASS'
+            StaleSessionSeeded = (Get-Serial $SerialPath).Substring($sessionStart) -match '(?m)^\[C102-MANAGED-OUTPUT\] C164-PRECEDENCE explicit=document stale-session=cleared requested-path=authoritative result=PASS'
+        }
+    }
+    throw "Unknown C164 production boot number $Number."
 }
 
 function Open-ManagedFileExplorerDirectoryByKeyboard([string]$SerialPath,
@@ -678,9 +870,21 @@ function Click-TaskManagerCloseApplication([int]$ScreenWidth,
     [int]$ScreenHeight, [string]$SerialPath) {
     $windowX = [Math]::Max(0, [int](($ScreenWidth - 800) / 2))
     $windowY = [Math]::Max(0, [int](($ScreenHeight - 370) / 2))
-    $before = (Get-Serial $SerialPath).Length
-    Click-Screen ($windowX + 234) ($windowY + 24 + 290)
-    return Wait-Serial $SerialPath '^\[C102-MANAGED-OUTPUT\] C162-TM-CONFIRM open=true identity=captured modal=true result=PASS' $before 20
+    $pattern = '^\[C102-MANAGED-OUTPUT\] C162-TM-CONFIRM open=true identity=captured modal=true result=PASS'
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        if ($attempt -eq 2) {
+            # A transiently dropped pointer click can leave Task Manager
+            # behind another live surface. Re-activate its exposed title bar
+            # before retrying the same close-button hit target.
+            Activate-ManagedTaskManager $ScreenWidth $ScreenHeight
+        }
+        $before = (Get-Serial $SerialPath).Length
+        Click-Screen ($windowX + 234) ($windowY + 24 + 290)
+        try { return (Wait-Serial $SerialPath $pattern $before 20) } catch {
+            if ($attempt -eq 2 -or $_.Exception.Message -notlike 'Timed out waiting for serial marker:*') { throw }
+        }
+    }
+    throw 'Managed Task Manager did not open its close confirmation after two pointer attempts.'
 }
 
 function Click-TaskManagerDialogButton([bool]$Confirm,
@@ -1205,7 +1409,15 @@ function Stop-Qemu([int]$Port, [System.Diagnostics.Process]$Process,
         $stream.Write($quit, 0, $quit.Length); $stream.Flush()
         Add-Content -LiteralPath $LogPath -Value 'shutdown=quit' -Encoding ASCII
     } finally { $client.Dispose() }
-    Wait-Process -Id $Process.Id -Timeout 12 -ErrorAction SilentlyContinue
+    $Process.Refresh()
+    if (-not $Process.HasExited) {
+        try {
+            Wait-Process -Id $Process.Id -Timeout 12 -ErrorAction Stop
+        } catch {
+            $Process.Refresh()
+            if (-not $Process.HasExited) { throw }
+        }
+    }
 }
 
 function Start-Qemu([string]$SerialPath, [string]$StdoutPath,
@@ -1246,6 +1458,7 @@ function Invoke-ProductionBoot([int]$Number, [string]$Scenario,
         (Join-Path $root 'qemu.stderr.log') $esp $Qemu $Ovmf
     $process = $session.Process
     $c161Scenario = $null
+    $c164Scenario = $null
     try {
         Write-Host ("C158 production boot {0}/3: waiting for the Notes baseline." -f $Number)
         [void](Wait-Serial $serial '^\[desktop\] bare-metal desktop icon init completed' 0 $TimeoutSeconds)
@@ -1267,6 +1480,19 @@ function Invoke-ProductionBoot([int]$Number, [string]$Scenario,
             [void](Wait-Serial $serial '^\[C160-NATIVE-SNAPSHOT-TESTS\] cases=[0-9A-Fa-f]+ stress=1000 failed=[0-9A-Fa-f]{8}:[0-9A-Fa-f]{8} real-records=PASS identity=PASS bounded=PASS read-only=PASS result=PASS' 0 $TimeoutSeconds)
             [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C160-MANAGED-SNAPSHOT-TESTS cases=[0-9]+ v1=NotSupported malformed=Rejected layout=PASS identity=PASS stress=1000 result=PASS' 0 $TimeoutSeconds)
             [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C160-SNAPSHOT appId=com\.guidexos\.apps\.managed\.notes source=3 instance=[0-9]+ count=[0-9]+ active=1 previous=none result=PASS' 0 $TimeoutSeconds)
+        }
+        if ($PhaseC164) {
+            $associationTests = Wait-Serial $serial '^\[C164-FILE-ASSOCIATION-TESTS\] cases=([0-9A-Fa-f]{8}) failed=([0-9A-Fa-f]{8}) used=00000001 capacity=00000010 bytes=([0-9A-Fa-f]{8}) resolver-stress=1000 result=(PASS|FAIL)' 0 $TimeoutSeconds
+            $script:c164AssociationCases = [Convert]::ToInt32(
+                $associationTests.Match.Groups[1].Value, 16)
+            $script:c164AssociationTableBytes = [Convert]::ToInt32(
+                $associationTests.Match.Groups[3].Value, 16)
+            if ($script:c164AssociationCases -lt 10 -or
+                $script:c164AssociationTableBytes -le 0 -or
+                $associationTests.Match.Groups[2].Value -ne '00000000' -or
+                $associationTests.Match.Groups[4].Value -ne 'PASS') {
+                throw 'C164 fixed association table or resolver suite did not pass its bounds and stress checks.'
+            }
         }
         if ($PhaseC161) {
             if ($PhaseC163) {
@@ -1492,6 +1718,84 @@ function Invoke-ProductionBoot([int]$Number, [string]$Scenario,
                 throw "C163 $Number production boot contains failed File Explorer evidence."
             }
         }
+        if ($PhaseC164) {
+            # Earlier proof suites may leave the live Notes document dirty.
+            # Focus its real App Model surface and save through C152 so the
+            # subsequent fresh document activation respects the normal close
+            # veto and does not discard that document.
+            Send-ManagedNotesLaunch $screenWidth $screenHeight $serial
+            $cleanNotesStart = (Get-Serial $serial).Length
+            Send-QmpEvents @((New-Key 'ctrl' $true), (New-Key 's' $true),
+                (New-Key 's' $false), (New-Key 'ctrl' $false)) 90
+            [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C152-SAVE-AS chooser=open bounded=true result=PASS' $cleanNotesStart 15)
+            # The regression setup starts Notes untitled. Use its existing
+            # bounded Save As dialog and a fresh 8.3-compatible proof name.
+            Press-Key 'tab'
+            Press-Key 'end'
+            for ($index = 0; $index -lt 12; $index++) { Press-Key 'backspace' }
+            Send-Text 'c164a'
+            Press-Key 'tab'
+            $saveCommitStart = (Get-Serial $serial).Length
+            Press-Key 'ret'
+            [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C152-SAVE-AS committed path=/system/apps/c164a\r?$' $saveCommitStart 20)
+            [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C152-SAVE result=PASS verify=read-back exact=true bytes=bounded dirty=false' $cleanNotesStart 25)
+        }
+        if ($PhaseC164) {
+            Write-Host ("C164 production boot {0}/3: activating real VFS documents through Managed File Explorer." -f $Number)
+            $c164Scenario = Invoke-C164ManagedFileActivationScenario $Number $screenWidth $screenHeight $serial
+            $all = Get-Serial $serial
+            $contextTests = [regex]::Match($all,
+                '(?m)^\[C102-MANAGED-OUTPUT\] C164-ACTIVATION-CONTEXT-TESTS cases=(\d+) result=PASS')
+            $notesStateTests = [regex]::Matches($all,
+                '(?m)^\[C102-MANAGED-OUTPUT\] C164-NOTES-STATE-TESTS cases=(\d+) activation-clean=PASS dirty-undo-redo=PASS stress=25 result=PASS')
+            if (-not $contextTests.Success -or [int]$contextTests.Groups[1].Value -lt 20) {
+                throw 'C164 bounded activation-context suite did not pass at 20 or more cases.'
+            }
+            $script:c164ActivationContextCases = [int]$contextTests.Groups[1].Value
+            if ($notesStateTests.Count -lt $c164Scenario.Activations -or
+                [int]$notesStateTests[0].Groups[1].Value -lt 20) {
+                throw 'C164 Notes activation/document suite is missing for one or more fresh activations.'
+            }
+            $script:c164NotesStateCases = [int]$notesStateTests[0].Groups[1].Value
+            $documentActivations = [regex]::Matches($all,
+                '(?m)^\[C150-APP-LAUNCH\] id=com\.guidexos\.apps\.managed\.notes generation=([0-9A-Fa-f]+) selector=00000004 kind=document\r?$')
+            $sourceTransitions = [regex]::Matches($all,
+                '(?m)^\[C164-ACTIVATION\] source=ManagedFileExplorer instance=([0-9A-Fa-f]+) target=com\.guidexos\.apps\.managed\.notes path=/system/apps/C164/[^ ]+ fresh=true source-closed=true result=PASS\r?$')
+            $minimumActivations = [int]$c164Scenario.Activations
+            if ($documentActivations.Count -lt $minimumActivations -or
+                $sourceTransitions.Count -lt $minimumActivations) {
+                throw "C164 boot $Number lacks fresh App Model activation/source-close evidence (launches=$($documentActivations.Count), transitions=$($sourceTransitions.Count), required=$minimumActivations)."
+            }
+            $distinctNotes = [System.Collections.Generic.HashSet[string]]::new(
+                [System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($documentActivation in $documentActivations) {
+                [void]$distinctNotes.Add($documentActivation.Groups[1].Value)
+            }
+            if ($distinctNotes.Count -lt $minimumActivations) {
+                throw "C164 boot $Number reused a Notes application lifetime across document activations."
+            }
+            if ($Number -eq 1 -and
+                ($c164Scenario.FinalPath -ne '/system/apps/C164/hello.txt' -or
+                 $all -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C164-DOC event=input path=/system/apps/C164/hello\.txt len=16 dirty=1 undo=1 redo=0 caret=16 anchor=16 view=0 result=PASS' -or
+                 $all -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C164-DOC event=shortcut path=/system/apps/C164/hello\.txt len=15 dirty=0 undo=0 redo=1 caret=15 anchor=15 view=0 result=PASS')) {
+                throw 'C164 boot 1 did not prove real hello.txt activation, clean baseline, edit, and Undo restoration.'
+            }
+            if ($Number -eq 2 -and
+                (-not $c164Scenario.Save -or -not $c164Scenario.Unsupported -or
+                 $all -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C164-FILE-ACTIVATION path=/system/apps/C164/noapp\.bin result=unsupported source-retained=true selection=preserved')) {
+                throw 'C164 boot 2 did not prove save/reopen and safe unsupported-file handling.'
+            }
+            if ($Number -eq 3 -and
+                ($c164Scenario.DistinctNotes -lt 25 -or
+                 $c164Scenario.DistinctExplorers -lt 25 -or
+                 -not $c164Scenario.Precedence)) {
+                throw 'C164 boot 3 did not prove precedence and 25 distinct File Explorer/Notes activation lifetimes.'
+            }
+            if ($all -match '(?m)^\[C102-MANAGED-OUTPUT\] C164-[^\r\n]*result=FAIL' -or
+                $all -match '(?m)^\[C164-[^\r\n]*result=FAIL') {
+                throw "C164 production boot $Number contains failed file activation evidence."
+            }
+        }
 
         $full = Get-Serial $serial
         if ($full -match '(?m)^\[C102-MANAGED-OUTPUT\] C158-CALC-[^\r\n]*result=FAIL' -or
@@ -1551,6 +1855,8 @@ function Invoke-ProductionBoot([int]$Number, [string]$Scenario,
             FileExplorerScenario = $c163Scenario
             FileExplorerLaunches = [regex]::Matches($full, '(?m)^\[C102-MANAGED-OUTPUT\] C163-EXPLORER ').Count
             FileExplorerCloses = [regex]::Matches($full, '(?m)^\[C102-MANAGED-OUTPUT\] C163-FILE-EXPLORER-CLOSE ').Count
+            FileActivationScenario = $c164Scenario
+            FileActivationTransitions = [regex]::Matches($full, '(?m)^\[C164-ACTIVATION\] source=ManagedFileExplorer instance=').Count
             ControlDown = $controlDown
             ControlUp = $controlUp
             ShiftDown = $shiftDown
@@ -1682,7 +1988,7 @@ function Restore-CanonicalFiles {
 }
 
 function Install-C160CanonicalProducts([string]$Python) {
-    $canonicalStageRoot = Join-Path $EvidenceRoot $(if ($PhaseC163) { 'staging\wallpaper-pack-c163-production' } elseif ($PhaseC162) { 'staging\wallpaper-pack-c162-production' } elseif ($PhaseC161) { 'staging\wallpaper-pack-c161-production' } else { 'staging\wallpaper-pack-c160-production' })
+    $canonicalStageRoot = Join-Path $EvidenceRoot $(if ($PhaseC164) { 'staging\wallpaper-pack-c164-production' } elseif ($PhaseC163) { 'staging\wallpaper-pack-c163-production' } elseif ($PhaseC162) { 'staging\wallpaper-pack-c162-production' } elseif ($PhaseC161) { 'staging\wallpaper-pack-c161-production' } else { 'staging\wallpaper-pack-c160-production' })
     $canonicalCompositeElfPath = Join-Path $canonicalCompositeRoot 'artifacts\HostLogProof.elf'
     $managedBuildArguments = @('-ExecutionPolicy','Bypass','-File',$managedBuild,
         '-RepoRoot',$RepoRoot,'-OutputRoot',$canonicalCompositeRoot,
@@ -1691,7 +1997,7 @@ function Install-C160CanonicalProducts([string]$Python) {
         '-ProductionApplication','-PersistentCompositeLifecycle','-AllocationMode','Allocating',
         '-ManagedProjectMode','C160Composite','-C155ManagedNotesSession',
         '-C156ControlModifierShortcuts','-C157ManagedNotesNewDocument',
-        '-C158ManagedCalculator','-HeapConfiguration','Primary4MiB','-PythonExe',$Python)
+        '-C158ManagedCalculator','-HeapConfiguration',$(if ($PhaseC164) { 'Primary8MiB' } else { 'Primary4MiB' }),'-PythonExe',$Python)
     if ($PhaseC161) { $managedBuildArguments += '-C161ManagedTaskManager' }
     if ($PhaseC162) { $managedBuildArguments += '-C162ManagedTaskManagerClose' }
     if ($PhaseC163) { $managedBuildArguments += '-C163ManagedFileExplorer' }
@@ -1768,7 +2074,41 @@ if ($PhaseC161) {
         throw "C161 requires the audited v1.1_DOTNET_SUPPORT branch, found '$sourceBranch'."
     }
 }
-if ($PhaseC163) {
+if ($PhaseC164) {
+    $c163BaselineManifestPath = Join-Path $RepoRoot 'out\dotnet\c163-managed-file-explorer\c163-proof-manifest.json'
+    if (-not (Test-Path -LiteralPath $c163BaselineManifestPath -PathType Leaf)) {
+        throw "C164 requires the accepted C163 proof manifest: $c163BaselineManifestPath"
+    }
+    $c163BaselineManifest = Get-Content -LiteralPath $c163BaselineManifestPath -Raw | ConvertFrom-Json
+    $c162BaselineManifestPath = [string]$c163BaselineManifest.c163Contract.c162BaselineManifest
+    if ([string]::IsNullOrWhiteSpace($c162BaselineManifestPath) -or
+        -not (Test-Path -LiteralPath $c162BaselineManifestPath -PathType Leaf)) {
+        throw "C164 requires the C162 lineage manifest recorded by C163: $c162BaselineManifestPath"
+    }
+    $c163BootsPassed = @($c163BaselineManifest.productionBoots).Count -eq 3 -and
+        @($c163BaselineManifest.productionBoots | Where-Object { $_.Status -ne 'PASS' }).Count -eq 0 -and
+        @($c163BaselineManifest.ordinaryBoots).Count -eq 3 -and
+        @($c163BaselineManifest.ordinaryBoots | Where-Object { $_.Status -ne 'PASS' }).Count -eq 0
+    $expectedC163KernelHash = [string]$c163BaselineManifest.restoration.canonicalKernelAfter
+    $expectedC163RamdiskHash = [string]$c163BaselineManifest.restoration.protectedRamdiskAfter
+    if ($c163BaselineManifest.phase -ne 'C163' -or
+        $c163BaselineManifest.outcome -ne 'A' -or
+        $c163BaselineManifest.nativeAot.abiVersion -ne 3 -or
+        $c163BaselineManifest.nativeAot.abiTableBytes -ne 120 -or
+        -not $c163BaselineManifest.restoration.canonicalPostPhaseProductsVerified -or
+        -not $c163BootsPassed -or
+        $canonicalKernelHash -ne $expectedC163KernelHash -or
+        $espKernelHash -ne $expectedC163KernelHash -or
+        $ramdiskHash -ne $expectedC163RamdiskHash) {
+        throw ("C164 starting products differ from C163: phase={0} outcome={1} abi={2}/{3} verified={4} boots={5} kernel={6}/{7} esp={8}/{7} ramdisk={9}/{10}" -f
+            $c163BaselineManifest.phase, $c163BaselineManifest.outcome,
+            $c163BaselineManifest.nativeAot.abiVersion,
+            $c163BaselineManifest.nativeAot.abiTableBytes,
+            $c163BaselineManifest.restoration.canonicalPostPhaseProductsVerified,
+            $c163BootsPassed, $canonicalKernelHash, $expectedC163KernelHash,
+            $espKernelHash, $ramdiskHash, $expectedC163RamdiskHash)
+    }
+} elseif ($PhaseC163) {
     $c162BaselineManifestPath = Join-Path $RepoRoot 'out\dotnet\c162-managed-task-manager-close\c162-proof-manifest.json'
     if (-not (Test-Path -LiteralPath $c162BaselineManifestPath -PathType Leaf)) {
         throw "C163 requires the accepted C162 baseline manifest: $c162BaselineManifestPath"
@@ -1868,7 +2208,7 @@ $managedBuildArguments = @('-ExecutionPolicy','Bypass','-File',$managedBuild,
     '-ProductionApplication','-PersistentCompositeLifecycle','-AllocationMode','Allocating',
     '-ManagedProjectMode',$(if ($PhaseC160) { 'C160Composite' } else { 'C154Composite' }),'-C155ManagedNotesSession',
     '-C156ControlModifierShortcuts','-C157ManagedNotesNewDocument',
-    '-C158ManagedCalculator','-HeapConfiguration','Primary4MiB','-PythonExe',$python)
+    '-C158ManagedCalculator','-HeapConfiguration',$(if ($PhaseC164) { 'Primary8MiB' } else { 'Primary4MiB' }),'-PythonExe',$python)
 if ($PhaseC160) { $managedBuildArguments += '-C160ApplicationSnapshotProof' }
 if ($PhaseC161) {
     $managedBuildArguments += '-C161ManagedTaskManager'
@@ -1882,6 +2222,7 @@ if ($PhaseC163) {
     $managedBuildArguments += '-C163ManagedFileExplorer'
     $managedBuildArguments += '-C163FileExplorerProof'
 }
+if ($PhaseC164) { $managedBuildArguments += '-C164FileActivationProof' }
 Invoke-Checked 'powershell' $managedBuildArguments
 $compositeElf = Join-Path $compositeRoot 'artifacts\HostLogProof.elf'
 if (-not (Test-Path -LiteralPath $compositeElf -PathType Leaf)) { throw "C158 NativeAOT ELF missing: $compositeElf" }
@@ -1889,12 +2230,14 @@ $compositeHash = Get-Hash $compositeElf
 Write-Host ("{0} proof NativeAOT composite built: {1}" -f $(if ($PhaseC163) { 'C163' } elseif ($PhaseC162) { 'C162' } elseif ($PhaseC161) { 'C161' } elseif ($PhaseC160) { 'C160' } else { 'C158' }), $compositeHash) -ForegroundColor Green
 
 $generator = Join-Path $RepoRoot 'scripts\generate-wallpaper-pack.ps1'
-Invoke-Checked 'powershell' @('-ExecutionPolicy','Bypass','-File',$generator,
+$proofMediaArguments = @('-ExecutionPolicy','Bypass','-File',$generator,
     '-OutputDir',$stageRoot,'-OutputImage',$proofRamdisk,
     '-C104AppAPath',$compositeElf,'-ProductionCompositeApplicationPath',$compositeElf,
     '-C114ManagedDirectoryServices','-C117ManagedTextArea','-C118ManagedListBox',
     '-C151ManagedOpenFileDialog','-C152ManagedNotesSaveWorkflow',
     '-C155ManagedNotesSession','-C156ControlModifierShortcuts','-C157ManagedNotesNewDocument')
+if ($PhaseC164) { $proofMediaArguments += '-C164FileActivation' }
+Invoke-Checked 'powershell' $proofMediaArguments
 if (-not (Test-Path -LiteralPath $proofRamdisk -PathType Leaf)) { throw 'C158 proof ramdisk was not generated.' }
 $proofRamdiskHash = Get-Hash $proofRamdisk
 
@@ -1933,6 +2276,7 @@ if ($PhaseC160) { $flags += '-DGXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF' }
 if ($PhaseC161) { $flags += '-DGXOS_NATIVEAOT_C161_TASK_MANAGER_PROOF' }
 if ($PhaseC162) { $flags += '-DGXOS_NATIVEAOT_C162_MANAGED_TASK_MANAGER_CLOSE_PROOF' }
 if ($PhaseC163) { $flags += '-DGXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER_PROOF' }
+if ($PhaseC164) { $flags += '-DGXOS_NATIVEAOT_C164_FILE_ACTIVATION_PROOF' }
 $flags = $flags -join ' '
 if ($ReuseBuiltProofKernel) {
     if (-not (Test-Path -LiteralPath $proofKernel -PathType Leaf)) {
@@ -2115,7 +2459,7 @@ if ($PhaseC162) {
         shellCloseDisabled = $true
         taskManagerSelfCloseDisabled = $true
         managedCalculatorCloseCyclesBoot3 = $boot3ManagedCloses.Count
-        historicalC162BaselineManifestValidated = $PhaseC163
+        historicalC162BaselineManifestValidated = [bool]$PhaseC163
         distinctCalculatorRelaunchIdentitiesBoot3 = $true
         nativeCalculatorCloseAndRelaunchCalculation = '7*8=56, distinct identities, all 3 boots'
         postMutationSnapshotIsAuthoritative = $true
@@ -2123,11 +2467,11 @@ if ($PhaseC162) {
         processOrThreadSemanticsAdded = $false
     }
 }
-$phaseLabel = if ($PhaseC163) { 'C163' } elseif ($PhaseC162) { 'C162' } elseif ($PhaseC161) { 'C161' } elseif ($PhaseC160) { 'C160' } else { 'C158' }
-$manifestFile = if ($PhaseC163) { 'c163-proof-manifest.json' } elseif ($PhaseC162) { 'c162-proof-manifest.json' } elseif ($PhaseC161) { 'c161-proof-manifest.json' } elseif ($PhaseC160) { 'c160-proof-manifest.json' } else { 'c158-proof-manifest.json' }
-$ordinaryManifestFile = if ($PhaseC163) { 'c163-ordinary-manifest.json' } elseif ($PhaseC162) { 'c162-ordinary-manifest.json' } elseif ($PhaseC161) { 'c161-ordinary-manifest.json' } elseif ($PhaseC160) { 'c160-ordinary-manifest.json' } else { 'c158-ordinary-restoration-manifest.json' }
-$reportedCompositeElf = if ($PhaseC160) { $canonicalCompositeElf } else { $compositeElf }
-$reportedCompositeHash = if ($PhaseC160) { $canonicalCompositeHash } else { $compositeHash }
+$phaseLabel = if ($PhaseC164) { 'C164' } elseif ($PhaseC163) { 'C163' } elseif ($PhaseC162) { 'C162' } elseif ($PhaseC161) { 'C161' } elseif ($PhaseC160) { 'C160' } else { 'C158' }
+$manifestFile = if ($PhaseC164) { 'c164-proof-manifest.json' } elseif ($PhaseC163) { 'c163-proof-manifest.json' } elseif ($PhaseC162) { 'c162-proof-manifest.json' } elseif ($PhaseC161) { 'c161-proof-manifest.json' } elseif ($PhaseC160) { 'c160-proof-manifest.json' } else { 'c158-proof-manifest.json' }
+$ordinaryManifestFile = if ($PhaseC164) { 'c164-ordinary-manifest.json' } elseif ($PhaseC163) { 'c163-ordinary-manifest.json' } elseif ($PhaseC162) { 'c162-ordinary-manifest.json' } elseif ($PhaseC161) { 'c161-ordinary-manifest.json' } elseif ($PhaseC160) { 'c160-ordinary-manifest.json' } else { 'c158-ordinary-restoration-manifest.json' }
+$reportedCompositeElf = if ($PhaseC164 -or $PhaseC160) { $canonicalCompositeElf } else { $compositeElf }
+$reportedCompositeHash = if ($PhaseC164 -or $PhaseC160) { $canonicalCompositeHash } else { $compositeHash }
 $reportedAbiVersion = if ($PhaseC163 -or $PhaseC162) { 3 } elseif ($PhaseC160) { 2 } else { 1 }
 $reportedAbiSize = if ($PhaseC163 -or $PhaseC162) { 120 } elseif ($PhaseC160) { 112 } else { 104 }
 $c160FinalSnapshot = $null
@@ -2244,7 +2588,7 @@ if ($PhaseC161) {
         viewport = [uint32]$lastManagerRefresh.Groups[2].Value
         detailMatchesSelection = $true
         selfLifetimeStableFor100Refreshes = -not $PhaseC163
-        C162BaselineCoversHistoricalStress = $PhaseC163
+        C162BaselineCoversHistoricalStress = [bool]$PhaseC163
     }
 }
 $applicationManifest = if ($PhaseC163) {
@@ -2457,6 +2801,38 @@ $manifest = [ordered]@{
         historicalC162ProofBoots = 3
         historicalC162OrdinaryBoots = 3
     } } else { $null }
+    c164Contract = if ($PhaseC164) { [ordered]@{
+        nativeFileExplorerDispatch = 'shared bounded resolver; .txt launches Managed Notes with document activation; .log/.cfg/.ini Notepad, .png Image Viewer, and .img disk-image branches remain in native File Explorer'
+        managedFileExplorerId = 'com.guidexos.apps.managed.fileexplorer'
+        managedNotesId = 'com.guidexos.apps.managed.notes'
+        associationUsed = 1
+        associationCapacity = 16
+        associationTableBytes = $script:c164AssociationTableBytes
+        managedHeap = if ($PhaseC164) { 'Primary8MiB fixed' } else { $null }
+        associationFocusedCases = $script:c164AssociationCases
+        extensionMatching = 'ASCII case-insensitive; last dot in basename; .TXT equals .txt; trailing dot/no extension unsupported; leading dot alone is not an extension'
+        activationKind = 'None=0, Document=1; launch context is copied into the bounded managed app context and consumed at Notes launch'
+        activationPathCapacityBytes = 96
+        explicitDocumentOverridesC155Restore = $true
+        notesExternalOpen = 'existing bounded C151 VFS read and C152 document state; clean saved revision; no undo/redo; caret, anchor and viewport reset'
+        sourceLifecycle = 'one active managed surface; successful fresh Notes launch closes Managed File Explorer; failed launch retains source and selection'
+        unsupportedFileBehavior = 'no launch; bounded status; source and selection retained'
+        activationContextFocusedCases = $script:c164ActivationContextCases
+        notesDocumentFocusedCases = $script:c164NotesStateCases
+        activationStressBoot3 = $production[2].FileActivationScenario.Activations
+        distinctNotesLifetimesBoot3 = $production[2].FileActivationScenario.DistinctNotes
+        distinctExplorerLifetimesBoot3 = $production[2].FileActivationScenario.DistinctExplorers
+        precedenceBoot3 = $production[2].FileActivationScenario.Precedence
+        boot1EditUndoRestoresClean = $production[0].FileActivationScenario.Activations -eq 1
+        boot2SaveReopenAndUnsupported = $production[1].FileActivationScenario.Save -and $production[1].FileActivationScenario.Unsupported
+        nativeFileExplorerLaunchPreserved = $true
+        abiVersion = 3
+        hostTableBytes = 120
+        settingsFormatVersion = 2
+        proofBoots = @($production | ForEach-Object { $_.Status })
+        ordinaryBoots = @($ordinaryRecords.ToArray() | ForEach-Object { $_.Status })
+        c163BaselineManifest = $c163BaselineManifestPath
+    } } else { $null }
     application = $applicationManifest
     taskManager = if ($PhaseC162) { [ordered]@{
         focusedC161Cases = $c161FocusedTestCases
@@ -2479,6 +2855,9 @@ $manifest = [ordered]@{
     nativeAot = [ordered]@{
         compositeElf = $reportedCompositeElf
         compositeSha256 = $reportedCompositeHash
+        cleanProductionCompositeSha256 = if ($PhaseC164) { $canonicalCompositeHash } else { $null }
+        cleanProductionKernelSha256 = if ($PhaseC164) { $postC160KernelHash } else { $null }
+        cleanProductionRamdiskSha256 = if ($PhaseC164) { $postC160RamdiskHash } else { $null }
         proofCompositeElf = $compositeElf
         proofCompositeSha256 = $compositeHash
         proofKernel = $proofKernel
@@ -2492,7 +2871,7 @@ $manifest = [ordered]@{
         c161CleanProductionRamdiskSha256 = if ($PhaseC161) { $postC160RamdiskHash } else { $null }
         c162CleanProductionKernelSha256 = if ($PhaseC162) { $postC160KernelHash } else { $null }
         c162CleanProductionRamdiskSha256 = if ($PhaseC162) { $postC160RamdiskHash } else { $null }
-        heap = 'Primary4MiB'
+        heap = if ($PhaseC164) { 'Primary8MiB' } else { 'Primary4MiB' }
         abiVersion = $reportedAbiVersion
         abiTableBytes = $reportedAbiSize
         legacyPrefixBytes = 104
@@ -2517,6 +2896,7 @@ $manifest = [ordered]@{
         C161 = if ($PhaseC163) { "focused UI/snapshot $c161FocusedTestCases cases and 1000 wrapper calls PASS; live boot 3 Task Manager refresh and File Explorer identity observation PASS; accepted C162 baseline retains the prior 25-cycle/100-refresh Task Manager stress" } elseif ($PhaseC161) { "focused UI/snapshot $c161FocusedTestCases cases PASS; 1000 wrapper calls PASS; boot 3 $c161ProductionRefreshes real Ctrl+R refreshes PASS; 25 unique Task Manager launches and 25 closes PASS; self identity stable and active; pointer selection, real wheel, Refresh button, Ctrl+R, Tab/Shift+Tab, close and relaunch PASS" } else { 'not run' }
         C162 = if ($PhaseC163) { "accepted C162 baseline manifest validated with all 3 proof and 3 ordinary boots; current C163 boot 3 exercised managed Calculator close by exact C160 identity; ABI v3 callback offset 112, v2 NotSupported; no force-kill or process/thread semantics" } elseif ($PhaseC162) { "AppManager close $($c162CloseProof.nativeAppManagerCloseCases) focused cases and 100 mixed close requests PASS; wrapper $($c162CloseProof.managedWrapperCases) cases; native boundary 3 cases; boot 1 Managed Calculator cancel/close/relaunch PASS; boot 2 native Calculator close/relaunch plus shell/self protection PASS; boot 3 $($c162CloseProof.managedCalculatorCloseCyclesBoot3) Calculator close/relaunch cycles PASS; ABI v3 callback offset 112, v2 NotSupported; no force-kill or process/thread semantics" } else { 'not run' }
         C163 = if ($PhaseC163) { "real VFS browsing PASS; 48 focused cases, 1000 refreshes and 100 navigation iterations PASS; boot 3 $($production[2].FileExplorerScenario.LaunchCount - 1) unique launch/browse/close cycles PASS; three proof boots and three ordinary boots PASS; no filesystem mutation" } else { 'not run' }
+        C164 = if ($PhaseC164) { "bounded 16-entry file association table ($($script:c164AssociationTableBytes) bytes); $($script:c164AssociationCases) native resolver cases plus 1000 resolver calls; $($script:c164ActivationContextCases) activation-context cases; $($script:c164NotesStateCases) Notes/VFS/document-state cases; boot 1 real load/edit/undo PASS; boot 2 save/reopen/unsupported PASS; boot 3 $($production[2].FileActivationScenario.Activations) distinct fresh File Explorer-to-Notes activations with explicit-session precedence PASS; proof and clean ordinary boots 3/3 each" } else { 'not run' }
         C137 = if ($PhaseC161) { 'standalone suite 46/46 PASS; real QMP wheel-down moved the Task Manager ListBox viewport; shared NaturalScroll and ScrollLinesPerNotch policy used' } else { 'not run' }
     }
     productionBoots = @($productionRecords.ToArray())
@@ -2585,7 +2965,7 @@ $manifestPath = Join-Path $EvidenceRoot $manifestFile
 $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
 $ordinaryManifest = [ordered]@{
     schemaVersion = 1
-    phase = if ($PhaseC163) { 'C163-ordinary-post-phase' } elseif ($PhaseC162) { 'C162-ordinary-post-phase' } elseif ($PhaseC161) { 'C161-ordinary-post-phase' } elseif ($PhaseC160) { 'C160-ordinary-post-phase' } else { 'C158-ordinary-restoration' }
+    phase = if ($PhaseC164) { 'C164-ordinary-post-phase' } elseif ($PhaseC163) { 'C163-ordinary-post-phase' } elseif ($PhaseC162) { 'C162-ordinary-post-phase' } elseif ($PhaseC161) { 'C161-ordinary-post-phase' } elseif ($PhaseC160) { 'C160-ordinary-post-phase' } else { 'C158-ordinary-restoration' }
     status = 'PASS'
     protected = $manifest.restoration
     ordinaryBoots = @($ordinaryRecords.ToArray())

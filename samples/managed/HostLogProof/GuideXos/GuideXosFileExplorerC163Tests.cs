@@ -265,9 +265,9 @@ internal static class GuideXosManagedFileExplorerC163Tests
         result &= Case(statFailure.OpenInitial() == GuideXosFileResult.Success &&
             statFailure.Select(2) && statFailure.SelectedFileSize == null &&
             statFailure.CurrentPath == GuideXosDirectoryBrowserC163.InitialPath);
-        result &= Case(statFailure.OpenSelected() == GuideXosFileResult.Success &&
+        result &= Case(statFailure.OpenSelected() == GuideXosFileResult.InvalidArgument &&
             statFailure.CurrentPath == GuideXosDirectoryBrowserC163.InitialPath &&
-            statFailure.Status == "File activation not implemented");
+            statFailure.Status == "File activation requires the App Model host");
 
         FakeSource controllerSource = new();
         GuideXosFileExplorerControllerC163 controller =
@@ -310,7 +310,7 @@ internal static class GuideXosManagedFileExplorerC163Tests
         result &= Case(enterFileController.Browser.CurrentPath ==
                 GuideXosDirectoryBrowserC163.InitialPath &&
             enterFileController.Browser.Status ==
-                "File activation not implemented");
+                "File activation unavailable");
 
         FakeSource shortcutSource = new();
         GuideXosFileExplorerControllerC163 shortcutController =

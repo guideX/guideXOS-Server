@@ -3,6 +3,7 @@
 #include "include/kernel/address_space.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/desktop.h"
+#include "include/kernel/app_launch_target_resolver.h"
 #include "include/kernel/hugepages.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/kernel_app.h"
@@ -47,6 +48,9 @@ constexpr uint32_t kMaxWorkerSlots = 4u;
 constexpr uint32_t kMaxFlsSlots = gxos::runtime::kLocalStorageCapacity;
 constexpr uint32_t kMaxFlsContexts = gxos::runtime::kLocalStorageMaximumContexts;
 constexpr uint64_t kMaxArtifactBytes = 4u * 1024u * 1024u;
+// Keep file size separately bounded while allowing the fixed 8 MiB C164
+// managed heap plus NativeAOT image sections in the mapped composite span.
+constexpr uint64_t kMaxArtifactSpanBytes = 12u * 1024u * 1024u;
 constexpr uint32_t kMaxApplicationPath = 128u;
 constexpr uint32_t kElfClass64 = 2u;
 constexpr uint32_t kElfDataLittle = 1u;
@@ -62,6 +66,7 @@ constexpr uint32_t kVmemCommit = 0x1000u;
 constexpr uint32_t kVmemRelease = 0x8000u;
 constexpr int32_t kInvalidApplicationIdReturn = -4;
 constexpr uint32_t kManagedTaskManagerCloseCompletedActionId = 0x01620001u;
+constexpr uint32_t kManagedApplicationLifetimeCloseActionId = 0x01500002u;
 constexpr const char* kProductionCompositeImage = gxos::apps::kManagedNativeAotCompositeImagePath;
 // ABI v2 appended the snapshot callback at 104; ABI v3 appends exact-identity
 // close at 112. Both historical prefixes remain byte-for-byte stable.
@@ -247,6 +252,18 @@ struct NativeAotTlsGsArea {
 
 struct NativeGxAppContext;
 
+struct ManagedFileActivationRequest {
+    bool requested;
+    uint32_t pathLength;
+    char applicationId[96];
+    char path[kManagedLaunchContextMaxBytes + 1u];
+};
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedRequestFileActivation(
+    NativeGxAppContext* context, const uint8_t* path, uint32_t pathLength);
+void processManagedFileActivation(
+    uint32_t sourceSelector, const ManagedFileActivationRequest& request);
+
 struct NativeHostCallTable {
     uint32_t size;
     uint32_t version;
@@ -314,6 +331,11 @@ struct NativeGxAppContext {
     const uint8_t* launchContext;
     uint32_t launchContextLength;
     uint32_t launchFlags;
+    uint32_t activationKind;
+    void* applicationRequestState;
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *requestFileActivation)(
+        NativeGxAppContext* context, const uint8_t* path,
+        uint32_t pathLength);
 };
 
 struct NativeAotStartupContext {
@@ -387,7 +409,13 @@ static_assert(sizeof(ManagedDirectoryEntryAbi) == kManagedDirectoryEntryAbiSize,
               "C114 directory-entry ABI drift");
 static_assert(sizeof(ManagedFileInfoAbi) == kManagedFileInfoAbiSize,
               "C114 file-info ABI drift");
-static_assert(sizeof(NativeGxAppContext) == 40, "C111 application ABI drift");
+static_assert(sizeof(NativeGxAppContext) == 64, "C164 application context tail drift");
+static_assert(offsetof(NativeGxAppContext, activationKind) == 40,
+              "C164 activation kind offset drift");
+static_assert(offsetof(NativeGxAppContext, applicationRequestState) == 48,
+              "C164 dispatch request state offset drift");
+static_assert(offsetof(NativeGxAppContext, requestFileActivation) == 56,
+              "C164 file activation callback offset drift");
 static_assert(offsetof(NativeAotTlsGsArea, vector) == 0x58,
               "C102 TLS vector offset drift");
 
@@ -1062,6 +1090,21 @@ public:
             const int32_t teardownResult = invokeManagedAction(
                 7u, 0x01610001u);
             serial::puts("[C161-TM-CLOSE-DISPATCH] selector=7 controls=0 result=");
+            serial::puts(teardownResult == 0 ? "PASS\n" : "FAIL\n");
+        }
+#endif
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION) && \
+    defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
+        // Notes and Settings Center close through ordinary window lifecycle
+        // paths. Release their managed lifetime entries after close approval
+        // so bounded App Model capacity remains reusable across transitions.
+        if (!m_replacingSurface && (m_selector == 4u || m_selector == 5u) &&
+            m_surfaceApplicationId[0]) {
+            const int32_t teardownResult = invokeManagedAction(
+                m_selector, kManagedApplicationLifetimeCloseActionId);
+            serial::puts("[C150-LIFETIME-CLOSE] selector=");
+            serial::put_hex32(m_selector);
+            serial::puts(" result=");
             serial::puts(teardownResult == 0 ? "PASS\n" : "FAIL\n");
         }
 #endif
@@ -3630,7 +3673,7 @@ bool probeElfEnvelope(const uint8_t* bytes, uint64_t size, LaunchReport* report)
         ++loadCount;
     }
     if (loadCount == 0 || imageLow == UINTPTR_MAX || imageHigh <= imageLow ||
-        !entryValid || imageHigh - imageLow > kMaxArtifactBytes * 2u) return false;
+        !entryValid || imageHigh - imageLow > kMaxArtifactSpanBytes) return false;
     report->artifactBase = imageLow;
     report->artifactSpan = imageHigh - imageLow;
     report->loadSegmentCount = loadCount;
@@ -3717,7 +3760,7 @@ bool mapElf(const uint8_t* bytes, uint64_t size, LaunchReport* report) {
         ++loadCount;
     }
     if (loadCount == 0 || imageLow == UINTPTR_MAX || imageHigh <= imageLow ||
-        !entryValid || imageHigh - imageLow > kMaxArtifactBytes * 2u) return false;
+        !entryValid || imageHigh - imageLow > kMaxArtifactSpanBytes) return false;
 
     memory::address_space::AddressSpace* addressSpace = memory::address_space::current();
     if (addressSpace == nullptr) return false;
@@ -3866,11 +3909,119 @@ LaunchStatus statusForManagedReturn(int32_t managedReturn) {
     return LaunchStatus::ManagedFailed;
 }
 
+namespace {
+constexpr const char* kManagedFileExplorerApplicationId =
+    "com.guidexos.apps.managed.fileexplorer";
+constexpr uint32_t kManagedFileExplorerCloseActionId = 0x01630001u;
+constexpr uint32_t kManagedFileExplorerActivationFailureActionId = 0x01630002u;
+
+int32_t managedRequestFileActivation(
+    NativeGxAppContext* context, const uint8_t* path, uint32_t pathLength) {
+    constexpr int32_t kAccepted = 0;
+    constexpr int32_t kUnsupported = 1;
+    constexpr int32_t kInvalidPath = -1;
+    constexpr int32_t kPathTooLong = -2;
+    constexpr int32_t kDirectory = -3;
+    constexpr int32_t kNotRegularFile = -4;
+    constexpr int32_t kNotFound = -5;
+    constexpr int32_t kIoFailure = -6;
+    if (!context || context->size < sizeof(NativeGxAppContext) ||
+        context->requestFileActivation != managedRequestFileActivation ||
+        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(context->userData)) != 8u ||
+        !context->applicationRequestState || !path || pathLength == 0u) {
+        return kInvalidPath;
+    }
+    ManagedFileActivationRequest* request =
+        static_cast<ManagedFileActivationRequest*>(context->applicationRequestState);
+    if (request->requested) return kInvalidPath;
+    if (pathLength > kManagedLaunchContextMaxBytes)
+        return kPathTooLong;
+
+    char boundedPath[kManagedLaunchContextMaxBytes + 1u] = {};
+    for (uint32_t index = 0u; index < pathLength; ++index) {
+        if (path[index] == 0u) return kInvalidPath;
+        boundedPath[index] = static_cast<char>(path[index]);
+    }
+    boundedPath[pathLength] = '\0';
+    const appmodel::FileAssociationResolution association =
+        appmodel::resolveFileAssociationFromVfs(boundedPath);
+    switch (association.status) {
+        case appmodel::FileAssociationStatus::Unsupported:
+            return kUnsupported;
+        case appmodel::FileAssociationStatus::InvalidPath:
+            return kInvalidPath;
+        case appmodel::FileAssociationStatus::PathTooLong:
+            return kPathTooLong;
+        case appmodel::FileAssociationStatus::Directory:
+            return kDirectory;
+        case appmodel::FileAssociationStatus::NotRegularFile:
+            return kNotRegularFile;
+        case appmodel::FileAssociationStatus::NotFound:
+            return kNotFound;
+        case appmodel::FileAssociationStatus::IoFailure:
+            return kIoFailure;
+        case appmodel::FileAssociationStatus::Resolved:
+            break;
+    }
+    if (!association.applicationId ||
+        !copyManagedIdentity(association.applicationId,
+            request->applicationId, sizeof(request->applicationId))) {
+        return kIoFailure;
+    }
+    for (uint32_t index = 0u; index <= pathLength; ++index)
+        request->path[index] = boundedPath[index];
+    request->pathLength = pathLength;
+    request->requested = true;
+    return kAccepted;
+}
+
+void processManagedFileActivation(
+    uint32_t sourceSelector, const ManagedFileActivationRequest& request) {
+    if (!request.requested || sourceSelector != 8u) return;
+    NativeAotManagedSurface* sourceSurface =
+        managedSurfaceForApplication(kManagedFileExplorerApplicationId);
+    if (!sourceSurface || sourceSurface->windowId() == 0u) return;
+
+    LaunchReport report{};
+    const LaunchStatus status = launchLogicalApplication(
+        request.applicationId, &report, request.path, request.pathLength,
+        kManagedActivationKindDocument);
+    if (status != LaunchStatus::Success) {
+        serial::puts("[C164-ACTIVATION] source=ManagedFileExplorer target=");
+        serial::puts(request.applicationId);
+        serial::puts(" path=");
+        serial::puts(request.path);
+        serial::puts(" status=");
+        serial::puts(launchStatusName(status));
+        serial::puts(" source-retained=true result=FAIL\n");
+        (void)invokeManagedAction(8u,
+            kManagedFileExplorerActivationFailureActionId);
+        return;
+    }
+
+    const uint64_t sourceInstance = sourceSurface->snapshotInstanceId();
+    const bool closed = sourceSurface->requestClose();
+    const int32_t managedClose = closed
+        ? invokeManagedAction(8u, kManagedFileExplorerCloseActionId) : -1;
+    serial::puts("[C164-ACTIVATION] source=ManagedFileExplorer instance=");
+    serial::put_hex64(sourceInstance);
+    serial::puts(" target=");
+    serial::puts(request.applicationId);
+    serial::puts(" path=");
+    serial::puts(request.path);
+    serial::puts(" fresh=true source-closed=");
+    serial::puts(closed && managedClose == 0 ? "true" : "false");
+    serial::puts(" result=");
+    serial::puts(closed && managedClose == 0 ? "PASS\n" : "FAIL\n");
+}
+} // namespace
+
 int32_t invokeManagedWithHostMetadata(
     uint32_t selector,
     uint32_t launchFlags,
     uint32_t hostVersion,
-    uint64_t capabilities) {
+    uint64_t capabilities,
+    ManagedFileActivationRequest* fileActivationRequest = nullptr) {
     if (g_application.state != ApplicationLifecycleState::Resident ||
         g_application.entryPoint == 0u || selector == 0u) {
         return kInvalidApplicationIdReturn;
@@ -3897,7 +4048,10 @@ int32_t invokeManagedWithHostMetadata(
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
         reinterpret_cast<void*>(static_cast<uintptr_t>(selector)),
-        nullptr, 0u, launchFlags};
+        nullptr, 0u, launchFlags, kManagedActivationKindNone,
+        fileActivationRequest,
+        fileActivationRequest && selector == 8u
+            ? managedRequestFileActivation : nullptr};
     // The resident wrapper only needs non-null startup-table addresses on a
     // re-entry; it does not reinstall the runtime foundations.  The real
     // managed context remains the only application-facing value.
@@ -3932,14 +4086,18 @@ int32_t invokeManagedWithHostMetadata(
         completeManagedReturnIfPending();
     }
 #endif
+    if (fileActivationRequest && fileActivationRequest->requested)
+        processManagedFileActivation(selector, *fileActivationRequest);
     return managedReturn;
 }
 
 int32_t invokeManagedAction(uint32_t selector, uint32_t actionId) {
     if (actionId == 0u || actionId > 0x1FFFFFFFu) return -2;
+    ManagedFileActivationRequest fileActivationRequest{};
     return invokeManagedWithHostMetadata(
         selector, kLaunchFlagAction | actionId,
-        kManagedHostAbiVersion, kManagedCapabilities);
+        kManagedHostAbiVersion, kManagedCapabilities,
+        selector == 8u ? &fileActivationRequest : nullptr);
 }
 
 int32_t invokeManagedInput(uint32_t selector, uint32_t inputFlags) {
@@ -3965,8 +4123,10 @@ int32_t invokeManagedInput(uint32_t selector, uint32_t inputFlags) {
         return -2;
     }
     g_c116InputDispatchActive = true;
+    ManagedFileActivationRequest fileActivationRequest{};
     const int32_t result = invokeManagedWithHostMetadata(
-        selector, inputFlags, kManagedHostAbiVersion, kManagedCapabilities);
+        selector, inputFlags, kManagedHostAbiVersion, kManagedCapabilities,
+        selector == 8u ? &fileActivationRequest : nullptr);
     g_c116InputDispatchActive = false;
     return result;
 }
@@ -3988,7 +4148,8 @@ int32_t invokeManagedKeyDownForProof(
 
 LaunchStatus launchResident(const char* path, uint32_t logicalAppId,
                             LaunchReport* report, const char* launchContext,
-                            uint32_t launchContextLength) {
+                            uint32_t launchContextLength,
+                            uint32_t activationKind) {
     const uint32_t sequence = g_application.sequence + 1u;
     emitC103Begin(sequence, path, true);
     const uint8_t handle = vfs::open(path, vfs::OPEN_READ);
@@ -4119,7 +4280,8 @@ LaunchStatus launchResident(const char* path, uint32_t logicalAppId,
     NativeGxAppContext app{
         sizeof(NativeGxAppContext), 0u, &host,
         reinterpret_cast<void*>(static_cast<uintptr_t>(logicalAppId)),
-        reinterpret_cast<const uint8_t*>(launchContext), launchContextLength, 0u};
+        reinterpret_cast<const uint8_t*>(launchContext), launchContextLength,
+        0u, activationKind, nullptr, nullptr};
     NativeAotStartupContext startup{
         &legacy, &pal, &gc, &app, startupInstallTls, startupMarker };
     using Entry = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void*);
@@ -4173,13 +4335,22 @@ LaunchStatus launchResident(const char* path, uint32_t logicalAppId,
 
 LaunchStatus launchInternal(const char* path, uint32_t logicalAppId,
                             LaunchReport* report, const char* launchContext,
-                            uint32_t launchContextLength) {
+                            uint32_t launchContextLength,
+                            uint32_t activationKind) {
     LaunchReport local{};
     if (report == nullptr) report = &local;
     *report = {};
     report->logicalAppId = logicalAppId;
     report->status = LaunchStatus::InvalidPath;
     if (path == nullptr || path[0] != '/') return report->status;
+    if ((activationKind != kManagedActivationKindNone &&
+            activationKind != kManagedActivationKindDocument) ||
+        (activationKind == kManagedActivationKindDocument &&
+            launchContextLength == 0u)) {
+        report->status = LaunchStatus::InvalidLaunchContext;
+        serial::puts("[NATIVEAOT-CONTEXT] status=invalid-activation-flags\n");
+        return report->status;
+    }
     if ((launchContextLength != 0u && launchContext == nullptr) ||
         launchContextLength > kManagedLaunchContextMaxBytes) {
         report->status = LaunchStatus::InvalidLaunchContext;
@@ -4205,7 +4376,7 @@ LaunchStatus launchInternal(const char* path, uint32_t logicalAppId,
     if (g_application.state == ApplicationLifecycleState::Resident) {
         return launchResident(requestedPath, logicalAppId, report,
                               launchContextLength == 0u ? nullptr : launchContextCopy,
-                              launchContextLength);
+                              launchContextLength, activationKind);
     }
     g_application.state = ApplicationLifecycleState::Loading;
     const uint32_t sequence = 1u;
@@ -4342,7 +4513,7 @@ LaunchStatus launchInternal(const char* path, uint32_t logicalAppId,
         reinterpret_cast<void*>(static_cast<uintptr_t>(logicalAppId)),
         reinterpret_cast<const uint8_t*>(
             launchContextLength == 0u ? nullptr : launchContextCopy),
-        launchContextLength, 0u};
+        launchContextLength, 0u, activationKind, nullptr, nullptr};
     NativeAotStartupContext startup{
         &legacy, &pal, &gc, &app, startupInstallTls, startupMarker };
     using Entry = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void*);
@@ -4412,14 +4583,15 @@ LaunchStatus launchInternal(const char* path, uint32_t logicalAppId,
 }
 
 LaunchStatus launch(const char* path, LaunchReport* report) {
-    return launchInternal(path, 0u, report, nullptr, 0u);
+    return launchInternal(path, 0u, report, nullptr, 0u, 0u);
 }
 
 LaunchStatus launchLogical(const char* path, uint32_t logicalAppId,
                            LaunchReport* report, const char* launchContext,
-                           uint32_t launchContextLength) {
+                           uint32_t launchContextLength,
+                           uint32_t activationKind) {
     return launchInternal(path, logicalAppId, report, launchContext,
-                          launchContextLength);
+                          launchContextLength, activationKind);
 }
 
 bool isProductionLogicalApplicationId(const char* applicationId) {
@@ -4440,7 +4612,31 @@ const char* productionCompositeImagePath() {
 LaunchStatus launchLogicalApplication(const char* applicationId,
                                       LaunchReport* report,
                                       const char* launchContext,
-                                      uint32_t launchContextLength) {
+                                      uint32_t launchContextLength,
+                                      uint32_t activationKind) {
+#if defined(GXOS_NATIVEAOT_C164_FILE_ACTIVATION_PROOF)
+    static bool c164AssociationTestsRun = false;
+    if (!c164AssociationTestsRun) {
+        c164AssociationTestsRun = true;
+        uint32_t cases = 0u;
+        uint32_t failureMask = 0u;
+        const bool passed = appmodel::runC164FileAssociationTests(
+            &cases, &failureMask);
+        serial::puts("[C164-FILE-ASSOCIATION-TESTS] cases=");
+        serial::put_hex32(cases);
+        serial::puts(" failed=");
+        serial::put_hex32(failureMask);
+        serial::puts(" used=");
+        serial::put_hex32(appmodel::fileAssociationUsedCount());
+        serial::puts(" capacity=");
+        serial::put_hex32(appmodel::fileAssociationCapacity());
+        serial::puts(" bytes=");
+        serial::put_hex32(appmodel::fileAssociationTableBytes());
+        serial::puts(" resolver-stress=1000 result=");
+        serial::puts(passed ? "PASS\n" : "FAIL\n");
+        if (!passed) return LaunchStatus::ManagedFailed;
+    }
+#endif
 #if defined(GXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER)
     static bool c161RegistrationTestRun = false;
     if (!c161RegistrationTestRun) {
@@ -4484,6 +4680,15 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
     if (report == nullptr) report = &local;
     *report = {};
     report->status = LaunchStatus::InvalidApplicationId;
+    if ((activationKind != kManagedActivationKindNone &&
+            activationKind != kManagedActivationKindDocument) ||
+        (launchContextLength != 0u && launchContext == nullptr) ||
+        launchContextLength > kManagedLaunchContextMaxBytes ||
+        (activationKind == kManagedActivationKindDocument &&
+            launchContextLength == 0u)) {
+        report->status = LaunchStatus::InvalidLaunchContext;
+        return report->status;
+    }
     const gxos::apps::BuiltInAppMetadata* metadata =
         gxos::apps::FindManagedNativeAotAppByIdentity(applicationId);
     if (metadata == nullptr || !gxos::apps::ManagedNativeAotCatalogIsValid() ||
@@ -4502,20 +4707,35 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
     NativeAotManagedSurface* targetSurface =
         managedSurfaceForApplication(metadata->appId);
     if (targetSurface && targetSurface->windowId() != 0u) {
-        compositor::KernelCompositor::setFocus(
-            static_cast<uint32_t>(targetSurface->windowId()));
-        g_managedLastSelector = selector;
+        if (activationKind == kManagedActivationKindDocument) {
+            if (!targetSurface->requestClose()) {
+                serial::puts("[C164-ACTIVATION] target=Notes existing-close=vetoed result=FAIL\n");
+                return LaunchStatus::ManagedFailed;
+            }
+            targetSurface = nullptr;
+        } else {
+            compositor::KernelCompositor::setFocus(
+                static_cast<uint32_t>(targetSurface->windowId()));
+            if (!copyManagedIdentity(metadata->appId,
+                    g_managedActiveApplicationId,
+                    sizeof(g_managedActiveApplicationId))) {
+                return LaunchStatus::InvalidApplicationId;
+            }
+            g_managedActiveSnapshotInstanceId =
+                targetSurface->snapshotInstanceId();
+            g_managedLastSelector = selector;
 #if defined(GXOS_NATIVEAOT_C162_MANAGED_TASK_MANAGER_CLOSE)
-        serial::puts("[C162-MANAGED-FOCUS] appId=");
-        serial::puts(metadata->appId);
-        serial::puts(" source=3 instance=");
-        serial::put_hex64(targetSurface->snapshotInstanceId());
-        serial::puts(" selector=");
-        serial::put_hex32(selector);
-        serial::puts(" existing=true result=PASS\n");
+            serial::puts("[C162-MANAGED-FOCUS] appId=");
+            serial::puts(metadata->appId);
+            serial::puts(" source=3 instance=");
+            serial::put_hex64(targetSurface->snapshotInstanceId());
+            serial::puts(" selector=");
+            serial::put_hex32(selector);
+            serial::puts(" existing=true result=PASS\n");
 #endif
-        report->status = LaunchStatus::Success;
-        return report->status;
+            report->status = LaunchStatus::Success;
+            return report->status;
+        }
     }
     char previousIdentity[kManagedApplicationIdentityCapacity] = {};
     (void)copyManagedIdentity(g_managedActiveApplicationId, previousIdentity,
@@ -4550,8 +4770,9 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
     serial::put_hex32(launchGeneration);
     serial::puts(" selector=");
     serial::put_hex32(selector);
-    serial::puts(g_managedReturnLaunchActive
-        ? " kind=return\n" : " kind=normal\n");
+    serial::puts(activationKind == kManagedActivationKindDocument
+        ? " kind=document\n"
+        : g_managedReturnLaunchActive ? " kind=return\n" : " kind=normal\n");
 #else
     ++g_managedApplicationLaunchGeneration;
 #endif
@@ -4572,7 +4793,7 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
     g_managedLastSelector = selector;
     const LaunchStatus status = launchLogical(
         kProductionCompositeImage, selector, report,
-        launchContext, launchContextLength);
+        launchContext, launchContextLength, activationKind);
     g_managedInvocationSurface = previousInvocationSurface;
 #if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
     if (status != LaunchStatus::Success) {
@@ -4688,7 +4909,8 @@ LaunchStatus probeFileServiceNegativeTests(LaunchReport* report) {
         managedFileStat, managedApplicationSnapshot, managedCloseApplication };
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
-        reinterpret_cast<void*>(static_cast<uintptr_t>(4u)), nullptr, 0u, 0u};
+        reinterpret_cast<void*>(static_cast<uintptr_t>(4u)), nullptr, 0u, 0u,
+        kManagedActivationKindNone, nullptr, nullptr};
     uint8_t buffer[64] = {};
     uint32_t outLength = 0u;
     uint8_t oversizedPath[kManagedFilePathMaxBytes + 1u] = {};
@@ -4792,7 +5014,8 @@ LaunchStatus probeDirectoryServiceNegativeTests(LaunchReport* report) {
         managedFileStat, managedApplicationSnapshot, managedCloseApplication };
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
-        reinterpret_cast<void*>(static_cast<uintptr_t>(4u)), nullptr, 0u, 0u};
+        reinterpret_cast<void*>(static_cast<uintptr_t>(4u)), nullptr, 0u, 0u,
+        kManagedActivationKindNone, nullptr, nullptr};
     ManagedDirectoryEntryAbi entries[2]{};
     ManagedFileInfoAbi info{};
     uint32_t count = 0u;
@@ -4873,7 +5096,8 @@ LaunchStatus probeDirectoryCapacityTests(LaunchReport* report) {
         managedFileStat, managedApplicationSnapshot, managedCloseApplication };
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
-        reinterpret_cast<void*>(static_cast<uintptr_t>(4u)), nullptr, 0u, 0u};
+        reinterpret_cast<void*>(static_cast<uintptr_t>(4u)), nullptr, 0u, 0u,
+        kManagedActivationKindNone, nullptr, nullptr};
     ManagedDirectoryEntryAbi one[1]{};
     ManagedDirectoryEntryAbi all[kManagedDirectoryMaxEntries]{};
     uint32_t smallCount = 0u;

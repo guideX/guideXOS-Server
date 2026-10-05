@@ -26,7 +26,9 @@ enum class LaunchStatus : int32_t {
 // The managed App Model context is deliberately small and synchronous.  The
 // launcher copies exactly this many UTF-8 bytes into the NativeGxAppContext
 // frame before entering the resident composite image.
-static constexpr uint32_t kManagedLaunchContextMaxBytes = 48u;
+static constexpr uint32_t kManagedLaunchContextMaxBytes = 96u;
+static constexpr uint32_t kManagedActivationKindNone = 0u;
+static constexpr uint32_t kManagedActivationKindDocument = 1u;
 
 struct LaunchReport {
     LaunchStatus status;
@@ -70,12 +72,14 @@ LaunchStatus launch(const char* path, LaunchReport* report);
 LaunchStatus launchLogical(const char* path, uint32_t logicalAppId,
                            LaunchReport* report,
                            const char* launchContext = nullptr,
-                           uint32_t launchContextLength = 0u);
+                           uint32_t launchContextLength = 0u,
+                           uint32_t activationKind = kManagedActivationKindNone);
 bool isProductionLogicalApplicationId(const char* applicationId);
 LaunchStatus launchLogicalApplication(const char* applicationId,
                                       LaunchReport* report,
                                       const char* launchContext = nullptr,
-                                      uint32_t launchContextLength = 0u);
+                                      uint32_t launchContextLength = 0u,
+                                      uint32_t activationKind = kManagedActivationKindNone);
 #if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
 // Read-only lifecycle observations for the C150 in-kernel proof harness.
 bool c150ReturnTargetIsEmpty();

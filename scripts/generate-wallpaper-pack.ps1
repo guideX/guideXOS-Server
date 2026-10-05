@@ -17,7 +17,8 @@ param(
     [switch]$C152ManagedNotesSaveWorkflow,
     [switch]$C155ManagedNotesSession,
     [switch]$C156ControlModifierShortcuts,
-    [switch]$C157ManagedNotesNewDocument
+    [switch]$C157ManagedNotesNewDocument,
+    [switch]$C164FileActivation
 )
 
 $ErrorActionPreference = "Stop"
@@ -707,6 +708,7 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
     $hasC151Full = $false
     $hasC152 = $false
     $hasC155 = $false
+    $hasC164 = $false
     $hasConfigCerts = $false
     $hasConfigNavigator = $false
     foreach ($file in $Files) {
@@ -758,6 +760,11 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
                 $hasC155 = $true
                 break
             }
+            '^apps/C164$' {
+                $hasApps = $true
+                $hasC164 = $true
+                break
+            }
             '^apps/FULL$' {
                 $hasApps = $true
                 $hasC151Full = $true
@@ -799,6 +806,7 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
     $c151NestedCluster = $null
     $c151FullCluster = $null
     $c155Cluster = $null
+    $c164Cluster = $null
     $configCertsCluster = $null
     $configNavigatorCluster = $null
     if ($hasCerts) {
@@ -824,6 +832,10 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
     if ($hasC155) {
         $c155Cluster = $nextCluster++
         $fat[$c155Cluster] = 0x0FFFFFFF
+    }
+    if ($hasC164) {
+        $c164Cluster = $nextCluster++
+        $fat[$c164Cluster] = 0x0FFFFFFF
     }
     if ($hasC151Nested) {
         $c151NestedCluster = $nextCluster++
@@ -938,6 +950,8 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
         $usedC152 = @{}
         $c155Entries = if ($null -ne $c155Cluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
         $usedC155 = @{}
+        $c164Entries = if ($null -ne $c164Cluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
+        $usedC164 = @{}
         $c151NestedEntries = if ($null -ne $c151NestedCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
         $usedC151Nested = @{}
         $c151FullEntries = if ($null -ne $c151FullCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
@@ -951,6 +965,9 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
             }
             if ($null -ne $c155Cluster) {
                 Add-DirectoryRecord $appsEntries "C155" (Get-ShortName "C155" $usedApps) 0x10 $c155Cluster 0
+            }
+            if ($null -ne $c164Cluster) {
+                Add-DirectoryRecord $appsEntries "C164" (Get-ShortName "C164" $usedApps) 0x10 $c164Cluster 0
             }
             if ($null -ne $c151FullCluster) {
                 Add-DirectoryRecord $appsEntries "FULL" (Get-ShortName "FULL" $usedApps) 0x10 $c151FullCluster 0
@@ -1007,6 +1024,10 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
                     Add-DirectoryRecord $c155Entries $record.Name (Get-ShortName $record.Name $usedC155) 0x20 $record.Cluster $record.Size
                     break
                 }
+                "apps/C164" {
+                    Add-DirectoryRecord $c164Entries $record.Name (Get-ShortName $record.Name $usedC164) 0x20 $record.Cluster $record.Size
+                    break
+                }
                 "apps/C151/nested" {
                     Add-DirectoryRecord $c151NestedEntries $record.Name (Get-ShortName $record.Name $usedC151Nested) 0x20 $record.Cluster $record.Size
                     break
@@ -1027,6 +1048,7 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
             @($c151Cluster, $c151Entries),
             @($c152Cluster, $c152Entries),
             @($c155Cluster, $c155Entries),
+            @($c164Cluster, $c164Entries),
             @($c151NestedCluster, $c151NestedEntries),
             @($c151FullCluster, $c151FullEntries),
             @($configCertsCluster, $configCertEntries),
@@ -1193,6 +1215,36 @@ if ($C155ManagedNotesSession) {
         [System.Text.Encoding]::ASCII)
     $staged += @(Get-ChildItem -LiteralPath $c155Dir -File)
     Write-Host "      staged C155 named-session and Save As fixtures" -ForegroundColor Yellow
+}
+
+if ($C164FileActivation) {
+    if (-not $C151ManagedOpenFileDialog -or -not $C152ManagedNotesSaveWorkflow -or
+        -not $C155ManagedNotesSession) {
+        throw "C164 file activation media requires C151 read, C152 save, and C155 session fixtures."
+    }
+    $c164Dir = Join-Path $appsDir "C164"
+    New-Item -ItemType Directory -Force -Path $c164Dir | Out-Null
+    $fixtures = [ordered]@{
+        "hello.txt" = "hello from C164"
+        "save.txt" = "C164_SAVE_ORIGINAL"
+        "noapp.bin" = "C164_UNSUPPORTED"
+        "mixed.TXT" = "C164_MIXED_CASE"
+        "report.final.txt" = "C164_MULTIPLE_DOTS"
+        "noextension" = "C164_NO_EXTENSION"
+        ".profile" = "C164_DOTFILE"
+        "empty.txt" = ""
+        "lines.txt" = (("line`n" * 32) + "end")
+        "oversized.txt" = ("X" * 257)
+    }
+    foreach ($fixture in $fixtures.GetEnumerator()) {
+        $fixturePath = Join-Path $c164Dir $fixture.Key
+        [System.IO.File]::WriteAllText(
+            $fixturePath, $fixture.Value, [System.Text.Encoding]::ASCII)
+    }
+    [System.IO.File]::WriteAllBytes((Join-Path $c164Dir "invalid.txt"),
+        [byte[]]@(0xC2))
+    $staged += @(Get-ChildItem -LiteralPath $c164Dir -File -Force)
+    Write-Host "      staged C164 activation fixtures: exact, mixed-case, unsupported, dotfile, empty, and capacity cases" -ForegroundColor Yellow
 }
 
 if ($C156ControlModifierShortcuts -and -not $C155ManagedNotesSession) {

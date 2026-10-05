@@ -8234,7 +8234,8 @@ enum class ManagedAppModelLaunchResult : uint8_t {
 static ManagedAppModelLaunchResult launch_managed_appmodel_record(const char* appName,
                                                                   const char* source,
                                                                   const char* launchContext,
-                                                                  uint32_t launchContextLength)
+                                                                  uint32_t launchContextLength,
+                                                                  uint32_t activationKind = 0u)
 {
 #if defined(GXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH) && defined(GXOS_BARE_METAL)
     if (!appName || !appName[0]) return ManagedAppModelLaunchResult::NotManaged;
@@ -8265,7 +8266,8 @@ static ManagedAppModelLaunchResult launch_managed_appmodel_record(const char* ap
     nativeaot::LaunchReport report{};
     const nativeaot::LaunchStatus status =
         nativeaot::launchLogicalApplication(
-            target.appId, &report, launchContext, launchContextLength);
+            target.appId, &report, launchContext, launchContextLength,
+            activationKind);
     serial::puts("[APPMODEL-MANAGED-RESULT] appId=");
     serial::puts(target.appId);
     serial::puts(" status=");
@@ -8897,14 +8899,16 @@ bool launch_app(const char* appName)
 static uint32_t bounded_launch_context_length(const char* launchContext)
 {
     if (!launchContext) return 0u;
-    constexpr uint32_t kMaxContextBytes = 48u;
+    constexpr uint32_t kMaxContextBytes =
+        nativeaot::kManagedLaunchContextMaxBytes;
     for (uint32_t index = 0; index <= kMaxContextBytes; ++index) {
         if (launchContext[index] == '\0') return index;
     }
     return kMaxContextBytes + 1u;
 }
 
-bool launch_app_with_context(const char* appName, const char* launchContext)
+bool launch_app_with_context(const char* appName, const char* launchContext,
+                             uint32_t activationKind)
 {
     if (!appName) return false;
     // Bare-metal File Explorer is the kernel-side "Files" app; hosted/compositor
@@ -8935,10 +8939,11 @@ bool launch_app_with_context(const char* appName, const char* launchContext)
     const ManagedAppModelLaunchResult managedResult =
         launch_managed_appmodel_record(
             appName, "DesktopLaunch", launchContext,
-            bounded_launch_context_length(launchContext));
+            bounded_launch_context_length(launchContext), activationKind);
     if (managedResult != ManagedAppModelLaunchResult::NotManaged) {
         return managedResult == ManagedAppModelLaunchResult::Succeeded;
     }
+    if (activationKind != 0u) return false;
     
     // Try to launch as kernel GUI app
     return try_launch_kernel_app(appName);

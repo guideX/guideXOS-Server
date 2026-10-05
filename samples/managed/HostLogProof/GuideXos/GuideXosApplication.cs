@@ -58,6 +58,8 @@ public readonly struct GuideXosApplicationDescriptor
 /// </summary>
 public static unsafe class GuideXosApplicationRegistry
 {
+    public const uint LifetimeCloseActionId = 0x01500002u;
+
 #if HOSTLOGPROOF_MANAGED_APP_RETURN
     private static readonly GuideXosApplicationDescriptor[] s_entries =
     {
@@ -177,6 +179,16 @@ public static unsafe class GuideXosApplicationRegistry
         }
 #endif
 
+#if HOSTLOGPROOF_MANAGED_APP_RETURN
+        if (host.IsAction && host.LaunchContext.ActionId ==
+                LifetimeCloseActionId)
+        {
+            s_lifetime.Clear(selector);
+            host.TryLog("C150-LIFETIME-CLOSE result=PASS"u8);
+            return (int)GuideXosResult.Success;
+        }
+#endif
+
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
         // The shared loader runs before the first managed application launch
         // or input callback; Settings Center is only one consumer of state.
@@ -217,7 +229,10 @@ public static unsafe class GuideXosApplicationRegistry
         {
             if (!s_lifetime.TryStart(descriptor, out application,
                     out uint generation))
+            {
+                host.TryLog("C150-LIFETIME-START result=FAIL capacity=3"u8);
                 return GxAbi.ErrorInvalidApplicationId;
+            }
 #if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
             Span<byte> instanceMarker = stackalloc byte[96];
             int markerLength = 0;

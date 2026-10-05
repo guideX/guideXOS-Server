@@ -95,6 +95,10 @@ public sealed partial class ManagedNotes
 
         LogC156Shortcut(host, input, actionId, enabled,
             result == GuideXosResult.Success);
+#if HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF
+        if (IsC164DocumentPath())
+            LogC164DocumentState(host, "shortcut"u8);
+#endif
         return true;
     }
 

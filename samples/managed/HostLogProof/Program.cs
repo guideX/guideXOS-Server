@@ -2111,7 +2111,7 @@ public static unsafe class Program
     private static bool HostSurfaceAvailable(NativeGxAppContext* context)
     {
         return context != null &&
-            context->size >= (uint)sizeof(NativeGxAppContext) &&
+            context->size >= GxAbi.AppContextLaunchPrefixSize &&
             context->host != null &&
             context->host->size >= (uint)sizeof(NativeHostCallTable) &&
             context->host->requestWindow != null &&
@@ -2125,7 +2125,7 @@ public static unsafe class Program
         out byte[] copy)
     {
         copy = Array.Empty<byte>();
-        if (context == null || context->size < (uint)sizeof(NativeGxAppContext) ||
+        if (context == null || context->size < GxAbi.AppContextLaunchPrefixSize ||
             context->launchContextLength > GxAbi.MaxLaunchContextBytes ||
             (context->launchContextLength != 0u && context->launchContext == null))
         {

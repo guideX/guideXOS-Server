@@ -4,6 +4,8 @@
 #include "include/kernel/kernel_app.h"
 #include "include/kernel/vfs.h"
 
+#include <stddef.h>
+
 namespace gxos {
 namespace apps {
 namespace {
@@ -29,6 +31,243 @@ void SetTypedDispatchRuntimeEnabledForDiagnostics(bool enabled)
 
 namespace kernel {
 namespace appmodel {
+
+namespace {
+struct FileAssociationRecord {
+    const char* extension;
+    const char* applicationId;
+};
+
+constexpr const char* kManagedNotesApplicationId =
+    "com.guidexos.apps.managed.notes";
+constexpr FileAssociationRecord kFileAssociations[kFileAssociationCapacity] = {
+    { ".txt", kManagedNotesApplicationId },
+};
+static_assert(sizeof(kFileAssociations) ==
+    kFileAssociationCapacity * sizeof(FileAssociationRecord),
+    "file association table must retain its fixed capacity");
+
+bool asciiEqualsIgnoreCase(const char* left, const char* right) {
+    if (!left || !right) return false;
+    while (*left && *right) {
+        char a = *left++;
+        char b = *right++;
+        if (a >= 'A' && a <= 'Z') a = static_cast<char>(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z') b = static_cast<char>(b - 'A' + 'a');
+        if (a != b) return false;
+    }
+    return *left == '\0' && *right == '\0';
+}
+
+bool validCanonicalAssociationPath(const char* path, uint32_t* outLength,
+                                   const char** outLeaf) {
+    if (!path || !outLength || !outLeaf) return false;
+    uint32_t length = 0u;
+    while (length <= kFileAssociationPathCapacity && path[length] != '\0')
+        ++length;
+    if (length == 0u || length > kFileAssociationPathCapacity ||
+        path[0] != '/' || path[length - 1u] == '/') return false;
+
+    uint32_t componentStart = 1u;
+    uint32_t leafStart = 1u;
+    for (uint32_t index = 1u; index <= length; ++index) {
+        if (index < length && path[index] == '\\') return false;
+        if (index != length && path[index] != '/') continue;
+        const uint32_t componentLength = index - componentStart;
+        if (componentLength == 0u ||
+            (componentLength == 1u && path[componentStart] == '.') ||
+            (componentLength == 2u && path[componentStart] == '.' &&
+                path[componentStart + 1u] == '.')) return false;
+        leafStart = componentStart;
+        componentStart = index + 1u;
+    }
+    *outLength = length;
+    *outLeaf = path + leafStart;
+    return true;
+}
+
+bool hasDuplicateAssociationExtensions() {
+    for (uint32_t left = 0u; left < kFileAssociationCapacity; ++left) {
+        if (!kFileAssociations[left].extension) continue;
+        for (uint32_t right = left + 1u;
+             right < kFileAssociationCapacity; ++right) {
+            if (kFileAssociations[right].extension &&
+                asciiEqualsIgnoreCase(kFileAssociations[left].extension,
+                    kFileAssociations[right].extension)) return true;
+        }
+    }
+    return false;
+}
+} // namespace
+
+FileAssociationResolution resolveFileAssociation(
+    const char* path, bool isRegularFile, bool isDirectory) {
+    uint32_t pathLength = 0u;
+    const char* leaf = nullptr;
+    if (!path) return { FileAssociationStatus::InvalidPath, nullptr };
+    while (pathLength <= kFileAssociationPathCapacity && path[pathLength])
+        ++pathLength;
+    if (pathLength > kFileAssociationPathCapacity)
+        return { FileAssociationStatus::PathTooLong, nullptr };
+    if (!validCanonicalAssociationPath(path, &pathLength, &leaf))
+        return { FileAssociationStatus::InvalidPath, nullptr };
+    if (isDirectory) return { FileAssociationStatus::Directory, nullptr };
+    if (!isRegularFile)
+        return { FileAssociationStatus::NotRegularFile, nullptr };
+
+    const char* lastDot = nullptr;
+    for (const char* cursor = leaf; *cursor; ++cursor) {
+        if (*cursor == '.') lastDot = cursor;
+    }
+    if (!lastDot || lastDot == leaf)
+        return { FileAssociationStatus::Unsupported, nullptr };
+
+    for (uint32_t index = 0u; index < kFileAssociationCapacity; ++index) {
+        const FileAssociationRecord& record = kFileAssociations[index];
+        if (record.extension && record.applicationId &&
+            asciiEqualsIgnoreCase(lastDot, record.extension)) {
+            return { FileAssociationStatus::Resolved, record.applicationId };
+        }
+    }
+    return { FileAssociationStatus::Unsupported, nullptr };
+}
+
+FileAssociationResolution resolveFileAssociationFromVfs(const char* path) {
+    if (!path) return { FileAssociationStatus::InvalidPath, nullptr };
+    const FileAssociationResolution shape =
+        resolveFileAssociation(path, false, false);
+    if (shape.status == FileAssociationStatus::InvalidPath ||
+        shape.status == FileAssociationStatus::PathTooLong) return shape;
+    vfs::FileInfo info{};
+    const vfs::Status status = vfs::stat(path, &info);
+    if (status != vfs::VFS_OK) return {
+        status == vfs::VFS_ERR_NOT_FOUND ? FileAssociationStatus::NotFound
+                                     : FileAssociationStatus::IoFailure,
+        nullptr };
+    if (info.type == vfs::FILE_TYPE_DIRECTORY)
+        return resolveFileAssociation(path, false, true);
+    if (info.type != vfs::FILE_TYPE_REGULAR)
+        return resolveFileAssociation(path, false, false);
+    return resolveFileAssociation(path, true, false);
+}
+
+uint32_t fileAssociationUsedCount() {
+    uint32_t count = 0u;
+    for (uint32_t index = 0u; index < kFileAssociationCapacity; ++index) {
+        if (kFileAssociations[index].extension &&
+            kFileAssociations[index].applicationId) ++count;
+    }
+    return count;
+}
+
+uint32_t fileAssociationCapacity() {
+    return kFileAssociationCapacity;
+}
+
+uint32_t fileAssociationTableBytes() {
+    return static_cast<uint32_t>(sizeof(kFileAssociations));
+}
+
+bool runC164FileAssociationTests(uint32_t* outCases,
+                                 uint32_t* outFailureMask) {
+    uint32_t cases = 0u;
+    uint32_t failureMask = 0u;
+    bool passed = true;
+    auto check = [&passed, &cases, &failureMask](bool condition) {
+        if (!condition && cases < 32u)
+            failureMask |= 1u << cases;
+        passed = passed && condition;
+        ++cases;
+    };
+    const char* notes = kManagedNotesApplicationId;
+    auto resolveRegular = [](const char* path) {
+        return resolveFileAssociation(path, true, false);
+    };
+
+    check(resolveRegular("/system/apps/C164/hello.txt").status ==
+        FileAssociationStatus::Resolved);
+    check(resolveRegular("/system/apps/C164/hello.TXT").status ==
+        FileAssociationStatus::Resolved);
+    check(resolveRegular("/system/apps/C164/hello.TxT").status ==
+        FileAssociationStatus::Resolved);
+    check(asciiEqualsIgnoreCase(resolveRegular(
+        "/system/apps/C164/hello.TXT").applicationId, notes));
+    check(resolveRegular("/system/apps/C164/report.final.txt").status ==
+        FileAssociationStatus::Resolved);
+    check(resolveRegular("/system/apps/C164/file.bin").status ==
+        FileAssociationStatus::Unsupported);
+    check(resolveRegular("/system/apps/C164/noextension").status ==
+        FileAssociationStatus::Unsupported);
+    check(resolveRegular("/system/apps/C164/.profile").status ==
+        FileAssociationStatus::Unsupported);
+    check(resolveRegular("/system/apps/C164/.profile.txt").status ==
+        FileAssociationStatus::Resolved);
+    check(resolveFileAssociationFromVfs(
+        "/system/apps/C164/hello.txt").status ==
+        FileAssociationStatus::Resolved);
+    check(resolveFileAssociationFromVfs(
+        "/system/apps/C164/noapp.bin").status ==
+        FileAssociationStatus::Unsupported);
+    check(resolveFileAssociationFromVfs(
+        "/system/apps/C164/missing.txt").status ==
+        FileAssociationStatus::NotFound);
+    check(resolveFileAssociationFromVfs(
+        "/system/apps/C164").status == FileAssociationStatus::Directory);
+    check(resolveFileAssociation("/system/apps/C164/dir", false, true).status ==
+        FileAssociationStatus::Directory);
+    check(resolveFileAssociation("/system/apps/C164/device", false, false).status ==
+        FileAssociationStatus::NotRegularFile);
+    check(resolveFileAssociation("", true, false).status ==
+        FileAssociationStatus::InvalidPath);
+    check(resolveFileAssociation(nullptr, true, false).status ==
+        FileAssociationStatus::InvalidPath);
+    check(resolveRegular("relative/file.txt").status ==
+        FileAssociationStatus::InvalidPath);
+    check(resolveRegular("/system/apps/C164/../file.txt").status ==
+        FileAssociationStatus::InvalidPath);
+    check(resolveRegular("/system/apps//file.txt").status ==
+        FileAssociationStatus::InvalidPath);
+    check(resolveRegular("/system/apps/C164/").status ==
+        FileAssociationStatus::InvalidPath);
+
+    char maximumPath[kFileAssociationPathCapacity + 2u] = {};
+    uint32_t maximumPosition = 0u;
+    maximumPath[maximumPosition++] = '/';
+    for (uint32_t index = 0u; index < 91u; ++index)
+        maximumPath[maximumPosition++] = 'a';
+    maximumPath[maximumPosition++] = '.';
+    maximumPath[maximumPosition++] = 't';
+    maximumPath[maximumPosition++] = 'x';
+    maximumPath[maximumPosition++] = 't';
+    maximumPath[maximumPosition] = '\0';
+    check(maximumPosition == kFileAssociationPathCapacity &&
+        resolveRegular(maximumPath).status == FileAssociationStatus::Resolved);
+    maximumPath[maximumPosition] = 'x';
+    maximumPath[maximumPosition + 1u] = '\0';
+    check(resolveRegular(maximumPath).status == FileAssociationStatus::PathTooLong);
+    check(fileAssociationUsedCount() == 1u &&
+        fileAssociationCapacity() == kFileAssociationCapacity);
+    check(fileAssociationTableBytes() ==
+        kFileAssociationCapacity * sizeof(FileAssociationRecord));
+    check(!hasDuplicateAssociationExtensions());
+    check(resolveRegular("/system/apps/C164/hello.txt").applicationId ==
+        resolveRegular("/system/apps/C164/hello.TXT").applicationId);
+
+    bool stress = true;
+    for (uint32_t index = 0u; index < 1000u; ++index) {
+        const FileAssociationResolution result = resolveRegular(
+            (index & 1u) ? "/system/apps/C164/report.final.TxT"
+                         : "/system/apps/C164/file.bin");
+        stress = stress && ((index & 1u)
+            ? result.status == FileAssociationStatus::Resolved &&
+                result.applicationId == notes
+            : result.status == FileAssociationStatus::Unsupported);
+    }
+    check(stress);
+    if (outCases) *outCases = cases;
+    if (outFailureMask) *outFailureMask = failureMask;
+    return passed && cases >= 20u;
+}
 
 static bool text_equals(const char* a, const char* b)
 {

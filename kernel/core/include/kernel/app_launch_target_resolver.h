@@ -8,6 +8,36 @@ namespace appmodel {
 
 typedef void (*LaunchTargetDiagnosticWriter)(const char*);
 
+enum class FileAssociationStatus : uint32_t {
+    Resolved = 0,
+    Unsupported = 1,
+    InvalidPath = 2,
+    PathTooLong = 3,
+    Directory = 4,
+    NotRegularFile = 5,
+    NotFound = 6,
+    IoFailure = 7,
+};
+
+struct FileAssociationResolution {
+    FileAssociationStatus status;
+    const char* applicationId;
+};
+
+static constexpr uint32_t kFileAssociationCapacity = 16u;
+static constexpr uint32_t kFileAssociationPathCapacity = 96u;
+
+// The normalized extension table is fixed, shared by native and managed
+// File Explorer, and maps only regular files to canonical App Model IDs.
+FileAssociationResolution resolveFileAssociation(
+    const char* path, bool isRegularFile, bool isDirectory);
+FileAssociationResolution resolveFileAssociationFromVfs(const char* path);
+uint32_t fileAssociationUsedCount();
+uint32_t fileAssociationCapacity();
+uint32_t fileAssociationTableBytes();
+bool runC164FileAssociationTests(uint32_t* outCases,
+                                uint32_t* outFailureMask);
+
 gxos::apps::LaunchTarget resolveLaunchTarget(const char* label);
 void printLaunchTargetDiagnostic(const gxos::apps::LaunchTarget& target, LaunchTargetDiagnosticWriter write);
 void printLaunchTargetDiagnostic(const char* label, LaunchTargetDiagnosticWriter write);

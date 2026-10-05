@@ -176,8 +176,8 @@ internal sealed class GuideXosDirectoryBrowserC163
         }
         if (entry.Type != GuideXosEntryType.Directory)
         {
-            SetStatus("File activation not implemented");
-            return GuideXosFileResult.Success;
+            SetStatus("File activation requires the App Model host");
+            return GuideXosFileResult.InvalidArgument;
         }
         GuideXosPickerPathStatus pathStatus =
             GuideXosPickerPath.TryBuildPath(_currentPath, entry.Name,
@@ -340,7 +340,7 @@ internal sealed class GuideXosDirectoryBrowserC163
         "Showing first " + _entryCount.ToString(CultureInfo.InvariantCulture) +
         " entries; more omitted";
 
-    private static string PathStatusText(GuideXosPickerPathStatus status) =>
+    internal static string PathStatusText(GuideXosPickerPathStatus status) =>
         status == GuideXosPickerPathStatus.PathTooLong
             ? "Path exceeds 96 bytes" : "Invalid directory or entry path";
 
@@ -386,6 +386,7 @@ internal sealed class GuideXosFileExplorerControllerC163
     private readonly GuideXosLabel _status = new(20, 294, 760, "Directory not loaded", 56);
     private bool _controlsInitialized;
     private bool _suppressControlRCharacter;
+    private GuideXosHost _host;
 
     internal GuideXosFileExplorerControllerC163() :
         this(new GuideXosFileExplorerHostSourceC163())
@@ -414,6 +415,7 @@ internal sealed class GuideXosFileExplorerControllerC163
 
     internal void AttachHost(GuideXosHost host)
     {
+        _host = host;
         if (_source is GuideXosFileExplorerHostSourceC163 hostSource)
             hostSource.Attach(host);
     }
@@ -475,16 +477,76 @@ internal sealed class GuideXosFileExplorerControllerC163
 
     public GuideXosFileResult OpenSelected()
     {
-        string previousPath = _browser.CurrentPath;
-        GuideXosFileResult result = _browser.OpenSelected();
-        if (result == GuideXosFileResult.Success &&
-            !string.Equals(previousPath, _browser.CurrentPath,
-                StringComparison.Ordinal))
+        GuideXosDirectoryEntry entry = _browser.SelectedEntry;
+        if (entry == null)
         {
-            RebuildList(resetViewport: true);
+            _browser.SetStatus("Select a directory or file");
+            SyncControlsAndDetails();
+            return GuideXosFileResult.InvalidArgument;
         }
+        if (entry.Type == GuideXosEntryType.Directory)
+        {
+            string previousPath = _browser.CurrentPath;
+            GuideXosFileResult navigation = _browser.OpenSelected();
+            if (navigation == GuideXosFileResult.Success &&
+                !string.Equals(previousPath, _browser.CurrentPath,
+                    StringComparison.Ordinal))
+                RebuildList(resetViewport: true);
+            SyncControlsAndDetails();
+            return navigation;
+        }
+
+        GuideXosPickerPathStatus pathStatus =
+            GuideXosPickerPath.TryBuildPath(_browser.CurrentPath, entry.Name,
+                out string selectedPath);
+        if (pathStatus != GuideXosPickerPathStatus.Success)
+        {
+            _browser.SetStatus(GuideXosDirectoryBrowserC163.PathStatusText(pathStatus));
+            SyncControlsAndDetails();
+            return GuideXosFileResult.InvalidPath;
+        }
+        if (_host == null)
+        {
+            _browser.SetStatus("File activation unavailable");
+            SyncControlsAndDetails();
+            return GuideXosFileResult.CapabilityUnavailable;
+        }
+
+        GuideXosFileActivationResult activation = _host.TryRequestFileActivation(
+            Encoding.UTF8.GetBytes(selectedPath));
+#if HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF
+        if (activation == GuideXosFileActivationResult.Unsupported)
+        {
+            Span<byte> line = stackalloc byte[224];
+            int position = 0;
+            GuideXosText.Append(line, ref position,
+                "C164-FILE-ACTIVATION path="u8);
+            GuideXosText.Append(line, ref position,
+                Encoding.UTF8.GetBytes(selectedPath));
+            GuideXosText.Append(line, ref position,
+                " result=unsupported source-retained=true selection=preserved"u8);
+            _host.TryLog(line[..position]);
+        }
+#endif
+        _browser.SetStatus(activation switch
+        {
+            GuideXosFileActivationResult.Accepted => "Opening file in Managed Notes",
+            GuideXosFileActivationResult.Unsupported =>
+                "No application is associated with this file type.",
+            GuideXosFileActivationResult.InvalidPath => "Selected path is invalid",
+            GuideXosFileActivationResult.PathTooLong =>
+                "Activation path exceeds 96 bytes",
+            GuideXosFileActivationResult.Directory =>
+                "Selected entry changed to a directory",
+            GuideXosFileActivationResult.NotRegularFile =>
+                "Selected entry is not a regular file",
+            GuideXosFileActivationResult.NotFound => "Selected file is unavailable",
+            GuideXosFileActivationResult.IoFailure => "File association lookup failed",
+            _ => "File activation unavailable",
+        });
         SyncControlsAndDetails();
-        return result;
+        return activation == GuideXosFileActivationResult.Accepted
+            ? GuideXosFileResult.Success : GuideXosFileResult.InvalidArgument;
     }
 
     public void Reset()
@@ -499,6 +561,7 @@ internal sealed class GuideXosFileExplorerControllerC163
         _open.SetEnabled(false);
         _controlsInitialized = false;
         _suppressControlRCharacter = false;
+        _host = null;
         _browser.Reset();
         if (_source is GuideXosFileExplorerHostSourceC163 hostSource)
             hostSource.Detach();

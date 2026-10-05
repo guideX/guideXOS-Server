@@ -16,8 +16,9 @@ public static class GxAbi
     public const uint CompositeAppA = 1u;
     public const uint CompositeAppB = 2u;
     public const uint CompositeAppCounter = 3u;
-    public const uint MaxLaunchContextBytes = 48u;
+    public const uint MaxLaunchContextBytes = 96u;
     public const uint LegacyContextSize = 24u;
+    public const uint AppContextLaunchPrefixSize = 40u;
     public const uint HostCallTablePrefixSize = 16u;
     public const uint HostCallTableV1Size = 72u;
     public const uint C113HostCallTableSize = 88u;
@@ -44,6 +45,8 @@ public static class GxAbi
     public const uint DirectoryEntryAbiSize = 144u;
     public const uint FileInfoAbiSize = 16u;
     public const uint LaunchFlagAction = 0x80000000u;
+    public const uint ActivationKindNone = 0u;
+    public const uint ActivationKindDocument = 1u;
     public const uint LaunchFlagCapabilityProbe = 0x40000000u;
     public const uint LaunchFlagAbiProbe = 0x20000000u;
     // C116 reuses the existing launch-flags transport for synchronous input
@@ -116,6 +119,19 @@ public enum GuideXosFileResult
     InvalidArgument = -16,
     NotDirectory = -17,
     EntryNameTooLong = -18,
+}
+
+public enum GuideXosFileActivationResult
+{
+    Accepted = 0,
+    Unsupported = 1,
+    InvalidPath = 2,
+    PathTooLong = 3,
+    Directory = 4,
+    NotRegularFile = 5,
+    NotFound = 6,
+    IoFailure = 7,
+    NotSupported = 8,
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -316,4 +332,8 @@ public unsafe struct NativeGxAppContext
     public byte* launchContext;
     public uint launchContextLength;
     public uint launchFlags;
+    public uint activationKind;
+    public void* applicationRequestState;
+    public delegate* unmanaged<NativeGxAppContext*, byte*, uint, int>
+        requestFileActivation;
 }

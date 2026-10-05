@@ -10,11 +10,15 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
         "com.guidexos.apps.managed.fileexplorer";
     public const uint ApplicationSelector = 8u;
     public const uint CloseActionId = 0x01630001u;
+    public const uint ActivationFailureActionId = 0x01630002u;
     public const int SurfaceWidth = 800;
     public const int SurfaceHeight = 390;
 
 #if HOSTLOGPROOF_C163_FILE_EXPLORER_PROOF
     private static bool s_proofTestsRun;
+#endif
+#if HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF
+    private static bool s_c164ContextTestsRun;
 #endif
     private readonly GuideXosFileExplorerControllerC163 _controller = new();
     private ulong _window;
@@ -38,6 +42,17 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
             if (!GuideXosManagedFileExplorerC163Tests.Run(host))
             {
                 host.TryLog("C163-FILE-EXPLORER-TESTS result=FAIL"u8);
+                return GuideXosResult.InvalidArgument;
+            }
+        }
+#endif
+#if HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF
+        if (!s_c164ContextTestsRun)
+        {
+            s_c164ContextTestsRun = true;
+            if (!GuideXosFileActivationC164Tests.Run(host))
+            {
+                host.TryLog("C164-ACTIVATION-CONTEXT-TESTS result=FAIL"u8);
                 return GuideXosResult.InvalidArgument;
             }
         }
@@ -118,9 +133,20 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
     public override GuideXosResult HandleAction(GuideXosHost host,
         uint actionId)
     {
-        if (actionId != CloseActionId) return GuideXosResult.InvalidAction;
-        _closeRequested = true;
-        ResetAfterClose(host);
+        if (actionId == CloseActionId)
+        {
+            _closeRequested = true;
+            ResetAfterClose(host);
+            return GuideXosResult.Success;
+        }
+        if (actionId != ActivationFailureActionId)
+            return GuideXosResult.InvalidAction;
+
+        _controller.Browser.SetStatus("Unable to open selected file");
+        if (host.TryGetSurface(_window, out GuideXosSurface surface) ==
+                GuideXosResult.Success && surface != null)
+            _controller.Render(surface);
+        host.TryLog("C164-ACTIVATION source-retained=true result=FAIL"u8);
         return GuideXosResult.Success;
     }
 

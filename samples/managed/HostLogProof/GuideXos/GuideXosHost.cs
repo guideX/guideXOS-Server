@@ -17,6 +17,7 @@ public sealed unsafe class GuideXosHost
     private const nuint DirectoryListOffset = 88u;
     private const nuint FileStatOffset = 96u;
     private const nuint ApplicationSnapshotOffset = 104u;
+    private const uint FileActivationContextSize = 64u;
     private NativeGxAppContext* _context;
     private NativeHostCallTable* _host;
     private static readonly GuideXosLaunchContext s_dispatchContext =
@@ -136,6 +137,47 @@ public sealed unsafe class GuideXosHost
     {
         return GuideXosApplicationControl.TryCloseApplication(
             _context, _host, identity);
+    }
+
+    /// <summary>Requests bounded OS file activation for the current Explorer dispatch.</summary>
+    public GuideXosFileActivationResult TryRequestFileActivation(
+        ReadOnlySpan<byte> canonicalPath)
+    {
+        if (LaunchContext.Selector != 8u || canonicalPath.Length == 0)
+            return GuideXosFileActivationResult.InvalidPath;
+        if (canonicalPath.Length > GxAbi.MaxLaunchContextBytes)
+            return GuideXosFileActivationResult.PathTooLong;
+        if (_context == null || _context->size < FileActivationContextSize ||
+            _context->applicationRequestState == null ||
+            _context->requestFileActivation == null)
+            return GuideXosFileActivationResult.NotSupported;
+        for (int index = 0; index < canonicalPath.Length; index++)
+        {
+            if (canonicalPath[index] == 0)
+                return GuideXosFileActivationResult.InvalidPath;
+        }
+
+        Span<byte> path = stackalloc byte[canonicalPath.Length + 1];
+        canonicalPath.CopyTo(path);
+        path[^1] = 0;
+        int nativeResult;
+        fixed (byte* pointer = path)
+        {
+            nativeResult = _context->requestFileActivation(
+                _context, pointer, (uint)canonicalPath.Length);
+        }
+        return nativeResult switch
+        {
+            0 => GuideXosFileActivationResult.Accepted,
+            1 => GuideXosFileActivationResult.Unsupported,
+            -1 => GuideXosFileActivationResult.InvalidPath,
+            -2 => GuideXosFileActivationResult.PathTooLong,
+            -3 => GuideXosFileActivationResult.Directory,
+            -4 => GuideXosFileActivationResult.NotRegularFile,
+            -5 => GuideXosFileActivationResult.NotFound,
+            -6 => GuideXosFileActivationResult.IoFailure,
+            _ => GuideXosFileActivationResult.NotSupported,
+        };
     }
 
     internal static GuideXosApplicationSnapshotResult TryGetApplicationSnapshot(

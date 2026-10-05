@@ -8,6 +8,8 @@
 #include "include/kernel/kernel_compositor.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/desktop.h"
+#include "include/kernel/app_launch_target_resolver.h"
+#include "include/kernel/nativeaot_application.h"
 #include "include/kernel/shell.h"
 #include "include/kernel/ps2keyboard.h"
 #include "include/kernel/vfs.h"
@@ -4569,11 +4571,39 @@ void FileExplorerApp::navigate(const char* path) {
 void FileExplorerApp::openSelected() {
     if (m_selected < 0 || m_selected >= m_entryCount) return;
     Entry& e = m_entries[m_selected];
+    if (!e.isDir && endsWithIgnoreCase(e.name, ".txt")) {
+        const size_t baseLength = strlen(m_currentPath);
+        const size_t nameLength = strlen(e.name);
+        const size_t separatorLength = baseLength > 1u &&
+            m_currentPath[baseLength - 1u] != '/' ? 1u : 0u;
+        const size_t pathLength = baseLength + separatorLength + nameLength;
+        if (pathLength > ::kernel::appmodel::kFileAssociationPathCapacity) {
+            setStatus("File path exceeds activation limit");
+            invalidate();
+            return;
+        }
+    }
     char full[MAX_PATH_LEN];
     joinPath(m_currentPath, e.name, full, sizeof(full));
     if (e.isDir) {
         serial::puts("[fileexplorer-bm] open folder\n");
         navigate(full);
+    } else if (endsWithIgnoreCase(e.name, ".txt")) {
+        const ::kernel::appmodel::FileAssociationResolution association =
+            ::kernel::appmodel::resolveFileAssociationFromVfs(full);
+        if (association.status ==
+                ::kernel::appmodel::FileAssociationStatus::Resolved &&
+            ::kernel::desktop::launch_app_with_context(
+                association.applicationId, full,
+                ::kernel::nativeaot::kManagedActivationKindDocument)) {
+            setStatus("Opened text file in Managed Notes");
+        } else if (association.status ==
+                       ::kernel::appmodel::FileAssociationStatus::Unsupported) {
+            setStatus("No application registered for this file type");
+        } else {
+            setStatus("Unable to activate selected text file");
+        }
+        invalidate();
     } else if (isTextFile(e.name)) {
         if (app::AppManager::launchAppWithParam("Notepad", full)) {
             setStatus("Opened text file in Notepad");

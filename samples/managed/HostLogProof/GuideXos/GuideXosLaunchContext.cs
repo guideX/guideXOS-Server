@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 
 namespace HostLogProof;
 
@@ -13,6 +14,7 @@ public sealed unsafe class GuideXosLaunchContext
     private int _length;
     private uint _selector;
     private uint _flags;
+    private uint _activationKind;
 
     internal GuideXosLaunchContext()
     {
@@ -23,6 +25,10 @@ public sealed unsafe class GuideXosLaunchContext
     public bool HasText => _length != 0;
     public int Length => _length;
     public ReadOnlySpan<byte> Utf8 => _utf8.AsSpan(0, _length);
+    public bool IsDocumentActivation =>
+        _activationKind == GxAbi.ActivationKindDocument;
+    public string DocumentPath => IsDocumentActivation
+        ? Encoding.UTF8.GetString(Utf8) : string.Empty;
     public bool IsAction => (Flags & GxAbi.LaunchFlagAction) != 0;
     public uint ActionId => Flags & GxAbi.LaunchFlagPayloadMask;
     public bool IsInput => (Flags & GxAbi.LaunchFlagInput) != 0;
@@ -89,15 +95,23 @@ public sealed unsafe class GuideXosLaunchContext
         out GuideXosLaunchContext result)
     {
         result = null;
-        if (context == null || context->size < GxAbi.LegacyContextSize ||
+        uint activationKind = context != null && context->size >= 44u
+            ? context->activationKind : GxAbi.ActivationKindNone;
+        if (context == null || context->size < GxAbi.AppContextLaunchPrefixSize ||
             context->launchContextLength > GxAbi.MaxLaunchContextBytes ||
-            (context->launchContextLength != 0u && context->launchContext == null))
+            (context->launchContextLength != 0u && context->launchContext == null) ||
+            (context->size >= 44u &&
+                activationKind != GxAbi.ActivationKindNone &&
+                activationKind != GxAbi.ActivationKindDocument) ||
+            (activationKind == GxAbi.ActivationKindDocument &&
+                context->launchContextLength == 0u))
         {
             return false;
         }
 
         _selector = selector;
         _flags = context->launchFlags;
+        _activationKind = activationKind;
         _length = (int)context->launchContextLength;
         for (int index = 0; index < context->launchContextLength; index++)
         {

@@ -298,6 +298,9 @@
   <PropertyGroup Condition="'$(HostLogProofC163FileExplorerProof)' == 'true'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C163_FILE_EXPLORER_PROOF</DefineConstants>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofC164FileActivationProof)' == 'true'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF</DefineConstants>
+  </PropertyGroup>
   <ItemGroup Condition="'$(HostLogProofMode)' != 'C152Composite' and '$(HostLogProofMode)' != 'C153Composite' and '$(HostLogProofMode)' != 'C154Composite' and '$(HostLogProofMode)' != 'C160Composite' and '$(HostLogProofC155ManagedNotesSession)' != 'true' and '$(HostLogProofC156ControlModifierShortcuts)' != 'true'">
     <Compile Remove="Applications/ManagedNotesC152.cs" />
   </ItemGroup>

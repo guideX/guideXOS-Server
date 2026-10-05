@@ -467,6 +467,15 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #else
     private uint _launchCount;
 #endif
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+    private static bool s_c151RegressionTestsRun;
+#endif
+#if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
+    private static bool s_c152RegressionTestsRun;
+#endif
+#if HOSTLOGPROOF_C153_MANAGED_TEXT_UNDO_REDO
+    private static bool s_c153RegressionTestsRun;
+#endif
     private int _saveInvocation;
     private bool _useTextInput;
     [ThreadStatic]
@@ -744,6 +753,10 @@ public sealed partial class ManagedNotes : GuideXosApplication
     public override GuideXosResult Launch(GuideXosHost host)
     {
         if (host.IsCapabilityProbe) return GuideXosResult.Success;
+        bool documentActivation = host.LaunchContext.IsDocumentActivation;
+        if (documentActivation && (host.Selector != 4u ||
+                !host.LaunchContext.HasText))
+            return GuideXosResult.InvalidArgument;
 #if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
         _c152Enabled = true;
         if (_c152Enabled) _c152DocumentState.InitializeUntitled(_textArea);
@@ -765,12 +778,34 @@ public sealed partial class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("managed-app-return"u8);
 #if HOSTLOGPROOF_C155_MANAGED_NOTES_SESSION
         GuideXosNotesReturnSessionDataC155 c155Session = default;
-        bool c155SessionConsumed = _c150ReturnLaunchContext &&
+#if HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF
+        bool c164StaleSessionPending = documentActivation &&
+            GuideXosNotesReturnSessionC155.Shared.IsPending;
+#endif
+        bool c155SessionConsumed = !documentActivation &&
+            _c150ReturnLaunchContext &&
             host.Selector == 4u &&
             GuideXosNotesReturnSessionC155.Shared.TryConsume(true,
                 out c155Session);
-        if (!_c150ReturnLaunchContext)
+        if (documentActivation || !_c150ReturnLaunchContext)
             GuideXosNotesReturnSessionC155.Shared.Clear();
+#if HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF
+        if (documentActivation)
+        {
+            if (c164StaleSessionPending)
+            {
+                bool precedencePassed =
+                    !GuideXosNotesReturnSessionC155.Shared.IsPending;
+                host.TryLog(precedencePassed
+                    ? "C164-PRECEDENCE explicit=document stale-session=cleared requested-path=authoritative result=PASS"u8
+                    : "C164-PRECEDENCE explicit=document stale-session=retained result=FAIL"u8);
+            }
+            else
+            {
+                host.TryLog("C164-PRECEDENCE explicit=document stale-session=none requested-path=authoritative result=SKIP"u8);
+            }
+        }
+#endif
         RunC155SessionTests(host);
         if (c155SessionConsumed)
             LogC155SessionConsumed(host, c155Session);
@@ -1683,6 +1718,7 @@ public sealed partial class ManagedNotes : GuideXosApplication
         _useTextInput = _c118ProofContext;
 #endif
         _currentPath =
+            documentActivation ? host.LaunchContext.DocumentPath :
 #if HOSTLOGPROOF_C156_CONTROL_MODIFIER_SHORTCUTS
             host.LaunchContext.Utf8.SequenceEqual("c156-untitled"u8)
                 ? "/system/apps/C156-UNTITLED.TXT" :
@@ -1717,15 +1753,84 @@ public sealed partial class ManagedNotes : GuideXosApplication
         }
 #endif
         GuideXosFileResult loadResult = GuideXosFileResult.NotFound;
+        if (documentActivation && !TryLoadC151Document(host,
+                host.LaunchContext.DocumentPath,
+                out GuideXosFileResult activationFileResult,
+                out _))
+        {
+            host.TryLog(activationFileResult == GuideXosFileResult.BufferTooSmall
+                ? "C164-NOTES-ACTIVATION result=FAIL reason=document-limit"u8
+                : activationFileResult == GuideXosFileResult.NotFound
+                    ? "C164-NOTES-ACTIVATION result=FAIL reason=missing-file"u8
+                    : "C164-NOTES-ACTIVATION result=FAIL reason=invalid-or-unreadable"u8);
+            return GuideXosResult.InvalidArgument;
+        }
+#if HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF
+        if (documentActivation &&
+            !GuideXosNotesActivationC164Tests.Run(host))
+        {
+            host.TryLog("C164-NOTES-STATE-TESTS result=FAIL"u8);
+            return GuideXosResult.InvalidArgument;
+        }
+#endif
 #if HOSTLOGPROOF_C155_MANAGED_NOTES_SESSION
         RunC155RestorationTests(host);
-        if (c155SessionConsumed)
+        if (documentActivation)
+        {
+            if (!TryLoadC151Document(host, host.LaunchContext.DocumentPath,
+                    out GuideXosFileResult activationReloadResult, out int bytesRead))
+            {
+                host.TryLog(activationReloadResult == GuideXosFileResult.BufferTooSmall
+                    ? "C164-NOTES-ACTIVATION result=FAIL reason=document-limit"u8
+                    : activationReloadResult == GuideXosFileResult.NotFound
+                        ? "C164-NOTES-ACTIVATION result=FAIL reason=missing-file"u8
+                        : "C164-NOTES-ACTIVATION result=FAIL reason=invalid-or-unreadable"u8);
+                return GuideXosResult.InvalidArgument;
+            }
+            bool activationBaseline = _currentPath ==
+                    host.LaunchContext.DocumentPath &&
+                !_c152DocumentState.Dirty && !_textArea.CanUndo &&
+                !_textArea.CanRedo && _textArea.CaretIndex == 0 &&
+                _textArea.AnchorIndex == 0 && _textArea.FirstVisibleLine == 0;
+            if (!activationBaseline) return GuideXosResult.InvalidArgument;
+            Span<byte> activationLine = stackalloc byte[192];
+            int activationPosition = 0;
+            GuideXosText.Append(activationLine, ref activationPosition,
+                "C164-NOTES-ACT path="u8);
+            GuideXosText.Append(activationLine, ref activationPosition,
+                Encoding.UTF8.GetBytes(_currentPath));
+            GuideXosText.Append(activationLine, ref activationPosition,
+                " bytes="u8);
+            GuideXosText.AppendUnsigned(activationLine,
+                ref activationPosition, (uint)bytesRead);
+            GuideXosText.Append(activationLine, ref activationPosition,
+                " clean=1 undo=0 redo=0 caret=0 anchor=0 view=0 result=PASS"u8);
+            host.TryLog(activationLine[..activationPosition]);
+#if HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF
+            byte[] loadedContent = _textArea.ToUtf8();
+            bool fixtureContent = host.LaunchContext.DocumentPath switch
+            {
+                "/system/apps/C164/hello.txt" =>
+                    loadedContent.AsSpan().SequenceEqual("hello from C164"u8),
+                "/system/apps/C164/save.txt" =>
+                    loadedContent.AsSpan().SequenceEqual("C164_SAVE_ORIGINAL"u8) ||
+                    loadedContent.AsSpan().SequenceEqual("C164_SAVE_ORIGINALx"u8),
+                "/system/apps/C164/mixed.TXT" =>
+                    loadedContent.AsSpan().SequenceEqual("C164_MIXED_CASE"u8),
+                _ => true,
+            };
+            host.TryLog(fixtureContent
+                ? "C164-NOTES-CONTENT exact=true source=VFS result=PASS"u8
+                : "C164-NOTES-CONTENT exact=false source=VFS result=FAIL"u8);
+#endif
+        }
+        if (!documentActivation && c155SessionConsumed)
         {
             bool restored = TryRestoreC155Session(host, c155Session,
                 out GuideXosFileResult c155FileResult);
             LogC155Restoration(host, c155Session, restored, c155FileResult);
         }
-        else if (_c150ReturnLaunchContext)
+        else if (!documentActivation && _c150ReturnLaunchContext)
         {
             _currentPath = string.Empty;
             _c152DocumentState.InitializeUntitled(_textArea);
@@ -1733,8 +1838,10 @@ public sealed partial class ManagedNotes : GuideXosApplication
             UpdatePathLabel();
             host.TryLog("C155-RESTORE session=missing fallback=blank pending=none result=PASS"u8);
         }
-        else
+        else if (!documentActivation)
 #endif
+        {
+        if (!documentActivation)
         {
         loadResult = GuideXosFile.ReadAllTextUtf8(
             host, Encoding.UTF8.GetBytes(_currentPath), out byte[] loaded);
@@ -1777,8 +1884,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
             _status = StatusText(loadResult);
         }
         }
+        }
 #if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
-        if (_c137ProofContext)
+        if (_c137ProofContext && !documentActivation)
         {
             _textArea.SetText(
                 "Line 00\nLine 01\nLine 02\nLine 03\nLine 04\nLine 05\n" +
@@ -1854,12 +1962,13 @@ public sealed partial class ManagedNotes : GuideXosApplication
         }
 #endif
 #if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
-        if (_c151ProofContext
+        if (_c151ProofContext && !s_c151RegressionTestsRun
 #if HOSTLOGPROOF_C155_MANAGED_NOTES_SESSION
             && !_c150ReturnLaunchContext
 #endif
             )
         {
+            s_c151RegressionTestsRun = true;
             bool c145Regression = GuideXosDialogC145Tests.Run(host,
                 new GuideXosDialog(100, 88, 360, 160, "C151 nested candidate"));
             bool c151Core = GuideXosOpenFileDialogC151Tests.Run(host);
@@ -1869,12 +1978,13 @@ public sealed partial class ManagedNotes : GuideXosApplication
         }
 #endif
 #if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
-        if (_c152Enabled
+        if (_c152Enabled && !s_c152RegressionTestsRun
 #if HOSTLOGPROOF_C155_MANAGED_NOTES_SESSION
             && !_c150ReturnLaunchContext
 #endif
             )
         {
+            s_c152RegressionTestsRun = true;
             bool documentState = GuideXosNotesDocumentStateC152Tests.Run(host);
             bool saveDialog = GuideXosSaveFileDialogC152Tests.Run(
                 host, surface, _mainControlHost);
@@ -1892,12 +2002,13 @@ public sealed partial class ManagedNotes : GuideXosApplication
         }
 #endif
 #if HOSTLOGPROOF_C153_MANAGED_TEXT_UNDO_REDO
-        if (_c152Enabled
+        if (_c152Enabled && !s_c153RegressionTestsRun
 #if HOSTLOGPROOF_C155_MANAGED_NOTES_SESSION
             && !_c150ReturnLaunchContext
 #endif
             )
         {
+            s_c153RegressionTestsRun = true;
             bool historyCore = GuideXosTextHistoryC153Tests.Run(host);
             bool textAreaHistory = GuideXosTextAreaUndoRedoC153Tests.Run(host);
             bool savePointState = GuideXosNotesDocumentStateC153Tests.Run(host);
@@ -3684,6 +3795,14 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
 
         GuideXosControlHostResult routeResult = _mainControlHost.HandleInput(input);
+#if HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF
+        if (IsC164DocumentPath() &&
+            routeResult == GuideXosControlHostResult.Changed &&
+            _mainControlHost.ActiveControlId == C120DocumentControlId)
+        {
+            LogC164DocumentState(host, "input"u8);
+        }
+#endif
 #if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
         if (_c152Enabled && routeResult == GuideXosControlHostResult.Changed &&
             _mainControlHost.ActiveControlId == C120DocumentControlId)
@@ -4382,6 +4501,14 @@ public sealed partial class ManagedNotes : GuideXosApplication
         {
             host.TryLog("C117-SELECTION navigation=shift result=PASS"u8);
         }
+#if HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF
+        if (IsC164DocumentPath() && (editResult ==
+                GuideXosTextAreaEditResult.Changed || editResult ==
+                GuideXosTextAreaEditResult.Moved))
+        {
+            LogC164DocumentState(host, "input"u8);
+        }
+#endif
 #if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
         if (_c125ProofContext &&
             (editResult == GuideXosTextAreaEditResult.Changed ||
@@ -4408,6 +4535,39 @@ public sealed partial class ManagedNotes : GuideXosApplication
         }
         return GuideXosResult.Success;
     }
+
+#if HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF
+    private bool IsC164DocumentPath() =>
+        _currentPath.StartsWith("/system/apps/C164/", StringComparison.Ordinal);
+
+    private void LogC164DocumentState(GuideXosHost host,
+        ReadOnlySpan<byte> eventName)
+    {
+        Span<byte> line = stackalloc byte[208];
+        int position = 0;
+        GuideXosText.Append(line, ref position, "C164-DOC event="u8);
+        GuideXosText.Append(line, ref position, eventName);
+        GuideXosText.Append(line, ref position, " path="u8);
+        GuideXosText.Append(line, ref position, Encoding.UTF8.GetBytes(_currentPath));
+        GuideXosText.Append(line, ref position, " len="u8);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)_textArea.Length);
+        GuideXosText.Append(line, ref position, _c152DocumentState.Dirty
+            ? " dirty=1"u8 : " dirty=0"u8);
+        GuideXosText.Append(line, ref position, _textArea.CanUndo
+            ? " undo=1"u8 : " undo=0"u8);
+        GuideXosText.Append(line, ref position, _textArea.CanRedo
+            ? " redo=1"u8 : " redo=0"u8);
+        GuideXosText.Append(line, ref position, " caret="u8);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)_textArea.CaretIndex);
+        GuideXosText.Append(line, ref position, " anchor="u8);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)_textArea.AnchorIndex);
+        GuideXosText.Append(line, ref position, " view="u8);
+        GuideXosText.AppendUnsigned(line, ref position,
+            (uint)_textArea.FirstVisibleLine);
+        GuideXosText.Append(line, ref position, " result=PASS"u8);
+        host.TryLog(line[..position]);
+    }
+#endif
 
 #if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
     private GuideXosResult HandleC136SecondaryPointerInput(

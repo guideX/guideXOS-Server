@@ -27,9 +27,10 @@ param(
     [switch]$C162TaskManagerCloseProof,
     [switch]$C163ManagedFileExplorer,
     [switch]$C163FileExplorerProof,
+    [switch]$C164FileActivationProof,
     [ValidateSet("Production", "C104AppA", "C104AppB", "C107Composite", "C108ThreadStaticLifecycle", "ProductionComposite", "C112Composite", "C113Composite", "C114Composite", "C115Composite", "C116Composite", "C117Composite", "C118Composite", "C119Composite", "C120Composite", "C121Composite", "C122Composite", "C123Composite", "C124Composite", "C125Composite", "C126Composite", "C127Composite", "C128Composite", "C129Composite", "C131Composite", "C132Composite", "C133Composite", "C134Composite", "C135Composite", "C136Composite", "C137Composite", "C138Composite", "C139Composite", "C140Composite", "C141Composite", "C142Composite", "C143Composite", "C144Composite", "C145Composite", "C146Composite", "C147Composite", "C148Composite", "C149Composite", "C150Composite", "C151Composite", "C152Composite", "C153Composite", "C154Composite", "C158Composite", "C160Composite")]
     [string]$ManagedProjectMode = "",
-    [ValidateSet("Primary64KiB", "Primary128KiB", "Primary256KiB", "Primary4MiB", "Small4KiB")]
+    [ValidateSet("Primary64KiB", "Primary128KiB", "Primary256KiB", "Primary4MiB", "Primary8MiB", "Small4KiB")]
     [string]$HeapConfiguration = "Primary64KiB",
     [switch]$Clean
 )
@@ -41,6 +42,10 @@ if ($C163ManagedFileExplorer) {
     $C162ManagedTaskManagerClose = $true
 }
 if ($C163FileExplorerProof) {
+    $C163ManagedFileExplorer = $true
+}
+if ($C164FileActivationProof) {
+    $C163FileExplorerProof = $true
     $C163ManagedFileExplorer = $true
 }
 if ($C162ManagedTaskManagerClose) {
@@ -499,6 +504,9 @@ try {
             throw "C163 focused proof requires the Managed File Explorer app."
         }
         $publishProperties += "-p:HostLogProofC163FileExplorerProof=true"
+    }
+    if ($C164FileActivationProof) {
+        $publishProperties += "-p:HostLogProofC164FileActivationProof=true"
     }
     $publishBatch = @(
         "@echo off"
