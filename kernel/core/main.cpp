@@ -895,6 +895,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         if (is_bootinfo && bootinfo) {
             kernel::pci_audio::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::native_elf::audio_set_kernel_physical_base(bootinfo->KernelPhysicalBase);
+            kernel::usb::xhci::controller::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
         }
         kernel::pci_audio::init();
         kernel::serial::puts("[KERNEL] Audio controllers detected: ");
@@ -913,6 +914,14 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // This is INPUT2 scope: no USB device enumeration or HID activation.
         // See docs/MODERN_INPUT_INPUT2.md.
         kernel::usb::xhci::controller::init();
+
+        // xHCI first device enumeration: port reset, Enable Slot, Address
+        // Device, GET_DESCRIPTOR(Device).  This is INPUT3 scope.  See
+        // docs/MODERN_INPUT_INPUT3.md.
+        {
+            kernel::usb::xhci::EnumeratedDevice enumerated;
+            kernel::usb::xhci::controller::enumerate_device(&enumerated);
+        }
 #if defined(GXOS_AUDIO_BOOT_SELFTEST)
         // Opt-in full DMA proof (QEMU proof builds only, never default:
         // it audibly exercises the hardware). See

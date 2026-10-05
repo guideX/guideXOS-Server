@@ -181,6 +181,37 @@ static void port_write32(uint32_t portIndex, uint32_t offset, uint32_t value)
 }
 
 // ================================================================
+// DMA address translation (Section 12)
+//
+// The kernel links at 0x100000 but the bootloader may load it at an
+// arbitrary physical base (BootInfo.KernelPhysicalBase).  Device-visible
+// DMA addresses are base + (virt - 0x100000).  On Multiboot the load base
+// equals the link base, so the identity default (0x100000) is correct.
+// ================================================================
+
+static uint64_t s_kernelPhysicalBase = 0x100000ULL;
+
+static uint64_t kernel_virt_to_phys(uintptr_t virt)
+{
+    const uint64_t v = static_cast<uint64_t>(virt);
+    if (v < 0x100000ULL) {
+        return 0;
+    }
+    return s_kernelPhysicalBase + (v - 0x100000ULL);
+}
+
+// ================================================================
+// Doorbell access
+// ================================================================
+
+static void ring_doorbell(uint32_t doorbell, uint32_t value)
+{
+    volatile uint32_t* db = reinterpret_cast<volatile uint32_t*>(
+        static_cast<uintptr_t>(s_mmioBase + s_caps.dbBase + doorbell * 4u));
+    *db = value;
+}
+
+// ================================================================
 // Bounded delay
 // ================================================================
 
@@ -620,20 +651,43 @@ static bool start_controller()
 // Event processing
 // ================================================================
 
+static bool process_one_event(XhciEventTrb* eventOut)
+{
+    if (eventOut == nullptr) {
+        return false;
+    }
+
+    const XhciEventTrb& evt = s_eventRing[s_eventRingIndex];
+    const uint32_t cycleBit = evt.control & 0x01u;
+
+    if (cycleBit != s_eventRingCycle) {
+        return false; // No more events
+    }
+
+    *eventOut = evt;
+    ++s_eventRingIndex;
+
+    if (s_eventRingIndex >= EVENT_RING_SIZE) {
+        s_eventRingIndex = 0;
+        s_eventRingCycle ^= 1u;
+    }
+    return true;
+}
+
+static void update_erdp()
+{
+    const uint64_t erdp = reinterpret_cast<uint64_t>(&s_eventRing[s_eventRingIndex]);
+    rt_write32(XHCI_RT_ERDP, (uint32_t)(erdp & 0xFFFFFFFF));
+}
+
 static uint32_t process_events()
 {
     uint32_t processed = 0u;
+    XhciEventTrb evt;
 
-    while (true) {
-        const XhciEventTrb& evt = s_eventRing[s_eventRingIndex];
-        const uint32_t cycleBit = evt.control & 0x01u;
-
-        if (cycleBit != s_eventRingCycle) {
-            break; // No more events
-        }
-
-        const uint32_t type = (evt.control >> 10) & 0x3Fu;
-        const uint32_t cc = (evt.status >> 24) & 0xFFu;
+    while (process_one_event(&evt)) {
+        const uint32_t type = trb_type(reinterpret_cast<const XhciTrb&>(evt));
+        const uint32_t cc = trb_completion_code(evt);
 
         if (type == TRB_TYPE_PORT_STATUS_CHANGE) {
             const XhciPortStatusChangeEvent& psc =
@@ -645,11 +699,19 @@ static uint32_t process_events()
             serial_puts(completion_code_name((uint8_t)cc));
             serial_puts("\n");
         } else if (type == TRB_TYPE_COMMAND_COMP) {
-            serial_puts("[XHCI] command completion cc=");
+            serial_puts("[XHCI] command completion slot=");
+            serial_u32_dec(event_cmd_comp_slot_id(evt));
+            serial_puts(" cc=");
             serial_puts(completion_code_name((uint8_t)cc));
             serial_puts("\n");
         } else if (type == TRB_TYPE_TRANSFER_EVENT) {
-            serial_puts("[XHCI] transfer event cc=");
+            serial_puts("[XHCI] transfer event slot=");
+            serial_u32_dec(event_transfer_slot_id(evt));
+            serial_puts(" ep=");
+            serial_u32_dec(event_transfer_ep_id(evt));
+            serial_puts(" len=");
+            serial_u32_dec(event_transfer_length(evt));
+            serial_puts(" cc=");
             serial_puts(completion_code_name((uint8_t)cc));
             serial_puts("\n");
         } else {
@@ -661,19 +723,467 @@ static uint32_t process_events()
         }
 
         ++processed;
-        ++s_eventRingIndex;
+    }
 
-        if (s_eventRingIndex >= EVENT_RING_SIZE) {
-            s_eventRingIndex = 0;
-            s_eventRingCycle ^= 1u;
+    update_erdp();
+    return processed;
+}
+
+// ================================================================
+// Enumeration DMA structures (Section 12)
+// ================================================================
+
+static const uint32_t MAX_CONTEXT_SIZE   = 64;
+static const uint32_t INPUT_CTX_SIZE     = 3 * MAX_CONTEXT_SIZE;
+static const uint32_t DEVICE_CTX_SIZE    = 2 * MAX_CONTEXT_SIZE;
+static const uint32_t EP0_RING_SIZE      = 8;
+static const uint32_t CONTROL_BUF_SIZE   = 256;
+
+alignas(64) static uint8_t  s_inputCtx[INPUT_CTX_SIZE];
+alignas(64) static uint8_t  s_deviceCtx[DEVICE_CTX_SIZE];
+alignas(64) static XhciTrb  s_ep0Ring[EP0_RING_SIZE];
+alignas(64) static uint8_t  s_controlBuf[CONTROL_BUF_SIZE];
+
+static uint32_t s_ep0RingIndex = 0;
+static uint32_t s_ep0RingCycle = 1;
+
+static uint32_t context_size()
+{
+    return s_caps.csz ? XHCI_CONTEXT_SIZE_64 : XHCI_CONTEXT_SIZE_32;
+}
+
+// ================================================================
+// Command submission and event waiting (Sections 6, 14)
+// ================================================================
+
+struct CommandResult {
+    bool     valid;
+    uint8_t  completionCode;
+    uint8_t  slotId;
+    uint64_t trbPtr;
+};
+
+static bool submit_command(const XhciTrb& cmd, CommandResult* result, uint32_t timeoutMs)
+{
+    if (result != nullptr) {
+        result->valid = false;
+        result->completionCode = 0;
+        result->slotId = 0;
+        result->trbPtr = 0;
+    }
+
+    XhciTrb trb = cmd;
+    trb.control &= ~0x01u;
+    trb.control |= s_commandRingCycle;
+    s_commandRing[s_commandRingIndex] = trb;
+
+    ++s_commandRingIndex;
+    if (s_commandRingIndex >= COMMAND_RING_SIZE) {
+        s_commandRingIndex = 0;
+        s_commandRingCycle ^= 1u;
+    }
+
+    ring_doorbell(0u, 0u);
+
+    uint32_t elapsed = 0u;
+    while (elapsed < timeoutMs) {
+        XhciEventTrb evt;
+        while (process_one_event(&evt)) {
+            if (trb_type(reinterpret_cast<const XhciTrb&>(evt)) == TRB_TYPE_COMMAND_COMP) {
+                if (result != nullptr) {
+                    result->valid = true;
+                    result->completionCode = static_cast<uint8_t>(trb_completion_code(evt));
+                    result->slotId = event_cmd_comp_slot_id(evt);
+                    result->trbPtr = event_cmd_comp_trb_ptr(evt);
+                }
+                update_erdp();
+                return true;
+            }
+        }
+        delay_ms(1u);
+        ++elapsed;
+    }
+
+    update_erdp();
+    return false;
+}
+
+// ================================================================
+// Enable Slot (Section 6)
+// ================================================================
+
+static bool enable_slot(uint8_t* slotIdOut)
+{
+    if (slotIdOut != nullptr) {
+        *slotIdOut = 0;
+    }
+
+    CommandResult result;
+    if (!submit_command(trb_enable_slot(0), &result, 1000u)) {
+        serial_puts("[XHCI] Enable Slot timeout\n");
+        return false;
+    }
+
+    if (result.completionCode != CC_SUCCESS) {
+        serial_puts("[XHCI] Enable Slot failed cc=");
+        serial_puts(completion_code_name(result.completionCode));
+        serial_puts("\n");
+        return false;
+    }
+
+    if (result.slotId == 0u || result.slotId > s_caps.maxSlots) {
+        serial_puts("[XHCI] Enable Slot invalid slot id=");
+        serial_u32_dec(result.slotId);
+        serial_puts("\n");
+        return false;
+    }
+
+    if (slotIdOut != nullptr) {
+        *slotIdOut = result.slotId;
+    }
+
+    serial_puts("[XHCI] Enable Slot -> slot ");
+    serial_u32_dec(result.slotId);
+    serial_puts("\n");
+    return true;
+}
+
+// ================================================================
+// Port reset (Section 5)
+// ================================================================
+
+static bool reset_port(uint8_t portIndex)
+{
+    uint32_t portsc = port_read32(portIndex, XHCI_PORT_SC);
+    portsc |= XHCI_PORTSC_PR;
+    port_write32(portIndex, XHCI_PORT_SC, portsc);
+
+    for (uint32_t i = 0u; i < 500u; ++i) {
+        portsc = port_read32(portIndex, XHCI_PORT_SC);
+        if ((portsc & XHCI_PORTSC_PRC) != 0u) {
+            port_write32(portIndex, XHCI_PORT_SC, portsc | XHCI_PORTSC_PRC);
+            serial_puts("[XHCI] port reset complete port=");
+            serial_u32_dec(portIndex);
+            serial_puts("\n");
+            return true;
+        }
+        delay_ms(1u);
+    }
+
+    serial_puts("[XHCI] port reset timeout port=");
+    serial_u32_dec(portIndex);
+    serial_puts("\n");
+    return false;
+}
+
+// ================================================================
+// Address Device (Section 8)
+// ================================================================
+
+static uint32_t initial_max_packet_size(uint8_t speed)
+{
+    switch (speed) {
+        case XHCI_SPEED_LOW:
+        case XHCI_SPEED_FULL:       return 8u;
+        case XHCI_SPEED_HIGH:       return 64u;
+        case XHCI_SPEED_SUPER:
+        case XHCI_SPEED_SUPER_PLUS: return 512u;
+        default:                    return 8u;
+    }
+}
+
+static bool address_device(uint8_t slotId, uint8_t port, uint8_t speed)
+{
+    const uint32_t ctxSize = context_size();
+
+    for (uint32_t i = 0u; i < INPUT_CTX_SIZE; ++i) {
+        s_inputCtx[i] = 0;
+    }
+
+    uint32_t* icc = reinterpret_cast<uint32_t*>(s_inputCtx);
+    icc[0] = 0u;
+    icc[1] = XHCI_ADD_CONTEXT_FLAG_SLOT | XHCI_ADD_CONTEXT_FLAG_EP0;
+
+    uint32_t* slotCtx = reinterpret_cast<uint32_t*>(s_inputCtx + ctxSize);
+    slotCtx[0] = slot_ctx_set_speed(0u, speed) | slot_ctx_set_context_entries(0u, 1u);
+    slotCtx[1] = slot_ctx_set_root_port(0u, port);
+    slotCtx[4] = slot_ctx_set_interrupter_target(0u, 0u);
+
+    uint32_t* ep0Ctx = reinterpret_cast<uint32_t*>(s_inputCtx + 2u * ctxSize);
+    const uint32_t mps = initial_max_packet_size(speed);
+    ep0Ctx[0] = ep_ctx_set_max_packet_size(0u, mps);
+    ep0Ctx[1] = ep_ctx_set_type(0u, XHCI_EP_TYPE_CONTROL) | ep_ctx_set_cerr(0u, 3u);
+    const uint64_t ep0RingPhys = kernel_virt_to_phys(
+        reinterpret_cast<uintptr_t>(s_ep0Ring));
+    ep0Ctx[2] = static_cast<uint32_t>(ep0RingPhys & 0xFFFFFFFFu);
+    ep0Ctx[3] = static_cast<uint32_t>(ep0RingPhys >> 32);
+
+    for (uint32_t i = 0u; i < EP0_RING_SIZE; ++i) {
+        s_ep0Ring[i].parameter = 0;
+        s_ep0Ring[i].status = 0;
+        s_ep0Ring[i].control = 0;
+    }
+    s_ep0Ring[EP0_RING_SIZE - 1u].parameter = ep0RingPhys;
+    s_ep0Ring[EP0_RING_SIZE - 1u].control =
+        (TRB_TYPE_LINK << 10) | (1u << 1) | s_ep0RingCycle;
+    s_ep0RingIndex = 0;
+    s_ep0RingCycle = 1;
+
+    const uint64_t devCtxPhys = kernel_virt_to_phys(
+        reinterpret_cast<uintptr_t>(s_deviceCtx));
+    if (slotId < 256u) {
+        s_dcbaa[slotId] = devCtxPhys & XHCI_DCBAAP_PTR_MASK;
+    }
+
+    const uint64_t inputCtxPhys = kernel_virt_to_phys(
+        reinterpret_cast<uintptr_t>(s_inputCtx));
+    CommandResult result;
+    if (!submit_command(trb_address_device(inputCtxPhys, false, slotId), &result, 1000u)) {
+        serial_puts("[XHCI] Address Device timeout slot=");
+        serial_u32_dec(slotId);
+        serial_puts("\n");
+        return false;
+    }
+
+    if (result.completionCode != CC_SUCCESS) {
+        serial_puts("[XHCI] Address Device failed slot=");
+        serial_u32_dec(slotId);
+        serial_puts(" cc=");
+        serial_puts(completion_code_name(result.completionCode));
+        serial_puts("\n");
+        return false;
+    }
+
+    serial_puts("[XHCI] Address Device slot=");
+    serial_u32_dec(slotId);
+    serial_puts(" success\n");
+    return true;
+}
+
+// ================================================================
+// EP0 control transfer (Section 9)
+// ================================================================
+
+struct ControlTransferResult {
+    bool     valid;
+    uint8_t  completionCode;
+    uint32_t bytesTransferred;
+};
+
+static bool ep0_control_transfer(uint8_t slotId, const UsbControlRequest& req,
+                                  const void* dataOut, void* dataIn,
+                                  ControlTransferResult* result)
+{
+    if (result != nullptr) {
+        result->valid = false;
+        result->completionCode = 0;
+        result->bytesTransferred = 0;
+    }
+
+    const bool hasDataStage = (req.wLength > 0u);
+    const bool dataInDir = req.dataIn;
+
+    usb::SetupPacket setup;
+    setup.bmRequestType = req.bmRequestType;
+    setup.bRequest      = req.bRequest;
+    setup.wValue        = req.wValue;
+    setup.wIndex        = req.wIndex;
+    setup.wLength       = req.wLength;
+
+    const uint8_t trt = hasDataStage ? (dataInDir ? 2u : 3u) : 0u;
+
+    for (uint32_t i = 0u; i < EP0_RING_SIZE; ++i) {
+        s_ep0Ring[i].parameter = 0;
+        s_ep0Ring[i].status = 0;
+        s_ep0Ring[i].control = 0;
+    }
+
+    uint32_t idx = 0u;
+    s_ep0Ring[idx++] = trb_setup_stage(setup, trt, false);
+
+    if (hasDataStage) {
+        const uint64_t bufPhys = kernel_virt_to_phys(
+            reinterpret_cast<uintptr_t>(dataInDir ? dataIn : dataOut));
+        s_ep0Ring[idx++] = trb_data_stage(bufPhys, req.wLength, dataInDir, false, true);
+    }
+
+    const bool statusIn = hasDataStage ? !dataInDir : true;
+    s_ep0Ring[idx] = trb_status_stage(statusIn, true);
+
+    for (uint32_t i = 0u; i <= idx; ++i) {
+        s_ep0Ring[i].control &= ~0x01u;
+        s_ep0Ring[i].control |= s_ep0RingCycle;
+    }
+
+    const uint64_t ep0RingPhys = kernel_virt_to_phys(
+        reinterpret_cast<uintptr_t>(s_ep0Ring));
+    s_ep0Ring[EP0_RING_SIZE - 1u].parameter = ep0RingPhys;
+    s_ep0Ring[EP0_RING_SIZE - 1u].control =
+        (TRB_TYPE_LINK << 10) | (1u << 1) | s_ep0RingCycle;
+
+    s_ep0RingIndex = 0;
+    s_ep0RingCycle = 1;
+
+    ring_doorbell(slotId, 1u);
+
+    uint32_t elapsed = 0u;
+    while (elapsed < req.timeoutMs) {
+        XhciEventTrb evt;
+        while (process_one_event(&evt)) {
+            if (trb_type(reinterpret_cast<const XhciTrb&>(evt)) == TRB_TYPE_TRANSFER_EVENT) {
+                const uint8_t evtSlot = event_transfer_slot_id(evt);
+                const uint8_t evtEp   = event_transfer_ep_id(evt);
+                const uint8_t cc      = static_cast<uint8_t>(trb_completion_code(evt));
+                const uint32_t residual = event_transfer_length(evt);
+
+                if (evtSlot == slotId && evtEp == 1u) {
+                    update_erdp();
+                    if (result != nullptr) {
+                        result->valid = (cc == CC_SUCCESS || cc == CC_SHORT_PACKET);
+                        result->completionCode = cc;
+                        result->bytesTransferred = req.wLength - residual;
+                    }
+                    if (cc == CC_SUCCESS || cc == CC_SHORT_PACKET) {
+                        return true;
+                    }
+                    serial_puts("[XHCI] control transfer failed cc=");
+                    serial_puts(completion_code_name(cc));
+                    serial_puts("\n");
+                    return false;
+                }
+            }
+        }
+        delay_ms(1u);
+        ++elapsed;
+    }
+
+    update_erdp();
+    serial_puts("[XHCI] control transfer timeout slot=");
+    serial_u32_dec(slotId);
+    serial_puts("\n");
+    return false;
+}
+
+// ================================================================
+// GET_DESCRIPTOR (Section 10)
+// ================================================================
+
+static bool get_device_descriptor(uint8_t slotId, uint8_t* buf, uint32_t len,
+                                    UsbDeviceDescriptorInfo* info)
+{
+    if (buf == nullptr || info == nullptr) {
+        return false;
+    }
+
+    UsbControlRequest req = usb_get_device_descriptor_request(static_cast<uint16_t>(len));
+    ControlTransferResult result;
+
+    if (!ep0_control_transfer(slotId, req, nullptr, buf, &result)) {
+        serial_puts("[XHCI] GET_DESCRIPTOR(Device) failed slot=");
+        serial_u32_dec(slotId);
+        serial_puts(" cc=");
+        serial_puts(completion_code_name(result.completionCode));
+        serial_puts("\n");
+        return false;
+    }
+
+    *info = validate_usb_device_descriptor(buf, result.bytesTransferred);
+    if (!info->valid) {
+        serial_puts("[XHCI] GET_DESCRIPTOR(Device) invalid descriptor\n");
+        return false;
+    }
+
+    serial_puts("[XHCI] GET_DESCRIPTOR(Device) success\n");
+    return true;
+}
+
+// ================================================================
+// Enumeration orchestration (Section 5)
+// ================================================================
+
+static bool enumerate_first_device(EnumeratedDevice* out)
+{
+    if (out != nullptr) {
+        out->valid = false;
+    }
+
+    if (!s_running) {
+        serial_puts("[XHCI] enumerate: controller not running\n");
+        return false;
+    }
+
+    uint8_t port = 0u;
+    for (uint8_t p = 1u; p <= s_portCount; ++p) {
+        XhciPortStatus ps;
+        if (port_status(p, &ps) && ps.connected) {
+            port = p;
+            break;
         }
     }
 
-    // Update ERDP
-    const uint64_t erdp = reinterpret_cast<uint64_t>(&s_eventRing[s_eventRingIndex]);
-    rt_write32(XHCI_RT_ERDP, (uint32_t)(erdp & 0xFFFFFFFF));
+    if (port == 0u) {
+        serial_puts("[XHCI] enumerate: no connected port\n");
+        return false;
+    }
 
-    return processed;
+    serial_puts("[XHCI] enumerate: port ");
+    serial_u32_dec(port);
+    serial_puts(" connected speed=");
+    serial_puts(speed_name(portsc_get_speed(port_read32(port, XHCI_PORT_SC))));
+    serial_puts("\n");
+
+    if (!reset_port(port)) {
+        return false;
+    }
+
+    uint8_t slotId = 0u;
+    if (!enable_slot(&slotId)) {
+        return false;
+    }
+
+    XhciPortStatus ps;
+    port_status(port, &ps);
+    const uint8_t speed = ps.speed;
+
+    if (!address_device(slotId, port, speed)) {
+        return false;
+    }
+
+    UsbDeviceDescriptorInfo info;
+
+    if (!get_device_descriptor(slotId, s_controlBuf, 8u, &info)) {
+        return false;
+    }
+
+    if (!get_device_descriptor(slotId, s_controlBuf, 18u, &info)) {
+        return false;
+    }
+
+    if (out != nullptr) {
+        out->valid = true;
+        out->slotId = slotId;
+        out->port = port;
+        out->speed = speed;
+        out->descriptor = info;
+    }
+
+    serial_puts("[USB] VID=");
+    serial_hex_n(info.idVendor, 4u);
+    serial_puts(" PID=");
+    serial_hex_n(info.idProduct, 4u);
+    serial_puts(" class=");
+    serial_hex_n(info.deviceClass, 2u);
+    serial_puts(" mps0=");
+    serial_u32_dec(info.maxPacketSize0);
+    serial_puts(" configs=");
+    serial_u32_dec(info.numConfigurations);
+    serial_puts("\n");
+
+    if (info.deviceClass == 0x09u) {
+        serial_puts("[USB] device is a hub; downstream enumeration deferred to INPUT4\n");
+    }
+
+    return true;
 }
 
 #endif // ARCH_HAS_PORT_IO
@@ -812,6 +1322,27 @@ uint64_t mmio_base()
 const XhciCapabilities* capabilities()
 {
     return &s_caps;
+}
+
+// Set the kernel physical base for DMA address translation.  Must be called
+// before enumerate_device() on UEFI boot (see pci_audio::set_kernel_physical_base).
+void set_kernel_physical_base(uint64_t physicalBase)
+{
+    if (physicalBase != 0u) {
+        s_kernelPhysicalBase = physicalBase;
+    }
+}
+
+// Enumerate the first connected USB device: port reset, Enable Slot,
+// Address Device, GET_DESCRIPTOR(Device).  Returns true on success.
+bool enumerate_device(EnumeratedDevice* out)
+{
+#if ARCH_HAS_PORT_IO
+    return enumerate_first_device(out);
+#else
+    (void)out;
+    return false;
+#endif
 }
 
 } // namespace controller

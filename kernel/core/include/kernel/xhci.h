@@ -25,6 +25,7 @@
 #pragma once
 
 #include "kernel/types.h"
+#include "kernel/usb.h"
 #include "kernel/usb_controller.h"
 
 namespace kernel {
@@ -168,8 +169,6 @@ struct XhciTransferEvent {
 #pragma pack(pop)
 #endif
 
-#undef XHCI_PACKED
-
 // ================================================================
 // Operational register offsets (from opBase)
 // ================================================================
@@ -293,6 +292,8 @@ struct XhciErstEntry {
     uint32_t ringSegmentSize;
     uint32_t reserved;
 } XHCI_PACKED;
+
+#undef XHCI_PACKED
 
 // ================================================================
 // USB Legacy Support extended capability
@@ -695,6 +696,341 @@ inline const char* trb_type_name(uint8_t type)
 }
 
 // ================================================================
+// USB standard requests (USB 2.0 spec 9.4)
+// ================================================================
+
+enum UsbStandardRequest : uint8_t {
+    USB_REQ_GET_STATUS        = 0,
+    USB_REQ_CLEAR_FEATURE     = 1,
+    USB_REQ_SET_FEATURE       = 3,
+    USB_REQ_SET_ADDRESS       = 5,
+    USB_REQ_GET_DESCRIPTOR    = 6,
+    USB_REQ_SET_DESCRIPTOR    = 7,
+    USB_REQ_GET_CONFIGURATION = 8,
+    USB_REQ_SET_CONFIGURATION = 9,
+    USB_REQ_GET_INTERFACE     = 10,
+    USB_REQ_SET_INTERFACE     = 11,
+    USB_REQ_SYNCH_FRAME       = 12,
+};
+
+// bmRequestType direction / type / recipient bits
+static const uint8_t USB_REQ_DIR_DEVICE_TO_HOST = 0x80;
+static const uint8_t USB_REQ_DIR_HOST_TO_DEVICE = 0x00;
+static const uint8_t USB_REQ_TYPE_STANDARD      = 0x00;
+static const uint8_t USB_REQ_TYPE_CLASS         = 0x20;
+static const uint8_t USB_REQ_TYPE_VENDOR        = 0x40;
+static const uint8_t USB_REQ_RECIPIENT_DEVICE   = 0x00;
+static const uint8_t USB_REQ_RECIPIENT_INTERFACE = 0x01;
+static const uint8_t USB_REQ_RECIPIENT_ENDPOINT  = 0x02;
+
+// GET_DESCRIPTOR wValue high-byte descriptor types
+static const uint8_t USB_DESC_TYPE_DEVICE        = 0x01;
+static const uint8_t USB_DESC_TYPE_CONFIGURATION = 0x02;
+static const uint8_t USB_DESC_TYPE_STRING        = 0x03;
+static const uint8_t USB_DESC_TYPE_INTERFACE     = 0x04;
+static const uint8_t USB_DESC_TYPE_ENDPOINT      = 0x05;
+
+// ================================================================
+// xHCI context sizes and field helpers
+// ================================================================
+
+static const uint32_t XHCI_CONTEXT_SIZE_32 = 32;
+static const uint32_t XHCI_CONTEXT_SIZE_64 = 64;
+static const uint32_t XHCI_CONTEXT_ALIGNMENT = 64;
+
+// Endpoint state (Endpoint Context DWORD 0 bits 0-2)
+enum XhciEpState : uint8_t {
+    XHCI_EP_STATE_DISABLED = 0,
+    XHCI_EP_STATE_RUNNING  = 1,
+    XHCI_EP_STATE_HALTED   = 2,
+    XHCI_EP_STATE_STOPPED  = 3,
+    XHCI_EP_STATE_ERROR    = 4,
+};
+
+// Endpoint type (Endpoint Context DWORD 1 bits 2-4)
+enum XhciEpType : uint8_t {
+    XHCI_EP_TYPE_NOT_VALID  = 0,
+    XHCI_EP_TYPE_ISOCH_OUT  = 1,
+    XHCI_EP_TYPE_BULK_OUT   = 2,
+    XHCI_EP_TYPE_INT_OUT    = 3,
+    XHCI_EP_TYPE_CONTROL    = 4,
+    XHCI_EP_TYPE_ISOCH_IN   = 5,
+    XHCI_EP_TYPE_BULK_IN    = 6,
+    XHCI_EP_TYPE_INT_IN     = 7,
+};
+
+// Input Control Context Add/Drop context flags
+static const uint32_t XHCI_ADD_CONTEXT_FLAG_SLOT     = 0x00000001u;
+static const uint32_t XHCI_ADD_CONTEXT_FLAG_EP0      = 0x00000002u;
+static const uint32_t XHCI_ADD_CONTEXT_FLAG_ALL = 0x00000003u;
+
+// ---- Slot Context field helpers (dword-indexed) ----
+// DWORD 0: Route String [0:19], Speed [20:23], MTT [24], Hub [25], Context Entries [26:30]
+inline uint32_t slot_ctx_route_string(uint32_t dw0) { return dw0 & 0x000FFFFFu; }
+inline uint32_t slot_ctx_speed(uint32_t dw0)       { return (dw0 >> 20) & 0x0Fu; }
+inline uint32_t slot_ctx_context_entries(uint32_t dw0) { return (dw0 >> 26) & 0x1Fu; }
+inline uint32_t slot_ctx_max_exit_latency(uint32_t dw1) { return dw1 & 0x0000FFFFu; }
+inline uint32_t slot_ctx_root_port(uint32_t dw1)    { return (dw1 >> 16) & 0xFFFFu; }
+inline uint32_t slot_ctx_interrupter_target(uint32_t dw4) { return dw4 & 0x000003FFu; }
+inline uint32_t slot_ctx_usb_address(uint32_t dw4) { return (dw4 >> 16) & 0x00FFu; }
+
+inline uint32_t slot_ctx_set_route_string(uint32_t dw0, uint32_t route) {
+    return (dw0 & ~0x000FFFFFu) | (route & 0x000FFFFFu);
+}
+inline uint32_t slot_ctx_set_speed(uint32_t dw0, uint32_t speed) {
+    return (dw0 & ~(0x0Fu << 20)) | ((speed & 0x0Fu) << 20);
+}
+inline uint32_t slot_ctx_set_context_entries(uint32_t dw0, uint32_t entries) {
+    return (dw0 & ~(0x1Fu << 26)) | ((entries & 0x1Fu) << 26);
+}
+inline uint32_t slot_ctx_set_root_port(uint32_t dw1, uint32_t port) {
+    return (dw1 & ~0xFFFF0000u) | ((port & 0xFFFFu) << 16);
+}
+inline uint32_t slot_ctx_set_interrupter_target(uint32_t dw4, uint32_t target) {
+    return (dw4 & ~0x000003FFu) | (target & 0x000003FFu);
+}
+inline uint32_t slot_ctx_set_usb_address(uint32_t dw4, uint32_t addr) {
+    return (dw4 & ~0x00FF0000u) | ((addr & 0x00FFu) << 16);
+}
+
+// ---- Endpoint Context field helpers (dword-indexed) ----
+// DWORD 0: EP State [0:2], RsvdZ [3], Mult [4:5], MaxPStreams [6:10], LSA [11],
+//          Interval [12:15], Max Packet Size [16:31]
+// DWORD 1: CErr [0:1], EP Type [2:4], RsvdZ [5], HID [6], Max Burst Size [7:8], RsvdZ [9:31]
+// DWORD 2-3: Dequeue Pointer (64-bit)
+// DWORD 4: Average TRB Length [0:15], Max ESIT Payload [16:31]
+inline uint32_t ep_ctx_state(uint32_t dw0)        { return dw0 & 0x07u; }
+inline uint32_t ep_ctx_interval(uint32_t dw0)     { return (dw0 >> 12) & 0x0Fu; }
+inline uint32_t ep_ctx_max_packet_size(uint32_t dw0) { return (dw0 >> 16) & 0xFFFFu; }
+inline uint32_t ep_ctx_cerr(uint32_t dw1)         { return dw1 & 0x03u; }
+inline uint32_t ep_ctx_type(uint32_t dw1)         { return (dw1 >> 2) & 0x07u; }
+inline uint32_t ep_ctx_max_burst(uint32_t dw1)    { return (dw1 >> 7) & 0x03u; }
+inline uint64_t ep_ctx_dequeue_ptr(uint32_t dw2, uint32_t dw3) {
+    return (static_cast<uint64_t>(dw3) << 32) | dw2;
+}
+inline uint32_t ep_ctx_avg_trb_length(uint32_t dw4) { return dw4 & 0x0000FFFFu; }
+
+inline uint32_t ep_ctx_set_state(uint32_t dw0, uint32_t state) {
+    return (dw0 & ~0x07u) | (state & 0x07u);
+}
+inline uint32_t ep_ctx_set_interval(uint32_t dw0, uint32_t interval) {
+    return (dw0 & ~(0x0Fu << 12)) | ((interval & 0x0Fu) << 12);
+}
+inline uint32_t ep_ctx_set_max_packet_size(uint32_t dw0, uint32_t mps) {
+    return (dw0 & ~0xFFFF0000u) | ((mps & 0xFFFFu) << 16);
+}
+inline uint32_t ep_ctx_set_cerr(uint32_t dw1, uint32_t cerr) {
+    return (dw1 & ~0x03u) | (cerr & 0x03u);
+}
+inline uint32_t ep_ctx_set_type(uint32_t dw1, uint32_t type) {
+    return (dw1 & ~(0x07u << 2)) | ((type & 0x07u) << 2);
+}
+inline uint32_t ep_ctx_set_max_burst(uint32_t dw1, uint32_t burst) {
+    return (dw1 & ~(0x03u << 7)) | ((burst & 0x03u) << 7);
+}
+inline uint32_t ep_ctx_set_avg_trb_length(uint32_t dw4, uint32_t len) {
+    return (dw4 & ~0x0000FFFFu) | (len & 0x0000FFFFu);
+}
+
+// ================================================================
+// TRB builders (pure; produce XhciTrb values for the command/transfer rings)
+// ================================================================
+
+// Enable Slot command TRB.  slotType 0 = device.
+inline XhciTrb trb_enable_slot(uint8_t slotType)
+{
+    XhciTrb trb{};
+    trb.parameter = 0;
+    trb.status = 0;
+    trb.control = (static_cast<uint32_t>(TRB_TYPE_ENABLE_SLOT) << 10) |
+                  ((slotType & 0x1Fu) << 16);
+    return trb;
+}
+
+// Address Device command TRB.  BSR=0 sets the device address; BSR=1 blocks it.
+inline XhciTrb trb_address_device(uint64_t inputCtxPhys, bool blockSetAddr, uint8_t slotId)
+{
+    XhciTrb trb{};
+    trb.parameter = inputCtxPhys;
+    trb.status = 0;
+    trb.control = (static_cast<uint32_t>(TRB_TYPE_ADDRESS_DEVICE) << 10) |
+                  (blockSetAddr ? (1u << 9) : 0u) |
+                  ((slotId & 0xFFu) << 24);
+    return trb;
+}
+
+// Setup Stage TRB for an 8-byte USB setup packet.
+inline XhciTrb trb_setup_stage(const usb::SetupPacket& setup, uint8_t trt, bool ioc)
+{
+    XhciTrb trb{};
+    uint64_t p = 0;
+    p |= static_cast<uint64_t>(setup.bmRequestType);
+    p |= static_cast<uint64_t>(setup.bRequest) << 8;
+    p |= static_cast<uint64_t>(setup.wValue) << 16;
+    p |= static_cast<uint64_t>(setup.wIndex) << 32;
+    p |= static_cast<uint64_t>(setup.wLength) << 48;
+    trb.parameter = p;
+    trb.status = (8u & 0x00FFFFFFu) | ((trt & 0x03u) << 16);
+    trb.control = (static_cast<uint32_t>(TRB_TYPE_SETUP_STAGE) << 10) |
+                  (1u << 6) | // IDT: setup data is in this TRB
+                  (ioc ? (1u << 5) : 0u);
+    return trb;
+}
+
+// Data Stage TRB.  direction: 0 = OUT, 1 = IN.
+inline XhciTrb trb_data_stage(uint64_t bufferPhys, uint32_t length, bool in, bool ioc, bool chain)
+{
+    XhciTrb trb{};
+    trb.parameter = bufferPhys;
+    trb.status = (length & 0x00FFFFFFu) | ((in ? 1u : 0u) << 16);
+    trb.control = (static_cast<uint32_t>(TRB_TYPE_DATA_STAGE) << 10) |
+                  (chain ? (1u << 1) : 0u) |
+                  (ioc ? (1u << 5) : 0u);
+    return trb;
+}
+
+// Status Stage TRB.  direction: 0 = OUT, 1 = IN (opposite of data stage).
+inline XhciTrb trb_status_stage(bool in, bool ioc)
+{
+    XhciTrb trb{};
+    trb.parameter = 0;
+    trb.status = ((in ? 1u : 0u) << 16);
+    trb.control = (static_cast<uint32_t>(TRB_TYPE_STATUS_STAGE) << 10) |
+                  (ioc ? (1u << 5) : 0u);
+    return trb;
+}
+
+// ================================================================
+// Event field accessors
+// ================================================================
+
+// Command Completion Event: slot ID is control bits [24:31].
+inline uint8_t event_cmd_comp_slot_id(const XhciEventTrb& evt)
+{
+    return static_cast<uint8_t>((evt.control >> 24) & 0xFFu);
+}
+// Command Completion Event: command TRB pointer is event_data.
+inline uint64_t event_cmd_comp_trb_ptr(const XhciEventTrb& evt)
+{
+    return evt.eventData;
+}
+
+// Transfer Event: slot ID is control bits [24:31], endpoint ID is control bits [16:20].
+inline uint8_t event_transfer_slot_id(const XhciEventTrb& evt)
+{
+    return static_cast<uint8_t>((evt.control >> 24) & 0xFFu);
+}
+inline uint8_t event_transfer_ep_id(const XhciEventTrb& evt)
+{
+    return static_cast<uint8_t>((evt.control >> 16) & 0x1Fu);
+}
+// Transfer Event: residual transfer length is status bits [0:23].
+inline uint32_t event_transfer_length(const XhciEventTrb& evt)
+{
+    return (evt.status & 0x00FFFFFFu);
+}
+// Transfer Event: TRB pointer is event_data.
+inline uint64_t event_transfer_trb_ptr(const XhciEventTrb& evt)
+{
+    return evt.eventData;
+}
+
+// ================================================================
+// USB descriptor validation (pure)
+// ================================================================
+
+struct UsbDeviceDescriptorInfo {
+    bool     valid;
+    uint16_t bcdUSB;
+    uint8_t  deviceClass;
+    uint8_t  deviceSubClass;
+    uint8_t  deviceProtocol;
+    uint8_t  maxPacketSize0;
+    uint16_t idVendor;
+    uint16_t idProduct;
+    uint16_t bcdDevice;
+    uint8_t  numConfigurations;
+};
+
+// Validate a Device Descriptor from raw wire bytes.  `len` is the number of
+// bytes actually transferred.  Returns false (with valid=false) on any
+// malformed input; never reads past `len`.
+inline UsbDeviceDescriptorInfo validate_usb_device_descriptor(const uint8_t* data, uint32_t len)
+{
+    UsbDeviceDescriptorInfo info{};
+    info.valid = false;
+
+    if (data == nullptr || len < 18u) {
+        return info;
+    }
+    if (data[0] < 18u) {
+        return info; // bLength too small for a Device Descriptor
+    }
+    if (data[1] != USB_DESC_TYPE_DEVICE) {
+        return info; // wrong descriptor type
+    }
+
+    info.bcdUSB            = static_cast<uint16_t>(data[2] | (data[3] << 8));
+    info.deviceClass       = data[4];
+    info.deviceSubClass    = data[5];
+    info.deviceProtocol    = data[6];
+    info.maxPacketSize0    = data[7];
+    info.idVendor          = static_cast<uint16_t>(data[8] | (data[9] << 8));
+    info.idProduct         = static_cast<uint16_t>(data[10] | (data[11] << 8));
+    info.bcdDevice         = static_cast<uint16_t>(data[12] | (data[13] << 8));
+    info.numConfigurations = data[17];
+
+    // EP0 max packet size must be a valid USB 2.0 control-endpoint value.
+    if (info.maxPacketSize0 != 8u && info.maxPacketSize0 != 16u &&
+        info.maxPacketSize0 != 32u && info.maxPacketSize0 != 64u) {
+        return info;
+    }
+
+    info.valid = true;
+    return info;
+}
+
+// ================================================================
+// Control transfer request descriptor (reusable for standard requests)
+// ================================================================
+
+struct UsbControlRequest {
+    uint8_t  bmRequestType;
+    uint8_t  bRequest;
+    uint16_t wValue;
+    uint16_t wIndex;
+    uint16_t wLength;
+    bool     dataIn;      // true = device-to-host (IN data stage)
+    uint32_t timeoutMs;   // bounded completion wait
+};
+
+// Build a GET_DESCRIPTOR(Device) request.
+inline UsbControlRequest usb_get_device_descriptor_request(uint16_t length)
+{
+    UsbControlRequest req{};
+    req.bmRequestType = USB_REQ_DIR_DEVICE_TO_HOST | USB_REQ_TYPE_STANDARD | USB_REQ_RECIPIENT_DEVICE;
+    req.bRequest      = USB_REQ_GET_DESCRIPTOR;
+    req.wValue        = static_cast<uint16_t>(USB_DESC_TYPE_DEVICE << 8);
+    req.wIndex        = 0;
+    req.wLength       = length;
+    req.dataIn        = true;
+    req.timeoutMs     = 1000u;
+    return req;
+}
+
+// ================================================================
+// Enumerated device result (Section 5)
+// ================================================================
+
+struct EnumeratedDevice {
+    bool                    valid;
+    uint8_t                 slotId;
+    uint8_t                 port;
+    uint8_t                 speed;
+    UsbDeviceDescriptorInfo descriptor;
+};
+
+// ================================================================
 // Controller bring-up interface (implemented in xhci.cpp)
 // ================================================================
 
@@ -727,6 +1063,13 @@ uint64_t mmio_base();
 
 // Get the validated capability registers.
 const XhciCapabilities* capabilities();
+
+// Set the kernel physical base for DMA address translation (Section 12).
+// Must be called before enumerate_device() on UEFI boot.
+void set_kernel_physical_base(uint64_t physicalBase);
+
+// Enumerate the first connected USB device (Section 5).
+bool enumerate_device(EnumeratedDevice* out);
 
 } // namespace controller
 
