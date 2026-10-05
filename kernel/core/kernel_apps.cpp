@@ -8670,13 +8670,15 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             lineY += 14;
             disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
                 "No partition creation, filesystem format, or GPT repair is performed.", kSubText);
-        } else if (!m_dialogIsCreate && !m_dialogIsFormat &&
+        } else if (!m_dialogIsGptRepair && !m_dialogIsCreate &&
+                   !m_dialogIsFormat &&
                    m_initializeDialogState == INITIALIZE_DIALOG_RUNNING) {
             strcopy(line, "Stage: ", sizeof(line));
             strappend(line, storage::initialize_disk_stage_name(
                 m_initializeResult.stage), sizeof(line));
             disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20, line, kText);
-        } else if (!m_dialogIsCreate && !m_dialogIsFormat) {
+        } else if (!m_dialogIsGptRepair && !m_dialogIsCreate &&
+                   !m_dialogIsFormat) {
             const bool success = m_initializeResult.status == storage::INITIALIZE_DISK_SUCCESS;
             disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
                 success ? "Initialization completed" : "Initialization failed",
