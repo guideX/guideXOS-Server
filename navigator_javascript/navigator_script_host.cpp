@@ -3574,9 +3574,20 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
     NavigatorScriptRelativeSelectorRelation relation,
     const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
     std::int16_t nthA, std::int16_t nthB,
-    const NavigatorScriptSelectorDescriptor& storage) const
+    const NavigatorScriptSelectorDescriptor& storage
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+    , NavigatorScriptRelativeSelectorCounters* counters
+#endif
+    ) const
 {
     using MatchResult = NavigatorScriptSelectorMatchResult;
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+    if (counters != nullptr) ++counters->relativeEvaluationCalls;
+#define GXOS_RELATIVE_COUNT(field) \
+    do { if (counters != nullptr) ++counters->field; } while (false)
+#else
+#define GXOS_RELATIVE_COUNT(field) do { } while (false)
+#endif
     if (document_ == nullptr || !anchor.valid() ||
         anchor.kind != kNavigatorElementHostKind ||
         anchor.generation != generation_ ||
@@ -3596,18 +3607,26 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
     // also makes malformed, duplicate, or capacity-corrupted registries fail
     // closed without introducing a persistent index.
     for (std::size_t position = 0u; position < count; ++position) {
+        GXOS_RELATIVE_COUNT(structuralRecordsInspected);
         if (document_->structuralElements[position].serial != position + 1u)
             return MatchResult::Invalid;
     }
     const auto structuralElement = [&](HostInstanceId serial)
         -> const gxos::web::HtmlElementRef* {
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        GXOS_RELATIVE_COUNT(serialIndexResolutions);
+#endif
         if (serial == 0u || serial > count) return nullptr;
         const gxos::web::HtmlElementRef& element =
             document_->structuralElements[static_cast<std::size_t>(serial - 1u)];
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        GXOS_RELATIVE_COUNT(structuralRecordsInspected);
+#endif
         return element.serial == serial ? &element : nullptr;
     };
     std::size_t anchorPosition = count;
     for (std::size_t position = 0u; position < count; ++position) {
+        GXOS_RELATIVE_COUNT(structuralRecordsInspected);
         if (&document_->structuralElements[position] == anchorElement) {
             anchorPosition = position;
             break;
@@ -3621,6 +3640,7 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
     HostInstanceId anchorAncestor = anchor.instanceId;
     bool reachedRoot = false;
     for (std::size_t hop = 0u; hop < count; ++hop) {
+        GXOS_RELATIVE_COUNT(parentHops);
         HostInstanceId parentSerial = 0u;
         const gxos::web::HtmlElementRef* ancestor =
             structuralElement(anchorAncestor);
@@ -3639,6 +3659,9 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
 
     const auto candidateMatches = [&](
         const gxos::web::HtmlElementRef& candidate) {
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        GXOS_RELATIVE_COUNT(simpleSelectorEvaluations);
+#endif
         return selectorCoreElementMatchResult(candidate, selector, nthA,
             nthB, storage, true);
     };
@@ -3648,6 +3671,9 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
         for (std::size_t position = 0u; position < count; ++position) {
             const gxos::web::HtmlElementRef& candidate =
                 document_->structuralElements[position];
+            GXOS_RELATIVE_COUNT(structuralRecordsInspected);
+            if (relation == NavigatorScriptRelativeSelectorRelation::Child)
+                GXOS_RELATIVE_COUNT(childRelationCandidateChecks);
             if (candidate.serial == 0u || candidate.serial == anchor.instanceId)
                 continue;
             bool eligible = false;
@@ -3660,6 +3686,7 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
             } else {
                 HostInstanceId currentSerial = candidate.serial;
                 for (std::size_t hop = 0u; hop < count; ++hop) {
+                    GXOS_RELATIVE_COUNT(parentHops);
                     const gxos::web::HtmlElementRef* current =
                         structuralElement(currentSerial);
                     if (current == nullptr ||
@@ -3703,6 +3730,11 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
             ++position) {
         const gxos::web::HtmlElementRef& candidate =
             document_->structuralElements[position];
+        GXOS_RELATIVE_COUNT(structuralRecordsInspected);
+        if (relation == NavigatorScriptRelativeSelectorRelation::AdjacentSibling)
+            GXOS_RELATIVE_COUNT(adjacentSiblingChecks);
+        else
+            GXOS_RELATIVE_COUNT(generalSiblingChecks);
         if (candidate.serial == 0u || candidate.serial == anchor.instanceId ||
             candidate.parentSerial != parentSerial) continue;
         if (structuralElement(candidate.serial) != &candidate)
@@ -3713,6 +3745,7 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
         if (relation == NavigatorScriptRelativeSelectorRelation::AdjacentSibling)
             return MatchResult::NoMatch;
     }
+#undef GXOS_RELATIVE_COUNT
     return MatchResult::NoMatch;
 }
 

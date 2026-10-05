@@ -6489,3 +6489,108 @@ generated artifact trees. No public `:has()` is supported. Because total work
 across many outer candidates remains O(N³) in the conservative bound and has
 not been measured at capacity, JS62R is Outcome B: NOT YET SAFE TO PROCEED TO
 JS63.
+
+### JS62R2 relative selector exposure qualification (2026-10-04)
+
+JS62R2 measured the existing JS62R evaluator without changing its algorithm.
+The test-only `NavigatorScriptRelativeSelectorCounters` is caller-owned, has
+eight 64-bit fields (64 bytes), and is compiled only with
+`GXOS_RELATIVE_SELECTOR_DIAGNOSTICS`. Production builds have no counter type,
+argument, global state, or counter storage. The test caller keeps the 64-byte
+counter on its stack; production evaluator stack usage is unchanged. Counters
+track relative calls, inspected structural records, parent hops, serial/index
+resolutions, simple-selector evaluations, and Child, AdjacentSibling, and
+GeneralSibling candidate checks. Repeated near-capacity runs produced identical
+counts. A counter-enabled and ordinary call returned the same result.
+
+The structural Element cap remains 1024. JS62's original repeated serial scans
+had an O(N³) Descendant cost per anchor; JS62R reduced it to O(N²) per anchor
+through one sequential-serial validation followed by direct `serial - 1`
+parent lookup. JS62R2 made no further algorithm change. Final traversal bounds
+remain Descendant O(N²), Child O(N), AdjacentSibling O(N), and GeneralSibling
+O(N). No persistent cache, heap allocation, parser change, or public `:has()`
+support was added. Production descriptor sizes remain: shared core 32 bytes,
+simple selector 68 bytes, four-member selector 812 bytes, collection record
+832 bytes, 128-record registry 106,496 bytes, `HtmlElementRef` 440 bytes, and
+content record 24 bytes.
+
+At the full 1024-record capacity, a single flat-tree Descendant call with the
+only match at the last eligible node used 4,102 record inspections, 1,027
+parent hops, 2,051 serial/index resolutions, and 1,021 selector evaluations.
+The absent-target scan had the same counts. A 400-level nested chain (403
+structural Elements) used 161,218 record inspections, 80,206 parent hops,
+160,409 resolutions, and 400 selector evaluations for both deepest-match and
+absent-target cases. The 1,021-child wide tree measured Child first/middle/last
+matches at respectively 1,038/2,058/3,078 records, 3/3/3 parent hops,
+7/517/1,027 resolutions, and 1/511/1,021 selector evaluations. Descendant
+first/middle/last matches used 1,042/2,572/4,102 records, 7/517/1,027 hops,
+11/1,031/2,051 resolutions, and 1/511/1,021 selector evaluations. The absent
+Child case used 3,078 records and 1,021 selector evaluations.
+
+The wide sibling fixture contained 1,018 direct siblings. GeneralSibling late
+match and absent-target cases each used 3,068 records, 4 parent hops, 1,026
+resolutions, and 1,017 selector evaluations. Adjacent first and middle
+nonmatches used 1,036 and 1,545 records with one adjacent candidate check each;
+the last-anchor case had no following candidate. A separate immediate-match
+fixture verified both sibling relations.
+
+The future-like simulation called Descendant matching for all 1,022 represented
+Elements in a full-capacity document. Across all anchors, early-true used
+7,930,708 records, 3,181,563 parent hops, 5,494,253 resolutions, and 345
+selector evaluations (average 7,759.99 records and maximum 9,530 per anchor;
+average 3,113.08 hops and maximum 3,743). Late-true used 7,931,740 records,
+3,181,908 hops, 5,494,943 resolutions, and 687 selector evaluations (average
+7,761 records and maximum 9,530 per anchor; average 3,113.41 hops and maximum
+3,743). The full false case used 9,210,448 records, 3,820,245 hops, 6,598,727
+resolutions, and 2,721 selector evaluations (average 9,012.18 records and
+maximum 9,530 per anchor; average 3,738.01 hops and maximum 3,743). Native
+timings for these runs were 17–20 ms and are secondary to the operation counts.
+These measured bounded counts did not justify another optimization.
+
+The new focused `tests/navigator_javascript_js62r2_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js62r2.ps1`, passes 4,081 checks and the
+strict warning-as-error source lane. It covers the measurements above; a
+300-document generation replacement loop; stale anchor and target handles;
+true/false serial reuse; live attribute presence and equality; checked state;
+focus moving outside, to two descendants, and outside again; empty and six
+structural pseudos; a rich compound through all four relations; root negatives;
+self-parent, two-node and three-node cycles; sequential and duplicate serial
+corruption; invalid parent metadata; parentless and invalid sibling parents;
+capacity rejection; hidden Elements; form-owner independence; anchor-self and
+sibling-boundary exclusion; and the unsupported public boundary. Public
+`:has(.x)`, `:has(> .x)`, `:has(+ .x)`, `:has(~ .x)`, and standalone leading
+combinators remain unsupported.
+
+The focused JS36–JS62 check counts were: JS36 114, JS37 180, JS38 152, JS39
+218, JS40 155, JS41 220, JS42 235, JS43 277, JS44 183, JS45 184, JS46 220,
+JS47 137, JS48 136, JS49 150, JS50 313, JS51 278, JS52 319, JS53 211, JS54
+238, JS55 340, JS56 110, JS57 269, JS58 153, JS59 621, JS60 1,377, JS61
+2,077, and JS62 15. All passed. JS62R passed 10/10 and JS62R2 passed
+4,081/4,081. The full
+historical JavaScript matrix passed 60/60 lanes: lexer, parser, runtime, and
+JS6–JS62. The production `build.bat` passed. The hosted aggregate reproduced
+614 passed and the same seven known CSS failures (3C, 3G, 6A, three 6B checks,
+and 6C), with no new failures. The kernel wrapper stopped on the existing
+undefined PacMan symbols `pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)`. Direct amd64 make stopped on the
+existing Mbed TLS configuration errors at `mbedtls_check_config.h:51` and
+`:64`; no fresh kernel or QEMU run resulted.
+
+Before build attempts, JS62R2 captured SHA-256 and length for all 1,337 ignored
+files (88,371,771 bytes), including hosted build outputs, PacMan objects,
+kernel outputs, and wallpaper-pack files. Regenerated files were restored from
+that backup; the three tracked PacMan objects changed by the kernel wrapper
+were restored to HEAD. The final ignored-artifact comparison is changed=0,
+missing=0, extra=0. No generated artifact is included in the source change.
+
+JS62R2 is Outcome B. The measured bounded workload is small enough that
+performance alone does not block JS63. However, qualification is incomplete:
+radio exclusivity and fieldset-disabled projection were not exercised;
+disabled-state freshness was checked through a native test accessor to the
+canonical runtime state rather than a supported JavaScript mutation; independent
+cross-checks against `contains`, `parentElement`, sibling traversal, and CSS
+relation queries were not completed; and event metadata, nested dispatch,
+reentrancy, and full evaluator-purity checks remain unqualified. Those are the
+remaining blockers. No public `:has()` syntax was added.
+
+**NOT YET SAFE TO PROCEED TO JS63**

@@ -188,6 +188,21 @@ enum class NavigatorScriptRelativeSelectorRelation : std::uint8_t {
     GeneralSibling,
 };
 
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+// Native-test-only, caller-owned counters. Production builds omit both this
+// type and the corresponding evaluator parameter.
+struct NavigatorScriptRelativeSelectorCounters {
+    std::uint64_t relativeEvaluationCalls = 0u;
+    std::uint64_t structuralRecordsInspected = 0u;
+    std::uint64_t parentHops = 0u;
+    std::uint64_t serialIndexResolutions = 0u;
+    std::uint64_t simpleSelectorEvaluations = 0u;
+    std::uint64_t childRelationCandidateChecks = 0u;
+    std::uint64_t adjacentSiblingChecks = 0u;
+    std::uint64_t generalSiblingChecks = 0u;
+};
+#endif
+
 struct NavigatorScriptSelectorMemberDescriptor {
     NavigatorScriptSelectorRelation relation =
         NavigatorScriptSelectorRelation::None;
@@ -469,7 +484,11 @@ private:
         NavigatorScriptRelativeSelectorRelation relation,
         const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
         std::int16_t nthA, std::int16_t nthB,
-        const NavigatorScriptSelectorDescriptor& storage) const;
+        const NavigatorScriptSelectorDescriptor& storage
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        , NavigatorScriptRelativeSelectorCounters* counters = nullptr
+#endif
+        ) const;
     NavigatorScriptSelectorMatchResult selectorSimpleElementMatchResult(
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSimpleSelectorDescriptor& selector,
