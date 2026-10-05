@@ -6304,6 +6304,7 @@ DiskManagerApp::DiskManagerApp()
     memset(&m_gptRepairResult, 0, sizeof(m_gptRepairResult));
     memset(&m_formatRequest, 0, sizeof(m_formatRequest));
     memset(&m_formatResult, 0, sizeof(m_formatResult));
+    memset(&m_formatJob, 0, sizeof(m_formatJob));
     memset(&m_mountDialogPartition, 0, sizeof(m_mountDialogPartition));
     m_lastStorageOperation = 0;
     m_mountDialogPath[0] = '\0';
@@ -6321,6 +6322,9 @@ DiskManagerApp::~DiskManagerApp() {
         storage::cancel_delete_partition(m_deletePlan);
     if (m_gptRepairPlan.confirmationReady)
         storage::cancel_gpt_repair(m_gptRepairPlan);
+    if (m_formatJob.state == storage::FAT32_FORMAT_JOB_SCANNING ||
+        m_formatJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT)
+        storage::cancel_fat32_format_job(m_formatJob);
 }
 
 bool DiskManagerApp::init() {
@@ -6373,8 +6377,31 @@ void DiskManagerApp::shutdown() {
         storage::cancel_delete_partition(m_deletePlan);
     if (m_gptRepairPlan.confirmationReady)
         storage::cancel_gpt_repair(m_gptRepairPlan);
+    if (m_formatJob.state == storage::FAT32_FORMAT_JOB_SCANNING ||
+        m_formatJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT)
+        storage::cancel_fat32_format_job(m_formatJob);
     m_initializeDialogState = INITIALIZE_DIALOG_CLOSED;
     m_state = app::AppState::Terminated;
+}
+
+void DiskManagerApp::update() {
+    if (m_initializeDialogState != INITIALIZE_DIALOG_RUNNING ||
+        m_dialogIsReformat ||
+        (m_formatJob.state != storage::FAT32_FORMAT_JOB_SCANNING &&
+         m_formatJob.state != storage::FAT32_FORMAT_JOB_READY_TO_COMMIT))
+        return;
+
+    const storage::Fat32FormatJobState state =
+        storage::step_fat32_format_job(m_formatJob);
+    m_formatResult = m_formatJob.result;
+    if (state == storage::FAT32_FORMAT_JOB_COMPLETED ||
+        state == storage::FAT32_FORMAT_JOB_FAILED ||
+        state == storage::FAT32_FORMAT_JOB_CANCELED) {
+        completeFormatOperation();
+        return;
+    }
+    updateInitializeControls();
+    invalidate();
 }
 
 void DiskManagerApp::scanDisks() {
@@ -7124,7 +7151,12 @@ void DiskManagerApp::updateInitializeControls() {
             m_createRequest.requestedScheme == storage::PARTITION_SCHEME_GPT);
         nameInput->enabled = nameInput->visible;
     }
-    const bool showCancel = m_mountDialogOpen ||
+    const bool formatScanCancelable = m_dialogIsFormat &&
+        m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
+        !m_formatJob.commitStarted &&
+        (m_formatJob.state == storage::FAT32_FORMAT_JOB_SCANNING ||
+         m_formatJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT);
+    const bool showCancel = m_mountDialogOpen || formatScanCancelable ||
         (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED &&
          m_initializeDialogState != INITIALIZE_DIALOG_RUNNING);
     if (cancel) {
@@ -8427,11 +8459,50 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                         0xFFFFB0A0);
                 }
             } else if (m_initializeDialogState == INITIALIZE_DIALOG_RUNNING) {
-                strcopy(line, "Stage: ", sizeof(line));
-                strappend(line, storage::fat32_format_stage_name(
-                    m_formatResult.stage), sizeof(line));
+                const storage::Fat32FormatJobState jobState = m_formatJob.state;
+                strcopy(line, "Phase: ", sizeof(line));
+                strappend(line, storage::fat32_format_job_state_name(jobState),
+                    sizeof(line));
                 disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
                     line, kText);
+                lineY += 20;
+                const uint32_t sectorSize =
+                    m_formatJob.request.targetSnapshot.logicalSectorSize;
+                const uint64_t sectors =
+                    m_formatJob.request.partitionSnapshot.sectorCount;
+                const uint64_t totalBytes = sectorSize != 0 &&
+                    sectors <= UINT64_MAX / sectorSize
+                    ? sectors * sectorSize : 0;
+                strcopy(line, "Verified: ", sizeof(line));
+                disk_manager_u64(m_formatResult.scanBytesRead / 1048576ULL,
+                    number, sizeof(number));
+                strappend(line, number, sizeof(line));
+                strappend(line, " MiB / ", sizeof(line));
+                disk_manager_u64(totalBytes / 1048576ULL,
+                    number, sizeof(number));
+                strappend(line, number, sizeof(line));
+                strappend(line, " MiB (", sizeof(line));
+                disk_manager_u64(m_formatResult.scanProgressPercent,
+                    number, sizeof(number));
+                strappend(line, number, sizeof(line));
+                strappend(line, "%)", sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kSubText);
+                lineY += 19;
+                const uint32_t barWidth = panelW > 20 ? panelW - 20 : 0;
+                framebuffer::fill_rect(panelX + 10, lineY, barWidth, 10,
+                    0xFF111820);
+                const uint32_t completedWidth = static_cast<uint32_t>(
+                    (static_cast<uint64_t>(barWidth) *
+                     m_formatResult.scanProgressPercent) / 100u);
+                framebuffer::fill_rect(panelX + 10, lineY, completedWidth, 10,
+                    0xFF4C91C2);
+                lineY += 17;
+                if (jobState == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT) {
+                    disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                        "Scan complete. Metadata publication is next.",
+                        0xFFFFD080);
+                }
             } else if (m_initializeDialogState == INITIALIZE_DIALOG_RESULT) {
                 const bool success = m_formatResult.status ==
                     storage::FAT32_FORMAT_SUCCESS;
@@ -9843,9 +9914,18 @@ void DiskManagerApp::beginFormatOptions() {
         strcopy(m_createNameText, m_formatResult.oldVolumeLabel,
                 sizeof(m_createNameText));
     }
-    if (!m_dialogIsReformat && !existingFat32 && !interruptedReformat)
-        status = storage::probe_fat32_format_partition(
-            m_formatRequest, m_formatResult);
+    if (!m_dialogIsReformat && !existingFat32 && !interruptedReformat) {
+        status = storage::calculate_fat32_format_geometry(
+            selected.parsed.startLba, selected.parsed.sectorCount,
+            disk.capabilities.logicalSectorSize, m_formatResult.geometry);
+        if (status == storage::FAT32_FORMAT_READY) {
+            m_formatResult.status = storage::FAT32_FORMAT_READY;
+            m_formatResult.existingState = storage::FAT32_EXISTING_UNKNOWN;
+            strcopy(m_formatResult.diagnostic,
+                "Blank media is checked after confirmation and before any metadata write.",
+                sizeof(m_formatResult.diagnostic));
+        }
+    }
     if (status != storage::FAT32_FORMAT_READY) {
         strcopy(m_statusMessage, m_formatResult.diagnostic[0]
             ? m_formatResult.diagnostic : storage::fat32_format_status_name(status),
@@ -9887,12 +9967,34 @@ void DiskManagerApp::runFormatOperation() {
     m_formatResult.stage = storage::FAT32_FORMAT_STAGE_VALIDATING;
     updateInitializeControls();
     invalidate();
+    if (!m_dialogIsReformat) {
+        memset(&m_formatJob, 0, sizeof(m_formatJob));
+        const storage::Fat32FormatJobState state =
+            storage::begin_fat32_format_job(m_formatJob, m_formatRequest);
+        m_formatResult = m_formatJob.result;
+        if (state == storage::FAT32_FORMAT_JOB_SCANNING ||
+            state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT) {
+            updateInitializeControls();
+            invalidate();
+            return;
+        }
+        completeFormatOperation();
+        return;
+    }
     if (m_dialogIsReformat)
         storage::quick_reformat_fat32_partition(m_formatRequest, m_formatResult);
-    else
-        storage::format_fat32_partition(m_formatRequest, m_formatResult);
+    completeFormatOperation();
+}
+
+void DiskManagerApp::completeFormatOperation() {
+    if (!m_dialogIsReformat && m_formatJob.state != storage::FAT32_FORMAT_JOB_IDLE)
+        m_formatResult = m_formatJob.result;
     m_lastStorageOperation = 3;
-    if (m_formatResult.status != storage::FAT32_FORMAT_SUCCESS &&
+    if (m_formatResult.status == storage::FAT32_FORMAT_CANCELED) {
+        strcopy(m_initializeMessage,
+            "Format canceled. No filesystem metadata was written.",
+            sizeof(m_initializeMessage));
+    } else if (m_formatResult.status != storage::FAT32_FORMAT_SUCCESS &&
         m_formatResult.failedBeforeWrite) {
         strcopy(m_initializeMessage, m_dialogIsReformat
             ? "Quick Reformat failed before any metadata writes were made."
@@ -9936,6 +10038,20 @@ void DiskManagerApp::runFormatOperation() {
 }
 
 void DiskManagerApp::closeInitializeDialog() {
+    if (m_dialogIsFormat &&
+        (m_formatJob.state == storage::FAT32_FORMAT_JOB_SCANNING ||
+         m_formatJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT)) {
+        if (storage::cancel_fat32_format_job(m_formatJob)) {
+            m_formatResult = m_formatJob.result;
+            strcopy(m_initializeMessage,
+                "Format canceled. No filesystem metadata was written.",
+                sizeof(m_initializeMessage));
+            m_initializeDialogState = INITIALIZE_DIALOG_RESULT;
+            updateInitializeControls();
+            invalidate();
+            return;
+        }
+    }
     if (m_initializePlan.confirmationReady)
         storage::cancel_initialize_disk(m_initializePlan);
     if (m_deletePlan.confirmationReady)
@@ -9951,6 +10067,10 @@ void DiskManagerApp::closeInitializeDialog() {
     m_gptRepairButtonFocus = 0;
     m_createInputFocus = 0;
     m_initializeMessage[0] = '\0';
+    if (m_formatJob.state == storage::FAT32_FORMAT_JOB_COMPLETED ||
+        m_formatJob.state == storage::FAT32_FORMAT_JOB_FAILED ||
+        m_formatJob.state == storage::FAT32_FORMAT_JOB_CANCELED)
+        memset(&m_formatJob, 0, sizeof(m_formatJob));
     updateInitializeControls();
     invalidate();
 }

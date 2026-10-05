@@ -494,6 +494,11 @@ struct BlankVerificationToken {
     uint64_t sectorsVerified;
 };
 
+// The cooperative formatter is intentionally single-job. Its unforgeable
+// KnownZero evidence stays private to this translation unit and is bound to
+// the operation owner until commit or cancellation.
+static BlankVerificationToken s_jobBlankToken;
+
 static bool buffer_is_zero(const uint8_t* bytes, size_t length,
                            size_t& firstNonzeroOffset)
 {
@@ -2283,7 +2288,8 @@ static Fat32FormatStatus execute_quick_reformat_locked(
 
 static Fat32FormatStatus execute_locked(const Fat32FormatRequest& request,
                                         Fat32FormatResult& result,
-                                        StorageOperationLease& lease)
+                                        StorageOperationLease& lease,
+                                        const BlankVerificationToken* scannedToken = nullptr)
 {
     PartitionCheck check = {};
     result.stage = FAT32_FORMAT_STAGE_REVALIDATING_PARTITION;
@@ -2296,10 +2302,17 @@ static Fat32FormatStatus execute_locked(const Fat32FormatRequest& request,
     clear_bytes(s_rollbackRecords, sizeof(s_rollbackRecords));
     s_rollbackRecordCount = 0;
     BlankVerificationToken blankToken = {};
-    status = scan_partition_for_clean_state(request,
-        check.capabilities.logicalSectorSize, check.geometry, lease,
-        result.existingState, result, blankToken);
-    if (status != FAT32_FORMAT_READY) return status;
+    if (scannedToken) {
+        blankToken = *scannedToken;
+        if (!blank_token_matches(blankToken, request,
+                check.currentPartition, check.geometry, lease))
+            return FAT32_FORMAT_OPERATION_OWNERSHIP_INVALID;
+    } else {
+        status = scan_partition_for_clean_state(request,
+            check.capabilities.logicalSectorSize, check.geometry, lease,
+            result.existingState, result, blankToken);
+        if (status != FAT32_FORMAT_READY) return status;
+    }
 
     // The long scan held the exact target pin and exclusive storage lease.
     // Re-run destructive preflight immediately afterward, before metadata
@@ -2641,6 +2654,273 @@ static Fat32FormatStatus run_with_lease(const Fat32FormatRequest& request,
 
 } // namespace
 
+static void finish_job_failure(Fat32FormatJob& job, Fat32FormatStatus status)
+{
+    if (s_jobBlankToken.operationGeneration == job.lease.ownerToken)
+        s_jobBlankToken.valid = false;
+    job.result.status = status;
+    if (job.result.stage != FAT32_FORMAT_STAGE_STATE_UNCERTAIN) {
+        if (job.result.stage != FAT32_FORMAT_STAGE_FAILED)
+            mark_stage_failed(job.result);
+        job.result.status = status;
+        if (job.result.diagnostic[0] == '\0')
+            set_diagnostic(job.result, fat32_format_status_name(status));
+    }
+    job.state = FAT32_FORMAT_JOB_FAILED;
+    if (job.lease.ownerToken != 0 && !job.result.writeAttempted)
+        release_storage_operation(job.lease);
+}
+
+static bool cancel_job_now(Fat32FormatJob& job)
+{
+    if (job.commitStarted || job.state == FAT32_FORMAT_JOB_COMPLETED ||
+        job.state == FAT32_FORMAT_JOB_FAILED ||
+        job.state == FAT32_FORMAT_JOB_CANCELED ||
+        job.state == FAT32_FORMAT_JOB_IDLE)
+        return false;
+    job.cancelRequested = true;
+    if (job.stepActive) return true;
+    if (s_jobBlankToken.operationGeneration == job.lease.ownerToken)
+        s_jobBlankToken.valid = false;
+    job.result.status = FAT32_FORMAT_CANCELED;
+    job.result.failureStatus = FAT32_FORMAT_CANCELED;
+    job.result.failedBeforeWrite = true;
+    job.result.stage = FAT32_FORMAT_STAGE_FAILED;
+    job.result.lastStage = FAT32_FORMAT_STAGE_FAILED;
+    set_diagnostic(job.result,
+        "Canceled before FAT32 metadata publication; no formatter writes were made.");
+    if (job.lease.ownerToken != 0) release_storage_operation(job.lease);
+    job.state = FAT32_FORMAT_JOB_CANCELED;
+    return true;
+}
+
+Fat32FormatJobState begin_fat32_format_job(
+    Fat32FormatJob& job, const Fat32FormatRequest& request)
+{
+    if (job.state == FAT32_FORMAT_JOB_SCANNING ||
+        job.state == FAT32_FORMAT_JOB_READY_TO_COMMIT)
+        return job.state;
+    clear_bytes(&job, sizeof(job));
+    job.request = request;
+    reset_result(job.result);
+    job.result.targetIdentity = request.targetSnapshot;
+    job.result.partition = request.partitionSnapshot;
+    job.result.stage = FAT32_FORMAT_STAGE_VALIDATING;
+
+    const StorageOperationLockStatus lock =
+        try_acquire_storage_operation(job.lease);
+    if (lock != STORAGE_OPERATION_LOCK_ACQUIRED) {
+        finish_job_failure(job, lock == STORAGE_OPERATION_LOCK_BUSY
+            ? FAT32_FORMAT_OPERATION_BUSY
+            : FAT32_FORMAT_OPERATION_OWNERSHIP_INVALID);
+        return job.state;
+    }
+    clear_bytes(&s_jobBlankToken, sizeof(s_jobBlankToken));
+    job.result.stage = FAT32_FORMAT_STAGE_PIN_TARGET;
+    if (!pin_storage_operation_target(job.lease, job.request.targetSnapshot)) {
+        const Fat32FormatStatus failure = map_identity(revalidate_target_identity(
+            job.request.targetSnapshot));
+        finish_job_failure(job, failure == FAT32_FORMAT_SUCCESS
+            ? FAT32_FORMAT_IDENTITY_CHANGED : failure);
+        return job.state;
+    }
+
+    PartitionCheck check = {};
+    job.result.stage = FAT32_FORMAT_STAGE_REVALIDATING_PARTITION;
+    Fat32FormatStatus status = validate_request_and_partition(
+        job.request, job.result, check);
+    if (status != FAT32_FORMAT_READY) {
+        finish_job_failure(job, status);
+        return job.state;
+    }
+    job.geometry = check.geometry;
+    job.result.stage = FAT32_FORMAT_STAGE_CALCULATING_LAYOUT;
+    job.result.existingState = classify_existing_prefix(job.request,
+        check.capabilities.logicalSectorSize);
+    if (job.result.existingState == FAT32_EXISTING_UNREADABLE) {
+        finish_job_failure(job, FAT32_FORMAT_READ_UNAVAILABLE);
+        return job.state;
+    }
+    if (job.result.existingState == FAT32_EXISTING_RECOGNIZED_FILESYSTEM) {
+        finish_job_failure(job, FAT32_FORMAT_FILESYSTEM_ALREADY_RECOGNIZED);
+        return job.state;
+    }
+    job.scanMaxSectors = fat32_scan_batch_sectors(
+        check.capabilities.logicalSectorSize, check.capabilities.maxTransferBytes);
+    if (job.scanMaxSectors == 0) {
+        finish_job_failure(job, FAT32_FORMAT_READ_UNAVAILABLE);
+        return job.state;
+    }
+    job.scanStartTicks = scan_clock_ticks();
+    job.result.stage = FAT32_FORMAT_STAGE_VALIDATING;
+    job.result.status = FAT32_FORMAT_READY;
+    job.state = FAT32_FORMAT_JOB_SCANNING;
+    return job.state;
+}
+
+Fat32FormatJobState step_fat32_format_job(Fat32FormatJob& job)
+{
+    if (job.state == FAT32_FORMAT_JOB_SCANNING) {
+        if (job.cancelRequested) {
+            job.stepActive = false;
+            cancel_job_now(job);
+            return job.state;
+        }
+        job.stepActive = true;
+        if (!storage_operation_lease_is_current(job.lease) ||
+            revalidate_target_identity(job.request.targetSnapshot) != TARGET_VALID) {
+            job.stepActive = false;
+            finish_job_failure(job, FAT32_FORMAT_IDENTITY_CHANGED);
+            return job.state;
+        }
+        DeviceCapabilities caps = {};
+        if (!query_device_capabilities(job.request.targetSnapshot.globalIndex,
+                                       caps)) {
+            job.stepActive = false;
+            finish_job_failure(job, FAT32_FORMAT_DEVICE_MISSING);
+            return job.state;
+        }
+        const uint64_t total = job.request.partitionSnapshot.sectorCount;
+        if (job.scanRelativeLba >= total) {
+            job.stepActive = false;
+            finish_job_failure(job, FAT32_FORMAT_INVALID_GEOMETRY);
+            return job.state;
+        }
+        const uint32_t count = static_cast<uint32_t>(
+            total - job.scanRelativeLba < job.scanMaxSectors
+                ? total - job.scanRelativeLba : job.scanMaxSectors);
+        uint64_t lba = 0;
+        if (!add_u64(job.request.partitionSnapshot.startLba,
+                     job.scanRelativeLba, lba) ||
+            !checked_lba_range(caps.totalLogicalSectors, lba, count)) {
+            job.stepActive = false;
+            finish_job_failure(job, FAT32_FORMAT_INVALID_GEOMETRY);
+            return job.state;
+        }
+        const uint32_t sectorSize = caps.logicalSectorSize;
+        const uint32_t bytes = count * sectorSize;
+        ++job.result.scanReadRequests;
+        if (job.result.scanSmallestRequestBytes == 0 ||
+            bytes < job.result.scanSmallestRequestBytes)
+            job.result.scanSmallestRequestBytes = bytes;
+        if (bytes > job.result.scanLargestRequestBytes)
+            job.result.scanLargestRequestBytes = bytes;
+        job.result.scanCurrentLba = lba;
+        job.result.scanRelativeLba = job.scanRelativeLba;
+        if (read_sectors_safe(job.request.targetSnapshot.globalIndex, lba,
+                count, s_zeroScanBuffer, bytes) != block::BLOCK_OK) {
+            (void)capture_current_io_result(job.result);
+            finish_scan_metrics(job.result, job.scanStartTicks);
+            job.stepActive = false;
+            finish_job_failure(job, FAT32_FORMAT_READ_UNAVAILABLE);
+            return job.state;
+        }
+        job.result.scanBytesRead += bytes;
+        size_t firstNonzeroOffset = 0;
+        if (!buffer_is_zero(s_zeroScanBuffer, bytes, firstNonzeroOffset)) {
+            job.result.scanFirstNonzeroRelativeLba = job.scanRelativeLba +
+                firstNonzeroOffset / sectorSize;
+            job.result.scanFirstNonzeroByteOffset = static_cast<uint32_t>(
+                firstNonzeroOffset % sectorSize);
+            job.result.scanCurrentLba = job.request.partitionSnapshot.startLba +
+                job.result.scanFirstNonzeroRelativeLba;
+            job.result.scanRelativeLba = job.result.scanFirstNonzeroRelativeLba;
+            const uint64_t totalBytes = total *
+                static_cast<uint64_t>(sectorSize);
+            job.result.scanProgressPercent = totalBytes == 0 ? 0u :
+                static_cast<uint8_t>((job.result.scanBytesRead * 100u) /
+                                     totalBytes);
+            job.result.existingState = FAT32_EXISTING_AMBIGUOUS_DATA;
+            set_diagnostic(job.result,
+                "Blank scan found non-zero data; no formatter writes were made.");
+            finish_scan_metrics(job.result, job.scanStartTicks);
+            job.stepActive = false;
+            finish_job_failure(job, FAT32_FORMAT_AMBIGUOUS_EXISTING_DATA);
+            return job.state;
+        }
+        if (job.cancelRequested) {
+            finish_scan_metrics(job.result, job.scanStartTicks);
+            job.stepActive = false;
+            cancel_job_now(job);
+            return job.state;
+        }
+        job.scanRelativeLba += count;
+        job.result.scanZeroVerifiedSectors += count;
+        job.result.scanRelativeLba = job.scanRelativeLba;
+        job.result.scanCurrentLba = job.request.partitionSnapshot.startLba +
+            job.scanRelativeLba;
+        const uint64_t totalBytes = total * static_cast<uint64_t>(sectorSize);
+        job.result.scanProgressPercent = totalBytes == 0 ? 100u :
+            static_cast<uint8_t>((job.result.scanBytesRead * 100u) / totalBytes);
+        job.stepActive = false;
+        if (job.scanRelativeLba == total) {
+            job.result.scanCoverageComplete = true;
+            job.result.scanProgressPercent = 100u;
+            job.result.existingState = FAT32_EXISTING_CLEAN;
+            finish_scan_metrics(job.result, job.scanStartTicks);
+            s_jobBlankToken.valid = true;
+            s_jobBlankToken.target = job.request.targetSnapshot;
+            s_jobBlankToken.partition = job.request.partitionSnapshot;
+            s_jobBlankToken.geometry = job.geometry;
+            s_jobBlankToken.operationGeneration = job.lease.ownerToken;
+            s_jobBlankToken.sectorsVerified = job.result.scanZeroVerifiedSectors;
+            job.state = FAT32_FORMAT_JOB_READY_TO_COMMIT;
+        }
+        return job.state;
+    }
+
+    if (job.state != FAT32_FORMAT_JOB_READY_TO_COMMIT) return job.state;
+    if (job.cancelRequested) {
+        cancel_job_now(job);
+        return job.state;
+    }
+    if (!s_jobBlankToken.valid ||
+        !storage_operation_lease_is_current(job.lease) ||
+        revalidate_target_identity(job.request.targetSnapshot) != TARGET_VALID) {
+        finish_job_failure(job, FAT32_FORMAT_IDENTITY_CHANGED);
+        return job.state;
+    }
+    job.commitStarted = true;
+    const BlankVerificationToken token = s_jobBlankToken;
+    s_jobBlankToken.valid = false;
+    const Fat32FormatStatus status = execute_locked(job.request, job.result,
+        job.lease, &token);
+    if (job.lease.ownerToken != 0 && !job.result.writeAttempted &&
+        job.result.stage != FAT32_FORMAT_STAGE_COMPLETED &&
+        job.result.stage != FAT32_FORMAT_STAGE_STATE_UNCERTAIN)
+        release_storage_operation(job.lease);
+    if (status != FAT32_FORMAT_READY && status != FAT32_FORMAT_SUCCESS &&
+        job.result.stage != FAT32_FORMAT_STAGE_STATE_UNCERTAIN) {
+        job.result.status = status;
+        if (job.result.stage != FAT32_FORMAT_STAGE_FAILED)
+            mark_stage_failed(job.result);
+        if (status != FAT32_FORMAT_AMBIGUOUS_EXISTING_DATA ||
+            job.result.diagnostic[0] == '\0')
+            set_diagnostic(job.result, fat32_format_status_name(status));
+    }
+    job.state = status == FAT32_FORMAT_SUCCESS
+        ? FAT32_FORMAT_JOB_COMPLETED : FAT32_FORMAT_JOB_FAILED;
+    return job.state;
+}
+
+bool cancel_fat32_format_job(Fat32FormatJob& job)
+{
+    return cancel_job_now(job);
+}
+
+const char* fat32_format_job_state_name(Fat32FormatJobState state)
+{
+    switch (state) {
+        case FAT32_FORMAT_JOB_IDLE: return "Idle";
+        case FAT32_FORMAT_JOB_SCANNING: return "Checking blank media";
+        case FAT32_FORMAT_JOB_READY_TO_COMMIT: return "Creating FAT32 metadata";
+        case FAT32_FORMAT_JOB_COMPLETED: return "Completed";
+        case FAT32_FORMAT_JOB_FAILED: return "Failed";
+        case FAT32_FORMAT_JOB_CANCELED: return "Canceled";
+        default: return "Unknown";
+    }
+}
+
 uint32_t fat32_scan_batch_sectors(uint32_t logicalSectorSize,
                                   uint32_t maxTransferBytes)
 {
@@ -2849,6 +3129,7 @@ const char* fat32_format_status_name(Fat32FormatStatus status)
     switch (status) {
         case FAT32_FORMAT_READY: return "Ready to format FAT32";
         case FAT32_FORMAT_SUCCESS: return "FAT32 formatted and verified";
+        case FAT32_FORMAT_CANCELED: return "Formatting canceled before metadata publication";
         case FAT32_FORMAT_OPERATION_BUSY: return "Another storage operation is active";
         case FAT32_FORMAT_INVALID_REQUEST: return "The format request is invalid";
         case FAT32_FORMAT_DEVICE_MISSING: return "The disk is no longer present";

@@ -1179,6 +1179,7 @@ public:
 
     virtual bool init() override;
     virtual void shutdown() override;
+    virtual void update() override;
     virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override;
 
     virtual void onMouseDown(int x, int y, uint8_t button) override;
@@ -1343,6 +1344,7 @@ private:
     storage::GptRepairResult m_gptRepairResult;
     storage::Fat32FormatRequest m_formatRequest;
     storage::Fat32FormatResult m_formatResult;
+    storage::Fat32FormatJob m_formatJob;
     uint8_t m_lastStorageOperation;
     bool m_mountDialogOpen;
     uint8_t m_mountDialogDeviceIndex;
@@ -1401,6 +1403,7 @@ private:
     bool        updateCreateInputWidgets();
     void        beginFormatOptions();
     void        runFormatOperation();
+    void        completeFormatOperation();
     bool        updateFormatLabelWidget();
     void        closeInitializeDialog();
     void        beginMountDialog();

@@ -75,6 +75,7 @@ enum Fat32FormatStatus : uint8_t {
     FAT32_FORMAT_REFORMAT_TARGET_UNSUPPORTED,
     FAT32_FORMAT_REFORMAT_MARKER_FAILED,
     FAT32_FORMAT_REFORMAT_INCOMPLETE,
+    FAT32_FORMAT_CANCELED,
 };
 
 enum Fat32ReformatState : uint8_t {
@@ -238,6 +239,43 @@ struct Fat32FormatResult {
     uint32_t reformatWriteRequests;
     char diagnostic[160];
 };
+
+// Cooperative blank-media format job. The request and result are owned by the
+// job for its entire lifetime; one call to step() performs at most one bounded
+// scan transfer. The formatter retains the operation lease and device pin
+// between calls. Cancellation is accepted only before metadata publication.
+enum Fat32FormatJobState : uint8_t {
+    FAT32_FORMAT_JOB_IDLE = 0,
+    FAT32_FORMAT_JOB_SCANNING,
+    FAT32_FORMAT_JOB_READY_TO_COMMIT,
+    FAT32_FORMAT_JOB_COMPLETED,
+    FAT32_FORMAT_JOB_FAILED,
+    FAT32_FORMAT_JOB_CANCELED,
+};
+
+struct Fat32FormatJob {
+    Fat32FormatRequest request;
+    Fat32FormatResult result;
+    StorageOperationLease lease;
+    Fat32FormatGeometry geometry;
+    uint64_t scanRelativeLba;
+    uint64_t scanStartTicks;
+    uint32_t scanMaxSectors;
+    Fat32FormatJobState state;
+    bool cancelRequested;
+    bool commitStarted;
+    bool stepActive;
+};
+
+// begin() snapshots the immutable request, acquires the destructive-operation
+// lease and target pin, and performs bounded preflight reads. step() scans one
+// transfer or, on a later call, publishes metadata from completed KnownZero
+// evidence. No token is exposed by this API.
+Fat32FormatJobState begin_fat32_format_job(
+    Fat32FormatJob& job, const Fat32FormatRequest& request);
+Fat32FormatJobState step_fat32_format_job(Fat32FormatJob& job);
+bool cancel_fat32_format_job(Fat32FormatJob& job);
+const char* fat32_format_job_state_name(Fat32FormatJobState state);
 
 // Deterministic calculator and label normalizer are also used by tests and
 // future storage clients; neither function performs device I/O.

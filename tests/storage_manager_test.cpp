@@ -97,6 +97,8 @@ struct FakeDisk {
     bool removed;
     bool attemptMountDuringScanRead;
     vfs::PartitionMountError mountAttemptError;
+    storage::Fat32FormatJob* cancelFormatJobOnRead;
+    uint64_t cancelFormatJobOnReadLba;
 
     FakeDisk(uint32_t size, uint64_t count, bool allocate = true)
         : sectorSize(size), sectorCount(count), driverId(0), sparse(!allocate),
@@ -121,7 +123,8 @@ struct FakeDisk {
           reads(0), writes(0), writeAttempts(0), flushes(0),
           registryIndex(0xFF), registrationId(0), removeOnVerifyRead(false), removeOnFlush(false), removeOnFlushAt(0),
           removed(false), attemptMountDuringScanRead(false),
-          mountAttemptError(vfs::PARTITION_MOUNT_INVALID_ARGUMENT) {}
+          mountAttemptError(vfs::PARTITION_MOUNT_INVALID_ARGUMENT),
+          cancelFormatJobOnRead(nullptr), cancelFormatJobOnReadLba(UINT64_MAX) {}
 };
 
 FakeDisk* g_fakeDisks[256] = {};
@@ -230,6 +233,12 @@ block::Status fake_read(uint8_t driverId, uint64_t lba, uint32_t count, void* bu
                 std::memcpy(output + static_cast<size_t>(i) * disk->sectorSize,
                             found->second.data(), disk->sectorSize);
         }
+        if (disk->cancelFormatJobOnRead &&
+            lba == disk->cancelFormatJobOnReadLba) {
+            storage::Fat32FormatJob* job = disk->cancelFormatJobOnRead;
+            disk->cancelFormatJobOnRead = nullptr;
+            (void)storage::cancel_fat32_format_job(*job);
+        }
         return block::BLOCK_OK;
     }
     const size_t offset = static_cast<size_t>(lba * disk->sectorSize);
@@ -245,6 +254,12 @@ block::Status fake_read(uint8_t driverId, uint64_t lba, uint32_t count, void* bu
         disk->bytes[446u + 9u] = static_cast<uint8_t>(start >> 8);
         disk->bytes[446u + 10u] = static_cast<uint8_t>(start >> 16);
         disk->bytes[446u + 11u] = static_cast<uint8_t>(start >> 24);
+    }
+    if (disk->cancelFormatJobOnRead &&
+        lba == disk->cancelFormatJobOnReadLba) {
+        storage::Fat32FormatJob* job = disk->cancelFormatJobOnRead;
+        disk->cancelFormatJobOnRead = nullptr;
+        (void)storage::cancel_fat32_format_job(*job);
     }
     return block::BLOCK_OK;
 }
@@ -8338,6 +8353,253 @@ int main()
               storage::normalize_fat32_volume_label("bad/name", normalized) ==
                   storage::FAT32_FORMAT_LABEL_INVALID,
               "FAT labels normalize case, allow blank and 11 characters, and reject separators");
+    }
+
+    {
+        const uint32_t partitionSectors = 70000u;
+        const uint32_t maxReadBytes = 128u * 1024u;
+        FakeDisk cooperative(512, 90000);
+        set_mbr_signature(cooperative);
+        set_mbr_partition(cooperative, 0, 0, 0x0C, 2048,
+                          partitionSectors);
+        const uint8_t cooperativeIndex = register_fake(cooperative, true,
+            true, true, false, 0, maxReadBytes);
+        storage::PartitionTableModel cooperativeTable = {};
+        storage::PartitionEntry cooperativePartition = {};
+        const bool cooperativeParsed = parse_first_partition(cooperativeIndex,
+            cooperativeTable, cooperativePartition);
+        storage::Fat32FormatRequest cooperativeRequest = make_format_request(
+            cooperativeIndex, cooperativePartition, "JOB", 0xD33F0001u);
+
+        storage::Fat32FormatJob beforeFirstIo = {};
+        const storage::Fat32FormatJobState beforeFirstState =
+            storage::begin_fat32_format_job(beforeFirstIo, cooperativeRequest);
+        const uint32_t scanReadsBeforeCancel =
+            beforeFirstIo.result.scanReadRequests;
+        const bool canceledBeforeFirstIo = storage::cancel_fat32_format_job(
+            beforeFirstIo);
+        check(cooperativeParsed && beforeFirstState ==
+                  storage::FAT32_FORMAT_JOB_SCANNING && canceledBeforeFirstIo &&
+              scanReadsBeforeCancel == 0 &&
+              beforeFirstIo.state == storage::FAT32_FORMAT_JOB_CANCELED &&
+              !beforeFirstIo.result.scanCoverageComplete &&
+              cooperative.writeAttempts == 0 && cooperative.flushes == 0 &&
+              !storage::storage_operation_active(),
+              "cooperative blank format cancels before scan I/O without writes, Flush, or a retained lease");
+
+        storage::Fat32FormatJob midScan = {};
+        storage::Fat32FormatRequest mutableSelection = cooperativeRequest;
+        const storage::Fat32FormatJobState midState =
+            storage::begin_fat32_format_job(midScan, mutableSelection);
+        const storage::TargetIdentity boundTarget = midScan.request.targetSnapshot;
+        mutableSelection.targetSnapshot.globalIndex = 0xFE;
+        mutableSelection.partitionSnapshot.startLba += 1u;
+        const storage::Fat32FormatJobState oneStep =
+            storage::step_fat32_format_job(midScan);
+        const uint64_t midProgress = midScan.result.scanBytesRead;
+        const storage::Fat32FormatJobState duplicateBegin =
+            storage::begin_fat32_format_job(midScan, mutableSelection);
+        const bool midCanceled = storage::cancel_fat32_format_job(midScan);
+        check(midState == storage::FAT32_FORMAT_JOB_SCANNING &&
+              oneStep == storage::FAT32_FORMAT_JOB_SCANNING &&
+              duplicateBegin == storage::FAT32_FORMAT_JOB_SCANNING &&
+              midProgress > 0 &&
+              midScan.request.targetSnapshot.registrationId ==
+                  boundTarget.registrationId &&
+              midScan.request.partitionSnapshot.startLba ==
+                  cooperativePartition.startLba && midCanceled &&
+              midScan.result.status == storage::FAT32_FORMAT_CANCELED &&
+              !midScan.result.scanCoverageComplete &&
+              cooperative.writeAttempts == 0 && cooperative.flushes == 0 &&
+              !storage::storage_operation_active(),
+              "cooperative scan holds immutable target binding and cancels at a bounded I/O boundary");
+
+        storage::Fat32FormatJob beforeCommit = {};
+        storage::begin_fat32_format_job(beforeCommit, cooperativeRequest);
+        while (beforeCommit.state == storage::FAT32_FORMAT_JOB_SCANNING)
+            storage::step_fat32_format_job(beforeCommit);
+        const bool reachedCommitBoundary = beforeCommit.state ==
+            storage::FAT32_FORMAT_JOB_READY_TO_COMMIT &&
+            beforeCommit.result.scanCoverageComplete &&
+            beforeCommit.result.scanZeroVerifiedSectors == partitionSectors &&
+            beforeCommit.result.scanProgressPercent == 100u;
+        storage::Fat32FormatJob competingJob = {};
+        const storage::Fat32FormatJobState competingState =
+            storage::begin_fat32_format_job(competingJob, cooperativeRequest);
+        const bool boundaryCanceled =
+            storage::cancel_fat32_format_job(beforeCommit);
+        check(reachedCommitBoundary && boundaryCanceled &&
+              competingState == storage::FAT32_FORMAT_JOB_FAILED &&
+              competingJob.result.status == storage::FAT32_FORMAT_OPERATION_BUSY &&
+              beforeCommit.state == storage::FAT32_FORMAT_JOB_CANCELED &&
+              cooperative.writeAttempts == 0 && cooperative.flushes == 0 &&
+              !storage::storage_operation_active(),
+              "cancellation after the final blank read wins before metadata commit and discards KnownZero evidence");
+
+        uint8_t* nonzero = sector(cooperative,
+            cooperativePartition.startLba + maxReadBytes / 512u);
+        nonzero[37] = 0xA5;
+        storage::Fat32FormatJob nonblankJob = {};
+        storage::begin_fat32_format_job(nonblankJob, cooperativeRequest);
+        while (nonblankJob.state == storage::FAT32_FORMAT_JOB_SCANNING)
+            storage::step_fat32_format_job(nonblankJob);
+        const bool stoppedAtNonzero = nonblankJob.state ==
+                storage::FAT32_FORMAT_JOB_FAILED &&
+            nonblankJob.result.status ==
+                storage::FAT32_FORMAT_AMBIGUOUS_EXISTING_DATA &&
+            nonblankJob.result.scanFirstNonzeroRelativeLba ==
+                maxReadBytes / 512u && !nonblankJob.result.scanCoverageComplete &&
+            cooperative.writeAttempts == 0 && cooperative.flushes == 0;
+        nonzero[37] = 0;
+        check(stoppedAtNonzero,
+              "cooperative blank scan stops at the first nonzero transfer without a formatter write or Flush");
+
+        storage::Fat32FormatJob retryJob = {};
+        storage::begin_fat32_format_job(retryJob, cooperativeRequest);
+        uint64_t previousBytes = 0;
+        uint8_t previousPercent = 0;
+        uint32_t progressUpdates = 0;
+        bool monotonic = true;
+        while (retryJob.state == storage::FAT32_FORMAT_JOB_SCANNING) {
+            storage::step_fat32_format_job(retryJob);
+            monotonic = monotonic &&
+                retryJob.result.scanBytesRead >= previousBytes &&
+                retryJob.result.scanProgressPercent >= previousPercent &&
+                retryJob.result.scanProgressPercent <= 100u;
+            if (retryJob.result.scanBytesRead != previousBytes) ++progressUpdates;
+            previousBytes = retryJob.result.scanBytesRead;
+            previousPercent = retryJob.result.scanProgressPercent;
+        }
+        const uint64_t expectedScanBytes =
+            static_cast<uint64_t>(partitionSectors) * 512u;
+        const bool exactCoverage = retryJob.state ==
+                storage::FAT32_FORMAT_JOB_READY_TO_COMMIT &&
+            retryJob.result.scanCoverageComplete &&
+            retryJob.result.scanBytesRead == expectedScanBytes &&
+            retryJob.result.scanZeroVerifiedSectors == partitionSectors &&
+            retryJob.result.scanProgressPercent == 100u &&
+            retryJob.result.scanLargestRequestBytes <=
+                storage::FAT32_FORMAT_SCAN_BUFFER_MAX_BYTES;
+        while (retryJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT)
+            storage::step_fat32_format_job(retryJob);
+        check(monotonic && exactCoverage && progressUpdates > 1 &&
+              retryJob.state == storage::FAT32_FORMAT_JOB_COMPLETED &&
+              retryJob.result.status == storage::FAT32_FORMAT_SUCCESS &&
+              retryJob.result.verificationPassed &&
+              retryJob.request.targetSnapshot.registrationId ==
+                  cooperativeRequest.targetSnapshot.registrationId,
+              "retry after cancellation completes with monotonic exact progress and verified formatter publication");
+        check(sizeof(storage::Fat32FormatJob) < 2048u,
+              "cooperative format job state remains below the 2 KiB bound");
+        unregister_fake(cooperativeIndex, cooperative);
+    }
+
+    {
+        FakeDisk fourKn(4096, 71000, false);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        uint8_t index = 0xFF;
+        const bool parsed = setup_4kn_mbr_fixture(fourKn, index, table,
+                                                   partition);
+        storage::Fat32FormatRequest request = make_format_request(index,
+            partition, "FOURKN", 0xD33F0002u);
+        storage::Fat32FormatJob job = {};
+        const storage::Fat32FormatJobState begin =
+            storage::begin_fat32_format_job(job, request);
+        uint64_t previous = 0;
+        bool monotonic = true;
+        while (job.state == storage::FAT32_FORMAT_JOB_SCANNING) {
+            storage::step_fat32_format_job(job);
+            monotonic = monotonic && job.result.scanBytesRead >= previous;
+            previous = job.result.scanBytesRead;
+        }
+        const uint64_t expected =
+            static_cast<uint64_t>(partition.sectorCount) * 4096u;
+        const bool complete = parsed && begin ==
+                storage::FAT32_FORMAT_JOB_SCANNING && monotonic &&
+            job.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT &&
+            job.result.scanCoverageComplete &&
+            job.result.scanBytesRead == expected &&
+            job.result.scanZeroVerifiedSectors == partition.sectorCount &&
+            job.result.scanProgressPercent == 100u &&
+            job.result.scanLargestRequestBytes <=
+                storage::FAT32_FORMAT_SCAN_BUFFER_MAX_BYTES &&
+            storage::cancel_fat32_format_job(job) &&
+            fourKn.writeAttempts == 0 && fourKn.flushes == 0;
+        check(complete,
+              "4Kn cooperative scan preserves full exact byte coverage and cancellation boundary");
+        unregister_fake(index, fourKn);
+    }
+
+    {
+        const uint32_t partitionSectors = 70000u;
+        const uint32_t maxReadBytes = 128u * 1024u;
+        const uint32_t maxReadSectors = maxReadBytes / 512u;
+        FakeDisk completionRace(512, 90000);
+        set_mbr_signature(completionRace);
+        set_mbr_partition(completionRace, 0, 0, 0x0C, 2048,
+                          partitionSectors);
+        const uint8_t index = register_fake(completionRace, true, true, true,
+            false, 0, maxReadBytes);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        const bool parsed = parse_first_partition(index, table, partition);
+        storage::Fat32FormatRequest request = make_format_request(index,
+            partition, "RACE", 0xD33F0004u);
+        storage::Fat32FormatJob job = {};
+        storage::begin_fat32_format_job(job, request);
+        const uint64_t finalRelative =
+            ((partitionSectors - 1u) / maxReadSectors) * maxReadSectors;
+        completionRace.cancelFormatJobOnRead = &job;
+        completionRace.cancelFormatJobOnReadLba =
+            partition.startLba + finalRelative;
+        while (job.state == storage::FAT32_FORMAT_JOB_SCANNING)
+            storage::step_fat32_format_job(job);
+        check(parsed && job.state == storage::FAT32_FORMAT_JOB_CANCELED &&
+              job.result.status == storage::FAT32_FORMAT_CANCELED &&
+              !job.result.scanCoverageComplete &&
+              !job.result.verificationPassed && completionRace.writeAttempts == 0 &&
+              completionRace.flushes == 0 &&
+              !storage::storage_operation_active(),
+              "cancel requested during the final scan transfer wins before KnownZero publication and formatter commit");
+        unregister_fake(index, completionRace);
+    }
+
+    {
+        const uint32_t maxReadBytes = 128u * 1024u;
+        const uint32_t maxReadSectors = maxReadBytes / 512u;
+        FakeDisk removed(512, 90000);
+        FakeDisk replacement(512, 90000, false);
+        set_mbr_signature(removed);
+        set_mbr_partition(removed, 0, 0, 0x0C, 2048, 70000u);
+        const uint8_t index = register_fake(removed, true, true, true,
+            false, 0, maxReadBytes);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        const bool parsed = parse_first_partition(index, table, partition);
+        storage::Fat32FormatRequest request = make_format_request(index,
+            partition, "REMOVE", 0xD33F0003u);
+        removed.removeOnScanReadLba = partition.startLba + maxReadSectors;
+        removed.removeOnScanReadMinCount = maxReadSectors;
+        removed.replacementDuringScan = &replacement;
+        storage::Fat32FormatJob job = {};
+        storage::begin_fat32_format_job(job, request);
+        while (job.state == storage::FAT32_FORMAT_JOB_SCANNING)
+            storage::step_fat32_format_job(job);
+        const bool safeRemoval = parsed && job.state ==
+                storage::FAT32_FORMAT_JOB_FAILED &&
+            job.result.status == storage::FAT32_FORMAT_READ_UNAVAILABLE &&
+            removed.removed && removed.replacementRegisteredDuringScan &&
+            replacement.reads == 0 && !job.result.scanCoverageComplete &&
+            removed.writeAttempts == 0 && removed.flushes == 0 &&
+            !storage::storage_operation_active();
+        check(safeRemoval,
+              "cooperative device removal releases its pin and never scans or writes replacement media");
+        if (removed.replacementIndex != 0xFF)
+            (void)unregister_fake(removed.replacementIndex, replacement);
+        else
+            g_fakeDisks[replacement.driverId] = nullptr;
+        g_fakeDisks[removed.driverId] = nullptr;
     }
 
     {
