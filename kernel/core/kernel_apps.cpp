@@ -7138,6 +7138,11 @@ void DiskManagerApp::updateInitializeControls() {
             ? 0xFF34465C : 0xFF505060;
         if (confirm) confirm->bgColor = m_gptRepairButtonFocus == 1
             ? 0xFF34465C : 0xFF505060;
+    } else if (formatOptions) {
+        if (confirm) confirm->bgColor = m_createInputFocus == 3
+            ? 0xFF34465C : 0xFF505060;
+        if (cancel) cancel->bgColor = m_createInputFocus == 2
+            ? 0xFF34465C : 0xFF505060;
     } else {
         if (confirm) confirm->bgColor = 0xFF505060;
         if (cancel) cancel->bgColor = 0xFF505060;
@@ -7363,7 +7368,9 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             invalidate();
         } else if (m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS &&
                    tab) {
-            if (m_dialogIsFormat) m_createInputFocus = 1;
+            if (m_dialogIsFormat)
+                m_createInputFocus = m_createInputFocus >= 3
+                    ? 1 : static_cast<uint8_t>(m_createInputFocus + 1);
             else if (m_selectedDisk >= 0 && m_selectedDisk < m_diskCount &&
                 m_disks[m_selectedDisk].scheme == storage::PARTITION_SCHEME_GPT)
                 m_createInputFocus = static_cast<uint8_t>(m_createInputFocus == 0 ? 1 : 0);
@@ -7371,7 +7378,8 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             updateInitializeControls();
             invalidate();
         } else if (m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS &&
-                   (key == 8 || key == shell::KEY_DELETE)) {
+                   (key == 8 || key == shell::KEY_DELETE) &&
+                   (!m_dialogIsFormat || m_createInputFocus == 1)) {
             const bool sizeField = !m_dialogIsFormat && m_createInputFocus == 0;
             char* target = sizeField ? m_createSizeText : m_createNameText;
             const size_t capacity = sizeField
@@ -7406,9 +7414,14 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
         } else if (enter && m_initializeDialogState ==
                    INITIALIZE_DIALOG_DELETE_CONFIRM) {
             runDeletePartitionOperation();
-        } else if (key == 13 && m_initializeDialogState ==
+        } else if (enter && m_initializeDialogState ==
                    INITIALIZE_DIALOG_CREATE_OPTIONS) {
-            if (m_dialogIsFormat) runFormatOperation();
+            if (m_dialogIsFormat) {
+                if (m_createInputFocus == 2)
+                    onWidgetClick(m_cancelInitializeBtnId);
+                else if (m_createInputFocus == 3)
+                    onWidgetClick(m_confirmInitializeBtnId);
+            }
             else runCreatePartitionOperation();
         } else if (enter && m_initializeDialogState == INITIALIZE_DIALOG_RESULT) {
             closeInitializeDialog();
@@ -7459,7 +7472,9 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
 
 void DiskManagerApp::onKeyChar(char c) {
     if (c == ' ' &&
-        ((m_dialogIsGptRepair && m_initializeDialogState ==
+        ((m_dialogIsFormat && m_initializeDialogState ==
+            INITIALIZE_DIALOG_CREATE_OPTIONS) ||
+         (m_dialogIsGptRepair && m_initializeDialogState ==
             INITIALIZE_DIALOG_GPT_REPAIR_CONFIRM) ||
          (m_initializeDialogState == INITIALIZE_DIALOG_CLOSED &&
           m_keyboardPane == KEYBOARD_ACTIONS))) {
@@ -7468,6 +7483,7 @@ void DiskManagerApp::onKeyChar(char c) {
     }
     if (m_mountDialogOpen || (!m_dialogIsCreate && !m_dialogIsFormat) || m_initializeDialogState !=
             INITIALIZE_DIALOG_CREATE_OPTIONS || c < 0x20 || c > 0x7E) return;
+    if (m_dialogIsFormat && m_createInputFocus != 1) return;
     const bool sizeField = !m_dialogIsFormat && m_createInputFocus == 0;
     char* target = sizeField ? m_createSizeText : m_createNameText;
     const size_t capacity = sizeField
