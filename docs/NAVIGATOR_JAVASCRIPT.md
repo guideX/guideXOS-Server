@@ -6657,3 +6657,214 @@ unsupported. The direct relative evaluator has no callback/reentrant entry
 point in this phase, so completing this item requires a native test seam that
 can execute evaluator calls at event-handler boundaries without exposing a
 JavaScript API or changing production behavior.
+
+### JS62R4 Event and reentrancy qualification (2026-10-05)
+
+JS62R4 adds a diagnostics-only native probe around each existing Event
+listener invocation. The probe is compiled only when
+`GXOS_RELATIVE_SELECTOR_DIAGNOSTICS` is defined; its callback type, adapter
+fields, and invocation sites are absent from production builds. It exposes no
+JavaScript function or selector syntax. Before and after each listener, the
+native test invokes the private relative evaluator using caller-owned
+counters and inspects the active runtime Event object.
+
+The dispatch audit found that `dispatchEvent` keeps its propagation path,
+listener snapshots, invocation arguments, saved adapter dispatch flag, and
+related-target reference in dispatch-local storage. The event target is a
+generation-checked reference retained for that dispatch; currentTarget and
+eventPhase are updated at the relevant propagation stage. The shared Event
+object is selected from a per-depth cache. `RuntimeContext` stores dispatch
+phase, propagation flags, cancellation state, cancelability, and the prior
+Event object in its fixed 16-entry EventDispatchState stack. Nested dispatch
+restores that state on return. Listener function/environment state belongs to
+the synchronous runtime call stack and bounded runtime environment store.
+The adapter's `clickDispatchActive_` is one per-adapter flag, but each dispatch
+saves and restores its previous value.
+
+The relative evaluator has no static or global mutable traversal scratch,
+anchor, relation, selector, cursor, or statistics pointer. Its traversal
+temporaries and optional counter pointer are call-local. Diagnostic counters
+remain caller-owned, independently resettable 64-byte structs; the
+diagnostics-disabled call returns the same result. No traversal algorithm,
+production Event structure, or persistent production storage changed.
+
+The focused test performs 100 outer click dispatches. Each outer listener
+prevents default, dispatches a nested click, and that listener dispatches a
+third click (two levels of nesting). The test probe executes Descendant,
+Child, AdjacentSibling, and GeneralSibling calls, then uses a different `#id`
+core and `:empty` core in the same probe. It also evaluates with event.target
+and event.currentTarget as anchors when their canonical Element handles are
+available, compares a no-counter call, and rejects stale-generation and
+invalid-serial anchors. Event wrapper fields are identity-observed before and
+after each set of calls. The test separately checks the outer and inner
+JavaScript Event objects after nested dispatch, resets only the inner
+counter set at each inner target listener, and verifies that outer totals do
+not change during those resets.
+
+The JS62R4 lane passes **113/113** checks. It recorded 1,804 before/after
+listener probes (400 outer-target, 600 inner-target, 800 depth-two-target
+probes, plus four focus-event probes), with zero Event metadata changes and
+zero result mismatches. Capture, target, and bubble phases were all observed.
+One hundred nested dispatch cycles completed. Focusout/focusin relatedTarget
+identity remained unchanged while relative calls ran. The counter isolation
+and deliberate reset checks passed; selector core and selector storage
+snapshots remained byte-identical. Invalid anchors and diagnostics-disabled
+behavior left Event dispatch unaffected.
+
+JS62R4 does not change the bounded traversal. The JS62R3 focused lane reruns
+the near-capacity performance checks and preserves the JS62R2 values: for
+both late-true and false Descendant evaluation, 4,102 structural inspections,
+1,027 parent hops, 2,051 serial/index resolutions, and 1,021 selector
+evaluations. The 64-anchor simulation remains 581,942 inspections. No
+performance regression called for optimization.
+
+The Event probe adds zero production bytes. The previously qualified
+production sizes remain: shared selector core 32 bytes, simple selector
+descriptor 68, four-member descriptor 812, collection record 832, 128-entry
+collection registry 106,496, `HtmlElementRef` 440, content metadata record
+24. JS62R2 counters remain 64 bytes per native test caller. No additional
+production stack or local state was introduced; callback data and counters
+are test-local.
+
+Public `:has()` forms and standalone leading combinators remain unsupported.
+The JS62R3 hosted fixture and native regression continue to assert those
+rejections. No public relative-selector grammar, `Has` pseudo kind, heap
+scratch, or persistent result cache was added.
+
+#### JS62R4 phase completion audit
+
+The exact historical JavaScript matrix passed **60/60** (lexer, parser,
+runtime, and JS6–JS62). The focused JS36–JS62R3 regressions passed **30/30**;
+the JS62R4 focused event/reentrancy lane passed **113/113**. JS62R3's
+near-capacity and 64-anchor measurements matched their recorded JS62R2/R3
+baselines. `build.bat` passed, as did the JS62R4 strict warning-as-error
+parser/adapter/runtime lane.
+
+The hosted aggregate reported **614 passed / 7 failed / 621 total**. The seven
+failures were precisely the existing CSS 3C, CSS 3G, CSS 6A, three CSS 6B,
+and CSS 6C checks. The kernel wrapper stopped on the established undefined
+PacMan symbols `pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)`. Direct
+`mingw32-make ARCH=amd64 EXTRA_CFLAGS=` from `kernel/` stopped at the existing
+Mbed TLS configuration errors in `mbedtls_check_config.h:51` and `:64`.
+No fresh kernel was produced, so **QEMU proof is not claimed**.
+
+The pre-build ignored/generated snapshot contained **1,337 files / 88,371,771
+bytes**. After the build and hosted smoke, it contains 1,343 files / 88,850,994
+bytes: zero missing, one changed (`guideXOSServer.exe`), and six new hosted
+smoke logs. The three PacMan object files modified by the kernel wrapper were
+restored to their original tracked contents. The initial executable's SHA-256
+was recorded, but its bytes were not backed up; no matching copy exists in
+the workspace, so its original hash could not be restored. The shell policy
+rejected removal of the six generated smoke logs. No generated file is staged
+or committed, but the requested final artifact comparison is not clean.
+
+The worktree started clean on `NAVIGATOR_JAVASCRIPT_SUPPORT` at
+`ce6287ffb5e02d726ddc060af108214f4b8762ae` (`navigator: extend JS62
+behavioral qualification`), tracking `origin/NAVIGATOR_JAVASCRIPT_SUPPORT`
+at 1 ahead / 0 behind. No branch operation or push occurred. No commit was
+created because the phase did not achieve a clean artifact audit.
+
+**Outcome C: NOT YET SAFE TO PROCEED TO JS63.** Event, reentrancy, counter,
+and selector-purity evidence passed. The remaining blocker is the failed
+generated-artifact restoration audit: the previous ignored executable bytes
+were unavailable, and the six run-generated logs remain present after shell
+policy rejected their removal. Re-run the snapshot with restorable file
+backups, then restore/clean those exact generated outputs before claiming
+phase completion.
+
+#### JS62R4M artifact provenance and deterministic closeout (2026-10-05)
+
+This closeout supersedes the earlier artifact-audit statement above about the
+six hosted smoke logs: all six exact logs were later removed and each path was
+verified absent. Their total size was **479,223 bytes** (460,137 + 0 + 14,943
++ 0 + 4,143 + 0). The recorded inventories differ by exactly that amount:
+88,850,994 - 88,371,771 = 479,223. The immediate comparison therefore
+reported one changed file, zero missing files, and six extras; the executable
+had no length delta at that comparison point. Its inferred historical length
+is **8,398,274 bytes**.
+
+The original per-file snapshot was recovered at
+`C:\Users\guideX\AppData\Local\Temp\js62r2-artifact-baseline.csv`. It has
+1,337 rows / 88,371,771 bytes and records `guideXOSServer.exe` as 8,398,274
+bytes with SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`. The
+matching byte backup is
+`C:\Users\guideX\AppData\Local\Temp\js62r2-artifact-backup\guideXOSServer.exe`.
+Both its length and SHA-256 matched the CSV row before restoration. This is
+the historical hash record; the earlier JS62R4C conclusion that the value
+was unavailable is superseded.
+
+The later timestamped Mbed TLS dependency file was
+`kernel/build/amd64/obj/third_party/mbedtls/library/mbedtls_config.d`, a
+4,361-byte generated dependency file with SHA-256
+`F6A5E53C027870BD1711204D59619571E182109E5F65D918631764E7AD781C4F`, last
+observed written 2026-10-05 06:16:55 -07:00 after the later
+`mingw32-make ARCH=amd64 EXTRA_CFLAGS=` run in `kernel/`. The kernel Makefile
+uses `-MMD -MP` for these generated dependency files. The recovered baseline
+CSV and backup show this exact path and content were already part of the
+original snapshot; its SHA-256 was unchanged. The file was temporarily removed
+while classifying it, then restored from the matching snapshot backup. Its
+restored write time is 2026-10-04 17:22:29 -07:00. It was a timestamp refresh,
+not an extra. No Mbed TLS source, submodule metadata, or directory was removed.
+
+Two separate, clean ordinary recovery copies were built from branch
+`NAVIGATOR_JAVASCRIPT_SUPPORT`, exact HEAD
+`ce6287ffb5e02d726ddc060af108214f4b8762ae` (`navigator: extend JS62
+behavioral qualification`):
+
+| Copy | Path | `build.bat` result | Length | SHA-256 |
+| --- | --- | --- | ---: | --- |
+| A | `D:\JS62R4-A` | success | 8,398,274 | `D0E356151E7C9F15740DB7C4E44DF352D9894080832A2811F2C11D0E0FC0AEAF` |
+| B | `D:\JS62R4-B` | success | 8,398,274 | `1DAB1DB926317D4D80EC3434AE5F00AAB0D8596952E20484EA2BF8C677175EC9` |
+
+Both copies used `C:\mingw64\bin\g++.exe` (MinGW-W64 x86_64, GCC 15.2.0),
+the same production `build.bat` command and flags, the locked Mbed TLS 4.1.0
+commit `0fe989b6b514192783c469039edd325fd0989806`, TF-PSA-Crypto 1.1.0
+commit `29160dd877d29658279fd683b2ae57b320ddcf09`, the three repository patch
+series, and stb_image v2.30 SHA-256
+`1F8C1B6B408F26E3B20CBFBBD4758AFB3DC9B837FF1E17C258928F406148A87C`. Each
+dependency profile verification passed. The recovery outputs were not copied
+to the main executable.
+
+The two executable lengths matched the historical length, but the hashes did
+not match each other. A byte comparison found four changed bytes:
+PE timestamp bytes at offsets 136–139 and the associated PE checksum at
+216–219. `objdump` reported linker timestamps 2026-10-05 21:05:04 and
+21:13:27 local time (503 seconds apart). No timestamp normalization or build
+system changes were made. This is direct evidence that the existing build is
+not byte-for-byte deterministic; neither recovery build matches the captured
+historical hash. The deterministic fallback was therefore not used. The
+exact hash-matching historical backup was restored to the main executable and
+verified at 8,398,274 bytes / SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`.
+
+After restoring the historical executable and the baseline Mbed TLS
+dependency file, a per-file comparison against the recovered CSV reports
+**1,337 files / 88,371,771 bytes; changed=0, missing=0, extra=0**. This
+comparison includes each row's path, length, and SHA-256, including the
+restored executable and `.d` dependency file.
+
+The focused `scripts/smoke-navigator-javascript-js62r4.ps1` rerun passed
+**113/113**, with the strict warning-as-error lane passing. Its report showed
+1,804 Event probes, zero relation failures, zero metadata failures, nested
+callback totals 400/600/800 at depth two, and isolated counters 3000/32/6200.
+The qualified counter isolation and selector immutability assertions remain
+green. Public `:has(.x)`, `:has(> .x)`, `:has(+ .x)`, `:has(~ .x)`, and
+standalone leading combinators remain unsupported. `git diff --check` passed.
+
+No branch switch, stash, reset, `git clean`, Git worktree, or push occurred.
+The main checkout remained on `NAVIGATOR_JAVASCRIPT_SUPPORT` at
+`ce6287ffb5e02d726ddc060af108214f4b8762ae` during recovery. Live upstream
+already contained that HEAD (0 ahead / 0 behind), although the earlier prompt
+expected 1 ahead / 0 behind. No qualified source was copied from recovery
+folders. No main production rebuild, kernel rerun, or QEMU run occurred.
+
+**Outcome A — SAFE TO PROCEED TO JS63.** The historical executable hash was
+recovered from the JS62R2 CSV and the exact backed-up bytes were restored. The
+full ignored-artifact comparison is clean, JS62R4's narrow source checks pass,
+and the original Mbed TLS dependency file is present with its baseline hash.
+The build reproducibility experiment did expose PE timestamp variation, but
+it is not needed to establish provenance now that the original hash and exact
+matching bytes are available. JS62R4 selector and Event qualification remains
+green; no selector or Event rework is indicated.

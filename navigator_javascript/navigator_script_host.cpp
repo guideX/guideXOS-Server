@@ -1903,12 +1903,24 @@ bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
     RuntimeErrorCode firstError = RuntimeErrorCode::None;
     const auto invoke = [&](RuntimeFunctionId function) {
         if (function == kInvalidRuntimeFunctionId) return;
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        if (relativeSelectorDispatchProbe_ != nullptr)
+            relativeSelectorDispatchProbe_(
+                relativeSelectorDispatchProbeContext_, *this, runtime,
+                event, true);
+#endif
         RuntimeErrorCode callbackError = RuntimeErrorCode::None;
         if (!runtime.invokeFunctionInSameRealm(Value::function(function),
             arguments, ignored, callbackError)) {
             succeeded = false;
             if (firstError == RuntimeErrorCode::None) firstError = callbackError;
         }
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        if (relativeSelectorDispatchProbe_ != nullptr)
+            relativeSelectorDispatchProbe_(
+                relativeSelectorDispatchProbeContext_, *this, runtime,
+                event, false);
+#endif
     };
     // The phase comes from the propagation stage, never from the listener's
     // capture flag. Target capture listeners are therefore AT_TARGET.

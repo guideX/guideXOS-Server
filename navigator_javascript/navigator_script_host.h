@@ -231,6 +231,19 @@ public:
     using DispatchCompleteCallback = void (*)(void* context);
     using ActivationDefaultActionCallback = bool (*)(void* context,
         HostInstanceId serial, NavigatorScriptActivationProvenance provenance);
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+    // Native qualification hook. It is absent from production builds and is
+    // called immediately around each listener invocation.
+    using RelativeSelectorDispatchProbe = void (*)(void* context,
+        NavigatorScriptHostAdapter& adapter, RuntimeContext& runtime,
+        const Value& event, bool beforeListener);
+    void setRelativeSelectorDispatchProbe(
+        RelativeSelectorDispatchProbe probe, void* context)
+    {
+        relativeSelectorDispatchProbe_ = probe;
+        relativeSelectorDispatchProbeContext_ = context;
+    }
+#endif
 
     explicit NavigatorScriptHostAdapter(HostGenerationId generation = 1u,
         NavigatorScriptHostLimits limits = NavigatorScriptHostLimits());
@@ -562,6 +575,10 @@ private:
     std::size_t clickListenerCount_ = 0;
     std::uint64_t nextListenerRegistrationSequence_ = 1u;
     bool clickDispatchActive_ = false;
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+    RelativeSelectorDispatchProbe relativeSelectorDispatchProbe_ = nullptr;
+    void* relativeSelectorDispatchProbeContext_ = nullptr;
+#endif
     std::size_t activationDepth_ = 0;
     std::size_t resetDepth_ = 0;
     FocusRequestCallback focusRequestCallback_ = nullptr;
