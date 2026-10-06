@@ -5650,6 +5650,31 @@ const char* get_wallpaper_id()
     return s_wallpaperConfig.wallpaperId ? s_wallpaperConfig.wallpaperId : s_builtInWallpapers[0].id;
 }
 
+bool set_desktop_theme_id(const char* themeId)
+{
+    DesktopThemeId parsedTheme = DesktopThemeId::Classic;
+    if (!TryParseDesktopThemeId(themeId, &parsedTheme)) {
+        // Match the existing persisted-config policy: unknown IDs resolve to Classic.
+        parsedTheme = DesktopThemeId::Classic;
+    }
+
+    BareMetalDisplayOptionsData store;
+    bare_metal_load_display_options(store);
+    desktop_str_copy(store.desktopThemeId, DesktopThemeIdToString(parsedTheme),
+                     (int)sizeof(store.desktopThemeId));
+    if (!bare_metal_save_display_options(store)) {
+        serial::puts("[desktop] theme apply failed reason=persistence\n");
+        return false;
+    }
+
+    serial::puts("[desktop] theme apply requested id=");
+    serial::puts(DesktopThemeIdToString(parsedTheme));
+    serial::putc('\n');
+    load_persisted_desktop_theme();
+    request_redraw();
+    return true;
+}
+
 void reload_persisted_wallpaper()
 {
     load_persisted_wallpaper_scale_mode();

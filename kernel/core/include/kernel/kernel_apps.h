@@ -257,6 +257,9 @@ private:
     int m_selectedGradientIndex;
     int m_appliedGradientIndex;
     int m_activeTab;
+    int m_focusedTabIndex;
+    int m_focusedThemeIndex;
+    int m_selectedThemeIndex;
     int m_windowW;
     int m_windowH;
     int m_backgroundGalleryScrollOffset;
@@ -279,9 +282,11 @@ private:
     uint64_t m_windowGeneration;
     uint64_t m_displayRequestId;
     bool m_displayRequestPending;
+    char m_themeStatus[96];
 
     void loadSelection();
     void setActiveTab(int tab);
+    void drawThemeTab(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
     int& activeGalleryScrollOffset();
     int activeGalleryItemCount() const;
     int activeSelectionIndex() const;

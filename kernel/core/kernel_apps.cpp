@@ -2410,9 +2410,10 @@ bool NotepadApp::updateMenuHover(int x, int y) {
 // ============================================================
 
 DisplayOptionsApp::DisplayOptionsApp()
-    : m_selectedIndex(0), m_appliedIndex(0), m_selectedBackgroundIndex(0), m_appliedBackgroundIndex(0), m_selectedGradientIndex(0), m_appliedGradientIndex(0), m_activeTab(0), m_windowW(720), m_windowH(460), m_backgroundGalleryScrollOffset(0), m_gradientGalleryScrollOffset(0), m_galleryScrollbarDragging(false), m_galleryScrollbarDragStartY(0), m_galleryScrollbarDragStartOffset(0), m_selectButtonId(-1), m_desktopIconVisibility{true, true, true, false}, m_selectedDisplayMode(gxos::display::DisplayConfigurationMode::Extend), m_appliedDisplayMode(gxos::display::DisplayConfigurationMode::Extend), m_selectedPrimaryOutput(0), m_appliedPrimaryOutput(0), m_activeDisplayConfiguration{}, m_requestedDisplayConfiguration{}, m_pendingTopologyChange{}, m_activeConfigurationGeneration(1), m_displayLocalEdits(false), m_displayStatus{}, m_windowGeneration(0), m_displayRequestId(0), m_displayRequestPending(false) {
+    : m_selectedIndex(0), m_appliedIndex(0), m_selectedBackgroundIndex(0), m_appliedBackgroundIndex(0), m_selectedGradientIndex(0), m_appliedGradientIndex(0), m_activeTab(0), m_focusedTabIndex(0), m_focusedThemeIndex(0), m_selectedThemeIndex(0), m_windowW(720), m_windowH(460), m_backgroundGalleryScrollOffset(0), m_gradientGalleryScrollOffset(0), m_galleryScrollbarDragging(false), m_galleryScrollbarDragStartY(0), m_galleryScrollbarDragStartOffset(0), m_selectButtonId(-1), m_desktopIconVisibility{true, true, true, false}, m_selectedDisplayMode(gxos::display::DisplayConfigurationMode::Extend), m_appliedDisplayMode(gxos::display::DisplayConfigurationMode::Extend), m_selectedPrimaryOutput(0), m_appliedPrimaryOutput(0), m_activeDisplayConfiguration{}, m_requestedDisplayConfiguration{}, m_pendingTopologyChange{}, m_activeConfigurationGeneration(1), m_displayLocalEdits(false), m_displayStatus{}, m_windowGeneration(0), m_displayRequestId(0), m_displayRequestPending(false), m_themeStatus{} {
     strcopy(m_name, "DisplayOptions", app::MAX_APP_NAME);
     m_displayStatus[0] = '\0';
+    m_themeStatus[0] = '\0';
 }
 
 DisplayOptionsApp::~DisplayOptionsApp() {
@@ -2432,6 +2433,9 @@ void DisplayOptionsApp::loadSelection() {
     m_galleryScrollbarDragStartY = 0;
     m_galleryScrollbarDragStartOffset = 0;
     m_activeTab = 0;
+    m_selectedThemeIndex = GetCurrentDesktopThemeId() == DesktopThemeId::SciFi ? 1 : 0;
+    m_focusedThemeIndex = m_selectedThemeIndex;
+    m_themeStatus[0] = '\0';
     m_desktopIconVisibility = kernel::desktop::get_system_desktop_icon_visibility();
     serial::puts("[display-options] Desktop Icons checkbox state loaded\n");
     queryDisplayConfiguration();
@@ -2498,6 +2502,14 @@ void DisplayOptionsApp::onWindowClose() {
 
 void DisplayOptionsApp::setActiveTab(int tab)
 {
+    const int tabId[] = { 0, 2, 1, 3, 4 };
+    for (int i = 0; i < 5; ++i) {
+        if (tabId[i] == tab) {
+            m_focusedTabIndex = i;
+            break;
+        }
+    }
+    if (tab == 4) m_focusedThemeIndex = m_selectedThemeIndex;
     setActiveTabAndClamp(tab);
 }
 
@@ -2594,7 +2606,7 @@ void DisplayOptionsApp::setActiveSelectionIndex(int index) {
 }
 
 void DisplayOptionsApp::setActiveTabAndClamp(int tab) {
-    if (tab < 0 || tab > 3) return;
+    if (tab < 0 || tab > 4) return;
     m_activeTab = tab;
     clampSelectionToCurrentTab();
     if (tab == 0 || tab == 1) {
@@ -2686,6 +2698,39 @@ static void format_qemu_logical_resolution(const gxos::display::DisplayConfigura
     strcopy(destination, width, capacity);
     strappend(destination, " x ", capacity);
     strappend(destination, height, capacity);
+}
+
+void DisplayOptionsApp::drawThemeTab(uint32_t x, uint32_t y, uint32_t, uint32_t)
+{
+    const uint32_t cardX = x + 34u;
+    const uint32_t cardW = 450u;
+    const uint32_t cardH = 76u;
+    const uint32_t cardY[] = { y + 104u, y + 196u };
+    const char* names[] = { "Classic", "Sci-Fi" };
+    const char* descriptions[] = {
+        "Familiar guideXOS desktop. Default for new configurations.",
+        "Dark surfaces and cool accents. Choose to opt in."
+    };
+
+    for (int i = 0; i < 2; ++i) {
+        if (m_focusedThemeIndex == i) {
+            appDrawRect(cardX - 4u, cardY[i] - 4u, cardW + 8u, cardH + 8u, GetCurrentDesktopTheme().accent);
+        }
+        if (m_selectedThemeIndex == i) {
+            appDrawRect(cardX - 2u, cardY[i] - 2u, cardW + 4u, cardH + 4u,
+                        kernelDisplayOptionsSelectionBorderColor());
+        }
+        framebuffer::fill_rect(cardX, cardY[i], cardW, cardH, kernelDisplayOptionsCardColor());
+        appDrawRect(cardX, cardY[i], cardW, cardH, kernelDisplayOptionsCardBorderColor());
+        if (m_selectedThemeIndex == i) {
+            appDrawText(cardX + 14u, cardY[i] + 12u, "x", kernelDisplayOptionsSelectionBorderColor());
+        }
+        appDrawText(cardX + 34u, cardY[i] + 10u, names[i], kernelDisplayOptionsHeadingTextColor());
+        appDrawText(cardX + 34u, cardY[i] + 36u, descriptions[i], kernelDisplayOptionsLabelTextColor());
+    }
+
+    appDrawText(x + 34u, y + 300u, m_themeStatus[0] ? m_themeStatus : "Theme changes save and apply immediately.",
+                m_themeStatus[0] ? kernelDisplayOptionsPositiveTextColor() : kernelDisplayOptionsMutedTextColor());
 }
 
 void DisplayOptionsApp::drawDisplayTab(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
@@ -3090,24 +3135,25 @@ void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     m_windowW = static_cast<int>(w);
     m_windowH = static_cast<int>(h);
     framebuffer::fill_rect(x, y, w, h, kernelDisplayOptionsBodyColor());
+    const int tabX[] = { 16, 150, 284, 418, 552 };
+    const int tabId[] = { 0, 2, 1, 3, 4 };
+    const char* tabLabel[] = { "Backgrounds", "Desktop Icons", "Gradients", "Displays", "Theme" };
+    for (int i = 0; i < 5; ++i) {
+        const bool active = m_activeTab == tabId[i];
+        framebuffer::fill_rect(x + tabX[i], y + 16, 120, 30, kernelDisplayOptionsTabColor(active));
+        appDrawRect(x + tabX[i], y + 16, 120, 30, kernelDisplayOptionsTabBorderColor(active));
+        if (m_focusedTabIndex == i) {
+            appDrawRect(x + tabX[i] - 2, y + 14, 124, 34, GetCurrentDesktopTheme().accent);
+        }
+        appDrawText(x + tabX[i] + 8, y + 27, tabLabel[i], active ? kernelDisplayOptionsHeadingTextColor() : kernelDisplayOptionsMutedTextColor());
+    }
 
-    framebuffer::fill_rect(x + 16, y + 16, 140, 30, kernelDisplayOptionsTabColor(m_activeTab == 0));
-    appDrawRect(x + 16, y + 16, 140, 30, kernelDisplayOptionsTabBorderColor(m_activeTab == 0));
-    appDrawText(x + 28, y + 27, "Backgrounds", m_activeTab == 0 ? kernelDisplayOptionsHeadingTextColor() : kernelDisplayOptionsMutedTextColor());
-
-    framebuffer::fill_rect(x + 166, y + 16, 140, 30, kernelDisplayOptionsTabColor(m_activeTab == 2));
-    appDrawRect(x + 166, y + 16, 140, 30, kernelDisplayOptionsTabBorderColor(m_activeTab == 2));
-    appDrawText(x + 178, y + 27, "Desktop Icons", m_activeTab == 2 ? kernelDisplayOptionsHeadingTextColor() : kernelDisplayOptionsMutedTextColor());
-
-    framebuffer::fill_rect(x + 316, y + 16, 140, 30, kernelDisplayOptionsTabColor(m_activeTab == 1));
-    appDrawRect(x + 316, y + 16, 140, 30, kernelDisplayOptionsTabBorderColor(m_activeTab == 1));
-    appDrawText(x + 328, y + 27, "Gradients", m_activeTab == 1 ? kernelDisplayOptionsHeadingTextColor() : kernelDisplayOptionsMutedTextColor());
-
-    framebuffer::fill_rect(x + 466, y + 16, 140, 30, kernelDisplayOptionsTabColor(m_activeTab == 3));
-    appDrawRect(x + 466, y + 16, 140, 30, kernelDisplayOptionsTabBorderColor(m_activeTab == 3));
-    appDrawText(x + 478, y + 27, "Displays", m_activeTab == 3 ? kernelDisplayOptionsHeadingTextColor() : kernelDisplayOptionsMutedTextColor());
-
-    appDrawText(x + 18, y + 58, m_activeTab == 3 ? "Configure the QEMU display layout:" : (m_activeTab == 2 ? "Choose system icons shown on the desktop:" : (m_activeTab == 0 ? "Select a background from the gallery:" : "Select a gradient from the gallery:")), kernelDisplayOptionsHeadingTextColor());
+    appDrawText(x + 18, y + 58,
+        m_activeTab == 4 ? "Choose the desktop theme (Classic is the default):" :
+        (m_activeTab == 3 ? "Configure the QEMU display layout:" :
+        (m_activeTab == 2 ? "Choose system icons shown on the desktop:" :
+        (m_activeTab == 0 ? "Select a background from the gallery:" : "Select a gradient from the gallery:"))),
+        kernelDisplayOptionsHeadingTextColor());
     const int panelW = maxInt(1, static_cast<int>(w) - 28);
     const int panelH = maxInt(1, static_cast<int>(h) - 92);
     framebuffer::fill_rect(x + 14, y + 74, static_cast<uint32_t>(panelW), static_cast<uint32_t>(panelH), kernelDisplayOptionsPanelColor());
@@ -3199,6 +3245,14 @@ void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY + kDesktopIconCheckboxRowH, "File Explorer", m_desktopIconVisibility.showThisSystem || m_desktopIconVisibility.showFileManager);
         drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY + kDesktopIconCheckboxRowH * 2, "System Settings", m_desktopIconVisibility.showSystemSettings);
         appDrawText(x + kDesktopIconCheckboxX, y + maxInt(292, static_cast<int>(h) - 28), "Changes are saved immediately.", kernelDisplayOptionsLabelTextColor());
+    } else if (m_activeTab == 4) {
+        if (m_selectButtonId >= 0) {
+            if (app::Widget* button = getWidget(m_selectButtonId)) {
+                button->visible = false;
+                button->enabled = false;
+            }
+        }
+        drawThemeTab(x, y, w, h);
     } else {
         if (m_selectButtonId >= 0) {
             if (app::Widget* button = getWidget(m_selectButtonId)) {
@@ -3384,6 +3438,38 @@ bool DisplayOptionsApp::handleGalleryKey(uint32_t key) {
 }
 
 void DisplayOptionsApp::onKeyDown(uint32_t key) {
+    if (key == '\t' || key == shell::KEY_TAB) {
+        const int tabId[] = { 0, 2, 1, 3, 4 };
+        m_focusedTabIndex = (m_focusedTabIndex + 1) % 5;
+        setActiveTab(tabId[m_focusedTabIndex]);
+        if (m_activeTab == 3) queryDisplayConfiguration();
+        invalidate();
+        return;
+    }
+    if (m_activeTab == 4) {
+        if (key == shell::KEY_LEFT || key == shell::KEY_UP) {
+            m_focusedThemeIndex = 0;
+            invalidate();
+            return;
+        }
+        if (key == shell::KEY_RIGHT || key == shell::KEY_DOWN) {
+            m_focusedThemeIndex = 1;
+            invalidate();
+            return;
+        }
+        if (key == '\r' || key == '\n') {
+            const char* themeId = m_focusedThemeIndex == 0 ? "classic" : "scifi";
+            if (kernel::desktop::set_desktop_theme_id(themeId)) {
+                m_selectedThemeIndex = m_focusedThemeIndex;
+                strcopy(m_themeStatus, m_selectedThemeIndex == 0 ? "Classic theme saved and applied." : "Sci-Fi theme saved and applied.", sizeof(m_themeStatus));
+            } else {
+                strcopy(m_themeStatus, "Theme could not be saved.", sizeof(m_themeStatus));
+            }
+            invalidate();
+            return;
+        }
+        return;
+    }
     if (m_activeTab == 3) {
         if (key == '\r' || key == '\n') {
             submitDisplayConfiguration(false);
@@ -3399,6 +3485,17 @@ void DisplayOptionsApp::onKeyDown(uint32_t key) {
 }
 
 void DisplayOptionsApp::onKeyChar(char c) {
+    if (m_activeTab == 4 && c == ' ') {
+        const char* themeId = m_focusedThemeIndex == 0 ? "classic" : "scifi";
+        if (kernel::desktop::set_desktop_theme_id(themeId)) {
+            m_selectedThemeIndex = m_focusedThemeIndex;
+            strcopy(m_themeStatus, m_selectedThemeIndex == 0 ? "Classic theme saved and applied." : "Sci-Fi theme saved and applied.", sizeof(m_themeStatus));
+        } else {
+            strcopy(m_themeStatus, "Theme could not be saved.", sizeof(m_themeStatus));
+        }
+        invalidate();
+        return;
+    }
     if (c == ' ' || c == '\r' || c == '\n') {
         if (m_activeTab == 0 || m_activeTab == 1) {
             applySelected();
@@ -3407,25 +3504,52 @@ void DisplayOptionsApp::onKeyChar(char c) {
 }
 
 void DisplayOptionsApp::onMouseDown(int x, int y, uint8_t) {
-    if (x >= 16 && x < 156 && y >= 16 && y < 46) {
+    if (x >= 16 && x < 136 && y >= 16 && y < 46) {
         setActiveTab(0);
         invalidate();
         return;
     }
-    if (x >= 166 && x < 306 && y >= 16 && y < 46) {
+    if (x >= 150 && x < 270 && y >= 16 && y < 46) {
         setActiveTab(2);
         serial::puts("[display-options] Desktop Icons UI selected\n");
         invalidate();
         return;
     }
-    if (x >= 316 && x < 456 && y >= 16 && y < 46) {
+    if (x >= 284 && x < 404 && y >= 16 && y < 46) {
         setActiveTab(1);
         invalidate();
         return;
     }
-    if (x >= 466 && x < 606 && y >= 16 && y < 46) {
+    if (x >= 418 && x < 538 && y >= 16 && y < 46) {
         setActiveTab(3);
         queryDisplayConfiguration();
+        invalidate();
+        return;
+    }
+    if (x >= 552 && x < 672 && y >= 16 && y < 46) {
+        setActiveTab(4);
+        invalidate();
+        return;
+    }
+
+    if (m_activeTab == 4) {
+        const int cardX = 34;
+        const int cardW = 450;
+        const int cardH = 76;
+        if (x >= cardX && x < cardX + cardW && y >= 104 && y < 104 + cardH) {
+            m_focusedThemeIndex = 0;
+        } else if (x >= cardX && x < cardX + cardW && y >= 196 && y < 196 + cardH) {
+            m_focusedThemeIndex = 1;
+        } else {
+            return;
+        }
+        const char* themeId = m_focusedThemeIndex == 0 ? "classic" : "scifi";
+        if (kernel::desktop::set_desktop_theme_id(themeId)) {
+            m_selectedThemeIndex = m_focusedThemeIndex;
+            strcopy(m_themeStatus, m_selectedThemeIndex == 0 ? "Classic theme saved and applied." : "Sci-Fi theme saved and applied.", sizeof(m_themeStatus));
+        } else {
+            strcopy(m_themeStatus, "Theme could not be saved.", sizeof(m_themeStatus));
+        }
         invalidate();
         return;
     }

@@ -155,6 +155,10 @@ void set_wallpaper_by_id(const char* wallpaperId);
 // Return the currently selected built-in wallpaper/background id.
 const char* get_wallpaper_id();
 
+// Persist and apply a canonical desktop theme ID through the normal bare-metal
+// Display Options store, then request a full desktop redraw.
+bool set_desktop_theme_id(const char* themeId);
+
 // Get or update the visible built-in system desktop icons.
 SystemDesktopIconVisibility get_system_desktop_icon_visibility();
 void set_system_desktop_icon_visibility(const SystemDesktopIconVisibility& visibility);
