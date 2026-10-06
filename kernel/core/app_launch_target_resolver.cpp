@@ -209,6 +209,16 @@ uint32_t fileAssociationTableBytes() {
     return static_cast<uint32_t>(sizeof(kFileAssociations));
 }
 
+uint64_t fileAssociationActiveGeneration() {
+    loadAssociationOverrides();
+    return s_activeGeneration;
+}
+
+int32_t fileAssociationActiveSlot() {
+    loadAssociationOverrides();
+    return s_activeSlot;
+}
+
 bool runC164FileAssociationTests(uint32_t* outCases,
                                  uint32_t* outFailureMask) {
     uint32_t cases = 0u;
@@ -495,6 +505,130 @@ AssociationServiceStatus fileAssociationService(
     response->hasEffectiveAssociation = response->effectiveAppId[0] ? 1u : 0u;
     response->status = static_cast<uint32_t>(AssociationServiceStatus::Success);
     return AssociationServiceStatus::Success;
+}
+
+bool runC166AssociationServiceTests(uint32_t* outCases,
+                                    uint32_t* outFailureMask) {
+    uint32_t cases = 0u;
+    uint32_t failures = 0u;
+    bool passed = true;
+    auto check = [&passed, &cases, &failures](bool condition) {
+        if (!condition && cases < 32u) failures |= 1u << cases;
+        passed = passed && condition;
+        ++cases;
+    };
+    AssociationServiceRequest request{};
+    AssociationServiceResponse response{};
+    request.operation = static_cast<uint32_t>(AssociationOperation::Query);
+    copyBounded(request.extension, sizeof(request.extension), ".TXT");
+    AssociationServiceStatus status = fileAssociationService(&request, &response);
+    check(status == AssociationServiceStatus::Success &&
+        response.overrideState == static_cast<uint32_t>(AssociationOverrideState::NoOverride) &&
+        response.hasEffectiveAssociation == 1u &&
+        asciiEqualsIgnoreCase(response.effectiveAppId, kManagedNotesApplicationId) &&
+        asciiEqualsIgnoreCase(response.normalizedExtension, ".txt"));
+    check(asciiEqualsIgnoreCase(response.compiledDefaultAppId,
+        kManagedNotesApplicationId) && response.overrideAppId[0] == '\0');
+    check(resolveFileAssociation("/proof/clean.txt", true, false).status ==
+        FileAssociationStatus::Resolved);
+    check(fileAssociationCapacity() == 16u && fileAssociationUsedCount() == 1u);
+
+    request = {};
+    request.operation = static_cast<uint32_t>(AssociationOperation::SetOverride);
+    copyBounded(request.extension, sizeof(request.extension), ".txt");
+    copyBounded(request.applicationId, sizeof(request.applicationId), kManagedNotesApplicationId);
+    status = fileAssociationService(&request, &response);
+    check(status == AssociationServiceStatus::Success && response.overrideState ==
+        static_cast<uint32_t>(AssociationOverrideState::ApplicationOverride) &&
+        asciiEqualsIgnoreCase(response.effectiveAppId, kManagedNotesApplicationId));
+    check(response.hasEffectiveAssociation == 1u &&
+        asciiEqualsIgnoreCase(response.overrideAppId, kManagedNotesApplicationId));
+    check(resolveFileAssociation("/proof/override.txt", true, false).status ==
+        FileAssociationStatus::Resolved);
+    status = fileAssociationService(&request, &response);
+    check(status == AssociationServiceStatus::Success && response.overrideState ==
+        static_cast<uint32_t>(AssociationOverrideState::ApplicationOverride));
+
+    request.operation = static_cast<uint32_t>(AssociationOperation::Disable);
+    status = fileAssociationService(&request, &response);
+    check(status == AssociationServiceStatus::Success && response.overrideState ==
+        static_cast<uint32_t>(AssociationOverrideState::Disabled) &&
+        response.hasEffectiveAssociation == 0u && response.effectiveAppId[0] == '\0');
+    check(resolveFileAssociation("/proof/disabled.txt", true, false).status ==
+        FileAssociationStatus::Unsupported);
+    status = fileAssociationService(&request, &response);
+    check(status == AssociationServiceStatus::Success && response.overrideState ==
+        static_cast<uint32_t>(AssociationOverrideState::Disabled));
+
+    request.operation = static_cast<uint32_t>(AssociationOperation::Reset);
+    status = fileAssociationService(&request, &response);
+    check(status == AssociationServiceStatus::Success && response.overrideState ==
+        static_cast<uint32_t>(AssociationOverrideState::NoOverride) &&
+        asciiEqualsIgnoreCase(response.effectiveAppId, kManagedNotesApplicationId));
+    check(resolveFileAssociation("/proof/reset.txt", true, false).status ==
+        FileAssociationStatus::Resolved);
+    status = fileAssociationService(&request, &response);
+    check(status == AssociationServiceStatus::Success && response.overrideState ==
+        static_cast<uint32_t>(AssociationOverrideState::NoOverride));
+
+    request.operation = static_cast<uint32_t>(AssociationOperation::Query);
+    copyBounded(request.extension, sizeof(request.extension), ".bin");
+    check(fileAssociationService(&request, &response) == AssociationServiceStatus::UnknownExtension);
+    copyBounded(request.extension, sizeof(request.extension), "txt");
+    check(fileAssociationService(&request, &response) == AssociationServiceStatus::UnknownExtension);
+    copyBounded(request.extension, sizeof(request.extension), ".TXT");
+    check(fileAssociationService(&request, &response) == AssociationServiceStatus::Success &&
+        response.overrideState == static_cast<uint32_t>(AssociationOverrideState::NoOverride));
+    copyBounded(request.extension, sizeof(request.extension), ".txt");
+    request.operation = 99u;
+    check(fileAssociationService(&request, &response) == AssociationServiceStatus::InvalidArgument);
+    request.operation = static_cast<uint32_t>(AssociationOperation::SetOverride);
+    copyBounded(request.applicationId, sizeof(request.applicationId), "gxos.builtin.notepad");
+    check(fileAssociationService(&request, &response) == AssociationServiceStatus::IneligibleHandler);
+    request.applicationId[0] = '\0';
+    check(fileAssociationService(&request, &response) == AssociationServiceStatus::IneligibleHandler);
+    copyBounded(request.applicationId, sizeof(request.applicationId),
+        "com.guidexos.apps.managed.fileexplorer");
+    check(fileAssociationService(&request, &response) == AssociationServiceStatus::IneligibleHandler);
+    check(fileAssociationService(nullptr, &response) == AssociationServiceStatus::InvalidArgument);
+    check(fileAssociationService(&request, nullptr) == AssociationServiceStatus::InvalidArgument);
+
+    request = {};
+    request.operation = static_cast<uint32_t>(AssociationOperation::SetOverride);
+    copyBounded(request.extension, sizeof(request.extension), ".txt");
+    copyBounded(request.applicationId, sizeof(request.applicationId), kManagedNotesApplicationId);
+    uint64_t generation = s_activeGeneration;
+    bool generationMonotonic = true;
+    for (uint32_t cycle = 0u; cycle < 5u; ++cycle) {
+        status = fileAssociationService(&request, &response);
+        generationMonotonic = generationMonotonic && status == AssociationServiceStatus::Success &&
+            s_activeGeneration == generation + 1u;
+        generation = s_activeGeneration;
+        request.operation = static_cast<uint32_t>(AssociationOperation::Disable);
+    }
+    request.operation = static_cast<uint32_t>(AssociationOperation::Reset);
+    status = fileAssociationService(&request, &response);
+    generationMonotonic = generationMonotonic && status == AssociationServiceStatus::Success &&
+        s_activeGeneration == generation + 1u && response.overrideState ==
+        static_cast<uint32_t>(AssociationOverrideState::NoOverride);
+    check(generationMonotonic);
+
+    bool stress = true;
+    for (uint32_t cycle = 0u; cycle < 100u; ++cycle) {
+        request.operation = static_cast<uint32_t>(AssociationOperation::Disable);
+        status = fileAssociationService(&request, &response);
+        stress = stress && status == AssociationServiceStatus::Success &&
+            response.overrideState == static_cast<uint32_t>(AssociationOverrideState::Disabled);
+        request.operation = static_cast<uint32_t>(AssociationOperation::Reset);
+        status = fileAssociationService(&request, &response);
+        stress = stress && status == AssociationServiceStatus::Success &&
+            response.overrideState == static_cast<uint32_t>(AssociationOverrideState::NoOverride) &&
+            asciiEqualsIgnoreCase(response.effectiveAppId, kManagedNotesApplicationId);
+    }
+    check(stress);
+    if (outCases) *outCases = cases;
+    if (outFailureMask) *outFailureMask = failures;
+    return passed && cases >= 25u;
 }
 
 bool copyBounded(char* destination, uint32_t capacity, const char* source) {

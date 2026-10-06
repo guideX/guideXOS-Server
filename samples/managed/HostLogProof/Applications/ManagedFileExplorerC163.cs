@@ -20,6 +20,9 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
 #if HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF
     private static bool s_c164ContextTestsRun;
 #endif
+#if HOSTLOGPROOF_C166_FILE_ASSOCIATION_PROOF
+    private static bool s_c166AssociationTestsRun;
+#endif
     private readonly GuideXosFileExplorerControllerC163 _controller = new();
     private ulong _window;
     private bool _closeRequested;
@@ -53,6 +56,17 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
             if (!GuideXosFileActivationC164Tests.Run(host))
             {
                 host.TryLog("C164-ACTIVATION-CONTEXT-TESTS result=FAIL"u8);
+                return GuideXosResult.InvalidArgument;
+            }
+        }
+#endif
+#if HOSTLOGPROOF_C166_FILE_ASSOCIATION_PROOF
+        if (!s_c166AssociationTestsRun)
+        {
+            s_c166AssociationTestsRun = true;
+            if (!GuideXosFileAssociationsC166Tests.Run(host))
+            {
+                host.TryLog("C166-MANAGED-ASSOCIATION-TESTS result=FAIL"u8);
                 return GuideXosResult.InvalidArgument;
             }
         }

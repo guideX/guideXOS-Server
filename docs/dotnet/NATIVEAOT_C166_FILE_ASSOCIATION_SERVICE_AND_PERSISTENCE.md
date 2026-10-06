@@ -244,3 +244,129 @@ boots remain unverified. No test totals or Outcome A claim are made. The final
 C166 disposition is **not accepted** pending those gates. Host ABI target
 remains v4/128 bytes with callbacks at 104/112/120; Settings remains v2; C128
 remains unverified; no Default Apps UI was added.
+
+## C166R3 validation-lane reconstruction (2026-10-05)
+
+### Starting state and runner audit
+
+C166R3 started at the expected full HEAD `72b2673e84212e62b78ea1835e583e34bb0f5d23`
+on `v1.1_DOTNET_SUPPORT`, tracking `origin/v1.1_DOTNET_SUPPORT`. The starting
+worktree was clean and the branch was 1 ahead / 0 behind. The latest commit is
+the C166R2 dual-slot hardening commit `72b2673e`; C166 implementation remains
+`1688a98deb1aa8714591bd09418fa22362307a86`. C166 had not been accepted, so the
+zero-modification accepted-state stop did not apply.
+
+The inherited entry point remains
+`scripts/dotnet/run-c158-managed-calculator.ps1`. Its phase coupling is explicit:
+C164 implies C163, then C162, C161, and C160. It retains common build, protected
+media backup/restore, QEMU/QMP launch, serial waiting, hashing, and manifests,
+but its C166-inappropriate gates and scenarios include:
+
+- C163-only predecessor outcome/ABI/artifact hashes before the phase build;
+- C164 assumptions about accepted C163/C162 manifests and exact restored
+  product hashes;
+- C163 menu counts, Explorer registration/refresh/navigation proof markers;
+- C164 activation-context and Notes document-state proof, fixture navigation,
+  and 25 distinct File Explorer-to-Notes lifetimes;
+- historical product identity and post-phase restoration fields tied to C160-C164.
+
+C160-C164 lifecycle stages are reusable only when those regressions are
+explicitly requested and freshly executed. C166 needs its own association
+state, persistence, and reboot acceptance assertions. Historical C163/C164
+manifests are retained as regression evidence and are not prerequisites.
+The new entry point is `scripts/dotnet/run-c166-file-associations.ps1`; it
+checks the existing branch, discovers tools, builds output-only proof products,
+and makes proof boot an explicit opt-in. It has no C163/C164 hash gate. Its
+current proof-boot body deliberately reports blocked because complete C166
+state-transition scenarios have not yet been connected.
+
+### Environment discovery and protected media
+
+The repository AMD64 Makefile chooses plain `g++`/`ld` on Windows, so the
+successful production kernel toolchain is the installed MinGW fallback rather
+than the `x86_64-elf-*` family. Exact paths and versions discovered:
+
+| Tool | Path | Version/result |
+| --- | --- | --- |
+| .NET SDK | `C:\Program Files\dotnet\dotnet.exe` | 10.0.401 |
+| MinGW g++ | `C:\mingw64\bin\g++.exe` | 15.2.0, `x86_64-w64-mingw32` |
+| MinGW ld | `C:\mingw64\bin\ld.exe` | 2.46.0.20260210 |
+| MinGW objcopy | `C:\mingw64\bin\objcopy.exe` | 2.46.0.20260210 |
+| Make | `C:\mingw64\bin\mingw32-make.exe` | available |
+| NASM | `C:\mingw64\bin\nasm.exe` | 2.16.03 |
+| QEMU | `C:\Program Files\qemu\qemu-system-x86_64.exe` | 11.0.0 (v11.0.0-12122-ga4bb4b10c9) |
+
+The named `x86_64-elf-gcc/g++/ld/objcopy` tools were not found in PATH or the
+repository's configured candidate location; the production toolchain is still
+available through the documented Windows MinGW fallback. The initial C166R3
+environment record used an incompatible QEMU `--version` switch and said
+unavailable; this was corrected to QEMU's `-version`, which returned the
+version above.
+
+Before the full proof kernel rebuild, canonical kernel, ESP kernel, and ESP
+ramdisk hashes were respectively `02817323329C5CA7A6B0DAB67C8709CD60CDED9B3A4F2B096C9D1194E503BE4B`,
+`02817323329C5CA7A6B0DAB67C8709CD60CDED9B3A4F2B096C9D1194E503BE4B`, and
+`5CEC7F5FF2B43AE223A9793232BE0740E33FE357FA8B07869A941BAB54A2B41D`. The
+ignored canonical kernel output was restored from the verified C166R2 byte
+backup after building. All three protected hashes were rechecked and match.
+No proof media was installed on ESP. No restoration of ESP bytes was needed.
+
+QEMU process audit found PID 29980 running a separately named
+`guideXOS-v03-scifi-final-candidate` workload from
+`D:\dev\guideXOSServerV0.3_SCI_FI_THEME`. It is unrelated to this repository.
+It was left running. QEMU boots and all guest-executed cases are blocked until
+that independent workload ends; QEMU has not been declared unavailable.
+
+### C166R3 source/test additions and executed checks
+
+Added native C166 association-service cases for clean query/default,
+case-normalized extension, Set, Disabled, Reset, unknown extension, malformed
+operation, ineligible Notepad/empty handlers, null arguments, repeated
+mutations, monotonic generation observations, and 200 mutation stress
+operations. Added a managed wrapper proof for v1/v2/v3/v4 sizes, callback
+offsets, v3/short/malformed ABI rejection, absent callback, capability checks,
+native result mapping, invalid arguments, and malformed response rejection.
+These suites compile into the fresh proof composite but remain **not executed**
+because their current invocation path requires a guest boot.
+
+Executed successfully:
+
+- PowerShell parse checks for the new runner and inherited runners;
+- XML parse of the managed project;
+- MinGW syntax-only compile of the modified native association resolver;
+- managed C# build with C155/C156/C157/C160/C163/C164/C166 proof defines:
+  0 errors, existing MSBuild base-intermediate-path and unreachable-code
+  warnings;
+- fresh NativeAOT proof composite build from current source, with existing
+  linker/PDB/entry-point warnings;
+- fresh proof ramdisk generation;
+- full AMD64 kernel compile, link, and PE-to-ELF conversion using the current
+  source and configured MinGW toolchain; repository warnings remain, including
+  the existing desktop line-buffer diagnostic.
+
+Fresh product hashes (proof products only):
+
+| Product | SHA-256 |
+| --- | --- |
+| NativeAOT proof composite | `C24B84128EDABA027B92A78F2ED1674CCF551ED31905BDCB55D98715924A7DCA` |
+| Proof kernel | `4B0A75B3C347A21E7AC9045EBC6F3D9CBF7F5F30DD65134CBDC01260122A3DE5` |
+| Proof ramdisk | `DB6A880E78DDC24749AE470CFAFDA6F68AEE9D1A5D10438052EA15D3B59E5344` |
+
+The output manifest is `out/dotnet/c166r3-file-associations/c166r3-proof-manifest.json`.
+It is ignored build evidence, not committed source. It records current HEAD and
+fresh products, not C163/C164 historical hashes. No fresh production composite,
+clean production kernel/ramdisk installation, serial log, proof boot, ordinary
+boot, or regression suite was produced. Native focused test total, persistence
+format/corruption/partial-write tests, ABI executed total, managed executed
+total, CRC vector, slot-selection/tie/recovery evidence, C164/C163/C162/C160/C156
+regressions, Explorer parity, Notes activation, Settings smoke, C128, and
+reboot persistence are all unverified. The C166 outcome remains **not
+accepted**; the present phase classification is Outcome E (an unrelated
+existing QEMU run prevents guest execution), not a source/toolchain failure.
+
+The slot contract remains the C166R2 baseline: `/GXAS0.BIN` and `/GXAS1.BIN`,
+v2 136-byte images, 16-byte headers, 116-byte records, CRC-32/ISO-HDLC, 64-bit
+nonwrapping generations, highest-valid selection with slot A on ties, and
+runtime update after write/readback validation. Legacy `/GXASSOC.BIN` remains
+ignored without migration. No Settings Default Apps UI was added; Settings
+format remains v2; C128 remains unverified.

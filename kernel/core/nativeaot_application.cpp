@@ -4680,6 +4680,31 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
         }
     }
 #endif
+#if defined(GXOS_NATIVEAOT_C166_FILE_ASSOCIATION_PROOF)
+    static bool c166AssociationTestsRun = false;
+    if (!c166AssociationTestsRun) {
+        c166AssociationTestsRun = true;
+        uint32_t cases = 0u;
+        uint32_t failureMask = 0u;
+        const bool passed = appmodel::runC166AssociationServiceTests(
+            &cases, &failureMask);
+        serial::puts("[C166-ASSOCIATION-SERVICE-TESTS] cases=");
+        serial::put_hex32(cases);
+        serial::puts(" failed=");
+        serial::put_hex32(failureMask);
+        serial::puts(" generation=");
+        serial::put_hex32(static_cast<uint32_t>(
+            appmodel::fileAssociationActiveGeneration() >> 32u));
+        serial::put_hex32(static_cast<uint32_t>(
+            appmodel::fileAssociationActiveGeneration()));
+        serial::puts(" slot=");
+        serial::put_hex32(static_cast<uint32_t>(
+            appmodel::fileAssociationActiveSlot()));
+        serial::puts(" service-stress=200 mutations result=");
+        serial::puts(passed ? "PASS\n" : "FAIL\n");
+        if (!passed) return LaunchStatus::ManagedFailed;
+    }
+#endif
 #if defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER_PROOF)
     static bool c163RegistrationTestRun = false;
     if (!c163RegistrationTestRun) {

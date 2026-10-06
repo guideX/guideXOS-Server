@@ -62,8 +62,12 @@ FileAssociationResolution resolveFileAssociationFromVfs(const char* path);
 uint32_t fileAssociationUsedCount();
 uint32_t fileAssociationCapacity();
 uint32_t fileAssociationTableBytes();
+uint64_t fileAssociationActiveGeneration();
+int32_t fileAssociationActiveSlot();
 bool runC164FileAssociationTests(uint32_t* outCases,
                                 uint32_t* outFailureMask);
+bool runC166AssociationServiceTests(uint32_t* outCases,
+                                   uint32_t* outFailureMask);
 AssociationServiceStatus fileAssociationService(
     const AssociationServiceRequest* request,
     AssociationServiceResponse* response);
