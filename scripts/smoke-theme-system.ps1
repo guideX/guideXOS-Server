@@ -360,6 +360,9 @@ $kernelNavigatorThemeMatch = Find-RawMatch $kernelApps 'kernelNavigatorClientCol
 $kernelNavigatorEnabledMatch = Find-RawMatch $kernelApps 'updateButtons\(\).*?setWidgetEnabled\(m_backBtnId.*?setWidgetEnabled\(m_forwardBtnId'
 $kernelNavigatorViewportMatch = Find-FirstMatch $kernelApps 'kernelNavigatorViewportBorderColor|CONTENT_X, contentTop'
 $themeRecommendationGateMatch = Find-FirstMatch $displayOptions 's_selectedThemeId == DesktopThemeId::SciFi'
+$themeKeyboardMatch = Find-RawMatch $displayOptions 'bool handleThemeKey\(uint32_t key\).*?s_focusedThemeIndex = 0.*?s_focusedThemeIndex = 1.*?kKeyEnter \|\| key == kKeySpace.*?applySelectedTheme\(\)'
+$themeFocusIndicatorMatch = Find-RawMatch $displayOptions 'const bool focused = \(s_focusedThemeIndex.*?if \(focused\) drawColorRect'
+$themeMouseActivationMatch = Find-RawMatch $displayOptions 'if \(s_activeTab == 3\).*?s_focusedThemeIndex = 0;\s*s_selectedThemeId = DesktopThemeId::Classic;\s*applySelectedTheme\(\).*?s_focusedThemeIndex = 1;\s*s_selectedThemeId = DesktopThemeId::SciFi;\s*applySelectedTheme\(\)'
 $themeRecommendationTextMatch = Find-RawMatch $displayOptions 'Optional recommendation for Sci Fi: guideXOS Space, guideXOS Space 2, Tron Porsche, CPU\..*?Choose any wallpaper on the Background tab\.'
 $clockThemeHelperMatch = Find-FirstMatch $clock 'ClockBodyColor|ClockFaceColor|ClockBorderColor|ClockReadoutColor|ClockMutedTextColor|ClockAccentColor|paintClockSurface|drawClockText|GetCurrentDesktopThemeId|GetCurrentDesktopTheme|DesktopThemeId::SciFi'
 $clockClearHelperMatch = Find-FirstMatch $clock 'clearWindowSurface\(uint64_t windowId\)'
@@ -587,6 +590,9 @@ $checks = @(
     [pscustomobject]@{ Name = "display options theme fields wired"; Pass = $null -ne $displayOptionsThemeFieldMatch; Match = $displayOptionsThemeFieldMatch },
     [pscustomobject]@{ Name = "display options text color support"; Pass = $null -ne $displayOptionsTextColorMatch; Match = $displayOptionsTextColorMatch },
     [pscustomobject]@{ Name = "display options sci fi wallpaper recommendation gate"; Pass = $null -ne $themeRecommendationGateMatch; Match = $themeRecommendationGateMatch },
+    [pscustomobject]@{ Name = "display options Theme keyboard traversal and activation"; Pass = $null -ne $themeKeyboardMatch; Match = $themeKeyboardMatch },
+    [pscustomobject]@{ Name = "display options Theme visible focus indicator"; Pass = $null -ne $themeFocusIndicatorMatch; Match = $themeFocusIndicatorMatch },
+    [pscustomobject]@{ Name = "display options Theme mouse activation retained"; Pass = $null -ne $themeMouseActivationMatch; Match = $themeMouseActivationMatch },
     [pscustomobject]@{ Name = "display options sci fi wallpaper recommendation text"; Pass = $null -ne $themeRecommendationTextMatch; Match = $themeRecommendationTextMatch },
     [pscustomobject]@{ Name = "display options effect placeholders remain"; Pass = $null -ne $effectPlaceholderMatch -and $null -ne $phase3aNoEffectsMatch; Match = $(if ($null -ne $phase3aNoEffectsMatch) { $phase3aNoEffectsMatch } else { $effectPlaceholderMatch }) },
     [pscustomobject]@{ Name = "navigator theme helpers wired"; Pass = $null -ne $navigatorThemeHelperMatch -or $null -ne $navigatorThemeFieldMatch; Match = $(if ($null -ne $navigatorThemeHelperMatch) { $navigatorThemeHelperMatch } else { $navigatorThemeFieldMatch }) },

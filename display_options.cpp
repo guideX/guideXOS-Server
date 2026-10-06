@@ -35,6 +35,7 @@ int DisplayOptions::s_selectedGradientIndex = 0;
 int DisplayOptions::s_appliedGradientIndex = 0;
 DesktopThemeId DisplayOptions::s_selectedThemeId = DesktopThemeId::Classic;
 DesktopThemeId DisplayOptions::s_appliedThemeId = DesktopThemeId::Classic;
+int DisplayOptions::s_focusedThemeIndex = 0;
 int DisplayOptions::s_activeTab = 0;
 int DisplayOptions::s_windowW = 800;
 int DisplayOptions::s_windowH = 620;
@@ -397,6 +398,29 @@ namespace {
             return true;
         }
         if (key == kKeyEscape) {
+            return true;
+        }
+        return false;
+    }
+
+    bool handleThemeKey(uint32_t key)
+    {
+        if (DisplayOptions::s_activeTab != 3) return false;
+        if (key == kKeyLeft || key == kKeyUp) {
+            DisplayOptions::s_focusedThemeIndex = 0;
+            DisplayOptions::render();
+            return true;
+        }
+        if (key == kKeyRight || key == kKeyDown) {
+            DisplayOptions::s_focusedThemeIndex = 1;
+            DisplayOptions::render();
+            return true;
+        }
+        if (key == kKeyEnter || key == kKeySpace) {
+            DisplayOptions::s_selectedThemeId = DisplayOptions::s_focusedThemeIndex == 0
+                ? DesktopThemeId::Classic : DesktopThemeId::SciFi;
+            DisplayOptions::applySelectedTheme();
+            DisplayOptions::render();
             return true;
         }
         return false;
@@ -1078,6 +1102,9 @@ int DisplayOptions::main(int, char**)
                     if (handleGalleryKey(key)) {
                         break;
                     }
+                    if (handleThemeKey(key)) {
+                        break;
+                    }
                 }
             } catch (...) {
             }
@@ -1288,6 +1315,8 @@ void DisplayOptions::drawThemeTab()
     auto drawThemeOption = [&](int x, int y, DesktopThemeId id, const DesktopTheme& theme, const char* description, const char* feature1, const char* feature2, const char* feature3) {
         const bool selected = (s_selectedThemeId == id);
         const bool applied = (s_appliedThemeId == id);
+        const bool focused = (s_focusedThemeIndex == (id == DesktopThemeId::Classic ? 0 : 1));
+        if (focused) drawColorRect(s_windowId, x - 7, y - 7, kThemeOptionW + 14, kThemeOptionH + 14, DisplayOptionsAccentColor());
         if (selected) drawColorRect(s_windowId, x - 4, y - 4, kThemeOptionW + 8, kThemeOptionH + 8, DisplayOptionsSelectedBorderColor());
         drawColorRect(s_windowId, x, y, kThemeOptionW, kThemeOptionH, DisplayOptionsCardColor());
         drawColorRect(s_windowId, x, y, kThemeOptionW, 1, IsSciFiThemeActive() ? blendColor(DisplayOptionsNeutralBorderColor(), DisplayOptionsTextColor(), 10) : packRgb(84, 90, 105));
@@ -1834,6 +1863,7 @@ void DisplayOptions::handleMouseDown(int mx, int my)
     }
     if (hit(mx, my, kThemeTabX, kTabY, kTabW, kTabH)) {
         setActiveTabAndClamp(3);
+        s_focusedThemeIndex = s_selectedThemeId == DesktopThemeId::SciFi ? 1 : 0;
         Logger::write(LogLevel::Info, "DisplayOptions Theme tab selected");
         render();
         return;
@@ -1933,12 +1963,14 @@ void DisplayOptions::handleMouseDown(int mx, int my)
 
     if (s_activeTab == 3) {
         if (hit(mx, my, kThemeOptionX, kThemeOptionY, kThemeOptionW, kThemeOptionH)) {
+            s_focusedThemeIndex = 0;
             s_selectedThemeId = DesktopThemeId::Classic;
             applySelectedTheme();
             render();
             return;
         }
         if (hit(mx, my, kThemeOptionX, kThemeOptionY + kThemeOptionH + kThemeOptionGap, kThemeOptionW, kThemeOptionH)) {
+            s_focusedThemeIndex = 1;
             s_selectedThemeId = DesktopThemeId::SciFi;
             applySelectedTheme();
             render();

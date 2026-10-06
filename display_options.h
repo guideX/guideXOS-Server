@@ -25,6 +25,7 @@ public:
     static int s_appliedGradientIndex;
     static DesktopThemeId s_selectedThemeId;
     static DesktopThemeId s_appliedThemeId;
+    static int s_focusedThemeIndex;
     static int s_activeTab;
     static int s_windowW;
     static int s_windowH;
