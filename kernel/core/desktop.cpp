@@ -1970,6 +1970,7 @@ static const char* s_allProgramsList[] = {
     "Console",
     "ControlPanel",
     "DiskManager",
+    "DisplayOptions",
     "File Explorer",
     "guideXOS Navigator",
     "HDInstaller",

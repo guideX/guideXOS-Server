@@ -29,5 +29,6 @@ Assert-Contains $apps 'm_focusedTabIndex = (m_focusedTabIndex + 1) % 5' 'Display
 Assert-Contains $apps 'set_desktop_theme_id(themeId)' 'keyboard theme activation'
 Assert-Contains $compositor 'setFocus(target)' 'focus change through the normal compositor'
 Assert-Contains $desktop 'show_start_menu_notification(start_menu_left_item_label_for_row(leftHit))' 'existing mouse Start-menu activation path'
+Assert-Contains $desktop '"DisplayOptions",' 'Display Options entry in All Programs for keyboard access'
 
 Write-Host '[DesktopKeyboardOperabilitySmoke] focused keyboard and mouse-path checks passed.'
