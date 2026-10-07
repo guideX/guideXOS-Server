@@ -11625,17 +11625,6 @@ void handle_key(uint32_t key)
         return;
     }
 
-    if (s_startMenuOpen) {
-        if (key == 27u || key == ps2keyboard::KEY_EVENT_ESCAPE) {
-            s_startMenuOpen = false;
-            s_hoverMenuLeft = s_hoverMenuRight = -1;
-        } else if (!handle_start_menu_key(key)) {
-            return;
-        }
-        draw();
-        return;
-    }
-
     // Bare-metal Native ELF validation and the installed PacMan package share
     // the normal desktop/App Model dispatcher.  F12 is an intentionally
     // narrow desktop shortcut for this external package so QEMU/physical
@@ -11653,6 +11642,17 @@ void handle_key(uint32_t key)
 
     if (key == shell::KEY_TAB && ps2keyboard::was_alt_f4_shortcut_candidate()) {
         compositor::KernelCompositor::cycleFocus(ps2keyboard::is_shift_down());
+        draw();
+        return;
+    }
+
+    if (s_startMenuOpen) {
+        if (key == 27u || key == ps2keyboard::KEY_EVENT_ESCAPE) {
+            s_startMenuOpen = false;
+            s_hoverMenuLeft = s_hoverMenuRight = -1;
+        } else if (!handle_start_menu_key(key)) {
+            return;
+        }
         draw();
         return;
     }
