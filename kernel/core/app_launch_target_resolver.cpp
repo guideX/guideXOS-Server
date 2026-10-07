@@ -143,7 +143,7 @@ static void fill_shell_label(gxos::apps::LaunchTarget& target, const char* label
         target.diagnosticReason = "Bare-metal computer/root label opens File Explorer at the filesystem root";
     } else if (text_equals(label, "Documents")) {
         target.dispatchLaunchName = "Files";
-        target.pathParameter = "/Documents";
+        target.pathParameter = "/DOCS";
         target.diagnosticReason = "Bare-metal Documents label opens File Explorer at the Documents folder";
     } else if (text_equals(label, "Pictures")) {
         target.dispatchLaunchName = "Files";

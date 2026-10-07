@@ -1580,7 +1580,9 @@ static bool bare_metal_prepare_desktop_directory(const char* path)
 static bool bare_metal_ensure_standard_user_folders()
 {
     static const char* kFolders[] = {
-        "/Documents",
+        // The bare-metal FAT writer currently creates 8.3 names only.
+        // Keep the user-facing Documents label while storing this folder as DOCS.
+        "/DOCS",
         "/Pictures",
         "/Music",
         "/Network",
@@ -2631,7 +2633,7 @@ static void activate_start_menu_control_panel(int rightIndex = 5)
 static const char* bare_metal_start_menu_folder_path_for_label(const char* label)
 {
     if (desktop_str_eq(label, "Computer") || desktop_str_eq(label, "This System")) return "/";
-    if (desktop_str_eq(label, "Documents")) return "/Documents";
+    if (desktop_str_eq(label, "Documents")) return "/DOCS";
     if (desktop_str_eq(label, "Pictures")) return "/Pictures";
     if (desktop_str_eq(label, "Music")) return "/Music";
     if (desktop_str_eq(label, "Network")) return "/Network";
