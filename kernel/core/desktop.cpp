@@ -2598,10 +2598,12 @@ static int s_clickedMenuRight = -1; // clicked right-column item index
 static int s_startMenuSelection = 0;    // Currently selected item (keyboard nav)
 static int s_startMenuScroll = 0;       // Scroll offset for long lists
 static bool s_startMenuAllProgs = false; // Toggle between Recent Programs vs All Programs
+static bool s_startMenuRightColumnFocused = false;
 static char s_startMenuRecentPrograms[kMaxStartMenuRecent][64]; // Persisted recent programs for Start Menu
 static int s_startMenuRecentProgramCount = 0;
 static const int kStartMenuMaxRows = 14; // Max visible rows before scrolling
 static const int kStartMenuRowH = 22;    // Height of each menu row
+static bool handle_start_menu_key(uint32_t key);
 
 static bool start_menu_recent_contains(const char* value)
 {
@@ -5030,6 +5032,70 @@ static const char* start_menu_left_item_label_for_row(int row)
     if (row < 0) return "";
     int itemIndex = row + s_startMenuScroll;
     return start_menu_visible_item_for_index(itemIndex);
+}
+
+static bool handle_start_menu_key(uint32_t key)
+{
+    if (!s_startMenuOpen) return false;
+    if (!s_startMenuAllProgs && (key == shell::KEY_DOWN || key == '\r' || key == '\n') &&
+        get_start_menu_item_count() == 0) {
+        // The default Recent view may be empty on a fresh profile. Enter the
+        // useful catalog when navigating it rather than requiring a pointer.
+        s_startMenuAllProgs = true;
+        s_startMenuSelection = 0;
+        s_startMenuScroll = 0;
+        if (key == shell::KEY_DOWN) return true;
+    }
+    if (!s_startMenuAllProgs && (key == shell::KEY_LEFT || key == shell::KEY_RIGHT || key == shell::KEY_TAB)) {
+        s_startMenuAllProgs = true;
+        s_startMenuSelection = 0;
+        s_startMenuScroll = 0;
+    }
+    if (!s_startMenuAllProgs && key == shell::KEY_UP && get_start_menu_item_count() == 0) {
+        s_startMenuOpen = false;
+        s_hoverMenuLeft = s_hoverMenuRight = -1;
+        return true;
+    }
+    if (key == shell::KEY_UP || key == shell::KEY_DOWN) {
+        if (s_startMenuRightColumnFocused) {
+            const int delta = key == shell::KEY_DOWN ? 1 : -1;
+            s_clickedMenuRight = (s_clickedMenuRight < 0 ? 0 :
+                (s_clickedMenuRight + delta + kStartMenuRightCount) % kStartMenuRightCount);
+        } else {
+            const int count = get_start_menu_item_count();
+            if (count > 0) {
+                const int delta = key == shell::KEY_DOWN ? 1 : -1;
+                s_startMenuSelection = (s_startMenuSelection + delta + count) % count;
+                if (s_startMenuSelection < s_startMenuScroll) s_startMenuScroll = s_startMenuSelection;
+                else if (s_startMenuSelection >= s_startMenuScroll + kStartMenuMaxRows)
+                    s_startMenuScroll = s_startMenuSelection - kStartMenuMaxRows + 1;
+            }
+        }
+        return true;
+    }
+    if (key == shell::KEY_LEFT || key == shell::KEY_RIGHT || key == shell::KEY_TAB) {
+        s_startMenuRightColumnFocused = !s_startMenuRightColumnFocused;
+        if (s_startMenuRightColumnFocused && s_clickedMenuRight < 0) s_clickedMenuRight = 0;
+        return true;
+    }
+    if (key == 'a' || key == 'A') {
+        s_startMenuAllProgs = true;
+        s_startMenuSelection = 0;
+        s_startMenuScroll = 0;
+        s_startMenuRightColumnFocused = false;
+        return true;
+    }
+    if (key == '\r' || key == '\n') {
+        if (s_startMenuRightColumnFocused) {
+            if (s_clickedMenuRight >= 0 && s_clickedMenuRight < kStartMenuRightCount)
+                show_start_menu_notification(s_startMenuRight[s_clickedMenuRight].label);
+        } else {
+            const char* label = start_menu_visible_item_for_index(s_startMenuSelection);
+            if (label && label[0]) show_start_menu_notification(label);
+        }
+        return true;
+    }
+    return false;
 }
 
 // ============================================================
@@ -9864,6 +9930,7 @@ void toggle_start_menu()
         // Initialize start menu state when opening
         s_startMenuSelection = 0;
         s_startMenuScroll = 0;
+        s_startMenuRightColumnFocused = false;
         s_startMenuAllProgs = false;  // Start with Recent Programs view
         refresh_start_menu_list();     // Sync with desktop icon states
         s_hoverMenuLeft = -1;
@@ -11534,7 +11601,7 @@ void handle_key(uint32_t key)
     reset_alt_f4_shortcut_state();
 
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
-    if (key == kAltF4KeyCode) {
+    if (key == kAltF4KeyCode || key == ps2keyboard::KEY_EVENT_F4) {
         serial::puts("[desktop] key f4 candidate=");
         serial::puts(ps2keyboard::was_alt_f4_shortcut_candidate() ? "1" : "0");
         serial::puts(" leftAlt=");
@@ -11558,6 +11625,17 @@ void handle_key(uint32_t key)
         return;
     }
 
+    if (s_startMenuOpen) {
+        if (key == 27u || key == ps2keyboard::KEY_EVENT_ESCAPE) {
+            s_startMenuOpen = false;
+            s_hoverMenuLeft = s_hoverMenuRight = -1;
+        } else if (!handle_start_menu_key(key)) {
+            return;
+        }
+        draw();
+        return;
+    }
+
     // Bare-metal Native ELF validation and the installed PacMan package share
     // the normal desktop/App Model dispatcher.  F12 is an intentionally
     // narrow desktop shortcut for this external package so QEMU/physical
@@ -11569,6 +11647,12 @@ void handle_key(uint32_t key)
         const bool launched = launch_app("Nexgen PacMan");
         serial::puts("[NATIVE-ELF] desktop shortcut result=");
         serial::puts(launched ? "PASS\n" : "FAIL\n");
+        draw();
+        return;
+    }
+
+    if (key == shell::KEY_TAB && ps2keyboard::was_alt_f4_shortcut_candidate()) {
+        compositor::KernelCompositor::cycleFocus(ps2keyboard::is_shift_down());
         draw();
         return;
     }
@@ -11622,7 +11706,7 @@ void handle_key(uint32_t key)
         app::KernelWindow* focused = compositor::KernelCompositor::getFocusedWindow();
         if (focused) {
             // Escape closes app window
-            if (key == 27) {  // ESC
+            if (key == 27 || key == ps2keyboard::KEY_EVENT_ESCAPE) {  // ESC
                 compositor::KernelCompositor::closeWindow(focused->id);
                 draw();
                 return;
@@ -11643,11 +11727,20 @@ void handle_key(uint32_t key)
             return;
         }
     }
+
+    if (key == ps2keyboard::KEY_EVENT_ESCAPE && !shell::is_open()) {
+        if (s_rightClickMenuOpen) close_context_menu();
+        else if (s_controlPanelOpen) s_controlPanelOpen = false;
+        else if (s_deviceManagerOpen) s_deviceManagerOpen = false;
+        else if (s_networkAdaptersOpen) s_networkAdaptersOpen = false;
+        draw();
+        return;
+    }
     
     // If shell is open, send keys to it
     if (shell::is_open()) {
         // Escape closes shell
-        if (key == 27) {  // ESC
+        if (key == 27 || key == ps2keyboard::KEY_EVENT_ESCAPE) {  // ESC
             close_shell_surface_if_open();
             draw();
             return;

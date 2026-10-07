@@ -106,6 +106,9 @@ public:
     
     // Set focus to a window
     static void setFocus(uint32_t windowId);
+    static void cycleFocus(bool reverse = false);
+    static uint32_t getCycleFocusTarget(bool reverse = false);
+    static uint32_t getCloseFocusTarget();
     
     // Bring window to front
     static void bringToFront(uint32_t windowId);

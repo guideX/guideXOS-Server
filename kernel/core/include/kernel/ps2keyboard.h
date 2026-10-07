@@ -20,6 +20,9 @@ static const uint32_t KEY_EVENT_UP = 0x100;
 static const uint32_t KEY_EVENT_DOWN = 0x101;
 static const uint32_t KEY_EVENT_LEFT = 0x102;
 static const uint32_t KEY_EVENT_RIGHT = 0x103;
+static const uint32_t KEY_EVENT_TAB = 0x107;
+static const uint32_t KEY_EVENT_ESCAPE = 0x10B;
+static const uint32_t KEY_EVENT_F4 = 0x113;
 
 // Initialize the PS/2 keyboard driver
 void init();

@@ -143,6 +143,7 @@ static const uint32_t KEY_END    = 0x105;
 static const uint32_t KEY_DELETE = 0x106;
 static const uint32_t KEY_PGUP   = 0x108;
 static const uint32_t KEY_PGDN   = 0x109;
+static const uint32_t KEY_ESCAPE = 0x10B;
 static const uint32_t KEY_F1     = 0x110;
 static const uint32_t KEY_F11    = 0x11A;
 static const uint32_t KEY_F12    = 0x11B;
@@ -279,6 +280,41 @@ void irq_handler()
         if (keyUp) {
             return;
         }
+        if (!keyUp) {
+            enqueue_event(KEY_F1 + 3, false);
+            s_lastKey = KEY_F1 + 3;
+            s_hasKey = true;
+            s_lastKeyAltF4Candidate = altF4Candidate;
+            s_lastKeyAltLeftDown = altF4LeftDown;
+            s_lastKeyAltRightDown = altF4RightDown;
+            return;
+        }
+    }
+
+    if (!s_extendedKey && scancode == 0x0D) { // Tab
+        s_extendedKey = false;
+        if (!keyUp) {
+            const bool altTabCandidate = s_altDown || s_rightAltDown;
+            enqueue_event(shell::KEY_TAB, false);
+            s_lastKey = shell::KEY_TAB;
+            s_hasKey = true;
+            s_lastKeyAltF4Candidate = altTabCandidate;
+            s_lastKeyAltLeftDown = altTabCandidate && s_altDown;
+            s_lastKeyAltRightDown = altTabCandidate && s_rightAltDown;
+        }
+        return;
+    }
+    if (!s_extendedKey && scancode == 0x76) { // Escape
+        s_extendedKey = false;
+        if (!keyUp) {
+            enqueue_event(KEY_ESCAPE, false);
+            s_lastKey = KEY_ESCAPE;
+            s_hasKey = true;
+            s_lastKeyAltF4Candidate = false;
+            s_lastKeyAltLeftDown = false;
+            s_lastKeyAltRightDown = false;
+        }
+        return;
     }
     
     uint32_t key = 0;

@@ -1022,6 +1022,32 @@ void KernelCompositor::drawTitlebar(app::KernelWindow* window) {
     hline(minBtnX + 4, btnY + BUTTON_SIZE - 5, 8, iconColor);
 }
 
+void KernelCompositor::cycleFocus(bool reverse) {
+    const uint32_t target = getCycleFocusTarget(reverse);
+    if (target != 0u) setFocus(target);
+}
+
+uint32_t KernelCompositor::getCycleFocusTarget(bool reverse) {
+    int current = findWindowIndex(s_focusedWindowId);
+    if (current < 0) return 0u;
+    for (int offset = 1; offset <= MAX_WINDOWS; ++offset) {
+        int index = (current + (reverse ? -offset : offset) + MAX_WINDOWS * 2) % MAX_WINDOWS;
+        if (s_windows[index].valid && s_windows[index].window &&
+            (s_windows[index].window->flags & app::WF_VISIBLE) &&
+            !(s_windows[index].window->flags & app::WF_MINIMIZED) && index != current) {
+            return s_windows[index].window->id;
+        }
+    }
+    return 0u;
+}
+
+uint32_t KernelCompositor::getCloseFocusTarget() {
+    app::KernelWindow* focused = getFocusedWindow();
+    if (!focused || !(focused->flags & app::WF_CLOSABLE) ||
+        !(focused->flags & app::WF_VISIBLE) || (focused->flags & app::WF_MINIMIZED)) return 0u;
+    return focused->id;
+}
+
 static bool kernelCompositorTextEquals(const char* left, const char* right)
 {
     if (!left || !right) return false;
