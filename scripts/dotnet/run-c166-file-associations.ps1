@@ -2,7 +2,8 @@ param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
     [string]$EvidenceRoot = "",
     [switch]$BuildProofProducts,
-    [switch]$RunProofBoots
+    [switch]$RunProofBoots,
+    [switch]$HostTestsOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,7 +15,11 @@ if ((& git -C $RepoRoot branch --show-current).Trim() -ne 'v1.1_DOTNET_SUPPORT')
 $head = (& git -C $RepoRoot rev-parse HEAD).Trim()
 if (-not $head) { throw 'Could not resolve repository HEAD.' }
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = Join-Path $RepoRoot 'out\dotnet\c166r3-file-associations'
+    $EvidenceRoot = if ($HostTestsOnly) {
+        Join-Path $RepoRoot 'out\dotnet\c166r7-host-validation'
+    } else {
+        Join-Path $RepoRoot 'out\dotnet\c166r3-file-associations'
+    }
 }
 $EvidenceRoot = [System.IO.Path]::GetFullPath($EvidenceRoot)
 $allowedRoot = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot 'out\dotnet')).TrimEnd('\', '/') + '\'
@@ -22,6 +27,54 @@ if (-not $EvidenceRoot.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnor
     throw "C166R3 evidence must remain under $allowedRoot"
 }
 New-Item -ItemType Directory -Force -Path $EvidenceRoot | Out-Null
+
+if ($HostTestsOnly) {
+    $gxxCommand = Get-Command g++.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    $dotnetCommand = Get-Command dotnet.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $gxxCommand) { throw 'C166R7 host mode requires a C++ host compiler (g++).' }
+    if (-not $dotnetCommand) { throw 'C166R7 host mode requires the .NET SDK.' }
+    $nativeExe = Join-Path $EvidenceRoot 'C166Association.exe'
+    $nativeLog = Join-Path $EvidenceRoot 'native-host-tests.txt'
+    $nativeSources = @(
+        (Join-Path $RepoRoot 'samples\host\C166Association\main.cpp'),
+        (Join-Path $RepoRoot 'kernel\core\file_association_service.cpp'))
+    & $gxxCommand.Source -std=c++14 -O2 -Wall -Wextra "-I$RepoRoot" `
+        "-I$(Join-Path $RepoRoot 'kernel\core')" @nativeSources -o $nativeExe
+    if ($LASTEXITCODE -ne 0) { throw "C166R7 native host compilation failed: $LASTEXITCODE" }
+    $nativeOutput = & $nativeExe 2>&1 | Out-String
+    $nativeExit = $LASTEXITCODE
+    Set-Content -LiteralPath $nativeLog -Value $nativeOutput -Encoding utf8
+    if ($nativeExit -ne 0) { throw "C166R7 native host tests failed; see $nativeLog" }
+    $managedProject = Join-Path $RepoRoot 'samples\host\C166Association\ManagedHostTests.csproj'
+    $managedLog = Join-Path $EvidenceRoot 'managed-host-tests.txt'
+    $managedOutput = & $dotnetCommand.Source run --project $managedProject --configuration Release 2>&1 | Out-String
+    $managedExit = $LASTEXITCODE
+    Set-Content -LiteralPath $managedLog -Value $managedOutput -Encoding utf8
+    if ($managedExit -ne 0) { throw "C166R7 managed host tests failed; see $managedLog" }
+    $nativeCount = 0
+    if ($nativeOutput -match 'native host cases=(\d+)') { $nativeCount = [int]$Matches[1] }
+    $managedCount = 0
+    if ($managedOutput -match 'C166-MANAGED-ASSOCIATION-TESTS cases=(\d+)') {
+        $managedCount = [int]$Matches[1]
+    }
+    $manifest = [ordered]@{
+        phase='C166R7'; sourceHead=$head; productionModule='kernel/core/file_association_service.cpp'
+        storageInterface='kernel/core/include/kernel/file_association_service.h'
+        productionVfsAdapter='kernel/core/file_association_vfs_storage.cpp'
+        hostStorageAdapter='samples/host/C166Association/fake_storage.h'
+        nativeCases=$nativeCount; abiCases=1; managedCases=$managedCount
+        crcVectors=@('123456789=0xCBF43926','empty=0x00000000')
+        partialWriteCases=136; stressTransactions=1000; resolverLookups=1000
+        hostSuiteStatus='incomplete: full 30-case dual-slot validation and persistent CRC/generation stress audit remain'
+        accepted=$false
+    }
+    $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath `
+        (Join-Path $EvidenceRoot 'c166r7-host-manifest.json') -Encoding utf8
+    Write-Host $nativeOutput.Trim()
+    Write-Host $managedOutput.Trim()
+    Write-Host "C166R7 host results recorded; incomplete suite does not emit the acceptance marker."
+    return
+}
 
 function Resolve-Tool([string]$Name, [string[]]$Candidates) {
     foreach ($candidate in $Candidates) {

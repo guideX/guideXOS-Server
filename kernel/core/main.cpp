@@ -26,6 +26,7 @@
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/desktop_capabilities.h"
 #include "include/kernel/app_launch_target_resolver.h"
+#include "include/kernel/file_association_vfs_storage.h"
 #include "include/kernel/address_space.h"
 #include "include/kernel/nativeaot_application.h"
 #include "built_in_app_metadata.h"
@@ -741,6 +742,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
         // C166 loads the App Model association override image before any
         // application or File Explorer activation can consult the resolver.
+        kernel::appmodel::initializeFileAssociationVfsStorage();
         kernel::appmodel::initializeFileAssociations();
         if (kernel::appmodel::fileAssociationPersistenceRejected()) {
             kernel::serial::puts("[APP-MODEL] association-persistence=invalid-ignored\n");

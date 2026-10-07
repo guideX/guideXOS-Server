@@ -31,10 +31,11 @@ internal static unsafe class GuideXosFileAssociationsC166Tests
         passed &= Case(ref cases, GuideXosFileAssociations.Query(&context,
             &table, ".txt"u8).Status == GuideXosAssociationStatus.NotSupported);
         table.size = GxAbi.HostCallTableSize;
-        table.version = 99u;
+        table.version = 0u;
         passed &= Case(ref cases, GuideXosFileAssociations.Query(&context,
             &table, ".txt"u8).Status == GuideXosAssociationStatus.NotSupported);
         table.version = GxAbi.HostAbiVersion;
+        table.capabilities = GxAbi.CapabilityAssociationService;
         table.associationService = null;
         passed &= Case(ref cases, GuideXosFileAssociations.Query(&context,
             &table, ".txt"u8).Status == GuideXosAssociationStatus.NotSupported);
@@ -58,6 +59,19 @@ internal static unsafe class GuideXosFileAssociationsC166Tests
             GuideXosAssociationStatus.Success &&
             success.Response.hasEffectiveAssociation == 1u && s_calls == 1 &&
             s_lastOperation == 0u);
+        passed &= Case(ref cases, GuideXosFileAssociations.SetDefault(&context,
+            &table, ".txt"u8, "com.guidexos.apps.managed.notes"u8).Status ==
+            GuideXosAssociationStatus.Success && s_lastOperation == 1u);
+        passed &= Case(ref cases, GuideXosFileAssociations.Disable(&context,
+            &table, ".txt"u8).Status == GuideXosAssociationStatus.Success &&
+            s_lastOperation == 2u);
+        passed &= Case(ref cases, GuideXosFileAssociations.Reset(&context,
+            &table, ".txt"u8).Status == GuideXosAssociationStatus.Success &&
+            s_lastOperation == 3u);
+        int callsAfterOperations = s_calls;
+        passed &= Case(ref cases, GuideXosFileAssociations.Query(&context,
+            &table, ".txt"u8).Status == GuideXosAssociationStatus.Success &&
+            s_calls == callsAfterOperations + 1 && s_lastOperation == 0u);
 
         s_status = -5;
         passed &= Case(ref cases, GuideXosFileAssociations.Query(&context,
@@ -91,13 +105,17 @@ internal static unsafe class GuideXosFileAssociationsC166Tests
         passed &= Case(ref cases, GuideXosFileAssociations.SetDefault(&context,
             &table, ".txt"u8, tooLong).Status ==
             GuideXosAssociationStatus.InvalidArgument);
+        Span<byte> maximumExtension = stackalloc byte[16];
+        maximumExtension.Fill((byte)'x');
+        passed &= Case(ref cases, GuideXosFileAssociations.Query(&context,
+            &table, maximumExtension).Status == GuideXosAssociationStatus.InvalidArgument);
         s_status = 0;
         s_response = default;
         s_response.overrideState = 99u;
         passed &= Case(ref cases, GuideXosFileAssociations.Query(&context,
             &table, ".txt"u8).Status == GuideXosAssociationStatus.InvalidResponse);
 
-        if (passed && cases >= 15)
+        if (passed && cases >= 20)
         {
             Span<byte> line = stackalloc byte[112];
             int position = 0;
@@ -109,7 +127,7 @@ internal static unsafe class GuideXosFileAssociationsC166Tests
             host?.TryLog(line[..position]);
         }
         else host?.TryLog("C166-MANAGED-ASSOCIATION-TESTS result=FAIL"u8);
-        return passed && cases >= 15;
+        return passed && cases >= 20;
     }
 
     private static NativeAssociationServiceResponse s_response;
@@ -118,7 +136,11 @@ internal static unsafe class GuideXosFileAssociationsC166Tests
     private static uint s_lastOperation;
 
     private static bool Case(ref int cases, bool value)
-    { cases++; return value; }
+    {
+        cases++;
+        if (!value) Console.WriteLine($"C166 managed case {cases} failed");
+        return value;
+    }
 
     private static NativeGxAppContext MakeContext(NativeHostCallTable* table)
     {

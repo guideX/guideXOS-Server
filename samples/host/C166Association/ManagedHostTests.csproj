@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DefineConstants>HOSTLOGPROOF_C166_FILE_ASSOCIATION_PROOF</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="../../managed/HostLogProof/NativeAbi.cs" Link="NativeAbi.cs" />
+    <Compile Include="../../managed/HostLogProof/GuideXos/GuideXosFileAssociationsC166.cs" Link="GuideXosFileAssociationsC166.cs" />
+    <Compile Include="../../managed/HostLogProof/GuideXos/GuideXosFileAssociationsC166Tests.cs" Link="GuideXosFileAssociationsC166Tests.cs" />
+  </ItemGroup>
+</Project>
