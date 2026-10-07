@@ -11,7 +11,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$SourceRoot = "",
+    [string]$PacmanRepository = "",
     [string]$OutputPackage = "",
     [switch]$Clean
 )
@@ -19,11 +19,19 @@ param(
 $ErrorActionPreference = "Stop"
 
 $ServerRoot = Split-Path -Parent $PSScriptRoot
-if ([string]::IsNullOrWhiteSpace($SourceRoot)) {
-    $SourceRoot = if ([string]::IsNullOrWhiteSpace($env:GUIDEXOS_PACMAN_SOURCE_ROOT)) {
+$revisionFile = Join-Path $PSScriptRoot "pacman-revision.txt"
+if (!(Test-Path -LiteralPath $revisionFile -PathType Leaf)) {
+    throw "Pinned PacMan revision file is missing: $revisionFile"
+}
+$pinnedRevision = (Get-Content -LiteralPath $revisionFile -Raw).Trim()
+if ($pinnedRevision -notmatch '^[0-9a-fA-F]{40}$') {
+    throw "Pinned PacMan revision must be a full 40-character commit SHA: $revisionFile"
+}
+if ([string]::IsNullOrWhiteSpace($PacmanRepository)) {
+    $PacmanRepository = if ([string]::IsNullOrWhiteSpace($env:GUIDEXOS_PACMAN_REPOSITORY)) {
         "D:\dev\pacman\guidexos"
     } else {
-        $env:GUIDEXOS_PACMAN_SOURCE_ROOT
+        $env:GUIDEXOS_PACMAN_REPOSITORY
     }
 }
 if ([string]::IsNullOrWhiteSpace($OutputPackage)) {
@@ -40,6 +48,8 @@ $sdkInclude = Join-Path $ServerRoot "sdk\include"
 $buildRoot = Join-Path $ServerRoot "build\pacman-native\amd64"
 $objectRoot = Join-Path $buildRoot "objects"
 $builtElf = Join-Path $buildRoot "pacman.elf"
+$sourceStageRoot = Join-Path $buildRoot "source-$pinnedRevision"
+$archivePath = Join-Path $buildRoot "source-$pinnedRevision.zip"
 $outputElf = Join-Path $OutputPackage "bin\amd64\pacman.elf"
 
 function Assert-File([string]$Path, [string]$Description) {
@@ -66,6 +76,34 @@ function Invoke-Native([string]$FilePath, [string[]]$Arguments, [string]$Descrip
     }
 }
 
+if (!(Test-Path -LiteralPath $PacmanRepository -PathType Container)) {
+    throw "PacMan Git repository not found: $PacmanRepository. Set GUIDEXOS_PACMAN_REPOSITORY or pass -PacmanRepository."
+}
+$resolvedRevision = & git -C $PacmanRepository rev-parse --verify "$pinnedRevision^{commit}" 2>$null
+if ($LASTEXITCODE -ne 0 -or $resolvedRevision.Trim() -ne $pinnedRevision.ToLowerInvariant()) {
+    throw "Required PacMan commit $pinnedRevision is unavailable in '$PacmanRepository'. Obtain that commit locally; normal builds do not fetch from the network."
+}
+$siblingHead = & git -C $PacmanRepository rev-parse HEAD
+if ($LASTEXITCODE -ne 0) { throw "Unable to read PacMan repository HEAD: $PacmanRepository" }
+Write-Host "      PacMan pinned revision: $pinnedRevision" -ForegroundColor Cyan
+Write-Host "      PacMan repository HEAD: $($siblingHead.Trim())" -ForegroundColor DarkGray
+Write-Host "      Exporting committed source to: $sourceStageRoot" -ForegroundColor Cyan
+
+if ($Clean -and (Test-Path -LiteralPath $buildRoot)) {
+    Remove-Item -LiteralPath $buildRoot -Recurse -Force
+}
+if (Test-Path -LiteralPath $sourceStageRoot) {
+    Remove-Item -LiteralPath $sourceStageRoot -Recurse -Force
+}
+if (Test-Path -LiteralPath $archivePath) {
+    Remove-Item -LiteralPath $archivePath -Force
+}
+New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
+Invoke-Native "git" @("-C", $PacmanRepository, "archive", "--format=zip", "--output=$archivePath", $pinnedRevision) "PacMan pinned source export"
+Expand-Archive -LiteralPath $archivePath -DestinationPath $sourceStageRoot -Force
+Remove-Item -LiteralPath $archivePath -Force
+$SourceRoot = $sourceStageRoot
+
 Assert-File $clang "PacMan clang++ compiler"
 Assert-File $lld "PacMan lld linker"
 Assert-File (Join-Path $sdkInclude "guidexos\abi.h") "guideXOS Native ELF ABI header"
@@ -85,9 +123,6 @@ Assert-File (Join-Path $SourceRoot "app.json") "PacMan App Model manifest"
 Assert-File (Join-Path $SourceRoot "resources\generated\level1.gximg") "PacMan level asset"
 Assert-File (Join-Path $SourceRoot "resources\generated\pacpics.gximg") "PacMan sprite asset"
 
-if ($Clean -and (Test-Path -LiteralPath $buildRoot)) {
-    Remove-Item -LiteralPath $buildRoot -Recurse -Force
-}
 New-Item -ItemType Directory -Path $objectRoot -Force | Out-Null
 
 $commonFlags = @(
