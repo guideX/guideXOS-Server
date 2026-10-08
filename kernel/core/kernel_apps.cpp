@@ -6974,6 +6974,11 @@ void DiskManagerApp::updateInitializeControls() {
         m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS;
     const bool formatOptions = m_dialogIsFormat &&
         m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS;
+    const bool formatScanCancelable = m_dialogIsFormat &&
+        m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
+        !m_formatJob.commitStarted &&
+        (m_formatJob.state == storage::FAT32_FORMAT_JOB_SCANNING ||
+         m_formatJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT);
     const bool deleteConfirm = m_dialogIsDelete &&
         m_initializeDialogState == INITIALIZE_DIALOG_DELETE_CONFIRM;
     const bool gptRepairConfirm = m_dialogIsGptRepair &&
@@ -7143,6 +7148,10 @@ void DiskManagerApp::updateInitializeControls() {
             ? 0xFF34465C : 0xFF505060;
         if (cancel) cancel->bgColor = m_createInputFocus == 2
             ? 0xFF34465C : 0xFF505060;
+    } else if (formatScanCancelable) {
+        if (confirm) confirm->bgColor = 0xFF505060;
+        if (cancel) cancel->bgColor = m_createInputFocus == 2
+            ? 0xFF34465C : 0xFF505060;
     } else {
         if (confirm) confirm->bgColor = 0xFF505060;
         if (cancel) cancel->bgColor = 0xFF505060;
@@ -7156,11 +7165,6 @@ void DiskManagerApp::updateInitializeControls() {
             m_createRequest.requestedScheme == storage::PARTITION_SCHEME_GPT);
         nameInput->enabled = nameInput->visible;
     }
-    const bool formatScanCancelable = m_dialogIsFormat &&
-        m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
-        !m_formatJob.commitStarted &&
-        (m_formatJob.state == storage::FAT32_FORMAT_JOB_SCANNING ||
-         m_formatJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT);
     const bool showCancel = m_mountDialogOpen || formatScanCancelable ||
         (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED &&
          m_initializeDialogState != INITIALIZE_DIALOG_RUNNING);
@@ -7361,6 +7365,23 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
     if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED) {
         if (escape) {
             closeInitializeDialog();
+        } else if (m_initializeDialogState == INITIALIZE_DIALOG_RUNNING && tab) {
+            const bool formatScanCancelable = m_dialogIsFormat &&
+                !m_formatJob.commitStarted &&
+                (m_formatJob.state == storage::FAT32_FORMAT_JOB_SCANNING ||
+                 m_formatJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT);
+            m_createInputFocus = formatScanCancelable ? 2 : 0;
+            updateInitializeControls();
+            invalidate();
+        } else if (enter &&
+                   m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
+                   m_dialogIsFormat && m_createInputFocus == 2 &&
+                   !m_formatJob.commitStarted &&
+                   (m_formatJob.state == storage::FAT32_FORMAT_JOB_SCANNING ||
+                    m_formatJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT)) {
+            app::Widget* cancel = getWidget(m_cancelInitializeBtnId);
+            if (cancel && cancel->visible && cancel->enabled)
+                onWidgetClick(m_cancelInitializeBtnId);
         } else if (m_dialogIsGptRepair && tab) {
             m_gptRepairButtonFocus = static_cast<uint8_t>(
                 (m_gptRepairButtonFocus + 1) % 2);
@@ -7471,9 +7492,14 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
 }
 
 void DiskManagerApp::onKeyChar(char c) {
-    if (c == ' ' &&
+    if ((c == ' ' || c == '\r' || c == '\n') &&
         ((m_dialogIsFormat && m_initializeDialogState ==
             INITIALIZE_DIALOG_CREATE_OPTIONS) ||
+         (m_dialogIsFormat && m_initializeDialogState ==
+            INITIALIZE_DIALOG_RUNNING && m_createInputFocus == 2 &&
+          !m_formatJob.commitStarted &&
+          (m_formatJob.state == storage::FAT32_FORMAT_JOB_SCANNING ||
+           m_formatJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT)) ||
          (m_dialogIsGptRepair && m_initializeDialogState ==
             INITIALIZE_DIALOG_GPT_REPAIR_CONFIRM) ||
          (m_initializeDialogState == INITIALIZE_DIALOG_CLOSED &&
