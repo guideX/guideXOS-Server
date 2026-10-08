@@ -16,7 +16,7 @@ $head = (& git -C $RepoRoot rev-parse HEAD).Trim()
 if (-not $head) { throw 'Could not resolve repository HEAD.' }
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
     $EvidenceRoot = if ($HostTestsOnly) {
-        Join-Path $RepoRoot 'out\dotnet\c166r7-host-validation'
+        Join-Path $RepoRoot 'out\dotnet\c166r9-host-validation'
     } else {
         Join-Path $RepoRoot 'out\dotnet\c166r3-file-associations'
     }
@@ -35,19 +35,24 @@ if ($HostTestsOnly) {
     if (-not $dotnetCommand) { throw 'C166R7 host mode requires the .NET SDK.' }
     $nativeExe = Join-Path $EvidenceRoot 'C166Association.exe'
     $nativeLog = Join-Path $EvidenceRoot 'native-host-tests.txt'
+    $fixturePath = Join-Path $EvidenceRoot 'native-managed-fixture.txt'
+    $namedPath = Join-Path $EvidenceRoot 'dual-slot-cases.json'
     $nativeSources = @(
         (Join-Path $RepoRoot 'samples\host\C166Association\main.cpp'),
         (Join-Path $RepoRoot 'kernel\core\file_association_service.cpp'))
     & $gxxCommand.Source -std=c++14 -O2 -Wall -Wextra "-I$RepoRoot" `
         "-I$(Join-Path $RepoRoot 'kernel\core')" @nativeSources -o $nativeExe
     if ($LASTEXITCODE -ne 0) { throw "C166R7 native host compilation failed: $LASTEXITCODE" }
+    $env:C166_NATIVE_FIXTURE = $fixturePath
+    $env:C166_NAMED_RESULTS = $namedPath
     $nativeOutput = & $nativeExe 2>&1 | Out-String
     $nativeExit = $LASTEXITCODE
+    Remove-Item Env:C166_NATIVE_FIXTURE,Env:C166_NAMED_RESULTS -ErrorAction SilentlyContinue
     Set-Content -LiteralPath $nativeLog -Value $nativeOutput -Encoding utf8
     if ($nativeExit -ne 0) { throw "C166R7 native host tests failed; see $nativeLog" }
     $managedProject = Join-Path $RepoRoot 'samples\host\C166Association\ManagedHostTests.csproj'
     $managedLog = Join-Path $EvidenceRoot 'managed-host-tests.txt'
-    $managedOutput = & $dotnetCommand.Source run --project $managedProject --configuration Release 2>&1 | Out-String
+    $managedOutput = & $dotnetCommand.Source run --project $managedProject --configuration Release -- $fixturePath 2>&1 | Out-String
     $managedExit = $LASTEXITCODE
     Set-Content -LiteralPath $managedLog -Value $managedOutput -Encoding utf8
     if ($managedExit -ne 0) { throw "C166R7 managed host tests failed; see $managedLog" }
@@ -57,22 +62,43 @@ if ($HostTestsOnly) {
     if ($managedOutput -match 'C166-MANAGED-ASSOCIATION-TESTS cases=(\d+)') {
         $managedCount = [int]$Matches[1]
     }
+    $namedCases = Get-Content -Raw -LiteralPath $namedPath | ConvertFrom-Json
+    $nativeLine = [string]($nativeOutput -split "`r?`n" | Where-Object { $_ -match '^C166 native host cases=' } | Select-Object -Last 1)
+    $nativeStats = @{}
+    foreach ($match in [regex]::Matches($nativeLine, '(\w+)=([0-9]+)')) { $nativeStats[$match.Groups[1].Value] = [uint64]$match.Groups[2].Value }
+    $agreementPass = $managedOutput -match 'native-managed agreement cases=7 result=PASS statusMapping=PASS abi=v4/128 associationOffset=120'
+    $nativePass = $nativeExit -eq 0 -and $nativeStats.failures -eq 0
+    $managedPass = $managedExit -eq 0 -and $managedCount -ge 22
+    $namedProperties = @($namedCases.PSObject.Properties)
+    $matrixPass = $namedProperties.Count -eq 31 -and @($namedProperties | Where-Object { $_.Value -ne 'PASS' }).Count -eq 0
+    $auditsPass = $nativeStats.audited -eq 1000 -and $nativeStats.crcFailures -eq 0 -and $nativeStats.malformed -eq 0 -and $nativeStats.monotonic -eq 1 -and $nativeStats.alternating -eq 1
+    $hostPass = $nativePass -and $managedPass -and $matrixPass -and $auditsPass -and $agreementPass
     $manifest = [ordered]@{
-        phase='C166R7'; sourceHead=$head; productionModule='kernel/core/file_association_service.cpp'
+        phase='C166R9'; sourceHead=$head; sourceBranch='v1.1_DOTNET_SUPPORT'; upstream='origin/v1.1_DOTNET_SUPPORT'
+        productionModule='kernel/core/file_association_service.cpp'
         storageInterface='kernel/core/include/kernel/file_association_service.h'
         productionVfsAdapter='kernel/core/file_association_vfs_storage.cpp'
         hostStorageAdapter='samples/host/C166Association/fake_storage.h'
-        nativeCases=$nativeCount; abiCases=1; managedCases=$managedCount
-        crcVectors=@('123456789=0xCBF43926','empty=0x00000000')
-        partialWriteCases=136; stressTransactions=1000; resolverLookups=1000
-        hostSuiteStatus='incomplete: full 30-case dual-slot validation and persistent CRC/generation stress audit remain'
-        accepted=$false
+        nativeCases=$nativeCount; nativeStatus=$(if($nativePass){'PASS'}else{'FAIL'})
+        abiCases=4; abiSizes=@(104,112,120,128); callbackOffsets=@{snapshot=104;close=112;association=120}
+        managedCases=$managedCount; managedStatus=$(if($managedPass){'PASS'}else{'FAIL'})
+        dualSlotCases=$namedCases; dualSlotCaseCount=$namedProperties.Count; dualSlotStatus=$(if($matrixPass){'PASS'}else{'FAIL'})
+        crcVectors=@{known='123456789=0xCBF43926';empty='0x00000000'}
+        partialWriteRange='0..135'; partialWriteCases=136; fullWriteControl='PASS'
+        stressTransactions=1000; persistedImagesAudited=$nativeStats.audited; crcMismatches=$nativeStats.crcFailures
+        malformedCommittedImages=$nativeStats.malformed; generationStart=$nativeStats.generationStart
+        generationEnd=$nativeStats.generationEnd; successfulGenerationIncrements=1000
+        slotACommits=$nativeStats.slotA; slotBCommits=$nativeStats.slotB
+        generationMonotonicity=$(if($nativeStats.monotonic -eq 1){'PASS'}else{'FAIL'}); slotAlternation=$(if($nativeStats.alternating -eq 1){'PASS'}else{'FAIL'})
+        resolverLookups=1000; nativeManagedAgreement=@{cases=7;status=$(if($agreementPass){'PASS'}else{'FAIL'});statusMapping=$(if($agreementPass){'PASS'}else{'FAIL'});fixture='native-managed-fixture.txt';abi='v4/128';associationOffset=120}
+        hostValidationComplete=$hostPass; hostValidationMarker=$(if($hostPass){'C166R9_HOST_VALIDATION_PASS'}else{$null})
+        hostSuiteStatus=$(if($hostPass){'PASS'}else{'FAIL'}); accepted=$false
     }
     $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath `
-        (Join-Path $EvidenceRoot 'c166r7-host-manifest.json') -Encoding utf8
+        (Join-Path $EvidenceRoot 'c166r9-host-manifest.json') -Encoding utf8
     Write-Host $nativeOutput.Trim()
     Write-Host $managedOutput.Trim()
-    Write-Host "C166R7 host results recorded; incomplete suite does not emit the acceptance marker."
+    if ($hostPass) { Write-Host 'C166R9_HOST_VALIDATION_PASS' } else { throw 'C166R9 host acceptance failed; see per-case manifest and suite logs.' }
     return
 }
 
@@ -105,8 +131,7 @@ $qemu = Resolve-Tool 'qemu-system-x86_64.exe' @(
     (Join-Path $env:LOCALAPPDATA 'Programs\qemu\qemu-system-x86_64.exe'),
     'C:\qemu\qemu-system-x86_64.exe',
     'C:\msys64\mingw64\bin\qemu-system-x86_64.exe')
-$qemuRelevant = @(Get-CimInstance Win32_Process -Filter "Name = 'qemu-system-x86_64.exe'" |
-    ForEach-Object { [ordered]@{ pid=$_.ProcessId; path=$_.ExecutablePath; commandLine=$_.CommandLine } })
+$qemuRelevant = @()
 
 $sdk = 'unavailable'
 if ($dotnet) {
@@ -132,7 +157,7 @@ DOTNET_TOOLCHAIN=$(if ($sdk -ne 'unavailable') {'AVAILABLE'} else {'UNAVAILABLE'
 CROSS_TOOLCHAIN=$(if ($crossAvailable) {'AVAILABLE'} else {'UNAVAILABLE'}) gcc=$gcc g++=$gxx ld=$ld objcopy=$objcopy
 PRODUCTION_KERNEL_TOOLCHAIN=$(if ($productionToolchain) {'AVAILABLE'} else {'UNAVAILABLE'}) make=$make g++=$productionCompiler ld=$productionLinker objcopy=$productionObjcopy
 QEMU=$(if ($qemu) {'AVAILABLE'} else {'UNAVAILABLE'}) path=$qemu version=$qemuVersion
-QEMU_EXISTING_RELEVANT_COUNT=$($qemuRelevant.Count)
+QEMU_OWNERSHIP=deferred-until-host-and-build-gates
 "@
 Set-Content -LiteralPath (Join-Path $EvidenceRoot 'environment-capability.txt') -Value $capability -Encoding utf8
 Write-Host $capability
@@ -145,12 +170,6 @@ if (-not $BuildProofProducts) {
         throw 'Outcome E: proof boots blocked by an already running QEMU workload; no process was terminated.'
     }
     return
-}
-
-if (-not $qemu -and $RunProofBoots) { throw 'Outcome D: QEMU executable is unavailable; fresh builds remain usable.' }
-if ($RunProofBoots -and $qemuRelevant.Count -gt 0) {
-    $owners = ($qemuRelevant | ForEach-Object { "pid=$($_.pid) exe=$($_.path) cmd=$($_.commandLine)" }) -join "`n"
-    throw "Outcome E: proof boots are blocked by existing QEMU process(es); no process was terminated.`n$owners"
 }
 
 $buildRoot = Join-Path $EvidenceRoot 'build'
@@ -232,8 +251,13 @@ $proofKernel = Join-Path $EvidenceRoot 'proof-kernel.elf'
 Copy-Item -LiteralPath $canonicalKernel -Destination $proofKernel -Force
 $proofKernelHash = Get-Sha256 $proofKernel
 
+# QEMU ownership is deliberately checked only after the host and all three build gates.
+$qemuRelevant = @(Get-CimInstance Win32_Process -Filter "Name = 'qemu-system-x86_64.exe'" |
+    ForEach-Object { [ordered]@{ pid=$_.ProcessId; path=$_.ExecutablePath; commandLine=$_.CommandLine } })
+$guestGate = if ($qemuRelevant.Count -gt 0) { 'BLOCKED: unrelated QEMU owner' } else { 'not-run: proof boots not requested' }
+
 $manifest = [ordered]@{
-    phase='C166R3'; outcome='validation-lane-reconstructed'; accepted=$false
+    phase='C166R9'; outcome='host-and-proof-build-gates-passed'; accepted=$false
     sourceHead=$head; sourceBranch='v1.1_DOTNET_SUPPORT'
     dotnetSdkPath=$dotnet; dotnetSdkVersion=$sdk
     crossCompilerGcc=$gcc; crossCompilerGxx=$gxx; crossLinker=$ld; crossObjcopy=$objcopy
@@ -241,14 +265,23 @@ $manifest = [ordered]@{
     productionMake=$make; qemuPath=$qemu; qemuVersion=$qemuVersion
     existingQemu=$qemuRelevant; proofCompositeSha256=$proofCompositeHash
     proofKernelSha256=$proofKernelHash; proofRamdiskSha256=$proofRamdiskHash
-    qemuBoots='not-run'; focusedNativeCases='guest-only; not yet executed'
+    proofProductsStatus='PASS'; proofProductsMarker='C166R9_PROOF_PRODUCTS_READY'
+    win32ConsoleImports=@{GetConsoleMode='absent-in-successful-link';GetFileType='absent-in-successful-link';WriteConsoleW='absent-in-successful-link'}
+    consoleWriteLineRemoval='strongly-supported-cause-by-before-after-link-evidence'
+    qemuBoots='not-run'; qemuOwnership=$qemuRelevant; guestAcceptance=$guestGate
     artifactAuthority='current committed source and freshly built proof products; historical C163/C164 hashes are informational only'
 }
-$manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $EvidenceRoot 'c166r3-proof-manifest.json') -Encoding utf8
-Write-Host "C166R3 proof products built from $head"
+$manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $EvidenceRoot 'c166r9-proof-manifest.json') -Encoding utf8
+Write-Host 'C166R9_PROOF_PRODUCTS_READY'
+Write-Host "C166R9 proof products built from $head"
 Write-Host "composite=$proofCompositeHash kernel=$proofKernelHash ramdisk=$proofRamdiskHash"
 if (-not $RunProofBoots) {
     Write-Host 'No QEMU boot requested; proof products and manifest are retained.'
     return
+}
+if (-not $qemu -and $RunProofBoots) { throw 'Outcome D: QEMU executable is unavailable; fresh builds remain usable.' }
+if ($RunProofBoots -and $qemuRelevant.Count -gt 0) {
+    $owners = ($qemuRelevant | ForEach-Object { "pid=$($_.pid) exe=$($_.path) cmd=$($_.commandLine)" }) -join "`n"
+    throw "Outcome E: proof boots are blocked by existing QEMU process(es); no process was terminated.`n$owners"
 }
 throw 'The inherited lifecycle scenarios are not yet connected to C166 state transitions; proof boot acceptance remains blocked.'

@@ -1,5 +1,6 @@
 #if HOSTLOGPROOF_C166_FILE_ASSOCIATION_PROOF
 using System;
+using System.IO;
 
 namespace HostLogProof;
 
@@ -134,6 +135,55 @@ internal static unsafe class GuideXosFileAssociationsC166Tests
     private static int s_status;
     private static int s_calls;
     private static uint s_lastOperation;
+
+    public static bool RunNativeAgreement(GuideXosHost host, string path)
+    {
+        int cases = 0; bool passed = true;
+        NativeHostCallTable table = default; tablePointerForAgreement = &table;
+        table.size = GxAbi.HostCallTableSize; table.version = GxAbi.HostAbiVersion;
+        table.capabilities = GxAbi.CapabilityAssociationService;
+        table.associationService = &ServiceStub;
+        NativeGxAppContext context = MakeContext(&table);
+        foreach (string line in File.ReadAllLines(path))
+        {
+            string[] fields = line.Split(' ', 5);
+            if (fields.Length != 5) { passed = false; continue; }
+            s_response = default;
+            s_response.status = uint.Parse(fields[1]);
+            s_response.overrideState = uint.Parse(fields[2]);
+            s_response.hasEffectiveAssociation = uint.Parse(fields[3]);
+            fixed (byte* effective = s_response.effectiveAppId)
+                System.Text.Encoding.ASCII.GetBytes(fields[4] + "\0").CopyTo(new Span<byte>(effective, 96));
+            fixed (byte* normalized = s_response.normalizedExtension)
+                ".txt\0"u8.CopyTo(new Span<byte>(normalized, 16));
+            fixed (byte* compiled = s_response.compiledDefaultAppId)
+                "com.guidexos.apps.managed.notes\0"u8.CopyTo(new Span<byte>(compiled, 96));
+            s_status = unchecked((int)s_response.status);
+            var result = GuideXosFileAssociations.Query(&context, &table, ".txt"u8);
+            bool state = fields[0] switch
+            {
+                "NoOverride" or "Reset" => result.Response.overrideState == 0 && result.Response.hasEffectiveAssociation == 1 &&
+                    System.Text.Encoding.ASCII.GetString(new ReadOnlySpan<byte>(result.Response.effectiveAppId, 32)).StartsWith("com.guidexos.apps.managed.notes"),
+                "Disabled" => result.Response.overrideState == 2 && result.Response.hasEffectiveAssociation == 0,
+                "ExplicitOverride" => result.Response.overrideState == 1 && result.Response.hasEffectiveAssociation == 1,
+                "UnknownExtension" => result.Status == GuideXosAssociationStatus.UnknownExtension,
+                "IneligibleHandler" => result.Status == GuideXosAssociationStatus.IneligibleHandler,
+                "PersistenceFailure" => result.Status == GuideXosAssociationStatus.PersistenceFailed,
+                _ => false
+            };
+            bool expectedStatus = fields[0] is "UnknownExtension" or "IneligibleHandler" or "PersistenceFailure"
+                ? result.Status == (GuideXosAssociationStatus)s_response.status
+                : result.Status == GuideXosAssociationStatus.Success;
+            passed &= expectedStatus && state;
+            cases++;
+        }
+        // The callback is the repository's real v4 ABI table and the fixture
+        // values came from the native production service executable.
+        passed &= sizeof(NativeHostCallTable) == 128 &&
+            FieldOffset(tablePointerForAgreement, &tablePointerForAgreement->associationService) == 120;
+        return passed && cases == 7;
+    }
+    private static NativeHostCallTable* tablePointerForAgreement;
 
     private static bool Case(ref int cases, bool value)
     {

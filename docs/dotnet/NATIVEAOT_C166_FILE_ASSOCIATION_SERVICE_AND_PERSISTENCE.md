@@ -420,3 +420,90 @@ object/library and successful symbol removal remain unverified. No proof
 ramdisk, QEMU, guest, clean-install, or ordinary-boot claims are made for
 C166R8. C166 remains not accepted; C128 remains unverified; no Default Apps UI
 was added.
+
+## C166R9 — Final Host Acceptance and NativeAOT Link Verification (2026-10-07)
+
+C166R9 started at `db278252f793cb12a9962ee26924a23bcee59520` on
+`v1.1_DOTNET_SUPPORT`, upstream `origin/v1.1_DOTNET_SUPPORT`, clean, 1 ahead /
+0 behind. No later accepted C166 work existed.
+
+The host runner now serializes 31 individually named dual-slot cases to
+`out/dotnet/c166r9-host-validation/dual-slot-cases.json`. All 31 passed:
+`NoSlots`, `SlotAOnly`, `SlotBOnly`, `SlotANewer`, `SlotBNewer`,
+`EqualGenerationPrefersA`, `SlotABadCrcSlotBValid`,
+`SlotBBadCrcSlotAValid`, `SlotATruncatedSlotBValid`,
+`SlotBTruncatedSlotAValid`, `BothSlotsCorrupt`, `WrongMagic`,
+`WrongVersion`, `InvalidRecordCount`, `InvalidOverrideState`,
+`InvalidApplicationId`, `IneligibleHandler`, `ValidNoOverride`,
+`ValidDisabled`, `ValidManagedNotesOverride`, `GenerationProgression`,
+`GenerationExhaustion`, `CandidateWriteFailure`, `CandidateShortWrite`,
+`CandidateFlushFailure`, `CandidateReopenFailure`, `CandidateReadFailure`,
+`CandidateReadbackMismatch`, `FailedCandidatePreservesAuthoritativeSlot`,
+`SuccessfulCandidateBecomesAuthoritative`, and `NextMutationAlternatesSlot`.
+
+The storage interface exposes `readSlot`, `writeSlot`, and `flushSlot`; it has
+no independent reopen callback. `CandidateReopenFailure` therefore exercises
+the exact testable equivalent: a failure reading back the just-written
+candidate slot. A persisted ineligible handler is also the same invalid
+application-ID validation condition, while the named `IneligibleHandler` case
+independently exercises the service request rejection before any write.
+
+The native host suite passed 604 assertions. The exhaustive writes of 0..135
+bytes passed 136/136: each candidate failed, the authoritative slot remained
+byte-identical, reload returned the old state, and resolver output remained on
+the previous effective handler. The full 136-byte write control passed with
+readback validation before runtime commit. The existing service test routine
+and resolver run were retained.
+
+All 1,000 successful persistence transactions were audited immediately from
+the persisted target slot. Each image passed the 136-byte length, GSA2 magic,
+v2 format, record count and expected record semantics, generation, recomputed
+CRC, expected target slot, and sequential generation checks. Results: 1,000
+images audited, zero CRC mismatches, zero malformed committed images;
+generation 0 to 1000, 1,000 monotonic increments, 500 commits to each slot,
+and expected alternation. Resolver stress passed 1,000 lookups. CRC vectors
+remain `123456789 -> 0xCBF43926` and empty input `0x00000000`.
+
+The managed host suite passed 22 wrapper cases and checks the actual ABI
+declarations: sizes 104/112/120/128 and callback offsets 104/112/120. The
+native executable emitted the seven-state/status fixture consumed through the
+real managed wrapper and its status decoder; NoOverride, Disabled, explicit
+Managed Notes override, Reset, UnknownExtension, IneligibleHandler, and
+PersistenceFailure agreed. The wrapper's existing fixtures also cover
+Success, NotSupported, and InvalidArgument mapping. Numeric service statuses
+are shared: Success=0, UnknownExtension=3, IneligibleHandler=4,
+PersistenceFailed=6; ABI NotSupported and InvalidArgument are native callback
+results -5 and -2. The fixture is
+`out/dotnet/c166r9-host-validation/native-managed-fixture.txt`.
+
+`C166R9_HOST_VALIDATION_PASS` was emitted and
+`hostValidationComplete=true` is recorded in
+`out/dotnet/c166r9-host-validation/c166r9-host-manifest.json`.
+
+Immediately after host acceptance, the C160Composite NativeAOT proof was
+rebuilt. It linked successfully, and the fresh proof ramdisk and full AMD64
+kernel compile/link also passed. The prior unresolved `GetConsoleMode`,
+`GetFileType`, and `WriteConsoleW` imports disappeared. Together with the
+before/after link result and the removed host `Console.WriteLine` in the
+included C166 proof tests, this strongly supports that call as the concrete
+cause; no broader cause is claimed. No Win32 stubs or host libraries were
+added. Product hashes are recorded in the R9 proof manifest.
+
+After the build gates, QEMU ownership was checked. PID 30728 is running an
+unrelated workload from
+`D:\dev\guideXOSServer_DiskManagerImprovements`. It was left running; no proof
+media was installed and no guest acceptance was attempted. Therefore
+`C166R9_PROOF_PRODUCTS_READY` was emitted, but guest proof boots, reboot
+persistence, Explorer parity, regressions, clean production installation,
+Settings smoke, and three ordinary boots remain unverified. C166 host
+validation is complete; C166 itself is not accepted. Settings remains v2,
+C128 remains unverified, and no Default Apps UI was added.
+
+The proof composite hash is
+`3B3B54F46FFF6B9E0859BA3C5FC9697CBD71811464CACF7ECA8B602BDCB53537`, the
+proof ramdisk hash is
+`1020B163488D6D9994FC6FC701B617078C9126140F2105D61A32DB2BB0E674AB`, and
+the full AMD64 proof kernel hash is
+`97D919592E265D57BF5A6D19BE419E48CB9A40B9177A11CFCACB359F7FCF93F9`.
+The kernel source/build inputs were unchanged by the host-only test and
+documentation additions, and the freshly linked kernel was verified by hash.

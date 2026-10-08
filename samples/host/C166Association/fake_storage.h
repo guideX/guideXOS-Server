@@ -10,7 +10,9 @@ struct FakeAssociationStorage {
     int partialWrite = -1;
     int failReadSlot = -1;
     int failFlushSlot = -1;
+    int failWriteSlot = -1;
     int corruptReadbackSlot = -1;
+    uint32_t writeCalls = 0;
 
     static bool Read(void* context, uint32_t slot, void* buffer, uint32_t size,
                      bool* exists) {
@@ -30,7 +32,9 @@ struct FakeAssociationStorage {
     static bool Write(void* context, uint32_t slot, const void* buffer,
                       uint32_t size) {
         auto& self = *static_cast<FakeAssociationStorage*>(context);
+        ++self.writeCalls;
         if (slot > 1) return false;
+        if (static_cast<int>(slot) == self.failWriteSlot) return false;
         auto& bytes = self.slots[slot];
         const uint32_t count = self.partialWrite < 0
             ? size : static_cast<uint32_t>(self.partialWrite);
