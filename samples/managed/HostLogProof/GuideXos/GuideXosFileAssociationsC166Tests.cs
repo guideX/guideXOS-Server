@@ -138,7 +138,6 @@ internal static unsafe class GuideXosFileAssociationsC166Tests
     private static bool Case(ref int cases, bool value)
     {
         cases++;
-        if (!value) Console.WriteLine($"C166 managed case {cases} failed");
         return value;
     }
 

@@ -392,3 +392,31 @@ The host runner is `scripts/dotnet/run-c166-file-associations.ps1 -HostTestsOnly
 The proof composite build was attempted from the same source HEAD and failed at NativeAOT link with unresolved `GetConsoleMode`, `GetFileType`, and `WriteConsoleW` symbols. A plain full AMD64 build without proof feature defines also failed on conditional NativeAOT declarations. The full AMD64 kernel was then rebuilt with the repository proof defines and linked successfully; fresh `kernel.elf` SHA-256 is `97D919592E265D57BF5A6D19BE419E48CB9A40B9177A11CFCACB359F7FCF93F9`. The proof ramdisk was not produced because the composite build failed first.
 
 QEMU discovery found one active `qemu-system-x86_64.exe` process (PID 27820). C166R7 guest proof was not run. C166 remains unaccepted pending the full host matrix, passing proof builds, and the previously defined guest-only FAT persistence/reboot, Explorer parity, clean production, and ordinary-boot gates. Settings remains v2; C128 remains unverified; no Default Apps UI was added.
+
+## C166R8 — Host acceptance and NativeAOT follow-up (2026-10-07)
+
+C166R8 starts at `34e66f732ed9c7ef6b4e9e93a1a0d84f26883f05` on
+`v1.1_DOTNET_SUPPORT`, with a clean worktree and 0/0 upstream tracking. No
+later C166 acceptance record was present.
+
+The inherited host lane was rerun against the extracted production service:
+436 native checks passed, all 136 partial writes (sizes 0 through 135)
+preserved the authoritative slot and reloaded the prior state, the full-write
+control passed, the 1,000-transaction and 1,000-lookup stress runs passed, and
+the 22 managed wrapper checks passed. CRC vectors remain
+`123456789 -> 0xCBF43926` and empty input -> `0x00000000`. This rerun does not
+complete C166R8 host acceptance: the named dual-slot matrix, per-image CRC and
+generation audit, and native-to-managed state/status agreement fixture have
+not been implemented or executed. No host acceptance marker is emitted.
+
+The C166 managed proof test source is included by the `C160Composite`
+NativeAOT project through its default compile items. Its failure-case helper
+contained a `Console.WriteLine`, despite routing proof output through the
+existing `GuideXosHost.TryLog` path. That call was removed. This is a concrete
+host-console dependency in a source file used by the proof target and is the
+current bounded repair candidate for the C166R7 unresolved console imports.
+The post-change composite has not yet been rebuilt, so the precise requesting
+object/library and successful symbol removal remain unverified. No proof
+ramdisk, QEMU, guest, clean-install, or ordinary-boot claims are made for
+C166R8. C166 remains not accepted; C128 remains unverified; no Default Apps UI
+was added.
