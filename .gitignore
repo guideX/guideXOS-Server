@@ -34,3 +34,6 @@
 /out/wallpaper-pack/config/certs/ca-bundle.manifest
 /scripts/fixtures/public-roots/*.local
 /bkup/gfx
+/out
+/build
+/build/pacman-native/amd64/source-196aaea97a6ed5a9d1f78643973d8c84a8e8ed50
