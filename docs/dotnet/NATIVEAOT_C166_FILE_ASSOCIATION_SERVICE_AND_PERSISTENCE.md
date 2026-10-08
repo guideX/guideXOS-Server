@@ -489,21 +489,26 @@ included C166 proof tests, this strongly supports that call as the concrete
 cause; no broader cause is claimed. No Win32 stubs or host libraries were
 added. Product hashes are recorded in the R9 proof manifest.
 
-After the build gates, QEMU ownership was checked. PID 30728 is running an
-unrelated workload from
-`D:\dev\guideXOSServer_DiskManagerImprovements`. It was left running; no proof
-media was installed and no guest acceptance was attempted. Therefore
-`C166R9_PROOF_PRODUCTS_READY` was emitted, but guest proof boots, reboot
-persistence, Explorer parity, regressions, clean production installation,
-Settings smoke, and three ordinary boots remain unverified. C166 host
-validation is complete; C166 itself is not accepted. Settings remains v2,
-C128 remains unverified, and no Default Apps UI was added.
+After the final build gates, QEMU ownership was checked and no process was
+active. PID 30728 had been observed earlier during this run in the unrelated
+`D:\dev\guideXOSServer_DiskManagerImprovements` workspace, but it was absent
+from the final post-gate process snapshot. The existing C166 runner still has
+no guest state-transition scenario connected: its `-RunProofBoots` path ends
+with an explicit blocker, and the older C164 lane does not prove C166
+Disabled/reset persistence. No guest boot was attempted because the required
+existing C166 acceptance lane is not implemented. `C166R9_PROOF_PRODUCTS_READY`
+was emitted; guest proof boots, reboot persistence, Explorer parity,
+regressions, clean production installation, Settings smoke, and three ordinary
+boots remain unverified. C166 host validation is complete; C166 itself is not
+accepted. Settings remains v2, C128 remains unverified, and no Default Apps UI
+was added.
 
 The proof composite hash is
-`3B3B54F46FFF6B9E0859BA3C5FC9697CBD71811464CACF7ECA8B602BDCB53537`, the
+`8640F781670C1663C81852E0D1CA0EC62219561659496E97EF697BFC082C4038`, the
 proof ramdisk hash is
-`1020B163488D6D9994FC6FC701B617078C9126140F2105D61A32DB2BB0E674AB`, and
+`6973C50C72ED5F617873B7CB4CAF9AD8A01CFD2DAB725B317EEFB24C4CCBC906`, and
 the full AMD64 proof kernel hash is
 `97D919592E265D57BF5A6D19BE419E48CB9A40B9177A11CFCACB359F7FCF93F9`.
-The kernel source/build inputs were unchanged by the host-only test and
-documentation additions, and the freshly linked kernel was verified by hash.
+The proof products were rebuilt from commit
+`9ecdafdf89edbb688d1c0049393b5ada0b4a74cb`. The final later change is
+documentation only; kernel and proof build inputs match that commit.
