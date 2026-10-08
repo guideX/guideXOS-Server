@@ -182,12 +182,12 @@ int main()
             storage) == NavigatorScriptSelectorMatchResult::Invalid,
             "stale generation anchor fails closed");
     }
-    for (const char* unsupported : {".matches(':has(.target)')",
+    for (const char* supported : {".matches(':has(.target)')",
             ".matches(':has(> .target)')", ".matches(':has(+ .target)')",
             ".matches(':has(~ .target)')"}) {
-        const std::string source = std::string("document.body") + unsupported + ";";
-        expect(!harness.execute(source).succeeded(),
-            "public :has() and relative arguments remain unsupported");
+        const std::string source = std::string("document.querySelector('body')") + supported + ";";
+        expect(harness.execute(source).succeeded(),
+            "public :has() relative forms parse through the selector API");
     }
     if (failures != 0) return 1;
     std::cout << "Navigator JavaScript JS62 checks: " << checks << "/" << checks

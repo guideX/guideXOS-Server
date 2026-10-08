@@ -594,8 +594,8 @@ void publicBoundary()
         "public-boundary fixture loads");
     for (const char* suffix : {".matches(':has(.x)')", ".matches(':has(> .x)')",
             ".matches(':has(+ .x)')", ".matches(':has(~ .x)')"})
-        expect(!h.execute(std::string("document.body") + suffix + ";").succeeded(),
-            "public :has form remains unsupported");
+        expect(h.execute(std::string("document.querySelector('body')") + suffix + ";").succeeded(),
+            "public :has form is accepted");
     std::size_t leadingIndex = 0u;
     for (const char* selector : {"> .x", "+ .x", "~ .x"}) {
         const std::string name = "leadingRejected" + std::to_string(leadingIndex++);

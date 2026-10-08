@@ -810,6 +810,11 @@ bool findLogicalArgumentClose(SourceView source, std::size_t open,
     return false;
 }
 
+bool parseHasPseudo(SourceView source, std::size_t colon, std::size_t end,
+    NavigatorScriptSelectorDescriptor& storage,
+    NavigatorScriptSimpleSelectorCoreDescriptor& selector,
+    NavigatorScriptSimpleSelectorCoreDescriptor* innerStorage);
+
 bool parseSimpleSelectorCore(SourceView source, std::size_t begin,
     std::size_t end, NavigatorScriptSelectorDescriptor& storage,
     NavigatorScriptSimpleSelectorCoreDescriptor& selector,
@@ -867,33 +872,57 @@ bool parseSimpleSelectorCore(SourceView source, std::size_t begin,
     }
 
     if (position < end && source.data[position] == ':') {
-        std::size_t logicalOpen = end;
-        const NavigatorScriptStatePseudo logicalPseudo =
-            logicalPseudoFunction(source, position, end, logicalOpen);
-        if (logicalPseudo != NavigatorScriptStatePseudo::None) {
-            if (!allowLogicalPseudo || logicalSelector == nullptr) return false;
-            std::size_t close = end;
-            if (!findLogicalArgumentClose(source, logicalOpen, end, close))
+        // :has() is the sole public relative-selector entry point. It owns
+        // the remaining pseudo component and parses exactly one inner core.
+        std::size_t functionOpen = end;
+        const NavigatorScriptStatePseudo function = logicalPseudoFunction(
+            source, position, end, functionOpen);
+        bool isHas = false;
+        if (functionOpen != end &&
+            function == NavigatorScriptStatePseudo::None) {
+            const std::size_t nameLength = functionOpen - position - 1u;
+            isHas = nameLength == 3u &&
+                lowerAscii(static_cast<unsigned char>(source.data[position + 1u])) == 'h' &&
+                lowerAscii(static_cast<unsigned char>(source.data[position + 2u])) == 'a' &&
+                lowerAscii(static_cast<unsigned char>(source.data[position + 3u])) == 's';
+        }
+        if (isHas) {
+            if (selector.statePseudo != NavigatorScriptStatePseudo::None ||
+                !parseHasPseudo(source, position, end, storage, selector,
+                    logicalSelector))
                 return false;
-            std::size_t innerBegin = logicalOpen + 1u;
-            std::size_t innerEnd = close;
-            while (innerBegin < innerEnd &&
-                isSelectorAsciiWhitespace(source.data[innerBegin]))
-                ++innerBegin;
-            while (innerEnd > innerBegin &&
-                isSelectorAsciiWhitespace(source.data[innerEnd - 1u]))
-                --innerEnd;
-            std::int16_t innerNthA = 0;
-            std::int16_t innerNthB = 0;
-            if (innerBegin == innerEnd || !parseSimpleSelectorCore(source,
-                    innerBegin, innerEnd, storage, *logicalSelector, innerNthA,
-                    innerNthB, nullptr, false, false)) return false;
-            selector.statePseudo = logicalPseudo;
-            position = close + 1u;
-        } else {
-            if (!parseStatePseudo(source, position, end, selector, nthA,
-                    nthB, allowFunctionalPseudo)) return false;
             position = end;
+        } else {
+            std::size_t logicalOpen = end;
+            const NavigatorScriptStatePseudo logicalPseudo =
+                logicalPseudoFunction(source, position, end, logicalOpen);
+            if (logicalPseudo != NavigatorScriptStatePseudo::None) {
+                if (!allowLogicalPseudo || logicalSelector == nullptr)
+                    return false;
+                std::size_t close = end;
+                if (!findLogicalArgumentClose(source, logicalOpen, end, close))
+                    return false;
+                std::size_t innerBegin = logicalOpen + 1u;
+                std::size_t innerEnd = close;
+                while (innerBegin < innerEnd &&
+                    isSelectorAsciiWhitespace(source.data[innerBegin]))
+                    ++innerBegin;
+                while (innerEnd > innerBegin &&
+                    isSelectorAsciiWhitespace(source.data[innerEnd - 1u]))
+                    --innerEnd;
+                std::int16_t innerNthA = 0;
+                std::int16_t innerNthB = 0;
+                if (innerBegin == innerEnd || !parseSimpleSelectorCore(source,
+                        innerBegin, innerEnd, storage, *logicalSelector,
+                        innerNthA, innerNthB, nullptr, false, false))
+                    return false;
+                selector.statePseudo = logicalPseudo;
+                position = close + 1u;
+            } else {
+                if (!parseStatePseudo(source, position, end, selector, nthA,
+                        nthB, allowFunctionalPseudo)) return false;
+                position = end;
+            }
         }
     }
 
@@ -912,6 +941,74 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
 {
     return parseSimpleSelectorCore(source, begin, end, storage, selector,
         selector.nthA, selector.nthB, &selector.logicalSelector, true, true);
+}
+
+bool parseHasPseudo(SourceView source, std::size_t colon, std::size_t end,
+    NavigatorScriptSelectorDescriptor& storage,
+    NavigatorScriptSimpleSelectorCoreDescriptor& selector,
+    NavigatorScriptSimpleSelectorCoreDescriptor* innerStorage)
+{
+    std::size_t open = end;
+    for (std::size_t index = colon + 1u; index < end; ++index) {
+        if (source.data[index] == '(') { open = index; break; }
+    }
+    if (open == end || source.data[end - 1u] != ')') return false;
+    const std::size_t nameLength = open - colon - 1u;
+    if (nameLength != 3u ||
+        lowerAscii(static_cast<unsigned char>(source.data[colon + 1u])) != 'h' ||
+        lowerAscii(static_cast<unsigned char>(source.data[colon + 2u])) != 'a' ||
+        lowerAscii(static_cast<unsigned char>(source.data[colon + 3u])) != 's')
+        return false;
+    std::size_t begin = open + 1u;
+    std::size_t finish = end - 1u;
+    while (begin < finish &&
+        isSelectorAsciiWhitespace(source.data[begin])) ++begin;
+    while (finish > begin &&
+        isSelectorAsciiWhitespace(source.data[finish - 1u])) --finish;
+    if (begin == finish || innerStorage == nullptr) return false;
+    NavigatorScriptSelectorRelation relation =
+        NavigatorScriptSelectorRelation::Descendant;
+    if (source.data[begin] == '>' || source.data[begin] == '+' ||
+        source.data[begin] == '~') {
+        const char token = source.data[begin++];
+        relation = token == '>' ? NavigatorScriptSelectorRelation::Child :
+            token == '+' ? NavigatorScriptSelectorRelation::AdjacentSibling :
+                NavigatorScriptSelectorRelation::GeneralSibling;
+        while (begin < finish &&
+            isSelectorAsciiWhitespace(source.data[begin])) ++begin;
+    }
+    if (begin == finish) return false;
+    // The shared core parser rejects nested functional pseudos and compounds
+    // with multiple pseudo predicates. Check explicit top-level combinators
+    // and whitespace before delegating the single core.
+    bool inAttribute = false;
+    char quote = '\0';
+    for (std::size_t i = begin; i < finish; ++i) {
+        const char c = source.data[i];
+        if (inAttribute) {
+            if (quote != '\0') { if (c == quote) quote = '\0'; }
+            else if (c == '"' || c == '\'') quote = c;
+            else if (c == ']') inAttribute = false;
+            continue;
+        }
+        if (c == '[') { inAttribute = true; continue; }
+        if (c == '(' || c == ')' || c == ',' || c == '>' || c == '+' ||
+            c == '~' || isSelectorAsciiWhitespace(c)) return false;
+    }
+    std::int16_t innerA = 0;
+    std::int16_t innerB = 0;
+    NavigatorScriptSimpleSelectorCoreDescriptor inner;
+    if (!parseSimpleSelectorCore(source, begin, finish, storage, inner,
+            innerA, innerB, nullptr, false, false)) return false;
+    selector.statePseudo = relation == NavigatorScriptSelectorRelation::Child
+        ? NavigatorScriptStatePseudo::HasChild
+        : relation == NavigatorScriptSelectorRelation::AdjacentSibling
+            ? NavigatorScriptStatePseudo::HasAdjacentSibling
+            : relation == NavigatorScriptSelectorRelation::GeneralSibling
+                ? NavigatorScriptStatePseudo::HasGeneralSibling
+                : NavigatorScriptStatePseudo::HasDescendant;
+    *innerStorage = inner;
+    return true;
 }
 
 bool parseBoundedSelectorMember(SourceView source,
@@ -3572,7 +3669,11 @@ NavigatorScriptHostAdapter::selectorCoreElementMatchResult(
     }
     if (selector.statePseudo == NavigatorScriptStatePseudo::Not ||
         selector.statePseudo == NavigatorScriptStatePseudo::Is ||
-        selector.statePseudo == NavigatorScriptStatePseudo::Where)
+        selector.statePseudo == NavigatorScriptStatePseudo::Where ||
+        selector.statePseudo == NavigatorScriptStatePseudo::HasDescendant ||
+        selector.statePseudo == NavigatorScriptStatePseudo::HasChild ||
+        selector.statePseudo == NavigatorScriptStatePseudo::HasAdjacentSibling ||
+        selector.statePseudo == NavigatorScriptStatePseudo::HasGeneralSibling)
         return MatchResult::Invalid;
     if (!strictPseudoValidation)
         return selectorStatePseudoMatches(element, selector, nthA, nthB)
@@ -3773,6 +3874,26 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
         core.statePseudo == NavigatorScriptStatePseudo::Not ||
         core.statePseudo == NavigatorScriptStatePseudo::Is ||
         core.statePseudo == NavigatorScriptStatePseudo::Where;
+    if (core.statePseudo == NavigatorScriptStatePseudo::HasDescendant ||
+        core.statePseudo == NavigatorScriptStatePseudo::HasChild ||
+        core.statePseudo == NavigatorScriptStatePseudo::HasAdjacentSibling ||
+        core.statePseudo == NavigatorScriptStatePseudo::HasGeneralSibling) {
+        const MatchResult conditions = selectorCoreConditionsMatchResult(
+            element, core, storage);
+        if (conditions != MatchResult::Match) return conditions;
+        const HostObjectReference anchor{element.serial, generation_,
+            kNavigatorElementHostKind};
+        const NavigatorScriptRelativeSelectorRelation relation =
+            core.statePseudo == NavigatorScriptStatePseudo::HasChild
+                ? NavigatorScriptRelativeSelectorRelation::Child
+                : core.statePseudo == NavigatorScriptStatePseudo::HasAdjacentSibling
+                    ? NavigatorScriptRelativeSelectorRelation::AdjacentSibling
+                    : core.statePseudo == NavigatorScriptStatePseudo::HasGeneralSibling
+                        ? NavigatorScriptRelativeSelectorRelation::GeneralSibling
+                        : NavigatorScriptRelativeSelectorRelation::Descendant;
+        return selectorRelativeElementMatchResult(anchor, relation,
+            selector.logicalSelector, 0, 0, storage);
+    }
     if (!isLogicalPseudo)
         return selectorCoreElementMatchResult(element, core, selector.nthA,
             selector.nthB, storage);
@@ -4135,6 +4256,10 @@ bool NavigatorScriptHostAdapter::selectorStatePseudoMatches(
     case NavigatorScriptStatePseudo::Not:
     case NavigatorScriptStatePseudo::Is:
     case NavigatorScriptStatePseudo::Where:
+    case NavigatorScriptStatePseudo::HasDescendant:
+    case NavigatorScriptStatePseudo::HasChild:
+    case NavigatorScriptStatePseudo::HasAdjacentSibling:
+    case NavigatorScriptStatePseudo::HasGeneralSibling:
         return false;
     }
     return false;

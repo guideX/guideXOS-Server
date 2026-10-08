@@ -135,6 +135,10 @@ enum class NavigatorScriptStatePseudo : std::uint8_t {
     Not,
     Is,
     Where,
+    HasDescendant,
+    HasChild,
+    HasAdjacentSibling,
+    HasGeneralSibling,
 };
 
 struct NavigatorScriptSimpleSelectorCoreDescriptor {
@@ -169,7 +173,8 @@ struct NavigatorScriptSimpleSelectorDescriptor :
     std::int16_t nthB = 0;
     // :not(), :is(), and :where() share one nonfunctional inner selector.
     // The core has no nested logical or nth-expression fields, so functional
-    // depth is fixed and the descriptor cannot be recursive.
+    // depth is fixed and the descriptor cannot be recursive. :has() stores
+    // one bounded nonfunctional core in this field.
     NavigatorScriptSimpleSelectorCoreDescriptor logicalSelector;
 };
 

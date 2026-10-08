@@ -6868,3 +6868,101 @@ The build reproducibility experiment did expose PE timestamp variation, but
 it is not needed to establish provenance now that the original hash and exact
 matching bytes are available. JS62R4 selector and Event qualification remains
 green; no selector or Event rework is indicated.
+
+#### JS63 bounded public `:has()` implementation (2026-10-07)
+
+JS63 follows the accepted JS62R4M closeout at the current source baseline
+`fa853ed3836c69c4137f1ea25f7ed19f748ff5fb` (`navigator: qualify JS62 event
+reentrancy`). The earlier JS62R notes in this file record real, intermediate
+qualification blockers. They are historical checkpoints, not later phase
+authority: JS62R4M subsequently closed the artifact/provenance work and marked
+the relative evaluator safe for JS63. JS62-era tests that required public
+`:has()` rejection were updated to check that these four arguments are accepted;
+the dedicated JS63 suite now verifies their behavior and malformed-input
+rejection.
+
+Public support is implemented with the existing bounded parser and matcher.
+The argument grammar is one optional leading relation plus exactly one
+restricted simple-selector core:
+
+| Public form | Evaluator relation |
+| --- | --- |
+| `:has(S)` | strict `Descendant` |
+| `:has(> S)` | `Child` |
+| `:has(+ S)` | `AdjacentSibling` |
+| `:has(~ S)` | `GeneralSibling` |
+
+The tested element is passed as the relative evaluator's anchor. The evaluator
+searches only descendants or following siblings as indicated; the anchor does
+not match itself. Child means direct structural Element child. Adjacent means
+the immediate following structural Element sibling. General sibling means any
+later structural Element sibling with the same valid, nonzero parent.
+
+The existing shared core parser handles the inner selector's tag/universal,
+ID, class tokens, attribute predicate, and supported nonfunctional state or
+structural pseudo. Existing selector bounds remain in force: 256 characters
+for the complete selector, at most four outer list members, eight class
+tokens, 64 attribute-name bytes, and 128 attribute-value bytes. Pseudo names
+are ASCII case-insensitive. Existing one-pseudo-per-simple-selector behavior
+is preserved. Empty arguments, absent targets, malformed or multiple leading
+combinators, inner selector lists, relation chains, nested `:has()`, nested
+`:not()`/`:is()`/`:where()`, and inner functional nth pseudos are rejected
+fail-closed. Outer selector lists remain supported.
+
+The parsed inner core uses the existing fixed `logicalSelector` core slot; its
+relation is represented by four `:has` variants of the existing one-byte
+`statePseudo` enum. This avoids adding a relation member or growing selector
+collections. There is no match-time parse, heap allocation, persistent result
+cache, or global traversal scratch. Query, `matches()`, and `closest()` all
+call the same outer matcher, which calls the JS62 relative evaluator.
+`querySelectorAll()` retains its existing live collection behavior, document
+order, and deduplication. Element-scoped queries continue to enumerate strict
+descendants of the scope, so the scope itself is not returned as a query
+result; relative evaluation for each result remains anchored to that result.
+
+Memory sizes remain at the JS62R2 qualified values: shared selector core 32
+bytes, simple selector descriptor 68 bytes, four-member selector descriptor
+812 bytes, collection record 832 bytes, 128-record registry 106,496 bytes,
+`HtmlElementRef` 440 bytes, and content metadata 24 bytes. JS63 adds zero
+persistent bytes for relation storage because it uses existing pseudo enum
+values; the inner core uses the pre-existing fixed core slot. No parser-local
+stack measurement was added.
+
+Focused regression results:
+
+- JS63: 6/6 checks; all four relation semantics, positive/negative boundaries,
+  strict self exclusion, compound/tag/attribute matching, outer-list ordering,
+  Element-scoped sibling queries, `matches()`, `closest()`, live `:checked`
+  and attribute mutation, malformed and unsupported grammar rejection, and
+  Event callback matching.
+- JS62: 15/15; JS62R: 10/10; JS62R2: 4081/4081; JS62R3: 1293/1293; JS62R4:
+  113/113 with 1,804 Event probes and zero relation/metadata failures.
+- JS61: 2077/2077; JS38 DOM/API regression: 152/152; JS36 query/DOM regression:
+  114 checks, zero failures. Their strict warning-as-error lanes passed where
+  provided by the focused scripts.
+
+The qualified JS62R2 near-capacity false simulation remains 9,210,448
+structural-record inspections, 3,820,245 parent hops, 6,598,727 serial/index
+resolutions, and 2,721 selector evaluations across 1,022 anchors. A single
+near-capacity Descendant late-true/false call remains 4,102 inspections, 1,027
+parent hops, 2,051 resolutions, and 1,021 selector evaluations. JS63 adds one
+outer predicate dispatch before entering this same evaluator; a separate
+public-path counter build was not made, so no additional public-call count is
+claimed.
+
+The hosted Navigator smoke was attempted with the available
+`guideXOSServer.exe`, which predates JS63. Its hosted JS59/JS61 selector checks
+passed, while seven unrelated CSS smoke checks failed in phases 3C, 3G, 6A,
+6B (three checks), and 6C. This run therefore does not qualify JS63 against a
+fresh hosted binary. The 42 persistent generated fixtures (458,372 bytes)
+matched their pre-run byte snapshot; all six timestamped logs created by the
+run were deleted by exact path and verified absent. A production `build.bat`
+rebuild and fresh hosted JS63 fixture remain unrun. No new standalone phase
+marker was created because repository progression is recorded in this
+chronological document.
+
+**Outcome B — bounded public `:has()` implementation complete; production
+hosted qualification pending.** The four forms are exposed through the
+qualified JS62 evaluator without persistent memory growth. Close the hosted
+baseline CSS failures and build a fresh server with a JS63 fixture before
+claiming Outcome A. Next phase should be JS64 only after that evidence closes.

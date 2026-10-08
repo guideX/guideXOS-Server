@@ -56,6 +56,14 @@ int main()
     expect(harness.document().structuralElements.size() ==
         kNavigatorScriptMaxDocumentNodes,
         "fixture reaches the 1024 structural record cap");
+    for (const char* suffix : {".matches(':has(.target)')",
+            ".matches(':has(> .target)')", ".matches(':has(+ .target)')",
+            ".matches(':has(~ .target)')"}) {
+        const std::string source =
+            std::string("document.querySelector('body')") + suffix + ";";
+        expect(harness.execute(source).succeeded(),
+            "public :has() relative forms are accepted");
+    }
 
     auto* anchor = find(harness.document(), "anchor");
     auto* targetElement = find(harness.document(), "last");
@@ -101,14 +109,6 @@ int main()
             NavigatorScriptRelativeSelectorRelation::Descendant, target,
             storage) == NavigatorScriptSelectorMatchResult::Invalid,
             "two-node cycle in anchor ancestry is bounded and rejected");
-    }
-
-    for (const char* suffix : {".matches(':has(.target)')",
-            ".matches(':has(> .target)')", ".matches(':has(+ .target)')",
-            ".matches(':has(~ .target)')"}) {
-        const std::string source = std::string("document.body") + suffix + ";";
-        expect(!harness.execute(source).succeeded(),
-            "public :has() remains unsupported");
     }
 
     if (failures != 0) return 1;
