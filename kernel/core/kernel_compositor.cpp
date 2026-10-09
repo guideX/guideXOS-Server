@@ -5,6 +5,7 @@
 //
 
 #include "include/kernel/kernel_compositor.h"
+#include "include/kernel/widget_activation.h"
 #include "include/kernel/kernel_ipc.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/image_adapter.h"
@@ -729,7 +730,8 @@ void KernelCompositor::handleMouseUp(int32_t mx, int32_t my, uint8_t button) {
             if (widget->visible && widget->enabled &&
                 localX >= widget->x && localX < widget->x + widget->w &&
                 localY >= widget->y && localY < widget->y + widget->h) {
-                hitWin->owner->onWidgetClick(widget->id);
+                app::dispatch_widget_activation(hitWin, widget->id,
+                    [hitWin](int id) { hitWin->owner->onWidgetClick(id); });
                 return;
             }
         }

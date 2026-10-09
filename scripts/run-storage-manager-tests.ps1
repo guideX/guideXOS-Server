@@ -34,6 +34,16 @@ try {
     & $testExe
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+    $widgetTestExe = Join-Path $outputDir 'widget_activation_test.exe'
+    & $compiler.Source `
+        -std=c++17 -O2 -Wall -Wextra `
+        -iquote kernel/core/include `
+        tests/widget_activation_test.cpp `
+        -o $widgetTestExe
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & $widgetTestExe
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
     $python = Get-Command python -ErrorAction Stop
     & $python.Source (Join-Path $repoRoot 'tests/classify_dm20_usb_trace_test.py')
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -45,4 +55,5 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {
     Remove-Item -LiteralPath $testExe -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $outputDir 'widget_activation_test.exe') -Force -ErrorAction SilentlyContinue
 }

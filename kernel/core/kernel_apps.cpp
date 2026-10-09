@@ -5,6 +5,7 @@
 //
 
 #include "include/kernel/kernel_apps.h"
+#include "include/kernel/widget_activation.h"
 #include "include/kernel/kernel_compositor.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/desktop.h"
@@ -7379,9 +7380,11 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
                    !m_formatJob.commitStarted &&
                    (m_formatJob.state == storage::FAT32_FORMAT_JOB_SCANNING ||
                     m_formatJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT)) {
-            app::Widget* cancel = getWidget(m_cancelInitializeBtnId);
-            if (cancel && cancel->visible && cancel->enabled)
-                onWidgetClick(m_cancelInitializeBtnId);
+            app::dispatch_focused_button_activation(m_window,
+                m_cancelInitializeBtnId,
+                app::focused_button_widget_id_for_index(
+                    m_createInputFocus, 2, m_cancelInitializeBtnId), key,
+                [this](int id) { onWidgetClick(id); });
         } else if (m_dialogIsGptRepair && tab) {
             m_gptRepairButtonFocus = static_cast<uint8_t>(
                 (m_gptRepairButtonFocus + 1) % 2);
@@ -7428,8 +7431,15 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             beginInitializeConfirmation(m_initializeScheme);
         } else if (m_dialogIsGptRepair && enter &&
                    m_initializeDialogState == INITIALIZE_DIALOG_GPT_REPAIR_CONFIRM) {
-            onWidgetClick(m_gptRepairButtonFocus == 0
-                ? m_cancelInitializeBtnId : m_confirmInitializeBtnId);
+            const bool cancelFocused = m_gptRepairButtonFocus == 0;
+            const int focusedButtonId = cancelFocused
+                ? m_cancelInitializeBtnId : m_confirmInitializeBtnId;
+            app::dispatch_focused_button_activation(m_window,
+                focusedButtonId,
+                app::focused_button_widget_id_for_index(
+                    m_gptRepairButtonFocus, cancelFocused ? 0 : 1,
+                    focusedButtonId), key,
+                [this](int id) { onWidgetClick(id); });
         } else if (enter && m_initializeDialogState == INITIALIZE_DIALOG_CONFIRM) {
             runInitializeOperation();
         } else if (enter && m_initializeDialogState ==
@@ -7438,10 +7448,21 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
         } else if (enter && m_initializeDialogState ==
                    INITIALIZE_DIALOG_CREATE_OPTIONS) {
             if (m_dialogIsFormat) {
-                if (m_createInputFocus == 2)
-                    onWidgetClick(m_cancelInitializeBtnId);
-                else if (m_createInputFocus == 3)
-                    onWidgetClick(m_confirmInitializeBtnId);
+                if (m_createInputFocus == 2) {
+                    const int focusedButtonId = m_cancelInitializeBtnId;
+                    app::dispatch_focused_button_activation(m_window,
+                        focusedButtonId,
+                        app::focused_button_widget_id_for_index(
+                            m_createInputFocus, 2, focusedButtonId), key,
+                        [this](int id) { onWidgetClick(id); });
+                } else if (m_createInputFocus == 3) {
+                    const int focusedButtonId = m_confirmInitializeBtnId;
+                    app::dispatch_focused_button_activation(m_window,
+                        focusedButtonId,
+                        app::focused_button_widget_id_for_index(
+                            m_createInputFocus, 3, focusedButtonId), key,
+                        [this](int id) { onWidgetClick(id); });
+                }
             }
             else runCreatePartitionOperation();
         } else if (enter && m_initializeDialogState == INITIALIZE_DIALOG_RESULT) {
