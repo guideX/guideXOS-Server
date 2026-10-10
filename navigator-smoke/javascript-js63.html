@@ -1,0 +1,111 @@
+<!doctype html>
+<html id="root">
+<head><title>Navigator JavaScript JS63</title></head>
+<body>
+<h1>Navigator JavaScript JS63</h1>
+<main id="scope">
+  <div id="desc" class="anchor"><span class="target"></span></div>
+  <div id="self" class="target"></div>
+  <div id="child-true"><span class="target"></span></div>
+  <div id="child-false"><span><i class="target"></i></span></div>
+  <div id="adj-prev-target" class="target"></div>
+  <div id="adj-prev-anchor"></div>
+  <div id="adjacent"></div><b id="adj-target" class="target"></b>
+  <div id="adj-later"></div><i></i><b class="target"></b>
+  <div id="general"></div><i></i><b id="general-target" class="target"></b>
+  <div id="general-prev-target" class="target"></div><div id="general-prev"></div>
+  <div id="general-nested"></div><b><i class="target"></i></b>
+  <div id="list-x" class="multi"><span class="x"></span></div>
+  <section id="list-y"><i class="y"></i></section>
+  <div id="list-both" class="multi"><i class="x"></i><b class="y"></b></div>
+  <div id="live"><i id="live-child"></i></div>
+  <div id="checked-host"><input id="check" type="checkbox" checked></div>
+  <div id="disabled-host"><fieldset disabled><input id="disabled"></fieldset></div>
+  <div id="empty-host"><i id="empty"></i></div>
+  <div id="scope-sibling"></div><div id="scope-target" class="scope-target"></div>
+  <button id="event-button" type="button">Run</button>
+  <button id="scope-focus-transfer" type="button">Transfer focus</button>
+</main>
+<button id="outside-focus" type="button">Outside focus</button>
+<pre id="result">initial</pre>
+<script>
+var assertions = 0;
+var failures = 0;
+var failedIndexes = '';
+function verify(value) {
+  assertions = assertions + 1;
+  if (!value) { failures = failures + 1; failedIndexes = failedIndexes + ',' + assertions; }
+}
+var desc = document.querySelector('#desc');
+verify(desc.matches(':has(.target)'));
+verify(!document.querySelector('#self').matches(':has(.target)'));
+verify(document.querySelector('#child-true').matches(':has(> .target)'));
+verify(!document.querySelector('#child-false').matches(':has(> .target)'));
+verify(document.querySelector('#adjacent').matches(':has(+ .target)'));
+verify(!document.querySelector('#adj-later').matches(':has(+ .target)'));
+verify(!document.querySelector('#adj-prev-anchor').matches(':has(+ .target)'));
+verify(document.querySelector('#general').matches(':has(~ .target)'));
+verify(!document.querySelector('#general-prev').matches(':has(~ .target)'));
+verify(!document.querySelector('#general-nested').matches(':has(~ .target)'));
+verify(document.querySelector('div:has(.target)') === desc);
+var ordered = document.querySelectorAll('div:has(.x), section:has(.y), div:has(.x)');
+verify(ordered.length === 3 && ordered[0] === document.querySelector('#list-x') &&
+  ordered[1] === document.querySelector('#list-y') &&
+  ordered[2] === document.querySelector('#list-both'));
+verify(document.querySelectorAll('div:has(.x), div:has(.y)').length === 2);
+verify(desc.closest('div:has(.target)') === desc);
+verify(document.querySelector('#self').closest('#self:has(.target)') === null);
+verify(document.querySelector('#scope').querySelector('#desc:has(.target)') === desc);
+var scoped = document.querySelector('#scope').querySelectorAll(':has(+ .scope-target)');
+verify(scoped.length === 1 && scoped[0] === document.querySelector('#scope-sibling'));
+verify(document.querySelector('#scope').querySelector(':has(+ .scope-target)') === scoped[0]);
+verify(document.querySelector('#scope').querySelectorAll('div:has(.target)').length > 0);
+var live = document.querySelector('#live');
+verify(!live.matches(':has([data-state=ready])'));
+document.querySelector('#live-child').setAttribute('data-state', 'ready');
+verify(live.matches(':has([data-state=ready])'));
+document.querySelector('#live-child').removeAttribute('data-state');
+verify(!live.matches(':has([data-state=ready])'));
+var checkedHost = document.querySelector('#checked-host');
+var checkbox = document.querySelector('#check');
+verify(checkedHost.matches(':has(:checked)'));
+checkbox.checked = false;
+verify(!checkedHost.matches(':has(:checked)'));
+checkbox.checked = true;
+verify(checkedHost.matches(':has(:checked)'));
+verify(document.querySelector('#disabled-host').matches(':has(:disabled)'));
+verify(document.querySelector('#empty-host').matches(':has(:empty)'));
+var focusScope = document.querySelector('#scope');
+var outsideFocus = document.querySelector('#outside-focus');
+var eventButton = document.querySelector('#event-button');
+var transferFocus = document.querySelector('#scope-focus-transfer');
+outsideFocus.focus();
+verify(!focusScope.matches(':has(:focus)'));
+eventButton.focus();
+verify(focusScope.matches(':has(:focus)'));
+transferFocus.focus();
+verify(focusScope.matches(':has(:focus)') && document.activeElement === transferFocus);
+transferFocus.blur();
+verify(!focusScope.matches(':has(:focus)'));
+var bad = [':has()', ':has(.a, .b)', ':has(.a .b)', ':has(> .a + .b)',
+  ':has(:has(.x))', ':has(:not(.x))', ':has(:is(.x))', ':has(:where(.x))'];
+var malformed = true;
+for (var i = 0; i != bad.length; i = i + 1)
+  if (document.querySelector(bad[i]) !== null) malformed = false;
+verify(malformed);
+var eventMatched = false;
+var eventMetadata = false;
+document.querySelector('#scope').addEventListener('click', function (event) {
+  eventMatched = event.currentTarget.matches(':has(#event-button)');
+  eventMetadata = event.target === document.querySelector('#event-button') &&
+    event.currentTarget === document.querySelector('#scope') &&
+    event.eventPhase === 3 && event.defaultPrevented === false;
+document.querySelector('#result').textContent = 'event=' + eventMatched +
+    ':metadata=' + eventMetadata + ':assertions=' + assertions + ':failures=' + failures +
+    ':failed=' + failedIndexes;
+});
+document.querySelector('#result').textContent = 'initial:assertions=' + assertions +
+  ':failures=' + failures + ':malformed=' + malformed + ':failed=' + failedIndexes;
+</script>
+</body>
+</html>

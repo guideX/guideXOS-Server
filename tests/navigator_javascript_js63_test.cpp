@@ -117,6 +117,34 @@ document.querySelector('#first').addEventListener('click', function(e) {
         std::cerr << "FAIL: :has works in dispatched Event callback\n";
     }
 
+    std::string nearCapacityHtml =
+        "<html><body><div id='capacity'>";
+    for (std::size_t index = 0; index < 1020u; ++index)
+        nearCapacityHtml += "<i></i>";
+    nearCapacityHtml += "<b id='tail'></b></div></body></html>";
+    NavigatorScriptExecutionHarness nearCapacityHarness;
+    error = RuntimeErrorCode::None;
+    const bool nearCapacityLoaded = nearCapacityHarness.loadHtml(
+        "file:///js63-near-capacity.html", nearCapacityHtml, error);
+    ++checks;
+    if (!nearCapacityLoaded || error != RuntimeErrorCode::None ||
+        nearCapacityHarness.document().structuralElements.size() !=
+            kNavigatorScriptMaxDocumentNodes) {
+        ++failures;
+        std::cerr << "FAIL: JS63 public fixture reaches the 1,024-node bound\n";
+    }
+    expect(nearCapacityHarness, R"JS(
+var capacity = document.querySelector('#capacity');
+var tail = document.querySelector('#tail');
+var fullFalse = !capacity.matches(':has(.target)');
+tail.setAttribute('class', 'target');
+var lateTrue = capacity.matches(':has(.target)');
+var selected = document.querySelector('div:has(.target)');
+var all = document.querySelectorAll('div:has(.target)');
+var ok = fullFalse && lateTrue && selected === capacity &&
+ all.length === 1 && all[0] === capacity;
+)JS", "public :has full-false and late-true at the 1,024-node bound");
+
     std::cout << "Navigator JavaScript JS63 checks: " << checks - failures
         << "/" << checks << " passed\n";
     return failures == 0 ? 0 : 1;

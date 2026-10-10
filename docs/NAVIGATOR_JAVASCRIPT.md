@@ -6966,3 +6966,103 @@ hosted qualification pending.** The four forms are exposed through the
 qualified JS62 evaluator without persistent memory growth. Close the hosted
 baseline CSS failures and build a fresh server with a JS63 fixture before
 claiming Outcome A. Next phase should be JS64 only after that evidence closes.
+
+#### JS63Q2 hosted fixture and bounded artifact closeout (2026-10-10)
+
+JS63Q2 completed the outstanding production-hosted qualification. The earlier
+JS63Q attempt stopped during artifact preflight because it treated the full
+ignored tree as requiring exact backups. JS63Q2 instead hashed that tree for
+change detection and backed up only output paths identified by the build and
+hosted-runner scripts before invoking them.
+
+The new `navigator-smoke/javascript-js63.html` fixture is part of the existing
+`navigator.smoke` aggregate. It makes 28 public API assertions covering
+Descendant, Child, AdjacentSibling, and GeneralSibling `:has()` relations;
+strict self exclusion; anchor identity; ordered and deduplicated selector-list
+results; `querySelector`, `querySelectorAll`, `matches`, `closest`, and
+Element-scoped queries; a scoped adjacent-sibling query; live attribute and
+checked-state changes; disabled and empty targets; and rejection of empty,
+list, chained, nested, and nested-functional arguments. It registers an Event
+listener that evaluates `:has()` and checks target, currentTarget, eventPhase,
+and defaultPrevented. A follow-up adds four assertions for live `:has(:focus)`
+state while focus moves from outside the scope, between two in-scope controls,
+and out again on blur. The hosted fixture passed 32/32 assertions, including
+the Event callback. The initial fixture draft exposed two useful harness details:
+the HTML script extractor stops at a literal `<` in inline script text, and a
+matching wrapper `div` correctly wins earlier query order. The fixture avoids
+the extractor boundary and uses a `main` scope so its `div` anchor expectations
+are unambiguous.
+
+`server.cpp` adds three checks to the existing aggregate for the JS63 fixture,
+its public API results, and Event integration. The hosted runner reports both
+the executable path and hash and checks the launched process path. The fresh
+`build.bat` output was `guideXOSServer.exe`, 8,416,318 bytes, SHA-256
+`343431D5FEAD5D9E0925E682B77E1DC47FCC6DE365CE863A9D82D587125809A9`. The
+process actually launched from that same repository path. The runner does not
+stage or copy the server binary.
+
+The fresh hosted aggregate reported **617 passed / 7 failed / 624 total**.
+All three JS63 aggregate checks passed. The only failures were the established
+CSS baseline checks: CSS 3C; CSS 3G; CSS 6A; the three CSS 6B checks for sticky
+diagnostics, local/nested scrollports, and fixed-descendant invariance; and CSS
+6C. No CSS source was changed. The full JavaScript smoke-script matrix passed
+**65/65**, including lexer, parser, runtime, JS6–JS63, JS62R, JS62R2, JS62R3,
+and JS62R4. The strict JS63 `-Wall -Wextra -Werror -pedantic` lane passed.
+JS63 passed **8/8** native checks, including a public `matches()` full-false
+then late-true case, `querySelector()` anchor identity, and
+`querySelectorAll()` at the 1,024-Element document limit. Required focused
+regressions JS36, JS38–JS41, JS50–JS52, JS55–JS56, JS58–JS63, and JS62R–JS62R4
+passed in the matrix.
+
+The JS62 qualified sizes remain unchanged: inner core 32 bytes; simple
+selector 68 bytes; four-member selector descriptor 812 bytes; collection
+record 832 bytes; 128-record registry 106,496 bytes; `HtmlElementRef` 440
+bytes; and content metadata 24 bytes. JS63 still stores its relation choice in
+the existing one-byte pseudo enum and uses the pre-existing inner-core slot.
+Parsing stores the bounded inner selector before matching; the matcher passes
+that descriptor to the JS62 relative evaluator and does not parse raw
+`:has()` text per anchor. The JS63 selector parse and match path adds no heap
+container or persistent result cache. Live attribute and checked state are
+read on each evaluation.
+
+The 1,024-node public-path test passed its full-false and late-true cases.
+JS62R2/R3 diagnostic baselines remain 4,102 structural inspections, 1,027
+parent hops, 2,051 serial/index resolutions, and 1,021 simple-selector checks
+for one near-capacity late-true or false relative evaluation. JS62R2's
+1,022-anchor full-false simulation measured 9,210,448 inspections, 3,820,245
+parent hops, 6,598,727 resolutions, and 2,721 selector evaluations in 19 ms.
+JS63 adds the outer pseudo dispatch before this same evaluator; no separate
+diagnostic-counter build for the public JS63 path was made.
+
+`build-kernel.bat` stopped at the known PacMan link errors for
+`pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)`. The direct
+`mingw32-make ARCH=amd64 EXTRA_CFLAGS=` lane stopped at the known Mbed TLS
+configuration errors in `mbedtls_check_config.h:51` and `:64`. Neither lane
+produced a fresh kernel, so QEMU proof is not claimed. These unrelated kernel
+blockers do not block JS63 qualification.
+
+The broad initial ignored/generated audit covered 1,337 files / 88,371,771
+bytes, recording SHA-256 for every file. Exact pre-run byte backups covered
+351 files / 139,615,462 bytes across the server executable, ESP, PacMan
+package/build outputs, bootloader outputs, AMD64 kernel build outputs,
+wallpaper-pack outputs, and persistent hosted fixtures. Before restoration,
+the only changed baseline artifact was `guideXOSServer.exe`; the four hosted
+runs created 24 timestamped log files. The original executable bytes were
+restored from their exact backup and all 24 exact log paths were removed. The
+final broad audit returned to the same file count and total bytes with zero
+changed, missing, or extra files. Generated outputs remain excluded from the
+commit. The hosted server also rewrote `desktop.state`, `display-options.cfg`,
+and `window-bounds.cfg`; the starting worktree was clean, so those three
+tracked state files were restored to their exact starting `HEAD` blobs. The
+kernel wrapper regenerated tracked PacMan `game.o`, `main.o`, and `renderer.o`;
+all three were restored from the exact pre-run byte backups and hash-verified.
+
+No CSS files changed. No branch or worktree topology operation, stash, reset,
+or `git clean` was used, and nothing was pushed. The JS63Q2 source, runner, and
+documentation changes are ready for one local qualification commit.
+
+**Outcome A — JS63 bounded public `:has()` fully qualified.** No bounded
+`:has()` qualification gap remains. Select the next JavaScript selector
+feature for JS64 as a separate phase; the seven unrelated CSS baseline
+failures are not JS63 follow-up work.

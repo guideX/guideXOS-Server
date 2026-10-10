@@ -23,6 +23,9 @@ $exe = Join-Path $Root "guideXOSServer.exe"
 if (-not (Test-Path $exe)) {
     throw "guideXOSServer.exe not found. Run build.bat first or pass -Build."
 }
+$freshExecutableHash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+Write-Host "HOSTED_EXECUTABLE_PATH=$exe"
+Write-Host "HOSTED_EXECUTABLE_SHA256=$freshExecutableHash"
 
 function Find-Python {
     foreach ($candidate in @(
@@ -109,6 +112,13 @@ try {
 
     $appProc = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden `
         -RedirectStandardInput $input -RedirectStandardOutput $log -RedirectStandardError $err
+    $processExecutablePath = (Get-Process -Id $appProc.Id -ErrorAction Stop).Path
+    Write-Host "HOSTED_PROCESS_ID=$($appProc.Id)"
+    Write-Host "HOSTED_PROCESS_EXECUTABLE_PATH=$processExecutablePath"
+    if ([System.IO.Path]::GetFullPath($processExecutablePath) -ne
+        [System.IO.Path]::GetFullPath($exe)) {
+        throw "Hosted process executable path does not match the freshly built server: $processExecutablePath"
+    }
     Wait-Process -Id $appProc.Id
     $output = Get-Content $log -Raw
 } finally {

@@ -4749,6 +4749,38 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js61AfterClick, 2200) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js63FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js63.html";
+    const bool js63Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js63FixtureUrl);
+    const std::string js63InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS63 hosted public :has() fixture loads with all assertions passing",
+        js63Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js63FixtureUrl &&
+        contains(js63InitialText, "Navigator JavaScript JS63") &&
+        contains(js63InitialText,
+            "initial:assertions=32:failures=0:malformed=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js63Loaded) + ",text=" +
+        summarizeText(js63InitialText, 900) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS63 hosted relations, public APIs, scoped queries, and live state pass",
+        js63Loaded && contains(js63InitialText,
+            "initial:assertions=32:failures=0:malformed=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "32 fixture assertions cover all four relations, strict self exclusion, anchor identity, ordered/deduplicated qSA, matches, closest, scoped qS/qSA and sibling anchoring, live attributes, checked/disabled/empty/focus state, and malformed grammar");
+    const bool js63Click = gxos::apps::Navigator::SmokeClickFormControlById(
+        "event-button");
+    const std::string js63AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS63 hosted Event callback matching preserves metadata",
+        js63Click && contains(js63AfterClick,
+            "event=true:metadata=true:assertions=32:failures=0") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js63Click) + ",text=" +
+        summarizeText(js63AfterClick, 900) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();
