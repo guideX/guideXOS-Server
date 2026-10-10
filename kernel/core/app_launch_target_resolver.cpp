@@ -55,31 +55,56 @@ bool runC164FileAssociationTests(uint32_t* outCases,
         ++cases;
     };
     const char* notes = "com.guidexos.apps.managed.notes";
+    AssociationServiceRequest textQuery{};
+    textQuery.operation = static_cast<uint32_t>(AssociationOperation::Query);
+    textQuery.extension[0] = '.';
+    textQuery.extension[1] = 't';
+    textQuery.extension[2] = 'x';
+    textQuery.extension[3] = 't';
+    AssociationServiceResponse textResponse{};
+    const bool textQueryPassed = fileAssociationService(&textQuery,
+        &textResponse) == AssociationServiceStatus::Success &&
+        textResponse.status == static_cast<uint32_t>(AssociationServiceStatus::Success);
+    const char* effectiveTextHandler = textResponse.hasEffectiveAssociation
+        ? textResponse.effectiveAppId : nullptr;
+    auto resolvesCurrentTextState = [&](const FileAssociationResolution& result) {
+        if (!textQueryPassed) return false;
+        if (!effectiveTextHandler) {
+            return result.status == FileAssociationStatus::Unsupported &&
+                result.applicationId == nullptr;
+        }
+        return result.status == FileAssociationStatus::Resolved &&
+            associationTestEqualsIgnoreCase(result.applicationId,
+                effectiveTextHandler);
+    };
+    check(textQueryPassed);
     auto resolveRegular = [](const char* path) {
         return resolveFileAssociation(path, true, false);
     };
 
-    check(resolveRegular("/system/apps/C164/hello.txt").status ==
-        FileAssociationStatus::Resolved);
-    check(resolveRegular("/system/apps/C164/hello.TXT").status ==
-        FileAssociationStatus::Resolved);
-    check(resolveRegular("/system/apps/C164/hello.TxT").status ==
-        FileAssociationStatus::Resolved);
-    check(associationTestEqualsIgnoreCase(resolveRegular(
-        "/system/apps/C164/hello.TXT").applicationId, notes));
-    check(resolveRegular("/system/apps/C164/report.final.txt").status ==
-        FileAssociationStatus::Resolved);
+    check(resolvesCurrentTextState(
+        resolveRegular("/system/apps/C164/hello.txt")));
+    check(resolvesCurrentTextState(
+        resolveRegular("/system/apps/C164/hello.TXT")));
+    check(resolvesCurrentTextState(
+        resolveRegular("/system/apps/C164/hello.TxT")));
+    const FileAssociationResolution uppercaseText = resolveRegular(
+        "/system/apps/C164/hello.TXT");
+    check(resolvesCurrentTextState(uppercaseText) &&
+        (!effectiveTextHandler || associationTestEqualsIgnoreCase(
+            uppercaseText.applicationId, notes)));
+    check(resolvesCurrentTextState(
+        resolveRegular("/system/apps/C164/report.final.txt")));
     check(resolveRegular("/system/apps/C164/file.bin").status ==
         FileAssociationStatus::Unsupported);
     check(resolveRegular("/system/apps/C164/noextension").status ==
         FileAssociationStatus::Unsupported);
     check(resolveRegular("/system/apps/C164/.profile").status ==
         FileAssociationStatus::Unsupported);
-    check(resolveRegular("/system/apps/C164/.profile.txt").status ==
-        FileAssociationStatus::Resolved);
-    check(resolveFileAssociationFromVfs(
-        "/system/apps/C164/hello.txt").status ==
-        FileAssociationStatus::Resolved);
+    check(resolvesCurrentTextState(
+        resolveRegular("/system/apps/C164/.profile.txt")));
+    check(resolvesCurrentTextState(resolveFileAssociationFromVfs(
+        "/system/apps/C164/hello.txt")));
     check(resolveFileAssociationFromVfs(
         "/system/apps/C164/noapp.bin").status ==
         FileAssociationStatus::Unsupported);
@@ -116,7 +141,7 @@ bool runC164FileAssociationTests(uint32_t* outCases,
     maximumPath[maximumPosition++] = 't';
     maximumPath[maximumPosition] = '\0';
     check(maximumPosition == kFileAssociationPathCapacity &&
-        resolveRegular(maximumPath).status == FileAssociationStatus::Resolved);
+        resolvesCurrentTextState(resolveRegular(maximumPath)));
     maximumPath[maximumPosition] = 'x';
     maximumPath[maximumPosition + 1u] = '\0';
     check(resolveRegular(maximumPath).status == FileAssociationStatus::PathTooLong);
@@ -132,8 +157,7 @@ bool runC164FileAssociationTests(uint32_t* outCases,
             (index & 1u) ? "/system/apps/C164/report.final.TxT"
                          : "/system/apps/C164/file.bin");
         stress = stress && ((index & 1u)
-            ? result.status == FileAssociationStatus::Resolved &&
-                result.applicationId == notes
+            ? resolvesCurrentTextState(result)
             : result.status == FileAssociationStatus::Unsupported);
     }
     check(stress);

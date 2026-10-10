@@ -594,3 +594,133 @@ documented in
 [`PROOF1_GUEST_PROOF_CONTROL_INFRASTRUCTURE.md`](PROOF1_GUEST_PROOF_CONTROL_INFRASTRUCTURE.md).
 PROOF1 does not change the C166 acceptance status: C166 remains
 **host-validated, guest-unaccepted** until the fresh guest lane passes.
+
+## C166A — Final Guest Acceptance (2026-10-10)
+
+C166A started from `3d346ff2413e7251d6d422e11b89140c4eaaf8d5` on
+`v1.1_DOTNET_SUPPORT`, tracking `origin/v1.1_DOTNET_SUPPORT`; the post-sync
+starting worktree was clean. The C166R9 host gate remains authoritative:
+`C166R9_HOST_VALIDATION_PASS` (604 native, 34 managed, 31 dual-slot cases,
+136 partial-write positions, 1,000 persistence transactions/images, zero CRC
+mismatches, generations 0 through 1,000, 500 commits per slot, and 1,000
+resolver lookups). PROOF1 infrastructure remains accepted as A-INFRA. No C166
+service, ABI, dual-slot, CRC, or production association algorithm was changed.
+
+Tool discovery selected the repository-configured MinGW fallback:
+`C:\mingw64\bin\g++.exe`, `C:\mingw64\bin\ld.exe`,
+`C:\mingw64\bin\mingw32-make.exe`, and
+`C:\mingw64\bin\objcopy.exe`. NativeAOT used .NET SDK 10.0.401 from
+`C:\Program Files\dotnet\dotnet.exe` with the Visual Studio 18 MSVC
+compiler/linker. QEMU was `C:\Program Files\qemu\qemu-system-x86_64.exe`,
+version 11.0.0. The ownership gate was free for the three runner-owned proof
+processes; no unrelated QEMU process was terminated.
+
+The C166A-specific protected-media backups were byte-exact and hash-verified:
+canonical kernel `E8A91DA0B2E5747A815A4CAD5F2F519F03E8CD0DB2D3A7FDAE751150A045FF42`,
+ESP kernel `02817323329C5CA7A6B0DAB67C8709CD60CDED9B3A4F2B096C9D1194E503BE4B`,
+and production ramdisk
+`5CEC7F5FF2B43AE223A9793232BE0740E33FE357FA8B07869A941BAB54A2B41D`.
+
+### PROOF1 guest execution
+
+Fresh proof products were built with source HEAD at the expected starting
+commit plus the bounded proof-selector, serial-marker, and C164 self-test
+corrections documented below. The successful three-boot proof sequence used
+that same corrected source state. The NativeAOT proof composite SHA-256 is
+`CF8CB042316AAC6FD0A5D653BB4803BA8ACD434BE08459787E9D31439743B1EF`;
+the AMD64 proof kernel is
+`5CD193C29D3EBB2E98A1FA4C33888463FBD39C4E4751FD511D1A5F619328141B`.
+Selector ramdisk hashes are SameBoot
+`2F7A52766277A20731AA5BCC677142360F6C7B83A7FA30C329F61FEE1F262DDC`,
+PreReboot
+`3345DF0D99606F5144F2457CDC6F21F42D96FF3D0E834568C47940418A78F0D7`,
+and PostReboot
+`FAF07E53B6A5A9441317589EC85B9F268CF989CCEB0E9A29FBF698C47C180417`.
+Each selector remained the fixed 9-byte record in the separate boot ramdisk.
+
+Three distinct QEMU processes completed the wired scenario sequence. Boot 1
+SameBoot emitted five numbered PASS steps and one completion marker; its serial
+SHA-256 is
+`E1DD8DD794160A37979623F359FF3088D2B049FE5ED3DB3E60E3966FAFAE2F06`.
+The managed API observed NoOverride (`ov=0`), Disabled (`ov=2`), then
+NoOverride (`ov=0`). Boot 2 PreReboot emitted three numbered PASS steps and
+one completion marker; its serial SHA-256 is
+`D0A9244C999CECD01A6E9EC5F544333B01FF43CC61C2E473575B5578ACCEF79F`.
+Its Diagnostics result reported Disabled, authoritative slot A, generation 3.
+Boot 3 PostReboot emitted four numbered PASS steps and one completion marker;
+its serial SHA-256 is
+`16536FBE6A27ED86E7B57A04A4A218B05ABE250EBF5F9B8CDB336E536307EE47`.
+Before Reset, Query reported Disabled and Diagnostics loaded slot A,
+generation 3. The exact comparisons passed: Boot 2 slot A equals Boot 3
+loaded slot A, and generation 3 equals generation 3. Boot 3 Reset and Query
+returned NoOverride. The post-reset writable FAT files were `/GXAS0.BIN`
+(136 bytes, Disabled, generation 3) and `/GXAS1.BIN` (136 bytes, NoOverride,
+generation 4). The service opened both files through the guest VFS. Boot 2 and
+Boot 3 used the same writable FAT backing directory:
+`out/dotnet/proof1/guest-run-20261010-183857-ee661a2c/shared-esp`; only the
+selector ramdisk changed.
+
+The four real guest mutations were Boot 1 Disable/Reset, Boot 2 Disable, and
+Boot 3 Reset. Consecutive persistence writes alternated from slot A/generation
+3 to slot B/generation 4. The accepted coordinator has no wired 25-mutation
+churn sequence; its fixed scenario steps total 12 operations. C166A did not
+expand PROOF1, so the required minimum of 25 real managed guest mutations was
+not met. Boot 1/Boot 3 Explorer parity around the C166 transitions, and the
+C166-specific real Notes path/content/clean-baseline interaction, were also
+not driven by this runner. The API-level persistence proof therefore passes,
+but the full guest acceptance gate does not.
+
+Guest corruption injection not performed; exhaustive host recovery evidence
+retained. Host validation remains distinct from guest corruption evidence.
+
+### Regressions and clean production
+
+The fresh C164 regression lane passed C164, C163, C162, C160, and C156
+coverage. C164 reported 28 resolver cases plus 1,000 resolver calls, 30
+activation-context cases, 32 Notes/VFS/document-state cases, and its real
+file-activation scenarios. C163 reported 48 focused VFS cases, 1,000 refreshes,
+100 navigation iterations, and 25 unique launch/browse/close cycles. C160
+reported AppManager identity 29/29, native snapshots 34/34 with 1,000-call
+stress, and managed snapshots 22/22 with 1,000-call stress. C162 identity-safe
+Calculator close/relaunch and Task Manager baseline passed. C156 modifier
+decode passed 10/10, shortcut routing 15/15, and live Ctrl+9 was ignored;
+final Control and Shift states were released. Settings format remained v2 and
+no Default Apps UI was added. A launch/close Settings UI smoke was not part of
+the executed C164 lane. C128 remains unverified.
+
+After proof and regression execution, the C164 lane built and installed fresh
+clean production artifacts with proof-control flags disabled. The clean
+NativeAOT composite hash is
+`1120F0F8198BA88E3D7A29626A51015B0EB9C3E465C42FD93E005AD2E64F1CFA`.
+The clean canonical and ESP kernels both hash to
+`742CCA4EEBC6B2894F15AAF35774338649C7E4392463A860551CC50B1CE261DA`.
+The clean production ramdisk hash is
+`9E28B1B0E4CAD866DF737995AE4357503486F695F9E152E524F2FC8D3DDF2A83`.
+The clean composite, kernel, and ramdisk contain no inspected
+`PROOF-SCENARIO-PASS`, `PROOF-SCENARIO-FAIL`, `GUIDEXOS_PROOF_CONTROL`, or
+`PROOF C166` strings. The clean source ESP has no association slot files, so
+the compiled default `.txt` mapping remains Managed Notes.
+
+Three fresh ordinary QEMU boots passed in the C164 clean regression lane with
+the same clean kernel/ramdisk hashes: Boot 1 serial
+`430273FB5A0D07F333E190080BF71A80EC544F31A7187FFA086845F304726E7D`, Boot 2
+serial `17EEB78E274C64DFAB372BADC6D893FD5DD2A49B3F16C2B2AEFFF7757810FF0F`,
+and Boot 3 serial
+`7A4FD2F9B80098F5C8E02E8AD20605F6D32323B8BB55457B1FBF032D0B272721`.
+These are clean ordinary regression boots, not the requested C166-specific
+Boot 1 document activation, Boot 2 native File Explorer plus Task Manager,
+and Boot 3 Calculator/Task Manager/Settings sequence. Those ordinary
+application checks and Settings launch/close smoke remain incomplete.
+
+### C166A disposition
+
+The real FAT reboot persistence gate passed exactly: Boot 2 A/3 reloaded as
+Boot 3 A/3 in a new QEMU process using the same writable disk, then Reset
+produced NoOverride in B/4. The clean production build/install and three
+ordinary regression boots also passed. C166 is **not accepted** in C166A
+because the required 25-operation guest churn, transition-time Explorer
+parity, and C166-specific ordinary boot workflows were not executed. No
+production association defect was observed. The proof and ordinary manifests
+are retained at
+`out/dotnet/c166a-final-acceptance/c166a-proof-manifest.json` and
+`out/dotnet/c166a-final-acceptance/c166a-ordinary-manifest.json`.

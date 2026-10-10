@@ -2,6 +2,7 @@ param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
     [string]$EvidenceRoot = "",
     [switch]$BuildProofProducts,
+    [switch]$UseExistingProofProducts,
     [switch]$RunProofBoots,
     [switch]$HostTestsOnly
 )
@@ -198,7 +199,7 @@ function Invoke-ProofQemuBoot([string]$Stage, [string]$Ramdisk,
             Start-Sleep -Milliseconds 250
             if (Test-Path -LiteralPath $serialPath) {
                 $serial = Get-Content -LiteralPath $serialPath -Raw -ErrorAction SilentlyContinue
-                if ($serial -match '(?m)^PROOF-SCENARIO-(?:PASS|FAIL) C166 ') { break }
+                if ($serial -match '(?m)^(?:\[C102-MANAGED-OUTPUT\] )?PROOF-SCENARIO-(?:PASS|FAIL) C166 ') { break }
             }
             $process.Refresh()
             if ($process.HasExited) { break }
@@ -222,8 +223,8 @@ function Assert-ProofScenario([object]$Boot, [string]$ScenarioCode,
     [string]$StageCode, [int]$ExpectedSteps) {
     $expectedCompletion = "PROOF-SCENARIO-PASS C166 $ScenarioCode $StageCode"
     if ($Boot.serial -notmatch [regex]::Escape($expectedCompletion)) { throw "$($Boot.stage) proof completion failed; see $($Boot.serialPath)." }
-    if (@([regex]::Matches($Boot.serial, '(?m)^PROOF-SCENARIO-(?:PASS|FAIL) C166 ')).Count -ne 1) { throw "$($Boot.stage) emitted duplicate or missing completion markers." }
-    $stepLines = @([regex]::Matches($Boot.serial, '(?m)^PROOF C166 [SP] (?:Same|Pre|Post) (?<step>[0-9]+) PASS '))
+    if (@([regex]::Matches($Boot.serial, '(?m)^(?:\[C102-MANAGED-OUTPUT\] )?PROOF-SCENARIO-(?:PASS|FAIL) C166 ')).Count -ne 1) { throw "$($Boot.stage) emitted duplicate or missing completion markers." }
+    $stepLines = @([regex]::Matches($Boot.serial, '(?m)^(?:\[C102-MANAGED-OUTPUT\] )?PROOF C166 [SP] (?:Same|Pre|Post) (?<step>[0-9]+) PASS '))
     if ($stepLines.Count -ne $ExpectedSteps) { throw "$($Boot.stage) expected $ExpectedSteps passing proof steps; found $($stepLines.Count)." }
     for ($i = 0; $i -lt $stepLines.Count; $i++) {
         if ([int]$stepLines[$i].Groups['step'].Value -ne $i + 1) { throw "$($Boot.stage) proof steps were missing, duplicated, or out of order." }
@@ -275,18 +276,60 @@ Write-Host $capability
 if (-not $dotnet) { throw 'Outcome E: current .NET SDK is unavailable.' }
 
 if (-not $productionToolchain) { throw 'Outcome E: repository production kernel build toolchain is unavailable.' }
-if (-not $BuildProofProducts) {
+if (-not $BuildProofProducts -and -not $UseExistingProofProducts) {
     Write-Host 'Focused C166R3 source/tool discovery complete; pass -BuildProofProducts to build fresh proof products.'
     if ($RunProofBoots -and $qemuRelevant.Count -gt 0) {
         throw 'Outcome E: proof boots blocked by an already running QEMU workload; no process was terminated.'
     }
     return
 }
+if ($BuildProofProducts -and $UseExistingProofProducts) {
+    throw 'Choose either fresh proof-product builds or verified existing proof products, not both.'
+}
 
 $buildRoot = Join-Path $EvidenceRoot 'build'
 $proofComposite = Join-Path $buildRoot 'composite-c166-proof'
 $productionComposite = Join-Path $buildRoot 'composite-c166-production'
 $runtimeOutput = Join-Path $buildRoot 'runtime-pack'
+$proofElf = Join-Path $proofComposite 'artifacts\HostLogProof.elf'
+$proofKernel = Join-Path $EvidenceRoot 'proof-kernel.elf'
+$proofScenarioMedia = [ordered]@{}
+$proofCompositeHash = $null
+$proofKernelHash = $null
+$proofRamdiskHash = $null
+$proofKernelStatus = 'not built'
+
+if ($UseExistingProofProducts) {
+    $savedManifestPath = Join-Path $EvidenceRoot 'c166r9-proof-manifest.json'
+    if (-not (Test-Path -LiteralPath $savedManifestPath -PathType Leaf)) {
+        throw "Existing proof-product manifest is missing: $savedManifestPath"
+    }
+    $savedManifest = Get-Content -Raw -LiteralPath $savedManifestPath | ConvertFrom-Json
+    if ($savedManifest.sourceHead -ne $head -or $savedManifest.proofProductsStatus -ne 'PASS') {
+        throw 'Existing proof products do not have a PASS manifest for the current source HEAD.'
+    }
+    if (-not (Test-Path -LiteralPath $proofElf -PathType Leaf) -or
+        (Get-Sha256 $proofElf) -ne $savedManifest.proofCompositeSha256) {
+        throw 'Existing proof composite is missing or does not match its verified build manifest.'
+    }
+    if (-not (Test-Path -LiteralPath $proofKernel -PathType Leaf) -or
+        (Get-Sha256 $proofKernel) -ne $savedManifest.proofKernelSha256) {
+        throw 'Existing proof kernel is missing or does not match its verified build manifest.'
+    }
+    foreach ($stageName in @('SameBoot','PreReboot','PostReboot')) {
+        $savedStage = $savedManifest.scenarioMedia.$stageName
+        if (-not $savedStage -or -not (Test-Path -LiteralPath $savedStage.path -PathType Leaf) -or
+            (Get-Sha256 $savedStage.path) -ne $savedStage.sha256) {
+            throw "Existing $stageName selector ramdisk is missing or does not match its verified build manifest."
+        }
+        $proofScenarioMedia[$stageName] = [ordered]@{ path=$savedStage.path; sha256=$savedStage.sha256 }
+    }
+    $proofCompositeHash = $savedManifest.proofCompositeSha256
+    $proofKernelHash = $savedManifest.proofKernelSha256
+    $proofRamdiskHash = $proofScenarioMedia.SameBoot.sha256
+    $proofKernelStatus = $savedManifest.proofKernelStatus
+    Write-Host "Verified existing C166 proof products for source HEAD $head."
+} else {
 $python = Resolve-Tool 'python.exe' @(
     'C:\Users\guideX\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe',
     'C:\Python312\python.exe','C:\Python311\python.exe')
@@ -305,7 +348,6 @@ $managedArgs = @('-ExecutionPolicy','Bypass','-File',$managedBuilder,
     '-HeapConfiguration','Primary8MiB','-PythonExe',$python)
 & powershell.exe @managedArgs
 if ($LASTEXITCODE -ne 0) { throw "Fresh C166 managed proof build failed: $LASTEXITCODE" }
-$proofElf = Join-Path $proofComposite 'artifacts\HostLogProof.elf'
 if (-not (Test-Path -LiteralPath $proofElf -PathType Leaf)) { throw "Proof composite missing: $proofElf" }
 $proofCompositeHash = Get-Sha256 $proofElf
 
@@ -374,6 +416,7 @@ if ($productionToolchain) {
     Copy-Item -LiteralPath $canonicalKernel -Destination $proofKernel -Force
     $proofKernelHash = Get-Sha256 $proofKernel
     $proofKernelStatus = "PASS: configured AMD64 MinGW fallback ($productionCompiler)"
+}
 }
 
 # QEMU ownership is deliberately checked only after the host and all three build gates.
@@ -462,7 +505,7 @@ Assert-ProofScenario $boot1 'S' 'Same' 5
 $boot2 = Invoke-ProofQemuBoot 'Boot2-PreReboot' $proofScenarioMedia.PreReboot.path $sharedEsp $bootloader $proofKernel $qemu $ovmf (Join-Path $guestRoot 'boot2')
 Assert-ProofScenario $boot2 'P' 'Pre' 3
 if ($boot2.backingEspPath -ne $diskIdentity) { throw 'Boot 2 association storage backing path changed unexpectedly.' }
-$boot2Diagnostic = [regex]::Match($boot2.serial, '(?m)^PROOF C166 P Pre [0-9]+ PASS Diag st=0 ov=2 slot=(?<slot>[ABN]) gen=(?<gen>[0-9]+)$')
+$boot2Diagnostic = [regex]::Match($boot2.serial, '(?m)^(?:\[C102-MANAGED-OUTPUT\] )?PROOF C166 P Pre [0-9]+ PASS Diag st=0 ov=2 slot=(?<slot>[ABN]) gen=(?<gen>[0-9]+)\r?$')
 if (-not $boot2Diagnostic.Success) { throw 'Boot 2 did not report Disabled state and authoritative slot/generation.' }
 $crossBootStatePath = Join-Path $guestRoot 'c166-persistence-state.json'
 $crossBootState = [ordered]@{suite='C166';scenario='Persistence';slot=$boot2Diagnostic.Groups['slot'].Value;generation=$boot2Diagnostic.Groups['gen'].Value;boot2SerialSha256=$boot2.serialSha256;associationDiskPath=$diskIdentity}
@@ -472,7 +515,7 @@ Assert-ProofScenario $boot3 'P' 'Post' 4
 if ($boot3.backingEspPath -ne $diskIdentity -or $boot2.backingEspPath -ne $boot3.backingEspPath) {
     throw 'Boot 2 and Boot 3 did not use the same writable association-storage disk identity.'
 }
-$boot3Diagnostic = [regex]::Match($boot3.serial, '(?m)^PROOF C166 P Post [0-9]+ PASS Diag st=0 ov=2 slot=(?<slot>[ABN]) gen=(?<gen>[0-9]+)$')
+$boot3Diagnostic = [regex]::Match($boot3.serial, '(?m)^(?:\[C102-MANAGED-OUTPUT\] )?PROOF C166 P Post [0-9]+ PASS Diag st=0 ov=2 slot=(?<slot>[ABN]) gen=(?<gen>[0-9]+)\r?$')
 if (-not $boot3Diagnostic.Success -or $boot3Diagnostic.Groups['slot'].Value -ne $crossBootState.slot -or $boot3Diagnostic.Groups['gen'].Value -ne $crossBootState.generation) {
     throw 'Boot 3 slot/generation did not match host-owned Boot 2 orchestration state.'
 }

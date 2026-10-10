@@ -3081,8 +3081,32 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedFileReadAll(
     }
     *outLength = 0u;
     char validatedPath[kManagedFilePathMaxBytes + 1u] = {};
-    if (!copyManagedFilePath(path, pathLength, validatedPath,
-                             sizeof(validatedPath))) {
+    bool validPath = copyManagedFilePath(path, pathLength, validatedPath,
+                                         sizeof(validatedPath));
+#if defined(GUIDEXOS_PROOF_CONTROL)
+    // PROOF1's fixed selector is stored beside application media in the
+    // read-only boot ramdisk, outside the managed application data root.
+    // Permit only this exact read path in proof builds; writes and all other
+    // managed file operations remain confined to /system/apps.
+    constexpr char kProofSelectorPath[] = "/system/config/proof1.bin";
+    if (!validPath && path && pathLength == sizeof(kProofSelectorPath) - 1u) {
+        bool matchesProofSelector = true;
+        for (uint32_t index = 0u; index < pathLength; ++index) {
+            if (path[index] != static_cast<uint8_t>(kProofSelectorPath[index])) {
+                matchesProofSelector = false;
+                break;
+            }
+        }
+        if (matchesProofSelector) {
+            for (uint32_t index = 0u; index < pathLength; ++index) {
+                validatedPath[index] = kProofSelectorPath[index];
+            }
+            validatedPath[pathLength] = '\0';
+            validPath = true;
+        }
+    }
+#endif
+    if (!validPath) {
         return kManagedFileInvalidPath;
     }
     const char* vfsPath = resolveManagedFileVfsPath(validatedPath);
