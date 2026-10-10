@@ -512,3 +512,76 @@ the full AMD64 proof kernel hash is
 The proof products were rebuilt from commit
 `9ecdafdf89edbb688d1c0049393b5ada0b4a74cb`. The final later change is
 documentation only; kernel and proof build inputs match that commit.
+## C166R11 — Guest Control and Final Acceptance (2026-10-09)
+
+C166R11 began at `f2f0297ba7b323c9735d3828c5b0520fa9f86fda` on `v1.1_DOTNET_SUPPORT`, tracking `origin/v1.1_DOTNET_SUPPORT` at 0/0, with a clean worktree. No later accepted C166 work was present. The existing C166R9 host evidence remains authoritative: `C166R9_HOST_VALIDATION_PASS`.
+
+### Audit and disposition
+
+C166R10's blocker remains. `samples/managed/HostLogProof/GuideXos/GuideXosFileAssociationsC166.cs` contains the managed wrapper for Query, Set, Disable, and Reset, and `HostLogProof.csproj` gates its associated sources with `HOSTLOGPROOF_C166_FILE_ASSOCIATION_PROOF`. The kernel installs the VFS storage and loads association state after filesystem mount in `kernel/core/main.cpp`. The existing ABI v4 association callback at offset 120 reaches `managedAssociationService`, which invokes the real service.
+
+No existing HostLogProof QMP command dispatcher, serial command input, proof-only keyboard command map, or proof-stage selector was found. The current C166 kernel proof hook in `kernel/core/nativeaot_application.cpp` runs the native `runC166AssociationServiceTests` suite, which performs a 200-mutation stress sequence and changes the actual association slots before restoring NoOverride. It is not a suitable managed guest controller and cannot independently satisfy the required transitions. The ABI v4 response contains override state and effective/compiled handler IDs but no authoritative slot or generation. The service has separate local slot/generation getters, but exposing those to managed proof requires a new bounded diagnostic bridge.
+
+Consequently, a compliant controller needs new managed entry/dispatch integration, a proof-stage selector separate from `/GXAS0.BIN` and `/GXAS1.BIN`, a bounded diagnostic path for active slot/generation and actual FAT file metadata, plus QMP/serial orchestration for three fresh boots and the ordinary regressions. Reusing the existing native stress hook would bypass the managed ABI and contaminate stage state. This coupling is broader than the requested narrow guest-control addition, so no control plane was added and no QEMU media was installed.
+
+### Environment and preserved media
+
+QEMU 11.0.0 is available and no QEMU process was running at preflight. The existing C166R10 protected-media backups still match the protected production bytes:
+
+- canonical kernel: `97D919592E265D57BF5A6D19BE419E48CB9A40B9177A11CFCACB359F7FCF93F9`
+- ESP kernel: `02817323329C5CA7A6B0DAB67C8709CD60CDED9B3A4F2B096C9D1194E503BE4B`
+- ramdisk: `5CEC7F5FF2B43AE223A9793232BE0740E33FE357FA8B07869A941BAB54A2B41D`
+
+The .NET SDK 10.0.401 is available, but `x86_64-elf-gcc` and `x86_64-elf-g++` are unavailable. The required fresh AMD64 proof kernel could not be built in this environment. No proof composite, proof ramdisk, proof kernel, or clean production artifacts were rebuilt. The old R9 hashes are inherited evidence only, not R11 build results.
+
+### Acceptance result
+
+Outcome D — no safe bounded guest control path can be integrated from the existing proof architecture without adding a managed controller dispatch and diagnostic coupling. Proof Boot 1/2/3, reboot slot/generation match, guest FAT 136-byte file verification, churn, Explorer parity, C164/C163/C162/C160/C156 regressions, clean production rebuild/install, and ordinary Boot 1/2/3 were not run. C166 remains unaccepted. C128 remains unverified. Settings remains v2 and no Default Apps UI was added. Production association files were not modified.
+
+## C166R12 — Guest Proof Infrastructure (2026-10-09)
+
+### Starting state and R11 audit
+
+C166R12 started at `f2f0297ba7b323c9735d3828c5b0520fa9f86fda` on
+`v1.1_DOTNET_SUPPORT`, tracking `origin/v1.1_DOTNET_SUPPORT`. The only initial
+worktree change was the C166R11 audit above; it was preserved. The requested
+proof-control infrastructure is not already present.
+
+R11's findings were verified against the current source. The managed wrapper
+`GuideXosFileAssociations` already calls the v4 `associationService` callback
+for Query, Set, Disable, and Reset. The runner
+`scripts/dotnet/run-c166-file-associations.ps1` can build host/proof products,
+but its `-RunProofBoots` branch ends in an explicit throw: no C166 QMP
+scenario, controller dispatch, or stage selection is wired. The kernel's
+existing `runC166AssociationServiceTests` hook performs native mutations and
+is therefore not a substitute for managed guest proof. Native active-slot and
+generation getters exist, but there is no managed read-only diagnostic call.
+
+### R12 disposition
+
+No source change was made. In particular, the requested three primitives were
+not implemented, so this phase is **Outcome D — proof architecture still lacks
+a safe deterministic path**, and **C166 proof infrastructure is incomplete**.
+The existing managed wrapper alone cannot be triggered as a persistent,
+focus-independent command service. The runner has QMP socket/input utilities
+in the C158 script, but C166 has no controller input target and no stage/config
+mechanism. Reusing the native stress hook would mutate the association state
+outside the managed ABI. A new global command channel or general-purpose debug
+shell would exceed the prompt's bounded proof-only design.
+
+The source-level interfaces identified for a future bounded implementation
+are: a C166-only managed command dispatcher around `GuideXosFileAssociations`;
+a fixed Q/M/D/R input mapping routed to that dispatcher independent of app
+focus; a proof-stage value supplied separately from the persistent root FAT
+disk (the proof ramdisk is a candidate); and a read-only diagnostic operation
+that reports active slot, generation, and override state. Any future runner
+must explicitly preserve the same writable FAT image while changing only
+proof-stage input between Boot 2 and Boot 3. These interfaces were not
+represented as wired or tested in R12.
+
+### Build and acceptance status
+
+No source was changed, no proof product was rebuilt, and no guest boot was run.
+Cross-compiler and QEMU availability are recorded in the R12 manifest. C166
+remains unaccepted. The production association algorithms, ABI v4 table,
+Settings v2, and product UI were not changed; no Default Apps UI was added.
