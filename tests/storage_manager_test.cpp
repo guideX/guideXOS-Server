@@ -8379,6 +8379,33 @@ int main()
     {
         const uint32_t partitionSectors = 70000u;
         const uint32_t maxReadBytes = 128u * 1024u;
+
+        FakeDisk readOnlyJobDisk(512, 90000);
+        set_mbr_signature(readOnlyJobDisk);
+        set_mbr_partition(readOnlyJobDisk, 0, 0, 0x0C, 2048,
+                          partitionSectors);
+        const uint8_t readOnlyJobIndex = register_fake(readOnlyJobDisk,
+            false, true, true, false, 0, maxReadBytes);
+        storage::PartitionTableModel readOnlyJobTable = {};
+        storage::PartitionEntry readOnlyJobPartition = {};
+        const bool readOnlyJobParsed = parse_first_partition(
+            readOnlyJobIndex, readOnlyJobTable, readOnlyJobPartition);
+        storage::Fat32FormatJob readOnlyJob = {};
+        const storage::Fat32FormatJobState readOnlyJobState =
+            storage::begin_fat32_format_job(readOnlyJob,
+                make_format_request(readOnlyJobIndex, readOnlyJobPartition,
+                    "READONLY", 0xD33F0006u));
+        check(readOnlyJobParsed && readOnlyJobState ==
+                  storage::FAT32_FORMAT_JOB_FAILED &&
+              readOnlyJob.result.status == storage::FAT32_FORMAT_READ_ONLY &&
+              readOnlyJob.result.scanReadRequests == 0 &&
+              !readOnlyJob.result.scanCoverageComplete &&
+              readOnlyJobDisk.writeAttempts == 0 &&
+              readOnlyJobDisk.flushes == 0 &&
+              !storage::storage_operation_active(),
+              "cooperative FAT32 Format rejects read-only media before Scanning, scan I/O, writes, or Flush and releases its lease");
+        unregister_fake(readOnlyJobIndex, readOnlyJobDisk);
+
         FakeDisk cooperative(512, 90000);
         set_mbr_signature(cooperative);
         set_mbr_partition(cooperative, 0, 0, 0x0C, 2048,
