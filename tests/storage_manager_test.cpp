@@ -59,6 +59,7 @@ struct FakeDisk {
     uint32_t failReadAtLbaMinCount;
     uint64_t removeOnScanReadLba;
     uint32_t removeOnScanReadMinCount;
+    bool duplicateRemovalResult;
     FakeDisk* replacementDuringScan;
     uint8_t replacementIndex;
     bool replacementRegisteredDuringScan;
@@ -99,6 +100,8 @@ struct FakeDisk {
     vfs::PartitionMountError mountAttemptError;
     storage::Fat32FormatJob* cancelFormatJobOnRead;
     uint64_t cancelFormatJobOnReadLba;
+    storage::Fat32FormatJob* cancelFormatJobOnWrite;
+    bool cancelOnWriteRejected;
 
     FakeDisk(uint32_t size, uint64_t count, bool allocate = true)
         : sectorSize(size), sectorCount(count), driverId(0), sparse(!allocate),
@@ -108,6 +111,7 @@ struct FakeDisk {
           failLba(UINT64_MAX), failReadAtLba(UINT64_MAX),
           failReadAtLbaMinCount(0),
           removeOnScanReadLba(UINT64_MAX), removeOnScanReadMinCount(0),
+          duplicateRemovalResult(false),
           replacementDuringScan(nullptr), replacementIndex(0xFF),
           replacementRegisteredDuringScan(false),
           mutatePartitionOnReadLba(UINT64_MAX), mutatePartitionStartTo(0),
@@ -124,7 +128,8 @@ struct FakeDisk {
           registryIndex(0xFF), registrationId(0), removeOnVerifyRead(false), removeOnFlush(false), removeOnFlushAt(0),
           removed(false), attemptMountDuringScanRead(false),
           mountAttemptError(vfs::PARTITION_MOUNT_INVALID_ARGUMENT),
-          cancelFormatJobOnRead(nullptr), cancelFormatJobOnReadLba(UINT64_MAX) {}
+          cancelFormatJobOnRead(nullptr), cancelFormatJobOnReadLba(UINT64_MAX),
+          cancelFormatJobOnWrite(nullptr), cancelOnWriteRejected(false) {}
 };
 
 FakeDisk* g_fakeDisks[256] = {};
@@ -133,6 +138,9 @@ int g_checks = 0;
 int g_failures = 0;
 
 void register_fake_replacement_after_removal(FakeDisk* removed);
+block::Status fake_write(uint8_t driverId, uint64_t lba, uint32_t count,
+                         const void* buffer);
+block::Status fake_flush(uint8_t driverId);
 
 void check(bool condition, const char* label)
 {
@@ -170,17 +178,24 @@ block::Status fake_read(uint8_t driverId, uint64_t lba, uint32_t count, void* bu
         count >= disk->removeOnScanReadMinCount) {
         disk->removed = block::mark_device_offline(
             disk->registryIndex, disk->registrationId);
+        disk->duplicateRemovalResult = block::mark_device_offline(
+            disk->registryIndex, disk->registrationId);
         FakeDisk* replacement = disk->replacementDuringScan;
         if (replacement) {
             replacement->driverId = static_cast<uint8_t>(g_nextDriverId++);
             g_fakeDisks[replacement->driverId] = replacement;
             block::BlockDevice descriptor = {};
             descriptor.active = true;
-            descriptor.type = block::BDEV_USB_MASS;
+            descriptor.type = block::BDEV_ATA_PIO;
             descriptor.driverIndex = replacement->driverId;
             descriptor.totalSectors = replacement->sectorCount;
             descriptor.sectorSize = replacement->sectorSize;
             descriptor.readFn = fake_read;
+            descriptor.writeFn = fake_write;
+            descriptor.flushFn = fake_flush;
+            descriptor.flushSemanticsKnown = true;
+            descriptor.bootProvenance =
+                block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT;
             descriptor.maxTransferBytes = 128u * 1024u;
             std::strncpy(descriptor.name, "scan-replacement",
                          sizeof(descriptor.name) - 1);
@@ -274,6 +289,12 @@ block::Status fake_write(uint8_t driverId, uint64_t lba, uint32_t count,
     if (lba > disk->sectorCount || count > disk->sectorCount - lba)
         return block::BLOCK_ERR_IO;
     ++disk->writeAttempts;
+    if (disk->cancelFormatJobOnWrite) {
+        storage::Fat32FormatJob* job = disk->cancelFormatJobOnWrite;
+        disk->cancelFormatJobOnWrite = nullptr;
+        disk->cancelOnWriteRejected =
+            !storage::cancel_fat32_format_job(*job);
+    }
     if (disk->removeOnWriteAtCall != 0 &&
         disk->writeAttempts == disk->removeOnWriteAtCall) {
         disk->removed = block::mark_device_offline(
@@ -8480,15 +8501,18 @@ int main()
             retryJob.result.scanProgressPercent == 100u &&
             retryJob.result.scanLargestRequestBytes <=
                 storage::FAT32_FORMAT_SCAN_BUFFER_MAX_BYTES;
+        cooperative.cancelFormatJobOnWrite = &retryJob;
         while (retryJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT)
             storage::step_fat32_format_job(retryJob);
         check(monotonic && exactCoverage && progressUpdates > 1 &&
               retryJob.state == storage::FAT32_FORMAT_JOB_COMPLETED &&
               retryJob.result.status == storage::FAT32_FORMAT_SUCCESS &&
               retryJob.result.verificationPassed &&
+              cooperative.cancelOnWriteRejected &&
+              retryJob.result.writeAttempted && retryJob.result.flushAttempted &&
               retryJob.request.targetSnapshot.registrationId ==
                   cooperativeRequest.targetSnapshot.registrationId,
-              "retry after cancellation completes with monotonic exact progress and verified formatter publication");
+              "retry after cancellation completes with exact progress; cancel is rejected after publication starts and Flush verification completes");
         check(sizeof(storage::Fat32FormatJob) < 2048u,
               "cooperative format job state remains below the 2 KiB bound");
         unregister_fake(cooperativeIndex, cooperative);
@@ -8589,12 +8613,40 @@ int main()
         const bool safeRemoval = parsed && job.state ==
                 storage::FAT32_FORMAT_JOB_FAILED &&
             job.result.status == storage::FAT32_FORMAT_READ_UNAVAILABLE &&
-            removed.removed && removed.replacementRegisteredDuringScan &&
+            removed.removed && removed.duplicateRemovalResult &&
+            removed.replacementRegisteredDuringScan &&
+            replacement.registrationId != request.targetSnapshot.registrationId &&
+            replacement.sectorCount == removed.sectorCount &&
             replacement.reads == 0 && !job.result.scanCoverageComplete &&
             removed.writeAttempts == 0 && removed.flushes == 0 &&
             !storage::storage_operation_active();
         check(safeRemoval,
-              "cooperative device removal releases its pin and never scans or writes replacement media");
+              "removal during a synchronous pending scan read settles once; duplicate invalidation is safe and the terminal old job never scans or writes a same-geometry replacement");
+        set_mbr_signature(replacement);
+        set_mbr_partition(replacement, 0, 0, 0x0C, 2048, 70000u);
+        storage::Fat32FormatJob replacementJob = {};
+        const storage::Fat32FormatJobState replacementBegin =
+            storage::begin_fat32_format_job(replacementJob,
+                make_format_request(removed.replacementIndex, partition,
+                    "REPLACE", 0xD33F0005u));
+        const bool replacementRequiresFreshScan = replacementBegin ==
+                storage::FAT32_FORMAT_JOB_SCANNING &&
+            replacementJob.result.scanBytesRead == 0 &&
+            replacementJob.request.targetSnapshot.registrationId ==
+                replacement.registrationId &&
+            storage::cancel_fat32_format_job(replacementJob) &&
+            replacementJob.state == storage::FAT32_FORMAT_JOB_CANCELED &&
+            replacement.writeAttempts == 0 && replacement.flushes == 0;
+        if (!replacementRequiresFreshScan) std::fprintf(stderr,
+            "DEBUG replacement begin=%u result=%u bytes=%llu active=%d reg=%llu id=%llu read=%u\n",
+            static_cast<unsigned>(replacementBegin),
+            static_cast<unsigned>(replacementJob.result.status),
+            static_cast<unsigned long long>(replacementJob.result.scanBytesRead),
+            storage::storage_operation_active(),
+            static_cast<unsigned long long>(replacementJob.request.targetSnapshot.registrationId),
+            static_cast<unsigned long long>(replacement.registrationId), replacement.reads);
+        check(replacementRequiresFreshScan,
+              "same-geometry replacement starts a fresh scan and cannot reuse the removed incarnation's KnownZero authorization");
         if (removed.replacementIndex != 0xFF)
             (void)unregister_fake(removed.replacementIndex, replacement);
         else

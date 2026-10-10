@@ -2,6 +2,9 @@
 #include "include/kernel/block_device.h"
 #include "include/kernel/pit.h"
 #if !defined(KERNEL_STORAGE_TEST)
+#include "include/kernel/serial_debug.h"
+#endif
+#if !defined(KERNEL_STORAGE_TEST)
 #include "include/kernel/virtio_rng.h"
 #endif
 #if defined(GXOS_DM23_SCAN_DIAGNOSTICS) && \
@@ -2654,10 +2657,83 @@ static Fat32FormatStatus run_with_lease(const Fat32FormatRequest& request,
 
 } // namespace
 
+static void report_job_lifecycle(const char* event,
+                                 const Fat32FormatJob& job,
+                                 const char* reason = nullptr)
+{
+#if !defined(KERNEL_STORAGE_TEST)
+    serial::puts("[DM33-FORMAT] event=");
+    serial::puts(event);
+    serial::puts(" operation=0x");
+    serial::put_hex64(job.operationId);
+    serial::puts(" target=0x");
+    serial::put_hex8(job.request.targetSnapshot.globalIndex);
+    serial::puts(" registration=0x");
+    serial::put_hex64(job.request.targetSnapshot.registrationId);
+    serial::puts(" phase=");
+    serial::puts(fat32_format_stage_name(job.result.stage));
+    serial::puts(" state=");
+    serial::puts(fat32_format_job_state_name(job.state));
+    serial::puts(" scanLba=0x");
+    serial::put_hex64(job.result.scanCurrentLba);
+    serial::puts(" progress=");
+    serial::put_hex32(job.result.scanProgressPercent);
+    serial::puts(" io=model=synchronous pending=0");
+    serial::puts(" block-status=");
+    if (job.result.blockStatusValid) {
+        serial::puts("0x");
+        serial::put_hex8(static_cast<uint8_t>(job.result.blockStatus));
+    } else {
+        serial::puts("na");
+    }
+    if (reason != nullptr) {
+        serial::puts(" reason=");
+        serial::puts(reason);
+    }
+    serial::putc('\n');
+#else
+    (void)event;
+    (void)job;
+    (void)reason;
+#endif
+}
+
+static bool invalidate_job_blank_token(Fat32FormatJob& job)
+{
+    if (!s_jobBlankToken.valid ||
+        s_jobBlankToken.operationGeneration != job.operationId)
+        return false;
+    s_jobBlankToken.valid = false;
+    report_job_lifecycle("known-zero-invalidated", job);
+    return true;
+}
+
+static void release_job_ownership(Fat32FormatJob& job)
+{
+    if (job.lease.ownerToken == 0) return;
+    const uint64_t ownerToken = job.lease.ownerToken;
+    const uint8_t targetIndex = job.lease.pinnedIndex;
+    const uint64_t registrationId = job.lease.pinnedRegistrationId;
+    if (release_storage_operation(job.lease)) {
+#if !defined(KERNEL_STORAGE_TEST)
+        serial::puts("[DM33-FORMAT] event=ownership-released operation=0x");
+        serial::put_hex64(ownerToken);
+        serial::puts(" target=0x");
+        serial::put_hex8(targetIndex);
+        serial::puts(" registration=0x");
+        serial::put_hex64(registrationId);
+        serial::puts(" pin=unwound\n");
+#else
+        (void)ownerToken;
+        (void)targetIndex;
+        (void)registrationId;
+#endif
+    }
+}
+
 static void finish_job_failure(Fat32FormatJob& job, Fat32FormatStatus status)
 {
-    if (s_jobBlankToken.operationGeneration == job.lease.ownerToken)
-        s_jobBlankToken.valid = false;
+    (void)invalidate_job_blank_token(job);
     job.result.status = status;
     if (job.result.stage != FAT32_FORMAT_STAGE_STATE_UNCERTAIN) {
         if (job.result.stage != FAT32_FORMAT_STAGE_FAILED)
@@ -2667,8 +2743,9 @@ static void finish_job_failure(Fat32FormatJob& job, Fat32FormatStatus status)
             set_diagnostic(job.result, fat32_format_status_name(status));
     }
     job.state = FAT32_FORMAT_JOB_FAILED;
+    report_job_lifecycle("terminal", job, fat32_format_status_name(status));
     if (job.lease.ownerToken != 0 && !job.result.writeAttempted)
-        release_storage_operation(job.lease);
+        release_job_ownership(job);
 }
 
 static bool cancel_job_now(Fat32FormatJob& job)
@@ -2680,8 +2757,7 @@ static bool cancel_job_now(Fat32FormatJob& job)
         return false;
     job.cancelRequested = true;
     if (job.stepActive) return true;
-    if (s_jobBlankToken.operationGeneration == job.lease.ownerToken)
-        s_jobBlankToken.valid = false;
+    (void)invalidate_job_blank_token(job);
     job.result.status = FAT32_FORMAT_CANCELED;
     job.result.failureStatus = FAT32_FORMAT_CANCELED;
     job.result.failedBeforeWrite = true;
@@ -2689,8 +2765,9 @@ static bool cancel_job_now(Fat32FormatJob& job)
     job.result.lastStage = FAT32_FORMAT_STAGE_FAILED;
     set_diagnostic(job.result,
         "Canceled before FAT32 metadata publication; no formatter writes were made.");
-    if (job.lease.ownerToken != 0) release_storage_operation(job.lease);
     job.state = FAT32_FORMAT_JOB_CANCELED;
+    report_job_lifecycle("terminal", job, "canceled-before-publication");
+    if (job.lease.ownerToken != 0) release_job_ownership(job);
     return true;
 }
 
@@ -2715,6 +2792,7 @@ Fat32FormatJobState begin_fat32_format_job(
             : FAT32_FORMAT_OPERATION_OWNERSHIP_INVALID);
         return job.state;
     }
+    job.operationId = job.lease.ownerToken;
     clear_bytes(&s_jobBlankToken, sizeof(s_jobBlankToken));
     job.result.stage = FAT32_FORMAT_STAGE_PIN_TARGET;
     if (!pin_storage_operation_target(job.lease, job.request.targetSnapshot)) {
@@ -2755,6 +2833,7 @@ Fat32FormatJobState begin_fat32_format_job(
     job.result.stage = FAT32_FORMAT_STAGE_VALIDATING;
     job.result.status = FAT32_FORMAT_READY;
     job.state = FAT32_FORMAT_JOB_SCANNING;
+    report_job_lifecycle("active", job);
     return job.state;
 }
 
@@ -2767,10 +2846,20 @@ Fat32FormatJobState step_fat32_format_job(Fat32FormatJob& job)
             return job.state;
         }
         job.stepActive = true;
-        if (!storage_operation_lease_is_current(job.lease) ||
-            revalidate_target_identity(job.request.targetSnapshot) != TARGET_VALID) {
+        if (!storage_operation_lease_is_current(job.lease)) {
+            report_job_lifecycle("target-invalidated", job,
+                "operation-ownership-invalid");
             job.stepActive = false;
-            finish_job_failure(job, FAT32_FORMAT_IDENTITY_CHANGED);
+            finish_job_failure(job, FAT32_FORMAT_OPERATION_OWNERSHIP_INVALID);
+            return job.state;
+        }
+        if (revalidate_target_identity(job.request.targetSnapshot) != TARGET_VALID) {
+            const RevalidationStatus invalidation =
+                revalidate_target_identity(job.request.targetSnapshot);
+            report_job_lifecycle("target-invalidated", job,
+                fat32_format_status_name(map_identity(invalidation)));
+            job.stepActive = false;
+            finish_job_failure(job, map_identity(invalidation));
             return job.state;
         }
         DeviceCapabilities caps = {};
@@ -2812,6 +2901,8 @@ Fat32FormatJobState step_fat32_format_job(Fat32FormatJob& job)
             (void)capture_current_io_result(job.result);
             finish_scan_metrics(job.result, job.scanStartTicks);
             job.stepActive = false;
+            report_job_lifecycle("read-settled-failed", job,
+                "synchronous-read-returned-error");
             finish_job_failure(job, FAT32_FORMAT_READ_UNAVAILABLE);
             return job.state;
         }
@@ -2865,6 +2956,8 @@ Fat32FormatJobState step_fat32_format_job(Fat32FormatJob& job)
             s_jobBlankToken.operationGeneration = job.lease.ownerToken;
             s_jobBlankToken.sectorsVerified = job.result.scanZeroVerifiedSectors;
             job.state = FAT32_FORMAT_JOB_READY_TO_COMMIT;
+            report_job_lifecycle("known-zero-published", job);
+            report_job_lifecycle("ready-to-commit", job);
         }
         return job.state;
     }
@@ -2874,21 +2967,32 @@ Fat32FormatJobState step_fat32_format_job(Fat32FormatJob& job)
         cancel_job_now(job);
         return job.state;
     }
-    if (!s_jobBlankToken.valid ||
-        !storage_operation_lease_is_current(job.lease) ||
-        revalidate_target_identity(job.request.targetSnapshot) != TARGET_VALID) {
-        finish_job_failure(job, FAT32_FORMAT_IDENTITY_CHANGED);
+    if (!storage_operation_lease_is_current(job.lease)) {
+        report_job_lifecycle("target-invalidated", job,
+            "operation-ownership-invalid-before-publication");
+        finish_job_failure(job, FAT32_FORMAT_OPERATION_OWNERSHIP_INVALID);
+        return job.state;
+    }
+    const RevalidationStatus commitIdentity =
+        revalidate_target_identity(job.request.targetSnapshot);
+    if (!s_jobBlankToken.valid || commitIdentity != TARGET_VALID) {
+        report_job_lifecycle("target-invalidated", job,
+            commitIdentity == TARGET_VALID ? "known-zero-token-invalid"
+                : fat32_format_status_name(map_identity(commitIdentity)));
+        finish_job_failure(job, commitIdentity == TARGET_VALID
+            ? FAT32_FORMAT_IDENTITY_CHANGED : map_identity(commitIdentity));
         return job.state;
     }
     job.commitStarted = true;
     const BlankVerificationToken token = s_jobBlankToken;
+    report_job_lifecycle("known-zero-consumed", job);
     s_jobBlankToken.valid = false;
     const Fat32FormatStatus status = execute_locked(job.request, job.result,
         job.lease, &token);
     if (job.lease.ownerToken != 0 && !job.result.writeAttempted &&
         job.result.stage != FAT32_FORMAT_STAGE_COMPLETED &&
         job.result.stage != FAT32_FORMAT_STAGE_STATE_UNCERTAIN)
-        release_storage_operation(job.lease);
+        release_job_ownership(job);
     if (status != FAT32_FORMAT_READY && status != FAT32_FORMAT_SUCCESS &&
         job.result.stage != FAT32_FORMAT_STAGE_STATE_UNCERTAIN) {
         job.result.status = status;
@@ -2900,6 +3004,18 @@ Fat32FormatJobState step_fat32_format_job(Fat32FormatJob& job)
     }
     job.state = status == FAT32_FORMAT_SUCCESS
         ? FAT32_FORMAT_JOB_COMPLETED : FAT32_FORMAT_JOB_FAILED;
+    report_job_lifecycle("terminal", job, fat32_format_status_name(status));
+#if !defined(KERNEL_STORAGE_TEST)
+    if (job.lease.ownerToken == 0) {
+        serial::puts("[DM33-FORMAT] event=ownership-released operation=0x");
+        serial::put_hex64(token.operationGeneration);
+        serial::puts(" target=0x");
+        serial::put_hex8(job.request.targetSnapshot.globalIndex);
+        serial::puts(" registration=0x");
+        serial::put_hex64(job.request.targetSnapshot.registrationId);
+        serial::puts(" pin=unwound\n");
+    }
+#endif
     return job.state;
 }
 

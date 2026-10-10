@@ -257,6 +257,7 @@ struct Fat32FormatJob {
     Fat32FormatRequest request;
     Fat32FormatResult result;
     StorageOperationLease lease;
+    uint64_t operationId;
     Fat32FormatGeometry geometry;
     uint64_t scanRelativeLba;
     uint64_t scanStartTicks;
