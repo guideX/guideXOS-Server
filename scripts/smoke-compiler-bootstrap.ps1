@@ -97,6 +97,7 @@ if ($Phase29FDebugStartOnly) { $Phase28QOnly = $true }
 if ($Phase29ISentinelOnly) { $Phase28QOnly = $true }
 if ($Phase29COnly) { $Phase28QOnly = $true }
 $Phase29LOwnershipGate = $Phase29LOwnershipOnly -or $Phase29LFullAcceptance
+$phase29yQualifiedDeveloperStudioSha256 = '7605FE1BC4BDF82833032E9381D4678672641F906510290DB99B92D0E744A0DE'
 if ($Phase28QOnly) {
     $Phase27E = $false; $Phase27F = $false; $Phase27G = $false; $Phase27H = $false
     $Phase27I = $false; $Phase27J = $false; $Phase27K = $false; $Phase27L = $false
@@ -4134,10 +4135,17 @@ try {
         }
         $phase28mEspPackage = Join-Path $espDirectory "Apps/DeveloperStudio"
         if ($Phase29YUseStagedDeveloperStudioPackage) {
+            $stagedDeveloperStudioElf = Join-Path $phase28mEspPackage "bin/amd64/developerstudio.elf"
             if (!(Test-Path -LiteralPath (Join-Path $phase28mEspPackage "app.json") -PathType Leaf) -or
-                !(Test-Path -LiteralPath (Join-Path $phase28mEspPackage "bin/amd64/developerstudio.elf") -PathType Leaf)) {
+                !(Test-Path -LiteralPath $stagedDeveloperStudioElf -PathType Leaf)) {
                 throw "Phase 29Y staged Developer Studio AMD64 package is missing from ESP"
             }
+            $stagedDeveloperStudioHash = (Get-FileHash -LiteralPath $stagedDeveloperStudioElf -Algorithm SHA256).Hash.ToUpperInvariant()
+            if ($stagedDeveloperStudioHash -cne $phase29yQualifiedDeveloperStudioSha256) {
+                throw "Phase 29Y staged Developer Studio package identity mismatch: expected $phase29yQualifiedDeveloperStudioSha256, got $stagedDeveloperStudioHash"
+            }
+            Write-Host ("P29Y STAGED_DEVELOPER_STUDIO sha256={0} expected_sha256={1}" -f
+                $stagedDeveloperStudioHash, $phase29yQualifiedDeveloperStudioSha256) -ForegroundColor DarkCyan
         } else {
             if (!(Test-Path -LiteralPath $developerStudioPackageDirectory -PathType Container) -or
                 !(Test-Path -LiteralPath (Join-Path $developerStudioPackageDirectory "app.json") -PathType Leaf) -or
