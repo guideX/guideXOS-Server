@@ -1,4 +1,5 @@
 #include "../kernel/core/include/kernel/widget_activation.h"
+#include "../kernel/core/include/kernel/disk_manager_wipe_ui.h"
 
 #include <cstdio>
 
@@ -97,6 +98,74 @@ int main()
           "keyboard focus cannot activate a non-button widget");
     check(dispatch_widget_activation(&window, 21, modalClick) && modalClicks == 3,
           "pointer widget dispatch preserves text-box activation behavior");
+
+    using namespace kernel::apps::disk_manager_wipe_ui;
+    kernel::storage::PartitionWipeResult wipeProgress = {};
+    wipeProgress.progressPercent = 43;
+    wipeProgress.bytesWritten = 44u * 1024u;
+    wipeProgress.totalBytes = 100u * 1024u;
+    check(wipe_progress_value(wipeProgress) == 43,
+          "wipe progress uses the engine percentage without timer estimation");
+
+    window.widgetCount = 2;
+    window.widgets[0] = {};
+    window.widgets[0].id = 29;
+    window.widgets[0].type = WidgetType::TextBox;
+    window.widgets[0].visible = true;
+    window.widgets[0].enabled = true;
+    window.widgets[1] = make_button(30);
+    window.widgets[1].visible = true;
+    window.widgets[1].enabled = false;
+    int wipeStarts = 0;
+    const auto startWipe = [&window, &wipeStarts](int id) {
+        if (id != 30) return;
+        ++wipeStarts;
+        window.widgets[1].enabled = false;
+        window.widgets[1].visible = false;
+    };
+    const int initiallyFocusedConfirm = focused_button_widget_id_for_index(
+        0, 3, 30);
+    check(initiallyFocusedConfirm == -1 &&
+          !dispatch_focused_button_activation(&window, 30,
+              initiallyFocusedConfirm, '\n', startWipe) && wipeStarts == 0,
+          "initial confirmation focus cannot activate Wipe Partition with Enter");
+    check(!wipe_confirmation_can_start(true, WIPE_ACTION_READY, "WIPX") &&
+          !wipe_confirmation_can_start(true, WIPE_ACTION_READY, ""),
+          "wrong or empty typed confirmation leaves the destructive button disabled");
+    window.widgets[1].enabled = wipe_confirmation_can_start(
+        true, WIPE_ACTION_READY, "WIPE");
+    check(window.widgets[1].enabled &&
+          dispatch_focused_button_activation(&window, 30,
+              focused_button_widget_id_for_index(3, 3, 30), '\n', startWipe) &&
+          wipeStarts == 1,
+          "typing WIPE and explicit focused Enter activates through normal widget dispatch");
+    check(!dispatch_focused_button_activation(&window, 30,
+              focused_button_widget_id_for_index(3, 3, 30), '\n', startWipe) &&
+          wipeStarts == 1,
+          "duplicate confirmation activation cannot start a second wipe");
+
+    window.widgetCount = 1;
+    window.widgets[0] = make_button(31);
+    window.widgets[0].visible = true;
+    window.widgets[0].enabled = true;
+    int stopRequests = 0;
+    const auto stopWipe = [&window, &stopRequests](int id) {
+        if (id != 31) return;
+        ++stopRequests;
+        window.widgets[0].enabled = false;
+    };
+    check(dispatch_focused_button_activation(&window, 31,
+              focused_button_widget_id_for_index(2, 2, 31), '\r', stopWipe) &&
+          stopRequests == 1,
+          "keyboard activation dispatches Stop Wipe through the normal button handler");
+    window.widgets[0].enabled = true;
+    check(dispatch_widget_activation(&window, 31, stopWipe) &&
+          stopRequests == 2,
+          "pointer activation dispatches Stop Wipe through the normal widget handler");
+    window.widgets[0].enabled = false;
+    check(!dispatch_widget_activation(&window, 31, stopWipe) &&
+          stopRequests == 2,
+          "a repeated Stop Wipe activation is ignored after terminal dispatch");
 
     std::printf("Widget activation checks: %s (%d failures)\n",
         failures == 0 ? "PASS" : "FAIL", failures);

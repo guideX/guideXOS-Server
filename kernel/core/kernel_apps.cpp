@@ -6274,13 +6274,16 @@ DiskManagerApp::DiskManagerApp()
       m_propertiesBtnId(-1), m_diagnosticsBtnId(-1), m_initializeBtnId(-1),
       m_deleteBtnId(-1),
       m_mountBtnId(-1), m_unmountBtnId(-1),
+      m_wipeBtnId(-1),
       m_gptBtnId(-1), m_mbrBtnId(-1),
       m_confirmInitializeBtnId(-1), m_cancelInitializeBtnId(-1),
       m_createSizeTextBoxId(-1), m_createNameTextBoxId(-1),
+      m_wipeConfirmTextBoxId(-1), m_wipeProgressBarId(-1),
       m_initializeDialogState(INITIALIZE_DIALOG_CLOSED),
       m_dialogIsCreate(false), m_dialogIsFormat(false),
       m_dialogIsReformat(false), m_dialogIsDelete(false),
-      m_dialogIsGptRepair(false),
+      m_dialogIsGptRepair(false), m_dialogIsWipe(false),
+      m_wipeBlockReason(disk_manager_wipe_ui::WIPE_ACTION_PARTITION_NOT_SELECTED),
       m_gptRepairButtonFocus(0),
       m_createSizeEdited(false),
       m_createNameEdited(false), m_createInputFocus(0),
@@ -6306,11 +6309,16 @@ DiskManagerApp::DiskManagerApp()
     memset(&m_formatRequest, 0, sizeof(m_formatRequest));
     memset(&m_formatResult, 0, sizeof(m_formatResult));
     memset(&m_formatJob, 0, sizeof(m_formatJob));
+    memset(&m_wipeRequest, 0, sizeof(m_wipeRequest));
+    memset(&m_wipeResult, 0, sizeof(m_wipeResult));
+    memset(&m_wipeJob, 0, sizeof(m_wipeJob));
+    m_wipeEligibility = {};
     memset(&m_mountDialogPartition, 0, sizeof(m_mountDialogPartition));
     m_lastStorageOperation = 0;
     m_mountDialogPath[0] = '\0';
     m_createSizeText[0] = '\0';
     m_createNameText[0] = '\0';
+    m_wipeConfirmText[0] = '\0';
     m_initializeMessage[0] = '\0';
     strcopy(m_statusMessage, "Ready", sizeof(m_statusMessage));
     strcopy(m_name, "DiskManager", app::MAX_APP_NAME);
@@ -6326,6 +6334,10 @@ DiskManagerApp::~DiskManagerApp() {
     if (m_formatJob.state == storage::FAT32_FORMAT_JOB_SCANNING ||
         m_formatJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT)
         storage::cancel_fat32_format_job(m_formatJob);
+    if (disk_manager_wipe_ui::wipe_job_running(m_wipeJob)) {
+        storage::request_partition_wipe_stop(m_wipeJob);
+        storage::step_partition_wipe_job(m_wipeJob);
+    }
 }
 
 bool DiskManagerApp::init() {
@@ -6354,6 +6366,7 @@ bool DiskManagerApp::init() {
     m_deleteBtnId = addButton(652, 0, 116, 28, "Delete Partition...");
     m_mountBtnId = addButton(452, 0, 100, 28, "Mount...");
     m_unmountBtnId = addButton(558, 0, 90, 28, "Unmount");
+    m_wipeBtnId = addButton(10, 0, 112, 28, "Wipe Partition...");
     m_gptBtnId = addButton(10, 0, 140, 28,
                            "GPT (Default)");
     m_mbrBtnId = addButton(158, 0, 150, 28,
@@ -6364,6 +6377,8 @@ bool DiskManagerApp::init() {
                                        "Cancel");
     m_createSizeTextBoxId = addTextBox(0, 0, 180, 26, "MAX");
     m_createNameTextBoxId = addTextBox(0, 0, 220, 26, "New Volume");
+    m_wipeConfirmTextBoxId = addTextBox(0, 0, 220, 26, "");
+    m_wipeProgressBarId = addProgressBar(0, 0, 300, 18, 0);
     updateInitializeControls();
     scanDisks();
     m_state = app::AppState::Running;
@@ -6381,11 +6396,41 @@ void DiskManagerApp::shutdown() {
     if (m_formatJob.state == storage::FAT32_FORMAT_JOB_SCANNING ||
         m_formatJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT)
         storage::cancel_fat32_format_job(m_formatJob);
+    if (disk_manager_wipe_ui::wipe_job_running(m_wipeJob)) {
+        storage::request_partition_wipe_stop(m_wipeJob);
+        storage::step_partition_wipe_job(m_wipeJob);
+    }
     m_initializeDialogState = INITIALIZE_DIALOG_CLOSED;
     m_state = app::AppState::Terminated;
 }
 
+bool DiskManagerApp::onCloseRequested() {
+    if (!disk_manager_wipe_ui::request_wipe_stop_before_close(m_wipeJob)) {
+        strcopy(m_statusMessage,
+            "Close requested. Stopping the wipe; review its result before closing.",
+            sizeof(m_statusMessage));
+        m_createInputFocus = 2;
+        updateInitializeControls();
+        invalidate();
+        return false;
+    }
+    return true;
+}
+
 void DiskManagerApp::update() {
+    if (m_initializeDialogState == INITIALIZE_DIALOG_RUNNING && m_dialogIsWipe &&
+        disk_manager_wipe_ui::wipe_job_running(m_wipeJob)) {
+        const storage::PartitionWipeState state =
+            storage::step_partition_wipe_job(m_wipeJob);
+        m_wipeResult = m_wipeJob.result;
+        if (state != storage::PARTITION_WIPE_RUNNING) {
+            completePartitionWipeOperation();
+            return;
+        }
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
     if (m_initializeDialogState != INITIALIZE_DIALOG_RUNNING ||
         m_dialogIsReformat ||
         (m_formatJob.state != storage::FAT32_FORMAT_JOB_SCANNING &&
@@ -6888,7 +6933,7 @@ void DiskManagerApp::formatSizePrecise(uint64_t bytes, char* out,
 
 void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
     const bool compact = w < 620;
-    m_footerY = static_cast<int>(h) - (compact ? 68 : 38);
+    m_footerY = static_cast<int>(h) - (compact ? 100 : 68);
     app::Widget* refresh = getWidget(m_refreshBtnId);
     app::Widget* properties = getWidget(m_propertiesBtnId);
     app::Widget* diagnostics = getWidget(m_diagnosticsBtnId);
@@ -6896,29 +6941,36 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
     app::Widget* deleteAction = getWidget(m_deleteBtnId);
     app::Widget* mountAction = getWidget(m_mountBtnId);
     app::Widget* unmountAction = getWidget(m_unmountBtnId);
+    app::Widget* wipeAction = getWidget(m_wipeBtnId);
     app::Widget* gpt = getWidget(m_gptBtnId);
     app::Widget* mbr = getWidget(m_mbrBtnId);
     app::Widget* confirm = getWidget(m_confirmInitializeBtnId);
     app::Widget* cancel = getWidget(m_cancelInitializeBtnId);
     app::Widget* sizeInput = getWidget(m_createSizeTextBoxId);
     app::Widget* nameInput = getWidget(m_createNameTextBoxId);
+    app::Widget* wipeInput = getWidget(m_wipeConfirmTextBoxId);
+    app::Widget* wipeProgress = getWidget(m_wipeProgressBarId);
     const int rowY = static_cast<int>(h) - 32;
+    const int secondRowY = static_cast<int>(h) - 64;
+    const int firstRowY = static_cast<int>(h) - 96;
     if (compact) {
-        if (refresh) { refresh->x = 10; refresh->y = static_cast<int>(h) - 64; refresh->w = 78; }
-        if (properties) { properties->x = 94; properties->y = static_cast<int>(h) - 64; properties->w = 92; }
-        if (diagnostics) { diagnostics->x = 192; diagnostics->y = static_cast<int>(h) - 64; diagnostics->w = 102; }
-        if (initialize) { initialize->x = 10; initialize->y = rowY; initialize->w = 130; }
-        if (mountAction) { mountAction->x = 146; mountAction->y = rowY; mountAction->w = 108; }
-        if (unmountAction) { unmountAction->x = 260; unmountAction->y = rowY; unmountAction->w = 92; }
-        if (deleteAction) { deleteAction->x = 358; deleteAction->y = rowY; deleteAction->w = 116; }
+        if (refresh) { refresh->x = 10; refresh->y = firstRowY; refresh->w = 78; }
+        if (properties) { properties->x = 94; properties->y = firstRowY; properties->w = 92; }
+        if (diagnostics) { diagnostics->x = 192; diagnostics->y = firstRowY; diagnostics->w = 102; }
+        if (initialize) { initialize->x = 10; initialize->y = secondRowY; initialize->w = 128; }
+        if (wipeAction) { wipeAction->x = 144; wipeAction->y = secondRowY; wipeAction->w = 108; }
+        if (mountAction) { mountAction->x = 10; mountAction->y = rowY; mountAction->w = 108; }
+        if (unmountAction) { unmountAction->x = 124; unmountAction->y = rowY; unmountAction->w = 92; }
+        if (deleteAction) { deleteAction->x = 222; deleteAction->y = rowY; deleteAction->w = 116; }
     } else {
-        if (refresh) { refresh->x = 10; refresh->y = rowY; refresh->w = 82; }
-        if (properties) { properties->x = 98; properties->y = rowY; properties->w = 90; }
-        if (diagnostics) { diagnostics->x = 194; diagnostics->y = rowY; diagnostics->w = 96; }
-        if (initialize) { initialize->x = 296; initialize->y = rowY; initialize->w = 150; }
-        if (mountAction) { mountAction->x = 452; mountAction->y = rowY; mountAction->w = 100; }
-        if (unmountAction) { unmountAction->x = 558; unmountAction->y = rowY; unmountAction->w = 90; }
-        if (deleteAction) { deleteAction->x = 652; deleteAction->y = rowY; deleteAction->w = 116; }
+        if (refresh) { refresh->x = 10; refresh->y = secondRowY; refresh->w = 82; }
+        if (properties) { properties->x = 98; properties->y = secondRowY; properties->w = 90; }
+        if (diagnostics) { diagnostics->x = 194; diagnostics->y = secondRowY; diagnostics->w = 96; }
+        if (initialize) { initialize->x = 10; initialize->y = rowY; initialize->w = 140; }
+        if (wipeAction) { wipeAction->x = 156; wipeAction->y = rowY; wipeAction->w = 112; }
+        if (mountAction) { mountAction->x = 274; mountAction->y = rowY; mountAction->w = 90; }
+        if (unmountAction) { unmountAction->x = 370; unmountAction->y = rowY; unmountAction->w = 82; }
+        if (deleteAction) { deleteAction->x = 458; deleteAction->y = rowY; deleteAction->w = 116; }
     }
     if (gpt) { gpt->x = 10; gpt->y = rowY; gpt->w = 140; }
     if (mbr) { mbr->x = 158; mbr->y = rowY; mbr->w = 150; }
@@ -6941,6 +6993,20 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
         if (nameInput->w > 260) nameInput->w = 260;
         nameInput->h = 26;
     }
+    if (wipeInput) {
+        wipeInput->x = static_cast<int>(leftW) + 26;
+        wipeInput->y = static_cast<int>(h) - (compact ? 160 : 130);
+        wipeInput->w = static_cast<int>(w) > static_cast<int>(leftW) + 48
+            ? static_cast<int>(w) - static_cast<int>(leftW) - 40 : 120;
+        wipeInput->h = 26;
+    }
+    if (wipeProgress) {
+        wipeProgress->x = static_cast<int>(leftW) + 26;
+        wipeProgress->y = 270;
+        wipeProgress->w = static_cast<int>(w) > static_cast<int>(leftW) + 48
+            ? static_cast<int>(w) - static_cast<int>(leftW) - 40 : 120;
+        wipeProgress->h = 18;
+    }
 }
 
 void DiskManagerApp::updateInitializeControls() {
@@ -6955,12 +7021,15 @@ void DiskManagerApp::updateInitializeControls() {
     app::Widget* deleteAction = getWidget(m_deleteBtnId);
     app::Widget* mountAction = getWidget(m_mountBtnId);
     app::Widget* unmountAction = getWidget(m_unmountBtnId);
+    app::Widget* wipeAction = getWidget(m_wipeBtnId);
     app::Widget* gpt = getWidget(m_gptBtnId);
     app::Widget* mbr = getWidget(m_mbrBtnId);
     app::Widget* confirm = getWidget(m_confirmInitializeBtnId);
     app::Widget* cancel = getWidget(m_cancelInitializeBtnId);
     app::Widget* sizeInput = getWidget(m_createSizeTextBoxId);
     app::Widget* nameInput = getWidget(m_createNameTextBoxId);
+    app::Widget* wipeInput = getWidget(m_wipeConfirmTextBoxId);
+    app::Widget* wipeProgress = getWidget(m_wipeProgressBarId);
     const bool dialogClosed = m_initializeDialogState == INITIALIZE_DIALOG_CLOSED &&
         !m_mountDialogOpen;
     const bool haveSelection = m_selectedDisk >= 0 && m_selectedDisk < m_diskCount;
@@ -6984,6 +7053,11 @@ void DiskManagerApp::updateInitializeControls() {
         m_initializeDialogState == INITIALIZE_DIALOG_DELETE_CONFIRM;
     const bool gptRepairConfirm = m_dialogIsGptRepair &&
         m_initializeDialogState == INITIALIZE_DIALOG_GPT_REPAIR_CONFIRM;
+    const bool wipeConfirm = m_dialogIsWipe &&
+        m_initializeDialogState == INITIALIZE_DIALOG_WIPE_CONFIRM;
+    const bool wipeRunning = m_dialogIsWipe &&
+        m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
+        disk_manager_wipe_ui::wipe_job_running(m_wipeJob);
     const bool gptRepairLeaseCurrent = storage::storage_operation_lease_is_current(
         m_gptRepairPlan.lease);
     const storage::DiskState selectedState = haveSelection
@@ -7013,8 +7087,11 @@ void DiskManagerApp::updateInitializeControls() {
     bool showMountAction = false;
     bool showUnmountAction = false;
     bool deleteAvailable = false;
+    bool selectedPartition = false;
+    m_wipeEligibility = {};
     if (haveSelection && m_selectedObject == SELECTED_PARTITION &&
         m_selectedPart >= 0 && m_selectedPart < m_disks[m_selectedDisk].partCount) {
+        selectedPartition = true;
         const DiskEntry& disk = m_disks[m_selectedDisk];
         const PartEntry& part = disk.parts[m_selectedPart];
         const bool existingFat32 = strcmp(part.fsLabel, "FAT32") == 0;
@@ -7034,6 +7111,48 @@ void DiskManagerApp::updateInitializeControls() {
             (disk.capabilities.persistence == storage::PERSISTENCE_FLUSH_REQUIRED &&
              disk.capabilities.flushSupported &&
              disk.capabilities.flushSemanticsKnown);
+        const bool wipeTableValid = disk.scheme == storage::PARTITION_SCHEME_GPT
+            ? disk.state == storage::DISK_STATE_VALID_GPT &&
+                disk.primaryGptValid && disk.backupGptValid &&
+                disk.gptCopiesAgree && !disk.gptCopiesConflict
+            : disk.scheme == storage::PARTITION_SCHEME_MBR &&
+                disk.state == storage::DISK_STATE_VALID_MBR &&
+                !disk.hybridMbr && !disk.extendedPartitionsPresent;
+        const storage::PartitionEntry& wipePart = part.parsed;
+        const uint64_t totalSectors = disk.capabilities.totalLogicalSectors;
+        const bool wipeGeometryValid = disk.capabilities.geometryValid &&
+            wipePart.partitionNumber != 0 && wipePart.startLba != 0 &&
+            wipePart.sectorCount != 0 && wipePart.startLba <= wipePart.endLba &&
+            wipePart.endLba < totalSectors &&
+            wipePart.endLba - wipePart.startLba != UINT64_MAX &&
+            wipePart.endLba - wipePart.startLba + 1u == wipePart.sectorCount &&
+            !(wipePart.startLba == 0 && wipePart.sectorCount == totalSectors) &&
+            storage::checked_lba_range(totalSectors, wipePart.startLba,
+                                       wipePart.sectorCount) &&
+            storage::valid_geometry(wipePart.sectorCount,
+                disk.capabilities.logicalSectorSize, nullptr);
+        const bool wipeIdentityValid = disk.identity.registrationId != 0 &&
+            disk.identity.globalIndex == disk.devIndex &&
+            storage::revalidate_target_identity(disk.identity) ==
+                storage::TARGET_VALID;
+        m_wipeEligibility.partitionSelected = true;
+        m_wipeEligibility.identityValid = wipeIdentityValid;
+        m_wipeEligibility.validPartitionTable = wipeTableValid;
+        m_wipeEligibility.validPartitionGeometry = wipeGeometryValid;
+        m_wipeEligibility.transport = disk.capabilities.transport;
+        m_wipeEligibility.deviceOnline = block::registration_is_present(
+            disk.devIndex, disk.identity.registrationId);
+        m_wipeEligibility.readable = disk.capabilities.readable;
+        m_wipeEligibility.writable = disk.capabilities.writable;
+        m_wipeEligibility.durabilityQualified = durable;
+        m_wipeEligibility.unmounted = disk.mountSafety ==
+                storage::DEVICE_UNMOUNTED && !part.mounted;
+        m_wipeEligibility.bootSafe = disk.bootSafety ==
+                storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET &&
+            !disk_manager_wipe_ui::wipe_partition_is_protected(wipePart);
+        m_wipeEligibility.operationIdle = !storage::storage_operation_active();
+        m_wipeBlockReason = disk_manager_wipe_ui::wipe_action_block_reason(
+            m_wipeEligibility);
         formatAvailable = possibleFs && disk.haveInfo &&
             validTable && durable && disk.identity.registrationId != 0 &&
             disk.capabilities.geometryValid &&
@@ -7058,6 +7177,11 @@ void DiskManagerApp::updateInitializeControls() {
             (disk.capabilities.logicalSectorSize == 512 ||
              disk.capabilities.logicalSectorSize == 4096) &&
             part.parsed.partitionNumber != 0;
+    }
+    if (!selectedPartition) {
+        m_wipeEligibility.partitionSelected = false;
+        m_wipeBlockReason = disk_manager_wipe_ui::wipe_action_block_reason(
+            m_wipeEligibility);
     }
     if (refresh) {
         refresh->visible = dialogClosed;
@@ -7105,6 +7229,11 @@ void DiskManagerApp::updateInitializeControls() {
         deleteAction->visible = dialogClosed && m_selectedObject == SELECTED_PARTITION;
         deleteAction->enabled = deleteAvailable && dialogClosed;
     }
+    if (wipeAction) {
+        wipeAction->visible = dialogClosed && selectedPartition;
+        wipeAction->enabled = wipeAction->visible &&
+            m_wipeBlockReason == disk_manager_wipe_ui::WIPE_ACTION_READY;
+    }
     if (mountAction) {
         mountAction->visible = dialogClosed && showMountAction;
         mountAction->enabled = mountAvailable;
@@ -7117,22 +7246,39 @@ void DiskManagerApp::updateInitializeControls() {
     if (mbr) { mbr->visible = choosing; mbr->enabled = choosing; }
     if (confirm) {
         confirm->visible = m_mountDialogOpen || confirming || createOptions ||
-            formatOptions || deleteConfirm || gptRepairConfirm;
-        confirm->enabled = m_mountDialogOpen || (confirming
-            ? (m_initializePlan.confirmationReady &&
-               initializeLeaseCurrent)
+            formatOptions || deleteConfirm || gptRepairConfirm || wipeConfirm;
+        bool wipeSelectionMatchesRequest = false;
+        if (wipeConfirm && selectedPartition) {
+            const DiskEntry& disk = m_disks[m_selectedDisk];
+            const PartEntry& selected = disk.parts[m_selectedPart];
+            wipeSelectionMatchesRequest =
+                disk_manager_wipe_ui::wipe_confirmation_binding_matches(
+                    m_wipeRequest, disk.identity, disk.scheme, selected.parsed);
+        }
+        confirm->enabled = m_mountDialogOpen ||
+            (wipeConfirm
+                ? (wipeSelectionMatchesRequest &&
+                   disk_manager_wipe_ui::wipe_confirmation_can_start(
+                       true, m_wipeBlockReason, m_wipeConfirmText))
+            : (confirming
+                ? (m_initializePlan.confirmationReady &&
+                   initializeLeaseCurrent)
             : (gptRepairConfirm
                 ? (m_gptRepairPlan.confirmationReady && gptRepairLeaseCurrent)
             : (deleteConfirm
                 ? (m_deletePlan.confirmationReady &&
                    storage::storage_operation_lease_is_current(m_deletePlan.lease))
                 : (createOptions ? updateCreateInputWidgets() :
-                    (formatOptions && updateFormatLabelWidget())))));
-        setWidgetText(m_confirmInitializeBtnId,
-            m_mountDialogOpen ? "Mount" : (gptRepairConfirm ? "Repair GPT" :
-                (deleteConfirm ? "Delete Partition" :
-                    (formatOptions ? (m_dialogIsReformat ? "Quick Reformat" : "Format FAT32") :
-                        (createOptions ? "Create" : "Initialize")))));
+                    (formatOptions && updateFormatLabelWidget()))))));
+        const char* confirmLabel = "Initialize";
+        if (m_mountDialogOpen) confirmLabel = "Mount";
+        else if (gptRepairConfirm) confirmLabel = "Repair GPT";
+        else if (wipeConfirm) confirmLabel = "Wipe Partition";
+        else if (deleteConfirm) confirmLabel = "Delete Partition";
+        else if (formatOptions)
+            confirmLabel = m_dialogIsReformat ? "Quick Reformat" : "Format FAT32";
+        else if (createOptions) confirmLabel = "Create";
+        setWidgetText(m_confirmInitializeBtnId, confirmLabel);
     }
     if (m_dialogIsGptRepair && gptRepairConfirm) {
         app::Widget* focused = m_gptRepairButtonFocus == 0 ? cancel : confirm;
@@ -7144,6 +7290,15 @@ void DiskManagerApp::updateInitializeControls() {
             ? 0xFF34465C : 0xFF505060;
         if (confirm) confirm->bgColor = m_gptRepairButtonFocus == 1
             ? 0xFF34465C : 0xFF505060;
+    } else if (wipeConfirm) {
+        if (confirm) confirm->bgColor = m_createInputFocus == 3
+            ? 0xFFB83434 : 0xFF6F3030;
+        if (cancel) cancel->bgColor = m_createInputFocus == 2
+            ? 0xFF34465C : 0xFF505060;
+    } else if (wipeRunning) {
+        if (confirm) confirm->bgColor = 0xFF505060;
+        if (cancel) cancel->bgColor = m_createInputFocus == 2
+            ? 0xFF9A3A32 : 0xFF6F3030;
     } else if (formatOptions) {
         if (confirm) confirm->bgColor = m_createInputFocus == 3
             ? 0xFF34465C : 0xFF505060;
@@ -7166,14 +7321,27 @@ void DiskManagerApp::updateInitializeControls() {
             m_createRequest.requestedScheme == storage::PARTITION_SCHEME_GPT);
         nameInput->enabled = nameInput->visible;
     }
-    const bool showCancel = m_mountDialogOpen || formatScanCancelable ||
+    if (wipeInput) {
+        wipeInput->visible = wipeConfirm;
+        wipeInput->enabled = wipeConfirm;
+        setWidgetText(m_wipeConfirmTextBoxId, m_wipeConfirmText);
+        wipeInput->bgColor = wipeConfirm && m_createInputFocus == 0
+            ? 0xFF3A4A5C : 0xFF2D2D37;
+    }
+    if (wipeProgress) {
+        wipeProgress->visible = wipeRunning;
+        wipeProgress->enabled = false;
+        setWidgetValue(m_wipeProgressBarId,
+            disk_manager_wipe_ui::wipe_progress_value(m_wipeResult));
+    }
+    const bool showCancel = m_mountDialogOpen || formatScanCancelable || wipeRunning ||
         (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED &&
          m_initializeDialogState != INITIALIZE_DIALOG_RUNNING);
     if (cancel) {
         cancel->visible = showCancel;
         cancel->enabled = showCancel;
-        setWidgetText(m_cancelInitializeBtnId,
-            m_initializeDialogState == INITIALIZE_DIALOG_RESULT ? "Close" : "Cancel");
+        setWidgetText(m_cancelInitializeBtnId, wipeRunning ? "Stop Wipe" :
+            (m_initializeDialogState == INITIALIZE_DIALOG_RESULT ? "Close" : "Cancel"));
     }
 }
 
@@ -7306,8 +7474,8 @@ void DiskManagerApp::moveKeyboardSelection(int delta) {
         invalidate();
     } else if (m_keyboardPane == KEYBOARD_ACTIONS) {
         m_actionFocus += delta;
-        if (m_actionFocus < 0) m_actionFocus = 3;
-        if (m_actionFocus > 3) m_actionFocus = 0;
+        if (m_actionFocus < 0) m_actionFocus = 4;
+        if (m_actionFocus > 4) m_actionFocus = 0;
         invalidate();
     } else {
         m_detailScroll += delta;
@@ -7345,6 +7513,8 @@ void DiskManagerApp::activateKeyboardAction() {
         invalidate();
     } else if (m_actionFocus == 3 && m_initializeBtnId >= 0) {
         onWidgetClick(m_initializeBtnId);
+    } else if (m_actionFocus == 4 && m_wipeBtnId >= 0) {
+        onWidgetClick(m_wipeBtnId);
     }
 }
 
@@ -7364,16 +7534,32 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
         return;
     }
     if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED) {
+        const bool wipeConfirm = m_dialogIsWipe &&
+            m_initializeDialogState == INITIALIZE_DIALOG_WIPE_CONFIRM;
+        const bool wipeRunning = m_dialogIsWipe &&
+            m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
+            disk_manager_wipe_ui::wipe_job_running(m_wipeJob);
         if (escape) {
             closeInitializeDialog();
+        } else if (wipeConfirm && tab) {
+            m_createInputFocus = m_createInputFocus == 0 ? 2 :
+                (m_createInputFocus == 2 ? 3 : 0);
+            updateInitializeControls();
+            invalidate();
         } else if (m_initializeDialogState == INITIALIZE_DIALOG_RUNNING && tab) {
             const bool formatScanCancelable = m_dialogIsFormat &&
                 !m_formatJob.commitStarted &&
                 (m_formatJob.state == storage::FAT32_FORMAT_JOB_SCANNING ||
                  m_formatJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT);
-            m_createInputFocus = formatScanCancelable ? 2 : 0;
+            m_createInputFocus = (wipeRunning || formatScanCancelable) ? 2 : 0;
             updateInitializeControls();
             invalidate();
+        } else if (enter && wipeRunning && m_createInputFocus == 2) {
+            app::dispatch_focused_button_activation(m_window,
+                m_cancelInitializeBtnId,
+                app::focused_button_widget_id_for_index(
+                    m_createInputFocus, 2, m_cancelInitializeBtnId), key,
+                [this](int id) { onWidgetClick(id); });
         } else if (enter &&
                    m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
                    m_dialogIsFormat && m_createInputFocus == 2 &&
@@ -7422,6 +7608,15 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             }
             updateInitializeControls();
             invalidate();
+        } else if (wipeConfirm &&
+                   (key == 8 || key == shell::KEY_DELETE) &&
+                   m_createInputFocus == 0) {
+            size_t length = 0;
+            while (length + 1 < sizeof(m_wipeConfirmText) &&
+                   m_wipeConfirmText[length]) ++length;
+            if (length > 0) m_wipeConfirmText[length - 1] = '\0';
+            updateInitializeControls();
+            invalidate();
         } else if (m_initializeDialogState == INITIALIZE_DIALOG_CHOOSE_SCHEME &&
                    (key == shell::KEY_LEFT || key == shell::KEY_RIGHT)) {
             m_initializeScheme = m_initializeScheme == storage::PARTITION_SCHEME_GPT
@@ -7439,6 +7634,12 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
                 app::focused_button_widget_id_for_index(
                     m_gptRepairButtonFocus, cancelFocused ? 0 : 1,
                     focusedButtonId), key,
+                [this](int id) { onWidgetClick(id); });
+        } else if (enter && wipeConfirm && m_createInputFocus == 3) {
+            app::dispatch_focused_button_activation(m_window,
+                m_confirmInitializeBtnId,
+                app::focused_button_widget_id_for_index(
+                    m_createInputFocus, 3, m_confirmInitializeBtnId), key,
                 [this](int id) { onWidgetClick(id); });
         } else if (enter && m_initializeDialogState == INITIALIZE_DIALOG_CONFIRM) {
             runInitializeOperation();
@@ -7505,7 +7706,7 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             selectListItem(m_disks[m_selectedDisk].itemCount - 1);
     } else if ((key == shell::KEY_LEFT || key == shell::KEY_RIGHT) &&
                m_keyboardPane == KEYBOARD_ACTIONS) {
-        m_actionFocus = (m_actionFocus + (key == shell::KEY_RIGHT ? 1 : 3)) % 4;
+        m_actionFocus = (m_actionFocus + (key == shell::KEY_RIGHT ? 1 : 4)) % 5;
         invalidate();
     } else if (enter) {
         activateKeyboardAction();
@@ -7523,13 +7724,36 @@ void DiskManagerApp::onKeyChar(char c) {
            m_formatJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT)) ||
          (m_dialogIsGptRepair && m_initializeDialogState ==
             INITIALIZE_DIALOG_GPT_REPAIR_CONFIRM) ||
+         (m_dialogIsWipe && m_initializeDialogState ==
+            INITIALIZE_DIALOG_WIPE_CONFIRM) ||
+         (m_dialogIsWipe && m_initializeDialogState ==
+            INITIALIZE_DIALOG_RUNNING && m_createInputFocus == 2 &&
+          disk_manager_wipe_ui::wipe_job_running(m_wipeJob)) ||
          (m_initializeDialogState == INITIALIZE_DIALOG_CLOSED &&
           m_keyboardPane == KEYBOARD_ACTIONS))) {
         onKeyDown(32);
         return;
     }
-    if (m_mountDialogOpen || (!m_dialogIsCreate && !m_dialogIsFormat) || m_initializeDialogState !=
-            INITIALIZE_DIALOG_CREATE_OPTIONS || c < 0x20 || c > 0x7E) return;
+    const bool wipeConfirmationInput = m_dialogIsWipe &&
+        m_initializeDialogState == INITIALIZE_DIALOG_WIPE_CONFIRM;
+    if (m_mountDialogOpen ||
+        ((!m_dialogIsCreate && !m_dialogIsFormat) && !wipeConfirmationInput) ||
+        (m_initializeDialogState != INITIALIZE_DIALOG_CREATE_OPTIONS &&
+         !wipeConfirmationInput) || c < 0x20 || c > 0x7E) return;
+    if (wipeConfirmationInput) {
+        if (m_createInputFocus != 0) return;
+        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+        if (c < 'A' || c > 'Z') return;
+        size_t length = 0;
+        while (length + 1 < sizeof(m_wipeConfirmText) &&
+               m_wipeConfirmText[length]) ++length;
+        if (length + 1 >= sizeof(m_wipeConfirmText)) return;
+        m_wipeConfirmText[length] = c;
+        m_wipeConfirmText[length + 1] = '\0';
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
     if (m_dialogIsFormat && m_createInputFocus != 1) return;
     const bool sizeField = !m_dialogIsFormat && m_createInputFocus == 0;
     char* target = sizeField ? m_createSizeText : m_createNameText;
@@ -7652,11 +7876,28 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
         invalidate();
         return;
     }
+    if (widgetId == m_cancelInitializeBtnId && m_dialogIsWipe &&
+        m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
+        disk_manager_wipe_ui::wipe_job_running(m_wipeJob)) {
+        if (storage::request_partition_wipe_stop(m_wipeJob)) {
+            strcopy(m_statusMessage,
+                "Stop requested. The current bounded write may finish before cleanup.",
+                sizeof(m_statusMessage));
+            updateInitializeControls();
+            invalidate();
+        }
+        return;
+    }
     if ((widgetId == m_createSizeTextBoxId ||
          widgetId == m_createNameTextBoxId) &&
         m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS) {
         m_createInputFocus = !m_dialogIsFormat &&
             widgetId == m_createSizeTextBoxId ? 0 : 1;
+        updateInitializeControls();
+        invalidate();
+    } else if (widgetId == m_wipeConfirmTextBoxId && m_dialogIsWipe &&
+               m_initializeDialogState == INITIALIZE_DIALOG_WIPE_CONFIRM) {
+        m_createInputFocus = 0;
         updateInitializeControls();
         invalidate();
     } else if (widgetId == m_cancelInitializeBtnId &&
@@ -7697,6 +7938,9 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
     } else if (widgetId == m_deleteBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
         beginDeletePartitionConfirmation();
+    } else if (widgetId == m_wipeBtnId &&
+               m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
+        beginWipeConfirmation();
     } else if (widgetId == m_propertiesBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
         m_detailsMode = DETAILS_PROPERTIES;
@@ -7724,6 +7968,9 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
     } else if (widgetId == m_confirmInitializeBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_GPT_REPAIR_CONFIRM) {
         runGptRepairOperation();
+    } else if (widgetId == m_confirmInitializeBtnId &&
+               m_initializeDialogState == INITIALIZE_DIALOG_WIPE_CONFIRM) {
+        runPartitionWipeOperation();
     } else if (widgetId == m_confirmInitializeBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS) {
         if (m_dialogIsFormat) runFormatOperation();
@@ -7825,6 +8072,81 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     if (m_selectedDisk < 0 || m_selectedDisk >= m_diskCount) {
         disk_manager_draw_clipped(rightX + 6, y + 32, rightW - 12,
             "Select a registered disk to view its volumes and properties.", kSubText);
+        if (m_dialogIsWipe && m_initializeDialogState !=
+                INITIALIZE_DIALOG_CLOSED) {
+            const uint32_t panelX = rightX + 8;
+            const uint32_t panelY = y + 70;
+            const uint32_t panelW = rightW > 24 ? rightW - 16 : rightW;
+            const uint32_t panelH = bodyBottom > 78
+                ? static_cast<uint32_t>(bodyBottom - 76) : 90;
+            framebuffer::fill_rect(panelX, panelY, panelW, panelH, 0xFF252D3B);
+            framebuffer::fill_rect(panelX, panelY, panelW, 23, 0xFF8C3030);
+            const bool terminal = m_initializeDialogState ==
+                INITIALIZE_DIALOG_RESULT;
+            disk_manager_draw_clipped(panelX + 10, panelY + 7,
+                panelW - 20, terminal ? "Partition Wipe Result" :
+                    "Partition Wipe Target Offline", kText);
+            char line[176], number[24], sizeText[32];
+            uint32_t lineY = panelY + 33;
+            strcopy(line, "Target: ", sizeof(line));
+            strappend(line, m_wipeResult.targetIdentity.name, sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kText);
+            lineY += 16;
+            strcopy(line, "Disk Manager disk ", sizeof(line));
+            disk_manager_u64(static_cast<uint64_t>(
+                m_wipeResult.targetIdentity.globalIndex) + 1u,
+                number, sizeof(number));
+            strappend(line, number, sizeof(line));
+            strappend(line, " | Partition ", sizeof(line));
+            disk_manager_u64(m_wipeResult.partition.partitionNumber,
+                number, sizeof(number));
+            strappend(line, number, sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kSubText);
+            lineY += 16;
+            const uint32_t sectorSize =
+                m_wipeResult.targetIdentity.logicalSectorSize;
+            const uint64_t totalBytes = sectorSize != 0 &&
+                m_wipeResult.partition.sectorCount <= UINT64_MAX / sectorSize
+                ? m_wipeResult.partition.sectorCount * sectorSize : 0;
+            formatSizePrecise(totalBytes, sizeText, sizeof(sizeText));
+            strcopy(line, "Partition size: ", sizeof(line));
+            strappend(line, sizeText, sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kSubText);
+            lineY += 18;
+            strcopy(line, "State: ", sizeof(line));
+            strappend(line, storage::partition_wipe_state_name(
+                m_wipeResult.state), sizeof(line));
+            strappend(line, " | ", sizeof(line));
+            disk_manager_u64(m_wipeResult.bytesWritten,
+                number, sizeof(number));
+            strappend(line, number, sizeof(line));
+            strappend(line, " bytes written of ", sizeof(line));
+            disk_manager_u64(m_wipeResult.totalBytes,
+                number, sizeof(number));
+            strappend(line, number, sizeof(line));
+            strappend(line, " (", sizeof(line));
+            disk_manager_u64(m_wipeResult.progressPercent,
+                number, sizeof(number));
+            strappend(line, number, sizeof(line));
+            strappend(line, "%)", sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kText);
+            lineY += 18;
+            const char* message = terminal
+                ? disk_manager_wipe_ui::wipe_terminal_message(
+                    m_wipeResult.state, m_wipeResult.sectorsWritten)
+                : "The exact device registration is offline; no replacement is targeted.";
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                message, terminal && m_wipeResult.state ==
+                    storage::PARTITION_WIPE_COMPLETED ? kText : 0xFFFFB0A0);
+            if (m_wipeResult.diagnostic[0] && lineY + 17 < panelY + panelH) {
+                disk_manager_draw_clipped(panelX + 10, lineY + 17,
+                    panelW - 20, m_wipeResult.diagnostic, 0xFFFFB0A0);
+            }
+        }
         if (m_dialogIsCreate && m_initializeDialogState ==
                 INITIALIZE_DIALOG_RESULT) {
             const uint32_t panelX = rightX + 8;
@@ -8152,9 +8474,13 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         const uint32_t panelH = bodyBottom > 90
             ? static_cast<uint32_t>(bodyBottom - 88) : 90;
         framebuffer::fill_rect(panelX, panelY, panelW, panelH, 0xFF252D3B);
-        framebuffer::fill_rect(panelX, panelY, panelW, 23, 0xFF34465C);
+        framebuffer::fill_rect(panelX, panelY, panelW, 23,
+            m_dialogIsWipe ? 0xFF8C3030 : 0xFF34465C);
         disk_manager_draw_clipped(panelX + 10, panelY + 7, panelW - 20,
-            m_dialogIsGptRepair
+            m_dialogIsWipe
+                ? (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
+                    ? "Partition Wipe Result" : "Wipe Selected Partition?")
+                : (m_dialogIsGptRepair
                 ? (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
                     ? "GPT Repair Result" : "Repair GPT Redundancy")
                 : (m_dialogIsDelete
@@ -8170,18 +8496,19 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                 ? (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
                     ? "Create Partition Result" : "Create Partition")
                 : (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
-                    ? "Initialize Disk Result" : "Initialize Disk")))),
+                    ? "Initialize Disk Result" : "Initialize Disk"))))),
             kText);
         uint32_t lineY = panelY + 32;
         const storage::TargetIdentity& identity =
-            (m_dialogIsGptRepair || m_dialogIsDelete || m_dialogIsFormat || m_dialogIsCreate || m_initializeDialogState !=
+            (m_dialogIsWipe || m_dialogIsGptRepair || m_dialogIsDelete || m_dialogIsFormat || m_dialogIsCreate || m_initializeDialogState !=
                 INITIALIZE_DIALOG_CHOOSE_SCHEME)
-                ? (m_dialogIsGptRepair ? m_gptRepairResult.targetIdentity
+                ? (m_dialogIsWipe ? m_wipeResult.targetIdentity
+                  : (m_dialogIsGptRepair ? m_gptRepairResult.targetIdentity
                   : (m_dialogIsDelete ? m_deleteResult.targetIdentity
                   : (m_dialogIsFormat ? m_formatResult.targetIdentity
                   : (m_dialogIsCreate ? m_createResult.targetIdentity
                                     : m_initializeResult.targetIdentity)
-                  )))
+                  ))))
                 : disk.identity;
         char line[160], number[24], sizeText[32];
         strcopy(line, "Target: ", sizeof(line));
@@ -8205,7 +8532,115 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         strappend(line, " bytes", sizeof(line));
         disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20, line, kSubText);
         lineY += 17;
-        if (m_dialogIsGptRepair) {
+        if (m_dialogIsWipe) {
+            const storage::PartitionEntry& part =
+                m_wipeRequest.partitionSnapshot;
+            char partitionNo[16], startText[24], endText[24], capacityText[32];
+            disk_manager_u64(part.partitionNumber, partitionNo,
+                             sizeof(partitionNo));
+            disk_manager_u64(part.startLba, startText, sizeof(startText));
+            disk_manager_u64(part.endLba, endText, sizeof(endText));
+            const uint64_t bytes = identity.logicalSectorSize != 0 &&
+                part.sectorCount <= UINT64_MAX / identity.logicalSectorSize
+                ? part.sectorCount * identity.logicalSectorSize : 0;
+            formatSizePrecise(bytes, capacityText, sizeof(capacityText));
+            strcopy(line, "Disk Manager disk ", sizeof(line));
+            disk_manager_u64(static_cast<uint64_t>(
+                m_wipeRequest.targetSnapshot.globalIndex) + 1u,
+                number, sizeof(number));
+            strappend(line, number, sizeof(line));
+            strappend(line, " | Partition ", sizeof(line));
+            strappend(line, partitionNo, sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kText);
+            lineY += 16;
+            strcopy(line, "Size: ", sizeof(line));
+            strappend(line, capacityText, sizeof(line));
+            strappend(line, " | LBA ", sizeof(line));
+            strappend(line, startText, sizeof(line));
+            strappend(line, " through ", sizeof(line));
+            strappend(line, endText, sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kText);
+            lineY += 17;
+            if (m_initializeDialogState == INITIALIZE_DIALOG_WIPE_CONFIRM) {
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "Operation: zero-overwrite only this selected partition.",
+                    0xFFFFD080);
+                lineY += 19;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "Other partitions and the partition table will be preserved.",
+                    0xFFFFD080);
+                lineY += 19;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "This destroys the existing filesystem and data.",
+                    0xFFFFB0A0);
+                lineY += 19;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "Stopping after the first write will not restore overwritten data.",
+                    0xFFFFB0A0);
+                lineY += 19;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "This is not a secure erase or sanitization operation.",
+                    0xFFFFD080);
+                lineY += 24;
+                strcopy(line, "Type WIPE, then activate Wipe Partition.",
+                        sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kText);
+            } else {
+                strcopy(line, "State: ", sizeof(line));
+                strappend(line, storage::partition_wipe_state_name(
+                    m_wipeResult.state), sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, m_wipeResult.state == storage::PARTITION_WIPE_FAILED
+                        ? 0xFFFFB0A0 : kText);
+                lineY += 16;
+                strcopy(line, "Written: ", sizeof(line));
+                disk_manager_u64(m_wipeResult.bytesWritten, number,
+                    sizeof(number));
+                strappend(line, number, sizeof(line));
+                strappend(line, " of ", sizeof(line));
+                disk_manager_u64(m_wipeResult.totalBytes, number,
+                    sizeof(number));
+                strappend(line, number, sizeof(line));
+                strappend(line, " bytes | ", sizeof(line));
+                disk_manager_u64(m_wipeResult.sectorsWritten, number,
+                    sizeof(number));
+                strappend(line, number, sizeof(line));
+                strappend(line, " of ", sizeof(line));
+                disk_manager_u64(m_wipeResult.totalSectors, number,
+                    sizeof(number));
+                strappend(line, number, sizeof(line));
+                strappend(line, " sectors", sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kSubText);
+                lineY += 16;
+                strcopy(line, "Progress: ", sizeof(line));
+                disk_manager_u64(m_wipeResult.progressPercent, number,
+                    sizeof(number));
+                strappend(line, number, sizeof(line));
+                strappend(line, "% | Required Flush: ", sizeof(line));
+                strappend(line, !m_wipeResult.flushAttempted ? "pending" :
+                    (m_wipeResult.durabilityConfirmed ? "succeeded" :
+                     (m_wipeResult.flushOutcome == block::FLUSH_OUTCOME_FAILED
+                        ? "failed" : "not confirmed")), sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kSubText);
+                lineY += 18;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    disk_manager_wipe_ui::wipe_terminal_message(
+                        m_wipeResult.state, m_wipeResult.sectorsWritten),
+                    m_wipeResult.state == storage::PARTITION_WIPE_FAILED
+                        ? 0xFFFFB0A0 : kText);
+                if (m_wipeResult.state == storage::PARTITION_WIPE_FAILED ||
+                    m_wipeResult.state == storage::PARTITION_WIPE_NOT_ADMITTED) {
+                    lineY += 17;
+                    disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                        m_wipeResult.diagnostic, 0xFFFFB0A0);
+                }
+            }
+        } else if (m_dialogIsGptRepair) {
             const bool confirmingRepair = m_initializeDialogState ==
                 INITIALIZE_DIALOG_GPT_REPAIR_CONFIRM;
             const char* direction = m_gptRepairPlan.direction ==
@@ -9011,6 +9446,12 @@ void DiskManagerApp::drawDetails(uint32_t x, uint32_t y, uint32_t w,
                 ? (part.mountIdentityValid ? "Yes" : "Identity invalid") : "No");
             add(left, leftCount, "Mount path", part.mounted
                 ? part.mountPath : "(not mounted)");
+            add(right, rightCount, "Wipe Partition",
+                m_wipeBlockReason ==
+                    disk_manager_wipe_ui::WIPE_ACTION_READY
+                    ? "Available for this selected partition"
+                    : disk_manager_wipe_ui::wipe_action_block_reason_text(
+                        m_wipeBlockReason));
             add(left, leftCount, "Mount mode", part.mounted
                 ? (part.mountReadOnly ? "Read Only" : "Read/Write") : "-"
             );
@@ -9078,6 +9519,9 @@ void DiskManagerApp::drawDetails(uint32_t x, uint32_t y, uint32_t w,
                            value, sizeof(value));
                 add(right, rightCount, "Aligned start LBA", value);
             }
+            add(right, rightCount, "Wipe Partition",
+                disk_manager_wipe_ui::wipe_action_block_reason_text(
+                    m_wipeBlockReason));
         } else {
             add(left, leftCount, "Device", disk.identity.name);
             if (disk.identity.model[0]) add(left, leftCount, "Model", disk.identity.model);
@@ -9230,6 +9674,9 @@ void DiskManagerApp::drawDetails(uint32_t x, uint32_t y, uint32_t w,
             disk.parserError == storage::PARTITION_ERROR_NONE)
             parserError = "No parser result available";
         add(right, rightCount, "Parser result", parserError);
+        add(right, rightCount, "Wipe Partition",
+            disk_manager_wipe_ui::wipe_action_block_reason_text(
+                m_wipeBlockReason));
         const bool gptMetadataDetected =
             disk.scheme == storage::PARTITION_SCHEME_GPT || disk.protectiveMbr ||
             disk.primaryGptCopyState != storage::GPT_COPY_NOT_PRESENT ||
@@ -10100,7 +10547,275 @@ void DiskManagerApp::completeFormatOperation() {
     invalidate();
 }
 
+void DiskManagerApp::beginWipeConfirmation() {
+    if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED ||
+        m_mountDialogOpen || m_selectedDisk < 0 || m_selectedDisk >= m_diskCount ||
+        m_selectedObject != SELECTED_PARTITION || m_selectedPart < 0 ||
+        m_selectedPart >= m_disks[m_selectedDisk].partCount) {
+        strcopy(m_statusMessage, "Select one validated partition before wiping.",
+                sizeof(m_statusMessage));
+        invalidate();
+        return;
+    }
+    if (m_wipeBlockReason != disk_manager_wipe_ui::WIPE_ACTION_READY) {
+        strcopy(m_statusMessage,
+            disk_manager_wipe_ui::wipe_action_block_reason_text(m_wipeBlockReason),
+            sizeof(m_statusMessage));
+        invalidate();
+        return;
+    }
+
+    const DiskEntry& disk = m_disks[m_selectedDisk];
+    const storage::PartitionEntry& partition =
+        disk.parts[m_selectedPart].parsed;
+    memset(&m_wipeRequest, 0, sizeof(m_wipeRequest));
+    memset(&m_wipeResult, 0, sizeof(m_wipeResult));
+    memset(&m_wipeJob, 0, sizeof(m_wipeJob));
+    disk_manager_wipe_ui::bind_wipe_request(m_wipeRequest, disk.identity,
+        disk.scheme, partition,
+        disk.scheme == storage::PARTITION_SCHEME_GPT
+            ? disk.primaryDiskGuid : nullptr,
+        disk.mbrDiskSignature);
+    m_wipeResult.targetIdentity = disk.identity;
+    m_wipeResult.partitionScheme = disk.scheme;
+    m_wipeResult.partition = partition;
+    m_wipeResult.state = storage::PARTITION_WIPE_NOT_ADMITTED;
+    m_dialogIsCreate = false;
+    m_dialogIsFormat = false;
+    m_dialogIsReformat = false;
+    m_dialogIsDelete = false;
+    m_dialogIsGptRepair = false;
+    m_dialogIsWipe = true;
+    m_wipeConfirmText[0] = '\0';
+    m_createInputFocus = 0;
+    m_initializeMessage[0] = '\0';
+    m_initializeDialogState = INITIALIZE_DIALOG_WIPE_CONFIRM;
+    updateInitializeControls();
+    invalidate();
+}
+
+bool DiskManagerApp::revalidateWipeConfirmation() {
+    if (!m_dialogIsWipe || m_initializeDialogState !=
+            INITIALIZE_DIALOG_WIPE_CONFIRM) {
+        strcopy(m_initializeMessage,
+            "The wipe confirmation is no longer active. Select the partition again.",
+            sizeof(m_initializeMessage));
+        return false;
+    }
+    if (m_selectedDisk < 0 || m_selectedDisk >= m_diskCount ||
+        m_selectedObject != SELECTED_PARTITION || m_selectedPart < 0 ||
+        m_selectedPart >= m_disks[m_selectedDisk].partCount ||
+        !disk_manager_wipe_ui::wipe_confirmation_binding_matches(
+            m_wipeRequest, m_disks[m_selectedDisk].identity,
+            m_disks[m_selectedDisk].scheme,
+            m_disks[m_selectedDisk].parts[m_selectedPart].parsed)) {
+        strcopy(m_initializeMessage,
+            "The selected device or partition changed. Select it again and confirm a new target.",
+            sizeof(m_initializeMessage));
+        return false;
+    }
+
+    storage::TargetIdentity currentIdentity = {};
+    if (storage::revalidate_target_identity(m_wipeRequest.targetSnapshot) !=
+            storage::TARGET_VALID ||
+        !storage::capture_target_identity(
+            m_wipeRequest.targetSnapshot.globalIndex, currentIdentity) ||
+        !storage::target_identities_equal(currentIdentity,
+                                          m_wipeRequest.targetSnapshot)) {
+        strcopy(m_initializeMessage,
+            "The exact device registration is missing or changed. Select the device again.",
+            sizeof(m_initializeMessage));
+        return false;
+    }
+
+    storage::DeviceCapabilities caps = {};
+    storage::PartitionTableModel& table = s_diskManagerTableScratch;
+    if (!storage::query_device_capabilities(
+            m_wipeRequest.targetSnapshot.globalIndex, caps) ||
+        !storage::parse_partition_table(
+            m_wipeRequest.targetSnapshot.globalIndex, table)) {
+        strcopy(m_initializeMessage,
+            "The device or its partition table could not be revalidated.",
+            sizeof(m_initializeMessage));
+        return false;
+    }
+    const bool tableValid = table.scheme == m_wipeRequest.partitionScheme &&
+        table.state == (table.scheme == storage::PARTITION_SCHEME_GPT
+            ? storage::DISK_STATE_VALID_GPT : storage::DISK_STATE_VALID_MBR) &&
+        !table.hybridMbr && !table.extendedPartitionsPresent &&
+        (table.scheme != storage::PARTITION_SCHEME_GPT ||
+            (table.primaryGptValid && table.backupGptValid &&
+             table.gptCopiesAgree && !table.gptCopiesConflict));
+    bool tableIdentityMatches = false;
+    if (tableValid && table.scheme == storage::PARTITION_SCHEME_GPT) {
+        tableIdentityMatches = true;
+        for (uint8_t i = 0; i < 16; ++i)
+            if (m_wipeRequest.gptDiskGuid[i] != table.primaryDiskGuid[i] ||
+                m_wipeRequest.gptDiskGuid[i] != table.backupDiskGuid[i])
+                tableIdentityMatches = false;
+    } else if (tableValid && table.scheme == storage::PARTITION_SCHEME_MBR) {
+        tableIdentityMatches = m_wipeRequest.mbrDiskSignature ==
+            table.mbrDiskSignature;
+    }
+    const storage::PartitionEntry* currentPartition = nullptr;
+    for (uint16_t i = 0; tableValid && i < table.partitionCount; ++i) {
+        if (table.partitions[i].partitionNumber !=
+                m_wipeRequest.partitionSnapshot.partitionNumber) continue;
+        if (currentPartition) {
+            currentPartition = nullptr;
+            break;
+        }
+        currentPartition = &table.partitions[i];
+    }
+    const bool partitionMatches = tableIdentityMatches && currentPartition &&
+        disk_manager_wipe_ui::wipe_partition_snapshot_matches(
+            *currentPartition, m_wipeRequest.partitionSnapshot);
+    if (!partitionMatches) {
+        strcopy(m_initializeMessage,
+            "The partition table or selected partition identity changed. Select it again.",
+            sizeof(m_initializeMessage));
+        return false;
+    }
+
+    const storage::MountProtection mount =
+        storage::query_partition_mount_protection(m_wipeRequest.targetSnapshot,
+            m_wipeRequest.partitionScheme, *currentPartition);
+    if (mount.safety != storage::DEVICE_UNMOUNTED ||
+        !mount.partitionIdentityKnown) {
+        strcopy(m_initializeMessage,
+            "The selected partition is mounted or its mount state is unknown.",
+            sizeof(m_initializeMessage));
+        return false;
+    }
+    const storage::BootProtection diskBoot =
+        storage::query_boot_protection(m_wipeRequest.targetSnapshot);
+    const storage::BootProtection partitionBoot =
+        storage::query_partition_boot_protection(m_wipeRequest.targetSnapshot,
+            m_wipeRequest.partitionScheme, *currentPartition, table);
+    if (diskBoot.safety != storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET ||
+        partitionBoot.safety != storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET ||
+        disk_manager_wipe_ui::wipe_partition_is_protected(*currentPartition)) {
+        strcopy(m_initializeMessage,
+            "Boot, root, or protected system storage cannot be wiped.",
+            sizeof(m_initializeMessage));
+        return false;
+    }
+
+    const uint64_t sectors = caps.totalLogicalSectors;
+    const storage::PartitionEntry& part = *currentPartition;
+    const bool geometryValid = caps.geometryValid && part.partitionNumber != 0 &&
+        part.startLba != 0 && part.sectorCount != 0 &&
+        part.startLba <= part.endLba && part.endLba < sectors &&
+        part.endLba - part.startLba != UINT64_MAX &&
+        part.endLba - part.startLba + 1u == part.sectorCount &&
+        !(part.startLba == 0 && part.sectorCount == sectors) &&
+        storage::checked_lba_range(sectors, part.startLba, part.sectorCount) &&
+        storage::valid_geometry(part.sectorCount, caps.logicalSectorSize, nullptr);
+    const bool durable = caps.persistence ==
+            storage::PERSISTENCE_SYNCHRONOUS_DURABLE ||
+        (caps.persistence == storage::PERSISTENCE_FLUSH_REQUIRED &&
+         caps.flushSupported && caps.flushSemanticsKnown);
+    storage::MountSafety selectedMount = mount.safety;
+    const bool bootSafe = diskBoot.safety ==
+            storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET &&
+        partitionBoot.safety == storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET &&
+        !disk_manager_wipe_ui::wipe_partition_is_protected(part);
+    disk_manager_wipe_ui::WipeActionEligibility eligibility = {};
+    eligibility.partitionSelected = true;
+    eligibility.identityValid = true;
+    eligibility.validPartitionTable = tableValid;
+    eligibility.validPartitionGeometry = geometryValid;
+    eligibility.transport = caps.transport;
+    eligibility.deviceOnline = block::registration_is_present(
+        m_wipeRequest.targetSnapshot.globalIndex,
+        m_wipeRequest.targetSnapshot.registrationId);
+    eligibility.readable = caps.readable;
+    eligibility.writable = caps.writable;
+    eligibility.durabilityQualified = durable;
+    eligibility.unmounted = selectedMount == storage::DEVICE_UNMOUNTED;
+    eligibility.bootSafe = bootSafe;
+    eligibility.operationIdle = !storage::storage_operation_active();
+    const disk_manager_wipe_ui::WipeActionBlockReason reason =
+        disk_manager_wipe_ui::wipe_action_block_reason(eligibility);
+    if (reason != disk_manager_wipe_ui::WIPE_ACTION_READY) {
+        strcopy(m_initializeMessage,
+            disk_manager_wipe_ui::wipe_action_block_reason_text(reason),
+            sizeof(m_initializeMessage));
+        return false;
+    }
+    return true;
+}
+
+void DiskManagerApp::runPartitionWipeOperation() {
+    if (!m_dialogIsWipe || m_initializeDialogState !=
+            INITIALIZE_DIALOG_WIPE_CONFIRM ||
+        !disk_manager_wipe_ui::wipe_confirmation_can_start(
+            true, m_wipeBlockReason, m_wipeConfirmText))
+        return;
+    if (!revalidateWipeConfirmation()) {
+        m_wipeResult.state = storage::PARTITION_WIPE_NOT_ADMITTED;
+        m_wipeResult.reason = storage::PARTITION_WIPE_REASON_PARTITION_CHANGED;
+        strcopy(m_wipeResult.diagnostic, m_initializeMessage,
+                sizeof(m_wipeResult.diagnostic));
+        strcopy(m_initializeMessage,
+            "Wipe was not started. Select the partition again and review a new confirmation.",
+            sizeof(m_initializeMessage));
+        m_statusMessage[0] = '\0';
+        m_initializeDialogState = INITIALIZE_DIALOG_RESULT;
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
+
+    m_initializeDialogState = INITIALIZE_DIALOG_RUNNING;
+    m_createInputFocus = 0;
+    memset(&m_wipeJob, 0, sizeof(m_wipeJob));
+    const storage::PartitionWipeState state =
+        storage::begin_partition_wipe_job(m_wipeJob, m_wipeRequest);
+    m_wipeResult = m_wipeJob.result;
+    if (state == storage::PARTITION_WIPE_RUNNING) {
+        strcopy(m_statusMessage, "Partition wipe running.",
+                sizeof(m_statusMessage));
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
+    completePartitionWipeOperation();
+}
+
+void DiskManagerApp::completePartitionWipeOperation() {
+    m_wipeResult = m_wipeJob.result;
+    m_lastStorageOperation = 7;
+    strcopy(m_initializeMessage,
+        disk_manager_wipe_ui::wipe_terminal_message(
+            m_wipeResult.state, m_wipeResult.sectorsWritten),
+        sizeof(m_initializeMessage));
+    if (m_wipeResult.state == storage::PARTITION_WIPE_FAILED ||
+        m_wipeResult.state == storage::PARTITION_WIPE_NOT_ADMITTED) {
+        strappend(m_initializeMessage, " Reason: ", sizeof(m_initializeMessage));
+        strappend(m_initializeMessage,
+            m_wipeResult.diagnostic[0] ? m_wipeResult.diagnostic :
+                storage::partition_wipe_reason_name(m_wipeResult.reason),
+            sizeof(m_initializeMessage));
+    }
+    scanDisks();
+    m_initializeDialogState = INITIALIZE_DIALOG_RESULT;
+    strcopy(m_statusMessage, m_initializeMessage, sizeof(m_statusMessage));
+    updateInitializeControls();
+    invalidate();
+}
+
 void DiskManagerApp::closeInitializeDialog() {
+    if (m_dialogIsWipe &&
+        disk_manager_wipe_ui::wipe_job_running(m_wipeJob)) {
+        storage::request_partition_wipe_stop(m_wipeJob);
+        strcopy(m_statusMessage,
+            "Stop requested. The wipe result will show how much was overwritten.",
+            sizeof(m_statusMessage));
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
     if (m_dialogIsFormat &&
         (m_formatJob.state == storage::FAT32_FORMAT_JOB_SCANNING ||
          m_formatJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT)) {
@@ -10127,6 +10842,7 @@ void DiskManagerApp::closeInitializeDialog() {
     m_dialogIsReformat = false;
     m_dialogIsDelete = false;
     m_dialogIsGptRepair = false;
+    m_dialogIsWipe = false;
     m_gptRepairButtonFocus = 0;
     m_createInputFocus = 0;
     m_initializeMessage[0] = '\0';
@@ -10134,6 +10850,15 @@ void DiskManagerApp::closeInitializeDialog() {
         m_formatJob.state == storage::FAT32_FORMAT_JOB_FAILED ||
         m_formatJob.state == storage::FAT32_FORMAT_JOB_CANCELED)
         memset(&m_formatJob, 0, sizeof(m_formatJob));
+    if (m_wipeJob.result.state == storage::PARTITION_WIPE_COMPLETED ||
+        m_wipeJob.result.state == storage::PARTITION_WIPE_FAILED ||
+        m_wipeJob.result.state == storage::PARTITION_WIPE_STOPPED ||
+        m_wipeJob.result.state == storage::PARTITION_WIPE_NOT_ADMITTED) {
+        memset(&m_wipeJob, 0, sizeof(m_wipeJob));
+        memset(&m_wipeRequest, 0, sizeof(m_wipeRequest));
+        memset(&m_wipeResult, 0, sizeof(m_wipeResult));
+        m_wipeConfirmText[0] = '\0';
+    }
     updateInitializeControls();
     invalidate();
 }

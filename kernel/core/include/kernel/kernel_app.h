@@ -213,6 +213,10 @@ public:
     virtual void onKeyUp(uint32_t key) {}
     virtual void onKeyChar(char c) {}
     virtual void onWidgetClick(int widgetId) {}
+    // Return false to keep the app and its window alive when a close request
+    // would invalidate an owned operation. The default preserves existing
+    // app behavior.
+    virtual bool onCloseRequested() { return true; }
     virtual void onWindowClose() {}
     virtual void onWindowFocus() {}
     virtual void onWindowBlur() {}

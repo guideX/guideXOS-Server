@@ -96,6 +96,7 @@ void KernelApp::setPosition(int x, int y) {
 
 void KernelApp::requestClose() {
     if (m_window) {
+        if (!onCloseRequested()) return;
         #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
         serial::puts("[app] close-request app=");
         serial::puts(m_name);
@@ -453,7 +454,12 @@ void AppManager::closeApp(KernelApp* app) {
     // Find and remove from running list
     for (int i = 0; i < s_runningAppCount; i++) {
         if (s_runningApps[i] == app) {
-            app->shutdown();
+            if (app->getWindow()) app->requestClose();
+            else if (app->getState() != AppState::Terminated) {
+                if (!app->onCloseRequested()) return;
+                app->shutdown();
+            }
+            if (app->getState() != AppState::Terminated) return;
             delete app;
             desktop_request_redraw();
             

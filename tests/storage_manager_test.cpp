@@ -8,6 +8,7 @@
 #include "../kernel/core/include/kernel/gpt_repair.h"
 #include "../kernel/core/include/kernel/fat32_formatter.h"
 #include "../kernel/core/include/kernel/partition_wipe.h"
+#include "../kernel/core/include/kernel/disk_manager_wipe_ui.h"
 #include "../kernel/core/include/kernel/fs_fat.h"
 #include "../kernel/core/include/kernel/disk_manager_model.h"
 #include "../kernel/core/include/kernel/ramdisk.h"
@@ -6149,6 +6150,184 @@ void run_partition_wipe_tests()
         g_checks - checksBefore, g_failures - failuresBefore);
 }
 
+void run_disk_manager_wipe_ui_tests()
+{
+    const int checksBefore = g_checks;
+    const int failuresBefore = g_failures;
+    namespace wipeUi = apps::disk_manager_wipe_ui;
+
+    wipeUi::WipeActionEligibility eligible = {};
+    eligible.partitionSelected = true;
+    eligible.identityValid = true;
+    eligible.validPartitionTable = true;
+    eligible.validPartitionGeometry = true;
+    eligible.transport = block::BDEV_ATA_PIO;
+    eligible.deviceOnline = true;
+    eligible.readable = true;
+    eligible.writable = true;
+    eligible.durabilityQualified = true;
+    eligible.unmounted = true;
+    eligible.bootSafe = true;
+    eligible.operationIdle = true;
+    check(wipeUi::wipe_action_block_reason(eligible) ==
+              wipeUi::WIPE_ACTION_READY,
+          "Disk Manager exposes wipe only when the selected partition is eligible");
+
+    wipeUi::WipeActionEligibility blocked = eligible;
+    blocked.partitionSelected = false;
+    check(wipeUi::wipe_action_block_reason(blocked) ==
+              wipeUi::WIPE_ACTION_PARTITION_NOT_SELECTED,
+          "a device row or unselected extent cannot become a wipe target");
+    blocked = eligible;
+    blocked.validPartitionGeometry = false;
+    check(wipeUi::wipe_action_block_reason(blocked) ==
+              wipeUi::WIPE_ACTION_GEOMETRY_INVALID,
+          "whole-device and malformed extents are ineligible");
+    blocked = eligible;
+    blocked.validPartitionTable = false;
+    check(wipeUi::wipe_action_block_reason(blocked) ==
+              wipeUi::WIPE_ACTION_TABLE_INVALID,
+          "invalid or unsupported partition tables are ineligible");
+    blocked = eligible;
+    blocked.identityValid = false;
+    check(wipeUi::wipe_action_block_reason(blocked) ==
+              wipeUi::WIPE_ACTION_IDENTITY_INVALID,
+          "a missing or replaced registration is ineligible");
+    blocked = eligible;
+    blocked.bootSafe = false;
+    check(wipeUi::wipe_action_block_reason(blocked) ==
+              wipeUi::WIPE_ACTION_PROTECTED,
+          "boot, root, and protected partition targets are ineligible");
+    blocked = eligible;
+    blocked.unmounted = false;
+    check(wipeUi::wipe_action_block_reason(blocked) ==
+              wipeUi::WIPE_ACTION_MOUNTED,
+          "mounted targets are ineligible");
+    blocked = eligible;
+    blocked.writable = false;
+    check(wipeUi::wipe_action_block_reason(blocked) ==
+              wipeUi::WIPE_ACTION_READ_ONLY,
+          "read-only targets are ineligible");
+    blocked = eligible;
+    blocked.transport = block::BDEV_NVME;
+    check(wipeUi::wipe_action_block_reason(blocked) ==
+              wipeUi::WIPE_ACTION_NVME_UNQUALIFIED,
+          "NVMe stays denied by the GUI eligibility policy");
+    blocked = eligible;
+    blocked.transport = block::BDEV_RAMDISK;
+    check(wipeUi::wipe_action_block_reason(blocked) ==
+              wipeUi::WIPE_ACTION_TRANSPORT_UNSUPPORTED,
+          "unqualified transports cannot enable the wipe action");
+    blocked = eligible;
+    blocked.durabilityQualified = false;
+    check(wipeUi::wipe_action_block_reason(blocked) ==
+              wipeUi::WIPE_ACTION_DURABILITY_UNKNOWN,
+          "unknown write durability keeps the wipe action disabled");
+    blocked = eligible;
+    blocked.operationIdle = false;
+    check(wipeUi::wipe_action_block_reason(blocked) ==
+              wipeUi::WIPE_ACTION_OPERATION_BUSY,
+          "a conflicting Format or destructive operation blocks wiping");
+
+    storage::TargetIdentity captured = {};
+    captured.registryGeneration = 12;
+    captured.registrationId = 34;
+    captured.globalIndex = 2;
+    captured.transport = block::BDEV_ATA_PIO;
+    captured.totalLogicalSectors = 128;
+    captured.logicalSectorSize = 512;
+    std::strcpy(captured.name, "Disposable test disk");
+    storage::PartitionEntry partition = {};
+    partition.partitionNumber = 1;
+    partition.mbrType = 0x83;
+    partition.startLba = 8;
+    partition.endLba = 15;
+    partition.sectorCount = 8;
+    storage::PartitionWipeRequest request = {};
+    wipeUi::bind_wipe_request(request, captured,
+        storage::PARTITION_SCHEME_MBR, partition, nullptr, 0xD34A5EEDu);
+    const storage::PartitionEntry differentPartition = partition;
+    storage::TargetIdentity changedIdentity = captured;
+    changedIdentity.registrationId += 1;
+    check(request.targetSnapshot.registrationId == captured.registrationId &&
+          request.partitionSnapshot.startLba == partition.startLba &&
+          request.mbrDiskSignature == 0xD34A5EEDu &&
+          request.expectedRegistryGeneration == captured.registryGeneration,
+          "confirmation captures immutable device, table, and partition identity");
+    check(wipeUi::wipe_confirmation_binding_matches(request, captured,
+              storage::PARTITION_SCHEME_MBR, partition),
+          "the captured registration and exact partition pass confirmation revalidation");
+    check(!wipeUi::wipe_confirmation_binding_matches(request, changedIdentity,
+              storage::PARTITION_SCHEME_MBR, partition),
+          "device registration replacement invalidates the confirmation");
+    changedIdentity = captured;
+    changedIdentity.registryGeneration += 1;
+    check(!wipeUi::wipe_confirmation_binding_matches(request, changedIdentity,
+              storage::PARTITION_SCHEME_MBR, partition),
+          "registry generation change invalidates the confirmation");
+    check(!wipeUi::wipe_confirmation_binding_matches(request, captured,
+              storage::PARTITION_SCHEME_GPT, partition),
+          "partition-table scheme change invalidates the confirmation");
+    storage::PartitionEntry movedPartition = partition;
+    movedPartition.startLba += 1;
+    check(!wipeUi::wipe_confirmation_binding_matches(request, captured,
+              storage::PARTITION_SCHEME_MBR, movedPartition),
+          "changed selection or geometry cannot retarget the captured wipe");
+    storage::PartitionWipeRequest immutableRequest = request;
+    storage::PartitionEntry changedSelection = partition;
+    changedSelection.startLba = 32;
+    check(immutableRequest.partitionSnapshot.startLba == 8 &&
+          immutableRequest.targetSnapshot.registrationId == 34,
+          "changing the current row leaves the operation request bound to its original target");
+    check(!wipeUi::wipe_partition_snapshot_matches(changedSelection,
+              differentPartition),
+          "selection changes do not match the captured partition tuple");
+
+    check(!wipeUi::wipe_confirmation_can_start(true,
+              wipeUi::WIPE_ACTION_READY, ""),
+          "confirmation starts disabled with an empty field");
+    check(!wipeUi::wipe_confirmation_can_start(true,
+              wipeUi::WIPE_ACTION_READY, "WIPX"),
+          "wrong deliberate confirmation is rejected");
+    check(!wipeUi::wipe_confirmation_can_start(false,
+              wipeUi::WIPE_ACTION_READY, "WIPE"),
+          "confirmation cannot start after target revalidation fails");
+    check(wipeUi::wipe_confirmation_can_start(true,
+              wipeUi::WIPE_ACTION_READY, "WIPE"),
+          "the exact deliberate confirmation can start an eligible target");
+
+    storage::PartitionWipeResult progress = {};
+    progress.progressPercent = 37;
+    progress.bytesWritten = 4096;
+    progress.totalBytes = 16384;
+    check(wipeUi::wipe_progress_value(progress) == 37,
+          "the GUI progress bar uses the engine counter directly");
+    storage::PartitionWipeJob closeJob = {};
+    closeJob.result.state = storage::PARTITION_WIPE_RUNNING;
+    check(!wipeUi::request_wipe_stop_before_close(closeJob) &&
+          closeJob.result.stopRequested &&
+          wipeUi::wipe_job_running(closeJob),
+          "an active wipe keeps the Disk Manager close request from destroying ownership");
+    closeJob.result.state = storage::PARTITION_WIPE_STOPPED;
+    check(wipeUi::request_wipe_stop_before_close(closeJob),
+          "close becomes available after the wipe reaches a terminal state");
+    check(std::strstr(wipeUi::wipe_terminal_message(
+              storage::PARTITION_WIPE_STOPPED, 0), "No sectors were written") != nullptr,
+          "Stop before the first write reports no overwrite");
+    check(std::strstr(wipeUi::wipe_terminal_message(
+              storage::PARTITION_WIPE_STOPPED, 1), "data may be lost") != nullptr,
+          "partial Stop reports possible data loss");
+    check(std::strstr(wipeUi::wipe_terminal_message(
+              storage::PARTITION_WIPE_FAILED, 1), "may be partially overwritten") != nullptr,
+          "write or Flush failure cannot use the completion message");
+    check(std::strstr(wipeUi::wipe_terminal_message(
+              storage::PARTITION_WIPE_COMPLETED, 8), "overwritten with zeros") != nullptr,
+          "completion wording is reserved for the engine Completed state");
+
+    std::printf("DM34 Disk Manager wipe UI policy: %d checks, %d failures\n",
+        g_checks - checksBefore, g_failures - failuresBefore);
+}
+
 int main()
 {
     run_nvme_logic_tests();
@@ -6160,6 +6339,7 @@ int main()
     run_gpt_repair_tests();
     run_delete_partition_tests();
     run_partition_wipe_tests();
+    run_disk_manager_wipe_ui_tests();
 
     check(storage::crc32("123456789", 9) == 0xCBF43926u, "CRC32 standard test vector");
     check(storage::valid_geometry(10, 512), "512-byte geometry accepted");
