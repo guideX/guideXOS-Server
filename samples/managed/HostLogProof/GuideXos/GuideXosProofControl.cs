@@ -100,17 +100,29 @@ public static unsafe class GuideXosProofCoordinator
             return Step(host, context, table, s, ProofOperation.Query, 0) &&
                 Step(host, context, table, s, ProofOperation.Disable, 2) &&
                 Step(host, context, table, s, ProofOperation.Diagnostics, 2);
-        return Step(host, context, table, s, ProofOperation.Query, 2) &&
-            Step(host, context, table, s, ProofOperation.Diagnostics, 2) &&
-            Step(host, context, table, s, ProofOperation.Reset, 0) &&
-            Step(host, context, table, s, ProofOperation.Query, 0);
+        if (!Step(host, context, table, s, ProofOperation.Query, 2) ||
+            !Step(host, context, table, s, ProofOperation.Diagnostics, 2,
+                out GuideXosAssociationResult rebootDiagnostics) ||
+            !ConfirmBoot2Checkpoint(host, rebootDiagnostics))
+            return false;
+        if (!RunManagedMutationChurn(host, context, table,
+                rebootDiagnostics.Response.diagnosticSlot,
+                rebootDiagnostics.Response.diagnosticGeneration))
+            return false;
+        return Step(host, context, table, s, ProofOperation.Query, 0);
     }
 
     private static bool Step(GuideXosHost host, NativeGxAppContext* context,
-        NativeHostCallTable* table, ProofSelection s, ProofOperation operation, int expectedState)
+        NativeHostCallTable* table, ProofSelection s, ProofOperation operation,
+        int expectedState) => Step(host, context, table, s, operation,
+            expectedState, out _);
+
+    private static bool Step(GuideXosHost host, NativeGxAppContext* context,
+        NativeHostCallTable* table, ProofSelection s, ProofOperation operation,
+        int expectedState, out GuideXosAssociationResult result)
     {
         int step = s_steps.Next();
-        GuideXosAssociationResult result;
+        result = default;
         switch (operation)
         {
             case ProofOperation.Query: result = GuideXosFileAssociations.Query(context, table, ".txt"u8); break;
@@ -122,6 +134,11 @@ public static unsafe class GuideXosProofCoordinator
         }
         bool valid = result.Status == GuideXosAssociationStatus.Success &&
             (expectedState < 0 || result.Response.overrideState == (uint)expectedState);
+        if (valid && operation == ProofOperation.Query && expectedState >= 0)
+            valid = EffectiveEquals(result.Response,
+                expectedState == (uint)GuideXosAssociationOverrideState.Disabled
+                    ? ReadOnlySpan<byte>.Empty
+                    : "com.guidexos.apps.managed.notes"u8);
         Span<byte> line = stackalloc byte[MaximumMarkerLength];
         int p = 0;
         Append(line, ref p, "PROOF C166 "u8); AppendScenarioStage(line, ref p, s);
@@ -130,6 +147,12 @@ public static unsafe class GuideXosProofCoordinator
         AppendOperation(line, ref p, operation);
         Append(line, ref p, " st="u8); AppendNumber(line, ref p, (uint)result.Status);
         Append(line, ref p, " ov="u8); AppendNumber(line, ref p, result.Response.overrideState);
+        if (operation == ProofOperation.Query)
+        {
+            Append(line, ref p, " eff="u8);
+            Append(line, ref p, EffectiveToken(result.Response.hasEffectiveAssociation == 0u
+                ? ReadOnlySpan<byte>.Empty : "com.guidexos.apps.managed.notes"u8));
+        }
         if (operation == ProofOperation.Diagnostics)
         {
             Append(line, ref p, " slot="u8);
@@ -138,6 +161,165 @@ public static unsafe class GuideXosProofCoordinator
         }
         host.TryLog(line[..p]);
         return valid;
+    }
+
+    private static bool ConfirmBoot2Checkpoint(GuideXosHost host,
+        GuideXosAssociationResult diagnostics)
+    {
+        // Boot 1 commits A/1 and B/2. Boot 2 then persists Disabled as A/3;
+        // the runner checks those direct diagnostics before launching this
+        // stage. Stop before churn unless this fresh boot reloaded the same
+        // checkpoint.
+        const uint boot2Slot = 0u;
+        const ulong boot2Generation = 3ul;
+        bool pass = diagnostics.Status == GuideXosAssociationStatus.Success &&
+            diagnostics.Response.overrideState ==
+                (uint)GuideXosAssociationOverrideState.Disabled &&
+            diagnostics.Response.diagnosticSlot == boot2Slot &&
+            diagnostics.Response.diagnosticGeneration == boot2Generation;
+        Span<byte> line = stackalloc byte[MaximumMarkerLength];
+        int p = 0;
+        Append(line, ref p, "PROOF C166 P Post REBOOT-COMPARE "u8);
+        Append(line, ref p, pass ? "PASS slot="u8 : "FAIL slot="u8);
+        Append(line, ref p, SlotToken(diagnostics.Response.diagnosticSlot));
+        Append(line, ref p, " gen="u8);
+        AppendUnsigned64(line, ref p, diagnostics.Response.diagnosticGeneration);
+        Append(line, ref p, " expected=A/3"u8);
+        host.TryLog(line[..p]);
+        return pass;
+    }
+
+    private static bool RunManagedMutationChurn(GuideXosHost host,
+        NativeGxAppContext* context, NativeHostCallTable* table,
+        uint initialSlot, ulong initialGeneration)
+    {
+        uint expectedSlot = initialSlot;
+        ulong expectedGeneration = initialGeneration;
+        int successful = 0;
+        for (int repetition = 0; repetition < 8; repetition++)
+        {
+            if (!MutateAndVerify(host, context, table,
+                    ProofOperation.SetManagedNotes, 1,
+                    "com.guidexos.apps.managed.notes"u8,
+                    ref expectedSlot, ref expectedGeneration, successful + 1))
+                return false;
+            successful++;
+            if (!MutateAndVerify(host, context, table,
+                    ProofOperation.Disable, 2, ReadOnlySpan<byte>.Empty,
+                    ref expectedSlot, ref expectedGeneration, successful + 1))
+                return false;
+            successful++;
+            if (!MutateAndVerify(host, context, table,
+                    ProofOperation.Reset, 0,
+                    "com.guidexos.apps.managed.notes"u8,
+                    ref expectedSlot, ref expectedGeneration, successful + 1))
+                return false;
+            successful++;
+        }
+        if (!MutateAndVerify(host, context, table,
+                ProofOperation.SetManagedNotes, 1,
+                "com.guidexos.apps.managed.notes"u8,
+                ref expectedSlot, ref expectedGeneration, successful + 1))
+            return false;
+        successful++;
+        if (!MutateAndVerify(host, context, table,
+                ProofOperation.Reset, 0,
+                "com.guidexos.apps.managed.notes"u8,
+                ref expectedSlot, ref expectedGeneration, successful + 1))
+            return false;
+        successful++;
+
+        Span<byte> line = stackalloc byte[MaximumMarkerLength];
+        int p = 0;
+        Append(line, ref p, "PROOF C166 P Post MUTATION-SUMMARY "u8);
+        Append(line, ref p, successful == 26 ? "PASS count="u8 : "FAIL count="u8);
+        AppendNumber(line, ref p, (uint)successful);
+        Append(line, ref p, " commits=26 gen=3-"u8);
+        AppendUnsigned64(line, ref p, expectedGeneration);
+        Append(line, ref p, " alt=PASS final="u8);
+        Append(line, ref p, SlotToken(expectedSlot));
+        Append(line, ref p, "/"u8);
+        AppendUnsigned64(line, ref p, expectedGeneration);
+        Append(line, ref p, "/0"u8);
+        host.TryLog(line[..p]);
+        return successful == 26;
+    }
+
+    private static bool MutateAndVerify(GuideXosHost host,
+        NativeGxAppContext* context, NativeHostCallTable* table,
+        ProofOperation operation, uint expectedState,
+        ReadOnlySpan<byte> expectedEffective,
+        ref uint expectedSlot, ref ulong expectedGeneration, int index)
+    {
+        GuideXosAssociationResult mutation = operation switch
+        {
+            ProofOperation.SetManagedNotes =>
+                GuideXosFileAssociations.SetDefault(context, table, ".txt"u8,
+                    "com.guidexos.apps.managed.notes"u8),
+            ProofOperation.Disable =>
+                GuideXosFileAssociations.Disable(context, table, ".txt"u8),
+            ProofOperation.Reset =>
+                GuideXosFileAssociations.Reset(context, table, ".txt"u8),
+            _ => default,
+        };
+        bool responsePass = mutation.Status == GuideXosAssociationStatus.Success &&
+            mutation.Response.overrideState == expectedState &&
+            EffectiveEquals(mutation.Response, expectedEffective);
+        GuideXosAssociationResult diagnostics = default;
+        if (responsePass)
+            diagnostics = GuideXosFileAssociations.Diagnostics(context, table,
+                ".txt"u8);
+        uint nextSlot = expectedSlot ^ 1u;
+        ulong nextGeneration = expectedGeneration + 1ul;
+        bool pass = responsePass &&
+            diagnostics.Status == GuideXosAssociationStatus.Success &&
+            diagnostics.Response.overrideState == expectedState &&
+            diagnostics.Response.diagnosticSlot == nextSlot &&
+            diagnostics.Response.diagnosticGeneration == nextGeneration;
+        Span<byte> line = stackalloc byte[MaximumMarkerLength];
+        int p = 0;
+        Append(line, ref p, "PROOF C166 P Post M"u8);
+        AppendTwoDigits(line, ref p, (uint)index);
+        Append(line, ref p, pass ? " PASS "u8 : " FAIL "u8);
+        AppendOperation(line, ref p, operation);
+        Append(line, ref p, " st="u8);
+        AppendNumber(line, ref p, (uint)mutation.Status);
+        Append(line, ref p, " ov="u8);
+        AppendNumber(line, ref p, mutation.Response.overrideState);
+        Append(line, ref p, " eff="u8);
+        Append(line, ref p, EffectiveToken(expectedEffective));
+        Append(line, ref p, " slot="u8);
+        Append(line, ref p, SlotToken(diagnostics.Response.diagnosticSlot));
+        Append(line, ref p, " gen="u8);
+        AppendUnsigned64(line, ref p, diagnostics.Response.diagnosticGeneration);
+        host.TryLog(line[..p]);
+        if (!pass) return false;
+        expectedSlot = nextSlot;
+        expectedGeneration = nextGeneration;
+        return true;
+    }
+
+    private static bool EffectiveEquals(NativeAssociationServiceResponse response,
+        ReadOnlySpan<byte> expected)
+    {
+        byte* effective = response.effectiveAppId;
+        if (response.hasEffectiveAssociation != (expected.IsEmpty ? 0u : 1u))
+            return false;
+        for (int i = 0; i < expected.Length; i++)
+            if (effective[i] != expected[i]) return false;
+        return effective[expected.Length] == 0;
+    }
+
+    private static ReadOnlySpan<byte> EffectiveToken(ReadOnlySpan<byte> effective) =>
+        effective.IsEmpty ? "none"u8 : "notes"u8;
+
+    private static ReadOnlySpan<byte> SlotToken(uint slot) =>
+        slot == 0u ? "A"u8 : slot == 1u ? "B"u8 : "N"u8;
+
+    private static void AppendTwoDigits(Span<byte> b, ref int p, uint value)
+    {
+        b[p++] = (byte)('0' + (value / 10u) % 10u);
+        b[p++] = (byte)('0' + value % 10u);
     }
 
     private static void AppendScenarioStage(Span<byte> b, ref int p, ProofSelection s)

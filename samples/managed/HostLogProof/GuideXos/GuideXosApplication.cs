@@ -59,6 +59,9 @@ public readonly struct GuideXosApplicationDescriptor
 public static unsafe class GuideXosApplicationRegistry
 {
     public const uint LifetimeCloseActionId = 0x01500002u;
+#if GUIDEXOS_PROOF_CONTROL
+    private static bool s_proofConfigConsumed;
+#endif
 
 #if HOSTLOGPROOF_MANAGED_APP_RETURN
     private static readonly GuideXosApplicationDescriptor[] s_entries =
@@ -153,25 +156,30 @@ public static unsafe class GuideXosApplicationRegistry
         }
 
 #if GUIDEXOS_PROOF_CONTROL
-        Span<byte> proofConfig = stackalloc byte[9];
-        GuideXosFileResult proofConfigResult = host.TryReadInto(
-            "/system/config/proof1.bin"u8, proofConfig,
-            out int proofConfigLength);
-        if (proofConfigResult == GuideXosFileResult.Success)
+        if (!s_proofConfigConsumed)
         {
-            if (proofConfigLength != proofConfig.Length ||
-                !ProofSelection.TryParse(proofConfig, out ProofSelection selection))
+            Span<byte> proofConfig = stackalloc byte[9];
+            GuideXosFileResult proofConfigResult = host.TryReadInto(
+                "/system/config/proof1.bin"u8, proofConfig,
+                out int proofConfigLength);
+            if (proofConfigResult == GuideXosFileResult.Success)
             {
-                host.TryLog("PROOF-SCENARIO-FAIL INVALID-CONFIG"u8);
+                s_proofConfigConsumed = true;
+                if (proofConfigLength != proofConfig.Length ||
+                    !ProofSelection.TryParse(proofConfig, out ProofSelection selection))
+                {
+                    host.TryLog("PROOF-SCENARIO-FAIL INVALID-CONFIG"u8);
+                    return GxAbi.ErrorInvalidArgument;
+                }
+                GuideXosProofCoordinator.Run(host, context, context->host, selection);
+                return (int)GuideXosResult.Success;
+            }
+            if (proofConfigResult != GuideXosFileResult.NotFound)
+            {
+                s_proofConfigConsumed = true;
+                host.TryLog("PROOF-SCENARIO-FAIL CONFIG-READ"u8);
                 return GxAbi.ErrorInvalidArgument;
             }
-            GuideXosProofCoordinator.Run(host, context, context->host, selection);
-            return (int)GuideXosResult.Success;
-        }
-        if (proofConfigResult != GuideXosFileResult.NotFound)
-        {
-            host.TryLog("PROOF-SCENARIO-FAIL CONFIG-READ"u8);
-            return GxAbi.ErrorInvalidArgument;
         }
 #endif
 

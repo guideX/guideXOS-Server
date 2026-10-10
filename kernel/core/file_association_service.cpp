@@ -1,4 +1,8 @@
 #include "include/kernel/file_association_service.h"
+#if defined(GUIDEXOS_PROOF_CONTROL) && !defined(GUIDEXOS_HOST_C166_TESTS)
+#include "include/kernel/serial_debug.h"
+#define GUIDEXOS_C166_PERSISTENCE_TRACE 1
+#endif
 #include <stddef.h>
 #include <stdint.h>
 
@@ -16,6 +20,15 @@ constexpr FileAssociationRecord kFileAssociations[kFileAssociationCapacity] = {
 };
 constexpr uint32_t kAssociationMagic = 0x32415347u; // GSA2
 constexpr uint16_t kAssociationVersion = 2u;
+#if defined(GUIDEXOS_C166_PERSISTENCE_TRACE)
+void tracePersistenceFailure(uint32_t slot, const char* phase) {
+    serial::puts("[C166-PERSIST-FAIL] slot=");
+    serial::putc(slot == 0u ? 'A' : 'B');
+    serial::puts(" phase=");
+    serial::puts(phase);
+    serial::puts("\n");
+}
+#endif
 constexpr uint32_t kAssociationOverrideCapacity = 1u;
 enum class PersistedOverrideState : uint32_t { Application = 1u, Disabled = 2u };
 struct AssociationOverrideRecord {
@@ -514,14 +527,51 @@ bool persistCandidate(AssociationPersistenceImage* image) {
         offsetof(AssociationPersistenceImage, integrity));
     const uint32_t target = s_activeSlot < 0 ? 0u :
         static_cast<uint32_t>(1 - s_activeSlot);
-    if (!s_storage.writeSlot || !s_storage.readSlot || !s_storage.flushSlot ||
-        !s_storage.writeSlot(s_storage.context, target, image, sizeof(*image)) ||
-        !s_storage.flushSlot(s_storage.context, target)) return false;
+    if (!s_storage.writeSlot || !s_storage.readSlot || !s_storage.flushSlot) {
+#if defined(GUIDEXOS_C166_PERSISTENCE_TRACE)
+        tracePersistenceFailure(target, "adapter");
+#endif
+        return false;
+    }
+    if (!s_storage.writeSlot(s_storage.context, target, image, sizeof(*image))) {
+#if defined(GUIDEXOS_C166_PERSISTENCE_TRACE)
+        tracePersistenceFailure(target, "write");
+#endif
+        return false;
+    }
+    if (!s_storage.flushSlot(s_storage.context, target)) {
+#if defined(GUIDEXOS_C166_PERSISTENCE_TRACE)
+        tracePersistenceFailure(target, "flush");
+#endif
+        return false;
+    }
     AssociationPersistenceImage readback{};
     bool exists = false;
     if (!s_storage.readSlot(s_storage.context, target, &readback,
-            sizeof(readback), &exists) || !exists || !validateImage(readback) ||
-        __builtin_memcmp(image, &readback, sizeof(*image)) != 0) return false;
+            sizeof(readback), &exists)) {
+#if defined(GUIDEXOS_C166_PERSISTENCE_TRACE)
+        tracePersistenceFailure(target, "read");
+#endif
+        return false;
+    }
+    if (!exists) {
+#if defined(GUIDEXOS_C166_PERSISTENCE_TRACE)
+        tracePersistenceFailure(target, "missing");
+#endif
+        return false;
+    }
+    if (!validateImage(readback)) {
+#if defined(GUIDEXOS_C166_PERSISTENCE_TRACE)
+        tracePersistenceFailure(target, "crc");
+#endif
+        return false;
+    }
+    if (__builtin_memcmp(image, &readback, sizeof(*image)) != 0) {
+#if defined(GUIDEXOS_C166_PERSISTENCE_TRACE)
+        tracePersistenceFailure(target, "compare");
+#endif
+        return false;
+    }
     s_activeGeneration = image->generation;
     s_activeSlot = static_cast<int32_t>(target);
     return true;

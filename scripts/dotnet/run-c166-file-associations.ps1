@@ -4,6 +4,7 @@ param(
     [switch]$BuildProofProducts,
     [switch]$UseExistingProofProducts,
     [switch]$RunProofBoots,
+    [switch]$RunOrdinaryAcceptance,
     [switch]$HostTestsOnly
 )
 
@@ -41,7 +42,7 @@ if ($HostTestsOnly) {
     $nativeSources = @(
         (Join-Path $RepoRoot 'samples\host\C166Association\main.cpp'),
         (Join-Path $RepoRoot 'kernel\core\file_association_service.cpp'))
-    & $gxxCommand.Source -std=c++14 -O2 -Wall -Wextra -DGUIDEXOS_PROOF_CONTROL "-I$RepoRoot" `
+    & $gxxCommand.Source -std=c++14 -O2 -Wall -Wextra -DGUIDEXOS_PROOF_CONTROL -DGUIDEXOS_HOST_C166_TESTS "-I$RepoRoot" `
         "-I$(Join-Path $RepoRoot 'kernel\core')" @nativeSources -o $nativeExe
     if ($LASTEXITCODE -ne 0) { throw "C166R7 native host compilation failed: $LASTEXITCODE" }
     $env:C166_NATIVE_FIXTURE = $fixturePath
@@ -173,11 +174,15 @@ function Send-OwnedQemuQuit([int]$Port, [System.Diagnostics.Process]$Process) {
 
 function Invoke-ProofQemuBoot([string]$Stage, [string]$Ramdisk,
     [string]$EspPath, [string]$Bootloader, [string]$Kernel,
-    [string]$QemuPath, [string]$OvmfPath, [string]$BootRoot) {
+    [string]$QemuPath, [string]$OvmfPath, [string]$BootRoot,
+    [switch]$HoldAfterPass,
+    [string]$ReadyPattern = '(?m)^(?:\[C102-MANAGED-OUTPUT\] )?PROOF-SCENARIO-(?:PASS|FAIL) C166 ') {
     $serialPath = Join-Path $BootRoot 'serial.log'
     $stdoutPath = Join-Path $BootRoot 'qemu.stdout.log'
     $stderrPath = Join-Path $BootRoot 'qemu.stderr.log'
+    $qmpLogPath = Join-Path $BootRoot 'qmp-input.log'
     New-Item -ItemType Directory -Force -Path (Join-Path $EspPath 'EFI\BOOT'), $BootRoot | Out-Null
+    Set-Content -LiteralPath $qmpLogPath -Value '' -Encoding ASCII
     Copy-Item -LiteralPath $Bootloader -Destination (Join-Path $EspPath 'EFI\BOOT\BOOTX64.EFI') -Force
     Copy-Item -LiteralPath $Kernel -Destination (Join-Path $EspPath 'kernel.elf') -Force
     # Only boot metadata changes. This path is the same root FAT backing for every boot.
@@ -193,20 +198,24 @@ function Invoke-ProofQemuBoot([string]$Stage, [string]$Ramdisk,
     $process = Start-Process -FilePath $QemuPath -ArgumentList $arguments -WorkingDirectory $RepoRoot `
         -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden -PassThru
     $serial = ''
+    $holdProcess = $false
     try {
         $deadline = (Get-Date).AddSeconds(120)
         while ((Get-Date) -lt $deadline) {
             Start-Sleep -Milliseconds 250
             if (Test-Path -LiteralPath $serialPath) {
                 $serial = Get-Content -LiteralPath $serialPath -Raw -ErrorAction SilentlyContinue
-                if ($serial -match '(?m)^(?:\[C102-MANAGED-OUTPUT\] )?PROOF-SCENARIO-(?:PASS|FAIL) C166 ') { break }
+                if ($serial -match $ReadyPattern) { break }
             }
             $process.Refresh()
             if ($process.HasExited) { break }
         }
+        if ($HoldAfterPass -and $serial -match $ReadyPattern) {
+            $holdProcess = $true
+        }
     } finally {
         $process.Refresh()
-        if (-not $process.HasExited) {
+        if (-not $holdProcess -and -not $process.HasExited) {
             try { Send-OwnedQemuQuit $qmpPort $process }
             catch {
                 # Fallback is constrained to the QEMU process created above.
@@ -216,7 +225,27 @@ function Invoke-ProofQemuBoot([string]$Stage, [string]$Ramdisk,
         }
     }
     if (Test-Path -LiteralPath $serialPath) { $serial = Get-Content -LiteralPath $serialPath -Raw }
-    return [ordered]@{stage=$Stage;serialPath=$serialPath;serialSha256=(Get-Sha256 $serialPath);serial=$serial;pid=$process.Id;exitCode=$process.ExitCode;backingEspPath=[System.IO.Path]::GetFullPath($EspPath)}
+    $process.Refresh()
+    $exitCode = if ($process.HasExited) { $process.ExitCode } else { $null }
+    $serialHash = if ($null -ne $exitCode) { Get-Sha256 $serialPath } else { $null }
+    return [ordered]@{stage=$Stage;serialPath=$serialPath;serialSha256=$serialHash;serial=$serial;pid=$process.Id;exitCode=$exitCode;backingEspPath=[System.IO.Path]::GetFullPath($EspPath);qmpPort=$qmpPort;qmpLogPath=$qmpLogPath;process=$process;held=$holdProcess}
+}
+
+function Stop-OwnedProofQemu([object]$Boot) {
+    if (-not $Boot -or -not $Boot.process) { return }
+    $process = [System.Diagnostics.Process]$Boot.process
+    $process.Refresh()
+    if (-not $process.HasExited) {
+        try { Send-OwnedQemuQuit ([int]$Boot.qmpPort) $process }
+        catch {
+            # The fallback remains restricted to the process created by this runner.
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            [void]$process.WaitForExit(5000)
+        }
+    }
+    $process.Refresh()
+    if ($process.HasExited) { $Boot.exitCode = $process.ExitCode }
+    $Boot.held = $false
 }
 
 function Assert-ProofScenario([object]$Boot, [string]$ScenarioCode,
@@ -231,6 +260,830 @@ function Assert-ProofScenario([object]$Boot, [string]$ScenarioCode,
     }
 }
 
+function Assert-PostRebootChurn([object]$Boot) {
+    $compare = @([regex]::Matches($Boot.serial,
+        '(?m)^(?:\[C102-MANAGED-OUTPUT\] )?PROOF C166 P Post REBOOT-COMPARE PASS slot=A gen=3 expected=A/3\r?$'))
+    if ($compare.Count -ne 1) { throw 'Boot 3 did not emit one direct A/3 reboot comparison before mutation.' }
+    $mutationMatches = @([regex]::Matches($Boot.serial,
+        '(?m)^(?:\[C102-MANAGED-OUTPUT\] )?PROOF C166 P Post M(?<index>[0-9]{2}) (?<result>PASS|FAIL) (?<operation>Set|Dis|Rst) st=(?<status>[0-9]+) ov=(?<override>[0-2]) eff=(?<effective>notes|none) slot=(?<slot>[ABN]) gen=(?<generation>[0-9]+)\r?$'))
+    if ($mutationMatches.Count -ne 26) { throw "Boot 3 expected 26 indexed managed mutation markers; found $($mutationMatches.Count)." }
+    $mutations = @()
+    for ($i = 1; $i -le 26; $i++) {
+        $match = $mutationMatches[$i - 1]
+        $expectedOperation = if ($i -le 24) { switch (($i - 1) % 3) { 0 {'Set'} 1 {'Dis'} default {'Rst'} } } elseif ($i -eq 25) { 'Set' } else { 'Rst' }
+        $expectedOverride = switch ($expectedOperation) { 'Set' { '1' } 'Dis' { '2' } default { '0' } }
+        $expectedEffective = if ($expectedOperation -eq 'Dis') { 'none' } else { 'notes' }
+        $expectedSlot = if (($i % 2) -eq 1) { 'B' } else { 'A' }
+        $expectedGeneration = [string](3 + $i)
+        if ([int]$match.Groups['index'].Value -ne $i -or
+            $match.Groups['result'].Value -ne 'PASS' -or
+            $match.Groups['operation'].Value -ne $expectedOperation -or
+            $match.Groups['status'].Value -ne '0' -or
+            $match.Groups['override'].Value -ne $expectedOverride -or
+            $match.Groups['effective'].Value -ne $expectedEffective -or
+            $match.Groups['slot'].Value -ne $expectedSlot -or
+            $match.Groups['generation'].Value -ne $expectedGeneration) {
+            throw "Boot 3 mutation $i failed its result/state/effective-handler/slot/generation contract: $($match.Value)"
+        }
+        $mutations += [ordered]@{ index=$i;operation=$expectedOperation;status=0;override=$expectedOverride;effective=$expectedEffective;slot=$expectedSlot;generation=[int64]$expectedGeneration;marker=$match.Value }
+    }
+    $summary = @([regex]::Matches($Boot.serial,
+        '(?m)^(?:\[C102-MANAGED-OUTPUT\] )?PROOF C166 P Post MUTATION-SUMMARY PASS count=26 commits=26 gen=3-29 alt=PASS final=A/29/0\r?$'))
+    if ($summary.Count -ne 1) { throw 'Boot 3 managed mutation summary is missing or inconsistent.' }
+    if ($Boot.serial -notmatch '(?m)^(?:\[C102-MANAGED-OUTPUT\] )?PROOF C166 P Post 3 PASS Q st=0 ov=0 eff=notes\r?$') {
+        throw 'Boot 3 final Query did not report NoOverride with Managed Notes as the effective handler.'
+    }
+    $Boot['mutations'] = $mutations
+    return ,$mutations
+}
+
+function Get-C166Serial([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
+    $content=Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue
+    if ($null -eq $content) { return '' }
+    return [string]$content
+}
+
+function Wait-C166Serial([string]$Path, [string]$Pattern,
+    [int]$After = 0, [int]$Seconds = 30) {
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        $text = Get-C166Serial $Path
+        $tail = if ($After -le $text.Length) { $text.Substring($After) } else { '' }
+        $match = [regex]::Match($tail, "(?m)$Pattern")
+        if ($match.Success) { return [pscustomobject]@{Text=$text;Match=$match;Index=$text.Length} }
+        Start-Sleep -Milliseconds 100
+    }
+    throw "Timed out waiting for C166 guest marker '$Pattern' in $Path."
+}
+
+function Read-C166QmpResponse([System.IO.Stream]$Stream, [int]$Seconds = 3) {
+    $builder = [System.Text.StringBuilder]::new()
+    $buffer = [byte[]]::new(4096)
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        if ($Stream.DataAvailable) {
+            $count = $Stream.Read($buffer, 0, $buffer.Length)
+            if ($count -gt 0) {
+                [void]$builder.Append([System.Text.Encoding]::ASCII.GetString($buffer, 0, $count))
+                if ($builder.ToString().TrimEnd().EndsWith('}')) { break }
+            }
+        } else { Start-Sleep -Milliseconds 20 }
+    }
+    return $builder.ToString()
+}
+
+function Send-C166QmpEvents([int]$Port, [object[]]$Events,
+    [string]$LogPath, [int]$DelayMilliseconds = 45) {
+    if ($Events.Count -eq 0) { return }
+    $client = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $client.Connect('127.0.0.1', $Port)
+        $stream = $client.GetStream()
+        $stream.ReadTimeout = 200
+        $greeting = Read-C166QmpResponse $stream
+        $capabilityBytes = [System.Text.Encoding]::ASCII.GetBytes(
+            '{"execute":"qmp_capabilities"}' + "`n")
+        $stream.Write($capabilityBytes, 0, $capabilityBytes.Length); $stream.Flush()
+        $capabilities = Read-C166QmpResponse $stream
+        if ($capabilities -match '"error"') { throw "C166 QMP negotiation failed: $capabilities" }
+        foreach ($event in $Events) {
+            $request = [ordered]@{execute='input-send-event';arguments=[ordered]@{events=@($event)}} |
+                ConvertTo-Json -Compress -Depth 10
+            $bytes = [System.Text.Encoding]::ASCII.GetBytes($request + "`n")
+            $stream.Write($bytes, 0, $bytes.Length); $stream.Flush()
+            $response = Read-C166QmpResponse $stream
+            Add-Content -LiteralPath $LogPath -Value ("event={0}`ngreeting={1}`ncapabilities={2}`nresponse={3}" -f $request,$greeting,$capabilities,$response) -Encoding ASCII
+            if ($response -match '"error"') { throw "C166 QMP input event failed: $response" }
+            if ($DelayMilliseconds -gt 0) { Start-Sleep -Milliseconds $DelayMilliseconds }
+        }
+    } finally { $client.Dispose() }
+}
+
+function Send-C166QmpCommand([int]$Port, [string]$Command,
+    [object]$Arguments, [string]$LogPath) {
+    $client = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $client.Connect('127.0.0.1', $Port)
+        $stream = $client.GetStream()
+        $stream.ReadTimeout = 200
+        $greeting = Read-C166QmpResponse $stream
+        $capabilityBytes = [System.Text.Encoding]::ASCII.GetBytes(
+            '{"execute":"qmp_capabilities"}' + "`n")
+        $stream.Write($capabilityBytes, 0, $capabilityBytes.Length); $stream.Flush()
+        $capabilities = Read-C166QmpResponse $stream
+        if ($capabilities -match '"error"') { throw "C166 QMP negotiation failed: $capabilities" }
+        $payload = [ordered]@{execute=$Command}
+        if ($null -ne $Arguments) { $payload.arguments = $Arguments }
+        $request = $payload | ConvertTo-Json -Compress -Depth 10
+        $bytes = [System.Text.Encoding]::ASCII.GetBytes($request + "`n")
+        $stream.Write($bytes, 0, $bytes.Length); $stream.Flush()
+        $response = Read-C166QmpResponse $stream
+        Add-Content -LiteralPath $LogPath -Value ("command={0}`ngreeting={1}`ncapabilities={2}`nresponse={3}" -f $request,$greeting,$capabilities,$response) -Encoding ASCII
+        if ($response -match '"error"') { throw "C166 QMP command '$Command' failed: $response" }
+        return $response
+    } finally { $client.Dispose() }
+}
+
+function New-C166RelativeMove([int]$Dx, [int]$Dy) {
+    $events = [System.Collections.Generic.List[object]]::new()
+    foreach ($axis in @(@{Name='x';Delta=$Dx},@{Name='y';Delta=$Dy})) {
+        $remaining = [int]$axis.Delta
+        while ($remaining -ne 0) {
+            $step = [Math]::Sign($remaining) * [Math]::Min([Math]::Abs($remaining),40)
+            $events.Add([ordered]@{type='rel';data=[ordered]@{axis=$axis.Name;value=$step}})
+            $remaining -= $step
+        }
+    }
+    return $events.ToArray()
+}
+
+function New-C166Button([string]$Name, [bool]$Down) {
+    return [ordered]@{type='btn';data=[ordered]@{button=$Name;down=$Down}}
+}
+
+function New-C166Key([string]$Code, [bool]$Down) {
+    return [ordered]@{type='key';data=[ordered]@{down=$Down;key=[ordered]@{type='qcode';data=$Code}}}
+}
+
+function Initialize-C166GuestPointer([object]$Boot) {
+    # Proof scenario completion is emitted before the kernel finishes device
+    # startup. Do not send QMP input until PS/2 and the desktop event loop are
+    # ready to consume it.
+    [void](Wait-C166Serial $Boot.serialPath '^\[KERNEL\] Input manager initialized' 0 120)
+    [void](Wait-C166Serial $Boot.serialPath '^\[KERNEL\] Entering main loop \(waiting for input\)\.\.\.' 0 120)
+    $serial = Get-C166Serial $Boot.serialPath
+    $widthMatch = [regex]::Match($serial, '(?m)^\[DESKTOP CAP\] framebuffer_width=0x([0-9A-Fa-f]+)')
+    $heightMatch = [regex]::Match($serial, '(?m)^\[DESKTOP CAP\] framebuffer_height=0x([0-9A-Fa-f]+)')
+    if (-not $widthMatch.Success -or -not $heightMatch.Success) {
+        throw "$($Boot.stage) did not report framebuffer dimensions for QMP interaction."
+    }
+    $script:c166ScreenWidth = [Convert]::ToInt32($widthMatch.Groups[1].Value,16)
+    $script:c166ScreenHeight = [Convert]::ToInt32($heightMatch.Groups[1].Value,16)
+    $Boot.pointerStartupScreenshot = Join-Path (Split-Path $Boot.serialPath) 'pointer-startup.ppm'
+    $Boot.pointerStartupScreenshotSha256 = Capture-C166GuestScreen $Boot $Boot.pointerStartupScreenshot
+    # ps2mouse::init places the cursor at the framebuffer center on every
+    # fresh guest boot. Keep that exact screen-space origin for subsequent
+    # QMP relative moves; input callbacks can be absent while a native window
+    # is foreground, so a managed C138 callback is not a cursor calibration.
+    $script:c166Cursor = [pscustomobject]@{
+        X = [int]($script:c166ScreenWidth/2)
+        Y = [int]($script:c166ScreenHeight/2)
+    }
+}
+
+function Move-C166Pointer([int]$X, [int]$Y, [object]$Boot) {
+    if (-not $script:c166Cursor) { throw 'C166 QMP pointer is not calibrated.' }
+    if ($X -eq $script:c166Cursor.X -and $Y -eq $script:c166Cursor.Y) { return }
+    Send-C166QmpEvents ([int]$Boot.qmpPort) `
+        (New-C166RelativeMove ($X-$script:c166Cursor.X) ($Y-$script:c166Cursor.Y)) `
+        $Boot.qmpLogPath 80
+    $script:c166Cursor = [pscustomobject]@{X=$X;Y=$Y}
+}
+
+function Click-C166Screen([int]$X, [int]$Y, [object]$Boot) {
+    Move-C166Pointer $X $Y $Boot
+    Send-C166QmpEvents ([int]$Boot.qmpPort) @((New-C166Button 'left' $true),(New-C166Button 'left' $false)) $Boot.qmpLogPath 300
+}
+
+function Press-C166Key([string]$Code, [object]$Boot) {
+    Send-C166QmpEvents ([int]$Boot.qmpPort) @((New-C166Key $Code $true),(New-C166Key $Code $false)) $Boot.qmpLogPath 110
+}
+
+function Capture-C166GuestScreen([object]$Boot, [string]$Path) {
+    $null = Send-C166QmpCommand ([int]$Boot.qmpPort) 'screendump' ([ordered]@{filename=[System.IO.Path]::GetFullPath($Path)}) $Boot.qmpLogPath
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "QMP did not create guest screen evidence $Path." }
+    return Get-Sha256 $Path
+}
+
+function Get-C166AssociationDiskState([string]$EspPath) {
+    $slots = @()
+    foreach ($item in @(@{name='A';file='gxas0.bin'},@{name='B';file='gxas1.bin'})) {
+        $path = Join-Path $EspPath $item.file
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            $slots += [ordered]@{slot=$item.name;path=$path;present=$false;sizeBytes=0;sha256=$null;generation=$null;recordCount=$null;override=$null;applicationId=$null}
+            continue
+        }
+        $bytes = [System.IO.File]::ReadAllBytes($path)
+        if ($bytes.Length -ne 136) { throw "C166 $($item.name) slot image has unexpected size $($bytes.Length)." }
+        $records = [BitConverter]::ToUInt16($bytes,6)
+        $persistedOverride = if ($records -eq 0) { 'NoOverride' } else {
+            switch ([BitConverter]::ToUInt32($bytes,32)) { 1 {'ApplicationOverride'} 2 {'Disabled'} default {'Invalid'} }
+        }
+        $applicationId = if ($records -gt 0) {
+            ([System.Text.Encoding]::ASCII.GetString($bytes,36,96)).TrimEnd([char]0)
+        } else { '' }
+        $slots += [ordered]@{
+            slot=$item.name;path=$path;present=$true;sizeBytes=$bytes.Length
+            sha256=(Get-Sha256 $path);generation=[BitConverter]::ToUInt64($bytes,8)
+            recordCount=$records;override=$persistedOverride;applicationId=$applicationId
+        }
+    }
+    return ,$slots
+}
+
+function Get-C166SlotIdentity([object[]]$Slots) {
+    return (($Slots | ForEach-Object { '{0}:{1}:{2}:{3}' -f $_.slot,$_.generation,$_.override,$_.sha256 }) -join '|')
+}
+
+function Open-C166AllProgramsItem([int]$Index, [object]$Boot) {
+    $screenHeight = [int]$script:c166ScreenHeight
+    # The rendered menu height follows the full s_startMenuApps table, which
+    # includes unpinned recent entries as well as the 18 pinned/control entries.
+    # C166's C158-C163 composition has 22 rows; All Programs itself has 21.
+    $menuCount = 22
+    $menuHeight = 30 + $menuCount * 22 + 36
+    $menuY = [Math]::Max(0,($screenHeight-40)-$menuHeight)
+    $contentY = $menuY + 31
+    $footerY = $menuY + 30 + $menuCount * 22
+    Click-C166Screen 50 ($screenHeight-20) $Boot
+    Start-Sleep -Milliseconds 250
+    $Boot.startMenuOpenScreenshot = Join-Path (Split-Path $Boot.serialPath) 'start-menu-open.ppm'
+    $Boot.startMenuOpenScreenshotSha256 = Capture-C166GuestScreen $Boot $Boot.startMenuOpenScreenshot
+    Click-C166Screen 70 ($footerY+18) $Boot
+    Start-Sleep -Milliseconds 250
+    $Boot.allProgramsScreenshot = Join-Path (Split-Path $Boot.serialPath) 'start-menu-all-programs.ppm'
+    $Boot.allProgramsScreenshotSha256 = Capture-C166GuestScreen $Boot $Boot.allProgramsScreenshot
+    $programY = $contentY + $Index*22 + 11
+    Click-C166Screen 115 $programY $Boot
+}
+
+function Launch-C166ManagedFileExplorer([object]$Boot) {
+    $start = (Get-C166Serial $Boot.serialPath).Length
+    Open-C166AllProgramsItem 15 $Boot
+    Start-Sleep -Milliseconds 500
+    $Boot.managedExplorerLaunchScreenshot = Join-Path (Split-Path $Boot.serialPath) 'managed-explorer-launch-attempt.ppm'
+    $Boot.managedExplorerLaunchScreenshotSha256 = Capture-C166GuestScreen $Boot $Boot.managedExplorerLaunchScreenshot
+    [void](Wait-C166Serial $Boot.serialPath '^\[APPMODEL-MANAGED-LAUNCH\] source=StartMenu appId=com\.guidexos\.apps\.managed\.fileexplorer selector=00000008 image=/system/apps/GXOSAPP\.ELF metadata=valid' $start 40)
+    $Boot.managedExplorerAfterLaunchScreenshot = Join-Path (Split-Path $Boot.serialPath) 'managed-explorer-after-launch.ppm'
+    $Boot.managedExplorerAfterLaunchScreenshotSha256 = Capture-C166GuestScreen $Boot $Boot.managedExplorerAfterLaunchScreenshot
+    try {
+        [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C163-EXPLORER id=com\.guidexos\.apps\.managed\.fileexplorer sel=8 path=/system/apps n=\d+ cap=64 ctl=5 abi=3/120 ro=1 result=PASS' $start 60)
+    } catch {
+        $Boot.managedExplorerLaunchTimeoutScreenshot = Join-Path (Split-Path $Boot.serialPath) 'managed-explorer-launch-timeout.ppm'
+        $Boot.managedExplorerLaunchTimeoutScreenshotSha256 = Capture-C166GuestScreen $Boot $Boot.managedExplorerLaunchTimeoutScreenshot
+        throw
+    }
+}
+
+function Get-C166ManagedExplorerOrigin {
+    return [pscustomobject]@{
+        X = [Math]::Max(0,[int](($script:c166ScreenWidth-800)/2))
+        Y = [Math]::Max(0,[int](($script:c166ScreenHeight-390)/2))
+    }
+}
+
+function Close-C166ManagedNotesStartupWindow([object]$Boot) {
+    # The proof guest starts with a clean Managed Notes window. Close it through
+    # its normal title-bar control so document activation can reuse its managed
+    # surface slot after File Explorer is opened.
+    $originX = [Math]::Max(0,[int](($script:c166ScreenWidth-600)/2))
+    $originY = [Math]::Max(0,[int](($script:c166ScreenHeight-360)/2))
+    Click-C166Screen ($originX+586) ($originY+12) $Boot
+    Start-Sleep -Milliseconds 250
+    [void](Wait-C166Serial $Boot.serialPath `
+        'C150-SURFACE.*destroy appId=com\.guidexos\.apps\.managed\.notes' 0 10)
+    [void](Wait-C166Serial $Boot.serialPath 'C111-SURFACE.*action=close result=PASS' 0 10)
+}
+
+function Click-C166ManagedExplorerRow([int]$Row, [object]$Boot) {
+    $origin = Get-C166ManagedExplorerOrigin
+    Click-C166Screen ($origin.X+40) ($origin.Y+24+70+$Row*18+9) $Boot
+}
+
+function Click-C166ManagedExplorerButton([string]$Name, [object]$Boot) {
+    $origin = Get-C166ManagedExplorerOrigin
+    $x = switch ($Name) {'Up' {66} 'Open' {170} 'Refresh' {284} 'Close' {398} default {throw "Unknown Managed File Explorer button '$Name'."}}
+    Click-C166Screen ($origin.X+$x) ($origin.Y+24+340) $Boot
+}
+
+function Select-C166ManagedExplorerEntry([string]$Path, [string]$Name,
+    [string]$Type, [object]$Boot) {
+    $beforeAll = Get-C166Serial $Boot.serialPath
+    $after = $beforeAll.Length
+    for ($row=0; $row -lt 20; $row++) {
+        Click-C166ManagedExplorerRow $row $Boot
+        Start-Sleep -Milliseconds 200
+        $text = Get-C166Serial $Boot.serialPath
+        $tail = if ($after -le $text.Length) {$text.Substring($after)} else {''}
+        $pattern = '(?m)^\[C102-MANAGED-OUTPUT\] C163-STATE ev=input k=\d+ path=' +
+            [regex]::Escape($Path) + ' n=\d+ sel=' + [regex]::Escape($Name) +
+            ' type=' + [regex]::Escape($Type) + ' size=[^ ]+ view=\d+ status='
+        if ($tail -match $pattern) { return }
+    }
+    throw "Managed File Explorer could not select '$Name' in '$Path'."
+}
+
+function Navigate-C166ManagedExplorerToHello([object]$Boot) {
+    Select-C166ManagedExplorerEntry '/system/apps' 'C164' 'Directory' $Boot
+    $pathStart = (Get-C166Serial $Boot.serialPath).Length
+    Click-C166ManagedExplorerButton 'Open' $Boot
+    [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C163-STATE ev=input k=\d+ path=/system/apps/C164 ' $pathStart 15)
+    Select-C166ManagedExplorerEntry '/system/apps/C164' 'hello.txt' 'File' $Boot
+    if ((Get-C166Serial $Boot.serialPath) -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C163-STATE ev=input k=\d+ path=/system/apps/C164 n=\d+ sel=hello\.txt type=File size=15 view=\d+ status=File selected\r?$') {
+        throw 'Managed File Explorer did not report the exact 15-byte hello.txt VFS fixture.'
+    }
+}
+
+function Invoke-C166ManagedExplorerOpen([object]$Boot, [string]$Mode,
+    [string]$ScreenEvidencePath) {
+    $notesLaunchesBefore = [regex]::Matches((Get-C166Serial $Boot.serialPath),
+        '(?m)^\[C150-APP-LAUNCH\] id=com\.guidexos\.apps\.managed\.notes ').Count
+    Launch-C166ManagedFileExplorer $Boot
+    Navigate-C166ManagedExplorerToHello $Boot
+    $openStart = (Get-C166Serial $Boot.serialPath).Length
+    Click-C166ManagedExplorerButton 'Open' $Boot
+    if ($Mode -eq 'Disabled') {
+        [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C164-FILE-ACTIVATION path=/system/apps/C164/hello\.txt result=unsupported source-retained=true selection=preserved\r?$' $openStart 20)
+        $sha = Capture-C166GuestScreen $Boot $ScreenEvidencePath
+        $notesLaunchesAfter = [regex]::Matches((Get-C166Serial $Boot.serialPath),
+            '(?m)^\[C150-APP-LAUNCH\] id=com\.guidexos\.apps\.managed\.notes ').Count
+        if ($notesLaunchesAfter -ne $notesLaunchesBefore) { throw 'Disabled Managed File Explorer Open launched Managed Notes.' }
+        return [ordered]@{workflow='Managed File Explorer';path='/system/apps/C164/hello.txt';result='No associated handler';notesLaunchesBefore=$notesLaunchesBefore;notesLaunchesAfter=$notesLaunchesAfter;screenshot=$ScreenEvidencePath;screenshotSha256=$sha}
+    }
+    [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C164-NOTES-ACT path=/system/apps/C164/hello\.txt bytes=15 clean=1 undo=0 redo=0 caret=0 anchor=0 view=0 result=PASS\r?$' $openStart 90)
+    [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C164-NOTES-CONTENT exact=true source=VFS result=PASS\r?$' $openStart 20)
+    [void](Wait-C166Serial $Boot.serialPath '^\[C164-ACTIVATION\] source=ManagedFileExplorer instance=[0-9A-Fa-f]+ target=com\.guidexos\.apps\.managed\.notes path=/system/apps/C164/hello\.txt fresh=true source-closed=true result=PASS\r?$' $openStart 90)
+    $sha = Capture-C166GuestScreen $Boot $ScreenEvidencePath
+    return [ordered]@{workflow='Managed File Explorer';path='/system/apps/C164/hello.txt';content='hello from C164';contentBytes=15;clean=$true;undo=0;redo=0;activation='PASS';screenshot=$ScreenEvidencePath;screenshotSha256=$sha}
+}
+
+function Launch-C166NativeFileExplorer([object]$Boot) {
+    $before = (Get-C166Serial $Boot.serialPath).Length
+    Open-C166AllProgramsItem 5 $Boot
+    Start-Sleep -Milliseconds 800
+    $Boot.nativeExplorerLaunchScreenshot = Join-Path (Split-Path $Boot.serialPath) 'native-explorer-launch.ppm'
+    $Boot.nativeExplorerLaunchScreenshotSha256 = Capture-C166GuestScreen $Boot $Boot.nativeExplorerLaunchScreenshot
+    $text = Get-C166Serial $Boot.serialPath
+    if ($text.Substring([Math]::Min($before,$text.Length)) -match 'Managed application launch rejected|Not available in bare-metal mode') {
+        throw 'Native File Explorer launch was rejected or unavailable.'
+    }
+}
+
+function Navigate-C166NativeExplorerToHello([object]$Boot) {
+    # The native Files window begins at /. Use its visible /system mount in
+    # the Navigation pane, then the sorted VFS directory rows and keyboard
+    # Open action. No host-side resolver or direct Notes launch is involved.
+    $windowX = 80; $windowY = 45
+    $mountStart = (Get-C166Serial $Boot.serialPath).Length
+    # The mount list includes both / (row 0) and /system (row 1).
+    Click-C166Screen ($windowX+40) ($windowY+152) $Boot
+    Start-Sleep -Milliseconds 250
+    # /system contains the apps directory as its first sorted directory.
+    Press-C166Key 'home' $Boot
+    Press-C166Key 'ret' $Boot
+    Start-Sleep -Milliseconds 250
+    # /system/apps directories sort as C151, C152, C155, C164 in this fixture pack.
+    Press-C166Key 'home' $Boot
+    for ($i=0; $i -lt 3; $i++) { Press-C166Key 'down' $Boot }
+    Press-C166Key 'ret' $Boot
+    Start-Sleep -Milliseconds 250
+    # Hidden dotfiles are omitted; the visible files begin empty.txt, hello.txt.
+    Press-C166Key 'home' $Boot
+    Press-C166Key 'down' $Boot
+    Start-Sleep -Milliseconds 150
+    $Boot['nativeNavigationStart'] = $mountStart
+}
+
+function Invoke-C166NativeExplorerOpen([object]$Boot, [string]$Mode,
+    [string]$BeforeOpenScreenshot, [string]$AfterOpenScreenshot) {
+    $notesLaunchesBefore = [regex]::Matches((Get-C166Serial $Boot.serialPath),
+        '(?m)^\[C150-APP-LAUNCH\] id=com\.guidexos\.apps\.managed\.notes ').Count
+    Launch-C166NativeFileExplorer $Boot
+    Navigate-C166NativeExplorerToHello $Boot
+    # The native Files control handles mouse row selection reliably, while
+    # its keyboard focus remains on the first file after the directory change.
+    # Click the visible hello.txt row before capturing/opening the selection.
+    Click-C166Screen 300 181 $Boot
+    Start-Sleep -Milliseconds 150
+    $beforeSha = Capture-C166GuestScreen $Boot $BeforeOpenScreenshot
+    $openStart = (Get-C166Serial $Boot.serialPath).Length
+    Press-C166Key 'ret' $Boot
+    Start-Sleep -Milliseconds 1000
+    $afterSha = Capture-C166GuestScreen $Boot $AfterOpenScreenshot
+    $notesLaunchesAfter = [regex]::Matches((Get-C166Serial $Boot.serialPath),
+        '(?m)^\[C150-APP-LAUNCH\] id=com\.guidexos\.apps\.managed\.notes ').Count
+    if ($Mode -eq 'Disabled') {
+        if ($notesLaunchesAfter -ne $notesLaunchesBefore) { throw 'Disabled native File Explorer Open launched Managed Notes.' }
+        return [ordered]@{workflow='Native File Explorer';path='/system/apps/C164/hello.txt';result='No associated handler';notesLaunchesBefore=$notesLaunchesBefore;notesLaunchesAfter=$notesLaunchesAfter;selectedScreenshot=$BeforeOpenScreenshot;selectedScreenshotSha256=$beforeSha;openScreenshot=$AfterOpenScreenshot;openScreenshotSha256=$afterSha;uiStatus='captured for visual confirmation'}
+    }
+    [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C164-NOTES-ACT path=/system/apps/C164/hello\.txt bytes=15 clean=1 undo=0 redo=0 caret=0 anchor=0 view=0 result=PASS\r?$' $openStart 90)
+    [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C164-NOTES-CONTENT exact=true source=VFS result=PASS\r?$' $openStart 20)
+    if ($notesLaunchesAfter -le $notesLaunchesBefore) { throw 'Native File Explorer did not launch Managed Notes with a document activation.' }
+    return [ordered]@{workflow='Native File Explorer';path='/system/apps/C164/hello.txt';content='hello from C164';contentBytes=15;clean=$true;undo=0;redo=0;notesLaunchesBefore=$notesLaunchesBefore;notesLaunchesAfter=$notesLaunchesAfter;activation='PASS';openedScreenshot=$AfterOpenScreenshot;screenshotSha256=$afterSha}
+}
+
+function New-C166SettingsRecord([string]$Path) {
+    [byte[]]$bytes = [byte[]]::new(26)
+    [byte[]]$magic = [System.Text.Encoding]::ASCII.GetBytes('GXSC')
+    [Array]::Copy($magic,0,$bytes,0,4)
+    $bytes[4]=2; $bytes[6]=10
+    $bytes[12]=0; $bytes[13]=1; $bytes[14]=0; $bytes[15]=1
+    $bytes[16]=1; $bytes[17]=1; $bytes[18]=1; $bytes[19]=0
+    $bytes[20]=0; $bytes[21]=5
+    [long]$crc=4294967295L
+    foreach ($value in $bytes[0..21]) {
+        $crc=($crc -bxor [long]$value) -band 4294967295L
+        for ($bit=0; $bit -lt 8; $bit++) {
+            if (($crc -band 1) -ne 0) { $crc=(($crc -shr 1) -bxor 3988292384L) -band 4294967295L }
+            else { $crc=($crc -shr 1) -band 4294967295L }
+        }
+    }
+    $crc=($crc -bxor 4294967295L) -band 4294967295L
+    for ($index=0; $index -lt 4; $index++) { $bytes[22+$index]=[byte](($crc -shr ($index*8)) -band 255) }
+    [System.IO.File]::WriteAllBytes($Path,$bytes)
+}
+
+function Get-C166TaskManagerOrigin {
+    return [pscustomobject]@{
+        X=[Math]::Max(0,[int](($script:c166ScreenWidth-800)/2))
+        Y=[Math]::Max(0,[int](($script:c166ScreenHeight-370)/2))
+    }
+}
+
+function Close-C166TaskManager([object]$Boot) {
+    $origin=Get-C166TaskManagerOrigin
+    $start=(Get-C166Serial $Boot.serialPath).Length
+    Click-C166Screen ($origin.X+390) ($origin.Y+24+290) $Boot
+    [void](Wait-C166Serial $Boot.serialPath '^\[C161-TM-CLOSE-DISPATCH\] selector=7 controls=0 result=PASS' $start 20)
+    [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C161-TM-CLOSE controls=0 selection=none result=PASS' $start 15)
+}
+
+function Invoke-C166TaskManagerSnapshot([object]$Boot) {
+    $start=(Get-C166Serial $Boot.serialPath).Length
+    Open-C166AllProgramsItem 14 $Boot
+    [void](Wait-C166Serial $Boot.serialPath '^\[APPMODEL-MANAGED-LAUNCH\] source=StartMenu appId=com\.guidexos\.apps\.managed\.taskmanager selector=00000007 image=/system/apps/GXOSAPP\.ELF metadata=valid' $start 35)
+    $launch=Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C161-TM-LAUNCH id=7 reg=\d+ ctr=4 cap=4 max=20 snap=\d+ n=\d+ self=\d+ active=1 result=PASS' $start 35
+    $origin=Get-C166TaskManagerOrigin
+    Click-C166Screen ($origin.X+30) ($origin.Y+24+64) $Boot
+    $refreshStart=(Get-C166Serial $Boot.serialPath).Length
+    Send-C166QmpEvents ([int]$Boot.qmpPort) `
+        @((New-C166Key 'ctrl' $true),(New-C166Key 'r' $true),
+          (New-C166Key 'r' $false),(New-C166Key 'ctrl' $false)) $Boot.qmpLogPath 60
+    $refresh=Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C161-TM-R s=Ctrl\+R st=\d+ n=(\d+) sel=([^ ]+) v=\d+ ap=true self=(\d+) active=1 result=PASS' $refreshStart 20
+    return [ordered]@{launch=$launch.Match.Value;refresh=$refresh.Match.Value;rowCount=[int]$refresh.Match.Groups[1].Value;active=$true}
+}
+
+function Close-C166NativeExplorerThroughTaskManager([object]$Boot,[int]$RowCount) {
+    if ($RowCount -le 0) { throw 'C166 Task Manager snapshot contained no rows.' }
+    $origin=Get-C166TaskManagerOrigin
+    Click-C166Screen ($origin.X+30) ($origin.Y+24+64) $Boot
+    $selectedIdentity=$null
+    for ($row=$RowCount-1; $row -ge 0; $row--) {
+        $before=(Get-C166Serial $Boot.serialPath).Length
+        if ($row -eq $RowCount-1) { Press-C166Key 'end' $Boot }
+        else { Press-C166Key 'up' $Boot }
+        $selection=Wait-C166Serial $Boot.serialPath ('^\[C102-MANAGED-OUTPUT\] C161-TM-SELECT source=keyboard row={0} identity=(\d+):(\d+) on=[01] result=PASS' -f $row) $before 12
+        if ($selection.Match.Groups[1].Value -ne '1') { continue }
+        $identity=$selection.Match.Groups[2].Value
+        $hex=([uint64]::Parse($identity,[Globalization.CultureInfo]::InvariantCulture)).ToString('X16')
+        $full=Get-C166Serial $Boot.serialPath
+        if ($full -match ('(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-ID 1:{0}=gxos\.builtin\.fileexplorer\r?$' -f $hex)) {
+            [void](Wait-C166Serial $Boot.serialPath ('^\[C102-MANAGED-OUTPUT\] C162-TM-CLOSE-ELIGIBILITY identity=1:{0} enabled=true result=PASS' -f [regex]::Escape($identity)) $before 10)
+            $selectedIdentity=$identity
+            break
+        }
+    }
+    if (-not $selectedIdentity) { throw 'C166 Task Manager snapshot did not identify native File Explorer for a safe close.' }
+    $origin=Get-C166TaskManagerOrigin
+    $closeStart=(Get-C166Serial $Boot.serialPath).Length
+    Click-C166Screen ($origin.X+234) ($origin.Y+24+290) $Boot
+    [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C162-TM-CONFIRM open=true identity=captured modal=true result=PASS' $closeStart 20)
+    Press-C166Key 'ret' $Boot
+    [void](Wait-C166Serial $Boot.serialPath ('^\[C102-MANAGED-OUTPUT\] C162-TM-CLOSE identity=1:{0} result=0 fresh=true remains=false result=PASS' -f [regex]::Escape($selectedIdentity)) $closeStart 30)
+    return [ordered]@{target='gxos.builtin.fileexplorer';identityType=1;identity=$selectedIdentity;close='PASS'}
+}
+
+function Invoke-C166OrdinaryBoot([int]$Number,[string]$Kernel,[string]$Ramdisk,
+    [string]$SettingsRecord,[string]$Qemu,[string]$Ovmf,[string]$Bootloader,
+    [string]$EvidenceRoot) {
+    $root=Join-Path $EvidenceRoot ("ordinary-boot-{0:D2}" -f $Number)
+    $esp=Join-Path $root 'ESP'
+    New-Item -ItemType Directory -Force -Path $root,$esp | Out-Null
+    Copy-Item -LiteralPath $SettingsRecord -Destination (Join-Path $esp 'GXSETT.BIN') -Force
+    $boot=Invoke-ProofQemuBoot ("C166-Ordinary-{0}" -f $Number) $Ramdisk $esp $Bootloader $Kernel $Qemu $Ovmf `
+        (Join-Path $root 'qemu') -HoldAfterPass -ReadyPattern '(?m)^\[desktop\] bare-metal desktop icon init completed'
+    $integration=$null
+    try {
+        [void](Wait-C166Serial $boot.serialPath '^\[NATIVEAOT-PRODUCTION-LAUNCH\] applicationId=com\.guidexos\.apps\.managed\.notes recordId=com\.guidexos\.apps\.managed\.notes image=/system/apps/GXOSAPP\.ELF selector=00000004' 0 90)
+        [void](Wait-C166Serial $boot.serialPath '^\[C102-MANAGED-OUTPUT\] C156-MODIFIER-DECODE cases=10 .*result=PASS' 0 120)
+        [void](Wait-C166Serial $boot.serialPath '^\[C102-MANAGED-OUTPUT\] C156-SHORTCUT-ROUTING cases=15 .*result=PASS' 0 120)
+        if ($Number -eq 1) {
+            Initialize-C166GuestPointer $boot
+            Close-C166ManagedNotesStartupWindow $boot
+            $notes=Invoke-C166ManagedExplorerOpen $boot 'Default' (Join-Path $root 'managed-explorer-notes.ppm')
+            $integration=[ordered]@{managedFileExplorer=$notes;C164NotesActivation='PASS';path=$notes.path;content=$notes.content;cleanDocument=$notes.clean}
+        } elseif ($Number -eq 2) {
+            Initialize-C166GuestPointer $boot
+            $native=Invoke-C166NativeExplorerOpen $boot 'Default' `
+                (Join-Path $root 'native-explorer-selected.ppm') (Join-Path $root 'native-explorer-notes.ppm')
+            $snapshot=Invoke-C166TaskManagerSnapshot $boot
+            $nativeClose=Close-C166NativeExplorerThroughTaskManager $boot $snapshot.rowCount
+            Close-C166TaskManager $boot
+            $integration=[ordered]@{nativeFileExplorer=$native;taskManager=$snapshot;nativeFileExplorerClose=$nativeClose;taskManagerClose='PASS';C164NotesActivation='PASS'}
+        } elseif ($Number -eq 3) {
+            Initialize-C166GuestPointer $boot
+            Close-C166ManagedNotesStartupWindow $boot
+            $notes=Invoke-C166ManagedExplorerOpen $boot 'Default' (Join-Path $root 'managed-explorer-notes.ppm')
+            $calcStart=(Get-C166Serial $boot.serialPath).Length
+            Open-C166AllProgramsItem 11 $boot
+            [void](Wait-C166Serial $boot.serialPath '^\[APPMODEL-MANAGED-LAUNCH\] source=StartMenu appId=com\.guidexos\.apps\.managed\.calculator selector=00000006 image=/system/apps/GXOSAPP\.ELF metadata=valid' $calcStart 35)
+            [void](Wait-C166Serial $boot.serialPath '^\[C102-MANAGED-OUTPUT\] C158-CALC-LAUNCH id=managed-calculator selector=6 controls=18 capacity=18 focus=18 fresh=PASS result=PASS' $calcStart 35)
+            Press-C166Key '7' $boot
+            Send-C166QmpEvents ([int]$boot.qmpPort) `
+                @((New-C166Key 'shift' $true),(New-C166Key '8' $true),
+                  (New-C166Key '8' $false),(New-C166Key 'shift' $false)) $boot.qmpLogPath 90
+            Press-C166Key '8' $boot
+            Press-C166Key 'ret' $boot
+            [void](Wait-C166Serial $boot.serialPath '^\[C102-MANAGED-OUTPUT\] C158-CALC-STATE display=56 phase=3 commands=4 result=PASS' $calcStart 20)
+            $calcScreen=Capture-C166GuestScreen $boot (Join-Path $root 'calculator-56.ppm')
+            $calcCloseStart=(Get-C166Serial $boot.serialPath).Length
+            Send-C166QmpEvents ([int]$boot.qmpPort) `
+                @((New-C166Key 'alt' $true),(New-C166Key 'f4' $true),
+                  (New-C166Key 'f4' $false),(New-C166Key 'alt' $false)) $boot.qmpLogPath 90
+            [void](Wait-C166Serial $boot.serialPath '^\[C102-MANAGED-OUTPUT\] C158-CALC-CLOSE controls=0 active=none modal=none popup=none drag=none result=PASS' $calcCloseStart 30)
+            $snapshot=Invoke-C166TaskManagerSnapshot $boot
+            Close-C166TaskManager $boot
+            $notesFocusStart=(Get-C166Serial $boot.serialPath).Length
+            Open-C166AllProgramsItem 12 $boot
+            $notesFocus=Wait-C166Serial $boot.serialPath '^\[C162-MANAGED-FOCUS\] appId=com\.guidexos\.apps\.managed\.notes source=3 instance=[0-9A-Fa-f]{16} selector=00000004 existing=true result=PASS' $notesFocusStart 25
+            $origin=[pscustomobject]@{X=[Math]::Max(0,[int](($script:c166ScreenWidth-600)/2));Y=[Math]::Max(0,[int](($script:c166ScreenHeight-360)/2))}
+            $settingsStart=(Get-C166Serial $boot.serialPath).Length
+            Click-C166Screen ($origin.X+475) ($origin.Y+24+294) $boot
+            [void](Wait-C166Serial $boot.serialPath '^\[C150-SETTINGS-LAUNCH\] source=Notes path=AppModel result=PASS' $settingsStart 90)
+            [void](Wait-C166Serial $boot.serialPath '^(?:\[C102-MANAGED-OUTPUT\] )?C148-LOAD-META path=/system/apps/GXSETT\.BIN v=2 size=26 .*result=PASS' $settingsStart 60)
+            [void](Wait-C166Serial $boot.serialPath '^(?:\[C102-MANAGED-OUTPUT\] )?C145-FINAL viewport=valid registration=\d+ modal=none capture=none drag=none result=PASS' $settingsStart 120)
+            $settingsCloseStart=(Get-C166Serial $boot.serialPath).Length
+            Send-C166QmpEvents ([int]$boot.qmpPort) `
+                @((New-C166Key 'alt' $true),(New-C166Key 'f4' $true),
+                  (New-C166Key 'f4' $false),(New-C166Key 'alt' $false)) $boot.qmpLogPath 90
+            [void](Wait-C166Serial $boot.serialPath '^\[C150-SURFACE\] action=destroy appId=com\.guidexos\.apps\.managed\.settingscenter generation=[0-9A-Fa-f]+ window=[0-9A-Fa-f]+ reason=(?:close-or-replace|return)' $settingsCloseStart 25)
+            $settings=[ordered]@{launch='PASS';close='PASS';format='v2';loadMeta='PASS';ownership='modal=none capture=none drag=none';focusMarker=$notesFocus.Match.Value}
+            $integration=[ordered]@{managedFileExplorer=$notes;calculator=[ordered]@{display=56;screen=Join-Path $root 'calculator-56.ppm';screenSha256=$calcScreen};taskManager=$snapshot;settings=$settings;C164NotesActivation='PASS';C162NotesFocus=$true}
+        } else { throw "Unexpected C166 ordinary boot number $Number." }
+        $full=Get-C166Serial $boot.serialPath
+        if ($full -match '(?m)^PROOF-SCENARIO-|^\[C102-MANAGED-OUTPUT\] PROOF C166') {
+            throw "Clean ordinary boot $Number contains active PROOF1 output."
+        }
+        Stop-OwnedProofQemu $boot
+        $boot.serial=Get-C166Serial $boot.serialPath
+        $boot.serialSha256=Get-Sha256 $boot.serialPath
+        $boot.productionIntegration=$integration
+        $boot.status='PASS'
+        $boot.kernelSha256=Get-Sha256 (Join-Path $esp 'kernel.elf')
+        $boot.ramdiskSha256=Get-Sha256 (Join-Path $esp 'ramdisk.img')
+        $boot.associationSlots=Get-C166AssociationDiskState $esp
+        $boot.logPath=$boot.serialPath
+        $boot.serialSummary=[ordered]@{
+            modifierDecode=($boot.serial -match '(?m)^\[C102-MANAGED-OUTPUT\] C156-MODIFIER-DECODE cases=10 .*result=PASS')
+            shortcutRouting=($boot.serial -match '(?m)^\[C102-MANAGED-OUTPUT\] C156-SHORTCUT-ROUTING cases=15 .*result=PASS')
+            proof1OutputAbsent=($boot.serial -notmatch '(?m)^PROOF-SCENARIO-|^\[C102-MANAGED-OUTPUT\] PROOF C166')
+            containsFailure=($boot.serial -match '(?m)^\[C102-MANAGED-OUTPUT\] (?:C158|C161|C162|C163|C164|C145|C148)-[^\r\n]*result=FAIL')
+        }
+        $boot.pid=$boot.process.Id
+        $boot.process=$null
+        $boot.serial=$null
+        return $boot
+    } finally {
+        Stop-OwnedProofQemu $boot
+    }
+}
+
+function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
+    [string]$ProofCompositeHash,[string]$ProofKernelHash,[string]$ProofRamdiskHash,
+    [string[]]$Flags,[string]$Qemu,[string]$Ovmf,[string]$Bootloader,[string]$Make,[string]$Compiler) {
+    $acceptanceRoot=Join-Path $RepoRoot 'out\dotnet\c166a2-final-acceptance'
+    $proofManifestPath=Join-Path (Join-Path $EvidenceRoot 'proof1-guest-runs') 'proof1-manifest.json'
+    $hostManifestPath=Join-Path (Join-Path $acceptanceRoot 'host-validation') 'c166r9-host-manifest.json'
+    if (-not (Test-Path -LiteralPath $proofManifestPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $hostManifestPath -PathType Leaf)) {
+        throw 'C166 ordinary acceptance requires preserved C166A2 proof and fresh host validation manifests.'
+    }
+    $proofManifest=Get-Content -LiteralPath $proofManifestPath -Raw | ConvertFrom-Json
+    $hostManifest=Get-Content -LiteralPath $hostManifestPath -Raw | ConvertFrom-Json
+    if (-not $proofManifest.guestLaneExecuted -or
+        @($proofManifest.guestBoots).Count -ne 3 -or
+        @($proofManifest.successfulManagedMutations).Count -lt 25 -or
+        -not $hostManifest.hostValidationComplete) {
+        throw 'C166 ordinary acceptance prerequisites are not complete or passing.'
+    }
+    $qemuOwners=@(Get-CimInstance Win32_Process -Filter "Name = 'qemu-system-x86_64.exe'" |
+        ForEach-Object { [ordered]@{pid=$_.ProcessId;path=$_.ExecutablePath;commandLine=$_.CommandLine} })
+    if ($qemuOwners.Count -gt 0) {
+        $formatted=($qemuOwners | ForEach-Object { "pid=$($_.pid) exe=$($_.path) cmd=$($_.commandLine)" }) -join "`n"
+        throw "C166 ordinary boots are blocked by existing QEMU owner(s); none was terminated.`n$formatted"
+    }
+
+    $cleanRoot=Join-Path $EvidenceRoot 'clean-production-candidate'
+    $buildRoot=Join-Path $cleanRoot 'build'
+    $compositeRoot=Join-Path $buildRoot 'composite-c166-production'
+    $runtimeOutput=Join-Path $buildRoot 'runtime-pack'
+    $composite=Join-Path $compositeRoot 'artifacts\HostLogProof.elf'
+    $kernelCandidate=Join-Path $cleanRoot 'kernel.elf'
+    $ramdiskCandidate=Join-Path $cleanRoot 'ramdisk.img'
+    $settingsRecord=Join-Path $cleanRoot 'GXSETT.BIN'
+    New-Item -ItemType Directory -Force -Path $cleanRoot,$buildRoot | Out-Null
+    $dotnet=Resolve-Tool 'dotnet.exe' @('C:\Program Files\dotnet\dotnet.exe')
+    $python=Resolve-Tool 'python.exe' @(
+        'C:\Users\guideX\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe',
+        'C:\Python312\python.exe','C:\Python311\python.exe')
+    if (-not $dotnet -or -not $python -or -not $Make -or -not $Compiler) {
+        throw 'Clean C166 production candidate build tools are unavailable.'
+    }
+
+    $managedBuilder=Join-Path $RepoRoot 'scripts\dotnet\build-managed-hostlog-proof.ps1'
+    $managedLog=Join-Path $cleanRoot 'managed-composite-build.log'
+    $managedArgs=@('-ExecutionPolicy','Bypass','-File',$managedBuilder,
+        '-RepoRoot',$RepoRoot,'-OutputRoot',$compositeRoot,
+        '-RuntimePackRoot',(Join-Path $RepoRoot 'tools\dotnet\runtime-pack'),
+        '-RuntimePackOutputRoot',$runtimeOutput,'-UseGuideXosRuntimePack',
+        '-ProductionApplication','-PersistentCompositeLifecycle','-AllocationMode','Allocating',
+        '-ManagedProjectMode','C160Composite','-C155ManagedNotesSession',
+        '-C156ControlModifierShortcuts','-C157ManagedNotesNewDocument','-C158ManagedCalculator',
+        '-C160ApplicationSnapshotProof','-C161ManagedTaskManager','-C161TaskManagerProof',
+        '-C162ManagedTaskManagerClose','-C162TaskManagerCloseProof',
+        '-C163ManagedFileExplorer','-C163FileExplorerProof','-C164FileActivationProof',
+        '-HeapConfiguration','Primary8MiB','-PythonExe',$python)
+    & powershell.exe @managedArgs *> $managedLog
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $composite -PathType Leaf)) {
+        throw "Clean C166 production composite build failed; see $managedLog."
+    }
+    $cleanCompositeHash=Get-Sha256 $composite
+
+    $generator=Join-Path $RepoRoot 'scripts\generate-wallpaper-pack.ps1'
+    $generatorLog=Join-Path $cleanRoot 'production-ramdisk-build.log'
+    $generatorArgs=@('-ExecutionPolicy','Bypass','-File',$generator,
+        '-OutputDir',(Join-Path $cleanRoot 'wallpaper-pack'),'-OutputImage',$ramdiskCandidate,
+        '-C104AppAPath',$composite,'-ProductionCompositeApplicationPath',$composite,
+        '-C114ManagedDirectoryServices','-C117ManagedTextArea','-C118ManagedListBox',
+        '-C151ManagedOpenFileDialog','-C152ManagedNotesSaveWorkflow','-C155ManagedNotesSession',
+        '-C156ControlModifierShortcuts','-C157ManagedNotesNewDocument','-C164FileActivation')
+    & powershell.exe @generatorArgs *> $generatorLog
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ramdiskCandidate -PathType Leaf)) {
+        throw "Clean C166 production ramdisk build failed; see $generatorLog."
+    }
+    $cleanRamdiskHash=Get-Sha256 $ramdiskCandidate
+
+    $kernelPath=Join-Path $RepoRoot 'kernel\build\amd64\bin\kernel.elf'
+    $espKernel=Join-Path $RepoRoot 'ESP\kernel.elf'
+    $espRamdisk=Join-Path $RepoRoot 'ESP\ramdisk.img'
+    $protectedRoot=Join-Path $acceptanceRoot 'protected-media-before-c166a2'
+    $kernelBackup=Join-Path $protectedRoot 'kernel-build-kernel.elf'
+    $espKernelBackup=Join-Path $protectedRoot 'esp-kernel.elf'
+    $ramdiskBackup=Join-Path $protectedRoot 'esp-ramdisk.img'
+    foreach ($path in @($kernelBackup,$espKernelBackup,$ramdiskBackup,$kernelPath,$espKernel,$espRamdisk)) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Protected production media is missing: $path" }
+    }
+    $baselineKernelHash=Get-Sha256 $kernelBackup
+    $baselineEspKernelHash=Get-Sha256 $espKernelBackup
+    $baselineRamdiskHash=Get-Sha256 $ramdiskBackup
+    if ((Get-Sha256 $kernelPath) -ne $baselineKernelHash -or
+        (Get-Sha256 $espKernel) -ne $baselineEspKernelHash -or
+        (Get-Sha256 $espRamdisk) -ne $baselineRamdiskHash) {
+        throw 'Protected production artifacts changed since byte-exact C166A2 backup; leaving them untouched.'
+    }
+    $preInstallSlots=Get-C166AssociationDiskState (Join-Path $RepoRoot 'ESP')
+    if (@($preInstallSlots | Where-Object { $_.present }).Count -gt 0) {
+        throw 'Protected production ESP unexpectedly contains association overrides; refusing to replace production media.'
+    }
+
+    $cleanFlags=@(($Flags) | Where-Object {
+        $_ -ne '-DGUIDEXOS_PROOF_CONTROL' -and
+        $_ -ne '-DGXOS_NATIVEAOT_C166_FILE_ASSOCIATION_PROOF'
+    })
+    $kernelLog=Join-Path $cleanRoot 'production-kernel-build.log'
+    $kernelArgs=@('-C',(Join-Path $RepoRoot 'kernel'),'ARCH=amd64',
+        "EXTRA_CFLAGS=$($cleanFlags -join ' ')",'-B')
+    $priorErrorActionPreference=$ErrorActionPreference
+    try {
+        $ErrorActionPreference='Continue'
+        & $Make @kernelArgs *> $kernelLog
+        $kernelBuildExitCode=$LASTEXITCODE
+    } finally {
+        $ErrorActionPreference=$priorErrorActionPreference
+    }
+    if ($kernelBuildExitCode -ne 0 -or -not (Test-Path -LiteralPath $kernelPath -PathType Leaf)) {
+        if ((Get-Sha256 $kernelPath) -eq $baselineKernelHash) {
+            throw "Clean C166 production kernel link failed without changing the protected canonical kernel; see $kernelLog."
+        }
+        throw "Clean C166 production kernel link failed after changing the canonical build output; protected bytes remain in $kernelBackup, and were not restored over a possibly newer file. See $kernelLog."
+    }
+    Copy-Item -LiteralPath $kernelPath -Destination $kernelCandidate -Force
+    $cleanKernelHash=Get-Sha256 $kernelCandidate
+    if ((Get-Sha256 $kernelPath) -ne $cleanKernelHash) { throw 'Clean kernel candidate copy does not match the linked output.' }
+    Copy-Item -LiteralPath $kernelBackup -Destination $kernelPath -Force
+    if ((Get-Sha256 $kernelPath) -ne $baselineKernelHash) { throw 'Protected canonical kernel restoration failed after candidate build.' }
+
+    $scanPaths=@($composite,$kernelCandidate,$ramdiskCandidate)
+    $forbidden=@('GUIDEXOS_PROOF_CONTROL','PROOF-SCENARIO-PASS','PROOF-SCENARIO-FAIL','PROOF C166','proof1.bin','GXPF')
+    $scanResults=@()
+    foreach ($path in $scanPaths) {
+        $text=[System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($path))
+        foreach ($needle in $forbidden) {
+            if ($text.IndexOf($needle,[StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                throw "Clean production candidate contains prohibited PROOF1 string '$needle' in $path."
+            }
+        }
+        $scanResults += [ordered]@{path=$path;sha256=Get-Sha256 $path;forbiddenProof1Strings='absent'}
+    }
+    New-C166SettingsRecord $settingsRecord
+    $settingsHash=Get-Sha256 $settingsRecord
+
+    $ordinaryRunId=[DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0,8)
+    $ordinaryRoot=Join-Path (Join-Path $acceptanceRoot 'ordinary-boots') "ordinary-run-$ordinaryRunId"
+    $ordinary=@()
+    for ($number=1; $number -le 3; $number++) {
+        if (Get-CimInstance Win32_Process -Filter "Name = 'qemu-system-x86_64.exe'") {
+            throw "A QEMU owner appeared before C166 ordinary boot $number; no process was terminated."
+        }
+        $ordinary += Invoke-C166OrdinaryBoot $number $kernelCandidate $ramdiskCandidate `
+            $settingsRecord $Qemu $Ovmf $Bootloader $ordinaryRoot
+    }
+    if ($ordinary.Count -ne 3 -or @($ordinary | Where-Object status -ne 'PASS').Count -ne 0) {
+        throw 'C166 ordinary production boot results were not 3/3 PASS.'
+    }
+    foreach ($boot in $ordinary) {
+        if ($boot.kernelSha256 -ne $cleanKernelHash -or $boot.ramdiskSha256 -ne $cleanRamdiskHash) {
+            throw "C166 ordinary boot $($boot.stage) did not use the exact clean candidate artifacts."
+        }
+    }
+    if (@($ordinary[0].associationSlots | Where-Object { $_.present }).Count -gt 0 -or
+        @($ordinary[1].associationSlots | Where-Object { $_.present }).Count -gt 0 -or
+        @($ordinary[2].associationSlots | Where-Object { $_.present }).Count -gt 0) {
+        throw 'A clean ordinary C166 guest created a persistent association override unexpectedly.'
+    }
+
+    # All clean candidate gates have passed. Install the verified kernel and
+    # ramdisk only now; the previous production hashes remain recoverable.
+    if ((Get-Sha256 $kernelPath) -ne $baselineKernelHash -or
+        (Get-Sha256 $espKernel) -ne $baselineEspKernelHash -or
+        (Get-Sha256 $espRamdisk) -ne $baselineRamdiskHash) {
+        throw 'Protected media changed after ordinary validation; preserving the newer bytes instead of installing.'
+    }
+    try {
+        Copy-Item -LiteralPath $kernelCandidate -Destination $kernelPath -Force
+        Copy-Item -LiteralPath $kernelCandidate -Destination $espKernel -Force
+        Copy-Item -LiteralPath $ramdiskCandidate -Destination $espRamdisk -Force
+        if ((Get-Sha256 $kernelPath) -ne $cleanKernelHash -or
+            (Get-Sha256 $espKernel) -ne $cleanKernelHash -or
+            (Get-Sha256 $espRamdisk) -ne $cleanRamdiskHash) {
+            throw 'Installed C166 clean candidate hashes do not match the validated candidate.'
+        }
+    } catch {
+        if ((Get-Sha256 $kernelPath) -eq $cleanKernelHash) { Copy-Item -LiteralPath $kernelBackup -Destination $kernelPath -Force }
+        elseif ((Get-Sha256 $kernelPath) -ne $baselineKernelHash) { throw 'Canonical kernel changed unexpectedly during failed install; preserved bytes need review.' }
+        if ((Get-Sha256 $espKernel) -eq $cleanKernelHash) { Copy-Item -LiteralPath $espKernelBackup -Destination $espKernel -Force }
+        elseif ((Get-Sha256 $espKernel) -ne $baselineEspKernelHash) { throw 'ESP kernel changed unexpectedly during failed install; preserved bytes need review.' }
+        if ((Get-Sha256 $espRamdisk) -eq $cleanRamdiskHash) { Copy-Item -LiteralPath $ramdiskBackup -Destination $espRamdisk -Force }
+        elseif ((Get-Sha256 $espRamdisk) -ne $baselineRamdiskHash) { throw 'ESP ramdisk changed unexpectedly during failed install; preserved bytes need review.' }
+        throw
+    }
+    $finalSlots=Get-C166AssociationDiskState (Join-Path $RepoRoot 'ESP')
+    if (@($finalSlots | Where-Object { $_.present }).Count -gt 0) {
+        throw 'Installed clean production ESP contains association override slots.'
+    }
+    $qemuAfter=@(Get-CimInstance Win32_Process -Filter "Name = 'qemu-system-x86_64.exe'" |
+        ForEach-Object { [ordered]@{pid=$_.ProcessId;path=$_.ExecutablePath;commandLine=$_.CommandLine} })
+    $runnerQemuPids=@($ordinary | ForEach-Object { [int]$_.pid })
+    $runnerQemuAfter=@($qemuAfter | Where-Object { $runnerQemuPids -contains [int]$_.pid })
+    if ($runnerQemuAfter.Count -gt 0) { throw 'A runner-owned QEMU process remained after ordinary acceptance.' }
+
+    $manifest=[ordered]@{
+        phase='C166A2';outcome='A';c166Accepted=$true;sourceHead=$head;sourceBranch='v1.1_DOTNET_SUPPORT'
+        preservedC166AEvidence='out/dotnet/proof1/guest-run-20261010-183857-ee661a2c and C166A accepted manifests retained'
+        hostValidation=[ordered]@{nativeCases=$hostManifest.nativeCases;managedCases=$hostManifest.managedCases;dualSlotCases=$hostManifest.dualSlotCaseCount;partialWriteCases=$hostManifest.partialWriteCases;stressTransactions=$hostManifest.stressTransactions;status='PASS';manifest=$hostManifestPath}
+        proofProducts=[ordered]@{compositeSha256=$ProofCompositeHash;kernelSha256=$ProofKernelHash;ramdiskSha256=$ProofRamdiskHash;scenarioMedia=$proofManifest.scenarioMedia}
+        proofManifest=$proofManifestPath;proofBoots=$proofManifest.guestBoots;crossBootState=$proofManifest.crossBootStatePath
+        boot2DirectDiagnostics=$proofManifest.boot2DisabledExplorerParity.observedByProof
+        boot3DirectRebootComparison=$proofManifest.boot3ReloadedDiagnostic
+        successfulManagedMutations=$proofManifest.successfulManagedMutations
+        managedMutationCount=@($proofManifest.successfulManagedMutations).Count
+        mutationSummary=$proofManifest.mutationSummary
+        disabledExplorerParity=$proofManifest.boot2DisabledExplorerParity
+        restoredDefaultExplorerParity=$proofManifest.boot3RestoredExplorerParity
+            notesActivation=[ordered]@{path='/system/apps/C164/hello.txt';content='hello from C164';contentBytes=15;clean=$true;undo=0;redo=0;caret=0;anchor=0;view=0;source='real VFS fixture through Managed and Native File Explorer'}
+        regressions=[ordered]@{
+            C164='fresh real Managed/Native File Explorer Notes activation in proof Boot 3 and ordinary boots 1-3';
+            C163='fresh Managed File Explorer UI browsing/open and Notes activation';
+            C162='fresh identity-safe native File Explorer close through Managed Task Manager in ordinary Boot 2';
+            C160='fresh application snapshot/task-manager ABI build and startup markers';
+            C156='fresh modifier decode and shortcut routing PASS in all three ordinary boots';
+            C128='unverified; retained C166A evidence unchanged'
+        }
+        cleanProduction=[ordered]@{compositeSha256=$cleanCompositeHash;kernelSha256=$cleanKernelHash;ramdiskSha256=$cleanRamdiskHash;kernelCanonicalSha256=(Get-Sha256 $kernelPath);kernelEspSha256=(Get-Sha256 $espKernel);ramdiskEspSha256=(Get-Sha256 $espRamdisk);allCandidateStrings=$scanResults;proof1Excluded=$true;settingsRecordFormat='v2/26 bytes';settingsRecordSha256=$settingsHash}
+        ordinaryBoots=@($ordinary)
+        settingsSmoke=$ordinary[2].productionIntegration.settings
+        finalAssociation=[ordered]@{slotsPresent=0;override='NoOverride (no persisted override files)';effectiveHandler='com.guidexos.apps.managed.notes';evidence='ordinary Managed File Explorer opens the exact C164 TXT fixture through the default handler'}
+        productionInstallation='PASS after clean candidate and all three ordinary boots passed'
+        qemuOwnership=[ordered]@{beforeOrdinary=@();afterOrdinary=$qemuAfter;runnerOwnedProcessesReaped=$true;unrelatedProcessesTerminated=0}
+        protectedBaseline=[ordered]@{kernelSha256=$baselineKernelHash;espKernelSha256=$baselineEspKernelHash;ramdiskSha256=$baselineRamdiskHash;backupRoot=$protectedRoot}
+        endingHead=(& git -C $RepoRoot rev-parse HEAD).Trim();acceptanceManifest='out/dotnet/c166a2-final-acceptance/c166a2-manifest.json'
+    }
+    $manifestPath=Join-Path $acceptanceRoot 'c166a2-manifest.json'
+    $manifest | ConvertTo-Json -Depth 24 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+    Write-Host "C166A2 outcome=A C166 accepted: proof, regressions, clean production, and ordinary boots 3/3 PASS. Manifest: $manifestPath"
+}
+
 $dotnet = Resolve-Tool 'dotnet.exe' @('C:\Program Files\dotnet\dotnet.exe')
 $gcc = Resolve-Tool 'x86_64-elf-gcc.exe' @('C:\x86_64-elf-tools\bin\x86_64-elf-gcc.exe')
 $gxx = Resolve-Tool 'x86_64-elf-g++.exe' @('C:\x86_64-elf-tools\bin\x86_64-elf-g++.exe')
@@ -243,6 +1096,10 @@ $qemu = Resolve-Tool 'qemu-system-x86_64.exe' @(
     (Join-Path $env:LOCALAPPDATA 'Programs\qemu\qemu-system-x86_64.exe'),
     'C:\qemu\qemu-system-x86_64.exe',
     'C:\msys64\mingw64\bin\qemu-system-x86_64.exe')
+$ovmf = Resolve-Tool 'edk2-x86_64-code.fd' @(
+    (Join-Path $RepoRoot 'OVMF.fd'),(Join-Path $RepoRoot 'ovmf.fd'),
+    'C:\Program Files\qemu\share\edk2-x86_64-code.fd')
+$bootloader = Join-Path $RepoRoot 'guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe'
 $qemuRelevant = @()
 
 $sdk = 'unavailable'
@@ -298,6 +1155,38 @@ $proofCompositeHash = $null
 $proofKernelHash = $null
 $proofRamdiskHash = $null
 $proofKernelStatus = 'not built'
+
+$flags = @('-DGXOS_NATIVEAOT_PRODUCTION_APPLICATION',
+    '-DGXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH',
+    '-DGXOS_NATIVEAOT_C112_REUSABLE_MANAGED_APPLICATION',
+    '-DGXOS_NATIVEAOT_C113_MANAGED_FILE_SERVICES',
+    '-DGXOS_NATIVEAOT_C114_MANAGED_DIRECTORY_SERVICES',
+    '-DGXOS_NATIVEAOT_C115_MANAGED_FILE_PICKER','-DGXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT',
+    '-DGXOS_NATIVEAOT_C117_MANAGED_TEXT_AREA','-DGXOS_NATIVEAOT_C118_MANAGED_LIST_BOX',
+    '-DGXOS_NATIVEAOT_C119_MANAGED_BUTTON','-DGXOS_NATIVEAOT_C120_MANAGED_CONTROL_HOST',
+    '-DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX','-DGXOS_NATIVEAOT_C122_MANAGED_LABEL',
+    '-DGXOS_NATIVEAOT_C123_MANAGED_SEPARATOR','-DGXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON',
+    '-DGXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR','-DGXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX',
+    '-DGXOS_NATIVEAOT_C127_MANAGED_PANEL','-DGXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE',
+    '-DGXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT','-DGXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX',
+    '-DGXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON','-DGXOS_NATIVEAOT_C133_REUSABLE_COMBOBOX',
+    '-DGXOS_NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING','-DGXOS_NATIVEAOT_C135_REUSABLE_POPUP_MENU',
+    '-DGXOS_NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU','-DGXOS_NATIVEAOT_C137_MOUSE_WHEEL_SCROLLING',
+    '-DGXOS_NATIVEAOT_C138_REUSABLE_SCROLLBAR','-DGXOS_NATIVEAOT_C139_SHARED_SCROLL_VIEWPORT',
+    '-DGXOS_NATIVEAOT_C140_MANAGED_SCROLL_VIEW','-DGXOS_NATIVEAOT_C141_MANAGED_VERTICAL_STACK',
+    '-DGXOS_NATIVEAOT_C142_MANAGED_VERTICAL_STACK','-DGXOS_NATIVEAOT_C143_MANAGED_GROUP_BOX',
+    '-DGXOS_NATIVEAOT_C144_MANAGED_SETTINGS_CENTER','-DGXOS_NATIVEAOT_C145_MANAGED_MODAL_DIALOG',
+    '-DGXOS_NATIVEAOT_C146_SETTINGS_PERSISTENCE','-DGXOS_NATIVEAOT_C147_RUNTIME_SETTINGS',
+    '-DGXOS_NATIVEAOT_C148_SETTINGS_V2','-DGXOS_NATIVEAOT_C149_SECOND_RUNTIME_SETTING',
+    '-DGXOS_NATIVEAOT_C150_MANAGED_APP_RETURN','-DGXOS_NATIVEAOT_C151_MANAGED_OPEN_FILE_DIALOG',
+    '-DGXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW','-DGXOS_NATIVEAOT_C155_MANAGED_NOTES_SESSION',
+    '-DGXOS_NATIVEAOT_C156_CONTROL_MODIFIER_SHORTCUTS','-DGXOS_NATIVEAOT_C157_MANAGED_NOTES_NEW_DOCUMENT',
+    '-DGXOS_NATIVEAOT_C158_MANAGED_CALCULATOR','-DGXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF',
+    '-DGXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER','-DGXOS_NATIVEAOT_C161_TASK_MANAGER_PROOF',
+    '-DGXOS_NATIVEAOT_C162_MANAGED_TASK_MANAGER_CLOSE','-DGXOS_NATIVEAOT_C162_MANAGED_TASK_MANAGER_CLOSE_PROOF',
+    '-DGXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER','-DGXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER_PROOF',
+    '-DGXOS_NATIVEAOT_C164_FILE_ACTIVATION_PROOF',
+    '-DGUIDEXOS_PROOF_CONTROL')
 
 if ($UseExistingProofProducts) {
     $savedManifestPath = Join-Path $EvidenceRoot 'c166r9-proof-manifest.json'
@@ -373,37 +1262,6 @@ foreach ($proofStage in @('SameBoot','PreReboot','PostReboot')) {
 }
 $proofRamdiskHash = $proofScenarioMedia.SameBoot.sha256
 
-$flags = @('-DGXOS_NATIVEAOT_PRODUCTION_APPLICATION',
-    '-DGXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH',
-    '-DGXOS_NATIVEAOT_C112_REUSABLE_MANAGED_APPLICATION',
-    '-DGXOS_NATIVEAOT_C113_MANAGED_FILE_SERVICES',
-    '-DGXOS_NATIVEAOT_C114_MANAGED_DIRECTORY_SERVICES',
-    '-DGXOS_NATIVEAOT_C115_MANAGED_FILE_PICKER','-DGXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT',
-    '-DGXOS_NATIVEAOT_C117_MANAGED_TEXT_AREA','-DGXOS_NATIVEAOT_C118_MANAGED_LIST_BOX',
-    '-DGXOS_NATIVEAOT_C119_MANAGED_BUTTON','-DGXOS_NATIVEAOT_C120_MANAGED_CONTROL_HOST',
-    '-DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX','-DGXOS_NATIVEAOT_C122_MANAGED_LABEL',
-    '-DGXOS_NATIVEAOT_C123_MANAGED_SEPARATOR','-DGXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON',
-    '-DGXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR','-DGXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX',
-    '-DGXOS_NATIVEAOT_C127_MANAGED_PANEL','-DGXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE',
-    '-DGXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT','-DGXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX',
-    '-DGXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON','-DGXOS_NATIVEAOT_C133_REUSABLE_COMBOBOX',
-    '-DGXOS_NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING','-DGXOS_NATIVEAOT_C135_REUSABLE_POPUP_MENU',
-    '-DGXOS_NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU','-DGXOS_NATIVEAOT_C137_MOUSE_WHEEL_SCROLLING',
-    '-DGXOS_NATIVEAOT_C138_REUSABLE_SCROLLBAR','-DGXOS_NATIVEAOT_C139_SHARED_SCROLL_VIEWPORT',
-    '-DGXOS_NATIVEAOT_C140_MANAGED_SCROLL_VIEW','-DGXOS_NATIVEAOT_C141_MANAGED_VERTICAL_STACK',
-    '-DGXOS_NATIVEAOT_C142_MANAGED_VERTICAL_STACK','-DGXOS_NATIVEAOT_C143_MANAGED_GROUP_BOX',
-    '-DGXOS_NATIVEAOT_C144_MANAGED_SETTINGS_CENTER','-DGXOS_NATIVEAOT_C145_MANAGED_MODAL_DIALOG',
-    '-DGXOS_NATIVEAOT_C146_SETTINGS_PERSISTENCE','-DGXOS_NATIVEAOT_C147_RUNTIME_SETTINGS',
-    '-DGXOS_NATIVEAOT_C148_SETTINGS_V2','-DGXOS_NATIVEAOT_C149_SECOND_RUNTIME_SETTING',
-    '-DGXOS_NATIVEAOT_C150_MANAGED_APP_RETURN','-DGXOS_NATIVEAOT_C151_MANAGED_OPEN_FILE_DIALOG',
-    '-DGXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW','-DGXOS_NATIVEAOT_C155_MANAGED_NOTES_SESSION',
-    '-DGXOS_NATIVEAOT_C156_CONTROL_MODIFIER_SHORTCUTS','-DGXOS_NATIVEAOT_C157_MANAGED_NOTES_NEW_DOCUMENT',
-    '-DGXOS_NATIVEAOT_C158_MANAGED_CALCULATOR','-DGXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF',
-    '-DGXOS_NATIVEAOT_C161_MANAGED_TASK_MANAGER','-DGXOS_NATIVEAOT_C161_TASK_MANAGER_PROOF',
-    '-DGXOS_NATIVEAOT_C162_MANAGED_TASK_MANAGER_CLOSE','-DGXOS_NATIVEAOT_C162_MANAGED_TASK_MANAGER_CLOSE_PROOF',
-    '-DGXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER','-DGXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER_PROOF',
-    '-DGXOS_NATIVEAOT_C164_FILE_ACTIVATION_PROOF',
-    '-DGUIDEXOS_PROOF_CONTROL')
 $kernelArgs = @('-C',(Join-Path $RepoRoot 'kernel'),'ARCH=amd64',
     "EXTRA_CFLAGS=$($flags -join ' ')",'-B')
 $proofKernelStatus = 'SKIPPED: no configured AMD64 compiler'
@@ -470,12 +1328,20 @@ $proof1Manifest = [ordered]@{
     crossBootState='host out/dotnet/proof1/guest-run-*/c166-persistence-state.json; expected slot, generation, prior serial SHA-256, and association disk path'
     productDiskIdentity='same writable fat:rw ESP directory at IDE index 0 for Boot 2 and Boot 3; only ramdisk.img is replaced'
 }
-$proof1Dir = Join-Path $RepoRoot 'out\dotnet\proof1'
+$proof1Dir = Join-Path $EvidenceRoot 'proof1-guest-runs'
 New-Item -ItemType Directory -Force -Path $proof1Dir | Out-Null
-$proof1Manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $proof1Dir 'proof1-manifest.json') -Encoding utf8
+if (-not $RunOrdinaryAcceptance) {
+    $proof1Manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $proof1Dir 'proof1-manifest.json') -Encoding utf8
+}
 Write-Host 'C166R9_PROOF_PRODUCTS_READY'
 Write-Host "C166R9 proof products built from $head"
 Write-Host "composite=$proofCompositeHash kernel=$proofKernelHash ramdisk=$proofRamdiskHash"
+if ($RunOrdinaryAcceptance) {
+    if ($RunProofBoots) { throw 'Choose separate coherent proof and ordinary acceptance runs.' }
+    if (-not $UseExistingProofProducts) { throw 'C166 ordinary acceptance requires the verified existing proof products and completed proof run.' }
+    Invoke-C166OrdinaryAcceptance $RepoRoot $EvidenceRoot $proofCompositeHash $proofKernelHash $proofRamdiskHash $flags $qemu $ovmf $bootloader $make $productionCompiler
+    return
+}
 if (-not $RunProofBoots) {
     Write-Host 'No QEMU boot requested; proof products and manifest are retained.'
     return
@@ -488,37 +1354,108 @@ if ($RunProofBoots -and $qemuRelevant.Count -gt 0) {
 if (-not $proofKernelHash) {
     throw 'Outcome E: guest execution is externally blocked because the configured AMD64 cross compiler is unavailable; the proof scenarios and managed proof composite are built.'
 }
-$ovmf = Resolve-Tool 'edk2-x86_64-code.fd' @(
-    (Join-Path $RepoRoot 'OVMF.fd'),(Join-Path $RepoRoot 'ovmf.fd'),
-    'C:\Program Files\qemu\share\edk2-x86_64-code.fd')
-$bootloader = Join-Path $RepoRoot 'guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe'
 if (-not $ovmf -or -not (Test-Path -LiteralPath $bootloader -PathType Leaf)) {
-    throw 'Outcome E: fresh proof QEMU boot requires the repository bootloader and OVMF code image.'
+    throw 'Outcome E: fresh QEMU boot requires the repository bootloader and OVMF code image.'
 }
 $runStamp = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0,8)
 $guestRoot = Join-Path $proof1Dir "guest-run-$runStamp"
 $sharedEsp = Join-Path $guestRoot 'shared-esp'
 New-Item -ItemType Directory -Force -Path $sharedEsp | Out-Null
 $diskIdentity = [System.IO.Path]::GetFullPath($sharedEsp)
-$boot1 = Invoke-ProofQemuBoot 'Boot1-SameBoot' $proofScenarioMedia.SameBoot.path $sharedEsp $bootloader $proofKernel $qemu $ovmf (Join-Path $guestRoot 'boot1')
-Assert-ProofScenario $boot1 'S' 'Same' 5
-$boot2 = Invoke-ProofQemuBoot 'Boot2-PreReboot' $proofScenarioMedia.PreReboot.path $sharedEsp $bootloader $proofKernel $qemu $ovmf (Join-Path $guestRoot 'boot2')
-Assert-ProofScenario $boot2 'P' 'Pre' 3
-if ($boot2.backingEspPath -ne $diskIdentity) { throw 'Boot 2 association storage backing path changed unexpectedly.' }
-$boot2Diagnostic = [regex]::Match($boot2.serial, '(?m)^(?:\[C102-MANAGED-OUTPUT\] )?PROOF C166 P Pre [0-9]+ PASS Diag st=0 ov=2 slot=(?<slot>[ABN]) gen=(?<gen>[0-9]+)\r?$')
-if (-not $boot2Diagnostic.Success) { throw 'Boot 2 did not report Disabled state and authoritative slot/generation.' }
+$boot1 = Invoke-ProofQemuBoot 'Boot1-SameBoot' $proofScenarioMedia.SameBoot.path $sharedEsp $bootloader $proofKernel $qemu $ovmf (Join-Path $guestRoot 'boot1') -HoldAfterPass
+$boot1Interactions = $null
+try {
+    Assert-ProofScenario $boot1 'S' 'Same' 5
+    if ($boot1.backingEspPath -ne $diskIdentity) { throw 'Boot 1 association storage backing path changed unexpectedly.' }
+    $boot1Before = Get-C166AssociationDiskState $sharedEsp
+    $boot1NoOverride = @($boot1Before | Where-Object { $_.override -eq 'NoOverride' } | Sort-Object generation -Descending | Select-Object -First 1)[0]
+    if (-not $boot1NoOverride -or $boot1NoOverride.generation -ne 2 -or $boot1NoOverride.slot -ne 'B') {
+        throw 'Boot 1 SameBoot Reset did not leave the expected directly observed B/2 NoOverride checkpoint.'
+    }
+    $boot1Evidence = Join-Path $guestRoot 'boot1\integration-evidence'
+    New-Item -ItemType Directory -Force -Path $boot1Evidence | Out-Null
+    Initialize-C166GuestPointer $boot1
+    Close-C166ManagedNotesStartupWindow $boot1
+    $managedDefault = Invoke-C166ManagedExplorerOpen $boot1 'Default' `
+        (Join-Path $boot1Evidence 'managed-explorer-default-notes.ppm')
+    $boot1After = Get-C166AssociationDiskState $sharedEsp
+    if ((Get-C166SlotIdentity $boot1Before) -ne (Get-C166SlotIdentity $boot1After)) {
+        throw 'Boot 1 Managed File Explorer interaction changed association slot bytes, override state, or generation.'
+    }
+    $boot1Interactions = [ordered]@{restoredState='NoOverride';observedSlot=$boot1NoOverride.slot;observedGeneration=$boot1NoOverride.generation;effectiveHandler='com.guidexos.apps.managed.notes';managed=$managedDefault;slotImagesBefore=$boot1Before;slotImagesAfter=$boot1After;associationStateAndGenerationUnchanged=$true}
+} finally {
+    Stop-OwnedProofQemu $boot1
+}
+$boot1.serial = Get-C166Serial $boot1.serialPath
+$boot1.serialSha256 = Get-Sha256 $boot1.serialPath
+$boot2 = Invoke-ProofQemuBoot 'Boot2-PreReboot' $proofScenarioMedia.PreReboot.path $sharedEsp $bootloader $proofKernel $qemu $ovmf (Join-Path $guestRoot 'boot2') -HoldAfterPass
+$boot2Interactions = $null
+try {
+    Assert-ProofScenario $boot2 'P' 'Pre' 3
+    if ($boot2.backingEspPath -ne $diskIdentity) { throw 'Boot 2 association storage backing path changed unexpectedly.' }
+    $boot2Diagnostic = [regex]::Match($boot2.serial, '(?m)^(?:\[C102-MANAGED-OUTPUT\] )?PROOF C166 P Pre [0-9]+ PASS Diag st=0 ov=2 slot=(?<slot>[ABN]) gen=(?<gen>[0-9]+)\r?$')
+    if (-not $boot2Diagnostic.Success -or $boot2Diagnostic.Groups['slot'].Value -ne 'A' -or $boot2Diagnostic.Groups['gen'].Value -ne '3') {
+        throw 'Boot 2 did not directly report the expected Disabled A/3 persistence checkpoint.'
+    }
+    $boot2Before = Get-C166AssociationDiskState $sharedEsp
+    Initialize-C166GuestPointer $boot2
+    $boot2Evidence = Join-Path $guestRoot 'boot2\integration-evidence'
+    New-Item -ItemType Directory -Force -Path $boot2Evidence | Out-Null
+    $managedDisabled = Invoke-C166ManagedExplorerOpen $boot2 'Disabled' (Join-Path $boot2Evidence 'managed-explorer-disabled.ppm')
+    $nativeDisabled = Invoke-C166NativeExplorerOpen $boot2 'Disabled' `
+        (Join-Path $boot2Evidence 'native-explorer-disabled-selected.ppm') `
+        (Join-Path $boot2Evidence 'native-explorer-disabled-open.ppm')
+    $boot2After = Get-C166AssociationDiskState $sharedEsp
+    if ((Get-C166SlotIdentity $boot2Before) -ne (Get-C166SlotIdentity $boot2After)) {
+        throw 'Boot 2 Explorer interactions changed association slot bytes, override state, or generation.'
+    }
+    $boot2Interactions = [ordered]@{disabledState='Disabled';observedByProof='A/3';managed=$managedDisabled;native=$nativeDisabled;slotImagesBefore=$boot2Before;slotImagesAfter=$boot2After;associationStateAndGenerationUnchanged=$true}
+} finally {
+    Stop-OwnedProofQemu $boot2
+}
+$boot2.serial = Get-C166Serial $boot2.serialPath
+$boot2.serialSha256 = Get-Sha256 $boot2.serialPath
 $crossBootStatePath = Join-Path $guestRoot 'c166-persistence-state.json'
 $crossBootState = [ordered]@{suite='C166';scenario='Persistence';slot=$boot2Diagnostic.Groups['slot'].Value;generation=$boot2Diagnostic.Groups['gen'].Value;boot2SerialSha256=$boot2.serialSha256;associationDiskPath=$diskIdentity}
 $crossBootState | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $crossBootStatePath -Encoding ASCII
-$boot3 = Invoke-ProofQemuBoot 'Boot3-PostReboot' $proofScenarioMedia.PostReboot.path $sharedEsp $bootloader $proofKernel $qemu $ovmf (Join-Path $guestRoot 'boot3')
-Assert-ProofScenario $boot3 'P' 'Post' 4
-if ($boot3.backingEspPath -ne $diskIdentity -or $boot2.backingEspPath -ne $boot3.backingEspPath) {
-    throw 'Boot 2 and Boot 3 did not use the same writable association-storage disk identity.'
+
+$boot3 = Invoke-ProofQemuBoot 'Boot3-PostReboot' $proofScenarioMedia.PostReboot.path $sharedEsp $bootloader $proofKernel $qemu $ovmf (Join-Path $guestRoot 'boot3') -HoldAfterPass
+$boot3Interactions = $null
+$postRebootMutations = @()
+try {
+    Assert-ProofScenario $boot3 'P' 'Post' 3
+    $postRebootMutations = Assert-PostRebootChurn $boot3
+    if ($boot3.backingEspPath -ne $diskIdentity -or $boot2.backingEspPath -ne $boot3.backingEspPath) {
+        throw 'Boot 2 and Boot 3 did not use the same writable association-storage disk identity.'
+    }
+    $boot3Diagnostic = [regex]::Match($boot3.serial, '(?m)^(?:\[C102-MANAGED-OUTPUT\] )?PROOF C166 P Post 2 PASS Diag st=0 ov=2 slot=(?<slot>[ABN]) gen=(?<gen>[0-9]+)\r?$')
+    if (-not $boot3Diagnostic.Success -or $boot3Diagnostic.Groups['slot'].Value -ne $crossBootState.slot -or $boot3Diagnostic.Groups['gen'].Value -ne $crossBootState.generation) {
+        throw 'Boot 3 loaded slot/generation did not exactly match Boot 2 direct diagnostics before any mutation.'
+    }
+    $boot3BeforeInteractions = Get-C166AssociationDiskState $sharedEsp
+    $slotA = @($boot3BeforeInteractions | Where-Object slot -eq 'A')[0]
+    $slotB = @($boot3BeforeInteractions | Where-Object slot -eq 'B')[0]
+    if ($slotA.generation -ne 29 -or $slotA.override -ne 'NoOverride' -or
+        $slotB.generation -ne 28 -or $slotB.override -ne 'ApplicationOverride' -or
+        $slotB.applicationId -ne 'com.guidexos.apps.managed.notes') {
+        throw 'Boot 3 final association slot images do not match A/29 NoOverride and B/28 Managed Notes.'
+    }
+    $boot3Evidence = Join-Path $guestRoot 'boot3\integration-evidence'
+    New-Item -ItemType Directory -Force -Path $boot3Evidence | Out-Null
+    Initialize-C166GuestPointer $boot3
+    $nativeDefault = Invoke-C166NativeExplorerOpen $boot3 'Default' `
+        (Join-Path $boot3Evidence 'native-explorer-default-selected.ppm') `
+        (Join-Path $boot3Evidence 'native-explorer-default-notes.ppm')
+    $boot3AfterInteractions = Get-C166AssociationDiskState $sharedEsp
+    if ((Get-C166SlotIdentity $boot3BeforeInteractions) -ne (Get-C166SlotIdentity $boot3AfterInteractions)) {
+        throw 'Boot 3 Explorer interactions changed association slot bytes, override state, or generation.'
+    }
+    $boot3Interactions = [ordered]@{restoredState='NoOverride';effectiveHandler='com.guidexos.apps.managed.notes';native=$nativeDefault;managedFromBoot1=$boot1Interactions.managed;slotImagesBefore=$boot3BeforeInteractions;slotImagesAfter=$boot3AfterInteractions;associationStateAndGenerationUnchanged=$true;managedInteractionBoot='Boot1-SameBoot'}
+} finally {
+    Stop-OwnedProofQemu $boot3
 }
-$boot3Diagnostic = [regex]::Match($boot3.serial, '(?m)^(?:\[C102-MANAGED-OUTPUT\] )?PROOF C166 P Post [0-9]+ PASS Diag st=0 ov=2 slot=(?<slot>[ABN]) gen=(?<gen>[0-9]+)\r?$')
-if (-not $boot3Diagnostic.Success -or $boot3Diagnostic.Groups['slot'].Value -ne $crossBootState.slot -or $boot3Diagnostic.Groups['gen'].Value -ne $crossBootState.generation) {
-    throw 'Boot 3 slot/generation did not match host-owned Boot 2 orchestration state.'
-}
+$boot3.serial = Get-C166Serial $boot3.serialPath
+$boot3.serialSha256 = Get-Sha256 $boot3.serialPath
 $proof1Manifest.guestLaneExecuted = $true
 $proof1Manifest.c166Accepted = $false
 $guestBootSummary = @()
@@ -528,5 +1465,12 @@ foreach ($bootResult in @($boot1,$boot2,$boot3)) {
 $proof1Manifest.guestBoots = $guestBootSummary
 $proof1Manifest.crossBootStatePath = $crossBootStatePath
 $proof1Manifest.associationDiskIdentity = [ordered]@{path=$diskIdentity;boot2=$boot2.backingEspPath;boot3=$boot3.backingEspPath;same=$true}
-$proof1Manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $proof1Dir 'proof1-manifest.json') -Encoding utf8
-Write-Host "PROOF1 managed guest scenarios passed; C166 acceptance remains pending. Evidence: $guestRoot"
+$proof1Manifest.boot2PersistedDiagnostic = [ordered]@{slot=$boot2Diagnostic.Groups['slot'].Value;generation=[int64]$boot2Diagnostic.Groups['gen'].Value;marker=$boot2Diagnostic.Value}
+$proof1Manifest.boot3ReloadedDiagnostic = [ordered]@{slot=$boot3Diagnostic.Groups['slot'].Value;generation=[int64]$boot3Diagnostic.Groups['gen'].Value;matchesBoot2=($boot3Diagnostic.Groups['slot'].Value -eq $crossBootState.slot -and $boot3Diagnostic.Groups['gen'].Value -eq $crossBootState.generation);marker=$boot3Diagnostic.Value}
+$proof1Manifest.boot2DisabledExplorerParity = $boot2Interactions
+$proof1Manifest.boot1RestoredExplorerParity = $boot1Interactions
+$proof1Manifest.boot3RestoredExplorerParity = $boot3Interactions
+$proof1Manifest.successfulManagedMutations = $postRebootMutations
+$proof1Manifest.mutationSummary = [ordered]@{count=$postRebootMutations.Count;successfulPersistedTransactions=$postRebootMutations.Count;generationStart=3;generationEnd=29;alternatingSlots=$true;finalSlot='A';finalOverride='NoOverride';marker=([regex]::Match($boot3.serial,'(?m)^(?:\[C102-MANAGED-OUTPUT\] )?PROOF C166 P Post MUTATION-SUMMARY PASS[^\r\n]*').Value)}
+$proof1Manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $proof1Dir 'proof1-manifest.json') -Encoding utf8
+Write-Host "PROOF1 managed scenarios, reboot churn, and guest Explorer workflows passed. Evidence: $guestRoot"
