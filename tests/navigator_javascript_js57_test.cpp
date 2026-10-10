@@ -354,10 +354,10 @@ var textareaProjectionUnchanged =
         gxos::javascript::NavigatorScriptSelectorDescriptor);
     const std::size_t collectionRecord =
         (16u + selectorDescriptor + 7u) / 8u * 8u;
-    expect(selectorSimple == 68u && selectorDescriptor == 812u &&
-        collectionRecord == 832u && collectionRecord *
-            gxos::javascript::kNavigatorScriptMaxSelectorCollections == 106496u,
-        "JS59 inner core keeps selector and collection memory fixed and bounded");
+    expect(selectorSimple == 68u && selectorDescriptor == 958u &&
+        collectionRecord == 976u && collectionRecord *
+            gxos::javascript::kNavigatorScriptMaxSelectorCollections == 124928u,
+        "JS64 compact second-argument pool keeps collection memory bounded");
 }
 
 } // namespace

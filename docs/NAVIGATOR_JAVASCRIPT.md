@@ -7066,3 +7066,135 @@ documentation changes are ready for one local qualification commit.
 `:has()` qualification gap remains. Select the next JavaScript selector
 feature for JS64 as a separate phase; the seven unrelated CSS baseline
 failures are not JS63 follow-up work.
+
+#### JS64 bounded two-alternative `:has()` lists (2026-10-10)
+
+JS64 extends the qualified JS63 grammar to accept one or two independent
+relative selectors in each `:has()` expression. The two results are combined
+with OR, and a matching first alternative returns before the second is
+expanded or evaluated. Each alternative retains JS63's optional single
+relation and restricted simple-selector core. Descendant, child, adjacent
+sibling, and general sibling relations all use the existing JS62 relative
+evaluator. Nested functional pseudos, relation chains, empty alternatives,
+and a third alternative remain rejected. The existing four-member outer
+selector list remains independent of the two-alternative inner bound.
+
+The inner comma scanner ignores commas inside quoted attribute values and
+rejects nested functional syntax before splitting. Whitespace around either
+alternative is trimmed; whitespace inside a selector core remains outside the
+grammar. The shared parser still stores first-alternative relation and core in
+the JS63 fields. A descriptor-wide fixed pool holds up to eight compact
+second cores, matching the maximum two compound selectors across four outer
+members. The simple selector's existing `nthA` records an explicit count of
+one or two, while `nthB` packs the second relation and pool index. No pool
+pointer or parser-buffer address is retained.
+
+Each compact second core is 18 bytes. Class token ranges remain usable by the
+existing evaluator: parsed class names are stored contiguously with NUL
+separators, and the compact core records one bounded block. During matching,
+that fixed block is expanded into the existing 32-byte JS62 core on the
+stack. Matching does not reparse selector text, allocate memory, or retain
+results. A first-alternative Invalid result fails closed; a Match
+short-circuits; only NoMatch proceeds to the second alternative.
+
+Memory was measured against the live JS63 layout before implementation:
+
+| Structure | JS63 | JS64 | Delta |
+| --- | ---: | ---: | ---: |
+| Relative core, first argument | 32 B | 32 B | 0 B |
+| Relative core, second argument | — | 18 B | 18 B per second core |
+| `SimpleSelector` | 68 B | 68 B | 0 B |
+| Four-member selector descriptor | 812 B | 958 B | +146 B |
+| Selector collection record | 832 B | 976 B | +144 B |
+| 128-record collection registry | 106,496 B | 124,928 B | +18,432 B |
+| Document-owned persistent storage | — | 0 B | 0 B |
+
+The 146-byte descriptor increase is eight 18-byte pool entries plus the pool
+count and alignment. The collection record's alignment makes its measured
+growth 144 bytes. The pool is fixed and bounded; it is not multiplied into
+each `SimpleSelector`. Parser stack measurements and full JS64 qualification
+results follow in the closeout below.
+
+The parser stack comparison used MinGW GCC 15.2 with C++17, `-O2`, and
+`-fstack-usage`, compiling the JS63 source/header from the starting `HEAD`
+beside the JS64 worktree source/header. The per-function static stack frames
+were: `parseBoundedSelector` 112 bytes before and after;
+`parseBoundedSelectorMember` 176 bytes before and after; and
+`parseSimpleSelectorCore` 336 bytes before, 432 bytes after. The direct
+bounded-selector parser chain therefore measures 624 bytes before and 720
+bytes after, a 96-byte increase. The 256-byte selector-input bound is
+unchanged. These figures are compiler-reported static frames and do not add
+the separate caller/API frame or helper frames.
+
+#### JS64 qualification closeout (2026-10-10)
+
+The focused JS64 native lane passed **24/24 checks**, including the strict
+`-Wall -Wextra -Werror -pedantic` syntax compile. The native cases cover the
+complete 16 ordered relation-pair matrix in first-only, second-only, and
+false states; first-match short-circuiting; second evaluation after a
+non-match; malformed and unsupported grammar rejection; all eight pool
+entries across four outer members; scoped queries, `matches()`, `closest()`,
+outer-list order and deduplication; live attributes, checked/radio, focus,
+disabled, and empty state; stale generations; event metadata and nested
+dispatch; and a 1,024-Element full-false/late-true search. A 256-character
+selector was accepted and a 257-character selector rejected. Twenty
+near-capacity direct calls measured 11 microseconds when the first alternative
+matched and 9,612 microseconds when only the second alternative matched. The
+timings are observational, not test thresholds.
+
+JS63 remained green at **8/8 native checks**, and its hosted fixture retained
+all **32/32 assertions**. JS62R4 and all earlier JavaScript lanes passed in the
+full current smoke matrix: **66/66 scripts**. This includes the selector
+regression lanes through JS63 and JS62R, JS62R2, JS62R3, and JS62R4. The JS64
+strict compile and matrix runs used the same worktree source.
+
+The dedicated hosted fixture is
+`navigator-smoke/javascript-js64.html`. On the fresh production server it
+reported **37 assertions, 0 failures**, and **48/48 relation-pair cases**.
+Its initial and Event callback results both passed; the callback preserved
+target/currentTarget/phase/default-prevented metadata. All three JS64 hosted
+aggregate checks passed. The hosted JS63 fixture also passed all three of its
+aggregate checks.
+
+The full hosted aggregate reported **620 passed / 7 failed / 627 total**. The
+seven failures exactly match the established CSS baseline: CSS 3C; CSS 3G; CSS
+6A; the three CSS 6B checks for sticky diagnostics, local/nested scrollports,
+and fixed-descendant invariance; and CSS 6C. The JS63 baseline had 617 passed,
+7 failed, and 624 total; JS64 adds the three passing aggregate checks. No CSS
+source was changed and there were no new unexplained failures.
+
+`build.bat` succeeded from the JS64 worktree based on starting source HEAD
+`3b66a4b5ee4617b98b9402ad102fe67ed7a2af32`, subject
+`navigator: qualify hosted JS63 has support`. The output was
+`D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe`, 8,423,787
+bytes, SHA-256
+`68E06AF7AA6FB14B524B21C5086C4F8553E09387055A3E376FD99FF64930ED5E`. The
+hosted runner reported that same path and hash, launched process 3244 from
+that path, and used fixture `javascript-js64.html`; it did not stage a copy.
+The build emitted existing warnings from unrelated files but exited
+successfully. After the hosted run, the original executable was restored from
+its exact backup (8,398,274 bytes, SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`).
+
+The initial ignored/generated audit covered **1,337 files / 88,371,771
+bytes**. Exact byte backups covered 46 mutable files / 8,857,239 bytes: the
+server executable, `desktop.state`, `display-options.cfg`,
+`window-bounds.cfg`, and all 42 existing files in
+`navigator-smoke/generated`. The hosted run created six timestamped log
+files; they were moved out of the repository to the run's temporary audit
+directory. The three tracked state/config files and all backed-up generated
+fixtures were restored. The final broad audit returned to **1,337 files /
+88,371,771 bytes**, with **0 changed, 0 missing, and 0 extra** ignored files.
+
+No kernel wrapper or direct AMD64 kernel build was run for this hosted-server
+selector change, so no fresh kernel or QEMU proof is claimed. JS64 itself
+passed on the fresh hosted production server. The JS63 qualification record
+above preserves the previously observed unrelated PacMan link and Mbed TLS
+configuration blockers; neither was changed for this phase.
+
+**Outcome A — Bounded two-alternative `:has()` lists fully qualified.** The
+current implementation remains intentionally limited to two alternatives
+per `:has()` and four outer selector-list members. If later work needs a larger
+inner list or relation chains, qualify its storage and near-capacity cost in
+its own phase; otherwise select the next distinct selector capability from
+the project roadmap without widening this grammar implicitly.

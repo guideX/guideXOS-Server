@@ -1,0 +1,127 @@
+<!doctype html>
+<html id="root">
+<head><title>Navigator JavaScript JS64</title></head>
+<body>
+<h1>Navigator JavaScript JS64</h1>
+<main id="scope">
+  <section id="anchor">
+    <i id="direct"></i>
+    <div><b id="deep"></b></div>
+    <i id="comma" data-key="alpha,beta"></i>
+  </section>
+  <b id="adjacent"></b><i id="gap"></i><b id="later"></b>
+  <section id="card"><i id="warning" class="warning"></i><b id="error" class="error"></b></section>
+  <section id="child-anchor"><i id="icon" class="icon"></i></section>
+  <b id="badge" class="badge"></b>
+  <div id="live"><i id="live-child"></i></div>
+  <form id="form"><input id="check" type="checkbox" checked><input id="radio-a" type="radio" name="g" checked><input id="radio-b" type="radio" name="g"></form>
+  <button id="disabled" disabled></button><div id="empty"></div>
+  <div id="pool1"><i class="a"></i><span id="span1"><i class="c"></i></span></div>
+  <div id="pool2"><i class="a"></i><span id="span2"><i class="c"></i></span></div>
+  <div id="pool3"><i class="a"></i><span id="span3"><i class="c"></i></span></div>
+  <div id="pool4"><i class="a"></i><span id="span4"><i class="c"></i></span></div>
+  <button id="event-button" type="button">Run</button>
+</main>
+<pre id="result">initial</pre>
+<script>
+var assertions = 0;
+var failures = 0;
+var failedIndexes = '';
+function verify(value) {
+  assertions = assertions + 1;
+  if (!value) { failures = failures + 1; failedIndexes = failedIndexes + ',' + assertions; }
+}
+var anchor = document.querySelector('#anchor');
+verify(anchor.matches(':has(.warning, .error)') === false);
+verify(anchor.matches(':has(#deep, .missing)'));
+verify(anchor.matches(':has(.missing, #direct)'));
+verify(anchor.matches(':has(#deep, #direct)'));
+verify(!anchor.matches(':has(.missing, #later)'));
+verify(!anchor.matches(':has(#anchor, .missing)'));
+verify(anchor.matches(':has([data-key="alpha,beta"], .missing)'));
+verify(anchor.matches(':has(  .missing  ,  > #direct  )'));
+verify(document.querySelector('#card:has(.warning, .error)') === document.querySelector('#card'));
+verify(document.querySelector('#card:has(.missing, .error)') === document.querySelector('#card'));
+verify(document.querySelector('#card:has(.missing, .absent)') === null);
+var duplicates = document.querySelectorAll('#card:has(.warning, .warning), #card:has(.warning)');
+verify(duplicates.length === 1 && duplicates[0] === document.querySelector('#card'));
+var outer = document.querySelectorAll('#anchor:has(#deep, #direct), #card:has(.warning, .error), #anchor:has(#direct)');
+verify(outer.length === 2 && outer[0] === anchor && outer[1] === document.querySelector('#card'));
+verify(document.querySelector('#child-anchor:has(> .icon, + .badge)') === document.querySelector('#child-anchor'));
+verify(document.querySelector('#anchor:has(.missing, > #direct)') === anchor);
+verify(document.querySelector('#anchor').matches(':has(+ #adjacent, ~ #later)'));
+verify(document.querySelector('#adjacent').matches(':has(~ #later, .missing)'));
+verify(!document.querySelector('#later').matches(':has(+ .missing, ~ .missing)'));
+var scoped = document.querySelector('#scope').querySelectorAll(':has(> .icon, + .badge)');
+verify(scoped.length === 1 && scoped[0] === document.querySelector('#child-anchor'));
+verify(document.querySelector('#scope').querySelector(':has(> .icon, + .badge)') === scoped[0]);
+verify(document.querySelector('#deep').closest('#anchor:has(#deep, .missing)') === anchor);
+verify(document.querySelector('#direct').matches('i:has(:empty, #deep)') === false);
+var live = document.querySelectorAll('#live:has(.missing, [data-state=ready])');
+verify(live.length === 0);
+document.querySelector('#live-child').setAttribute('data-state', 'ready');
+verify(live.length === 1);
+document.querySelector('#live-child').removeAttribute('data-state');
+verify(live.length === 0);
+var checkedHost = document.querySelector('#form');
+var checkbox = document.querySelector('#check');
+var checkedLive = document.querySelectorAll('#form:has(.missing, #check:checked)');
+verify(checkedLive.length === 1);
+checkbox.checked = false;
+verify(checkedLive.length === 0);
+checkbox.checked = true;
+verify(checkedLive.length === 1);
+var radioA = document.querySelector('#radio-a');
+var radioLive = document.querySelectorAll('#form:has(.missing, #radio-a:checked)');
+verify(radioLive.length === 1);
+radioA.checked = false;
+verify(radioLive.length === 0);
+var focusLive = document.querySelectorAll('#form:has(.missing, :focus)');
+checkbox.focus();
+verify(focusLive.length === 1);
+checkbox.blur();
+verify(focusLive.length === 0);
+verify(document.querySelector('#scope:has(.missing, :disabled)') !== null);
+verify(document.querySelector('#scope:has(.missing, #empty:empty)') !== null);
+var relationPrefixes = ['', '> ', '+ ', '~ '];
+var relationTargets = ['deep', 'direct', 'adjacent', 'later'];
+var pairChecks = 0;
+var pairFailures = 0;
+for (var left = 0; left != 4; left = left + 1) {
+  for (var right = 0; right != 4; right = right + 1) {
+    for (var target = 0; target != 4; target = target + 1)
+      document.querySelector('#' + relationTargets[target]).removeAttribute('class');
+    var selector = ':has(' + relationPrefixes[left] + '.a, ' + relationPrefixes[right] + '.b)';
+    document.querySelector('#' + relationTargets[left]).setAttribute('class', 'a');
+    pairChecks = pairChecks + 1;
+    if (!anchor.matches(selector)) pairFailures = pairFailures + 1;
+    document.querySelector('#' + relationTargets[left]).removeAttribute('class');
+    document.querySelector('#' + relationTargets[right]).setAttribute('class', 'b');
+    pairChecks = pairChecks + 1;
+    if (!anchor.matches(selector)) pairFailures = pairFailures + 1;
+    document.querySelector('#' + relationTargets[right]).removeAttribute('class');
+    pairChecks = pairChecks + 1;
+    if (anchor.matches(selector)) pairFailures = pairFailures + 1;
+  }
+}
+verify(pairChecks === 48 && pairFailures === 0);
+var poolSelector = 'div:has(.missing,.a)>span:has(.missing,.c)';
+var poolQuery = document.querySelectorAll(poolSelector + ',' + poolSelector + ',' + poolSelector + ',' + poolSelector);
+verify(poolQuery.length === 4 && poolQuery[0].matches('#span1') && poolQuery[1].matches('#span2') && poolQuery[2].matches('#span3') && poolQuery[3].matches('#span4'));
+var bad = [':has()', ':has( )', ':has(, .a)', ':has(.a,)', ':has(.a,,.b)', ':has(.a,.b,.c)', ':has(.a .b, .c)', ':has(.a > .b, .c)', ':has(:not(.x), .y)', ':has(:is(.x), .y)', ':has(:where(.x), .y)', ':has(:has(.x), .y)', ':has(:nth-child(2), .y)', ':has(> .a + .b, .c)'];
+document.querySelector('#direct').setAttribute('class', 'a b c');
+var malformed = true;
+for (var i = 0; i != bad.length; i = i + 1)
+  if (document.querySelector('#anchor' + bad[i]) !== null) malformed = false;
+verify(malformed);
+var eventMatched = false;
+var eventMetadata = false;
+document.querySelector('#scope').addEventListener('click', function(event) {
+  eventMatched = event.currentTarget.matches(':has(.missing, #event-button)');
+  eventMetadata = event.target === document.querySelector('#event-button') && event.currentTarget === document.querySelector('#scope') && event.eventPhase === 3 && event.defaultPrevented === false;
+  document.querySelector('#result').textContent = 'event=' + eventMatched + ':metadata=' + eventMetadata + ':assertions=' + assertions + ':failures=' + failures + ':failed=' + failedIndexes;
+});
+document.querySelector('#result').textContent = 'initial:assertions=' + assertions + ':failures=' + failures + ':malformed=' + malformed + ':pairs=' + pairChecks + ':pairFailures=' + pairFailures + ':failed=' + failedIndexes;
+</script>
+</body>
+</html>

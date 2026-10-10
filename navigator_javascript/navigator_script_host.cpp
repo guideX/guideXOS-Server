@@ -402,6 +402,13 @@ bool storeSelectorClassTokens(SourceView source,
     }
     selector.classTokenCount = static_cast<std::uint8_t>(uniqueCount);
     for (std::size_t index = 0u; index < uniqueCount; ++index) {
+        if (index != 0u) {
+            if (storage.textLength >= kNavigatorScriptMaxSelectorLength)
+                return false;
+            // A NUL separator keeps the parsed token block compact while
+            // using space that was already occupied by a source separator.
+            storage.text[storage.textLength++] = '\0';
+        }
         NavigatorScriptSimpleSelectorDescriptor::ClassTokenRange& stored =
             selector.classTokens[index];
         if (!copySelectorPart(storage, source, tokens[index].offset,
@@ -813,7 +820,11 @@ bool findLogicalArgumentClose(SourceView source, std::size_t open,
 bool parseHasPseudo(SourceView source, std::size_t colon, std::size_t end,
     NavigatorScriptSelectorDescriptor& storage,
     NavigatorScriptSimpleSelectorCoreDescriptor& selector,
-    NavigatorScriptSimpleSelectorCoreDescriptor* innerStorage);
+    NavigatorScriptSimpleSelectorCoreDescriptor* innerStorage,
+    std::int16_t& argumentCount, std::int16_t& secondArgumentInfo);
+
+NavigatorScriptStatePseudo hasPseudoForRelation(
+    NavigatorScriptRelativeSelectorRelation relation);
 
 bool parseSimpleSelectorCore(SourceView source, std::size_t begin,
     std::size_t end, NavigatorScriptSelectorDescriptor& storage,
@@ -889,7 +900,7 @@ bool parseSimpleSelectorCore(SourceView source, std::size_t begin,
         if (isHas) {
             if (selector.statePseudo != NavigatorScriptStatePseudo::None ||
                 !parseHasPseudo(source, position, end, storage, selector,
-                    logicalSelector))
+                    logicalSelector, nthA, nthB))
                 return false;
             position = end;
         } else {
@@ -946,7 +957,8 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
 bool parseHasPseudo(SourceView source, std::size_t colon, std::size_t end,
     NavigatorScriptSelectorDescriptor& storage,
     NavigatorScriptSimpleSelectorCoreDescriptor& selector,
-    NavigatorScriptSimpleSelectorCoreDescriptor* innerStorage)
+    NavigatorScriptSimpleSelectorCoreDescriptor* innerStorage,
+    std::int16_t& argumentCount, std::int16_t& secondArgumentInfo)
 {
     std::size_t open = end;
     for (std::size_t index = colon + 1u; index < end; ++index) {
@@ -959,55 +971,159 @@ bool parseHasPseudo(SourceView source, std::size_t colon, std::size_t end,
         lowerAscii(static_cast<unsigned char>(source.data[colon + 2u])) != 'a' ||
         lowerAscii(static_cast<unsigned char>(source.data[colon + 3u])) != 's')
         return false;
-    std::size_t begin = open + 1u;
-    std::size_t finish = end - 1u;
-    while (begin < finish &&
-        isSelectorAsciiWhitespace(source.data[begin])) ++begin;
-    while (finish > begin &&
-        isSelectorAsciiWhitespace(source.data[finish - 1u])) --finish;
-    if (begin == finish || innerStorage == nullptr) return false;
-    NavigatorScriptSelectorRelation relation =
-        NavigatorScriptSelectorRelation::Descendant;
-    if (source.data[begin] == '>' || source.data[begin] == '+' ||
-        source.data[begin] == '~') {
-        const char token = source.data[begin++];
-        relation = token == '>' ? NavigatorScriptSelectorRelation::Child :
-            token == '+' ? NavigatorScriptSelectorRelation::AdjacentSibling :
-                NavigatorScriptSelectorRelation::GeneralSibling;
-        while (begin < finish &&
-            isSelectorAsciiWhitespace(source.data[begin])) ++begin;
-    }
-    if (begin == finish) return false;
-    // The shared core parser rejects nested functional pseudos and compounds
-    // with multiple pseudo predicates. Check explicit top-level combinators
-    // and whitespace before delegating the single core.
+    if (innerStorage == nullptr) return false;
+
+    std::array<SelectorSourceRange, 2u> arguments{};
+    std::size_t argumentTotal = 0u;
+    std::size_t argumentBegin = open + 1u;
+    const std::size_t argumentEnd = end - 1u;
     bool inAttribute = false;
     char quote = '\0';
-    for (std::size_t i = begin; i < finish; ++i) {
-        const char c = source.data[i];
+    for (std::size_t index = argumentBegin; index < argumentEnd; ++index) {
+        const char character = source.data[index];
         if (inAttribute) {
-            if (quote != '\0') { if (c == quote) quote = '\0'; }
-            else if (c == '"' || c == '\'') quote = c;
-            else if (c == ']') inAttribute = false;
+            if (quote != '\0') {
+                if (character == quote) quote = '\0';
+            } else if (character == '"' || character == '\'') {
+                quote = character;
+            } else if (character == '[' || character == '(' ||
+                character == ')') {
+                return false;
+            } else if (character == ']') {
+                inAttribute = false;
+            }
             continue;
         }
-        if (c == '[') { inAttribute = true; continue; }
-        if (c == '(' || c == ')' || c == ',' || c == '>' || c == '+' ||
-            c == '~' || isSelectorAsciiWhitespace(c)) return false;
+        if (character == '[') {
+            inAttribute = true;
+            continue;
+        }
+        // Functional nesting is outside the bounded relative core. Reject it
+        // before splitting so nested commas can never become list separators.
+        if (character == '(' || character == ')') return false;
+        if (character != ',') continue;
+        if (argumentTotal >= 1u) return false;
+        arguments[argumentTotal++] = {argumentBegin, index - argumentBegin};
+        argumentBegin = index + 1u;
     }
-    std::int16_t innerA = 0;
-    std::int16_t innerB = 0;
-    NavigatorScriptSimpleSelectorCoreDescriptor inner;
-    if (!parseSimpleSelectorCore(source, begin, finish, storage, inner,
-            innerA, innerB, nullptr, false, false)) return false;
-    selector.statePseudo = relation == NavigatorScriptSelectorRelation::Child
-        ? NavigatorScriptStatePseudo::HasChild
-        : relation == NavigatorScriptSelectorRelation::AdjacentSibling
-            ? NavigatorScriptStatePseudo::HasAdjacentSibling
-            : relation == NavigatorScriptSelectorRelation::GeneralSibling
-                ? NavigatorScriptStatePseudo::HasGeneralSibling
-                : NavigatorScriptStatePseudo::HasDescendant;
-    *innerStorage = inner;
+    if (inAttribute || quote != '\0') return false;
+    arguments[argumentTotal++] = {argumentBegin, argumentEnd - argumentBegin};
+    if (argumentTotal == 0u || argumentTotal > 2u) return false;
+
+    const auto trimArgument = [&source](SelectorSourceRange& range) {
+        while (range.length != 0u &&
+            isSelectorAsciiWhitespace(source.data[range.offset])) {
+            ++range.offset;
+            --range.length;
+        }
+        while (range.length != 0u && isSelectorAsciiWhitespace(
+                source.data[range.offset + range.length - 1u])) --range.length;
+        return range.length != 0u;
+    };
+    if (!trimArgument(arguments[0]) ||
+        (argumentTotal == 2u && !trimArgument(arguments[1]))) return false;
+
+    const auto parseArgument = [&source, &storage](
+        const SelectorSourceRange& range,
+        NavigatorScriptSimpleSelectorCoreDescriptor& core,
+        NavigatorScriptRelativeSelectorRelation& relation) {
+        std::size_t begin = range.offset;
+        const std::size_t finish = range.offset + range.length;
+        relation = NavigatorScriptRelativeSelectorRelation::Descendant;
+        if (source.data[begin] == '>' || source.data[begin] == '+' ||
+            source.data[begin] == '~') {
+            const char token = source.data[begin++];
+            relation = token == '>'
+                ? NavigatorScriptRelativeSelectorRelation::Child
+                : token == '+'
+                    ? NavigatorScriptRelativeSelectorRelation::AdjacentSibling
+                    : NavigatorScriptRelativeSelectorRelation::GeneralSibling;
+            while (begin < finish &&
+                isSelectorAsciiWhitespace(source.data[begin])) ++begin;
+        }
+        if (begin == finish) return false;
+        // The shared core parser rejects unsupported functional pseudos. This
+        // boundary check rejects relation chains and residual inner whitespace.
+        bool attribute = false;
+        char attributeQuote = '\0';
+        for (std::size_t index = begin; index < finish; ++index) {
+            const char character = source.data[index];
+            if (attribute) {
+                if (attributeQuote != '\0') {
+                    if (character == attributeQuote) attributeQuote = '\0';
+                } else if (character == '"' || character == '\'') {
+                    attributeQuote = character;
+                } else if (character == ']') {
+                    attribute = false;
+                }
+                continue;
+            }
+            if (character == '[') { attribute = true; continue; }
+            if (character == '(' || character == ')' || character == ',' ||
+                character == '>' || character == '+' || character == '~' ||
+                isSelectorAsciiWhitespace(character)) return false;
+        }
+        std::int16_t innerA = 0;
+        std::int16_t innerB = 0;
+        return parseSimpleSelectorCore(source, begin, finish, storage, core,
+            innerA, innerB, nullptr, false, false);
+    };
+
+    NavigatorScriptRelativeSelectorRelation firstRelation =
+        NavigatorScriptRelativeSelectorRelation::Descendant;
+    NavigatorScriptSimpleSelectorCoreDescriptor firstCore;
+    if (!parseArgument(arguments[0], firstCore, firstRelation)) return false;
+
+    selector.statePseudo = hasPseudoForRelation(firstRelation);
+    *innerStorage = firstCore;
+    argumentCount = 1;
+    secondArgumentInfo = 0;
+    if (argumentTotal == 1u) return true;
+
+    if (storage.hasSecondArgumentCount >= storage.hasSecondArguments.size())
+        return false;
+    NavigatorScriptRelativeSelectorRelation secondRelation =
+        NavigatorScriptRelativeSelectorRelation::Descendant;
+    NavigatorScriptSimpleSelectorCoreDescriptor secondCore;
+    if (!parseArgument(arguments[1], secondCore, secondRelation)) return false;
+
+    NavigatorScriptCompactRelativeSelectorCoreDescriptor compact;
+    compact.valid = secondCore.valid;
+    compact.universal = secondCore.universal;
+    compact.tagOffset = secondCore.tagOffset;
+    compact.tagLength = secondCore.tagLength;
+    compact.idOffset = secondCore.idOffset;
+    compact.idLength = secondCore.idLength;
+    compact.classTokenCount = secondCore.classTokenCount;
+    if (secondCore.classTokenCount != 0u) {
+        if (secondCore.classTokenCount > kNavigatorScriptMaxClassQueryTokens)
+            return false;
+        const auto& firstToken = secondCore.classTokens[0];
+        const auto& lastToken =
+            secondCore.classTokens[secondCore.classTokenCount - 1u];
+        const std::size_t blockBegin = firstToken.offset;
+        const std::size_t blockEnd =
+            static_cast<std::size_t>(lastToken.offset) + lastToken.length;
+        if (blockEnd <= blockBegin || blockEnd - blockBegin >
+                std::numeric_limits<std::uint8_t>::max()) return false;
+        compact.classBlockOffset = static_cast<std::uint8_t>(blockBegin);
+        compact.classBlockLength = static_cast<std::uint8_t>(
+            blockEnd - blockBegin);
+    }
+    compact.hasAttributePredicate = secondCore.hasAttributePredicate;
+    compact.attributeValuePresent = secondCore.attributeValuePresent;
+    compact.attributeNameOffset = secondCore.attributeNameOffset;
+    compact.attributeNameLength = secondCore.attributeNameLength;
+    compact.attributeValueOffset = secondCore.attributeValueOffset;
+    compact.attributeValueLength = secondCore.attributeValueLength;
+    compact.statePseudo = secondCore.statePseudo;
+
+    const std::uint8_t poolIndex = storage.hasSecondArgumentCount;
+    storage.hasSecondArguments[poolIndex] = compact;
+    ++storage.hasSecondArgumentCount;
+    argumentCount = 2;
+    secondArgumentInfo = static_cast<std::int16_t>(
+        (static_cast<std::uint16_t>(secondRelation) << 3u) | poolIndex);
     return true;
 }
 
@@ -1218,6 +1334,107 @@ SourceView selectorPart(const NavigatorScriptSelectorDescriptor& storage,
     std::uint16_t offset, std::uint16_t length)
 {
     return SourceView(storage.text.data() + offset, length);
+}
+
+bool isHasStatePseudo(NavigatorScriptStatePseudo pseudo)
+{
+    return pseudo == NavigatorScriptStatePseudo::HasDescendant ||
+        pseudo == NavigatorScriptStatePseudo::HasChild ||
+        pseudo == NavigatorScriptStatePseudo::HasAdjacentSibling ||
+        pseudo == NavigatorScriptStatePseudo::HasGeneralSibling;
+}
+
+NavigatorScriptRelativeSelectorRelation relativeRelationForHasPseudo(
+    NavigatorScriptStatePseudo pseudo)
+{
+    return pseudo == NavigatorScriptStatePseudo::HasChild
+        ? NavigatorScriptRelativeSelectorRelation::Child
+        : pseudo == NavigatorScriptStatePseudo::HasAdjacentSibling
+            ? NavigatorScriptRelativeSelectorRelation::AdjacentSibling
+            : pseudo == NavigatorScriptStatePseudo::HasGeneralSibling
+                ? NavigatorScriptRelativeSelectorRelation::GeneralSibling
+                : NavigatorScriptRelativeSelectorRelation::Descendant;
+}
+
+NavigatorScriptStatePseudo hasPseudoForRelation(
+    NavigatorScriptRelativeSelectorRelation relation)
+{
+    return relation == NavigatorScriptRelativeSelectorRelation::Child
+        ? NavigatorScriptStatePseudo::HasChild
+        : relation == NavigatorScriptRelativeSelectorRelation::AdjacentSibling
+            ? NavigatorScriptStatePseudo::HasAdjacentSibling
+            : relation == NavigatorScriptRelativeSelectorRelation::GeneralSibling
+                ? NavigatorScriptStatePseudo::HasGeneralSibling
+                : NavigatorScriptStatePseudo::HasDescendant;
+}
+
+bool expandCompactRelativeCore(
+    const NavigatorScriptCompactRelativeSelectorCoreDescriptor& compact,
+    const NavigatorScriptSelectorDescriptor& storage,
+    NavigatorScriptSimpleSelectorCoreDescriptor& expanded)
+{
+    if (!compact.valid || storage.textLength >
+            kNavigatorScriptMaxSelectorLength ||
+        compact.classTokenCount > kNavigatorScriptMaxClassQueryTokens)
+        return false;
+    expanded = NavigatorScriptSimpleSelectorCoreDescriptor();
+    expanded.valid = compact.valid;
+    expanded.universal = compact.universal;
+    expanded.tagOffset = compact.tagOffset;
+    expanded.tagLength = compact.tagLength;
+    expanded.idOffset = compact.idOffset;
+    expanded.idLength = compact.idLength;
+    expanded.classTokenCount = compact.classTokenCount;
+    expanded.hasAttributePredicate = compact.hasAttributePredicate;
+    expanded.attributeValuePresent = compact.attributeValuePresent;
+    expanded.attributeNameOffset = compact.attributeNameOffset;
+    expanded.attributeNameLength = compact.attributeNameLength;
+    expanded.attributeValueOffset = compact.attributeValueOffset;
+    expanded.attributeValueLength = compact.attributeValueLength;
+    expanded.statePseudo = compact.statePseudo;
+
+    if (compact.classTokenCount == 0u)
+        return compact.classBlockLength == 0u;
+    const std::size_t blockBegin = compact.classBlockOffset;
+    const std::size_t blockEnd = blockBegin + compact.classBlockLength;
+    if (compact.classBlockLength == 0u || blockEnd > storage.textLength ||
+        blockEnd > kNavigatorScriptMaxSelectorLength) return false;
+    std::size_t position = blockBegin;
+    for (std::size_t index = 0u; index < compact.classTokenCount; ++index) {
+        const std::size_t tokenBegin = position;
+        while (position < blockEnd && storage.text[position] != '\0')
+            ++position;
+        if (position == tokenBegin || position - tokenBegin >
+                std::numeric_limits<std::uint8_t>::max()) return false;
+        expanded.classTokens[index].offset =
+            static_cast<std::uint8_t>(tokenBegin);
+        expanded.classTokens[index].length =
+            static_cast<std::uint8_t>(position - tokenBegin);
+        if (index + 1u < compact.classTokenCount) {
+            if (position >= blockEnd || storage.text[position] != '\0')
+                return false;
+            ++position;
+        }
+    }
+    return position == blockEnd;
+}
+
+bool hasSecondArgumentInfo(std::int16_t packedInfo,
+    const NavigatorScriptSelectorDescriptor& storage,
+    std::uint8_t& poolIndex,
+    NavigatorScriptRelativeSelectorRelation& relation)
+{
+    if (packedInfo < 0) return false;
+    const std::uint16_t packed = static_cast<std::uint16_t>(packedInfo);
+    poolIndex = static_cast<std::uint8_t>(packed & 0x7u);
+    const std::uint16_t relationValue = packed >> 3u;
+    if (relationValue > static_cast<std::uint16_t>(
+            NavigatorScriptRelativeSelectorRelation::GeneralSibling) ||
+        storage.hasSecondArgumentCount > storage.hasSecondArguments.size() ||
+        poolIndex >= storage.hasSecondArgumentCount) return false;
+    relation = static_cast<NavigatorScriptRelativeSelectorRelation>(
+        relationValue);
+    return true;
 }
 
 bool selectorTextEquals(SourceView left, SourceView right)
@@ -3559,9 +3776,35 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
         const NavigatorScriptSimpleSelectorDescriptor& leftSimple,
         const NavigatorScriptSelectorDescriptor& right,
         const NavigatorScriptSimpleSelectorDescriptor& rightSimple) {
+        if (!coreEqual(left, leftSimple, right, rightSimple)) return false;
+        if (isHasStatePseudo(leftSimple.statePseudo)) {
+            if (leftSimple.nthA != rightSimple.nthA ||
+                (leftSimple.nthA != 1 && leftSimple.nthA != 2) ||
+                !coreEqual(left, leftSimple.logicalSelector, right,
+                    rightSimple.logicalSelector)) return false;
+            if (leftSimple.nthA == 1)
+                return leftSimple.nthB == 0 && rightSimple.nthB == 0;
+            std::uint8_t leftIndex = 0u;
+            std::uint8_t rightIndex = 0u;
+            NavigatorScriptRelativeSelectorRelation leftRelation =
+                NavigatorScriptRelativeSelectorRelation::Descendant;
+            NavigatorScriptRelativeSelectorRelation rightRelation =
+                NavigatorScriptRelativeSelectorRelation::Descendant;
+            NavigatorScriptSimpleSelectorCoreDescriptor leftSecond;
+            NavigatorScriptSimpleSelectorCoreDescriptor rightSecond;
+            if (!hasSecondArgumentInfo(leftSimple.nthB, left, leftIndex,
+                    leftRelation) ||
+                !hasSecondArgumentInfo(rightSimple.nthB, right, rightIndex,
+                    rightRelation) || leftRelation != rightRelation ||
+                !expandCompactRelativeCore(left.hasSecondArguments[leftIndex],
+                    left, leftSecond) ||
+                !expandCompactRelativeCore(
+                    right.hasSecondArguments[rightIndex], right,
+                    rightSecond)) return false;
+            return coreEqual(left, leftSecond, right, rightSecond);
+        }
         if (leftSimple.nthA != rightSimple.nthA ||
-            leftSimple.nthB != rightSimple.nthB ||
-            !coreEqual(left, leftSimple, right, rightSimple)) return false;
+            leftSimple.nthB != rightSimple.nthB) return false;
         const bool hasLogicalPseudo =
             leftSimple.statePseudo == NavigatorScriptStatePseudo::Not ||
             leftSimple.statePseudo == NavigatorScriptStatePseudo::Is ||
@@ -3874,25 +4117,30 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
         core.statePseudo == NavigatorScriptStatePseudo::Not ||
         core.statePseudo == NavigatorScriptStatePseudo::Is ||
         core.statePseudo == NavigatorScriptStatePseudo::Where;
-    if (core.statePseudo == NavigatorScriptStatePseudo::HasDescendant ||
-        core.statePseudo == NavigatorScriptStatePseudo::HasChild ||
-        core.statePseudo == NavigatorScriptStatePseudo::HasAdjacentSibling ||
-        core.statePseudo == NavigatorScriptStatePseudo::HasGeneralSibling) {
+    if (isHasStatePseudo(core.statePseudo)) {
         const MatchResult conditions = selectorCoreConditionsMatchResult(
             element, core, storage);
         if (conditions != MatchResult::Match) return conditions;
         const HostObjectReference anchor{element.serial, generation_,
             kNavigatorElementHostKind};
-        const NavigatorScriptRelativeSelectorRelation relation =
-            core.statePseudo == NavigatorScriptStatePseudo::HasChild
-                ? NavigatorScriptRelativeSelectorRelation::Child
-                : core.statePseudo == NavigatorScriptStatePseudo::HasAdjacentSibling
-                    ? NavigatorScriptRelativeSelectorRelation::AdjacentSibling
-                    : core.statePseudo == NavigatorScriptStatePseudo::HasGeneralSibling
-                        ? NavigatorScriptRelativeSelectorRelation::GeneralSibling
-                        : NavigatorScriptRelativeSelectorRelation::Descendant;
-        return selectorRelativeElementMatchResult(anchor, relation,
+        if (selector.nthA != 1 && selector.nthA != 2)
+            return MatchResult::Invalid;
+        const MatchResult first = selectorRelativeElementMatchResult(anchor,
+            relativeRelationForHasPseudo(core.statePseudo),
             selector.logicalSelector, 0, 0, storage);
+        if (first != MatchResult::NoMatch || selector.nthA == 1)
+            return first;
+
+        std::uint8_t poolIndex = 0u;
+        NavigatorScriptRelativeSelectorRelation secondRelation =
+            NavigatorScriptRelativeSelectorRelation::Descendant;
+        NavigatorScriptSimpleSelectorCoreDescriptor secondCore;
+        if (!hasSecondArgumentInfo(selector.nthB, storage, poolIndex,
+                secondRelation) ||
+            !expandCompactRelativeCore(storage.hasSecondArguments[poolIndex],
+                storage, secondCore)) return MatchResult::Invalid;
+        return selectorRelativeElementMatchResult(anchor, secondRelation,
+            secondCore, 0, 0, storage);
     }
     if (!isLogicalPseudo)
         return selectorCoreElementMatchResult(element, core, selector.nthA,

@@ -178,6 +178,33 @@ struct NavigatorScriptSimpleSelectorDescriptor :
     NavigatorScriptSimpleSelectorCoreDescriptor logicalSelector;
 };
 
+// Compact parsed storage for the optional second :has() alternative. Class
+// tokens are stored as one NUL-separated block in the selector text buffer;
+// offsets and lengths for the other predicates remain fixed-width. Matching
+// expands this into the established JS62 core on the stack and calls the same
+// relative evaluator used by JS63.
+struct NavigatorScriptCompactRelativeSelectorCoreDescriptor {
+    bool valid = false;
+    bool universal = false;
+    std::uint8_t tagOffset = 0;
+    std::uint16_t tagLength = 0;
+    std::uint8_t idOffset = 0;
+    std::uint8_t idLength = 0;
+    std::uint8_t classTokenCount = 0;
+    std::uint8_t classBlockOffset = 0;
+    std::uint8_t classBlockLength = 0;
+    bool hasAttributePredicate = false;
+    bool attributeValuePresent = false;
+    std::uint8_t attributeNameOffset = 0;
+    std::uint8_t attributeNameLength = 0;
+    std::uint8_t attributeValueOffset = 0;
+    std::uint8_t attributeValueLength = 0;
+    NavigatorScriptStatePseudo statePseudo =
+        NavigatorScriptStatePseudo::None;
+};
+static_assert(sizeof(NavigatorScriptCompactRelativeSelectorCoreDescriptor) ==
+    18u, "JS64 second relative cores must use compact bounded storage");
+
 enum class NavigatorScriptSelectorMatchResult : std::uint8_t {
     Invalid = 0u,
     NoMatch,
@@ -224,6 +251,13 @@ struct NavigatorScriptSelectorDescriptor {
     std::uint8_t memberCount = 0;
     std::array<NavigatorScriptSelectorMemberDescriptor,
         kNavigatorScriptMaxSelectorListMembers> members{};
+    // At most two simple selectors per outer member can own :has(), so this
+    // fixed pool covers all eight possible second alternatives. nthA/nthB on
+    // a :has() simple selector hold its explicit count and packed pool/relation
+    // metadata without growing every simple-selector descriptor.
+    std::array<NavigatorScriptCompactRelativeSelectorCoreDescriptor,
+        kNavigatorScriptMaxSelectorListMembers * 2u> hasSecondArguments{};
+    std::uint8_t hasSecondArgumentCount = 0;
 };
 
 // The adapter never stores a JavaScript pointer and never creates a

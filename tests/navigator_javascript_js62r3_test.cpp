@@ -1084,10 +1084,10 @@ int main()
         "JS62R2 does not grow the shared selector core");
     static_assert(sizeof(NavigatorScriptSimpleSelectorDescriptor) == 68u,
         "JS62R2 does not grow the simple selector descriptor");
-    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 812u,
-        "JS62R2 does not grow the four-member selector descriptor");
-    static_assert(NavigatorScriptRelativeSelectorTestAccess::collectionRecordBytes() == 832u,
-        "JS62R2 does not grow selector collection records");
+    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 958u,
+        "JS62R3 preserves the JS64 bounded descriptor size");
+    static_assert(NavigatorScriptRelativeSelectorTestAccess::collectionRecordBytes() == 976u,
+        "JS62R3 preserves the JS64 selector collection size");
     static_assert(sizeof(gxos::web::HtmlElementRef) == 440u,
         "JS62R2 does not grow structural Elements");
     static_assert(sizeof(gxos::web::HtmlElementContentMetadata) == 24u,

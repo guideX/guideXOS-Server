@@ -687,10 +687,10 @@ int main()
     const std::size_t selectorDescriptor = sizeof(
         gxos::javascript::NavigatorScriptSelectorDescriptor);
     const std::size_t collectionRecord = (16u + selectorDescriptor + 7u) / 8u * 8u;
-    expect(simpleSelector == 68u && selectorDescriptor == 812u &&
-        collectionRecord == 832u && collectionRecord *
-            gxos::javascript::kNavigatorScriptMaxSelectorCollections == 106496u,
-        "JS59 adds a bounded inner core while preserving fixed collection storage");
+    expect(simpleSelector == 68u && selectorDescriptor == 958u &&
+        collectionRecord == 976u && collectionRecord *
+            gxos::javascript::kNavigatorScriptMaxSelectorCollections == 124928u,
+        "JS64 compact second-argument pool preserves bounded collection storage");
 
     if (failures != 0) {
         std::cerr << failures << " JS58 test failure(s) across " << checks
