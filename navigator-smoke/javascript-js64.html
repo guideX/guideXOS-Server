@@ -10,6 +10,10 @@
     <i id="comma" data-key="alpha,beta"></i>
   </section>
   <b id="adjacent"></b><i id="gap"></i><b id="later"></b>
+  <section id="unsupported">
+    <div class="a"><div class="b"><i class="c"></i></div></div>
+    <div class="one"></div><div class="two"></div><div class="three"></div>
+  </section>
   <section id="card"><i id="warning" class="warning"></i><b id="error" class="error"></b></section>
   <section id="child-anchor"><i id="icon" class="icon"></i></section>
   <b id="badge" class="badge"></b>
@@ -108,11 +112,11 @@ verify(pairChecks === 48 && pairFailures === 0);
 var poolSelector = 'div:has(.missing,.a)>span:has(.missing,.c)';
 var poolQuery = document.querySelectorAll(poolSelector + ',' + poolSelector + ',' + poolSelector + ',' + poolSelector);
 verify(poolQuery.length === 4 && poolQuery[0].matches('#span1') && poolQuery[1].matches('#span2') && poolQuery[2].matches('#span3') && poolQuery[3].matches('#span4'));
-var bad = [':has()', ':has( )', ':has(, .a)', ':has(.a,)', ':has(.a,,.b)', ':has(.a,.b,.c)', ':has(.a .b, .c)', ':has(.a > .b, .c)', ':has(:not(.x), .y)', ':has(:is(.x), .y)', ':has(:where(.x), .y)', ':has(:has(.x), .y)', ':has(:nth-child(2), .y)', ':has(> .a + .b, .c)'];
+var bad = [':has()', ':has( )', ':has(, .a)', ':has(.a,)', ':has(.a,,.b)', ':has(.a,.b,.c)', ':has(.a .b .c)', ':has(.a, .b, .c)', ':has(:not(.x), .y)', ':has(:is(.x), .y)', ':has(:where(.x), .y)', ':has(:has(.x), .y)', ':has(:nth-child(2), .y)', ':has(> .a + .b + .c)'];
 document.querySelector('#direct').setAttribute('class', 'a b c');
 var malformed = true;
 for (var i = 0; i != bad.length; i = i + 1)
-  if (document.querySelector('#anchor' + bad[i]) !== null) malformed = false;
+  if (document.querySelector('#unsupported' + bad[i]) !== null) malformed = false;
 verify(malformed);
 var eventMatched = false;
 var eventMetadata = false;

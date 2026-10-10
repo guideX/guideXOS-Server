@@ -52,8 +52,8 @@ int main()
         "JS62 must reuse the JS59-JS61 shared selector core");
     static_assert(sizeof(NavigatorScriptSimpleSelectorDescriptor) == 68u,
         "JS62 must not grow the simple selector descriptor");
-    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 958u,
-        "JS64 uses only the fixed compact second-argument pool");
+    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 1278u,
+        "JS65 uses only the fixed compact chained-core pool");
     static_assert(sizeof(gxos::web::HtmlElementRef) == 440u,
         "JS62 must not grow document Element records");
     NavigatorScriptExecutionHarness harness;

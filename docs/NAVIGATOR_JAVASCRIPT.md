@@ -7198,3 +7198,97 @@ per `:has()` and four outer selector-list members. If later work needs a larger
 inner list or relation chains, qualify its storage and near-capacity cost in
 its own phase; otherwise select the next distinct selector capability from
 the project roadmap without widening this grammar implicitly.
+
+#### JS65 bounded two-step relative `:has()` chains (2026-10-10)
+
+JS65 extends each of JS64's at most two independent `:has()` alternatives
+with an optional second simple/compound selector step. The first relation is
+still relative to the original subject; the optional second relation is
+relative to each matching intermediate element. Descendant, child, adjacent
+sibling, and general sibling are independently accepted in both positions.
+The complete chain must match; an intermediate match alone is not sufficient.
+Alternatives retain OR semantics and stop after the first complete match.
+Outer selector lists, scoped query behavior, `matches()`, `closest()`, and
+Event callback matching continue to use the shared bounded selector path.
+
+The parser accepts one or two steps per alternative, at most two alternatives,
+and keeps the 256-byte selector-source limit. It rejects a third step, a third
+alternative, missing operands, invalid/repeated combinators, nested `:has()`,
+and newly nested functional expressions. The four existing relationships are
+all valid at either chain edge, for 16 ordered relation pairs. Chained matching
+is iterative and bounded by the 1,024-node document capacity; it does not
+retain parsed source pointers, recurse through selector chains, or allocate
+heap memory. A fixed 128-byte stack-local bitset records the first relation's
+candidate nodes once per chain evaluation, avoiding repeated whole-document
+anchor-relation scans while checking terminal candidates.
+
+JS65 keeps the existing 32-byte shared core and 68-byte simple-selector
+descriptor. One 4-byte expression record stores the optional chain and
+alternative metadata; a fixed pool of 24 compact 18-byte cores supports up to
+three additional cores for each of eight possible `:has()` expressions across
+four outer members. The measured four-member selector descriptor is 1,278 B,
+the selector collection record is 1,296 B, and the 128-record collection
+registry is 165,888 B. Against JS64, the descriptor and record each grow by
+320 B, and the registry grows by 40,960 B. No document-owned storage was
+added. GCC 15.2 C++17 `-O2 -fstack-usage` reports 112 B for
+`parseBoundedSelector`, 176 B for `parseBoundedSelectorMember`, 528 B for
+`parseSimpleSelectorCore`, and 208 B for the alternative parser callback. The
+measured nested parser path is 1,552 B, compared with JS64's 720 B. The chain
+evaluator frame is 96 B; the relation evaluator frame that owns the bounded
+scratch is 464 B. These are compiler-reported static frames, not a whole-task
+stack high-water measurement.
+
+The focused JS65 native suite passed **18/18 checks**, including strict
+warnings-as-errors compilation, every ordered relation pair in positive and
+negative states, late candidates, unrelated-branch and wrong-side negatives,
+OR behavior, invalid grammar, repeated valid/invalid input, exact 256/257-byte
+limits, and 1,024-element capacity fixtures. JS63 remained **8/8** and JS64
+remained **24/24**. JS65's full-false 1,024-element descendant-chain case
+measured 2,374 microseconds for one direct evaluation in the final matrix run;
+20 late-success chained evaluations measured 5,322 microseconds. A dedicated
+optimized run measured 1,792 and 5,092 microseconds respectively. These are
+observations without timing thresholds. JS64's 1,024-element second-
+alternative true branch measured 27,167 microseconds for 20 calls in the
+final matrix run (11,840 microseconds in the dedicated run). That JS64 case is
+not a like-for-like chain workload, so these values are recorded without a
+speedup claim. The new full-false chain workload was also used to identify and
+remove repeated anchor ancestry scans; its initial unoptimized observation was
+69,368 microseconds for one call.
+
+The complete JavaScript smoke matrix passed **67/67 scripts**. The hosted JS65
+fixture reported **17 assertions, 0 failures**, including all 16 relation
+pairs in true and false states, OR/short-circuit behavior, malformed and
+unsupported rejection, and repeated size-bound checks. Its three hosted
+aggregate checks passed, including Event callback target/currentTarget/phase/
+default-prevented metadata. The JS63 hosted fixture remained 32/32; JS64
+reported 37 assertions with 0 failures and 48/48 relation-pair cases. The
+hosted aggregate reported **623 passed / 7 failed / 630 total**. The same
+seven known CSS baseline checks remain: CSS 3C, CSS 3G, CSS 6A, three CSS 6B
+checks, and CSS 6C. The prior aggregate was 620/7/627; JS65 added three
+passing checks and no new failures. No CSS source changed.
+
+The production `build.bat` completed successfully. Its generated
+`guideXOSServer.exe` was 8,435,170 bytes with SHA-256
+`6F66B7127E16094CA43EF2B31FDF87F59002C3003632D191075902BC2CAAD995`; it was
+restored from the pre-run snapshot after hosted qualification. The hosted
+runner needed a bounded retry for `Get-Process.Path`, which can be empty just
+after process launch; it now fails clearly after the retry window and stops
+only its own launched app on early failure. The successful hosted aggregate
+uses the exact built executable and fixture path. The generated fixture/log,
+downloads, executable, and tracked desktop/config state are covered by the
+pre-run artifact snapshot and were restored byte-for-byte.
+
+The hosted selectors were exercised through Navigator's production server and
+browser harness. An additional independent browser-reference comparison was
+not available because local `file:` access was blocked by the computer-use
+safety layer; no alternate protocol was attempted. No kernel build or QEMU
+run was performed for this hosted selector change, and no guest validation is
+claimed. The repository's starting HEAD and JS62–JS64 source, tests, and this
+document provide phase evidence; this checkout has no `.phase` marker, and
+none was created or changed.
+
+**Outcome A — Bounded two-step relative `:has()` chains qualified.** The
+supported maximum remains two steps and two alternatives per `:has()`. Keep
+larger chain/list capacity out of scope; JS66 should be selected as a separate,
+explicitly bounded selector capability after this implementation is
+committed.

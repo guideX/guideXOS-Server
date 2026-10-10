@@ -33,6 +33,7 @@ int main()
         "<button id='first' class='item hot' data-state='ready'></button>"
         "<i id='middle'></i><b id='later' class='target'></b>"
         "<div id='deep'><em id='deep-target' class='deep'></em></div>"
+        "<div class='a'><div class='b'><i class='c'></i></div></div>"
         "</section><aside id='outside' class='target'></aside>"
         "<form id='form'><input id='check' type='checkbox' checked></form>"
         "</div></body></html>";
@@ -53,7 +54,8 @@ var ok = panel.matches(':has(.item)') && panel.matches(':has(> .item)') &&
  !panel.matches(':has(> .deep)') && first.matches(':has(+ #middle)') &&
  !first.matches(':has(+ .target)') && first.matches(':has(~ .target)') &&
  !later.matches(':has(~ .item)') && !panel.matches(':has(+ .target)') &&
- !panel.matches(':has(~ .target)') && deep.matches(':has(em.deep)');
+ !panel.matches(':has(~ .target)') && deep.matches(':has(em.deep)') &&
+ root.matches(':has(> .panel .deep)');
 )JS", "four relation match boundaries and strict descendant semantics");
     expect(harness, R"JS(
 var q = document.querySelector('section:has(> button.item[data-state=ready])');
@@ -83,7 +85,7 @@ var ok = live.length === 0 && attrLive.length === 1;
     expect(harness, R"JS(
 var bad = [':has()', ':has( )', ':has(>)', ':has(+)', ':has(~)',
  ':has(> + .x)', ':has(|| .x)', ':has(>> .x)', ':has(++ .x)',
- ':has(.a, .b)', ':has(.a .b)', ':has(.a > .b)', ':has(> .a .b)',
+ ':has(.a .b .c)', ':has(.a, .b, .c)', ':has(> .a + .b + .c)',
  ':has(:not(.x))', ':has(:is(.x))', ':has(:where(.x))',
  ':has(:has(.x))', ':has(:nth-child(2))', ':has(.x):focus'];
 var ok = true;

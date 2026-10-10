@@ -1023,107 +1023,184 @@ bool parseHasPseudo(SourceView source, std::size_t colon, std::size_t end,
     if (!trimArgument(arguments[0]) ||
         (argumentTotal == 2u && !trimArgument(arguments[1]))) return false;
 
-    const auto parseArgument = [&source, &storage](
-        const SelectorSourceRange& range,
-        NavigatorScriptSimpleSelectorCoreDescriptor& core,
-        NavigatorScriptRelativeSelectorRelation& relation) {
-        std::size_t begin = range.offset;
-        const std::size_t finish = range.offset + range.length;
-        relation = NavigatorScriptRelativeSelectorRelation::Descendant;
-        if (source.data[begin] == '>' || source.data[begin] == '+' ||
-            source.data[begin] == '~') {
-            const char token = source.data[begin++];
-            relation = token == '>'
-                ? NavigatorScriptRelativeSelectorRelation::Child
-                : token == '+'
-                    ? NavigatorScriptRelativeSelectorRelation::AdjacentSibling
-                    : NavigatorScriptRelativeSelectorRelation::GeneralSibling;
-            while (begin < finish &&
-                isSelectorAsciiWhitespace(source.data[begin])) ++begin;
-        }
-        if (begin == finish) return false;
-        // The shared core parser rejects unsupported functional pseudos. This
-        // boundary check rejects relation chains and residual inner whitespace.
-        bool attribute = false;
-        char attributeQuote = '\0';
-        for (std::size_t index = begin; index < finish; ++index) {
-            const char character = source.data[index];
-            if (attribute) {
-                if (attributeQuote != '\0') {
-                    if (character == attributeQuote) attributeQuote = '\0';
-                } else if (character == '"' || character == '\'') {
-                    attributeQuote = character;
-                } else if (character == ']') {
-                    attribute = false;
-                }
-                continue;
-            }
-            if (character == '[') { attribute = true; continue; }
-            if (character == '(' || character == ')' || character == ',' ||
-                character == '>' || character == '+' || character == '~' ||
-                isSelectorAsciiWhitespace(character)) return false;
-        }
-        std::int16_t innerA = 0;
-        std::int16_t innerB = 0;
-        return parseSimpleSelectorCore(source, begin, finish, storage, core,
-            innerA, innerB, nullptr, false, false);
+    struct ParsedAlternative {
+        NavigatorScriptRelativeSelectorRelation firstRelation =
+            NavigatorScriptRelativeSelectorRelation::Descendant;
+        NavigatorScriptSimpleSelectorCoreDescriptor firstCore;
+        bool hasSecondStep = false;
+        NavigatorScriptRelativeSelectorRelation secondRelation =
+            NavigatorScriptRelativeSelectorRelation::Descendant;
+        NavigatorScriptSimpleSelectorCoreDescriptor secondCore;
     };
 
-    NavigatorScriptRelativeSelectorRelation firstRelation =
-        NavigatorScriptRelativeSelectorRelation::Descendant;
-    NavigatorScriptSimpleSelectorCoreDescriptor firstCore;
-    if (!parseArgument(arguments[0], firstCore, firstRelation)) return false;
+    const auto relationForToken = [](char token) {
+        return token == '>'
+            ? NavigatorScriptRelativeSelectorRelation::Child
+            : token == '+'
+                ? NavigatorScriptRelativeSelectorRelation::AdjacentSibling
+                : NavigatorScriptRelativeSelectorRelation::GeneralSibling;
+    };
+    const auto parseAlternative = [&source, &storage, &relationForToken](
+        const SelectorSourceRange& range, ParsedAlternative& parsed) {
+        std::size_t position = range.offset;
+        const std::size_t finish = range.offset + range.length;
+        if (source.data[position] == '>' || source.data[position] == '+' ||
+            source.data[position] == '~') {
+            parsed.firstRelation = relationForToken(source.data[position++]);
+            while (position < finish &&
+                isSelectorAsciiWhitespace(source.data[position])) ++position;
+        }
 
-    selector.statePseudo = hasPseudoForRelation(firstRelation);
-    *innerStorage = firstCore;
-    argumentCount = 1;
-    secondArgumentInfo = 0;
-    if (argumentTotal == 1u) return true;
+        const auto scanCoreEnd = [&source, finish](std::size_t begin) {
+            bool inAttribute = false;
+            char attributeQuote = '\0';
+            for (std::size_t index = begin; index < finish; ++index) {
+                const char character = source.data[index];
+                if (inAttribute) {
+                    if (attributeQuote != '\0') {
+                        if (character == attributeQuote) attributeQuote = '\0';
+                    } else if (character == '"' || character == '\'') {
+                        attributeQuote = character;
+                    } else if (character == ']') {
+                        inAttribute = false;
+                    }
+                    continue;
+                }
+                if (character == '[') {
+                    inAttribute = true;
+                    continue;
+                }
+                if (character == '>' || character == '+' || character == '~' ||
+                    isSelectorAsciiWhitespace(character)) return index;
+            }
+            return finish;
+        };
+        const auto parseCore = [&source, &storage](std::size_t begin,
+            std::size_t end, NavigatorScriptSimpleSelectorCoreDescriptor& core) {
+            if (begin == end) return false;
+            std::int16_t innerA = 0;
+            std::int16_t innerB = 0;
+            return parseSimpleSelectorCore(source, begin, end, storage, core,
+                innerA, innerB, nullptr, false, false);
+        };
 
-    if (storage.hasSecondArgumentCount >= storage.hasSecondArguments.size())
-        return false;
-    NavigatorScriptRelativeSelectorRelation secondRelation =
-        NavigatorScriptRelativeSelectorRelation::Descendant;
-    NavigatorScriptSimpleSelectorCoreDescriptor secondCore;
-    if (!parseArgument(arguments[1], secondCore, secondRelation)) return false;
+        const std::size_t firstEnd = scanCoreEnd(position);
+        if (!parseCore(position, firstEnd, parsed.firstCore)) return false;
+        position = firstEnd;
+        bool separatedByWhitespace = false;
+        while (position < finish &&
+            isSelectorAsciiWhitespace(source.data[position])) {
+            separatedByWhitespace = true;
+            ++position;
+        }
+        if (position == finish) return true;
 
-    NavigatorScriptCompactRelativeSelectorCoreDescriptor compact;
-    compact.valid = secondCore.valid;
-    compact.universal = secondCore.universal;
-    compact.tagOffset = secondCore.tagOffset;
-    compact.tagLength = secondCore.tagLength;
-    compact.idOffset = secondCore.idOffset;
-    compact.idLength = secondCore.idLength;
-    compact.classTokenCount = secondCore.classTokenCount;
-    if (secondCore.classTokenCount != 0u) {
-        if (secondCore.classTokenCount > kNavigatorScriptMaxClassQueryTokens)
+        parsed.hasSecondStep = true;
+        if (source.data[position] == '>' || source.data[position] == '+' ||
+            source.data[position] == '~') {
+            parsed.secondRelation = relationForToken(source.data[position++]);
+            while (position < finish &&
+                isSelectorAsciiWhitespace(source.data[position])) ++position;
+        } else if (separatedByWhitespace) {
+            parsed.secondRelation =
+                NavigatorScriptRelativeSelectorRelation::Descendant;
+        } else {
             return false;
-        const auto& firstToken = secondCore.classTokens[0];
-        const auto& lastToken =
-            secondCore.classTokens[secondCore.classTokenCount - 1u];
-        const std::size_t blockBegin = firstToken.offset;
-        const std::size_t blockEnd =
-            static_cast<std::size_t>(lastToken.offset) + lastToken.length;
-        if (blockEnd <= blockBegin || blockEnd - blockBegin >
-                std::numeric_limits<std::uint8_t>::max()) return false;
-        compact.classBlockOffset = static_cast<std::uint8_t>(blockBegin);
-        compact.classBlockLength = static_cast<std::uint8_t>(
-            blockEnd - blockBegin);
-    }
-    compact.hasAttributePredicate = secondCore.hasAttributePredicate;
-    compact.attributeValuePresent = secondCore.attributeValuePresent;
-    compact.attributeNameOffset = secondCore.attributeNameOffset;
-    compact.attributeNameLength = secondCore.attributeNameLength;
-    compact.attributeValueOffset = secondCore.attributeValueOffset;
-    compact.attributeValueLength = secondCore.attributeValueLength;
-    compact.statePseudo = secondCore.statePseudo;
+        }
 
-    const std::uint8_t poolIndex = storage.hasSecondArgumentCount;
-    storage.hasSecondArguments[poolIndex] = compact;
-    ++storage.hasSecondArgumentCount;
-    argumentCount = 2;
-    secondArgumentInfo = static_cast<std::int16_t>(
-        (static_cast<std::uint16_t>(secondRelation) << 3u) | poolIndex);
+        const std::size_t secondEnd = scanCoreEnd(position);
+        if (!parseCore(position, secondEnd, parsed.secondCore)) return false;
+        position = secondEnd;
+        // The bound is exactly two steps. Any remaining token, combinator, or
+        // whitespace therefore represents an unsupported third step or a
+        // malformed missing operand.
+        return position == finish;
+    };
+
+    ParsedAlternative first;
+    if (!parseAlternative(arguments[0], first)) return false;
+    ParsedAlternative second;
+    if (argumentTotal == 2u && !parseAlternative(arguments[1], second))
+        return false;
+    if (storage.hasExpressionCount >= storage.hasExpressions.size())
+        return false;
+
+    const auto compactCore = [&storage](
+        const NavigatorScriptSimpleSelectorCoreDescriptor& core,
+        NavigatorScriptCompactRelativeSelectorCoreDescriptor& compact) {
+        compact.valid = core.valid;
+        compact.universal = core.universal;
+        compact.tagOffset = core.tagOffset;
+        compact.tagLength = core.tagLength;
+        compact.idOffset = core.idOffset;
+        compact.idLength = core.idLength;
+        compact.classTokenCount = core.classTokenCount;
+        if (core.classTokenCount != 0u) {
+            if (core.classTokenCount > kNavigatorScriptMaxClassQueryTokens)
+                return false;
+            const auto& firstToken = core.classTokens[0];
+            const auto& lastToken =
+                core.classTokens[core.classTokenCount - 1u];
+            const std::size_t blockBegin = firstToken.offset;
+            const std::size_t blockEnd =
+                static_cast<std::size_t>(lastToken.offset) + lastToken.length;
+            if (blockEnd <= blockBegin || blockEnd - blockBegin >
+                    std::numeric_limits<std::uint8_t>::max()) return false;
+            compact.classBlockOffset = static_cast<std::uint8_t>(blockBegin);
+            compact.classBlockLength = static_cast<std::uint8_t>(
+                blockEnd - blockBegin);
+        }
+        compact.hasAttributePredicate = core.hasAttributePredicate;
+        compact.attributeValuePresent = core.attributeValuePresent;
+        compact.attributeNameOffset = core.attributeNameOffset;
+        compact.attributeNameLength = core.attributeNameLength;
+        compact.attributeValueOffset = core.attributeValueOffset;
+        compact.attributeValueLength = core.attributeValueLength;
+        compact.statePseudo = core.statePseudo;
+        return true;
+    };
+    const auto storeCore = [&storage, &compactCore](
+        const NavigatorScriptSimpleSelectorCoreDescriptor& core,
+        std::uint8_t& index) {
+        if (storage.hasRelativeCoreCount >= storage.hasRelativeCores.size())
+            return false;
+        NavigatorScriptCompactRelativeSelectorCoreDescriptor compact;
+        if (!compactCore(core, compact)) return false;
+        index = storage.hasRelativeCoreCount;
+        storage.hasRelativeCores[index] = compact;
+        ++storage.hasRelativeCoreCount;
+        return true;
+    };
+
+    NavigatorScriptHasExpressionDescriptor expression;
+    std::uint8_t relationFlags = 0x80u;
+    if (first.hasSecondStep) {
+        if (!storeCore(first.secondCore, expression.firstStepTwoCoreIndex))
+            return false;
+        relationFlags |= static_cast<std::uint8_t>(first.secondRelation);
+    }
+    if (argumentTotal == 2u) {
+        if (!storeCore(second.firstCore, expression.secondFirstCoreIndex))
+            return false;
+        relationFlags |= 0x40u;
+        relationFlags |= static_cast<std::uint8_t>(
+            static_cast<std::uint8_t>(second.firstRelation) << 2u);
+        if (second.hasSecondStep) {
+            if (!storeCore(second.secondCore,
+                    expression.secondStepTwoCoreIndex)) return false;
+            relationFlags |= static_cast<std::uint8_t>(
+                static_cast<std::uint8_t>(second.secondRelation) << 4u);
+        }
+    }
+    expression.flags = relationFlags;
+    const std::uint8_t expressionIndex = storage.hasExpressionCount;
+    storage.hasExpressions[expressionIndex] = expression;
+    ++storage.hasExpressionCount;
+
+    selector.statePseudo = hasPseudoForRelation(first.firstRelation);
+    *innerStorage = first.firstCore;
+    argumentCount = static_cast<std::int16_t>(expressionIndex + 1u);
+    secondArgumentInfo = 0;
     return true;
 }
 
@@ -1419,21 +1496,56 @@ bool expandCompactRelativeCore(
     return position == blockEnd;
 }
 
-bool hasSecondArgumentInfo(std::int16_t packedInfo,
-    const NavigatorScriptSelectorDescriptor& storage,
-    std::uint8_t& poolIndex,
-    NavigatorScriptRelativeSelectorRelation& relation)
+constexpr std::uint8_t kHasExpressionValidFlag = 0x80u;
+constexpr std::uint8_t kHasExpressionTwoAlternativesFlag = 0x40u;
+constexpr std::uint8_t kHasNoRelativeCore = 0xFFu;
+
+NavigatorScriptRelativeSelectorRelation hasExpressionRelation(
+    const NavigatorScriptHasExpressionDescriptor& expression,
+    unsigned shift)
 {
-    if (packedInfo < 0) return false;
-    const std::uint16_t packed = static_cast<std::uint16_t>(packedInfo);
-    poolIndex = static_cast<std::uint8_t>(packed & 0x7u);
-    const std::uint16_t relationValue = packed >> 3u;
-    if (relationValue > static_cast<std::uint16_t>(
-            NavigatorScriptRelativeSelectorRelation::GeneralSibling) ||
-        storage.hasSecondArgumentCount > storage.hasSecondArguments.size() ||
-        poolIndex >= storage.hasSecondArgumentCount) return false;
-    relation = static_cast<NavigatorScriptRelativeSelectorRelation>(
-        relationValue);
+    return static_cast<NavigatorScriptRelativeSelectorRelation>(
+        (expression.flags >> shift) & 0x3u);
+}
+
+bool hasExpressionInfo(const NavigatorScriptSimpleSelectorDescriptor& selector,
+    const NavigatorScriptSelectorDescriptor& storage,
+    const NavigatorScriptHasExpressionDescriptor*& expression)
+{
+    if (selector.nthA <= 0 || selector.nthB != 0 ||
+        storage.hasExpressionCount > storage.hasExpressions.size() ||
+        storage.hasRelativeCoreCount > storage.hasRelativeCores.size())
+        return false;
+    const std::size_t index = static_cast<std::size_t>(selector.nthA - 1);
+    if (index >= storage.hasExpressionCount) return false;
+    const auto& candidate = storage.hasExpressions[index];
+    if ((candidate.flags & kHasExpressionValidFlag) == 0u) return false;
+    const bool hasSecondAlternative =
+        (candidate.flags & kHasExpressionTwoAlternativesFlag) != 0u;
+    const auto coreAvailable = [&storage](std::uint8_t coreIndex) {
+        return coreIndex != kHasNoRelativeCore &&
+            coreIndex < storage.hasRelativeCoreCount &&
+            coreIndex < storage.hasRelativeCores.size();
+    };
+    const bool firstChainPresent =
+        candidate.firstStepTwoCoreIndex != kHasNoRelativeCore;
+    const bool secondFirstPresent =
+        candidate.secondFirstCoreIndex != kHasNoRelativeCore;
+    const bool secondChainPresent =
+        candidate.secondStepTwoCoreIndex != kHasNoRelativeCore;
+    if ((firstChainPresent &&
+            !coreAvailable(candidate.firstStepTwoCoreIndex)) ||
+        (secondFirstPresent &&
+            !coreAvailable(candidate.secondFirstCoreIndex)) ||
+        (secondChainPresent &&
+            !coreAvailable(candidate.secondStepTwoCoreIndex)) ||
+        secondFirstPresent != hasSecondAlternative ||
+        (!hasSecondAlternative && secondChainPresent) ||
+        (!firstChainPresent && (candidate.flags & 0x03u) != 0u) ||
+        (!hasSecondAlternative && (candidate.flags & 0x0Cu) != 0u) ||
+        (!secondChainPresent && (candidate.flags & 0x30u) != 0u))
+        return false;
+    expression = &candidate;
     return true;
 }
 
@@ -3778,30 +3890,41 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
         const NavigatorScriptSimpleSelectorDescriptor& rightSimple) {
         if (!coreEqual(left, leftSimple, right, rightSimple)) return false;
         if (isHasStatePseudo(leftSimple.statePseudo)) {
-            if (leftSimple.nthA != rightSimple.nthA ||
-                (leftSimple.nthA != 1 && leftSimple.nthA != 2) ||
+            const NavigatorScriptHasExpressionDescriptor* leftExpression =
+                nullptr;
+            const NavigatorScriptHasExpressionDescriptor* rightExpression =
+                nullptr;
+            if (!hasExpressionInfo(leftSimple, left, leftExpression) ||
+                !hasExpressionInfo(rightSimple, right, rightExpression) ||
+                leftExpression->flags != rightExpression->flags ||
                 !coreEqual(left, leftSimple.logicalSelector, right,
                     rightSimple.logicalSelector)) return false;
-            if (leftSimple.nthA == 1)
-                return leftSimple.nthB == 0 && rightSimple.nthB == 0;
-            std::uint8_t leftIndex = 0u;
-            std::uint8_t rightIndex = 0u;
-            NavigatorScriptRelativeSelectorRelation leftRelation =
-                NavigatorScriptRelativeSelectorRelation::Descendant;
-            NavigatorScriptRelativeSelectorRelation rightRelation =
-                NavigatorScriptRelativeSelectorRelation::Descendant;
-            NavigatorScriptSimpleSelectorCoreDescriptor leftSecond;
-            NavigatorScriptSimpleSelectorCoreDescriptor rightSecond;
-            if (!hasSecondArgumentInfo(leftSimple.nthB, left, leftIndex,
-                    leftRelation) ||
-                !hasSecondArgumentInfo(rightSimple.nthB, right, rightIndex,
-                    rightRelation) || leftRelation != rightRelation ||
-                !expandCompactRelativeCore(left.hasSecondArguments[leftIndex],
-                    left, leftSecond) ||
-                !expandCompactRelativeCore(
-                    right.hasSecondArguments[rightIndex], right,
-                    rightSecond)) return false;
-            return coreEqual(left, leftSecond, right, rightSecond);
+            const auto compactEqual = [&coreEqual](
+                const NavigatorScriptSelectorDescriptor& leftStorage,
+                std::uint8_t leftIndex,
+                const NavigatorScriptSelectorDescriptor& rightStorage,
+                std::uint8_t rightIndex) {
+                if ((leftIndex == kHasNoRelativeCore) !=
+                    (rightIndex == kHasNoRelativeCore)) return false;
+                if (leftIndex == kHasNoRelativeCore) return true;
+                if (leftIndex >= leftStorage.hasRelativeCoreCount ||
+                    rightIndex >= rightStorage.hasRelativeCoreCount) return false;
+                NavigatorScriptSimpleSelectorCoreDescriptor leftCore;
+                NavigatorScriptSimpleSelectorCoreDescriptor rightCore;
+                return expandCompactRelativeCore(
+                        leftStorage.hasRelativeCores[leftIndex], leftStorage,
+                        leftCore) &&
+                    expandCompactRelativeCore(
+                        rightStorage.hasRelativeCores[rightIndex],
+                        rightStorage, rightCore) &&
+                    coreEqual(leftStorage, leftCore, rightStorage, rightCore);
+            };
+            return compactEqual(left, leftExpression->firstStepTwoCoreIndex,
+                    right, rightExpression->firstStepTwoCoreIndex) &&
+                compactEqual(left, leftExpression->secondFirstCoreIndex,
+                    right, rightExpression->secondFirstCoreIndex) &&
+                compactEqual(left, leftExpression->secondStepTwoCoreIndex,
+                    right, rightExpression->secondStepTwoCoreIndex);
         }
         if (leftSimple.nthA != rightSimple.nthA ||
             leftSimple.nthB != rightSimple.nthB) return false;
@@ -3934,6 +4057,8 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
     , NavigatorScriptRelativeSelectorCounters* counters
 #endif
+    , const NavigatorScriptSimpleSelectorCoreDescriptor* secondStep,
+    NavigatorScriptRelativeSelectorRelation secondRelation
     ) const
 {
     using MatchResult = NavigatorScriptSelectorMatchResult;
@@ -3989,6 +4114,9 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
         }
     }
     if (anchorPosition == count) return MatchResult::Invalid;
+    const gxos::web::HtmlElementRef* anchorStructureForChain =
+        structuralElement(anchor.instanceId);
+    if (anchorStructureForChain == nullptr) return MatchResult::Invalid;
 
     // Validate the anchor's complete parent chain before using it as an
     // authority boundary. The node cap bounds malformed cycles without
@@ -4013,6 +4141,40 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
     }
     if (!reachedRoot) return MatchResult::Invalid;
 
+    // A descendant/descendant chain can revisit the same intermediate nodes
+    // from many matching terminal candidates. Cache the first relationship's
+    // answer once per represented node in a fixed 128-byte bitset, keeping
+    // those later checks constant-time and the ancestry walk bounded to one
+    // preparation pass.
+    std::array<std::uint64_t,
+        (kNavigatorScriptMaxDocumentNodes + 63u) / 64u>
+        anchorDescendantBits{};
+    if (secondStep != nullptr &&
+        relation == NavigatorScriptRelativeSelectorRelation::Descendant) {
+        for (std::size_t position = 0u; position < count; ++position) {
+            const auto& candidate = document_->structuralElements[position];
+            if (candidate.serial == anchor.instanceId) continue;
+            HostInstanceId currentSerial = candidate.serial;
+            for (std::size_t hop = 0u; hop < count; ++hop) {
+                GXOS_RELATIVE_COUNT(parentHops);
+                const auto* current = structuralElement(currentSerial);
+                if (current == nullptr ||
+                    current->parentSerial == current->serial)
+                    return MatchResult::Invalid;
+                const HostInstanceId parentSerial = current->parentSerial;
+                if (parentSerial == anchor.instanceId) {
+                    anchorDescendantBits[position / 64u] |=
+                        std::uint64_t{1u} << (position % 64u);
+                    break;
+                }
+                if (parentSerial == 0u) break;
+                if (parentSerial > count) return MatchResult::Invalid;
+                currentSerial = parentSerial;
+                if (hop + 1u == count) return MatchResult::Invalid;
+            }
+        }
+    }
+
     const auto candidateMatches = [&](
         const gxos::web::HtmlElementRef& candidate) {
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
@@ -4021,6 +4183,169 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
         return selectorCoreElementMatchResult(candidate, selector, nthA,
             nthB, storage, true);
     };
+
+    if (secondStep != nullptr) {
+        if (!secondStep->valid || static_cast<std::uint8_t>(relation) >
+                static_cast<std::uint8_t>(
+                    NavigatorScriptRelativeSelectorRelation::GeneralSibling) ||
+            static_cast<std::uint8_t>(secondRelation) >
+                static_cast<std::uint8_t>(
+                    NavigatorScriptRelativeSelectorRelation::GeneralSibling))
+            return MatchResult::Invalid;
+
+        const auto initialRelationMatches = [&] (
+            const gxos::web::HtmlElementRef& intermediate)
+            -> MatchResult {
+            if (intermediate.serial == anchor.instanceId)
+                return MatchResult::NoMatch;
+            if (relation == NavigatorScriptRelativeSelectorRelation::Descendant ||
+                relation == NavigatorScriptRelativeSelectorRelation::Child) {
+                if (relation ==
+                    NavigatorScriptRelativeSelectorRelation::Child) {
+                    GXOS_RELATIVE_COUNT(childRelationCandidateChecks);
+                    if (intermediate.parentSerial == intermediate.serial)
+                        return MatchResult::Invalid;
+                    if (intermediate.parentSerial != 0u &&
+                        structuralElement(intermediate.parentSerial) == nullptr)
+                        return MatchResult::Invalid;
+                    return intermediate.parentSerial == anchor.instanceId
+                        ? MatchResult::Match : MatchResult::NoMatch;
+                }
+                const std::size_t position =
+                    static_cast<std::size_t>(intermediate.serial - 1u);
+                if (position >= count) return MatchResult::Invalid;
+                return (anchorDescendantBits[position / 64u] &
+                    (std::uint64_t{1u} << (position % 64u))) != 0u
+                    ? MatchResult::Match : MatchResult::NoMatch;
+            }
+
+            const std::size_t intermediatePosition =
+                static_cast<std::size_t>(intermediate.serial - 1u);
+            if (intermediate.parentSerial == intermediate.serial ||
+                (intermediate.parentSerial != 0u &&
+                    structuralElement(intermediate.parentSerial) == nullptr))
+                return MatchResult::Invalid;
+            if (intermediatePosition <= anchorPosition ||
+                intermediate.parentSerial !=
+                    anchorStructureForChain->parentSerial)
+                return MatchResult::NoMatch;
+            if (relation ==
+                NavigatorScriptRelativeSelectorRelation::GeneralSibling)
+                return MatchResult::Match;
+            if (relation !=
+                NavigatorScriptRelativeSelectorRelation::AdjacentSibling)
+                return MatchResult::Invalid;
+            for (std::size_t position = intermediatePosition; position > 0u;
+                    --position) {
+                const auto& prior = document_->structuralElements[position - 1u];
+                GXOS_RELATIVE_COUNT(structuralRecordsInspected);
+                if (prior.parentSerial == intermediate.parentSerial)
+                    return prior.serial == anchor.instanceId
+                        ? MatchResult::Match : MatchResult::NoMatch;
+            }
+            return MatchResult::NoMatch;
+        };
+
+        const auto testIntermediate = [&] (
+            const gxos::web::HtmlElementRef& intermediate)
+            -> MatchResult {
+            const MatchResult related = initialRelationMatches(intermediate);
+            if (related != MatchResult::Match) return related;
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+            GXOS_RELATIVE_COUNT(simpleSelectorEvaluations);
+#endif
+            return selectorCoreElementMatchResult(intermediate, selector,
+                nthA, nthB, storage, true);
+        };
+
+        for (std::size_t terminalPosition = 0u; terminalPosition < count;
+                ++terminalPosition) {
+            const auto& terminal =
+                document_->structuralElements[terminalPosition];
+            GXOS_RELATIVE_COUNT(structuralRecordsInspected);
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+            GXOS_RELATIVE_COUNT(simpleSelectorEvaluations);
+#endif
+            const MatchResult terminalMatch = selectorCoreElementMatchResult(
+                terminal, *secondStep, 0, 0, storage, true);
+            if (terminalMatch == MatchResult::Invalid) return terminalMatch;
+            if (terminalMatch == MatchResult::NoMatch) continue;
+
+            if (secondRelation ==
+                NavigatorScriptRelativeSelectorRelation::Descendant) {
+                HostInstanceId intermediateSerial = terminal.parentSerial;
+                for (std::size_t hop = 0u; intermediateSerial != 0u &&
+                        hop < count; ++hop) {
+                    const auto* intermediate = structuralElement(
+                        intermediateSerial);
+                    if (intermediate == nullptr ||
+                        intermediate->parentSerial == intermediate->serial)
+                        return MatchResult::Invalid;
+                    const MatchResult matched = testIntermediate(*intermediate);
+                    if (matched == MatchResult::Match ||
+                        matched == MatchResult::Invalid) return matched;
+                    const HostInstanceId parentSerial =
+                        intermediate->parentSerial;
+                    if (parentSerial != 0u &&
+                        structuralElement(parentSerial) == nullptr)
+                        return MatchResult::Invalid;
+                    intermediateSerial = parentSerial;
+                    if (hop + 1u == count && intermediateSerial != 0u)
+                        return MatchResult::Invalid;
+                }
+            } else if (secondRelation ==
+                NavigatorScriptRelativeSelectorRelation::Child) {
+                GXOS_RELATIVE_COUNT(childRelationCandidateChecks);
+                if (terminal.parentSerial == terminal.serial)
+                    return MatchResult::Invalid;
+                if (terminal.parentSerial != 0u) {
+                    const auto* intermediate =
+                        structuralElement(terminal.parentSerial);
+                    if (intermediate == nullptr) return MatchResult::Invalid;
+                    const MatchResult matched = testIntermediate(*intermediate);
+                    if (matched == MatchResult::Match ||
+                        matched == MatchResult::Invalid) return matched;
+                }
+            } else {
+                const HostInstanceId parentSerial = terminal.parentSerial;
+                if (parentSerial == terminal.serial ||
+                    (parentSerial != 0u &&
+                        structuralElement(parentSerial) == nullptr))
+                    return MatchResult::Invalid;
+                if (secondRelation ==
+                    NavigatorScriptRelativeSelectorRelation::AdjacentSibling) {
+                    GXOS_RELATIVE_COUNT(adjacentSiblingChecks);
+                    for (std::size_t position = terminalPosition;
+                            position > 0u; --position) {
+                        const auto& prior =
+                            document_->structuralElements[position - 1u];
+                        GXOS_RELATIVE_COUNT(structuralRecordsInspected);
+                        if (prior.parentSerial != parentSerial) continue;
+                        const MatchResult matched = testIntermediate(prior);
+                        if (matched == MatchResult::Match ||
+                            matched == MatchResult::Invalid) return matched;
+                        break;
+                    }
+                } else if (secondRelation ==
+                    NavigatorScriptRelativeSelectorRelation::GeneralSibling) {
+                    GXOS_RELATIVE_COUNT(generalSiblingChecks);
+                    for (std::size_t position = terminalPosition;
+                            position > 0u; --position) {
+                        const auto& prior =
+                            document_->structuralElements[position - 1u];
+                        GXOS_RELATIVE_COUNT(structuralRecordsInspected);
+                        if (prior.parentSerial != parentSerial) continue;
+                        const MatchResult matched = testIntermediate(prior);
+                        if (matched == MatchResult::Match ||
+                            matched == MatchResult::Invalid) return matched;
+                    }
+                } else {
+                    return MatchResult::Invalid;
+                }
+            }
+        }
+        return MatchResult::NoMatch;
+    }
 
     if (relation == NavigatorScriptRelativeSelectorRelation::Descendant ||
         relation == NavigatorScriptRelativeSelectorRelation::Child) {
@@ -4106,6 +4431,27 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
 }
 
 NavigatorScriptSelectorMatchResult
+NavigatorScriptHostAdapter::selectorRelativeChainMatchResult(
+    const HostObjectReference& anchor,
+    NavigatorScriptRelativeSelectorRelation firstRelation,
+    const NavigatorScriptSimpleSelectorCoreDescriptor& firstSelector,
+    NavigatorScriptRelativeSelectorRelation secondRelation,
+    const NavigatorScriptSimpleSelectorCoreDescriptor& secondSelector,
+    const NavigatorScriptSelectorDescriptor& storage
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+    , NavigatorScriptRelativeSelectorCounters* counters
+#endif
+    ) const
+{
+    return selectorRelativeElementMatchResult(anchor, firstRelation,
+        firstSelector, 0, 0, storage
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        , counters
+#endif
+        , &secondSelector, secondRelation);
+}
+
+NavigatorScriptSelectorMatchResult
 NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
     const gxos::web::HtmlElementRef& element,
     const NavigatorScriptSimpleSelectorDescriptor& selector,
@@ -4123,24 +4469,46 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
         if (conditions != MatchResult::Match) return conditions;
         const HostObjectReference anchor{element.serial, generation_,
             kNavigatorElementHostKind};
-        if (selector.nthA != 1 && selector.nthA != 2)
+        const NavigatorScriptHasExpressionDescriptor* expression = nullptr;
+        if (!hasExpressionInfo(selector, storage, expression))
             return MatchResult::Invalid;
-        const MatchResult first = selectorRelativeElementMatchResult(anchor,
+        const auto evaluateAlternative = [this, &anchor, &storage](
+            NavigatorScriptRelativeSelectorRelation firstRelation,
+            const NavigatorScriptSimpleSelectorCoreDescriptor& firstCore,
+            std::uint8_t secondStepIndex,
+            NavigatorScriptRelativeSelectorRelation secondRelation) {
+            if (secondStepIndex == kHasNoRelativeCore)
+                return selectorRelativeElementMatchResult(anchor,
+                    firstRelation, firstCore, 0, 0, storage);
+            if (secondStepIndex >= storage.hasRelativeCoreCount)
+                return MatchResult::Invalid;
+            NavigatorScriptSimpleSelectorCoreDescriptor secondCore;
+            if (!expandCompactRelativeCore(
+                    storage.hasRelativeCores[secondStepIndex], storage,
+                    secondCore)) return MatchResult::Invalid;
+            return selectorRelativeChainMatchResult(anchor, firstRelation,
+                firstCore, secondRelation, secondCore, storage);
+        };
+
+        const MatchResult first = evaluateAlternative(
             relativeRelationForHasPseudo(core.statePseudo),
-            selector.logicalSelector, 0, 0, storage);
-        if (first != MatchResult::NoMatch || selector.nthA == 1)
+            selector.logicalSelector, expression->firstStepTwoCoreIndex,
+            hasExpressionRelation(*expression, 0u));
+        if (first != MatchResult::NoMatch ||
+            (expression->flags & kHasExpressionTwoAlternativesFlag) == 0u)
             return first;
 
-        std::uint8_t poolIndex = 0u;
-        NavigatorScriptRelativeSelectorRelation secondRelation =
-            NavigatorScriptRelativeSelectorRelation::Descendant;
-        NavigatorScriptSimpleSelectorCoreDescriptor secondCore;
-        if (!hasSecondArgumentInfo(selector.nthB, storage, poolIndex,
-                secondRelation) ||
-            !expandCompactRelativeCore(storage.hasSecondArguments[poolIndex],
-                storage, secondCore)) return MatchResult::Invalid;
-        return selectorRelativeElementMatchResult(anchor, secondRelation,
-            secondCore, 0, 0, storage);
+        if (expression->secondFirstCoreIndex == kHasNoRelativeCore ||
+            expression->secondFirstCoreIndex >= storage.hasRelativeCoreCount)
+            return MatchResult::Invalid;
+        NavigatorScriptSimpleSelectorCoreDescriptor secondFirstCore;
+        if (!expandCompactRelativeCore(storage.hasRelativeCores[
+                expression->secondFirstCoreIndex], storage, secondFirstCore))
+            return MatchResult::Invalid;
+        return evaluateAlternative(
+            hasExpressionRelation(*expression, 2u), secondFirstCore,
+            expression->secondStepTwoCoreIndex,
+            hasExpressionRelation(*expression, 4u));
     }
     if (!isLogicalPseudo)
         return selectorCoreElementMatchResult(element, core, selector.nthA,

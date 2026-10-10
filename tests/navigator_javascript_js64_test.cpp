@@ -105,8 +105,8 @@ NavigatorScriptSelectorDescriptor diagnosticDescriptor(
     auto& simple = storage.members[0].rightSimple;
     simple.valid = true;
     simple.statePseudo = NavigatorScriptStatePseudo::HasDescendant;
-    simple.nthA = 2;
-    simple.nthB = 0; // Descendant relation, pool entry zero.
+    simple.nthA = 1;
+    simple.nthB = 0; // Expression entry zero.
     simple.logicalSelector.valid = true;
     simple.logicalSelector.classTokenCount = 1u;
     simple.logicalSelector.classTokens[0].offset = 0u;
@@ -116,7 +116,7 @@ NavigatorScriptSelectorDescriptor diagnosticDescriptor(
         ++simple.logicalSelector.classTokens[0].length;
     }
     if (secondClass[0] != '\0') storage.text[storage.textLength++] = '\0';
-    auto& compact = storage.hasSecondArguments[0];
+    auto& compact = storage.hasRelativeCores[0];
     compact.valid = true;
     compact.classTokenCount = 1u;
     compact.classBlockOffset = static_cast<std::uint8_t>(storage.textLength);
@@ -125,7 +125,11 @@ NavigatorScriptSelectorDescriptor diagnosticDescriptor(
         storage.text[storage.textLength++] = secondClass[secondOffset++];
         ++compact.classBlockLength;
     }
-    storage.hasSecondArgumentCount = 1u;
+    auto& expression = storage.hasExpressions[0];
+    expression.secondFirstCoreIndex = 0u;
+    expression.flags = 0xC0u; // Valid expression with two alternatives.
+    storage.hasRelativeCoreCount = 1u;
+    storage.hasExpressionCount = 1u;
     return storage;
 }
 
@@ -139,21 +143,25 @@ int main()
         "JS64 keeps the outer simple-selector size");
     static_assert(sizeof(NavigatorScriptCompactRelativeSelectorCoreDescriptor) ==
         18u, "JS64 stores each second alternative in 18 bytes");
-    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 958u,
-        "JS64 adds only its 8-entry compact second-argument pool");
+    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 1278u,
+        "JS65 stores bounded chains in fixed compact pools");
     static_assert(NavigatorScriptRelativeSelectorTestAccess::
-        collectionRecordBytes() == 976u,
-        "JS64 selector collection record size is measured");
+        collectionRecordBytes() == 1296u,
+        "JS65 selector collection record size is measured");
     static_assert(NavigatorScriptRelativeSelectorTestAccess::
         collectionRecordBytes() * kNavigatorScriptMaxSelectorCollections ==
-            124928u,
-        "JS64 128-record registry memory is measured");
+            165888u,
+        "JS65 128-record registry memory is measured");
 
     const std::string html =
         "<html><body><main id='main'>"
         "<section id='anchor'><i id='direct'></i>"
         "<div><b id='deep'></b></div><i id='comma' data-key='alpha,beta'></i>"
         "</section><i id='adjacent'></i><i id='gap'></i><i id='later'></i>"
+        "<section id='unsupported'>"
+        "<div class='a'><div class='b'><i class='c'></i></div></div>"
+        "<div class='one'></div><div class='two'></div><div class='three'></div>"
+        "</section>"
         "<section id='card'><i id='warning' class='warning'></i></section>"
         "<form id='form'><input id='check' type='checkbox' checked>"
         "<input id='radio-a' type='radio' name='group' checked>"
@@ -271,8 +279,8 @@ var spaced = anchor.matches(':has(  .never  ,  > #direct  )');
 var commas = anchor.matches(':has([data-key="alpha,beta"], .never)');
 var invalid = [':has()', ':has( )', ':has(, .a)', ':has(.a,)',
  ':has(.a,,.b)', ':has(.a,.b,.c)', ':has(> , .a)', ':has(+)',
- ':has(~)', ':has(.a .b, .c)', ':has(.a > .b, .c)',
- ':has(> .a + .b, .c)', ':has(:not(.x), .y)', ':has(:is(.x), .y)',
+ ':has(~)', ':has(.a .b .c)', ':has(.a, .b, .c)',
+ ':has(> .a + .b + .c)', ':has(:not(.x), .y)', ':has(:is(.x), .y)',
  ':has(:where(.x), .y)', ':has(:has(.x), .y)',
  ':has(:nth-child(2), .y)', ':has(.a):focus'];
 document.querySelector('#direct').setAttribute('class', 'a b c');
@@ -280,7 +288,7 @@ var rejected = true;
 var badCount = 0;
 var firstBad = '';
 for (var i = 0; i < invalid.length; i++)
- if (document.querySelector('#anchor' + invalid[i]) !== null) {
+ if (document.querySelector('#unsupported' + invalid[i]) !== null) {
   rejected = false; badCount = badCount + 1; firstBad = invalid[i];
  }
 var twoPresent = document.querySelector('#anchor:has(.a, .b)') === anchor;
@@ -393,7 +401,7 @@ var ok = fullFalse && lateTrue && list.length === 1 && list[0] === capacity;
     expect(addEarlyTarget.succeeded(),
         "first near-capacity descendant becomes an early target");
     auto shortCircuitStorage = diagnosticDescriptor("early", "target");
-    shortCircuitStorage.hasSecondArguments[0].valid = false;
+    shortCircuitStorage.hasRelativeCores[0].valid = false;
     const auto shortCircuit = capacityElement == nullptr
         ? NavigatorScriptSelectorMatchResult::Invalid
         : NavigatorScriptRelativeSelectorTestAccess::simpleMatch(

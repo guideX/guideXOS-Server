@@ -1,0 +1,139 @@
+<!doctype html>
+<html id="root">
+<head><title>Navigator JavaScript JS65</title></head>
+<body>
+<h1>Navigator JavaScript JS65</h1>
+<main id="scope">
+  <section id="card">
+    <div id="row" class="row"><div><b id="badge" class="badge"></b></div></div>
+    <div class="toolbar"><button id="toolbar-button" class="button"></button></div>
+    <i id="item" class="item"></i><i id="selected" class="selected"></i>
+    <i id="gap"></i><i id="warning" class="warning"></i>
+    <div class="branch"></div><div class="other"><i class="icon"></i></div>
+    <i class="error"></i>
+    <div class="a"><div class="b"><div class="c"></div></div></div>
+    <div class="one"></div><div class="two"></div><div class="three"></div>
+  </section>
+  <section id="adjacent-anchor"></section>
+  <div class="panel"><button class="button"></button></div>
+  <div class="panel"></div><section id="wrong-side"></section>
+  <section id="general-anchor"></section>
+  <div class="later"><div><i class="warning"></i></div></div>
+  <div class="outside"><i class="warning"></i></div>
+
+  <section id="matrix-subject">
+    <div id="inter-child"><div><i id="child-desc"></i></div><i id="child-child"></i></div>
+    <i id="child-adjacent"></i><i id="child-gap"></i><i id="child-general"></i>
+    <div id="desc-wrap"><div id="inter-desc"><div><i id="desc-desc"></i></div>
+      <i id="desc-child"></i></div><i id="desc-adjacent"></i><i id="desc-gap"></i>
+      <i id="desc-general"></i></div>
+  </section>
+  <div id="inter-adjacent"><div><i id="adj-desc"></i></div><i id="adj-child"></i></div>
+  <i id="adj-adjacent"></i><i id="adj-gap"></i><i id="adj-general"></i>
+  <i id="general-gap"></i>
+  <div id="inter-general"><div><i id="gen-desc"></i></div><i id="gen-child"></i></div>
+  <i id="gen-adjacent"></i><i id="gen-gap"></i><i id="gen-general"></i>
+  <button id="event-button" type="button">Run</button>
+</main>
+<pre id="result">initial</pre>
+<script>
+var assertions = 0;
+var failures = 0;
+var failedIndexes = '';
+function verify(value) {
+  assertions = assertions + 1;
+  if (!value) { failures = failures + 1; failedIndexes = failedIndexes + ',' + assertions; }
+}
+
+var card = document.querySelector('#card');
+verify(card.matches(':has(> .row .badge)'));
+verify(card.matches(':has(> .toolbar > .button)'));
+verify(card.matches(':has(.item + .selected)'));
+verify(card.matches(':has(.item ~ .warning)'));
+verify(document.querySelector('#adjacent-anchor').matches(':has(+ .panel > .button)'));
+verify(document.querySelector('#general-anchor').matches(':has(~ .later .warning)'));
+verify(document.querySelector('#card:has(.branch .icon, > .toolbar > .button)') === card);
+verify(card.matches(':has(> .row .badge, > .missing .invalid)'));
+verify(!card.matches(':has(.missing .icon, > .toolbar > .missing)'));
+verify(!card.matches(':has(> .row > .badge)'));
+verify(!document.querySelector('#wrong-side').matches(':has(+ .panel > .button)'));
+verify(!card.matches(':has(.outside .warning)'));
+verify(!card.matches(':has(> .row .error)'));
+verify(!card.matches(':has(.branch .icon)'));
+
+var firstPrefixes = ['', '> ', '+ ', '~ '];
+var nextPrefixes = [' ', ' > ', ' + ', ' ~ '];
+var intermediateIds = ['inter-desc', 'inter-child', 'inter-adjacent', 'inter-general'];
+var terminalIds = [
+  'desc-desc','desc-child','desc-adjacent','desc-general',
+  'child-desc','child-child','child-adjacent','child-general',
+  'adj-desc','adj-child','adj-adjacent','adj-general',
+  'gen-desc','gen-child','gen-adjacent','gen-general'];
+var pairChecks = 0;
+var pairFailures = 0;
+var matrixSubject = document.querySelector('#matrix-subject');
+for (var left = 0; left != 4; left = left + 1) {
+  for (var right = 0; right != 4; right = right + 1) {
+    for (var i = 0; i != 4; i = i + 1)
+      document.querySelector('#' + intermediateIds[i]).removeAttribute('class');
+    for (var j = 0; j != 16; j = j + 1)
+      document.querySelector('#' + terminalIds[j]).removeAttribute('class');
+    document.querySelector('#' + intermediateIds[left]).setAttribute('class', 'a');
+    document.querySelector('#' + terminalIds[left * 4 + right]).setAttribute('class', 'b');
+    var selector = ':has(' + firstPrefixes[left] + '.a' + nextPrefixes[right] + '.b)';
+    pairChecks = pairChecks + 1;
+    if (!matrixSubject.matches(selector)) pairFailures = pairFailures + 1;
+    document.querySelector('#' + terminalIds[left * 4 + right]).removeAttribute('class');
+    pairChecks = pairChecks + 1;
+    if (matrixSubject.matches(selector)) pairFailures = pairFailures + 1;
+  }
+}
+verify(pairChecks === 32 && pairFailures === 0);
+
+var malformedSelectors = [
+  '#card:has(.a .b .c)',
+  '#card:has(.one, .two, .three)',
+  '#card:has(> > .row)',
+  '#card:has(.row + > .badge)',
+  '#card:has(.row >)',
+  '#card:has(.row ++ .badge)',
+  '#card:has(+)',
+  '#card:has(.row +)',
+  '#card:has(> .row >)',
+  '#card:has(:not(.absent) .badge)',
+  '#card:has(:has(.row) .badge)'];
+var malformed = true;
+for (var k = 0; k != malformedSelectors.length; k = k + 1)
+  if (document.querySelector(malformedSelectors[k]) !== null) malformed = false;
+verify(malformed);
+
+var longClass = '';
+for (var n = 0; n != 242; n = n + 1) longClass = longClass + 'x';
+var exactSelector = ':has(> .row .' + longClass + ')';
+var overSelector = ':has(> .row .' + longClass + 'x)';
+document.querySelector('#badge').setAttribute('class', longClass);
+var exactLimit = exactSelector.length === 256 && card.matches(exactSelector);
+document.querySelector('#badge').setAttribute('class', longClass + 'x');
+var overLimit = overSelector.length === 257 && !card.matches(overSelector);
+var repeated = true;
+for (var q = 0; q != 16; q = q + 1)
+  if (card.matches(overSelector)) repeated = false;
+verify(exactLimit && overLimit && repeated);
+
+var eventMatched = false;
+var eventMetadata = false;
+document.querySelector('#scope').addEventListener('click', function(event) {
+  eventMatched = event.currentTarget.matches(':has(.missing .icon, > #event-button)');
+  eventMetadata = event.target === document.querySelector('#event-button') &&
+    event.currentTarget === document.querySelector('#scope') &&
+    event.eventPhase === 3 && event.defaultPrevented === false;
+  document.querySelector('#result').textContent = 'event=' + eventMatched +
+    ':metadata=' + eventMetadata + ':assertions=' + assertions +
+    ':failures=' + failures + ':failed=' + failedIndexes;
+});
+document.querySelector('#result').textContent = 'initial:assertions=' + assertions +
+  ':failures=' + failures + ':malformed=' + malformed + ':pairs=' + pairChecks +
+  ':pairFailures=' + pairFailures + ':failed=' + failedIndexes;
+</script>
+</body>
+</html>

@@ -55,6 +55,10 @@ constexpr std::size_t kNavigatorScriptMaxDocumentNodes = 1024u;
 constexpr std::size_t kNavigatorScriptMaxClickHandlers = 64u;
 constexpr std::size_t kNavigatorScriptMaxSelectorLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxSelectorListMembers = 4u;
+constexpr std::size_t kNavigatorScriptMaxHasExpressions =
+    kNavigatorScriptMaxSelectorListMembers * 2u;
+constexpr std::size_t kNavigatorScriptMaxHasRelativeCores =
+    kNavigatorScriptMaxHasExpressions * 3u;
 constexpr std::size_t kNavigatorScriptMaxSelectorAttributeNameLength = 64u;
 constexpr std::size_t kNavigatorScriptMaxSelectorAttributeValueLength = 128u;
 constexpr std::size_t kNavigatorScriptMaxClassQueryTokens = 8u;
@@ -178,11 +182,11 @@ struct NavigatorScriptSimpleSelectorDescriptor :
     NavigatorScriptSimpleSelectorCoreDescriptor logicalSelector;
 };
 
-// Compact parsed storage for the optional second :has() alternative. Class
-// tokens are stored as one NUL-separated block in the selector text buffer;
-// offsets and lengths for the other predicates remain fixed-width. Matching
-// expands this into the established JS62 core on the stack and calls the same
-// relative evaluator used by JS63.
+// Compact parsed storage for relative cores that cannot use the first
+// alternative's inline core. Class tokens are stored as one NUL-separated
+// block in the selector text buffer; offsets and lengths for the other
+// predicates remain fixed-width. Matching expands this into the established
+// JS62 core on the stack and uses the same relative evaluator as JS63.
 struct NavigatorScriptCompactRelativeSelectorCoreDescriptor {
     bool valid = false;
     bool universal = false;
@@ -203,7 +207,20 @@ struct NavigatorScriptCompactRelativeSelectorCoreDescriptor {
         NavigatorScriptStatePseudo::None;
 };
 static_assert(sizeof(NavigatorScriptCompactRelativeSelectorCoreDescriptor) ==
-    18u, "JS64 second relative cores must use compact bounded storage");
+    18u, "relative cores must use compact bounded storage");
+
+// One fixed-size record describes one :has() expression. The first
+// alternative's first step is stored inline in logicalSelector, so this record
+// only points at optional step-two and second-alternative cores. Relation
+// fields and the alternative count are packed into flags.
+struct NavigatorScriptHasExpressionDescriptor {
+    std::uint8_t firstStepTwoCoreIndex = 0xFFu;
+    std::uint8_t secondFirstCoreIndex = 0xFFu;
+    std::uint8_t secondStepTwoCoreIndex = 0xFFu;
+    std::uint8_t flags = 0u;
+};
+static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 4u,
+    "JS65 :has() expressions must stay compact and fixed-size");
 
 enum class NavigatorScriptSelectorMatchResult : std::uint8_t {
     Invalid = 0u,
@@ -251,13 +268,17 @@ struct NavigatorScriptSelectorDescriptor {
     std::uint8_t memberCount = 0;
     std::array<NavigatorScriptSelectorMemberDescriptor,
         kNavigatorScriptMaxSelectorListMembers> members{};
-    // At most two simple selectors per outer member can own :has(), so this
-    // fixed pool covers all eight possible second alternatives. nthA/nthB on
-    // a :has() simple selector hold its explicit count and packed pool/relation
-    // metadata without growing every simple-selector descriptor.
+    // At most two simple selectors per outer member can own :has(). Each of
+    // those eight expressions can need three compact cores: step two for the
+    // first alternative, the second alternative's first step, and its step
+    // two. The expression records keep relation metadata out of every simple
+    // selector descriptor.
     std::array<NavigatorScriptCompactRelativeSelectorCoreDescriptor,
-        kNavigatorScriptMaxSelectorListMembers * 2u> hasSecondArguments{};
-    std::uint8_t hasSecondArgumentCount = 0;
+        kNavigatorScriptMaxHasRelativeCores> hasRelativeCores{};
+    std::uint8_t hasRelativeCoreCount = 0;
+    std::array<NavigatorScriptHasExpressionDescriptor,
+        kNavigatorScriptMaxHasExpressions> hasExpressions{};
+    std::uint8_t hasExpressionCount = 0;
 };
 
 // The adapter never stores a JavaScript pointer and never creates a
@@ -536,6 +557,20 @@ private:
         NavigatorScriptRelativeSelectorRelation relation,
         const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
         std::int16_t nthA, std::int16_t nthB,
+        const NavigatorScriptSelectorDescriptor& storage
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        , NavigatorScriptRelativeSelectorCounters* counters = nullptr
+#endif
+        , const NavigatorScriptSimpleSelectorCoreDescriptor* secondStep = nullptr
+        , NavigatorScriptRelativeSelectorRelation secondRelation =
+            NavigatorScriptRelativeSelectorRelation::Descendant
+        ) const;
+    NavigatorScriptSelectorMatchResult selectorRelativeChainMatchResult(
+        const HostObjectReference& anchor,
+        NavigatorScriptRelativeSelectorRelation firstRelation,
+        const NavigatorScriptSimpleSelectorCoreDescriptor& firstSelector,
+        NavigatorScriptRelativeSelectorRelation secondRelation,
+        const NavigatorScriptSimpleSelectorCoreDescriptor& secondSelector,
         const NavigatorScriptSelectorDescriptor& storage
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
         , NavigatorScriptRelativeSelectorCounters* counters = nullptr

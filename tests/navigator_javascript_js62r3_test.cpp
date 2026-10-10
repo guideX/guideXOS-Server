@@ -638,13 +638,13 @@ void performanceSanitySubset()
     expect(result == Result::NoMatch, "near-capacity false descendant remains false");
     report("JS62R3 near-capacity late true", late);
     report("JS62R3 near-capacity false", absent);
-    expect(late.structuralRecordsInspected == 4102u && late.parentHops == 1027u &&
-        late.serialIndexResolutions == 2051u && late.simpleSelectorEvaluations == 1021u &&
+    expect(late.structuralRecordsInspected == 4103u && late.parentHops == 1027u &&
+        late.serialIndexResolutions == 2052u && late.simpleSelectorEvaluations == 1021u &&
         absent.structuralRecordsInspected == late.structuralRecordsInspected &&
         absent.parentHops == late.parentHops &&
         absent.serialIndexResolutions == late.serialIndexResolutions &&
         absent.simpleSelectorEvaluations == late.simpleSelectorEvaluations,
-        "near-capacity operation counts remain at JS62R2 baseline");
+        "near-capacity operation counts remain deterministic at JS65 baseline");
 
     std::uint64_t records = 0u;
     constexpr std::size_t sampleAnchors = 64u;
@@ -1084,17 +1084,17 @@ int main()
         "JS62R2 does not grow the shared selector core");
     static_assert(sizeof(NavigatorScriptSimpleSelectorDescriptor) == 68u,
         "JS62R2 does not grow the simple selector descriptor");
-    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 958u,
-        "JS62R3 preserves the JS64 bounded descriptor size");
-    static_assert(NavigatorScriptRelativeSelectorTestAccess::collectionRecordBytes() == 976u,
-        "JS62R3 preserves the JS64 selector collection size");
+    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 1278u,
+        "JS62R3 preserves the JS65 bounded descriptor size");
+    static_assert(NavigatorScriptRelativeSelectorTestAccess::collectionRecordBytes() == 1296u,
+        "JS62R3 preserves the JS65 selector collection size");
     static_assert(sizeof(gxos::web::HtmlElementRef) == 440u,
         "JS62R2 does not grow structural Elements");
     static_assert(sizeof(gxos::web::HtmlElementContentMetadata) == 24u,
         "JS62R2 does not grow content records");
     static_assert(sizeof(NavigatorScriptRelativeSelectorCounters) == 64u,
         "diagnostic counters remain test-local and compact");
-    std::cout << "memory core=32 simple=68 complete=812 collection=832 registry="
+    std::cout << "memory core=32 simple=68 complete=1278 collection=1296 registry="
         << (128u * NavigatorScriptRelativeSelectorTestAccess::collectionRecordBytes())
         << " htmlElement=440 content=24"
         << " diagnosticCounters=64 productionCounterStorage=0\n";

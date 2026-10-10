@@ -4,7 +4,9 @@
 <body>
 <h1>Navigator JavaScript JS63</h1>
 <main id="scope">
-  <div id="desc" class="anchor"><span class="target"></span></div>
+  <div id="desc" class="anchor"><span class="target"></span>
+    <div class="a"><div class="b"><i class="c"></i></div></div>
+  </div>
   <div id="self" class="target"></div>
   <div id="child-true"><span class="target"></span></div>
   <div id="child-false"><span><i class="target"></i></span></div>
@@ -87,7 +89,7 @@ transferFocus.focus();
 verify(focusScope.matches(':has(:focus)') && document.activeElement === transferFocus);
 transferFocus.blur();
 verify(!focusScope.matches(':has(:focus)'));
-var bad = [':has()', ':has(.a, .b)', ':has(.a .b)', ':has(> .a + .b)',
+var bad = [':has()', ':has(.a .b .c)', ':has(.a, .b, .c)', ':has(> .a + .b + .c)',
   ':has(:has(.x))', ':has(:not(.x))', ':has(:is(.x))', ':has(:where(.x))'];
 var malformed = true;
 for (var i = 0; i != bad.length; i = i + 1)

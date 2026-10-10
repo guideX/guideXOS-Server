@@ -112,9 +112,21 @@ try {
 
     $appProc = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden `
         -RedirectStandardInput $input -RedirectStandardOutput $log -RedirectStandardError $err
-    $processExecutablePath = (Get-Process -Id $appProc.Id -ErrorAction Stop).Path
+    $processExecutablePath = $null
+    for ($attempt = 0; $attempt -lt 20; ++$attempt) {
+        $processInfo = Get-Process -Id $appProc.Id -ErrorAction SilentlyContinue
+        if ($processInfo -and -not [string]::IsNullOrWhiteSpace($processInfo.Path)) {
+            $processExecutablePath = $processInfo.Path
+            break
+        }
+        if ($appProc.HasExited) { break }
+        Start-Sleep -Milliseconds 100
+    }
     Write-Host "HOSTED_PROCESS_ID=$($appProc.Id)"
     Write-Host "HOSTED_PROCESS_EXECUTABLE_PATH=$processExecutablePath"
+    if ([string]::IsNullOrWhiteSpace($processExecutablePath)) {
+        throw "Hosted process executable path was unavailable for process $($appProc.Id)."
+    }
     if ([System.IO.Path]::GetFullPath($processExecutablePath) -ne
         [System.IO.Path]::GetFullPath($exe)) {
         throw "Hosted process executable path does not match the freshly built server: $processExecutablePath"
@@ -126,6 +138,9 @@ try {
     Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_EXPECT_TRUSTED_LOCALHOST" -Value $oldExpectTrusted
     Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_EXPECT_SMOKE_LOCALHOST_BYPASS" -Value $oldExpectBypass
     Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_DEFER_PAINT" -Value $oldDeferPaint
+    if ($appProc -and -not $appProc.HasExited) {
+        Stop-Process -Id $appProc.Id -Force
+    }
     if ($httpProc -and -not $httpProc.HasExited) {
         Stop-Process -Id $httpProc.Id -Force
     }

@@ -743,13 +743,13 @@ for (var i = 0; i < 100; i = i + 1) {
     const std::size_t collection = (16u + selector + 7u) / 8u * 8u;
     const std::size_t registry = collection *
         gxos::javascript::kNavigatorScriptMaxSelectorCollections;
-    expect(core == 32u && simple == 68u && selector == 958u &&
-        collection == 976u && registry == 124928u,
-        "JS64 compact pool and registry sizes match the audited bound");
+    expect(core == 32u && simple == 68u && selector == 1278u &&
+        collection == 1296u && registry == 165888u,
+        "JS65 compact chain pool and registry sizes match the audited bound");
     std::cout << "JS59 memory: core=" << core << " bytes simpleSelector="
         << simple << " bytes selectorDescriptor=" << selector
         << " bytes collectionRecord=" << collection << " bytes registry="
-        << registry << " bytes js64SecondArgumentPoolGrowth=18432 bytes\n";
+        << registry << " bytes js65ChainedCorePoolGrowth=40960 bytes\n";
 }
 
 } // namespace
