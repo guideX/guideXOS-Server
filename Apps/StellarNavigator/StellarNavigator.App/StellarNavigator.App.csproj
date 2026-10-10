@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Astronomy.Core\Astronomy.Core.csproj" />
+    <ProjectReference Include="..\Astronomy.Catalog\Astronomy.Catalog.csproj" />
+    <ProjectReference Include="..\Astronomy.Ephemeris\Astronomy.Ephemeris.csproj" />
+    <ProjectReference Include="..\Navigation.Core\Navigation.Core.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\Astronomy.Catalog\Data\solar_system.json" Link="Data\solar_system.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\Astronomy.Ephemeris\Data\ephemeris_j2000.json" Link="Data\ephemeris_j2000.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

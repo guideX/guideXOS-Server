@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "description": "Synthetic demonstration ephemeris for SN1. Positions are approximate and NOT suitable for real navigation. Frame: Heliocentric ICRF/J2000. Units: AU and AU/day.",
+  "source": "Synthetic demonstration data - not from any official ephemeris service",
+  "epoch": "J2000.0 (JD 2451545.0)",
+  "frame": "Heliocentric ICRF/J2000",
+  "units": {
+    "position": "AU",
+    "velocity": "AU/day"
+  },
+  "entries": [
+    {
+      "bodyId": "mercury",
+      "jd": 2451545.0,
+      "position": { "x": -0.130, "y": -0.449, "z": 0.020 },
+      "velocity": { "x": 0.0160, "y": -0.0060, "z": -0.0020 }
+    },
+    {
+      "bodyId": "venus",
+      "jd": 2451545.0,
+      "position": { "x": 0.718, "y": 0.032, "z": 0.040 },
+      "velocity": { "x": -0.0008, "y": 0.0202, "z": 0.0003 }
+    },
+    {
+      "bodyId": "earth",
+      "jd": 2451545.0,
+      "position": { "x": -0.177, "y": 0.967, "z": -0.0001 },
+      "velocity": { "x": -0.0172, "y": -0.0031, "z": 0.0000 }
+    },
+    {
+      "bodyId": "moon",
+      "jd": 2451545.0,
+      "position": { "x": -0.180, "y": 0.968, "z": 0.0000 },
+      "velocity": { "x": -0.0175, "y": 0.0063, "z": 0.0001 }
+    },
+    {
+      "bodyId": "mars",
+      "jd": 2451545.0,
+      "position": { "x": 1.382, "y": 0.025, "z": -0.028 },
+      "velocity": { "x": -0.0006, "y": 0.0128, "z": 0.0004 }
+    },
+    {
+      "bodyId": "jupiter",
+      "jd": 2451545.0,
+      "position": { "x": 4.003, "y": 1.490, "z": -0.095 },
+      "velocity": { "x": -0.0022, "y": 0.0059, "z": 0.0001 }
+    },
+    {
+      "bodyId": "saturn",
+      "jd": 2451545.0,
+      "position": { "x": 6.406, "y": 6.558, "z": -0.362 },
+      "velocity": { "x": -0.0033, "y": 0.0037, "z": 0.0002 }
+    },
+    {
+      "bodyId": "uranus",
+      "jd": 2451545.0,
+      "position": { "x": 13.831, "y": -12.832, "z": -0.220 },
+      "velocity": { "x": 0.0026, "y": 0.0022, "z": -0.0001 }
+    },
+    {
+      "bodyId": "neptune",
+      "jd": 2451545.0,
+      "position": { "x": 16.029, "y": -24.033, "z": 0.187 },
+      "velocity": { "x": 0.0024, "y": 0.0013, "z": -0.0002 }
+    }
+  ]
+}
