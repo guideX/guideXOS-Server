@@ -47,6 +47,8 @@ static const uint64_t NESTED_APPLICATION_STACK_BASE =
 static const uint64_t NESTED_SERVICE_STACK_BASE =
     NESTED_APPLICATION_STACK_BASE - APPLICATION_STACK_SIZE;
 static bool s_nestedExecutionActive = false;
+static bool s_phase29zTargetCallActive = false;
+static uint64_t s_phase29zTargetCallStartTick = 0;
 // Nested execution only needs to suspend the active target image while the
 // child runs. Keep this kernel-owned snapshot bounded by the artifact file
 // limit instead of mirroring the full 512-MiB guest mapping window in kernel
@@ -332,6 +334,16 @@ static void native_app_host_log_echo_bounded(const char* message)
         s_appRuntime.hostLogSerialTruncated = true;
 }
 
+static bool native_app_log_message_equals(const char* message,
+                                          uint32_t messageBytes,
+                                          const char* expected)
+{
+    if (!message || !expected) return false;
+    uint32_t i = 0;
+    while (i < messageBytes && expected[i] != '\0' && message[i] == expected[i]) ++i;
+    return i == messageBytes && expected[i] == '\0';
+}
+
 static gx_result GX_CALL host_log(gx_app_context* context, const char* message)
 {
     if (s_appRuntime.state != NativeAppExecutionState::Running ||
@@ -350,6 +362,20 @@ static gx_result GX_CALL host_log(gx_app_context* context, const char* message)
     uint32_t length = 0;
     while (length < maximumReadableBytes && message[length] != '\0') ++length;
     if (length == maximumReadableBytes) return GX_ERROR_INVALID_ARGUMENT;
+
+    if (s_phase29zTargetCallActive &&
+        (native_app_log_message_equals(message, length, "P28Z APP 00 gx_main_entry_raw") ||
+         native_app_log_message_equals(message, length, "P28Z APP 01 gx_main_entered"))) {
+        const bool app00 = native_app_log_message_equals(
+            message, length, "P28Z APP 00 gx_main_entry_raw");
+        const uint64_t now = pit::ticks();
+        serial::puts("P29Z APP_MARKER marker=");
+        serial::puts(app00 ? "APP00" : "APP01");
+        serial::puts(" tick="); serial::put_hex64(now);
+        serial::puts(" since_call_ticks=");
+        serial::put_hex64(now - s_phase29zTargetCallStartTick);
+        serial::putc('\n');
+    }
 
     s_appRuntime.hostLogObserved = true;
     s_appRuntime.hostLogBytes = length;
@@ -1358,6 +1384,137 @@ static bool find_pte(uint64_t virtualAddress, volatile uint64_t** outPte)
     return true;
 }
 
+static bool phase29z_is_qualified_developer_studio(const char* path)
+{
+    static const char expected[] = "/Apps/DeveloperStudio/bin/amd64/developerstudio.elf";
+    if (!path) return false;
+    uint32_t i = 0;
+    while (path[i] != '\0' && path[i] == expected[i]) ++i;
+    return path[i] == '\0' && expected[i] == '\0';
+}
+
+static void phase29z_put_hex_bytes(const uint8_t* bytes, uint32_t count)
+{
+    static const char digits[] = "0123456789ABCDEF";
+    if (!bytes) return;
+    for (uint32_t i = 0; i < count; ++i) {
+        if (i != 0) serial::putc(' ');
+        serial::putc(digits[(bytes[i] >> 4) & 0x0FU]);
+        serial::putc(digits[bytes[i] & 0x0FU]);
+    }
+}
+
+static void phase29z_pre_call_diagnostic(const char* path,
+                                         const NativeElfValidationResult& validation,
+                                         uint32_t fileBytes)
+{
+    if (!phase29z_is_qualified_developer_studio(path)) return;
+
+    serial::puts("P29Z ENTRY RESOLVED method=ELF_e_entry path="); serial::puts(path);
+    serial::puts(" et_exec=");
+    serial::put_hex32(s_file[16] == 2U && s_file[17] == 0U ? 1U : 0U);
+    serial::puts(" image_base="); serial::put_hex64(validation.imageBase);
+    serial::puts(" entry="); serial::put_hex64(validation.entryPoint);
+    serial::puts(" load_bias=0 mapped_bytes="); put_decimal_u64(validation.mappedBytes);
+    serial::puts(" file_bytes="); put_decimal_u64(fileBytes);
+    serial::puts(" load_count="); put_decimal_u64(validation.loadCount);
+    serial::puts(" entry_load_index="); put_decimal_u64(validation.entryLoadIndex);
+    serial::puts(" relocations=none-fixed-ET_EXEC\n");
+
+    for (uint32_t i = 0; i < validation.loadCount; ++i) {
+        const NativeElfLoad& load = validation.loads[i];
+        serial::puts("P29Z SEGMENT index="); put_decimal_u64(i);
+        serial::puts(" source_offset="); serial::put_hex64(load.fileOffset);
+        serial::puts(" destination="); serial::put_hex64(load.virtualAddress);
+        serial::puts(" filesz="); put_decimal_u64(load.fileSize);
+        serial::puts(" memsz="); put_decimal_u64(load.memorySize);
+        serial::puts(" copied="); put_decimal_u64(load.fileSize);
+        serial::puts(" zero_fill="); put_decimal_u64(load.memorySize - load.fileSize);
+        serial::puts(" flags="); serial::put_hex32(load.flags);
+        serial::puts(" bounds=["); serial::put_hex64(load.virtualAddress);
+        serial::putc(','); serial::put_hex64(load.virtualAddress + load.memorySize);
+        serial::puts(")\n");
+    }
+
+    if (validation.entryLoadIndex >= validation.loadCount) {
+        serial::puts("P29Z ENTRY_BYTES valid=0 reason=entry_load_index_out_of_range\n");
+        return;
+    }
+    const NativeElfLoad& entryLoad = validation.loads[validation.entryLoadIndex];
+    const uint64_t entryInSegment = validation.entryPoint - entryLoad.virtualAddress;
+    const uint64_t expectedOffset = entryLoad.fileOffset + entryInSegment;
+    const uint32_t signatureBytes = 16U;
+    if (entryInSegment > entryLoad.fileSize ||
+        signatureBytes > entryLoad.fileSize - entryInSegment ||
+        expectedOffset > fileBytes || signatureBytes > fileBytes - expectedOffset) {
+        serial::puts("P29Z ENTRY_BYTES valid=0 reason=signature_outside_file_backed_segment\n");
+        return;
+    }
+    const uint8_t* expectedBytes = s_file + expectedOffset;
+    const uint8_t* runtimeBytes = reinterpret_cast<const uint8_t*>(
+        static_cast<uintptr_t>(validation.entryPoint));
+    bool bytesMatch = true;
+    for (uint32_t i = 0; i < signatureBytes; ++i) {
+        if (expectedBytes[i] != runtimeBytes[i]) bytesMatch = false;
+    }
+    serial::puts("P29Z ENTRY_BYTES file_offset="); serial::put_hex64(expectedOffset);
+    serial::puts(" expected="); phase29z_put_hex_bytes(expectedBytes, signatureBytes);
+    serial::puts(" runtime="); phase29z_put_hex_bytes(runtimeBytes, signatureBytes);
+    serial::puts(" match="); serial::put_hex32(bytesMatch ? 1U : 0U);
+    serial::puts(" coherency=x86-coherent-no-explicit-icache-flush\n");
+
+    volatile uint64_t* pte = nullptr;
+    if (find_pte(align_down(validation.entryPoint), &pte)) {
+        const uint64_t pageEntry = *pte;
+        serial::puts("P29Z ENTRY_PTE page=");
+        serial::put_hex64(align_down(validation.entryPoint));
+        serial::puts(" pte="); serial::put_hex64(pageEntry);
+        serial::puts(" physical_page="); serial::put_hex64(pageEntry & PTE_ADDRESS_MASK);
+        serial::puts(" present="); serial::put_hex32((pageEntry & PTE_PRESENT) ? 1U : 0U);
+        serial::puts(" writable="); serial::put_hex32((pageEntry & PTE_WRITABLE) ? 1U : 0U);
+        serial::puts(" nx="); serial::put_hex32((pageEntry & PTE_NX) ? 1U : 0U);
+        serial::putc('\n');
+    } else {
+        serial::puts("P29Z ENTRY_PTE present=0 lookup_failed=1\n");
+    }
+
+    const gx_app_context* app = &s_appRuntime.appContext;
+    const gx_host_calls* host = app->host;
+    serial::puts("P29Z ENTRY_CONTEXT arg0_rcx=");
+    serial::put_hex64(reinterpret_cast<uint64_t>(app));
+    serial::puts(" app_size="); serial::put_hex32(app->size);
+    serial::puts(" api="); serial::put_hex32(app->apiVersion);
+    serial::puts(" host="); serial::put_hex64(reinterpret_cast<uint64_t>(host));
+    serial::puts(" user_data="); serial::put_hex64(reinterpret_cast<uint64_t>(app->userData));
+    serial::puts(" host_size="); serial::put_hex32(host ? host->size : 0U);
+    serial::puts(" host_version="); serial::put_hex32(host ? host->version : 0U);
+    serial::puts(" log="); serial::put_hex32(host && host->log ? 1U : 0U);
+    serial::puts(" get_api_version="); serial::put_hex32(host && host->get_api_version ? 1U : 0U);
+    serial::puts(" build_start_poll_release=");
+    serial::put_hex32(host && host->bare_metal_build_project_start &&
+        host->bare_metal_build_project_poll && host->bare_metal_build_project_release ? 1U : 0U);
+    serial::putc('\n');
+
+    uint16_t cs = 0;
+#if defined(__GNUC__) || defined(__clang__)
+    asm volatile("mov %%cs, %0" : "=r"(cs));
+#endif
+    const uint64_t callRsp = s_appRuntime.stackTop - 0x20ULL;
+    const uint64_t entryRsp = s_appRuntime.stackTop - 0x28ULL;
+    serial::puts("P29Z ENTRY_STACK kernel_rsp_before=");
+    serial::put_hex64(read_stack_pointer());
+    serial::puts(" base="); serial::put_hex64(s_appRuntime.stackBase);
+    serial::puts(" top="); serial::put_hex64(s_appRuntime.stackTop);
+    serial::puts(" remaining_at_entry="); put_decimal_u64(entryRsp - s_appRuntime.stackBase);
+    serial::puts(" call_rsp="); serial::put_hex64(callRsp);
+    serial::puts(" call_rsp_mod16="); serial::put_hex32(static_cast<uint32_t>(callRsp & 0xFU));
+    serial::puts(" entry_rsp="); serial::put_hex64(entryRsp);
+    serial::puts(" entry_rsp_mod16="); serial::put_hex32(static_cast<uint32_t>(entryRsp & 0xFU));
+    serial::puts(" cs="); serial::put_hex32(cs);
+    serial::puts(" cpl="); serial::put_hex32(cs & 3U);
+    serial::puts(" abi=ms_x64 arg_count=1\n");
+}
+
 static bool set_page_permissions(uint64_t start,
                                   uint64_t end,
                                   bool writable,
@@ -1797,14 +1954,38 @@ static bool run_file_internal(const char* path,
     serial::puts(" top=0x");
     serial::put_hex64(s_appRuntime.stackTop);
     serial::putc('\n');
+    const bool phase29zTarget = phase29z_is_qualified_developer_studio(path);
+    phase29z_pre_call_diagnostic(path, validation, fileBytes);
     serial::debugcon_puts("P29J GUEST 07 native_loader_dispatch_ready\n");
     serial::puts("ELF Loader: invoking gx_main with gx_app_context\n");
     serial::debugcon_puts("P29J GUEST 08 gx_main_invoke\n");
     serial::puts("P28Z BOOT 01 native_loader_entered\n");
-    serial::puts("P28Z BOOT 05 gx_main_invoke\n");
+    serial::puts("P28Z BOOT 05 gx_main_invoke path=");
+    serial::puts(path);
+    serial::putc('\n');
     s_appRuntime.kernelRspBefore = read_stack_pointer();
     s_appRuntime.state = NativeAppExecutionState::Running;
     NativeElfTrampolineResult trampoline = {};
+    const bool previousPhase29zCallActive = s_phase29zTargetCallActive;
+    const uint64_t previousPhase29zCallStartTick = s_phase29zTargetCallStartTick;
+    if (phase29zTarget) {
+        s_phase29zTargetCallActive = true;
+        s_phase29zTargetCallStartTick = pit::ticks();
+    }
+    if (phase29zTarget) {
+        serial::puts("P29Z CALL_BEGIN path="); serial::puts(path);
+        serial::puts(" entry="); serial::put_hex64(validation.entryPoint);
+        serial::puts(" function_pointer=");
+        serial::put_hex64(static_cast<uint64_t>(
+            static_cast<uintptr_t>(validation.entryPoint)));
+        serial::puts(" target_arg0_rcx=");
+        serial::put_hex64(reinterpret_cast<uint64_t>(&s_appRuntime.appContext));
+        serial::puts(" kernel_rsp="); serial::put_hex64(s_appRuntime.kernelRspBefore);
+        serial::puts(" stack_call_rsp="); serial::put_hex64(s_appRuntime.stackTop - 0x20ULL);
+        serial::puts(" stack_entry_rsp="); serial::put_hex64(s_appRuntime.stackTop - 0x28ULL);
+        serial::puts(" tick="); serial::put_hex64(s_phase29zTargetCallStartTick);
+        serial::putc('\n');
+    }
     const bool invoked = invoke_native_entry_on_stack(validation.entryPoint,
                                                       &s_appRuntime.appContext,
                                                       s_appRuntime.stackTop,
@@ -1812,6 +1993,15 @@ static bool run_file_internal(const char* path,
     s_appRuntime.kernelRspAfter = read_stack_pointer();
     s_appRuntime.applicationRsp = trampoline.applicationRsp;
     if (!invoked) {
+        if (phase29zTarget) {
+            serial::puts("P29Z CALL_RETURN invoked=0 kernel_rsp_after=");
+            serial::put_hex64(s_appRuntime.kernelRspAfter);
+            serial::puts(" elapsed_ticks=");
+            serial::put_hex64(pit::ticks() - s_phase29zTargetCallStartTick);
+            serial::putc('\n');
+        }
+        s_phase29zTargetCallActive = previousPhase29zCallActive;
+        s_phase29zTargetCallStartTick = previousPhase29zCallStartTick;
         s_appRuntime.state = NativeAppExecutionState::Failed;
         if (report) {
             report->kernelRspBefore = s_appRuntime.kernelRspBefore;
@@ -1826,6 +2016,20 @@ static bool run_file_internal(const char* path,
     s_appRuntime.runtimeCallDepth = trampoline.runtimeCallDepth;
     *returnValue = s_appRuntime.result;
     s_appRuntime.state = NativeAppExecutionState::Returned;
+    if (phase29zTarget) {
+        serial::puts("P29Z CALL_RETURN invoked=1 return=");
+        put_decimal_i32(s_appRuntime.result);
+        serial::puts(" runtime_status=");
+        serial::put_hex32(static_cast<uint32_t>(s_appRuntime.runtimeStatus));
+        serial::puts(" application_rsp="); serial::put_hex64(s_appRuntime.applicationRsp);
+        serial::puts(" kernel_rsp_before="); serial::put_hex64(s_appRuntime.kernelRspBefore);
+        serial::puts(" kernel_rsp_after="); serial::put_hex64(s_appRuntime.kernelRspAfter);
+        serial::puts(" elapsed_ticks=");
+        serial::put_hex64(pit::ticks() - s_phase29zTargetCallStartTick);
+        serial::putc('\n');
+    }
+    s_phase29zTargetCallActive = previousPhase29zCallActive;
+    s_phase29zTargetCallStartTick = previousPhase29zCallStartTick;
     if (report) {
         report->returnValue = s_appRuntime.result;
         report->kernelRspBefore = s_appRuntime.kernelRspBefore;
@@ -1851,7 +2055,10 @@ static bool run_file_internal(const char* path,
     serial::puts("ELF Loader: gx_main returned ");
     put_decimal_i32(s_appRuntime.result);
     serial::putc('\n');
-    serial::puts("P28Z BOOT 08 gx_main_returned\n");
+    serial::puts("P28Z BOOT 08 gx_main_returned path=");
+    serial::puts(path);
+    serial::puts(" return="); put_decimal_i32(s_appRuntime.result);
+    serial::putc('\n');
     const bool runtimeSucceeded = s_appRuntime.runtimeStatus == NativeRuntimeStatus::None;
     if (!runtimeSucceeded) {
         serial::puts(s_appRuntime.runtimeStatus == NativeRuntimeStatus::ArrayBoundsExceeded

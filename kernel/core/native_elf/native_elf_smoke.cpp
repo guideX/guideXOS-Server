@@ -2464,25 +2464,53 @@ static bool compile_diagnostic_contains(const compiler::CompileSummary& summary,
     return false;
 }
 
-static bool file_contains_bytes(const char* path, const uint8_t* pattern, uint32_t patternBytes)
+struct Phase29zFileProbe {
+    int32_t statResult;
+    int32_t readResult;
+    uint32_t fileType;
+    uint32_t fileBytes;
+    bool tokenFound;
+};
+
+static bool file_contains_bytes_probe(const char* path,
+                                      const uint8_t* pattern,
+                                      uint32_t patternBytes,
+                                      Phase29zFileProbe* probe)
 {
+    if (probe) *probe = {-1, -1, 0, 0, false};
     if (!path || !pattern || patternBytes == 0 || patternBytes > sizeof(s_invalidImage)) return false;
     vfs::FileInfo info = {};
-    if (vfs::stat(path, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR ||
+    const int32_t statResult = static_cast<int32_t>(vfs::stat(path, &info));
+    if (probe) {
+        probe->statResult = statResult;
+        probe->fileType = static_cast<uint32_t>(info.type);
+        probe->fileBytes = static_cast<uint32_t>(info.size);
+    }
+    if (statResult != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR ||
         info.size == 0 || info.size > sizeof(s_invalidImage)) return false;
     const uint32_t bytes = static_cast<uint32_t>(info.size);
-    if (vfs::read_file(path, s_invalidImage, bytes) != static_cast<int32_t>(bytes)) return false;
+    const int32_t readResult = vfs::read_file(path, s_invalidImage, bytes);
+    if (probe) probe->readResult = readResult;
+    if (readResult != static_cast<int32_t>(bytes)) return false;
     for (uint32_t i = 0; i + patternBytes <= bytes; ++i) {
         bool same = true;
         for (uint32_t j = 0; j < patternBytes; ++j) {
             if (s_invalidImage[i + j] != pattern[j]) same = false;
         }
-        if (same) return true;
+        if (same) {
+            if (probe) probe->tokenFound = true;
+            return true;
+        }
     }
     return false;
 }
 
-#if defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE) || defined(GXOS_PHASE28I_SMOKE) || defined(GXOS_PHASE28J_SMOKE) || defined(GXOS_PHASE28K_SMOKE) || defined(GXOS_PHASE28L_SMOKE)
+static bool file_contains_bytes(const char* path, const uint8_t* pattern, uint32_t patternBytes)
+{
+    return file_contains_bytes_probe(path, pattern, patternBytes, nullptr);
+}
+
+#if defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE) || defined(GXOS_PHASE28I_SMOKE) || defined(GXOS_PHASE28J_SMOKE) || defined(GXOS_PHASE28K_SMOKE) || defined(GXOS_PHASE28L_SMOKE) || defined(GXOS_PHASE28M_SMOKE)
 static void print_decimal(uint32_t value)
 {
     char digits[10] = {};
@@ -7739,16 +7767,49 @@ auto run_phase28g_normal_session = [&](const gx_build_snapshot& build) -> bool
     const uint8_t runtimeToken[] = "native-elf";
     vfs::FileInfo manifestInfo = {};
     vfs::FileInfo artifactInfo = {};
-    const bool manifestPresent = vfs::stat("/Apps/DeveloperStudio/app.json", &manifestInfo) == vfs::VFS_OK &&
+    const int32_t manifestStat = static_cast<int32_t>(
+        vfs::stat("/Apps/DeveloperStudio/app.json", &manifestInfo));
+    const bool manifestPresent = manifestStat == vfs::VFS_OK &&
         manifestInfo.type == vfs::FILE_TYPE_REGULAR && manifestInfo.size != 0 && manifestInfo.size < sizeof(s_invalidImage);
-    const bool artifactPresent = vfs::stat("/Apps/DeveloperStudio/bin/amd64/developerstudio.elf", &artifactInfo) == vfs::VFS_OK &&
+    const int32_t artifactStat = manifestPresent ? static_cast<int32_t>(
+        vfs::stat("/Apps/DeveloperStudio/bin/amd64/developerstudio.elf", &artifactInfo)) : -1;
+    const bool artifactPresent = manifestPresent && artifactStat == vfs::VFS_OK &&
         artifactInfo.type == vfs::FILE_TYPE_REGULAR && artifactInfo.size != 0;
-    const bool packageIdentity = manifestPresent && artifactPresent &&
-        file_contains_bytes("/Apps/DeveloperStudio/app.json", idToken, sizeof(idToken) - 1) &&
-        file_contains_bytes("/Apps/DeveloperStudio/app.json", elfToken, sizeof(elfToken) - 1) &&
-        file_contains_bytes("/Apps/DeveloperStudio/app.json", entryToken, sizeof(entryToken) - 1) &&
-        file_contains_bytes("/Apps/DeveloperStudio/app.json", abiToken, sizeof(abiToken) - 1) &&
-        file_contains_bytes("/Apps/DeveloperStudio/app.json", runtimeToken, sizeof(runtimeToken) - 1);
+    Phase29zFileProbe idProbe = {}, elfProbe = {}, entryProbe = {}, abiProbe = {}, runtimeProbe = {};
+    const bool idPresent = manifestPresent && artifactPresent &&
+        file_contains_bytes_probe("/Apps/DeveloperStudio/app.json", idToken,
+                                  sizeof(idToken) - 1, &idProbe);
+    const bool elfPresent = idPresent &&
+        file_contains_bytes_probe("/Apps/DeveloperStudio/app.json", elfToken,
+                                  sizeof(elfToken) - 1, &elfProbe);
+    const bool entryPresent = elfPresent &&
+        file_contains_bytes_probe("/Apps/DeveloperStudio/app.json", entryToken,
+                                  sizeof(entryToken) - 1, &entryProbe);
+    const bool abiPresent = entryPresent &&
+        file_contains_bytes_probe("/Apps/DeveloperStudio/app.json", abiToken,
+                                  sizeof(abiToken) - 1, &abiProbe);
+    const bool runtimePresent = abiPresent &&
+        file_contains_bytes_probe("/Apps/DeveloperStudio/app.json", runtimeToken,
+                                  sizeof(runtimeToken) - 1, &runtimeProbe);
+    const bool packageIdentity = runtimePresent;
+    serial::puts("P29Z PACKAGE_DISCOVERY manifest_stat=0x");
+    serial::put_hex32(static_cast<uint32_t>(manifestStat));
+    serial::puts(" manifest_type="); serial::put_hex32(static_cast<uint32_t>(manifestInfo.type));
+    serial::puts(" manifest_bytes="); print_decimal(static_cast<uint32_t>(manifestInfo.size));
+    serial::puts(" artifact_stat=0x");
+    serial::put_hex32(static_cast<uint32_t>(artifactStat));
+    serial::puts(" artifact_type="); serial::put_hex32(static_cast<uint32_t>(artifactInfo.type));
+    serial::puts(" artifact_bytes="); print_decimal(static_cast<uint32_t>(artifactInfo.size));
+    const Phase29zFileProbe* tokenProbes[] = {&idProbe, &elfProbe, &entryProbe, &abiProbe, &runtimeProbe};
+    const char* tokenNames[] = {" id", " elf", " entry", " abi", " runtime"};
+    for (uint32_t i = 0; i < sizeof(tokenProbes) / sizeof(tokenProbes[0]); ++i) {
+        serial::puts(tokenNames[i]); serial::putc('=');
+        serial::put_hex32(tokenProbes[i]->tokenFound ? 1U : 0U);
+        serial::putc('/'); serial::put_hex32(static_cast<uint32_t>(tokenProbes[i]->statResult));
+        serial::putc('/'); serial::put_hex32(static_cast<uint32_t>(tokenProbes[i]->readResult));
+        serial::putc('/'); print_decimal(tokenProbes[i]->fileBytes);
+    }
+    serial::putc('\n');
     print_marker("DEVELOPER_STUDIO_PHASE28M_APP_DISCOVERY_PASS", packageIdentity);
 
     static int32_t developerStudioReturn = 1;
