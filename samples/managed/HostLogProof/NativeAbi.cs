@@ -169,7 +169,7 @@ public unsafe struct NativeAssociationServiceRequest
     public fixed byte applicationId[96];
 }
 
-[StructLayout(LayoutKind.Sequential, Pack = 4, Size = 316)]
+[StructLayout(LayoutKind.Sequential, Pack = 4, Size = 328)]
 public unsafe struct NativeAssociationServiceResponse
 {
     public uint status;
@@ -179,6 +179,8 @@ public unsafe struct NativeAssociationServiceResponse
     public fixed byte overrideAppId[96];
     public fixed byte effectiveAppId[96];
     public uint hasEffectiveAssociation;
+    public uint diagnosticSlot;
+    public ulong diagnosticGeneration;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 8, Size = (int)GxAbi.ApplicationSnapshotRecordSize)]

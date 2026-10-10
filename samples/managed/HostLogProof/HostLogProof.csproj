@@ -304,6 +304,9 @@
   <PropertyGroup Condition="'$(HostLogProofC166FileAssociationProof)' == 'true'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C166_FILE_ASSOCIATION_PROOF</DefineConstants>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofProofControl)' == 'true'">
+    <DefineConstants>$(DefineConstants);GUIDEXOS_PROOF_CONTROL</DefineConstants>
+  </PropertyGroup>
   <ItemGroup Condition="'$(HostLogProofMode)' != 'C152Composite' and '$(HostLogProofMode)' != 'C153Composite' and '$(HostLogProofMode)' != 'C154Composite' and '$(HostLogProofMode)' != 'C160Composite' and '$(HostLogProofC155ManagedNotesSession)' != 'true' and '$(HostLogProofC156ControlModifierShortcuts)' != 'true'">
     <Compile Remove="Applications/ManagedNotesC152.cs" />
   </ItemGroup>

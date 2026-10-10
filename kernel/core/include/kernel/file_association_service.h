@@ -24,7 +24,7 @@ enum class AssociationOverrideState : uint32_t {
     NoOverride = 0, ApplicationOverride = 1, Disabled = 2,
 };
 enum class AssociationOperation : uint32_t {
-    Query = 0, SetOverride = 1, Disable = 2, Reset = 3,
+    Query = 0, SetOverride = 1, Disable = 2, Reset = 3, Diagnostics = 4,
 };
 struct AssociationServiceRequest {
     uint32_t operation;
@@ -39,6 +39,8 @@ struct AssociationServiceResponse {
     char overrideAppId[96];
     char effectiveAppId[96];
     uint32_t hasEffectiveAssociation;
+    uint32_t diagnosticSlot;
+    uint64_t diagnosticGeneration;
 };
 
 static constexpr uint32_t kFileAssociationCapacity = 16u;

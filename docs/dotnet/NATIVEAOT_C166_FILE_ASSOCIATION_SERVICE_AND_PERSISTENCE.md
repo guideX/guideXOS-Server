@@ -585,3 +585,12 @@ No source was changed, no proof product was rebuilt, and no guest boot was run.
 Cross-compiler and QEMU availability are recorded in the R12 manifest. C166
 remains unaccepted. The production association algorithms, ABI v4 table,
 Settings v2, and product UI were not changed; no Default Apps UI was added.
+
+## PROOF1 follow-up
+
+The reusable proof-control layer, build gate, selector, managed C166 handler,
+bounded serial protocol, Diagnostics operation, and Boot 1/2/3 runner are
+documented in
+[`PROOF1_GUEST_PROOF_CONTROL_INFRASTRUCTURE.md`](PROOF1_GUEST_PROOF_CONTROL_INFRASTRUCTURE.md).
+PROOF1 does not change the C166 acceptance status: C166 remains
+**host-validated, guest-unaccepted** until the fresh guest lane passes.

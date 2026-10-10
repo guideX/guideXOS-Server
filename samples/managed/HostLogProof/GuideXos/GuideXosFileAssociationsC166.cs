@@ -32,6 +32,7 @@ public static unsafe class GuideXosFileAssociations
     private const uint SetOperation = 1u;
     private const uint DisableOperation = 2u;
     private const uint ResetOperation = 3u;
+    private const uint DiagnosticsOperation = 4u;
 
     public static GuideXosAssociationResult Query(NativeGxAppContext* context,
         NativeHostCallTable* host, ReadOnlySpan<byte> extension) =>
@@ -49,6 +50,12 @@ public static unsafe class GuideXosFileAssociations
     public static GuideXosAssociationResult Reset(NativeGxAppContext* context,
         NativeHostCallTable* host, ReadOnlySpan<byte> extension) =>
         Invoke(context, host, ResetOperation, extension, default);
+
+#if GUIDEXOS_PROOF_CONTROL
+    public static GuideXosAssociationResult Diagnostics(NativeGxAppContext* context,
+        NativeHostCallTable* host, ReadOnlySpan<byte> extension) =>
+        Invoke(context, host, DiagnosticsOperation, extension, default);
+#endif
 
     private static GuideXosAssociationResult Invoke(NativeGxAppContext* context,
         NativeHostCallTable* host, uint operation, ReadOnlySpan<byte> extension,
@@ -89,6 +96,24 @@ public static unsafe class GuideXosFileAssociations
         byte* overridden = response.overrideAppId;
         byte* effective = response.effectiveAppId;
         byte* normalized = response.normalizedExtension;
+        if (operation == DiagnosticsOperation)
+        {
+            if (!Terminated(normalized, 16) || normalized[0] != (byte)'.' ||
+                response.diagnosticSlot != 0u && response.diagnosticSlot != 1u &&
+                    response.diagnosticSlot != 0xFFFFFFFFu)
+                return new(GuideXosAssociationStatus.InvalidResponse, empty);
+            for (int i = 1; i < extension.Length; ++i)
+            {
+                byte expected = extension[i];
+                if (expected >= (byte)'A' && expected <= (byte)'Z')
+                    expected = (byte)(expected + 32);
+                if (normalized[i] != expected)
+                    return new(GuideXosAssociationStatus.InvalidResponse, empty);
+            }
+            if (normalized[extension.Length] != 0)
+                return new(GuideXosAssociationStatus.InvalidResponse, empty);
+            return new(GuideXosAssociationStatus.Success, response);
+        }
         if (!Terminated(compiled, 96) || !Terminated(overridden, 96) ||
             !Terminated(effective, 96) ||
             !Terminated(normalized, 16) || normalized[0] != (byte)'.' ||

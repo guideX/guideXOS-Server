@@ -22,9 +22,10 @@ internal static class Program
 
 public sealed class GuideXosHost
 {
+    public static bool SuppressLog;
     public bool TryLog(ReadOnlySpan<byte> message)
     {
-        Console.WriteLine(System.Text.Encoding.UTF8.GetString(message));
+        if (!SuppressLog) Console.WriteLine(System.Text.Encoding.UTF8.GetString(message));
         return true;
     }
 }

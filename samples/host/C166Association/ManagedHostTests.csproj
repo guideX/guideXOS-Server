@@ -4,12 +4,13 @@
     <TargetFramework>net9.0</TargetFramework>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <DefineConstants>HOSTLOGPROOF_C166_FILE_ASSOCIATION_PROOF</DefineConstants>
+    <DefineConstants>HOSTLOGPROOF_C166_FILE_ASSOCIATION_PROOF;GUIDEXOS_PROOF_CONTROL;HOSTLOGPROOF_HOST_TEST_STUB</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="../../managed/HostLogProof/NativeAbi.cs" Link="NativeAbi.cs" />
     <Compile Include="../../managed/HostLogProof/GuideXos/GuideXosFileAssociationsC166.cs" Link="GuideXosFileAssociationsC166.cs" />
     <Compile Include="../../managed/HostLogProof/GuideXos/GuideXosFileAssociationsC166Tests.cs" Link="GuideXosFileAssociationsC166Tests.cs" />
+    <Compile Include="../../managed/HostLogProof/GuideXos/GuideXosProofControl.cs" Link="GuideXosProofControl.cs" />
   </ItemGroup>
 </Project>

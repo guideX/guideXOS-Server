@@ -18,7 +18,9 @@ param(
     [switch]$C155ManagedNotesSession,
     [switch]$C156ControlModifierShortcuts,
     [switch]$C157ManagedNotesNewDocument,
-    [switch]$C164FileActivation
+    [switch]$C164FileActivation,
+    [switch]$Proof1Control,
+    [ValidateSet("SameBoot", "PreReboot", "PostReboot")][string]$Proof1Stage = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -721,6 +723,10 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
             '^wall$' {
                 break
             }
+            '^config$' {
+                $hasConfig = $true
+                break
+            }
             '^certs$' {
                 $hasCerts = $true
                 break
@@ -992,6 +998,10 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
 
         foreach ($record in $fileRecords) {
             switch ($record.Directory) {
+                "config" {
+                    Add-DirectoryRecord $configEntries $record.Name (Get-ShortName $record.Name $usedConfig) 0x20 $record.Cluster $record.Size
+                    break
+                }
                 "wall" {
                     Add-DirectoryRecord $wallEntries $record.Name (Get-ShortName $record.Name $usedWall) 0x20 $record.Cluster $record.Size
                     break
@@ -1104,6 +1114,18 @@ foreach ($stagingDir in @($wallpaperDir, $certsDir, $configDir, $appsDir)) {
 New-Item -ItemType Directory -Force -Path $wallpaperDir | Out-Null
 New-Item -ItemType Directory -Force -Path $appsDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $OutputImage) | Out-Null
+
+if ($Proof1Control) {
+    if ([string]::IsNullOrWhiteSpace($Proof1Stage)) { throw "Proof1Control requires a fixed Proof1Stage." }
+    $stageId = switch ($Proof1Stage) { "SameBoot" { 1 } "PreReboot" { 2 } "PostReboot" { 3 } }
+    $scenarioId = if ($Proof1Stage -eq "SameBoot") { 1 } else { 2 }
+    $configDir = Join-Path $OutputDir "config"
+    New-Item -ItemType Directory -Force -Path $configDir | Out-Null
+    $configBytes = [byte[]](0x47,0x58,0x50,0x46,1,1,$scenarioId,$stageId,(1 -bxor 1 -bxor $scenarioId -bxor $stageId))
+    $selectorPath = Join-Path $configDir "proof1.bin"
+    [System.IO.File]::WriteAllBytes($selectorPath, $configBytes)
+    $staged += Get-Item $selectorPath
+}
 
 if ($C114ManagedDirectoryServices) {
     # Deterministic small text fixtures for the managed directory/stat proof.

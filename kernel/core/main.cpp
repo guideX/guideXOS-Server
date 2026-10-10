@@ -764,6 +764,14 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // The first desktop draw happens before VFS and the boot ramdisk are ready.
         // Redraw now so bare-metal thumbnails and the selected wallpaper use /system/wallpapers.
         kernel::desktop::draw();
+#if defined(GUIDEXOS_PROOF_CONTROL)
+        // Start the fixed managed scenario selector from the proof ramdisk.
+        kernel::serial::puts("[PROOF1-STARTUP] launching managed scenario dispatcher\n");
+        const bool proofDispatchStarted = kernel::desktop::launch_app(
+            "com.guidexos.apps.managed.notes");
+        kernel::serial::puts("[PROOF1-STARTUP] managed-dispatch=");
+        kernel::serial::puts(proofDispatchStarted ? "started\n" : "failed\n");
+#endif
         
         // ============================================================
         

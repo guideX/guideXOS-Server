@@ -152,6 +152,29 @@ public static unsafe class GuideXosApplicationRegistry
                 : (int)hostResult;
         }
 
+#if GUIDEXOS_PROOF_CONTROL
+        Span<byte> proofConfig = stackalloc byte[9];
+        GuideXosFileResult proofConfigResult = host.TryReadInto(
+            "/system/config/proof1.bin"u8, proofConfig,
+            out int proofConfigLength);
+        if (proofConfigResult == GuideXosFileResult.Success)
+        {
+            if (proofConfigLength != proofConfig.Length ||
+                !ProofSelection.TryParse(proofConfig, out ProofSelection selection))
+            {
+                host.TryLog("PROOF-SCENARIO-FAIL INVALID-CONFIG"u8);
+                return GxAbi.ErrorInvalidArgument;
+            }
+            GuideXosProofCoordinator.Run(host, context, context->host, selection);
+            return (int)GuideXosResult.Success;
+        }
+        if (proofConfigResult != GuideXosFileResult.NotFound)
+        {
+            host.TryLog("PROOF-SCENARIO-FAIL CONFIG-READ"u8);
+            return GxAbi.ErrorInvalidArgument;
+        }
+#endif
+
         if (!TryFind(selector, out GuideXosApplicationDescriptor descriptor))
         {
             host.TryLog("C112-UNKNOWN-SELECTOR"u8);

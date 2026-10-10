@@ -410,7 +410,7 @@ static_assert(kManagedHostTableSize ==
               "C166 ABI-v4 table size drift");
 static_assert(sizeof(appmodel::AssociationServiceRequest) == 116u,
               "C166 request layout drift");
-static_assert(sizeof(appmodel::AssociationServiceResponse) == 316u,
+static_assert(sizeof(appmodel::AssociationServiceResponse) == 328u,
               "C166 response layout drift");
 static_assert(kManagedHostAbiV1Size == kManagedApplicationSnapshotOffset,
               "C160 ABI-v1 prefix size drift");

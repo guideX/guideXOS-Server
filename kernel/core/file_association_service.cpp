@@ -212,7 +212,12 @@ AssociationServiceStatus fileAssociationService(
     if (!request || !response) return AssociationServiceStatus::InvalidArgument;
     loadAssociationOverrides();
     *response = {};
-    if (request->operation > static_cast<uint32_t>(AssociationOperation::Reset)) {
+#if defined(GUIDEXOS_PROOF_CONTROL)
+    constexpr uint32_t maximumOperation = static_cast<uint32_t>(AssociationOperation::Diagnostics);
+#else
+    constexpr uint32_t maximumOperation = static_cast<uint32_t>(AssociationOperation::Reset);
+#endif
+    if (request->operation > maximumOperation) {
         response->status = static_cast<uint32_t>(AssociationServiceStatus::InvalidArgument);
         return AssociationServiceStatus::InvalidArgument;
     }
@@ -224,6 +229,18 @@ AssociationServiceStatus fileAssociationService(
     copyBounded(response->normalizedExtension,
         sizeof(response->normalizedExtension), extension);
     const AssociationOperation operation = static_cast<AssociationOperation>(request->operation);
+    if (operation == AssociationOperation::Diagnostics) {
+        response->overrideState = s_hasOverride
+            ? (s_override.state == static_cast<uint32_t>(PersistedOverrideState::Disabled)
+                ? static_cast<uint32_t>(AssociationOverrideState::Disabled)
+                : static_cast<uint32_t>(AssociationOverrideState::ApplicationOverride))
+            : static_cast<uint32_t>(AssociationOverrideState::NoOverride);
+        response->diagnosticSlot = s_activeSlot < 0 ? 0xFFFFFFFFu
+            : static_cast<uint32_t>(s_activeSlot);
+        response->diagnosticGeneration = s_activeGeneration;
+        response->status = static_cast<uint32_t>(AssociationServiceStatus::Success);
+        return AssociationServiceStatus::Success;
+    }
     if (operation == AssociationOperation::SetOverride &&
         !boundedEqualsIgnoreCase(request->applicationId, kManagedNotesApplicationId,
             sizeof(request->applicationId))) {
@@ -296,6 +313,24 @@ bool runC166AssociationServiceTests(uint32_t* outCases,
         asciiEqualsIgnoreCase(response.normalizedExtension, ".txt"));
     check(asciiEqualsIgnoreCase(response.compiledDefaultAppId,
         kManagedNotesApplicationId) && response.overrideAppId[0] == '\0');
+#if defined(GUIDEXOS_PROOF_CONTROL)
+    const int32_t diagnosticsSlot = fileAssociationActiveSlot();
+    const uint64_t diagnosticsGeneration = fileAssociationActiveGeneration();
+    request.operation = static_cast<uint32_t>(AssociationOperation::Diagnostics);
+    status = fileAssociationService(&request, &response);
+    check(status == AssociationServiceStatus::Success &&
+        response.diagnosticSlot == (diagnosticsSlot < 0 ? 0xFFFFFFFFu :
+            static_cast<uint32_t>(diagnosticsSlot)) &&
+        response.diagnosticGeneration == diagnosticsGeneration &&
+        fileAssociationActiveSlot() == diagnosticsSlot &&
+        fileAssociationActiveGeneration() == diagnosticsGeneration);
+    request.operation = static_cast<uint32_t>(AssociationOperation::Query);
+#else
+    request.operation = static_cast<uint32_t>(AssociationOperation::Diagnostics);
+    check(fileAssociationService(&request, &response) ==
+        AssociationServiceStatus::InvalidArgument);
+    request.operation = static_cast<uint32_t>(AssociationOperation::Query);
+#endif
     check(resolveFileAssociation("/proof/clean.txt", true, false).status ==
         FileAssociationStatus::Resolved);
     check(fileAssociationCapacity() == 16u && fileAssociationUsedCount() == 1u);
