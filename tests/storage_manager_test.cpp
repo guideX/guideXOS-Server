@@ -7,6 +7,7 @@
 #include "../kernel/core/include/kernel/partition_operations.h"
 #include "../kernel/core/include/kernel/gpt_repair.h"
 #include "../kernel/core/include/kernel/fat32_formatter.h"
+#include "../kernel/core/include/kernel/partition_wipe.h"
 #include "../kernel/core/include/kernel/fs_fat.h"
 #include "../kernel/core/include/kernel/disk_manager_model.h"
 #include "../kernel/core/include/kernel/ramdisk.h"
@@ -299,6 +300,8 @@ block::Status fake_write(uint8_t driverId, uint64_t lba, uint32_t count,
         disk->writeAttempts == disk->removeOnWriteAtCall) {
         disk->removed = block::mark_device_offline(
             disk->registryIndex, disk->registrationId);
+        disk->duplicateRemovalResult = block::mark_device_offline(
+            disk->registryIndex, disk->registrationId);
         register_fake_replacement_after_removal(disk);
         return block::BLOCK_ERR_NO_MEDIA;
     }
@@ -383,7 +386,7 @@ uint8_t register_fake(FakeDisk& disk, bool writable = false,
                       uint16_t usbVendorId = 0, uint16_t usbProductId = 0,
                       uint8_t usbPort = 0, uint8_t usbInterface = 0,
                       uint8_t usbLun = 0, bool ahciPortValid = false,
-                      uint8_t ahciPort = 0)
+                      uint8_t ahciPort = 0, uint8_t usbSyncCacheState = 0)
 {
     disk.driverId = static_cast<uint8_t>(g_nextDriverId++);
     g_fakeDisks[disk.driverId] = &disk;
@@ -419,6 +422,7 @@ uint8_t register_fake(FakeDisk& disk, bool writable = false,
     descriptor.usbPort = usbPort;
     descriptor.usbInterface = usbInterface;
     descriptor.usbLun = usbLun;
+    descriptor.usbSyncCacheState = usbSyncCacheState;
     descriptor.ahciPortValid = ahciPortValid;
     descriptor.ahciPort = ahciPort;
     const uint8_t index = block::register_device(descriptor);
@@ -1154,6 +1158,70 @@ storage::Fat32FormatRequest make_format_request(
     request.testVolumeIdProvided = true;
     request.testVolumeId = volumeId;
     return request;
+}
+
+storage::PartitionWipeRequest make_partition_wipe_request(
+    uint8_t index, const storage::PartitionEntry& partition)
+{
+    storage::PartitionWipeRequest request = {};
+    storage::capture_target_identity(index, request.targetSnapshot);
+    storage::PartitionTableModel table = {};
+    storage::parse_partition_table(index, table);
+    request.partitionScheme = table.scheme;
+    request.partitionSnapshot = partition;
+    std::memcpy(request.gptDiskGuid, table.primaryDiskGuid,
+                sizeof(request.gptDiskGuid));
+    request.mbrDiskSignature = table.mbrDiskSignature;
+    request.expectedRegistryGeneration =
+        request.targetSnapshot.registryGeneration;
+    return request;
+}
+
+void prepare_wipe_mbr(FakeDisk& disk, uint32_t firstStart,
+                      uint32_t firstCount, uint32_t secondStart,
+                      uint32_t secondCount)
+{
+    std::fill(disk.bytes.begin(), disk.bytes.end(), 0xA7);
+    uint8_t* mbr = sector(disk, 0);
+    std::memset(mbr + 446, 0, 64);
+    write_u32(mbr + 440, 0xD34A5EEDu);
+    set_mbr_partition(disk, 0, 0, 0x0C, firstStart, firstCount);
+    set_mbr_partition(disk, 1, 0, 0x07, secondStart, secondCount);
+    set_mbr_signature(disk);
+}
+
+uint8_t register_wipe_usb_fake(FakeDisk& disk)
+{
+    return register_fake(disk, true, true, true, false, 0, 1024u,
+        block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT, block::BDEV_USB_MASS,
+        false, 0, 0, 0, 0, false, 0, 0, 0, true, 0x1234, 0x5678,
+        1, 0, 0, false, 0, usb_storage::SYNC_CACHE_SUCCEEDED);
+}
+
+bool wipe_partition_is_zero(const FakeDisk& disk,
+                            const storage::PartitionEntry& partition)
+{
+    for (uint64_t offset = 0; offset < partition.sectorCount; ++offset) {
+        const uint8_t* bytes = disk.bytes.data() + static_cast<size_t>(
+            (partition.startLba + offset) * disk.sectorSize);
+        if (!std::all_of(bytes, bytes + disk.sectorSize,
+                         [](uint8_t value) { return value == 0; })) return false;
+    }
+    return true;
+}
+
+bool bytes_outside_partition_unchanged(
+    const FakeDisk& disk, const std::vector<uint8_t>& before,
+    const storage::PartitionEntry& partition)
+{
+    for (uint64_t lba = 0; lba < disk.sectorCount; ++lba) {
+        if (lba >= partition.startLba && lba <= partition.endLba) continue;
+        const size_t offset = static_cast<size_t>(lba * disk.sectorSize);
+        if (std::memcmp(disk.bytes.data() + offset,
+                        before.data() + offset, disk.sectorSize) != 0)
+            return false;
+    }
+    return true;
 }
 
 bool parse_first_partition(uint8_t index, storage::PartitionTableModel& table,
@@ -5573,6 +5641,514 @@ void run_gpt_repair_tests()
     }
 }
 
+void run_partition_wipe_tests()
+{
+    const int checksBefore = g_checks;
+    const int failuresBefore = g_failures;
+
+    {
+        FakeDisk disk(512, 128);
+        prepare_wipe_mbr(disk, 8, 5, 24, 7);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry selected = {};
+        const bool parsed = parse_first_partition(index, table, selected);
+        const std::vector<uint8_t> before = disk.bytes;
+        storage::PartitionWipeRequest request =
+            make_partition_wipe_request(index, selected);
+        storage::PartitionWipeJob job = {};
+        const storage::PartitionWipeState admitted =
+            storage::begin_partition_wipe_job(job, request);
+        storage::PartitionWipeRequest changedSelection = request;
+        changedSelection.targetSnapshot.globalIndex = 0xFE;
+        changedSelection.partitionSnapshot.startLba += 1;
+        const storage::PartitionWipeState duplicateBegin =
+            storage::begin_partition_wipe_job(job, changedSelection);
+        const storage::PartitionWipeState firstStep =
+            storage::step_partition_wipe_job(job);
+        const bool boundedFirstBatch = firstStep == storage::PARTITION_WIPE_RUNNING &&
+            job.result.sectorsWritten == 2 && job.result.progressPercent == 40 &&
+            disk.writeLog.size() == 1 && disk.writeLog[0].lba == 8 &&
+            disk.writeLog[0].count == 2;
+        storage::PartitionWipeState terminal = firstStep;
+        while (terminal == storage::PARTITION_WIPE_RUNNING)
+            terminal = storage::step_partition_wipe_job(job);
+        storage::PartitionTableModel afterTable = {};
+        const bool tableStillValid = storage::parse_partition_table(index,
+            afterTable) && afterTable.state == storage::DISK_STATE_VALID_MBR &&
+            afterTable.partitionCount == 2;
+        check(parsed && admitted == storage::PARTITION_WIPE_RUNNING &&
+              duplicateBegin == storage::PARTITION_WIPE_RUNNING &&
+              job.request.targetSnapshot.globalIndex == index &&
+              job.request.partitionSnapshot.startLba == selected.startLba &&
+              boundedFirstBatch && terminal == storage::PARTITION_WIPE_COMPLETED &&
+              job.result.progressPercent == 100 && job.result.sectorsWritten == 5 &&
+              job.result.bytesWritten == 5u * 512u && job.result.flushAttempted &&
+              job.result.durabilityConfirmed && job.result.ownershipReleased &&
+              job.lease.ownerToken == 0 && wipe_partition_is_zero(disk, selected) &&
+              bytes_outside_partition_unchanged(disk, before, selected) &&
+              tableStillValid && !storage::storage_operation_active(),
+              "DM34 valid 512-byte MBR wipe uses an immutable target, a 2/2/1 final batch, durable completion, and preserves the full MBR, neighbor, and guard ranges");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk disk(512, 1024);
+        build_gpt_three_partitions(disk);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 12u * 512u);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry selected = {};
+        const bool parsed = parse_first_partition(index, table, selected);
+        for (uint64_t offset = 0; offset < selected.sectorCount; ++offset)
+            std::memset(sector(disk, selected.startLba + offset), 0x5B,
+                        disk.sectorSize);
+        const std::vector<uint8_t> before = disk.bytes;
+        storage::PartitionWipeJob job = {};
+        const storage::PartitionWipeState admitted =
+            storage::begin_partition_wipe_job(job,
+                make_partition_wipe_request(index, selected));
+        storage::PartitionWipeState terminal = admitted;
+        while (terminal == storage::PARTITION_WIPE_RUNNING)
+            terminal = storage::step_partition_wipe_job(job);
+        const bool allWritesInside = std::all_of(disk.writeLog.begin(),
+            disk.writeLog.end(), [&](const FakeWriteRecord& write) {
+                return write.lba >= selected.startLba &&
+                    write.lba + write.count - 1 <= selected.endLba;
+            });
+        check(parsed && table.state == storage::DISK_STATE_VALID_GPT &&
+              admitted == storage::PARTITION_WIPE_RUNNING &&
+              terminal == storage::PARTITION_WIPE_COMPLETED &&
+              job.result.sectorsWritten == selected.sectorCount &&
+              job.result.progressPercent == 100 && allWritesInside &&
+              wipe_partition_is_zero(disk, selected) &&
+              bytes_outside_partition_unchanged(disk, before, selected) &&
+              disk.writeLog.back().count < disk.writeLog.front().count,
+              "DM34 GPT wipe zeroes the complete selected extent with a short last batch and leaves both GPT copies, the protective MBR, peers, and guards byte-identical");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk disk(4096, 96);
+        prepare_wipe_mbr(disk, 4, 7, 20, 5);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 4096, 8192u);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry selected = {};
+        const bool parsed = parse_first_partition(index, table, selected);
+        const std::vector<uint8_t> before = disk.bytes;
+        storage::PartitionWipeJob job = {};
+        const storage::PartitionWipeState admitted =
+            storage::begin_partition_wipe_job(job,
+                make_partition_wipe_request(index, selected));
+        storage::PartitionWipeState terminal = admitted;
+        while (terminal == storage::PARTITION_WIPE_RUNNING)
+            terminal = storage::step_partition_wipe_job(job);
+        check(parsed && admitted == storage::PARTITION_WIPE_RUNNING &&
+              terminal == storage::PARTITION_WIPE_COMPLETED &&
+              job.result.logicalSectorSize == 4096 &&
+              job.result.totalBytes == 7u * 4096u &&
+              job.result.bytesWritten == job.result.totalBytes &&
+              job.result.sectorsWritten == 7 && disk.writeLog.size() == 4 &&
+              disk.writeLog.back().count == 1 &&
+              wipe_partition_is_zero(disk, selected) &&
+              bytes_outside_partition_unchanged(disk, before, selected),
+              "DM34 4Kn wipe honors 4096-byte alignment and byte counts across 2/2/2/1 sector batches");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk readOnly(512, 64);
+        prepare_wipe_mbr(readOnly, 8, 5, 24, 7);
+        const uint8_t index = register_fake(readOnly, false, true, true);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        const bool parsed = parse_first_partition(index, table, partition);
+        storage::PartitionWipeJob job = {};
+        const storage::PartitionWipeState state = storage::begin_partition_wipe_job(
+            job, make_partition_wipe_request(index, partition));
+        check(parsed && state == storage::PARTITION_WIPE_NOT_ADMITTED &&
+              job.result.reason == storage::PARTITION_WIPE_REASON_READ_ONLY &&
+              readOnly.writeAttempts == 0 && readOnly.flushes == 0 &&
+              job.result.ownershipReleased && !storage::storage_operation_active(),
+              "DM34 read-only media is rejected before writes and releases its acquired ownership");
+        unregister_fake(index, readOnly);
+    }
+
+    {
+        FakeDisk nvme(512, 64);
+        prepare_wipe_mbr(nvme, 8, 5, 24, 7);
+        const uint8_t index = register_fake(nvme, true, true, true,
+            false, 0, 0, block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT,
+            block::BDEV_NVME);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        const bool parsed = parse_first_partition(index, table, partition);
+        storage::PartitionWipeJob job = {};
+        const storage::PartitionWipeState state = storage::begin_partition_wipe_job(
+            job, make_partition_wipe_request(index, partition));
+        check(parsed && state == storage::PARTITION_WIPE_NOT_ADMITTED &&
+              job.result.reason == storage::PARTITION_WIPE_REASON_UNSUPPORTED_TRANSPORT &&
+              nvme.writeAttempts == 0 && nvme.flushes == 0 &&
+              job.result.ownershipReleased,
+              "DM34 refuses NVMe even when a fixture supplies write and Flush callbacks");
+        unregister_fake(index, nvme);
+    }
+
+    {
+        FakeDisk ahci(512, 64), usb(512, 64);
+        prepare_wipe_mbr(ahci, 8, 5, 24, 7);
+        prepare_wipe_mbr(usb, 8, 5, 24, 7);
+        const uint8_t ahciIndex = register_fake(ahci, true, true, true,
+            false, 0, 1024u, block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT,
+            block::BDEV_AHCI);
+        const uint8_t usbIndex = register_wipe_usb_fake(usb);
+        storage::PartitionTableModel ahciTable = {}, usbTable = {};
+        storage::PartitionEntry ahciPartition = {}, usbPartition = {};
+        const bool parsed = parse_first_partition(ahciIndex, ahciTable,
+            ahciPartition) && parse_first_partition(usbIndex, usbTable,
+            usbPartition);
+        storage::PartitionWipeJob ahciJob = {}, usbJob = {};
+        const storage::PartitionWipeState ahciState =
+            storage::begin_partition_wipe_job(ahciJob,
+                make_partition_wipe_request(ahciIndex, ahciPartition));
+        storage::request_partition_wipe_stop(ahciJob);
+        const storage::PartitionWipeState ahciStopped =
+            storage::step_partition_wipe_job(ahciJob);
+        const storage::PartitionWipeState usbState =
+            storage::begin_partition_wipe_job(usbJob,
+                make_partition_wipe_request(usbIndex, usbPartition));
+        storage::request_partition_wipe_stop(usbJob);
+        const storage::PartitionWipeState usbStopped =
+            storage::step_partition_wipe_job(usbJob);
+        check(parsed && ahciState == storage::PARTITION_WIPE_RUNNING &&
+              usbState == storage::PARTITION_WIPE_RUNNING &&
+              ahciStopped == storage::PARTITION_WIPE_STOPPED &&
+              usbStopped == storage::PARTITION_WIPE_STOPPED &&
+              usb.flushes == 0 && usb.writeAttempts == 0 &&
+              ahci.writeAttempts == 0,
+              "DM34 admits AHCI and USB only with write support and a successful known USB Synchronize Cache contract");
+        unregister_fake(ahciIndex, ahci);
+        unregister_fake(usbIndex, usb);
+    }
+
+    {
+        FakeDisk disk(512, 64);
+        prepare_wipe_mbr(disk, 8, 5, 24, 7);
+        const uint8_t index = register_fake(disk, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        const bool parsed = parse_first_partition(index, table, partition);
+        storage::PartitionWipeRequest zeroLength =
+            make_partition_wipe_request(index, partition);
+        zeroLength.partitionSnapshot.sectorCount = 0;
+        storage::PartitionWipeJob zeroJob = {};
+        const storage::PartitionWipeState zeroState =
+            storage::begin_partition_wipe_job(zeroJob, zeroLength);
+        storage::PartitionWipeRequest outOfBounds =
+            make_partition_wipe_request(index, partition);
+        outOfBounds.partitionSnapshot.endLba = disk.sectorCount;
+        outOfBounds.partitionSnapshot.sectorCount =
+            outOfBounds.partitionSnapshot.endLba -
+            outOfBounds.partitionSnapshot.startLba + 1u;
+        storage::PartitionWipeJob boundsJob = {};
+        const storage::PartitionWipeState boundsState =
+            storage::begin_partition_wipe_job(boundsJob, outOfBounds);
+        check(parsed && zeroState == storage::PARTITION_WIPE_NOT_ADMITTED &&
+              zeroJob.result.reason == storage::PARTITION_WIPE_REASON_INVALID_GEOMETRY &&
+              boundsState == storage::PARTITION_WIPE_NOT_ADMITTED &&
+              boundsJob.result.reason == storage::PARTITION_WIPE_REASON_INVALID_GEOMETRY &&
+              disk.writeAttempts == 0,
+              "DM34 rejects zero-length and out-of-bounds partition requests");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk disk(512, 64);
+        prepare_wipe_mbr(disk, 8, 5, 24, 7);
+        const uint8_t index = register_fake(disk, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        const bool parsed = parse_first_partition(index, table, partition);
+        vfs::test_set_mount(0, true, index, "/wipe-busy");
+        storage::PartitionWipeJob job = {};
+        const storage::PartitionWipeState state = storage::begin_partition_wipe_job(
+            job, make_partition_wipe_request(index, partition));
+        vfs::test_clear_mounts();
+        check(parsed && state == storage::PARTITION_WIPE_NOT_ADMITTED &&
+              job.result.reason == storage::PARTITION_WIPE_REASON_MOUNTED &&
+              disk.writeAttempts == 0 && job.result.ownershipReleased,
+              "DM34 rejects a mounted or ambiguous whole-device VFS view without detaching it");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk bootDisk(512, 64), unknownDisk(512, 64);
+        prepare_wipe_mbr(bootDisk, 8, 5, 24, 7);
+        prepare_wipe_mbr(unknownDisk, 8, 5, 24, 7);
+        const uint8_t bootIndex = register_fake(bootDisk, true, true, true,
+            false, 0, 0, block::BOOT_PROVENANCE_BOOT_BACKING);
+        const uint8_t unknownIndex = register_fake(unknownDisk, true, true, true,
+            false, 0, 0, block::BOOT_PROVENANCE_UNKNOWN);
+        storage::PartitionTableModel bootTable = {}, unknownTable = {};
+        storage::PartitionEntry bootPartition = {}, unknownPartition = {};
+        const bool parsed = parse_first_partition(bootIndex, bootTable,
+            bootPartition) && parse_first_partition(unknownIndex, unknownTable,
+            unknownPartition);
+        storage::PartitionWipeJob bootJob = {}, unknownJob = {};
+        const storage::PartitionWipeState bootState =
+            storage::begin_partition_wipe_job(bootJob,
+                make_partition_wipe_request(bootIndex, bootPartition));
+        const storage::PartitionWipeState unknownState =
+            storage::begin_partition_wipe_job(unknownJob,
+                make_partition_wipe_request(unknownIndex, unknownPartition));
+        check(parsed && bootState == storage::PARTITION_WIPE_NOT_ADMITTED &&
+              bootJob.result.reason == storage::PARTITION_WIPE_REASON_BOOT_BACKING &&
+              unknownState == storage::PARTITION_WIPE_NOT_ADMITTED &&
+              unknownJob.result.reason ==
+                  storage::PARTITION_WIPE_REASON_BOOT_IDENTITY_UNKNOWN &&
+              bootDisk.writeAttempts == 0 && unknownDisk.writeAttempts == 0,
+              "DM34 rejects known boot backing and ambiguous boot provenance");
+        unregister_fake(bootIndex, bootDisk);
+        unregister_fake(unknownIndex, unknownDisk);
+    }
+
+    {
+        FakeDisk disk(512, 1024);
+        build_gpt(disk);
+        static const uint8_t efiTypeGuid[16] = {
+            0x28, 0x73, 0x2A, 0xC1, 0x1F, 0xF8, 0xD2, 0x11,
+            0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B};
+        const uint64_t backupArrayLba = read_u64(
+            sector(disk, disk.sectorCount - 1) + 72);
+        std::memcpy(sector(disk, 2), efiTypeGuid, sizeof(efiTypeGuid));
+        std::memcpy(sector(disk, backupArrayLba), efiTypeGuid,
+                    sizeof(efiTypeGuid));
+        refresh_gpt_fixture_crcs(disk);
+        const uint8_t index = register_fake(disk, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        const bool parsed = parse_first_partition(index, table, partition);
+        storage::PartitionWipeJob job = {};
+        const storage::PartitionWipeState state = storage::begin_partition_wipe_job(
+            job, make_partition_wipe_request(index, partition));
+        check(parsed && state == storage::PARTITION_WIPE_NOT_ADMITTED &&
+              job.result.reason ==
+                  storage::PARTITION_WIPE_REASON_PROTECTED_SYSTEM_PARTITION &&
+              disk.writeAttempts == 0,
+              "DM34 refuses a GPT EFI System partition identified by its validated type GUID");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk disk(512, 64);
+        prepare_wipe_mbr(disk, 8, 5, 24, 7);
+        const uint8_t index = register_fake(disk, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        parse_first_partition(index, table, partition);
+        const storage::PartitionWipeRequest request =
+            make_partition_wipe_request(index, partition);
+        storage::PartitionWipeJob job = {}, competing = {};
+        const storage::PartitionWipeState active =
+            storage::begin_partition_wipe_job(job, request);
+        const storage::PartitionWipeState rejected =
+            storage::begin_partition_wipe_job(competing, request);
+        request_partition_wipe_stop(job);
+        const storage::PartitionWipeState stopped =
+            storage::step_partition_wipe_job(job);
+        check(active == storage::PARTITION_WIPE_RUNNING &&
+              rejected == storage::PARTITION_WIPE_NOT_ADMITTED &&
+              competing.result.reason == storage::PARTITION_WIPE_REASON_OPERATION_BUSY &&
+              stopped == storage::PARTITION_WIPE_STOPPED &&
+              !job.result.mediaMayHaveChanged && job.result.sectorsWritten == 0 &&
+              !job.result.flushAttempted && disk.writeAttempts == 0 &&
+              job.result.ownershipReleased && !storage::storage_operation_active(),
+              "DM34 duplicate destructive admission is rejected and Stop before the first write makes no media change");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk disk(512, 64);
+        prepare_wipe_mbr(disk, 8, 5, 24, 7);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        parse_first_partition(index, table, partition);
+        storage::PartitionWipeJob job = {};
+        const storage::PartitionWipeState active = storage::begin_partition_wipe_job(
+            job, make_partition_wipe_request(index, partition));
+        const storage::PartitionWipeState oneBatch = storage::step_partition_wipe_job(job);
+        const bool stopAccepted = storage::request_partition_wipe_stop(job);
+        const uint32_t attemptsAtStop = disk.writeAttempts;
+        const storage::PartitionWipeState terminal = storage::step_partition_wipe_job(job);
+        check(active == storage::PARTITION_WIPE_RUNNING &&
+              oneBatch == storage::PARTITION_WIPE_RUNNING && stopAccepted &&
+              terminal == storage::PARTITION_WIPE_STOPPED &&
+              job.result.mediaMayHaveChanged && job.result.stopRequested &&
+              job.result.sectorsWritten == 2 && job.result.completedRangeStartLba == 8 &&
+              job.result.completedRangeSectors == 2 &&
+              job.result.progressPercent == 40 && disk.writeAttempts == attemptsAtStop &&
+              job.result.flushAttempted && job.result.durabilityConfirmed &&
+              !storage::storage_operation_active(),
+              "DM34 Stop after a bounded batch flushes and reports the exact durable partial range without another write");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk disk(512, 64);
+        prepare_wipe_mbr(disk, 8, 5, 24, 7);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        disk.failWriteAtCall2 = 2;
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        parse_first_partition(index, table, partition);
+        storage::PartitionWipeJob job = {};
+        storage::begin_partition_wipe_job(job,
+            make_partition_wipe_request(index, partition));
+        storage::step_partition_wipe_job(job);
+        const storage::PartitionWipeState failed =
+            storage::step_partition_wipe_job(job);
+        const uint32_t attempts = disk.writeAttempts;
+        const storage::PartitionWipeState terminalAgain =
+            storage::step_partition_wipe_job(job);
+        check(failed == storage::PARTITION_WIPE_FAILED &&
+              terminalAgain == storage::PARTITION_WIPE_FAILED &&
+              job.result.reason == storage::PARTITION_WIPE_REASON_WRITE_FAILED &&
+              job.result.blockStatusValid && job.result.blockStatus == block::BLOCK_ERR_IO &&
+              job.result.mediaMayHaveChanged && job.result.sectorsWritten == 2 &&
+              job.result.failedLba == partition.startLba + 2 &&
+              job.result.failedSectorCount == 2 && job.result.progressPercent == 40 &&
+              job.result.flushAttempted && job.result.durabilityConfirmed &&
+              disk.writeAttempts == attempts && job.result.ownershipReleased &&
+              !storage::storage_operation_active(),
+              "DM34 write failure records the exact partial range and block error, settles Flush, and never retries or claims completion");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk disk(512, 64);
+        prepare_wipe_mbr(disk, 8, 3, 24, 7);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        disk.failFlush = true;
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        parse_first_partition(index, table, partition);
+        storage::PartitionWipeJob job = {};
+        storage::begin_partition_wipe_job(job,
+            make_partition_wipe_request(index, partition));
+        storage::PartitionWipeState terminal = storage::PARTITION_WIPE_RUNNING;
+        while (terminal == storage::PARTITION_WIPE_RUNNING)
+            terminal = storage::step_partition_wipe_job(job);
+        check(terminal == storage::PARTITION_WIPE_FAILED &&
+              job.result.reason == storage::PARTITION_WIPE_REASON_FLUSH_FAILED &&
+              job.result.sectorsWritten == partition.sectorCount &&
+              job.result.progressPercent == 99 && !job.result.durabilityConfirmed &&
+              job.result.flushAttempted && job.result.flushStatus == block::BLOCK_ERR_IO &&
+              wipe_partition_is_zero(disk, partition) &&
+              job.result.ownershipReleased,
+              "DM34 failed required Flush leaves completion below 100 percent despite zeroed contents");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk disk(512, 4096), replacement(512, 4096);
+        prepare_wipe_mbr(disk, 8, 8, 32, 8);
+        prepare_wipe_mbr(replacement, 8, 8, 32, 8);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        disk.replacementOnRemoval = &replacement;
+        disk.removeOnWriteAtCall = 2;
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        parse_first_partition(index, table, partition);
+        storage::PartitionWipeJob job = {};
+        storage::begin_partition_wipe_job(job,
+            make_partition_wipe_request(index, partition));
+        storage::step_partition_wipe_job(job);
+        const storage::PartitionWipeState terminal =
+            storage::step_partition_wipe_job(job);
+        const uint32_t oldAttemptsAtTerminal = disk.writeAttempts;
+        const uint32_t replacementAttempts = replacement.writeAttempts;
+        const uint64_t replacementRegistration = replacement.registrationId;
+        const storage::PartitionWipeState terminalAgain =
+            storage::step_partition_wipe_job(job);
+        check(terminal == storage::PARTITION_WIPE_FAILED &&
+              terminalAgain == storage::PARTITION_WIPE_FAILED && disk.removed &&
+              disk.duplicateRemovalResult && disk.replacementRegisteredDuringRemoval &&
+              replacementRegistration != 0 && replacement.sectorCount == disk.sectorCount &&
+              replacement.sectorSize == disk.sectorSize && replacementAttempts == 0 &&
+              replacement.writeAttempts == 0 && oldAttemptsAtTerminal == 2 &&
+              disk.writeAttempts == oldAttemptsAtTerminal &&
+              job.result.reason == storage::PARTITION_WIPE_REASON_WRITE_FAILED &&
+              job.result.blockStatus == block::BLOCK_ERR_NO_MEDIA &&
+              job.result.sectorsWritten == 2 && job.result.mediaMayHaveChanged &&
+              !job.result.flushAttempted && job.result.ownershipReleased &&
+              !storage::storage_operation_active(),
+              "DM34 removal, duplicate notification, and same-capacity replacement terminate the pinned job without replacement I/O");
+        g_fakeDisks[disk.driverId] = nullptr;
+        if (disk.replacementIndex != 0xFF)
+            unregister_fake(disk.replacementIndex, replacement);
+    }
+
+    {
+        FakeDisk disk(512, 64);
+        prepare_wipe_mbr(disk, 8, 5, 24, 7);
+        const uint8_t index = register_fake(disk, true, true, true);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        parse_first_partition(index, table, partition);
+        storage::PartitionWipeRequest request =
+            make_partition_wipe_request(index, partition);
+        request.partitionSnapshot.startLba = UINT64_MAX - 2u;
+        request.partitionSnapshot.endLba = UINT64_MAX;
+        request.partitionSnapshot.sectorCount = 3;
+        storage::PartitionWipeJob job = {};
+        const storage::PartitionWipeState state =
+            storage::begin_partition_wipe_job(job, request);
+        check(state == storage::PARTITION_WIPE_NOT_ADMITTED &&
+              job.result.reason == storage::PARTITION_WIPE_REASON_INVALID_GEOMETRY &&
+              disk.writeAttempts == 0,
+              "DM34 rejects overflowing and out-of-device LBA arithmetic before writes");
+        unregister_fake(index, disk);
+    }
+
+    {
+        FakeDisk sparse(512, UINT64_MAX / 512u + 1u, false);
+        set_mbr_signature(sparse);
+        write_u32(sector(sparse, 0) + 440, 0xD34A5EEDu);
+        set_mbr_partition(sparse, 0, 0, 0x0C, 8, 16);
+        const uint8_t index = register_fake(sparse, true, true, true);
+        storage::TargetIdentity target = {};
+        storage::capture_target_identity(index, target);
+        storage::PartitionWipeRequest request = {};
+        request.targetSnapshot = target;
+        request.partitionScheme = storage::PARTITION_SCHEME_MBR;
+        request.partitionSnapshot.partitionNumber = 1;
+        request.partitionSnapshot.mbrType = 0x0C;
+        request.partitionSnapshot.startLba = 8;
+        request.partitionSnapshot.endLba = 23;
+        request.partitionSnapshot.sectorCount = 16;
+        request.mbrDiskSignature = 0xD34A5EEDu;
+        request.expectedRegistryGeneration = target.registryGeneration;
+        storage::PartitionWipeJob job = {};
+        const storage::PartitionWipeState state =
+            storage::begin_partition_wipe_job(job, request);
+        check(state == storage::PARTITION_WIPE_NOT_ADMITTED &&
+              job.result.reason == storage::PARTITION_WIPE_REASON_INVALID_GEOMETRY &&
+              sparse.writeAttempts == 0 && job.result.ownershipReleased,
+              "DM34 rejects a device whose sector-to-byte capacity multiplication overflows");
+        unregister_fake(index, sparse);
+    }
+
+    std::printf("DM34 partition wipe tests: %d checks, %d failures\n",
+        g_checks - checksBefore, g_failures - failuresBefore);
+}
+
 int main()
 {
     run_nvme_logic_tests();
@@ -5583,6 +6159,7 @@ int main()
     vfs::test_clear_mounts();
     run_gpt_repair_tests();
     run_delete_partition_tests();
+    run_partition_wipe_tests();
 
     check(storage::crc32("123456789", 9) == 0xCBF43926u, "CRC32 standard test vector");
     check(storage::valid_geometry(10, 512), "512-byte geometry accepted");

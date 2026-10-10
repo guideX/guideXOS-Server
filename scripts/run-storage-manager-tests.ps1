@@ -23,6 +23,7 @@ try {
         kernel/core/gpt_repair.cpp `
         kernel/core/disk_initialization.cpp `
         kernel/core/partition_operations.cpp `
+        kernel/core/partition_wipe.cpp `
         kernel/core/fat32_formatter.cpp `
         kernel/core/fs_fat.cpp `
         kernel/core/fs_ext4.cpp `
