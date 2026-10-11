@@ -184,22 +184,26 @@ struct NavigatorScriptSimpleSelectorDescriptor :
     NavigatorScriptSimpleSelectorCoreDescriptor {
     using ClassTokenRange =
         NavigatorScriptSimpleSelectorCoreDescriptor::ClassTokenRange;
-    std::int16_t nthA = 0;
-    std::int16_t nthB = 0;
-    // :not(), :is(), and :where() share one nonfunctional inner selector.
-    // The core has no nested logical or nth-expression fields, so functional
-    // depth is fixed and the descriptor cannot be recursive. :has() stores
-    // one bounded nonfunctional core in this field.
-    NavigatorScriptSimpleSelectorCoreDescriptor logicalSelector;
+    // Selector-specific data is tagged by the inherited statePseudo:
+    // - :has() stores a 16-byte compact first relative core and one expression
+    //   index byte.
+    // - :not(), :is(), and :where() store one compact logical argument.
+    // - nth pseudos store the two int16 formula values.
+    // These forms are mutually exclusive, so a byte buffer keeps the active
+    // representation descriptor-owned without an unsafe union or pointers.
+    std::array<std::uint8_t, 17u> selectorPayload{};
 };
+static_assert(sizeof(NavigatorScriptSimpleSelectorDescriptor) == 50u,
+    "tagged simple-selector payloads must remain compact");
 
 // Compact parsed storage for relative cores that cannot use the first
 // alternative's inline core. Class tokens are stored as one NUL-separated
 // block in the selector text buffer; offsets and lengths for the other
 // predicates remain fixed-width. Matching expands this into the established
-// JS62 core on the stack and uses the same relative evaluator as JS63.
+// JS62 core on the stack and uses the same relative evaluator as JS63. Every
+// published pool index refers to a successfully compacted valid core, so the
+// descriptor's bounded count replaces a duplicate per-entry validity byte.
 struct NavigatorScriptCompactRelativeSelectorCoreDescriptor {
-    bool valid = false;
     bool universal = false;
     std::uint8_t tagOffset = 0;
     std::uint16_t tagLength = 0;
@@ -218,14 +222,16 @@ struct NavigatorScriptCompactRelativeSelectorCoreDescriptor {
         NavigatorScriptStatePseudo::None;
 };
 static_assert(sizeof(NavigatorScriptCompactRelativeSelectorCoreDescriptor) ==
-    18u, "relative cores must use compact bounded storage");
+    16u, "relative cores must use compact bounded storage");
 
-// Logical arguments are even more compact because their booleans share one
-// flags byte. Class tokens still refer to the selector's bounded text buffer.
+// Logical arguments use a dense 13-byte representation. The two tag-length
+// bytes are accessed through explicit little-endian helpers, avoiding
+// unaligned integer fields. The pseudo kind shares the high flag bits.
 struct NavigatorScriptCompactLogicalArgumentDescriptor {
     std::uint8_t flags = 0u;
     std::uint8_t tagOffset = 0u;
-    std::uint16_t tagLength = 0u;
+    std::uint8_t tagLengthLow = 0u;
+    std::uint8_t tagLengthHigh = 0u;
     std::uint8_t idOffset = 0u;
     std::uint8_t idLength = 0u;
     std::uint8_t classTokenCount = 0u;
@@ -235,11 +241,22 @@ struct NavigatorScriptCompactLogicalArgumentDescriptor {
     std::uint8_t attributeNameLength = 0u;
     std::uint8_t attributeValueOffset = 0u;
     std::uint8_t attributeValueLength = 0u;
-    NavigatorScriptStatePseudo statePseudo =
-        NavigatorScriptStatePseudo::None;
+
+    void setTagLength(std::uint16_t length)
+    {
+        tagLengthLow = static_cast<std::uint8_t>(length & 0xFFu);
+        tagLengthHigh = static_cast<std::uint8_t>(length >> 8u);
+    }
+
+    std::uint16_t tagLength() const
+    {
+        return static_cast<std::uint16_t>(tagLengthLow) |
+            static_cast<std::uint16_t>(
+                static_cast<std::uint16_t>(tagLengthHigh) << 8u);
+    }
 };
 static_assert(sizeof(NavigatorScriptCompactLogicalArgumentDescriptor) ==
-    14u, "logical arguments must use compact fixed storage");
+    13u, "logical arguments must use dense fixed storage");
 
 // One fixed-size record describes one :has() expression. The first
 // alternative's first step is stored inline in logicalSelector, so this record
@@ -256,7 +273,7 @@ struct NavigatorScriptHasExpressionDescriptor {
     std::array<NavigatorScriptCompactLogicalArgumentDescriptor, 8u>
         logicalArguments{};
 };
-static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 116u,
+static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 108u,
     "JS69 :has() logical argument lists must stay fixed and bounded");
 
 enum class NavigatorScriptSelectorMatchResult : std::uint8_t {
@@ -305,6 +322,7 @@ struct NavigatorScriptSelectorDescriptor {
     std::array<char, kNavigatorScriptMaxSelectorLength> text{};
     std::uint16_t textLength = 0;
     std::uint8_t memberCount = 0;
+    std::uint8_t hasRelativeCoreCount = 0;
     std::array<NavigatorScriptSelectorMemberDescriptor,
         kNavigatorScriptMaxSelectorListMembers> members{};
     // At most two simple selectors per outer member can own :has(). Each of
@@ -314,10 +332,9 @@ struct NavigatorScriptSelectorDescriptor {
     // selector descriptor.
     std::array<NavigatorScriptCompactRelativeSelectorCoreDescriptor,
         kNavigatorScriptMaxHasRelativeCores> hasRelativeCores{};
-    std::uint8_t hasRelativeCoreCount = 0;
+    std::uint8_t hasExpressionCount = 0;
     std::array<NavigatorScriptHasExpressionDescriptor,
         kNavigatorScriptMaxHasExpressions> hasExpressions{};
-    std::uint8_t hasExpressionCount = 0;
 };
 
 // The adapter never stores a JavaScript pointer and never creates a

@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -15,6 +16,15 @@ struct NavigatorScriptRelativeSelectorTestAccess {
     static constexpr std::size_t collectionRecordBytes()
     {
         return sizeof(NavigatorScriptHostAdapter::SelectorCollectionRecord);
+    }
+
+    static void setHasInlineCore(
+        NavigatorScriptSimpleSelectorDescriptor& selector,
+        const NavigatorScriptCompactRelativeSelectorCoreDescriptor& core,
+        std::uint8_t expressionIndex)
+    {
+        std::memcpy(selector.selectorPayload.data(), &core, sizeof(core));
+        selector.selectorPayload[sizeof(core)] = expressionIndex;
     }
 
     static NavigatorScriptSelectorMatchContext contextForScope(
@@ -279,26 +289,26 @@ int main()
 {
     static_assert(sizeof(NavigatorScriptSimpleSelectorCoreDescriptor) == 32u,
         "JS69 does not grow the shared simple-selector core");
-    static_assert(sizeof(NavigatorScriptSimpleSelectorDescriptor) == 68u,
+    static_assert(sizeof(NavigatorScriptSimpleSelectorDescriptor) == 50u,
         "JS69 does not grow the outer simple-selector descriptor");
     static_assert(sizeof(NavigatorScriptCompactRelativeSelectorCoreDescriptor) ==
-        18u, "JS69 preserves compact relative cores");
-    static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 116u,
+        16u, "JS69 preserves compact relative cores");
+    static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 108u,
         "JS69 keeps two logical arguments fixed per relative core");
     static_assert(sizeof(NavigatorScriptSelectorMatchContext) == 16u,
         "JS69 reuses the call-local JS66 match context");
-    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 2176u,
+    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 1918u,
         "JS69 adds compact second logical arguments per :has() core");
     static_assert(sizeof(gxos::web::HtmlElementRef) == 440u,
         "JS69 does not grow document structural records");
     static_assert(sizeof(gxos::web::HtmlElementContentMetadata) == 24u,
         "JS69 does not grow document content metadata");
     static_assert(NavigatorScriptRelativeSelectorTestAccess::
-        collectionRecordBytes() == 2192u,
+        collectionRecordBytes() == 1936u,
         "JS69 collection records include the bounded logical slots");
     static_assert(NavigatorScriptRelativeSelectorTestAccess::
         collectionRecordBytes() * kNavigatorScriptMaxSelectorCollections ==
-            280576u,
+            247808u,
         "JS69 fixed logical slots keep the 128-entry registry bounded");
 
     const auto harnessStorage = std::make_unique<NavigatorScriptExecutionHarness>();
@@ -470,11 +480,11 @@ var ok = first.matches(':has(> .row:not(.valid), + .badge)') &&
     shortCircuitSelector.valid = true;
     shortCircuitSelector.statePseudo =
         NavigatorScriptStatePseudo::HasChild;
-    shortCircuitSelector.nthA = 1;
-    shortCircuitSelector.logicalSelector.valid = true;
-    shortCircuitSelector.logicalSelector.universal = true;
-    shortCircuitSelector.logicalSelector.statePseudo =
-        NavigatorScriptStatePseudo::Is;
+    NavigatorScriptCompactRelativeSelectorCoreDescriptor firstCore;
+    firstCore.universal = true;
+    firstCore.statePseudo = NavigatorScriptStatePseudo::Is;
+    NavigatorScriptRelativeSelectorTestAccess::setHasInlineCore(
+        shortCircuitSelector, firstCore, 0u);
     for (std::size_t index = 0u; index < 7u; ++index)
         shortCircuitStorage.text[index] = "warning"[index];
     shortCircuitStorage.textLength = 7u;
@@ -487,6 +497,8 @@ var ok = first.matches(':has(> .row:not(.valid), + .badge)') &&
     firstLogicalArgument.classTokenCount = 1u;
     firstLogicalArgument.classBlockLength = 7u;
     shortCircuitStorage.hasRelativeCoreCount = 1u;
+    shortCircuitStorage.hasRelativeCores[0].classTokenCount =
+        kNavigatorScriptMaxClassQueryTokens + 1u;
     shortCircuitStorage.hasExpressionCount = 1u;
     const HostInstanceId logicalPanelSerial = serialById(
         harness.document(), "logical-panel");

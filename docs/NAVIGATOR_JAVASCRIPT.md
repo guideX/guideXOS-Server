@@ -8044,3 +8044,294 @@ baseline, and exact artifact restoration all passed their stated gates.
 Recommended next bounded capability: support one parsed `:nth-child(An+B)`
 predicate on a `:has()` relative core, without an `of <selector-list>` clause,
 using a compact fixed representation and explicit stack and pool measurements.
+
+## JS70 selector descriptor storage optimization
+
+JS70 audits and compacts the fixed selector storage introduced through JS69.
+The task began on `NAVIGATOR_JAVASCRIPT_SUPPORT` at
+`40c72a5a3724bb4a2b971172c4f965a0ff3b2afa`; the live branch had no commits
+ahead of or behind its configured upstream. The worktree was clean. No
+`.phase` file existed, as expected for this subsystem. No later JS70 work was
+present in history or the checkout. Measurements below use GCC 15.2.0 on
+64-bit Windows with C++17; layout diagnostics and compile-time assertions
+confirm the reported values.
+
+### Initial layout and storage ownership
+
+Before editing, the JS69 descriptor had this layout:
+
+| Structure | Size / alignment | Relevant layout |
+|---|---:|---|
+| Restricted selector core | 32 B / 2 | `valid` 0, `universal` 1, tag offset/length 2/4, id 6/1, class count 8, eight class ranges 9–24, attribute fields 25–30, pseudo 31 |
+| Simple selector | 68 B / 2 | 32-byte core, `nthA` at 32, `nthB` at 34, nested core at 36 |
+| Compact relative core | 18 B / 2 | validity and universal flags plus tag/id/class/attribute ranges and state pseudo |
+| Compact logical argument | 14 B / 2 | flags, tag range, id, class block, attribute ranges, separate pseudo byte |
+| `:has()` expression | 116 B / 2 | four relation/index bytes and eight 14-byte logical slots |
+| Outer selector member | 138 B / 2 | relation at 0; simple selectors at 2 and 70 |
+| Selector descriptor | 2,176 B / 2 | 256-byte text, four members at 260, 24 relative cores at 812, eight expressions at 1,246 |
+| Collection record | 2,192 B / 8 | active at 0, scope at 8, descriptor at 16 |
+| 128-record collection array | 280,576 B | 128 fixed collection records |
+| Scope context | 16 B / 8 | scope serial, generation, validity |
+| `HtmlElementRef` | 440 B / 8 | unchanged document element representation |
+| Content metadata | 24 B / 8 | unchanged retained-content metadata |
+
+The simple-selector core is always present. Its nth formula fields and nested
+logical core are present in every simple selector even though the pseudo kind
+selects only one of those representations. Every collection record owns one
+complete selector descriptor and its original scope serial. The selector
+text buffer is shared by offsets inside that descriptor; no persistent field
+borrows a parse-buffer pointer. Alignment in the nested selector descriptor
+and its collection record contributes to the final sizes, so all savings were
+checked with compiler offsets and `sizeof`, not inferred from field totals.
+
+### Relative-core pool capacity
+
+Each of four outer members can contain two eligible simple-selector
+`:has()` owners, for eight expression records. The first step of the first
+alternative is stored inline in that owner's simple-selector payload. Each
+expression can additionally need exactly three pool slots: the first
+alternative's second step, the second alternative's first step, and that
+alternative's second step. Thus `8 * 3 = 24` simultaneously live pool slots
+are reachable under the existing limits. No slot can be shared between
+exclusive alternatives because both alternatives remain part of one valid
+descriptor. The 24-entry bound therefore was retained.
+
+The JS70 native capacity fixture parses four outer members with two
+two-step `:has()` expressions each, then repeats the parse and query. It
+asserts four outer members, eight expressions, all 24 owned pool entries, and
+no match-result corruption. A second descriptor fills all eight logical
+argument slots of one expression across its four relative cores. A separate
+selector of exactly 256 bytes is accepted; the same form at 257 bytes is
+rejected. The parser publishes pool indices only after complete core
+compaction. Indices are checked against both the descriptor's published count
+and the fixed array size; a failed parse cannot leave a published partial
+descriptor. Copies keep their own text, indices, pool, expressions, and scope
+in the owning record.
+
+### Compaction choices
+
+The implementation keeps every existing selector and collection limit and
+uses only fixed, descriptor-owned byte storage:
+
+* **Tagged simple-selector payload:** the `statePseudo` discriminator already
+  makes `:has()`, logical pseudos, and nth pseudos mutually exclusive. The
+  former 32-byte nested core and two 16-bit nth values are replaced by one
+  17-byte payload. `:has()` uses 16 bytes for its compact first core and one
+  expression index; logical pseudos use 13 bytes; nth pseudos use four bytes.
+  The active bytes are copied with `memcpy`; there is no union, pointer, or
+  active-lifetime ambiguity.
+* **Relative-core validity:** a pool entry becomes visible only after a valid
+  compact core has been appended. The descriptor's bounded published count
+  therefore supplies the validity/ownership check. Removing the repeated
+  `valid` byte and ordering fields to avoid alignment gaps reduces each core
+  from 18 to 16 bytes.
+* **Logical arguments:** each 14-byte slot becomes 13 bytes. The pseudo kind
+  shares the flag byte, the 16-bit tag length is encoded as two explicit
+  bytes, attribute presence follows a nonempty attribute-name length, and a
+  universal argument is reconstructed when it has no other predicate. The
+  sole-`*` case is preserved explicitly by that reconstruction rule.
+* **Expression metadata:** relation kinds, alternative count, and validity
+  remain in the existing four flag/index bytes. Eight compact 13-byte slots
+  make each expression 108 bytes instead of 116.
+* **Outer members and collection records:** each fixed outer member embeds
+  two simple-selector descriptors, so its size falls from 138 to 102 bytes.
+  Collection records continue to own their descriptor and scope. Sharing
+  records across collection objects would weaken identity and lifetime
+  guarantees, so the 128-record fixed registry remains in place.
+* **Alignment and scratch:** fields are reordered without packed structs.
+  Relative pool entries expand into the established restricted core on the
+  stack for the existing matcher. This keeps the matching grammar and
+  evaluator unchanged and introduces no heap storage, cache, or reparse.
+
+The outer member array remains four entries; selector text remains 256 bytes;
+the expression array remains eight entries; the relative-core array remains
+24 entries; each expression keeps eight logical slots; the collection array
+remains 128 records; and the structural document limit remains 1,024
+Elements. Public JavaScript API signatures and accepted selector syntax did
+not change. All compact structures remain trivially copyable and contain no
+internal pointers.
+
+| Structure | JS69 | JS70 | Saved |
+|---|---:|---:|---:|
+| Simple selector | 68 B | 50 B | 18 B |
+| Compact relative core | 18 B | 16 B | 2 B |
+| Compact logical argument | 14 B | 13 B | 1 B |
+| `:has()` expression | 116 B | 108 B | 8 B |
+| Outer selector member | 138 B | 102 B | 36 B |
+| Selector descriptor | 2,176 B | 1,918 B | 258 B |
+| Collection record | 2,192 B | 1,936 B | 256 B |
+| 128-record registry | 280,576 B | 247,808 B | 32,768 B |
+
+The field ordering and compact encodings are checked by static assertions
+and the native layout diagnostic. The memory result is a 1,918-byte selector
+descriptor and a 1,936-byte collection record. The record's eight-byte
+alignment rounds the 258-byte descriptor decrease to a 256-byte per-record
+decrease. The resulting fixed registry is 247,808 bytes, a 32,768-byte
+reduction (11.6788%) from JS69. The standalone descriptor reduction is 258
+bytes (11.8566%). Scope context, base simple-selector core, `HtmlElementRef`,
+and content metadata retain their sizes.
+
+### Native verification and JS69 parity
+
+`tests/navigator_javascript_js70_test.cpp` keeps the JS69 Boolean, parsing,
+query, `:scope`, correlated two-step, invalid-candidate, generation, and Event
+checks, and adds storage-specific coverage. It verifies type copyability,
+descriptor and registry sizes, the 24-slot/8-expression maximum, the eight
+logical slots in one expression, 256-byte acceptance and 257-byte rejection,
+failed-selector rejection, repeated descriptor queries, and 128 collection
+records with the same bounded 129th-record failure. It also checks empty,
+disabled-only, hidden-only, and valid candidates under two-member `:not()`,
+out-of-range serial and parent indices, document replacement and serial reuse,
+scope ownership in retained collections, and nested Event dispatch.
+
+The JS70 native executable passed **77/77** checks with
+`-Wall -Wextra -Werror -pedantic`; the production parser/adapter/runtime
+passed the corresponding strict syntax build. Its deterministic 1,024-Element
+operation counters match the JS69 baseline counters for every retained
+near-capacity logical case, including the 2,030-record correlated late-scope
+query, the 5,008-record late `:is()` match, and the 5,183-record full-false
+`:not()` case. The zero-target `:not()` case still performs no logical or
+simple-predicate tests. The JS70 native suite executes the hosted fixture's
+script and validates its assertion markers before production hosting.
+
+Focused historical suites passed JS64 **24/24**, JS65 **18/18**, JS66
+**24/24**, JS67 **44/44**, JS68 **69/69**, and JS69 **72/72**. Earlier JS63
+coverage remains **8/8**. The changed historical tests only update
+compile-time storage expectations affected by the new layout; selector
+results and grammar expectations are retained. JS69's native test ran at the
+original 2,176-byte descriptor and again after compaction, with the same
+72/72 results and the same operation counters, providing a direct parity
+check against the starting source.
+
+### Controlled performance and stack comparison
+
+The same C++ benchmark source was compiled once against the captured JS69
+header/adapter and once against JS70. Both used GCC 15.2.0, C++17, `-O2`, the
+same warning flags, public query APIs, identical generated 1,024-Element
+fixtures, 20 repeated queries per sample, and seven samples per workload. The
+128-record saturation case used 128 selector queries per sample; the nested
+Event case used 40 dispatches. The runs were serial, with no competing
+compiler processes. Timings include script execution and query work, so they
+compare the same harness end to end. Native diagnostic counters were
+collected separately with the same test-only instrumentation on JS69 and
+JS70; every recorded operation count matched.
+
+| Workload | JS69 median (range) µs | JS70 median (range) µs | Median change |
+|---|---:|---:|---:|
+| Simple tag | 35 (30–152) | 40 (32–118) | +14.3% |
+| Simple class | 4,677 (4,600–4,799) | 4,464 (4,405–4,972) | −4.6% |
+| Four-member outer list | 19,652 (19,324–21,714) | 19,506 (18,313–25,340) | −0.7% |
+| Single-step `:has()` | 7,933 (7,856–8,582) | 4,403 (4,396–4,488) | −44.5% |
+| Two-alternative `:has()` | 17,068 (11,849–17,621) | 9,157 (9,002–9,204) | −46.3% |
+| Two-step chain | 99 (84–142) | 145 (113–170) | +46.5% |
+| Explicit `:scope` | 4,773 (4,716–5,834) | 4,539 (4,481–4,914) | −4.9% |
+| `:scope` in `:has()` | 14,710 (14,216–15,095) | 13,034 (12,995–13,501) | −11.4% |
+| Nested logical predicate | 14,618 (13,789–20,757) | 12,920 (12,759–13,261) | −11.6% |
+| Two-member `:not()` | 117 (93–192) | 138 (95–268) | +17.9% |
+| Large `querySelectorAll()` | 5,056 (4,901–5,419) | 4,740 (4,641–5,037) | −6.2% |
+| 1,024-Element false case | 5,328 (4,969–6,293) | 4,687 (4,637–4,891) | −12.0% |
+| 1,024-Element late success | 4,496 (4,391–4,993) | 4,330 (4,308–4,655) | −3.7% |
+| 128-collection saturation | 500 (490–538) | 502 (498–568) | +0.4% |
+| Nested Event dispatch | 294 (285–311) | 295 (294–316) | +0.3% |
+
+The single-step and two-alternative `:has()` medians improved by 44.5% and
+46.3%; their observed ranges do not overlap. The 1,024-Element false case
+improved by 12.0%, and other large-query and scope cases were lower by
+0.7–11.6%. The simple-tag, two-step, two-member `:not()`, collection, and
+Event timings are under 200 microseconds or have overlapping ranges and are
+treated as noise-limited, not regressions. There is no timing threshold.
+Together with identical operation counters and no sustained slow case, the
+measured tradeoff is acceptable for this fixed-memory reduction.
+
+GCC `-O2 -fstack-usage` reports these relevant frames:
+
+| Function/frame | JS69 | JS70 | Change |
+|---|---:|---:|---:|
+| `parseBoundedSelectorMember` | 192 B | 144 B | −48 B |
+| `parseBoundedSelector` | 112 B | 112 B | unchanged |
+| `parseSimpleSelectorCore` | 944 B | no separate frame | inlined by optimizer |
+| `:has()` alternative-parser lambda | 224 B | 224 B | unchanged |
+| Relative element evaluator | 544 B | 528 B | −16 B |
+| Correlated-chain evaluator | 144 B | 128 B | −16 B |
+| Simple-selector matcher | 240 B | 288 B | +48 B |
+| Simple-match predicate lambda | 400 B | 368 B | −32 B |
+| `querySelectorAll` | 2,384 B | 2,128 B | −256 B |
+| `getElementsBySimpleSelector` | 2,496 B | 2,240 B | −256 B |
+
+The parser has no recursive selector descent; relative matching remains
+iterative. The simple-selector function has a slightly larger reported frame
+for lazy compact decoding, while its inner predicate lambda and large
+collection-query frames are smaller. The no-frame parser entry is omitted by
+the compiler after inlining, not treated as zero stack for its callers. The
+standalone optimized adapter object changed from **249,540 B** to **249,668
+B** (+128 B, about 0.05%); code footprint is effectively unchanged while the
+per-adapter collection storage falls by 32 KiB.
+
+### Full matrix, production build, and hosted qualification
+
+The complete Navigator JavaScript smoke matrix finished **72/72** after
+rerunning the JS70 lane. All historical JavaScript and DOM lanes passed,
+including JS59–JS61, JS62 and JS62R–JS62R4, JS63–JS69, and the lexer, parser,
+and runtime lanes. The first sweep reported one JS70 lane failure because a
+test-source quote was removed while trimming trailing whitespace; that line
+was fixed, and the JS70 strict runner then passed 77/77. No historical lane
+failed.
+
+`build.bat` completed successfully from the JS70 source state. The production
+executable was
+`D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe`, **8,475,734
+bytes**, SHA-256
+`912A4E5F699976476A2BEBAA9A9881F08FE6ED0C21988BD2A849884FF0EBBEC9`. The
+hosted runner launched PID **19688** from that same path and verified the
+process image had the same SHA-256.
+
+The JS69 qualification records its fresh `build.bat` executable at **8,469,180
+bytes**, SHA-256
+`A35DEE4B1EF9FE1449A572BE22385F878AE2E4DB04683CF28C2A048A2D1254A8`. The
+JS70 server image is 6,554 bytes larger (0.08%), including the new hosted
+fixture integration. The focused adapter object changed by only 128 bytes.
+
+The fresh hosted run passed the JS70 fixture: the initial marker was
+`JS70:initial:assertions=76:failures=0:malformed=true`; after nested Event
+dispatch it was
+`JS70:event=true:nested=true:metadata=true:assertions=79:failures=0`. JS63,
+JS64, JS65, JS66, JS67, JS68, and JS69 hosted initial/Event markers also
+passed.
+
+The hosted aggregate recorded **638 passed / 7 failed / 645 total**, compared
+with the JS69 baseline of **635 passed / 7 failed / 642 total**. JS70 added
+three passing hosted checks and no new failures. The seven failures remain
+the known CSS baseline: CSS 3C, CSS 3G, CSS 6A, three CSS 6B checks, and CSS
+6C. No CSS implementation or fixture was changed for JS70. The hosted runner
+therefore printed `NAVIGATOR_SMOKE_RESULT: FAIL` for those same seven known
+CSS checks; the Navigator JavaScript fixtures, including JS70, passed.
+
+### Artifact restoration and outcome
+
+Before the build, the ignored/generated baseline contained **1,337 files /
+88,371,771 bytes**. Exact byte backups covered the existing executable and
+all 42 existing `navigator-smoke/generated` files. The pre-existing
+executable was **8,398,274 bytes**, SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`; the
+fresh JS70 executable was copied outside the checkout before hosting. The
+hosted runner's downloads snapshot was restored by its wrapper. Six newly
+created hosted logs were archived outside the checkout and removed; all 1,019
+pre-existing logs remained byte-identical. The executable and all 42
+generated files were restored from their exact backups and SHA-256 checked.
+The final ignored manifest again contained **1,337 files / 88,371,771 bytes**
+with **0 changed / 0 missing / 0 extra**.
+
+No kernel build or QEMU run was needed for this hosted Navigator phase.
+**Outcome A — JS70 selector storage optimization fully qualified.** The
+registry is measurably smaller; selector syntax and all parser, pool,
+collection, generation, scope, and structural capacities remain unchanged;
+the JS69 result corpus and operation counts match; native, strict, matrix,
+fresh-build, hosted JS70, and artifact-restoration gates passed. The seven
+hosted CSS failures are unchanged from JS69.
+
+One remaining fixed component of the registry is the 256-byte selector text
+buffer in each collection record. A JS71 audit could examine safe
+bounded storage for repeated selector text while retaining 128 independently
+owned collection descriptors and all current lifetimes. Any shared fixed
+pool would need explicit slot ownership, reuse, generation, and reentrancy
+proof before replacing the current self-contained records.

@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <string>
 
@@ -12,6 +13,15 @@ struct NavigatorScriptRelativeSelectorTestAccess {
     static constexpr std::size_t collectionRecordBytes()
     {
         return sizeof(NavigatorScriptHostAdapter::SelectorCollectionRecord);
+    }
+
+    static void setHasInlineCore(
+        NavigatorScriptSimpleSelectorDescriptor& selector,
+        const NavigatorScriptCompactRelativeSelectorCoreDescriptor& core,
+        std::uint8_t expressionIndex)
+    {
+        std::memcpy(selector.selectorPayload.data(), &core, sizeof(core));
+        selector.selectorPayload[sizeof(core)] = expressionIndex;
     }
 
     static NavigatorScriptSelectorMatchResult simpleMatch(
@@ -88,20 +98,20 @@ int main()
 {
     static_assert(sizeof(NavigatorScriptSimpleSelectorCoreDescriptor) == 32u,
         "JS65 keeps the shared selector-core size");
-    static_assert(sizeof(NavigatorScriptSimpleSelectorDescriptor) == 68u,
+    static_assert(sizeof(NavigatorScriptSimpleSelectorDescriptor) == 50u,
         "JS65 keeps the outer simple-selector size");
     static_assert(sizeof(NavigatorScriptCompactRelativeSelectorCoreDescriptor) ==
-        18u, "JS65 compact cores remain fixed-size");
-    static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 116u,
+        16u, "JS65 compact cores remain fixed-size");
+    static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 108u,
         "JS65 expression metadata remains fixed-size");
-    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 2176u,
+    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 1918u,
         "JS65 selector descriptor has bounded fixed pools");
     static_assert(NavigatorScriptRelativeSelectorTestAccess::
-        collectionRecordBytes() == 2192u,
+        collectionRecordBytes() == 1936u,
         "JS65 selector collection record size is measured");
     static_assert(NavigatorScriptRelativeSelectorTestAccess::
         collectionRecordBytes() * kNavigatorScriptMaxSelectorCollections ==
-            280576u,
+            247808u,
         "JS65 128-record registry memory is measured");
 
     const std::string html =
@@ -285,24 +295,24 @@ var ok = rejected;
     auto& shortCircuit = shortCircuitStorage.members[0].rightSimple;
     shortCircuit.valid = true;
     shortCircuit.statePseudo = NavigatorScriptStatePseudo::HasChild;
-    shortCircuit.nthA = 1;
-    shortCircuit.logicalSelector.valid = true;
-    shortCircuit.logicalSelector.classTokenCount = 1u;
-    shortCircuit.logicalSelector.classTokens[0].offset = 0u;
-    shortCircuit.logicalSelector.classTokens[0].length = 3u;
+    NavigatorScriptCompactRelativeSelectorCoreDescriptor shortCircuitCore;
+    shortCircuitCore.classTokenCount = 1u;
+    shortCircuitCore.classBlockLength = 3u;
     shortCircuitStorage.text[0] = 'r';
     shortCircuitStorage.text[1] = 'o';
     shortCircuitStorage.text[2] = 'w';
     shortCircuitStorage.text[3] = '\0';
+    NavigatorScriptRelativeSelectorTestAccess::setHasInlineCore(
+        shortCircuit, shortCircuitCore, 0u);
     auto& firstTerminal = shortCircuitStorage.hasRelativeCores[0];
-    firstTerminal.valid = true;
     firstTerminal.classTokenCount = 1u;
     firstTerminal.classBlockOffset = 4u;
     firstTerminal.classBlockLength = 5u;
     for (std::size_t i = 0u; i < 5u; ++i)
         shortCircuitStorage.text[4u + i] = "badge"[i];
     shortCircuitStorage.textLength = 9u;
-    shortCircuitStorage.hasRelativeCores[1].valid = false;
+    shortCircuitStorage.hasRelativeCores[1].classTokenCount =
+        kNavigatorScriptMaxClassQueryTokens + 1u;
     shortCircuitStorage.hasRelativeCoreCount = 2u;
     auto& shortCircuitExpression = shortCircuitStorage.hasExpressions[0];
     shortCircuitExpression.firstStepTwoCoreIndex = 0u;
@@ -358,11 +368,9 @@ var ok = fullFalse && lateTrue && secondAlternative && repeatedValid && repeated
     auto& chainSelector = chainDescriptor.members[0].rightSimple;
     chainSelector.valid = true;
     chainSelector.statePseudo = NavigatorScriptStatePseudo::HasChild;
-    chainSelector.nthA = 1;
-    chainSelector.logicalSelector.valid = true;
-    chainSelector.logicalSelector.classTokenCount = 1u;
-    chainSelector.logicalSelector.classTokens[0].offset = 0u;
-    chainSelector.logicalSelector.classTokens[0].length = 3u;
+    NavigatorScriptCompactRelativeSelectorCoreDescriptor chainFirstCore;
+    chainFirstCore.classTokenCount = 1u;
+    chainFirstCore.classBlockLength = 3u;
     chainDescriptor.text[0] = 'r';
     chainDescriptor.text[1] = 'o';
     chainDescriptor.text[2] = 'w';
@@ -373,8 +381,9 @@ var ok = fullFalse && lateTrue && secondAlternative && repeatedValid && repeated
     chainDescriptor.text[7] = 'g';
     chainDescriptor.text[8] = 'e';
     chainDescriptor.textLength = 9u;
+    NavigatorScriptRelativeSelectorTestAccess::setHasInlineCore(
+        chainSelector, chainFirstCore, 0u);
     auto& chainTerminal = chainDescriptor.hasRelativeCores[0];
-    chainTerminal.valid = true;
     chainTerminal.classTokenCount = 1u;
     chainTerminal.classBlockOffset = 4u;
     chainTerminal.classBlockLength = 5u;
@@ -423,11 +432,9 @@ var ok = fullFalse && lateTrue && secondAlternative && repeatedValid && repeated
     auto& deepFalseSelector = deepFalseDescriptor.members[0].rightSimple;
     deepFalseSelector.valid = true;
     deepFalseSelector.statePseudo = NavigatorScriptStatePseudo::HasDescendant;
-    deepFalseSelector.nthA = 1;
-    deepFalseSelector.logicalSelector.valid = true;
-    deepFalseSelector.logicalSelector.classTokenCount = 1u;
-    deepFalseSelector.logicalSelector.classTokens[0].offset = 0u;
-    deepFalseSelector.logicalSelector.classTokens[0].length = 3u;
+    NavigatorScriptCompactRelativeSelectorCoreDescriptor deepFalseFirstCore;
+    deepFalseFirstCore.classTokenCount = 1u;
+    deepFalseFirstCore.classBlockLength = 3u;
     deepFalseDescriptor.text[0] = 'r';
     deepFalseDescriptor.text[1] = 'o';
     deepFalseDescriptor.text[2] = 'w';
@@ -438,8 +445,9 @@ var ok = fullFalse && lateTrue && secondAlternative && repeatedValid && repeated
     deepFalseDescriptor.text[7] = 'g';
     deepFalseDescriptor.text[8] = 'e';
     deepFalseDescriptor.textLength = 9u;
+    NavigatorScriptRelativeSelectorTestAccess::setHasInlineCore(
+        deepFalseSelector, deepFalseFirstCore, 0u);
     auto& deepFalseTerminal = deepFalseDescriptor.hasRelativeCores[0];
-    deepFalseTerminal.valid = true;
     deepFalseTerminal.classTokenCount = 1u;
     deepFalseTerminal.classBlockOffset = 4u;
     deepFalseTerminal.classBlockLength = 5u;

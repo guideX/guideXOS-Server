@@ -183,26 +183,26 @@ int main()
 {
     static_assert(sizeof(NavigatorScriptSimpleSelectorCoreDescriptor) == 32u,
         "JS67 does not grow the shared simple-selector core");
-    static_assert(sizeof(NavigatorScriptSimpleSelectorDescriptor) == 68u,
+    static_assert(sizeof(NavigatorScriptSimpleSelectorDescriptor) == 50u,
         "JS67 does not grow the outer simple-selector descriptor");
     static_assert(sizeof(NavigatorScriptCompactRelativeSelectorCoreDescriptor) ==
-        18u, "JS67 preserves compact relative cores");
-    static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 116u,
+        16u, "JS67 preserves compact relative cores");
+    static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 108u,
         "JS67 preserves JS65 expression metadata");
     static_assert(sizeof(NavigatorScriptSelectorMatchContext) == 16u,
         "JS67 reuses the call-local JS66 match context");
-    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 2176u,
+    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 1918u,
         "JS67 does not grow the bounded selector descriptor");
     static_assert(sizeof(gxos::web::HtmlElementRef) == 440u,
         "JS67 does not grow document structural records");
     static_assert(sizeof(gxos::web::HtmlElementContentMetadata) == 24u,
         "JS67 does not grow document content metadata");
     static_assert(NavigatorScriptRelativeSelectorTestAccess::
-        collectionRecordBytes() == 2192u,
+        collectionRecordBytes() == 1936u,
         "JS67 does not grow retained selector collection records");
     static_assert(NavigatorScriptRelativeSelectorTestAccess::
         collectionRecordBytes() * kNavigatorScriptMaxSelectorCollections ==
-            280576u,
+            247808u,
         "JS67 does not grow the 128-entry collection registry");
 
     NavigatorScriptExecutionHarness harness;

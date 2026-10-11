@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <string>
 
@@ -12,6 +13,15 @@ struct NavigatorScriptRelativeSelectorTestAccess {
     static constexpr std::size_t collectionRecordBytes()
     {
         return sizeof(NavigatorScriptHostAdapter::SelectorCollectionRecord);
+    }
+
+    static void setHasInlineCore(
+        NavigatorScriptSimpleSelectorDescriptor& selector,
+        const NavigatorScriptCompactRelativeSelectorCoreDescriptor& core,
+        std::uint8_t expressionIndex)
+    {
+        std::memcpy(selector.selectorPayload.data(), &core, sizeof(core));
+        selector.selectorPayload[sizeof(core)] = expressionIndex;
     }
 
     static NavigatorScriptSelectorMatchResult simpleMatch(
@@ -105,19 +115,18 @@ NavigatorScriptSelectorDescriptor diagnosticDescriptor(
     auto& simple = storage.members[0].rightSimple;
     simple.valid = true;
     simple.statePseudo = NavigatorScriptStatePseudo::HasDescendant;
-    simple.nthA = 1;
-    simple.nthB = 0; // Expression entry zero.
-    simple.logicalSelector.valid = true;
-    simple.logicalSelector.classTokenCount = 1u;
-    simple.logicalSelector.classTokens[0].offset = 0u;
+    NavigatorScriptCompactRelativeSelectorCoreDescriptor firstCore;
+    firstCore.classTokenCount = 1u;
+    firstCore.classBlockOffset = 0u;
     std::size_t offset = 0u;
     while (firstClass[offset] != '\0') {
         storage.text[storage.textLength++] = firstClass[offset++];
-        ++simple.logicalSelector.classTokens[0].length;
+        ++firstCore.classBlockLength;
     }
+    NavigatorScriptRelativeSelectorTestAccess::setHasInlineCore(simple,
+        firstCore, 0u);
     if (secondClass[0] != '\0') storage.text[storage.textLength++] = '\0';
     auto& compact = storage.hasRelativeCores[0];
-    compact.valid = true;
     compact.classTokenCount = 1u;
     compact.classBlockOffset = static_cast<std::uint8_t>(storage.textLength);
     std::size_t secondOffset = 0u;
@@ -139,18 +148,18 @@ int main()
 {
     static_assert(sizeof(NavigatorScriptSimpleSelectorCoreDescriptor) == 32u,
         "JS64 keeps the shared JS59-JS61 core size");
-    static_assert(sizeof(NavigatorScriptSimpleSelectorDescriptor) == 68u,
+    static_assert(sizeof(NavigatorScriptSimpleSelectorDescriptor) == 50u,
         "JS64 keeps the outer simple-selector size");
     static_assert(sizeof(NavigatorScriptCompactRelativeSelectorCoreDescriptor) ==
-        18u, "JS64 stores each second alternative in 18 bytes");
-    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 2176u,
+        16u, "JS64 stores each second alternative in 16 bytes");
+    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 1918u,
         "JS65 stores bounded chains in fixed compact pools");
     static_assert(NavigatorScriptRelativeSelectorTestAccess::
-        collectionRecordBytes() == 2192u,
+        collectionRecordBytes() == 1936u,
         "JS65 selector collection record size is measured");
     static_assert(NavigatorScriptRelativeSelectorTestAccess::
         collectionRecordBytes() * kNavigatorScriptMaxSelectorCollections ==
-            280576u,
+            247808u,
         "JS65 128-record registry memory is measured");
 
     const std::string html =
@@ -403,7 +412,8 @@ var ok = fullFalse && lateTrue && list.length === 1 && list[0] === capacity;
     expect(addEarlyTarget.succeeded(),
         "first near-capacity descendant becomes an early target");
     auto shortCircuitStorage = diagnosticDescriptor("early", "target");
-    shortCircuitStorage.hasRelativeCores[0].valid = false;
+    shortCircuitStorage.hasRelativeCores[0].classTokenCount =
+        kNavigatorScriptMaxClassQueryTokens + 1u;
     const auto shortCircuit = capacityElement == nullptr
         ? NavigatorScriptSelectorMatchResult::Invalid
         : NavigatorScriptRelativeSelectorTestAccess::simpleMatch(

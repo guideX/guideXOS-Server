@@ -81,26 +81,26 @@ int main()
 {
     static_assert(sizeof(NavigatorScriptSimpleSelectorCoreDescriptor) == 32u,
         "JS66 does not grow the shared simple-selector core");
-    static_assert(sizeof(NavigatorScriptSimpleSelectorDescriptor) == 68u,
+    static_assert(sizeof(NavigatorScriptSimpleSelectorDescriptor) == 50u,
         "JS66 does not grow the simple-selector descriptor");
     static_assert(sizeof(NavigatorScriptCompactRelativeSelectorCoreDescriptor) ==
-        18u, "JS66 preserves compact relative cores");
-    static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 116u,
+        16u, "JS66 preserves compact relative cores");
+    static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 108u,
         "JS66 preserves JS65 expression metadata");
     static_assert(sizeof(NavigatorScriptSelectorMatchContext) == 16u,
         "JS66 keeps match context call-local and compact");
-    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 2176u,
+    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 1918u,
         "JS66 reuses the JS65 selector descriptor");
     static_assert(sizeof(gxos::web::HtmlElementRef) == 440u,
         "JS66 does not grow document structural records");
     static_assert(sizeof(gxos::web::HtmlElementContentMetadata) == 24u,
         "JS66 does not grow document content metadata records");
     static_assert(NavigatorScriptScopeSelectorTestAccess::
-        collectionRecordBytes() == 2192u,
+        collectionRecordBytes() == 1936u,
         "JS66 reuses the JS65 collection record");
     static_assert(NavigatorScriptScopeSelectorTestAccess::
         collectionRecordBytes() * kNavigatorScriptMaxSelectorCollections ==
-            280576u,
+            247808u,
         "JS66 does not grow the 128-entry collection registry");
 
     const std::string html =

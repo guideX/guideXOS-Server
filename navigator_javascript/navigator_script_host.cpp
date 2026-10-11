@@ -7,6 +7,7 @@
 #include <charconv>
 #include <cmath>
 #include <cctype>
+#include <cstring>
 #include <limits>
 #include <new>
 #include <utility>
@@ -833,6 +834,8 @@ bool parseHasPseudo(SourceView source, std::size_t colon, std::size_t end,
     NavigatorScriptSimpleSelectorCoreDescriptor* innerStorage,
     std::int16_t& argumentCount, std::int16_t& secondArgumentInfo);
 
+bool isHasStatePseudo(NavigatorScriptStatePseudo pseudo);
+
 NavigatorScriptStatePseudo hasPseudoForRelation(
     NavigatorScriptRelativeSelectorRelation relation);
 
@@ -843,10 +846,160 @@ bool isLogicalStatePseudo(NavigatorScriptStatePseudo pseudo)
         pseudo == NavigatorScriptStatePseudo::Where;
 }
 
+bool isNthStatePseudo(NavigatorScriptStatePseudo pseudo)
+{
+    return pseudo == NavigatorScriptStatePseudo::NthChild ||
+        pseudo == NavigatorScriptStatePseudo::NthLastChild ||
+        pseudo == NavigatorScriptStatePseudo::NthOfType ||
+        pseudo == NavigatorScriptStatePseudo::NthLastOfType;
+}
+
 constexpr std::uint8_t kCompactLogicalArgumentValidFlag = 0x01u;
-constexpr std::uint8_t kCompactLogicalArgumentUniversalFlag = 0x02u;
-constexpr std::uint8_t kCompactLogicalArgumentAttributeFlag = 0x04u;
-constexpr std::uint8_t kCompactLogicalArgumentValueFlag = 0x08u;
+constexpr std::uint8_t kCompactLogicalArgumentValueFlag = 0x02u;
+constexpr unsigned kCompactLogicalArgumentPseudoShift = 2u;
+constexpr std::uint8_t kCompactLogicalArgumentReservedFlag = 0x80u;
+constexpr std::size_t kSimpleSelectorHasExpressionIndexOffset =
+    sizeof(NavigatorScriptCompactRelativeSelectorCoreDescriptor);
+
+bool expandCompactRelativeCore(
+    const NavigatorScriptCompactRelativeSelectorCoreDescriptor& compact,
+    const NavigatorScriptSelectorDescriptor& storage,
+    NavigatorScriptSimpleSelectorCoreDescriptor& expanded);
+bool expandCompactLogicalArgument(
+    const NavigatorScriptCompactLogicalArgumentDescriptor& compact,
+    const NavigatorScriptSelectorDescriptor& storage,
+    NavigatorScriptSimpleSelectorCoreDescriptor& expanded);
+
+bool compactRelativeSelectorCore(
+    const NavigatorScriptSimpleSelectorCoreDescriptor& core,
+    NavigatorScriptCompactRelativeSelectorCoreDescriptor& compact)
+{
+    if (!core.valid) return false;
+    compact = NavigatorScriptCompactRelativeSelectorCoreDescriptor();
+    compact.universal = core.universal;
+    compact.tagOffset = core.tagOffset;
+    compact.tagLength = core.tagLength;
+    compact.idOffset = core.idOffset;
+    compact.idLength = core.idLength;
+    compact.classTokenCount = core.classTokenCount;
+    if (core.classTokenCount != 0u) {
+        if (core.classTokenCount > kNavigatorScriptMaxClassQueryTokens)
+            return false;
+        const auto& firstToken = core.classTokens[0];
+        const auto& lastToken = core.classTokens[core.classTokenCount - 1u];
+        const std::size_t blockBegin = firstToken.offset;
+        const std::size_t blockEnd =
+            static_cast<std::size_t>(lastToken.offset) + lastToken.length;
+        if (blockEnd <= blockBegin || blockEnd - blockBegin >
+                std::numeric_limits<std::uint8_t>::max()) return false;
+        compact.classBlockOffset = static_cast<std::uint8_t>(blockBegin);
+        compact.classBlockLength = static_cast<std::uint8_t>(
+            blockEnd - blockBegin);
+    }
+    compact.hasAttributePredicate = core.hasAttributePredicate;
+    compact.attributeValuePresent = core.attributeValuePresent;
+    compact.attributeNameOffset = core.attributeNameOffset;
+    compact.attributeNameLength = core.attributeNameLength;
+    compact.attributeValueOffset = core.attributeValueOffset;
+    compact.attributeValueLength = core.attributeValueLength;
+    compact.statePseudo = core.statePseudo;
+    return true;
+}
+
+bool compactLogicalArgument(
+    const NavigatorScriptSimpleSelectorCoreDescriptor& core,
+    NavigatorScriptCompactLogicalArgumentDescriptor& compact)
+{
+    if (!core.valid || core.classTokenCount >
+            kNavigatorScriptMaxClassQueryTokens ||
+        (core.hasAttributePredicate != (core.attributeNameLength != 0u)) ||
+        static_cast<std::uint8_t>(core.statePseudo) > 0x1Fu) return false;
+    compact = NavigatorScriptCompactLogicalArgumentDescriptor();
+    compact.flags = static_cast<std::uint8_t>(
+        kCompactLogicalArgumentValidFlag |
+        (core.attributeValuePresent ? kCompactLogicalArgumentValueFlag : 0u) |
+        (static_cast<std::uint8_t>(core.statePseudo) <<
+            kCompactLogicalArgumentPseudoShift));
+    compact.tagOffset = core.tagOffset;
+    compact.setTagLength(core.tagLength);
+    compact.idOffset = core.idOffset;
+    compact.idLength = core.idLength;
+    compact.classTokenCount = core.classTokenCount;
+    if (core.classTokenCount != 0u) {
+        const auto& firstToken = core.classTokens[0];
+        const auto& lastToken = core.classTokens[core.classTokenCount - 1u];
+        const std::size_t blockBegin = firstToken.offset;
+        const std::size_t blockEnd =
+            static_cast<std::size_t>(lastToken.offset) + lastToken.length;
+        if (blockEnd <= blockBegin || blockEnd - blockBegin >
+                std::numeric_limits<std::uint8_t>::max()) return false;
+        compact.classBlockOffset = static_cast<std::uint8_t>(blockBegin);
+        compact.classBlockLength = static_cast<std::uint8_t>(
+            blockEnd - blockBegin);
+    }
+    compact.attributeNameOffset = core.attributeNameOffset;
+    compact.attributeNameLength = core.attributeNameLength;
+    compact.attributeValueOffset = core.attributeValueOffset;
+    compact.attributeValueLength = core.attributeValueLength;
+    return true;
+}
+
+void storeSimpleSelectorNth(
+    NavigatorScriptSimpleSelectorDescriptor& selector,
+    std::int16_t nthA, std::int16_t nthB)
+{
+    std::memcpy(selector.selectorPayload.data(), &nthA, sizeof(nthA));
+    std::memcpy(selector.selectorPayload.data() + sizeof(nthA), &nthB,
+        sizeof(nthB));
+}
+
+void loadSimpleSelectorNth(
+    const NavigatorScriptSimpleSelectorDescriptor& selector,
+    std::int16_t& nthA, std::int16_t& nthB)
+{
+    std::memcpy(&nthA, selector.selectorPayload.data(), sizeof(nthA));
+    std::memcpy(&nthB, selector.selectorPayload.data() + sizeof(nthA),
+        sizeof(nthB));
+}
+
+void storeSimpleSelectorHasData(
+    NavigatorScriptSimpleSelectorDescriptor& selector,
+    const NavigatorScriptCompactRelativeSelectorCoreDescriptor& firstCore,
+    std::uint8_t expressionIndex)
+{
+    static_assert(sizeof(firstCore) == kSimpleSelectorHasExpressionIndexOffset,
+        "the :has() inline core must fit its tagged payload");
+    std::memcpy(selector.selectorPayload.data(), &firstCore, sizeof(firstCore));
+    selector.selectorPayload[kSimpleSelectorHasExpressionIndexOffset] =
+        expressionIndex;
+}
+
+bool loadSimpleSelectorHasFirstCore(
+    const NavigatorScriptSimpleSelectorDescriptor& selector,
+    const NavigatorScriptSelectorDescriptor& storage,
+    NavigatorScriptSimpleSelectorCoreDescriptor& firstCore)
+{
+    NavigatorScriptCompactRelativeSelectorCoreDescriptor compact;
+    std::memcpy(&compact, selector.selectorPayload.data(), sizeof(compact));
+    return expandCompactRelativeCore(compact, storage, firstCore);
+}
+
+void storeSimpleSelectorLogicalArgument(
+    NavigatorScriptSimpleSelectorDescriptor& selector,
+    const NavigatorScriptCompactLogicalArgumentDescriptor& argument)
+{
+    std::memcpy(selector.selectorPayload.data(), &argument, sizeof(argument));
+}
+
+bool loadSimpleSelectorLogicalArgument(
+    const NavigatorScriptSimpleSelectorDescriptor& selector,
+    const NavigatorScriptSelectorDescriptor& storage,
+    NavigatorScriptSimpleSelectorCoreDescriptor& argument)
+{
+    NavigatorScriptCompactLogicalArgumentDescriptor compact;
+    std::memcpy(&compact, selector.selectorPayload.data(), sizeof(compact));
+    return expandCompactLogicalArgument(compact, storage, argument);
+}
 
 bool isOneRestrictedLogicalArgument(SourceView source, std::size_t begin,
     std::size_t end)
@@ -1068,9 +1221,32 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
     std::size_t end, NavigatorScriptSelectorDescriptor& storage,
     NavigatorScriptSimpleSelectorDescriptor& selector)
 {
-    return parseSimpleSelectorCore(source, begin, end, storage, selector,
-        selector.nthA, selector.nthB, &selector.logicalSelector, nullptr,
-        true, true);
+    selector.selectorPayload.fill(0u);
+    std::int16_t nthA = 0;
+    std::int16_t nthB = 0;
+    NavigatorScriptSimpleSelectorCoreDescriptor logicalSelector;
+    if (!parseSimpleSelectorCore(source, begin, end, storage, selector,
+            nthA, nthB, &logicalSelector, nullptr, true, true)) return false;
+
+    if (isHasStatePseudo(selector.statePseudo)) {
+        if (nthA <= 0 || nthA > static_cast<std::int16_t>(
+                kNavigatorScriptMaxHasExpressions) || nthB != 0) return false;
+        NavigatorScriptCompactRelativeSelectorCoreDescriptor firstCore;
+        if (!compactRelativeSelectorCore(logicalSelector, firstCore))
+            return false;
+        storeSimpleSelectorHasData(selector, firstCore,
+            static_cast<std::uint8_t>(nthA - 1));
+    } else if (isLogicalStatePseudo(selector.statePseudo)) {
+        if (logicalSelector.valid) {
+            NavigatorScriptCompactLogicalArgumentDescriptor compact;
+            if (!compactLogicalArgument(logicalSelector, compact))
+                return false;
+            storeSimpleSelectorLogicalArgument(selector, compact);
+        }
+    } else {
+        storeSimpleSelectorNth(selector, nthA, nthB);
+    }
+    return true;
 }
 
 bool parseHasPseudo(SourceView source, std::size_t colon, std::size_t end,
@@ -1275,84 +1451,13 @@ bool parseHasPseudo(SourceView source, std::size_t colon, std::size_t end,
     if (storage.hasExpressionCount >= storage.hasExpressions.size())
         return false;
 
-    const auto compactCore = [&storage](
-        const NavigatorScriptSimpleSelectorCoreDescriptor& core,
-        NavigatorScriptCompactRelativeSelectorCoreDescriptor& compact) {
-        compact.valid = core.valid;
-        compact.universal = core.universal;
-        compact.tagOffset = core.tagOffset;
-        compact.tagLength = core.tagLength;
-        compact.idOffset = core.idOffset;
-        compact.idLength = core.idLength;
-        compact.classTokenCount = core.classTokenCount;
-        if (core.classTokenCount != 0u) {
-            if (core.classTokenCount > kNavigatorScriptMaxClassQueryTokens)
-                return false;
-            const auto& firstToken = core.classTokens[0];
-            const auto& lastToken =
-                core.classTokens[core.classTokenCount - 1u];
-            const std::size_t blockBegin = firstToken.offset;
-            const std::size_t blockEnd =
-                static_cast<std::size_t>(lastToken.offset) + lastToken.length;
-            if (blockEnd <= blockBegin || blockEnd - blockBegin >
-                    std::numeric_limits<std::uint8_t>::max()) return false;
-            compact.classBlockOffset = static_cast<std::uint8_t>(blockBegin);
-            compact.classBlockLength = static_cast<std::uint8_t>(
-                blockEnd - blockBegin);
-        }
-        compact.hasAttributePredicate = core.hasAttributePredicate;
-        compact.attributeValuePresent = core.attributeValuePresent;
-        compact.attributeNameOffset = core.attributeNameOffset;
-        compact.attributeNameLength = core.attributeNameLength;
-        compact.attributeValueOffset = core.attributeValueOffset;
-        compact.attributeValueLength = core.attributeValueLength;
-        compact.statePseudo = core.statePseudo;
-        return true;
-    };
-    const auto compactLogicalArgument = [&storage](
-        const NavigatorScriptSimpleSelectorCoreDescriptor& core,
-        NavigatorScriptCompactLogicalArgumentDescriptor& compact) {
-        if (!core.valid || core.classTokenCount >
-                kNavigatorScriptMaxClassQueryTokens) return false;
-        compact.flags = kCompactLogicalArgumentValidFlag;
-        if (core.universal)
-            compact.flags |= kCompactLogicalArgumentUniversalFlag;
-        if (core.hasAttributePredicate)
-            compact.flags |= kCompactLogicalArgumentAttributeFlag;
-        if (core.attributeValuePresent)
-            compact.flags |= kCompactLogicalArgumentValueFlag;
-        compact.tagOffset = core.tagOffset;
-        compact.tagLength = core.tagLength;
-        compact.idOffset = core.idOffset;
-        compact.idLength = core.idLength;
-        compact.classTokenCount = core.classTokenCount;
-        if (core.classTokenCount != 0u) {
-            const auto& firstToken = core.classTokens[0];
-            const auto& lastToken =
-                core.classTokens[core.classTokenCount - 1u];
-            const std::size_t blockBegin = firstToken.offset;
-            const std::size_t blockEnd =
-                static_cast<std::size_t>(lastToken.offset) + lastToken.length;
-            if (blockEnd <= blockBegin || blockEnd - blockBegin >
-                    std::numeric_limits<std::uint8_t>::max()) return false;
-            compact.classBlockOffset = static_cast<std::uint8_t>(blockBegin);
-            compact.classBlockLength = static_cast<std::uint8_t>(
-                blockEnd - blockBegin);
-        }
-        compact.attributeNameOffset = core.attributeNameOffset;
-        compact.attributeNameLength = core.attributeNameLength;
-        compact.attributeValueOffset = core.attributeValueOffset;
-        compact.attributeValueLength = core.attributeValueLength;
-        compact.statePseudo = core.statePseudo;
-        return true;
-    };
-    const auto storeCore = [&storage, &compactCore](
+    const auto storeCore = [&storage](
         const NavigatorScriptSimpleSelectorCoreDescriptor& core,
         std::uint8_t& index) {
         if (storage.hasRelativeCoreCount >= storage.hasRelativeCores.size())
             return false;
         NavigatorScriptCompactRelativeSelectorCoreDescriptor compact;
-        if (!compactCore(core, compact)) return false;
+        if (!compactRelativeSelectorCore(core, compact)) return false;
         index = storage.hasRelativeCoreCount;
         storage.hasRelativeCores[index] = compact;
         ++storage.hasRelativeCoreCount;
@@ -1360,8 +1465,7 @@ bool parseHasPseudo(SourceView source, std::size_t colon, std::size_t end,
     };
 
     NavigatorScriptHasExpressionDescriptor expression;
-    const auto storeLogicalArguments = [&compactLogicalArgument,
-            &expression](
+    const auto storeLogicalArguments = [&expression](
         const NavigatorScriptSimpleSelectorCoreDescriptor& relativeCore,
         const NavigatorScriptSimpleSelectorCoreDescriptor& firstArgument,
         const NavigatorScriptSimpleSelectorCoreDescriptor& secondArgument,
@@ -1664,12 +1768,14 @@ bool expandCompactRelativeCore(
     const NavigatorScriptSelectorDescriptor& storage,
     NavigatorScriptSimpleSelectorCoreDescriptor& expanded)
 {
-    if (!compact.valid || storage.textLength >
+    if (storage.textLength >
             kNavigatorScriptMaxSelectorLength ||
         compact.classTokenCount > kNavigatorScriptMaxClassQueryTokens)
         return false;
     expanded = NavigatorScriptSimpleSelectorCoreDescriptor();
-    expanded.valid = compact.valid;
+    // Relative pool indices are issued only after a complete valid core has
+    // been compacted. The descriptor count is the ownership and validity tag.
+    expanded.valid = true;
     expanded.universal = compact.universal;
     expanded.tagOffset = compact.tagOffset;
     expanded.tagLength = compact.tagLength;
@@ -1716,28 +1822,36 @@ bool expandCompactLogicalArgument(
     NavigatorScriptSimpleSelectorCoreDescriptor& expanded)
 {
     if ((compact.flags & kCompactLogicalArgumentValidFlag) == 0u ||
-        (compact.flags & static_cast<std::uint8_t>(~0x0Fu)) != 0u)
+        (compact.flags & kCompactLogicalArgumentReservedFlag) != 0u)
         return false;
+    const std::uint8_t pseudoValue = static_cast<std::uint8_t>(
+        compact.flags >> kCompactLogicalArgumentPseudoShift);
+    if (pseudoValue > static_cast<std::uint8_t>(
+            NavigatorScriptStatePseudo::Scope)) return false;
     NavigatorScriptCompactRelativeSelectorCoreDescriptor relative;
-    relative.valid = true;
-    relative.universal = (compact.flags &
-        kCompactLogicalArgumentUniversalFlag) != 0u;
+    // A universal selector adds no constraint beside another predicate. If
+    // it is the argument's only condition, retain it so `:is(*)` remains a
+    // valid match-all argument rather than an empty core.
+    relative.universal = compact.tagLength() == 0u && compact.idLength == 0u &&
+        compact.classTokenCount == 0u && compact.attributeNameLength == 0u &&
+        pseudoValue == static_cast<std::uint8_t>(
+            NavigatorScriptStatePseudo::None);
     relative.tagOffset = compact.tagOffset;
-    relative.tagLength = compact.tagLength;
+    relative.tagLength = compact.tagLength();
     relative.idOffset = compact.idOffset;
     relative.idLength = compact.idLength;
     relative.classTokenCount = compact.classTokenCount;
     relative.classBlockOffset = compact.classBlockOffset;
     relative.classBlockLength = compact.classBlockLength;
-    relative.hasAttributePredicate = (compact.flags &
-        kCompactLogicalArgumentAttributeFlag) != 0u;
+    relative.hasAttributePredicate = compact.attributeNameLength != 0u;
     relative.attributeValuePresent = (compact.flags &
         kCompactLogicalArgumentValueFlag) != 0u;
     relative.attributeNameOffset = compact.attributeNameOffset;
     relative.attributeNameLength = compact.attributeNameLength;
     relative.attributeValueOffset = compact.attributeValueOffset;
     relative.attributeValueLength = compact.attributeValueLength;
-    relative.statePseudo = compact.statePseudo;
+    relative.statePseudo = static_cast<NavigatorScriptStatePseudo>(
+        pseudoValue);
     return expandCompactRelativeCore(relative, storage, expanded);
 }
 
@@ -1757,11 +1871,11 @@ bool hasExpressionInfo(const NavigatorScriptSimpleSelectorDescriptor& selector,
     const NavigatorScriptSelectorDescriptor& storage,
     const NavigatorScriptHasExpressionDescriptor*& expression)
 {
-    if (selector.nthA <= 0 || selector.nthB != 0 ||
-        storage.hasExpressionCount > storage.hasExpressions.size() ||
+    const std::uint8_t index = selector.selectorPayload[
+        kSimpleSelectorHasExpressionIndexOffset];
+    if (storage.hasExpressionCount > storage.hasExpressions.size() ||
         storage.hasRelativeCoreCount > storage.hasRelativeCores.size())
         return false;
-    const std::size_t index = static_cast<std::size_t>(selector.nthA - 1);
     if (index >= storage.hasExpressionCount) return false;
     const auto& candidate = storage.hasExpressions[index];
     if ((candidate.flags & kHasExpressionValidFlag) == 0u) return false;
@@ -4141,9 +4255,16 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
                 nullptr;
             if (!hasExpressionInfo(leftSimple, left, leftExpression) ||
                 !hasExpressionInfo(rightSimple, right, rightExpression) ||
-                leftExpression->flags != rightExpression->flags ||
-                !coreEqual(left, leftSimple.logicalSelector, right,
-                    rightSimple.logicalSelector)) return false;
+                leftExpression->flags != rightExpression->flags)
+                return false;
+            NavigatorScriptSimpleSelectorCoreDescriptor leftFirstCore;
+            NavigatorScriptSimpleSelectorCoreDescriptor rightFirstCore;
+            if (!loadSimpleSelectorHasFirstCore(leftSimple, left,
+                    leftFirstCore) ||
+                !loadSimpleSelectorHasFirstCore(rightSimple, right,
+                    rightFirstCore) ||
+                !coreEqual(left, leftFirstCore, right, rightFirstCore))
+                return false;
             const auto compactEqual = [&coreEqual](
                 const NavigatorScriptSelectorDescriptor& leftStorage,
                 std::uint8_t leftIndex,
@@ -4200,14 +4321,29 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
                 compactEqual(left, leftExpression->secondStepTwoCoreIndex,
                     right, rightExpression->secondStepTwoCoreIndex);
         }
-        if (leftSimple.nthA != rightSimple.nthA ||
-            leftSimple.nthB != rightSimple.nthB) return false;
+        if (isNthStatePseudo(leftSimple.statePseudo)) {
+            std::int16_t leftNthA = 0;
+            std::int16_t leftNthB = 0;
+            std::int16_t rightNthA = 0;
+            std::int16_t rightNthB = 0;
+            loadSimpleSelectorNth(leftSimple, leftNthA, leftNthB);
+            loadSimpleSelectorNth(rightSimple, rightNthA, rightNthB);
+            if (leftNthA != rightNthA || leftNthB != rightNthB) return false;
+        }
         const bool hasLogicalPseudo =
             leftSimple.statePseudo == NavigatorScriptStatePseudo::Not ||
             leftSimple.statePseudo == NavigatorScriptStatePseudo::Is ||
             leftSimple.statePseudo == NavigatorScriptStatePseudo::Where;
-        return !hasLogicalPseudo || coreEqual(left, leftSimple.logicalSelector,
-            right, rightSimple.logicalSelector);
+        if (!hasLogicalPseudo) return true;
+        NavigatorScriptSimpleSelectorCoreDescriptor leftArgument;
+        NavigatorScriptSimpleSelectorCoreDescriptor rightArgument;
+        const bool leftArgumentValid = loadSimpleSelectorLogicalArgument(
+            leftSimple, left, leftArgument);
+        const bool rightArgumentValid = loadSimpleSelectorLogicalArgument(
+            rightSimple, right, rightArgument);
+        return leftArgumentValid == rightArgumentValid &&
+            (!leftArgumentValid || coreEqual(left, leftArgument, right,
+                rightArgument));
     };
     for (std::size_t index = 0u; index < left.memberCount; ++index) {
         const NavigatorScriptSelectorMemberDescriptor& leftMember =
@@ -4839,7 +4975,9 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
         const HostObjectReference anchor{element.serial, generation_,
             kNavigatorElementHostKind};
         const NavigatorScriptHasExpressionDescriptor* expression = nullptr;
-        if (!hasExpressionInfo(selector, storage, expression))
+        NavigatorScriptSimpleSelectorCoreDescriptor firstCore;
+        if (!hasExpressionInfo(selector, storage, expression) ||
+            !loadSimpleSelectorHasFirstCore(selector, storage, firstCore))
             return MatchResult::Invalid;
         const auto evaluateAlternative = [this, &anchor, &storage, &context,
                 expression](
@@ -4922,7 +5060,7 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
 
         const MatchResult first = evaluateAlternative(
             relativeRelationForHasPseudo(core.statePseudo),
-            selector.logicalSelector, expression->firstStepTwoCoreIndex,
+            firstCore, expression->firstStepTwoCoreIndex,
             hasExpressionRelation(*expression, 0u), 0u, 2u);
         if (first != MatchResult::NoMatch ||
             (expression->flags & kHasExpressionTwoAlternativesFlag) == 0u)
@@ -4940,16 +5078,23 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
             expression->secondStepTwoCoreIndex,
             hasExpressionRelation(*expression, 4u), 4u, 6u);
     }
-    if (!isLogicalPseudo)
-        return selectorCoreElementMatchResult(element, core, selector.nthA,
-            selector.nthB, storage, false, context);
+    if (!isLogicalPseudo) {
+        std::int16_t nthA = 0;
+        std::int16_t nthB = 0;
+        if (isNthStatePseudo(core.statePseudo))
+            loadSimpleSelectorNth(selector, nthA, nthB);
+        return selectorCoreElementMatchResult(element, core, nthA, nthB,
+            storage, false, context);
+    }
 
     const MatchResult conditions = selectorCoreConditionsMatchResult(element,
         core, storage);
     if (conditions != MatchResult::Match) return conditions;
-    if (!selector.logicalSelector.valid) return MatchResult::Invalid;
+    NavigatorScriptSimpleSelectorCoreDescriptor logicalSelector;
+    if (!loadSimpleSelectorLogicalArgument(selector, storage,
+            logicalSelector)) return MatchResult::Invalid;
     const MatchResult inner = selectorCoreElementMatchResult(element,
-        selector.logicalSelector, 0, 0, storage, true, context);
+        logicalSelector, 0, 0, storage, true, context);
     if (inner == MatchResult::Invalid) return MatchResult::Invalid;
     if (core.statePseudo != NavigatorScriptStatePseudo::Not) return inner;
     return inner == MatchResult::Match ? MatchResult::NoMatch :
