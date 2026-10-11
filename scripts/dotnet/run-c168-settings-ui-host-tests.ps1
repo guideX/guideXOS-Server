@@ -1,6 +1,7 @@
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\.." )).Path,
-    [string]$EvidenceRoot = ""
+    [string]$EvidenceRoot = "",
+    [string]$ArtifactsRoot = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,7 +21,13 @@ $dotnet = Get-Command dotnet.exe -ErrorAction SilentlyContinue | Select-Object -
 if (-not $dotnet) { throw 'C168 host tests require the .NET SDK.' }
 $project = Join-Path $RepoRoot 'samples\host\C167SettingsDefaultApps\C167SettingsDefaultApps.csproj'
 $hostLog = Join-Path $EvidenceRoot 'c168-managed-settings-host-tests.txt'
-$hostOutput = & $dotnet.Source run --project $project --configuration Release --no-restore 2>&1 | Out-String
+if ([string]::IsNullOrWhiteSpace($ArtifactsRoot)) {
+    $hostOutput = & $dotnet.Source run --project $project --configuration Release --no-restore 2>&1 | Out-String
+} else {
+    $ArtifactsRoot = [System.IO.Path]::GetFullPath($ArtifactsRoot)
+    New-Item -ItemType Directory -Force -Path $ArtifactsRoot | Out-Null
+    $hostOutput = & $dotnet.Source run --project $project --configuration Release --artifacts-path $ArtifactsRoot 2>&1 | Out-String
+}
 $hostExit = $LASTEXITCODE
 Set-Content -LiteralPath $hostLog -Value $hostOutput -Encoding utf8
 $c167Pass = $hostOutput -match 'C167 host UI/state cases=20 stress=60 result=PASS'

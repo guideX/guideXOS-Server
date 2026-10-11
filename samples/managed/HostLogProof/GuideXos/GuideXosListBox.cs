@@ -365,7 +365,7 @@ public sealed class GuideXosListBox
             int position = 0;
             int index = _viewport.Offset + row;
             if (!AppendByte(line, ref position,
-                    index == _selectedIndex ? (byte)'>' : (byte)' ') ||
+                    GetRenderMarker(index)) ||
                 !AppendByte(line, ref position, (byte)' '))
             {
                 return GuideXosResult.InvalidArgument;
@@ -386,6 +386,13 @@ public sealed class GuideXosListBox
             }
         }
         return GuideXosResult.Success;
+    }
+
+    internal byte GetRenderMarker(int index)
+    {
+        if (!_isEnabled) return (byte)'x';
+        if (index != _selectedIndex) return (byte)' ';
+        return _isFocused ? (byte)'>' : (byte)'*';
     }
 
     private GuideXosListBoxResult MoveSelection(int delta)

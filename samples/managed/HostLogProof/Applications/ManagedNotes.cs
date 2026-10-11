@@ -1754,7 +1754,7 @@ public sealed partial class ManagedNotes : GuideXosApplication
             host.TryLog("C119-NOTES directory-cache=PASS"u8);
         }
 #endif
-        GuideXosFileResult loadResult = GuideXosFileResult.NotFound;
+#if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
         if (documentActivation && !TryLoadC151Document(host,
                 host.LaunchContext.DocumentPath,
                 out GuideXosFileResult activationFileResult,
@@ -1767,6 +1767,14 @@ public sealed partial class ManagedNotes : GuideXosApplication
                     : "C164-NOTES-ACTIVATION result=FAIL reason=invalid-or-unreadable"u8);
             return GuideXosResult.InvalidArgument;
         }
+#else
+        if (documentActivation)
+        {
+            host.TryLog("C164-NOTES-ACTIVATION result=FAIL reason=loader-unavailable"u8);
+            return GuideXosResult.InvalidArgument;
+        }
+#endif
+        GuideXosFileResult loadResult = GuideXosFileResult.NotFound;
 #if HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF
         if (documentActivation &&
             !GuideXosNotesActivationC164Tests.Run(host))

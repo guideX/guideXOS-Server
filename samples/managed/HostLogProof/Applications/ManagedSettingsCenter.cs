@@ -906,6 +906,20 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         return valid;
     }
 
+    internal bool RunC146SettingsTestsForHost(GuideXosHost host)
+    {
+        bool prior = _c145FocusedTesting;
+        _c145FocusedTesting = true;
+        try
+        {
+            return GuideXosSettingsCenterC146Tests.Run(host, this);
+        }
+        finally
+        {
+            _c145FocusedTesting = prior;
+        }
+    }
+
     internal bool EnterDefaultAppsForTests(
         IManagedDefaultAppsAssociationService service)
     {
@@ -1855,11 +1869,11 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         if (!_resetDialog.TrySetMessage("Replace the working settings with defaults?") ||
             !_resetDialog.Open(_controlHost))
         {
-            host.TryLog("C145-RESET open=FAIL result=FAIL"u8);
+            host?.TryLog("C145-RESET open=FAIL result=FAIL"u8);
             return false;
         }
         _activeDialog = _resetDialog;
-        host.TryLog(_controlHost.IsModalActive && _controlHost.ActiveIndex == -1 &&
+        host?.TryLog(_controlHost.IsModalActive && _controlHost.ActiveIndex == -1 &&
             _resetDialog.IsModal && _resetDialog.ControlHost.ActiveControlId ==
                 _resetDialog.DefaultButtonId
             ? "C145-RESET open=PASS modal=active focus=default parent=blocked result=PASS"u8
@@ -1878,11 +1892,11 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         if (!_dirtyCloseDialog.TrySetMessage("Apply changes before closing?") ||
             !_dirtyCloseDialog.Open(_controlHost))
         {
-            host.TryLog("C145-UNSAVED open=FAIL result=FAIL"u8);
+            host?.TryLog("C145-UNSAVED open=FAIL result=FAIL"u8);
             return false;
         }
         _activeDialog = _dirtyCloseDialog;
-        host.TryLog(_controlHost.IsModalActive && _controlHost.ActiveIndex == -1 &&
+        host?.TryLog(_controlHost.IsModalActive && _controlHost.ActiveIndex == -1 &&
             _dirtyCloseDialog.IsModal && _dirtyCloseDialog.RegistrationCount == 3
             ? "C145-UNSAVED open=PASS modal=active parent=blocked buttons=3 result=PASS"u8
             : "C145-UNSAVED open=FAIL result=FAIL"u8);

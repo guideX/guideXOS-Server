@@ -5,6 +5,12 @@ namespace HostLogProof;
 /// <summary>Working/applied/persisted and persistence-error modal integration.</summary>
 public static class GuideXosSettingsCenterC146Tests
 {
+    public static bool Run(GuideXosHost host)
+    {
+        ManagedSettingsCenter app = new();
+        return app.InitializeForTests() && app.RunC146SettingsTestsForHost(host);
+    }
+
     public static bool Run(GuideXosHost host, ManagedSettingsCenter app)
     {
         int cases = 0;

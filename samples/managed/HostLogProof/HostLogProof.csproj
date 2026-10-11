@@ -17,9 +17,14 @@
     <SelfContained>true</SelfContained>
     <HostLogProofMode Condition="'$(HostLogProofMode)' == ''">NonAllocating</HostLogProofMode>
     <HostLogProofImageBase Condition="'$(HostLogProofImageBase)' == ''">0x100000000</HostLogProofImageBase>
-    <BaseOutputPath>..\..\..\out\dotnet\managed-hostlog\bin\</BaseOutputPath>
-    <BaseIntermediateOutputPath>..\..\..\out\dotnet\managed-hostlog\obj\</BaseIntermediateOutputPath>
+    <BaseOutputPath Condition="'$(ArtifactsPath)' == ''">..\..\..\out\dotnet\managed-hostlog\bin\</BaseOutputPath>
+    <BaseIntermediateOutputPath Condition="'$(ArtifactsPath)' == ''">..\..\..\out\dotnet\managed-hostlog\obj\</BaseIntermediateOutputPath>
     <HostLogProofMapPath Condition="'$(HostLogProofMapPath)' == ''">$(MSBuildProjectDirectory)\..\..\..\out\dotnet\managed-hostlog\artifacts\HostLogProof.map</HostLogProofMapPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(HostLogProofHostTest)' == 'true'">
+    <PublishAot>false</PublishAot>
+    <SelfContained>false</SelfContained>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'Allocating'">
@@ -339,6 +344,10 @@
 
   <PropertyGroup Condition="'$(HostLogProofC136IncludeFocusedTests)' == 'true'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C134_TRANSIENT_POPUP_ROUTING;HOSTLOGPROOF_C134_HOST_TESTS;HOSTLOGPROOF_C135_POPUP_MENU_TESTS;HOSTLOGPROOF_C135_HOST_TESTS;HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(HostLogProofC169IncludeFocusedTests)' == 'true'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C169_MANAGED_UI_REGRESSION</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(HostLogProofC134IncludeFocusedTests)' != 'true' and '$(HostLogProofC135IncludeFocusedTests)' != 'true' and '$(HostLogProofC136IncludeFocusedTests)' != 'true' and '$(HostLogProofMode)' != 'C137Composite' and '$(HostLogProofMode)' != 'C138Composite' and '$(HostLogProofMode)' != 'C139Composite' and '$(HostLogProofMode)' != 'C140Composite' and '$(HostLogProofMode)' != 'C141Composite' and '$(HostLogProofMode)' != 'C142Composite' and '$(HostLogProofMode)' != 'C143Composite' and '$(HostLogProofMode)' != 'C144Composite' and '$(HostLogProofMode)' != 'C145Composite' and '$(HostLogProofMode)' != 'C146Composite' and '$(HostLogProofMode)' != 'C147Composite' and '$(HostLogProofMode)' != 'C148Composite' and '$(HostLogProofMode)' != 'C149Composite' and '$(HostLogProofMode)' != 'C150Composite' and '$(HostLogProofMode)' != 'C151Composite' and '$(HostLogProofMode)' != 'C152Composite' and '$(HostLogProofMode)' != 'C153Composite' and '$(HostLogProofMode)' != 'C154Composite' and '$(HostLogProofMode)' != 'C160Composite' and '$(HostLogProofMode)' != 'C167ProofComposite'">
