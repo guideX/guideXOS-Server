@@ -13,6 +13,7 @@
 
 #include "include/kernel/ata.h"
 #include "include/kernel/block_device.h"
+#include "include/kernel/ata_flush.h"
 #include "include/kernel/arch.h"
 
 // Define ARCH_HAS_PORT_IO for x86/amd64 architectures
@@ -331,18 +332,58 @@ static block::Status ata_pio_write(uint8_t devIdx,
 // Cache flush is deliberately separate from a block write. FAT commits call
 // this after data and metadata are complete, instead of paying for a device
 // cache flush after every cluster and FAT-entry update.
+#if defined(__GNUC__) || defined(__clang__)
+static uint16_t s_reportedCacheFlushFailures = 0;
+
+static void report_cache_flush_failure(uint8_t devIdx,
+                                       const flush_detail::FlushResult& result)
+{
+    const uint16_t bit = static_cast<uint16_t>(1u << result.code);
+    if (s_reportedCacheFlushFailures & bit) return;
+    s_reportedCacheFlushFailures |= bit;
+
+    serial::puts("[ATA] Cache flush failed dev=0x");
+    serial::put_hex8(devIdx);
+    serial::puts(" reason=");
+    serial::puts(flush_detail::result_name(result.code));
+    serial::puts(" status=0x");
+    serial::put_hex8(result.status);
+    serial::puts(" command=0x");
+    serial::put_hex8(result.command);
+    serial::puts(result.commandIssued ? " issued\n" : " not-issued\n");
+}
+#endif
+
 static block::Status ata_pio_flush(uint8_t devIdx)
 {
     if (devIdx >= MAX_ATA_DEVICES || !s_devices[devIdx].active)
         return block::BLOCK_ERR_INVALID;
 
     ATADevice& dev = s_devices[devIdx];
-    arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_COMMAND),
-               dev.lba48 ? ATA_CMD_CACHE_FLUSH_EXT : ATA_CMD_CACHE_FLUSH);
-    if (!ata_wait_bsy(dev.ioBase, 500000))
-        return block::BLOCK_ERR_TIMEOUT;
+    const flush_detail::IdentifyCapabilities capabilities = {
+        dev.lba48, dev.flushCache, dev.flushCacheExt
+    };
+    const flush_detail::FlushResult result = flush_detail::issue_cache_flush(
+        capabilities, dev.isMaster != 0, 500000,
+        [&dev](uint8_t driveSelect) {
+            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_DRIVE_HEAD),
+                       driveSelect);
+        },
+        [&dev]() { delay_400ns(dev.ctrlBase); },
+        [&dev]() {
+            return arch::inb(static_cast<uint16_t>(dev.ioBase + ATA_REG_STATUS));
+        },
+        [&dev](uint8_t command) {
+            arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_COMMAND),
+                       command);
+        });
 
-    return block::BLOCK_OK;
+    if (result.code != flush_detail::FLUSH_SUCCESS) {
+#if defined(__GNUC__) || defined(__clang__)
+        report_cache_flush_failure(devIdx, result);
+#endif
+    }
+    return flush_detail::to_block_status(result.code);
 }
 
 // ================================================================
@@ -395,7 +436,12 @@ static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
         dev.sectorSize = 512;
 
         // LBA48 support: word 83 bit 10
-        dev.lba48 = (id.commandSets83 & (1 << 10)) != 0;
+        const flush_detail::IdentifyCapabilities capabilities =
+            flush_detail::decode_identify_capabilities(id.commandSets82,
+                                                       id.commandSets83);
+        dev.lba48 = capabilities.lba48;
+        dev.flushCache = capabilities.flushCache;
+        dev.flushCacheExt = capabilities.flushCacheExt;
 
         if (dev.lba48) {
             dev.totalSectors = id.lba48Sectors;
