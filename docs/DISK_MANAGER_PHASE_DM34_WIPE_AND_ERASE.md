@@ -246,7 +246,7 @@ The new production policy/operation checks add **37 whole-disk GUI checks** to `
 
 Final-source host qualification passes: **1,108/1,108 storage checks**, including whole-disk engine **34/34**, Partition Wipe engine **17/17**, previous Partition Wipe UI policy **31**, and new whole-disk GUI/operation **37**. Widget activation passes with zero failures. USB trace verifier passes **7/7**, GPT verifier **1/1**, and DM30 fixture verifier **1/1**. AMD64 kernel passes with NVMe write and Flush proof flags at zero; `build.bat` passes; `build-uefi.ps1 -Arch amd64` passes its UEFI x64 Release bootloader, AMD64 kernel and ESP setup. The UEFI script checked QEMU prerequisites but did not launch QEMU. The separate `build.ps1 -Arch amd64` path was attempted without `-Clean` and stopped at the known unrelated PacMan Native ELF link errors `pacman_audio_load_resources` and `pacman_audio_submit`. Its compile phase touched three tracked generated PacMan object files; those exact files were restored to their clean-gate contents. No PacMan source or package output changed. `git diff --check` passes (Git reports only the repository's configured LF/CRLF normalization notices). The UEFI script's generated tracked `ESP/build-identity.txt` was restored to its original clean-gate contents; no other generated tracked media changed.
 
-### Next runtime acceptance plan (not executed here)
+### Next runtime acceptance plan (as of continuation 5)
 
 Use only dedicated disposable virtual disks with nonzero patterns in LBA 0, MBR/GPT metadata, multiple partition contents, unallocated sectors, and the final logical sector. Preserve pristine copies for host-side byte verification after releasing each image.
 
@@ -257,8 +257,52 @@ Use only dedicated disposable virtual disks with nonzero patterns in LBA 0, MBR/
 5. **Guest Test E — application Close:** use a separate disposable disk, start erase, press Alt+F4, and prove Stop settlement and ownership release precede window destruction.
 6. **Identity/removal:** rely on accepted host protections unless GUI behavior reveals a reason for additional bounded runtime coverage; do not automatically repeat the extensive DM33 hotplug qualification.
 
-No test above was executed in this continuation. QEMU Stop/completion, independent whole-image verification, and runtime Close remain the next DM34 guest qualification gates.
+No test above had been executed by the end of continuation 5. QEMU Stop/completion, independent whole-image verification, and runtime Close remained the next DM34 guest qualification gates.
 
 ### Outcome
 
 This continuation is **Outcome B — `DM34_DISK_GUI_READY`**. The explicit whole-disk GUI, engine-sourced eligibility, stable target-bound typed confirmation, operation lifetime handling, focused host checks, full storage suite, and required builds are qualified on the host. It does not complete DM34. `.phase` remains `last_completed=DM33`, `next_expected=DM34`; DM35 has not started.
+
+## DM34 continuation 6 — real whole-disk GUI acceptance attempt
+
+### Gate and candidate provenance
+
+The run began on branch `DISK_MANAGER_IMPROVEMENTS`, clean worktree, at expected HEAD `738914a7b0f4bc939ee75ec667dfb7ceb27e18df` (`disk-manager: add DM34 whole-disk erase GUI safeguards`). `.phase` was `last_completed=DM33`, `next_expected=DM34`. No branch or worktree topology changes were made. No physical host storage was attached, no temporary launch hook was used, and `kernel/core/main.cpp` remained the normal production startup source (blob `d93803dd33d5c6886c9dadd9d9e38f61201bf479`).
+
+The exact-HEAD AMD64 kernel was freshly built to `kernel/build/amd64-dm34-continuation-6/bin/kernel.elf`; the build exited 0 with `NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0`. Its SHA-256 is `24ADB91B79B63B24657EB69AD5D1DBD120A0C63188033AA66667C9FF582C444D` (3,049,128 bytes). The candidate ESP kernel has the same hash. The UEFI x64 Release bootloader used in that ESP is `guideXOSBootLoader/x64/Release/guideXOSBootLoader.exe`, SHA-256 `B6DE6EBBC595E688E6CBBF207A005A7B5CB2F1AD3B9D89D3E8E6AECC135835B2`; its required Release build is retained from continuation 5. Full candidate details are in ignored `out/dm34/whole-disk-erase/candidate-provenance.json`.
+
+### Disposable media prepared
+
+Six independent raw USB fixtures and matching pristine preimages were created under ignored `out/dm34/whole-disk-erase/`. Each is 307,200,000 bytes, 512-byte logical sectors, 600,000 sectors, and final LBA 599,999. They use valid inactive MBRs with two type-0x0C entries: partition 1 starts at LBA 2,048 and spans 180,000 sectors (ends at 182,047); partition 2 starts at 190,000 and spans 180,000 sectors (ends at 369,999). LBA 0, reserved sectors, both partitions, the inter-partition gap, unallocated tail, and final LBA contain nonzero patterns. The manifest records full paths, device IDs, layout, identity, hashes, and intended result.
+
+| Serial | Purpose | Pristine image SHA-256 |
+| --- | --- | --- |
+| `DM34SAFE01` | Protection/confirmation | `c0db142bc92cf752922d0d82b5e0ce47983d216987632cb217612d93a8a20225` |
+| `DM34STOP01` | Partial Stop | `54c0b09950f7d686d60372b3fcb8808fc0ab6d6f31e91b375e7c3517768db918` |
+| `DM34FULL01` | Full completion | `44d922cb7f3fc2ded6410a2f3a02a573178927a91852931c1322e133ab23106e` |
+| `DM34CLOSE01` | Application Close | `62fffcece45d568ee6214121b35028340955ee50eac00c78c490b26dba7d9576` |
+| `DM34REMOVE01` | Removal | `0aa12d8d12a288d319249dfac185097a5746ca5fdc606cd44f5a378d7d54ce4d` |
+| `DM34REPL01` | Same-geometry replacement | `dd64d90ba605ae59101197b558240f4a2f83bd751034eb493d07bc219e08f290` |
+
+The complete fixture manifest is `out/dm34/whole-disk-erase/fixture-manifest.json`; the independent host checker is `fixtures.py` in the same directory. A fresh unchanged-mode pass over all six released images confirms that each remains byte-identical to its pristine preimage. The confirmation fixture's post-run verification also checks its released image against its full preimage hash.
+
+### Exclusive QEMU attempts and observed result
+
+Preflight found no existing QEMU process. Two DM34-owned guests ran sequentially, never concurrently, using QEMU 11.0.0 (`v11.0.0-12122-ga4bb4b10c9`), executable `C:\Program Files\qemu\qemu-system-x86_64.exe`, SHA-256 `A930E028F93D0FA47E4D58BDAD2432F7466DC2B6AF0AE376F77EF7A298FFDD02`. Both used only the read-only OVMF image, the candidate ESP, and the `DM34SAFE01` USB raw image. The ownership manifests capture live command lines, PID, QMP endpoint, attached paths, device IDs, kernel and bootloader hashes, and serial/stdout/stderr destinations:
+
+| Run | PID | QMP endpoint | Serial log | Ownership manifest |
+| --- | ---: | --- | --- | --- |
+| PS/2/default VGA input attempt | 8044 | `127.0.0.1:61234` | `safe.serial.log` | `safe-owner-manifest.json` |
+| Named VGA routing retry | 3608 | `127.0.0.1:61235` | `safe-routed.serial.log` | `safe-routed-owner-manifest.json` |
+
+Both guests reached the normal desktop. PS/2 relative movement, QMP key events, tablet/pointer attempts, HMP pointer attempts, and then explicit key/relative-pointer events routed to `video0` failed to activate desktop widgets. QEMU rejected the absolute event with `Input handler not found for event type abs`. No Disk Manager window, disk selection, confirmation dialog, or erase job was reached. These were headless input failures; they did not demonstrate a production defect. After two materially different input routes, no further guest retry was made.
+
+QMP target statistics show zero write operations and zero write bytes in both runs. Each guest had one USB target Flush during boot/desktop initialization before the measured desktop-to-exit interval; the interval itself had zero write and Flush deltas. This is not a GUI confirmation test: no empty or incorrect phrase was entered, and the exact `ERASE DM34SAFE01` flow was not exercised. After each QEMU process exited, the target image was exclusively reopenable. The released `DM34SAFE01` image remained byte-for-byte identical to its 307,200,000-byte preimage (SHA-256 `c0db142bc92cf752922d0d82b5e0ce47983d216987632cb217612d93a8a20225`). QMP output, screenshots, input snapshots, manifests, run records, and verifier output are retained in the same ignored evidence directory.
+
+### Remaining acceptance gates and outcome
+
+The runtime preflight did not select or test the guest's running boot/root device, mounted/busy devices, read-only devices, unsupported/ambiguous devices, or NVMe; their production host protection checks remain the evidence for those categories. The GUI did not prove disk-row selection, partition/free-space rejection, dialog contents, disabled initial action, Enter/incorrect-phrase rejection, exact typed confirmation, separate final activation, or target-specific preconfirmation counters. No whole-disk operation was admitted, so partial Stop and its independent verifier, full completion/required Flush/all-byte zero verification, destroyed-partition inventory refresh, application Close settlement, and removal/replacement identity behavior remain unqualified. Previously qualified Partition Wipe guest evidence is retained without repetition.
+
+Continuation 5's exact-source host suite (**1,108/1,108**), widget activation checks, USB/GPT/DM30 fixture checks, AMD64 kernel, `build.bat`, and UEFI x64 Release results remain the production qualification baseline; no production source changed here. This continuation freshly rebuilt the exact-HEAD AMD64 kernel for the candidate above. `git diff --check` passed for this documentation update.
+
+This is **Outcome B — headless QMP input could not reach the GUI; no production defect demonstrated**. The evidence limitation is not a pass for any GUI-dependent safety gate. `.phase` remains `last_completed=DM33`, `next_expected=DM34`; DM35 is not ready. No physical host media was touched, and NVMe proof flags remain zero.
