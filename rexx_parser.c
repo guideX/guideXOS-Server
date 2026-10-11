@@ -1561,6 +1561,22 @@ static RexxAstClause *rexx_parser_parse_simple_keyword(
     }
     if (kind == REXX_AST_CLAUSE_SAY ||
         kind == REXX_AST_CLAUSE_ADDRESS) {
+        /*
+         * ADDRESS accepts an optional environment followed by command text.
+         * This compact AST and VM dispatcher carry command text only, so
+         * consume a separated leading environment name here instead of
+         * folding it into the command's implicit blank concatenation.
+         */
+        if (kind == REXX_AST_CLAUSE_ADDRESS &&
+            !rexx_parser_token_is_stop(&parser->current, stop_mask) &&
+            rexx_parser_is_name_token(&parser->current) &&
+            rexx_parser_can_start_term(&parser->lookahead) &&
+            !rexx_parser_tokens_are_adjacent(&parser->current,
+                                             &parser->lookahead)) {
+            if (!rexx_parser_advance(parser)) {
+                return NULL;
+            }
+        }
         if (!rexx_parser_token_is_stop(&parser->current, stop_mask)) {
             clause->as.simple.expression =
                 rexx_parser_parse_expression_internal(parser, 1, stop_mask);

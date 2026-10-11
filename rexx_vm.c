@@ -12,7 +12,7 @@ static const char *const vm_messages[] = {
     "ok", "invalid VM argument", "out of memory", "VM resource limit exceeded",
     "evaluation stack overflow", "evaluation stack underflow",
     "invalid or malformed bytecode", "value is not a valid finite number",
-    "opcode is not implemented by this VM"
+    "opcode is not implemented by this VM", "standard output error"
 };
 
 static int ascii_space(unsigned char c)
@@ -118,7 +118,7 @@ static RexxVMStatus vm_fail(RexxVM *vm, RexxVMStatus status, size_t pc)
         vm->error.status = status;
         vm->error.pc = pc;
         vm->error.message = status >= REXX_VM_STATUS_OK &&
-                            status <= REXX_VM_STATUS_UNSUPPORTED_OPCODE
+                            status <= REXX_VM_STATUS_IO_ERROR
                                 ? vm_messages[status] : "unknown VM error";
     }
     return status;
@@ -694,7 +694,12 @@ static RexxVMStatus binary_number(RexxVM *vm, RexxOpcode opcode)
     if (status == REXX_VM_STATUS_OK) status = value_number(&left, &a);
     if (status == REXX_VM_STATUS_OK) status = value_number(&right, &b);
     if (status == REXX_VM_STATUS_OK) {
-        answer = opcode == OP_ADD ? a + b : a - b;
+        switch (opcode) {
+        case OP_ADD: answer = a + b; break;
+        case OP_SUB: answer = a - b; break;
+        case OP_MULTIPLY: answer = a * b; break;
+        default: status = REXX_VM_STATUS_UNSUPPORTED_OPCODE; answer = 0.0; break;
+        }
         if (!isfinite(answer)) status = REXX_VM_STATUS_NUMERIC_ERROR;
     }
     rexx_value_clear(&left);
@@ -705,11 +710,11 @@ static RexxVMStatus binary_number(RexxVM *vm, RexxOpcode opcode)
     return status;
 }
 
-static RexxVMStatus concat_values(RexxVM *vm)
+static RexxVMStatus concat_values(RexxVM *vm, RexxOpcode opcode)
 {
     RexxValue left, right, result;
     char *a = NULL, *b = NULL, *joined = NULL;
-    size_t alen = 0, blen = 0;
+    size_t alen = 0, blen = 0, separator_length = 0;
     RexxVMStatus status;
     memset(&left, 0, sizeof(left));
     memset(&right, 0, sizeof(right));
@@ -719,15 +724,22 @@ static RexxVMStatus concat_values(RexxVM *vm)
     if (status == REXX_VM_STATUS_OK) status = value_string(&left, &a, &alen);
     if (status == REXX_VM_STATUS_OK) status = value_string(&right, &b, &blen);
     if (status == REXX_VM_STATUS_OK) {
-        if (alen > SIZE_MAX - blen - 1) status = REXX_VM_STATUS_RESOURCE_LIMIT;
+        if (opcode == OP_CONCAT_BLANK && alen != 0 && blen != 0)
+            separator_length = 1;
+        if (alen > SIZE_MAX - separator_length - 1 ||
+            blen > SIZE_MAX - alen - separator_length - 1)
+            status = REXX_VM_STATUS_RESOURCE_LIMIT;
         else {
-            joined = (char *)malloc(alen + blen + 1);
+            joined = (char *)malloc(alen + separator_length + blen + 1);
             if (joined == NULL) status = REXX_VM_STATUS_OUT_OF_MEMORY;
             else {
                 if (alen != 0) memcpy(joined, a, alen);
-                if (blen != 0) memcpy(joined + alen, b, blen);
-                joined[alen + blen] = '\0';
-                status = rexx_value_set_string(&result, joined, alen + blen);
+                if (separator_length != 0) joined[alen] = ' ';
+                if (blen != 0)
+                    memcpy(joined + alen + separator_length, b, blen);
+                joined[alen + separator_length + blen] = '\0';
+                status = rexx_value_set_string(
+                    &result, joined, alen + separator_length + blen);
             }
         }
     }
@@ -739,6 +751,56 @@ static RexxVMStatus concat_values(RexxVM *vm)
     rexx_value_clear(&right);
     rexx_value_clear(&result);
     return status;
+}
+
+/* Compare numerically when both operands are numeric; otherwise compare their
+ * rendered byte strings. This is sufficient for the ordered comparisons used
+ * by the currently implemented execution subset and avoids locale dependence. */
+static RexxVMStatus compare_values(const RexxValue *left,
+                                   const RexxValue *right,
+                                   int *comparison)
+{
+    double left_number = 0.0, right_number = 0.0;
+    RexxVMStatus left_status, right_status;
+
+    if (left == NULL || right == NULL || comparison == NULL)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+
+    left_status = value_number(left, &left_number);
+    right_status = value_number(right, &right_number);
+    if (left_status == REXX_VM_STATUS_OUT_OF_MEMORY ||
+        right_status == REXX_VM_STATUS_OUT_OF_MEMORY)
+        return REXX_VM_STATUS_OUT_OF_MEMORY;
+    if (left_status == REXX_VM_STATUS_OK && right_status == REXX_VM_STATUS_OK) {
+        *comparison = left_number < right_number ? -1 :
+                      left_number > right_number ? 1 : 0;
+        return REXX_VM_STATUS_OK;
+    }
+
+    {
+        char *left_text = NULL, *right_text = NULL;
+        size_t left_length = 0, right_length = 0, common_length, index;
+        RexxVMStatus status = value_string(left, &left_text, &left_length);
+        if (status == REXX_VM_STATUS_OK)
+            status = value_string(right, &right_text, &right_length);
+        if (status == REXX_VM_STATUS_OK) {
+            common_length = left_length < right_length ? left_length : right_length;
+            for (index = 0; index < common_length; ++index) {
+                unsigned char a = (unsigned char)left_text[index];
+                unsigned char b = (unsigned char)right_text[index];
+                if (a != b) {
+                    *comparison = a < b ? -1 : 1;
+                    break;
+                }
+            }
+            if (index == common_length)
+                *comparison = left_length < right_length ? -1 :
+                              left_length > right_length ? 1 : 0;
+        }
+        free(left_text);
+        free(right_text);
+        return status;
+    }
 }
 
 RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
@@ -818,11 +880,58 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 
         case OP_ADD:
         case OP_SUB:
+        case OP_MULTIPLY:
             status = binary_number(vm, (RexxOpcode)ins->opcode);
             break;
 
         case OP_CONCAT:
-            status = concat_values(vm);
+        case OP_CONCAT_BLANK:
+        case OP_CONCAT_ABUTTAL:
+            status = concat_values(vm, (RexxOpcode)ins->opcode);
+            break;
+
+        case OP_GREATER: {
+            RexxValue left, right;
+            int comparison = 0;
+            memset(&left, 0, sizeof(left));
+            memset(&right, 0, sizeof(right));
+            status = pop_move(vm, &right);
+            if (status == REXX_VM_STATUS_OK) status = pop_move(vm, &left);
+            if (status == REXX_VM_STATUS_OK)
+                status = compare_values(&left, &right, &comparison);
+            if (status == REXX_VM_STATUS_OK)
+                status = rexx_value_set_boolean(&value, comparison > 0);
+            if (status == REXX_VM_STATUS_OK) status = push_move(vm, &value);
+            rexx_value_clear(&left);
+            rexx_value_clear(&right);
+            break;
+        }
+
+        case OP_SAY: {
+            char *text = NULL;
+            size_t length = 0;
+            if ((ins->flags & REXX_INSTRUCTION_HAS_VALUE) != 0) {
+                status = pop_move(vm, &value);
+                if (status == REXX_VM_STATUS_OK)
+                    status = value_string(&value, &text, &length);
+            }
+            if (status == REXX_VM_STATUS_OK &&
+                ((length != 0u && fwrite(text, 1u, length, stdout) != length) ||
+                 fputc('\n', stdout) == EOF)) {
+                status = REXX_VM_STATUS_IO_ERROR;
+            }
+            free(text);
+            rexx_value_clear(&value);
+            break;
+        }
+
+        /* A plain DO group only needs a structural frame. Counted and
+         * controlled loops remain unsupported until their opcodes are added. */
+        case OP_DO_SETUP:
+            if (ins->operand != REXX_NO_SYMBOL || ins->auxiliary != 0u)
+                status = REXX_VM_STATUS_UNSUPPORTED_OPCODE;
+            break;
+        case OP_DO_END:
             break;
 
         case OP_JUMP:
@@ -888,7 +997,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 
 const char *rexx_vm_status_name(RexxVMStatus status)
 {
-    if (status < REXX_VM_STATUS_OK || status > REXX_VM_STATUS_UNSUPPORTED_OPCODE)
+    if (status < REXX_VM_STATUS_OK || status > REXX_VM_STATUS_IO_ERROR)
         return "unknown VM status";
     return vm_messages[status];
 }

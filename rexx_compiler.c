@@ -822,7 +822,9 @@ static int rexx_compiler_compile_do(RexxCompiler *compiler,
                                  &clause->token);
         (void)rexx_compiler_emit(compiler, OP_JUMP, 0u,
                                  (uint32_t)top_target, 0u, &clause->token);
-    } else {
+    } else if (loop->mode == REXX_AST_DO_FOREVER ||
+               (loop->mode == REXX_AST_DO_BLOCK &&
+                (loop->has_while || loop->has_until))) {
         (void)rexx_compiler_emit(compiler, OP_JUMP, 0u,
                                  (uint32_t)top_target, 0u, &clause->token);
     }

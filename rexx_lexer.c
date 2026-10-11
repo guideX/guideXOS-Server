@@ -76,14 +76,6 @@ static unsigned char rexx_ascii_to_upper(unsigned char ch)
     return ch;
 }
 
-static unsigned char rexx_ascii_to_lower(unsigned char ch)
-{
-    if (ch >= (unsigned char)'A' && ch <= (unsigned char)'Z') {
-        return (unsigned char)(ch - (unsigned char)'A' + (unsigned char)'a');
-    }
-    return ch;
-}
-
 static int rexx_ascii_is_symbol_start(unsigned char ch)
 {
     return rexx_ascii_is_alpha(ch) ||
