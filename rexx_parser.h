@@ -87,7 +87,7 @@ typedef struct RexxAstClause RexxAstClause;
 typedef struct RexxAstWhen RexxAstWhen;
 
 struct RexxAstArgument {
-    RexxAstExpression *expression;
+    RexxAstExpression *expression; /* NULL represents an omitted positional arg. */
     RexxAstArgument *next;
 };
 

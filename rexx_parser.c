@@ -669,13 +669,16 @@ static RexxAstExpression *rexx_parser_parse_call_after_name(
     }
 
     for (;;) {
-        RexxAstExpression *argument_expression;
+        RexxAstExpression *argument_expression = NULL;
         RexxAstArgument *argument;
 
-        argument_expression = rexx_parser_parse_expression_internal(
-            parser, 1, 0u);
-        if (argument_expression == NULL) {
-            return NULL;
+        if (parser->current.type != TOKEN_COMMA &&
+            parser->current.type != TOKEN_RIGHT_PAREN) {
+            argument_expression = rexx_parser_parse_expression_internal(
+                parser, 1, 0u);
+            if (argument_expression == NULL) {
+                return NULL;
+            }
         }
         argument = rexx_parser_new_argument(parser, argument_expression);
         if (argument == NULL) {
@@ -690,12 +693,6 @@ static RexxAstExpression *rexx_parser_parse_call_after_name(
 
         if (parser->current.type == TOKEN_COMMA) {
             if (!rexx_parser_advance(parser)) {
-                return NULL;
-            }
-            if (parser->current.type == TOKEN_RIGHT_PAREN) {
-                rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
-                                      &parser->current,
-                                      rexx_parser_message_expected_expression);
                 return NULL;
             }
             continue;

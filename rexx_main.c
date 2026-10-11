@@ -3,7 +3,7 @@
  *
  * Build this file with the four in-tree REXX modules, for example:
  *   cc -std=c11 -Wall -Wextra -pedantic rexx_main.c rexx_lexer.c \
- *      rexx_parser.c rexx_compiler.c rexx_vm.c -lm -o rexx_test
+ *      rexx_parser.c rexx_compiler.c rexx_vm.c rexx_builtin.c -lm -o rexx_test
  *
  * With no arguments the executable runs the built-in integration suite.
  * `--eval` executes one source string through the same public pipeline. No

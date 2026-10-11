@@ -491,9 +491,17 @@ static int rexx_compiler_compile_arguments(RexxCompiler *compiler,
         return 0;
     }
     for (argument = arguments; argument != NULL; argument = argument->next) {
-        if (!rexx_compiler_visit(compiler, NULL) ||
-            argument->expression == NULL ||
-            !rexx_compiler_compile_expression(compiler, argument->expression)) {
+        if (!rexx_compiler_visit(compiler, NULL)) {
+            return 0;
+        }
+        if (argument->expression == NULL) {
+            (void)rexx_compiler_emit(compiler, OP_LOAD_UNSET, 0u, 0u, 0u,
+                                     NULL);
+            if (compiler->status != REXX_COMPILER_STATUS_OK) {
+                return 0;
+            }
+        } else if (!rexx_compiler_compile_expression(compiler,
+                                                      argument->expression)) {
             if (compiler->status == REXX_COMPILER_STATUS_OK) {
                 rexx_compiler_fail(compiler, REXX_COMPILER_STATUS_MALFORMED_AST,
                                    NULL, rexx_compiler_message_malformed_ast);

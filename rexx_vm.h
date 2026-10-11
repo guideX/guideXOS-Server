@@ -52,7 +52,9 @@ typedef enum RexxVMStatus {
     REXX_VM_STATUS_INVALID_BYTECODE,
     REXX_VM_STATUS_NUMERIC_ERROR,
     REXX_VM_STATUS_UNSUPPORTED_OPCODE,
-    REXX_VM_STATUS_IO_ERROR
+    REXX_VM_STATUS_IO_ERROR,
+    REXX_VM_STATUS_UNKNOWN_FUNCTION,
+    REXX_VM_STATUS_INVALID_FUNCTION_CALL
 } RexxVMStatus;
 
 typedef struct RexxVMError {
@@ -119,8 +121,8 @@ void rexx_vm_free(RexxVM *vm);
 /*
  * Executes the implemented compiler opcodes (constants, variable/stem access,
  * ADD/SUB/MULTIPLY, concatenation, GREATER, SAY, plain DO blocks, jumps,
- * stack basics, and ADDRESS). Other opcodes return
- * REXX_VM_STATUS_UNSUPPORTED_OPCODE. Locals/globals persist between calls.
+ * stack basics, ADDRESS, and registered built-in function calls). Other
+ * opcodes return REXX_VM_STATUS_UNSUPPORTED_OPCODE. Locals/globals persist.
  * OP_ADDRESS with a value consumes that command string and leaves its numeric
  * RC on the evaluation stack; environment-aware dispatch receives the
  * explicit environment or KERNEL by default. `vm->rc` records the latest RC.

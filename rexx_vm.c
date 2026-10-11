@@ -1,4 +1,5 @@
 #include "rexx_vm.h"
+#include "rexx_builtin.h"
 
 #include <errno.h>
 #include <math.h>
@@ -12,7 +13,8 @@ static const char *const vm_messages[] = {
     "ok", "invalid VM argument", "out of memory", "VM resource limit exceeded",
     "evaluation stack overflow", "evaluation stack underflow",
     "invalid or malformed bytecode", "value is not a valid finite number",
-    "opcode is not implemented by this VM", "standard output error"
+    "opcode is not implemented by this VM", "standard output error",
+    "unknown REXX built-in function", "invalid arguments to REXX built-in function"
 };
 
 static int ascii_space(unsigned char c)
@@ -118,7 +120,7 @@ static RexxVMStatus vm_fail(RexxVM *vm, RexxVMStatus status, size_t pc)
         vm->error.status = status;
         vm->error.pc = pc;
         vm->error.message = status >= REXX_VM_STATUS_OK &&
-                            status <= REXX_VM_STATUS_IO_ERROR
+                            status <= REXX_VM_STATUS_INVALID_FUNCTION_CALL
                                 ? vm_messages[status] : "unknown VM error";
     }
     return status;
@@ -855,6 +857,10 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
             status = load_constant(vm, chunk, ins->operand);
             break;
 
+        case OP_LOAD_UNSET:
+            status = push_move(vm, &value);
+            break;
+
         case OP_LOAD_VAR:
         case OP_LOAD_STEM: {
             const RexxSymbol *symbol = NULL;
@@ -931,6 +937,35 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
             }
             free(text);
             rexx_value_clear(&value);
+            break;
+        }
+
+        case OP_CALL: {
+            const RexxSymbol *function = NULL;
+            size_t argument_count = (size_t)ins->auxiliary;
+            size_t argument_start;
+            size_t argument_index;
+
+            status = get_symbol(chunk, ins->operand, REXX_SYMBOL_ROUTINE,
+                                &function);
+            if (status == REXX_VM_STATUS_OK && argument_count > vm->sp) {
+                status = REXX_VM_STATUS_STACK_UNDERFLOW;
+            }
+            if (status == REXX_VM_STATUS_OK) {
+                argument_start = vm->sp - argument_count;
+                status = rexx_builtin_dispatch(
+                    function->name, function->length,
+                    argument_count == 0u ? NULL : &vm->stack[argument_start],
+                    argument_count, &value);
+                for (argument_index = argument_start; argument_index < vm->sp;
+                     ++argument_index) {
+                    rexx_value_clear(&vm->stack[argument_index]);
+                }
+                vm->sp = argument_start;
+                if (status == REXX_VM_STATUS_OK) {
+                    status = push_move(vm, &value);
+                }
+            }
             break;
         }
 
@@ -1031,7 +1066,8 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 
 const char *rexx_vm_status_name(RexxVMStatus status)
 {
-    if (status < REXX_VM_STATUS_OK || status > REXX_VM_STATUS_IO_ERROR)
+    if (status < REXX_VM_STATUS_OK ||
+        status > REXX_VM_STATUS_INVALID_FUNCTION_CALL)
         return "unknown VM status";
     return vm_messages[status];
 }

@@ -76,13 +76,15 @@ typedef enum RexxOpcode {
     OP_DO_SETUP,
     OP_DO_TEST,
     OP_DO_NEXT,
-    OP_DO_END
+    OP_DO_END,
+    OP_LOAD_UNSET
 } RexxOpcode;
 
 /*
  * An instruction always occupies the same record size. For most opcodes,
  * `operand` is the sole operand and `auxiliary` is zero. OP_CALL uses
  * `operand` for the function symbol and `auxiliary` for argument count.
+ * OP_LOAD_UNSET pushes an unset value for an omitted positional argument.
  * OP_ADDRESS uses `operand` for an environment symbol when
  * REXX_INSTRUCTION_HAS_ENVIRONMENT is set; otherwise its environment is
  * KERNEL.
