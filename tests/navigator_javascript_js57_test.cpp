@@ -354,9 +354,9 @@ var textareaProjectionUnchanged =
         gxos::javascript::NavigatorScriptSelectorDescriptor);
     const std::size_t collectionRecord =
         (16u + selectorDescriptor + 7u) / 8u * 8u;
-    expect(selectorSimple == 68u && selectorDescriptor == 1278u &&
-        collectionRecord == 1296u && collectionRecord *
-            gxos::javascript::kNavigatorScriptMaxSelectorCollections == 165888u,
+    expect(selectorSimple == 68u && selectorDescriptor == 1856u &&
+        collectionRecord == 1872u && collectionRecord *
+            gxos::javascript::kNavigatorScriptMaxSelectorCollections == 239616u,
         "JS65 compact chained-selector pool keeps collection memory bounded");
 }
 

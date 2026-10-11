@@ -90,7 +90,8 @@ verify(focusScope.matches(':has(:focus)') && document.activeElement === transfer
 transferFocus.blur();
 verify(!focusScope.matches(':has(:focus)'));
 var bad = [':has()', ':has(.a .b .c)', ':has(.a, .b, .c)', ':has(> .a + .b + .c)',
-  ':has(:has(.x))', ':has(:not(.x))', ':has(:is(.x))', ':has(:where(.x))'];
+  ':has(:has(.x))', ':has(:is(:not(.x)))', ':has(:where(:is(.x)))',
+  ':has(:not(:where(.x)))'];
 var malformed = true;
 for (var i = 0; i != bad.length; i = i + 1)
   if (document.querySelector(bad[i]) !== null) malformed = false;

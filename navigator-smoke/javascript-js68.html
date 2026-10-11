@@ -1,0 +1,184 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS68</title></head>
+<body>
+<h1>Navigator JavaScript JS68</h1>
+<div id="warning-panel" class="panel">
+  <span class="warning" data-label="a,b"></span>
+  <span class="disabled"></span><span class="enabled"></span>
+</div>
+<div id="empty-panel" class="panel"></div>
+<div id="disabled-panel" class="panel">
+  <span class="disabled"></span><span class="disabled"></span>
+</div>
+<form id="bad-form" class="form">
+  <div class="row"><span class="valid"></span></div>
+  <div class="other"><span class="invalid"></span></div>
+</form>
+<form id="good-form" class="form">
+  <div class="row"><span class="invalid"></span></div>
+</form>
+<section id="panel" class="panel">
+  <div id="row" class="row"><span id="scope-leaf" class="leaf"></span></div>
+</section>
+<div id="or-panel" class="panel"><section><i class="target"></i></section></div>
+<i class="badge"></i>
+<div id="relation-child"><i class="a"></i></div>
+<div id="relation-desc"><div><i class="a"></i></div></div>
+<i id="relation-adjacent"></i><i class="a"></i>
+<i id="relation-general"></i><b></b><i class="a"></i>
+<div id="list-a" class="a"></div>
+<div id="list-ab" class="a b"></div>
+<form id="state-form" class="form">
+  <input id="state-check" type="checkbox">
+  <button id="state-focus-reset" type="button"></button>
+</form>
+<div id="attribute-panel" class="panel">
+  <div id="state-row" class="row" data-state="ready" data-name="a b"></div>
+</div>
+<div id="event-panel" class="panel"><div class="row">
+  <span id="event-leaf"></span><button id="event-a" type="button">A</button>
+</div></div>
+<div id="event-panel-b" class="panel"><div class="row">
+  <span id="event-leaf-b"></span><button id="event-b" type="button">B</button>
+  <i class="selected"></i>
+</div></div>
+<pre id="result">JS68:pending</pre>
+<script>
+var assertions = 0;
+var failures = 0;
+var failedIndexes = '';
+function verify(value) {
+  assertions = assertions + 1;
+  if (!value) {
+    failures = failures + 1;
+    failedIndexes = failedIndexes + ',' + assertions;
+  }
+}
+
+var warning = document.querySelector('#warning-panel');
+var empty = document.querySelector('#empty-panel');
+var disabled = document.querySelector('#disabled-panel');
+var badForm = document.querySelector('#bad-form');
+var goodForm = document.querySelector('#good-form');
+var panel = document.querySelector('#panel');
+var leaf = document.querySelector('#scope-leaf');
+verify(warning.matches(':has(:is(.warning))'));
+verify(warning.matches(':has(:where(.warning))') ===
+  warning.matches(':has(:is(.warning))'));
+verify(warning.matches(':has(:is([data-label="a,b"]))'));
+verify(warning.matches(':has(> :not(.disabled))'));
+verify(!empty.matches(':has(:not(.disabled))'));
+verify(!disabled.matches(':has(> :not(.disabled))'));
+verify(goodForm.matches(':has(> .row:is(.row) > :not(.valid))'));
+verify(!badForm.matches(':has(> .row :not(.valid))'));
+verify(leaf.closest('.panel:has(> .row > :is(:scope))') === panel);
+verify(!leaf.matches(':has(:is(:scope))'));
+verify(!leaf.matches(':has(:not(:scope))'));
+verify(panel.matches(':has(> :not(:scope))'));
+
+var child = document.querySelector('#relation-child');
+var descendant = document.querySelector('#relation-desc');
+var adjacent = document.querySelector('#relation-adjacent');
+var general = document.querySelector('#relation-general');
+verify(child.matches(':has(> :is(.a))'));
+verify(descendant.matches(':has(:where(.a))'));
+verify(adjacent.matches(':has(+ :is(.a))'));
+verify(general.matches(':has(~ :not(.missing))'));
+
+verify(warning.matches(':has(> :is(.warning), + .badge)'));
+verify(document.querySelector('#or-panel').matches(
+  ':has(> .missing:not(.disabled), + :is(.badge))'));
+verify(!empty.matches(':has(> :not(.disabled), + :is(.badge))'));
+verify(warning.matches(':has(> :is(.warning), > :not(.disabled))'));
+
+var target = document.querySelector('#or-panel').querySelector('.target');
+var all = document.querySelectorAll(
+  '#or-panel:has(+ :is(.badge)) .target, #scope-leaf');
+verify(all.length === 2 && all[0] === leaf && all[1] === target);
+verify(document.querySelector('#panel').querySelector(
+  ':has(> .row > :is(:scope))') === null);
+verify(document.querySelector('#panel').matches(
+  ':has(> .row > :is(.leaf))'));
+verify(leaf.closest('.panel:has(> .row > :is(.leaf))') === panel);
+
+var stateForm = document.querySelector('#state-form');
+var check = document.querySelector('#state-check');
+var attrPanel = document.querySelector('#attribute-panel');
+var stateRow = document.querySelector('#state-row');
+verify(!stateForm.matches(':has(> input:is(:checked))'));
+verify(stateForm.matches(':has(> input:not(:checked))'));
+verify(attrPanel.matches(':has(> .row:is([data-name="a b"]))'));
+check.checked = true;
+stateRow.setAttribute('data-state', 'disabled');
+check.focus();
+verify(stateForm.matches(':has(> input:is(:checked))'));
+verify(!stateForm.matches(':has(> input:not(:checked))'));
+verify(stateForm.matches(':has(> input:is(:focus))'));
+verify(!attrPanel.matches(':has(> .row:not([data-state=disabled]))'));
+check.checked = false;
+stateRow.setAttribute('data-state', 'ready');
+check.blur();
+verify(!stateForm.matches(':has(> input:is(:checked))'));
+verify(stateForm.matches(':has(> input:not(:checked))'));
+verify(!stateForm.matches(':has(> input:is(:focus))'));
+verify(attrPanel.matches(':has(> .row:not([data-state=disabled]))'));
+
+var malformed = [':has(:is())', ':has(:not())', ':has(:where())',
+  ':has(:is(.a, .b))', ':has(:where(.a, .b))', ':has(:not(.a, .b))',
+  ':has(:is(:not(.a)))', ':has(:where(:is(.a)))',
+  ':has(:not(:where(.a)))', ':has(:not(:has(.a)))', ':has(:has(.a))',
+  ':has(.a:is(.b):focus)', ':has(:not(.a) .b .c)',
+  ':has(:is(.a), .b, .c)', ':has(> .a > :not(.b) > .c)',
+  ':has(:is(.a)'];
+var malformedRejected = true;
+for (var i = 0; i !== malformed.length; i++)
+  if (document.querySelector(malformed[i]) !== null)
+    malformedRejected = false;
+malformedRejected = malformedRejected &&
+  document.querySelector('#list-a:has(:is(.a, .b))') === null &&
+  document.querySelector('#list-ab:has(:is(.a, .b))') === null &&
+  document.querySelector('#list-a:has(:not(.a, .b))') === null;
+verify(malformedRejected);
+verify(leaf.matches(':scope') && !leaf.matches('div:scope'));
+verify(document.querySelector('#panel:has(> .row > :scope)') === null);
+verify(document.querySelector('#good-form:has(> .row > .invalid)') !== null);
+
+var eventResult = false;
+var nestedResult = false;
+var eventMetadata = false;
+document.querySelector('#event-a').addEventListener('click', function(event) {
+  var savedTarget = event.target;
+  var savedCurrent = event.currentTarget;
+  var savedPhase = event.eventPhase;
+  var savedDefault = event.defaultPrevented;
+  eventResult = document.querySelector('#event-panel').matches(
+    ':has(> .row > :not(.disabled))');
+  document.querySelector('#event-b').click();
+  eventResult = eventResult && document.querySelector('#event-panel').matches(
+    ':has(> .row > :not(.disabled))');
+  eventMetadata = event.target === savedTarget &&
+    event.currentTarget === savedCurrent && event.eventPhase === savedPhase &&
+    event.defaultPrevented === savedDefault;
+  verify(eventResult);
+  verify(nestedResult);
+  verify(eventMetadata);
+  document.querySelector('#result').textContent =
+    'JS68:event=' + eventResult + ':nested=' + nestedResult +
+    ':metadata=' + eventMetadata + ':assertions=' + assertions +
+    ':failures=' + failures + ':failed=' + failedIndexes;
+});
+document.querySelector('#event-b').addEventListener('click', function(event) {
+  nestedResult = document.querySelector('#event-b').matches(
+    ':has(+ :is(.selected))') &&
+    event.target === document.querySelector('#event-b') &&
+    event.currentTarget === document.querySelector('#event-b') &&
+    event.eventPhase === 2 && event.defaultPrevented === false;
+});
+
+document.querySelector('#result').textContent =
+  'JS68:initial:assertions=' + assertions + ':failures=' + failures +
+  ':malformed=' + malformedRejected + ':failed=' + failedIndexes;
+</script>
+</body>
+</html>

@@ -86,7 +86,8 @@ var ok = live.length === 0 && attrLive.length === 1;
 var bad = [':has()', ':has( )', ':has(>)', ':has(+)', ':has(~)',
  ':has(> + .x)', ':has(|| .x)', ':has(>> .x)', ':has(++ .x)',
  ':has(.a .b .c)', ':has(.a, .b, .c)', ':has(> .a + .b + .c)',
- ':has(:not(.x))', ':has(:is(.x))', ':has(:where(.x))',
+ ':has(:is(:not(.x)))', ':has(:where(:is(.x)))',
+ ':has(:not(:where(.x)))',
  ':has(:has(.x))', ':has(:nth-child(2))', ':has(.x):focus'];
 var ok = true;
 for (var i = 0; i < bad.length; i++)

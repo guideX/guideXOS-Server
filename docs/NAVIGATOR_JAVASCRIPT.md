@@ -7646,3 +7646,193 @@ anchor through `closest()`, outer relational selectors, retained collections,
 and nested Event dispatch. There was no branch switch, creation, rename,
 worktree topology change, stash, reset, clean, upstream fetch, or push; the
 current branch advanced only for this local qualification commit.
+
+#### JS68 bounded logical pseudos inside `:has()`
+
+JS68 allows one `:is(S)`, `:where(S)`, or `:not(S)` in either relative simple
+selector core of either existing `:has()` alternative. Each `S` is exactly one
+JS59–JS61 restricted, nonfunctional simple-selector core. Existing bounded tag,
+ID, class, attribute, and supported state-pseudo matching is reused. A logical
+pseudo consumes that core's one functional slot: lists, stacked functions,
+nested `:has()`, and recursive logical arguments remain rejected. In
+particular, a comma inside a logical argument is not treated as an outer
+`:has()` alternative separator. The 256-byte selector limit, two alternatives,
+two correlated steps, and four-member outer list remain in force.
+
+`:is(S)` and `:where(S)` test the actual relative candidate against `S` and
+have identical Boolean behavior in this matcher; specificity and cascade are
+outside Navigator's JavaScript matching behavior. `:not(S)` inverts only after
+the candidate's handle, generation, structural position, and inner selector
+are valid. The enclosing `:has()` still requires a structurally related
+candidate, so zero candidates cannot become a match. This is existential
+`:has(:not(S))` behavior, distinct from `:not(:has(S))`.
+
+Two-step selectors retain JS65 correlation: the second step is searched only
+within the first step candidate's structural relationship. Logical predicates
+are checked at the relative step where they appear; the first step and target
+do not drift into unrelated branches. JS67's explicit API scope remains
+separate from the changing `:has()` anchor, including when a logical predicate
+contains `:scope`. Both alternatives still use OR semantics and stop after a
+successful alternative. Invalid inner arguments return `Invalid` before any
+`:not()` inversion.
+
+The representation is fixed and nonrecursive. Each 76-byte
+`NavigatorScriptHasExpressionDescriptor` has four expression-local compact
+argument slots, one per possible relative core (two steps by two alternatives).
+Each compact argument is 18 bytes and points into the existing selector text
+buffer. The existing 24-slot relative-core pool remains unchanged; JS68 does
+not allocate a selector AST, cache results, or reparse during matching. The
+descriptor grows from 1,278 to 1,856 bytes, the collection record from 1,296
+to 1,872 bytes, and the 128-record registry from 165,888 to 239,616 bytes;
+the match context (16 B), `HtmlElementRef` (440 B), and content metadata (24 B)
+are unchanged. This is bounded registry growth of 73,728 bytes, measured and
+covered by static assertions.
+
+The permanent native suite is `tests/navigator_javascript_js68_test.cpp`,
+run by `scripts/smoke-navigator-javascript-js68.ps1`. It exercises all three
+logical pseudos in both relative steps and alternative positions, inner-core
+restrictions, existential negation and zero candidates, stale/reused handles,
+structural corruption, correlated relations, all 16 ordered pairs of the four
+relations, `:scope` API propagation, query and collection paths, live state,
+Event reentrancy and metadata, alternative short-circuiting, parser bounds,
+and the 1,024-Element near-capacity workload. The hosted fixture is
+`navigator-smoke/javascript-js68.html`; its initial and nested Event assertions
+are integrated into `server.cpp`. Final native, matrix, production, hosted,
+memory, stack, and artifact qualification evidence is recorded in the JS68
+qualification entry below.
+
+#### JS68 final qualification record
+
+The qualification started in `D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT`
+on branch `NAVIGATOR_JAVASCRIPT_SUPPORT`, at clean HEAD
+`abe22a61e0a5bdff2552de6b119e8adfb0e6568f` (`navigator: add JS67 scoped
+relative selector support`). The live upstream divergence was **0 ahead / 0
+behind**; this live value was used instead of the prompt's expected 2 ahead /
+0 behind. No JS68 or later implementation was present. `.phase` was absent,
+which is normal for this checkout, and was not created. No branch or worktree
+topology change, fetch, reset, stash, clean, or push was made.
+
+The grammar is one `:is(S)`, `:where(S)`, or `:not(S)` in each relative
+simple-selector core, with at most two steps and two alternatives per `:has()`.
+`S` is one trimmed, nonfunctional JS59–JS61 restricted core. Leading and
+trailing ASCII whitespace is accepted; whitespace-separated compounds,
+top-level commas, multiple functions in a core, recursive logical nesting,
+nested `:has()`, and logical argument lists are rejected. Existing tag, ID,
+class, attribute, `:scope`, and supported live state predicates remain
+available inside `S`. No attribute operators or unrelated selector primitives
+were added. The outer selector remains limited to 256 bytes and four list
+members.
+
+`:is(S)` and `:where(S)` have the same Boolean result for the actual relative
+candidate. `:not(S)` first requires a valid, generation-matched candidate that
+satisfies the structural relationship and its nonlogical compound conditions;
+an invalid inner result propagates as `Invalid` and is never inverted. The
+enclosing `:has()` still requires an existing related candidate, so zero
+related Elements cannot satisfy `:not()`. This implements existential
+`:has(:not(S))`; it does not implement `:not(:has(S))`. The second step stays
+correlated to its first-step intermediate, and `:scope` continues to use the
+outer API scope independently of the changing relative anchor. The two
+alternatives retain OR behavior and first-success short-circuiting.
+
+Each 76-byte `NavigatorScriptHasExpressionDescriptor` stores four fixed
+18-byte compact arguments, corresponding to each possible core in the two
+steps and two alternatives. There are at most eight `:has()` expression slots
+per selector (four outer members times two sides), hence at most 32
+expression-local logical argument slots. The existing 24-entry compact
+relative-core pool is unchanged. The arguments are parsed once into fixed
+storage; there is no recursive AST, match-time reparsing, cache, or dynamic
+allocation. The 256-byte input, two-alternative, two-step, and four-member
+bounds are enforced before matching. Failed parsing leaves an empty selector
+descriptor.
+
+Measured memory changed as follows: match context **16 B** (unchanged),
+selector descriptor **1,278 -> 1,856 B** (+578 B), collection record
+**1,296 -> 1,872 B** (+576 B), and 128-record registry **165,888 -> 239,616
+B** (+73,728 B). `HtmlElementRef` stayed **440 B**, content metadata stayed
+**24 B**, and the relative-core pool capacity stayed 24. The per-expression
+argument slots account for the bounded registry growth; compile-time size
+assertions cover the resulting records. The extra descriptor storage does
+not change document content records.
+
+GCC 15.2.0 `-O2 -fstack-usage` measured `parseBoundedSelector` **112 B**,
+`parseBoundedSelectorMember` **176 B**, `parseSimpleSelectorCore` **336 B**,
+`parseHasPseudo` **592 B** (its alternative parser lambda is **208 B**), the
+relative evaluator **496 B**, the chain wrapper **112 B**, and the shared
+simple matcher **352 B**. Public `querySelectorAll` and
+`getElementsBySimpleSelector` frames measured **2,064 B** and **2,176 B**.
+The reset reconstructs the fixed descriptor in place, avoiding the 1,856-byte
+temporary that the ordinary assignment form introduced. The matcher remains
+iterative and fixed-depth.
+
+The 1,024-Element native workload used scope serial **995** and 15 outer
+candidates; its optimized query workload took **31,098 us**. Diagnostic
+counters below compare early exits and late/full-false paths. Each row is one
+relative evaluation; `early exits` records successful short-circuit exits.
+
+| Workload | Records | Parent hops | Serial/index resolutions | Simple tests | Logical tests | Early exits |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Correlated two-step, late `:scope` | 2,030 | 3 | 8 | 2,988 | 996 | 1 |
+| Early `:is()` | 1,043 | 7 | 12 | 2 | 1 | 1 |
+| Late `:where()` | 5,008 | 1,494 | 2,986 | 1,984 | 992 | 1 |
+| Early existential `:not()` | 1,048 | 9 | 16 | 4 | 2 | 1 |
+| Full-false `:not()` | 5,183 | 1,567 | 3,132 | 2,042 | 1,021 | 0 |
+| `:not()` with zero matching targets | 11,281 | 4,630 | 8,237 | 0 | 0 | 0 |
+
+`tests/navigator_javascript_js68_test.cpp` passed **69/69** checks. Its
+`-Wall -Wextra -Werror -pedantic` native compilation and strict production
+parser/adapter/runtime syntax compilation passed. The suite checks all three
+logical pseudos, their positions in both relative steps and alternatives,
+quoted commas and spaces in attributes, inner-list and recursive-depth
+rejection, existential negation, no-candidate false results, invalid and stale
+generation contexts, reused serials, invalid structural indices and parent or
+sibling links, parser limits and failure clearing, all 16 ordered two-relation
+pairs, API scope, collections, live checked/focus/attribute state, Event
+reentrancy and metadata, and first-alternative short-circuiting. It also
+verifies that the HTML parser preserves the hosted inline script before
+execution.
+
+The focused historical gates passed: JS59 **621/621**, JS60 **1,377/1,377**,
+JS61 **2,077/2,077**, JS62 **15/15**, JS62R **10/10**, JS62R2 **4,081/4,081**,
+JS62R3 **1,293/1,293**, JS62R4 **113/113**, JS63 **8/8**, JS64 **24/24**,
+JS65 **18/18**, JS66 **24/24**, and JS67 **44/44**. The updated legacy
+rejection cases still reject recursive functional nesting, nested `:has()`,
+and inner logical lists while permitting the new JS68 one-level form. JS63,
+JS64, JS65, and JS67 hosted fixtures remain in the aggregate and passed; their
+malformed-input lists were adjusted to express the still-unsupported grammar.
+The complete `smoke-navigator-javascript-*.ps1` matrix passed **70/70**,
+including the lexer, parser, and runtime smoke lanes.
+
+The production build ran through
+`scripts/smoke-navigator-hosted.ps1 -Build`, which invoked `build.bat` on the
+JS68 worktree based on the starting JS67 HEAD. Build succeeded. The fresh
+executable was `D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe`,
+**8,462,812 bytes**, SHA-256
+`73554A502C596FD77A02218222590F4E26B6C663F661DF25C4F569DE51E0D179`. Hosted
+process PID **24684** reported the same executable path and SHA-256. The
+JS68 initial marker was `JS68:initial:assertions=39:failures=0:malformed=true`;
+after nested Event dispatch it was
+`JS68:event=true:nested=true:metadata=true:assertions=42:failures=0`. JS63,
+JS64, JS65, JS66, and JS67 hosted markers and Event checks also passed.
+
+The full hosted aggregate recorded **632 passed / 7 failed / 639 total**.
+The seven failures are the established unrelated CSS baseline: 3C, 3G, 6A,
+three 6B checks, and 6C. There were no JavaScript fixture failures. The
+hosted wrapper returned nonzero because it marks any aggregate failure as
+`NAVIGATOR_SMOKE_RESULT: FAIL`; under the phase's stated baseline rule, this
+same seven-CSS set does not block JS68 Outcome A.
+
+Before building, the ignored-artifact snapshot contained **1,337 files /
+88,371,771 bytes**. Exact backups covered **46 files / 8,857,239 bytes**:
+`guideXOSServer.exe`, desktop state/configuration, and all 42 existing files
+under `navigator-smoke/generated`. All 46 were restored and SHA-256 checked.
+The new executable was archived outside the checkout at
+`C:\Users\guideX\AppData\Local\Temp\js68-evidence-20261011\guideXOSServer-js68-built.exe`;
+the six hosted logs were archived outside the checkout. The final ignored
+manifest returned **0 changed / 0 missing / 0 extra**, with the original file
+and byte totals. No kernel build or QEMU run was needed or attempted.
+
+**Outcome A — JS68 bounded logical pseudos inside `:has()` fully qualified.**
+`:is(S)`, `:where(S)`, and `:not(S)` work in the bounded relative grammar,
+including correlated chains and existing API scope context. Recursive logical
+forms, nested `:has()`, inner selector lists, third steps, and third
+alternatives remain deferred. The seven historical CSS failures are unchanged.

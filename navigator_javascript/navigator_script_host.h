@@ -228,9 +228,14 @@ struct NavigatorScriptHasExpressionDescriptor {
     std::uint8_t secondFirstCoreIndex = 0xFFu;
     std::uint8_t secondStepTwoCoreIndex = 0xFFu;
     std::uint8_t flags = 0u;
+    // One restricted, nonfunctional argument can accompany each of the four
+    // possible relative cores. These records are expression-local and do not
+    // introduce recursive selector storage.
+    std::array<NavigatorScriptCompactRelativeSelectorCoreDescriptor, 4u>
+        logicalArguments{};
 };
-static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 4u,
-    "JS65 :has() expressions must stay compact and fixed-size");
+static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 76u,
+    "JS68 :has() logical arguments must stay fixed and bounded");
 
 enum class NavigatorScriptSelectorMatchResult : std::uint8_t {
     Invalid = 0u,
@@ -256,6 +261,8 @@ struct NavigatorScriptRelativeSelectorCounters {
     std::uint64_t parentHops = 0u;
     std::uint64_t serialIndexResolutions = 0u;
     std::uint64_t simpleSelectorEvaluations = 0u;
+    std::uint64_t logicalPredicateEvaluations = 0u;
+    std::uint64_t earlyExits = 0u;
     std::uint64_t childRelationCandidateChecks = 0u;
     std::uint64_t adjacentSiblingChecks = 0u;
     std::uint64_t generalSiblingChecks = 0u;
@@ -579,6 +586,10 @@ private:
             NavigatorScriptRelativeSelectorRelation::Descendant
         , const NavigatorScriptSelectorMatchContext& context =
             NavigatorScriptSelectorMatchContext()
+        , const NavigatorScriptSimpleSelectorCoreDescriptor* logicalArgument =
+            nullptr
+        , const NavigatorScriptSimpleSelectorCoreDescriptor*
+            secondLogicalArgument = nullptr
         ) const;
     NavigatorScriptSelectorMatchResult selectorRelativeChainMatchResult(
         const HostObjectReference& anchor,
@@ -592,6 +603,10 @@ private:
 #endif
         , const NavigatorScriptSelectorMatchContext& context =
             NavigatorScriptSelectorMatchContext()
+        , const NavigatorScriptSimpleSelectorCoreDescriptor* firstLogicalArgument =
+            nullptr
+        , const NavigatorScriptSimpleSelectorCoreDescriptor* secondLogicalArgument =
+            nullptr
         ) const;
     NavigatorScriptSelectorMatchResult selectorSimpleElementMatchResult(
         const gxos::web::HtmlElementRef& element,

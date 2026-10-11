@@ -687,9 +687,9 @@ int main()
     const std::size_t selectorDescriptor = sizeof(
         gxos::javascript::NavigatorScriptSelectorDescriptor);
     const std::size_t collectionRecord = (16u + selectorDescriptor + 7u) / 8u * 8u;
-    expect(simpleSelector == 68u && selectorDescriptor == 1278u &&
-        collectionRecord == 1296u && collectionRecord *
-            gxos::javascript::kNavigatorScriptMaxSelectorCollections == 165888u,
+    expect(simpleSelector == 68u && selectorDescriptor == 1856u &&
+        collectionRecord == 1872u && collectionRecord *
+            gxos::javascript::kNavigatorScriptMaxSelectorCollections == 239616u,
         "JS65 compact chained-selector pool preserves bounded collection storage");
 
     if (failures != 0) {

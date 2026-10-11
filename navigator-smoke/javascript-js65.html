@@ -100,7 +100,7 @@ var malformedSelectors = [
   '#card:has(+)',
   '#card:has(.row +)',
   '#card:has(> .row >)',
-  '#card:has(:not(.absent) .badge)',
+  '#card:has(:not(:is(.absent)) .badge)',
   '#card:has(:has(.row) .badge)'];
 var malformed = true;
 for (var k = 0; k != malformedSelectors.length; k = k + 1)

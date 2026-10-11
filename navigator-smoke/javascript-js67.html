@@ -149,8 +149,10 @@ var logical = firstLeaf.matches(':is(:scope)') &&
   firstLeaf.matches(':where(:scope)') && !firstLeaf.matches(':not(:scope)');
 verify(logical);
 var malformed = [':has()', ':has(:scope())', ':has(:scope(anything))',
-  ':has(:scope:focus)', ':has(:has(:scope))', ':has(:is(:scope))',
-  ':has(:not(:scope))', ':has(:where(:scope))', ':has(:scope .a .b)',
+  ':has(:scope:focus)', ':has(:has(:scope))',
+  ':has(:is(:not(:scope)))', ':has(:not(:where(:scope)))',
+  ':has(:where(:is(:scope)))',
+  ':has(:scope .a .b)',
   ':has(> .a > :scope > .b)', ':has(.a, .b, :scope)'];
 var malformedRejected = true;
 for (var i = 0; i !== malformed.length; i++)

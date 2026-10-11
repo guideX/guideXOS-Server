@@ -92,16 +92,16 @@ int main()
         "JS65 keeps the outer simple-selector size");
     static_assert(sizeof(NavigatorScriptCompactRelativeSelectorCoreDescriptor) ==
         18u, "JS65 compact cores remain fixed-size");
-    static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 4u,
+    static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 76u,
         "JS65 expression metadata remains fixed-size");
-    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 1278u,
+    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 1856u,
         "JS65 selector descriptor has bounded fixed pools");
     static_assert(NavigatorScriptRelativeSelectorTestAccess::
-        collectionRecordBytes() == 1296u,
+        collectionRecordBytes() == 1872u,
         "JS65 selector collection record size is measured");
     static_assert(NavigatorScriptRelativeSelectorTestAccess::
         collectionRecordBytes() * kNavigatorScriptMaxSelectorCollections ==
-            165888u,
+            239616u,
         "JS65 128-record registry memory is measured");
 
     const std::string html =
@@ -247,7 +247,7 @@ var unsupported = [
  '#card:has(+)',
  '#card:has(.row +)',
  '#card:has(> .row >)',
- '#card:has(:not(.one) .badge)',
+ '#card:has(:not(:is(.one)) .badge)',
  '#card:has(:has(.row) .badge)'];
 var rejected = true;
 for (var i = 0; i < unsupported.length; i++)
