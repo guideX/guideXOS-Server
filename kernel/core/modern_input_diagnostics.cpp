@@ -106,6 +106,20 @@ static void initialize_controller(ControllerSnapshot* controller)
     controller->ownership = OwnershipStatus::Unknown;
     controller->occupied = false;
     controller->mmioBase = 0u;
+    controller->pciBar0 = 0u;
+    controller->pciBar1 = 0u;
+    controller->pciCommand = 0u;
+    controller->pciCommandInitial = 0u;
+    controller->pciCommandInitialCaptured = false;
+    controller->pciBarType = 0u;
+    controller->pciBarIsIo = false;
+    controller->pciBarIs64 = false;
+    controller->pciBarPrefetchable = false;
+    controller->mmioRequiredSpan = 0u;
+    controller->mmioMappedVirtual = 0u;
+    controller->mmioMappedLength = 0u;
+    controller->mmioMappingSucceeded = false;
+    controller->mmioMappingReason = nullptr;
     controller->capLength = 0u;
     controller->hciVersion = 0u;
     controller->maxSlots = 0u;
@@ -239,6 +253,47 @@ void record_mmio_base(int32_t controllerIndex, uint64_t base)
     unlock_snapshot();
 }
 
+void record_mmio_configuration(int32_t controllerIndex, uint32_t bar0,
+                                uint32_t bar1, uint16_t pciCommand,
+                                uint8_t barType, bool barIsIo, bool barIs64,
+                                bool barPrefetchable)
+{
+    lock_snapshot();
+    ControllerSnapshot* controller = controller_for_index(controllerIndex);
+    if (controller != nullptr) {
+        controller->pciBar0 = bar0;
+        controller->pciBar1 = bar1;
+        controller->pciCommand = pciCommand;
+        if (!controller->pciCommandInitialCaptured) {
+            controller->pciCommandInitial = pciCommand;
+            controller->pciCommandInitialCaptured = true;
+        }
+        controller->pciBarType = barType;
+        controller->pciBarIsIo = barIsIo;
+        controller->pciBarIs64 = barIs64;
+        controller->pciBarPrefetchable = barPrefetchable;
+    }
+    unlock_snapshot();
+}
+
+void record_mmio_mapping(int32_t controllerIndex, const char* substage,
+                         uint64_t requiredSpan,
+                         bool succeeded, uint64_t mappedVirtual,
+                         uint64_t mappedLength, const char* reason)
+{
+    lock_snapshot();
+    ControllerSnapshot* controller = controller_for_index(controllerIndex);
+    if (controller != nullptr) {
+        controller->mmioRequiredSpan = requiredSpan;
+        controller->mmioMappingSucceeded = succeeded;
+        controller->mmioMappedVirtual = mappedVirtual;
+        controller->mmioMappedLength = mappedLength;
+        controller->mmioValidationSubstage = substage;
+        controller->mmioMappingReason = reason;
+    }
+    unlock_snapshot();
+}
+
 void record_ownership_status(int32_t controllerIndex, OwnershipStatus status)
 {
     lock_snapshot();
@@ -306,7 +361,8 @@ void record_stage(int32_t controllerIndex, Stage stage, Status status,
                   uint32_t errorCode, bool hasErrorCode,
                   uint32_t controllerStatus, bool hasControllerStatus,
                   uint8_t slotId, uint8_t portId, uint8_t endpointId,
-                  uint8_t completionCode, bool hasCompletionCode)
+                  uint8_t completionCode, bool hasCompletionCode,
+                  const char* detail)
 {
     if (!stage_valid(stage)) return;
     StageResult result = {};
@@ -320,6 +376,7 @@ void record_stage(int32_t controllerIndex, Stage stage, Status status,
     result.hasErrorCode = hasErrorCode;
     result.hasControllerStatus = hasControllerStatus;
     result.hasCompletionCode = hasCompletionCode;
+    result.detail = detail;
 
     lock_snapshot();
     ControllerSnapshot* controller = controller_for_index(controllerIndex);
@@ -435,6 +492,10 @@ uint32_t format_stage_result(const StageResult& result, char* out, uint32_t capa
         position = append_text(out, capacity, position, " status=0x");
         position = append_hex(out, capacity, position, result.controllerStatus, 8u);
     }
+    if (includeResult && result.detail != nullptr && result.detail[0] != '\0') {
+        position = append_text(out, capacity, position, " reason=");
+        position = append_text(out, capacity, position, result.detail);
+    }
     return position;
 }
 
@@ -469,6 +530,10 @@ uint32_t format_first_failure(const Snapshot& snapshot, char* out, uint32_t capa
     if (result.hasControllerStatus) {
         position = append_text(out, capacity, position, " status=0x");
         position = append_hex(out, capacity, position, result.controllerStatus, 8u);
+    }
+    if (result.detail != nullptr && result.detail[0] != '\0') {
+        position = append_text(out, capacity, position, " reason=");
+        position = append_text(out, capacity, position, result.detail);
     }
     if (result.slotId != 0u) {
         position = append_text(out, capacity, position, " slot=");

@@ -95,6 +95,11 @@ int main()
     record_stage(first, Stage::PciDiscovery, Status::Pass, 0u, false,
                  0u, false, 0u, 0u, 0u, 0u, false);
     record_mmio_base(first, 0xFEDC0000u);
+    record_mmio_configuration(first, 0xE1020004u, 0u, 0x0002u,
+                              2u, false, true, false);
+    record_mmio_mapping(first, "test map", 0x4800u, true,
+                        0xFFFFC00000000000ULL, 0x5000u,
+                        "mapped into reserved kernel MMIO window");
     record_capabilities(first, 0x20u, 0x0110u, 64u, 16u, 64u, true, 2u, 0u);
     record_ownership_status(first, OwnershipStatus::OsOwned);
     record_root_ports(first, 16u, 2u, 4u);
@@ -110,7 +115,8 @@ int main()
                  0u, false, 2u, 0u, 0u, 1u, true);
     record_stage(first, Stage::AddressDevice, Status::Fail,
                  0u, false, 0x00000002u, true,
-                 2u, 4u, 0u, 0x11u, true);
+                 2u, 4u, 0u, 0x11u, true,
+                 "device command completion failed");
     record_stage(first, Stage::ControlTransfer, Status::Timeout,
                  1000u, true, 0u, false, 2u, 4u, 1u, 0u, false);
     record_stage(first, Stage::HidDiscovery, Status::Unsupported,
@@ -130,6 +136,15 @@ int main()
             snapshot.controllers[0].maxPorts == 16u &&
             snapshot.controllers[0].scratchpadBuffersRequired == 0u,
             "capability values are preserved from observation");
+    require(snapshot.controllers[0].pciBar0 == 0xE1020004u &&
+            snapshot.controllers[0].pciBar1 == 0u &&
+            snapshot.controllers[0].pciBarIs64 &&
+            snapshot.controllers[0].pciCommandInitial == 0x0002u &&
+            snapshot.controllers[0].mmioRequiredSpan == 0x4800u &&
+            snapshot.controllers[0].mmioMappingSucceeded &&
+            snapshot.controllers[0].mmioValidationSubstage != nullptr &&
+            snapshot.controllers[0].mmioMappedVirtual == 0xFFFFC00000000000ULL,
+            "PCI BAR and verified MMIO mapping diagnostics are preserved");
     require(snapshot.controllers[0].connectedPortCount == 2u &&
             snapshot.controllers[0].selectedPort == 4u,
             "root-port and selected-port results are preserved");
@@ -151,12 +166,13 @@ int main()
             snapshot.latestStatus.status == Status::NotAttempted,
             "latest status advances independently of first failure");
 
-    char formatted[112];
+    char formatted[192];
     format_first_failure(snapshot, formatted, sizeof(formatted));
     require(std::strstr(formatted, "00:14.0") != nullptr &&
             std::strstr(formatted, "Address Device") != nullptr &&
             std::strstr(formatted, "cc=0x11") != nullptr &&
             std::strstr(formatted, "status=0x00000002") != nullptr &&
+            std::strstr(formatted, "reason=device command completion failed") != nullptr &&
             std::strstr(formatted, "slot=2") != nullptr &&
             std::strstr(formatted, "port=4") != nullptr,
             "first-failure formatting includes controller, stage, result, slot, and port");

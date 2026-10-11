@@ -1,9 +1,9 @@
 //
 // Kernel MMIO Mapping Implementation
 //
-// QEMU-only x86_64 runtime MMIO mapping for diagnostic VirtIO probing.
-// The active path installs supervisor-only, NX, UC-style mappings in a
-// reserved high virtual MMIO window and keeps the unmap path conservative.
+// AMD64 runtime MMIO mapping for PCI/device access. The path installs
+// supervisor-only, NX, UC mappings in a reserved high virtual MMIO window
+// and keeps the unmap path conservative.
 //
 // Copyright (c) 2026 guideXOS Server
 //
@@ -27,7 +27,7 @@ namespace mmio {
 
 namespace {
 
-#if defined(ARCH_AMD64) && defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE)
+#if defined(ARCH_AMD64)
 
 static const uint64_t KERNEL_VIRTUAL_BASE = 0x100000ULL;
 static const uint64_t PAGE_SHIFT = 12ULL;
@@ -41,6 +41,8 @@ static const uint64_t PTE_PS = (1ULL << 7);
 static const uint64_t PTE_NX = (1ULL << 63);
 static const uint32_t IA32_EFER = 0xC0000080U;
 static const uint64_t EFER_NXE = (1ULL << 11);
+static const uint32_t IA32_PAT = 0x00000277U;
+static const uint64_t CR4_LA57 = (1ULL << 12);
 static const uint64_t PTE_ADDR_MASK = 0x000FFFFFFFFFF000ULL;
 static const uint64_t SUPPORTED_FLAG_MASK =
     MAP_FLAG_NON_USER | MAP_FLAG_NO_EXEC | MAP_FLAG_UNCACHED |
@@ -48,6 +50,20 @@ static const uint64_t SUPPORTED_FLAG_MASK =
 static uint64_t s_kernelPhysicalBase = KERNEL_VIRTUAL_BASE;
 static bool s_nxEnabled = false;
 static bool s_nxStateKnown = false;
+static bool s_patStateKnown = false;
+static bool s_patAvailable = false;
+static uint8_t s_ucPatIndex = 0u;
+static uint8_t s_physicalAddressBits = 0u;
+
+static const char* uc_pat_mode_name(uint8_t index)
+{
+    static const char* const names[8] = {
+        "uc(pat-index-0)", "uc(pat-index-1)", "uc(pat-index-2)",
+        "uc(pcd+pwt)", "uc(pat-index-4)", "uc(pat-index-5)",
+        "uc(pat-index-6)", "uc(pat-index-7)"
+    };
+    return index < 8u ? names[index] : "uc(pat-index-invalid)";
+}
 
 struct PageRecord {
     bool active;
@@ -80,10 +96,75 @@ static void memzero(void* dst, size_t len)
 static uint64_t kernel_virtual_to_physical(uint64_t virtualAddress)
 {
     if (virtualAddress >= KERNEL_VIRTUAL_BASE) {
-        return s_kernelPhysicalBase + (virtualAddress - KERNEL_VIRTUAL_BASE);
+        const uint64_t offset = virtualAddress - KERNEL_VIRTUAL_BASE;
+        if (offset > (~0ULL - s_kernelPhysicalBase)) return ~0ULL;
+        return s_kernelPhysicalBase + offset;
     }
 
     return virtualAddress;
+}
+
+static bool cpu_supports_pat()
+{
+#if defined(_MSC_VER)
+    int regs[4] = {};
+    __cpuid(regs, 1);
+    return (static_cast<uint32_t>(regs[3]) & (1u << 16)) != 0u;
+#elif defined(__GNUC__) || defined(__clang__)
+    uint32_t eax = 0u;
+    uint32_t ebx = 0u;
+    uint32_t ecx = 0u;
+    uint32_t edx = 0u;
+    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1u), "c"(0u));
+    return (edx & (1u << 16)) != 0u;
+#else
+    return false;
+#endif
+}
+
+static uint8_t cpu_physical_address_bits()
+{
+#if defined(_MSC_VER)
+    int regs[4] = {};
+    __cpuid(regs, 0x80000000);
+    if (static_cast<uint32_t>(regs[0]) < 0x80000008u) return 0u;
+    __cpuid(regs, 0x80000008);
+    return static_cast<uint8_t>(regs[0] & 0xFF);
+#elif defined(__GNUC__) || defined(__clang__)
+    uint32_t eax = 0u;
+    uint32_t ebx = 0u;
+    uint32_t ecx = 0u;
+    uint32_t edx = 0u;
+    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
+                     : "a"(0x80000000u), "c"(0u));
+    if (eax < 0x80000008u) return 0u;
+    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
+                     : "a"(0x80000008u), "c"(0u));
+    return static_cast<uint8_t>(eax & 0xFFu);
+#else
+    return 0u;
+#endif
+}
+
+static bool ensure_uc_pat_index(const char** reasonOut)
+{
+    if (s_patStateKnown) return s_patAvailable;
+    s_patStateKnown = true;
+    if (!cpu_supports_pat()) {
+        if (reasonOut != nullptr) *reasonOut = "CPU lacks PAT support for a verified UC MMIO mapping";
+        return false;
+    }
+
+    const uint64_t pat = kernel::arch::read_msr(IA32_PAT);
+    for (uint8_t index = 0u; index < 8u; ++index) {
+        if (((pat >> (index * 8u)) & 0xFFu) == 0u) {
+            s_ucPatIndex = index;
+            s_patAvailable = true;
+            return true;
+        }
+    }
+    if (reasonOut != nullptr) *reasonOut = "IA32_PAT has no UC memory type for MMIO";
+    return false;
 }
 
 static uint64_t* current_cr3_root()
@@ -165,6 +246,11 @@ static uint64_t* allocate_page_table_page()
         memzero(page, PAGE_SIZE_BYTES);
         const uint64_t virtualPage = reinterpret_cast<uint64_t>(page);
         const uint64_t physicalPage = kernel_virtual_to_physical(virtualPage);
+        if (physicalPage == ~0ULL || (physicalPage & PAGE_MASK) != 0u ||
+            (physicalPage & ~PTE_ADDR_MASK) != 0u) {
+            s_pageTablePoolUsed[i] = false;
+            return nullptr;
+        }
         s_pageTableRecords[i].active = true;
         s_pageTableRecords[i].physicalPage = physicalPage;
         s_pageTableRecords[i].virtualPage = virtualPage;
@@ -302,12 +388,12 @@ static bool walk_to_pt(uint64_t virtualAddress, uint64_t** ptOut, const char** r
 
 static uint64_t make_mmio_leaf(uint64_t physicalPage)
 {
-    return (physicalPage & PTE_ADDR_MASK) |
-           PTE_PRESENT |
-           PTE_WRITABLE |
-           PTE_PCD |
-           PTE_PWT |
-           (s_nxEnabled ? PTE_NX : 0ULL);
+    uint64_t cacheFlags = 0u;
+    if ((s_ucPatIndex & 0x1u) != 0u) cacheFlags |= PTE_PWT;
+    if ((s_ucPatIndex & 0x2u) != 0u) cacheFlags |= PTE_PCD;
+    if ((s_ucPatIndex & 0x4u) != 0u) cacheFlags |= PTE_PS; // PAT bit in a 4-KiB PTE.
+    return (physicalPage & PTE_ADDR_MASK) | PTE_PRESENT | PTE_WRITABLE |
+           cacheFlags | (s_nxEnabled ? PTE_NX : 0ULL);
 }
 
 static bool map_single_page(uint64_t physicalPage, uint64_t* mappedVirtualPageOut,
@@ -340,8 +426,8 @@ static bool map_single_page(uint64_t physicalPage, uint64_t* mappedVirtualPageOu
         const uint64_t currentLeaf = pt[ptIndex];
         if ((currentLeaf & PTE_PRESENT) != 0u) {
             if ((currentLeaf & PTE_ADDR_MASK) != (expectedLeaf & PTE_ADDR_MASK) ||
-                (currentLeaf & (PTE_PRESENT | PTE_WRITABLE | PTE_PCD | PTE_PWT | PTE_NX | PTE_USER)) !=
-                    (expectedLeaf & (PTE_PRESENT | PTE_WRITABLE | PTE_PCD | PTE_PWT | PTE_NX))) {
+                (currentLeaf & (PTE_PRESENT | PTE_WRITABLE | PTE_PCD | PTE_PWT | PTE_PS | PTE_NX | PTE_USER)) !=
+                    (expectedLeaf & (PTE_PRESENT | PTE_WRITABLE | PTE_PCD | PTE_PWT | PTE_PS | PTE_NX))) {
                 if (reasonOut != nullptr) {
                     *reasonOut = "conflicting MMIO mapping already occupies the window slot";
                 }
@@ -378,8 +464,8 @@ static bool map_single_page(uint64_t physicalPage, uint64_t* mappedVirtualPageOu
     const uint64_t expectedLeaf = make_mmio_leaf(physicalPage);
     if ((currentLeaf & PTE_PRESENT) != 0u) {
         if ((currentLeaf & PTE_ADDR_MASK) != (expectedLeaf & PTE_ADDR_MASK) ||
-            (currentLeaf & (PTE_PRESENT | PTE_WRITABLE | PTE_PCD | PTE_PWT | PTE_NX | PTE_USER)) !=
-                (expectedLeaf & (PTE_PRESENT | PTE_WRITABLE | PTE_PCD | PTE_PWT | PTE_NX))) {
+            (currentLeaf & (PTE_PRESENT | PTE_WRITABLE | PTE_PCD | PTE_PWT | PTE_PS | PTE_NX | PTE_USER)) !=
+                (expectedLeaf & (PTE_PRESENT | PTE_WRITABLE | PTE_PCD | PTE_PWT | PTE_PS | PTE_NX))) {
             if (reasonOut != nullptr) {
                 *reasonOut = "conflicting MMIO mapping already occupies the window slot";
             }
@@ -434,6 +520,11 @@ static bool map_page_range(uint64_t alignedBase, uint64_t pageCount,
 
         if (i == 0) {
             firstVirtualPage = mappedVirtualPage;
+        } else if (mappedVirtualPage != firstVirtualPage + (i * PAGE_SIZE_BYTES)) {
+            if (reasonOut != nullptr) {
+                *reasonOut = "physical pages do not form one contiguous virtual MMIO range";
+            }
+            return false;
         }
 
         *createdNewOut = *createdNewOut || createdNew;
@@ -443,13 +534,13 @@ static bool map_page_range(uint64_t alignedBase, uint64_t pageCount,
     return true;
 }
 
-#endif // ARCH_AMD64 && GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE
+#endif // ARCH_AMD64
 
 } // namespace
 
 void set_kernel_physical_base(uint64_t physicalBase)
 {
-#if defined(ARCH_AMD64) && defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE)
+#if defined(ARCH_AMD64)
     if (physicalBase != 0) {
         s_kernelPhysicalBase = physicalBase;
     }
@@ -473,7 +564,7 @@ bool mapForDevice(uint64_t physicalBase, uint64_t length,
     report.mappedVirtual = 0;
     report.mappedLength = report.alignedLength;
 
-#if defined(ARCH_AMD64) && defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE)
+#if defined(ARCH_AMD64)
     if ((flags & ~SUPPORTED_FLAG_MASK) != 0u) {
         report.reason = "MMIO mapping received unknown flags";
         report.nextKernelFeature = "flag validation";
@@ -528,6 +619,33 @@ bool mapForDevice(uint64_t physicalBase, uint64_t length,
         return false;
     }
 
+    if ((kernel::arch::read_cr4() & CR4_LA57) != 0u) {
+        report.reason = "five-level paging is active; the reserved MMIO mapper supports four-level paging only";
+        report.nextKernelFeature = "five-level page-table support";
+        if (reportOut != nullptr) *reportOut = report;
+        return false;
+    }
+
+    if (s_physicalAddressBits == 0u) {
+        s_physicalAddressBits = cpu_physical_address_bits();
+    }
+    if (s_physicalAddressBits == 0u || s_physicalAddressBits > 52u ||
+        !physical_range_fits_bits(report.alignedBase, report.alignedLength,
+                                  s_physicalAddressBits)) {
+        report.reason = "MMIO range exceeds the CPU or page-table physical address width";
+        report.nextKernelFeature = "physical address-width validation";
+        if (reportOut != nullptr) *reportOut = report;
+        return false;
+    }
+
+    const char* patReason = nullptr;
+    if (!ensure_uc_pat_index(&patReason)) {
+        report.reason = patReason != nullptr ? patReason : "UC memory type is unavailable";
+        report.nextKernelFeature = "verified UC PAT mapping";
+        if (reportOut != nullptr) *reportOut = report;
+        return false;
+    }
+
     const char* nxReason = nullptr;
     if (!ensure_nx_enabled(&nxReason)) {
         report.reason = nxReason != nullptr ? nxReason : "non-executable MMIO mappings require NXE support";
@@ -562,7 +680,7 @@ bool mapForDevice(uint64_t physicalBase, uint64_t length,
     report.requiresNewPageTableEntries = createdNew;
     report.cacheAttributesRequested = true;
     report.cacheAttributesSupported = true;
-    report.cacheMode = "uc(pcd+pwt)";
+    report.cacheMode = uc_pat_mode_name(s_ucPatIndex);
     report.reason = createdNew ? "mapped into reserved kernel MMIO window"
                                : "reused reserved kernel MMIO page";
     report.nextKernelFeature = "controlled feature negotiation";
@@ -579,8 +697,8 @@ bool mapForDevice(uint64_t physicalBase, uint64_t length,
     (void)physicalBase;
     (void)length;
     (void)flags;
-    report.reason = "runtime MMIO mapping is gated to the x86_64 QEMU probe build";
-    report.nextKernelFeature = "GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE";
+    report.reason = "runtime MMIO mapping is available only on AMD64";
+    report.nextKernelFeature = "AMD64 runtime MMIO mapping";
     if (reportOut != nullptr) {
         *reportOut = report;
     }
@@ -590,7 +708,7 @@ bool mapForDevice(uint64_t physicalBase, uint64_t length,
 
 bool unmap(uint64_t mappedVirtual, uint64_t length, const char** reasonOut)
 {
-#if defined(ARCH_AMD64) && defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE)
+#if defined(ARCH_AMD64)
     if (reasonOut != nullptr) {
         *reasonOut = nullptr;
     }
@@ -669,7 +787,7 @@ bool unmap(uint64_t mappedVirtual, uint64_t length, const char** reasonOut)
     (void)mappedVirtual;
     (void)length;
     if (reasonOut != nullptr) {
-        *reasonOut = "runtime MMIO unmap is gated to the x86_64 QEMU probe build";
+        *reasonOut = "runtime MMIO unmap is available only on AMD64";
     }
     return false;
 #endif

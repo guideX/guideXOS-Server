@@ -86,71 +86,6 @@ static void serial_bdf(uint8_t bus, uint8_t dev, uint8_t func)
     kernel::serial::putc(static_cast<char>('0' + (func & 0x7u)));
 }
 
-// Bounded, read-only xHCI MMIO capability probe.  The capability register
-// block is immutable hardware state, so this cannot disturb the controller.
-static void report_xhci_capabilities(uint64_t mmioBase, int32_t diagnosticIndex)
-{
-    volatile const uint32_t* mmio =
-        reinterpret_cast<volatile const uint32_t*>(
-            static_cast<uintptr_t>(mmioBase));
-
-    uint32_t capWords[XHCI_CAP_DWORD_COUNT];
-    for (uint32_t i = 0u; i < XHCI_CAP_DWORD_COUNT; ++i) {
-        capWords[i] = mmio[i];
-    }
-
-    XhciCapabilities caps = parse_xhci_capabilities(
-        capWords, XHCI_CAP_DWORD_COUNT);
-    kernel::modern_input_diagnostics::record_capabilities(
-        diagnosticIndex, caps.caplength, caps.hciVersion, caps.maxSlots,
-        caps.maxPorts, caps.csz ? 64u : 32u, caps.ac64, 0u,
-        caps.maxScratchpadBufs);
-    kernel::modern_input_diagnostics::record_stage(
-        diagnosticIndex, kernel::modern_input_diagnostics::Stage::Capabilities,
-        caps.valid ? kernel::modern_input_diagnostics::Status::Pass
-                   : kernel::modern_input_diagnostics::Status::Fail,
-        capWords[0], !caps.valid, 0u, false, 0u, 0u, 0u, 0u, false);
-
-    char line[192];
-    format_xhci_capabilities(caps, line, sizeof(line));
-    kernel::serial::puts("[USB]   xHCI caps ");
-    kernel::serial::puts(line);
-    kernel::serial::putc('\n');
-
-    if (!caps.valid || caps.xecp == 0u) {
-        return;
-    }
-
-    // xECP is a dword offset into the BAR.  Bound it so a malformed value
-    // cannot walk far outside the controller's register window.
-    if (caps.xecp > 0x4000u) {
-        kernel::serial::puts("[USB]   xHCI xECP out of range, skipped\n");
-        return;
-    }
-
-    volatile const uint32_t* ext = mmio + caps.xecp;
-    uint32_t extWords[XHCI_EXT_CAP_MAX_DWORDS];
-    for (uint32_t i = 0u; i < XHCI_EXT_CAP_MAX_DWORDS; ++i) {
-        extWords[i] = ext[i];
-    }
-
-    XhciProtocol protocols[XHCI_MAX_PROTOCOLS];
-    const uint32_t count = parse_xhci_supported_protocols(
-        extWords, XHCI_EXT_CAP_MAX_DWORDS, protocols, XHCI_MAX_PROTOCOLS);
-    kernel::modern_input_diagnostics::record_capabilities(
-        diagnosticIndex, caps.caplength, caps.hciVersion, caps.maxSlots,
-        caps.maxPorts, caps.csz ? 64u : 32u, caps.ac64, count,
-        caps.maxScratchpadBufs);
-
-    for (uint32_t i = 0u; i < count; ++i) {
-        char proto[96];
-        format_xhci_protocol(protocols[i], proto, sizeof(proto));
-        kernel::serial::puts("[USB]   xHCI proto ");
-        kernel::serial::puts(proto);
-        kernel::serial::putc('\n');
-    }
-}
-
 // ================================================================
 // PCI enumeration
 // ================================================================
@@ -235,67 +170,44 @@ static uint32_t scan_port_io()
 
                 ++controllers;
 
-                // BAR0: report type/address; never write it.
+                // Read both BAR dwords and PCI command state, but do not
+                // dereference a BAR here. xHCI initialization maps and proves
+                // the full register span before any capability read.
                 const uint32_t bar0 = pci_read32(static_cast<uint8_t>(bus),
                                                  dev, func, 0x10u);
-                if ((bar0 & 0x01u) != 0u) {
-                    kernel::serial::puts("[USB]   bar0=io base=0x");
-                    serial_hex_n(bar0 & 0xFFFCu, 4u);
-                    kernel::serial::putc('\n');
-                    if (cls.type == UsbControllerType::xHCI) {
-                        kernel::modern_input_diagnostics::record_stage(
-                            diagnosticIndex,
-                            kernel::modern_input_diagnostics::Stage::BarMmio,
-                            kernel::modern_input_diagnostics::Status::Fail,
-                            bar0, true, 0u, false, 0u, 0u, 0u, 0u, false);
+                const uint32_t bar1 = pci_read32(static_cast<uint8_t>(bus),
+                                                 dev, func, 0x14u);
+                const uint16_t pciCommand = static_cast<uint16_t>(
+                    pci_read32(static_cast<uint8_t>(bus), dev, func, 0x04u) & 0xFFFFu);
+                const bool ioSpace = (bar0 & 0x01u) != 0u;
+                const uint8_t barType = static_cast<uint8_t>((bar0 >> 1) & 0x03u);
+                const bool is64 = !ioSpace && barType == 0x02u;
+                const bool prefetchable = !ioSpace && (bar0 & 0x08u) != 0u;
+                const xhci::XhciBarInfo bar =
+                    xhci::validate_mmio_bar(bar0, bar1, 1u);
+
+                if (cls.type == UsbControllerType::xHCI) {
+                    kernel::modern_input_diagnostics::record_mmio_configuration(
+                        diagnosticIndex, bar0, bar1, pciCommand, barType,
+                        ioSpace, is64, prefetchable);
+                    if (bar.valid) {
+                        kernel::modern_input_diagnostics::record_mmio_base(
+                            diagnosticIndex, bar.base);
                     }
-                    continue;
                 }
 
-                const uint32_t barType = (bar0 >> 1) & 0x03u;
-                const bool is64 = (barType == 0x02u);
-                uint64_t mmioBase = static_cast<uint64_t>(bar0 & 0xFFFFFFF0u);
-                if (is64) {
-                    const uint32_t bar1 = pci_read32(static_cast<uint8_t>(bus),
-                                                     dev, func, 0x14u);
-                    mmioBase |= (static_cast<uint64_t>(bar1) << 32);
-                }
-
-                kernel::serial::puts("[USB]   bar0=mmio");
-                kernel::serial::puts(is64 ? "64" : "32");
-                kernel::serial::puts(" base=0x");
-                kernel::serial::put_hex64(mmioBase);
+                kernel::serial::puts("[USB]   BAR0 raw=0x");
+                kernel::serial::put_hex64(bar0);
+                kernel::serial::puts(" BAR1 raw=0x");
+                kernel::serial::put_hex64(bar1);
+                kernel::serial::puts(ioSpace ? " type=I/O" : (is64 ? " type=64-bit" :
+                    (barType == 0u ? " type=32-bit" :
+                        (barType == 1u ? " type=below-1MiB" : " type=reserved"))));
+                kernel::serial::puts(" decoded=0x");
+                kernel::serial::put_hex64(bar.base);
+                kernel::serial::puts(" PCI-command=0x");
+                kernel::serial::put_hex64(pciCommand);
                 kernel::serial::putc('\n');
-
-                if (cls.type == UsbControllerType::xHCI &&
-                    mmioBase != 0u && mmioBase != 0xFFFFFFFFu) {
-                    const uint32_t bar1 = is64
-                        ? pci_read32(static_cast<uint8_t>(bus), dev, func, 0x14u) : 0u;
-                    const xhci::XhciBarInfo bar =
-                        xhci::validate_mmio_bar(bar0, bar1, 0x1000u);
-                    if (!bar.valid) {
-                        kernel::modern_input_diagnostics::record_stage(
-                            diagnosticIndex,
-                            kernel::modern_input_diagnostics::Stage::BarMmio,
-                            kernel::modern_input_diagnostics::Status::Fail,
-                            bar0, true, 0u, false, 0u, 0u, 0u, 0u, false);
-                        continue;
-                    }
-                    kernel::modern_input_diagnostics::record_mmio_base(
-                        diagnosticIndex, bar.base);
-                    kernel::modern_input_diagnostics::record_stage(
-                        diagnosticIndex,
-                        kernel::modern_input_diagnostics::Stage::BarMmio,
-                        kernel::modern_input_diagnostics::Status::Pass,
-                        0u, false, 0u, false, 0u, 0u, 0u, 0u, false);
-                    report_xhci_capabilities(bar.base, diagnosticIndex);
-                } else if (cls.type == UsbControllerType::xHCI) {
-                    kernel::modern_input_diagnostics::record_stage(
-                        diagnosticIndex,
-                        kernel::modern_input_diagnostics::Stage::BarMmio,
-                        kernel::modern_input_diagnostics::Status::Fail,
-                        bar0, true, 0u, false, 0u, 0u, 0u, 0u, false);
-                }
             }
         }
     }

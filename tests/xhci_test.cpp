@@ -19,6 +19,7 @@
 //
 
 #include "kernel/xhci.h"
+#include "kernel/mmio.h"
 
 #include <cstring>
 #include <iostream>
@@ -50,6 +51,12 @@ void test_bar_validation()
         expect(bar.valid && !bar.is64 && bar.base == 0xF0000000u,
                "BAR 32-bit MMIO");
     }
+    // Memory BAR attributes are removed from the decoded base.
+    {
+        const XhciBarInfo bar = validate_mmio_bar(0xF0000008u, 0x12345678u, 0x1000u);
+        expect(bar.valid && !bar.is64 && bar.prefetchable &&
+               bar.base == 0xF0000000u, "BAR 32-bit prefetchable attributes masked");
+    }
     // 64-bit MMIO BAR (bits [2:1] = 10)
     {
         const XhciBarInfo bar = validate_mmio_bar(0xF0000004u, 0x00000001u, 0x1000u);
@@ -71,21 +78,88 @@ void test_bar_validation()
         const XhciBarInfo bar = validate_mmio_bar(0xFFFFFFFFu, 0, 0x1000u);
         expect(!bar.valid, "BAR all-ones rejected");
     }
-    // 64-bit BAR with zero upper dword rejected
+    // A zero high dword is valid for a 64-bit BAR below 4 GiB.
     {
         const XhciBarInfo bar = validate_mmio_bar(0xF0000004u, 0x00000000u, 0x1000u);
-        expect(!bar.valid, "BAR 64-bit zero upper rejected");
+        expect(bar.valid && bar.is64 && bar.base == 0xF0000000ULL,
+               "BAR 64-bit zero upper accepted");
     }
-    // 64-bit BAR with all-ones upper dword rejected
+    // BAR1 is address data. Physical-width checks belong to the mapper.
     {
-        const XhciBarInfo bar = validate_mmio_bar(0xF0000004u, 0xFFFFFFFFu, 0x1000u);
-        expect(!bar.valid, "BAR 64-bit all-ones upper rejected");
+        const XhciBarInfo bar = validate_mmio_bar(0xE1020004u, 0xFFFFFFFFu, 0x1000u);
+        expect(bar.valid && bar.base == 0xFFFFFFFFE1020000ULL,
+               "BAR1 all-ones retained as high address bits");
     }
-    // Reserved BAR type rejected (bits [2:1] = 01)
+    // PCI memory type 01 is a below-1-MiB BAR and is decoded within 20 bits.
     {
-        const XhciBarInfo bar = validate_mmio_bar(0xFFFFFFFAu, 0, 0x1000u);
-        expect(!bar.valid, "BAR reserved type rejected");
+        const XhciBarInfo bar = validate_mmio_bar(0x000A0002u, 0, 0x1000u);
+        expect(bar.valid && bar.type == 1u && bar.base == 0x000A0000u,
+               "below-1-MiB memory BAR decoded");
     }
+    {
+        const XhciBarInfo highBits = validate_mmio_bar(0xE0000002u, 0, 0x1000u);
+        const XhciBarInfo crossing = validate_mmio_bar(0x000FF002u, 0, 0x2000u);
+        const XhciBarInfo reserved = validate_mmio_bar(0x000A0006u, 0, 0x1000u);
+        expect(!highBits.valid && !crossing.valid && !reserved.valid,
+               "malformed and reserved memory BAR encodings rejected");
+    }
+    // The complete requested span must stay representable in the decoded BAR.
+    {
+        const XhciBarInfo bar = validate_mmio_bar(0xFFFFFFF4u, 0xFFFFFFFFu, 0x20u);
+        expect(!bar.valid && bar.reason != nullptr,
+               "BAR required span overflow rejected");
+    }
+}
+
+void test_mmio_mapping_validation()
+{
+    const XhciBarInfo bar = validate_mmio_bar(0xE1020004u, 0u, 0x100u);
+    expect(bar.valid && bar.is64 && bar.base == 0xE1020000ULL,
+           "physical xHCI BAR shape decodes with zero upper dword");
+
+    const XhciMmioAccess unavailable = validate_mmio_access(
+        bar, true, 0x100u, false, bar.base, 0u, 0u);
+    expect(!unavailable.valid &&
+           unavailable.failure == XhciMmioAccessFailure::MappingUnavailable,
+           "unavailable MMIO mapping blocks access");
+
+    const XhciMmioAccess memoryDisabled = validate_mmio_access(
+        bar, false, 0x100u, true, bar.base, 0xFFFFC00000000000ULL, 0x1000u);
+    expect(!memoryDisabled.valid &&
+           memoryDisabled.failure == XhciMmioAccessFailure::MemorySpaceDisabled,
+           "PCI memory-space decoding required before access");
+
+    const XhciMmioAccess shortMapping = validate_mmio_access(
+        bar, true, 0x1000u, true, bar.base, 0xFFFFC00000000000ULL, 0x100u);
+    expect(!shortMapping.valid &&
+           shortMapping.failure == XhciMmioAccessFailure::MappingTooShort,
+           "incomplete MMIO mapping blocks access");
+
+    const XhciMmioAccess wrongTranslation = validate_mmio_access(
+        bar, true, 0x100u, true, bar.base + 0x1000u,
+        0xFFFFC00000000000ULL, 0x1000u);
+    expect(!wrongTranslation.valid &&
+           wrongTranslation.failure == XhciMmioAccessFailure::MappingPhysicalMismatch,
+           "physical-to-virtual translation mismatch blocks access");
+
+    const XhciMmioAccess valid = validate_mmio_access(
+        bar, true, 0x100u, true, bar.base,
+        0xFFFFC00000000000ULL, 0x1000u);
+    expect(valid.valid && valid.failure == XhciMmioAccessFailure::None,
+           "complete verified MMIO mapping permits access");
+
+    expect(kernel::mmio::physical_range_fits_bits(0xE1020000ULL, 0x1000u, 36u),
+           "MMIO address fits implemented physical address width");
+    expect(!kernel::mmio::physical_range_fits_bits(0x100000000000ULL, 0x1000u, 36u),
+           "MMIO address beyond physical width rejected");
+    const kernel::mmio::MappingReport overflow = kernel::mmio::describeRange(
+        0xFFFFFFFFFFFFF800ULL, 0x2000u,
+        kernel::mmio::MAP_FLAG_NON_USER | kernel::mmio::MAP_FLAG_NO_EXEC |
+        kernel::mmio::MAP_FLAG_UNCACHED);
+    expect(overflow.pageCount == 0u && !overflow.withinSafeDirectMap &&
+           overflow.reason != nullptr &&
+           std::strcmp(overflow.reason, "MMIO range overflows address space") == 0,
+           "page-rounded MMIO address overflow rejected");
 }
 
 // ================================================================
@@ -692,6 +766,7 @@ void test_control_request()
 int main()
 {
     test_bar_validation();
+    test_mmio_mapping_validation();
     test_ownership_detection();
     test_ring_helpers();
     test_erst_helpers();

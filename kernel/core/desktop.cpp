@@ -9295,6 +9295,78 @@ static void input3d_panel_draw_controller_details(
     input3d_panel_draw_line(writer, line, rgb(205, 218, 238));
 
     line[0] = '\0';
+    position = input3d_panel_append(line, sizeof(line), 0u, "PCI BAR0=0x");
+    position = input3d_panel_hex(line, sizeof(line), position, controller.pciBar0, 8u);
+    position = input3d_panel_append(line, sizeof(line), position, " BAR1=0x");
+    position = input3d_panel_hex(line, sizeof(line), position, controller.pciBar1, 8u);
+    position = input3d_panel_append(line, sizeof(line), position, " type=");
+    position = input3d_panel_append(line, sizeof(line), position,
+        controller.pciBarIsIo ? "I/O" : (controller.pciBarIs64 ? "64-bit" :
+            (controller.pciBarType == 0u ? "32-bit" :
+                (controller.pciBarType == 1u ? "below-1MiB" : "reserved"))));
+    if (controller.pciBarPrefetchable) {
+        input3d_panel_append(line, sizeof(line), position, " prefetch");
+    }
+    input3d_panel_draw_line(writer, line, rgb(205, 218, 238));
+
+    line[0] = '\0';
+    position = input3d_panel_append(line, sizeof(line), 0u, "PCI command=0x");
+    position = input3d_panel_hex(line, sizeof(line), position, controller.pciCommand, 4u);
+    position = input3d_panel_append(line, sizeof(line), position, " memory decode=");
+    position = input3d_panel_append(line, sizeof(line), position,
+        (controller.pciCommand & 0x0002u) != 0u ? "ON" : "OFF");
+    if (controller.pciCommandInitialCaptured) {
+        position = input3d_panel_append(line, sizeof(line), position, " initial=");
+        input3d_panel_append(line, sizeof(line), position,
+            (controller.pciCommandInitial & 0x0002u) != 0u ? "ON" : "OFF");
+    }
+    input3d_panel_draw_line(writer, line, rgb(205, 218, 238));
+
+    line[0] = '\0';
+    position = input3d_panel_append(line, sizeof(line), 0u, "MMIO span=0x");
+    position = input3d_panel_hex(line, sizeof(line), position,
+        static_cast<uint32_t>(controller.mmioRequiredSpan >> 32), 8u);
+    position = input3d_panel_hex(line, sizeof(line), position,
+        static_cast<uint32_t>(controller.mmioRequiredSpan), 8u);
+    position = input3d_panel_append(line, sizeof(line), position, " map=");
+    position = input3d_panel_append(line, sizeof(line), position,
+        controller.mmioMappingSucceeded ? "PASS" :
+            (controller.mmioMappingReason != nullptr ? "FAIL" : "NOT ATTEMPTED"));
+    if (controller.mmioMappingSucceeded) {
+        position = input3d_panel_append(line, sizeof(line), position, " va=0x");
+        position = input3d_panel_hex(line, sizeof(line), position,
+            static_cast<uint32_t>(controller.mmioMappedVirtual >> 32), 8u);
+        input3d_panel_hex(line, sizeof(line), position,
+            static_cast<uint32_t>(controller.mmioMappedVirtual), 8u);
+    }
+    input3d_panel_draw_line(writer, line, rgb(205, 218, 238));
+
+    if (controller.mmioMappingSucceeded) {
+        line[0] = '\0';
+        position = input3d_panel_append(line, sizeof(line), 0u, "MMIO mapped length=0x");
+        position = input3d_panel_hex(line, sizeof(line), position,
+            static_cast<uint32_t>(controller.mmioMappedLength >> 32), 8u);
+        input3d_panel_hex(line, sizeof(line), position,
+            static_cast<uint32_t>(controller.mmioMappedLength), 8u);
+        input3d_panel_draw_line(writer, line, rgb(205, 218, 238));
+    }
+
+    if (controller.mmioMappingReason != nullptr) {
+        line[0] = '\0';
+        position = input3d_panel_append(line, sizeof(line), 0u, "MMIO substage: ");
+        input3d_panel_append(line, sizeof(line), position,
+                             controller.mmioValidationSubstage != nullptr
+                                ? controller.mmioValidationSubstage : "unknown");
+        input3d_panel_draw_line(writer, line,
+            controller.mmioMappingSucceeded ? rgb(205, 218, 238) : rgb(255, 185, 135));
+        line[0] = '\0';
+        position = input3d_panel_append(line, sizeof(line), 0u, "MMIO reason: ");
+        input3d_panel_append(line, sizeof(line), position, controller.mmioMappingReason);
+        input3d_panel_draw_line(writer, line,
+            controller.mmioMappingSucceeded ? rgb(205, 218, 238) : rgb(255, 185, 135));
+    }
+
+    line[0] = '\0';
     position = input3d_panel_append(line, sizeof(line), 0u, "CAPS: ");
     position = input3d_panel_append(line, sizeof(line), position,
         modern_input_diagnostics::status_name(controller.stages[static_cast<uint32_t>(Stage::Capabilities)].status));
@@ -9496,15 +9568,108 @@ static void draw_input3d_diagnostics_panel()
         const modern_input_diagnostics::ControllerSnapshot& selected =
             snapshot.controllers[static_cast<uint32_t>(snapshot.selectedControllerIndex)];
         if (layout.compact) {
-            input3d_panel_status_line(&writer, "BAR/MMIO",
-                selected.stages[static_cast<uint32_t>(modern_input_diagnostics::Stage::BarMmio)]);
-            input3d_panel_status_line(&writer, "Capabilities",
-                selected.stages[static_cast<uint32_t>(modern_input_diagnostics::Stage::Capabilities)]);
+            line[0] = '\0';
+            position = input3d_panel_append(line, sizeof(line), 0u, "BAR/MMIO: ");
+            position = input3d_panel_append(line, sizeof(line), position,
+                modern_input_diagnostics::status_name(selected.stages[
+                    static_cast<uint32_t>(modern_input_diagnostics::Stage::BarMmio)].status));
+            position = input3d_panel_append(line, sizeof(line), position,
+                selected.pciBarIsIo ? " I/O" : (selected.pciBarIs64 ? " 64-bit" :
+                    (selected.pciBarType == 0u ? " 32-bit" :
+                        (selected.pciBarType == 1u ? " below-1MiB" : " reserved"))));
+            if (selected.mmioBase != 0u) {
+                position = input3d_panel_append(line, sizeof(line), position, " base=0x");
+                position = input3d_panel_hex(line, sizeof(line), position,
+                    static_cast<uint32_t>(selected.mmioBase >> 32), 8u);
+                input3d_panel_hex(line, sizeof(line), position,
+                    static_cast<uint32_t>(selected.mmioBase), 8u);
+            }
+            input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
+
+            line[0] = '\0';
+            position = input3d_panel_append(line, sizeof(line), 0u, "PCI BAR0=0x");
+            position = input3d_panel_hex(line, sizeof(line), position, selected.pciBar0, 8u);
+            position = input3d_panel_append(line, sizeof(line), position, " BAR1=0x");
+            input3d_panel_hex(line, sizeof(line), position, selected.pciBar1, 8u);
+            input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
+
+            line[0] = '\0';
+            position = input3d_panel_append(line, sizeof(line), 0u, "PCI command=0x");
+            position = input3d_panel_hex(line, sizeof(line), position, selected.pciCommand, 4u);
+            position = input3d_panel_append(line, sizeof(line), position, " memory=");
+            position = input3d_panel_append(line, sizeof(line), position,
+                (selected.pciCommand & 0x0002u) != 0u ? "ON" : "OFF");
+            if (selected.pciCommandInitialCaptured) {
+                position = input3d_panel_append(line, sizeof(line), position, " initial=");
+                input3d_panel_append(line, sizeof(line), position,
+                    (selected.pciCommandInitial & 0x0002u) != 0u ? "ON" : "OFF");
+            }
+            input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
+
+            line[0] = '\0';
+            position = input3d_panel_append(line, sizeof(line), 0u, "MMIO span=0x");
+            position = input3d_panel_hex(line, sizeof(line), position,
+                static_cast<uint32_t>(selected.mmioRequiredSpan >> 32), 8u);
+            position = input3d_panel_hex(line, sizeof(line), position,
+                static_cast<uint32_t>(selected.mmioRequiredSpan), 8u);
+            position = input3d_panel_append(line, sizeof(line), position, " map=");
+            input3d_panel_append(line, sizeof(line), position,
+                selected.mmioMappingSucceeded ? "PASS" :
+                    (selected.mmioMappingReason != nullptr ? "FAIL" : "NOT ATTEMPTED"));
+            input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
+
+            if (selected.mmioMappingSucceeded) {
+                line[0] = '\0';
+                position = input3d_panel_append(line, sizeof(line), 0u, "MMIO VA=0x");
+                position = input3d_panel_hex(line, sizeof(line), position,
+                    static_cast<uint32_t>(selected.mmioMappedVirtual >> 32), 8u);
+                position = input3d_panel_hex(line, sizeof(line), position,
+                    static_cast<uint32_t>(selected.mmioMappedVirtual), 8u);
+                position = input3d_panel_append(line, sizeof(line), position, " len=0x");
+                input3d_panel_hex(line, sizeof(line), position,
+                    static_cast<uint32_t>(selected.mmioMappedLength), 8u);
+                input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
+            }
+
+            if (selected.mmioMappingReason != nullptr) {
+                line[0] = '\0';
+                position = input3d_panel_append(line, sizeof(line), 0u, "MMIO substage: ");
+                input3d_panel_append(line, sizeof(line), position,
+                    selected.mmioValidationSubstage != nullptr
+                        ? selected.mmioValidationSubstage : "unknown");
+                input3d_panel_draw_line(&writer, line,
+                    selected.mmioMappingSucceeded ? rgb(205, 218, 238) : rgb(255, 185, 135));
+                line[0] = '\0';
+                position = input3d_panel_append(line, sizeof(line), 0u, "MMIO reason: ");
+                input3d_panel_append(line, sizeof(line), position,
+                                     selected.mmioMappingReason);
+                input3d_panel_draw_line(&writer, line,
+                    selected.mmioMappingSucceeded ? rgb(205, 218, 238) : rgb(255, 185, 135));
+            }
+            line[0] = '\0';
+            position = input3d_panel_append(line, sizeof(line), 0u, "Capabilities: ");
+            const modern_input_diagnostics::StageResult& capabilityStage =
+                selected.stages[static_cast<uint32_t>(modern_input_diagnostics::Stage::Capabilities)];
+            position = input3d_panel_append(line, sizeof(line), position,
+                modern_input_diagnostics::status_name(capabilityStage.status));
+            if (capabilityStage.status == modern_input_diagnostics::Status::Pass) {
+                position = input3d_panel_append(line, sizeof(line), position, " caplen=0x");
+                position = input3d_panel_hex(line, sizeof(line), position, selected.capLength, 2u);
+                position = input3d_panel_append(line, sizeof(line), position, " version=0x");
+                input3d_panel_hex(line, sizeof(line), position, selected.hciVersion, 4u);
+            }
+            input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
             input3d_panel_ownership_line(&writer, selected);
-            input3d_panel_status_line(&writer, "DMA",
-                selected.stages[static_cast<uint32_t>(modern_input_diagnostics::Stage::DmaPrerequisites)]);
-            input3d_panel_status_line(&writer, "Controller run",
-                selected.stages[static_cast<uint32_t>(modern_input_diagnostics::Stage::ControllerRunning)]);
+            line[0] = '\0';
+            position = input3d_panel_append(line, sizeof(line), 0u, "DMA/run: ");
+            position = input3d_panel_append(line, sizeof(line), position,
+                modern_input_diagnostics::status_name(selected.stages[
+                    static_cast<uint32_t>(modern_input_diagnostics::Stage::DmaPrerequisites)].status));
+            position = input3d_panel_append(line, sizeof(line), position, "/");
+            input3d_panel_append(line, sizeof(line), position,
+                modern_input_diagnostics::status_name(selected.stages[
+                    static_cast<uint32_t>(modern_input_diagnostics::Stage::ControllerRunning)].status));
+            input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
             line[0] = '\0';
             position = input3d_panel_append(line, sizeof(line), 0u, "Ports root=");
             position = input3d_panel_decimal(line, sizeof(line), position, selected.rootPortCount);

@@ -21,6 +21,7 @@
 #include "include/kernel/xhci.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/modern_input_diagnostics.h"
+#include "include/kernel/mmio.h"
 #include "include/kernel/serial_debug.h"
 
 namespace kernel {
@@ -54,6 +55,18 @@ static uint32_t pci_read32(uint8_t bus, uint8_t dev, uint8_t func,
     return kernel::arch::inl(PCI_CONFIG_DATA);
 }
 
+static uint16_t pci_read16(uint8_t bus, uint8_t dev, uint8_t func,
+                           uint8_t offset)
+{
+    const uint32_t address = 0x80000000u |
+                             (static_cast<uint32_t>(bus)  << 16) |
+                             (static_cast<uint32_t>(dev)  << 11) |
+                             (static_cast<uint32_t>(func) << 8)  |
+                             (offset & 0xFCu);
+    kernel::arch::outl(PCI_CONFIG_ADDR, address);
+    return kernel::arch::inw(static_cast<uint16_t>(PCI_CONFIG_DATA + (offset & 0x02u)));
+}
+
 static void pci_write32(uint8_t bus, uint8_t dev, uint8_t func,
                         uint8_t offset, uint32_t value)
 {
@@ -64,6 +77,18 @@ static void pci_write32(uint8_t bus, uint8_t dev, uint8_t func,
                              (offset & 0xFCu);
     kernel::arch::outl(PCI_CONFIG_ADDR, address);
     kernel::arch::outl(PCI_CONFIG_DATA, value);
+}
+
+static void pci_write16(uint8_t bus, uint8_t dev, uint8_t func,
+                        uint8_t offset, uint16_t value)
+{
+    const uint32_t address = 0x80000000u |
+                             (static_cast<uint32_t>(bus)  << 16) |
+                             (static_cast<uint32_t>(dev)  << 11) |
+                             (static_cast<uint32_t>(func) << 8)  |
+                             (offset & 0xFCu);
+    kernel::arch::outl(PCI_CONFIG_ADDR, address);
+    kernel::arch::outw(static_cast<uint16_t>(PCI_CONFIG_DATA + (offset & 0x02u)), value);
 }
 
 // ================================================================
@@ -109,7 +134,11 @@ static bool s_initialized = false;
 static bool s_running = false;
 static XhciControllerState s_state = XhciControllerState::Idle;
 static XhciOwnershipState s_ownership = XhciOwnershipState::NoCapability;
-static uint64_t s_mmioBase = 0;
+static uint64_t s_mmioPhysicalBase = 0;
+static uint64_t s_mmioBase = 0; // Verified kernel virtual mapping.
+static uint32_t s_pciBar0 = 0u;
+static uint32_t s_pciBar1 = 0u;
+static uint16_t s_pciCommand = 0u;
 static uint8_t s_bus = 0;
 static uint8_t s_dev = 0;
 static uint8_t s_func = 0;
@@ -243,12 +272,13 @@ static void diagnostic_stage(modern_input_diagnostics::Stage stage,
                              uint8_t slotId = 0u, uint8_t portId = 0u,
                              uint8_t endpointId = 0u,
                              uint8_t completionCode = 0u,
-                             bool hasCompletionCode = false)
+                             bool hasCompletionCode = false,
+                             const char* detail = nullptr)
 {
     modern_input_diagnostics::record_stage(
         s_diagnosticControllerIndex, stage, status, errorCode, hasErrorCode,
         controllerStatus, hasControllerStatus, slotId, portId, endpointId,
-        completionCode, hasCompletionCode);
+        completionCode, hasCompletionCode, detail);
 }
 
 static bool validate_dma_prerequisites()
@@ -417,29 +447,149 @@ static bool find_xhci_controller()
 
 static bool validate_bar()
 {
-    const uint32_t bar0 = pci_read32(s_bus, s_dev, s_func, 0x10u);
-    const uint32_t bar1 = pci_read32(s_bus, s_dev, s_func, 0x14u);
-
-    // Minimum MMIO span: operational + runtime + doorbell + port registers
-    const uint32_t minSize = s_caps.opBase + 0x400 +
-                             s_caps.maxPorts * 0x10 + 0x1000;
-
-    const XhciBarInfo bar = validate_mmio_bar(bar0, bar1, minSize);
-    if (!bar.valid) {
-        serial_puts("[XHCI] MMIO BAR validation failed\n");
+    uint64_t requiredSpan = 0u;
+    if (!xhci_required_mmio_span(s_caps, &requiredSpan)) {
+        static const char* reason = "capability offsets do not produce a representable xHCI MMIO span";
+        modern_input_diagnostics::record_mmio_mapping(
+            s_diagnosticControllerIndex, "xHCI register-span calculation",
+            0u, false, 0u, 0u, reason);
         diagnostic_stage(modern_input_diagnostics::Stage::BarMmio,
-                         modern_input_diagnostics::Status::Fail,
-                         bar0, true);
+                         modern_input_diagnostics::Status::Fail, 0u, false,
+                         0u, false, 0u, 0u, 0u, 0u, false, reason);
         return false;
     }
 
-    s_mmioBase = bar.base;
+    const XhciBarInfo bar = validate_mmio_bar(s_pciBar0, s_pciBar1, requiredSpan);
+    if (!bar.valid) {
+        modern_input_diagnostics::record_mmio_base(s_diagnosticControllerIndex,
+                                                   bar.base);
+        modern_input_diagnostics::record_mmio_mapping(
+            s_diagnosticControllerIndex, "PCI BAR decode and span validation",
+            requiredSpan, false, 0u, 0u, bar.reason);
+        serial_puts("[XHCI] MMIO BAR/span validation failed: ");
+        serial_puts(bar.reason);
+        serial_puts("\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::BarMmio,
+                         modern_input_diagnostics::Status::Fail,
+                         0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
+                         bar.reason);
+        return false;
+    }
+
+    const uint16_t command = pci_read16(s_bus, s_dev, s_func, 0x04u);
+    s_pciCommand = command;
+    if ((command & 0x0002u) == 0u) {
+        modern_input_diagnostics::record_mmio_configuration(
+            s_diagnosticControllerIndex, s_pciBar0, s_pciBar1, command,
+            bar.type, bar.ioSpace, bar.is64, bar.prefetchable);
+        modern_input_diagnostics::record_mmio_mapping(
+            s_diagnosticControllerIndex, "PCI command memory-enable readback",
+            requiredSpan, false, 0u, 0u,
+            "PCI memory-space decoding is disabled after enable attempt");
+        diagnostic_stage(modern_input_diagnostics::Stage::BarMmio,
+                         modern_input_diagnostics::Status::Fail,
+                         0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
+                         "PCI memory-space decoding is disabled");
+        return false;
+    }
+
+    uint64_t mappedVirtual = 0u;
+    kernel::mmio::MappingReport mapping = {};
+    const uint32_t mapFlags = kernel::mmio::MAP_FLAG_NON_USER |
+                              kernel::mmio::MAP_FLAG_NO_EXEC |
+                              kernel::mmio::MAP_FLAG_UNCACHED;
+    const bool mappingSucceeded = kernel::mmio::mapForDevice(
+        bar.base, requiredSpan, &mappedVirtual, &mapping, mapFlags);
+    const XhciMmioAccess access = validate_mmio_access(
+        bar, (command & 0x0002u) != 0u, requiredSpan,
+        mappingSucceeded && mapping.success, mapping.physicalBase,
+        mappedVirtual, mapping.length);
+    const char* reason = access.valid ? mapping.reason :
+        (!mappingSucceeded && mapping.reason != nullptr
+            ? mapping.reason : xhci_mmio_access_failure_name(access.failure));
+    modern_input_diagnostics::record_mmio_mapping(
+        s_diagnosticControllerIndex, "full xHCI physical-to-virtual mapping",
+        requiredSpan, access.valid,
+        access.valid ? mappedVirtual : 0u, mapping.length, reason);
+    if (!access.valid) {
+        serial_puts("[XHCI] MMIO mapping blocked: ");
+        serial_puts(reason);
+        serial_puts("\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::BarMmio,
+                         modern_input_diagnostics::Status::Fail,
+                         0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
+                         reason);
+        return false;
+    }
+
+    s_mmioPhysicalBase = bar.base;
+    s_mmioBase = mappedVirtual;
     modern_input_diagnostics::record_mmio_base(s_diagnosticControllerIndex, bar.base);
     diagnostic_stage(modern_input_diagnostics::Stage::BarMmio,
                      modern_input_diagnostics::Status::Pass);
-    serial_puts("[XHCI] MMIO BAR validated base=0x");
+    serial_puts("[XHCI] MMIO mapped physical=0x");
+    kernel::serial::put_hex64(s_mmioPhysicalBase);
+    serial_puts(" virtual=0x");
     kernel::serial::put_hex64(s_mmioBase);
     serial_puts(bar.is64 ? " (64-bit)\n" : " (32-bit)\n");
+    return true;
+}
+
+static bool enable_pci_memory_space(const XhciBarInfo& bar)
+{
+    uint16_t command = pci_read16(s_bus, s_dev, s_func, 0x04u);
+    if ((command & 0x0002u) == 0u) {
+        // Use a 16-bit PCI config write so the adjacent status register's
+        // write-one-to-clear bits are never echoed back from a dword read.
+        pci_write16(s_bus, s_dev, s_func, 0x04u,
+                    static_cast<uint16_t>(command | 0x0002u));
+        command = pci_read16(s_bus, s_dev, s_func, 0x04u);
+    }
+    s_pciCommand = command;
+    modern_input_diagnostics::record_mmio_configuration(
+        s_diagnosticControllerIndex, s_pciBar0, s_pciBar1, command,
+        bar.type, bar.ioSpace, bar.is64, bar.prefetchable);
+    return (command & 0x0002u) != 0u;
+}
+
+static bool map_initial_capabilities(const XhciBarInfo& bar)
+{
+    static const uint64_t kInitialCapabilitySpan =
+        static_cast<uint64_t>(XHCI_CAP_DWORD_COUNT) * sizeof(uint32_t);
+    uint64_t mappedVirtual = 0u;
+    kernel::mmio::MappingReport mapping = {};
+    const uint32_t mapFlags = kernel::mmio::MAP_FLAG_NON_USER |
+                              kernel::mmio::MAP_FLAG_NO_EXEC |
+                              kernel::mmio::MAP_FLAG_UNCACHED;
+    const bool mappingSucceeded = kernel::mmio::mapForDevice(
+        bar.base, kInitialCapabilitySpan, &mappedVirtual, &mapping, mapFlags);
+    const XhciMmioAccess access = validate_mmio_access(
+        bar, (s_pciCommand & 0x0002u) != 0u, kInitialCapabilitySpan,
+        mappingSucceeded && mapping.success, mapping.physicalBase,
+        mappedVirtual, mapping.length);
+    const char* reason = access.valid ? mapping.reason :
+        (!mappingSucceeded && mapping.reason != nullptr
+            ? mapping.reason : xhci_mmio_access_failure_name(access.failure));
+    modern_input_diagnostics::record_mmio_mapping(
+        s_diagnosticControllerIndex, "initial capability-register mapping",
+        kInitialCapabilitySpan, access.valid,
+        access.valid ? mappedVirtual : 0u, mapping.length, reason);
+    if (!access.valid) {
+        diagnostic_stage(modern_input_diagnostics::Stage::BarMmio,
+                         modern_input_diagnostics::Status::Fail,
+                         0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
+                         reason);
+        serial_puts("[XHCI] initial capability mapping blocked: ");
+        serial_puts(reason);
+        serial_puts("\n");
+        return false;
+    }
+
+    s_mmioPhysicalBase = bar.base;
+    s_mmioBase = mappedVirtual;
+    modern_input_diagnostics::record_mmio_base(s_diagnosticControllerIndex, bar.base);
+    diagnostic_stage(modern_input_diagnostics::Stage::BarMmio,
+                     modern_input_diagnostics::Status::Pass);
     return true;
 }
 
@@ -1500,24 +1650,53 @@ bool init()
     }
     serial_puts("[XHCI] PCI device found\n");
 
-    // Read capabilities first to get opBase for BAR validation
-    // We need a temporary MMIO read to parse capabilities
-    // For now, use a default opBase of 0x20 for initial parse
-    const uint32_t bar0 = pci_read32(s_bus, s_dev, s_func, 0x10u);
-    const uint32_t bar1 = pci_read32(s_bus, s_dev, s_func, 0x14u);
-    const XhciBarInfo tempBar = validate_mmio_bar(bar0, bar1, 0x1000u);
-    if (!tempBar.valid) {
-        serial_puts("[XHCI] initial BAR validation failed\n");
+    s_pciBar0 = pci_read32(s_bus, s_dev, s_func, 0x10u);
+    s_pciBar1 = pci_read32(s_bus, s_dev, s_func, 0x14u);
+    s_pciCommand = pci_read16(s_bus, s_dev, s_func, 0x04u);
+    const bool barIoSpace = (s_pciBar0 & 0x01u) != 0u;
+    const uint8_t barType = static_cast<uint8_t>((s_pciBar0 >> 1) & 0x03u);
+    const bool barIs64 = !barIoSpace && barType == 0x02u;
+    const bool barPrefetchable = !barIoSpace && (s_pciBar0 & 0x08u) != 0u;
+    modern_input_diagnostics::record_mmio_configuration(
+        s_diagnosticControllerIndex, s_pciBar0, s_pciBar1, s_pciCommand,
+        barType, barIoSpace, barIs64, barPrefetchable);
+
+    static const uint64_t kInitialCapabilitySpan =
+        static_cast<uint64_t>(XHCI_CAP_DWORD_COUNT) * sizeof(uint32_t);
+    const XhciBarInfo initialBar = validate_mmio_bar(
+        s_pciBar0, s_pciBar1, kInitialCapabilitySpan);
+    if (!initialBar.valid) {
+        modern_input_diagnostics::record_mmio_mapping(
+            s_diagnosticControllerIndex, "initial PCI BAR decode",
+            kInitialCapabilitySpan, false,
+            0u, 0u, initialBar.reason);
+        serial_puts("[XHCI] initial BAR validation failed: ");
+        serial_puts(initialBar.reason);
+        serial_puts("\n");
         diagnostic_stage(modern_input_diagnostics::Stage::BarMmio,
                          modern_input_diagnostics::Status::Fail,
-                         bar0, true);
+                         0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
+                         initialBar.reason);
         return false;
     }
-    s_mmioBase = tempBar.base;
     modern_input_diagnostics::record_mmio_base(s_diagnosticControllerIndex,
-                                               tempBar.base);
-    diagnostic_stage(modern_input_diagnostics::Stage::BarMmio,
-                     modern_input_diagnostics::Status::Pass);
+                                               initialBar.base);
+    if (!enable_pci_memory_space(initialBar)) {
+        static const char* reason = "PCI memory-space decoding is disabled after enable attempt";
+        modern_input_diagnostics::record_mmio_mapping(
+            s_diagnosticControllerIndex, "PCI command memory-enable readback",
+            kInitialCapabilitySpan, false,
+            0u, 0u, reason);
+        diagnostic_stage(modern_input_diagnostics::Stage::BarMmio,
+                         modern_input_diagnostics::Status::Fail,
+                         0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
+                         reason);
+        serial_puts("[XHCI] PCI memory-space decoding could not be enabled\n");
+        return false;
+    }
+    if (!map_initial_capabilities(initialBar)) {
+        return false;
+    }
 
     if (!parse_capabilities()) {
         return false;
@@ -1642,7 +1821,7 @@ bool port_status(uint8_t portIndex, XhciPortStatus* out)
 
 uint64_t mmio_base()
 {
-    return s_mmioBase;
+    return s_mmioPhysicalBase;
 }
 
 const XhciCapabilities* capabilities()

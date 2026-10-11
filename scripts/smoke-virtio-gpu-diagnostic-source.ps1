@@ -104,8 +104,9 @@ Assert-True ($mmioHeader.Contains('MMIO mappings must be kernel-only, no-executa
 Assert-True ($mmioHeader.Contains('Reserved kernel MMIO window')) 'mmio.h should document the reserved MMIO window'
 Assert-True ($mmioHeader.Contains('bounded bump allocator')) 'mmio.h should document the allocation strategy'
 
-Assert-True ($mmioCpp.Contains('GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE')) 'mmio.cpp should gate the active path behind the QEMU probe flag'
-Assert-True ($mmioCpp.Contains('runtime MMIO mapping is gated to the x86_64 QEMU probe build')) 'mmio.cpp should keep the fallback gate explicit'
+Assert-True ($mmioCpp.Contains('#if defined(ARCH_AMD64)')) 'mmio.cpp should expose the verified mapper on AMD64'
+Assert-True ($mmioCpp.Contains('runtime MMIO mapping is available only on AMD64')) 'mmio.cpp should keep the non-AMD64 fallback explicit'
+Assert-True ($mmioCpp.Contains('ensure_uc_pat_index')) 'mmio.cpp should verify the UC PAT encoding'
 Assert-True ($mmioCpp.Contains('PTE_PCD')) 'mmio.cpp should use PCD for MMIO'
 Assert-True ($mmioCpp.Contains('PTE_PWT')) 'mmio.cpp should use PWT for MMIO'
 Assert-True ($mmioCpp.Contains('PTE_NX')) 'mmio.cpp should mark MMIO non-executable'

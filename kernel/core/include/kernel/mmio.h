@@ -1,26 +1,23 @@
 // Kernel MMIO Mapping Diagnostics and Runtime Front Door
 //
-// Conservative helpers for reasoning about whether a physical MMIO range can
-// be mapped safely at runtime.
+// Helpers for validating and mapping a physical MMIO range at runtime.
 //
-// The active x86_64 runtime path uses a reserved high virtual MMIO window in
-// QEMU diagnostic builds only.  The helpers here centralize the safety checks,
-// window geometry, and the precise blocker text used by the QEMU-only
-// virtio-gpu probe.
+// AMD64 uses a reserved high virtual MMIO window with supervisor-only,
+// non-executable mappings and a UC PAT memory type.
 //
 // Copyright (c) 2026 guideXOS Server
 //
 
 #pragma once
 
-#include <kernel/types.h>
+#include "kernel/types.h"
 
 namespace kernel {
 namespace mmio {
 
 static const uint64_t PAGE_SIZE_BYTES = 0x1000ULL;
 static const uint64_t SAFE_DIRECT_MAP_CEILING = 0x100000000ULL; // Legacy diagnostic ceiling retained for compatibility.
-// Reserved kernel MMIO window for the x86_64 QEMU probe build.
+// Reserved kernel MMIO window for bounded AMD64 device mappings.
 // Base: 0xFFFFC00000000000
 // Size: 16 MiB
 // Allocation model: bounded bump allocator with conservative conflict checks.
@@ -79,6 +76,19 @@ inline bool range_overflows(uint64_t physicalBase, uint64_t length)
     return (length != 0ULL) && (physicalBase > (~0ULL - length));
 }
 
+inline bool physical_range_fits_bits(uint64_t physicalBase, uint64_t length,
+                                     uint8_t physicalAddressBits)
+{
+    if (length == 0u || physicalAddressBits == 0u || physicalAddressBits > 64u ||
+        range_overflows(physicalBase, length)) {
+        return false;
+    }
+    const uint64_t lastByte = physicalBase + length - 1u;
+    const uint64_t maxAddress = physicalAddressBits == 64u
+        ? ~0ULL : ((1ULL << physicalAddressBits) - 1u);
+    return lastByte <= maxAddress;
+}
+
 inline MappingReport describeRange(uint64_t physicalBase, uint64_t length, uint32_t flags = MAP_FLAG_NONE)
 {
     MappingReport report{};
@@ -108,16 +118,27 @@ inline MappingReport describeRange(uint64_t physicalBase, uint64_t length, uint3
 #endif
     report.success = false;
 
-    const bool rangeOverflow = range_overflows(physicalBase, length);
+    bool rangeOverflow = range_overflows(physicalBase, length);
     if (!rangeOverflow && length != 0) {
-        const uint64_t alignedEnd = align_up(physicalBase + length);
-        report.alignedLength = alignedEnd - report.alignedBase;
-        report.mappedLength = report.alignedLength;
-        report.pageCount = report.alignedLength / PAGE_SIZE_BYTES;
-        report.withinSafeDirectMap = ((flags & (MAP_FLAG_NON_USER | MAP_FLAG_NO_EXEC)) ==
-                                      (MAP_FLAG_NON_USER | MAP_FLAG_NO_EXEC)) &&
-                                     report.cacheAttributesSupported;
+        const uint64_t lastByte = physicalBase + length - 1u;
+        if (lastByte > (~0ULL - (PAGE_SIZE_BYTES - 1u))) {
+            rangeOverflow = true;
+        } else {
+            const uint64_t alignedEnd = align_down(lastByte) + PAGE_SIZE_BYTES;
+            report.alignedLength = alignedEnd - report.alignedBase;
+            report.mappedLength = report.alignedLength;
+            report.pageCount = report.alignedLength / PAGE_SIZE_BYTES;
+            report.withinSafeDirectMap = ((flags & (MAP_FLAG_NON_USER | MAP_FLAG_NO_EXEC)) ==
+                                          (MAP_FLAG_NON_USER | MAP_FLAG_NO_EXEC)) &&
+                                         report.cacheAttributesSupported;
+        }
     } else {
+        report.withinSafeDirectMap = false;
+    }
+    if (rangeOverflow) {
+        report.alignedLength = 0u;
+        report.mappedLength = 0u;
+        report.pageCount = 0u;
         report.withinSafeDirectMap = false;
     }
     report.requiresNewPageTableEntries = report.withinSafeDirectMap && report.pageCount != 0;
@@ -171,10 +192,8 @@ inline bool canMap(uint64_t physicalBase, uint64_t length,
         *reportOut = report;
     }
 
-    // The current branch can only claim feasibility when the range is eligible
-    // for the reserved QEMU-only MMIO window and the safe UC cache mode is
-    // available.  This is a preflight check only; it does not prove that the
-    // runtime window still has free slots.
+    // This is a preflight check only; it does not prove that the runtime window
+    // still has free slots or that active CPU/page-table state is supported.
     const bool hasRequiredSafetyFlags =
         (flags & (MAP_FLAG_NON_USER | MAP_FLAG_NO_EXEC)) == (MAP_FLAG_NON_USER | MAP_FLAG_NO_EXEC);
     return report.withinSafeDirectMap && hasRequiredSafetyFlags && report.cacheAttributesSupported;

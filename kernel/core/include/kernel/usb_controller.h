@@ -216,8 +216,9 @@ inline XhciCapabilities parse_xhci_capabilities(const uint32_t* cap,
         (((hcsp2 >> 21) & 0x1Fu) << 5) | ((hcsp2 >> 27) & 0x1Fu));
 
     c.hccParams1 = cap[4];
-    c.dboff      = cap[5];
-    c.rtsoff     = cap[6];
+    // Low reserved bits in these offset registers are not address bits.
+    c.dboff      = cap[5] & ~0x3u;
+    c.rtsoff     = cap[6] & ~0x1Fu;
     c.hccParams2 = cap[7];
 
     c.ac64 = (c.hccParams1 & (1u << 0)) != 0u;
@@ -236,8 +237,9 @@ inline XhciCapabilities parse_xhci_capabilities(const uint32_t* cap,
     if (c.hciVersion == 0x0000u || c.hciVersion == 0xFFFFu) ok = false;
     if (c.maxSlots == 0u) ok = false;
     if (c.maxPorts == 0u) ok = false;
+    if (cap[4] == 0xFFFFFFFFu || cap[5] == 0xFFFFFFFFu ||
+        cap[6] == 0xFFFFFFFFu) ok = false;
     if (c.rtsoff == 0u || c.dboff == 0u) ok = false;
-    if (c.rtsoff == 0xFFFFu || c.dboff == 0xFFFFu) ok = false;
 
     c.valid = ok;
     return c;

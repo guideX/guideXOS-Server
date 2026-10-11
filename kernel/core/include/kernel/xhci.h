@@ -509,47 +509,167 @@ inline uint64_t erst_encode_base(uint64_t base)
 struct XhciBarInfo {
     bool     valid;
     bool     is64;
+    bool     prefetchable;
+    bool     ioSpace;
+    uint8_t  type;
     uint64_t base;
-    uint32_t minSize; // minimum MMIO span required
+    uint64_t minSize; // minimum MMIO span required
+    const char* reason;
 };
 
 inline XhciBarInfo validate_mmio_bar(uint32_t bar0, uint32_t bar1,
-                                      uint32_t minSize)
+                                      uint64_t minSize)
 {
-    XhciBarInfo info;
-    info.valid = false;
-    info.is64 = false;
-    info.base = 0;
+    XhciBarInfo info = {};
     info.minSize = minSize;
 
     if (bar0 == 0 || bar0 == 0xFFFFFFFF) {
+        info.reason = "BAR0 is unassigned or all ones";
         return info;
     }
 
     if (bar0 & 0x01) {
-        return info; // I/O BAR
+        info.ioSpace = true;
+        info.reason = "BAR0 selects I/O space; xHCI requires memory space";
+        return info;
     }
 
-    const uint32_t barType = (bar0 >> 1) & 0x03;
-    if (barType == 0x02) {
+    info.type = static_cast<uint8_t>((bar0 >> 1) & 0x03u);
+    info.prefetchable = (bar0 & 0x08u) != 0u;
+    if (info.type == 0x02u) {
         info.is64 = true;
-        if (bar1 == 0 || bar1 == 0xFFFFFFFF) {
+        // BAR1 is the high address dword. Zero is valid when the assigned
+        // 64-bit MMIO resource lies below 4 GiB; it is not an absence marker.
+        info.base = ((uint64_t)bar1 << 32) | (bar0 & 0xFFFFFFF0);
+    } else if (info.type == 0x00u) {
+        info.base = bar0 & 0xFFFFFFF0;
+    } else if (info.type == 0x01u) {
+        // PCI defines type 01 as a below-1-MiB memory BAR. Bits 31:20 are
+        // reserved in this encoding and the complete register span must
+        // remain in the 20-bit address window.
+        if ((bar0 & 0xFFF00000u) != 0u) {
+            info.reason = "below-1-MiB BAR has reserved address bits set";
             return info;
         }
-        info.base = ((uint64_t)bar1 << 32) | (bar0 & 0xFFFFFFF0);
-    } else if (barType == 0x00) {
-        info.is64 = false;
-        info.base = bar0 & 0xFFFFFFF0;
+        info.base = bar0 & 0x000FFFF0u;
+        if (minSize == 0u || info.base >= 0x100000u ||
+            minSize - 1u > (0xFFFFFu - info.base)) {
+            info.reason = "required MMIO span crosses the below-1-MiB BAR address window";
+            return info;
+        }
     } else {
-        return info; // reserved type
+        info.reason = "BAR0 uses reserved memory BAR type 11b";
+        return info;
     }
 
-    if (info.base == 0 || info.base == 0xFFFFFFFF) {
+    if (info.base == 0) {
+        info.reason = "decoded BAR base is zero";
+        return info;
+    }
+    if (minSize == 0) {
+        info.reason = "required MMIO span is zero";
+        return info;
+    }
+    if (minSize - 1u > (~static_cast<uint64_t>(0) - info.base)) {
+        info.reason = "BAR base plus required MMIO span overflows 64-bit address space";
         return info;
     }
 
     info.valid = true;
+    info.reason = "BAR decoded and required span is representable";
     return info;
+}
+
+enum class XhciMmioAccessFailure : uint8_t {
+    None = 0,
+    InvalidBar,
+    MemorySpaceDisabled,
+    MappingUnavailable,
+    MappingPhysicalMismatch,
+    MappingTooShort,
+    MappingVirtualOverflow
+};
+
+struct XhciMmioAccess {
+    bool valid;
+    XhciMmioAccessFailure failure;
+};
+
+// Pure gate used after the architecture mapper reports its result. It keeps
+// every xHCI register dereference behind BAR, PCI command, translation, and
+// complete-span checks and is deterministic in hosted tests.
+inline XhciMmioAccess validate_mmio_access(const XhciBarInfo& bar,
+                                           bool memorySpaceEnabled,
+                                           uint64_t requiredSpan,
+                                           bool mappingSucceeded,
+                                           uint64_t mappedPhysicalBase,
+                                           uint64_t mappedVirtualBase,
+                                           uint64_t mappedLength)
+{
+    XhciMmioAccess access = {};
+    if (!bar.valid) {
+        access.failure = XhciMmioAccessFailure::InvalidBar;
+    } else if (!memorySpaceEnabled) {
+        access.failure = XhciMmioAccessFailure::MemorySpaceDisabled;
+    } else if (requiredSpan == 0u ||
+               requiredSpan - 1u > (~static_cast<uint64_t>(0) - bar.base)) {
+        access.failure = XhciMmioAccessFailure::InvalidBar;
+    } else if (!mappingSucceeded || mappedVirtualBase == 0u) {
+        access.failure = XhciMmioAccessFailure::MappingUnavailable;
+    } else if (mappedPhysicalBase != bar.base) {
+        access.failure = XhciMmioAccessFailure::MappingPhysicalMismatch;
+    } else if (mappedLength < requiredSpan) {
+        access.failure = XhciMmioAccessFailure::MappingTooShort;
+    } else if (requiredSpan - 1u > (~static_cast<uint64_t>(0) - mappedVirtualBase)) {
+        access.failure = XhciMmioAccessFailure::MappingVirtualOverflow;
+    } else {
+        access.valid = true;
+        access.failure = XhciMmioAccessFailure::None;
+    }
+    return access;
+}
+
+inline const char* xhci_mmio_access_failure_name(XhciMmioAccessFailure failure)
+{
+    switch (failure) {
+        case XhciMmioAccessFailure::InvalidBar: return "BAR/span validation failed";
+        case XhciMmioAccessFailure::MemorySpaceDisabled: return "PCI memory-space decoding is disabled";
+        case XhciMmioAccessFailure::MappingUnavailable: return "physical-to-virtual MMIO mapping unavailable";
+        case XhciMmioAccessFailure::MappingPhysicalMismatch: return "mapper returned a different physical range";
+        case XhciMmioAccessFailure::MappingTooShort: return "mapped range is shorter than the required MMIO span";
+        case XhciMmioAccessFailure::MappingVirtualOverflow: return "mapped virtual range overflows 64-bit address space";
+        default: return "none";
+    }
+}
+
+// Return the exclusive byte span needed by this bounded xHCI driver. Includes
+// the capability block, the first xECP dword, operational/port registers,
+// interrupter zero, and doorbells through MaxSlots.
+inline bool xhci_required_mmio_span(const XhciCapabilities& caps,
+                                    uint64_t* spanOut)
+{
+    if (spanOut == nullptr || !caps.valid || caps.maxPorts == 0u ||
+        caps.maxSlots == 0u) {
+        return false;
+    }
+    const uint64_t capSpan = XHCI_CAP_DWORD_COUNT * 4u;
+    const uint64_t xecpSpan = caps.xecp == 0u
+        ? 0u : static_cast<uint64_t>(caps.xecpBase) + 4u;
+    const uint64_t opSpan = static_cast<uint64_t>(caps.opBase) + 0x400u +
+        static_cast<uint64_t>(caps.maxPorts) * 0x10u;
+    const uint64_t runtimeSpan = static_cast<uint64_t>(caps.rtBase) + 0x40u;
+    const uint64_t doorbellSpan = static_cast<uint64_t>(caps.dbBase) +
+        (static_cast<uint64_t>(caps.maxSlots) + 1u) * 4u;
+    uint64_t span = capSpan;
+    if (xecpSpan > span) span = xecpSpan;
+    if (opSpan > span) span = opSpan;
+    if (runtimeSpan > span) span = runtimeSpan;
+    if (doorbellSpan > span) span = doorbellSpan;
+    if (span == 0u || span > (~static_cast<uint64_t>(0) - 0xFFFu)) {
+        return false;
+    }
+    *spanOut = span;
+    return true;
 }
 
 // Translate a statically linked kernel address into a controller-visible

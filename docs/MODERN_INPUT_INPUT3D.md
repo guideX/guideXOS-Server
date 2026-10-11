@@ -61,6 +61,41 @@ the descriptor prefix has its own validator. Root-port reset writes avoid
 clearing unrelated write-one-to-clear status bits. IOMMU presence and physical
 qualification still require real-machine evidence.
 
+## INPUT3D-R1: BAR/MMIO failure frontier
+
+On the 2026-10-11 physical boot, the recorded result `0xe1020004` was the raw
+BAR0 dword passed to the generic stage formatter, not an xHCI error code. Its
+low attribute bits identify a 64-bit memory BAR, and its address bits decode
+to `0x00000000e1020000` when BAR1 is zero. The former validator rejected both
+BAR1 zero and BAR1 all-ones as unassigned, even though zero is a valid upper
+dword for a 64-bit BAR below 4 GiB. The old overlay did not retain BAR1, so
+this boot proves that the initial BAR-validation branch failed before any
+capability access, but it cannot distinguish which of those two BAR1 values
+was read. INPUT3D-R1 records both raw dwords and the exact validation substage
+and reason for the next boot.
+
+The second defect was independent of BAR decoding: xHCI initialization cast
+the decoded physical BAR address directly to a C++ pointer. The UEFI loader
+builds new four-level page tables from a bounded list of identity-mapped
+ranges (kernel, boot data, framebuffer, and selected devices); it does not add
+the xHCI BAR. Therefore physical and virtual addresses could not be assumed
+identical. PCI scanning also had an earlier read-only capability probe that
+dereferenced the BAR before xHCI validation.
+
+INPUT3D-R1 now decodes all defined PCI memory BAR types, masks address and
+attribute fields, validates the full xHCI register span for overflow, verifies
+PCI memory-space decoding, maps the physical BAR into the kernel's AMD64 UC,
+non-executable MMIO window, and checks the returned physical-to-virtual
+translation and covered span before the first register read. The xHCI path
+performs no raw BAR dereference. The overlay reports BAR0/BAR1, decoded base,
+type/attributes, initial and current PCI memory-enable state, required span,
+mapping result, validation substage, and reason. CAPLENGTH and HCIVERSION are
+published only after the initial capability range maps and passes validation.
+BAR1 zero is accepted as address data; invalid or unmapppable resources still
+stop initialization with their reason intact. No new physical boot has been
+performed, so this repair is not yet physical acceptance and makes no HID
+input claim.
+
 ## Physical comparison procedure
 
 Use the same INPUT3D ISO on each machine. Do not write it to a USB drive from

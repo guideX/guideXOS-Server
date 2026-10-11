@@ -76,6 +76,7 @@ struct StageResult {
     bool hasErrorCode;
     bool hasControllerStatus;
     bool hasCompletionCode;
+    const char* detail;
 };
 
 struct ControllerSnapshot {
@@ -92,6 +93,21 @@ struct ControllerSnapshot {
     OwnershipStatus ownership;
     bool occupied;
     uint64_t mmioBase;
+    uint32_t pciBar0;
+    uint32_t pciBar1;
+    uint16_t pciCommand;
+    uint16_t pciCommandInitial;
+    bool pciCommandInitialCaptured;
+    uint8_t pciBarType;
+    bool pciBarIsIo;
+    bool pciBarIs64;
+    bool pciBarPrefetchable;
+    uint64_t mmioRequiredSpan;
+    uint64_t mmioMappedVirtual;
+    uint64_t mmioMappedLength;
+    bool mmioMappingSucceeded;
+    const char* mmioValidationSubstage;
+    const char* mmioMappingReason;
     uint8_t capLength;
     uint16_t hciVersion;
     uint8_t maxSlots;
@@ -166,6 +182,14 @@ int32_t record_controller(uint8_t bus, uint8_t device, uint8_t function,
 int32_t find_controller(uint8_t bus, uint8_t device, uint8_t function);
 void select_controller(int32_t controllerIndex);
 void record_mmio_base(int32_t controllerIndex, uint64_t base);
+void record_mmio_configuration(int32_t controllerIndex, uint32_t bar0,
+                                uint32_t bar1, uint16_t pciCommand,
+                                uint8_t barType, bool barIsIo, bool barIs64,
+                                bool barPrefetchable);
+void record_mmio_mapping(int32_t controllerIndex, const char* substage,
+                         uint64_t requiredSpan,
+                         bool succeeded, uint64_t mappedVirtual,
+                         uint64_t mappedLength, const char* reason);
 void record_ownership_status(int32_t controllerIndex, OwnershipStatus status);
 void record_capabilities(int32_t controllerIndex, uint8_t capLength,
                          uint16_t hciVersion, uint8_t maxSlots,
@@ -181,7 +205,8 @@ void record_stage(int32_t controllerIndex, Stage stage, Status status,
                   uint32_t errorCode, bool hasErrorCode,
                   uint32_t controllerStatus, bool hasControllerStatus,
                   uint8_t slotId, uint8_t portId, uint8_t endpointId,
-                  uint8_t completionCode, bool hasCompletionCode);
+                  uint8_t completionCode, bool hasCompletionCode,
+                  const char* detail = nullptr);
 void increment_counter(int32_t controllerIndex, Counter counter);
 void copy_snapshot(Snapshot* outSnapshot);
 

@@ -40,8 +40,11 @@ Assert-Match -Path $mmioHeader -Pattern 'uc\(pcd\+pwt\)' -Message 'mmio.h should
 Assert-Match -Path $mmioHeader -Pattern 'mapForDevice' -Message 'mmio.h should declare the runtime device-mapping helper.'
 Assert-Match -Path $mmioHeader -Pattern 'unmap' -Message 'mmio.h should declare the runtime unmap helper.'
 
-Assert-Match -Path $mmioCpp -Pattern 'GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE' -Message 'mmio.cpp should gate the active mapper behind the QEMU probe build flag.'
-Assert-Match -Path $mmioCpp -Pattern 'runtime MMIO mapping is gated to the x86_64 QEMU probe build' -Message 'mmio.cpp should keep the non-QEMU fallback explicit.'
+Assert-Match -Path $mmioCpp -Pattern '#if defined\(ARCH_AMD64\)' -Message 'mmio.cpp should activate the verified mapper on AMD64 builds.'
+Assert-Match -Path $mmioCpp -Pattern 'runtime MMIO mapping is available only on AMD64' -Message 'mmio.cpp should keep the non-AMD64 fallback explicit.'
+Assert-Match -Path $mmioCpp -Pattern 'physical_range_fits_bits' -Message 'mmio.cpp should validate the CPU physical-address width.'
+Assert-Match -Path $mmioCpp -Pattern 'ensure_uc_pat_index' -Message 'mmio.cpp should verify a UC PAT encoding before mapping.'
+Assert-Match -Path $mmioCpp -Pattern 'five-level paging is active' -Message 'mmio.cpp should reject unsupported LA57 page tables.'
 Assert-Match -Path $mmioCpp -Pattern 'PTE_PCD' -Message 'mmio.cpp should use PCD for device MMIO.'
 Assert-Match -Path $mmioCpp -Pattern 'PTE_PWT' -Message 'mmio.cpp should use PWT for device MMIO.'
 Assert-Match -Path $mmioCpp -Pattern 'PTE_NX' -Message 'mmio.cpp should mark MMIO mappings non-executable.'
@@ -49,7 +52,7 @@ Assert-Match -Path $mmioCpp -Pattern 'mapped into reserved kernel MMIO window' -
 Assert-Match -Path $mmioCpp -Pattern 'reused reserved kernel MMIO page' -Message 'mmio.cpp should deduplicate repeated page mappings.'
 Assert-Match -Path $mmioCpp -Pattern 'reserved MMIO window exhausted' -Message 'mmio.cpp should stop on window exhaustion.'
 Assert-Match -Path $mmioCpp -Pattern 'kernel::arch::invalidate_tlb_entry' -Message 'mmio.cpp should invalidate TLB entries after mapping and unmapping.'
-Assert-Match -Path $mmioCpp -Pattern 'MMIO unmap is gated to the x86_64 QEMU probe build' -Message 'mmio.cpp should keep the unmap gate explicit.'
+Assert-Match -Path $mmioCpp -Pattern 'runtime MMIO unmap is available only on AMD64' -Message 'mmio.cpp should keep the non-AMD64 unmap fallback explicit.'
 
 Assert-Match -Path $virtioGpuCpp -Pattern 'kernel::mmio::mapForDevice' -Message 'virtio_gpu.cpp should route MMIO access through the mapping helper.'
 Assert-Match -Path $virtioGpuCpp -Pattern 'MAP_FLAG_NON_USER' -Message 'virtio_gpu.cpp should request kernel-only, no-exec, uncached MMIO mappings.'
