@@ -594,7 +594,11 @@ try {
         fs = '2.4.16'
         pycdlib = '1.16.0'
         isoBackend = $IsoBackend
-        canonicalBuild = 'build.ps1 -Arch amd64' + $(if ($Clean) { ' -Clean' } else { '' }) + $(if ($ModernInputDiagnostics) { ' -ModernInputDiagnostics' } else { '' })
+        canonicalBuild = if ($SkipBuild) {
+            'not invoked (-SkipBuild); prebuilt ESP inputs validated from build-identity.txt'
+        } else {
+            'build.ps1 -Arch amd64' + $(if ($Clean) { ' -Clean' } else { '' }) + $(if ($ModernInputDiagnostics) { ' -ModernInputDiagnostics' } else { '' })
+        }
     }
     if ($IsoBackend -eq 'Oscdimg') {
         $toolRecords.oscdimg = Get-ToolRecord $oscdimg $oscdimgVersion
