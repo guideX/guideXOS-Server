@@ -110,3 +110,59 @@ Console.WriteLine("Spacecraft data: Simulated (not measured)");
 Console.WriteLine("No navigation solution is validated for flight use.");
 Console.WriteLine();
 Console.WriteLine("Stellar Navigator SN2 - Offline operation confirmed.");
+
+// ─── SN3: continuous Chebyshev evaluation at an arbitrary TDB epoch ───
+Console.WriteLine();
+Console.WriteLine("=== Stellar Navigator SN3 ===");
+Console.WriteLine("Continuous Chebyshev evaluation (pure managed code, offline)");
+
+var chebyPath = Path.Combine(AppContext.BaseDirectory, "Data", "ephemeris_de440s_chebyshev.json");
+if (!File.Exists(chebyPath))
+{
+    Console.WriteLine($"SN3 dataset missing: {chebyPath}");
+    Console.WriteLine("SN3 continuous evaluation is unavailable; SN2 exact-sample data above remains valid.");
+    return;
+}
+
+var continuous = new ChebyshevEphemerisProvider(chebyPath);
+Console.WriteLine($"Continuous source: {continuous.DataSource}");
+Console.WriteLine($"Records: {continuous.TotalRecords}, SHA-256: {continuous.Sha256[..16]}...");
+Console.WriteLine($"Coverage: {continuous.CoverageStart.JdUtc:F6} to {continuous.CoverageEnd.JdUtc:F6} JD (TDB)");
+
+// Minimal off-grid epoch selection: CLI args [bodyId] [jdTdb], else defaults
+// deliberately off the SN2 30-day sample grid.
+string targetId = args.Length > 0 ? args[0] : "mars";
+double jdTdb = args.Length > 1 && double.TryParse(args[1],
+    System.Globalization.NumberStyles.Float,
+    System.Globalization.CultureInfo.InvariantCulture, out var parsed)
+    ? parsed
+    : 2451545.0 + 12.3456789;
+var offGridEpoch = new AstroTime(jdTdb, TimeScale.Tdb);
+Console.WriteLine($"Requested body: {targetId}, TDB epoch: JD {jdTdb:F7}");
+
+var state = continuous.GetState(targetId, offGridEpoch, barycentric);
+if (state.IsSuccess && state.Value is var (cpos, cvel))
+{
+    Console.WriteLine($"{targetId} position (km): ({cpos.X / 1000.0:F3}, {cpos.Y / 1000.0:F3}, {cpos.Z / 1000.0:F3})");
+    Console.WriteLine($"{targetId} velocity (km/s): ({cvel.X / 1000.0:F6}, {cvel.Y / 1000.0:F6}, {cvel.Z / 1000.0:F6})");
+    Console.WriteLine($"Source: {state.Provenance}  Quality: {state.Status}");
+
+    string otherId = targetId == "earth" ? "mars" : "earth";
+    var relCalc = new RelativePositionCalculator(continuous);
+    var rel = relCalc.Calculate(targetId, otherId, offGridEpoch);
+    if (rel.IsSuccess)
+        Console.WriteLine($"{targetId}-{otherId} distance: {rel.Value!.SeparationDistanceKm:F3} km [{rel.Value.Status}]");
+    else
+        Console.WriteLine($"Distance unavailable: {rel.ErrorMessage}");
+}
+else
+{
+    Console.WriteLine($"UNAVAILABLE [{state.Status}]: {state.ErrorMessage}");
+}
+
+// Explicit failure demonstration: epoch beyond supported coverage.
+var farFuture = new AstroTime(2506352.5 + 365.0, TimeScale.Tdb);
+var oob = continuous.GetState("earth", farFuture, barycentric);
+Console.WriteLine($"Out-of-coverage query: Success={oob.IsSuccess} [{oob.Status}] {oob.ErrorMessage}");
+Console.WriteLine();
+Console.WriteLine("Stellar Navigator SN3 - Continuous offline evaluation confirmed.");
