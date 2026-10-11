@@ -1,0 +1,34 @@
+#ifndef GUIDEXOS_REXX_CLI_H
+#define GUIDEXOS_REXX_CLI_H
+
+/*
+ * Native command-line front end for the guideXOS REXX interpreter.
+ *
+ * A shell command table can register guide_rexx_main directly. The function
+ * accepts the conventional argc/argv shape and returns a process-style
+ * status: zero on success, one for a script/file/runtime failure, and two
+ * for invalid command-line usage.
+ */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/*
+ * Execute one REXX source file.
+ *
+ * Supported forms:
+ *   rexx <script.rx>
+ *   rexx --help
+ *   rexx -- <script-path>
+ *
+ * The wrapper owns and releases all source, parser, bytecode, and VM state
+ * created while executing the script. The argv strings remain caller-owned.
+ */
+int guide_rexx_main(int argc, char **argv);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* GUIDEXOS_REXX_CLI_H */
