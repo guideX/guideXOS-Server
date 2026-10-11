@@ -1,5 +1,6 @@
 #include "compositor.h"
 #include "compositor_pointer_buttons.h"
+#include "compositor_resize_notification.h"
 #include "allocator.h"
 #include "built_in_app_metadata.h"
 #include "desktop_state.h"
@@ -6418,7 +6419,31 @@ namespace gxos {
             if (down) { for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { WinInfo& w = g_windows[g_z[idx]]; if (!w.resizable || w.minimized || w.maximized || w.tombstoned) continue; if (mx >= w.x + w.w - gripSize && mx < w.x + w.w && my >= w.y + w.h - gripSize && my < w.y + w.h) { g_resizeActive = true; g_resizeWin = w.id; g_resizeStartW = w.w; g_resizeStartH = w.h; g_resizeStartMX = mx; g_resizeStartMY = my; break; } } }
             if (g_dragActive && up) { auto it = g_windows.find(g_dragWin); if (it != g_windows.end( )) { WinInfo& w = it->second; const int snap = 16; bool nearLeft = mx <= snap, nearRight = mx >= cr.right - snap, nearTop = my <= snap; if (nearTop && !(nearLeft || nearRight)) { maximizeWindow(w, work); } else if (nearLeft) { w.maximized = false; w.x = work.left; w.y = work.top; w.w = (work.right - work.left) / 2; w.h = work.bottom - work.top; w.snapState = 1; w.dirty = true; } else if (nearRight) { w.maximized = false; w.x = work.left + (work.right - work.left) / 2; w.y = work.top; w.w = (work.right - work.left) / 2; w.h = work.bottom - work.top; w.snapState = 2; w.dirty = true; } } g_dragActive = false; g_dragWin = 0; g_snapPreviewActive = false; invalidate(0); }
             if (g_resizeActive && !up) { auto it = g_windows.find(g_resizeWin); if (it != g_windows.end( )) { int dw = mx - g_resizeStartMX; int dh = my - g_resizeStartMY; int newW = g_resizeStartW + dw; if (newW < 160) newW = 160; int newH = g_resizeStartH + dh; if (newH < 120) newH = 120; g_resizePreviewActive = true; g_resizePreviewW = newW; g_resizePreviewH = newH; } }
-            if (g_resizeActive && up) { auto it = g_windows.find(g_resizeWin); if (it != g_windows.end( )) { int dw = mx - g_resizeStartMX; int dh = my - g_resizeStartMY; int newW = g_resizeStartW + dw; if (newW < 160) newW = 160; int newH = g_resizeStartH + dh; if (newH < 120) newH = 120; it->second.w = newW; it->second.h = newH; clampNormalBounds(it->second, work); rememberNormalBounds(it->second); it->second.dirty = true; } g_resizeActive = false; g_resizeWin = 0; g_resizePreviewActive = false; }
+            if (g_resizeActive && up) {
+                auto it = g_windows.find(g_resizeWin);
+                if (it != g_windows.end( )) {
+                    int dw = mx - g_resizeStartMX;
+                    int dh = my - g_resizeStartMY;
+                    int newW = std::max(160, g_resizeStartW + dw);
+                    int newH = std::max(120, g_resizeStartH + dh);
+                    WinInfo& resized = it->second;
+                    const int previousW = resized.w;
+                    const int previousH = resized.h;
+                    resized.w = newW;
+                    resized.h = newH;
+                    clampNormalBounds(resized, work);
+                    rememberNormalBounds(resized);
+                    resized.dirty = true;
+                    if ((resized.w != previousW || resized.h != previousH) && resized.ownerPid != 0) {
+                        publishOut(MsgType::MT_Resize,
+                            gxos::gui::resizenotice::payload(resized.id, resized.w, resized.h),
+                            resized.ownerPid);
+                    }
+                }
+                g_resizeActive = false;
+                g_resizeWin = 0;
+                g_resizePreviewActive = false;
+            }
             if (down) { for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { WinInfo& w = g_windows[g_z[idx]]; if (w.minimized || w.tombstoned) continue; if (g_modalWindow != 0 && w.id != g_modalWindow) continue; if (mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + w.h) { g_focus = w.id; for (auto itZ = g_z.begin( ); itZ != g_z.end( ); ++itZ) { if (*itZ == w.id) { g_z.erase(itZ); break; } } g_z.push_back(w.id); publishOut(MsgType::MT_SetFocus, std::to_string(w.id), w.ownerPid); break; } } }
             return captureRequested;
         }
@@ -6538,7 +6563,7 @@ namespace gxos {
             std::string s(m.data.begin( ), m.data.end( )); switch ((MsgType)m.type) {
             case MsgType::MT_Create: { 
                 Logger::write(LogLevel::Info, std::string("Compositor received MT_Create: ") + s + " from pid=" + std::to_string(m.srcPid));
-                std::istringstream iss(s); std::string title; std::getline(iss, title, '|'); std::string wS, hS, flagsS; std::getline(iss, wS, '|'); std::getline(iss, hS, '|'); std::getline(iss, flagsS, '|'); int w = 320, h = 200; uint32_t createFlags = gui::kWindowCreateFlagResizable; try { w = std::stoi(wS); h = std::stoi(hS); if (!flagsS.empty()) createFlags = static_cast<uint32_t>(std::stoul(flagsS)); } catch (...) {} uint64_t id = s_nextWinId.fetch_add(1); uint64_t previousFocus = 0; const std::string persistenceKey = windowPersistenceKey(m.srcPid);
+                std::istringstream iss(s); std::string title; std::getline(iss, title, '|'); std::string wS, hS, flagsS; std::getline(iss, wS, '|'); std::getline(iss, hS, '|'); std::getline(iss, flagsS, '|'); int w = 320, h = 200; uint32_t createFlags = gui::kWindowCreateFlagResizable; try { w = std::stoi(wS); h = std::stoi(hS); if (!flagsS.empty()) createFlags = static_cast<uint32_t>(std::stoul(flagsS)); } catch (...) {} uint64_t id = s_nextWinId.fetch_add(1); uint64_t previousFocus = 0; int actualWidth = w; int actualHeight = h; const std::string persistenceKey = windowPersistenceKey(m.srcPid);
                 { 
                     std::lock_guard<std::mutex> lk(g_lock); 
                     previousFocus = g_focus;
@@ -6615,6 +6640,8 @@ namespace gxos {
                         clampNormalBounds(wi, work);
                     }
                     rememberNormalBounds(wi);
+                    actualWidth = wi.w;
+                    actualHeight = wi.h;
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
                     wi.taskbarIcon = Icons::TaskbarIcon(16);
 #endif
@@ -6627,7 +6654,12 @@ namespace gxos {
                     if (wi.modal) g_modalWindow = id;
                 } 
                 Logger::write(LogLevel::Info, std::string("Compositor created window id=") + std::to_string(id) + " sending ack to pid=" + std::to_string(m.srcPid));
-                publishOut(MsgType::MT_Create, std::to_string(id) + "|" + title, m.srcPid); sendFocusChange(previousFocus, id); invalidate(id); } break;
+                publishOut(MsgType::MT_Create, std::to_string(id) + "|" + title, m.srcPid);
+                if (actualWidth != w || actualHeight != h) {
+                    publishOut(MsgType::MT_Resize,
+                        gxos::gui::resizenotice::payload(id, actualWidth, actualHeight), m.srcPid);
+                }
+                sendFocusChange(previousFocus, id); invalidate(id); } break;
             case MsgType::MT_RequestFrame: { uint64_t id = 0; uint64_t ownerPid = 0; int width = 0; int height = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( ) && it->second.ownerPid == m.srcPid) { ownerPid = it->second.ownerPid; width = it->second.w; height = it->second.h; } } if (ownerPid != 0) {
                     // This is the app-side paint request/response handshake.
                     // Do not invalidate the compositor before the app has
