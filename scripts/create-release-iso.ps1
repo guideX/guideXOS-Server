@@ -7,6 +7,7 @@ param(
 
     [switch]$Clean,
     [switch]$SkipBuild,
+    [switch]$ModernInputDiagnostics,
     [switch]$RequireCleanWorktree,
     [switch]$Force,
     [switch]$BootstrapTools,
@@ -417,6 +418,7 @@ function Invoke-CanonicalBuild {
     if ($null -eq $powershell) { Fail 'Windows PowerShell (powershell.exe) is required to invoke the canonical build.' }
     $buildArgs = @('-Arch', $Arch)
     if ($Clean) { $buildArgs = @('-Clean', '-Arch', $Arch) }
+    if ($ModernInputDiagnostics) { $buildArgs += '-ModernInputDiagnostics' }
     Write-Host "[release-iso] invoking canonical build.ps1 with supported arguments" -ForegroundColor Cyan
     Invoke-ExternalChecked -FilePath $powershell.Source -Arguments (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $BuildScript) + $buildArgs) | Out-Null
 }
@@ -475,6 +477,33 @@ try {
     if (-not $SkipBuild) { Invoke-CanonicalBuild }
     $esp = Get-EspContents
 
+    if ($ModernInputDiagnostics) {
+        $identityPath = Join-Path $EspRoot 'build-identity.txt'
+        $kernelPath = Join-Path $EspRoot 'kernel.elf'
+        if (-not (Test-Path -LiteralPath $identityPath -PathType Leaf)) {
+            Fail 'INPUT3D packaging requires ESP/build-identity.txt from the canonical diagnostic build.'
+        }
+        if (-not (Test-Path -LiteralPath $kernelPath -PathType Leaf)) {
+            Fail 'INPUT3D packaging requires ESP/kernel.elf from the canonical diagnostic build.'
+        }
+        $identity = Get-Content -LiteralPath $identityPath -Raw
+        $actualKernelHash = (Get-FileHash -LiteralPath $kernelPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $expectedRevision = $sourceCommit.Substring(0, 12)
+        $identityRevision = [regex]::Match($identity, '(?m)^sourceGitCommit=([0-9a-fA-F]{12,40})\s*$')
+        $identityKernelHash = [regex]::Match($identity, '(?m)^espKernelSha256=([0-9a-fA-F]{64})\s*$')
+        if ($identity -notmatch '(?m)^input3dDiagnostics=enabled\s*$') {
+            Fail 'ESP/build-identity.txt does not identify an INPUT3D diagnostic kernel.'
+        }
+        if (-not $identityRevision.Success -or
+            $identityRevision.Groups[1].Value.Substring(0, 12).ToLowerInvariant() -ne $expectedRevision.ToLowerInvariant()) {
+            Fail "ESP/build-identity.txt source revision does not match packaging HEAD $sourceCommit. Run the canonical diagnostic build first."
+        }
+        if (-not $identityKernelHash.Success -or
+            $identityKernelHash.Groups[1].Value.ToLowerInvariant() -ne $actualKernelHash) {
+            Fail 'ESP/build-identity.txt kernel hash does not match ESP/kernel.elf; refusing to package stale diagnostic media.'
+        }
+    }
+
     $bootloader = Get-Item -LiteralPath (Join-Path $EspRoot 'EFI\BOOT\BOOTX64.EFI')
     $kernel = Get-Item -LiteralPath (Join-Path $EspRoot 'kernel.elf')
     $ramdisk = Get-Item -LiteralPath (Join-Path $EspRoot 'ramdisk.img')
@@ -510,6 +539,7 @@ try {
         ("Version: $Version"),
         ("Architecture: $Arch"),
         ("Source commit: $sourceCommit"),
+        $(if ($ModernInputDiagnostics) { 'Purpose: INPUT3D physical USB/xHCI diagnostics.' } else { '' }),
         '',
         ("The bootable UEFI FAT image is $bootImageIsoPath."),
         'It contains the complete guideXOS Server EFI payload.',
@@ -564,10 +594,15 @@ try {
         fs = '2.4.16'
         pycdlib = '1.16.0'
         isoBackend = $IsoBackend
-        canonicalBuild = 'build.ps1 -Arch amd64' + $(if ($Clean) { ' -Clean' } else { '' })
+        canonicalBuild = 'build.ps1 -Arch amd64' + $(if ($Clean) { ' -Clean' } else { '' }) + $(if ($ModernInputDiagnostics) { ' -ModernInputDiagnostics' } else { '' })
     }
     if ($IsoBackend -eq 'Oscdimg') {
         $toolRecords.oscdimg = Get-ToolRecord $oscdimg $oscdimgVersion
+    }
+    $diagnosticMode = if ($ModernInputDiagnostics) {
+        'INPUT3D hardware diagnostics'
+    } else {
+        'standard'
     }
     $manifest = [ordered]@{
         schemaVersion = 1
@@ -583,6 +618,7 @@ try {
         sourceGitBranch = $sourceBranch
         worktreeCleanAtPackagingStart = [bool]$worktreeClean
         worktreeStatusAtPackagingStart = @($sourceStatusLines)
+        diagnosticMode = $diagnosticMode
         buildTimestampUtc = $PackageStartUtc.ToString('o')
         requiredInputFiles = @($esp.Required)
         inputFiles = @($esp.Files)

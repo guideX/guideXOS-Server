@@ -16,11 +16,16 @@ param(
     [switch]$Ext4Only,
     [switch]$Debug,
     [switch]$WaitGdb,
+    [switch]$ModernInputDiagnostics,
     [string]$Memory = "1024M",
     [string]$Arch = "amd64"
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($ModernInputDiagnostics -and $Arch -ne "amd64") {
+    throw "Modern input hardware diagnostics are currently supported only by the AMD64 boot path."
+}
 
 Write-Host "====================================" -ForegroundColor Cyan
 Write-Host "  guideXOS Complete Build System" -ForegroundColor Cyan
@@ -331,6 +336,9 @@ if (!$SkipKernel) {
         if (-not [string]::IsNullOrWhiteSpace($env:EXTRA_CFLAGS)) {
             $KernelExtraCFlags += $env:EXTRA_CFLAGS.Trim()
         }
+        if ($ModernInputDiagnostics) {
+            $KernelExtraCFlags += "-DGXOS_INPUT3D_DIAGNOSTICS=1"
+        }
         # Keep the default bare-metal build free of boot-time smoke launches.
         # The kernel makefile does not include CFLAGS in object dependencies. If
         # an opt-in launch-smoke build ran immediately before a normal build,
@@ -339,6 +347,11 @@ if (!$SkipKernel) {
         if (-not $cleanupSmokeEnabled) {
             Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelDir "build\$Arch\obj\core\main.o")
         }
+        # The diagnostic overlay is selected by a CFLAGS define, and the
+        # kernel makefile does not track CFLAGS as an object dependency.
+        # Rebuild desktop.cpp on every scripted kernel build to avoid keeping
+        # a diagnostic or non-diagnostic object from the preceding build.
+        Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelDir "build\$Arch\obj\core\desktop.o")
         # The file-operation runtime smoke adds run_runtime_smoke() to the
         # clipboard translation unit. CFLAGS are not part of the Makefile's
         # object dependency key, so invalidate that object when switching
@@ -443,6 +456,8 @@ elseif (Test-Path $KernelBin) {
         "kernelSource=$KernelBin"
         "kernelSha256=$((Get-FileHash -LiteralPath $KernelBin -Algorithm SHA256).Hash)"
         "espKernelSha256=$((Get-FileHash -LiteralPath $TargetKernel -Algorithm SHA256).Hash)"
+        "sourceGitCommit=$(& git -C $RootDir rev-parse HEAD)"
+        "input3dDiagnostics=$(if ($ModernInputDiagnostics) { 'enabled' } else { 'disabled' })"
         "builtAtUtc=$([DateTime]::UtcNow.ToString('o'))"
     ) | Set-Content -LiteralPath $identityPath -Encoding ascii
     Write-Host "      Wrote: build-identity.txt" -ForegroundColor Cyan

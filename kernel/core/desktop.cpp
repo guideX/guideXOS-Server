@@ -13,6 +13,7 @@
 
 #include "include/kernel/desktop.h"
 #include "include/kernel/desktop_font.h"
+#include "include/kernel/build_identity.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/startmenubutton_img.h"
 #include "include/kernel/desktop_icon_theme_flat.h"
@@ -37,6 +38,7 @@
 #include "include/kernel/time.h"
 #include "include/kernel/ramdisk.h"
 #include "include/kernel/block_device.h"
+#include "include/kernel/modern_input_diagnostics.h"
 #if ARCH_HAS_PIC_8259
 #include "../../guideXOSBootLoader/guidexOSBootInfo.h"
 #endif
@@ -9136,6 +9138,403 @@ static void draw_shell_window()
 }
 
 
+#if defined(GXOS_INPUT3D_DIAGNOSTICS) && defined(GXOS_BARE_METAL)
+namespace {
+
+struct Input3dPanelWriter {
+    modern_input_diagnostics::PanelLayout layout;
+    uint32_t row;
+};
+
+static uint32_t input3d_panel_append(char* out, uint32_t capacity,
+                                    uint32_t position, const char* text)
+{
+    if (out == nullptr || capacity == 0u || text == nullptr) return position;
+    while (*text != '\0' && position + 1u < capacity) out[position++] = *text++;
+    out[position < capacity ? position : capacity - 1u] = '\0';
+    return position;
+}
+
+static uint32_t input3d_panel_decimal(char* out, uint32_t capacity,
+                                      uint32_t position, uint32_t value)
+{
+    char digits[10];
+    uint32_t count = 0u;
+    do {
+        digits[count++] = static_cast<char>('0' + value % 10u);
+        value /= 10u;
+    } while (value != 0u && count < sizeof(digits));
+    while (count != 0u && position + 1u < capacity) out[position++] = digits[--count];
+    if (capacity != 0u) out[position < capacity ? position : capacity - 1u] = '\0';
+    return position;
+}
+
+static uint32_t input3d_panel_hex(char* out, uint32_t capacity,
+                                 uint32_t position, uint32_t value,
+                                 uint32_t digits)
+{
+    static const char hex[] = "0123456789abcdef";
+    for (uint32_t i = 0u; i < digits && position + 1u < capacity; ++i) {
+        const uint32_t shift = (digits - i - 1u) * 4u;
+        out[position++] = hex[(value >> shift) & 0xFu];
+    }
+    if (capacity != 0u) out[position < capacity ? position : capacity - 1u] = '\0';
+    return position;
+}
+
+static void input3d_panel_draw_line(Input3dPanelWriter* writer,
+                                    const char* text, uint32_t color)
+{
+    if (writer == nullptr || text == nullptr ||
+        writer->row >= writer->layout.rowCapacity) return;
+    char clipped[128];
+    uint32_t count = 0u;
+    while (text[count] != '\0' && count + 1u < sizeof(clipped)) {
+        clipped[count] = text[count];
+        ++count;
+    }
+    clipped[count] = '\0';
+    const uint32_t maxPixelWidth = writer->layout.width > 18u
+        ? writer->layout.width - 18u : writer->layout.width;
+    while (count != 0u && measure_text(clipped) > static_cast<int>(maxPixelWidth)) {
+        clipped[--count] = '\0';
+    }
+    draw_text(writer->layout.x + 9u,
+              writer->layout.y + 25u + writer->row * writer->layout.rowHeight,
+              clipped, color, 1);
+    ++writer->row;
+}
+
+static void input3d_panel_status_line(Input3dPanelWriter* writer,
+                                      const char* label,
+                                      const modern_input_diagnostics::StageResult& result)
+{
+    char formatted[64];
+    char line[112];
+    line[0] = '\0';
+    modern_input_diagnostics::format_stage_result(result, formatted, sizeof(formatted));
+    uint32_t position = input3d_panel_append(line, sizeof(line), 0u, label);
+    position = input3d_panel_append(line, sizeof(line), position, ": ");
+    input3d_panel_append(line, sizeof(line), position, formatted);
+    const uint32_t color = result.status == modern_input_diagnostics::Status::Fail ||
+                           result.status == modern_input_diagnostics::Status::Timeout
+        ? rgb(255, 135, 125) : rgb(205, 218, 238);
+    input3d_panel_draw_line(writer, line, color);
+}
+
+static void input3d_panel_controller_identity(
+    const modern_input_diagnostics::ControllerSnapshot& controller,
+    char* out, uint32_t capacity)
+{
+    if (out == nullptr || capacity == 0u) return;
+    out[0] = '\0';
+    uint32_t position = 0u;
+    position = input3d_panel_append(out, capacity, position,
+                                    modern_input_diagnostics::controller_kind_name(controller.kind));
+    position = input3d_panel_append(out, capacity, position, " ");
+    position = input3d_panel_hex(out, capacity, position, controller.bus, 2u);
+    position = input3d_panel_append(out, capacity, position, ":");
+    position = input3d_panel_hex(out, capacity, position, controller.device, 2u);
+    position = input3d_panel_append(out, capacity, position, ".");
+    position = input3d_panel_decimal(out, capacity, position, controller.function);
+    position = input3d_panel_append(out, capacity, position, " ");
+    position = input3d_panel_hex(out, capacity, position, controller.vendorId, 4u);
+    position = input3d_panel_append(out, capacity, position, ":");
+    input3d_panel_hex(out, capacity, position, controller.deviceId, 4u);
+}
+
+static const char* input3d_panel_ownership_name(
+    modern_input_diagnostics::OwnershipStatus status)
+{
+    using modern_input_diagnostics::OwnershipStatus;
+    switch (status) {
+        case OwnershipStatus::NotRequired: return "NOT REQUIRED";
+        case OwnershipStatus::BiosOwned: return "BIOS OWNED";
+        case OwnershipStatus::OsOwned: return "OS OWNED";
+        case OwnershipStatus::HandoffTimeout: return "HANDOFF TIMEOUT";
+        default: return "UNKNOWN";
+    }
+}
+
+static void input3d_panel_ownership_line(
+    Input3dPanelWriter* writer,
+    const modern_input_diagnostics::ControllerSnapshot& controller)
+{
+    char line[96];
+    line[0] = '\0';
+    uint32_t position = input3d_panel_append(line, sizeof(line), 0u, "BIOS ownership: ");
+    position = input3d_panel_append(line, sizeof(line), position,
+        modern_input_diagnostics::status_name(controller.stages[
+            static_cast<uint32_t>(modern_input_diagnostics::Stage::BiosOwnership)].status));
+    position = input3d_panel_append(line, sizeof(line), position, " (");
+    position = input3d_panel_append(line, sizeof(line), position,
+        input3d_panel_ownership_name(controller.ownership));
+    input3d_panel_append(line, sizeof(line), position, ")");
+    input3d_panel_draw_line(writer, line, rgb(205, 218, 238));
+}
+
+static void input3d_panel_draw_controller_details(
+    Input3dPanelWriter* writer,
+    const modern_input_diagnostics::ControllerSnapshot& controller)
+{
+    using modern_input_diagnostics::Stage;
+    using modern_input_diagnostics::Status;
+    char line[120];
+    line[0] = '\0';
+    uint32_t position = input3d_panel_append(line, sizeof(line), 0u, "BAR/MMIO: ");
+    position = input3d_panel_append(line, sizeof(line), position,
+        modern_input_diagnostics::status_name(controller.stages[static_cast<uint32_t>(Stage::BarMmio)].status));
+    if (controller.mmioBase != 0u) {
+        position = input3d_panel_append(line, sizeof(line), position, " base=0x");
+        // Keep the base readable while bounding each row.
+        position = input3d_panel_hex(line, sizeof(line), position,
+                                     static_cast<uint32_t>(controller.mmioBase >> 32), 8u);
+        input3d_panel_hex(line, sizeof(line), position,
+                          static_cast<uint32_t>(controller.mmioBase), 8u);
+    }
+    input3d_panel_draw_line(writer, line, rgb(205, 218, 238));
+
+    line[0] = '\0';
+    position = input3d_panel_append(line, sizeof(line), 0u, "CAPS: ");
+    position = input3d_panel_append(line, sizeof(line), position,
+        modern_input_diagnostics::status_name(controller.stages[static_cast<uint32_t>(Stage::Capabilities)].status));
+    if (controller.stages[static_cast<uint32_t>(Stage::Capabilities)].status == Status::Pass) {
+        position = input3d_panel_append(line, sizeof(line), position, " caplen=0x");
+        position = input3d_panel_hex(line, sizeof(line), position, controller.capLength, 2u);
+        position = input3d_panel_append(line, sizeof(line), position, " ver=0x");
+        position = input3d_panel_hex(line, sizeof(line), position, controller.hciVersion, 4u);
+        position = input3d_panel_append(line, sizeof(line), position, " slots=");
+        position = input3d_panel_decimal(line, sizeof(line), position, controller.maxSlots);
+        position = input3d_panel_append(line, sizeof(line), position, " ports=");
+        position = input3d_panel_decimal(line, sizeof(line), position, controller.maxPorts);
+        position = input3d_panel_append(line, sizeof(line), position, controller.contextSize == 64u ? " ctx=64" : " ctx=32");
+        position = input3d_panel_append(line, sizeof(line), position, controller.ac64 ? " AC64" : " AC32");
+        position = input3d_panel_append(line, sizeof(line), position, " scratch=");
+        input3d_panel_decimal(line, sizeof(line), position, controller.scratchpadBuffersRequired);
+    }
+    input3d_panel_draw_line(writer, line, rgb(205, 218, 238));
+
+    input3d_panel_ownership_line(writer, controller);
+    input3d_panel_status_line(writer, "Halt",
+        controller.stages[static_cast<uint32_t>(Stage::ControllerHalt)]);
+    input3d_panel_status_line(writer, "Reset",
+        controller.stages[static_cast<uint32_t>(Stage::ControllerReset)]);
+    input3d_panel_status_line(writer, "Controller ready",
+        controller.stages[static_cast<uint32_t>(Stage::ControllerNotReady)]);
+
+    line[0] = '\0';
+    position = input3d_panel_append(line, sizeof(line), 0u, "DMA: ");
+    position = input3d_panel_append(line, sizeof(line), position,
+        modern_input_diagnostics::status_name(controller.stages[static_cast<uint32_t>(Stage::DmaPrerequisites)].status));
+    position = input3d_panel_append(line, sizeof(line), position, controller.ac64 ? " AC64" : " AC32");
+    position = input3d_panel_append(line, sizeof(line), position, " scratch=");
+    position = input3d_panel_decimal(line, sizeof(line), position, controller.scratchpadBuffersRequired);
+    position = input3d_panel_append(line, sizeof(line), position,
+                                    controller.iommuStatusUnknown ? " IOMMU=UNKNOWN" : " IOMMU=CHECKED");
+    input3d_panel_draw_line(writer, line, rgb(205, 218, 238));
+    input3d_panel_status_line(writer, "Rings",
+        controller.stages[static_cast<uint32_t>(Stage::RingInitialization)]);
+    input3d_panel_status_line(writer, "Run/Stop",
+        controller.stages[static_cast<uint32_t>(Stage::ControllerRunning)]);
+
+    line[0] = '\0';
+    position = input3d_panel_append(line, sizeof(line), 0u, "Ports: root=");
+    position = input3d_panel_decimal(line, sizeof(line), position, controller.rootPortCount);
+    position = input3d_panel_append(line, sizeof(line), position, " connected=");
+    position = input3d_panel_decimal(line, sizeof(line), position, controller.connectedPortCount);
+    position = input3d_panel_append(line, sizeof(line), position, " selected=");
+    input3d_panel_decimal(line, sizeof(line), position, controller.selectedPort);
+    input3d_panel_draw_line(writer, line, rgb(205, 218, 238));
+    input3d_panel_status_line(writer, "Port reset",
+        controller.stages[static_cast<uint32_t>(Stage::PortReset)]);
+    input3d_panel_status_line(writer, "Enable Slot",
+        controller.stages[static_cast<uint32_t>(Stage::EnableSlot)]);
+    input3d_panel_status_line(writer, "Address Device",
+        controller.stages[static_cast<uint32_t>(Stage::AddressDevice)]);
+    input3d_panel_status_line(writer, "Control transfer",
+        controller.stages[static_cast<uint32_t>(Stage::ControlTransfer)]);
+
+    line[0] = '\0';
+    position = input3d_panel_append(line, sizeof(line), 0u, "Device descriptor: transfers=");
+    position = input3d_panel_decimal(line, sizeof(line), position,
+                                    controller.descriptorTransfersSucceeded);
+    position = input3d_panel_append(line, sizeof(line), position,
+        controller.deviceDescriptorValid ? " valid VID:PID=" : " valid=NO");
+    if (controller.deviceDescriptorValid) {
+        position = input3d_panel_hex(line, sizeof(line), position, controller.vendorDescriptor, 4u);
+        position = input3d_panel_append(line, sizeof(line), position, ":");
+        input3d_panel_hex(line, sizeof(line), position, controller.productDescriptor, 4u);
+    }
+    input3d_panel_draw_line(writer, line, rgb(205, 218, 238));
+    input3d_panel_status_line(writer, "HID interfaces",
+        controller.stages[static_cast<uint32_t>(Stage::HidDiscovery)]);
+    input3d_panel_status_line(writer, "HID reports",
+        controller.stages[static_cast<uint32_t>(Stage::HidReportDelivery)]);
+    input3d_panel_status_line(writer, "Input routing",
+        controller.stages[static_cast<uint32_t>(Stage::InputRouting)]);
+}
+
+static void draw_input3d_diagnostics_panel()
+{
+    using modern_input_diagnostics::Status;
+    modern_input_diagnostics::Snapshot snapshot;
+    modern_input_diagnostics::PanelLayout layout;
+    modern_input_diagnostics::copy_snapshot(&snapshot);
+    if (!modern_input_diagnostics::calculate_panel_layout(
+            framebuffer::get_width(), framebuffer::get_height(), &layout) ||
+        layout.width < 1u || layout.height < 1u) {
+        return;
+    }
+
+    framebuffer::fill_rect(layout.x, layout.y, layout.width, layout.height,
+                           rgb(13, 18, 29));
+    if (layout.width > 2u && layout.height > 2u) {
+        draw_rect(layout.x, layout.y, layout.width, layout.height, rgb(82, 126, 184));
+    }
+    if (layout.width > 4u) {
+        framebuffer::fill_rect(layout.x + 1u, layout.y + 1u,
+                               layout.width - 2u, 21u,
+                               rgb(26, 44, 68));
+    }
+
+    Input3dPanelWriter writer = {layout, 0u};
+    input3d_panel_draw_line(&writer, "guideXOS - Modern Input Diagnostics",
+                            rgb(238, 244, 255));
+
+    char line[128];
+    line[0] = '\0';
+    uint32_t position = input3d_panel_append(line, sizeof(line), 0u, "Build: INPUT3D / ");
+    input3d_panel_append(line, sizeof(line), position, GXOS_BUILD_SOURCE_REVISION);
+    input3d_panel_draw_line(&writer, line, rgb(157, 190, 229));
+
+    line[0] = '\0';
+    position = input3d_panel_append(line, sizeof(line), 0u, "PCI: ");
+    position = input3d_panel_append(line, sizeof(line), position,
+        modern_input_diagnostics::status_name(snapshot.pciEnumeration));
+    position = input3d_panel_append(line, sizeof(line), position, " USB=");
+    position = input3d_panel_decimal(line, sizeof(line), position, snapshot.usbControllerCount);
+    position = input3d_panel_append(line, sizeof(line), position, " xHCI=");
+    position = input3d_panel_decimal(line, sizeof(line), position, snapshot.xhciControllerCount);
+    input3d_panel_draw_line(&writer, line, rgb(220, 230, 245));
+
+    char failure[112];
+    modern_input_diagnostics::format_first_failure(snapshot, failure, sizeof(failure));
+    if (layout.compact) {
+        line[0] = '\0';
+        position = input3d_panel_append(line, sizeof(line), 0u, "Selected: ");
+        if (snapshot.selectedControllerIndex >= 0 &&
+            static_cast<uint32_t>(snapshot.selectedControllerIndex) < snapshot.storedControllerCount) {
+            const modern_input_diagnostics::ControllerSnapshot& selected =
+                snapshot.controllers[static_cast<uint32_t>(snapshot.selectedControllerIndex)];
+            position = input3d_panel_hex(line, sizeof(line), position, selected.bus, 2u);
+            position = input3d_panel_append(line, sizeof(line), position, ":");
+            position = input3d_panel_hex(line, sizeof(line), position, selected.device, 2u);
+            position = input3d_panel_append(line, sizeof(line), position, ".");
+            position = input3d_panel_decimal(line, sizeof(line), position, selected.function);
+            position = input3d_panel_append(line, sizeof(line), position, " ");
+            position = input3d_panel_hex(line, sizeof(line), position, selected.vendorId, 4u);
+            position = input3d_panel_append(line, sizeof(line), position, ":");
+            input3d_panel_hex(line, sizeof(line), position, selected.deviceId, 4u);
+        } else {
+            input3d_panel_append(line, sizeof(line), position, "NONE");
+        }
+        input3d_panel_draw_line(&writer, line, rgb(220, 230, 245));
+        line[0] = '\0';
+        position = input3d_panel_append(line, sizeof(line), 0u, "FIRST FAILURE: ");
+        input3d_panel_append(line, sizeof(line), position, failure);
+        input3d_panel_draw_line(&writer, line,
+            snapshot.firstFailure.present ? rgb(255, 135, 125) : rgb(196, 213, 234));
+    } else {
+        line[0] = '\0';
+        position = input3d_panel_append(line, sizeof(line), 0u, "Selected xHCI: ");
+        if (snapshot.selectedControllerIndex >= 0 &&
+            static_cast<uint32_t>(snapshot.selectedControllerIndex) < snapshot.storedControllerCount) {
+            const modern_input_diagnostics::ControllerSnapshot& selected =
+                snapshot.controllers[static_cast<uint32_t>(snapshot.selectedControllerIndex)];
+            char identity[64];
+            input3d_panel_controller_identity(selected, identity, sizeof(identity));
+            position = input3d_panel_decimal(line, sizeof(line), position,
+                static_cast<uint32_t>(snapshot.selectedControllerIndex));
+            position = input3d_panel_append(line, sizeof(line), position, " ");
+            input3d_panel_append(line, sizeof(line), position, identity);
+        } else {
+            input3d_panel_append(line, sizeof(line), position,
+                                 snapshot.xhciControllerCount == 0u ? "NONE FOUND" : "NOT ATTEMPTED");
+        }
+        input3d_panel_draw_line(&writer, line, rgb(220, 230, 245));
+        line[0] = '\0';
+        position = input3d_panel_append(line, sizeof(line), 0u, "FIRST FAILURE: ");
+        input3d_panel_append(line, sizeof(line), position, failure);
+        input3d_panel_draw_line(&writer, line,
+            snapshot.firstFailure.present ? rgb(255, 135, 125) : rgb(196, 213, 234));
+
+        for (uint32_t i = 0u; i < snapshot.storedControllerCount; ++i) {
+            const modern_input_diagnostics::ControllerSnapshot& controller = snapshot.controllers[i];
+            line[0] = '\0';
+            position = input3d_panel_append(line, sizeof(line), 0u, "#");
+            position = input3d_panel_decimal(line, sizeof(line), position, i);
+            position = input3d_panel_append(line, sizeof(line), position, " ");
+            char identity[64];
+            input3d_panel_controller_identity(controller, identity, sizeof(identity));
+            position = input3d_panel_append(line, sizeof(line), position, identity);
+            position = input3d_panel_append(line, sizeof(line), position, " run=");
+            input3d_panel_append(line, sizeof(line), position,
+                modern_input_diagnostics::status_name(controller.stages[
+                    static_cast<uint32_t>(modern_input_diagnostics::Stage::ControllerRunning)].status));
+            input3d_panel_draw_line(&writer, line, rgb(198, 212, 233));
+        }
+        if (snapshot.controllersOmitted != 0u) {
+            line[0] = '\0';
+            position = input3d_panel_append(line, sizeof(line), 0u, "Additional controllers not stored: ");
+            input3d_panel_decimal(line, sizeof(line), position, snapshot.controllersOmitted);
+            input3d_panel_draw_line(&writer, line, rgb(255, 195, 125));
+        }
+    }
+
+    if (snapshot.selectedControllerIndex >= 0 &&
+        static_cast<uint32_t>(snapshot.selectedControllerIndex) < snapshot.storedControllerCount) {
+        const modern_input_diagnostics::ControllerSnapshot& selected =
+            snapshot.controllers[static_cast<uint32_t>(snapshot.selectedControllerIndex)];
+        if (layout.compact) {
+            input3d_panel_status_line(&writer, "BAR/MMIO",
+                selected.stages[static_cast<uint32_t>(modern_input_diagnostics::Stage::BarMmio)]);
+            input3d_panel_status_line(&writer, "Capabilities",
+                selected.stages[static_cast<uint32_t>(modern_input_diagnostics::Stage::Capabilities)]);
+            input3d_panel_ownership_line(&writer, selected);
+            input3d_panel_status_line(&writer, "DMA",
+                selected.stages[static_cast<uint32_t>(modern_input_diagnostics::Stage::DmaPrerequisites)]);
+            input3d_panel_status_line(&writer, "Controller run",
+                selected.stages[static_cast<uint32_t>(modern_input_diagnostics::Stage::ControllerRunning)]);
+            line[0] = '\0';
+            position = input3d_panel_append(line, sizeof(line), 0u, "Ports root=");
+            position = input3d_panel_decimal(line, sizeof(line), position, selected.rootPortCount);
+            position = input3d_panel_append(line, sizeof(line), position, " connected=");
+            input3d_panel_decimal(line, sizeof(line), position, selected.connectedPortCount);
+            input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
+            input3d_panel_status_line(&writer, "Address Device",
+                selected.stages[static_cast<uint32_t>(modern_input_diagnostics::Stage::AddressDevice)]);
+            input3d_panel_status_line(&writer, "Device descriptor",
+                selected.stages[static_cast<uint32_t>(modern_input_diagnostics::Stage::DeviceDescriptor)]);
+            input3d_panel_status_line(&writer, "HID / input path",
+                selected.stages[static_cast<uint32_t>(modern_input_diagnostics::Stage::HidDiscovery)]);
+        } else {
+            input3d_panel_draw_controller_details(&writer, selected);
+        }
+    }
+
+    line[0] = '\0';
+    position = input3d_panel_append(line, sizeof(line), 0u, "Latest: ");
+    position = input3d_panel_append(line, sizeof(line), position,
+        modern_input_diagnostics::stage_name(snapshot.latestStage));
+    position = input3d_panel_append(line, sizeof(line), position, " ");
+    input3d_panel_append(line, sizeof(line), position,
+        modern_input_diagnostics::status_name(snapshot.latestStatus.status));
+    input3d_panel_draw_line(&writer, line, rgb(157, 190, 229));
+}
+
+} // namespace
+#endif
+
 void draw()
 {
     if (!s_initialized || !framebuffer::is_available()) return;
@@ -9178,6 +9577,12 @@ void draw()
 
     // Desktop context menu is a top-level overlay and should stay above windows.
     draw_right_click_menu();
+
+#if defined(GXOS_INPUT3D_DIAGNOSTICS) && defined(GXOS_BARE_METAL)
+    // This read-only panel is rendered by the existing desktop framebuffer
+    // pass, so it remains visible after later redraws without owning hardware.
+    draw_input3d_diagnostics_panel();
+#endif
     
     // Present the back buffer to the screen (swap buffers)
     // This is the key to preventing flickering - all drawing is done

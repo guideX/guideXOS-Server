@@ -20,12 +20,16 @@
 
 #include "include/kernel/xhci.h"
 #include "include/kernel/arch.h"
+#include "include/kernel/modern_input_diagnostics.h"
 #include "include/kernel/serial_debug.h"
 
 namespace kernel {
 namespace usb {
 namespace xhci {
 namespace controller {
+
+extern "C" char __kernel_start[];
+extern "C" char __kernel_end[];
 
 namespace {
 
@@ -109,6 +113,9 @@ static uint64_t s_mmioBase = 0;
 static uint8_t s_bus = 0;
 static uint8_t s_dev = 0;
 static uint8_t s_func = 0;
+static int32_t s_diagnosticControllerIndex = -1;
+static bool s_dmaReady = false;
+static uint8_t s_selectedPort = 0u;
 static XhciCapabilities s_caps = {};
 static uint8_t s_portCount = 0;
 
@@ -121,6 +128,17 @@ alignas(64) static XhciTrb s_commandRing[COMMAND_RING_SIZE];
 alignas(64) static XhciEventTrb s_eventRing[EVENT_RING_SIZE];
 alignas(64) static XhciErstEntry s_erst[ERST_ENTRIES];
 alignas(64) static uint64_t s_dcbaa[256];
+
+static const uint32_t MAX_CONTEXT_SIZE   = 64;
+static const uint32_t INPUT_CTX_SIZE     = 3 * MAX_CONTEXT_SIZE;
+static const uint32_t DEVICE_CTX_SIZE    = 2 * MAX_CONTEXT_SIZE;
+static const uint32_t EP0_RING_SIZE      = 8;
+static const uint32_t CONTROL_BUF_SIZE   = 256;
+
+alignas(64) static uint8_t  s_inputCtx[INPUT_CTX_SIZE];
+alignas(64) static uint8_t  s_deviceCtx[DEVICE_CTX_SIZE];
+alignas(64) static XhciTrb  s_ep0Ring[EP0_RING_SIZE];
+alignas(64) static uint8_t  s_controlBuf[CONTROL_BUF_SIZE];
 
 static uint32_t s_commandRingIndex = 0;
 static uint32_t s_commandRingCycle = 1;
@@ -190,14 +208,94 @@ static void port_write32(uint32_t portIndex, uint32_t offset, uint32_t value)
 // ================================================================
 
 static uint64_t s_kernelPhysicalBase = 0x100000ULL;
+static bool s_kernelPhysicalBaseValid = true; // Multiboot loads this image at its link base.
 
 static uint64_t kernel_virt_to_phys(uintptr_t virt)
 {
     const uint64_t v = static_cast<uint64_t>(virt);
-    if (v < 0x100000ULL) {
+    if (!s_kernelPhysicalBaseValid || v < 0x100000ULL) {
         return 0;
     }
-    return s_kernelPhysicalBase + (v - 0x100000ULL);
+    const uint64_t offset = v - 0x100000ULL;
+    if (offset > (~static_cast<uint64_t>(0) - s_kernelPhysicalBase)) {
+        return 0;
+    }
+    return s_kernelPhysicalBase + offset;
+}
+
+static bool dma_region_address(const void* pointer, uint32_t size,
+                               uint32_t alignment, uint64_t* physicalOut)
+{
+    if (!s_kernelPhysicalBaseValid || pointer == nullptr) return false;
+    return translate_kernel_dma_address(
+        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pointer)),
+        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(__kernel_start)),
+        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(__kernel_end)),
+        s_kernelPhysicalBase, size, alignment, s_caps.ac64, physicalOut);
+}
+
+static void diagnostic_stage(modern_input_diagnostics::Stage stage,
+                             modern_input_diagnostics::Status status,
+                             uint32_t errorCode = 0u,
+                             bool hasErrorCode = false,
+                             uint32_t controllerStatus = 0u,
+                             bool hasControllerStatus = false,
+                             uint8_t slotId = 0u, uint8_t portId = 0u,
+                             uint8_t endpointId = 0u,
+                             uint8_t completionCode = 0u,
+                             bool hasCompletionCode = false)
+{
+    modern_input_diagnostics::record_stage(
+        s_diagnosticControllerIndex, stage, status, errorCode, hasErrorCode,
+        controllerStatus, hasControllerStatus, slotId, portId, endpointId,
+        completionCode, hasCompletionCode);
+}
+
+static bool validate_dma_prerequisites()
+{
+    if (s_caps.maxScratchpadBufs != 0u) {
+        diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                         modern_input_diagnostics::Status::Unsupported,
+                         s_caps.maxScratchpadBufs, true);
+        serial_puts("[XHCI] DMA blocked: scratchpad buffers are required but not implemented\n");
+        return false;
+    }
+
+    uint64_t ignored = 0u;
+    const bool valid =
+        dma_region_address(s_commandRing, sizeof(s_commandRing), 64u, &ignored) &&
+        dma_region_address(s_eventRing, sizeof(s_eventRing), 64u, &ignored) &&
+        dma_region_address(s_erst, sizeof(s_erst), 64u, &ignored) &&
+        dma_region_address(s_dcbaa, sizeof(s_dcbaa), 64u, &ignored) &&
+        dma_region_address(s_inputCtx, sizeof(s_inputCtx), 64u, &ignored) &&
+        dma_region_address(s_deviceCtx, sizeof(s_deviceCtx), 64u, &ignored) &&
+        dma_region_address(s_ep0Ring, sizeof(s_ep0Ring), 64u, &ignored) &&
+        dma_region_address(s_controlBuf, sizeof(s_controlBuf), 64u, &ignored);
+    if (!valid) {
+        diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                         modern_input_diagnostics::Status::Blocked,
+                         s_kernelPhysicalBaseValid ? 2u : 1u, true);
+        serial_puts("[XHCI] DMA blocked: physical translation, alignment, or controller address width is invalid\n");
+        return false;
+    }
+
+    s_dmaReady = true;
+    diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                     modern_input_diagnostics::Status::Pass);
+    serial_puts("[XHCI] DMA buffer translation/alignment validated; IOMMU state unknown\n");
+    return true;
+}
+
+static void op_write64(uint32_t offset, uint64_t value)
+{
+    op_write32(offset + 4u, static_cast<uint32_t>(value >> 32));
+    op_write32(offset, static_cast<uint32_t>(value & 0xFFFFFFFFu));
+}
+
+static void rt_write64(uint32_t offset, uint64_t value)
+{
+    rt_write32(offset + 4u, static_cast<uint32_t>(value >> 32));
+    rt_write32(offset, static_cast<uint32_t>(value & 0xFFFFFFFFu));
 }
 
 // ================================================================
@@ -293,6 +391,18 @@ static bool find_xhci_controller()
                     s_bus = static_cast<uint8_t>(bus);
                     s_dev = dev;
                     s_func = func;
+                    s_diagnosticControllerIndex =
+                        modern_input_diagnostics::find_controller(s_bus, s_dev, s_func);
+                    if (s_diagnosticControllerIndex < 0) {
+                        modern_input_diagnostics::record_stage(
+                            -1, modern_input_diagnostics::Stage::PciDiscovery,
+                            modern_input_diagnostics::Status::Blocked,
+                            modern_input_diagnostics::MAX_CONTROLLERS, true,
+                            0u, false, 0u, 0u, 0u, 0u, false);
+                        serial_puts("[XHCI] diagnostic snapshot full; refusing untracked controller initialization\n");
+                        return false;
+                    }
+                    modern_input_diagnostics::select_controller(s_diagnosticControllerIndex);
                     return true;
                 }
             }
@@ -317,10 +427,16 @@ static bool validate_bar()
     const XhciBarInfo bar = validate_mmio_bar(bar0, bar1, minSize);
     if (!bar.valid) {
         serial_puts("[XHCI] MMIO BAR validation failed\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::BarMmio,
+                         modern_input_diagnostics::Status::Fail,
+                         bar0, true);
         return false;
     }
 
     s_mmioBase = bar.base;
+    modern_input_diagnostics::record_mmio_base(s_diagnosticControllerIndex, bar.base);
+    diagnostic_stage(modern_input_diagnostics::Stage::BarMmio,
+                     modern_input_diagnostics::Status::Pass);
     serial_puts("[XHCI] MMIO BAR validated base=0x");
     kernel::serial::put_hex64(s_mmioBase);
     serial_puts(bar.is64 ? " (64-bit)\n" : " (32-bit)\n");
@@ -345,8 +461,18 @@ static bool parse_capabilities()
     s_caps = parse_xhci_capabilities(capWords, XHCI_CAP_DWORD_COUNT);
     if (!s_caps.valid) {
         serial_puts("[XHCI] capability registers invalid\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::Capabilities,
+                         modern_input_diagnostics::Status::Fail,
+                         capWords[0], true);
         return false;
     }
+
+    modern_input_diagnostics::record_capabilities(
+        s_diagnosticControllerIndex, s_caps.caplength, s_caps.hciVersion,
+        s_caps.maxSlots, s_caps.maxPorts, s_caps.csz ? 64u : 32u,
+        s_caps.ac64, 0u, s_caps.maxScratchpadBufs);
+    diagnostic_stage(modern_input_diagnostics::Stage::Capabilities,
+                     modern_input_diagnostics::Status::Pass);
 
     s_portCount = s_caps.maxPorts;
 
@@ -378,7 +504,12 @@ static bool acquire_ownership()
 {
     if (s_caps.xecp == 0u) {
         s_ownership = XhciOwnershipState::NoCapability;
+        modern_input_diagnostics::record_ownership_status(
+            s_diagnosticControllerIndex,
+            modern_input_diagnostics::OwnershipStatus::NotRequired);
         serial_puts("[XHCI] ownership not required (no xECP)\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::BiosOwnership,
+                         modern_input_diagnostics::Status::Pass);
         return true;
     }
 
@@ -391,24 +522,45 @@ static bool acquire_ownership()
 
     if (capId != XHCI_USBLEGSUP_CAPID) {
         s_ownership = XhciOwnershipState::NoCapability;
+        modern_input_diagnostics::record_ownership_status(
+            s_diagnosticControllerIndex,
+            modern_input_diagnostics::OwnershipStatus::NotRequired);
         serial_puts("[XHCI] ownership not required (no legacy support cap)\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::BiosOwnership,
+                         modern_input_diagnostics::Status::Pass,
+                         capId, true);
         return true;
     }
 
     const XhciOwnershipState initial = detect_ownership(legsup);
     if (initial == XhciOwnershipState::OsOwned) {
         s_ownership = XhciOwnershipState::OsOwned;
+        modern_input_diagnostics::record_ownership_status(
+            s_diagnosticControllerIndex,
+            modern_input_diagnostics::OwnershipStatus::OsOwned);
         serial_puts("[XHCI] ownership already OS-owned\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::BiosOwnership,
+                         modern_input_diagnostics::Status::Pass,
+                         legsup, true, legsup, true);
         return true;
     }
 
     if (initial == XhciOwnershipState::NoCapability) {
         s_ownership = XhciOwnershipState::NoCapability;
+        modern_input_diagnostics::record_ownership_status(
+            s_diagnosticControllerIndex,
+            modern_input_diagnostics::OwnershipStatus::NotRequired);
         serial_puts("[XHCI] ownership not required\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::BiosOwnership,
+                         modern_input_diagnostics::Status::Pass,
+                         legsup, true, legsup, true);
         return true;
     }
 
     // BIOS-owned: request OS ownership
+    modern_input_diagnostics::record_ownership_status(
+        s_diagnosticControllerIndex,
+        modern_input_diagnostics::OwnershipStatus::BiosOwned);
     serial_puts("[XHCI] ownership BIOS-owned, requesting handoff\n");
 
     volatile uint32_t* legsupPtr = const_cast<volatile uint32_t*>(&mmio[s_caps.xecp]);
@@ -419,14 +571,26 @@ static bool acquire_ownership()
         const uint32_t current = *legsupPtr;
         if (current & XHCI_USBLEGSUP_HC_OS_OWNED_SEM) {
             s_ownership = XhciOwnershipState::OsOwned;
+            modern_input_diagnostics::record_ownership_status(
+                s_diagnosticControllerIndex,
+                modern_input_diagnostics::OwnershipStatus::OsOwned);
             serial_puts("[XHCI] ownership acquired\n");
+            diagnostic_stage(modern_input_diagnostics::Stage::BiosOwnership,
+                             modern_input_diagnostics::Status::Pass,
+                             current, true, current, true);
             return true;
         }
         delay_ms(1);
     }
 
     s_ownership = XhciOwnershipState::HandoffTimeout;
+    modern_input_diagnostics::record_ownership_status(
+        s_diagnosticControllerIndex,
+        modern_input_diagnostics::OwnershipStatus::HandoffTimeout);
     serial_puts("[XHCI] ownership handoff timed out\n");
+    diagnostic_stage(modern_input_diagnostics::Stage::BiosOwnership,
+                     modern_input_diagnostics::Status::Timeout,
+                     legsup, true, *legsupPtr, true);
     return false;
 }
 
@@ -441,6 +605,9 @@ static bool halt_controller()
         // Already halted
         s_state = XhciControllerState::Halted;
         serial_puts("[XHCI] controller already halted\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::ControllerHalt,
+                         modern_input_diagnostics::Status::Pass,
+                         usbcmd, true, op_read32(XHCI_OP_USBSTS), true);
         return true;
     }
 
@@ -450,11 +617,19 @@ static bool halt_controller()
     if (!wait_for_halted(1000u)) {
         s_state = XhciControllerState::Error;
         serial_puts("[XHCI] halt timeout\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::ControllerHalt,
+                         modern_input_diagnostics::Status::Timeout,
+                         op_read32(XHCI_OP_USBCMD), true,
+                         op_read32(XHCI_OP_USBSTS), true);
         return false;
     }
 
     s_state = XhciControllerState::Halted;
     serial_puts("[XHCI] controller halted\n");
+    diagnostic_stage(modern_input_diagnostics::Stage::ControllerHalt,
+                     modern_input_diagnostics::Status::Pass,
+                     op_read32(XHCI_OP_USBCMD), true,
+                     op_read32(XHCI_OP_USBSTS), true);
     return true;
 }
 
@@ -477,15 +652,32 @@ static bool reset_controller()
     if (!wait_for_reset_complete(1000u)) {
         s_state = XhciControllerState::Error;
         serial_puts("[XHCI] reset timeout\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::ControllerReset,
+                         modern_input_diagnostics::Status::Timeout,
+                         op_read32(XHCI_OP_USBCMD), true,
+                         op_read32(XHCI_OP_USBSTS), true);
         return false;
     }
+    diagnostic_stage(modern_input_diagnostics::Stage::ControllerReset,
+                     modern_input_diagnostics::Status::Pass,
+                     op_read32(XHCI_OP_USBCMD), true,
+                     op_read32(XHCI_OP_USBSTS), true);
 
     // Wait for CNR to clear
     if (!wait_for_cnr_clear(1000u)) {
         s_state = XhciControllerState::Error;
         serial_puts("[XHCI] CNR timeout\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::ControllerNotReady,
+                         modern_input_diagnostics::Status::Timeout,
+                         op_read32(XHCI_OP_USBCMD), true,
+                         op_read32(XHCI_OP_USBSTS), true);
         return false;
     }
+
+    diagnostic_stage(modern_input_diagnostics::Stage::ControllerNotReady,
+                     modern_input_diagnostics::Status::Pass,
+                     op_read32(XHCI_OP_USBCMD), true,
+                     op_read32(XHCI_OP_USBSTS), true);
 
     s_state = XhciControllerState::Reset;
     serial_puts("[XHCI] controller reset complete\n");
@@ -505,7 +697,8 @@ static void init_command_ring()
     }
 
     // Link TRB at the end to wrap the ring
-    const uint64_t ringBase = reinterpret_cast<uint64_t>(s_commandRing);
+    const uint64_t ringBase = kernel_virt_to_phys(
+        reinterpret_cast<uintptr_t>(s_commandRing));
     s_commandRing[COMMAND_RING_SIZE - 1].parameter = ringBase;
     s_commandRing[COMMAND_RING_SIZE - 1].status = 0;
     s_commandRing[COMMAND_RING_SIZE - 1].control =
@@ -516,10 +709,7 @@ static void init_command_ring()
 
     // Program CRCR
     const uint64_t crcr = ringBase | XHCI_CRCR_RCS;
-    op_write32(XHCI_OP_CRCR, (uint32_t)(crcr & 0xFFFFFFFF));
-    // Note: CRCR is 64-bit; upper dword written via second access
-    // For simplicity, we assume the ring is in low 4GB (static allocation)
-    // A full implementation would write the upper dword separately
+    op_write64(XHCI_OP_CRCR, crcr);
 
     serial_puts("[XHCI] command ring configured\n");
 }
@@ -533,7 +723,9 @@ static void init_event_ring()
     }
 
     // ERST
-    s_erst[0].ringSegmentBaseAddr = reinterpret_cast<uint64_t>(s_eventRing);
+    const uint64_t eventRingBase = kernel_virt_to_phys(
+        reinterpret_cast<uintptr_t>(s_eventRing));
+    s_erst[0].ringSegmentBaseAddr = eventRingBase;
     s_erst[0].ringSegmentSize = EVENT_RING_SIZE;
     s_erst[0].reserved = 0;
 
@@ -541,14 +733,12 @@ static void init_event_ring()
     rt_write32(XHCI_RT_ERSTSZ, ERST_ENTRIES);
 
     // Program ERSTBA
-    const uint64_t erstba = reinterpret_cast<uint64_t>(s_erst);
-    rt_write32(XHCI_RT_ERSTBA, (uint32_t)(erstba & 0xFFFFFFFF));
-    // Note: ERSTBA is 64-bit; upper dword written via second access
+    const uint64_t erstba = kernel_virt_to_phys(reinterpret_cast<uintptr_t>(s_erst));
+    rt_write64(XHCI_RT_ERSTBA, erstba);
 
     // Program ERDP
-    const uint64_t erdp = reinterpret_cast<uint64_t>(s_eventRing);
-    rt_write32(XHCI_RT_ERDP, (uint32_t)(erdp & 0xFFFFFFFF));
-    // Note: ERDP is 64-bit; upper dword written via second access
+    const uint64_t erdp = eventRingBase;
+    rt_write64(XHCI_RT_ERDP, erdp);
 
     s_eventRingIndex = 0;
     s_eventRingCycle = 1;
@@ -567,10 +757,10 @@ static void init_dcbaa()
     }
 
     // Program DCBAAP
-    const uint64_t dcbaap = reinterpret_cast<uint64_t>(s_dcbaa) &
+    const uint64_t dcbaap = kernel_virt_to_phys(
+                                reinterpret_cast<uintptr_t>(s_dcbaa)) &
                             XHCI_DCBAAP_PTR_MASK;
-    op_write32(XHCI_OP_DCBAAP, (uint32_t)(dcbaap & 0xFFFFFFFF));
-    // Note: DCBAAP is 64-bit; upper dword written via second access
+    op_write64(XHCI_OP_DCBAAP, dcbaap);
 
     serial_puts("[XHCI] DCBAA configured\n");
 }
@@ -601,6 +791,9 @@ static bool validate_page_size()
     // We require 4K pages for simplicity
     if ((pageSize & 0x01u) == 0u) {
         serial_puts("[XHCI] page size not 4K\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                         modern_input_diagnostics::Status::Blocked,
+                         pageSize, true);
         return false;
     }
     serial_puts("[XHCI] page size validated (4K)\n");
@@ -638,12 +831,20 @@ static bool start_controller()
     if (!wait_for_running(1000u)) {
         s_state = XhciControllerState::Error;
         serial_puts("[XHCI] start timeout (HCHalted did not clear)\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::ControllerRunning,
+                         modern_input_diagnostics::Status::Timeout,
+                         op_read32(XHCI_OP_USBCMD), true,
+                         op_read32(XHCI_OP_USBSTS), true);
         return false;
     }
 
     s_state = XhciControllerState::Running;
     s_running = true;
     serial_puts("[XHCI] controller running\n");
+    diagnostic_stage(modern_input_diagnostics::Stage::ControllerRunning,
+                     modern_input_diagnostics::Status::Pass,
+                     op_read32(XHCI_OP_USBCMD), true,
+                     op_read32(XHCI_OP_USBSTS), true);
     return true;
 }
 
@@ -676,8 +877,9 @@ static bool process_one_event(XhciEventTrb* eventOut)
 
 static void update_erdp()
 {
-    const uint64_t erdp = reinterpret_cast<uint64_t>(&s_eventRing[s_eventRingIndex]);
-    rt_write32(XHCI_RT_ERDP, (uint32_t)(erdp & 0xFFFFFFFF));
+    const uint64_t erdp = kernel_virt_to_phys(
+        reinterpret_cast<uintptr_t>(&s_eventRing[s_eventRingIndex]));
+    rt_write64(XHCI_RT_ERDP, erdp);
 }
 
 static uint32_t process_events()
@@ -732,17 +934,6 @@ static uint32_t process_events()
 // ================================================================
 // Enumeration DMA structures (Section 12)
 // ================================================================
-
-static const uint32_t MAX_CONTEXT_SIZE   = 64;
-static const uint32_t INPUT_CTX_SIZE     = 3 * MAX_CONTEXT_SIZE;
-static const uint32_t DEVICE_CTX_SIZE    = 2 * MAX_CONTEXT_SIZE;
-static const uint32_t EP0_RING_SIZE      = 8;
-static const uint32_t CONTROL_BUF_SIZE   = 256;
-
-alignas(64) static uint8_t  s_inputCtx[INPUT_CTX_SIZE];
-alignas(64) static uint8_t  s_deviceCtx[DEVICE_CTX_SIZE];
-alignas(64) static XhciTrb  s_ep0Ring[EP0_RING_SIZE];
-alignas(64) static uint8_t  s_controlBuf[CONTROL_BUF_SIZE];
 
 static uint32_t s_ep0RingIndex = 0;
 static uint32_t s_ep0RingCycle = 1;
@@ -821,6 +1012,9 @@ static bool enable_slot(uint8_t* slotIdOut)
     CommandResult result;
     if (!submit_command(trb_enable_slot(0), &result, 1000u)) {
         serial_puts("[XHCI] Enable Slot timeout\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::EnableSlot,
+                         modern_input_diagnostics::Status::Timeout,
+                         1000u, true);
         return false;
     }
 
@@ -828,6 +1022,10 @@ static bool enable_slot(uint8_t* slotIdOut)
         serial_puts("[XHCI] Enable Slot failed cc=");
         serial_puts(completion_code_name(result.completionCode));
         serial_puts("\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::EnableSlot,
+                         modern_input_diagnostics::Status::Fail,
+                         result.completionCode, false, 0u, false,
+                         0u, 0u, 0u, result.completionCode, true);
         return false;
     }
 
@@ -835,6 +1033,11 @@ static bool enable_slot(uint8_t* slotIdOut)
         serial_puts("[XHCI] Enable Slot invalid slot id=");
         serial_u32_dec(result.slotId);
         serial_puts("\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::EnableSlot,
+                         modern_input_diagnostics::Status::Fail,
+                         result.slotId, true, 0u, false,
+                         result.slotId, 0u, 0u, result.completionCode,
+                         result.completionCode != 0u);
         return false;
     }
 
@@ -845,6 +1048,10 @@ static bool enable_slot(uint8_t* slotIdOut)
     serial_puts("[XHCI] Enable Slot -> slot ");
     serial_u32_dec(result.slotId);
     serial_puts("\n");
+    diagnostic_stage(modern_input_diagnostics::Stage::EnableSlot,
+                     modern_input_diagnostics::Status::Pass,
+                     0u, false, 0u, false, result.slotId, 0u,
+                     0u, result.completionCode, true);
     return true;
 }
 
@@ -855,16 +1062,21 @@ static bool enable_slot(uint8_t* slotIdOut)
 static bool reset_port(uint8_t portIndex)
 {
     uint32_t portsc = port_read32(portIndex, XHCI_PORT_SC);
-    portsc |= XHCI_PORTSC_PR;
-    port_write32(portIndex, XHCI_PORT_SC, portsc);
+    // PORTSC change bits are write-one-to-clear. Preserve only Port Power
+    // when requesting reset so this operation does not erase unrelated
+    // connect/link change evidence collected by the diagnostic snapshot.
+    const uint32_t resetRequest = (portsc & XHCI_PORTSC_PP) | XHCI_PORTSC_PR;
+    port_write32(portIndex, XHCI_PORT_SC, resetRequest);
 
     for (uint32_t i = 0u; i < 500u; ++i) {
         portsc = port_read32(portIndex, XHCI_PORT_SC);
         if ((portsc & XHCI_PORTSC_PRC) != 0u) {
-            port_write32(portIndex, XHCI_PORT_SC, portsc | XHCI_PORTSC_PRC);
             serial_puts("[XHCI] port reset complete port=");
             serial_u32_dec(portIndex);
             serial_puts("\n");
+            diagnostic_stage(modern_input_diagnostics::Stage::PortReset,
+                             modern_input_diagnostics::Status::Pass,
+                             0u, false, portsc, true, 0u, portIndex);
             return true;
         }
         delay_ms(1u);
@@ -873,6 +1085,9 @@ static bool reset_port(uint8_t portIndex)
     serial_puts("[XHCI] port reset timeout port=");
     serial_u32_dec(portIndex);
     serial_puts("\n");
+    diagnostic_stage(modern_input_diagnostics::Stage::PortReset,
+                     modern_input_diagnostics::Status::Timeout,
+                     0u, false, portsc, true, 0u, portIndex);
     return false;
 }
 
@@ -942,6 +1157,9 @@ static bool address_device(uint8_t slotId, uint8_t port, uint8_t speed)
         serial_puts("[XHCI] Address Device timeout slot=");
         serial_u32_dec(slotId);
         serial_puts("\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::AddressDevice,
+                         modern_input_diagnostics::Status::Timeout,
+                         1000u, true, 0u, false, slotId, port);
         return false;
     }
 
@@ -951,12 +1169,20 @@ static bool address_device(uint8_t slotId, uint8_t port, uint8_t speed)
         serial_puts(" cc=");
         serial_puts(completion_code_name(result.completionCode));
         serial_puts("\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::AddressDevice,
+                         modern_input_diagnostics::Status::Fail,
+                         result.completionCode, false, 0u, false,
+                         slotId, port, 0u, result.completionCode, true);
         return false;
     }
 
     serial_puts("[XHCI] Address Device slot=");
     serial_u32_dec(slotId);
     serial_puts(" success\n");
+    diagnostic_stage(modern_input_diagnostics::Stage::AddressDevice,
+                     modern_input_diagnostics::Status::Pass,
+                     0u, false, 0u, false, slotId, port,
+                     0u, result.completionCode, true);
     return true;
 }
 
@@ -1044,8 +1270,16 @@ static bool ep0_control_transfer(uint8_t slotId, const UsbControlRequest& req,
                         result->bytesTransferred = req.wLength - residual;
                     }
                     if (cc == CC_SUCCESS || cc == CC_SHORT_PACKET) {
+                        diagnostic_stage(modern_input_diagnostics::Stage::ControlTransfer,
+                                         modern_input_diagnostics::Status::Pass,
+                                         residual, true, 0u, false, slotId,
+                                         0u, evtEp, cc, true);
                         return true;
                     }
+                    diagnostic_stage(modern_input_diagnostics::Stage::ControlTransfer,
+                                     modern_input_diagnostics::Status::Fail,
+                                     residual, true, 0u, false, slotId,
+                                     0u, evtEp, cc, true);
                     serial_puts("[XHCI] control transfer failed cc=");
                     serial_puts(completion_code_name(cc));
                     serial_puts("\n");
@@ -1061,6 +1295,10 @@ static bool ep0_control_transfer(uint8_t slotId, const UsbControlRequest& req,
     serial_puts("[XHCI] control transfer timeout slot=");
     serial_u32_dec(slotId);
     serial_puts("\n");
+    diagnostic_stage(modern_input_diagnostics::Stage::ControlTransfer,
+                     modern_input_diagnostics::Status::Timeout,
+                     req.timeoutMs, true, 0u, false, slotId,
+                     0u, 1u);
     return false;
 }
 
@@ -1068,7 +1306,8 @@ static bool ep0_control_transfer(uint8_t slotId, const UsbControlRequest& req,
 // GET_DESCRIPTOR (Section 10)
 // ================================================================
 
-static bool get_device_descriptor(uint8_t slotId, uint8_t* buf, uint32_t len,
+static bool get_device_descriptor(uint8_t slotId, uint8_t speed,
+                                    uint8_t* buf, uint32_t len,
                                     UsbDeviceDescriptorInfo* info)
 {
     if (buf == nullptr || info == nullptr) {
@@ -1084,16 +1323,53 @@ static bool get_device_descriptor(uint8_t slotId, uint8_t* buf, uint32_t len,
         serial_puts(" cc=");
         serial_puts(completion_code_name(result.completionCode));
         serial_puts("\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::DeviceDescriptor,
+                         result.completionCode == 0u
+                             ? modern_input_diagnostics::Status::Timeout
+                             : modern_input_diagnostics::Status::Fail,
+                         0u, false, 0u, false, slotId,
+                         s_selectedPort,
+                         1u, result.completionCode,
+                         result.completionCode != 0u);
         return false;
     }
 
-    *info = validate_usb_device_descriptor(buf, result.bytesTransferred);
+    if (len < 18u) {
+        const bool validPrefix = validate_usb_device_descriptor_prefix(
+            buf, result.bytesTransferred, speed);
+        modern_input_diagnostics::record_device_descriptor(
+            s_diagnosticControllerIndex, true, false, 0u, 0u);
+        diagnostic_stage(modern_input_diagnostics::Stage::DeviceDescriptor,
+                         validPrefix ? modern_input_diagnostics::Status::Pass
+                                     : modern_input_diagnostics::Status::Fail,
+                         result.bytesTransferred, !validPrefix, 0u, false,
+                         slotId, 0u, 1u);
+        if (!validPrefix) {
+            serial_puts("[XHCI] GET_DESCRIPTOR(Device) invalid 8-byte prefix\n");
+            return false;
+        }
+        return true;
+    }
+
+    *info = validate_usb_device_descriptor(buf, result.bytesTransferred, speed);
+    modern_input_diagnostics::record_device_descriptor(
+        s_diagnosticControllerIndex, true, info->valid,
+        info->valid ? info->idVendor : 0u,
+        info->valid ? info->idProduct : 0u);
     if (!info->valid) {
         serial_puts("[XHCI] GET_DESCRIPTOR(Device) invalid descriptor\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::DeviceDescriptor,
+                         modern_input_diagnostics::Status::Fail,
+                         result.bytesTransferred, true, 0u, false,
+                         slotId, 0u, 1u);
         return false;
     }
 
     serial_puts("[XHCI] GET_DESCRIPTOR(Device) success\n");
+    diagnostic_stage(modern_input_diagnostics::Stage::DeviceDescriptor,
+                     modern_input_diagnostics::Status::Pass,
+                     result.bytesTransferred, true, 0u, false,
+                     slotId, 0u, 1u);
     return true;
 }
 
@@ -1111,15 +1387,30 @@ static bool enumerate_first_device(EnumeratedDevice* out)
         serial_puts("[XHCI] enumerate: controller not running\n");
         return false;
     }
+    if (!s_dmaReady) {
+        serial_puts("[XHCI] enumerate: DMA prerequisites were not satisfied\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                         modern_input_diagnostics::Status::Blocked);
+        return false;
+    }
 
     uint8_t port = 0u;
+    uint32_t connectedPorts = 0u;
     for (uint8_t p = 1u; p <= s_portCount; ++p) {
         XhciPortStatus ps;
-        if (port_status(p, &ps) && ps.connected) {
-            port = p;
-            break;
+        if (port_status(p, &ps)) {
+            if (ps.connected) {
+                ++connectedPorts;
+                if (port == 0u) port = p;
+            }
         }
     }
+    s_selectedPort = port;
+    modern_input_diagnostics::record_root_ports(
+        s_diagnosticControllerIndex, s_portCount, connectedPorts, port);
+    diagnostic_stage(modern_input_diagnostics::Stage::RootPorts,
+                     modern_input_diagnostics::Status::Pass,
+                     connectedPorts, true);
 
     if (port == 0u) {
         serial_puts("[XHCI] enumerate: no connected port\n");
@@ -1151,11 +1442,11 @@ static bool enumerate_first_device(EnumeratedDevice* out)
 
     UsbDeviceDescriptorInfo info;
 
-    if (!get_device_descriptor(slotId, s_controlBuf, 8u, &info)) {
+    if (!get_device_descriptor(slotId, speed, s_controlBuf, 8u, &info)) {
         return false;
     }
 
-    if (!get_device_descriptor(slotId, s_controlBuf, 18u, &info)) {
+    if (!get_device_descriptor(slotId, speed, s_controlBuf, 18u, &info)) {
         return false;
     }
 
@@ -1217,15 +1508,29 @@ bool init()
     const XhciBarInfo tempBar = validate_mmio_bar(bar0, bar1, 0x1000u);
     if (!tempBar.valid) {
         serial_puts("[XHCI] initial BAR validation failed\n");
+        diagnostic_stage(modern_input_diagnostics::Stage::BarMmio,
+                         modern_input_diagnostics::Status::Fail,
+                         bar0, true);
         return false;
     }
     s_mmioBase = tempBar.base;
+    modern_input_diagnostics::record_mmio_base(s_diagnosticControllerIndex,
+                                               tempBar.base);
+    diagnostic_stage(modern_input_diagnostics::Stage::BarMmio,
+                     modern_input_diagnostics::Status::Pass);
 
     if (!parse_capabilities()) {
         return false;
     }
 
     if (!validate_bar()) {
+        return false;
+    }
+
+    // Do not hand DMA addresses to hardware until every static ring/context
+    // address has a verified physical translation, alignment, and address
+    // width. Scratchpad support is deliberately a hard prerequisite.
+    if (!validate_dma_prerequisites()) {
         return false;
     }
 
@@ -1246,6 +1551,9 @@ bool init()
     }
 
     if (!configure_max_slots()) {
+        diagnostic_stage(modern_input_diagnostics::Stage::RingInitialization,
+                         modern_input_diagnostics::Status::Blocked,
+                         s_caps.maxSlots, true);
         return false;
     }
 
@@ -1253,10 +1561,28 @@ bool init()
     init_command_ring();
     init_event_ring();
     init_interrupter();
+    diagnostic_stage(modern_input_diagnostics::Stage::RingInitialization,
+                     modern_input_diagnostics::Status::Pass);
 
     if (!start_controller()) {
         return false;
     }
+
+    uint32_t connectedPorts = 0u;
+    uint8_t firstConnectedPort = 0u;
+    for (uint8_t port = 1u; port <= s_portCount; ++port) {
+        XhciPortStatus status;
+        if (port_status(port, &status) && status.connected) {
+            ++connectedPorts;
+            if (firstConnectedPort == 0u) firstConnectedPort = port;
+        }
+    }
+    modern_input_diagnostics::record_root_ports(
+        s_diagnosticControllerIndex, s_portCount, connectedPorts,
+        firstConnectedPort);
+    diagnostic_stage(modern_input_diagnostics::Stage::RootPorts,
+                     modern_input_diagnostics::Status::Pass,
+                     connectedPorts, true);
 
     s_initialized = true;
     serial_puts("[XHCI] init complete\n");
@@ -1330,6 +1656,9 @@ void set_kernel_physical_base(uint64_t physicalBase)
 {
     if (physicalBase != 0u) {
         s_kernelPhysicalBase = physicalBase;
+        s_kernelPhysicalBaseValid = true;
+    } else {
+        s_kernelPhysicalBaseValid = false;
     }
 }
 

@@ -96,6 +96,8 @@ MBEDTLS_GUIDEXOS_IMPORT_STATE_DEPS := \
 CFLAGS := -std=c++14 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti
 CFLAGS += -nostdlib -nostdinc++ -fno-builtin
 CFLAGS += -DGXOS_BARE_METAL
+GXOS_BUILD_SOURCE_REVISION := $(shell git -C "$(GUIDEXOS_REPO_ROOT)" rev-parse --short=12 HEAD)
+CFLAGS += -DGXOS_BUILD_SOURCE_REVISION=\"$(GXOS_BUILD_SOURCE_REVISION)\"
 CFLAGS += -I. -I.. -Icore/include -Iarch/$(ARCH)/include
 CFLAGS += $(EXTRA_CFLAGS)
 ifneq ($(MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED),0)

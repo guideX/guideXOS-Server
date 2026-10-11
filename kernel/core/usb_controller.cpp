@@ -15,7 +15,9 @@
 //
 
 #include "include/kernel/usb_controller.h"
+#include "include/kernel/xhci.h"
 #include "include/kernel/arch.h"
+#include "include/kernel/modern_input_diagnostics.h"
 #include "include/kernel/serial_debug.h"
 
 namespace kernel {
@@ -86,7 +88,7 @@ static void serial_bdf(uint8_t bus, uint8_t dev, uint8_t func)
 
 // Bounded, read-only xHCI MMIO capability probe.  The capability register
 // block is immutable hardware state, so this cannot disturb the controller.
-static void report_xhci_capabilities(uint64_t mmioBase)
+static void report_xhci_capabilities(uint64_t mmioBase, int32_t diagnosticIndex)
 {
     volatile const uint32_t* mmio =
         reinterpret_cast<volatile const uint32_t*>(
@@ -99,6 +101,15 @@ static void report_xhci_capabilities(uint64_t mmioBase)
 
     XhciCapabilities caps = parse_xhci_capabilities(
         capWords, XHCI_CAP_DWORD_COUNT);
+    kernel::modern_input_diagnostics::record_capabilities(
+        diagnosticIndex, caps.caplength, caps.hciVersion, caps.maxSlots,
+        caps.maxPorts, caps.csz ? 64u : 32u, caps.ac64, 0u,
+        caps.maxScratchpadBufs);
+    kernel::modern_input_diagnostics::record_stage(
+        diagnosticIndex, kernel::modern_input_diagnostics::Stage::Capabilities,
+        caps.valid ? kernel::modern_input_diagnostics::Status::Pass
+                   : kernel::modern_input_diagnostics::Status::Fail,
+        capWords[0], !caps.valid, 0u, false, 0u, 0u, 0u, 0u, false);
 
     char line[192];
     format_xhci_capabilities(caps, line, sizeof(line));
@@ -126,6 +137,10 @@ static void report_xhci_capabilities(uint64_t mmioBase)
     XhciProtocol protocols[XHCI_MAX_PROTOCOLS];
     const uint32_t count = parse_xhci_supported_protocols(
         extWords, XHCI_EXT_CAP_MAX_DWORDS, protocols, XHCI_MAX_PROTOCOLS);
+    kernel::modern_input_diagnostics::record_capabilities(
+        diagnosticIndex, caps.caplength, caps.hciVersion, caps.maxSlots,
+        caps.maxPorts, caps.csz ? 64u : 32u, caps.ac64, count,
+        caps.maxScratchpadBufs);
 
     for (uint32_t i = 0u; i < count; ++i) {
         char proto[96];
@@ -146,6 +161,7 @@ static uint32_t scan_port_io()
     uint32_t xhciCount   = 0u;
 
     kernel::serial::puts("[USB] host-controller scan begin\n");
+    kernel::modern_input_diagnostics::begin_pci_enumeration();
 
     for (uint16_t bus = 0u; bus < 256u; ++bus) {
         for (uint8_t dev = 0u; dev < 32u; ++dev) {
@@ -164,12 +180,40 @@ static uint32_t scan_port_io()
 
                 const UsbControllerClass cls =
                     classify_usb_controller(baseClass, subClass, progIf);
-                if (!cls.isUsbController) {
+                if (!cls.isHostController) {
                     continue;
                 }
 
                 const uint16_t vendor = static_cast<uint16_t>(id & 0xFFFFu);
                 const uint16_t device = static_cast<uint16_t>((id >> 16) & 0xFFFFu);
+                kernel::modern_input_diagnostics::ControllerKind diagnosticKind =
+                    kernel::modern_input_diagnostics::ControllerKind::Other;
+                switch (cls.type) {
+                    case UsbControllerType::UHCI:
+                        diagnosticKind = kernel::modern_input_diagnostics::ControllerKind::UHCI;
+                        break;
+                    case UsbControllerType::OHCI:
+                        diagnosticKind = kernel::modern_input_diagnostics::ControllerKind::OHCI;
+                        break;
+                    case UsbControllerType::EHCI:
+                        diagnosticKind = kernel::modern_input_diagnostics::ControllerKind::EHCI;
+                        break;
+                    case UsbControllerType::xHCI:
+                        diagnosticKind = kernel::modern_input_diagnostics::ControllerKind::XHCI;
+                        break;
+                    default:
+                        break;
+                }
+                const int32_t diagnosticIndex =
+                    kernel::modern_input_diagnostics::record_controller(
+                        static_cast<uint8_t>(bus), dev, func, vendor, device,
+                        baseClass, subClass, progIf, diagnosticKind);
+                if (cls.type == UsbControllerType::xHCI) ++xhciCount;
+                kernel::modern_input_diagnostics::record_stage(
+                    diagnosticIndex,
+                    kernel::modern_input_diagnostics::Stage::PciDiscovery,
+                    kernel::modern_input_diagnostics::Status::Pass,
+                    0u, false, 0u, false, 0u, 0u, 0u, 0u, false);
 
                 kernel::serial::puts("[USB] controller ");
                 serial_u32_dec(controllers);
@@ -198,6 +242,13 @@ static uint32_t scan_port_io()
                     kernel::serial::puts("[USB]   bar0=io base=0x");
                     serial_hex_n(bar0 & 0xFFFCu, 4u);
                     kernel::serial::putc('\n');
+                    if (cls.type == UsbControllerType::xHCI) {
+                        kernel::modern_input_diagnostics::record_stage(
+                            diagnosticIndex,
+                            kernel::modern_input_diagnostics::Stage::BarMmio,
+                            kernel::modern_input_diagnostics::Status::Fail,
+                            bar0, true, 0u, false, 0u, 0u, 0u, 0u, false);
+                    }
                     continue;
                 }
 
@@ -218,8 +269,32 @@ static uint32_t scan_port_io()
 
                 if (cls.type == UsbControllerType::xHCI &&
                     mmioBase != 0u && mmioBase != 0xFFFFFFFFu) {
-                    ++xhciCount;
-                    report_xhci_capabilities(mmioBase);
+                    const uint32_t bar1 = is64
+                        ? pci_read32(static_cast<uint8_t>(bus), dev, func, 0x14u) : 0u;
+                    const xhci::XhciBarInfo bar =
+                        xhci::validate_mmio_bar(bar0, bar1, 0x1000u);
+                    if (!bar.valid) {
+                        kernel::modern_input_diagnostics::record_stage(
+                            diagnosticIndex,
+                            kernel::modern_input_diagnostics::Stage::BarMmio,
+                            kernel::modern_input_diagnostics::Status::Fail,
+                            bar0, true, 0u, false, 0u, 0u, 0u, 0u, false);
+                        continue;
+                    }
+                    kernel::modern_input_diagnostics::record_mmio_base(
+                        diagnosticIndex, bar.base);
+                    kernel::modern_input_diagnostics::record_stage(
+                        diagnosticIndex,
+                        kernel::modern_input_diagnostics::Stage::BarMmio,
+                        kernel::modern_input_diagnostics::Status::Pass,
+                        0u, false, 0u, false, 0u, 0u, 0u, 0u, false);
+                    report_xhci_capabilities(bar.base, diagnosticIndex);
+                } else if (cls.type == UsbControllerType::xHCI) {
+                    kernel::modern_input_diagnostics::record_stage(
+                        diagnosticIndex,
+                        kernel::modern_input_diagnostics::Stage::BarMmio,
+                        kernel::modern_input_diagnostics::Status::Fail,
+                        bar0, true, 0u, false, 0u, 0u, 0u, 0u, false);
                 }
             }
         }
@@ -230,6 +305,9 @@ static uint32_t scan_port_io()
     kernel::serial::puts(" xhci=");
     serial_u32_dec(xhciCount);
     kernel::serial::putc('\n');
+
+    kernel::modern_input_diagnostics::complete_pci_enumeration(
+        kernel::modern_input_diagnostics::Status::Pass);
 
     return controllers;
 }
@@ -245,6 +323,9 @@ uint32_t scan_host_controllers()
 #else
     // Pure classification/parsing remains available; PCI config access is
     // not present on this architecture yet.
+    kernel::modern_input_diagnostics::begin_pci_enumeration();
+    kernel::modern_input_diagnostics::complete_pci_enumeration(
+        kernel::modern_input_diagnostics::Status::Unsupported);
     return 0u;
 #endif
 }

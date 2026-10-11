@@ -564,9 +564,13 @@ void test_descriptor_validation()
     }
     // Short descriptor
     {
-        const uint8_t desc[8] = { 8, 0x01, 0, 0, 0, 0, 0, 8 };
+        const uint8_t desc[8] = { 18, 0x01, 0, 2, 0, 0, 0, 64 };
         const UsbDeviceDescriptorInfo info = validate_usb_device_descriptor(desc, 8);
         expect(!info.valid, "short descriptor invalid");
+        expect(validate_usb_device_descriptor_prefix(desc, 8),
+               "valid initial eight-byte descriptor prefix accepted");
+        expect(!validate_usb_device_descriptor_prefix(desc, 7),
+               "short initial descriptor prefix rejected");
     }
     // Wrong descriptor type
     {
@@ -600,6 +604,69 @@ void test_descriptor_validation()
         const UsbDeviceDescriptorInfo info = validate_usb_device_descriptor(nullptr, 18);
         expect(!info.valid, "null descriptor invalid");
     }
+    // SuperSpeed uses bMaxPacketSize0 = 9 to represent a 512-byte EP0.
+    {
+        const uint8_t desc[18] = {
+            18, 0x01, 0x00, 0x03, 0x00, 0x00, 0x00, 9,
+            0x34, 0x12, 0x78, 0x56, 0x00, 0x01, 0, 0, 0, 1
+        };
+        expect(validate_usb_device_descriptor_prefix(desc, 8, XHCI_SPEED_SUPER),
+               "SuperSpeed eight-byte descriptor prefix accepts EP0 encoding 9");
+        expect(validate_usb_device_descriptor(desc, 18, XHCI_SPEED_SUPER).valid,
+               "SuperSpeed device descriptor accepts 512-byte EP0 encoding");
+        expect(!validate_usb_device_descriptor(desc, 18, XHCI_SPEED_FULL).valid,
+               "USB 2.0 descriptor rejects SuperSpeed EP0 encoding");
+    }
+}
+
+void test_dma_address_translation()
+{
+    uint64_t physical = 0u;
+    expect(translate_kernel_dma_address(0x101000u, 0x100000u, 0x200000u, 0x800000u,
+                                        128u, 64u, true, &physical),
+           "relocated kernel DMA address translates");
+    expect(physical == 0x801000u,
+           "DMA translation adds the kernel physical load base offset");
+    expect(!translate_kernel_dma_address(0x100FFFu, 0x100000u, 0x200000u, 0x800000u,
+                                         64u, 64u, true, &physical),
+           "address before kernel link base is rejected");
+    expect(!translate_kernel_dma_address(0x101001u, 0x100000u, 0x200000u, 0x800000u,
+                                         64u, 64u, true, &physical),
+           "misaligned virtual DMA address is rejected");
+    expect(!translate_kernel_dma_address(0x101000u, 0x100000u, 0x200000u, 0x800001u,
+                                         64u, 64u, true, &physical),
+           "misaligned translated physical address is rejected");
+    expect(!translate_kernel_dma_address(0x101000u, 0x100000u, 0x200000u, 0u,
+                                         64u, 64u, true, &physical),
+           "unknown physical load base is rejected");
+    expect(!translate_kernel_dma_address(0x101000u, 0x100000u, 0x200000u, 0x800000u,
+                                         0u, 64u, true, &physical),
+           "empty DMA span is rejected");
+    expect(!translate_kernel_dma_address(0x101000u, 0x100000u, 0x200000u, 0x800000u,
+                                         64u, 0u, true, &physical),
+           "zero DMA alignment is rejected");
+    expect(!translate_kernel_dma_address(0x101000u, 0x100000u, 0x200000u, 0x100000000ULL,
+                                         64u, 64u, false, &physical),
+           "32-bit-only controller rejects a span above 4 GiB");
+    expect(translate_kernel_dma_address(0x101000u, 0x100000u, 0x200000u, 0x100000000ULL,
+                                        64u, 64u, true, &physical) &&
+           physical == 0x100001000ULL,
+           "64-bit-capable controller accepts translated span above 4 GiB");
+    expect(!translate_kernel_dma_address(0x101000u, 0x100000u, 0x200000u, ~0ULL - 0xFFFu,
+                                         64u, 64u, true, &physical),
+           "DMA physical arithmetic overflow is rejected");
+    expect(!translate_kernel_dma_address(0x101000u, 0x100000u, 0x200000u, 0x800000u,
+                                         64u, 3u, true, &physical),
+           "non-power-of-two DMA alignment is rejected");
+    expect(!translate_kernel_dma_address(0x101000u, 0x100000u, 0x200000u, 0x800000u,
+                                         64u, 64u, true, nullptr),
+           "null DMA output is rejected");
+    expect(!translate_kernel_dma_address(0x1FFFFFu, 0x100000u, 0x200000u, 0x800000u,
+                                         2u, 1u, true, &physical),
+           "DMA span crossing the loaded kernel image end is rejected");
+    expect(!translate_kernel_dma_address(0x201000u, 0x100000u, 0x200000u, 0x800000u,
+                                         64u, 64u, true, &physical),
+           "DMA address outside the loaded kernel image is rejected");
 }
 
 // ================================================================
@@ -637,6 +704,7 @@ int main()
     test_trb_builders();
     test_event_accessors();
     test_descriptor_validation();
+    test_dma_address_translation();
     test_control_request();
 
     if (g_failures == 0) {

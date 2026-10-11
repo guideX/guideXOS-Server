@@ -24,6 +24,7 @@
 #include "include/kernel/pci_audio.h"
 #include "include/kernel/usb_controller.h"
 #include "include/kernel/xhci.h"
+#include "include/kernel/modern_input_diagnostics.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/desktop_capabilities.h"
 #include "include/kernel/app_launch_target_resolver.h"
@@ -724,6 +725,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 
     // Initialize serial debug output early
     kernel::serial::init();
+    kernel::modern_input_diagnostics::initialize();
     kernel::serial::puts("[GXOS-BUILD] identity=");
     kernel::serial::puts(GXOS_BUILD_IDENTITY);
     kernel::serial::puts(" probe=");
@@ -922,6 +924,28 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::usb::xhci::EnumeratedDevice enumerated;
             kernel::usb::xhci::controller::enumerate_device(&enumerated);
         }
+        // The generic USB HID decoder is present, but the current xHCI path
+        // does not enumerate HID interfaces or submit interrupt reports.
+        // Publish that boundary explicitly instead of presenting zero report
+        // counters as evidence that transport failed.
+        {
+            kernel::modern_input_diagnostics::Snapshot snapshot;
+            kernel::modern_input_diagnostics::copy_snapshot(&snapshot);
+            const int32_t selected = snapshot.selectedControllerIndex;
+            kernel::modern_input_diagnostics::record_stage(
+                selected, kernel::modern_input_diagnostics::Stage::HidDiscovery,
+                kernel::modern_input_diagnostics::Status::Unsupported,
+                0u, false, 0u, false, 0u, 0u, 0u, 0u, false);
+            kernel::modern_input_diagnostics::record_stage(
+                selected, kernel::modern_input_diagnostics::Stage::HidReportDelivery,
+                kernel::modern_input_diagnostics::Status::Unsupported,
+                0u, false, 0u, false, 0u, 0u, 0u, 0u, false);
+            kernel::modern_input_diagnostics::record_stage(
+                selected, kernel::modern_input_diagnostics::Stage::InputRouting,
+                kernel::modern_input_diagnostics::Status::Unsupported,
+                0u, false, 0u, false, 0u, 0u, 0u, 0u, false);
+        }
+        kernel::desktop::request_redraw();
 #if defined(GXOS_AUDIO_BOOT_SELFTEST)
         // Opt-in full DMA proof (QEMU proof builds only, never default:
         // it audibly exercises the hardware). See

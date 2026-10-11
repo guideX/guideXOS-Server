@@ -552,6 +552,36 @@ inline XhciBarInfo validate_mmio_bar(uint32_t bar0, uint32_t bar1,
     return info;
 }
 
+// Translate a statically linked kernel address into a controller-visible
+// physical address. The current AMD64 image links at 1 MiB; firmware may load
+// it at another physical base. Validate the complete span, alignment,
+// arithmetic bounds, and the controller's advertised address width.
+inline bool translate_kernel_dma_address(uint64_t virtualAddress,
+                                        uint64_t kernelVirtualStart,
+                                        uint64_t kernelVirtualEnd,
+                                        uint64_t kernelPhysicalBase,
+                                        uint32_t size, uint32_t alignment,
+                                        bool ac64, uint64_t* physicalOut)
+{
+    if (physicalOut == nullptr || kernelPhysicalBase == 0u || size == 0u ||
+        kernelVirtualStart < 0x100000ULL || kernelVirtualEnd <= kernelVirtualStart ||
+        virtualAddress < kernelVirtualStart || virtualAddress >= kernelVirtualEnd ||
+        static_cast<uint64_t>(size) > kernelVirtualEnd - virtualAddress ||
+        alignment == 0u || (alignment & (alignment - 1u)) != 0u ||
+        (virtualAddress & (static_cast<uint64_t>(alignment) - 1u)) != 0u) {
+        return false;
+    }
+    const uint64_t offset = virtualAddress - kernelVirtualStart;
+    if (offset > (~static_cast<uint64_t>(0) - kernelPhysicalBase)) return false;
+    const uint64_t physicalAddress = kernelPhysicalBase + offset;
+    if ((physicalAddress & (static_cast<uint64_t>(alignment) - 1u)) != 0u) return false;
+    const uint64_t lastByteOffset = static_cast<uint64_t>(size - 1u);
+    if (lastByteOffset > (~static_cast<uint64_t>(0) - physicalAddress)) return false;
+    if (!ac64 && physicalAddress + lastByteOffset > 0xFFFFFFFFULL) return false;
+    *physicalOut = physicalAddress;
+    return true;
+}
+
 // ================================================================
 // Ownership detection
 // ================================================================
@@ -955,7 +985,24 @@ struct UsbDeviceDescriptorInfo {
 // Validate a Device Descriptor from raw wire bytes.  `len` is the number of
 // bytes actually transferred.  Returns false (with valid=false) on any
 // malformed input; never reads past `len`.
-inline UsbDeviceDescriptorInfo validate_usb_device_descriptor(const uint8_t* data, uint32_t len)
+inline bool validate_usb_device_descriptor_prefix(const uint8_t* data, uint32_t len,
+                                                  uint8_t speed = 0u)
+{
+    if (data == nullptr || len < 8u || data[0] < 18u ||
+        data[1] != USB_DESC_TYPE_DEVICE) {
+        return false;
+    }
+    const uint8_t packetSize0 = data[7];
+    if (speed == XHCI_SPEED_SUPER || speed == XHCI_SPEED_SUPER_PLUS) {
+        return packetSize0 == 9u;
+    }
+    return packetSize0 == 8u || packetSize0 == 16u ||
+           packetSize0 == 32u || packetSize0 == 64u;
+}
+
+inline UsbDeviceDescriptorInfo validate_usb_device_descriptor(const uint8_t* data,
+                                                               uint32_t len,
+                                                               uint8_t speed = 0u)
 {
     UsbDeviceDescriptorInfo info{};
     info.valid = false;
@@ -963,12 +1010,7 @@ inline UsbDeviceDescriptorInfo validate_usb_device_descriptor(const uint8_t* dat
     if (data == nullptr || len < 18u) {
         return info;
     }
-    if (data[0] < 18u) {
-        return info; // bLength too small for a Device Descriptor
-    }
-    if (data[1] != USB_DESC_TYPE_DEVICE) {
-        return info; // wrong descriptor type
-    }
+    if (!validate_usb_device_descriptor_prefix(data, len, speed)) return info;
 
     info.bcdUSB            = static_cast<uint16_t>(data[2] | (data[3] << 8));
     info.deviceClass       = data[4];
@@ -981,11 +1023,6 @@ inline UsbDeviceDescriptorInfo validate_usb_device_descriptor(const uint8_t* dat
     info.numConfigurations = data[17];
 
     // EP0 max packet size must be a valid USB 2.0 control-endpoint value.
-    if (info.maxPacketSize0 != 8u && info.maxPacketSize0 != 16u &&
-        info.maxPacketSize0 != 32u && info.maxPacketSize0 != 64u) {
-        return info;
-    }
-
     info.valid = true;
     return info;
 }
