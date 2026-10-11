@@ -1,7 +1,9 @@
 #include "../kernel/core/include/kernel/widget_activation.h"
 #include "../kernel/core/include/kernel/disk_manager_wipe_ui.h"
+#include "../kernel/core/include/kernel/disk_manager_whole_disk_erase_ui.h"
 
 #include <cstdio>
+#include <cstring>
 
 namespace {
 
@@ -166,6 +168,80 @@ int main()
     check(!dispatch_widget_activation(&window, 31, stopWipe) &&
           stopRequests == 2,
           "a repeated Stop Wipe activation is ignored after terminal dispatch");
+
+    using namespace kernel::apps::disk_manager_whole_disk_erase_ui;
+    char erasePhrase[64] = {};
+    check(build_confirmation_phrase("SN-1234", erasePhrase,
+              sizeof(erasePhrase)) &&
+          std::strcmp(erasePhrase, "ERASE SN-1234") == 0,
+          "whole-disk final phrase names the displayed stable serial");
+    check(!confirmation_phrase_matches("", erasePhrase) &&
+          !confirmation_phrase_matches("WIPE", erasePhrase) &&
+          !confirmation_phrase_matches("ERASE SN-9999", erasePhrase),
+          "empty, Partition Wipe, and wrong-target phrases cannot enable disk erase");
+
+    window.widgetCount = 2;
+    window.widgets[0] = {};
+    window.widgets[0].id = 41;
+    window.widgets[0].type = WidgetType::TextBox;
+    window.widgets[0].visible = true;
+    window.widgets[0].enabled = true;
+    window.widgets[1] = make_button(42);
+    window.widgets[1].visible = true;
+    window.widgets[1].enabled = false;
+    int eraseStarts = 0;
+    const auto startErase = [&window, &eraseStarts](int id) {
+        if (id != 42) return;
+        ++eraseStarts;
+        window.widgets[1].enabled = false;
+    };
+    check(!dispatch_focused_button_activation(&window, 42,
+              focused_button_widget_id_for_index(0, 3, 42), '\n', startErase) &&
+          eraseStarts == 0,
+          "Enter in the initially focused confirmation textbox cannot start erase");
+    window.widgets[1].enabled = confirmation_phrase_matches(
+        "ERASE SN-1234", erasePhrase);
+    check(window.widgets[1].enabled &&
+          !dispatch_focused_button_activation(&window, 42,
+              focused_button_widget_id_for_index(0, 3, 42), '\n', startErase) &&
+          eraseStarts == 0,
+          "valid phrase still requires a separate final button activation");
+    check(dispatch_focused_button_activation(&window, 42,
+              focused_button_widget_id_for_index(3, 3, 42), '\n', startErase) &&
+          eraseStarts == 1 &&
+          !dispatch_focused_button_activation(&window, 42,
+              focused_button_widget_id_for_index(3, 3, 42), '\n', startErase) &&
+          eraseStarts == 1,
+          "keyboard final activation uses normal dispatch and duplicate activation starts only once");
+
+    window.widgets[1].enabled = true;
+    int pointerEraseStarts = 0;
+    const auto pointerStart = [&window, &pointerEraseStarts](int id) {
+        if (id != 42) return;
+        ++pointerEraseStarts;
+        window.widgets[1].enabled = false;
+    };
+    check(dispatch_widget_activation(&window, 42, pointerStart) &&
+          pointerEraseStarts == 1 &&
+          !dispatch_widget_activation(&window, 42, pointerStart) &&
+          pointerEraseStarts == 1,
+          "pointer final activation shares normal widget dispatch and one-shot admission");
+
+    int stopEraseRequests = 0;
+    window.widgetCount = 1;
+    window.widgets[0] = make_button(43);
+    window.widgets[0].visible = true;
+    window.widgets[0].enabled = true;
+    const auto stopEraseClick = [&stopEraseRequests](int id) {
+        if (id == 43) ++stopEraseRequests;
+    };
+    check(dispatch_focused_button_activation(&window, 43,
+              focused_button_widget_id_for_index(2, 2, 43), '\r',
+              stopEraseClick) && stopEraseRequests == 1,
+          "keyboard Stop Erase routes through the normal widget dispatcher");
+    check(dispatch_widget_activation(&window, 43, stopEraseClick) &&
+          stopEraseRequests == 2,
+          "pointer Stop Erase routes through the normal widget dispatcher");
 
     std::printf("Widget activation checks: %s (%d failures)\n",
         failures == 0 ? "PASS" : "FAIL", failures);

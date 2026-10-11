@@ -6275,15 +6275,21 @@ DiskManagerApp::DiskManagerApp()
       m_deleteBtnId(-1),
       m_mountBtnId(-1), m_unmountBtnId(-1),
       m_wipeBtnId(-1),
+      m_wholeEraseBtnId(-1),
       m_gptBtnId(-1), m_mbrBtnId(-1),
       m_confirmInitializeBtnId(-1), m_cancelInitializeBtnId(-1),
       m_createSizeTextBoxId(-1), m_createNameTextBoxId(-1),
-      m_wipeConfirmTextBoxId(-1), m_wipeProgressBarId(-1),
+      m_wipeConfirmTextBoxId(-1), m_wholeEraseConfirmTextBoxId(-1),
+      m_wipeProgressBarId(-1),
       m_initializeDialogState(INITIALIZE_DIALOG_CLOSED),
       m_dialogIsCreate(false), m_dialogIsFormat(false),
       m_dialogIsReformat(false), m_dialogIsDelete(false),
       m_dialogIsGptRepair(false), m_dialogIsWipe(false),
+      m_dialogIsWholeErase(false),
       m_wipeBlockReason(disk_manager_wipe_ui::WIPE_ACTION_PARTITION_NOT_SELECTED),
+      m_wholeEraseBlockReason(
+          disk_manager_whole_disk_erase_ui::WHOLE_ERASE_UI_DISK_ROW_REQUIRED),
+      m_wholeEraseEngineReason(storage::WHOLE_DISK_ERASE_REASON_NONE),
       m_gptRepairButtonFocus(0),
       m_createSizeEdited(false),
       m_createNameEdited(false), m_createInputFocus(0),
@@ -6312,6 +6318,11 @@ DiskManagerApp::DiskManagerApp()
     memset(&m_wipeRequest, 0, sizeof(m_wipeRequest));
     memset(&m_wipeResult, 0, sizeof(m_wipeResult));
     memset(&m_wipeJob, 0, sizeof(m_wipeJob));
+    memset(&m_wholeEraseRequest, 0, sizeof(m_wholeEraseRequest));
+    memset(&m_wholeEraseConfirmationProbe, 0,
+           sizeof(m_wholeEraseConfirmationProbe));
+    memset(&m_wholeEraseResult, 0, sizeof(m_wholeEraseResult));
+    memset(&m_wholeEraseJob, 0, sizeof(m_wholeEraseJob));
     m_wipeEligibility = {};
     memset(&m_mountDialogPartition, 0, sizeof(m_mountDialogPartition));
     m_lastStorageOperation = 0;
@@ -6319,6 +6330,8 @@ DiskManagerApp::DiskManagerApp()
     m_createSizeText[0] = '\0';
     m_createNameText[0] = '\0';
     m_wipeConfirmText[0] = '\0';
+    m_wholeEraseConfirmText[0] = '\0';
+    m_wholeEraseConfirmationPhrase[0] = '\0';
     m_initializeMessage[0] = '\0';
     strcopy(m_statusMessage, "Ready", sizeof(m_statusMessage));
     strcopy(m_name, "DiskManager", app::MAX_APP_NAME);
@@ -6337,6 +6350,11 @@ DiskManagerApp::~DiskManagerApp() {
     if (disk_manager_wipe_ui::wipe_job_running(m_wipeJob)) {
         storage::request_partition_wipe_stop(m_wipeJob);
         storage::step_partition_wipe_job(m_wipeJob);
+    }
+    if (disk_manager_whole_disk_erase_ui::whole_erase_job_running(
+            m_wholeEraseJob)) {
+        storage::request_whole_disk_erase_stop(m_wholeEraseJob);
+        storage::step_whole_disk_erase_job(m_wholeEraseJob);
     }
 }
 
@@ -6367,6 +6385,8 @@ bool DiskManagerApp::init() {
     m_mountBtnId = addButton(452, 0, 100, 28, "Mount...");
     m_unmountBtnId = addButton(558, 0, 90, 28, "Unmount");
     m_wipeBtnId = addButton(10, 0, 112, 28, "Wipe Partition...");
+    m_wholeEraseBtnId = addButton(10, 0, 174, 28,
+                                  "Erase Entire Disk");
     m_gptBtnId = addButton(10, 0, 140, 28,
                            "GPT (Default)");
     m_mbrBtnId = addButton(158, 0, 150, 28,
@@ -6378,6 +6398,7 @@ bool DiskManagerApp::init() {
     m_createSizeTextBoxId = addTextBox(0, 0, 180, 26, "MAX");
     m_createNameTextBoxId = addTextBox(0, 0, 220, 26, "New Volume");
     m_wipeConfirmTextBoxId = addTextBox(0, 0, 220, 26, "");
+    m_wholeEraseConfirmTextBoxId = addTextBox(0, 0, 320, 26, "");
     m_wipeProgressBarId = addProgressBar(0, 0, 300, 18, 0);
     updateInitializeControls();
     scanDisks();
@@ -6400,11 +6421,26 @@ void DiskManagerApp::shutdown() {
         storage::request_partition_wipe_stop(m_wipeJob);
         storage::step_partition_wipe_job(m_wipeJob);
     }
+    if (disk_manager_whole_disk_erase_ui::whole_erase_job_running(
+            m_wholeEraseJob)) {
+        storage::request_whole_disk_erase_stop(m_wholeEraseJob);
+        storage::step_whole_disk_erase_job(m_wholeEraseJob);
+    }
     m_initializeDialogState = INITIALIZE_DIALOG_CLOSED;
     m_state = app::AppState::Terminated;
 }
 
 bool DiskManagerApp::onCloseRequested() {
+    if (!disk_manager_whole_disk_erase_ui::request_stop_before_close(
+            m_wholeEraseJob)) {
+        strcopy(m_statusMessage,
+            "Close requested. Stopping the erase; the disk may already be partially overwritten.",
+            sizeof(m_statusMessage));
+        m_createInputFocus = 2;
+        updateInitializeControls();
+        invalidate();
+        return false;
+    }
     if (!disk_manager_wipe_ui::request_wipe_stop_before_close(m_wipeJob)) {
         strcopy(m_statusMessage,
             "Close requested. Stopping the wipe; review its result before closing.",
@@ -6418,6 +6454,21 @@ bool DiskManagerApp::onCloseRequested() {
 }
 
 void DiskManagerApp::update() {
+    if (m_dialogIsWholeErase && m_initializeDialogState ==
+            INITIALIZE_DIALOG_WHOLE_ERASE_RUNNING &&
+        disk_manager_whole_disk_erase_ui::whole_erase_job_running(
+            m_wholeEraseJob)) {
+        const storage::WholeDiskEraseState state =
+            storage::step_whole_disk_erase_job(m_wholeEraseJob);
+        m_wholeEraseResult = m_wholeEraseJob.result;
+        if (state != storage::WHOLE_DISK_ERASE_RUNNING) {
+            completeWholeDiskEraseOperation();
+            return;
+        }
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
     if (m_initializeDialogState == INITIALIZE_DIALOG_RUNNING && m_dialogIsWipe &&
         disk_manager_wipe_ui::wipe_job_running(m_wipeJob)) {
         const storage::PartitionWipeState state =
@@ -6529,6 +6580,8 @@ void DiskManagerApp::scanDisks() {
         }
 
         readPartitionTable(e);
+        storage::probe_whole_disk_erase_target(e.identity,
+                                                 e.wholeEraseProbe);
         for (uint8_t mountIndex = 0; mountIndex < vfs::VFS_MAX_MOUNTS;
              ++mountIndex) {
             const vfs::MountPoint* mount = vfs::get_mount_by_index(mountIndex);
@@ -6942,6 +6995,7 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
     app::Widget* mountAction = getWidget(m_mountBtnId);
     app::Widget* unmountAction = getWidget(m_unmountBtnId);
     app::Widget* wipeAction = getWidget(m_wipeBtnId);
+    app::Widget* wholeEraseAction = getWidget(m_wholeEraseBtnId);
     app::Widget* gpt = getWidget(m_gptBtnId);
     app::Widget* mbr = getWidget(m_mbrBtnId);
     app::Widget* confirm = getWidget(m_confirmInitializeBtnId);
@@ -6949,6 +7003,7 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
     app::Widget* sizeInput = getWidget(m_createSizeTextBoxId);
     app::Widget* nameInput = getWidget(m_createNameTextBoxId);
     app::Widget* wipeInput = getWidget(m_wipeConfirmTextBoxId);
+    app::Widget* wholeEraseInput = getWidget(m_wholeEraseConfirmTextBoxId);
     app::Widget* wipeProgress = getWidget(m_wipeProgressBarId);
     const int rowY = static_cast<int>(h) - 32;
     const int secondRowY = static_cast<int>(h) - 64;
@@ -6959,6 +7014,7 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
         if (diagnostics) { diagnostics->x = 192; diagnostics->y = firstRowY; diagnostics->w = 102; }
         if (initialize) { initialize->x = 10; initialize->y = secondRowY; initialize->w = 128; }
         if (wipeAction) { wipeAction->x = 144; wipeAction->y = secondRowY; wipeAction->w = 108; }
+        if (wholeEraseAction) { wholeEraseAction->x = 258; wholeEraseAction->y = secondRowY; wholeEraseAction->w = 172; }
         if (mountAction) { mountAction->x = 10; mountAction->y = rowY; mountAction->w = 108; }
         if (unmountAction) { unmountAction->x = 124; unmountAction->y = rowY; unmountAction->w = 92; }
         if (deleteAction) { deleteAction->x = 222; deleteAction->y = rowY; deleteAction->w = 116; }
@@ -6971,6 +7027,7 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
         if (mountAction) { mountAction->x = 274; mountAction->y = rowY; mountAction->w = 90; }
         if (unmountAction) { unmountAction->x = 370; unmountAction->y = rowY; unmountAction->w = 82; }
         if (deleteAction) { deleteAction->x = 458; deleteAction->y = rowY; deleteAction->w = 116; }
+        if (wholeEraseAction) { wholeEraseAction->x = 580; wholeEraseAction->y = rowY; wholeEraseAction->w = 174; }
     }
     if (gpt) { gpt->x = 10; gpt->y = rowY; gpt->w = 140; }
     if (mbr) { mbr->x = 158; mbr->y = rowY; mbr->w = 150; }
@@ -7000,6 +7057,13 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
             ? static_cast<int>(w) - static_cast<int>(leftW) - 40 : 120;
         wipeInput->h = 26;
     }
+    if (wholeEraseInput) {
+        wholeEraseInput->x = static_cast<int>(leftW) + 26;
+        wholeEraseInput->y = static_cast<int>(h) - (compact ? 160 : 130);
+        wholeEraseInput->w = static_cast<int>(w) > static_cast<int>(leftW) + 48
+            ? static_cast<int>(w) - static_cast<int>(leftW) - 40 : 120;
+        wholeEraseInput->h = 26;
+    }
     if (wipeProgress) {
         wipeProgress->x = static_cast<int>(leftW) + 26;
         wipeProgress->y = 270;
@@ -7022,6 +7086,7 @@ void DiskManagerApp::updateInitializeControls() {
     app::Widget* mountAction = getWidget(m_mountBtnId);
     app::Widget* unmountAction = getWidget(m_unmountBtnId);
     app::Widget* wipeAction = getWidget(m_wipeBtnId);
+    app::Widget* wholeEraseAction = getWidget(m_wholeEraseBtnId);
     app::Widget* gpt = getWidget(m_gptBtnId);
     app::Widget* mbr = getWidget(m_mbrBtnId);
     app::Widget* confirm = getWidget(m_confirmInitializeBtnId);
@@ -7029,10 +7094,13 @@ void DiskManagerApp::updateInitializeControls() {
     app::Widget* sizeInput = getWidget(m_createSizeTextBoxId);
     app::Widget* nameInput = getWidget(m_createNameTextBoxId);
     app::Widget* wipeInput = getWidget(m_wipeConfirmTextBoxId);
+    app::Widget* wholeEraseInput = getWidget(m_wholeEraseConfirmTextBoxId);
     app::Widget* wipeProgress = getWidget(m_wipeProgressBarId);
     const bool dialogClosed = m_initializeDialogState == INITIALIZE_DIALOG_CLOSED &&
         !m_mountDialogOpen;
     const bool haveSelection = m_selectedDisk >= 0 && m_selectedDisk < m_diskCount;
+    const bool selectedDiskRow = haveSelection &&
+        m_selectedObject == SELECTED_DISK;
     const bool rawSelected = haveSelection && m_disks[m_selectedDisk].haveInfo &&
         m_disks[m_selectedDisk].state == storage::DISK_STATE_NOT_INITIALIZED;
     const bool selectedRegion = haveSelection &&
@@ -7058,6 +7126,86 @@ void DiskManagerApp::updateInitializeControls() {
     const bool wipeRunning = m_dialogIsWipe &&
         m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
         disk_manager_wipe_ui::wipe_job_running(m_wipeJob);
+    const bool wholeEraseConfirm = m_dialogIsWholeErase &&
+        m_initializeDialogState == INITIALIZE_DIALOG_WHOLE_ERASE_CONFIRM;
+    const bool wholeEraseRunning = m_dialogIsWholeErase &&
+        m_initializeDialogState == INITIALIZE_DIALOG_WHOLE_ERASE_RUNNING &&
+        disk_manager_whole_disk_erase_ui::whole_erase_job_running(
+            m_wholeEraseJob);
+    storage::WholeDiskEraseProbe wholeEraseUiProbe = {};
+    bool wholeEraseSerialUnique = true;
+    if (selectedDiskRow) {
+        const DiskEntry& selected = m_disks[m_selectedDisk];
+        wholeEraseUiProbe = selected.wholeEraseProbe;
+        if (disk_manager_whole_disk_erase_ui::stable_serial_is_usable(
+                wholeEraseUiProbe.targetIdentity.serial)) {
+            for (int i = 0; i < m_diskCount; ++i) {
+                if (i == m_selectedDisk) continue;
+                if (disk_manager_whole_disk_erase_ui::stable_serials_equal(
+                        wholeEraseUiProbe.targetIdentity.serial,
+                        m_disks[i].identity.serial)) {
+                    wholeEraseSerialUnique = false;
+                    break;
+                }
+            }
+        }
+        if (wholeEraseUiProbe.reason ==
+                storage::WHOLE_DISK_ERASE_REASON_NONE) {
+            if (storage::storage_operation_active()) {
+                wholeEraseUiProbe.reason =
+                    storage::WHOLE_DISK_ERASE_REASON_OPERATION_BUSY;
+            } else {
+                const storage::RevalidationStatus identityStatus =
+                    storage::revalidate_target_identity(selected.identity);
+                if (identityStatus != storage::TARGET_VALID) {
+                    wholeEraseUiProbe.reason =
+                        identityStatus == storage::TARGET_DEVICE_MISSING
+                        ? storage::WHOLE_DISK_ERASE_REASON_DEVICE_MISSING
+                        : storage::WHOLE_DISK_ERASE_REASON_IDENTITY_CHANGED;
+                } else {
+                    const storage::MountProtection mount =
+                        storage::query_mount_protection(selected.identity);
+                    if (mount.safety == storage::DEVICE_ROOT_BACKING)
+                        wholeEraseUiProbe.reason =
+                            storage::WHOLE_DISK_ERASE_REASON_ROOT_BACKING;
+                    else if (mount.safety != storage::DEVICE_UNMOUNTED)
+                        wholeEraseUiProbe.reason =
+                            storage::WHOLE_DISK_ERASE_REASON_MOUNTED_CHILD;
+                    else {
+                        const storage::BootProtection boot =
+                            storage::query_boot_protection(selected.identity);
+                        if (boot.safety == storage::BOOT_DEVICE_IS_TARGET)
+                            wholeEraseUiProbe.reason =
+                                storage::WHOLE_DISK_ERASE_REASON_BOOT_BACKING;
+                        else if (boot.safety !=
+                                storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET)
+                            wholeEraseUiProbe.reason =
+                                storage::WHOLE_DISK_ERASE_REASON_BOOT_IDENTITY_UNKNOWN;
+                        else {
+                            storage::DeviceCapabilities liveCapabilities = {};
+                            if (!storage::query_device_capabilities(
+                                    selected.devIndex, liveCapabilities))
+                                wholeEraseUiProbe.reason =
+                                    storage::WHOLE_DISK_ERASE_REASON_DEVICE_MISSING;
+                            else if (!disk_manager_whole_disk_erase_ui::
+                                    capabilities_match(
+                                        selected.wholeEraseProbe.capabilities,
+                                        liveCapabilities))
+                                wholeEraseUiProbe.reason =
+                                    storage::WHOLE_DISK_ERASE_REASON_IDENTITY_CHANGED;
+                        }
+                    }
+                }
+            }
+        }
+        m_wholeEraseEngineReason = wholeEraseUiProbe.reason;
+    } else {
+        m_wholeEraseEngineReason =
+            storage::WHOLE_DISK_ERASE_REASON_NONE;
+    }
+    m_wholeEraseBlockReason =
+        disk_manager_whole_disk_erase_ui::whole_erase_action_block_reason(
+            selectedDiskRow, wholeEraseUiProbe, wholeEraseSerialUnique);
     const bool gptRepairLeaseCurrent = storage::storage_operation_lease_is_current(
         m_gptRepairPlan.lease);
     const storage::DiskState selectedState = haveSelection
@@ -7234,6 +7382,12 @@ void DiskManagerApp::updateInitializeControls() {
         wipeAction->enabled = wipeAction->visible &&
             m_wipeBlockReason == disk_manager_wipe_ui::WIPE_ACTION_READY;
     }
+    if (wholeEraseAction) {
+        wholeEraseAction->visible = dialogClosed && selectedDiskRow;
+        wholeEraseAction->enabled = wholeEraseAction->visible &&
+            m_wholeEraseBlockReason ==
+                disk_manager_whole_disk_erase_ui::WHOLE_ERASE_UI_READY;
+    }
     if (mountAction) {
         mountAction->visible = dialogClosed && showMountAction;
         mountAction->enabled = mountAvailable;
@@ -7246,7 +7400,8 @@ void DiskManagerApp::updateInitializeControls() {
     if (mbr) { mbr->visible = choosing; mbr->enabled = choosing; }
     if (confirm) {
         confirm->visible = m_mountDialogOpen || confirming || createOptions ||
-            formatOptions || deleteConfirm || gptRepairConfirm || wipeConfirm;
+            formatOptions || deleteConfirm || gptRepairConfirm || wipeConfirm ||
+            wholeEraseConfirm;
         bool wipeSelectionMatchesRequest = false;
         if (wipeConfirm && selectedPartition) {
             const DiskEntry& disk = m_disks[m_selectedDisk];
@@ -7256,24 +7411,31 @@ void DiskManagerApp::updateInitializeControls() {
                     m_wipeRequest, disk.identity, disk.scheme, selected.parsed);
         }
         confirm->enabled = m_mountDialogOpen ||
-            (wipeConfirm
-                ? (wipeSelectionMatchesRequest &&
-                   disk_manager_wipe_ui::wipe_confirmation_can_start(
-                       true, m_wipeBlockReason, m_wipeConfirmText))
-            : (confirming
-                ? (m_initializePlan.confirmationReady &&
-                   initializeLeaseCurrent)
-            : (gptRepairConfirm
-                ? (m_gptRepairPlan.confirmationReady && gptRepairLeaseCurrent)
-            : (deleteConfirm
-                ? (m_deletePlan.confirmationReady &&
-                   storage::storage_operation_lease_is_current(m_deletePlan.lease))
-                : (createOptions ? updateCreateInputWidgets() :
-                    (formatOptions && updateFormatLabelWidget()))))));
+            (wholeEraseConfirm && selectedDiskRow && m_selectedDisk >= 0 &&
+             m_selectedDisk < m_diskCount &&
+             disk_manager_whole_disk_erase_ui::confirmation_can_start(
+                 storage::target_identities_equal(
+                     m_wholeEraseConfirmationProbe.targetIdentity,
+                     m_disks[m_selectedDisk].identity),
+                 m_wholeEraseConfirmationProbe, wholeEraseUiProbe,
+                 m_wholeEraseConfirmText,
+                 m_wholeEraseConfirmationPhrase)) ||
+            (wipeConfirm && wipeSelectionMatchesRequest &&
+             disk_manager_wipe_ui::wipe_confirmation_can_start(
+                 true, m_wipeBlockReason, m_wipeConfirmText)) ||
+            (confirming && m_initializePlan.confirmationReady &&
+             initializeLeaseCurrent) ||
+            (gptRepairConfirm && m_gptRepairPlan.confirmationReady &&
+             gptRepairLeaseCurrent) ||
+            (deleteConfirm && m_deletePlan.confirmationReady &&
+             storage::storage_operation_lease_is_current(m_deletePlan.lease)) ||
+            (createOptions && updateCreateInputWidgets()) ||
+            (formatOptions && updateFormatLabelWidget());
         const char* confirmLabel = "Initialize";
         if (m_mountDialogOpen) confirmLabel = "Mount";
         else if (gptRepairConfirm) confirmLabel = "Repair GPT";
         else if (wipeConfirm) confirmLabel = "Wipe Partition";
+        else if (wholeEraseConfirm) confirmLabel = "Erase Entire Disk";
         else if (deleteConfirm) confirmLabel = "Delete Partition";
         else if (formatOptions)
             confirmLabel = m_dialogIsReformat ? "Quick Reformat" : "Format FAT32";
@@ -7291,6 +7453,11 @@ void DiskManagerApp::updateInitializeControls() {
         if (confirm) confirm->bgColor = m_gptRepairButtonFocus == 1
             ? 0xFF34465C : 0xFF505060;
     } else if (wipeConfirm) {
+        if (confirm) confirm->bgColor = m_createInputFocus == 3
+            ? 0xFFB83434 : 0xFF6F3030;
+        if (cancel) cancel->bgColor = m_createInputFocus == 2
+            ? 0xFF34465C : 0xFF505060;
+    } else if (wholeEraseConfirm) {
         if (confirm) confirm->bgColor = m_createInputFocus == 3
             ? 0xFFB83434 : 0xFF6F3030;
         if (cancel) cancel->bgColor = m_createInputFocus == 2
@@ -7328,20 +7495,38 @@ void DiskManagerApp::updateInitializeControls() {
         wipeInput->bgColor = wipeConfirm && m_createInputFocus == 0
             ? 0xFF3A4A5C : 0xFF2D2D37;
     }
-    if (wipeProgress) {
-        wipeProgress->visible = wipeRunning;
-        wipeProgress->enabled = false;
-        setWidgetValue(m_wipeProgressBarId,
-            disk_manager_wipe_ui::wipe_progress_value(m_wipeResult));
+    if (wholeEraseInput) {
+        wholeEraseInput->visible = wholeEraseConfirm;
+        wholeEraseInput->enabled = wholeEraseConfirm;
+        setWidgetText(m_wholeEraseConfirmTextBoxId,
+                      m_wholeEraseConfirmText);
+        wholeEraseInput->bgColor = wholeEraseConfirm &&
+                m_createInputFocus == 0
+            ? 0xFF3A4A5C : 0xFF2D2D37;
     }
-    const bool showCancel = m_mountDialogOpen || formatScanCancelable || wipeRunning ||
+    if (wipeProgress) {
+        wipeProgress->visible = wipeRunning || wholeEraseRunning;
+        wipeProgress->enabled = false;
+        setWidgetValue(m_wipeProgressBarId, wholeEraseRunning
+            ? disk_manager_whole_disk_erase_ui::progress_value(
+                m_wholeEraseResult)
+            : disk_manager_wipe_ui::wipe_progress_value(m_wipeResult));
+    }
+    const bool showCancel = m_mountDialogOpen || formatScanCancelable ||
+        wipeRunning || wholeEraseRunning ||
         (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED &&
          m_initializeDialogState != INITIALIZE_DIALOG_RUNNING);
     if (cancel) {
         cancel->visible = showCancel;
         cancel->enabled = showCancel;
-        setWidgetText(m_cancelInitializeBtnId, wipeRunning ? "Stop Wipe" :
-            (m_initializeDialogState == INITIALIZE_DIALOG_RESULT ? "Close" : "Cancel"));
+        setWidgetText(m_cancelInitializeBtnId,
+            wholeEraseRunning
+                ? (m_wholeEraseResult.stopRequested
+                    ? "Stop Requested" : "Stop Erase")
+                : (wipeRunning ? "Stop Wipe" :
+                   (m_initializeDialogState == INITIALIZE_DIALOG_RESULT ||
+                    m_initializeDialogState == INITIALIZE_DIALOG_WHOLE_ERASE_RESULT
+                        ? "Close" : "Cancel")));
     }
 }
 
@@ -7373,6 +7558,8 @@ void DiskManagerApp::selectDisk(int index) {
     m_partitionScroll = 0;
     m_detailScroll = 0;
     m_keyboardPane = KEYBOARD_DISKS;
+    storage::probe_whole_disk_erase_target(m_disks[index].identity,
+                                           m_disks[index].wholeEraseProbe);
     probeSelectedRegion();
     updateInitializeControls();
     invalidate();
@@ -7474,8 +7661,8 @@ void DiskManagerApp::moveKeyboardSelection(int delta) {
         invalidate();
     } else if (m_keyboardPane == KEYBOARD_ACTIONS) {
         m_actionFocus += delta;
-        if (m_actionFocus < 0) m_actionFocus = 4;
-        if (m_actionFocus > 4) m_actionFocus = 0;
+        if (m_actionFocus < 0) m_actionFocus = 5;
+        if (m_actionFocus > 5) m_actionFocus = 0;
         invalidate();
     } else {
         m_detailScroll += delta;
@@ -7515,6 +7702,8 @@ void DiskManagerApp::activateKeyboardAction() {
         onWidgetClick(m_initializeBtnId);
     } else if (m_actionFocus == 4 && m_wipeBtnId >= 0) {
         onWidgetClick(m_wipeBtnId);
+    } else if (m_actionFocus == 5 && m_wholeEraseBtnId >= 0) {
+        onWidgetClick(m_wholeEraseBtnId);
     }
 }
 
@@ -7539,9 +7728,20 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
         const bool wipeRunning = m_dialogIsWipe &&
             m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
             disk_manager_wipe_ui::wipe_job_running(m_wipeJob);
+        const bool wholeEraseConfirm = m_dialogIsWholeErase &&
+            m_initializeDialogState == INITIALIZE_DIALOG_WHOLE_ERASE_CONFIRM;
+        const bool wholeEraseRunning = m_dialogIsWholeErase &&
+            m_initializeDialogState == INITIALIZE_DIALOG_WHOLE_ERASE_RUNNING &&
+            disk_manager_whole_disk_erase_ui::whole_erase_job_running(
+                m_wholeEraseJob);
         if (escape) {
             closeInitializeDialog();
         } else if (wipeConfirm && tab) {
+            m_createInputFocus = m_createInputFocus == 0 ? 2 :
+                (m_createInputFocus == 2 ? 3 : 0);
+            updateInitializeControls();
+            invalidate();
+        } else if (wholeEraseConfirm && tab) {
             m_createInputFocus = m_createInputFocus == 0 ? 2 :
                 (m_createInputFocus == 2 ? 3 : 0);
             updateInitializeControls();
@@ -7551,10 +7751,17 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
                 !m_formatJob.commitStarted &&
                 (m_formatJob.state == storage::FAT32_FORMAT_JOB_SCANNING ||
                  m_formatJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT);
-            m_createInputFocus = (wipeRunning || formatScanCancelable) ? 2 : 0;
+            m_createInputFocus = (wipeRunning || wholeEraseRunning ||
+                formatScanCancelable) ? 2 : 0;
             updateInitializeControls();
             invalidate();
         } else if (enter && wipeRunning && m_createInputFocus == 2) {
+            app::dispatch_focused_button_activation(m_window,
+                m_cancelInitializeBtnId,
+                app::focused_button_widget_id_for_index(
+                    m_createInputFocus, 2, m_cancelInitializeBtnId), key,
+                [this](int id) { onWidgetClick(id); });
+        } else if (enter && wholeEraseRunning && m_createInputFocus == 2) {
             app::dispatch_focused_button_activation(m_window,
                 m_cancelInitializeBtnId,
                 app::focused_button_widget_id_for_index(
@@ -7617,6 +7824,15 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             if (length > 0) m_wipeConfirmText[length - 1] = '\0';
             updateInitializeControls();
             invalidate();
+        } else if (wholeEraseConfirm &&
+                   (key == 8 || key == shell::KEY_DELETE) &&
+                   m_createInputFocus == 0) {
+            size_t length = 0;
+            while (length + 1 < sizeof(m_wholeEraseConfirmText) &&
+                   m_wholeEraseConfirmText[length]) ++length;
+            if (length > 0) m_wholeEraseConfirmText[length - 1] = '\0';
+            updateInitializeControls();
+            invalidate();
         } else if (m_initializeDialogState == INITIALIZE_DIALOG_CHOOSE_SCHEME &&
                    (key == shell::KEY_LEFT || key == shell::KEY_RIGHT)) {
             m_initializeScheme = m_initializeScheme == storage::PARTITION_SCHEME_GPT
@@ -7636,6 +7852,12 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
                     focusedButtonId), key,
                 [this](int id) { onWidgetClick(id); });
         } else if (enter && wipeConfirm && m_createInputFocus == 3) {
+            app::dispatch_focused_button_activation(m_window,
+                m_confirmInitializeBtnId,
+                app::focused_button_widget_id_for_index(
+                    m_createInputFocus, 3, m_confirmInitializeBtnId), key,
+                [this](int id) { onWidgetClick(id); });
+        } else if (enter && wholeEraseConfirm && m_createInputFocus == 3) {
             app::dispatch_focused_button_activation(m_window,
                 m_confirmInitializeBtnId,
                 app::focused_button_widget_id_for_index(
@@ -7667,6 +7889,9 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             }
             else runCreatePartitionOperation();
         } else if (enter && m_initializeDialogState == INITIALIZE_DIALOG_RESULT) {
+            closeInitializeDialog();
+        } else if (enter && m_initializeDialogState ==
+                   INITIALIZE_DIALOG_WHOLE_ERASE_RESULT) {
             closeInitializeDialog();
         }
         return;
@@ -7706,7 +7931,7 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             selectListItem(m_disks[m_selectedDisk].itemCount - 1);
     } else if ((key == shell::KEY_LEFT || key == shell::KEY_RIGHT) &&
                m_keyboardPane == KEYBOARD_ACTIONS) {
-        m_actionFocus = (m_actionFocus + (key == shell::KEY_RIGHT ? 1 : 4)) % 5;
+        m_actionFocus = (m_actionFocus + (key == shell::KEY_RIGHT ? 1 : 5)) % 6;
         invalidate();
     } else if (enter) {
         activateKeyboardAction();
@@ -7714,7 +7939,10 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
 }
 
 void DiskManagerApp::onKeyChar(char c) {
-    if ((c == ' ' || c == '\r' || c == '\n') &&
+    const bool wholeEraseTextFocused = m_dialogIsWholeErase &&
+        m_initializeDialogState == INITIALIZE_DIALOG_WHOLE_ERASE_CONFIRM &&
+        m_createInputFocus == 0;
+    if (((c == ' ' && !wholeEraseTextFocused) || c == '\r' || c == '\n') &&
         ((m_dialogIsFormat && m_initializeDialogState ==
             INITIALIZE_DIALOG_CREATE_OPTIONS) ||
          (m_dialogIsFormat && m_initializeDialogState ==
@@ -7729,6 +7957,14 @@ void DiskManagerApp::onKeyChar(char c) {
          (m_dialogIsWipe && m_initializeDialogState ==
             INITIALIZE_DIALOG_RUNNING && m_createInputFocus == 2 &&
           disk_manager_wipe_ui::wipe_job_running(m_wipeJob)) ||
+         (m_dialogIsWholeErase && m_initializeDialogState ==
+            INITIALIZE_DIALOG_WHOLE_ERASE_CONFIRM &&
+          m_createInputFocus != 0) ||
+         (m_dialogIsWholeErase && m_initializeDialogState ==
+            INITIALIZE_DIALOG_WHOLE_ERASE_RUNNING &&
+          m_createInputFocus == 2 &&
+          disk_manager_whole_disk_erase_ui::whole_erase_job_running(
+              m_wholeEraseJob)) ||
          (m_initializeDialogState == INITIALIZE_DIALOG_CLOSED &&
           m_keyboardPane == KEYBOARD_ACTIONS))) {
         onKeyDown(32);
@@ -7736,10 +7972,14 @@ void DiskManagerApp::onKeyChar(char c) {
     }
     const bool wipeConfirmationInput = m_dialogIsWipe &&
         m_initializeDialogState == INITIALIZE_DIALOG_WIPE_CONFIRM;
+    const bool wholeEraseConfirmationInput = m_dialogIsWholeErase &&
+        m_initializeDialogState == INITIALIZE_DIALOG_WHOLE_ERASE_CONFIRM;
     if (m_mountDialogOpen ||
-        ((!m_dialogIsCreate && !m_dialogIsFormat) && !wipeConfirmationInput) ||
+        ((!m_dialogIsCreate && !m_dialogIsFormat) &&
+         !wipeConfirmationInput && !wholeEraseConfirmationInput) ||
         (m_initializeDialogState != INITIALIZE_DIALOG_CREATE_OPTIONS &&
-         !wipeConfirmationInput) || c < 0x20 || c > 0x7E) return;
+         !wipeConfirmationInput && !wholeEraseConfirmationInput) ||
+        c < 0x20 || c > 0x7E) return;
     if (wipeConfirmationInput) {
         if (m_createInputFocus != 0) return;
         if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
@@ -7750,6 +7990,19 @@ void DiskManagerApp::onKeyChar(char c) {
         if (length + 1 >= sizeof(m_wipeConfirmText)) return;
         m_wipeConfirmText[length] = c;
         m_wipeConfirmText[length + 1] = '\0';
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
+    if (wholeEraseConfirmationInput) {
+        if (m_createInputFocus != 0) return;
+        c = disk_manager_whole_disk_erase_ui::uppercase_ascii(c);
+        size_t length = 0;
+        while (length + 1 < sizeof(m_wholeEraseConfirmText) &&
+               m_wholeEraseConfirmText[length]) ++length;
+        if (length + 1 >= sizeof(m_wholeEraseConfirmText)) return;
+        m_wholeEraseConfirmText[length] = c;
+        m_wholeEraseConfirmText[length + 1] = '\0';
         updateInitializeControls();
         invalidate();
         return;
@@ -7888,6 +8141,19 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
         }
         return;
     }
+    if (widgetId == m_cancelInitializeBtnId && m_dialogIsWholeErase &&
+        m_initializeDialogState == INITIALIZE_DIALOG_WHOLE_ERASE_RUNNING &&
+        disk_manager_whole_disk_erase_ui::whole_erase_job_running(
+            m_wholeEraseJob)) {
+        if (storage::request_whole_disk_erase_stop(m_wholeEraseJob)) {
+            strcopy(m_statusMessage,
+                "Stop requested. The erase may already have destroyed part of the disk.",
+                sizeof(m_statusMessage));
+            updateInitializeControls();
+            invalidate();
+        }
+        return;
+    }
     if ((widgetId == m_createSizeTextBoxId ||
          widgetId == m_createNameTextBoxId) &&
         m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS) {
@@ -7897,6 +8163,13 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
         invalidate();
     } else if (widgetId == m_wipeConfirmTextBoxId && m_dialogIsWipe &&
                m_initializeDialogState == INITIALIZE_DIALOG_WIPE_CONFIRM) {
+        m_createInputFocus = 0;
+        updateInitializeControls();
+        invalidate();
+    } else if (widgetId == m_wholeEraseConfirmTextBoxId &&
+               m_dialogIsWholeErase &&
+               m_initializeDialogState ==
+                   INITIALIZE_DIALOG_WHOLE_ERASE_CONFIRM) {
         m_createInputFocus = 0;
         updateInitializeControls();
         invalidate();
@@ -7941,6 +8214,9 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
     } else if (widgetId == m_wipeBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
         beginWipeConfirmation();
+    } else if (widgetId == m_wholeEraseBtnId &&
+               m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
+        beginWholeDiskEraseConfirmation();
     } else if (widgetId == m_propertiesBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
         m_detailsMode = DETAILS_PROPERTIES;
@@ -7971,6 +8247,10 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
     } else if (widgetId == m_confirmInitializeBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_WIPE_CONFIRM) {
         runPartitionWipeOperation();
+    } else if (widgetId == m_confirmInitializeBtnId &&
+               m_initializeDialogState ==
+                   INITIALIZE_DIALOG_WHOLE_ERASE_CONFIRM) {
+        runWholeDiskEraseOperation();
     } else if (widgetId == m_confirmInitializeBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS) {
         if (m_dialogIsFormat) runFormatOperation();
@@ -8147,6 +8427,58 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                     panelW - 20, m_wipeResult.diagnostic, 0xFFFFB0A0);
             }
         }
+        if (m_dialogIsWholeErase) {
+            const uint32_t panelX = rightX + 8;
+            const uint32_t panelY = y + 70;
+            const uint32_t panelW = rightW > 24 ? rightW - 16 : rightW;
+            const uint32_t panelH = bodyBottom > 78
+                ? static_cast<uint32_t>(bodyBottom - 76) : 90;
+            framebuffer::fill_rect(panelX, panelY, panelW, panelH, kPanel);
+            framebuffer::fill_rect(panelX, panelY, panelW, 23, 0xFF8C3030);
+            disk_manager_draw_clipped(panelX + 10, panelY + 7,
+                panelW - 20, "Entire-Disk Erase Result", kText);
+            char line[176], number[24], sizeText[32];
+            uint32_t lineY = panelY + 33;
+            const storage::TargetIdentity& target =
+                m_wholeEraseResult.targetIdentity;
+            strcopy(line, "Target: ", sizeof(line));
+            strappend(line, target.model[0] ? target.model : target.name,
+                sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kText);
+            lineY += 16;
+            strcopy(line, "Serial: ", sizeof(line));
+            strappend(line, target.serial, sizeof(line));
+            strappend(line, " | State: ", sizeof(line));
+            strappend(line, storage::whole_disk_erase_state_name(
+                m_wholeEraseResult.state), sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kText);
+            lineY += 18;
+            const uint64_t totalBytes = m_wholeEraseResult.totalBytes != 0
+                ? m_wholeEraseResult.totalBytes
+                : m_wholeEraseConfirmationProbe.capabilities.totalCapacityBytes;
+            formatSizePrecise(totalBytes, sizeText, sizeof(sizeText));
+            strcopy(line, "Capacity: ", sizeof(line));
+            strappend(line, sizeText, sizeof(line));
+            strappend(line, " | Successfully written: ", sizeof(line));
+            disk_manager_u64(m_wholeEraseResult.bytesWritten, number,
+                sizeof(number));
+            strappend(line, number, sizeof(line));
+            strappend(line, " bytes", sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kSubText);
+            lineY += 18;
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                disk_manager_whole_disk_erase_ui::terminal_message(
+                    m_wholeEraseResult.state,
+                    m_wholeEraseResult.writeAttempted), 0xFFFFA0A0);
+            if (m_wholeEraseResult.diagnostic[0]) {
+                lineY += 18;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    m_wholeEraseResult.diagnostic, 0xFFFFB0A0);
+            }
+        }
         if (m_dialogIsCreate && m_initializeDialogState ==
                 INITIALIZE_DIALOG_RESULT) {
             const uint32_t panelX = rightX + 8;
@@ -8269,8 +8601,23 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             "Invalid metadata is not treated as a raw disk.", 0xFFFFB0A0);
     }
 
-    int tableTop = blockedRaw ||
-        disk.state == storage::DISK_STATE_INVALID_PARTITION_TABLE ? 94 : 82;
+    const char* eraseHint = nullptr;
+    if (m_selectedObject == SELECTED_DISK) {
+        eraseHint = disk_manager_whole_disk_erase_ui::
+            whole_erase_ui_block_reason_text(m_wholeEraseBlockReason,
+                                              m_wholeEraseEngineReason);
+    } else {
+        eraseHint = "To erase the whole device, deliberately select this parent disk row.";
+    }
+    const bool diskStateWarning = blockedRaw ||
+        disk.state == storage::DISK_STATE_INVALID_PARTITION_TABLE;
+    disk_manager_draw_clipped(rightX + 4,
+        y + (diskStateWarning ? 92 : 76), rightW - 8, eraseHint,
+        m_selectedObject == SELECTED_DISK && m_wholeEraseBlockReason ==
+            disk_manager_whole_disk_erase_ui::WHOLE_ERASE_UI_READY
+            ? kSubText : 0xFFFFC98C);
+
+    int tableTop = diskStateWarning ? 110 : 94;
     int contentBottom = bodyBottom;
     int tableHeight = contentBottom - tableTop - 40 - 96;
     if (tableHeight > 142) tableHeight = 142;
@@ -8467,6 +8814,22 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     drawDetails(rightX + 2, y + detailsY, rightW - 4,
                 detailsH > 0 ? static_cast<uint32_t>(detailsH) : 0, disk);
 
+    if (m_dialogIsWholeErase && m_initializeDialogState ==
+            INITIALIZE_DIALOG_WHOLE_ERASE_RUNNING) {
+        framebuffer::fill_rect(rightX + 2, y + tableTop, rightW - 4,
+            bodyBottom > tableTop ? static_cast<uint32_t>(bodyBottom - tableTop) : 0,
+            kPanel);
+        disk_manager_draw_clipped(rightX + 10, y + tableTop + 22,
+            rightW - 20, "Whole-device erase is active.", kText);
+        disk_manager_draw_clipped(rightX + 10, y + tableTop + 42,
+            rightW - 20,
+            "Partition metadata may already be destroyed; cached partition entries are hidden.",
+            0xFFFFD080);
+        disk_manager_draw_clipped(rightX + 10, y + tableTop + 62,
+            rightW - 20,
+            "The immutable erase target and engine progress remain active.", kSubText);
+    }
+
     if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED) {
         const uint32_t panelX = rightX + 8;
         const uint32_t panelY = y + 82;
@@ -8475,9 +8838,15 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             ? static_cast<uint32_t>(bodyBottom - 88) : 90;
         framebuffer::fill_rect(panelX, panelY, panelW, panelH, 0xFF252D3B);
         framebuffer::fill_rect(panelX, panelY, panelW, 23,
-            m_dialogIsWipe ? 0xFF8C3030 : 0xFF34465C);
+            (m_dialogIsWipe || m_dialogIsWholeErase)
+                ? 0xFF8C3030 : 0xFF34465C);
         disk_manager_draw_clipped(panelX + 10, panelY + 7, panelW - 20,
-            m_dialogIsWipe
+            m_dialogIsWholeErase
+                ? (m_initializeDialogState ==
+                        INITIALIZE_DIALOG_WHOLE_ERASE_RESULT
+                    ? "Entire-Disk Erase Result"
+                    : "Erase Entire Disk — Permanent Data Loss")
+                : (m_dialogIsWipe
                 ? (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
                     ? "Partition Wipe Result" : "Wipe Selected Partition?")
                 : (m_dialogIsGptRepair
@@ -8496,19 +8865,20 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                 ? (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
                     ? "Create Partition Result" : "Create Partition")
                 : (m_initializeDialogState == INITIALIZE_DIALOG_RESULT
-                    ? "Initialize Disk Result" : "Initialize Disk"))))),
+                    ? "Initialize Disk Result" : "Initialize Disk")))))),
             kText);
         uint32_t lineY = panelY + 32;
         const storage::TargetIdentity& identity =
-            (m_dialogIsWipe || m_dialogIsGptRepair || m_dialogIsDelete || m_dialogIsFormat || m_dialogIsCreate || m_initializeDialogState !=
+            (m_dialogIsWholeErase || m_dialogIsWipe || m_dialogIsGptRepair || m_dialogIsDelete || m_dialogIsFormat || m_dialogIsCreate || m_initializeDialogState !=
                 INITIALIZE_DIALOG_CHOOSE_SCHEME)
-                ? (m_dialogIsWipe ? m_wipeResult.targetIdentity
+                ? (m_dialogIsWholeErase ? m_wholeEraseResult.targetIdentity
+                  : (m_dialogIsWipe ? m_wipeResult.targetIdentity
                   : (m_dialogIsGptRepair ? m_gptRepairResult.targetIdentity
                   : (m_dialogIsDelete ? m_deleteResult.targetIdentity
                   : (m_dialogIsFormat ? m_formatResult.targetIdentity
                   : (m_dialogIsCreate ? m_createResult.targetIdentity
                                     : m_initializeResult.targetIdentity)
-                  ))))
+                  )))))
                 : disk.identity;
         char line[160], number[24], sizeText[32];
         strcopy(line, "Target: ", sizeof(line));
@@ -8532,7 +8902,145 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         strappend(line, " bytes", sizeof(line));
         disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20, line, kSubText);
         lineY += 17;
-        if (m_dialogIsWipe) {
+        if (m_dialogIsWholeErase) {
+            const bool confirmingWhole = m_initializeDialogState ==
+                INITIALIZE_DIALOG_WHOLE_ERASE_CONFIRM;
+            const storage::WholeDiskEraseProbe& snapshot =
+                m_wholeEraseConfirmationProbe;
+            const storage::WholeDiskEraseResult& result = m_wholeEraseResult;
+            const storage::TargetIdentity& target = confirmingWhole
+                ? snapshot.targetIdentity : result.targetIdentity;
+            const storage::DeviceCapabilities& capabilities = confirmingWhole
+                ? snapshot.capabilities : snapshot.capabilities;
+            const char* model = target.model[0] ? target.model : target.name;
+            strcopy(line, "Model/name: ", sizeof(line));
+            strappend(line, model, sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kText);
+            lineY += 16;
+            strcopy(line, "Device serial: ", sizeof(line));
+            strappend(line, target.serial, sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kText);
+            lineY += 16;
+            strcopy(line, "Disk Manager disk ", sizeof(line));
+            disk_manager_u64(static_cast<uint64_t>(target.globalIndex) + 1u,
+                number, sizeof(number));
+            strappend(line, number, sizeof(line));
+            strappend(line, " | Capacity: ", sizeof(line));
+            uint64_t totalBytes = result.totalBytes != 0
+                ? result.totalBytes : capabilities.totalCapacityBytes;
+            formatSizePrecise(totalBytes, sizeText, sizeof(sizeText));
+            strappend(line, sizeText, sizeof(line));
+            strappend(line, " | Logical sector: ", sizeof(line));
+            disk_manager_u64(target.logicalSectorSize, number, sizeof(number));
+            strappend(line, number, sizeof(line));
+            strappend(line, " bytes", sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kText);
+            lineY += 16;
+            strcopy(line, "Addressable sectors: ", sizeof(line));
+            const uint64_t totalSectors = result.totalSectors != 0
+                ? result.totalSectors : capabilities.totalLogicalSectors;
+            disk_manager_u64(totalSectors, number, sizeof(number));
+            strappend(line, number, sizeof(line));
+            strappend(line, " | Partitions at confirmation: ", sizeof(line));
+            disk_manager_u64(snapshot.partitionCount, number,
+                sizeof(number));
+            strappend(line, number, sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, kSubText);
+            lineY += 16;
+            strcopy(line, "Scope: entire device | Start LBA: 0 | End LBA: ",
+                sizeof(line));
+            disk_manager_u64(totalSectors ? totalSectors - 1u : 0,
+                number, sizeof(number));
+            strappend(line, number, sizeof(line));
+            disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                line, 0xFFFFD080);
+            lineY += 19;
+            if (confirmingWhole) {
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "All data on this disk will be destroyed.", 0xFFFFA0A0);
+                lineY += 16;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "Every addressable sector is zeroed, including partition tables,",
+                    0xFFFFA0A0);
+                lineY += 16;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "boot information, filesystems, partitions, and free space.",
+                    0xFFFFA0A0);
+                lineY += 16;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "The disk may no longer boot or contain recognizable partitions.",
+                    0xFFFFA0A0);
+                lineY += 16;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "Stopping after writes begin may leave it unusable and partly erased.",
+                    0xFFFFA0A0);
+                lineY += 16;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    "This is not Secure Erase or a sanitization operation.",
+                    0xFFFFD080);
+                lineY += 18;
+                strcopy(line, "Type exactly: ", sizeof(line));
+                strappend(line, m_wholeEraseConfirmationPhrase,
+                          sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kText);
+            } else {
+                strcopy(line, "State: ", sizeof(line));
+                strappend(line, storage::whole_disk_erase_state_name(
+                    result.state), sizeof(line));
+                strappend(line, " | ", sizeof(line));
+                disk_manager_u64(result.bytesWritten, number, sizeof(number));
+                strappend(line, number, sizeof(line));
+                strappend(line, " bytes successfully written of ",
+                    sizeof(line));
+                disk_manager_u64(result.totalBytes, number, sizeof(number));
+                strappend(line, number, sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kText);
+                lineY += 17;
+                strcopy(line, "Sectors: ", sizeof(line));
+                disk_manager_u64(result.sectorsWritten, number,
+                    sizeof(number));
+                strappend(line, number, sizeof(line));
+                strappend(line, " of ", sizeof(line));
+                disk_manager_u64(result.totalSectors, number, sizeof(number));
+                strappend(line, number, sizeof(line));
+                strappend(line, " | Progress: ", sizeof(line));
+                disk_manager_u64(result.progressPercent, number,
+                    sizeof(number));
+                strappend(line, number, sizeof(line));
+                strappend(line, "%", sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kSubText);
+                lineY += 17;
+                strcopy(line, "Phase: ", sizeof(line));
+                strappend(line, result.phase ==
+                    storage::WHOLE_DISK_ERASE_PHASE_FLUSH ? "Flush" :
+                    (result.phase == storage::WHOLE_DISK_ERASE_PHASE_OVERWRITE
+                        ? "Overwrite" : "Terminal/admission"), sizeof(line));
+                strappend(line, " | Required Flush: ", sizeof(line));
+                strappend(line, !result.flushAttempted ? "pending" :
+                    (result.durabilityConfirmed ? "succeeded" :
+                     (result.flushOutcome == block::FLUSH_OUTCOME_FAILED
+                        ? "failed" : "not confirmed")), sizeof(line));
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    line, kSubText);
+                lineY += 20;
+                disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
+                    disk_manager_whole_disk_erase_ui::terminal_message(
+                        result.state, result.writeAttempted),
+                    result.state == storage::WHOLE_DISK_ERASE_COMPLETED
+                        ? kText : 0xFFFFA0A0);
+                lineY += 19;
+                if (result.diagnostic[0])
+                    disk_manager_draw_clipped(panelX + 10, lineY,
+                        panelW - 20, result.diagnostic, 0xFFFFB0A0);
+            }
+        } else if (m_dialogIsWipe) {
             const storage::PartitionEntry& part =
                 m_wipeRequest.partitionSnapshot;
             char partitionNo[16], startText[24], endText[24], capacityText[32];
@@ -10805,7 +11313,239 @@ void DiskManagerApp::completePartitionWipeOperation() {
     invalidate();
 }
 
+void DiskManagerApp::beginWholeDiskEraseConfirmation() {
+    if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED ||
+        m_mountDialogOpen || m_selectedDisk < 0 ||
+        m_selectedDisk >= m_diskCount || m_selectedObject != SELECTED_DISK) {
+        strcopy(m_statusMessage,
+            "Select the parent disk row deliberately; a partition or free-space row cannot authorize erasing its disk.",
+            sizeof(m_statusMessage));
+        invalidate();
+        return;
+    }
+
+    DiskEntry& disk = m_disks[m_selectedDisk];
+    storage::WholeDiskEraseProbe probe = {};
+    storage::probe_whole_disk_erase_target(disk.identity, probe);
+    disk.wholeEraseProbe = probe;
+    bool serialUnique = true;
+    if (disk_manager_whole_disk_erase_ui::stable_serial_is_usable(
+            probe.targetIdentity.serial)) {
+        for (int i = 0; i < m_diskCount; ++i) {
+            if (i == m_selectedDisk) continue;
+            if (disk_manager_whole_disk_erase_ui::stable_serials_equal(
+                    probe.targetIdentity.serial, m_disks[i].identity.serial)) {
+                serialUnique = false;
+                break;
+            }
+        }
+    }
+    m_wholeEraseEngineReason = probe.reason;
+    m_wholeEraseBlockReason =
+        disk_manager_whole_disk_erase_ui::whole_erase_action_block_reason(
+            true, probe, serialUnique);
+    if (m_wholeEraseBlockReason !=
+            disk_manager_whole_disk_erase_ui::WHOLE_ERASE_UI_READY) {
+        strcopy(m_statusMessage,
+            disk_manager_whole_disk_erase_ui::whole_erase_ui_block_reason_text(
+                m_wholeEraseBlockReason, m_wholeEraseEngineReason),
+            sizeof(m_statusMessage));
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
+
+    memset(&m_wholeEraseRequest, 0, sizeof(m_wholeEraseRequest));
+    memset(&m_wholeEraseJob, 0, sizeof(m_wholeEraseJob));
+    memset(&m_wholeEraseResult, 0, sizeof(m_wholeEraseResult));
+    m_wholeEraseConfirmationProbe = probe;
+    m_wholeEraseRequest.targetSnapshot = probe.targetIdentity;
+    m_wholeEraseRequest.expectedRegistryGeneration =
+        probe.targetIdentity.registryGeneration;
+    m_wholeEraseRequest.scope =
+        storage::WHOLE_DISK_ERASE_ALL_ADDRESSABLE_SECTORS;
+    m_wholeEraseResult.targetIdentity = probe.targetIdentity;
+    m_wholeEraseResult.logicalSectorSize =
+        probe.capabilities.logicalSectorSize;
+    m_wholeEraseResult.totalSectors = probe.capabilities.totalLogicalSectors;
+    m_wholeEraseResult.totalBytes = probe.capabilities.totalCapacityBytes;
+    m_wholeEraseResult.state = storage::WHOLE_DISK_ERASE_NOT_ADMITTED;
+    if (!disk_manager_whole_disk_erase_ui::build_confirmation_phrase(
+            probe.targetIdentity.serial, m_wholeEraseConfirmationPhrase,
+            sizeof(m_wholeEraseConfirmationPhrase))) {
+        m_wholeEraseConfirmationProbe = {};
+        m_wholeEraseRequest = {};
+        strcopy(m_statusMessage,
+            "A unique, typeable device serial is required for whole-disk confirmation.",
+            sizeof(m_statusMessage));
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
+
+    m_dialogIsCreate = false;
+    m_dialogIsFormat = false;
+    m_dialogIsReformat = false;
+    m_dialogIsDelete = false;
+    m_dialogIsGptRepair = false;
+    m_dialogIsWipe = false;
+    m_dialogIsWholeErase = true;
+    m_wholeEraseConfirmText[0] = '\0';
+    m_createInputFocus = 0;
+    m_initializeMessage[0] = '\0';
+    m_initializeDialogState = INITIALIZE_DIALOG_WHOLE_ERASE_CONFIRM;
+    updateInitializeControls();
+    invalidate();
+}
+
+bool DiskManagerApp::revalidateWholeDiskEraseConfirmation(
+    storage::WholeDiskEraseProbe& currentProbe)
+{
+    using namespace disk_manager_whole_disk_erase_ui;
+    if (!m_dialogIsWholeErase || m_initializeDialogState !=
+            INITIALIZE_DIALOG_WHOLE_ERASE_CONFIRM ||
+        m_wholeEraseRequest.scope !=
+            storage::WHOLE_DISK_ERASE_ALL_ADDRESSABLE_SECTORS ||
+        m_wholeEraseRequest.expectedRegistryGeneration !=
+            m_wholeEraseConfirmationProbe.targetIdentity.registryGeneration ||
+        m_selectedObject != SELECTED_DISK || m_selectedDisk < 0 ||
+        m_selectedDisk >= m_diskCount ||
+        !storage::target_identities_equal(
+            m_wholeEraseRequest.targetSnapshot,
+            m_wholeEraseConfirmationProbe.targetIdentity) ||
+        !storage::target_identities_equal(
+            m_disks[m_selectedDisk].identity,
+            m_wholeEraseConfirmationProbe.targetIdentity)) {
+        strcopy(m_initializeMessage,
+            "The selected disk changed. Confirmation was cleared; select the disk and review a new confirmation.",
+            sizeof(m_initializeMessage));
+        return false;
+    }
+
+    storage::probe_whole_disk_erase_target(
+        m_wholeEraseConfirmationProbe.targetIdentity, currentProbe);
+    if (currentProbe.reason != storage::WHOLE_DISK_ERASE_REASON_NONE) {
+        strcopy(m_initializeMessage,
+            "The captured disk is no longer eligible: ",
+            sizeof(m_initializeMessage));
+        strappend(m_initializeMessage,
+            storage::whole_disk_erase_reason_name(currentProbe.reason),
+            sizeof(m_initializeMessage));
+        return false;
+    }
+    if (!confirmation_snapshot_matches(m_wholeEraseConfirmationProbe,
+                                       currentProbe)) {
+        strcopy(m_initializeMessage,
+            "The disk identity, geometry, capabilities, or partition layout changed. Confirmation was cleared; select the disk and review a new confirmation.",
+            sizeof(m_initializeMessage));
+        return false;
+    }
+
+    bool serialUnique = true;
+    for (int i = 0; i < m_diskCount; ++i) {
+        if (i == m_selectedDisk) continue;
+        if (stable_serials_equal(
+                m_wholeEraseConfirmationProbe.targetIdentity.serial,
+                m_disks[i].identity.serial)) {
+            serialUnique = false;
+            break;
+        }
+    }
+    if (!serialUnique || !stable_serial_is_usable(
+            m_wholeEraseConfirmationProbe.targetIdentity.serial)) {
+        strcopy(m_initializeMessage,
+            "The stable device serial is no longer unique and usable. Confirmation was cleared.",
+            sizeof(m_initializeMessage));
+        return false;
+    }
+    return true;
+}
+
+void DiskManagerApp::runWholeDiskEraseOperation() {
+    using namespace disk_manager_whole_disk_erase_ui;
+    if (!m_dialogIsWholeErase || m_initializeDialogState !=
+            INITIALIZE_DIALOG_WHOLE_ERASE_CONFIRM ||
+        !confirmation_phrase_matches(m_wholeEraseConfirmText,
+                                     m_wholeEraseConfirmationPhrase))
+        return;
+
+    storage::WholeDiskEraseProbe currentProbe = {};
+    if (!revalidateWholeDiskEraseConfirmation(currentProbe)) {
+        m_wholeEraseResult.state = storage::WHOLE_DISK_ERASE_NOT_ADMITTED;
+        m_wholeEraseResult.reason = currentProbe.reason ==
+                storage::WHOLE_DISK_ERASE_REASON_NONE
+            ? storage::WHOLE_DISK_ERASE_REASON_IDENTITY_CHANGED
+            : currentProbe.reason;
+        m_wholeEraseResult.targetIdentity =
+            m_wholeEraseConfirmationProbe.targetIdentity;
+        strcopy(m_wholeEraseResult.diagnostic, m_initializeMessage,
+                sizeof(m_wholeEraseResult.diagnostic));
+        m_wholeEraseConfirmText[0] = '\0';
+        m_wholeEraseConfirmationPhrase[0] = '\0';
+        memset(&m_wholeEraseRequest, 0, sizeof(m_wholeEraseRequest));
+        m_initializeDialogState = INITIALIZE_DIALOG_WHOLE_ERASE_RESULT;
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
+
+    m_initializeDialogState = INITIALIZE_DIALOG_WHOLE_ERASE_RUNNING;
+    m_createInputFocus = 0;
+    memset(&m_wholeEraseJob, 0, sizeof(m_wholeEraseJob));
+    const storage::WholeDiskEraseState state =
+        storage::begin_whole_disk_erase_job(m_wholeEraseJob,
+                                             m_wholeEraseRequest);
+    m_wholeEraseResult = m_wholeEraseJob.result;
+    if (state == storage::WHOLE_DISK_ERASE_RUNNING) {
+        strcopy(m_statusMessage, "Whole-disk erase running.",
+                sizeof(m_statusMessage));
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
+    completeWholeDiskEraseOperation();
+}
+
+void DiskManagerApp::completeWholeDiskEraseOperation() {
+    m_wholeEraseResult = m_wholeEraseJob.result;
+    m_lastStorageOperation = 8;
+    strcopy(m_initializeMessage,
+        disk_manager_whole_disk_erase_ui::terminal_message(
+            m_wholeEraseResult.state, m_wholeEraseResult.writeAttempted),
+        sizeof(m_initializeMessage));
+    if (m_wholeEraseResult.state == storage::WHOLE_DISK_ERASE_FAILED ||
+        m_wholeEraseResult.state ==
+            storage::WHOLE_DISK_ERASE_NOT_ADMITTED) {
+        strappend(m_initializeMessage, " Reason: ",
+                  sizeof(m_initializeMessage));
+        strappend(m_initializeMessage,
+            m_wholeEraseResult.diagnostic[0]
+                ? m_wholeEraseResult.diagnostic
+                : storage::whole_disk_erase_reason_name(
+                    m_wholeEraseResult.reason),
+            sizeof(m_initializeMessage));
+    }
+    // LBA 0 and the GPT copies are in scope. Refresh only after the exact job
+    // reaches terminal state and the engine releases its storage lease.
+    scanDisks();
+    m_initializeDialogState = INITIALIZE_DIALOG_WHOLE_ERASE_RESULT;
+    strcopy(m_statusMessage, m_initializeMessage, sizeof(m_statusMessage));
+    updateInitializeControls();
+    invalidate();
+}
+
 void DiskManagerApp::closeInitializeDialog() {
+    if (m_dialogIsWholeErase &&
+        disk_manager_whole_disk_erase_ui::whole_erase_job_running(
+            m_wholeEraseJob)) {
+        storage::request_whole_disk_erase_stop(m_wholeEraseJob);
+        strcopy(m_statusMessage,
+            "Stop requested. The disk may already be partially overwritten; the result will be shown after Flush handling.",
+            sizeof(m_statusMessage));
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
     if (m_dialogIsWipe &&
         disk_manager_wipe_ui::wipe_job_running(m_wipeJob)) {
         storage::request_partition_wipe_stop(m_wipeJob);
@@ -10843,6 +11583,7 @@ void DiskManagerApp::closeInitializeDialog() {
     m_dialogIsDelete = false;
     m_dialogIsGptRepair = false;
     m_dialogIsWipe = false;
+    m_dialogIsWholeErase = false;
     m_gptRepairButtonFocus = 0;
     m_createInputFocus = 0;
     m_initializeMessage[0] = '\0';
@@ -10858,6 +11599,20 @@ void DiskManagerApp::closeInitializeDialog() {
         memset(&m_wipeRequest, 0, sizeof(m_wipeRequest));
         memset(&m_wipeResult, 0, sizeof(m_wipeResult));
         m_wipeConfirmText[0] = '\0';
+    }
+    if (m_wholeEraseJob.result.state ==
+            storage::WHOLE_DISK_ERASE_COMPLETED ||
+        m_wholeEraseJob.result.state == storage::WHOLE_DISK_ERASE_FAILED ||
+        m_wholeEraseJob.result.state == storage::WHOLE_DISK_ERASE_STOPPED ||
+        m_wholeEraseJob.result.state ==
+            storage::WHOLE_DISK_ERASE_NOT_ADMITTED) {
+        memset(&m_wholeEraseJob, 0, sizeof(m_wholeEraseJob));
+        memset(&m_wholeEraseRequest, 0, sizeof(m_wholeEraseRequest));
+        memset(&m_wholeEraseConfirmationProbe, 0,
+               sizeof(m_wholeEraseConfirmationProbe));
+        memset(&m_wholeEraseResult, 0, sizeof(m_wholeEraseResult));
+        m_wholeEraseConfirmText[0] = '\0';
+        m_wholeEraseConfirmationPhrase[0] = '\0';
     }
     updateInitializeControls();
     invalidate();

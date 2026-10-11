@@ -10,6 +10,7 @@
 #include "../kernel/core/include/kernel/partition_wipe.h"
 #include "../kernel/core/include/kernel/whole_disk_erase.h"
 #include "../kernel/core/include/kernel/disk_manager_wipe_ui.h"
+#include "../kernel/core/include/kernel/disk_manager_whole_disk_erase_ui.h"
 #include "../kernel/core/include/kernel/fs_fat.h"
 #include "../kernel/core/include/kernel/disk_manager_model.h"
 #include "../kernel/core/include/kernel/ramdisk.h"
@@ -7096,6 +7097,272 @@ void run_disk_manager_wipe_ui_tests()
         g_checks - checksBefore, g_failures - failuresBefore);
 }
 
+void run_disk_manager_whole_erase_ui_tests()
+{
+    const int checksBefore = g_checks;
+    const int failuresBefore = g_failures;
+    namespace eraseUi = apps::disk_manager_whole_disk_erase_ui;
+
+    FakeDisk disk(512, 131);
+    prepare_whole_disk_mbr(disk);
+    const uint8_t index = register_fake(disk, true, true, true,
+        false, 0, 1024u);
+    storage::TargetIdentity target = {};
+    storage::capture_target_identity(index, target);
+    storage::WholeDiskEraseProbe captured = {};
+    const auto probeState = storage::probe_whole_disk_erase_target(
+        target, captured);
+    check(probeState == storage::WHOLE_DISK_ERASE_REASON_NONE &&
+          captured.reason == storage::WHOLE_DISK_ERASE_REASON_NONE &&
+          captured.partitionScheme == storage::PARTITION_SCHEME_MBR &&
+          captured.partitionCount == 2 &&
+          captured.layoutFingerprint[0] != 0 &&
+          captured.capabilities.totalLogicalSectors == disk.sectorCount &&
+          captured.capabilities.logicalSectorSize == disk.sectorSize,
+          "whole-disk GUI uses the production engine probe and captures eligible disk properties");
+    check(eraseUi::whole_erase_action_block_reason(true, captured, true) ==
+              eraseUi::WHOLE_ERASE_UI_READY,
+          "only a disk-row selection with an eligible engine probe and unique serial enables the action");
+    check(eraseUi::whole_erase_action_block_reason(false, captured, true) ==
+              eraseUi::WHOLE_ERASE_UI_DISK_ROW_REQUIRED &&
+          eraseUi::whole_erase_action_block_reason(true, captured, false) ==
+              eraseUi::WHOLE_ERASE_UI_DUPLICATE_SERIAL,
+          "partition and unallocated selections and duplicate serials fail closed");
+    storage::WholeDiskEraseProbe noSerial = captured;
+    noSerial.targetIdentity.serial[0] = '\0';
+    check(eraseUi::whole_erase_action_block_reason(true, noSerial, true) ==
+              eraseUi::WHOLE_ERASE_UI_STABLE_SERIAL_REQUIRED &&
+          eraseUi::whole_erase_action_block_reason(true, captured, true) ==
+              eraseUi::WHOLE_ERASE_UI_READY,
+          "missing serial identity fails closed while unique stable identity is accepted");
+
+    char phrase[64] = {};
+    check(eraseUi::build_confirmation_phrase(target.serial, phrase,
+              sizeof(phrase)) && std::strcmp(phrase, "ERASE FAKE-ONLY") == 0,
+          "confirmation phrase is built from the captured stable device serial");
+    check(!eraseUi::confirmation_phrase_matches("", phrase) &&
+          !eraseUi::confirmation_phrase_matches("ERASE FAKE-OTHER", phrase) &&
+          !eraseUi::confirmation_phrase_matches("ERASE", phrase) &&
+          eraseUi::confirmation_phrase_matches("ERASE FAKE-ONLY", phrase),
+          "empty and wrong phrases fail while the exact target phrase succeeds");
+    check(!eraseUi::stable_serial_is_usable("") &&
+          !eraseUi::stable_serial_is_usable("dsk") &&
+          !eraseUi::build_confirmation_phrase("", phrase, sizeof(phrase)),
+          "missing or too-short serial identity prevents whole-disk confirmation");
+    eraseUi::build_confirmation_phrase(target.serial, phrase, sizeof(phrase));
+
+    storage::WholeDiskEraseProbe current = {};
+    storage::probe_whole_disk_erase_target(target, current);
+    check(current.reason == storage::WHOLE_DISK_ERASE_REASON_NONE &&
+          captured.reason == storage::WHOLE_DISK_ERASE_REASON_NONE,
+          "both captured and current whole-disk engine probes are eligible");
+    check(eraseUi::confirmation_snapshot_matches(captured, current),
+          "exact engine probe snapshot matches the captured confirmation target");
+    check(eraseUi::confirmation_phrase_matches("ERASE FAKE-ONLY", phrase) &&
+          eraseUi::confirmation_can_start(true, captured, current,
+              "ERASE FAKE-ONLY", phrase),
+          "confirmed input is bound to the captured disk and full current engine snapshot");
+    check(!eraseUi::confirmation_can_start(false, captured, current,
+              "ERASE FAKE-ONLY", phrase),
+          "changing from the selected disk row invalidates confirmation");
+    storage::WholeDiskEraseProbe changed = current;
+    changed.targetIdentity.registrationId += 1;
+    check(!eraseUi::confirmation_snapshot_matches(captured, changed),
+          "device replacement invalidates target-bound confirmation");
+    changed = current;
+    changed.targetIdentity.registryGeneration += 1;
+    check(!eraseUi::confirmation_snapshot_matches(captured, changed),
+          "registry generation changes invalidate confirmation");
+    changed = current;
+    changed.targetIdentity.totalLogicalSectors += 1;
+    check(!eraseUi::confirmation_snapshot_matches(captured, changed),
+          "capacity changes invalidate confirmation");
+    changed = current;
+    changed.targetIdentity.logicalSectorSize *= 2;
+    check(!eraseUi::confirmation_snapshot_matches(captured, changed),
+          "logical-sector geometry changes invalidate confirmation");
+    changed = current;
+    changed.capabilities.flushSemanticsKnown = false;
+    check(!eraseUi::confirmation_snapshot_matches(captured, changed),
+          "required durability capability changes invalidate confirmation");
+    changed = current;
+    changed.layoutFingerprint[0] ^= 1u;
+    check(!eraseUi::confirmation_snapshot_matches(captured, changed),
+          "partition-layout changes invalidate confirmation");
+    changed = current;
+    changed.reason = storage::WHOLE_DISK_ERASE_REASON_MOUNTED_CHILD;
+    check(!eraseUi::confirmation_snapshot_matches(captured, changed),
+          "new mount protection invalidates confirmation and admission");
+
+    // The production engine probe rejects the same boot, mount, capability,
+    // and operation-ownership cases used by begin admission.
+    vfs::test_clear_mounts();
+    storage::StorageOperationLease busyLease = {};
+    const auto lockState = storage::try_acquire_storage_operation(busyLease);
+    check(lockState == storage::STORAGE_OPERATION_LOCK_ACQUIRED &&
+          storage::probe_whole_disk_erase_target(target, current) ==
+              storage::WHOLE_DISK_ERASE_REASON_OPERATION_BUSY,
+          "a conflicting production storage-operation owner disables the action");
+    check(storage::release_storage_operation(busyLease),
+          "the probe conflict check leaves operation ownership releasable");
+    vfs::test_set_mount(0, true, index, "/data");
+    check(storage::probe_whole_disk_erase_target(target, current) ==
+              storage::WHOLE_DISK_ERASE_REASON_MOUNTED_CHILD,
+          "an active mounted child is rejected by the production engine probe");
+    vfs::test_clear_mounts();
+    vfs::test_set_mount(0, true, index, "/");
+    check(storage::probe_whole_disk_erase_target(target, current) ==
+              storage::WHOLE_DISK_ERASE_REASON_ROOT_BACKING,
+          "root-backed storage is rejected by the production engine probe");
+    vfs::test_clear_mounts();
+    unregister_fake(index, disk);
+
+    FakeDisk bootDisk(512, 131);
+    prepare_whole_disk_mbr(bootDisk);
+    const uint8_t bootIndex = register_fake(bootDisk, true, true, true,
+        false, 0, 1024u, block::BOOT_PROVENANCE_BOOT_BACKING);
+    storage::capture_target_identity(bootIndex, target);
+    check(storage::probe_whole_disk_erase_target(target, current) ==
+              storage::WHOLE_DISK_ERASE_REASON_BOOT_BACKING,
+          "running boot media is rejected by the production engine probe");
+    unregister_fake(bootIndex, bootDisk);
+
+    FakeDisk unknownBoot(512, 131);
+    prepare_whole_disk_mbr(unknownBoot);
+    const uint8_t unknownIndex = register_fake(unknownBoot, true, true, true,
+        false, 0, 1024u, block::BOOT_PROVENANCE_UNKNOWN);
+    storage::capture_target_identity(unknownIndex, target);
+    check(storage::probe_whole_disk_erase_target(target, current) ==
+              storage::WHOLE_DISK_ERASE_REASON_BOOT_IDENTITY_UNKNOWN,
+          "ambiguous boot provenance stays fail-closed in the GUI probe");
+    unregister_fake(unknownIndex, unknownBoot);
+
+    FakeDisk readOnlyDisk(512, 131);
+    prepare_whole_disk_mbr(readOnlyDisk);
+    const uint8_t readOnlyIndex = register_fake(readOnlyDisk, false, true, true,
+        false, 0, 1024u);
+    storage::capture_target_identity(readOnlyIndex, target);
+    check(storage::probe_whole_disk_erase_target(target, current) ==
+              storage::WHOLE_DISK_ERASE_REASON_READ_ONLY,
+          "read-only media remains visible but is rejected by engine eligibility");
+    unregister_fake(readOnlyIndex, readOnlyDisk);
+
+    FakeDisk nvmeDisk(512, 131);
+    prepare_whole_disk_mbr(nvmeDisk);
+    const uint8_t nvmeIndex = register_fake(nvmeDisk, true, true, true,
+        false, 0, 1024u,
+        block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT, block::BDEV_NVME);
+    storage::capture_target_identity(nvmeIndex, target);
+    check(storage::probe_whole_disk_erase_target(target, current) ==
+              storage::WHOLE_DISK_ERASE_REASON_UNSUPPORTED_TRANSPORT,
+          "NVMe remains disabled regardless of GUI selection or typed phrase");
+    unregister_fake(nvmeIndex, nvmeDisk);
+
+    // Same-capacity re-registration and a changed valid partition map cannot
+    // reuse the first confirmation snapshot.
+    FakeDisk replacement(512, 131);
+    prepare_whole_disk_mbr(replacement);
+    const uint8_t replacementIndex = register_fake(replacement, true, true,
+        true, false, 0, 1024u);
+    storage::capture_target_identity(replacementIndex, target);
+    storage::WholeDiskEraseProbe replacementProbe = {};
+    storage::probe_whole_disk_erase_target(target, replacementProbe);
+    check(!eraseUi::confirmation_snapshot_matches(captured, replacementProbe),
+          "a new same-capacity registration cannot satisfy the old confirmation");
+    set_mbr_partition(replacement, 0, 0, 0x0C, 9, 8);
+    storage::WholeDiskEraseProbe changedLayout = {};
+    storage::probe_whole_disk_erase_target(target, changedLayout);
+    check(changedLayout.reason == storage::WHOLE_DISK_ERASE_REASON_NONE &&
+          !eraseUi::confirmation_snapshot_matches(replacementProbe,
+                                                   changedLayout),
+          "a changed but otherwise eligible partition layout requires fresh confirmation");
+    unregister_fake(replacementIndex, replacement);
+
+    // Run the actual cooperative engine through full write and Flush states;
+    // UI progress reads the engine counter and cannot claim 100% early.
+    FakeDisk completeDisk(512, 131);
+    prepare_whole_disk_mbr(completeDisk);
+    const uint8_t completeIndex = register_fake(completeDisk, true, true,
+        true, false, 0, 1024u * 1024u);
+    storage::WholeDiskEraseJob completeJob = {};
+    storage::begin_whole_disk_erase_job(completeJob,
+        make_whole_disk_erase_request(completeIndex));
+    const auto writingState = storage::step_whole_disk_erase_job(completeJob);
+    check(writingState == storage::WHOLE_DISK_ERASE_RUNNING &&
+          completeJob.result.sectorsWritten == completeDisk.sectorCount &&
+          eraseUi::progress_value(completeJob.result) == 99,
+          "progress follows actual written sectors and stays below 100 before Flush");
+    const auto completedState = storage::step_whole_disk_erase_job(completeJob);
+    check(completedState == storage::WHOLE_DISK_ERASE_COMPLETED &&
+          completeJob.result.durabilityConfirmed &&
+          eraseUi::progress_value(completeJob.result) == 100 &&
+          std::strstr(eraseUi::terminal_message(completedState, true),
+              "All addressable logical sectors were overwritten with zeros") != nullptr,
+          "100% and completion wording require the production engine's successful Flush");
+    storage::PartitionTableModel erasedTable = {};
+    check(storage::parse_partition_table(completeIndex, erasedTable) &&
+          erasedTable.state == storage::DISK_STATE_NOT_INITIALIZED,
+          "inventory parsing after LBA 0 destruction reports uninitialized media without recreating a table");
+    check(!storage::storage_operation_active() &&
+          completeJob.result.ownershipReleased,
+          "terminal completion releases the exact operation lease before inventory refresh");
+    unregister_fake(completeIndex, completeDisk);
+
+    FakeDisk stopDisk(512, 131);
+    prepare_whole_disk_mbr(stopDisk);
+    const uint8_t stopIndex = register_fake(stopDisk, true, true, true,
+        false, 0, 1024u);
+    storage::WholeDiskEraseJob stopJob = {};
+    storage::begin_whole_disk_erase_job(stopJob,
+        make_whole_disk_erase_request(stopIndex));
+    check(!eraseUi::request_stop_before_close(stopJob) &&
+          stopJob.result.stopRequested &&
+          storage::step_whole_disk_erase_job(stopJob) ==
+              storage::WHOLE_DISK_ERASE_STOPPED &&
+          !stopJob.result.writeAttempted && stopDisk.writeAttempts == 0 &&
+          std::strstr(eraseUi::terminal_message(stopJob.result.state,
+              stopJob.result.writeAttempted), "No sectors were changed") != nullptr,
+          "application Close before the first write requests Stop and reports no media change");
+    check(stopJob.result.ownershipReleased && !storage::storage_operation_active() &&
+          eraseUi::request_stop_before_close(stopJob),
+          "close becomes safe only after pre-write Stop settlement releases ownership");
+    unregister_fake(stopIndex, stopDisk);
+
+    FakeDisk partialDisk(512, 131);
+    prepare_whole_disk_mbr(partialDisk);
+    const uint8_t partialIndex = register_fake(partialDisk, true, true, true,
+        false, 0, 1024u);
+    storage::WholeDiskEraseJob partialJob = {};
+    storage::begin_whole_disk_erase_job(partialJob,
+        make_whole_disk_erase_request(partialIndex));
+    storage::step_whole_disk_erase_job(partialJob);
+    check(partialJob.result.sectorsWritten != 0 &&
+          !eraseUi::request_stop_before_close(partialJob) &&
+          storage::step_whole_disk_erase_job(partialJob) ==
+              storage::WHOLE_DISK_ERASE_STOPPED &&
+          std::strstr(eraseUi::terminal_message(partialJob.result.state,
+              partialJob.result.writeAttempted),
+              "may be partially overwritten") != nullptr &&
+          partialJob.result.flushAttempted &&
+          partialJob.result.durabilityConfirmed &&
+          partialJob.result.ownershipReleased,
+          "Close during partial erase requests Stop, Flushes, reports data loss, and releases ownership");
+    check(eraseUi::request_stop_before_close(partialJob),
+          "window teardown becomes allowed after partial erase settlement");
+    unregister_fake(partialIndex, partialDisk);
+
+    check(std::strstr(eraseUi::terminal_message(
+              storage::WHOLE_DISK_ERASE_FAILED, true),
+              "may be partially overwritten") != nullptr &&
+          std::strstr(eraseUi::terminal_message(
+              storage::WHOLE_DISK_ERASE_STOPPED, true),
+              "may no longer contain a usable partition table") != nullptr,
+          "write and Flush failures and partial Stop retain truthful destructive-result wording");
+
+    std::printf("DM34 Disk Manager whole-disk erase UI/operation: %d checks, %d failures\n",
+        g_checks - checksBefore, g_failures - failuresBefore);
+}
+
 int main()
 {
     run_nvme_logic_tests();
@@ -7109,6 +7376,7 @@ int main()
     run_partition_wipe_tests();
     run_whole_disk_erase_tests();
     run_disk_manager_wipe_ui_tests();
+    run_disk_manager_whole_erase_ui_tests();
 
     check(storage::crc32("123456789", 9) == 0xCBF43926u, "CRC32 standard test vector");
     check(storage::valid_geometry(10, 512), "512-byte geometry accepted");

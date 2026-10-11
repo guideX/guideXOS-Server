@@ -20,6 +20,8 @@
 #include "kernel/fat32_formatter.h"
 #include "kernel/partition_wipe.h"
 #include "kernel/disk_manager_wipe_ui.h"
+#include "kernel/whole_disk_erase.h"
+#include "kernel/disk_manager_whole_disk_erase_ui.h"
 #include "kernel/disk_manager_model.h"
 #include "kernel/desktop.h"
 #include "kernel/image_adapter.h"
@@ -1229,6 +1231,9 @@ private:
         INITIALIZE_DIALOG_DELETE_CONFIRM,
         INITIALIZE_DIALOG_GPT_REPAIR_CONFIRM,
         INITIALIZE_DIALOG_WIPE_CONFIRM,
+        INITIALIZE_DIALOG_WHOLE_ERASE_CONFIRM,
+        INITIALIZE_DIALOG_WHOLE_ERASE_RUNNING,
+        INITIALIZE_DIALOG_WHOLE_ERASE_RESULT,
         INITIALIZE_DIALOG_RUNNING,
         INITIALIZE_DIALOG_RESULT,
     };
@@ -1305,6 +1310,7 @@ private:
         ListItem items[MAX_LIST_ITEMS];
         uint16_t itemCount;
         storage::TargetIdentity identity;
+        storage::WholeDiskEraseProbe wholeEraseProbe;
     };
 
     DiskEntry m_disks[MAX_DISKS];
@@ -1319,6 +1325,7 @@ private:
     int m_mountBtnId;
     int m_unmountBtnId;
     int m_wipeBtnId;
+    int m_wholeEraseBtnId;
     int m_gptBtnId;
     int m_mbrBtnId;
     int m_confirmInitializeBtnId;
@@ -1326,6 +1333,7 @@ private:
     int m_createSizeTextBoxId;
     int m_createNameTextBoxId;
     int m_wipeConfirmTextBoxId;
+    int m_wholeEraseConfirmTextBoxId;
     int m_wipeProgressBarId;
     InitializeDialogState m_initializeDialogState;
     bool m_dialogIsCreate;
@@ -1334,8 +1342,12 @@ private:
     bool m_dialogIsDelete;
     bool m_dialogIsGptRepair;
     bool m_dialogIsWipe;
+    bool m_dialogIsWholeErase;
     disk_manager_wipe_ui::WipeActionEligibility m_wipeEligibility;
     disk_manager_wipe_ui::WipeActionBlockReason m_wipeBlockReason;
+    disk_manager_whole_disk_erase_ui::WholeDiskEraseUiBlockReason
+        m_wholeEraseBlockReason;
+    storage::WholeDiskEraseReason m_wholeEraseEngineReason;
     uint8_t m_gptRepairButtonFocus;
     bool m_createSizeEdited;
     bool m_createNameEdited;
@@ -1343,6 +1355,8 @@ private:
     char m_createSizeText[32];
     char m_createNameText[64];
     char m_wipeConfirmText[8];
+    char m_wholeEraseConfirmText[64];
+    char m_wholeEraseConfirmationPhrase[64];
     storage::PartitionScheme m_initializeScheme;
     storage::InitializeDiskPlan m_initializePlan;
     storage::InitializeDiskResult m_initializeResult;
@@ -1359,6 +1373,10 @@ private:
     storage::PartitionWipeRequest m_wipeRequest;
     storage::PartitionWipeResult m_wipeResult;
     storage::PartitionWipeJob m_wipeJob;
+    storage::WholeDiskEraseRequest m_wholeEraseRequest;
+    storage::WholeDiskEraseProbe m_wholeEraseConfirmationProbe;
+    storage::WholeDiskEraseResult m_wholeEraseResult;
+    storage::WholeDiskEraseJob m_wholeEraseJob;
     uint8_t m_lastStorageOperation;
     bool m_mountDialogOpen;
     uint8_t m_mountDialogDeviceIndex;
@@ -1423,6 +1441,11 @@ private:
     bool        revalidateWipeConfirmation();
     void        runPartitionWipeOperation();
     void        completePartitionWipeOperation();
+    void        beginWholeDiskEraseConfirmation();
+    bool        revalidateWholeDiskEraseConfirmation(
+                    storage::WholeDiskEraseProbe& currentProbe);
+    void        runWholeDiskEraseOperation();
+    void        completeWholeDiskEraseOperation();
     void        closeInitializeDialog();
     void        beginMountDialog();
     void        confirmPartitionMount();

@@ -67,6 +67,19 @@ enum WholeDiskMediaClassification : uint8_t {
     WHOLE_DISK_MEDIA_CLASS_AMBIGUOUS,
 };
 
+// Read-only admission snapshot for UI presentation and target-bound
+// confirmation. This uses the same production eligibility checks as begin;
+// it does not acquire ownership or issue writes.
+struct WholeDiskEraseProbe {
+    TargetIdentity targetIdentity;
+    DeviceCapabilities capabilities;
+    WholeDiskEraseReason reason;
+    WholeDiskMediaClassification mediaClassification;
+    PartitionScheme partitionScheme;
+    uint16_t partitionCount;
+    uint64_t layoutFingerprint[2];
+};
+
 struct WholeDiskEraseResult {
     WholeDiskEraseState state;
     WholeDiskEraseReason reason;
@@ -115,6 +128,8 @@ struct WholeDiskEraseJob {
 // revalidate the partition map because LBA 0 and GPT metadata are in scope.
 WholeDiskEraseState begin_whole_disk_erase_job(
     WholeDiskEraseJob& job, const WholeDiskEraseRequest& request);
+WholeDiskEraseReason probe_whole_disk_erase_target(
+    const TargetIdentity& target, WholeDiskEraseProbe& probe);
 WholeDiskEraseState step_whole_disk_erase_job(WholeDiskEraseJob& job);
 bool request_whole_disk_erase_stop(WholeDiskEraseJob& job);
 const char* whole_disk_erase_state_name(WholeDiskEraseState state);

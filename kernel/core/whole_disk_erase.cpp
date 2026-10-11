@@ -152,15 +152,110 @@ static WholeDiskEraseReason classify_partition_map(
     return WHOLE_DISK_ERASE_REASON_NONE;
 }
 
+static void layout_hash_byte(uint64_t& first, uint64_t& second,
+                             uint8_t value)
+{
+    first = (first ^ value) * 1099511628211ull;
+    second = (second ^ static_cast<uint8_t>(value ^ 0xA7u)) *
+        14029467366897019727ull;
+}
+
+static void layout_hash_u64(uint64_t& first, uint64_t& second,
+                            uint64_t value, uint8_t byteCount)
+{
+    for (uint8_t i = 0; i < byteCount; ++i) {
+        layout_hash_byte(first, second, static_cast<uint8_t>(value));
+        value >>= 8;
+    }
+}
+
+static void layout_hash_text(uint64_t& first, uint64_t& second,
+                             const char* value, size_t capacity)
+{
+    size_t length = 0;
+    while (length < capacity && value[length]) {
+        layout_hash_byte(first, second,
+            static_cast<uint8_t>(value[length]));
+        ++length;
+    }
+    layout_hash_byte(first, second, 0);
+}
+
+static void fingerprint_partition_map(WholeDiskEraseProbe& probe)
+{
+    uint64_t first = 14695981039346656037ull;
+    uint64_t second = 7809847782465536322ull;
+    layout_hash_u64(first, second, s_partitionTable.scheme, 1);
+    layout_hash_u64(first, second, s_partitionTable.state, 1);
+    layout_hash_u64(first, second, s_partitionTable.partitionCount, 2);
+    layout_hash_u64(first, second, s_partitionTable.tableEntryCount, 2);
+    layout_hash_u64(first, second, s_partitionTable.gptEntrySize, 4);
+    layout_hash_u64(first, second, s_partitionTable.gptEntryArraySectors, 4);
+    layout_hash_u64(first, second, s_partitionTable.primaryGptHeaderCrc32, 4);
+    layout_hash_u64(first, second, s_partitionTable.backupGptHeaderCrc32, 4);
+    layout_hash_u64(first, second,
+        s_partitionTable.primaryGptEntryArrayCrc32, 4);
+    layout_hash_u64(first, second,
+        s_partitionTable.backupGptEntryArrayCrc32, 4);
+    layout_hash_u64(first, second,
+        s_partitionTable.primaryGptEntryArrayLba, 8);
+    layout_hash_u64(first, second,
+        s_partitionTable.backupGptEntryArrayLba, 8);
+    layout_hash_u64(first, second, s_partitionTable.firstUsableLba, 8);
+    layout_hash_u64(first, second, s_partitionTable.lastUsableLba, 8);
+    layout_hash_u64(first, second, s_partitionTable.protectiveMbr, 1);
+    layout_hash_u64(first, second, s_partitionTable.hybridMbr, 1);
+    layout_hash_u64(first, second,
+        s_partitionTable.extendedPartitionsPresent, 1);
+    layout_hash_u64(first, second, s_partitionTable.primaryGptValid, 1);
+    layout_hash_u64(first, second, s_partitionTable.backupGptValid, 1);
+    layout_hash_u64(first, second, s_partitionTable.gptCopiesAgree, 1);
+    layout_hash_u64(first, second, s_partitionTable.gptCopiesConflict, 1);
+    layout_hash_u64(first, second, s_partitionTable.protectiveMbrValid, 1);
+    layout_hash_u64(first, second, s_partitionTable.primaryGptCopyState, 1);
+    layout_hash_u64(first, second, s_partitionTable.backupGptCopyState, 1);
+    layout_hash_u64(first, second, s_partitionTable.primaryGptError, 1);
+    layout_hash_u64(first, second, s_partitionTable.backupGptError, 1);
+    for (uint8_t i = 0; i < 16; ++i) {
+        layout_hash_byte(first, second, s_partitionTable.primaryDiskGuid[i]);
+        layout_hash_byte(first, second, s_partitionTable.backupDiskGuid[i]);
+    }
+    layout_hash_u64(first, second, s_partitionTable.mbrDiskSignature, 4);
+    for (uint16_t i = 0; i < s_partitionTable.partitionCount; ++i) {
+        const PartitionEntry& part = s_partitionTable.partitions[i];
+        layout_hash_u64(first, second, part.partitionNumber, 2);
+        layout_hash_u64(first, second, part.mbrType, 1);
+        layout_hash_u64(first, second, part.isGpt, 1);
+        layout_hash_u64(first, second, part.bootable, 1);
+        for (uint8_t j = 0; j < 16; ++j) {
+            layout_hash_byte(first, second, part.typeGuid[j]);
+            layout_hash_byte(first, second, part.uniqueGuid[j]);
+        }
+        layout_hash_u64(first, second, part.startLba, 8);
+        layout_hash_u64(first, second, part.endLba, 8);
+        layout_hash_u64(first, second, part.sectorCount, 8);
+        layout_hash_u64(first, second, part.attributes, 8);
+        layout_hash_text(first, second, part.name, sizeof(part.name));
+    }
+    probe.partitionScheme = s_partitionTable.scheme;
+    probe.partitionCount = s_partitionTable.partitionCount;
+    probe.layoutFingerprint[0] = first;
+    probe.layoutFingerprint[1] = second;
+}
+
 static WholeDiskEraseReason validate_live_target(
-    const TargetIdentity& target, const StorageOperationLease& lease,
+    const TargetIdentity& target, const StorageOperationLease* lease,
     const uint8_t* zeroBuffer, DeviceCapabilities& caps)
 {
-    if (!storage_operation_lease_is_current(lease))
-        return WHOLE_DISK_ERASE_REASON_OWNERSHIP_INVALID;
-    if (!lease.targetPinned || lease.pinnedIndex != target.globalIndex ||
-        lease.pinnedRegistrationId != target.registrationId)
-        return WHOLE_DISK_ERASE_REASON_OWNERSHIP_INVALID;
+    if (lease) {
+        if (!storage_operation_lease_is_current(*lease))
+            return WHOLE_DISK_ERASE_REASON_OWNERSHIP_INVALID;
+        if (!lease->targetPinned || lease->pinnedIndex != target.globalIndex ||
+            lease->pinnedRegistrationId != target.registrationId)
+            return WHOLE_DISK_ERASE_REASON_OWNERSHIP_INVALID;
+    } else if (storage_operation_active()) {
+        return WHOLE_DISK_ERASE_REASON_OPERATION_BUSY;
+    }
 
     const RevalidationStatus identity = revalidate_target_identity(target);
     if (identity == TARGET_DEVICE_MISSING)
@@ -292,7 +387,7 @@ static bool finish_flush(WholeDiskEraseJob& job,
 {
     job.result.phase = WHOLE_DISK_ERASE_PHASE_FLUSH;
     DeviceCapabilities caps = {};
-    reason = validate_live_target(job.result.targetIdentity, job.lease,
+    reason = validate_live_target(job.result.targetIdentity, &job.lease,
                                   s_zeroBatch, caps);
     if (reason != WHOLE_DISK_ERASE_REASON_NONE) return false;
 
@@ -344,7 +439,7 @@ static void settle_failed_write(WholeDiskEraseJob& job,
     if (status != block::BLOCK_ERR_NO_MEDIA) {
         DeviceCapabilities caps = {};
         const WholeDiskEraseReason live = validate_live_target(
-            job.result.targetIdentity, job.lease, s_zeroBatch, caps);
+            job.result.targetIdentity, &job.lease, s_zeroBatch, caps);
         if (live == WHOLE_DISK_ERASE_REASON_NONE) {
             WholeDiskEraseReason flushReason = WHOLE_DISK_ERASE_REASON_NONE;
             (void)finish_flush(job, flushReason);
@@ -360,7 +455,7 @@ static void settle_failed_write(WholeDiskEraseJob& job,
 }
 
 static WholeDiskEraseReason validate_admission_policy(
-    const TargetIdentity& target, const StorageOperationLease& lease,
+    const TargetIdentity& target, const StorageOperationLease* lease,
     DeviceCapabilities& caps, WholeDiskMediaClassification& classification)
 {
     WholeDiskEraseReason reason = validate_live_target(
@@ -388,6 +483,39 @@ static WholeDiskEraseReason validate_admission_policy(
 }
 
 } // namespace
+
+WholeDiskEraseReason probe_whole_disk_erase_target(
+    const TargetIdentity& target, WholeDiskEraseProbe& probe)
+{
+    probe = {};
+    probe.targetIdentity = target;
+    probe.reason = WHOLE_DISK_ERASE_REASON_INVALID_REQUEST;
+    probe.mediaClassification = WHOLE_DISK_MEDIA_CLASS_UNKNOWN;
+    if (target.registrationId == 0 || target.registryGeneration == 0 ||
+        target.registryGeneration == UINT64_MAX ||
+        target.registryGeneration != block::registry_generation())
+        return probe.reason;
+    if (storage_operation_active()) {
+        probe.reason = WHOLE_DISK_ERASE_REASON_OPERATION_BUSY;
+        return probe.reason;
+    }
+
+    DeviceCapabilities caps = {};
+    WholeDiskMediaClassification classification =
+        WHOLE_DISK_MEDIA_CLASS_UNKNOWN;
+    probe.reason = validate_admission_policy(target, nullptr, caps,
+                                             classification);
+    probe.capabilities = caps;
+    probe.mediaClassification = classification;
+    if (probe.reason == WHOLE_DISK_ERASE_REASON_NONE) {
+        fingerprint_partition_map(probe);
+        // A competing operation may have acquired ownership while the
+        // read-only partition-table validation was running.
+        if (storage_operation_active())
+            probe.reason = WHOLE_DISK_ERASE_REASON_OPERATION_BUSY;
+    }
+    return probe.reason;
+}
 
 WholeDiskEraseState begin_whole_disk_erase_job(
     WholeDiskEraseJob& job, const WholeDiskEraseRequest& request)
@@ -447,7 +575,7 @@ WholeDiskEraseState begin_whole_disk_erase_job(
     WholeDiskMediaClassification classification =
         WHOLE_DISK_MEDIA_CLASS_UNKNOWN;
     WholeDiskEraseReason reason = validate_admission_policy(
-        request.targetSnapshot, job.lease, caps, classification);
+        request.targetSnapshot, &job.lease, caps, classification);
     job.result.mediaClassification = classification;
     if (reason != WHOLE_DISK_ERASE_REASON_NONE) {
         job.result.reason = reason;
@@ -501,7 +629,7 @@ WholeDiskEraseState step_whole_disk_erase_job(WholeDiskEraseJob& job)
 
     DeviceCapabilities caps = {};
     WholeDiskEraseReason reason = validate_live_target(
-        job.result.targetIdentity, job.lease, s_zeroBatch, caps);
+        job.result.targetIdentity, &job.lease, s_zeroBatch, caps);
     if (reason != WHOLE_DISK_ERASE_REASON_NONE) {
         job.stepActive = false;
         set_terminal(job, WHOLE_DISK_ERASE_FAILED, reason,
@@ -517,7 +645,7 @@ WholeDiskEraseState step_whole_disk_erase_job(WholeDiskEraseJob& job)
         WholeDiskMediaClassification classification =
             WHOLE_DISK_MEDIA_CLASS_UNKNOWN;
         reason = validate_admission_policy(job.result.targetIdentity,
-            job.lease, caps, classification);
+            &job.lease, caps, classification);
         job.result.mediaClassification = classification;
         if (reason != WHOLE_DISK_ERASE_REASON_NONE) {
             job.stepActive = false;
