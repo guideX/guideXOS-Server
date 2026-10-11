@@ -1,19 +1,77 @@
 # AIDA_LPT Intel I219-LM TX engine audit — Phase 25
 
-Status: source audit and one-variable artifact are prepared. The next AIDA_LPT
-run must capture the physical GCR state and, only if the TX no-snoop bits are
-set, perform one bounded TX attempt. This report does not claim physical TX
-success or a hardware root cause. The phase marker remains `PHASE25` until that
-physical result is collected.
+Status: Phase 25's physical diagnostic objective is complete with the
+documented **Outcome D — candidate already compliant**. The TX no-snoop
+controls were already clear, so no write or Phase 25 TX attempt was made. This
+closes the diagnostic question about that GCR policy; it does not establish
+physical TX functionality or identify the remaining hardware root cause.
+
+## Phase 25 physical evidence reconciliation
+
+### Requested check
+
+The requested Phase 25 check was to inspect the physical I219 GCR TX no-snoop
+controls and clear only those controls if any were set. The prepared command
+would make at most one bounded TX attempt, and only after a real GCR change
+read back successfully. It explicitly skips both the write and TX attempt when
+the controls are already clear.
+
+### Observation
+
+The user reports that the GCR TX no-snoop bits were already clear. No register
+modification was necessary, and no additional TX attempt was performed. No
+raw numeric GCR value, timestamp, transcript, or screenshot is added here.
+
+### Interpretation
+
+This is the prepared command's Outcome D: the proposed GCR change was
+unnecessary because the observed controls already matched the SPT TX policy.
+The GCR TX no-snoop hypothesis does not explain the observed TX failure under
+this state and is eliminated as an actionable Phase 25 candidate. Since no
+change was applicable, this observation is not a before/after TX comparison and
+does not rule out other DMA visibility or cache-coherency problems.
+
+### Remaining failure and investigation frontier
+
+The outstanding I219 TX-engine failure remains unresolved. Phase 25 did not
+submit a descriptor, and there is no new evidence of descriptor consumption,
+completion, or successful on-wire transmission. Physical TX functionality
+remains unverified. The remaining candidates from the original audit are
+LAN_INIT_DONE sequencing and PCIe-master/reset-quiesce requirements; both
+remain uncertain, and neither is declared the root cause. Their Phase 26
+readiness assessment appears below.
+
+### Phase 25 acceptance and repository phase state
+
+The original Phase 25 procedure explicitly defines Outcome D for the case
+where GCR already matches the SPT policy and says to skip the TX attempt when
+no real candidate change can be made. The reported observation satisfies that
+diagnostic acceptance condition. Phase 25 is therefore complete for its
+diagnostic objective only; TX behavior remains unverified.
+
+At the starting commit, `.phase` was absent, was not ignored, and has no
+tracked-file or commit-history precedent. The repository's existing phase
+state is recorded in its phase reports; no separate structured authoritative
+phase file exists. This audit remains the phase-state record rather than
+introducing a new marker format:
+
+```text
+last_completed=PHASE25
+next_expected=PHASE26
+```
+
+This does not advance the phase to PHASE27.
 
 ## Starting evidence and limits
 
-The supplied Phase 24 evidence is retained as reported: PCI `8086:156F`, link
-up, PCI command `0x0006`, ring rearm complete, `TDLEN=0x400`, `TXDCTL=0x0141001F`,
+The supplied [Phase 24 report](NETWORK_I219_LM_DMA_FETCH_NO_DMAR_PHASE24.md)
+retains the evidence as reported: PCI `8086:156F`, link up, PCI command
+`0x0006`, ring rearm complete, `TDLEN=0x400`, `TXDCTL=0x0141001F`,
 `TCTL=0x0003F0FA`, and pre-attempt `TDH=TDT=0`. The one-shot attempt ended with
 descriptor `DD=no`. ACPI DMAR and a matching DRHD were absent, so Phase 24
 classified IOMMU applicability as no and did not obtain a VT-d fault
-comparison.
+comparison. Phase 24's source audit builds on the
+[Phase 23 DMA-fetch audit](NETWORK_I219_LM_DMA_FETCH_AUDIT_PHASE23.md).
 
 The available Phase 24 photographs do not contain a complete transcript or all
 16 pre-TDT descriptor bytes. This report therefore does not claim the exact
@@ -73,7 +131,11 @@ This is a source-level audit of the Phase 25 fixture; it is not a retroactive
 decode of the incomplete Phase 24 photographs. QEMU acceptance would still not
 prove physical I219 DMA behavior.
 
-## Ranked hypotheses and selected experiment
+## Pre-Phase25 ranked hypotheses and selected experiment
+
+This ranking and the planned experiment below are retained as the historical
+pre-physical Phase 25 decision record. The post-observation Phase 26 ranking
+and recommendation follow it.
 
 | Rank | Hypothesis; support and evidence against | Exact missing proof | Could explain stationary TDH? | Could explain DD clear? |
 |---|---|---|---|---|
@@ -93,6 +155,87 @@ The candidate does not copy the full Linux GCR value; it changes only the TX
 mask, preserving RX and unrelated state to isolate one variable. If the bits
 were already clear or if the applied change leaves TDH/DD unchanged, the
 hypothesis is weakened. No additional workaround is bundled with it.
+
+## Phase 26 readiness assessment (no implementation)
+
+After the Phase 25 observation, the two remaining candidates rank as follows.
+This is a diagnostic ordering, not a root-cause declaration.
+
+### Rank 1 — LAN_INIT_DONE sequencing
+
+- **Supporting evidence:** Linux's SPT path uses `e1000_pch_spt_info` and the
+  ICH8LAN reset/configuration operations. For ICH10-and-newer MAC types,
+  `e1000_get_cfg_done_ich8lan` calls `e1000_lan_init_done_ich8lan`, which polls
+  `STATUS.LAN_INIT_DONE` after reset before continuing PHY setup. In guideXOS,
+  `kernel/core/nic.cpp`'s `i219_pch_reset()` captures STATUS for reset
+  diagnostics, then `init_e1000()` proceeds through MAC and PHY setup without
+  a separately named LAN_INIT_DONE wait or decode. The bit is not defined by
+  name in `kernel/core/include/kernel/nic.h`.
+- **Contradictory evidence:** the earlier physical run reports link up and the
+  reset completed. This is evidence that basic PHY setup progressed, although
+  the bit itself was not isolated in the available historical capture. Linux
+  documents this wait as basic/PHY configuration completion, not as a TX
+  descriptor-fetch requirement. The TX connection is indirect.
+- **Family-specific reference requirement:** keep the analysis on PCI
+  `8086:156F` / SPT `e1000_pch_spt`, using the
+  [Linux SPT configuration-done path](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/intel/e1000e/ich8lan.c#L2790-L2816)
+  and the [I219 datasheet](https://cdrdv2-public.intel.com/612523/ethernet-connection-i219-datasheet.pdf).
+  Confirm the applicable PCH/I219 STATUS semantics before attempting any
+  write-to-clear behavior; the first experiment should not write STATUS.
+- **Bounded experiment and risk:** an opt-in, I219-only diagnostic can capture
+  and bounded-poll the bit immediately after reset completion and before
+  existing PHY reads. Keep it read-only and preserve the current reset, RX,
+  PHY, and link programming. This is reversible by booting the baseline image;
+  the main operational risk is added startup delay if the bit never sets.
+- **Expected observations:** if the bit is already set before PHY setup and a
+  subsequent bounded TX attempt still leaves TDH/DD unchanged, the sequencing
+  hypothesis weakens. If it remains clear at the current boundary and waiting
+  for it correlates with successful PHY/link setup and descriptor consumption,
+  the hypothesis gains support. One run would still need cautious
+  interpretation.
+
+### Rank 2 — PCIe-master/reset-quiesce requirements
+
+- **Supporting evidence:** the SPT `e1000_reset_hw_ich8lan()` path calls
+  `e1000e_disable_pcie_master()`, masks interrupts, disables RCTL/TCTL, flushes,
+  and waits before reset. The guideXOS `i219_pch_reset()` performs the engine
+  disable, STATUS flush, and delay, but does not request or poll
+  `CTRL.GIO_MASTER_DISABLE` before reset. The driver defines the relevant
+  CTRL/STATUS masks and reports the post-reset `gio-master` state; that does
+  not establish the pre-reset state or prove that outstanding transactions
+  were present.
+- **Contradictory evidence:** reset completion, link up, ring rearm, and the
+  later PCI command `0x0006` are already observed. They weigh against a broad
+  reset or PCI bring-up failure, but do not measure the internal GIO-master
+  state before reset or outstanding TLPs. The Linux reset rationale is a
+  possible bus-stall prevention requirement, not direct proof of a TX-fetch
+  dependency.
+- **Family-specific reference requirement:** use the
+  [Linux ICH8LAN/PCH reset path](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/intel/e1000e/ich8lan.c#L4527-L4615)
+  for SPT sequencing and the I219/PCH register documentation for exact
+  disable, poll, and recovery semantics. Do not infer this from generic E1000
+  behavior or change PCI command bits.
+- **Bounded experiment and risk:** a reversible test is possible only in a
+  fresh, opt-in diagnostic boot, before rings or active traffic. Capture the
+  pre-reset GIO-master state, request only the documented internal disable,
+  bounded-poll for the disabled state, and stop before reset/rearm if it cannot
+  be verified. Continue only after the reset path restores the expected state.
+  Do not toggle it while RX is active. The risk is higher than the read-only
+  LAN_INIT_DONE check because disabling device DMA can interrupt RX/TX and may
+  affect reset or link initialization. Avoiding PCI configuration writes
+  preserves PCI discovery; a cold boot to the baseline image is the rollback
+  if the diagnostic path fails.
+- **Expected observations:** a pre-reset enabled state that clears on request,
+  followed by a successful reset/rearm and a bounded TX attempt that advances
+  TDH or sets DD would support the candidate. An already-disabled state, a
+  failure to reach the disabled state, or unchanged TX behavior after verified
+  quiescence would weaken it. A failed poll must not be followed by TX.
+
+**Recommendation:** begin Phase 26 with the read-only LAN_INIT_DONE boundary
+capture. It is the lower-risk, device-specific missing sequence. Do not add a
+STATUS write or broad PCH initialization changes. Keep PCIe-master quiescence
+as a separately gated follow-up only if later evidence justifies the higher
+reset/DMA risk. Neither candidate is established as the root cause.
 
 ## MMIO and publication findings
 
@@ -167,5 +310,5 @@ link. The build identity and ISO manifest record the package-reuse mode.
 - QEMU: all seven firmware, bootloader, kernel, ramdisk, desktop-ready, and main-loop markers observed. Serial log: `out/release-iso/qemu-test-927fb90741894f5db2a61d69a8020307/serial.log`
 - QEMU serial log SHA-256: `35252377e720588b4f668e15147112351fef06d5f67b4dba4fbf8e85240a78c0`
 
-The phase marker is intentionally not advanced while AIDA_LPT physical
-evidence is pending. Next expected phase: **PHASE25 physical test completion**.
+The reconciled phase state and remaining physical TX qualification are recorded
+in the evidence reconciliation at the start of this report.
