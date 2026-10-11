@@ -13,7 +13,7 @@ public readonly struct AstroTime : IComparable<AstroTime>, IEquatable<AstroTime>
     public double JdUtc { get; }
     public TimeScale OriginalScale { get; }
 
-    private AstroTime(double jdUtc, TimeScale originalScale)
+    public AstroTime(double jdUtc, TimeScale originalScale)
     {
         JdUtc = jdUtc;
         OriginalScale = originalScale;
@@ -48,7 +48,7 @@ public readonly struct AstroTime : IComparable<AstroTime>, IEquatable<AstroTime>
     public override int GetHashCode() => JdUtc.GetHashCode();
 
     public override string ToString() =>
-        $"JD {JdUtc:F6} UTC (original scale: {OriginalScale})";
+        $"JD {JdUtc:F6} {OriginalScale}";
 
     internal static double ToJd(DateTime dt)
     {
