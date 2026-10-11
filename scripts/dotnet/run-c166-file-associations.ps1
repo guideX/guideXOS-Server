@@ -8,6 +8,7 @@ param(
     [switch]$RunOrdinaryAcceptance,
     [switch]$RunC167SettingsProofBoots,
     [switch]$C167SettingsDefaultApps,
+    [switch]$ReuseC167ProofKernel,
     [switch]$HostTestsOnly
 )
 
@@ -25,6 +26,9 @@ if ($RunC167SettingsProofBoots -and
     ((-not $BuildProofProducts -and -not $UseExistingProofProducts) -or
      ($BuildProofProducts -and $UseExistingProofProducts) -or $RunProofBoots -or $RunOrdinaryAcceptance)) {
     throw 'C167 real Settings proof requires verified proof products and runs separately from the C166 proof/ordinary switches.'
+}
+if ($ReuseC167ProofKernel -and -not $RunC167SettingsProofBoots) {
+    throw 'ReuseC167ProofKernel applies only to the real Settings UI proof lane.'
 }
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
     $EvidenceRoot = if ($HostTestsOnly) {
@@ -154,6 +158,18 @@ function Resolve-Tool([string]$Name, [string[]]$Candidates) {
 
 function Get-Sha256([string]$Path) {
     (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+}
+
+function Get-C166WorkspaceQemuOwners([string]$RepoRoot) {
+    $workspacePath = [System.IO.Path]::GetFullPath($RepoRoot).Replace('/', '\').TrimEnd('\')
+    @(
+        Get-CimInstance Win32_Process -Filter "Name = 'qemu-system-x86_64.exe'" |
+            Where-Object {
+                $commandLine = ([string]$_.CommandLine).Replace('/', '\')
+                $commandLine.IndexOf($workspacePath,
+                    [StringComparison]::OrdinalIgnoreCase) -ge 0
+            }
+    )
 }
 
 function Get-FreeQmpPort {
@@ -430,6 +446,18 @@ function New-C166RelativeMove([int]$Dx, [int]$Dy) {
 
 function New-C166Button([string]$Name, [bool]$Down) {
     return [ordered]@{type='btn';data=[ordered]@{button=$Name;down=$Down}}
+}
+
+function New-C166Wheel([int]$Delta) {
+    if ($Delta -eq 0) { throw 'C166 wheel delta cannot be zero.' }
+    return [ordered]@{
+        type='btn'
+        data=[ordered]@{
+            # QEMU's PS/2 wheel buttons are sign-inverted by the guest packet.
+            button=if ($Delta -gt 0) { 'wheel-down' } else { 'wheel-up' }
+            down=$true
+        }
+    }
 }
 
 function New-C166Key([string]$Code, [bool]$Down) {
@@ -808,6 +836,7 @@ function Open-C167SettingsCenter([object]$Boot,[switch]$ExpectC145Final) {
         [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C145-FINAL viewport=valid registration=12 modal=none capture=none drag=none result=PASS' $start 60)
     }
     [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C167-RENDER page=Settings result=PASS' $start 20)
+    Start-Sleep -Milliseconds 350
     return Get-C167SettingsOrigin
 }
 
@@ -826,12 +855,12 @@ function Enter-C167DefaultAppsPage([object]$Boot,[string]$ExpectedState,[string]
 function Select-C167DefaultAppsChoice([object]$Boot,[int]$ChoiceIndex) {
     if ($ChoiceIndex -notin @(0,1)) { throw "Unsupported C167 choice index $ChoiceIndex." }
     $origin = Get-C167SettingsOrigin
-    $comboX = $origin.X + 44 + 110
-    $comboY = $origin.Y + 24 + 86 + 98 + 9
+    $comboX = $origin.X + 44 + 224
+    $comboY = $origin.Y + 24 + 96 + 80 + 9
     $start = (Get-C166Serial $Boot.serialPath).Length
     Click-C166Screen $comboX $comboY $Boot
     [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C144-COMBO open=PASS capture=combo result=PASS' $start 10)
-    $popupY = $origin.Y + 24 + 86 + 98 + 18 + ($ChoiceIndex*18) + 9
+    $popupY = $origin.Y + 24 + 96 + 80 + 18 + ($ChoiceIndex*18) + 9
     Click-C166Screen $comboX $popupY $Boot
     if ($ChoiceIndex -eq 0) {
         [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C144-COMBO commit=PASS translated-origin=PASS result=PASS' $start 10)
@@ -841,10 +870,51 @@ function Select-C167DefaultAppsChoice([object]$Boot,[int]$ChoiceIndex) {
     return [ordered]@{choiceIndex=$ChoiceIndex;open='PASS';selection='PASS';qmpLog=$Boot.qmpLogPath}
 }
 
+function Invoke-C167KeyboardDefaultAppsSelection([object]$Boot,[int]$ChoiceIndex) {
+    if ($ChoiceIndex -notin @(0,1)) { throw "Unsupported C167 choice index $ChoiceIndex." }
+    # Enter Apps using the visible page button first; the existing host then
+    # owns every focus transition through the same ScrollView and ComboBox.
+    $start = (Get-C166Serial $Boot.serialPath).Length
+    Press-C166Key 'tab' $Boot
+    [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C144-FOCUS tab=traversed result=PASS' $start 10)
+    $start = (Get-C166Serial $Boot.serialPath).Length
+    Press-C166Key 'ret' $Boot
+    [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C144-COMBO keyboard-open=PASS capture=combo result=PASS' $start 10)
+    $start = (Get-C166Serial $Boot.serialPath).Length
+    Press-C166Key 'esc' $Boot
+    [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C144-CAPTURE popup=none result=PASS' $start 10)
+
+    # Traverse forward to Apply and Reset, then backward to the selector. This
+    # exercises the host's established forward and reverse focus routing.
+    Press-C166Key 'tab' $Boot
+    Press-C166Key 'tab' $Boot
+    $start = (Get-C166Serial $Boot.serialPath).Length
+    Send-C166QmpEvents ([int]$Boot.qmpPort) `
+        @((New-C166Key 'shift' $true),(New-C166Key 'tab' $true),
+          (New-C166Key 'tab' $false),(New-C166Key 'shift' $false)) $Boot.qmpLogPath 90
+    [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C144-FOCUS shift-tab=handled earlier-member=PASS result=PASS' $start 10)
+    $start = (Get-C166Serial $Boot.serialPath).Length
+    Send-C166QmpEvents ([int]$Boot.qmpPort) `
+        @((New-C166Key 'shift' $true),(New-C166Key 'tab' $true),
+          (New-C166Key 'tab' $false),(New-C166Key 'shift' $false)) $Boot.qmpLogPath 90
+    [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C144-FOCUS shift-tab=handled earlier-member=PASS result=PASS' $start 10)
+
+    $start = (Get-C166Serial $Boot.serialPath).Length
+    Press-C166Key 'ret' $Boot
+    [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C144-COMBO keyboard-open=PASS capture=combo result=PASS' $start 10)
+    if ($ChoiceIndex -eq 1) { Press-C166Key 'down' $Boot }
+    elseif ($ChoiceIndex -eq 0) { Press-C166Key 'up' $Boot }
+    $start = (Get-C166Serial $Boot.serialPath).Length
+    Press-C166Key 'ret' $Boot
+    [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C144-COMBO keyboard-commit=PASS capture=none result=PASS' $start 10)
+    [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C167-RENDER page=Apps result=PASS' $start 10)
+    return [ordered]@{choiceIndex=$ChoiceIndex;keyboardOpenEscape='PASS';tab='PASS';shiftTab='PASS';selection='PASS';qmpLog=$Boot.qmpLogPath}
+}
+
 function Apply-C167DefaultAppsChoice([object]$Boot,[string]$ExpectedState,[string]$ScreenshotPath) {
     $origin = Get-C167SettingsOrigin
     $start = (Get-C166Serial $Boot.serialPath).Length
-    Click-C166Screen ($origin.X+44+80) ($origin.Y+24+86+134+9) $Boot
+    Click-C166Screen ($origin.X+44+80) ($origin.Y+24+96+158+9) $Boot
     [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C167-APPLY input=pointer verified=true result=PASS' $start 20)
     $state = [regex]::Escape($ExpectedState)
     $marker = Wait-C166Serial $Boot.serialPath `
@@ -854,10 +924,25 @@ function Apply-C167DefaultAppsChoice([object]$Boot,[string]$ExpectedState,[strin
     return [ordered]@{state=$ExpectedState;marker=$marker.Match.Value;screenshot=$ScreenshotPath;screenshotSha256=$sha}
 }
 
+function Apply-C167DefaultAppsChoiceByKeyboard([object]$Boot,[string]$ExpectedState,[string]$ScreenshotPath) {
+    $start = (Get-C166Serial $Boot.serialPath).Length
+    Press-C166Key 'tab' $Boot
+    [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C144-FOCUS tab=traversed result=PASS' $start 10)
+    $start = (Get-C166Serial $Boot.serialPath).Length
+    Press-C166Key 'ret' $Boot
+    [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C167-APPLY input=keyboard verified=true result=PASS' $start 20)
+    $state = [regex]::Escape($ExpectedState)
+    $marker = Wait-C166Serial $Boot.serialPath `
+        ('^\[C102-MANAGED-OUTPUT\] C167-STATE operation=Apply state={0} .*result=PASS' -f $state) $start 10
+    [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C167-RENDER page=Apps result=PASS' $start 20)
+    $sha = Capture-C167GuestScreen $Boot $ScreenshotPath
+    return [ordered]@{state=$ExpectedState;input='keyboard';marker=$marker.Match.Value;screenshot=$ScreenshotPath;screenshotSha256=$sha}
+}
+
 function Reset-C167DefaultApps([object]$Boot,[string]$ScreenshotPath) {
     $origin = Get-C167SettingsOrigin
     $start = (Get-C166Serial $Boot.serialPath).Length
-    Click-C166Screen ($origin.X+44+80) ($origin.Y+24+86+152+9) $Boot
+    Click-C166Screen ($origin.X+44+164+100) ($origin.Y+24+96+158+9) $Boot
     [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C167-RESET input=pointer verified=true result=PASS' $start 20)
     $marker = Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C167-STATE operation=Reset state=NoOverride display=system-default result=PASS' $start 10
     [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C167-RENDER page=Apps result=PASS' $start 20)
@@ -883,11 +968,16 @@ function Close-C167SettingsCenter([object]$Boot) {
 }
 
 function Get-C167ResolvedDiskState([object[]]$Slots) {
-    $committed = @($Slots | Where-Object { $_.present } | Sort-Object generation -Descending)
+    $committed = @($Slots | Where-Object { $_.present })
     if ($committed.Count -eq 0) {
         return [ordered]@{override='NoOverride';generation=0;slot='N';applicationId=''}
     }
     $latest = $committed[0]
+    for ($index = 1; $index -lt $committed.Count; $index++) {
+        if ([uint64]$committed[$index].generation -gt [uint64]$latest.generation) {
+            $latest = $committed[$index]
+        }
+    }
     return [ordered]@{override=$latest.override;generation=$latest.generation;slot=$latest.slot;applicationId=$latest.applicationId}
 }
 
@@ -919,7 +1009,7 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
     if (-not (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $NeutralRamdisk) 'wallpaper-pack-c167-ui-proof') -PathType Container)) {
         throw 'C167 UI proof ramdisk was not staged by the selector-free ramdisk generation command.'
     }
-    $qemuOwners = @(Get-CimInstance Win32_Process -Filter "Name = 'qemu-system-x86_64.exe'")
+    $qemuOwners = @(Get-C166WorkspaceQemuOwners $RepoRoot)
     if ($qemuOwners.Count -gt 0) {
         $formatted = ($qemuOwners | ForEach-Object { "pid=$($_.ProcessId) exe=$($_.ExecutablePath) cmd=$($_.CommandLine)" }) -join "`n"
         throw "C167 UI proof is blocked by existing QEMU owner(s); none was terminated.`n$formatted"
@@ -952,14 +1042,14 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
         $boot1Before = Get-C167AssociationDiskState $sharedEsp $Python
         $settingsOrigin = Open-C167SettingsCenter $boot1 -ExpectC145Final
         $boot1Default = Enter-C167DefaultAppsPage $boot1 'NoOverride' (Join-Path $runRoot 'boot1-default-apps-system-default.ppm')
-        $selection = Select-C167DefaultAppsChoice $boot1 1
+        $selection = Invoke-C167KeyboardDefaultAppsSelection $boot1 1
         $beforeApply = Get-C167AssociationDiskState $sharedEsp $Python
         if ((Get-C166SlotIdentity $boot1Before) -ne (Get-C166SlotIdentity $beforeApply)) {
             throw 'Boot 1 selecting No default wrote association persistence before Apply.'
         }
         $boot1PendingScreenshot = Join-Path $runRoot 'boot1-no-default-pending.ppm'
         $pendingSha = Capture-C167GuestScreen $boot1 $boot1PendingScreenshot
-        $boot1Apply = Apply-C167DefaultAppsChoice $boot1 'Disabled' (Join-Path $runRoot 'boot1-default-apps-disabled.ppm')
+        $boot1Apply = Apply-C167DefaultAppsChoiceByKeyboard $boot1 'Disabled' (Join-Path $runRoot 'boot1-default-apps-disabled.ppm')
         $boot1Reentry = Return-C167ToSettingsAndReenter $boot1 'Disabled' (Join-Path $runRoot 'boot1-default-apps-reentry.ppm')
         Close-C167SettingsCenter $boot1
         $boot1Explorer = Invoke-C166ManagedExplorerOpen $boot1 'Disabled' (Join-Path $runRoot 'boot1-managed-explorer-no-handler.ppm')
@@ -1018,7 +1108,13 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
         if ($boot2Explorer.content -ne 'hello from C164' -or -not $boot2Explorer.clean) {
             throw 'Boot 2 Native File Explorer did not open the expected C164 Notes document.'
         }
-        $boot2Interactions = [ordered]@{restoredState=$boot2Resolved;settings=$boot2Disabled;queryPreservedSlots=$true;choice=$boot2Selection;beforeApplySlots=$boot2BeforeApply;apply=$boot2Apply;nativeExplorer=$boot2Explorer;result='PASS'}
+        Close-C166ManagedNotesStartupWindow $boot2
+        $boot2ManagedExplorer = Invoke-C166ManagedExplorerOpen $boot2 'Default' `
+            (Join-Path $runRoot 'boot2-managed-explorer-notes-activation.ppm')
+        if ($boot2ManagedExplorer.content -ne 'hello from C164' -or -not $boot2ManagedExplorer.clean) {
+            throw 'Boot 2 Managed File Explorer did not agree with native File Explorer for the explicit Notes default.'
+        }
+        $boot2Interactions = [ordered]@{restoredState=$boot2Resolved;settings=$boot2Disabled;queryPreservedSlots=$true;choice=$boot2Selection;beforeApplySlots=$boot2BeforeApply;apply=$boot2Apply;nativeExplorer=$boot2Explorer;managedExplorer=$boot2ManagedExplorer;result='PASS'}
     } finally {
         Stop-OwnedProofQemu $boot2
     }
@@ -1194,21 +1290,90 @@ function Invoke-C166OrdinaryBoot([int]$Number,[string]$Kernel,[string]$Ramdisk,
                 $ordinarySlots=Get-C166AssociationDiskState $esp
                 [void](Assert-C167DiskState $ordinarySlots 'NoOverride' $false)
                 Close-C167SettingsCenter $boot
+                Open-C167SettingsCenter $boot | Out-Null
+                $reopened=Enter-C167DefaultAppsPage $boot 'NoOverride' `
+                    (Join-Path $root 'default-apps-close-reopen-system-default.ppm')
+                Close-C167SettingsCenter $boot
+                $defaultApps.reopen=$reopened
             }
             $integration=[ordered]@{managedFileExplorer=$notes;defaultApps=$defaultApps;C164NotesActivation='PASS';path=$notes.path;content=$notes.content;cleanDocument=$notes.clean}
         } elseif ($Number -eq 2) {
             Initialize-C166GuestPointer $boot
             $managed=$null
             if ($script:c167SettingsAcceptance) {
+                Open-C167SettingsCenter $boot | Out-Null
+                $settingsInitialScreenshot=Join-Path $root 'settings-general-initial.ppm'
+                $settingsInitialSha=Capture-C167GuestScreen $boot $settingsInitialScreenshot
+                $settingsOrigin=Get-C167SettingsOrigin
+                $settingsPageEntry=Enter-C167DefaultAppsPage $boot 'NoOverride' `
+                    (Join-Path $root 'settings-navigation-default-apps.ppm')
+                $returnStart=(Get-C166Serial $boot.serialPath).Length
+                Click-C166Screen ($settingsOrigin.X+476) `
+                    ($settingsOrigin.Y+24+48+11) $boot
+                $settingsReturn=Wait-C166Serial $boot.serialPath `
+                    '^\[C102-MANAGED-OUTPUT\] C167-PAGE return=Settings pending=discarded write=false result=PASS' `
+                    $returnStart 15
+                [void](Wait-C166Serial $boot.serialPath `
+                    '^\[C102-MANAGED-OUTPUT\] C167-RENDER page=Settings result=PASS' `
+                    $returnStart 15)
+                Click-C166Screen ($settingsOrigin.X+24+450) `
+                    ($settingsOrigin.Y+24+96+180) $boot
+                $settingsViewportX=$settingsOrigin.X+24+250
+                $settingsViewportY=$settingsOrigin.Y+24+96+100
+                Move-C166Pointer $settingsViewportX $settingsViewportY $boot
+                $scrollDownStart=(Get-C166Serial $boot.serialPath).Length
+                Send-C166QmpEvents ([int]$boot.qmpPort) `
+                    @((New-C166Wheel 1),(New-C166Wheel 1),(New-C166Wheel 1)) `
+                    $boot.qmpLogPath 180
+                $scrollDown=Wait-C166Serial $boot.serialPath `
+                    '^\[C102-MANAGED-OUTPUT\] C144-WHEEL viewport=changed sections-translated=PASS result=PASS' `
+                    $scrollDownStart 20
+                $scrollDownScreenshot=Join-Path $root 'settings-scroll-lower-sections.ppm'
+                $scrollDownSha=Capture-C167GuestScreen $boot $scrollDownScreenshot
+                $scrollUpStart=(Get-C166Serial $boot.serialPath).Length
+                Send-C166QmpEvents ([int]$boot.qmpPort) `
+                    @((New-C166Wheel -1),(New-C166Wheel -1),(New-C166Wheel -1)) `
+                    $boot.qmpLogPath 180
+                $scrollUp=Wait-C166Serial $boot.serialPath `
+                    '^\[C102-MANAGED-OUTPUT\] C144-WHEEL viewport=changed sections-translated=PASS result=PASS' `
+                    $scrollUpStart 20
+                $focusStart=(Get-C166Serial $boot.serialPath).Length
+                Press-C166Key 'tab' $boot
+                $tab=Wait-C166Serial $boot.serialPath `
+                    '^\[C102-MANAGED-OUTPUT\] C144-FOCUS tab=(?:traversed|offscreen-revealed) result=PASS' `
+                    $focusStart 15
+                $shiftTabStart=(Get-C166Serial $boot.serialPath).Length
+                Send-C166QmpEvents ([int]$boot.qmpPort) `
+                    @((New-C166Key 'shift' $true),(New-C166Key 'tab' $true),
+                      (New-C166Key 'tab' $false),(New-C166Key 'shift' $false)) `
+                    $boot.qmpLogPath 90
+                $shiftTab=Wait-C166Serial $boot.serialPath `
+                    '^\[C102-MANAGED-OUTPUT\] C144-FOCUS shift-tab=handled earlier-member=PASS result=PASS' `
+                    $shiftTabStart 15
+                $defaultApps=Enter-C167DefaultAppsPage $boot 'NoOverride' `
+                    (Join-Path $root 'default-apps-system-default.ppm')
+                Close-C167SettingsCenter $boot
                 $managed=Invoke-C166ManagedExplorerOpen $boot 'Default' `
                     (Join-Path $root 'managed-explorer-notes.ppm')
+                $settingsNavigation=[ordered]@{
+                    initialSettings='PASS';defaultAppsEntry=$settingsPageEntry
+                    settingsReturn=$settingsReturn.Match.Value
+                    initialSettingsScreenshot=$settingsInitialScreenshot
+                    initialSettingsScreenshotSha256=$settingsInitialSha
+                    scrollDown=$scrollDown.Match.Value
+                    scrollUp=$scrollUp.Match.Value;tab=$tab.Match.Value
+                    shiftTab=$shiftTab.Match.Value
+                    lowerSectionsScreenshot=$scrollDownScreenshot
+                    lowerSectionsScreenshotSha256=$scrollDownSha
+                    defaultApps=$defaultApps;close='PASS';result='PASS'
+                }
             }
             $native=Invoke-C166NativeExplorerOpen $boot 'Default' `
                 (Join-Path $root 'native-explorer-selected.ppm') (Join-Path $root 'native-explorer-notes.ppm')
             $snapshot=Invoke-C166TaskManagerSnapshot $boot
             $nativeClose=Close-C166NativeExplorerThroughTaskManager $boot $snapshot.rowCount
             Close-C166TaskManager $boot
-            $integration=[ordered]@{managedFileExplorer=$managed;nativeFileExplorer=$native;taskManager=$snapshot;nativeFileExplorerClose=$nativeClose;taskManagerClose='PASS';C164NotesActivation='PASS'}
+            $integration=[ordered]@{settingsNavigation=$settingsNavigation;managedFileExplorer=$managed;nativeFileExplorer=$native;taskManager=$snapshot;nativeFileExplorerClose=$nativeClose;taskManagerClose='PASS';C164NotesActivation='PASS'}
         } elseif ($Number -eq 3) {
             Initialize-C166GuestPointer $boot
             Close-C166ManagedNotesStartupWindow $boot
@@ -1250,10 +1415,8 @@ function Invoke-C166OrdinaryBoot([int]$Number,[string]$Kernel,[string]$Ramdisk,
                 $slotsAfterApply=Get-C166AssociationDiskState $esp
                 [void](Assert-C167DiskState $slotsAfterApply 'ApplicationOverride' $true)
                 $reset=Reset-C167DefaultApps $boot (Join-Path $root 'default-apps-reset-system-default.ppm')
-                $slotsAfterReset=Get-C166AssociationDiskState $esp
-                [void](Assert-C167DiskState $slotsAfterReset 'NoOverride' $true)
                 $reentry=Return-C167ToSettingsAndReenter $boot 'NoOverride' (Join-Path $root 'default-apps-reset-reentry.ppm')
-                $defaultApps=[ordered]@{initial=$defaultApps;apply=$apply;reset=$reset;reentry=$reentry;slotsBeforeApply=$slotsBeforeApply;slotsAfterApply=$slotsAfterApply;slotsAfterReset=$slotsAfterReset;result='PASS'}
+                $defaultApps=[ordered]@{initial=$defaultApps;apply=$apply;reset=$reset;reentry=$reentry;slotsBeforeApply=$slotsBeforeApply;slotsAfterApply=$slotsAfterApply;slotVerification='authoritative query during Reset plus host disk read after QEMU shutdown';result='PASS'}
             }
             $settingsCloseStart=(Get-C166Serial $boot.serialPath).Length
             Send-C166QmpEvents ([int]$boot.qmpPort) `
@@ -1322,7 +1485,7 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
         -not $hostManifest.hostValidationComplete) {
         throw 'C166 ordinary acceptance prerequisites are not complete or passing.'
     }
-    $qemuOwners=@(Get-CimInstance Win32_Process -Filter "Name = 'qemu-system-x86_64.exe'" |
+    $qemuOwners=@(Get-C166WorkspaceQemuOwners $RepoRoot |
         ForEach-Object { [ordered]@{pid=$_.ProcessId;path=$_.ExecutablePath;commandLine=$_.CommandLine} })
     if ($qemuOwners.Count -gt 0) {
         $formatted=($qemuOwners | ForEach-Object { "pid=$($_.pid) exe=$($_.path) cmd=$($_.commandLine)" }) -join "`n"
@@ -1460,8 +1623,8 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
     $ordinaryRoot=Join-Path (Join-Path $acceptanceRoot 'ordinary-boots') "ordinary-run-$ordinaryRunId"
     $ordinary=@()
     for ($number=1; $number -le 3; $number++) {
-        if (Get-CimInstance Win32_Process -Filter "Name = 'qemu-system-x86_64.exe'") {
-            throw "A QEMU owner appeared before C166 ordinary boot $number; no process was terminated."
+        if (@(Get-C166WorkspaceQemuOwners $RepoRoot).Count -gt 0) {
+            throw "A QEMU owner using this workspace appeared before C166 ordinary boot $number; no process was terminated."
         }
         $ordinary += Invoke-C166OrdinaryBoot $number $kernelCandidate $ramdiskCandidate `
             $settingsRecord $Qemu $Ovmf $Bootloader $ordinaryRoot
@@ -1739,25 +1902,35 @@ if ($UseExistingProofProducts) {
             throw "C167 selector-free UI proof ramdisk generation failed: $LASTEXITCODE"
         }
         if ($productionToolchain) {
-            $c167ProofOnlyFlags = @(
-                '-DGXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF',
-                '-DGXOS_NATIVEAOT_C161_TASK_MANAGER_PROOF',
-                '-DGXOS_NATIVEAOT_C162_MANAGED_TASK_MANAGER_CLOSE_PROOF',
-                '-DGXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER_PROOF',
-                '-DGXOS_NATIVEAOT_C164_FILE_ACTIVATION_PROOF',
-                '-DGXOS_NATIVEAOT_C166_FILE_ASSOCIATION_PROOF',
-                '-DGUIDEXOS_PROOF_CONTROL')
-            $c167Flags = @($flags | Where-Object { $_ -notin $c167ProofOnlyFlags })
-            $c167KernelArgs = @('-C',(Join-Path $RepoRoot 'kernel'),'ARCH=amd64',
-                "EXTRA_CFLAGS=$($c167Flags -join ' ')",'-B')
-            $canonicalKernel = Join-Path $RepoRoot 'kernel\build\amd64\bin\kernel.elf'
-            try {
-                & $make @c167KernelArgs
-                if ($LASTEXITCODE -ne 0) { throw "Focused C167 UI kernel link failed: $LASTEXITCODE" }
-                Copy-Item -LiteralPath $canonicalKernel -Destination $c167UiKernel -Force
+            if ($ReuseC167ProofKernel) {
+                $kernelChanges = @(& git -C $RepoRoot diff --name-only -- kernel)
+                if ($kernelChanges.Count -ne 0 -or
+                    -not (Test-Path -LiteralPath $c167UiKernel -PathType Leaf)) {
+                    throw 'The existing focused UI kernel cannot be reused after kernel-source changes or when its protected evidence file is missing.'
+                }
                 $c167UiKernelHash = Get-Sha256 $c167UiKernel
-            } finally {
-                Restore-C167CanonicalKernel $c167ProtectedMedia $RepoRoot
+                Write-Host "Reusing unchanged focused UI kernel: $c167UiKernelHash"
+            } else {
+                $c167ProofOnlyFlags = @(
+                    '-DGXOS_NATIVEAOT_C160_APPLICATION_SNAPSHOT_PROOF',
+                    '-DGXOS_NATIVEAOT_C161_TASK_MANAGER_PROOF',
+                    '-DGXOS_NATIVEAOT_C162_MANAGED_TASK_MANAGER_CLOSE_PROOF',
+                    '-DGXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER_PROOF',
+                    '-DGXOS_NATIVEAOT_C164_FILE_ACTIVATION_PROOF',
+                    '-DGXOS_NATIVEAOT_C166_FILE_ASSOCIATION_PROOF',
+                    '-DGUIDEXOS_PROOF_CONTROL')
+                $c167Flags = @($flags | Where-Object { $_ -notin $c167ProofOnlyFlags })
+                $c167KernelArgs = @('-C',(Join-Path $RepoRoot 'kernel'),'ARCH=amd64',
+                    "EXTRA_CFLAGS=$($c167Flags -join ' ')",'-B')
+                $canonicalKernel = Join-Path $RepoRoot 'kernel\build\amd64\bin\kernel.elf'
+                try {
+                    & $make @c167KernelArgs
+                    if ($LASTEXITCODE -ne 0) { throw "Focused C167 UI kernel link failed: $LASTEXITCODE" }
+                    Copy-Item -LiteralPath $canonicalKernel -Destination $c167UiKernel -Force
+                    $c167UiKernelHash = Get-Sha256 $c167UiKernel
+                } finally {
+                    Restore-C167CanonicalKernel $c167ProtectedMedia $RepoRoot
+                }
             }
         }
     }
@@ -1880,9 +2053,9 @@ if ($RunC167SettingsProofBoots -and $productionToolchain) {
 }
 
 # QEMU ownership is deliberately checked only after the host and all three build gates.
-$qemuRelevant = @(Get-CimInstance Win32_Process -Filter "Name = 'qemu-system-x86_64.exe'" |
+$qemuRelevant = @(Get-C166WorkspaceQemuOwners $RepoRoot |
     ForEach-Object { [ordered]@{ pid=$_.ProcessId; path=$_.ExecutablePath; commandLine=$_.CommandLine } })
-$guestGate = if ($qemuRelevant.Count -gt 0) { 'BLOCKED: unrelated QEMU owner' }
+$guestGate = if ($qemuRelevant.Count -gt 0) { 'BLOCKED: this workspace already owns QEMU' }
     elseif ($RunProofBoots -and -not $proofKernelHash) { 'BLOCKED: no configured AMD64 compiler; no fresh proof kernel' }
     elseif ($RunProofBoots) { 'ready: three managed proof scenarios staged' }
     else { 'not-run: proof boots not requested' }
@@ -1894,7 +2067,7 @@ $manifest = [ordered]@{
     crossCompilerGcc=$gcc; crossCompilerGxx=$gxx; crossLinker=$ld; crossObjcopy=$objcopy
     productionCompiler=$productionCompiler; productionLinker=$productionLinker
     productionMake=$make; qemuPath=$qemu; qemuVersion=$qemuVersion
-    existingQemu=$qemuRelevant; proofCompositeSha256=$proofCompositeHash
+    existingWorkspaceQemu=$qemuRelevant; qemuOwnershipPolicy='scoped to command lines referencing this checkout; unrelated QEMU processes are preserved'; proofCompositeSha256=$proofCompositeHash
     proofKernelSha256=$proofKernelHash; proofKernelStatus=$proofKernelStatus; proofRamdiskSha256=$proofRamdiskHash
     proofControlFlag='GUIDEXOS_PROOF_CONTROL'; registeredProofSuites=@('C166')
     c166Scenarios=@('SameBoot','Persistence'); scenarioStages=@('SameBoot','PreReboot','PostReboot')

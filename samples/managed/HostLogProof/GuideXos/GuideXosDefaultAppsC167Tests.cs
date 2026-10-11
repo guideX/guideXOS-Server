@@ -25,13 +25,17 @@ public static unsafe class GuideXosDefaultAppsC167Tests
         passed &= Case(ref cases, Start(app, service,
             GuideXosAssociationOverrideState.NoOverride) &&
             app.DefaultAppsPage.CurrentText ==
-                "System default: Managed Notes" &&
+                "Effective application: Managed Notes" &&
+            app.DefaultAppsPage.OverrideText ==
+                "Association state: System default" &&
             app.DefaultAppsPage.Choice.SelectedIndex == 0);
 
         bool explicitStart = Start(app, service,
             GuideXosAssociationOverrideState.ApplicationOverride);
         bool explicitUi = app.DefaultAppsPage.CurrentText ==
-                "Explicit default: Managed Notes" &&
+                "Effective application: Managed Notes" &&
+            app.DefaultAppsPage.OverrideText ==
+                "Association state: Explicitly selected" &&
             app.DefaultAppsPage.Choice.SelectedIndex == 0;
         if (explicitStart && !explicitUi)
             FailureDetail = $"explicit state={app.DefaultAppsPage.CommittedState} text={app.DefaultAppsPage.CurrentText} choice={app.DefaultAppsPage.Choice.SelectedIndex}";
@@ -40,7 +44,9 @@ public static unsafe class GuideXosDefaultAppsC167Tests
         bool disabledStart = Start(app, service,
             GuideXosAssociationOverrideState.Disabled);
         bool disabledUi = app.DefaultAppsPage.CurrentText ==
-                "Disabled: no default app" &&
+                "Effective application: None" &&
+            app.DefaultAppsPage.OverrideText ==
+                "Association state: Disabled" &&
             app.DefaultAppsPage.Choice.SelectedIndex == 1;
         if (disabledStart && !disabledUi)
             FailureDetail = $"disabled state={app.DefaultAppsPage.CommittedState} text={app.DefaultAppsPage.CurrentText} choice={app.DefaultAppsPage.Choice.SelectedIndex}";
@@ -75,7 +81,9 @@ public static unsafe class GuideXosDefaultAppsC167Tests
             app.DefaultAppsPage.CommittedState ==
                 GuideXosAssociationOverrideState.NoOverride &&
             app.DefaultAppsPage.CurrentText ==
-                "System default: Managed Notes");
+                "Effective application: Managed Notes" &&
+            app.DefaultAppsPage.OverrideText ==
+                "Association state: System default");
 
         Start(app, service, GuideXosAssociationOverrideState.NoOverride);
         int queryBeforeApply = service.QueryCount;
@@ -92,7 +100,7 @@ public static unsafe class GuideXosDefaultAppsC167Tests
         passed &= Case(ref cases, !app.DefaultAppsPage.Apply() &&
             app.DefaultAppsPage.CurrentText == priorDisplay &&
             app.DefaultAppsPage.FeedbackText ==
-                "Could not save .txt default." &&
+                "Could not save default. Pending: No default app" &&
             app.DefaultAppsPage.CommittedState ==
                 GuideXosAssociationOverrideState.NoOverride);
 
@@ -111,7 +119,9 @@ public static unsafe class GuideXosDefaultAppsC167Tests
         bool reentered = app.EnterDefaultAppsForTests(service);
         passed &= Case(ref cases, reentered && service.QueryCount >= 2 &&
             app.DefaultAppsPage.CurrentText ==
-                "Disabled: no default app" &&
+                "Effective application: None" &&
+            app.DefaultAppsPage.OverrideText ==
+                "Association state: Disabled" &&
             app.DefaultAppsPage.Choice.SelectedIndex == 1);
 
         Start(app, service, GuideXosAssociationOverrideState.NoOverride);
@@ -141,7 +151,7 @@ public static unsafe class GuideXosDefaultAppsC167Tests
             GuideXosComboBoxResult.SelectionChanged;
         int pointerChoice = app.DefaultAppsPage.PendingChoice;
         choice.TrySetSelectedIndex(0);
-        app.ControlHost.TryFocus(12);
+        app.ControlHost.TryFocus(1);
         bool keyboardOpen = choice.HandleKey(GuideXosTextInputKey.Enter) ==
             GuideXosComboBoxResult.Opened;
         bool keyboardMove = choice.HandleKey(GuideXosTextInputKey.Down) ==
@@ -171,7 +181,7 @@ public static unsafe class GuideXosDefaultAppsC167Tests
         }
         passed &= Case(ref cases, tabBounded && !controlHost.IsModalActive);
 
-        bool popup = controlHost.TryFocus(12) == GuideXosControlHostResult.Focused &&
+        bool popup = controlHost.TryFocus(1) == GuideXosControlHostResult.Focused &&
             app.DefaultAppsPage.Choice.Open() == GuideXosComboBoxResult.Opened &&
             controlHost.TryAcquireTransientInputCapture(12);
         controlHost.HandleInput(GuideXosInputEvent.ForKeyDown(

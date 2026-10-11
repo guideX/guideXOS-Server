@@ -31,35 +31,57 @@ internal sealed class ManagedDefaultAppsHostService : IManagedDefaultAppsAssocia
 internal sealed class ManagedDefaultAppsPageC167
 {
     private const string NotesId = "com.guidexos.apps.managed.notes";
-    private readonly GuideXosGroupBox _group = new(0, 0, 272, 216, "Default Apps");
-    private readonly GuideXosVerticalStack _stack = new(0, 0, 240, 8);
-    private readonly GuideXosLabel _fileType = new(0, 0, 216, "File type: .txt");
-    private readonly GuideXosLabel _current = new(0, 0, 216, "Default: not loaded");
-    private readonly GuideXosLabel _choiceHeading = new(0, 0, 216, "Choose default application");
-    private readonly GuideXosComboBox _choice = new(0, 0, 216, 18, 4, 32, 2);
-    private readonly GuideXosLabel _feedback = new(0, 0, 216, "Pending: none");
-    private readonly GuideXosButton _apply = new(0, 0, 216, 18, "Apply");
-    private readonly GuideXosButton _reset = new(0, 0, 216, 18, "Reset to System Default");
-    private readonly GuideXosLabel _audience = new(0, 0, 216, "Changes affect all users.");
+    private readonly GuideXosGroupBox _group = new(0, 0, 504, 252, "Default Apps");
+    private readonly GuideXosVerticalStack _stack = new(0, 0, 488, 8);
+    private readonly GuideXosLabel _current = new(0, 0, 448,
+        "Effective application: unavailable");
+    private readonly GuideXosLabel _override = new(0, 0, 448,
+        "Association state: unavailable");
+    private readonly GuideXosLabel _choiceHeading = new(0, 0, 448,
+        "Choose the .txt default application");
+    private readonly GuideXosComboBox _choice = new(0, 0, 448, 18, 4, 32, 2);
+    private readonly GuideXosLabel _feedback = new(0, 0, 448, "Pending: none");
+    private readonly GuideXosButton _apply = new(0, 0, 120, 18, "Apply");
+    private readonly GuideXosButton _reset = new(0, 0, 272, 18,
+        "Reset to System Default");
+    private readonly GuideXosLabel _audience = new(0, 0, 448,
+        "Changes affect all users.");
     private readonly object[] _members;
     private IManagedDefaultAppsAssociationService _service;
     private NativeAssociationServiceResponse _committed;
     private bool _hasCommitted;
     private bool _syncing;
     private bool _errorShown;
+    private string _feedbackMessage;
     private int _pendingChoice;
     public string AttachDiagnostics { get; private set; } = "not-run";
 
     public ManagedDefaultAppsPageC167()
     {
-        _members = new object[] { _fileType, _current, _choiceHeading, _choice,
+        _members = new object[] { _current, _override, _choiceHeading, _choice,
             _feedback, _apply, _reset, _audience };
         foreach (object member in _members)
         {
+            switch (member)
+            {
+                case GuideXosLabel label:
+                    label.HorizontalAlignment =
+                        GuideXosVerticalStackHorizontalAlignment.Left;
+                    break;
+                case GuideXosButton button:
+                    button.HorizontalAlignment =
+                        GuideXosVerticalStackHorizontalAlignment.Left;
+                    break;
+                case GuideXosComboBox combo:
+                    combo.HorizontalAlignment =
+                        GuideXosVerticalStackHorizontalAlignment.Left;
+                    break;
+            }
             _stack.TryAddMember(member);
             _group.TryAddMember(member);
         }
-        _stack.TrySetPadding(4, 2, 4, 2);
+        _group.TrySetContentPadding(0);
+        _stack.TrySetPadding(12, 0, 12, 0);
         _stack.TrySetSpacing(1);
         _choice.TryAddItem("Managed Notes");
         _choice.TryAddItem("No default application");
@@ -73,10 +95,18 @@ internal sealed class ManagedDefaultAppsPageC167
     public GuideXosGroupBox Group => _group;
     public GuideXosVerticalStack Stack => _stack;
     public string CurrentText => _current.Text;
+    public string OverrideText => _override.Text;
     public string FeedbackText => _feedback.Text;
     public int PendingChoice => _pendingChoice;
     public bool HasCommittedState => _hasCommitted;
     public bool HasLoadedState => _hasCommitted;
+    public bool HasPendingChange => _hasCommitted &&
+        _pendingChoice != EffectiveChoice(_committed);
+    public bool CanApply => HasPendingChange || (_hasCommitted &&
+        _committed.overrideState ==
+            (uint)GuideXosAssociationOverrideState.NoOverride &&
+        _pendingChoice == 0);
+    public int ControlCount => _members.Length;
     public GuideXosAssociationOverrideState CommittedState =>
         _hasCommitted
             ? (GuideXosAssociationOverrideState)_committed.overrideState
@@ -89,16 +119,13 @@ internal sealed class ManagedDefaultAppsPageC167
         GuideXosAssociationResult query = _service?.QueryTxt() ?? default;
         if (!IsValidQuery(query))
         {
-            _hasCommitted = false;
-            _pendingChoice = 0;
-            _current.SetText("Default: unavailable");
-            SyncChoice();
             Fail("Could not read .txt default.");
             return false;
         }
         _committed = query.Response;
         _hasCommitted = true;
         _errorShown = false;
+        _feedbackMessage = null;
         _pendingChoice = _committed.overrideState ==
             (uint)GuideXosAssociationOverrideState.Disabled ? 1 : 0;
         SyncChoice();
@@ -111,7 +138,7 @@ internal sealed class ManagedDefaultAppsPageC167
         AttachDiagnostics = "start";
         if (view == null) { AttachDiagnostics = "null-view"; return false; }
         view.Clear();
-        if (!_group.TrySetBounds(0, 0, 272, 216))
+        if (!_group.TrySetBounds(view.InnerX, view.InnerY, 504, 252))
         { AttachDiagnostics = "group-bounds"; return false; }
         if (!_group.TryGetContentRectangle(out int left, out int top,
                 out int width, out _))
@@ -121,20 +148,39 @@ internal sealed class ManagedDefaultAppsPageC167
         GuideXosVerticalStackResult layout = _stack.PerformLayout();
         if (layout != GuideXosVerticalStackResult.LaidOut)
         { AttachDiagnostics = $"stack-layout:{layout}:{_stack.MemberCount}"; return false; }
-        bool ok = view.TryAddMember(_group, 4, 4) == GuideXosScrollViewResult.Added;
-        if (!ok) AttachDiagnostics = "add-group";
+        bool ok = true;
         for (int index = 0; index < _members.Length; index++)
         {
             object member = _members[index];
-            GuideXosScrollViewResult add = view.TryAddMember(member, 20,
-                44 + index * 18);
+            int x = index == 6 ? 164 : 20;
+            int y = index switch
+            {
+                0 => 18,
+                1 => 38,
+                2 => 62,
+                3 => 80,
+                4 => 136,
+                5 or 6 => 158,
+                _ => 180,
+            };
+            GuideXosScrollViewResult add = view.TryAddMember(member, x, y);
             if (add != GuideXosScrollViewResult.Added)
-            { AttachDiagnostics = $"add-member:{index}:{add}"; ok = false; }
+            {
+                int memberWidth = member switch
+                {
+                    GuideXosLabel label => label.Width,
+                    GuideXosButton button => button.Width,
+                    GuideXosComboBox combo => combo.Width,
+                    _ => 0,
+                };
+                AttachDiagnostics = $"add-member:{index}:{add}:pos={x},{y}:size={memberWidth}:view={view.Width}x{view.Height}";
+                ok = false;
+            }
         }
         view.RecalculateContentExtent();
         bool geometry = _group.ValidateMembershipGeometry(out int outside);
-        bool valid = ok && view.MemberCount == _members.Length + 1 &&
-            view.ContainsMember(_group) && view.ContainsMember(_choice) &&
+        bool valid = ok && view.MemberCount == _members.Length &&
+            !view.ContainsMember(_group) && view.ContainsMember(_choice) &&
             geometry && outside == 0;
         if (valid) AttachDiagnostics = "valid";
         else if (ok) AttachDiagnostics = $"validate:view={view.MemberCount}:group={_group.MemberCount}:outside={outside}";
@@ -143,13 +189,13 @@ internal sealed class ManagedDefaultAppsPageC167
 
     public bool Validate(GuideXosScrollView view)
     {
-        if (view == null || view.MemberCount != _members.Length + 1 ||
-            view.MaximumMemberCount < _members.Length + 1 ||
+        if (view == null || view.MemberCount != _members.Length ||
+            view.MaximumMemberCount < _members.Length ||
             _group.MemberCount != _members.Length ||
             _stack.MemberCount != _members.Length || _choice.ItemCount != 2 ||
             _choice.GetItemText(0) != "Managed Notes" ||
             _choice.GetItemText(1) != "No default application" ||
-            !view.ContainsMember(_group) ||
+            view.ContainsMember(_group) ||
             !_group.ValidateMembershipGeometry(out int outside) || outside != 0)
             return false;
         foreach (object member in _members)
@@ -160,19 +206,24 @@ internal sealed class ManagedDefaultAppsPageC167
 
     public bool Apply()
     {
-        if (_service == null) return Fail("Could not save .txt default.");
+        if (!_hasCommitted) return Fail("Could not read .txt default.");
+        if (!CanApply) return true;
+        if (_service == null) return Fail("Could not save default.");
         GuideXosAssociationResult mutation = _pendingChoice == 0
             ? _service.SetManagedNotes()
             : _service.DisableTxt();
         if (mutation.Status != GuideXosAssociationStatus.Success)
-            return Fail("Could not save .txt default.");
+            return Fail("Could not save default.");
 
         GuideXosAssociationResult query = _service.QueryTxt();
         if (!IsValidQuery(query) || !MatchesChoice(query.Response, _pendingChoice))
-            return Fail("Could not verify .txt default.");
+            return Fail("Could not verify default.");
         _committed = query.Response;
         _hasCommitted = true;
         _errorShown = false;
+        _feedbackMessage = _pendingChoice == 0
+            ? "Default application updated."
+            : "No default application selected.";
         SetTextFromState();
         return true;
     }
@@ -180,16 +231,17 @@ internal sealed class ManagedDefaultAppsPageC167
     public bool ResetToSystemDefault()
     {
         if (_service == null || _service.ResetTxt().Status != GuideXosAssociationStatus.Success)
-            return Fail("Could not reset .txt default.");
+            return Fail("Could not reset default.");
         GuideXosAssociationResult query = _service.QueryTxt();
         if (!IsValidQuery(query) || query.Response.overrideState !=
                 (uint)GuideXosAssociationOverrideState.NoOverride ||
             !HasCompiledId(query.Response, NotesId) ||
             !HasEffectiveId(query.Response, NotesId))
-            return Fail("Could not verify system default.");
+            return Fail("Could not verify reset.");
         _committed = query.Response;
         _hasCommitted = true;
         _errorShown = false;
+        _feedbackMessage = "System default restored.";
         _pendingChoice = 0;
         SyncChoice();
         SetTextFromState();
@@ -205,6 +257,7 @@ internal sealed class ManagedDefaultAppsPageC167
         _group.Reset();
         _group.ClearMembers();
         _stack.Clear();
+        _group.TrySetContentPadding(0);
         _apply.Reset();
         _reset.Reset();
         _reset.SetLabel("Reset to System Default");
@@ -218,10 +271,12 @@ internal sealed class ManagedDefaultAppsPageC167
             _stack.TryAddMember(member);
             _group.TryAddMember(member);
         }
-        _stack.TrySetPadding(4, 2, 4, 2);
+        _stack.TrySetPadding(12, 0, 12, 0);
         _stack.TrySetSpacing(1);
         _errorShown = false;
-        _current.SetText("Default: not loaded");
+        _feedbackMessage = null;
+        _current.SetText("Effective application: unavailable");
+        _override.SetText("Association state: unavailable");
         _feedback.SetText("Pending: none");
         _choice.SetVisible(false);
         _syncing = false;
@@ -233,6 +288,7 @@ internal sealed class ManagedDefaultAppsPageC167
         if (_syncing || index is < 0 or > 1) return;
         _pendingChoice = index;
         _errorShown = false;
+        _feedbackMessage = null;
         SetTextFromState();
     }
 
@@ -247,37 +303,54 @@ internal sealed class ManagedDefaultAppsPageC167
     {
         if (!_hasCommitted)
         {
-            if (!_errorShown) _current.SetText("Default: not loaded");
+            _current.SetText("Effective application: unavailable");
+            _override.SetText("Association state: unavailable");
         }
         else if (_committed.overrideState ==
                  (uint)GuideXosAssociationOverrideState.Disabled)
-            _current.SetText("Disabled: no default app");
+        {
+            _current.SetText("Effective application: None");
+            _override.SetText("Association state: Disabled");
+        }
         else if (_committed.overrideState ==
                  (uint)GuideXosAssociationOverrideState.ApplicationOverride)
-            _current.SetText("Explicit default: Managed Notes");
+        {
+            _current.SetText("Effective application: Managed Notes");
+            _override.SetText("Association state: Explicitly selected");
+        }
         else
-            _current.SetText("System default: Managed Notes");
+        {
+            _current.SetText("Effective application: Managed Notes");
+            _override.SetText("Association state: System default");
+        }
 
         if (!_errorShown)
         {
-            bool pending = _hasCommitted &&
-                ((_committed.overrideState ==
-                    (uint)GuideXosAssociationOverrideState.Disabled) !=
-                 (_pendingChoice == 1));
-            _feedback.SetText(pending
+            _feedback.SetText(_feedbackMessage ?? (HasPendingChange
                 ? _pendingChoice == 0
                     ? "Pending: Managed Notes"
                     : "Pending: No default application"
-                : "Pending: none");
+                : "Pending: none"));
         }
+        else if (HasPendingChange)
+            _feedback.SetText(_feedbackMessage + " Pending: " +
+                (_pendingChoice == 0 ? "Managed Notes" : "No default app"));
+        else
+            _feedback.SetText(_feedbackMessage);
+        _apply.SetEnabled(CanApply);
     }
 
     private bool Fail(string message)
     {
         _errorShown = true;
-        _feedback.SetText(message);
+        _feedbackMessage = message;
+        SetTextFromState();
         return false;
     }
+
+    private static int EffectiveChoice(NativeAssociationServiceResponse response) =>
+        response.overrideState ==
+            (uint)GuideXosAssociationOverrideState.Disabled ? 1 : 0;
 
     private static bool IsValidQuery(GuideXosAssociationResult result)
     {

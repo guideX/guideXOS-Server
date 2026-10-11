@@ -1593,8 +1593,8 @@ public sealed class GuideXosControlHost
             return menu.IsOpen && menu.EffectiveVisible && menu.Enabled &&
                 menu.InvokerAvailable;
         }
-        return IsComboBoxOpen(index) && IsEligible(index) &&
-            IsControlFocused(index);
+        return IsComboBoxOpen(index) && IsControlVisible(index) &&
+            !IsControlDisabled(index) && IsControlFocused(index);
     }
 
     private bool TryGetTransientCaptureIndex(out int index)

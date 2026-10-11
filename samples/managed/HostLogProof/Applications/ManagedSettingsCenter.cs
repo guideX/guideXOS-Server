@@ -56,6 +56,8 @@ internal struct ManagedSettingsSnapshot : IEquatable<ManagedSettingsSnapshot>
 /// </summary>
 public sealed class ManagedSettingsCenter : GuideXosApplication
 {
+    internal const int SurfaceWidth = 560;
+    internal const int SurfaceHeight = 340;
     private const int ViewId = 1;
     private const int ScrollBarId = 2;
     private const int DensityComboId = 3;
@@ -74,8 +76,8 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     private const uint MenuDefaults = 2;
     private const uint MenuClose = 3;
 
-    private readonly GuideXosScrollView _view = new(24, 86, 300, 208, ViewCapacity);
-    private readonly GuideXosScrollBar _scrollBar = new(336, 86, 16, 208);
+    private readonly GuideXosScrollView _view = new(24, 96, 504, 208, ViewCapacity);
+    private readonly GuideXosScrollBar _scrollBar = new(532, 96, 16, 208);
     private readonly GuideXosGroupBox[] _groups =
     {
         new(0, 0, 272, 180, "Appearance"),
@@ -302,6 +304,9 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     internal int LeafControlCount => 18;
     internal int InputGroupBoxMemberCount => _groups[1].MemberCount;
     internal int ScrollViewMemberCount => _view.MemberCount;
+    internal ReadOnlySpan<byte> CurrentPageHeading => _defaultAppsPageActive
+        ? "Apps / Default Apps  |  .txt"u8
+        : "Settings"u8;
     internal int RegistrationCount => _controlHost?.RegistrationCount ?? 0;
     internal int HostCapacity => _controlHost?.MaximumControlCount ?? 0;
     internal int DialogRegistrationCount => _resetDialog.RegistrationCount;
@@ -397,7 +402,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 #endif
         if (!ResetComposition()) return GuideXosResult.InvalidArgument;
         GuideXosResult create = host.TryCreateSurface(
-            "Managed Settings Center"u8, 560, 340, out _surface);
+            "Managed Settings Center"u8, SurfaceWidth, SurfaceHeight, out _surface);
         if (create != GuideXosResult.Success || _surface == null) return create;
         _window = _surface.Handle;
         if (!_testsRun)
@@ -1260,6 +1265,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _working = ManagedSettingsSnapshot.Defaults;
         SyncControlsFromWorking();
         _view.RecalculateContentExtent();
+        SyncScrollBarVisibility();
         _scrollBar.Value = _view.Offset;
         if (_view.Offset != priorOffset && _view.Offset > _view.MaximumOffset)
             _view.SetOffset(_view.MaximumOffset);
@@ -1337,7 +1343,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         bool ok = AttachGeneralView(initializeMembership: true);
         _view.RecalculateContentExtent();
         _view.BindScrollBar(_scrollBar);
-        _scrollBar.SetVisible(true);
+        SyncScrollBarVisibility();
         _controlHost.TryRegisterScrollView(ViewId, _view, true);
         _controlHost.TryRegisterScrollBar(ScrollBarId, _scrollBar, false);
         _controlHost.TryRegisterComboBox(DensityComboId, _density, true);
@@ -1350,7 +1356,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _controlHost.TryRegisterCheckBox(AdvancedToggleId, _showAdvanced, true);
         _controlHost.TryRegisterButton(AppsButtonId, _appsButton, true);
         _controlHost.TryRegisterComboBox(DefaultAppsComboId,
-            _defaultAppsPage.Choice, true);
+            _defaultAppsPage.Choice, false);
         _applyButton.SetEnabled(false);
         _syncing = false;
         SyncControlsFromWorking();
@@ -1448,10 +1454,12 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _appsButton.SetLabel("Settings");
         _inputEnabled.SetVisible(false);
         _showAdvanced.SetVisible(false);
+        SetGeneralComboVisibility(false);
         bool attached = _defaultAppsPage.Attach(_view);
         _view.BindScrollBar(_scrollBar);
         _view.SetOffset(0);
         _scrollBar.Value = _view.Offset;
+        SyncScrollBarVisibility();
         _controlHost?.RefreshVisibility();
         if (!attached)
             host?.TryLog("C167-PAGE entry=Apps layout=invalid result=FAIL"u8);
@@ -1480,12 +1488,14 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _appsButton.SetLabel("Apps");
         _inputEnabled.SetVisible(true);
         _showAdvanced.SetVisible(true);
+        SetGeneralComboVisibility(true);
         _view.Clear();
         bool attached = AttachGeneralView(initializeMembership: false);
         _view.RecalculateContentExtent();
         _view.BindScrollBar(_scrollBar);
         _view.SetOffset(0);
         _scrollBar.Value = _view.Offset;
+        SyncScrollBarVisibility();
         _controlHost?.RefreshVisibility();
         host?.TryLog(attached
             ? "C167-PAGE return=Settings pending=discarded write=false result=PASS"u8
@@ -1497,6 +1507,14 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     {
         if (_defaultAppsPageActive) ReturnToSettingsPage(host);
         else EnterDefaultAppsPage(host);
+    }
+
+    private void SetGeneralComboVisibility(bool visible)
+    {
+        _density.SetVisible(visible);
+        _speed.SetVisible(visible);
+        _scrollLines.SetVisible(visible);
+        _statusCombo.SetVisible(visible);
     }
 
     private void LogC167CommittedState(GuideXosHost host,
@@ -1601,6 +1619,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         UpdateStatusPreview();
         _syncing = false;
         _view.RecalculateContentExtent();
+        SyncScrollBarVisibility();
         RefreshDirtyState();
         _controlHost?.RefreshVisibility();
     }
@@ -1703,6 +1722,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _systemDescription.SetVisible(value);
         _stacks[2].PerformLayout();
         _view.RecalculateContentExtent();
+        SyncScrollBarVisibility();
         _controlHost.RefreshVisibility();
         _appHost?.TryLog(value
             ? "C144-SYSTEM visible=true extent=updated result=PASS"u8
@@ -1717,6 +1737,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _groups[3].SetVisible(value);
         if (value) _stacks[3].PerformLayout();
         _view.RecalculateContentExtent();
+        SyncScrollBarVisibility();
         _finalContentHeight = _view.ContentExtent;
         _controlHost.RefreshVisibility();
         _appHost?.TryLog(value
@@ -1758,6 +1779,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _groups[1].SetEnabled(enabled);
         _controlHost?.RefreshVisibility();
         _view.RecalculateContentExtent();
+        SyncScrollBarVisibility();
         _appHost?.TryLog(enabled
             ? "C144-GROUP input=enabled own-member-state=preserved result=PASS"u8
             : "C144-GROUP input=disabled pointer-tab-popup=gated result=PASS"u8);
@@ -1797,6 +1819,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         for (int index = 0; index < SectionCount; index++) _stacks[index].TrySetSpacing(spacing);
         for (int index = 0; index < SectionCount; index++) _stacks[index].PerformLayout();
         _view.RecalculateContentExtent();
+        SyncScrollBarVisibility();
     }
 
     private void UpdateStatusPreview()
@@ -2144,10 +2167,13 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         if (Contains(_appsButton, x, y)) return AppsButtonId;
         if (x >= _view.X && x < _view.X + _view.Width && y >= _view.Y && y < _view.Y + _view.Height)
             return ViewId;
-        if (x >= _scrollBar.X && x < _scrollBar.X + _scrollBar.Width &&
+        if (_scrollBar.Visible && x >= _scrollBar.X && x < _scrollBar.X + _scrollBar.Width &&
             y >= _scrollBar.Y && y < _scrollBar.Y + _scrollBar.Height) return ScrollBarId;
         return 0;
     }
+
+    private void SyncScrollBarVisibility() =>
+        _scrollBar.SetVisible(_view.MaximumOffset > 0);
 
     private static bool Contains(GuideXosCheckBox item, int x, int y) =>
         item.Visible && x >= item.X && x < item.X + item.Width && y >= item.Y && y < item.Y + item.Height;
@@ -2273,18 +2299,33 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 
     private GuideXosResult Render(GuideXosHost host, GuideXosSurface surface)
     {
-        if (surface.TryFillRect(10, 10, 540, 320, 0x003D465Au) != GuideXosResult.Success ||
-            surface.TrySetText(20, 24, "Settings Center  |  managed working copy"u8) != GuideXosResult.Success ||
-            _inputEnabled.Render(surface) != GuideXosResult.Success ||
-            _showAdvanced.Render(surface) != GuideXosResult.Success ||
-            _optionsButton.Render(surface) != GuideXosResult.Success ||
-            _appsButton.Render(surface) != GuideXosResult.Success ||
-            surface.TrySetText(280, 24, IsDirty ? "Unsaved changes"u8 : "Applied"u8) != GuideXosResult.Success ||
-            _view.Render(surface) != GuideXosResult.Success ||
-            _scrollBar.Render(surface) != GuideXosResult.Success ||
-            (_menu.IsOpen && _menu.Render(surface) != GuideXosResult.Success) ||
-            (_activeDialog != null && _activeDialog.Render(surface) != GuideXosResult.Success) ||
-            surface.TrySetText(20, 306, _working.ShowKeyboardTips
+        if (surface.TryFillRect(10, 10, 540, 320, 0x003D465Au) != GuideXosResult.Success)
+            return GuideXosResult.InvalidArgument;
+        if (surface.TrySetText(30, 24, "Settings Center"u8) != GuideXosResult.Success)
+            return GuideXosResult.InvalidArgument;
+        if (_inputEnabled.Render(surface) != GuideXosResult.Success)
+            return GuideXosResult.InvalidArgument;
+        if (_showAdvanced.Render(surface) != GuideXosResult.Success)
+            return GuideXosResult.InvalidArgument;
+        if (_optionsButton.Render(surface) != GuideXosResult.Success)
+            return GuideXosResult.InvalidArgument;
+        if (_appsButton.Render(surface) != GuideXosResult.Success)
+            return GuideXosResult.InvalidArgument;
+        if (surface.TrySetText(280, 24, _defaultAppsPageActive
+                ? "Association"u8
+                : IsDirty ? "Unsaved changes"u8 : "Applied"u8) != GuideXosResult.Success)
+            return GuideXosResult.InvalidArgument;
+        if (surface.TrySetText(36, 74, CurrentPageHeading) != GuideXosResult.Success)
+            return GuideXosResult.InvalidArgument;
+        if (_view.Render(surface) != GuideXosResult.Success)
+            return GuideXosResult.InvalidArgument;
+        if (_scrollBar.Visible && _scrollBar.Render(surface) != GuideXosResult.Success)
+            return GuideXosResult.InvalidArgument;
+        if (_menu.IsOpen && _menu.Render(surface) != GuideXosResult.Success)
+            return GuideXosResult.InvalidArgument;
+        if (_activeDialog != null && _activeDialog.Render(surface) != GuideXosResult.Success)
+            return GuideXosResult.InvalidArgument;
+        if (surface.TrySetText(20, 306, _working.ShowKeyboardTips
                 ? "Tab / Shift+Tab move focus | Enter activates | wheel scrolls"u8
                 : "Tab moves focus | Enter activates"u8) != GuideXosResult.Success)
             return GuideXosResult.InvalidArgument;
