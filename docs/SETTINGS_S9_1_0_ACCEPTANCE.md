@@ -6,6 +6,13 @@ Date: 2026-09-30
 
 **Outcome B — implementation and hosted App Model launch are strong; full live UI acceptance remains blocked by this execution surface.**
 
+The later S9R bare-metal investigation is recorded in
+[`SETTINGS_S9R_NATIVE_INTEGRATION_ASSESSMENT_20261011.md`](SETTINGS_S9R_NATIVE_INTEGRATION_ASSESSMENT_20261011.md).
+It finds no reusable native Settings entry point in the production kernel and
+records S9R Outcome C at the shared-runtime/provider boundary. The historical
+hosted results below remain valid; no guest Settings Center acceptance is
+claimed.
+
 The supported hosted build passed. The normal App Model launched Settings as
 gxos.builtin.settings and the compositor registered a visible Settings window.
 Settings model, provider, bridge, and inherited regression suites passed at
