@@ -1,0 +1,150 @@
+{
+  "version": 4,
+  "targets": {
+    "net8.0": {
+      "Astronomy.Core/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v8.0",
+        "compile": {
+          "bin/placeholder/Astronomy.Core.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Astronomy.Core.dll": {}
+        }
+      },
+      "Astronomy.Ephemeris/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v8.0",
+        "dependencies": {
+          "Astronomy.Core": "1.0.0",
+          "Navigation.Core": "1.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Astronomy.Ephemeris.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Astronomy.Ephemeris.dll": {}
+        }
+      },
+      "Navigation.Core/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v8.0",
+        "dependencies": {
+          "Astronomy.Core": "1.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Navigation.Core.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Navigation.Core.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "Astronomy.Core/1.0.0": {
+      "type": "project",
+      "path": "../Astronomy.Core/Astronomy.Core.csproj",
+      "msbuildProject": "../Astronomy.Core/Astronomy.Core.csproj"
+    },
+    "Astronomy.Ephemeris/1.0.0": {
+      "type": "project",
+      "path": "../Astronomy.Ephemeris/Astronomy.Ephemeris.csproj",
+      "msbuildProject": "../Astronomy.Ephemeris/Astronomy.Ephemeris.csproj"
+    },
+    "Navigation.Core/1.0.0": {
+      "type": "project",
+      "path": "../Navigation.Core/Navigation.Core.csproj",
+      "msbuildProject": "../Navigation.Core/Navigation.Core.csproj"
+    }
+  },
+  "projectFileDependencyGroups": {
+    "net8.0": [
+      "Astronomy.Core >= 1.0.0",
+      "Astronomy.Ephemeris >= 1.0.0",
+      "Navigation.Core >= 1.0.0"
+    ]
+  },
+  "packageFolders": {
+    "C:\\Users\\guideX\\.nuget\\packages\\": {},
+    "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
+  },
+  "project": {
+    "version": "1.0.0",
+    "restore": {
+      "projectUniqueName": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\StellarNavigator.Benchmarks\\StellarNavigator.Benchmarks.csproj",
+      "projectName": "StellarNavigator.Benchmarks",
+      "projectPath": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\StellarNavigator.Benchmarks\\StellarNavigator.Benchmarks.csproj",
+      "packagesPath": "C:\\Users\\guideX\\.nuget\\packages\\",
+      "outputPath": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\StellarNavigator.Benchmarks\\obj\\",
+      "projectStyle": "PackageReference",
+      "fallbackFolders": [
+        "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
+      ],
+      "configFilePaths": [
+        "C:\\Users\\guideX\\AppData\\Roaming\\NuGet\\NuGet.Config",
+        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
+        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+      ],
+      "originalTargetFrameworks": [
+        "net8.0"
+      ],
+      "sources": {
+        "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+        "C:\\Program Files\\dotnet\\library-packs": {},
+        "https://api.nuget.org/v3/index.json": {}
+      },
+      "frameworks": {
+        "net8.0": {
+          "framework": "net8.0",
+          "targetAlias": "net8.0",
+          "projectReferences": {
+            "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Core\\Astronomy.Core.csproj": {
+              "projectPath": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Core\\Astronomy.Core.csproj"
+            },
+            "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Ephemeris\\Astronomy.Ephemeris.csproj": {
+              "projectPath": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Ephemeris\\Astronomy.Ephemeris.csproj"
+            },
+            "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Navigation.Core\\Navigation.Core.csproj": {
+              "projectPath": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Navigation.Core\\Navigation.Core.csproj"
+            }
+          }
+        }
+      },
+      "warningProperties": {
+        "warnAsError": [
+          "NU1605"
+        ]
+      },
+      "restoreAuditProperties": {
+        "enableAudit": "true",
+        "auditLevel": "low",
+        "auditMode": "direct"
+      },
+      "SdkAnalysisLevel": "10.0.400"
+    },
+    "frameworks": {
+      "net8.0": {
+        "framework": "net8.0",
+        "targetAlias": "net8.0",
+        "imports": [
+          "net461",
+          "net462",
+          "net47",
+          "net471",
+          "net472",
+          "net48",
+          "net481"
+        ],
+        "assetTargetFallback": true,
+        "warn": true,
+        "frameworkReferences": {
+          "Microsoft.NETCore.App": {
+            "privateAssets": "all"
+          }
+        },
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.401/PortableRuntimeIdentifierGraph.json"
+      }
+    }
+  }
+}

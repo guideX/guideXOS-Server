@@ -166,3 +166,82 @@ var oob = continuous.GetState("earth", farFuture, barycentric);
 Console.WriteLine($"Out-of-coverage query: Success={oob.IsSuccess} [{oob.Status}] {oob.ErrorMessage}");
 Console.WriteLine();
 Console.WriteLine("Stellar Navigator SN3 - Continuous offline evaluation confirmed.");
+
+// ─── SN4: complete eight-planet coverage with bounded-memory lazy loading ───
+Console.WriteLine();
+Console.WriteLine("=== Stellar Navigator SN4 ===");
+Console.WriteLine("Eight-planet indexed evaluation (pure managed code, offline, bounded cache)");
+
+var indexedPath = Path.Combine(AppContext.BaseDirectory, "Data", "ephemeris_de440s_chebyshev.sn4bin");
+if (!File.Exists(indexedPath))
+{
+    Console.WriteLine($"SN4 dataset missing: {indexedPath}");
+    Console.WriteLine("SN4 indexed evaluation is unavailable; SN2/SN3 output above remains valid.");
+    return;
+}
+
+using var indexed = new IndexedChebyshevEphemerisProvider(indexedPath);
+Console.WriteLine($"Indexed source: {indexed.DataSource}");
+Console.WriteLine($"Segments: {indexed.Segments.Count}, records: {indexed.TotalRecords}, SHA-256: {indexed.Sha256[..16]}...");
+Console.WriteLine($"SPK provenance: MD5 {indexed.Provenance.SpkMd5} / SHA-256 {indexed.Provenance.SpkSha256[..16]}...");
+Console.WriteLine($"Coverage: {indexed.CoverageStart.JdUtc:F6} to {indexed.CoverageEnd.JdUtc:F6} JD (TDB)");
+Console.WriteLine($"Cache budget: {indexed.CacheBudgetBytes / 1048576.0:F1} MiB (retained now: {indexed.CachedBytes} bytes)");
+Console.WriteLine();
+
+// Supported planetary objects with exact NAIF identifiers. Barycenter ids
+// (1,2,4,5,6,7,8) are system barycenters, NOT physical planet centers
+// (199,299,499,599,699,799,899). Mercury/Venus centers are measured
+// coincident with their barycenters under DE440s conventions.
+var sn4Planets = new (string BodyId, int NaifId, string Label)[]
+{
+    ("mercury", 1, "Mercury system barycenter"),
+    ("venus", 2, "Venus system barycenter"),
+    ("earth", 399, "Earth geocenter (via Earth-Moon barycenter 3)"),
+    ("mars", 4, "Mars system barycenter (Mars center 499 unavailable)"),
+    ("jupiter", 5, "Jupiter system barycenter (center 599 unavailable)"),
+    ("saturn", 6, "Saturn system barycenter (center 699 unavailable)"),
+    ("uranus", 7, "Uranus system barycenter (center 799 unavailable)"),
+    ("neptune", 8, "Neptune system barycenter (center 899 unavailable)"),
+};
+Console.WriteLine("--- Supported planetary objects (SN4) ---");
+foreach (var (id, naif, label) in sn4Planets)
+    Console.WriteLine($"  {id,-10} NAIF {naif,-4} {label}  supported={indexed.IsBodySupported(id)}");
+Console.WriteLine($"  {"mercury_center",-10} NAIF {199,-4} Mercury body center (coincident with barycenter 1)");
+Console.WriteLine($"  {"venus_center",-10} NAIF {299,-4} Venus body center (coincident with barycenter 2)");
+Console.WriteLine();
+
+// Off-grid epoch query (CLI args [bodyId] [jdTdb] select target/epoch).
+string sn4Target = args.Length > 0 ? args[0] : "saturn";
+if (!indexed.IsBodySupported(sn4Target))
+{
+    Console.WriteLine($"Body '{sn4Target}' is not in the SN4 dataset (Pluto and planet centers 499/599/699/799/899 are unsupported).");
+    Console.WriteLine($"Supported: {string.Join(", ", indexed.SupportedBodies)}");
+    return;
+}
+var sn4Epoch = new AstroTime(jdTdb, TimeScale.Tdb);
+Console.WriteLine($"Requested body: {sn4Target}, TDB epoch: JD {jdTdb:F7}");
+var sn4State = indexed.GetState(sn4Target, sn4Epoch, barycentric);
+if (sn4State.IsSuccess && sn4State.Value is var (spos, svel))
+{
+    Console.WriteLine($"{sn4Target} position (km): ({spos.X / 1000.0:F3}, {spos.Y / 1000.0:F3}, {spos.Z / 1000.0:F3})");
+    Console.WriteLine($"{sn4Target} velocity (km/s): ({svel.X / 1000.0:F6}, {svel.Y / 1000.0:F6}, {svel.Z / 1000.0:F6})");
+    Console.WriteLine($"Source: {sn4State.Provenance}  Quality: {sn4State.Status}");
+    Console.WriteLine($"Frame: {sn4State.Frame}  Origin: SSB  Units: m, m/s (evaluated in km, converted once on output)");
+
+    string sn4Other = sn4Target == "earth" ? "saturn" : "earth";
+    var sn4RelCalc = new RelativePositionCalculator(indexed);
+    var sn4Rel = sn4RelCalc.Calculate(sn4Target, sn4Other, sn4Epoch);
+    if (sn4Rel.IsSuccess)
+        Console.WriteLine($"{sn4Target}-{sn4Other} distance: {sn4Rel.Value!.SeparationDistanceKm:F3} km [{sn4Rel.Value.Status}]");
+    else
+        Console.WriteLine($"Distance unavailable: {sn4Rel.ErrorMessage}");
+    Console.WriteLine($"Cache after queries: {indexed.CachedRecordCount} records, {indexed.CachedBytes} bytes " +
+        $"(hits={indexed.CacheHitCount}, misses={indexed.CacheMissCount})");
+}
+else
+{
+    Console.WriteLine($"UNAVAILABLE [{sn4State.Status}]: {sn4State.ErrorMessage}");
+}
+
+Console.WriteLine();
+Console.WriteLine("Stellar Navigator SN4 - Eight-planet offline evaluation confirmed.");

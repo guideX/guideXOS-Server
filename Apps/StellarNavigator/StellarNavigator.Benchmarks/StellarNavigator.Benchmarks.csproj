@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Astronomy.Core\Astronomy.Core.csproj" />
+    <ProjectReference Include="..\Astronomy.Ephemeris\Astronomy.Ephemeris.csproj" />
+    <ProjectReference Include="..\Navigation.Core\Navigation.Core.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\Astronomy.Ephemeris\Data\ephemeris_de440s_chebyshev.json" Link="Data\ephemeris_de440s_chebyshev.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\Astronomy.Ephemeris\Data\ephemeris_de440s_chebyshev.sn4bin" Link="Data\ephemeris_de440s_chebyshev.sn4bin" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

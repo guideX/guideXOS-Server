@@ -19,6 +19,7 @@
     <None Include="..\Astronomy.Ephemeris\Data\ephemeris_j2000.json" Link="Data\ephemeris_j2000.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\Astronomy.Ephemeris\Data\ephemeris_de440s.json" Link="Data\ephemeris_de440s.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\Astronomy.Ephemeris\Data\ephemeris_de440s_chebyshev.json" Link="Data\ephemeris_de440s_chebyshev.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\Astronomy.Ephemeris\Data\ephemeris_de440s_chebyshev.sn4bin" Link="Data\ephemeris_de440s_chebyshev.sn4bin" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

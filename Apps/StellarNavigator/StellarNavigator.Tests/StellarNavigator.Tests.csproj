@@ -21,6 +21,7 @@
   <ItemGroup>
     <None Include="sn2_reference.json" Link="sn2_reference.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="sn3_reference.json" Link="sn3_reference.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="sn4_reference.json" Link="sn4_reference.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
