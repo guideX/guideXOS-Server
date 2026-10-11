@@ -966,14 +966,26 @@ static int rexx_compiler_compile_clause(RexxCompiler *compiler,
                                  0u, 0u, &clause->token);
         break;
     case REXX_AST_CLAUSE_ADDRESS:
+    {
+        uint32_t environment_symbol = 0u;
+        uint8_t flags = clause->as.simple.expression != NULL
+                            ? REXX_INSTRUCTION_HAS_VALUE : 0u;
+
+        if (clause->as.simple.has_address_environment) {
+            environment_symbol = rexx_compiler_intern_symbol(
+                compiler, &clause->as.simple.address_environment,
+                REXX_SYMBOL_VARIABLE);
+            if (compiler->status != REXX_COMPILER_STATUS_OK) return 0;
+            flags |= REXX_INSTRUCTION_HAS_ENVIRONMENT;
+        }
         if (clause->as.simple.expression != NULL &&
             !rexx_compiler_compile_expression(
                 compiler, clause->as.simple.expression)) return 0;
         (void)rexx_compiler_emit(
-            compiler, OP_ADDRESS,
-            clause->as.simple.expression != NULL ? 1u : 0u,
-            0u, 0u, &clause->token);
+            compiler, OP_ADDRESS, flags, environment_symbol, 0u,
+            &clause->token);
         break;
+    }
     case REXX_AST_CLAUSE_COMMAND:
         if (clause->as.simple.expression == NULL ||
             !rexx_compiler_compile_expression(

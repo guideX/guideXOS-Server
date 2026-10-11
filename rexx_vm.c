@@ -312,6 +312,15 @@ void rexx_vm_set_command_dispatcher(RexxVM *vm,
     vm->command_dispatcher_user_data = user_data;
 }
 
+void rexx_vm_set_address_dispatcher(RexxVM *vm,
+                                    RexxVMAddressDispatcher dispatcher,
+                                    void *user_data)
+{
+    if (vm == NULL || !vm->initialized) return;
+    vm->address_dispatcher = dispatcher;
+    vm->address_dispatcher_user_data = dispatcher != NULL ? user_data : NULL;
+}
+
 int32_t rexx_vm_guidexos_command_stub(const char *command, size_t command_length)
 {
     (void)command;
@@ -956,8 +965,22 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
             }
             break;
 
-        case OP_ADDRESS:
-            if ((ins->flags & REXX_INSTRUCTION_HAS_VALUE) != 0) {
+        case OP_ADDRESS: {
+            const char *environment = "KERNEL";
+            size_t environment_length = 6u;
+            const RexxSymbol *environment_symbol = NULL;
+
+            if ((ins->flags & REXX_INSTRUCTION_HAS_ENVIRONMENT) != 0u) {
+                status = get_symbol(chunk, ins->operand,
+                                    REXX_SYMBOL_VARIABLE,
+                                    &environment_symbol);
+                if (status == REXX_VM_STATUS_OK) {
+                    environment = environment_symbol->name;
+                    environment_length = environment_symbol->length;
+                }
+            }
+            if (status == REXX_VM_STATUS_OK &&
+                (ins->flags & REXX_INSTRUCTION_HAS_VALUE) != 0u) {
                 char *command = NULL;
                 size_t command_length = 0;
                 status = pop_move(vm, &value);
@@ -965,10 +988,20 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
                     status = value_string(&value, &command, &command_length);
                 rexx_value_clear(&value);
                 if (status == REXX_VM_STATUS_OK) {
-                    vm->rc = vm->command_dispatcher == NULL
-                        ? rexx_vm_guidexos_command_stub(command, command_length)
-                        : vm->command_dispatcher(vm->command_dispatcher_user_data,
-                                                 command, command_length);
+                    if (vm->address_dispatcher != NULL) {
+                        vm->rc = vm->address_dispatcher(
+                            vm->address_dispatcher_user_data,
+                            environment, environment_length,
+                            command, command_length);
+                    } else if (vm->command_dispatcher != NULL) {
+                        /* Preserve the legacy command-only embedding API. */
+                        vm->rc = vm->command_dispatcher(
+                            vm->command_dispatcher_user_data,
+                            command, command_length);
+                    } else {
+                        vm->rc = rexx_vm_guidexos_command_stub(
+                            command, command_length);
+                    }
                     status = rexx_value_set_number(&value, (double)vm->rc);
                     if (status == REXX_VM_STATUS_OK) status = push_move(vm, &value);
                 }
@@ -976,6 +1009,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
                 rexx_value_clear(&value);
             }
             break;
+        }
 
         default:
             status = REXX_VM_STATUS_UNSUPPORTED_OPCODE;

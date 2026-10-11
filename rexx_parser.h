@@ -167,6 +167,8 @@ struct RexxAstClause {
         } assignment;
         struct {
             RexxAstExpression *expression; /* NULL is permitted for SAY. */
+            RexxToken address_environment; /* ADDRESS only; source-backed. */
+            int has_address_environment;
         } simple;
         struct {
             RexxAstExpression *call;

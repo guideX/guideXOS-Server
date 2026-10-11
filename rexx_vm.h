@@ -79,6 +79,11 @@ struct RexxVM;
 typedef int32_t (*RexxVMCommandDispatcher)(void *user_data,
                                           const char *command,
                                           size_t command_length);
+typedef int32_t (*RexxVMAddressDispatcher)(void *user_data,
+                                          const char *environment,
+                                          size_t environment_length,
+                                          const char *command,
+                                          size_t command_length);
 
 typedef struct RexxVM {
     RexxValue *stack;
@@ -99,6 +104,8 @@ typedef struct RexxVM {
     int32_t rc;           /* Most recent guideXOS command return code. */
     RexxVMCommandDispatcher command_dispatcher;
     void *command_dispatcher_user_data;
+    RexxVMAddressDispatcher address_dispatcher;
+    void *address_dispatcher_user_data;
 
     RexxVMStatus status;
     RexxVMError error;
@@ -115,14 +122,22 @@ void rexx_vm_free(RexxVM *vm);
  * stack basics, and ADDRESS). Other opcodes return
  * REXX_VM_STATUS_UNSUPPORTED_OPCODE. Locals/globals persist between calls.
  * OP_ADDRESS with a value consumes that command string and leaves its numeric
- * RC on the evaluation stack; `vm->rc` always records the latest return code.
+ * RC on the evaluation stack; environment-aware dispatch receives the
+ * explicit environment or KERNEL by default. `vm->rc` records the latest RC.
  */
 RexxVMStatus rexx_vm_execute(RexxVM *vm,
                              const RexxBytecodeChunk *chunk);
 
-/* Optional command hook. A NULL hook selects the safe built-in stub. */
+/* Optional legacy command-only hook. The environment-aware hook takes
+ * precedence; without either hook, ADDRESS returns the safe RC 127 stub. */
 void rexx_vm_set_command_dispatcher(RexxVM *vm,
                                     RexxVMCommandDispatcher dispatcher,
+                                    void *user_data);
+
+/* Optional environment-aware hook. It takes precedence over the legacy
+ * command-only hook; omitted ADDRESS environments are reported as KERNEL. */
+void rexx_vm_set_address_dispatcher(RexxVM *vm,
+                                    RexxVMAddressDispatcher dispatcher,
                                     void *user_data);
 
 /* The built-in dispatcher never invokes a host shell; it returns RC 127. */

@@ -83,6 +83,9 @@ typedef enum RexxOpcode {
  * An instruction always occupies the same record size. For most opcodes,
  * `operand` is the sole operand and `auxiliary` is zero. OP_CALL uses
  * `operand` for the function symbol and `auxiliary` for argument count.
+ * OP_ADDRESS uses `operand` for an environment symbol when
+ * REXX_INSTRUCTION_HAS_ENVIRONMENT is set; otherwise its environment is
+ * KERNEL.
  * OP_DO_SETUP uses `operand` for a control symbol (or REXX_NO_SYMBOL) and
  * `auxiliary` for RexxDoFlags. Before setup, the compiler pushes the initial
  * value and then any present TO, BY, and FOR expressions in that order.
@@ -146,8 +149,9 @@ typedef enum RexxDoFlags {
     REXX_DO_FLAG_HAS_FOR = 1u << 4
 } RexxDoFlags;
 
-/* Instruction flag bit used by SAY, ADDRESS, RETURN, and EXIT. */
+/* Instruction flag bits used by SAY, ADDRESS, RETURN, and EXIT. */
 #define REXX_INSTRUCTION_HAS_VALUE ((uint8_t)1u)
+#define REXX_INSTRUCTION_HAS_ENVIRONMENT ((uint8_t)2u)
 
 typedef enum RexxCompilerStatus {
     REXX_COMPILER_STATUS_OK = 0,

@@ -10,6 +10,7 @@
 #include "include/kernel/block_device.h"
 #include "include/kernel/fs_fat.h"
 #include "include/kernel/fs_ext4.h"
+#include "../../rexx_os_io.h"
 
 #if defined(__GNUC__) || defined(__clang__)
 #include "include/kernel/serial_debug.h"
@@ -1668,3 +1669,49 @@ const char* status_name(Status status)
 
 } // namespace vfs
 } // namespace kernel
+
+/*
+ * Stable C ABI for the pure-C REXX OS adapter. Keep all namespaced VFS types
+ * on this side of the boundary so rexx_os_io.c remains valid C11.
+ */
+extern "C" int32_t guidexos_rexx_vfs_open(const char* path,
+                                           uint8_t* out_handle)
+{
+    kernel::vfs::FileInfo info{};
+    kernel::vfs::Status stat_status;
+    uint8_t handle;
+
+    if (!path || !out_handle) return kernel::vfs::VFS_ERR_INVALID;
+    *out_handle = 0xFF;
+
+    stat_status = kernel::vfs::stat(path, &info);
+    if (stat_status != kernel::vfs::VFS_OK) return stat_status;
+    if (info.type == kernel::vfs::FILE_TYPE_DIRECTORY) {
+        return kernel::vfs::VFS_ERR_IS_DIR;
+    }
+    if (info.type != kernel::vfs::FILE_TYPE_REGULAR) {
+        return kernel::vfs::VFS_ERR_NOT_SUPPORTED;
+    }
+
+    handle = kernel::vfs::open(path, kernel::vfs::OPEN_READ);
+    if (handle == 0xFF) return kernel::vfs::VFS_ERR_IO;
+    *out_handle = handle;
+    return kernel::vfs::VFS_OK;
+}
+
+extern "C" int64_t guidexos_rexx_vfs_size(uint8_t handle)
+{
+    return kernel::vfs::file_size(handle);
+}
+
+extern "C" int32_t guidexos_rexx_vfs_read(uint8_t handle,
+                                           void* buffer,
+                                           uint32_t requested)
+{
+    return kernel::vfs::read(handle, buffer, requested);
+}
+
+extern "C" int32_t guidexos_rexx_vfs_close(uint8_t handle)
+{
+    return kernel::vfs::close(handle);
+}

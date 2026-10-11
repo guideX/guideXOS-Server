@@ -1,13 +1,12 @@
 /*
  * Native command-line wrapper for the in-tree guideXOS REXX interpreter.
  *
- * This translation unit deliberately depends only on the C runtime and the
- * repository's lexer/parser/compiler/VM modules. Script input is read in
- * bounded chunks rather than by trusting a file-size result, which also
- * handles files whose size cannot be determined in advance.
+ * This translation unit uses the repository's lexer/parser/compiler/VM
+ * modules and the guideXOS OS I/O adapter for bounded script loading.
  */
 
 #include "rexx_cli.h"
+#include "rexx_os_io.h"
 
 #include "rexx_compiler.h"
 #include "rexx_lexer.h"
@@ -15,16 +14,7 @@
 #include "rexx_vm.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-
-/*
- * Bound script input so a malformed or unexpectedly large file cannot cause
- * unbounded allocations before the parser's own AST limits take effect.
- * Keep this limit below SIZE_MAX so the trailing NUL byte is always safe.
- */
-#define REXX_CLI_MAX_SOURCE_BYTES ((size_t)16777216u) /* 16 MiB */
-#define REXX_CLI_READ_CHUNK       ((size_t)4096u)
 
 enum {
     REXX_CLI_EXIT_SUCCESS = 0,
@@ -45,182 +35,33 @@ static void rexx_cli_print_usage(FILE *stream, const char *program_name)
                   name, name, name);
 }
 
-/*
- * Grow the input buffer without overflowing size_t or exceeding the configured
- * source limit. On failure, the original allocation remains owned by caller.
- */
-static int rexx_cli_grow_source(char **buffer,
-                                size_t *capacity,
-                                size_t minimum_capacity)
-{
-    size_t next_capacity;
-    char *grown;
-
-    if (buffer == NULL || capacity == NULL || minimum_capacity == 0u ||
-        minimum_capacity > REXX_CLI_MAX_SOURCE_BYTES) {
-        return 0;
-    }
-
-    next_capacity = *capacity;
-    if (next_capacity == 0u) {
-        next_capacity = REXX_CLI_READ_CHUNK;
-        if (next_capacity > REXX_CLI_MAX_SOURCE_BYTES) {
-            next_capacity = REXX_CLI_MAX_SOURCE_BYTES;
-        }
-    }
-
-    while (next_capacity < minimum_capacity) {
-        if (next_capacity > REXX_CLI_MAX_SOURCE_BYTES / 2u) {
-            next_capacity = REXX_CLI_MAX_SOURCE_BYTES;
-        } else {
-            next_capacity *= 2u;
-        }
-    }
-
-    if (next_capacity < minimum_capacity ||
-        next_capacity > REXX_CLI_MAX_SOURCE_BYTES) {
-        return 0;
-    }
-
-    grown = (char *)realloc(*buffer, next_capacity);
-    if (grown == NULL) {
-        return 0;
-    }
-
-    *buffer = grown;
-    *capacity = next_capacity;
-    return 1;
-}
-
-/*
- * Read a script as bytes, append a NUL terminator for convenience, and reject
- * embedded NULs because the lexer and downstream diagnostics treat source as
- * text. On failure, this function frees any partial buffer and leaves outputs
- * in their initialized empty state.
- */
+/* Read through the OS adapter and reject binary input the lexer cannot use. */
 static int rexx_cli_read_source(const char *path,
                                 char **source_out,
                                 size_t *length_out)
 {
-    FILE *file = NULL;
-    char *source = NULL;
-    size_t capacity = 0u;
-    size_t length = 0u;
-    int failed = 0;
+    RexxOSIOStatus status;
 
     if (source_out == NULL || length_out == NULL || path == NULL ||
         path[0] == '\0') {
         return 0;
     }
-
     *source_out = NULL;
     *length_out = 0u;
-
-    file = fopen(path, "rb");
-    if (file == NULL) {
-        (void)fprintf(stderr,
-                      "rexx: %s: cannot open script (not found or inaccessible)\n",
-                      path);
+    status = rexx_os_read_file_ex(path, source_out, length_out);
+    if (status != REXX_OS_IO_OK) {
+        (void)fprintf(stderr, "rexx: %s: %s\n", path,
+                      rexx_os_io_status_name(status));
         return 0;
     }
-
-    if (!rexx_cli_grow_source(&source, &capacity, REXX_CLI_READ_CHUNK)) {
-        (void)fprintf(stderr, "rexx: %s: out of memory while loading script\n",
-                      path);
-        failed = 1;
-    }
-
-    while (!failed) {
-        size_t bytes_read;
-
-        /*
-         * If the limit is exactly reached, inspect one extra byte to
-         * distinguish a valid maximum-size input from a truncated oversized
-         * file. fgetc's int return keeps every byte value distinct from EOF.
-         */
-        if (length == REXX_CLI_MAX_SOURCE_BYTES) {
-            int extra_byte = fgetc(file);
-            if (extra_byte != EOF) {
-                (void)fprintf(stderr,
-                              "rexx: %s: script exceeds the %lu-byte limit\n",
-                              path,
-                              (unsigned long)REXX_CLI_MAX_SOURCE_BYTES);
-                failed = 1;
-            } else if (ferror(file)) {
-                (void)fprintf(stderr, "rexx: %s: error reading script\n", path);
-                failed = 1;
-            }
-            break;
-        }
-
-        if (length == capacity) {
-            size_t next_capacity = capacity;
-            if (next_capacity > REXX_CLI_MAX_SOURCE_BYTES / 2u) {
-                next_capacity = REXX_CLI_MAX_SOURCE_BYTES;
-            } else {
-                next_capacity *= 2u;
-            }
-            if (next_capacity <= capacity ||
-                !rexx_cli_grow_source(&source, &capacity, next_capacity)) {
-                (void)fprintf(stderr,
-                              "rexx: %s: out of memory while loading script\n",
-                              path);
-                failed = 1;
-                break;
-            }
-        }
-
-        bytes_read = fread(source + length, 1u, capacity - length, file);
-        length += bytes_read;
-
-        if (bytes_read == 0u) {
-            if (ferror(file)) {
-                (void)fprintf(stderr, "rexx: %s: error reading script\n", path);
-                failed = 1;
-            } else if (!feof(file)) {
-                /* A zero-byte read without EOF or an error cannot make progress. */
-                (void)fprintf(stderr, "rexx: %s: incomplete read of script\n", path);
-                failed = 1;
-            }
-            break;
-        }
-    }
-
-    if (fclose(file) != 0 && !failed) {
-        (void)fprintf(stderr, "rexx: %s: error closing script after read\n", path);
-        failed = 1;
-    }
-
-    if (!failed && length != 0u && memchr(source, '\0', length) != NULL) {
+    if (*length_out != 0u &&
+        memchr(*source_out, '\0', *length_out) != NULL) {
         (void)fprintf(stderr, "rexx: %s: script contains a NUL byte\n", path);
-        failed = 1;
-    }
-
-    if (!failed && length < capacity) {
-        source[length] = '\0';
-    } else if (!failed) {
-        char *terminated_source;
-
-        /* At the exact size limit, reserve one extra byte for the terminator. */
-        terminated_source = (char *)realloc(source, length + 1u);
-        if (terminated_source == NULL) {
-            (void)fprintf(stderr,
-                          "rexx: %s: out of memory while finalizing script\n",
-                          path);
-            failed = 1;
-        } else {
-            source = terminated_source;
-            source[length] = '\0';
-        }
-    }
-
-    if (failed) {
-        free(source);
+        rexx_os_free_file(*source_out);
+        *source_out = NULL;
+        *length_out = 0u;
         return 0;
     }
-
-    *source_out = source;
-    *length_out = length;
     return 1;
 }
 
@@ -314,11 +155,8 @@ static int rexx_cli_execute_source(const char *path,
         goto cleanup;
     }
 
-    /*
-     * The VM's built-in ADDRESS dispatcher is intentionally safe: it returns
-     * RC 127 and never forwards text to a host shell. A native shell embedding
-     * may set its own dispatcher before VM execution in a future integration.
-     */
+    /* The OS hook is a safe RC 127 stub until the shell installs live routes. */
+    rexx_vm_set_address_dispatcher(&vm, rexx_os_vm_address_dispatcher, NULL);
     vm_status = rexx_vm_execute(&vm, chunk);
     if (vm_status != REXX_VM_STATUS_OK) {
         const RexxVMError *error = &vm.error;
@@ -414,6 +252,6 @@ int guide_rexx_main(int argc, char **argv)
     }
 
     result = rexx_cli_execute_source(script_path, source, source_length);
-    free(source);
+    rexx_os_free_file(source);
     return result;
 }
