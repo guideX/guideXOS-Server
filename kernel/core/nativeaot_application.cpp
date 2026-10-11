@@ -746,7 +746,8 @@ class NativeAotManagedSurface final : public app::KernelApp {
 public:
     NativeAotManagedSurface()
         : m_rectCount(0), m_actionButtonId(-1), m_actionId(0),
-          m_actionSelector(0), m_actionCount(0) {
+          m_actionSelector(0), m_actionCount(0),
+          m_managedFrameOpen(false) {
         const char* name = "Managed NativeAOT";
         int index = 0;
         while (name[index] && index < app::MAX_APP_NAME - 1) {
@@ -1343,6 +1344,10 @@ public:
         return true;
     }
 
+    bool managedFrameOpen() const { return m_managedFrameOpen; }
+
+    void endManagedFrame() { m_managedFrameOpen = false; }
+
     void beginManagedFrame() {
         // Every managed render starts with a background rectangle. Reusing
         // that call as the frame boundary keeps widget/action storage bounded
@@ -1353,6 +1358,7 @@ public:
         m_actionId = 0;
         m_actionSelector = 0;
         m_actionBindingCount = 0;
+        m_managedFrameOpen = true;
     }
 
     bool addActionButton(int32_t x, int32_t y, int32_t width, int32_t height,
@@ -1405,6 +1411,7 @@ private:
     uint32_t m_actionId;
     uint32_t m_actionSelector;
     int m_actionCount;
+    bool m_managedFrameOpen;
     uint32_t m_selector = 0;
 #if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
     char m_surfaceApplicationId[kManagedApplicationIdentityCapacity] = {};
@@ -3544,7 +3551,7 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedDrawRect(
         x > 4096 || y > 4096 || width > 4096 || height > 4096) {
         return -2;
     }
-    surface->beginManagedFrame();
+    if (!surface->managedFrameOpen()) surface->beginManagedFrame();
     if (!surface->addRect(x, y, width, height, color)) return -2;
     if (g_c116InputDispatchActive) return 0;
     serial::puts("[C111-SURFACE-RECT] window=");
@@ -4122,12 +4129,16 @@ int32_t invokeManagedWithHostMetadata(
     NativeAotManagedSurface* previousInvocationSurface =
         g_managedInvocationSurface;
     g_managedInvocationSurface = managedSurfaceForSelector(selector);
+    if (g_managedInvocationSurface)
+        g_managedInvocationSurface->endManagedFrame();
     g_managedLastSelector = selector;
     g_activeManagedContext = &context;
     arch::amd64::disable_interrupts();
     const int32_t managedReturn = reinterpret_cast<Entry>(
         g_application.entryPoint)(&startup);
     arch::amd64::enable_interrupts();
+    if (g_managedInvocationSurface)
+        g_managedInvocationSurface->endManagedFrame();
     g_activeManagedContext = previousActiveManagedContext;
     g_managedInvocationSurface = previousInvocationSurface;
     if (previousActiveManagedContext != nullptr)

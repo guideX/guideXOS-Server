@@ -66,6 +66,8 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     private const int InputEnabledId = 8;
     private const int AdvancedToggleId = 9;
     private const int ScrollLinesComboId = 10;
+    private const int AppsButtonId = 11;
+    private const int DefaultAppsComboId = 12;
     private const int ViewCapacity = 24;
     private const int SectionCount = 4;
     private const uint MenuApply = 1;
@@ -109,7 +111,9 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     private readonly GuideXosButton _defaultsButton = new(0, 0, 128, 18, "Defaults");
     private readonly GuideXosCheckBox _inputEnabled =
         new(24, 54, 248, 18, "Enable input settings", true);
-    private readonly GuideXosButton _optionsButton = new(420, 48, 112, 22, "Options");
+    private readonly GuideXosButton _optionsButton = new(420, 20, 112, 22, "Options");
+    private readonly GuideXosButton _appsButton = new(420, 48, 112, 22, "Apps");
+    private readonly ManagedDefaultAppsPageC167 _defaultAppsPage = new();
     private readonly GuideXosPopupMenu _menu = new(0, 0, 144, 4, 20);
     private readonly GuideXosDialog _resetDialog = new(112, 96, 336, 160,
         "Confirm reset");
@@ -150,6 +154,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     private GuideXosDialog _activeDialog;
     private bool _resettingComposition;
     private bool _surfaceClosing;
+    private bool _defaultAppsPageActive;
 #if !HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
     private bool _c145TestsPassed;
 #endif
@@ -336,8 +341,12 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     internal GuideXosCheckBox KeyboardTips => _showTips;
     internal GuideXosButton ApplyButton => _applyButton;
     internal GuideXosButton DefaultsButton => _defaultsButton;
+    internal GuideXosButton AppsButton => _appsButton;
+    internal ManagedDefaultAppsPageC167 DefaultAppsPage => _defaultAppsPage;
+    internal bool IsDefaultAppsPage => _defaultAppsPageActive;
     internal bool PopupOpen => _menu.IsOpen || _density.IsOpen || _speed.IsOpen ||
-        _scrollLines.IsOpen || _statusCombo.IsOpen;
+        _scrollLines.IsOpen || _statusCombo.IsOpen ||
+        _defaultAppsPage.Choice.IsOpen;
     internal bool HasCapture => _controlHost?.HasTransientInputCapture ?? false;
     internal bool HasDragOwner => _controlHost?.HasPointerDragCapture ?? false;
     internal bool SurfaceClosingForTests => _surfaceClosing;
@@ -348,6 +357,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     {
         if (host.IsCapabilityProbe) return GuideXosResult.Success;
         _appHost = host;
+        _defaultAppsPage.SetService(new ManagedDefaultAppsHostService(host));
         ++_launchCount;
         _surfaceClosing = false;
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
@@ -528,7 +538,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         bool controlsRegistered = RegisterControls();
         HydratePersistedSettings(host);
         _initialContentHeight = _view.ContentExtent;
-        bool valid = controlsRegistered && _controlHost.RegistrationCount == 10 &&
+        bool valid = controlsRegistered && _controlHost.RegistrationCount == 12 &&
             _view.MemberCount == 22 && _view.MaximumMemberCount == ViewCapacity &&
             _groups.Length == SectionCount && _stacks.Length == SectionCount &&
             _working.Equals(_applied) && _applied.Equals(_persisted) &&
@@ -536,41 +546,41 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             _view.MaximumOffset > 0 && ValidateComposition();
 #if HOSTLOGPROOF_C148_SETTINGS_V2
         host.TryLog(valid
-            ? "C148-COMPOSITION launch=PASS reg=10 host=10 groups=4 leaves=18 view=22 input=6 capacity=24 layout=valid result=PASS"u8
+            ? "C148-COMPOSITION launch=PASS reg=12 host=12 groups=4 leaves=18 view=22 input=6 capacity=24 layout=valid result=PASS"u8
             : "C148-COMPOSITION launch=FAIL result=FAIL"u8);
 #else
         host.TryLog(valid
-            ? "C144-PROOF launch=PASS registration=10 hostCapacity=10 groupBoxes=4 leaves=18 viewMembers=22 stacks=4 layout=valid result=PASS"u8
+            ? "C144-PROOF launch=PASS registration=12 hostCapacity=12 groupBoxes=4 leaves=18 viewMembers=22 stacks=4 layout=valid result=PASS"u8
             : "C144-PROOF launch=FAIL result=FAIL"u8);
 #endif
 #if HOSTLOGPROOF_C146_PERSISTENT_SETTINGS
 #if HOSTLOGPROOF_C148_SETTINGS_V2
         host.TryLog(valid && _resetDialog.RegistrationCount == 2 &&
             _dirtyCloseDialog.RegistrationCount == 3 && _c146TestsPassed
-            ? "C148-PROOF launch=PASS registration=10 hostCapacity=10 dialogCapacity=8 resetRegistrations=2 closeRegistrations=3 result=PASS"u8
+            ? "C148-PROOF launch=PASS registration=12 hostCapacity=12 dialogCapacity=8 resetRegistrations=2 closeRegistrations=3 result=PASS"u8
             : "C148-PROOF launch=FAIL result=FAIL"u8);
 #else
         host.TryLog(valid && _resetDialog.RegistrationCount == 2 &&
             _dirtyCloseDialog.RegistrationCount == 3 && _c146TestsPassed
-            ? "C146-PROOF launch=PASS registration=10 hostCapacity=10 dialogCapacity=8 resetRegistrations=2 closeRegistrations=3 result=PASS"u8
+            ? "C146-PROOF launch=PASS registration=12 hostCapacity=12 dialogCapacity=8 resetRegistrations=2 closeRegistrations=3 result=PASS"u8
             : "C146-PROOF launch=FAIL result=FAIL"u8);
 #endif
 #else
         host.TryLog(valid && _resetDialog.RegistrationCount == 2 &&
             _dirtyCloseDialog.RegistrationCount == 3 && _c145TestsPassed
-            ? "C148-PROOF launch=PASS registration=10 hostCapacity=10 dialogCapacity=8 resetRegistrations=2 closeRegistrations=3 result=PASS"u8
+            ? "C148-PROOF launch=PASS registration=12 hostCapacity=12 dialogCapacity=8 resetRegistrations=2 closeRegistrations=3 result=PASS"u8
             : "C148-PROOF launch=FAIL result=FAIL"u8);
 #endif
         LogGeometry(host, "initial");
         if (_launchCount > 1)
         {
 #if HOSTLOGPROOF_C148_SETTINGS_V2
-            host.TryLog(valid ? "C144-RELAUNCH close=PASS relaunch=PASS registration=10 result=PASS"u8 : "C144-RELAUNCH result=FAIL"u8);
+            host.TryLog(valid ? "C144-RELAUNCH close=PASS relaunch=PASS registration=12 result=PASS"u8 : "C144-RELAUNCH result=FAIL"u8);
 #else
-            host.TryLog(valid ? "C144-RELAUNCH close=PASS relaunch=PASS registration=9 result=PASS"u8 : "C144-RELAUNCH result=FAIL"u8);
+            host.TryLog(valid ? "C144-RELAUNCH close=PASS relaunch=PASS registration=12 result=PASS"u8 : "C144-RELAUNCH result=FAIL"u8);
 #endif
         }
-        return Render(host, _surface);
+        return RenderC167Frame(host, _surface);
     }
 
     public override GuideXosResult HandleInput(GuideXosHost host, GuideXosInputEvent input)
@@ -701,7 +711,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
                         : !_controlHost.HasTransientInputCapture
                             ? "C144-COMBO popup=closed capture=none result=PASS"u8
                             : "C144-COMBO popup=closed capture=stale result=FAIL"u8);
-                return Render(host, surface);
+                return RenderC167Frame(host, surface);
             }
 
             int target = HitId(input.X, input.Y);
@@ -712,7 +722,25 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             if (target == ViewId)
             {
                 object activated = _view.LastActivatedMember;
-                if (activated is GuideXosComboBox combo)
+                if (_defaultAppsPageActive && ReferenceEquals(activated,
+                    _defaultAppsPage.ApplyButton))
+                {
+                    bool applied = _defaultAppsPage.Apply();
+                    host.TryLog(applied
+                        ? "C167-APPLY input=pointer verified=true result=PASS"u8
+                        : "C167-APPLY input=pointer verified=false result=FAIL"u8);
+                    if (applied) LogC167CommittedState(host, "Apply"u8);
+                }
+                else if (_defaultAppsPageActive && ReferenceEquals(activated,
+                    _defaultAppsPage.ResetButton))
+                {
+                    bool reset = _defaultAppsPage.ResetToSystemDefault();
+                    host.TryLog(reset
+                        ? "C167-RESET input=pointer verified=true result=PASS"u8
+                        : "C167-RESET input=pointer verified=false result=FAIL"u8);
+                    if (reset) LogC167CommittedState(host, "Reset"u8);
+                }
+                else if (activated is GuideXosComboBox combo)
                 {
                     int comboId = ComboId(combo);
                     bool captured = combo.IsOpen && _controlHost.TryAcquireTransientInputCapture(comboId);
@@ -748,9 +776,13 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
                     GuideXosPopupMenuResult.Opened && _controlHost.TryAcquireTransientInputCapture(MenuId);
                 host.TryLog(opened ? "C144-MENU open=PASS capture=menu result=PASS"u8 : "C144-MENU open=FAIL result=FAIL"u8);
             }
+            else if (target == AppsButtonId && result == GuideXosControlHostResult.Activated)
+            {
+                ToggleDefaultAppsPage(host);
+            }
             else if (target == InputEnabledId)
                 UpdateInputSection(_inputEnabled.Checked);
-            return Render(host, surface);
+            return RenderC167Frame(host, surface);
         }
 
         int priorActive = _controlHost.ActiveControlId;
@@ -790,8 +822,37 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
                 input.KeyCode == (uint)GuideXosTextInputKey.Enter;
             if (activate && priorActive == ViewId && ReferenceEquals(_view.FocusedMember, _applyButton))
             {
-                ApplyWorking();
-                host.TryLog("C144-KEYBOARD button=apply result=PASS"u8);
+                if (_defaultAppsPageActive)
+                {
+                    bool applied = _defaultAppsPage.Apply();
+                    host.TryLog(applied
+                        ? "C167-APPLY input=keyboard verified=true result=PASS"u8
+                        : "C167-APPLY input=keyboard verified=false result=FAIL"u8);
+                    if (applied) LogC167CommittedState(host, "Apply"u8);
+                }
+                else
+                {
+                    ApplyWorking();
+                    host.TryLog("C144-KEYBOARD button=apply result=PASS"u8);
+                }
+            }
+            else if (activate && priorActive == ViewId && _defaultAppsPageActive &&
+                ReferenceEquals(_view.FocusedMember, _defaultAppsPage.ApplyButton))
+            {
+                bool applied = _defaultAppsPage.Apply();
+                host.TryLog(applied
+                    ? "C167-APPLY input=keyboard verified=true result=PASS"u8
+                    : "C167-APPLY input=keyboard verified=false result=FAIL"u8);
+                if (applied) LogC167CommittedState(host, "Apply"u8);
+            }
+            else if (activate && priorActive == ViewId && _defaultAppsPageActive &&
+                ReferenceEquals(_view.FocusedMember, _defaultAppsPage.ResetButton))
+            {
+                bool reset = _defaultAppsPage.ResetToSystemDefault();
+                host.TryLog(reset
+                    ? "C167-RESET input=keyboard verified=true result=PASS"u8
+                    : "C167-RESET input=keyboard verified=false result=FAIL"u8);
+                if (reset) LogC167CommittedState(host, "Reset"u8);
             }
             else if (activate && priorActive == ViewId &&
                 ReferenceEquals(_view.FocusedMember, _defaultsButton))
@@ -803,6 +864,10 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
                 priorActive == OptionsButtonId)
             {
                 OpenOptionsMenu();
+            }
+            else if (activate && priorActive == AppsButtonId)
+            {
+                ToggleDefaultAppsPage(host);
             }
         }
         if (input.Kind == GuideXosInputKind.KeyDown &&
@@ -825,7 +890,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             if (closed) return GuideXosResult.Success;
         }
         if (_surfaceClosing) return GuideXosResult.Success;
-        return Render(host, surface);
+        return RenderC167Frame(host, surface);
     }
 
     internal bool InitializeForTests()
@@ -834,6 +899,31 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _initialContentHeight = _view.ContentExtent;
         _finalContentHeight = _initialContentHeight;
         return valid;
+    }
+
+    internal bool EnterDefaultAppsForTests(
+        IManagedDefaultAppsAssociationService service)
+    {
+        _defaultAppsPage.SetService(service);
+        return EnterDefaultAppsPage(_appHost);
+    }
+
+    internal bool ReturnToSettingsForTests() => ReturnToSettingsPage(_appHost);
+
+    internal bool CloseDefaultAppsForTests()
+    {
+        bool prior = _c145FocusedTesting;
+        _c145FocusedTesting = true;
+        bool closed;
+        if (_surface == null)
+        {
+            _defaultAppsPage.Choice.Close();
+            _controlHost?.RefreshVisibility();
+            closed = ValidateComposition() && !HasCapture && !HasDragOwner;
+        }
+        else closed = RequestCloseForTests();
+        _c145FocusedTesting = prior;
+        return closed;
     }
 
     internal void InjectNextSaveFailureForTests() => _failNextSaveForTests = true;
@@ -1181,7 +1271,8 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _resettingComposition = true;
         if (_resetDialog.IsOpen) _resetDialog.Close(GuideXosDialogResult.None);
         if (_dirtyCloseDialog.IsOpen) _dirtyCloseDialog.Close(GuideXosDialogResult.None);
-        if (_persistenceDialog.IsOpen) _persistenceDialog.Close(GuideXosDialogResult.None);
+        if (_persistenceDialog != null && _persistenceDialog.IsOpen)
+            _persistenceDialog.Close(GuideXosDialogResult.None);
         _activeDialog = null;
         _resettingComposition = false;
         _syncing = true;
@@ -1193,6 +1284,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _saveInProgress = false;
         _failNextSaveForTests = false;
         _pendingPersistenceMessage = 0;
+        _defaultAppsPageActive = false;
         _view.Clear();
         _view.Reset();
         for (int section = 0; section < SectionCount; section++)
@@ -1205,8 +1297,9 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             _stacks[section].TrySetPadding(4, 4, 4, 4);
             _stacks[section].TrySetSpacing(3);
         }
-        if (_controlHost == null) _controlHost = new GuideXosControlHost(10);
+        if (_controlHost == null) _controlHost = new GuideXosControlHost(12);
         else _controlHost.Reset();
+        _defaultAppsPage.ResetUi();
         _wheelGroup.Reset();
         _statusGroup.Reset();
         _standardWheel.Reset(); _naturalWheel.Reset();
@@ -1228,6 +1321,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _inputEnabled.SetEnabled(true); _inputEnabled.SetVisible(true); _inputEnabled.SetChecked(true);
         _showStatus.SetChecked(true); _showAdvanced.SetChecked(false); _showTips.SetChecked(true);
         _applyButton.Reset(); _defaultsButton.Reset(); _optionsButton.Reset();
+        _appsButton.Reset(); _appsButton.SetLabel("Apps");
         _menu.Reset(); _menu.ClearItems();
         _menu.TryAddItem("Apply", MenuApply); _menu.TryAddItem("Reset to defaults", MenuDefaults);
         _menu.TryAddSeparator(); _menu.TryAddItem("Close", MenuClose);
@@ -1240,24 +1334,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _statusCombo.TrySetSelectedIndex(_working.ReportFormat);
         _statusProgress.TrySetValue(52);
 
-        int[] tops = { 4, 200, 416, 648 };
-        bool ok = true;
-        for (int section = 0; section < SectionCount; section++)
-        {
-            GuideXosGroupBox group = _groups[section];
-            GuideXosVerticalStack stack = _stacks[section];
-            ok &= _view.TryAddMember(group, 4, tops[section]) == GuideXosScrollViewResult.Added;
-            ok &= stack.TrySetFrame(group.ContentLeft, group.ContentTop, group.ContentWidth);
-            object[] leaves = _sectionLeaves[section];
-            for (int index = 0; index < leaves.Length; index++)
-            {
-                ok &= group.TryAddMember(leaves[index]) == GuideXosGroupBoxResult.Added;
-                ok &= _view.TryAddMember(leaves[index], 20, tops[section] + 40 + index * 20) ==
-                    GuideXosScrollViewResult.Added;
-                ok &= stack.TryAddMember(leaves[index]) == GuideXosVerticalStackResult.Added;
-            }
-            ok &= stack.PerformLayout() == GuideXosVerticalStackResult.LaidOut;
-        }
+        bool ok = AttachGeneralView(initializeMembership: true);
         _view.RecalculateContentExtent();
         _view.BindScrollBar(_scrollBar);
         _scrollBar.SetVisible(true);
@@ -1271,6 +1348,9 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _controlHost.TryRegisterButton(OptionsButtonId, _optionsButton, true);
         _controlHost.TryRegisterCheckBox(InputEnabledId, _inputEnabled, true);
         _controlHost.TryRegisterCheckBox(AdvancedToggleId, _showAdvanced, true);
+        _controlHost.TryRegisterButton(AppsButtonId, _appsButton, true);
+        _controlHost.TryRegisterComboBox(DefaultAppsComboId,
+            _defaultAppsPage.Choice, true);
         _applyButton.SetEnabled(false);
         _syncing = false;
         SyncControlsFromWorking();
@@ -1324,13 +1404,147 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     }
 #endif
 
-    private bool RegisterControls() => _controlHost != null && _controlHost.RegistrationCount == 10;
+    private bool RegisterControls() => _controlHost != null && _controlHost.RegistrationCount == 12;
+
+    private bool AttachGeneralView(bool initializeMembership)
+    {
+        int[] tops = { 4, 200, 416, 648 };
+        bool ok = true;
+        for (int section = 0; section < SectionCount; section++)
+        {
+            GuideXosGroupBox group = _groups[section];
+            GuideXosVerticalStack stack = _stacks[section];
+            ok &= _view.TryAddMember(group, 4, tops[section]) ==
+                GuideXosScrollViewResult.Added;
+            ok &= stack.TrySetFrame(group.ContentLeft, group.ContentTop,
+                group.ContentWidth);
+            object[] leaves = _sectionLeaves[section];
+            for (int index = 0; index < leaves.Length; index++)
+            {
+                if (initializeMembership)
+                {
+                    ok &= group.TryAddMember(leaves[index]) ==
+                        GuideXosGroupBoxResult.Added;
+                    ok &= stack.TryAddMember(leaves[index]) ==
+                        GuideXosVerticalStackResult.Added;
+                }
+                ok &= _view.TryAddMember(leaves[index], 20,
+                    tops[section] + 40 + index * 20) ==
+                    GuideXosScrollViewResult.Added;
+            }
+            ok &= stack.PerformLayout() == GuideXosVerticalStackResult.LaidOut;
+        }
+        return ok;
+    }
+
+    private bool EnterDefaultAppsPage(GuideXosHost host)
+    {
+        if (_defaultAppsPageActive) return true;
+        if (host != null)
+            _defaultAppsPage.SetService(new ManagedDefaultAppsHostService(host));
+        _defaultAppsPage.Choice.SetVisible(true);
+        bool queried = _defaultAppsPage.Refresh();
+        _defaultAppsPageActive = true;
+        _appsButton.SetLabel("Settings");
+        _inputEnabled.SetVisible(false);
+        _showAdvanced.SetVisible(false);
+        bool attached = _defaultAppsPage.Attach(_view);
+        _view.BindScrollBar(_scrollBar);
+        _view.SetOffset(0);
+        _scrollBar.Value = _view.Offset;
+        _controlHost?.RefreshVisibility();
+        if (!attached)
+            host?.TryLog("C167-PAGE entry=Apps layout=invalid result=FAIL"u8);
+        else if (!queried)
+            host?.TryLog("C167-PAGE entry=Apps query=fresh state=unavailable result=FAIL"u8);
+        else
+            host?.TryLog(_defaultAppsPage.CommittedState switch
+            {
+                GuideXosAssociationOverrideState.NoOverride =>
+                    "C167-PAGE entry=Apps query=fresh state=NoOverride display=system-default result=PASS"u8,
+                GuideXosAssociationOverrideState.ApplicationOverride =>
+                    "C167-PAGE entry=Apps query=fresh state=ApplicationOverride display=explicit-default result=PASS"u8,
+                GuideXosAssociationOverrideState.Disabled =>
+                    "C167-PAGE entry=Apps query=fresh state=Disabled display=no-default result=PASS"u8,
+                _ => "C167-PAGE entry=Apps query=fresh state=invalid result=FAIL"u8,
+            });
+        return attached;
+    }
+
+    private bool ReturnToSettingsPage(GuideXosHost host)
+    {
+        if (!_defaultAppsPageActive) return true;
+        _defaultAppsPage.Choice.Close();
+        _defaultAppsPage.Choice.SetVisible(false);
+        _defaultAppsPageActive = false;
+        _appsButton.SetLabel("Apps");
+        _inputEnabled.SetVisible(true);
+        _showAdvanced.SetVisible(true);
+        _view.Clear();
+        bool attached = AttachGeneralView(initializeMembership: false);
+        _view.RecalculateContentExtent();
+        _view.BindScrollBar(_scrollBar);
+        _view.SetOffset(0);
+        _scrollBar.Value = _view.Offset;
+        _controlHost?.RefreshVisibility();
+        host?.TryLog(attached
+            ? "C167-PAGE return=Settings pending=discarded write=false result=PASS"u8
+            : "C167-PAGE return=Settings layout=invalid result=FAIL"u8);
+        return attached;
+    }
+
+    private void ToggleDefaultAppsPage(GuideXosHost host)
+    {
+        if (_defaultAppsPageActive) ReturnToSettingsPage(host);
+        else EnterDefaultAppsPage(host);
+    }
+
+    private void LogC167CommittedState(GuideXosHost host,
+        ReadOnlySpan<byte> operation)
+    {
+        if (host == null) return;
+        ReadOnlySpan<byte> state = !_defaultAppsPage.HasLoadedState
+            ? "unavailable"u8
+            : _defaultAppsPage.CommittedState switch
+            {
+                GuideXosAssociationOverrideState.NoOverride => "NoOverride"u8,
+                GuideXosAssociationOverrideState.ApplicationOverride => "ApplicationOverride"u8,
+                GuideXosAssociationOverrideState.Disabled => "Disabled"u8,
+                _ => "invalid"u8,
+            };
+        ReadOnlySpan<byte> display = !_defaultAppsPage.HasLoadedState
+            ? "unknown"u8
+            : _defaultAppsPage.CommittedState switch
+            {
+                GuideXosAssociationOverrideState.NoOverride => "system-default"u8,
+                GuideXosAssociationOverrideState.ApplicationOverride => "explicit-default"u8,
+                GuideXosAssociationOverrideState.Disabled => "no-default"u8,
+                _ => "invalid"u8,
+            };
+        Span<byte> line = stackalloc byte[112];
+        int length = 0;
+        if (GuideXosText.Append(line, ref length, "C167-STATE operation="u8) &&
+            GuideXosText.Append(line, ref length, operation) &&
+            GuideXosText.Append(line, ref length, " state="u8) &&
+            GuideXosText.Append(line, ref length, state) &&
+            GuideXosText.Append(line, ref length, " display="u8) &&
+            GuideXosText.Append(line, ref length, display) &&
+            GuideXosText.Append(line, ref length, " result="u8) &&
+            GuideXosText.Append(line, ref length,
+                _defaultAppsPage.HasLoadedState ? "PASS"u8 : "FAIL"u8))
+            host.TryLog(line[..length]);
+    }
 
     private bool ValidateComposition()
     {
+        if (_defaultAppsPageActive) return _defaultAppsPage.Validate(_view) &&
+            _controlHost != null && _controlHost.RegistrationCount == 12 &&
+            _controlHost.MaximumControlCount == 12 &&
+            _view.Offset >= 0 && _view.Offset <= _view.MaximumOffset &&
+            _scrollBar.Value == _view.Offset;
         if (_view.MemberCount != 22 || _view.MaximumMemberCount != ViewCapacity ||
-            _controlHost == null || _controlHost.RegistrationCount != 10 ||
-            _controlHost.MaximumControlCount != 10 || _wheelGroup.MemberCount != 2 ||
+            _controlHost == null || _controlHost.RegistrationCount != 12 ||
+            _controlHost.MaximumControlCount != 12 || _wheelGroup.MemberCount != 2 ||
             _statusGroup.MemberCount != 2 || _view.Offset < 0 || _view.Offset > _view.MaximumOffset)
             return false;
         for (int section = 0; section < SectionCount; section++)
@@ -1788,6 +2002,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         }
         _activeDialog = null;
         _menu.Close();
+        _defaultAppsPage.Choice.Close();
         _controlHost?.RefreshVisibility();
         bool valid = _controlHost != null && !_controlHost.IsModalActive &&
             !_controlHost.HasTransientInputCapture && !_controlHost.HasPointerDragCapture &&
@@ -1795,9 +2010,9 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             _scrollBar.Value == _view.Offset && ValidateComposition();
         host?.TryLog(valid
 #if HOSTLOGPROOF_C148_SETTINGS_V2
-            ? "C145-FINAL viewport=valid registration=10 modal=none capture=none drag=none result=PASS"u8
+            ? "C145-FINAL viewport=valid registration=12 modal=none capture=none drag=none result=PASS"u8
 #else
-            ? "C145-FINAL viewport=valid registration=9 modal=none capture=none drag=none result=PASS"u8
+            ? "C145-FINAL viewport=valid registration=12 modal=none capture=none drag=none result=PASS"u8
 #endif
             : "C145-FINAL result=FAIL"u8);
         if (reason == "clean")
@@ -1910,19 +2125,23 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     }
 
     private bool AnyComboOpen() => _density.IsOpen || _speed.IsOpen ||
-        _scrollLines.IsOpen || _statusCombo.IsOpen;
+        _scrollLines.IsOpen || _statusCombo.IsOpen ||
+        _defaultAppsPage.Choice.IsOpen;
     private GuideXosComboBox OpenCombo() => _density.IsOpen ? _density :
         _speed.IsOpen ? _speed : _scrollLines.IsOpen ? _scrollLines :
-        _statusCombo.IsOpen ? _statusCombo : null;
+        _statusCombo.IsOpen ? _statusCombo :
+        _defaultAppsPage.Choice.IsOpen ? _defaultAppsPage.Choice : null;
     private int ComboId(GuideXosComboBox combo) => ReferenceEquals(combo, _density)
         ? DensityComboId : ReferenceEquals(combo, _speed) ? SpeedComboId :
-        ReferenceEquals(combo, _scrollLines) ? ScrollLinesComboId : StatusComboId;
+        ReferenceEquals(combo, _scrollLines) ? ScrollLinesComboId :
+        ReferenceEquals(combo, _defaultAppsPage.Choice) ? DefaultAppsComboId : StatusComboId;
 
     private int HitId(int x, int y)
     {
         if (Contains(_inputEnabled, x, y)) return InputEnabledId;
         if (Contains(_showAdvanced, x, y)) return AdvancedToggleId;
         if (Contains(_optionsButton, x, y)) return OptionsButtonId;
+        if (Contains(_appsButton, x, y)) return AppsButtonId;
         if (x >= _view.X && x < _view.X + _view.Width && y >= _view.Y && y < _view.Y + _view.Height)
             return ViewId;
         if (x >= _scrollBar.X && x < _scrollBar.X + _scrollBar.Width &&
@@ -2059,6 +2278,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             _inputEnabled.Render(surface) != GuideXosResult.Success ||
             _showAdvanced.Render(surface) != GuideXosResult.Success ||
             _optionsButton.Render(surface) != GuideXosResult.Success ||
+            _appsButton.Render(surface) != GuideXosResult.Success ||
             surface.TrySetText(280, 24, IsDirty ? "Unsaved changes"u8 : "Applied"u8) != GuideXosResult.Success ||
             _view.Render(surface) != GuideXosResult.Success ||
             _scrollBar.Render(surface) != GuideXosResult.Success ||
@@ -2070,5 +2290,20 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             return GuideXosResult.InvalidArgument;
         _ = host;
         return GuideXosResult.Success;
+    }
+
+    private GuideXosResult RenderC167Frame(GuideXosHost host,
+        GuideXosSurface surface)
+    {
+        GuideXosResult result = Render(host, surface);
+        if (host != null)
+        {
+            host.TryLog(result == GuideXosResult.Success
+                ? _defaultAppsPageActive
+                    ? "C167-RENDER page=Apps result=PASS"u8
+                    : "C167-RENDER page=Settings result=PASS"u8
+                : "C167-RENDER result=FAIL"u8);
+        }
+        return result;
     }
 }

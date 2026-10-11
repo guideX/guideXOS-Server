@@ -68,7 +68,8 @@ static bool str_equal(const char* a, const char* b, uint32_t len)
 static bool is_fat_partition_type(uint8_t partType)
 {
     return partType == 0x01 || partType == 0x04 || partType == 0x06 ||
-           partType == 0x0B || partType == 0x0C || partType == 0x0E;
+           partType == 0x0B || partType == 0x0C || partType == 0x0E ||
+           partType == 0xEF;
 }
 
 static block::Status read_volume_sector(const FATVolume& vol, uint64_t lba, void* buffer)

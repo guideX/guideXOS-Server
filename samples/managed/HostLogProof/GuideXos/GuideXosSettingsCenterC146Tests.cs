@@ -128,7 +128,7 @@ public static class GuideXosSettingsCenterC146Tests
             GuideXosRuntimeSettings.Current.ShowKeyboardTips;
         result &= Case(ref cases, defaultsApplied);
 
-        bool clean = app.RegistrationCount == 10 &&
+        bool clean = app.RegistrationCount == 12 &&
             app.View.MemberCount == 22 && app.ScrollViewMemberCount == 22 &&
             app.InputGroupBoxMemberCount == 6 &&
             app.View.Offset == 0 && !app.ControlHost.IsModalActive &&

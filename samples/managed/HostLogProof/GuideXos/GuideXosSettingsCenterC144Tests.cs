@@ -100,7 +100,7 @@ public static class GuideXosSettingsCenterC144Tests
         bool result = true;
         result &= Case(ref count, app.SectionGroupCount == 4 && app.LeafControlCount == 17);
         result &= Case(ref count, app.View.MemberCount == 21 && app.View.MaximumMemberCount == 24);
-        result &= Case(ref count, app.RegistrationCount == 9 && app.ControlHost.MaximumControlCount == 10);
+        result &= Case(ref count, app.RegistrationCount == 12 && app.ControlHost.MaximumControlCount == 12);
         result &= Case(ref count, app.Stack(0).MemberCount == 3 && app.Stack(1).MemberCount == 5 &&
             app.Stack(2).MemberCount == 6 && app.Stack(3).MemberCount == 3);
         result &= Case(ref count, app.Group(0).MemberCount == 3 && app.Group(1).MemberCount == 5 &&
@@ -152,8 +152,9 @@ public static class GuideXosSettingsCenterC144Tests
             legacy.TryAddMember(new GuideXosLabel(0, 0, 80, "ninth"), 0, 144) == GuideXosScrollViewResult.CapacityReached);
         result &= Case(ref count, CapacityBoundaries(23) && CapacityBoundaries(24));
         result &= Case(ref count, HostCapacityBoundary(9) && HostCapacityBoundary(10) &&
-            app.RegistrationCount == 9 && app.ControlHost.MaximumControlCount == 10);
-        result &= Case(ref count, app.View.MemberCount == 21 && app.RegistrationCount == 9);
+            HostCapacityBoundary(11) && HostCapacityBoundary(12) &&
+            app.RegistrationCount == 12 && app.ControlHost.MaximumControlCount == 12);
+        result &= Case(ref count, app.View.MemberCount == 21 && app.RegistrationCount == 12);
         return result && count == 21;
     }
 
@@ -230,7 +231,7 @@ public static class GuideXosSettingsCenterC144Tests
             app.RestoreDefaults();
             app.ApplyWorking();
         }
-        return app.RegistrationCount == 9 && app.View.MemberCount == 21 &&
+        return app.RegistrationCount == 12 && app.View.MemberCount == 21 &&
             app.View.Offset >= 0 && app.View.Offset <= app.View.MaximumOffset &&
             app.ScrollBar.Value == app.View.Offset && !app.HasCapture && !app.HasDragOwner &&
             !app.IsDirty;
@@ -280,7 +281,7 @@ public static class GuideXosSettingsCenterC144Tests
         result &= Case(ref count, app.View.Offset == 0 && app.ScrollBar.Value == 0);
         result &= Case(ref count, !app.PopupOpen && !app.HasCapture && !app.HasDragOwner);
         result &= Case(ref count, app.Group(0).ValidateMembershipGeometry(out int outside) && outside == 0 &&
-            app.RegistrationCount == 9 && app.View.MemberCount == 21);
+            app.RegistrationCount == 12 && app.View.MemberCount == 21);
         return result && count == 13;
     }
 

@@ -806,7 +806,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
             }
         }
 #endif
+#if !HOSTLOGPROOF_C167_UI_FOCUSED_BUILD && !HOSTLOGPROOF_C166_ORDINARY_BUILD
         RunC155SessionTests(host);
+#endif
         if (c155SessionConsumed)
             LogC155SessionConsumed(host, c155Session);
 #endif
@@ -1774,7 +1776,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
         }
 #endif
 #if HOSTLOGPROOF_C155_MANAGED_NOTES_SESSION
+#if !HOSTLOGPROOF_C167_UI_FOCUSED_BUILD && !HOSTLOGPROOF_C166_ORDINARY_BUILD
         RunC155RestorationTests(host);
+#endif
         if (documentActivation)
         {
             if (!TryLoadC151Document(host, host.LaunchContext.DocumentPath,
@@ -1806,7 +1810,7 @@ public sealed partial class ManagedNotes : GuideXosApplication
             GuideXosText.Append(activationLine, ref activationPosition,
                 " clean=1 undo=0 redo=0 caret=0 anchor=0 view=0 result=PASS"u8);
             host.TryLog(activationLine[..activationPosition]);
-#if HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF
+#if HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF || HOSTLOGPROOF_C164_FILE_ACTIVATION_DIAGNOSTICS
             byte[] loadedContent = _textArea.ToUtf8();
             bool fixtureContent = host.LaunchContext.DocumentPath switch
             {
@@ -1947,6 +1951,7 @@ public sealed partial class ManagedNotes : GuideXosApplication
             "Managed Notes"u8, 600, 360, out GuideXosSurface surface);
         if (result != GuideXosResult.Success || surface == null) return result;
         _window = surface.Handle;
+#if !HOSTLOGPROOF_C167_UI_FOCUSED_BUILD && !HOSTLOGPROOF_C166_ORDINARY_BUILD
 #if HOSTLOGPROOF_C156_CONTROL_MODIFIER_SHORTCUTS
         bool c156Modifiers = GuideXosInputTransportC156Tests.Run(host);
         bool c156Shortcuts = GuideXosNotesShortcutC156Tests.Run(host);
@@ -2017,6 +2022,7 @@ public sealed partial class ManagedNotes : GuideXosApplication
                 : "C153-REGRESSIONS result=FAIL"u8);
         }
 #endif
+#endif
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
         if (_c138ProofContext && !_c138TestsRun)
         {
@@ -2025,6 +2031,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
         }
 #endif
         if (!RenderMain(host, surface, launchCount)) return GuideXosResult.InvalidArgument;
+#if HOSTLOGPROOF_C166_ORDINARY_BUILD
+        host.TryLog("C166-ORDINARY-READY app=ManagedNotes render=PASS"u8);
+#endif
 #if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
         if (_c147RuntimeConsumerContext)
         {

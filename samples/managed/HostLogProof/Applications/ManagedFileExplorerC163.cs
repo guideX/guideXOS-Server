@@ -108,7 +108,7 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
         GuideXosText.Append(line, ref position,
             " abi=3/120 ro=1 result=PASS"u8);
         host.TryLog(line[..position]);
-#if HOSTLOGPROOF_C163_FILE_EXPLORER_PROOF
+#if HOSTLOGPROOF_C163_FILE_EXPLORER_DIAGNOSTICS || HOSTLOGPROOF_C163_FILE_EXPLORER_PROOF
         LogState(host, "launch"u8, 0u);
 #endif
         return GuideXosResult.Success;
@@ -123,7 +123,7 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
             return GuideXosResult.SurfaceCreationFailed;
         }
         GuideXosFileExplorerCommandC163 command = _controller.RouteInput(input);
-#if HOSTLOGPROOF_C163_FILE_EXPLORER_PROOF
+#if HOSTLOGPROOF_C163_FILE_EXPLORER_DIAGNOSTICS || HOSTLOGPROOF_C163_FILE_EXPLORER_PROOF
         if (input.Kind != GuideXosInputKind.PointerMove &&
             input.Kind != GuideXosInputKind.PointerUp)
             LogState(host, "input"u8, (uint)input.Kind);

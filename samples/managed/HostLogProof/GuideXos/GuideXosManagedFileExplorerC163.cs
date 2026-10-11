@@ -514,7 +514,7 @@ internal sealed class GuideXosFileExplorerControllerC163
 
         GuideXosFileActivationResult activation = _host.TryRequestFileActivation(
             Encoding.UTF8.GetBytes(selectedPath));
-#if HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF
+#if HOSTLOGPROOF_C164_FILE_ACTIVATION_DIAGNOSTICS || HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF
         if (activation == GuideXosFileActivationResult.Unsupported)
         {
             Span<byte> line = stackalloc byte[224];

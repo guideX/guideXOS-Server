@@ -267,7 +267,8 @@ static FSType detect_fs_type(uint8_t blockDevIndex)
 #endif
         
         if (partType == 0x01 || partType == 0x04 || partType == 0x06 ||
-            partType == 0x0B || partType == 0x0C || partType == 0x0E) {
+            partType == 0x0B || partType == 0x0C || partType == 0x0E ||
+            partType == 0xEF) {
             // FAT-family partition - let the FAT driver probe the partition start.
             uint32_t startLBA = *reinterpret_cast<uint32_t*>(&buffer[446 + 8]);
 #if defined(__GNUC__) || defined(__clang__)

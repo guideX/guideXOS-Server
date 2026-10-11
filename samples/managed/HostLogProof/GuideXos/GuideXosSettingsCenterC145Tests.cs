@@ -11,8 +11,8 @@ public static class GuideXosSettingsCenterC145Tests
         int cases = 0;
         bool initialized = app.InitializeForTests();
         bool result = initialized;
-        result &= Case(ref cases, initialized && app.RegistrationCount == 9 &&
-            app.HostCapacity == 10 && app.DialogCapacity == 8 &&
+        result &= Case(ref cases, initialized && app.RegistrationCount == 12 &&
+            app.HostCapacity == 12 && app.DialogCapacity == 8 &&
             app.DialogRegistrationCount == 2 && app.ControlHost.ActiveScopeHost == app.ControlHost);
 
         result &= Case(ref cases, app.RequestCloseForTests() && !app.IsDirty &&
@@ -92,8 +92,8 @@ public static class GuideXosSettingsCenterC145Tests
             app.ActiveDialog == null && !app.IsDirty &&
             app.Applied.Equals(app.Working) && !app.ControlHost.IsModalActive);
 
-        bool relaunched = app.InitializeForTests() && app.RegistrationCount == 9 &&
-            app.HostCapacity == 10 && app.ControlHost.ActiveScopeHost == app.ControlHost &&
+        bool relaunched = app.InitializeForTests() && app.RegistrationCount == 12 &&
+            app.HostCapacity == 12 && app.ControlHost.ActiveScopeHost == app.ControlHost &&
             !app.ControlHost.HasTransientInputCapture &&
             !app.ControlHost.HasPointerDragCapture && app.View.Offset == 0;
         result &= Case(ref cases, relaunched);
@@ -113,7 +113,7 @@ public static class GuideXosSettingsCenterC145Tests
         app.DensityCombo.Close();
         app.ControlHost.RefreshVisibility();
         result &= Case(ref cases, popupInvalidation && !app.HasCapture &&
-            !app.ControlHost.IsModalActive && app.RegistrationCount == 9 &&
+            !app.ControlHost.IsModalActive && app.RegistrationCount == 12 &&
             app.DialogRegistrationCount == 2);
 
         GuideXosControlHost reusedHost = app.ControlHost;
@@ -131,7 +131,7 @@ public static class GuideXosSettingsCenterC145Tests
             stress &= resetResult == ((index & 1) == 0
                 ? GuideXosControlHostResult.Cancelled
                 : GuideXosControlHostResult.Activated) && app.ActiveDialog == null &&
-                !app.ControlHost.IsModalActive && app.RegistrationCount == 9 &&
+                !app.ControlHost.IsModalActive && app.RegistrationCount == 12 &&
                 app.DialogRegistrationCount == 2 && !app.HasCapture && !app.HasDragOwner &&
                 app.View.Offset >= 0 && app.View.Offset <= app.View.MaximumOffset;
         }
@@ -162,10 +162,10 @@ public static class GuideXosSettingsCenterC145Tests
             }
             stress &= (closeResult is GuideXosControlHostResult.Cancelled or
                     GuideXosControlHostResult.Activated) && app.ActiveDialog == null &&
-                !app.ControlHost.IsModalActive && app.RegistrationCount == 9 &&
+                !app.ControlHost.IsModalActive && app.RegistrationCount == 12 &&
                 app.DialogRegistrationCount == 2 && !app.HasCapture && !app.HasDragOwner;
         }
-        stress &= app.InitializeForTests() && app.RegistrationCount == 9 &&
+        stress &= app.InitializeForTests() && app.RegistrationCount == 12 &&
             !app.ControlHost.IsModalActive && !app.HasCapture && !app.HasDragOwner;
         result &= Case(ref cases, stress);
 
