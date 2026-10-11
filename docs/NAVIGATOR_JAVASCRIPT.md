@@ -7448,3 +7448,201 @@ stash, reset, or `git clean` was used, and nothing was pushed.
 two-alternative/two-step `:has()` limits and the 256-byte selector input bound.
 The next phase should add a distinct selector capability without widening
 these bounds implicitly.
+
+#### JS67 bounded `:scope` inside `:has()`
+
+JS67 removes the JS66 parser's explicit rejection of the already-supported
+nonfunctional `:scope` simple selector inside the existing bounded `:has()`
+relative argument. No other parser feature was opened. The argument remains
+limited to two alternatives, two relation steps per alternative, the 256-byte
+selector input bound, and one supported pseudo-class per simple-selector
+core. Nested functional pseudos inside `:has()`, nested `:has()`, excess
+relations, and excess alternatives remain rejected.
+
+The matcher keeps the two relevant identities separate. The call-local
+`NavigatorScriptSelectorMatchContext` continues to carry the API operation's
+original scope serial, generation, and validity. The candidate Element whose
+`:has()` predicate is being evaluated remains the relative traversal anchor.
+Relative relations start from that anchor, while an explicit `:scope` in
+either relative step is tested against the unchanged API context. The relative
+matcher passes the same context to first-step candidates, correlated
+intermediates, and terminal candidates. It does not rewrite the context or
+retain it in selector or collection storage.
+
+This follows the current Selectors Level 4 definitions: relative selectors
+are anchored against the `:has()` subject, and `:scope` represents the
+scoping root supplied by the outer operation. The CSSWG resolved to remove
+special `:scope` handling in `:has()` and relative selectors; the issue
+discussion records that explicit `:scope` matches the same elements inside
+and outside `:has()`. See the [current relational pseudo-class definition](https://drafts.csswg.org/selectors/#relational),
+the [current `:scope` definition](https://drafts.csswg.org/selectors/#scope-pseudo),
+the [DOM scope-match algorithm](https://dom.spec.whatwg.org/#scope-match-a-selectors-string),
+and [CSSWG issue 6399](https://github.com/w3c/csswg-drafts/issues/6399).
+Issue [7211](https://github.com/w3c/csswg-drafts/issues/7211) captures the
+historical ambiguity that this behavior resolves. Thus the earlier JS66
+statement that inner `:scope` was rejected records that phase's behavior and
+is superseded here.
+
+The context split gives the intended positive results through public APIs.
+For `leaf.closest('.container:has(:scope)')`, the container is the relative
+anchor and the original leaf is the strict descendant that matches the API
+scope. `leaf.closest('.container:has(> :scope)')` also matches when the leaf
+is a direct child. In a two-step selector such as
+`leaf.closest('.panel:has(> .row > :scope)')`, the API-scoped leaf must be a
+child of the same `.row` that satisfies the first relation; a leaf in an
+unrelated branch does not match. `:scope` also works in the first relative
+step, in compound selectors such as `span:scope`, and at either sibling
+relation position. The four existing relation types and all 16 ordered
+two-step relation pairs remain bounded and retain their JS65 meaning.
+
+`matches()` keeps its strict-relative behavior: an Element does not match
+`:has(:scope)` or `:has(> :scope)` when it is both the API scope and the
+`:has()` subject, because it cannot be its own strict descendant or child.
+Outer selectors continue to evaluate their left side with the original API
+scope while the rightmost returned candidate stays in the existing query
+domain. Thus `queryRoot.querySelector('.ancestor:has(> :scope) .target')`
+can return a strict descendant target even though `.ancestor` is outside
+`queryRoot`; `queryRoot` satisfies the inner scope test but is not itself a
+query result. Document queries still use the authoritative document element
+as scope, and strict descendant matching leaves document-level
+`:has(:scope)` and `:has(> :scope)` without a result for a parentless document
+root.
+
+Selector-list matching retains the same API context for every member, keeps
+structural order and deduplication, and preserves the two-alternative OR and
+first-success behavior. Retained collections continue to store their existing
+scope serial and reconstruct a generation-checked context when read. The
+matcher uses no global scope slot, borrowed context pointer, heap-backed AST,
+match-time reparsing, or result cache. The 1,278-byte selector descriptor,
+1,296-byte collection record, 165,888-byte 128-record registry, 16-byte
+match context, 440-byte `HtmlElementRef`, and 24-byte content record are
+unchanged; the document-owned memory delta is zero.
+
+The new native suite is `tests/navigator_javascript_js67_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js67.ps1`. It checks parser acceptance
+and rejections, single-step and two-step scope, compound scope, document
+negatives, `matches()` self-exclusion, both positive `closest()` cases,
+same-intermediate correlation, unrelated-branch rejection, sibling
+relations, all 16 scope-terminal relation pairs, outer query/matches
+integration, strict query result domains, selector-list order/deduplication,
+alternative order, independent retained collections, generation replacement
+with serial reuse, nested Event dispatch and metadata, malformed structure,
+fixed memory sizes, and the 1,024-Element near-capacity case. The native lane
+passed **44/44 checks** and its `-Wall -Wextra -Werror -pedantic` compilation
+passed. It also verifies that the HTML parser preserves the hosted fixture's
+complete inline script before executing it. The 1,024-node query kept the API
+scope at serial 995, evaluated 15 outer candidates and both alternatives, and measured about **19 ms** in the
+optimized native run. A direct late-scope two-step evaluation inspected
+2,030 structural records, took 3 parent hops, and performed 996 simple
+selector checks; these are workload observations, not timing thresholds.
+GCC 15.2.0 `-O2 -fstack-usage` reports 112 B for `parseBoundedSelector`,
+176 B for `parseBoundedSelectorMember`, 528 B for `parseSimpleSelectorCore`,
+480 B for the relative evaluator (down from 496 B), 96 B for the relative
+chain wrapper, and 256 B for the shared simple matcher. The parser frames
+remain unchanged, and the evaluator remains iterative and bounded.
+
+The hosted JS67 fixture is `navigator-smoke/javascript-js67.html`. Its 34
+initial assertions cover document and Element scoping, closest/matches,
+correlated chains, outer qS/qSA and candidate-domain behavior, alternatives,
+sibling relations, live checked/focus/attribute state in a scoped relative
+chain, logical pseudo compatibility, and malformed syntax. Its nested click
+adds three assertions for independently scoped selectors and stable Event
+metadata. Hosted JS63–JS66 fixtures and the complete JavaScript
+matrix are qualified in the JS67 run record below; no prior phase results are
+removed.
+
+The JS67 grammar still defers nested functional pseudo-classes in `:has()`,
+third alternatives, third relation steps, and additional outer relation
+chains. Keep those as separate bounded proposals. The JS66 limits of four
+outer selector-list members and the existing scope-aware API behavior remain
+unchanged.
+
+#### JS67 final qualification record
+
+The starting checkout was `D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT` on
+`NAVIGATOR_JAVASCRIPT_SUPPORT`, at JS66 HEAD
+`9349955c88bfee277d09a5d37e0d156ab3b4ed7a` (`navigator: add JS66 bounded
+scope pseudo-class`), one commit ahead and zero behind upstream, with a clean
+worktree. The duplicate/stale gate found no JS67 or later implementation; the
+existing `:scope` rejection inside `:has()` was present. `.phase` was absent
+and its absence did not block this work.
+
+Final native qualification passed **44/44 JS67 checks** with strict
+`-std=c++17 -O2 -Wall -Wextra -Werror -pedantic` compilation. JS63, JS64,
+JS65, and JS66 focused regressions passed **8/8**, **24/24**, **18/18**, and
+**24/24**; JS62R through JS62R4 passed **10/10**, **4,081/4,081**,
+**1,293/1,293**, and **113/113**. The complete 69-script
+`smoke-navigator-javascript-*.ps1` matrix passed **69/69**, with no nonzero
+script exits. The JS67 test added the HTML-parser source-integrity assertion
+after the first hosted attempt exposed that a literal `<` in the fixture's
+JavaScript loop condition was interpreted as HTML markup. Replacing the loop
+condition with an equivalent `!==` comparison kept the fixture within the
+existing HTML subset; the hosted script is now checked byte-for-byte before
+execution in the native fixture lane.
+
+The final hosted run used the fresh executable produced by
+`scripts/smoke-navigator-hosted.ps1 -Build`, which invoked `build.bat` from
+JS67 dirty source based on HEAD
+`9349955c88bfee277d09a5d37e0d156ab3b4ed7a`. Build succeeded. The executable
+path was
+`D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe`, size
+**8,442,463 bytes**, SHA-256
+`782A271D5F135A981051609234F0C25D3407443F6ED2AB9CB9DA09A1804B3C4B`.
+Hosted process PID **16004** reported that exact path and hash. The final
+hosted JS67 marker was `initial:assertions=34:failures=0:malformed=true`;
+after nested Event dispatch it was
+`event=true:nested=true:metadata=true:assertions=37:failures=0`. The scoped
+relative chain also observed checked, focused, and attribute state live.
+Hosted JS63, JS64, JS65, and JS66 markers also passed, including their Event
+checks.
+
+The complete hosted aggregate reported **629 passed / 7 failed / 636 total**.
+Its seven failures are the established unrelated CSS baseline: 3C, 3G, 6A,
+three 6B checks, and 6C. This is three more passing checks than the JS66
+aggregate (626/7/633), and there were no new unexplained failures. The initial
+hosted attempt did not qualify because the HTML subset truncated the fixture
+at its JavaScript `<` comparison; it was corrected, and the final run above
+used the newly rebuilt, path-and-hash-verified JS67 executable.
+
+Memory stayed at the JS66 baseline: match context **16 B**, selector
+descriptor **1,278 B**, collection record **1,296 B**, 128-record registry
+**165,888 B**, `HtmlElementRef` **440 B**, and content metadata **24 B**;
+document persistent-memory delta was zero. GCC 15.2.0 stack-usage comparison
+against JS66 showed `parseBoundedSelector` **112 B** (unchanged),
+`parseBoundedSelectorMember` **176 B** (unchanged),
+`parseSimpleSelectorCore` **528 B** (unchanged), the alternative parser lambda
+**208 B** (up from 192 B), and the relative evaluator **480 B** (down from
+496 B). The relative chain wrapper stayed at **96 B** and the shared simple
+matcher at **256 B**. The 1,024-Element near-capacity workload used scope
+serial 995 and 15 outer candidates; the observed optimized query workload was
+**18,953 us**. Its late-scope relative evaluation inspected 2,030 structural
+records, made 3 parent hops, and ran 996 simple-selector tests. These are
+workload observations, not imposed timing thresholds.
+
+An independent standards-browser comparison was unavailable: the headless
+browser attempt did not return DOM results because it attached to an existing
+browser session. No local-file workaround was used. The interpretation was
+checked against the current Selectors Level 4, DOM scoping algorithm, and the
+CSSWG resolution and issue discussion linked above.
+
+The ignored-artifact snapshot before the hosted build covered **1,337 files /
+88,371,771 bytes**. Exact backups covered **46 files / 8,857,239 bytes**:
+`guideXOSServer.exe`, `desktop.state`, `display-options.cfg`,
+`window-bounds.cfg`, and 42 existing files under `navigator-smoke/generated`.
+The executable backup is
+`C:\Users\guideX\AppData\Local\Temp\js67-evidence-6ab6abe7d35f4429818ca6844d5cf23f\guideXOSServer.exe.baseline`;
+the exact mutable path/hash/backup list is
+`C:\Users\guideX\AppData\Local\Temp\js67-evidence-6ab6abe7d35f4429818ca6844d5cf23f\mutable-backups.csv`.
+All 46 files were restored and hash-verified; the tracked desktop state/config
+files match their initially clean contents. Newly created hosted logs were
+archived outside the checkout. The final ignored-artifact comparison returned
+**0 changed / 0 missing / 0 extra**, with the baseline count and byte total
+restored. No kernel build or QEMU run was attempted, and the unrelated
+QEMU/QMP processes were left untouched.
+
+**Outcome A — JS67 context-correct `:scope` inside `:has()` fully qualified.**
+The original API scope remains distinct from the changing `:has()` relative
+anchor through `closest()`, outer relational selectors, retained collections,
+and nested Event dispatch. There was no branch switch, creation, rename,
+worktree topology change, stash, reset, clean, upstream fetch, or push; the
+current branch advanced only for this local qualification commit.

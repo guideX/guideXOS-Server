@@ -1,0 +1,199 @@
+<!doctype html>
+<html id="document-root">
+<head><title>Navigator JavaScript JS67</title></head>
+<body>
+<h1>Navigator JavaScript JS67</h1>
+<div id="ancestor" class="ancestor"><section id="query-root">
+  <span id="target" class="target"></span>
+</section></div>
+<div id="nested-ancestor" class="ancestor"><div><section id="nested-query-root">
+  <span id="nested-target" class="target"></span>
+</section></div></div>
+<div id="container" class="container">
+  <span id="direct-leaf" class="child"></span>
+  <div><span id="deep-leaf" class="child"></span></div>
+</div>
+<section id="panel" class="panel"><div id="row" class="row">
+  <span id="leaf" class="leaf"></span>
+</div></section>
+<section id="bad-panel" class="panel"><div class="row"></div>
+  <div class="other"><span id="bad-leaf"></span></div>
+</section>
+<section id="first-panel" class="panel"><span id="first-leaf">
+  <i class="note"></i>
+</span><span id="other-leaf"></span></section>
+<div id="or-panel" class="panel"><section id="or-root">
+  <i class="target"></i>
+</section></div><i class="badge"></i>
+<div id="sibling-parent" class="sibling-parent">
+  <span id="sibling-scope" class="scope"></span>
+  <i class="peer"></i><i class="peer"></i>
+</div>
+<i id="adjacent-anchor" class="adjacent-anchor"></i>
+<span id="adjacent-scope" class="scope"></span>
+<i id="general-anchor" class="general-anchor"></i><b></b>
+<span id="general-scope" class="scope"></span>
+<form id="state-panel" class="panel"><input id="state-check" type="checkbox">
+  <span id="state-leaf"></span></form>
+<div id="event-panel" class="panel"><div class="row">
+  <span id="event-leaf"></span><button id="event-a">A</button>
+</div></div>
+<div id="event-panel-b" class="panel"><div class="row">
+  <span id="event-leaf-b"></span><button id="event-b">B</button>
+</div></div>
+<pre id="result">initial</pre>
+<script>
+var assertions = 0;
+var failures = 0;
+var failedIndexes = '';
+function verify(value) {
+  assertions = assertions + 1;
+  if (!value) {
+    failures = failures + 1;
+    failedIndexes = failedIndexes + ',' + assertions;
+  }
+}
+
+var documentScope = document.querySelector(':scope');
+verify(document.querySelector(':has(:scope)') === null);
+verify(document.querySelector(':has(> :scope)') === null);
+verify(document.querySelector(':has(+ :scope)') === null);
+verify(documentScope === document.querySelector(':root'));
+
+var container = document.querySelector('#container');
+var directLeaf = document.querySelector('#direct-leaf');
+var deepLeaf = document.querySelector('#deep-leaf');
+verify(directLeaf.closest('.container:has(:scope)') === container);
+verify(directLeaf.closest('.container:has(> :scope)') === container);
+verify(deepLeaf.closest('.container:has(:scope)') === container);
+verify(deepLeaf.closest('.container:has(> :scope)') === null);
+verify(!directLeaf.matches(':has(:scope)') && !directLeaf.matches(':has(> :scope)'));
+verify(directLeaf.matches('.container:has(> :scope) > .child'));
+
+var leaf = document.querySelector('#leaf');
+var panel = document.querySelector('#panel');
+var badLeaf = document.querySelector('#bad-leaf');
+verify(leaf.closest('.panel:has(> .row > :scope)') === panel);
+verify(leaf.closest('.panel:has(.row > :scope)') === panel);
+verify(badLeaf.closest('.panel:has(> .row > :scope)') === null);
+verify(panel.matches(':has(> .row > :scope)') === false);
+
+var firstLeaf = document.querySelector('#first-leaf');
+verify(firstLeaf.closest('.panel:has(:scope > .note)') ===
+  document.querySelector('#first-panel'));
+verify(document.querySelector('#other-leaf').closest(
+  '.panel:has(:scope > .note)') === null);
+verify(firstLeaf.matches('span:scope') && !firstLeaf.matches('div:scope'));
+
+var queryRoot = document.querySelector('#query-root');
+var target = document.querySelector('#target');
+var queryResult = queryRoot.querySelector(
+  '.ancestor:has(:scope) .target');
+var queryDirect = queryRoot.querySelector(
+  '.ancestor:has(> :scope) .target');
+var queryAll = queryRoot.querySelectorAll(
+  '.ancestor:has(> :scope) .target');
+verify(queryResult === target && queryDirect === target);
+verify(queryAll.length === 1 && queryAll[0] === target);
+verify(queryRoot.querySelector(':scope') === null &&
+  queryRoot.querySelectorAll(':scope').length === 0);
+
+var nestedRoot = document.querySelector('#nested-query-root');
+var nestedTarget = document.querySelector('#nested-target');
+var nestedDescendant = nestedRoot.querySelector(
+  '.ancestor:has(:scope) .target');
+var nestedDirect = nestedRoot.querySelector(
+  '.ancestor:has(> :scope) .target');
+verify(nestedDescendant === nestedTarget && nestedDirect === null);
+
+var savedA = queryRoot.querySelectorAll('.ancestor:has(> :scope) .target');
+var savedB = nestedRoot.querySelectorAll('.ancestor:has(:scope) .target');
+document.querySelector('#leaf').matches(':scope');
+verify(savedA.length === 1 && savedA[0] === target &&
+  savedB.length === 1 && savedB[0] === nestedTarget && savedA[0] === target);
+
+var orRoot = document.querySelector('#or-root');
+var orTarget = orRoot.querySelector('.target');
+var ordered = orRoot.querySelectorAll(
+  '.panel:has(> :scope, + .badge) .target, .target, ' +
+  '.panel:has(+ .badge, > :scope) .target');
+var secondAlternative = orRoot.querySelector(
+  '.panel:has(> .missing > :scope, > :scope) .target');
+verify(orTarget !== null && ordered.length === 1 && ordered[0] === orTarget);
+verify(secondAlternative === orTarget);
+
+var siblingScope = document.querySelector('#sibling-scope');
+verify(siblingScope.closest('.sibling-parent:has(:scope + .peer)') ===
+  document.querySelector('#sibling-parent'));
+verify(siblingScope.closest('.sibling-parent:has(:scope ~ .peer)') ===
+  document.querySelector('#sibling-parent'));
+verify(document.querySelector('#adjacent-scope').matches(
+  '.adjacent-anchor:has(+ :scope) + .scope'));
+verify(document.querySelector('#general-scope').matches(
+  '.general-anchor:has(~ :scope) ~ .scope'));
+
+var statePanel = document.querySelector('#state-panel');
+var stateCheck = document.querySelector('#state-check');
+var stateLeaf = document.querySelector('#state-leaf');
+var stateCheckedSelector = '.panel:has(> input:checked + :scope)';
+var stateFocusSelector = '.panel:has(> input:focus + :scope)';
+verify(stateLeaf.closest(stateCheckedSelector) === null);
+stateCheck.checked = true;
+verify(stateLeaf.closest(stateCheckedSelector) === statePanel);
+stateLeaf.setAttribute('data-state', 'ready');
+verify(stateLeaf.matches('span[data-state="ready"]'));
+stateCheck.focus();
+verify(stateLeaf.closest(stateFocusSelector) === statePanel);
+
+var logical = firstLeaf.matches(':is(:scope)') &&
+  firstLeaf.matches(':where(:scope)') && !firstLeaf.matches(':not(:scope)');
+verify(logical);
+var malformed = [':has()', ':has(:scope())', ':has(:scope(anything))',
+  ':has(:scope:focus)', ':has(:has(:scope))', ':has(:is(:scope))',
+  ':has(:not(:scope))', ':has(:where(:scope))', ':has(:scope .a .b)',
+  ':has(> .a > :scope > .b)', ':has(.a, .b, :scope)'];
+var malformedRejected = true;
+for (var i = 0; i !== malformed.length; i++)
+  if (document.querySelector(malformed[i]) !== null) malformedRejected = false;
+verify(malformedRejected);
+
+var eventAResult = false;
+var eventBResult = false;
+var eventMetadata = false;
+var eventLeaf = document.querySelector('#event-leaf');
+var eventLeafB = document.querySelector('#event-leaf-b');
+var eventPanel = document.querySelector('#event-panel');
+var eventPanelB = document.querySelector('#event-panel-b');
+document.querySelector('#event-a').addEventListener('click', function(event) {
+  var savedTarget = event.target;
+  var savedCurrent = event.currentTarget;
+  var savedPhase = event.eventPhase;
+  var savedDefault = event.defaultPrevented;
+  eventAResult = eventLeaf.closest('.panel:has(> .row > :scope)') === eventPanel;
+  document.querySelector('#event-b').click();
+  eventAResult = eventAResult &&
+    eventLeaf.closest('.panel:has(> .row > :scope)') === eventPanel;
+  eventMetadata = event.target === savedTarget &&
+    event.currentTarget === savedCurrent && event.eventPhase === savedPhase &&
+    event.defaultPrevented === savedDefault;
+  verify(eventAResult);
+  verify(eventMetadata);
+  document.querySelector('#result').textContent = 'event=' + eventAResult +
+    ':nested=' + eventBResult + ':metadata=' + eventMetadata +
+    ':assertions=' + assertions + ':failures=' + failures +
+    ':failed=' + failedIndexes;
+});
+document.querySelector('#event-b').addEventListener('click', function(event) {
+  eventBResult = eventLeafB.closest('.panel:has(> .row > :scope)') ===
+    eventPanelB && event.target === document.querySelector('#event-b') &&
+    event.currentTarget === document.querySelector('#event-b') &&
+    event.eventPhase === 2 && event.defaultPrevented === false;
+  verify(eventBResult);
+});
+
+document.querySelector('#result').textContent =
+  'initial:assertions=' + assertions + ':failures=' + failures +
+  ':malformed=' + malformedRejected + ':failed=' + failedIndexes;
+</script>
+</body>
+</html>

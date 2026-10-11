@@ -131,6 +131,12 @@ try {
         [System.IO.Path]::GetFullPath($exe)) {
         throw "Hosted process executable path does not match the freshly built server: $processExecutablePath"
     }
+    $processExecutableHash = (Get-FileHash -LiteralPath $processExecutablePath `
+        -Algorithm SHA256).Hash
+    Write-Host "HOSTED_PROCESS_EXECUTABLE_SHA256=$processExecutableHash"
+    if ($processExecutableHash -ne $freshExecutableHash) {
+        throw "Hosted process executable hash does not match the freshly built server."
+    }
     Wait-Process -Id $appProc.Id
     $output = Get-Content $log -Raw
 } finally {

@@ -577,6 +577,8 @@ private:
         , const NavigatorScriptSimpleSelectorCoreDescriptor* secondStep = nullptr
         , NavigatorScriptRelativeSelectorRelation secondRelation =
             NavigatorScriptRelativeSelectorRelation::Descendant
+        , const NavigatorScriptSelectorMatchContext& context =
+            NavigatorScriptSelectorMatchContext()
         ) const;
     NavigatorScriptSelectorMatchResult selectorRelativeChainMatchResult(
         const HostObjectReference& anchor,
@@ -588,6 +590,8 @@ private:
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
         , NavigatorScriptRelativeSelectorCounters* counters = nullptr
 #endif
+        , const NavigatorScriptSelectorMatchContext& context =
+            NavigatorScriptSelectorMatchContext()
         ) const;
     NavigatorScriptSelectorMatchResult selectorSimpleElementMatchResult(
         const gxos::web::HtmlElementRef& element,

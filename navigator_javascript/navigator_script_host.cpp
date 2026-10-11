@@ -1083,8 +1083,7 @@ bool parseHasPseudo(SourceView source, std::size_t colon, std::size_t end,
             std::int16_t innerA = 0;
             std::int16_t innerB = 0;
             return parseSimpleSelectorCore(source, begin, end, storage, core,
-                    innerA, innerB, nullptr, false, false) &&
-                core.statePseudo != NavigatorScriptStatePseudo::Scope;
+                    innerA, innerB, nullptr, false, false);
         };
 
         const std::size_t firstEnd = scanCoreEnd(position);
@@ -4064,7 +4063,8 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
     , NavigatorScriptRelativeSelectorCounters* counters
 #endif
     , const NavigatorScriptSimpleSelectorCoreDescriptor* secondStep,
-    NavigatorScriptRelativeSelectorRelation secondRelation
+    NavigatorScriptRelativeSelectorRelation secondRelation,
+    const NavigatorScriptSelectorMatchContext& context
     ) const
 {
     using MatchResult = NavigatorScriptSelectorMatchResult;
@@ -4187,7 +4187,7 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
         GXOS_RELATIVE_COUNT(simpleSelectorEvaluations);
 #endif
         return selectorCoreElementMatchResult(candidate, selector, nthA,
-            nthB, storage, true);
+            nthB, storage, true, context);
     };
 
     if (secondStep != nullptr) {
@@ -4261,7 +4261,7 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
             GXOS_RELATIVE_COUNT(simpleSelectorEvaluations);
 #endif
             return selectorCoreElementMatchResult(intermediate, selector,
-                nthA, nthB, storage, true);
+                nthA, nthB, storage, true, context);
         };
 
         for (std::size_t terminalPosition = 0u; terminalPosition < count;
@@ -4273,7 +4273,7 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
             GXOS_RELATIVE_COUNT(simpleSelectorEvaluations);
 #endif
             const MatchResult terminalMatch = selectorCoreElementMatchResult(
-                terminal, *secondStep, 0, 0, storage, true);
+                terminal, *secondStep, 0, 0, storage, true, context);
             if (terminalMatch == MatchResult::Invalid) return terminalMatch;
             if (terminalMatch == MatchResult::NoMatch) continue;
 
@@ -4447,6 +4447,7 @@ NavigatorScriptHostAdapter::selectorRelativeChainMatchResult(
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
     , NavigatorScriptRelativeSelectorCounters* counters
 #endif
+    , const NavigatorScriptSelectorMatchContext& context
     ) const
 {
     return selectorRelativeElementMatchResult(anchor, firstRelation,
@@ -4454,7 +4455,7 @@ NavigatorScriptHostAdapter::selectorRelativeChainMatchResult(
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
         , counters
 #endif
-        , &secondSelector, secondRelation);
+        , &secondSelector, secondRelation, context);
 }
 
 NavigatorScriptSelectorMatchResult
@@ -4479,14 +4480,20 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
         const NavigatorScriptHasExpressionDescriptor* expression = nullptr;
         if (!hasExpressionInfo(selector, storage, expression))
             return MatchResult::Invalid;
-        const auto evaluateAlternative = [this, &anchor, &storage](
+        const auto evaluateAlternative = [this, &anchor, &storage, &context](
             NavigatorScriptRelativeSelectorRelation firstRelation,
             const NavigatorScriptSimpleSelectorCoreDescriptor& firstCore,
             std::uint8_t secondStepIndex,
             NavigatorScriptRelativeSelectorRelation secondRelation) {
             if (secondStepIndex == kHasNoRelativeCore)
                 return selectorRelativeElementMatchResult(anchor,
-                    firstRelation, firstCore, 0, 0, storage);
+                    firstRelation, firstCore, 0, 0, storage
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+                    , nullptr
+#endif
+                    , nullptr,
+                    NavigatorScriptRelativeSelectorRelation::Descendant,
+                    context);
             if (secondStepIndex >= storage.hasRelativeCoreCount)
                 return MatchResult::Invalid;
             NavigatorScriptSimpleSelectorCoreDescriptor secondCore;
@@ -4494,7 +4501,11 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
                     storage.hasRelativeCores[secondStepIndex], storage,
                     secondCore)) return MatchResult::Invalid;
             return selectorRelativeChainMatchResult(anchor, firstRelation,
-                firstCore, secondRelation, secondCore, storage);
+                firstCore, secondRelation, secondCore, storage
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+                , nullptr
+#endif
+                , context);
         };
 
         const MatchResult first = evaluateAlternative(

@@ -187,13 +187,12 @@ var ok = document.querySelector(':SCOPE') === documentRoot &&
 
     expectScript(harness, R"JS(
 var invalid = [':scope()', ':scope(anything)', ':scope(', ':scope)',
- ':scope:', ':scope:focus', ':has(:scope)', ':has(> :scope)',
- ':has(.row :scope)'];
+ ':scope:', ':scope:focus'];
 var rejected = true;
 for (var i = 0; i < invalid.length; i++)
  if (document.querySelector(invalid[i]) !== null) rejected = false;
 var ok = rejected;
-)JS", "malformed syntax, one-pseudo bound, and deferred :has(:scope) rejection");
+)JS", "malformed syntax and the established one-pseudo bound");
 
     expectScript(harness, R"JS(
 var root = document.querySelector('#root');
