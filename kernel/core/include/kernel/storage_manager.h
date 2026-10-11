@@ -64,6 +64,13 @@ struct TargetIdentity {
     uint8_t driverIndex;
     uint64_t totalLogicalSectors;
     uint32_t logicalSectorSize;
+    // Captured boot provenance is part of the immutable target snapshot used
+    // by destructive operations. A registration cannot be reinterpreted as
+    // an ordinary data device after admission.
+    block::BootProvenance bootProvenance;
+    bool ataTargetValid;
+    uint8_t ataChannel;
+    uint8_t ataTarget;
     bool usbIdentityValid;
     uint16_t usbVendorId;
     uint16_t usbProductId;

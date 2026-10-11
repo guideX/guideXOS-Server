@@ -382,6 +382,10 @@ bool capture_target_identity(uint8_t globalIndex, TargetIdentity& out)
     snapshot.driverIndex = dev->driverIndex;
     snapshot.totalLogicalSectors = dev->totalSectors;
     snapshot.logicalSectorSize = dev->sectorSize;
+    snapshot.bootProvenance = dev->bootProvenance;
+    snapshot.ataTargetValid = dev->ataTargetValid;
+    snapshot.ataChannel = dev->ataChannel;
+    snapshot.ataTarget = dev->ataTarget;
     snapshot.usbIdentityValid = dev->usbIdentityValid;
     snapshot.usbVendorId = dev->usbVendorId;
     snapshot.usbProductId = dev->usbProductId;
@@ -413,6 +417,10 @@ bool target_identities_equal(const TargetIdentity& left,
            left.driverIndex == right.driverIndex &&
            left.totalLogicalSectors == right.totalLogicalSectors &&
            left.logicalSectorSize == right.logicalSectorSize &&
+           left.bootProvenance == right.bootProvenance &&
+           left.ataTargetValid == right.ataTargetValid &&
+           left.ataChannel == right.ataChannel &&
+           left.ataTarget == right.ataTarget &&
            left.usbIdentityValid == right.usbIdentityValid &&
            left.usbVendorId == right.usbVendorId &&
            left.usbProductId == right.usbProductId &&

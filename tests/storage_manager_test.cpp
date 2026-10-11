@@ -8,6 +8,7 @@
 #include "../kernel/core/include/kernel/gpt_repair.h"
 #include "../kernel/core/include/kernel/fat32_formatter.h"
 #include "../kernel/core/include/kernel/partition_wipe.h"
+#include "../kernel/core/include/kernel/whole_disk_erase.h"
 #include "../kernel/core/include/kernel/disk_manager_wipe_ui.h"
 #include "../kernel/core/include/kernel/fs_fat.h"
 #include "../kernel/core/include/kernel/disk_manager_model.h"
@@ -1189,6 +1190,82 @@ void prepare_wipe_mbr(FakeDisk& disk, uint32_t firstStart,
     set_mbr_partition(disk, 0, 0, 0x0C, firstStart, firstCount);
     set_mbr_partition(disk, 1, 0, 0x07, secondStart, secondCount);
     set_mbr_signature(disk);
+}
+
+storage::WholeDiskEraseRequest make_whole_disk_erase_request(
+    uint8_t index,
+    storage::WholeDiskEraseScope scope =
+        storage::WHOLE_DISK_ERASE_ALL_ADDRESSABLE_SECTORS)
+{
+    storage::WholeDiskEraseRequest request = {};
+    storage::capture_target_identity(index, request.targetSnapshot);
+    request.expectedRegistryGeneration =
+        request.targetSnapshot.registryGeneration;
+    request.scope = scope;
+    return request;
+}
+
+void prepare_whole_disk_mbr(FakeDisk& disk, bool activeFirst = false,
+                            uint8_t firstType = 0x0Cu,
+                            uint32_t firstStart = 8,
+                            uint32_t firstCount = 9,
+                            uint32_t secondStart = 24,
+                            uint32_t secondCount = 11)
+{
+    for (uint64_t lba = 0; lba < disk.sectorCount; ++lba)
+        std::memset(sector(disk, lba),
+            static_cast<int>((lba * 37u + 0x53u) & 0xFFu), disk.sectorSize);
+    uint8_t* mbr = sector(disk, 0);
+    std::memset(mbr + 446, 0, 64);
+    write_u32(mbr + 440, 0xD34A5EEDu);
+    set_mbr_partition(disk, 0, activeFirst ? 0x80 : 0, firstType,
+                      firstStart, firstCount);
+    set_mbr_partition(disk, 1, 0, 0x0Cu, secondStart, secondCount);
+    set_mbr_signature(disk);
+}
+
+void prepare_whole_disk_gpt(FakeDisk& disk, bool efiSystem = false)
+{
+    build_gpt_three_partitions(disk);
+    const uint64_t backupHeaderLba = disk.sectorCount - 1;
+    const uint64_t primaryArrayLba = read_u64(sector(disk, 1) + 72);
+    const uint64_t backupArrayLba =
+        read_u64(sector(disk, backupHeaderLba) + 72);
+    const uint64_t arraySectors = (128u * 128u + disk.sectorSize - 1u) /
+        disk.sectorSize;
+    const uint64_t primaryEnd = primaryArrayLba + arraySectors;
+    const uint64_t backupStart = backupArrayLba;
+    for (uint64_t lba = 0; lba < disk.sectorCount; ++lba) {
+        const bool metadata = lba == 0 || lba == 1 ||
+            (lba >= primaryArrayLba && lba < primaryEnd) ||
+            (lba >= backupStart && lba < backupHeaderLba) ||
+            lba == backupHeaderLba;
+        if (!metadata)
+            std::memset(sector(disk, lba),
+                static_cast<int>((lba * 19u + 0x29u) & 0xFFu),
+                disk.sectorSize);
+    }
+    static const uint8_t linuxHomeGuid[16] = {
+        0xE1, 0xC7, 0x3A, 0x93, 0xB4, 0x2E, 0x13, 0x4F,
+        0xB8, 0x44, 0x0E, 0x14, 0xE2, 0xAE, 0xF9, 0x15};
+    static const uint8_t efiSystemGuid[16] = {
+        0x28, 0x73, 0x2A, 0xC1, 0x1F, 0xF8, 0xD2, 0x11,
+        0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B};
+    const uint8_t* typeGuid = efiSystem ? efiSystemGuid : linuxHomeGuid;
+    for (uint64_t arrayLba : {primaryArrayLba, backupArrayLba}) {
+        for (uint8_t part = 0; part < 3; ++part) {
+            uint8_t* entry = sector(disk, arrayLba) + part * 128u;
+            std::memcpy(entry, typeGuid, 16);
+            write_u64(entry + 48, 0);
+            std::memset(entry + 56, 0, 72);
+            const char* name = part == 0 ? "DataOne" :
+                (part == 1 ? "DataTwo" : "DataThree");
+            for (uint8_t i = 0; name[i]; ++i)
+                write_u16(entry + 56 + i * 2,
+                          static_cast<uint16_t>(name[i]));
+        }
+    }
+    refresh_gpt_fixture_crcs(disk);
 }
 
 uint8_t register_wipe_usb_fake(FakeDisk& disk)
@@ -6150,6 +6227,697 @@ void run_partition_wipe_tests()
         g_checks - checksBefore, g_failures - failuresBefore);
 }
 
+void run_whole_disk_erase_tests()
+{
+    const int checksBefore = g_checks;
+    const int failuresBefore = g_failures;
+    auto finish_job = [](storage::WholeDiskEraseJob& job) {
+        storage::WholeDiskEraseState state = job.result.state;
+        uint32_t steps = 0;
+        while (state == storage::WHOLE_DISK_ERASE_RUNNING && steps++ < 10000)
+            state = storage::step_whole_disk_erase_job(job);
+        return state;
+    };
+    auto is_zero = [](const FakeDisk& disk) {
+        return !disk.sparse && std::all_of(disk.bytes.begin(), disk.bytes.end(),
+            [](uint8_t value) { return value == 0; });
+    };
+
+    // Explicit scope and a current disk registration are mandatory.
+    {
+        FakeDisk disk(512, 131);
+        prepare_whole_disk_mbr(disk);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        storage::WholeDiskEraseJob job = {};
+        storage::WholeDiskEraseRequest request =
+            make_whole_disk_erase_request(index,
+                storage::WHOLE_DISK_ERASE_SCOPE_UNSPECIFIED);
+        const auto partitionOnly = storage::begin_whole_disk_erase_job(job,
+                                                                       request);
+        request = {};
+        request.scope = storage::WHOLE_DISK_ERASE_ALL_ADDRESSABLE_SECTORS;
+        const auto missingSelection = storage::begin_whole_disk_erase_job(job,
+                                                                           request);
+        check(partitionOnly == storage::WHOLE_DISK_ERASE_NOT_ADMITTED &&
+              job.result.reason == storage::WHOLE_DISK_ERASE_REASON_INVALID_REQUEST &&
+              missingSelection == storage::WHOLE_DISK_ERASE_NOT_ADMITTED &&
+              job.result.reason == storage::WHOLE_DISK_ERASE_REASON_INVALID_REQUEST &&
+              disk.writeAttempts == 0,
+              "whole-device API rejects partition-only scope and missing disk selection");
+        unregister_fake(index, disk);
+    }
+
+    // The same target/transport capability checks used by production admission
+    // reject unwritable, NVMe, and non-durable transports before any write.
+    auto denied_capability = [&](block::DeviceType transport,
+                                 block::BootProvenance boot,
+                                 bool writable, bool withFlush,
+                                 bool flushKnown, uint32_t maxTransfer,
+                                 storage::WholeDiskEraseReason expected,
+                                 const char* label) {
+        FakeDisk disk(512, 131);
+        prepare_whole_disk_mbr(disk);
+        const uint8_t index = register_fake(disk, writable, withFlush,
+            flushKnown, false, 0, maxTransfer, boot, transport);
+        storage::WholeDiskEraseJob job = {};
+        const auto state = storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        check(state == storage::WHOLE_DISK_ERASE_NOT_ADMITTED &&
+              job.result.reason == expected && disk.writeAttempts == 0 &&
+              job.result.ownershipReleased && !storage::storage_operation_active(),
+              label);
+        unregister_fake(index, disk);
+    };
+    denied_capability(block::BDEV_ATA_PIO,
+        block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT, false, true, true, 1024u,
+        storage::WHOLE_DISK_ERASE_REASON_READ_ONLY,
+        "read-only device is rejected before whole-device writes");
+    denied_capability(block::BDEV_NVME,
+        block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT, true, true, true, 1024u,
+        storage::WHOLE_DISK_ERASE_REASON_UNSUPPORTED_TRANSPORT,
+        "NVMe remains explicitly denied even when a fake proof registration has write and Flush callbacks");
+    denied_capability(block::BDEV_ATA_PIO,
+        block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT, true, false, false, 1024u,
+        storage::WHOLE_DISK_ERASE_REASON_FLUSH_UNAVAILABLE,
+        "device without a real Flush callback is rejected");
+    denied_capability(block::BDEV_USB_MASS,
+        block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT, true, true, true, 1024u,
+        storage::WHOLE_DISK_ERASE_REASON_DURABILITY_UNKNOWN,
+        "USB Mass Storage without proven Synchronize Cache remains ineligible");
+    denied_capability(block::BDEV_ATA_PIO,
+        block::BOOT_PROVENANCE_UNKNOWN, true, true, true, 1024u,
+        storage::WHOLE_DISK_ERASE_REASON_BOOT_IDENTITY_UNKNOWN,
+        "ambiguous boot provenance is fail-closed");
+    denied_capability(block::BDEV_ATA_PIO,
+        block::BOOT_PROVENANCE_BOOT_BACKING, true, true, true, 1024u,
+        storage::WHOLE_DISK_ERASE_REASON_BOOT_BACKING,
+        "the current boot device is rejected by the production boot-provenance check");
+
+    // ATA PIO, AHCI and Sync-Cache-qualified USB use the same production path.
+    for (block::DeviceType transport : {block::BDEV_ATA_PIO,
+                                        block::BDEV_AHCI,
+                                        block::BDEV_USB_MASS}) {
+        FakeDisk disk(512, 131);
+        prepare_whole_disk_mbr(disk);
+        const uint8_t index = transport == block::BDEV_USB_MASS
+            ? register_wipe_usb_fake(disk)
+            : register_fake(disk, true, true, true, false, 0, 1024u,
+                block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT, transport);
+        storage::WholeDiskEraseJob job = {};
+        const auto admitted = storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        const bool accepted = admitted == storage::WHOLE_DISK_ERASE_RUNNING &&
+            job.result.totalSectors == disk.sectorCount &&
+            job.result.targetIdentity.registrationId == disk.registrationId;
+        storage::request_whole_disk_erase_stop(job);
+        const auto stopped = storage::step_whole_disk_erase_job(job);
+        check(accepted && stopped == storage::WHOLE_DISK_ERASE_STOPPED &&
+              disk.writeAttempts == 0 && !job.result.flushAttempted &&
+              job.result.ownershipReleased,
+              "qualified ATA/AHCI/USB whole-device admission binds the exact capacity and supports pre-write Stop");
+        unregister_fake(index, disk);
+    }
+
+    // Protection covers every mount on the parent device, root backing, and
+    // metadata that looks bootable or whose role is not known by policy.
+    {
+        FakeDisk disk(512, 131);
+        prepare_whole_disk_mbr(disk);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        storage::WholeDiskEraseJob job = {};
+        vfs::test_clear_mounts();
+        vfs::test_set_mount(0, true, index, "/mnt/child-partition");
+        const auto mounted = storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        const bool mountedRejected = mounted ==
+                storage::WHOLE_DISK_ERASE_NOT_ADMITTED &&
+            job.result.reason == storage::WHOLE_DISK_ERASE_REASON_MOUNTED_CHILD &&
+            disk.writeAttempts == 0;
+        vfs::test_clear_mounts();
+        vfs::test_set_mount(0, true, index, "/");
+        const auto root = storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        const bool rootRejected = root == storage::WHOLE_DISK_ERASE_NOT_ADMITTED &&
+            job.result.reason == storage::WHOLE_DISK_ERASE_REASON_ROOT_BACKING &&
+            disk.writeAttempts == 0;
+        vfs::test_clear_mounts();
+        check(mountedRejected && rootRejected,
+              "any mounted child and the running root volume reject parent-device erase");
+        unregister_fake(index, disk);
+    }
+    {
+        FakeDisk disk(512, 131);
+        prepare_whole_disk_mbr(disk, true);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        storage::WholeDiskEraseJob job = {};
+        const auto state = storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        check(state == storage::WHOLE_DISK_ERASE_NOT_ADMITTED &&
+              job.result.reason ==
+                  storage::WHOLE_DISK_ERASE_REASON_BOOTABLE_MEDIA_PROTECTED &&
+              job.result.mediaClassification ==
+                  storage::WHOLE_DISK_MEDIA_CLASS_PROTECTED_BOOTABLE &&
+              disk.writeAttempts == 0,
+              "inactive MBR media carrying an active partition flag is classified protected and rejected");
+        unregister_fake(index, disk);
+    }
+    {
+        FakeDisk disk(512, 1024);
+        prepare_whole_disk_gpt(disk, true);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 4096u);
+        storage::WholeDiskEraseJob job = {};
+        const auto state = storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        check(state == storage::WHOLE_DISK_ERASE_NOT_ADMITTED &&
+              job.result.reason ==
+                  storage::WHOLE_DISK_ERASE_REASON_BOOTABLE_MEDIA_PROTECTED &&
+              disk.writeAttempts == 0,
+              "inactive GPT media carrying an EFI System Partition is protected");
+        unregister_fake(index, disk);
+    }
+    {
+        FakeDisk disk(512, 131);
+        prepare_whole_disk_mbr(disk, false, 0x07u);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        storage::WholeDiskEraseJob job = {};
+        const auto state = storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        check(state == storage::WHOLE_DISK_ERASE_NOT_ADMITTED &&
+              job.result.reason ==
+                  storage::WHOLE_DISK_ERASE_REASON_BOOT_MEDIA_AMBIGUOUS &&
+              job.result.mediaClassification ==
+                  storage::WHOLE_DISK_MEDIA_CLASS_AMBIGUOUS &&
+              disk.writeAttempts == 0,
+              "NTFS/Windows-like inactive MBR media remains ambiguous and is denied by the initial policy");
+        unregister_fake(index, disk);
+    }
+    {
+        FakeDisk disk(512, 1024);
+        prepare_whole_disk_gpt(disk, false);
+        uint8_t* name = sector(disk, 2) + 56;
+        std::memset(name, 0, 72);
+        const uint64_t backupArrayLba =
+            read_u64(sector(disk, disk.sectorCount - 1) + 72);
+        uint8_t* backupName = sector(disk, backupArrayLba) + 56;
+        std::memset(backupName, 0, 72);
+        const char* systemName = "System";
+        for (uint8_t i = 0; systemName[i]; ++i) {
+            const uint16_t character = static_cast<uint16_t>(systemName[i]);
+            write_u16(name + i * 2, character);
+            write_u16(backupName + i * 2, character);
+        }
+        refresh_gpt_fixture_crcs(disk);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 4096u);
+        storage::WholeDiskEraseJob job = {};
+        const auto state = storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        check(state == storage::WHOLE_DISK_ERASE_NOT_ADMITTED &&
+              job.result.reason ==
+                  storage::WHOLE_DISK_ERASE_REASON_BOOT_MEDIA_AMBIGUOUS &&
+              disk.writeAttempts == 0,
+              "historical system-labelled GPT media is classified ambiguous and denied");
+        unregister_fake(index, disk);
+    }
+    {
+        FakeDisk disk(512, 1024);
+        prepare_whole_disk_gpt(disk, false);
+        static const uint8_t microsoftBasicDataGuid[16] = {
+            0xA2, 0xA0, 0xD0, 0xEB, 0xE5, 0xB9, 0x33, 0x44,
+            0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26, 0x99, 0xC7};
+        const uint64_t backupArrayLba =
+            read_u64(sector(disk, disk.sectorCount - 1) + 72);
+        for (uint64_t arrayLba : {uint64_t(2), backupArrayLba})
+            for (uint8_t part = 0; part < 3; ++part)
+                std::memcpy(sector(disk, arrayLba) + part * 128u,
+                    microsoftBasicDataGuid, sizeof(microsoftBasicDataGuid));
+        refresh_gpt_fixture_crcs(disk);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 4096u);
+        storage::WholeDiskEraseJob job = {};
+        const auto state = storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        check(state == storage::WHOLE_DISK_ERASE_NOT_ADMITTED &&
+              job.result.reason ==
+                  storage::WHOLE_DISK_ERASE_REASON_BOOT_MEDIA_AMBIGUOUS &&
+              job.result.mediaClassification ==
+                  storage::WHOLE_DISK_MEDIA_CLASS_AMBIGUOUS &&
+              disk.writeAttempts == 0,
+              "generic GPT Basic Data is ambiguous because it may contain an inactive Windows system image");
+        unregister_fake(index, disk);
+    }
+
+    // Invalid logical geometry, overflowing byte capacity, and unsupported
+    // raw/ambiguous maps are rejected before destructive I/O.
+    {
+        FakeDisk disk(256, 131);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        storage::WholeDiskEraseJob job = {};
+        const auto state = storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        check(state == storage::WHOLE_DISK_ERASE_NOT_ADMITTED &&
+              job.result.reason ==
+                  storage::WHOLE_DISK_ERASE_REASON_INVALID_GEOMETRY &&
+              disk.writeAttempts == 0,
+              "unsupported sector geometry is rejected before map reads or writes");
+        unregister_fake(index, disk);
+    }
+    {
+        FakeDisk disk(512, UINT64_MAX / 512u + 1u, false);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        storage::WholeDiskEraseJob job = {};
+        const auto state = storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        check(state == storage::WHOLE_DISK_ERASE_NOT_ADMITTED &&
+              job.result.reason ==
+                  storage::WHOLE_DISK_ERASE_REASON_INVALID_GEOMETRY &&
+              disk.writeAttempts == 0,
+              "capacity-to-byte multiplication overflow is denied before writes");
+        unregister_fake(index, disk);
+    }
+    {
+        FakeDisk disk(512, 131);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        storage::WholeDiskEraseJob job = {};
+        const auto state = storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        check(state == storage::WHOLE_DISK_ERASE_NOT_ADMITTED &&
+              job.result.reason ==
+                  storage::WHOLE_DISK_ERASE_REASON_PARTITION_MAP_INVALID &&
+              disk.writeAttempts == 0,
+              "raw or uninitialized media with no authoritative partition map is denied as ambiguous");
+        unregister_fake(index, disk);
+    }
+    {
+        FakeDisk disk(512, 131), replacement(512, 131);
+        prepare_whole_disk_mbr(disk);
+        prepare_whole_disk_mbr(replacement);
+        disk.removeOnScanReadLba = 0;
+        disk.removeOnScanReadMinCount = 1;
+        disk.replacementDuringScan = &replacement;
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        storage::WholeDiskEraseJob job = {};
+        const auto state = storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        check(state == storage::WHOLE_DISK_ERASE_NOT_ADMITTED &&
+              job.result.reason ==
+                  storage::WHOLE_DISK_ERASE_REASON_IDENTITY_CHANGED &&
+              disk.removed && disk.replacementRegisteredDuringScan &&
+              replacement.registrationId != disk.registrationId &&
+              replacement.sectorCount == disk.sectorCount &&
+              replacement.writeAttempts == 0 && disk.writeAttempts == 0 &&
+              job.result.ownershipReleased,
+              "registration changes during admission fail closed and a same-capacity replacement does not inherit the request");
+        g_fakeDisks[disk.driverId] = nullptr;
+        if (disk.replacementIndex != 0xFF)
+            unregister_fake(disk.replacementIndex, replacement);
+    }
+
+    // Complete MBR coverage includes LBA 0, free space, the last addressable
+    // sector, and durability. The final short batch is checked independently.
+    {
+        FakeDisk disk(512, 131);
+        prepare_whole_disk_mbr(disk);
+        const std::vector<uint8_t> before = disk.bytes;
+        const bool firstAndLastNonzero =
+            std::any_of(sector(disk, 0), sector(disk, 0) + disk.sectorSize,
+                [](uint8_t value) { return value != 0; }) &&
+            std::any_of(sector(disk, disk.sectorCount - 1),
+                sector(disk, disk.sectorCount - 1) + disk.sectorSize,
+                [](uint8_t value) { return value != 0; });
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        storage::WholeDiskEraseRequest request =
+            make_whole_disk_erase_request(index);
+        storage::WholeDiskEraseJob job = {};
+        const auto admitted = storage::begin_whole_disk_erase_job(job, request);
+        request.targetSnapshot.globalIndex = 0xFE;
+        request.scope = storage::WHOLE_DISK_ERASE_SCOPE_UNSPECIFIED;
+        bool fullCoverageBeforeFlush = false;
+        auto terminal = admitted;
+        while (terminal == storage::WHOLE_DISK_ERASE_RUNNING) {
+            terminal = storage::step_whole_disk_erase_job(job);
+            if (terminal == storage::WHOLE_DISK_ERASE_RUNNING &&
+                job.result.sectorsWritten == disk.sectorCount)
+                fullCoverageBeforeFlush =
+                    job.result.progressPercent == 99 && disk.flushes == 0;
+        }
+        const bool bounded = !disk.writeLog.empty() &&
+            disk.writeLog.front().lba == 0 &&
+            disk.writeLog.back().lba + disk.writeLog.back().count ==
+                disk.sectorCount &&
+            std::all_of(disk.writeLog.begin(), disk.writeLog.end(),
+                [&](const FakeWriteRecord& write) {
+                    return write.count != 0 && write.lba < disk.sectorCount &&
+                        write.count <= disk.sectorCount - write.lba;
+                });
+        const bool noEarlySuccess = fullCoverageBeforeFlush &&
+            job.result.durabilityConfirmed && job.result.flushAttempted &&
+            job.result.flushOutcome == block::FLUSH_OUTCOME_SUPPORTED_SUCCEEDED;
+        check(admitted == storage::WHOLE_DISK_ERASE_RUNNING &&
+              terminal == storage::WHOLE_DISK_ERASE_COMPLETED && firstAndLastNonzero &&
+              before.size() == disk.bytes.size() && is_zero(disk) && bounded &&
+              job.result.totalSectors == 131 && job.result.startLba == 0 &&
+              job.result.sectorsWritten == 131 && job.result.totalBytes ==
+                  131u * 512u && job.result.bytesWritten == job.result.totalBytes &&
+              job.result.progressPercent == 100 && job.request.targetSnapshot.globalIndex == index &&
+              job.result.partitionMapMayBeDestroyed && noEarlySuccess &&
+              disk.writeLog.back().lba == 130 && disk.writeLog.back().count == 1 &&
+              job.result.ownershipReleased,
+              "512-byte MBR erase zeroes and bounds every addressable byte including LBA 0 and a one-sector final batch, independent of later caller selection changes");
+        storage::PartitionTableModel after = {};
+        check(storage::parse_partition_table(index, after) &&
+              after.state == storage::DISK_STATE_NOT_INITIALIZED &&
+              !storage::storage_operation_active(),
+              "successful MBR erase destroys the table and leaves the disk uninitialized after releasing ownership");
+        unregister_fake(index, disk);
+    }
+
+    // Independent GPT checks include the protective MBR, both arrays, both
+    // headers, partition data, free space and the final addressable sector.
+    {
+        FakeDisk disk(512, 1024);
+        prepare_whole_disk_gpt(disk);
+        const uint64_t backupArrayLba =
+            read_u64(sector(disk, disk.sectorCount - 1) + 72);
+        const bool gptBefore = std::memcmp(sector(disk, 1), "EFI PART", 8) == 0 &&
+            std::memcmp(sector(disk, disk.sectorCount - 1), "EFI PART", 8) == 0 &&
+            sector(disk, 0)[450] == 0xEE;
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 4096u);
+        storage::WholeDiskEraseJob job = {};
+        const auto admitted = storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        const auto terminal = finish_job(job);
+        check(gptBefore && admitted == storage::WHOLE_DISK_ERASE_RUNNING &&
+              terminal == storage::WHOLE_DISK_ERASE_COMPLETED && is_zero(disk) &&
+              sector(disk, 0)[450] == 0 &&
+              std::memcmp(sector(disk, 1), "EFI PART", 8) != 0 &&
+              std::all_of(sector(disk, 2), sector(disk, 2) + 32u * 512u,
+                  [](uint8_t value) { return value == 0; }) &&
+              std::all_of(sector(disk, backupArrayLba),
+                  sector(disk, disk.sectorCount - 1),
+                  [](uint8_t value) { return value == 0; }) &&
+              job.result.sectorsWritten == disk.sectorCount &&
+              job.result.flushStatus == block::BLOCK_OK &&
+              job.result.durabilityConfirmed,
+              "512-byte GPT erase independently zeroes the protective MBR, primary GPT, all partitions/free space, backup array/header and final sector");
+        storage::PartitionTableModel after = {};
+        check(storage::parse_partition_table(index, after) &&
+              after.state == storage::DISK_STATE_NOT_INITIALIZED,
+              "successful GPT erase removes both metadata copies without automatic reinitialization");
+        unregister_fake(index, disk);
+    }
+
+    // 4Kn alignment and a shortened final batch use the same exact full-device
+    // bound. Stop near the end leaves truthful partial-destruction state.
+    {
+        FakeDisk disk(4096, 17);
+        prepare_whole_disk_mbr(disk, false, 0x0Cu, 2, 3, 8, 2);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 3u * 4096u);
+        storage::WholeDiskEraseJob job = {};
+        const auto admitted = storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        const auto terminal = finish_job(job);
+        const bool alignedBatches = disk.writeLog.size() == 6 &&
+            std::all_of(disk.writeLog.begin(), disk.writeLog.end(),
+                [](const FakeWriteRecord& write) {
+                    return write.count != 0 && write.count <= 3 &&
+                        (write.count * 4096u) % 4096u == 0;
+                });
+        check(admitted == storage::WHOLE_DISK_ERASE_RUNNING &&
+              terminal == storage::WHOLE_DISK_ERASE_COMPLETED && is_zero(disk) &&
+              alignedBatches && disk.writeLog.front().lba == 0 &&
+              disk.writeLog.back().lba == 15 && disk.writeLog.back().count == 2 &&
+              job.result.logicalSectorSize == 4096 &&
+              job.result.totalBytes == 17u * 4096u &&
+              job.result.bytesWritten == job.result.totalBytes &&
+              job.result.progressPercent == 100,
+              "4Kn whole-device erase stays sector-aligned and shortens the final batch to include LBA 16");
+        unregister_fake(index, disk);
+    }
+
+    // Stop semantics distinguish no-write Stop, metadata destruction, and
+    // stopping close to completion.
+    {
+        FakeDisk disk(512, 131);
+        prepare_whole_disk_mbr(disk);
+        const std::vector<uint8_t> before = disk.bytes;
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        storage::WholeDiskEraseJob job = {};
+        storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        const bool requested = storage::request_whole_disk_erase_stop(job);
+        const auto terminal = storage::step_whole_disk_erase_job(job);
+        check(requested && terminal == storage::WHOLE_DISK_ERASE_STOPPED &&
+              job.result.sectorsWritten == 0 && !job.result.writeAttempted &&
+              !job.result.mediaMayHaveChanged && !job.result.flushAttempted &&
+              job.result.ownershipReleased && disk.writeAttempts == 0 &&
+              disk.bytes == before &&
+              std::strstr(job.result.diagnostic, "before any overwrite") != nullptr,
+              "Stop before the first batch makes no media changes and reports zero writes");
+        unregister_fake(index, disk);
+    }
+    {
+        FakeDisk disk(512, 1024);
+        prepare_whole_disk_gpt(disk);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        storage::WholeDiskEraseJob job = {};
+        storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        const auto firstBatch = storage::step_whole_disk_erase_job(job);
+        const bool stopRequested = storage::request_whole_disk_erase_stop(job);
+        const auto terminal = storage::step_whole_disk_erase_job(job);
+        check(firstBatch == storage::WHOLE_DISK_ERASE_RUNNING && stopRequested &&
+              terminal == storage::WHOLE_DISK_ERASE_STOPPED &&
+              job.result.sectorsWritten == 2 && job.result.bytesWritten == 1024 &&
+              job.result.partitionMapMayBeDestroyed &&
+              std::all_of(sector(disk, 0), sector(disk, 0) + 1024,
+                  [](uint8_t value) { return value == 0; }) &&
+              disk.writeAttempts == 1 && job.result.flushAttempted &&
+              job.result.durabilityConfirmed && job.result.progressPercent < 100 &&
+              std::strstr(job.result.diagnostic, "unusable") != nullptr &&
+              job.result.ownershipReleased,
+              "Stop after the first GPT batch reports possible table destruction, partial data loss and successful settling Flush");
+        unregister_fake(index, disk);
+    }
+    {
+        FakeDisk disk(4096, 17);
+        prepare_whole_disk_mbr(disk, false, 0x0Cu, 2, 3, 8, 2);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 3u * 4096u);
+        storage::WholeDiskEraseJob job = {};
+        storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        for (uint8_t i = 0; i < 5; ++i)
+            storage::step_whole_disk_erase_job(job);
+        const bool requested = storage::request_whole_disk_erase_stop(job);
+        const auto terminal = storage::step_whole_disk_erase_job(job);
+        check(requested && terminal == storage::WHOLE_DISK_ERASE_STOPPED &&
+              job.result.sectorsWritten == 15 && job.result.progressPercent < 100 &&
+              disk.writeLog.size() == 5 && job.result.flushAttempted &&
+              job.result.durabilityConfirmed && job.result.ownershipReleased,
+              "Stop near the final 4Kn batch stops only at a bounded batch boundary and does not claim completion");
+        unregister_fake(index, disk);
+    }
+
+    // Write, Flush, removal and replacement failures retain truthful progress
+    // and never issue subsequent batches to a different registration.
+    {
+        FakeDisk disk(512, 131);
+        prepare_whole_disk_mbr(disk);
+        disk.failWriteAtCall1 = 1;
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        storage::WholeDiskEraseJob job = {};
+        storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        const auto terminal = finish_job(job);
+        const auto callsAtTerminal = disk.writeAttempts;
+        const auto repeated = storage::step_whole_disk_erase_job(job);
+        check(terminal == storage::WHOLE_DISK_ERASE_FAILED &&
+              repeated == storage::WHOLE_DISK_ERASE_FAILED &&
+              job.result.reason == storage::WHOLE_DISK_ERASE_REASON_WRITE_FAILED &&
+              job.result.failedLba == 0 && job.result.mediaMayHaveChanged &&
+              job.result.sectorsWritten == 0 && job.result.flushAttempted &&
+              job.result.durabilityConfirmed && disk.writeAttempts == callsAtTerminal &&
+              job.result.ownershipReleased && !storage::storage_operation_active(),
+              "early write failure reports possible media change, failed LBA and exactly-once terminal release without false progress");
+        unregister_fake(index, disk);
+    }
+    {
+        FakeDisk disk(512, 131);
+        prepare_whole_disk_mbr(disk);
+        disk.failWriteAtCall1 = 2;
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        storage::WholeDiskEraseJob job = {};
+        storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        const auto terminal = finish_job(job);
+        check(terminal == storage::WHOLE_DISK_ERASE_FAILED &&
+              job.result.reason == storage::WHOLE_DISK_ERASE_REASON_WRITE_FAILED &&
+              job.result.sectorsWritten == 2 && job.result.failedLba == 2 &&
+              job.result.failedSectorCount == 2 && job.result.progressPercent < 100 &&
+              job.result.flushAttempted && job.result.ownershipReleased,
+              "later write failure preserves the completed prefix, failed range and partial-destruction semantics");
+        unregister_fake(index, disk);
+    }
+    {
+        FakeDisk disk(512, 131);
+        prepare_whole_disk_mbr(disk);
+        disk.failFlush = true;
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 8192u);
+        storage::WholeDiskEraseJob job = {};
+        storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        const auto terminal = finish_job(job);
+        check(terminal == storage::WHOLE_DISK_ERASE_FAILED &&
+              job.result.reason == storage::WHOLE_DISK_ERASE_REASON_FLUSH_FAILED &&
+              job.result.sectorsWritten == disk.sectorCount &&
+              job.result.progressPercent == 99 && !job.result.durabilityConfirmed &&
+              job.result.flushAttempted && job.result.flushStatus == block::BLOCK_ERR_IO &&
+              is_zero(disk) && job.result.ownershipReleased,
+              "required Flush failure leaves full logical writes at 99 percent and never reports durable completion");
+        unregister_fake(index, disk);
+    }
+    {
+        FakeDisk disk(512, 131), replacement(512, 131);
+        prepare_whole_disk_mbr(disk);
+        prepare_whole_disk_mbr(replacement);
+        disk.replacementOnRemoval = &replacement;
+        disk.removeOnWriteAtCall = 2;
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        storage::WholeDiskEraseJob job = {};
+        storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        storage::step_whole_disk_erase_job(job);
+        const auto terminal = storage::step_whole_disk_erase_job(job);
+        const uint32_t oldWritesAtTerminal = disk.writeAttempts;
+        const uint32_t replacementWritesAtTerminal = replacement.writeAttempts;
+        const auto repeated = storage::step_whole_disk_erase_job(job);
+        check(terminal == storage::WHOLE_DISK_ERASE_FAILED &&
+              repeated == storage::WHOLE_DISK_ERASE_FAILED && disk.removed &&
+              disk.duplicateRemovalResult && disk.replacementRegisteredDuringRemoval &&
+              oldWritesAtTerminal == 2 && disk.writeAttempts == oldWritesAtTerminal &&
+              replacementWritesAtTerminal == 0 && replacement.writeAttempts == 0 &&
+              job.result.reason == storage::WHOLE_DISK_ERASE_REASON_DEVICE_MISSING &&
+              job.result.sectorsWritten == 2 && !job.result.flushAttempted &&
+              job.result.ownershipReleased && !storage::storage_operation_active(),
+              "removal during write, duplicate notification and same-capacity replacement cannot resume or inherit the old job");
+        g_fakeDisks[disk.driverId] = nullptr;
+        if (disk.replacementIndex != 0xFF)
+            unregister_fake(disk.replacementIndex, replacement);
+    }
+    {
+        FakeDisk disk(512, 5), replacement(512, 5);
+        prepare_whole_disk_mbr(disk, false, 0x0Cu, 1, 1, 3, 1);
+        prepare_whole_disk_mbr(replacement, false, 0x0Cu, 1, 1, 3, 1);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        storage::WholeDiskEraseJob job = {};
+        storage::begin_whole_disk_erase_job(job,
+            make_whole_disk_erase_request(index));
+        while (job.result.state == storage::WHOLE_DISK_ERASE_RUNNING &&
+               job.result.sectorsWritten < disk.sectorCount)
+            storage::step_whole_disk_erase_job(job);
+        const uint32_t oldWritesBeforeRemoval = disk.writeAttempts;
+        const bool removed = block::mark_device_offline(index,
+                                                        disk.registrationId);
+        const uint8_t replacementIndex = register_fake(replacement, true,
+            true, true, false, 0, 1024u);
+        const auto terminal = storage::step_whole_disk_erase_job(job);
+        check(removed && replacementIndex != 0xFF && oldWritesBeforeRemoval == 3 &&
+              terminal == storage::WHOLE_DISK_ERASE_FAILED &&
+              job.result.sectorsWritten == disk.sectorCount &&
+              job.result.progressPercent == 99 && !job.result.flushAttempted &&
+              replacement.writeAttempts == 0 && disk.writeAttempts == oldWritesBeforeRemoval &&
+              job.result.ownershipReleased,
+              "removal after full write coverage but before Flush prevents durability access to a same-capacity replacement");
+        g_fakeDisks[disk.driverId] = nullptr;
+        if (replacementIndex != 0xFF) unregister_fake(replacementIndex, replacement);
+    }
+
+    // The one shared lease conflicts with every existing destructive storage
+    // path and blocks new mounts while the whole parent device is owned.
+    {
+        FakeDisk disk(512, 131);
+        prepare_whole_disk_mbr(disk);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        storage::PartitionTableModel table = {};
+        storage::PartitionEntry partition = {};
+        const bool parsed = storage::parse_partition_table(index, table) &&
+            find_partition_number(table, 1, partition);
+        storage::WholeDiskEraseJob whole = {};
+        const auto admitted = storage::begin_whole_disk_erase_job(whole,
+            make_whole_disk_erase_request(index));
+        storage::PartitionWipeJob wipe = {};
+        const auto wipeState = storage::begin_partition_wipe_job(wipe,
+            make_partition_wipe_request(index, partition));
+        storage::Fat32FormatJob format = {};
+        const auto formatState = storage::begin_fat32_format_job(format,
+            make_format_request(index, partition));
+        storage::Fat32FormatResult quickResult = {};
+        const auto quick = storage::quick_reformat_fat32_partition(
+            make_format_request(index, partition), quickResult);
+        storage::GptRepairRequest repairRequest = {};
+        storage::capture_target_identity(index, repairRequest.targetSnapshot);
+        repairRequest.expectedRegistryGeneration =
+            repairRequest.targetSnapshot.registryGeneration;
+        storage::GptRepairPlan repairPlan = {};
+        storage::GptRepairResult repairResult = {};
+        const auto repair = storage::prepare_gpt_repair(repairRequest,
+            repairPlan, repairResult);
+        storage::DeletePartitionPlan deletePlan = {};
+        storage::DeletePartitionResult deleteResult = {};
+        const auto deleted = storage::prepare_delete_partition(
+            make_delete_request(index, table.scheme, partition), deletePlan,
+            deleteResult);
+        storage::WholeDiskEraseJob duplicateJob = {};
+        const auto duplicate = storage::begin_whole_disk_erase_job(
+            duplicateJob,
+            make_whole_disk_erase_request(index));
+        const auto mount = vfs::mount_partition_detailed(
+            "/dm34-whole-erase-lock", index, partition.partitionNumber);
+        storage::StorageOperationLease competingLease = {};
+        const auto lease = storage::try_acquire_storage_operation(competingLease);
+        storage::request_whole_disk_erase_stop(whole);
+        storage::step_whole_disk_erase_job(whole);
+        check(parsed && admitted == storage::WHOLE_DISK_ERASE_RUNNING &&
+              wipeState == storage::PARTITION_WIPE_NOT_ADMITTED &&
+              wipe.result.reason == storage::PARTITION_WIPE_REASON_OPERATION_BUSY &&
+              formatState == storage::FAT32_FORMAT_JOB_FAILED &&
+              format.result.status == storage::FAT32_FORMAT_OPERATION_BUSY &&
+              quick == storage::FAT32_FORMAT_OPERATION_BUSY &&
+              repair == storage::GPT_REPAIR_OPERATION_BUSY &&
+              deleted == storage::DELETE_PARTITION_OPERATION_BUSY &&
+              duplicate == storage::WHOLE_DISK_ERASE_NOT_ADMITTED &&
+              mount.error == vfs::PARTITION_MOUNT_OPERATION_BUSY &&
+              lease == storage::STORAGE_OPERATION_LOCK_BUSY &&
+              whole.result.ownershipReleased,
+              "whole-device ownership conflicts with Partition Wipe, Format, Quick Reformat, Delete, GPT Repair, duplicate erase, new mounts and direct lease acquisition");
+        unregister_fake(index, disk);
+    }
+
+    std::printf("DM34 whole-device erase tests: %d checks, %d failures\n",
+        g_checks - checksBefore, g_failures - failuresBefore);
+}
+
 void run_disk_manager_wipe_ui_tests()
 {
     const int checksBefore = g_checks;
@@ -6339,6 +7107,7 @@ int main()
     run_gpt_repair_tests();
     run_delete_partition_tests();
     run_partition_wipe_tests();
+    run_whole_disk_erase_tests();
     run_disk_manager_wipe_ui_tests();
 
     check(storage::crc32("123456789", 9) == 0xCBF43926u, "CRC32 standard test vector");
