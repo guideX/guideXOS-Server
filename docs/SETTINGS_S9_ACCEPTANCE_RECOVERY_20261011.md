@@ -4,9 +4,20 @@ Date: 2026-10-11
 
 Result: **Outcome B — implementation advanced; full acceptance remains incomplete.**
 
-This is the current S9 recovery assessment and updates the acceptance status in
+## S9R continuation status (2026-10-11)
+
+The subsequent native integration assessment records **Outcome C** for S9R:
+the hosted Settings Center has no compatible production-kernel entry point or
+provider/identity bridge, and integrating it would require a wider shared
+runtime milestone. See
+[`SETTINGS_S9R_NATIVE_INTEGRATION_ASSESSMENT_20261011.md`](SETTINGS_S9R_NATIVE_INTEGRATION_ASSESSMENT_20261011.md)
+for the architecture, validation, and exact stop boundary. This does not
+change the earlier hosted results or accept S9 / Settings 1.0.
+
+The original recovery snapshot updates the acceptance status in
 `SETTINGS_S9_1_0_ACCEPTANCE.md` as of this date. It does not accept S9 or start
-S10.
+S10; the later S9R investigation is recorded above and in the linked
+assessment.
 
 ## Repository and phase state
 
