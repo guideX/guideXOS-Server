@@ -696,6 +696,8 @@ bool parseStatePseudo(SourceView source, std::size_t colon,
             selector.statePseudo = NavigatorScriptStatePseudo::Disabled;
         else if (equalsAsciiCaseInsensitive("focus"))
             selector.statePseudo = NavigatorScriptStatePseudo::Focus;
+        else if (equalsAsciiCaseInsensitive("scope"))
+            selector.statePseudo = NavigatorScriptStatePseudo::Scope;
         else if (equalsAsciiCaseInsensitive("first-child"))
             selector.statePseudo = NavigatorScriptStatePseudo::FirstChild;
         else if (equalsAsciiCaseInsensitive("last-child"))
@@ -1081,7 +1083,8 @@ bool parseHasPseudo(SourceView source, std::size_t colon, std::size_t end,
             std::int16_t innerA = 0;
             std::int16_t innerB = 0;
             return parseSimpleSelectorCore(source, begin, end, storage, core,
-                innerA, innerB, nullptr, false, false);
+                    innerA, innerB, nullptr, false, false) &&
+                core.statePseudo != NavigatorScriptStatePseudo::Scope;
         };
 
         const std::size_t firstEnd = scanCoreEnd(position);
@@ -4021,7 +4024,8 @@ NavigatorScriptHostAdapter::selectorCoreElementMatchResult(
     const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
     std::int16_t nthA, std::int16_t nthB,
     const NavigatorScriptSelectorDescriptor& storage,
-    bool strictPseudoValidation) const
+    bool strictPseudoValidation,
+    const NavigatorScriptSelectorMatchContext& context) const
 {
     using MatchResult = NavigatorScriptSelectorMatchResult;
     const MatchResult conditions = selectorCoreConditionsMatchResult(element,
@@ -4042,9 +4046,11 @@ NavigatorScriptHostAdapter::selectorCoreElementMatchResult(
         selector.statePseudo == NavigatorScriptStatePseudo::HasGeneralSibling)
         return MatchResult::Invalid;
     if (!strictPseudoValidation)
-        return selectorStatePseudoMatches(element, selector, nthA, nthB)
+        return selectorStatePseudoMatches(element, selector, nthA, nthB,
+            context)
             ? MatchResult::Match : MatchResult::NoMatch;
-    return selectorStatePseudoMatchResult(element, selector, nthA, nthB);
+    return selectorStatePseudoMatchResult(element, selector, nthA, nthB,
+        context);
 }
 
 NavigatorScriptSelectorMatchResult
@@ -4455,7 +4461,8 @@ NavigatorScriptSelectorMatchResult
 NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
     const gxos::web::HtmlElementRef& element,
     const NavigatorScriptSimpleSelectorDescriptor& selector,
-    const NavigatorScriptSelectorDescriptor& storage) const
+    const NavigatorScriptSelectorDescriptor& storage,
+    const NavigatorScriptSelectorMatchContext& context) const
 {
     using MatchResult = NavigatorScriptSelectorMatchResult;
     const NavigatorScriptSimpleSelectorCoreDescriptor& core = selector;
@@ -4512,14 +4519,14 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
     }
     if (!isLogicalPseudo)
         return selectorCoreElementMatchResult(element, core, selector.nthA,
-            selector.nthB, storage);
+            selector.nthB, storage, false, context);
 
     const MatchResult conditions = selectorCoreConditionsMatchResult(element,
         core, storage);
     if (conditions != MatchResult::Match) return conditions;
     if (!selector.logicalSelector.valid) return MatchResult::Invalid;
     const MatchResult inner = selectorCoreElementMatchResult(element,
-        selector.logicalSelector, 0, 0, storage, true);
+        selector.logicalSelector, 0, 0, storage, true, context);
     if (inner == MatchResult::Invalid) return MatchResult::Invalid;
     if (core.statePseudo != NavigatorScriptStatePseudo::Not) return inner;
     return inner == MatchResult::Match ? MatchResult::NoMatch :
@@ -4529,9 +4536,11 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
 bool NavigatorScriptHostAdapter::selectorSimpleElementMatches(
     const gxos::web::HtmlElementRef& element,
     const NavigatorScriptSimpleSelectorDescriptor& selector,
-    const NavigatorScriptSelectorDescriptor& storage) const
+    const NavigatorScriptSelectorDescriptor& storage,
+    const NavigatorScriptSelectorMatchContext& context) const
 {
-    return selectorSimpleElementMatchResult(element, selector, storage) ==
+    return selectorSimpleElementMatchResult(element, selector, storage,
+        context) ==
         NavigatorScriptSelectorMatchResult::Match;
 }
 
@@ -4539,7 +4548,8 @@ NavigatorScriptSelectorMatchResult
 NavigatorScriptHostAdapter::selectorStatePseudoMatchResult(
     const gxos::web::HtmlElementRef& element,
     const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
-    std::int16_t nthA, std::int16_t nthB) const
+    std::int16_t nthA, std::int16_t nthB,
+    const NavigatorScriptSelectorMatchContext& context) const
 {
     using MatchResult = NavigatorScriptSelectorMatchResult;
     const NavigatorScriptStatePseudo pseudo = selector.statePseudo;
@@ -4625,6 +4635,19 @@ NavigatorScriptHostAdapter::selectorStatePseudoMatchResult(
             findElement(document_->documentElement.serial);
         if (root == nullptr || root->parentSerial != 0u)
             return MatchResult::Invalid;
+    } else if (pseudo == NavigatorScriptStatePseudo::Scope) {
+        if (!context.valid || context.generation != generation_ ||
+            context.scopeSerial == 0u ||
+            context.scopeSerial > document_->structuralElements.size())
+            return MatchResult::Invalid;
+        const gxos::web::HtmlElementRef& canonical =
+            document_->structuralElements[static_cast<std::size_t>(
+                context.scopeSerial - 1u)];
+        // The context factory validates the canonical scope and its
+        // structural parent once per API operation. Keep per-candidate scope
+        // validation O(1) while rejecting a corrupted serial/index mapping.
+        if (canonical.serial != context.scopeSerial)
+            return MatchResult::Invalid;
     } else if (pseudo == NavigatorScriptStatePseudo::FirstChild ||
             pseudo == NavigatorScriptStatePseudo::LastChild ||
             pseudo == NavigatorScriptStatePseudo::OnlyChild ||
@@ -4657,14 +4680,15 @@ NavigatorScriptHostAdapter::selectorStatePseudoMatchResult(
                 structuralIndex)) return MatchResult::Invalid;
     }
 
-    return selectorStatePseudoMatches(element, selector, nthA, nthB)
+    return selectorStatePseudoMatches(element, selector, nthA, nthB, context)
         ? MatchResult::Match : MatchResult::NoMatch;
 }
 
 bool NavigatorScriptHostAdapter::selectorStatePseudoMatches(
     const gxos::web::HtmlElementRef& element,
     const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
-    std::int16_t nthA, std::int16_t nthB) const
+    std::int16_t nthA, std::int16_t nthB,
+    const NavigatorScriptSelectorMatchContext& context) const
 {
     const NavigatorScriptStatePseudo pseudo = selector.statePseudo;
     if (document_ == nullptr || element.serial == 0u ||
@@ -4718,6 +4742,10 @@ bool NavigatorScriptHostAdapter::selectorStatePseudoMatches(
         // activeElementSerial() is the adapter's canonical projection of the
         // generation-checked focused serial and supported focused control.
         return activeElementSerial() == element.serial;
+    case NavigatorScriptStatePseudo::Scope:
+        return context.valid && context.generation == generation_ &&
+            context.scopeSerial != 0u &&
+            context.scopeSerial == element.serial;
     case NavigatorScriptStatePseudo::Root:
         // WebDocument owns the parser-designated document Element. Its serial
         // is local to this document generation; a parentless Element is not
@@ -4952,10 +4980,12 @@ bool NavigatorScriptHostAdapter::resolveStructuralIndex(
 bool NavigatorScriptHostAdapter::selectorMemberElementMatches(
     const gxos::web::HtmlElementRef& element,
     const NavigatorScriptSelectorMemberDescriptor& selector,
-    const NavigatorScriptSelectorDescriptor& storage) const
+    const NavigatorScriptSelectorDescriptor& storage,
+    const NavigatorScriptSelectorMatchContext& context) const
 {
     if (document_ == nullptr || !selector.rightSimple.valid ||
-        !selectorSimpleElementMatches(element, selector.rightSimple, storage))
+        !selectorSimpleElementMatches(element, selector.rightSimple, storage,
+            context))
         return false;
     if (selector.relation == NavigatorScriptSelectorRelation::None)
         return true;
@@ -4966,7 +4996,7 @@ bool NavigatorScriptHostAdapter::selectorMemberElementMatches(
     if (selector.relation == NavigatorScriptSelectorRelation::Child) {
         const gxos::web::HtmlElementRef* parent = findElement(parentSerial);
         return parent != nullptr && selectorSimpleElementMatches(*parent,
-            selector.leftSimple, storage);
+            selector.leftSimple, storage, context);
     }
 
     if (selector.relation == NavigatorScriptSelectorRelation::AdjacentSibling) {
@@ -4976,7 +5006,7 @@ bool NavigatorScriptHostAdapter::selectorMemberElementMatches(
             return false;
         const gxos::web::HtmlElementRef* previous = findElement(previousSerial);
         return previous != nullptr && selectorSimpleElementMatches(*previous,
-            selector.leftSimple, storage);
+            selector.leftSimple, storage, context);
     }
 
     if (selector.relation == NavigatorScriptSelectorRelation::GeneralSibling) {
@@ -4993,7 +5023,7 @@ bool NavigatorScriptHostAdapter::selectorMemberElementMatches(
                 findElement(previousSerial);
             if (previous == nullptr) return false;
             if (selectorSimpleElementMatches(*previous, selector.leftSimple,
-                    storage)) return true;
+                    storage, context)) return true;
             currentSerial = previousSerial;
         }
         return false;
@@ -5010,7 +5040,7 @@ bool NavigatorScriptHostAdapter::selectorMemberElementMatches(
         const gxos::web::HtmlElementRef* ancestor = findElement(ancestorSerial);
         if (ancestor == nullptr) return false;
         if (selectorSimpleElementMatches(*ancestor, selector.leftSimple,
-                storage)) return true;
+                storage, context)) return true;
         HostInstanceId nextParentSerial = 0u;
         if (!resolveStructuralParentSerial(ancestorSerial,
                 nextParentSerial)) break;
@@ -5021,14 +5051,15 @@ bool NavigatorScriptHostAdapter::selectorMemberElementMatches(
 
 bool NavigatorScriptHostAdapter::selectorElementMatches(
     const gxos::web::HtmlElementRef& element,
-    const NavigatorScriptSelectorDescriptor& selector) const
+    const NavigatorScriptSelectorDescriptor& selector,
+    const NavigatorScriptSelectorMatchContext& context) const
 {
     if (selector.memberCount == 0u ||
         selector.memberCount > kNavigatorScriptMaxSelectorListMembers)
         return false;
     for (std::size_t index = 0u; index < selector.memberCount; ++index) {
         if (selectorMemberElementMatches(element, selector.members[index],
-                selector)) return true;
+                selector, context)) return true;
     }
     return false;
 }
@@ -5036,6 +5067,7 @@ bool NavigatorScriptHostAdapter::selectorElementMatches(
 bool NavigatorScriptHostAdapter::selectorClosestMatch(
     HostInstanceId receiverSerial,
     const NavigatorScriptSelectorDescriptor& selector,
+    const NavigatorScriptSelectorMatchContext& context,
     HostInstanceId& matchSerial) const
 {
     matchSerial = 0u;
@@ -5055,7 +5087,7 @@ bool NavigatorScriptHostAdapter::selectorClosestMatch(
         const gxos::web::HtmlElementRef* candidate =
             findElement(candidateSerial);
         if (candidate == nullptr) return false;
-        if (selectorElementMatches(*candidate, selector)) {
+        if (selectorElementMatches(*candidate, selector, context)) {
             matchSerial = candidate->serial;
             return true;
         }
@@ -5074,12 +5106,46 @@ bool NavigatorScriptHostAdapter::selectorScopeMatches(
     return isDescendantOrSelf(element.serial, scopeSerial);
 }
 
+NavigatorScriptSelectorMatchContext
+NavigatorScriptHostAdapter::selectorMatchContextForScope(
+    HostInstanceId scopeSerial) const
+{
+    NavigatorScriptSelectorMatchContext context;
+    context.generation = generation_;
+    if (document_ == nullptr || document_->structuralElements.size() >
+            limits_.maxDocumentNodes || document_->structuralElements.size() >
+            kNavigatorScriptMaxDocumentNodes) return context;
+
+    const bool documentScope = scopeSerial == 0u;
+    if (documentScope) {
+        if (!document_->hasDocumentElement ||
+            document_->documentElement.serial == 0u) return context;
+        scopeSerial = document_->documentElement.serial;
+    }
+    const std::size_t count = document_->structuralElements.size();
+    if (scopeSerial == 0u || scopeSerial > count) return context;
+    const gxos::web::HtmlElementRef& canonical =
+        document_->structuralElements[static_cast<std::size_t>(
+            scopeSerial - 1u)];
+    const gxos::web::HtmlElementRef* scope = findElement(scopeSerial);
+    HostInstanceId parentSerial = 0u;
+    if (canonical.serial != scopeSerial || scope != &canonical ||
+        !resolveStructuralParentSerial(scopeSerial, parentSerial) ||
+        (documentScope && parentSerial != 0u)) return context;
+
+    context.scopeSerial = scopeSerial;
+    context.valid = true;
+    return context;
+}
+
 std::size_t NavigatorScriptHostAdapter::selectorMatchCount(
     const SelectorCollectionRecord& record) const
 {
     if (document_ == nullptr || record.selector.memberCount == 0u ||
         record.selector.memberCount > kNavigatorScriptMaxSelectorListMembers)
         return 0u;
+    const NavigatorScriptSelectorMatchContext context =
+        selectorMatchContextForScope(record.scopeSerial);
     const std::size_t count = std::min(limits_.maxDocumentNodes,
         document_->structuralElements.size());
     std::size_t matches = 0u;
@@ -5087,7 +5153,8 @@ std::size_t NavigatorScriptHostAdapter::selectorMatchCount(
         const gxos::web::HtmlElementRef& element =
             document_->structuralElements[position];
         if (selectorScopeMatches(element, record.scopeSerial) &&
-            selectorElementMatches(element, record.selector)) ++matches;
+            selectorElementMatches(element, record.selector, context))
+            ++matches;
     }
     return matches;
 }
@@ -5100,6 +5167,8 @@ bool NavigatorScriptHostAdapter::selectorMatchAt(
     if (document_ == nullptr || record.selector.memberCount == 0u ||
         record.selector.memberCount > kNavigatorScriptMaxSelectorListMembers)
         return false;
+    const NavigatorScriptSelectorMatchContext context =
+        selectorMatchContextForScope(record.scopeSerial);
     const std::size_t count = std::min(limits_.maxDocumentNodes,
         document_->structuralElements.size());
     std::size_t matched = 0u;
@@ -5107,7 +5176,8 @@ bool NavigatorScriptHostAdapter::selectorMatchAt(
         const gxos::web::HtmlElementRef& element =
             document_->structuralElements[position];
         if (!selectorScopeMatches(element, record.scopeSerial) ||
-            !selectorElementMatches(element, record.selector)) continue;
+            !selectorElementMatches(element, record.selector, context))
+            continue;
         if (matched == index) {
             serial = element.serial;
             return true;
@@ -5157,12 +5227,14 @@ HostResult NavigatorScriptHostAdapter::querySelector(HostInstanceId scopeSerial,
     }
     if (document_->structuralElements.size() > limits_.maxDocumentNodes)
         return HostResult{HostResultCode::DocumentLookupLimitExceeded};
+    const NavigatorScriptSelectorMatchContext context =
+        selectorMatchContextForScope(scopeSerial);
     const std::size_t count = document_->structuralElements.size();
     for (std::size_t position = 0; position < count; ++position) {
         const gxos::web::HtmlElementRef& element =
             document_->structuralElements[position];
         if (!selectorScopeMatches(element, scopeSerial) ||
-            !selectorElementMatches(element, selector)) continue;
+            !selectorElementMatches(element, selector, context)) continue;
         result = HostValue::fromHostObject(HostObjectReference{
             element.serial, generation_, kNavigatorElementHostKind});
         return HostResult();
@@ -6348,19 +6420,21 @@ HostResult NavigatorScriptHostAdapter::callInternal(
         const bool parsed = arguments != nullptr && argumentCount == 1u &&
             arguments[0].type == HostValueType::String &&
             parseBoundedSelector(arguments[0].stringValue, selector);
+        const NavigatorScriptSelectorMatchContext context =
+            selectorMatchContextForScope(receiver->instanceId);
         if (methodId == kNavigatorMatchesMethod) {
             // Selector failures follow querySelector's bounded, fail-closed
             // policy and do not allocate or retain a selector collection.
             const gxos::web::HtmlElementRef* element =
                 findElement(receiver->instanceId);
             result = HostValue::boolean(parsed && element != nullptr &&
-                selectorElementMatches(*element, selector));
+                selectorElementMatches(*element, selector, context));
             return HostResult();
         }
 
         HostInstanceId matchSerial = 0u;
         if (!parsed || !selectorClosestMatch(receiver->instanceId, selector,
-                matchSerial)) {
+                context, matchSerial)) {
             result = HostValue::nullValue();
             return HostResult();
         }

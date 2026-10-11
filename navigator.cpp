@@ -225,6 +225,12 @@ void Navigator::executeJavaScriptDocumentScripts()
 		} else {
 			std::string diagnostic = "script[" + std::to_string(index) +
 				"] status=" + std::to_string(static_cast<int>(result.status));
+			if (result.status == gxos::javascript::ScriptStatus::ParseFailure) {
+				diagnostic += " parser=" + std::string(
+					gxos::javascript::parserErrorCodeName(result.parserError.code)) +
+					" line=" + std::to_string(result.parserError.location.line) +
+					" column=" + std::to_string(result.parserError.location.column);
+			}
 			if (diagnostic.size() > 512u) diagnostic.resize(512u);
 			s_lastJavaScriptError = std::move(diagnostic);
 			Logger::write(LogLevel::Warn, "Navigator JavaScript " + s_lastJavaScriptError);

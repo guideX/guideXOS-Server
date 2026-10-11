@@ -143,6 +143,16 @@ enum class NavigatorScriptStatePseudo : std::uint8_t {
     HasChild,
     HasAdjacentSibling,
     HasGeneralSibling,
+    Scope,
+};
+
+// Call-local selector operation context. The serial and generation are kept
+// separate from the candidate passed to the shared matcher; retained query
+// collections reconstruct this context from their existing scopeSerial field.
+struct NavigatorScriptSelectorMatchContext {
+    HostInstanceId scopeSerial = 0u;
+    HostGenerationId generation = 0u;
+    bool valid = false;
 };
 
 struct NavigatorScriptSimpleSelectorCoreDescriptor {
@@ -398,6 +408,7 @@ public:
 
 private:
     friend struct NavigatorScriptRelativeSelectorTestAccess;
+    friend struct NavigatorScriptScopeSelectorTestAccess;
     struct ClickHandlerRecord {
         HostInstanceId serial = 0;
         RuntimeFunctionId onclickFunction = kInvalidRuntimeFunctionId;
@@ -551,7 +562,9 @@ private:
         const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
         std::int16_t nthA, std::int16_t nthB,
         const NavigatorScriptSelectorDescriptor& storage,
-        bool strictPseudoValidation = false) const;
+        bool strictPseudoValidation = false,
+        const NavigatorScriptSelectorMatchContext& context =
+            NavigatorScriptSelectorMatchContext()) const;
     NavigatorScriptSelectorMatchResult selectorRelativeElementMatchResult(
         const HostObjectReference& anchor,
         NavigatorScriptRelativeSelectorRelation relation,
@@ -579,31 +592,45 @@ private:
     NavigatorScriptSelectorMatchResult selectorSimpleElementMatchResult(
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSimpleSelectorDescriptor& selector,
-        const NavigatorScriptSelectorDescriptor& storage) const;
+        const NavigatorScriptSelectorDescriptor& storage,
+        const NavigatorScriptSelectorMatchContext& context =
+            NavigatorScriptSelectorMatchContext()) const;
     bool selectorSimpleElementMatches(
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSimpleSelectorDescriptor& selector,
-        const NavigatorScriptSelectorDescriptor& storage) const;
+        const NavigatorScriptSelectorDescriptor& storage,
+        const NavigatorScriptSelectorMatchContext& context =
+            NavigatorScriptSelectorMatchContext()) const;
     NavigatorScriptSelectorMatchResult selectorStatePseudoMatchResult(
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
-        std::int16_t nthA, std::int16_t nthB) const;
+        std::int16_t nthA, std::int16_t nthB,
+        const NavigatorScriptSelectorMatchContext& context =
+            NavigatorScriptSelectorMatchContext()) const;
     bool selectorStatePseudoMatches(
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
-        std::int16_t nthA, std::int16_t nthB) const;
+        std::int16_t nthA, std::int16_t nthB,
+        const NavigatorScriptSelectorMatchContext& context =
+            NavigatorScriptSelectorMatchContext()) const;
     bool resolveStructuralIndex(
         const gxos::web::HtmlElementRef& element, bool sameType,
         bool fromEnd, std::size_t& index) const;
     bool selectorMemberElementMatches(
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSelectorMemberDescriptor& selector,
-        const NavigatorScriptSelectorDescriptor& storage) const;
+        const NavigatorScriptSelectorDescriptor& storage,
+        const NavigatorScriptSelectorMatchContext& context) const;
     bool selectorElementMatches(const gxos::web::HtmlElementRef& element,
-        const NavigatorScriptSelectorDescriptor& selector) const;
+        const NavigatorScriptSelectorDescriptor& selector,
+        const NavigatorScriptSelectorMatchContext& context =
+            NavigatorScriptSelectorMatchContext()) const;
     bool selectorClosestMatch(HostInstanceId receiverSerial,
         const NavigatorScriptSelectorDescriptor& selector,
+        const NavigatorScriptSelectorMatchContext& context,
         HostInstanceId& matchSerial) const;
+    NavigatorScriptSelectorMatchContext selectorMatchContextForScope(
+        HostInstanceId scopeSerial) const;
     bool selectorScopeMatches(const gxos::web::HtmlElementRef& element,
         HostInstanceId scopeSerial) const;
     std::size_t selectorMatchCount(const SelectorCollectionRecord& record) const;

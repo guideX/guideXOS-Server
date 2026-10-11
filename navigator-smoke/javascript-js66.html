@@ -1,0 +1,123 @@
+<!doctype html>
+<html id="document-root">
+<head><title>Navigator JavaScript JS66</title></head>
+<body>
+<h1>Navigator JavaScript JS66</h1>
+<main id="outer">
+  <section id="scope" class="selected">
+    <div id="card" class="card">
+      <div id="direct-row" class="row"><span id="leaf" class="leaf"></span></div>
+      <div id="wrapper"><div id="nested-row" class="row"></div></div>
+      <i id="item" class="item"></i><i id="selected-item" class="selected-item"></i>
+      <div id="warning-wrap"><i id="warning" class="warning"></i></div>
+    </div>
+    <button id="event-button" type="button">Run</button>
+  </section>
+  <section id="scope-b">
+    <i id="target-b" class="target-b"></i>
+    <button id="nested-button" type="button">Nested</button>
+  </section>
+</main>
+<pre id="result">initial</pre>
+<script>
+var assertions = 0;
+var failures = 0;
+var lastFailedIndex = 0;
+var failedIndexes = '';
+function verify(value) {
+  assertions = assertions + 1;
+  if (!value) {
+    failures = failures + 1;
+    lastFailedIndex = assertions;
+    failedIndexes = failedIndexes + ',' + assertions;
+  }
+}
+
+var documentScope = document.querySelector(':scope');
+var documentRoot = document.querySelector(':root');
+var body = document.querySelector(':scope > body');
+verify(documentScope === documentRoot);
+verify(documentScope === document.querySelector('#document-root'));
+verify(body === document.querySelector('body'));
+
+var scope = document.querySelector('#scope');
+var card = document.querySelector('#card');
+var directRow = document.querySelector('#direct-row');
+var nestedRow = document.querySelector('#nested-row');
+verify(scope.querySelector(':scope') === null);
+verify(scope.querySelectorAll(':scope').length === 0);
+verify(scope.querySelector(':scope > .card') === card);
+verify(card.querySelector(':scope > .row') === directRow);
+verify(card.querySelectorAll(':scope > .row').length === 1);
+verify(card.querySelectorAll(':scope .row').length === 2);
+verify(card.querySelector(':scope .leaf') === document.querySelector('#leaf'));
+
+verify(scope.matches('.selected:scope'));
+verify(scope.matches('#scope:scope'));
+verify(!scope.matches(':root'));
+verify(card.matches(':not(:scope)') === false);
+verify(card.matches(':is(:scope)') && card.matches(':where(:scope)'));
+verify(card.closest(':scope') === card);
+verify(document.querySelector('#leaf').closest('div:scope') === null);
+verify(document.querySelector('#leaf').closest('div') === directRow);
+
+var union = scope.querySelectorAll(
+  ':scope > .card, :scope > #event-button, .card, :scope > .card');
+verify(union.length === 2 && union[0] === card &&
+  union[1] === document.querySelector('#event-button') &&
+  scope.querySelector(':scope > #missing, :scope > .card') === card);
+var ordered = scope.querySelectorAll('.warning, .card');
+verify(ordered.length === 2 && ordered[0] === card &&
+  ordered[1] === document.querySelector('#warning'));
+var fromA = card.querySelectorAll(':scope > .row');
+var scopeB = document.querySelector('#scope-b');
+var fromB = scopeB.querySelectorAll(':scope > .target-b');
+verify(fromA.length === 1 && fromB.length === 1 && fromA[0] === directRow &&
+  fromB[0] === document.querySelector('#target-b') && fromA[0] === directRow);
+verify(card.querySelector('.item + .selected-item') ===
+  document.querySelector('#selected-item'));
+verify(document.querySelector(':SCOPE') === documentScope &&
+  document.querySelector(':sCoPe') === documentScope);
+
+var malformed = [':scope()', ':scope(anything)', ':scope(', ':scope)',
+  ':scope:', ':scope:focus'];
+var malformedRejected = true;
+for (var i = 0; i !== malformed.length; i++)
+  if (document.querySelector(malformed[i]) !== null) malformedRejected = false;
+verify(malformedRejected);
+verify(card.matches(':has(> .row .leaf)'));
+verify(document.querySelector('#card:has(:scope)') === null &&
+  document.querySelector('#card:has(> :scope)') === null);
+
+var eventScope = false;
+var nestedScope = false;
+var eventMetadata = false;
+var eventButton = document.querySelector('#event-button');
+var nestedButton = document.querySelector('#nested-button');
+scope.addEventListener('click', function(event) {
+  var savedTarget = event.target;
+  var savedCurrentTarget = event.currentTarget;
+  var savedPhase = event.eventPhase;
+  var savedDefaultPrevented = event.defaultPrevented;
+  eventScope = scope.querySelector(':scope > #card') === card;
+  nestedButton.click();
+  eventScope = eventScope && scope.querySelector(':scope > #card') === card;
+  eventMetadata = event.target === savedTarget &&
+    event.currentTarget === savedCurrentTarget && event.eventPhase === savedPhase &&
+    event.defaultPrevented === savedDefaultPrevented && savedTarget === eventButton;
+  document.querySelector('#result').textContent = 'event=' + eventScope +
+    ':nested=' + nestedScope + ':metadata=' + eventMetadata +
+    ':assertions=' + assertions + ':failures=' + failures;
+});
+scopeB.addEventListener('click', function(event) {
+  nestedScope = scopeB.querySelector(':scope > .target-b') ===
+    document.querySelector('#target-b') && event.target === nestedButton &&
+    event.currentTarget === scopeB && event.eventPhase === 3 &&
+    event.defaultPrevented === false;
+});
+document.querySelector('#result').textContent = 'initial:assertions=' + assertions +
+  ':failures=' + failures + ':malformed=' + malformedRejected +
+  ':failed=' + failedIndexes + ':lastFailed=' + lastFailedIndex;
+</script>
+</body>
+</html>
