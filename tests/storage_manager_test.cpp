@@ -7103,6 +7103,15 @@ void run_disk_manager_whole_erase_ui_tests()
     const int failuresBefore = g_failures;
     namespace eraseUi = apps::disk_manager_whole_disk_erase_ui;
 
+    check(eraseUi::stop_button_background(false) !=
+              eraseUi::stop_button_background(true),
+          "focused whole-disk Stop Erase has a distinct visible button state");
+    check(eraseUi::running_tab_navigation_enabled(false, true) &&
+              !eraseUi::running_tab_navigation_enabled(false, false) &&
+              eraseUi::running_tab_focuses_stop_button(false, true, false) &&
+              !eraseUi::running_tab_focuses_stop_button(false, false, false),
+          "the separate whole-disk Running state accepts Tab and focuses its Stop button");
+
     FakeDisk disk(512, 131);
     prepare_whole_disk_mbr(disk);
     const uint8_t index = register_fake(disk, true, true, true,

@@ -11,6 +11,8 @@
 #include "include/kernel/image_adapter.h"
 #include "include/kernel/serial_debug.h"
 
+#include <string.h>
+
 namespace kernel {
 namespace compositor {
 
@@ -730,8 +732,28 @@ void KernelCompositor::handleMouseUp(int32_t mx, int32_t my, uint8_t button) {
             if (widget->visible && widget->enabled &&
                 localX >= widget->x && localX < widget->x + widget->w &&
                 localY >= widget->y && localY < widget->y + widget->h) {
-                app::dispatch_widget_activation(hitWin, widget->id,
+                const bool wholeEraseStopWidget =
+                    widget->type == app::WidgetType::Button &&
+                    (strcmp(widget->text, "Stop Erase") == 0 ||
+                     strcmp(widget->text, "Stop Requested") == 0);
+                if (wholeEraseStopWidget) {
+                    serial::puts("[dm34-stop] pointer-hit widget_id=");
+                    serial::put_hex32(static_cast<uint32_t>(widget->id));
+                    serial::puts(" text=");
+                    serial::puts(widget->text);
+                    serial::puts(" local_x=");
+                    serial::put_hex32(static_cast<uint32_t>(localX));
+                    serial::puts(" local_y=");
+                    serial::put_hex32(static_cast<uint32_t>(localY));
+                    serial::putc('\n');
+                }
+                const bool dispatched = app::dispatch_widget_activation(
+                    hitWin, widget->id,
                     [hitWin](int id) { hitWin->owner->onWidgetClick(id); });
+                if (wholeEraseStopWidget) {
+                    serial::puts("[dm34-stop] pointer-dispatch result=");
+                    serial::puts(dispatched ? "accepted\n" : "rejected\n");
+                }
                 return;
             }
         }

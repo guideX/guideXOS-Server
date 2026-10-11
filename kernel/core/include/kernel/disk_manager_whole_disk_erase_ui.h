@@ -222,6 +222,24 @@ inline int progress_value(const storage::WholeDiskEraseResult& result)
     return result.progressPercent;
 }
 
+inline uint32_t stop_button_background(bool focused)
+{
+    return focused ? 0xFF9A3A32 : 0xFF6F3030;
+}
+
+inline bool running_tab_navigation_enabled(bool regularRunningDialog,
+                                           bool wholeEraseRunning)
+{
+    return regularRunningDialog || wholeEraseRunning;
+}
+
+inline bool running_tab_focuses_stop_button(bool wipeRunning,
+                                            bool wholeEraseRunning,
+                                            bool formatScanCancelable)
+{
+    return wipeRunning || wholeEraseRunning || formatScanCancelable;
+}
+
 } // namespace disk_manager_whole_disk_erase_ui
 } // namespace apps
 } // namespace kernel

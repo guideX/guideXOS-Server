@@ -48,6 +48,7 @@ static char s_kernelLastDnsResolvedIp[16];
 static char s_kernelLastDnsError[64];
 
 static void strappend(char* dst, const char* src, int maxLen);
+static void serial_put_dec64(uint64_t value);
 
 namespace {
 constexpr int kNavigatorToolbarButtonY = 12;
@@ -7464,8 +7465,14 @@ void DiskManagerApp::updateInitializeControls() {
             ? 0xFF34465C : 0xFF505060;
     } else if (wipeRunning) {
         if (confirm) confirm->bgColor = 0xFF505060;
-        if (cancel) cancel->bgColor = m_createInputFocus == 2
-            ? 0xFF9A3A32 : 0xFF6F3030;
+        if (cancel) cancel->bgColor =
+            disk_manager_whole_disk_erase_ui::stop_button_background(
+                m_createInputFocus == 2);
+    } else if (wholeEraseRunning) {
+        if (confirm) confirm->bgColor = 0xFF505060;
+        if (cancel) cancel->bgColor =
+            disk_manager_whole_disk_erase_ui::stop_button_background(
+                m_createInputFocus == 2);
     } else if (formatOptions) {
         if (confirm) confirm->bgColor = m_createInputFocus == 3
             ? 0xFF34465C : 0xFF505060;
@@ -7734,6 +7741,13 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             m_initializeDialogState == INITIALIZE_DIALOG_WHOLE_ERASE_RUNNING &&
             disk_manager_whole_disk_erase_ui::whole_erase_job_running(
                 m_wholeEraseJob);
+        if (wholeEraseRunning && (tab || enter)) {
+            serial::puts("[dm34-stop] keyboard-key-received key=0x");
+            serial::put_hex32(key);
+            serial::puts(" focus=");
+            serial_put_dec64(m_createInputFocus);
+            serial::putc('\n');
+        }
         if (escape) {
             closeInitializeDialog();
         } else if (wipeConfirm && tab) {
@@ -7746,13 +7760,25 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
                 (m_createInputFocus == 2 ? 3 : 0);
             updateInitializeControls();
             invalidate();
-        } else if (m_initializeDialogState == INITIALIZE_DIALOG_RUNNING && tab) {
+        } else if (
+            disk_manager_whole_disk_erase_ui::running_tab_navigation_enabled(
+                m_initializeDialogState == INITIALIZE_DIALOG_RUNNING,
+                wholeEraseRunning) && tab) {
             const bool formatScanCancelable = m_dialogIsFormat &&
                 !m_formatJob.commitStarted &&
                 (m_formatJob.state == storage::FAT32_FORMAT_JOB_SCANNING ||
                  m_formatJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT);
-            m_createInputFocus = (wipeRunning || wholeEraseRunning ||
-                formatScanCancelable) ? 2 : 0;
+            m_createInputFocus =
+                disk_manager_whole_disk_erase_ui::running_tab_focuses_stop_button(
+                    wipeRunning, wholeEraseRunning, formatScanCancelable)
+                ? 2 : 0;
+            if (wholeEraseRunning) {
+                serial::puts("[dm34-stop] keyboard-focus key=Tab focus=");
+                serial_put_dec64(m_createInputFocus);
+                serial::puts(" widget_id=");
+                serial_put_dec64(m_cancelInitializeBtnId);
+                serial::putc('\n');
+            }
             updateInitializeControls();
             invalidate();
         } else if (enter && wipeRunning && m_createInputFocus == 2) {
@@ -7762,11 +7788,22 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
                     m_createInputFocus, 2, m_cancelInitializeBtnId), key,
                 [this](int id) { onWidgetClick(id); });
         } else if (enter && wholeEraseRunning && m_createInputFocus == 2) {
-            app::dispatch_focused_button_activation(m_window,
+            const int focusedWidgetId = app::focused_button_widget_id_for_index(
+                m_createInputFocus, 2, m_cancelInitializeBtnId);
+            serial::puts("[dm34-stop] keyboard-activation key=0x");
+            serial::put_hex32(key);
+            serial::puts(" focus=");
+            serial_put_dec64(m_createInputFocus);
+            serial::puts(" widget_id=");
+            serial_put_dec64(focusedWidgetId);
+            serial::putc('\n');
+            const bool dispatched = app::dispatch_focused_button_activation(
+                m_window,
                 m_cancelInitializeBtnId,
-                app::focused_button_widget_id_for_index(
-                    m_createInputFocus, 2, m_cancelInitializeBtnId), key,
+                focusedWidgetId, key,
                 [this](int id) { onWidgetClick(id); });
+            serial::puts("[dm34-stop] keyboard-dispatch result=");
+            serial::puts(dispatched ? "accepted\n" : "rejected\n");
         } else if (enter &&
                    m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
                    m_dialogIsFormat && m_createInputFocus == 2 &&
@@ -8145,7 +8182,20 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
         m_initializeDialogState == INITIALIZE_DIALOG_WHOLE_ERASE_RUNNING &&
         disk_manager_whole_disk_erase_ui::whole_erase_job_running(
             m_wholeEraseJob)) {
-        if (storage::request_whole_disk_erase_stop(m_wholeEraseJob)) {
+        serial::puts("[dm34-stop] handler-enter widget_id=");
+        serial_put_dec64(widgetId);
+        serial::puts(" expected_widget_id=");
+        serial_put_dec64(m_cancelInitializeBtnId);
+        serial::puts(" operation_id=0x");
+        serial::put_hex64(m_wholeEraseJob.result.operationId);
+        serial::puts(" serial=");
+        serial::puts(m_wholeEraseJob.result.targetIdentity.serial);
+        serial::putc('\n');
+        const bool stopAccepted =
+            storage::request_whole_disk_erase_stop(m_wholeEraseJob);
+        serial::puts("[dm34-stop] engine-request accepted=");
+        serial::puts(stopAccepted ? "yes\n" : "no\n");
+        if (stopAccepted) {
             strcopy(m_statusMessage,
                 "Stop requested. The erase may already have destroyed part of the disk.",
                 sizeof(m_statusMessage));
@@ -11508,6 +11558,33 @@ void DiskManagerApp::runWholeDiskEraseOperation() {
 
 void DiskManagerApp::completeWholeDiskEraseOperation() {
     m_wholeEraseResult = m_wholeEraseJob.result;
+    serial::puts("[dm34-stop] terminal state=");
+    serial::puts(storage::whole_disk_erase_state_name(m_wholeEraseResult.state));
+    serial::puts(" reason=");
+    serial::puts(storage::whole_disk_erase_reason_name(m_wholeEraseResult.reason));
+    serial::puts(" operation_id=0x");
+    serial::put_hex64(m_wholeEraseResult.operationId);
+    serial::puts(" progress=");
+    serial_put_dec64(m_wholeEraseResult.progressPercent);
+    serial::puts(" sectors=");
+    serial_put_dec64(m_wholeEraseResult.sectorsWritten);
+    serial::putc('/');
+    serial_put_dec64(m_wholeEraseResult.totalSectors);
+    serial::puts(" bytes=");
+    serial_put_dec64(m_wholeEraseResult.bytesWritten);
+    serial::putc('/');
+    serial_put_dec64(m_wholeEraseResult.totalBytes);
+    serial::puts(" flush_attempted=");
+    serial_put_dec64(m_wholeEraseResult.flushAttempted ? 1 : 0);
+    serial::puts(" flush_outcome=");
+    serial_put_dec64(m_wholeEraseResult.flushOutcome);
+    serial::puts(" flush_status=");
+    serial_put_dec64(m_wholeEraseResult.flushStatus);
+    serial::puts(" durability_confirmed=");
+    serial_put_dec64(m_wholeEraseResult.durabilityConfirmed ? 1 : 0);
+    serial::puts(" ownership_released=");
+    serial_put_dec64(m_wholeEraseResult.ownershipReleased ? 1 : 0);
+    serial::putc('\n');
     m_lastStorageOperation = 8;
     strcopy(m_initializeMessage,
         disk_manager_whole_disk_erase_ui::terminal_message(
@@ -12766,7 +12843,6 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
     appDrawText(x + 10, y + h - STATUS_H + 8, statusLine, rgb(222, 226, 236));
 }
 
-static void serial_put_dec64(uint64_t value);
 static bool nav_starts_with(const char* value, const char* prefix);
 
 bool NavigatorApp::smokeTypographyPhase7A()
