@@ -817,6 +817,7 @@ bool findLogicalArgumentClose(SourceView source, std::size_t open,
             insideAttribute = true;
             continue;
         }
+        if (character == ']') return false;
         if (character == '(') return false;
         if (character == ')') {
             close = index;
@@ -841,6 +842,11 @@ bool isLogicalStatePseudo(NavigatorScriptStatePseudo pseudo)
         pseudo == NavigatorScriptStatePseudo::Is ||
         pseudo == NavigatorScriptStatePseudo::Where;
 }
+
+constexpr std::uint8_t kCompactLogicalArgumentValidFlag = 0x01u;
+constexpr std::uint8_t kCompactLogicalArgumentUniversalFlag = 0x02u;
+constexpr std::uint8_t kCompactLogicalArgumentAttributeFlag = 0x04u;
+constexpr std::uint8_t kCompactLogicalArgumentValueFlag = 0x08u;
 
 bool isOneRestrictedLogicalArgument(SourceView source, std::size_t begin,
     std::size_t end)
@@ -878,6 +884,7 @@ bool parseSimpleSelectorCore(SourceView source, std::size_t begin,
     NavigatorScriptSimpleSelectorCoreDescriptor& selector,
     std::int16_t& nthA, std::int16_t& nthB,
     NavigatorScriptSimpleSelectorCoreDescriptor* logicalSelector,
+    NavigatorScriptSimpleSelectorCoreDescriptor* secondLogicalSelector,
     bool allowLogicalPseudo, bool allowFunctionalPseudo)
 {
     if (begin == end) return false;
@@ -961,22 +968,83 @@ bool parseSimpleSelectorCore(SourceView source, std::size_t begin,
                 std::size_t close = end;
                 if (!findLogicalArgumentClose(source, logicalOpen, end, close))
                     return false;
-                std::size_t innerBegin = logicalOpen + 1u;
-                std::size_t innerEnd = close;
-                while (innerBegin < innerEnd &&
-                    isSelectorAsciiWhitespace(source.data[innerBegin]))
-                    ++innerBegin;
-                while (innerEnd > innerBegin &&
-                    isSelectorAsciiWhitespace(source.data[innerEnd - 1u]))
-                    --innerEnd;
-                std::int16_t innerNthA = 0;
-                std::int16_t innerNthB = 0;
-                if (innerBegin == innerEnd ||
-                    !isOneRestrictedLogicalArgument(source, innerBegin,
-                        innerEnd) || !parseSimpleSelectorCore(source,
-                        innerBegin, innerEnd, storage, *logicalSelector,
-                        innerNthA, innerNthB, nullptr, false, false))
+                std::array<SelectorSourceRange, 2u> arguments{};
+                std::size_t argumentCount = 0u;
+                std::size_t argumentBegin = logicalOpen + 1u;
+                bool inAttribute = false;
+                char quote = '\0';
+                for (std::size_t index = argumentBegin; index < close;
+                        ++index) {
+                    const char character = source.data[index];
+                    if (inAttribute) {
+                        if (quote != '\0') {
+                            if (character == quote) quote = '\0';
+                        } else if (character == '"' || character == '\'') {
+                            quote = character;
+                        } else if (character == '[') {
+                            return false;
+                        } else if (character == ']') {
+                            inAttribute = false;
+                        }
+                        continue;
+                    }
+                    if (character == '[') {
+                        inAttribute = true;
+                        continue;
+                    }
+                    // A second function or any stray closing delimiter is a
+                    // structural grammar error, even for forgiving :is() and
+                    // :where() member handling.
+                    if (character == '(' || character == ')') return false;
+                    if (character != ',') continue;
+                    if (argumentCount >= 1u) return false;
+                    arguments[argumentCount++] = {argumentBegin,
+                        index - argumentBegin};
+                    argumentBegin = index + 1u;
+                }
+                if (inAttribute || quote != '\0') return false;
+                arguments[argumentCount++] = {argumentBegin,
+                    close - argumentBegin};
+                if (argumentCount == 0u || argumentCount > 2u ||
+                    (argumentCount == 2u && secondLogicalSelector == nullptr))
                     return false;
+
+                NavigatorScriptSimpleSelectorCoreDescriptor* destinations[2] =
+                    {logicalSelector, secondLogicalSelector};
+                for (std::size_t argumentIndex = 0u;
+                        argumentIndex < argumentCount; ++argumentIndex) {
+                    SelectorSourceRange range = arguments[argumentIndex];
+                    while (range.length != 0u &&
+                        isSelectorAsciiWhitespace(source.data[range.offset])) {
+                        ++range.offset;
+                        --range.length;
+                    }
+                    while (range.length != 0u && isSelectorAsciiWhitespace(
+                            source.data[range.offset + range.length - 1u]))
+                        --range.length;
+                    if (range.length == 0u) return false;
+                    if (!isOneRestrictedLogicalArgument(source, range.offset,
+                            range.offset + range.length)) {
+                        if (logicalPseudo == NavigatorScriptStatePseudo::Not)
+                            return false;
+                        continue;
+                    }
+                    const std::uint16_t savedTextLength = storage.textLength;
+                    NavigatorScriptSimpleSelectorCoreDescriptor parsedArgument;
+                    std::int16_t innerNthA = 0;
+                    std::int16_t innerNthB = 0;
+                    const bool parsed = parseSimpleSelectorCore(source,
+                        range.offset, range.offset + range.length, storage,
+                        parsedArgument, innerNthA, innerNthB, nullptr, nullptr,
+                        false, false);
+                    if (!parsed) {
+                        storage.textLength = savedTextLength;
+                        if (logicalPseudo == NavigatorScriptStatePseudo::Not)
+                            return false;
+                        continue;
+                    }
+                    *destinations[argumentIndex] = parsedArgument;
+                }
                 selector.statePseudo = logicalPseudo;
                 position = close + 1u;
             } else {
@@ -1001,7 +1069,8 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
     NavigatorScriptSimpleSelectorDescriptor& selector)
 {
     return parseSimpleSelectorCore(source, begin, end, storage, selector,
-        selector.nthA, selector.nthB, &selector.logicalSelector, true, true);
+        selector.nthA, selector.nthB, &selector.logicalSelector, nullptr,
+        true, true);
 }
 
 bool parseHasPseudo(SourceView source, std::size_t colon, std::size_t end,
@@ -1086,11 +1155,15 @@ bool parseHasPseudo(SourceView source, std::size_t colon, std::size_t end,
             NavigatorScriptRelativeSelectorRelation::Descendant;
         NavigatorScriptSimpleSelectorCoreDescriptor firstCore;
         NavigatorScriptSimpleSelectorCoreDescriptor firstLogicalArgument;
+        NavigatorScriptSimpleSelectorCoreDescriptor
+            firstLogicalArgumentSecond;
         bool hasSecondStep = false;
         NavigatorScriptRelativeSelectorRelation secondRelation =
             NavigatorScriptRelativeSelectorRelation::Descendant;
         NavigatorScriptSimpleSelectorCoreDescriptor secondCore;
         NavigatorScriptSimpleSelectorCoreDescriptor secondLogicalArgument;
+        NavigatorScriptSimpleSelectorCoreDescriptor
+            secondLogicalArgumentSecond;
     };
 
     const auto relationForToken = [](char token) {
@@ -1147,17 +1220,20 @@ bool parseHasPseudo(SourceView source, std::size_t colon, std::size_t end,
         };
         const auto parseCore = [&source, &storage](std::size_t begin,
             std::size_t end, NavigatorScriptSimpleSelectorCoreDescriptor& core,
-            NavigatorScriptSimpleSelectorCoreDescriptor& logicalArgument) {
+            NavigatorScriptSimpleSelectorCoreDescriptor& logicalArgument,
+            NavigatorScriptSimpleSelectorCoreDescriptor& logicalArgumentSecond) {
             if (begin == end) return false;
             std::int16_t innerA = 0;
             std::int16_t innerB = 0;
             return parseSimpleSelectorCore(source, begin, end, storage, core,
-                    innerA, innerB, &logicalArgument, true, false);
+                    innerA, innerB, &logicalArgument,
+                    &logicalArgumentSecond, true, false);
         };
 
         const std::size_t firstEnd = scanCoreEnd(position);
         if (!parseCore(position, firstEnd, parsed.firstCore,
-                parsed.firstLogicalArgument)) return false;
+                parsed.firstLogicalArgument,
+                parsed.firstLogicalArgumentSecond)) return false;
         position = firstEnd;
         bool separatedByWhitespace = false;
         while (position < finish &&
@@ -1182,7 +1258,8 @@ bool parseHasPseudo(SourceView source, std::size_t colon, std::size_t end,
 
         const std::size_t secondEnd = scanCoreEnd(position);
         if (!parseCore(position, secondEnd, parsed.secondCore,
-                parsed.secondLogicalArgument)) return false;
+                parsed.secondLogicalArgument,
+                parsed.secondLogicalArgumentSecond)) return false;
         position = secondEnd;
         // The bound is exactly two steps. Any remaining token, combinator, or
         // whitespace therefore represents an unsupported third step or a
@@ -1232,6 +1309,43 @@ bool parseHasPseudo(SourceView source, std::size_t colon, std::size_t end,
         compact.statePseudo = core.statePseudo;
         return true;
     };
+    const auto compactLogicalArgument = [&storage](
+        const NavigatorScriptSimpleSelectorCoreDescriptor& core,
+        NavigatorScriptCompactLogicalArgumentDescriptor& compact) {
+        if (!core.valid || core.classTokenCount >
+                kNavigatorScriptMaxClassQueryTokens) return false;
+        compact.flags = kCompactLogicalArgumentValidFlag;
+        if (core.universal)
+            compact.flags |= kCompactLogicalArgumentUniversalFlag;
+        if (core.hasAttributePredicate)
+            compact.flags |= kCompactLogicalArgumentAttributeFlag;
+        if (core.attributeValuePresent)
+            compact.flags |= kCompactLogicalArgumentValueFlag;
+        compact.tagOffset = core.tagOffset;
+        compact.tagLength = core.tagLength;
+        compact.idOffset = core.idOffset;
+        compact.idLength = core.idLength;
+        compact.classTokenCount = core.classTokenCount;
+        if (core.classTokenCount != 0u) {
+            const auto& firstToken = core.classTokens[0];
+            const auto& lastToken =
+                core.classTokens[core.classTokenCount - 1u];
+            const std::size_t blockBegin = firstToken.offset;
+            const std::size_t blockEnd =
+                static_cast<std::size_t>(lastToken.offset) + lastToken.length;
+            if (blockEnd <= blockBegin || blockEnd - blockBegin >
+                    std::numeric_limits<std::uint8_t>::max()) return false;
+            compact.classBlockOffset = static_cast<std::uint8_t>(blockBegin);
+            compact.classBlockLength = static_cast<std::uint8_t>(
+                blockEnd - blockBegin);
+        }
+        compact.attributeNameOffset = core.attributeNameOffset;
+        compact.attributeNameLength = core.attributeNameLength;
+        compact.attributeValueOffset = core.attributeValueOffset;
+        compact.attributeValueLength = core.attributeValueLength;
+        compact.statePseudo = core.statePseudo;
+        return true;
+    };
     const auto storeCore = [&storage, &compactCore](
         const NavigatorScriptSimpleSelectorCoreDescriptor& core,
         std::uint8_t& index) {
@@ -1246,24 +1360,33 @@ bool parseHasPseudo(SourceView source, std::size_t colon, std::size_t end,
     };
 
     NavigatorScriptHasExpressionDescriptor expression;
-    const auto storeLogicalArgument = [&compactCore, &expression](
+    const auto storeLogicalArguments = [&compactLogicalArgument,
+            &expression](
         const NavigatorScriptSimpleSelectorCoreDescriptor& relativeCore,
-        const NavigatorScriptSimpleSelectorCoreDescriptor& logicalArgument,
-        std::size_t slot) {
+        const NavigatorScriptSimpleSelectorCoreDescriptor& firstArgument,
+        const NavigatorScriptSimpleSelectorCoreDescriptor& secondArgument,
+        std::size_t firstSlot) {
         if (!isLogicalStatePseudo(relativeCore.statePseudo)) return true;
-        return slot < expression.logicalArguments.size() &&
-            logicalArgument.valid && compactCore(logicalArgument,
-                expression.logicalArguments[slot]);
+        if (firstSlot + 1u >= expression.logicalArguments.size()) return false;
+        if (firstArgument.valid && !compactLogicalArgument(firstArgument,
+                expression.logicalArguments[firstSlot])) return false;
+        if (secondArgument.valid && !compactLogicalArgument(secondArgument,
+                expression.logicalArguments[firstSlot + 1u])) return false;
+        return true;
     };
-    if (!storeLogicalArgument(first.firstCore,
-            first.firstLogicalArgument, 0u) ||
-        !storeLogicalArgument(first.secondCore,
-            first.secondLogicalArgument, 1u) ||
+    if (!storeLogicalArguments(first.firstCore,
+            first.firstLogicalArgument,
+            first.firstLogicalArgumentSecond, 0u) ||
+        !storeLogicalArguments(first.secondCore,
+            first.secondLogicalArgument,
+            first.secondLogicalArgumentSecond, 2u) ||
         (argumentTotal == 2u &&
-            (!storeLogicalArgument(second.firstCore,
-                second.firstLogicalArgument, 2u) ||
-             !storeLogicalArgument(second.secondCore,
-                second.secondLogicalArgument, 3u)))) return false;
+            (!storeLogicalArguments(second.firstCore,
+                second.firstLogicalArgument,
+                second.firstLogicalArgumentSecond, 4u) ||
+             !storeLogicalArguments(second.secondCore,
+                second.secondLogicalArgument,
+                second.secondLogicalArgumentSecond, 6u)))) return false;
     std::uint8_t relationFlags = 0x80u;
     if (first.hasSecondStep) {
         if (!storeCore(first.secondCore, expression.firstStepTwoCoreIndex))
@@ -1585,6 +1708,37 @@ bool expandCompactRelativeCore(
         }
     }
     return position == blockEnd;
+}
+
+bool expandCompactLogicalArgument(
+    const NavigatorScriptCompactLogicalArgumentDescriptor& compact,
+    const NavigatorScriptSelectorDescriptor& storage,
+    NavigatorScriptSimpleSelectorCoreDescriptor& expanded)
+{
+    if ((compact.flags & kCompactLogicalArgumentValidFlag) == 0u ||
+        (compact.flags & static_cast<std::uint8_t>(~0x0Fu)) != 0u)
+        return false;
+    NavigatorScriptCompactRelativeSelectorCoreDescriptor relative;
+    relative.valid = true;
+    relative.universal = (compact.flags &
+        kCompactLogicalArgumentUniversalFlag) != 0u;
+    relative.tagOffset = compact.tagOffset;
+    relative.tagLength = compact.tagLength;
+    relative.idOffset = compact.idOffset;
+    relative.idLength = compact.idLength;
+    relative.classTokenCount = compact.classTokenCount;
+    relative.classBlockOffset = compact.classBlockOffset;
+    relative.classBlockLength = compact.classBlockLength;
+    relative.hasAttributePredicate = (compact.flags &
+        kCompactLogicalArgumentAttributeFlag) != 0u;
+    relative.attributeValuePresent = (compact.flags &
+        kCompactLogicalArgumentValueFlag) != 0u;
+    relative.attributeNameOffset = compact.attributeNameOffset;
+    relative.attributeNameLength = compact.attributeNameLength;
+    relative.attributeValueOffset = compact.attributeValueOffset;
+    relative.attributeValueLength = compact.attributeValueLength;
+    relative.statePseudo = compact.statePseudo;
+    return expandCompactRelativeCore(relative, storage, expanded);
 }
 
 constexpr std::uint8_t kHasExpressionValidFlag = 0x80u;
@@ -4020,25 +4174,26 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
                     leftExpression.logicalArguments[slot];
                 const auto& rightArgument =
                     rightExpression.logicalArguments[slot];
-                if (leftArgument.valid != rightArgument.valid) return false;
-                if (!leftArgument.valid) return true;
+                const bool leftValid = (leftArgument.flags &
+                    kCompactLogicalArgumentValidFlag) != 0u;
+                const bool rightValid = (rightArgument.flags &
+                    kCompactLogicalArgumentValidFlag) != 0u;
+                if (leftValid != rightValid) return false;
+                if (!leftValid) return true;
                 NavigatorScriptSimpleSelectorCoreDescriptor leftCore;
                 NavigatorScriptSimpleSelectorCoreDescriptor rightCore;
-                return expandCompactRelativeCore(leftArgument, leftStorage,
+                return expandCompactLogicalArgument(leftArgument, leftStorage,
                         leftCore) &&
-                    expandCompactRelativeCore(rightArgument, rightStorage,
+                    expandCompactLogicalArgument(rightArgument, rightStorage,
                         rightCore) &&
                     coreEqual(leftStorage, leftCore, rightStorage, rightCore);
             };
-            return logicalArgumentEqual(left, *leftExpression, right,
-                    *rightExpression, 0u) &&
-                logicalArgumentEqual(left, *leftExpression, right,
-                    *rightExpression, 1u) &&
-                logicalArgumentEqual(left, *leftExpression, right,
-                    *rightExpression, 2u) &&
-                logicalArgumentEqual(left, *leftExpression, right,
-                    *rightExpression, 3u) &&
-                compactEqual(left, leftExpression->firstStepTwoCoreIndex,
+            for (std::size_t slot = 0u;
+                    slot < leftExpression->logicalArguments.size(); ++slot) {
+                if (!logicalArgumentEqual(left, *leftExpression, right,
+                        *rightExpression, slot)) return false;
+            }
+            return compactEqual(left, leftExpression->firstStepTwoCoreIndex,
                     right, rightExpression->firstStepTwoCoreIndex) &&
                 compactEqual(left, leftExpression->secondFirstCoreIndex,
                     right, rightExpression->secondFirstCoreIndex) &&
@@ -4183,7 +4338,10 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
     NavigatorScriptRelativeSelectorRelation secondRelation,
     const NavigatorScriptSelectorMatchContext& context,
     const NavigatorScriptSimpleSelectorCoreDescriptor* logicalArgument,
-    const NavigatorScriptSimpleSelectorCoreDescriptor* secondLogicalArgument
+    const NavigatorScriptSimpleSelectorCoreDescriptor* secondLogicalArgument,
+    const NavigatorScriptSimpleSelectorCoreDescriptor* logicalArgumentSecond,
+    const NavigatorScriptSimpleSelectorCoreDescriptor*
+        secondLogicalArgumentSecond
     ) const
 {
     using MatchResult = NavigatorScriptSelectorMatchResult;
@@ -4304,6 +4462,7 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
         const gxos::web::HtmlElementRef& candidate,
         const NavigatorScriptSimpleSelectorCoreDescriptor& candidateCore,
         const NavigatorScriptSimpleSelectorCoreDescriptor* argument,
+        const NavigatorScriptSimpleSelectorCoreDescriptor* secondArgument,
         std::int16_t candidateNthA, std::int16_t candidateNthB) {
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
         GXOS_RELATIVE_COUNT(simpleSelectorEvaluations);
@@ -4317,21 +4476,37 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
         const MatchResult conditions = selectorCoreConditionsMatchResult(
             candidate, candidateCore, storage);
         if (conditions != MatchResult::Match) return conditions;
-        if (argument == nullptr || !argument->valid ||
-            isLogicalStatePseudo(argument->statePseudo) ||
-            isHasStatePseudo(argument->statePseudo))
+        const bool isNot = candidateCore.statePseudo ==
+            NavigatorScriptStatePseudo::Not;
+        if (isNot && (argument == nullptr || !argument->valid) &&
+            (secondArgument == nullptr || !secondArgument->valid))
             return MatchResult::Invalid;
+        const auto evaluateArgument = [&](
+            const NavigatorScriptSimpleSelectorCoreDescriptor* current)
+            -> MatchResult {
+            if (current == nullptr) return MatchResult::NoMatch;
+            if (!current->valid || isLogicalStatePseudo(current->statePseudo) ||
+                isHasStatePseudo(current->statePseudo))
+                return MatchResult::Invalid;
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
-        GXOS_RELATIVE_COUNT(logicalPredicateEvaluations);
-        GXOS_RELATIVE_COUNT(simpleSelectorEvaluations);
+            GXOS_RELATIVE_COUNT(logicalPredicateEvaluations);
+            GXOS_RELATIVE_COUNT(simpleSelectorEvaluations);
 #endif
-        const MatchResult inner = selectorCoreElementMatchResult(candidate,
-            *argument, 0, 0, storage, true, context);
-        if (inner == MatchResult::Invalid) return MatchResult::Invalid;
-        if (candidateCore.statePseudo != NavigatorScriptStatePseudo::Not)
-            return inner;
-        return inner == MatchResult::Match ? MatchResult::NoMatch :
-            MatchResult::Match;
+            return selectorCoreElementMatchResult(candidate, *current, 0, 0,
+                storage, true, context);
+        };
+        const MatchResult first = evaluateArgument(argument);
+        if (first == MatchResult::Invalid) return MatchResult::Invalid;
+        if (isNot && first == MatchResult::Match)
+            return MatchResult::NoMatch;
+        if (!isNot && first == MatchResult::Match)
+            return MatchResult::Match;
+        const MatchResult second = evaluateArgument(secondArgument);
+        if (second == MatchResult::Invalid) return MatchResult::Invalid;
+        if (isNot)
+            return second == MatchResult::Match ? MatchResult::NoMatch :
+                MatchResult::Match;
+        return second;
     };
 
     if (secondStep != nullptr) {
@@ -4405,7 +4580,7 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
             GXOS_RELATIVE_COUNT(simpleSelectorEvaluations);
 #endif
             return candidateMatches(intermediate, selector, logicalArgument,
-                nthA, nthB);
+                logicalArgumentSecond, nthA, nthB);
         };
 
         for (std::size_t terminalPosition = 0u; terminalPosition < count;
@@ -4417,7 +4592,8 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
             GXOS_RELATIVE_COUNT(simpleSelectorEvaluations);
 #endif
             const MatchResult terminalMatch = candidateMatches(terminal,
-                *secondStep, secondLogicalArgument, 0, 0);
+                *secondStep, secondLogicalArgument,
+                secondLogicalArgumentSecond, 0, 0);
             if (terminalMatch == MatchResult::Invalid) return terminalMatch;
             if (terminalMatch == MatchResult::NoMatch) continue;
 
@@ -4562,7 +4738,7 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
             }
             if (!eligible) continue;
             const MatchResult matched = candidateMatches(candidate, selector,
-                logicalArgument, nthA, nthB);
+                logicalArgument, logicalArgumentSecond, nthA, nthB);
             if (matched == MatchResult::Invalid) return MatchResult::Invalid;
             if (matched == MatchResult::Match) {
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
@@ -4601,7 +4777,7 @@ NavigatorScriptHostAdapter::selectorRelativeElementMatchResult(
         if (structuralElement(candidate.serial) != &candidate)
             return MatchResult::Invalid;
         const MatchResult matched = candidateMatches(candidate, selector,
-            logicalArgument, nthA, nthB);
+            logicalArgument, logicalArgumentSecond, nthA, nthB);
         if (matched == MatchResult::Invalid) return MatchResult::Invalid;
         if (matched == MatchResult::Match) {
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
@@ -4629,7 +4805,11 @@ NavigatorScriptHostAdapter::selectorRelativeChainMatchResult(
 #endif
     , const NavigatorScriptSelectorMatchContext& context,
     const NavigatorScriptSimpleSelectorCoreDescriptor* firstLogicalArgument,
-    const NavigatorScriptSimpleSelectorCoreDescriptor* secondLogicalArgument
+    const NavigatorScriptSimpleSelectorCoreDescriptor* secondLogicalArgument,
+    const NavigatorScriptSimpleSelectorCoreDescriptor*
+        firstLogicalArgumentSecond,
+    const NavigatorScriptSimpleSelectorCoreDescriptor*
+        secondLogicalArgumentSecond
     ) const
 {
     return selectorRelativeElementMatchResult(anchor, firstRelation,
@@ -4638,7 +4818,8 @@ NavigatorScriptHostAdapter::selectorRelativeChainMatchResult(
         , counters
 #endif
         , &secondSelector, secondRelation, context, firstLogicalArgument,
-        secondLogicalArgument);
+        secondLogicalArgument, firstLogicalArgumentSecond,
+        secondLogicalArgumentSecond);
 }
 
 NavigatorScriptSelectorMatchResult
@@ -4668,18 +4849,44 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
             NavigatorScriptRelativeSelectorRelation secondRelation,
             std::size_t firstArgumentSlot,
             std::size_t secondArgumentSlot) {
-            NavigatorScriptSimpleSelectorCoreDescriptor firstArgument;
-            NavigatorScriptSimpleSelectorCoreDescriptor secondArgument;
+            std::array<NavigatorScriptSimpleSelectorCoreDescriptor, 4u>
+                logicalArguments{};
             const NavigatorScriptSimpleSelectorCoreDescriptor*
                 firstArgumentPointer = nullptr;
             const NavigatorScriptSimpleSelectorCoreDescriptor*
+                firstArgumentSecondPointer = nullptr;
+            const NavigatorScriptSimpleSelectorCoreDescriptor*
                 secondArgumentPointer = nullptr;
+            const NavigatorScriptSimpleSelectorCoreDescriptor*
+                secondArgumentSecondPointer = nullptr;
+            const auto loadLogicalArguments = [&] (
+                std::size_t slot,
+                const NavigatorScriptSimpleSelectorCoreDescriptor*& first,
+                const NavigatorScriptSimpleSelectorCoreDescriptor*& second,
+                std::size_t localOffset) {
+                if (slot + 1u >= expression->logicalArguments.size() ||
+                    localOffset + 1u >= logicalArguments.size()) return false;
+                const auto& firstCompact = expression->logicalArguments[slot];
+                if ((firstCompact.flags &
+                        kCompactLogicalArgumentValidFlag) != 0u) {
+                    if (!expandCompactLogicalArgument(firstCompact, storage,
+                            logicalArguments[localOffset])) return false;
+                    first = &logicalArguments[localOffset];
+                }
+                const auto& secondCompact =
+                    expression->logicalArguments[slot + 1u];
+                if ((secondCompact.flags &
+                        kCompactLogicalArgumentValidFlag) != 0u) {
+                    if (!expandCompactLogicalArgument(secondCompact, storage,
+                            logicalArguments[localOffset + 1u])) return false;
+                    second = &logicalArguments[localOffset + 1u];
+                }
+                return true;
+            };
             if (isLogicalStatePseudo(firstCore.statePseudo)) {
-                if (firstArgumentSlot >= expression->logicalArguments.size() ||
-                    !expandCompactRelativeCore(
-                        expression->logicalArguments[firstArgumentSlot],
-                        storage, firstArgument)) return MatchResult::Invalid;
-                firstArgumentPointer = &firstArgument;
+                if (!loadLogicalArguments(firstArgumentSlot,
+                        firstArgumentPointer, firstArgumentSecondPointer, 0u))
+                    return MatchResult::Invalid;
             }
             if (secondStepIndex == kHasNoRelativeCore) {
                 return selectorRelativeElementMatchResult(anchor,
@@ -4689,7 +4896,8 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
 #endif
                     , nullptr,
                     NavigatorScriptRelativeSelectorRelation::Descendant,
-                    context, firstArgumentPointer, nullptr);
+                    context, firstArgumentPointer, nullptr,
+                    firstArgumentSecondPointer, nullptr);
             }
             if (secondStepIndex >= storage.hasRelativeCoreCount)
                 return MatchResult::Invalid;
@@ -4698,25 +4906,24 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
                     storage.hasRelativeCores[secondStepIndex], storage,
                     secondCore)) return MatchResult::Invalid;
             if (isLogicalStatePseudo(secondCore.statePseudo)) {
-                if (secondArgumentSlot >=
-                        expression->logicalArguments.size() ||
-                    !expandCompactRelativeCore(
-                        expression->logicalArguments[secondArgumentSlot],
-                        storage, secondArgument)) return MatchResult::Invalid;
-                secondArgumentPointer = &secondArgument;
+                if (!loadLogicalArguments(secondArgumentSlot,
+                        secondArgumentPointer,
+                        secondArgumentSecondPointer, 2u))
+                    return MatchResult::Invalid;
             }
             return selectorRelativeChainMatchResult(anchor, firstRelation,
                 firstCore, secondRelation, secondCore, storage
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
                 , nullptr
 #endif
-                , context, firstArgumentPointer, secondArgumentPointer);
+                , context, firstArgumentPointer, secondArgumentPointer,
+                firstArgumentSecondPointer, secondArgumentSecondPointer);
         };
 
         const MatchResult first = evaluateAlternative(
             relativeRelationForHasPseudo(core.statePseudo),
             selector.logicalSelector, expression->firstStepTwoCoreIndex,
-            hasExpressionRelation(*expression, 0u), 0u, 1u);
+            hasExpressionRelation(*expression, 0u), 0u, 2u);
         if (first != MatchResult::NoMatch ||
             (expression->flags & kHasExpressionTwoAlternativesFlag) == 0u)
             return first;
@@ -4731,7 +4938,7 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
         return evaluateAlternative(
             hasExpressionRelation(*expression, 2u), secondFirstCore,
             expression->secondStepTwoCoreIndex,
-            hasExpressionRelation(*expression, 4u), 2u, 3u);
+            hasExpressionRelation(*expression, 4u), 4u, 6u);
     }
     if (!isLogicalPseudo)
         return selectorCoreElementMatchResult(element, core, selector.nthA,
@@ -6875,15 +7082,16 @@ bool navigatorScriptElementTextContent(
 
 NavigatorScriptExecutionHarness::NavigatorScriptExecutionHarness(
     RuntimeLimits runtimeLimits, NavigatorScriptHostLimits hostLimits)
-    : runtime_(runtimeLimits), adapter_(1u, hostLimits)
+    : runtime_(runtimeLimits), adapter_(
+        std::make_unique<NavigatorScriptHostAdapter>(1u, hostLimits))
 {
-    adapter_.setFocusRequestCallback(
+    adapter_->setFocusRequestCallback(
         &NavigatorScriptExecutionHarness::focusRequestCallback, this);
-    adapter_.setDispatchCompleteCallback(
+    adapter_->setDispatchCompleteCallback(
         &NavigatorScriptExecutionHarness::dispatchCompleteCallback, this);
-    adapter_.setActivationDefaultActionCallback(
+    adapter_->setActivationDefaultActionCallback(
         &NavigatorScriptExecutionHarness::activationDefaultActionCallback, this);
-    runtime_.setHostAdapter(&adapter_);
+    runtime_.setHostAdapter(adapter_.get());
 }
 
 bool NavigatorScriptExecutionHarness::installDocumentGlobal(
@@ -6905,7 +7113,7 @@ bool NavigatorScriptExecutionHarness::loadParsedDocument(
         }
     }
     document_ = std::move(document);
-    adapter_.attachDocument(document_, runtime_.hostGeneration());
+    adapter_->attachDocument(document_, runtime_.hostGeneration());
     document_.formRuntimeState = gxos::web::FormRuntimeStateTable{};
     document_.formRuntimeState.initialized = true;
     document_.formRuntimeState.documentGeneration = 1u;
@@ -7025,7 +7233,7 @@ bool NavigatorScriptExecutionHarness::invalidateDocumentGeneration(
     RuntimeErrorCode& error)
 {
     if (!runtime_.invalidateHostGeneration(error)) return false;
-    adapter_.setGeneration(runtime_.hostGeneration());
+    adapter_->setGeneration(runtime_.hostGeneration());
     return true;
 }
 
@@ -7042,13 +7250,13 @@ ScriptResult NavigatorScriptExecutionHarness::execute(const std::string& source)
 bool NavigatorScriptExecutionHarness::dispatchClick(std::uint64_t serial,
     RuntimeErrorCode& error, bool* defaultPrevented)
 {
-    return adapter_.dispatchClick(runtime_, serial, error, defaultPrevented);
+    return adapter_->dispatchClick(runtime_, serial, error, defaultPrevented);
 }
 
 bool NavigatorScriptExecutionHarness::dispatchSubmit(
     std::uint64_t formSerial, RuntimeErrorCode& error, bool* defaultPrevented)
 {
-    return adapter_.dispatchSubmitEvent(runtime_, formSerial, error,
+    return adapter_->dispatchSubmitEvent(runtime_, formSerial, error,
         defaultPrevented);
 }
 
@@ -7082,7 +7290,7 @@ bool NavigatorScriptExecutionHarness::activationDefaultActionCallback(
 bool NavigatorScriptExecutionHarness::performElementDefaultAction(
     HostInstanceId serial, NavigatorScriptActivationProvenance)
 {
-    if (!loaded_ || serial == 0 || adapter_.document() != &document_)
+    if (!loaded_ || serial == 0 || adapter_->document() != &document_)
         return false;
     const gxos::web::DocBlock* block = nullptr;
     for (const gxos::web::DocBlock& candidate : document_.blocks) {
@@ -7099,11 +7307,11 @@ bool NavigatorScriptExecutionHarness::performElementDefaultAction(
         block->type == gxos::web::BlockType::FormRadio ||
         block->type == gxos::web::BlockType::FormSelect) {
         bool changed = false;
-        if (!adapter_.setFormControlFromUser(serial, changed)) return true;
+        if (!adapter_->setFormControlFromUser(serial, changed)) return true;
         if (changed) {
             RuntimeErrorCode error = RuntimeErrorCode::None;
-            if (!adapter_.dispatchInputEvent(runtime_, serial, error) ||
-                !adapter_.dispatchChangeEvent(runtime_, serial, error))
+            if (!adapter_->dispatchInputEvent(runtime_, serial, error) ||
+                !adapter_->dispatchChangeEvent(runtime_, serial, error))
                 return false;
         }
         return true;
@@ -7114,7 +7322,7 @@ bool NavigatorScriptExecutionHarness::performElementDefaultAction(
         block->formControl.parentFormSerial != 0) {
         RuntimeErrorCode error = RuntimeErrorCode::None;
         bool defaultPrevented = false;
-        if (!adapter_.dispatchSubmitEvent(runtime_,
+        if (!adapter_->dispatchSubmitEvent(runtime_,
                 block->formControl.parentFormSerial, error,
                 &defaultPrevented)) return false;
     } else if (block->type == gxos::web::BlockType::FormSubmit &&
@@ -7122,7 +7330,7 @@ bool NavigatorScriptExecutionHarness::performElementDefaultAction(
         block->formControl.parentFormSerial != 0) {
         RuntimeErrorCode error = RuntimeErrorCode::None;
         bool defaultPrevented = false;
-        if (!adapter_.requestFormReset(runtime_,
+        if (!adapter_->requestFormReset(runtime_,
                 block->formControl.parentFormSerial, error,
                 &defaultPrevented)) return false;
     }
@@ -7133,7 +7341,7 @@ bool NavigatorScriptExecutionHarness::requestFocus(HostInstanceId serial,
     bool focus)
 {
     const gxos::web::HtmlElementRef* element = findElementInDocument(document_,
-        serial, adapter_.limits().maxDocumentNodes);
+        serial, adapter_->limits().maxDocumentNodes);
     const gxos::web::DocBlock* focusBlock = nullptr;
     for (const gxos::web::DocBlock& candidate : document_.blocks) {
         if (candidate.formControl.logicalSerial == serial) {
@@ -7156,7 +7364,7 @@ bool NavigatorScriptExecutionHarness::requestFocus(HostInstanceId serial,
         // blur() never clears a different element's authoritative owner.
         return true;
     }
-    if (focusTransitionActive_ || adapter_.eventDispatchActive()) {
+    if (focusTransitionActive_ || adapter_->eventDispatchActive()) {
         pendingFocusRequest_ = true;
         pendingFocusSerial_ = serial;
         pendingFocusGain_ = focus;
@@ -7173,7 +7381,7 @@ bool NavigatorScriptExecutionHarness::focusElementInternal(
 {
     error = RuntimeErrorCode::None;
     const gxos::web::HtmlElementRef* element = findElementInDocument(document_,
-        serial, adapter_.limits().maxDocumentNodes);
+        serial, adapter_->limits().maxDocumentNodes);
     const gxos::web::DocBlock* focusBlock = nullptr;
     for (const gxos::web::DocBlock& candidate : document_.blocks) {
         if (candidate.formControl.logicalSerial == serial) {
@@ -7191,13 +7399,13 @@ bool NavigatorScriptExecutionHarness::focusElementInternal(
     if (focusedElementSerial_ == serial) return true;
     const std::uint64_t previousSerial = focusedElementSerial_;
     if (previousSerial != 0) {
-        if (!adapter_.dispatchFocusEvent(runtime_, previousSerial, false, false,
-                serial, error) || !adapter_.dispatchFocusEvent(runtime_,
+        if (!adapter_->dispatchFocusEvent(runtime_, previousSerial, false, false,
+                serial, error) || !adapter_->dispatchFocusEvent(runtime_,
                 previousSerial, false, true, serial, error)) return false;
         bool changed = false;
-        if (!adapter_.commitFormEditSession(previousSerial, changed))
+        if (!adapter_->commitFormEditSession(previousSerial, changed))
             changed = false;
-        if (changed && !adapter_.dispatchChangeEvent(runtime_, previousSerial,
+        if (changed && !adapter_->dispatchChangeEvent(runtime_, previousSerial,
                 error)) return false;
     }
     document_.formRuntimeState.initialized = true;
@@ -7206,7 +7414,7 @@ bool NavigatorScriptExecutionHarness::focusElementInternal(
     document_.formRuntimeState.focusedDocumentGeneration = 1u;
     document_.formRuntimeState.focusValid = true;
     focusedElementSerial_ = serial;
-    adapter_.beginFormEditSession(serial);
+    adapter_->beginFormEditSession(serial);
     focusedInputCaret_ = 0;
     for (const gxos::web::DocBlock& block : document_.blocks) {
         if (block.formControl.logicalSerial == serial &&
@@ -7216,9 +7424,9 @@ bool NavigatorScriptExecutionHarness::focusElementInternal(
             break;
         }
     }
-    if (!adapter_.dispatchFocusEvent(runtime_, serial, true, false,
+    if (!adapter_->dispatchFocusEvent(runtime_, serial, true, false,
             previousSerial, error) ||
-        !adapter_.dispatchFocusEvent(runtime_, serial, true, true,
+        !adapter_->dispatchFocusEvent(runtime_, serial, true, true,
             previousSerial, error))
         return false;
     return true;
@@ -7230,13 +7438,13 @@ bool NavigatorScriptExecutionHarness::clearFocusInternal(
     error = RuntimeErrorCode::None;
     if (focusedElementSerial_ == 0) return true;
     const std::uint64_t previousSerial = focusedElementSerial_;
-    if (!adapter_.dispatchFocusEvent(runtime_, previousSerial, false, false,
-            0, error) || !adapter_.dispatchFocusEvent(runtime_, previousSerial,
+    if (!adapter_->dispatchFocusEvent(runtime_, previousSerial, false, false,
+            0, error) || !adapter_->dispatchFocusEvent(runtime_, previousSerial,
             false, true, 0, error)) return false;
     bool changed = false;
-    if (!adapter_.commitFormEditSession(previousSerial, changed))
+    if (!adapter_->commitFormEditSession(previousSerial, changed))
         changed = false;
-    if (changed && !adapter_.dispatchChangeEvent(runtime_, previousSerial,
+    if (changed && !adapter_->dispatchChangeEvent(runtime_, previousSerial,
             error)) return false;
     document_.formRuntimeState.focusedLogicalSerial = 0;
     document_.formRuntimeState.focusedDocumentGeneration = 0;
@@ -7305,7 +7513,7 @@ bool NavigatorScriptExecutionHarness::dispatchFocusedKeyboardEvent(
     int keyCode, bool down, bool shiftPressed, RuntimeErrorCode& error,
     bool* defaultPrevented)
 {
-    return adapter_.dispatchKeyboardEvent(runtime_, focusedElementSerial_,
+    return adapter_->dispatchKeyboardEvent(runtime_, focusedElementSerial_,
         keyCode, down, shiftPressed, error, defaultPrevented);
 }
 
@@ -7321,7 +7529,7 @@ bool NavigatorScriptExecutionHarness::dispatchFocusedUserEdit(
     }
 
     bool keydownDefaultPrevented = false;
-    if (!adapter_.dispatchKeyboardEvent(runtime_, focusedElementSerial_,
+    if (!adapter_->dispatchKeyboardEvent(runtime_, focusedElementSerial_,
             keyCode, true, shiftPressed, error, &keydownDefaultPrevented)) {
         return false;
     }
@@ -7371,9 +7579,9 @@ bool NavigatorScriptExecutionHarness::dispatchFocusedUserEdit(
             nextCaret = caret + 1;
         }
         if (editedValue != block->inputValue &&
-            adapter_.setFormValueFromUser(serial, editedValue)) {
+            adapter_->setFormValueFromUser(serial, editedValue)) {
             focusedInputCaret_ = nextCaret;
-            if (!adapter_.dispatchInputEvent(runtime_, serial, error)) {
+            if (!adapter_->dispatchInputEvent(runtime_, serial, error)) {
                 return false;
             }
         }
@@ -7384,7 +7592,7 @@ bool NavigatorScriptExecutionHarness::dispatchFocusedUserEdit(
     }
 
     const std::uint64_t keyupTarget = focusedElementSerial_;
-    return adapter_.dispatchKeyboardEvent(runtime_, keyupTarget, keyCode,
+    return adapter_->dispatchKeyboardEvent(runtime_, keyupTarget, keyCode,
         false, shiftPressed, error, nullptr);
 }
 
@@ -7399,14 +7607,14 @@ bool NavigatorScriptExecutionHarness::dispatchFocusedUserFormControl(
     }
     if (defaultPrevented != nullptr) *defaultPrevented = false;
     bool changed = false;
-    if (!adapter_.setFormControlFromUser(focusedElementSerial_, changed)) {
+    if (!adapter_->setFormControlFromUser(focusedElementSerial_, changed)) {
         error = RuntimeErrorCode::StaleHostObject;
         return false;
     }
     if (!changed) return true;
-    if (!adapter_.dispatchInputEvent(runtime_, focusedElementSerial_, error))
+    if (!adapter_->dispatchInputEvent(runtime_, focusedElementSerial_, error))
         return false;
-    if (!adapter_.dispatchChangeEvent(runtime_, focusedElementSerial_, error))
+    if (!adapter_->dispatchChangeEvent(runtime_, focusedElementSerial_, error))
         return false;
     return true;
 }

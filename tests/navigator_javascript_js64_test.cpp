@@ -143,14 +143,14 @@ int main()
         "JS64 keeps the outer simple-selector size");
     static_assert(sizeof(NavigatorScriptCompactRelativeSelectorCoreDescriptor) ==
         18u, "JS64 stores each second alternative in 18 bytes");
-    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 1856u,
+    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 2176u,
         "JS65 stores bounded chains in fixed compact pools");
     static_assert(NavigatorScriptRelativeSelectorTestAccess::
-        collectionRecordBytes() == 1872u,
+        collectionRecordBytes() == 2192u,
         "JS65 selector collection record size is measured");
     static_assert(NavigatorScriptRelativeSelectorTestAccess::
         collectionRecordBytes() * kNavigatorScriptMaxSelectorCollections ==
-            239616u,
+            280576u,
         "JS65 128-record registry memory is measured");
 
     const std::string html =
@@ -280,8 +280,10 @@ var commas = anchor.matches(':has([data-key="alpha,beta"], .never)');
 var invalid = [':has()', ':has( )', ':has(, .a)', ':has(.a,)',
  ':has(.a,,.b)', ':has(.a,.b,.c)', ':has(> , .a)', ':has(+)',
  ':has(~)', ':has(.a .b .c)', ':has(.a, .b, .c)',
- ':has(> .a + .b + .c)', ':has(:not(.x, .y))', ':has(:is(.x, .y))',
- ':has(:where(.x, .y))', ':has(:has(.x), .y)',
+ ':has(> .a + .b + .c)', ':has(:not(.x, .y, .z))',
+ ':has(:is(.x, .y, .z))', ':has(:where(.x, .y, .z))',
+ ':has(:is(:not(.x), .y))', ':has(:where(:is(.x), .y))',
+ ':has(:not(:where(.x), .y))', ':has(:has(.x), .y)',
  ':has(:nth-child(2), .y)', ':has(.a):focus'];
 document.querySelector('#direct').setAttribute('class', 'a b c');
 var rejected = true;

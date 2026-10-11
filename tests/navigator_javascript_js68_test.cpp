@@ -273,25 +273,26 @@ int main()
         "JS68 does not grow the outer simple-selector descriptor");
     static_assert(sizeof(NavigatorScriptCompactRelativeSelectorCoreDescriptor) ==
         18u, "JS68 preserves compact relative cores");
-    static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 76u,
-        "JS68 preserves JS65 expression metadata");
+    static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 116u,
+        "JS69 keeps two logical arguments fixed per relative core");
     static_assert(sizeof(NavigatorScriptSelectorMatchContext) == 16u,
         "JS68 reuses the call-local JS66 match context");
-    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 1856u,
-        "JS68 adds only four fixed logical-argument cores per :has()");
+    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 2176u,
+        "JS69 adds compact second logical arguments per :has() core");
     static_assert(sizeof(gxos::web::HtmlElementRef) == 440u,
         "JS68 does not grow document structural records");
     static_assert(sizeof(gxos::web::HtmlElementContentMetadata) == 24u,
         "JS68 does not grow document content metadata");
     static_assert(NavigatorScriptRelativeSelectorTestAccess::
-        collectionRecordBytes() == 1872u,
-        "JS68 collection records include the bounded logical slots");
+        collectionRecordBytes() == 2192u,
+        "JS69 collection records include the bounded logical slots");
     static_assert(NavigatorScriptRelativeSelectorTestAccess::
         collectionRecordBytes() * kNavigatorScriptMaxSelectorCollections ==
-            239616u,
-        "JS68 fixed logical slots keep the 128-entry registry bounded");
+            280576u,
+        "JS69 fixed logical slots keep the 128-entry registry bounded");
 
-    NavigatorScriptExecutionHarness harness;
+    const auto harnessStorage = std::make_unique<NavigatorScriptExecutionHarness>();
+    auto& harness = *harnessStorage;
     RuntimeErrorCode error = RuntimeErrorCode::None;
     expect(harness.loadHtml("file:///js68.html", kJs68Html, error) &&
         error == RuntimeErrorCode::None, "JS68 structural fixture loads");
@@ -393,7 +394,7 @@ var ok = first.matches(':has(> .row:not(.valid), + .badge)') &&
     shortCircuitExpression.flags = 0xC0u;
     auto& firstLogicalArgument =
         shortCircuitExpression.logicalArguments[0];
-    firstLogicalArgument.valid = true;
+    firstLogicalArgument.flags = 0x01u;
     firstLogicalArgument.classTokenCount = 1u;
     firstLogicalArgument.classBlockLength = 7u;
     shortCircuitStorage.hasRelativeCoreCount = 1u;
@@ -514,18 +515,18 @@ var invalid = [':has()', ':has(:scope())', ':has(:scope(anything))',
  ':has(> .a > :scope > .b)', ':has(.a, .b, :scope)', ':has(:is())',
  ':has(:where())', ':has(:not())', ':has(:is(:not(.a)))',
  ':has(:where(:is(.a)))', ':has(:not(:where(.a)))',
- ':has(:not(:has(.a)))', ':has(:has(.a))', ':has(:is(.a, .b))',
- ':has(:is(.a, .b))', ':has(:where(.a, .b))',
- ':has(:not(.a, .b))', ':has(.a:is(.b):focus)',
+ ':has(:not(:has(.a)))', ':has(:has(.a))',
+ ':has(:is(.a, .b, .c))', ':has(:where(.a, .b, .c))',
+ ':has(:not(.a, .b, .c))', ':has(.a:is(.b):focus)',
  ':has(:not(.a) .b .c)', ':has(:is(.a), .b, .c)',
  ':has(> .a > :not(.b) > .c)', ':has(:is(.a)'];
 var rejected = true;
 for (var i = 0; i !== invalid.length; i++)
  if (document.querySelector(invalid[i]) !== null) rejected = false;
 var listRejected = document.querySelector(
- '#list-a:has(:is(.a, .b))') === null && document.querySelector(
- '#list-ab:has(:is(.a, .b))') === null && document.querySelector(
- '#list-a:has(:not(.a, .b))') === null;
+ '#list-a:has(:is(.a, .b, .c))') === null && document.querySelector(
+ '#list-ab:has(:is(.a, .b, .c))') === null && document.querySelector(
+ '#list-a:has(:not(.a, .b, .c))') === null;
 var leaf = document.querySelector('#leaf');
 var panel = document.querySelector('#panel');
 var logical = document.querySelector('#logical-panel');
@@ -540,7 +541,8 @@ var ok = rejected && listRejected && sequence &&
 
     for (unsigned first = 0u; first < 4u; ++first) {
         for (unsigned second = 0u; second < 4u; ++second) {
-            NavigatorScriptExecutionHarness pairHarness;
+            const auto pairHarnessStorage = std::make_unique<NavigatorScriptExecutionHarness>();
+            auto& pairHarness = *pairHarnessStorage;
             error = RuntimeErrorCode::None;
             const std::string pairHtml = relationPairHtml(first, second);
             const bool loaded = pairHarness.loadHtml("file:///js68-pair.html",
@@ -588,7 +590,8 @@ var ok = rejected && listRejected && sequence &&
         }
     }
 
-    NavigatorScriptExecutionHarness eventHarness;
+    const auto eventHarnessStorage = std::make_unique<NavigatorScriptExecutionHarness>();
+    auto& eventHarness = *eventHarnessStorage;
     error = RuntimeErrorCode::None;
     expect(eventHarness.loadHtml("file:///js68-events.html", kJs68Html, error) &&
         error == RuntimeErrorCode::None, "JS68 Event fixture loads");
@@ -656,7 +659,8 @@ var ok = true;
         reportEventValue("eventMetadata", eventMetadata);
     }
 
-    NavigatorScriptExecutionHarness replacementHarness;
+    const auto replacementHarnessStorage = std::make_unique<NavigatorScriptExecutionHarness>();
+    auto& replacementHarness = *replacementHarnessStorage;
     error = RuntimeErrorCode::None;
     expect(replacementHarness.loadHtml("file:///js68-old.html",
         "<html><body><div class='ancestor'><section id='panel' class='panel'>"
@@ -727,7 +731,8 @@ var ok = true;
         "rows.length === 1;",
         "new generation establishes a fresh scope without stale leakage");
 
-    NavigatorScriptExecutionHarness corruptHarness;
+    const auto corruptHarnessStorage = std::make_unique<NavigatorScriptExecutionHarness>();
+    auto& corruptHarness = *corruptHarnessStorage;
     error = RuntimeErrorCode::None;
     expect(corruptHarness.loadHtml("file:///js68-corrupt.html",
         "<html><body><section id='panel' class='panel'><div id='row' class='row'>"
@@ -751,7 +756,8 @@ var ok = true;
         "var ok = !panel.matches(':has(> :not(.invalid))');",
         "out-of-range structural serial cannot satisfy :not()");
 
-    NavigatorScriptExecutionHarness capacityHarness;
+    const auto capacityHarnessStorage = std::make_unique<NavigatorScriptExecutionHarness>();
+    auto& capacityHarness = *capacityHarnessStorage;
     std::string capacityHtml = "<html><body><section id='panel' class='panel'>";
     for (std::size_t index = 0u; index < 495u; ++index)
         capacityHtml += "<div class='row'><i></i></div>";
@@ -934,7 +940,8 @@ var ok = all.length === 15 && first === all[0] &&
 #endif
     std::cout << ", query-workload=" << capacityElapsed << "us\n";
 
-    NavigatorScriptExecutionHarness fixtureHarness;
+    const auto fixtureHarnessStorage = std::make_unique<NavigatorScriptExecutionHarness>();
+    auto& fixtureHarness = *fixtureHarnessStorage;
     error = RuntimeErrorCode::None;
     std::ifstream fixtureFile("navigator-smoke/javascript-js68.html",
         std::ios::binary);

@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 
 namespace gxos {
@@ -219,6 +220,27 @@ struct NavigatorScriptCompactRelativeSelectorCoreDescriptor {
 static_assert(sizeof(NavigatorScriptCompactRelativeSelectorCoreDescriptor) ==
     18u, "relative cores must use compact bounded storage");
 
+// Logical arguments are even more compact because their booleans share one
+// flags byte. Class tokens still refer to the selector's bounded text buffer.
+struct NavigatorScriptCompactLogicalArgumentDescriptor {
+    std::uint8_t flags = 0u;
+    std::uint8_t tagOffset = 0u;
+    std::uint16_t tagLength = 0u;
+    std::uint8_t idOffset = 0u;
+    std::uint8_t idLength = 0u;
+    std::uint8_t classTokenCount = 0u;
+    std::uint8_t classBlockOffset = 0u;
+    std::uint8_t classBlockLength = 0u;
+    std::uint8_t attributeNameOffset = 0u;
+    std::uint8_t attributeNameLength = 0u;
+    std::uint8_t attributeValueOffset = 0u;
+    std::uint8_t attributeValueLength = 0u;
+    NavigatorScriptStatePseudo statePseudo =
+        NavigatorScriptStatePseudo::None;
+};
+static_assert(sizeof(NavigatorScriptCompactLogicalArgumentDescriptor) ==
+    14u, "logical arguments must use compact fixed storage");
+
 // One fixed-size record describes one :has() expression. The first
 // alternative's first step is stored inline in logicalSelector, so this record
 // only points at optional step-two and second-alternative cores. Relation
@@ -228,14 +250,14 @@ struct NavigatorScriptHasExpressionDescriptor {
     std::uint8_t secondFirstCoreIndex = 0xFFu;
     std::uint8_t secondStepTwoCoreIndex = 0xFFu;
     std::uint8_t flags = 0u;
-    // One restricted, nonfunctional argument can accompany each of the four
-    // possible relative cores. These records are expression-local and do not
-    // introduce recursive selector storage.
-    std::array<NavigatorScriptCompactRelativeSelectorCoreDescriptor, 4u>
+    // Two restricted, nonfunctional arguments can accompany each of the four
+    // possible relative cores. Packed flags keep these expression-local
+    // records compact; they do not introduce recursive selector storage.
+    std::array<NavigatorScriptCompactLogicalArgumentDescriptor, 8u>
         logicalArguments{};
 };
-static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 76u,
-    "JS68 :has() logical arguments must stay fixed and bounded");
+static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 116u,
+    "JS69 :has() logical argument lists must stay fixed and bounded");
 
 enum class NavigatorScriptSelectorMatchResult : std::uint8_t {
     Invalid = 0u,
@@ -590,6 +612,10 @@ private:
             nullptr
         , const NavigatorScriptSimpleSelectorCoreDescriptor*
             secondLogicalArgument = nullptr
+        , const NavigatorScriptSimpleSelectorCoreDescriptor*
+            logicalArgumentSecond = nullptr
+        , const NavigatorScriptSimpleSelectorCoreDescriptor*
+            secondLogicalArgumentSecond = nullptr
         ) const;
     NavigatorScriptSelectorMatchResult selectorRelativeChainMatchResult(
         const HostObjectReference& anchor,
@@ -607,6 +633,10 @@ private:
             nullptr
         , const NavigatorScriptSimpleSelectorCoreDescriptor* secondLogicalArgument =
             nullptr
+        , const NavigatorScriptSimpleSelectorCoreDescriptor*
+            firstLogicalArgumentSecond = nullptr
+        , const NavigatorScriptSimpleSelectorCoreDescriptor*
+            secondLogicalArgumentSecond = nullptr
         ) const;
     NavigatorScriptSelectorMatchResult selectorSimpleElementMatchResult(
         const gxos::web::HtmlElementRef& element,
@@ -760,8 +790,8 @@ public:
 
     RuntimeContext& runtime() { return runtime_; }
     const RuntimeContext& runtime() const { return runtime_; }
-    NavigatorScriptHostAdapter& hostAdapter() { return adapter_; }
-    const NavigatorScriptHostAdapter& hostAdapter() const { return adapter_; }
+    NavigatorScriptHostAdapter& hostAdapter() { return *adapter_; }
+    const NavigatorScriptHostAdapter& hostAdapter() const { return *adapter_; }
     gxos::web::WebDocument& document() { return document_; }
     const gxos::web::WebDocument& document() const { return document_; }
     bool loaded() const { return loaded_; }
@@ -787,7 +817,9 @@ private:
         bool resetRealm, RuntimeErrorCode& error);
 
     RuntimeContext runtime_;
-    NavigatorScriptHostAdapter adapter_;
+    // The test adapter owns large fixed selector and callback tables. Keep
+    // that bounded storage out of small native test thread stacks.
+    std::unique_ptr<NavigatorScriptHostAdapter> adapter_;
     gxos::web::WebDocument document_;
     std::uint64_t focusedElementSerial_ = 0;
     int focusedInputCaret_ = 0;

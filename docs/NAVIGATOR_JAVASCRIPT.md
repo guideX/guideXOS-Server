@@ -7836,3 +7836,211 @@ and byte totals. No kernel build or QEMU run was needed or attempted.
 including correlated chains and existing API scope context. Recursive logical
 forms, nested `:has()`, inner selector lists, third steps, and third
 alternatives remain deferred. The seven historical CSS failures are unchanged.
+
+#### JS69 bounded logical selector lists inside `:has()`
+
+JS69 extends the JS68 functional predicate in each supported relative simple
+core from one restricted argument to one or two comma-separated arguments:
+
+```css
+:has(:is(.warning, .error))
+:has(> :where(.ready, .selected))
+:has(.row > :not(.disabled, .hidden))
+```
+
+The grammar is limited to `:is(A)`, `:is(A, B)`, `:where(A)`,
+`:where(A, B)`, `:not(A)`, and `:not(A, B)` inside the already bounded
+`:has()` alternatives. Each member is independently parsed with the existing
+restricted nonfunctional core grammar; list members cannot contain relation
+chains or another functional selector. The 256-byte input bound, four outer
+selector-list members, two `:has()` alternatives, two relative steps, and one
+functional nesting level remain unchanged. Empty entries, a third logical
+member, nested functions, nested `:has()`, malformed grouping, and unsupported
+relations remain rejected.
+
+The parser assigns commas at three levels. The outer selector parser splits
+only at top level while tracking functional depth, attributes, and quoted
+attribute strings. `parseHasPseudo` then splits its one or two relative
+alternatives only outside an attribute or functional argument. The logical
+core parser splits at most one comma outside attributes and quoted values;
+`findLogicalArgumentClose` rejects nested parentheses and malformed closing
+brackets before forgiving member handling. Empty and excess entries reject
+the whole selector. Thus an outer list, a `:has()` alternative list, and an
+inner logical list can coexist without a naïve comma split.
+
+`:is(A, B)` and `:where(A, B)` match when either valid member matches and
+short-circuit on the first match. Within this supported subset their
+JavaScript Boolean behavior is identical; CSS specificity is unchanged and
+outside scope. These two functions use forgiving handling only for an
+individually invalid member whose boundary is safe: that member is marked
+invalid and ignored, while the other member can still match. If both are
+invalid, the predicate matches no candidate. Empty entries, excess members,
+unbalanced brackets or quotes, nested functions, and other structural syntax
+errors reject the selector rather than being discarded. `:not(A, B)` is
+strict: either invalid member rejects the selector, and a valid candidate
+matches only if neither member matches (`NOT (A OR B)`).
+
+Candidate and relation validation still precede logical evaluation and
+negation. The candidate must have a valid current handle and generation, pass
+the enclosing relative relationship, and satisfy the nonlogical compound
+conditions before `:not()` can return true. The surrounding `:has()` remains
+existential, so no related candidate is always false, including for
+`:has(:not(...))`. The second step remains correlated to its first-step
+intermediate. `:scope` inside either logical list member keeps the original
+public API scope instead of rebinding to the subject or visited candidate.
+The two relative alternatives retain isolated OR evaluation and successful
+short-circuiting.
+
+Logical storage remains fixed and nonrecursive. Each 116-byte
+`NavigatorScriptHasExpressionDescriptor` contains eight 14-byte compact
+argument records: two members for each of its four possible relative cores.
+One selector descriptor has eight expression records across four outer
+members and two sides, so the maximum is 64 fixed compact logical arguments.
+The existing 24-entry relative-core pool is unchanged, and matching expands
+arguments into bounded core storage rather than allocating an AST, reparsing,
+or caching results. Compared with JS68, the selector descriptor grows from
+1,856 to 2,176 bytes (+320), a selector collection record from 1,872 to 2,192
+bytes (+320), and the 128-record registry from 239,616 to 280,576 bytes
+(+40,960). The 16-byte match context, 32-byte core, 68-byte simple selector,
+440-byte `HtmlElementRef`, and 24-byte content metadata remain unchanged.
+
+The native test harness now owns its fixed-size `NavigatorScriptHostAdapter`
+through a `unique_ptr`. This keeps the approximately 280 KiB adapter record
+array off test-call stacks that previously overflowed in an older JS26 test.
+This test-only ownership change does not add a production allocation: the
+production adapter remains statically allocated. GCC 15.2.0 with `-O2
+-fstack-usage` reports a 944-byte `parseSimpleSelectorCore` frame (with the
+bounded `:has()` parse inlined), 112 bytes for `parseBoundedSelector`, 528
+bytes for the relative element evaluator, 128 bytes for the correlated-chain
+evaluator, and 240 bytes for the simple-element wrapper. The
+`parseHasPseudo` alternative-parsing lambda reports 224 bytes. These are
+per-function frame measurements; the grammar still has a fixed maximum parse
+depth, and matching is iterative.
+
+The JS69 native suite is `tests/navigator_javascript_js69_test.cpp`, invoked
+by `scripts/smoke-navigator-javascript-js69.ps1`. It covers one-member
+backward compatibility, OR/NONE results, first and second member evaluation,
+forgiving and strict invalid members, empty/excess/malformed/nested syntax,
+all three comma levels, quoted commas, all four relations, two-step
+correlation, alternatives, scope, public query APIs, ordering and
+deduplication, generation replacement, live state, nested Event dispatch,
+fixed-pool bounds, parser atomicity, and 1,024-Element near-capacity counts.
+The hosted fixture is `navigator-smoke/javascript-js69.html`; `server.cpp`
+checks its initial and nested Event result markers against the production
+Navigator executable.
+
+#### JS69 final qualification record
+
+The qualification started in `D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT`
+on branch `NAVIGATOR_JAVASCRIPT_SUPPORT`, at clean HEAD
+`6fc3963711cad5b8fc499eafb84b3447ab8d804c` (`navigator: add JS68 bounded
+logical pseudos inside has`). The live upstream divergence was **0 ahead / 0
+behind** at start; the prompt's expected divergence differed, so the live
+repository state was used. No JS69 or later implementation was present.
+`.phase` was absent as expected for this checkout and was not created. The
+branch and worktree topology were preserved; no fetch, reset, clean, stash, or
+push was used.
+
+The parser accepts one or two restricted members for each of `:is()`,
+`:where()`, and `:not()` within either relative step and either `:has()`
+alternative. One-member JS68 selectors retain their behavior. The native
+suite proves OR behavior for `:is()` and `:where()`, NONE behavior for
+`:not()`, first and second member matches, duplicates, order reversal,
+forgiving invalid members for `:is()`/`:where()`, and strict invalid-member
+rejection for `:not()`. Both invalid forgiving members produce no match.
+Candidate validity, including generation, and structural eligibility are
+validated before negation. `:has(:not(...))` remains false when no related
+candidate exists.
+
+The delimiter scanners keep outer selector commas, relative-alternative
+commas, and logical-list commas at their owning grammar level, respecting
+attributes and quoted commas. Empty members, third members, malformed
+quotes/brackets/parentheses, unmatched closing brackets, nested functions,
+nested `:has()`, and relation chains within a logical member reject the
+selector. A safely delimited unsupported simple member can be discarded only
+by forgiving `:is()`/`:where()` handling. Two-step candidates remain
+correlated; `:scope` uses the original API root; alternatives remain
+independent. Public query, collection ordering and identity, deduplication,
+live attributes/checked/focus, generation replacement, and nested Event
+dispatch passed.
+
+The 14-byte compact argument format stores eight logical slots in each
+116-byte `NavigatorScriptHasExpressionDescriptor`; those slots cover both
+members for the four possible relative cores. Across the selector's eight
+expression records, the maximum is 64 compact arguments. The 24-entry
+relative-core pool is unchanged. JS68-to-JS69 measured sizes are: descriptor
+**1,856 -> 2,176 B**, collection record **1,872 -> 2,192 B**, and the
+128-record registry **239,616 -> 280,576 B**. The match context (**16 B**),
+simple-selector core (**32 B**), simple-selector descriptor (**68 B**),
+`HtmlElementRef` (**440 B**), and content metadata (**24 B**) are unchanged.
+
+GCC 15.2.0 `-O2 -fstack-usage` measured these per-function frames: bounded
+selector member **192 B** (JS68: 176 B), bounded selector **112 B** (112 B),
+`parseSimpleSelectorCore` **944 B** (336 B; the bounded `:has()` parse is
+inlined), the `parseHasPseudo` alternative-parser lambda **224 B** (208 B),
+relative element evaluation **528 B** (496 B), correlated-chain evaluation
+**128 B** (112 B), `querySelectorAll` **2,384 B** (2,064 B), and
+`getElementsBySimpleSelector` **2,496 B** (2,176 B). The shared simple-match
+lambda remained **352 B**. These are compiler per-function stack reports;
+the selector parse depth remains fixed and relative matching is iterative.
+The native test harness holds its fixed adapter through `unique_ptr` so its
+roughly 280 KiB collection array does not occupy test-call stack space. This
+test-only change adds no production allocation: the production adapter stays
+statically allocated.
+
+Across two optimized 1,024-Element query runs, measured workload time ranged
+from **116,796 to 200,904 us** under concurrent build load; there is no timing
+threshold. The deterministic late two-step `:scope` case inspected 2,030
+records with 3 parent hops, 8 serial/index resolutions, 3,984 simple tests,
+1,992 logical tests, and one early exit. A late successful `:is()` case
+inspected 5,008 records with 1,494 parent hops and 2,986 resolutions. A
+full-false `:not()` case inspected 5,183 records; the zero-target case
+performed no logical or simple predicate tests and returned false.
+
+`tests/navigator_javascript_js69_test.cpp` passed **72/72** with strict
+`-Wall -Wextra -Werror -pedantic` compilation; the production parser,
+adapter, and runtime strict syntax build passed. Focused historical results
+were JS63 **8/8**, JS64 **24/24**, JS65 **18/18**, JS66 **24/24**, JS67
+**44/44**, and JS68 **69/69**. The refreshed JavaScript matrix passed
+**71/71 scripts**, including JS59–JS69, the JS62R hardening lanes, and the
+lexer, parser, and runtime lanes. The first hosted aggregate exposed a stale
+JS64 HTML negative list that still rejected two-member logical selectors. It
+was replaced with three-member and nested-function rejection cases; the
+rerun's JS64 fixture and Event markers passed.
+
+`build.bat` succeeded from the JS69 source state. The fresh executable was
+`D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe`, **8,469,180
+bytes**, SHA-256
+`A35DEE4B1EF9FE1449A572BE22385F878AE2E4DB04683CF28C2A048A2D1254A8`. Hosted
+process PID **7992** reported the same executable path and SHA-256. The JS69
+initial marker was `JS69:initial:assertions=74:failures=0:malformed=true`; the
+nested Event marker was
+`JS69:event=true:nested=true:metadata=true:assertions=77:failures=0`.
+
+The final hosted aggregate recorded **635 passed / 7 failed / 642 total**.
+There were no JavaScript failures. The seven failures were the existing CSS
+baseline: CSS 3C, CSS 3G, CSS 6A, three CSS 6B checks, and CSS 6C. No CSS code
+was changed.
+
+The starting ignored-artifact manifest contained **1,337 files / 88,371,771
+bytes**. Exact backups covered **46 mutable files / 8,857,239 bytes**: the
+existing executable, three desktop state/configuration files, and all 42
+existing `navigator-smoke/generated` files. The fresh executable was archived
+outside the checkout; logs from both hosted runs were archived outside the
+checkout, and only those 12 run-created log files were removed. All 46
+baseline files were restored and SHA-256 checked. The final ignored manifest
+was **1,337 files / 88,371,771 bytes**, with **0 changed / 0 missing / 0
+extra**. The hosted smoke's downloads snapshot was restored by its wrapper.
+No kernel build or QEMU run was attempted because neither is required for
+hosted Navigator qualification.
+
+**Outcome A — JS69 bounded logical selector lists inside `:has()` fully
+qualified.** Two-member Boolean behavior, forgiving versus strict handling,
+candidate validation, comma ownership, correlation, scope, generation safety,
+public APIs, Event reentrancy, bounded memory, strict native compilation,
+historical regressions, fresh production provenance, hosted behavior, the CSS
+baseline, and exact artifact restoration all passed their stated gates.
+
+Recommended next bounded capability: support one parsed `:nth-child(An+B)`
+predicate on a `:has()` relative core, without an `of <selector-list>` clause,
+using a compact fixed representation and explicit stack and pool measurements.

@@ -1084,9 +1084,9 @@ int main()
         "JS62R2 does not grow the shared selector core");
     static_assert(sizeof(NavigatorScriptSimpleSelectorDescriptor) == 68u,
         "JS62R2 does not grow the simple selector descriptor");
-    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 1856u,
+    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 2176u,
         "JS62R3 preserves the JS65 bounded descriptor size");
-    static_assert(NavigatorScriptRelativeSelectorTestAccess::collectionRecordBytes() == 1872u,
+    static_assert(NavigatorScriptRelativeSelectorTestAccess::collectionRecordBytes() == 2192u,
         "JS62R3 preserves the JS65 selector collection size");
     static_assert(sizeof(gxos::web::HtmlElementRef) == 440u,
         "JS62R2 does not grow structural Elements");
@@ -1094,7 +1094,7 @@ int main()
         "JS62R2 does not grow content records");
     static_assert(sizeof(NavigatorScriptRelativeSelectorCounters) == 80u,
         "JS68 logical diagnostics remain test-local");
-    std::cout << "memory core=32 simple=68 complete=1856 collection=1872 registry="
+    std::cout << "memory core=32 simple=68 complete=2176 collection=2192 registry="
         << (128u * NavigatorScriptRelativeSelectorTestAccess::collectionRecordBytes())
         << " htmlElement=440 content=24"
         << " diagnosticCounters=80 productionCounterStorage=0\n";

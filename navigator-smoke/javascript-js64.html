@@ -112,7 +112,7 @@ verify(pairChecks === 48 && pairFailures === 0);
 var poolSelector = 'div:has(.missing,.a)>span:has(.missing,.c)';
 var poolQuery = document.querySelectorAll(poolSelector + ',' + poolSelector + ',' + poolSelector + ',' + poolSelector);
 verify(poolQuery.length === 4 && poolQuery[0].matches('#span1') && poolQuery[1].matches('#span2') && poolQuery[2].matches('#span3') && poolQuery[3].matches('#span4'));
-var bad = [':has()', ':has( )', ':has(, .a)', ':has(.a,)', ':has(.a,,.b)', ':has(.a,.b,.c)', ':has(.a .b .c)', ':has(.a, .b, .c)', ':has(:not(.x, .y))', ':has(:is(.x, .y))', ':has(:where(.x, .y))', ':has(:has(.x), .y)', ':has(:nth-child(2), .y)', ':has(> .a + .b + .c)'];
+var bad = [':has()', ':has( )', ':has(, .a)', ':has(.a,)', ':has(.a,,.b)', ':has(.a,.b,.c)', ':has(.a .b .c)', ':has(.a, .b, .c)', ':has(:not(.x, .y, .z))', ':has(:is(.x, .y, .z))', ':has(:where(.x, .y, .z))', ':has(:is(:not(.x), .y))', ':has(:has(.x), .y)', ':has(:nth-child(2), .y)', ':has(> .a + .b + .c)'];
 document.querySelector('#direct').setAttribute('class', 'a b c');
 var malformed = true;
 for (var i = 0; i != bad.length; i = i + 1)

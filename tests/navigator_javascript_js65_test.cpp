@@ -92,16 +92,16 @@ int main()
         "JS65 keeps the outer simple-selector size");
     static_assert(sizeof(NavigatorScriptCompactRelativeSelectorCoreDescriptor) ==
         18u, "JS65 compact cores remain fixed-size");
-    static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 76u,
+    static_assert(sizeof(NavigatorScriptHasExpressionDescriptor) == 116u,
         "JS65 expression metadata remains fixed-size");
-    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 1856u,
+    static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 2176u,
         "JS65 selector descriptor has bounded fixed pools");
     static_assert(NavigatorScriptRelativeSelectorTestAccess::
-        collectionRecordBytes() == 1872u,
+        collectionRecordBytes() == 2192u,
         "JS65 selector collection record size is measured");
     static_assert(NavigatorScriptRelativeSelectorTestAccess::
         collectionRecordBytes() * kNavigatorScriptMaxSelectorCollections ==
-            239616u,
+            280576u,
         "JS65 128-record registry memory is measured");
 
     const std::string html =

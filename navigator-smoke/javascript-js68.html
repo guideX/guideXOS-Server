@@ -125,7 +125,8 @@ verify(!stateForm.matches(':has(> input:is(:focus))'));
 verify(attrPanel.matches(':has(> .row:not([data-state=disabled]))'));
 
 var malformed = [':has(:is())', ':has(:not())', ':has(:where())',
-  ':has(:is(.a, .b))', ':has(:where(.a, .b))', ':has(:not(.a, .b))',
+  ':has(:is(.a, .b, .c))', ':has(:where(.a, .b, .c))',
+  ':has(:not(.a, .b, .c))',
   ':has(:is(:not(.a)))', ':has(:where(:is(.a)))',
   ':has(:not(:where(.a)))', ':has(:not(:has(.a)))', ':has(:has(.a))',
   ':has(.a:is(.b):focus)', ':has(:not(.a) .b .c)',
@@ -136,9 +137,9 @@ for (var i = 0; i !== malformed.length; i++)
   if (document.querySelector(malformed[i]) !== null)
     malformedRejected = false;
 malformedRejected = malformedRejected &&
-  document.querySelector('#list-a:has(:is(.a, .b))') === null &&
-  document.querySelector('#list-ab:has(:is(.a, .b))') === null &&
-  document.querySelector('#list-a:has(:not(.a, .b))') === null;
+  document.querySelector('#list-a:has(:is(.a, .b, .c))') === null &&
+  document.querySelector('#list-ab:has(:is(.a, .b, .c))') === null &&
+  document.querySelector('#list-a:has(:not(.a, .b, .c))') === null;
 verify(malformedRejected);
 verify(leaf.matches(':scope') && !leaf.matches('div:scope'));
 verify(document.querySelector('#panel:has(> .row > :scope)') === null);
