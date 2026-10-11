@@ -157,6 +157,8 @@
     <ClInclude Include="disk_manager.h" />
     <ClInclude Include="control_panel.h" />
     <ClInclude Include="settings_center.h" />
+    <ClInclude Include="settings_presentation_core.h" />
+    <ClInclude Include="settings_presentation_adapter.h" />
     <ClInclude Include="settings_server_identity.h" />
     <ClInclude Include="settings_system_information.h" />
     <ClInclude Include="settings_network_service.h" />
@@ -420,6 +422,7 @@
     <ClCompile Include="disk_manager.cpp" />
     <ClCompile Include="control_panel.cpp" />
     <ClCompile Include="settings_center.cpp" />
+    <ClCompile Include="settings_presentation_core.cpp" />
     <ClCompile Include="settings_system_information.cpp" />
     <ClCompile Include="elf_validator.cpp" />
     <ClCompile Include="executable_memory.cpp" />

@@ -24,6 +24,7 @@ $Arguments = @(
     "app_manifest_loader.cpp",
     "app_manifest_validator.cpp",
     "fs.cpp",
+    "settings_presentation_core.cpp",
     "-o", $Output
 )
 
