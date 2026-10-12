@@ -178,6 +178,7 @@
     <ClInclude Include="kernel\core\include\kernel\desktop.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop_font.h" />
     <ClInclude Include="kernel\core\include\kernel\shell.h" />
+    <ClInclude Include="kernel\shell\rexx_shell_cmd.h" />
     <ClInclude Include="kernel\core\include\kernel\system_font.h" />
     <ClInclude Include="kernel\core\include\kernel\generated\system_font_roboto.h" />
     <ClInclude Include="kernel\core\include\kernel\framebuffer.h" />
@@ -264,6 +265,7 @@
     <ClCompile Include="kernel\core\desktop_font.cpp" />
     <ClCompile Include="kernel\core\system_font.cpp" />
     <ClCompile Include="kernel\core\shell.cpp" />
+    <ClCompile Include="kernel\shell\rexx_shell_cmd.cpp" />
     <ClCompile Include="kernel\core\interrupts.cpp" />
     <ClCompile Include="kernel\core\ps2mouse.cpp" />
     <ClCompile Include="kernel\core\mmio.cpp" />

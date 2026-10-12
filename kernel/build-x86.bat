@@ -209,6 +209,7 @@ REM ============================================
 REM Create directories
 echo Creating build directories...
 if not exist "%OBJ_DIR%\core" mkdir "%OBJ_DIR%\core"
+if not exist "%OBJ_DIR%\shell" mkdir "%OBJ_DIR%\shell"
 if not exist "%OBJ_DIR%\arch" mkdir "%OBJ_DIR%\arch"
 if not exist "%BIN_DIR%" mkdir "%BIN_DIR%"
 echo [OK] Directories created
@@ -261,9 +262,25 @@ if %COMPILE_ERRORS%==1 (
 echo [OK] All core files compiled
 echo.
 
+REM Compile shell command modules kept separate from the main shell dispatcher.
+echo Compiling shell command modules...
+set "SHELL_OBJS="
+for %%f in (shell\*.cpp) do (
+    echo   Compiling %%~nxf...
+    %CXX% %CFLAGS% -c "%%f" -o "%OBJ_DIR%\shell\%%~nf.o"
+    if !errorlevel! neq 0 (
+        echo   [ERROR] Failed to compile %%~nxf
+        pause
+        exit /b 1
+    )
+    set "SHELL_OBJS=!SHELL_OBJS! "%OBJ_DIR%\shell\%%~nf.o""
+)
+echo [OK] Shell command modules compiled
+echo.
+
 REM Link kernel
 echo Linking kernel...
-%LD% %LDFLAGS% -o "%KERNEL%" "%OBJ_DIR%\arch\boot.o" "%OBJ_DIR%\arch\arch.o" %CORE_OBJS%
+%LD% %LDFLAGS% -o "%KERNEL%" "%OBJ_DIR%\arch\boot.o" "%OBJ_DIR%\arch\arch.o" %CORE_OBJS% %SHELL_OBJS%
 
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to link kernel

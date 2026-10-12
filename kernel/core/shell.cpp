@@ -21,6 +21,7 @@
 #include "include/kernel/kernel_app.h"
 #include "include/kernel/app_launch_target_resolver.h"
 #include "include/kernel/serial_debug.h"
+#include "../shell/rexx_shell_cmd.h"
 
 // Forward declarations for power functions (defined in desktop.cpp, outside any namespace)
 extern void perform_shutdown();
@@ -174,6 +175,9 @@ static const char* s_hostname = "guideXOS";
 
 // Uptime counter (incremented externally)
 static uint32_t s_uptimeSeconds = 0;
+
+// Command status is shared with the REXX callback and exposed as `$?`.
+static int s_lastExitCode = 0;
 
 // ============================================================
 // Helper Functions
@@ -405,6 +409,7 @@ static void cmd_help() {
     output_string("  testmode       - GUI compositor test\n");
     output_string("\n");
     output_string("Utilities:\n");
+    output_string("  rexx <script.rx> - Run a REXX script\n");
     output_string("  clear, cls     - Clear screen\n");
     output_string("  echo           - Print text\n");
     output_string("  which          - Locate command\n");
@@ -1945,6 +1950,33 @@ static void uint_to_str(uint32_t n, char* buf) {
     buf[i] = '\0';
 }
 
+// Format an int without libc so the shell's status value remains usable in
+// the freestanding kernel. The unsigned subtraction also handles INT_MIN
+// without signed overflow.
+static void int_to_str(int value, char* buf) {
+    uint32_t magnitude;
+    int position = 0;
+    char reversed[12];
+    int reversedLength = 0;
+
+    if (value < 0) {
+        buf[position++] = '-';
+        magnitude = 0u - static_cast<uint32_t>(value);
+    } else {
+        magnitude = static_cast<uint32_t>(value);
+    }
+
+    do {
+        reversed[reversedLength++] = static_cast<char>('0' + magnitude % 10u);
+        magnitude /= 10u;
+    } while (magnitude != 0u && reversedLength < (int)sizeof(reversed));
+
+    while (reversedLength > 0) {
+        buf[position++] = reversed[--reversedLength];
+    }
+    buf[position] = '\0';
+}
+
 static void cmd_nicinfo() {
     output_string("=== NIC Diagnostic Information ===\n\n");
     
@@ -2891,6 +2923,13 @@ static void execute_command(const char* cmd) {
     
     if (argCount == 0) return;
 
+    const int previousExitCode = s_lastExitCode;
+
+    // Commands without an explicit failure result currently default to
+    // success. Commands with a process-style result, including REXX, replace
+    // this value below.
+    s_lastExitCode = 0;
+
     
     const char* command = args[0];
     const char* arg1 = (argCount > 1) ? args[1] : "";
@@ -2898,6 +2937,23 @@ static void execute_command(const char* cmd) {
     // POSIX commands
     if (str_eq(command, "help") || str_eq(command, "?")) {
         cmd_help();
+    } else if (str_eq(command, "rexx")) {
+        int rexxExitCode = 2;
+        const RexxShellTokenizeStatus tokenizeStatus =
+            shell_cmd_rexx_line(cmd, &rexxExitCode);
+
+        if (tokenizeStatus == RexxShellTokenizeStatus::InvalidInput) {
+            output_string("rexx: invalid command line (check quoting and argument limits)\n");
+            s_lastExitCode = 2;
+        } else if (tokenizeStatus == RexxShellTokenizeStatus::OutOfMemory) {
+            output_string("rexx: out of memory while preparing arguments\n");
+            s_lastExitCode = 1;
+        } else {
+            s_lastExitCode = rexxExitCode;
+            if (!rexx_cli_available()) {
+                output_string("rexx: REXX CLI engine is not linked into this kernel image\n");
+            }
+        }
     } else if (str_eq(command, "clear") || str_eq(command, "cls")) {
         cmd_clear();
     } else if (str_eq(command, "pwd")) {
@@ -2911,6 +2967,12 @@ static void execute_command(const char* cmd) {
     } else if (str_eq(command, "cat") || str_eq(command, "type")) {
         cmd_cat(arg1);
     } else if (str_eq(command, "echo")) {
+        if (argCount == 2 && str_eq(args[1], "$?")) {
+            char statusText[16];
+            int_to_str(previousExitCode, statusText);
+            cmd_echo(statusText);
+            return;
+        }
         // Rejoin args for echo
         char text[256] = "";
         uint32_t pos = 0;
@@ -3059,7 +3121,8 @@ static void execute_command(const char* cmd) {
     } else if (str_eq(command, "true")) {
         // Do nothing, return success (implicit)
     } else if (str_eq(command, "false")) {
-        output_string(""); // Returns failure conceptually
+        s_lastExitCode = 1;
+        output_string(""); // No text; set the conventional failure status.
     } else if (str_eq(command, "yes")) {
         output_string("y\ny\ny\n(use Ctrl+C to stop in a real terminal)\n");
     } else if (str_eq(command, "banner")) {
@@ -3214,6 +3277,7 @@ static void execute_command(const char* cmd) {
             output_string(": ASCII text\n");
         }
     } else {
+        s_lastExitCode = 127;
         cmd_not_found(command);
     }
 }
@@ -3230,6 +3294,7 @@ void init() {
     s_scrollOffset = 0;
     s_historyCount = 0;
     s_historyIdx = 0;
+    s_lastExitCode = 0;
     str_copy(s_cwd, "/", 256);
 }
 
@@ -3276,6 +3341,10 @@ ShellState get_state() {
 
 const char* get_cwd() {
     return s_cwd;
+}
+
+int last_exit_code() {
+    return s_lastExitCode;
 }
 
 void process_char(char c) {

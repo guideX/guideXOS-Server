@@ -117,6 +117,7 @@ LDFLAGS := $(LINKER_SCRIPT_FLAG)arch/$(ARCH)/linker.ld $(ARCH_LDFLAGS)
 
 # Source files
 CORE_SOURCES := $(wildcard core/*.cpp)
+SHELL_SOURCES := $(wildcard shell/*.cpp)
 ARCH_SOURCES := $(wildcard arch/$(ARCH)/*.cpp)
 ASM_SOURCES := $(wildcard arch/$(ARCH)/*.asm) $(wildcard arch/$(ARCH)/*.s)
 MBEDTLS_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_LINK_ENABLED)),$(MBEDTLS_GUIDEXOS_C_SOURCES))
@@ -124,14 +125,15 @@ MBEDTLS_COMPILE_PROBE_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_COMPILE_PR
 
 # Object files
 CORE_OBJS := $(patsubst core/%.cpp,$(OBJ_DIR)/core/%.o,$(CORE_SOURCES))
+SHELL_OBJS := $(patsubst shell/%.cpp,$(OBJ_DIR)/shell/%.o,$(SHELL_SOURCES))
 ARCH_OBJS := $(patsubst arch/$(ARCH)/%.cpp,$(OBJ_DIR)/arch/%.o,$(ARCH_SOURCES))
 ASM_OBJS := $(patsubst arch/$(ARCH)/%.asm,$(OBJ_DIR)/arch/%.o,$(ASM_SOURCES))
 ASM_OBJS += $(patsubst arch/$(ARCH)/%.s,$(OBJ_DIR)/arch/%.o,$(filter %.s,$(ASM_SOURCES)))
 MBEDTLS_C_OBJS := $(patsubst $(GUIDEXOS_REPO_ROOT)/third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_C_SOURCES))
 MBEDTLS_COMPILE_PROBE_C_OBJS := $(patsubst $(GUIDEXOS_REPO_ROOT)/third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_COMPILE_PROBE_C_SOURCES))
 
-ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS) $(MBEDTLS_C_OBJS)
-DEPFILES := $(CORE_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_COMPILE_PROBE_C_OBJS:.o=.d)
+ALL_OBJS := $(CORE_OBJS) $(SHELL_OBJS) $(ARCH_OBJS) $(ASM_OBJS) $(MBEDTLS_C_OBJS)
+DEPFILES := $(CORE_OBJS:.o=.d) $(SHELL_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_COMPILE_PROBE_C_OBJS:.o=.d)
 
 # Targets
 .PHONY: all clean info verify-mbedtls-guidexos mbedtls-guidexos-compile-probe
@@ -200,6 +202,16 @@ $(OBJ_DIR)/core/%.d: core/%.cpp
 	@$(call MKDIR,$(OBJ_DIR)/core)
 	@echo "Bootstrapping dependencies for $<..."
 	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $(OBJ_DIR)/core/$*.o
+
+$(OBJ_DIR)/shell/%.o: shell/%.cpp
+	@$(call MKDIR,$(OBJ_DIR)/shell)
+	@echo "Compiling $<..."
+	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/shell/%.d: shell/%.cpp
+	@$(call MKDIR,$(OBJ_DIR)/shell)
+	@echo "Bootstrapping dependencies for $<..."
+	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $(OBJ_DIR)/shell/$*.o
 
 $(OBJ_DIR)/arch/%.o: arch/$(ARCH)/%.cpp
 	@$(call MKDIR,$(OBJ_DIR)/arch)

@@ -7,7 +7,7 @@
 //   POSIX:   ls, ll, cd, pwd, cat, echo, cp, mv, rm, mkdir, rmdir, touch, clear, exit, help
 //   Windows: dir, cls, type, copy, del, md, rd, ren
 //   System:  reboot, shutdown, sleep, uptime, mem, cpuinfo, ps, kill
-//   Misc:    date, time, whoami, hostname, env, history, alias
+//   Misc:    date, time, whoami, hostname, env, history, alias, rexx
 //
 // Copyright (c) 2026 guideXOS Server
 //
@@ -80,6 +80,11 @@ void execute(const char* cmd);
 
 // Get current working directory
 const char* get_cwd();
+
+// Return the status recorded for the most recently executed command. The
+// REXX built-in preserves the exact return code from its C CLI entry point.
+// The same value is available to shell users through `echo $?`.
+int last_exit_code();
 
 // ================================================================
 // Special Key Codes
