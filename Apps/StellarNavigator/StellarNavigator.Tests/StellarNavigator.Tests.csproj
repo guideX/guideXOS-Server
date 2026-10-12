@@ -22,12 +22,14 @@
     <None Include="sn2_reference.json" Link="sn2_reference.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="sn3_reference.json" Link="sn3_reference.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="sn4_reference.json" Link="sn4_reference.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="sn5_reference.json" Link="sn5_reference.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Astronomy.Core\Astronomy.Core.csproj" />
     <ProjectReference Include="..\Astronomy.Catalog\Astronomy.Catalog.csproj" />
     <ProjectReference Include="..\Astronomy.Ephemeris\Astronomy.Ephemeris.csproj" />
+    <ProjectReference Include="..\Astronomy.Time\Astronomy.Time.csproj" />
     <ProjectReference Include="..\Navigation.Core\Navigation.Core.csproj" />
   </ItemGroup>
 

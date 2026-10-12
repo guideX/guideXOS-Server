@@ -4,6 +4,7 @@
     <ProjectReference Include="..\Astronomy.Core\Astronomy.Core.csproj" />
     <ProjectReference Include="..\Astronomy.Catalog\Astronomy.Catalog.csproj" />
     <ProjectReference Include="..\Astronomy.Ephemeris\Astronomy.Ephemeris.csproj" />
+    <ProjectReference Include="..\Astronomy.Time\Astronomy.Time.csproj" />
     <ProjectReference Include="..\Navigation.Core\Navigation.Core.csproj" />
   </ItemGroup>
 
@@ -20,6 +21,7 @@
     <None Include="..\Astronomy.Ephemeris\Data\ephemeris_de440s.json" Link="Data\ephemeris_de440s.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\Astronomy.Ephemeris\Data\ephemeris_de440s_chebyshev.json" Link="Data\ephemeris_de440s_chebyshev.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\Astronomy.Ephemeris\Data\ephemeris_de440s_chebyshev.sn4bin" Link="Data\ephemeris_de440s_chebyshev.sn4bin" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\Astronomy.Time\Data\leap_seconds.sn5json" Link="Data\leap_seconds.sn5json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

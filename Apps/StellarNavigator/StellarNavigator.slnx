@@ -2,6 +2,7 @@
   <Project Path="Astronomy.Catalog/Astronomy.Catalog.csproj" />
   <Project Path="Astronomy.Core/Astronomy.Core.csproj" />
   <Project Path="Astronomy.Ephemeris/Astronomy.Ephemeris.csproj" />
+  <Project Path="Astronomy.Time/Astronomy.Time.csproj" />
   <Project Path="Navigation.Core/Navigation.Core.csproj" />
   <Project Path="StellarNavigator.App/StellarNavigator.App.csproj" />
   <Project Path="StellarNavigator.Benchmarks/StellarNavigator.Benchmarks.csproj" />

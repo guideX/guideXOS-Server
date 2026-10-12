@@ -1,6 +1,7 @@
 ﻿using Astronomy.Catalog;
 using Astronomy.Core;
 using Astronomy.Ephemeris;
+using Astronomy.Time;
 using Navigation.Core;
 
 var catalogPath = Path.Combine(AppContext.BaseDirectory, "Data", "solar_system.json");
@@ -245,3 +246,103 @@ else
 
 Console.WriteLine();
 Console.WriteLine("Stellar Navigator SN4 - Eight-planet offline evaluation confirmed.");
+
+// ─── SN5: astronomical timekeeping — UTC calendar input to TDB epochs ───
+Console.WriteLine();
+Console.WriteLine("=== Stellar Navigator SN5 ===");
+Console.WriteLine("Astronomical timekeeping: UTC -> TAI -> TT -> TDB (offline, managed)");
+
+var timeDataPath = Path.Combine(AppContext.BaseDirectory, "Data", "leap_seconds.sn5json");
+LeapSecondProvider timeProvider;
+try
+{
+    timeProvider = LeapSecondProvider.Load(timeDataPath);
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"SN5 time data unavailable: {ex.Message}");
+    Console.WriteLine("UTC conversion is unavailable; direct JD TDB queries above remain valid.");
+    return;
+}
+
+var timeConverter = new TimeConverter(timeProvider.Table, timeProvider.Identity);
+Console.WriteLine($"Leap-second kernel: {timeProvider.Identity}");
+Console.WriteLine($"  source: {timeProvider.KernelSourceUrl}");
+Console.WriteLine($"  retrieved: {timeProvider.RetrievalDate}, kernel SHA-256: {timeProvider.KernelSha256}");
+Console.WriteLine($"  transitions: {timeProvider.Table.Transitions.Count} " +
+    $"(TAI-UTC {timeProvider.Table.FirstOffset} -> {timeProvider.Table.LastOffset}), " +
+    $"last announced leap: {timeProvider.LastAnnouncedLeapSecondUtc}");
+Console.WriteLine($"  DELTET: TA=32.184s K=0.001657 EB=0.01671 M=(6.239996, 1.99096871e-7)");
+Console.WriteLine($"  strict UTC interval: 1972-01-01T00:00:00Z .. 2017-01-01T00:00:00Z (+ supported leap seconds)");
+Console.WriteLine($"  time-data asset: {timeProvider.AssetBytes} bytes, SHA-256 verified at load");
+Console.WriteLine();
+
+// CLI: [bodyId] [jdTdb | utcIso] [--provisional]. A second argument containing
+// 'T' is treated as a UTC calendar timestamp; otherwise the SN4 JD TDB path above applies.
+bool allowProv = args.Any(a => a == "--provisional");
+string? utcArg = args.Length > 1 && args[1].Contains('T') ? args[1] : null;
+string demoUtc = "2016-07-14T00:00:00Z"; // strict, contemporary, inside ephemeris coverage
+
+void PrintUtcState(string bodyId, string utcText)
+{
+    var q = new UtcEphemerisQuery(indexed, timeConverter);
+    var r = q.GetState(bodyId, utcText, barycentric, allowProv);
+    Console.WriteLine($"UTC '{utcText}' -> {bodyId}:");
+    if (r.Time is not null)
+    {
+        var t = r.Time;
+        Console.WriteLine($"  ET (TDB): {t.Et.Value:F6} s past J2000, JD TDB: {t.JdTdb:F7}");
+        Console.WriteLine($"  TAI-UTC: {t.TaiMinusUtcSeconds}s, DELTA_ET: {t.DeltaEtSeconds:F6}s, " +
+            $"quality: {t.Quality}, epoch error bound: {t.EstimatedErrorSeconds:E1}s");
+        Console.WriteLine($"  NOTE: JD TDB printed for compatibility; the query used the full-precision ET. " +
+            $"JD doubles quantize time to ~80 us.");
+    }
+    else
+    {
+        Console.WriteLine($"  time conversion failed [{r.TimeError!.Quality}]: {r.TimeError.Message}");
+    }
+    if (r.Ephemeris is not null)
+    {
+        var s = r.Ephemeris;
+        if (s.IsSuccess && s.Value is var (p, v))
+        {
+            Console.WriteLine($"  position (km): ({p.X / 1000.0:F3}, {p.Y / 1000.0:F3}, {p.Z / 1000.0:F3})");
+            Console.WriteLine($"  velocity (km/s): ({v.X / 1000.0:F6}, {v.Y / 1000.0:F6}, {v.Z / 1000.0:F6})");
+            Console.WriteLine($"  time quality: {r.TimeQuality}, ephemeris quality: {s.Status}, source: {s.Provenance}");
+        }
+        else
+        {
+            Console.WriteLine($"  ephemeris UNAVAILABLE [{s.Status}]: {s.ErrorMessage}");
+        }
+    }
+    Console.WriteLine($"  kernel: {timeProvider.Identity}");
+}
+
+// Demonstration: Earth's and Jupiter's states at a supported UTC timestamp.
+Console.WriteLine($"--- UTC demonstration (strict, {demoUtc}) ---");
+PrintUtcState("earth", demoUtc);
+PrintUtcState("jupiter", demoUtc);
+
+// Leap-second showcase: the final announced leap second, 2016-12-31T23:59:60Z.
+Console.WriteLine("--- Leap-second showcase (strict) ---");
+PrintUtcState("earth", "2016-12-31T23:59:60Z");
+
+// User-requested UTC query (preserves SN4 JD path when no UTC argument given).
+if (utcArg is not null)
+{
+    Console.WriteLine("--- Requested UTC query ---");
+    PrintUtcState(sn4Target, utcArg);
+}
+
+// Explicit diagnostics: unsupported conversions never masquerade as timestamps.
+Console.WriteLine("--- Unsupported-conversion diagnostics ---");
+foreach (var bad in new[] { "1969-07-20T20:17:40Z", "2019-12-31T23:59:60Z", "2030-01-01T00:00:00Z" })
+{
+    var q = new UtcEphemerisQuery(indexed, timeConverter);
+    var r = q.GetState("earth", bad, barycentric, allowProv);
+    Console.WriteLine($"UTC '{bad}': Success={r.IsSuccess} [{r.TimeQuality}] {r.TimeError?.Message}");
+}
+
+Console.WriteLine();
+Console.WriteLine("Stellar Navigator SN5 - Offline UTC-to-ephemeris conversion confirmed.");
+Console.WriteLine("Research software: provisional epochs are labeled, never certified for navigation use.");

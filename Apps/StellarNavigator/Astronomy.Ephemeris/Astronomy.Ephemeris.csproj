@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Astronomy.Core\Astronomy.Core.csproj" />
+    <ProjectReference Include="..\Astronomy.Time\Astronomy.Time.csproj" />
     <ProjectReference Include="..\Navigation.Core\Navigation.Core.csproj" />
   </ItemGroup>
 

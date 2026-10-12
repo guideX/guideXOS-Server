@@ -50,7 +50,7 @@ public sealed class PrecomputedEphemerisProvider : IEphemerisProvider
                 velEl.GetProperty("z").GetDouble());
 
             var posM = posAu * Distance.MetersPerAstronomicalUnit;
-            var velMs = velAuDay * Distance.MetersPerAstronomicalUnit / Time.SecondsPerDay;
+            var velMs = velAuDay * Distance.MetersPerAstronomicalUnit / global::Astronomy.Core.Time.SecondsPerDay;
 
             _entries[bodyId] = new EphemerisEntry { Epoch = epoch, Position = posM, Velocity = velMs };
         }
