@@ -8,6 +8,7 @@ param(
     [switch]$RunOrdinaryAcceptance,
     [switch]$RunC167SettingsProofBoots,
     [switch]$RunC169ManagedUiProofBoots,
+    [switch]$C170ControlRendering,
     [switch]$C167SettingsDefaultApps,
     [switch]$ReuseC167ProofKernel,
     [switch]$ReuseC167ProofComposite,
@@ -26,8 +27,13 @@ if (-not $head) { throw 'Could not resolve repository HEAD.' }
 $script:c167SettingsAcceptance = [bool]($RunC167SettingsProofBoots -or $C167SettingsDefaultApps)
 $script:c169ManagedUiProof = [bool]$RunC169ManagedUiProofBoots
 $script:c169ManagedUiOrdinaryAcceptance = [bool]$RunC169ManagedUiOrdinaryAcceptance
+$script:c170ControlRendering = [bool]$C170ControlRendering
 if ($RunC169ManagedUiProofBoots -and -not $RunC167SettingsProofBoots) {
     throw 'C169 managed UI proof extends the focused C167 Settings proof lane and requires -RunC167SettingsProofBoots.'
+}
+if ($C170ControlRendering -and
+    -not ($RunC169ManagedUiProofBoots -or $RunC169ManagedUiOrdinaryAcceptance)) {
+    throw 'C170 evidence requires the existing focused or ordinary C169 Settings proof lane.'
 }
 $script:c167SettingsProofBuild = $false
 if ($RunC167SettingsProofBoots -and
@@ -50,6 +56,8 @@ if ($RunC169ManagedUiOrdinaryAcceptance -and
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
     $EvidenceRoot = if ($HostTestsOnly) {
         Join-Path $RepoRoot 'out\dotnet\c166r9-host-validation'
+    } elseif ($C170ControlRendering) {
+        Join-Path $RepoRoot 'out\dotnet\c170-control-rendering'
     } elseif ($RunC167SettingsProofBoots) {
         Join-Path $RepoRoot 'out\dotnet\c167-default-apps'
     } else {
@@ -57,12 +65,14 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
     }
 }
 $EvidenceRoot = [System.IO.Path]::GetFullPath($EvidenceRoot)
+$script:c170EvidenceOutputRoot = $EvidenceRoot
 $allowedRoot = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot 'out\dotnet')).TrimEnd('\', '/') + '\'
 if (-not $EvidenceRoot.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
     throw "C166R3 evidence must remain under $allowedRoot"
 }
 $script:c167EvidenceRoot = if ([string]::IsNullOrWhiteSpace($C167EvidenceRoot)) {
-    Join-Path $RepoRoot 'out\dotnet\c167-default-apps'
+    if ($script:c170ControlRendering) { $EvidenceRoot }
+    else { Join-Path $RepoRoot 'out\dotnet\c167-default-apps' }
 } else { [System.IO.Path]::GetFullPath($C167EvidenceRoot) }
 if (-not $script:c167EvidenceRoot.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
     throw "C167 evidence must remain under $allowedRoot"
@@ -177,6 +187,376 @@ function Get-Sha256([string]$Path) {
     (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
 }
 
+function New-C170EvidenceFileRecord([string]$Name,[string]$Path,[string]$ExpectedSha256) {
+    if ([string]::IsNullOrWhiteSpace($Path) -or
+        -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "C170 evidence file is missing: $Path"
+    }
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $actualHash = Get-Sha256 $fullPath
+    if ([string]::IsNullOrWhiteSpace($ExpectedSha256) -or
+        $actualHash -ne $ExpectedSha256.ToUpperInvariant()) {
+        throw "C170 evidence file hash mismatch: $fullPath"
+    }
+    return [ordered]@{
+        name = $Name
+        path = $fullPath
+        sha256 = $actualHash
+        sizeBytes = (Get-Item -LiteralPath $fullPath).Length
+    }
+}
+
+function Get-C170ScreenshotReferences([object]$Value,[System.Collections.Generic.List[object]]$References) {
+    if ($null -eq $Value -or $Value -is [string]) { return }
+    if ($Value -is [System.Collections.IDictionary]) {
+        foreach ($key in $Value.Keys) {
+            if ([string]$key -notmatch '(?i)(screenshot|screen)$' -or
+                [string]::IsNullOrWhiteSpace([string]$Value[$key])) { continue }
+            $hashKey = [string]$key + 'Sha256'
+            $hashValue = if ($Value.Contains($hashKey)) { [string]$Value[$hashKey] } else { '' }
+            if ([string]::IsNullOrWhiteSpace($hashValue) -and
+                [string]$key -match '(?i)^opened(?=screenshot$|screen$)') {
+                $fallbackHashKey = ([string]$key -replace '(?i)^opened','') + 'Sha256'
+                if ($Value.Contains($fallbackHashKey)) { $hashValue = [string]$Value[$fallbackHashKey] }
+            }
+            $References.Add([ordered]@{path=[string]$Value[$key];sha256=$hashValue})
+        }
+        foreach ($key in $Value.Keys) {
+            if ([string]$key -match '(?i)(screenshot|screen)(Sha256)?$') { continue }
+            Get-C170ScreenshotReferences $Value[$key] $References
+        }
+        return
+    }
+    if ($Value -is [System.Collections.IEnumerable]) {
+        foreach ($item in $Value) { Get-C170ScreenshotReferences $item $References }
+        return
+    }
+    $propertyNames = @($Value.PSObject.Properties | ForEach-Object { $_.Name })
+    foreach ($property in $Value.PSObject.Properties) {
+        if ($property.Name -notmatch '(?i)(screenshot|screen)$' -or
+            [string]::IsNullOrWhiteSpace([string]$property.Value)) { continue }
+        $hashName = $property.Name + 'Sha256'
+        $hashProperty = $Value.PSObject.Properties[$hashName]
+        if (-not $hashProperty -and $property.Name -match '(?i)^opened(?=screenshot$|screen$)') {
+            $fallbackHashName = ($property.Name -replace '(?i)^opened','') + 'Sha256'
+            $hashProperty = $Value.PSObject.Properties[$fallbackHashName]
+        }
+        $hashValue = if ($hashProperty) { [string]$hashProperty.Value } else { '' }
+        $References.Add([ordered]@{path=[string]$property.Value;sha256=$hashValue})
+    }
+    foreach ($property in $Value.PSObject.Properties) {
+        if ($property.Name -match '(?i)(screenshot|screen)(Sha256)?$') { continue }
+        Get-C170ScreenshotReferences $property.Value $References
+    }
+}
+
+function Write-C170FocusedEvidenceManifest([string]$EvidenceRoot,[string]$SourceManifestPath,
+    [string]$Composite,[string]$Kernel,[string]$NeutralRamdisk,[string]$QemuPath,[string]$SourceHead) {
+    $source = Get-Content -LiteralPath $SourceManifestPath -Raw | ConvertFrom-Json
+    if ($source.status -ne 'PASS' -or $source.sourceHead -ne $SourceHead -or
+        @($source.guestBoots).Count -ne 3 -or
+        $source.persistentStorage.sameImagePathAcrossAllBoots -ne $true) {
+        throw 'C170 focused source manifest is incomplete, stale, or does not prove one shared storage image.'
+    }
+
+    $files = [System.Collections.Generic.List[object]]::new()
+    $files.Add((New-C170EvidenceFileRecord 'source-focused-manifest' $SourceManifestPath `
+        (Get-Sha256 $SourceManifestPath)))
+    $files.Add((New-C170EvidenceFileRecord 'proof-composite' $Composite $source.proofCompositeSha256))
+    $files.Add((New-C170EvidenceFileRecord 'proof-kernel' $Kernel $source.proofKernelSha256))
+    $files.Add((New-C170EvidenceFileRecord 'neutral-ramdisk' $NeutralRamdisk $source.neutralRamdiskSha256))
+
+    $boots = [System.Collections.Generic.List[object]]::new()
+    $seenScreenshots = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $requiredStateMarkers = @(
+        'C167-STATE operation=Apply state=Disabled',
+        'C167-STATE operation=Apply state=ApplicationOverride',
+        'C167-STATE operation=Reset state=NoOverride')
+    for ($index = 0; $index -lt 3; $index++) {
+        $boot = $source.guestBoots[$index]
+        if ($boot.status -ne 'PASS' -or [int]$boot.pid -le 0) {
+            throw "C170 focused boot $($index + 1) is not a completed PASS boot."
+        }
+        $serial = New-C170EvidenceFileRecord "focused-boot-$($index + 1)-serial" `
+            $boot.serialPath $boot.serialSha256
+        $qmpPath = Join-Path (Split-Path -Parent $boot.serialPath) 'qmp-input.log'
+        $qmpRecord = New-C170EvidenceFileRecord "focused-boot-$($index + 1)-qmp" `
+            $qmpPath $boot.qmpInputSha256
+        $serialText = Get-Content -LiteralPath $boot.serialPath -Raw
+        if ($serialText.IndexOf($requiredStateMarkers[$index], [StringComparison]::Ordinal) -lt 0) {
+            throw "C170 focused boot $($index + 1) is missing its required completion marker."
+        }
+        $files.Add($serial)
+        $files.Add($qmpRecord)
+        $references = [System.Collections.Generic.List[object]]::new()
+        Get-C170ScreenshotReferences $boot.interactions $references
+        if ($references.Count -eq 0) {
+            throw "C170 focused boot $($index + 1) has no screenshot references."
+        }
+        $screenshots = [System.Collections.Generic.List[object]]::new()
+        foreach ($reference in $references) {
+            $record = New-C170EvidenceFileRecord "focused-boot-$($index + 1)-screenshot" `
+                $reference.path $reference.sha256
+            if ($seenScreenshots.Add($record.path)) { $files.Add($record) }
+            $screenshots.Add([ordered]@{path=$record.path;sha256=$record.sha256})
+        }
+        $boots.Add([ordered]@{
+            stage = $boot.stage
+            result = 'PASS'
+            qemuProcessIdentity = [ordered]@{
+                processId = [int]$boot.pid
+                executablePath = $QemuPath
+                commandLineArguments = @($boot.qemuArguments)
+                startedAtUtc = $boot.qemuStartedAtUtc
+            }
+            backingStoragePath = [System.IO.Path]::GetFullPath($boot.backingEspPath)
+            serial = [ordered]@{path=$serial.path;sha256=$serial.sha256}
+            qmpInput = [ordered]@{path=$qmpRecord.path;sha256=$qmpRecord.sha256}
+            completionMarkers = @($requiredStateMarkers[$index])
+            screenshots = @($screenshots.ToArray())
+        })
+    }
+
+    $manifest = [ordered]@{
+        schemaVersion = 1
+        phase = 'C170-focused-control-rendering-proof'
+        sourceHead = $SourceHead
+        sourceBranch = 'v1.1_DOTNET_SUPPORT'
+        status = 'PASS'
+        scenarioResult = 'PASS'
+        sourceManifest = [System.IO.Path]::GetFullPath($SourceManifestPath)
+        proofArtifacts = [ordered]@{
+            composite = $files[1]
+            kernel = $files[2]
+            neutralRamdisk = $files[3]
+        }
+        guestBootCount = $boots.Count
+        guestBoots = @($boots.ToArray())
+        files = @($files.ToArray())
+        artifactIntegrity = [ordered]@{result='PASS';algorithm='SHA-256';errors=@()}
+    }
+    $manifestPath = Join-Path $EvidenceRoot 'c170-focused-proof-manifest.json'
+    $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+    $verified = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    if ($verified.schemaVersion -ne 1 -or $verified.status -ne 'PASS' -or
+        @($verified.guestBoots).Count -ne 3 -or @($verified.files).Count -lt 7) {
+        throw 'C170 focused proof manifest did not survive JSON/schema validation.'
+    }
+    foreach ($file in $verified.files) {
+        if (-not (Test-Path -LiteralPath $file.path -PathType Leaf) -or
+            (Get-Sha256 $file.path) -ne $file.sha256) {
+            throw "C170 focused proof manifest references a missing or mismatched file: $($file.path)"
+        }
+    }
+    Write-Host "C170 focused proof manifest PASS: $manifestPath"
+}
+
+function Write-C170IncompleteEvidenceManifest([string]$Path,[string]$Phase,
+    [string]$SourceHead,[string]$Reason) {
+    $owners = @(
+        Get-CimInstance Win32_Process -Filter "Name = 'qemu-system-x86_64.exe'" |
+            ForEach-Object { [ordered]@{
+                processId = [int]$_.ProcessId
+                executablePath = [string]$_.ExecutablePath
+                commandLine = [string]$_.CommandLine
+            } }
+    )
+    $manifest = [ordered]@{
+        schemaVersion = 1
+        phase = $Phase
+        sourceHead = $SourceHead
+        sourceBranch = 'v1.1_DOTNET_SUPPORT'
+        status = 'INCOMPLETE'
+        scenarioResult = 'INCOMPLETE'
+        reason = $Reason
+        guestBootCount = 0
+        guestBoots = @()
+        files = @()
+        artifactIntegrity = [ordered]@{result='INCOMPLETE';algorithm='SHA-256';errors=@($Reason)}
+        qemuOwnersAtIncompleteCapture = $owners
+    }
+    $manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $Path -Encoding utf8
+    $verified = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    if ($verified.status -ne 'INCOMPLETE' -or $verified.scenarioResult -eq 'PASS') {
+        throw "C170 incomplete evidence manifest validation failed: $Path"
+    }
+}
+
+function Write-C170OrdinaryEvidenceManifest([string]$EvidenceRoot,[string]$SourceManifestPath,
+    [string]$RepoRoot,[string]$SourceHead) {
+    $source = Get-Content -LiteralPath $SourceManifestPath -Raw | ConvertFrom-Json
+    if ($source.outcome -ne 'A' -or $source.sourceHead -ne $SourceHead -or
+        $source.productionInstallation -notlike 'PASS*' -or
+        @($source.ordinaryBoots).Count -ne 3 -or
+        $source.finalAssociation.slotsPresent -ne 0 -or
+        -not $source.cleanProduction.proof1Excluded) {
+        throw 'C170 ordinary source manifest is incomplete, stale, or lacks clean production acceptance.'
+    }
+
+    $files = [System.Collections.Generic.List[object]]::new()
+    $files.Add((New-C170EvidenceFileRecord 'source-ordinary-manifest' $SourceManifestPath `
+        (Get-Sha256 $SourceManifestPath)))
+    $proofPrerequisite = $null
+    if ($source.proofPrerequisite) {
+        $prerequisite = $source.proofPrerequisite
+        $proofManifestRecord = New-C170EvidenceFileRecord 'c166-proof-prerequisite-manifest' `
+            $prerequisite.proofManifestPath $prerequisite.proofManifestSha256
+        $acceptanceRecord = New-C170EvidenceFileRecord 'c166-proof-acceptance-manifest' `
+            $prerequisite.acceptanceManifestPath $prerequisite.acceptanceManifestSha256
+        $files.Add($proofManifestRecord)
+        $files.Add($acceptanceRecord)
+        $proofSerials = [System.Collections.Generic.List[object]]::new()
+        foreach ($serial in $prerequisite.serials) {
+            $record = New-C170EvidenceFileRecord "c166-proof-$($serial.stage)-serial" `
+                $serial.path $serial.sha256
+            $files.Add($record)
+            $proofSerials.Add([ordered]@{stage=$serial.stage;path=$record.path;sha256=$record.sha256})
+        }
+        $refreshDiagnostic = $null
+        if ($prerequisite.refreshDiagnosticPath) {
+            $refreshDiagnosticRecord = New-C170EvidenceFileRecord 'c170-proof1-refresh-incomplete-diagnostic' `
+                $prerequisite.refreshDiagnosticPath $prerequisite.refreshDiagnosticSha256
+            $refreshDetails = Get-Content -LiteralPath $refreshDiagnosticRecord.path -Raw | ConvertFrom-Json
+            if ($refreshDetails.status -ne 'INCOMPLETE' -or
+                $refreshDetails.historicalEvidenceSubstituted -ne $false -or
+                $refreshDetails.guestLaneExecuted -ne $false) {
+                throw 'C170 failed proof refresh diagnostic is not explicitly incomplete.'
+            }
+            $files.Add($refreshDiagnosticRecord)
+            $refreshDiagnostic = [ordered]@{
+                path = $refreshDiagnosticRecord.path
+                sha256 = $refreshDiagnosticRecord.sha256
+                status = 'INCOMPLETE'
+                usedAsAcceptanceProof = $false
+                bootSerials = @($refreshDetails.serials)
+            }
+        }
+        $proofPrerequisite = [ordered]@{
+            kind = $prerequisite.kind
+            sourceHead = $prerequisite.sourceHead
+            acceptanceSourceHead = $prerequisite.acceptanceSourceHead
+            proofManifest = [ordered]@{path=$proofManifestRecord.path;sha256=$proofManifestRecord.sha256}
+            acceptanceManifest = [ordered]@{path=$acceptanceRecord.path;sha256=$acceptanceRecord.sha256}
+            guestBootCount = [int]$prerequisite.guestBootCount
+            successfulManagedMutationCount = [int]$prerequisite.successfulManagedMutationCount
+            serials = @($proofSerials.ToArray())
+            failedC170Refresh = $refreshDiagnostic
+        }
+    }
+    $productionArtifacts = [System.Collections.Generic.List[object]]::new()
+    foreach ($candidate in $source.cleanProduction.allCandidateStrings) {
+        $record = New-C170EvidenceFileRecord "clean-$([IO.Path]::GetFileName($candidate.path))" `
+            $candidate.path $candidate.sha256
+        $files.Add($record)
+        $productionArtifacts.Add($record)
+    }
+    if ($productionArtifacts.Count -ne 3) {
+        throw 'C170 ordinary manifest requires composite, kernel, and ramdisk build hashes.'
+    }
+    $installedPaths = @(
+        (Join-Path $RepoRoot 'kernel\build\amd64\bin\kernel.elf'),
+        (Join-Path $RepoRoot 'ESP\kernel.elf'),
+        (Join-Path $RepoRoot 'ESP\ramdisk.img'))
+    $installedHashes = @(
+        $source.cleanProduction.kernelCanonicalSha256,
+        $source.cleanProduction.kernelEspSha256,
+        $source.cleanProduction.ramdiskEspSha256)
+    $installedNames = @('installed-canonical-kernel','installed-esp-kernel','installed-esp-ramdisk')
+    $installed = [System.Collections.Generic.List[object]]::new()
+    for ($index = 0; $index -lt $installedPaths.Count; $index++) {
+        $record = New-C170EvidenceFileRecord $installedNames[$index] `
+            $installedPaths[$index] $installedHashes[$index]
+        $files.Add($record)
+        $installed.Add($record)
+    }
+    if ($installed[0].sha256 -ne $productionArtifacts[1].sha256 -or
+        $installed[1].sha256 -ne $productionArtifacts[1].sha256 -or
+        $installed[2].sha256 -ne $productionArtifacts[2].sha256) {
+        throw 'C170 ordinary installed production hashes do not match the clean candidate artifacts.'
+    }
+
+    $boots = [System.Collections.Generic.List[object]]::new()
+    $seenScreenshots = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($boot in $source.ordinaryBoots) {
+        if ($boot.status -ne 'PASS' -or [int]$boot.pid -le 0) {
+            throw "C170 ordinary boot $($boot.stage) is not a completed PASS boot."
+        }
+        $serial = New-C170EvidenceFileRecord "$($boot.stage)-serial" `
+            $boot.serialPath $boot.serialSha256
+        $qmpPath = Join-Path (Split-Path -Parent $boot.serialPath) 'qmp-input.log'
+        $qmpRecord = New-C170EvidenceFileRecord "$($boot.stage)-qmp" `
+            $qmpPath $boot.qmpInputSha256
+        $serialText = Get-Content -LiteralPath $boot.serialPath -Raw
+        if ($serialText -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C166-ORDINARY-READY app=ManagedNotes render=PASS') {
+            throw "C170 ordinary boot $($boot.stage) is missing its completion marker."
+        }
+        $files.Add($serial)
+        $files.Add($qmpRecord)
+        $references = [System.Collections.Generic.List[object]]::new()
+        Get-C170ScreenshotReferences $boot.productionIntegration $references
+        if ($references.Count -eq 0) { throw "C170 ordinary boot $($boot.stage) has no screenshot references." }
+        $screenshots = [System.Collections.Generic.List[object]]::new()
+        foreach ($reference in $references) {
+            $record = New-C170EvidenceFileRecord "$($boot.stage)-screenshot" `
+                $reference.path $reference.sha256
+            if ($seenScreenshots.Add($record.path)) { $files.Add($record) }
+            $screenshots.Add([ordered]@{path=$record.path;sha256=$record.sha256})
+        }
+        $boots.Add([ordered]@{
+            stage = $boot.stage
+            result = 'PASS'
+            qemuProcessIdentity = [ordered]@{
+                processId = [int]$boot.pid
+                executablePath = $boot.qemuExecutablePath
+                commandLineArguments = @($boot.qemuArguments)
+                startedAtUtc = $boot.qemuStartedAtUtc
+            }
+            serial = [ordered]@{path=$serial.path;sha256=$serial.sha256}
+            qmpInput = [ordered]@{path=$qmpRecord.path;sha256=$qmpRecord.sha256}
+            completionMarkers = @('C166-ORDINARY-READY app=ManagedNotes render=PASS')
+            screenshots = @($screenshots.ToArray())
+        })
+    }
+    $manifest = [ordered]@{
+        schemaVersion = 1
+        phase = 'C170-ordinary-production-control-rendering'
+        sourceHead = $SourceHead
+        sourceBranch = 'v1.1_DOTNET_SUPPORT'
+        status = 'PASS'
+        scenarioResult = 'PASS'
+        sourceManifest = [System.IO.Path]::GetFullPath($SourceManifestPath)
+        cleanProduction = [ordered]@{
+            composite = $productionArtifacts[0]
+            kernel = $productionArtifacts[1]
+            ramdisk = $productionArtifacts[2]
+            installedCanonicalKernel = $installed[0]
+            installedEspKernel = $installed[1]
+            installedEspRamdisk = $installed[2]
+            proof1Excluded = $true
+        }
+        finalAssociation = $source.finalAssociation
+        c166ProofPrerequisite = $proofPrerequisite
+        guestBootCount = $boots.Count
+        guestBoots = @($boots.ToArray())
+        files = @($files.ToArray())
+        artifactIntegrity = [ordered]@{result='PASS';algorithm='SHA-256';errors=@()}
+    }
+    $manifestPath = Join-Path $EvidenceRoot 'c170-ordinary-production-manifest.json'
+    $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+    $verified = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    if ($verified.schemaVersion -ne 1 -or $verified.status -ne 'PASS' -or
+        @($verified.guestBoots).Count -ne 3 -or @($verified.files).Count -lt 10) {
+        throw 'C170 ordinary production manifest did not survive JSON/schema validation.'
+    }
+    foreach ($file in $verified.files) {
+        if (-not (Test-Path -LiteralPath $file.path -PathType Leaf) -or
+            (Get-Sha256 $file.path) -ne $file.sha256) {
+            throw "C170 ordinary manifest references a missing or mismatched file: $($file.path)"
+        }
+    }
+    Write-Host "C170 ordinary production manifest PASS: $manifestPath"
+}
+
 function Get-C166WorkspaceQemuOwners([string]$RepoRoot) {
     $workspacePath = [System.IO.Path]::GetFullPath($RepoRoot).Replace('/', '\').TrimEnd('\')
     @(
@@ -274,6 +654,7 @@ function Invoke-ProofQemuBoot([string]$Stage, [string]$Ramdisk,
         '-boot','order=c','-no-reboot','-no-shutdown','-rtc','base=utc,clock=host')
     $process = Start-Process -FilePath $QemuPath -ArgumentList $arguments -WorkingDirectory $RepoRoot `
         -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden -PassThru
+    $qemuStartedAtUtc = $process.StartTime.ToUniversalTime().ToString('o')
     $serial = ''
     $holdProcess = $false
     try {
@@ -305,7 +686,7 @@ function Invoke-ProofQemuBoot([string]$Stage, [string]$Ramdisk,
     $process.Refresh()
     $exitCode = if ($process.HasExited) { $process.ExitCode } else { $null }
     $serialHash = if ($null -ne $exitCode) { Get-Sha256 $serialPath } else { $null }
-    return [ordered]@{stage=$Stage;serialPath=$serialPath;serialSha256=$serialHash;serial=$serial;pid=$process.Id;exitCode=$exitCode;backingEspPath=[System.IO.Path]::GetFullPath($EspPath);kernelSha256=$stagedKernelSha256;ramdiskSha256=$stagedRamdiskSha256;qmpPort=$qmpPort;qmpLogPath=$qmpLogPath;process=$process;held=$holdProcess}
+    return [ordered]@{stage=$Stage;serialPath=$serialPath;serialSha256=$serialHash;serial=$serial;pid=$process.Id;exitCode=$exitCode;backingEspPath=[System.IO.Path]::GetFullPath($EspPath);kernelSha256=$stagedKernelSha256;ramdiskSha256=$stagedRamdiskSha256;qmpPort=$qmpPort;qmpLogPath=$qmpLogPath;qemuExecutablePath=[System.IO.Path]::GetFullPath($QemuPath);qemuArguments=@($arguments);qemuStartedAtUtc=$qemuStartedAtUtc;process=$process;held=$holdProcess}
 }
 
 function Stop-OwnedProofQemu([object]$Boot) {
@@ -945,15 +1326,19 @@ function Invoke-C167KeyboardDefaultAppsSelection([object]$Boot,[int]$ChoiceIndex
         $dismissedScreenshotSha256 = Capture-C166GuestScreen $Boot $dismissedScreenshot
     }
 
-    # Traverse forward to Apply and Reset, then backward to the selector. This
-    # exercises the host's established forward and reverse focus routing.
+    # Focus Apply long enough to capture the shared Button cue, then continue
+    # through Reset and return to the selector using existing focus routing.
+    $buttonFocusScreenshot = $null
+    $buttonFocusScreenshotSha256 = $null
+    $buttonFocusStart = (Get-C166Serial $Boot.serialPath).Length
     Press-C166Key 'tab' $Boot
-    Press-C166Key 'tab' $Boot
-    $start = (Get-C166Serial $Boot.serialPath).Length
-    Send-C166QmpEvents ([int]$Boot.qmpPort) `
-        @((New-C166Key 'shift' $true),(New-C166Key 'tab' $true),
-          (New-C166Key 'tab' $false),(New-C166Key 'shift' $false)) $Boot.qmpLogPath 90
-    [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C144-FOCUS shift-tab=handled earlier-member=PASS result=PASS' $start 10)
+    [void](Wait-C166Serial $Boot.serialPath `
+        '^\[C102-MANAGED-OUTPUT\] C144-FOCUS tab=(?:traversed|offscreen-revealed) result=PASS' `
+        $buttonFocusStart 10)
+    if (-not [string]::IsNullOrWhiteSpace($ScreenshotRoot)) {
+        $buttonFocusScreenshot = Join-Path $ScreenshotRoot 'c170-button-focused.ppm'
+        $buttonFocusScreenshotSha256 = Capture-C167GuestScreen $Boot $buttonFocusScreenshot
+    }
     $start = (Get-C166Serial $Boot.serialPath).Length
     Send-C166QmpEvents ([int]$Boot.qmpPort) `
         @((New-C166Key 'shift' $true),(New-C166Key 'tab' $true),
@@ -969,7 +1354,7 @@ function Invoke-C167KeyboardDefaultAppsSelection([object]$Boot,[int]$ChoiceIndex
     Press-C166Key 'ret' $Boot
     [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C144-COMBO keyboard-commit=PASS capture=none result=PASS' $start 10)
     [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C167-RENDER page=Apps result=PASS' $start 10)
-    return [ordered]@{choiceIndex=$ChoiceIndex;keyboardOpenEscape='PASS';tab='PASS';shiftTab='PASS';selection='PASS';focusScreenshot=$focusScreenshot;focusScreenshotSha256=$focusScreenshotSha256;popupScreenshot=$popupScreenshot;popupScreenshotSha256=$popupScreenshotSha256;dismissedScreenshot=$dismissedScreenshot;dismissedScreenshotSha256=$dismissedScreenshotSha256;qmpLog=$Boot.qmpLogPath}
+    return [ordered]@{choiceIndex=$ChoiceIndex;keyboardOpenEscape='PASS';tab='PASS';shiftTab='PASS';selection='PASS';focusScreenshot=$focusScreenshot;focusScreenshotSha256=$focusScreenshotSha256;buttonFocusScreenshot=$buttonFocusScreenshot;buttonFocusScreenshotSha256=$buttonFocusScreenshotSha256;popupScreenshot=$popupScreenshot;popupScreenshotSha256=$popupScreenshotSha256;dismissedScreenshot=$dismissedScreenshot;dismissedScreenshotSha256=$dismissedScreenshotSha256;qmpLog=$Boot.qmpLogPath}
 }
 
 function Invoke-C169SettingsScrollProof([object]$Boot,[string]$ScreenshotRoot) {
@@ -1159,7 +1544,7 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
     $boot1Interactions.diskSha256Before = $boot1DiskHashBefore
     $boot1Interactions.diskSha256After = $boot1DiskHashAfter
     $boot1Interactions.result = 'PASS'
-    $bootResults += [ordered]@{stage=$boot1.stage;status='PASS';pid=$boot1.pid;serialPath=$boot1.serialPath;serialSha256=$boot1.serialSha256;qmpInputSha256=$boot1.qmpInputSha256;backingEspPath=$boot1.backingEspPath;interactions=$boot1Interactions}
+    $bootResults += [ordered]@{stage=$boot1.stage;status='PASS';pid=$boot1.pid;serialPath=$boot1.serialPath;serialSha256=$boot1.serialSha256;qmpInputSha256=$boot1.qmpInputSha256;qemuArguments=@($boot1.qemuArguments);qemuStartedAtUtc=$boot1.qemuStartedAtUtc;backingEspPath=$boot1.backingEspPath;interactions=$boot1Interactions}
 
     $boot2DiskHashBefore = Get-Sha256 $sharedEsp
     if ($boot2DiskHashBefore -ne $boot1DiskHashAfter) { throw 'C167 FAT16 ESP image changed between Boots 1 and 2 outside the guest run.' }
@@ -1225,7 +1610,7 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
     $boot2Interactions.sameEspPath = $diskIdentity
     $boot2Interactions.diskSha256Before = $boot2DiskHashBefore
     $boot2Interactions.diskSha256After = $boot2DiskHashAfter
-    $bootResults += [ordered]@{stage=$boot2.stage;status='PASS';pid=$boot2.pid;serialPath=$boot2.serialPath;serialSha256=$boot2.serialSha256;qmpInputSha256=$boot2.qmpInputSha256;backingEspPath=$boot2.backingEspPath;interactions=$boot2Interactions}
+    $bootResults += [ordered]@{stage=$boot2.stage;status='PASS';pid=$boot2.pid;serialPath=$boot2.serialPath;serialSha256=$boot2.serialSha256;qmpInputSha256=$boot2.qmpInputSha256;qemuArguments=@($boot2.qemuArguments);qemuStartedAtUtc=$boot2.qemuStartedAtUtc;backingEspPath=$boot2.backingEspPath;interactions=$boot2Interactions}
 
     $boot3DiskHashBefore = Get-Sha256 $sharedEsp
     if ($boot3DiskHashBefore -ne $boot2DiskHashAfter) { throw 'C167 FAT16 ESP image changed between Boots 2 and 3 outside the guest run.' }
@@ -1280,7 +1665,7 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
     $boot3Interactions.sameEspPath = $diskIdentity
     $boot3Interactions.diskSha256Before = $boot3DiskHashBefore
     $boot3Interactions.diskSha256After = $boot3DiskHashAfter
-    $bootResults += [ordered]@{stage=$boot3.stage;status='PASS';pid=$boot3.pid;serialPath=$boot3.serialPath;serialSha256=$boot3.serialSha256;qmpInputSha256=$boot3.qmpInputSha256;backingEspPath=$boot3.backingEspPath;interactions=$boot3Interactions}
+    $bootResults += [ordered]@{stage=$boot3.stage;status='PASS';pid=$boot3.pid;serialPath=$boot3.serialPath;serialSha256=$boot3.serialSha256;qmpInputSha256=$boot3.qmpInputSha256;qemuArguments=@($boot3.qemuArguments);qemuStartedAtUtc=$boot3.qemuStartedAtUtc;backingEspPath=$boot3.backingEspPath;interactions=$boot3Interactions}
 
     $finalSlots = Get-C167AssociationDiskState $sharedEsp $Python
     $finalState = Assert-C167DiskState $finalSlots 'NoOverride' $true
@@ -1305,6 +1690,10 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
     $manifest | ConvertTo-Json -Depth 24 | Set-Content -LiteralPath $manifestPath -Encoding utf8
     $latestManifest = Join-Path $EvidenceRoot 'c167-settings-ui-proof-manifest.json'
     Copy-Item -LiteralPath $manifestPath -Destination $latestManifest -Force
+    if ($script:c170ControlRendering) {
+        Write-C170FocusedEvidenceManifest $script:c170EvidenceOutputRoot $manifestPath $Composite $Kernel `
+            $NeutralRamdisk $Qemu $head
+    }
     Write-Host "C167 real Settings proof boots=3/3 PASS; evidence: $runRoot"
 }
 
@@ -1629,6 +2018,7 @@ function Invoke-C166OrdinaryBoot([int]$Number,[string]$Kernel,[string]$Ramdisk,
         Stop-OwnedProofQemu $boot
         $boot.serial=Get-C166Serial $boot.serialPath
         $boot.serialSha256=Get-Sha256 $boot.serialPath
+        $boot.qmpInputSha256=Get-Sha256 $boot.qmpLogPath
         $boot.productionIntegration=$integration
         $boot.status='PASS'
         $boot.kernelSha256=Get-Sha256 (Join-Path $esp 'kernel.elf')
@@ -1658,6 +2048,7 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
         Join-Path $RepoRoot 'out\dotnet\c166a2-final-acceptance'
     }
     $proofManifestPath=Join-Path (Join-Path $EvidenceRoot 'proof1-guest-runs') 'proof1-manifest.json'
+    $historicalProofPrerequisite = $null
     $hostManifestPath = if ($script:c167SettingsAcceptance) {
         Join-Path (Join-Path $script:c167EvidenceRoot 'host-validation') 'c166r9-host-manifest.json'
     } else {
@@ -1667,13 +2058,135 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
         -not (Test-Path -LiteralPath $hostManifestPath -PathType Leaf)) {
         throw 'C166 ordinary acceptance requires preserved C166A2 proof and fresh host validation manifests.'
     }
-    $proofManifest=Get-Content -LiteralPath $proofManifestPath -Raw | ConvertFrom-Json
     $hostManifest=Get-Content -LiteralPath $hostManifestPath -Raw | ConvertFrom-Json
-    if (-not $proofManifest.guestLaneExecuted -or
-        @($proofManifest.guestBoots).Count -ne 3 -or
-        @($proofManifest.successfulManagedMutations).Count -lt 25 -or
-        -not $hostManifest.hostValidationComplete) {
+    $proofManifest = $null
+    $proofReady = $false
+    $currentProofManifest = $null
+    if (Test-Path -LiteralPath $proofManifestPath -PathType Leaf) {
+        $currentProofManifest=Get-Content -LiteralPath $proofManifestPath -Raw | ConvertFrom-Json
+        $proofReady = [bool]$currentProofManifest.guestLaneExecuted -and
+            @($currentProofManifest.guestBoots).Count -eq 3 -and
+            @($currentProofManifest.successfulManagedMutations).Count -ge 25
+        if ($proofReady) { $proofManifest=$currentProofManifest }
+    }
+    if (-not $proofReady -and $script:c170ControlRendering) {
+        # A failed C170 refresh remains incomplete. C170 may rely on the already
+        # accepted C166A2 proof only as an explicitly linked prerequisite; it
+        # never copies the historic manifest into the C170 proof output.
+        $historicalProofManifestPath = Join-Path $RepoRoot `
+            'out\dotnet\c167-default-apps\proof1-guest-runs\proof1-manifest.json'
+        $historicalAcceptancePath = Join-Path $RepoRoot `
+            'out\dotnet\c167-default-apps\production-acceptance\c166a2-manifest.json'
+        foreach ($path in @($historicalProofManifestPath,$historicalAcceptancePath)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                throw "C170 historical C166 proof prerequisite is missing: $path"
+            }
+        }
+        $historicalProof=Get-Content -LiteralPath $historicalProofManifestPath -Raw | ConvertFrom-Json
+        $historicalAcceptance=Get-Content -LiteralPath $historicalAcceptancePath -Raw | ConvertFrom-Json
+        $historicalProofCanonical=[System.IO.Path]::GetFullPath($historicalProofManifestPath)
+        $acceptedProofCanonical=[System.IO.Path]::GetFullPath([string]$historicalAcceptance.proofManifest)
+        if ($historicalAcceptance.outcome -ne 'A' -or -not $historicalAcceptance.c166Accepted -or
+            -not [StringComparer]::OrdinalIgnoreCase.Equals($acceptedProofCanonical,$historicalProofCanonical) -or
+            -not $historicalProof.guestLaneExecuted -or @($historicalProof.guestBoots).Count -ne 3 -or
+            @($historicalProof.successfulManagedMutations).Count -lt 25) {
+            throw 'C170 historical C166 proof is not linked to a passing accepted C166A2 manifest.'
+        }
+        $refreshDiagnosticPath = Join-Path $script:c170EvidenceOutputRoot 'c170-proof1-refresh-incomplete.json'
+        $refreshRunRoot = Join-Path $script:c170EvidenceOutputRoot 'proof1-guest-runs'
+        $latestRefreshRun = Get-ChildItem -LiteralPath $refreshRunRoot -Directory -Filter 'guest-run-*' `
+            -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        $refreshSerials=[System.Collections.Generic.List[object]]::new()
+        if ($latestRefreshRun) {
+            foreach ($bootNumber in 1..3) {
+                $serialPath=Join-Path (Join-Path $latestRefreshRun.FullName "boot$bootNumber") 'serial.log'
+                if (Test-Path -LiteralPath $serialPath -PathType Leaf) {
+                    $serialText=Get-Content -LiteralPath $serialPath -Raw
+                    $refreshSerials.Add([ordered]@{
+                        boot=$bootNumber
+                        path=[System.IO.Path]::GetFullPath($serialPath)
+                        sha256=Get-Sha256 $serialPath
+                        c166SameBootPassMarkerObserved=($serialText -match '(?m)^\[C102-MANAGED-OUTPUT\] PROOF-SCENARIO-PASS C166 S Same$')
+                        missingSurfaceDestroy=($serialText -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C150-SURFACE.*destroy appId=com\.guidexos\.apps\.managed\.notes')
+                        staleDispatchObserved=($serialText -match '(?m)^\[C150-MANAGED-OUTPUT\] C150-DISPATCH rejected=stale-application result=FAIL')
+                    })
+                }
+            }
+        }
+        $refreshDiagnostic=[ordered]@{
+            schemaVersion=1
+            phase='C170-C166-proof-refresh-diagnostic'
+            sourceHead=$head
+            sourceBranch='v1.1_DOTNET_SUPPORT'
+            status='INCOMPLETE'
+            scenarioResult='INCOMPLETE'
+            reason='C170 proof refresh did not complete its application-integration lane: Boot 1 emitted the C166 SameBoot pass marker but timed out waiting for the Managed Notes C150 surface-destroy marker after stale-application dispatch evidence.'
+            guestLaneExecuted=[bool]$currentProofManifest.guestLaneExecuted
+            c166Accepted=[bool]$currentProofManifest.c166Accepted
+            currentProofBuildManifest=[ordered]@{
+                path=[System.IO.Path]::GetFullPath($proofManifestPath)
+                sha256=Get-Sha256 $proofManifestPath
+            }
+            failedRunPath=if ($latestRefreshRun) { [System.IO.Path]::GetFullPath($latestRefreshRun.FullName) } else { $null }
+            serials=@($refreshSerials.ToArray())
+            historicalEvidenceSubstituted=$false
+            artifactIntegrity=[ordered]@{result='PASS';algorithm='SHA-256';errors=@()}
+        }
+        $refreshDiagnostic | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $refreshDiagnosticPath -Encoding utf8
+        $verifiedRefresh=Get-Content -LiteralPath $refreshDiagnosticPath -Raw | ConvertFrom-Json
+        if ($verifiedRefresh.status -ne 'INCOMPLETE' -or $verifiedRefresh.scenarioResult -eq 'PASS') {
+            throw 'C170 proof refresh diagnostic incorrectly claims completion.'
+        }
+        foreach ($serial in $verifiedRefresh.serials) {
+            if (-not (Test-Path -LiteralPath $serial.path -PathType Leaf) -or
+                (Get-Sha256 $serial.path) -ne $serial.sha256) {
+                throw "C170 proof refresh diagnostic references a missing or mismatched serial: $($serial.path)"
+            }
+        }
+        $historicalSerials=[System.Collections.Generic.List[object]]::new()
+        foreach ($boot in $historicalProof.guestBoots) {
+            if ([String]::IsNullOrWhiteSpace([string]$boot.serialPath) -or
+                [String]::IsNullOrWhiteSpace([string]$boot.serialSha256) -or
+                -not (Test-Path -LiteralPath $boot.serialPath -PathType Leaf) -or
+                (Get-Sha256 $boot.serialPath) -ne $boot.serialSha256) {
+                throw "C170 historical C166 proof has a missing or mismatched serial for $($boot.stage)."
+            }
+            $serialText=Get-Content -LiteralPath $boot.serialPath -Raw
+            if ($serialText -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] PROOF-SCENARIO-PASS C166 ') {
+                throw "C170 historical C166 proof serial lacks its completion marker: $($boot.serialPath)"
+            }
+            $historicalSerials.Add([ordered]@{
+                stage=[string]$boot.stage
+                path=[System.IO.Path]::GetFullPath([string]$boot.serialPath)
+                sha256=[string]$boot.serialSha256
+            })
+        }
+        if (@($historicalProof.successfulManagedMutations | Where-Object { [int]$_.status -ne 0 }).Count -gt 0) {
+            throw 'C170 historical C166 proof contains a failed managed mutation.'
+        }
+        $proofManifest=$historicalProof
+        $proofManifestPath=$historicalProofCanonical
+        $proofReady=$true
+        $historicalProofPrerequisite=[ordered]@{
+            kind='accepted-historical-C166A2-proof-prerequisite'
+            sourceHead=[string]$historicalProof.sourceHead
+            acceptanceSourceHead=[string]$historicalAcceptance.sourceHead
+            proofManifestPath=$historicalProofCanonical
+            proofManifestSha256=Get-Sha256 $historicalProofCanonical
+            acceptanceManifestPath=[System.IO.Path]::GetFullPath($historicalAcceptancePath)
+            acceptanceManifestSha256=Get-Sha256 $historicalAcceptancePath
+            guestBootCount=@($historicalProof.guestBoots).Count
+            successfulManagedMutationCount=@($historicalProof.successfulManagedMutations).Count
+            serials=@($historicalSerials.ToArray())
+            refreshDiagnosticPath=[System.IO.Path]::GetFullPath($refreshDiagnosticPath)
+            refreshDiagnosticSha256=Get-Sha256 $refreshDiagnosticPath
+        }
+    }
+    if (-not $proofReady -or -not $hostManifest.hostValidationComplete) {
         throw 'C166 ordinary acceptance prerequisites are not complete or passing.'
+    }
+    if ($script:c170ControlRendering) {
+        $script:c170OrdinaryProofPrerequisite=$historicalProofPrerequisite
     }
     $qemuOwners=@(Get-C166WorkspaceQemuOwners $RepoRoot |
         ForEach-Object { [ordered]@{pid=$_.ProcessId;path=$_.ExecutablePath;commandLine=$_.CommandLine} })
@@ -1890,6 +2403,7 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
         hostValidation=[ordered]@{nativeCases=$hostManifest.nativeCases;managedCases=$hostManifest.managedCases;dualSlotCases=$hostManifest.dualSlotCaseCount;partialWriteCases=$hostManifest.partialWriteCases;stressTransactions=$hostManifest.stressTransactions;status='PASS';manifest=$hostManifestPath}
         proofProducts=[ordered]@{compositeSha256=$ProofCompositeHash;kernelSha256=$ProofKernelHash;ramdiskSha256=$ProofRamdiskHash;scenarioMedia=$proofManifest.scenarioMedia}
         proofManifest=$proofManifestPath;proofBoots=$proofManifest.guestBoots;crossBootState=$proofManifest.crossBootStatePath
+        proofPrerequisite=if ($script:c170ControlRendering) { $script:c170OrdinaryProofPrerequisite } else { $null }
         boot2DirectDiagnostics=$proofManifest.boot2DisabledExplorerParity.observedByProof
         boot3DirectRebootComparison=$proofManifest.boot3ReloadedDiagnostic
         successfulManagedMutations=$proofManifest.successfulManagedMutations
@@ -1930,6 +2444,17 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
     $manifestPath=Join-Path $acceptanceRoot 'c166a2-manifest.json'
     $manifest | ConvertTo-Json -Depth 24 | Set-Content -LiteralPath $manifestPath -Encoding utf8
     Write-Host "C166A2 outcome=A C166 accepted: proof, regressions, clean production, and ordinary boots 3/3 PASS. Manifest: $manifestPath"
+}
+
+if ($script:c170ControlRendering -and $RunC167SettingsProofBoots) {
+    Write-C170IncompleteEvidenceManifest `
+        (Join-Path $script:c170EvidenceOutputRoot 'c170-focused-proof-manifest.json') `
+        'C170-focused-control-rendering-proof' $head 'C170 focused proof has started; acceptance validation is pending.'
+}
+if ($script:c170ControlRendering -and $RunOrdinaryAcceptance) {
+    Write-C170IncompleteEvidenceManifest `
+        (Join-Path $script:c170EvidenceOutputRoot 'c170-ordinary-production-manifest.json') `
+        'C170-ordinary-production-control-rendering' $head 'C170 ordinary acceptance has started; production validation is pending.'
 }
 
 $c167ProtectedMedia = $null
@@ -2359,15 +2884,46 @@ if ($RunC167SettingsProofBoots) {
         'C:\Users\guideX\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe',
         'C:\Python312\python.exe','C:\Python311\python.exe')
     if (-not $c167Python) { throw 'C167 FAT16 proof-disk tooling requires Python.' }
-    Invoke-C167SettingsProofBoots $RepoRoot $script:c167EvidenceRoot $c167ProofElf $c167NeutralRamdisk `
-        $c167UiKernel $qemu $ovmf $bootloader $c167Python $c167ProtectedMedia
+    try {
+        Invoke-C167SettingsProofBoots $RepoRoot $script:c167EvidenceRoot $c167ProofElf $c167NeutralRamdisk `
+            $c167UiKernel $qemu $ovmf $bootloader $c167Python $c167ProtectedMedia
+    } catch {
+        if ($script:c170ControlRendering) {
+            Write-C170IncompleteEvidenceManifest `
+                (Join-Path $script:c170EvidenceOutputRoot 'c170-focused-proof-manifest.json') `
+                'C170-focused-control-rendering-proof' $head $_.Exception.Message
+        }
+        throw
+    }
     return
 }
 if ($RunOrdinaryAcceptance) {
     if ($RunProofBoots) { throw 'Choose separate coherent proof and ordinary acceptance runs.' }
     if (-not $UseExistingProofProducts) { throw 'C166 ordinary acceptance requires the verified existing proof products and completed proof run.' }
-    Invoke-C166OrdinaryAcceptance $RepoRoot $EvidenceRoot $proofCompositeHash $proofKernelHash $proofRamdiskHash $flags $qemu $ovmf $bootloader $make $productionCompiler
-    if ($C167SettingsDefaultApps) {
+    try {
+        Invoke-C166OrdinaryAcceptance $RepoRoot $EvidenceRoot $proofCompositeHash $proofKernelHash $proofRamdiskHash $flags $qemu $ovmf $bootloader $make $productionCompiler
+    } catch {
+        if ($script:c170ControlRendering) {
+            Write-C170IncompleteEvidenceManifest `
+                (Join-Path $script:c170EvidenceOutputRoot 'c170-ordinary-production-manifest.json') `
+                'C170-ordinary-production-control-rendering' $head $_.Exception.Message
+        }
+        throw
+    }
+    if ($script:c170ControlRendering) {
+        $ordinaryAcceptancePath = Join-Path `
+            (Join-Path $script:c167EvidenceRoot 'production-acceptance') 'c166a2-manifest.json'
+        try {
+            Write-C170OrdinaryEvidenceManifest $script:c170EvidenceOutputRoot $ordinaryAcceptancePath `
+                $RepoRoot $head
+        } catch {
+            Write-C170IncompleteEvidenceManifest `
+                (Join-Path $script:c170EvidenceOutputRoot 'c170-ordinary-production-manifest.json') `
+                'C170-ordinary-production-control-rendering' $head $_.Exception.Message
+            throw
+        }
+    }
+    if ($C167SettingsDefaultApps -and -not $script:c170ControlRendering) {
         $c166AcceptancePath = Join-Path (Join-Path $script:c167EvidenceRoot 'production-acceptance') 'c166a2-manifest.json'
         $c167ProofPath = Join-Path $script:c167EvidenceRoot 'c167-settings-ui-proof-manifest.json'
         $c167HostPath = Join-Path (Join-Path $script:c167EvidenceRoot 'host-validation') 'c167-host-manifest.json'

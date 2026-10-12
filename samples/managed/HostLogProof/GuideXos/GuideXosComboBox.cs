@@ -421,9 +421,38 @@ public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
         Span<byte> line = stackalloc byte[64];
         line.Clear();
         int position = 0;
-        byte marker = !EffectiveEnabled ? (byte)'x' : _isFocused ? (byte)'>' : (byte)'[';
-        if (!AppendByte(line, ref position, marker) ||
-            (marker != (byte)'[' && !AppendByte(line, ref position, (byte)'[')) ||
+        bool enabled = EffectiveEnabled;
+        if (!enabled)
+        {
+            if (!ClearPopupRows(surface) ||
+                !AppendByte(line, ref position, (byte)'x') ||
+                !AppendByte(line, ref position, (byte)' '))
+            {
+                return GuideXosResult.InvalidArgument;
+            }
+            int disabledLabelWidth = Math.Max(0,
+                (_width / CharacterWidth) - position);
+            if (IsValidIndex(_selectedIndex))
+            {
+                int length = Math.Min(_itemLengths[_selectedIndex],
+                    disabledLabelWidth);
+                for (int index = 0; index < length; index++)
+                {
+                    if (!AppendByte(line, ref position,
+                            (byte)_itemStorage[
+                                _selectedIndex * _maximumItemTextLength + index]))
+                    {
+                        return GuideXosResult.InvalidArgument;
+                    }
+                }
+            }
+            return surface.TrySetText(_x, _y, line[..position]);
+        }
+
+        if ((_isFocused &&
+                (!AppendByte(line, ref position, (byte)'>') ||
+                 !AppendByte(line, ref position, (byte)' '))) ||
+            !AppendByte(line, ref position, (byte)'[') ||
             !AppendByte(line, ref position, (byte)' '))
         {
             return GuideXosResult.InvalidArgument;
@@ -447,7 +476,7 @@ public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
         {
             line[position++] = (byte)' ';
         }
-        if (!AppendByte(line, ref position, (byte)'v') ||
+        if (!AppendByte(line, ref position, _isOpen ? (byte)'^' : (byte)'v') ||
             !AppendByte(line, ref position, (byte)']') ||
             surface.TrySetText(_x, _y, line[..position]) != GuideXosResult.Success)
         {

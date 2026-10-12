@@ -340,17 +340,29 @@ public sealed class GuideXosButton : IGuideXosVerticalStackMember
         Span<byte> line = stackalloc byte[64];
         line.Clear();
         int position = 0;
-        byte lead = !EffectiveEnabled
-            ? (byte)'x'
-            : _isFocused ? (byte)'>' : (byte)'[';
-        if (!AppendByte(line, ref position, lead) ||
-            (lead != (byte)'[' && !AppendByte(line, ref position, (byte)'[')) ||
-            !AppendByte(line, ref position, (byte)' '))
+        bool enabled = EffectiveEnabled;
+        if (!enabled)
         {
-            return GuideXosResult.InvalidArgument;
+            if (!AppendByte(line, ref position, (byte)'x') ||
+                !AppendByte(line, ref position, (byte)' '))
+            {
+                return GuideXosResult.InvalidArgument;
+            }
+        }
+        else
+        {
+            if ((_isFocused &&
+                    (!AppendByte(line, ref position, (byte)'>') ||
+                     !AppendByte(line, ref position, (byte)' '))) ||
+                !AppendByte(line, ref position, (byte)'[') ||
+                !AppendByte(line, ref position, (byte)' '))
+            {
+                return GuideXosResult.InvalidArgument;
+            }
         }
 
-        int availableLabelLength = Math.Max(0, (_width / 8) - 5);
+        int availableLabelLength = Math.Max(0, (_width / 8) - position -
+            (enabled ? 2 : 0));
         availableLabelLength = Math.Min(_labelLength, availableLabelLength);
         for (int index = 0; index < availableLabelLength; index++)
         {
@@ -359,8 +371,9 @@ public sealed class GuideXosButton : IGuideXosVerticalStackMember
                 return GuideXosResult.InvalidArgument;
             }
         }
-        if (!AppendByte(line, ref position, (byte)' ') ||
-            !AppendByte(line, ref position, (byte)']'))
+        if (enabled &&
+            (!AppendByte(line, ref position, (byte)' ') ||
+             !AppendByte(line, ref position, (byte)']')))
         {
             return GuideXosResult.InvalidArgument;
         }

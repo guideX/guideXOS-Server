@@ -61,5 +61,13 @@ bool stressPassed = RunSuite("C169-Stress", 4,
 allPassed &= stressPassed;
 Console.WriteLine($"C169-STRESS popupCycles={GuideXosManagedUiStressC169Tests.PopupCycleCount} scrollViewMovements={GuideXosManagedUiStressC169Tests.ScrollMovementCount} c168Replays={GuideXosManagedUiStressC169Tests.SettingsLifecycleCycleCount} c168ReplayPageCycles=25000 c168ReplaySelectionChanges=25000 c168ReplayApplyResetCycles=10000 c168ReplayPopupCycles=25000 settingsCloseReopenCycles={GuideXosManagedUiStressC169Tests.SettingsLifecycleCycleCount} result={(stressPassed ? "PASS" : "FAIL")}");
 
+allPassed &= RunSuite("C170-ControlRendering",
+    GuideXosControlRenderingC170Tests.CaseCount,
+    () => GuideXosControlRenderingC170Tests.Run(null));
+bool c170StressPassed = RunSuite("C170-Stress", 7,
+    () => GuideXosControlRenderingC170Tests.RunStress(null));
+allPassed &= c170StressPassed;
+Console.WriteLine($"C170-STRESS buttonFocusChanges={GuideXosControlRenderingC170Tests.ButtonFocusChangeCount} buttonActivations={GuideXosControlRenderingC170Tests.ButtonActivationCount} comboFocusChanges={GuideXosControlRenderingC170Tests.ComboFocusChangeCount} dropdownCycles={GuideXosControlRenderingC170Tests.DropDownCycleCount} keyboardSelectionChanges={GuideXosControlRenderingC170Tests.KeyboardSelectionChangeCount} pointerSelectionChanges={GuideXosControlRenderingC170Tests.PointerSelectionChangeCount} settingsCloseReopenCycles={GuideXosControlRenderingC170Tests.SettingsCloseReopenCycleCount} result={(c170StressPassed ? "PASS" : "FAIL")}");
+
 Console.WriteLine($"MANAGED-UI-HOST-GATE suites={passedSuites + failedSuites} passed={passedSuites} failed={failedSuites} cases={totalCases} result={(allPassed && failedSuites == 0 ? "PASS" : "FAIL")}");
 return allPassed && failedSuites == 0 ? 0 : 1;
