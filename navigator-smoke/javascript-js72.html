@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS72</title></head>
+<body>
+<h1>Navigator JavaScript JS72</h1>
+<section id="series" class="container">
+  <li id="a" class="selected active visible"></li>
+  <li id="b"></li>
+  <li id="c" class="selected visible"></li>
+  <li id="d" class="selected active"></li>
+  <li id="e" class="active"></li>
+  <li id="f" class="selected required"></li>
+</section>
+<section id="other">
+  <li id="g" class="selected"></li>
+  <li id="h" class="selected"></li>
+</section>
+<section id="checks">
+  <input id="check-a" type="checkbox">
+  <input id="check-b" type="checkbox">
+</section>
+<section id="event-buttons">
+  <button id="event-a" class="selected" type="button">A</button>
+  <button id="event-b" class="selected" type="button">B</button>
+</section>
+<pre id="result">JS72:pending</pre>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions++;
+  if (!condition) failures++;
+}
+
+var series = document.getElementById('series');
+var a = document.getElementById('a');
+var b = document.getElementById('b');
+var c = document.getElementById('c');
+var d = document.getElementById('d');
+var e = document.getElementById('e');
+var f = document.getElementById('f');
+verify(document.querySelector(':nth-child(2 of .selected)') === c);
+verify(document.querySelector(':nth-last-child(1 of .selected)') === f);
+verify(!b.matches(':nth-child(2 of .selected)') &&
+  c.matches(':nth-child(2 of .selected)'));
+var firstThree = series.querySelectorAll(':scope > :nth-child(-n+3 of .selected)');
+verify(firstThree.length === 3 && firstThree[0] === a &&
+  firstThree[1] === c && firstThree[2] === d);
+var activeReverse = series.querySelectorAll(':nth-last-child(even of .active)');
+verify(activeReverse.length === 1 && activeReverse[0] === d);
+verify(series.querySelector(':nth-child(2 of .active)') === d);
+var four = document.querySelectorAll(
+  '#series > :nth-child(1 of .visible), ' +
+  '#series > :nth-child(2 of .selected), ' +
+  '#series > :nth-last-child(1 of .active), ' +
+  '#series > :nth-last-child(1 of .required)');
+verify(four.length === 4);
+verify(four[0] === a && four[1] === c && four[2] === e && four[3] === f);
+verify(document.querySelector('#other > :nth-child(2 of .selected)') ===
+  document.getElementById('h'));
+var scoped = series.querySelectorAll(':scope > li:nth-child(odd of .selected)');
+verify(scoped.length === 2 && scoped[0] === a && scoped[1] === d);
+verify(a.matches(':nth-child(1 of :scope)') &&
+  !c.matches(':nth-child(2 of :scope)'));
+verify(d.closest(':nth-child(3 of .selected)') === d);
+verify(document.querySelectorAll('#series > :nth-child(2 of .selected)').length === 1 &&
+  document.querySelectorAll('#series > :nth-child(2 of .selected)').length === 1);
+var live = series.querySelectorAll(':scope > :nth-child(2 of .selected)');
+verify(live.length === 1 && live[0] === c);
+b.setAttribute('class', 'selected');
+verify(live.length === 1 && live[0] === b);
+b.removeAttribute('class');
+verify(live.length === 1 && live[0] === c);
+verify(document.querySelector(':nth-child(2 of .selected, .active)') === null);
+verify(document.querySelector(':nth-child(2 of .selected > .active)') === null);
+verify(a.matches('.selected:nth-child(1)'));
+
+var checkA = document.getElementById('check-a');
+var checkB = document.getElementById('check-b');
+verify(document.querySelectorAll('input:nth-child(1 of :checked)').length === 0);
+checkA.checked = true;
+var checkedA = document.querySelectorAll('input:nth-child(1 of :checked)');
+verify(checkedA.length === 1 && checkedA[0] === checkA);
+checkB.checked = true;
+var checkedB = document.querySelectorAll('input:nth-child(2 of :checked)');
+verify(checkedB.length === 1 && checkedB[0] === checkB);
+checkA.focus();
+var focused = document.querySelectorAll('input:nth-child(1 of :focus)');
+verify(focused.length === 1 && focused[0] === checkA);
+
+var eventA = document.getElementById('event-a');
+var eventB = document.getElementById('event-b');
+var eventResult = false;
+var nestedResult = false;
+var eventMetadata = false;
+eventA.addEventListener('click', function(event) {
+  var target = event.target;
+  var before = document.querySelectorAll(
+    '#event-buttons > :nth-child(odd of .selected)');
+  eventB.click();
+  var after = document.querySelectorAll(
+    '#event-buttons > :nth-child(odd of .selected)');
+  eventResult = before.length === 1 && before[0] === eventA &&
+    after.length === 1 && after[0] === eventA && target === event.target;
+  eventMetadata = event.currentTarget === target && event.eventPhase === 2;
+  verify(eventResult);
+  verify(nestedResult);
+  verify(eventMetadata);
+  document.getElementById('result').textContent =
+    'JS72:event=' + eventResult + ':nested=' + nestedResult +
+    ':metadata=' + eventMetadata + ':assertions=' + assertions +
+    ':failures=' + failures;
+});
+eventB.addEventListener('click', function(event) {
+  var rows = document.querySelectorAll(
+    '#event-buttons > :nth-child(odd of .selected)');
+  nestedResult = rows.length === 1 && rows[0] === eventA &&
+    event.target === eventB && event.currentTarget === eventB &&
+    event.eventPhase === 2;
+});
+document.getElementById('result').textContent =
+  'JS72:initial:assertions=' + assertions + ':failures=' + failures +
+  ':malformed=true';
+</script>
+</body>
+</html>

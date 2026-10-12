@@ -8496,3 +8496,205 @@ the 128 independently owned collection records, as proposed in the JS70
 record. It must preserve per-collection lifetime and generation behavior and
 must not weaken the ownership guarantees retained by JS71's descriptor-owned
 filter cores.
+
+## JS72 filtered positional selector performance
+
+### Profile and baseline method
+
+JS71 resolves a candidate's parent, validates its direct-sibling chain, and
+walks that chain to run the restricted `of S` matcher and derive the candidate
+ordinal. `querySelectorAll()` invokes the same positional matcher for each
+outer candidate. With a common parent this repeated structural and filter
+work grows with the number of candidates times the sibling count; the
+restricted selector descriptor copy was not the source of the measured cost.
+The original JS71 implementation counted 1,045,504 structural inspections,
+1,042,441 same-parent sibling inspections/filter evaluations, 1,021 parent
+resolutions, and 1,021 formula evaluations for the 1,024-Element
+same-parent workload.
+
+For a comparable timing baseline, the original JS71 header and implementation
+were exported from commit `7fc8f6b01a688926905408d369bdad198f50412f` and
+compiled with the same JS72 test fixture, compiler options, and benchmark
+queries as the optimized version. The baseline binary is outside the
+checkout at `%TEMP%\guidex-navigator-javascript-js72-test\navigator_javascript_js72_js71_baseline.exe`;
+its source snapshot is at `%TEMP%\guidex-js72-js71-baseline-source`. Each
+scenario was run five times, serially, with no competing benchmark process.
+The optimized executable used the same C++17 `g++ -O2` harness and fixture.
+Times below are elapsed microseconds for the complete measured operation,
+with all scenario-specific query repetitions held constant between builds.
+
+| Workload | JS71 median (min–max) | JS72 median (min–max) | Median change |
+|---|---:|---:|---:|
+| 1,024 siblings, all selected | 463,128 (454,396–507,450) | 86 (80–194) | −99.98% |
+| 1,024 siblings, alternating filter | 483,685 (478,901–510,989) | 87 (76–96) | −99.98% |
+| 1,024 siblings, no selected | 458,238 (453,942–519,140) | 144 (140–997) | −99.97% |
+| Late matching sibling | 1,000,762 (967,580–1,033,524) | 314 (266–341) | −99.97% |
+| 1,024 Elements across many parents | 119,329 (112,204–156,052) | 499 (439–560) | −99.58% |
+| One direct child | 7 (6–25) | 9 (7–19) | +2 μs |
+| Repeated `querySelectorAll()` | 1,014,837 (955,540–1,042,901) | 160 (154–204) | −99.98% |
+| `matches()` on one Element | 466 (459–480) | 462 (458–483) | −1% |
+| `closest()` | 450 (445–471) | 469 (458–504) | +4% |
+| `:nth-last-child()` reverse ranking | 512,984 (498,389–515,134) | 86 (82–112) | −99.98% |
+| Four-member outer selector list | 3,495,826 (3,296,528–4,791,701) | 1,268 (1,236–1,368) | −99.96% |
+
+The large-query reduction is also reflected in the counters, so the result is
+not attributed only to instruction-level savings. The 1,024-Element
+same-parent alternating-filter qSA recorded 2,048 structural inspections,
+2,046 sibling-link inspections, 1,023 filter evaluations, three parent
+resolutions, and 511 formula evaluations. It initialized and built one rank
+cache and recorded 1,023 candidate cache hits. JS71's corresponding
+same-parent count is 1,045,504 structural inspections, 1,042,441 sibling
+inspections/filter evaluations, 1,021 parent resolutions, and 1,021 formula
+evaluations. JS72 therefore reduced those measured quantities by about
+99.8%, 99.9%, and 99.7% respectively; formula calls also stop for candidates
+that fail the `of S` membership requirement.
+
+The 1,024-Element many-parent case recorded 513 parent resolutions, 2,048
+structural inspections, 2,046 sibling-link inspections, 1,023 filter
+evaluations, 255 matching siblings and formula evaluations, and one cache
+initialization/build with 1,023 candidate cache hits. The table's JS72 times
+come from a standalone `--bench-only` run after the matrix completed, with
+five serial repetitions per workload and no concurrent compiler or
+benchmark process. One of the five no-match samples was a 997 μs outlier, so
+its median is 144 μs; the reported range preserves that sample.
+
+### Bounded invocation scratch
+
+The selected approach keeps a `FilteredNthQueryScratch` on the filtered
+matcher call stack. It has fixed arrays for 1,024 structural-group states,
+group counts, and eight descriptor-specific rank maps of 1,024 entries,
+alongside bounded selector-slot metadata. The exact object size is 19,576
+bytes. There is no heap allocation, global mutable storage, document-owned
+cache, descriptor growth, or retained collection cache. Scratch is created
+for a filtered query collection read and destroyed before that public read
+returns; a later read of the live collection rebuilds ranks and observes
+current attributes and checked/focus state. `matches()` and `closest()` keep
+the direct single-candidate path and do not initialize the scratch.
+
+Repeated per-candidate sibling scans were retained only as the direct
+single-candidate fallback. A document-persistent cache was rejected because
+attribute/state mutation, scope changes, document generations, and nested
+Event dispatch would require a broader invalidation and ownership protocol.
+The chosen implementation first validates each direct-child group once per
+read, then builds one rank table per outer-member/position-descriptor slot.
+Known canonical Elements use their verified document slot during core
+filtering, avoiding a repeated linear `findElement()` lookup for every
+sibling; attribute and state predicates are still evaluated for the current
+read, so this shortcut does not retain mutable filter results.
+
+Each rank slot belongs to one outer selector member and one positional
+descriptor within it. A slot binds the current document, generation, API
+scope, and descriptor identity. A different parent group is validated and
+counted independently; a malformed group is rejected without invalidating
+other parents. The pass checks canonical serial mappings, parent identity,
+child indexes, sibling counts, previous-sibling links, and parent child
+counts before filter evaluation. A failed validation is fail-closed for that
+group. Only structurally valid siblings are tested against the restricted
+core. Forward ordinals are recorded once; reverse ordinals are derived from
+the same matching total. Candidate membership in `S` remains mandatory
+before the cached rank can satisfy the positional formula.
+
+The scratch is invocation-local, so nested Event callbacks obtain an
+independent object. A callback's nested qSA completes and releases its
+scratch before dispatch resumes. Generation replacement, stale collection
+reads, different scopes, outer-list members, filters, and parent groups do
+not share rank state. The tests exercise nested dispatch, attribute mutation
+between retained-collection reads, same-serial generation replacement,
+invalid sibling structures followed by repair, separate parents, and
+different filters.
+
+The per-candidate helper's GCC `-fstack-usage` frame is 19,648 bytes for
+filtered count and 19,680 bytes for filtered index; rank preparation/build
+and cache lookup frames are 128/176/256 bytes. Review of the call paths
+confirmed that filtered count and index use distinct public-call frames and
+that Event dispatch does not nest a live scratch frame around the callback's
+separate query. The small-document workload measured 7 μs at baseline and
+9 μs after optimization (five runs: 6–25 μs and 7–19 μs), a 2 μs difference
+at a very short duration. `matches()` and `closest()` median changes are
+−4 μs and +19 μs respectively; both run distributions overlap. The
+optimization is scoped to filtered collection reads.
+
+### Memory, capacities, and correctness coverage
+
+JS72 leaves the selector descriptor at 1,918 bytes, collection record at
+1,936 bytes, 128-record registry at 247,808 bytes, canonical `HtmlElementRef`
+at 440 bytes, and content metadata at 24 bytes. The 19,576-byte scratch is
+temporary stack storage. All existing limits remain: 256 selector bytes,
+four outer-list members, two `:has()` alternatives and relative steps, two
+nested logical members, 24 relative-core entries, 128 collections, and 1,024
+structural Elements. No syntax or public API was added.
+
+The JS72 native harness checks forward and reverse positions, `An+B`,
+candidate membership, filters and parents in isolation, scope, matches and
+closest, live collection reads, checked/focus state, malformed structures,
+generation replacement, Event reentrancy, four-member list identity/order,
+and maximum-capacity one-parent and many-parent documents. The focused run
+passed **55/55** checks and strict `-Wall -Wextra -Werror -pedantic`
+compilation. The JS71 focused suite passed **110/110** after the change.
+The dedicated runner repeats all eleven timing workloads five times; its
+timings and diagnostic counts above were captured serially. Full JavaScript
+matrix, production-hosted JS72, aggregate, and artifact-restoration results
+are recorded in the qualification closeout below.
+
+### JS72 qualification closeout
+
+The JS72 hosted fixture starts with 23 assertions and runs three additional
+assertions after Event dispatch. The server checks its exact markers:
+`JS72:initial:assertions=23:failures=0:malformed=true` and
+`JS72:event=true:nested=true:metadata=true:assertions=26:failures=0`.
+
+The complete native JavaScript matrix passed **74/74 lanes** and reported
+**13,219/13,219 assertions across 32 lanes**. This includes the parser,
+runtime, JS6–JS72, and all four JS62 revision lanes. The updated JS72 focused
+runner passed **55/55** checks with strict compilation; the JS71 focused
+regression passed **110/110**.
+
+`build.bat` succeeded from the JS72 source. The fresh
+`D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe` was
+**8,498,327 bytes**, SHA-256
+`9AF5D9E2C6ED89A5C84888894C01AF0FEFFC3841D0525AD304147EE3060E2D3A`. The
+successful hosted retry launched PID **21860** from that same path and
+verified the same SHA-256. The first hosted attempt exposed a fixture setup
+issue: its event buttons had no visible content for the hosted click helper.
+Adding visible labels fixed the fixture; all three JS72 hosted checks then
+passed against the same fresh executable.
+
+The hosted aggregate recorded **644 passed / 7 failed / 651 total**. All
+three new JS72 checks passed. Its only failures are the established CSS
+baseline: CSS 3C, CSS 3G, CSS 6A, three CSS 6B checks, and CSS 6C. The
+JavaScript hosted fixtures passed, including the JS72 initial and nested
+Event markers above. No CSS implementation or fixture was changed.
+
+Before build and hosted execution, the ignored file manifest held **1,337
+files / 88,371,771 bytes**. The original **8,398,274-byte** executable was
+backed up with SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971` and
+restored and hash-verified. The 42 pre-existing generated fixtures had no
+content or size differences from the manifest after the run; the hosted
+runner also restored `downloads`. Twelve run-created HTTP, HTTPS, and smoke
+logs totaling **979,069 bytes** were copied to
+`C:\Users\guideX\AppData\Local\Temp\guidex-js72-hosted-evidence-20261012`.
+Windows command policy rejected removal of those exact archived log files.
+The final comparison therefore has **0 changed / 0 missing / 12 extra**
+files, with **1,349 files / 89,350,840 bytes**. The remaining extras are
+only the two attempts' identified logs; no baseline file changed.
+
+At task start the worktree was clean on
+`NAVIGATOR_JAVASCRIPT_SUPPORT`, HEAD
+`7fc8f6b01a688926905408d369bdad198f50412f`, with the recorded divergence
+1 ahead / 0 behind. During qualification, the local origin-tracking ref
+advanced to that same JS71 commit (`origin/NAVIGATOR_JAVASCRIPT_SUPPORT`
+reflog: update by push at 2026-10-12 05:54 -0700); no fetch or push was run
+for this task. Before the JS72 commit, the live divergence was 0 ahead / 0
+behind. `.phase` is absent as expected. No kernel or QEMU test was needed.
+
+The large shared-parent and many-parent performance gains, semantics,
+capacity bounds, strict compilation, native matrix, fresh build, hosted JS72,
+and CSS-baseline classification are qualified. **Outcome B — useful JS72
+performance work with artifact cleanup incomplete:** exact ignored-state
+restoration is the sole open acceptance item because command policy rejected
+deleting the archived run logs. The 19,576-byte per-read scratch and
+per-index live collection rebuilds remain the main areas for follow-up. A
+bounded JS73 investigation should measure repeated indexed reads on retained
+large collections and evaluate a smaller rank workspace while preserving
+mutation, scope, generation, and Event isolation.

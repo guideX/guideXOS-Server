@@ -158,6 +158,9 @@ struct NavigatorScriptFilteredNthCounters {
     std::uint64_t simpleSelectorEvaluations = 0u;
     std::uint64_t matchingSiblings = 0u;
     std::uint64_t formulaEvaluations = 0u;
+    std::uint64_t rankCacheInitializations = 0u;
+    std::uint64_t rankCacheBuilds = 0u;
+    std::uint64_t rankCacheHits = 0u;
 };
 #endif
 
@@ -500,6 +503,28 @@ private:
         NavigatorScriptSelectorDescriptor selector;
     };
 
+    static constexpr std::size_t kFilteredNthCacheSlots =
+        kNavigatorScriptMaxSelectorListMembers * 2u;
+    struct FilteredNthQueryScratch {
+        const gxos::web::WebDocument* document = nullptr;
+        const NavigatorScriptSelectorDescriptor* selector = nullptr;
+        HostGenerationId generation = 0u;
+        HostInstanceId scopeSerial = 0u;
+        bool structuralGroupsReady = false;
+        std::array<std::uint8_t, kNavigatorScriptMaxDocumentNodes>
+            groupState{};
+        std::array<std::uint16_t, kNavigatorScriptMaxDocumentNodes>
+            groupCounts{};
+        std::array<std::array<std::uint16_t,
+            kNavigatorScriptMaxDocumentNodes>, kFilteredNthCacheSlots> ranks{};
+        std::array<const NavigatorScriptSimpleSelectorDescriptor*,
+            kFilteredNthCacheSlots> slotSelectors{};
+        std::array<bool, kFilteredNthCacheSlots> slotBuilt{};
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        NavigatorScriptFilteredNthCounters* counters = nullptr;
+#endif
+    };
+
     std::size_t callbackLimit() const;
     std::size_t listenerLimit() const;
     ClickHandlerRecord* clickHandlerFor(HostInstanceId serial);
@@ -592,7 +617,8 @@ private:
     gxos::web::HtmlElementRef* findElement(HostInstanceId serial);
     const gxos::web::HtmlElementRef* findElement(HostInstanceId serial) const;
     bool resolveElementAttribute(HostInstanceId serial, SourceView name,
-        SourceView& value) const;
+        SourceView& value,
+        const gxos::web::HtmlElementRef* canonicalElement = nullptr) const;
     bool mutateElementAttribute(HostInstanceId serial, SourceView name,
         SourceView value, bool remove);
     bool isKnownElementSerial(HostInstanceId serial) const;
@@ -614,7 +640,8 @@ private:
     NavigatorScriptSelectorMatchResult selectorCoreConditionsMatchResult(
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
-        const NavigatorScriptSelectorDescriptor& storage) const;
+        const NavigatorScriptSelectorDescriptor& storage,
+        bool canonicalElementCheck = false) const;
     NavigatorScriptSelectorMatchResult selectorCoreElementMatchResult(
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
@@ -622,7 +649,8 @@ private:
         const NavigatorScriptSelectorDescriptor& storage,
         bool strictPseudoValidation = false,
         const NavigatorScriptSelectorMatchContext& context =
-            NavigatorScriptSelectorMatchContext()) const;
+            NavigatorScriptSelectorMatchContext(),
+        bool canonicalElementCheck = false) const;
     NavigatorScriptSelectorMatchResult selectorRelativeElementMatchResult(
         const HostObjectReference& anchor,
         NavigatorScriptRelativeSelectorRelation relation,
@@ -676,25 +704,31 @@ private:
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
         , NavigatorScriptFilteredNthCounters* filteredNthCounters = nullptr
 #endif
+        , FilteredNthQueryScratch* filteredNthScratch = nullptr
+        , std::uint8_t filteredNthCacheSlot = 0xFFu
         ) const;
     bool selectorSimpleElementMatches(
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSimpleSelectorDescriptor& selector,
         const NavigatorScriptSelectorDescriptor& storage,
         const NavigatorScriptSelectorMatchContext& context =
-            NavigatorScriptSelectorMatchContext()) const;
+            NavigatorScriptSelectorMatchContext(),
+        FilteredNthQueryScratch* filteredNthScratch = nullptr,
+        std::uint8_t filteredNthCacheSlot = 0xFFu) const;
     NavigatorScriptSelectorMatchResult selectorStatePseudoMatchResult(
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
         std::int16_t nthA, std::int16_t nthB,
         const NavigatorScriptSelectorMatchContext& context =
-            NavigatorScriptSelectorMatchContext()) const;
+            NavigatorScriptSelectorMatchContext(),
+        bool canonicalElementCheck = false) const;
     bool selectorStatePseudoMatches(
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
         std::int16_t nthA, std::int16_t nthB,
         const NavigatorScriptSelectorMatchContext& context =
-            NavigatorScriptSelectorMatchContext()) const;
+            NavigatorScriptSelectorMatchContext(),
+        bool canonicalElementCheck = false) const;
     bool resolveStructuralIndex(
         const gxos::web::HtmlElementRef& element, bool sameType,
         bool fromEnd, std::size_t& index) const;
@@ -703,6 +737,9 @@ private:
         const NavigatorScriptSimpleSelectorCoreDescriptor& filter,
         const NavigatorScriptSelectorDescriptor& storage,
         const NavigatorScriptSelectorMatchContext& context, bool fromEnd,
+        const NavigatorScriptSimpleSelectorDescriptor& selectorDescriptor,
+        FilteredNthQueryScratch* filteredNthScratch,
+        std::uint8_t filteredNthCacheSlot,
         std::size_t& index
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
         , NavigatorScriptFilteredNthCounters* filteredNthCounters
@@ -712,11 +749,14 @@ private:
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSelectorMemberDescriptor& selector,
         const NavigatorScriptSelectorDescriptor& storage,
-        const NavigatorScriptSelectorMatchContext& context) const;
+        const NavigatorScriptSelectorMatchContext& context,
+        FilteredNthQueryScratch* filteredNthScratch = nullptr,
+        std::size_t memberIndex = 0u) const;
     bool selectorElementMatches(const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSelectorDescriptor& selector,
         const NavigatorScriptSelectorMatchContext& context =
-            NavigatorScriptSelectorMatchContext()) const;
+            NavigatorScriptSelectorMatchContext(),
+        FilteredNthQueryScratch* filteredNthScratch = nullptr) const;
     bool selectorClosestMatch(HostInstanceId receiverSerial,
         const NavigatorScriptSelectorDescriptor& selector,
         const NavigatorScriptSelectorMatchContext& context,
@@ -725,9 +765,38 @@ private:
         HostInstanceId scopeSerial) const;
     bool selectorScopeMatches(const gxos::web::HtmlElementRef& element,
         HostInstanceId scopeSerial) const;
-    std::size_t selectorMatchCount(const SelectorCollectionRecord& record) const;
+    std::size_t selectorMatchCount(const SelectorCollectionRecord& record
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        , NavigatorScriptFilteredNthCounters* filteredNthCounters = nullptr
+#endif
+        ) const;
     bool selectorMatchAt(const SelectorCollectionRecord& record,
         std::size_t index, HostInstanceId& serial) const;
+    std::size_t selectorMatchCountInternal(
+        const SelectorCollectionRecord& record,
+        FilteredNthQueryScratch* filteredNthScratch) const;
+    bool selectorMatchAtInternal(const SelectorCollectionRecord& record,
+        std::size_t index, HostInstanceId& serial,
+        FilteredNthQueryScratch* filteredNthScratch) const;
+    std::size_t selectorMatchCountFiltered(
+        const SelectorCollectionRecord& record
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        , NavigatorScriptFilteredNthCounters* filteredNthCounters
+#endif
+        ) const;
+    bool selectorMatchAtFiltered(const SelectorCollectionRecord& record,
+        std::size_t index, HostInstanceId& serial) const;
+    bool selectorHasFilteredNth(
+        const NavigatorScriptSelectorDescriptor& selector) const;
+    bool prepareFilteredNthStructuralGroups(
+        FilteredNthQueryScratch& scratch) const;
+    bool buildFilteredNthRankCache(
+        FilteredNthQueryScratch& scratch, std::uint8_t cacheSlot,
+        const NavigatorScriptSimpleSelectorDescriptor& selectorDescriptor,
+        const NavigatorScriptSimpleSelectorCoreDescriptor& filter,
+        const NavigatorScriptSelectorDescriptor& storage,
+        const NavigatorScriptSelectorMatchContext& context,
+        bool fromEnd) const;
     bool getOrCreateSelectorCollection(HostInstanceId scopeSerial,
         const NavigatorScriptSelectorDescriptor& selector,
         HostInstanceId& token);

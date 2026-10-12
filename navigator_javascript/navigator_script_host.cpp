@@ -3899,11 +3899,21 @@ const gxos::web::HtmlElementRef* NavigatorScriptHostAdapter::findElement(
 }
 
 bool NavigatorScriptHostAdapter::resolveElementAttribute(
-    HostInstanceId serial, SourceView name, SourceView& value) const
+    HostInstanceId serial, SourceView name, SourceView& value,
+    const gxos::web::HtmlElementRef* canonicalElement) const
 {
     value = SourceView();
     if (document_ == nullptr || !validAttributeName(name)) return false;
-    const gxos::web::HtmlElementRef* element = findElement(serial);
+    const gxos::web::HtmlElementRef* element = canonicalElement;
+    if (element == nullptr) element = findElement(serial);
+    else {
+        const std::size_t count = std::min(limits_.maxDocumentNodes,
+            document_->structuralElements.size());
+        if (serial == 0u || serial > count || element->serial != serial ||
+            &document_->structuralElements[static_cast<std::size_t>(
+                serial - 1u)] != element)
+            return false;
+    }
     if (element == nullptr) return false;
 
     const std::string& tag = element->tagName;
@@ -4549,13 +4559,22 @@ NavigatorScriptSelectorMatchResult
 NavigatorScriptHostAdapter::selectorCoreConditionsMatchResult(
     const gxos::web::HtmlElementRef& element,
     const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
-    const NavigatorScriptSelectorDescriptor& storage) const
+    const NavigatorScriptSelectorDescriptor& storage,
+    bool canonicalElementCheck) const
 {
     using MatchResult = NavigatorScriptSelectorMatchResult;
+    bool canonicalElement = false;
+    if (canonicalElementCheck && document_ != nullptr &&
+        element.serial != 0u && element.serial <=
+            document_->structuralElements.size()) {
+        canonicalElement = &document_->structuralElements[
+            static_cast<std::size_t>(element.serial - 1u)] == &element;
+    }
     if (!selector.valid || storage.textLength >
             kNavigatorScriptMaxSelectorLength || element.serial == 0u ||
         element.tagName.empty() ||
-        document_ == nullptr || findElement(element.serial) != &element)
+        document_ == nullptr || (canonicalElementCheck
+            ? !canonicalElement : findElement(element.serial) != &element))
         return MatchResult::Invalid;
     const auto partIsBounded = [&storage](std::uint16_t offset,
             std::uint16_t length) {
@@ -4600,7 +4619,8 @@ NavigatorScriptHostAdapter::selectorCoreConditionsMatchResult(
         SourceView retainedValue;
         if (!resolveElementAttribute(element.serial,
                 selectorPart(storage, selector.attributeNameOffset,
-                    selector.attributeNameLength), retainedValue))
+                    selector.attributeNameLength), retainedValue,
+                canonicalElementCheck ? &element : nullptr))
             return MatchResult::NoMatch;
         if (selector.attributeValuePresent &&
             !selectorTextEquals(retainedValue,
@@ -4618,11 +4638,12 @@ NavigatorScriptHostAdapter::selectorCoreElementMatchResult(
     std::int16_t nthA, std::int16_t nthB,
     const NavigatorScriptSelectorDescriptor& storage,
     bool strictPseudoValidation,
-    const NavigatorScriptSelectorMatchContext& context) const
+    const NavigatorScriptSelectorMatchContext& context,
+    bool canonicalElementCheck) const
 {
     using MatchResult = NavigatorScriptSelectorMatchResult;
     const MatchResult conditions = selectorCoreConditionsMatchResult(element,
-        selector, storage);
+        selector, storage, canonicalElementCheck);
     if (conditions != MatchResult::Match) return conditions;
     if (selector.statePseudo == NavigatorScriptStatePseudo::None) {
         const bool hasSimpleCondition = selector.tagLength != 0u ||
@@ -4643,7 +4664,7 @@ NavigatorScriptHostAdapter::selectorCoreElementMatchResult(
             context)
             ? MatchResult::Match : MatchResult::NoMatch;
     return selectorStatePseudoMatchResult(element, selector, nthA, nthB,
-        context);
+        context, canonicalElementCheck);
 }
 
 NavigatorScriptSelectorMatchResult
@@ -5153,6 +5174,8 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
     , NavigatorScriptFilteredNthCounters* filteredNthCounters
 #endif
+    , FilteredNthQueryScratch* filteredNthScratch
+    , std::uint8_t filteredNthCacheSlot
     ) const
 {
     using MatchResult = NavigatorScriptSelectorMatchResult;
@@ -5282,7 +5305,7 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
                     NavigatorScriptStatePseudo::NthLastChild)
                 return MatchResult::Invalid;
             const MatchResult conditions = selectorCoreConditionsMatchResult(
-                element, core, storage);
+                element, core, storage, filteredNthScratch != nullptr);
             if (conditions != MatchResult::Match) return conditions;
             if (filteredCoreIndex >= storage.hasRelativeCoreCount ||
                 filteredCoreIndex >= storage.hasRelativeCores.size())
@@ -5296,6 +5319,7 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
                 element, filteredCore, storage, context,
                 core.statePseudo ==
                     NavigatorScriptStatePseudo::NthLastChild,
+                selector, filteredNthScratch, filteredNthCacheSlot,
                 filteredIndex
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
                 , filteredNthCounters
@@ -5331,10 +5355,17 @@ bool NavigatorScriptHostAdapter::selectorSimpleElementMatches(
     const gxos::web::HtmlElementRef& element,
     const NavigatorScriptSimpleSelectorDescriptor& selector,
     const NavigatorScriptSelectorDescriptor& storage,
-    const NavigatorScriptSelectorMatchContext& context) const
+    const NavigatorScriptSelectorMatchContext& context,
+    FilteredNthQueryScratch* filteredNthScratch,
+    std::uint8_t filteredNthCacheSlot) const
 {
     return selectorSimpleElementMatchResult(element, selector, storage,
-        context) ==
+        context
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        , filteredNthScratch == nullptr ? nullptr :
+            filteredNthScratch->counters
+#endif
+        , filteredNthScratch, filteredNthCacheSlot) ==
         NavigatorScriptSelectorMatchResult::Match;
 }
 
@@ -5343,12 +5374,21 @@ NavigatorScriptHostAdapter::selectorStatePseudoMatchResult(
     const gxos::web::HtmlElementRef& element,
     const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
     std::int16_t nthA, std::int16_t nthB,
-    const NavigatorScriptSelectorMatchContext& context) const
+    const NavigatorScriptSelectorMatchContext& context,
+    bool canonicalElementCheck) const
 {
     using MatchResult = NavigatorScriptSelectorMatchResult;
     const NavigatorScriptStatePseudo pseudo = selector.statePseudo;
+    bool canonicalElement = false;
+    if (canonicalElementCheck && document_ != nullptr &&
+        element.serial != 0u && element.serial <=
+            document_->structuralElements.size()) {
+        canonicalElement = &document_->structuralElements[
+            static_cast<std::size_t>(element.serial - 1u)] == &element;
+    }
     if (document_ == nullptr || element.serial == 0u ||
-        findElement(element.serial) != &element ||
+        (canonicalElementCheck ? !canonicalElement :
+            findElement(element.serial) != &element) ||
         pseudo == NavigatorScriptStatePseudo::None ||
         pseudo == NavigatorScriptStatePseudo::Not ||
         pseudo == NavigatorScriptStatePseudo::Is ||
@@ -5440,7 +5480,10 @@ NavigatorScriptHostAdapter::selectorStatePseudoMatchResult(
         // The context factory validates the canonical scope and its
         // structural parent once per API operation. Keep per-candidate scope
         // validation O(1) while rejecting a corrupted serial/index mapping.
-        if (canonical.serial != context.scopeSerial)
+        if (canonical.serial != context.scopeSerial ||
+            (canonicalElementCheck &&
+                &document_->structuralElements[static_cast<std::size_t>(
+                    context.scopeSerial - 1u)] != &canonical))
             return MatchResult::Invalid;
     } else if (pseudo == NavigatorScriptStatePseudo::FirstChild ||
             pseudo == NavigatorScriptStatePseudo::LastChild ||
@@ -5474,7 +5517,8 @@ NavigatorScriptHostAdapter::selectorStatePseudoMatchResult(
                 structuralIndex)) return MatchResult::Invalid;
     }
 
-    return selectorStatePseudoMatches(element, selector, nthA, nthB, context)
+    return selectorStatePseudoMatches(element, selector, nthA, nthB, context,
+        canonicalElementCheck)
         ? MatchResult::Match : MatchResult::NoMatch;
 }
 
@@ -5482,11 +5526,20 @@ bool NavigatorScriptHostAdapter::selectorStatePseudoMatches(
     const gxos::web::HtmlElementRef& element,
     const NavigatorScriptSimpleSelectorCoreDescriptor& selector,
     std::int16_t nthA, std::int16_t nthB,
-    const NavigatorScriptSelectorMatchContext& context) const
+    const NavigatorScriptSelectorMatchContext& context,
+    bool canonicalElementCheck) const
 {
     const NavigatorScriptStatePseudo pseudo = selector.statePseudo;
+    bool canonicalElement = false;
+    if (canonicalElementCheck && document_ != nullptr &&
+        element.serial != 0u && element.serial <=
+            document_->structuralElements.size()) {
+        canonicalElement = &document_->structuralElements[
+            static_cast<std::size_t>(element.serial - 1u)] == &element;
+    }
     if (document_ == nullptr || element.serial == 0u ||
-        findElement(element.serial) != &element) return false;
+        (canonicalElementCheck ? !canonicalElement :
+            findElement(element.serial) != &element)) return false;
 
     switch (pseudo) {
     case NavigatorScriptStatePseudo::None:
@@ -5761,12 +5814,213 @@ bool NavigatorScriptHostAdapter::resolveStructuralIndex(
     return index != 0u && index <= bound;
 }
 
+bool NavigatorScriptHostAdapter::prepareFilteredNthStructuralGroups(
+    FilteredNthQueryScratch& scratch) const
+{
+    if (scratch.structuralGroupsReady) return true;
+    if (document_ == nullptr || scratch.document != document_ ||
+        scratch.generation != generation_ || scratch.selector == nullptr ||
+        document_->structuralElements.size() > limits_.maxDocumentNodes ||
+        document_->structuralElements.size() >
+            kNavigatorScriptMaxDocumentNodes)
+        return false;
+
+    const std::size_t count = document_->structuralElements.size();
+    scratch.groupState.fill(0u);
+    scratch.groupCounts.fill(0u);
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+    if (scratch.counters != nullptr)
+        ++scratch.counters->rankCacheInitializations;
+#endif
+
+    // Validate each direct-child group once. This preserves JS71's fail-closed
+    // sibling checks while keeping malformed, unrelated parent groups from
+    // invalidating candidates under a different parent.
+    for (std::size_t position = 0u; position < count; ++position) {
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        if (scratch.counters != nullptr)
+            ++scratch.counters->structuralInspections;
+#endif
+        const gxos::web::HtmlElementRef& sibling =
+            document_->structuralElements[position];
+        const HostInstanceId parentSerial = sibling.parentSerial;
+        if (parentSerial == 0u || parentSerial > count) continue;
+        const std::size_t parentIndex =
+            static_cast<std::size_t>(parentSerial - 1u);
+        std::uint8_t& state = scratch.groupState[parentIndex];
+        const gxos::web::HtmlElementRef& parent =
+            document_->structuralElements[parentIndex];
+        if (state == 0u) {
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+            if (scratch.counters != nullptr)
+                ++scratch.counters->parentResolutions;
+#endif
+            state = parent.serial == parentSerial ? 1u : 3u;
+        }
+        if (state != 1u) continue;
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        if (scratch.counters != nullptr)
+            ++scratch.counters->siblingInspections;
+#endif
+        const std::size_t childCount =
+            static_cast<std::size_t>(scratch.groupCounts[parentIndex]) + 1u;
+        if (childCount > std::numeric_limits<std::uint16_t>::max()) {
+            state = 3u;
+            continue;
+        }
+        scratch.groupCounts[parentIndex] =
+            static_cast<std::uint16_t>(childCount);
+
+        const bool canonicalSibling = sibling.serial != 0u &&
+            sibling.serial <= count &&
+            &document_->structuralElements[static_cast<std::size_t>(
+                sibling.serial - 1u)] == &sibling;
+        bool previousValid = childCount == 1u
+            ? sibling.previousSiblingSerial == 0u
+            : sibling.previousSiblingSerial != 0u &&
+                sibling.previousSiblingSerial <= count;
+        if (previousValid && childCount > 1u) {
+            const gxos::web::HtmlElementRef& previous =
+                document_->structuralElements[static_cast<std::size_t>(
+                    sibling.previousSiblingSerial - 1u)];
+            previousValid = previous.serial == sibling.previousSiblingSerial &&
+                previous.parentSerial == parentSerial &&
+                previous.childIndex + 1u == sibling.childIndex &&
+                previous.serial < sibling.serial;
+        }
+        if (sibling.serial == parentSerial || !canonicalSibling ||
+            !previousValid || sibling.childIndex != childCount ||
+            sibling.siblingCount != parent.childCount ||
+            parent.childCount == 0u || childCount > parent.childCount) {
+            state = 3u;
+        }
+    }
+
+    for (std::size_t parentIndex = 0u; parentIndex < count; ++parentIndex) {
+        if (scratch.groupState[parentIndex] != 1u) continue;
+        const gxos::web::HtmlElementRef& parent =
+            document_->structuralElements[parentIndex];
+        scratch.groupState[parentIndex] =
+            scratch.groupCounts[parentIndex] != 0u &&
+                scratch.groupCounts[parentIndex] == parent.childCount
+            ? 2u : 3u;
+    }
+    scratch.structuralGroupsReady = true;
+    return true;
+}
+
+bool NavigatorScriptHostAdapter::buildFilteredNthRankCache(
+    FilteredNthQueryScratch& scratch, std::uint8_t cacheSlot,
+    const NavigatorScriptSimpleSelectorDescriptor& selectorDescriptor,
+    const NavigatorScriptSimpleSelectorCoreDescriptor& filter,
+    const NavigatorScriptSelectorDescriptor& storage,
+    const NavigatorScriptSelectorMatchContext& context,
+    bool fromEnd) const
+{
+    if (cacheSlot >= kFilteredNthCacheSlots ||
+        scratch.document != document_ || scratch.selector != &storage ||
+        scratch.generation != generation_ || !context.valid ||
+        context.generation != generation_ ||
+        context.scopeSerial != scratch.scopeSerial)
+        return false;
+    const auto* existing = scratch.slotSelectors[cacheSlot];
+    if (existing != nullptr && existing != &selectorDescriptor) return false;
+    scratch.slotSelectors[cacheSlot] = &selectorDescriptor;
+    if (scratch.slotBuilt[cacheSlot]) return true;
+    if (!prepareFilteredNthStructuralGroups(scratch)) return false;
+
+    const std::size_t count = document_->structuralElements.size();
+    auto& ranks = scratch.ranks[cacheSlot];
+    ranks.fill(0u);
+    scratch.groupCounts.fill(0u);
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+    if (scratch.counters != nullptr)
+        ++scratch.counters->rankCacheBuilds;
+#endif
+    for (std::size_t position = 0u; position < count; ++position) {
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        if (scratch.counters != nullptr)
+            ++scratch.counters->structuralInspections;
+#endif
+        const gxos::web::HtmlElementRef& sibling =
+            document_->structuralElements[position];
+        if (sibling.parentSerial == 0u || sibling.parentSerial > count)
+            continue;
+        const std::size_t parentIndex =
+            static_cast<std::size_t>(sibling.parentSerial - 1u);
+        if (scratch.groupState[parentIndex] != 2u) continue;
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        if (scratch.counters != nullptr) {
+            ++scratch.counters->siblingInspections;
+            ++scratch.counters->simpleSelectorEvaluations;
+        }
+#endif
+        const auto matches = selectorCoreElementMatchResult(sibling, filter,
+            0, 0, storage, true, context, true);
+        if (matches == NavigatorScriptSelectorMatchResult::Invalid) {
+            scratch.groupState[parentIndex] = 3u;
+            continue;
+        }
+        if (matches != NavigatorScriptSelectorMatchResult::Match) continue;
+        const std::size_t rank = static_cast<std::size_t>(
+            scratch.groupCounts[parentIndex]) + 1u;
+        if (rank > count || rank > std::numeric_limits<std::uint16_t>::max()) {
+            scratch.groupState[parentIndex] = 3u;
+            continue;
+        }
+        scratch.groupCounts[parentIndex] = static_cast<std::uint16_t>(rank);
+        if (sibling.serial == 0u || sibling.serial > count ||
+            &document_->structuralElements[static_cast<std::size_t>(
+                sibling.serial - 1u)] != &sibling) {
+            scratch.groupState[parentIndex] = 3u;
+            continue;
+        }
+        ranks[static_cast<std::size_t>(sibling.serial - 1u)] =
+            static_cast<std::uint16_t>(rank);
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        if (scratch.counters != nullptr)
+            ++scratch.counters->matchingSiblings;
+#endif
+    }
+
+    if (fromEnd) {
+        for (std::size_t position = 0u; position < count; ++position) {
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+            if (scratch.counters != nullptr)
+                ++scratch.counters->structuralInspections;
+#endif
+            const gxos::web::HtmlElementRef& sibling =
+                document_->structuralElements[position];
+            if (sibling.serial == 0u || sibling.serial > count) continue;
+            std::uint16_t& rank = ranks[static_cast<std::size_t>(
+                sibling.serial - 1u)];
+            if (rank == 0u || sibling.parentSerial == 0u ||
+                sibling.parentSerial > count) continue;
+            const std::size_t parentIndex =
+                static_cast<std::size_t>(sibling.parentSerial - 1u);
+            if (scratch.groupState[parentIndex] != 2u) continue;
+            const std::uint16_t matchingCount =
+                scratch.groupCounts[parentIndex];
+            if (rank > matchingCount) {
+                scratch.groupState[parentIndex] = 3u;
+                continue;
+            }
+            rank = static_cast<std::uint16_t>(matchingCount - rank + 1u);
+        }
+    }
+    scratch.slotBuilt[cacheSlot] = true;
+    return true;
+}
+
 NavigatorScriptSelectorMatchResult
 NavigatorScriptHostAdapter::resolveFilteredStructuralIndex(
     const gxos::web::HtmlElementRef& element,
     const NavigatorScriptSimpleSelectorCoreDescriptor& filter,
     const NavigatorScriptSelectorDescriptor& storage,
     const NavigatorScriptSelectorMatchContext& context, bool fromEnd,
+    const NavigatorScriptSimpleSelectorDescriptor& selectorDescriptor,
+    FilteredNthQueryScratch* filteredNthScratch,
+    std::uint8_t filteredNthCacheSlot,
     std::size_t& index
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
     , NavigatorScriptFilteredNthCounters* filteredNthCounters
@@ -5775,6 +6029,39 @@ NavigatorScriptHostAdapter::resolveFilteredStructuralIndex(
 {
     using MatchResult = NavigatorScriptSelectorMatchResult;
     index = 0u;
+    if (filteredNthScratch != nullptr) {
+        if (filteredNthCacheSlot >= kFilteredNthCacheSlots ||
+            filteredNthScratch->document != document_ ||
+            filteredNthScratch->selector != &storage ||
+            filteredNthScratch->generation != generation_ ||
+            !context.valid || context.generation != generation_ ||
+            context.scopeSerial != filteredNthScratch->scopeSerial)
+            return MatchResult::Invalid;
+        if (!buildFilteredNthRankCache(*filteredNthScratch,
+                filteredNthCacheSlot, selectorDescriptor, filter, storage,
+                context, fromEnd))
+            return MatchResult::Invalid;
+        const std::size_t count = document_ == nullptr ? 0u :
+            document_->structuralElements.size();
+        if (element.serial == 0u || element.serial > count ||
+            &document_->structuralElements[static_cast<std::size_t>(
+                element.serial - 1u)] != &element)
+            return MatchResult::Invalid;
+        if (element.parentSerial == 0u) return MatchResult::NoMatch;
+        if (element.parentSerial > count) return MatchResult::Invalid;
+        const std::size_t parentIndex = static_cast<std::size_t>(
+            element.parentSerial - 1u);
+        if (filteredNthScratch->groupState[parentIndex] != 2u)
+            return MatchResult::Invalid;
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        if (filteredNthScratch->counters != nullptr)
+            ++filteredNthScratch->counters->rankCacheHits;
+#endif
+        index = filteredNthScratch->ranks[filteredNthCacheSlot][
+            static_cast<std::size_t>(element.serial - 1u)];
+        return index != 0u && index <= count ? MatchResult::Match :
+            MatchResult::NoMatch;
+    }
     if (document_ == nullptr || !filter.valid || element.serial == 0u ||
         element.tagName.empty() || findElement(element.serial) != &element ||
         document_->structuralElements.size() > limits_.maxDocumentNodes ||
@@ -5866,11 +6153,18 @@ bool NavigatorScriptHostAdapter::selectorMemberElementMatches(
     const gxos::web::HtmlElementRef& element,
     const NavigatorScriptSelectorMemberDescriptor& selector,
     const NavigatorScriptSelectorDescriptor& storage,
-    const NavigatorScriptSelectorMatchContext& context) const
+    const NavigatorScriptSelectorMatchContext& context,
+    FilteredNthQueryScratch* filteredNthScratch,
+    std::size_t memberIndex) const
 {
+    if (memberIndex >= kNavigatorScriptMaxSelectorListMembers) return false;
+    const std::uint8_t leftCacheSlot = static_cast<std::uint8_t>(
+        memberIndex * 2u);
+    const std::uint8_t rightCacheSlot = static_cast<std::uint8_t>(
+        memberIndex * 2u + 1u);
     if (document_ == nullptr || !selector.rightSimple.valid ||
         !selectorSimpleElementMatches(element, selector.rightSimple, storage,
-            context))
+            context, filteredNthScratch, rightCacheSlot))
         return false;
     if (selector.relation == NavigatorScriptSelectorRelation::None)
         return true;
@@ -5881,7 +6175,8 @@ bool NavigatorScriptHostAdapter::selectorMemberElementMatches(
     if (selector.relation == NavigatorScriptSelectorRelation::Child) {
         const gxos::web::HtmlElementRef* parent = findElement(parentSerial);
         return parent != nullptr && selectorSimpleElementMatches(*parent,
-            selector.leftSimple, storage, context);
+            selector.leftSimple, storage, context, filteredNthScratch,
+            leftCacheSlot);
     }
 
     if (selector.relation == NavigatorScriptSelectorRelation::AdjacentSibling) {
@@ -5891,7 +6186,8 @@ bool NavigatorScriptHostAdapter::selectorMemberElementMatches(
             return false;
         const gxos::web::HtmlElementRef* previous = findElement(previousSerial);
         return previous != nullptr && selectorSimpleElementMatches(*previous,
-            selector.leftSimple, storage, context);
+            selector.leftSimple, storage, context, filteredNthScratch,
+            leftCacheSlot);
     }
 
     if (selector.relation == NavigatorScriptSelectorRelation::GeneralSibling) {
@@ -5908,7 +6204,8 @@ bool NavigatorScriptHostAdapter::selectorMemberElementMatches(
                 findElement(previousSerial);
             if (previous == nullptr) return false;
             if (selectorSimpleElementMatches(*previous, selector.leftSimple,
-                    storage, context)) return true;
+                    storage, context, filteredNthScratch, leftCacheSlot))
+                return true;
             currentSerial = previousSerial;
         }
         return false;
@@ -5925,7 +6222,8 @@ bool NavigatorScriptHostAdapter::selectorMemberElementMatches(
         const gxos::web::HtmlElementRef* ancestor = findElement(ancestorSerial);
         if (ancestor == nullptr) return false;
         if (selectorSimpleElementMatches(*ancestor, selector.leftSimple,
-                storage, context)) return true;
+                storage, context, filteredNthScratch, leftCacheSlot))
+            return true;
         HostInstanceId nextParentSerial = 0u;
         if (!resolveStructuralParentSerial(ancestorSerial,
                 nextParentSerial)) break;
@@ -5937,14 +6235,15 @@ bool NavigatorScriptHostAdapter::selectorMemberElementMatches(
 bool NavigatorScriptHostAdapter::selectorElementMatches(
     const gxos::web::HtmlElementRef& element,
     const NavigatorScriptSelectorDescriptor& selector,
-    const NavigatorScriptSelectorMatchContext& context) const
+    const NavigatorScriptSelectorMatchContext& context,
+    FilteredNthQueryScratch* filteredNthScratch) const
 {
     if (selector.memberCount == 0u ||
         selector.memberCount > kNavigatorScriptMaxSelectorListMembers)
         return false;
     for (std::size_t index = 0u; index < selector.memberCount; ++index) {
         if (selectorMemberElementMatches(element, selector.members[index],
-                selector, context)) return true;
+                selector, context, filteredNthScratch, index)) return true;
     }
     return false;
 }
@@ -6023,8 +6322,66 @@ NavigatorScriptHostAdapter::selectorMatchContextForScope(
     return context;
 }
 
+bool NavigatorScriptHostAdapter::selectorHasFilteredNth(
+    const NavigatorScriptSelectorDescriptor& selector) const
+{
+    if (selector.memberCount > kNavigatorScriptMaxSelectorListMembers)
+        return false;
+    for (std::size_t memberIndex = 0u; memberIndex < selector.memberCount;
+            ++memberIndex) {
+        const auto& member = selector.members[memberIndex];
+        const NavigatorScriptSimpleSelectorDescriptor* simpleSelectors[] =
+            {&member.leftSimple, &member.rightSimple};
+        for (const auto* simple : simpleSelectors) {
+            if ((simple->statePseudo == NavigatorScriptStatePseudo::NthChild ||
+                    simple->statePseudo ==
+                        NavigatorScriptStatePseudo::NthLastChild) &&
+                loadSimpleSelectorFilteredNthCoreIndex(*simple) != 0xFFu)
+                return true;
+        }
+    }
+    return false;
+}
+
 std::size_t NavigatorScriptHostAdapter::selectorMatchCount(
-    const SelectorCollectionRecord& record) const
+    const SelectorCollectionRecord& record
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+    , NavigatorScriptFilteredNthCounters* filteredNthCounters
+#endif
+    ) const
+{
+    if (!selectorHasFilteredNth(record.selector))
+        return selectorMatchCountInternal(record, nullptr);
+    return selectorMatchCountFiltered(record
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        , filteredNthCounters
+#endif
+        );
+}
+
+std::size_t NavigatorScriptHostAdapter::selectorMatchCountFiltered(
+    const SelectorCollectionRecord& record
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+    , NavigatorScriptFilteredNthCounters* filteredNthCounters
+#endif
+    ) const
+{
+    FilteredNthQueryScratch scratch{};
+    const NavigatorScriptSelectorMatchContext context =
+        selectorMatchContextForScope(record.scopeSerial);
+    scratch.document = document_;
+    scratch.selector = &record.selector;
+    scratch.generation = generation_;
+    scratch.scopeSerial = context.scopeSerial;
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+    scratch.counters = filteredNthCounters;
+#endif
+    return selectorMatchCountInternal(record, &scratch);
+}
+
+std::size_t NavigatorScriptHostAdapter::selectorMatchCountInternal(
+    const SelectorCollectionRecord& record,
+    FilteredNthQueryScratch* filteredNthScratch) const
 {
     if (document_ == nullptr || record.selector.memberCount == 0u ||
         record.selector.memberCount > kNavigatorScriptMaxSelectorListMembers)
@@ -6038,7 +6395,8 @@ std::size_t NavigatorScriptHostAdapter::selectorMatchCount(
         const gxos::web::HtmlElementRef& element =
             document_->structuralElements[position];
         if (selectorScopeMatches(element, record.scopeSerial) &&
-            selectorElementMatches(element, record.selector, context))
+            selectorElementMatches(element, record.selector, context,
+                filteredNthScratch))
             ++matches;
     }
     return matches;
@@ -6047,6 +6405,30 @@ std::size_t NavigatorScriptHostAdapter::selectorMatchCount(
 bool NavigatorScriptHostAdapter::selectorMatchAt(
     const SelectorCollectionRecord& record, std::size_t index,
     HostInstanceId& serial) const
+{
+    if (!selectorHasFilteredNth(record.selector))
+        return selectorMatchAtInternal(record, index, serial, nullptr);
+    return selectorMatchAtFiltered(record, index, serial);
+}
+
+bool NavigatorScriptHostAdapter::selectorMatchAtFiltered(
+    const SelectorCollectionRecord& record, std::size_t index,
+    HostInstanceId& serial) const
+{
+    FilteredNthQueryScratch scratch{};
+    const NavigatorScriptSelectorMatchContext context =
+        selectorMatchContextForScope(record.scopeSerial);
+    scratch.document = document_;
+    scratch.selector = &record.selector;
+    scratch.generation = generation_;
+    scratch.scopeSerial = context.scopeSerial;
+    return selectorMatchAtInternal(record, index, serial, &scratch);
+}
+
+bool NavigatorScriptHostAdapter::selectorMatchAtInternal(
+    const SelectorCollectionRecord& record, std::size_t index,
+    HostInstanceId& serial,
+    FilteredNthQueryScratch* filteredNthScratch) const
 {
     serial = 0u;
     if (document_ == nullptr || record.selector.memberCount == 0u ||
@@ -6061,7 +6443,8 @@ bool NavigatorScriptHostAdapter::selectorMatchAt(
         const gxos::web::HtmlElementRef& element =
             document_->structuralElements[position];
         if (!selectorScopeMatches(element, record.scopeSerial) ||
-            !selectorElementMatches(element, record.selector, context))
+            !selectorElementMatches(element, record.selector, context,
+                filteredNthScratch))
             continue;
         if (matched == index) {
             serial = element.serial;
