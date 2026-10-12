@@ -21,7 +21,10 @@ namespace gxos { namespace ipc {
         static void ensure(const std::string& name);
         static bool subscribe(const std::string& name, uint64_t pid);
         static void unsubscribe(const std::string& name, uint64_t pid);
-        static void publish(const std::string& name, Message&& msg, bool fanout=true);
+        // Returns false when a directed recipient rejects the message (for
+        // example, a full priority-input lane); callers that inject input can
+        // then report delivery failure instead of claiming it was queued.
+        static bool publish(const std::string& name, Message&& msg, bool fanout=true);
         // For host/REPL to read from a named channel
         static bool pop(const std::string& name, Message& out, uint64_t timeoutMs);
         // Read the first queued message of a given type without disturbing

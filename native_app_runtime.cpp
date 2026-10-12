@@ -553,16 +553,19 @@ bool tryParseUnsigned64(const std::string& text, uint64_t& value) {
     }
 }
 
-bool parseKeyPayload(const std::string& payload, int& keyCode, int& action, int& modifiers, uint64_t& window) {
+bool parseKeyPayload(const std::string& payload, int& keyCode, int& action, int& modifiers,
+                     uint64_t& window, uint64_t& inputSequence) {
     std::istringstream iss(payload);
     std::string keyCodeText;
     std::string actionText;
     std::string modifiersText;
     std::string windowText;
+    std::string inputSequenceText;
     std::getline(iss, keyCodeText, '|');
     std::getline(iss, actionText, '|');
     std::getline(iss, modifiersText, '|');
     std::getline(iss, windowText, '|');
+    std::getline(iss, inputSequenceText, '|');
 
     if (!tryParseInt(keyCodeText, keyCode) || keyCode < 0) return false;
     if (actionText == "down") {
@@ -581,6 +584,8 @@ bool parseKeyPayload(const std::string& payload, int& keyCode, int& action, int&
 
     window = 0;
     if (!windowText.empty() && !tryParseUnsigned64(windowText, window)) return false;
+    inputSequence = 0;
+    if (!inputSequenceText.empty() && !tryParseUnsigned64(inputSequenceText, inputSequence)) return false;
     return true;
 }
 
@@ -1666,6 +1671,7 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
         int keyCode = 0;
         int keyAction = 0;
         int keyModifiers = 0;
+        uint64_t inputSequence = 0;
         int mouseX = 0;
         int mouseY = 0;
         int mousePackedButtonAction = 0;
@@ -1674,7 +1680,7 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
         if (eventType == GX_EVENT_WINDOW_PAINT) {
             parsed = parseFramePayload(payload, window, paintWidth, paintHeight);
         } else if (eventType == GX_EVENT_KEY) {
-            parsed = parseKeyPayload(payload, keyCode, keyAction, keyModifiers, window);
+            parsed = parseKeyPayload(payload, keyCode, keyAction, keyModifiers, window, inputSequence);
             if (parsed && window == 0) window = context->focusedOwnedWindow;
         } else if (eventType == GX_EVENT_MOUSE) {
             parsed = parseMousePayload(payload, mouseX, mouseY, mousePackedButtonAction, mouseModifiers, window);
@@ -1698,6 +1704,14 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
                 " window=" + std::to_string(window) +
                 " focusedWindow=" + std::to_string(context->focusedOwnedWindow) +
                 " ownsWindow=" + (ownsWindow(*context, window) ? "1" : "0"));
+            if (inputSequence != 0) {
+                Logger::write(LogLevel::Info, "Hosted input trace input_seq=" + std::to_string(inputSequence) +
+                    " stage=runtime_dequeued runtime_id=" + std::to_string(context->runtimeId) +
+                    " app_id=" + context->appId + " window=" + std::to_string(window) +
+                    " focused_window=" + std::to_string(context->focusedOwnedWindow) +
+                    " key=" + std::to_string(keyCode) + " action=" + std::to_string(keyAction) +
+                    " modifiers=" + std::to_string(keyModifiers));
+            }
         }
 
         if (!ownsWindow(*context, window)) {
@@ -1729,6 +1743,14 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
             context->lastKeyAction = keyAction;
             context->lastKeyModifiers = keyModifiers;
             context->paintRequestNeeded = true;
+            if (inputSequence != 0) {
+                Logger::write(LogLevel::Info, "Hosted input trace input_seq=" + std::to_string(inputSequence) +
+                    " stage=application_event_return runtime_id=" + std::to_string(context->runtimeId) +
+                    " app_id=" + context->appId + " window=" + std::to_string(window) +
+                    " focused_window=" + std::to_string(context->focusedOwnedWindow) +
+                    " key=" + std::to_string(keyCode) + " action=" + std::to_string(keyAction) +
+                    " modifiers=" + std::to_string(keyModifiers));
+            }
         } else if (eventType == GX_EVENT_MOUSE) {
             outEvent->param1 = mouseX;
             outEvent->param2 = mouseY;

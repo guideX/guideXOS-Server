@@ -848,7 +848,7 @@ namespace gxos {
         }
 #endif
 
-        static void publishOut(MsgType type, const std::string& payload, uint64_t dstPid = 0) { 
+        static bool publishOut(MsgType type, const std::string& payload, uint64_t dstPid = 0) {
             if (type == MsgType::MT_Create) {
                 Logger::write(LogLevel::Info, std::string("publishOut MT_Create payload=") + payload + " dstPid=" + std::to_string(dstPid));
             }
@@ -863,9 +863,9 @@ namespace gxos {
                 // mailbox or the shared output channel; neither path is
                 // consumed by the native app, and an expanded debugger tree
                 // can otherwise fill the channel while starving input.
-                return;
+                return true;
             }
-            ipc::Bus::publish(kGuiChanOut, std::move(out), false);
+            return ipc::Bus::publish(kGuiChanOut, std::move(out), false);
         }
 
         struct BackgroundDrawRect {
@@ -5565,13 +5565,22 @@ namespace gxos {
                     const int keyCode = std::stoi(fields[keyIndex]);
                     const std::string& action = fields[actionIndex];
                     const std::string modifiers = fields.size() > modifierIndex ? fields[modifierIndex] : "0";
+                    uint64_t inputSequence = 0;
+                    const size_t sequenceIndex = modifierIndex + 1u;
+                    if (fields.size() > sequenceIndex && !fields[sequenceIndex].empty())
+                        inputSequence = std::stoull(fields[sequenceIndex]);
                     uint64_t ownerPid = 0;
+                    uint64_t focusWindow = 0;
+                    uint64_t modalWindow = 0;
                     {
                         std::lock_guard<std::mutex> lk(g_lock);
+                        focusWindow = g_focus;
+                        modalWindow = g_modalWindow;
                         if (targeted) {
                             const auto target = g_windows.find(targetWindow);
                             if (target == g_windows.end() || target->second.minimized || target->second.tombstoned) {
-                                Logger::write(LogLevel::Warn, "Compositor: targeted key window is unavailable: " + std::to_string(targetWindow));
+                                Logger::write(LogLevel::Warn, "Compositor: targeted key window is unavailable: " + std::to_string(targetWindow) +
+                                    (inputSequence ? " input_seq=" + std::to_string(inputSequence) : std::string()));
                                 break;
                             }
                             ownerPid = target->second.ownerPid;
@@ -5582,7 +5591,22 @@ namespace gxos {
                     
                     // Forward to the explicit target when provided; the
                     // legacy form continues to use the compositor focus.
-                    publishOut(MsgType::MT_InputKey, std::to_string(keyCode) + "|" + action + "|" + modifiers, ownerPid);
+                    if (inputSequence != 0) {
+                        Logger::write(LogLevel::Info, "Hosted input trace input_seq=" + std::to_string(inputSequence) +
+                            " stage=compositor_received target_window=" + std::to_string(targetWindow) +
+                            " owner_pid=" + std::to_string(ownerPid) + " focus_window=" + std::to_string(focusWindow) +
+                            " modal_window=" + std::to_string(modalWindow) + " key=" + std::to_string(keyCode) +
+                            " action=" + action + " modifiers=" + modifiers);
+                    }
+                    std::string outputPayload = std::to_string(keyCode) + "|" + action + "|" + modifiers;
+                    if (inputSequence != 0) outputPayload += "|0|" + std::to_string(inputSequence);
+                    const bool accepted = publishOut(MsgType::MT_InputKey, outputPayload, ownerPid);
+                    if (inputSequence != 0) {
+                        Logger::write(accepted ? LogLevel::Info : LogLevel::Warn,
+                            "Hosted input trace input_seq=" + std::to_string(inputSequence) +
+                            " stage=app_mailbox_enqueue result=" + (accepted ? "accepted" : "rejected") +
+                            " owner_pid=" + std::to_string(ownerPid) + " target_window=" + std::to_string(targetWindow));
+                    }
                 } catch (const std::exception& e) {
                     Logger::write(LogLevel::Error, std::string("Compositor: Failed to parse MT_InputKey: ") + e.what());
                 }

@@ -37,15 +37,14 @@ namespace gxos {
             ch->subs.erase(pid);
         }
 
-        void Bus::publish(const std::string& name, Message&& msg, bool fanout) {
+        bool Bus::publish(const std::string& name, Message&& msg, bool fanout) {
             if (msg.srcPid == 0) {
                 msg.srcPid = Allocator::currentPid();
             }
             if (!fanout && msg.dstPid != 0) {
                 Logger::write(LogLevel::Info, std::string("Bus::publish directing msg type=") + std::to_string(msg.type) + " to pid=" + std::to_string(msg.dstPid));
                 const uint64_t destination = msg.dstPid;
-                ProcessTable::send(destination, std::move(msg));
-                return;
+                return ProcessTable::send(destination, std::move(msg));
             }
 
             Logger::write(LogLevel::Info, std::string("Bus::publish queueing msg type=") + std::to_string(msg.type) + " to channel=" + name);
@@ -54,11 +53,12 @@ namespace gxos {
             ch->cv.wait(lk, [&] {
                 return ch->queue.size() < ch->cap;
                 });
+            bool allAccepted = true;
             if (fanout) {
                 for (auto pid : ch->subs) {
                     Message copy = msg;
                     copy.dstPid = pid;
-                    ProcessTable::send(pid, std::move(copy));
+                    if (!ProcessTable::send(pid, std::move(copy))) allAccepted = false;
                 }
             }
             else {
@@ -66,6 +66,7 @@ namespace gxos {
             }
             lk.unlock();
             ch->cv.notify_all();
+            return allAccepted;
         }
 
         bool Bus::pop(const std::string& name, Message& out, uint64_t timeoutMs) {

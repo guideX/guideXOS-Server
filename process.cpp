@@ -245,11 +245,22 @@ namespace gxos {
         {
             std::lock_guard<std::mutex> _g(g_lock);
             auto it = g_proc.find(dstPid);
-            if (it == g_proc.end()) return false;
+            if (it == g_proc.end()) {
+                Logger::write(LogLevel::Warn, "ProcessTable::send rejected message reason=destination_missing pid=" +
+                    std::to_string(dstPid) + " type=" + std::to_string(msg.type));
+                return false;
+            }
             proc = it->second;
         }
-        if (isPriorityInputMessage(msg.type))
-            return proc->mbox.try_push_priority(std::move(msg));
+        if (isPriorityInputMessage(msg.type)) {
+            const uint32_t type = msg.type;
+            const bool accepted = proc->mbox.try_push_priority(std::move(msg));
+            if (!accepted) {
+                Logger::write(LogLevel::Warn, "ProcessTable::send rejected priority message reason=priority_lane_full pid=" +
+                    std::to_string(dstPid) + " type=" + std::to_string(type));
+            }
+            return accepted;
+        }
         proc->mbox.push(std::move(msg));
         return true;
     }
