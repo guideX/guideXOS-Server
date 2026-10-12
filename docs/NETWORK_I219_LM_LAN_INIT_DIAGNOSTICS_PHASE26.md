@@ -1,9 +1,11 @@
 # Intel I219-LM LAN_INIT_DONE Diagnostics — Phase 26 Audit
 
-**Phase:** PHASE26  
-**Branch:** `NAVIGATOR_GENERAL_IMPROVEMENTS`  
-**Starting HEAD:** `8a9c20fcb75816eb196e8daa0f07321099199573`  
-**Implementation commit:** `abfeed747d94173b5f96f82061f0e8fce242734c`  
+| Field | Value |
+|---|---|
+| Phase | PHASE26 |
+| Branch | `NAVIGATOR_GENERAL_IMPROVEMENTS` |
+| Starting HEAD | `8a9c20fcb75816eb196e8daa0f07321099199573` |
+| Implementation commit | `abfeed747d94173b5f96f82061f0e8fce242734c` |
 **Status:** implementation and ISO gates passed; physical qualification pending; phase remains open.
 
 ## Phase authority and starting evidence
