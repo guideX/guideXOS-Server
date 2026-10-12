@@ -58,6 +58,7 @@ static bool streq(const char* a, const char* b) {
 
 KernelApp::KernelApp() : m_state(AppState::NotLoaded), m_window(nullptr) {
     m_name[0] = '\0';
+    m_runtimeAppId[0] = '\0';
 }
 
 KernelApp::~KernelApp() {
@@ -67,6 +68,10 @@ KernelApp::~KernelApp() {
         m_window = nullptr;
     }
 }
+
+void KernelApp::onWindowFocus() {}
+
+void KernelApp::onWindowBlur() {}
 
 void KernelApp::setTitle(const char* title) {
     if (m_window && title) {
@@ -280,6 +285,7 @@ void AppManager::init() {
     // (e.g., kernel/UEFI environments where .bss might not be zeroed)
     for (int i = 0; i < MAX_APPS; i++) {
         s_registeredApps[i].name[0] = '\0';
+        s_registeredApps[i].appId[0] = '\0';
         s_registeredApps[i].available = false;
         s_registeredApps[i].factory = nullptr;
         s_runningApps[i] = nullptr;
@@ -291,14 +297,34 @@ void AppManager::init() {
 }
 
 bool AppManager::registerApp(const char* name, uint32_t iconColor, KernelApp* (*factory)()) {
-    if (!s_initialized || !name || !factory) {
+    return registerAppWithIdentity(name, "", iconColor, factory);
+}
+
+bool AppManager::registerAppWithIdentity(const char* name, const char* appId,
+                                         uint32_t iconColor, KernelApp* (*factory)()) {
+    if (!s_initialized || !name || !name[0] || !appId || !factory) {
         return false;
     }
+
+    int nameLength = 0;
+    while (name[nameLength]) ++nameLength;
+    int appIdLength = 0;
+    while (appId[appIdLength]) ++appIdLength;
+    if (nameLength >= MAX_APP_NAME || appIdLength >= MAX_APP_ID) return false;
     
     // Check if already registered
     for (int i = 0; i < s_registeredAppCount; i++) {
         if (streq(s_registeredApps[i].name, name)) {
             return false;  // Already registered
+        }
+        // A canonical identity may have multiple launch-name aliases only
+        // when they resolve to the same registered application factory.
+        // This prevents a second built-in factory from claiming Settings'
+        // runtime identity while preserving existing launch aliases.
+        if (appId[0] && s_registeredApps[i].appId[0] &&
+            streq(s_registeredApps[i].appId, appId) &&
+            s_registeredApps[i].factory != factory) {
+            return false;
         }
     }
     
@@ -308,6 +334,7 @@ bool AppManager::registerApp(const char* name, uint32_t iconColor, KernelApp* (*
     
     AppInfo& info = s_registeredApps[s_registeredAppCount++];
     strcopy(info.name, name, MAX_APP_NAME);
+    strcopy(info.appId, appId, MAX_APP_ID);
     info.iconColor = iconColor;
     info.available = true;
     info.factory = factory;
@@ -368,6 +395,8 @@ bool AppManager::launchApp(const char* name) {
         AppLogger::logLaunch(name, LaunchResult::OutOfResources);
         return false;
     }
+
+    strcopy(app->m_runtimeAppId, info->appId, MAX_APP_ID);
     
     // Initialize app
     if (!app->init()) {
@@ -430,6 +459,8 @@ bool AppManager::launchAppWithParam(const char* name, const char* param) {
         AppLogger::logLaunch(name, LaunchResult::OutOfResources);
         return false;
     }
+
+    strcopy(app->m_runtimeAppId, info->appId, MAX_APP_ID);
     
     // Initialize app with parameter
     bool initSuccess = param ? app->initWithParam(param) : app->init();

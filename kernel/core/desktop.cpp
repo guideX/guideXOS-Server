@@ -11857,8 +11857,9 @@ static void show_start_menu_notification(const char* label)
     }
 
     if (desktop_str_eq(label, "Settings")) {
-        // Temporary fallback: reuse the existing control area until a dedicated
-        // Settings app exists in bare-metal mode.
+        // Keep Start -> Settings on the embedded legacy control area for this
+        // initial acceptance. The dedicated native app is independently
+        // launchable by the canonical gxos.builtin.settings identity.
 #if defined(GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE) && defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
         if (s_launchShadowSuppressRealBranchLaunch) {
             log_bare_metal_static_app_shadow_only_observation(

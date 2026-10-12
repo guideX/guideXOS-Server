@@ -22,6 +22,7 @@ namespace app {
 
 static const int MAX_APPS = 16;
 static const int MAX_APP_NAME = 32;
+static const int MAX_APP_ID = 48;
 static const int MAX_WINDOWS = 8;
 static const int MAX_TITLE_LEN = 64;
 
@@ -143,12 +144,14 @@ struct KernelWindow {
 
 struct AppInfo {
     char name[MAX_APP_NAME];
+    char appId[MAX_APP_ID];
     uint32_t iconColor;
     bool available;  // true if app can run in kernel mode
     KernelApp* (*factory)();  // Factory function to create app instance
     
     AppInfo() : iconColor(0xFF4690C8), available(false), factory(nullptr) {
         name[0] = '\0';
+        appId[0] = '\0';
     }
 };
 
@@ -213,8 +216,8 @@ public:
     virtual void onKeyChar(char c) {}
     virtual void onWidgetClick(int widgetId) {}
     virtual void onWindowClose() {}
-    virtual void onWindowFocus() {}
-    virtual void onWindowBlur() {}
+    virtual void onWindowFocus();
+    virtual void onWindowBlur();
     
     // Drawing (called by compositor to render app content)
     virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) = 0;
@@ -222,6 +225,9 @@ public:
     // State
     AppState getState() const { return m_state; }
     const char* getName() const { return m_name; }
+    // Assigned by AppManager from trusted built-in registration metadata.
+    // Apps can read this identity but cannot set it through the app API.
+    const char* getRuntimeAppId() const { return m_runtimeAppId; }
     KernelWindow* getWindow() { return m_window; }
     
     // Window management helpers
@@ -246,7 +252,9 @@ protected:
     char m_name[MAX_APP_NAME];
     AppState m_state;
     KernelWindow* m_window;
-    
+
+private:
+    char m_runtimeAppId[MAX_APP_ID];
     friend class AppManager;
 };
 
@@ -261,6 +269,12 @@ public:
     
     // Register an app that can run in kernel mode
     static bool registerApp(const char* name, uint32_t iconColor, KernelApp* (*factory)());
+
+    // Register a built-in app with a canonical identity supplied by the
+    // trusted kernel registration table. The identity is copied onto each
+    // instance before init() runs; app arguments cannot grant this identity.
+    static bool registerAppWithIdentity(const char* name, const char* appId,
+                                        uint32_t iconColor, KernelApp* (*factory)());
     
     // Check if an app is available in kernel mode
     static bool isAppAvailable(const char* name);
