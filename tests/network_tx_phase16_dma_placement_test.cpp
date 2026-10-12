@@ -35,8 +35,10 @@ int main()
     assert(nic::tx_dma_region_layout_valid(
         regionBase, regionSize, &ringPhysical, &bufferPhysical));
     assert(ringPhysical == regionBase);
+    assert((ringPhysical % nic::TX_DESC_RING_BASE_ALIGNMENT) == 0u);
     assert(bufferPhysical == regionBase + nic::TX_DMA_REGION_BUFFER_OFFSET);
     assert(nic::tx_dma_region_below_4g(regionBase, regionSize));
+    assert(!nic::tx_dma_region_layout_valid(0u, regionSize));
     assert(!nic::tx_dma_region_below_4g(0xFFFFF000ULL, regionSize));
     assert(!nic::tx_dma_region_layout_valid(regionBase + 0x10u, regionSize));
     assert(!nic::tx_dma_region_layout_valid(regionBase, 0x1000u));
@@ -48,6 +50,14 @@ int main()
     assert(!nic::tx_dma_identity_mapping_valid(regionBase,
                                                regionBase + 0x1000u,
                                                regionSize));
+    uint64_t translated = 0xBAD0BAD0ULL;
+    assert(!nic::translate_kernel_dma_address(0x00101000ULL, 0u,
+                                               &translated));
+    assert(translated == 0xBAD0BAD0ULL);
+    assert(!nic::translate_kernel_dma_address(0x000FFFFFULL,
+                                               0x200000ULL, &translated));
+    assert(!nic::translate_kernel_dma_address(0x00101000ULL, ~0ULL,
+                                               &translated));
     assert(nic::dma_ranges_overlap(regionBase, 0x100u,
                                    regionBase + 0x80u, 0x100u));
     assert(!nic::dma_ranges_overlap(regionBase, 0x100u,
@@ -84,6 +94,26 @@ int main()
         regionBase, regionSize, requiredFlags,
         nic::TX_DMA_EFI_LOADER_DATA_TYPE,
         &loaderData, 1u, sizeof(loaderData)));
+
+    // The loader's allocation failure or a build with the placement
+    // experiment disabled leaves an empty BootInfo handoff. Both must fail
+    // closed; the kernel must not substitute a fabricated DMA address.
+    assert(!nic::tx_dma_region_handoff_valid(
+        0u, 0u, 0u, 0u, nullptr, 0u, sizeof(loaderData)));
+    assert(!nic::tx_dma_region_handoff_valid(
+        regionBase, regionSize,
+        requiredFlags & ~nic::TX_DMA_REGION_FLAG_CONTIGUOUS,
+        nic::TX_DMA_EFI_LOADER_DATA_TYPE,
+        &loaderData, 1u, sizeof(loaderData)));
+
+    // A memory-map descriptor must prove ownership of the complete region,
+    // rather than only the ring's first page.
+    loaderData.numberOfPages = 1u;
+    assert(!nic::tx_dma_region_handoff_valid(
+        regionBase, regionSize, requiredFlags,
+        nic::TX_DMA_EFI_LOADER_DATA_TYPE,
+        &loaderData, 1u, sizeof(loaderData)));
+    loaderData.numberOfPages = 3u;
 
     loaderData.type = 7u; // EfiConventionalMemory, not loader-owned.
     assert(!nic::tx_dma_region_owned_by_loader_memory_map(

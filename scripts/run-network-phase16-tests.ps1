@@ -50,6 +50,61 @@ Require $bootInfoSource 'TxDmaRegionDescriptor' 'BootInfo TX DMA handoff is miss
 Require $buildSource 'I219TxDmaPlacementExperiment' 'canonical build switch is missing'
 Require $projectSource 'GXOS_I219_TX_DMA_PLACEMENT_EXPERIMENT' 'bootloader project does not receive Phase 16 switch'
 
+# Keep provisioning fail-closed and prove that the enabled experiment uses the
+# loader-selected allocation, not a guessed physical address. On allocation
+# or ownership failure the handoff must stay empty, which the kernel rejects.
+$allocationStart = $loaderSource.IndexOf('// Phase 16 controlled TX DMA placement.')
+$allocationEnd = $loaderSource.IndexOf('// --- Build identity-mapped page tables', $allocationStart)
+if ($allocationStart -lt 0 -or $allocationEnd -le $allocationStart) {
+    throw 'Phase 16 TX DMA allocator source boundary was not found'
+}
+$allocationSource = $loaderSource.Substring($allocationStart, $allocationEnd - $allocationStart)
+Require $allocationSource 'GXOS_I219_TX_DMA_PLACEMENT_EXPERIMENT\s*!=\s*0' `
+    'TX DMA allocation is not explicitly gated by the placement experiment'
+Require $allocationSource 'AllocatePages\([\s\S]*?AllocateMaxAddress[\s\S]*?EfiLoaderData' `
+    'TX DMA allocation is not firmware-selected EfiLoaderData below the bound'
+Require $allocationSource 'if\s*\(txDmaReservationValid\)[\s\S]*?TxDmaRegion\.Base\s*=\s*txDmaMaxAddress' `
+    'BootInfo does not receive the verified allocator-selected base'
+Require $allocationSource 'else\s*\{[\s\S]*?FreePages[\s\S]*?SetMem\(&v1BootInfo->TxDmaRegion' `
+    'failed/invalid allocation does not clear the DMA handoff safely'
+
+$txStart = $nicSource.IndexOf('static bool init_tx(')
+$txEnd = $nicSource.IndexOf('void set_kernel_physical_base', $txStart)
+if ($txStart -lt 0 -or $txEnd -le $txStart) {
+    throw 'TX initialization source boundary was not found'
+}
+$txSource = $nicSource.Substring($txStart, $txEnd - $txStart)
+$experimentGate = $txSource.IndexOf('!tx_dma_experiment_active(s_txDmaMode)')
+$layoutCheck = $txSource.IndexOf('validate_tx_dma_layout(&layoutFailure)')
+$addressCheck = $txSource.IndexOf('dma_address_range(s_txDescs')
+$ringProgram = $txSource.IndexOf('mmio_write32(mmioBase, E1000_TDBAL')
+$ringReady = $txSource.IndexOf('s_device.txRingInitialized = true')
+if ($experimentGate -lt 0 -or $layoutCheck -le $experimentGate -or
+    $addressCheck -le $layoutCheck -or $ringProgram -le $addressCheck -or
+    $ringReady -le $ringProgram) {
+    throw 'TX ring programming/readiness no longer follows explicit DMA validation'
+}
+
+$initStart = $nicSource.IndexOf('static bool init_e1000(')
+$initEnd = $nicSource.IndexOf('// PCI bus scan for network controllers', $initStart)
+$bootStart = $nicSource.IndexOf('bool init_from_bootinfo(')
+$bootEnd = $nicSource.IndexOf('// Public API', $bootStart)
+if ($initStart -lt 0 -or $initEnd -le $initStart -or
+    $bootStart -lt 0 -or $bootEnd -le $bootStart) {
+    throw 'NIC initialization/registration source boundaries were not found'
+}
+$initSource = $nicSource.Substring($initStart, $initEnd - $initStart)
+$bootSource = $nicSource.Substring($bootStart, $bootEnd - $bootStart)
+Require $initSource 'if\s*\(!init_tx\(mmioBase\)\)[\s\S]*?return false;[\s\S]*?capture_i219_lan_init_post_init' `
+    'failed TX initialization must return before the post-init checkpoint'
+$initResult = $bootSource.IndexOf('if (!init_e1000(s_device.mmioBase))')
+$completionGate = $bootSource.IndexOf('if (!hardware_init_complete(s_device))')
+$registration = $bootSource.IndexOf('s_device.nicRegistered = true')
+if ($initResult -lt 0 -or $completionGate -le $initResult -or
+    $registration -le $completionGate) {
+    throw 'NIC registration no longer requires successful hardware and TX initialization'
+}
+
 # Structural host check for the one-screen command. Count source-level
 # newline emission sites in the normal and no-device branches.
 $shellSource = Get-Content -LiteralPath (Join-Path $root 'kernel/core/shell.cpp') -Raw
@@ -62,4 +117,4 @@ $briefSource = $shellSource.Substring($briefStart, $briefEnd - $briefStart)
 $lineCount = ([regex]::Matches($briefSource, 'output_string\("[^"\r\n]*\\n"\)')).Count
 if ($lineCount -gt 20) { throw "nicinfo tx brief source emits $lineCount newline sites; maximum is 20" }
 
-Write-Host "Phase 16 DMA-placement tests PASS (brief newline sites=$lineCount)." -ForegroundColor Green
+Write-Host "Phase 16 DMA-placement/provisioning tests PASS (brief newline sites=$lineCount)." -ForegroundColor Green

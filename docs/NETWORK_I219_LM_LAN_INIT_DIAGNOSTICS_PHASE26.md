@@ -6,7 +6,11 @@
 | Branch | `NAVIGATOR_GENERAL_IMPROVEMENTS` |
 | Starting HEAD | `8a9c20fcb75816eb196e8daa0f07321099199573` |
 | Implementation commit | `abfeed747d94173b5f96f82061f0e8fce242734c` |
-**Status:** implementation and ISO gates passed; physical qualification pending; phase remains open.
+**Status:** Phase 26 implementation and ISO gates passed. The supplied AIDA_LPT
+capture records LAN_INIT_DONE set in visible PRE samples 2 and 3, but the Phase
+26 image had TX DMA placement disabled and failed closed before TX ring setup.
+Phase 26R prepares the gated provisioning path for a fresh physical check; the
+phase remains open.
 
 ## Phase authority and starting evidence
 
@@ -99,13 +103,20 @@ operations.
 
 | Gate | Result |
 |---|---|
-| Phase 11–25 NIC/network regression chain | PASS |
+| Phase 11–26 hosted NIC/network regression chain, including new Phase 26R provisioning checks | PASS |
 | Phase 26 enabled/disabled simulated-MMIO tests and source guards | PASS |
-| AMD64 kernel build | PASS; compiler warnings included unused-parameter/function and signedness/narrowing warnings |
-| UEFI bootloader build | PASS; MSVC option-override warnings |
-| ISO structural verification | PASS; UEFI El Torito platform `0xEF`, bootable no-emulation media |
-| QEMU ISO boot/readiness smoke | PASS; firmware, loader, kernel, ramdisk, desktop-ready, and kernel-main-loop markers observed |
-| AIDA_LPT physical qualification | PENDING; no physical Phase 26 capture was available for this audit |
+| AMD64 kernel build (Phase 26R) | PASS; existing unused-parameter/function and signedness/narrowing warnings |
+| UEFI bootloader build (Phase 26R) | PASS; existing MSVC option-override warnings |
+| Phase 26R ISO structural verification | PASS; UEFI El Torito platform `0xEF`, bootable no-emulation media |
+| Phase 26R QEMU ISO boot/readiness smoke | PASS; firmware, loader, kernel, ramdisk, desktop-ready, and kernel-main-loop markers observed |
+| AIDA_LPT physical qualification | PARTIAL; bounded PRE evidence supplied, but TX DMA/ring/registration acceptance failed at the disabled configuration gate |
+
+The Phase 26R hosted additions exercise valid and empty handoffs, failed
+translation and identity checks, invalid range/alignment/ownership/contiguity,
+TX ring programming order, readiness gating, and the diagnostics-disabled
+production build. Source guards also verify that allocation failure clears the
+handoff and that the Phase 26R ISO enables the existing experiment in both the
+kernel and loader build settings.
 
 The QEMU run used QEMU's emulated generic `e1000` device. It is virtual boot
 evidence only and is not an Intel I219-LM observation.
@@ -166,7 +177,125 @@ reset behavior for this observation.
 
 The separate PCIe-master/reset-quiesce candidate remains appropriate for a
 later, separately gated phase only if physical evidence makes it the stronger
-candidate. Phase 26 implements no behavioral repair. The phase remains open
-until its physical qualification criteria are met; do not advance to Phase 27.
+candidate. The Phase 26 evidence and Phase 26R source trace are reconciled
+below. No LAN_INIT_DONE or PCIe-master behavior was changed. The phase remains
+open until its physical qualification criteria are met; do not advance to
+Phase 27.
+
+## Phase 26R physical evidence and failure trace
+
+### Supplied AIDA_LPT observation
+
+The user-provided visible PRE samples 2 and 3 both report `STATUS=0x00080683`,
+`LAN_INIT_DONE=1`, `PHYRA=1`, `LU=1`, `CTRL=0x00100240`, and `RST=0`. The
+diagnostic reports three bounded PRE samples, no STATUS writes, and no
+POST-INIT capture. The first PRE sample value was not supplied and is not
+reconstructed here.
+
+The same capture reports physical link UP and valid PHY/MAC link observations,
+but TX ring NOT READY, NIC Registered NO, Driver Ready NO, initialization
+stage TX ring, hardware initialization incomplete, and
+`TX_DMA_REGION_UNAVAILABLE`. Therefore the visible samples weaken the missing
+LAN_INIT_DONE hypothesis at samples 2 and 3, but do not prove that timing never
+matters. They are not enough to assign the audit's “first sample set” or
+“changed during samples” interpretations because PRE sample 1 is unavailable.
+
+### Exact failure and why POST-INIT was absent
+
+This is a Phase 26 build-configuration failure, not evidence of a failed UEFI
+allocation or failed address translation:
+
+1. The Phase 26 ISO build script did not pass `-I219TxDmaPlacementExperiment`.
+   Its manifest confirms `i219TxDmaPlacementExperiment=false`.
+2. With that compile-time flag off, the UEFI loader's guarded
+   `AllocatePages(AllocateMaxAddress, EfiLoaderData, ...)` block is skipped.
+   It leaves `BootInfo.TxDmaRegion` zero; no allocation is attempted.
+3. `kernel/core/main.cpp` passes that empty descriptor to
+   `nic::set_tx_dma_region()`. Its zero-base/size/flags check returns while
+   retaining `TxFailureReason::DmaRegionUnavailable`.
+4. With the placement flag off, `select_tx_dma_storage()` keeps kernel-image
+   TX storage selected. `init_tx()` explicitly rejects that mode for I219
+   before `validate_tx_dma_layout()`, `dma_address_range()`, address
+   translation, or TDBAL/TDBAH programming. This is the precise early return
+   that leaves the recorded failure as `TX_DMA_REGION_UNAVAILABLE`.
+5. `init_e1000()` returns from its TX-ring failure branch. The POST-INIT
+   capture is later in the success path, after TX setup and link refresh, so
+   that checkpoint is unreachable. `init_from_bootinfo()` then returns before
+   the hardware-completion gate and NIC registration.
+
+Thus the observed failure is **configuration/gating**. No allocation failed;
+no runtime translation, DMA address, physical placement, alignment, or
+contiguity check was reached. The I219 fallback is intentionally fail-closed;
+the kernel-image storage is not substituted as an unqualified DMA region.
+No kernel behavior, LAN_INIT_DONE handling, STATUS write, or PCIe-master
+sequence was changed.
+
+The latest prior documented AIDA_LPT ring-ready evidence is the Phase 24
+physical record carried in the Phase 25 audit: reset/rearm completed and the
+TX snapshot showed `TDLEN=0x400`, `TXDCTL=0x0141001F`, and `TDH=TDT=0`. The
+Phase 24 build script explicitly enabled the same placement experiment. That
+comparison is evidence that the Phase 26 setting differs; it does not establish
+successful TX descriptor consumption or transmission.
+
+### Phase 26R image and gates
+
+The new Phase 26R builder enables both the existing compile-time-gated DMA
+placement experiment and the read-only LAN_INIT diagnostics for the exact
+I219 physical test. The UEFI allocator remains firmware-selected and bounded
+below 4 GiB; all ownership, identity mapping, contiguity, cacheability,
+alignment, range, and non-overlap checks remain in force. RX, PHY, PCI, and
+link initialization are unchanged. No packet transmission is added.
+
+- Builder: `scripts/create-phase26r-aida-i219-tx-dma-provision-iso.ps1`
+- ISO: `dist/guideXOS-Server-v0.1.0-navgen-phase26r-tx-dma-provision-amd64.iso`
+- Size: `91,293,696` bytes
+- SHA-256: `6b0fbbf226aee1377ee75fd05b677c31bd2f746e79d8677aca24d3e7a6ada4d2`
+- Source commit used for kernel/bootloader: `607f3e3e3dcb379dea79d393eb3a615c99156bf0`
+- Manifest build identity: `GXOS-P7-4-607f3e3e3dcb-991b20a0-75f1-47cc-bce5-d3bcb4a03db9`
+- ESP identity: `GXOS-P7-4-64f60a6efce14397b9a409232fe109c4`
+- Configuration: AMD64 UEFI; Phase 5 stage 8, Phase 6 stage 0, Phase 7 stage 4; TX DMA placement experiment enabled; LAN_INIT diagnostics enabled; tracked PacMan package reused.
+- Kernel SHA-256: `cabdbb7e1cb2cf8dece90054cf1b30f3570eb4540f953bcb186380a331327dbc`
+- UEFI bootloader SHA-256: `069381362193e77e2249b78611ef022386ed23c19e88566b828a125fcac8fa86`
+- QEMU: firmware boot, loader, kernel, ramdisk, desktop-ready, and kernel-main-loop markers passed. Serial log: `out/release-iso/qemu-test-a35d2f4e6fdb4bbc9d9df85da3c89ea4/serial.log`.
+
+The manifest records that packaging began with the test/script changes and
+generated `ESP/build-identity.txt` present in the worktree. The packaged
+kernel and bootloader hashes above identify the tested image; QEMU used a
+generic emulated `e1000` and is not I219 qualification.
+
+For this provisioning investigation, classify the observed boundary as:
+
+- **Outcome A — allocation failure:** the experiment is enabled but UEFI does
+  not return a valid region. Not observed in the supplied Phase 26 capture,
+  because the allocator was not called.
+- **Outcome B — handoff/validation failure:** the loader allocates a region but
+  the kernel rejects ownership, mapping, range, or layout. Not observed in the
+  supplied capture; Phase 26 never reached those checks.
+- **Outcome C — configuration gate skipped provisioning:** the experiment is
+  disabled, no allocation is attempted, and I219 TX initialization fails
+  closed with `TX_DMA_REGION_UNAVAILABLE`. This is the supplied observation.
+
+### Next AIDA_LPT check
+
+Boot the Phase 26R ISO and capture the complete `nicinfo laninit`,
+`nicinfo brief`, `nicinfo link`, and `nicinfo tx brief` output. Verify PCI
+`8086:156F` and `family=I219/PCH`; record the retained PRE samples, whether
+POST-INIT is now present, the TX DMA mode/provisioning fields, TX ring READY,
+NIC registration, Driver Ready, and link state. Photograph the displayed
+build identity and output.
+
+These commands are read-only. Do not run reset/rearm, `nicinfo tx phase25`,
+`nicinfo tx raw`, DHCP, or any packet-send command during this provisioning
+check. If allocation or validation fails, record the precise reported state
+and stop. If the handoff is valid, the TX ring is READY, registration succeeds,
+and POST-INIT is captured, preserve that evidence first; it will establish a
+safe basis for selecting a separate one-shot TX diagnostic. Ring readiness
+alone does not justify a transmission in this run.
+
+**Phase 26R investigation outcome C:** the visible Phase 26 TX failure is
+explained by a disabled build configuration, and a reproducible enabled-gate
+physical check is prepared. **Physical acceptance: pending**; the supplied
+boot did not initialize/register the TX ring, and no successful descriptor
+consumption or transmission is claimed.
 
 **Phase state:** `last_completed=PHASE25`; `next_expected=PHASE26`.

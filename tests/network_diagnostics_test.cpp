@@ -161,6 +161,15 @@ int main()
     assert(nic::hardware_init_complete(readyDevice));
     assert(nic::is_driver_ready(readyDevice));
 
+    // TX provisioning failure must stop publication even if later state bits
+    // were stale or accidentally left set. Registration/readiness requires a
+    // successfully initialized TX ring.
+    nic::NICDevice txDmaUnavailable = readyDevice;
+    txDmaUnavailable.txRingInitialized = false;
+    txDmaUnavailable.initStage = nic::NIC_INIT_TX_RING;
+    assert(!nic::hardware_init_complete(txDmaUnavailable));
+    assert(!nic::is_driver_ready(txDmaUnavailable));
+
     // A discovered/bound I219 with a failed PHY stage must not project as
     // driver-ready, even if a stale registration/active bit is present.
     readyDevice.phyAccess = nic::NIC_PHY_FAILED;
