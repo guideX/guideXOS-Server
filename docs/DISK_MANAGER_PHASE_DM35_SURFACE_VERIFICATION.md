@@ -316,3 +316,123 @@ G. **Independent integrity:** after each completed or stopped run, release the
 
 DM35 remains active, `.phase` remains `last_completed=DM34`,
 `next_expected=DM35`, and no DM36 work has started.
+
+## Continuation 3 — exact-HEAD candidate prepared; guest lane blocked
+
+### Repository and candidate gate
+
+This continuation began on the required `DISK_MANAGER_IMPROVEMENTS` branch at
+`d73560863ec5cd6b588be3bb3f0f6f3ee38e1dd3`, subject
+`disk-manager: add DM35 surface verification GUI`. `.phase` was
+`last_completed=DM34`, `next_expected=DM35`. Tracked and untracked Git state
+was clean, and no DM35 acceptance or DM36 phase advancement was present. The
+existing DM35 report remains the authoritative phase document. No production
+source or proof hook changed.
+
+An isolated AMD64 kernel build from that exact source tree passed with
+`NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0`. The kernel SHA-256 is
+`CD48DB091C392D11439E0EFDE2CBC694CE3E3DFD25D54483AD5A5C41CEBE067A`; the ESP
+copy matches. The staged PE32+ EFI application bootloader SHA-256 is
+`9CFBD33384CE921DAADFE82C54E372752EE34BD4394EFAD9F9A0CED8E03BB121`, and
+read-only `OVMF.fd` is
+`2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792`. The
+candidate provenance records source tree
+`7d7949f7c5603ded2a5daa111069327b287b05ac`, ordinary `kernel/core/main.cpp`
+startup, and the matching engine and GUI sources. Previously accepted
+`build.bat`, UEFI x64 Release, 48/48 surface-engine, 34/34 surface-GUI, and
+1,192/1,192 full storage evidence was retained without repeating those host
+campaigns.
+
+### Fixtures prepared
+
+Eight newly generated, separate raw images are in ignored
+`out/dm35/surface-verification/fixtures/`. Each is 307,200,000 bytes, 512-byte
+sectors, 600,000 sectors, final LBA 599,999. Each has an inactive MBR with two
+type-0x0C partitions: Partition 1 is LBA 2,048 through 182,047, and Partition 2
+is LBA 190,000 through 369,999. The MBR, both partitions, reserved area, gap,
+tail, and final LBA have distinct known patterns. All eight pristine SHA-256
+hashes are
+`8a9450cbd33723c613d88d47e2177e751c0af7929de68d903feac2660bbc39d7`:
+
+| Serial | Intended use | Initial SHA-256 | QEMU attachment |
+| --- | --- | --- | --- |
+| `DM35DISK01` | Entire disk | `8a9450cbd33723c613d88d47e2177e751c0af7929de68d903feac2660bbc39d7` | Not attached |
+| `DM35PART01` | Partition 1 | `8a9450cbd33723c613d88d47e2177e751c0af7929de68d903feac2660bbc39d7` | Not attached |
+| `DM35STOP01` | Dedicated Stop Scan | `8a9450cbd33723c613d88d47e2177e751c0af7929de68d903feac2660bbc39d7` | Not attached |
+| `DM35CLOSE01` | Application Close | `8a9450cbd33723c613d88d47e2177e751c0af7929de68d903feac2660bbc39d7` | Not attached |
+| `DM35REMOVE01` | Removal | `8a9450cbd33723c613d88d47e2177e751c0af7929de68d903feac2660bbc39d7` | Not attached |
+| `DM35REPL01` | Same-capacity replacement | `8a9450cbd33723c613d88d47e2177e751c0af7929de68d903feac2660bbc39d7` | Not attached |
+| `DM35READ01` | Read-only admission | `8a9450cbd33723c613d88d47e2177e751c0af7929de68d903feac2660bbc39d7` | Not attached |
+| `DM35ERR01` | QEMU read-error injection | `8a9450cbd33723c613d88d47e2177e751c0af7929de68d903feac2660bbc39d7` | Not attached |
+
+The post-block full-image hash check matched every initial hash. No DM34 image
+was reused or modified. The fixture manifest and hash check are retained under
+`out/dm35/surface-verification/fixtures/` and
+`out/dm35/surface-verification/runs/A-entire-disk/`.
+The independent boundary and partition-geometry validator passed for all
+eight images, including the MBR signature, both partition extents, reserved
+area, gap, tail, and final-LBA patterns; its result is
+`out/dm35/surface-verification/fixtures/fixture-validation.json`.
+
+### Foreign QEMU ownership block
+
+The earlier workspace census was clear, but the required per-launch census
+found one active foreign QEMU process, PID
+`25712`, QEMU 11.0.0, WHPX, QMP `127.0.0.1:51917`. Its command line and
+process manifest identify run `pacman-soak-76ecb7e9780b4c968dc43e1fcca9418c`,
+owned by repository `D:\dev\pacman`, branch `master`, HEAD
+`faf63394f10a4f4b9f9789d4849da5d2174cd1a1`, started by
+`D:\dev\pacman\guidexos\tools\pacman_hosted_soak.ps1`. It uses a copied
+`D:\dev\guideXOSServer\ESP` and a private firmware file. The DM35 target path
+was not in its command line. Its QMP endpoint was not contacted, and the
+process was not paused, terminated, or otherwise controlled.
+
+The DM35 launch helper stopped before creating a guest. The requested QMP
+port `61350` was free and `DM35DISK01` passed an exclusive-open check; the
+prelaunch census and foreign owner manifests are retained in
+`out/dm35/surface-verification/runs/A-entire-disk/`. No DM35 GUI was opened,
+no guest image was attached, and no guest QMP I/O counters or scan trace were
+collected. This is **Outcome B — `BLOCKED_BY_FOREIGN_QEMU`**. No production
+defect was demonstrated.
+
+### Unqualified runtime evidence and retained host coverage
+
+Guest gates A–G remain unqualified: whole-disk scan, partition-bounded scan,
+dedicated Stop Scan, application Close, removal/replacement, guest read-error
+reporting, read-only media admission, scan-specific I/O attribution, and
+post-attachment image integrity. The GUI input sequence therefore has not
+been exercised in this continuation. The only unchanged-image result is the
+prelaunch check confirming all unattached fixtures still match their pristine
+hashes.
+
+The exact production-linked host read-failure checks retained in
+`tests/storage_manager_test.cpp::run_surface_verification_tests()` are:
+
+- `first-batch read failure reports its transport status and exact request range`;
+- `middle-batch timeout preserves prior readable coverage and exact failed range`;
+- `near-final read failure reports the two-sector tail range without false completion`.
+
+Each check also verifies no retry, no later batch, ownership release, no
+write/Flush, and unchanged fake-media bytes. Host read-only admission includes
+`read-only 512-byte full-disk scan covers first and final sectors and completes
+accurately` and `read-only NVMe 4Kn scan succeeds with a non-round final
+batch`. These remain host evidence and are not reported as guest passes.
+
+QEMU 11.0.0 locally exposes `scsi_req_parsed` and
+`scsi_req_parsed_lba` trace events for a future operation-window LBA trace.
+QEMU's [documented `blkdebug` backend](https://www.qemu.org/docs/master/devel/testing/blkdebug.html)
+supports deterministic `read_aio` error injection with an optional sector
+match and one-shot behavior; this is a candidate safe guest mechanism, not yet
+validated through the production USB transport in a guest. No read error was
+injected or claimed.
+
+### Status and next continuation
+
+No DM35-owned QEMU process was started and no physical host storage was
+attached. No temporary launch hook or production shortcut was created. The
+accepted host suite and build evidence remain retained because production
+source did not change. `.phase` remains `last_completed=DM34`,
+`next_expected=DM35`; DM36 implementation has not started. The next
+continuation should resume the prepared guest campaign when the exclusive
+QEMU lane is available, beginning with `DM35DISK01`, without rerunning the
+accepted host campaigns or recreating these fixtures.
