@@ -2102,11 +2102,19 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
                 $serialPath=Join-Path (Join-Path $latestRefreshRun.FullName "boot$bootNumber") 'serial.log'
                 if (Test-Path -LiteralPath $serialPath -PathType Leaf) {
                     $serialText=Get-Content -LiteralPath $serialPath -Raw
+                    $c166SameBootCheckCount = [regex]::Matches(
+                        $serialText,
+                        '(?m)^\[C102-MANAGED-OUTPUT\] PROOF C166 S Same [1-5] PASS(?:\s|$)'
+                    ).Count
                     $refreshSerials.Add([ordered]@{
                         boot=$bootNumber
                         path=[System.IO.Path]::GetFullPath($serialPath)
                         sha256=Get-Sha256 $serialPath
-                        c166SameBootPassMarkerObserved=($serialText -match '(?m)^\[C102-MANAGED-OUTPUT\] PROOF-SCENARIO-PASS C166 S Same$')
+                        c166SameBootPassMarkerObserved=(
+                            $serialText -match '(?m)^\[C102-MANAGED-OUTPUT\] PROOF-SCENARIO-PASS C166 S Same$' -or
+                            $c166SameBootCheckCount -eq 5
+                        )
+                        c166SameBootPassCheckCount=$c166SameBootCheckCount
                         missingSurfaceDestroy=($serialText -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C150-SURFACE.*destroy appId=com\.guidexos\.apps\.managed\.notes')
                         staleDispatchObserved=($serialText -match '(?m)^\[C150-MANAGED-OUTPUT\] C150-DISPATCH rejected=stale-application result=FAIL')
                     })
@@ -2120,7 +2128,7 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
             sourceBranch='v1.1_DOTNET_SUPPORT'
             status='INCOMPLETE'
             scenarioResult='INCOMPLETE'
-            reason='C170 proof refresh did not complete its application-integration lane: Boot 1 emitted the C166 SameBoot pass marker but timed out waiting for the Managed Notes C150 surface-destroy marker after stale-application dispatch evidence.'
+            reason='C170 proof refresh did not complete its application-integration lane: Boot 1 passed all five C166 SameBoot checks but timed out waiting for the Managed Notes C150 surface-destroy marker after stale-application dispatch evidence.'
             guestLaneExecuted=[bool]$currentProofManifest.guestLaneExecuted
             c166Accepted=[bool]$currentProofManifest.c166Accepted
             currentProofBuildManifest=[ordered]@{
