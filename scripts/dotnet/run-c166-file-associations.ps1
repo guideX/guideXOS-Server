@@ -268,10 +268,14 @@ function Write-C170FocusedEvidenceManifest([string]$EvidenceRoot,[string]$Source
 
     $boots = [System.Collections.Generic.List[object]]::new()
     $seenScreenshots = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    $requiredStateMarkers = @(
-        'C167-STATE operation=Apply state=Disabled',
+    $requiredStateMarkers = [System.Collections.Generic.List[string[]]]::new()
+    $requiredStateMarkers.Add([string[]]@('C167-STATE operation=Apply state=Disabled'))
+    $requiredStateMarkers.Add([string[]]@(
         'C167-STATE operation=Apply state=ApplicationOverride',
-        'C167-STATE operation=Reset state=NoOverride')
+        'C167-STATE operation=Reset state=NoOverride'))
+    $requiredStateMarkers.Add([string[]]@(
+        'C167-STATE operation=Apply state=ApplicationOverride',
+        'C167-STATE operation=Reset state=NoOverride'))
     for ($index = 0; $index -lt 3; $index++) {
         $boot = $source.guestBoots[$index]
         if ($boot.status -ne 'PASS' -or [int]$boot.pid -le 0) {
@@ -283,8 +287,10 @@ function Write-C170FocusedEvidenceManifest([string]$EvidenceRoot,[string]$Source
         $qmpRecord = New-C170EvidenceFileRecord "focused-boot-$($index + 1)-qmp" `
             $qmpPath $boot.qmpInputSha256
         $serialText = Get-Content -LiteralPath $boot.serialPath -Raw
-        if ($serialText.IndexOf($requiredStateMarkers[$index], [StringComparison]::Ordinal) -lt 0) {
-            throw "C170 focused boot $($index + 1) is missing its required completion marker."
+        foreach ($requiredMarker in $requiredStateMarkers[$index]) {
+            if ($serialText.IndexOf($requiredMarker, [StringComparison]::Ordinal) -lt 0) {
+                throw "C170 focused boot $($index + 1) is missing required completion marker: $requiredMarker"
+            }
         }
         $files.Add($serial)
         $files.Add($qmpRecord)
@@ -1572,9 +1578,17 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
             throw 'Boot 2 selecting Managed Notes wrote association persistence before Apply.'
         }
         $boot2Apply = Apply-C167DefaultAppsChoice $boot2 'ApplicationOverride' (Join-Path $runRoot 'boot2-default-apps-explicit-notes.ppm')
+        $boot2Committed = Get-C167AssociationDiskState $sharedEsp $Python
+        $boot2CommittedState = Assert-C167DiskState $boot2Committed 'ApplicationOverride' $true
         $boot2Reentry = $null
         if ($script:c169ManagedUiProof) {
             $boot2Reentry = Return-C167ToSettingsAndReenter $boot2 'ApplicationOverride' (Join-Path $runRoot 'boot2-c169-settings-reentry.ppm')
+        }
+        $boot2Reset = $null
+        $boot2ResetReentry = $null
+        if ($script:c170ControlRendering) {
+            $boot2Reset = Reset-C167DefaultApps $boot2 (Join-Path $runRoot 'boot2-default-apps-reset-system-default.ppm')
+            $boot2ResetReentry = Return-C167ToSettingsAndReenter $boot2 'NoOverride' (Join-Path $runRoot 'boot2-default-apps-reset-reentry.ppm')
         }
         Close-C167SettingsCenter $boot2
         $boot2Explorer = Invoke-C166NativeExplorerOpen $boot2 'Default' `
@@ -1589,16 +1603,23 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
         if ($boot2ManagedExplorer.content -ne 'hello from C164' -or -not $boot2ManagedExplorer.clean) {
             throw 'Boot 2 Managed File Explorer did not agree with native File Explorer for the explicit Notes default.'
         }
-        $boot2Interactions = [ordered]@{restoredState=$boot2Resolved;settings=$boot2Disabled;queryPreservedSlots=$true;choice=$boot2Selection;beforeApplySlots=$boot2BeforeApply;apply=$boot2Apply;nativeExplorer=$boot2Explorer;managedExplorer=$boot2ManagedExplorer;c169=if ($script:c169ManagedUiProof) { [ordered]@{scroll=$scrollProof;settingsReentry=$boot2Reentry;pointerPopupSelection=$boot2Selection} } else { $null };result='PASS'}
+        $boot2Interactions = [ordered]@{restoredState=$boot2Resolved;settings=$boot2Disabled;queryPreservedSlots=$true;choice=$boot2Selection;beforeApplySlots=$boot2BeforeApply;apply=$boot2Apply;committedStateRequeried=$boot2CommittedState;reset=$boot2Reset;resetReentry=$boot2ResetReentry;nativeExplorer=$boot2Explorer;managedExplorer=$boot2ManagedExplorer;c169=if ($script:c169ManagedUiProof) { [ordered]@{scroll=$scrollProof;settingsReentry=$boot2Reentry;pointerPopupSelection=$boot2Selection} } else { $null };result='PASS'}
     } finally {
         Stop-OwnedProofQemu $boot2
     }
     $boot2DiskHashAfter = Get-Sha256 $sharedEsp
     $boot2AfterApply = Get-C167AssociationDiskState $sharedEsp $Python
-    $boot2Explicit = Assert-C167DiskState $boot2AfterApply 'ApplicationOverride' $true
-    $boot2Interactions.explicitState = $boot2Explicit
-    $boot2Interactions.slotImagesAfterExplorer = $boot2AfterApply
-    $boot2Interactions.associationDiskUnchangedThroughExplorer = 'Verified by the ApplicationOverride state restored on Boot 3.'
+    if ($script:c170ControlRendering) {
+        $boot2NoOverride = Assert-C167DiskState $boot2AfterApply 'NoOverride' $true
+        $boot2Interactions.finalStateAfterReset = $boot2NoOverride
+        $boot2Interactions.slotImagesAfterExplorer = $boot2AfterApply
+        $boot2Interactions.associationDiskUnchangedThroughExplorer = 'Verified by the NoOverride state after Boot 2 Reset and Managed File Explorer.'
+    } else {
+        $boot2Explicit = Assert-C167DiskState $boot2AfterApply 'ApplicationOverride' $true
+        $boot2Interactions.explicitState = $boot2Explicit
+        $boot2Interactions.slotImagesAfterExplorer = $boot2AfterApply
+        $boot2Interactions.associationDiskUnchangedThroughExplorer = 'Verified by the ApplicationOverride state restored on Boot 3.'
+    }
     $boot2.serial = Get-C166Serial $boot2.serialPath
     $boot2.serialSha256 = Get-Sha256 $boot2.serialPath
     $boot2.qmpInputSha256 = Get-Sha256 $boot2.qmpLogPath
@@ -1619,10 +1640,20 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
     try {
         if ($boot3.backingEspPath -ne $diskIdentity) { throw 'Boot 3 did not reuse the exact writable FAT16 ESP image.' }
         $boot3Before = Get-C167AssociationDiskState $sharedEsp $Python
-        $boot3Resolved = Assert-C167DiskState $boot3Before 'ApplicationOverride' $true
+        $boot3ExpectedState = if ($script:c170ControlRendering) { 'NoOverride' } else { 'ApplicationOverride' }
+        $boot3Resolved = Assert-C167DiskState $boot3Before $boot3ExpectedState $true
         Initialize-C166GuestPointer $boot3
         Open-C167SettingsCenter $boot3 -ExpectC145Final | Out-Null
-        $boot3Explicit = Enter-C167DefaultAppsPage $boot3 'ApplicationOverride' (Join-Path $runRoot 'boot3-default-apps-restored-explicit.ppm')
+        $boot3Explicit = Enter-C167DefaultAppsPage $boot3 $boot3ExpectedState (Join-Path $runRoot 'boot3-default-apps-restored-explicit.ppm')
+        $boot3Selection = $null
+        $boot3Apply = $null
+        $boot3CommittedState = $null
+        if ($script:c170ControlRendering) {
+            $boot3Selection = Select-C167DefaultAppsChoice $boot3 0
+            $boot3Apply = Apply-C167DefaultAppsChoice $boot3 'ApplicationOverride' (Join-Path $runRoot 'boot3-default-apps-explicit-notes.ppm')
+            $boot3Committed = Get-C167AssociationDiskState $sharedEsp $Python
+            $boot3CommittedState = Assert-C167DiskState $boot3Committed 'ApplicationOverride' $true
+        }
         $boot3Reset = Reset-C167DefaultApps $boot3 (Join-Path $runRoot 'boot3-default-apps-reset-system-default.ppm')
         $boot3Reentry = Return-C167ToSettingsAndReenter $boot3 'NoOverride' (Join-Path $runRoot 'boot3-default-apps-reset-reentry.ppm')
         Close-C167SettingsCenter $boot3
@@ -1644,7 +1675,7 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
             $boot3Tail -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C145-FINAL viewport=valid registration=12 modal=none capture=none drag=none result=PASS') {
             throw 'Boot 3 did not leave verified NoOverride state with clean Settings control ownership.'
         }
-        $boot3Interactions = [ordered]@{restoredState=$boot3Resolved;settings=$boot3Explicit;reset=$boot3Reset;reentry=$boot3Reentry;managedExplorer=$boot3Explorer;cleanNotesBaseline=$true;modalCaptureDrag='none';c169=$c169AppChecks;result='PASS'}
+        $boot3Interactions = [ordered]@{restoredState=$boot3Resolved;settings=$boot3Explicit;selection=$boot3Selection;apply=$boot3Apply;committedStateRequeried=$boot3CommittedState;reset=$boot3Reset;reentry=$boot3Reentry;managedExplorer=$boot3Explorer;cleanNotesBaseline=$true;modalCaptureDrag='none';c169=$c169AppChecks;result='PASS'}
     } finally {
         Stop-OwnedProofQemu $boot3
     }
@@ -1916,6 +1947,36 @@ function Invoke-C166OrdinaryBoot([int]$Number,[string]$Kernel,[string]$Ramdisk,
                         throw 'Ordinary boot 2 pointer ComboBox selection wrote association persistence before Apply.'
                     }
                 }
+                $c170DefaultApps=$null
+                if ($script:c170ControlRendering) {
+                    # The ordinary C170 Boot 2 scenario performs the full
+                    # commit/re-query/Reset lifecycle in this same fresh boot.
+                    # Return the pending ComboBox value to Managed Notes so
+                    # Apply exercises a real ApplicationOverride transition.
+                    $notesSelection=Select-C167DefaultAppsChoice $boot 0 $root
+                    $slotsBeforeApply=Get-C166AssociationDiskState $esp
+                    [void](Assert-C167DiskState $slotsBeforeApply 'NoOverride' $false)
+                    $apply=Apply-C167DefaultAppsChoice $boot 'ApplicationOverride' `
+                        (Join-Path $root 'default-apps-applied-explicit-notes.ppm')
+                    $slotsAfterApply=Get-C166AssociationDiskState $esp
+                    [void](Assert-C167DiskState $slotsAfterApply 'ApplicationOverride' $true)
+                    $reset=Reset-C167DefaultApps $boot (Join-Path $root 'default-apps-reset-system-default.ppm')
+                    $reentry=Return-C167ToSettingsAndReenter $boot 'NoOverride' `
+                        (Join-Path $root 'default-apps-reset-reentry.ppm')
+                    $slotsAfterReset=Get-C166AssociationDiskState $esp
+                    [void](Assert-C167DiskState $slotsAfterReset 'NoOverride' $true)
+                    $c170DefaultApps=[ordered]@{
+                        pendingNoDefault=$c169PointerSelection
+                        pendingManagedNotes=$notesSelection
+                        slotsBeforeApply=$slotsBeforeApply
+                        apply=$apply
+                        slotsAfterApply=$slotsAfterApply
+                        reset=$reset
+                        reentry=$reentry
+                        slotsAfterReset=$slotsAfterReset
+                        result='PASS'
+                    }
+                }
                 Close-C167SettingsCenter $boot
                 $managed=Invoke-C166ManagedExplorerOpen $boot 'Default' `
                     (Join-Path $root 'managed-explorer-notes.ppm')
@@ -1929,7 +1990,7 @@ function Invoke-C166OrdinaryBoot([int]$Number,[string]$Kernel,[string]$Ramdisk,
                     shiftTab=$shiftTab.Match.Value
                     lowerSectionsScreenshot=$scrollDownScreenshot
                     lowerSectionsScreenshotSha256=$scrollDownSha
-                    c169PointerPopup=$c169PointerSelection
+                    c169PointerPopup=$c169PointerSelection;c170DefaultApps=$c170DefaultApps
                     defaultApps=$defaultApps;close='PASS';result='PASS'
                 }
             }
