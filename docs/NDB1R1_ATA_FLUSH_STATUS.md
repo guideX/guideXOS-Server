@@ -340,9 +340,10 @@ NDB1R1 qualification path was lost or overwritten. The merge is explicitly
 retained; the three Settings documents are not part of the NDB1R1 closeout
 commit.
 
-HEAD remained at `c69b2e97` throughout the audit and requalification; no
-concurrent history change was observed. Only the authorized NDB1R1 closeout and
-phase-metadata commits below advance it.
+HEAD remained at `c69b2e97` throughout the merge audit and hosted/kernel
+requalification; no concurrent history change was observed. The only later
+commits are the authorized NDB1R1 closeout, phase-marker update, and final-QEMU
+evidence supplement.
 
 The pending NDB1R1 worktree inventory was limited to the documentation update,
 the compile-time-gated QEMU qualification hook in `kernel/core/main.cpp`, its
@@ -405,10 +406,31 @@ The retained disposable raw disk is 32 MiB / 65,536 sectors. A read-only host
 inspection during this continuation confirmed its SHA-256 remains
 `AB16AF0AEA38E13FA177DD872591B93681256B32651B4467C9A295BAC5CC9B96`, both
 expected patterns exactly occupy sectors 4096–4103, and every byte outside
-those sectors is zero. The retained QEMU evidence remains valid because the
-merge changed only the three Settings documentation files and the production
-ATA and qualification source used by the recorded run is unchanged. No new QEMU
-guest run was needed for this documentation-only merge.
+those sectors is zero. The earlier QEMU evidence remains valid because the
+merge changed only the three Settings documentation files and its production
+ATA source is unchanged. To tie runtime evidence directly to the committed
+qualification harness, the test kernel was also rebuilt with the two
+qualification macros into
+`kernel/build/amd64-ndb1r1-qemu-recheck/bin/kernel.elf` (2,659,920 bytes,
+SHA-256 `3DB29B788DE0AD66B83136767918C39186D3B19846718789A16F26F9BED3C5C4`).
+Its build log is
+`out/validation/NDB1R1_ATA_PIO_20261011/kernel-build-qemu-final-recheck.log`.
+
+The committed harness then ran against a separate fresh 32 MiB raw disk,
+`out/validation/NDB1R1_ATA_PIO_20261011/ata-pio-disposable-32MiB-final-recheck.raw`.
+The wrong-serial run returned QEMU debug-exit code **35** and left the disk at
+its original all-zero SHA-256
+`83EE47245398ADEE79BD9C0A8BC57B821E92ABA10F5F9ADE8A5D1FAE4D8C4302`. The
+identified-device write/flush/readback run and the independent-process
+read-only run each returned debug-exit code **33** and reported their pass
+markers. Their serial logs are
+`negative-identity-final-recheck.serial.log`,
+`write-phase-final-recheck.serial.log`, and
+`cross-process-readback-final-recheck.serial.log` in the same validation
+directory. A host-side read-only inspection confirmed both exact patterns and
+zero bytes outside sectors 4096–4103; the final disk SHA-256 is
+`AB16AF0AEA38E13FA177DD872591B93681256B32651B4467C9A295BAC5CC9B96`.
+These extra build and QEMU artifacts remain ignored and were not committed.
 
 This proves QEMU TCG behavior and clean-shutdown/relaunch persistence only. It
 does not establish arbitrary power-loss durability or physical bare-metal ATA
