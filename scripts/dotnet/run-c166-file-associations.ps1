@@ -274,8 +274,7 @@ function Write-C170FocusedEvidenceManifest([string]$EvidenceRoot,[string]$Source
         'C167-STATE operation=Apply state=ApplicationOverride',
         'C167-STATE operation=Reset state=NoOverride'))
     $requiredStateMarkers.Add([string[]]@(
-        'C167-STATE operation=Apply state=ApplicationOverride',
-        'C167-STATE operation=Reset state=NoOverride'))
+        'C167-PAGE entry=Apps query=fresh state=NoOverride display=system-default result=PASS'))
     for ($index = 0; $index -lt 3; $index++) {
         $boot = $source.guestBoots[$index]
         if ($boot.status -ne 'PASS' -or [int]$boot.pid -le 0) {
@@ -1645,17 +1644,13 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
         Initialize-C166GuestPointer $boot3
         Open-C167SettingsCenter $boot3 -ExpectC145Final | Out-Null
         $boot3Explicit = Enter-C167DefaultAppsPage $boot3 $boot3ExpectedState (Join-Path $runRoot 'boot3-default-apps-restored-explicit.ppm')
-        $boot3Selection = $null
-        $boot3Apply = $null
-        $boot3CommittedState = $null
+        $boot3Reset = $null
         if ($script:c170ControlRendering) {
-            $boot3Selection = Select-C167DefaultAppsChoice $boot3 0
-            $boot3Apply = Apply-C167DefaultAppsChoice $boot3 'ApplicationOverride' (Join-Path $runRoot 'boot3-default-apps-explicit-notes.ppm')
-            $boot3Committed = Get-C167AssociationDiskState $sharedEsp $Python
-            $boot3CommittedState = Assert-C167DiskState $boot3Committed 'ApplicationOverride' $true
+            $boot3Reentry = Return-C167ToSettingsAndReenter $boot3 'NoOverride' (Join-Path $runRoot 'boot3-default-apps-system-default-reentry.ppm')
+        } else {
+            $boot3Reset = Reset-C167DefaultApps $boot3 (Join-Path $runRoot 'boot3-default-apps-reset-system-default.ppm')
+            $boot3Reentry = Return-C167ToSettingsAndReenter $boot3 'NoOverride' (Join-Path $runRoot 'boot3-default-apps-reset-reentry.ppm')
         }
-        $boot3Reset = Reset-C167DefaultApps $boot3 (Join-Path $runRoot 'boot3-default-apps-reset-system-default.ppm')
-        $boot3Reentry = Return-C167ToSettingsAndReenter $boot3 'NoOverride' (Join-Path $runRoot 'boot3-default-apps-reset-reentry.ppm')
         Close-C167SettingsCenter $boot3
         $boot3Explorer = Invoke-C166ManagedExplorerOpen $boot3 'Default' (Join-Path $runRoot 'boot3-managed-explorer-notes-activation.ppm')
         if ($boot3Explorer.content -ne 'hello from C164' -or -not $boot3Explorer.clean) {
@@ -1675,7 +1670,7 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
             $boot3Tail -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C145-FINAL viewport=valid registration=12 modal=none capture=none drag=none result=PASS') {
             throw 'Boot 3 did not leave verified NoOverride state with clean Settings control ownership.'
         }
-        $boot3Interactions = [ordered]@{restoredState=$boot3Resolved;settings=$boot3Explicit;selection=$boot3Selection;apply=$boot3Apply;committedStateRequeried=$boot3CommittedState;reset=$boot3Reset;reentry=$boot3Reentry;managedExplorer=$boot3Explorer;cleanNotesBaseline=$true;modalCaptureDrag='none';c169=$c169AppChecks;result='PASS'}
+        $boot3Interactions = [ordered]@{restoredState=$boot3Resolved;settings=$boot3Explicit;reset=$boot3Reset;reentry=$boot3Reentry;managedExplorer=$boot3Explorer;cleanNotesBaseline=$true;modalCaptureDrag='none';c169=$c169AppChecks;result='PASS'}
     } finally {
         Stop-OwnedProofQemu $boot3
     }
@@ -1684,7 +1679,11 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
     $boot3NoOverride = Assert-C167DiskState $boot3AfterReset 'NoOverride' $true
     $boot3Interactions.noOverrideState = $boot3NoOverride
     $boot3Interactions.slotImagesAfterExplorer = $boot3AfterReset
-    $boot3Interactions.associationDiskUnchangedThroughExplorer = 'Verified by the final NoOverride slot after reset and Managed File Explorer.'
+    $boot3Interactions.associationDiskUnchangedThroughExplorer = if ($script:c170ControlRendering) {
+        'Verified by the final NoOverride slot after Boot 2 Reset and Boot 3 Managed File Explorer.'
+    } else {
+        'Verified by the final NoOverride slot after reset and Managed File Explorer.'
+    }
     $boot3.serial = Get-C166Serial $boot3.serialPath
     $boot3.serialSha256 = Get-Sha256 $boot3.serialPath
     $boot3.qmpInputSha256 = Get-Sha256 $boot3.qmpLogPath
