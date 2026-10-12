@@ -9,6 +9,7 @@
 #include "../kernel/core/include/kernel/fat32_formatter.h"
 #include "../kernel/core/include/kernel/partition_wipe.h"
 #include "../kernel/core/include/kernel/whole_disk_erase.h"
+#include "../kernel/core/include/kernel/surface_verification.h"
 #include "../kernel/core/include/kernel/disk_manager_wipe_ui.h"
 #include "../kernel/core/include/kernel/disk_manager_whole_disk_erase_ui.h"
 #include "../kernel/core/include/kernel/fs_fat.h"
@@ -6919,6 +6920,552 @@ void run_whole_disk_erase_tests()
         g_checks - checksBefore, g_failures - failuresBefore);
 }
 
+void run_surface_verification_tests()
+{
+    const int checksBefore = g_checks;
+    const int failuresBefore = g_failures;
+    block::init();
+    vfs::test_clear_mounts();
+
+    const auto registerReadFixture = [](
+        FakeDisk& disk, block::DeviceType transport, uint32_t maxTransferBytes,
+        bool writable) {
+        return register_fake(disk, writable, false, false, false, 0,
+            maxTransferBytes,
+            block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT, transport);
+    };
+    const auto makeRequest = [](uint8_t index, uint64_t startLba,
+                               uint64_t sectorCount) {
+        storage::SurfaceVerificationRequest request = {};
+        (void)storage::capture_target_identity(index, request.targetSnapshot);
+        request.startLba = startLba;
+        request.sectorCount = sectorCount;
+        return request;
+    };
+    const auto runToTerminal = [](storage::SurfaceVerificationJob& job) {
+        uint32_t steps = 0;
+        while (job.result.state == storage::SURFACE_VERIFICATION_RUNNING &&
+               steps < 20000u) {
+            (void)storage::step_surface_verification_job(job);
+            ++steps;
+        }
+        return steps < 20000u;
+    };
+    const auto checkUnchanged = [](FakeDisk& disk,
+                                   const std::vector<uint8_t>& original,
+                                   const char* label) {
+        check(disk.bytes == original && disk.writeAttempts == 0 &&
+              disk.writes == 0 && disk.flushes == 0, label);
+    };
+
+    // Full 512-byte media through the real read-only block path. ATA PIO is
+    // deliberately stepped one sector at a time by the production engine.
+    {
+        FakeDisk disk(512, 13);
+        for (size_t i = 0; i < disk.bytes.size(); ++i)
+            disk.bytes[i] = static_cast<uint8_t>((i * 29u + 7u) & 0xFFu);
+        const std::vector<uint8_t> original = disk.bytes;
+        const uint8_t index = registerReadFixture(disk,
+            block::BDEV_ATA_PIO, 0, false);
+        storage::SurfaceVerificationRequest request = makeRequest(
+            index, 0, disk.sectorCount);
+        storage::SurfaceVerificationJob job = {};
+        const auto admitted = storage::begin_surface_verification_job(
+            job, request);
+        const bool settled = runToTerminal(job);
+        block::OperationCounters counters = {};
+        block::operation_counters(counters);
+        check(index != 0xFF && admitted ==
+                  storage::SURFACE_VERIFICATION_RUNNING && settled &&
+              job.result.state == storage::SURFACE_VERIFICATION_COMPLETED &&
+              job.result.allSelectedSectorsReadable &&
+              job.result.readableSectors == 13 &&
+              job.result.bytesRead == original.size() &&
+              job.result.lastSuccessfulLba == 12 &&
+              job.result.progressPercent == 100 &&
+              job.result.unverifiedSectors == 0 &&
+              disk.readLog.size() == 13 && disk.readLog.front().lba == 0 &&
+              disk.readLog.back().lba == 12 &&
+              disk.readLog.front().count == 1 &&
+              job.result.ownershipReleased && !storage::storage_operation_active(),
+              "read-only 512-byte full-disk scan covers first and final sectors and completes accurately");
+        check(counters.readOperations == 13 && counters.writeOperations == 0 &&
+              counters.sectorsWritten == 0 && counters.flushAttempts == 0,
+              "512-byte surface scan issues reads only, with no writes or Flush");
+        checkUnchanged(disk, original,
+            "512-byte full-disk scan preserves every fixture byte");
+        check(unregister_fake(index, disk),
+              "512-byte surface scan releases its registration pin");
+    }
+
+    // NVMe read capability is independent of the default-disabled write and
+    // Flush callbacks. The last 4Kn request is an exact one-sector remainder.
+    {
+        FakeDisk disk(4096, 7);
+        for (size_t i = 0; i < disk.bytes.size(); ++i)
+            disk.bytes[i] = static_cast<uint8_t>((i * 11u + 3u) & 0xFFu);
+        const std::vector<uint8_t> original = disk.bytes;
+        const uint8_t index = registerReadFixture(disk, block::BDEV_NVME,
+            3u * 4096u, false);
+        const auto request = makeRequest(index, 0, disk.sectorCount);
+        storage::SurfaceVerificationJob job = {};
+        const auto admitted = storage::begin_surface_verification_job(job,
+            request);
+        const bool settled = runToTerminal(job);
+        check(index != 0xFF && admitted == storage::SURFACE_VERIFICATION_RUNNING &&
+              settled && job.result.state ==
+                  storage::SURFACE_VERIFICATION_COMPLETED &&
+              job.result.logicalSectorSize == 4096 &&
+              job.result.readableSectors == 7 &&
+              job.result.bytesRead == original.size() &&
+              job.result.lastSuccessfulLba == 6 &&
+              disk.readLog.size() == 3 && disk.readLog[0].count == 3 &&
+              disk.readLog[1].lba == 3 && disk.readLog[1].count == 3 &&
+              disk.readLog[2].lba == 6 && disk.readLog[2].count == 1 &&
+              job.result.allSelectedSectorsReadable,
+              "read-only NVMe 4Kn scan succeeds with a non-round final batch");
+        checkUnchanged(disk, original,
+            "4Kn NVMe surface scan preserves every fixture byte");
+        check(unregister_fake(index, disk),
+              "4Kn surface scan releases its registration pin");
+    }
+
+    // The common engine accepts an explicit partition-sized extent and never
+    // widens it to the whole device.
+    {
+        FakeDisk disk(512, 20);
+        const std::vector<uint8_t> original = disk.bytes;
+        const uint8_t index = registerReadFixture(disk, block::BDEV_AHCI,
+            4u * 512u, false);
+        const auto request = makeRequest(index, 3, 10);
+        storage::SurfaceVerificationJob job = {};
+        const auto admitted = storage::begin_surface_verification_job(job,
+            request);
+        const bool settled = runToTerminal(job);
+        check(admitted == storage::SURFACE_VERIFICATION_RUNNING && settled &&
+              job.result.state == storage::SURFACE_VERIFICATION_COMPLETED &&
+              job.result.startLba == 3 && job.result.totalSectors == 10 &&
+              job.result.readableSectors == 10 &&
+              job.result.lastSuccessfulLba == 12 &&
+              disk.readLog.size() == 3 && disk.readLog[0].lba == 3 &&
+              disk.readLog[0].count == 4 && disk.readLog[1].lba == 7 &&
+              disk.readLog[1].count == 4 && disk.readLog[2].lba == 11 &&
+              disk.readLog[2].count == 2,
+              "partition-bounded scan reads exactly the selected extent and final partial batch");
+        checkUnchanged(disk, original,
+            "partition-bounded surface scan preserves every fixture byte");
+        check(unregister_fake(index, disk),
+              "partition-bounded scan releases its registration pin");
+    }
+
+    // Empty, out-of-range, and overflowing caller extents fail before any
+    // ownership acquisition or read callback.
+    {
+        FakeDisk disk(512, 16);
+        const uint8_t index = registerReadFixture(disk, block::BDEV_AHCI,
+            4096, false);
+        storage::SurfaceVerificationJob job = {};
+        auto request = makeRequest(index, 0, 0);
+        const auto empty = storage::begin_surface_verification_job(job,
+            request);
+        request.startLba = 16;
+        request.sectorCount = 1;
+        const auto beyond = storage::begin_surface_verification_job(job,
+            request);
+        request.startLba = UINT64_MAX - 1u;
+        request.sectorCount = 4;
+        const auto overflow = storage::begin_surface_verification_job(job,
+            request);
+        check(empty == storage::SURFACE_VERIFICATION_NOT_ADMITTED &&
+              beyond == storage::SURFACE_VERIFICATION_NOT_ADMITTED &&
+              overflow == storage::SURFACE_VERIFICATION_NOT_ADMITTED &&
+              job.result.reason ==
+                  storage::SURFACE_VERIFICATION_REASON_INVALID_REQUEST &&
+              !job.result.ownershipAcquired && disk.readLog.empty() &&
+              !storage::storage_operation_active(),
+              "empty, out-of-range, and overflowing surface scan ranges are rejected without I/O");
+        check(unregister_fake(index, disk),
+              "invalid surface scan requests retain no device pin");
+    }
+
+    // Geometry validation rejects unsupported sector size and capacity
+    // multiplication overflow before entering the scan.
+    {
+        FakeDisk unsupported(256, 8);
+        const uint8_t unsupportedIndex = registerReadFixture(unsupported,
+            block::BDEV_AHCI, 0, false);
+        auto request = makeRequest(unsupportedIndex, 0, 1);
+        storage::SurfaceVerificationJob job = {};
+        const auto state = storage::begin_surface_verification_job(job,
+            request);
+        check(state == storage::SURFACE_VERIFICATION_NOT_ADMITTED &&
+              job.result.reason ==
+                  storage::SURFACE_VERIFICATION_REASON_UNSUPPORTED_GEOMETRY &&
+              !job.result.ownershipAcquired && unsupported.readLog.empty(),
+              "unsupported logical-sector geometry is rejected");
+        check(unregister_fake(unsupportedIndex, unsupported),
+              "unsupported geometry retains no device pin");
+
+        FakeDisk overflowing(512, UINT64_MAX / 512u + 1u, false);
+        const uint8_t overflowIndex = registerReadFixture(overflowing,
+            block::BDEV_AHCI, 0, false);
+        request = makeRequest(overflowIndex, 0, 1);
+        storage::SurfaceVerificationJob overflowJob = {};
+        const auto overflowState = storage::begin_surface_verification_job(
+            overflowJob, request);
+        check(overflowState == storage::SURFACE_VERIFICATION_NOT_ADMITTED &&
+              overflowJob.result.reason ==
+                  storage::SURFACE_VERIFICATION_REASON_UNSUPPORTED_GEOMETRY &&
+              overflowJob.result.ownershipReleased &&
+              !storage::storage_operation_active() &&
+              overflowing.readLog.empty(),
+              "capacity-byte overflow is rejected and the acquired lease is released");
+        check(unregister_fake(overflowIndex, overflowing),
+              "overflowing capacity retains no device pin");
+    }
+
+    // A live registration with no read callback is not admitted, even when
+    // its sector geometry is otherwise valid.
+    {
+        block::BlockDevice descriptor = {};
+        descriptor.active = true;
+        descriptor.type = block::BDEV_AHCI;
+        descriptor.totalSectors = 8;
+        descriptor.sectorSize = 512;
+        descriptor.bootProvenance =
+            block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT;
+        std::strncpy(descriptor.name, "no-read-fixture",
+                     sizeof(descriptor.name) - 1);
+        const uint8_t index = block::register_device(descriptor);
+        auto request = makeRequest(index, 0, 8);
+        storage::SurfaceVerificationJob job = {};
+        const auto state = storage::begin_surface_verification_job(job,
+            request);
+        check(state == storage::SURFACE_VERIFICATION_NOT_ADMITTED &&
+              job.result.reason ==
+                  storage::SURFACE_VERIFICATION_REASON_READ_UNAVAILABLE &&
+              job.result.ownershipAcquired && job.result.ownershipReleased &&
+              !storage::storage_operation_active(),
+              "device without a read callback is rejected and its lease is released");
+        check(block::unregister_device(index),
+              "unsupported read operation retains no registration pin");
+    }
+
+    // First-error policy is bounded and explicit: the failed request is
+    // recorded as a range, but no individual sector in that batch is called
+    // bad and later batches are not issued.
+    const auto runReadFailure = [&](uint64_t failingLba,
+                                    uint64_t expectedReadable,
+                                    uint32_t expectedFailedCount,
+                                    uint64_t expectedUnattempted,
+                                    block::Status transportStatus,
+                                    uint64_t expectedRequests,
+                                    const char* label) {
+        FakeDisk disk(512, 10);
+        const std::vector<uint8_t> original = disk.bytes;
+        disk.failReadAtLba = failingLba;
+        disk.failReadAtLbaMinCount = 1;
+        disk.failReadStatus = transportStatus;
+        const uint8_t index = registerReadFixture(disk, block::BDEV_AHCI,
+            4u * 512u, false);
+        const auto request = makeRequest(index, 0, 10);
+        storage::SurfaceVerificationJob job = {};
+        const auto admitted = storage::begin_surface_verification_job(job,
+            request);
+        const bool settled = runToTerminal(job);
+        check(admitted == storage::SURFACE_VERIFICATION_RUNNING && settled &&
+              job.result.state == storage::SURFACE_VERIFICATION_FAILED &&
+              job.result.reason ==
+                  storage::SURFACE_VERIFICATION_REASON_READ_FAILURE &&
+              job.result.blockStatusValid &&
+              job.result.blockStatus == transportStatus &&
+              job.result.failureRangeValid &&
+              job.result.failedLba == failingLba &&
+              job.result.failedSectorCount == expectedFailedCount &&
+              job.result.readableSectors == expectedReadable &&
+              job.result.unattemptedSectors == expectedUnattempted &&
+              !job.result.allSelectedSectorsReadable &&
+              job.result.progressPercent < 100 &&
+              job.result.ownershipReleased,
+              label);
+        check(job.result.readRequests == expectedRequests &&
+              disk.readLog.size() == expectedRequests,
+              "failed read range is not retried and no later batch begins");
+        checkUnchanged(disk, original,
+            "failed surface scan preserves every fixture byte and issues no writes or Flush");
+        check(unregister_fake(index, disk),
+              "failed surface scan releases its registration pin");
+    };
+    runReadFailure(0, 0, 4, 6, block::BLOCK_ERR_IO, 1,
+        "first-batch read failure reports its transport status and exact request range");
+    runReadFailure(4, 4, 4, 2, block::BLOCK_ERR_TIMEOUT, 2,
+        "middle-batch timeout preserves prior readable coverage and exact failed range");
+    runReadFailure(8, 8, 2, 0, block::BLOCK_ERR_IO, 3,
+        "near-final read failure reports the two-sector tail range without false completion");
+
+    // Stop before I/O and after one successful bounded batch. Stop is a
+    // distinct incomplete result, not a read failure.
+    {
+        FakeDisk disk(512, 10);
+        const std::vector<uint8_t> original = disk.bytes;
+        const uint8_t index = registerReadFixture(disk, block::BDEV_AHCI,
+            4u * 512u, false);
+        const auto request = makeRequest(index, 0, 10);
+        storage::SurfaceVerificationJob job = {};
+        const auto admitted = storage::begin_surface_verification_job(job,
+            request);
+        const bool stopAccepted =
+            storage::request_surface_verification_stop(job);
+        const auto state = storage::step_surface_verification_job(job);
+        check(admitted == storage::SURFACE_VERIFICATION_RUNNING &&
+              stopAccepted && state == storage::SURFACE_VERIFICATION_STOPPED &&
+              job.result.reason ==
+                  storage::SURFACE_VERIFICATION_REASON_STOP_REQUESTED &&
+              job.result.readRequests == 0 && disk.readLog.empty() &&
+              job.result.readableSectors == 0 &&
+              job.result.unverifiedSectors == 10 &&
+              !job.result.allSelectedSectorsReadable &&
+              !job.result.blockStatusValid && job.result.ownershipReleased,
+              "Stop before the first read releases ownership and leaves the full range unverified");
+        checkUnchanged(disk, original,
+            "pre-read Stop leaves the complete fixture byte-identical");
+        check(unregister_fake(index, disk),
+              "pre-read Stop releases its device pin");
+    }
+    {
+        FakeDisk disk(512, 10);
+        const std::vector<uint8_t> original = disk.bytes;
+        const uint8_t index = registerReadFixture(disk, block::BDEV_AHCI,
+            4u * 512u, false);
+        const auto request = makeRequest(index, 0, 10);
+        storage::SurfaceVerificationJob job = {};
+        const auto admitted = storage::begin_surface_verification_job(job,
+            request);
+        const auto firstStep = storage::step_surface_verification_job(job);
+        const bool stopAccepted =
+            storage::request_surface_verification_stop(job);
+        const auto stopped = storage::step_surface_verification_job(job);
+        const uint64_t readsAtStop = job.result.readRequests;
+        (void)storage::step_surface_verification_job(job);
+        check(admitted == storage::SURFACE_VERIFICATION_RUNNING &&
+              firstStep == storage::SURFACE_VERIFICATION_RUNNING &&
+              stopAccepted && stopped == storage::SURFACE_VERIFICATION_STOPPED &&
+              job.result.readableSectors == 4 &&
+              job.result.unverifiedSectors == 6 &&
+              job.result.unattemptedSectors == 6 &&
+              !job.result.failureRangeValid &&
+              !job.result.allSelectedSectorsReadable &&
+              job.result.reason ==
+                  storage::SURFACE_VERIFICATION_REASON_STOP_REQUESTED &&
+              readsAtStop == 1 && job.result.readRequests == readsAtStop &&
+              disk.readLog.size() == 1 && job.result.ownershipReleased &&
+              !storage::storage_operation_active(),
+              "Stop after partial progress starts no additional batch and never reports complete");
+        checkUnchanged(disk, original,
+            "partial read-only Stop preserves every fixture byte");
+        check(unregister_fake(index, disk),
+              "partial Stop releases its device pin");
+    }
+
+    // The immutable request snapshot and shared operation owner prevent a
+    // GUI selection change, duplicate scan, Format, Wipe, or erase from
+    // redirecting or competing with the running job.
+    {
+        FakeDisk disk(512, 10);
+        const uint8_t index = registerReadFixture(disk, block::BDEV_AHCI,
+            4u * 512u, false);
+        auto request = makeRequest(index, 2, 6);
+        storage::SurfaceVerificationJob job = {};
+        const auto admitted = storage::begin_surface_verification_job(job,
+            request);
+        const uint64_t operationId = job.result.operationId;
+        const auto duplicateSameJob = storage::begin_surface_verification_job(
+            job, request);
+        request.startLba = 0;
+        request.sectorCount = 10;
+        storage::SurfaceVerificationJob duplicateJob = {};
+        const auto duplicateOtherJob = storage::begin_surface_verification_job(
+            duplicateJob, request);
+        storage::Fat32FormatJob format = {};
+        const auto formatState = storage::begin_fat32_format_job(format, {});
+        storage::PartitionWipeRequest wipeRequest = {};
+        wipeRequest.targetSnapshot = job.result.targetIdentity;
+        wipeRequest.expectedRegistryGeneration =
+            wipeRequest.targetSnapshot.registryGeneration;
+        wipeRequest.partitionScheme = storage::PARTITION_SCHEME_MBR;
+        storage::PartitionWipeJob wipe = {};
+        const auto wipeState = storage::begin_partition_wipe_job(wipe,
+            wipeRequest);
+        storage::WholeDiskEraseRequest eraseRequest = {};
+        eraseRequest.targetSnapshot = job.result.targetIdentity;
+        eraseRequest.expectedRegistryGeneration =
+            eraseRequest.targetSnapshot.registryGeneration;
+        eraseRequest.scope =
+            storage::WHOLE_DISK_ERASE_ALL_ADDRESSABLE_SECTORS;
+        storage::WholeDiskEraseJob erase = {};
+        const auto eraseState = storage::begin_whole_disk_erase_job(erase,
+            eraseRequest);
+        const bool unregisterBlocked = !block::unregister_device(index);
+        const auto firstStep = storage::step_surface_verification_job(job);
+        const bool stopAccepted =
+            storage::request_surface_verification_stop(job);
+        const auto terminal = storage::step_surface_verification_job(job);
+        const uint64_t requestsAtTerminal = job.result.readRequests;
+        (void)storage::step_surface_verification_job(job);
+        check(admitted == storage::SURFACE_VERIFICATION_RUNNING &&
+              duplicateSameJob == storage::SURFACE_VERIFICATION_RUNNING &&
+              duplicateOtherJob ==
+                  storage::SURFACE_VERIFICATION_NOT_ADMITTED &&
+              duplicateJob.result.reason ==
+                  storage::SURFACE_VERIFICATION_REASON_OPERATION_BUSY &&
+              job.result.operationId == operationId &&
+              job.result.startLba == 2 && job.result.totalSectors == 6 &&
+              formatState == storage::FAT32_FORMAT_JOB_FAILED &&
+              format.result.status == storage::FAT32_FORMAT_OPERATION_BUSY &&
+              wipeState == storage::PARTITION_WIPE_NOT_ADMITTED &&
+              wipe.result.reason == storage::PARTITION_WIPE_REASON_OPERATION_BUSY &&
+              eraseState == storage::WHOLE_DISK_ERASE_NOT_ADMITTED &&
+              erase.result.reason ==
+                  storage::WHOLE_DISK_ERASE_REASON_OPERATION_BUSY &&
+              unregisterBlocked &&
+              firstStep == storage::SURFACE_VERIFICATION_RUNNING && stopAccepted &&
+              terminal == storage::SURFACE_VERIFICATION_STOPPED &&
+              disk.readLog.size() == 1 && disk.readLog.front().lba == 2 &&
+              disk.readLog.front().count == 4 &&
+              job.result.readableSectors == 4 &&
+              job.result.unverifiedSectors == 2 &&
+              job.result.ownershipReleased && job.ownershipReleaseAttempted &&
+              !storage::storage_operation_active() &&
+              job.result.readRequests == requestsAtTerminal,
+              "scan ownership blocks duplicates and existing destructive operations, then releases exactly once");
+        check(disk.readLog.size() == 1 && disk.readLog.front().lba == 2 &&
+              job.result.readableSectors == 4 &&
+              job.result.unverifiedSectors == 2,
+              "changed caller selection cannot redirect a queued scan request");
+        check(unregister_fake(index, disk),
+              "completed ownership release permits device unregister");
+    }
+
+    // The reverse conflict direction is also required: an active destructive
+    // engine owns the same global lease and prevents a read scan from entering.
+    {
+        FakeDisk disk(512, 131);
+        prepare_whole_disk_mbr(disk);
+        const uint8_t index = register_fake(disk, true, true, true,
+            false, 0, 1024u);
+        storage::WholeDiskEraseJob erase = {};
+        const auto eraseBegin = storage::begin_whole_disk_erase_job(erase,
+            make_whole_disk_erase_request(index));
+        const size_t readsBeforeScan = disk.readLog.size();
+        const auto request = makeRequest(index, 0, disk.sectorCount);
+        storage::SurfaceVerificationJob scan = {};
+        const auto scanBegin = storage::begin_surface_verification_job(scan,
+            request);
+        const bool stopAccepted =
+            storage::request_whole_disk_erase_stop(erase);
+        const auto eraseStopped = storage::step_whole_disk_erase_job(erase);
+        check(eraseBegin == storage::WHOLE_DISK_ERASE_RUNNING &&
+              scanBegin == storage::SURFACE_VERIFICATION_NOT_ADMITTED &&
+              scan.result.reason ==
+                  storage::SURFACE_VERIFICATION_REASON_OPERATION_BUSY &&
+              !scan.result.ownershipAcquired &&
+              disk.readLog.size() == readsBeforeScan && stopAccepted &&
+              eraseStopped == storage::WHOLE_DISK_ERASE_STOPPED &&
+              erase.result.ownershipReleased &&
+              !storage::storage_operation_active(),
+              "active whole-disk erase excludes scan admission without issuing scan reads");
+        check(disk.writeAttempts == 0 && disk.writes == 0,
+              "destructive-operation conflict fixture is stopped before its first write");
+        check(unregister_fake(index, disk),
+              "conflicting whole-disk operation releases its device pin");
+    }
+
+    // An unrelated registry generation change is fail-closed, and the old
+    // operation never follows a same-capacity replacement registration.
+    {
+        FakeDisk disk(512, 12);
+        FakeDisk unrelated(512, 4);
+        const uint8_t index = registerReadFixture(disk, block::BDEV_AHCI,
+            4u * 512u, false);
+        const auto request = makeRequest(index, 0, 12);
+        storage::SurfaceVerificationJob job = {};
+        (void)storage::begin_surface_verification_job(job, request);
+        (void)storage::step_surface_verification_job(job);
+        const uint8_t unrelatedIndex = registerReadFixture(unrelated,
+            block::BDEV_AHCI, 0, false);
+        const auto invalidated = storage::step_surface_verification_job(job);
+        check(invalidated == storage::SURFACE_VERIFICATION_FAILED &&
+              job.result.reason ==
+                  storage::SURFACE_VERIFICATION_REASON_REGISTRATION_INVALIDATED &&
+              job.result.readableSectors == 4 && disk.readLog.size() == 1 &&
+              job.result.unattemptedSectors == 8 &&
+              job.result.ownershipReleased,
+              "registry-generation invalidation stops before another read");
+        check(unregister_fake(index, disk) &&
+              unregister_fake(unrelatedIndex, unrelated),
+              "registry invalidation releases ownership and the exact target pin");
+    }
+    {
+        FakeDisk disk(512, 16);
+        FakeDisk replacement(512, 16);
+        const std::vector<uint8_t> original = disk.bytes;
+        const std::vector<uint8_t> replacementOriginal = replacement.bytes;
+        disk.removeOnScanReadLba = 1;
+        disk.removeOnScanReadMinCount = 1;
+        disk.replacementDuringScan = &replacement;
+        const uint8_t index = registerReadFixture(disk, block::BDEV_ATA_PIO,
+            0, false);
+        const auto request = makeRequest(index, 0, 16);
+        storage::SurfaceVerificationJob job = {};
+        (void)storage::begin_surface_verification_job(job, request);
+        (void)storage::step_surface_verification_job(job);
+        const auto removed = storage::step_surface_verification_job(job);
+        const uint64_t oldRegistration = job.result.targetIdentity.registrationId;
+        const bool replacementUntouched = replacement.readLog.empty();
+        const bool oldStopped = disk.readLog.size() == 2 &&
+            disk.readLog.back().lba == 1;
+        storage::TargetIdentity freshIdentity = {};
+        const bool freshCaptured = disk.replacementRegisteredDuringScan &&
+            storage::capture_target_identity(replacement.registryIndex,
+                                             freshIdentity);
+        const bool distinctRegistration = freshCaptured &&
+            freshIdentity.registrationId != oldRegistration;
+        storage::SurfaceVerificationJob freshJob = {};
+        storage::SurfaceVerificationRequest freshRequest = {};
+        freshRequest.targetSnapshot = freshIdentity;
+        freshRequest.startLba = 0;
+        freshRequest.sectorCount = 16;
+        const auto freshBegin = storage::begin_surface_verification_job(
+            freshJob, freshRequest);
+        const bool freshSettled = runToTerminal(freshJob);
+        check(removed == storage::SURFACE_VERIFICATION_FAILED &&
+              job.result.reason ==
+                  storage::SURFACE_VERIFICATION_REASON_DEVICE_REMOVED &&
+              job.result.failureRangeValid && job.result.failedLba == 1 &&
+              job.result.failedSectorCount == 1 &&
+              job.result.readableSectors == 1 && oldStopped &&
+              replacementUntouched && distinctRegistration &&
+              job.result.ownershipReleased,
+              "removal during scan terminates the old registration without reading its same-capacity replacement");
+        check(freshBegin == storage::SURFACE_VERIFICATION_RUNNING &&
+              freshSettled && freshJob.result.state ==
+                  storage::SURFACE_VERIFICATION_COMPLETED &&
+              freshJob.result.targetIdentity.registrationId != oldRegistration &&
+              freshJob.result.readableSectors == 16,
+              "replacement media is readable only through a fresh explicitly admitted scan");
+        checkUnchanged(disk, original,
+            "removed old-media fixture remains byte-identical");
+        checkUnchanged(replacement, replacementOriginal,
+            "same-capacity replacement remains byte-identical");
+        if (replacement.registryIndex != 0xFF)
+            (void)unregister_fake(replacement.registryIndex, replacement);
+        g_fakeDisks[disk.driverId] = nullptr;
+    }
+
+    std::printf("DM35 read-only surface verification tests: %d checks, %d failures\n",
+        g_checks - checksBefore, g_failures - failuresBefore);
+}
+
 void run_disk_manager_wipe_ui_tests()
 {
     const int checksBefore = g_checks;
@@ -7384,6 +7931,7 @@ int main()
     run_delete_partition_tests();
     run_partition_wipe_tests();
     run_whole_disk_erase_tests();
+    run_surface_verification_tests();
     run_disk_manager_wipe_ui_tests();
     run_disk_manager_whole_erase_ui_tests();
 

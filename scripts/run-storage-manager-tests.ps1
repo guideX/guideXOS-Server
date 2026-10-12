@@ -25,6 +25,7 @@ try {
         kernel/core/partition_operations.cpp `
         kernel/core/partition_wipe.cpp `
         kernel/core/whole_disk_erase.cpp `
+        kernel/core/surface_verification.cpp `
         kernel/core/fat32_formatter.cpp `
         kernel/core/fs_fat.cpp `
         kernel/core/fs_ext4.cpp `
