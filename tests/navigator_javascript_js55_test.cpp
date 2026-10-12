@@ -353,10 +353,11 @@ var parserFailClosed = document.querySelector(":nth-child") === null &&
   document.querySelector(":nth-child(+ 2n)") === null &&
   document.querySelector(":nth-child(2 n)") === null &&
   document.querySelector(":nth-child(n 1)") === null &&
-  document.querySelector(":nth-child(2 of .entry)") === null &&
   document.querySelector("li:nth-child(1):focus") === null &&
   document.querySelector("#n5:nth-child(5) .entry") === null &&
   document.querySelector(":nth-child(1) > .entry > div") === null;
+var filteredNthSyntax = document.querySelector(
+  ":nth-child(2 of .entry)") === n2;
 var root = document.querySelector("html");
 var noParentFailsClosed = root.parentElement === null &&
   !root.matches(":nth-child(1)") && !root.matches(":nth-last-child(1)") &&
@@ -369,7 +370,7 @@ var noParentFailsClosed = root.parentElement === null &&
         "constantAndZero", "acceptedWhitespace", "compounds", "typeFilters",
         "hiddenAndForm", "crossChecks", "apiComposition",
         "relationComposition", "listComposition", "parserFailClosed",
-        "noParentFailsClosed"};
+        "filteredNthSyntax", "noParentFailsClosed"};
     for (const char* name : names)
         expectBoolean(harness, name, true,
             std::string("nth parser and matcher: ") + name);

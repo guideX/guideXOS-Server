@@ -150,6 +150,17 @@ enum class NavigatorScriptStatePseudo : std::uint8_t {
 // Call-local selector operation context. The serial and generation are kept
 // separate from the candidate passed to the shared matcher; retained query
 // collections reconstruct this context from their existing scopeSerial field.
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+struct NavigatorScriptFilteredNthCounters {
+    std::uint64_t structuralInspections = 0u;
+    std::uint64_t parentResolutions = 0u;
+    std::uint64_t siblingInspections = 0u;
+    std::uint64_t simpleSelectorEvaluations = 0u;
+    std::uint64_t matchingSiblings = 0u;
+    std::uint64_t formulaEvaluations = 0u;
+};
+#endif
+
 struct NavigatorScriptSelectorMatchContext {
     HostInstanceId scopeSerial = 0u;
     HostGenerationId generation = 0u;
@@ -188,7 +199,8 @@ struct NavigatorScriptSimpleSelectorDescriptor :
     // - :has() stores a 16-byte compact first relative core and one expression
     //   index byte.
     // - :not(), :is(), and :where() store one compact logical argument.
-    // - nth pseudos store the two int16 formula values.
+    // - nth pseudos store the two int16 formula values and use one payload
+    //   byte for an optional index into the descriptor-owned compact core pool.
     // These forms are mutually exclusive, so a byte buffer keeps the active
     // representation descriptor-owned without an unsafe union or pointers.
     std::array<std::uint8_t, 17u> selectorPayload{};
@@ -660,7 +672,11 @@ private:
         const NavigatorScriptSimpleSelectorDescriptor& selector,
         const NavigatorScriptSelectorDescriptor& storage,
         const NavigatorScriptSelectorMatchContext& context =
-            NavigatorScriptSelectorMatchContext()) const;
+            NavigatorScriptSelectorMatchContext()
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        , NavigatorScriptFilteredNthCounters* filteredNthCounters = nullptr
+#endif
+        ) const;
     bool selectorSimpleElementMatches(
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSimpleSelectorDescriptor& selector,
@@ -682,6 +698,16 @@ private:
     bool resolveStructuralIndex(
         const gxos::web::HtmlElementRef& element, bool sameType,
         bool fromEnd, std::size_t& index) const;
+    NavigatorScriptSelectorMatchResult resolveFilteredStructuralIndex(
+        const gxos::web::HtmlElementRef& element,
+        const NavigatorScriptSimpleSelectorCoreDescriptor& filter,
+        const NavigatorScriptSelectorDescriptor& storage,
+        const NavigatorScriptSelectorMatchContext& context, bool fromEnd,
+        std::size_t& index
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        , NavigatorScriptFilteredNthCounters* filteredNthCounters
+#endif
+        ) const;
     bool selectorMemberElementMatches(
         const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSelectorMemberDescriptor& selector,

@@ -8335,3 +8335,164 @@ bounded storage for repeated selector text while retaining 128 independently
 owned collection descriptors and all current lifetimes. Any shared fixed
 pool would need explicit slot ownership, reuse, generation, and reentrancy
 proof before replacing the current self-contained records.
+
+## JS71 bounded filtered positional selectors
+
+JS71 adds the bounded Selectors Level 4 forms
+`:nth-child(An+B of S)` and `:nth-last-child(An+B of S)`. The formula ranks
+only the sibling Elements matching `S`; the candidate must match `S` as well.
+For example, `:nth-child(2 of .selected)` returns the second selected sibling
+even when unselected Elements appear before or between selected siblings.
+The reverse form counts the same filtered sequence from its end. Ordinary
+`.selected:nth-child(2)` retains its prior meaning: the candidate is selected
+and is the second Element child overall.
+
+### Bounded grammar and parsing
+
+`S` is exactly one restricted simple-selector core supported by the existing
+Navigator matcher. It can use supported tag, ID, class, attribute, and
+nonfunctional state predicates. The `of` delimiter is recognized as a
+case-insensitive keyword only between ASCII whitespace at the functional
+pseudo's top level; brackets and quoted attribute values are tracked so text
+such as `color of sky` remains part of the value. The existing bounded JS55
+`An+B` parser handles the formula, including `odd`, `even`, positive and
+negative steps, fixed offsets, and the existing signed 16-bit coefficient
+limit.
+
+Selector lists, combinators, `:has()`, logical functional pseudos, nested
+positional pseudos, a second `of` clause, and `of S` on `:nth-of-type()` or
+`:nth-last-of-type()` remain unsupported and fail closed. This is a deliberate
+Navigator subset; it is not unrestricted Selectors Level 4 support. The
+maximum 256-byte selector length and all existing selector, collection,
+document, and pool capacities remain unchanged.
+
+### Storage and matching
+
+The existing positional payload keeps the two signed 16-bit formula values
+and uses its next byte for a compact-core pool index (`0xFF` means no filter).
+The filter core is stored by value in the descriptor's existing 16-byte
+relative-core pool. No parser input pointer or heap allocation is retained.
+At most eight outer simple-selector positions exist across a four-member
+selector list. Each position is either a `:has()` pseudo using at most three
+pool cores or a filtered positional pseudo using one, so the existing
+24-entry pool remains sufficient at maximum capacity. Descriptor copies and
+retained query collections keep their existing ownership behavior.
+
+For each candidate, the matcher validates the candidate and generation,
+resolves its real parent, then scans the bounded structural Element records
+in document order. Only records with that same parent contribute. It checks
+canonical serial identity, child index, sibling count, previous-sibling
+linkage, and the parent's child count while scanning. Every actual sibling is
+tested against `S` using the original scope context. If the candidate does
+not match, the predicate is false. Otherwise the matcher computes its
+one-based rank among matching siblings from the front or back and applies the
+shared JS55 `An+B` evaluator. Text nodes and records from other parents never
+contribute; invalid structure and stale generations fail closed.
+
+Optional native diagnostics receive a caller-owned counter pointer at the
+test matcher call. No mutable global counter is used, and the selector match
+context remains **16 bytes** in both production and diagnostic builds.
+
+| Fixed structure | JS70 | JS71 |
+|---|---:|---:|
+| Selector descriptor | 1,918 B | 1,918 B |
+| Collection record | 1,936 B | 1,936 B |
+| 128-record registry | 247,808 B | 247,808 B |
+| Compact relative-core pool | 24 entries | 24 entries |
+| Structural Element | 440 B | 440 B |
+| Element content metadata | 24 B | 24 B |
+
+### JS71 native coverage and bounded workload
+
+`tests/navigator_javascript_js71_test.cpp` covers filtered forward and reverse
+positions, candidate membership, the distinction from ordinary `nth-child`,
+all-selected and empty filters, odd/even and signed formulas, mixed tags,
+separate parents, `:scope`, public query/matches/closest APIs, quoted `of`
+text, malformed and oversized inputs, live attributes and checked state,
+retained collections, stale generations, invalid structural parents, nested
+Event dispatch, and the full existing collection/pool capacities. Its hosted
+fixture source is also executed by the native harness. The focused JS71
+strict runner passed **110/110** checks.
+
+At the 1,024-Element boundary, the 1,021-sibling all-selected query performed
+1,045,504 structural inspections, 1,042,441 same-parent sibling inspections
+and simple-filter evaluations, 1,021 parent resolutions, and 1,021 formula
+evaluations. The none-match variant performed zero formula evaluations; the
+one-early and one-late variants each performed one. The fixed workspace is
+bounded by the existing 1,024-Element limit. GCC `-fstack-usage` on the
+focused adapter reported 224 bytes for the filtered sibling resolver, 288
+bytes for the simple matcher, and 912 bytes for the restricted-core parser;
+the larger document-load frames are pre-existing harness work.
+
+The JS71 hosted page starts with **43 assertions** and adds three assertions
+after nested Event dispatch, for **46 total**. The server checks the exact
+initial and Event result markers. Fresh production-hosted and aggregate
+results, full-matrix reruns, exact executable provenance, and final artifact
+comparison are recorded in the JS71 qualification closeout below.
+
+### JS71 qualification closeout
+
+The duplicate/stale gate found JS71 outstanding. The live repository was on
+`NAVIGATOR_JAVASCRIPT_SUPPORT` at `81d67f73c170bc3999e724a40c23af7ec501dd9b`
+(`navigator: optimize JS70 selector descriptor storage`), with a clean
+worktree and **0 ahead / 0 behind** its upstream. The prompt's expected
+divergence was 1 ahead / 0 behind; the live repository state was used. No
+`.phase` file was present, which is normal for this subsystem. No branch,
+worktree, remote, or commit topology was changed during qualification.
+
+The native JS71 focused runner passed **110/110**, including strict
+`-Wall -Wextra -Werror -pedantic` compilation. The established matrix contains
+**73 scripts** here: all 72 historical JavaScript lanes plus JS71. The final
+results were **73/73 passed**. JS55's former negative expectation for
+`:nth-child(2 of .entry)` was updated to assert the newly supported syntax;
+its rerun passed **343/343**. JS67 was rerun after keeping the diagnostic
+context at its historic 16-byte size and passed **44/44**. JS70 passed
+**77/77**. The JS70 benchmark executable also completed all 15 workload
+groups, including 1,024-Element queries, 128-collection saturation, and
+nested Event dispatch. The final JS71 and JS67 diagnostic outputs both report
+the 16-byte match context and unchanged fixed storage sizes.
+
+`build.bat` completed successfully from the final JS71 source. The fresh
+`D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe` was
+**8,484,988 bytes**, SHA-256
+`9A7BF046FB8B9E03700248B4F0DE40E2859C45E8B5F3EE815CBF0BC807966EC7`. The
+hosted runner launched PID **17940** from that same executable path and
+verified the same hash. The fresh executable was copied to
+`C:\Users\guideX\AppData\Local\Temp\guidex-js71-fresh-production.exe`
+before artifact restoration.
+
+The production-hosted JS71 fixture passed all **43 initial assertions** and
+all three post-click nested-Event assertions, for **46 total**. Its exact
+markers were
+`JS71:initial:assertions=43:failures=0:malformed=true` and
+`JS71:event=true:nested=true:metadata=true:assertions=46:failures=0`.
+The aggregate recorded **641 passed / 7 failed / 648 total**. The seven
+failures are unchanged CSS baselines: CSS 3C, CSS 3G, CSS 6A, three CSS 6B
+checks, and CSS 6C. JS63 through JS71 hosted initial/Event markers passed.
+No CSS source or fixture was changed, and no new hosted failure appeared.
+
+Before the build and hosted run, the ignored baseline was **1,337 files /
+88,371,771 bytes**. Exact backups covered the original **8,398,274-byte**
+server executable (SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`) and all
+42 pre-existing generated smoke files. The hosted runner restored `downloads`
+using its own snapshot. Six run-created HTTP, HTTPS, and smoke logs were
+archived at
+`C:\Users\guideX\AppData\Local\Temp\guidex-js71-hosted-evidence-20261011-175904`
+and removed from the checkout. The original executable and all 42 generated
+files were restored and hash checked. Final ignored-state comparison was
+**0 changed / 0 missing / 0 extra**, with the same 1,337 files and
+88,371,771 bytes.
+
+No kernel build or QEMU run was needed for this hosted Navigator feature.
+**Outcome A — JS71 filtered positional selectors fully qualified.** The
+implementation adds the restricted filtered-sibling forms without changing
+the JS70 descriptor, collection, registry, context, structural-record, or
+pool sizes; native, historical matrix, fresh production build, hosted JS71,
+aggregate, and artifact-restoration gates passed.
+
+The next bounded Navigator review can examine fixed selector-text sharing in
+the 128 independently owned collection records, as proposed in the JS70
+record. It must preserve per-collection lifetime and generation behavior and
+must not weaken the ownership guarantees retained by JS71's descriptor-owned
+filter cores.

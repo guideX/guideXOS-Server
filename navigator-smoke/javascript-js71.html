@@ -1,0 +1,167 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS71</title></head>
+<body>
+<h1>Navigator JavaScript JS71</h1>
+<ul id="series" class="container">
+  <li id="a"></li>
+  <li id="b" class="selected"></li>
+  <li id="c"></li>
+  <li id="d" class="selected"></li>
+  <li id="e" class="selected" data-label="color of sky"></li>
+</ul>
+<ul id="all">
+  <li id="all1" class="selected"></li>
+  <li id="all2" class="selected"></li>
+  <li id="all3" class="selected"></li>
+</ul>
+<ul id="none"><li></li><li></li></ul>
+<div id="mixed"><span id="s1" class="selected"></span>
+  <button id="b1" class="selected"></button>
+  <span id="s2" class="selected"></span></div>
+<div id="parent-one"><span id="other1" class="selected"></span></div>
+<div id="parent-two"><span id="other2" class="selected"></span></div>
+<ul id="state-list"><li id="state-a" data-state="ready"></li>
+  <li id="state-b" data-state="idle"></li>
+  <li id="state-c" data-state="ready"></li></ul>
+<div id="check-list"><input id="check-a" type="checkbox">
+  <input id="check-b" type="checkbox" checked></div>
+<div id="events"><button id="event-a" class="selected" type="button">A</button>
+  <button id="event-b" class="selected" type="button">B</button></div>
+<pre id="result">JS71:pending</pre>
+<script>
+var assertions = 0;
+var failures = 0;
+var failedIndexes = '';
+function verify(value) {
+  assertions = assertions + 1;
+  if (!value) {
+    failures = failures + 1;
+    failedIndexes = failedIndexes + ',' + assertions;
+  }
+}
+
+var series = document.getElementById('series');
+var a = document.getElementById('a');
+var b = document.getElementById('b');
+var c = document.getElementById('c');
+var d = document.getElementById('d');
+var e = document.getElementById('e');
+verify(document.querySelector(':nth-child(1 of .selected)') === b);
+verify(document.querySelector(':nth-child(2 of .selected)') === d);
+verify(document.querySelector(':nth-child(3 of .selected)') === e);
+verify(document.querySelector(':nth-child(4 of .selected)') === null);
+verify(document.querySelector(':nth-last-child(1 of .selected)') === e);
+verify(document.querySelector(':nth-last-child(2 of .selected)') === d);
+verify(document.querySelector(':nth-last-child(3 of .selected)') === b);
+verify(document.querySelector(':nth-last-child(4 of .selected)') === null);
+verify(!a.matches(':nth-child(1 of .selected)'));
+verify(!c.matches(':nth-child(2 of .selected)'));
+verify(document.querySelector('.selected:nth-child(2)') === b);
+verify(document.querySelector(':nth-child(2 of .selected)') === d);
+verify(series.querySelectorAll(':nth-child(odd of .selected)').length === 2);
+verify(series.querySelectorAll(':nth-child(odd of .selected)')[0] === b);
+verify(series.querySelectorAll(':nth-child(odd of .selected)')[1] === e);
+verify(series.querySelectorAll(':nth-child(even of .selected)').length === 1);
+verify(document.querySelector(':nth-child(2n+1 of .selected)') === b);
+verify(document.querySelector(':nth-child(-n+2 of .selected)') === b);
+verify(document.querySelectorAll(':nth-child(-n+2 of .selected)')[1] === d);
+verify(document.querySelector(':nth-last-child(odd of .selected)') === b);
+verify(document.querySelector('#series > li:nth-child(2 of .selected)') === d);
+verify(series.querySelector(':nth-child(2 of .selected)') === d);
+var oddChildren = series.querySelectorAll(
+  ':scope > li:nth-child(odd of .selected)');
+verify(oddChildren.length === 2 && oddChildren[0] === b &&
+  oddChildren[1] === e);
+verify(d.matches(':nth-child(2 of .selected)'));
+verify(d.closest(':nth-child(2 of .selected)') === d);
+var deduped = series.querySelectorAll(
+  ':nth-child(2 of .selected), #d');
+verify(deduped.length === 1 && deduped[0] === d);
+verify(document.querySelector(':nth-child(1 oF [data-label="color of sky"])') === e);
+verify(document.querySelector('#mixed :nth-child(2 of .selected)') ===
+  document.getElementById('b1'));
+verify(document.querySelector('#mixed :nth-child(2 of span.selected)') ===
+  document.getElementById('s2'));
+verify(!document.getElementById('other1').matches(
+  ':nth-child(2 of .selected)'));
+verify(!document.getElementById('other2').matches(
+  ':nth-child(2 of .selected)'));
+verify(document.getElementById('none').querySelectorAll(
+  ':nth-child(1 of .selected)').length === 0);
+verify(document.querySelector('#all > :nth-child(2 of .selected)') ===
+  document.getElementById('all2'));
+
+var stateList = document.getElementById('state-list');
+var stateB = document.getElementById('state-b');
+var stateC = document.getElementById('state-c');
+var held = stateList.querySelectorAll(
+  ':nth-child(2 of [data-state=ready])');
+verify(held.length === 1 && held[0] === stateC);
+stateB.setAttribute('data-state', 'ready');
+verify(held.length === 1 && held[0] === stateB);
+stateB.setAttribute('data-state', 'idle');
+verify(held.length === 1 && held[0] === stateC);
+
+var checkA = document.getElementById('check-a');
+var checkB = document.getElementById('check-b');
+verify(document.querySelector(':nth-last-child(1 of :checked)') === checkB);
+checkB.checked = false;
+verify(document.querySelector(':nth-last-child(1 of :checked)') === null);
+checkA.checked = true;
+verify(document.querySelector(':nth-last-child(1 of :checked)') === checkA);
+verify(d.matches(':nth-child(1 of :scope)'));
+verify(series.querySelectorAll(
+  ':scope > li:nth-child(1 of :scope)').length === 0);
+
+var malformed = [
+  ':nth-child(of .selected)', ':nth-child(2 of)',
+  ':nth-child(2 of .a, .b)', ':nth-child(2 of .a > .b)',
+  ':nth-child(2 of :has(.a))', ':nth-child(2 of :nth-child(1))',
+  ':nth-child(2 of :is(.a, .b))', ':nth-child(2 of .a of .b)',
+  ':nth-child(2 of .a', ':nth-child(2 of .a))',
+  ':nth-of-type(2 of .selected)',
+  ':nth-child(999999999999999999999n of .selected)'];
+var malformedRejected = true;
+for (var i = 0; i !== malformed.length; i = i + 1)
+  if (document.querySelector(malformed[i]) !== null)
+    malformedRejected = false;
+verify(document.querySelectorAll(':nth-child(2 of .a, .b)').length === 0);
+verify(document.querySelector(':nth-child(2 of .selected)') === d);
+
+document.getElementById('result').textContent =
+  'JS71:initial:assertions=' + assertions + ':failures=' + failures +
+  ':malformed=' + malformedRejected + ':failed=' + failedIndexes;
+
+var eventResult = false;
+var nestedResult = false;
+var eventMetadata = false;
+document.getElementById('event-a').addEventListener('click', function(event) {
+  var savedTarget = event.target;
+  var savedCurrent = event.currentTarget;
+  var savedPhase = event.eventPhase;
+  var savedDefault = event.defaultPrevented;
+  eventResult = event.target.matches(':nth-child(1 of .selected)');
+  document.getElementById('event-b').click();
+  eventResult = eventResult &&
+    event.target.matches(':nth-child(1 of .selected)');
+  eventMetadata = event.target === savedTarget &&
+    event.currentTarget === savedCurrent && event.eventPhase === savedPhase &&
+    event.defaultPrevented === savedDefault;
+  verify(eventResult);
+  verify(nestedResult);
+  verify(eventMetadata);
+  document.getElementById('result').textContent =
+    'JS71:event=' + eventResult + ':nested=' + nestedResult +
+    ':metadata=' + eventMetadata + ':assertions=' + assertions +
+    ':failures=' + failures + ':failed=' + failedIndexes;
+});
+document.getElementById('event-b').addEventListener('click', function(event) {
+  nestedResult = event.target.matches(
+    ':nth-last-child(1 of .selected)') &&
+    event.currentTarget === event.target &&
+    event.eventPhase === 2 && event.defaultPrevented === false;
+});
+</script>
+</body>
+</html>

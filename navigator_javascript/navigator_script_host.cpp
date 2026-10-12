@@ -667,10 +667,74 @@ bool parseNthExpression(SourceView argument, std::int16_t& a,
     return true;
 }
 
+bool parseNthExpressionAndOptionalFilter(SourceView argument,
+    std::size_t sourceOffset, std::int16_t& a, std::int16_t& b,
+    SelectorSourceRange& filterRange)
+{
+    filterRange = {};
+    if (argument.data == nullptr || argument.length == 0u) return false;
+
+    bool insideAttribute = false;
+    char quote = '\0';
+    std::size_t ofPosition = argument.length;
+    for (std::size_t index = 0u; index < argument.length; ++index) {
+        const char character = argument.data[index];
+        if (insideAttribute) {
+            if (quote != '\0') {
+                if (character == quote) quote = '\0';
+            } else if (character == '"' || character == '\'') {
+                quote = character;
+            } else if (character == '[') {
+                return false;
+            } else if (character == ']') {
+                insideAttribute = false;
+            }
+            continue;
+        }
+        if (character == '[') {
+            insideAttribute = true;
+            continue;
+        }
+        if (character == ']' || character == '(' || character == ')')
+            return false;
+        if (index == 0u || index + 2u >= argument.length ||
+            !isSelectorAsciiWhitespace(argument.data[index - 1u]) ||
+            !isSelectorAsciiWhitespace(argument.data[index + 2u]) ||
+            lowerAscii(static_cast<unsigned char>(argument.data[index])) !=
+                static_cast<unsigned char>('o') ||
+            lowerAscii(static_cast<unsigned char>(argument.data[index + 1u])) !=
+                static_cast<unsigned char>('f')) continue;
+        if (ofPosition != argument.length) return false;
+        ofPosition = index;
+    }
+    if (insideAttribute || quote != '\0') return false;
+    if (ofPosition == argument.length)
+        return parseNthExpression(argument, a, b);
+
+    std::size_t formulaEnd = ofPosition;
+    while (formulaEnd != 0u && isSelectorAsciiWhitespace(
+            argument.data[formulaEnd - 1u])) --formulaEnd;
+    if (formulaEnd == 0u ||
+        !parseNthExpression(SourceView(argument.data, formulaEnd), a, b))
+        return false;
+
+    std::size_t filterBegin = ofPosition + 2u;
+    while (filterBegin < argument.length && isSelectorAsciiWhitespace(
+            argument.data[filterBegin])) ++filterBegin;
+    std::size_t filterEnd = argument.length;
+    while (filterEnd > filterBegin && isSelectorAsciiWhitespace(
+            argument.data[filterEnd - 1u])) --filterEnd;
+    if (filterBegin == filterEnd ||
+        sourceOffset > std::numeric_limits<std::size_t>::max() - filterBegin)
+        return false;
+    filterRange = {sourceOffset + filterBegin, filterEnd - filterBegin};
+    return true;
+}
+
 bool parseStatePseudo(SourceView source, std::size_t colon,
     std::size_t end, NavigatorScriptSimpleSelectorCoreDescriptor& selector,
     std::int16_t& nthA, std::int16_t& nthB,
-    bool allowFunctionalPseudo)
+    bool allowFunctionalPseudo, SelectorSourceRange* nthFilterRange)
 {
     if (source.data == nullptr || colon >= end || source.data[colon] != ':' ||
         colon + 1u >= end) return false;
@@ -729,10 +793,30 @@ bool parseStatePseudo(SourceView source, std::size_t colon,
 
     if (!allowFunctionalPseudo || end <= open + 1u ||
         source.data[end - 1u] != ')') return false;
+    bool insideAttribute = false;
+    char quote = '\0';
     for (std::size_t index = open + 1u; index + 1u < end; ++index) {
-        if (source.data[index] == '(' || source.data[index] == ')')
+        const char character = source.data[index];
+        if (insideAttribute) {
+            if (quote != '\0') {
+                if (character == quote) quote = '\0';
+            } else if (character == '"' || character == '\'') {
+                quote = character;
+            } else if (character == '[') {
+                return false;
+            } else if (character == ']') {
+                insideAttribute = false;
+            }
+            continue;
+        }
+        if (character == '[') {
+            insideAttribute = true;
+            continue;
+        }
+        if (character == ']' || character == '(' || character == ')')
             return false;
     }
+    if (insideAttribute || quote != '\0') return false;
 
     if (equalsAsciiCaseInsensitive("nth-child"))
         selector.statePseudo = NavigatorScriptStatePseudo::NthChild;
@@ -745,8 +829,17 @@ bool parseStatePseudo(SourceView source, std::size_t colon,
     else
         return false;
 
-    return parseNthExpression(SourceView(source.data + open + 1u,
-        end - open - 2u), nthA, nthB);
+    SelectorSourceRange parsedFilter;
+    if (!parseNthExpressionAndOptionalFilter(SourceView(
+            source.data + open + 1u, end - open - 2u), open + 1u,
+            nthA, nthB, parsedFilter)) return false;
+    const bool hasFilter = parsedFilter.length != 0u;
+    if (hasFilter && selector.statePseudo !=
+            NavigatorScriptStatePseudo::NthChild && selector.statePseudo !=
+            NavigatorScriptStatePseudo::NthLastChild) return false;
+    if (hasFilter && nthFilterRange == nullptr) return false;
+    if (nthFilterRange != nullptr) *nthFilterRange = parsedFilter;
+    return true;
 }
 
 NavigatorScriptStatePseudo logicalPseudoFunction(SourceView source,
@@ -854,6 +947,24 @@ bool isNthStatePseudo(NavigatorScriptStatePseudo pseudo)
         pseudo == NavigatorScriptStatePseudo::NthLastOfType;
 }
 
+bool nthFormulaMatches(std::int16_t nthA, std::int16_t nthB,
+    std::size_t index)
+{
+    if (index == 0u || index > static_cast<std::size_t>(
+            std::numeric_limits<std::int32_t>::max())) return false;
+    const std::int32_t position = static_cast<std::int32_t>(index);
+    const std::int32_t a = nthA;
+    const std::int32_t b = nthB;
+    if (a == 0) return position == b;
+    if (a > 0) {
+        const std::int32_t delta = position - b;
+        return delta >= 0 && delta % a == 0;
+    }
+    const std::int32_t delta = b - position;
+    const std::int32_t step = -a;
+    return delta >= 0 && delta % step == 0;
+}
+
 constexpr std::uint8_t kCompactLogicalArgumentValidFlag = 0x01u;
 constexpr std::uint8_t kCompactLogicalArgumentValueFlag = 0x02u;
 constexpr unsigned kCompactLogicalArgumentPseudoShift = 2u;
@@ -906,6 +1017,21 @@ bool compactRelativeSelectorCore(
     return true;
 }
 
+bool storeCompactRelativeSelectorCore(
+    NavigatorScriptSelectorDescriptor& storage,
+    const NavigatorScriptSimpleSelectorCoreDescriptor& core,
+    std::uint8_t& index)
+{
+    if (storage.hasRelativeCoreCount >= storage.hasRelativeCores.size())
+        return false;
+    NavigatorScriptCompactRelativeSelectorCoreDescriptor compact;
+    if (!compactRelativeSelectorCore(core, compact)) return false;
+    index = storage.hasRelativeCoreCount;
+    storage.hasRelativeCores[index] = compact;
+    ++storage.hasRelativeCoreCount;
+    return true;
+}
+
 bool compactLogicalArgument(
     const NavigatorScriptSimpleSelectorCoreDescriptor& core,
     NavigatorScriptCompactLogicalArgumentDescriptor& compact)
@@ -946,11 +1072,14 @@ bool compactLogicalArgument(
 
 void storeSimpleSelectorNth(
     NavigatorScriptSimpleSelectorDescriptor& selector,
-    std::int16_t nthA, std::int16_t nthB)
+    std::int16_t nthA, std::int16_t nthB,
+    std::uint8_t filteredCoreIndex = 0xFFu)
 {
     std::memcpy(selector.selectorPayload.data(), &nthA, sizeof(nthA));
     std::memcpy(selector.selectorPayload.data() + sizeof(nthA), &nthB,
         sizeof(nthB));
+    selector.selectorPayload[sizeof(nthA) + sizeof(nthB)] =
+        filteredCoreIndex;
 }
 
 void loadSimpleSelectorNth(
@@ -960,6 +1089,12 @@ void loadSimpleSelectorNth(
     std::memcpy(&nthA, selector.selectorPayload.data(), sizeof(nthA));
     std::memcpy(&nthB, selector.selectorPayload.data() + sizeof(nthA),
         sizeof(nthB));
+}
+
+std::uint8_t loadSimpleSelectorFilteredNthCoreIndex(
+    const NavigatorScriptSimpleSelectorDescriptor& selector)
+{
+    return selector.selectorPayload[sizeof(std::int16_t) * 2u];
 }
 
 void storeSimpleSelectorHasData(
@@ -1038,7 +1173,8 @@ bool parseSimpleSelectorCore(SourceView source, std::size_t begin,
     std::int16_t& nthA, std::int16_t& nthB,
     NavigatorScriptSimpleSelectorCoreDescriptor* logicalSelector,
     NavigatorScriptSimpleSelectorCoreDescriptor* secondLogicalSelector,
-    bool allowLogicalPseudo, bool allowFunctionalPseudo)
+    bool allowLogicalPseudo, bool allowFunctionalPseudo,
+    SelectorSourceRange* nthFilterRange = nullptr)
 {
     if (begin == end) return false;
 
@@ -1201,8 +1337,14 @@ bool parseSimpleSelectorCore(SourceView source, std::size_t begin,
                 selector.statePseudo = logicalPseudo;
                 position = close + 1u;
             } else {
+                SelectorSourceRange parsedFilter;
                 if (!parseStatePseudo(source, position, end, selector, nthA,
-                        nthB, allowFunctionalPseudo)) return false;
+                        nthB, allowFunctionalPseudo, &parsedFilter))
+                    return false;
+                if (parsedFilter.length != 0u) {
+                    if (nthFilterRange == nullptr) return false;
+                    *nthFilterRange = parsedFilter;
+                }
                 position = end;
             }
         }
@@ -1224,9 +1366,30 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
     selector.selectorPayload.fill(0u);
     std::int16_t nthA = 0;
     std::int16_t nthB = 0;
+    SelectorSourceRange nthFilterRange;
     NavigatorScriptSimpleSelectorCoreDescriptor logicalSelector;
     if (!parseSimpleSelectorCore(source, begin, end, storage, selector,
-            nthA, nthB, &logicalSelector, nullptr, true, true)) return false;
+            nthA, nthB, &logicalSelector, nullptr, true, true,
+            &nthFilterRange)) return false;
+
+    std::uint8_t nthFilterIndex = 0xFFu;
+    if (nthFilterRange.length != 0u) {
+        if (selector.statePseudo != NavigatorScriptStatePseudo::NthChild &&
+            selector.statePseudo !=
+                NavigatorScriptStatePseudo::NthLastChild) return false;
+        NavigatorScriptSimpleSelectorCoreDescriptor filteredCore;
+        std::int16_t filteredNthA = 0;
+        std::int16_t filteredNthB = 0;
+        if (!parseSimpleSelectorCore(source, nthFilterRange.offset,
+                nthFilterRange.offset + nthFilterRange.length, storage,
+                filteredCore, filteredNthA, filteredNthB, nullptr, nullptr,
+                false, false) ||
+            isNthStatePseudo(filteredCore.statePseudo) ||
+            isLogicalStatePseudo(filteredCore.statePseudo) ||
+            isHasStatePseudo(filteredCore.statePseudo) ||
+            !storeCompactRelativeSelectorCore(storage, filteredCore,
+                nthFilterIndex)) return false;
+    }
 
     if (isHasStatePseudo(selector.statePseudo)) {
         if (nthA <= 0 || nthA > static_cast<std::int16_t>(
@@ -1244,7 +1407,7 @@ bool parseSimpleSelector(SourceView source, std::size_t begin,
             storeSimpleSelectorLogicalArgument(selector, compact);
         }
     } else {
-        storeSimpleSelectorNth(selector, nthA, nthB);
+        storeSimpleSelectorNth(selector, nthA, nthB, nthFilterIndex);
     }
     return true;
 }
@@ -4329,6 +4492,29 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
             loadSimpleSelectorNth(leftSimple, leftNthA, leftNthB);
             loadSimpleSelectorNth(rightSimple, rightNthA, rightNthB);
             if (leftNthA != rightNthA || leftNthB != rightNthB) return false;
+            const std::uint8_t leftFilterIndex =
+                loadSimpleSelectorFilteredNthCoreIndex(leftSimple);
+            const std::uint8_t rightFilterIndex =
+                loadSimpleSelectorFilteredNthCoreIndex(rightSimple);
+            if ((leftFilterIndex == 0xFFu) !=
+                (rightFilterIndex == 0xFFu)) return false;
+            if (leftFilterIndex != 0xFFu) {
+                if (leftFilterIndex >= left.hasRelativeCoreCount ||
+                    rightFilterIndex >= right.hasRelativeCoreCount ||
+                    leftFilterIndex >= left.hasRelativeCores.size() ||
+                    rightFilterIndex >= right.hasRelativeCores.size())
+                    return false;
+                NavigatorScriptSimpleSelectorCoreDescriptor leftFilter;
+                NavigatorScriptSimpleSelectorCoreDescriptor rightFilter;
+                if (!expandCompactRelativeCore(
+                        left.hasRelativeCores[leftFilterIndex], left,
+                        leftFilter) ||
+                    !expandCompactRelativeCore(
+                        right.hasRelativeCores[rightFilterIndex], right,
+                        rightFilter) ||
+                    !coreEqual(left, leftFilter, right, rightFilter))
+                    return false;
+            }
         }
         const bool hasLogicalPseudo =
             leftSimple.statePseudo == NavigatorScriptStatePseudo::Not ||
@@ -4963,7 +5149,11 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
     const gxos::web::HtmlElementRef& element,
     const NavigatorScriptSimpleSelectorDescriptor& selector,
     const NavigatorScriptSelectorDescriptor& storage,
-    const NavigatorScriptSelectorMatchContext& context) const
+    const NavigatorScriptSelectorMatchContext& context
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+    , NavigatorScriptFilteredNthCounters* filteredNthCounters
+#endif
+    ) const
 {
     using MatchResult = NavigatorScriptSelectorMatchResult;
     const NavigatorScriptSimpleSelectorCoreDescriptor& core = selector;
@@ -5083,6 +5273,42 @@ NavigatorScriptHostAdapter::selectorSimpleElementMatchResult(
         std::int16_t nthB = 0;
         if (isNthStatePseudo(core.statePseudo))
             loadSimpleSelectorNth(selector, nthA, nthB);
+        const std::uint8_t filteredCoreIndex =
+            loadSimpleSelectorFilteredNthCoreIndex(selector);
+        if (isNthStatePseudo(core.statePseudo) &&
+            filteredCoreIndex != 0xFFu) {
+            if (core.statePseudo != NavigatorScriptStatePseudo::NthChild &&
+                core.statePseudo !=
+                    NavigatorScriptStatePseudo::NthLastChild)
+                return MatchResult::Invalid;
+            const MatchResult conditions = selectorCoreConditionsMatchResult(
+                element, core, storage);
+            if (conditions != MatchResult::Match) return conditions;
+            if (filteredCoreIndex >= storage.hasRelativeCoreCount ||
+                filteredCoreIndex >= storage.hasRelativeCores.size())
+                return MatchResult::Invalid;
+            NavigatorScriptSimpleSelectorCoreDescriptor filteredCore;
+            if (!expandCompactRelativeCore(
+                    storage.hasRelativeCores[filteredCoreIndex], storage,
+                    filteredCore)) return MatchResult::Invalid;
+            std::size_t filteredIndex = 0u;
+            const MatchResult indexed = resolveFilteredStructuralIndex(
+                element, filteredCore, storage, context,
+                core.statePseudo ==
+                    NavigatorScriptStatePseudo::NthLastChild,
+                filteredIndex
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+                , filteredNthCounters
+#endif
+                );
+            if (indexed != MatchResult::Match) return indexed;
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+            if (filteredNthCounters != nullptr)
+                ++filteredNthCounters->formulaEvaluations;
+#endif
+            return nthFormulaMatches(nthA, nthB, filteredIndex)
+                ? MatchResult::Match : MatchResult::NoMatch;
+        }
         return selectorCoreElementMatchResult(element, core, nthA, nthB,
             storage, false, context);
     }
@@ -5453,17 +5679,7 @@ bool NavigatorScriptHostAdapter::selectorStatePseudoMatches(
         if (!resolveStructuralIndex(element, sameType, fromEnd, index))
             return false;
 
-        const std::int32_t a = nthA;
-        const std::int32_t b = nthB;
-        if (index == 0u) return false;
-        if (a == 0) return static_cast<std::int32_t>(index) == b;
-        if (a > 0) {
-            const std::int32_t delta = static_cast<std::int32_t>(index) - b;
-            return delta >= 0 && delta % a == 0;
-        }
-        const std::int32_t delta = b - static_cast<std::int32_t>(index);
-        const std::int32_t step = -a;
-        return delta >= 0 && delta % step == 0;
+        return nthFormulaMatches(nthA, nthB, index);
     }
     case NavigatorScriptStatePseudo::Not:
     case NavigatorScriptStatePseudo::Is:
@@ -5543,6 +5759,107 @@ bool NavigatorScriptHostAdapter::resolveStructuralIndex(
         index = fromEnd ? sameTypeAfter + 1u : forwardTypeIndex;
     }
     return index != 0u && index <= bound;
+}
+
+NavigatorScriptSelectorMatchResult
+NavigatorScriptHostAdapter::resolveFilteredStructuralIndex(
+    const gxos::web::HtmlElementRef& element,
+    const NavigatorScriptSimpleSelectorCoreDescriptor& filter,
+    const NavigatorScriptSelectorDescriptor& storage,
+    const NavigatorScriptSelectorMatchContext& context, bool fromEnd,
+    std::size_t& index
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+    , NavigatorScriptFilteredNthCounters* filteredNthCounters
+#endif
+    ) const
+{
+    using MatchResult = NavigatorScriptSelectorMatchResult;
+    index = 0u;
+    if (document_ == nullptr || !filter.valid || element.serial == 0u ||
+        element.tagName.empty() || findElement(element.serial) != &element ||
+        document_->structuralElements.size() > limits_.maxDocumentNodes ||
+        document_->structuralElements.size() >
+            kNavigatorScriptMaxDocumentNodes)
+        return MatchResult::Invalid;
+
+    HostInstanceId parentSerial = 0u;
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+    if (filteredNthCounters != nullptr)
+        ++filteredNthCounters->parentResolutions;
+#endif
+    if (!resolveStructuralParentSerial(element.serial, parentSerial))
+        return MatchResult::Invalid;
+    if (parentSerial == 0u) return MatchResult::NoMatch;
+    const gxos::web::HtmlElementRef* parent = findElement(parentSerial);
+    if (parent == nullptr || parent->serial != parentSerial)
+        return MatchResult::Invalid;
+
+    const std::size_t bound = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+    std::size_t childCount = 0u;
+    std::size_t candidateChildIndex = 0u;
+    std::size_t matchingBefore = 0u;
+    std::size_t matchingAfter = 0u;
+    bool candidateFound = false;
+    bool candidateMatchesFilter = false;
+    HostInstanceId previousSiblingSerial = 0u;
+    for (std::size_t position = 0u; position < bound; ++position) {
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        if (filteredNthCounters != nullptr)
+            ++filteredNthCounters->structuralInspections;
+#endif
+        const gxos::web::HtmlElementRef& sibling =
+            document_->structuralElements[position];
+        if (sibling.parentSerial != parentSerial) continue;
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        if (filteredNthCounters != nullptr)
+            ++filteredNthCounters->siblingInspections;
+#endif
+        if (sibling.serial == 0u || findElement(sibling.serial) != &sibling ||
+            childCount >= std::numeric_limits<std::uint16_t>::max())
+            return MatchResult::Invalid;
+        ++childCount;
+        if (sibling.childIndex != childCount ||
+            sibling.siblingCount != element.siblingCount ||
+            sibling.previousSiblingSerial != previousSiblingSerial)
+            return MatchResult::Invalid;
+
+        const bool isCandidate = &sibling == &element;
+        if (isCandidate) {
+            if (candidateFound || sibling.serial != element.serial)
+                return MatchResult::Invalid;
+            candidateFound = true;
+            candidateChildIndex = childCount;
+        }
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        if (filteredNthCounters != nullptr)
+            ++filteredNthCounters->simpleSelectorEvaluations;
+#endif
+        const MatchResult matchesFilter = selectorCoreElementMatchResult(
+            sibling, filter, 0, 0, storage, true, context);
+        if (matchesFilter == MatchResult::Invalid)
+            return MatchResult::Invalid;
+        if (matchesFilter == MatchResult::Match) {
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+            if (filteredNthCounters != nullptr)
+                ++filteredNthCounters->matchingSiblings;
+#endif
+            if (isCandidate) candidateMatchesFilter = true;
+            else if (candidateFound) ++matchingAfter;
+            else ++matchingBefore;
+        }
+        previousSiblingSerial = sibling.serial;
+    }
+
+    if (!candidateFound || childCount == 0u ||
+        parent->childCount != childCount ||
+        element.siblingCount != childCount ||
+        element.childIndex != candidateChildIndex)
+        return MatchResult::Invalid;
+    if (!candidateMatchesFilter) return MatchResult::NoMatch;
+    index = fromEnd ? matchingAfter + 1u : matchingBefore + 1u;
+    return index != 0u && index <= bound ? MatchResult::Match :
+        MatchResult::Invalid;
 }
 
 bool NavigatorScriptHostAdapter::selectorMemberElementMatches(
