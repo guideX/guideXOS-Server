@@ -6277,6 +6277,7 @@ DiskManagerApp::DiskManagerApp()
       m_mountBtnId(-1), m_unmountBtnId(-1),
       m_wipeBtnId(-1),
       m_wholeEraseBtnId(-1),
+      m_verifyEntireDiskBtnId(-1), m_verifyPartitionBtnId(-1),
       m_gptBtnId(-1), m_mbrBtnId(-1),
       m_confirmInitializeBtnId(-1), m_cancelInitializeBtnId(-1),
       m_createSizeTextBoxId(-1), m_createNameTextBoxId(-1),
@@ -6286,7 +6287,8 @@ DiskManagerApp::DiskManagerApp()
       m_dialogIsCreate(false), m_dialogIsFormat(false),
       m_dialogIsReformat(false), m_dialogIsDelete(false),
       m_dialogIsGptRepair(false), m_dialogIsWipe(false),
-      m_dialogIsWholeErase(false),
+      m_dialogIsWholeErase(false), m_dialogIsVerification(false),
+      m_closeAfterVerification(false),
       m_wipeBlockReason(disk_manager_wipe_ui::WIPE_ACTION_PARTITION_NOT_SELECTED),
       m_wholeEraseBlockReason(
           disk_manager_whole_disk_erase_ui::WHOLE_ERASE_UI_DISK_ROW_REQUIRED),
@@ -6295,6 +6297,8 @@ DiskManagerApp::DiskManagerApp()
       m_createSizeEdited(false),
       m_createNameEdited(false), m_createInputFocus(0),
       m_initializeScheme(storage::DEFAULT_INITIALIZE_SCHEME),
+      m_surfaceVerificationBlockReason(
+          disk_manager_surface_verification_ui::ADMISSION_SELECTION_REQUIRED),
       m_mountDialogOpen(false), m_mountDialogDeviceIndex(0xFF),
       m_mountDialogRegistrationId(0), m_mountDialogReadOnly(true),
       m_selectedObject(SELECTED_DISK), m_detailsMode(DETAILS_PROPERTIES),
@@ -6324,6 +6328,9 @@ DiskManagerApp::DiskManagerApp()
            sizeof(m_wholeEraseConfirmationProbe));
     memset(&m_wholeEraseResult, 0, sizeof(m_wholeEraseResult));
     memset(&m_wholeEraseJob, 0, sizeof(m_wholeEraseJob));
+    memset(&m_surfaceVerificationTarget, 0,
+           sizeof(m_surfaceVerificationTarget));
+    memset(&m_surfaceVerificationJob, 0, sizeof(m_surfaceVerificationJob));
     m_wipeEligibility = {};
     memset(&m_mountDialogPartition, 0, sizeof(m_mountDialogPartition));
     m_lastStorageOperation = 0;
@@ -6356,6 +6363,11 @@ DiskManagerApp::~DiskManagerApp() {
             m_wholeEraseJob)) {
         storage::request_whole_disk_erase_stop(m_wholeEraseJob);
         storage::step_whole_disk_erase_job(m_wholeEraseJob);
+    }
+    if (disk_manager_surface_verification_ui::verification_job_running(
+            m_surfaceVerificationJob)) {
+        storage::request_surface_verification_stop(m_surfaceVerificationJob);
+        storage::step_surface_verification_job(m_surfaceVerificationJob);
     }
 }
 
@@ -6401,6 +6413,13 @@ bool DiskManagerApp::init() {
     m_wipeConfirmTextBoxId = addTextBox(0, 0, 220, 26, "");
     m_wholeEraseConfirmTextBoxId = addTextBox(0, 0, 320, 26, "");
     m_wipeProgressBarId = addProgressBar(0, 0, 300, 18, 0);
+    m_verifyEntireDiskBtnId = addButton(0, 0, 150, 28,
+                                        "Verify Entire Disk");
+    m_verifyPartitionBtnId = addButton(0, 0, 140, 28,
+                                       "Verify Partition");
+    serial::puts("[dm35-ui] stop-scan-widget-id=");
+    serial_put_dec64(m_cancelInitializeBtnId);
+    serial::putc('\n');
     updateInitializeControls();
     scanDisks();
     m_state = app::AppState::Running;
@@ -6427,11 +6446,27 @@ void DiskManagerApp::shutdown() {
         storage::request_whole_disk_erase_stop(m_wholeEraseJob);
         storage::step_whole_disk_erase_job(m_wholeEraseJob);
     }
+    if (disk_manager_surface_verification_ui::verification_job_running(
+            m_surfaceVerificationJob)) {
+        storage::request_surface_verification_stop(m_surfaceVerificationJob);
+        storage::step_surface_verification_job(m_surfaceVerificationJob);
+    }
     m_initializeDialogState = INITIALIZE_DIALOG_CLOSED;
     m_state = app::AppState::Terminated;
 }
 
 bool DiskManagerApp::onCloseRequested() {
+    if (!disk_manager_surface_verification_ui::request_stop_before_close(
+            m_surfaceVerificationJob)) {
+        m_closeAfterVerification = true;
+        strcopy(m_statusMessage,
+            "Close requested. Stopping verification after the current read settles.",
+            sizeof(m_statusMessage));
+        m_createInputFocus = 2;
+        updateInitializeControls();
+        invalidate();
+        return false;
+    }
     if (!disk_manager_whole_disk_erase_ui::request_stop_before_close(
             m_wholeEraseJob)) {
         strcopy(m_statusMessage,
@@ -6455,6 +6490,21 @@ bool DiskManagerApp::onCloseRequested() {
 }
 
 void DiskManagerApp::update() {
+    if (m_dialogIsVerification && m_initializeDialogState ==
+            INITIALIZE_DIALOG_RUNNING &&
+        disk_manager_surface_verification_ui::verification_job_running(
+            m_surfaceVerificationJob)) {
+        const storage::SurfaceVerificationState state =
+            storage::step_surface_verification_job(m_surfaceVerificationJob);
+        if (state != storage::SURFACE_VERIFICATION_RUNNING) {
+            completeSurfaceVerificationOperation();
+            if (m_closeAfterVerification) requestClose();
+            return;
+        }
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
     if (m_dialogIsWholeErase && m_initializeDialogState ==
             INITIALIZE_DIALOG_WHOLE_ERASE_RUNNING &&
         disk_manager_whole_disk_erase_ui::whole_erase_job_running(
@@ -6751,6 +6801,15 @@ void DiskManagerApp::readPartitionTable(DiskEntry& disk) {
     memcpy(disk.backupDiskGuid, table.backupDiskGuid,
            sizeof(disk.backupDiskGuid));
     disk.mbrDiskSignature = table.mbrDiskSignature;
+    disk.gptEntrySize = table.gptEntrySize;
+    disk.gptEntryArraySectors = table.gptEntryArraySectors;
+    disk.primaryGptHeaderCrc32 = table.primaryGptHeaderCrc32;
+    disk.backupGptHeaderCrc32 = table.backupGptHeaderCrc32;
+    disk.primaryGptEntryArrayCrc32 = table.primaryGptEntryArrayCrc32;
+    disk.backupGptEntryArrayCrc32 = table.backupGptEntryArrayCrc32;
+    disk.primaryGptEntryArrayLba = table.primaryGptEntryArrayLba;
+    disk.backupGptEntryArrayLba = table.backupGptEntryArrayLba;
+    disk.tableEntryCount = table.tableEntryCount;
     disk.totalPartitionCount = table.partitionCount;
     const bool parsedEntriesAvailable =
         table.state == storage::DISK_STATE_VALID_MBR ||
@@ -6848,6 +6907,52 @@ void DiskManagerApp::readPartitionTable(DiskEntry& disk) {
             disk.items[at].unallocated = true;
         }
     }
+}
+
+bool DiskManagerApp::partitionTableMatchesDiskCache(
+    const DiskEntry& disk, const storage::PartitionTableModel& table) const {
+    if (table.scheme != disk.scheme || table.state != disk.state ||
+        table.partitionCount != disk.totalPartitionCount ||
+        table.tableEntryCount != disk.tableEntryCount ||
+        table.firstUsableLba != disk.firstUsableLba ||
+        table.lastUsableLba != disk.lastUsableLba ||
+        table.protectiveMbr != disk.protectiveMbr ||
+        table.hybridMbr != disk.hybridMbr ||
+        table.extendedPartitionsPresent != disk.extendedPartitionsPresent ||
+        table.primaryGptValid != disk.primaryGptValid ||
+        table.backupGptValid != disk.backupGptValid ||
+        table.gptCopiesAgree != disk.gptCopiesAgree ||
+        table.gptCopiesConflict != disk.gptCopiesConflict ||
+        table.protectiveMbrValid != disk.protectiveMbrValid ||
+        table.primaryGptCopyState != disk.primaryGptCopyState ||
+        table.backupGptCopyState != disk.backupGptCopyState ||
+        table.mbrDiskSignature != disk.mbrDiskSignature ||
+        table.gptEntrySize != disk.gptEntrySize ||
+        table.gptEntryArraySectors != disk.gptEntryArraySectors ||
+        table.primaryGptHeaderCrc32 != disk.primaryGptHeaderCrc32 ||
+        table.backupGptHeaderCrc32 != disk.backupGptHeaderCrc32 ||
+        table.primaryGptEntryArrayCrc32 != disk.primaryGptEntryArrayCrc32 ||
+        table.backupGptEntryArrayCrc32 != disk.backupGptEntryArrayCrc32 ||
+        table.primaryGptEntryArrayLba != disk.primaryGptEntryArrayLba ||
+        table.backupGptEntryArrayLba != disk.backupGptEntryArrayLba ||
+        disk.partCount != disk.totalPartitionCount) return false;
+    for (uint8_t i = 0; i < 16; ++i)
+        if (table.primaryDiskGuid[i] != disk.primaryDiskGuid[i] ||
+            table.backupDiskGuid[i] != disk.backupDiskGuid[i]) return false;
+    for (uint16_t i = 0; i < table.partitionCount; ++i) {
+        const storage::PartitionEntry& current = table.partitions[i];
+        const storage::PartitionEntry* cached = nullptr;
+        for (int j = 0; j < disk.partCount; ++j) {
+            if (disk.parts[j].parsed.partitionNumber !=
+                    current.partitionNumber) continue;
+            if (cached) return false;
+            cached = &disk.parts[j].parsed;
+        }
+        if (!cached ||
+            !disk_manager_surface_verification_ui::partition_entries_equal(
+                *cached, current)) return false;
+    }
+    return true;
 }
 
 const char* DiskManagerApp::detectFs(uint8_t devIndex, uint64_t lbaStart,
@@ -6997,6 +7102,8 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
     app::Widget* unmountAction = getWidget(m_unmountBtnId);
     app::Widget* wipeAction = getWidget(m_wipeBtnId);
     app::Widget* wholeEraseAction = getWidget(m_wholeEraseBtnId);
+    app::Widget* verifyDiskAction = getWidget(m_verifyEntireDiskBtnId);
+    app::Widget* verifyPartitionAction = getWidget(m_verifyPartitionBtnId);
     app::Widget* gpt = getWidget(m_gptBtnId);
     app::Widget* mbr = getWidget(m_mbrBtnId);
     app::Widget* confirm = getWidget(m_confirmInitializeBtnId);
@@ -7015,6 +7122,8 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
         if (diagnostics) { diagnostics->x = 192; diagnostics->y = firstRowY; diagnostics->w = 102; }
         if (initialize) { initialize->x = 10; initialize->y = secondRowY; initialize->w = 128; }
         if (wipeAction) { wipeAction->x = 144; wipeAction->y = secondRowY; wipeAction->w = 108; }
+        if (verifyDiskAction) { verifyDiskAction->x = 144; verifyDiskAction->y = secondRowY; verifyDiskAction->w = 110; }
+        if (verifyPartitionAction) { verifyPartitionAction->x = 258; verifyPartitionAction->y = secondRowY; verifyPartitionAction->w = 144; }
         if (wholeEraseAction) { wholeEraseAction->x = 258; wholeEraseAction->y = secondRowY; wholeEraseAction->w = 172; }
         if (mountAction) { mountAction->x = 10; mountAction->y = rowY; mountAction->w = 108; }
         if (unmountAction) { unmountAction->x = 124; unmountAction->y = rowY; unmountAction->w = 92; }
@@ -7025,9 +7134,11 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
         if (diagnostics) { diagnostics->x = 194; diagnostics->y = secondRowY; diagnostics->w = 96; }
         if (initialize) { initialize->x = 10; initialize->y = rowY; initialize->w = 140; }
         if (wipeAction) { wipeAction->x = 156; wipeAction->y = rowY; wipeAction->w = 112; }
-        if (mountAction) { mountAction->x = 274; mountAction->y = rowY; mountAction->w = 90; }
-        if (unmountAction) { unmountAction->x = 370; unmountAction->y = rowY; unmountAction->w = 82; }
-        if (deleteAction) { deleteAction->x = 458; deleteAction->y = rowY; deleteAction->w = 116; }
+        if (verifyDiskAction) { verifyDiskAction->x = 156; verifyDiskAction->y = rowY; verifyDiskAction->w = 150; }
+        if (verifyPartitionAction) { verifyPartitionAction->x = 274; verifyPartitionAction->y = rowY; verifyPartitionAction->w = 128; }
+        if (mountAction) { mountAction->x = 408; mountAction->y = rowY; mountAction->w = 90; }
+        if (unmountAction) { unmountAction->x = 504; unmountAction->y = rowY; unmountAction->w = 82; }
+        if (deleteAction) { deleteAction->x = 592; deleteAction->y = rowY; deleteAction->w = 116; }
         if (wholeEraseAction) { wholeEraseAction->x = 580; wholeEraseAction->y = rowY; wholeEraseAction->w = 174; }
     }
     if (gpt) { gpt->x = 10; gpt->y = rowY; gpt->w = 140; }
@@ -7088,6 +7199,8 @@ void DiskManagerApp::updateInitializeControls() {
     app::Widget* unmountAction = getWidget(m_unmountBtnId);
     app::Widget* wipeAction = getWidget(m_wipeBtnId);
     app::Widget* wholeEraseAction = getWidget(m_wholeEraseBtnId);
+    app::Widget* verifyDiskAction = getWidget(m_verifyEntireDiskBtnId);
+    app::Widget* verifyPartitionAction = getWidget(m_verifyPartitionBtnId);
     app::Widget* gpt = getWidget(m_gptBtnId);
     app::Widget* mbr = getWidget(m_mbrBtnId);
     app::Widget* confirm = getWidget(m_confirmInitializeBtnId);
@@ -7133,6 +7246,14 @@ void DiskManagerApp::updateInitializeControls() {
         m_initializeDialogState == INITIALIZE_DIALOG_WHOLE_ERASE_RUNNING &&
         disk_manager_whole_disk_erase_ui::whole_erase_job_running(
             m_wholeEraseJob);
+    const bool verificationConfirm = m_dialogIsVerification &&
+        m_initializeDialogState == INITIALIZE_DIALOG_VERIFY_CONFIRM;
+    const bool verificationRunning = m_dialogIsVerification &&
+        m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
+        disk_manager_surface_verification_ui::verification_job_running(
+            m_surfaceVerificationJob);
+    const bool verificationResult = m_dialogIsVerification &&
+        m_initializeDialogState == INITIALIZE_DIALOG_VERIFY_RESULT;
     storage::WholeDiskEraseProbe wholeEraseUiProbe = {};
     bool wholeEraseSerialUnique = true;
     if (selectedDiskRow) {
@@ -7237,6 +7358,10 @@ void DiskManagerApp::updateInitializeControls() {
     bool showUnmountAction = false;
     bool deleteAvailable = false;
     bool selectedPartition = false;
+    bool verificationPartitionMapValid = false;
+    bool verificationPartitionGeometryValid = false;
+    bool verificationIdentityValid = false;
+    bool verificationReadAvailable = false;
     m_wipeEligibility = {};
     if (haveSelection && m_selectedObject == SELECTED_PARTITION &&
         m_selectedPart >= 0 && m_selectedPart < m_disks[m_selectedDisk].partCount) {
@@ -7255,6 +7380,8 @@ void DiskManagerApp::updateInitializeControls() {
             : disk.scheme == storage::PARTITION_SCHEME_MBR &&
                 disk.state == storage::DISK_STATE_VALID_MBR &&
                 !disk.hybridMbr && !disk.extendedPartitionsPresent;
+        verificationPartitionMapValid = validTable && !disk.hybridMbr &&
+            !disk.extendedPartitionsPresent;
         const bool durable = disk.capabilities.persistence ==
                 storage::PERSISTENCE_SYNCHRONOUS_DURABLE ||
             (disk.capabilities.persistence == storage::PERSISTENCE_FLUSH_REQUIRED &&
@@ -7280,10 +7407,23 @@ void DiskManagerApp::updateInitializeControls() {
                                        wipePart.sectorCount) &&
             storage::valid_geometry(wipePart.sectorCount,
                 disk.capabilities.logicalSectorSize, nullptr);
+        verificationPartitionGeometryValid = disk.capabilities.geometryValid &&
+            disk.capabilities.capacityValid && wipePart.partitionNumber != 0 &&
+            wipePart.startLba != 0 && wipePart.sectorCount != 0 &&
+            wipePart.startLba <= wipePart.endLba &&
+            wipePart.endLba < totalSectors &&
+            wipePart.endLba - wipePart.startLba != UINT64_MAX &&
+            wipePart.endLba - wipePart.startLba + 1u == wipePart.sectorCount &&
+            storage::checked_lba_range(totalSectors, wipePart.startLba,
+                                       wipePart.sectorCount) &&
+            storage::valid_geometry(wipePart.sectorCount,
+                disk.capabilities.logicalSectorSize, nullptr);
         const bool wipeIdentityValid = disk.identity.registrationId != 0 &&
             disk.identity.globalIndex == disk.devIndex &&
             storage::revalidate_target_identity(disk.identity) ==
                 storage::TARGET_VALID;
+        verificationIdentityValid = wipeIdentityValid;
+        verificationReadAvailable = disk.capabilities.readable;
         m_wipeEligibility.partitionSelected = true;
         m_wipeEligibility.identityValid = wipeIdentityValid;
         m_wipeEligibility.validPartitionTable = wipeTableValid;
@@ -7331,6 +7471,44 @@ void DiskManagerApp::updateInitializeControls() {
         m_wipeEligibility.partitionSelected = false;
         m_wipeBlockReason = disk_manager_wipe_ui::wipe_action_block_reason(
             m_wipeEligibility);
+    }
+    bool verifyEntireDiskEnabled = false;
+    if (dialogClosed && selectedDiskRow) {
+        const DiskEntry& disk = m_disks[m_selectedDisk];
+        const bool identityValid = disk.haveInfo &&
+            disk.identity.registrationId != 0 &&
+            disk.identity.globalIndex == disk.devIndex &&
+            storage::revalidate_target_identity(disk.identity) ==
+                storage::TARGET_VALID;
+        m_surfaceVerificationBlockReason =
+            disk_manager_surface_verification_ui::build_entire_disk_target(
+                true, identityValid, !storage::storage_operation_active(),
+                disk.identity, disk.capabilities,
+                m_surfaceVerificationTarget);
+        verifyEntireDiskEnabled = m_surfaceVerificationBlockReason ==
+            disk_manager_surface_verification_ui::ADMISSION_READY;
+    } else if (dialogClosed && selectedPartition) {
+        if (!verificationIdentityValid)
+            m_surfaceVerificationBlockReason =
+                disk_manager_surface_verification_ui::ADMISSION_IDENTITY_INVALID;
+        else if (!verificationPartitionMapValid)
+            m_surfaceVerificationBlockReason =
+                disk_manager_surface_verification_ui::ADMISSION_PARTITION_TABLE_INVALID;
+        else if (!verificationPartitionGeometryValid)
+            m_surfaceVerificationBlockReason =
+                disk_manager_surface_verification_ui::ADMISSION_PARTITION_INVALID;
+        else if (!verificationReadAvailable)
+            m_surfaceVerificationBlockReason =
+                disk_manager_surface_verification_ui::ADMISSION_READ_UNAVAILABLE;
+        else if (storage::storage_operation_active())
+            m_surfaceVerificationBlockReason =
+                disk_manager_surface_verification_ui::ADMISSION_OPERATION_BUSY;
+        else
+            m_surfaceVerificationBlockReason =
+                disk_manager_surface_verification_ui::ADMISSION_READY;
+    } else if (dialogClosed) {
+        m_surfaceVerificationBlockReason =
+            disk_manager_surface_verification_ui::ADMISSION_SELECTION_REQUIRED;
     }
     if (refresh) {
         refresh->visible = dialogClosed;
@@ -7389,6 +7567,21 @@ void DiskManagerApp::updateInitializeControls() {
             m_wholeEraseBlockReason ==
                 disk_manager_whole_disk_erase_ui::WHOLE_ERASE_UI_READY;
     }
+    if (verifyDiskAction) {
+        verifyDiskAction->visible = dialogClosed && selectedDiskRow;
+        verifyDiskAction->enabled = verifyDiskAction->visible &&
+            verifyEntireDiskEnabled;
+        setWidgetText(m_verifyEntireDiskBtnId, "Verify Entire Disk");
+    }
+    const bool verifyPartitionVisible = dialogClosed && selectedPartition &&
+        verificationPartitionMapValid && verificationPartitionGeometryValid;
+    if (verifyPartitionAction) {
+        verifyPartitionAction->visible = verifyPartitionVisible;
+        verifyPartitionAction->enabled = verifyPartitionVisible &&
+            m_surfaceVerificationBlockReason ==
+                disk_manager_surface_verification_ui::ADMISSION_READY;
+        setWidgetText(m_verifyPartitionBtnId, "Verify Partition");
+    }
     if (mountAction) {
         mountAction->visible = dialogClosed && showMountAction;
         mountAction->enabled = mountAvailable;
@@ -7402,7 +7595,7 @@ void DiskManagerApp::updateInitializeControls() {
     if (confirm) {
         confirm->visible = m_mountDialogOpen || confirming || createOptions ||
             formatOptions || deleteConfirm || gptRepairConfirm || wipeConfirm ||
-            wholeEraseConfirm;
+            wholeEraseConfirm || verificationConfirm;
         bool wipeSelectionMatchesRequest = false;
         if (wipeConfirm && selectedPartition) {
             const DiskEntry& disk = m_disks[m_selectedDisk];
@@ -7411,7 +7604,7 @@ void DiskManagerApp::updateInitializeControls() {
                 disk_manager_wipe_ui::wipe_confirmation_binding_matches(
                     m_wipeRequest, disk.identity, disk.scheme, selected.parsed);
         }
-        confirm->enabled = m_mountDialogOpen ||
+        confirm->enabled = m_mountDialogOpen || verificationConfirm ||
             (wholeEraseConfirm && selectedDiskRow && m_selectedDisk >= 0 &&
              m_selectedDisk < m_diskCount &&
              disk_manager_whole_disk_erase_ui::confirmation_can_start(
@@ -7437,6 +7630,7 @@ void DiskManagerApp::updateInitializeControls() {
         else if (gptRepairConfirm) confirmLabel = "Repair GPT";
         else if (wipeConfirm) confirmLabel = "Wipe Partition";
         else if (wholeEraseConfirm) confirmLabel = "Erase Entire Disk";
+        else if (verificationConfirm) confirmLabel = "Start Verification";
         else if (deleteConfirm) confirmLabel = "Delete Partition";
         else if (formatOptions)
             confirmLabel = m_dialogIsReformat ? "Quick Reformat" : "Format FAT32";
@@ -7463,6 +7657,11 @@ void DiskManagerApp::updateInitializeControls() {
             ? 0xFFB83434 : 0xFF6F3030;
         if (cancel) cancel->bgColor = m_createInputFocus == 2
             ? 0xFF34465C : 0xFF505060;
+    } else if (verificationConfirm) {
+        if (confirm) confirm->bgColor = m_createInputFocus == 3
+            ? 0xFF356A48 : 0xFF505060;
+        if (cancel) cancel->bgColor = m_createInputFocus == 2
+            ? 0xFF34465C : 0xFF505060;
     } else if (wipeRunning) {
         if (confirm) confirm->bgColor = 0xFF505060;
         if (cancel) cancel->bgColor =
@@ -7473,6 +7672,13 @@ void DiskManagerApp::updateInitializeControls() {
         if (cancel) cancel->bgColor =
             disk_manager_whole_disk_erase_ui::stop_button_background(
                 m_createInputFocus == 2);
+    } else if (verificationRunning) {
+        if (confirm) confirm->bgColor = 0xFF505060;
+        if (cancel) cancel->bgColor = m_createInputFocus == 2
+            ? disk_manager_surface_verification_ui::
+                stop_button_background(true)
+            : disk_manager_surface_verification_ui::
+                stop_button_background(false);
     } else if (formatOptions) {
         if (confirm) confirm->bgColor = m_createInputFocus == 3
             ? 0xFF34465C : 0xFF505060;
@@ -7512,28 +7718,53 @@ void DiskManagerApp::updateInitializeControls() {
             ? 0xFF3A4A5C : 0xFF2D2D37;
     }
     if (wipeProgress) {
-        wipeProgress->visible = wipeRunning || wholeEraseRunning;
+        wipeProgress->visible = wipeRunning || wholeEraseRunning ||
+            verificationRunning;
         wipeProgress->enabled = false;
         setWidgetValue(m_wipeProgressBarId, wholeEraseRunning
             ? disk_manager_whole_disk_erase_ui::progress_value(
                 m_wholeEraseResult)
-            : disk_manager_wipe_ui::wipe_progress_value(m_wipeResult));
+            : (verificationRunning
+                ? disk_manager_surface_verification_ui::progress_value(
+                    m_surfaceVerificationJob.result)
+                : disk_manager_wipe_ui::wipe_progress_value(m_wipeResult)));
     }
     const bool showCancel = m_mountDialogOpen || formatScanCancelable ||
-        wipeRunning || wholeEraseRunning ||
+        wipeRunning || wholeEraseRunning || verificationRunning ||
         (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED &&
          m_initializeDialogState != INITIALIZE_DIALOG_RUNNING);
     if (cancel) {
         cancel->visible = showCancel;
         cancel->enabled = showCancel;
         setWidgetText(m_cancelInitializeBtnId,
-            wholeEraseRunning
+            verificationRunning
+                ? (m_surfaceVerificationJob.result.stopRequested
+                    ? "Stop Requested" : "Stop Scan")
+                : (wholeEraseRunning
                 ? (m_wholeEraseResult.stopRequested
                     ? "Stop Requested" : "Stop Erase")
                 : (wipeRunning ? "Stop Wipe" :
                    (m_initializeDialogState == INITIALIZE_DIALOG_RESULT ||
-                    m_initializeDialogState == INITIALIZE_DIALOG_WHOLE_ERASE_RESULT
-                        ? "Close" : "Cancel")));
+                    m_initializeDialogState == INITIALIZE_DIALOG_WHOLE_ERASE_RESULT ||
+                    verificationResult
+                        ? "Close" : "Cancel"))));
+    }
+    if (dialogClosed) {
+        const int count = activeActionCount();
+        if (count == 0) m_actionFocus = 0;
+        else if (m_actionFocus >= count) m_actionFocus = count - 1;
+        const int candidates[] = {m_refreshBtnId, m_propertiesBtnId,
+            m_diagnosticsBtnId, m_initializeBtnId, m_wipeBtnId,
+            m_verifyEntireDiskBtnId, m_verifyPartitionBtnId, m_mountBtnId,
+            m_unmountBtnId, m_deleteBtnId, m_wholeEraseBtnId};
+        const int focusedId = m_keyboardPane == KEYBOARD_ACTIONS
+            ? activeActionWidgetIdAt(m_actionFocus) : -1;
+        for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
+            app::Widget* action = getWidget(candidates[i]);
+            if (!action || !action->visible || !action->enabled) continue;
+            action->bgColor = action->id == focusedId
+                ? 0xFF34465C : 0xFF505060;
+        }
     }
 }
 
@@ -7667,15 +7898,43 @@ void DiskManagerApp::moveKeyboardSelection(int delta) {
             m_partitionScroll = next - m_partitionVisibleRows + 1;
         invalidate();
     } else if (m_keyboardPane == KEYBOARD_ACTIONS) {
-        m_actionFocus += delta;
-        if (m_actionFocus < 0) m_actionFocus = 5;
-        if (m_actionFocus > 5) m_actionFocus = 0;
-        invalidate();
+        moveActionFocus(delta);
     } else {
         m_detailScroll += delta;
         if (m_detailScroll < 0) m_detailScroll = 0;
         invalidate();
     }
+}
+
+int DiskManagerApp::activeActionCount() {
+    const int candidates[] = {m_refreshBtnId, m_propertiesBtnId,
+        m_diagnosticsBtnId, m_initializeBtnId, m_wipeBtnId,
+        m_verifyEntireDiskBtnId, m_verifyPartitionBtnId, m_mountBtnId,
+        m_unmountBtnId, m_deleteBtnId, m_wholeEraseBtnId};
+    return disk_manager_surface_verification_ui::active_action_count(
+        m_window, candidates, sizeof(candidates) / sizeof(candidates[0]));
+}
+
+int DiskManagerApp::activeActionWidgetIdAt(int index) {
+    const int candidates[] = {m_refreshBtnId, m_propertiesBtnId,
+        m_diagnosticsBtnId, m_initializeBtnId, m_wipeBtnId,
+        m_verifyEntireDiskBtnId, m_verifyPartitionBtnId, m_mountBtnId,
+        m_unmountBtnId, m_deleteBtnId, m_wholeEraseBtnId};
+    return disk_manager_surface_verification_ui::active_action_widget_id(
+        m_window, candidates, sizeof(candidates) / sizeof(candidates[0]), index);
+}
+
+void DiskManagerApp::moveActionFocus(int delta) {
+    const int candidates[] = {m_refreshBtnId, m_propertiesBtnId,
+        m_diagnosticsBtnId, m_initializeBtnId, m_wipeBtnId,
+        m_verifyEntireDiskBtnId, m_verifyPartitionBtnId, m_mountBtnId,
+        m_unmountBtnId, m_deleteBtnId, m_wholeEraseBtnId};
+    m_actionFocus = disk_manager_surface_verification_ui::move_active_action_focus(
+        m_window, candidates,
+        sizeof(candidates) / sizeof(candidates[0]),
+        m_actionFocus, delta);
+    updateInitializeControls();
+    invalidate();
 }
 
 void DiskManagerApp::activateKeyboardAction() {
@@ -7693,25 +7952,9 @@ void DiskManagerApp::activateKeyboardAction() {
         return;
     }
     if (m_keyboardPane != KEYBOARD_ACTIONS) return;
-    if (m_actionFocus == 0) {
-        scanDisks();
-        invalidate();
-    } else if (m_actionFocus == 1) {
-        m_detailsMode = DETAILS_PROPERTIES;
-        m_keyboardPane = KEYBOARD_DETAILS;
-        invalidate();
-    } else if (m_actionFocus == 2) {
-        m_detailsMode = DETAILS_DIAGNOSTICS;
-        m_keyboardPane = KEYBOARD_DETAILS;
-        m_detailScroll = 0;
-        invalidate();
-    } else if (m_actionFocus == 3 && m_initializeBtnId >= 0) {
-        onWidgetClick(m_initializeBtnId);
-    } else if (m_actionFocus == 4 && m_wipeBtnId >= 0) {
-        onWidgetClick(m_wipeBtnId);
-    } else if (m_actionFocus == 5 && m_wholeEraseBtnId >= 0) {
-        onWidgetClick(m_wholeEraseBtnId);
-    }
+    const int widgetId = activeActionWidgetIdAt(m_actionFocus);
+    app::dispatch_button_activation(m_window, widgetId,
+        [this](int id) { onWidgetClick(id); });
 }
 
 void DiskManagerApp::onKeyDown(uint32_t key) {
@@ -7730,6 +7973,13 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
         return;
     }
     if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED) {
+        if (m_dialogIsVerification && key == 0x114) {
+            scanDisks();
+            invalidate();
+            return;
+        }
+        const bool verificationConfirm = m_dialogIsVerification &&
+            m_initializeDialogState == INITIALIZE_DIALOG_VERIFY_CONFIRM;
         const bool wipeConfirm = m_dialogIsWipe &&
             m_initializeDialogState == INITIALIZE_DIALOG_WIPE_CONFIRM;
         const bool wipeRunning = m_dialogIsWipe &&
@@ -7741,6 +7991,10 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             m_initializeDialogState == INITIALIZE_DIALOG_WHOLE_ERASE_RUNNING &&
             disk_manager_whole_disk_erase_ui::whole_erase_job_running(
                 m_wholeEraseJob);
+        const bool verificationRunning = m_dialogIsVerification &&
+            m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
+            disk_manager_surface_verification_ui::verification_job_running(
+                m_surfaceVerificationJob);
         if (wholeEraseRunning && (tab || enter)) {
             serial::puts("[dm34-stop] keyboard-key-received key=0x");
             serial::put_hex32(key);
@@ -7750,6 +8004,10 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
         }
         if (escape) {
             closeInitializeDialog();
+        } else if (verificationConfirm && tab) {
+            m_createInputFocus = m_createInputFocus == 2 ? 3 : 2;
+            updateInitializeControls();
+            invalidate();
         } else if (wipeConfirm && tab) {
             m_createInputFocus = m_createInputFocus == 0 ? 2 :
                 (m_createInputFocus == 2 ? 3 : 0);
@@ -7761,16 +8019,17 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             updateInitializeControls();
             invalidate();
         } else if (
-            disk_manager_whole_disk_erase_ui::running_tab_navigation_enabled(
+            disk_manager_surface_verification_ui::running_tab_navigation_enabled(
                 m_initializeDialogState == INITIALIZE_DIALOG_RUNNING,
-                wholeEraseRunning) && tab) {
+                wholeEraseRunning, verificationRunning) && tab) {
             const bool formatScanCancelable = m_dialogIsFormat &&
                 !m_formatJob.commitStarted &&
                 (m_formatJob.state == storage::FAT32_FORMAT_JOB_SCANNING ||
                  m_formatJob.state == storage::FAT32_FORMAT_JOB_READY_TO_COMMIT);
             m_createInputFocus =
-                disk_manager_whole_disk_erase_ui::running_tab_focuses_stop_button(
-                    wipeRunning, wholeEraseRunning, formatScanCancelable)
+                disk_manager_surface_verification_ui::running_tab_focuses_stop_button(
+                    wipeRunning, wholeEraseRunning, formatScanCancelable,
+                    verificationRunning)
                 ? 2 : 0;
             if (wholeEraseRunning) {
                 serial::puts("[dm34-stop] keyboard-focus key=Tab focus=");
@@ -7804,6 +8063,23 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
                 [this](int id) { onWidgetClick(id); });
             serial::puts("[dm34-stop] keyboard-dispatch result=");
             serial::puts(dispatched ? "accepted\n" : "rejected\n");
+        } else if (enter && verificationRunning && m_createInputFocus == 2) {
+            app::dispatch_focused_button_activation(m_window,
+                m_cancelInitializeBtnId,
+                app::focused_button_widget_id_for_index(
+                    m_createInputFocus, 2, m_cancelInitializeBtnId), key,
+                [this](int id) { onWidgetClick(id); });
+        } else if (enter && verificationConfirm &&
+                   (m_createInputFocus == 2 || m_createInputFocus == 3)) {
+            const bool startFocused = m_createInputFocus == 3;
+            const int focusedButtonId = startFocused
+                ? m_confirmInitializeBtnId : m_cancelInitializeBtnId;
+            app::dispatch_focused_button_activation(m_window,
+                focusedButtonId,
+                app::focused_button_widget_id_for_index(
+                    m_createInputFocus, startFocused ? 3 : 2,
+                    focusedButtonId), key,
+                [this](int id) { onWidgetClick(id); });
         } else if (enter &&
                    m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
                    m_dialogIsFormat && m_createInputFocus == 2 &&
@@ -7930,6 +8206,9 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
         } else if (enter && m_initializeDialogState ==
                    INITIALIZE_DIALOG_WHOLE_ERASE_RESULT) {
             closeInitializeDialog();
+        } else if (enter && m_initializeDialogState ==
+                   INITIALIZE_DIALOG_VERIFY_RESULT) {
+            closeInitializeDialog();
         }
         return;
     }
@@ -7968,8 +8247,7 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             selectListItem(m_disks[m_selectedDisk].itemCount - 1);
     } else if ((key == shell::KEY_LEFT || key == shell::KEY_RIGHT) &&
                m_keyboardPane == KEYBOARD_ACTIONS) {
-        m_actionFocus = (m_actionFocus + (key == shell::KEY_RIGHT ? 1 : 5)) % 6;
-        invalidate();
+        moveActionFocus(key == shell::KEY_RIGHT ? 1 : -1);
     } else if (enter) {
         activateKeyboardAction();
     }
@@ -8002,6 +8280,13 @@ void DiskManagerApp::onKeyChar(char c) {
           m_createInputFocus == 2 &&
           disk_manager_whole_disk_erase_ui::whole_erase_job_running(
               m_wholeEraseJob)) ||
+         (m_dialogIsVerification && m_initializeDialogState ==
+            INITIALIZE_DIALOG_VERIFY_CONFIRM &&
+          (m_createInputFocus == 2 || m_createInputFocus == 3)) ||
+         (m_dialogIsVerification && m_initializeDialogState ==
+            INITIALIZE_DIALOG_RUNNING && m_createInputFocus == 2 &&
+          disk_manager_surface_verification_ui::verification_job_running(
+              m_surfaceVerificationJob)) ||
          (m_initializeDialogState == INITIALIZE_DIALOG_CLOSED &&
           m_keyboardPane == KEYBOARD_ACTIONS))) {
         onKeyDown(32);
@@ -8178,6 +8463,20 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
         }
         return;
     }
+    if (widgetId == m_cancelInitializeBtnId && m_dialogIsVerification &&
+        m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
+        disk_manager_surface_verification_ui::verification_job_running(
+            m_surfaceVerificationJob)) {
+        if (storage::request_surface_verification_stop(
+                m_surfaceVerificationJob)) {
+            strcopy(m_statusMessage,
+                "Stop requested. The current bounded read will settle before another batch starts.",
+                sizeof(m_statusMessage));
+            updateInitializeControls();
+            invalidate();
+        }
+        return;
+    }
     if (widgetId == m_cancelInitializeBtnId && m_dialogIsWholeErase &&
         m_initializeDialogState == INITIALIZE_DIALOG_WHOLE_ERASE_RUNNING &&
         disk_manager_whole_disk_erase_ui::whole_erase_job_running(
@@ -8267,6 +8566,14 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
     } else if (widgetId == m_wholeEraseBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
         beginWholeDiskEraseConfirmation();
+    } else if (widgetId == m_verifyEntireDiskBtnId &&
+               m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
+        beginSurfaceVerification(
+            disk_manager_surface_verification_ui::VERIFY_ENTIRE_DISK);
+    } else if (widgetId == m_verifyPartitionBtnId &&
+               m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
+        beginSurfaceVerification(
+            disk_manager_surface_verification_ui::VERIFY_PARTITION);
     } else if (widgetId == m_propertiesBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
         m_detailsMode = DETAILS_PROPERTIES;
@@ -8301,6 +8608,9 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
                m_initializeDialogState ==
                    INITIALIZE_DIALOG_WHOLE_ERASE_CONFIRM) {
         runWholeDiskEraseOperation();
+    } else if (widgetId == m_confirmInitializeBtnId &&
+               m_initializeDialogState == INITIALIZE_DIALOG_VERIFY_CONFIRM) {
+        runSurfaceVerificationOperation();
     } else if (widgetId == m_confirmInitializeBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS) {
         if (m_dialogIsFormat) runFormatOperation();
@@ -8402,6 +8712,15 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     if (m_selectedDisk < 0 || m_selectedDisk >= m_diskCount) {
         disk_manager_draw_clipped(rightX + 6, y + 32, rightW - 12,
             "Select a registered disk to view its volumes and properties.", kSubText);
+        if (m_dialogIsVerification && m_initializeDialogState !=
+                INITIALIZE_DIALOG_CLOSED) {
+            const uint32_t panelX = rightX + 8;
+            const uint32_t panelY = y + 70;
+            const uint32_t panelW = rightW > 24 ? rightW - 16 : rightW;
+            const uint32_t panelH = bodyBottom > 78
+                ? static_cast<uint32_t>(bodyBottom - 76) : 90;
+            drawSurfaceVerificationPanel(panelX, panelY, panelW, panelH);
+        }
         if (m_dialogIsWipe && m_initializeDialogState !=
                 INITIALIZE_DIALOG_CLOSED) {
             const uint32_t panelX = rightX + 8;
@@ -9855,6 +10174,8 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                     m_initializeResult.rollbackSucceeded ? kSubText : 0xFFFFB0A0);
             }
         }
+        if (m_dialogIsVerification)
+            drawSurfaceVerificationPanel(panelX, panelY, panelW, panelH);
     }
 
     if (m_mountDialogOpen) {
@@ -11611,7 +11932,457 @@ void DiskManagerApp::completeWholeDiskEraseOperation() {
     invalidate();
 }
 
+void DiskManagerApp::beginSurfaceVerification(
+    disk_manager_surface_verification_ui::VerificationScope scope) {
+    using namespace disk_manager_surface_verification_ui;
+    if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED ||
+        m_mountDialogOpen || m_selectedDisk < 0 ||
+        m_selectedDisk >= m_diskCount) return;
+
+    DiskEntry& disk = m_disks[m_selectedDisk];
+    const bool entireDisk = scope == VERIFY_ENTIRE_DISK;
+    if ((entireDisk && m_selectedObject != SELECTED_DISK) ||
+        (!entireDisk && (m_selectedObject != SELECTED_PARTITION ||
+            m_selectedPart < 0 || m_selectedPart >= disk.partCount))) {
+        strcopy(m_statusMessage,
+            "Select the parent disk row or one validated partition row.",
+            sizeof(m_statusMessage));
+        invalidate();
+        return;
+    }
+
+    storage::TargetIdentity liveIdentity = {};
+    storage::DeviceCapabilities liveCapabilities = {};
+    if (!storage::capture_target_identity(disk.devIndex, liveIdentity) ||
+        !storage::target_identities_equal(disk.identity, liveIdentity) ||
+        storage::revalidate_target_identity(disk.identity) !=
+            storage::TARGET_VALID ||
+        !storage::query_device_capabilities(disk.devIndex, liveCapabilities)) {
+        strcopy(m_statusMessage,
+            "The selected device registration is unavailable or changed. Refresh and select it again.",
+            sizeof(m_statusMessage));
+        invalidate();
+        return;
+    }
+
+    AdmissionBlockReason admission = ADMISSION_READY;
+    if (entireDisk) {
+        admission = build_entire_disk_target(true, true,
+            !storage::storage_operation_active(), liveIdentity,
+            liveCapabilities, m_surfaceVerificationTarget);
+    } else {
+        if (!storage::parse_partition_table(disk.devIndex,
+                                            s_diskManagerTableScratch) ||
+            !partitionTableMatchesDiskCache(disk,
+                                            s_diskManagerTableScratch)) {
+            strcopy(m_statusMessage,
+                "The partition map changed since selection. Refresh and select the partition again.",
+                sizeof(m_statusMessage));
+            invalidate();
+            return;
+        }
+        admission = build_partition_target(true, true,
+            !storage::storage_operation_active(), liveIdentity,
+            liveCapabilities, s_diskManagerTableScratch,
+            disk.parts[m_selectedPart].parsed, m_surfaceVerificationTarget);
+    }
+    if (admission != ADMISSION_READY) {
+        m_surfaceVerificationBlockReason = admission;
+        strcopy(m_statusMessage, admission_block_reason_text(admission),
+                sizeof(m_statusMessage));
+        invalidate();
+        return;
+    }
+    if (storage::revalidate_target_identity(liveIdentity) !=
+            storage::TARGET_VALID) {
+        strcopy(m_statusMessage,
+            "The selected device registration changed during target capture. Refresh and select it again.",
+            sizeof(m_statusMessage));
+        invalidate();
+        return;
+    }
+
+    m_surfaceVerificationBlockReason = ADMISSION_READY;
+    memset(&m_surfaceVerificationJob, 0, sizeof(m_surfaceVerificationJob));
+    m_surfaceVerificationJob.request = m_surfaceVerificationTarget.request;
+    m_surfaceVerificationJob.result.targetIdentity = liveIdentity;
+    m_surfaceVerificationJob.result.startLba =
+        m_surfaceVerificationTarget.request.startLba;
+    m_surfaceVerificationJob.result.totalSectors =
+        m_surfaceVerificationTarget.request.sectorCount;
+    m_surfaceVerificationJob.result.lastSuccessfulLba = UINT64_MAX;
+    m_surfaceVerificationJob.result.failedLba = UINT64_MAX;
+    m_surfaceVerificationJob.result.state =
+        storage::SURFACE_VERIFICATION_NOT_ADMITTED;
+    m_surfaceVerificationJob.result.reason =
+        storage::SURFACE_VERIFICATION_REASON_NONE;
+    m_dialogIsCreate = false;
+    m_dialogIsFormat = false;
+    m_dialogIsReformat = false;
+    m_dialogIsDelete = false;
+    m_dialogIsGptRepair = false;
+    m_dialogIsWipe = false;
+    m_dialogIsWholeErase = false;
+    m_dialogIsVerification = true;
+    m_closeAfterVerification = false;
+    m_createInputFocus = 2;
+    m_initializeMessage[0] = '\0';
+    m_initializeDialogState = INITIALIZE_DIALOG_VERIFY_CONFIRM;
+    updateInitializeControls();
+    invalidate();
+}
+
+storage::SurfaceVerificationReason
+DiskManagerApp::revalidateSurfaceVerificationTarget() {
+    using namespace disk_manager_surface_verification_ui;
+    const VerificationTarget& target = m_surfaceVerificationTarget;
+    if (!m_dialogIsVerification ||
+        m_initializeDialogState != INITIALIZE_DIALOG_VERIFY_CONFIRM ||
+        m_selectedDisk < 0 || m_selectedDisk >= m_diskCount)
+        return storage::SURFACE_VERIFICATION_REASON_TARGET_IDENTITY_CHANGED;
+    if (storage::storage_operation_active())
+        return storage::SURFACE_VERIFICATION_REASON_OPERATION_BUSY;
+
+    const DiskEntry& disk = m_disks[m_selectedDisk];
+    const bool diskRowSelected = m_selectedObject == SELECTED_DISK;
+    const bool partitionRowSelected = m_selectedObject == SELECTED_PARTITION;
+    const storage::PartitionEntry* currentPartition = nullptr;
+    if (partitionRowSelected && m_selectedPart >= 0 &&
+        m_selectedPart < disk.partCount)
+        currentPartition = &disk.parts[m_selectedPart].parsed;
+    if (!target_binding_matches_selection(target, diskRowSelected,
+            partitionRowSelected, disk.identity, currentPartition))
+        return storage::SURFACE_VERIFICATION_REASON_TARGET_IDENTITY_CHANGED;
+
+    const storage::RevalidationStatus initialIdentity =
+        storage::revalidate_target_identity(target.request.targetSnapshot);
+    if (initialIdentity == storage::TARGET_DEVICE_MISSING)
+        return storage::SURFACE_VERIFICATION_REASON_DEVICE_REMOVED;
+    if (initialIdentity == storage::TARGET_REGISTRY_CHANGED)
+        return storage::SURFACE_VERIFICATION_REASON_REGISTRATION_INVALIDATED;
+    if (initialIdentity != storage::TARGET_VALID)
+        return storage::SURFACE_VERIFICATION_REASON_TARGET_IDENTITY_CHANGED;
+    storage::TargetIdentity currentIdentity = {};
+    storage::DeviceCapabilities capabilities = {};
+    if (!storage::capture_target_identity(
+            target.request.targetSnapshot.globalIndex, currentIdentity) ||
+        !storage::query_device_capabilities(
+            target.request.targetSnapshot.globalIndex, capabilities))
+        return storage::SURFACE_VERIFICATION_REASON_DEVICE_REMOVED;
+    if (!storage::target_identities_equal(currentIdentity,
+            target.request.targetSnapshot))
+        return storage::SURFACE_VERIFICATION_REASON_TARGET_IDENTITY_CHANGED;
+    if (!live_target_matches_capabilities(currentIdentity, capabilities))
+        return storage::SURFACE_VERIFICATION_REASON_TARGET_IDENTITY_CHANGED;
+    if (!capabilities.readable)
+        return storage::SURFACE_VERIFICATION_REASON_READ_UNAVAILABLE;
+    if (!capabilities.geometryValid || !capabilities.capacityValid ||
+        !storage::valid_geometry(capabilities.totalLogicalSectors,
+            capabilities.logicalSectorSize, nullptr))
+        return storage::SURFACE_VERIFICATION_REASON_UNSUPPORTED_GEOMETRY;
+
+    if (target.scope == VERIFY_ENTIRE_DISK)
+        return target.request.startLba == 0 &&
+            target.request.sectorCount == capabilities.totalLogicalSectors &&
+            target.request.targetSnapshot.totalLogicalSectors ==
+                capabilities.totalLogicalSectors
+            ? storage::SURFACE_VERIFICATION_REASON_NONE
+            : storage::SURFACE_VERIFICATION_REASON_TARGET_IDENTITY_CHANGED;
+
+    if (target.scope != VERIFY_PARTITION || !target.partitionTableCaptured ||
+        !storage::parse_partition_table(disk.devIndex,
+                                        s_diskManagerTableScratch) ||
+        !partition_tables_equal(target.partitionTable,
+                                 s_diskManagerTableScratch) ||
+        !partitionTableMatchesDiskCache(disk, s_diskManagerTableScratch))
+        return storage::SURFACE_VERIFICATION_REASON_TARGET_IDENTITY_CHANGED;
+    const storage::PartitionEntry* parsedPartition = nullptr;
+    for (uint16_t i = 0; i < s_diskManagerTableScratch.partitionCount; ++i) {
+        if (s_diskManagerTableScratch.partitions[i].partitionNumber !=
+                target.partition.partitionNumber) continue;
+        if (parsedPartition)
+            return storage::SURFACE_VERIFICATION_REASON_TARGET_IDENTITY_CHANGED;
+        parsedPartition = &s_diskManagerTableScratch.partitions[i];
+    }
+    const bool partitionValid = parsedPartition &&
+        partition_entries_equal(*parsedPartition, target.partition) &&
+        target.request.startLba == parsedPartition->startLba &&
+        target.request.sectorCount == parsedPartition->sectorCount &&
+        storage::checked_lba_range(capabilities.totalLogicalSectors,
+            target.request.startLba, target.request.sectorCount);
+    if (!partitionValid)
+        return storage::SURFACE_VERIFICATION_REASON_TARGET_IDENTITY_CHANGED;
+    const storage::RevalidationStatus finalIdentity =
+        storage::revalidate_target_identity(target.request.targetSnapshot);
+    if (finalIdentity == storage::TARGET_DEVICE_MISSING)
+        return storage::SURFACE_VERIFICATION_REASON_DEVICE_REMOVED;
+    if (finalIdentity == storage::TARGET_REGISTRY_CHANGED)
+        return storage::SURFACE_VERIFICATION_REASON_REGISTRATION_INVALIDATED;
+    return finalIdentity == storage::TARGET_VALID
+        ? storage::SURFACE_VERIFICATION_REASON_NONE
+        : storage::SURFACE_VERIFICATION_REASON_TARGET_IDENTITY_CHANGED;
+}
+
+void DiskManagerApp::runSurfaceVerificationOperation() {
+    using namespace disk_manager_surface_verification_ui;
+    if (!m_dialogIsVerification || m_initializeDialogState !=
+            INITIALIZE_DIALOG_VERIFY_CONFIRM) return;
+    const storage::SurfaceVerificationReason rejection =
+        revalidateSurfaceVerificationTarget();
+    if (rejection != storage::SURFACE_VERIFICATION_REASON_NONE) {
+        memset(&m_surfaceVerificationJob, 0,
+               sizeof(m_surfaceVerificationJob));
+        m_surfaceVerificationJob.request = m_surfaceVerificationTarget.request;
+        m_surfaceVerificationJob.result.state =
+            storage::SURFACE_VERIFICATION_FAILED;
+        m_surfaceVerificationJob.result.reason = rejection;
+        m_surfaceVerificationJob.result.targetIdentity =
+            m_surfaceVerificationTarget.request.targetSnapshot;
+        m_surfaceVerificationJob.result.startLba =
+            m_surfaceVerificationTarget.request.startLba;
+        m_surfaceVerificationJob.result.totalSectors =
+            m_surfaceVerificationTarget.request.sectorCount;
+        m_surfaceVerificationJob.result.failedLba = UINT64_MAX;
+        m_surfaceVerificationJob.result.lastSuccessfulLba = UINT64_MAX;
+        strcopy(m_surfaceVerificationJob.result.diagnostic,
+            storage::surface_verification_reason_name(rejection),
+            sizeof(m_surfaceVerificationJob.result.diagnostic));
+        completeSurfaceVerificationOperation();
+        return;
+    }
+
+    m_initializeDialogState = INITIALIZE_DIALOG_RUNNING;
+    m_createInputFocus = 0;
+    memset(&m_surfaceVerificationJob, 0, sizeof(m_surfaceVerificationJob));
+    const storage::SurfaceVerificationState state =
+        storage::begin_surface_verification_job(m_surfaceVerificationJob,
+            m_surfaceVerificationTarget.request);
+    if (state == storage::SURFACE_VERIFICATION_RUNNING) {
+        strcopy(m_statusMessage, "Read-only verification running.",
+                sizeof(m_statusMessage));
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
+    completeSurfaceVerificationOperation();
+}
+
+void DiskManagerApp::completeSurfaceVerificationOperation() {
+    const storage::SurfaceVerificationResult& result =
+        m_surfaceVerificationJob.result;
+    strcopy(m_initializeMessage,
+        disk_manager_surface_verification_ui::terminal_message(result),
+        sizeof(m_initializeMessage));
+    if (result.state != storage::SURFACE_VERIFICATION_COMPLETED &&
+        result.diagnostic[0]) {
+        strappend(m_initializeMessage, " ", sizeof(m_initializeMessage));
+        strappend(m_initializeMessage, result.diagnostic,
+                  sizeof(m_initializeMessage));
+    }
+    m_initializeDialogState = INITIALIZE_DIALOG_VERIFY_RESULT;
+    strcopy(m_statusMessage, m_initializeMessage, sizeof(m_statusMessage));
+    updateInitializeControls();
+    invalidate();
+}
+
+void DiskManagerApp::drawSurfaceVerificationPanel(uint32_t x, uint32_t y,
+                                                   uint32_t w, uint32_t h) {
+    using namespace disk_manager_surface_verification_ui;
+    if (w < 36 || h < 42) return;
+    const bool confirming = m_initializeDialogState ==
+        INITIALIZE_DIALOG_VERIFY_CONFIRM;
+    const storage::TargetIdentity& target =
+        m_surfaceVerificationTarget.request.targetSnapshot;
+    const storage::SurfaceVerificationResult& result =
+        m_surfaceVerificationJob.result;
+    const uint32_t panelColor = 0xFF252D3B;
+    framebuffer::fill_rect(x, y, w, h, panelColor);
+    framebuffer::fill_rect(x, y, w, 23,
+        confirming ? 0xFF34465C : 0xFF28543C);
+    disk_manager_draw_clipped(x + 10, y + 7, w - 20,
+        confirming ? "Read-Only Verification Target" :
+            (result.state == storage::SURFACE_VERIFICATION_RUNNING
+                ? "Surface Verification Progress" :
+                  "Surface Verification Result"), 0xFFDCE3F0);
+
+    char line[192], number[24], sizeText[32];
+    uint32_t lineY = y + 32;
+    const char* model = target.model[0] ? target.model : target.name;
+    strcopy(line, "Device: ", sizeof(line));
+    strappend(line, model, sizeof(line));
+    strappend(line, " | Serial: ", sizeof(line));
+    strappend(line, target.serial[0] ? target.serial : "Unavailable",
+              sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFFDCE3F0);
+    lineY += 16;
+
+    strcopy(line, "Scope: ", sizeof(line));
+    strappend(line, scope_name(m_surfaceVerificationTarget.scope),
+              sizeof(line));
+    if (m_surfaceVerificationTarget.scope == VERIFY_PARTITION) {
+        strappend(line, " | Partition ", sizeof(line));
+        disk_manager_u64(m_surfaceVerificationTarget.partition.partitionNumber,
+            number, sizeof(number));
+        strappend(line, number, sizeof(line));
+        if (m_surfaceVerificationTarget.partition.isGpt) {
+            char guid[40];
+            disk_manager_guid_text(
+                m_surfaceVerificationTarget.partition.uniqueGuid,
+                guid, sizeof(guid));
+            strappend(line, " | GUID ", sizeof(line));
+            strappend(line, guid, sizeof(line));
+        } else {
+            strappend(line, " | MBR signature ", sizeof(line));
+            disk_manager_hex32(
+                m_surfaceVerificationTarget.partitionTable.mbrDiskSignature,
+                sizeText, sizeof(sizeText));
+            strappend(line, sizeText, sizeof(line));
+        }
+    }
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFFDCE3F0);
+    lineY += 16;
+
+    uint64_t capacityBytes = 0;
+    if (storage::valid_geometry(target.totalLogicalSectors,
+            target.logicalSectorSize, &capacityBytes))
+        formatSizePrecise(capacityBytes, sizeText, sizeof(sizeText));
+    else strcopy(sizeText, "Unknown", sizeof(sizeText));
+    strcopy(line, "Device capacity: ", sizeof(line));
+    strappend(line, sizeText, sizeof(line));
+    strappend(line, " | Sector size: ", sizeof(line));
+    disk_manager_u64(target.logicalSectorSize, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " bytes", sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFF9AA9BC);
+    lineY += 16;
+
+    const uint64_t startLba = m_surfaceVerificationTarget.request.startLba;
+    const uint64_t sectors =
+        m_surfaceVerificationTarget.request.sectorCount;
+    const uint64_t endLba = sectors != 0 ? startLba + sectors - 1u : startLba;
+    strcopy(line, "Scan range: LBA ", sizeof(line));
+    disk_manager_u64(startLba, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " through ", sizeof(line));
+    disk_manager_u64(endLba, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " | Total sectors: ", sizeof(line));
+    disk_manager_u64(sectors, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFFFFD080);
+    lineY += 17;
+
+    if (confirming) {
+        disk_manager_draw_clipped(x + 10, lineY, w - 20,
+            "Read only: the scan issues sector reads and changes no media.",
+            0xFFB8D8C0);
+        lineY += 17;
+        disk_manager_draw_clipped(x + 10, lineY, w - 20,
+            "Data may change while in use; this is not a stable snapshot.",
+            0xFF9AA9BC);
+        lineY += 17;
+        disk_manager_draw_clipped(x + 10, lineY, w - 20,
+            "Select Start Verification to begin the captured range.",
+            0xFFDCE3F0);
+        return;
+    }
+
+    strcopy(line, "State: ", sizeof(line));
+    strappend(line, storage::surface_verification_state_name(result.state),
+              sizeof(line));
+    strappend(line, " | Successfully examined: ", sizeof(line));
+    disk_manager_u64(result.readableSectors, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " / ", sizeof(line));
+    disk_manager_u64(result.totalSectors, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " sectors", sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFFDCE3F0);
+    lineY += 17;
+
+    strcopy(line, "Last attempted LBA: ", sizeof(line));
+    if (result.failureRangeValid) {
+        disk_manager_u64(result.failedLba, number, sizeof(number));
+        strappend(line, number, sizeof(line));
+    } else if (result.attemptedSectors != 0) {
+        const uint64_t offset = result.attemptedSectors <= result.totalSectors
+            ? result.attemptedSectors - 1u : result.totalSectors - 1u;
+        disk_manager_u64(result.startLba + offset, number, sizeof(number));
+        strappend(line, number, sizeof(line));
+    } else strappend(line, "none", sizeof(line));
+    strappend(line, " | Progress: ", sizeof(line));
+    disk_manager_u64(progress_value(result), number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, "%", sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFF9AA9BC);
+    lineY += 17;
+
+    if (result.state != storage::SURFACE_VERIFICATION_RUNNING) {
+        disk_manager_draw_clipped(x + 10, lineY, w - 20,
+            terminal_message(result),
+            result.state == storage::SURFACE_VERIFICATION_COMPLETED
+                ? 0xFFB8D8C0 : 0xFFFFD080);
+        lineY += 17;
+    }
+    if (result.reason == storage::SURFACE_VERIFICATION_REASON_READ_FAILURE &&
+        result.failureRangeValid) {
+        strcopy(line, "Failed request: LBA ", sizeof(line));
+        disk_manager_u64(result.failedLba, number, sizeof(number));
+        strappend(line, number, sizeof(line));
+        strappend(line, " | Requested sectors: ", sizeof(line));
+        disk_manager_u64(result.failedSectorCount, number, sizeof(number));
+        strappend(line, number, sizeof(line));
+        strappend(line, " | Block status: ", sizeof(line));
+        strappend(line, result.blockStatusValid
+            ? disk_manager_block_status_name(result.blockStatus) : "Unavailable",
+            sizeof(line));
+        disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFFFFB0A0);
+        lineY += 17;
+        if (result.blockDiagnostic.transportDiagnostic.valid &&
+            lineY + 16 < y + h) {
+            const block::TransportIoDiagnostic& transport =
+                result.blockDiagnostic.transportDiagnostic;
+            strcopy(line, "Transport detail: stage ", sizeof(line));
+            disk_manager_u64(transport.stage, number, sizeof(number));
+            strappend(line, number, sizeof(line));
+            strappend(line, " | failing LBA ", sizeof(line));
+            disk_manager_u64(transport.failingLba, number, sizeof(number));
+            strappend(line, number, sizeof(line));
+            disk_manager_draw_clipped(x + 10, lineY, w - 20,
+                line, 0xFFFFB0A0);
+            lineY += 16;
+        }
+    } else if (result.state == storage::SURFACE_VERIFICATION_STOPPED) {
+        strcopy(line, "Remaining unverified sectors: ", sizeof(line));
+        disk_manager_u64(result.unverifiedSectors, number, sizeof(number));
+        strappend(line, number, sizeof(line));
+        disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFFFFD080);
+        lineY += 17;
+    }
+    if (result.diagnostic[0] && lineY + 16 < y + h) {
+        disk_manager_draw_clipped(x + 10, lineY, w - 20,
+            result.diagnostic, 0xFF9AA9BC);
+        lineY += 16;
+    }
+    strcopy(line, "Storage ownership: ", sizeof(line));
+    strappend(line, result.ownershipReleased ? "released" :
+        (result.state == storage::SURFACE_VERIFICATION_RUNNING
+            ? "held for this scan" : "not held"), sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFF9AA9BC);
+}
+
 void DiskManagerApp::closeInitializeDialog() {
+    if (m_dialogIsVerification &&
+        disk_manager_surface_verification_ui::verification_job_running(
+            m_surfaceVerificationJob)) {
+        storage::request_surface_verification_stop(m_surfaceVerificationJob);
+        strcopy(m_statusMessage,
+            "Stop requested. The verification result will show the checked coverage.",
+            sizeof(m_statusMessage));
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
     if (m_dialogIsWholeErase &&
         disk_manager_whole_disk_erase_ui::whole_erase_job_running(
             m_wholeEraseJob)) {
@@ -11661,6 +12432,8 @@ void DiskManagerApp::closeInitializeDialog() {
     m_dialogIsGptRepair = false;
     m_dialogIsWipe = false;
     m_dialogIsWholeErase = false;
+    m_dialogIsVerification = false;
+    m_closeAfterVerification = false;
     m_gptRepairButtonFocus = 0;
     m_createInputFocus = 0;
     m_initializeMessage[0] = '\0';
@@ -11690,6 +12463,13 @@ void DiskManagerApp::closeInitializeDialog() {
         memset(&m_wholeEraseResult, 0, sizeof(m_wholeEraseResult));
         m_wholeEraseConfirmText[0] = '\0';
         m_wholeEraseConfirmationPhrase[0] = '\0';
+    }
+    if (m_surfaceVerificationJob.result.state !=
+            storage::SURFACE_VERIFICATION_RUNNING) {
+        memset(&m_surfaceVerificationJob, 0,
+               sizeof(m_surfaceVerificationJob));
+        memset(&m_surfaceVerificationTarget, 0,
+               sizeof(m_surfaceVerificationTarget));
     }
     updateInitializeControls();
     invalidate();

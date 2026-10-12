@@ -12,6 +12,8 @@
 #include "../kernel/core/include/kernel/surface_verification.h"
 #include "../kernel/core/include/kernel/disk_manager_wipe_ui.h"
 #include "../kernel/core/include/kernel/disk_manager_whole_disk_erase_ui.h"
+#include "../kernel/core/include/kernel/disk_manager_surface_verification_ui.h"
+#include "../kernel/core/include/kernel/widget_activation.h"
 #include "../kernel/core/include/kernel/fs_fat.h"
 #include "../kernel/core/include/kernel/disk_manager_model.h"
 #include "../kernel/core/include/kernel/ramdisk.h"
@@ -7271,9 +7273,36 @@ void run_surface_verification_tests()
     // GUI selection change, duplicate scan, Format, Wipe, or erase from
     // redirecting or competing with the running job.
     {
-        FakeDisk disk(512, 10);
+        FakeDisk disk(512, 131);
+        prepare_whole_disk_mbr(disk);
         const uint8_t index = registerReadFixture(disk, block::BDEV_AHCI,
             4u * 512u, false);
+        storage::PartitionTableModel conflictTable = {};
+        storage::PartitionEntry conflictPartition = {};
+        const bool conflictTableParsed =
+            storage::parse_partition_table(index, conflictTable) &&
+            find_partition_number(conflictTable, 1, conflictPartition);
+        storage::Fat32FormatRequest formatRequest = conflictTableParsed
+            ? make_format_request(index, conflictPartition)
+            : storage::Fat32FormatRequest{};
+        storage::PartitionWipeRequest wipeRequest = conflictTableParsed
+            ? make_partition_wipe_request(index, conflictPartition)
+            : storage::PartitionWipeRequest{};
+        storage::WholeDiskEraseRequest eraseRequest = {};
+        eraseRequest.targetSnapshot = makeRequest(index, 2, 6).targetSnapshot;
+        eraseRequest.expectedRegistryGeneration =
+            eraseRequest.targetSnapshot.registryGeneration;
+        eraseRequest.scope =
+            storage::WHOLE_DISK_ERASE_ALL_ADDRESSABLE_SECTORS;
+        storage::GptRepairRequest repairRequest = {};
+        repairRequest.targetSnapshot = eraseRequest.targetSnapshot;
+        repairRequest.expectedRegistryGeneration =
+            repairRequest.targetSnapshot.registryGeneration;
+        storage::DeletePartitionRequest deleteRequest = conflictTableParsed
+            ? make_delete_request(index, conflictTable.scheme,
+                conflictPartition)
+            : storage::DeletePartitionRequest{};
+        disk.readLog.clear();
         auto request = makeRequest(index, 2, 6);
         storage::SurfaceVerificationJob job = {};
         const auto admitted = storage::begin_surface_verification_job(job,
@@ -7288,23 +7317,30 @@ void run_surface_verification_tests()
             duplicateJob, request);
         storage::Fat32FormatJob format = {};
         const auto formatState = storage::begin_fat32_format_job(format, {});
-        storage::PartitionWipeRequest wipeRequest = {};
-        wipeRequest.targetSnapshot = job.result.targetIdentity;
-        wipeRequest.expectedRegistryGeneration =
-            wipeRequest.targetSnapshot.registryGeneration;
-        wipeRequest.partitionScheme = storage::PARTITION_SCHEME_MBR;
         storage::PartitionWipeJob wipe = {};
         const auto wipeState = storage::begin_partition_wipe_job(wipe,
             wipeRequest);
-        storage::WholeDiskEraseRequest eraseRequest = {};
-        eraseRequest.targetSnapshot = job.result.targetIdentity;
-        eraseRequest.expectedRegistryGeneration =
-            eraseRequest.targetSnapshot.registryGeneration;
-        eraseRequest.scope =
-            storage::WHOLE_DISK_ERASE_ALL_ADDRESSABLE_SECTORS;
         storage::WholeDiskEraseJob erase = {};
         const auto eraseState = storage::begin_whole_disk_erase_job(erase,
             eraseRequest);
+        storage::Fat32FormatResult quickResult = {};
+        const auto quickState = storage::quick_reformat_fat32_partition(
+            formatRequest, quickResult);
+        storage::GptRepairPlan repairPlan = {};
+        storage::GptRepairResult repairResult = {};
+        const auto repairState = storage::prepare_gpt_repair(repairRequest,
+            repairPlan, repairResult);
+        storage::DeletePartitionPlan deletePlan = {};
+        storage::DeletePartitionResult deleteResult = {};
+        const auto deleteState = conflictTableParsed
+            ? storage::prepare_delete_partition(deleteRequest, deletePlan,
+                deleteResult)
+            : storage::DELETE_PARTITION_INVALID_REQUEST;
+        const auto mountResult = conflictTableParsed
+            ? vfs::mount_partition_detailed("/dm35-surface-scan-conflict",
+                index, conflictPartition.partitionNumber)
+            : vfs::PartitionMountResult{0xFF,
+                vfs::PARTITION_MOUNT_INVALID_ARGUMENT};
         const bool unregisterBlocked = !block::unregister_device(index);
         const auto firstStep = storage::step_surface_verification_job(job);
         const bool stopAccepted =
@@ -7327,6 +7363,11 @@ void run_surface_verification_tests()
               eraseState == storage::WHOLE_DISK_ERASE_NOT_ADMITTED &&
               erase.result.reason ==
                   storage::WHOLE_DISK_ERASE_REASON_OPERATION_BUSY &&
+              quickState == storage::FAT32_FORMAT_OPERATION_BUSY &&
+              repairState == storage::GPT_REPAIR_OPERATION_BUSY &&
+              deleteState == storage::DELETE_PARTITION_OPERATION_BUSY &&
+              mountResult.error == vfs::PARTITION_MOUNT_OPERATION_BUSY &&
+              conflictTableParsed &&
               unregisterBlocked &&
               firstStep == storage::SURFACE_VERIFICATION_RUNNING && stopAccepted &&
               terminal == storage::SURFACE_VERIFICATION_STOPPED &&
@@ -7337,7 +7378,7 @@ void run_surface_verification_tests()
               job.result.ownershipReleased && job.ownershipReleaseAttempted &&
               !storage::storage_operation_active() &&
               job.result.readRequests == requestsAtTerminal,
-              "scan ownership blocks duplicates and existing destructive operations, then releases exactly once");
+              "scan ownership blocks duplicates, Format, Quick Reformat, Wipe, Erase, Delete, GPT Repair, mounts, then releases exactly once");
         check(disk.readLog.size() == 1 && disk.readLog.front().lba == 2 &&
               job.result.readableSectors == 4 &&
               job.result.unverifiedSectors == 2,
@@ -7919,6 +7960,274 @@ void run_disk_manager_whole_erase_ui_tests()
         g_checks - checksBefore, g_failures - failuresBefore);
 }
 
+void run_disk_manager_surface_verification_ui_tests()
+{
+    const int checksBefore = g_checks;
+    const int failuresBefore = g_failures;
+    namespace verifyUi = apps::disk_manager_surface_verification_ui;
+
+    FakeDisk disk(512, 131);
+    prepare_whole_disk_mbr(disk);
+    const std::vector<uint8_t> pristine = disk.bytes;
+    const uint8_t index = register_fake(disk, false, true, false,
+        false, 0, 1024u);
+    storage::TargetIdentity target = {};
+    storage::DeviceCapabilities capabilities = {};
+    storage::PartitionTableModel table = {};
+    const bool captured = storage::capture_target_identity(index, target) &&
+        storage::query_device_capabilities(index, capabilities) &&
+        storage::parse_partition_table(index, table);
+    check(captured && !capabilities.writable && capabilities.readable &&
+          verifyUi::valid_partition_table(table),
+          "production target and validated MBR map support a read-only GUI target");
+
+    verifyUi::VerificationTarget whole = {};
+    check(verifyUi::build_entire_disk_target(true, true, true, target,
+              capabilities, whole) == verifyUi::ADMISSION_READY &&
+          whole.scope == verifyUi::VERIFY_ENTIRE_DISK &&
+          whole.request.startLba == 0 &&
+          whole.request.sectorCount == capabilities.totalLogicalSectors &&
+          whole.request.sectorCount == disk.sectorCount,
+          "Verify Entire Disk binds only LBA zero through captured capacity");
+    verifyUi::VerificationTarget rejectedWhole = {};
+    check(verifyUi::build_entire_disk_target(false, true, true, target,
+              capabilities, rejectedWhole) ==
+              verifyUi::ADMISSION_SELECTION_REQUIRED,
+          "partition, unallocated, and absent selections cannot authorize whole-disk scope");
+    check(verifyUi::build_entire_disk_target(true, false, true, target,
+              capabilities, rejectedWhole) == verifyUi::ADMISSION_IDENTITY_INVALID,
+          "stale parent registration disables whole-disk verification");
+    storage::DeviceCapabilities badGeometry = capabilities;
+    badGeometry.geometryValid = false;
+    check(verifyUi::build_entire_disk_target(true, true, true, target,
+              badGeometry, rejectedWhole) == verifyUi::ADMISSION_GEOMETRY_INVALID,
+          "invalid device geometry disables whole-disk verification");
+    badGeometry = capabilities;
+    badGeometry.readable = false;
+    check(verifyUi::build_entire_disk_target(true, true, true, target,
+              badGeometry, rejectedWhole) == verifyUi::ADMISSION_READ_UNAVAILABLE,
+          "unsupported read capability disables whole-disk verification");
+    check(verifyUi::build_entire_disk_target(true, true, false, target,
+              capabilities, rejectedWhole) == verifyUi::ADMISSION_OPERATION_BUSY,
+          "an active shared storage operation blocks a new scan");
+
+    const storage::PartitionEntry partition = table.partitions[0];
+    verifyUi::VerificationTarget partitionTarget = {};
+    check(verifyUi::build_partition_target(true, true, true, target,
+              capabilities, table, partition, partitionTarget) ==
+              verifyUi::ADMISSION_READY &&
+          partitionTarget.scope == verifyUi::VERIFY_PARTITION &&
+          partitionTarget.request.startLba == partition.startLba &&
+          partitionTarget.request.sectorCount == partition.sectorCount &&
+          partitionTarget.request.startLba != 0 &&
+          partitionTarget.request.startLba +
+              partitionTarget.request.sectorCount <= disk.sectorCount &&
+          partitionTarget.partitionTableCaptured,
+          "Verify Partition binds the exact validated table entry extent");
+    check(whole.scope != partitionTarget.scope &&
+          whole.request.startLba != partitionTarget.request.startLba,
+          "disk and partition actions have distinct scopes and requests");
+    verifyUi::VerificationTarget rejectedPartition = {};
+    check(verifyUi::build_partition_target(false, true, true, target,
+              capabilities, table, partition, rejectedPartition) ==
+              verifyUi::ADMISSION_SELECTION_REQUIRED,
+          "disk and unallocated rows cannot authorize Verify Partition");
+    storage::PartitionEntry changedPartition = partition;
+    ++changedPartition.startLba;
+    check(verifyUi::build_partition_target(true, true, true, target,
+              capabilities, table, changedPartition, rejectedPartition) ==
+              verifyUi::ADMISSION_PARTITION_INVALID,
+          "changed selected partition identity is rejected before Start");
+    storage::PartitionTableModel changedTable = table;
+    ++changedTable.mbrDiskSignature;
+    check(!verifyUi::partition_tables_equal(table, changedTable),
+          "a changed partition-table identity invalidates the captured map");
+    changedTable = table;
+    changedTable.partitions[0].endLba += 1;
+    check(!verifyUi::partition_tables_equal(table, changedTable),
+          "a changed entry extent invalidates the captured partition target");
+    storage::PartitionTableModel invalidTable = table;
+    invalidTable.state = storage::DISK_STATE_INVALID_PARTITION_TABLE;
+    check(verifyUi::build_partition_target(true, true, true, target,
+              capabilities, invalidTable, partition, rejectedPartition) ==
+              verifyUi::ADMISSION_PARTITION_TABLE_INVALID,
+          "invalid partition maps do not expose a scan target");
+    check(verifyUi::build_partition_target(true, false, true, target,
+              capabilities, table, partition, rejectedPartition) ==
+              verifyUi::ADMISSION_IDENTITY_INVALID &&
+          verifyUi::build_partition_target(true, true, false, target,
+              capabilities, table, partition, rejectedPartition) ==
+              verifyUi::ADMISSION_OPERATION_BUSY,
+          "stale registrations and duplicate or conflicting operations block partition scans");
+
+    check(verifyUi::target_binding_matches_selection(whole, true, false,
+              target, nullptr) &&
+          !verifyUi::target_binding_matches_selection(whole, false, true,
+              target, &partition) &&
+          verifyUi::target_binding_matches_selection(partitionTarget, false,
+              true, target, &partition) &&
+          !verifyUi::target_binding_matches_selection(partitionTarget, false,
+              true, target, &changedPartition),
+          "captured target cannot follow later selection or partition changes");
+
+    // Building/displaying a target is passive. Only the final normal widget
+    // activation dispatch starts a job; repeat delivery is ignored.
+    app::KernelWindow window;
+    window.widgetCount = 2;
+    window.widgets[0].id = 11;
+    window.widgets[0].type = app::WidgetType::Button;
+    window.widgets[0].visible = true;
+    window.widgets[0].enabled = true;
+    window.widgets[1].id = verifyUi::STOP_SCAN_WIDGET_ID;
+    window.widgets[1].type = app::WidgetType::Button;
+    window.widgets[1].visible = true;
+    window.widgets[1].enabled = true;
+    int starts = 0;
+    const auto startClick = [&window, &starts](int id) {
+        if (id != 11) return;
+        ++starts;
+        window.widgets[0].enabled = false;
+    };
+    check(starts == 0 && verifyUi::STOP_SCAN_WIDGET_ID == 12,
+          "selection and target display alone do not start; Stop Scan uses widget ID 12");
+    const int startFocusedId = app::focused_button_widget_id_for_index(3, 3, 11);
+    check(app::dispatch_focused_button_activation(&window, 11,
+              startFocusedId, '\n', startClick) && starts == 1 &&
+          !app::dispatch_focused_button_activation(&window, 11,
+              startFocusedId, '\n', startClick) && starts == 1,
+          "normal final Enter Start activation begins one job and blocks duplicates");
+    window.widgets[0].enabled = true;
+    check(app::dispatch_focused_button_activation(&window, 11,
+              startFocusedId, 32, startClick) && starts == 2,
+          "Space starts verification through the normal widget dispatcher");
+    window.widgets[0].enabled = true;
+    check(app::dispatch_widget_activation(&window, 11, startClick) &&
+          starts == 3,
+          "pointer Start activation uses the same production widget dispatcher");
+
+    const bool tabReachesStop =
+        verifyUi::running_tab_navigation_enabled(false, false, true) &&
+        verifyUi::running_tab_focuses_stop_button(false, false, false, true);
+    const int stopFocus = tabReachesStop ? 2 : 0;
+    int stops = 0;
+    const auto stopClick = [&stops](int id) {
+        if (id == verifyUi::STOP_SCAN_WIDGET_ID) ++stops;
+    };
+    check(tabReachesStop && stopFocus == 2 &&
+          verifyUi::stop_button_background(true) !=
+              verifyUi::stop_button_background(false) &&
+          app::dispatch_focused_button_activation(&window,
+              verifyUi::STOP_SCAN_WIDGET_ID,
+              app::focused_button_widget_id_for_index(stopFocus, 2,
+                  verifyUi::STOP_SCAN_WIDGET_ID), '\r', stopClick) &&
+          stops == 1,
+          "running verification Tab visibly focuses Stop Scan and Enter dispatches ID 12");
+    check(app::dispatch_focused_button_activation(&window,
+              verifyUi::STOP_SCAN_WIDGET_ID,
+              app::focused_button_widget_id_for_index(stopFocus, 2,
+                  verifyUi::STOP_SCAN_WIDGET_ID), 32, stopClick) &&
+          stops == 2 && app::dispatch_widget_activation(&window,
+              verifyUi::STOP_SCAN_WIDGET_ID, stopClick) && stops == 3,
+          "Space and pointer Stop Scan use normal widget dispatch");
+    window.widgets[1].enabled = false;
+    check(!app::dispatch_focused_button_activation(&window,
+              verifyUi::STOP_SCAN_WIDGET_ID,
+              app::focused_button_widget_id_for_index(stopFocus, 2,
+                  verifyUi::STOP_SCAN_WIDGET_ID), '\n', stopClick) &&
+          !app::dispatch_widget_activation(&window,
+              verifyUi::STOP_SCAN_WIDGET_ID, stopClick) && stops == 3,
+          "disabled terminal Stop Scan cannot be activated by stale keyboard or pointer input");
+
+    const int candidateIds[] = {18, 19, 20};
+    window.widgetCount = 3;
+    window.widgets[0] = {};
+    window.widgets[0].id = 18;
+    window.widgets[0].type = app::WidgetType::Button;
+    window.widgets[0].visible = true;
+    window.widgets[0].enabled = false;
+    window.widgets[1] = {};
+    window.widgets[1].id = 19;
+    window.widgets[1].type = app::WidgetType::Button;
+    window.widgets[1].visible = false;
+    window.widgets[1].enabled = true;
+    window.widgets[2] = {};
+    window.widgets[2].id = 20;
+    window.widgets[2].type = app::WidgetType::Button;
+    window.widgets[2].visible = true;
+    window.widgets[2].enabled = true;
+    check(verifyUi::active_action_count(&window, candidateIds, 3) == 1 &&
+          verifyUi::active_action_widget_id(&window, candidateIds, 3, 0) == 20 &&
+          verifyUi::active_action_widget_id(&window, candidateIds, 3, 1) == -1,
+          "keyboard action focus excludes disabled, hidden, and stale widget IDs");
+
+    storage::SurfaceVerificationResult progress = {};
+    progress.state = storage::SURFACE_VERIFICATION_RUNNING;
+    progress.totalSectors = 100;
+    progress.readableSectors = 99;
+    progress.progressPercent = 99;
+    check(verifyUi::progress_value(progress) == 99,
+          "progress percentage reflects successfully examined sectors");
+    progress.progressPercent = 100;
+    check(verifyUi::progress_value(progress) == 99,
+          "running or failed results cannot present successful 100 percent");
+    progress.state = storage::SURFACE_VERIFICATION_COMPLETED;
+    progress.allSelectedSectorsReadable = true;
+    check(verifyUi::progress_value(progress) == 100 &&
+          std::strstr(verifyUi::terminal_message(progress),
+              "All selected sectors were readable during this scan") != nullptr,
+          "100 percent and success wording require successful terminal completion");
+    progress.state = storage::SURFACE_VERIFICATION_STOPPED;
+    progress.unverifiedSectors = 1;
+    check(std::strstr(verifyUi::terminal_message(progress),
+              "remaining sectors were not checked") != nullptr,
+          "Stop result says remaining sectors were not checked");
+    progress.state = storage::SURFACE_VERIFICATION_FAILED;
+    progress.reason = storage::SURFACE_VERIFICATION_REASON_READ_FAILURE;
+    progress.failureRangeValid = true;
+    progress.failedLba = 50;
+    progress.failedSectorCount = 4;
+    progress.blockStatusValid = true;
+    progress.blockStatus = block::BLOCK_ERR_TIMEOUT;
+    check(std::strstr(verifyUi::terminal_message(progress),
+              "encountered a read error") != nullptr &&
+          progress.failedLba == 50 && progress.failedSectorCount == 4 &&
+          progress.blockStatus == block::BLOCK_ERR_TIMEOUT,
+          "read failure retains the actual requested range and transport status");
+    progress.reason = storage::SURFACE_VERIFICATION_REASON_DEVICE_REMOVED;
+    check(std::strstr(verifyUi::terminal_message(progress),
+              "device is no longer available") != nullptr,
+          "device removal has a distinct terminal message");
+    progress.reason = storage::SURFACE_VERIFICATION_REASON_REGISTRATION_INVALIDATED;
+    check(std::strstr(verifyUi::terminal_message(progress),
+              "original device identity changed") != nullptr,
+          "replacement or generation change has a distinct terminal message");
+
+    storage::SurfaceVerificationJob closeJob = {};
+    const size_t closeReadsBefore = disk.readLog.size();
+    const auto closeAdmitted = storage::begin_surface_verification_job(
+        closeJob, whole.request);
+    check(!verifyUi::request_stop_before_close(closeJob) &&
+          closeJob.result.stopRequested &&
+          closeAdmitted == storage::SURFACE_VERIFICATION_RUNNING &&
+          verifyUi::verification_job_running(closeJob),
+          "active application Close requests Stop and retains the admitted job");
+    const auto closeSettled =
+        storage::step_surface_verification_job(closeJob);
+    check(closeSettled == storage::SURFACE_VERIFICATION_STOPPED &&
+          closeJob.result.ownershipReleased &&
+          !storage::storage_operation_active() &&
+          disk.readLog.size() == closeReadsBefore &&
+          verifyUi::request_stop_before_close(closeJob),
+          "Close waits for safe terminal settlement, releases ownership, and then permits destruction");
+
+    check(disk.bytes == pristine && disk.writeAttempts == 0 &&
+          disk.writes == 0 && disk.flushes == 0,
+          "GUI target admission and dispatch introduce no media writes or Flush");
+    unregister_fake(index, disk);
+    std::printf("DM35 Disk Manager surface-verification GUI: %d checks, %d failures\n",
+        g_checks - checksBefore, g_failures - failuresBefore);
+}
+
 int main()
 {
     run_nvme_logic_tests();
@@ -7934,6 +8243,7 @@ int main()
     run_surface_verification_tests();
     run_disk_manager_wipe_ui_tests();
     run_disk_manager_whole_erase_ui_tests();
+    run_disk_manager_surface_verification_ui_tests();
 
     check(storage::crc32("123456789", 9) == 0xCBF43926u, "CRC32 standard test vector");
     check(storage::valid_geometry(10, 512), "512-byte geometry accepted");

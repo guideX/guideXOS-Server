@@ -154,7 +154,7 @@ Builds passed:
 No QEMU guest or physical storage was used. No destructive guest campaign was
 repeated. PacMan sources and build behavior were not changed.
 
-## Deferred GUI and guest continuation
+## Continuation 2 — production GUI integration and deferred guest qualification
 
 The proposed Disk Manager flow is:
 
@@ -171,6 +171,148 @@ The proposed Disk Manager flow is:
    infrastructure failure distinctly. Never label every sector in a failed
    batch unreadable without additional bounded evidence.
 
-The GUI, application Close behavior, real transport/QEMU read scans, guest
-counter deltas, and future UI runtime qualification remain for the next DM35
-continuation. `.phase` is intentionally not advanced to DM36.
+The first four items above describe the GUI contract now integrated in
+Continuation 2. Real transport/QEMU read scans, guest counter deltas, and
+runtime UI qualification remain deferred. `.phase` is intentionally not
+advanced to DM36.
+
+### Host result: `DM35_GUI_READY`
+
+Starting state was the required `DISK_MANAGER_IMPROVEMENTS` branch at
+`0549fb02fb1ffd14e6edd31d771e40d2364bfab5`, with a clean tracked worktree and
+`.phase` at `last_completed=DM34`, `next_expected=DM35`. The authoritative
+engine evidence above was retained. This is a successful host continuation;
+DM35 remains active and the phase file remains unchanged.
+
+### Production GUI integration
+
+`kernel/core/kernel_apps.cpp` integrates verification in the existing
+`DiskManagerApp` operation modal, cooperative `update()` loop, inventory
+refresh path, operation lease, window-close guard, and ordinary widget
+dispatcher. It does not introduce another window or operation framework.
+`kernel/core/include/kernel/disk_manager_surface_verification_ui.h` contains
+the production target-binding, result wording, progress, and action-focus
+helpers; `kernel/core/include/kernel/kernel_apps.h` stores the captured target
+and job. The two scope actions are created as widget IDs **18** (Verify Entire
+Disk) and **19** (Verify Partition), after existing widget IDs. Stop Scan
+reuses the existing modal Cancel button, widget ID **12**, preserving DM34's
+Stop Erase and Stop Wipe routing.
+
+**Verify Entire Disk** is exposed for a selected parent disk row only. Its
+extent is constructed from the captured device capacity as LBA 0 through
+`totalLogicalSectors - 1`; no caller-provided arbitrary extent is accepted.
+Admission requires the exact current registration, valid nonzero capacity and
+logical-sector geometry, read capability, and an idle shared operation lease.
+It does not require write or Flush capability and does not inherit erase's
+boot/root/mount denial policy. A running or mounted volume can be read when
+the actual registration/read/lifetime checks permit it.
+
+**Verify Partition** is exposed for a selected, valid partition row. Admission
+captures the parent registration/incarnation and registry generation, exact
+partition number and MBR/GPT table identity, parsed bounds, and logical-sector
+geometry. The selected map is freshly parsed and compared with the inventory
+cache before opening the explicit confirmation and again immediately before
+Start. The entry must still match exactly, and checked range arithmetic keeps
+the scan inside device capacity. Unallocated space, invalid maps, stale
+registrations, changed entries, and unsupported read paths cannot start a
+partition scan. The engine receives only the immutable captured extent; later
+inventory selection changes cannot redirect it.
+
+Neither action starts a job on selection. The confirmation identifies scope,
+device/model and serial, capacity, sector size, exact scan range, and
+read-only behavior, and requires a separate **Start Verification** activation.
+It explains that active data can change during reads and the scan is not a
+stable snapshot. No typing phrase is required.
+
+The progress panel reads engine state and counters: total and successfully
+examined sectors, last attempted LBA, engine percentage, and current state.
+Only successful completed terminal state may display 100%. **Stop Scan** is
+widget ID 12 and routes through the ordinary keyboard/pointer widget
+dispatcher to `request_surface_verification_stop`. Tab includes the active
+verification state, visibly focuses Stop Scan, and Enter/Space dispatch the
+focused ID through the existing dispatcher. Dynamic action focus excludes
+hidden, disabled, and stale widgets. The action buttons use the same
+dispatcher; repeated Start is unavailable after transition to Running.
+
+Completed UI says “All selected sectors were readable during this scan” and
+shows the completed count. Stopped UI says “Verification stopped — remaining
+sectors were not checked” and retains coverage. Read failures show the exact
+failed requested LBA/count, block status and bounded transport details when
+available, plus successful coverage; a failed multi-sector request is not
+described as individually bad sectors. Device removal and registration/target
+identity changes have distinct terminal messages.
+
+Window Close and Alt+F4 during a scan request Stop and keep the app/job alive.
+The cooperative update path settles the bounded synchronous read, observes
+Stop before another batch, waits for engine terminal settlement and ownership
+release, then closes the window. Close after terminal settlement is allowed.
+During F5 inventory refresh, the panel continues to show the captured target;
+the running job never follows a changed disk number or same-capacity
+replacement. Removal is handled by the pinned engine registration and cannot
+continue on a newly registered device.
+
+The engine's shared `StorageOperationLease` remains authoritative. Focused
+regressions cover a duplicate surface scan and active scan conflicts with
+FAT32 Format, Quick Reformat, Partition Wipe, Entire-Disk Erase, Delete
+Partition, GPT Repair, unregister, and new mount admission. Existing reverse
+conflict and DM34/DM33 widget regressions remain in the full host suite.
+
+### Host regressions and build evidence
+
+`run_disk_manager_surface_verification_ui_tests()` passes **34/34** checks,
+using production target builders, real block registration/capability and
+partition parsing, engine-backed active Close settlement, and the production
+widget activation/focus helpers. The read-only engine regressions pass
+**48/48**. `scripts/run-storage-manager-tests.ps1` passes **1,192/1,192**
+storage checks, including **249** USB checks, existing device lifetime and
+removal/replacement, operation conflicts, DM34 Stop Erase, Partition Wipe
+Stop, and DM33 Cancel/widget routing. Widget activation passes; USB trace
+classification passes **7/7**, GPT verification **1/1**, and the DM30 GPT
+fixture verifier **1/1**. The final runner log is
+`out/dm35-storage-test-7d31e6097e1242e38c6c5561e6694ddc.log`.
+
+The isolated AMD64 production kernel build passed with
+`NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0`:
+`out/dm35-amd64-build-4aa77619a8c443cdbd5129bc811ef0a2.log`.
+`build.bat` passed; the previous ignored `guideXOSServer.exe` was restored
+byte-for-byte after the build. UEFI x64 Release passed with isolated output
+and intermediate directories:
+`out/dm35-uefi-release-0bb3ceba4005430a836323c4575d4bf0.log`.
+`git diff --check` passed.
+
+The separate `build.ps1 -Arch amd64` attempt stopped at the known unrelated
+PacMan Native ELF link errors `pacman_audio_load_resources` and
+`pacman_audio_submit`, recorded in
+`out/dm35-powershell-build-b58a64bcf3d34349aa89ea953ad2c066.log`. PacMan
+sources were not changed; its tracked generated outputs were restored to
+their pre-run contents. This does not affect the passing AMD64 kernel,
+`build.bat`, or UEFI Release results. No QEMU guest, physical media, or
+destructive test was used.
+
+### Deferred QEMU acceptance contract
+
+The following DM35 guest campaign is prepared but was **not run** in this
+host-only continuation. Use the previously qualified paced PS/2 QEMU input
+helper and manifest-verified disposable media:
+
+A. **Complete disk verification:** run the real GUI against a patterned
+   disposable device, observe genuine read progress and successful completion,
+   and prove zero scan-attributable writes and no media changes.
+B. **Partition verification:** choose one partition and prove reads stay
+   inside its captured extent using counters or production diagnostics.
+C. **Stop Scan:** after reads begin, activate Stop through normal pointer or
+   keyboard dispatch; prove safe terminal settlement and lease release.
+D. **Application Close:** Alt+F4 during an active scan must request Stop and
+   settle before window/job destruction.
+E. **Device removal:** remove a scanning disposable USB device; verify the
+   old registration settles as removed/invalidated and a same-capacity
+   replacement receives no continuation of the old scan.
+F. **Read failure:** use a controlled fault-injection fixture or the existing
+   production-linked host proof if QEMU cannot inject a precise safe failure;
+   do not damage media or invent a bad-sector diagnosis.
+G. **Independent integrity:** after each completed or stopped run, release the
+   media image and compare its SHA-256 with the pristine starting image.
+   Separate scan reads from USB registration/startup reads or Flush activity.
+
+DM35 remains active, `.phase` remains `last_completed=DM34`,
+`next_expected=DM35`, and no DM36 work has started.

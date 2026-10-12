@@ -22,6 +22,7 @@
 #include "kernel/disk_manager_wipe_ui.h"
 #include "kernel/whole_disk_erase.h"
 #include "kernel/disk_manager_whole_disk_erase_ui.h"
+#include "kernel/disk_manager_surface_verification_ui.h"
 #include "kernel/disk_manager_model.h"
 #include "kernel/desktop.h"
 #include "kernel/image_adapter.h"
@@ -1236,6 +1237,8 @@ private:
         INITIALIZE_DIALOG_WHOLE_ERASE_RESULT,
         INITIALIZE_DIALOG_RUNNING,
         INITIALIZE_DIALOG_RESULT,
+        INITIALIZE_DIALOG_VERIFY_CONFIRM,
+        INITIALIZE_DIALOG_VERIFY_RESULT,
     };
 
     struct PartEntry {
@@ -1296,6 +1299,15 @@ private:
         uint8_t primaryDiskGuid[16];
         uint8_t backupDiskGuid[16];
         uint32_t mbrDiskSignature;
+        uint32_t gptEntrySize;
+        uint32_t gptEntryArraySectors;
+        uint32_t primaryGptHeaderCrc32;
+        uint32_t backupGptHeaderCrc32;
+        uint32_t primaryGptEntryArrayCrc32;
+        uint32_t backupGptEntryArrayCrc32;
+        uint64_t primaryGptEntryArrayLba;
+        uint64_t backupGptEntryArrayLba;
+        uint16_t tableEntryCount;
         storage::InitializeDiskStatus initializeStatus;
         bool initializeAvailable;
         storage::CreatePartitionStatus createPartitionStatus;
@@ -1326,6 +1338,8 @@ private:
     int m_unmountBtnId;
     int m_wipeBtnId;
     int m_wholeEraseBtnId;
+    int m_verifyEntireDiskBtnId;
+    int m_verifyPartitionBtnId;
     int m_gptBtnId;
     int m_mbrBtnId;
     int m_confirmInitializeBtnId;
@@ -1343,6 +1357,8 @@ private:
     bool m_dialogIsGptRepair;
     bool m_dialogIsWipe;
     bool m_dialogIsWholeErase;
+    bool m_dialogIsVerification;
+    bool m_closeAfterVerification;
     disk_manager_wipe_ui::WipeActionEligibility m_wipeEligibility;
     disk_manager_wipe_ui::WipeActionBlockReason m_wipeBlockReason;
     disk_manager_whole_disk_erase_ui::WholeDiskEraseUiBlockReason
@@ -1377,6 +1393,11 @@ private:
     storage::WholeDiskEraseProbe m_wholeEraseConfirmationProbe;
     storage::WholeDiskEraseResult m_wholeEraseResult;
     storage::WholeDiskEraseJob m_wholeEraseJob;
+    disk_manager_surface_verification_ui::VerificationTarget
+        m_surfaceVerificationTarget;
+    storage::SurfaceVerificationJob m_surfaceVerificationJob;
+    disk_manager_surface_verification_ui::AdmissionBlockReason
+        m_surfaceVerificationBlockReason;
     uint8_t m_lastStorageOperation;
     bool m_mountDialogOpen;
     uint8_t m_mountDialogDeviceIndex;
@@ -1409,6 +1430,9 @@ private:
 
     void        scanDisks();
     void        readPartitionTable(DiskEntry& disk);
+    bool        partitionTableMatchesDiskCache(
+                    const DiskEntry& disk,
+                    const storage::PartitionTableModel& table) const;
     const char* detectFs(uint8_t devIndex, uint64_t lbaStart,
                          uint64_t sectorCount, PartEntry& properties);
     void        formatSize(uint64_t bytes, char* out, int outSize) const;
@@ -1422,6 +1446,9 @@ private:
     void        selectListItem(int index);
     void        moveKeyboardSelection(int delta);
     void        activateKeyboardAction();
+    int         activeActionCount();
+    int         activeActionWidgetIdAt(int index);
+    void        moveActionFocus(int delta);
     void        drawDetails(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                            const DiskEntry& disk);
     void        beginInitializeConfirmation(storage::PartitionScheme scheme);
@@ -1446,6 +1473,13 @@ private:
                     storage::WholeDiskEraseProbe& currentProbe);
     void        runWholeDiskEraseOperation();
     void        completeWholeDiskEraseOperation();
+    void        beginSurfaceVerification(
+                    disk_manager_surface_verification_ui::VerificationScope scope);
+    storage::SurfaceVerificationReason revalidateSurfaceVerificationTarget();
+    void        runSurfaceVerificationOperation();
+    void        completeSurfaceVerificationOperation();
+    void        drawSurfaceVerificationPanel(uint32_t x, uint32_t y,
+                    uint32_t w, uint32_t h);
     void        closeInitializeDialog();
     void        beginMountDialog();
     void        confirmPartitionMount();
