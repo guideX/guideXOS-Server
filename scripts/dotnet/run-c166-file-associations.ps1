@@ -1952,7 +1952,9 @@ function Invoke-C166OrdinaryBoot([int]$Number,[string]$Kernel,[string]$Ramdisk,
                     # commit/re-query/Reset lifecycle in this same fresh boot.
                     # Return the pending ComboBox value to Managed Notes so
                     # Apply exercises a real ApplicationOverride transition.
-                    $notesSelection=Select-C167DefaultAppsChoice $boot 0 $root
+                    $c170SelectionRoot=Join-Path $root 'c170-default-apps-selection'
+                    New-Item -ItemType Directory -Force -Path $c170SelectionRoot | Out-Null
+                    $notesSelection=Select-C167DefaultAppsChoice $boot 0 $c170SelectionRoot
                     $slotsBeforeApply=Get-C166AssociationDiskState $esp
                     [void](Assert-C167DiskState $slotsBeforeApply 'NoOverride' $false)
                     $apply=Apply-C167DefaultAppsChoice $boot 'ApplicationOverride' `
