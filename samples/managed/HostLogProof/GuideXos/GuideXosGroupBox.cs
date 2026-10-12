@@ -26,7 +26,7 @@ public sealed class GuideXosGroupBox
     public const int MinimumSupportedCoordinate = 0;
     public const int MaximumSupportedCoordinate = 4095;
     public const int MinimumSupportedRenderWidth = 8;
-    public const int MaximumSupportedRenderWidth = 63;
+    public const int MaximumSupportedRenderWidth = 83;
     public const int MinimumSupportedWidth =
         MinimumSupportedRenderWidth * CharacterWidth;
     public const int MaximumSupportedWidth =

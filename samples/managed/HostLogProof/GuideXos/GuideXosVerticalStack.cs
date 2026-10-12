@@ -36,7 +36,7 @@ public sealed class GuideXosVerticalStack
     public const int DefaultMaximumMemberCount = 8;
     public const int MaximumSupportedMemberCount = 8;
     public const int MaximumSupportedCoordinate = 4095;
-    public const int MaximumSupportedWidth = 504;
+    public const int MaximumSupportedWidth = 664;
     public const int MaximumSupportedPadding = 1024;
     public const int MaximumSupportedSpacing = 1024;
     public const int DefaultSpacing = 4;

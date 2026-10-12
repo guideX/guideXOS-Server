@@ -41,7 +41,7 @@ public sealed class GuideXosScrollView
     public const int MinimumSupportedCoordinate = 0;
     public const int MaximumSupportedCoordinate = 4095;
     public const int MinimumSupportedWidth = 24;
-    public const int MaximumSupportedWidth = 504;
+    public const int MaximumSupportedWidth = 664;
     public const int MinimumSupportedHeight = 20;
     public const int MaximumSupportedHeight = 288;
     public const int DefaultMaximumMemberCount = 8;
@@ -574,11 +574,32 @@ public sealed class GuideXosScrollView
         surface.SetRenderTranslation(0, -_viewport.Offset);
         try
         {
+#if GUIDEXOS_PROOF_CONTROL
+            Span<byte> traceLine = stackalloc byte[40];
+#endif
             for (int index = 0; index < _memberCount; index++)
             {
                 if (!IsMemberVisible(index)) continue;
-                if (RenderMember(_members[index].Kind, _members[index].Member, surface) !=
-                        GuideXosResult.Success) return GuideXosResult.InvalidArgument;
+#if GUIDEXOS_PROOF_CONTROL
+                int traceLength = 0;
+                GuideXosText.Append(traceLine, ref traceLength,
+                    "C171-RENDER member-begin index="u8);
+                GuideXosText.AppendUnsigned(traceLine, ref traceLength,
+                    (uint)index);
+                surface.TryLogC171Render(traceLine[..traceLength]);
+#endif
+                GuideXosResult memberResult = RenderMember(_members[index].Kind,
+                    _members[index].Member, surface);
+#if GUIDEXOS_PROOF_CONTROL
+                int traceEndLength = 0;
+                GuideXosText.Append(traceLine, ref traceEndLength,
+                    "C171-RENDER member-end index="u8);
+                GuideXosText.AppendUnsigned(traceLine, ref traceEndLength,
+                    (uint)index);
+                surface.TryLogC171Render(traceLine[..traceEndLength]);
+#endif
+                if (memberResult != GuideXosResult.Success)
+                    return GuideXosResult.InvalidArgument;
             }
         }
         finally

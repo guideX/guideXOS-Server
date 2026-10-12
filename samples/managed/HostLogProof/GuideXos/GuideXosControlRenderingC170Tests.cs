@@ -7,7 +7,7 @@ namespace HostLogProof;
 /// <summary>Hosted checks for the shared button and ComboBox render commands.</summary>
 public static unsafe class GuideXosControlRenderingC170Tests
 {
-    public const int CaseCount = 20;
+    public const int CaseCount = 21;
     public const int ButtonFocusChangeCount = 1000;
     public const int ButtonActivationCount = 500;
     public const int ComboFocusChangeCount = 1000;
@@ -17,7 +17,7 @@ public static unsafe class GuideXosControlRenderingC170Tests
     public const int SettingsCloseReopenCycleCount = 100;
 
     private const int MaximumCapturedCommands = 8;
-    private const int MaximumCapturedCommandBytes = 64;
+    private const int MaximumCapturedCommandBytes = 96;
     private static readonly byte[] s_textCommands =
         new byte[MaximumCapturedCommands * MaximumCapturedCommandBytes];
     private static readonly int[] s_textLengths =
@@ -262,6 +262,19 @@ public static unsafe class GuideXosControlRenderingC170Tests
             s_fillCommandCount == 0;
         passed &= Case(ref cases, fillsUnchanged);
 
+        GuideXosComboBox expandedCombo = new(10, 180,
+            GuideXosComboBox.MaximumSupportedWidth, 18, 1, 24, 3);
+        bool expandedComboReady = expandedCombo.TryAddItem("Expanded") &&
+            expandedCombo.TrySetSelectedIndex(0);
+        expandedCombo.Focus();
+        ClearCapturedCommands();
+        bool expandedComboRendered = expandedComboReady &&
+            expandedCombo.Render(surface) == GuideXosResult.Success &&
+            s_textCommandCount == 1 && CommandLength(0) == 62 &&
+            CommandStartsWith(0, "> [ Expanded"u8) &&
+            CommandEndsWith(0, "v]"u8) && s_fillCommandCount == 0;
+        passed &= Case(ref cases, expandedComboRendered);
+
         bool focusedListCompatibility = CheckListBoxMarkers();
         passed &= Case(ref cases, focusedListCompatibility);
 
@@ -271,7 +284,7 @@ public static unsafe class GuideXosControlRenderingC170Tests
         bool exactCases = cases == CaseCount;
         passed &= exactCases;
         host?.TryLog(passed
-            ? "C170-CONTROL-RENDER cases=20 result=PASS"u8
+            ? "C170-CONTROL-RENDER cases=21 result=PASS"u8
             : "C170-CONTROL-RENDER result=FAIL"u8);
         return passed;
     }

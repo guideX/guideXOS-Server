@@ -1178,6 +1178,10 @@ public:
 
     void onWindowClosed() override {
 #if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+        // A Settings size choice closes the old native window while retaining
+        // this managed application surface. Keep its selector and app identity
+        // so later input dispatch continues to reach the replacement window.
+        if (m_replacingSurface) return;
         const bool returnPending = g_managedReturnLaunchPending &&
             g_activeManagedContext == nullptr;
         if (returnPending) completeManagedReturnIfPending();
@@ -1212,6 +1216,12 @@ public:
             ? static_cast<int>((screenHeight - static_cast<uint32_t>(height)) / 2u) : 0;
         window->w = width;
         window->h = height;
+        if (isManagedSettingsCenterTitle(title)) {
+            // Settings changes size by creating a surface at a supported
+            // geometry. The existing native resize path has no managed
+            // geometry callback, so keep the layout fixed between choices.
+            window->flags &= ~static_cast<uint32_t>(app::WF_RESIZABLE);
+        }
         window->owner = this;
         if (!compositor::KernelCompositor::registerWindow(window)) {
             delete window;
@@ -1239,6 +1249,15 @@ public:
         serial::put_hex32(m_window->id);
         serial::puts(" result=PASS\n");
 #endif
+#endif
+#if defined(GUIDEXOS_PROOF_CONTROL)
+        if (isManagedSettingsCenterTitle(title)) {
+            serial::puts("[C171-WINDOW-CREATE] title=Managed Settings Center width=");
+            serial::put_hex32(static_cast<uint32_t>(width));
+            serial::puts(" height=");
+            serial::put_hex32(static_cast<uint32_t>(height));
+            serial::puts(" result=PASS\n");
+        }
 #endif
         return true;
     }
@@ -1388,6 +1407,15 @@ public:
     }
 
 private:
+    static bool isManagedSettingsCenterTitle(const char* title) {
+        static const char expected[] = "Managed Settings Center";
+        if (!title) return false;
+        for (size_t index = 0; index < sizeof(expected); ++index) {
+            if (title[index] != expected[index]) return false;
+        }
+        return true;
+    }
+
 #if defined(GXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW) && \
     defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
     void completeC152DeferredAction(int32_t managedResult) {

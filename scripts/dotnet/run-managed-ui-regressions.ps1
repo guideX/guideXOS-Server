@@ -109,6 +109,12 @@ $stressMatch = [regex]::Match($hostGate.output,
     '(?m)^C169-STRESS popupCycles=(\d+) scrollViewMovements=(\d+) c168Replays=(\d+) c168ReplayPageCycles=(\d+) c168ReplaySelectionChanges=(\d+) c168ReplayApplyResetCycles=(\d+) c168ReplayPopupCycles=(\d+) settingsCloseReopenCycles=(\d+) result=(PASS|FAIL)\s*$')
 $c170StressMatch = [regex]::Match($hostGate.output,
     '(?m)^C170-STRESS buttonFocusChanges=(\d+) buttonActivations=(\d+) comboFocusChanges=(\d+) dropdownCycles=(\d+) keyboardSelectionChanges=(\d+) pointerSelectionChanges=(\d+) settingsCloseReopenCycles=(\d+) result=(PASS|FAIL)\s*$')
+$c171StressMatch = [regex]::Match($hostGate.output,
+    '(?m)^C171-STRESS layout=(\d+) geometry=(\d+) focus=(\d+) scroll=(\d+) combo=(\d+) lifecycle=(\d+) allocationBytes=(\d+) drift=(\d+) result=(PASS|FAIL)\s*$')
+$c171StressDetailMatch = [regex]::Match($hostGate.output,
+    '(?m)^C171-STRESS-DETAIL generalPageAllocationBytes=(\d+) defaultAppsAttach=(\S+)\s*$')
+$c171WindowLayoutDetailMatch = [regex]::Match($hostGate.output,
+    '(?m)^C171-WINDOW-LAYOUT-DETAIL firstFailedCase=(\d+)\s*$')
 $c167Match = [regex]::Match($settingsGate.output,
     'C167 host UI/state cases=(\d+) stress=(\d+) result=(PASS|FAIL)')
 $c168Match = [regex]::Match($settingsGate.output,
@@ -119,24 +125,32 @@ $baselineSuiteNames = @(
     'C135-PopupMenuHost', 'C137-Wheel', 'C139-SharedViewport',
     'C140-ScrollView', 'C141-VerticalStack', 'C142-MarginsAlignment',
     'C145-Dialogs', 'C146-Settings', 'C146-StoreFormat',
-    'C169-ListBoxRendering', 'C169-Stress')
+    'C169-ListBoxRendering', 'C169-Stress',
+    'C171-WindowLayout', 'C171-Stress')
 $suiteNames = @($suites | ForEach-Object { $_.name })
 $hostSummaryValid = $summaryMatch.Success -and $summaryMatch.Groups[5].Value -eq 'PASS' -and
-    [int]$summaryMatch.Groups[1].Value -eq 16 -and $suites.Count -eq 16 -and
-    [int]$summaryMatch.Groups[2].Value -eq 16 -and
+    [int]$summaryMatch.Groups[1].Value -eq 18 -and $suites.Count -eq 18 -and
+    [int]$summaryMatch.Groups[2].Value -eq 18 -and
     [int]$summaryMatch.Groups[3].Value -eq 0 -and
-    [int]$summaryMatch.Groups[4].Value -eq 560 -and
+    [int]$summaryMatch.Groups[4].Value -eq 603 -and
     @($baselineSuiteNames | Where-Object { $suiteNames -notcontains $_ }).Count -eq 0 -and
     @($suiteNames | Where-Object { $_ -notin $baselineSuiteNames -and
         $_ -notin @('C170-ControlRendering', 'C170-Stress') }).Count -eq 0 -and
     @($suites | Where-Object result -ne 'PASS').Count -eq 0
 $renderingSuite = @($suites | Where-Object name -eq 'C170-ControlRendering')
 $renderingSuitePass = $renderingSuite.Count -eq 1 -and
-    $renderingSuite[0].cases -eq 20 -and $renderingSuite[0].result -eq 'PASS'
+    $renderingSuite[0].cases -eq 21 -and $renderingSuite[0].result -eq 'PASS'
 $renderingStressSuite = @($suites | Where-Object name -eq 'C170-Stress')
 $renderingStressSuitePass = $renderingStressSuite.Count -eq 1 -and
     $renderingStressSuite[0].cases -eq 7 -and
     $renderingStressSuite[0].result -eq 'PASS'
+$windowLayoutSuite = @($suites | Where-Object name -eq 'C171-WindowLayout')
+$windowLayoutStressSuite = @($suites | Where-Object name -eq 'C171-Stress')
+$windowLayoutSuitePass = $windowLayoutSuite.Count -eq 1 -and
+    $windowLayoutSuite[0].cases -eq 35 -and $windowLayoutSuite[0].result -eq 'PASS'
+$windowLayoutStressSuitePass = $windowLayoutStressSuite.Count -eq 1 -and
+    $windowLayoutStressSuite[0].cases -eq 7 -and
+    $windowLayoutStressSuite[0].result -eq 'PASS'
 $c135Pass = $c135Build.status -eq 'PASS'
 $c168Pass = $settingsGate.status -eq 'PASS' -and $c167Match.Success -and
     $c167Match.Groups[3].Value -eq 'PASS' -and $c168Match.Success -and
@@ -155,8 +169,25 @@ $c170StressPass = $c170StressMatch.Success -and
     [int]$c170StressMatch.Groups[6].Value -eq 250 -and
     [int]$c170StressMatch.Groups[7].Value -eq 100 -and
     $renderingSuitePass -and $renderingStressSuitePass
+$c171StressPass = $c171StressMatch.Success -and
+    $c171StressDetailMatch.Success -and
+    [int]$c171StressDetailMatch.Groups[1].Value -eq 0 -and
+    $c171StressDetailMatch.Groups[2].Value -eq 'valid' -and
+    $c171WindowLayoutDetailMatch.Success -and
+    [int]$c171WindowLayoutDetailMatch.Groups[1].Value -eq 0 -and
+    $c171StressMatch.Groups[9].Value -eq 'PASS' -and
+    [int]$c171StressMatch.Groups[1].Value -eq 1000 -and
+    [int]$c171StressMatch.Groups[2].Value -eq 500 -and
+    [int]$c171StressMatch.Groups[3].Value -eq 500 -and
+    [int]$c171StressMatch.Groups[4].Value -eq 250 -and
+    [int]$c171StressMatch.Groups[5].Value -eq 250 -and
+    [int]$c171StressMatch.Groups[6].Value -eq 100 -and
+    [int]$c171StressMatch.Groups[7].Value -eq 0 -and
+    [int]$c171StressMatch.Groups[8].Value -eq 0 -and
+    $windowLayoutSuitePass -and $windowLayoutStressSuitePass
 $gatePassed = $c135Pass -and $hostGate.status -eq 'PASS' -and
-    $hostSummaryValid -and $c168Pass -and $stressPass -and $c170StressPass
+    $hostSummaryValid -and $c168Pass -and $stressPass -and $c170StressPass -and
+    $c171StressPass
 
 $artifactRecords = @(
     foreach ($step in $script:steps) {
@@ -196,7 +227,7 @@ $manifestStatus = if ($gatePassed -and $integrityErrors.Count -eq 0) { 'PASS' } 
 
 $manifest = [ordered]@{
     schemaVersion = 1
-    phase = 'C170-managed-control-rendering-host-regression'
+    phase = 'C171-managed-window-layout-host-regression'
     sourceHead = $sourceHead
     runId = $runId
     status = $manifestStatus
@@ -248,6 +279,21 @@ $manifest = [ordered]@{
         settingsCloseReopenCycles = if ($c170StressMatch.Success) { [int]$c170StressMatch.Groups[7].Value } else { 0 }
         result = if ($c170StressPass) { 'PASS' } else { 'FAIL' }
     }
+    c171ManagedWindowLayout = [ordered]@{
+        focusedCases = if ($windowLayoutSuite.Count -eq 1) { $windowLayoutSuite[0].cases } else { 0 }
+        layoutRecomputations = if ($c171StressMatch.Success) { [int]$c171StressMatch.Groups[1].Value } else { 0 }
+        alternatingGeometryChanges = if ($c171StressMatch.Success) { [int]$c171StressMatch.Groups[2].Value } else { 0 }
+        focusTransitions = if ($c171StressMatch.Success) { [int]$c171StressMatch.Groups[3].Value } else { 0 }
+        scrollViewMovements = if ($c171StressMatch.Success) { [int]$c171StressMatch.Groups[4].Value } else { 0 }
+        comboCycles = if ($c171StressMatch.Success) { [int]$c171StressMatch.Groups[5].Value } else { 0 }
+        lifecycleIterations = if ($c171StressMatch.Success) { [int]$c171StressMatch.Groups[6].Value } else { 0 }
+        hotPathAllocationBytes = if ($c171StressMatch.Success) { [int]$c171StressMatch.Groups[7].Value } else { -1 }
+        generalPageHotPathAllocationBytes = if ($c171StressDetailMatch.Success) { [int]$c171StressDetailMatch.Groups[1].Value } else { -1 }
+        defaultAppsAttachValidation = if ($c171StressDetailMatch.Success) { $c171StressDetailMatch.Groups[2].Value } else { 'missing' }
+        firstFailedCase = if ($c171WindowLayoutDetailMatch.Success) { [int]$c171WindowLayoutDetailMatch.Groups[1].Value } else { -1 }
+        driftCount = if ($c171StressMatch.Success) { [int]$c171StressMatch.Groups[8].Value } else { -1 }
+        result = if ($c171StressPass) { 'PASS' } else { 'FAIL' }
+    }
     c167 = if ($c167Match.Success) {
         [ordered]@{ focusedCases = [int]$c167Match.Groups[1].Value; stressIterations = [int]$c167Match.Groups[2].Value; result = $c167Match.Groups[3].Value }
     } else { [ordered]@{ result = 'FAIL' } }
@@ -269,13 +315,13 @@ $manifestJson = $manifest | ConvertTo-Json -Depth 12
 Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding utf8
 $parsedManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
 $manifestValid = $parsedManifest.schemaVersion -eq 1 -and
-    $parsedManifest.phase -eq 'C170-managed-control-rendering-host-regression' -and
+    $parsedManifest.phase -eq 'C171-managed-window-layout-host-regression' -and
     $parsedManifest.sourceHead -eq $sourceHead -and
     $parsedManifest.status -eq $manifestStatus -and
     $parsedManifest.artifactIntegrity.referencedFiles.Count -eq $artifactRecords.Count -and
     $parsedManifest.artifactIntegrity.result -eq 'PASS'
 if (-not $manifestValid) {
-    Write-Error "Generated C170 host manifest failed schema or reference validation: $manifestPath"
+    Write-Error "Generated C171 host manifest failed schema or reference validation: $manifestPath"
 }
 Write-Host "Managed UI Regression Gate result=$($manifest.status) suites=$($suites.Count) cases=$($summaryMatch.Groups[4].Value) manifest=$manifestPath"
 if (-not $gatePassed -or -not $manifestValid) { exit 1 }

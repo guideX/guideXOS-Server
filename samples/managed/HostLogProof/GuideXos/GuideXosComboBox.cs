@@ -28,7 +28,7 @@ public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
     public const int DefaultVisibleRowCount = GuideXosListBox.DefaultVisibleRowCount;
     public const int MaximumVisibleRowCount = GuideXosListBox.MaximumVisibleRowCount;
     public const int MinimumSupportedWidth = GuideXosButton.MinimumSupportedWidth;
-    public const int MaximumSupportedWidth = GuideXosButton.MaximumSupportedWidth;
+    public const int MaximumSupportedWidth = 664;
     public const int MinimumSupportedHeight = GuideXosButton.MinimumSupportedHeight;
     public const int MaximumSupportedHeight = GuideXosButton.MaximumSupportedHeight;
     public const int MaximumSupportedCoordinate = GuideXosButton.MaximumSupportedCoordinate;
@@ -207,6 +207,20 @@ public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
                 index * _maximumItemTextLength + character];
         }
         return new string(text);
+    }
+
+    /// <summary>Compares an item in-place without allocating a managed string.</summary>
+    public bool IsItemText(int index, ReadOnlySpan<char> text)
+    {
+        if (!IsValidIndex(index) || _itemLengths[index] != text.Length)
+            return false;
+        int offset = index * _maximumItemTextLength;
+        for (int character = 0; character < text.Length; character++)
+        {
+            if (_itemStorage[offset + character] != text[character])
+                return false;
+        }
+        return true;
     }
 
     /// <summary>
@@ -418,9 +432,12 @@ public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
                 GuideXosResult.InvalidArgument;
         }
 
-        Span<byte> line = stackalloc byte[64];
+        Span<byte> line = stackalloc byte[
+            (MaximumSupportedWidth / CharacterWidth) + 2];
         line.Clear();
         int position = 0;
+        int renderColumns = Math.Min(_width / CharacterWidth,
+            GuideXosSurface.MaximumTextLength);
         bool enabled = EffectiveEnabled;
         if (!enabled)
         {
@@ -431,7 +448,7 @@ public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
                 return GuideXosResult.InvalidArgument;
             }
             int disabledLabelWidth = Math.Max(0,
-                (_width / CharacterWidth) - position);
+                renderColumns - position);
             if (IsValidIndex(_selectedIndex))
             {
                 int length = Math.Min(_itemLengths[_selectedIndex],
@@ -458,7 +475,7 @@ public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
             return GuideXosResult.InvalidArgument;
         }
 
-        int labelWidth = Math.Max(0, (_width / CharacterWidth) - position - 3);
+        int labelWidth = Math.Max(0, renderColumns - position - 3);
         if (IsValidIndex(_selectedIndex))
         {
             int length = Math.Min(_itemLengths[_selectedIndex], labelWidth);
@@ -472,7 +489,7 @@ public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
                 }
             }
         }
-        while (position < Math.Max(0, (_width / CharacterWidth) - 3))
+        while (position < Math.Max(0, renderColumns - 3))
         {
             line[position++] = (byte)' ';
         }
@@ -506,7 +523,7 @@ public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
             if (IsValidIndex(index))
             {
                 int length = Math.Min(_itemLengths[index],
-                    Math.Max(0, (_width / CharacterWidth) - position));
+                    Math.Max(0, renderColumns - position));
                 for (int column = 0; column < length; column++)
                 {
                     if (!AppendByte(line, ref position,

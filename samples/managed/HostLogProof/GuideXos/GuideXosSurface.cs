@@ -5,6 +5,8 @@ namespace HostLogProof;
 /// <summary>Opaque managed handle for the current compositor-backed surface.</summary>
 public sealed unsafe class GuideXosSurface
 {
+    public const int MaximumTextLength = 63;
+
     internal readonly struct RenderState
     {
         public RenderState(
@@ -37,6 +39,9 @@ public sealed unsafe class GuideXosSurface
     private int _clipHeight;
     private int _translationX;
     private int _translationY;
+#if GUIDEXOS_PROOF_CONTROL
+    internal bool C171RenderTrace { get; set; }
+#endif
 
     internal GuideXosSurface(GuideXosHost host, ulong handle)
     {
@@ -78,6 +83,13 @@ public sealed unsafe class GuideXosSurface
         _translationY = y;
     }
 
+#if GUIDEXOS_PROOF_CONTROL
+    internal void TryLogC171Render(ReadOnlySpan<byte> text)
+    {
+        if (C171RenderTrace) _host.TryLog(text);
+    }
+#endif
+
     public GuideXosResult TrySetText(int x, int y, ReadOnlySpan<byte> text)
     {
         NativeHostCallTable* table = _host.HostTable;
@@ -85,7 +97,8 @@ public sealed unsafe class GuideXosSurface
         {
             return GuideXosResult.CapabilityUnavailable;
         }
-        if (x < 0 || y < 0 || text.Length > 63) return GuideXosResult.InvalidArgument;
+        if (x < 0 || y < 0 || text.Length > MaximumTextLength)
+            return GuideXosResult.InvalidArgument;
 
         int renderX = x + _translationX;
         int renderY = y + _translationY;

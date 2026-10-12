@@ -27,7 +27,7 @@ public static unsafe class GuideXosDefaultAppsC168Tests
         passed &= Case(ref cases, Start(app, service,
             GuideXosAssociationOverrideState.NoOverride) &&
             page.ControlCount == 8 && app.ScrollViewMemberCount == 8 &&
-            app.View.Width == 504 && app.View.Height == 208 &&
+            app.View.Width == 504 && app.View.Height == 200 &&
             app.View.MaximumMemberCount == 24 && app.View.MaximumOffset == 0 &&
             !app.ScrollBar.Visible && page.Group.MemberCount == 8 &&
             page.Stack.MemberCount == 8 && !app.View.ContainsMember(page.Group));

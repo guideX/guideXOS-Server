@@ -14,7 +14,7 @@ public sealed class GuideXosLabel : IGuideXosVerticalStackMember
     public const int CharacterWidth = 8;
     public const int TextRowHeight = 18;
     public const int DefaultRenderWidth = 48;
-    public const int MaximumRenderWidth = 63;
+    public const int MaximumRenderWidth = 83;
     public const int MinimumSupportedCoordinate = 0;
     public const int MaximumSupportedCoordinate = 4095;
 

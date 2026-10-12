@@ -69,5 +69,18 @@ bool c170StressPassed = RunSuite("C170-Stress", 7,
 allPassed &= c170StressPassed;
 Console.WriteLine($"C170-STRESS buttonFocusChanges={GuideXosControlRenderingC170Tests.ButtonFocusChangeCount} buttonActivations={GuideXosControlRenderingC170Tests.ButtonActivationCount} comboFocusChanges={GuideXosControlRenderingC170Tests.ComboFocusChangeCount} dropdownCycles={GuideXosControlRenderingC170Tests.DropDownCycleCount} keyboardSelectionChanges={GuideXosControlRenderingC170Tests.KeyboardSelectionChangeCount} pointerSelectionChanges={GuideXosControlRenderingC170Tests.PointerSelectionChangeCount} settingsCloseReopenCycles={GuideXosControlRenderingC170Tests.SettingsCloseReopenCycleCount} result={(c170StressPassed ? "PASS" : "FAIL")}");
 
+allPassed &= RunSuite("C171-WindowLayout",
+    GuideXosManagedWindowLayoutC171Tests.CaseCount,
+    () => GuideXosManagedWindowLayoutC171Tests.Run(null));
+Console.WriteLine($"C171-WINDOW-LAYOUT-DETAIL firstFailedCase={GuideXosManagedWindowLayoutC171Tests.FirstFailedCase}");
+Console.WriteLine($"C171-MINIMUM-APPS-DETAIL {GuideXosManagedWindowLayoutC171Tests.MinimumAppsDetail}");
+bool c171StressPassed = RunSuite("C171-Stress",
+    GuideXosManagedWindowLayoutC171Tests.StressCaseCount,
+    () => GuideXosManagedWindowLayoutC171Tests.RunStress(null));
+allPassed &= c171StressPassed;
+Console.WriteLine($"C171-STRESS layout={GuideXosManagedWindowLayoutC171Tests.StressLayoutCount} geometry={GuideXosManagedWindowLayoutC171Tests.StressGeometryChanges} focus={GuideXosManagedWindowLayoutC171Tests.StressFocusTransitions} scroll={GuideXosManagedWindowLayoutC171Tests.StressScrollMovements} combo={GuideXosManagedWindowLayoutC171Tests.StressComboCycles} lifecycle={GuideXosManagedWindowLayoutC171Tests.StressLifecycleIterations} allocationBytes={GuideXosManagedWindowLayoutC171Tests.StressAllocationBytes} drift={GuideXosManagedWindowLayoutC171Tests.StressDriftCount} result={(c171StressPassed ? "PASS" : "FAIL")}");
+Console.WriteLine($"C171-STRESS-DETAIL generalPageAllocationBytes={GuideXosManagedWindowLayoutC171Tests.StressGeneralPageAllocationBytes} defaultAppsAttach={GuideXosManagedWindowLayoutC171Tests.StressAttachDiagnostics}");
+Console.WriteLine($"C171-STRESS-RESULT-DETAIL {GuideXosManagedWindowLayoutC171Tests.StressFailureDetail}");
+
 Console.WriteLine($"MANAGED-UI-HOST-GATE suites={passedSuites + failedSuites} passed={passedSuites} failed={failedSuites} cases={totalCases} result={(allPassed && failedSuites == 0 ? "PASS" : "FAIL")}");
 return allPassed && failedSuites == 0 ? 0 : 1;

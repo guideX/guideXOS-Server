@@ -58,6 +58,15 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 {
     internal const int SurfaceWidth = 560;
     internal const int SurfaceHeight = 340;
+    internal const int MinimumWindowWidth = 512;
+    internal const int MinimumWindowHeight = 222;
+    internal const int MaximumWindowWidth = 720;
+    internal const int MaximumWindowHeight = 420;
+    internal const int CompactWindowWidth = 512;
+    internal const int CompactWindowHeight = 260;
+    internal const int ExpandedWindowWidth = 720;
+    internal const int ExpandedWindowHeight = 420;
+    private const int NativeTitlebarHeight = 24;
     private const int ViewId = 1;
     private const int ScrollBarId = 2;
     private const int DensityComboId = 3;
@@ -72,9 +81,42 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     private const int DefaultAppsComboId = 12;
     private const int ViewCapacity = 24;
     private const int SectionCount = 4;
+    private static readonly int[] SectionTops = { 4, 200, 416, 648 };
     private const uint MenuApply = 1;
     private const uint MenuDefaults = 2;
     private const uint MenuClose = 3;
+    private const uint MenuCompactWindow = 4;
+    private const uint MenuExpandedWindow = 5;
+
+    private readonly struct WindowLayout
+    {
+        public WindowLayout(int windowWidth, int windowHeight, int clientWidth,
+            int clientHeight, int viewY, int viewWidth, int viewHeight,
+            int generalGroupWidth, int defaultAppsGroupWidth)
+        {
+            WindowWidth = windowWidth;
+            WindowHeight = windowHeight;
+            ClientWidth = clientWidth;
+            ClientHeight = clientHeight;
+            ViewY = viewY;
+            ViewWidth = viewWidth;
+            ViewHeight = viewHeight;
+            GeneralGroupWidth = generalGroupWidth;
+            DefaultAppsGroupWidth = defaultAppsGroupWidth;
+        }
+
+        public int WindowWidth { get; }
+        public int WindowHeight { get; }
+        public int ClientWidth { get; }
+        public int ClientHeight { get; }
+        public int ViewY { get; }
+        public int ViewWidth { get; }
+        public int ViewHeight { get; }
+        public int GeneralGroupWidth { get; }
+        public int DefaultAppsGroupWidth { get; }
+        public int FooterY => ClientHeight - GuideXosLabel.TextRowHeight;
+        public bool CompactNavigation => ClientWidth < SurfaceWidth;
+    }
 
     private readonly GuideXosScrollView _view = new(24, 96, 504, 208, ViewCapacity);
     private readonly GuideXosScrollBar _scrollBar = new(532, 96, 16, 208);
@@ -116,7 +158,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     private readonly GuideXosButton _optionsButton = new(420, 20, 112, 22, "Options");
     private readonly GuideXosButton _appsButton = new(420, 48, 112, 22, "Apps");
     private readonly ManagedDefaultAppsPageC167 _defaultAppsPage = new();
-    private readonly GuideXosPopupMenu _menu = new(0, 0, 144, 4, 20);
+    private readonly GuideXosPopupMenu _menu = new(0, 0, 200, 6, 24);
     private readonly GuideXosDialog _resetDialog = new(112, 96, 336, 160,
         "Confirm reset");
     private readonly GuideXosButton _resetCancelButton =
@@ -152,7 +194,18 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     private uint _menuCommand;
     private int _initialContentHeight;
     private int _finalContentHeight;
+    private int _windowWidth = SurfaceWidth;
+    private int _windowHeight = SurfaceHeight;
+    private int _clientWidth = SurfaceWidth;
+    private int _clientHeight = SurfaceHeight - NativeTitlebarHeight;
+    private int _viewY = 96;
+    private int _generalGroupWidth = 272;
+    private int _defaultAppsGroupWidth = 504;
+    private WindowLayout _layout;
     private uint _geometrySequence;
+#if GUIDEXOS_PROOF_CONTROL
+    private bool _traceC171Render;
+#endif
     private GuideXosDialog _activeDialog;
     private bool _resettingComposition;
     private bool _surfaceClosing;
@@ -202,8 +255,12 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     private ManagedSettingsSnapshot _dialogAppliedSnapshot;
     private int _dialogViewportOffset;
 
-    public ManagedSettingsCenter()
+    public ManagedSettingsCenter() : this(SurfaceWidth, SurfaceHeight) { }
+
+    internal ManagedSettingsCenter(int initialWindowWidth, int initialWindowHeight)
     {
+        _windowWidth = initialWindowWidth;
+        _windowHeight = initialWindowHeight;
         _sectionLeaves = new object[][]
         {
             new object[] { _appearanceHeading, _density, _showStatus },
@@ -264,10 +321,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _summaryMode.Changed = OnStatusModeChanged;
         _detailMode.Changed = OnStatusModeChanged;
         _menu.CommandInvoked = OnMenuCommand;
-        _menu.TryAddItem("Apply", MenuApply);
-        _menu.TryAddItem("Reset to defaults", MenuDefaults);
-        _menu.TryAddSeparator();
-        _menu.TryAddItem("Close", MenuClose);
+        ConfigureOptionsMenu();
 
         _resetDialog.TryAddMember(_resetCancelButton);
         _resetDialog.TryAddMember(_resetConfirmButton);
@@ -299,6 +353,16 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     internal GuideXosScrollView View => _view;
     internal GuideXosScrollBar ScrollBar => _scrollBar;
     internal GuideXosControlHost ControlHost => _controlHost;
+    internal int WindowWidth => _windowWidth;
+    internal int WindowHeight => _windowHeight;
+    internal int ClientWidth => _clientWidth;
+    internal int ClientHeight => _clientHeight;
+    internal int FooterY => _clientHeight - GuideXosLabel.TextRowHeight;
+    internal int HeadingY => _layout.CompactNavigation ? 96 : 74;
+    internal GuideXosButton OptionsButton => _optionsButton;
+    internal GuideXosButton NavigationAppsButton => _appsButton;
+    internal bool RecomputeLayoutForTests(int width, int height) =>
+        TryRecomputeLayout(width, height);
     internal int LaunchCount => (int)_launchCount;
     internal int SectionGroupCount => SectionCount;
     internal int LeafControlCount => 18;
@@ -402,7 +466,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 #endif
         if (!ResetComposition()) return GuideXosResult.InvalidArgument;
         GuideXosResult create = host.TryCreateSurface(
-            "Managed Settings Center"u8, SurfaceWidth, SurfaceHeight, out _surface);
+            "Managed Settings Center"u8, _windowWidth, _windowHeight, out _surface);
         if (create != GuideXosResult.Success || _surface == null) return create;
         _window = _surface.Handle;
         if (!_testsRun)
@@ -777,9 +841,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
                 host.TryLog("C144-SCROLL page=PASS offset=changed result=PASS"u8);
             else if (target == OptionsButtonId && result == GuideXosControlHostResult.Activated)
             {
-                bool opened = _menu.Open(_optionsButton.X, _optionsButton.Y + _optionsButton.Height) ==
-                    GuideXosPopupMenuResult.Opened && _controlHost.TryAcquireTransientInputCapture(MenuId);
-                host.TryLog(opened ? "C144-MENU open=PASS capture=menu result=PASS"u8 : "C144-MENU open=FAIL result=FAIL"u8);
+                OpenOptionsMenu();
             }
             else if (target == AppsButtonId && result == GuideXosControlHostResult.Activated)
             {
@@ -1288,6 +1350,9 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 
     private bool ResetComposition()
     {
+        if (!TryCalculateLayout(_windowWidth, _windowHeight,
+                out WindowLayout layout)) return false;
+        _layout = layout;
         _resettingComposition = true;
         if (_resetDialog.IsOpen) _resetDialog.Close(GuideXosDialogResult.None);
         if (_dirtyCloseDialog.IsOpen) _dirtyCloseDialog.Close(GuideXosDialogResult.None);
@@ -1307,11 +1372,16 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _defaultAppsPageActive = false;
         _view.Clear();
         _view.Reset();
+        _scrollBar.ResetTransientState();
+        if (!ApplyChromeGeometry(_layout)) return false;
         for (int section = 0; section < SectionCount; section++)
         {
             _stacks[section].Clear();
             _groups[section].ClearMembers();
-            _groups[section].TrySetBounds(0, 0, 272, section switch { 0 => 180, 1 => 216, 2 => 216, _ => 144 });
+            if (!_groups[section].TrySetBounds(0, 0,
+                    _layout.GeneralGroupWidth,
+                    section switch { 0 => 180, 1 => 216, 2 => 216, _ => 144 }))
+                return false;
             _groups[section].SetVisible(section != 3);
             _groups[section].SetEnabled(true);
             _stacks[section].TrySetPadding(4, 4, 4, 4);
@@ -1342,10 +1412,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _showStatus.SetChecked(true); _showAdvanced.SetChecked(false); _showTips.SetChecked(true);
         _applyButton.Reset(); _defaultsButton.Reset(); _optionsButton.Reset();
         _appsButton.Reset(); _appsButton.SetLabel("Apps");
-        _menu.Reset(); _menu.ClearItems();
-        _menu.TryAddItem("Apply", MenuApply); _menu.TryAddItem("Reset to defaults", MenuDefaults);
-        _menu.TryAddSeparator(); _menu.TryAddItem("Close", MenuClose);
-        _menu.CommandInvoked = OnMenuCommand;
+        ConfigureOptionsMenu();
         _menuCommand = 0;
         _density.TrySetSelectedIndex(_working.Density);
         _speed.TrySetSelectedIndex(_working.ScrollSpeed);
@@ -1380,6 +1447,192 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             compositionValid);
 #endif
         return ok && compositionValid;
+    }
+
+    private static bool TryCalculateLayout(int windowWidth, int windowHeight,
+        out WindowLayout layout)
+    {
+        layout = default;
+        if (windowWidth < MinimumWindowWidth ||
+            windowWidth > MaximumWindowWidth ||
+            windowHeight < MinimumWindowHeight ||
+            windowHeight > MaximumWindowHeight)
+            return false;
+
+        int clientWidth = windowWidth;
+        int clientHeight = windowHeight - NativeTitlebarHeight;
+        int viewY = clientWidth < SurfaceWidth ? 118 : 96;
+        int viewWidth = clientWidth - 56;
+        int viewHeight = clientHeight - viewY - 20;
+        if (viewWidth < GuideXosScrollView.MinimumSupportedWidth ||
+            viewWidth > GuideXosScrollView.MaximumSupportedWidth ||
+            viewHeight < 60 ||
+            viewHeight > GuideXosScrollView.MaximumSupportedHeight)
+            return false;
+
+        int additionalWidth = Math.Max(0, clientWidth - SurfaceWidth);
+        int generalGroupWidth = AlignDownToGrid(Math.Min(
+            GuideXosGroupBox.MaximumSupportedWidth, 272 + additionalWidth));
+        int defaultAppsGroupWidth = AlignDownToGrid(Math.Min(
+            GuideXosGroupBox.MaximumSupportedWidth, viewWidth + 2));
+        if (generalGroupWidth < 272 || defaultAppsGroupWidth < 352)
+            return false;
+
+        layout = new WindowLayout(windowWidth, windowHeight, clientWidth,
+            clientHeight, viewY, viewWidth, viewHeight, generalGroupWidth,
+            defaultAppsGroupWidth);
+        return true;
+    }
+
+    private static int AlignDownToGrid(int value) =>
+        value - value % GuideXosLabel.CharacterWidth;
+
+    private bool ApplyChromeGeometry(WindowLayout layout)
+    {
+        int navigationX = layout.ClientWidth - 140;
+        int advancedX = layout.CompactNavigation ? 24 : 280;
+        int advancedY = layout.CompactNavigation ? 76 : 54;
+        if (!_view.TrySetBounds(24, layout.ViewY, layout.ViewWidth,
+                layout.ViewHeight) ||
+            !_scrollBar.TrySetBounds(28 + layout.ViewWidth, layout.ViewY,
+                GuideXosScrollBar.DefaultWidth, layout.ViewHeight) ||
+            !_inputEnabled.TrySetBounds(24, 54, 248, 18) ||
+            !_showAdvanced.TrySetBounds(advancedX, advancedY, 138, 18) ||
+            !_optionsButton.TrySetBounds(navigationX, 20, 112, 22) ||
+            !_appsButton.TrySetBounds(navigationX, 48, 112, 22))
+            return false;
+
+        _windowWidth = layout.WindowWidth;
+        _windowHeight = layout.WindowHeight;
+        _clientWidth = layout.ClientWidth;
+        _clientHeight = layout.ClientHeight;
+        _viewY = layout.ViewY;
+        _generalGroupWidth = layout.GeneralGroupWidth;
+        _defaultAppsGroupWidth = layout.DefaultAppsGroupWidth;
+        _layout = layout;
+        return true;
+    }
+
+    private bool ConfigureGeneralGroupGeometry(int width)
+    {
+        for (int section = 0; section < SectionCount; section++)
+        {
+            GuideXosGroupBox group = _groups[section];
+            if (!group.TrySetBounds(0, 0, width,
+                    section switch { 0 => 180, 1 => 216, 2 => 216, _ => 144 }))
+                return false;
+            GuideXosVerticalStack stack = _stacks[section];
+            if (!stack.TrySetFrame(group.ContentLeft, group.ContentTop,
+                    group.ContentWidth) ||
+                stack.PerformLayout() != GuideXosVerticalStackResult.LaidOut)
+                return false;
+        }
+        return true;
+    }
+
+    private bool TryRecomputeLayout(int windowWidth, int windowHeight)
+    {
+        if (!TryCalculateLayout(windowWidth, windowHeight,
+                out WindowLayout next))
+            return false;
+
+        object focusedMember = _view.FocusedMember;
+        int activeControlId = _controlHost?.ActiveControlId ?? 0;
+        int priorOffset = _view.Offset;
+        CloseTransientPopupsForLayout();
+        _view.Clear();
+        if (!ApplyChromeGeometry(next) ||
+            !ConfigureGeneralGroupGeometry(next.GeneralGroupWidth))
+            return false;
+
+        bool attached = _defaultAppsPageActive
+            ? _defaultAppsPage.Attach(_view, next.DefaultAppsGroupWidth)
+            : AttachGeneralView(initializeMembership: false);
+        if (!attached) return false;
+
+        _view.RecalculateContentExtent();
+        _view.BindScrollBar(_scrollBar);
+        _view.SetOffset(Math.Min(priorOffset, _view.MaximumOffset));
+        _scrollBar.Value = _view.Offset;
+        SyncScrollBarVisibility();
+        _controlHost?.RefreshVisibility();
+        if (activeControlId != 0)
+            _controlHost?.TryFocus(activeControlId);
+        if (focusedMember != null && _view.ContainsMember(focusedMember))
+            _view.TryFocusMember(focusedMember);
+        bool compositionValid = ValidateComposition();
+        return compositionValid;
+    }
+
+    private void CloseTransientPopupsForLayout()
+    {
+        _menu.Close();
+        _density.Close();
+        _speed.Close();
+        _scrollLines.Close();
+        _statusCombo.Close();
+        _defaultAppsPage.Choice.Close();
+        _controlHost?.RefreshVisibility();
+    }
+
+    private bool RecreateSurfaceAtSize(GuideXosHost host, int width, int height)
+    {
+        if (host == null || !TryCalculateLayout(width, height,
+                out WindowLayout next))
+            return false;
+
+        int pendingChoice = _defaultAppsPage.PendingChoice;
+        GuideXosResult create = host.TryCreateSurface(
+            "Managed Settings Center"u8, width, height,
+            out GuideXosSurface replacement);
+        if (create != GuideXosResult.Success || replacement == null)
+            return false;
+
+        _surface = replacement;
+        _window = replacement.Handle;
+#if GUIDEXOS_PROOF_CONTROL
+        replacement.C171RenderTrace = true;
+#endif
+        bool layoutRecomputed = TryRecomputeLayout(next.WindowWidth,
+            next.WindowHeight);
+#if GUIDEXOS_PROOF_CONTROL
+        if (!layoutRecomputed)
+            host.TryLog(_defaultAppsPageActive
+                ? "C171-LAYOUT result=FAIL stage=recompute page=Apps"u8
+                : "C171-LAYOUT result=FAIL stage=recompute page=Settings"u8);
+#endif
+        if (!layoutRecomputed)
+            return false;
+
+        if (_defaultAppsPage.PendingChoice != pendingChoice)
+        {
+#if GUIDEXOS_PROOF_CONTROL
+            host.TryLog("C171-LAYOUT result=FAIL stage=pending-selection"u8);
+#endif
+            return false;
+        }
+
+        _controlHost.TryFocus(OptionsButtonId);
+#if GUIDEXOS_PROOF_CONTROL
+        host.TryLog(_defaultAppsPageActive
+            ? "C171-LAYOUT reflow=PASS page=Apps pending=preserved focus=options"u8
+            : "C171-LAYOUT reflow=PASS page=Settings pending=preserved focus=options"u8);
+        _traceC171Render = true;
+#endif
+        return RenderC167Frame(host, _surface) == GuideXosResult.Success;
+    }
+
+    private void ConfigureOptionsMenu()
+    {
+        _menu.Reset();
+        _menu.ClearItems();
+        _menu.TryAddItem("Apply", MenuApply);
+        _menu.TryAddItem("Reset to defaults", MenuDefaults);
+        _menu.TryAddSeparator();
+        _menu.TryAddItem("Compact 512x260", MenuCompactWindow);
+        _menu.TryAddItem("Expanded 720x420", MenuExpandedWindow);
+        _menu.TryAddItem("Close", MenuClose);
+        _menu.CommandInvoked = OnMenuCommand;
     }
 
 #if HOSTLOGPROOF_C148_SETTINGS_V2
@@ -1428,13 +1681,12 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 
     private bool AttachGeneralView(bool initializeMembership)
     {
-        int[] tops = { 4, 200, 416, 648 };
         bool ok = true;
         for (int section = 0; section < SectionCount; section++)
         {
             GuideXosGroupBox group = _groups[section];
             GuideXosVerticalStack stack = _stacks[section];
-            ok &= _view.TryAddMember(group, 4, tops[section]) ==
+            ok &= _view.TryAddMember(group, 4, SectionTops[section]) ==
                 GuideXosScrollViewResult.Added;
             ok &= stack.TrySetFrame(group.ContentLeft, group.ContentTop,
                 group.ContentWidth);
@@ -1449,7 +1701,7 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
                         GuideXosVerticalStackResult.Added;
                 }
                 ok &= _view.TryAddMember(leaves[index], 20,
-                    tops[section] + 40 + index * 20) ==
+                    SectionTops[section] + 40 + index * 20) ==
                     GuideXosScrollViewResult.Added;
             }
             ok &= stack.PerformLayout() == GuideXosVerticalStackResult.LaidOut;
@@ -1469,7 +1721,8 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _inputEnabled.SetVisible(false);
         _showAdvanced.SetVisible(false);
         SetGeneralComboVisibility(false);
-        bool attached = _defaultAppsPage.Attach(_view);
+        bool attached = _defaultAppsPage.Attach(_view,
+            _layout.DefaultAppsGroupWidth);
         _view.BindScrollBar(_scrollBar);
         _view.SetOffset(0);
         _scrollBar.Value = _view.Offset;
@@ -1852,7 +2105,10 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 
     private void OpenOptionsMenu()
     {
-        bool opened = _menu.Open(_optionsButton.X, _optionsButton.Y + _optionsButton.Height) ==
+        int menuX = Math.Min(_optionsButton.X,
+            _clientWidth - _menu.Width - 8);
+        bool opened = _menu.Open(menuX,
+            _optionsButton.Y + _optionsButton.Height) ==
             GuideXosPopupMenuResult.Opened && _controlHost.TryAcquireTransientInputCapture(MenuId);
         _appHost?.TryLog(opened ? "C144-MENU open=PASS capture=menu result=PASS"u8 : "C144-MENU open=FAIL result=FAIL"u8);
     }
@@ -2158,6 +2414,19 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             host.TryLog("C144-CLOSE popup=closed capture=none registration=bounded result=PASS"u8);
             return CloseSettingsCenter(host, surface, "clean");
         }
+        else if (command == MenuCompactWindow || command == MenuExpandedWindow)
+        {
+            int width = command == MenuCompactWindow
+                ? CompactWindowWidth : ExpandedWindowWidth;
+            int height = command == MenuCompactWindow
+                ? CompactWindowHeight : ExpandedWindowHeight;
+            if (!RecreateSurfaceAtSize(host, width, height))
+            {
+                GuideXosSurface current = _surface ?? surface;
+                if (current != null) Render(host, current);
+            }
+            return true;
+        }
         return false;
     }
 
@@ -2313,8 +2582,15 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 
     private GuideXosResult Render(GuideXosHost host, GuideXosSurface surface)
     {
-        if (surface.TryFillRect(10, 10, 540, 320, 0x003D465Au) != GuideXosResult.Success)
+#if GUIDEXOS_PROOF_CONTROL
+        if (_traceC171Render) host?.TryLog("C171-RENDER stage=begin"u8);
+#endif
+        if (surface.TryFillRect(10, 10, _clientWidth - 20,
+                _clientHeight - 20, 0x003D465Au) != GuideXosResult.Success)
             return GuideXosResult.InvalidArgument;
+#if GUIDEXOS_PROOF_CONTROL
+        if (_traceC171Render) host?.TryLog("C171-RENDER stage=background"u8);
+#endif
         if (surface.TrySetText(30, 24, "Settings Center"u8) != GuideXosResult.Success)
             return GuideXosResult.InvalidArgument;
         if (_inputEnabled.Render(surface) != GuideXosResult.Success)
@@ -2325,13 +2601,27 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             return GuideXosResult.InvalidArgument;
         if (_appsButton.Render(surface) != GuideXosResult.Success)
             return GuideXosResult.InvalidArgument;
-        if (surface.TrySetText(280, 24, _defaultAppsPageActive
-                ? "Association"u8
-                : IsDirty ? "Unsaved changes"u8 : "Applied"u8) != GuideXosResult.Success)
+        ReadOnlySpan<byte> breadcrumb = _defaultAppsPageActive
+            ? "Association"u8
+            : IsDirty ? "Unsaved changes"u8 : "Applied"u8;
+        int breadcrumbX = Math.Min(280,
+            _clientWidth - 24 - breadcrumb.Length * GuideXosLabel.CharacterWidth);
+        if (surface.TrySetText(breadcrumbX, 24, breadcrumb) != GuideXosResult.Success)
             return GuideXosResult.InvalidArgument;
-        if (surface.TrySetText(36, 74, CurrentPageHeading) != GuideXosResult.Success)
+        int headingY = _layout.CompactNavigation ? 96 : 74;
+        if (surface.TrySetText(36, headingY, CurrentPageHeading) != GuideXosResult.Success)
             return GuideXosResult.InvalidArgument;
-        if (_view.Render(surface) != GuideXosResult.Success)
+#if GUIDEXOS_PROOF_CONTROL
+        if (_traceC171Render) host?.TryLog("C171-RENDER stage=scrollview-begin"u8);
+#endif
+        GuideXosResult viewRender = _view.Render(surface);
+#if GUIDEXOS_PROOF_CONTROL
+        if (_traceC171Render)
+            host?.TryLog(viewRender == GuideXosResult.Success
+                ? "C171-RENDER stage=scrollview-complete"u8
+                : "C171-RENDER stage=scrollview-fail"u8);
+#endif
+        if (viewRender != GuideXosResult.Success)
             return GuideXosResult.InvalidArgument;
         if (_scrollBar.Visible && _scrollBar.Render(surface) != GuideXosResult.Success)
             return GuideXosResult.InvalidArgument;
@@ -2339,10 +2629,17 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             return GuideXosResult.InvalidArgument;
         if (_activeDialog != null && _activeDialog.Render(surface) != GuideXosResult.Success)
             return GuideXosResult.InvalidArgument;
-        if (surface.TrySetText(20, 306, _working.ShowKeyboardTips
+        if (surface.TrySetText(20, _layout.FooterY, _working.ShowKeyboardTips
                 ? "Tab / Shift+Tab move focus | Enter activates | wheel scrolls"u8
                 : "Tab moves focus | Enter activates"u8) != GuideXosResult.Success)
             return GuideXosResult.InvalidArgument;
+#if GUIDEXOS_PROOF_CONTROL
+        if (_traceC171Render)
+        {
+            host?.TryLog("C171-RENDER stage=complete"u8);
+            _traceC171Render = false;
+        }
+#endif
         _ = host;
         return GuideXosResult.Success;
     }

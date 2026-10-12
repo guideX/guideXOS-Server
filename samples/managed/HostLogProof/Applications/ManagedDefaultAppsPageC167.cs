@@ -66,14 +66,11 @@ internal sealed class ManagedDefaultAppsPageC167
             {
                 case GuideXosLabel label:
                     label.HorizontalAlignment =
-                        GuideXosVerticalStackHorizontalAlignment.Left;
+                        GuideXosVerticalStackHorizontalAlignment.Stretch;
+                    label.TrySetMargins(8, 2, 8, 2);
                     break;
                 case GuideXosButton button:
                     button.HorizontalAlignment =
-                        GuideXosVerticalStackHorizontalAlignment.Left;
-                    break;
-                case GuideXosComboBox combo:
-                    combo.HorizontalAlignment =
                         GuideXosVerticalStackHorizontalAlignment.Left;
                     break;
             }
@@ -133,12 +130,19 @@ internal sealed class ManagedDefaultAppsPageC167
         return true;
     }
 
-    public bool Attach(GuideXosScrollView view)
+    public bool Attach(GuideXosScrollView view) =>
+        Attach(view, 504);
+
+    public bool Attach(GuideXosScrollView view, int groupWidth)
     {
         AttachDiagnostics = "start";
         if (view == null) { AttachDiagnostics = "null-view"; return false; }
+        if (groupWidth < GuideXosGroupBox.MinimumSupportedWidth ||
+            groupWidth > GuideXosGroupBox.MaximumSupportedWidth ||
+            groupWidth % GuideXosGroupBox.CharacterWidth != 0)
+        { AttachDiagnostics = "group-width"; return false; }
         view.Clear();
-        if (!_group.TrySetBounds(view.InnerX, view.InnerY, 504, 252))
+        if (!_group.TrySetBounds(view.InnerX, view.InnerY, groupWidth, 252))
         { AttachDiagnostics = "group-bounds"; return false; }
         if (!_group.TryGetContentRectangle(out int left, out int top,
                 out int width, out _))
@@ -193,8 +197,8 @@ internal sealed class ManagedDefaultAppsPageC167
             view.MaximumMemberCount < _members.Length ||
             _group.MemberCount != _members.Length ||
             _stack.MemberCount != _members.Length || _choice.ItemCount != 2 ||
-            _choice.GetItemText(0) != "Managed Notes" ||
-            _choice.GetItemText(1) != "No default application" ||
+            !_choice.IsItemText(0, "Managed Notes") ||
+            !_choice.IsItemText(1, "No default application") ||
             view.ContainsMember(_group) ||
             !_group.ValidateMembershipGeometry(out int outside) || outside != 0)
             return false;

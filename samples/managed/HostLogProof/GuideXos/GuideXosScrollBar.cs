@@ -32,10 +32,10 @@ public sealed class GuideXosScrollBar
     public const int ArrowPixels = 12;
     public const int MaximumSupportedCoordinate = 4095;
 
-    private readonly int _x;
-    private readonly int _y;
-    private readonly int _width;
-    private readonly int _height;
+    private int _x;
+    private int _y;
+    private int _width;
+    private int _height;
     private int _minimum;
     private int _maximum;
     private int _value;
@@ -163,6 +163,25 @@ public sealed class GuideXosScrollBar
     }
 
     public bool HasViewportBinding => _boundViewport != null;
+
+    /// <summary>Updates the existing scrollbar rectangle without replacing its viewport binding.</summary>
+    public bool TrySetBounds(int x, int y, int width, int height)
+    {
+        if (x < 0 || y < 0 || width < 1 || height < 1 ||
+            x > MaximumSupportedCoordinate - width ||
+            y > MaximumSupportedCoordinate - height)
+            return false;
+
+        _x = x;
+        _y = y;
+        _width = width;
+        _height = height;
+        _isDragging = false;
+        _dragOffset = 0;
+        _dragStartThumbOffset = 0;
+        _dragStartValue = _value;
+        return true;
+    }
 
     /// <summary>Refreshes range/page/value after external model replacement.</summary>
     public void SynchronizeViewport()
