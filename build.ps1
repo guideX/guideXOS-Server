@@ -25,6 +25,7 @@ param(
     [ValidateRange(0, 4)]
     [int]$I219Phase7Stage = 0,
     [switch]$I219TxDmaPlacementExperiment,
+    [switch]$I219LanInitDiagnostics,
     [switch]$SkipPacManPackageBuild
 )
 
@@ -39,6 +40,7 @@ Write-Host "  I219 Phase 5 stage: $I219Phase5Stage" -ForegroundColor Cyan
 Write-Host "  I219 Phase 6 micro-stage: $I219Phase6Stage" -ForegroundColor Cyan
 Write-Host "  I219 Phase 7 stage: $I219Phase7Stage ($(@('reset-only','mac','phy','dma','register')[$I219Phase7Stage]))" -ForegroundColor Cyan
 Write-Host "  I219 TX DMA placement experiment: $($I219TxDmaPlacementExperiment.IsPresent)" -ForegroundColor Cyan
+Write-Host "  I219 LAN_INIT_DONE diagnostics: $($I219LanInitDiagnostics.IsPresent)" -ForegroundColor Cyan
 Write-Host "  Skip PacMan package rebuild: $($SkipPacManPackageBuild.IsPresent)" -ForegroundColor Cyan
 Write-Host ""
 
@@ -355,6 +357,7 @@ if (!$SkipKernel) {
         $KernelExtraCFlags += "-DGXOS_AIDA_I219_PHASE6_STAGE=$I219Phase6Stage"
         $KernelExtraCFlags += "-DGXOS_AIDA_I219_PHASE7_STAGE=$I219Phase7Stage"
         $KernelExtraCFlags += "-DGXOS_I219_TX_DMA_PLACEMENT_EXPERIMENT=$([int]$I219TxDmaPlacementExperiment.IsPresent)"
+        $KernelExtraCFlags += "-DGXOS_I219_LAN_INIT_DIAGNOSTICS=$([int]$I219LanInitDiagnostics.IsPresent)"
         if (-not [string]::IsNullOrWhiteSpace($env:EXTRA_CFLAGS)) {
             $KernelExtraCFlags += $env:EXTRA_CFLAGS.Trim()
         }
@@ -473,6 +476,7 @@ elseif (Test-Path $KernelBin) {
         "phase7I219Stage=$I219Phase7Stage"
         "phase7I219StageName=$(@('reset-only','mac','phy','dma','register')[$I219Phase7Stage])"
         "i219TxDmaPlacementExperiment=$([bool]$I219TxDmaPlacementExperiment.IsPresent)"
+        "i219LanInitDiagnostics=$([bool]$I219LanInitDiagnostics.IsPresent)"
         "pacmanPackageBuildSkipped=$([bool]$SkipPacManPackageBuild.IsPresent)"
         "uniqueBuildId=GXOS-P7-$I219Phase7Stage-$([Guid]::NewGuid().ToString('N'))"
         "imageRoot=$ESPDir"

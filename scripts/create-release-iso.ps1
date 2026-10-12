@@ -21,7 +21,8 @@ param(
     [int]$I219Phase6Stage = 0,
     [ValidateRange(0, 4)]
     [int]$I219Phase7Stage = 0,
-    [switch]$I219TxDmaPlacementExperiment
+    [switch]$I219TxDmaPlacementExperiment,
+    [switch]$I219LanInitDiagnostics
 )
 
 Set-StrictMode -Version Latest
@@ -429,12 +430,14 @@ function Invoke-CanonicalBuild {
                    '-I219Phase6Stage', [string]$I219Phase6Stage,
                    '-I219Phase7Stage', [string]$I219Phase7Stage)
     if ($I219TxDmaPlacementExperiment) { $buildArgs += '-I219TxDmaPlacementExperiment' }
+    if ($I219LanInitDiagnostics) { $buildArgs += '-I219LanInitDiagnostics' }
     if ($SkipPacManPackageBuild) { $buildArgs += '-SkipPacManPackageBuild' }
     if ($Clean) { $buildArgs = @('-Clean', '-Arch', $Arch,
                                   '-I219Phase5Stage', [string]$I219Phase5Stage,
                                   '-I219Phase6Stage', [string]$I219Phase6Stage,
                                   '-I219Phase7Stage', [string]$I219Phase7Stage)
         if ($I219TxDmaPlacementExperiment) { $buildArgs += '-I219TxDmaPlacementExperiment' }
+        if ($I219LanInitDiagnostics) { $buildArgs += '-I219LanInitDiagnostics' }
         if ($SkipPacManPackageBuild) { $buildArgs += '-SkipPacManPackageBuild' }
     }
     Write-Host "[release-iso] invoking canonical build.ps1 with supported arguments" -ForegroundColor Cyan
@@ -516,6 +519,16 @@ try {
             ([bool]::Parse($txDmaExperimentMatch.Groups[1].Value) -ne $I219TxDmaPlacementExperiment.IsPresent)) {
             Fail "ESP build identity TX DMA experiment flag does not match the requested packaging mode. Rebuild without -SkipBuild."
         }
+        $lanInitDiagnosticsMatch = [regex]::Match($identityText, '(?m)^i219LanInitDiagnostics=(True|False)\s*$')
+        if ($I219LanInitDiagnostics.IsPresent -and
+            (-not $lanInitDiagnosticsMatch.Success -or
+             -not [bool]::Parse($lanInitDiagnosticsMatch.Groups[1].Value))) {
+            Fail 'ESP build identity does not confirm Phase 26 LAN_INIT_DONE diagnostics. Rebuild without -SkipBuild.'
+        }
+        if ($lanInitDiagnosticsMatch.Success -and
+            ([bool]::Parse($lanInitDiagnosticsMatch.Groups[1].Value) -ne $I219LanInitDiagnostics.IsPresent)) {
+            Fail 'ESP build identity LAN_INIT_DONE diagnostics flag does not match the requested packaging mode. Rebuild without -SkipBuild.'
+        }
         $pacmanBuildSkippedMatch = [regex]::Match($identityText, '(?m)^pacmanPackageBuildSkipped=(True|False)\s*$')
         if ($pacmanBuildSkippedMatch.Success -and
             ([bool]::Parse($pacmanBuildSkippedMatch.Groups[1].Value) -ne $SkipPacManPackageBuild.IsPresent)) {
@@ -562,6 +575,7 @@ try {
         ("I219 Phase 6 micro-stage selector: $I219Phase6Stage"),
         ("I219 Phase 7 stage selector: $I219Phase7Stage ($I219Phase7StageName)"),
         ("I219 TX DMA placement experiment: $($I219TxDmaPlacementExperiment.IsPresent)"),
+        ("I219 LAN_INIT_DONE diagnostics: $($I219LanInitDiagnostics.IsPresent)"),
         ("Unique build identity: $uniqueBuildId"),
         '',
         ("The bootable UEFI FAT image is $bootImageIsoPath."),
@@ -617,7 +631,7 @@ try {
         fs = '2.4.16'
         pycdlib = '1.16.0'
         isoBackend = $IsoBackend
-        canonicalBuild = 'build.ps1 -Arch amd64 -I219Phase5Stage ' + $I219Phase5Stage + ' -I219Phase6Stage ' + $I219Phase6Stage + ' -I219Phase7Stage ' + $I219Phase7Stage + $(if ($I219TxDmaPlacementExperiment) { ' -I219TxDmaPlacementExperiment' } else { '' }) + $(if ($SkipPacManPackageBuild) { ' -SkipPacManPackageBuild' } else { '' }) + $(if ($Clean) { ' -Clean' } else { '' })
+        canonicalBuild = 'build.ps1 -Arch amd64 -I219Phase5Stage ' + $I219Phase5Stage + ' -I219Phase6Stage ' + $I219Phase6Stage + ' -I219Phase7Stage ' + $I219Phase7Stage + $(if ($I219TxDmaPlacementExperiment) { ' -I219TxDmaPlacementExperiment' } else { '' }) + $(if ($I219LanInitDiagnostics) { ' -I219LanInitDiagnostics' } else { '' }) + $(if ($SkipPacManPackageBuild) { ' -SkipPacManPackageBuild' } else { '' }) + $(if ($Clean) { ' -Clean' } else { '' })
     }
     if ($IsoBackend -eq 'Oscdimg') {
         $toolRecords.oscdimg = Get-ToolRecord $oscdimg $oscdimgVersion
@@ -633,6 +647,7 @@ try {
         i219Phase7Stage = $I219Phase7Stage
         i219Phase7StageName = $I219Phase7StageName
         i219TxDmaPlacementExperiment = [bool]$I219TxDmaPlacementExperiment.IsPresent
+        i219LanInitDiagnostics = [bool]$I219LanInitDiagnostics.IsPresent
         pacmanPackageBuildSkipped = [bool]$SkipPacManPackageBuild.IsPresent
         uniqueBuildId = $uniqueBuildId
         isoBackend = $IsoBackend

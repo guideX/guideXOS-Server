@@ -68,6 +68,17 @@
 #error GXOS_I219_TX_DMA_PLACEMENT_EXPERIMENT must be 0 or 1
 #endif
 
+// Phase 26 enables bounded, read-only LAN_INIT_DONE capture only in the
+// physical diagnostic image. The default build compiles the capture calls
+// out, leaving the established I219 reset/PHY timing unchanged.
+#ifndef GXOS_I219_LAN_INIT_DIAGNOSTICS
+#define GXOS_I219_LAN_INIT_DIAGNOSTICS 0
+#endif
+
+#if GXOS_I219_LAN_INIT_DIAGNOSTICS < 0 || GXOS_I219_LAN_INIT_DIAGNOSTICS > 1
+#error GXOS_I219_LAN_INIT_DIAGNOSTICS must be 0 or 1
+#endif
+
 namespace kernel {
 namespace nic {
 
@@ -215,6 +226,8 @@ static const uint32_t E1000_CTRL_GIO_MASTER_DISABLE = 0x00000004u;
 
 // STATUS register bits
 static const uint32_t E1000_STATUS_LU  = (1u << 1);   // Link Up
+static const uint32_t E1000_STATUS_LAN_INIT_DONE = 0x00000200u;
+static const uint32_t E1000_STATUS_PHYRA = 0x00000400u;
 static const uint32_t E1000_STATUS_GIO_MASTER_ENABLE = 0x00080000u;
 static const uint32_t E1000_STATUS_SPEED_MASK = (3u << 6);
 static const uint32_t E1000_STATUS_SPEED_10   = (0u << 6);
@@ -1705,6 +1718,39 @@ inline TxEvidence observe_tx(const TxDiagnostics& before,
 // NIC device descriptor
 // ================================================================
 
+// Phase 26 stores a small fixed set of read-only samples at the post-reset /
+// pre-PHY boundary, then one observation after the existing init sequence.
+// These records do not participate in NIC setup or descriptor handling.
+static const uint8_t I219_LAN_INIT_SAMPLE_LIMIT = 3u;
+static const uint32_t I219_LAN_INIT_SAMPLE_INTERVAL_MS = 1u;
+
+struct I219LanInitSample {
+    uint32_t sequence;
+    uint32_t status;
+    uint32_t ctrl;
+    bool statusValid;
+    bool ctrlValid;
+};
+
+struct I219LanInitDiagnostics {
+    bool enabled;
+    bool prePhyCaptured;
+    uint16_t pciCommandBeforeReset;
+    bool pciCommandValid;
+    bool resetCompletedAtCheckpoint;
+    uint32_t resetPollIterations;
+    uint32_t nextSequence;
+    uint8_t prePhySampleCount;
+    I219LanInitSample prePhySamples[I219_LAN_INIT_SAMPLE_LIMIT];
+    bool postInitCaptured;
+    I219LanInitSample postInitSample;
+    bool postInitResetCompleted;
+    bool postInitPhyReady;
+    bool postInitPhyStatusValid;
+    uint16_t postInitPhyStatus;
+    LinkState postInitLink;
+};
+
 struct NICDevice {
     bool        active;
     bool        driverReady;    // published only after hardware init and registration
@@ -1731,6 +1777,7 @@ struct NICDevice {
     I219PcieTxSnoopDiagnostics pcieTxSnoop;
     I219HwControlDiagnostics hwControl;
     I219ResetDiagnostics resetDiagnostics;
+    I219LanInitDiagnostics lanInitDiagnostics;
     char        name[32];       // e.g. "eth0"
     bool        mmioMapped;     // true if MMIO is mapped by bootloader
     bool        irqRegistered;  // kernel IRQ handler registered
@@ -1963,6 +2010,10 @@ bool is_active();
 
 // Return the NIC device info.
 const NICDevice* get_device();
+
+// Return retained Phase 26 read-only LAN initialization observations. This
+// accessor never performs PCI, MMIO, or PHY accesses.
+const I219LanInitDiagnostics* get_i219_lan_init_diagnostics();
 
 // Perform a bounded, read-only PCI scan and return network-controller
 // identities, including unsupported PCI wireless controllers. No BAR is

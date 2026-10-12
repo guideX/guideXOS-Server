@@ -51,6 +51,8 @@ static const uint32_t NICINFO_TX_IOMMU_MAX_LINES = 64;
 static const uint32_t NICINFO_TX_IOMMU_EXPECTED_LINES = 47;
 static const uint32_t NICINFO_TX_PHASE25_MAX_LINES = 80;
 static const uint32_t NICINFO_TX_PHASE25_EXPECTED_LINES = 54;
+static const uint32_t NICINFO_LANINIT_MAX_LINES = 12;
+static const uint32_t NICINFO_LANINIT_EXPECTED_LINES = 11;
 static_assert(NICINFO_BRIEF_EXPECTED_LINES <= NICINFO_BRIEF_MAX_LINES,
               "nicinfo brief expected output must stay within its line bound");
 static_assert(NICINFO_TX_BRIEF_EXPECTED_LINES <= NICINFO_TX_BRIEF_MAX_LINES,
@@ -71,6 +73,8 @@ static_assert(NICINFO_TX_IOMMU_EXPECTED_LINES <= NICINFO_TX_IOMMU_MAX_LINES,
               "nicinfo tx iommu expected output must stay within its line bound");
 static_assert(NICINFO_TX_PHASE25_EXPECTED_LINES <= NICINFO_TX_PHASE25_MAX_LINES,
               "nicinfo tx phase25 output must stay within its line bound");
+static_assert(NICINFO_LANINIT_EXPECTED_LINES <= NICINFO_LANINIT_MAX_LINES,
+              "nicinfo laninit output must stay within its line bound");
 
 enum NicInfoMode : uint8_t {
     NICINFO_MODE_FULL = 0,
@@ -91,6 +95,7 @@ enum NicInfoMode : uint8_t {
     NICINFO_MODE_DMA_BRIEF,
     NICINFO_MODE_TX_IOMMU,
     NICINFO_MODE_TX_PHASE25,
+    NICINFO_MODE_LANINIT,
     NICINFO_MODE_INVALID,
 };
 
@@ -102,6 +107,7 @@ inline NicInfoMode nicinfo_mode_from_arg(const char* arg)
     const char* link = "link";
     const char* tx = "tx";
     const char* dma = "dma";
+    const char* laninit = "laninit";
     const char* original = arg;
     while (*arg && *brief && *arg == *brief) {
         ++arg;
@@ -128,8 +134,15 @@ inline NicInfoMode nicinfo_mode_from_arg(const char* arg)
         ++arg;
         ++dma;
     }
-    return (*arg == '\0' && *dma == '\0')
-        ? NICINFO_MODE_DMA : NICINFO_MODE_INVALID;
+    if (*arg == '\0' && *dma == '\0') return NICINFO_MODE_DMA;
+
+    arg = original;
+    while (*arg && *laninit && *arg == *laninit) {
+        ++arg;
+        ++laninit;
+    }
+    return (*arg == '\0' && *laninit == '\0')
+        ? NICINFO_MODE_LANINIT : NICINFO_MODE_INVALID;
 }
 
 inline bool nicinfo_token_equals(const char* actual, const char* expected)

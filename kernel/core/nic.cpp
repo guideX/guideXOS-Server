@@ -14,6 +14,7 @@
 #include "include/kernel/nic.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/i219_lan_init_diagnostics.h"
 
 #if ARCH_HAS_PIC_8259
 #include "include/kernel/interrupts.h"
@@ -46,6 +47,9 @@ static void memcopy(void* dst, const void* src, uint32_t len)
 static NICDevice   s_device;
 static bool        s_initialised = false;
 static uint64_t    s_kernelPhysicalBase = 0x100000;
+#if GXOS_I219_LAN_INIT_DIAGNOSTICS
+static bool        s_captureLanInitAtResetCompletion = false;
+#endif
 
 // These linker symbols delimit the exact linked image that the UEFI loader
 // allocates contiguously and maps at KERNEL_LINK_VIRTUAL_BASE. DMA objects
@@ -522,6 +526,46 @@ static void pch_reset_delay_ms(uint32_t milliseconds)
     mdic_delay_us(milliseconds * 1000u);
 }
 
+#if GXOS_I219_LAN_INIT_DIAGNOSTICS
+static void capture_i219_lan_init_pre_phy(uint64_t mmioBase)
+{
+    I219LanInitDiagnostics& diagnostics = s_device.lanInitDiagnostics;
+    diagnostics.resetCompletedAtCheckpoint = s_device.resetCompleted;
+    diagnostics.resetPollIterations = s_device.resetPollIterations;
+    diagnostics.pciCommandBeforeReset = s_device.pciCommand;
+    diagnostics.pciCommandValid = s_device.pciCommand != 0xFFFFu;
+    const auto readRegister = [mmioBase](uint32_t reg) -> uint32_t {
+        return mmio_read32(mmioBase, reg);
+    };
+    const auto delayMilliseconds = [](uint32_t milliseconds) {
+        pch_reset_delay_ms(milliseconds);
+    };
+    diagnostics.prePhySampleCount = lan_init_diagnostics::capture_samples(
+        diagnostics.prePhySamples, I219_LAN_INIT_SAMPLE_LIMIT,
+        &diagnostics.nextSequence, readRegister, delayMilliseconds);
+    diagnostics.prePhyCaptured = diagnostics.prePhySampleCount != 0u;
+}
+
+static void capture_i219_lan_init_post_init(uint64_t mmioBase)
+{
+    I219LanInitDiagnostics& diagnostics = s_device.lanInitDiagnostics;
+    const auto readRegister = [mmioBase](uint32_t reg) -> uint32_t {
+        return mmio_read32(mmioBase, reg);
+    };
+    const auto noDelay = [](uint32_t) {};
+    diagnostics.postInitCaptured =
+        lan_init_diagnostics::capture_samples(
+            &diagnostics.postInitSample, 1u, &diagnostics.nextSequence,
+            readRegister, noDelay) == 1u;
+    diagnostics.postInitResetCompleted = s_device.resetCompleted;
+    diagnostics.postInitPhyReady = s_device.phyProbeAttempted &&
+        s_device.phyAccess == NIC_PHY_OK && s_device.phyStatusValid;
+    diagnostics.postInitPhyStatusValid = s_device.phyStatusValid;
+    diagnostics.postInitPhyStatus = s_device.phyStatusValue;
+    diagnostics.postInitLink = s_device.link;
+}
+#endif
+
 static void phase7_print_mac_marker(const uint8_t* mac)
 {
     serial::puts("[AIDA-I219-P7] mac=");
@@ -652,6 +696,11 @@ static bool i219_pch_reset(uint64_t mmioBase)
     }
     s_device.resetCompleted = true;
     s_device.resetDiagnostics.resetCompleted = true;
+#if GXOS_I219_LAN_INIT_DIAGNOSTICS
+    if (s_captureLanInitAtResetCompletion) {
+        capture_i219_lan_init_pre_phy(mmioBase);
+    }
+#endif
     if (!refresh_i219_reset_boundary(mmioBase)) {
         set_init_failure(
             NIC_INIT_RESET,
@@ -2157,7 +2206,14 @@ static bool init_e1000(uint64_t mmioBase)
         if (i219P18 && !capture_i219_hw_control_initial(mmioBase)) {
             return false;
         }
+#if GXOS_I219_LAN_INIT_DIAGNOSTICS
+        s_captureLanInitAtResetCompletion = true;
+        const bool resetSucceeded = i219_pch_reset(mmioBase);
+        s_captureLanInitAtResetCompletion = false;
+        if (!resetSucceeded) return false;
+#else
         if (!i219_pch_reset(mmioBase)) return false;
+#endif
         if (i219P18) {
             if (!capture_i219_hw_control_after_reset(mmioBase) ||
                 !acquire_i219_hw_control(mmioBase)) {
@@ -2482,6 +2538,12 @@ static bool init_e1000(uint64_t mmioBase)
     if (i219P18 && !verify_i219_hw_control_final(mmioBase)) {
         return false;
     }
+
+#if GXOS_I219_LAN_INIT_DIAGNOSTICS
+    if (i219P7) {
+        capture_i219_lan_init_post_init(mmioBase);
+    }
+#endif
 
     // Keep NIC interrupt causes masked until the kernel has installed the
     // device IRQ handler.  Enabling them here leaves a real device a window
@@ -3232,6 +3294,9 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
     s_device.phase5Stage = i219 ? static_cast<uint8_t>(GXOS_AIDA_I219_PHASE5_STAGE) : 0xFFu;
     s_device.phase6Stage = i219 ? static_cast<uint8_t>(GXOS_AIDA_I219_PHASE6_STAGE) : 0xFFu;
     s_device.phase7Stage = i219 ? static_cast<uint8_t>(GXOS_AIDA_I219_PHASE7_STAGE) : 0xFFu;
+#if GXOS_I219_LAN_INIT_DIAGNOSTICS
+    s_device.lanInitDiagnostics.enabled = i219 && i219_phase7_path_selected();
+#endif
     s_device.phase5Stopped = false;
     s_device.interruptsEnabled = false;
     s_device.driverBound = exactDriverMatch;
@@ -3531,6 +3596,11 @@ bool is_active()
 const NICDevice* get_device()
 {
     return s_initialised ? &s_device : nullptr;
+}
+
+const I219LanInitDiagnostics* get_i219_lan_init_diagnostics()
+{
+    return s_initialised ? &s_device.lanInitDiagnostics : nullptr;
 }
 
 const uint8_t* get_mac_address()

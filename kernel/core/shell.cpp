@@ -2792,6 +2792,7 @@ static bool nicinfo_rx_ring_present(const nic::I219ResetSnapshot& snapshot)
 // the existing TX diagnostics section below.
 static void cmd_nicinfo_tx_brief();
 static void cmd_nicinfo_brief();
+static void cmd_nicinfo_laninit();
 
 static const char* nicinfo_vtd_bool(bool value)
 {
@@ -4350,6 +4351,120 @@ static void cmd_nicinfo_link()
     output_string(dev->linkFailureReason[0] != '\0'
                   ? dev->linkFailureReason : "none");
     output_string("\n");
+}
+
+static void nicinfo_print_lan_init_sample(
+    const char* label, const nic::I219LanInitSample& sample)
+{
+    char numStr[16];
+    char hexStr[9];
+    output_string(label);
+    output_string(" seq=");
+    uint_to_str(sample.sequence, numStr);
+    output_string(numStr);
+    output_string(" STATUS=0x");
+    uint_hex_to_str(sample.status, 8, hexStr);
+    output_string(hexStr);
+    output_string(" LD=");
+    output_string(sample.statusValid
+        ? ((sample.status & nic::E1000_STATUS_LAN_INIT_DONE) ? "1" : "0")
+        : "?");
+    output_string(" PHYRA=");
+    output_string(sample.statusValid
+        ? ((sample.status & nic::E1000_STATUS_PHYRA) ? "1" : "0") : "?");
+    output_string(" LU=");
+    output_string(sample.statusValid
+        ? ((sample.status & nic::E1000_STATUS_LU) ? "1" : "0") : "?");
+    output_string(" CTRL=0x");
+    uint_hex_to_str(sample.ctrl, 8, hexStr);
+    output_string(hexStr);
+    output_string(" RST=");
+    output_string(sample.ctrlValid
+        ? ((sample.ctrl & nic::E1000_CTRL_RST) ? "1\n" : "0\n") : "?\n");
+}
+
+// Display only the Phase 26 samples retained during NIC initialization. This
+// command never reads PCI, MMIO, or PHY registers and never submits a packet.
+static void cmd_nicinfo_laninit()
+{
+    output_string("I219 LAN_INIT_DONE capture (read-only)\n");
+    const nic::NICDevice* dev = nic::get_device();
+    const nic::I219LanInitDiagnostics* diagnostics =
+        nic::get_i219_lan_init_diagnostics();
+    if (!dev || !diagnostics) {
+        output_string("Device: no recorded NIC state\n");
+        output_string("Capture: unavailable\n");
+        return;
+    }
+
+    char hexStr[9];
+    char numStr[16];
+    output_string("PCI ID=");
+    uint_hex_to_str(dev->vendorId, 4, hexStr);
+    output_string(hexStr);
+    output_string(":");
+    uint_hex_to_str(dev->deviceId, 4, hexStr);
+    output_string(hexStr);
+    output_string(" family=");
+    output_string(nic::device_family_name(
+        nic::device_family_for(dev->vendorId, dev->deviceId)));
+    output_string("\n");
+
+    if (!diagnostics->enabled) {
+        output_string("Capture: disabled or not an I219/PCH init path\n");
+        return;
+    }
+
+    output_string("PCI-CMD(pre-reset)=");
+    if (diagnostics->pciCommandValid) {
+        uint_hex_to_str(diagnostics->pciCommandBeforeReset, 4, hexStr);
+        output_string("0x");
+        output_string(hexStr);
+        output_string(" MEM=");
+        output_string((diagnostics->pciCommandBeforeReset &
+                       nic::PCI_COMMAND_MEMORY_SPACE) ? "1" : "0");
+        output_string(" BM=");
+        output_string((diagnostics->pciCommandBeforeReset &
+                       nic::PCI_COMMAND_BUS_MASTER) ? "1\n" : "0\n");
+    } else {
+        output_string("invalid\n");
+    }
+
+    output_string("POST-RESET/PRE-PHY: reset=");
+    output_string(diagnostics->resetCompletedAtCheckpoint ? "done" : "unknown");
+    output_string(" polls=");
+    uint_to_str(diagnostics->resetPollIterations, numStr);
+    output_string(numStr);
+    output_string(" samples=");
+    uint_to_str(diagnostics->prePhySampleCount, numStr);
+    output_string(numStr);
+    output_string("/3 step=1ms nominal\n");
+    for (uint8_t i = 0; i < diagnostics->prePhySampleCount; ++i) {
+        nicinfo_print_lan_init_sample("PRE", diagnostics->prePhySamples[i]);
+    }
+
+    if (diagnostics->postInitCaptured) {
+        output_string("POST-INIT/PRE-REGISTRATION:\n");
+        nicinfo_print_lan_init_sample("POST", diagnostics->postInitSample);
+        output_string("reset=");
+        output_string(diagnostics->postInitResetCompleted ? "done" : "unknown");
+        output_string(" PHY=");
+        output_string(diagnostics->postInitPhyReady ? "ready" : "not-ready");
+        output_string(" phyStatus=");
+        if (diagnostics->postInitPhyStatusValid) {
+            uint_hex_to_str(diagnostics->postInitPhyStatus, 4, hexStr);
+            output_string("0x");
+            output_string(hexStr);
+        } else {
+            output_string("invalid");
+        }
+        output_string(" link=");
+        output_string(nic::link_state_name(diagnostics->postInitLink));
+        output_string("\n");
+    } else {
+        output_string("POST-INIT: not captured\n");
+    }
+    output_string("sample-only bound=3 STATUS-writes=none\n");
 }
 
 static void cmd_nicinfo() {
@@ -6410,9 +6525,12 @@ static void execute_command(const char* cmd) {
             cmd_nicinfo_tx_iommu();
         } else if (nicInfoMode == NICINFO_MODE_TX_PHASE25) {
             cmd_nicinfo_tx_phase25();
+        } else if (nicInfoMode == NICINFO_MODE_LANINIT) {
+            cmd_nicinfo_laninit();
         } else {
-            output_string("Usage: nicinfo [brief|link|dma [brief]|tx [brief|owner|iommu|phase25|reset [brief|run]|rearm|lifecycle|raw [direct|status]]]\n");
+            output_string("Usage: nicinfo [brief|link|laninit|dma [brief]|tx [brief|owner|iommu|phase25|reset [brief|run]|rearm|lifecycle|raw [direct|status]]]\n");
             output_string("  brief: recorded NIC initialization/link state only\n");
+            output_string("  laninit: retained read-only Phase 26 LAN_INIT_DONE samples\n");
             output_string("  link: one bounded, read-only current link refresh\n");
             output_string("  dma: read-only ACPI DMAR/VT-d audit; no IOMMU writes\n");
             output_string("  dma brief: compact read-only VT-d state\n");
