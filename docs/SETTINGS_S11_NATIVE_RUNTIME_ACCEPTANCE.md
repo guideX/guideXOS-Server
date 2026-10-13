@@ -1,14 +1,14 @@
-# Settings S11 Native Runtime Slice
+# Settings S11 Native Runtime Slice — S11R Closeout
 
-Status: **Outcome B — partial progress; S11 is not accepted.**
+Status: **S11 — Outcome A: Native Settings Runtime Slice Accepted.**
 
 S11 adds a dedicated native Settings application to the production kernel app
 manager and compositor. The native window reuses the S10 presentation core,
 shows a bounded read-only System/About snapshot from kernel-owned identity,
 version, and architecture values, and responds to guest keyboard and mouse
-input. The remaining acceptance gap is the guest activation of the legacy
-Control Panel: the Start menu entry and resolver route are preserved, but this
-run did not complete its activation in QEMU.
+input. S11R completed the remaining production guest validation of the legacy
+Control Panel and verified that it continues to operate alongside native
+Settings.
 
 ## Architecture decision
 
@@ -64,14 +64,23 @@ account information, network details, or mutation surface are included.
 
 ### Hosted and focused tests
 
-- Native registration, provider safety, core input/focus, duplicate launch,
-  parameter spoofing, and lifecycle harness: **549/549 passed**, including 100
-  create/close/reopen repetitions with balanced window registration and app
-  destruction.
-- S10 shared presentation core: **2,645/2,645 passed**.
-- Affected hosted Settings and service regression suites: **443/443 passed**.
-  The prior S10 acceptance record remains **464/464 hosted regression checks**.
-- `git diff --check`: clean.
+- S11's original native registration/provider harness recorded **549/549**;
+  its 100 lifecycle repetitions and the **443/443** affected hosted Settings
+  and service checks are historical S11 results, not new S11R runs. The prior
+  S10 acceptance record remains **464/464 hosted regression checks**.
+- S11R native launch/provider/window harness: **554/554 passed**, including
+  resolver separation for the legacy Control Panel shell action and native
+  Settings, rejection of hosted-only Control Panel KernelApp launches,
+  duplicate-launch identity protection, provider denial for non-Settings
+  callers, and independent close behavior. It also completed 100 deterministic
+  Settings launch/duplicate-launch/close/reopen repetitions with balanced
+  window registration and application destruction.
+- S10 shared presentation core rerun during S11R: **2,645/2,645 passed**.
+- The 443/443 hosted regression group was not rerun during S11R; no production
+  source changed. Focused harness compilation emitted existing unused default
+  handler parameter warnings in `kernel_app.h` and an existing unused helper
+  warning in `app_launch_target_resolver.cpp`; no production kernel rebuild was
+  needed. Final `git diff --check` completed cleanly.
 
 ### AMD64 kernel build and link
 
@@ -99,31 +108,91 @@ Final kernel image SHA-256:
 
 ### QEMU guest evidence
 
-The normal AMD64 graphical image booted to the desktop from an isolated copy
-of the ESP and OVMF files. The final kernel image was then launched through
-`desktop.launch gxos.builtin.settings`; the guest resolver selected the
-registered `Settings` KernelApp, and the window displayed the runtime
-identity and real product/version/architecture snapshot.
+S11's earlier guest evidence established native Settings operation but did not
+activate Control Panel. S11R closed that gap with two isolated graphical QEMU
+boots of the already-built production AMD64 kernel. Each run used copied ESP
+and OVMF inputs in `out/validation/settings-s11r-20261013/` and separate QMP
+ports. The existing production kernel image hash remains
+`B5349D89DF7127D8CFE03F9697D28642B9EFC867FA4A1280A87B8F4BF7B46AF7`.
+No production source changed, so S11R did not rebuild the kernel.
 
-The guest serial log records `focus=acquired`, a ready revision-1 snapshot,
-keyboard selections of About and System through the shared core, shutdown,
-and focus loss. An earlier final-input run also records mouse selection of
-System and About through the same core, followed by close/reopen with a fresh
-System selection. A final-symbol-fix guest boot reconfirmed the current kernel
-launch, provider snapshot, keyboard transitions, close, and clean desktop
-return.
+The actual Control Panel launch path is:
 
-The guest Start menu visibly contains both `Control Panel` and `Settings`.
-Resolver and hosted regression tests confirm the legacy Control Panel identity
-and shell-action target remain distinct. The QEMU run did not complete
-activation of the legacy Control Panel entry, so its guest operation is not
-claimed as validated and S11 remains Outcome B.
+1. The guest Start-menu hit handler passes the selected right-column label to
+   `show_start_menu_notification` in `kernel/core/desktop.cpp`.
+2. The `Control Panel` entry calls `activate_start_menu_control_panel(5)`,
+   which closes Start and sets the embedded legacy control-area state open.
+3. The typed resolver maps `Control Panel` to a bare-metal `ShellAction` with
+   the `Control Panel` dispatch label. This is an embedded desktop surface,
+   not a bare-metal `KernelApp`; the hosted-only canonical identity
+   `gxos.builtin.controlpanel` has no KernelApp factory.
+4. Selecting the legacy panel's Display tile first closes that embedded panel,
+   then calls `launch_app("DisplayOptions")`, dispatching the existing
+   `DisplayOptions` KernelApp factory.
 
-All guest runs used task-specific directories under
-`out/validation/settings-s11-production-20261011/`, copied ESP/OVMF inputs,
-and separate QMP ports. The QEMU process snapshots are saved beside each run.
-Only the QEMU processes created for these runs were exited; unrelated existing
-QEMU sessions were left untouched.
+The separate native Settings route remains
+`desktop.launch gxos.builtin.settings`. The guest resolver dispatches that
+canonical identity to the registered `Settings` KernelApp, whose private
+runtime identity is assigned by AppManager. The Start-menu `Settings` entry
+continues to open the legacy control area; S11R did not change that behavior.
+
+In the first S11R production guest, guest keyboard and calibrated QMP mouse
+input opened the Start menu and activated Control Panel. The legacy window
+rendered its Control Panel title and System Settings, Display, Device Mgr, and
+Network tiles. Selecting Display closed Control Panel and opened the real
+Display Options page; guest Escape closed that page and returned to the
+desktop. In a fresh production guest, Control Panel was launched again from
+the same Start-menu row, closed through its own title-bar close control, and
+reopened through that same guest action while native Settings was running.
+It remained open underneath Settings and was still present after Settings
+closed. The final Control Panel close returned to a clean desktop without a
+crash, hang, or stale window.
+
+In that same guest, Settings was independently launched using the canonical
+shell command. The System page displayed Product `guideXOS`, kernel version
+`0.1.0`, architecture `AMD64 (x86-64)`, snapshot revision 1, and runtime
+identity `gxos.builtin.settings`. Pressing the guest `a` key selected About
+through the shared presentation core. Closing Settings logged shutdown and
+focus loss while Control Panel remained visible. Reopening Settings selected
+the fresh default System page, reacquired focus, and rendered the same
+provider-backed fields. Closing it again left Control Panel operable. The
+guest serial log records both typed Settings dispatches, both focus lifecycle
+transitions, both ready snapshots, the About `shared-core=true` input, and
+both shutdowns. Settings retained its AppManager-assigned identity and
+independently owned KernelCompositor window; the legacy Control Panel remained
+in its separate embedded desktop state. Closing either surface did not
+terminate or stale the other.
+
+QMP used the calibrated relative PS/2 pointer path (the guest reports a
+non-absolute QEMU PS/2 Mouse) and keyboard input, with host pointer-grab
+behavior accounted for. Early pointer placement missed a menu row and one
+session became unresponsive to pointer movement; those were input/session
+calibration issues. A fresh isolated boot and corrected pointer movement
+completed the required actions. No production defect was found or repaired.
+Only task-owned QEMU processes were exited through QMP; the previously
+identified unrelated QEMU session was not signaled.
+
+S11R focused test and QEMU evidence:
+
+- First Control Panel and Display page screenshots:
+  `out/validation/settings-s11r-20261013/guest-visible/control-panel-open-foreground.png`,
+  `out/validation/settings-s11r-20261013/guest-visible/display-options-open.png`,
+  `out/validation/settings-s11r-20261013/guest-visible/display-options-escape-close.png`
+- Reopened Control Panel and closed state:
+  `out/validation/settings-s11r-20261013/guest-reopen-fresh/control-panel-second-instance.png`,
+  `out/validation/settings-s11r-20261013/guest-reopen-fresh/control-panel-second-closed.png`
+- Native provider fields and shared-core About navigation:
+  `out/validation/settings-s11r-20261013/guest-reopen-fresh/settings-system-current.png`,
+  `out/validation/settings-s11r-20261013/guest-reopen-fresh/settings-about-current-delayed.png`
+- Fresh Settings reopen, Control Panel retained after Settings close, and clean final desktop:
+  `out/validation/settings-s11r-20261013/guest-reopen-fresh/settings-reopened-clean.png`,
+  `out/validation/settings-s11r-20261013/guest-reopen-fresh/post-terminal-escape.png`,
+  `out/validation/settings-s11r-20261013/guest-reopen-fresh/desktop-final-clean.png`
+- S11R serial and QMP transcripts:
+  `out/validation/settings-s11r-20261013/guest-reopen-fresh/guest-com1.serial.log`,
+  `out/validation/settings-s11r-20261013/guest-reopen-fresh/qmp-transcript.log`
+- Final focused harness executable:
+  `out/validation/settings-s11r-20261013/final-native-runtime/settings_native_runtime_test.exe`
 
 Key evidence files:
 
@@ -142,9 +211,15 @@ constant at 1 for this immutable boot identity/version slice and must be
 advanced if a later provider adds changing values. The legacy Start-menu
 Settings routing has not been redirected.
 
-**Recommended S12 scope:** finish and preserve QEMU evidence for activation,
-operation, close, and reopen of the legacy Control Panel through its Start-menu
-shell-action route. Once that regression passes, route Start → Settings to
-`gxos.builtin.settings` and verify the legacy Control Panel remains independently
-reachable. Keep S12 read-only; do not add a Settings write provider until the
-native registration, identity, and guest lifecycle are accepted.
+**S11 final acceptance state:** S11 is accepted as **Outcome A — Native
+Settings Runtime Slice Accepted**. S9 and Settings 1.0 are not accepted by this
+closeout. The v0.3 readiness state was not re-evaluated and is unchanged.
+
+**Recommended S12 scope — Native Settings Default Launch Routing and Initial
+Page Expansion:** route Start → Settings to `gxos.builtin.settings`, retain a
+separate working Control Panel launch entry, and verify both in QEMU. Expand
+native Settings only through the S10 shared core and authoritative production
+providers; show unsupported capabilities as unavailable. Keep authorization
+runtime-owned and preserve read-only restrictions until mutation capabilities
+are explicitly implemented and validated. Do not implement S12 as part of
+this closeout.

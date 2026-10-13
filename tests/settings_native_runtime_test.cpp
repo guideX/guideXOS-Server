@@ -205,13 +205,26 @@ int main()
     const gxos::apps::LaunchTarget controlPanelTarget =
         appmodel::resolveLaunchTarget("Control Panel");
     expect(controlPanelTarget.type == gxos::apps::LaunchTargetType::ShellAction &&
-               std::string(controlPanelTarget.dispatchLaunchName) == "Control Panel",
-           "legacy Control Panel route remains independently resolved");
+               std::string(controlPanelTarget.shellAction) == "Control Panel" &&
+               std::string(controlPanelTarget.dispatchLaunchName) == "Control Panel" &&
+               controlPanelTarget.bareMetalAvailable &&
+               std::string(controlPanelTarget.appId) != kSettingsRuntimeAppId,
+           "legacy Control Panel resolves as its production bare-metal shell action");
+    const gxos::apps::LaunchTarget startSettingsTarget =
+        appmodel::resolveLaunchTarget("Settings");
+    expect(startSettingsTarget.type == gxos::apps::LaunchTargetType::ShellAction &&
+               std::string(startSettingsTarget.dispatchLaunchName) == "Control Panel",
+           "Start-menu Settings keeps its existing legacy control-area route");
     const gxos::apps::LaunchTarget controlPanelIdentity =
         appmodel::resolveLaunchTarget("gxos.builtin.controlpanel");
     expect(std::string(controlPanelIdentity.appId) == "gxos.builtin.controlpanel" &&
-               !controlPanelIdentity.bareMetalAvailable,
-           "legacy Control Panel canonical identity remains distinct and hosted-only");
+               !controlPanelIdentity.bareMetalAvailable &&
+               !AppManager::isAppAvailable("ControlPanel"),
+           "hosted-only Control Panel identity has no bare-metal KernelApp factory");
+    expect(!AppManager::launchAppWithParam("ControlPanel", kSettingsRuntimeAppId),
+           "hosted-only Control Panel identity cannot launch through the bare-metal manager");
+    expect(!AppManager::launchAppWithParam("Control Panel", kSettingsRuntimeAppId),
+           "legacy Control Panel shell action is not a parameterized KernelApp launch");
     expect(appmodel::resolveLaunchTarget("unknown.s11.target").type ==
                gxos::apps::LaunchTargetType::Unknown,
            "unknown resolver target rejected");
@@ -238,6 +251,11 @@ int main()
            "Settings window owner matches its running application");
     expect(AppManager::launchApp("Settings") && AppManager::getRunningAppCount() == 1,
            "duplicate launch focuses existing instance without creating another");
+    expect(AppManager::launchAppWithParam("Settings", "gxos.builtin.controlpanel") &&
+               AppManager::getRunningAppCount() == 1 &&
+               AppManager::getRunningApp(0) == settingsApp &&
+               std::string(settingsApp->getRuntimeAppId()) == kSettingsRuntimeAppId,
+           "duplicate launch arguments cannot retarget Settings identity or instance");
 
     SystemAboutSnapshotRequestV1 request = {
         sizeof(SystemAboutSnapshotRequestV1), kSystemAboutSnapshotVersion, 0
@@ -344,11 +362,15 @@ int main()
     expect(readSystemAboutSnapshot(otherApp, &request, &snapshot, sizeof(snapshot),
                                    &snapshotSize, &snapshotRevision) ==
                SnapshotStatus::Unauthorized,
-           "provider denies a caller without runtime Settings identity");
+           "provider denies a caller without runtime Settings identity, including launch-argument spoofing");
     if (otherApp) otherApp->requestClose();
     AppManager::update();
     expect(AppManager::getRunningAppCount() == 1 && g_activeWindows == 1,
            "closing the unrelated app releases its window ownership");
+    expect(AppManager::getRunningApp(0) == settingsApp &&
+               std::string(settingsApp->getRuntimeAppId()) == kSettingsRuntimeAppId &&
+               settingsApp->getWindow() && settingsApp->getWindow()->owner == settingsApp,
+           "closing an unrelated app leaves the Settings identity and window ownership intact");
 
     KernelApp* settingsBeforeCycles = AppManager::getRunningApp(0);
     if (settingsBeforeCycles) settingsBeforeCycles->requestClose();
