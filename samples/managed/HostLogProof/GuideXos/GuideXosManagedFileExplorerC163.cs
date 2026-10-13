@@ -356,17 +356,22 @@ internal sealed class GuideXosDirectoryBrowserC163
 
 internal sealed class GuideXosFileExplorerControllerC163
 {
-    public const int ControlCapacity = 5;
+    public const int ControlCapacity = 6;
     public const int ListControlId = 1;
     public const int UpControlId = 2;
     public const int OpenControlId = 3;
     public const int RefreshControlId = 4;
     public const int CloseControlId = 5;
+    public const int ScrollBarControlId = 6;
     public const int ListX = 20;
     public const int ListY = 70;
     public const int ButtonY = 326;
     public const int ListVisibleRows = 12;
-    public const int ListWidthCharacters = 61;
+    public const int ListWidthCharacters = 59;
+    public const int MinimumListWidthCharacters = 34;
+    public const int MaximumListWidthCharacters = 79;
+    public const int MinimumListVisibleRows = 10;
+    public const int ScrollBarWidth = GuideXosScrollBar.DefaultWidth;
 
     private readonly GuideXosFileExplorerSourceC163 _source;
     private readonly GuideXosDirectoryBrowserC163 _browser;
@@ -378,6 +383,8 @@ internal sealed class GuideXosFileExplorerControllerC163
     private readonly GuideXosButton _open = new(124, ButtonY, 92, 28, "Open");
     private readonly GuideXosButton _refresh = new(228, ButtonY, 112, 28, "Refresh");
     private readonly GuideXosButton _close = new(352, ButtonY, 92, 28, "Close");
+    private readonly GuideXosScrollBar _scrollBar = new(508, ListY,
+        ScrollBarWidth, ListVisibleRows * 18);
     private readonly GuideXosControlHost _controls = new(ControlCapacity);
     private readonly GuideXosLabel _path = new(20, 42, 760, "Path:", 56);
     private readonly GuideXosLabel _name = new(520, 88, 260, "Name:", 56);
@@ -387,6 +394,9 @@ internal sealed class GuideXosFileExplorerControllerC163
     private bool _controlsInitialized;
     private bool _suppressControlRCharacter;
     private GuideXosHost _host;
+    private int _windowWidth = Applications.ManagedFileExplorerC163.SurfaceWidth;
+    private int _windowHeight = Applications.ManagedFileExplorerC163.SurfaceHeight;
+    private int _layoutUpdateCount;
 
     internal GuideXosFileExplorerControllerC163() :
         this(new GuideXosFileExplorerHostSourceC163())
@@ -407,17 +417,125 @@ internal sealed class GuideXosFileExplorerControllerC163
     public GuideXosButton OpenButton => _open;
     public GuideXosButton RefreshButton => _refresh;
     public GuideXosButton CloseButton => _close;
+    public GuideXosScrollBar ScrollBar => _scrollBar;
     public int ControlCount => _controls.RegistrationCount;
     public int ControlMaximum => _controls.MaximumControlCount;
     public int SharedControlMaximum => GuideXosControlHost.MaximumSupportedControlCount;
     public int RowCount => _list.ItemCount;
     public int FirstVisibleIndex => _list.FirstVisibleIndex;
+    public int WindowWidth => _windowWidth;
+    public int WindowHeight => _windowHeight;
+    public int LayoutUpdateCount => _layoutUpdateCount;
+    public int ListVisibleRowCount => _list.VisibleRowCount;
+    public int ListRenderWidth => _list.RenderWidth;
+    public int ListXPosition => _list.X;
+    public int ListYPosition => _list.Y;
+    public int ListWidth => _list.Width;
+    public int ListHeight => _list.Height;
+    public int PathWidth => _path.Width;
+    public int DetailX => _name.X;
+    public int StatusY => _status.Y;
+    public int ButtonYPosition => _up.Y;
+    public bool ScrollBarVisible => _scrollBar.Visible;
 
     internal void AttachHost(GuideXosHost host)
     {
         _host = host;
         if (_source is GuideXosFileExplorerHostSourceC163 hostSource)
             hostSource.Attach(host);
+    }
+
+    /// <summary>
+    /// Recomputes the existing Explorer controls for an outer-window size.
+    /// This operation is presentation-only: it neither reads the directory
+    /// source nor replaces the list, browser, controls, or their selection.
+    /// </summary>
+    public bool TryRecomputeLayout(int outerWidth, int outerHeight)
+    {
+        if (outerWidth < Applications.ManagedFileExplorerC163.MinimumWindowWidth ||
+            outerHeight < Applications.ManagedFileExplorerC163.MinimumWindowHeight ||
+            outerWidth > Applications.ManagedFileExplorerC163.MaximumWindowWidth ||
+            outerHeight > Applications.ManagedFileExplorerC163.MaximumWindowHeight)
+            return false;
+
+        int clientHeight = outerHeight -
+            Applications.ManagedFileExplorerC163.NativeTitlebarHeight;
+        int detailX = outerWidth - 280;
+        int listWidthCharacters = (detailX - 12 - ScrollBarWidth - ListX) /
+            GuideXosLabel.CharacterWidth;
+        if (listWidthCharacters < MinimumListWidthCharacters)
+            return false;
+        if (listWidthCharacters > MaximumListWidthCharacters)
+            listWidthCharacters = MaximumListWidthCharacters;
+
+        int buttonY = clientHeight - 40;
+        int statusY = clientHeight - 72;
+        int visibleRows = (statusY - ListY - 8) / _list.LineHeight;
+        if (visibleRows < MinimumListVisibleRows ||
+            visibleRows > GuideXosListBox.MaximumVisibleRowCount)
+            visibleRows = visibleRows < MinimumListVisibleRows
+                ? MinimumListVisibleRows
+                : GuideXosListBox.MaximumVisibleRowCount;
+
+        int pathWidth = Math.Min(664, (outerWidth - 40) /
+            GuideXosLabel.CharacterWidth * GuideXosLabel.CharacterWidth);
+        int detailWidth = 256;
+        int priorWidth = _windowWidth;
+        int priorHeight = _windowHeight;
+        int priorOffset = _list.FirstVisibleIndex;
+        if (!ApplyLayout(outerWidth, outerHeight, clientHeight, detailX,
+                listWidthCharacters, visibleRows, buttonY, statusY,
+                pathWidth, detailWidth))
+        {
+            int priorClientHeight = priorHeight -
+                Applications.ManagedFileExplorerC163.NativeTitlebarHeight;
+            int priorDetailX = priorWidth - 280;
+            int priorListWidth = (priorDetailX - 12 - ScrollBarWidth - ListX) /
+                GuideXosLabel.CharacterWidth;
+            int priorButtonY = priorClientHeight - 40;
+            int priorStatusY = priorClientHeight - 72;
+            int priorRows = (priorStatusY - ListY - 8) / _list.LineHeight;
+            if (priorRows < MinimumListVisibleRows)
+                priorRows = MinimumListVisibleRows;
+            if (priorRows > GuideXosListBox.MaximumVisibleRowCount)
+                priorRows = GuideXosListBox.MaximumVisibleRowCount;
+            _ = ApplyLayout(priorWidth, priorHeight, priorClientHeight,
+                priorDetailX, priorListWidth, priorRows, priorButtonY,
+                priorStatusY, Math.Min(664, (priorWidth - 40) /
+                    GuideXosLabel.CharacterWidth * GuideXosLabel.CharacterWidth),
+                detailWidth);
+            _list.SetFirstVisibleIndex(priorOffset);
+            return false;
+        }
+
+        ++_layoutUpdateCount;
+        SyncScrollBarVisibility();
+        return true;
+    }
+
+    private bool ApplyLayout(int outerWidth, int outerHeight, int clientHeight,
+        int detailX, int listWidthCharacters, int visibleRows, int buttonY,
+        int statusY, int pathWidth, int detailWidth)
+    {
+        if (!_list.TrySetLayout(listWidthCharacters, visibleRows, ListX, ListY) ||
+            !_scrollBar.TrySetBounds(ListX + listWidthCharacters *
+                GuideXosLabel.CharacterWidth, ListY, ScrollBarWidth,
+                visibleRows * _list.LineHeight) ||
+            !_up.TrySetBounds(20, buttonY, 92, 28) ||
+            !_open.TrySetBounds(124, buttonY, 92, 28) ||
+            !_refresh.TrySetBounds(228, buttonY, 112, 28) ||
+            !_close.TrySetBounds(352, buttonY, 92, 28) ||
+            !_path.TrySetBounds(20, 42, pathWidth) ||
+            !_name.TrySetBounds(detailX, 88, detailWidth) ||
+            !_type.TrySetBounds(detailX, 112, detailWidth) ||
+            !_size.TrySetBounds(detailX, 136, detailWidth) ||
+            !_status.TrySetBounds(20, statusY, pathWidth))
+            return false;
+
+        _windowWidth = outerWidth;
+        _windowHeight = outerHeight;
+        _ = clientHeight;
+        return true;
     }
 
     public bool InitializeControls()
@@ -434,8 +552,11 @@ internal sealed class GuideXosFileExplorerControllerC163
                 GuideXosControlHostResult.Registered &&
             _controls.TryRegisterButton(CloseControlId, _close) ==
                 GuideXosControlHostResult.Registered &&
+            _controls.TryRegisterScrollBar(ScrollBarControlId, _scrollBar,
+                focusable: false) == GuideXosControlHostResult.Registered &&
             _controls.TryFocus(ListControlId) == GuideXosControlHostResult.Focused;
         _controlsInitialized = registered;
+        if (registered) _scrollBar.BindViewport(_list.VerticalViewport);
         return registered;
     }
 
@@ -551,6 +672,10 @@ internal sealed class GuideXosFileExplorerControllerC163
 
     public void Reset()
     {
+        _scrollBar.UnbindViewport();
+        _scrollBar.ResetTransientState();
+        _scrollBar.SetVisible(false);
+        _scrollBar.SetEnabled(false);
         _controls.Reset();
         _list.Reset();
         _up.Reset();
@@ -575,18 +700,22 @@ internal sealed class GuideXosFileExplorerControllerC163
     public GuideXosResult Render(GuideXosSurface surface)
     {
         if (surface == null ||
-            surface.TryFillRect(8, 8, 784, 374, 0x001D2733u) !=
+            surface.TryFillRect(8, 8, _windowWidth - 16,
+                _windowHeight - Applications.ManagedFileExplorerC163.NativeTitlebarHeight - 16,
+                0x001D2733u) !=
                 GuideXosResult.Success ||
             surface.TrySetText(20, 16, "Managed File Explorer | Read only"u8) !=
                 GuideXosResult.Success ||
             _path.Render(surface) != GuideXosResult.Success ||
-            _list.Render(surface, ListX, ListY) != GuideXosResult.Success ||
-            surface.TrySetText(520, 64, "Selected entry"u8) !=
+            _list.Render(surface, _list.X, _list.Y) != GuideXosResult.Success ||
+            surface.TrySetText(_name.X, 64, "Selected entry"u8) !=
                 GuideXosResult.Success ||
             _name.Render(surface) != GuideXosResult.Success ||
             _type.Render(surface) != GuideXosResult.Success ||
             _size.Render(surface) != GuideXosResult.Success ||
             _status.Render(surface) != GuideXosResult.Success ||
+            (_scrollBar.Visible && _scrollBar.Render(surface) !=
+                GuideXosResult.Success) ||
             _up.Render(surface) != GuideXosResult.Success ||
             _open.Render(surface) != GuideXosResult.Success ||
             _refresh.Render(surface) != GuideXosResult.Success ||
@@ -599,6 +728,18 @@ internal sealed class GuideXosFileExplorerControllerC163
 
     public GuideXosFileExplorerCommandC163 RouteInput(GuideXosInputEvent input)
     {
+        if (input.Kind == GuideXosInputKind.PointerMove &&
+            _controls.HasPointerDragCapture)
+        {
+            _controls.HandlePointerMove(input.X, input.Y);
+            return GuideXosFileExplorerCommandC163.None;
+        }
+        if (input.Kind == GuideXosInputKind.PointerUp &&
+            _controls.HasPointerDragCapture)
+        {
+            _controls.HandlePointerUp(input.X, input.Y, input.Button);
+            return GuideXosFileExplorerCommandC163.None;
+        }
         if (_suppressControlRCharacter && input.Kind == GuideXosInputKind.KeyChar &&
             (input.Character == 'r' || input.Character == 'R'))
         {
@@ -621,11 +762,16 @@ internal sealed class GuideXosFileExplorerControllerC163
         {
             int target = 0;
             GuideXosControlHostResult routed = GuideXosControlHostResult.Ignored;
-            if (Inside(input.X, input.Y, ListX, ListY, _list.Width, _list.Height))
+            if (_scrollBar.Visible && _scrollBar.ContainsPoint(input.X, input.Y))
+            {
+                target = ScrollBarControlId;
+                routed = _controls.FocusAndRoutePointer(target, input.X, input.Y);
+            }
+            else if (Inside(input.X, input.Y, _list.X, _list.Y, _list.Width, _list.Height))
             {
                 target = ListControlId;
                 routed = _controls.FocusAndRoutePointer(target, input.X, input.Y,
-                    ListX, ListY, GuideXosLabel.CharacterWidth, _list.LineHeight);
+                    _list.X, _list.Y, GuideXosLabel.CharacterWidth, _list.LineHeight);
                 SyncSelectionFromList();
             }
             else if (Inside(input.X, input.Y, _up.X, _up.Y, _up.Width, _up.Height))
@@ -655,10 +801,17 @@ internal sealed class GuideXosFileExplorerControllerC163
         }
 
         if (input.Kind == GuideXosInputKind.Wheel &&
-            Inside(input.X, input.Y, ListX, ListY, _list.Width, _list.Height))
+            _scrollBar.Visible && _scrollBar.ContainsPoint(input.X, input.Y))
+        {
+            _scrollBar.HandleWheel(input.WheelDelta);
+            return GuideXosFileExplorerCommandC163.None;
+        }
+
+        if (input.Kind == GuideXosInputKind.Wheel &&
+            Inside(input.X, input.Y, _list.X, _list.Y, _list.Width, _list.Height))
         {
             _controls.HandleWheel(ListControlId, input.X, input.Y,
-                input.WheelDelta, ListX, ListY,
+                input.WheelDelta, _list.X, _list.Y,
                 GuideXosLabel.CharacterWidth, _list.LineHeight);
             return GuideXosFileExplorerCommandC163.None;
         }
@@ -703,6 +856,7 @@ internal sealed class GuideXosFileExplorerControllerC163
 
     private void SyncControlsAndDetails()
     {
+        SyncScrollBarVisibility();
         _up.SetEnabled(_browser.CanGoUp);
         _open.SetEnabled(_browser.HasSelection);
         string path = _browser.CurrentPath ?? string.Empty;
@@ -725,6 +879,14 @@ internal sealed class GuideXosFileExplorerControllerC163
                 ? "Size: " + _browser.SelectedFileSize.Value.ToString(
                     CultureInfo.InvariantCulture) + " bytes"
                 : "Size: unavailable");
+    }
+
+    private void SyncScrollBarVisibility()
+    {
+        bool scrollable = _list.ItemCount > _list.VisibleRowCount;
+        _scrollBar.SetEnabled(scrollable);
+        _scrollBar.SetVisible(scrollable);
+        _scrollBar.SynchronizeViewport();
     }
 
     private void RebuildList(bool resetViewport, int oldViewport = 0,

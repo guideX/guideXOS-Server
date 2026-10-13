@@ -32,6 +32,7 @@ param(
     [switch]$C164FileActivationDiagnostics,
     [switch]$C166FileAssociationProof,
     [switch]$C166OrdinaryBuild,
+    [switch]$C173ManagedFileExplorerResize,
     [switch]$C167DefaultAppsProof,
     [switch]$ProofControl,
     [ValidateSet("Production", "C104AppA", "C104AppB", "C107Composite", "C108ThreadStaticLifecycle", "ProductionComposite", "C112Composite", "C113Composite", "C114Composite", "C115Composite", "C116Composite", "C117Composite", "C118Composite", "C119Composite", "C120Composite", "C121Composite", "C122Composite", "C123Composite", "C124Composite", "C125Composite", "C126Composite", "C127Composite", "C128Composite", "C129Composite", "C131Composite", "C132Composite", "C133Composite", "C134Composite", "C135Composite", "C136Composite", "C137Composite", "C138Composite", "C139Composite", "C140Composite", "C141Composite", "C142Composite", "C143Composite", "C144Composite", "C145Composite", "C146Composite", "C147Composite", "C148Composite", "C149Composite", "C150Composite", "C151Composite", "C152Composite", "C153Composite", "C154Composite", "C158Composite", "C160Composite", "C167ProofComposite")]
@@ -526,6 +527,14 @@ try {
         }
         $publishProperties += "-p:HostLogProofC163FileExplorerDiagnostics=true"
     }
+    if ($C173ManagedFileExplorerResize) {
+        if (-not $ProductionApplication -or
+            $managedProjectMode -notin @("C160Composite", "C167ProofComposite") -or
+            -not $C163ManagedFileExplorer -or -not $C163FileExplorerDiagnostics) {
+            throw "C173 focused proof requires a production C160 or C167 composite with the C163 app and state diagnostics."
+        }
+        $publishProperties += "-p:HostLogProofC173IncludeFocusedTests=true"
+    }
     if ($C164FileActivationProof) {
         $publishProperties += "-p:HostLogProofC164FileActivationProof=true"
     }
@@ -597,6 +606,15 @@ if ($LASTEXITCODE -ne 0) {
 
 if (-not (Test-Path -LiteralPath $artifactElf)) {
     throw "ELF output not found: $artifactElf"
+}
+if ($C173ManagedFileExplorerResize -and $ProofControl) {
+    $artifactText = [System.Text.Encoding]::ASCII.GetString(
+        [System.IO.File]::ReadAllBytes($artifactElf))
+    foreach ($requiredMarker in @('C172-MANAGED-GEOMETRY', 'C173-MANAGED-GEOMETRY')) {
+        if (-not $artifactText.Contains($requiredMarker)) {
+            throw "C173 focused composite is missing managed proof-control marker '$requiredMarker'."
+        }
+    }
 }
 
 if ([string]::IsNullOrWhiteSpace($nativeHostLogObj)) {

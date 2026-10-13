@@ -272,8 +272,8 @@ internal static class GuideXosManagedFileExplorerC163Tests
         FakeSource controllerSource = new();
         GuideXosFileExplorerControllerC163 controller =
             NewController(controllerSource);
-        result &= Case(controller.ControlCount == 5 &&
-            controller.ControlMaximum == 5 &&
+        result &= Case(controller.ControlCount == 6 &&
+            controller.ControlMaximum == 6 &&
             controller.SharedControlMaximum == 20 &&
             controller.Controls.ActiveControlId ==
                 GuideXosFileExplorerControllerC163.ListControlId);

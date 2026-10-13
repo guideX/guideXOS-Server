@@ -13,6 +13,11 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
     public const uint ActivationFailureActionId = 0x01630002u;
     public const int SurfaceWidth = 800;
     public const int SurfaceHeight = 390;
+    public const int MinimumWindowWidth = 600;
+    public const int MinimumWindowHeight = 360;
+    public const int MaximumWindowWidth = 960;
+    public const int MaximumWindowHeight = 526;
+    public const int NativeTitlebarHeight = 24;
 
 #if HOSTLOGPROOF_C163_FILE_EXPLORER_PROOF
     private static bool s_proofTestsRun;
@@ -23,12 +28,21 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
 #if HOSTLOGPROOF_C166_FILE_ASSOCIATION_PROOF
     private static bool s_c166AssociationTestsRun;
 #endif
+#if HOSTLOGPROOF_C173_MANAGED_FILE_EXPLORER_RESIZE
+    private static bool s_c173ResizeTestsRun;
+#endif
     private readonly GuideXosFileExplorerControllerC163 _controller = new();
     private ulong _window;
     private bool _closeRequested;
 
     internal GuideXosFileExplorerControllerC163 Controller => _controller;
     internal bool CloseRequested => _closeRequested;
+    internal int WindowWidth => _controller.WindowWidth;
+    internal int WindowHeight => _controller.WindowHeight;
+    internal ulong WindowHandle => _window;
+
+    internal bool ApplyLiveGeometryForTests(int outerWidth, int outerHeight) =>
+        _controller.TryRecomputeLayout(outerWidth, outerHeight);
 
     public override GuideXosResult Launch(GuideXosHost host)
     {
@@ -71,8 +85,25 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
             }
         }
 #endif
+#if HOSTLOGPROOF_C173_MANAGED_FILE_EXPLORER_RESIZE
+        if (!s_c173ResizeTestsRun)
+        {
+            s_c173ResizeTestsRun = true;
+            if (!GuideXosManagedWindowResizeC173Tests.Run(host))
+            {
+                host.TryLog("C173-FILE-EXPLORER-TESTS result=FAIL"u8);
+                return GuideXosResult.InvalidArgument;
+            }
+            if (!GuideXosManagedWindowResizeC173Tests.RunStress(host))
+            {
+                host.TryLog("C173-FILE-EXPLORER-STRESS result=FAIL"u8);
+                return GuideXosResult.InvalidArgument;
+            }
+        }
+#endif
 
-        if (!_controller.InitializeControls())
+        if (!_controller.InitializeControls() ||
+            !_controller.TryRecomputeLayout(SurfaceWidth, SurfaceHeight))
             return GuideXosResult.InvalidArgument;
         _controller.AttachHost(host);
         if (_controller.OpenInitial() != GuideXosFileResult.Success)
@@ -122,6 +153,7 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
         {
             return GuideXosResult.SurfaceCreationFailed;
         }
+        bool pointerDragActive = _controller.Controls.HasPointerDragCapture;
         GuideXosFileExplorerCommandC163 command = _controller.RouteInput(input);
 #if HOSTLOGPROOF_C163_FILE_EXPLORER_DIAGNOSTICS || HOSTLOGPROOF_C163_FILE_EXPLORER_PROOF
         if (input.Kind != GuideXosInputKind.PointerMove &&
@@ -138,8 +170,8 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
             }
             return close;
         }
-        if (input.Kind == GuideXosInputKind.PointerMove ||
-            input.Kind == GuideXosInputKind.PointerUp)
+        if ((input.Kind == GuideXosInputKind.PointerMove ||
+            input.Kind == GuideXosInputKind.PointerUp) && !pointerDragActive)
             return GuideXosResult.Success;
         return _controller.Render(surface);
     }
@@ -147,6 +179,10 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
     public override GuideXosResult HandleAction(GuideXosHost host,
         uint actionId)
     {
+        if (GuideXosManagedWindowGeometryC172.TryDecodeAction(
+                actionId, out int outerWidth, out int outerHeight))
+            return HandleLiveGeometry(host, outerWidth, outerHeight);
+
         if (actionId == CloseActionId)
         {
             _closeRequested = true;
@@ -163,6 +199,125 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
         host.TryLog("C164-ACTIVATION source-retained=true result=FAIL"u8);
         return GuideXosResult.Success;
     }
+
+    private GuideXosResult HandleLiveGeometry(GuideXosHost host,
+        int outerWidth, int outerHeight)
+    {
+        if (host == null || _window == 0u || _closeRequested ||
+            host.TryGetSurface(_window, out GuideXosSurface surface) !=
+                GuideXosResult.Success || surface == null)
+            return GuideXosResult.SurfaceCreationFailed;
+
+        int priorWidth = _controller.WindowWidth;
+        int priorHeight = _controller.WindowHeight;
+        int priorOffset = _controller.FirstVisibleIndex;
+        string priorPath = _controller.Browser.CurrentPath;
+        int priorSelectedIndex = _controller.Browser.SelectedIndex;
+        GuideXosDirectoryEntry priorSelection =
+            _controller.Browser.SelectedEntry;
+        int priorFocusId = _controller.Controls.ActiveControlId;
+        if (!_controller.TryRecomputeLayout(outerWidth, outerHeight))
+        {
+#if GUIDEXOS_PROOF_CONTROL
+            host.TryLog("C173-MANAGED-GEOMETRY result=REJECT layout=unchanged"u8);
+            LogC173State(host);
+#endif
+            return GuideXosResult.InvalidArgument;
+        }
+
+        GuideXosResult rendered = _controller.Render(surface);
+        bool transientStateClear = !_controller.Controls.IsModalActive &&
+            !_controller.Controls.HasTransientInputCapture &&
+            !_controller.Controls.HasPointerDragCapture;
+        bool focusRetained = _controller.Controls.ActiveControlId == priorFocusId;
+        bool directoryStateRetained = string.Equals(priorPath,
+            _controller.Browser.CurrentPath, StringComparison.Ordinal) &&
+            _controller.Browser.SelectedIndex == priorSelectedIndex &&
+            ReferenceEquals(priorSelection,
+                _controller.Browser.SelectedEntry);
+        if (rendered != GuideXosResult.Success || !transientStateClear ||
+            !focusRetained || !directoryStateRetained)
+        {
+            _controller.TryRecomputeLayout(priorWidth, priorHeight);
+            _controller.List.SetFirstVisibleIndex(priorOffset);
+            _ = _controller.Render(surface);
+#if GUIDEXOS_PROOF_CONTROL
+            host.TryLog("C173-MANAGED-GEOMETRY result=REJECT stage=render-or-state rollback=attempted"u8);
+            LogC173State(host);
+#endif
+            return rendered == GuideXosResult.Success
+                ? GuideXosResult.InvalidArgument : rendered;
+        }
+
+#if GUIDEXOS_PROOF_CONTROL
+        Span<byte> line = stackalloc byte[192];
+        int position = 0;
+        GuideXosText.Append(line, ref position,
+            "C173-MANAGED-GEOMETRY size="u8);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)outerWidth);
+        GuideXosText.Append(line, ref position, "x"u8);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)outerHeight);
+        GuideXosText.Append(line, ref position,
+            directoryStateRetained
+                ? " path=1 selection=1 scroll="u8
+                : " path=0 selection=0 scroll="u8);
+        GuideXosText.AppendUnsigned(line, ref position,
+            (uint)_controller.FirstVisibleIndex);
+        GuideXosText.Append(line, ref position,
+            focusRetained && transientStateClear
+                ? " focus=1 popup=0 result=PASS"u8
+                : " focus=0 popup=1 result=FAIL"u8);
+        host.TryLog(line[..position]);
+        LogC173State(host);
+#if HOSTLOGPROOF_C163_FILE_EXPLORER_DIAGNOSTICS || HOSTLOGPROOF_C163_FILE_EXPLORER_PROOF
+        LogState(host, "resize"u8, 0u);
+#endif
+#endif
+        return GuideXosResult.Success;
+    }
+
+#if GUIDEXOS_PROOF_CONTROL
+    private void LogC173State(GuideXosHost host)
+    {
+        Span<byte> state = stackalloc byte[127];
+        int position = 0;
+        GuideXosText.Append(state, ref position, "C173-STATE path="u8);
+        string currentPath = _controller.Browser.CurrentPath;
+        for (int index = 0; index < currentPath.Length &&
+            position < state.Length - 1; index++)
+        {
+            char value = currentPath[index];
+            state[position++] = value is >= (char)0x20 and <= (char)0x7E
+                ? (byte)value : (byte)'?';
+        }
+        GuideXosText.Append(state, ref position, " sel="u8);
+        GuideXosDirectoryEntry currentSelection =
+            _controller.Browser.SelectedEntry;
+        if (currentSelection == null)
+        {
+            GuideXosText.Append(state, ref position, "none"u8);
+            GuideXosText.Append(state, ref position, " type=none"u8);
+        }
+        else
+        {
+            int nameLength = Math.Min(currentSelection.Name.Length, 32);
+            for (int index = 0; index < nameLength &&
+                position < state.Length - 1; index++)
+            {
+                char value = currentSelection.Name[index];
+                state[position++] = value is >= (char)0x20 and <= (char)0x7E
+                    ? (byte)value : (byte)'?';
+            }
+            GuideXosText.Append(state, ref position,
+                currentSelection.Type == GuideXosEntryType.Directory
+                    ? " type=Directory"u8 : " type=File"u8);
+        }
+        GuideXosText.Append(state, ref position, " view="u8);
+        GuideXosText.AppendUnsigned(state, ref position,
+            (uint)_controller.FirstVisibleIndex);
+        host.TryLog(state[..position]);
+    }
+#endif
 
     public override void OnTearingDown()
     {

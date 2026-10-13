@@ -976,8 +976,11 @@ public:
 
     bool onWindowResize(int oldWidth, int oldHeight,
                         int newWidth, int newHeight) override {
-        if (!m_window || m_selector != 5u ||
-            !isManagedSettingsCenterTitle(m_window->title)) {
+        const bool settingsWindow = m_selector == 5u && m_window &&
+            isManagedSettingsCenterTitle(m_window->title);
+        const bool fileExplorerWindow = m_selector == 8u && m_window &&
+            isManagedFileExplorerTitle(m_window->title);
+        if (!m_window || (!settingsWindow && !fileExplorerWindow)) {
             return true;
         }
         if (newWidth <= 0 || newHeight <= 0 ||
@@ -994,7 +997,9 @@ public:
         const int32_t result = invokeManagedAction(m_selector, actionId);
         g_c116InputDispatchActive = priorInputDispatch;
 #if defined(GUIDEXOS_PROOF_CONTROL)
-        serial::puts("[C172-NATIVE-GEOMETRY] app=ManagedSettings instance=");
+        serial::puts(settingsWindow
+            ? "[C172-NATIVE-GEOMETRY] app=ManagedSettings instance="
+            : "[C173-NATIVE-GEOMETRY] appId=com.guidexos.apps.managed.fileexplorer instance=");
         serial::put_hex64(m_snapshotInstanceId);
         serial::puts(" generation=");
         serial::put_hex32(m_surfaceGeneration);
@@ -1467,6 +1472,15 @@ public:
 private:
     static bool isManagedSettingsCenterTitle(const char* title) {
         static const char expected[] = "Managed Settings Center";
+        if (!title) return false;
+        for (size_t index = 0; index < sizeof(expected); ++index) {
+            if (title[index] != expected[index]) return false;
+        }
+        return true;
+    }
+
+    static bool isManagedFileExplorerTitle(const char* title) {
+        static const char expected[] = "Managed File Explorer";
         if (!title) return false;
         for (size_t index = 0; index < sizeof(expected); ++index) {
             if (title[index] != expected[index]) return false;

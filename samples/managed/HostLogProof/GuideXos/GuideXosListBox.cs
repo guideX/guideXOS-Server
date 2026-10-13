@@ -32,13 +32,13 @@ public sealed class GuideXosListBox
     public const int DefaultVisibleRowCount = 4;
     public const int MaximumVisibleRowCount = 16;
     public const int DefaultRenderWidth = 48;
-    public const int MaximumSupportedRenderWidth = 61;
+    public const int MaximumSupportedRenderWidth = 81;
 
     private readonly char[] _labelStorage;
     private readonly int[] _labelLengths;
     private readonly int _maximumLabelLength;
-    private readonly int _visibleRowCount;
-    private readonly int _renderWidth;
+    private int _visibleRowCount;
+    private int _renderWidth;
     private readonly int _lineHeight;
     private readonly GuideXosVerticalViewport _viewport;
     private int _x;
@@ -134,6 +134,39 @@ public sealed class GuideXosListBox
         }
         _x = x;
         _y = y;
+        return true;
+    }
+
+    /// <summary>
+    /// Changes the bounded render and viewport geometry in place. Rows,
+    /// selection, focus, and the current scroll offset are retained where the
+    /// new viewport permits them; no label storage is rebuilt or allocated.
+    /// </summary>
+    public bool TrySetLayout(int renderWidth, int visibleRowCount, int x, int y)
+    {
+        if (renderWidth < 2 || renderWidth > MaximumSupportedRenderWidth ||
+            visibleRowCount < 1 || visibleRowCount > MaximumVisibleRowCount ||
+            x < 0 || y < 0 ||
+            x > GuideXosLabel.MaximumSupportedCoordinate -
+                renderWidth * GuideXosLabel.CharacterWidth ||
+            y > GuideXosLabel.MaximumSupportedCoordinate -
+                visibleRowCount * _lineHeight)
+        {
+            ++_rejectedOperationCount;
+            return false;
+        }
+
+        _renderWidth = renderWidth;
+        _visibleRowCount = visibleRowCount;
+        _x = x;
+        _y = y;
+        _viewport.VisibleExtent = visibleRowCount;
+        if (IsValidIndex(_selectedIndex) &&
+            (_selectedIndex < _viewport.Offset ||
+             _selectedIndex >= _viewport.Offset + visibleRowCount))
+        {
+            _viewport.EnsureVisible(_selectedIndex);
+        }
         return true;
     }
 
@@ -357,7 +390,7 @@ public sealed class GuideXosListBox
             return GuideXosResult.InvalidArgument;
         }
 
-        Span<byte> line = stackalloc byte[64];
+        Span<byte> line = stackalloc byte[MaximumSupportedRenderWidth];
         int labelWidth = _renderWidth - 2;
         for (int row = 0; row < _visibleRowCount; row++)
         {

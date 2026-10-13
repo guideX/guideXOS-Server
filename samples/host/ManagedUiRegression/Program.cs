@@ -92,5 +92,16 @@ allPassed &= c172StressPassed;
 Console.WriteLine($"C172-STRESS geometry={GuideXosManagedWindowResizeC172Tests.StressGeometryUpdates} transitions={GuideXosManagedWindowResizeC172Tests.StressAlternatingTransitions} focus={GuideXosManagedWindowResizeC172Tests.StressFocusTransitions} combo={GuideXosManagedWindowResizeC172Tests.StressComboCycles} scroll={GuideXosManagedWindowResizeC172Tests.StressScrollMovements} lifecycle={GuideXosManagedWindowResizeC172Tests.StressLifecycleIterations} allocationBytes={GuideXosManagedWindowResizeC172Tests.StressAllocationBytes} drift={GuideXosManagedWindowResizeC172Tests.StressDriftCount} result={(c172StressPassed ? "PASS" : "FAIL")}");
 Console.WriteLine($"C172-STRESS-DETAIL firstFailedCase={GuideXosManagedWindowResizeC172Tests.FirstFailedCase} failure={GuideXosManagedWindowResizeC172Tests.StressFailureDetail}");
 
+allPassed &= RunSuite("C173-ExplorerResize",
+    GuideXosManagedWindowResizeC173Tests.CaseCount,
+    () => GuideXosManagedWindowResizeC173Tests.Run(null));
+Console.WriteLine($"C173-WINDOW-RESIZE-DETAIL firstFailedCase={GuideXosManagedWindowResizeC173Tests.FirstFailedCase}");
+bool c173StressPassed = RunSuite("C173-ExplorerStress",
+    GuideXosManagedWindowResizeC173Tests.StressCaseCount,
+    () => GuideXosManagedWindowResizeC173Tests.RunStress(null));
+allPassed &= c173StressPassed;
+Console.WriteLine($"C173-STRESS layoutUpdates={GuideXosManagedWindowResizeC173Tests.StressLayoutUpdates} alternatingResizes={GuideXosManagedWindowResizeC173Tests.StressAlternatingResizes} selections={GuideXosManagedWindowResizeC173Tests.StressSelectionTransitions} scrolls={GuideXosManagedWindowResizeC173Tests.StressScrollOperations} keyboard={GuideXosManagedWindowResizeC173Tests.StressKeyboardNavigations} navigationResize={GuideXosManagedWindowResizeC173Tests.StressNavigationResizeOperations} lifecycles={GuideXosManagedWindowResizeC173Tests.StressLifecycleCycles} allocationBytes={GuideXosManagedWindowResizeC173Tests.StressLayoutAllocationBytes} drift={GuideXosManagedWindowResizeC173Tests.StressDriftCount} result={(c173StressPassed ? "PASS" : "FAIL")}");
+Console.WriteLine($"C173-STRESS-DETAIL failure={GuideXosManagedWindowResizeC173Tests.StressFailureDetail}");
+
 Console.WriteLine($"MANAGED-UI-HOST-GATE suites={passedSuites + failedSuites} passed={passedSuites} failed={failedSuites} cases={totalCases} result={(allPassed && failedSuites == 0 ? "PASS" : "FAIL")}");
 return allPassed && failedSuites == 0 ? 0 : 1;
