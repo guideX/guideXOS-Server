@@ -1,8 +1,8 @@
 # Disk Manager DM35 — Read-Only Surface Verification Foundation
 
-**Outcome B — `DM35_SCAN_ENGINE_READY` (host-only foundation)**  
-**Phase marker remains:** `last_completed=DM34`, `next_expected=DM35`  
-**Scope:** cooperative read-only sector-read verification; GUI and QEMU qualification are deferred.
+**Outcome A — DM35 accepted**
+**Phase marker:** `last_completed=DM35`, `next_expected=DM36`
+**Scope:** cooperative read-only sector-read verification with completed host, build, and A–G guest qualification.
 
 ## Roadmap and repository gate
 
@@ -580,3 +580,178 @@ continuation should resolve the ordinary Start Menu input path on a fresh
 guest, then complete E, G, and safe F fault injection. Requalify D's launch
 path because this run used the shell fallback. No production source changes
 or new regression/build runs are indicated by this evidence.
+
+## DM35 continuation 5 — D–G qualified; final acceptance
+
+Continuation 4 records the state at that time. This section supersedes its
+remaining-gate and phase-decision statements. Work began on the requested
+branch `DISK_MANAGER_IMPROVEMENTS`, exact starting HEAD
+`42dcef7e7375f70c4503df83ed992caae363e3aa`, with `.phase` at DM34→DM35. No
+production source changed. The earlier A–D guest candidate revision
+`f4c09c66931f8ead48194b3ece509fa112055572` differs from the starting HEAD only
+in these two authoritative documentation files, so its production-source
+identity is unchanged. E, F, and G manifests record the exact starting HEAD.
+
+All guest runs used the same qualified kernel SHA-256
+`CD48DB091C392D11439E0EFDE2CBC694CE3E3DFD25D54483AD5A5C41CEBE067A`, EFI
+bootloader SHA-256
+`9CFBD33384CE921DAADFE82C54E372752EE34BD4394EFAD9F9A0CED8E03BB121`, read-only
+OVMF SHA-256
+`2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792`, and QEMU
+11.0.0 executable SHA-256
+`A930E028F93D0FA47E4D58BDAD2432F7466DC2B6AF0AE376F77EF7A298FFDD02`. QEMU
+used WHPX, UHCI USB mass storage, implicit paced PS/2 input, standard VGA, and
+headless 1280×800 framebuffer capture. Only disposable raw fixtures were
+attached. No physical host storage was attached; `NVME_WRITE_PROVEN=0` and
+`NVME_FLUSH_PROVEN=0` remained in force. Manifests, screenshots, QMP snapshots,
+serial output, traces, and integrity records remain in the ignored run
+directories under `out/dm35/surface-verification/runs/`.
+
+### D — Close lifecycle and launch-route reconciliation: qualified
+
+The D run used `DM35CLOSE01`, PID `9536`, QMP `127.0.0.1:61355`. In
+`kernel/core/shell.cpp`, `cmd_desktop_launch()` calls
+`desktop::launch_app()`. For Disk Manager, `desktop::launch_app()` and the
+Start Menu's `show_start_menu_notification()` both reach
+`try_launch_kernel_app()`, which runs the same production launch-target
+resolver and `AppManager::launchApp()` dispatch. Registration maps the
+`DiskManager` built-in to `DiskManagerApp::create`; both routes therefore
+construct and initialize the same Disk Manager application and compositor
+window. The shell route does not bypass the production resolver, factory,
+window, or Close handler.
+
+During a nonzero scan, the guest received real Alt+F4. The serial log records
+`shortcut alt-f4 recognized`, `close-request ... app=DiskManager`, and
+`close-result=accepted`. The GUI displayed “Close requested. Stopping
+verification after the current read settles.” `DiskManagerApp::onCloseRequested()`
+requests Stop and defers teardown; `update()` continues stepping the job and
+requests window closure only after the engine leaves Running and the result is
+completed; the engine's terminal path releases the shared storage-operation
+lease and exact registration pin before this deferred close completes. The
+window was gone in the settled capture. Target reads stopped at 380 operations
+/ 23,322,112 cumulative bytes; the immediate and settled (14-second)
+snapshots have identical QMP trace offsets and counters. Writes, unmap, and
+failed reads remained zero; the only Flush was already present before the scan.
+The released `DM35CLOSE01.raw` hash matches its pristine hash. This positive
+shared-path and deferred-close evidence satisfies D; a cosmetic Start Menu
+retry was not necessary. Screenshots and counters are in
+`runs/D-close-20261012/`.
+
+### E — active USB removal and same-capacity replacement: qualified
+
+Run `E-removal-replacement-cont4-20261012` used PID `11052`, QMP
+`127.0.0.1:61357`, original device ID
+`dm35_dm35-removal_during_scan-device`, drive ID
+`dm35_dm35-removal_during_scan-drive`, and serial `DM35REMOVE01`. The attached
+307,200,000-byte fixture had pristine SHA-256
+`8a9450cbd33723c613d88d47e2177e751c0af7929de68d903feac2660bbc39d7`. The
+production GUI confirmed the full-disk range LBA 0–599999 and began a real
+scan. QMP advanced from the pre-scan baseline of 131 reads / 85,504 bytes to
+215 reads / 11,095,552 bytes before removal. Its operation trace contains 84
+contiguous 128 KiB READ(10) requests beginning at LBA 0; the first 83 batches
+cover the 21,248 successfully examined sectors, and the request at LBA 21,248
+was in flight when removal was issued.
+
+QMP `device_del` targeted only the original QEMU device. The GUI reached
+Failed at 21,248/600,000 with “selected device is no longer available,”
+“Device removed or offline,” and “Storage ownership: released.” This is
+distinct from a diagnosed unreadable-sector error. The QMP trace offset stopped
+at byte 51,388 and remained unchanged in both the immediate-removal and
+terminal-before-replacement captures; no further old-registration batch ran.
+Only after that terminal result and ownership release, pristine
+`DM35REPL01` was attached as a new USB/QEMU device
+`dm35_dm35-same-capacity_replacement-device`, node `dm35_repl_raw`. Its new
+serial was visible as `DM35REPL01` on a different USB port. At attachment its
+QMP backend had zero reads/writes/unmaps and one registration-time Flush. The
+subsequent inventory/selection window contained 75 one-sector metadata reads
+(38,400 bytes) and the registration Flush, with zero writes, unmaps, or failed
+reads; it contained no 128 KiB verification batch. The old result remained
+terminal, no job was inherited, and the normal Verify Entire Disk action was
+available for a future explicit scan. No replacement scan was started.
+
+After QEMU exited, its process and QMP endpoint were absent and both images
+opened exclusively. `DM35REMOVE01.raw` and `DM35REPL01.raw` remained
+307,200,000 bytes and each retained pristine SHA-256
+`8a9450cbd33723c613d88d47e2177e751c0af7929de68d903feac2660bbc39d7`. The
+full trace/counter summary is `runs/E-removal-replacement-cont4-20261012/read-window-summary.json`;
+all pre/post screenshots and QMP snapshots are alongside it.
+
+### F — real guest read-error classification: qualified
+
+Run `F-read-error-cont4-20261012` used PID `27616`, QMP
+`127.0.0.1:61357`, read-only fixture `DM35ERR01`, and the pristine fixture
+hash above. A bounded QEMU `blkdebug:` URI used the documented one-shot
+`read_aio` error (`errno=5`) at sector 300000. A separate read-only `qemu-io`
+probe returned Input/output error using that URI before the guest run. The
+guest used the normal Disk Manager GUI and started a full-disk scan.
+
+The UI ended Failed after successfully examining 299,776 sectors. It reports
+the failed request at LBA 299,776 for 256 sectors with block status
+`BLOCK_ERR_IO`; its transport detail says stage 7 / failing LBA 0, and it
+explicitly says the failed requested range is not individually localized. The
+configured fault sector 300,000 lies inside that request (LBA 299,776–300,031),
+so the UI does not claim every sector of the multi-sector request is bad. The
+scan trace contains the 1,171 successful 128 KiB requests plus the final
+injected failed request. QMP read counters advanced from 70 / 54,272 bytes to
+1,241 / 153,539,584 bytes; the successful-byte delta is 153,485,312 bytes,
+and `failed_rd_operations` increased exactly once. Writes and unmaps stayed
+zero; the single Flush was already in the pre-scan baseline. Ownership was
+released, and the trace offset and counters stayed fixed during the five
+second post-terminal observation. QEMU exited before the image was opened
+exclusively; size and SHA-256 remained unchanged. The injected guest evidence
+complements the retained production-linked first-request, mid-progress, and
+near-final host fail-fast tests. Configuration, probe result, trace, snapshots,
+and integrity evidence are in `runs/F-read-error-cont4-20261012/`, including
+`read-error-summary.json`.
+
+The QEMU backend and error event used here are documented by the [QEMU
+`blkdebug` testing documentation](https://www.qemu.org/docs/master/devel/testing/blkdebug.html)
+and [QEMU QMP reference](https://www.qemu.org/docs/master/interop/qemu-qmp-ref.html).
+
+### G — read-only USB admission and complete verification: qualified
+
+Run `G-read-only-cont4-20261012` used PID `29784`, QMP
+`127.0.0.1:61358`, and `DM35READ01`. QEMU attached the 307,200,000-byte image
+with `readonly=on`; QMP reported the block backend read-only. The GUI showed
+the exact serial, 512-byte logical sectors, 600,000 sectors, and Read only
+access while keeping Verify Entire Disk available. Through the ordinary Start
+Menu, the full-range confirmation was accepted and the scan completed at
+600,000/600,000, LBA 0–599999, 100%, with all selected sectors reported
+readable and storage ownership released.
+
+The pre-scan confirmation snapshot had 63 reads / 50,688 bytes and one
+registration-time Flush. The settled QMP sample had 2,407 reads / 307,250,688
+bytes, exactly +2,344 reads and +307,200,000 bytes for the scan. QMP shows
+zero write operations/bytes, zero unmaps, zero failed reads, and no Flush
+delta. The operation-window trace contains 2,344 contiguous READ(10) requests
+covering exactly 600,000 sectors from LBA 0 through 599999; the last request
+starts at LBA 599808 and is shortened to 192 sectors. The terminal capture
+and the five-second settled capture have identical counters and trace offset.
+QEMU exited, its QMP port closed, and the fixture opened exclusively with its
+original size and pristine SHA-256. Full provenance, accounting, trace range,
+and integrity results are in `runs/G-read-only-cont4-20261012/`, including
+`read-only-coverage-summary.json` and `postexit-integrity.json`.
+
+### Final DM35 decision
+
+A and B remain qualified by their retained full-disk and bounded-partition
+guest evidence. C remains qualified by the real Stop Scan widget and settled
+partial terminal state. D is now reconciled to the shared production launch
+and Close lifecycle. E proves removal invalidation, exact old-job settlement,
+replacement isolation, and unchanged images. F proves guest read-error
+classification with the failed multi-sector range kept distinct from an
+individually identified bad sector. G proves a genuinely read-only removable
+device can be selected, scanned completely, and released without scan-attributable
+writes or Flushes.
+
+Production source is unchanged from the exact-source baseline. The accepted
+48/48 surface engine, 34/34 Disk Manager GUI, 1,192/1,192 full storage suite,
+USB 7/7, GPT 1/1, DM30 fixture 1/1, widget activation, AMD64 kernel,
+`build.bat`, and UEFI x64 Release results are therefore retained without
+rerunning. Existing operation-conflict tests remain valid. The separate
+`build.ps1 -Arch amd64` PacMan Native ELF link failure is unrelated and
+unchanged; PacMan was not modified. All disposable fixture checks passed,
+with no physical storage attached and both NVMe proof flags zero. This is
+**Outcome A — DM35 accepted**. `.phase` advances to
+`last_completed=DM35`, `next_expected=DM36`. DM36 implementation has not
+started.
