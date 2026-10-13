@@ -10,6 +10,7 @@
 #include "../kernel/core/include/kernel/partition_wipe.h"
 #include "../kernel/core/include/kernel/whole_disk_erase.h"
 #include "../kernel/core/include/kernel/surface_verification.h"
+#include "../kernel/core/include/kernel/fat32_integrity.h"
 #include "../kernel/core/include/kernel/disk_manager_wipe_ui.h"
 #include "../kernel/core/include/kernel/disk_manager_whole_disk_erase_ui.h"
 #include "../kernel/core/include/kernel/disk_manager_surface_verification_ui.h"
@@ -8228,6 +8229,574 @@ void run_disk_manager_surface_verification_ui_tests()
         g_checks - checksBefore, g_failures - failuresBefore);
 }
 
+void run_fat32_integrity_tests()
+{
+    const int checksBefore = g_checks;
+    const int failuresBefore = g_failures;
+    vfs::test_clear_mounts();
+
+    auto prepareFormattedFixture = [](FakeDisk& disk, uint32_t startLba,
+                                      uint32_t partitionSectors,
+                                      uint8_t& index,
+                                      storage::PartitionEntry& partition,
+                                      storage::Fat32IntegrityRequest& request) {
+        index = 0xFF;
+        std::memset(sector(disk, 0) + 446, 0, 64);
+        write_u32(sector(disk, 0) + 440, 0xD36FA732u);
+        set_mbr_partition(disk, 0, 0, 0x0C, startLba,
+                          partitionSectors);
+        set_mbr_signature(disk);
+        index = register_fake(disk, true, true, true, false, 0,
+            128u * 1024u, block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT,
+            block::BDEV_AHCI);
+        if (index == 0xFF) return false;
+        storage::PartitionTableModel table = {};
+        if (!parse_first_partition(index, table, partition)) return false;
+        storage::Fat32FormatRequest formatRequest = make_format_request(
+            index, partition, "DM36", 0x36A03211u);
+        storage::Fat32FormatResult formatResult = {};
+        if (storage::format_fat32_partition(formatRequest, formatResult) !=
+                storage::FAT32_FORMAT_SUCCESS ||
+            !storage::parse_partition_table(index, table) ||
+            !parse_first_partition(index, table, partition)) return false;
+        storage::TargetIdentity target = {};
+        return storage::capture_target_identity(index, target) &&
+            storage::capture_fat32_integrity_request(target, table,
+                partition, request);
+    };
+
+    auto runAndCheckReadOnly = [](FakeDisk& disk,
+                                  const storage::Fat32IntegrityRequest& request,
+                                  storage::Fat32IntegrityJob& job) {
+        const std::vector<uint8_t> mbrBefore = disk.sparseMbr;
+        const auto sectorsBefore = disk.sparseSectors;
+        const uint32_t writeAttemptsBefore = disk.writeAttempts;
+        const uint32_t writesBefore = disk.writes;
+        const uint32_t flushesBefore = disk.flushes;
+        disk.readLog.clear();
+        storage::Fat32IntegrityState state =
+            storage::begin_fat32_integrity_job(job, request);
+        uint32_t steps = 0;
+        bool boundedSteps = true;
+        while (state == storage::FAT32_INTEGRITY_RUNNING && steps++ < 20000) {
+            const size_t readsBeforeStep = disk.readLog.size();
+            state = storage::step_fat32_integrity_job(job);
+            if (disk.readLog.size() - readsBeforeStep > 1)
+                boundedSteps = false;
+        }
+        bool rangesBounded = true;
+        for (const FakeWriteRecord& read : disk.readLog) {
+            const uint64_t bytes = static_cast<uint64_t>(read.count) *
+                disk.sectorSize;
+            rangesBounded = rangesBounded &&
+                read.lba >= request.partitionSnapshot.startLba &&
+                read.lba <= request.partitionSnapshot.endLba &&
+                read.count <= request.partitionSnapshot.endLba - read.lba + 1 &&
+                bytes <= storage::FAT32_INTEGRITY_COMPARE_BUFFER_BYTES;
+        }
+        check(state != storage::FAT32_INTEGRITY_RUNNING && steps < 20000,
+              "metadata checker reaches a terminal result through bounded cooperative steps");
+        check(boundedSteps && rangesBounded,
+              "each update issues at most one bounded read wholly inside the captured partition");
+        check(disk.sparseMbr == mbrBefore && disk.sparseSectors == sectorsBefore &&
+              disk.writeAttempts == writeAttemptsBefore &&
+              disk.writes == writesBefore && disk.flushes == flushesBefore,
+              "metadata verification does not change fixture contents or issue writes/Flushes");
+        return state;
+    };
+
+    FakeDisk disk512(512, 90000, false);
+    uint8_t index512 = 0xFF;
+    storage::PartitionEntry partition512 = {};
+    storage::Fat32IntegrityRequest request512 = {};
+    const bool formatted512 = prepareFormattedFixture(disk512, 2048, 80000,
+        index512, partition512, request512);
+    check(formatted512,
+          "512-byte FAT32 checker fixture is created by the production formatter and bound to a valid MBR table");
+    if (!formatted512) {
+        if (index512 != 0xFF) (void)unregister_fake(index512, disk512);
+        std::printf("DM36 FAT32 integrity metadata: %d checks, %d failures\n",
+            g_checks - checksBefore, g_failures - failuresBefore);
+        return;
+    }
+
+    storage::Fat32IntegrityJob clean512 = {};
+    const auto clean512State = runAndCheckReadOnly(disk512, request512,
+                                                    clean512);
+    check(clean512State == storage::FAT32_INTEGRITY_PASSED &&
+          clean512.result.findingCount == 0 &&
+          clean512.result.geometry.bytesPerSector == 512 &&
+          clean512.result.fatBytesCompared ==
+              clean512.result.geometry.fatBytes &&
+          clean512.result.ownershipReleased &&
+          !storage::storage_operation_active(),
+          "formatted 512-byte FAT32 primary/backup BPB, FSInfo, reserved FAT entries, and mirrored FAT compare pass");
+    uint64_t mappedRoot = 0;
+    check(storage::fat32_integrity_cluster_sector(clean512.result.geometry,
+              clean512.result.geometry.rootCluster, mappedRoot) &&
+          mappedRoot == clean512.result.geometry.rootDirectorySector &&
+          !storage::fat32_integrity_cluster_sector(clean512.result.geometry,
+              clean512.result.geometry.clusterCount + 2u, mappedRoot),
+          "checked cluster-to-sector mapping accepts root and rejects the first out-of-range cluster");
+    check(storage::step_fat32_integrity_job(clean512) == clean512State &&
+          clean512.result.ownershipReleased,
+          "terminal re-entry cannot repeat ownership release or issue another read");
+
+    (void)unregister_fake(index512, disk512);
+
+    FakeDisk disk4Kn(4096, 67000, false);
+    uint8_t index4Kn = 0xFF;
+    storage::PartitionEntry partition4Kn = {};
+    storage::Fat32IntegrityRequest request4Kn = {};
+    const bool formatted4Kn = prepareFormattedFixture(disk4Kn, 8, 66000,
+        index4Kn, partition4Kn, request4Kn);
+    check(formatted4Kn,
+          "4Kn FAT32 checker fixture is created by the production formatter");
+    if (formatted4Kn) {
+        storage::Fat32IntegrityJob clean4Kn = {};
+        const auto clean4KnState = runAndCheckReadOnly(disk4Kn, request4Kn,
+                                                        clean4Kn);
+        check(clean4KnState == storage::FAT32_INTEGRITY_PASSED &&
+              clean4Kn.result.geometry.bytesPerSector == 4096 &&
+              clean4Kn.result.findingCount == 0 &&
+              clean4Kn.result.fatBytesCompared ==
+                  clean4Kn.result.geometry.fatBytes &&
+              clean4Kn.result.ownershipReleased,
+              "4Kn BPB, FSInfo signatures, FAT offsets, and bounded mirror comparison pass");
+        (void)unregister_fake(index4Kn, disk4Kn);
+    } else if (index4Kn != 0xFF) {
+        (void)unregister_fake(index4Kn, disk4Kn);
+    }
+
+    // Re-register the completed 512-byte formatter image read-only. The
+    // integrity engine must not require writable or Flush capability.
+    index512 = register_fake(disk512, false, false, false, false, 0,
+        128u * 1024u, block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT,
+        block::BDEV_AHCI);
+    storage::PartitionTableModel table512 = {};
+    storage::TargetIdentity target512 = {};
+    const bool readonlyBound = index512 != 0xFF &&
+        parse_first_partition(index512, table512, partition512) &&
+        storage::capture_target_identity(index512, target512) &&
+        storage::capture_fat32_integrity_request(target512, table512,
+            partition512, request512);
+    check(readonlyBound,
+          "read-only registration retains a fresh target, partition, and table identity");
+    if (!readonlyBound) {
+        if (index512 != 0xFF) (void)unregister_fake(index512, disk512);
+        std::printf("DM36 FAT32 integrity metadata: %d checks, %d failures\n",
+            g_checks - checksBefore, g_failures - failuresBefore);
+        return;
+    }
+
+    const std::vector<uint8_t> pristineMbr = disk512.sparseMbr;
+    const auto pristineSectors = disk512.sparseSectors;
+    const uint32_t readonlyBaselineWriteAttempts = disk512.writeAttempts;
+    const uint32_t readonlyBaselineWrites = disk512.writes;
+    const uint32_t readonlyBaselineFlushes = disk512.flushes;
+    const uint64_t bootLba = partition512.startLba;
+    uint8_t* boot = sector(disk512, bootLba);
+    const uint32_t reserved = read_u16(boot + 14);
+    const uint32_t fatSize = read_u32(boot + 36);
+    const uint64_t fsInfoLba = bootLba + read_u16(boot + 48);
+    const uint64_t backupBootLba = bootLba + read_u16(boot + 50);
+
+    // Stop before the first filesystem metadata read.
+    {
+        storage::Fat32IntegrityJob stopped = {};
+        disk512.readLog.clear();
+        const auto admitted = storage::begin_fat32_integrity_job(stopped,
+            request512);
+        const bool stopAccepted =
+            storage::request_fat32_integrity_stop(stopped);
+        const auto stoppedState =
+            storage::step_fat32_integrity_job(stopped);
+        check(admitted == storage::FAT32_INTEGRITY_RUNNING && stopAccepted &&
+              stoppedState == storage::FAT32_INTEGRITY_STOPPED &&
+              disk512.readLog.empty() && stopped.result.ownershipReleased &&
+              stopped.result.metadataReadRequests == 0,
+              "Stop before the first metadata read settles and releases ownership without I/O");
+    }
+
+    // A completed operation lease blocks admission without touching media.
+    {
+        storage::StorageOperationLease conflict = {};
+        const auto lock = storage::try_acquire_storage_operation(conflict);
+        storage::Fat32IntegrityJob busy = {};
+        disk512.readLog.clear();
+        const auto state = storage::begin_fat32_integrity_job(busy, request512);
+        const bool released = storage::release_storage_operation(conflict);
+        check(lock == storage::STORAGE_OPERATION_LOCK_ACQUIRED &&
+              state == storage::FAT32_INTEGRITY_NOT_ADMITTED &&
+              busy.result.reason ==
+                  storage::FAT32_INTEGRITY_REASON_OPERATION_BUSY &&
+              disk512.readLog.empty() && released,
+              "conflicting storage operation prevents checker admission before a read");
+    }
+
+    // The target device must have no active VFS mount while checks run.
+    {
+        vfs::test_set_mount(0, true, index512, "/dm36-mounted");
+        disk512.readLog.clear();
+        storage::Fat32IntegrityJob mounted = {};
+        const auto state = storage::begin_fat32_integrity_job(mounted,
+            request512);
+        vfs::test_clear_mounts();
+        check(state == storage::FAT32_INTEGRITY_NOT_ADMITTED &&
+              mounted.result.reason ==
+                  storage::FAT32_INTEGRITY_REASON_MOUNTED_TARGET &&
+              mounted.result.ownershipReleased && disk512.readLog.empty(),
+              "mounted parent device is rejected to avoid diagnosing concurrent filesystem changes");
+    }
+
+    // Caller selection changes after admission cannot retarget the copied job.
+    {
+        storage::Fat32IntegrityRequest laterSelection = request512;
+        storage::Fat32IntegrityJob bound = {};
+        const auto admitted = storage::begin_fat32_integrity_job(bound,
+            request512);
+        laterSelection.partitionSnapshot.startLba += 1;
+        const auto completed = runAndCheckReadOnly(disk512, bound.request,
+                                                    bound);
+        check(admitted == storage::FAT32_INTEGRITY_RUNNING &&
+              completed == storage::FAT32_INTEGRITY_PASSED &&
+              bound.result.partitionStartLba == partition512.startLba &&
+              laterSelection.partitionSnapshot.startLba !=
+                  bound.result.partitionStartLba,
+              "captured immutable target is independent of later selection changes");
+    }
+
+    // Short stop after primary/backup/FSInfo work has made progress.
+    {
+        storage::Fat32IntegrityJob partial = {};
+        disk512.readLog.clear();
+        const auto admitted = storage::begin_fat32_integrity_job(partial,
+            request512);
+        (void)storage::step_fat32_integrity_job(partial); // validate capture
+        (void)storage::step_fat32_integrity_job(partial); // primary boot
+        (void)storage::step_fat32_integrity_job(partial); // backup boot
+        (void)storage::step_fat32_integrity_job(partial); // FSInfo
+        const size_t readsAtStop = disk512.readLog.size();
+        const bool stopAccepted =
+            storage::request_fat32_integrity_stop(partial);
+        const auto stopped = storage::step_fat32_integrity_job(partial);
+        check(admitted == storage::FAT32_INTEGRITY_RUNNING &&
+              readsAtStop == 3 && stopAccepted &&
+              stopped == storage::FAT32_INTEGRITY_STOPPED &&
+              disk512.readLog.size() == readsAtStop &&
+              partial.result.findingCount == 0 &&
+              partial.result.ownershipReleased,
+              "Stop after partial metadata progress prevents later reads and releases once");
+    }
+
+    auto runMutation = [&](uint64_t lba, uint32_t offset, uint8_t value,
+                           storage::Fat32IntegrityState expectedState,
+                           storage::Fat32IntegrityFindingCategory category,
+                           const char* label) {
+        uint8_t* changed = sector(disk512, lba);
+        const uint8_t original = changed[offset];
+        changed[offset] = value;
+        storage::Fat32IntegrityJob job = {};
+        const auto state = runAndCheckReadOnly(disk512, request512, job);
+        bool found = false;
+        for (uint8_t i = 0; i < job.result.findingCount; ++i)
+            if (job.result.findings[i].category == category) found = true;
+        check(state == expectedState && found, label);
+        changed = sector(disk512, lba);
+        changed[offset] = original;
+    };
+
+    runMutation(bootLba, 510, 0x00,
+        storage::FAT32_INTEGRITY_INCONSISTENCY,
+        storage::FAT32_INTEGRITY_FINDING_BOOT_SIGNATURE,
+        "bad primary boot signature is reported as a structural finding");
+
+    runMutation(bootLba, 13, 0,
+        storage::FAT32_INTEGRITY_INVALID_GEOMETRY,
+        storage::FAT32_INTEGRITY_FINDING_MALFORMED_BPB,
+        "zero sectors-per-cluster is rejected as malformed BPB geometry");
+
+    runMutation(bootLba, 39, 0xFF,
+        storage::FAT32_INTEGRITY_INVALID_GEOMETRY,
+        storage::FAT32_INTEGRITY_FINDING_MALFORMED_BPB,
+        "FAT size extending beyond the volume is rejected before FAT reads");
+
+    runMutation(bootLba, 44, 1,
+        storage::FAT32_INTEGRITY_INVALID_GEOMETRY,
+        storage::FAT32_INTEGRITY_FINDING_MALFORMED_BPB,
+        "invalid root cluster is rejected by the checked data-region bounds");
+
+    runMutation(bootLba, 32,
+        static_cast<uint8_t>((partition512.sectorCount + 1u) & 0xFFu),
+        storage::FAT32_INTEGRITY_INVALID_GEOMETRY,
+        storage::FAT32_INTEGRITY_FINDING_MALFORMED_BPB,
+        "truncated partition cannot contain the BPB-advertised volume size");
+
+    runMutation(backupBootLba, 44,
+        static_cast<uint8_t>(read_u32(sector(disk512, backupBootLba) + 44) ^ 1u),
+        storage::FAT32_INTEGRITY_INCONSISTENCY,
+        storage::FAT32_INTEGRITY_FINDING_BACKUP_BOOT_MISMATCH,
+        "primary/backup boot-sector BPB mismatch is reported without repair");
+
+    runMutation(fsInfoLba, 0, 0,
+        storage::FAT32_INTEGRITY_INCONSISTENCY,
+        storage::FAT32_INTEGRITY_FINDING_FSINFO_SIGNATURE,
+        "invalid FSInfo signatures are reported as structural findings");
+
+    runMutation(bootLba + reserved, 0,
+        static_cast<uint8_t>(sector(disk512, bootLba + reserved)[0] ^ 1u),
+        storage::FAT32_INTEGRITY_INCONSISTENCY,
+        storage::FAT32_INTEGRITY_FINDING_FAT_RESERVED_ENTRY,
+        "implausible FAT32 reserved entry is reported");
+
+    // A stale FSInfo hint is advisory: it must not become proof of damage.
+    {
+        uint8_t* fsinfo = sector(disk512, fsInfoLba);
+        const uint32_t oldFree = read_u32(fsinfo + 488);
+        const uint32_t oldNext = read_u32(fsinfo + 492);
+        write_u32(fsinfo + 488, clean512.result.geometry.clusterCount + 3u);
+        write_u32(fsinfo + 492, 1u);
+        storage::Fat32IntegrityJob stale = {};
+        const auto state = runAndCheckReadOnly(disk512, request512, stale);
+        bool advisoryOnly = stale.result.findingCount == 2;
+        for (uint8_t i = 0; i < stale.result.findingCount; ++i)
+            advisoryOnly = advisoryOnly && stale.result.findings[i].severity ==
+                storage::FAT32_INTEGRITY_ADVISORY;
+        check(state == storage::FAT32_INTEGRITY_PASSED && advisoryOnly &&
+              !stale.result.structuralInconsistencyFound,
+              "stale/out-of-range FSInfo hints are reported conservatively as advisory findings");
+        write_u32(fsinfo + 488, oldFree);
+        write_u32(fsinfo + 492, oldNext);
+    }
+
+    // Unknown hints are explicitly accepted without a corruption finding.
+    {
+        uint8_t* fsinfo = sector(disk512, fsInfoLba);
+        const uint32_t oldFree = read_u32(fsinfo + 488);
+        const uint32_t oldNext = read_u32(fsinfo + 492);
+        write_u32(fsinfo + 488, UINT32_MAX);
+        write_u32(fsinfo + 492, UINT32_MAX);
+        storage::Fat32IntegrityJob unknown = {};
+        const auto state = runAndCheckReadOnly(disk512, request512, unknown);
+        check(state == storage::FAT32_INTEGRITY_PASSED &&
+              unknown.result.findingCount == 0,
+              "unknown FSInfo free-count and next-free hints remain non-errors");
+        write_u32(fsinfo + 488, oldFree);
+        write_u32(fsinfo + 492, oldNext);
+    }
+
+    const uint64_t fat2Lba = bootLba + reserved + fatSize;
+    runMutation(fat2Lba, 100,
+        static_cast<uint8_t>(sector(disk512, fat2Lba)[100] ^ 1u),
+        storage::FAT32_INTEGRITY_INCONSISTENCY,
+        storage::FAT32_INTEGRITY_FINDING_FAT_COPY_MISMATCH,
+        "mirrored FAT copy mismatch is reported and neither copy is repaired");
+
+    // When BPB_ExtFlags disables mirroring, the active FAT is defined by the
+    // BPB and other copies may be stale. Compare them, but report differences
+    // as advisory instead of claiming filesystem corruption.
+    {
+        uint8_t* primary = sector(disk512, bootLba);
+        uint8_t* backup = sector(disk512, backupBootLba);
+        const uint16_t primaryFlags = read_u16(primary + 40);
+        const uint16_t backupFlags = read_u16(backup + 40);
+        uint8_t* staleFatByte = sector(disk512, fat2Lba) + 100;
+        const uint8_t originalFatByte = *staleFatByte;
+        write_u16(primary + 40, 0x0080u);
+        write_u16(backup + 40, 0x0080u);
+        *staleFatByte ^= 1u;
+        storage::Fat32IntegrityJob disabledMirroring = {};
+        const auto state = runAndCheckReadOnly(disk512, request512,
+                                               disabledMirroring);
+        bool advisoryMismatch = false;
+        for (uint8_t i = 0;
+             i < disabledMirroring.result.findingCount; ++i) {
+            const storage::Fat32IntegrityFinding& finding =
+                disabledMirroring.result.findings[i];
+            if (finding.category ==
+                    storage::FAT32_INTEGRITY_FINDING_FAT_COPY_MISMATCH &&
+                finding.severity == storage::FAT32_INTEGRITY_ADVISORY)
+                advisoryMismatch = true;
+        }
+        check(state == storage::FAT32_INTEGRITY_PASSED &&
+              advisoryMismatch &&
+              !disabledMirroring.result.structuralInconsistencyFound,
+              "disabled FAT mirroring still compares copies but reports divergence conservatively as advisory");
+        write_u16(primary + 40, primaryFlags);
+        write_u16(backup + 40, backupFlags);
+        *staleFatByte = originalFatByte;
+    }
+
+    // Overflow/escape geometry is denied before admission; no media is read.
+    {
+        storage::Fat32IntegrityRequest overflow = request512;
+        overflow.partitionSnapshot.startLba = UINT64_MAX - 7u;
+        overflow.partitionSnapshot.endLba = UINT64_MAX;
+        overflow.partitionSnapshot.sectorCount = 16;
+        storage::Fat32IntegrityJob rejected = {};
+        disk512.readLog.clear();
+        const auto state = storage::begin_fat32_integrity_job(rejected,
+            overflow);
+        check(state == storage::FAT32_INTEGRITY_NOT_ADMITTED &&
+              rejected.result.reason ==
+                  storage::FAT32_INTEGRITY_REASON_INVALID_REQUEST &&
+              disk512.readLog.empty(),
+              "overflowing partition extent is rejected without a metadata read");
+    }
+
+    // Fail the first metadata read and preserve the exact failed request.
+    {
+        disk512.failLba = bootLba;
+        disk512.failReadStatus = block::BLOCK_ERR_IO;
+        storage::Fat32IntegrityJob failed = {};
+        const auto state = runAndCheckReadOnly(disk512, request512, failed);
+        check(state == storage::FAT32_INTEGRITY_READ_ERROR &&
+              failed.result.reason ==
+                  storage::FAT32_INTEGRITY_REASON_READ_FAILURE &&
+              failed.result.blockStatusValid &&
+              failed.result.blockStatus == block::BLOCK_ERR_IO &&
+              failed.result.failedLba == bootLba &&
+              failed.result.failedSectorCount == 1 &&
+              failed.result.ownershipReleased,
+              "read failure retains its actual LBA/status and releases ownership");
+        disk512.failLba = UINT64_MAX;
+    }
+
+    // The operation copies the exact selected request; caller memory may be
+    // reused for a later selection without changing this job.
+    // Exercise a real media removal and same-capacity replacement last,
+    // since registry-generation invalidation is terminal for this request.
+    {
+        FakeDisk replacement(512, disk512.sectorCount, false);
+        disk512.removeOnReadAtCall = disk512.reads + 1u;
+        disk512.replacementOnRemoval = &replacement;
+        storage::Fat32IntegrityJob removed = {};
+        disk512.readLog.clear();
+        const auto admitted = storage::begin_fat32_integrity_job(removed,
+            request512);
+        (void)storage::step_fat32_integrity_job(removed); // capture check
+        const auto state = storage::step_fat32_integrity_job(removed);
+        check(admitted == storage::FAT32_INTEGRITY_RUNNING &&
+              state == storage::FAT32_INTEGRITY_TARGET_INVALIDATED &&
+              removed.result.reason ==
+                  storage::FAT32_INTEGRITY_REASON_DEVICE_REMOVED &&
+              removed.result.ownershipReleased &&
+              disk512.replacementRegisteredDuringRemoval &&
+              replacement.readLog.empty() && disk512.readLog.size() == 1,
+              "device removal settles the old job without redirecting its read to same-capacity replacement media");
+        if (replacement.registryIndex != 0xFF)
+            (void)unregister_fake(replacement.registryIndex, replacement);
+        g_fakeDisks[disk512.driverId] = nullptr;
+    }
+
+    // A synthetic sparse FAT32 fixture makes the mirror larger than the
+    // finding cap. The checking engine remains the production checker; only
+    // this test-only media image is populated directly.
+    {
+        FakeDisk large(512, 303000, false);
+        const uint32_t partitionStart = 2048;
+        const uint32_t partitionSectors = 300000;
+        std::memset(sector(large, 0) + 446, 0, 64);
+        write_u32(sector(large, 0) + 440, 0xD36B0A1Du);
+        set_mbr_partition(large, 0, 0, 0x0C, partitionStart,
+                          partitionSectors);
+        set_mbr_signature(large);
+        const uint32_t fatSectors = 2340;
+        auto writeBoot = [&](uint64_t lba) {
+            uint8_t* b = sector(large, lba);
+            std::memset(b, 0, large.sectorSize);
+            b[0] = 0xEB; b[1] = 0x58; b[2] = 0x90;
+            std::memcpy(b + 3, "DM36TEST", 8);
+            write_u16(b + 11, 512);
+            b[13] = 1;
+            write_u16(b + 14, 32);
+            b[16] = 2;
+            write_u16(b + 17, 0);
+            write_u16(b + 19, 0);
+            b[21] = 0xF8;
+            write_u16(b + 22, 0);
+            write_u32(b + 28, partitionStart);
+            write_u32(b + 32, partitionSectors);
+            write_u32(b + 36, fatSectors);
+            write_u16(b + 40, 0);
+            write_u16(b + 42, 0);
+            write_u32(b + 44, 2);
+            write_u16(b + 48, 1);
+            write_u16(b + 50, 6);
+            b[66] = 0x29;
+            write_u32(b + 67, 0xD36A1234u);
+            std::memcpy(b + 71, "DM36VOL    ", 11);
+            std::memcpy(b + 82, "FAT32   ", 8);
+            b[510] = 0x55;
+            b[511] = 0xAA;
+        };
+        writeBoot(partitionStart);
+        writeBoot(partitionStart + 6);
+        uint8_t* fsinfo = sector(large, partitionStart + 1);
+        write_u32(fsinfo, 0x41615252u);
+        write_u32(fsinfo + 484, 0x61417272u);
+        const uint32_t clusterCount = partitionSectors - 32u -
+            2u * fatSectors;
+        write_u32(fsinfo + 488, clusterCount - 1u);
+        write_u32(fsinfo + 492, 3u);
+        write_u32(fsinfo + 508, 0xAA550000u);
+        const uint64_t fat1Lba = partitionStart + 32u;
+        const uint64_t fat2Lba = fat1Lba + fatSectors;
+        for (uint64_t fatLba : {fat1Lba, fat2Lba}) {
+            write_u32(sector(large, fatLba), 0x0FFFFFF8u);
+            write_u32(sector(large, fatLba) + 4, 0x0FFFFFFFu);
+        }
+        const uint8_t largeIndex = register_fake(large, false, false, false,
+            false, 0, 128u * 1024u,
+            block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT,
+            block::BDEV_AHCI);
+        storage::PartitionTableModel largeTable = {};
+        storage::PartitionEntry largePartition = {};
+        storage::TargetIdentity largeTarget = {};
+        storage::Fat32IntegrityRequest largeRequest = {};
+        const bool largeBound = largeIndex != 0xFF &&
+            parse_first_partition(largeIndex, largeTable, largePartition) &&
+            storage::capture_target_identity(largeIndex, largeTarget) &&
+            storage::capture_fat32_integrity_request(largeTarget, largeTable,
+                largePartition, largeRequest);
+        bool capVerified = false;
+        if (largeBound) {
+            const uint64_t totalFatBytes =
+                static_cast<uint64_t>(fatSectors) * 512u;
+            for (uint64_t byteOffset = 0;
+                 byteOffset < totalFatBytes;
+                 byteOffset += storage::FAT32_INTEGRITY_COMPARE_BUFFER_BYTES) {
+                const uint64_t lba = fat2Lba + byteOffset / 512u;
+                const uint32_t offset = static_cast<uint32_t>(byteOffset % 512u) + 100u;
+                sector(large, lba)[offset] ^= 1u;
+            }
+            storage::Fat32IntegrityJob bounded = {};
+            const auto state = runAndCheckReadOnly(large, largeRequest,
+                                                    bounded);
+            capVerified = state == storage::FAT32_INTEGRITY_INCONSISTENCY &&
+                bounded.result.findingCount ==
+                    storage::FAT32_INTEGRITY_MAX_FINDINGS &&
+                bounded.result.additionalFindingsMayExist &&
+                bounded.result.fatBytesCompared == totalFatBytes;
+        }
+        check(largeBound && capVerified,
+              "finding storage stops at its fixed cap, reports possible additional findings, and finishes bounded FAT comparison");
+        if (largeIndex != 0xFF) (void)unregister_fake(largeIndex, large);
+    }
+
+    // Restore only the deliberate test-fixture edits after verifying each
+    // checker run was read-only. This fixture is disposable in-memory media.
+    disk512.sparseMbr = pristineMbr;
+    disk512.sparseSectors = pristineSectors;
+    check(disk512.writeAttempts == readonlyBaselineWriteAttempts &&
+          disk512.writes == readonlyBaselineWrites &&
+          disk512.flushes == readonlyBaselineFlushes,
+          "the metadata engine never issues writes or Flush on the test fixture");
+
+    std::printf("DM36 FAT32 integrity metadata: %d checks, %d failures\n",
+        g_checks - checksBefore, g_failures - failuresBefore);
+}
+
 int main()
 {
     run_nvme_logic_tests();
@@ -8241,6 +8810,7 @@ int main()
     run_partition_wipe_tests();
     run_whole_disk_erase_tests();
     run_surface_verification_tests();
+    run_fat32_integrity_tests();
     run_disk_manager_wipe_ui_tests();
     run_disk_manager_whole_erase_ui_tests();
     run_disk_manager_surface_verification_ui_tests();
