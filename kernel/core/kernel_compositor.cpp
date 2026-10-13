@@ -524,10 +524,36 @@ void KernelCompositor::handleMouseMove(int32_t mx, int32_t my) {
             if (s_dragState.isResize) {
                 int newW = s_dragState.resizeStartW + (mx - s_dragState.startX);
                 int newH = s_dragState.resizeStartH + (my - s_dragState.startY);
+#if defined(GUIDEXOS_PROOF_CONTROL)
+                serial::puts("[C172-COMPOSITOR-TRACE] action=drag x=");
+                serial::put_hex32(static_cast<uint32_t>(mx));
+                serial::puts(" y=");
+                serial::put_hex32(static_cast<uint32_t>(my));
+                serial::puts(" start=");
+                serial::put_hex32(static_cast<uint32_t>(s_dragState.startX));
+                serial::putc('x');
+                serial::put_hex32(static_cast<uint32_t>(s_dragState.startY));
+                serial::puts(" size=");
+                serial::put_hex32(static_cast<uint32_t>(newW));
+                serial::putc('x');
+                serial::put_hex32(static_cast<uint32_t>(newH));
+                serial::puts(" flags=");
+                serial::put_hex32(win->flags);
+                serial::putc('\n');
+#endif
                 if (newW < MIN_WINDOW_WIDTH) newW = MIN_WINDOW_WIDTH;
                 if (newH < MIN_WINDOW_HEIGHT) newH = MIN_WINDOW_HEIGHT;
-                win->w = newW;
-                win->h = newH;
+                const int oldW = win->w;
+                const int oldH = win->h;
+                if (newW != oldW || newH != oldH) {
+                    win->w = newW;
+                    win->h = newH;
+                    if (win->owner && !win->owner->onWindowResize(
+                            oldW, oldH, newW, newH)) {
+                        win->w = oldW;
+                        win->h = oldH;
+                    }
+                }
             } else {
                 win->x = mx - s_dragState.offsetX;
                 win->y = my - s_dragState.offsetY;
@@ -548,6 +574,19 @@ void KernelCompositor::handleMouseMove(int32_t mx, int32_t my) {
 
     app::KernelWindow* hitWin = nullptr;
     HitTestResult hit = hitTest(mx, my, &hitWin);
+#if defined(GUIDEXOS_PROOF_CONTROL)
+    if (hit == HitTestResult::ResizeCorner) {
+        serial::puts("[C172-COMPOSITOR-TRACE] action=resize-hover x=");
+        serial::put_hex32(static_cast<uint32_t>(mx));
+        serial::puts(" y=");
+        serial::put_hex32(static_cast<uint32_t>(my));
+        serial::puts(" window=");
+        serial::put_hex32(hitWin ? hitWin->id : 0u);
+        serial::puts(" flags=");
+        serial::put_hex32(hitWin ? hitWin->flags : 0u);
+        serial::putc('\n');
+    }
+#endif
     if (hit == HitTestResult::Client && hitWin && hitWin->owner) {
         int localX = mx - hitWin->x;
         int localY = my - hitWin->y - TITLEBAR_HEIGHT;
@@ -565,6 +604,27 @@ void KernelCompositor::handleMouseDown(int32_t mx, int32_t my, uint8_t button) {
     
     app::KernelWindow* hitWin = nullptr;
     HitTestResult hit = hitTest(mx, my, &hitWin);
+#if defined(GUIDEXOS_PROOF_CONTROL)
+    serial::puts("[C172-COMPOSITOR-TRACE] action=button-down x=");
+    serial::put_hex32(static_cast<uint32_t>(mx));
+    serial::puts(" y=");
+    serial::put_hex32(static_cast<uint32_t>(my));
+    serial::puts(" button=");
+    serial::put_hex32(button);
+    serial::puts(" hit=");
+    serial::put_hex32(static_cast<uint32_t>(hit));
+    serial::puts(" window=");
+    serial::put_hex32(hitWin ? hitWin->id : 0u);
+    serial::puts(" flags=");
+    serial::put_hex32(hitWin ? hitWin->flags : 0u);
+    if (hitWin) {
+        serial::puts(" size=");
+        serial::put_hex32(static_cast<uint32_t>(hitWin->w));
+        serial::putc('x');
+        serial::put_hex32(static_cast<uint32_t>(hitWin->h));
+    }
+    serial::putc('\n');
+#endif
     
     if (hit == HitTestResult::None) {
         return;

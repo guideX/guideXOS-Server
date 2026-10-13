@@ -225,6 +225,17 @@ public:
     virtual void onKeyUp(uint32_t key) {}
     virtual void onKeyChar(char c) {}
     virtual void onWidgetClick(int widgetId) {}
+    // Called synchronously after the compositor proposes new outer-window
+    // dimensions and before the next render. Returning false rejects the
+    // geometry transaction and keeps the previous dimensions.
+    virtual bool onWindowResize(int oldWidth, int oldHeight,
+                                int newWidth, int newHeight) {
+        (void)oldWidth;
+        (void)oldHeight;
+        (void)newWidth;
+        (void)newHeight;
+        return true;
+    }
     // Allows an application to resolve a close request before teardown.
     virtual bool onWindowCloseRequested() { return true; }
     virtual void onWindowClose() {}

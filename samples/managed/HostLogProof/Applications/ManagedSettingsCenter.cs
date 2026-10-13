@@ -363,6 +363,8 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     internal GuideXosButton NavigationAppsButton => _appsButton;
     internal bool RecomputeLayoutForTests(int width, int height) =>
         TryRecomputeLayout(width, height);
+    internal bool ApplyLiveGeometryForTests(int width, int height) =>
+        TryApplyLiveGeometry(width, height, out _);
     internal int LaunchCount => (int)_launchCount;
     internal int SectionGroupCount => SectionCount;
     internal int LeafControlCount => 18;
@@ -958,6 +960,72 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         }
         if (_surfaceClosing) return GuideXosResult.Success;
         return RenderC167Frame(host, surface);
+    }
+
+    public override GuideXosResult HandleAction(GuideXosHost host, uint actionId)
+    {
+        if (!GuideXosManagedWindowGeometryC172.TryDecodeAction(
+                actionId, out int outerWidth, out int outerHeight))
+            return base.HandleAction(host, actionId);
+
+        if (_surfaceClosing || host == null ||
+            host.TryGetSurface(_window, out GuideXosSurface surface) !=
+                GuideXosResult.Success || surface == null)
+            return GuideXosResult.SurfaceCreationFailed;
+
+        int priorWidth = _windowWidth;
+        int priorHeight = _windowHeight;
+        int priorFocusId = _controlHost.ActiveControlId;
+        object priorFocusedMember = _view.FocusedMember;
+        if (!TryApplyLiveGeometry(outerWidth, outerHeight,
+                out bool geometryChanged))
+        {
+#if GUIDEXOS_PROOF_CONTROL
+            host.TryLog("C172-MANAGED-GEOMETRY result=REJECT layout=unchanged"u8);
+#endif
+            return GuideXosResult.InvalidArgument;
+        }
+        if (!geometryChanged) return GuideXosResult.Success;
+
+        GuideXosResult rendered = Render(host, surface);
+        if (rendered == GuideXosResult.Success)
+        {
+            bool transientStateCleared = !PopupOpen && !HasCapture;
+            bool focusRetained = _controlHost.ActiveControlId == priorFocusId &&
+                ReferenceEquals(_view.FocusedMember, priorFocusedMember);
+            if (!transientStateCleared || !focusRetained)
+            {
+                if (TryRecomputeLayout(priorWidth, priorHeight))
+                    _ = Render(host, surface);
+#if GUIDEXOS_PROOF_CONTROL
+                host.TryLog("C172-MANAGED-GEOMETRY result=REJECT stage=transient-state rollback=attempted"u8);
+#endif
+                return GuideXosResult.InvalidArgument;
+            }
+#if GUIDEXOS_PROOF_CONTROL
+            host.TryLog("C172-MANAGED-GEOMETRY layout=recomputed popup=dismissed capture=none focus=retained result=PASS"u8);
+#endif
+            return rendered;
+        }
+
+        // The compositor publishes the candidate geometry only after this
+        // action succeeds. Restore the prior managed layout before asking the
+        // native resize transaction to roll back its window rectangle.
+        if (TryRecomputeLayout(priorWidth, priorHeight))
+            _ = Render(host, surface);
+#if GUIDEXOS_PROOF_CONTROL
+        host.TryLog("C172-MANAGED-GEOMETRY result=REJECT stage=render rollback=attempted"u8);
+#endif
+        return rendered;
+    }
+
+    private bool TryApplyLiveGeometry(
+        int outerWidth, int outerHeight, out bool geometryChanged)
+    {
+        geometryChanged = outerWidth != _windowWidth ||
+            outerHeight != _windowHeight;
+        if (!geometryChanged) return true;
+        return TryRecomputeLayout(outerWidth, outerHeight);
     }
 
     internal bool InitializeForTests()

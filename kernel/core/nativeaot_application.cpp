@@ -181,6 +181,12 @@ constexpr uint32_t kC137RelaunchKey = 0x11Bu;
 constexpr uint32_t kLaunchFlagInputShift = 0x00800000u;
 constexpr uint32_t kLaunchFlagInputControl = 0x00400000u;
 constexpr uint32_t kLaunchFlagInputValueMask = 0x003FFFFFu;
+// C172 reserves one existing 29-bit application action range for synchronous
+// outer-window geometry updates. The v4 host-call table and entry signature
+// remain unchanged.
+constexpr uint32_t kManagedGeometryActionTag = 0x08000000u;
+constexpr uint32_t kManagedGeometryActionTagMask = 0x1F000000u;
+constexpr uint32_t kManagedGeometryComponentMask = 0x00000FFFu;
 
 #pragma pack(push, 1)
 struct Elf64Header {
@@ -761,14 +767,24 @@ public:
     void shutdown() override {}
 
     void draw(uint32_t windowX, uint32_t clientY,
-              uint32_t, uint32_t) override {
+              uint32_t clientWidth, uint32_t clientHeight) override {
         for (int index = 0; index < m_rectCount; ++index) {
             const ManagedSurfaceRect& rect = m_rects[index];
+            const int64_t right = static_cast<int64_t>(rect.x) + rect.width;
+            const int64_t bottom = static_cast<int64_t>(rect.y) + rect.height;
+            const int64_t clippedLeft = rect.x < 0 ? 0 : rect.x;
+            const int64_t clippedTop = rect.y < 0 ? 0 : rect.y;
+            const int64_t clippedRight = right > clientWidth
+                ? clientWidth : right;
+            const int64_t clippedBottom = bottom > clientHeight
+                ? clientHeight : bottom;
+            if (clippedRight <= clippedLeft || clippedBottom <= clippedTop)
+                continue;
             framebuffer::fill_rect(
-                windowX + static_cast<uint32_t>(rect.x),
-                clientY + static_cast<uint32_t>(rect.y),
-                static_cast<uint32_t>(rect.width),
-                static_cast<uint32_t>(rect.height),
+                windowX + static_cast<uint32_t>(clippedLeft),
+                clientY + static_cast<uint32_t>(clippedTop),
+                static_cast<uint32_t>(clippedRight - clippedLeft),
+                static_cast<uint32_t>(clippedBottom - clippedTop),
                 0xFF000000u | (rect.color & 0x00FFFFFFu));
         }
     }
@@ -956,6 +972,54 @@ public:
         serial::puts(" buttons-preserved=true result=");
         serial::puts(result == 0 ? "PASS\n" : "FAIL\n");
 #endif
+    }
+
+    bool onWindowResize(int oldWidth, int oldHeight,
+                        int newWidth, int newHeight) override {
+        if (!m_window || m_selector != 5u ||
+            !isManagedSettingsCenterTitle(m_window->title)) {
+            return true;
+        }
+        if (newWidth <= 0 || newHeight <= 0 ||
+            newWidth > static_cast<int>(kManagedGeometryComponentMask) ||
+            newHeight > static_cast<int>(kManagedGeometryComponentMask)) {
+            return false;
+        }
+
+        const uint32_t actionId = kManagedGeometryActionTag |
+            (static_cast<uint32_t>(newWidth) << 12) |
+            static_cast<uint32_t>(newHeight);
+        const bool priorInputDispatch = g_c116InputDispatchActive;
+        g_c116InputDispatchActive = true;
+        const int32_t result = invokeManagedAction(m_selector, actionId);
+        g_c116InputDispatchActive = priorInputDispatch;
+#if defined(GUIDEXOS_PROOF_CONTROL)
+        serial::puts("[C172-NATIVE-GEOMETRY] app=ManagedSettings instance=");
+        serial::put_hex64(m_snapshotInstanceId);
+        serial::puts(" generation=");
+        serial::put_hex32(m_surfaceGeneration);
+        serial::puts(" window=");
+        serial::put_hex32(m_window->id);
+        serial::puts(" oldOuter=");
+        serial::put_hex32(static_cast<uint32_t>(oldWidth));
+        serial::putc('x');
+        serial::put_hex32(static_cast<uint32_t>(oldHeight));
+        serial::puts(" newOuter=");
+        serial::put_hex32(static_cast<uint32_t>(newWidth));
+        serial::putc('x');
+        serial::put_hex32(static_cast<uint32_t>(newHeight));
+        serial::puts(" client=");
+        serial::put_hex32(static_cast<uint32_t>(newWidth));
+        serial::putc('x');
+        serial::put_hex32(static_cast<uint32_t>(
+            newHeight - compositor::TITLEBAR_HEIGHT));
+        serial::puts(" result=");
+        serial::puts(result == 0 ? "PASS\n" : "REJECT\n");
+#else
+        (void)oldWidth;
+        (void)oldHeight;
+#endif
+        return result == 0;
     }
 
     void onKeyDown(uint32_t key) override {
@@ -1216,12 +1280,6 @@ public:
             ? static_cast<int>((screenHeight - static_cast<uint32_t>(height)) / 2u) : 0;
         window->w = width;
         window->h = height;
-        if (isManagedSettingsCenterTitle(title)) {
-            // Settings changes size by creating a surface at a supported
-            // geometry. The existing native resize path has no managed
-            // geometry callback, so keep the layout fixed between choices.
-            window->flags &= ~static_cast<uint32_t>(app::WF_RESIZABLE);
-        }
         window->owner = this;
         if (!compositor::KernelCompositor::registerWindow(window)) {
             delete window;

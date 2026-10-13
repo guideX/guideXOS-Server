@@ -82,5 +82,15 @@ Console.WriteLine($"C171-STRESS layout={GuideXosManagedWindowLayoutC171Tests.Str
 Console.WriteLine($"C171-STRESS-DETAIL generalPageAllocationBytes={GuideXosManagedWindowLayoutC171Tests.StressGeneralPageAllocationBytes} defaultAppsAttach={GuideXosManagedWindowLayoutC171Tests.StressAttachDiagnostics}");
 Console.WriteLine($"C171-STRESS-RESULT-DETAIL {GuideXosManagedWindowLayoutC171Tests.StressFailureDetail}");
 
+allPassed &= RunSuite("C172-WindowResize",
+    GuideXosManagedWindowResizeC172Tests.CaseCount,
+    () => GuideXosManagedWindowResizeC172Tests.Run(null));
+bool c172StressPassed = RunSuite("C172-Stress",
+    GuideXosManagedWindowResizeC172Tests.StressCaseCount,
+    () => GuideXosManagedWindowResizeC172Tests.RunStress(null));
+allPassed &= c172StressPassed;
+Console.WriteLine($"C172-STRESS geometry={GuideXosManagedWindowResizeC172Tests.StressGeometryUpdates} transitions={GuideXosManagedWindowResizeC172Tests.StressAlternatingTransitions} focus={GuideXosManagedWindowResizeC172Tests.StressFocusTransitions} combo={GuideXosManagedWindowResizeC172Tests.StressComboCycles} scroll={GuideXosManagedWindowResizeC172Tests.StressScrollMovements} lifecycle={GuideXosManagedWindowResizeC172Tests.StressLifecycleIterations} allocationBytes={GuideXosManagedWindowResizeC172Tests.StressAllocationBytes} drift={GuideXosManagedWindowResizeC172Tests.StressDriftCount} result={(c172StressPassed ? "PASS" : "FAIL")}");
+Console.WriteLine($"C172-STRESS-DETAIL firstFailedCase={GuideXosManagedWindowResizeC172Tests.FirstFailedCase} failure={GuideXosManagedWindowResizeC172Tests.StressFailureDetail}");
+
 Console.WriteLine($"MANAGED-UI-HOST-GATE suites={passedSuites + failedSuites} passed={passedSuites} failed={failedSuites} cases={totalCases} result={(allPassed && failedSuites == 0 ? "PASS" : "FAIL")}");
 return allPassed && failedSuites == 0 ? 0 : 1;
