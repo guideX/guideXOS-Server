@@ -88,7 +88,8 @@ struct NavigatorScriptRelativeSelectorTestAccess {
 #ifndef GXOS_JS72_BASELINE
     static constexpr std::size_t scratchBytes()
     {
-        return sizeof(NavigatorScriptHostAdapter::FilteredNthQueryScratch);
+        return sizeof(NavigatorScriptHostAdapter::
+            FilteredNthQueryScratchStorage<8u>);
     }
 #endif
 };

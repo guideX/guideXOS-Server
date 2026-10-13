@@ -506,23 +506,81 @@ private:
     static constexpr std::size_t kFilteredNthCacheSlots =
         kNavigatorScriptMaxSelectorListMembers * 2u;
     struct FilteredNthQueryScratch {
+        static constexpr std::uint16_t kGroupStateMask = 0xC000u;
+        static constexpr std::uint16_t kGroupCountMask = 0x3FFFu;
+
         const gxos::web::WebDocument* document = nullptr;
         const NavigatorScriptSelectorDescriptor* selector = nullptr;
+        std::uint16_t* rankValues = nullptr;
         HostGenerationId generation = 0u;
         HostInstanceId scopeSerial = 0u;
+        std::uint8_t rankSlotCount = 0u;
         bool structuralGroupsReady = false;
-        std::array<std::uint8_t, kNavigatorScriptMaxDocumentNodes>
-            groupState{};
         std::array<std::uint16_t, kNavigatorScriptMaxDocumentNodes>
-            groupCounts{};
-        std::array<std::array<std::uint16_t,
-            kNavigatorScriptMaxDocumentNodes>, kFilteredNthCacheSlots> ranks{};
+            groupMetadata{};
+        std::array<std::uint8_t, kFilteredNthCacheSlots>
+            rankSlotIndices{};
         std::array<const NavigatorScriptSimpleSelectorDescriptor*,
             kFilteredNthCacheSlots> slotSelectors{};
         std::array<bool, kFilteredNthCacheSlots> slotBuilt{};
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
         NavigatorScriptFilteredNthCounters* counters = nullptr;
 #endif
+
+        std::uint8_t groupState(std::size_t parentIndex) const
+        {
+            return static_cast<std::uint8_t>(groupMetadata[parentIndex] >>
+                14u);
+        }
+
+        void setGroupState(std::size_t parentIndex, std::uint8_t state)
+        {
+            groupMetadata[parentIndex] = static_cast<std::uint16_t>(
+                (groupMetadata[parentIndex] & kGroupCountMask) |
+                ((static_cast<std::uint16_t>(state) & 0x3u) << 14u));
+        }
+
+        std::uint16_t groupCount(std::size_t parentIndex) const
+        {
+            return static_cast<std::uint16_t>(
+                groupMetadata[parentIndex] & kGroupCountMask);
+        }
+
+        void setGroupCount(std::size_t parentIndex, std::uint16_t count)
+        {
+            groupMetadata[parentIndex] = static_cast<std::uint16_t>(
+                (groupMetadata[parentIndex] & kGroupStateMask) |
+                (count & kGroupCountMask));
+        }
+
+        void resetGroupCounts()
+        {
+            for (std::uint16_t& metadata : groupMetadata)
+                metadata &= kGroupStateMask;
+        }
+
+        std::uint16_t rankAt(std::size_t slot, std::size_t elementIndex) const
+        {
+            const std::size_t physicalSlot = rankSlotIndices[slot];
+            return rankValues[physicalSlot *
+                kNavigatorScriptMaxDocumentNodes + elementIndex];
+        }
+
+        void setRank(std::size_t slot, std::size_t elementIndex,
+            std::uint16_t rank)
+        {
+            const std::size_t physicalSlot = rankSlotIndices[slot];
+            rankValues[physicalSlot * kNavigatorScriptMaxDocumentNodes +
+                elementIndex] = rank;
+        }
+
+    };
+
+    template<std::size_t RankSlotCount>
+    struct FilteredNthQueryScratchStorage {
+        FilteredNthQueryScratch scratch{};
+        std::array<std::uint16_t,
+            RankSlotCount * kNavigatorScriptMaxDocumentNodes> rankValues{};
     };
 
     std::size_t callbackLimit() const;
@@ -784,7 +842,22 @@ private:
         , NavigatorScriptFilteredNthCounters* filteredNthCounters
 #endif
         ) const;
+    std::size_t selectorFilteredNthRankSlotCount(
+        const NavigatorScriptSelectorDescriptor& selector) const;
+    void initializeFilteredNthRankSlots(
+        const NavigatorScriptSelectorDescriptor& selector,
+        FilteredNthQueryScratch& scratch) const;
+    template<std::size_t RankSlotCount>
+    std::size_t selectorMatchCountFilteredWithSlots(
+        const SelectorCollectionRecord& record
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        , NavigatorScriptFilteredNthCounters* filteredNthCounters
+#endif
+        ) const;
     bool selectorMatchAtFiltered(const SelectorCollectionRecord& record,
+        std::size_t index, HostInstanceId& serial) const;
+    template<std::size_t RankSlotCount>
+    bool selectorMatchAtFilteredWithSlots(const SelectorCollectionRecord& record,
         std::size_t index, HostInstanceId& serial) const;
     bool selectorHasFilteredNth(
         const NavigatorScriptSelectorDescriptor& selector) const;

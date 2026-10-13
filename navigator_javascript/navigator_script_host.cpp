@@ -5826,8 +5826,7 @@ bool NavigatorScriptHostAdapter::prepareFilteredNthStructuralGroups(
         return false;
 
     const std::size_t count = document_->structuralElements.size();
-    scratch.groupState.fill(0u);
-    scratch.groupCounts.fill(0u);
+    scratch.groupMetadata.fill(0u);
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
     if (scratch.counters != nullptr)
         ++scratch.counters->rankCacheInitializations;
@@ -5847,7 +5846,7 @@ bool NavigatorScriptHostAdapter::prepareFilteredNthStructuralGroups(
         if (parentSerial == 0u || parentSerial > count) continue;
         const std::size_t parentIndex =
             static_cast<std::size_t>(parentSerial - 1u);
-        std::uint8_t& state = scratch.groupState[parentIndex];
+        std::uint8_t state = scratch.groupState(parentIndex);
         const gxos::web::HtmlElementRef& parent =
             document_->structuralElements[parentIndex];
         if (state == 0u) {
@@ -5856,6 +5855,7 @@ bool NavigatorScriptHostAdapter::prepareFilteredNthStructuralGroups(
                 ++scratch.counters->parentResolutions;
 #endif
             state = parent.serial == parentSerial ? 1u : 3u;
+            scratch.setGroupState(parentIndex, state);
         }
         if (state != 1u) continue;
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
@@ -5863,13 +5863,13 @@ bool NavigatorScriptHostAdapter::prepareFilteredNthStructuralGroups(
             ++scratch.counters->siblingInspections;
 #endif
         const std::size_t childCount =
-            static_cast<std::size_t>(scratch.groupCounts[parentIndex]) + 1u;
+            static_cast<std::size_t>(scratch.groupCount(parentIndex)) + 1u;
         if (childCount > std::numeric_limits<std::uint16_t>::max()) {
-            state = 3u;
+            scratch.setGroupState(parentIndex, 3u);
             continue;
         }
-        scratch.groupCounts[parentIndex] =
-            static_cast<std::uint16_t>(childCount);
+        scratch.setGroupCount(parentIndex,
+            static_cast<std::uint16_t>(childCount));
 
         const bool canonicalSibling = sibling.serial != 0u &&
             sibling.serial <= count &&
@@ -5892,18 +5892,18 @@ bool NavigatorScriptHostAdapter::prepareFilteredNthStructuralGroups(
             !previousValid || sibling.childIndex != childCount ||
             sibling.siblingCount != parent.childCount ||
             parent.childCount == 0u || childCount > parent.childCount) {
-            state = 3u;
+            scratch.setGroupState(parentIndex, 3u);
         }
     }
 
     for (std::size_t parentIndex = 0u; parentIndex < count; ++parentIndex) {
-        if (scratch.groupState[parentIndex] != 1u) continue;
+        if (scratch.groupState(parentIndex) != 1u) continue;
         const gxos::web::HtmlElementRef& parent =
             document_->structuralElements[parentIndex];
-        scratch.groupState[parentIndex] =
-            scratch.groupCounts[parentIndex] != 0u &&
-                scratch.groupCounts[parentIndex] == parent.childCount
-            ? 2u : 3u;
+        scratch.setGroupState(parentIndex,
+            scratch.groupCount(parentIndex) != 0u &&
+                scratch.groupCount(parentIndex) == parent.childCount
+            ? 2u : 3u);
     }
     scratch.structuralGroupsReady = true;
     return true;
@@ -5918,6 +5918,7 @@ bool NavigatorScriptHostAdapter::buildFilteredNthRankCache(
     bool fromEnd) const
 {
     if (cacheSlot >= kFilteredNthCacheSlots ||
+        scratch.rankSlotIndices[cacheSlot] >= scratch.rankSlotCount ||
         scratch.document != document_ || scratch.selector != &storage ||
         scratch.generation != generation_ || !context.valid ||
         context.generation != generation_ ||
@@ -5930,9 +5931,7 @@ bool NavigatorScriptHostAdapter::buildFilteredNthRankCache(
     if (!prepareFilteredNthStructuralGroups(scratch)) return false;
 
     const std::size_t count = document_->structuralElements.size();
-    auto& ranks = scratch.ranks[cacheSlot];
-    ranks.fill(0u);
-    scratch.groupCounts.fill(0u);
+    scratch.resetGroupCounts();
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
     if (scratch.counters != nullptr)
         ++scratch.counters->rankCacheBuilds;
@@ -5948,7 +5947,7 @@ bool NavigatorScriptHostAdapter::buildFilteredNthRankCache(
             continue;
         const std::size_t parentIndex =
             static_cast<std::size_t>(sibling.parentSerial - 1u);
-        if (scratch.groupState[parentIndex] != 2u) continue;
+        if (scratch.groupState(parentIndex) != 2u) continue;
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
         if (scratch.counters != nullptr) {
             ++scratch.counters->siblingInspections;
@@ -5958,25 +5957,26 @@ bool NavigatorScriptHostAdapter::buildFilteredNthRankCache(
         const auto matches = selectorCoreElementMatchResult(sibling, filter,
             0, 0, storage, true, context, true);
         if (matches == NavigatorScriptSelectorMatchResult::Invalid) {
-            scratch.groupState[parentIndex] = 3u;
+            scratch.setGroupState(parentIndex, 3u);
             continue;
         }
         if (matches != NavigatorScriptSelectorMatchResult::Match) continue;
         const std::size_t rank = static_cast<std::size_t>(
-            scratch.groupCounts[parentIndex]) + 1u;
+            scratch.groupCount(parentIndex)) + 1u;
         if (rank > count || rank > std::numeric_limits<std::uint16_t>::max()) {
-            scratch.groupState[parentIndex] = 3u;
+            scratch.setGroupState(parentIndex, 3u);
             continue;
         }
-        scratch.groupCounts[parentIndex] = static_cast<std::uint16_t>(rank);
+        scratch.setGroupCount(parentIndex, static_cast<std::uint16_t>(rank));
         if (sibling.serial == 0u || sibling.serial > count ||
             &document_->structuralElements[static_cast<std::size_t>(
                 sibling.serial - 1u)] != &sibling) {
-            scratch.groupState[parentIndex] = 3u;
+            scratch.setGroupState(parentIndex, 3u);
             continue;
         }
-        ranks[static_cast<std::size_t>(sibling.serial - 1u)] =
-            static_cast<std::uint16_t>(rank);
+        scratch.setRank(cacheSlot,
+            static_cast<std::size_t>(sibling.serial - 1u),
+            static_cast<std::uint16_t>(rank));
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
         if (scratch.counters != nullptr)
             ++scratch.counters->matchingSiblings;
@@ -5992,20 +5992,22 @@ bool NavigatorScriptHostAdapter::buildFilteredNthRankCache(
             const gxos::web::HtmlElementRef& sibling =
                 document_->structuralElements[position];
             if (sibling.serial == 0u || sibling.serial > count) continue;
-            std::uint16_t& rank = ranks[static_cast<std::size_t>(
-                sibling.serial - 1u)];
+            const std::size_t elementIndex = static_cast<std::size_t>(
+                sibling.serial - 1u);
+            std::uint16_t rank = scratch.rankAt(cacheSlot, elementIndex);
             if (rank == 0u || sibling.parentSerial == 0u ||
                 sibling.parentSerial > count) continue;
             const std::size_t parentIndex =
                 static_cast<std::size_t>(sibling.parentSerial - 1u);
-            if (scratch.groupState[parentIndex] != 2u) continue;
+            if (scratch.groupState(parentIndex) != 2u) continue;
             const std::uint16_t matchingCount =
-                scratch.groupCounts[parentIndex];
+                scratch.groupCount(parentIndex);
             if (rank > matchingCount) {
-                scratch.groupState[parentIndex] = 3u;
+                scratch.setGroupState(parentIndex, 3u);
                 continue;
             }
-            rank = static_cast<std::uint16_t>(matchingCount - rank + 1u);
+            scratch.setRank(cacheSlot, elementIndex,
+                static_cast<std::uint16_t>(matchingCount - rank + 1u));
         }
     }
     scratch.slotBuilt[cacheSlot] = true;
@@ -6051,14 +6053,14 @@ NavigatorScriptHostAdapter::resolveFilteredStructuralIndex(
         if (element.parentSerial > count) return MatchResult::Invalid;
         const std::size_t parentIndex = static_cast<std::size_t>(
             element.parentSerial - 1u);
-        if (filteredNthScratch->groupState[parentIndex] != 2u)
+        if (filteredNthScratch->groupState(parentIndex) != 2u)
             return MatchResult::Invalid;
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
         if (filteredNthScratch->counters != nullptr)
             ++filteredNthScratch->counters->rankCacheHits;
 #endif
-        index = filteredNthScratch->ranks[filteredNthCacheSlot][
-            static_cast<std::size_t>(element.serial - 1u)];
+        index = filteredNthScratch->rankAt(filteredNthCacheSlot,
+            static_cast<std::size_t>(element.serial - 1u));
         return index != 0u && index <= count ? MatchResult::Match :
             MatchResult::NoMatch;
     }
@@ -6325,8 +6327,16 @@ NavigatorScriptHostAdapter::selectorMatchContextForScope(
 bool NavigatorScriptHostAdapter::selectorHasFilteredNth(
     const NavigatorScriptSelectorDescriptor& selector) const
 {
-    if (selector.memberCount > kNavigatorScriptMaxSelectorListMembers)
-        return false;
+    return selectorFilteredNthRankSlotCount(selector) != 0u;
+}
+
+std::size_t NavigatorScriptHostAdapter::selectorFilteredNthRankSlotCount(
+    const NavigatorScriptSelectorDescriptor& selector) const
+{
+    if (selector.memberCount == 0u ||
+        selector.memberCount > kNavigatorScriptMaxSelectorListMembers)
+        return 0u;
+    std::size_t slotCount = 0u;
     for (std::size_t memberIndex = 0u; memberIndex < selector.memberCount;
             ++memberIndex) {
         const auto& member = selector.members[memberIndex];
@@ -6337,10 +6347,41 @@ bool NavigatorScriptHostAdapter::selectorHasFilteredNth(
                     simple->statePseudo ==
                         NavigatorScriptStatePseudo::NthLastChild) &&
                 loadSimpleSelectorFilteredNthCoreIndex(*simple) != 0xFFu)
-                return true;
+                ++slotCount;
         }
     }
-    return false;
+    return slotCount;
+}
+
+void NavigatorScriptHostAdapter::initializeFilteredNthRankSlots(
+    const NavigatorScriptSelectorDescriptor& selector,
+    FilteredNthQueryScratch& scratch) const
+{
+    scratch.rankSlotIndices.fill(0xFFu);
+    std::uint8_t nextRankSlot = 0u;
+    for (std::size_t memberIndex = 0u;
+            memberIndex < selector.memberCount; ++memberIndex) {
+        const auto& member = selector.members[memberIndex];
+        const NavigatorScriptSimpleSelectorDescriptor* simpleSelectors[] =
+            {&member.leftSimple, &member.rightSimple};
+        for (std::size_t simpleIndex = 0u; simpleIndex < 2u; ++simpleIndex) {
+            const auto* simple = simpleSelectors[simpleIndex];
+            if ((simple->statePseudo !=
+                    NavigatorScriptStatePseudo::NthChild &&
+                    simple->statePseudo !=
+                        NavigatorScriptStatePseudo::NthLastChild) ||
+                loadSimpleSelectorFilteredNthCoreIndex(*simple) == 0xFFu)
+                continue;
+            const std::size_t logicalSlot = memberIndex * 2u + simpleIndex;
+            if (logicalSlot >= kFilteredNthCacheSlots ||
+                nextRankSlot >= kFilteredNthCacheSlots) {
+                scratch.rankSlotCount = 0u;
+                return;
+            }
+            scratch.rankSlotIndices[logicalSlot] = nextRankSlot++;
+        }
+    }
+    scratch.rankSlotCount = nextRankSlot;
 }
 
 std::size_t NavigatorScriptHostAdapter::selectorMatchCount(
@@ -6366,13 +6407,71 @@ std::size_t NavigatorScriptHostAdapter::selectorMatchCountFiltered(
 #endif
     ) const
 {
-    FilteredNthQueryScratch scratch{};
+    switch (selectorFilteredNthRankSlotCount(record.selector)) {
+    case 1u: return selectorMatchCountFilteredWithSlots<1u>(record
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        , filteredNthCounters
+#endif
+        );
+    case 2u: return selectorMatchCountFilteredWithSlots<2u>(record
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        , filteredNthCounters
+#endif
+        );
+    case 3u: return selectorMatchCountFilteredWithSlots<3u>(record
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        , filteredNthCounters
+#endif
+        );
+    case 4u: return selectorMatchCountFilteredWithSlots<4u>(record
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        , filteredNthCounters
+#endif
+        );
+    case 5u: return selectorMatchCountFilteredWithSlots<5u>(record
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        , filteredNthCounters
+#endif
+        );
+    case 6u: return selectorMatchCountFilteredWithSlots<6u>(record
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        , filteredNthCounters
+#endif
+        );
+    case 7u: return selectorMatchCountFilteredWithSlots<7u>(record
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        , filteredNthCounters
+#endif
+        );
+    case 8u: return selectorMatchCountFilteredWithSlots<8u>(record
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        , filteredNthCounters
+#endif
+        );
+    default: return 0u;
+    }
+}
+
+template<std::size_t RankSlotCount>
+std::size_t
+NavigatorScriptHostAdapter::selectorMatchCountFilteredWithSlots(
+    const SelectorCollectionRecord& record
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+    , NavigatorScriptFilteredNthCounters* filteredNthCounters
+#endif
+    ) const
+{
+    FilteredNthQueryScratchStorage<RankSlotCount> storage{};
+    FilteredNthQueryScratch& scratch = storage.scratch;
     const NavigatorScriptSelectorMatchContext context =
         selectorMatchContextForScope(record.scopeSerial);
     scratch.document = document_;
     scratch.selector = &record.selector;
+    scratch.rankValues = storage.rankValues.data();
     scratch.generation = generation_;
     scratch.scopeSerial = context.scopeSerial;
+    initializeFilteredNthRankSlots(record.selector, scratch);
+    if (scratch.rankSlotCount != RankSlotCount) return 0u;
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
     scratch.counters = filteredNthCounters;
 #endif
@@ -6415,13 +6514,40 @@ bool NavigatorScriptHostAdapter::selectorMatchAtFiltered(
     const SelectorCollectionRecord& record, std::size_t index,
     HostInstanceId& serial) const
 {
-    FilteredNthQueryScratch scratch{};
+    switch (selectorFilteredNthRankSlotCount(record.selector)) {
+    case 1u: return selectorMatchAtFilteredWithSlots<1u>(record, index, serial);
+    case 2u: return selectorMatchAtFilteredWithSlots<2u>(record, index, serial);
+    case 3u: return selectorMatchAtFilteredWithSlots<3u>(record, index, serial);
+    case 4u: return selectorMatchAtFilteredWithSlots<4u>(record, index, serial);
+    case 5u: return selectorMatchAtFilteredWithSlots<5u>(record, index, serial);
+    case 6u: return selectorMatchAtFilteredWithSlots<6u>(record, index, serial);
+    case 7u: return selectorMatchAtFilteredWithSlots<7u>(record, index, serial);
+    case 8u: return selectorMatchAtFilteredWithSlots<8u>(record, index, serial);
+    default:
+        serial = 0u;
+        return false;
+    }
+}
+
+template<std::size_t RankSlotCount>
+bool NavigatorScriptHostAdapter::selectorMatchAtFilteredWithSlots(
+    const SelectorCollectionRecord& record, std::size_t index,
+    HostInstanceId& serial) const
+{
+    FilteredNthQueryScratchStorage<RankSlotCount> storage{};
+    FilteredNthQueryScratch& scratch = storage.scratch;
     const NavigatorScriptSelectorMatchContext context =
         selectorMatchContextForScope(record.scopeSerial);
     scratch.document = document_;
     scratch.selector = &record.selector;
+    scratch.rankValues = storage.rankValues.data();
     scratch.generation = generation_;
     scratch.scopeSerial = context.scopeSerial;
+    initializeFilteredNthRankSlots(record.selector, scratch);
+    if (scratch.rankSlotCount != RankSlotCount) {
+        serial = 0u;
+        return false;
+    }
     return selectorMatchAtInternal(record, index, serial, &scratch);
 }
 

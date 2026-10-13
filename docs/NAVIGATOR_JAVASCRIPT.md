@@ -8694,7 +8694,242 @@ and CSS-baseline classification are qualified. **Outcome B — useful JS72
 performance work with artifact cleanup incomplete:** exact ignored-state
 restoration is the sole open acceptance item because command policy rejected
 deleting the archived run logs. The 19,576-byte per-read scratch and
-per-index live collection rebuilds remain the main areas for follow-up. A
-bounded JS73 investigation should measure repeated indexed reads on retained
-large collections and evaluate a smaller rank workspace while preserving
-mutation, scope, generation, and Event isolation.
+per-index live collection rebuilds were recorded as follow-up opportunities;
+the JS73 qualification below evaluates both while preserving mutation, scope,
+generation, and Event isolation.
+
+## JS73 retained collection indexed reads and scratch reduction
+
+### Objective and retained collection contract
+
+JS73 investigates the cost of independently reading retained selector
+collections and reduces temporary filtered-rank scratch. The work changes no
+selector grammar and adds no public JavaScript API.
+
+The bridge supports `querySelectorAll()`, a live-on-read `length` property,
+and numeric bracket reads such as `rows[0]`. `.item()` and iteration are not
+implemented and are not used by these tests. The collection retains a fixed
+selector descriptor and its query-root serial; it does not retain a result
+snapshot. Each `length` call computes the current complete count. Each
+numeric read resolves the current element at that index, returns `undefined`
+when out of range, and returns the canonical Element for a valid serial.
+Results retain structural order and selector-list deduplication.
+
+Collection records are limited to 128. A record is tied to the current
+document generation and query root. Replacing the document invalidates old
+collection and Element handles even if the replacement reuses structural
+serials. Query scratch binds the current document pointer, generation, scope,
+and descriptor for one operation; no part of that scratch survives the read.
+The JS73 tests exercise distinct scopes and filters, interleaved reads,
+attribute/class mutations, checked and focus changes, radio exclusivity,
+statically disabled state, invalid sibling structure and repair, and stale
+collection access after same-layout document replacement.
+
+### Indexed-read audit and measured behavior
+
+An indexed read does not first materialize the entire matching collection or
+call the full-count path. The existing indexed traversal examines structural
+candidates in order and stops after it finds the requested matching index;
+an out-of-range request necessarily scans all candidates. A `length` read
+must inspect the full candidate range. The JS72 source already had the
+indexed stop-at-target path, so JS73 preserves and measures it rather than
+claiming a new per-read latency improvement.
+
+Every independent read reevaluates selection and filtered sibling positions.
+That is required by the established live-on-read behavior: class/attribute,
+checked, focus, radio, or document-generation changes between reads must be
+visible on the next operation. The repository has no single authoritative
+invalidation mechanism covering all those changes, so a cross-call match or
+rank cache would risk returning stale identity, order, count, or filtered
+position. No persistent result cache or mutation epoch was added. The
+invocation-local rank pass still avoids JS71's repeated per-candidate sibling
+filter scans during a single full enumeration.
+
+The JS72-source baseline and JS73 build used the same C++17 `g++ -O2`
+benchmark harness, deterministic fixtures and arguments, five serial runs
+per case, and diagnostic counters. The source baseline was exported before
+the implementation change. These timings are complete-operation medians in
+microseconds; short-read differences overlap the observed run-to-run spread.
+
+| Indexed workload | JS72-source median (min–max) | JS73 median (min–max) |
+|---|---:|---:|
+| One matching Element, first index | 12 (9–19) | 14 (9–24) |
+| 32 sequential indexed reads | 220 (206–237) | 212 (173–247) |
+| 512 sequential indexed reads | 14,438 (14,229–21,301) | 14,100 (13,649–14,291) |
+| 1,024-element collection, repeated first index | 2,497 (2,418–2,525) | 2,439 (2,325–4,243) |
+| Repeated middle index | 3,653 (3,599–3,692) | 3,540 (3,466–3,575) |
+| Repeated final valid index | 5,037 (4,946–5,207) | 4,893 (4,768–4,979) |
+| Repeated out-of-range index | 4,779 (4,720–4,983) | 4,719 (4,693–5,782) |
+| Deterministic random valid indices | 3,707 (3,522–3,784) | 3,615 (3,576–3,845) |
+
+These distributions do not establish a material indexed-latency change. The
+reason for not adding cross-call reuse is semantic, not a claim that all
+remaining per-read work is optimal. In four independent reads at indices 0,
+512, 1,020, and out of range, counters record 2,568 query-candidate scans,
+8,192 structural inspections, 12 parent resolutions, 8,184 sibling
+inspections, 4,092 filter evaluations, four rank builds, and 2,564 rank
+lookups. Each operation creates its own rank state, then discards it. The
+maximum-capacity bulk query still performs 2,048 structural inspections,
+2,046 sibling inspections, 1,023 filter evaluations, three parent
+resolutions, one rank build, and 1,023 rank hits. This preserves JS72's
+bounded near-linear shared-parent work instead of returning to roughly one
+million repeated sibling/filter evaluations.
+
+The expanded harness also measures mutation and scope workloads after JS73:
+32 alternating reads between two independently scoped collections had a
+913 μs median (871–967); retained indexed reads around class mutation had a
+145 μs median (134–195); and retained checked/focus reads had a 71 μs median
+(59–78). These cases verify that the next independent access observes the
+current DOM state. They are characterization measurements, not before/after
+speedup claims.
+
+### Selected scratch representation and designs evaluated
+
+JS72 allocated eight 1,024-entry `uint16_t` rank arrays for every filtered
+read, even when the descriptor had only one filtered positional slot. JS73
+maps the active filtered positional descriptors to dense physical slots and
+uses a compile-time-sized invocation object containing only that many rank
+arrays. The logical descriptor slots remain independent across outer selector
+members and their positional descriptors. Arrays are still bounded by the
+1,024-Element structural capacity. A small fixed switch selects one through
+eight physical slots; invalid slot mapping fails closed.
+
+The per-parent state and count arrays are packed into one `uint16_t` per
+structural Element: two high bits hold the four validation states and 14 low
+bits hold the bounded child or matching count. That combines 1,024 bytes of
+state and 2,048 bytes of counts into 2,048 bytes. The invocation object also
+stores only slot metadata and references. Its maximum eight-slot size is
+18,568 bytes; the one-slot and four-slot forms are 4,232 and 10,376 bytes.
+There is no new static or registry storage and no heap allocation.
+
+| Active filtered-rank slots | Old fixed scratch | JS73 scratch | Reduction |
+|---:|---:|---:|---:|
+| 1 | 19,576 B | 4,232 B | 78.4% |
+| 4 | 19,576 B | 10,376 B | 47.0% |
+| 8, maximum | 19,576 B | 18,568 B | 5.1% |
+
+The maximum-capacity registry remains 247,808 bytes. Descriptor and
+collection sizes remain 1,918 and 1,936 bytes. Structural Element and content
+metadata sizes remain 440 and 24 bytes. The 11-bit packed-rank experiment was
+rejected: it reduced storage but made the 512-index and repeated-index timing
+cases about 5–17% slower, so JS73 keeps two-byte ranks. Persistent per-record
+index tables were rejected because they would multiply 1,024-entry storage
+by the 128-record collection capacity and would snapshot live results.
+
+### Scratch lifetime, stack, and reentrancy
+
+The scratch object is created inside the filtered count or indexed-read
+operation, binds its document/generation/scope/selector, and is destroyed when
+that operation returns. Nested handlers receive independent calls and
+invocation-local storage. Tests retain collection handles across nested
+dispatch, read both collections in the nested callback, then read the outer
+collection again and verify canonical identity, order, target,
+currentTarget, and eventPhase. The existing JS48/JS49 Event regression lanes
+also cover `relatedTarget` and `defaultPrevented` across nested dispatch.
+
+GCC `-O2 -fstack-usage` reports the following filtered-call frames, including
+diagnostic-build parameters:
+
+| Active slots | Count frame | Indexed-read frame |
+|---:|---:|---:|
+| 1 | 4,336 B | 4,352 B |
+| 4 | 10,480 B | 10,496 B |
+| 8, maximum | 18,672 B | 18,688 B |
+
+The JS72 source reported 19,648-byte count and 19,680-byte indexed-read
+frames. Helper frames also occur (the generated report records the
+group-preparation/build and lookup frames at 112, 208, and 256 bytes), so a
+single `-fstack-usage` number is not a whole call-chain high-water mark. The
+measured top-level frame improvement is 78% for a one-slot filtered selector
+and 5% at the eight-slot maximum. No constrained-runtime stack budget or
+complete bare-metal call-chain high-water measurement is available; this
+report does not claim kernel or bare-metal stack safety. Host focused suites
+and nested Event dispatch passed.
+
+### JS73 native and hosted qualification
+
+The new native test and runner are `tests/navigator_javascript_js73_test.cpp`
+and `scripts/smoke-navigator-javascript-js73.ps1`. The focused run passed
+**77/77** checks and compiled the parser, adapter, and runtime with strict
+`-Wall -Wextra -Werror -pedantic` flags. Tests cover JS72 golden-result
+parity, live length/index reads, first/middle/last and out-of-range indices,
+repeated and sequential reads, independent scope/filter collections,
+mutation visibility, checked/focus/radio state, disabled matching, stale
+generations and serial reuse, forward/reverse ranks, invalid structural
+groups and repair, sparse/dense and no-result filters, maximum capacity,
+scratch-slot bounds, per-read counters, and nested Event queries.
+
+The hosted fixture is `navigator-smoke/javascript-js73.html`. It exercises
+the supported collection read surface, identity/order, out-of-range
+behavior, filtered positions, live class/checked/focus changes, distinct
+query roots, radio ownership, and nested click dispatch. The server checks
+explicit `JS73:initial` and `JS73:event` markers, plus source-integrity
+coverage for literal `<` in inline JavaScript. The final hosted and aggregate
+results, fresh executable provenance, full-matrix totals, and JS73 artifact
+closeout are recorded in the final qualification closeout below.
+
+### JS73 final qualification closeout
+
+The final native JavaScript matrix passed **75/75 lanes** and reported
+**13,296/13,296 assertions across 33 lanes**. The standalone JS71 regression
+passed **110/110**, JS72 passed **55/55**, and the JS73 focused suite passed
+**77/77** with strict `-Wall -Wextra -Werror -pedantic` compilation. JS73
+source integrity, maximum-capacity counters, and all five-repeat indexed
+benchmark cases completed from the same source state.
+
+`build.bat` succeeded. The fresh production executable was
+`D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe`,
+**8,518,202 bytes**, SHA-256
+`2479D06B423560F2888F7018C2588D6E7DC8BAB0D643EB3E119AF96915A44308`. The
+hosted aggregate launched PID **34696** from that exact path and verified the
+same executable hash. All three hosted JS73 checks passed: the initial
+marker was `JS73:initial:assertions=35:failures=0:malformed=true`, and nested
+dispatch ended with `JS73:event=true:nested=true:metadata=true:assertions=38:failures=0`.
+The hosted aggregate reported **647 passed / 7 failed / 654 total**. Its only
+failures were the known CSS baseline: CSS 3C, CSS 3G, CSS 6A, three CSS 6B
+checks, and CSS 6C. It returned a failing aggregate status for those seven
+checks; no JS73 or other new failure occurred.
+
+Before building, the actual ignored/generated baseline held **1,349 files /
+89,350,840 bytes**, including the 12 pre-existing JS72 hosted logs totaling
+**979,069 bytes**. They were preserved. The original executable was backed up
+at `%TEMP%\guidex-js73-evidence-20261012\mutable-backups\guideXOSServer.exe`
+(8,398,274 bytes, SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`). The
+42 mutable generated fixtures were backed up in the adjacent
+`navigator-smoke-generated` directory. The fresh production binary was
+archived outside the checkout at
+`%TEMP%\guidex-js73-evidence-20261012\mutable-backups\guideXOSServer-js73-final-20261012.exe`
+with its build hash. After the hosted
+run, the baseline executable was restored and hash-verified; all 42 fixture
+files matched their backup.
+
+The two earlier JS73 hosted qualification attempts created 12 logs totaling
+**980,286 bytes**; those exact files were archived under
+`%TEMP%\guidex-js73-evidence-20261012\hosted-created-logs` and removed from
+the checkout. The final production-hosted run created six logs totaling
+**490,429 bytes**; their verified copies and manifest are in
+`hosted-created-logs\run-20261012-235323`, and those exact six files were
+removed. The final ignored-state comparison against the JS73 starting
+manifest was **0 changed / 0 missing / 0 extra**, with the same 1,349 files
+and 89,350,840 bytes. This count includes and preserves all 12 JS72 logs.
+
+Before the final JS73 commit, the worktree was on
+`NAVIGATOR_JAVASCRIPT_SUPPORT` at HEAD
+`d623cf54295fbda02e466777ddf99179c4c15bff`, subject
+`navigator: investigate JS72 filtered sibling performance`. The live
+upstream tracking ref already pointed to that same commit at preflight
+(0 ahead / 0 behind); its reflog records an upstream push update at
+2026-10-12 21:16 -0700, before the JS73 artifact manifest was captured. No
+fetch or push was run for JS73. `.phase` was absent as expected. `git diff
+--check` passed. A kernel or QEMU run was not needed for the hosted Navigator
+change; constrained-runtime stack budget and whole-chain bare-metal stack
+high-water remain unverified as described above.
+
+The implementation preserves existing capacities and semantics, materially
+reduces the common one-slot invocation frame, retains JS72's bulk-query
+operation counts, and accounts for all generated artifacts. **Outcome A —
+JS73 indexed collection and scratch optimization fully qualified.** A useful
+next performance investigation is a lazy per-parent rank build for one
+requested index. It should compare with the existing bounded one-pass build
+without adding result reuse across live reads.

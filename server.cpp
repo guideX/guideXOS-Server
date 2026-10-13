@@ -5079,6 +5079,39 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js72AfterClick, 3200) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js73FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js73.html";
+    const bool js73Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js73FixtureUrl);
+    const std::string js73InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS73 retained collection indexed-read fixture passes",
+        js73Loaded && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js73FixtureUrl &&
+        contains(js73InitialText, "Navigator JavaScript JS73") &&
+        contains(js73InitialText,
+            "JS73:initial:assertions=35:failures=0:malformed=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js73Loaded) + ",text=" +
+        summarizeText(js73InitialText, 3200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS73 indexed reads preserve live results, scope, identity, and order",
+        js73Loaded && contains(js73InitialText,
+            "JS73:initial:assertions=35:failures=0:malformed=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "hosted checks cover retained length, repeated first/middle/last bracket reads, out-of-range undefined, alternating query roots, mutation visibility, filtered ranks, and JS71/JS72 parity");
+    const bool js73Click = gxos::apps::Navigator::SmokeClickFormControlById(
+        "event-a");
+    const std::string js73AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS73 nested Event reads preserve independent rank scratch",
+        js73Click && contains(js73AfterClick,
+            "JS73:event=true:nested=true:metadata=true:assertions=38:failures=0") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js73Click) + ",text=" +
+        summarizeText(js73AfterClick, 3200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();
