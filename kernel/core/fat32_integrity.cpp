@@ -9,6 +9,22 @@ namespace {
 static const uint32_t kFat32MinimumClusters = 65525u;
 static const uint32_t kFat32MaximumClusters = 0x0FFFFFEEu;
 static const uint32_t kFat32MaximumClusterBytes = 32768u;
+static const uint32_t kFat32ReservedValueFirst = 0x0FFFFFF0u;
+static const uint32_t kFat32BadCluster = 0x0FFFFFF7u;
+static const uint32_t kFat32EndOfChainFirst = 0x0FFFFFF8u;
+
+struct IntegrityDirectoryWork {
+    uint32_t startCluster;
+    uint32_t parentCluster;
+    uint32_t depth;
+};
+
+struct IntegrityFileWork {
+    uint32_t startCluster;
+    uint32_t fileSize;
+    uint64_t entryLba;
+    uint32_t entryOffset;
+};
 
 alignas(4096) static uint8_t s_primaryBoot[MAX_LOGICAL_SECTOR_SIZE];
 alignas(4096) static uint8_t s_sector[MAX_LOGICAL_SECTOR_SIZE];
@@ -16,6 +32,13 @@ alignas(4096) static uint8_t s_compareReference[
     FAT32_INTEGRITY_COMPARE_BUFFER_BYTES];
 alignas(4096) static uint8_t s_compareOther[
     FAT32_INTEGRITY_COMPARE_BUFFER_BYTES];
+// The operation lease admits only one integrity job at a time. Fixed global
+// tracking keeps the checker bounded without placing a cluster-sized object
+// on a kernel or test caller's stack.
+static uint16_t s_clusterOwners[FAT32_INTEGRITY_MAX_TRACKED_CLUSTERS];
+static IntegrityDirectoryWork s_directoryQueue[
+    FAT32_INTEGRITY_MAX_PENDING_DIRECTORIES];
+static IntegrityFileWork s_fileQueue[FAT32_INTEGRITY_MAX_FILE_CHAINS];
 
 static uint16_t read_u16(const uint8_t* p)
 {
@@ -94,10 +117,21 @@ static void update_progress(Fat32IntegrityResult& result)
     if (result.state == FAT32_INTEGRITY_PASSED ||
         result.state == FAT32_INTEGRITY_INCONSISTENCY) {
         result.progressPercent = 100;
+    } else if (result.structuralStarted &&
+               result.orphanBytesToScan != 0) {
+        result.progressPercent = static_cast<uint8_t>(80u +
+            (ratio_percent(result.orphanBytesScanned,
+                           result.orphanBytesToScan) * 19u) / 100u);
+    } else if (result.structuralStarted) {
+        const uint64_t clusterCount = result.geometry.clusterCount;
+        const uint8_t chainPercent = ratio_percent(
+            result.chainClustersVisited, clusterCount);
+        result.progressPercent = static_cast<uint8_t>(70u +
+            (chainPercent * 9u) / 100u);
     } else if (result.fatBytesToCompare != 0) {
         result.progressPercent = static_cast<uint8_t>(10u +
             (ratio_percent(result.fatBytesCompared,
-                           result.fatBytesToCompare) * 89u) / 100u);
+                           result.fatBytesToCompare) * 60u) / 100u);
     } else if (result.metadataReadRequests > 0) {
         result.progressPercent = 10;
     }
@@ -386,6 +420,16 @@ static bool read_partition_range(Fat32IntegrityJob& job,
         terminal = finish_job(job, FAT32_INTEGRITY_INCOMPLETE,
             FAT32_INTEGRITY_REASON_INTERNAL_BOUNDS_FAILURE,
             "A metadata request exceeded its fixed transfer bound.");
+        return false;
+    }
+    if (job.result.metadataReadRequests >=
+            FAT32_INTEGRITY_MAX_TOTAL_READS ||
+        bytes > FAT32_INTEGRITY_MAX_TOTAL_READ_BYTES ||
+        job.result.bytesRead >
+            FAT32_INTEGRITY_MAX_TOTAL_READ_BYTES - bytes) {
+        terminal = finish_job(job, FAT32_INTEGRITY_INCOMPLETE,
+            FAT32_INTEGRITY_REASON_RESOURCE_LIMIT,
+            "The fixed total read-count or byte-work limit was reached; verification coverage is incomplete.");
         return false;
     }
     DeviceCapabilities capabilities = {};
@@ -804,6 +848,827 @@ static void compare_fat_chunks(Fat32IntegrityJob& job)
     update_progress(job.result);
 }
 
+static Fat32IntegrityState structural_limit(
+    Fat32IntegrityJob& job, Fat32IntegrityReason reason,
+    const char* message)
+{
+    return finish_job(job, FAT32_INTEGRITY_INCOMPLETE, reason, message);
+}
+
+static bool read_structural_range(Fat32IntegrityJob& job,
+                                  uint64_t relativeLba, uint32_t count,
+                                  void* buffer, size_t bufferBytes,
+                                  Fat32IntegrityStructure structure,
+                                  Fat32IntegrityState& terminal)
+{
+    if (job.result.structuralReadRequests >=
+        FAT32_INTEGRITY_MAX_STRUCTURAL_READS) {
+        terminal = structural_limit(job,
+            FAT32_INTEGRITY_REASON_RESOURCE_LIMIT,
+            "Structural verification reached its fixed read-work limit; coverage is incomplete.");
+        return false;
+    }
+    ++job.result.structuralReadRequests;
+    return read_partition_range(job, relativeLba, count, buffer,
+        bufferBytes, structure, terminal);
+}
+
+static bool cluster_fat_location(const Fat32IntegrityGeometry& geometry,
+                                 uint32_t cluster, uint64_t& relativeLba,
+                                 uint32_t& byteOffset)
+{
+    const uint64_t lastCluster =
+        static_cast<uint64_t>(geometry.clusterCount) + 1u;
+    uint64_t fatByteOffset = 0;
+    uint64_t fatSectorOffset = 0;
+    uint64_t fatBaseOffset = 0;
+    uint64_t fatIndexOffset = 0;
+    if (cluster < 2 || cluster > lastCluster ||
+        geometry.bytesPerSector == 0 ||
+        !mul_u64(cluster, 4u, fatByteOffset) ||
+        !mul_u64(geometry.activeFat, geometry.fatSizeSectors,
+                 fatIndexOffset)) return false;
+    fatSectorOffset = fatByteOffset / geometry.bytesPerSector;
+    byteOffset = static_cast<uint32_t>(
+        fatByteOffset % geometry.bytesPerSector);
+    if (fatSectorOffset >= geometry.fatSizeSectors ||
+        byteOffset + 4u > geometry.bytesPerSector ||
+        !add_u64(geometry.firstFatSector, fatIndexOffset, fatBaseOffset) ||
+        !add_u64(fatBaseOffset, fatSectorOffset, relativeLba) ||
+        relativeLba >= geometry.totalSectors) return false;
+    return true;
+}
+
+static uint64_t cluster_absolute_lba(const Fat32IntegrityJob& job,
+                                     uint32_t cluster)
+{
+    uint64_t relative = 0;
+    uint64_t absolute = job.result.partitionStartLba;
+    if (!fat32_integrity_cluster_sector(job.result.geometry, cluster,
+                                        relative) ||
+        !add_u64(job.result.partitionStartLba, relative, absolute) ||
+        !checked_lba_range(job.result.targetIdentity.totalLogicalSectors,
+                           absolute, 1))
+        return job.result.partitionStartLba;
+    return absolute;
+}
+
+static void record_entry_finding(Fat32IntegrityJob& job,
+                                 Fat32IntegrityFindingCategory category,
+                                 uint64_t absoluteLba, uint32_t byteOffset,
+                                 uint64_t expected, uint64_t observed)
+{
+    record_finding(job, category, FAT32_INTEGRITY_STRUCTURE_DIRECTORY,
+        FAT32_INTEGRITY_STRUCTURAL_INCONSISTENCY, absoluteLba, 1,
+        byteOffset, expected, observed, true);
+}
+
+static void reset_lfn_state(Fat32IntegrityJob& job)
+{
+    job.lfnExpectedSequence = 0;
+    job.lfnChecksum = 0;
+    job.lfnFirstLba = 0;
+    job.lfnFirstOffset = 0;
+    job.lfnSequenceActive = false;
+    job.lfnMalformed = false;
+    job.lfnChecksumMismatch = false;
+}
+
+static void finish_lfn_state(Fat32IntegrityJob& job, bool associated,
+                             uint8_t shortChecksum)
+{
+    if (!job.lfnSequenceActive) return;
+    if (!associated) {
+        record_entry_finding(job, FAT32_INTEGRITY_FINDING_ORPHANED_LFN,
+            job.lfnFirstLba, job.lfnFirstOffset, 0, 1);
+    } else if (job.lfnMalformed || job.lfnExpectedSequence != 0) {
+        record_entry_finding(job, FAT32_INTEGRITY_FINDING_LFN_SEQUENCE,
+            job.lfnFirstLba, job.lfnFirstOffset, 0,
+            job.lfnExpectedSequence);
+    } else if (job.lfnChecksumMismatch ||
+               job.lfnChecksum != shortChecksum) {
+        record_entry_finding(job, FAT32_INTEGRITY_FINDING_LFN_CHECKSUM,
+            job.lfnFirstLba, job.lfnFirstOffset, job.lfnChecksum,
+            shortChecksum);
+    }
+    reset_lfn_state(job);
+}
+
+static uint8_t short_name_checksum(const uint8_t* name)
+{
+    uint8_t checksum = 0;
+    for (uint8_t i = 0; i < 11; ++i)
+        checksum = static_cast<uint8_t>(
+            ((checksum & 1u) ? 0x80u : 0u) + (checksum >> 1) + name[i]);
+    return checksum;
+}
+
+static bool enqueue_directory(Fat32IntegrityJob& job,
+                              uint32_t startCluster,
+                              uint32_t parentCluster, uint32_t depth,
+                              uint64_t entryLba, uint32_t entryOffset)
+{
+    if (depth > FAT32_INTEGRITY_MAX_DIRECTORY_DEPTH) {
+        record_entry_finding(job,
+            FAT32_INTEGRITY_FINDING_INVALID_DIRECTORY_REFERENCE,
+            entryLba, entryOffset, FAT32_INTEGRITY_MAX_DIRECTORY_DEPTH,
+            depth);
+        job.directoryCoverageComplete = false;
+        return true;
+    }
+    if (job.directoryQueueCount >=
+        FAT32_INTEGRITY_MAX_PENDING_DIRECTORIES) {
+        structural_limit(job, FAT32_INTEGRITY_REASON_RESOURCE_LIMIT,
+            "The bounded pending-directory queue is full; directory and orphan coverage is incomplete.");
+        return false;
+    }
+    const uint32_t index = job.directoryQueueTail;
+    s_directoryQueue[index].startCluster = startCluster;
+    s_directoryQueue[index].parentCluster = parentCluster;
+    s_directoryQueue[index].depth = depth;
+    job.directoryQueueTail =
+        (job.directoryQueueTail + 1u) %
+            FAT32_INTEGRITY_MAX_PENDING_DIRECTORIES;
+    ++job.directoryQueueCount;
+    return true;
+}
+
+static bool enqueue_file(Fat32IntegrityJob& job, uint32_t startCluster,
+                         uint32_t fileSize, uint64_t entryLba,
+                         uint32_t entryOffset)
+{
+    if (job.fileQueueCount >= FAT32_INTEGRITY_MAX_FILE_CHAINS) {
+        structural_limit(job, FAT32_INTEGRITY_REASON_RESOURCE_LIMIT,
+            "The bounded file-chain queue is full; structural coverage is incomplete.");
+        return false;
+    }
+    IntegrityFileWork& item = s_fileQueue[job.fileQueueCount++];
+    item.startCluster = startCluster;
+    item.fileSize = fileSize;
+    item.entryLba = entryLba;
+    item.entryOffset = entryOffset;
+    return true;
+}
+
+static bool valid_cluster_reference(const Fat32IntegrityGeometry& geometry,
+                                    uint32_t cluster)
+{
+    return cluster >= 2 &&
+        static_cast<uint64_t>(cluster) <
+            static_cast<uint64_t>(geometry.clusterCount) + 2u;
+}
+
+static void process_lfn_entry(Fat32IntegrityJob& job,
+                              const uint8_t* entry,
+                              uint64_t absoluteLba, uint32_t offset)
+{
+    const uint8_t order = entry[0];
+    const uint8_t sequence = order & 0x1Fu;
+    const bool last = (order & 0x40u) != 0;
+    if (job.lfnSequenceActive && last) {
+        finish_lfn_state(job, false, 0);
+    }
+    if (!job.lfnSequenceActive) {
+        job.lfnSequenceActive = true;
+        job.lfnExpectedSequence = sequence;
+        job.lfnChecksum = entry[13];
+        job.lfnFirstLba = absoluteLba;
+        job.lfnFirstOffset = offset;
+        job.lfnMalformed = false;
+        job.lfnChecksumMismatch = false;
+        if (!last || sequence == 0 || sequence > 20 ||
+            (order & 0xA0u) != 0)
+            job.lfnMalformed = true;
+    } else if (sequence != job.lfnExpectedSequence || last ||
+               (order & 0xA0u) != 0) {
+        job.lfnMalformed = true;
+    }
+    if (entry[12] != 0 || read_u16(entry + 26) != 0)
+        job.lfnMalformed = true;
+    if (entry[13] != job.lfnChecksum)
+        job.lfnChecksumMismatch = true;
+    if (sequence == 0 || sequence > 20) {
+        job.lfnMalformed = true;
+        job.lfnExpectedSequence = 0;
+    } else {
+        job.lfnExpectedSequence = static_cast<uint8_t>(sequence - 1u);
+    }
+}
+
+static bool is_dot_name(const uint8_t* name, bool parent)
+{
+    if (name[0] != '.') return false;
+    if (parent && name[1] != '.') return false;
+    const uint32_t firstSpace = parent ? 2u : 1u;
+    for (uint32_t i = firstSpace; i < 11; ++i)
+        if (name[i] != ' ') return false;
+    return !parent || name[1] == '.';
+}
+
+static void process_directory_entry(Fat32IntegrityJob& job,
+                                   const uint8_t* entry,
+                                   uint64_t absoluteLba,
+                                   uint32_t offset)
+{
+    if (job.result.directoryEntriesExamined >=
+        FAT32_INTEGRITY_MAX_DIRECTORY_ENTRIES) {
+        structural_limit(job, FAT32_INTEGRITY_REASON_RESOURCE_LIMIT,
+            "The fixed directory-entry examination limit was reached; traversal is incomplete.");
+        return;
+    }
+    ++job.result.directoryEntriesExamined;
+    if (entry[0] == 0x00) {
+        finish_lfn_state(job, false, 0);
+        job.directoryLogicalEnd = true;
+        return;
+    }
+    if (entry[0] == 0xE5) {
+        finish_lfn_state(job, false, 0);
+        return;
+    }
+    if (entry[11] == 0x0Fu) {
+        process_lfn_entry(job, entry, absoluteLba, offset);
+        return;
+    }
+
+    const uint8_t attr = entry[11];
+    if ((attr & 0xC0u) != 0 ||
+        ((attr & 0x08u) != 0 && (attr & 0x30u) != 0)) {
+        record_entry_finding(job,
+            FAT32_INTEGRITY_FINDING_INVALID_DIRECTORY_ENTRY,
+            absoluteLba, offset + 11u, 0, attr);
+    }
+    const uint8_t nameChecksum = short_name_checksum(entry);
+    if ((attr & 0x08u) != 0) {
+        finish_lfn_state(job, false, 0);
+        return;
+    }
+    finish_lfn_state(job, true, nameChecksum);
+
+    const uint16_t high = read_u16(entry + 20);
+    const uint16_t low = read_u16(entry + 26);
+    const uint32_t startCluster =
+        (static_cast<uint32_t>(high & 0x0FFFu) << 16) | low;
+    const uint32_t fileSize = read_u32(entry + 28);
+    if ((high & 0xF000u) != 0) {
+        record_entry_finding(job,
+            FAT32_INTEGRITY_FINDING_INVALID_CLUSTER_REFERENCE,
+            absoluteLba, offset + 20u, 0, high);
+    }
+
+    const bool directory = (attr & 0x10u) != 0;
+    const bool dot = is_dot_name(entry, false);
+    const bool dotDot = is_dot_name(entry, true);
+    if (dot || dotDot) {
+        const uint32_t expected = dot ? job.currentDirectoryCluster
+            : job.currentDirectoryParent;
+        const bool rootDotDotMayBeZero = dotDot &&
+            job.currentDirectoryParent == job.result.geometry.rootCluster &&
+            startCluster == 0;
+        if (!directory || (!rootDotDotMayBeZero && startCluster != expected))
+            record_entry_finding(job,
+                FAT32_INTEGRITY_FINDING_INVALID_DIRECTORY_REFERENCE,
+                absoluteLba, offset + 20u, expected, startCluster);
+        return;
+    }
+
+    if (directory) {
+        if (startCluster == 0 ||
+            !valid_cluster_reference(job.result.geometry, startCluster)) {
+            record_entry_finding(job,
+                FAT32_INTEGRITY_FINDING_INVALID_DIRECTORY_REFERENCE,
+                absoluteLba, offset + 20u, 2, startCluster);
+            job.directoryCoverageComplete = false;
+            return;
+        }
+        if (fileSize != 0)
+            record_entry_finding(job,
+                FAT32_INTEGRITY_FINDING_INVALID_DIRECTORY_ENTRY,
+                absoluteLba, offset + 28u, 0, fileSize);
+        (void)enqueue_directory(job, startCluster,
+            job.currentDirectoryCluster,
+            job.currentDirectoryDepth + 1u, absoluteLba, offset);
+        return;
+    }
+
+    if (startCluster == 0) {
+        if (fileSize != 0) {
+            record_entry_finding(job,
+                FAT32_INTEGRITY_FINDING_INVALID_CLUSTER_REFERENCE,
+                absoluteLba, offset + 26u, 2, 0);
+            record_entry_finding(job,
+                FAT32_INTEGRITY_FINDING_FILE_SIZE_MISMATCH,
+                absoluteLba, offset + 28u, fileSize, 0);
+        }
+        return;
+    }
+    if (!valid_cluster_reference(job.result.geometry, startCluster)) {
+        record_entry_finding(job,
+            FAT32_INTEGRITY_FINDING_INVALID_CLUSTER_REFERENCE,
+            absoluteLba, offset + 26u,
+            static_cast<uint64_t>(job.result.geometry.clusterCount) + 1u,
+            startCluster);
+        return;
+    }
+    (void)enqueue_file(job, startCluster, fileSize, absoluteLba, offset);
+}
+
+static void process_directory_sector(Fat32IntegrityJob& job,
+                                     uint64_t absoluteLba)
+{
+    const uint32_t entriesPerSector =
+        job.result.geometry.bytesPerSector / 32u;
+    for (uint32_t index = 0; index < entriesPerSector; ++index) {
+        if (job.result.state != FAT32_INTEGRITY_RUNNING ||
+            job.directoryLogicalEnd) break;
+        const uint32_t offset = index * 32u;
+        process_directory_entry(job, s_sector + offset, absoluteLba,
+                                offset);
+    }
+}
+
+static bool allocate_owner_id(Fat32IntegrityJob& job, uint32_t& ownerId)
+{
+    if (job.nextOwnerId == 0 || job.nextOwnerId > UINT16_MAX) {
+        structural_limit(job, FAT32_INTEGRITY_REASON_RESOURCE_LIMIT,
+            "The fixed cluster-owner identifier space was exhausted; verification is incomplete.");
+        return false;
+    }
+    ownerId = job.nextOwnerId++;
+    return true;
+}
+
+static void begin_chain(Fat32IntegrityJob& job, uint32_t startCluster,
+                        uint32_t ownerId, bool isDirectory,
+                        uint32_t fileSize)
+{
+    job.currentCluster = startCluster;
+    job.chainStartCluster = startCluster;
+    job.chainLength = 0;
+    job.chainOwnerId = ownerId;
+    job.chainIsDirectory = isDirectory;
+    job.chainFileSize = fileSize;
+    job.nextCluster = 0;
+    job.nextClusterValid = false;
+    job.nextIsEndOfChain = false;
+    job.nextIsBadCluster = false;
+    job.structuralStep = FAT32_INTEGRITY_STRUCTURE_WALK_CLUSTER;
+}
+
+static void finish_file_chain(Fat32IntegrityJob& job, bool endedAtEoc)
+{
+    uint64_t bytesPerCluster = 0;
+    uint64_t capacity = 0;
+    if (!mul_u64(job.result.geometry.bytesPerSector,
+                 job.result.geometry.sectorsPerCluster,
+                 bytesPerCluster) || bytesPerCluster == 0 ||
+        !mul_u64(job.chainLength, bytesPerCluster, capacity)) {
+        structural_limit(job, FAT32_INTEGRITY_REASON_INTERNAL_BOUNDS_FAILURE,
+            "File allocation capacity arithmetic overflowed; verification is incomplete.");
+        return;
+    }
+    const uint64_t requiredClusters = job.chainFileSize == 0 ? 0 :
+        (static_cast<uint64_t>(job.chainFileSize) + bytesPerCluster - 1u) /
+            bytesPerCluster;
+    if (static_cast<uint64_t>(job.chainLength) < requiredClusters) {
+        record_finding(job, FAT32_INTEGRITY_FINDING_FILE_SIZE_MISMATCH,
+            FAT32_INTEGRITY_STRUCTURE_DIRECTORY,
+            FAT32_INTEGRITY_STRUCTURAL_INCONSISTENCY,
+            job.directoryEntryLba, 1, job.directoryEntryOffset + 28u,
+            capacity, job.chainFileSize, true);
+    } else if (endedAtEoc &&
+               static_cast<uint64_t>(job.chainLength) > requiredClusters) {
+        record_finding(job, FAT32_INTEGRITY_FINDING_FILE_SIZE_MISMATCH,
+            FAT32_INTEGRITY_STRUCTURE_DIRECTORY,
+            FAT32_INTEGRITY_STRUCTURAL_INCONSISTENCY,
+            job.directoryEntryLba, 1, job.directoryEntryOffset + 28u,
+            requiredClusters, job.chainLength, true);
+    }
+    job.structuralStep = FAT32_INTEGRITY_STRUCTURE_START_FILE;
+}
+
+static Fat32IntegrityState start_orphan_scan(Fat32IntegrityJob& job)
+{
+    uint64_t entries = 0;
+    if (!add_u64(job.result.geometry.clusterCount, 2u, entries) ||
+        !mul_u64(entries, 4u, job.orphanByteCount) ||
+        job.orphanByteCount > job.result.geometry.fatBytes) {
+        return structural_limit(job,
+            FAT32_INTEGRITY_REASON_INTERNAL_BOUNDS_FAILURE,
+            "The active FAT cannot cover the validated cluster range.");
+    }
+    job.result.orphanBytesToScan = job.orphanByteCount;
+    job.orphanByteOffset = 0;
+    job.compareByteOffset = 0;
+    job.orphanFirstCluster = 0;
+    job.orphanClusterCount = 0;
+    job.result.structuralStarted = true;
+    job.structuralStep = FAT32_INTEGRITY_STRUCTURE_SCAN_ORPHANS;
+    update_progress(job.result);
+    return job.result.state;
+}
+
+static Fat32IntegrityState begin_next_directory(Fat32IntegrityJob& job)
+{
+    if (job.directoryQueueCount != 0) {
+        if (job.result.directoriesVisited >=
+            FAT32_INTEGRITY_MAX_DIRECTORIES)
+            return structural_limit(job,
+                FAT32_INTEGRITY_REASON_RESOURCE_LIMIT,
+                "The fixed directory traversal limit was reached; coverage is incomplete.");
+        const IntegrityDirectoryWork item =
+            s_directoryQueue[job.directoryQueueHead];
+        job.directoryQueueHead =
+            (job.directoryQueueHead + 1u) %
+                FAT32_INTEGRITY_MAX_PENDING_DIRECTORIES;
+        --job.directoryQueueCount;
+        ++job.result.directoriesVisited;
+        uint32_t ownerId = 0;
+        if (!allocate_owner_id(job, ownerId)) return job.result.state;
+        job.currentDirectoryCluster = item.startCluster;
+        job.currentDirectoryParent = item.parentCluster;
+        job.currentDirectoryDepth = item.depth;
+        job.directoryLogicalEnd = false;
+        job.directorySectorInCluster = 0;
+        reset_lfn_state(job);
+        begin_chain(job, item.startCluster, ownerId, true, 0);
+        return job.result.state;
+    }
+    if (!job.directoryCoverageComplete)
+        return structural_limit(job, FAT32_INTEGRITY_REASON_RESOURCE_LIMIT,
+            "One or more directory references could not be traversed; orphan analysis is incomplete.");
+    if (job.fileQueueIndex < job.fileQueueCount) {
+        job.structuralStep = FAT32_INTEGRITY_STRUCTURE_START_FILE;
+        return job.result.state;
+    }
+    return start_orphan_scan(job);
+}
+
+static bool prepare_orphan_chunk(Fat32IntegrityJob& job)
+{
+    const uint64_t remaining = job.orphanByteCount - job.orphanByteOffset;
+    const uint32_t sectorSize = job.result.geometry.bytesPerSector;
+    uint64_t limit = FAT32_INTEGRITY_COMPARE_BUFFER_BYTES;
+    if (job.maxTransferBytes != 0 && limit > job.maxTransferBytes)
+        limit = job.maxTransferBytes;
+    limit -= limit % sectorSize;
+    if (limit == 0) return false;
+    uint64_t bytes = remaining < limit ? remaining : limit;
+    if (bytes % sectorSize != 0) {
+        const uint64_t rounded = bytes + sectorSize - bytes % sectorSize;
+        bytes = rounded <= limit ? rounded : limit;
+    }
+    if (bytes == 0 || bytes > UINT32_MAX) return false;
+    job.compareByteOffset = job.orphanByteOffset;
+    job.compareChunkBytes = static_cast<uint32_t>(bytes);
+    job.compareChunkSectors = job.compareChunkBytes / sectorSize;
+    return job.compareChunkSectors != 0;
+}
+
+static void inspect_orphan_chunk(Fat32IntegrityJob& job)
+{
+    const uint32_t maxCluster = job.result.geometry.clusterCount + 1u;
+    const uint32_t entryCount = static_cast<uint32_t>(
+        (job.orphanByteCount - job.orphanByteOffset <
+             job.compareChunkBytes
+         ? job.orphanByteCount - job.orphanByteOffset
+         : job.compareChunkBytes) / 4u);
+    const uint64_t firstEntry = job.orphanByteOffset / 4u;
+    for (uint32_t index = 0; index < entryCount; ++index) {
+        const uint64_t entry = firstEntry + index;
+        if (entry < 2 || entry > maxCluster) continue;
+        const uint32_t cluster = static_cast<uint32_t>(entry);
+        const uint32_t value = read_u32(s_compareReference + index * 4u) &
+            0x0FFFFFFFu;
+        ++job.result.orphanClustersScanned;
+        if (value == 0 || value == kFat32BadCluster) continue;
+        if (value >= kFat32ReservedValueFirst &&
+            value < kFat32EndOfChainFirst) {
+            uint64_t relativeLba = 0;
+            uint32_t byteOffset = 0;
+            uint64_t absoluteLba = job.result.partitionStartLba;
+            if (!cluster_fat_location(job.result.geometry, cluster,
+                    relativeLba, byteOffset) ||
+                !absolute_partition_lba(job, relativeLba, 1, absoluteLba)) {
+                (void)structural_limit(job,
+                    FAT32_INTEGRITY_REASON_INTERNAL_BOUNDS_FAILURE,
+                    "A reserved FAT value could not be localized within the selected partition.");
+                return;
+            }
+            record_finding(job,
+                FAT32_INTEGRITY_FINDING_INVALID_CLUSTER_REFERENCE,
+                FAT32_INTEGRITY_STRUCTURE_FAT,
+                FAT32_INTEGRITY_STRUCTURAL_INCONSISTENCY,
+                absoluteLba, 1, byteOffset,
+                maxCluster, value, true);
+            continue;
+        }
+        const bool validLink = value >= 2 && value <= maxCluster;
+        const bool eoc = value >= kFat32EndOfChainFirst;
+        if (!validLink && !eoc) {
+            uint64_t relativeLba = 0;
+            uint32_t byteOffset = 0;
+            uint64_t absoluteLba = job.result.partitionStartLba;
+            if (!cluster_fat_location(job.result.geometry, cluster,
+                    relativeLba, byteOffset) ||
+                !absolute_partition_lba(job, relativeLba, 1, absoluteLba)) {
+                (void)structural_limit(job,
+                    FAT32_INTEGRITY_REASON_INTERNAL_BOUNDS_FAILURE,
+                    "An invalid FAT value could not be localized within the selected partition.");
+                return;
+            }
+            record_finding(job,
+                FAT32_INTEGRITY_FINDING_INVALID_CLUSTER_REFERENCE,
+                FAT32_INTEGRITY_STRUCTURE_FAT,
+                FAT32_INTEGRITY_STRUCTURAL_INCONSISTENCY,
+                absoluteLba, 1, byteOffset,
+                maxCluster, value, true);
+        }
+        if (s_clusterOwners[cluster - 2u] == 0) {
+            if (job.orphanClusterCount == 0)
+                job.orphanFirstCluster = cluster;
+            ++job.orphanClusterCount;
+        }
+    }
+}
+
+static void record_orphans(Fat32IntegrityJob& job)
+{
+    if (job.orphanClusterCount == 0) return;
+    job.result.orphanClusters = job.orphanClusterCount;
+    job.result.firstOrphanCluster = job.orphanFirstCluster;
+    record_finding(job,
+        FAT32_INTEGRITY_FINDING_ORPHANED_ALLOCATION,
+        FAT32_INTEGRITY_STRUCTURE_FAT,
+        FAT32_INTEGRITY_STRUCTURAL_INCONSISTENCY,
+        cluster_absolute_lba(job, job.orphanFirstCluster), 1, 0,
+        0, job.orphanClusterCount, true);
+}
+
+static Fat32IntegrityState step_structure(Fat32IntegrityJob& job)
+{
+    if (!job.structureInitialized) {
+        const uint32_t clusterCount = job.result.geometry.clusterCount;
+        if (clusterCount > FAT32_INTEGRITY_MAX_TRACKED_CLUSTERS)
+            return structural_limit(job,
+                FAT32_INTEGRITY_REASON_UNSUPPORTED_SCALE,
+                "The valid FAT32 volume exceeds the fixed cluster-ownership map; structural coverage is unsupported at this scale.");
+        for (uint32_t i = 0;
+             i < FAT32_INTEGRITY_MAX_TRACKED_CLUSTERS; ++i)
+            s_clusterOwners[i] = 0;
+        job.nextOwnerId = 1;
+        job.directoryQueueHead = 0;
+        job.directoryQueueTail = 0;
+        job.directoryQueueCount = 0;
+        job.fileQueueCount = 0;
+        job.fileQueueIndex = 0;
+        job.directoryCoverageComplete = true;
+        job.result.structuralStarted = true;
+        job.structureInitialized = true;
+        job.structuralStep = FAT32_INTEGRITY_STRUCTURE_START_DIRECTORY;
+        if (!enqueue_directory(job, job.result.geometry.rootCluster,
+                job.result.geometry.rootCluster, 0,
+                job.result.partitionStartLba, 0))
+            return job.result.state;
+        update_progress(job.result);
+        return job.result.state;
+    }
+
+    Fat32IntegrityState terminal = FAT32_INTEGRITY_RUNNING;
+    switch (job.structuralStep) {
+        case FAT32_INTEGRITY_STRUCTURE_START_DIRECTORY:
+            return begin_next_directory(job);
+
+        case FAT32_INTEGRITY_STRUCTURE_WALK_CLUSTER: {
+            if (!valid_cluster_reference(job.result.geometry,
+                                         job.currentCluster)) {
+                record_finding(job,
+                    FAT32_INTEGRITY_FINDING_INVALID_CLUSTER_REFERENCE,
+                    FAT32_INTEGRITY_STRUCTURE_FAT,
+                    FAT32_INTEGRITY_STRUCTURAL_INCONSISTENCY,
+                    job.result.partitionStartLba, 1, 0, 2,
+                    job.currentCluster, true);
+                if (job.chainIsDirectory)
+                    job.directoryCoverageComplete = false;
+                if (job.chainIsDirectory)
+                    job.structuralStep =
+                        FAT32_INTEGRITY_STRUCTURE_START_DIRECTORY;
+                else
+                    finish_file_chain(job, false);
+                return job.result.state;
+            }
+            const uint32_t ownerIndex = job.currentCluster - 2u;
+            const uint16_t previousOwner = s_clusterOwners[ownerIndex];
+            if (previousOwner != 0) {
+                if (previousOwner == job.chainOwnerId) {
+                    record_finding(job,
+                        FAT32_INTEGRITY_FINDING_CHAIN_CYCLE,
+                        FAT32_INTEGRITY_STRUCTURE_FAT,
+                        FAT32_INTEGRITY_STRUCTURAL_INCONSISTENCY,
+                        cluster_absolute_lba(job, job.currentCluster), 1, 0,
+                        job.chainOwnerId, job.currentCluster, true);
+                    if (job.chainIsDirectory)
+                        record_finding(job,
+                            FAT32_INTEGRITY_FINDING_DIRECTORY_LOOP,
+                            FAT32_INTEGRITY_STRUCTURE_DIRECTORY,
+                            FAT32_INTEGRITY_STRUCTURAL_INCONSISTENCY,
+                            cluster_absolute_lba(job, job.currentCluster),
+                            1, 0, job.chainOwnerId, job.currentCluster,
+                            true);
+                } else {
+                    record_finding(job,
+                        FAT32_INTEGRITY_FINDING_CROSS_LINKED_CLUSTER,
+                        FAT32_INTEGRITY_STRUCTURE_FAT,
+                        FAT32_INTEGRITY_STRUCTURAL_INCONSISTENCY,
+                        cluster_absolute_lba(job, job.currentCluster), 1, 0,
+                        previousOwner, job.chainOwnerId, true);
+                    if (job.chainIsDirectory &&
+                        job.currentCluster == job.chainStartCluster)
+                        record_finding(job,
+                            FAT32_INTEGRITY_FINDING_DIRECTORY_LOOP,
+                            FAT32_INTEGRITY_STRUCTURE_DIRECTORY,
+                            FAT32_INTEGRITY_STRUCTURAL_INCONSISTENCY,
+                            cluster_absolute_lba(job, job.currentCluster),
+                            1, 0, previousOwner, job.chainOwnerId, true);
+                }
+                if (job.chainIsDirectory) {
+                    job.structuralStep =
+                        FAT32_INTEGRITY_STRUCTURE_START_DIRECTORY;
+                } else {
+                    finish_file_chain(job, false);
+                }
+                return job.result.state;
+            }
+            s_clusterOwners[ownerIndex] =
+                static_cast<uint16_t>(job.chainOwnerId);
+            ++job.chainLength;
+            ++job.result.chainClustersVisited;
+            uint64_t relativeFatLba = 0;
+            uint32_t entryOffset = 0;
+            if (!cluster_fat_location(job.result.geometry,
+                    job.currentCluster, relativeFatLba, entryOffset))
+                return structural_limit(job,
+                    FAT32_INTEGRITY_REASON_INTERNAL_BOUNDS_FAILURE,
+                    "A FAT entry offset failed checked geometry bounds.");
+            if (!read_structural_range(job, relativeFatLba, 1, s_sector,
+                    sizeof(s_sector), FAT32_INTEGRITY_STRUCTURE_FAT,
+                    terminal)) return terminal;
+            uint64_t absoluteFatLba = 0;
+            if (!absolute_partition_lba(job, relativeFatLba, 1,
+                                        absoluteFatLba))
+                return structural_limit(job,
+                    FAT32_INTEGRITY_REASON_INTERNAL_BOUNDS_FAILURE,
+                    "A validated FAT entry could not be mapped to an absolute partition LBA.");
+            const uint32_t value = read_u32(s_sector + entryOffset) &
+                0x0FFFFFFFu;
+            job.nextCluster = value;
+            job.nextClusterValid = false;
+            job.nextIsEndOfChain = value >= kFat32EndOfChainFirst;
+            job.nextIsBadCluster = value == kFat32BadCluster;
+            if (!job.nextIsEndOfChain && !job.nextIsBadCluster &&
+                valid_cluster_reference(job.result.geometry, value)) {
+                job.nextClusterValid = true;
+            } else if (!job.nextIsEndOfChain && job.nextIsBadCluster) {
+                record_finding(job,
+                    FAT32_INTEGRITY_FINDING_BAD_CLUSTER_IN_CHAIN,
+                    FAT32_INTEGRITY_STRUCTURE_FAT,
+                    FAT32_INTEGRITY_STRUCTURAL_INCONSISTENCY,
+                    absoluteFatLba, 1,
+                    entryOffset, 0, value, true);
+            } else if (!job.nextIsEndOfChain) {
+                record_finding(job,
+                    FAT32_INTEGRITY_FINDING_INVALID_CLUSTER_REFERENCE,
+                    FAT32_INTEGRITY_STRUCTURE_FAT,
+                    FAT32_INTEGRITY_STRUCTURAL_INCONSISTENCY,
+                    absoluteFatLba, 1,
+                    entryOffset,
+                    static_cast<uint64_t>(job.result.geometry.clusterCount) +
+                        1u,
+                    value, true);
+            }
+            if (job.chainIsDirectory && !job.directoryLogicalEnd) {
+                job.directorySectorInCluster = 0;
+                job.structuralStep =
+                    FAT32_INTEGRITY_STRUCTURE_READ_DIRECTORY_SECTOR;
+            } else {
+                job.structuralStep =
+                    FAT32_INTEGRITY_STRUCTURE_ADVANCE_CHAIN;
+            }
+            return job.result.state;
+        }
+
+        case FAT32_INTEGRITY_STRUCTURE_READ_DIRECTORY_SECTOR: {
+            uint64_t clusterSector = 0;
+            uint64_t relative = 0;
+            uint64_t absolute = 0;
+            if (job.directorySectorInCluster >=
+                    job.result.geometry.sectorsPerCluster ||
+                !fat32_integrity_cluster_sector(job.result.geometry,
+                    job.currentCluster, clusterSector) ||
+                !add_u64(clusterSector, job.directorySectorInCluster,
+                         relative) ||
+                !absolute_partition_lba(job, relative, 1, absolute))
+                return structural_limit(job,
+                    FAT32_INTEGRITY_REASON_INTERNAL_BOUNDS_FAILURE,
+                    "A directory data-sector mapping failed checked partition bounds.");
+            if (!read_structural_range(job, relative, 1, s_sector,
+                    sizeof(s_sector), FAT32_INTEGRITY_STRUCTURE_DIRECTORY,
+                    terminal)) return terminal;
+            process_directory_sector(job, absolute);
+            if (job.result.state != FAT32_INTEGRITY_RUNNING)
+                return job.result.state;
+            ++job.directorySectorInCluster;
+            if (job.directoryLogicalEnd ||
+                job.directorySectorInCluster >=
+                    job.result.geometry.sectorsPerCluster)
+                job.structuralStep =
+                    FAT32_INTEGRITY_STRUCTURE_ADVANCE_CHAIN;
+            return job.result.state;
+        }
+
+        case FAT32_INTEGRITY_STRUCTURE_ADVANCE_CHAIN:
+            if (job.nextIsEndOfChain) {
+                if (job.chainIsDirectory) {
+                    finish_lfn_state(job, false, 0);
+                    job.structuralStep =
+                        FAT32_INTEGRITY_STRUCTURE_START_DIRECTORY;
+                } else {
+                    finish_file_chain(job, true);
+                }
+                return job.result.state;
+            }
+            if (job.nextClusterValid) {
+                job.currentCluster = job.nextCluster;
+                job.structuralStep =
+                    FAT32_INTEGRITY_STRUCTURE_WALK_CLUSTER;
+                return job.result.state;
+            }
+            if (job.chainIsDirectory) {
+                job.directoryCoverageComplete = false;
+                finish_lfn_state(job, false, 0);
+                job.structuralStep =
+                    FAT32_INTEGRITY_STRUCTURE_START_DIRECTORY;
+            } else {
+                finish_file_chain(job, false);
+            }
+            return job.result.state;
+
+        case FAT32_INTEGRITY_STRUCTURE_START_FILE:
+            if (job.fileQueueIndex >= job.fileQueueCount)
+                return start_orphan_scan(job);
+            {
+                const IntegrityFileWork item =
+                    s_fileQueue[job.fileQueueIndex++];
+                uint32_t ownerId = 0;
+                if (!allocate_owner_id(job, ownerId))
+                    return job.result.state;
+                job.directoryEntryLba = item.entryLba;
+                job.directoryEntryOffset = item.entryOffset;
+                begin_chain(job, item.startCluster, ownerId, false,
+                            item.fileSize);
+            }
+            return job.result.state;
+
+        case FAT32_INTEGRITY_STRUCTURE_SCAN_ORPHANS: {
+            if (job.orphanByteOffset >= job.orphanByteCount) {
+                record_orphans(job);
+                job.result.orphanAnalysisComplete = true;
+                job.result.structuralAnalysisComplete = true;
+                job.step = FAT32_INTEGRITY_STEP_FINISHED;
+                update_progress(job.result);
+                return job.result.state;
+            }
+            if (!prepare_orphan_chunk(job))
+                return structural_limit(job,
+                    FAT32_INTEGRITY_REASON_INTERNAL_BOUNDS_FAILURE,
+                    "The active FAT scan could not form a bounded sector-aligned request.");
+            if (job.result.structuralReadRequests >=
+                FAT32_INTEGRITY_MAX_STRUCTURAL_READS)
+                return structural_limit(job,
+                    FAT32_INTEGRITY_REASON_RESOURCE_LIMIT,
+                    "Structural verification reached its fixed read-work limit; orphan analysis is incomplete.");
+            ++job.result.structuralReadRequests;
+            if (!read_fat_chunk(job, job.result.geometry.activeFat,
+                    s_compareReference, sizeof(s_compareReference), terminal))
+                return terminal;
+            inspect_orphan_chunk(job);
+            const uint64_t remaining = job.orphanByteCount -
+                job.orphanByteOffset;
+            const uint64_t scanned = remaining < job.compareChunkBytes
+                ? remaining : job.compareChunkBytes;
+            job.orphanByteOffset += scanned;
+            job.result.orphanBytesScanned = job.orphanByteOffset;
+            update_progress(job.result);
+            return job.result.state;
+        }
+
+        default:
+            return structural_limit(job,
+                FAT32_INTEGRITY_REASON_INTERNAL_BOUNDS_FAILURE,
+                "The structural verifier entered an unknown bounded-work state.");
+    }
+}
+
 } // namespace
 
 bool capture_fat32_integrity_request(
@@ -944,7 +1809,7 @@ Fat32IntegrityState step_fat32_integrity_job(Fat32IntegrityJob& job)
     if (job.result.stopRequested)
         return finish_job(job, FAT32_INTEGRITY_STOPPED,
             FAT32_INTEGRITY_REASON_STOP_REQUESTED,
-            "Verification stopped; remaining metadata is unverified.");
+            "Verification stopped at a cooperative boundary; remaining filesystem coverage is incomplete.");
 
     DeviceCapabilities capabilities = {};
     const Fat32IntegrityReason liveReason =
@@ -1007,6 +1872,36 @@ Fat32IntegrityState step_fat32_integrity_job(Fat32IntegrityJob& job)
             break;
 
         case FAT32_INTEGRITY_STEP_FAT_RESERVED: {
+            if (!job.result.geometry.fatMirroringEnabled &&
+                job.reservedFatIndex !=
+                    job.result.geometry.activeFat) {
+                ++job.reservedFatIndex;
+                if (job.reservedFatIndex >=
+                    job.result.geometry.fatCount) {
+                    if (job.result.geometry.clusterCount >
+                        FAT32_INTEGRITY_MAX_TRACKED_CLUSTERS)
+                        return finish_job(job,
+                            FAT32_INTEGRITY_INCOMPLETE,
+                            FAT32_INTEGRITY_REASON_UNSUPPORTED_SCALE,
+                            "Metadata checks completed, but structural verification exceeds the fixed cluster-ownership map.");
+                    if (job.result.geometry.fatBytes >
+                        FAT32_INTEGRITY_MAX_FAT_BYTES)
+                        return finish_job(job,
+                            FAT32_INTEGRITY_INCOMPLETE,
+                            FAT32_INTEGRITY_REASON_RESOURCE_LIMIT,
+                            "Metadata checks completed, but the FAT exceeds the fixed comparison-work limit.");
+                    if (job.result.geometry.fatCount > 1 &&
+                        !prepare_compare_chunk(job))
+                        return finish_job(job,
+                            FAT32_INTEGRITY_INCOMPLETE,
+                            FAT32_INTEGRITY_REASON_INTERNAL_BOUNDS_FAILURE,
+                            "The bounded FAT comparison could not form a sector-aligned chunk.");
+                    job.step = job.result.geometry.fatCount > 1
+                        ? FAT32_INTEGRITY_STEP_FAT_COMPARE_REFERENCE
+                        : FAT32_INTEGRITY_STEP_STRUCTURE;
+                }
+                break;
+            }
             uint64_t fatOffset = 0;
             uint64_t relative = 0;
             if (!mul_u64(job.reservedFatIndex,
@@ -1023,6 +1918,16 @@ Fat32IntegrityState step_fat32_integrity_job(Fat32IntegrityJob& job)
                 job.reservedFatIndex);
             ++job.reservedFatIndex;
             if (job.reservedFatIndex >= job.result.geometry.fatCount) {
+                if (job.result.geometry.clusterCount >
+                    FAT32_INTEGRITY_MAX_TRACKED_CLUSTERS)
+                    return finish_job(job, FAT32_INTEGRITY_INCOMPLETE,
+                        FAT32_INTEGRITY_REASON_UNSUPPORTED_SCALE,
+                        "Metadata checks completed, but structural verification exceeds the fixed cluster-ownership map.");
+                if (job.result.geometry.fatBytes >
+                    FAT32_INTEGRITY_MAX_FAT_BYTES)
+                    return finish_job(job, FAT32_INTEGRITY_INCOMPLETE,
+                        FAT32_INTEGRITY_REASON_RESOURCE_LIMIT,
+                        "Metadata checks completed, but the FAT exceeds the fixed comparison-work limit.");
                 if (job.result.geometry.fatCount > 1 &&
                     !prepare_compare_chunk(job))
                     return finish_job(job, FAT32_INTEGRITY_INCOMPLETE,
@@ -1030,7 +1935,7 @@ Fat32IntegrityState step_fat32_integrity_job(Fat32IntegrityJob& job)
                         "The bounded FAT comparison could not form a sector-aligned chunk.");
                 job.step = job.result.geometry.fatCount > 1
                     ? FAT32_INTEGRITY_STEP_FAT_COMPARE_REFERENCE
-                    : FAT32_INTEGRITY_STEP_FINISHED;
+                    : FAT32_INTEGRITY_STEP_STRUCTURE;
             }
             break;
         }
@@ -1052,10 +1957,18 @@ Fat32IntegrityState step_fat32_integrity_job(Fat32IntegrityJob& job)
                 return terminal;
             compare_fat_chunks(job);
             if (job.compareByteOffset >= job.result.geometry.fatBytes)
-                job.step = FAT32_INTEGRITY_STEP_FINISHED;
+                job.step = FAT32_INTEGRITY_STEP_STRUCTURE;
             else
                 job.step = FAT32_INTEGRITY_STEP_FAT_COMPARE_REFERENCE;
             break;
+
+        case FAT32_INTEGRITY_STEP_STRUCTURE: {
+            const Fat32IntegrityState state = step_structure(job);
+            if (state != FAT32_INTEGRITY_RUNNING) return state;
+            job.stepActive = false;
+            update_progress(job.result);
+            return job.result.state;
+        }
 
         case FAT32_INTEGRITY_STEP_FINISHED:
             return finish_job(job,
@@ -1064,8 +1977,8 @@ Fat32IntegrityState step_fat32_integrity_job(Fat32IntegrityJob& job)
                     : FAT32_INTEGRITY_PASSED,
                 FAT32_INTEGRITY_REASON_NONE,
                 job.result.structuralInconsistencyFound
-                    ? "Metadata verification completed with structural findings; no repair was attempted."
-                    : "The bounded FAT32 metadata checks passed; directory and cluster-chain checks were not performed.");
+                    ? "FAT32 metadata, allocation chains, directories, and allocation reachability were checked; findings were reported without repair."
+                    : "All supported FAT32 metadata, allocation-chain, directory, LFN, and orphan checks completed without detected inconsistencies.");
 
         default:
             return finish_job(job, FAT32_INTEGRITY_INCOMPLETE,
@@ -1111,7 +2024,7 @@ const char* fat32_integrity_state_name(Fat32IntegrityState state)
     switch (state) {
         case FAT32_INTEGRITY_NOT_ADMITTED: return "Not admitted";
         case FAT32_INTEGRITY_RUNNING: return "Running";
-        case FAT32_INTEGRITY_PASSED: return "Metadata checks passed";
+        case FAT32_INTEGRITY_PASSED: return "Verification passed";
         case FAT32_INTEGRITY_INCONSISTENCY: return "Structural inconsistency detected";
         case FAT32_INTEGRITY_STOPPED: return "Stopped";
         case FAT32_INTEGRITY_READ_ERROR: return "Read error";
@@ -1140,6 +2053,8 @@ const char* fat32_integrity_reason_name(Fat32IntegrityReason reason)
         case FAT32_INTEGRITY_REASON_READ_FAILURE: return "A metadata read failed";
         case FAT32_INTEGRITY_REASON_STOP_REQUESTED: return "Stop requested";
         case FAT32_INTEGRITY_REASON_INTERNAL_BOUNDS_FAILURE: return "A checked metadata range was invalid";
+        case FAT32_INTEGRITY_REASON_RESOURCE_LIMIT: return "A fixed verification resource limit was reached";
+        case FAT32_INTEGRITY_REASON_UNSUPPORTED_SCALE: return "The volume exceeds the supported structural verification scale";
         default: return "Unknown verifier reason";
     }
 }

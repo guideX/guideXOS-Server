@@ -10,6 +10,17 @@ namespace storage {
 // the volume size and fits the largest supported logical-sector geometry.
 static const uint32_t FAT32_INTEGRITY_COMPARE_BUFFER_BYTES = 32u * 1024u;
 static const uint8_t FAT32_INTEGRITY_MAX_FINDINGS = 32;
+static const uint32_t FAT32_INTEGRITY_MAX_TRACKED_CLUSTERS = 131072u;
+static const uint32_t FAT32_INTEGRITY_MAX_PENDING_DIRECTORIES = 256u;
+static const uint32_t FAT32_INTEGRITY_MAX_DIRECTORY_DEPTH = 64u;
+static const uint32_t FAT32_INTEGRITY_MAX_DIRECTORIES = 4096u;
+static const uint32_t FAT32_INTEGRITY_MAX_DIRECTORY_ENTRIES = 65536u;
+static const uint32_t FAT32_INTEGRITY_MAX_FILE_CHAINS = 4096u;
+static const uint32_t FAT32_INTEGRITY_MAX_STRUCTURAL_READS = 262144u;
+static const uint32_t FAT32_INTEGRITY_MAX_FAT_BYTES = 8u * 1024u * 1024u;
+static const uint32_t FAT32_INTEGRITY_MAX_TOTAL_READS = 263000u;
+static const uint64_t FAT32_INTEGRITY_MAX_TOTAL_READ_BYTES =
+    600ull * 1024ull * 1024ull;
 
 struct Fat32IntegrityRequest {
     TargetIdentity targetSnapshot;
@@ -70,6 +81,8 @@ enum Fat32IntegrityReason : uint8_t {
     FAT32_INTEGRITY_REASON_READ_FAILURE,
     FAT32_INTEGRITY_REASON_STOP_REQUESTED,
     FAT32_INTEGRITY_REASON_INTERNAL_BOUNDS_FAILURE,
+    FAT32_INTEGRITY_REASON_RESOURCE_LIMIT,
+    FAT32_INTEGRITY_REASON_UNSUPPORTED_SCALE,
 };
 
 enum Fat32IntegrityFindingCategory : uint8_t {
@@ -81,6 +94,18 @@ enum Fat32IntegrityFindingCategory : uint8_t {
     FAT32_INTEGRITY_FINDING_FAT_RESERVED_ENTRY,
     FAT32_INTEGRITY_FINDING_FAT_COPY_MISMATCH,
     FAT32_INTEGRITY_FINDING_READ_FAILURE,
+    FAT32_INTEGRITY_FINDING_INVALID_CLUSTER_REFERENCE,
+    FAT32_INTEGRITY_FINDING_BAD_CLUSTER_IN_CHAIN,
+    FAT32_INTEGRITY_FINDING_CHAIN_CYCLE,
+    FAT32_INTEGRITY_FINDING_CROSS_LINKED_CLUSTER,
+    FAT32_INTEGRITY_FINDING_FILE_SIZE_MISMATCH,
+    FAT32_INTEGRITY_FINDING_ORPHANED_ALLOCATION,
+    FAT32_INTEGRITY_FINDING_DIRECTORY_LOOP,
+    FAT32_INTEGRITY_FINDING_INVALID_DIRECTORY_REFERENCE,
+    FAT32_INTEGRITY_FINDING_INVALID_DIRECTORY_ENTRY,
+    FAT32_INTEGRITY_FINDING_LFN_CHECKSUM,
+    FAT32_INTEGRITY_FINDING_LFN_SEQUENCE,
+    FAT32_INTEGRITY_FINDING_ORPHANED_LFN,
 };
 
 enum Fat32IntegrityStructure : uint8_t {
@@ -89,6 +114,7 @@ enum Fat32IntegrityStructure : uint8_t {
     FAT32_INTEGRITY_STRUCTURE_FSINFO,
     FAT32_INTEGRITY_STRUCTURE_FAT,
     FAT32_INTEGRITY_STRUCTURE_DATA_REGION,
+    FAT32_INTEGRITY_STRUCTURE_DIRECTORY,
 };
 
 enum Fat32IntegrityFindingSeverity : uint8_t {
@@ -134,6 +160,18 @@ struct Fat32IntegrityResult {
     uint64_t bytesRead;
     uint64_t fatBytesCompared;
     uint64_t fatBytesToCompare;
+    uint64_t orphanBytesScanned;
+    uint64_t orphanBytesToScan;
+    uint32_t structuralReadRequests;
+    uint32_t chainClustersVisited;
+    uint32_t directoryEntriesExamined;
+    uint32_t directoriesVisited;
+    uint32_t orphanClusters;
+    uint32_t orphanClustersScanned;
+    uint32_t firstOrphanCluster;
+    bool structuralStarted;
+    bool structuralAnalysisComplete;
+    bool orphanAnalysisComplete;
     uint8_t progressPercent;
     char diagnostic[160];
 };
@@ -146,7 +184,17 @@ enum Fat32IntegrityStep : uint8_t {
     FAT32_INTEGRITY_STEP_FAT_RESERVED,
     FAT32_INTEGRITY_STEP_FAT_COMPARE_REFERENCE,
     FAT32_INTEGRITY_STEP_FAT_COMPARE_OTHER,
+    FAT32_INTEGRITY_STEP_STRUCTURE,
     FAT32_INTEGRITY_STEP_FINISHED,
+};
+
+enum Fat32IntegrityStructuralStep : uint8_t {
+    FAT32_INTEGRITY_STRUCTURE_START_DIRECTORY = 0,
+    FAT32_INTEGRITY_STRUCTURE_WALK_CLUSTER,
+    FAT32_INTEGRITY_STRUCTURE_READ_DIRECTORY_SECTOR,
+    FAT32_INTEGRITY_STRUCTURE_ADVANCE_CHAIN,
+    FAT32_INTEGRITY_STRUCTURE_START_FILE,
+    FAT32_INTEGRITY_STRUCTURE_SCAN_ORPHANS,
 };
 
 struct Fat32IntegrityJob {
@@ -158,6 +206,43 @@ struct Fat32IntegrityJob {
     uint32_t compareChunkBytes;
     uint32_t compareChunkSectors;
     uint32_t maxTransferBytes;
+    uint32_t currentCluster;
+    uint32_t nextCluster;
+    uint32_t chainStartCluster;
+    uint32_t chainLength;
+    uint32_t chainOwnerId;
+    uint32_t chainFileSize;
+    uint32_t currentDirectoryCluster;
+    uint32_t currentDirectoryParent;
+    uint32_t currentDirectoryDepth;
+    uint32_t directorySectorInCluster;
+    uint64_t directoryEntryLba;
+    uint32_t directoryEntryOffset;
+    uint32_t directoryQueueHead;
+    uint32_t directoryQueueTail;
+    uint32_t directoryQueueCount;
+    uint32_t fileQueueCount;
+    uint32_t fileQueueIndex;
+    uint32_t nextOwnerId;
+    uint32_t orphanFirstCluster;
+    uint32_t orphanClusterCount;
+    uint64_t orphanByteOffset;
+    uint64_t orphanByteCount;
+    uint8_t lfnExpectedSequence;
+    uint8_t lfnChecksum;
+    uint64_t lfnFirstLba;
+    uint32_t lfnFirstOffset;
+    Fat32IntegrityStructuralStep structuralStep;
+    bool chainIsDirectory;
+    bool directoryLogicalEnd;
+    bool directoryCoverageComplete;
+    bool lfnSequenceActive;
+    bool lfnMalformed;
+    bool lfnChecksumMismatch;
+    bool nextClusterValid;
+    bool nextIsEndOfChain;
+    bool nextIsBadCluster;
+    bool structureInitialized;
     uint8_t reservedFatIndex;
     uint8_t compareReferenceFat;
     uint8_t compareOtherFat;

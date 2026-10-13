@@ -8363,6 +8363,34 @@ void run_fat32_integrity_tests()
                   clean4Kn.result.geometry.fatBytes &&
               clean4Kn.result.ownershipReleased,
               "4Kn BPB, FSInfo signatures, FAT offsets, and bounded mirror comparison pass");
+        const storage::Fat32IntegrityGeometry g =
+            clean4Kn.result.geometry;
+        static const uint8_t fourKnName[11] = {
+            'F','O','U','R','K','N',' ',' ','B','I','N'
+        };
+        const uint64_t rootLba = partition4Kn.startLba +
+            g.rootDirectorySector;
+        uint8_t* entry = sector(disk4Kn, rootLba) + 32u;
+        std::memset(entry, 0, 32);
+        std::memcpy(entry, fourKnName, 11);
+        entry[11] = 0x20;
+        write_u16(entry + 26, 3);
+        write_u32(entry + 28, 17);
+        for (uint32_t fat = 0; fat < g.fatCount; ++fat) {
+            const uint64_t fatEntryLba = partition4Kn.startLba +
+                g.firstFatSector +
+                static_cast<uint64_t>(fat) * g.fatSizeSectors;
+            write_u32(sector(disk4Kn, fatEntryLba) + 12u,
+                      0x0FFFFFFFu);
+        }
+        storage::Fat32IntegrityJob fourKnFile = {};
+        const auto fourKnFileState = runAndCheckReadOnly(
+            disk4Kn, request4Kn, fourKnFile);
+        check(fourKnFileState == storage::FAT32_INTEGRITY_PASSED &&
+              fourKnFile.result.structuralAnalysisComplete &&
+              fourKnFile.result.chainClustersVisited == 2 &&
+              fourKnFile.result.orphanClusters == 0,
+              "4Kn directory parsing and a single-cluster file allocation pass");
         (void)unregister_fake(index4Kn, disk4Kn);
     } else if (index4Kn != 0xFF) {
         (void)unregister_fake(index4Kn, disk4Kn);
@@ -8687,6 +8715,8 @@ void run_fat32_integrity_tests()
         if (replacement.registryIndex != 0xFF)
             (void)unregister_fake(replacement.registryIndex, replacement);
         g_fakeDisks[disk512.driverId] = nullptr;
+        disk512.removeOnReadAtCall = 0;
+        disk512.replacementOnRemoval = nullptr;
     }
 
     // A synthetic sparse FAT32 fixture makes the mirror larger than the
@@ -8696,6 +8726,7 @@ void run_fat32_integrity_tests()
         FakeDisk large(512, 303000, false);
         const uint32_t partitionStart = 2048;
         const uint32_t partitionSectors = 300000;
+        const uint32_t volumeSectors = 135000;
         std::memset(sector(large, 0) + 446, 0, 64);
         write_u32(sector(large, 0) + 440, 0xD36B0A1Du);
         set_mbr_partition(large, 0, 0, 0x0C, partitionStart,
@@ -8716,7 +8747,7 @@ void run_fat32_integrity_tests()
             b[21] = 0xF8;
             write_u16(b + 22, 0);
             write_u32(b + 28, partitionStart);
-            write_u32(b + 32, partitionSectors);
+            write_u32(b + 32, volumeSectors);
             write_u32(b + 36, fatSectors);
             write_u16(b + 40, 0);
             write_u16(b + 42, 0);
@@ -8735,7 +8766,7 @@ void run_fat32_integrity_tests()
         uint8_t* fsinfo = sector(large, partitionStart + 1);
         write_u32(fsinfo, 0x41615252u);
         write_u32(fsinfo + 484, 0x61417272u);
-        const uint32_t clusterCount = partitionSectors - 32u -
+        const uint32_t clusterCount = volumeSectors - 32u -
             2u * fatSectors;
         write_u32(fsinfo + 488, clusterCount - 1u);
         write_u32(fsinfo + 492, 3u);
@@ -8745,6 +8776,7 @@ void run_fat32_integrity_tests()
         for (uint64_t fatLba : {fat1Lba, fat2Lba}) {
             write_u32(sector(large, fatLba), 0x0FFFFFF8u);
             write_u32(sector(large, fatLba) + 4, 0x0FFFFFFFu);
+            write_u32(sector(large, fatLba) + 8, 0x0FFFFFFFu);
         }
         const uint8_t largeIndex = register_fake(large, false, false, false,
             false, 0, 128u * 1024u,
@@ -8781,7 +8813,670 @@ void run_fat32_integrity_tests()
         }
         check(largeBound && capVerified,
               "finding storage stops at its fixed cap, reports possible additional findings, and finishes bounded FAT comparison");
+        if (largeBound) {
+            write_u32(sector(large, partitionStart) + 32, 200000u);
+            write_u32(sector(large, partitionStart + 6) + 32, 200000u);
+            storage::Fat32IntegrityJob unsupported = {};
+            const auto unsupportedState = runAndCheckReadOnly(
+                large, largeRequest, unsupported);
+            check(unsupportedState == storage::FAT32_INTEGRITY_INCOMPLETE &&
+                  unsupported.result.reason ==
+                      storage::FAT32_INTEGRITY_REASON_UNSUPPORTED_SCALE &&
+                  !unsupported.result.structuralAnalysisComplete &&
+                  !unsupported.result.orphanAnalysisComplete,
+                  "valid FAT32 geometry beyond the fixed owner map reports incomplete coverage instead of a clean result");
+        }
         if (largeIndex != 0xFF) (void)unregister_fake(largeIndex, large);
+    }
+
+    // The prior lifecycle case intentionally invalidated the original
+    // registration. Bind a fresh immutable target before structural fixtures.
+    index512 = register_fake(disk512, false, false, false, false, 0,
+        128u * 1024u, block::BOOT_PROVENANCE_DEFINITELY_NOT_BOOT,
+        block::BDEV_AHCI);
+    storage::PartitionTableModel structuralTable = {};
+    storage::TargetIdentity structuralTarget = {};
+    const bool structuralTargetCaptured = index512 != 0xFF &&
+        parse_first_partition(index512, structuralTable, partition512) &&
+        storage::capture_target_identity(index512, structuralTarget) &&
+        storage::capture_fat32_integrity_request(structuralTarget,
+            structuralTable, partition512, request512);
+    check(structuralTargetCaptured,
+          "structural tests bind a fresh registration after the removal fixture");
+
+    const auto& integrityGeometry = clean512.result.geometry;
+    const uint64_t rootDirectoryLba = bootLba +
+        integrityGeometry.rootDirectorySector;
+    const uint64_t clusterBytes =
+        static_cast<uint64_t>(integrityGeometry.bytesPerSector) *
+        integrityGeometry.sectorsPerCluster;
+    auto resetStructuralFixture = [&]() {
+        disk512.sparseMbr = pristineMbr;
+        disk512.sparseSectors = pristineSectors;
+        disk512.failLba = UINT64_MAX;
+        disk512.failReadStatus = block::BLOCK_ERR_IO;
+    };
+    auto writeFatEntryBoth = [&](uint32_t cluster, uint32_t value) {
+        const uint64_t byteOffset = static_cast<uint64_t>(cluster) * 4u;
+        const uint32_t sectorOffset = static_cast<uint32_t>(
+            byteOffset / integrityGeometry.bytesPerSector);
+        const uint32_t byteInSector = static_cast<uint32_t>(
+            byteOffset % integrityGeometry.bytesPerSector);
+        for (uint32_t fat = 0; fat < integrityGeometry.fatCount; ++fat) {
+            const uint64_t lba = bootLba +
+                integrityGeometry.firstFatSector +
+                static_cast<uint64_t>(fat) *
+                    integrityGeometry.fatSizeSectors + sectorOffset;
+            write_u32(sector(disk512, lba) + byteInSector, value);
+        }
+    };
+    auto clusterDataLba = [&](uint32_t cluster) {
+        return bootLba + integrityGeometry.firstDataSector +
+            static_cast<uint64_t>(cluster - 2u) *
+                integrityGeometry.sectorsPerCluster;
+    };
+    auto setDirectoryEntry = [&](uint64_t lba, uint32_t slot,
+                                 const uint8_t name[11], uint8_t attr,
+                                 uint32_t cluster, uint32_t size) {
+        uint8_t* entry = sector(disk512, lba) + slot * 32u;
+        std::memset(entry, 0, 32);
+        std::memcpy(entry, name, 11);
+        entry[11] = attr;
+        write_u16(entry + 20,
+            static_cast<uint16_t>((cluster >> 16) & 0xFFFFu));
+        write_u16(entry + 26, static_cast<uint16_t>(cluster & 0xFFFFu));
+        write_u32(entry + 28, size);
+    };
+    auto setRootEntry = [&](uint32_t slot, const uint8_t name[11],
+                            uint8_t attr, uint32_t cluster,
+                            uint32_t size) {
+        setDirectoryEntry(rootDirectoryLba, slot, name, attr, cluster, size);
+    };
+    auto hasFinding = [](const storage::Fat32IntegrityJob& job,
+                         storage::Fat32IntegrityFindingCategory category) {
+        for (uint8_t i = 0; i < job.result.findingCount; ++i)
+            if (job.result.findings[i].category == category) return true;
+        return false;
+    };
+    auto runStructuralCase = [&](const char* label, auto setup,
+                                 auto verify) {
+        resetStructuralFixture();
+        setup();
+        storage::Fat32IntegrityJob job = {};
+        const auto state = runAndCheckReadOnly(disk512, request512, job);
+        verify(job, state, label);
+        resetStructuralFixture();
+    };
+    static const uint8_t fileA[11] = {
+        'F','I','L','E','A',' ',' ',' ','T','X','T'
+    };
+    static const uint8_t fileB[11] = {
+        'F','I','L','E','B',' ',' ',' ','T','X','T'
+    };
+    static const uint8_t subdirName[11] = {
+        'S','U','B','D','I','R',' ',' ',' ',' ',' '
+    };
+    static const uint8_t loopName[11] = {
+        'L','O','O','P',' ',' ',' ',' ',' ',' ',' '
+    };
+    static const uint8_t shortAlias[11] = {
+        'F','I','L','E',' ',' ',' ',' ','T','X','T'
+    };
+
+    runStructuralCase(
+        "valid single-cluster files and zero-byte files pass structural verification",
+        [&]() {
+            writeFatEntryBoth(3, 0x0FFFFFFFu);
+            setRootEntry(1, fileA, 0x20, 3, 1);
+            setRootEntry(2, fileB, 0x20, 0, 0);
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_PASSED &&
+                  job.result.findingCount == 0 &&
+                  job.result.structuralAnalysisComplete &&
+                  job.result.orphanAnalysisComplete, label);
+        });
+
+    runStructuralCase(
+        "valid multi-cluster file chains match the declared size",
+        [&]() {
+            writeFatEntryBoth(3, 4);
+            writeFatEntryBoth(4, 0x0FFFFFFFu);
+            setRootEntry(1, fileA, 0x20, 3,
+                static_cast<uint32_t>(clusterBytes + 1u));
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_PASSED &&
+                  job.result.chainClustersVisited == 3 &&
+                  job.result.orphanClusters == 0, label);
+        });
+
+    runStructuralCase(
+        "nested directories and their ordinary dot references pass without cross-link findings",
+        [&]() {
+            writeFatEntryBoth(3, 0x0FFFFFFFu);
+            setRootEntry(1, subdirName, 0x10, 3, 0);
+            static const uint8_t dot[11] = {
+                '.',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '
+            };
+            static const uint8_t dotdot[11] = {
+                '.','.',' ',' ',' ',' ',' ',' ',' ',' ',' '
+            };
+            setDirectoryEntry(clusterDataLba(3), 0, dot, 0x10, 3, 0);
+            setDirectoryEntry(clusterDataLba(3), 1, dotdot, 0x10, 2, 0);
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_PASSED &&
+                  job.result.directoriesVisited == 2 &&
+                  !hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_CROSS_LINKED_CLUSTER),
+                  label);
+        });
+    runStructuralCase(
+        "a child directory may encode its root parent as cluster zero",
+        [&]() {
+            writeFatEntryBoth(3, 0x0FFFFFFFu);
+            setRootEntry(1, subdirName, 0x10, 3, 0);
+            static const uint8_t dot[11] = {
+                '.',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '
+            };
+            static const uint8_t dotdot[11] = {
+                '.','.',' ',' ',' ',' ',' ',' ',' ',' ',' '
+            };
+            setDirectoryEntry(clusterDataLba(3), 0, dot, 0x10, 3, 0);
+            setDirectoryEntry(clusterDataLba(3), 1, dotdot, 0x10, 0, 0);
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_PASSED &&
+                  job.result.directoriesVisited == 2, label);
+        });
+
+    auto installSingleLfn = [&](bool checksumValid, uint8_t order) {
+        uint8_t* lfn = sector(disk512, rootDirectoryLba) + 32u;
+        std::memset(lfn, 0xFF, 32);
+        lfn[0] = order;
+        lfn[11] = 0x0F;
+        lfn[12] = 0;
+        uint8_t checksum = 0;
+        for (uint32_t i = 0; i < 11; ++i)
+            checksum = static_cast<uint8_t>(
+                ((checksum & 1u) ? 0x80u : 0u) + (checksum >> 1) +
+                shortAlias[i]);
+        lfn[13] = static_cast<uint8_t>(checksum ^
+            (checksumValid ? 0u : 1u));
+        write_u16(lfn + 26, 0);
+        const uint16_t units[13] = {
+            0x03A9u, 0x0000u, 0xFFFFu, 0xFFFFu, 0xFFFFu,
+            0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu,
+            0xFFFFu, 0xFFFFu, 0xFFFFu
+        };
+        const uint8_t unitOffsets[13] = {
+            1,3,5,7,9, 14,16,18,20,22,24, 28,30
+        };
+        for (uint32_t i = 0; i < 13; ++i)
+            write_u16(lfn + unitOffsets[i], units[i]);
+        setRootEntry(2, shortAlias, 0x20, 0, 0);
+    };
+
+    runStructuralCase(
+        "valid UTF-16 long filenames with non-ASCII code units pass checksum and sequence checks",
+        [&]() { installSingleLfn(true, 0x41u); },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_PASSED &&
+                  !hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_LFN_CHECKSUM) &&
+                  !hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_LFN_SEQUENCE), label);
+        });
+
+    runStructuralCase(
+        "multi-entry VFAT sequence numbers are consumed in descending on-disk order",
+        [&]() {
+            uint8_t checksum = 0;
+            for (uint32_t i = 0; i < 11; ++i)
+                checksum = static_cast<uint8_t>(
+                    ((checksum & 1u) ? 0x80u : 0u) + (checksum >> 1) +
+                    shortAlias[i]);
+            const uint8_t offsets[13] = {
+                1,3,5,7,9, 14,16,18,20,22,24, 28,30
+            };
+            auto writeLfn = [&](uint32_t slot, uint8_t order,
+                                const uint16_t units[13]) {
+                uint8_t* lfn = sector(disk512, rootDirectoryLba) +
+                    slot * 32u;
+                std::memset(lfn, 0xFF, 32);
+                lfn[0] = order;
+                lfn[11] = 0x0F;
+                lfn[12] = 0;
+                lfn[13] = checksum;
+                write_u16(lfn + 26, 0);
+                for (uint32_t i = 0; i < 13; ++i)
+                    write_u16(lfn + offsets[i], units[i]);
+            };
+            uint16_t tail[13];
+            uint16_t head[13];
+            for (uint32_t i = 0; i < 13; ++i) {
+                tail[i] = 0xFFFFu;
+                head[i] = static_cast<uint16_t>('A' + i);
+            }
+            tail[0] = 'N';
+            tail[1] = 0;
+            writeLfn(1, 0x42u, tail);
+            writeLfn(2, 0x01u, head);
+            setRootEntry(3, shortAlias, 0x20, 0, 0);
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_PASSED &&
+                  !hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_LFN_SEQUENCE) &&
+                  !hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_LFN_CHECKSUM), label);
+        });
+
+    runStructuralCase(
+        "invalid LFN checksum is reported against its directory entry",
+        [&]() { installSingleLfn(false, 0x41u); },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_INCONSISTENCY &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_LFN_CHECKSUM), label);
+        });
+
+    runStructuralCase(
+        "LFN sequence without a valid last-entry marker is reported",
+        [&]() { installSingleLfn(true, 0x01u); },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_INCONSISTENCY &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_LFN_SEQUENCE), label);
+        });
+
+    runStructuralCase(
+        "orphaned LFN fragments are reported without rejecting deleted entries",
+        [&]() {
+            installSingleLfn(true, 0x41u);
+            std::memset(sector(disk512, rootDirectoryLba) + 64u, 0, 32);
+            sector(disk512, rootDirectoryLba)[64] = 0;
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_INCONSISTENCY &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_ORPHANED_LFN), label);
+        });
+
+    runStructuralCase(
+        "deleted short and LFN slots are ignored safely",
+        [&]() {
+            uint8_t* deleted = sector(disk512, rootDirectoryLba) + 32u;
+            std::memset(deleted, 0, 32);
+            deleted[0] = 0xE5;
+            deleted[11] = 0x0F;
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_PASSED &&
+                  job.result.findingCount == 0, label);
+        });
+
+    runStructuralCase(
+        "file chains detect self-references and multi-cluster cycles",
+        [&]() {
+            writeFatEntryBoth(3, 4);
+            writeFatEntryBoth(4, 3);
+            setRootEntry(1, fileA, 0x20, 3,
+                static_cast<uint32_t>(clusterBytes * 2u));
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_INCONSISTENCY &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_CHAIN_CYCLE), label);
+        });
+    runStructuralCase(
+        "a file chain that points to itself is detected directly",
+        [&]() {
+            writeFatEntryBoth(3, 3);
+            setRootEntry(1, fileA, 0x20, 3, 1);
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_INCONSISTENCY &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_CHAIN_CYCLE), label);
+        });
+
+    runStructuralCase(
+        "a file entry with a reserved starting cluster is reported",
+        [&]() { setRootEntry(1, fileA, 0x20, 1, 1); },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_INCONSISTENCY &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_INVALID_CLUSTER_REFERENCE),
+                  label);
+        });
+
+    runStructuralCase(
+        "out-of-range FAT links and bad-cluster links are distinguished",
+        [&]() {
+            writeFatEntryBoth(3,
+                integrityGeometry.clusterCount + 2u);
+            setRootEntry(1, fileA, 0x20, 3, 1);
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_INCONSISTENCY &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_INVALID_CLUSTER_REFERENCE),
+                  label);
+        });
+    runStructuralCase(
+        "a recognized bad-cluster marker is not accepted as a live chain link",
+        [&]() {
+            writeFatEntryBoth(3, 0x0FFFFFF7u);
+            setRootEntry(1, fileA, 0x20, 3, 1);
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_INCONSISTENCY &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_BAD_CLUSTER_IN_CHAIN),
+                  label);
+        });
+
+    runStructuralCase(
+        "two files sharing allocation and distinct chains merging into a tail are detected",
+        [&]() {
+            writeFatEntryBoth(3, 5);
+            writeFatEntryBoth(4, 5);
+            writeFatEntryBoth(5, 0x0FFFFFFFu);
+            setRootEntry(1, fileA, 0x20, 3, 1);
+            setRootEntry(2, fileB, 0x20, 4, 1);
+            setRootEntry(3, subdirName, 0x20, 3, 1);
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_INCONSISTENCY &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_CROSS_LINKED_CLUSTER),
+                  label);
+        });
+
+    runStructuralCase(
+        "file and directory ownership conflicts are reported",
+        [&]() {
+            writeFatEntryBoth(3, 0x0FFFFFFFu);
+            setRootEntry(1, subdirName, 0x10, 3, 0);
+            setRootEntry(2, fileA, 0x20, 3, 1);
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_INCONSISTENCY &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_CROSS_LINKED_CLUSTER),
+                  label);
+        });
+
+    runStructuralCase(
+        "file size shorter than required allocation and overallocated chains are reported",
+        [&]() {
+            writeFatEntryBoth(3, 4);
+            writeFatEntryBoth(4, 0x0FFFFFFFu);
+            setRootEntry(1, fileA, 0x20, 3,
+                static_cast<uint32_t>(clusterBytes * 2u + 1u));
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_INCONSISTENCY &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_FILE_SIZE_MISMATCH),
+                  label);
+        });
+    runStructuralCase(
+        "an allocated tail beyond a file's declared size is reported",
+        [&]() {
+            writeFatEntryBoth(3, 4);
+            writeFatEntryBoth(4, 0x0FFFFFFFu);
+            setRootEntry(1, fileA, 0x20, 3, 1);
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_INCONSISTENCY &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_FILE_SIZE_MISMATCH),
+                  label);
+        });
+
+    runStructuralCase(
+        "orphan chains are grouped while free clusters and explicit bad clusters are excluded",
+        [&]() {
+            writeFatEntryBoth(5, 6);
+            writeFatEntryBoth(6, 0x0FFFFFFFu);
+            writeFatEntryBoth(7, 0x0FFFFFF7u);
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_INCONSISTENCY &&
+                  job.result.orphanAnalysisComplete &&
+                  job.result.orphanClusters == 2 &&
+                  job.result.firstOrphanCluster == 5 &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_ORPHANED_ALLOCATION),
+                  label);
+        });
+
+    runStructuralCase(
+        "reserved FAT markers are not counted as orphan allocation",
+        [&]() { writeFatEntryBoth(5, 0x0FFFFFF1u); },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_INCONSISTENCY &&
+                  job.result.orphanAnalysisComplete &&
+                  job.result.orphanClusters == 0 &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_INVALID_CLUSTER_REFERENCE) &&
+                  !hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_ORPHANED_ALLOCATION),
+                  label);
+        });
+
+    runStructuralCase(
+        "directory self-cycles and invalid parent/self references are detected",
+        [&]() {
+            writeFatEntryBoth(3, 0x0FFFFFFFu);
+            setRootEntry(1, subdirName, 0x10, 3, 0);
+            setDirectoryEntry(clusterDataLba(3), 0, loopName, 0x10, 3, 0);
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_INCONSISTENCY &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_DIRECTORY_LOOP), label);
+        });
+    runStructuralCase(
+        "the FAT32 root-directory allocation chain detects a cluster loop",
+        [&]() {
+            writeFatEntryBoth(2, 3);
+            writeFatEntryBoth(3, 2);
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_INCONSISTENCY &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_CHAIN_CYCLE) &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_DIRECTORY_LOOP), label);
+        });
+    runStructuralCase(
+        "corrupted directory dot and dotdot cluster references are reported",
+        [&]() {
+            writeFatEntryBoth(3, 0x0FFFFFFFu);
+            setRootEntry(1, subdirName, 0x10, 3, 0);
+            static const uint8_t dot[11] = {
+                '.',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '
+            };
+            static const uint8_t dotdot[11] = {
+                '.','.',' ',' ',' ',' ',' ',' ',' ',' ',' '
+            };
+            setDirectoryEntry(clusterDataLba(3), 0, dot, 0x10, 4, 0);
+            setDirectoryEntry(clusterDataLba(3), 1, dotdot, 0x10, 4, 0);
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_INCONSISTENCY &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_INVALID_DIRECTORY_REFERENCE),
+                  label);
+        });
+
+    runStructuralCase(
+        "invalid directory start clusters stop orphan analysis as incomplete",
+        [&]() { setRootEntry(1, subdirName, 0x10, 1, 0); },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_INCOMPLETE &&
+                  !job.result.orphanAnalysisComplete &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_INVALID_DIRECTORY_REFERENCE),
+                  label);
+        });
+
+    runStructuralCase(
+        "valid active-FAT selection controls allocation checks when mirroring is disabled",
+        [&]() {
+            write_u16(sector(disk512, bootLba) + 40, 0x0081u);
+            write_u16(sector(disk512, backupBootLba) + 40, 0x0081u);
+            write_u32(sector(disk512,
+                bootLba + integrityGeometry.firstFatSector), 0);
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            bool advisoryCopyMismatch = false;
+            for (uint8_t i = 0; i < job.result.findingCount; ++i)
+                if (job.result.findings[i].category ==
+                        storage::FAT32_INTEGRITY_FINDING_FAT_COPY_MISMATCH &&
+                    job.result.findings[i].severity ==
+                        storage::FAT32_INTEGRITY_ADVISORY)
+                    advisoryCopyMismatch = true;
+            check(state == storage::FAT32_INTEGRITY_PASSED &&
+                  job.result.geometry.activeFat == 1 &&
+                  advisoryCopyMismatch &&
+                  !hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_FAT_RESERVED_ENTRY),
+                  label);
+        });
+
+    // The root chain spans enough sectors to enqueue 257 valid directory
+    // references before traversal begins, exercising the fixed pending queue.
+    runStructuralCase(
+        "pending-directory queue exhaustion is explicitly incomplete",
+        [&]() {
+            const uint32_t entriesPerSector =
+                integrityGeometry.bytesPerSector / 32u;
+            const uint32_t entriesPerCluster = entriesPerSector *
+                integrityGeometry.sectorsPerCluster;
+            const uint32_t rootClusters = (258u + entriesPerCluster - 1u) /
+                entriesPerCluster;
+            for (uint32_t i = 0; i < rootClusters; ++i)
+                writeFatEntryBoth(2u + i,
+                    i + 1u == rootClusters ? 0x0FFFFFFFu : 3u + i);
+            for (uint32_t i = 0; i < 257u; ++i) {
+                const uint32_t sectorIndex = i / entriesPerSector;
+                const uint32_t slot = i % entriesPerSector;
+                const uint32_t clusterIndex =
+                    sectorIndex / integrityGeometry.sectorsPerCluster;
+                const uint32_t sectorInCluster =
+                    sectorIndex % integrityGeometry.sectorsPerCluster;
+                const uint64_t lba = clusterDataLba(2u + clusterIndex) +
+                    sectorInCluster;
+                uint8_t name[11] = {
+                    'D','I','R','0','0','0','0','0',' ',' ',' '
+                };
+                uint32_t number = i;
+                for (int digit = 7; digit >= 3; --digit) {
+                    name[digit] = static_cast<uint8_t>('0' + number % 10u);
+                    number /= 10u;
+                }
+                setDirectoryEntry(lba, slot, name, 0x10,
+                    1000u + i, 0);
+                writeFatEntryBoth(1000u + i, 0x0FFFFFFFu);
+            }
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_INCOMPLETE &&
+                  job.result.reason ==
+                      storage::FAT32_INTEGRITY_REASON_RESOURCE_LIMIT &&
+                  !job.result.orphanAnalysisComplete &&
+                  job.directoryQueueCount ==
+                      storage::FAT32_INTEGRITY_MAX_PENDING_DIRECTORIES,
+                  label);
+        });
+
+    // Stop only after a file-chain FAT read has completed; the next step must
+    // honor Stop before issuing another block request.
+    resetStructuralFixture();
+    writeFatEntryBoth(3, 4);
+    writeFatEntryBoth(4, 0x0FFFFFFFu);
+    setRootEntry(1, fileA, 0x20, 3, 1);
+    {
+        storage::Fat32IntegrityJob stoppedChain = {};
+        const auto admitted = storage::begin_fat32_integrity_job(
+            stoppedChain, request512);
+        auto state = admitted;
+        uint32_t steps = 0;
+        while (state == storage::FAT32_INTEGRITY_RUNNING && steps++ < 500) {
+            state = storage::step_fat32_integrity_job(stoppedChain);
+            if (!stoppedChain.chainIsDirectory &&
+                stoppedChain.chainLength != 0 &&
+                stoppedChain.result.structuralReadRequests != 0)
+                break;
+        }
+        const size_t readsBeforeStop = disk512.readLog.size();
+        const uint32_t structuralReadsBeforeStop =
+            stoppedChain.result.structuralReadRequests;
+        const bool stopAccepted =
+            storage::request_fat32_integrity_stop(stoppedChain);
+        const auto stopped =
+            storage::step_fat32_integrity_job(stoppedChain);
+        check(admitted == storage::FAT32_INTEGRITY_RUNNING && stopAccepted &&
+              stopped == storage::FAT32_INTEGRITY_STOPPED &&
+              disk512.readLog.size() == readsBeforeStop &&
+              stoppedChain.result.structuralReadRequests ==
+                  structuralReadsBeforeStop &&
+              !stoppedChain.result.orphanAnalysisComplete &&
+              stoppedChain.result.ownershipReleased,
+              "Stop during a file-chain walk prevents the next read and leaves coverage incomplete");
+    }
+
+    runStructuralCase(
+        "a directory read failure is reported with incomplete coverage",
+        [&]() {
+            writeFatEntryBoth(3, 0x0FFFFFFFu);
+            setRootEntry(1, subdirName, 0x10, 3, 0);
+            disk512.failLba = clusterDataLba(3);
+            disk512.failReadStatus = block::BLOCK_ERR_IO;
+        },
+        [&](const storage::Fat32IntegrityJob& job,
+            storage::Fat32IntegrityState state, const char* label) {
+            check(state == storage::FAT32_INTEGRITY_READ_ERROR &&
+                  job.result.failedLba == clusterDataLba(3) &&
+                  !job.result.orphanAnalysisComplete &&
+                  hasFinding(job,
+                      storage::FAT32_INTEGRITY_FINDING_READ_FAILURE), label);
+        });
+    if (index512 != 0xFF) {
+        (void)unregister_fake(index512, disk512);
+        index512 = 0xFF;
     }
 
     // Restore only the deliberate test-fixture edits after verifying each
