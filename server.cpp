@@ -5112,6 +5112,40 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js73AfterClick, 3200) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js74FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js74.html";
+    const bool js74Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js74FixtureUrl);
+    const std::string js74InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS74 selector stack and capacity fixture passes",
+        js74Loaded && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js74FixtureUrl &&
+        contains(js74InitialText, "Navigator JavaScript JS74") &&
+        contains(js74InitialText, "JS74:initial:") &&
+        contains(js74InitialText,
+            ":failures=0:malformed=true:slots=8") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js74Loaded) + ",text=" +
+        summarizeText(js74InitialText, 3200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS74 selector lists, scope, live collections, and JS70-JS73 behavior pass",
+        js74Loaded && contains(js74InitialText,
+            ":failures=0:malformed=true:slots=8") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "hosted checks cover forward/reverse filtered positions, retained numeric reads, live mutation, eight active rank slots, two-step :has() with nested logical alternatives, canonical identity, scope, and malformed rejection");
+    const bool js74Click = gxos::apps::Navigator::SmokeClickFormControlById(
+        "event-a");
+    const std::string js74AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS74 nested Event dispatch restores selectors and Event metadata",
+        js74Click && contains(js74AfterClick,
+            "JS74:event=true:nested=true:metadata=true:depth=3:failures=0") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js74Click) + ",text=" +
+        summarizeText(js74AfterClick, 3200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

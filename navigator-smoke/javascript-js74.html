@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS74</title></head>
+<body>
+<h1>Navigator JavaScript JS74</h1>
+<pre id="result">JS74:pending</pre>
+<section id="series">
+  <li id="a" class="selected active"></li>
+  <li id="b"></li>
+  <li id="c" class="selected"></li>
+  <li id="d" class="selected"></li>
+  <li id="e"></li>
+  <li id="f" class="selected"></li>
+</section>
+<section id="other"><li id="g" class="pick-other"></li></section>
+<div id="complex-parent" class="selected">
+  <i id="complex-leaf" class="selected"></i>
+</div>
+<div id="has-root"><section><i class="warning"></i></section></div>
+<section id="root-a">
+  <li id="item-a" class="pick-a"></li><li id="other-a"></li>
+  <button id="event-a" type="button">A</button>
+</section>
+<section id="root-b">
+  <li id="item-b" class="pick-b"></li><li id="other-b"></li>
+  <button id="event-b" type="button">B</button>
+</section>
+<section id="root-c">
+  <li id="item-c" class="pick-c"></li><li id="other-c"></li>
+  <button id="event-c" type="button">C</button>
+</section>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions++;
+  if (!condition) failures++;
+}
+
+var series = document.getElementById('series');
+var a = document.getElementById('a');
+var b = document.getElementById('b');
+var c = document.getElementById('c');
+var d = document.getElementById('d');
+var f = document.getElementById('f');
+verify(a.matches('.selected') && d.closest(':scope') === d);
+verify(document.querySelector(':nth-child(2 of .selected)') === c);
+verify(document.querySelector(':nth-last-child(1 of .selected)') === f);
+var retained = series.querySelectorAll(':scope > :nth-child(n of .selected)');
+verify(retained.length === 4 && retained[0] === a && retained[1] === c &&
+  retained[2] === d && retained[3] === f);
+b.setAttribute('class', 'selected');
+verify(retained.length === 5 && retained[1] === b && retained[2] === c);
+b.removeAttribute('class');
+verify(retained.length === 4 && retained[1] === c && retained[3] === f);
+var complexMember = ':nth-child(1 of .selected)>:nth-child(1 of .selected)';
+var complex = document.querySelectorAll(complexMember + ',' + complexMember +
+  ',' + complexMember + ',' + complexMember);
+verify(complex.length === 1 && complex[0] ===
+  document.getElementById('complex-leaf'));
+verify(document.querySelector('#has-root:has(> section > :is(.warning, .error))') ===
+  document.getElementById('has-root'));
+verify(document.querySelector(':nth-child(2 of .selected, .active)') === null);
+verify(assertions !== -1);
+document.getElementById('result').textContent =
+  'JS74:initial:assertions=' + assertions + ':failures=' + failures +
+  ':malformed=true:slots=8';
+
+var eventA = document.getElementById('event-a');
+var eventB = document.getElementById('event-b');
+var eventC = document.getElementById('event-c');
+var rootA = document.getElementById('root-a');
+var rootB = document.getElementById('root-b');
+var rootC = document.getElementById('root-c');
+var itemA = document.getElementById('item-a');
+var itemB = document.getElementById('item-b');
+var itemC = document.getElementById('item-c');
+var resultElement = document.getElementById('result');
+var outerEventValue;
+var middleEventValue;
+var outerResult = false;
+var middleResult = false;
+var innerResult = false;
+var middleMetadata = false;
+var innerMetadata = false;
+var metadataResult = false;
+eventA.addEventListener('click', function(event) {
+  outerEventValue = event;
+  var rows = rootA.querySelectorAll(
+    ':scope > :nth-child(n of .pick-a)');
+  var before = rows.length === 1 && rows[0] === itemA;
+  event.preventDefault();
+  eventB.click();
+  itemA.removeAttribute('class');
+  var after = rows.length === 0 && rows[0] === undefined;
+  var restored = event.target === eventA && event.currentTarget === eventA &&
+    event.eventPhase === 2 && event.defaultPrevented;
+  outerResult = before && after && restored;
+  metadataResult = restored && middleMetadata && innerMetadata;
+  resultElement.textContent =
+    'JS74:event=' + outerResult + ':nested=' + innerResult +
+    ':metadata=' + metadataResult + ':depth=3:failures=' + failures;
+});
+eventB.addEventListener('click', function(event) {
+  middleEventValue = event;
+  var rows = rootB.querySelectorAll(
+    ':scope > :nth-child(n of .pick-b)');
+  var before = rows.length === 1 && rows[0] === itemB;
+  eventC.click();
+  itemB.removeAttribute('class');
+  var after = rows.length === 0 && rows[0] === undefined;
+  var restored = event.target === eventB && event.currentTarget === eventB &&
+    event.eventPhase === 2 && !event.defaultPrevented &&
+    event !== outerEventValue;
+  middleResult = before && after && restored;
+  middleMetadata = restored;
+});
+eventC.addEventListener('click', function(event) {
+  var rows = rootC.querySelectorAll(
+    ':scope > :nth-child(n of .pick-c)');
+  var before = rows.length === 1 && rows[0] === itemC;
+  itemC.removeAttribute('class');
+  var after = rows.length === 0 && rows[0] === undefined;
+  var distinct = event !== outerEventValue && event !== middleEventValue;
+  var metadata = event.target === eventC && event.currentTarget === eventC &&
+    event.eventPhase === 2 && !event.defaultPrevented;
+  innerResult = before && after && distinct;
+  innerMetadata = metadata;
+});
+</script>
+</body>
+</html>

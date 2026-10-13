@@ -8933,3 +8933,268 @@ JS73 indexed collection and scratch optimization fully qualified.** A useful
 next performance investigation is a lazy per-parent rank build for one
 requested index. It should compare with the existing bounded one-pass build
 without adding result reuse across live reads.
+
+#### JS74 selector stack safety and worst-case qualification (2026-10-13)
+
+JS74 audited the JS73 invocation-local selector-rank scratch against selector
+capacities and nested Event dispatch. It preserves the production selector
+limits: 256 input bytes, four outer selector-list members, 24 relative
+`:has()` cores, eight simultaneously active filtered-rank slots, 1,024
+document nodes, and 128 retained query-collection records. The JS74 native
+suite passed the inherited JS73 checks (77/77) and its new checks (25/25).
+It accepts an exactly 256-byte selector and rejects 257 bytes, exercises
+one-, four-, and eight-slot queries, nested two-step `:has()` with logical
+alternatives, and sweeps nested Event dispatch from depth 1 through the
+runtime's fixed limit of 16. Every depth dispatched and returned with all
+selector, retained-collection, object-identity, Event target/currentTarget,
+eventPhase, and defaultPrevented checks intact.
+The inherited 1,024-Element diagnostics retain JS72's 2,048 structural
+inspections, 1,023 filter evaluations, and one rank build; the indexed probe
+retains four builds for four independent reads. A JS74 boundary case creates
+128 distinct collections with distinct results and verifies every final
+indexed value, filling the existing registry without growth.
+
+No production selector source or storage layout changes were needed. The
+selector descriptor and query-collection record remain 1,918 and 1,936 bytes;
+the 128-record collection registry is 247,808 bytes. The largest scratch
+object remains invocation-local and grows only with the number of active
+filtered-rank slots:
+
+| Active slots | Scratch object | Count frame, production | Indexed-read frame, production |
+|---:|---:|---:|---:|
+| 1 | 4,232 B | 4,304 B | 4,336 B |
+| 4 | 10,376 B | 10,448 B | 10,480 B |
+| 8, maximum | 18,568 B | 18,640 B | 18,672 B |
+
+The native diagnostic build, which includes its counter pointer in scratch,
+reports the same slot scaling at 4,336/4,352 B (one slot), 10,480/10,496 B
+(four), and 18,672/18,688 B (eight) for count/index frames. Against JS72's
+fixed diagnostic frames of 19,648/19,680 B, that means the actual one-slot
+frames are 78% smaller, four-slot frames 47% smaller, and eight-slot frames
+about 5% smaller. The eight-slot maximum retains JS72's bulk-query path while
+the common case now reserves only its own specialization. JS74 itself makes
+no selector frame change; these are the qualified JS73 layout and frame
+sizes, remeasured under both production and native flags.
+
+The scratch audit found one 2,048-byte `uint16_t` group-metadata array (two
+state bits and a 14-bit bounded child/match count per structural parent),
+eight one-byte logical-to-physical slot indices, eight selector pointers, and
+eight built flags. The rank table is exactly 2,048 bytes per active slot
+(1,024 `uint16_t` ranks); document, descriptor, generation, and scope
+references are shared once per call rather than repeated per slot. Element
+serial-to-index resolution uses the already-validated serial ordering, so no
+second 1,024-entry mapping table is needed. No rank data escapes the stack
+call, and no global, heap, or persistent cache was introduced.
+
+The reachable worst-case test corpus has separate inputs because the bounded
+grammar and 256-byte input limit do not allow every independent maximum in
+one selector. The four-member eight-slot selector is 215 bytes and places two
+filtered positional expressions in each member. A separate 256-byte class
+selector checks the exact accepted input boundary and its 257-byte neighbor.
+A 48-byte `:has()` selector covers two correlated relative steps and a
+two-member nested `:is()` list. The 128-collection stress fills every retained
+record with a distinct selector/result. These inputs cover the largest
+simultaneous rank occupancy, input bytes, relative traversal/logical depth,
+collection occupancy, and the 1,024-Element document bound without claiming
+an impossible selector that combines all maxima.
+
+Optimization candidates were reviewed against these measurements. Narrowing
+the 16-bit rank to an 11-bit packed representation was previously measured
+in JS73 and rejected after 5–17% regressions in repeated indexed reads. The
+current template specializations already compile a genuinely smaller frame
+for one and four active slots; the runtime samples track the 6,144-byte
+one-to-four scratch delta exactly. Reducing the 14-bit group count would
+require packing counts across word boundaries; 14 bits already covers the
+1,024-node bound and leaves simple state operations. Slot metadata is small
+and carries per-slot selector identity and build state needed to reject
+cross-slot reuse. The compact descriptor is copied once into the retained
+record by design and is not copied into scratch on collection reads. A
+bitset/checkpoint representation would add lookup work to the hot path, and
+heap/global scratch would break the existing ownership and reentrancy model.
+With the measured 1 MiB native stack margin, none of these changes is
+justified for JS74.
+
+These are GCC 15.2.0 x86_64 MinGW `-O2 -fstack-usage` static frame sizes
+compiled with the production flags (`-std=c++17 -Wall -O2 -iquote .`). In
+the native diagnostic build, the count frames add 32 bytes and the indexed
+frames add 16 bytes. All reported
+translation-unit frames had the `static` classification; the compiler did
+not report a dynamic or unbounded frame. Relevant production caller frames
+are `querySelector` 2,160 B, `querySelectorAll` 2,128 B,
+`getProperty` 272 B, filtered-count dispatch 48 B, filtered-index dispatch
+64 B, `dispatchEvent` 2,544 B, `callInternal` 2,224 B, `RuntimeContext::execute`
+608 B, `Evaluator::invokeFunction` 528 B, and `Parser::parse` 560 B (the
+lexer-result overload is 80 B). A frame-size report is not itself a whole
+call-chain high-water measurement: caller/callee frames coexist only along
+the active path, and unrelated alternatives must not be added together.
+
+The bounded selector parser has separate frames: `parseBoundedSelector`
+112 B, `parseBoundedSelectorMember` 144 B, and `parseSimpleSelector` 304 B.
+The parser is entered under the 2,160 B `querySelector` or 2,128 B
+`querySelectorAll` frame, which owns the 1,918 B descriptor. `querySelector`
+matches immediately; `querySelectorAll` copies that descriptor into its
+retained record and returns. The `Parser::parse` 560 B value above belongs to
+the JavaScript source parser, not this selector parser.
+
+The maximum eight-slot retained-`length` rank-building path has a
+conservative adapter-only frame sum of **20,704 B**: `getProperty` 272,
+count dispatch 48, filtered-slot dispatch 48, the eight-slot count frame
+18,640, internal scan 192, selector/member/simple matching frames 128 + 176 +
+80 + 320, filtered-index resolution 256, rank build 176, and restricted-core
+matching 144 + 224. The equivalent indexed-read adapter path sums to
+**20,784 B**, substituting the indexed dispatch (80 + 64), indexed frame
+18,672, and indexed scan (192) for the count dispatch/frame/scan. These are
+deliberately conservative sums of listed out-of-line frame sizes along the
+source call path; compiler inlining, tail calls, and mutually exclusive
+branches can make the actual chain smaller. They exclude the JavaScript
+evaluator frames and platform entry baseline. The runtime watermark below
+samples the complete tested path, including those callers. Count and indexed
+paths are separate operations and never coexist.
+
+The relevant call paths are:
+
+```text
+JS execution / callback
+  -> querySelector / querySelectorAll
+       -> bounded selector parser -> local descriptor
+       -> querySelector: scan and return one Element
+       -> querySelectorAll: copy descriptor to retained record and return
+  -> retained collection property read
+       -> getProperty -> count/index dispatcher
+       -> one-, four-, or eight-slot specialization
+       -> local scratch -> structural scan -> restricted-core matcher
+       -> build the requested rank cache -> release scratch on return
+
+matches / closest
+  -> callInternal -> bounded selector parser -> direct Element matcher
+  -> bounded ancestry walk for closest; no full rank scratch
+
+nested Event A -> callback A -> query/read scratch A (returns and is released)
+               -> nested Event B -> callback B -> query/read scratch B (released)
+               -> callback A resumes -> retained A is read and rebuilt
+```
+
+The source call graph shows at most **one live filtered-rank scratch object**
+at a time. Selector evaluation is synchronous host code and does not call
+script callbacks. A `length` or index read has returned and released its
+local scratch before JavaScript can dispatch the next Event.
+Collection records and callback activations remain live, but those are not
+rank-array scratch instances. The fixed runtime limits are 16 Event dispatch
+levels and 16 script activations. The depth-16 test exercises the event bound;
+it does not claim support for unbounded recursive JavaScript.
+
+The public query calls parse the bounded selector into a descriptor in their
+own frame. `querySelectorAll` registers a compact collection record, then
+returns; later `length` and numeric property reads evaluate the retained live
+query. A filtered `length` read reaches the one-, four-, or eight-slot count
+specialization. An indexed read reaches its matching indexed specialization.
+Each specialization constructs its scratch on that call's stack and releases
+it on return. `matches()` and `closest()` use direct matching and do not
+construct the full rank scratch. Repeated and nested reads therefore rebuild
+from live DOM state and cannot alias a previous or outer invocation's rank
+arrays. Nested synchronous Event dispatch does retain the bounded JavaScript
+and dispatch frames; selector scratch is not live across a callback unless
+the callback itself is currently evaluating a collection read.
+
+To sample the complete native call path, the JS74 runner built a separate
+`-finstrument-functions` executable on a dedicated Windows thread with a 1 MiB
+stack reserve. A `uintptr_t` marker in the entry hook records the lowest
+function-entry stack address for each workload. Disassembly verified that the
+largest specialized frame runs `___chkstk_ms` and reserves its frame before
+the compiler-generated entry hook. The probe also reads the owning thread's
+`NT_TIB.StackBase` and `StackLimit` after each workload. The minimum hook
+address gives a per-workload watermark; the TEB limit gives a cumulative,
+page-rounded upper bound on committed stack and covers transient frames in
+non-instrumented library calls. It reads no arbitrary stack memory and uses
+integer address arithmetic. The stack limit is monotonic on this thread, so
+the maximum committed value is reported once for the full workload sequence.
+
+The worst per-workload watermark was the 16-level nested Event case with
+selector reads at every level: **328,993 B observed**. The TEB committed-stack
+high-water was **331,776 B out of 1,048,576 B**, leaving **716,800 B** of
+reserve. Initial commitment was 8,192 B. The TEB result is a conservative
+page-rounded upper bound for this entire native test thread, which also
+includes test-harness setup. The separate function-entry samples were
+190,433 B for an eight-slot retained `length` read and 175,537 B for a
+one-slot indexed read. These are runtime results for the instrumented native
+test executable, not exact production stack consumption; the instrumentation
+and harness add frames. The freshly built hosted executable's PE stack
+reserve is recorded in the final build/hosted closeout. No constrained-runtime
+or kernel stack budget is inferred from this Windows measurement.
+
+Five-repeat native timing medians and ranges cover representative selector
+paths. In the final focused run, `matches()` took 9 us (6–28); one-slot
+forward/reverse qSA took 234 us (232–255) / 242 us (236–274); four-slot qSA
+took 257 us (252–279); eight-slot qSA took 541 us (538–580); dense/sparse
+filters took 195 us (192–214) / 134 us (130–204); three repeated indexed
+reads took 258 us (213–436); and the depth-16 Event workload took 629 us
+(625–669). The broad repeated-index range includes scheduling noise, so no
+speedup is inferred from these host timings. The figures are qualification
+samples, not performance guarantees.
+The rejected
+11-bit rank representation remains out of scope: JS73 found a 5–17% slowdown
+for the repeated-index cases, and JS74 found no stack-safety need that would
+justify that tradeoff.
+
+The hosted fixture `navigator-smoke/javascript-js74.html` adds initial
+selector/capacity and nested-event coverage to the existing hosted aggregate.
+`server.cpp` adds three aggregate checks for the initial marker, selector
+coverage, and nested Event marker. Its visible `<h1>` also supplies the title
+text required by the hosted document-text smoke API. The fixture keeps literal
+`<` out of its inline JavaScript because the HTML subset parser treats that
+byte as the end of script source.
+
+**Decision:** the existing bounded per-call scratch is safe for the measured
+native worst case and the fixed 16-level Event regression. It preserves exact
+slot-scaled allocation, live-query semantics, and all selector capacities;
+this audit requires no production logic or layout change.
+
+##### JS74 final qualification closeout
+
+The full JavaScript matrix completed **76/76 lanes** and reported
+**13,321/13,321 assertions across 34 lanes**. This includes the inherited
+JS71/JS72/JS73 focused suites at 110/110, 55/55, and 77/77, plus the JS74
+suite at 25/25. JS74's strict compile passed with GCC 15.2.0 targeting
+`x86_64-w64-mingw32`; the 16 nested Event-depth cases all passed. The final
+stack probe reported 328,993 B maximum instrumented watermark and 331,776 B
+maximum TEB committed stack against its dedicated 1 MiB reserve.
+
+The full matrix preceded the visible-heading fixture correction below. That
+change did not alter inline script bytes; the focused JS74 run was repeated
+afterward and again passed 25/25, including its source-integrity check. The
+stack and timing numbers here are from that final focused run.
+
+`build.bat` completed successfully with the configured MinGW compiler. The
+fresh `guideXOSServer.exe` was 8,523,834 bytes with SHA-256
+`FC5ABEEDC056AF0CB4DA707FB955B0DC058BEDF666B9BE5CF4021930C494F504`.
+`objdump -p` reported a PE stack reserve of 2,097,152 bytes and initial commit
+of 4,096 bytes. The hosted runner confirmed the exact path and hash for the
+launched server process (PID 22168). That aggregate reported **650 passed,
+7 failed, 657 total**. All three JS74 checks passed. The seven failures were
+the pre-existing CSS 3C, 3G, 6A, three 6B, and 6C checks; the JS72 hosted
+baseline had the same seven CSS failures (647/7/654 before JS74's three
+checks). The first hosted attempt exposed that the smoke document-text API
+does not include `<title>`; adding a visible heading and rerunning produced
+the passing JS74 checks above. The overall hosted command therefore still
+exits with the known CSS failures.
+
+The original local server executable was restored after hosted verification.
+All 42 files (458,372 bytes) in `navigator-smoke/generated` and the backed-up
+`desktop.state`, `display-options.cfg`, and `window-bounds.cfg` were restored.
+The before/after ignored-file audit matched every original file hash and
+length: **1,349 files / 89,350,840 bytes; 0 changed, 0 missing, 0 extra**.
+This includes the 12 preserved JS72 logs. Newly created hosted stdout and
+stderr logs were archived outside the repository at
+`C:\Users\guideX\AppData\Local\Temp\guidex-js74-evidence-20261013`; the
+same folder contains the baseline manifest, executable backups, and stack
+reports. No existing ignored outputs were removed. `.phase` remained absent.
+
+Pre-commit, the branch was still `NAVIGATOR_JAVASCRIPT_SUPPORT` at starting
+HEAD `8842b21db0c9952dc1c26913dc884c6b5d000226` (one commit ahead of its
+already-known upstream tracking ref). No fetch, push, reset, checkout, clean,
+stash, or worktree operation was used. The JS74 work is committed locally;
+the branch is left unpushed. No kernel or QEMU run was performed, so this
+Windows hosted/native qualification does not establish a constrained-runtime
+stack budget. A follow-up should measure the target's real thread reserve and
+repeat the maximum selector and Event inputs there before making a
+bare-metal stack-safety claim.
