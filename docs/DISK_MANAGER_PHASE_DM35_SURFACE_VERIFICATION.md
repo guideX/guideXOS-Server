@@ -436,3 +436,147 @@ source did not change. `.phase` remains `last_completed=DM34`,
 continuation should resume the prepared guest campaign when the exclusive
 QEMU lane is available, beginning with `DM35DISK01`, without rerunning the
 accepted host campaigns or recreating these fixtures.
+
+## DM35 continuation 4 — real QEMU runs A–D; remaining gates blocked by GUI input
+
+### Guest candidate and headless display
+
+The run manifests identify branch `DISK_MANAGER_IMPROVEMENTS`, source revision
+`f4c09c66931f8ead48194b3ece509fa112055572` (a documentation-only descendant
+of the prepared source candidate), and QEMU 11.0.0 executable SHA-256
+`A930E028F93D0FA47E4D58BDAD2432F7466DC2B6AF0AE376F77EF7A298FFDD02`. Each
+guest used WHPX, `pc,usb=off`, UHCI, implicit PS/2 input, standard VGA, and
+`-display none`. QEMU ran as a headless background process and produced
+1280×800 framebuffer screenshots; no desktop QEMU window was expected. The
+AMD64 kernel and ESP kernel both hash to
+`CD48DB091C392D11439E0EFDE2CBC694CE3E3DFD25D54483AD5A5C41CEBE067A`; the EFI
+bootloader hash is
+`9CFBD33384CE921DAADFE82C54E372752EE34BD4394EFAD9F9A0CED8E03BB121`, and
+read-only OVMF hash is
+`2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792`.
+NVMe proof flags remained zero. No launch hook or physical host storage was
+used.
+
+The process, command line, QMP port, fixture identity, and prelaunch census
+for each guest are recorded in `owner-manifest.json` and
+`prelaunch-qemu-ownership.json` under ignored
+`out/dm35/surface-verification/runs/`.
+
+### A — complete-disk verification: qualified
+
+Run `A-entire-disk-retry2-20261012` used PID `34528`, QMP
+`127.0.0.1:61351`, and `DM35DISK01` (307,200,000 bytes, 512-byte sectors,
+600,000 sectors). Disk Manager was launched through Start Menu. The GUI
+confirmed the entire-disk scope, started the scan, showed engine-backed
+progress, and ended Completed at 100%. `logical-read-coverage.json` contains
+2,344 contiguous READ(10) requests, covering exactly LBA 0–599,999 (600,000
+sectors); the final request is 192 sectors and no unpaired CDBs were found.
+QMP recorded no target writes, unmap/discard, or failed reads. After safe
+QEMU exit and exclusive image release, `DM35DISK01.raw` still hashes to its
+pristine `8a9450cbd33723c613d88d47e2177e751c0af7929de68d903feac2660bbc39d7`.
+
+### B — partition-bounded verification: qualified
+
+Run `B-partition-retry-20261012` used PID `20160`, QMP `127.0.0.1:61352`, and
+`DM35PART01`. The selected row was MBR Partition 1, start LBA 2,048, 180,000
+sectors, last LBA 182,047. The operation-scoped trace separates three
+preflight reads (LBA 0, 1, and 599,999) from the scan. The scan itself is 704
+contiguous requests over exactly LBA 2,048–182,047; no scan request falls
+outside the selected partition. The GUI completed at 100%. QMP target writes
+and unmap/discard remained zero; one target Flush was present in the total
+counters but was not issued by the read-only scan. The released image hash
+is unchanged at
+`8a9450cbd33723c613d88d47e2177e751c0af7929de68d903feac2660bbc39d7`.
+
+### C — dedicated Stop Scan: qualified
+
+Run `C-stop-retry2-20261012` used PID `16676`, QMP `127.0.0.1:61354`, and
+`DM35STOP01`. This pass used the ordinary Start Menu launch. After confirming
+the entire-device scope, the GUI showed nonzero progress. Tab visibly
+focused Stop Scan (widget ID 12); Enter dispatched through the normal
+focused-button path. The GUI settled at **Stopped**, 11,776 of 600,000 sectors
+examined, with 588,224 remaining explicitly unverified, and showed ownership
+released. The capture immediately after activation records 525 target reads
+/ 32,535,552 bytes and trace offset 92,970; the capture 19 seconds later has
+identical read counters and trace offset. No post-settlement read batch
+began. Target writes, unmap/discard, and failed reads remained zero. The one
+target Flush in the cumulative counter was present before Stop and is not
+attributed to scanning. The released fixture hash remains the pristine
+`8a9450cbd33723c613d88d47e2177e751c0af7929de68d903feac2660bbc39d7`.
+Screenshots include `startmenu-stop-tab-focus.png`,
+`startmenu-stop-enter-settled.png`, and
+`startmenu-stop-after-settle-wait.png` in that run directory. An earlier
+terminal-launched attempt is retained but is not used as the qualifying
+Start Menu evidence.
+
+### D — application Close during verification: lifecycle observed; launch-path limitation
+
+Run `D-close-20261012` used PID `9536`, QMP `127.0.0.1:61355`, and
+`DM35CLOSE01`. The GUI confirmed the entire-device target, started a scan,
+and displayed nonzero progress. Start Menu activation attempts did not launch
+Disk Manager; it was ultimately opened through the guest shell using
+`desktop.launch DiskManager`. This run exercises Close settlement but does
+not satisfy the ordinary Start Menu launch method.
+
+Alt+F4 was issued during Running. The guest log records the real Disk Manager
+close request as accepted; the GUI displayed “Close requested. Stopping
+verification after the current read settles.” Fourteen seconds later the
+application window was gone and the guest terminal was visible. From the
+measured pre-close baseline, target reads increased by 23,199,744 bytes
+(45,312 sectors); the target ended at 380 reads / 23,322,112 cumulative
+bytes. The settled and pre-settle snapshots have identical trace offsets
+and read counters. Target writes, unmap/discard, and failed reads stayed
+zero. The single target Flush was already present at the pre-scan baseline
+and is not attributed to verification. After QEMU exit and exclusive
+release, `DM35CLOSE01.raw` still hashes to pristine
+`8a9450cbd33723c613d88d47e2177e751c0af7929de68d903feac2660bbc39d7`.
+Screenshots and counters are in `runs/D-close-20261012/`; the serial log
+contains the `close-request` and `close-result=accepted` records.
+
+### E — removal/replacement not run; QEMU and fixture cleanup verified
+
+After D cleanup, one foreign QEMU was observed: PID `15760`, parent `31224`,
+from `D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT`, run
+`c172-live-window-resize/production-acceptance/ordinary-boots/ordinary-run-20261013-023649-23bfb252/ordinary-boot-02`,
+using TCG `thread=single` and QMP port `53265`. It was not contacted,
+paused, terminated, or controlled. A later read-only census at 19:44:41 local
+reported zero QEMU processes, so the lane was available for a disposable E
+attempt.
+
+Two owned attempts used `DM35REMOVE01` on QMP port `61356` (PIDs `31368` and
+`32544`). In both, paced input did not reliably activate the Disk Manager
+row from Start Menu; one incidental launch opened Clock and another opened
+Navigator. No surface-verification job started, no `device_del` was issued,
+and `DM35REPL01` was never attached. The retry's final target counters are
+56 reads / 47,104 bytes, zero writes, zero unmap/discard, zero failed reads,
+and one initialization Flush. Both fixture files were exclusively reopened
+after QEMU exited, QMP port `61356` was closed, the process census was zero,
+and both `DM35REMOVE01.raw` and `DM35REPL01.raw` still hash to
+`8a9450cbd33723c613d88d47e2177e751c0af7929de68d903feac2660bbc39d7`. Exact
+attempt manifests, screenshots, QMP snapshots, and post-exit hashes are in
+`runs/E-removal-replacement-20261012/` and
+`runs/E-removal-replacement-retry-20261012/`. No production defect was
+demonstrated.
+
+### Remaining gates and decision
+
+E removal/replacement isolation is unqualified. F has no guest read-error
+injection result; retain the three production-linked host failure tests
+listed above and the candidate QEMU `blkdebug` approach as host/candidate
+evidence only. G has no guest read-only-admission result; retain the named
+production-linked read-only host tests above. The accepted host engine 48/48,
+GUI 34/34, storage 1,192/1,192, USB 7/7, GPT 1/1, DM30 fixture 1/1, widget
+activation, and AMD64 / `build.bat` / UEFI x64 Release build evidence remain
+source-matched and were not rerun because production source did not change.
+The known unrelated `build.ps1 -Arch amd64` PacMan link failure also remains
+unchanged.
+
+This continuation is **Outcome B — evidence incomplete**. A and B pass; C
+passes through the dedicated Stop widget; D demonstrates safe Close settlement
+but its launch method does not meet the ordinary Start Menu requirement; E
+did not reach a scan; and F/G remain guest-unqualified. `.phase` stays
+`last_completed=DM34`, `next_expected=DM35`; no DM36 work began. The next
+continuation should resolve the ordinary Start Menu input path on a fresh
+guest, then complete E, G, and safe F fault injection. Requalify D's launch
+path because this run used the shell fallback. No production source changes
+or new regression/build runs are indicated by this evidence.
