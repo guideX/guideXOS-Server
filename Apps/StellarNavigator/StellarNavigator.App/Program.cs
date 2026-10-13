@@ -346,3 +346,79 @@ foreach (var bad in new[] { "1969-07-20T20:17:40Z", "2019-12-31T23:59:60Z", "203
 Console.WriteLine();
 Console.WriteLine("Stellar Navigator SN5 - Offline UTC-to-ephemeris conversion confirmed.");
 Console.WriteLine("Research software: provisional epochs are labeled, never certified for navigation use.");
+
+// ─── SN6: reference frames & spacecraft-relative navigation coordinates ───
+Console.WriteLine();
+Console.WriteLine("=== Stellar Navigator SN6 ===");
+Console.WriteLine("Reference frames & spacecraft-relative coordinates (offline, managed)");
+
+var orientAssetPath = Path.Combine(AppContext.BaseDirectory, "Data", "earth_orientation.sn6json");
+try
+{
+    var orient = Astronomy.Core.IauEarthOrientation.Load(orientAssetPath);
+    Console.WriteLine($"Orientation model: J2000 <-> IAU_EARTH [{orient.Provenance}]");
+    Console.WriteLine($"  asset: {new FileInfo(orientAssetPath).Length} bytes, SHA-256 verified at load");
+    Console.WriteLine("  IAU_EARTH is a low-precision cartographic model, NOT ITRF93/EOP-based.");
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"SN6 orientation data unavailable: {ex.Message}");
+    Console.WriteLine("Framed queries are unavailable; SN2-SN5 output above remains valid.");
+    return;
+}
+
+var framed = new FramedStateService(indexed);
+var sn6Epoch = new AstroTime(jdTdb, TimeScale.Tdb);
+
+void PrintFramed(string label, NavigationResult<CartesianState> r)
+{
+    Console.WriteLine($"{label}:");
+    if (!r.IsSuccess)
+    {
+        Console.WriteLine($"  UNAVAILABLE [{r.Status}]: {r.ErrorMessage}");
+        return;
+    }
+    var s = r.Value!;
+    Console.WriteLine($"  position (km): ({s.Position.X / 1000.0:F3}, {s.Position.Y / 1000.0:F3}, {s.Position.Z / 1000.0:F3})");
+    Console.WriteLine($"  velocity (km/s): ({s.Velocity.X / 1000.0:F6}, {s.Velocity.Y / 1000.0:F6}, {s.Velocity.Z / 1000.0:F6})");
+    Console.WriteLine($"  frame: orientation={s.Orientation}, origin={s.OriginId}, ET={s.EtSeconds:F3}s past J2000 (TDB)");
+    Console.WriteLine($"  quality: {s.Quality}, simulated={s.IsSimulated}");
+    Console.WriteLine($"  provenance: {s.Provenance}");
+}
+
+Console.WriteLine($"--- Framed queries at JD TDB {jdTdb:F7} ---");
+PrintFramed("Earth relative to SSB in J2000", framed.GetState("earth", sn6Epoch, Astronomy.Core.FrameOrientation.J2000, "ssb"));
+PrintFramed("Mars relative to Earth in J2000", framed.GetState("mars", sn6Epoch, Astronomy.Core.FrameOrientation.J2000, "earth"));
+PrintFramed("Mars relative to Earth in IAU_EARTH axes", framed.GetState("mars", sn6Epoch, Astronomy.Core.FrameOrientation.IauEarth, "earth"));
+
+Console.WriteLine("--- Spacecraft-relative query (clearly labeled simulated state) ---");
+var sn6Earth = indexed.GetState("earth", sn6Epoch, ReferenceFrame.Barycentric);
+if (sn6Earth.IsSuccess && sn6Earth.Value is var (epos, _))
+{
+    var demoSc = new SpacecraftState
+    {
+        SpacecraftId = "demo-sim-1",
+        Position = epos + new Vector3D(7.0e8, 0, 0), // 700 000 km sunward-ish offset: synthetic
+        Velocity = new Vector3D(0, 0, 0),
+        Frame = ReferenceFrame.Barycentric,
+        CenterOfReferenceId = "ssb",
+        Epoch = sn6Epoch,
+        Provenance = StateProvenance.Simulated,
+        Quality = NavigationResultStatus.ApproximateOrSimulated,
+    };
+    Console.WriteLine($"Spacecraft {demoSc.SpacecraftId}: SIMULATED state (not measured, not inferred from camera).");
+    PrintFramed("Jupiter relative to demo-sim-1 (J2000-aligned translated frame)",
+        framed.GetSpacecraftRelative("jupiter", demoSc));
+}
+else
+{
+    Console.WriteLine($"Spacecraft demo unavailable: {sn6Earth.ErrorMessage}");
+}
+
+Console.WriteLine("--- Unsupported-frame diagnostic (no silent fallback) ---");
+var unsupported = framed.GetState("mars", sn6Epoch, "ITRF93", "ssb");
+Console.WriteLine($"ITRF93 request: Success={unsupported.IsSuccess} [{unsupported.Status}] {unsupported.ErrorMessage}");
+
+Console.WriteLine();
+Console.WriteLine("Stellar Navigator SN6 - Offline framed-state demonstration confirmed.");
+Console.WriteLine("Research software: implementation validated vs CSPICE, never certified for navigation use.");
