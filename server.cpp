@@ -5146,6 +5146,55 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js74AfterClick, 3200) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js75FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js75.html";
+    const bool js75Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js75FixtureUrl);
+    const std::string js75InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS75 collection item fixture passes on the hosted production server",
+        js75Loaded && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js75FixtureUrl &&
+        contains(js75InitialText, "Navigator JavaScript JS75") &&
+        contains(js75InitialText, "JS75:initial:assertions=") &&
+        contains(js75InitialText, ":failures=0:malformed=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js75Loaded) + ",text=" +
+        summarizeText(js75InitialText, 3200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS75 callable item conversion, null, identity, scope, and live semantics pass",
+        js75Loaded && contains(js75InitialText,
+            "JS75:initial:assertions=") &&
+        contains(js75InitialText, ":failures=0:malformed=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "fixture checks bracket undefined versus item null, numeric Web IDL conversion, canonical identity, retained reads, scoped queries, filtered positional mutation, attributes, checked state, and focus state");
+    const bool js75Click = gxos::apps::Navigator::SmokeClickFormControlById(
+        "event-a");
+    const std::string js75AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS75 nested Event item reads preserve metadata and live results",
+        js75Click && contains(js75AfterClick,
+            "JS75:event=true:nested=true:metadata=true:depth=3:failures=0") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js75Click) + ",text=" +
+        summarizeText(js75AfterClick, 3200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const std::string js75MissingFixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js75-missing.html";
+    const bool js75MissingLoaded =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(js75MissingFixtureUrl);
+    const std::string js75MissingText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string js75MissingError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS75 omitted item argument reports TypeError in the hosted runtime",
+        js75MissingLoaded && contains(js75MissingText,
+            "JS75:missing:calling") &&
+        contains(js75MissingError, "TypeError"),
+        std::string("loaded=") + yesNo(js75MissingLoaded) + ",text=" +
+        summarizeText(js75MissingText, 800) + ",error=" + js75MissingError);
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

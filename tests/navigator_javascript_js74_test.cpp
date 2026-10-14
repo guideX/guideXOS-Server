@@ -123,14 +123,23 @@ std::string nestedEventSetup(std::size_t depth)
             std::to_string(index) + ")');";
         source += "var before" + std::to_string(index) + "=rows" +
             std::to_string(index) + ".length===1&&rows" +
+#if defined(GXOS_JS75_STACK_PROBE)
+            std::to_string(index) + ".item(0)===item" +
+            std::to_string(index) + ";";
+#else
             std::to_string(index) + "[0]===item" + std::to_string(index) + ";";
+#endif
         if (index + 1u < depth) {
             source += "button" + std::to_string(index + 1u) + ".click();";
         }
         source += "item" + std::to_string(index) +
             ".removeAttribute('class');var after" + std::to_string(index) +
             "=rows" + std::to_string(index) + ".length===0&&rows" +
+#if defined(GXOS_JS75_STACK_PROBE)
+            std::to_string(index) + ".item(0)===null;";
+#else
             std::to_string(index) + "[0]===undefined;";
+#endif
         source += "var metadata" + std::to_string(index) + "=event" +
             std::to_string(index) + ".target===button" +
             std::to_string(index) + "&&event" + std::to_string(index) +
@@ -268,6 +277,10 @@ bool runStackWorkloads(StackProbeResult& result)
         "var ok=one.length===510;") && passed;
     passed = measureScript(result, harness, "retained-index-one-slot",
         "var ok=one[509].id==='s1018';") && passed;
+#if defined(GXOS_JS75_STACK_PROBE)
+    passed = measureScript(result, harness, "retained-item-one-slot",
+        "var ok=one.item(509).id==='s1018';") && passed;
+#endif
     passed = measureScript(result, harness, "retained-length-four-slots",
         "var ok=four.length===4;") && passed;
     passed = measureScript(result, harness, "retained-length-eight-slots",
@@ -604,7 +617,10 @@ void runJs74Benchmarks()
 
 } // namespace
 
-int main(int argc, char** argv)
+#ifndef GXOS_JS74_TEST_MAIN
+#define GXOS_JS74_TEST_MAIN main
+#endif
+int GXOS_JS74_TEST_MAIN(int argc, char** argv)
 {
     using namespace gxos::javascript;
     static_assert(sizeof(NavigatorScriptSelectorDescriptor) == 1918u,

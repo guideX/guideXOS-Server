@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS75</title></head>
+<body>
+<h1>Navigator JavaScript JS75</h1>
+<pre id="result">JS75:pending</pre>
+<section id="series">
+  <article id="a" class="row selected" data-live="yes">A</article>
+  <article id="b" class="row">B</article>
+  <article id="c" class="row selected">C</article>
+  <article id="d" class="row selected">D</article>
+</section>
+<section id="left-root" class="scope-root">
+  <i id="left-a" class="scoped">Left A</i>
+  <i id="left-b" class="scoped">Left B</i>
+</section>
+<section id="right-root" class="scope-root">
+  <i id="right-a" class="scoped">Right A</i>
+</section>
+<input id="check-a" type="checkbox">
+<input id="radio-a" type="radio" name="choice" checked>
+<input id="radio-b" type="radio" name="choice">
+<input id="focus-a" type="text">
+<button id="disabled-a" type="button">Disabled state</button>
+<section id="root-a">
+  <li id="item-a" class="pick-a">A</li><li id="other-a">Other A</li>
+  <button id="event-a" type="button">Run nested A</button>
+</section>
+<section id="root-b">
+  <li id="item-b" class="pick-b">B</li><li id="other-b">Other B</li>
+  <button id="event-b" type="button">Run nested B</button>
+</section>
+<section id="root-c">
+  <li id="item-c" class="pick-c">C</li><li id="other-c">Other C</li>
+  <button id="event-c" type="button">Run nested C</button>
+</section>
+<script>
+var assertions = 0;
+var failures = 0;
+var failureAt = 0;
+function verify(condition) {
+  assertions++;
+  if (!condition) {
+    failures++;
+    if (failureAt === 0) failureAt = assertions;
+  }
+}
+
+var rows = document.querySelectorAll('.row');
+var a = document.getElementById('a');
+var b = document.getElementById('b');
+var c = document.getElementById('c');
+var d = document.getElementById('d');
+var savedItem = rows.item;
+verify(rows.item === rows.item && savedItem === rows.item);
+verify(rows.length === 4 && rows.item(0) === a && rows.item(3) === d);
+verify(rows.item(0) === rows[0] && rows.item(1) === rows[1]);
+verify(rows.item(2) === rows[2] && rows.item(3) === rows[3]);
+verify(rows.item(0) === document.querySelector('.row'));
+verify(rows.item(4) === null && rows.item(9999) === null);
+verify(rows[4] === undefined);
+verify(rows.item(1.9) === b && rows.item(-1) === null);
+verify(rows.item(-0) === a && rows.item(0 / 0) === a);
+verify(rows.item(1 / 0) === a && rows.item('2') === c);
+verify(rows.item(null) === a && rows.item(undefined) === a);
+verify(rows.item('not-a-number') === a && rows.item(true) === b);
+verify(rows.item(4294967296) === a);
+verify(rows.item(4294967297) === b);
+verify(rows.item(4294967299) === d);
+verify(rows.item(-4294967296) === a);
+verify(rows.item(4294967300) === null);
+verify(rows.item(2, 99) === c);
+var empty = document.querySelectorAll('.missing');
+var one = document.querySelectorAll('#d');
+verify(empty.length === 0 && empty.item(0) === null);
+verify(one.length === 1 && one.item(0) === d && one.item(1) === null);
+
+var leftRoot = document.getElementById('left-root');
+var rightRoot = document.getElementById('right-root');
+var left = leftRoot.querySelectorAll('.scoped');
+var right = rightRoot.querySelectorAll('.scoped');
+verify(left.item(0).id === 'left-a' && right.item(0).id === 'right-a');
+verify(left.item(1).id === 'left-b' && left.item(0).id === 'left-a');
+verify(leftRoot.querySelectorAll('.scope-root').length === 0);
+
+var filtered = document.querySelectorAll(
+  '.row:nth-child(odd of .selected)');
+verify(filtered.length === 2 && filtered.item(0) === a &&
+  filtered.item(1) === d);
+b.setAttribute('class', 'row selected');
+verify(filtered.length === 2 && filtered.item(0) === a &&
+  filtered.item(1) === c);
+a.removeAttribute('class');
+verify(filtered.item(0) === b && filtered.item(1) === d);
+verify(rows.length === 3 && rows.item(0) === b);
+a.setAttribute('class', 'row selected');
+verify(filtered.item(0) === a && filtered.item(1) === c);
+var liveAttribute = document.querySelectorAll('[data-live]');
+verify(liveAttribute.length === 1 && liveAttribute.item(0) === a);
+b.setAttribute('data-live', 'yes');
+verify(liveAttribute.length === 2 && liveAttribute.item(1) === b);
+
+var checked = document.querySelectorAll('#check-a:checked');
+var checkA = document.getElementById('check-a');
+checkA.checked = true;
+verify(checked.length === 1 && checked.item(0) === checkA);
+checkA.checked = false;
+verify(checked.length === 0 && checked.item(0) === null);
+var radioA = document.getElementById('radio-a');
+var radioB = document.getElementById('radio-b');
+var checkedRadios = document.querySelectorAll(':checked');
+radioB.checked = true;
+verify(!radioA.checked && radioB.checked);
+verify(checkedRadios.item(0) === radioB);
+var focusA = document.getElementById('focus-a');
+var focused = document.querySelectorAll(':focus');
+focusA.focus();
+verify(focused.length === 1 && focused.item(0) === focusA);
+focusA.blur();
+
+document.getElementById('result').textContent =
+  'JS75:initial:assertions=' + assertions + ':failures=' + failures +
+  ':malformed=true';
+
+var eventA = document.getElementById('event-a');
+var eventB = document.getElementById('event-b');
+var eventC = document.getElementById('event-c');
+var rootA = document.getElementById('root-a');
+var rootB = document.getElementById('root-b');
+var rootC = document.getElementById('root-c');
+var itemA = document.getElementById('item-a');
+var itemB = document.getElementById('item-b');
+var itemC = document.getElementById('item-c');
+var resultElement = document.getElementById('result');
+var outerEventValue;
+var middleEventValue;
+var outerResult = false;
+var middleResult = false;
+var innerResult = false;
+var metadataResult = false;
+eventA.addEventListener('click', function(event) {
+  outerEventValue = event;
+  var values = rootA.querySelectorAll(':scope > .pick-a');
+  var before = values.item(0) === itemA;
+  event.preventDefault();
+  eventB.click();
+  itemA.removeAttribute('class');
+  var after = values.length === 0 && values.item(0) === null &&
+    values[0] === undefined;
+  var metadata = event.target === eventA &&
+    event.currentTarget === eventA && event.eventPhase === 2 &&
+    event.defaultPrevented;
+  outerResult = before && after && metadata;
+  metadataResult = metadata && middleMetadata && innerMetadata;
+  resultElement.textContent = 'JS75:event=' + outerResult + ':nested=' +
+    innerResult + ':metadata=' + metadataResult + ':depth=3:failures=' +
+    failures;
+});
+var middleMetadata = false;
+eventB.addEventListener('click', function(event) {
+  middleEventValue = event;
+  var values = rootB.querySelectorAll(':scope > .pick-b');
+  var before = values.item(0) === itemB;
+  eventC.click();
+  itemB.removeAttribute('class');
+  var after = values.length === 0 && values.item(0) === null;
+  var metadata = event.target === eventB &&
+    event.currentTarget === eventB && event.eventPhase === 2 &&
+    !event.defaultPrevented && event !== outerEventValue;
+  middleResult = before && after;
+  middleMetadata = metadata;
+});
+var innerMetadata = false;
+eventC.addEventListener('click', function(event) {
+  var values = rootC.querySelectorAll(':scope > .pick-c');
+  var before = values.item(0) === itemC;
+  itemC.removeAttribute('class');
+  var after = values.length === 0 && values.item(0) === null;
+  var distinct = event !== outerEventValue && event !== middleEventValue;
+  innerMetadata = event.target === eventC &&
+    event.currentTarget === eventC && event.eventPhase === 2 &&
+    !event.defaultPrevented && distinct;
+  innerResult = before && after;
+});
+</script>
+</body>
+</html>

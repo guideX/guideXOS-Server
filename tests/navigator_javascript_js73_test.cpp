@@ -17,6 +17,15 @@ namespace gxos::javascript {
 struct NavigatorScriptRelativeSelectorTestAccess {
     using Collection = NavigatorScriptHostAdapter::SelectorCollectionRecord;
 
+    static std::size_t activeCollectionCount(
+        const NavigatorScriptHostAdapter& adapter)
+    {
+        std::size_t count = 0u;
+        for (const Collection& record : adapter.selectorCollections_)
+            if (record.active) ++count;
+        return count;
+    }
+
     static const Collection* collectionFor(
         const NavigatorScriptHostAdapter& adapter,
         const std::string& selector)

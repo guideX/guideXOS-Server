@@ -44,6 +44,7 @@ constexpr std::uint32_t kNavigatorGetAttributeMethod = 16u;
 constexpr std::uint32_t kNavigatorHasAttributeMethod = 17u;
 constexpr std::uint32_t kNavigatorSetAttributeMethod = 18u;
 constexpr std::uint32_t kNavigatorRemoveAttributeMethod = 19u;
+constexpr std::uint32_t kNavigatorSelectorCollectionItemMethod = 20u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;
@@ -503,6 +504,11 @@ private:
         NavigatorScriptSelectorDescriptor selector;
     };
 
+    struct SelectorCollectionLookup {
+        bool found = false;
+        HostInstanceId serial = 0u;
+    };
+
     static constexpr std::size_t kFilteredNthCacheSlots =
         kNavigatorScriptMaxSelectorListMembers * 2u;
     struct FilteredNthQueryScratch {
@@ -830,6 +836,8 @@ private:
         ) const;
     bool selectorMatchAt(const SelectorCollectionRecord& record,
         std::size_t index, HostInstanceId& serial) const;
+    SelectorCollectionLookup selectorCollectionLookup(
+        const SelectorCollectionRecord& record, std::size_t index) const;
     std::size_t selectorMatchCountInternal(
         const SelectorCollectionRecord& record,
         FilteredNthQueryScratch* filteredNthScratch) const;

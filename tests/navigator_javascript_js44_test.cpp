@@ -298,7 +298,8 @@ var independent = all.length === 5 && actions.length === 6 &&
     fields.length === 1 && all !== actions && all[0] === panel;
 var stable = all === document.getElementsByClassName("primary action") &&
     fields === panel.getElementsByClassName("required field");
-var indexedMiss = all[999] === undefined && all.item === undefined &&
+var indexedMiss = all[999] === undefined && all.item !== undefined &&
+    all.item(0) === all[0] && all.item(999) === null &&
     all.namedItem === undefined && all["save"] === undefined;
 )JS");
     expect(setup.succeeded(), "collections: setup");
@@ -307,7 +308,7 @@ var indexedMiss = all[999] === undefined && all.item === undefined &&
     expectBoolean(harness, "stable", true,
         "collections: normalized queries reuse stable descriptors");
     expectBoolean(harness, "indexedMiss", true,
-        "collections: indexed miss and unsupported collection APIs");
+        "collections: bracket miss and shared item result semantics");
     expectError(harness.execute(
             "all[0] = document.querySelector(\"#outside\");"),
         RuntimeErrorCode::HostPropertyReadOnly,

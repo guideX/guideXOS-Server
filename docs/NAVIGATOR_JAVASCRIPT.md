@@ -9198,3 +9198,186 @@ Windows hosted/native qualification does not establish a constrained-runtime
 stack budget. A follow-up should measure the target's real thread reserve and
 repeat the maximum selector and Event inputs there before making a
 bare-metal stack-safety claim.
+
+## JS75 retained collection `item(index)` and indexed-access consistency
+
+JS75 adds a callable `item(index)` method to the existing retained
+`querySelectorAll()` collection. Both document and Element-scoped results use
+the same method and collection record. The operation accepts zero-based
+indices. A found index returns the existing canonical Element host handle;
+an absent index returns JavaScript `null`. Numeric bracket reads keep their
+prior behavior and return `undefined` when absent. `length` remains live on
+each read, and item and bracket reads re-evaluate the retained selector against
+current document state. These Navigator collections are live-on-read; they are
+not browser-style static `NodeList` snapshots.
+
+The existing `getElementsByTagName()` and `getElementsByClassName()` adapters
+reuse the same retained collection object when scope and selector descriptors
+match `querySelectorAll()`. Those aliases therefore expose the same `item()`
+method while preserving their existing strict identity and registry-slot reuse.
+JS42 now checks that shared surface, canonical Element results, `null` misses,
+and the unchanged bracket `undefined` miss.
+
+The native method is returned through the established receiver-aware host
+method mechanism. Its runtime method value is shared across collection
+receivers, while invocation still uses and validates the actual receiver. A
+detached method call fails with `InvalidReceiver`; an Element or unrelated
+object cannot redirect a method call to another collection. Repeated reads do
+not register a collection or copy its descriptor. No iterator, `forEach()`,
+snapshot, or persistent result cache is added. This JavaScript subset does not
+implement the `typeof` operator or `Function.prototype.call`/`apply`, so method
+presence and invocation are verified through direct property access, repeated
+method identity, and successful calls.
+
+The `SelectorCollectionLookup` result contains a found flag and serial. The
+numeric property path and `item()` both call this shared adapter helper, which
+delegates to the existing bounded `selectorMatchAt()` traversal. The helper
+does not parse a selector or implement a second matcher. The existing path
+retains ordering, de-duplication, strict scoped descendant rules, generation
+validation, structural bounds, live mutation visibility, and JS71–JS74
+filtered positional optimizations. Both paths create the canonical Element
+handle from the same generation and serial.
+
+### `item()` argument conversion
+
+One supplied primitive argument is converted by the runtime's existing
+primitive number parser. Numbers and booleans convert to numbers; `null`
+converts to zero; explicitly supplied `undefined` and invalid numeric strings
+convert to `NaN`, which becomes zero under Web IDL unsigned-long conversion.
+The supported numeric string grammar is the runtime's existing bounded parser
+subset. The resulting number is truncated toward zero, reduced modulo 2^32,
+and only then cast to an unsigned 32-bit index. Non-finite values and either
+zero sign produce index zero. This avoids out-of-range floating-to-integer
+casts and does not clamp or wrap a large index into a valid collection slot.
+Extra arguments are ignored after the required first argument.
+
+Calling `item()` with no argument reports `RuntimeErrorCode::TypeError` and
+stops that script execution. The runtime has no catchable JavaScript error
+objects or `try`/`catch`, so the TypeError classification is observable through
+the host runtime result and smoke diagnostic, not through JavaScript exception
+handling. ToPrimitive for object, function, and host-object arguments is not
+implemented by this runtime; those arguments fail closed with
+`HostInvalidValue`. Those limitations are not claimed as full Web IDL
+conversion conformance.
+
+### Live, scoped, and reentrant behavior
+
+The JS75 fixture checks first, middle, last, one-past-end, large, empty, and
+single-result indices; item/bracket `null` versus `undefined`; canonical
+identity with both bracket access and `querySelector()`; ordinary numeric and
+primitive conversions; separate Element scopes; filtered positional selectors;
+class and supported attribute mutations; checked state and radio exclusivity;
+and focus changes. The retained collections are read again after each state
+change. The nested Event fixture reads scoped collections through `item()` at
+three levels, mutates each matching class, and checks the event target,
+currentTarget, phase, and default-prevented state as callbacks unwind.
+
+Generation replacement invalidates an old collection before a method can
+reuse its structural serial in the new document. A new collection reads the
+replacement document normally. The method uses the established collection
+capacity and selector limits and introduces no per-collection storage. The
+descriptor remains 1,918 bytes, each collection record 1,936 bytes, and the
+128-record registry 247,808 bytes. No selector scratch escapes the current
+lookup call, so Event reentrancy keeps invocation-local scratch ownership.
+
+### JS75 qualification
+
+The focused JS75 native suite inherits JS73's collection, scratch, and
+generation regressions and adds tests for native method invocation, argument
+conversion, missing arguments, receiver validation, replacement generations,
+hosted fixture integrity, and indexed-read timing. Strict compilation uses
+`-Wall -Wextra -Werror -pedantic`. Production `-O2 -fstack-usage` reports
+the added method dispatch and the same shared indexed lookup frames. These
+static frames do not establish whole-chain or bare-metal stack safety.
+
+The JS75 hosted fixture is `navigator-smoke/javascript-js75.html`; it uses the
+existing aggregate runner and visible buttons for its nested Event checks. A
+small negative fixture verifies the missing-argument TypeError because this
+runtime cannot catch JavaScript exceptions. The inline script keeps literal
+`<` out of its source to preserve the hosted HTML-subset script integrity
+behavior.
+
+### JS75 final qualification closeout
+
+The duplicate/stale check started on branch `NAVIGATOR_JAVASCRIPT_SUPPORT`,
+at `9c6075c65fedd38dc0147f0be72cff66b0fdffd0` (`navigator: qualify JS74
+selector stack and scratch safety`). The live local tracking refs showed
+0 ahead / 0 behind at task start; the pasted prompt's reported 2-ahead value
+was stale. The tracked worktree was clean, no JS75 implementation was already
+present, and `.phase` was absent and left absent. The preflight ignored-file
+manifest contained 1,349 files totaling 89,350,840 bytes. Exact backups of the
+executable, four desktop settings, and 42 pre-existing generated fixtures were
+saved outside the repository before builds and hosted runs.
+
+The full JavaScript runner passed **77/77 lanes**. The accepted JS74 matrix
+reported 13,321 assertions; JS75 adds 61 and the compatibility expectation
+updates preserve their assertion counts, for **13,382/13,382 reported
+assertions**. The final continuation itself passed 35/35 lanes and reported
+13,199/13,199 assertions across 34 lanes. JS42, JS43, and JS44 were rerun
+separately after the shared collection surface was updated; their results were
+235/235, 277/277, and 183/183. JS45 and JS46 passed 184/184 and 220/220.
+Focused regressions passed: JS73 77/77 and JS74 25/25. JS75 passed 61/61 and
+strict compilation with `-Wall -Wextra -Werror -pedantic`.
+
+Five-repetition median timings in microseconds (bracket → `item()`):
+
+| Workload | Bracket | `item()` |
+|---|---:|---:|
+| First index | 24 | 27 |
+| Index 255 of 511 | 887 | 917 |
+| Index 510 of 511 | 4,058 | 4,402 |
+| One past end (511) | 1,941 | 2,023 |
+| Filtered index 255 | 1,061 | 1,076 |
+| Sixteen sequential reads | 50 | 50 |
+| Many parents, index 127 | 886 | 870 |
+| Nested Event depth 3 | 29 | 28 |
+
+The additional cost is the host method dispatch; both accesses use the same
+indexed traversal and keep the existing targeted and filtered lookup paths.
+The JS73 indexed counter workload remained at 8,192 structural inspections,
+4,092 filter evaluations, 4 rank builds, 12 parent resolutions, and 2,564
+rank lookups for four reads. It still builds one invocation-local rank set per
+read rather than restoring quadratic repeated sibling matching. Timings are
+hosted microbenchmarks and vary between runs.
+
+The JS75 standalone Windows stack probe observed 332,465 B at nested Event
+depth 16, with 335,872 B committed from a 1,048,576 B reserve and 712,704 B
+headroom. This is 3,472 B more observed watermark than the JS74 baseline and
+remains within the hosted thread reserve. `callInternal` grew from 2,224 B to
+2,240 B static frame usage; the shared lookup adapter is 80 B,
+`selectorMatchAtInternal` is 192 B, and the eight-slot filtered frame remains
+18,672 B. Descriptor, collection-record, and 128-record registry sizes stayed
+at 1,918 B, 1,936 B, and 247,808 B. Invocation-local scratch remains bounded
+at 4,232 / 10,376 / 18,568 B for one / four / eight active rank slots. These
+are hosted Windows measurements, not bare-metal stack qualification.
+
+`build.bat` succeeded. The fresh production executable was
+`D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe`, 8,534,462
+bytes, SHA-256
+`3187A722DFE27EA7CF9F7D7568863A63E6547ABC4D16A4819B5FC39D5ABE1D09`. The
+final hosted process used that exact path and hash (PID 31476). All four JS75
+hosted checks passed: fixture results, callable conversion/null/identity/live
+semantics, nested Event reads, and omitted-argument TypeError. The run is
+recorded in the archived app log
+`C:\Users\guideX\AppData\Local\Temp\guidex-js75-evidence-20261013-1930\hosted-log-archive\navigator-hosted-smoke-20261013-195824.log`.
+
+The final hosted aggregate passed 654/661 checks. Its seven failures were the
+known CSS baseline: CSS 3C, 3G, 6A, three CSS 6B checks, and 6C. The exact
+backed-up pre-JS75 executable reproduced those same seven CSS failures. One
+early aggregate attempt on the fresh build also had 13 transient JS9/JS10
+listener failures; repeated fresh-build runs passed those checks and returned
+to only the seven CSS failures. No CSS source was changed.
+
+After qualification, the executable, desktop settings, and all 42 original
+generated fixtures were restored byte-for-byte. All 30 logs from the five
+JS75 hosted attempts were archived outside the repository. Comparing the
+final ignored-file manifest with the preflight manifest yielded **0 changed,
+0 missing, 0 extra**.
+No kernel or QEMU run was performed; the requested hosted/native qualification
+does not establish bare-metal stack safety.
+
+The result is **Outcome A — JS75 collection item(index) support fully
+qualified**. This record is committed locally as
+`navigator: add JS75 collection item method`; it was not pushed. The next
+useful phase is JS76 focused on any separately requested collection behavior;
+JS75 itself adds no iterator or broader collection API.

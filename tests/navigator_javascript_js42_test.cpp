@@ -130,7 +130,8 @@ var tagEmpty = document.getElementsByTagName("does-not-exist");
 var tagEmptyResult = tagEmpty !== null && tagEmpty.length === 0 &&
     tagEmpty[999] === undefined;
 var tagMissAndSurface = tags[999] === undefined &&
-    tags.item === undefined && tags.namedItem === undefined &&
+    tags.item !== undefined && tags.item(1) === tags[1] &&
+    tags.item(999) === null && tags.namedItem === undefined &&
     tags["save"] === undefined;
 var repeatedTagIdentity = tags === document.getElementsByTagName("button");
 )JS");
@@ -145,7 +146,7 @@ var repeatedTagIdentity = tags === document.getElementsByTagName("button");
     expectBoolean(harness, "tagEmptyResult", true,
         "document tags: no matches return an empty collection");
     expectBoolean(harness, "tagMissAndSurface", true,
-        "document tags: indexed miss and bounded surface");
+        "document tags: indexed miss and shared item surface");
     expectBoolean(harness, "repeatedTagIdentity", true,
         "document tags: same descriptor reuses collection record");
     expectError(harness.execute("tags[0] = document.querySelector(\"#outside\");"),
@@ -229,7 +230,8 @@ var classEmpty = document.getElementsByClassName("missing");
 var classEmptyResult = classEmpty !== null && classEmpty.length === 0 &&
     classEmpty[50] === undefined;
 var classMissAndSurface = actions[999] === undefined &&
-    actions.item === undefined && actions.namedItem === undefined &&
+    actions.item !== undefined && actions.item(1) === actions[1] &&
+    actions.item(999) === null && actions.namedItem === undefined &&
     actions["save"] === undefined;
 var repeatedClassIdentity = actions ===
     document.getElementsByClassName("action");
@@ -246,7 +248,7 @@ var repeatedClassIdentity = actions ===
     expectBoolean(harness, "classEmptyResult", true,
         "document classes: empty no-match collection");
     expectBoolean(harness, "classMissAndSurface", true,
-        "document classes: indexed miss and bounded surface");
+        "document classes: indexed miss and shared item surface");
     expectBoolean(harness, "repeatedClassIdentity", true,
         "document classes: same descriptor reuses collection record");
 }

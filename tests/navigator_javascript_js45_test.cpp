@@ -307,7 +307,8 @@ var independentDescriptors = first !== second && first !== relational &&
     relational.length === 2 && relationalOther.length === 2 &&
     first[0] === save && second[0] === document.querySelector("#field") &&
     relational[0] === save && relationalOther[0] === document.querySelector("#field");
-var indexedMiss = first[999] === undefined && first.item === undefined &&
+var indexedMiss = first[999] === undefined && first.item !== undefined &&
+    first.item(0) === first[0] && first.item(999) === null &&
     first.namedItem === undefined;
 )JS");
     expect(result.succeeded(), "relations/lifecycle: script");
@@ -334,7 +335,7 @@ var indexedMiss = first[999] === undefined && first.item === undefined &&
     expectBoolean(harness, "independentDescriptors", true,
         "simultaneous simple and relational collections retain independent descriptors");
     expectBoolean(harness, "indexedMiss", true,
-        "bounded selector collections retain indexed-miss behavior");
+        "bounded selector collections retain bracket and item miss behavior");
     expectError(harness.execute("first[0] = save;"),
         RuntimeErrorCode::HostPropertyReadOnly,
         "collections: indexed writes stay read-only");

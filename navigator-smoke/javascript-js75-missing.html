@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS75 missing argument</title></head>
+<body>
+<h1>Navigator JavaScript JS75 missing argument</h1>
+<pre id="result">JS75:missing:pending</pre>
+<div class="row">Row</div>
+<script>
+var rows = document.querySelectorAll('.row');
+document.getElementById('result').textContent = 'JS75:missing:calling';
+rows.item();
+document.getElementById('result').textContent = 'JS75:missing:returned';
+</script>
+</body>
+</html>

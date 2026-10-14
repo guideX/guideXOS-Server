@@ -2665,6 +2665,37 @@ bool RuntimeContext::readObjectPropertyForHost(RuntimeObjectId object,
     return readProperty(object, key, value, error, SourceLocation());
 }
 
+bool RuntimeContext::toNumberForHostArgument(const HostValue& input,
+    double& number)
+{
+    switch (input.type) {
+    case HostValueType::Undefined:
+        number = std::numeric_limits<double>::quiet_NaN();
+        return true;
+    case HostValueType::Null:
+        number = 0.0;
+        return true;
+    case HostValueType::Boolean:
+        number = input.booleanValue ? 1.0 : 0.0;
+        return true;
+    case HostValueType::Number:
+        number = input.numberValue;
+        return true;
+    case HostValueType::String:
+        if (input.stringValue.data == nullptr &&
+            input.stringValue.length != 0u) return false;
+        if (!parseNumber(input.stringValue, number))
+            number = std::numeric_limits<double>::quiet_NaN();
+        return true;
+    case HostValueType::Function:
+    case HostValueType::Object:
+    case HostValueType::HostObject:
+    case HostValueType::Method:
+        return false;
+    }
+    return false;
+}
+
 bool RuntimeContext::readProperty(RuntimeObjectId objectId,
     const std::string& key, Value& value, RuntimeErrorCode& error,
     SourceLocation location)
@@ -2835,6 +2866,8 @@ RuntimeErrorCode RuntimeContext::mapHostResult(HostResultCode code) const
         return RuntimeErrorCode::StaleHostObject;
     case HostResultCode::CallFailed:
         return RuntimeErrorCode::HostCallFailed;
+    case HostResultCode::TypeError:
+        return RuntimeErrorCode::TypeError;
     case HostResultCode::ReentryUnsupported:
         return RuntimeErrorCode::HostReentryUnsupported;
     case HostResultCode::InvalidReturn:
@@ -3708,6 +3741,7 @@ const char* runtimeErrorCodeName(RuntimeErrorCode code)
         return "ArrayIndexOutOfRange";
     case RuntimeErrorCode::InvalidPropertyKey: return "InvalidPropertyKey";
     case RuntimeErrorCode::InvalidReceiver: return "InvalidReceiver";
+    case RuntimeErrorCode::TypeError: return "TypeError";
     case RuntimeErrorCode::NativeFunctionLimitExceeded:
         return "NativeFunctionLimitExceeded";
     case RuntimeErrorCode::InvalidNativeFunction: return "InvalidNativeFunction";

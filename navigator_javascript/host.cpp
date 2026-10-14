@@ -29,6 +29,7 @@ const char* hostResultCodeName(HostResultCode code)
     case HostResultCode::InvalidObject: return "InvalidObject";
     case HostResultCode::StaleObject: return "StaleObject";
     case HostResultCode::CallFailed: return "CallFailed";
+    case HostResultCode::TypeError: return "TypeError";
     case HostResultCode::ReentryUnsupported: return "ReentryUnsupported";
     case HostResultCode::InvalidReturn: return "InvalidReturn";
     case HostResultCode::InvalidValue: return "InvalidValue";

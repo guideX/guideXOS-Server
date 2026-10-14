@@ -2202,7 +2202,8 @@ bool NavigatorScriptHostAdapter::allowsReentrantCall(
         methodId == kNavigatorGetAttributeMethod ||
         methodId == kNavigatorHasAttributeMethod ||
         methodId == kNavigatorSetAttributeMethod ||
-        methodId == kNavigatorRemoveAttributeMethod;
+        methodId == kNavigatorRemoveAttributeMethod ||
+        methodId == kNavigatorSelectorCollectionItemMethod;
 }
 
 bool NavigatorScriptHostAdapter::allowsStaleHostProperty(
@@ -6510,6 +6511,16 @@ bool NavigatorScriptHostAdapter::selectorMatchAt(
     return selectorMatchAtFiltered(record, index, serial);
 }
 
+NavigatorScriptHostAdapter::SelectorCollectionLookup
+NavigatorScriptHostAdapter::selectorCollectionLookup(
+    const SelectorCollectionRecord& record, std::size_t index) const
+{
+    SelectorCollectionLookup lookup;
+    lookup.found = selectorMatchAt(record, index, lookup.serial);
+    if (!lookup.found) lookup.serial = 0u;
+    return lookup;
+}
+
 bool NavigatorScriptHostAdapter::selectorMatchAtFiltered(
     const SelectorCollectionRecord& record, std::size_t index,
     HostInstanceId& serial) const
@@ -6942,6 +6953,11 @@ HostResult NavigatorScriptHostAdapter::getProperty(
         const SelectorCollectionRecord* record =
             selectorCollectionFor(object.instanceId);
         if (record == nullptr) return HostResult{HostResultCode::InvalidObject};
+        if (textEquals(property, "item")) {
+            result = HostValue::method(
+                kNavigatorSelectorCollectionItemMethod, true, true);
+            return HostResult();
+        }
         if (textEquals(property, "length")) {
             result = HostValue::number(static_cast<double>(
                 selectorMatchCount(*record)));
@@ -6950,13 +6966,14 @@ HostResult NavigatorScriptHostAdapter::getProperty(
         std::size_t index = 0;
         if (!parseCanonicalIndex(property, index))
             return HostResult{HostResultCode::PropertyNotFound};
-        HostInstanceId serial = 0;
-        if (!selectorMatchAt(*record, index, serial)) {
+        const SelectorCollectionLookup lookup =
+            selectorCollectionLookup(*record, index);
+        if (!lookup.found) {
             result = HostValue::undefined();
             return HostResult();
         }
         result = HostValue::fromHostObject(HostObjectReference{
-            serial, generation_, kNavigatorElementHostKind});
+            lookup.serial, generation_, kNavigatorElementHostKind});
         return HostResult();
     }
 
@@ -7717,6 +7734,39 @@ HostResult NavigatorScriptHostAdapter::callInternal(
     }
     const HostResult receiverResult = validate(*receiver);
     if (!receiverResult.succeeded()) return receiverResult;
+    if (methodId == kNavigatorSelectorCollectionItemMethod) {
+        if (receiver->kind != kNavigatorSelectorCollectionHostKind)
+            return HostResult{HostResultCode::InvalidValue};
+        if (argumentCount == 0u)
+            return HostResult{HostResultCode::TypeError};
+        if (arguments == nullptr)
+            return HostResult{HostResultCode::InvalidValue};
+
+        double number = 0.0;
+        if (!RuntimeContext::toNumberForHostArgument(arguments[0], number))
+            return HostResult{HostResultCode::InvalidValue};
+        constexpr double modulus = 4294967296.0;
+        double unsignedValue = 0.0;
+        if (std::isfinite(number) && number != 0.0) {
+            unsignedValue = std::fmod(std::trunc(number), modulus);
+            if (unsignedValue < 0.0) unsignedValue += modulus;
+        }
+        const std::uint32_t index =
+            static_cast<std::uint32_t>(unsignedValue);
+        const SelectorCollectionRecord* record =
+            selectorCollectionFor(receiver->instanceId);
+        if (record == nullptr)
+            return HostResult{HostResultCode::InvalidObject};
+        const SelectorCollectionLookup lookup = selectorCollectionLookup(
+            *record, static_cast<std::size_t>(index));
+        if (!lookup.found) {
+            result = HostValue::nullValue();
+            return HostResult();
+        }
+        result = HostValue::fromHostObject(HostObjectReference{
+            lookup.serial, generation_, kNavigatorElementHostKind});
+        return HostResult();
+    }
     if (methodId == kNavigatorGetAttributeMethod ||
         methodId == kNavigatorHasAttributeMethod) {
         if (receiver->kind != kNavigatorElementHostKind)

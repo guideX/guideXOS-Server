@@ -152,6 +152,7 @@ enum class HostResultCode : std::uint8_t {
     InvalidObject,
     StaleObject,
     CallFailed,
+    TypeError,
     ReentryUnsupported,
     InvalidReturn,
     InvalidValue,

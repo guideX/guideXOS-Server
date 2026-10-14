@@ -51,6 +51,7 @@ enum class RuntimeErrorCode : std::uint8_t {
     ArrayIndexOutOfRange,
     InvalidPropertyKey,
     InvalidReceiver,
+    TypeError,
     NativeFunctionLimitExceeded,
     InvalidNativeFunction,
     PrototypeChainExceeded,
@@ -231,6 +232,11 @@ public:
     // while validating a host call. Missing properties return Undefined.
     bool readObjectPropertyForHost(RuntimeObjectId object,
         const std::string& key, Value& value, RuntimeErrorCode& error);
+    // Primitive ToNumber conversion for Web IDL host arguments. Objects and
+    // callable values are rejected because this bounded runtime does not
+    // implement ToPrimitive for host-call coercion.
+    static bool toNumberForHostArgument(const HostValue& input,
+        double& number);
     bool readHostPropertyForTesting(RuntimeHostObjectId object,
         const std::string& key, Value& value, RuntimeErrorCode& error);
     bool writeHostPropertyForTesting(RuntimeHostObjectId object,
