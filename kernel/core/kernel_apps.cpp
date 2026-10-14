@@ -6278,6 +6278,8 @@ DiskManagerApp::DiskManagerApp()
       m_wipeBtnId(-1),
       m_wholeEraseBtnId(-1),
       m_verifyEntireDiskBtnId(-1), m_verifyPartitionBtnId(-1),
+      m_checkFat32BtnId(-1), m_previousFindingBtnId(-1),
+      m_nextFindingBtnId(-1),
       m_gptBtnId(-1), m_mbrBtnId(-1),
       m_confirmInitializeBtnId(-1), m_cancelInitializeBtnId(-1),
       m_createSizeTextBoxId(-1), m_createNameTextBoxId(-1),
@@ -6288,6 +6290,7 @@ DiskManagerApp::DiskManagerApp()
       m_dialogIsReformat(false), m_dialogIsDelete(false),
       m_dialogIsGptRepair(false), m_dialogIsWipe(false),
       m_dialogIsWholeErase(false), m_dialogIsVerification(false),
+      m_dialogIsFat32Integrity(false),
       m_closeAfterVerification(false),
       m_wipeBlockReason(disk_manager_wipe_ui::WIPE_ACTION_PARTITION_NOT_SELECTED),
       m_wholeEraseBlockReason(
@@ -6297,6 +6300,9 @@ DiskManagerApp::DiskManagerApp()
       m_createSizeEdited(false),
       m_createNameEdited(false), m_createInputFocus(0),
       m_initializeScheme(storage::DEFAULT_INITIALIZE_SCHEME),
+      m_fat32IntegrityBlockReason(
+          disk_manager_fat32_integrity_ui::ADMISSION_SELECTION_REQUIRED),
+      m_fat32FindingIndex(0),
       m_surfaceVerificationBlockReason(
           disk_manager_surface_verification_ui::ADMISSION_SELECTION_REQUIRED),
       m_mountDialogOpen(false), m_mountDialogDeviceIndex(0xFF),
@@ -6331,6 +6337,8 @@ DiskManagerApp::DiskManagerApp()
     memset(&m_surfaceVerificationTarget, 0,
            sizeof(m_surfaceVerificationTarget));
     memset(&m_surfaceVerificationJob, 0, sizeof(m_surfaceVerificationJob));
+    memset(&m_fat32IntegrityTarget, 0, sizeof(m_fat32IntegrityTarget));
+    memset(&m_fat32IntegrityJob, 0, sizeof(m_fat32IntegrityJob));
     m_wipeEligibility = {};
     memset(&m_mountDialogPartition, 0, sizeof(m_mountDialogPartition));
     m_lastStorageOperation = 0;
@@ -6368,6 +6376,10 @@ DiskManagerApp::~DiskManagerApp() {
             m_surfaceVerificationJob)) {
         storage::request_surface_verification_stop(m_surfaceVerificationJob);
         storage::step_surface_verification_job(m_surfaceVerificationJob);
+    }
+    if (disk_manager_fat32_integrity_ui::job_running(m_fat32IntegrityJob)) {
+        storage::request_fat32_integrity_stop(m_fat32IntegrityJob);
+        storage::step_fat32_integrity_job(m_fat32IntegrityJob);
     }
 }
 
@@ -6417,6 +6429,15 @@ bool DiskManagerApp::init() {
                                         "Verify Entire Disk");
     m_verifyPartitionBtnId = addButton(0, 0, 140, 28,
                                        "Verify Partition");
+    m_checkFat32BtnId = addButton(0, 0, 184, 28,
+                                  "Check FAT32 Filesystem");
+    m_previousFindingBtnId = addButton(0, 0, 92, 26, "Previous");
+    m_nextFindingBtnId = addButton(0, 0, 92, 26, "Next Finding");
+    if (!disk_manager_fat32_integrity_ui::widget_ids_match(
+            m_checkFat32BtnId, m_confirmInitializeBtnId,
+            m_cancelInitializeBtnId, m_previousFindingBtnId,
+            m_nextFindingBtnId, m_cancelInitializeBtnId))
+        serial::puts("[dm36-fat32-ui] widget-id-order-mismatch\n");
     serial::puts("[dm35-ui] stop-scan-widget-id=");
     serial_put_dec64(m_cancelInitializeBtnId);
     serial::putc('\n');
@@ -6451,11 +6472,26 @@ void DiskManagerApp::shutdown() {
         storage::request_surface_verification_stop(m_surfaceVerificationJob);
         storage::step_surface_verification_job(m_surfaceVerificationJob);
     }
+    if (disk_manager_fat32_integrity_ui::job_running(m_fat32IntegrityJob)) {
+        storage::request_fat32_integrity_stop(m_fat32IntegrityJob);
+        storage::step_fat32_integrity_job(m_fat32IntegrityJob);
+    }
     m_initializeDialogState = INITIALIZE_DIALOG_CLOSED;
     m_state = app::AppState::Terminated;
 }
 
 bool DiskManagerApp::onCloseRequested() {
+    if (!disk_manager_fat32_integrity_ui::request_stop_before_close(
+            m_fat32IntegrityJob)) {
+        m_closeAfterVerification = true;
+        strcopy(m_statusMessage,
+            "Close requested. Stopping the FAT32 check after the current read settles.",
+            sizeof(m_statusMessage));
+        m_createInputFocus = 2;
+        updateInitializeControls();
+        invalidate();
+        return false;
+    }
     if (!disk_manager_surface_verification_ui::request_stop_before_close(
             m_surfaceVerificationJob)) {
         m_closeAfterVerification = true;
@@ -6490,6 +6526,20 @@ bool DiskManagerApp::onCloseRequested() {
 }
 
 void DiskManagerApp::update() {
+    if (m_dialogIsFat32Integrity && m_initializeDialogState ==
+            INITIALIZE_DIALOG_RUNNING &&
+        disk_manager_fat32_integrity_ui::job_running(m_fat32IntegrityJob)) {
+        const storage::Fat32IntegrityState state =
+            storage::step_fat32_integrity_job(m_fat32IntegrityJob);
+        if (state != storage::FAT32_INTEGRITY_RUNNING) {
+            completeFat32IntegrityOperation();
+            if (m_closeAfterVerification) requestClose();
+            return;
+        }
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
     if (m_dialogIsVerification && m_initializeDialogState ==
             INITIALIZE_DIALOG_RUNNING &&
         disk_manager_surface_verification_ui::verification_job_running(
@@ -7092,7 +7142,7 @@ void DiskManagerApp::formatSizePrecise(uint64_t bytes, char* out,
 
 void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
     const bool compact = w < 620;
-    m_footerY = static_cast<int>(h) - (compact ? 100 : 68);
+    m_footerY = static_cast<int>(h) - 132;
     app::Widget* refresh = getWidget(m_refreshBtnId);
     app::Widget* properties = getWidget(m_propertiesBtnId);
     app::Widget* diagnostics = getWidget(m_diagnosticsBtnId);
@@ -7104,6 +7154,9 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
     app::Widget* wholeEraseAction = getWidget(m_wholeEraseBtnId);
     app::Widget* verifyDiskAction = getWidget(m_verifyEntireDiskBtnId);
     app::Widget* verifyPartitionAction = getWidget(m_verifyPartitionBtnId);
+    app::Widget* checkFat32Action = getWidget(m_checkFat32BtnId);
+    app::Widget* previousFinding = getWidget(m_previousFindingBtnId);
+    app::Widget* nextFinding = getWidget(m_nextFindingBtnId);
     app::Widget* gpt = getWidget(m_gptBtnId);
     app::Widget* mbr = getWidget(m_mbrBtnId);
     app::Widget* confirm = getWidget(m_confirmInitializeBtnId);
@@ -7115,7 +7168,8 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
     app::Widget* wipeProgress = getWidget(m_wipeProgressBarId);
     const int rowY = static_cast<int>(h) - 32;
     const int secondRowY = static_cast<int>(h) - 64;
-    const int firstRowY = static_cast<int>(h) - 96;
+    const int firstRowY = static_cast<int>(h) - 128;
+    const int fat32RowY = static_cast<int>(h) - 96;
     if (compact) {
         if (refresh) { refresh->x = 10; refresh->y = firstRowY; refresh->w = 78; }
         if (properties) { properties->x = 94; properties->y = firstRowY; properties->w = 92; }
@@ -7140,6 +7194,11 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
         if (unmountAction) { unmountAction->x = 504; unmountAction->y = rowY; unmountAction->w = 82; }
         if (deleteAction) { deleteAction->x = 592; deleteAction->y = rowY; deleteAction->w = 116; }
         if (wholeEraseAction) { wholeEraseAction->x = 580; wholeEraseAction->y = rowY; wholeEraseAction->w = 174; }
+    }
+    if (checkFat32Action) {
+        checkFat32Action->x = 10;
+        checkFat32Action->y = fat32RowY;
+        checkFat32Action->w = 184;
     }
     if (gpt) { gpt->x = 10; gpt->y = rowY; gpt->w = 140; }
     if (mbr) { mbr->x = 158; mbr->y = rowY; mbr->w = 150; }
@@ -7183,6 +7242,19 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
             ? static_cast<int>(w) - static_cast<int>(leftW) - 40 : 120;
         wipeProgress->h = 18;
     }
+    const int navY = static_cast<int>(h) - (compact ? 204 : 172);
+    if (previousFinding) {
+        previousFinding->x = static_cast<int>(leftW) + 18;
+        previousFinding->y = navY;
+        previousFinding->w = 92;
+        previousFinding->h = 26;
+    }
+    if (nextFinding) {
+        nextFinding->x = static_cast<int>(leftW) + 114;
+        nextFinding->y = navY;
+        nextFinding->w = 104;
+        nextFinding->h = 26;
+    }
 }
 
 void DiskManagerApp::updateInitializeControls() {
@@ -7201,6 +7273,9 @@ void DiskManagerApp::updateInitializeControls() {
     app::Widget* wholeEraseAction = getWidget(m_wholeEraseBtnId);
     app::Widget* verifyDiskAction = getWidget(m_verifyEntireDiskBtnId);
     app::Widget* verifyPartitionAction = getWidget(m_verifyPartitionBtnId);
+    app::Widget* checkFat32Action = getWidget(m_checkFat32BtnId);
+    app::Widget* previousFinding = getWidget(m_previousFindingBtnId);
+    app::Widget* nextFinding = getWidget(m_nextFindingBtnId);
     app::Widget* gpt = getWidget(m_gptBtnId);
     app::Widget* mbr = getWidget(m_mbrBtnId);
     app::Widget* confirm = getWidget(m_confirmInitializeBtnId);
@@ -7254,6 +7329,13 @@ void DiskManagerApp::updateInitializeControls() {
             m_surfaceVerificationJob);
     const bool verificationResult = m_dialogIsVerification &&
         m_initializeDialogState == INITIALIZE_DIALOG_VERIFY_RESULT;
+    const bool fat32Confirm = m_dialogIsFat32Integrity &&
+        m_initializeDialogState == INITIALIZE_DIALOG_FAT32_CONFIRM;
+    const bool fat32Running = m_dialogIsFat32Integrity &&
+        m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
+        disk_manager_fat32_integrity_ui::job_running(m_fat32IntegrityJob);
+    const bool fat32Result = m_dialogIsFat32Integrity &&
+        m_initializeDialogState == INITIALIZE_DIALOG_FAT32_RESULT;
     storage::WholeDiskEraseProbe wholeEraseUiProbe = {};
     bool wholeEraseSerialUnique = true;
     if (selectedDiskRow) {
@@ -7362,12 +7444,16 @@ void DiskManagerApp::updateInitializeControls() {
     bool verificationPartitionGeometryValid = false;
     bool verificationIdentityValid = false;
     bool verificationReadAvailable = false;
+    bool fat32Candidate = false;
     m_wipeEligibility = {};
     if (haveSelection && m_selectedObject == SELECTED_PARTITION &&
         m_selectedPart >= 0 && m_selectedPart < m_disks[m_selectedDisk].partCount) {
         selectedPartition = true;
         const DiskEntry& disk = m_disks[m_selectedDisk];
         const PartEntry& part = disk.parts[m_selectedPart];
+        fat32Candidate =
+            disk_manager_fat32_integrity_ui::is_supported_partition_identity(
+                part.parsed);
         const bool existingFat32 = strcmp(part.fsLabel, "FAT32") == 0;
         const bool interruptedReformat = part.reformatInterrupted ||
             strcmp(part.fsLabel, "Reformat interrupted") == 0;
@@ -7510,6 +7596,39 @@ void DiskManagerApp::updateInitializeControls() {
         m_surfaceVerificationBlockReason =
             disk_manager_surface_verification_ui::ADMISSION_SELECTION_REQUIRED;
     }
+    if (dialogClosed) {
+        if (!selectedPartition)
+            m_fat32IntegrityBlockReason =
+                disk_manager_fat32_integrity_ui::ADMISSION_SELECTION_REQUIRED;
+        else if (!fat32Candidate)
+            m_fat32IntegrityBlockReason =
+                disk_manager_fat32_integrity_ui::ADMISSION_UNSUPPORTED_PARTITION;
+        else if (!verificationIdentityValid)
+            m_fat32IntegrityBlockReason =
+                disk_manager_fat32_integrity_ui::ADMISSION_IDENTITY_INVALID;
+        else if (!verificationPartitionMapValid)
+            m_fat32IntegrityBlockReason =
+                disk_manager_fat32_integrity_ui::ADMISSION_PARTITION_TABLE_INVALID;
+        else if (!verificationPartitionGeometryValid ||
+                 !storage::fat32_format_sector_size_supported(
+                     m_disks[m_selectedDisk].capabilities.logicalSectorSize))
+            m_fat32IntegrityBlockReason =
+                disk_manager_fat32_integrity_ui::ADMISSION_GEOMETRY_INVALID;
+        else if (!verificationReadAvailable)
+            m_fat32IntegrityBlockReason =
+                disk_manager_fat32_integrity_ui::ADMISSION_READ_UNAVAILABLE;
+        else if (storage::storage_operation_active())
+            m_fat32IntegrityBlockReason =
+                disk_manager_fat32_integrity_ui::ADMISSION_OPERATION_BUSY;
+        else if (storage::query_mount_protection(
+                     m_disks[m_selectedDisk].identity).safety !=
+                 storage::DEVICE_UNMOUNTED)
+            m_fat32IntegrityBlockReason =
+                disk_manager_fat32_integrity_ui::ADMISSION_MOUNTED_TARGET;
+        else
+            m_fat32IntegrityBlockReason =
+                disk_manager_fat32_integrity_ui::ADMISSION_READY;
+    }
     if (refresh) {
         refresh->visible = dialogClosed;
         refresh->enabled = storage::disk_manager_action_enabled(
@@ -7582,6 +7701,12 @@ void DiskManagerApp::updateInitializeControls() {
                 disk_manager_surface_verification_ui::ADMISSION_READY;
         setWidgetText(m_verifyPartitionBtnId, "Verify Partition");
     }
+    if (checkFat32Action) {
+        checkFat32Action->visible = dialogClosed && selectedPartition &&
+            fat32Candidate;
+        checkFat32Action->enabled = checkFat32Action->visible;
+        setWidgetText(m_checkFat32BtnId, "Check FAT32 Filesystem");
+    }
     if (mountAction) {
         mountAction->visible = dialogClosed && showMountAction;
         mountAction->enabled = mountAvailable;
@@ -7595,7 +7720,7 @@ void DiskManagerApp::updateInitializeControls() {
     if (confirm) {
         confirm->visible = m_mountDialogOpen || confirming || createOptions ||
             formatOptions || deleteConfirm || gptRepairConfirm || wipeConfirm ||
-            wholeEraseConfirm || verificationConfirm;
+            wholeEraseConfirm || verificationConfirm || fat32Confirm;
         bool wipeSelectionMatchesRequest = false;
         if (wipeConfirm && selectedPartition) {
             const DiskEntry& disk = m_disks[m_selectedDisk];
@@ -7605,6 +7730,8 @@ void DiskManagerApp::updateInitializeControls() {
                     m_wipeRequest, disk.identity, disk.scheme, selected.parsed);
         }
         confirm->enabled = m_mountDialogOpen || verificationConfirm ||
+            (fat32Confirm && m_fat32IntegrityBlockReason ==
+                disk_manager_fat32_integrity_ui::ADMISSION_READY) ||
             (wholeEraseConfirm && selectedDiskRow && m_selectedDisk >= 0 &&
              m_selectedDisk < m_diskCount &&
              disk_manager_whole_disk_erase_ui::confirmation_can_start(
@@ -7631,6 +7758,7 @@ void DiskManagerApp::updateInitializeControls() {
         else if (wipeConfirm) confirmLabel = "Wipe Partition";
         else if (wholeEraseConfirm) confirmLabel = "Erase Entire Disk";
         else if (verificationConfirm) confirmLabel = "Start Verification";
+        else if (fat32Confirm) confirmLabel = "Start Check";
         else if (deleteConfirm) confirmLabel = "Delete Partition";
         else if (formatOptions)
             confirmLabel = m_dialogIsReformat ? "Quick Reformat" : "Format FAT32";
@@ -7662,6 +7790,11 @@ void DiskManagerApp::updateInitializeControls() {
             ? 0xFF356A48 : 0xFF505060;
         if (cancel) cancel->bgColor = m_createInputFocus == 2
             ? 0xFF34465C : 0xFF505060;
+    } else if (fat32Confirm) {
+        if (confirm) confirm->bgColor = m_createInputFocus == 3
+            ? 0xFF356A48 : 0xFF505060;
+        if (cancel) cancel->bgColor = m_createInputFocus == 2
+            ? 0xFF34465C : 0xFF505060;
     } else if (wipeRunning) {
         if (confirm) confirm->bgColor = 0xFF505060;
         if (cancel) cancel->bgColor =
@@ -7673,6 +7806,13 @@ void DiskManagerApp::updateInitializeControls() {
             disk_manager_whole_disk_erase_ui::stop_button_background(
                 m_createInputFocus == 2);
     } else if (verificationRunning) {
+        if (confirm) confirm->bgColor = 0xFF505060;
+        if (cancel) cancel->bgColor = m_createInputFocus == 2
+            ? disk_manager_surface_verification_ui::
+                stop_button_background(true)
+            : disk_manager_surface_verification_ui::
+                stop_button_background(false);
+    } else if (fat32Running) {
         if (confirm) confirm->bgColor = 0xFF505060;
         if (cancel) cancel->bgColor = m_createInputFocus == 2
             ? disk_manager_surface_verification_ui::
@@ -7731,13 +7871,17 @@ void DiskManagerApp::updateInitializeControls() {
     }
     const bool showCancel = m_mountDialogOpen || formatScanCancelable ||
         wipeRunning || wholeEraseRunning || verificationRunning ||
+        fat32Confirm || fat32Running || fat32Result ||
         (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED &&
          m_initializeDialogState != INITIALIZE_DIALOG_RUNNING);
     if (cancel) {
         cancel->visible = showCancel;
         cancel->enabled = showCancel;
         setWidgetText(m_cancelInitializeBtnId,
-            verificationRunning
+            fat32Running
+                ? (m_fat32IntegrityJob.result.stopRequested
+                    ? "Stop Requested" : "Stop Check")
+                : (verificationRunning
                 ? (m_surfaceVerificationJob.result.stopRequested
                     ? "Stop Requested" : "Stop Scan")
                 : (wholeEraseRunning
@@ -7746,8 +7890,40 @@ void DiskManagerApp::updateInitializeControls() {
                 : (wipeRunning ? "Stop Wipe" :
                    (m_initializeDialogState == INITIALIZE_DIALOG_RESULT ||
                     m_initializeDialogState == INITIALIZE_DIALOG_WHOLE_ERASE_RESULT ||
-                    verificationResult
-                        ? "Close" : "Cancel"))));
+                    verificationResult || fat32Confirm || fat32Result
+                        ? "Close" : "Cancel")))));
+    }
+    if (previousFinding) {
+        previousFinding->visible = fat32Result &&
+            m_fat32IntegrityJob.result.findingCount != 0;
+        previousFinding->enabled = previousFinding->visible &&
+            m_fat32FindingIndex > 0;
+    }
+    if (nextFinding) {
+        nextFinding->visible = fat32Result &&
+            m_fat32IntegrityJob.result.findingCount != 0;
+        nextFinding->enabled = nextFinding->visible &&
+            static_cast<uint16_t>(m_fat32FindingIndex) + 1u <
+                m_fat32IntegrityJob.result.findingCount;
+    }
+    if (fat32Result) {
+        const int findingActions[] = {m_cancelInitializeBtnId,
+            m_previousFindingBtnId, m_nextFindingBtnId};
+        const int actionCount =
+            disk_manager_surface_verification_ui::active_action_count(
+                m_window, findingActions, 3);
+        if (actionCount == 0) m_createInputFocus = 0;
+        else if (m_createInputFocus >= actionCount)
+            m_createInputFocus = actionCount - 1;
+        const int focusedId =
+            disk_manager_surface_verification_ui::active_action_widget_id(
+                m_window, findingActions, 3, m_createInputFocus);
+        if (cancel) cancel->bgColor = cancel->id == focusedId
+            ? 0xFF34465C : 0xFF505060;
+        if (previousFinding) previousFinding->bgColor =
+            previousFinding->id == focusedId ? 0xFF34465C : 0xFF505060;
+        if (nextFinding) nextFinding->bgColor =
+            nextFinding->id == focusedId ? 0xFF34465C : 0xFF505060;
     }
     if (dialogClosed) {
         const int count = activeActionCount();
@@ -7755,7 +7931,8 @@ void DiskManagerApp::updateInitializeControls() {
         else if (m_actionFocus >= count) m_actionFocus = count - 1;
         const int candidates[] = {m_refreshBtnId, m_propertiesBtnId,
             m_diagnosticsBtnId, m_initializeBtnId, m_wipeBtnId,
-            m_verifyEntireDiskBtnId, m_verifyPartitionBtnId, m_mountBtnId,
+            m_verifyEntireDiskBtnId, m_verifyPartitionBtnId, m_checkFat32BtnId,
+            m_mountBtnId,
             m_unmountBtnId, m_deleteBtnId, m_wholeEraseBtnId};
         const int focusedId = m_keyboardPane == KEYBOARD_ACTIONS
             ? activeActionWidgetIdAt(m_actionFocus) : -1;
@@ -7909,7 +8086,8 @@ void DiskManagerApp::moveKeyboardSelection(int delta) {
 int DiskManagerApp::activeActionCount() {
     const int candidates[] = {m_refreshBtnId, m_propertiesBtnId,
         m_diagnosticsBtnId, m_initializeBtnId, m_wipeBtnId,
-        m_verifyEntireDiskBtnId, m_verifyPartitionBtnId, m_mountBtnId,
+        m_verifyEntireDiskBtnId, m_verifyPartitionBtnId, m_checkFat32BtnId,
+        m_mountBtnId,
         m_unmountBtnId, m_deleteBtnId, m_wholeEraseBtnId};
     return disk_manager_surface_verification_ui::active_action_count(
         m_window, candidates, sizeof(candidates) / sizeof(candidates[0]));
@@ -7918,7 +8096,8 @@ int DiskManagerApp::activeActionCount() {
 int DiskManagerApp::activeActionWidgetIdAt(int index) {
     const int candidates[] = {m_refreshBtnId, m_propertiesBtnId,
         m_diagnosticsBtnId, m_initializeBtnId, m_wipeBtnId,
-        m_verifyEntireDiskBtnId, m_verifyPartitionBtnId, m_mountBtnId,
+        m_verifyEntireDiskBtnId, m_verifyPartitionBtnId, m_checkFat32BtnId,
+        m_mountBtnId,
         m_unmountBtnId, m_deleteBtnId, m_wholeEraseBtnId};
     return disk_manager_surface_verification_ui::active_action_widget_id(
         m_window, candidates, sizeof(candidates) / sizeof(candidates[0]), index);
@@ -7927,7 +8106,8 @@ int DiskManagerApp::activeActionWidgetIdAt(int index) {
 void DiskManagerApp::moveActionFocus(int delta) {
     const int candidates[] = {m_refreshBtnId, m_propertiesBtnId,
         m_diagnosticsBtnId, m_initializeBtnId, m_wipeBtnId,
-        m_verifyEntireDiskBtnId, m_verifyPartitionBtnId, m_mountBtnId,
+        m_verifyEntireDiskBtnId, m_verifyPartitionBtnId, m_checkFat32BtnId,
+        m_mountBtnId,
         m_unmountBtnId, m_deleteBtnId, m_wholeEraseBtnId};
     m_actionFocus = disk_manager_surface_verification_ui::move_active_action_focus(
         m_window, candidates,
@@ -7973,7 +8153,8 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
         return;
     }
     if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED) {
-        if (m_dialogIsVerification && key == 0x114) {
+        if ((m_dialogIsVerification || m_dialogIsFat32Integrity) &&
+            key == 0x114) {
             scanDisks();
             invalidate();
             return;
@@ -7995,6 +8176,13 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
             disk_manager_surface_verification_ui::verification_job_running(
                 m_surfaceVerificationJob);
+        const bool fat32Confirm = m_dialogIsFat32Integrity &&
+            m_initializeDialogState == INITIALIZE_DIALOG_FAT32_CONFIRM;
+        const bool fat32Running = m_dialogIsFat32Integrity &&
+            m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
+            disk_manager_fat32_integrity_ui::job_running(m_fat32IntegrityJob);
+        const bool fat32Result = m_dialogIsFat32Integrity &&
+            m_initializeDialogState == INITIALIZE_DIALOG_FAT32_RESULT;
         if (wholeEraseRunning && (tab || enter)) {
             serial::puts("[dm34-stop] keyboard-key-received key=0x");
             serial::put_hex32(key);
@@ -8006,6 +8194,23 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             closeInitializeDialog();
         } else if (verificationConfirm && tab) {
             m_createInputFocus = m_createInputFocus == 2 ? 3 : 2;
+            updateInitializeControls();
+            invalidate();
+        } else if (fat32Confirm && tab) {
+            m_createInputFocus =
+                m_fat32IntegrityBlockReason ==
+                    disk_manager_fat32_integrity_ui::ADMISSION_READY &&
+                m_createInputFocus == 2 ? 3 : 2;
+            updateInitializeControls();
+            invalidate();
+        } else if (fat32Result && tab) {
+            const int findingActions[] = {m_cancelInitializeBtnId,
+                m_previousFindingBtnId, m_nextFindingBtnId};
+            const int count =
+                disk_manager_surface_verification_ui::active_action_count(
+                    m_window, findingActions, 3);
+            m_createInputFocus = count > 0
+                ? (m_createInputFocus + 1) % count : 0;
             updateInitializeControls();
             invalidate();
         } else if (wipeConfirm && tab) {
@@ -8021,7 +8226,7 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
         } else if (
             disk_manager_surface_verification_ui::running_tab_navigation_enabled(
                 m_initializeDialogState == INITIALIZE_DIALOG_RUNNING,
-                wholeEraseRunning, verificationRunning) && tab) {
+                wholeEraseRunning, verificationRunning || fat32Running) && tab) {
             const bool formatScanCancelable = m_dialogIsFormat &&
                 !m_formatJob.commitStarted &&
                 (m_formatJob.state == storage::FAT32_FORMAT_JOB_SCANNING ||
@@ -8029,7 +8234,7 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             m_createInputFocus =
                 disk_manager_surface_verification_ui::running_tab_focuses_stop_button(
                     wipeRunning, wholeEraseRunning, formatScanCancelable,
-                    verificationRunning)
+                    verificationRunning || fat32Running)
                 ? 2 : 0;
             if (wholeEraseRunning) {
                 serial::puts("[dm34-stop] keyboard-focus key=Tab focus=");
@@ -8068,6 +8273,35 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
                 m_cancelInitializeBtnId,
                 app::focused_button_widget_id_for_index(
                     m_createInputFocus, 2, m_cancelInitializeBtnId), key,
+                [this](int id) { onWidgetClick(id); });
+        } else if (enter && fat32Running && m_createInputFocus == 2) {
+            app::dispatch_focused_button_activation(m_window,
+                m_cancelInitializeBtnId,
+                app::focused_button_widget_id_for_index(
+                    m_createInputFocus, 2, m_cancelInitializeBtnId), key,
+                [this](int id) { onWidgetClick(id); });
+        } else if (enter && fat32Confirm &&
+                   (m_createInputFocus == 2 || m_createInputFocus == 3)) {
+            const bool startFocused = m_createInputFocus == 3;
+            const int focusedButtonId = startFocused
+                ? m_confirmInitializeBtnId : m_cancelInitializeBtnId;
+            app::dispatch_focused_button_activation(m_window,
+                focusedButtonId,
+                app::focused_button_widget_id_for_index(
+                    m_createInputFocus, startFocused ? 3 : 2,
+                    focusedButtonId), key,
+                [this](int id) { onWidgetClick(id); });
+        } else if (enter && fat32Result) {
+            const int findingActions[] = {m_cancelInitializeBtnId,
+                m_previousFindingBtnId, m_nextFindingBtnId};
+            const int focusedButtonId =
+                disk_manager_surface_verification_ui::active_action_widget_id(
+                    m_window, findingActions, 3, m_createInputFocus);
+            app::dispatch_focused_button_activation(m_window,
+                focusedButtonId,
+                app::focused_button_widget_id_for_index(
+                    m_createInputFocus, m_createInputFocus,
+                    focusedButtonId), key,
                 [this](int id) { onWidgetClick(id); });
         } else if (enter && verificationConfirm &&
                    (m_createInputFocus == 2 || m_createInputFocus == 3)) {
@@ -8287,6 +8521,14 @@ void DiskManagerApp::onKeyChar(char c) {
             INITIALIZE_DIALOG_RUNNING && m_createInputFocus == 2 &&
           disk_manager_surface_verification_ui::verification_job_running(
               m_surfaceVerificationJob)) ||
+         (m_dialogIsFat32Integrity && m_initializeDialogState ==
+            INITIALIZE_DIALOG_FAT32_CONFIRM &&
+          (m_createInputFocus == 2 || m_createInputFocus == 3)) ||
+         (m_dialogIsFat32Integrity && m_initializeDialogState ==
+            INITIALIZE_DIALOG_RUNNING && m_createInputFocus == 2 &&
+          disk_manager_fat32_integrity_ui::job_running(m_fat32IntegrityJob)) ||
+         (m_dialogIsFat32Integrity && m_initializeDialogState ==
+            INITIALIZE_DIALOG_FAT32_RESULT) ||
          (m_initializeDialogState == INITIALIZE_DIALOG_CLOSED &&
           m_keyboardPane == KEYBOARD_ACTIONS))) {
         onKeyDown(32);
@@ -8477,6 +8719,18 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
         }
         return;
     }
+    if (widgetId == m_cancelInitializeBtnId && m_dialogIsFat32Integrity &&
+        m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
+        disk_manager_fat32_integrity_ui::job_running(m_fat32IntegrityJob)) {
+        if (storage::request_fat32_integrity_stop(m_fat32IntegrityJob)) {
+            strcopy(m_statusMessage,
+                "Stop requested. The current bounded read will settle before another checker step starts.",
+                sizeof(m_statusMessage));
+            updateInitializeControls();
+            invalidate();
+        }
+        return;
+    }
     if (widgetId == m_cancelInitializeBtnId && m_dialogIsWholeErase &&
         m_initializeDialogState == INITIALIZE_DIALOG_WHOLE_ERASE_RUNNING &&
         disk_manager_whole_disk_erase_ui::whole_erase_job_running(
@@ -8574,6 +8828,24 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
                m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
         beginSurfaceVerification(
             disk_manager_surface_verification_ui::VERIFY_PARTITION);
+    } else if (widgetId == m_checkFat32BtnId &&
+               m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
+        beginFat32IntegrityDialog();
+    } else if (widgetId == m_previousFindingBtnId &&
+               m_dialogIsFat32Integrity &&
+               m_initializeDialogState == INITIALIZE_DIALOG_FAT32_RESULT &&
+               m_fat32FindingIndex > 0) {
+        --m_fat32FindingIndex;
+        updateInitializeControls();
+        invalidate();
+    } else if (widgetId == m_nextFindingBtnId &&
+               m_dialogIsFat32Integrity &&
+               m_initializeDialogState == INITIALIZE_DIALOG_FAT32_RESULT &&
+               static_cast<uint16_t>(m_fat32FindingIndex) + 1u <
+                   m_fat32IntegrityJob.result.findingCount) {
+        ++m_fat32FindingIndex;
+        updateInitializeControls();
+        invalidate();
     } else if (widgetId == m_propertiesBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
         m_detailsMode = DETAILS_PROPERTIES;
@@ -8611,6 +8883,10 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
     } else if (widgetId == m_confirmInitializeBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_VERIFY_CONFIRM) {
         runSurfaceVerificationOperation();
+    } else if (widgetId == m_confirmInitializeBtnId &&
+               m_dialogIsFat32Integrity &&
+               m_initializeDialogState == INITIALIZE_DIALOG_FAT32_CONFIRM) {
+        runFat32IntegrityOperation();
     } else if (widgetId == m_confirmInitializeBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_CREATE_OPTIONS) {
         if (m_dialogIsFormat) runFormatOperation();
@@ -8720,6 +8996,15 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             const uint32_t panelH = bodyBottom > 78
                 ? static_cast<uint32_t>(bodyBottom - 76) : 90;
             drawSurfaceVerificationPanel(panelX, panelY, panelW, panelH);
+        }
+        if (m_dialogIsFat32Integrity && m_initializeDialogState !=
+                INITIALIZE_DIALOG_CLOSED) {
+            const uint32_t panelX = rightX + 8;
+            const uint32_t panelY = y + 70;
+            const uint32_t panelW = rightW > 24 ? rightW - 16 : rightW;
+            const uint32_t panelH = bodyBottom > 78
+                ? static_cast<uint32_t>(bodyBottom - 76) : 90;
+            drawFat32IntegrityPanel(panelX, panelY, panelW, panelH);
         }
         if (m_dialogIsWipe && m_initializeDialogState !=
                 INITIALIZE_DIALOG_CLOSED) {
@@ -10176,6 +10461,8 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         }
         if (m_dialogIsVerification)
             drawSurfaceVerificationPanel(panelX, panelY, panelW, panelH);
+        if (m_dialogIsFat32Integrity)
+            drawFat32IntegrityPanel(panelX, panelY, panelW, panelH);
     }
 
     if (m_mountDialogOpen) {
@@ -11932,6 +12219,228 @@ void DiskManagerApp::completeWholeDiskEraseOperation() {
     invalidate();
 }
 
+void DiskManagerApp::beginFat32IntegrityDialog() {
+    using namespace disk_manager_fat32_integrity_ui;
+    if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED ||
+        m_mountDialogOpen || m_selectedDisk < 0 ||
+        m_selectedDisk >= m_diskCount ||
+        m_selectedObject != SELECTED_PARTITION || m_selectedPart < 0 ||
+        m_selectedPart >= m_disks[m_selectedDisk].partCount) return;
+
+    DiskEntry& disk = m_disks[m_selectedDisk];
+    const PartEntry& part = disk.parts[m_selectedPart];
+    if (!is_supported_partition_identity(part.parsed)) return;
+
+    memset(&m_fat32IntegrityTarget, 0, sizeof(m_fat32IntegrityTarget));
+    m_fat32IntegrityTarget.request.targetSnapshot = disk.identity;
+    m_fat32IntegrityTarget.request.partitionScheme = disk.scheme;
+    m_fat32IntegrityTarget.request.partitionSnapshot = part.parsed;
+    m_fat32IntegrityTarget.request.expectedRegistryGeneration =
+        disk.identity.registryGeneration;
+    m_fat32IntegrityTarget.request.mbrDiskSignature = disk.mbrDiskSignature;
+    memcpy(m_fat32IntegrityTarget.request.gptDiskGuid,
+        disk.primaryDiskGuid,
+        sizeof(m_fat32IntegrityTarget.request.gptDiskGuid));
+
+    storage::TargetIdentity liveIdentity = {};
+    storage::DeviceCapabilities liveCapabilities = {};
+    bool identityValid = storage::capture_target_identity(
+        disk.devIndex, liveIdentity) &&
+        storage::target_identities_equal(disk.identity, liveIdentity) &&
+        storage::revalidate_target_identity(disk.identity) ==
+            storage::TARGET_VALID &&
+        storage::query_device_capabilities(disk.devIndex, liveCapabilities);
+    bool tableValid = false;
+    if (identityValid && storage::parse_partition_table(
+            disk.devIndex, s_diskManagerTableScratch) &&
+        partitionTableMatchesDiskCache(disk, s_diskManagerTableScratch)) {
+        tableValid = true;
+        CapturedTarget admittedTarget = {};
+        m_fat32IntegrityBlockReason = build_target(true, true, true, true,
+            liveIdentity, liveCapabilities, s_diskManagerTableScratch,
+            part.parsed, admittedTarget);
+        if (m_fat32IntegrityBlockReason == ADMISSION_READY)
+            m_fat32IntegrityTarget = admittedTarget;
+        else
+            m_fat32IntegrityTarget.partitionTableCaptured = false;
+    } else {
+        m_fat32IntegrityTarget.partitionTableCaptured = false;
+        m_fat32IntegrityBlockReason = identityValid
+            ? ADMISSION_PARTITION_TABLE_INVALID : ADMISSION_IDENTITY_INVALID;
+    }
+
+    if (tableValid && m_fat32IntegrityBlockReason == ADMISSION_READY) {
+        if (storage::storage_operation_active())
+            m_fat32IntegrityBlockReason = ADMISSION_OPERATION_BUSY;
+        else if (storage::query_mount_protection(disk.identity).safety !=
+                 storage::DEVICE_UNMOUNTED)
+            m_fat32IntegrityBlockReason = ADMISSION_MOUNTED_TARGET;
+    }
+
+    memset(&m_fat32IntegrityJob, 0, sizeof(m_fat32IntegrityJob));
+    m_fat32IntegrityJob.request = m_fat32IntegrityTarget.request;
+    m_fat32IntegrityJob.result.targetIdentity = disk.identity;
+    m_fat32IntegrityJob.result.partitionScheme = disk.scheme;
+    m_fat32IntegrityJob.result.partition = part.parsed;
+    m_fat32IntegrityJob.result.partitionStartLba = part.parsed.startLba;
+    m_fat32IntegrityJob.result.partitionSectorCount = part.parsed.sectorCount;
+    m_fat32IntegrityJob.result.state = storage::FAT32_INTEGRITY_NOT_ADMITTED;
+    m_fat32IntegrityJob.result.failedLba = UINT64_MAX;
+    m_fat32FindingIndex = 0;
+    m_dialogIsCreate = false;
+    m_dialogIsFormat = false;
+    m_dialogIsReformat = false;
+    m_dialogIsDelete = false;
+    m_dialogIsGptRepair = false;
+    m_dialogIsWipe = false;
+    m_dialogIsWholeErase = false;
+    m_dialogIsVerification = false;
+    m_dialogIsFat32Integrity = true;
+    m_createInputFocus = 2;
+    m_closeAfterVerification = false;
+    m_initializeDialogState = INITIALIZE_DIALOG_FAT32_CONFIRM;
+    strcopy(m_statusMessage, admission_reason_text(
+        m_fat32IntegrityBlockReason), sizeof(m_statusMessage));
+    serial::puts("[dm36-fat32-ui] check-widget-id=");
+    serial_put_dec64(m_checkFat32BtnId);
+    serial::puts(" start-widget-id=");
+    serial_put_dec64(m_confirmInitializeBtnId);
+    serial::puts(" stop-widget-id=");
+    serial_put_dec64(m_cancelInitializeBtnId);
+    serial::puts(" previous-finding-widget-id=");
+    serial_put_dec64(m_previousFindingBtnId);
+    serial::puts(" next-finding-widget-id=");
+    serial_put_dec64(m_nextFindingBtnId);
+    serial::puts(" close-widget-id=");
+    serial_put_dec64(m_cancelInitializeBtnId);
+    serial::putc('\n');
+    updateInitializeControls();
+    invalidate();
+}
+
+void DiskManagerApp::runFat32IntegrityOperation() {
+    using namespace disk_manager_fat32_integrity_ui;
+    if (!m_dialogIsFat32Integrity || m_initializeDialogState !=
+            INITIALIZE_DIALOG_FAT32_CONFIRM ||
+        m_fat32IntegrityBlockReason != ADMISSION_READY ||
+        !m_fat32IntegrityTarget.partitionTableCaptured) return;
+
+    storage::Fat32IntegrityReason rejection =
+        storage::FAT32_INTEGRITY_REASON_NONE;
+    storage::Fat32IntegrityState rejectedState =
+        storage::FAT32_INTEGRITY_NOT_ADMITTED;
+    const storage::TargetIdentity& capturedIdentity =
+        m_fat32IntegrityTarget.request.targetSnapshot;
+    storage::TargetIdentity liveIdentity = {};
+    storage::DeviceCapabilities liveCapabilities = {};
+    storage::PartitionTableModel liveTable = {};
+    CapturedTarget liveTarget = {};
+    const storage::RevalidationStatus identityStatus =
+        storage::revalidate_target_identity(capturedIdentity);
+    if (identityStatus != storage::TARGET_VALID ||
+        !storage::capture_target_identity(capturedIdentity.globalIndex,
+                                          liveIdentity) ||
+        !storage::target_identities_equal(capturedIdentity, liveIdentity)) {
+        rejection = identityStatus == storage::TARGET_DEVICE_MISSING
+            ? storage::FAT32_INTEGRITY_REASON_DEVICE_REMOVED
+            : storage::FAT32_INTEGRITY_REASON_REGISTRATION_INVALIDATED;
+        rejectedState = storage::FAT32_INTEGRITY_TARGET_INVALIDATED;
+    } else if (!storage::query_device_capabilities(
+                   capturedIdentity.globalIndex, liveCapabilities) ||
+               !disk_manager_surface_verification_ui::
+                   live_target_matches_capabilities(capturedIdentity,
+                                                    liveCapabilities)) {
+        rejection = storage::FAT32_INTEGRITY_REASON_TARGET_IDENTITY_CHANGED;
+        rejectedState = storage::FAT32_INTEGRITY_TARGET_INVALIDATED;
+    } else if (!storage::parse_partition_table(
+                   capturedIdentity.globalIndex, liveTable)) {
+        rejection = storage::FAT32_INTEGRITY_REASON_PARTITION_IDENTITY_INVALID;
+        rejectedState = storage::FAT32_INTEGRITY_TARGET_INVALIDATED;
+    } else if (build_target(true, true, true, true, liveIdentity,
+                   liveCapabilities, liveTable,
+                   m_fat32IntegrityTarget.request.partitionSnapshot,
+                   liveTarget) != ADMISSION_READY ||
+               !captured_target_matches_live(m_fat32IntegrityTarget,
+                                             liveTarget)) {
+        rejection = storage::FAT32_INTEGRITY_REASON_PARTITION_IDENTITY_INVALID;
+        rejectedState = storage::FAT32_INTEGRITY_TARGET_INVALIDATED;
+    } else if (storage::storage_operation_active()) {
+        rejection = storage::FAT32_INTEGRITY_REASON_OPERATION_BUSY;
+    } else if (storage::query_mount_protection(capturedIdentity).safety !=
+               storage::DEVICE_UNMOUNTED) {
+        rejection = storage::FAT32_INTEGRITY_REASON_MOUNTED_TARGET;
+    }
+
+    memset(&m_fat32IntegrityJob, 0, sizeof(m_fat32IntegrityJob));
+    if (rejection == storage::FAT32_INTEGRITY_REASON_NONE) {
+        const storage::Fat32IntegrityState state =
+            storage::begin_fat32_integrity_job(m_fat32IntegrityJob,
+                m_fat32IntegrityTarget.request);
+        serial::puts("[dm36-fat32-ui] start state=");
+        serial::puts(storage::fat32_integrity_state_name(state));
+        serial::puts(" operation-id=0x");
+        serial::put_hex64(m_fat32IntegrityJob.result.operationId);
+        serial::putc('\n');
+        if (state == storage::FAT32_INTEGRITY_RUNNING) {
+            m_initializeDialogState = INITIALIZE_DIALOG_RUNNING;
+            m_createInputFocus = 2;
+            updateInitializeControls();
+            invalidate();
+            return;
+        }
+    } else {
+        m_fat32IntegrityJob.request = m_fat32IntegrityTarget.request;
+        storage::Fat32IntegrityResult& result =
+            m_fat32IntegrityJob.result;
+        result.targetIdentity = capturedIdentity;
+        result.partitionScheme = m_fat32IntegrityTarget.request.partitionScheme;
+        result.partition = m_fat32IntegrityTarget.request.partitionSnapshot;
+        result.partitionStartLba = result.partition.startLba;
+        result.partitionSectorCount = result.partition.sectorCount;
+        result.state = rejectedState;
+        result.reason = rejection;
+        result.failedLba = UINT64_MAX;
+        strcopy(result.diagnostic, storage::fat32_integrity_reason_name(
+            rejection), sizeof(result.diagnostic));
+    }
+
+    m_initializeDialogState = INITIALIZE_DIALOG_FAT32_RESULT;
+    m_fat32FindingIndex = 0;
+    m_createInputFocus = 0;
+    m_lastStorageOperation = 10;
+    strcopy(m_initializeMessage,
+        terminal_message(m_fat32IntegrityJob.result),
+        sizeof(m_initializeMessage));
+    updateInitializeControls();
+    invalidate();
+}
+
+void DiskManagerApp::completeFat32IntegrityOperation() {
+    if (!m_dialogIsFat32Integrity ||
+        disk_manager_fat32_integrity_ui::job_running(m_fat32IntegrityJob))
+        return;
+    m_fat32FindingIndex = 0;
+    m_createInputFocus = 0;
+    m_initializeDialogState = INITIALIZE_DIALOG_FAT32_RESULT;
+    m_lastStorageOperation = 10;
+    strcopy(m_initializeMessage,
+        disk_manager_fat32_integrity_ui::terminal_message(
+            m_fat32IntegrityJob.result), sizeof(m_initializeMessage));
+    if (m_fat32IntegrityJob.result.diagnostic[0] &&
+        m_fat32IntegrityJob.result.state != storage::FAT32_INTEGRITY_PASSED) {
+        strappend(m_initializeMessage, " ", sizeof(m_initializeMessage));
+        strappend(m_initializeMessage,
+            m_fat32IntegrityJob.result.diagnostic,
+            sizeof(m_initializeMessage));
+    }
+    // Refresh inventory only after the checker reached terminal state and
+    // the engine released its operation lease and exact-registration pin.
+    if (!m_closeAfterVerification) scanDisks();
+    strcopy(m_statusMessage, m_initializeMessage, sizeof(m_statusMessage));
+    updateInitializeControls();
+    invalidate();
+}
+
 void DiskManagerApp::beginSurfaceVerification(
     disk_manager_surface_verification_ui::VerificationScope scope) {
     using namespace disk_manager_surface_verification_ui;
@@ -12371,7 +12880,258 @@ void DiskManagerApp::drawSurfaceVerificationPanel(uint32_t x, uint32_t y,
     disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFF9AA9BC);
 }
 
+void DiskManagerApp::drawFat32IntegrityPanel(uint32_t x, uint32_t y,
+                                              uint32_t w, uint32_t h) {
+    using namespace disk_manager_fat32_integrity_ui;
+    using namespace storage;
+    if (w < 36 || h < 42) return;
+    const Fat32IntegrityRequest& request = m_fat32IntegrityTarget.request;
+    const Fat32IntegrityResult& result = m_fat32IntegrityJob.result;
+    const bool confirming = m_initializeDialogState ==
+        INITIALIZE_DIALOG_FAT32_CONFIRM;
+    const bool running = m_initializeDialogState == INITIALIZE_DIALOG_RUNNING &&
+        job_running(m_fat32IntegrityJob);
+    framebuffer::fill_rect(x, y, w, h, 0xFF252D3B);
+    framebuffer::fill_rect(x, y, w, 23,
+        confirming ? 0xFF34465C : (running ? 0xFF28543C : 0xFF4A3B2C));
+    disk_manager_draw_clipped(x + 10, y + 7, w - 20,
+        confirming ? "Check FAT32 Filesystem — Captured Target" :
+            (running ? "FAT32 Integrity Check Progress" :
+                       "FAT32 Integrity Check Result"), 0xFFDCE3F0);
+
+    char line[192], number[24];
+    uint32_t lineY = y + 32;
+    const TargetIdentity& target = request.targetSnapshot;
+    strcopy(line, "Device: ", sizeof(line));
+    strappend(line, target.model[0] ? target.model : target.name,
+              sizeof(line));
+    strappend(line, " | Serial: ", sizeof(line));
+    strappend(line, target.serial[0] ? target.serial : "Unavailable",
+              sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFFDCE3F0);
+    lineY += 16;
+
+    strcopy(line, "Disk Manager device ", sizeof(line));
+    disk_manager_u64(static_cast<uint64_t>(target.globalIndex) + 1u,
+        number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " | Partition ", sizeof(line));
+    disk_manager_u64(request.partitionSnapshot.partitionNumber,
+        number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    if (request.partitionSnapshot.isGpt) {
+        char guid[40];
+        disk_manager_guid_text(request.partitionSnapshot.uniqueGuid,
+            guid, sizeof(guid));
+        strappend(line, " | GPT ", sizeof(line));
+        strappend(line, guid, sizeof(line));
+    } else {
+        strappend(line, " | MBR signature ", sizeof(line));
+        disk_manager_hex32(request.mbrDiskSignature, number, sizeof(number));
+        strappend(line, number, sizeof(line));
+    }
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFFDCE3F0);
+    lineY += 16;
+
+    strcopy(line, "Partition start LBA: ", sizeof(line));
+    disk_manager_u64(request.partitionSnapshot.startLba,
+        number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " | Sector count: ", sizeof(line));
+    disk_manager_u64(request.partitionSnapshot.sectorCount,
+        number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFFFFD080);
+    lineY += 16;
+
+    strcopy(line, "Logical-sector size: ", sizeof(line));
+    disk_manager_u64(target.logicalSectorSize, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " bytes | Operation: read only", sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFFB8D8C0);
+    lineY += 17;
+
+    if (confirming) {
+        strcopy(line, "Eligibility: ", sizeof(line));
+        strappend(line, admission_reason_text(m_fat32IntegrityBlockReason),
+                  sizeof(line));
+        disk_manager_draw_clipped(x + 10, lineY, w - 20, line,
+            m_fat32IntegrityBlockReason == ADMISSION_READY
+                ? 0xFFB8D8C0 : 0xFFFFB0A0);
+        lineY += 17;
+        disk_manager_draw_clipped(x + 10, lineY, w - 20,
+            "Mounted volumes are not checked. Unmount explicitly; this dialog will not unmount.",
+            0xFF9AA9BC);
+        lineY += 17;
+        disk_manager_draw_clipped(x + 10, lineY, w - 20,
+            "Select Start Check to begin. No repairs or filesystem writes are performed.",
+            0xFFDCE3F0);
+        return;
+    }
+
+    strcopy(line, "State: ", sizeof(line));
+    strappend(line, fat32_integrity_state_name(result.state), sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFFDCE3F0);
+    lineY += 17;
+
+    if (running) {
+        strcopy(line, "Current stage: ", sizeof(line));
+        strappend(line, stage_name(m_fat32IntegrityJob), sizeof(line));
+        disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFFDCE3F0);
+        lineY += 17;
+    }
+
+    strcopy(line, "Metadata reads: ", sizeof(line));
+    disk_manager_u64(result.metadataReadRequests, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " | Bytes read: ", sizeof(line));
+    disk_manager_u64(result.bytesRead, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFF9AA9BC);
+    lineY += 16;
+
+    strcopy(line, "FAT bytes compared: ", sizeof(line));
+    disk_manager_u64(result.fatBytesCompared, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " / ", sizeof(line));
+    disk_manager_u64(result.fatBytesToCompare, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFF9AA9BC);
+    lineY += 16;
+
+    strcopy(line, "Chains/clusters: ", sizeof(line));
+    disk_manager_u64(result.chainClustersVisited, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " | Directories: ", sizeof(line));
+    disk_manager_u64(result.directoriesVisited, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " | Entries: ", sizeof(line));
+    disk_manager_u64(result.directoryEntriesExamined, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFF9AA9BC);
+    lineY += 16;
+
+    strcopy(line, "Structural reads: ", sizeof(line));
+    disk_manager_u64(result.structuralReadRequests, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " | Orphan clusters scanned: ", sizeof(line));
+    disk_manager_u64(result.orphanClustersScanned, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " | Orphan bytes: ", sizeof(line));
+    disk_manager_u64(result.orphanBytesScanned, number, sizeof(number));
+    strappend(line, " / ", sizeof(line));
+    disk_manager_u64(result.orphanBytesToScan, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFF9AA9BC);
+    lineY += 16;
+
+    strcopy(line, "Stored findings: ", sizeof(line));
+    disk_manager_u64(result.findingCount, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    if (result.additionalFindingsMayExist)
+        strappend(line, " | Additional findings omitted", sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line,
+        result.additionalFindingsMayExist ? 0xFFFFD080 : 0xFFDCE3F0);
+    lineY += 16;
+
+    if (!running) {
+        disk_manager_draw_clipped(x + 10, lineY, w - 20,
+            terminal_message(result),
+            result.state == FAT32_INTEGRITY_PASSED
+                ? 0xFFB8D8C0 : 0xFFFFD080);
+        lineY += 17;
+    }
+
+    if (result.reason == FAT32_INTEGRITY_REASON_READ_FAILURE &&
+        result.failedLba != UINT64_MAX) {
+        strcopy(line, "Failed request: LBA ", sizeof(line));
+        disk_manager_u64(result.failedLba, number, sizeof(number));
+        strappend(line, number, sizeof(line));
+        strappend(line, " | Sectors: ", sizeof(line));
+        disk_manager_u64(result.failedSectorCount, number, sizeof(number));
+        strappend(line, number, sizeof(line));
+        strappend(line, " | Status: ", sizeof(line));
+        strappend(line, result.blockStatusValid
+            ? disk_manager_block_status_name(result.blockStatus)
+            : "Unavailable", sizeof(line));
+        disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFFFFB0A0);
+        lineY += 17;
+    }
+
+    if (result.additionalFindingsMayExist && lineY + 16 < y + h) {
+        disk_manager_draw_clipped(x + 10, lineY, w - 20,
+            findings_overflow_message(true),
+            0xFFFFD080);
+        lineY += 16;
+    }
+    if (result.findingCount != 0 && m_fat32FindingIndex < result.findingCount &&
+        lineY + 64 < y + h) {
+        const Fat32IntegrityFinding& finding =
+            result.findings[m_fat32FindingIndex];
+        strcopy(line, "Finding ", sizeof(line));
+        disk_manager_u64(static_cast<uint64_t>(m_fat32FindingIndex) + 1u,
+            number, sizeof(number));
+        strappend(line, number, sizeof(line));
+        strappend(line, " of stored ", sizeof(line));
+        disk_manager_u64(result.findingCount, number, sizeof(number));
+        strappend(line, number, sizeof(line));
+        strappend(line, ": ", sizeof(line));
+        strappend(line, finding_category_name(finding.category), sizeof(line));
+        disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFFDCE3F0);
+        lineY += 16;
+
+        strcopy(line, "Severity: ", sizeof(line));
+        strappend(line, severity_name(finding.severity), sizeof(line));
+        strappend(line, " | Structure: ", sizeof(line));
+        strappend(line, structure_name(finding.structure), sizeof(line));
+        disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFFDCE3F0);
+        lineY += 16;
+
+        strcopy(line, "Location LBA: ", sizeof(line));
+        if (finding.lba == UINT64_MAX) strappend(line, "Unavailable", sizeof(line));
+        else {
+            disk_manager_u64(finding.lba, number, sizeof(number));
+            strappend(line, number, sizeof(line));
+        }
+        strappend(line, " | Byte offset: ", sizeof(line));
+        disk_manager_u64(finding.byteOffset, number, sizeof(number));
+        strappend(line, number, sizeof(line));
+        disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFF9AA9BC);
+        lineY += 16;
+
+        if (finding.expectedObservedValid) {
+            strcopy(line, "Expected: ", sizeof(line));
+            disk_manager_u64(finding.expected, number, sizeof(number));
+            strappend(line, number, sizeof(line));
+            strappend(line, " | Observed: ", sizeof(line));
+            disk_manager_u64(finding.observed, number, sizeof(number));
+            strappend(line, number, sizeof(number));
+            disk_manager_draw_clipped(x + 10, lineY, w - 20, line,
+                                      0xFF9AA9BC);
+            lineY += 16;
+        }
+    }
+
+    if (!running && lineY + 16 < y + h) {
+        strcopy(line, "No repair was performed. Storage ownership: ",
+            sizeof(line));
+        strappend(line, result.ownershipReleased ? "released" : "not held",
+                  sizeof(line));
+        disk_manager_draw_clipped(x + 10, lineY, w - 20, line, 0xFF9AA9BC);
+    }
+}
+
 void DiskManagerApp::closeInitializeDialog() {
+    if (m_dialogIsFat32Integrity &&
+        disk_manager_fat32_integrity_ui::job_running(m_fat32IntegrityJob)) {
+        storage::request_fat32_integrity_stop(m_fat32IntegrityJob);
+        strcopy(m_statusMessage,
+            "Stop requested. The FAT32 result will retain findings and unchecked coverage after the read settles.",
+            sizeof(m_statusMessage));
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
     if (m_dialogIsVerification &&
         disk_manager_surface_verification_ui::verification_job_running(
             m_surfaceVerificationJob)) {
@@ -12433,6 +13193,7 @@ void DiskManagerApp::closeInitializeDialog() {
     m_dialogIsWipe = false;
     m_dialogIsWholeErase = false;
     m_dialogIsVerification = false;
+    m_dialogIsFat32Integrity = false;
     m_closeAfterVerification = false;
     m_gptRepairButtonFocus = 0;
     m_createInputFocus = 0;
@@ -12470,6 +13231,15 @@ void DiskManagerApp::closeInitializeDialog() {
                sizeof(m_surfaceVerificationJob));
         memset(&m_surfaceVerificationTarget, 0,
                sizeof(m_surfaceVerificationTarget));
+    }
+    if (!disk_manager_fat32_integrity_ui::job_running(
+            m_fat32IntegrityJob)) {
+        memset(&m_fat32IntegrityJob, 0, sizeof(m_fat32IntegrityJob));
+        memset(&m_fat32IntegrityTarget, 0,
+               sizeof(m_fat32IntegrityTarget));
+        m_fat32FindingIndex = 0;
+        m_fat32IntegrityBlockReason =
+            disk_manager_fat32_integrity_ui::ADMISSION_SELECTION_REQUIRED;
     }
     updateInitializeControls();
     invalidate();
@@ -12531,7 +13301,7 @@ void DiskManagerApp::confirmPartitionMount() {
         strappend(status, ".", sizeof(status));
     }
     m_mountDialogOpen = false;
-    scanDisks();
+    if (!m_closeAfterVerification) scanDisks();
     strcopy(m_statusMessage, status, sizeof(m_statusMessage));
     updateInitializeControls();
     invalidate();

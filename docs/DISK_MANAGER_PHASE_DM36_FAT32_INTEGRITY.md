@@ -1,8 +1,8 @@
 # Disk Manager DM36 — Read-Only FAT32 Integrity
 
-**Current outcome: Outcome B — `DM36_STRUCTURE_ENGINE_READY`**
+**Current outcome: Outcome B — `DM36_GUI_READY`**
 **Phase marker:** `last_completed=DM35`, `next_expected=DM36`
-**Current scope:** bounded, host-tested FAT32 metadata, cluster-chain, directory, and allocation checks. The Disk Manager GUI and guest/QEMU acceptance are not complete, so this does not claim full filesystem consistency or complete DM36.
+**Current scope:** bounded, host-tested FAT32 metadata, cluster-chain, directory, and allocation checks are integrated into the production Disk Manager GUI. Guest/QEMU acceptance remains incomplete; this does not claim full filesystem consistency or complete DM36.
 
 ## Continuation 1 — Metadata integrity foundation
 
@@ -195,3 +195,91 @@ the three tracked PacMan object files rewritten by the attempt were restored.
 The UEFI staging run rewrote tracked `ESP/build-identity.txt`; its original
 bytes were restored. No QEMU or physical storage was used. GUI integration and
 guest acceptance remain outstanding, and `.phase` was not advanced.
+
+## Continuation 3 — production Disk Manager FAT32 integrity GUI
+
+This continuation began at `01b54dc65381c7f2380a73277377247a3492890e`
+(`disk-manager: add DM36 structural checks`) on branch
+`DISK_MANAGER_IMPROVEMENTS`. The worktree was clean, `.phase` remained
+`last_completed=DM35` / `next_expected=DM36`, and no branch or worktree switch
+was performed.
+
+The Disk Manager now exposes **Check FAT32 Filesystem** for supported MBR
+FAT32 partition types and GPT Microsoft Basic Data entries. Candidate
+selection uses partition identity, not boot-sector validity, so a damaged
+FAT32 boot sector can still be diagnosed. The confirmation view shows the
+captured device registration, partition identity and bounds, sector size,
+eligibility, and read-only scope. Start re-captures and compares device
+capabilities, exact parsed partition table, selected entry, registration, and
+mount/operation state before creating the production `fat32_integrity` job.
+Mounted targets, unavailable reads, changed identity, invalid geometry, and
+busy storage are rejected. The UI does not mount or unmount a volume.
+
+The app advances at most one production checker step per update. Progress uses
+the engine's current stage and actual metadata-read, byte, FAT-comparison,
+chain, directory, entry, structural-read, and orphan-scan counters; it does not
+invent a percentage. The result shows the engine's terminal state, read
+failure location/status where available, finding category/severity/structure,
+LBA and byte offset, expected/observed values, and stored-finding overflow.
+Previous/Next navigates stored findings. Stop settles the in-flight checked
+read and closes only after the engine releases its lease and registration pin.
+Device removal or replacement remains associated with the captured target.
+The app supports pointer and keyboard Start/Stop/finding navigation/Close.
+The verified widget IDs are Check FAT32 **20**, Start Check **11**, Stop
+Check **12**, Previous **21**, Next Finding **22**, and Close **12**; IDs are
+checked against the creation order during app initialization.
+
+The expanded DM36 metadata/structural group passes **259/259** checks,
+including the previously accepted 202 checker cases and additional
+production-result mapping coverage. The new production-linked GUI group passes
+**31/31** checks for target
+admission and identity, read-only devices, damaged metadata eligibility,
+real engine findings, one-read-per-step progress, explicit Start, clean
+terminal results, busy-operation exclusion, keyboard and pointer routing,
+Stop/Close settlement, and disabled finding navigation. The complete
+`scripts/run-storage-manager-tests.ps1` run passes **1,482 checks, 0
+failures**, including the DM35/DM34 regressions, widget activation, 249 USB
+checks, USB trace classifier, GPT verifier, and DM30 verifier. The generated
+result log is `out/dm36-gui-storage-test.log`.
+
+The isolated AMD64 kernel build passes with `NVME_WRITE_PROVEN=0` and
+`NVME_FLUSH_PROVEN=0` (`out/dm36-gui-amd64/kernel-build.log`). The root
+`build.bat` application build passed; its pre-existing ignored
+`guideXOSServer.exe` was restored byte-for-byte (`out/dm36-gui-host/build-bat.log`).
+The isolated MSBuild UEFI x64 Release bootloader target passed, alongside the
+AMD64 kernel build (`out/dm36-uefi-x64-release.log`). The requested
+`build.ps1 -Arch amd64` attempt stopped at the known unrelated PacMan Native
+ELF undefined symbols `pacman_audio_load_resources(gx_app_context*)` and
+`pacman_audio_submit(void*, PacManSoundId)` (`out/dm36-powershell-build.log`).
+All seven tracked PacMan generated files were restored byte-for-byte; PacMan
+sources were not changed. No QEMU guest or physical media was used.
+
+### Deferred DM36 QEMU acceptance plan — not run in this continuation
+
+The next DM36 guest campaign should use the previously qualified paced PS/2
+input helper and manifest-verified disposable images. It should verify:
+
+- **A — Clean FAT32:** a valid disposable partition completes through the real
+  GUI with no structural findings.
+- **B — Corrupt FAT32:** a purpose-built chain or directory inconsistency
+  produces the corresponding actual engine finding in the GUI.
+- **C — Stop Check:** normal widget dispatch requests Stop, the bounded read
+  settles, the result is Stopped, and ownership is released.
+- **D — Application Close:** Alt+F4 during a check stops the job and defers
+  teardown until the active read and ownership release settle.
+- **E — Removal/replacement:** the original target becomes terminal before a
+  separately identified replacement is scanned; the old job does not resume.
+- **F — Read failure:** supported QEMU blkdebug injection retains the exact
+  failed request bounds and returned block status.
+- **G — Media integrity:** each disposable image is byte-for-byte identical to
+  its pristine preimage after QEMU exits and releases it.
+- **H — Mounted target:** an actively mounted volume is rejected, with no
+  automatic unmount or concurrent snapshot claim.
+
+Do not repeat prior DM35 general Disk Manager launch qualification merely to
+reprove app startup. No gate above was run here.
+
+This is **Outcome B — `DM36_GUI_READY`** for host implementation and
+validation. Guest/QEMU acceptance remains deferred, so DM36 is not closed and
+`.phase` remains `last_completed=DM35`, `next_expected=DM36`. No repairs or
+destructive writes were performed. `git diff --check` passed.

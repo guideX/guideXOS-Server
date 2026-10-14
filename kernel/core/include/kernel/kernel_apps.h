@@ -23,6 +23,7 @@
 #include "kernel/whole_disk_erase.h"
 #include "kernel/disk_manager_whole_disk_erase_ui.h"
 #include "kernel/disk_manager_surface_verification_ui.h"
+#include "kernel/disk_manager_fat32_integrity_ui.h"
 #include "kernel/disk_manager_model.h"
 #include "kernel/desktop.h"
 #include "kernel/image_adapter.h"
@@ -1239,6 +1240,8 @@ private:
         INITIALIZE_DIALOG_RESULT,
         INITIALIZE_DIALOG_VERIFY_CONFIRM,
         INITIALIZE_DIALOG_VERIFY_RESULT,
+        INITIALIZE_DIALOG_FAT32_CONFIRM,
+        INITIALIZE_DIALOG_FAT32_RESULT,
     };
 
     struct PartEntry {
@@ -1340,6 +1343,9 @@ private:
     int m_wholeEraseBtnId;
     int m_verifyEntireDiskBtnId;
     int m_verifyPartitionBtnId;
+    int m_checkFat32BtnId;
+    int m_previousFindingBtnId;
+    int m_nextFindingBtnId;
     int m_gptBtnId;
     int m_mbrBtnId;
     int m_confirmInitializeBtnId;
@@ -1358,6 +1364,7 @@ private:
     bool m_dialogIsWipe;
     bool m_dialogIsWholeErase;
     bool m_dialogIsVerification;
+    bool m_dialogIsFat32Integrity;
     bool m_closeAfterVerification;
     disk_manager_wipe_ui::WipeActionEligibility m_wipeEligibility;
     disk_manager_wipe_ui::WipeActionBlockReason m_wipeBlockReason;
@@ -1396,6 +1403,11 @@ private:
     disk_manager_surface_verification_ui::VerificationTarget
         m_surfaceVerificationTarget;
     storage::SurfaceVerificationJob m_surfaceVerificationJob;
+    disk_manager_fat32_integrity_ui::CapturedTarget m_fat32IntegrityTarget;
+    storage::Fat32IntegrityJob m_fat32IntegrityJob;
+    disk_manager_fat32_integrity_ui::AdmissionBlockReason
+        m_fat32IntegrityBlockReason;
+    uint8_t m_fat32FindingIndex;
     disk_manager_surface_verification_ui::AdmissionBlockReason
         m_surfaceVerificationBlockReason;
     uint8_t m_lastStorageOperation;
@@ -1479,6 +1491,11 @@ private:
     void        runSurfaceVerificationOperation();
     void        completeSurfaceVerificationOperation();
     void        drawSurfaceVerificationPanel(uint32_t x, uint32_t y,
+                    uint32_t w, uint32_t h);
+    void        beginFat32IntegrityDialog();
+    void        runFat32IntegrityOperation();
+    void        completeFat32IntegrityOperation();
+    void        drawFat32IntegrityPanel(uint32_t x, uint32_t y,
                     uint32_t w, uint32_t h);
     void        closeInitializeDialog();
     void        beginMountDialog();

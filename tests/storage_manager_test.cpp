@@ -14,6 +14,7 @@
 #include "../kernel/core/include/kernel/disk_manager_wipe_ui.h"
 #include "../kernel/core/include/kernel/disk_manager_whole_disk_erase_ui.h"
 #include "../kernel/core/include/kernel/disk_manager_surface_verification_ui.h"
+#include "../kernel/core/include/kernel/disk_manager_fat32_integrity_ui.h"
 #include "../kernel/core/include/kernel/widget_activation.h"
 #include "../kernel/core/include/kernel/fs_fat.h"
 #include "../kernel/core/include/kernel/disk_manager_model.h"
@@ -8905,6 +8906,23 @@ void run_fat32_integrity_tests()
         storage::Fat32IntegrityJob job = {};
         const auto state = runAndCheckReadOnly(disk512, request512, job);
         verify(job, state, label);
+        using namespace apps::disk_manager_fat32_integrity_ui;
+        const char* resultText = terminal_message(job.result);
+        const char* stageText = stage_name(job);
+        check(resultText && resultText[0] && stageText && stageText[0],
+              "production structural fixture reaches a presentable checker result and engine stage");
+        for (uint8_t findingIndex = 0;
+             findingIndex < job.result.findingCount; ++findingIndex) {
+            const storage::Fat32IntegrityFinding& finding =
+                job.result.findings[findingIndex];
+            check(finding_category_name(finding.category)[0] &&
+                  structure_name(finding.structure)[0] &&
+                  severity_name(finding.severity)[0],
+                  "production finding retains a displayable category, structure, and engine severity");
+        }
+        if (job.result.additionalFindingsMayExist)
+            check(findings_overflow_message(true)[0],
+                  "production finding overflow has visible truncation wording");
         resetStructuralFixture();
     };
     static const uint8_t fileA[11] = {
@@ -9492,6 +9510,347 @@ void run_fat32_integrity_tests()
         g_checks - checksBefore, g_failures - failuresBefore);
 }
 
+void run_disk_manager_fat32_integrity_ui_tests()
+{
+    const int checksBefore = g_checks;
+    const int failuresBefore = g_failures;
+    using namespace apps::disk_manager_fat32_integrity_ui;
+    using namespace app;
+    vfs::test_clear_mounts();
+
+    FakeDisk disk(512, 90000, false);
+    set_mbr_partition(disk, 0, 0, 0x0C, 2048, 80000);
+    set_mbr_signature(disk);
+    uint8_t index = register_fake(disk, true, true, true, false, 0,
+        128u * 1024u);
+    storage::PartitionTableModel table = {};
+    storage::PartitionEntry partition = {};
+    bool ready = index != 0xFF &&
+        parse_first_partition(index, table, partition);
+    if (ready) {
+        storage::Fat32FormatRequest formatRequest = make_format_request(
+            index, partition, "DM36GUI", 0x36A03601u);
+        storage::Fat32FormatResult formatResult = {};
+        ready = storage::format_fat32_partition(formatRequest, formatResult) ==
+            storage::FAT32_FORMAT_SUCCESS;
+    }
+    if (index != 0xFF) (void)unregister_fake(index, disk);
+    index = ready ? register_fake(disk, false, false, false, false, 0,
+        128u * 1024u) : 0xFF;
+    ready = ready && index != 0xFF &&
+        parse_first_partition(index, table, partition);
+    storage::TargetIdentity target = {};
+    storage::DeviceCapabilities capabilities = {};
+    ready = ready && storage::capture_target_identity(index, target) &&
+        storage::query_device_capabilities(index, capabilities);
+    check(ready,
+          "DM36 GUI fixture is a production-formatted read-only FAT32 candidate");
+    if (!ready) {
+        if (index != 0xFF) (void)unregister_fake(index, disk);
+        std::printf("DM36 FAT32 integrity GUI: %d checks, %d failures\n",
+            g_checks - checksBefore, g_failures - failuresBefore);
+        return;
+    }
+    const uint32_t guiWriteBaseline = disk.writes;
+    const uint32_t guiWriteAttemptBaseline = disk.writeAttempts;
+    const uint32_t guiFlushBaseline = disk.flushes;
+
+    CapturedTarget captured = {};
+    check(is_supported_partition_identity(partition) &&
+          build_target(true, true, true, true, target, capabilities,
+              table, partition, captured) == ADMISSION_READY &&
+          captured.partitionTableCaptured &&
+          captured.request.partitionSnapshot.startLba == partition.startLba &&
+          captured.request.partitionSnapshot.sectorCount == partition.sectorCount,
+          "eligible partition captures exact MBR identity and extent for read-only checking");
+    check(!capabilities.writable && !capabilities.flushSupported &&
+          build_target(true, true, true, true, target, capabilities,
+              table, partition, captured) == ADMISSION_READY,
+          "read-only admission requires neither write nor Flush capability");
+
+    CapturedTarget rejected = {};
+    check(build_target(false, true, true, true, target, capabilities,
+              table, partition, rejected) == ADMISSION_SELECTION_REQUIRED,
+          "disk, unallocated, and absent rows cannot authorize a partition check");
+    storage::PartitionEntry unsupported = partition;
+    unsupported.mbrType = 0x07;
+    check(build_target(true, true, true, true, target, capabilities,
+              table, unsupported, rejected) == ADMISSION_UNSUPPORTED_PARTITION,
+          "unsupported partition identities are rejected independently of the boot sector");
+    check(build_target(true, false, true, true, target, capabilities,
+              table, partition, rejected) == ADMISSION_IDENTITY_INVALID,
+          "stale registration is rejected before Start");
+    CapturedTarget absentCapture = {};
+    check(!captured_target_matches_live(captured, absentCapture),
+          "captured target comparison rejects an absent confirmation binding");
+    check(build_target(true, true, true, false, target, capabilities,
+              table, partition, rejected) == ADMISSION_MOUNTED_TARGET,
+          "mounted-volume status blocks Start and leaves explicit unmount to the user");
+    check(build_target(true, true, false, true, target, capabilities,
+              table, partition, rejected) == ADMISSION_OPERATION_BUSY,
+          "a conflicting shared storage lease blocks Start");
+    storage::PartitionTableModel invalidTable = table;
+    invalidTable.state = storage::DISK_STATE_INVALID_PARTITION_TABLE;
+    check(build_target(true, true, true, true, target, capabilities,
+              invalidTable, partition, rejected) ==
+              ADMISSION_PARTITION_TABLE_INVALID,
+          "invalid partition-table identity cannot create a checker request");
+    storage::PartitionEntry changedPartition = partition;
+    ++changedPartition.startLba;
+    check(build_target(true, true, true, true, target, capabilities,
+              table, changedPartition, rejected) == ADMISSION_PARTITION_INVALID,
+          "changed partition bounds are rejected before Start");
+
+    storage::PartitionTableModel sameLiveTable = {};
+    check(storage::parse_partition_table(index, sameLiveTable) &&
+          build_target(true, true, true, true, target, capabilities,
+              sameLiveTable, partition, rejected) == ADMISSION_READY &&
+          captured_target_matches_live(captured, rejected),
+          "freshly parsed table and registration match the immutable confirmation target");
+    storage::PartitionTableModel changedTable = sameLiveTable;
+    ++changedTable.mbrDiskSignature;
+    CapturedTarget changedCapture = {};
+    check(build_target(true, true, true, true, target, capabilities,
+              changedTable, partition, changedCapture) == ADMISSION_READY &&
+          !captured_target_matches_live(captured, changedCapture),
+          "a changed MBR table signature invalidates the captured confirmation");
+
+    const uint8_t originalBootSignature0 =
+        sector(disk, partition.startLba)[510];
+    const uint8_t originalBootSignature1 =
+        sector(disk, partition.startLba)[511];
+    const uint16_t fsInfoSector = read_u16(
+        sector(disk, partition.startLba) + 48);
+    const uint64_t fsInfoLba = partition.startLba + fsInfoSector;
+    const uint8_t originalFsInfoSignature = sector(disk, fsInfoLba)[0];
+    sector(disk, partition.startLba)[510] = 0;
+    sector(disk, fsInfoLba)[0] = 0;
+    check(is_supported_partition_identity(partition) &&
+          build_target(true, true, true, true, target, capabilities,
+              table, partition, captured) == ADMISSION_READY,
+          "damaged FAT32 metadata remains diagnosable from valid partition identity and bounds");
+
+    const std::vector<uint8_t> damagedBeforeCheck = disk.bytes;
+    const uint32_t writesBeforeCheck = disk.writes;
+    const uint32_t writeAttemptsBeforeCheck = disk.writeAttempts;
+    const uint32_t flushesBeforeCheck = disk.flushes;
+    storage::Fat32IntegrityJob damagedJob = {};
+    storage::Fat32IntegrityState state =
+        storage::begin_fat32_integrity_job(damagedJob, captured.request);
+    uint32_t steps = 0;
+    bool oneReadPerStep = true;
+    while (state == storage::FAT32_INTEGRITY_RUNNING && steps++ < 20000) {
+        const size_t readsBeforeStep = disk.readLog.size();
+        state = storage::step_fat32_integrity_job(damagedJob);
+        if (disk.readLog.size() - readsBeforeStep > 1)
+            oneReadPerStep = false;
+    }
+    bool bootFinding = false;
+    bool fsInfoFinding = false;
+    for (uint8_t i = 0; i < damagedJob.result.findingCount; ++i) {
+        bootFinding = bootFinding || damagedJob.result.findings[i].category ==
+            storage::FAT32_INTEGRITY_FINDING_BOOT_SIGNATURE;
+        fsInfoFinding = fsInfoFinding || damagedJob.result.findings[i].category ==
+            storage::FAT32_INTEGRITY_FINDING_FSINFO_SIGNATURE;
+    }
+    check(state == storage::FAT32_INTEGRITY_INCONSISTENCY && bootFinding &&
+          fsInfoFinding && damagedJob.result.findingCount >= 2 &&
+          terminal_message(damagedJob.result) ==
+              std::string("Inconsistencies were found. No repairs were performed.") &&
+          finding_category_name(damagedJob.result.findings[0].category)[0],
+          "normal checker activation path returns actual damaged-volume findings and result wording");
+    check(oneReadPerStep && damagedJob.result.ownershipReleased &&
+          damagedJob.result.structuralInconsistencyFound &&
+          disk.bytes == damagedBeforeCheck && disk.writes == writesBeforeCheck &&
+          disk.writeAttempts == writeAttemptsBeforeCheck &&
+          disk.flushes == flushesBeforeCheck,
+          "GUI-bound checker remains cooperative, releases ownership, and leaves media unchanged");
+
+    sector(disk, partition.startLba)[510] = originalBootSignature0;
+    sector(disk, partition.startLba)[511] = originalBootSignature1;
+    sector(disk, fsInfoLba)[0] = originalFsInfoSignature;
+
+    // These IDs are the actual zero-based IDs created in DiskManagerApp::init.
+    KernelWindow window;
+    window.widgetCount = 5;
+    const int widgetIds[] = {START_CHECK_WIDGET_ID, STOP_CHECK_WIDGET_ID,
+        CHECK_FAT32_FILESYSTEM_WIDGET_ID, PREVIOUS_FINDING_WIDGET_ID,
+        NEXT_FINDING_WIDGET_ID};
+    for (int i = 0; i < window.widgetCount; ++i) {
+        window.widgets[i] = {};
+        window.widgets[i].id = widgetIds[i];
+        window.widgets[i].type = WidgetType::Button;
+        window.widgets[i].visible = true;
+        window.widgets[i].enabled = true;
+    }
+    check(widget_ids_match(CHECK_FAT32_FILESYSTEM_WIDGET_ID,
+              START_CHECK_WIDGET_ID, STOP_CHECK_WIDGET_ID,
+              PREVIOUS_FINDING_WIDGET_ID, NEXT_FINDING_WIDGET_ID,
+              CLOSE_DIALOG_WIDGET_ID),
+          "Check, Start, Stop, findings navigation, and Close IDs match production widget creation order");
+
+    int opens = 0;
+    int starts = 0;
+    const auto openDialog = [&opens, &starts](int id) {
+        if (id == CHECK_FAT32_FILESYSTEM_WIDGET_ID) ++opens;
+        (void)starts;
+    };
+    check(dispatch_button_activation(&window,
+              CHECK_FAT32_FILESYSTEM_WIDGET_ID, openDialog) &&
+          opens == 1 && starts == 0,
+          "selection and opening the read-only confirmation do not start verification");
+
+    storage::Fat32IntegrityJob cleanJob = {};
+    const auto startClean = [&window, &starts, &cleanJob,
+                             &captured](int id) {
+        if (id != START_CHECK_WIDGET_ID) return;
+        ++starts;
+        const auto result = storage::begin_fat32_integrity_job(
+            cleanJob, captured.request);
+        if (result == storage::FAT32_INTEGRITY_RUNNING)
+            for (int i = 0; i < window.widgetCount; ++i)
+                if (window.widgets[i].id == START_CHECK_WIDGET_ID)
+                    window.widgets[i].enabled = false;
+    };
+    const int startFocus = focused_button_widget_id_for_index(
+        3, 3, START_CHECK_WIDGET_ID);
+    check(dispatch_focused_button_activation(&window, START_CHECK_WIDGET_ID,
+              startFocus, '\n', startClean) && starts == 1 &&
+          cleanJob.result.state == storage::FAT32_INTEGRITY_RUNNING &&
+          !dispatch_focused_button_activation(&window, START_CHECK_WIDGET_ID,
+              startFocus, '\n', startClean) && starts == 1,
+          "explicit focused Enter starts exactly one production FAT32 job");
+    state = cleanJob.result.state;
+    steps = 0;
+    while (state == storage::FAT32_INTEGRITY_RUNNING && steps++ < 20000)
+        state = storage::step_fat32_integrity_job(cleanJob);
+    check(state == storage::FAT32_INTEGRITY_PASSED &&
+          terminal_message(cleanJob.result) == std::string(
+              "No FAT32 structural inconsistencies were detected in the checks completed.") &&
+          cleanJob.result.structuralAnalysisComplete &&
+          cleanJob.result.orphanAnalysisComplete,
+          "the valid empty production fixture renders a completed clean result only after all walks finish");
+
+    storage::StorageOperationLease conflict = {};
+    const bool leaseAcquired = storage::try_acquire_storage_operation(conflict) ==
+        storage::STORAGE_OPERATION_LOCK_ACQUIRED;
+    CapturedTarget busyTarget = {};
+    const auto busyAdmission = build_target(true, true, false, true,
+        target, capabilities, table, partition, busyTarget);
+    storage::Fat32IntegrityJob busyJob = {};
+    const auto busyState = storage::begin_fat32_integrity_job(
+        busyJob, captured.request);
+    const bool releasedConflict = !leaseAcquired ||
+        storage::release_storage_operation(conflict);
+    check(leaseAcquired && busyAdmission == ADMISSION_OPERATION_BUSY &&
+          busyState == storage::FAT32_INTEGRITY_NOT_ADMITTED &&
+          busyJob.result.reason == storage::FAT32_INTEGRITY_REASON_OPERATION_BUSY &&
+          releasedConflict,
+          "a conflicting production lease prevents GUI checker initiation");
+
+    storage::Fat32IntegrityJob stopJob = {};
+    const auto stopStart = storage::begin_fat32_integrity_job(
+        stopJob, captured.request);
+    state = stopStart;
+    if (state == storage::FAT32_INTEGRITY_RUNNING)
+        state = storage::step_fat32_integrity_job(stopJob);
+    int stopRequests = 0;
+    const auto stopThroughWidget = [&stopJob, &stopRequests](int id) {
+        if (id == STOP_CHECK_WIDGET_ID) {
+            ++stopRequests;
+            (void)storage::request_fat32_integrity_stop(stopJob);
+        }
+    };
+    const int stopFocus = focused_button_widget_id_for_index(
+        2, 2, STOP_CHECK_WIDGET_ID);
+    const bool stopDispatched = state == storage::FAT32_INTEGRITY_RUNNING &&
+        dispatch_focused_button_activation(&window, STOP_CHECK_WIDGET_ID,
+            stopFocus, 32, stopThroughWidget);
+    const size_t readsBeforeStopSettlement = disk.readLog.size();
+    check(stopDispatched && stopRequests == 1 &&
+          stopJob.result.stopRequested,
+          "focused Space dispatches Stop Check to the active checker job");
+    const bool closeDeferred = !request_stop_before_close(stopJob);
+    state = storage::step_fat32_integrity_job(stopJob);
+    const bool closeAllowedAfterSettlement = request_stop_before_close(stopJob);
+    check(closeDeferred,
+          "active application Close requests Stop without closing immediately");
+    check(state == storage::FAT32_INTEGRITY_STOPPED &&
+          closeAllowedAfterSettlement && stopJob.result.ownershipReleased,
+          "application Close becomes safe after the stopped job releases ownership");
+    check(disk.readLog.size() == readsBeforeStopSettlement,
+          "Stop settlement begins no additional checker read");
+
+    int findingIndex = 0;
+    int previousClicks = 0;
+    int nextClicks = 0;
+    int closeClicks = 0;
+    window.widgets[0].visible = true; // Start control is no longer focused.
+    for (int i = 0; i < window.widgetCount; ++i) {
+        if (window.widgets[i].id == START_CHECK_WIDGET_ID)
+            window.widgets[i].enabled = false;
+        if (window.widgets[i].id == STOP_CHECK_WIDGET_ID)
+            window.widgets[i].enabled = true;
+        if (window.widgets[i].id == PREVIOUS_FINDING_WIDGET_ID)
+            window.widgets[i].enabled = false;
+        if (window.widgets[i].id == NEXT_FINDING_WIDGET_ID)
+            window.widgets[i].enabled = true;
+    }
+    const int findingCandidates[] = {CLOSE_DIALOG_WIDGET_ID,
+        PREVIOUS_FINDING_WIDGET_ID, NEXT_FINDING_WIDGET_ID};
+    check(apps::disk_manager_surface_verification_ui::active_action_count(
+              &window, findingCandidates, 3) == 2 &&
+          apps::disk_manager_surface_verification_ui::active_action_widget_id(
+              &window, findingCandidates, 3, 0) ==
+              CLOSE_DIALOG_WIDGET_ID &&
+          apps::disk_manager_surface_verification_ui::active_action_widget_id(
+              &window, findingCandidates, 3, 1) ==
+              NEXT_FINDING_WIDGET_ID,
+          "terminal Tab traversal skips disabled finding navigation controls");
+    const auto navigate = [&findingIndex, &previousClicks, &nextClicks,
+                           &closeClicks, &damagedJob](int id) {
+        if (id == PREVIOUS_FINDING_WIDGET_ID && findingIndex > 0) {
+            ++previousClicks;
+            --findingIndex;
+        } else if (id == NEXT_FINDING_WIDGET_ID &&
+                   static_cast<uint8_t>(findingIndex + 1) <
+                       damagedJob.result.findingCount) {
+            ++nextClicks;
+            ++findingIndex;
+        } else if (id == CLOSE_DIALOG_WIDGET_ID) ++closeClicks;
+    };
+    check(dispatch_widget_activation(&window, NEXT_FINDING_WIDGET_ID, navigate) &&
+          findingIndex == 1 && nextClicks == 1,
+          "pointer activation navigates to the next stored finding");
+    for (int i = 0; i < window.widgetCount; ++i)
+        if (window.widgets[i].id == PREVIOUS_FINDING_WIDGET_ID)
+            window.widgets[i].enabled = true;
+    check(dispatch_widget_activation(&window, PREVIOUS_FINDING_WIDGET_ID,
+              navigate) && findingIndex == 0 && previousClicks == 1,
+          "pointer activation returns to the previous stored finding");
+    check(dispatch_widget_activation(&window, CLOSE_DIALOG_WIDGET_ID, navigate) &&
+          closeClicks == 1,
+          "the normal Close widget dismisses the findings view without repair");
+    for (int i = 0; i < window.widgetCount; ++i)
+        if (window.widgets[i].id == NEXT_FINDING_WIDGET_ID)
+            window.widgets[i].enabled = false;
+    check(!dispatch_widget_activation(&window, NEXT_FINDING_WIDGET_ID, navigate) &&
+          nextClicks == 1,
+          "disabled or stale findings navigation cannot activate");
+
+    const uint32_t writesAfter = disk.writes;
+    const uint32_t attemptsAfter = disk.writeAttempts;
+    const uint32_t flushesAfter = disk.flushes;
+    check(writesAfter == guiWriteBaseline &&
+          attemptsAfter == guiWriteAttemptBaseline &&
+          flushesAfter == guiFlushBaseline,
+          "read-only GUI checker fixtures issue no writes or Flush");
+    if (index != 0xFF) (void)unregister_fake(index, disk);
+    vfs::test_clear_mounts();
+    std::printf("DM36 FAT32 integrity GUI: %d checks, %d failures\n",
+        g_checks - checksBefore, g_failures - failuresBefore);
+}
+
 int main()
 {
     run_nvme_logic_tests();
@@ -9506,6 +9865,7 @@ int main()
     run_whole_disk_erase_tests();
     run_surface_verification_tests();
     run_fat32_integrity_tests();
+    run_disk_manager_fat32_integrity_ui_tests();
     run_disk_manager_wipe_ui_tests();
     run_disk_manager_whole_erase_ui_tests();
     run_disk_manager_surface_verification_ui_tests();
