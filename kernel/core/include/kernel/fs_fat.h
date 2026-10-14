@@ -77,6 +77,28 @@ enum FileWriteStatus : uint8_t {
 
 const char* file_write_status_name(FileWriteStatus status);
 
+// Detailed status for a bounded FAT32 shrink operation. A shrink can fail
+// after directory metadata has been published; in that case the FAT handle
+// is closed and the caller must discard its VFS handle.
+enum FileResizeStatus : uint8_t {
+    FILE_RESIZE_OK = 0,
+    FILE_RESIZE_INVALID_ARGUMENT,
+    FILE_RESIZE_NOT_MOUNTED,
+    FILE_RESIZE_UNSUPPORTED_TYPE,
+    FILE_RESIZE_NOT_FOUND,
+    FILE_RESIZE_IS_DIRECTORY,
+    FILE_RESIZE_READ_ONLY,
+    FILE_RESIZE_UNSUPPORTED_SIZE,
+    FILE_RESIZE_GROW_NOT_SUPPORTED,
+    FILE_RESIZE_BUSY,
+    FILE_RESIZE_CORRUPT_CHAIN,
+    FILE_RESIZE_CROSS_LINK,
+    FILE_RESIZE_IO_ERROR,
+    FILE_RESIZE_IO_TIMEOUT,
+};
+
+const char* file_resize_status_name(FileResizeStatus status);
+
 // Every cluster-chain consumer exposes its last bounded traversal result.
 // This is diagnostic state only; callers still use their existing bool/count
 // return values for compatibility with the VFS API.
@@ -96,6 +118,7 @@ enum TraversalStatus : uint8_t {
 
 const char* traversal_status_name(TraversalStatus status);
 TraversalStatus last_traversal_status();
+block::Status last_io_status();
 
 // Detailed result for delete_path().  The legacy bool API remains available,
 // but callers must be able to distinguish an intentionally refused rmdir from
@@ -389,6 +412,23 @@ bool seek_file(uint8_t fileHandle, uint32_t offset);
 // Returns the number of bytes written.
 uint32_t write_file(uint8_t fileHandle, const void* buffer, uint32_t len);
 
+// Return the live state for an open FAT file handle, or nullptr if invalid.
+const FATFile* get_open_file(uint8_t fileHandle);
+
+// Shrink an existing FAT32 file. The file-size and first-cluster fields are
+// updated in place; no delete/recreate operation is used.
+FileResizeStatus truncate_file_path_status(uint8_t volumeIndex,
+                                           const char* path,
+                                           uint8_t fileHandle,
+                                           uint32_t newSize,
+                                           block::Status* outBlockStatus);
+
+// Allocate and publish the first cluster for an empty open file before its
+// first data write, so a failed write cannot orphan an unreferenced cluster.
+FileWriteStatus ensure_file_cluster_for_write_path_status(
+    uint8_t volumeIndex, const char* path, uint8_t fileHandle,
+    block::Status* outBlockStatus);
+
 // Overwrite an existing file by path and update its directory file size.
 // Does not allocate additional clusters.
 bool overwrite_path(uint8_t volumeIndex, const char* path, const void* buffer, uint32_t len);
@@ -410,6 +450,13 @@ FileWriteStatus update_file_size_path_status(uint8_t volumeIndex,
                                              const char* path,
                                              uint32_t fileSize,
                                              block::Status* outBlockStatus);
+
+// Update first-cluster and size fields together after an open-handle write.
+FileWriteStatus update_file_metadata_path_status(uint8_t volumeIndex,
+                                                 const char* path,
+                                                 uint32_t firstCluster,
+                                                 uint32_t fileSize,
+                                                 block::Status* outBlockStatus);
 
 // Persist all completed writes for a mounted FAT volume.
 bool flush(uint8_t volumeIndex, block::Status* outBlockStatus = nullptr);

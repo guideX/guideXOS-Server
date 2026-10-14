@@ -117,6 +117,8 @@ enum Status : int8_t {
     VFS_ERR_CORRUPT_DIRECTORY = -21,
     VFS_ERR_INVALID_DESTINATION = -22,
     VFS_ERR_ROLLBACK_FAILED = -23,
+    // The requested byte size is outside the filesystem's supported range.
+    VFS_ERR_RESOURCE_LIMIT = -24,
 };
 
 // ================================================================
@@ -173,6 +175,7 @@ struct FileHandle {
     bool     open;
     uint8_t  mountIndex;              // Which mount point
     uint16_t flags;                   // Open flags
+    FileType type;                    // Cached regular-file/directory type
     uint64_t position;                // Current read/write position
     uint64_t size;                    // File size (cached)
     uint8_t  fsFileHandle;            // FS-specific handle
@@ -277,6 +280,10 @@ int64_t file_size(uint8_t handle);
 
 // Flush file buffers.
 Status flush(uint8_t handle);
+
+// Shrink an open regular file on FAT32 without replacing its directory entry.
+// Growth is explicitly unsupported by this API. The cursor is preserved.
+Status truncate_shrink(uint8_t handle, uint64_t newSize);
 
 // Get file handle info.
 const FileHandle* get_handle(uint8_t handle);

@@ -35,6 +35,13 @@ static uint64_t s_allocatedClusters = 0;
 // whole-volume walk.
 static const uint32_t kMaxSafeChainSteps = 65536u;
 static const uint32_t kMaxSafeDirectoryChainSteps = 4096u;
+static const uint32_t kMaxResizeOwnershipScanSteps = 1048576u;
+static const uint32_t kMaxResizeOwnershipDirectories = 4096u;
+// Resize is synchronous and the filesystem already uses shared sector and
+// directory scratch buffers, so a bounded static chain list avoids heap use.
+static uint32_t s_resizeChain[kMaxSafeChainSteps];
+static uint32_t s_resizeDirectoryQueue[kMaxResizeOwnershipDirectories];
+static uint8_t s_resizeDirBuf[4096];
 
 // Sector buffer for reading metadata (one sector at a time)
 static uint8_t   s_secBuf[4096]; // supports up to 4096-byte sectors
@@ -621,10 +628,29 @@ static block::Status write_cluster_sector(const FATVolume& vol,
 
 static block::Status write_fat_entry(const FATVolume& vol, uint32_t cluster, uint32_t value)
 {
+    if ((vol.type != FAT_TYPE_FAT16 && vol.type != FAT_TYPE_FAT32) ||
+        !is_valid_data_cluster(vol, cluster) || vol.bytesPerSector == 0 ||
+        vol.fatSizeSectors == 0 || vol.numFATs == 0) {
+        s_lastIoStatus = block::BLOCK_ERR_INVALID;
+        return s_lastIoStatus;
+    }
+
     uint32_t entrySize = fat_entry_size(vol);
-    uint32_t fatOffset = cluster * entrySize;
-    uint32_t fatSector = vol.reservedSectors + (fatOffset / vol.bytesPerSector);
-    uint32_t entryOffset = fatOffset % vol.bytesPerSector;
+    const uint64_t fatOffset = static_cast<uint64_t>(cluster) * entrySize;
+    const uint64_t fatSectorOffset = fatOffset / vol.bytesPerSector;
+    const uint32_t entryOffset = static_cast<uint32_t>(fatOffset % vol.bytesPerSector);
+    if (fatSectorOffset >= vol.fatSizeSectors ||
+        entryOffset + entrySize > vol.bytesPerSector) {
+        s_lastIoStatus = block::BLOCK_ERR_INVALID;
+        return s_lastIoStatus;
+    }
+    const uint64_t fatSector64 = static_cast<uint64_t>(vol.reservedSectors) +
+                                 fatSectorOffset;
+    if (fatSector64 > 0xFFFFFFFFull || fatSector64 >= vol.totalSectors) {
+        s_lastIoStatus = block::BLOCK_ERR_INVALID;
+        return s_lastIoStatus;
+    }
+    const uint32_t fatSector = static_cast<uint32_t>(fatSector64);
 
     block::Status st = read_volume_sector(vol, fatSector, s_secBuf);
     if (st != block::BLOCK_OK) return st;
@@ -632,18 +658,311 @@ static block::Status write_fat_entry(const FATVolume& vol, uint32_t cluster, uin
     if (entrySize == 2) {
         *reinterpret_cast<uint16_t*>(&s_secBuf[entryOffset]) = static_cast<uint16_t>(value & FAT16_CLUSTER_MASK);
     } else {
-        *reinterpret_cast<uint32_t*>(&s_secBuf[entryOffset]) = value & FAT32_CLUSTER_MASK;
+        uint32_t& current = *reinterpret_cast<uint32_t*>(&s_secBuf[entryOffset]);
+        current = (current & ~FAT32_CLUSTER_MASK) | (value & FAT32_CLUSTER_MASK);
     }
     st = write_volume_sector(vol, fatSector, s_secBuf);
     if (st != block::BLOCK_OK) return st;
 
     for (uint32_t fatIndex = 1; fatIndex < vol.numFATs; ++fatIndex) {
-        uint32_t mirrorSector = fatSector + fatIndex * vol.fatSizeSectors;
+        const uint64_t mirrorSector64 = fatSector64 +
+            static_cast<uint64_t>(fatIndex) * vol.fatSizeSectors;
+        if (mirrorSector64 >= vol.totalSectors || mirrorSector64 > 0xFFFFFFFFull) {
+            s_lastIoStatus = block::BLOCK_ERR_INVALID;
+            return s_lastIoStatus;
+        }
+        const uint32_t mirrorSector = static_cast<uint32_t>(mirrorSector64);
         st = write_volume_sector(vol, mirrorSector, s_secBuf);
         if (st != block::BLOCK_OK) return st;
     }
 
     return block::BLOCK_OK;
+}
+
+static FileResizeStatus resize_io_status()
+{
+    return s_lastIoStatus == block::BLOCK_ERR_TIMEOUT
+        ? FILE_RESIZE_IO_TIMEOUT : FILE_RESIZE_IO_ERROR;
+}
+
+// Unlike next_cluster(), this reader does not turn free, reserved, bad, or
+// out-of-range values into an apparent end-of-chain. Resize must distinguish
+// every malformed link before changing ownership.
+static FileResizeStatus read_resize_link(const FATVolume& vol,
+                                         uint32_t cluster,
+                                         uint32_t* outNext,
+                                         bool* outEndOfChain)
+{
+    if (!outNext || !outEndOfChain || vol.type != FAT_TYPE_FAT32 ||
+        !is_valid_data_cluster(vol, cluster) || vol.bytesPerSector == 0) {
+        set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+        return FILE_RESIZE_CORRUPT_CHAIN;
+    }
+
+    const uint64_t fatOffset = static_cast<uint64_t>(cluster) * 4u;
+    const uint64_t sectorOffset = fatOffset / vol.bytesPerSector;
+    const uint32_t entryOffset = static_cast<uint32_t>(fatOffset % vol.bytesPerSector);
+    if (sectorOffset >= vol.fatSizeSectors ||
+        entryOffset + 4u > vol.bytesPerSector) {
+        set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+        return FILE_RESIZE_CORRUPT_CHAIN;
+    }
+    const uint64_t sector64 = static_cast<uint64_t>(vol.reservedSectors) + sectorOffset;
+    if (sector64 >= vol.totalSectors || sector64 > 0xFFFFFFFFull) {
+        set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+        return FILE_RESIZE_CORRUPT_CHAIN;
+    }
+
+    if (read_volume_sector(vol, static_cast<uint32_t>(sector64), s_secBuf) != block::BLOCK_OK) {
+        set_traversal_status(TRAVERSAL_IO_ERROR);
+        return resize_io_status();
+    }
+
+    const uint32_t value = *reinterpret_cast<const uint32_t*>(&s_secBuf[entryOffset]) &
+                           FAT32_CLUSTER_MASK;
+    if (value >= FAT32_CLUSTER_END) {
+        *outNext = 0;
+        *outEndOfChain = true;
+        set_traversal_status(TRAVERSAL_END_OF_CHAIN);
+        return FILE_RESIZE_OK;
+    }
+    if (value == FAT32_CLUSTER_FREE) {
+        set_traversal_status(TRAVERSAL_TRUNCATED_CHAIN);
+        return FILE_RESIZE_CORRUPT_CHAIN;
+    }
+    if (value == FAT32_CLUSTER_BAD) {
+        set_traversal_status(TRAVERSAL_BAD_CLUSTER);
+        return FILE_RESIZE_CORRUPT_CHAIN;
+    }
+    if (value >= 0x0FFFFFF0u || !is_valid_data_cluster(vol, value)) {
+        set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+        return FILE_RESIZE_CORRUPT_CHAIN;
+    }
+
+    *outNext = value;
+    *outEndOfChain = false;
+    set_traversal_status(TRAVERSAL_OK);
+    return FILE_RESIZE_OK;
+}
+
+static void resize_chain_sift_down(uint32_t start, uint32_t endExclusive)
+{
+    uint32_t root = start;
+    for (;;) {
+        const uint64_t left64 = static_cast<uint64_t>(root) * 2u + 1u;
+        if (left64 >= endExclusive) return;
+        uint32_t child = static_cast<uint32_t>(left64);
+        if (child + 1u < endExclusive && s_resizeChain[child] < s_resizeChain[child + 1u]) {
+            ++child;
+        }
+        if (s_resizeChain[root] >= s_resizeChain[child]) return;
+        const uint32_t tmp = s_resizeChain[root];
+        s_resizeChain[root] = s_resizeChain[child];
+        s_resizeChain[child] = tmp;
+        root = child;
+    }
+}
+
+static void sort_resize_chain(uint32_t count)
+{
+    for (uint32_t start = count / 2u; start > 0; --start) {
+        resize_chain_sift_down(start - 1u, count);
+    }
+    for (uint32_t end = count; end > 1u; --end) {
+        const uint32_t tmp = s_resizeChain[0];
+        s_resizeChain[0] = s_resizeChain[end - 1u];
+        s_resizeChain[end - 1u] = tmp;
+        resize_chain_sift_down(0, end - 1u);
+    }
+}
+
+static bool resize_chain_contains(uint32_t count, uint32_t cluster)
+{
+    uint32_t low = 0;
+    uint32_t high = count;
+    while (low < high) {
+        const uint32_t middle = low + (high - low) / 2u;
+        if (s_resizeChain[middle] == cluster) return true;
+        if (s_resizeChain[middle] < cluster) low = middle + 1u;
+        else high = middle;
+    }
+    return false;
+}
+
+static FileResizeStatus reject_volume_cross_links(const FATVolume& vol,
+                                                  uint32_t targetSector,
+                                                  uint32_t targetOffset,
+                                                  uint32_t chainCount)
+{
+    if (chainCount == 0) return FILE_RESIZE_OK;
+    if (!is_valid_data_cluster(vol, vol.rootCluster)) {
+        set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+        return FILE_RESIZE_CORRUPT_CHAIN;
+    }
+
+    const uint32_t entriesPerSector = vol.bytesPerSector / 32u;
+    if (entriesPerSector == 0 || vol.bytesPerSector % 32u != 0 ||
+        vol.bytesPerSector > sizeof(s_resizeDirBuf)) {
+        set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
+        return FILE_RESIZE_CORRUPT_CHAIN;
+    }
+
+    uint32_t queueCount = 1;
+    uint32_t queueIndex = 0;
+    uint32_t workSteps = 0;
+    s_resizeDirectoryQueue[0] = vol.rootCluster;
+    const uint32_t stepLimit = directory_chain_step_limit(vol);
+    while (queueIndex < queueCount) {
+        const uint32_t firstDirectoryCluster = s_resizeDirectoryQueue[queueIndex++];
+        for (uint32_t prior = 0; prior + 1u < queueIndex; ++prior) {
+            if (s_resizeDirectoryQueue[prior] == firstDirectoryCluster) {
+                set_traversal_status(TRAVERSAL_CHAIN_CYCLE);
+                return FILE_RESIZE_CORRUPT_CHAIN;
+            }
+        }
+
+        uint32_t directoryCluster = firstDirectoryCluster;
+        bool directoryEnded = false;
+        bool chainEnded = false;
+        for (uint32_t step = 0; step < stepLimit; ++step) {
+            if (!is_valid_data_cluster(vol, directoryCluster)) {
+                set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+                return FILE_RESIZE_CORRUPT_CHAIN;
+            }
+            if (++workSteps > kMaxResizeOwnershipScanSteps) {
+                return FILE_RESIZE_UNSUPPORTED_SIZE;
+            }
+            if (resize_chain_contains(chainCount, directoryCluster)) {
+                return FILE_RESIZE_CROSS_LINK;
+            }
+
+            for (uint32_t sectorInCluster = 0;
+                 sectorInCluster < vol.sectorsPerCluster; ++sectorInCluster) {
+                if (++workSteps > kMaxResizeOwnershipScanSteps) {
+                    return FILE_RESIZE_UNSUPPORTED_SIZE;
+                }
+                const uint32_t sector = cluster_to_sector(vol, directoryCluster) + sectorInCluster;
+                if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
+                    set_traversal_status(TRAVERSAL_IO_ERROR);
+                    return resize_io_status();
+                }
+                memcopy(s_resizeDirBuf, s_secBuf, vol.bytesPerSector);
+                if (directoryEnded) continue;
+                for (uint32_t entryIndex = 0; entryIndex < entriesPerSector; ++entryIndex) {
+                    const uint32_t offset = entryIndex * 32u;
+                    const FAT32_DirEntry* entry =
+                        reinterpret_cast<const FAT32_DirEntry*>(&s_resizeDirBuf[offset]);
+                    if (static_cast<uint8_t>(entry->name[0]) == 0x00) {
+                        directoryEnded = true;
+                        break;
+                    }
+                    if (static_cast<uint8_t>(entry->name[0]) == 0xE5 ||
+                        entry->attr == ATTR_LFN || (entry->attr & ATTR_VOLUME_ID)) {
+                        continue;
+                    }
+                    if (sector == targetSector && offset == targetOffset) continue;
+
+                    // FAT directories contain self and parent entries. They
+                    // are not child directories and must not be enqueued.
+                    if (entry->name[0] == '.' &&
+                        (entry->name[1] == ' ' || entry->name[1] == '.')) {
+                        continue;
+                    }
+
+                    const uint32_t firstCluster =
+                        ((static_cast<uint32_t>(entry->firstClusterHi) << 16) |
+                         entry->firstClusterLo) & FAT32_CLUSTER_MASK;
+                    if (firstCluster == 0) continue;
+                    if (entry->attr & ATTR_DIRECTORY) {
+                        if (!is_valid_data_cluster(vol, firstCluster)) {
+                            set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+                            return FILE_RESIZE_CORRUPT_CHAIN;
+                        }
+                        for (uint32_t prior = 0; prior < queueCount; ++prior) {
+                            if (s_resizeDirectoryQueue[prior] == firstCluster) {
+                                set_traversal_status(TRAVERSAL_CHAIN_CYCLE);
+                                return FILE_RESIZE_CORRUPT_CHAIN;
+                            }
+                        }
+                        if (queueCount >= kMaxResizeOwnershipDirectories) {
+                            return FILE_RESIZE_UNSUPPORTED_SIZE;
+                        }
+                        s_resizeDirectoryQueue[queueCount++] = firstCluster;
+                        continue;
+                    }
+
+                    uint32_t peerCluster = firstCluster;
+                    const uint32_t peerLimit = max_chain_steps(vol);
+                    bool peerEnded = false;
+                    for (uint32_t peerStep = 0; peerStep < peerLimit; ++peerStep) {
+                        if (++workSteps > kMaxResizeOwnershipScanSteps) {
+                            return FILE_RESIZE_UNSUPPORTED_SIZE;
+                        }
+                        if (resize_chain_contains(chainCount, peerCluster)) {
+                            return FILE_RESIZE_CROSS_LINK;
+                        }
+                        uint32_t peerNext = 0;
+                        bool peerEndOfChain = false;
+                        const FileResizeStatus peerStatus = read_resize_link(
+                            vol, peerCluster, &peerNext, &peerEndOfChain);
+                        if (peerStatus != FILE_RESIZE_OK) return peerStatus;
+                        if (peerEndOfChain) {
+                            peerEnded = true;
+                            break;
+                        }
+                        peerCluster = peerNext;
+                    }
+                    if (!peerEnded) {
+                        set_traversal_status(TRAVERSAL_CHAIN_STEP_LIMIT);
+                        return FILE_RESIZE_CORRUPT_CHAIN;
+                    }
+                }
+            }
+
+            if (++workSteps > kMaxResizeOwnershipScanSteps) {
+                return FILE_RESIZE_UNSUPPORTED_SIZE;
+            }
+            uint32_t next = 0;
+            bool endOfChain = false;
+            const FileResizeStatus linkStatus = read_resize_link(
+                vol, directoryCluster, &next, &endOfChain);
+            if (linkStatus != FILE_RESIZE_OK) return linkStatus;
+            if (endOfChain) {
+                chainEnded = true;
+                break;
+            }
+            directoryCluster = next;
+        }
+        if (!chainEnded) {
+            set_traversal_status(TRAVERSAL_CHAIN_STEP_LIMIT);
+            return FILE_RESIZE_CORRUPT_CHAIN;
+        }
+    }
+    return FILE_RESIZE_OK;
+}
+
+static FileResizeStatus release_resize_chain(FATVolume& vol,
+                                             uint32_t firstCluster,
+                                             uint32_t clusterCount)
+{
+    uint32_t cluster = firstCluster;
+    for (uint32_t index = 0; index < clusterCount; ++index) {
+        uint32_t next = 0;
+        bool endOfChain = false;
+        const FileResizeStatus linkStatus = read_resize_link(
+            vol, cluster, &next, &endOfChain);
+        if (linkStatus != FILE_RESIZE_OK) return linkStatus;
+        if ((index + 1u == clusterCount) != endOfChain) {
+            set_traversal_status(TRAVERSAL_TRUNCATED_CHAIN);
+            return FILE_RESIZE_CORRUPT_CHAIN;
+        }
+        if (write_fat_entry(vol, cluster, FAT32_CLUSTER_FREE) != block::BLOCK_OK) {
+            return resize_io_status();
+        }
+        vol.nextFreeCluster = cluster;
+        if (!endOfChain) cluster = next;
+    }
+    return FILE_RESIZE_OK;
 }
 
 static uint32_t allocate_cluster(FATVolume& vol)
@@ -1244,6 +1563,7 @@ static bool extend_file_chain(FATVolume& vol, uint32_t previous,
 
 static uint32_t write_file_cursor(FATFile& f, const void* buffer, uint32_t len)
 {
+    s_lastIoStatus = block::BLOCK_OK;
     if (!f.open || (!buffer && len != 0) || len == 0) {
         set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
         return 0;
@@ -1411,6 +1731,12 @@ void close_file(uint8_t fileHandle)
 {
     if (fileHandle >= MAX_OPEN_FILES) return;
     s_files[fileHandle].open = false;
+}
+
+const FATFile* get_open_file(uint8_t fileHandle)
+{
+    if (fileHandle >= MAX_OPEN_FILES || !s_files[fileHandle].open) return nullptr;
+    return &s_files[fileHandle];
 }
 
 const FATVolume* get_volume(uint8_t volumeIndex)
@@ -1990,8 +2316,9 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
     serial::puts("FPASTE_FAT_ALLOCATE_BEGIN bytes=0x");
     serial::put_hex32(len);
     serial::puts("\n");
-    uint32_t firstCluster = allocate_cluster(vol);
-    if (firstCluster == 0) {
+    uint32_t firstCluster = 0;
+    if (len != 0) firstCluster = allocate_cluster(vol);
+    if (len != 0 && firstCluster == 0) {
         if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
         return s_lastIoStatus == block::BLOCK_OK ? FILE_WRITE_NO_FREE_CLUSTER : FILE_WRITE_IO_ERROR;
     }
@@ -2003,14 +2330,16 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
     serial::puts(" bytes=0x");
     serial::put_hex32(len);
     serial::puts("\n");
-    serial::puts("FPASTE_FAT_ALLOCATE_OK cluster=0x");
-    serial::put_hex32(firstCluster);
-    serial::puts("\n");
+    if (firstCluster != 0) {
+        serial::puts("FPASTE_FAT_ALLOCATE_OK cluster=0x");
+        serial::put_hex32(firstCluster);
+        serial::puts("\n");
+    }
 
     serial::puts("FPASTE_FAT_CHAIN_WRITE_BEGIN bytes=0x");
     serial::put_hex32(len);
     serial::puts("\n");
-    if (!write_file_clusters(vol, firstCluster, buffer, len)) {
+    if (len != 0 && !write_file_clusters(vol, firstCluster, buffer, len)) {
         const block::Status failedStatus = s_lastIoStatus;
         release_cluster_chain(vol, firstCluster);
         s_lastIoStatus = failedStatus;
@@ -2034,7 +2363,7 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
     serial::puts("FPASTE_DIRECTORY_METADATA_BEGIN\n");
     if (!find_free_dir_entry(volumeIndex, parentCluster, &sector, &offset)) {
         const block::Status failedStatus = s_lastIoStatus;
-        release_cluster_chain(vol, firstCluster);
+        if (firstCluster != 0) release_cluster_chain(vol, firstCluster);
         s_lastIoStatus = failedStatus;
         if (outBlockStatus) *outBlockStatus = failedStatus;
         return failedStatus == block::BLOCK_OK ? FILE_WRITE_NO_FREE_ENTRY : FILE_WRITE_IO_ERROR;
@@ -2047,7 +2376,7 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
 
     if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
         const block::Status failedStatus = s_lastIoStatus;
-        release_cluster_chain(vol, firstCluster);
+        if (firstCluster != 0) release_cluster_chain(vol, firstCluster);
         s_lastIoStatus = failedStatus;
         if (outBlockStatus) *outBlockStatus = failedStatus;
         return FILE_WRITE_IO_ERROR;
@@ -2063,7 +2392,7 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
 
     if (write_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
         const block::Status failedStatus = s_lastIoStatus;
-        release_cluster_chain(vol, firstCluster);
+        if (firstCluster != 0) release_cluster_chain(vol, firstCluster);
         s_lastIoStatus = failedStatus;
         if (outBlockStatus) *outBlockStatus = failedStatus;
         return FILE_WRITE_IO_ERROR;
@@ -2137,6 +2466,383 @@ FileWriteStatus update_file_size_path_status(uint8_t volumeIndex,
     return FILE_WRITE_OK;
 }
 
+FileWriteStatus update_file_metadata_path_status(uint8_t volumeIndex,
+                                                 const char* path,
+                                                 uint32_t firstCluster,
+                                                 uint32_t fileSize,
+                                                 block::Status* outBlockStatus)
+{
+    s_lastIoStatus = block::BLOCK_OK;
+    if (outBlockStatus) *outBlockStatus = block::BLOCK_OK;
+    if (volumeIndex >= MAX_FAT_VOLUMES || !path) {
+        return FILE_WRITE_INVALID_ARGUMENT;
+    }
+    if (!s_volumes[volumeIndex].mounted) return FILE_WRITE_NOT_MOUNTED;
+
+    FATVolume& vol = s_volumes[volumeIndex];
+    if (vol.type != FAT_TYPE_FAT32) return FILE_WRITE_UNSUPPORTED_TYPE;
+    if ((firstCluster != 0 && !is_valid_data_cluster(vol, firstCluster)) ||
+        (fileSize != 0 && firstCluster == 0)) {
+        return FILE_WRITE_INVALID_ARGUMENT;
+    }
+
+    DirEntry entry;
+    uint32_t sector = 0;
+    uint32_t offset = 0;
+    if (!find_path_entry_at(volumeIndex, path, &entry, &sector, &offset)) {
+        if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+        if (s_lastIoStatus != block::BLOCK_OK) {
+            return s_lastIoStatus == block::BLOCK_ERR_TIMEOUT
+                ? FILE_WRITE_IO_TIMEOUT : FILE_WRITE_IO_ERROR;
+        }
+        return FILE_WRITE_NOT_FOUND;
+    }
+    if (entry.isDir) return FILE_WRITE_INVALID_ARGUMENT;
+    if (entry.attr & ATTR_READ_ONLY) return FILE_WRITE_READ_ONLY;
+    if (offset + sizeof(FAT32_DirEntry) > vol.bytesPerSector) {
+        return FILE_WRITE_INVALID_ARGUMENT;
+    }
+
+    if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
+        if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+        return s_lastIoStatus == block::BLOCK_ERR_TIMEOUT
+            ? FILE_WRITE_IO_TIMEOUT : FILE_WRITE_IO_ERROR;
+    }
+    FAT32_DirEntry* de = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[offset]);
+    de->firstClusterHi = static_cast<uint16_t>((firstCluster >> 16) & 0xFFFFu);
+    de->firstClusterLo = static_cast<uint16_t>(firstCluster & 0xFFFFu);
+    de->fileSize = fileSize;
+    if (write_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
+        if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+        return s_lastIoStatus == block::BLOCK_ERR_TIMEOUT
+            ? FILE_WRITE_IO_TIMEOUT : FILE_WRITE_IO_ERROR;
+    }
+    return FILE_WRITE_OK;
+}
+
+FileWriteStatus ensure_file_cluster_for_write_path_status(
+    uint8_t volumeIndex, const char* path, uint8_t fileHandle,
+    block::Status* outBlockStatus)
+{
+    s_lastIoStatus = block::BLOCK_OK;
+    if (outBlockStatus) *outBlockStatus = block::BLOCK_OK;
+    if (volumeIndex >= MAX_FAT_VOLUMES || !path || fileHandle >= MAX_OPEN_FILES) {
+        return FILE_WRITE_INVALID_ARGUMENT;
+    }
+    if (!s_volumes[volumeIndex].mounted) return FILE_WRITE_NOT_MOUNTED;
+    FATVolume& vol = s_volumes[volumeIndex];
+    if (vol.type != FAT_TYPE_FAT32) return FILE_WRITE_UNSUPPORTED_TYPE;
+
+    FATFile& file = s_files[fileHandle];
+    if (!file.open || file.volumeIndex != volumeIndex || file.fileSize != 0 ||
+        file.currentOffset != 0) {
+        return FILE_WRITE_INVALID_ARGUMENT;
+    }
+    if (file.attr & ATTR_READ_ONLY) return FILE_WRITE_READ_ONLY;
+    if (file.firstCluster != 0) return FILE_WRITE_OK;
+
+    DirEntry entry;
+    uint32_t sector = 0;
+    uint32_t offset = 0;
+    if (!find_path_entry_at(volumeIndex, path, &entry, &sector, &offset)) {
+        if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+        return s_lastIoStatus == block::BLOCK_OK
+            ? FILE_WRITE_NOT_FOUND
+            : (s_lastIoStatus == block::BLOCK_ERR_TIMEOUT
+                ? FILE_WRITE_IO_TIMEOUT : FILE_WRITE_IO_ERROR);
+    }
+    if (entry.isDir) return FILE_WRITE_INVALID_ARGUMENT;
+    if (entry.attr & ATTR_READ_ONLY) return FILE_WRITE_READ_ONLY;
+    if (entry.fileSize != 0 || entry.firstCluster != 0) {
+        return FILE_WRITE_INVALID_ARGUMENT;
+    }
+
+    const uint32_t firstCluster = allocate_cluster(vol);
+    if (firstCluster == 0) {
+        if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+        if (s_lastIoStatus == block::BLOCK_ERR_TIMEOUT) return FILE_WRITE_IO_TIMEOUT;
+        if (s_lastIoStatus != block::BLOCK_OK) return FILE_WRITE_IO_ERROR;
+        return FILE_WRITE_NO_FREE_CLUSTER;
+    }
+
+    if (offset + sizeof(FAT32_DirEntry) > vol.bytesPerSector) {
+        release_allocated_cluster(vol, firstCluster);
+        return FILE_WRITE_INVALID_ARGUMENT;
+    }
+    if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
+        const block::Status failedStatus = s_lastIoStatus;
+        release_allocated_cluster(vol, firstCluster);
+        s_lastIoStatus = failedStatus;
+        if (outBlockStatus) *outBlockStatus = failedStatus;
+        return failedStatus == block::BLOCK_ERR_TIMEOUT
+            ? FILE_WRITE_IO_TIMEOUT : FILE_WRITE_IO_ERROR;
+    }
+
+    FAT32_DirEntry* de = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[offset]);
+    if (de->fileSize != 0 ||
+        (((static_cast<uint32_t>(de->firstClusterHi) << 16) |
+          de->firstClusterLo) & FAT32_CLUSTER_MASK) != 0) {
+        release_allocated_cluster(vol, firstCluster);
+        return FILE_WRITE_INVALID_ARGUMENT;
+    }
+    de->firstClusterHi = static_cast<uint16_t>((firstCluster >> 16) & 0xFFFFu);
+    de->firstClusterLo = static_cast<uint16_t>(firstCluster & 0xFFFFu);
+    if (write_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
+        // The failed write may still have reached the medium. Keep the
+        // cluster allocated so a partially published directory entry cannot
+        // point at a cluster that has already been freed.
+        if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+        close_file(fileHandle);
+        return s_lastIoStatus == block::BLOCK_ERR_TIMEOUT
+            ? FILE_WRITE_IO_TIMEOUT : FILE_WRITE_IO_ERROR;
+    }
+
+    file.firstCluster = firstCluster;
+    file.currentCluster = firstCluster;
+    file.pendingClusterAdvance = false;
+    return FILE_WRITE_OK;
+}
+
+static FileResizeStatus resize_file_write_status(FileWriteStatus status)
+{
+    switch (status) {
+        case FILE_WRITE_OK: return FILE_RESIZE_OK;
+        case FILE_WRITE_NOT_MOUNTED: return FILE_RESIZE_NOT_MOUNTED;
+        case FILE_WRITE_UNSUPPORTED_TYPE: return FILE_RESIZE_UNSUPPORTED_TYPE;
+        case FILE_WRITE_NOT_FOUND: return FILE_RESIZE_NOT_FOUND;
+        case FILE_WRITE_READ_ONLY: return FILE_RESIZE_READ_ONLY;
+        case FILE_WRITE_IO_TIMEOUT: return FILE_RESIZE_IO_TIMEOUT;
+        case FILE_WRITE_IO_ERROR: return FILE_RESIZE_IO_ERROR;
+        case FILE_WRITE_CORRUPT_CHAIN: return FILE_RESIZE_CORRUPT_CHAIN;
+        default: return FILE_RESIZE_INVALID_ARGUMENT;
+    }
+}
+
+FileResizeStatus truncate_file_path_status(uint8_t volumeIndex,
+                                           const char* path,
+                                           uint8_t fileHandle,
+                                           uint32_t newSize,
+                                           block::Status* outBlockStatus)
+{
+    s_lastIoStatus = block::BLOCK_OK;
+    set_traversal_status(TRAVERSAL_OK);
+    if (outBlockStatus) *outBlockStatus = block::BLOCK_OK;
+    if (volumeIndex >= MAX_FAT_VOLUMES || !path || fileHandle >= MAX_OPEN_FILES) {
+        return FILE_RESIZE_INVALID_ARGUMENT;
+    }
+    if (!s_volumes[volumeIndex].mounted) return FILE_RESIZE_NOT_MOUNTED;
+    FATVolume& vol = s_volumes[volumeIndex];
+    if (vol.type != FAT_TYPE_FAT32) return FILE_RESIZE_UNSUPPORTED_TYPE;
+
+    FATFile& file = s_files[fileHandle];
+    if (!file.open || file.volumeIndex != volumeIndex) return FILE_RESIZE_INVALID_ARGUMENT;
+    if (file.attr & ATTR_READ_ONLY) return FILE_RESIZE_READ_ONLY;
+
+    DirEntry entry;
+    uint32_t entrySector = 0;
+    uint32_t entryOffset = 0;
+    if (!find_path_entry_at(volumeIndex, path, &entry, &entrySector, &entryOffset)) {
+        if (s_lastIoStatus != block::BLOCK_OK) {
+            if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+            return resize_io_status();
+        }
+        return FILE_RESIZE_NOT_FOUND;
+    }
+    if (entry.isDir) return FILE_RESIZE_IS_DIRECTORY;
+    if (entry.attr & ATTR_READ_ONLY) return FILE_RESIZE_READ_ONLY;
+    if (entry.fileSize != file.fileSize || entry.firstCluster != file.firstCluster) {
+        return FILE_RESIZE_BUSY;
+    }
+    if (newSize > file.fileSize) return FILE_RESIZE_GROW_NOT_SUPPORTED;
+    if (newSize == file.fileSize &&
+        (newSize != 0 || file.firstCluster == 0)) {
+        return FILE_RESIZE_OK;
+    }
+
+    uint32_t clusterBytes = 0;
+    if (!cluster_byte_count(vol, &clusterBytes)) {
+        return FILE_RESIZE_UNSUPPORTED_SIZE;
+    }
+    const uint32_t maxSteps = max_chain_steps(vol);
+    uint32_t oldClusterCount = 0;
+    if (file.fileSize != 0) {
+        const uint64_t count64 =
+            (static_cast<uint64_t>(file.fileSize) + clusterBytes - 1u) / clusterBytes;
+        if (count64 == 0 || count64 > maxSteps || count64 > kMaxSafeChainSteps) {
+            return FILE_RESIZE_UNSUPPORTED_SIZE;
+        }
+        oldClusterCount = static_cast<uint32_t>(count64);
+        if (file.firstCluster == 0) return FILE_RESIZE_CORRUPT_CHAIN;
+        uint32_t cluster = file.firstCluster;
+        for (uint32_t index = 0; index < oldClusterCount; ++index) {
+            if (!is_valid_data_cluster(vol, cluster)) {
+                set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+                return FILE_RESIZE_CORRUPT_CHAIN;
+            }
+            s_resizeChain[index] = cluster;
+            uint32_t next = 0;
+            bool endOfChain = false;
+            const FileResizeStatus linkStatus = read_resize_link(
+                vol, cluster, &next, &endOfChain);
+            if (linkStatus != FILE_RESIZE_OK) {
+                if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+                return linkStatus;
+            }
+            const bool expectedEnd = index + 1u == oldClusterCount;
+            if (endOfChain != expectedEnd) {
+                set_traversal_status(TRAVERSAL_TRUNCATED_CHAIN);
+                return FILE_RESIZE_CORRUPT_CHAIN;
+            }
+            if (!endOfChain) cluster = next;
+        }
+    } else if (file.firstCluster != 0) {
+        uint32_t cluster = file.firstCluster;
+        bool ended = false;
+        for (; oldClusterCount < maxSteps; ++oldClusterCount) {
+            if (!is_valid_data_cluster(vol, cluster)) {
+                set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+                return FILE_RESIZE_CORRUPT_CHAIN;
+            }
+            s_resizeChain[oldClusterCount] = cluster;
+            uint32_t next = 0;
+            bool endOfChain = false;
+            const FileResizeStatus linkStatus = read_resize_link(
+                vol, cluster, &next, &endOfChain);
+            if (linkStatus != FILE_RESIZE_OK) {
+                if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+                return linkStatus;
+            }
+            if (endOfChain) {
+                ++oldClusterCount;
+                ended = true;
+                break;
+            }
+            cluster = next;
+        }
+        if (!ended) {
+            set_traversal_status(TRAVERSAL_CHAIN_STEP_LIMIT);
+            return FILE_RESIZE_CORRUPT_CHAIN;
+        }
+    }
+
+    if (oldClusterCount > 0) {
+        sort_resize_chain(oldClusterCount);
+        for (uint32_t i = 1; i < oldClusterCount; ++i) {
+            if (s_resizeChain[i - 1] == s_resizeChain[i]) {
+                set_traversal_status(TRAVERSAL_CHAIN_CYCLE);
+                return FILE_RESIZE_CORRUPT_CHAIN;
+            }
+        }
+    }
+
+    const uint32_t keepClusterCount = newSize == 0 ? 0u : static_cast<uint32_t>(
+        (static_cast<uint64_t>(newSize) + clusterBytes - 1u) / clusterBytes);
+    if (keepClusterCount > oldClusterCount) return FILE_RESIZE_CORRUPT_CHAIN;
+
+    // The directory entry is the target-size publication point. Preserve the
+    // original chain order before sorting it for cross-link checks.
+    uint32_t keptTailCluster = 0;
+    uint32_t detachedFirstCluster = 0;
+    if (keepClusterCount != 0) {
+        // Rewalk the already validated chain to recover its ordered tail and
+        // the start of the detached suffix without keeping a second 256 KiB
+        // buffer in kernel memory.
+        uint32_t cluster = file.firstCluster;
+        for (uint32_t index = 0; index < keepClusterCount; ++index) {
+            keptTailCluster = cluster;
+            uint32_t next = 0;
+            bool endOfChain = false;
+            const FileResizeStatus linkStatus = read_resize_link(
+                vol, cluster, &next, &endOfChain);
+            if (linkStatus != FILE_RESIZE_OK) {
+                if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+                return linkStatus;
+            }
+            if (index + 1u == keepClusterCount) {
+                if (!endOfChain) detachedFirstCluster = next;
+            } else {
+                if (endOfChain) return FILE_RESIZE_CORRUPT_CHAIN;
+                cluster = next;
+            }
+        }
+    } else {
+        detachedFirstCluster = file.firstCluster;
+    }
+    const uint32_t detachedClusterCount = oldClusterCount - keepClusterCount;
+
+    if (detachedClusterCount != 0) {
+        const FileResizeStatus crossLinkStatus = reject_volume_cross_links(
+            vol, entrySector, entryOffset, oldClusterCount);
+        if (crossLinkStatus != FILE_RESIZE_OK) {
+            if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+            return crossLinkStatus;
+        }
+    }
+
+    uint32_t newCursorCluster = 0;
+    bool newPendingClusterAdvance = false;
+    if (newSize == 0) {
+        newCursorCluster = 0;
+    } else if (file.currentOffset < newSize) {
+        const uint32_t cursorIndex = file.currentOffset / clusterBytes;
+        uint32_t cluster = file.firstCluster;
+        for (uint32_t index = 0; index < cursorIndex; ++index) {
+            uint32_t next = 0;
+            bool endOfChain = false;
+            const FileResizeStatus linkStatus = read_resize_link(
+                vol, cluster, &next, &endOfChain);
+            if (linkStatus != FILE_RESIZE_OK || endOfChain) {
+                if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+                return linkStatus == FILE_RESIZE_OK
+                    ? FILE_RESIZE_CORRUPT_CHAIN : linkStatus;
+            }
+            cluster = next;
+        }
+        newCursorCluster = cluster;
+    } else if (file.currentOffset == newSize) {
+        newCursorCluster = keptTailCluster;
+        newPendingClusterAdvance = (newSize % clusterBytes) == 0;
+    } else {
+        newCursorCluster = file.firstCluster;
+    }
+
+    const uint32_t newFirstCluster = keepClusterCount == 0
+        ? 0u : file.firstCluster;
+    block::Status metadataBlockStatus = block::BLOCK_OK;
+    const FileWriteStatus metadataStatus = update_file_metadata_path_status(
+        volumeIndex, path, newFirstCluster, newSize, &metadataBlockStatus);
+    if (metadataStatus != FILE_WRITE_OK) {
+        if (outBlockStatus) *outBlockStatus = metadataBlockStatus;
+        if (metadataStatus == FILE_WRITE_IO_ERROR ||
+            metadataStatus == FILE_WRITE_IO_TIMEOUT) {
+            close_file(fileHandle);
+        }
+        return resize_file_write_status(metadataStatus);
+    }
+
+    file.firstCluster = newFirstCluster;
+    file.fileSize = newSize;
+    file.currentCluster = newCursorCluster;
+    file.pendingClusterAdvance = newPendingClusterAdvance;
+
+    if (detachedClusterCount != 0) {
+        if (keepClusterCount != 0 &&
+            write_fat_entry(vol, keptTailCluster, fat_end_value(vol)) != block::BLOCK_OK) {
+            if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+            close_file(fileHandle);
+            return resize_io_status();
+        }
+        const FileResizeStatus releaseStatus = release_resize_chain(
+            vol, detachedFirstCluster, detachedClusterCount);
+        if (releaseStatus != FILE_RESIZE_OK) {
+            if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+            close_file(fileHandle);
+            return releaseStatus;
+        }
+    }
+    return FILE_RESIZE_OK;
+}
+
 bool create_directory_path(uint8_t volumeIndex, const char* path)
 {
     return create_directory_path_status(volumeIndex, path, nullptr) == DIRECTORY_CREATE_OK;
@@ -2182,6 +2888,27 @@ const char* file_write_status_name(FileWriteStatus status)
     }
 }
 
+const char* file_resize_status_name(FileResizeStatus status)
+{
+    switch (status) {
+        case FILE_RESIZE_OK: return "FAT_FILE_RESIZE_OK";
+        case FILE_RESIZE_INVALID_ARGUMENT: return "FAT_FILE_RESIZE_INVALID_ARGUMENT";
+        case FILE_RESIZE_NOT_MOUNTED: return "FAT_FILE_RESIZE_NOT_MOUNTED";
+        case FILE_RESIZE_UNSUPPORTED_TYPE: return "FAT_FILE_RESIZE_UNSUPPORTED_TYPE";
+        case FILE_RESIZE_NOT_FOUND: return "FAT_FILE_RESIZE_NOT_FOUND";
+        case FILE_RESIZE_IS_DIRECTORY: return "FAT_FILE_RESIZE_IS_DIRECTORY";
+        case FILE_RESIZE_READ_ONLY: return "FAT_FILE_RESIZE_READ_ONLY";
+        case FILE_RESIZE_UNSUPPORTED_SIZE: return "FAT_FILE_RESIZE_UNSUPPORTED_SIZE";
+        case FILE_RESIZE_GROW_NOT_SUPPORTED: return "FAT_FILE_RESIZE_GROW_NOT_SUPPORTED";
+        case FILE_RESIZE_BUSY: return "FAT_FILE_RESIZE_BUSY";
+        case FILE_RESIZE_CORRUPT_CHAIN: return "FAT_FILE_RESIZE_CORRUPT_CHAIN";
+        case FILE_RESIZE_CROSS_LINK: return "FAT_FILE_RESIZE_CROSS_LINK";
+        case FILE_RESIZE_IO_ERROR: return "FAT_FILE_RESIZE_IO_ERROR";
+        case FILE_RESIZE_IO_TIMEOUT: return "FAT_FILE_RESIZE_IO_TIMEOUT";
+        default: return "FAT_FILE_RESIZE_UNKNOWN";
+    }
+}
+
 const char* traversal_status_name(TraversalStatus status)
 {
     switch (status) {
@@ -2203,6 +2930,11 @@ const char* traversal_status_name(TraversalStatus status)
 TraversalStatus last_traversal_status()
 {
     return s_lastTraversalStatus;
+}
+
+block::Status last_io_status()
+{
+    return s_lastIoStatus;
 }
 
 const char* delete_status_name(DeleteStatus status)
