@@ -1562,9 +1562,10 @@ static RexxAstClause *rexx_parser_parse_simple_keyword(
         if (kind == REXX_AST_CLAUSE_ADDRESS &&
             !rexx_parser_token_is_stop(&parser->current, stop_mask) &&
             rexx_parser_is_name_token(&parser->current) &&
-            rexx_parser_can_start_term(&parser->lookahead) &&
-            !rexx_parser_tokens_are_adjacent(&parser->current,
-                                             &parser->lookahead)) {
+            (rexx_parser_token_is_stop(&parser->lookahead, stop_mask) ||
+             (rexx_parser_can_start_term(&parser->lookahead) &&
+              !rexx_parser_tokens_are_adjacent(&parser->current,
+                                               &parser->lookahead)))) {
             clause->as.simple.address_environment = parser->current;
             clause->as.simple.has_address_environment = 1;
             if (!rexx_parser_advance(parser)) {

@@ -6,8 +6,9 @@
  *
  * A shell command table can register guide_rexx_main directly. The function
  * accepts the conventional argc/argv shape and returns a process-style
- * status: zero on success, one for a script/file/runtime failure, and two
- * for invalid command-line usage.
+ * status: the integer result from an explicit EXIT value when representable,
+ * zero on normal completion or valueless EXIT, one for a script/file/runtime
+ * failure, and two for invalid command-line usage.
  */
 
 #ifdef __cplusplus

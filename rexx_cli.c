@@ -14,6 +14,10 @@
 #include "rexx_vm.h"
 
 #include <stdio.h>
+#include <errno.h>
+#include <math.h>
+#include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 enum {
@@ -90,6 +94,62 @@ static void rexx_cli_report_parse_error(const char *path,
     } else {
         (void)fprintf(stderr, "rexx: %s: syntax error: %s\n", path, message);
     }
+}
+
+/* Map an optional REXX EXIT result to a host process status. The VM retains
+ * the full RexxValue for embedders; this CLI boundary accepts integral values
+ * representable by int32_t, which is the shell bridge's status type. */
+static int rexx_cli_exit_status(const RexxVM *vm, int *status_out)
+{
+    double number;
+
+    if (vm == NULL || status_out == NULL || !vm->exit_requested)
+        return 0;
+    if (!vm->exit_has_value) {
+        *status_out = REXX_CLI_EXIT_SUCCESS;
+        return 1;
+    }
+
+    if (vm->exit_value.type == REXX_VALUE_NUMBER) {
+        number = vm->exit_value.as.number;
+    } else if (vm->exit_value.type == REXX_VALUE_BOOLEAN) {
+        number = vm->exit_value.as.boolean ? 1.0 : 0.0;
+    } else if (vm->exit_value.type == REXX_VALUE_STRING) {
+        char *copy;
+        char *end;
+        size_t length = vm->exit_value.as.string.length;
+
+        if (vm->exit_value.as.string.bytes == NULL || length == SIZE_MAX ||
+            memchr(vm->exit_value.as.string.bytes, '\0', length) != NULL)
+            return 0;
+        copy = (char *)malloc(length + 1u);
+        if (copy == NULL) return -1;
+        memcpy(copy, vm->exit_value.as.string.bytes, length);
+        copy[length] = '\0';
+        errno = 0;
+        number = strtod(copy, &end);
+        if (errno == ERANGE || end == copy) {
+            free(copy);
+            return 0;
+        }
+        while (*end == ' ' || *end == '\t' || *end == '\r' ||
+               *end == '\n' || *end == '\f' || *end == '\v') {
+            ++end;
+        }
+        if (*end != '\0') {
+            free(copy);
+            return 0;
+        }
+        free(copy);
+    } else {
+        return 0;
+    }
+
+    if (!isfinite(number) || number < (double)INT32_MIN ||
+        number > (double)INT32_MAX || number != (double)(int32_t)number)
+        return 0;
+    *status_out = (int)(int32_t)number;
+    return 1;
 }
 
 /* Run the interpreter pipeline and release every owned object on all exits. */
@@ -174,7 +234,25 @@ static int rexx_cli_execute_source(const char *path,
         goto cleanup;
     }
 
-    result = REXX_CLI_EXIT_SUCCESS;
+    if (vm.exit_requested) {
+        int exit_status = REXX_CLI_EXIT_FAILURE;
+        int exit_status_result = rexx_cli_exit_status(&vm, &exit_status);
+        if (exit_status_result < 0) {
+            (void)fprintf(stderr,
+                          "rexx: %s: out of memory while reading EXIT value\n",
+                          path);
+            goto cleanup;
+        }
+        if (exit_status_result == 0) {
+            (void)fprintf(stderr,
+                          "rexx: %s: EXIT value is not an integer process status\n",
+                          path);
+            goto cleanup;
+        }
+        result = exit_status;
+    } else {
+        result = REXX_CLI_EXIT_SUCCESS;
+    }
 
 cleanup:
     /* All release helpers accept zero-initialized/partially initialized state. */

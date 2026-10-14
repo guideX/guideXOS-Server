@@ -19,6 +19,7 @@ extern "C" {
 #define REXX_VM_DEFAULT_STACK_CAPACITY ((size_t)256u)
 #define REXX_VM_MAX_STACK_CAPACITY ((size_t)1048576u)
 #define REXX_VM_MAX_TABLE_ENTRIES ((size_t)65536u)
+#define REXX_VM_DEFAULT_INSTRUCTION_BUDGET ((size_t)1000000u)
 
 typedef enum RexxValueType {
     REXX_VALUE_UNSET = 0,
@@ -54,7 +55,8 @@ typedef enum RexxVMStatus {
     REXX_VM_STATUS_UNSUPPORTED_OPCODE,
     REXX_VM_STATUS_IO_ERROR,
     REXX_VM_STATUS_UNKNOWN_FUNCTION,
-    REXX_VM_STATUS_INVALID_FUNCTION_CALL
+    REXX_VM_STATUS_INVALID_FUNCTION_CALL,
+    REXX_VM_STATUS_INSTRUCTION_LIMIT
 } RexxVMStatus;
 
 typedef struct RexxVMError {
@@ -92,6 +94,7 @@ typedef struct RexxVM {
     size_t stack_capacity;
     size_t sp;            /* Number of live entries; top is stack[sp - 1]. */
     size_t pc;            /* Current bytecode instruction index. */
+    size_t instruction_budget; /* Maximum dispatches allowed by one execute. */
 
     RexxVMEntry *locals;
     size_t local_count;
@@ -104,6 +107,8 @@ typedef struct RexxVM {
     size_t stem_capacity;
 
     int32_t rc;           /* Most recent guideXOS command return code. */
+    char *address_environment; /* NULL means the initial KERNEL environment. */
+    size_t address_environment_length;
     RexxVMCommandDispatcher command_dispatcher;
     void *command_dispatcher_user_data;
     RexxVMAddressDispatcher address_dispatcher;
@@ -111,6 +116,9 @@ typedef struct RexxVM {
 
     RexxVMStatus status;
     RexxVMError error;
+    RexxValue exit_value;
+    int exit_requested;
+    int exit_has_value;
     int initialized;
 } RexxVM;
 
@@ -118,14 +126,19 @@ typedef struct RexxVM {
 RexxVMStatus rexx_vm_init(RexxVM *vm, size_t stack_capacity);
 void rexx_vm_free(RexxVM *vm);
 
+/* Set the maximum number of bytecode instructions dispatched by one execute.
+ * Zero is rejected so execution always remains bounded. */
+RexxVMStatus rexx_vm_set_instruction_budget(RexxVM *vm, size_t budget);
+
 /*
- * Executes the implemented compiler opcodes (constants, variable/stem access,
- * ADD/SUB/MULTIPLY, concatenation, GREATER, SAY, plain DO blocks, jumps,
- * stack basics, ADDRESS, and registered built-in function calls). Other
- * opcodes return REXX_VM_STATUS_UNSUPPORTED_OPCODE. Locals/globals persist.
- * OP_ADDRESS with a value consumes that command string and leaves its numeric
- * RC on the evaluation stack; environment-aware dispatch receives the
- * explicit environment or KERNEL by default. `vm->rc` records the latest RC.
+ * Executes the compiler opcodes implemented by this VM. Other opcodes return
+ * REXX_VM_STATUS_UNSUPPORTED_OPCODE. Locals/globals persist. ADDRESS and
+ * command clauses consume their command string, update `vm->rc`, and expose
+ * that return code through the REXX RC variable; they leave no stack value.
+ * ADDRESS environment changes the active environment, while ADDRESS
+ * environment command dispatches one command without changing it. The
+ * default environment is KERNEL. EXIT terminates successfully and stores its
+ * optional result in `exit_value`. Each call is bounded by instruction_budget.
  */
 RexxVMStatus rexx_vm_execute(RexxVM *vm,
                              const RexxBytecodeChunk *chunk);

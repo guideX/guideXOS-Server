@@ -14,7 +14,8 @@ static const char *const vm_messages[] = {
     "evaluation stack overflow", "evaluation stack underflow",
     "invalid or malformed bytecode", "value is not a valid finite number",
     "opcode is not implemented by this VM", "standard output error",
-    "unknown REXX built-in function", "invalid arguments to REXX built-in function"
+    "unknown REXX built-in function", "invalid arguments to REXX built-in function",
+    "instruction budget exhausted"
 };
 
 static int ascii_space(unsigned char c)
@@ -120,7 +121,7 @@ static RexxVMStatus vm_fail(RexxVM *vm, RexxVMStatus status, size_t pc)
         vm->error.status = status;
         vm->error.pc = pc;
         vm->error.message = status >= REXX_VM_STATUS_OK &&
-                            status <= REXX_VM_STATUS_INVALID_FUNCTION_CALL
+                            status <= REXX_VM_STATUS_INSTRUCTION_LIMIT
                                 ? vm_messages[status] : "unknown VM error";
     }
     return status;
@@ -269,10 +270,19 @@ RexxVMStatus rexx_vm_init(RexxVM *vm, size_t stack_capacity)
     vm->stack = (RexxValue *)calloc(stack_capacity, sizeof(*vm->stack));
     if (vm->stack == NULL) return vm_fail(vm, REXX_VM_STATUS_OUT_OF_MEMORY, 0);
     vm->stack_capacity = stack_capacity;
+    vm->instruction_budget = REXX_VM_DEFAULT_INSTRUCTION_BUDGET;
     vm->initialized = 1;
     vm->status = REXX_VM_STATUS_OK;
     vm->error.status = REXX_VM_STATUS_OK;
     vm->error.message = "ok";
+    return REXX_VM_STATUS_OK;
+}
+
+RexxVMStatus rexx_vm_set_instruction_budget(RexxVM *vm, size_t budget)
+{
+    if (vm == NULL || !vm->initialized || budget == 0u)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    vm->instruction_budget = budget;
     return REXX_VM_STATUS_OK;
 }
 
@@ -298,10 +308,12 @@ void rexx_vm_free(RexxVM *vm)
         free(vm->stems[i].tail);
         rexx_value_clear(&vm->stems[i].value);
     }
+    rexx_value_clear(&vm->exit_value);
     free(vm->stack);
     free(vm->locals);
     free(vm->globals);
     free(vm->stems);
+    free(vm->address_environment);
     memset(vm, 0, sizeof(*vm));
 }
 
@@ -328,6 +340,69 @@ int32_t rexx_vm_guidexos_command_stub(const char *command, size_t command_length
     (void)command;
     (void)command_length;
     return INT32_C(127); /* Dispatcher unavailable; never invokes a host shell. */
+}
+
+static const char *current_address_environment(const RexxVM *vm,
+                                               size_t *length)
+{
+    static const char default_environment[] = "KERNEL";
+    if (vm->address_environment != NULL) {
+        *length = vm->address_environment_length;
+        return vm->address_environment;
+    }
+    *length = sizeof(default_environment) - 1u;
+    return default_environment;
+}
+
+static RexxVMStatus set_address_environment(RexxVM *vm,
+                                             const char *environment,
+                                             size_t environment_length)
+{
+    char *copy;
+    if (environment == NULL || environment_length == 0u)
+        return REXX_VM_STATUS_INVALID_BYTECODE;
+    if (environment_length > REXX_VM_MAX_NAME_LENGTH)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    copy = copy_name(environment, environment_length);
+    if (copy == NULL) return REXX_VM_STATUS_OUT_OF_MEMORY;
+    free(vm->address_environment);
+    vm->address_environment = copy;
+    vm->address_environment_length = environment_length;
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus dispatch_command(RexxVM *vm,
+                                    const char *environment,
+                                    size_t environment_length,
+                                    const char *command,
+                                    size_t command_length)
+{
+    RexxValue rc_value = REXX_VALUE_INIT;
+    RexxVMStatus status;
+
+    if (environment == NULL || environment_length == 0u ||
+        (command == NULL && command_length != 0u))
+        return REXX_VM_STATUS_INVALID_BYTECODE;
+
+    if (vm->address_dispatcher != NULL) {
+        vm->rc = vm->address_dispatcher(
+            vm->address_dispatcher_user_data, environment,
+            environment_length, command, command_length);
+    } else if (vm->command_dispatcher != NULL) {
+        /* Preserve the legacy command-only embedding API. */
+        vm->rc = vm->command_dispatcher(
+            vm->command_dispatcher_user_data, command, command_length);
+    } else {
+        vm->rc = rexx_vm_guidexos_command_stub(command, command_length);
+    }
+
+    status = rexx_value_set_number(&rc_value, (double)vm->rc);
+    if (status == REXX_VM_STATUS_OK) {
+        status = table_set(&vm->locals, &vm->local_count, &vm->local_capacity,
+                           "RC", 2u, &rc_value);
+    }
+    rexx_value_clear(&rc_value);
+    return status;
 }
 
 RexxVMStatus rexx_vm_set_local(RexxVM *vm, const char *name, size_t name_length,
@@ -816,6 +891,8 @@ static RexxVMStatus compare_values(const RexxValue *left,
 
 RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 {
+    size_t dispatched = 0u;
+
     if (vm == NULL || !vm->initialized || chunk == NULL)
         return vm_fail(vm, REXX_VM_STATUS_INVALID_ARGUMENT, 0);
     if ((chunk->instruction_count != 0 && chunk->instructions == NULL) ||
@@ -828,6 +905,9 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 
     /* Each call starts with an empty evaluation stack; variable tables persist. */
     clear_stack(vm);
+    rexx_value_clear(&vm->exit_value);
+    vm->exit_requested = 0;
+    vm->exit_has_value = 0;
     vm->pc = 0;
     vm->status = REXX_VM_STATUS_OK;
     vm->error.status = REXX_VM_STATUS_OK;
@@ -835,6 +915,14 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
     vm->error.message = "ok";
 
     while (vm->pc < chunk->instruction_count) {
+        if (dispatched >= vm->instruction_budget) {
+            size_t exhausted_pc = vm->pc;
+            clear_stack(vm);
+            return vm_fail(vm, REXX_VM_STATUS_INSTRUCTION_LIMIT,
+                           exhausted_pc);
+        }
+        ++dispatched;
+
         size_t current_pc = vm->pc;
         const RexxInstruction *ins = &chunk->instructions[vm->pc++];
         RexxVMStatus status = REXX_VM_STATUS_OK;
@@ -843,6 +931,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 
         switch ((RexxOpcode)ins->opcode) {
         case OP_HALT:
+            clear_stack(vm);
             vm->status = REXX_VM_STATUS_OK;
             vm->error.status = REXX_VM_STATUS_OK;
             vm->error.pc = current_pc;
@@ -940,6 +1029,27 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
             break;
         }
 
+        case OP_COMMAND: {
+            char *command = NULL;
+            size_t command_length = 0u;
+            size_t environment_length = 0u;
+            const char *environment = NULL;
+
+            status = pop_move(vm, &value);
+            if (status == REXX_VM_STATUS_OK)
+                status = value_string(&value, &command, &command_length);
+            rexx_value_clear(&value);
+            if (status == REXX_VM_STATUS_OK) {
+                environment = current_address_environment(vm,
+                                                          &environment_length);
+                status = dispatch_command(vm, environment,
+                                          environment_length,
+                                          command, command_length);
+            }
+            free(command);
+            break;
+        }
+
         case OP_CALL: {
             const RexxSymbol *function = NULL;
             size_t argument_count = (size_t)ins->auxiliary;
@@ -978,6 +1088,24 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
         case OP_DO_END:
             break;
 
+        case OP_EXIT:
+            if ((ins->flags & (uint8_t)~REXX_INSTRUCTION_HAS_VALUE) != 0u) {
+                status = REXX_VM_STATUS_INVALID_BYTECODE;
+            } else {
+                vm->exit_has_value =
+                    (ins->flags & REXX_INSTRUCTION_HAS_VALUE) != 0u;
+                if (vm->exit_has_value) {
+                    status = pop_move(vm, &value);
+                    if (status == REXX_VM_STATUS_OK) {
+                        rexx_value_clear(&vm->exit_value);
+                        vm->exit_value = value;
+                        memset(&value, 0, sizeof(value));
+                    }
+                }
+                if (status == REXX_VM_STATUS_OK) vm->exit_requested = 1;
+            }
+            break;
+
         case OP_JUMP:
             if ((size_t)ins->operand > chunk->instruction_count)
                 status = REXX_VM_STATUS_INVALID_BYTECODE;
@@ -1002,17 +1130,25 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 
         case OP_ADDRESS: {
             const char *environment = "KERNEL";
-            size_t environment_length = 6u;
+            size_t environment_length = 0u;
             const RexxSymbol *environment_symbol = NULL;
 
+            if ((ins->flags & (uint8_t)~(REXX_INSTRUCTION_HAS_VALUE |
+                                         REXX_INSTRUCTION_HAS_ENVIRONMENT)) != 0u) {
+                status = REXX_VM_STATUS_INVALID_BYTECODE;
+            }
             if ((ins->flags & REXX_INSTRUCTION_HAS_ENVIRONMENT) != 0u) {
-                status = get_symbol(chunk, ins->operand,
-                                    REXX_SYMBOL_VARIABLE,
-                                    &environment_symbol);
+                if (status == REXX_VM_STATUS_OK)
+                    status = get_symbol(chunk, ins->operand,
+                                        REXX_SYMBOL_VARIABLE,
+                                        &environment_symbol);
                 if (status == REXX_VM_STATUS_OK) {
                     environment = environment_symbol->name;
                     environment_length = environment_symbol->length;
                 }
+            } else {
+                environment = current_address_environment(vm,
+                                                          &environment_length);
             }
             if (status == REXX_VM_STATUS_OK &&
                 (ins->flags & REXX_INSTRUCTION_HAS_VALUE) != 0u) {
@@ -1023,25 +1159,17 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
                     status = value_string(&value, &command, &command_length);
                 rexx_value_clear(&value);
                 if (status == REXX_VM_STATUS_OK) {
-                    if (vm->address_dispatcher != NULL) {
-                        vm->rc = vm->address_dispatcher(
-                            vm->address_dispatcher_user_data,
-                            environment, environment_length,
-                            command, command_length);
-                    } else if (vm->command_dispatcher != NULL) {
-                        /* Preserve the legacy command-only embedding API. */
-                        vm->rc = vm->command_dispatcher(
-                            vm->command_dispatcher_user_data,
-                            command, command_length);
-                    } else {
-                        vm->rc = rexx_vm_guidexos_command_stub(
-                            command, command_length);
-                    }
-                    status = rexx_value_set_number(&value, (double)vm->rc);
-                    if (status == REXX_VM_STATUS_OK) status = push_move(vm, &value);
+                    status = dispatch_command(vm, environment,
+                                              environment_length,
+                                              command, command_length);
                 }
                 free(command);
                 rexx_value_clear(&value);
+            } else if (status == REXX_VM_STATUS_OK &&
+                       (ins->flags & REXX_INSTRUCTION_HAS_ENVIRONMENT) != 0u) {
+                /* ADDRESS environment changes the default for later commands. */
+                status = set_address_environment(vm, environment,
+                                                 environment_length);
             }
             break;
         }
@@ -1054,9 +1182,20 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
         rexx_value_clear(&value);
         if (status != REXX_VM_STATUS_OK) {
             vm->pc = current_pc;
+            clear_stack(vm);
             return vm_fail(vm, status, current_pc);
         }
+
+        if ((RexxOpcode)ins->opcode == OP_EXIT) {
+            clear_stack(vm);
+            vm->status = REXX_VM_STATUS_OK;
+            vm->error.status = REXX_VM_STATUS_OK;
+            vm->error.pc = vm->pc;
+            vm->error.message = "ok";
+            return REXX_VM_STATUS_OK;
+        }
     }
+    clear_stack(vm);
     vm->status = REXX_VM_STATUS_OK;
     vm->error.status = REXX_VM_STATUS_OK;
     vm->error.pc = vm->pc;
@@ -1067,7 +1206,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 const char *rexx_vm_status_name(RexxVMStatus status)
 {
     if (status < REXX_VM_STATUS_OK ||
-        status > REXX_VM_STATUS_INVALID_FUNCTION_CALL)
+        status > REXX_VM_STATUS_INSTRUCTION_LIMIT)
         return "unknown VM status";
     return vm_messages[status];
 }
