@@ -1,0 +1,441 @@
+{
+  "schemaVersion": 1,
+  "phase": "C173R1 production concurrent Settings and File Explorer resizing acceptance",
+  "status": "PASS",
+  "outcome": "A",
+  "acceptance": "proof-disabled ordinary production guest demonstrated concurrent managed Settings and File Explorer resizing with stable identities, independent state, rejected-geometry rollback, focus return, and application interoperability",
+  "startingHead": "8c1859fd7e8f8c3d17b0ae61942012b9ed942e66",
+  "endingHeadBeforeDocumentationCommit": "8c1859fd7e8f8c3d17b0ae61942012b9ed942e66",
+  "branch": "v1.1_DOTNET_SUPPORT",
+  "historicalEvidence": {
+    "path": "out/dotnet/c173-file-explorer-resize/c173-production-acceptance-manifest.json",
+    "previousManifestSha256": "47C9E91618648E393A9E8C78CEFC5AAD6DF1CDAE75B2C20955E855AFAD7D2931",
+    "byteIdenticalBackup": "out/dotnet/c173-file-explorer-resize/production-acceptance/supplemental-concurrency-run-20261014-032606-0c241772/historical-c173-production-acceptance-manifest-before-c173r1.json",
+    "historicalOrdinaryBootCount": 3,
+    "historicalOrdinaryBootRecordsModified": false,
+    "updatedManifestSha256": "828B336FCF683C9BD420D05288503F190614D80DD3630C555CAA9A7DF4741B06",
+    "supplementalBootCount": 1
+  },
+  "supplementalBoot": {
+    "stage": "C173R1-Supplemental-Ordinary-Concurrency-1",
+    "status": "PASS",
+    "outcome": "A",
+    "classification": "supplemental production concurrency boot; historical three ordinary boots unchanged",
+    "sourceHead": "8c1859fd7e8f8c3d17b0ae61942012b9ed942e66",
+    "sourceBranch": "v1.1_DOTNET_SUPPORT",
+    "runManifest": {
+      "path": "out/dotnet/c173-file-explorer-resize/production-acceptance/supplemental-concurrency-run-20261014-032606-0c241772/c173r1-supplemental-production-concurrency-manifest.json",
+      "sha256": "087B2CC4EE0E09F414B3FA31594952E245DD0F271DF29EE97A5978CB58507332",
+      "sizeBytes": 207100
+    },
+    "bootIdentity": {
+      "runId": "supplemental-concurrency-run-20261014-032606-0c241772",
+      "qemuPid": 10584,
+      "qemuStartedAtUtc": "2026-10-14T03:26:08.2088824Z",
+      "isolatedEsp": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c173-file-explorer-resize\\production-acceptance\\supplemental-concurrency-run-20261014-032606-0c241772\\ordinary-boot-03\\ESP",
+      "serial": {
+        "path": "out/dotnet/c173-file-explorer-resize/production-acceptance/supplemental-concurrency-run-20261014-032606-0c241772/ordinary-boot-03/qemu/serial.log",
+        "sha256": "D00516F939A0F0BA476BDEC4D75B81EDD5DBA6AB0862543A94E83E42552A9151",
+        "sizeBytes": 828124
+      },
+      "qmpInput": {
+        "path": "out/dotnet/c173-file-explorer-resize/production-acceptance/supplemental-concurrency-run-20261014-032606-0c241772/ordinary-boot-03/qemu/qmp-input.log",
+        "sha256": "DCB5C255E4EC3293E3B4F70F5C35D7DE9F76C4A0BABCA9240F8E801EE898186D",
+        "sizeBytes": 547430
+      },
+      "qemuProcessIdentity": {
+        "path": "out/dotnet/c173-file-explorer-resize/production-acceptance/supplemental-concurrency-run-20261014-032606-0c241772/ordinary-boot-03/qemu/qemu-process-identity.json",
+        "sha256": "191C0C5E7EE2F39B0A69D70DD622D1AEF4A08281EFA054844C062BABFAC77FF3",
+        "sizeBytes": 2357
+      },
+      "qemuCommandLineArguments": [
+        "-accel",
+        "tcg,thread=single",
+        "-machine",
+        "pc",
+        "-smp",
+        "1",
+        "-drive",
+        "if=pflash,format=raw,readonly=on,file=\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\OVMF.fd\"",
+        "-drive",
+        "file=fat:rw:\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c173-file-explorer-resize\\production-acceptance\\supplemental-concurrency-run-20261014-032606-0c241772\\ordinary-boot-03\\ESP\",format=raw,if=ide,index=0",
+        "-m",
+        "1024M",
+        "-vga",
+        "std",
+        "-display",
+        "none",
+        "-serial",
+        "file:\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c173-file-explorer-resize\\production-acceptance\\supplemental-concurrency-run-20261014-032606-0c241772\\ordinary-boot-03\\qemu\\serial.log\"",
+        "-qmp",
+        "tcp:127.0.0.1:52079,server,nowait",
+        "-boot",
+        "order=c",
+        "-no-reboot",
+        "-no-shutdown",
+        "-rtc",
+        "base=utc,clock=host"
+      ],
+      "qemuProcessesAfter": [],
+      "unrelatedProcessesTerminated": 0
+    },
+    "productionMedia": {
+      "composite": {
+        "path": "out/dotnet/c173-file-explorer-resize/clean-production-candidate/build/composite-c166-production/artifacts/HostLogProof.elf",
+        "sha256": "AC80EC2937F55FE2AD828DDFBCAB7419A9BFB015B7B69B71C8FA01FB7CBBB637",
+        "sizeBytes": 2064384
+      },
+      "kernel": {
+        "path": "out/dotnet/c173-file-explorer-resize/clean-production-candidate/kernel.elf",
+        "sha256": "9F3091916D7CB6C109BB5D71B65E1D7F1047AB576C8C994105179ECCB6E6A8F1",
+        "sizeBytes": 2348536
+      },
+      "ramdisk": {
+        "path": "out/dotnet/c173-file-explorer-resize/clean-production-candidate/ramdisk.img",
+        "sha256": "AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8",
+        "sizeBytes": 67108864
+      }
+    },
+    "proofDisabled": {
+      "proof1Excluded": true,
+      "geometryAndProofMarkersAbsentFromMedia": true,
+      "geometryAndProofMarkersAbsentFromSerial": true,
+      "serialScan": "C173-NATIVE-GEOMETRY|C173-MANAGED-GEOMETRY|C172-NATIVE-GEOMETRY|C172-MANAGED-GEOMETRY|PROOF-SCENARIO-|PROOF C166"
+    },
+    "concurrentAcceptance": {
+      "status": "PASS",
+      "settingsIdentity": {
+        "appId": "com.guidexos.apps.managed.settingscenter",
+        "instance": "0000000000000007",
+        "generation": "00000007",
+        "window": "000003EE",
+        "createCount": 1
+      },
+      "explorerIdentity": {
+        "appId": "com.guidexos.apps.managed.fileexplorer",
+        "instance": "0000000000000008",
+        "generation": "00000008",
+        "window": "000003EF",
+        "createCount": 1
+      },
+      "distinctWindowIdentities": true,
+      "settingsResizeSequence": [
+        {
+          "from": "720x420",
+          "to": "512x222",
+          "explorerRemained": "600x360"
+        },
+        {
+          "from": "512x222",
+          "to": "720x420",
+          "explorerRemained": "600x360"
+        }
+      ],
+      "explorerResizeSequence": [
+        {
+          "from": "800x390",
+          "to": "960x526",
+          "settingsRemained": "720x420"
+        },
+        {
+          "from": "960x526",
+          "to": "600x360",
+          "settingsRemained": "720x420"
+        }
+      ],
+      "explorerDirectory": "/system/apps/C164",
+      "explorerSelection": "hello.txt",
+      "selectionPreserved": true,
+      "focus": {
+        "settingsAfterExplorerResize": "PASS",
+        "explorerAfterSettingsResize": "PASS",
+        "settingsRestoredAfterExplorerClose": "PASS"
+      },
+      "listBox": {
+        "entryCount": 11,
+        "end": {
+          "path": "/system/apps/C164",
+          "count": 11,
+          "selection": "save.txt",
+          "type": "File",
+          "view": 1,
+          "marker": "[C102-MANAGED-OUTPUT] C163-STATE ev=input k=2 path=/system/apps/C164 n=11 sel=save.txt type=File size=18 view=1 status=File selected\r"
+        },
+        "home": {
+          "path": "/system/apps/C164",
+          "count": 11,
+          "selection": ".profile",
+          "type": "File",
+          "view": 0,
+          "marker": "[C102-MANAGED-OUTPUT] C163-STATE ev=input k=2 path=/system/apps/C164 n=11 sel=.profile type=File size=12 view=0 status=File selected\r"
+        },
+        "selection": "hello.txt",
+        "result": "PASS"
+      },
+      "settingsPendingChoice": "Disabled",
+      "settingsPendingPersistedBeforeApply": false,
+      "pendingAssociationSlotsUnchangedDuringResize": true,
+      "applyReset": {
+        "apply": "Disabled",
+        "reset": "NoOverride",
+        "reentry": "NoOverride"
+      },
+      "rejectedExplorerGeometry": {
+        "result": "REJECTED-AND-ROLLED-BACK",
+        "requestedOuter": {
+          "width": 599,
+          "height": 359
+        },
+        "restoredOuter": {
+          "width": 600,
+          "height": 360
+        },
+        "statePreserved": "verified-by-followup-pointer-input",
+        "screenshot": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c173-file-explorer-resize\\production-acceptance\\supplemental-concurrency-run-20261014-032606-0c241772\\ordinary-boot-03\\c173r1-explorer-rejected-599x359.ppm",
+        "screenshotSha256": "5C46306CB69E87629C983CBF11065930F35642B9180BDEF55CA56D2077E5325D",
+        "measuredScreenshotBounds": {
+          "x": 240,
+          "y": 205,
+          "width": 600
+        },
+        "stateBefore": {
+          "path": "/system/apps/C164",
+          "selection": "hello.txt",
+          "type": "File"
+        },
+        "stateAfterPointerVerification": {
+          "path": "/system/apps/C164",
+          "count": 11,
+          "selection": "hello.txt",
+          "type": "File",
+          "view": 0,
+          "marker": "[C102-MANAGED-OUTPUT] C163-STATE ev=input k=1 path=/system/apps/C164 n=11 sel=hello.txt type=File size=15 view=0 status=File selected\r"
+        }
+      },
+      "rejectedSettingsGeometry": {
+        "requestedOuter": {
+          "width": 511,
+          "height": 221
+        },
+        "result": "REJECTED-AND-ROLLED-BACK",
+        "restoredOuter": {
+          "x": 360,
+          "y": 230,
+          "width": 512,
+          "height": 222
+        },
+        "heightBefore": {
+          "outerHeight": 222,
+          "outerTopY": 230,
+          "bottomBorderY": 451,
+          "sampleX": 616,
+          "borderRgb": "85,136,170",
+          "outsideRgb": "15,15,20",
+          "result": "PASS"
+        },
+        "heightAfter": {
+          "outerHeight": 222,
+          "outerTopY": 230,
+          "bottomBorderY": 451,
+          "sampleX": 616,
+          "borderRgb": "85,136,170",
+          "outsideRgb": "15,15,20",
+          "result": "PASS"
+        },
+        "identityPreserved": true,
+        "pendingAssociationSlotsUnchanged": true,
+        "beforeScreenshot": {
+          "path": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c173-file-explorer-resize\\production-acceptance\\supplemental-concurrency-run-20261014-032606-0c241772\\ordinary-boot-03\\c173r1-settings-before-rejected-511x221.ppm",
+          "sha256": "17D1C1D9334125BE95C8FC86B6118E129374A637A7602338E9304C066B3882A6"
+        },
+        "screenshot": {
+          "path": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c173-file-explorer-resize\\production-acceptance\\supplemental-concurrency-run-20261014-032606-0c241772\\ordinary-boot-03\\c173r1-settings-rejected-511x221.ppm",
+          "sha256": "2395393A3DE776DC0F9CD55A4470EE476097AE7E9AA0C5F9B80504E2F054B798"
+        }
+      },
+      "boundarySettingsIdentity": {
+        "appId": "com.guidexos.apps.managed.settingscenter",
+        "instance": "0000000000000007",
+        "generation": "00000007",
+        "window": "000003EE",
+        "createCount": 1
+      },
+      "boundaryExplorerIdentity": {
+        "appId": "com.guidexos.apps.managed.fileexplorer",
+        "instance": "000000000000000B",
+        "generation": "0000000B",
+        "window": "000003F2",
+        "createCount": 4
+      },
+      "boundaryExplorerResize": {
+        "mode": "live-compositor-drag-proof-disabled",
+        "input": "QMP left-button drag through native bottom-right resize corner",
+        "outerWindow": {
+          "width": 600,
+          "height": 360
+        },
+        "clientArea": {
+          "width": 600,
+          "height": 336
+        },
+        "identity": {
+          "instance": "not-logged-in-production",
+          "generation": "0000000B",
+          "window": "000003F2"
+        },
+        "previousState": {
+          "path": "/system/apps/C164",
+          "selection": "hello.txt",
+          "type": "File",
+          "scroll": 0
+        },
+        "resultingState": null,
+        "nativeCallbacks": 0,
+        "managedCallbacks": 0,
+        "surfaceReplacementVerified": true,
+        "screenshot": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c173-file-explorer-resize\\production-acceptance\\supplemental-concurrency-run-20261014-032606-0c241772\\ordinary-boot-03\\c173r1-boundary-explorer-600x360.ppm",
+        "screenshotSha256": "C698143832ED9C8846B896918C1AC76DFD7490112BE4C17D27A7A0324E946B48",
+        "measuredScreenshotBounds": {
+          "x": 240,
+          "y": 205,
+          "width": 600
+        },
+        "qmpLog": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c173-file-explorer-resize\\production-acceptance\\supplemental-concurrency-run-20261014-032606-0c241772\\ordinary-boot-03\\qemu\\qmp-input.log"
+      },
+      "boundaryFocus": {
+        "settingsAfterExplorer": "PASS",
+        "explorerAfterSettings": "PASS",
+        "settingsAfterClose": "PASS",
+        "settingsFocus": "[C162-MANAGED-FOCUS] appId=com.guidexos.apps.managed.settingscenter source=3 instance=0000000000000007 selector=00000005 existing=true result=PASS\r",
+        "explorerFocusAfterReject": "[C162-MANAGED-FOCUS] appId=com.guidexos.apps.managed.fileexplorer source=3 instance=000000000000000B selector=00000008 existing=true result=PASS\r",
+        "settingsFocusAfterReject": "[C162-MANAGED-FOCUS] appId=com.guidexos.apps.managed.settingscenter source=3 instance=0000000000000007 selector=00000005 existing=true result=PASS\r",
+        "explorerFocusAfterRestore": "[C162-MANAGED-FOCUS] appId=com.guidexos.apps.managed.fileexplorer source=3 instance=000000000000000B selector=00000008 existing=true result=PASS\r"
+      },
+      "dualWindowScreenshot": {
+        "path": "out/dotnet/c173-file-explorer-resize/production-acceptance/supplemental-concurrency-run-20261014-032606-0c241772/ordinary-boot-03/c173r1-both-managed-windows-open.ppm",
+        "sha256": "01CA16443B8556A1CBF1B7CA7748DDB56FB30D31076086FC9F292E4300C51CAA",
+        "sizeBytes": 3072016,
+        "previewPng": {
+          "path": "out/dotnet/c173-file-explorer-resize/production-acceptance/supplemental-concurrency-run-20261014-032606-0c241772/ordinary-boot-03/c173r1-both-managed-windows-open.png",
+          "sha256": "76E82BD89AB77A40FC8025963D9BFFF1457B3AB16C47E58B98C11D6A980F8A77",
+          "sizeBytes": 332281
+        },
+        "trackedPreview": {
+          "path": "docs/dotnet/C173R1_PRODUCTION_CONCURRENCY.png",
+          "sha256": "76E82BD89AB77A40FC8025963D9BFFF1457B3AB16C47E58B98C11D6A980F8A77",
+          "sizeBytes": 332281
+        }
+      },
+      "ordinaryExplorerResizeQualification": {
+        "status": "PASS",
+        "directory": "/system/apps/C151",
+        "entryCount": 15,
+        "selectedEntry": "oversized.txt",
+        "initialScrollOffset": 3,
+        "reducedScrollOffset": 3,
+        "restoredScrollOffset": 5,
+        "pointerHitTest": "PASS",
+        "keyboardUpDown": "PASS",
+        "sameSurfaceAcrossResize": true,
+        "transitions": [
+          {
+            "outer": {
+              "width": 960,
+              "height": 526
+            },
+            "selection": "oversized.txt",
+            "scroll": 3,
+            "screenshot": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c173-file-explorer-resize\\production-acceptance\\supplemental-concurrency-run-20261014-032606-0c241772\\ordinary-boot-03\\ordinary-boot3-c173-explorer-scrolled-expanded.ppm",
+            "screenshotSha256": "53E6B0BED990300C5799BAF349DB5A0D2E05E4F66FAD77ADF4FB583894751A94"
+          },
+          {
+            "outer": {
+              "width": 600,
+              "height": 360
+            },
+            "selection": "oversized.txt",
+            "scroll": 3,
+            "screenshot": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c173-file-explorer-resize\\production-acceptance\\supplemental-concurrency-run-20261014-032606-0c241772\\ordinary-boot-03\\ordinary-boot3-c173-explorer-scrolled-reduced.ppm",
+            "screenshotSha256": "3D7D8935C8FAB651004694EC069A3C1BB2F9F27A9B62C52C5CF67A2E27978D9B"
+          },
+          {
+            "outer": {
+              "width": 800,
+              "height": 390
+            },
+            "selection": "oversized.txt",
+            "scroll": 5,
+            "screenshot": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c173-file-explorer-resize\\production-acceptance\\supplemental-concurrency-run-20261014-032606-0c241772\\ordinary-boot-03\\ordinary-boot3-c173-explorer-scrolled-restored.ppm",
+            "screenshotSha256": "AD3F1531470C3BAC12FF67CA1DE6AC7EF52CE0DD4A289FB9A9232C584284708F"
+          }
+        ]
+      }
+    },
+    "applicationInteroperability": {
+      "notesActivation": "PASS",
+      "notesPath": "/system/apps/C164/hello.txt",
+      "notesContent": "hello from C164",
+      "notesContentBytes": 15,
+      "calculator": {
+        "display": 56,
+        "screen": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c173-file-explorer-resize\\production-acceptance\\supplemental-concurrency-run-20261014-032606-0c241772\\ordinary-boot-03\\calculator-56.ppm",
+        "screenSha256": "CF413C02E7DD46BDD1799AFCF7EB135EB73A9AEBB2505FAD448C730A69BD5E64"
+      },
+      "taskManager": {
+        "launch": "[C102-MANAGED-OUTPUT] C161-TM-LAUNCH id=7 reg=5 ctr=4 cap=4 max=20 snap=0 n=2 self=6 active=1 result=PASS",
+        "refresh": "[C102-MANAGED-OUTPUT] C161-TM-R s=Ctrl+R st=0 n=2 sel=3:6 v=0 ap=true self=6 active=1 result=PASS",
+        "rowCount": 2,
+        "active": true
+      }
+    },
+    "regressions": {
+      "concurrentResize": "PASS",
+      "explorerRejection": "PASS",
+      "settingsRejection": "PASS",
+      "notesActivation": "PASS",
+      "settingsApplyReset": "PASS",
+      "listBox": "PASS",
+      "dualWindowScreenshot": "PASS"
+    },
+    "trackedWorktreeAtBootStartAndEnd": [
+      " M ESP/ramdisk.img"
+    ]
+  },
+  "evidence": {
+    "generatedRunManifest": {
+      "path": "out/dotnet/c173-file-explorer-resize/production-acceptance/supplemental-concurrency-run-20261014-032606-0c241772/c173r1-supplemental-production-concurrency-manifest.json",
+      "sha256": "087B2CC4EE0E09F414B3FA31594952E245DD0F271DF29EE97A5978CB58507332",
+      "sizeBytes": 207100
+    },
+    "serial": {
+      "path": "out/dotnet/c173-file-explorer-resize/production-acceptance/supplemental-concurrency-run-20261014-032606-0c241772/ordinary-boot-03/qemu/serial.log",
+      "sha256": "D00516F939A0F0BA476BDEC4D75B81EDD5DBA6AB0862543A94E83E42552A9151",
+      "sizeBytes": 828124
+    },
+    "qmpInput": {
+      "path": "out/dotnet/c173-file-explorer-resize/production-acceptance/supplemental-concurrency-run-20261014-032606-0c241772/ordinary-boot-03/qemu/qmp-input.log",
+      "sha256": "DCB5C255E4EC3293E3B4F70F5C35D7DE9F76C4A0BABCA9240F8E801EE898186D",
+      "sizeBytes": 547430
+    },
+    "dualWindowScreenshot": {
+      "path": "out/dotnet/c173-file-explorer-resize/production-acceptance/supplemental-concurrency-run-20261014-032606-0c241772/ordinary-boot-03/c173r1-both-managed-windows-open.ppm",
+      "sha256": "01CA16443B8556A1CBF1B7CA7748DDB56FB30D31076086FC9F292E4300C51CAA",
+      "sizeBytes": 3072016,
+      "previewPng": {
+        "path": "out/dotnet/c173-file-explorer-resize/production-acceptance/supplemental-concurrency-run-20261014-032606-0c241772/ordinary-boot-03/c173r1-both-managed-windows-open.png",
+        "sha256": "76E82BD89AB77A40FC8025963D9BFFF1457B3AB16C47E58B98C11D6A980F8A77",
+        "sizeBytes": 332281
+      },
+      "trackedPreview": {
+        "path": "docs/dotnet/C173R1_PRODUCTION_CONCURRENCY.png",
+        "sha256": "76E82BD89AB77A40FC8025963D9BFFF1457B3AB16C47E58B98C11D6A980F8A77",
+        "sizeBytes": 332281
+      }
+    },
+    "runnerTranscript": {
+      "path": "out/dotnet/c173-file-explorer-resize/production-acceptance/supplemental-concurrency-run-20261014-032606-0c241772/runner-transcript.txt",
+      "sha256": "0A323A6B939F19486A18D769D85EB7F699B0031BC7E6AB0D21879DD0ABCFDF13",
+      "sizeBytes": 1469
+    }
+  }
+}

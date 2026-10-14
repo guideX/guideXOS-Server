@@ -4,8 +4,9 @@
 
 **Branch:** `v1.1_DOTNET_SUPPORT`
 
-**Starting HEAD:** `36e99731f014d6bf3ee9b4ecbf27ed8bb69e3cc6`
-**Current qualification:** implementation, host regression, and three focused guest boots PASS. The earlier proof-disabled production build, install, and three ordinary boots PASS. A final proof-disabled ordinary boot 3 with simultaneous Settings/Explorer resizing remains to be rerun after another workspace releases QEMU.
+**C173 implementation starting HEAD:** `36e99731f014d6bf3ee9b4ecbf27ed8bb69e3cc6`
+**C173R1 acceptance starting HEAD:** `8c1859fd7e8f8c3d17b0ae61942012b9ed942e66`
+**Current qualification:** implementation, host regression, three focused guest boots, three historical ordinary production boots, and one supplemental proof-disabled ordinary production concurrency boot PASS. Outcome A; the C173R1 evidence closes the prior concurrent-resize acceptance gap.
 
 ## 1. Starting state and protected media
 
@@ -95,10 +96,43 @@ The prior C173 production acceptance manifest reports a clean proof-disabled Nat
 
 Ordinary serial hashes in that accepted run were `697AB5D5E57FCE886E26B7AA8586C0FF7F17B97399D52CE465F2D0D14B482EB5`, `970AB3E62037721985D41109435AECCB7EF44C1B7A7BFB7F46BE2F8D5086745E`, and `2AC29A0313F9D92DFDA6EDD0B88A39EFD0B3496022947EB871AD4302DAF8F935`.
 
-Those ordinary boots exercised C173 Explorer resizing and the existing C163/C164/C172 regressions. They preceded the newly added simultaneous Settings/Explorer scenario. A repeat ordinary boot 3 is needed to add that cross-app result to the current proof-disabled production manifest. The repeat has not started because QEMU PID 26004 is using a separate workspace's `out\validation\settings-s11r-20261013` guest. It was left untouched, and no production media was changed while that QEMU process was active.
+Those three historical ordinary boots exercised C173 Explorer resizing and the existing C163/C164/C172 regressions. They preceded the simultaneous Settings/Explorer scenario and remain unchanged. C173R1 adds a separately identified ordinary proof-disabled production boot below; it does not rewrite or reinterpret any historical boot record.
 
-## 7. Compatibility and remaining status
+## 7. C173R1 supplemental ordinary production concurrency boot
+
+C173R1 started from `8c1859fd7e8f8c3d17b0ae61942012b9ed942e66` on `v1.1_DOTNET_SUPPORT`. Preflight found no running QEMU process, including no process matching the previously reported PID 29388. The run used an isolated ESP under `out/dotnet/c173-file-explorer-resize/production-acceptance/supplemental-concurrency-run-20261014-032606-0c241772/ordinary-boot-03`; no other workspace or QEMU media was reused. QEMU PID 10584 started at `2026-10-14T03:26:08.2088824Z`, using `C:\Program Files\qemu\qemu-system-x86_64.exe`. Its complete command-line arguments, isolated ESP, process identity record, and QMP endpoint are recorded in the supplemental manifest.
+
+The ordinary guest used the previously validated production media without rebuilding or replacing it:
+
+| Artifact | SHA-256 |
+|---|---|
+| NativeAOT composite | `AC80EC2937F55FE2AD828DDFBCAB7419A9BFB015B7B69B71C8FA01FB7CBBB637` |
+| Kernel | `9F3091916D7CB6C109BB5D71B65E1D7F1047AB576C8C994105179ECCB6E6A8F1` |
+| Ramdisk | `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8` |
+
+Proof-only diagnostics were disabled: `proof1` was excluded, the C172/C173 geometry and proof markers were absent from the composite, kernel, ramdisk, and serial log, and the guest ran the ordinary production application paths.
+
+The concurrent window identities observed in the production serial log were:
+
+| Application | Managed instance | Generation | Window |
+|---|---|---|---|
+| Settings | `0000000000000007` | `00000007` | `000003EE` |
+| File Explorer | `0000000000000008` | `00000008` | `000003EF` |
+
+Settings opened at 720×420. With Settings open, Explorer navigated to `/system/apps/C164`, selected `hello.txt`, and resized 800×390 → 960×526 → 600×360. Explorer kept the same instance, generation, and window; Settings stayed at 720×420. The selection and path were retained. Settings then resized 720×420 → 512×222 → 720×420 while Explorer remained at 600×360 with `/system/apps/C164/hello.txt` selected. Surface identities stayed stable and focus returned successfully to each window.
+
+An additional simultaneous boundary check verified out-of-bounds rejection and state rollback. Explorer rejected 599×359 from 600×360 and remained at 600×360 with `hello.txt` selected. Settings rejected 511×221 from 512×222 and remained at 512×222; its measured lower border stayed at pixel row 451 both before and after rejection. Settings then restored to 720×420. With both windows open, Explorer hit testing after rejection, ListBox End/Home keyboard navigation, the 11-entry view change, and selection restoration passed. This boundary check used Settings instance `0000000000000007` / generation `00000007` / window `000003EE` and Explorer instance `000000000000000B` / generation `0000000B` / window `000003F2`; both were simultaneously visible in the captured desktop frame. In the same ordinary boot, the 15-entry `/system/apps/C151` resize characterization also kept its selected entry and scroll viewport through 960×526, 600×360, and 800×390; pointer hit testing and Up/Down navigation passed, with scroll offsets 3, 3, and 5 recorded.
+
+Settings association behavior remained correct: the pending `Disabled` choice did not persist during resizing, the existing Apply operation reported `Disabled`, Reset returned to `NoOverride`, and reentry showed `NoOverride`. Production integration also opened `/system/apps/C164/hello.txt` in managed Notes and verified the exact 15-byte text `hello from C164`; Calculator displayed 56 and Task Manager launched and refreshed successfully.
+
+The dual-window screenshot shows the selected C164 file and both managed windows at once:
+
+![Ordinary production boot with managed Settings and File Explorer open](C173R1_PRODUCTION_CONCURRENCY.png)
+
+The actual production serial log SHA-256 is `D00516F939A0F0BA476BDEC4D75B81EDD5DBA6AB0862543A94E83E42552A9151`; the QMP input log SHA-256 is `DCB5C255E4EC3293E3B4F70F5C35D7DE9F76C4A0BABCA9240F8E801EE898186D`. The source run manifest SHA-256 is `087B2CC4EE0E09F414B3FA31594952E245DD0F271DF29EE97A5978CB58507332`. The detailed tracked result is [C173R1_PRODUCTION_CONCURRENCY_ACCEPTANCE.json](C173R1_PRODUCTION_CONCURRENCY_ACCEPTANCE.json). The ignored historical manifest was preserved byte-for-byte before update (SHA-256 `47C9E91618648E393A9E8C78CEFC5AAD6DF1CDAE75B2C20955E855AFAD7D2931`) and now records one explicitly supplemental concurrency boot; its original three ordinary boot entries remain unchanged.
+
+## 8. Compatibility and remaining status
 
 The host ABI remains version 4 with a 128-byte table; snapshot, close, and association callbacks remain at offsets 104, 112, and 120. C166 remains the single association authority with its 328-byte response and version-2, 136-byte dual-slot storage. Settings persistence remains `GXSETT.BIN`, version 2, 26 bytes. The final previously accepted association state is `NoOverride`, with effective handler `com.guidexos.apps.managed.notes`. No Native Notepad eligibility change was made. C128 remains unverified.
 
-The focused C173 acceptance is complete. Overall C173 production acceptance remains pending only the ordinary proof-disabled concurrent cross-app recheck described above. Evidence is stored under `out/dotnet/c173-file-explorer-resize/`: `host/managed-ui-host-manifest.json`, `c173-focused-proof-manifest.json`, and `c173-production-acceptance-manifest.json`.
+The C173 implementation and proof-disabled production acceptance are complete. C173R1 adds the ordinary concurrent Settings/Explorer evidence required for Outcome A. Evidence is stored under `out/dotnet/c173-file-explorer-resize/`: `host/managed-ui-host-manifest.json`, `c173-focused-proof-manifest.json`, the updated `c173-production-acceptance-manifest.json`, and the supplemental run directory referenced by `C173R1_PRODUCTION_CONCURRENCY_ACCEPTANCE.json`. C128 remains unverified and was outside this acceptance scope.
