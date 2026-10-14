@@ -1,5 +1,4 @@
 #include "settings_center.h"
-#include "settings_presentation_adapter.h"
 
 #include "compositor.h"
 #include "background_service.h"
@@ -358,14 +357,9 @@ public:
           m_personalizationFeedback(std::make_shared<PersonalizationFeedback>())
     {
         m_navigation.navigate(initialRoute);
-        updatePresentationCapability(CapabilityId::SystemInformation, CapabilityAvailability::ReadOnly);
-        updatePresentationCapability(CapabilityId::Users, CapabilityAvailability::Unsupported);
-        updatePresentationCapability(CapabilityId::Developer, CapabilityAvailability::ReadOnly);
         DesktopFocusPreferenceStore focusPreferenceStore;
         m_accessibilityPreferenceAvailable = focusPreferenceStore.read(
             m_accessibilityPreferences.enhancedFocusIndicator);
-        updatePresentationCapability(CapabilityId::Accessibility,
-            m_accessibilityPreferenceAvailable ? CapabilityAvailability::Writable : CapabilityAvailability::Unavailable);
         if (m_accessibilityPreferenceAvailable) {
             FocusIndicator::SetEnhancedFocusEnabled(m_accessibilityPreferences.enhancedFocusIndicator);
         }
@@ -428,7 +422,7 @@ public:
     bool refreshAppsIfDue()
     {
         const uint64_t now = steadyMilliseconds();
-        if (m_windowId == 0 || !m_windowFocused || m_navigation.hasSearchQuery() ||
+        if (m_windowId == 0 || !m_windowFocused || !m_search.empty() ||
             m_navigation.selectedCategory() != CategoryId::Apps || now < m_nextAppsRefreshMs) return false;
         return refreshApps();
     }
@@ -438,7 +432,7 @@ public:
         const uint64_t now = steadyMilliseconds();
         if (m_windowId == 0 || !dateTimeRefreshDue(
                 m_navigation.selectedCategory() == CategoryId::DateTime,
-                m_windowFocused, !m_navigation.hasSearchQuery(), now, m_nextDateTimeRefreshMs)) return false;
+                m_windowFocused, !m_search.empty(), now, m_nextDateTimeRefreshMs)) return false;
         m_nextDateTimeRefreshMs = now + 1000;
         m_dateTimeSnapshot = readHostedDateTime(m_clockDisplaySettings);
         renderDateTimeClockText();
@@ -464,7 +458,6 @@ public:
     void render()
     {
         if (m_windowId == 0) return;
-        synchronizePresentationFocus();
         publish(MsgType::MT_DrawText, std::to_string(m_windowId) + "|\f");
         drawRect(0, 0, m_width, m_height, bodyColor());
         drawText(24, 20, "Settings", textColor());
@@ -473,10 +466,10 @@ public:
         drawOutline(searchX(), kSearchY, searchWidth(), kSearchHeight,
                     m_focusedItem.kind == FocusItem::Kind::Search ? accentColor() : borderColor());
         drawText(searchX() + 12, kSearchY + 12,
-                 m_navigation.hasSearchQuery() ? fitText(std::string(m_navigation.searchQuery()), 46) : "Search settings...",
-                 m_navigation.hasSearchQuery() ? textColor() : mutedTextColor());
-        if (m_focusedItem.kind == FocusItem::Kind::Search && m_navigation.hasSearchQuery()) {
-            const int caretX = std::min(searchX() + searchWidth() - 10, searchX() + 12 + static_cast<int>(m_navigation.searchQueryLength()) * 8);
+                 m_search.empty() ? "Search settings..." : fitText(m_search, 46),
+                 m_search.empty() ? mutedTextColor() : textColor());
+        if (m_focusedItem.kind == FocusItem::Kind::Search && !m_search.empty()) {
+            const int caretX = std::min(searchX() + searchWidth() - 10, searchX() + 12 + static_cast<int>(m_search.size()) * 8);
             drawRect(caretX, kSearchY + 10, 1, 18, accentColor());
         }
 
@@ -497,7 +490,7 @@ public:
         drawText(kContentX + 26, kContentY + 22, category->label, textColor());
         drawText(kContentX + 26, kContentY + 52, category->description, mutedTextColor());
 
-        if (m_navigation.hasSearchQuery()) {
+        if (!m_search.empty()) {
             renderSearchResults();
         } else {
             switch (m_navigation.selectedCategory()) {
@@ -673,8 +666,8 @@ public:
                 return;
             }
             if (key == kKeyEscape) {
-                if (m_navigation.hasSearchQuery()) {
-                    m_navigation.clearSearch();
+                if (!m_search.empty()) {
+                    m_search.clear();
                     m_navigation.navigate(SettingsRoute{ m_navigation.selectedCategory(), TargetId::Page });
                     m_focusedItem = FocusItem{ FocusItem::Kind::Search, 0, FocusControl::None };
                     render();
@@ -686,21 +679,22 @@ public:
             }
             if (m_focusedItem.kind == FocusItem::Kind::Search) {
                 if (key == kKeyDown) {
-                    const SearchResultSet results = m_navigation.searchResults();
+                    const SearchResultSet results = searchSettings(m_search);
                     if (results.count > 0) {
                         m_focusedItem = FocusItem{ FocusItem::Kind::SearchResult, 0, FocusControl::None };
                     }
                     render();
                 } else if (key == kKeyBackspace) {
-                    m_navigation.backspaceSearch();
+                    if (!m_search.empty()) m_search.pop_back();
                     render();
                 } else if (key == kKeyEnter) {
-                    const SearchResultSet results = m_navigation.searchResults();
+                    const SearchResultSet results = searchSettings(m_search);
                     if (results.count > 0) activate(FocusItem{ FocusItem::Kind::SearchResult, 0, FocusControl::None });
                     render();
                 } else {
                     const char typed = keyToChar(key, (modifiers & kModifierShift) != 0);
-                    if (typed != '\0' && m_navigation.appendSearchCharacter(typed)) {
+                    if (typed != '\0' && m_search.size() < 40) {
+                        m_search.push_back(typed);
                         render();
                     }
                 }
@@ -744,6 +738,7 @@ private:
     int m_width{kWindowWidth};
     int m_height{kWindowHeight};
     NavigationModel m_navigation;
+    std::string m_search;
     DisplayPageState m_display;
     HostedSystemInformation m_systemInformation;
     std::string m_backgroundId;
@@ -957,7 +952,6 @@ private:
         }
 
         m_appInventory = DesktopService::GetSettingsAppModelInventory();
-        updatePresentationCapability(CapabilityId::Apps, CapabilityAvailability::Writable);
         const bool inventoryChanged = !sameAppInventory(previous, m_appInventory);
         const bool oldMissing = m_selectedAppMissing;
         if (m_navigation.route().target == TargetId::AppDetail && !m_selectedAppId.empty()) {
@@ -1193,7 +1187,6 @@ private:
     {
         m_appInventory = DesktopService::GetSettingsAppModelInventory();
         m_developerAppModel = buildDeveloperAppModelSnapshot(m_appInventory);
-        updatePresentationCapability(CapabilityId::Developer, CapabilityAvailability::ReadOnly);
         const DeveloperToolStatus keyboard = findDeveloperTool(
             m_appInventory, "gxos.builtin.onscreenkeyboard");
         m_accessibilityKeyboardAvailable = developerToolActionEnabled(keyboard);
@@ -1255,12 +1248,6 @@ private:
         DesktopFocusPreferenceStore store;
         bool authoritative = m_accessibilityPreferences.enhancedFocusIndicator;
         const bool requested = !authoritative;
-        const uint8_t requestedValue = requested ? 1u : 0u;
-        OperationRequest presentationRequest{};
-        const bool presentationTracked = m_navigation.beginOperation(
-            CapabilityId::Accessibility,
-            static_cast<uint16_t>(SettingsOperationCode::SetEnhancedFocusPreference),
-            presentationRequest, &requestedValue, sizeof(requestedValue));
         const AccessibilityMutationResult result = updateEnhancedFocusPreference(
             store, requested, [](bool enabled) {
                 FocusIndicator::SetEnhancedFocusEnabled(enabled);
@@ -1268,11 +1255,6 @@ private:
                 return FocusIndicator::EnhancedFocusEnabled() == enabled;
             }, authoritative);
         m_accessibilityPreferences.enhancedFocusIndicator = authoritative;
-        if (presentationTracked) {
-            m_navigation.completeOperation(OperationResult{ presentationRequest.requestId,
-                result == AccessibilityMutationResult::Applied
-                    ? OperationCompletion::Success : OperationCompletion::Failure });
-        }
         if (result != AccessibilityMutationResult::Applied) {
             Logger::write(LogLevel::Warn, "Settings could not persist, reread, or apply the enhanced focus preference.");
         }
@@ -1282,12 +1264,6 @@ private:
     {
         m_clockDisplaySettings = readHostedClockDisplaySettings();
         m_dateTimeSnapshot = readHostedDateTime(m_clockDisplaySettings);
-        const CapabilityAvailability availability = !m_dateTimeSnapshot.available
-            ? CapabilityAvailability::Unavailable
-            : m_dateTimeSnapshot.timeZoneAvailable
-                ? CapabilityAvailability::Writable
-                : CapabilityAvailability::ReadOnly;
-        updatePresentationCapability(CapabilityId::DateTime, availability);
         m_nextDateTimeRefreshMs = steadyMilliseconds() + 1000;
     }
 
@@ -1302,10 +1278,6 @@ private:
             inventory::DeviceSnapshot latest{};
             m_deviceReadResult = readSettingsDeviceSnapshot(&latest);
             m_deviceSnapshot = latest;
-            updatePresentationCapability(CapabilityId::Devices,
-                m_deviceReadResult == system_service::ClientResult::Ok &&
-                    latest.state != inventory::SnapshotState::Unavailable
-                    ? CapabilityAvailability::ReadOnly : CapabilityAvailability::Unavailable);
             changed = oldGeneration != latest.generation || oldState != latest.state ||
                 oldCount != latest.deviceCount || oldResult != m_deviceReadResult;
         } else if (m_navigation.selectedCategory() == CategoryId::Storage) {
@@ -1317,10 +1289,6 @@ private:
             inventory::StorageSnapshot latest{};
             m_storageReadResult = readSettingsStorageSnapshot(&latest);
             m_storageSnapshot = latest;
-            updatePresentationCapability(CapabilityId::Storage,
-                m_storageReadResult == system_service::ClientResult::Ok &&
-                    latest.state != inventory::SnapshotState::Unavailable
-                    ? CapabilityAvailability::ReadOnly : CapabilityAvailability::Unavailable);
             changed = oldGeneration != latest.generation || oldState != latest.state ||
                 oldDisks != latest.diskCount || oldVolumes != latest.volumeCount ||
                 oldResult != m_storageReadResult;
@@ -1565,8 +1533,8 @@ private:
         std::vector<FocusItem> items;
         items.push_back(FocusItem{ FocusItem::Kind::Search, 0, FocusControl::None });
         for (size_t i = 0; i < kCategories.size(); ++i) items.push_back(FocusItem{ FocusItem::Kind::Category, static_cast<int>(i), FocusControl::None });
-        if (m_navigation.hasSearchQuery()) {
-            const SearchResultSet results = m_navigation.searchResults();
+        if (!m_search.empty()) {
+            const SearchResultSet results = searchSettings(m_search);
             for (size_t i = 0; i < visibleSearchResultCount(results.count); ++i) items.push_back(FocusItem{ FocusItem::Kind::SearchResult, static_cast<int>(i), FocusControl::None });
             return items;
         }
@@ -1743,7 +1711,7 @@ private:
             m_focusedItem.index = next;
             navigateTo(SettingsRoute{ kCategories[static_cast<size_t>(next)].id, TargetId::Page });
         } else if (m_focusedItem.kind == FocusItem::Kind::SearchResult) {
-            const size_t count = visibleSearchResultCount(m_navigation.searchResults().count);
+            const size_t count = visibleSearchResultCount(searchSettings(m_search).count);
             if (count > 0) m_focusedItem.index = (m_focusedItem.index + delta + static_cast<int>(count)) % static_cast<int>(count);
         } else if (m_focusedItem.kind == FocusItem::Kind::Control &&
                    m_focusedItem.control == FocusControl::NetworkAdapter &&
@@ -1829,8 +1797,8 @@ private:
             if (x >= kCategoryX && x <= kCategoryX + kCategoryWidth && y >= cy && y <= cy + categoryHeight())
                 return FocusItem{ FocusItem::Kind::Category, static_cast<int>(i), FocusControl::None };
         }
-        if (m_navigation.hasSearchQuery()) {
-            const SearchResultSet results = m_navigation.searchResults();
+        if (!m_search.empty()) {
+            const SearchResultSet results = searchSettings(m_search);
             for (size_t i = 0; i < visibleSearchResultCount(results.count); ++i) {
                 const int ry = kContentY + 132 + static_cast<int>(i) * searchResultPitch();
                 if (x >= kContentX + 24 && x <= kContentX + contentWidth() - 24 && y >= ry && y <= ry + 42)
@@ -2065,27 +2033,9 @@ private:
         if (inventoryVisible && (previousCategory != route.category || !inventoryCategory(previousCategory)))
             refreshInventory();
         setFocusForRoute(route);
+        m_search.clear();
         m_s7PageScroll = 0;
         ensureS7FocusVisible();
-    }
-
-    void synchronizePresentationFocus()
-    {
-        if (m_focusedItem.kind == FocusItem::Kind::Control &&
-            !m_navigation.setFocusedControl(m_focusedItem.control)) {
-            m_navigation.setFocusedControl(FocusControl::None);
-        } else if (m_focusedItem.kind != FocusItem::Kind::Control) {
-            m_navigation.setFocusedControl(FocusControl::None);
-        }
-    }
-
-    void updatePresentationCapability(CapabilityId id,
-                                      CapabilityAvailability availability)
-    {
-        const CapabilityPresentation* current = m_navigation.capability(id);
-        uint64_t revision = current ? current->revision : 0;
-        if (revision != ~static_cast<uint64_t>(0)) ++revision;
-        m_navigation.applyCapabilitySnapshot(CapabilitySnapshot{ id, availability, revision });
     }
 
     void setFocusForRoute(const SettingsRoute& route)
@@ -2142,7 +2092,7 @@ private:
             }
             break;
         case FocusItem::Kind::SearchResult: {
-            const SearchResultSet results = m_navigation.searchResults();
+            const SearchResultSet results = searchSettings(m_search);
             if (item.index >= 0 && item.index < static_cast<int>(results.count)) navigateTo(results.values[static_cast<size_t>(item.index)].route);
             break;
         }
@@ -2368,10 +2318,6 @@ private:
             m_networkReadResult = network_settings::Result::Unavailable;
         }
         m_networkSnapshot = current;
-        updatePresentationCapability(CapabilityId::Network,
-            m_networkReadResult == network_settings::Result::Ok &&
-                current.state != network_settings::SnapshotState::Unavailable
-                ? CapabilityAvailability::ReadOnly : CapabilityAvailability::Unavailable);
         if (m_networkSnapshot.adapterCount == 0) m_selectedNetworkAdapter = 0;
         else if (m_selectedNetworkAdapter >= m_networkSnapshot.adapterCount)
             m_selectedNetworkAdapter = m_networkSnapshot.adapterCount - 1;
@@ -2383,8 +2329,6 @@ private:
     {
         DisplayConfigurationResponse response{};
         m_display.available = queryActiveDisplay(response);
-        updatePresentationCapability(CapabilityId::Display,
-            m_display.available ? CapabilityAvailability::Writable : CapabilityAvailability::Unavailable);
         m_display.supportedModes.clear();
         m_display.status.clear();
         if (!m_display.available) {
@@ -2452,19 +2396,9 @@ private:
     void applyDisplay()
     {
         if (!m_display.dirty()) return;
-        OperationRequest presentationRequest{};
-        const bool presentationTracked = m_navigation.beginOperation(
-            CapabilityId::Display,
-            static_cast<uint16_t>(SettingsOperationCode::ApplyDisplayConfiguration),
-            presentationRequest);
         DisplayConfigurationResponse latest{};
         if (!queryActiveDisplay(latest)) {
             m_display.status = "Apply failed: active display configuration is unavailable.";
-            updatePresentationCapability(CapabilityId::Display, CapabilityAvailability::Unavailable);
-            if (presentationTracked) {
-                m_navigation.completeOperation(OperationResult{ presentationRequest.requestId,
-                    OperationCompletion::Failure });
-            }
             return;
         }
         DisplayConfigurationCommand command{};
@@ -2505,16 +2439,8 @@ private:
 
             m_display.status = "Display configuration applied successfully.";
             m_focusedItem = FocusItem{ FocusItem::Kind::Control, 0, FocusControl::DisplayMode };
-            if (presentationTracked) {
-                m_navigation.completeOperation(OperationResult{ presentationRequest.requestId,
-                    OperationCompletion::Success });
-            }
         } else {
             m_display.status = std::string("Apply failed: ") + (response.diagnostic[0] ? response.diagnostic : "display configuration rejected");
-            if (presentationTracked) {
-                m_navigation.completeOperation(OperationResult{ presentationRequest.requestId,
-                    OperationCompletion::Failure });
-            }
         }
     }
 
@@ -2532,8 +2458,6 @@ private:
         std::string error;
         m_backgroundAvailable = gui::DesktopBackgroundService::ReadCurrentBackground(
             m_backgroundId, m_backgroundName, m_backgroundPreviewPath, error);
-        updatePresentationCapability(CapabilityId::Personalization,
-            m_backgroundAvailable ? CapabilityAvailability::Writable : CapabilityAvailability::Unavailable);
         if (!m_backgroundAvailable) {
             m_backgroundId.clear();
             m_backgroundName = "Background unavailable";
@@ -2567,7 +2491,7 @@ private:
 
     void renderSearchResults()
     {
-        const SearchResultSet results = m_navigation.searchResults();
+        const SearchResultSet results = searchSettings(m_search);
         drawText(kContentX + 26, kContentY + 98,
                  results.count ? "Search results" : "No matching settings", mutedTextColor());
         for (size_t i = 0; i < visibleSearchResultCount(results.count); ++i) {
@@ -3402,7 +3326,7 @@ private:
 
     void renderDateTimeClockText()
     {
-        if (m_windowId == 0 || m_navigation.searchQueryLength() != 0 ||
+        if (m_windowId == 0 || m_search.size() != 0 ||
             m_navigation.selectedCategory() != CategoryId::DateTime) return;
         const int x = pageX();
         const int width = pageWidth();

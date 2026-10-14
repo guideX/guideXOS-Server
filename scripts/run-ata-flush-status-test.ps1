@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$OutputPath = "out\validation\settings-s10-20261011\settings_presentation_core_test.exe"
+    [string]$OutputPath = (Join-Path ([IO.Path]::GetTempPath()) "guidexos_ata_flush_status_test.exe")
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,14 +16,14 @@ if (-not $Compiler) { throw "g++ was not found." }
 $Output = [IO.Path]::GetFullPath($OutputPath)
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Output) | Out-Null
 $Arguments = @(
-    "-std=c++17", "-Wall", "-Wextra", "-O2", "-iquote", ".",
-    "tests/settings_presentation_core_test.cpp", "settings_presentation_core.cpp", "-o", $Output
+    "-std=c++14", "-Wall", "-Wextra", "-O2", "-iquote", "kernel\core\include",
+    "tests\ata_flush_status_test.cpp", "-o", $Output
 )
 
 Write-Host ("Running: {0} {1}" -f $Compiler.Source, ($Arguments -join " "))
 & $Compiler.Source @Arguments
-if ($LASTEXITCODE -ne 0) { throw "Settings presentation core test build failed with exit code $LASTEXITCODE." }
+if ($LASTEXITCODE -ne 0) { throw "ATA flush status test build failed with exit code $LASTEXITCODE." }
 
 & $Output
-if ($LASTEXITCODE -ne 0) { throw "Settings presentation core tests failed with exit code $LASTEXITCODE." }
-Write-Host "Settings presentation core build and test PASS."
+if ($LASTEXITCODE -ne 0) { throw "ATA flush status tests failed with exit code $LASTEXITCODE." }
+Write-Host "ATA flush status build and test PASS."

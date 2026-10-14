@@ -36,6 +36,9 @@
 // Storage subsystem
 #include "include/kernel/block_device.h"
 #include "include/kernel/ata.h"
+#if defined(GXOS_QEMU_ATA_PIO_QUALIFICATION)
+#include "include/kernel/qemu_ata_pio_qualification.h"
+#endif
 #include "include/kernel/nvme.h"
 #include "include/kernel/ramdisk.h"
 #include "include/kernel/vfs.h"
@@ -759,6 +762,20 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[KERNEL] ERROR: No valid boot method detected, halting\n");
         while(1) { }
     }
+
+#if defined(GXOS_QEMU_ATA_PIO_QUALIFICATION) && \
+    defined(GXOS_QEMU_ATA_MULTIBOOT_BOOT)
+    if (is_multiboot) {
+        kernel::serial::puts("[NDB1R1-ATA-QUAL] QEMU Multiboot test entry\n");
+        kernel::block::init();
+        kernel::ata::init();
+        const bool passed = kernel::qemu_ata_pio_qualification::run();
+        // isa-debug-exit makes the test guest terminate promptly after its
+        // bounded result instead of leaving an idle VM behind.
+        kernel::arch::outl(0xF4, passed ? 0x10u : 0x11u);
+        for (;;) kernel::arch::halt();
+    }
+#endif
     
     // Initialize framebuffer for graphics mode
     bool has_fb = false;
@@ -950,6 +967,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[KERNEL] ATA/SATA driver initialized, ");
         kernel::serial::put_hex32(kernel::ata::device_count());
         kernel::serial::puts(" drive(s) found\n");
+#if defined(GXOS_QEMU_ATA_PIO_QUALIFICATION)
+        kernel::qemu_ata_pio_qualification::run();
+#endif
         
         // Initialize NVMe driver (scans for NVMe controllers)
         kernel::nvme::init();

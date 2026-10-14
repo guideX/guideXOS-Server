@@ -117,7 +117,6 @@ LDFLAGS := $(LINKER_SCRIPT_FLAG)arch/$(ARCH)/linker.ld $(ARCH_LDFLAGS)
 
 # Source files
 CORE_SOURCES := $(wildcard core/*.cpp)
-SETTINGS_PRESENTATION_SOURCE := $(GUIDEXOS_REPO_ROOT)/settings_presentation_core.cpp
 ARCH_SOURCES := $(wildcard arch/$(ARCH)/*.cpp)
 ASM_SOURCES := $(wildcard arch/$(ARCH)/*.asm) $(wildcard arch/$(ARCH)/*.s)
 MBEDTLS_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_LINK_ENABLED)),$(MBEDTLS_GUIDEXOS_C_SOURCES))
@@ -125,7 +124,6 @@ MBEDTLS_COMPILE_PROBE_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_COMPILE_PR
 
 # Object files
 CORE_OBJS := $(patsubst core/%.cpp,$(OBJ_DIR)/core/%.o,$(CORE_SOURCES))
-CORE_OBJS += $(OBJ_DIR)/core/settings_presentation_core.o
 ARCH_OBJS := $(patsubst arch/$(ARCH)/%.cpp,$(OBJ_DIR)/arch/%.o,$(ARCH_SOURCES))
 ASM_OBJS := $(patsubst arch/$(ARCH)/%.asm,$(OBJ_DIR)/arch/%.o,$(ASM_SOURCES))
 ASM_OBJS += $(patsubst arch/$(ARCH)/%.s,$(OBJ_DIR)/arch/%.o,$(filter %.s,$(ASM_SOURCES)))
@@ -194,11 +192,6 @@ $(OBJ_DIR)/core/%.o: core/%.cpp
 	@echo "Compiling $<..."
 	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/core/settings_presentation_core.o: $(SETTINGS_PRESENTATION_SOURCE)
-	@$(call MKDIR,$(OBJ_DIR)/core)
-	@echo "Compiling shared Settings presentation core $<..."
-	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
-
 $(OBJ_DIR)/core/gxos_tls_foundation.o: $(MBEDTLS_GUIDEXOS_IMPORT_STATE_DEPS)
 
 $(OBJ_DIR)/core/kernel_apps.o: $(MBEDTLS_GUIDEXOS_IMPORT_STATE_DEPS)
@@ -207,11 +200,6 @@ $(OBJ_DIR)/core/%.d: core/%.cpp
 	@$(call MKDIR,$(OBJ_DIR)/core)
 	@echo "Bootstrapping dependencies for $<..."
 	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $(OBJ_DIR)/core/$*.o
-
-$(OBJ_DIR)/core/settings_presentation_core.d: $(SETTINGS_PRESENTATION_SOURCE)
-	@$(call MKDIR,$(OBJ_DIR)/core)
-	@echo "Bootstrapping dependencies for shared Settings presentation core $<..."
-	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $(OBJ_DIR)/core/settings_presentation_core.o
 
 $(OBJ_DIR)/arch/%.o: arch/$(ARCH)/%.cpp
 	@$(call MKDIR,$(OBJ_DIR)/arch)

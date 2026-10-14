@@ -161,11 +161,9 @@ static void fill_shell_label(gxos::apps::LaunchTarget& target, const char* label
         target.dispatchLaunchName = "Control Panel";
         target.diagnosticReason = "Bare-metal Control Panel opens the existing embedded control area";
     } else if (text_equals(label, "Settings")) {
-        // Keep the visible Start menu label on the legacy path during the
-        // first native Settings acceptance. The canonical app ID is the safe
-        // independent launch route for this slice.
+        // Temporary fallback until a dedicated Settings app exists in bare metal.
         target.dispatchLaunchName = "Control Panel";
-        target.diagnosticReason = "Bare-metal Start menu Settings retains the legacy control area; launch gxos.builtin.settings independently";
+        target.diagnosticReason = "Bare-metal Settings falls back to the existing control area until a dedicated Settings app exists";
     } else if (text_equals(label, "System Settings")) {
         target.dispatchLaunchName = "DisplayOptions";
         target.diagnosticReason = "Bare-metal System Settings opens the existing display/settings panel";

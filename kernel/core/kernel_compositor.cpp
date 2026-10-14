@@ -268,8 +268,6 @@ void KernelCompositor::unregisterWindow(app::KernelWindow* window) {
             
             // Clear focus if this was focused
             if (s_focusedWindowId == window->id) {
-                if (window->owner) window->owner->onWindowBlur();
-                window->flags &= ~app::WF_FOCUSED;
                 s_focusedWindowId = 0;
                 // Focus next window if available
                 for (int j = MAX_WINDOWS - 1; j >= 0; j--) {
@@ -318,30 +316,23 @@ static void log_close_target(const char* prefix, const app::KernelWindow* win)
 #endif
 
 void KernelCompositor::setFocus(uint32_t windowId) {
-    app::KernelWindow* newWin = getWindow(windowId);
-    if (!newWin) return;
-
-    if (s_focusedWindowId == windowId) {
-        newWin->flags |= app::WF_FOCUSED;
-        return;
-    }
-
     // Clear focus flag on old window
     if (s_focusedWindowId != 0 && s_focusedWindowId != windowId) {
         app::KernelWindow* oldWin = getWindow(s_focusedWindowId);
         if (oldWin) {
             oldWin->flags &= ~app::WF_FOCUSED;
             oldWin->dirty = true;
-            if (oldWin->owner) oldWin->owner->onWindowBlur();
         }
     }
     
     // Set focus flag on new window
-    newWin->flags |= app::WF_FOCUSED;
-    newWin->dirty = true;
-    s_focusedWindowId = windowId;
-    bringToFront(windowId);
-    if (newWin->owner) newWin->owner->onWindowFocus();
+    app::KernelWindow* newWin = getWindow(windowId);
+    if (newWin) {
+        newWin->flags |= app::WF_FOCUSED;
+        newWin->dirty = true;
+        s_focusedWindowId = windowId;
+        bringToFront(windowId);
+    }
 }
 
 void KernelCompositor::bringToFront(uint32_t windowId) {

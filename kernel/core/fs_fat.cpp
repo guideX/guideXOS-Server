@@ -136,9 +136,6 @@ static block::Status write_volume_sector(const FATVolume& vol, uint64_t lba, con
 static block::Status flush_volume_io(const FATVolume& vol)
 {
     s_lastIoStatus = block::flush(vol.blockDevIndex);
-    serial::puts("LFPASTE_FLUSH_END status=0x");
-    serial::put_hex8(static_cast<uint8_t>(s_lastIoStatus));
-    serial::puts("\n");
     return s_lastIoStatus;
 }
 
@@ -1430,9 +1427,6 @@ bool flush(uint8_t volumeIndex, block::Status* outBlockStatus)
         if (outBlockStatus) *outBlockStatus = block::BLOCK_ERR_INVALID;
         return false;
     }
-    serial::puts("LFPASTE_FLUSH_BEGIN volume=0x");
-    serial::put_hex8(volumeIndex);
-    serial::puts("\n");
     const block::Status status = flush_volume_io(s_volumes[volumeIndex]);
     if (outBlockStatus) *outBlockStatus = status;
     return status == block::BLOCK_OK;

@@ -24,7 +24,7 @@
 namespace kernel {
 namespace serial {
 
-#if ARCH_HAS_PORT_IO
+#if ARCH_HAS_PORT_IO && !defined(GXOS_HOSTED_TEST)
 
 static const uint16_t kCOM1 = 0x3F8;
 

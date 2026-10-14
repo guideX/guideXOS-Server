@@ -17,7 +17,7 @@ $Output = [IO.Path]::GetFullPath($OutputPath)
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Output) | Out-Null
 $Arguments = @(
     "-std=c++17", "-Wall", "-Wextra", "-O2", "-iquote", ".",
-    "tests/settings_users_model_test.cpp", "settings_presentation_core.cpp", "-o", $Output
+    "tests/settings_users_model_test.cpp", "-o", $Output
 )
 
 Write-Host ("Running: {0} {1}" -f $Compiler.Source, ($Arguments -join " "))
