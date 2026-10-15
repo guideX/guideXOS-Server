@@ -1,8 +1,8 @@
 # Disk Manager DM36 — Read-Only FAT32 Integrity
 
-**Current outcome: Outcome B — `DM36_GUI_READY`**
+**Current outcome: Outcome B — `BLOCKED_BY_FOREIGN_QEMU`**
 **Phase marker:** `last_completed=DM35`, `next_expected=DM36`
-**Current scope:** bounded, host-tested FAT32 metadata, cluster-chain, directory, and allocation checks are integrated into the production Disk Manager GUI. Guest/QEMU acceptance remains incomplete; this does not claim full filesystem consistency or complete DM36.
+**Current scope:** bounded, host-tested FAT32 metadata, cluster-chain, directory, and allocation checks are integrated into the production Disk Manager GUI. Guest/QEMU acceptance remains incomplete because a sibling project owns an active QEMU guest; this does not claim full filesystem consistency or complete DM36.
 
 ## Continuation 1 — Metadata integrity foundation
 
@@ -283,3 +283,95 @@ This is **Outcome B — `DM36_GUI_READY`** for host implementation and
 validation. Guest/QEMU acceptance remains deferred, so DM36 is not closed and
 `.phase` remains `last_completed=DM35`, `next_expected=DM36`. No repairs or
 destructive writes were performed. `git diff --check` passed.
+
+## Continuation 4 — exact-head guest preflight blocked by foreign QEMU
+
+### Repository and stale-prompt gate
+
+The continuation verified repository root
+`D:\dev\guideXOSServer_DiskManagerImprovements`, branch
+`DISK_MANAGER_IMPROVEMENTS`, starting HEAD
+`6cd730dbe14e2103eb9d36a82f5aaad378244857` (`disk-manager: add DM36 FAT32
+integrity GUI`), and `.phase` values `last_completed=DM35` and
+`next_expected=DM36`. The tracked and untracked worktree was clean. The
+authoritative report identified DM36 guest acceptance as deferred, and there
+was no `out/dm36/fat32-integrity/` continuation artifact. DM36 was not already
+accepted, so the stale-prompt gate passed. No Windows timestamps were used.
+
+### QEMU ownership gate
+
+The initial process census was empty. A repeat census before any guest launch
+found PID **22092**, executable
+`C:\Program Files\qemu\qemu-system-x86_64.exe`, with command line name
+`guidexos-s12-20261014`. Its OVMF, ESP, serial log, and QEMU debug log all
+reside under the separate project workspace
+`D:\dev\guideXOSServer\out\validation\settings-s12-20261014\production\guest-acceptance\`.
+The process owns a WHPX QEMU guest and QMP endpoint `127.0.0.1:58312`. Its
+command line uses a GTK display and does not name a DM36 fixture. The owner is
+the sibling `D:\dev\guideXOSServer` project, not this repository. The QMP
+endpoint was not contacted; the process was not stopped, paused, or otherwise
+modified. No DM36 QEMU guest was started.
+
+The installed emulator reports QEMU **11.0.0** (`v11.0.0-12122-ga4bb4b10c9`);
+the executable SHA-256 is
+`A930E028F93D0FA47E4D58BDAD2432F7466DC2B6AF0AE376F77EF7A298FFDD02`. The
+active foreign WHPX guest makes this continuation's required QEMU lane
+unavailable under the foreign-owner stopping rule. The result is **Outcome B
+— `BLOCKED_BY_FOREIGN_QEMU`**.
+
+### Fixture reconnaissance and runtime provenance
+
+No new fixture was created or attached. Read-only offline inspection identified
+the existing DM30 source image `out/dm30-regression-dm9-ata/secondary-600-MiB.raw`
+as a possible starting point for a later DM36 fixture. It is 629,145,600 bytes,
+SHA-256 `C2E22CEA70DE015E6E551CBC31CAEA918135B0EEAC526AD411DEE7EE5392A30F2`.
+Its GPT Basic Data partition is named `DM9 QEMU Proof`, spans LBA 2048 through
+1228766 (1,226,719 sectors), and contains a 512-byte-sector FAT32 volume with
+16 sectors per cluster, 32 reserved sectors, two 599-sector FATs, 76,593 data
+clusters, root cluster 2, FSInfo sector 1, backup boot sector 6, and label
+`DM9PROOF`. The inspected root tree contains `DM9/PROOF.BIN` (29 bytes). This
+is fixture-source reconnaissance only; it is not a DM36 guest result or a
+newly generated DM36 fixture. The source image was not changed.
+
+The current source revision is the starting HEAD above. Source and candidate
+artifact SHA-256 values are:
+
+| Artifact | SHA-256 |
+|---|---|
+| `kernel/core/fat32_integrity.cpp` | `401E05E3AF38C74FF6264E248C172BD7CFE5F2E3E8632AED22A92A5494431331` |
+| `kernel/core/include/kernel/fat32_integrity.h` | `85858039AE17548B4D737DC44F4FB6EDF39E5A276D684FA8B4BF99D4C4B1BE1C` |
+| `kernel/core/kernel_apps.cpp` | `2A9E37B944B7725C41B5409637ADD5555D5411A8ABB1AB7552E34165462A8023` |
+| `kernel/core/include/kernel/disk_manager_surface_verification_ui.h` | `C638F3DF497EF0BBF0E9CF31785EB14422857EE686A3D4B30FF337E6245014D0` |
+| Existing isolated DM36 AMD64 `kernel.elf` | `96EC935C93BCB014D83419CE2C9A76B60521F89A8BBC148E28DC3A6A9136C870` |
+| Current workspace `ESP/kernel.elf` file | `0045993829AECECBCDC2782D4C3C62B3B80FBC36E5C2A8082CD066F2550B7779` |
+| Current workspace `ESP/EFI/BOOT/BOOTX64.EFI` file | `869D92E35AEF66C3AD8A4246C3A329BCD25A42C9FC6438A699BC80859125C50A` |
+| Existing UEFI x64 Release bootloader output | `30CAF50C39B37E1298C9D246DF88B1C16798C85AE1F5A8B78BD2DCB3524238F7` |
+| Current workspace `ESP/ramdisk.img` file | `5C9B3C5302E72F845448688A4C57DA91FD95F111946F5FCA4C30E452449555FD` |
+| Paced PS/2 helper `scripts/dm34_qmp_gui_input.py` | `FD41BE33D4F5C9E0B363B41E6EA4206FA7427E3DA9736EA39691B58505641D02` |
+
+The current ESP kernel and bootloader files do not match the isolated DM36 kernel
+and UEFI Release bootloader outputs. A source-matched candidate ESP was not
+assembled or booted because the QEMU ownership gate blocked guest launch. No
+proof-only checker bypass or automatic check-start hook was added. The existing
+build evidence retains `NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0`.
+
+### Gate and regression status
+
+Gates A–H were **not attempted**: no clean or corrupt DM36 guest scan, findings
+navigation, Stop Check, application Close, removal/replacement, guest read
+failure, mounted-target guest test, guest I/O counters, screenshots, or
+before/after DM36 fixture hashes exist. No physical host disk or USB device was
+attached. Existing host evidence remains source-matched and was not rerun:
+DM36 checker **259/259**, DM36 GUI **31/31**, full storage suite
+**1,482/1,482**, AMD64 kernel build PASS, `build.bat` PASS, and UEFI x64
+Release PASS. The previously recorded `build.ps1 -Arch amd64` failure at the
+unrelated PacMan Native ELF audio symbols remains unchanged; no PacMan files
+were modified.
+
+The smallest next continuation is to wait until the sibling project releases
+its QEMU guest, repeat the process census without touching foreign processes,
+assemble and hash a source-matched runtime ESP, prepare and independently
+validate the DM36 fixture set under `out/dm36/fat32-integrity/`, then run the
+guest gates A–H in the prescribed order. `.phase` remains
+`last_completed=DM35`, `next_expected=DM36`; DM37 is not ready. The report is
+not a filesystem-health certification and claims no repairs.
