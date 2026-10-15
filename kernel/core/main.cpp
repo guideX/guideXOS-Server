@@ -42,6 +42,9 @@
 #if defined(GXOS_QEMU_VFS_RESIZE_QUALIFICATION)
 #include "include/kernel/qemu_vfs_resize_qualification.h"
 #endif
+#if defined(GXOS_QEMU_NATIVE_DATABASE_QUALIFICATION)
+#include "include/kernel/qemu_native_database_qualification.h"
+#endif
 #include "include/kernel/nvme.h"
 #include "include/kernel/ramdisk.h"
 #include "include/kernel/vfs.h"
@@ -768,7 +771,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 
 #if (defined(GXOS_QEMU_ATA_PIO_QUALIFICATION) && \
      defined(GXOS_QEMU_ATA_MULTIBOOT_BOOT)) || \
-    defined(GXOS_QEMU_VFS_RESIZE_QUALIFICATION)
+    defined(GXOS_QEMU_VFS_RESIZE_QUALIFICATION) || \
+    defined(GXOS_QEMU_NATIVE_DATABASE_QUALIFICATION)
     if (is_multiboot) {
         kernel::serial::puts("[NDB-QEMU-QUAL] QEMU Multiboot test entry\n");
         kernel::block::init();
@@ -779,6 +783,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #endif
 #if defined(GXOS_QEMU_VFS_RESIZE_QUALIFICATION)
         if (passed) passed = kernel::qemu_vfs_resize_qualification::run();
+#endif
+#if defined(GXOS_QEMU_NATIVE_DATABASE_QUALIFICATION)
+        if (passed) passed = kernel::qemu_native_database_qualification::run();
 #endif
         // isa-debug-exit makes the test guest terminate promptly after its
         // bounded result instead of leaving an idle VM behind.

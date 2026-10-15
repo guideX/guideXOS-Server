@@ -77,6 +77,19 @@ enum FileWriteStatus : uint8_t {
 
 const char* file_write_status_name(FileWriteStatus status);
 
+// Status-bearing path lookup. The legacy bool API remains available, but
+// providers must distinguish an absent entry from a volume read failure.
+enum LookupStatus : uint8_t {
+    LOOKUP_OK = 0,
+    LOOKUP_NOT_FOUND,
+    LOOKUP_INVALID_ARGUMENT,
+    LOOKUP_NOT_MOUNTED,
+    LOOKUP_IO_ERROR,
+    LOOKUP_CORRUPT,
+};
+
+const char* lookup_status_name(LookupStatus status);
+
 // Detailed status for a bounded FAT32 shrink operation. A shrink can fail
 // after directory metadata has been published; in that case the FAT handle
 // is closed and the caller must discard its VFS handle.
@@ -496,6 +509,7 @@ bool find_in_dir(uint8_t volumeIndex, const char* name, DirEntry* out);
 // Traverses directories as needed.
 // Returns true if found, fills out the DirEntry.
 bool lookup_path(uint8_t volumeIndex, const char* path, DirEntry* out);
+LookupStatus lookup_path_status(uint8_t volumeIndex, const char* path, DirEntry* out);
 
 } // namespace fs_fat
 } // namespace kernel

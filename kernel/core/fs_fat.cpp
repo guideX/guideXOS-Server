@@ -2187,11 +2187,14 @@ bool find_in_dir(uint8_t volumeIndex, const char* name, DirEntry* out)
     return false;
 }
 
-bool lookup_path(uint8_t volumeIndex, const char* path, DirEntry* out)
+LookupStatus lookup_path_status(uint8_t volumeIndex, const char* path, DirEntry* out)
 {
-    if (volumeIndex >= MAX_FAT_VOLUMES) return false;
-    if (!s_volumes[volumeIndex].mounted) return false;
-    if (!path || !out) return false;
+    s_lastIoStatus = block::BLOCK_OK;
+    set_traversal_status(TRAVERSAL_OK);
+    if (volumeIndex >= MAX_FAT_VOLUMES || !path || !out) {
+        return LOOKUP_INVALID_ARGUMENT;
+    }
+    if (!s_volumes[volumeIndex].mounted) return LOOKUP_NOT_MOUNTED;
     
     FATVolume& vol = s_volumes[volumeIndex];
 
@@ -2205,7 +2208,7 @@ bool lookup_path(uint8_t volumeIndex, const char* path, DirEntry* out)
         out->fileSize = 0;
         out->attr = ATTR_DIRECTORY;
         out->isDir = true;
-        return true;
+        return LOOKUP_OK;
     }
 
     // Path lookup is deliberately independent of the public directory
@@ -2214,7 +2217,39 @@ bool lookup_path(uint8_t volumeIndex, const char* path, DirEntry* out)
     // cursor before its next readdir().
     uint32_t sector = 0;
     uint32_t offset = 0;
-    return find_path_entry_at(volumeIndex, path, out, &sector, &offset);
+    if (find_path_entry_at(volumeIndex, path, out, &sector, &offset)) {
+        return LOOKUP_OK;
+    }
+    if (s_lastIoStatus != block::BLOCK_OK ||
+        s_lastTraversalStatus == TRAVERSAL_IO_ERROR) {
+        return LOOKUP_IO_ERROR;
+    }
+    if (s_lastTraversalStatus == TRAVERSAL_CHAIN_CYCLE ||
+        s_lastTraversalStatus == TRAVERSAL_CHAIN_STEP_LIMIT ||
+        s_lastTraversalStatus == TRAVERSAL_TRUNCATED_CHAIN ||
+        s_lastTraversalStatus == TRAVERSAL_INVALID_CLUSTER ||
+        s_lastTraversalStatus == TRAVERSAL_BAD_CLUSTER) {
+        return LOOKUP_CORRUPT;
+    }
+    return LOOKUP_NOT_FOUND;
+}
+
+bool lookup_path(uint8_t volumeIndex, const char* path, DirEntry* out)
+{
+    return lookup_path_status(volumeIndex, path, out) == LOOKUP_OK;
+}
+
+const char* lookup_status_name(LookupStatus status)
+{
+    switch (status) {
+        case LOOKUP_OK: return "FAT_LOOKUP_OK";
+        case LOOKUP_NOT_FOUND: return "FAT_LOOKUP_NOT_FOUND";
+        case LOOKUP_INVALID_ARGUMENT: return "FAT_LOOKUP_INVALID_ARGUMENT";
+        case LOOKUP_NOT_MOUNTED: return "FAT_LOOKUP_NOT_MOUNTED";
+        case LOOKUP_IO_ERROR: return "FAT_LOOKUP_IO_ERROR";
+        case LOOKUP_CORRUPT: return "FAT_LOOKUP_CORRUPT";
+        default: return "FAT_LOOKUP_UNKNOWN";
+    }
 }
 
 FileWriteStatus overwrite_path_status(uint8_t volumeIndex, const char* path,
@@ -2291,7 +2326,18 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
     }
 
     DirEntry existing;
-    if (lookup_path(volumeIndex, path, &existing)) return FILE_WRITE_ALREADY_EXISTS;
+    const LookupStatus lookup = lookup_path_status(volumeIndex, path, &existing);
+    if (lookup == LOOKUP_OK) return FILE_WRITE_ALREADY_EXISTS;
+    if (lookup != LOOKUP_NOT_FOUND) {
+        if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+        if (lookup == LOOKUP_CORRUPT) return FILE_WRITE_CORRUPT_CHAIN;
+        if (lookup == LOOKUP_IO_ERROR) {
+            return s_lastIoStatus == block::BLOCK_ERR_TIMEOUT
+                ? FILE_WRITE_IO_TIMEOUT : FILE_WRITE_IO_ERROR;
+        }
+        return lookup == LOOKUP_NOT_MOUNTED ? FILE_WRITE_NOT_MOUNTED
+                                            : FILE_WRITE_INVALID_ARGUMENT;
+    }
 
     uint32_t parentCluster = 0;
     char fileName[128];

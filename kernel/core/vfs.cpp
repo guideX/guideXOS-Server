@@ -881,7 +881,9 @@ uint8_t open(const char* path, uint16_t flags)
         case FS_TYPE_EXFAT: {
             // Use lookup_path to find the file
             fs_fat::DirEntry entry;
-            if (fs_fat::lookup_path(mount->fsVolumeIndex, relPath, &entry)) {
+            const fs_fat::LookupStatus lookup = fs_fat::lookup_path_status(
+                mount->fsVolumeIndex, relPath, &entry);
+            if (lookup == fs_fat::LOOKUP_OK) {
                 fileType = entry.isDir ? FILE_TYPE_DIRECTORY : FILE_TYPE_REGULAR;
                 if ((flags & OPEN_CREATE) && (flags & OPEN_EXCL)) {
                     return 0xFF;
@@ -896,6 +898,9 @@ uint8_t open(const char* path, uint16_t flags)
                 }
                 
             } else {
+                if (lookup != fs_fat::LOOKUP_NOT_FOUND) {
+                    return 0xFF;
+                }
                 // File not found - check if we should create it
                 if (flags & OPEN_CREATE) {
                     block::Status blockStatus = block::BLOCK_OK;
@@ -913,7 +918,8 @@ uint8_t open(const char* path, uint16_t flags)
 #endif
                         return 0xFF;
                     }
-                    if (!fs_fat::lookup_path(mount->fsVolumeIndex, relPath, &entry)) {
+                    if (fs_fat::lookup_path_status(mount->fsVolumeIndex, relPath,
+                                                   &entry) != fs_fat::LOOKUP_OK) {
                         return 0xFF;
                     }
                 } else {
@@ -1558,8 +1564,19 @@ Status stat(const char* path, FileInfo* info)
         case FS_TYPE_FAT32:
         case FS_TYPE_EXFAT: {
             fs_fat::DirEntry entry;
-            if (!fs_fat::lookup_path(mount->fsVolumeIndex, relPath, &entry)) {
-                return VFS_ERR_NOT_FOUND;
+            const fs_fat::LookupStatus lookup = fs_fat::lookup_path_status(
+                mount->fsVolumeIndex, relPath, &entry);
+            if (lookup != fs_fat::LOOKUP_OK) {
+                switch (lookup) {
+                    case fs_fat::LOOKUP_NOT_FOUND: return VFS_ERR_NOT_FOUND;
+                    case fs_fat::LOOKUP_NOT_MOUNTED: return VFS_ERR_NOT_MOUNT;
+                    case fs_fat::LOOKUP_INVALID_ARGUMENT: return VFS_ERR_INVALID;
+                    case fs_fat::LOOKUP_CORRUPT: return VFS_ERR_CORRUPT_DIRECTORY;
+                    case fs_fat::LOOKUP_IO_ERROR:
+                        return fs_fat::last_io_status() == block::BLOCK_ERR_TIMEOUT
+                            ? VFS_ERR_IO_TIMEOUT : VFS_ERR_IO;
+                    default: return VFS_ERR_IO;
+                }
             }
             
             // Fill in FileInfo from DirEntry

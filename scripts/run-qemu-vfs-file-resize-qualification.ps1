@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [int]$TimeoutSeconds = 90
+    [int]$TimeoutSeconds = 90,
+    [switch]$NativeDatabaseBridge
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,7 +41,8 @@ function Assert-NewZeroImage([string]$Path, [long]$ExpectedLength) {
 function Invoke-QemuPhase([string]$QemuPath, [string]$LoaderPath,
                           [string]$KernelPath, [string]$DiskPath,
                           [string]$RunDirectory, [string]$Phase,
-                          [string]$ExpectedMarker, [int]$WaitSeconds) {
+                          [string]$ExpectedMarker, [string]$ExpectedBridgeMarker,
+                          [int]$WaitSeconds) {
     $serialPath = Join-Path $RunDirectory "$Phase.serial.log"
     $stdoutPath = Join-Path $RunDirectory "$Phase.stdout.log"
     $stderrPath = Join-Path $RunDirectory "$Phase.stderr.log"
@@ -76,8 +78,11 @@ function Invoke-QemuPhase([string]$QemuPath, [string]$LoaderPath,
     }
     $serial = Get-Content -LiteralPath $serialPath -Raw
     if (-not $serial.Contains($ExpectedMarker) -or
-        $serial.Contains("[NDB1R2-VFS-QUAL] FAIL:")) {
-        throw "QEMU $Phase phase did not report $ExpectedMarker.`n$serial"
+        $serial.Contains("[NDB1R2-VFS-QUAL] FAIL:") -or
+        ($ExpectedBridgeMarker -and
+         (-not $serial.Contains($ExpectedBridgeMarker) -or
+          $serial.Contains("[NDB1R3-BRIDGE] FAIL:")))) {
+        throw "QEMU $Phase phase did not report the required qualification markers.`n$serial"
     }
     $exitLabel = if ($null -eq $exitCode) { "process exited" } else { "exit $exitCode" }
     Write-Host "QEMU $Phase phase PASS ($exitLabel); serial: $serialPath"
@@ -97,7 +102,8 @@ $Linker = Find-Tool "ld.lld.exe" @("C:\Program Files\LLVM\bin\ld.lld.exe")
 $Nasm = Join-Path $Root "tools\nasm.exe"
 if (-not (Test-Path -LiteralPath $Nasm)) { throw "Repository NASM was not found: $Nasm" }
 
-$runName = "NDB1R2_VFS_RESIZE_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+$runPrefix = if ($NativeDatabaseBridge) { "NDB1R3_NATIVE_FILE_BRIDGE" } else { "NDB1R2_VFS_RESIZE" }
+$runName = "${runPrefix}_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
 $runDirectory = Join-Path $Root (Join-Path "out\validation" $runName)
 if (Test-Path -LiteralPath $runDirectory) {
     throw "Validation directory already exists; refusing to reuse it: $runDirectory"
@@ -109,8 +115,10 @@ $loaderPath = Join-Path $runDirectory "qemu_multiboot_loader.elf"
 $kernelPath = Join-Path $Root "kernel\build\amd64-ndb1r2-qemu\bin\kernel.elf"
 
 Write-Host "Building test-only kernel in a separate output directory."
+$extraCFlags = "-DGXOS_QEMU_VFS_RESIZE_QUALIFICATION"
+if ($NativeDatabaseBridge) { $extraCFlags += " -DGXOS_QEMU_NATIVE_DATABASE_QUALIFICATION" }
 & $Make -C kernel ARCH=amd64 BUILD_DIR=build/amd64-ndb1r2-qemu `
-    EXTRA_CFLAGS=-DGXOS_QEMU_VFS_RESIZE_QUALIFICATION -j4
+    "EXTRA_CFLAGS=$extraCFlags" -j4
 if ($LASTEXITCODE -ne 0) { throw "QEMU qualification kernel build failed." }
 if (-not (Test-Path -LiteralPath $kernelPath)) {
     throw "QEMU qualification kernel was not produced: $kernelPath"
@@ -132,11 +140,15 @@ $blankImageHash = Assert-NewZeroImage $diskPath 67108864
 Write-Host "Verified fresh zero-filled image; SHA-256: $blankImageHash"
 
 $writeLog = Invoke-QemuPhase $Qemu $loaderPath $kernelPath $diskPath `
-    $runDirectory "write-phase" "[NDB1R2-VFS-QUAL] WRITE_PHASE PASS" $TimeoutSeconds
+    $runDirectory "write-phase" "[NDB1R2-VFS-QUAL] WRITE_PHASE PASS" `
+    $(if ($NativeDatabaseBridge) { "[NDB1R3-BRIDGE] WRITE_PHASE PASS" } else { "" }) `
+    $TimeoutSeconds
 $afterWriteHash = (Get-FileHash -LiteralPath $diskPath -Algorithm SHA256).Hash
 $readbackLog = Invoke-QemuPhase $Qemu $loaderPath $kernelPath $diskPath `
     $runDirectory "cross-process-readback" `
-    "[NDB1R2-VFS-QUAL] CROSS_PROCESS_READBACK PASS" $TimeoutSeconds
+    "[NDB1R2-VFS-QUAL] CROSS_PROCESS_READBACK PASS" `
+    $(if ($NativeDatabaseBridge) { "[NDB1R3-BRIDGE] CROSS_PROCESS_READBACK PASS" } else { "" }) `
+    $TimeoutSeconds
 $afterReadbackHash = (Get-FileHash -LiteralPath $diskPath -Algorithm SHA256).Hash
 if ($afterReadbackHash -ne $afterWriteHash) {
     throw "The independent readback process changed the disposable disk image."
