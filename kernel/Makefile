@@ -52,7 +52,7 @@ KERNEL := $(BIN_DIR)/kernel.elf
 
 # Architecture-specific settings (sets CXX, AS, LD, and ARCH_CFLAGS)
 include arch/$(ARCH)/Makefile.arch
-CC ?= $(subst g++,gcc,$(CXX))
+CC := $(subst g++,gcc,$(CXX))
 
 MBEDTLS_GUIDEXOS_ENABLED := 0
 MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED := 0
@@ -123,6 +123,21 @@ ASM_SOURCES := $(wildcard arch/$(ARCH)/*.asm) $(wildcard arch/$(ARCH)/*.s)
 MBEDTLS_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_LINK_ENABLED)),$(MBEDTLS_GUIDEXOS_C_SOURCES))
 MBEDTLS_COMPILE_PROBE_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED)),$(MBEDTLS_GUIDEXOS_COMPILE_PROBE_C_SOURCES))
 
+# The native REXX command is enabled on AMD64 only. Other architecture builds
+# retain the existing weak shell bridge and its clear missing-engine message.
+ifeq ($(ARCH),amd64)
+REXX_C_SOURCES := $(addprefix $(GUIDEXOS_REPO_ROOT)/, \
+	rexx_lexer.c \
+	rexx_parser.c \
+	rexx_compiler.c \
+	rexx_vm.c \
+	rexx_builtin.c \
+	rexx_numeric.c \
+	rexx_output.c \
+	rexx_os_io.c \
+	rexx_cli.c)
+endif
+
 # Object files
 CORE_OBJS := $(patsubst core/%.cpp,$(OBJ_DIR)/core/%.o,$(CORE_SOURCES))
 SHELL_OBJS := $(patsubst shell/%.cpp,$(OBJ_DIR)/shell/%.o,$(SHELL_SOURCES))
@@ -131,9 +146,15 @@ ASM_OBJS := $(patsubst arch/$(ARCH)/%.asm,$(OBJ_DIR)/arch/%.o,$(ASM_SOURCES))
 ASM_OBJS += $(patsubst arch/$(ARCH)/%.s,$(OBJ_DIR)/arch/%.o,$(filter %.s,$(ASM_SOURCES)))
 MBEDTLS_C_OBJS := $(patsubst $(GUIDEXOS_REPO_ROOT)/third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_C_SOURCES))
 MBEDTLS_COMPILE_PROBE_C_OBJS := $(patsubst $(GUIDEXOS_REPO_ROOT)/third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_COMPILE_PROBE_C_SOURCES))
+REXX_C_OBJS := $(patsubst $(GUIDEXOS_REPO_ROOT)/%.c,$(OBJ_DIR)/rexx/%.o,$(REXX_C_SOURCES))
 
-ALL_OBJS := $(CORE_OBJS) $(SHELL_OBJS) $(ARCH_OBJS) $(ASM_OBJS) $(MBEDTLS_C_OBJS)
-DEPFILES := $(CORE_OBJS:.o=.d) $(SHELL_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_COMPILE_PROBE_C_OBJS:.o=.d)
+ALL_OBJS := $(CORE_OBJS) $(SHELL_OBJS) $(ARCH_OBJS) $(ASM_OBJS) $(MBEDTLS_C_OBJS) $(REXX_C_OBJS)
+DEPFILES := $(CORE_OBJS:.o=.d) $(SHELL_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_COMPILE_PROBE_C_OBJS:.o=.d) $(REXX_C_OBJS:.o=.d)
+
+REXX_CFLAGS := -std=c11 -ffreestanding -O2 -Wall -Wextra -fno-builtin
+REXX_CFLAGS += -nostdlib -DGXOS_BARE_METAL
+REXX_CFLAGS += -I. -I.. -Icore/include -Iarch/$(ARCH)/include
+REXX_CFLAGS += $(EXTRA_CFLAGS) $(ARCH_CFLAGS)
 
 # Targets
 .PHONY: all clean info verify-mbedtls-guidexos mbedtls-guidexos-compile-probe
@@ -222,6 +243,16 @@ $(OBJ_DIR)/arch/%.d: arch/$(ARCH)/%.cpp
 	@$(call MKDIR,$(OBJ_DIR)/arch)
 	@echo "Bootstrapping dependencies for $<..."
 	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $(OBJ_DIR)/arch/$*.o
+
+$(OBJ_DIR)/rexx/%.o: $(GUIDEXOS_REPO_ROOT)/%.c
+	@$(call MKDIR,$(OBJ_DIR)/rexx)
+	@echo "Compiling C source $<..."
+	$(CC) $(REXX_CFLAGS) $(DEPFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/rexx/%.d: $(GUIDEXOS_REPO_ROOT)/%.c
+	@$(call MKDIR,$(OBJ_DIR)/rexx)
+	@echo "Bootstrapping C dependencies for $<..."
+	$(CC) $(REXX_CFLAGS) $(DEPFLAGS) -c $< -o $(OBJ_DIR)/rexx/$*.o
 
 $(OBJ_DIR)/arch/%.o: arch/$(ARCH)/%.asm
 	@$(call MKDIR,$(OBJ_DIR)/arch)

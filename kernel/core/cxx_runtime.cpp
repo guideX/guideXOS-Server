@@ -282,6 +282,17 @@ int memcmp(const void* s1, const void* s2, size_t n)
     return 0;
 }
 
+void* memchr(const void* buffer, int value, size_t n)
+{
+    const uint8_t* bytes = static_cast<const uint8_t*>(buffer);
+    const uint8_t target = static_cast<uint8_t>(value);
+    if (bytes == nullptr) return nullptr;
+    for (size_t i = 0; i < n; ++i) {
+        if (bytes[i] == target) return const_cast<uint8_t*>(bytes + i);
+    }
+    return nullptr;
+}
+
 size_t strlen(const char* s)
 {
     size_t len = 0;
@@ -388,6 +399,7 @@ namespace {
 
     struct KernelHeapBlock {
         size_t size;
+        size_t requested_size;
         KernelHeapBlock* next;
         KernelHeapBlock* prev;
         uint32_t free;
@@ -407,6 +419,7 @@ namespace {
         if (g_heapInitialized) return;
         g_heapHead = reinterpret_cast<KernelHeapBlock*>(g_kernelHeap);
         g_heapHead->size = KERNEL_HEAP_SIZE - sizeof(KernelHeapBlock);
+        g_heapHead->requested_size = 0;
         g_heapHead->next = nullptr;
         g_heapHead->prev = nullptr;
         g_heapHead->free = 1;
@@ -439,6 +452,8 @@ namespace {
 
     void* kernel_alloc(size_t size) {
         kernel_heap_init();
+        if (size > static_cast<size_t>(-1) - (KERNEL_HEAP_ALIGNMENT - 1))
+            return nullptr;
         size_t alignedSize = align_size(size ? size : 1u);
         for (KernelHeapBlock* block = g_heapHead; block; block = block->next) {
             if (!block->free || block->size < alignedSize) {
@@ -449,6 +464,7 @@ namespace {
             if (remaining >= sizeof(KernelHeapBlock) + KERNEL_HEAP_ALIGNMENT) {
                 KernelHeapBlock* split = reinterpret_cast<KernelHeapBlock*>(block_payload(block) + alignedSize);
                 split->size = remaining - sizeof(KernelHeapBlock);
+                split->requested_size = 0;
                 split->next = block->next;
                 split->prev = block;
                 split->free = 1;
@@ -460,6 +476,7 @@ namespace {
             }
 
             block->free = 0;
+            block->requested_size = size;
             return block_payload(block);
         }
 
@@ -483,12 +500,76 @@ namespace {
         }
 
         block->free = 1;
+        block->requested_size = 0;
         merge_with_next(block);
         if (block->prev && block->prev->free) {
             block = block->prev;
             merge_with_next(block);
         }
     }
+
+    KernelHeapBlock* allocated_block(void* ptr) {
+        if (ptr == nullptr) return nullptr;
+        kernel_heap_init();
+
+        const uintptr_t heapBegin = reinterpret_cast<uintptr_t>(g_kernelHeap);
+        const uintptr_t heapEnd = heapBegin + KERNEL_HEAP_SIZE;
+        const uintptr_t payload = reinterpret_cast<uintptr_t>(ptr);
+        if (payload < heapBegin + sizeof(KernelHeapBlock) || payload >= heapEnd)
+            return nullptr;
+
+        KernelHeapBlock* block = payload_block(ptr);
+        const uintptr_t blockAddress = reinterpret_cast<uintptr_t>(block);
+        if (blockAddress < heapBegin || blockAddress >= heapEnd || block->free ||
+            block->size > heapEnd - payload ||
+            block->requested_size > block->size) {
+            return nullptr;
+        }
+        return block;
+    }
+}
+
+// Freestanding C allocation API used by C kernel modules. The same bounded
+// kernel heap backs C++ new/delete and REXX allocations.
+extern "C" void* malloc(size_t size)
+{
+    return kernel_alloc(size);
+}
+
+extern "C" void* calloc(size_t count, size_t size)
+{
+    if (size != 0 && count > static_cast<size_t>(-1) / size) return nullptr;
+    const size_t total = count * size;
+    void* memory = kernel_alloc(total);
+    if (memory != nullptr && total != 0) memset(memory, 0, total);
+    return memory;
+}
+
+extern "C" void free(void* ptr)
+{
+    kernel_free(ptr);
+}
+
+extern "C" void* realloc(void* ptr, size_t size)
+{
+    if (ptr == nullptr) return kernel_alloc(size);
+    if (size == 0) {
+        kernel_free(ptr);
+        return nullptr;
+    }
+
+    KernelHeapBlock* block = allocated_block(ptr);
+    if (block == nullptr) return nullptr;
+    if (block->requested_size >= size) {
+        block->requested_size = size;
+        return ptr;
+    }
+
+    void* replacement = kernel_alloc(size);
+    if (replacement == nullptr) return nullptr;
+    memcpy(replacement, ptr, block->requested_size);
+    kernel_free(ptr);
+    return replacement;
 }
 
 // ============================================================================

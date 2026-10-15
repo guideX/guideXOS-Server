@@ -1,8 +1,6 @@
 #include "rexx_builtin.h"
+#include "rexx_numeric.h"
 
-#include <errno.h>
-#include <math.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -80,11 +78,12 @@ static RexxVMStatus rexx_builtin_string_view(const RexxValue *value,
         view->length = 1u;
         return REXX_VM_STATUS_OK;
     case REXX_VALUE_NUMBER:
-        if (!isfinite(value->as.number)) {
+        if (!rexx_numeric_is_finite(value->as.number)) {
             return REXX_VM_STATUS_NUMERIC_ERROR;
         }
-        written = snprintf(view->number_buffer, sizeof(view->number_buffer),
-                           "%.15g", value->as.number);
+        written = rexx_numeric_format(view->number_buffer,
+                                      sizeof(view->number_buffer),
+                                      value->as.number);
         if (written < 0 || (size_t)written >= sizeof(view->number_buffer)) {
             return REXX_VM_STATUS_NUMERIC_ERROR;
         }
@@ -109,7 +108,7 @@ static RexxVMStatus rexx_builtin_number(const RexxValue *value, double *number)
         return REXX_VM_STATUS_INVALID_ARGUMENT;
     }
     if (value->type == REXX_VALUE_NUMBER) {
-        if (!isfinite(value->as.number)) {
+        if (!rexx_numeric_is_finite(value->as.number)) {
             return REXX_VM_STATUS_NUMERIC_ERROR;
         }
         *number = value->as.number;
@@ -138,6 +137,7 @@ static RexxVMStatus rexx_builtin_number(const RexxValue *value, double *number)
         char *end;
         size_t trimmed_length;
         double parsed;
+        RexxNumericStatus numeric_status;
 
         if (copy == NULL) {
             return REXX_VM_STATUS_OUT_OF_MEMORY;
@@ -165,10 +165,10 @@ static RexxVMStatus rexx_builtin_number(const RexxValue *value, double *number)
             return REXX_VM_STATUS_OK;
         }
 
-        errno = 0;
-        parsed = strtod(start, &end);
-        if (errno == ERANGE || end == start ||
-            (size_t)(end - start) != trimmed_length || !isfinite(parsed)) {
+        numeric_status = rexx_numeric_parse(start, &end, &parsed);
+        if (numeric_status != REXX_NUMERIC_OK || end == start ||
+            (size_t)(end - start) != trimmed_length ||
+            !rexx_numeric_is_finite(parsed)) {
             free(copy);
             return REXX_VM_STATUS_NUMERIC_ERROR;
         }
@@ -182,7 +182,6 @@ static RexxVMStatus rexx_builtin_number(const RexxValue *value, double *number)
 static RexxVMStatus rexx_builtin_size(const RexxValue *value, size_t *number)
 {
     double parsed;
-    double integral_part;
     size_t converted;
     RexxVMStatus status;
 
@@ -194,11 +193,11 @@ static RexxVMStatus rexx_builtin_size(const RexxValue *value, size_t *number)
         return status;
     }
     if (parsed < 0.0 || parsed >= (double)SIZE_MAX ||
-        modf(parsed, &integral_part) != 0.0) {
+        !rexx_numeric_is_integral(parsed)) {
         return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
     }
     converted = (size_t)parsed;
-    if ((double)converted != integral_part) {
+    if ((double)converted != parsed) {
         return REXX_VM_STATUS_INVALID_ARGUMENT;
     }
     *number = converted;
@@ -312,7 +311,6 @@ static RexxVMStatus rexx_builtin_word(const RexxValue *arguments,
 {
     RexxBuiltinStringView string;
     double word_number;
-    double integral_part;
     size_t index = 0u;
     size_t position = 0u;
     RexxVMStatus status;
@@ -326,13 +324,13 @@ static RexxVMStatus rexx_builtin_word(const RexxValue *arguments,
     if (status != REXX_VM_STATUS_OK) {
         return status;
     }
-    if (modf(word_number, &integral_part) != 0.0) {
+    if (!rexx_numeric_is_integral(word_number)) {
         return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
     }
-    if (integral_part <= 0.0 || integral_part >= (double)SIZE_MAX) {
+    if (word_number <= 0.0 || word_number >= (double)SIZE_MAX) {
         return rexx_builtin_set_empty(result);
     }
-    index = (size_t)integral_part;
+    index = (size_t)word_number;
 
     while (position < string.length) {
         size_t word_start;

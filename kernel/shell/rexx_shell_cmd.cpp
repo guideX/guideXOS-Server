@@ -6,6 +6,8 @@
 // has one clear release point after the interpreter returns.
 
 #include "rexx_shell_cmd.h"
+#include "kernel/shell.h"
+#include "../../rexx_cli.h"
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -14,9 +16,11 @@
 // configurations that have not yet linked the C interpreter objects usable;
 // when present, the command always calls this exact entry point.
 #if defined(__GNUC__) || defined(__clang__)
-extern "C" int guide_rexx_main(int argc, char** argv) __attribute__((weak));
+extern "C" int guide_rexx_main_with_output(
+    int argc, char** argv, const RexxOutputHost* host) __attribute__((weak));
 #else
-extern "C" int guide_rexx_main(int argc, char** argv);
+extern "C" int guide_rexx_main_with_output(
+    int argc, char** argv, const RexxOutputHost* host);
 #endif
 
 namespace kernel {
@@ -25,6 +29,15 @@ namespace {
 
 static const size_t kMaxCommandLineBytes = 256u;
 static const int kMaxArgumentCount = 16;
+
+static int shell_output_writer(void*, RexxOutputStream,
+                               const char* bytes, size_t length) {
+    return kernel::shell::write_rexx_output(bytes, length) ? 1 : 0;
+}
+
+static int shell_output_flush(void*, RexxOutputStream) {
+    return 1;
+}
 
 static bool is_shell_space(char value) {
     return value == ' ' || value == '\t' || value == '\r' || value == '\n';
@@ -180,13 +193,19 @@ static RexxShellTokenizeStatus tokenize_command_line(const char* input,
 
 bool rexx_cli_available() {
 #if defined(__GNUC__) || defined(__clang__)
-    return guide_rexx_main != NULL;
+    return guide_rexx_main_with_output != NULL;
 #else
     return true;
 #endif
 }
 
 int shell_cmd_rexx(int argc, char** argv) {
+    char resolved_path[256];
+    char* resolved_argv[kMaxArgumentCount + 1];
+    int script_index = 1;
+    int index;
+    RexxOutputHost host;
+
     if (argc < 1 || argc > kMaxArgumentCount || argv == NULL || argv[0] == NULL ||
         !rexx_command_name(argv[0])) {
         return 2;
@@ -196,7 +215,29 @@ int shell_cmd_rexx(int argc, char** argv) {
     }
     if (!rexx_cli_available()) return 127;
 
-    return guide_rexx_main(argc, argv);
+    for (index = 0; index < argc; ++index) resolved_argv[index] = argv[index];
+    resolved_argv[argc] = NULL;
+    if (script_index < argc && text_equals(resolved_argv[script_index], "--")) {
+        ++script_index;
+    }
+    if (script_index < argc && resolved_argv[script_index][0] != '-') {
+        if (!kernel::shell::resolve_rexx_script_path(resolved_argv[script_index],
+                                                    resolved_path,
+                                                    sizeof(resolved_path))) {
+            static const char error[] = "rexx: invalid or oversized script path\n";
+            (void)shell_output_writer(NULL, REXX_OUTPUT_STDERR,
+                                      error, sizeof(error) - 1u);
+            return 2;
+        }
+        resolved_argv[script_index] = resolved_path;
+    }
+
+    host.write = shell_output_writer;
+    host.flush = shell_output_flush;
+    host.context = NULL;
+    host.max_stdout_bytes = 65536u;
+    host.max_stderr_bytes = 4096u;
+    return guide_rexx_main_with_output(argc, resolved_argv, &host);
 }
 
 RexxShellTokenizeStatus shell_cmd_rexx_line(const char* command_line,

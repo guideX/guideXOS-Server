@@ -1,6 +1,8 @@
 #ifndef GUIDEXOS_REXX_CLI_H
 #define GUIDEXOS_REXX_CLI_H
 
+#include "rexx_output.h"
+
 /*
  * Native command-line front end for the guideXOS REXX interpreter.
  *
@@ -27,6 +29,12 @@ extern "C" {
  * created while executing the script. The argv strings remain caller-owned.
  */
 int guide_rexx_main(int argc, char **argv);
+
+/* Execute with an invocation-specific stdout/stderr host. The caller retains
+ * ownership of host and its context until this synchronous call returns. */
+int guide_rexx_main_with_output(int argc,
+                                char **argv,
+                                const RexxOutputHost *host);
 
 #ifdef __cplusplus
 }

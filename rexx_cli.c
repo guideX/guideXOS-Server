@@ -1,8 +1,8 @@
 /*
  * Native command-line wrapper for the in-tree guideXOS REXX interpreter.
  *
- * This translation unit uses the repository's lexer/parser/compiler/VM
- * modules and the guideXOS OS I/O adapter for bounded script loading.
+ * File access remains behind rexx_os_io. Output is supplied per invocation,
+ * so native shells can route SAY and diagnostics to the invoking Console.
  */
 
 #include "rexx_cli.h"
@@ -10,12 +10,11 @@
 
 #include "rexx_compiler.h"
 #include "rexx_lexer.h"
+#include "rexx_numeric.h"
+#include "rexx_output.h"
 #include "rexx_parser.h"
 #include "rexx_vm.h"
 
-#include <stdio.h>
-#include <errno.h>
-#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,21 +25,31 @@ enum {
     REXX_CLI_EXIT_USAGE = 2
 };
 
+static int rexx_cli_vm_output(void *context,
+                              const char *bytes,
+                              size_t length)
+{
+    return rexx_output_write((RexxOutputContext *)context,
+                             REXX_OUTPUT_STDOUT, bytes, length);
+}
+
 /* Print one consistent usage form for both help and argument errors. */
-static void rexx_cli_print_usage(FILE *stream, const char *program_name)
+static int rexx_cli_print_usage(RexxOutputContext *output,
+                                RexxOutputStream stream,
+                                const char *program_name)
 {
     const char *name = (program_name != NULL && program_name[0] != '\0')
                            ? program_name : "rexx";
-
-    (void)fprintf(stream,
-                  "Usage: %s <script.rx>\n"
-                  "       %s --help\n"
-                  "       %s -- <script-path>\n",
-                  name, name, name);
+    return rexx_output_format(output, stream,
+                              "Usage: %s <script.rx>\n"
+                              "       %s --help\n"
+                              "       %s -- <script-path>\n",
+                              name, name, name);
 }
 
 /* Read through the OS adapter and reject binary input the lexer cannot use. */
-static int rexx_cli_read_source(const char *path,
+static int rexx_cli_read_source(RexxOutputContext *output,
+                                const char *path,
                                 char **source_out,
                                 size_t *length_out)
 {
@@ -54,13 +63,16 @@ static int rexx_cli_read_source(const char *path,
     *length_out = 0u;
     status = rexx_os_read_file_ex(path, source_out, length_out);
     if (status != REXX_OS_IO_OK) {
-        (void)fprintf(stderr, "rexx: %s: %s\n", path,
-                      rexx_os_io_status_name(status));
+        (void)rexx_output_format(output, REXX_OUTPUT_STDERR,
+                                 "rexx: %s: %s\n", path,
+                                 rexx_os_io_status_name(status));
         return 0;
     }
     if (*length_out != 0u &&
         memchr(*source_out, '\0', *length_out) != NULL) {
-        (void)fprintf(stderr, "rexx: %s: script contains a NUL byte\n", path);
+        (void)rexx_output_format(output, REXX_OUTPUT_STDERR,
+                                 "rexx: %s: script contains a NUL byte\n",
+                                 path);
         rexx_os_free_file(*source_out);
         *source_out = NULL;
         *length_out = 0u;
@@ -70,7 +82,8 @@ static int rexx_cli_read_source(const char *path,
 }
 
 /* Emit a parser diagnostic with its best available source coordinates. */
-static void rexx_cli_report_parse_error(const char *path,
+static void rexx_cli_report_parse_error(RexxOutputContext *output,
+                                        const char *path,
                                         const RexxParserError *error,
                                         RexxParserStatus status)
 {
@@ -80,19 +93,28 @@ static void rexx_cli_report_parse_error(const char *path,
     size_t column = error != NULL ? error->token.column : 0u;
 
     if (status == REXX_PARSER_STATUS_OUT_OF_MEMORY) {
-        (void)fprintf(stderr, "rexx: %s: out of memory while parsing script\n",
-                      path);
+        (void)rexx_output_format(output, REXX_OUTPUT_STDERR,
+                                 "rexx: %s: out of memory while parsing script\n",
+                                 path);
     } else if (status == REXX_PARSER_STATUS_RESOURCE_LIMIT) {
-        (void)fprintf(stderr, "rexx: %s: parser resource limit exceeded\n", path);
+        (void)rexx_output_format(output, REXX_OUTPUT_STDERR,
+                                 "rexx: %s: parser resource limit exceeded\n",
+                                 path);
     } else if (line != 0u && column != 0u &&
                status == REXX_PARSER_STATUS_LEXER_ERROR) {
-        (void)fprintf(stderr, "rexx: %s:%lu:%lu: lexical error: %s\n",
-                      path, (unsigned long)line, (unsigned long)column, message);
+        (void)rexx_output_format(output, REXX_OUTPUT_STDERR,
+                                 "rexx: %s:%lu:%lu: lexical error: %s\n",
+                                 path, (unsigned long)line,
+                                 (unsigned long)column, message);
     } else if (line != 0u && column != 0u) {
-        (void)fprintf(stderr, "rexx: %s:%lu:%lu: syntax error: %s\n",
-                      path, (unsigned long)line, (unsigned long)column, message);
+        (void)rexx_output_format(output, REXX_OUTPUT_STDERR,
+                                 "rexx: %s:%lu:%lu: syntax error: %s\n",
+                                 path, (unsigned long)line,
+                                 (unsigned long)column, message);
     } else {
-        (void)fprintf(stderr, "rexx: %s: syntax error: %s\n", path, message);
+        (void)rexx_output_format(output, REXX_OUTPUT_STDERR,
+                                 "rexx: %s: syntax error: %s\n", path,
+                                 message);
     }
 }
 
@@ -118,6 +140,7 @@ static int rexx_cli_exit_status(const RexxVM *vm, int *status_out)
         char *copy;
         char *end;
         size_t length = vm->exit_value.as.string.length;
+        RexxNumericStatus numeric_status;
 
         if (vm->exit_value.as.string.bytes == NULL || length == SIZE_MAX ||
             memchr(vm->exit_value.as.string.bytes, '\0', length) != NULL)
@@ -126,9 +149,8 @@ static int rexx_cli_exit_status(const RexxVM *vm, int *status_out)
         if (copy == NULL) return -1;
         memcpy(copy, vm->exit_value.as.string.bytes, length);
         copy[length] = '\0';
-        errno = 0;
-        number = strtod(copy, &end);
-        if (errno == ERANGE || end == copy) {
+        numeric_status = rexx_numeric_parse(copy, &end, &number);
+        if (numeric_status != REXX_NUMERIC_OK || end == copy) {
             free(copy);
             return 0;
         }
@@ -145,7 +167,7 @@ static int rexx_cli_exit_status(const RexxVM *vm, int *status_out)
         return 0;
     }
 
-    if (!isfinite(number) || number < (double)INT32_MIN ||
+    if (!rexx_numeric_is_finite(number) || number < (double)INT32_MIN ||
         number > (double)INT32_MAX || number != (double)(int32_t)number)
         return 0;
     *status_out = (int)(int32_t)number;
@@ -153,9 +175,10 @@ static int rexx_cli_exit_status(const RexxVM *vm, int *status_out)
 }
 
 /* Run the interpreter pipeline and release every owned object on all exits. */
-static int rexx_cli_execute_source(const char *path,
-                                  const char *source,
-                                  size_t source_length)
+static int rexx_cli_execute_source(RexxOutputContext *output,
+                                   const char *path,
+                                   const char *source,
+                                   size_t source_length)
 {
     RexxLexer lexer;
     RexxParser parser;
@@ -176,61 +199,69 @@ static int rexx_cli_execute_source(const char *path,
 
     lexer_status = rexx_lexer_init(&lexer, source, source_length);
     if (lexer_status != REXX_LEXER_STATUS_OK) {
-        (void)fprintf(stderr, "rexx: %s: lexer initialization failed (%d)\n",
-                      path, (int)lexer_status);
+        (void)rexx_output_format(output, REXX_OUTPUT_STDERR,
+                                 "rexx: %s: lexer initialization failed (%d)\n",
+                                 path, (int)lexer_status);
         goto cleanup;
     }
 
     parser_status = rexx_parser_init(&parser, &lexer);
     if (parser_status != REXX_PARSER_STATUS_OK) {
-        rexx_cli_report_parse_error(path, rexx_parser_get_error(&parser),
+        rexx_cli_report_parse_error(output, path,
+                                    rexx_parser_get_error(&parser),
                                     parser_status);
         goto cleanup;
     }
 
     parser_status = rexx_parser_parse(&parser, &program);
     if (parser_status != REXX_PARSER_STATUS_OK) {
-        rexx_cli_report_parse_error(path, rexx_parser_get_error(&parser),
+        rexx_cli_report_parse_error(output, path,
+                                    rexx_parser_get_error(&parser),
                                     parser_status);
         goto cleanup;
     }
 
     compiler_status = rexx_compiler_compile(program, &chunk, &compiler_error);
     if (compiler_status != REXX_COMPILER_STATUS_OK) {
-        (void)fprintf(stderr,
-                      "rexx: %s:%lu:%lu: compile error: %s (%s)\n",
-                      path,
-                      (unsigned long)compiler_error.token.line,
-                      (unsigned long)compiler_error.token.column,
-                      compiler_error.message != NULL
-                          ? compiler_error.message : "unknown compiler error",
-                      rexx_compiler_status_name(compiler_status));
+        (void)rexx_output_format(output, REXX_OUTPUT_STDERR,
+                                 "rexx: %s:%lu:%lu: compile error: %s (%s)\n",
+                                 path,
+                                 (unsigned long)compiler_error.token.line,
+                                 (unsigned long)compiler_error.token.column,
+                                 compiler_error.message != NULL
+                                     ? compiler_error.message
+                                     : "unknown compiler error",
+                                 rexx_compiler_status_name(compiler_status));
         goto cleanup;
     }
 
     vm_status = rexx_vm_init(&vm, 0u);
     if (vm_status != REXX_VM_STATUS_OK) {
-        (void)fprintf(stderr, "rexx: %s: VM initialization failed: %s\n",
-                      path, rexx_vm_status_name(vm_status));
+        (void)rexx_output_format(output, REXX_OUTPUT_STDERR,
+                                 "rexx: %s: VM initialization failed: %s\n",
+                                 path, rexx_vm_status_name(vm_status));
         goto cleanup;
     }
 
-    /* The OS hook is a safe RC 127 stub until the shell installs live routes. */
+    rexx_vm_set_output_writer(&vm, rexx_cli_vm_output, output);
     rexx_vm_set_address_dispatcher(&vm, rexx_os_vm_address_dispatcher, NULL);
     vm_status = rexx_vm_execute(&vm, chunk);
     if (vm_status != REXX_VM_STATUS_OK) {
         const RexxVMError *error = &vm.error;
-        (void)fflush(stdout);
-        (void)fprintf(stderr,
-                      "rexx: %s: runtime error at instruction %lu: %s\n",
-                      path, (unsigned long)error->pc,
-                      error->message != NULL
-                          ? error->message : rexx_vm_status_name(vm_status));
+        (void)rexx_output_flush(output, REXX_OUTPUT_STDOUT);
+        (void)rexx_output_format(output, REXX_OUTPUT_STDERR,
+                                 "rexx: %s: runtime error at instruction %lu: %s\n",
+                                 path, (unsigned long)error->pc,
+                                 error->message != NULL
+                                     ? error->message
+                                     : rexx_vm_status_name(vm_status));
         goto cleanup;
     }
 
-    if (fflush(stdout) != 0) {
-        (void)fprintf(stderr, "rexx: %s: error writing standard output\n", path);
+    if (!rexx_output_flush(output, REXX_OUTPUT_STDOUT)) {
+        (void)rexx_output_format(output, REXX_OUTPUT_STDERR,
+                                 "rexx: %s: error writing standard output\n",
+                                 path);
         goto cleanup;
     }
 
@@ -238,15 +269,15 @@ static int rexx_cli_execute_source(const char *path,
         int exit_status = REXX_CLI_EXIT_FAILURE;
         int exit_status_result = rexx_cli_exit_status(&vm, &exit_status);
         if (exit_status_result < 0) {
-            (void)fprintf(stderr,
-                          "rexx: %s: out of memory while reading EXIT value\n",
-                          path);
+            (void)rexx_output_format(output, REXX_OUTPUT_STDERR,
+                                     "rexx: %s: out of memory while reading EXIT value\n",
+                                     path);
             goto cleanup;
         }
         if (exit_status_result == 0) {
-            (void)fprintf(stderr,
-                          "rexx: %s: EXIT value is not an integer process status\n",
-                          path);
+            (void)rexx_output_format(output, REXX_OUTPUT_STDERR,
+                                     "rexx: %s: EXIT value is not an integer process status\n",
+                                     path);
             goto cleanup;
         }
         result = exit_status;
@@ -255,15 +286,16 @@ static int rexx_cli_execute_source(const char *path,
     }
 
 cleanup:
-    /* All release helpers accept zero-initialized/partially initialized state. */
     rexx_vm_free(&vm);
     rexx_bytecode_chunk_free(chunk);
     rexx_parser_free_ast(program);
     return result;
 }
 
-/* Public shell entry point. It intentionally has no standalone main(). */
-int guide_rexx_main(int argc, char **argv)
+/* Explicit output host used by a kernel shell or another embedding Console. */
+int guide_rexx_main_with_output(int argc,
+                                char **argv,
+                                const RexxOutputHost *host)
 {
     const char *program_name = "rexx";
     const char *script_path = NULL;
@@ -272,13 +304,15 @@ int guide_rexx_main(int argc, char **argv)
     int index;
     int positional_only = 0;
     int result;
+    RexxOutputContext output;
 
+    rexx_output_init(&output, host);
     if (argc > 0 && argv != NULL && argv[0] != NULL && argv[0][0] != '\0') {
         program_name = argv[0];
     }
 
     if (argc < 0 || argv == NULL) {
-        rexx_cli_print_usage(stderr, program_name);
+        (void)rexx_cli_print_usage(&output, REXX_OUTPUT_STDERR, program_name);
         return REXX_CLI_EXIT_USAGE;
     }
 
@@ -286,8 +320,9 @@ int guide_rexx_main(int argc, char **argv)
         const char *argument = argv[index];
 
         if (argument == NULL) {
-            (void)fprintf(stderr, "rexx: invalid NULL argument at index %d\n",
-                          index);
+            (void)rexx_output_format(&output, REXX_OUTPUT_STDERR,
+                                     "rexx: invalid NULL argument at index %d\n",
+                                     index);
             return REXX_CLI_EXIT_USAGE;
         }
 
@@ -299,37 +334,51 @@ int guide_rexx_main(int argc, char **argv)
         if (!positional_only &&
             (strcmp(argument, "--help") == 0 || strcmp(argument, "-h") == 0)) {
             if (argc != 2) {
-                rexx_cli_print_usage(stderr, program_name);
+                (void)rexx_cli_print_usage(&output, REXX_OUTPUT_STDERR,
+                                           program_name);
                 return REXX_CLI_EXIT_USAGE;
             }
-            rexx_cli_print_usage(stdout, program_name);
-            return REXX_CLI_EXIT_SUCCESS;
+            return rexx_cli_print_usage(&output, REXX_OUTPUT_STDOUT,
+                                        program_name)
+                       ? REXX_CLI_EXIT_SUCCESS : REXX_CLI_EXIT_FAILURE;
         }
 
         if (!positional_only && argument[0] == '-') {
-            (void)fprintf(stderr, "rexx: unknown option: %s\n", argument);
-            rexx_cli_print_usage(stderr, program_name);
+            (void)rexx_output_format(&output, REXX_OUTPUT_STDERR,
+                                     "rexx: unknown option: %s\n", argument);
+            (void)rexx_cli_print_usage(&output, REXX_OUTPUT_STDERR,
+                                       program_name);
             return REXX_CLI_EXIT_USAGE;
         }
 
         if (script_path != NULL) {
-            (void)fputs("rexx: only one script path may be specified\n", stderr);
-            rexx_cli_print_usage(stderr, program_name);
+            (void)rexx_output_write(&output, REXX_OUTPUT_STDERR,
+                                    "rexx: only one script path may be specified\n",
+                                    sizeof("rexx: only one script path may be specified\n") - 1u);
+            (void)rexx_cli_print_usage(&output, REXX_OUTPUT_STDERR,
+                                       program_name);
             return REXX_CLI_EXIT_USAGE;
         }
         script_path = argument;
     }
 
     if (script_path == NULL || script_path[0] == '\0') {
-        rexx_cli_print_usage(stderr, program_name);
+        (void)rexx_cli_print_usage(&output, REXX_OUTPUT_STDERR, program_name);
         return REXX_CLI_EXIT_USAGE;
     }
 
-    if (!rexx_cli_read_source(script_path, &source, &source_length)) {
+    if (!rexx_cli_read_source(&output, script_path, &source, &source_length)) {
         return REXX_CLI_EXIT_FAILURE;
     }
 
-    result = rexx_cli_execute_source(script_path, source, source_length);
+    result = rexx_cli_execute_source(&output, script_path, source, source_length);
     rexx_os_free_file(source);
     return result;
+}
+
+/* Backwards-compatible hosted CLI entry point. Native shells should call
+ * guide_rexx_main_with_output() with their invocation-local output host. */
+int guide_rexx_main(int argc, char **argv)
+{
+    return guide_rexx_main_with_output(argc, argv, NULL);
 }

@@ -86,6 +86,10 @@ const char* get_cwd();
 // The same value is available to shell users through `echo $?`.
 int last_exit_code();
 
+/* REXX output and relative script paths stay bound to the invoking shell. */
+bool write_rexx_output(const char* bytes, size_t length);
+bool resolve_rexx_script_path(const char* path, char* output, size_t outputSize);
+
 // ================================================================
 // Special Key Codes
 // ================================================================

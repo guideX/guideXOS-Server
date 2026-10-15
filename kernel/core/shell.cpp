@@ -302,6 +302,25 @@ static void output_string(const char* str) {
     }
 }
 
+bool write_rexx_output(const char* bytes, size_t length) {
+    char chunk[MAX_LINE_LENGTH];
+    size_t offset = 0;
+
+    if (!bytes && length != 0) return false;
+    while (offset < length) {
+        size_t count = length - offset;
+        if (count >= sizeof(chunk)) count = sizeof(chunk) - 1;
+        for (size_t index = 0; index < count; ++index) {
+            if (bytes[offset + index] == '\0') return false;
+            chunk[index] = bytes[offset + index];
+        }
+        chunk[count] = '\0';
+        output_string(chunk);
+        offset += count;
+    }
+    return true;
+}
+
 static void output_prompt() {
     char prompt[128];
     // Format: [host cwd]$; this is shell context, not a user identity.
@@ -613,6 +632,10 @@ static bool resolve_cd_target_path(const char* path, char* targetPath, size_t ta
     vfs::join_path(s_cwd, path, joined, sizeof(joined));
     vfs::normalize_path(joined, targetPath, targetPathSize);
     return targetPath[0] != '\0';
+}
+
+bool resolve_rexx_script_path(const char* path, char* output, size_t outputSize) {
+    return resolve_cd_target_path(path, output, outputSize);
 }
 
 static bool cd_target_is_directory(const char* targetPath)

@@ -303,6 +303,11 @@
     <ClInclude Include="kernel\core\include\kernel\ramdisk.h" />
     <ClInclude Include="kernel\core\include\kernel\serial_debug.h" />
     <ClInclude Include="kernel\core\include\kernel\shell.h" />
+    <ClInclude Include="kernel\shell\rexx_shell_cmd.h" />
+    <ClInclude Include="rexx_cli.h" />
+    <ClInclude Include="rexx_numeric.h" />
+    <ClInclude Include="rexx_output.h" />
+    <ClInclude Include="rexx_os_io.h" />
     <ClInclude Include="kernel\core\include\kernel\system_font.h" />
     <ClInclude Include="kernel\core\include\kernel\generated\system_font_roboto.h" />
     <ClInclude Include="kernel\core\include\kernel\socket.h" />
@@ -576,6 +581,7 @@
     <ClCompile Include="kernel\core\ps2mouse.cpp" />
     <ClCompile Include="kernel\core\ramdisk.cpp" />
     <ClCompile Include="kernel\core\shell.cpp" />
+    <ClCompile Include="kernel\shell\rexx_shell_cmd.cpp" />
     <ClCompile Include="kernel\core\system_font.cpp" />
     <ClCompile Include="kernel\core\socket.cpp" />
     <ClCompile Include="kernel\core\tcp.cpp" />
@@ -596,6 +602,42 @@
     <ClCompile Include="kernel\core\usb_video_uvc.cpp" />
     <ClCompile Include="kernel\core\vesa.cpp" />
     <ClCompile Include="kernel\core\vfs.cpp" />
+    <ClCompile Include="rexx_lexer.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <AdditionalIncludeDirectories>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="rexx_parser.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <AdditionalIncludeDirectories>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="rexx_compiler.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <AdditionalIncludeDirectories>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="rexx_vm.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <AdditionalIncludeDirectories>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="rexx_builtin.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <AdditionalIncludeDirectories>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="rexx_numeric.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <AdditionalIncludeDirectories>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="rexx_output.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <AdditionalIncludeDirectories>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="rexx_os_io.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <AdditionalIncludeDirectories>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="rexx_cli.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <AdditionalIncludeDirectories>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
     <ClCompile Include="kernel\core\vga.cpp" />
     <ClCompile Include="kernel\core\virtio_block.cpp" />
     <ClCompile Include="kernel\core\virtio_gpu.cpp" />

@@ -1,11 +1,13 @@
 #include "rexx_vm.h"
 #include "rexx_builtin.h"
+#include "rexx_numeric.h"
 
-#include <errno.h>
-#include <math.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if !defined(GXOS_BARE_METAL)
+#include <stdio.h>
+#endif
 
 #define REXX_VM_MAX_NAME_LENGTH ((size_t)65535u)
 
@@ -60,7 +62,7 @@ void rexx_value_clear(RexxValue *value)
 
 RexxVMStatus rexx_value_set_number(RexxValue *value, double number)
 {
-    if (value == NULL || !isfinite(number)) return REXX_VM_STATUS_INVALID_ARGUMENT;
+    if (value == NULL || !rexx_numeric_is_finite(number)) return REXX_VM_STATUS_INVALID_ARGUMENT;
     rexx_value_clear(value);
     value->type = REXX_VALUE_NUMBER;
     value->as.number = number;
@@ -335,6 +337,15 @@ void rexx_vm_set_address_dispatcher(RexxVM *vm,
     vm->address_dispatcher_user_data = dispatcher != NULL ? user_data : NULL;
 }
 
+void rexx_vm_set_output_writer(RexxVM *vm,
+                               RexxVMOutputWriter writer,
+                               void *user_data)
+{
+    if (vm == NULL || !vm->initialized) return;
+    vm->output_writer = writer;
+    vm->output_writer_user_data = writer != NULL ? user_data : NULL;
+}
+
 int32_t rexx_vm_guidexos_command_stub(const char *command, size_t command_length)
 {
     (void)command;
@@ -457,6 +468,7 @@ static int parse_number(const char *bytes, size_t length, double *number)
     char *copy, *start, *end;
     size_t used;
     double parsed;
+    RexxNumericStatus numeric_status;
     if (number == NULL || (bytes == NULL && length != 0) || length == SIZE_MAX) return 0;
     copy = (char *)malloc(length + 1);
     if (copy == NULL) return -1;
@@ -473,10 +485,9 @@ static int parse_number(const char *bytes, size_t length, double *number)
         *number = 0.0;
         return 1;
     }
-    errno = 0;
-    parsed = strtod(start, &end);
-    if (errno == ERANGE || end == start || (size_t)(end - start) != used ||
-        !isfinite(parsed)) {
+    numeric_status = rexx_numeric_parse(start, &end, &parsed);
+    if (numeric_status != REXX_NUMERIC_OK || end == start ||
+        (size_t)(end - start) != used || !rexx_numeric_is_finite(parsed)) {
         free(copy);
         return 0;
     }
@@ -492,7 +503,7 @@ static RexxVMStatus value_number(const RexxValue *value, double *number)
     switch (value->type) {
     case REXX_VALUE_UNSET: *number = 0.0; return REXX_VM_STATUS_OK;
     case REXX_VALUE_NUMBER:
-        if (!isfinite(value->as.number)) return REXX_VM_STATUS_NUMERIC_ERROR;
+        if (!rexx_numeric_is_finite(value->as.number)) return REXX_VM_STATUS_NUMERIC_ERROR;
         *number = value->as.number;
         return REXX_VM_STATUS_OK;
     case REXX_VALUE_BOOLEAN: *number = value->as.boolean ? 1.0 : 0.0; return REXX_VM_STATUS_OK;
@@ -523,8 +534,8 @@ static RexxVMStatus value_string(const RexxValue *value, char **bytes, size_t *l
         break;
     case REXX_VALUE_BOOLEAN: source = value->as.boolean ? "1" : "0"; count = 1; break;
     case REXX_VALUE_NUMBER:
-        if (!isfinite(value->as.number)) return REXX_VM_STATUS_NUMERIC_ERROR;
-        written = snprintf(number, sizeof(number), "%.15g", value->as.number);
+        if (!rexx_numeric_is_finite(value->as.number)) return REXX_VM_STATUS_NUMERIC_ERROR;
+        written = rexx_numeric_format(number, sizeof(number), value->as.number);
         if (written < 0 || (size_t)written >= sizeof(number)) return REXX_VM_STATUS_NUMERIC_ERROR;
         source = number;
         count = (size_t)written;
@@ -770,7 +781,7 @@ static RexxVMStatus load_constant(RexxVM *vm, const RexxBytecodeChunk *chunk,
 static RexxVMStatus binary_number(RexxVM *vm, RexxOpcode opcode)
 {
     RexxValue left, right, result;
-    double a = 0.0, b = 0.0, answer;
+    double a = 0.0, b = 0.0, answer = 0.0;
     RexxVMStatus status;
     memset(&left, 0, sizeof(left));
     memset(&right, 0, sizeof(right));
@@ -786,7 +797,7 @@ static RexxVMStatus binary_number(RexxVM *vm, RexxOpcode opcode)
         case OP_MULTIPLY: answer = a * b; break;
         default: status = REXX_VM_STATUS_UNSUPPORTED_OPCODE; answer = 0.0; break;
         }
-        if (!isfinite(answer)) status = REXX_VM_STATUS_NUMERIC_ERROR;
+        if (!rexx_numeric_is_finite(answer)) status = REXX_VM_STATUS_NUMERIC_ERROR;
     }
     rexx_value_clear(&left);
     rexx_value_clear(&right);
@@ -1019,10 +1030,26 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
                 if (status == REXX_VM_STATUS_OK)
                     status = value_string(&value, &text, &length);
             }
-            if (status == REXX_VM_STATUS_OK &&
-                ((length != 0u && fwrite(text, 1u, length, stdout) != length) ||
-                 fputc('\n', stdout) == EOF)) {
-                status = REXX_VM_STATUS_IO_ERROR;
+            if (status == REXX_VM_STATUS_OK) {
+                static const char newline = '\n';
+                if (vm->output_writer != NULL) {
+                    if ((length != 0u &&
+                         vm->output_writer(vm->output_writer_user_data,
+                                           text, length) == 0) ||
+                        vm->output_writer(vm->output_writer_user_data,
+                                          &newline, 1u) == 0) {
+                        status = REXX_VM_STATUS_IO_ERROR;
+                    }
+                } else {
+#if !defined(GXOS_BARE_METAL)
+                    if ((length != 0u && fwrite(text, 1u, length, stdout) != length) ||
+                        fputc('\n', stdout) == EOF) {
+                        status = REXX_VM_STATUS_IO_ERROR;
+                    }
+#else
+                    status = REXX_VM_STATUS_IO_ERROR;
+#endif
+                }
             }
             free(text);
             rexx_value_clear(&value);

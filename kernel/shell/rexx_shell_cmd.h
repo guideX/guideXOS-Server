@@ -17,7 +17,7 @@ enum class RexxShellTokenizeStatus {
 };
 
 // Standard argv callback for dispatchers that already have tokenized input.
-// Returns guide_rexx_main's exact process-style status when the CLI is linked.
+// Returns the linked REXX CLI's exact process-style status.
 int shell_cmd_rexx(int argc, char** argv);
 
 // Tokenize and run a complete shell command line (including the leading

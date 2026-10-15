@@ -10,12 +10,16 @@ $buildDirectory = Join-Path $rootDir ("tmp\rexx-rx1-tests-" + [Guid]::NewGuid().
 New-Item -ItemType Directory -Path $buildDirectory | Out-Null
 $runtimeTest = Join-Path $buildDirectory "rexx_runtime_tests.exe"
 $cliTest = Join-Path $buildDirectory "rexx_cli.exe"
+$rx2Test = Join-Path $buildDirectory "rexx_rx2_tests.exe"
+$rx2NumericTest = Join-Path $buildDirectory "rexx_rx2_native_numeric_tests.exe"
+$rx2ShellBridgeTest = Join-Path $buildDirectory "rexx_rx2_shell_bridge_tests.exe"
 $commonSources = @(
     (Join-Path $rootDir "rexx_lexer.c"),
     (Join-Path $rootDir "rexx_parser.c"),
     (Join-Path $rootDir "rexx_compiler.c"),
     (Join-Path $rootDir "rexx_vm.c"),
-    (Join-Path $rootDir "rexx_builtin.c")
+    (Join-Path $rootDir "rexx_builtin.c"),
+    (Join-Path $rootDir "rexx_numeric.c")
 )
 
 Write-Host "Building hosted REXX runtime tests with $($gccCommand.Source)"
@@ -29,15 +33,67 @@ Write-Host "Building hosted REXX CLI test driver"
 & $gccCommand.Source -std=c11 -Wall -Wextra -Wpedantic -Werror `
     (Join-Path $PSScriptRoot "rexx_cli_test_driver.c") `
     (Join-Path $rootDir "rexx_cli.c") (Join-Path $rootDir "rexx_os_io.c") `
+    (Join-Path $rootDir "rexx_output.c") `
     @commonSources -lm -o $cliTest
 if ($LASTEXITCODE -ne 0) {
     throw "Hosted CLI test build failed with exit code $LASTEXITCODE."
+}
+
+Write-Host "Building RX2 VFS and output integration tests"
+& $gccCommand.Source -std=c11 -Wall -Wextra -Wpedantic -Werror `
+    (Join-Path $PSScriptRoot "rexx_rx2_test_driver.c") `
+    (Join-Path $rootDir "rexx_cli.c") (Join-Path $rootDir "rexx_os_io.c") `
+    (Join-Path $rootDir "rexx_output.c") `
+    @commonSources -lm -o $rx2Test
+if ($LASTEXITCODE -ne 0) {
+    throw "RX2 VFS/output integration test build failed with exit code $LASTEXITCODE."
+}
+
+Write-Host "Building RX2 freestanding numeric adapter tests"
+& $gccCommand.Source -std=c11 -DGXOS_BARE_METAL -ffreestanding `
+    -Wall -Wextra -Wpedantic -Werror `
+    (Join-Path $PSScriptRoot "rexx_rx2_native_numeric_test.c") `
+    (Join-Path $rootDir "rexx_numeric.c") -o $rx2NumericTest
+if ($LASTEXITCODE -ne 0) {
+    throw "RX2 freestanding numeric test build failed with exit code $LASTEXITCODE."
+}
+
+$gxxCommand = Get-Command g++ -ErrorAction SilentlyContinue
+if ($null -eq $gxxCommand) {
+    throw "g++ is required for the RX2 shell bridge integration test."
+}
+Write-Host "Building RX2 C++ shell bridge integration tests"
+& $gxxCommand.Source -std=c++14 -Wall -Wextra -Wpedantic -Werror `
+    (Join-Path $PSScriptRoot "rexx_rx2_shell_bridge_test.cpp") `
+    (Join-Path $rootDir "kernel\shell\rexx_shell_cmd.cpp") `
+    ("-I" + (Join-Path $rootDir "kernel\core\include")) `
+    -o $rx2ShellBridgeTest
+if ($LASTEXITCODE -ne 0) {
+    throw "RX2 shell bridge integration test build failed with exit code $LASTEXITCODE."
 }
 
 Write-Host "Running hosted runtime assertions"
 & $runtimeTest
 if ($LASTEXITCODE -ne 0) {
     throw "Hosted runtime assertions failed with exit code $LASTEXITCODE."
+}
+
+Write-Host "Running RX2 VFS and output assertions"
+& $rx2Test
+if ($LASTEXITCODE -ne 0) {
+    throw "RX2 VFS/output assertions failed with exit code $LASTEXITCODE."
+}
+
+Write-Host "Running RX2 freestanding numeric assertions"
+& $rx2NumericTest
+if ($LASTEXITCODE -ne 0) {
+    throw "RX2 freestanding numeric assertions failed with exit code $LASTEXITCODE."
+}
+
+Write-Host "Running RX2 shell bridge assertions"
+& $rx2ShellBridgeTest
+if ($LASTEXITCODE -ne 0) {
+    throw "RX2 shell bridge assertions failed with exit code $LASTEXITCODE."
 }
 
 $script:cliPassed = 0
@@ -59,19 +115,19 @@ function Assert-CliCase {
         $Source,
         [System.Text.UTF8Encoding]::new($false))
 
-    $actualOutput = @(& $cliTest $sourcePath 2>&1 | ForEach-Object { $_.ToString() })
-    $actualExit = $LASTEXITCODE
+    $actual = Invoke-CapturedProcess $cliTest @($sourcePath)
+    $actualExit = $actual.ExitCode
+    $actualText = (($actual.Stdout + $actual.Stderr) -replace "`r`n", "`n")
+    $actualText = $actualText.TrimEnd([char[]]"`n")
     if ($actualExit -ne $ExpectedExit) {
-        throw "$Name returned $actualExit; expected $ExpectedExit. Output: $($actualOutput -join ' | ')"
+        throw "$Name returned $actualExit; expected $ExpectedExit. Output: $actualText"
     }
 
     if ($ExpectedDiagnostic.Length -ne 0) {
-        $actualText = [string]::Join("`n", $actualOutput)
         if (-not $actualText.Contains($ExpectedDiagnostic)) {
             throw "$Name did not report '$ExpectedDiagnostic'. Output: $actualText"
         }
     } else {
-        $actualText = [string]::Join("`n", $actualOutput)
         $expectedText = [string]::Join("`n", $ExpectedOutput)
         if ($actualText -cne $expectedText) {
             throw "$Name output mismatch. Expected '$expectedText'; got '$actualText'."
@@ -79,13 +135,12 @@ function Assert-CliCase {
     }
 
     if ($CompareRegina -and $null -ne $script:reginaCommand) {
-        $referenceOutput = @(& $script:reginaCommand.Source $sourcePath 2>&1 |
-            ForEach-Object { $_.ToString() })
-        $referenceExit = $LASTEXITCODE
-        $referenceText = [string]::Join("`n", $referenceOutput)
+        $reference = Invoke-CapturedProcess $script:reginaCommand.Source @($sourcePath)
+        $referenceText = (($reference.Stdout + $reference.Stderr) -replace "`r`n", "`n")
+        $referenceText = $referenceText.TrimEnd([char[]]"`n")
         $expectedText = [string]::Join("`n", $ExpectedOutput)
-        if ($referenceExit -ne $ExpectedExit -or $referenceText -cne $expectedText) {
-            throw "$Name differed from Regina. Expected '$expectedText'/$ExpectedExit; got '$referenceText'/$referenceExit."
+        if ($reference.ExitCode -ne $ExpectedExit -or $referenceText -cne $expectedText) {
+            throw "$Name differed from Regina. Expected '$expectedText'/$ExpectedExit; got '$referenceText'/$($reference.ExitCode)."
         }
         ++$script:reginaPassed
         Write-Host "[PASS] Regina differential $Name"
@@ -93,6 +148,30 @@ function Assert-CliCase {
 
     ++$script:cliPassed
     Write-Host "[PASS] CLI $Name"
+}
+
+function Invoke-CapturedProcess {
+    param(
+        [string]$Executable,
+        [string[]]$Arguments
+    )
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $Executable
+    $startInfo.Arguments = (($Arguments | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    $stdout = $process.StandardOutput.ReadToEnd()
+    $stderr = $process.StandardError.ReadToEnd()
+    $process.WaitForExit()
+    return [PSCustomObject]@{
+        ExitCode = $process.ExitCode
+        Stdout = $stdout
+        Stderr = $stderr
+    }
 }
 
 $assignmentSource = @'
@@ -200,11 +279,12 @@ try {
 } finally {
     $oversizeStream.Dispose()
 }
-$limitOutput = @(& $cliTest $oversizePath 2>&1 | ForEach-Object { $_.ToString() })
-$limitExit = $LASTEXITCODE
+$limitResult = Invoke-CapturedProcess $cliTest @($oversizePath)
+$limitOutput = $limitResult.Stdout + $limitResult.Stderr
+$limitExit = $limitResult.ExitCode
 if ($limitExit -ne 1 -or
-    -not ([string]::Join("`n", $limitOutput)).Contains("file exceeds the 16 MiB limit")) {
-    throw "Source-size limit did not fail safely. Exit=$limitExit Output=$($limitOutput -join ' | ')"
+    -not $limitOutput.Contains("file exceeds the 16 MiB limit")) {
+    throw "Source-size limit did not fail safely. Exit=$limitExit Output=$limitOutput"
 }
 $script:cliPassed++
 Write-Host "[PASS] CLI source-size memory limit"

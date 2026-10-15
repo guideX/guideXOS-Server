@@ -88,6 +88,9 @@ typedef int32_t (*RexxVMAddressDispatcher)(void *user_data,
                                           size_t environment_length,
                                           const char *command,
                                           size_t command_length);
+typedef int32_t (*RexxVMOutputWriter)(void *user_data,
+                                      const char *bytes,
+                                      size_t length);
 
 typedef struct RexxVM {
     RexxValue *stack;
@@ -113,6 +116,8 @@ typedef struct RexxVM {
     void *command_dispatcher_user_data;
     RexxVMAddressDispatcher address_dispatcher;
     void *address_dispatcher_user_data;
+    RexxVMOutputWriter output_writer;
+    void *output_writer_user_data;
 
     RexxVMStatus status;
     RexxVMError error;
@@ -154,6 +159,12 @@ void rexx_vm_set_command_dispatcher(RexxVM *vm,
 void rexx_vm_set_address_dispatcher(RexxVM *vm,
                                     RexxVMAddressDispatcher dispatcher,
                                     void *user_data);
+
+/* Optional per-VM SAY output. Without a writer hosted builds use stdout;
+ * freestanding builds fail the SAY instruction with an I/O error. */
+void rexx_vm_set_output_writer(RexxVM *vm,
+                               RexxVMOutputWriter writer,
+                               void *user_data);
 
 /* The built-in dispatcher never invokes a host shell; it returns RC 127. */
 int32_t rexx_vm_guidexos_command_stub(const char *command,
