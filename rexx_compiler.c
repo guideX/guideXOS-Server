@@ -973,6 +973,16 @@ static int rexx_compiler_compile_clause(RexxCompiler *compiler,
                                  clause->as.simple.expression != NULL ? 1u : 0u,
                                  0u, 0u, &clause->token);
         break;
+    case REXX_AST_CLAUSE_NUMERIC_DIGITS:
+        if (clause->as.simple.expression != NULL &&
+            !rexx_compiler_compile_expression(
+                compiler, clause->as.simple.expression)) return 0;
+        (void)rexx_compiler_emit(
+            compiler, OP_NUMERIC_DIGITS,
+            clause->as.simple.expression != NULL
+                ? REXX_INSTRUCTION_HAS_VALUE : 0u,
+            0u, 0u, &clause->token);
+        break;
     case REXX_AST_CLAUSE_ADDRESS:
     {
         uint32_t environment_symbol = 0u;

@@ -2,6 +2,7 @@
 #define GUIDEXOS_REXX_NUMERIC_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -10,18 +11,60 @@ extern "C" {
 typedef enum RexxNumericStatus {
     REXX_NUMERIC_OK = 0,
     REXX_NUMERIC_INVALID,
-    REXX_NUMERIC_RANGE
+    REXX_NUMERIC_RANGE,
+    REXX_NUMERIC_RESOURCE_LIMIT
 } RexxNumericStatus;
 
-/* Parse the decimal forms used by REXX numeric values, returning the first
- * unconsumed byte. Hosted builds delegate conversion to strtod so existing
- * behavior remains tied to the host C runtime. */
+/* Bounded base-10 decimal used by classic REXX arithmetic. Digits are stored
+ * most-significant first. The value is sign * coefficient * 10^(-scale).
+ * Trailing coefficient zeroes and scale are retained for result formatting. */
+#define REXX_DECIMAL_MAX_DIGITS ((size_t)512u)
+#define REXX_DECIMAL_MAX_INPUT_BYTES ((size_t)512u)
+#define REXX_NUMERIC_MAX_DIGITS ((size_t)254u)
+#define REXX_DECIMAL_MAX_EXPONENT 1000000
+
+typedef struct RexxDecimal {
+    char digits[REXX_DECIMAL_MAX_DIGITS + 1u];
+    size_t length;
+    int32_t scale;
+    int8_t sign;
+} RexxDecimal;
+
+/* Parse one complete numeric string (surrounding ASCII blanks are allowed). */
+RexxNumericStatus rexx_decimal_parse(const char *text,
+                                     size_t length,
+                                     RexxDecimal *value_out);
+RexxNumericStatus rexx_decimal_add(const RexxDecimal *left,
+                                   const RexxDecimal *right,
+                                   size_t precision,
+                                   RexxDecimal *result);
+RexxNumericStatus rexx_decimal_subtract(const RexxDecimal *left,
+                                        const RexxDecimal *right,
+                                        size_t precision,
+                                        RexxDecimal *result);
+RexxNumericStatus rexx_decimal_multiply(const RexxDecimal *left,
+                                        const RexxDecimal *right,
+                                        size_t precision,
+                                        RexxDecimal *result);
+RexxNumericStatus rexx_decimal_round(RexxDecimal *value, size_t precision);
+int rexx_decimal_compare(const RexxDecimal *left, const RexxDecimal *right);
+RexxNumericStatus rexx_decimal_to_uint32(const RexxDecimal *value,
+                                         uint32_t *result);
+RexxNumericStatus rexx_decimal_to_int32(const RexxDecimal *value,
+                                        int32_t *result);
+/* Formats according to classic NUMERIC DIGITS and default SCIENTIFIC FORM. */
+int rexx_decimal_format(char *output,
+                        size_t output_capacity,
+                        const RexxDecimal *value,
+                        size_t precision);
+
+/* Legacy double adapters retained for C embedders and RX2 compatibility.
+ * REXX source values and implemented arithmetic use RexxDecimal below. */
 RexxNumericStatus rexx_numeric_parse(const char *text,
                                      char **end_out,
                                      double *value_out);
 
-/* Format a number using the interpreter's existing 15-significant-digit
- * general format. Returns the byte count excluding NUL, or -1 on failure. */
+/* Format the legacy C-embedding double. Returns bytes excluding NUL. */
 int rexx_numeric_format(char *output,
                         size_t output_capacity,
                         double value);

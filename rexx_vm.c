@@ -17,7 +17,7 @@ static const char *const vm_messages[] = {
     "invalid or malformed bytecode", "value is not a valid finite number",
     "opcode is not implemented by this VM", "standard output error",
     "unknown REXX built-in function", "invalid arguments to REXX built-in function",
-    "instruction budget exhausted"
+    "instruction budget exhausted", "invalid NUMERIC DIGITS setting"
 };
 
 static int ascii_space(unsigned char c)
@@ -39,6 +39,8 @@ static int ascii_equal(const char *a, size_t alen, const char *b, size_t blen)
     }
     return 1;
 }
+
+static RexxVMStatus value_set_int32(RexxValue *value, int32_t number);
 
 static char *copy_name(const char *name, size_t length)
 {
@@ -123,7 +125,7 @@ static RexxVMStatus vm_fail(RexxVM *vm, RexxVMStatus status, size_t pc)
         vm->error.status = status;
         vm->error.pc = pc;
         vm->error.message = status >= REXX_VM_STATUS_OK &&
-                            status <= REXX_VM_STATUS_INSTRUCTION_LIMIT
+                            status <= REXX_VM_STATUS_INVALID_NUMERIC_SETTING
                                 ? vm_messages[status] : "unknown VM error";
     }
     return status;
@@ -273,6 +275,11 @@ RexxVMStatus rexx_vm_init(RexxVM *vm, size_t stack_capacity)
     if (vm->stack == NULL) return vm_fail(vm, REXX_VM_STATUS_OUT_OF_MEMORY, 0);
     vm->stack_capacity = stack_capacity;
     vm->instruction_budget = REXX_VM_DEFAULT_INSTRUCTION_BUDGET;
+    vm->numeric_digits = REXX_VM_DEFAULT_NUMERIC_DIGITS;
+    vm->numeric_fuzz = 0u;
+    vm->numeric_form = REXX_NUMERIC_FORM_SCIENTIFIC;
+    vm->numeric_work_budget = REXX_VM_DEFAULT_NUMERIC_WORK_BUDGET;
+    vm->numeric_work_remaining = vm->numeric_work_budget;
     vm->initialized = 1;
     vm->status = REXX_VM_STATUS_OK;
     vm->error.status = REXX_VM_STATUS_OK;
@@ -407,7 +414,7 @@ static RexxVMStatus dispatch_command(RexxVM *vm,
         vm->rc = rexx_vm_guidexos_command_stub(command, command_length);
     }
 
-    status = rexx_value_set_number(&rc_value, (double)vm->rc);
+    status = value_set_int32(&rc_value, vm->rc);
     if (status == REXX_VM_STATUS_OK) {
         status = table_set(&vm->locals, &vm->local_count, &vm->local_capacity,
                            "RC", 2u, &rc_value);
@@ -462,57 +469,74 @@ static void clear_stack(RexxVM *vm)
     vm->sp = 0;
 }
 
-/* Returns 1 for a valid number, 0 for nonnumeric input, and -1 on allocation failure. */
-static int parse_number(const char *bytes, size_t length, double *number)
+static RexxVMStatus value_decimal(const RexxValue *value, RexxDecimal *decimal)
 {
-    char *copy, *start, *end;
-    size_t used;
-    double parsed;
-    RexxNumericStatus numeric_status;
-    if (number == NULL || (bytes == NULL && length != 0) || length == SIZE_MAX) return 0;
-    copy = (char *)malloc(length + 1);
-    if (copy == NULL) return -1;
-    if (length != 0) memcpy(copy, bytes, length);
-    copy[length] = '\0';
-    start = copy;
-    while (*start != '\0' && ascii_space((unsigned char)*start)) ++start;
-    end = copy + length;
-    while (end > start && ascii_space((unsigned char)end[-1])) --end;
-    *end = '\0';
-    used = (size_t)(end - start);
-    if (used == 0) {
-        free(copy);
-        *number = 0.0;
-        return 1;
+    char number[64];
+    const char *bytes = NULL;
+    size_t length = 0u;
+    int written;
+    RexxNumericStatus status;
+
+    if (value == NULL || decimal == NULL) return REXX_VM_STATUS_INVALID_ARGUMENT;
+    switch (value->type) {
+    case REXX_VALUE_STRING:
+        if (value->as.string.bytes == NULL && value->as.string.length != 0u)
+            return REXX_VM_STATUS_INVALID_ARGUMENT;
+        bytes = value->as.string.bytes;
+        length = value->as.string.length;
+        break;
+    case REXX_VALUE_BOOLEAN:
+        bytes = value->as.boolean ? "1" : "0";
+        length = 1u;
+        break;
+    case REXX_VALUE_NUMBER:
+        if (!rexx_numeric_is_finite(value->as.number))
+            return REXX_VM_STATUS_NUMERIC_ERROR;
+        written = rexx_numeric_format(number, sizeof(number), value->as.number);
+        if (written < 0) return REXX_VM_STATUS_NUMERIC_ERROR;
+        bytes = number;
+        length = (size_t)written;
+        break;
+    default:
+        return REXX_VM_STATUS_NUMERIC_ERROR;
     }
-    numeric_status = rexx_numeric_parse(start, &end, &parsed);
-    if (numeric_status != REXX_NUMERIC_OK || end == start ||
-        (size_t)(end - start) != used || !rexx_numeric_is_finite(parsed)) {
-        free(copy);
-        return 0;
-    }
-    free(copy);
-    *number = parsed;
-    return 1;
+    status = rexx_decimal_parse(bytes, length, decimal);
+    if (status == REXX_NUMERIC_OK) return REXX_VM_STATUS_OK;
+    if (status == REXX_NUMERIC_RESOURCE_LIMIT) return REXX_VM_STATUS_RESOURCE_LIMIT;
+    return REXX_VM_STATUS_NUMERIC_ERROR;
 }
 
-static RexxVMStatus value_number(const RexxValue *value, double *number)
+static size_t numeric_text_cost(const RexxValue *value)
 {
-    int parsed;
-    if (value == NULL || number == NULL) return REXX_VM_STATUS_INVALID_ARGUMENT;
-    switch (value->type) {
-    case REXX_VALUE_UNSET: *number = 0.0; return REXX_VM_STATUS_OK;
-    case REXX_VALUE_NUMBER:
-        if (!rexx_numeric_is_finite(value->as.number)) return REXX_VM_STATUS_NUMERIC_ERROR;
-        *number = value->as.number;
-        return REXX_VM_STATUS_OK;
-    case REXX_VALUE_BOOLEAN: *number = value->as.boolean ? 1.0 : 0.0; return REXX_VM_STATUS_OK;
-    case REXX_VALUE_STRING:
-        parsed = parse_number(value->as.string.bytes, value->as.string.length, number);
-        return parsed > 0 ? REXX_VM_STATUS_OK :
-               parsed < 0 ? REXX_VM_STATUS_OUT_OF_MEMORY : REXX_VM_STATUS_NUMERIC_ERROR;
-    default: return REXX_VM_STATUS_NUMERIC_ERROR;
+    if (value->type == REXX_VALUE_STRING) return value->as.string.length;
+    if (value->type == REXX_VALUE_NUMBER) return 32u;
+    return 1u;
+}
+
+static RexxVMStatus charge_numeric_work(RexxVM *vm, size_t cost)
+{
+    if (cost > vm->numeric_work_remaining) return REXX_VM_STATUS_RESOURCE_LIMIT;
+    vm->numeric_work_remaining -= cost;
+    return REXX_VM_STATUS_OK;
+}
+
+static size_t decimal_operation_cost(const RexxDecimal *left,
+                                    const RexxDecimal *right,
+                                    RexxOpcode opcode,
+                                    size_t precision)
+{
+    size_t cost = left->length + right->length;
+    if (opcode == OP_MULTIPLY) return cost + left->length * right->length;
+    {
+        int64_t scale_gap = (int64_t)left->scale - right->scale;
+        int exponent_gap = ((int)left->length - left->scale - 1) -
+                           ((int)right->length - right->scale - 1);
+        if (scale_gap < 0) scale_gap = -scale_gap;
+        if (exponent_gap < 0) exponent_gap = -exponent_gap;
+        if ((size_t)exponent_gap <= precision + 2u)
+            cost += (size_t)scale_gap;
     }
+    return cost;
 }
 
 static RexxVMStatus value_string(const RexxValue *value, char **bytes, size_t *length)
@@ -553,17 +577,20 @@ static RexxVMStatus value_string(const RexxValue *value, char **bytes, size_t *l
 
 static RexxVMStatus value_truthy(const RexxValue *value, int *truthy)
 {
-    double number;
-    int parsed;
+    RexxDecimal number;
+    RexxVMStatus status;
     if (value == NULL || truthy == NULL) return REXX_VM_STATUS_INVALID_ARGUMENT;
     switch (value->type) {
     case REXX_VALUE_UNSET: *truthy = 0; return REXX_VM_STATUS_OK;
     case REXX_VALUE_BOOLEAN: *truthy = value->as.boolean != 0; return REXX_VM_STATUS_OK;
-    case REXX_VALUE_NUMBER: *truthy = value->as.number != 0.0; return REXX_VM_STATUS_OK;
     case REXX_VALUE_STRING:
-        parsed = parse_number(value->as.string.bytes, value->as.string.length, &number);
-        if (parsed < 0) return REXX_VM_STATUS_OUT_OF_MEMORY;
-        *truthy = parsed > 0 ? number != 0.0 : value->as.string.length != 0;
+    case REXX_VALUE_NUMBER:
+        status = value_decimal(value, &number);
+        if (status == REXX_VM_STATUS_RESOURCE_LIMIT) return status;
+        *truthy = status == REXX_VM_STATUS_OK
+                      ? number.sign != 0
+                      : (value->type == REXX_VALUE_STRING &&
+                         value->as.string.length != 0u);
         return REXX_VM_STATUS_OK;
     default: return REXX_VM_STATUS_INVALID_BYTECODE;
     }
@@ -584,11 +611,7 @@ static RexxVMStatus decode_constant(const RexxConstant *constant, RexxValue *val
         return REXX_VM_STATUS_INVALID_BYTECODE;
     switch (constant->kind) {
     case REXX_CONSTANT_NUMBER: {
-        double number;
-        int parsed = parse_number(constant->text, constant->length, &number);
-        if (parsed < 0) return REXX_VM_STATUS_OUT_OF_MEMORY;
-        if (parsed == 0) return REXX_VM_STATUS_INVALID_BYTECODE;
-        return rexx_value_set_number(value, number);
+        return rexx_value_set_string(value, constant->text, constant->length);
     }
     case REXX_CONSTANT_STRING: {
         char quote, *decoded;
@@ -778,31 +801,91 @@ static RexxVMStatus load_constant(RexxVM *vm, const RexxBytecodeChunk *chunk,
     return result;
 }
 
-static RexxVMStatus binary_number(RexxVM *vm, RexxOpcode opcode)
+static RexxVMStatus decimal_status_to_vm(RexxNumericStatus status)
+{
+    if (status == REXX_NUMERIC_OK) return REXX_VM_STATUS_OK;
+    if (status == REXX_NUMERIC_RESOURCE_LIMIT) return REXX_VM_STATUS_RESOURCE_LIMIT;
+    return REXX_VM_STATUS_NUMERIC_ERROR;
+}
+
+static RexxVMStatus decimal_value_to_rexx(const RexxDecimal *decimal,
+                                          size_t precision,
+                                          RexxValue *result)
+{
+    char output[REXX_DECIMAL_MAX_DIGITS + 64u];
+    int length = rexx_decimal_format(output, sizeof(output), decimal, precision);
+    if (length < 0) return REXX_VM_STATUS_RESOURCE_LIMIT;
+    return rexx_value_set_string(result, output, (size_t)length);
+}
+
+static RexxVMStatus binary_decimal(RexxVM *vm, RexxOpcode opcode)
 {
     RexxValue left, right, result;
-    double a = 0.0, b = 0.0, answer = 0.0;
+    RexxDecimal a, b, answer;
+    RexxNumericStatus numeric_status = REXX_NUMERIC_INVALID;
     RexxVMStatus status;
     memset(&left, 0, sizeof(left));
     memset(&right, 0, sizeof(right));
     memset(&result, 0, sizeof(result));
     status = pop_move(vm, &right);
     if (status == REXX_VM_STATUS_OK) status = pop_move(vm, &left);
-    if (status == REXX_VM_STATUS_OK) status = value_number(&left, &a);
-    if (status == REXX_VM_STATUS_OK) status = value_number(&right, &b);
+    if (status == REXX_VM_STATUS_OK) status = value_decimal(&left, &a);
+    if (status == REXX_VM_STATUS_OK) status = value_decimal(&right, &b);
+    if (status == REXX_VM_STATUS_OK) {
+        size_t cost = numeric_text_cost(&left) + numeric_text_cost(&right) +
+                      decimal_operation_cost(&a, &b, opcode,
+                                             vm->numeric_digits);
+        status = charge_numeric_work(vm, cost);
+    }
     if (status == REXX_VM_STATUS_OK) {
         switch (opcode) {
-        case OP_ADD: answer = a + b; break;
-        case OP_SUB: answer = a - b; break;
-        case OP_MULTIPLY: answer = a * b; break;
-        default: status = REXX_VM_STATUS_UNSUPPORTED_OPCODE; answer = 0.0; break;
+        case OP_ADD:
+            numeric_status = rexx_decimal_add(&a, &b, vm->numeric_digits, &answer);
+            break;
+        case OP_SUB:
+            numeric_status = rexx_decimal_subtract(&a, &b, vm->numeric_digits, &answer);
+            break;
+        case OP_MULTIPLY:
+            numeric_status = rexx_decimal_multiply(&a, &b, vm->numeric_digits, &answer);
+            break;
+        default:
+            status = REXX_VM_STATUS_UNSUPPORTED_OPCODE;
+            break;
         }
-        if (!rexx_numeric_is_finite(answer)) status = REXX_VM_STATUS_NUMERIC_ERROR;
+        if (status == REXX_VM_STATUS_OK)
+            status = decimal_status_to_vm(numeric_status);
+        if (status == REXX_VM_STATUS_OK)
+            status = decimal_value_to_rexx(&answer, vm->numeric_digits, &result);
+        if (status == REXX_VM_STATUS_OK) status = push_move(vm, &result);
     }
     rexx_value_clear(&left);
     rexx_value_clear(&right);
-    if (status == REXX_VM_STATUS_OK) status = rexx_value_set_number(&result, answer);
+    rexx_value_clear(&result);
+    return status;
+}
+
+static RexxVMStatus unary_decimal(RexxVM *vm, RexxOpcode opcode)
+{
+    RexxValue source, result;
+    RexxDecimal number;
+    RexxVMStatus status;
+    RexxNumericStatus numeric_status;
+    memset(&source, 0, sizeof(source));
+    memset(&result, 0, sizeof(result));
+    status = pop_move(vm, &source);
+    if (status == REXX_VM_STATUS_OK) status = value_decimal(&source, &number);
+    if (status == REXX_VM_STATUS_OK) {
+        status = charge_numeric_work(vm, numeric_text_cost(&source) + number.length);
+    }
+    if (status == REXX_VM_STATUS_OK) {
+        if (opcode == OP_NEGATE && number.sign != 0) number.sign = (int8_t)-number.sign;
+        numeric_status = rexx_decimal_round(&number, vm->numeric_digits);
+        status = decimal_status_to_vm(numeric_status);
+    }
+    if (status == REXX_VM_STATUS_OK)
+        status = decimal_value_to_rexx(&number, vm->numeric_digits, &result);
     if (status == REXX_VM_STATUS_OK) status = push_move(vm, &result);
+    rexx_value_clear(&source);
     rexx_value_clear(&result);
     return status;
 }
@@ -850,54 +933,156 @@ static RexxVMStatus concat_values(RexxVM *vm, RexxOpcode opcode)
     return status;
 }
 
-/* Compare numerically when both operands are numeric; otherwise compare their
- * rendered byte strings. This is sufficient for the ordered comparisons used
- * by the currently implemented execution subset and avoids locale dependence. */
-static RexxVMStatus compare_values(const RexxValue *left,
-                                   const RexxValue *right,
-                                   int *comparison)
+static int comparison_is_strict(RexxOpcode opcode)
 {
-    double left_number = 0.0, right_number = 0.0;
-    RexxVMStatus left_status, right_status;
+    return opcode == OP_STRICT_EQUAL || opcode == OP_STRICT_NOT_EQUAL ||
+           opcode == OP_STRICT_GREATER || opcode == OP_STRICT_LESS ||
+           opcode == OP_STRICT_GREATER_EQUAL || opcode == OP_STRICT_LESS_EQUAL ||
+           opcode == OP_STRICT_NOT_GREATER || opcode == OP_STRICT_NOT_LESS;
+}
 
-    if (left == NULL || right == NULL || comparison == NULL)
-        return REXX_VM_STATUS_INVALID_ARGUMENT;
-
-    left_status = value_number(left, &left_number);
-    right_status = value_number(right, &right_number);
-    if (left_status == REXX_VM_STATUS_OUT_OF_MEMORY ||
-        right_status == REXX_VM_STATUS_OUT_OF_MEMORY)
-        return REXX_VM_STATUS_OUT_OF_MEMORY;
-    if (left_status == REXX_VM_STATUS_OK && right_status == REXX_VM_STATUS_OK) {
-        *comparison = left_number < right_number ? -1 :
-                      left_number > right_number ? 1 : 0;
-        return REXX_VM_STATUS_OK;
+static int comparison_result(RexxOpcode opcode, int comparison)
+{
+    switch (opcode) {
+    case OP_EQUAL: case OP_STRICT_EQUAL: return comparison == 0;
+    case OP_NOT_EQUAL: case OP_STRICT_NOT_EQUAL: return comparison != 0;
+    case OP_GREATER: case OP_STRICT_GREATER: return comparison > 0;
+    case OP_LESS: case OP_STRICT_LESS: return comparison < 0;
+    case OP_GREATER_EQUAL: case OP_STRICT_GREATER_EQUAL: return comparison >= 0;
+    case OP_LESS_EQUAL: case OP_STRICT_LESS_EQUAL: return comparison <= 0;
+    case OP_NOT_GREATER: case OP_STRICT_NOT_GREATER: return comparison <= 0;
+    case OP_NOT_LESS: case OP_STRICT_NOT_LESS: return comparison >= 0;
+    default: return 0;
     }
+}
 
-    {
+static RexxVMStatus compare_values(RexxVM *vm,
+                                   const RexxValue *left,
+                                   const RexxValue *right,
+                                   RexxOpcode opcode,
+                                   int *matches)
+{
+    RexxDecimal a, b, difference;
+    RexxVMStatus left_status, right_status;
+    RexxNumericStatus numeric_status;
+    int comparison;
+
+    if (vm == NULL || left == NULL || right == NULL || matches == NULL)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    if (comparison_is_strict(opcode)) {
+        left_status = right_status = REXX_VM_STATUS_NUMERIC_ERROR;
+    } else {
+        left_status = value_decimal(left, &a);
+        right_status = value_decimal(right, &b);
+    }
+    if (!comparison_is_strict(opcode) &&
+        (left_status == REXX_VM_STATUS_RESOURCE_LIMIT ||
+        right_status == REXX_VM_STATUS_RESOURCE_LIMIT)
+       )
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    if (!comparison_is_strict(opcode) &&
+        left_status == REXX_VM_STATUS_OK && right_status == REXX_VM_STATUS_OK) {
+        size_t cost = numeric_text_cost(left) + numeric_text_cost(right) +
+                      decimal_operation_cost(&a, &b, OP_SUB,
+                                             vm->numeric_digits - vm->numeric_fuzz);
+        RexxVMStatus charge_status = charge_numeric_work(vm, cost);
+        if (charge_status != REXX_VM_STATUS_OK) return charge_status;
+        numeric_status = rexx_decimal_subtract(&a, &b,
+                                               vm->numeric_digits - vm->numeric_fuzz,
+                                               &difference);
+        if (numeric_status != REXX_NUMERIC_OK)
+            return decimal_status_to_vm(numeric_status);
+        comparison = difference.sign;
+    } else {
         char *left_text = NULL, *right_text = NULL;
-        size_t left_length = 0, right_length = 0, common_length, index;
+        size_t left_length = 0u, right_length = 0u, count, index;
         RexxVMStatus status = value_string(left, &left_text, &left_length);
         if (status == REXX_VM_STATUS_OK)
             status = value_string(right, &right_text, &right_length);
-        if (status == REXX_VM_STATUS_OK) {
-            common_length = left_length < right_length ? left_length : right_length;
-            for (index = 0; index < common_length; ++index) {
-                unsigned char a = (unsigned char)left_text[index];
-                unsigned char b = (unsigned char)right_text[index];
-                if (a != b) {
-                    *comparison = a < b ? -1 : 1;
-                    break;
-                }
-            }
-            if (index == common_length)
-                *comparison = left_length < right_length ? -1 :
-                              left_length > right_length ? 1 : 0;
+        if (status != REXX_VM_STATUS_OK) {
+            free(left_text); free(right_text); return status;
         }
+        count = comparison_is_strict(opcode)
+                    ? (left_length < right_length ? left_length : right_length)
+                    : (left_length > right_length ? left_length : right_length);
+        comparison = 0;
+        for (index = 0u; index < count; ++index) {
+            unsigned char ca = index < left_length ? (unsigned char)left_text[index] : (unsigned char)' ';
+            unsigned char cb = index < right_length ? (unsigned char)right_text[index] : (unsigned char)' ';
+            if (ca != cb) { comparison = ca < cb ? -1 : 1; break; }
+        }
+        if (comparison == 0 && comparison_is_strict(opcode) &&
+            left_length != right_length)
+            comparison = left_length < right_length ? -1 : 1;
         free(left_text);
         free(right_text);
-        return status;
     }
+    *matches = comparison_result(opcode, comparison);
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus value_set_uint32(RexxValue *value, uint32_t number)
+{
+    char reverse[10], output[10];
+    size_t count = 0u, i;
+    do {
+        reverse[count++] = (char)('0' + number % 10u);
+        number /= 10u;
+    } while (number != 0u);
+    for (i = 0u; i < count; ++i) output[i] = reverse[count - i - 1u];
+    return rexx_value_set_string(value, output, count);
+}
+
+static RexxVMStatus value_set_int32(RexxValue *value, int32_t number)
+{
+    char output[11];
+    uint32_t magnitude;
+    size_t offset = 0u;
+    if (number < 0) {
+        output[offset++] = '-';
+        magnitude = (uint32_t)(-(int64_t)number);
+    } else {
+        magnitude = (uint32_t)number;
+    }
+    {
+        RexxValue digits = REXX_VALUE_INIT;
+        RexxVMStatus status = value_set_uint32(&digits, magnitude);
+        if (status != REXX_VM_STATUS_OK) return status;
+        if (digits.as.string.length > sizeof(output) - offset) {
+            rexx_value_clear(&digits);
+            return REXX_VM_STATUS_RESOURCE_LIMIT;
+        }
+        memcpy(output + offset, digits.as.string.bytes,
+               digits.as.string.length);
+        offset += digits.as.string.length;
+        rexx_value_clear(&digits);
+    }
+    return rexx_value_set_string(value, output, offset);
+}
+
+static RexxVMStatus execute_numeric_digits(RexxVM *vm,
+                                           uint8_t flags,
+                                           RexxValue *operand)
+{
+    RexxDecimal decimal;
+    uint32_t precision;
+    RexxVMStatus status;
+    RexxNumericStatus numeric_status;
+
+    if ((flags & (uint8_t)~REXX_INSTRUCTION_HAS_VALUE) != 0u)
+        return REXX_VM_STATUS_INVALID_BYTECODE;
+    if ((flags & REXX_INSTRUCTION_HAS_VALUE) == 0u) {
+        vm->numeric_digits = REXX_VM_DEFAULT_NUMERIC_DIGITS;
+        return REXX_VM_STATUS_OK;
+    }
+    status = value_decimal(operand, &decimal);
+    if (status != REXX_VM_STATUS_OK) return REXX_VM_STATUS_INVALID_NUMERIC_SETTING;
+    numeric_status = rexx_decimal_to_uint32(&decimal, &precision);
+    if (numeric_status != REXX_NUMERIC_OK || precision == 0u ||
+        precision > REXX_NUMERIC_MAX_DIGITS || precision <= vm->numeric_fuzz)
+        return REXX_VM_STATUS_INVALID_NUMERIC_SETTING;
+    vm->numeric_digits = precision;
+    return REXX_VM_STATUS_OK;
 }
 
 RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
@@ -913,6 +1098,8 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
         (chunk->constant_count != 0 && chunk->constants == NULL) ||
         (chunk->symbol_count != 0 && chunk->symbols == NULL))
         return vm_fail(vm, REXX_VM_STATUS_INVALID_BYTECODE, 0);
+
+    vm->numeric_work_remaining = vm->numeric_work_budget;
 
     /* Each call starts with an empty evaluation stack; variable tables persist. */
     clear_stack(vm);
@@ -996,7 +1183,12 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
         case OP_ADD:
         case OP_SUB:
         case OP_MULTIPLY:
-            status = binary_number(vm, (RexxOpcode)ins->opcode);
+            status = binary_decimal(vm, (RexxOpcode)ins->opcode);
+            break;
+
+        case OP_POSITIVE:
+        case OP_NEGATE:
+            status = unary_decimal(vm, (RexxOpcode)ins->opcode);
             break;
 
         case OP_CONCAT:
@@ -1005,17 +1197,33 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
             status = concat_values(vm, (RexxOpcode)ins->opcode);
             break;
 
-        case OP_GREATER: {
+        case OP_EQUAL:
+        case OP_STRICT_EQUAL:
+        case OP_NOT_EQUAL:
+        case OP_STRICT_NOT_EQUAL:
+        case OP_GREATER:
+        case OP_LESS:
+        case OP_GREATER_EQUAL:
+        case OP_LESS_EQUAL:
+        case OP_NOT_GREATER:
+        case OP_NOT_LESS:
+        case OP_STRICT_GREATER:
+        case OP_STRICT_LESS:
+        case OP_STRICT_GREATER_EQUAL:
+        case OP_STRICT_LESS_EQUAL:
+        case OP_STRICT_NOT_GREATER:
+        case OP_STRICT_NOT_LESS: {
             RexxValue left, right;
-            int comparison = 0;
+            int matches = 0;
             memset(&left, 0, sizeof(left));
             memset(&right, 0, sizeof(right));
             status = pop_move(vm, &right);
             if (status == REXX_VM_STATUS_OK) status = pop_move(vm, &left);
             if (status == REXX_VM_STATUS_OK)
-                status = compare_values(&left, &right, &comparison);
+                status = compare_values(vm, &left, &right,
+                                        (RexxOpcode)ins->opcode, &matches);
             if (status == REXX_VM_STATUS_OK)
-                status = rexx_value_set_boolean(&value, comparison > 0);
+                status = rexx_value_set_boolean(&value, matches);
             if (status == REXX_VM_STATUS_OK) status = push_move(vm, &value);
             rexx_value_clear(&left);
             rexx_value_clear(&right);
@@ -1090,10 +1298,17 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
             }
             if (status == REXX_VM_STATUS_OK) {
                 argument_start = vm->sp - argument_count;
-                status = rexx_builtin_dispatch(
-                    function->name, function->length,
-                    argument_count == 0u ? NULL : &vm->stack[argument_start],
-                    argument_count, &value);
+                if (ascii_equal(function->name, function->length, "DIGITS", 6u)) {
+                    if (argument_count != 0u)
+                        status = REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+                    else
+                        status = value_set_uint32(&value, vm->numeric_digits);
+                } else {
+                    status = rexx_builtin_dispatch(
+                        function->name, function->length,
+                        argument_count == 0u ? NULL : &vm->stack[argument_start],
+                        argument_count, &value);
+                }
                 for (argument_index = argument_start; argument_index < vm->sp;
                      ++argument_index) {
                     rexx_value_clear(&vm->stack[argument_index]);
@@ -1105,6 +1320,14 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
             }
             break;
         }
+
+        case OP_NUMERIC_DIGITS:
+            if ((ins->flags & REXX_INSTRUCTION_HAS_VALUE) != 0u)
+                status = pop_move(vm, &value);
+            if (status == REXX_VM_STATUS_OK)
+                status = execute_numeric_digits(vm, ins->flags, &value);
+            rexx_value_clear(&value);
+            break;
 
         /* A plain DO group only needs a structural frame. Counted and
          * controlled loops remain unsupported until their opcodes are added. */
@@ -1233,7 +1456,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 const char *rexx_vm_status_name(RexxVMStatus status)
 {
     if (status < REXX_VM_STATUS_OK ||
-        status > REXX_VM_STATUS_INSTRUCTION_LIMIT)
+        status > REXX_VM_STATUS_INVALID_NUMERIC_SETTING)
         return "unknown VM status";
     return vm_messages[status];
 }

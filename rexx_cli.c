@@ -123,7 +123,13 @@ static void rexx_cli_report_parse_error(RexxOutputContext *output,
  * representable by int32_t, which is the shell bridge's status type. */
 static int rexx_cli_exit_status(const RexxVM *vm, int *status_out)
 {
-    double number;
+    RexxDecimal number;
+    int32_t integer;
+    const char *bytes = NULL;
+    size_t length = 0u;
+    char formatted[64];
+    int written;
+    RexxNumericStatus numeric_status;
 
     if (vm == NULL || status_out == NULL || !vm->exit_requested)
         return 0;
@@ -133,44 +139,29 @@ static int rexx_cli_exit_status(const RexxVM *vm, int *status_out)
     }
 
     if (vm->exit_value.type == REXX_VALUE_NUMBER) {
-        number = vm->exit_value.as.number;
+        written = rexx_numeric_format(formatted, sizeof(formatted),
+                                      vm->exit_value.as.number);
+        if (written < 0) return 0;
+        bytes = formatted;
+        length = (size_t)written;
     } else if (vm->exit_value.type == REXX_VALUE_BOOLEAN) {
-        number = vm->exit_value.as.boolean ? 1.0 : 0.0;
+        bytes = vm->exit_value.as.boolean ? "1" : "0";
+        length = 1u;
     } else if (vm->exit_value.type == REXX_VALUE_STRING) {
-        char *copy;
-        char *end;
-        size_t length = vm->exit_value.as.string.length;
-        RexxNumericStatus numeric_status;
-
-        if (vm->exit_value.as.string.bytes == NULL || length == SIZE_MAX ||
-            memchr(vm->exit_value.as.string.bytes, '\0', length) != NULL)
+        if (vm->exit_value.as.string.bytes == NULL ||
+            memchr(vm->exit_value.as.string.bytes, '\0',
+                   vm->exit_value.as.string.length) != NULL)
             return 0;
-        copy = (char *)malloc(length + 1u);
-        if (copy == NULL) return -1;
-        memcpy(copy, vm->exit_value.as.string.bytes, length);
-        copy[length] = '\0';
-        numeric_status = rexx_numeric_parse(copy, &end, &number);
-        if (numeric_status != REXX_NUMERIC_OK || end == copy) {
-            free(copy);
-            return 0;
-        }
-        while (*end == ' ' || *end == '\t' || *end == '\r' ||
-               *end == '\n' || *end == '\f' || *end == '\v') {
-            ++end;
-        }
-        if (*end != '\0') {
-            free(copy);
-            return 0;
-        }
-        free(copy);
+        bytes = vm->exit_value.as.string.bytes;
+        length = vm->exit_value.as.string.length;
     } else {
         return 0;
     }
-
-    if (!rexx_numeric_is_finite(number) || number < (double)INT32_MIN ||
-        number > (double)INT32_MAX || number != (double)(int32_t)number)
+    numeric_status = rexx_decimal_parse(bytes, length, &number);
+    if (numeric_status != REXX_NUMERIC_OK ||
+        rexx_decimal_to_int32(&number, &integer) != REXX_NUMERIC_OK)
         return 0;
-    *status_out = (int)(int32_t)number;
+    *status_out = (int)integer;
     return 1;
 }
 

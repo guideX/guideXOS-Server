@@ -77,7 +77,8 @@ typedef enum RexxOpcode {
     OP_DO_TEST,
     OP_DO_NEXT,
     OP_DO_END,
-    OP_LOAD_UNSET
+    OP_LOAD_UNSET,
+    OP_NUMERIC_DIGITS
 } RexxOpcode;
 
 /*
@@ -151,7 +152,7 @@ typedef enum RexxDoFlags {
     REXX_DO_FLAG_HAS_FOR = 1u << 4
 } RexxDoFlags;
 
-/* Instruction flag bits used by SAY, ADDRESS, RETURN, and EXIT. */
+/* Instruction flag bits used by SAY, ADDRESS, RETURN, EXIT, and NUMERIC. */
 #define REXX_INSTRUCTION_HAS_VALUE ((uint8_t)1u)
 #define REXX_INSTRUCTION_HAS_ENVIRONMENT ((uint8_t)2u)
 

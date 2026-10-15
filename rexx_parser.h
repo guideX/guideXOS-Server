@@ -114,7 +114,8 @@ typedef enum RexxAstClauseKind {
     REXX_AST_CLAUSE_ADDRESS,
     REXX_AST_CLAUSE_IF,
     REXX_AST_CLAUSE_DO,
-    REXX_AST_CLAUSE_SELECT
+    REXX_AST_CLAUSE_SELECT,
+    REXX_AST_CLAUSE_NUMERIC_DIGITS
 } RexxAstClauseKind;
 
 typedef enum RexxAstDoMode {

@@ -14,6 +14,7 @@
 #include "rexx_parser.h"
 #include "rexx_compiler.h"
 #include "rexx_vm.h"
+#include "rexx_numeric.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -168,10 +169,16 @@ static int rexx_verify_expected_value(const RexxVM *vm,
         }
     }
 
-    if (audit->expected_value_kind == REXX_EXPECT_LOCAL_NUMBER &&
-        value != NULL && value->type == REXX_VALUE_NUMBER &&
-        value->as.number == audit->expected_number) {
-        return 1;
+    if (audit->expected_value_kind == REXX_EXPECT_LOCAL_NUMBER && value != NULL) {
+        char expected[64];
+        int expected_length = rexx_numeric_format(
+            expected, sizeof(expected), audit->expected_number);
+        if (value->type == REXX_VALUE_STRING && expected_length >= 0 &&
+            value->as.string.length == (size_t)expected_length &&
+            memcmp(value->as.string.bytes, expected,
+                   value->as.string.length) == 0) return 1;
+        if (value->type == REXX_VALUE_NUMBER &&
+            value->as.number == audit->expected_number) return 1;
     }
     if ((audit->expected_value_kind == REXX_EXPECT_LOCAL_STRING ||
          audit->expected_value_kind == REXX_EXPECT_STEM_STRING) &&
@@ -301,11 +308,18 @@ static int rexx_eval_source_with_audit(const char *source_code,
         (void)fputs("REXX EXIT execution expectation failed\n", stderr);
         goto cleanup;
     }
-    if (audit != NULL && audit->expect_exit_value &&
-        (!vm.exit_has_value || vm.exit_value.type != REXX_VALUE_NUMBER ||
-         vm.exit_value.as.number != audit->expected_exit_number)) {
-        (void)fputs("REXX EXIT value expectation failed\n", stderr);
-        goto cleanup;
+    if (audit != NULL && audit->expect_exit_value) {
+        char expected[64];
+        int expected_length = rexx_numeric_format(
+            expected, sizeof(expected), audit->expected_exit_number);
+        if (!vm.exit_has_value || expected_length < 0 ||
+            vm.exit_value.type != REXX_VALUE_STRING ||
+            vm.exit_value.as.string.length != (size_t)expected_length ||
+            memcmp(vm.exit_value.as.string.bytes, expected,
+                   (size_t)expected_length) != 0) {
+            (void)fputs("REXX EXIT value expectation failed\n", stderr);
+            goto cleanup;
+        }
     }
     if (audit != NULL && audit->expect_exit &&
         !audit->expect_exit_value && vm.exit_has_value) {

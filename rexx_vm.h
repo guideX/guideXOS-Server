@@ -20,6 +20,8 @@ extern "C" {
 #define REXX_VM_MAX_STACK_CAPACITY ((size_t)1048576u)
 #define REXX_VM_MAX_TABLE_ENTRIES ((size_t)65536u)
 #define REXX_VM_DEFAULT_INSTRUCTION_BUDGET ((size_t)1000000u)
+#define REXX_VM_DEFAULT_NUMERIC_DIGITS ((uint32_t)9u)
+#define REXX_VM_DEFAULT_NUMERIC_WORK_BUDGET ((size_t)10000000u)
 
 typedef enum RexxValueType {
     REXX_VALUE_UNSET = 0,
@@ -56,8 +58,14 @@ typedef enum RexxVMStatus {
     REXX_VM_STATUS_IO_ERROR,
     REXX_VM_STATUS_UNKNOWN_FUNCTION,
     REXX_VM_STATUS_INVALID_FUNCTION_CALL,
-    REXX_VM_STATUS_INSTRUCTION_LIMIT
+    REXX_VM_STATUS_INSTRUCTION_LIMIT,
+    REXX_VM_STATUS_INVALID_NUMERIC_SETTING
 } RexxVMStatus;
+
+typedef enum RexxNumericForm {
+    REXX_NUMERIC_FORM_SCIENTIFIC = 0,
+    REXX_NUMERIC_FORM_ENGINEERING = 1
+} RexxNumericForm;
 
 typedef struct RexxVMError {
     RexxVMStatus status;
@@ -98,6 +106,11 @@ typedef struct RexxVM {
     size_t sp;            /* Number of live entries; top is stack[sp - 1]. */
     size_t pc;            /* Current bytecode instruction index. */
     size_t instruction_budget; /* Maximum dispatches allowed by one execute. */
+    uint32_t numeric_digits; /* Invocation-local NUMERIC DIGITS context. */
+    uint32_t numeric_fuzz;   /* Reserved; FUZZ statements remain unsupported. */
+    RexxNumericForm numeric_form; /* Reserved; FORM statements remain unsupported. */
+    size_t numeric_work_budget;
+    size_t numeric_work_remaining;
 
     RexxVMEntry *locals;
     size_t local_count;

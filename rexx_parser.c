@@ -68,6 +68,8 @@ static const char rexx_parser_message_otherwise_order[] =
     "OTHERWISE must be the final SELECT branch";
 static const char rexx_parser_message_missing_otherwise_instruction[] =
     "expected an instruction after OTHERWISE";
+static const char rexx_parser_message_unsupported_numeric_setting[] =
+    "NUMERIC FUZZ and FORM are not supported by this interpreter phase";
 static const char rexx_parser_message_resource_limit[] =
     "parser resource limit exceeded";
 static const char rexx_parser_message_out_of_memory[] =
@@ -1545,6 +1547,32 @@ static RexxAstClause *rexx_parser_parse_call_clause(
     return clause->as.call.call != NULL ? clause : NULL;
 }
 
+static RexxAstClause *rexx_parser_parse_numeric_clause(
+    RexxParser *parser,
+    unsigned int stop_mask)
+{
+    RexxToken token = parser->current;
+    RexxAstClause *clause;
+
+    clause = rexx_parser_new_clause(parser, REXX_AST_CLAUSE_NUMERIC_DIGITS,
+                                    &token);
+    if (clause == NULL || !rexx_parser_advance(parser)) return NULL;
+    if (parser->current.type != TOKEN_SYMBOL ||
+        !rexx_token_equals_ascii_case_insensitive(&parser->current, "DIGITS")) {
+        rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                              &parser->current,
+                              rexx_parser_message_unsupported_numeric_setting);
+        return NULL;
+    }
+    if (!rexx_parser_advance(parser)) return NULL;
+    if (!rexx_parser_token_is_stop(&parser->current, stop_mask)) {
+        clause->as.simple.expression = rexx_parser_parse_expression_internal(
+            parser, 1, stop_mask);
+        if (clause->as.simple.expression == NULL) return NULL;
+    }
+    return clause;
+}
+
 static RexxAstClause *rexx_parser_parse_simple_keyword(
     RexxParser *parser,
     RexxAstClauseKind kind,
@@ -1607,6 +1635,9 @@ static RexxAstClause *rexx_parser_parse_clause(RexxParser *parser,
     }
 
     switch (parser->current.type) {
+    case TOKEN_KEYWORD_NUMERIC:
+        clause = rexx_parser_parse_numeric_clause(parser, stop_mask);
+        break;
     case TOKEN_KEYWORD_ADDRESS:
         clause = rexx_parser_parse_simple_keyword(
             parser, REXX_AST_CLAUSE_ADDRESS, stop_mask);
@@ -1710,6 +1741,7 @@ static void rexx_parser_free_clause_list(RexxAstClause *clauses)
         case REXX_AST_CLAUSE_RETURN:
         case REXX_AST_CLAUSE_EXIT:
         case REXX_AST_CLAUSE_COMMAND:
+        case REXX_AST_CLAUSE_NUMERIC_DIGITS:
             rexx_parser_free_expression(clauses->as.simple.expression);
             break;
         case REXX_AST_CLAUSE_CALL:

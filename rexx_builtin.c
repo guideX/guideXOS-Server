@@ -99,109 +99,71 @@ static RexxVMStatus rexx_builtin_string_view(const RexxValue *value,
  * Parse a finite REXX number without accepting embedded NULs or trailing
  * nonblank bytes. The empty string follows the VM's numeric convention (0).
  */
-static RexxVMStatus rexx_builtin_number(const RexxValue *value, double *number)
+static RexxVMStatus rexx_builtin_decimal(const RexxValue *value,
+                                         RexxDecimal *number)
 {
     RexxBuiltinStringView view;
-    RexxVMStatus status;
+    RexxNumericStatus numeric_status;
 
     if (value == NULL || number == NULL) {
         return REXX_VM_STATUS_INVALID_ARGUMENT;
     }
-    if (value->type == REXX_VALUE_NUMBER) {
-        if (!rexx_numeric_is_finite(value->as.number)) {
-            return REXX_VM_STATUS_NUMERIC_ERROR;
-        }
-        *number = value->as.number;
-        return REXX_VM_STATUS_OK;
+    if (value->type == REXX_VALUE_UNSET) return REXX_VM_STATUS_NUMERIC_ERROR;
+    if (value->type == REXX_VALUE_STRING) {
+        if (value->as.string.bytes == NULL && value->as.string.length != 0u)
+            return REXX_VM_STATUS_INVALID_ARGUMENT;
+        numeric_status = rexx_decimal_parse(value->as.string.bytes,
+                                            value->as.string.length, number);
+    } else {
+        RexxVMStatus status = rexx_builtin_string_view(value, &view);
+        if (status != REXX_VM_STATUS_OK) return status;
+        numeric_status = rexx_decimal_parse(view.bytes, view.length, number);
     }
-    if (value->type == REXX_VALUE_BOOLEAN) {
-        *number = value->as.boolean != 0 ? 1.0 : 0.0;
-        return REXX_VM_STATUS_OK;
-    }
-    if (value->type == REXX_VALUE_UNSET) {
-        *number = 0.0;
-        return REXX_VM_STATUS_OK;
-    }
-
-    status = rexx_builtin_string_view(value, &view);
-    if (status != REXX_VM_STATUS_OK) {
-        return status;
-    }
-    if (view.length == SIZE_MAX) {
+    if (numeric_status == REXX_NUMERIC_OK) return REXX_VM_STATUS_OK;
+    if (numeric_status == REXX_NUMERIC_RESOURCE_LIMIT)
         return REXX_VM_STATUS_RESOURCE_LIMIT;
-    }
-
-    {
-        char *copy = (char *)malloc(view.length + 1u);
-        char *start;
-        char *end;
-        size_t trimmed_length;
-        double parsed;
-        RexxNumericStatus numeric_status;
-
-        if (copy == NULL) {
-            return REXX_VM_STATUS_OUT_OF_MEMORY;
-        }
-        if (view.length != 0u) {
-            memcpy(copy, view.bytes, view.length);
-        }
-        copy[view.length] = '\0';
-
-        start = copy;
-        while (*start != '\0' &&
-               rexx_builtin_ascii_space((unsigned char)*start)) {
-            ++start;
-        }
-        end = copy + view.length;
-        while (end > start &&
-               rexx_builtin_ascii_space((unsigned char)end[-1])) {
-            --end;
-        }
-        *end = '\0';
-        trimmed_length = (size_t)(end - start);
-        if (trimmed_length == 0u) {
-            free(copy);
-            *number = 0.0;
-            return REXX_VM_STATUS_OK;
-        }
-
-        numeric_status = rexx_numeric_parse(start, &end, &parsed);
-        if (numeric_status != REXX_NUMERIC_OK || end == start ||
-            (size_t)(end - start) != trimmed_length ||
-            !rexx_numeric_is_finite(parsed)) {
-            free(copy);
-            return REXX_VM_STATUS_NUMERIC_ERROR;
-        }
-        free(copy);
-        *number = parsed;
-        return REXX_VM_STATUS_OK;
-    }
+    return REXX_VM_STATUS_NUMERIC_ERROR;
 }
 
 /* Convert to a nonnegative integral size, rejecting fractions and overflow. */
 static RexxVMStatus rexx_builtin_size(const RexxValue *value, size_t *number)
 {
-    double parsed;
-    size_t converted;
+    RexxDecimal parsed;
+    uint32_t converted;
     RexxVMStatus status;
+    RexxNumericStatus numeric_status;
 
     if (number == NULL) {
         return REXX_VM_STATUS_INVALID_ARGUMENT;
     }
-    status = rexx_builtin_number(value, &parsed);
+    status = rexx_builtin_decimal(value, &parsed);
     if (status != REXX_VM_STATUS_OK) {
         return status;
     }
-    if (parsed < 0.0 || parsed >= (double)SIZE_MAX ||
-        !rexx_numeric_is_integral(parsed)) {
+    if (parsed.sign < 0) {
         return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
     }
-    converted = (size_t)parsed;
-    if ((double)converted != parsed) {
-        return REXX_VM_STATUS_INVALID_ARGUMENT;
-    }
-    *number = converted;
+    numeric_status = rexx_decimal_to_uint32(&parsed, &converted);
+    if (numeric_status != REXX_NUMERIC_OK)
+        return numeric_status == REXX_NUMERIC_RANGE
+                   ? REXX_VM_STATUS_RESOURCE_LIMIT
+                   : REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    *number = (size_t)converted;
     return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_set_size(RexxValue *result, size_t value)
+{
+    char reverse[3u * sizeof(size_t) + 1u];
+    char output[3u * sizeof(size_t) + 1u];
+    size_t count = 0u, index;
+    do {
+        reverse[count++] = (char)('0' + value % 10u);
+        value /= 10u;
+    } while (value != 0u);
+    for (index = 0u; index < count; ++index)
+        output[index] = reverse[count - index - 1u];
+    return rexx_value_set_string(result, output, count);
 }
 
 static RexxVMStatus rexx_builtin_set_empty(RexxValue *result)
@@ -219,7 +181,7 @@ static RexxVMStatus rexx_builtin_length(const RexxValue *arguments,
     (void)argument_count;
     status = rexx_builtin_string_view(&arguments[0], &string);
     if (status == REXX_VM_STATUS_OK) {
-        status = rexx_value_set_number(result, (double)string.length);
+        status = rexx_builtin_set_size(result, string.length);
     }
     return status;
 }
@@ -310,7 +272,9 @@ static RexxVMStatus rexx_builtin_word(const RexxValue *arguments,
                                       RexxValue *result)
 {
     RexxBuiltinStringView string;
-    double word_number;
+    RexxDecimal word_number;
+    uint32_t word_index;
+    RexxNumericStatus numeric_status;
     size_t index = 0u;
     size_t position = 0u;
     RexxVMStatus status;
@@ -320,17 +284,21 @@ static RexxVMStatus rexx_builtin_word(const RexxValue *arguments,
     if (status != REXX_VM_STATUS_OK) {
         return status;
     }
-    status = rexx_builtin_number(&arguments[1], &word_number);
+    status = rexx_builtin_decimal(&arguments[1], &word_number);
     if (status != REXX_VM_STATUS_OK) {
         return status;
     }
-    if (!rexx_numeric_is_integral(word_number)) {
-        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
-    }
-    if (word_number <= 0.0 || word_number >= (double)SIZE_MAX) {
+    if (word_number.sign <= 0) {
         return rexx_builtin_set_empty(result);
     }
-    index = (size_t)word_number;
+    numeric_status = rexx_decimal_to_uint32(&word_number, &word_index);
+    if (numeric_status == REXX_NUMERIC_RANGE) {
+        return rexx_builtin_set_empty(result);
+    }
+    if (numeric_status != REXX_NUMERIC_OK) {
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    }
+    index = (size_t)word_index;
 
     while (position < string.length) {
         size_t word_start;
@@ -387,7 +355,7 @@ static RexxVMStatus rexx_builtin_words(const RexxValue *arguments,
             ++position;
         }
     }
-    return rexx_value_set_number(result, (double)count);
+    return rexx_builtin_set_size(result, count);
 }
 
 static RexxVMStatus rexx_builtin_strip(const RexxValue *arguments,
@@ -474,13 +442,13 @@ static RexxVMStatus rexx_builtin_pos(const RexxValue *arguments,
 
     start_index = start - 1u;
     if (start_index > haystack.length) {
-        return rexx_value_set_number(result, 0.0);
+        return rexx_builtin_set_size(result, 0u);
     }
     if (needle.length == 0u) {
-        return rexx_value_set_number(result, (double)start);
+        return rexx_builtin_set_size(result, start);
     }
     if (needle.length > haystack.length - start_index) {
-        return rexx_value_set_number(result, 0.0);
+        return rexx_builtin_set_size(result, 0u);
     }
 
     {
@@ -489,14 +457,14 @@ static RexxVMStatus rexx_builtin_pos(const RexxValue *arguments,
         for (position = start_index; position <= last_start; ++position) {
             if (memcmp(haystack.bytes + position, needle.bytes,
                        needle.length) == 0) {
-                return rexx_value_set_number(result, (double)(position + 1u));
+                return rexx_builtin_set_size(result, position + 1u);
             }
             if (position == last_start) {
                 break;
             }
         }
     }
-    return rexx_value_set_number(result, 0.0);
+    return rexx_builtin_set_size(result, 0u);
 }
 
 static size_t rexx_builtin_table_find(const char *table,
