@@ -1,0 +1,135 @@
+{
+  "phase": "S13",
+  "outcome": "A - accepted",
+  "branch": "main",
+  "startingHead": "de63af809e60504565db97b93998b4d30a0b6e2e",
+  "kernelPath": "kernel/build/s13-final-20261014/bin/kernel.elf",
+  "kernelBytes": 2687560,
+  "kernelSha256": "48D41C2BC86BCCDAF3821698E79E27EC13D42527A07F489A62F1B36AE6B8DC21",
+  "guestKernelPath": "out/validation/settings-s13-20261014/production/guest-acceptance-virtio-ready/ESP/kernel.elf",
+  "guestKernelSha256": "48D41C2BC86BCCDAF3821698E79E27EC13D42527A07F489A62F1B36AE6B8DC21",
+  "bootloaderPath": "out/validation/settings-s13-20261014/production/guest-acceptance-virtio-ready/ESP/EFI/BOOT/BOOTX64.EFI",
+  "bootloaderSha256": "E2FDB6AD78E0416AF250BEBBC6541640E3CCDC7DD9A14453C08143B7F4DA48AA",
+  "firmwarePath": "out/validation/settings-s13-20261014/production/guest-acceptance-virtio-ready/OVMF.fd",
+  "firmwareSha256": "2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792",
+  "productionBuild": {
+    "sourcePath": "out/validation/settings-s13-20261014/amd64-kernel-build-final.log",
+    "sourceSha256": "4BE768948E34FBF32B66B368C997B6C63F77662FBCDF1F664B959A5BFBEBE6D6",
+    "committedPath": "docs/evidence/settings-s13-20261014/amd64-kernel-build.log",
+    "committedSha256": "AD5B9C57977FE5483F41DA7434F7E0D85A5CEB48CBF8F89C71819258EB04E6D6",
+    "compilerCommands": 154,
+    "warnings": 409,
+    "errors": 0,
+    "newWarningsInAddedS13Lines": 0,
+    "unresolvedSymbolsS12": 19,
+    "unresolvedSymbolsS13": 19,
+    "unresolvedSymbolDelta": 0
+  },
+  "guestSerial": {
+    "sourcePath": "out/validation/settings-s13-20261014/production/guest-acceptance-virtio-ready/guest-com1.serial.log",
+    "sourceSha256": "F18802E1871F988B9C8A446D324DBD20D90F337191B5FEDD16FF706D72ED4F31",
+    "committedPath": "docs/evidence/settings-s13-20261014/guest-com1.serial.log",
+    "committedSha256": "1BF79E1A5179BADC98A2D95E51A38ECCD682CFC8F68635B59D39F13C72425E09",
+    "normalization": "ANSI terminal controls removed; LF line endings; trailing padding trimmed."
+  },
+  "qmpTranscript": {
+    "sourcePath": "out/validation/settings-s13-20261014/production/guest-acceptance-virtio-ready/qmp-transcript.log",
+    "sourceSha256": "6A8CFF7BF33B6A50ECE2EF0455183227B27957CDA16D5D09911A270F152062F9",
+    "committedPath": "docs/evidence/settings-s13-20261014/qmp-transcript.log",
+    "committedSha256": "4540129D4BC2BEE8E2CC597D0823BA76BEDE3AE3D73A46124ED50C830556F4B8",
+    "normalization": "LF line endings; content otherwise preserved."
+  },
+  "qemu": {
+    "launchManifest": "docs/evidence/settings-s13-20261014/qemu-launch.json",
+    "machine": "pc,accel=whpx",
+    "processors": 2,
+    "memory": "1536 MiB",
+    "network": "disabled",
+    "display": "gtk",
+    "displayDevice": "virtio-vga,id=video0",
+    "qmpEndpoint": "127.0.0.1:58413",
+    "ownedPid": 23628,
+    "stoppedThroughQmp": true
+  },
+  "framebuffer": {
+    "source": "UEFI GOP through BootInfo, retained by the kernel framebuffer API",
+    "width": 1280,
+    "height": 800,
+    "pitchBytes": 5120,
+    "bitsPerPixel": 32,
+    "pixelFormat": "B8G8R8A8",
+    "serialLines": "guest-com1.serial.log lines 17, 151",
+    "settingsValues": "settings-display-mouse.png and settings-display-reopened.png",
+    "logicalDesktop": "Unavailable",
+    "displayLayout": "Unavailable",
+    "primaryOutputMode": "Unavailable"
+  },
+  "screenshots": [
+    {
+      "path": "docs/evidence/settings-s13-20261014/start-menu-open.png",
+      "sha256": "1256E8AC03A8E65AFA1E9A3AE3D5B4A77E085E634C4AE54FCD1842C45AC63AF5",
+      "source": "out/validation/settings-s13-20261014/production/guest-acceptance-virtio-ready/start-menu-open.png"
+    },
+    {
+      "path": "docs/evidence/settings-s13-20261014/settings-display-mouse.png",
+      "sha256": "986E984AB3931B1F10AED67E94D0C652321D3232766B7A7899C0E120A8376C93",
+      "source": "out/validation/settings-s13-20261014/production/guest-acceptance-virtio-ready/settings-display-mouse-selected.png"
+    },
+    {
+      "path": "docs/evidence/settings-s13-20261014/settings-system.png",
+      "sha256": "9248BCA8F07C351F8CC35C2BF2CB594ADA1A8ACC560A2CAA60B9568BE1C4AC06",
+      "source": "out/validation/settings-s13-20261014/production/guest-acceptance-virtio-ready/settings-system.png"
+    },
+    {
+      "path": "docs/evidence/settings-s13-20261014/settings-about.png",
+      "sha256": "A951DF339F74BF19FEF56EF3D27F0ACF1DC62EFCC075615FC4B6EA6CB48A7669",
+      "source": "out/validation/settings-s13-20261014/production/guest-acceptance-virtio-ready/settings-about.png"
+    },
+    {
+      "path": "docs/evidence/settings-s13-20261014/settings-display-return.png",
+      "sha256": "0573B4EA644E29BC937E6EFCB4383BC445F1339FB683EA402E4E115A4706D999",
+      "source": "out/validation/settings-s13-20261014/production/guest-acceptance-virtio-ready/settings-display-return.png"
+    },
+    {
+      "path": "docs/evidence/settings-s13-20261014/settings-display-reopened.png",
+      "sha256": "9AFF89D840F524BBC505B9132F3725819399EFA0150908DB79BB266275F43E8D",
+      "source": "out/validation/settings-s13-20261014/production/guest-acceptance-virtio-ready/settings-display-reopened.png"
+    },
+    {
+      "path": "docs/evidence/settings-s13-20261014/control-panel-open.png",
+      "sha256": "B76CDFDFBE19548AC4D9D325D1D0D547E453FC5C78BF9283D69BC22BDBBC25BB",
+      "source": "out/validation/settings-s13-20261014/production/guest-acceptance-virtio-ready/control-panel-open-s13.png"
+    },
+    {
+      "path": "docs/evidence/settings-s13-20261014/display-options-open.png",
+      "sha256": "86327BE9FA5E570F537D041B3BB2139F9B066E0F19ACF6F5C3EACC8F82709610",
+      "source": "out/validation/settings-s13-20261014/production/guest-acceptance-virtio-ready/display-options-open-s13.png"
+    },
+    {
+      "path": "docs/evidence/settings-s13-20261014/display-options-backgrounds-tab.png",
+      "sha256": "45609FBF4F4D139636E3EF97A44291FDB6A166ED324BF7048513B4D8B0E1E375",
+      "source": "out/validation/settings-s13-20261014/production/guest-acceptance-virtio-ready/display-options-backgrounds-tab-s13.png"
+    },
+    {
+      "path": "docs/evidence/settings-s13-20261014/display-options-displays-tab.png",
+      "sha256": "BD6929761AA0CE1D4D69B658E1D16039D990550F7443E71331B133D387292DAD",
+      "source": "out/validation/settings-s13-20261014/production/guest-acceptance-virtio-ready/display-options-displays-tab-s13.png"
+    },
+    {
+      "path": "docs/evidence/settings-s13-20261014/control-panel-reopened.png",
+      "sha256": "F8CB197C3C7BF63829DFDA4D6199AFE6FCAC85FB667FE1703A335C08B85A20A4",
+      "source": "out/validation/settings-s13-20261014/production/guest-acceptance-virtio-ready/control-panel-reopened-final2.png"
+    },
+    {
+      "path": "docs/evidence/settings-s13-20261014/desktop-clean.png",
+      "sha256": "F1F71C59D0269EAF02BF56FB67D52AC98363981793BA379A3BF9C8B4D9253F2C",
+      "source": "out/validation/settings-s13-20261014/production/guest-acceptance-virtio-ready/desktop-clean-final2.png"
+    }
+  ],
+  "evidenceFiles": [
+    "docs/evidence/settings-s13-20261014/amd64-kernel-build.log",
+    "docs/evidence/settings-s13-20261014/guest-com1.serial.log",
+    "docs/evidence/settings-s13-20261014/qmp-transcript.log",
+    "docs/evidence/settings-s13-20261014/qemu-launch.json"
+  ]
+}

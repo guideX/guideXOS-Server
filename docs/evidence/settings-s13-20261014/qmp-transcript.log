@@ -1,0 +1,1429 @@
+2026-10-15T02:26:13.9416203Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:26:13.9793973Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:26:13.9842068Z RX {"return": {}}
+2026-10-15T02:26:13.9973966Z TX {"execute":"query-status"}
+2026-10-15T02:26:13.9983628Z RX {"return": {"status": "running", "running": true}}
+2026-10-15T02:26:14.0041167Z TX {"execute":"query-mice"}
+2026-10-15T02:26:14.0051666Z RX {"return": [{"index": 2, "name": "QEMU PS/2 Mouse", "current": true, "absolute": false}]}
+2026-10-15T02:26:14.0091836Z TX {"arguments":{"hold-time":120,"keys":[{"type":"qcode","data":"meta_l"}]},"execute":"send-key"}
+2026-10-15T02:26:14.0110946Z RX {"return": {}}
+2026-10-15T02:26:18.1493787Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:26:18.1999545Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:26:18.2074746Z RX {"return": {}}
+2026-10-15T02:26:18.2292296Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\start-menu-open.ppm"},"execute":"screendump"}
+2026-10-15T02:26:18.2444732Z RX {"return": {}}
+2026-10-15T02:26:25.2063834Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:26:25.2815259Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:26:25.2887661Z RX {"return": {}}
+2026-10-15T02:26:25.3091528Z TX {"arguments":{"events":[{"data":{"axis":"x","value":-24},"type":"rel"}],"device":"video0"},"execute":"input-send-event"}
+2026-10-15T02:26:25.3113980Z RX {"return": {}}
+2026-10-15T02:26:25.3937720Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\pointer-video0-step.ppm"},"execute":"screendump"}
+2026-10-15T02:26:25.4103985Z RX {"return": {}}
+2026-10-15T02:26:33.7807278Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:26:33.8123768Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:26:33.8169848Z RX {"return": {}}
+2026-10-15T02:26:33.8305569Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"value":-24,"axis":"x"}}]}}
+2026-10-15T02:26:33.8324820Z RX {"return": {}}
+2026-10-15T02:26:33.9077814Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\pointer-default-step.ppm"}}
+2026-10-15T02:26:33.9191224Z RX {"return": {}}
+2026-10-15T02:26:47.7341046Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:26:47.7725960Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:26:47.7779589Z RX {"return": {}}
+2026-10-15T02:26:47.7921105Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:47.7936457Z RX {"return": {}}
+2026-10-15T02:26:47.8716841Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:47.8731473Z RX {"return": {}}
+2026-10-15T02:26:47.9356334Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:47.9370433Z RX {"return": {}}
+2026-10-15T02:26:47.9996464Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:48.0013644Z RX {"return": {}}
+2026-10-15T02:26:48.0618015Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:48.0634979Z RX {"return": {}}
+2026-10-15T02:26:48.1247705Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:48.1263391Z RX {"return": {}}
+2026-10-15T02:26:48.1950774Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:48.1966651Z RX {"return": {}}
+2026-10-15T02:26:48.2656570Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:48.2674091Z RX {"return": {}}
+2026-10-15T02:26:48.3276238Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:48.3290574Z RX {"return": {}}
+2026-10-15T02:26:48.3905746Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:48.3920419Z RX {"return": {}}
+2026-10-15T02:26:48.4540809Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:48.4565057Z RX {"return": {}}
+2026-10-15T02:26:48.5329081Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:48.5357888Z RX {"return": {}}
+2026-10-15T02:26:48.6127136Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:48.6143986Z RX {"return": {}}
+2026-10-15T02:26:48.6757785Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:48.6773986Z RX {"return": {}}
+2026-10-15T02:26:48.7387347Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:48.7405149Z RX {"return": {}}
+2026-10-15T02:26:48.8019308Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:48.8047779Z RX {"return": {}}
+2026-10-15T02:26:48.8657580Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:48.8678261Z RX {"return": {}}
+2026-10-15T02:26:48.9287743Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:48.9305678Z RX {"return": {}}
+2026-10-15T02:26:48.9917047Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:48.9935754Z RX {"return": {}}
+2026-10-15T02:26:49.0547690Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:49.0564524Z RX {"return": {}}
+2026-10-15T02:26:49.1176817Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:49.1192896Z RX {"return": {}}
+2026-10-15T02:26:49.1817151Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:49.1833245Z RX {"return": {}}
+2026-10-15T02:26:49.2457060Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:49.2473941Z RX {"return": {}}
+2026-10-15T02:26:49.3096015Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:49.3111489Z RX {"return": {}}
+2026-10-15T02:26:49.3737423Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:49.3754030Z RX {"return": {}}
+2026-10-15T02:26:49.4366504Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:49.4384497Z RX {"return": {}}
+2026-10-15T02:26:49.4996962Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:26:49.5012879Z RX {"return": {}}
+2026-10-15T02:26:49.5627665Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\pointer-settings-row.ppm"},"execute":"screendump"}
+2026-10-15T02:26:49.5740340Z RX {"return": {}}
+2026-10-15T02:26:58.0243097Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:26:58.0630782Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:26:58.0677015Z RX {"return": {}}
+2026-10-15T02:26:58.0810731Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"x","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:26:58.0826867Z RX {"return": {}}
+2026-10-15T02:26:58.1460303Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"x","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:26:58.1477816Z RX {"return": {}}
+2026-10-15T02:26:58.2097884Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"x","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:26:58.2113386Z RX {"return": {}}
+2026-10-15T02:26:58.2738351Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"x","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:26:58.2754060Z RX {"return": {}}
+2026-10-15T02:26:58.3377830Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"x","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:26:58.3405713Z RX {"return": {}}
+2026-10-15T02:26:58.4013968Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\pointer-x5.ppm"},"execute":"screendump"}
+2026-10-15T02:26:58.4124342Z RX {"return": {}}
+2026-10-15T02:27:05.2785438Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:27:05.3111855Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:27:05.3161460Z RX {"return": {}}
+2026-10-15T02:27:05.3296812Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"button":"left","down":true},"type":"btn"}]}}
+2026-10-15T02:27:05.3313581Z RX {"return": {}}
+2026-10-15T02:27:05.4056833Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"button":"left","down":false},"type":"btn"}]}}
+2026-10-15T02:27:05.4071471Z RX {"return": {}}
+2026-10-15T02:27:05.4688009Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\settings-launch.ppm"}}
+2026-10-15T02:27:05.4803796Z RX {"return": {}}
+2026-10-15T02:27:30.3192765Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:27:30.3577785Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:27:30.3646818Z RX {"return": {}}
+2026-10-15T02:27:30.3851016Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"x","value":-24},"type":"rel"}]}}
+2026-10-15T02:27:30.3872720Z RX {"return": {}}
+2026-10-15T02:27:30.4677557Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"x","value":-24},"type":"rel"}]}}
+2026-10-15T02:27:30.4699316Z RX {"return": {}}
+2026-10-15T02:27:30.5363522Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"x","value":-24},"type":"rel"}]}}
+2026-10-15T02:27:30.5381490Z RX {"return": {}}
+2026-10-15T02:27:30.6222637Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"x","value":-24},"type":"rel"}]}}
+2026-10-15T02:27:30.6243990Z RX {"return": {}}
+2026-10-15T02:27:30.6902062Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"x","value":-24},"type":"rel"}]}}
+2026-10-15T02:27:30.6924254Z RX {"return": {}}
+2026-10-15T02:27:30.7704913Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\pointer-reposition-click.ppm"}}
+2026-10-15T02:27:30.7812168Z RX {"return": {}}
+2026-10-15T02:27:51.9985484Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:27:52.0344402Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:27:52.0411835Z RX {"return": {}}
+2026-10-15T02:27:52.0536075Z TX {"arguments":{"hold-time":120,"keys":[{"data":"meta_l","type":"qcode"}]},"execute":"send-key"}
+2026-10-15T02:27:52.0552169Z RX {"return": {}}
+2026-10-15T02:27:55.6510663Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:27:55.6801399Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:27:55.6852531Z RX {"return": {}}
+2026-10-15T02:27:55.6988498Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\start-menu-reopened-target.ppm"},"execute":"screendump"}
+2026-10-15T02:27:55.7103744Z RX {"return": {}}
+2026-10-15T02:28:03.7188717Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:28:03.7567940Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:28:03.7615503Z RX {"return": {}}
+2026-10-15T02:28:03.7756754Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"value":-1,"axis":"y"},"type":"rel"}]}}
+2026-10-15T02:28:03.7771405Z RX {"return": {}}
+2026-10-15T02:28:03.8496467Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\pointer-y-minus1.ppm"}}
+2026-10-15T02:28:03.8596751Z RX {"return": {}}
+2026-10-15T02:28:11.8648659Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:28:11.9006854Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:28:11.9054106Z RX {"return": {}}
+2026-10-15T02:28:11.9179819Z TX {"arguments":{"events":[{"data":{"value":-4,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:28:11.9195713Z RX {"return": {}}
+2026-10-15T02:28:11.9936186Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\pointer-y-minus4.ppm"},"execute":"screendump"}
+2026-10-15T02:28:12.0028352Z RX {"return": {}}
+2026-10-15T02:28:19.7899795Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:28:19.8208002Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:28:19.8252887Z RX {"return": {}}
+2026-10-15T02:28:19.8377623Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"down":true,"button":"left"},"type":"btn"},{"data":{"down":false,"button":"left"},"type":"btn"}]}}
+2026-10-15T02:28:19.8405784Z RX {"return": {}}
+2026-10-15T02:28:19.9238447Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\settings-click-combined.ppm"}}
+2026-10-15T02:28:19.9350418Z RX {"return": {}}
+2026-10-15T02:28:58.0334632Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:28:58.1015247Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:28:58.1064167Z RX {"return": {}}
+2026-10-15T02:28:58.1206838Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"down":true,"button":"left"},"type":"btn"},{"data":{"down":false,"button":"left"},"type":"btn"}],"device":"video0"}}
+2026-10-15T02:28:58.1226728Z RX {"return": {}}
+2026-10-15T02:28:58.2525625Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\settings-click-video0.ppm"}}
+2026-10-15T02:28:58.2672916Z RX {"return": {}}
+2026-10-15T02:29:13.8778973Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:29:13.9089167Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:29:13.9137705Z RX {"return": {}}
+2026-10-15T02:29:13.9266025Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"down":true,"button":"left"},"type":"btn"}]}}
+2026-10-15T02:29:13.9284275Z RX {"return": {}}
+2026-10-15T02:29:14.9172465Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:29:14.9476626Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:29:14.9523460Z RX {"return": {}}
+2026-10-15T02:29:14.9670712Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"down":false,"button":"left"},"type":"btn"}]}}
+2026-10-15T02:29:14.9686540Z RX {"return": {}}
+2026-10-15T02:29:17.4810450Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:29:17.5117921Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:29:17.5165055Z RX {"return": {}}
+2026-10-15T02:29:17.5283566Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\settings-click-hold.ppm"}}
+2026-10-15T02:29:17.5384004Z RX {"return": {}}
+2026-10-15T02:29:27.9376471Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:29:27.9772778Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:29:27.9825740Z RX {"return": {}}
+2026-10-15T02:29:27.9978409Z TX {"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":"d"}],"hold-time":120}}
+2026-10-15T02:29:27.9993094Z RX {"return": {}}
+2026-10-15T02:29:29.0956471Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:29:29.1250503Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:29:29.1296537Z RX {"return": {}}
+2026-10-15T02:29:29.1414952Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\settings-display.ppm"}}
+2026-10-15T02:29:29.1506914Z RX {"return": {}}
+2026-10-15T02:29:39.2549467Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:29:39.2921237Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:29:39.2973560Z RX {"return": {}}
+2026-10-15T02:29:39.3107396Z TX {"arguments":{"hold-time":120,"keys":[{"data":"s","type":"qcode"}]},"execute":"send-key"}
+2026-10-15T02:29:39.3122206Z RX {"return": {}}
+2026-10-15T02:29:40.4079290Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:29:40.4370801Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:29:40.4419424Z RX {"return": {}}
+2026-10-15T02:29:40.4542399Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\settings-system.ppm"},"execute":"screendump"}
+2026-10-15T02:29:40.4635223Z RX {"return": {}}
+2026-10-15T02:29:40.9941078Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:29:41.0220584Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:29:41.0267167Z RX {"return": {}}
+2026-10-15T02:29:41.0403186Z TX {"arguments":{"hold-time":120,"keys":[{"data":"a","type":"qcode"}]},"execute":"send-key"}
+2026-10-15T02:29:41.0425041Z RX {"return": {}}
+2026-10-15T02:29:42.1425646Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:29:42.1710994Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:29:42.1759888Z RX {"return": {}}
+2026-10-15T02:29:42.1880156Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\settings-about.ppm"},"execute":"screendump"}
+2026-10-15T02:29:42.1986011Z RX {"return": {}}
+2026-10-15T02:29:42.7121744Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:29:42.7421298Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:29:42.7473051Z RX {"return": {}}
+2026-10-15T02:29:42.7598878Z TX {"arguments":{"hold-time":120,"keys":[{"data":"d","type":"qcode"}]},"execute":"send-key"}
+2026-10-15T02:29:42.7616701Z RX {"return": {}}
+2026-10-15T02:29:43.8620206Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:29:43.8912760Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:29:43.8961710Z RX {"return": {}}
+2026-10-15T02:29:43.9086956Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\settings-display-return.ppm"},"execute":"screendump"}
+2026-10-15T02:29:43.9184396Z RX {"return": {}}
+2026-10-15T02:30:01.2893489Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:30:01.3311703Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:30:01.3359567Z RX {"return": {}}
+2026-10-15T02:30:01.3502249Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"x","value":-24},"type":"rel"}]}}
+2026-10-15T02:30:01.3518048Z RX {"return": {}}
+2026-10-15T02:30:01.4188612Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"x","value":-24},"type":"rel"}]}}
+2026-10-15T02:30:01.4207692Z RX {"return": {}}
+2026-10-15T02:30:01.4818649Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"x","value":-24},"type":"rel"}]}}
+2026-10-15T02:30:01.4836972Z RX {"return": {}}
+2026-10-15T02:30:01.5458408Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"x","value":-24},"type":"rel"}]}}
+2026-10-15T02:30:01.5475535Z RX {"return": {}}
+2026-10-15T02:30:01.6088241Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"x","value":-24},"type":"rel"}]}}
+2026-10-15T02:30:01.6105852Z RX {"return": {}}
+2026-10-15T02:30:01.6730239Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\settings-pointer-move1.ppm"}}
+2026-10-15T02:30:01.6857014Z RX {"return": {}}
+2026-10-15T02:30:11.8569353Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:30:11.9120981Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:30:11.9189101Z RX {"return": {}}
+2026-10-15T02:30:11.9404860Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]},"execute":"input-send-event"}
+2026-10-15T02:30:11.9442814Z RX {"return": {}}
+2026-10-15T02:30:12.0286155Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\settings-pointer-y1.ppm"},"execute":"screendump"}
+2026-10-15T02:30:12.0557113Z RX {"return": {}}
+2026-10-15T02:30:21.1407621Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:30:21.1854738Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:30:21.1906130Z RX {"return": {}}
+2026-10-15T02:30:21.2043262Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:30:21.2057780Z RX {"return": {}}
+2026-10-15T02:30:21.2810530Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:30:21.2832029Z RX {"return": {}}
+2026-10-15T02:30:21.3448286Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:30:21.3466029Z RX {"return": {}}
+2026-10-15T02:30:21.4325901Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:30:21.4344428Z RX {"return": {}}
+2026-10-15T02:30:21.5041776Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:30:21.5070647Z RX {"return": {}}
+2026-10-15T02:30:21.5679563Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:30:21.5697811Z RX {"return": {}}
+2026-10-15T02:30:21.6320107Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:30:21.6428263Z RX {"return": {}}
+2026-10-15T02:30:21.7120267Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:30:21.7138454Z RX {"return": {}}
+2026-10-15T02:30:21.7748814Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:30:21.7766160Z RX {"return": {}}
+2026-10-15T02:30:21.8379159Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:30:21.8410085Z RX {"return": {}}
+2026-10-15T02:30:21.9021720Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:30:21.9047268Z RX {"return": {}}
+2026-10-15T02:30:21.9660774Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:30:21.9678389Z RX {"return": {}}
+2026-10-15T02:30:22.0297975Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:30:22.0317462Z RX {"return": {}}
+2026-10-15T02:30:22.0927866Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:30:22.0944838Z RX {"return": {}}
+2026-10-15T02:30:22.1557581Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:30:22.1577967Z RX {"return": {}}
+2026-10-15T02:30:22.2188275Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\settings-pointer-display-row.ppm"}}
+2026-10-15T02:30:22.3683940Z RX {"return": {}}
+2026-10-15T02:30:32.5568658Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:30:32.5978890Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:30:32.6027817Z RX {"return": {}}
+2026-10-15T02:30:32.6164197Z TX {"execute":"send-key","arguments":{"hold-time":120,"keys":[{"data":"s","type":"qcode"}]}}
+2026-10-15T02:30:32.6177849Z RX {"return": {}}
+2026-10-15T02:30:32.7878849Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\settings-system-before-mouse-display.ppm"}}
+2026-10-15T02:30:32.8773133Z RX {"return": {}}
+2026-10-15T02:30:40.7297368Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:30:40.7679102Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:30:40.7727596Z RX {"return": {}}
+2026-10-15T02:30:40.7859878Z TX {"arguments":{"events":[{"data":{"button":"left","down":true},"type":"btn"}]},"execute":"input-send-event"}
+2026-10-15T02:30:40.7876166Z RX {"return": {}}
+2026-10-15T02:30:41.7866690Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:30:41.8154130Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:30:41.8203046Z RX {"return": {}}
+2026-10-15T02:30:41.8368347Z TX {"arguments":{"events":[{"data":{"button":"left","down":false},"type":"btn"}]},"execute":"input-send-event"}
+2026-10-15T02:30:41.8385951Z RX {"return": {}}
+2026-10-15T02:30:42.8241356Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:30:42.8535086Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:30:42.8581645Z RX {"return": {}}
+2026-10-15T02:30:42.8701009Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\settings-display-mouse-selected.ppm"},"execute":"screendump"}
+2026-10-15T02:30:43.0078206Z RX {"return": {}}
+2026-10-15T02:30:54.8108180Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:30:54.8476947Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:30:54.8523703Z RX {"return": {}}
+2026-10-15T02:30:54.8651968Z TX {"execute":"send-key","arguments":{"hold-time":120,"keys":[{"data":"esc","type":"qcode"}]}}
+2026-10-15T02:30:54.8666008Z RX {"return": {}}
+2026-10-15T02:30:56.1593262Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:30:56.1886167Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:30:56.1936955Z RX {"return": {}}
+2026-10-15T02:30:56.2052931Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\desktop-settings-closed.ppm"}}
+2026-10-15T02:30:56.2961526Z RX {"return": {}}
+2026-10-15T02:31:06.7925441Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:31:06.8308797Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:31:06.8357070Z RX {"return": {}}
+2026-10-15T02:31:06.8491723Z TX {"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":"meta_l"}],"hold-time":120}}
+2026-10-15T02:31:06.8506962Z RX {"return": {}}
+2026-10-15T02:31:10.4495184Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:31:10.4774493Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:31:10.4818384Z RX {"return": {}}
+2026-10-15T02:31:10.4981204Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\start-menu-reopen.ppm"}}
+2026-10-15T02:31:10.6452195Z RX {"return": {}}
+2026-10-15T02:31:20.4123794Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:31:20.4447686Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:31:20.4504037Z RX {"return": {}}
+2026-10-15T02:31:20.4635109Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"x","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:31:20.4649692Z RX {"return": {}}
+2026-10-15T02:31:20.5469445Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"x","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:31:20.5487248Z RX {"return": {}}
+2026-10-15T02:31:20.6098791Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"x","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:31:20.6116023Z RX {"return": {}}
+2026-10-15T02:31:20.6738432Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"x","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:31:20.6756154Z RX {"return": {}}
+2026-10-15T02:31:20.7528120Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"x","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:31:20.7545690Z RX {"return": {}}
+2026-10-15T02:31:20.8324477Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"x","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:31:20.8342911Z RX {"return": {}}
+2026-10-15T02:31:20.8949203Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:31:20.9067839Z RX {"return": {}}
+2026-10-15T02:31:20.9739354Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:31:20.9755866Z RX {"return": {}}
+2026-10-15T02:31:21.0379457Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:31:21.0396687Z RX {"return": {}}
+2026-10-15T02:31:21.1010449Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:31:21.1029489Z RX {"return": {}}
+2026-10-15T02:31:21.1639300Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:31:21.1657932Z RX {"return": {}}
+2026-10-15T02:31:21.2279933Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:31:21.2296601Z RX {"return": {}}
+2026-10-15T02:31:21.2918271Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:31:21.2940587Z RX {"return": {}}
+2026-10-15T02:31:21.3558811Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:31:21.3578462Z RX {"return": {}}
+2026-10-15T02:31:21.4190766Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:31:21.4211705Z RX {"return": {}}
+2026-10-15T02:31:21.4827642Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:31:21.4844348Z RX {"return": {}}
+2026-10-15T02:31:21.5457774Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:31:21.5475365Z RX {"return": {}}
+2026-10-15T02:31:21.6097248Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:31:21.6121448Z RX {"return": {}}
+2026-10-15T02:31:21.6897285Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\pointer-reopen-settings-row.ppm"},"execute":"screendump"}
+2026-10-15T02:31:21.8190218Z RX {"return": {}}
+2026-10-15T02:31:28.6086616Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:31:28.6395783Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:31:28.6450151Z RX {"return": {}}
+2026-10-15T02:31:28.6592210Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:31:28.6608099Z RX {"return": {}}
+2026-10-15T02:31:28.7367749Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:31:28.7383290Z RX {"return": {}}
+2026-10-15T02:31:28.8008292Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\pointer-reopen-settings-row2.ppm"}}
+2026-10-15T02:31:28.8141581Z RX {"return": {}}
+2026-10-15T02:31:35.3989198Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:31:35.4307983Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:31:35.4353114Z RX {"return": {}}
+2026-10-15T02:31:35.4483019Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:31:35.4498787Z RX {"return": {}}
+2026-10-15T02:31:35.5258709Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:31:35.5274810Z RX {"return": {}}
+2026-10-15T02:31:35.5888035Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\pointer-reopen-settings-row3.ppm"}}
+2026-10-15T02:31:35.6921445Z RX {"return": {}}
+2026-10-15T02:31:44.0054109Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:31:44.0434650Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:31:44.0483734Z RX {"return": {}}
+2026-10-15T02:31:44.0611261Z TX {"arguments":{"events":[{"data":{"down":true,"button":"left"},"type":"btn"}]},"execute":"input-send-event"}
+2026-10-15T02:31:44.0628523Z RX {"return": {}}
+2026-10-15T02:31:45.0787414Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:31:45.1068942Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:31:45.1112726Z RX {"return": {}}
+2026-10-15T02:31:45.1234319Z TX {"arguments":{"events":[{"data":{"down":false,"button":"left"},"type":"btn"}]},"execute":"input-send-event"}
+2026-10-15T02:31:45.1248869Z RX {"return": {}}
+2026-10-15T02:31:46.1101262Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:31:46.1389196Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:31:46.1436597Z RX {"return": {}}
+2026-10-15T02:31:46.1558129Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\settings-reopened.ppm"},"execute":"screendump"}
+2026-10-15T02:31:46.2190703Z RX {"return": {}}
+2026-10-15T02:32:08.0589816Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:32:08.0957323Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:32:18.6110372Z RX {"return": {}}
+2026-10-15T02:32:18.6315598Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:32:18.6337276Z RX {"return": {}}
+2026-10-15T02:32:18.6989527Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:32:18.9145655Z RX {"return": {}}
+2026-10-15T02:32:18.9839736Z TX {"arguments":{"events":[{"data":{"value":-4,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:32:19.2242524Z RX {"return": {}}
+2026-10-15T02:32:19.2998053Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\pointer-reopen-settings-aligned.ppm"},"execute":"screendump"}
+2026-10-15T02:32:19.5460641Z RX {"return": {}}
+2026-10-15T02:32:34.0413917Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:32:34.0781688Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:32:34.0828723Z RX {"return": {}}
+2026-10-15T02:32:34.0963615Z TX {"execute":"send-key","arguments":{"hold-time":120,"keys":[{"type":"qcode","data":"meta_l"}]}}
+2026-10-15T02:32:34.0978276Z RX {"return": {}}
+2026-10-15T02:32:38.2999465Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:32:38.3505361Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:32:38.3578845Z RX {"return": {}}
+2026-10-15T02:32:38.3764220Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\start-menu-reopen-second.ppm"}}
+2026-10-15T02:32:38.3937442Z RX {"return": {}}
+2026-10-15T02:32:48.7435730Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:32:48.7759336Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:32:48.7814430Z RX {"return": {}}
+2026-10-15T02:32:48.7944241Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"down":true,"button":"left"},"type":"btn"}]}}
+2026-10-15T02:32:48.7960534Z RX {"return": {}}
+2026-10-15T02:32:49.8152230Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:32:49.8440317Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:32:49.8489646Z RX {"return": {}}
+2026-10-15T02:32:49.8619256Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"down":false,"button":"left"},"type":"btn"}]}}
+2026-10-15T02:32:49.8635022Z RX {"return": {}}
+2026-10-15T02:32:50.8644755Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:32:50.8927773Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:32:50.8973477Z RX {"return": {}}
+2026-10-15T02:32:50.9090385Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\settings-reopened-second.ppm"}}
+2026-10-15T02:32:50.9190996Z RX {"return": {}}
+2026-10-15T02:33:46.6169137Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:33:46.6264768Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:33:46.6323324Z RX {"return": {}}
+2026-10-15T02:33:46.6445899Z TX {"execute":"send-key","arguments":{"keys":[{"data":"d","type":"qcode"}],"hold-time":120}}
+2026-10-15T02:33:46.6459801Z RX {"return": {}}
+2026-10-15T02:33:46.8208212Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\settings-display-reopened.ppm"}}
+2026-10-15T02:33:46.8307052Z RX {"return": {}}
+2026-10-15T02:34:03.4499680Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:34:03.4583708Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:34:03.4630663Z RX {"return": {}}
+2026-10-15T02:34:03.4747471Z TX {"arguments":{"keys":[{"type":"qcode","data":"esc"}],"hold-time":120},"execute":"send-key"}
+2026-10-15T02:34:03.4762762Z RX {"return": {}}
+2026-10-15T02:34:03.6568243Z TX {"arguments":{"keys":[{"type":"qcode","data":"meta_l"}],"hold-time":120},"execute":"send-key"}
+2026-10-15T02:34:03.6583288Z RX {"return": {}}
+2026-10-15T02:34:03.8298002Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-start-menu.ppm"},"execute":"screendump"}
+2026-10-15T02:34:03.8392342Z RX {"return": {}}
+2026-10-15T02:34:08.9972150Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:34:09.0040476Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:34:09.0084978Z RX {"return": {}}
+2026-10-15T02:34:09.0200753Z TX {"execute":"send-key","arguments":{"hold-time":120,"keys":[{"data":"meta_l","type":"qcode"}]}}
+2026-10-15T02:34:09.0215640Z RX {"return": {}}
+2026-10-15T02:34:09.1949111Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-start-menu-open.ppm"}}
+2026-10-15T02:34:09.2057591Z RX {"return": {}}
+2026-10-15T02:34:23.2177304Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:34:23.2271138Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:34:23.2321072Z RX {"return": {}}
+2026-10-15T02:34:23.2445455Z TX {"arguments":{"keys":[{"type":"qcode","data":"meta_l"}],"hold-time":120},"execute":"send-key"}
+2026-10-15T02:34:23.2459700Z RX {"return": {}}
+2026-10-15T02:34:24.1381320Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:34:24.1395869Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:34:24.1407093Z RX {"return": {}}
+2026-10-15T02:34:24.1425347Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-start-menu-open2.ppm"},"execute":"screendump"}
+2026-10-15T02:34:24.1625877Z RX {"return": {}}
+2026-10-15T02:34:29.3479386Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:34:29.3577578Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:34:29.3621412Z RX {"return": {}}
+2026-10-15T02:34:29.3747394Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-1}}]},"execute":"input-send-event"}
+2026-10-15T02:34:29.3762234Z RX {"return": {}}
+2026-10-15T02:34:29.4537804Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-pointer-target.ppm"},"execute":"screendump"}
+2026-10-15T02:34:29.4631732Z RX {"return": {}}
+2026-10-15T02:34:40.1085647Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:34:40.1168739Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:34:40.1213451Z RX {"return": {}}
+2026-10-15T02:34:40.1335249Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]}}
+2026-10-15T02:34:40.1350384Z RX {"return": {}}
+2026-10-15T02:34:40.2047775Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-pointer-target2.ppm"}}
+2026-10-15T02:34:40.2149243Z RX {"return": {}}
+2026-10-15T02:35:38.1832898Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:35:38.1929092Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:35:38.1973139Z RX {"return": {}}
+2026-10-15T02:35:38.2112806Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"x","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:35:38.2128827Z RX {"return": {}}
+2026-10-15T02:35:38.2967737Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-pointer-x-test.ppm"},"execute":"screendump"}
+2026-10-15T02:35:38.3064345Z RX {"return": {}}
+2026-10-15T02:35:48.4263247Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:35:48.4356136Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:35:48.4398844Z RX {"return": {}}
+2026-10-15T02:35:48.4518131Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"button":"left","down":true},"type":"btn"}]}}
+2026-10-15T02:35:48.4532589Z RX {"return": {}}
+2026-10-15T02:35:49.1402570Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:35:49.1416553Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:35:49.1427574Z RX {"return": {}}
+2026-10-15T02:35:49.1446570Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"button":"left","down":false},"type":"btn"}]}}
+2026-10-15T02:35:49.1564115Z RX {"return": {}}
+2026-10-15T02:35:50.0292385Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:35:50.0301884Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:35:50.0312700Z RX {"return": {}}
+2026-10-15T02:35:50.0332901Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-open-s13.ppm"}}
+2026-10-15T02:35:50.0429145Z RX {"return": {}}
+2026-10-15T02:36:05.5670474Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:36:05.5735479Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:36:05.5785348Z RX {"return": {}}
+2026-10-15T02:36:05.5927385Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:36:05.5943078Z RX {"return": {}}
+2026-10-15T02:36:05.6627898Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:36:05.6643839Z RX {"return": {}}
+2026-10-15T02:36:05.7268329Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:36:05.7285668Z RX {"return": {}}
+2026-10-15T02:36:05.7897107Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:36:05.8006528Z RX {"return": {}}
+2026-10-15T02:36:05.8687749Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:36:05.8703639Z RX {"return": {}}
+2026-10-15T02:36:05.9316561Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:36:05.9333587Z RX {"return": {}}
+2026-10-15T02:36:05.9952277Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:36:05.9974177Z RX {"return": {}}
+2026-10-15T02:36:06.0590252Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:36:06.0609192Z RX {"return": {}}
+2026-10-15T02:36:06.1228097Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:36:06.1245263Z RX {"return": {}}
+2026-10-15T02:36:06.1867303Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:36:06.1884571Z RX {"return": {}}
+2026-10-15T02:36:06.2507915Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:36:06.2526244Z RX {"return": {}}
+2026-10-15T02:36:06.3138750Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:36:06.3156574Z RX {"return": {}}
+2026-10-15T02:36:06.3937618Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:36:06.3955034Z RX {"return": {}}
+2026-10-15T02:36:06.4578157Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-display-pointer.ppm"}}
+2026-10-15T02:36:06.4693306Z RX {"return": {}}
+2026-10-15T02:36:20.4226930Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:36:20.4396573Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:36:20.4468023Z RX {"return": {}}
+2026-10-15T02:36:20.4656743Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]}}
+2026-10-15T02:36:20.4677713Z RX {"return": {}}
+2026-10-15T02:36:20.5447635Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]}}
+2026-10-15T02:36:20.5467909Z RX {"return": {}}
+2026-10-15T02:36:20.6089905Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]}}
+2026-10-15T02:36:20.6110700Z RX {"return": {}}
+2026-10-15T02:36:20.6888015Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]}}
+2026-10-15T02:36:20.7035151Z RX {"return": {}}
+2026-10-15T02:36:20.7839087Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]}}
+2026-10-15T02:36:20.7861330Z RX {"return": {}}
+2026-10-15T02:36:20.8477176Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]}}
+2026-10-15T02:36:20.8513183Z RX {"return": {}}
+2026-10-15T02:36:20.9272111Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]}}
+2026-10-15T02:36:20.9302962Z RX {"return": {}}
+2026-10-15T02:36:20.9892587Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]}}
+2026-10-15T02:36:20.9928869Z RX {"return": {}}
+2026-10-15T02:36:21.0529068Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]}}
+2026-10-15T02:36:21.0552169Z RX {"return": {}}
+2026-10-15T02:36:21.1160413Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]}}
+2026-10-15T02:36:21.1179709Z RX {"return": {}}
+2026-10-15T02:36:21.1778349Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]}}
+2026-10-15T02:36:21.1797104Z RX {"return": {}}
+2026-10-15T02:36:21.2418949Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]}}
+2026-10-15T02:36:21.2443001Z RX {"return": {}}
+2026-10-15T02:36:21.3059262Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]}}
+2026-10-15T02:36:21.3080991Z RX {"return": {}}
+2026-10-15T02:36:21.3678533Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"value":-1200,"axis":"y"},"type":"rel"}]}}
+2026-10-15T02:36:21.3700491Z RX {"return": {}}
+2026-10-15T02:36:21.4337621Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-display-pointer2.ppm"}}
+2026-10-15T02:36:21.4455087Z RX {"return": {}}
+2026-10-15T02:36:28.9094263Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:36:28.9162828Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:36:28.9208086Z RX {"return": {}}
+2026-10-15T02:36:28.9321353Z TX {"arguments":{"events":[{"data":{"axis":"y","value":-1200},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:36:28.9338906Z RX {"return": {}}
+2026-10-15T02:36:29.0047345Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-display-pointer3.ppm"},"execute":"screendump"}
+2026-10-15T02:36:29.0140040Z RX {"return": {}}
+2026-10-15T02:36:37.5068634Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:36:37.5133196Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:36:37.5177519Z RX {"return": {}}
+2026-10-15T02:36:37.5291862Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"y","value":300}}]},"execute":"input-send-event"}
+2026-10-15T02:36:37.5306829Z RX {"return": {}}
+2026-10-15T02:36:37.6126540Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-display-pointer4.ppm"},"execute":"screendump"}
+2026-10-15T02:36:37.6229966Z RX {"return": {}}
+2026-10-15T02:36:54.8837927Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:36:54.8930385Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:36:54.8976643Z RX {"return": {}}
+2026-10-15T02:36:54.9104188Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":-100},"type":"rel"}]}}
+2026-10-15T02:36:54.9119434Z RX {"return": {}}
+2026-10-15T02:36:54.9766668Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-display-pointer5.ppm"}}
+2026-10-15T02:36:54.9861623Z RX {"return": {}}
+2026-10-15T02:37:08.8961612Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:37:08.9026854Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:37:08.9070060Z RX {"return": {}}
+2026-10-15T02:37:08.9191036Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:08.9205136Z RX {"return": {}}
+2026-10-15T02:37:09.0026843Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:09.0041314Z RX {"return": {}}
+2026-10-15T02:37:09.0818204Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:09.0850721Z RX {"return": {}}
+2026-10-15T02:37:09.1456665Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:09.1471754Z RX {"return": {}}
+2026-10-15T02:37:09.2097070Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:09.2117845Z RX {"return": {}}
+2026-10-15T02:37:09.2727624Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:09.2747833Z RX {"return": {}}
+2026-10-15T02:37:09.3363963Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:09.3392714Z RX {"return": {}}
+2026-10-15T02:37:09.4001984Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:09.4033867Z RX {"return": {}}
+2026-10-15T02:37:09.4639248Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:09.4660325Z RX {"return": {}}
+2026-10-15T02:37:09.5269804Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:09.5290167Z RX {"return": {}}
+2026-10-15T02:37:09.5908169Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:09.5926288Z RX {"return": {}}
+2026-10-15T02:37:09.6548123Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:09.6569185Z RX {"return": {}}
+2026-10-15T02:37:09.7176817Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:09.7195395Z RX {"return": {}}
+2026-10-15T02:37:09.7819339Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:09.7838859Z RX {"return": {}}
+2026-10-15T02:37:09.8458000Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:09.8476138Z RX {"return": {}}
+2026-10-15T02:37:09.9256578Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:09.9272983Z RX {"return": {}}
+2026-10-15T02:37:10.0037235Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:10.0052857Z RX {"return": {}}
+2026-10-15T02:37:10.0666830Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:10.0687242Z RX {"return": {}}
+2026-10-15T02:37:10.1306588Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:10.1324245Z RX {"return": {}}
+2026-10-15T02:37:10.1947751Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:10.1964144Z RX {"return": {}}
+2026-10-15T02:37:10.2589135Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:10.2604826Z RX {"return": {}}
+2026-10-15T02:37:10.3227841Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:10.3244939Z RX {"return": {}}
+2026-10-15T02:37:10.3857442Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:10.3873149Z RX {"return": {}}
+2026-10-15T02:37:10.4496912Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:10.4520968Z RX {"return": {}}
+2026-10-15T02:37:10.5138054Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:10.5157116Z RX {"return": {}}
+2026-10-15T02:37:10.5767424Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:10.5783829Z RX {"return": {}}
+2026-10-15T02:37:10.6396190Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:10.6410231Z RX {"return": {}}
+2026-10-15T02:37:10.7036534Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:10.7050825Z RX {"return": {}}
+2026-10-15T02:37:10.7677833Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:10.7694495Z RX {"return": {}}
+2026-10-15T02:37:10.8478691Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:10.8500948Z RX {"return": {}}
+2026-10-15T02:37:10.9118817Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:10.9136008Z RX {"return": {}}
+2026-10-15T02:37:10.9748256Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:10.9764918Z RX {"return": {}}
+2026-10-15T02:37:11.0388888Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:11.0404662Z RX {"return": {}}
+2026-10-15T02:37:11.1027494Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:11.1043841Z RX {"return": {}}
+2026-10-15T02:37:11.1670962Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:11.1689237Z RX {"return": {}}
+2026-10-15T02:37:11.2300022Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:11.2316914Z RX {"return": {}}
+2026-10-15T02:37:11.3097116Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:11.3115095Z RX {"return": {}}
+2026-10-15T02:37:11.3726523Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:11.3741253Z RX {"return": {}}
+2026-10-15T02:37:11.4367007Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:11.4383173Z RX {"return": {}}
+2026-10-15T02:37:11.5007719Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:11.5025739Z RX {"return": {}}
+2026-10-15T02:37:11.5638718Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:11.5656692Z RX {"return": {}}
+2026-10-15T02:37:11.6416111Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:11.6429324Z RX {"return": {}}
+2026-10-15T02:37:11.7056222Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:11.7071807Z RX {"return": {}}
+2026-10-15T02:37:11.7696436Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:11.7711211Z RX {"return": {}}
+2026-10-15T02:37:11.8338974Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:11.8356679Z RX {"return": {}}
+2026-10-15T02:37:11.8968315Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:11.8984900Z RX {"return": {}}
+2026-10-15T02:37:11.9606613Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:11.9622637Z RX {"return": {}}
+2026-10-15T02:37:12.0235856Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:12.0252866Z RX {"return": {}}
+2026-10-15T02:37:12.0868206Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:12.0893960Z RX {"return": {}}
+2026-10-15T02:37:12.1495923Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:12.1518747Z RX {"return": {}}
+2026-10-15T02:37:12.2125540Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:12.2138978Z RX {"return": {}}
+2026-10-15T02:37:12.2756315Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:12.2771549Z RX {"return": {}}
+2026-10-15T02:37:12.3386102Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:12.3403163Z RX {"return": {}}
+2026-10-15T02:37:12.4025527Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:12.4042617Z RX {"return": {}}
+2026-10-15T02:37:12.4669095Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:12.4685364Z RX {"return": {}}
+2026-10-15T02:37:12.5294793Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:12.5307597Z RX {"return": {}}
+2026-10-15T02:37:12.5924981Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:12.5939752Z RX {"return": {}}
+2026-10-15T02:37:12.6565534Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:12.6579699Z RX {"return": {}}
+2026-10-15T02:37:12.7205936Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:12.7219598Z RX {"return": {}}
+2026-10-15T02:37:12.8005429Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:12.8027132Z RX {"return": {}}
+2026-10-15T02:37:12.8635281Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:12.8648790Z RX {"return": {}}
+2026-10-15T02:37:12.9255472Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:12.9269450Z RX {"return": {}}
+2026-10-15T02:37:12.9895225Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:12.9908853Z RX {"return": {}}
+2026-10-15T02:37:13.0534821Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:13.0547470Z RX {"return": {}}
+2026-10-15T02:37:13.1165571Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:13.1191136Z RX {"return": {}}
+2026-10-15T02:37:13.1805275Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:13.1821029Z RX {"return": {}}
+2026-10-15T02:37:13.2434928Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:13.2448076Z RX {"return": {}}
+2026-10-15T02:37:13.3074668Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:13.3090170Z RX {"return": {}}
+2026-10-15T02:37:13.3715317Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:13.3728888Z RX {"return": {}}
+2026-10-15T02:37:13.4355814Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:13.4370166Z RX {"return": {}}
+2026-10-15T02:37:13.4995154Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:13.5019256Z RX {"return": {}}
+2026-10-15T02:37:13.5605703Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:13.5620679Z RX {"return": {}}
+2026-10-15T02:37:13.6244973Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:13.6261972Z RX {"return": {}}
+2026-10-15T02:37:13.6884081Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:13.6897379Z RX {"return": {}}
+2026-10-15T02:37:13.7524035Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"y","value":24},"type":"rel"}]}}
+2026-10-15T02:37:13.7541243Z RX {"return": {}}
+2026-10-15T02:37:13.8164554Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-display-pointer6.ppm"}}
+2026-10-15T02:37:13.8262313Z RX {"return": {}}
+2026-10-15T02:37:29.3909204Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:37:29.4096867Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:37:29.4171509Z RX {"return": {}}
+2026-10-15T02:37:29.4371801Z TX {"arguments":{"command-line":"help mouse_move"},"execute":"human-monitor-command"}
+2026-10-15T02:37:29.4392176Z RX {"return": "mouse_move dx dy [dz] -- send mouse move events\r\n"}
+2026-10-15T02:37:29.4493663Z TX {"arguments":{"command-line":"info mice"},"execute":"human-monitor-command"}
+2026-10-15T02:37:29.4523716Z RX {"return": "* Mouse #2: QEMU PS/2 Mouse\r\n"}
+2026-10-15T02:37:34.5465446Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:37:34.5568784Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:37:34.5651961Z RX {"return": {}}
+2026-10-15T02:37:34.5822299Z TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 -200"}}
+2026-10-15T02:37:34.5841516Z RX {"return": ""}
+2026-10-15T02:37:34.5926994Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-display-pointer-hmp.ppm"}}
+2026-10-15T02:37:34.6799816Z RX {"return": {}}
+2026-10-15T02:37:42.5102375Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:37:42.5168814Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:37:42.5216079Z RX {"return": {}}
+2026-10-15T02:37:42.5331017Z TX {"arguments":{"command-line":"mouse_move 0 300"},"execute":"human-monitor-command"}
+2026-10-15T02:37:42.5358279Z RX {"return": ""}
+2026-10-15T02:37:42.5413386Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-display-pointer-hmp2.ppm"},"execute":"screendump"}
+2026-10-15T02:37:42.5951446Z RX {"return": {}}
+2026-10-15T02:37:48.9146687Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:37:48.9230438Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:37:48.9275496Z RX {"return": {}}
+2026-10-15T02:37:48.9390132Z TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 -50"}}
+2026-10-15T02:37:48.9403203Z RX {"return": ""}
+2026-10-15T02:37:48.9451303Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-display-pointer-hmp3.ppm"}}
+2026-10-15T02:37:48.9547687Z RX {"return": {}}
+2026-10-15T02:38:11.6754273Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:38:11.6848977Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:38:11.6893223Z RX {"return": {}}
+2026-10-15T02:38:11.7015016Z TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 50"}}
+2026-10-15T02:38:11.7039385Z RX {"return": ""}
+2026-10-15T02:38:11.7112188Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-display-pointer-hmp4.ppm"}}
+2026-10-15T02:38:11.7213406Z RX {"return": {}}
+2026-10-15T02:38:23.2713775Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:38:23.2789102Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:38:23.2835215Z RX {"return": {}}
+2026-10-15T02:38:23.2957479Z TX {"arguments":{"events":[{"data":{"value":12400,"axis":"x"},"type":"abs"},{"data":{"value":14336,"axis":"y"},"type":"abs"}]},"execute":"input-send-event"}
+2026-10-15T02:38:23.2976263Z RX {"error": {"class": "GenericError", "desc": "Input handler not found for event type abs"}}
+2026-10-15T02:38:40.9439076Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:38:40.9530440Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:38:40.9577624Z RX {"return": {}}
+2026-10-15T02:38:40.9695563Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"x","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:38:40.9710831Z RX {"return": {}}
+2026-10-15T02:38:41.0468064Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-display-pointer-reset1.ppm"},"execute":"screendump"}
+2026-10-15T02:38:41.0807191Z RX {"return": {}}
+2026-10-15T02:39:00.4286430Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:39:00.4424510Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:39:00.4500909Z RX {"return": {}}
+2026-10-15T02:39:00.5066072Z TX {"arguments":{"command-line":"mouse_move 0 -400"},"execute":"human-monitor-command"}
+2026-10-15T02:39:00.5086537Z RX {"return": ""}
+2026-10-15T02:39:00.5174554Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-display-pointer-hmp5.ppm"},"execute":"screendump"}
+2026-10-15T02:39:00.5330183Z RX {"return": {}}
+2026-10-15T02:39:08.0040881Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:39:08.0106988Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:39:08.0157209Z RX {"return": {}}
+2026-10-15T02:39:08.0268948Z TX {"arguments":{"command-line":"mouse_move 0 -400"},"execute":"human-monitor-command"}
+2026-10-15T02:39:08.0285191Z RX {"return": ""}
+2026-10-15T02:39:08.0339897Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-display-pointer-hmp6.ppm"},"execute":"screendump"}
+2026-10-15T02:39:08.0451988Z RX {"return": {}}
+2026-10-15T02:39:14.8242426Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:39:14.8324536Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:39:14.8374578Z RX {"return": {}}
+2026-10-15T02:39:14.8489186Z TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 -180"}}
+2026-10-15T02:39:14.8503830Z RX {"return": ""}
+2026-10-15T02:39:14.8567371Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-display-pointer-hmp7.ppm"}}
+2026-10-15T02:39:14.9840003Z RX {"return": {}}
+2026-10-15T02:39:22.0558841Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:39:22.0677646Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:39:22.0728070Z RX {"return": {}}
+2026-10-15T02:39:22.0887495Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"down":true,"button":"left"},"type":"btn"}]}}
+2026-10-15T02:39:22.0910540Z RX {"return": {}}
+2026-10-15T02:39:22.7891795Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:39:22.7907585Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:39:22.7920475Z RX {"return": {}}
+2026-10-15T02:39:22.7946803Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"down":false,"button":"left"},"type":"btn"}]}}
+2026-10-15T02:39:22.8066664Z RX {"return": {}}
+2026-10-15T02:39:23.6971210Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:39:23.6979876Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:39:23.6990691Z RX {"return": {}}
+2026-10-15T02:39:23.7008154Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\display-options-open-s13.ppm"}}
+2026-10-15T02:39:23.7464302Z RX {"return": {}}
+2026-10-15T02:39:36.2642237Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:39:36.2740721Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:39:36.2783650Z RX {"return": {}}
+2026-10-15T02:39:36.2902497Z TX {"arguments":{"command-line":"mouse_move -900 -700"},"execute":"human-monitor-command"}
+2026-10-15T02:39:36.2915755Z RX {"return": ""}
+2026-10-15T02:39:36.2988824Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\display-options-tab-pointer.ppm"},"execute":"screendump"}
+2026-10-15T02:39:36.3083108Z RX {"return": {}}
+2026-10-15T02:39:55.3794566Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:39:55.3884749Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:39:55.3932232Z RX {"return": {}}
+2026-10-15T02:39:55.4064655Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:55.4080045Z RX {"return": {}}
+2026-10-15T02:39:55.4748175Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:55.4767712Z RX {"return": {}}
+2026-10-15T02:39:55.5387309Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:55.5497231Z RX {"return": {}}
+2026-10-15T02:39:55.6188318Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:55.6204931Z RX {"return": {}}
+2026-10-15T02:39:55.6829069Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:55.6857229Z RX {"return": {}}
+2026-10-15T02:39:55.7471858Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:55.7494933Z RX {"return": {}}
+2026-10-15T02:39:55.8088411Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:55.8106311Z RX {"return": {}}
+2026-10-15T02:39:55.8721046Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:55.8738416Z RX {"return": {}}
+2026-10-15T02:39:55.9359492Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:55.9378567Z RX {"return": {}}
+2026-10-15T02:39:55.9987531Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:56.0003268Z RX {"return": {}}
+2026-10-15T02:39:56.0618630Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:56.0635749Z RX {"return": {}}
+2026-10-15T02:39:56.1249326Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:56.1267153Z RX {"return": {}}
+2026-10-15T02:39:56.1878278Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:56.1896059Z RX {"return": {}}
+2026-10-15T02:39:56.2518496Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:56.2548973Z RX {"return": {}}
+2026-10-15T02:39:56.3306755Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:56.3326955Z RX {"return": {}}
+2026-10-15T02:39:56.4097477Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:56.4118781Z RX {"return": {}}
+2026-10-15T02:39:56.4727797Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:56.4744285Z RX {"return": {}}
+2026-10-15T02:39:56.5369498Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:56.5391363Z RX {"return": {}}
+2026-10-15T02:39:56.6006813Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:56.6042464Z RX {"return": {}}
+2026-10-15T02:39:56.6636985Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:56.6653024Z RX {"return": {}}
+2026-10-15T02:39:56.7269571Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:56.7287978Z RX {"return": {}}
+2026-10-15T02:39:56.7898207Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:56.7914896Z RX {"return": {}}
+2026-10-15T02:39:56.8538737Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:56.8563936Z RX {"return": {}}
+2026-10-15T02:39:56.9177306Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:56.9193481Z RX {"return": {}}
+2026-10-15T02:39:56.9817535Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:56.9836344Z RX {"return": {}}
+2026-10-15T02:39:57.0437934Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:57.0453992Z RX {"return": {}}
+2026-10-15T02:39:57.1067897Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:57.1084856Z RX {"return": {}}
+2026-10-15T02:39:57.1708704Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:57.1729173Z RX {"return": {}}
+2026-10-15T02:39:57.2347980Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:39:57.2372380Z RX {"return": {}}
+2026-10-15T02:39:57.3146328Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\display-options-tab-pointer2.ppm"},"execute":"screendump"}
+2026-10-15T02:39:57.3257664Z RX {"return": {}}
+2026-10-15T02:40:10.4044593Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:40:10.4138758Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:40:10.4228397Z RX {"return": {}}
+2026-10-15T02:40:10.4396547Z TX {"arguments":{"events":[{"data":{"button":"left","down":true},"type":"btn"}]},"execute":"input-send-event"}
+2026-10-15T02:40:10.4421402Z RX {"return": {}}
+2026-10-15T02:40:11.1660695Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:40:11.1734422Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:40:11.1750518Z RX {"return": {}}
+2026-10-15T02:40:11.1783544Z TX {"arguments":{"events":[{"data":{"button":"left","down":false},"type":"btn"}]},"execute":"input-send-event"}
+2026-10-15T02:40:11.1930407Z RX {"return": {}}
+2026-10-15T02:40:11.9074487Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:40:11.9087560Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:40:11.9139171Z RX {"return": {}}
+2026-10-15T02:40:11.9176124Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\display-options-backgrounds-tab.ppm"},"execute":"screendump"}
+2026-10-15T02:40:11.9334531Z RX {"return": {}}
+2026-10-15T02:40:37.8152967Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:40:37.8256387Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:40:37.8303562Z RX {"return": {}}
+2026-10-15T02:40:37.8424954Z TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 -50"}}
+2026-10-15T02:40:37.8438407Z RX {"return": ""}
+2026-10-15T02:40:37.8507184Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\display-options-tab-pointer3.ppm"}}
+2026-10-15T02:40:37.8617681Z RX {"return": {}}
+2026-10-15T02:40:48.7726285Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:40:48.7822252Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:40:48.7868903Z RX {"return": {}}
+2026-10-15T02:40:48.7994038Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"value":-24,"axis":"x"}}]}}
+2026-10-15T02:40:48.8012773Z RX {"return": {}}
+2026-10-15T02:40:48.8666458Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\display-options-tab-pointer-xstep.ppm"}}
+2026-10-15T02:40:48.8764529Z RX {"return": {}}
+2026-10-15T02:40:57.7747542Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:40:57.7842331Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:40:57.7889108Z RX {"return": {}}
+2026-10-15T02:40:57.8018401Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:40:57.8034345Z RX {"return": {}}
+2026-10-15T02:40:57.8774786Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:40:57.8793080Z RX {"return": {}}
+2026-10-15T02:40:57.9565332Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:40:57.9581670Z RX {"return": {}}
+2026-10-15T02:40:58.0354653Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:40:58.0370475Z RX {"return": {}}
+2026-10-15T02:40:58.0994567Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:40:58.1010680Z RX {"return": {}}
+2026-10-15T02:40:58.1707759Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:40:58.1727017Z RX {"return": {}}
+2026-10-15T02:40:58.2269087Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:40:58.2296111Z RX {"return": {}}
+2026-10-15T02:40:58.2905482Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:40:58.2923214Z RX {"return": {}}
+2026-10-15T02:40:58.3535763Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:40:58.3564751Z RX {"return": {}}
+2026-10-15T02:40:58.4165127Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:40:58.4183115Z RX {"return": {}}
+2026-10-15T02:40:58.4805852Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:40:58.4823942Z RX {"return": {}}
+2026-10-15T02:40:58.5434903Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:40:58.5453082Z RX {"return": {}}
+2026-10-15T02:40:58.6074646Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:40:58.6092301Z RX {"return": {}}
+2026-10-15T02:40:58.6715814Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:40:58.6734744Z RX {"return": {}}
+2026-10-15T02:40:58.7334554Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:40:58.7362759Z RX {"return": {}}
+2026-10-15T02:40:58.7964663Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:40:58.7983378Z RX {"return": {}}
+2026-10-15T02:40:58.8594477Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:40:58.8612619Z RX {"return": {}}
+2026-10-15T02:40:58.9234001Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:40:58.9251915Z RX {"return": {}}
+2026-10-15T02:40:59.0025950Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:40:59.0047822Z RX {"return": {}}
+2026-10-15T02:40:59.0805735Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:40:59.0843789Z RX {"return": {}}
+2026-10-15T02:40:59.1606596Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:40:59.1624153Z RX {"return": {}}
+2026-10-15T02:40:59.2243813Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:40:59.2260304Z RX {"return": {}}
+2026-10-15T02:40:59.2874416Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:40:59.2892366Z RX {"return": {}}
+2026-10-15T02:40:59.3513393Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:40:59.3530991Z RX {"return": {}}
+2026-10-15T02:40:59.4144688Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:40:59.4159658Z RX {"return": {}}
+2026-10-15T02:40:59.4774042Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:40:59.4789949Z RX {"return": {}}
+2026-10-15T02:40:59.5413804Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:40:59.5429529Z RX {"return": {}}
+2026-10-15T02:40:59.6044322Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:40:59.6064374Z RX {"return": {}}
+2026-10-15T02:40:59.6683379Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:40:59.6698565Z RX {"return": {}}
+2026-10-15T02:40:59.7315122Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:40:59.7334084Z RX {"return": {}}
+2026-10-15T02:40:59.7943469Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:40:59.7958040Z RX {"return": {}}
+2026-10-15T02:40:59.8583262Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:40:59.8601207Z RX {"return": {}}
+2026-10-15T02:40:59.9223504Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:40:59.9238398Z RX {"return": {}}
+2026-10-15T02:40:59.9862506Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:40:59.9882077Z RX {"return": {}}
+2026-10-15T02:41:00.0653607Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:41:00.0673785Z RX {"return": {}}
+2026-10-15T02:41:00.1443881Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:41:00.1459708Z RX {"return": {}}
+2026-10-15T02:41:00.2082280Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:41:00.2099772Z RX {"return": {}}
+2026-10-15T02:41:00.2725130Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:41:00.2815302Z RX {"return": {}}
+2026-10-15T02:41:00.3353658Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:41:00.3368358Z RX {"return": {}}
+2026-10-15T02:41:00.3992236Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:41:00.4010058Z RX {"return": {}}
+2026-10-15T02:41:00.4634454Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:41:00.4650000Z RX {"return": {}}
+2026-10-15T02:41:00.5262672Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:41:00.5282158Z RX {"return": {}}
+2026-10-15T02:41:00.5903303Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-24}}]}}
+2026-10-15T02:41:00.5919237Z RX {"return": {}}
+2026-10-15T02:41:00.6542884Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\display-options-tab-pointer4.ppm"}}
+2026-10-15T02:41:00.6652347Z RX {"return": {}}
+2026-10-15T02:41:07.4302939Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:41:07.4370848Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:41:07.4423260Z RX {"return": {}}
+2026-10-15T02:41:07.4552024Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"down":true,"button":"left"},"type":"btn"}]}}
+2026-10-15T02:41:07.4570964Z RX {"return": {}}
+2026-10-15T02:41:08.1474404Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:41:08.1489016Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:41:08.1500626Z RX {"return": {}}
+2026-10-15T02:41:08.1519897Z TX {"execute":"input-send-event","arguments":[{"data":{"down":false,"button":"left"},"type":"btn"}]}
+2026-10-15T02:41:08.1645865Z RX {"error": {"class": "GenericError", "desc": "QMP input member 'arguments' must be an object"}}
+2026-10-15T02:41:16.0204939Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:41:16.0288940Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:41:16.0332759Z RX {"return": {}}
+2026-10-15T02:41:16.0445400Z TX {"arguments":{"events":[{"data":{"button":"left","down":false},"type":"btn"}]},"execute":"input-send-event"}
+2026-10-15T02:41:16.0459978Z RX {"return": {}}
+2026-10-15T02:41:16.7474026Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:41:16.7490411Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:41:16.7504385Z RX {"return": {}}
+2026-10-15T02:41:16.7525113Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\display-options-backgrounds-tab-s13.ppm"},"execute":"screendump"}
+2026-10-15T02:41:16.8911809Z RX {"return": {}}
+2026-10-15T02:41:25.2493746Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:41:25.2565593Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:41:25.2611881Z RX {"return": {}}
+2026-10-15T02:41:25.2736546Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:25.2751190Z RX {"return": {}}
+2026-10-15T02:41:25.3453710Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:25.3470108Z RX {"return": {}}
+2026-10-15T02:41:25.4244480Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:25.4359756Z RX {"return": {}}
+2026-10-15T02:41:25.4884895Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:25.4904719Z RX {"return": {}}
+2026-10-15T02:41:25.5738700Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:25.5765536Z RX {"return": {}}
+2026-10-15T02:41:25.6299527Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:25.6317578Z RX {"return": {}}
+2026-10-15T02:41:25.6936952Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:25.6961750Z RX {"return": {}}
+2026-10-15T02:41:25.7574345Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:25.7593787Z RX {"return": {}}
+2026-10-15T02:41:25.8216105Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:25.8240251Z RX {"return": {}}
+2026-10-15T02:41:25.8835138Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:25.8857901Z RX {"return": {}}
+2026-10-15T02:41:25.9474780Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:25.9497431Z RX {"return": {}}
+2026-10-15T02:41:26.0117012Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:26.0139267Z RX {"return": {}}
+2026-10-15T02:41:26.0981387Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:26.1004657Z RX {"return": {}}
+2026-10-15T02:41:26.1656336Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:26.1677423Z RX {"return": {}}
+2026-10-15T02:41:26.2323840Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:26.2345573Z RX {"return": {}}
+2026-10-15T02:41:26.2965166Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:26.2985890Z RX {"return": {}}
+2026-10-15T02:41:26.3604428Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:26.3625692Z RX {"return": {}}
+2026-10-15T02:41:26.4405161Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:26.4426639Z RX {"return": {}}
+2026-10-15T02:41:26.5127720Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:26.5147338Z RX {"return": {}}
+2026-10-15T02:41:26.5684294Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:26.5705796Z RX {"return": {}}
+2026-10-15T02:41:26.6325882Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:26.6346547Z RX {"return": {}}
+2026-10-15T02:41:26.6964979Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:26.6986657Z RX {"return": {}}
+2026-10-15T02:41:26.7594155Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:26.7614026Z RX {"return": {}}
+2026-10-15T02:41:26.8234491Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:26.8264066Z RX {"return": {}}
+2026-10-15T02:41:26.8863926Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:26.8898716Z RX {"return": {}}
+2026-10-15T02:41:26.9632081Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:26.9659161Z RX {"return": {}}
+2026-10-15T02:41:27.0296072Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:27.0324556Z RX {"return": {}}
+2026-10-15T02:41:27.0935589Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:41:27.0958572Z RX {"return": {}}
+2026-10-15T02:41:27.1734012Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\display-options-close-pointer.ppm"},"execute":"screendump"}
+2026-10-15T02:41:27.1871591Z RX {"return": {}}
+2026-10-15T02:41:35.0099032Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:41:35.0198690Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:41:35.0267641Z RX {"return": {}}
+2026-10-15T02:41:35.0439768Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":true}}]}}
+2026-10-15T02:41:35.0461347Z RX {"return": {}}
+2026-10-15T02:41:35.7523500Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:41:35.7547071Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:41:35.7588255Z RX {"return": {}}
+2026-10-15T02:41:35.7617198Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":false}}]}}
+2026-10-15T02:41:35.7767142Z RX {"return": {}}
+2026-10-15T02:41:36.3617160Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:41:36.3630637Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:41:36.3647808Z RX {"return": {}}
+2026-10-15T02:41:36.3686981Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-after-display-options-close.ppm"}}
+2026-10-15T02:41:36.3826421Z RX {"return": {}}
+2026-10-15T02:41:57.1770155Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:41:57.1862592Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:41:57.1907627Z RX {"return": {}}
+2026-10-15T02:41:57.2038600Z TX {"execute":"input-send-event","arguments":{"events":[{"data":{"axis":"x","value":-8},"type":"rel"}]}}
+2026-10-15T02:41:57.2053373Z RX {"return": {}}
+2026-10-15T02:41:57.2733193Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\display-options-close-pointer2.ppm"}}
+2026-10-15T02:41:57.2829609Z RX {"return": {}}
+2026-10-15T02:42:11.8552223Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:42:11.8882546Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:42:11.8928737Z RX {"return": {}}
+2026-10-15T02:42:11.9059325Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":true}}]}}
+2026-10-15T02:42:11.9082376Z RX {"return": {}}
+2026-10-15T02:42:12.7009667Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:42:12.7024274Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:42:12.7034319Z RX {"return": {}}
+2026-10-15T02:42:12.7052405Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":false}}]}}
+2026-10-15T02:42:12.7066923Z RX {"return": {}}
+2026-10-15T02:42:13.4973864Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:42:13.4984306Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:42:13.4993888Z RX {"return": {}}
+2026-10-15T02:42:19.6808922Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:42:19.6879592Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:42:19.6926444Z RX {"return": {}}
+2026-10-15T02:42:19.7041570Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-after-display-options-close2.ppm"}}
+2026-10-15T02:42:19.7136374Z RX {"return": {}}
+2026-10-15T02:42:38.7104753Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:42:38.7265735Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:42:38.7338835Z RX {"return": {}}
+2026-10-15T02:42:38.7539990Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:42:38.7563142Z RX {"return": {}}
+2026-10-15T02:42:38.8186450Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:42:38.8207672Z RX {"return": {}}
+2026-10-15T02:42:38.8824732Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:42:38.8848688Z RX {"return": {}}
+2026-10-15T02:42:38.9577858Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:42:39.0467660Z RX {"return": {}}
+2026-10-15T02:42:39.1027376Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:42:39.1052181Z RX {"return": {}}
+2026-10-15T02:42:39.1657250Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:42:39.1681389Z RX {"return": {}}
+2026-10-15T02:42:39.2287672Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:42:39.2312373Z RX {"return": {}}
+2026-10-15T02:42:39.2925388Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:42:39.2995058Z RX {"return": {}}
+2026-10-15T02:42:39.3716161Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:42:39.3739573Z RX {"return": {}}
+2026-10-15T02:42:39.4355394Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\display-options-displays-pointer.ppm"},"execute":"screendump"}
+2026-10-15T02:42:39.4498618Z RX {"return": {}}
+2026-10-15T02:42:47.5423224Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:42:47.5927184Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:42:47.5997068Z RX {"return": {}}
+2026-10-15T02:42:47.6196035Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":true}}]}}
+2026-10-15T02:42:47.6217980Z RX {"return": {}}
+2026-10-15T02:42:48.3365894Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:42:48.3637677Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:42:48.3747425Z RX {"return": {}}
+2026-10-15T02:42:48.3780351Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":false}}]}}
+2026-10-15T02:42:48.3801796Z RX {"return": {}}
+2026-10-15T02:42:49.0726163Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:42:49.0740608Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:42:49.0757798Z RX {"return": {}}
+2026-10-15T02:42:49.0793531Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\display-options-displays-tab-s13.ppm"}}
+2026-10-15T02:42:49.0939079Z RX {"return": {}}
+2026-10-15T02:42:59.8469908Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:42:59.8537933Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:42:59.8585254Z RX {"return": {}}
+2026-10-15T02:42:59.8697390Z TX {"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":"esc"}],"hold-time":120}}
+2026-10-15T02:42:59.8712448Z RX {"return": {}}
+2026-10-15T02:43:00.7710895Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:43:00.7721557Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:43:00.7732386Z RX {"return": {}}
+2026-10-15T02:43:00.7845467Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-after-display-options-escape.ppm"}}
+2026-10-15T02:43:00.7943760Z RX {"return": {}}
+2026-10-15T02:43:23.5084834Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:43:23.5186044Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:43:23.5240152Z RX {"return": {}}
+2026-10-15T02:43:23.5364298Z TX {"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":"meta_l"}],"hold-time":120}}
+2026-10-15T02:43:23.5377624Z RX {"return": {}}
+2026-10-15T02:43:24.2205773Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:43:24.2220967Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:43:24.2231415Z RX {"return": {}}
+2026-10-15T02:43:24.2340981Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-start-menu-final.ppm"}}
+2026-10-15T02:43:24.2961700Z RX {"return": {}}
+2026-10-15T02:43:32.3662157Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:43:32.3728033Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:43:32.3778049Z RX {"return": {}}
+2026-10-15T02:43:32.3895372Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:43:32.3909886Z RX {"return": {}}
+2026-10-15T02:43:32.4713648Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:43:32.4729040Z RX {"return": {}}
+2026-10-15T02:43:32.5355008Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:43:32.5374097Z RX {"return": {}}
+2026-10-15T02:43:32.6136742Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:43:32.6152136Z RX {"return": {}}
+2026-10-15T02:43:32.6763797Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:43:32.6778757Z RX {"return": {}}
+2026-10-15T02:43:32.7393550Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:43:32.7409875Z RX {"return": {}}
+2026-10-15T02:43:32.8028441Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:43:32.8050311Z RX {"return": {}}
+2026-10-15T02:43:32.8657966Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:43:32.8689560Z RX {"return": {}}
+2026-10-15T02:43:32.9285142Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:43:32.9302720Z RX {"return": {}}
+2026-10-15T02:43:32.9924230Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:43:32.9940748Z RX {"return": {}}
+2026-10-15T02:43:33.0544947Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:43:33.0566733Z RX {"return": {}}
+2026-10-15T02:43:33.1185686Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-24}}]}}
+2026-10-15T02:43:33.1204567Z RX {"return": {}}
+2026-10-15T02:43:33.1804493Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:33.1825848Z RX {"return": {}}
+2026-10-15T02:43:33.2424416Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:33.2439743Z RX {"return": {}}
+2026-10-15T02:43:33.3054420Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:33.3072881Z RX {"return": {}}
+2026-10-15T02:43:33.3694665Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:33.3712146Z RX {"return": {}}
+2026-10-15T02:43:33.4334103Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:33.4351061Z RX {"return": {}}
+2026-10-15T02:43:33.4964225Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:33.4980565Z RX {"return": {}}
+2026-10-15T02:43:33.5604107Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:33.5620888Z RX {"return": {}}
+2026-10-15T02:43:33.6224570Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:33.6261369Z RX {"return": {}}
+2026-10-15T02:43:33.6854318Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:33.6869486Z RX {"return": {}}
+2026-10-15T02:43:33.7493235Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:33.7507951Z RX {"return": {}}
+2026-10-15T02:43:33.8135123Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:33.8150362Z RX {"return": {}}
+2026-10-15T02:43:33.8924456Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:33.8939841Z RX {"return": {}}
+2026-10-15T02:43:33.9716016Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:33.9734656Z RX {"return": {}}
+2026-10-15T02:43:34.0504236Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:34.0519549Z RX {"return": {}}
+2026-10-15T02:43:34.1144534Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:34.1160129Z RX {"return": {}}
+2026-10-15T02:43:34.1784588Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:34.1800037Z RX {"return": {}}
+2026-10-15T02:43:34.2425048Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:34.2446629Z RX {"return": {}}
+2026-10-15T02:43:34.3053878Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:34.3069399Z RX {"return": {}}
+2026-10-15T02:43:34.3684690Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:34.3701309Z RX {"return": {}}
+2026-10-15T02:43:34.4324223Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:34.4340432Z RX {"return": {}}
+2026-10-15T02:43:34.4953167Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:34.4970183Z RX {"return": {}}
+2026-10-15T02:43:34.5594430Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:34.5610652Z RX {"return": {}}
+2026-10-15T02:43:34.6214815Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:34.6230212Z RX {"return": {}}
+2026-10-15T02:43:34.6843906Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]}}
+2026-10-15T02:43:34.6860182Z RX {"return": {}}
+2026-10-15T02:43:34.7473166Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-menu-pointer-final.ppm"}}
+2026-10-15T02:43:34.8564438Z RX {"return": {}}
+2026-10-15T02:43:41.9509499Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:43:41.9771327Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:43:41.9814857Z RX {"return": {}}
+2026-10-15T02:43:41.9931051Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":true}}]}}
+2026-10-15T02:43:41.9947495Z RX {"return": {}}
+2026-10-15T02:43:42.7777622Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:43:42.7791781Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:43:42.7802617Z RX {"return": {}}
+2026-10-15T02:43:42.7820968Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":false}}]}}
+2026-10-15T02:43:42.7836364Z RX {"return": {}}
+2026-10-15T02:43:43.5856039Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:43:43.5866166Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:43:43.5876490Z RX {"return": {}}
+2026-10-15T02:43:43.5894364Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-reopened-final.ppm"}}
+2026-10-15T02:43:43.8388440Z RX {"return": {}}
+2026-10-15T02:43:57.3331124Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:43:57.3418348Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:43:57.3461427Z RX {"return": {}}
+2026-10-15T02:43:57.3575532Z TX {"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":"meta_l"}],"hold-time":120}}
+2026-10-15T02:43:57.3588764Z RX {"return": {}}
+2026-10-15T02:43:58.0468827Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:43:58.0483148Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:43:58.0494170Z RX {"return": {}}
+2026-10-15T02:43:58.0602937Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-start-menu-final2.ppm"}}
+2026-10-15T02:43:58.1572533Z RX {"return": {}}
+2026-10-15T02:44:04.1431459Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:44:04.1500878Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:44:04.1547760Z RX {"return": {}}
+2026-10-15T02:44:04.1668982Z TX {"arguments":{"events":[{"type":"rel","data":{"axis":"y","value":24}}]},"execute":"input-send-event"}
+2026-10-15T02:44:04.1685705Z RX {"return": {}}
+2026-10-15T02:44:04.2267075Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-menu-pointer-final2.ppm"},"execute":"screendump"}
+2026-10-15T02:44:04.3173962Z RX {"return": {}}
+2026-10-15T02:44:15.0467667Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:44:15.0725021Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:44:15.0779499Z RX {"return": {}}
+2026-10-15T02:44:15.0894371Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":true}}]}}
+2026-10-15T02:44:15.0909641Z RX {"return": {}}
+2026-10-15T02:44:15.8807822Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:44:15.8821842Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:44:15.8833302Z RX {"return": {}}
+2026-10-15T02:44:15.8851983Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":false}}]}}
+2026-10-15T02:44:15.8866077Z RX {"return": {}}
+2026-10-15T02:44:16.6844570Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:44:16.6854696Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:44:16.6865365Z RX {"return": {}}
+2026-10-15T02:44:16.6883007Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-reopened-final2.ppm"}}
+2026-10-15T02:44:16.8396648Z RX {"return": {}}
+2026-10-15T02:44:25.1975445Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:44:25.2081729Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:44:25.2151874Z RX {"return": {}}
+2026-10-15T02:44:25.2349040Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:25.2371264Z RX {"return": {}}
+2026-10-15T02:44:25.3083123Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:25.3104724Z RX {"return": {}}
+2026-10-15T02:44:25.3856659Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:25.3878559Z RX {"return": {}}
+2026-10-15T02:44:25.4485972Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:25.4506769Z RX {"return": {}}
+2026-10-15T02:44:25.5170657Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:25.5189794Z RX {"return": {}}
+2026-10-15T02:44:25.5926509Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:25.5946339Z RX {"return": {}}
+2026-10-15T02:44:25.6558495Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:25.6589391Z RX {"return": {}}
+2026-10-15T02:44:25.7356307Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:25.7379034Z RX {"return": {}}
+2026-10-15T02:44:25.8146644Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:25.8168799Z RX {"return": {}}
+2026-10-15T02:44:25.8927764Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:25.8949142Z RX {"return": {}}
+2026-10-15T02:44:25.9726650Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:25.9748913Z RX {"return": {}}
+2026-10-15T02:44:26.0355737Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:26.0377233Z RX {"return": {}}
+2026-10-15T02:44:26.0995337Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:26.1015926Z RX {"return": {}}
+2026-10-15T02:44:26.1635641Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:26.1658532Z RX {"return": {}}
+2026-10-15T02:44:26.2284666Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:26.2306570Z RX {"return": {}}
+2026-10-15T02:44:26.2915595Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:26.2939182Z RX {"return": {}}
+2026-10-15T02:44:26.3554615Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:26.3575005Z RX {"return": {}}
+2026-10-15T02:44:26.4195117Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:26.4215282Z RX {"return": {}}
+2026-10-15T02:44:26.4974629Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:26.4994314Z RX {"return": {}}
+2026-10-15T02:44:26.5615633Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:26.5666281Z RX {"return": {}}
+2026-10-15T02:44:26.6451200Z TX {"arguments":{"events":[{"data":{"value":24,"axis":"x"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:26.6473687Z RX {"return": {}}
+2026-10-15T02:44:26.7204396Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:26.7225556Z RX {"return": {}}
+2026-10-15T02:44:26.7995462Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:26.8017032Z RX {"return": {}}
+2026-10-15T02:44:26.8635893Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:26.8656822Z RX {"return": {}}
+2026-10-15T02:44:26.9275290Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:26.9296224Z RX {"return": {}}
+2026-10-15T02:44:26.9915833Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:26.9941032Z RX {"return": {}}
+2026-10-15T02:44:27.0557808Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:27.0603091Z RX {"return": {}}
+2026-10-15T02:44:27.1328965Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:27.1352991Z RX {"return": {}}
+2026-10-15T02:44:27.2070826Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:27.2093807Z RX {"return": {}}
+2026-10-15T02:44:27.2785778Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:27.2806454Z RX {"return": {}}
+2026-10-15T02:44:27.3453477Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:27.3476678Z RX {"return": {}}
+2026-10-15T02:44:27.4224802Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:27.4260516Z RX {"return": {}}
+2026-10-15T02:44:27.5004850Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:27.5024479Z RX {"return": {}}
+2026-10-15T02:44:27.5697475Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:27.5730409Z RX {"return": {}}
+2026-10-15T02:44:27.6457755Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:27.6477864Z RX {"return": {}}
+2026-10-15T02:44:27.7087410Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:27.7107909Z RX {"return": {}}
+2026-10-15T02:44:27.7725159Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:27.7745107Z RX {"return": {}}
+2026-10-15T02:44:27.8366467Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:27.8493174Z RX {"return": {}}
+2026-10-15T02:44:27.9154213Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:27.9174702Z RX {"return": {}}
+2026-10-15T02:44:27.9794734Z TX {"arguments":{"events":[{"data":{"value":-24,"axis":"y"},"type":"rel"}]},"execute":"input-send-event"}
+2026-10-15T02:44:27.9814191Z RX {"return": {}}
+2026-10-15T02:44:28.0522742Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\control-panel-close-pointer-final.ppm"},"execute":"screendump"}
+2026-10-15T02:44:28.2056874Z RX {"return": {}}
+2026-10-15T02:44:40.0677345Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:44:40.0980952Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:44:40.1026196Z RX {"return": {}}
+2026-10-15T02:44:40.1147079Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":true}}]}}
+2026-10-15T02:44:40.1163212Z RX {"return": {}}
+2026-10-15T02:44:40.9020036Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:44:40.9034646Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:44:40.9046931Z RX {"return": {}}
+2026-10-15T02:44:40.9066519Z TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":false}}]}}
+2026-10-15T02:44:40.9083329Z RX {"return": {}}
+2026-10-15T02:44:41.7152203Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:44:41.7162406Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:44:41.7173894Z RX {"return": {}}
+2026-10-15T02:44:41.7192986Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\desktop-clean-final.ppm"}}
+2026-10-15T02:44:41.7421056Z RX {"return": {}}
+2026-10-15T02:45:04.5118055Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:45:04.5226141Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:45:04.5286659Z RX {"return": {}}
+2026-10-15T02:45:04.5414007Z TX {"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":"alt"},{"type":"qcode","data":"f4"}],"hold-time":120}}
+2026-10-15T02:45:04.5448064Z RX {"return": {}}
+2026-10-15T02:45:05.4400008Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:45:05.4413845Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:45:05.4425264Z RX {"return": {}}
+2026-10-15T02:45:05.4537552Z TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s13-20261014\\production\\guest-acceptance-virtio-ready\\desktop-clean-final2.ppm"}}
+2026-10-15T02:45:05.4632486Z RX {"return": {}}
+2026-10-15T02:45:16.9200064Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-15T02:45:16.9296178Z TX {"execute":"qmp_capabilities"}
+2026-10-15T02:45:16.9342672Z RX {"return": {}}
+2026-10-15T02:45:16.9460702Z TX {"execute":"quit"}
+2026-10-15T02:45:16.9470046Z RX {"timestamp": {"seconds": 1792032316, "microseconds": 946517}, "event": "SHUTDOWN", "data": {"guest": false, "reason": "host-qmp-quit"}}
+2026-10-15T02:45:16.9483909Z RX {"return": {}}

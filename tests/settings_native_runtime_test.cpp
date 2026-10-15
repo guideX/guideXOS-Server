@@ -1,6 +1,9 @@
 #include "kernel/app_launch_target_resolver.h"
 #include "kernel/kernel_app.h"
 #include "kernel/kernel_compositor.h"
+#include "kernel/framebuffer.h"
+#include "display_configuration_command.h"
+#include "display_configuration_service.h"
 #include "kernel/native_elf_baremetal.h"
 #include "kernel/settings_native_provider.h"
 #include "kernel/vfs.h"
@@ -31,6 +34,16 @@ int g_appShutdown = 0;
 int g_runtimeFocusAcquired = 0;
 int g_runtimeFocusLost = 0;
 char g_lastParameter[64] = {};
+bool g_testFramebufferAvailable = false;
+uint32_t g_testFramebufferWidth = 0;
+uint32_t g_testFramebufferHeight = 0;
+uint32_t g_testFramebufferPitch = 0;
+uint32_t g_testFramebufferBpp = 0;
+kernel::framebuffer::PixelFormat g_testFramebufferFormat = kernel::framebuffer::PixelFormat::Unknown;
+bool g_testActiveDisplayConfigurationAvailable = true;
+uint32_t g_testDisplayConfigurationGeneration = 8u;
+uint64_t g_testDisplayRequestId = 0u;
+int g_testDisplayMutationSubmissions = 0;
 
 void expect(bool condition, const char* name)
 {
@@ -121,6 +134,62 @@ void copySnapshotFromBytes(const uint8_t* source,
 }
 
 } // namespace
+
+namespace kernel {
+namespace framebuffer {
+
+bool is_available() { return g_testFramebufferAvailable; }
+uint32_t get_width() { return g_testFramebufferWidth; }
+uint32_t get_height() { return g_testFramebufferHeight; }
+uint32_t get_pitch() { return g_testFramebufferPitch; }
+uint8_t get_bpp() { return static_cast<uint8_t>(g_testFramebufferBpp); }
+PixelFormat get_pixel_format() { return g_testFramebufferFormat; }
+
+} // namespace framebuffer
+} // namespace kernel
+
+namespace gxos {
+namespace display {
+
+uint64_t DisplayConfigurationService::nextRequestId()
+{
+    return ++g_testDisplayRequestId;
+}
+
+bool DisplayConfigurationService::submit(
+    const DisplayConfigurationCommand& command,
+    DisplayConfigurationResponse& response)
+{
+    response = DisplayConfigurationResponse{};
+    response.version = kDisplayConfigurationContractVersion;
+    response.structureSize = sizeof(response);
+    response.requestId = command.requestId;
+    response.commandType = command.commandType;
+    response.completed = 1u;
+    if (command.commandType != static_cast<uint32_t>(DisplayConfigurationCommandType::QueryActiveConfiguration)) {
+        ++g_testDisplayMutationSubmissions;
+        return false;
+    }
+    response.activeConfigurationGeneration = g_testDisplayConfigurationGeneration;
+    if (!g_testActiveDisplayConfigurationAvailable) return true;
+
+    DisplayConfigurationSnapshot& active = response.activeConfiguration;
+    active.version = kDisplayConfigurationContractVersion;
+    active.structureSize = sizeof(active);
+    active.mode = static_cast<uint32_t>(DisplayConfigurationMode::Extend);
+    active.outputCount = 1u;
+    active.virtualDesktopWidth = 1379;
+    active.virtualDesktopHeight = 781;
+    DisplayConfigurationOutput& primary = active.outputs[0];
+    copyText(primary.modeId, "mode-primary-test", sizeof(primary.modeId));
+    primary.enabled = 1u;
+    primary.primary = 1u;
+    response.success = 1u;
+    return true;
+}
+
+} // namespace display
+} // namespace gxos
 
 namespace kernel {
 namespace compositor {
@@ -367,6 +436,168 @@ int main()
     snapshot.productName[0] = '\0';
     expect(!validSystemAboutSnapshot(snapshot), "invalid empty snapshot field rejected");
 
+    DisplaySnapshotV1 displaySnapshot{};
+    const uint32_t paddedPitch = 5512u;
+    expect(buildDisplaySnapshot(true, 1377u, 779u, paddedPitch, 32u,
+                                static_cast<uint32_t>(framebuffer::PixelFormat::B8G8R8A8),
+                                1u, &displaySnapshot) == SnapshotStatus::Ok &&
+               validDisplaySnapshot(displaySnapshot),
+           "valid framebuffer geometry creates a valid Display snapshot");
+    expect(displaySnapshot.status == DisplayInformationStatus::Available &&
+               displaySnapshot.framebufferWidth == 1377u &&
+               displaySnapshot.framebufferHeight == 779u &&
+               displaySnapshot.bitsPerPixel == 32u &&
+               displaySnapshot.bytesPerScanline == paddedPitch &&
+               displaySnapshot.pixelFormat == static_cast<uint32_t>(framebuffer::PixelFormat::B8G8R8A8),
+           "Display snapshot preserves active dimensions, depth, exact format, and padded pitch");
+    expect((displaySnapshot.flags & (kDisplayFramebufferWidthAvailable |
+               kDisplayFramebufferHeightAvailable | kDisplayPixelFormatAvailable |
+               kDisplayBitsPerPixelAvailable | kDisplayPitchAvailable)) ==
+               (kDisplayFramebufferWidthAvailable | kDisplayFramebufferHeightAvailable |
+                kDisplayPixelFormatAvailable | kDisplayBitsPerPixelAvailable | kDisplayPitchAvailable),
+           "Display snapshot flags match every returned field");
+
+    expect(buildDisplaySnapshot(false, 0u, 0u, 0u, 0u, 0u, 2u,
+                                &displaySnapshot) == SnapshotStatus::Ok &&
+               validDisplaySnapshot(displaySnapshot) &&
+               displaySnapshot.status == DisplayInformationStatus::Unavailable &&
+               displaySnapshot.flags == 0u,
+           "missing framebuffer is represented as an explicit unavailable snapshot");
+    expect(buildDisplaySnapshot(true, 0u, 779u, paddedPitch, 32u, 1u, 2u,
+                                &displaySnapshot) == SnapshotStatus::Ok &&
+               displaySnapshot.status == DisplayInformationStatus::Unavailable &&
+               validDisplaySnapshot(displaySnapshot),
+           "zero framebuffer dimensions are rejected without exposing partial values");
+    expect(buildDisplaySnapshot(true, 1377u, 779u, 0u, 24u, 0xFFFFFFFFu, 2u,
+                                &displaySnapshot) == SnapshotStatus::Ok &&
+               validDisplaySnapshot(displaySnapshot) &&
+               displaySnapshot.pixelFormat == static_cast<uint32_t>(framebuffer::PixelFormat::Unknown) &&
+               (displaySnapshot.flags & kDisplayPixelFormatAvailable) != 0u &&
+               (displaySnapshot.flags & kDisplayPitchAvailable) == 0u,
+           "unknown pixel formats are reported safely and absent pitch stays unavailable");
+    expect(buildDisplaySnapshot(true, 1377u, 779u, 5000u, 32u, 1u, 2u,
+                                &displaySnapshot) == SnapshotStatus::Ok &&
+               validDisplaySnapshot(displaySnapshot) &&
+               (displaySnapshot.flags & kDisplayPitchAvailable) == 0u,
+           "pitch shorter than a scanline is withheld");
+    expect(buildDisplaySnapshot(true, 1377u, 779u, 0u, 7u, 1u, 2u,
+                                &displaySnapshot) == SnapshotStatus::Ok &&
+               validDisplaySnapshot(displaySnapshot) &&
+               (displaySnapshot.flags & kDisplayBitsPerPixelAvailable) == 0u &&
+               (displaySnapshot.flags & kDisplayPitchAvailable) == 0u,
+           "unsupported pixel depth is withheld instead of misrepresented");
+    expect(buildDisplaySnapshot(true, 1377u, 779u, 0u, 16u, 1u, 2u,
+                                &displaySnapshot) == SnapshotStatus::Ok &&
+               (displaySnapshot.flags & kDisplayBitsPerPixelAvailable) != 0u,
+           "supported 16-bit pixel depth is represented");
+    expect(buildDisplaySnapshot(true, 1377u, 779u, 0u, 24u, 1u, 2u,
+                                &displaySnapshot) == SnapshotStatus::Ok &&
+               displaySnapshot.bitsPerPixel == 24u,
+           "supported 24-bit pixel depth is represented");
+    expect(buildDisplaySnapshot(true, 1377u, 779u, 0u, 40u, 1u, 2u,
+                                &displaySnapshot) == SnapshotStatus::Ok &&
+               (displaySnapshot.flags & kDisplayBitsPerPixelAvailable) == 0u,
+           "out-of-range pixel depth is not reported as a supported representation");
+    expect(buildDisplaySnapshot(true, 1u, 1u, 1u, 32u, 1u, 0u,
+                                &displaySnapshot) == SnapshotStatus::InvalidArgument,
+           "zero Display snapshot revision is invalid");
+
+    DisplaySnapshotRequestV1 displayRequest = {
+        sizeof(DisplaySnapshotRequestV1), kDisplaySnapshotVersion, 0u
+    };
+    g_testFramebufferAvailable = true;
+    g_testFramebufferWidth = 1377u;
+    g_testFramebufferHeight = 779u;
+    g_testFramebufferPitch = paddedPitch;
+    g_testFramebufferBpp = 32u;
+    g_testFramebufferFormat = framebuffer::PixelFormat::B8G8R8A8;
+    expect(readDisplaySnapshot(settingsApp, &displayRequest, &displaySnapshot,
+                               sizeof(displaySnapshot), &snapshotSize, &snapshotRevision) ==
+               SnapshotStatus::Ok && validDisplaySnapshot(displaySnapshot) &&
+               displaySnapshot.status == DisplayInformationStatus::Available,
+           "trusted Settings caller reads active framebuffer metadata");
+    expect(snapshotSize == sizeof(displaySnapshot) &&
+               snapshotRevision == static_cast<uint64_t>(g_testDisplayConfigurationGeneration) + 1u &&
+               displaySnapshot.revision == snapshotRevision,
+           "Display provider reports bounded size and active-configuration revision");
+    expect(displaySnapshot.logicalDesktopWidth == 1379u &&
+               displaySnapshot.logicalDesktopHeight == 781u &&
+               displaySnapshot.activeLayoutMode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Extend) &&
+               std::string(displaySnapshot.primaryModeId) == "mode-primary-test",
+           "active display mode and logical desktop values come from the trusted kernel service");
+    expect((displaySnapshot.flags & (kDisplayLogicalDesktopWidthAvailable |
+               kDisplayLogicalDesktopHeightAvailable | kDisplayActiveLayoutModeAvailable |
+               kDisplayPrimaryModeIdAvailable)) ==
+               (kDisplayLogicalDesktopWidthAvailable | kDisplayLogicalDesktopHeightAvailable |
+                kDisplayActiveLayoutModeAvailable | kDisplayPrimaryModeIdAvailable),
+           "active-mode flags match their validated values");
+    DisplaySnapshotV1 repeatedDisplaySnapshot{};
+    size_t repeatedDisplaySize = 0;
+    uint64_t repeatedDisplayRevision = 0;
+    expect(readDisplaySnapshot(settingsApp, &displayRequest, &repeatedDisplaySnapshot,
+                               sizeof(repeatedDisplaySnapshot), &repeatedDisplaySize,
+                               &repeatedDisplayRevision) == SnapshotStatus::Ok &&
+               repeatedDisplaySize == snapshotSize &&
+               repeatedDisplayRevision == snapshotRevision &&
+               repeatedDisplaySnapshot.framebufferWidth == displaySnapshot.framebufferWidth &&
+               repeatedDisplaySnapshot.bytesPerScanline == displaySnapshot.bytesPerScanline,
+           "repeated Display snapshot refresh is stable while framebuffer state is unchanged");
+    ++g_testDisplayConfigurationGeneration;
+    expect(readDisplaySnapshot(settingsApp, &displayRequest, &repeatedDisplaySnapshot,
+                               sizeof(repeatedDisplaySnapshot), &repeatedDisplaySize,
+                               &repeatedDisplayRevision) == SnapshotStatus::Ok &&
+               repeatedDisplayRevision == snapshotRevision + 1u,
+           "active display configuration generation advances the snapshot revision");
+    snapshotRevision = repeatedDisplayRevision;
+    displayRequest.knownRevision = snapshotRevision + 1u;
+    expect(readDisplaySnapshot(settingsApp, &displayRequest, &repeatedDisplaySnapshot,
+                               sizeof(repeatedDisplaySnapshot), &repeatedDisplaySize,
+                               &repeatedDisplayRevision) == SnapshotStatus::StaleRevision,
+           "Display provider rejects stale requested revisions");
+    displayRequest.knownRevision = 0u;
+    displayRequest.version = kDisplaySnapshotVersion + 1u;
+    expect(readDisplaySnapshot(settingsApp, &displayRequest, &repeatedDisplaySnapshot,
+                               sizeof(repeatedDisplaySnapshot), &repeatedDisplaySize,
+                               &repeatedDisplayRevision) == SnapshotStatus::UnsupportedVersion,
+           "unsupported Display snapshot versions are rejected");
+    displayRequest.version = kDisplaySnapshotVersion;
+    displayRequest.structureSize = sizeof(displayRequest) - 1u;
+    expect(readDisplaySnapshot(settingsApp, &displayRequest, &repeatedDisplaySnapshot,
+                               sizeof(repeatedDisplaySnapshot), &repeatedDisplaySize,
+                               &repeatedDisplayRevision) == SnapshotStatus::InvalidArgument,
+           "undersized Display snapshot request is rejected");
+    displayRequest.structureSize = sizeof(displayRequest);
+    expect(readDisplaySnapshot(settingsApp, &displayRequest, &repeatedDisplaySnapshot,
+                               sizeof(repeatedDisplaySnapshot) - 1u, &repeatedDisplaySize,
+                               &repeatedDisplayRevision) == SnapshotStatus::BufferTooSmall,
+           "undersized Display output buffer is rejected");
+    expect(readDisplaySnapshot(settingsApp, &displayRequest, nullptr,
+                               sizeof(repeatedDisplaySnapshot), &repeatedDisplaySize,
+                               &repeatedDisplayRevision) == SnapshotStatus::InvalidArgument,
+           "null Display output buffer is rejected");
+    expect(readDisplaySnapshot(settingsApp, nullptr, &repeatedDisplaySnapshot,
+                               sizeof(repeatedDisplaySnapshot), &repeatedDisplaySize,
+                               &repeatedDisplayRevision) == SnapshotStatus::InvalidArgument,
+           "null Display snapshot request is rejected");
+    g_testActiveDisplayConfigurationAvailable = false;
+    expect(readDisplaySnapshot(settingsApp, &displayRequest, &repeatedDisplaySnapshot,
+                               sizeof(repeatedDisplaySnapshot), &repeatedDisplaySize,
+                               &repeatedDisplayRevision) == SnapshotStatus::Ok &&
+               validDisplaySnapshot(repeatedDisplaySnapshot) &&
+               repeatedDisplaySnapshot.status == DisplayInformationStatus::Available &&
+               (repeatedDisplaySnapshot.flags & kDisplayLogicalDesktopWidthAvailable) == 0u,
+           "unavailable display-mode service leaves valid framebuffer fields intact");
+    g_testFramebufferAvailable = false;
+    expect(readDisplaySnapshot(settingsApp, &displayRequest, &repeatedDisplaySnapshot,
+                               sizeof(repeatedDisplaySnapshot), &repeatedDisplaySize,
+                               &repeatedDisplayRevision) == SnapshotStatus::Ok &&
+               validDisplaySnapshot(repeatedDisplaySnapshot) &&
+               repeatedDisplaySnapshot.status == DisplayInformationStatus::Unavailable,
+           "provider returns unavailable when both framebuffer and active mode are unavailable");
+    g_testFramebufferAvailable = true;
+    g_testActiveDisplayConfigurationAvailable = true;
+    g_testDisplayConfigurationGeneration = 8u;
+
     settings::SettingsPresentationCore presentation;
     expect(presentation.selectedCategory() == settings::CategoryId::System,
            "shared core initializes to System");
@@ -377,6 +608,24 @@ int main()
            "shared core selects About category");
     expect(presentation.focusedControl() == settings::FocusControl::None,
            "shared core clears focus when its category changes");
+    expect(presentation.selectCategory(settings::CategoryId::Display) &&
+               presentation.selectedCategory() == settings::CategoryId::Display,
+           "shared core navigates from System/About to Display");
+    expect(presentation.selectCategory(settings::CategoryId::About) &&
+               presentation.selectedCategory() == settings::CategoryId::About,
+           "shared core navigates from Display to About");
+    expect(presentation.selectCategory(settings::CategoryId::Display) &&
+               presentation.selectedCategory() == settings::CategoryId::Display,
+           "shared core navigates back from About to Display");
+    settings::CapabilitySnapshot displayCapability = {
+        settings::CapabilityId::Display,
+        settings::CapabilityAvailability::ReadOnly,
+        kDisplaySnapshotRevision
+    };
+    expect(presentation.applyCapabilitySnapshot(displayCapability) &&
+               presentation.capability(settings::CapabilityId::Display)->availability ==
+                   settings::CapabilityAvailability::ReadOnly,
+           "shared core records Display as an authoritative read-only capability");
     settings::CapabilitySnapshot unavailableCapability = {
         settings::CapabilityId::Network,
         settings::CapabilityAvailability::Unavailable,
@@ -404,6 +653,8 @@ int main()
     attemptedMutation.operationCode = static_cast<uint16_t>(settings::SettingsOperationCode::ApplyDisplayConfiguration);
     expect(rejectSettingsMutation(nullptr, &attemptedMutation) == false,
            "unauthorized Settings mutation is rejected without a write surface");
+    expect(g_testDisplayMutationSubmissions == 0,
+           "Display provider submits no configuration mutations");
 
     expect(AppManager::launchAppWithParam("Notepad", kSettingsRuntimeAppId),
            "parameterized non-Settings app launch remains available");
@@ -416,6 +667,10 @@ int main()
                                    &snapshotSize, &snapshotRevision) ==
                SnapshotStatus::Unauthorized,
            "provider denies a caller without runtime Settings identity, including launch-argument spoofing");
+    expect(readDisplaySnapshot(otherApp, &displayRequest, &repeatedDisplaySnapshot,
+                               sizeof(repeatedDisplaySnapshot), &repeatedDisplaySize,
+                               &repeatedDisplayRevision) == SnapshotStatus::Unauthorized,
+           "Display provider denies a non-Settings caller despite identity-like launch data");
     if (otherApp) otherApp->requestClose();
     AppManager::update();
     expect(AppManager::getRunningAppCount() == 1 && g_activeWindows == 1,
@@ -443,6 +698,21 @@ int main()
         KernelApp* current = AppManager::getRunningApp(0);
         expect(current && std::string(current->getRuntimeAppId()) == kSettingsRuntimeAppId,
                "reopened instance receives a fresh runtime identity");
+        DisplaySnapshotV1 lifecycleDisplay{};
+        size_t lifecycleDisplaySize = 0;
+        uint64_t lifecycleDisplayRevision = 0;
+        expect(readDisplaySnapshot(current, &displayRequest, &lifecycleDisplay,
+                                   sizeof(lifecycleDisplay), &lifecycleDisplaySize,
+                                   &lifecycleDisplayRevision) == SnapshotStatus::Ok &&
+                   validDisplaySnapshot(lifecycleDisplay) &&
+                   lifecycleDisplay.status == DisplayInformationStatus::Available,
+               "fresh lifecycle can read its Display snapshot");
+        DisplaySnapshotV1 lifecycleDisplayRefresh{};
+        expect(readDisplaySnapshot(current, &displayRequest, &lifecycleDisplayRefresh,
+                                   sizeof(lifecycleDisplayRefresh), &lifecycleDisplaySize,
+                                   &lifecycleDisplayRevision) == SnapshotStatus::Ok &&
+                   lifecycleDisplayRefresh.revision == lifecycleDisplay.revision,
+               "repeated Display reads do not retain stale app-owned provider state");
         if (current) current->requestClose();
         AppManager::update();
         expect(AppManager::getRunningAppCount() == 0 && g_activeWindows == 0,

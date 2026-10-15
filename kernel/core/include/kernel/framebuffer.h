@@ -14,6 +14,14 @@ namespace guideXOS {
 namespace kernel {
 namespace framebuffer {
 
+// Pixel format metadata supplied by the active framebuffer's boot source.
+// Unknown is retained whenever the kernel cannot establish an exact format.
+enum class PixelFormat : uint32_t {
+    Unknown = 0,
+    R8G8B8A8 = 1,
+    B8G8R8A8 = 2
+};
+
 // Initialize framebuffer from multiboot info (legacy BIOS)
 bool init(void* multiboot_info);
 
@@ -58,6 +66,7 @@ uint32_t get_width();
 uint32_t get_height();
 uint32_t get_pitch();
 uint8_t get_bpp();
+PixelFormat get_pixel_format();
 
 // Get framebuffer pointer
 uint32_t* get_buffer();

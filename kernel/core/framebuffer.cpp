@@ -27,6 +27,7 @@ static uint32_t g_width = 0;
 static uint32_t g_height = 0;
 static uint32_t g_pitch = 0;
 static uint8_t g_bpp = 0;
+static PixelFormat g_pixelFormat = PixelFormat::Unknown;
 static bool g_available = false;
 static bool g_doubleBuffered = false;
 static kernel::framebuffer::DiagnosticFramebufferInventorySummary g_diagnosticInventorySummary{};
@@ -216,6 +217,7 @@ static uint32_t read_front_pixel(uint32_t x, uint32_t y)
 bool init(void* multiboot_info_ptr)
 {
     reset_diagnostic_framebuffer_inventory();
+    g_pixelFormat = PixelFormat::Unknown;
 
     auto* info = reinterpret_cast<multiboot::Info*>(multiboot_info_ptr);
     
@@ -249,6 +251,7 @@ bool init(void* multiboot_info_ptr)
 bool init_from_bootinfo(const guideXOS::BootInfo* bootinfo)
 {
     cache_diagnostic_framebuffer_inventory(bootinfo);
+    g_pixelFormat = PixelFormat::Unknown;
 
     if (!bootinfo) {
         return false;
@@ -274,6 +277,17 @@ bool init_from_bootinfo(const guideXOS::BootInfo* bootinfo)
     g_height = bootinfo->FramebufferHeight;
     g_pitch = bootinfo->FramebufferPitch;
     g_bpp = 32;  // BootInfo always uses 32-bit format
+    switch (bootinfo->FramebufferFormat) {
+    case guideXOS::FramebufferFormat::R8G8B8A8:
+        g_pixelFormat = PixelFormat::R8G8B8A8;
+        break;
+    case guideXOS::FramebufferFormat::B8G8R8A8:
+        g_pixelFormat = PixelFormat::B8G8R8A8;
+        break;
+    default:
+        g_pixelFormat = PixelFormat::Unknown;
+        break;
+    }
     
     g_drawTarget = g_buffer;  // Draw directly to video memory by default
     g_available = true;
@@ -358,6 +372,7 @@ bool init_riscv_ramfb(uint64_t, uint32_t, uint32_t, uint32_t, uint8_t) { return 
 bool init_vesa(uint16_t width, uint16_t height, uint8_t bpp)
 {
     reset_diagnostic_framebuffer_inventory();
+    g_pixelFormat = PixelFormat::Unknown;
 #if ARCH_HAS_PORT_IO
     // Use the VESA core driver to set a BGA mode and read back
     // the LFB address.  If BGA is unavailable we still try to use
@@ -444,6 +459,7 @@ bool init_efi_gop(uint64_t lfbBase, uint32_t width, uint32_t height,
                   uint32_t pitch, uint8_t bpp)
 {
     reset_diagnostic_framebuffer_inventory();
+    g_pixelFormat = PixelFormat::Unknown;
     if (lfbBase == 0 || width == 0 || height == 0) return false;
 
     g_buffer = reinterpret_cast<uint32_t*>(static_cast<uintptr_t>(lfbBase));
@@ -464,6 +480,7 @@ bool init_manual(uint64_t lfbBase, uint32_t width, uint32_t height,
                  uint32_t pitch, uint8_t bpp)
 {
     reset_diagnostic_framebuffer_inventory();
+    g_pixelFormat = PixelFormat::Unknown;
     if (lfbBase == 0 || width == 0 || height == 0) return false;
 
     g_buffer = reinterpret_cast<uint32_t*>(static_cast<uintptr_t>(lfbBase));
@@ -479,6 +496,7 @@ bool init_manual(uint64_t lfbBase, uint32_t width, uint32_t height,
 bool init_virtual(uint32_t width, uint32_t height)
 {
     reset_diagnostic_framebuffer_inventory();
+    g_pixelFormat = PixelFormat::Unknown;
     if (width == 0u || height == 0u) return false;
 
     const uint64_t totalPixels = static_cast<uint64_t>(width) * height;
@@ -521,6 +539,11 @@ uint32_t get_pitch()
 uint8_t get_bpp()
 {
     return g_bpp;
+}
+
+PixelFormat get_pixel_format()
+{
+    return g_pixelFormat;
 }
 
 uint32_t* get_buffer()
