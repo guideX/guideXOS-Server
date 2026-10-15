@@ -2,7 +2,7 @@
 
 **Current outcome: Outcome B — `BLOCKED_BY_FOREIGN_QEMU`**
 **Phase marker:** `last_completed=DM35`, `next_expected=DM36`
-**Current scope:** bounded, host-tested FAT32 metadata, cluster-chain, directory, and allocation checks are integrated into the production Disk Manager GUI. Guest/QEMU acceptance remains incomplete because a sibling project owns an active QEMU guest; this does not claim full filesystem consistency or complete DM36.
+**Current scope:** bounded, host-tested FAT32 metadata, cluster-chain, directory, and allocation checks are integrated into the production Disk Manager GUI. The source-matched DM36 guest passed the clean FAT32 partition check, but the remaining mandatory guest gates are incomplete because a sibling project owns an active QEMU guest. This does not claim complete DM36 or general filesystem-health certification.
 
 ## Continuation 1 — Metadata integrity foundation
 
@@ -375,3 +375,122 @@ validate the DM36 fixture set under `out/dm36/fat32-integrity/`, then run the
 guest gates A–H in the prescribed order. `.phase` remains
 `last_completed=DM35`, `next_expected=DM36`; DM37 is not ready. The report is
 not a filesystem-health certification and claims no repairs.
+
+## Continuation 5 — source-matched guest and clean FAT32 pass; foreign owner blocks remaining gates
+
+### Repository and runtime provenance
+
+The repository was verified on `DISK_MANAGER_IMPROVEMENTS` at starting HEAD
+`4a729fadea61ded7ef82c0a5d45cab8c282c0510` (`disk-manager: record DM36 guest
+blocker`), with a clean worktree and `.phase` still at
+`last_completed=DM35`, `next_expected=DM36`. No Git topology operation was
+performed and no production source changed.
+
+An initial QEMU census found the lane free. The isolated source-matched runtime
+was assembled under the ignored
+`out/dm36/fat32-integrity/runtime/esp/` directory. The AMD64 kernel and staged
+ESP kernel both hash to
+`96EC935C93BCB014D83419CE2C9A76B60521F89A8BBC148E28DC3A6A9136C870`; the UEFI
+x64 Release bootloader and staged ESP bootloader both hash to
+`30CAF50C39B37E1298C9D246DF88B1C16798C85AE1F5A8B78BD2DCB3524238F7`. The workspace ESP retains a non-matching kernel
+(`0045993829AECECBCDC2782D4C3C62B3B80FBC36E5C2A8082CD066F2550B7779`) and
+bootloader (`869D92E35AEF66C3AD8A4246C3A329BCD25A42C9FC6438A699BC80859125C50A`);
+only the private staging directory uses the isolated build outputs. OVMF is
+`2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792`; QEMU is
+11.0.0 (`v11.0.0-12122-ga4bb4b10c9`) with executable hash
+`A930E028F93D0FA47E4D58BDAD2432F7466DC2B6AF0AE376F77EF7A298FFDD02`. The
+staged candidate retains normal production startup, has no automatic checker
+launcher or automatic target selection, attaches no physical host storage,
+and keeps `NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0`.
+
+### Disposable fixture evidence
+
+The unchanged 600 MiB DM30 source image has SHA-256
+`C2E22CEA70DE015E6E551CBC31CAE918135B0EEAC526AD411DEE7EE5392A30F2`, size
+629,145,600 bytes, and a valid GPT/FAT32 layout. Its Microsoft Basic Data
+partition starts at LBA 2,048, has 1,226,719 sectors, and ends at LBA
+1,228,766 inclusive. FAT32 uses 512-byte sectors, 16 sectors per cluster,
+32 reserved sectors, two 599-sector FATs, 76,593 data clusters, root cluster
+2, FSInfo sector 1, backup boot sector 6, and label `DM9PROOF`. The source was
+not modified.
+
+Ten independent disposable images and their serials, device IDs, starting
+hashes, and geometry are recorded in
+`out/dm36/fat32-integrity/fixtures/fixture-manifest.json`. The clean,
+pristine, Stop, Close, removal, replacement, read-error, and mounted-target
+fixtures retain the source hash. The loop fixture
+(`DM36LOOP01`, SHA-256
+`25F764F83C60D3C0208092C1E2A0CBF945675F32132B4590795A8853F7B6B316`) changes
+only cluster 4 in both FAT copies from EOC to a self-reference. The orphan
+fixture (`DM36ORPHAN01`, SHA-256
+`0E8944010169B8ACE8FE509492982AFDE8F5714DC9A5F70C092540F067AEF6A1`) changes
+only cluster 76,594 from free to allocated in both FAT copies. Offline checks
+confirmed the intended byte differences and preserved partition geometry.
+
+### Gate A — clean partition passed
+
+The clean guest used QEMU 11.0.0, WHPX, `pc,usb=off`, UHCI, standard headless
+VGA, and the paced PS/2 helper with input routed to the named VGA device. The
+production Start Menu opened Disk Manager. The selected USB disk and its sole
+GPT FAT32 partition were visibly selected in screenshots. The production
+confirmation dialog captured serial `DM36CLEAN01`, device 2, partition 1,
+GPT identity, start LBA 2,048, count 1,226,719, and 512-byte logical sectors;
+it identified the check as read-only and did not unmount the target.
+
+The clean check reached `Verification Passed`. The result screen recorded 40
+metadata reads, 925,184 bytes read, both FAT copies compared over 306,688
+bytes, three chains/clusters, two directories, seven entries, 15 structural
+reads, and all 76,593 orphan clusters scanned with zero orphan bytes. It
+reported no FAT32 structural inconsistencies, no repairs, and released
+storage ownership. Screenshots and QMP snapshots are retained in
+`out/dm36/fat32-integrity/runs/A-clean-partition-routed/`.
+
+The operation-scoped trace analysis in `A-read-coverage.json` isolates the
+checker's contiguous SCSI tags 664–703: 40 READ(10) requests, 925,184 bytes,
+all within the selected partition (LBA 2,048–3,294). This matches the result
+screen. The whole pre-operation-to-result trace window contains 434 reads and
+1,126,912 bytes. The other 394 requests account for 201,728 bytes and are not
+attributed to the checker: 393 are outside the selected partition and one is
+at LBA 2,048. QMP target block counters show zero writes, zero write bytes,
+zero unmaps, and zero failed reads, writes, unmaps, or Flushes. The scan added
+no Flush. One Flush was already present at the pre-check
+baseline and is not attributed to the checker. After the result and ownership
+release, QEMU exited, its endpoint closed, exclusive image access succeeded,
+and the full fixture hash remained
+`C2E22CEA70DE015E6E551CBC31CAE918135B0EEAC526AD411DEE7EE5392A30F2`. The
+accepted run was owned by QEMU PID 5648 on QMP `127.0.0.1:61432`; the earlier
+input calibration used PID 18904 on `127.0.0.1:61431`. Both were DM36-owned
+processes, shut down after their guest work, and released the image.
+
+One earlier input-routing calibration boot did not start a check; it was
+closed with zero writes, unmaps, or failures and an unchanged clean-fixture
+hash. It is retained separately as `A-clean-partition/`. The routed run above
+is the accepted Gate A result.
+
+### Ownership recheck and remaining gates
+
+Before launching the loop fixture, the launch helper took a new process census
+and refused to start because it found QEMU PID **20084**, parent PID **22432**,
+from the sibling workspace `D:\dev\guideXOSServer`. At census time the
+process was active, with executable
+`C:\Program Files\qemu\qemu-system-x86_64.exe`; its command line showed a
+WHPX guest on QMP `127.0.0.1:58413` using that sibling workspace's
+`out/validation/settings-s13-20261014/production/guest-acceptance-vgaid/`
+ESP. The owner command line identified a separate `-display gtk` guest with
+no network. This census was recorded at `2026-10-15T02:18:02Z` in
+`out/dm36/fat32-integrity/runs/B-loop-partition/prelaunch-qemu-ownership.json`.
+The loop launch was refused before QEMU creation. The foreign guest was not
+contacted, paused, modified, or stopped; its files and port were not reused.
+Guest-related work ended at this ownership gate.
+
+Gate A passed. Gate B (loop and independent corruption findings, including
+finding navigation), C (dedicated Stop), D (Alt+F4 Close), E
+(removal/replacement), F (blkdebug read failure), the remaining cross-run
+requirements in G, and guest H (mounted-target rejection) remain unqualified.
+The accepted host admission tests remain the evidence for mounted-target
+policy; no guest-mounted target was fabricated. The pre-existing 259/259
+checker, 31/31 GUI, 1,482/1,482 storage, AMD64, `build.bat`, and UEFI x64
+Release results remain valid because production source did not change. The
+unrelated PacMan Native ELF linker issue remains unchanged. This is **Outcome
+B — `BLOCKED_BY_FOREIGN_QEMU`**; it is not DM36 acceptance. `.phase` remains
+`last_completed=DM35`, `next_expected=DM36`; DM37 is not ready.
