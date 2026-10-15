@@ -202,22 +202,25 @@ public:
     
     // Lifecycle methods (override in subclasses)
     virtual bool init() = 0;
-    virtual bool initWithParam(const char* param) { return init(); }  // Override for param support
+    virtual bool initWithParam(const char*) { return init(); }  // Override for param support
     virtual void shutdown() = 0;
     virtual void update() {}  // Called each frame
     
     // Event handlers (override in subclasses)
-    virtual void onMouseMove(int x, int y) {}
-    virtual void onMouseDown(int x, int y, uint8_t button) {}
-    virtual void onMouseUp(int x, int y, uint8_t button) {}
-    virtual void onMouseWheel(int x, int y, int wheelDelta) {}
-    virtual void onKeyDown(uint32_t key) {}
-    virtual void onKeyUp(uint32_t key) {}
-    virtual void onKeyChar(char c) {}
-    virtual void onWidgetClick(int widgetId) {}
+    virtual void onMouseMove(int, int) {}
+    virtual void onMouseDown(int, int, uint8_t) {}
+    virtual void onMouseUp(int, int, uint8_t) {}
+    virtual void onMouseWheel(int, int, int) {}
+    virtual void onKeyDown(uint32_t) {}
+    virtual void onKeyUp(uint32_t) {}
+    virtual void onKeyChar(char) {}
+    virtual void onWidgetClick(int) {}
     virtual void onWindowClose() {}
     virtual void onWindowFocus();
     virtual void onWindowBlur();
+    // Value-only notification delivered on the desktop owner path after an
+    // authoritative active display configuration commits.
+    virtual void onDisplayConfigurationChanged(uint32_t) {}
     
     // Drawing (called by compositor to render app content)
     virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) = 0;
@@ -302,6 +305,10 @@ public:
     
     // Update all running apps
     static void update();
+
+    // Dispatch a committed display-configuration generation to running apps.
+    // This walks the fixed app table synchronously and retains no callbacks.
+    static void notifyDisplayConfigurationChanged(uint32_t generation);
     
     // Check if we're running in bare-metal/UEFI mode
     static bool isBareMetal();

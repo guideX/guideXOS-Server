@@ -36,12 +36,17 @@ $ProductionFlags = @(
 )
 
 $CoreObject = Join-Path $Output "settings_presentation_core.o"
+$RefreshObject = Join-Path $Output "settings_display_refresh.o"
 $HarnessObject = Join-Path $Output "settings_presentation_freestanding_harness.o"
 $LinkedObject = Join-Path $Output "settings_presentation_freestanding_linked.o"
 
 Write-Host "Compiling shared core with production AMD64 freestanding flags."
 & $Compiler.Source @ProductionFlags -c settings_presentation_core.cpp -o $CoreObject
 if ($LASTEXITCODE -ne 0) { throw "Freestanding core compilation failed with exit code $LASTEXITCODE." }
+
+Write-Host "Compiling the bounded Display refresh helper with production flags."
+& $Compiler.Source @ProductionFlags -c kernel/core/settings_display_refresh.cpp -o $RefreshObject
+if ($LASTEXITCODE -ne 0) { throw "Freestanding Display refresh compilation failed with exit code $LASTEXITCODE." }
 
 Write-Host "Compiling bounded contract and link harness with production flags."
 & $Compiler.Source @ProductionFlags -c tests/settings_presentation_freestanding_harness.cpp -o $HarnessObject
@@ -65,8 +70,13 @@ if ($LASTEXITCODE -ne 0) { throw "Could not inspect the core symbol table." }
 if ($CoreSymbols -match "ProcessTable|Compositor|ipc::|std::|operator new|__cxa|malloc") {
     throw "A hosted or heap-runtime symbol was found in the freestanding core object."
 }
+$RefreshSymbols = @(& $Nm $RefreshObject)
+if ($LASTEXITCODE -ne 0) { throw "Could not inspect the Display refresh symbol table." }
+if ($RefreshSymbols -match "std::|operator new|__cxa|malloc|ProcessTable|ipc::") {
+    throw "A hosted or heap-runtime symbol was found in the freestanding Display refresh object."
+}
 
-Get-Item $CoreObject, $HarnessObject, $LinkedObject |
+Get-Item $CoreObject, $RefreshObject, $HarnessObject, $LinkedObject |
     Select-Object Name, Length |
     Format-Table -AutoSize
 Write-Host "Freestanding compile, bounded link, and unresolved-symbol checks PASS."

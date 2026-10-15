@@ -202,8 +202,10 @@ static bool copyFixedText(char* destination, size_t capacity,
 }
 
 static bool queryActiveDisplayConfiguration(
-    gxos::display::DisplayConfigurationResponse& response)
+    gxos::display::DisplayConfigurationResponse& response,
+    bool& topologyAvailable)
 {
+    topologyAvailable = false;
     gxos::display::DisplayConfigurationCommand request{};
     request.version = gxos::display::kDisplayConfigurationContractVersion;
     request.structureSize = sizeof(request);
@@ -211,18 +213,33 @@ static bool queryActiveDisplayConfiguration(
     request.commandType = static_cast<uint32_t>(
         gxos::display::DisplayConfigurationCommandType::QueryActiveConfiguration);
 
-    if (request.requestId == 0u ||
-        !gxos::display::DisplayConfigurationService::submit(request, response) ||
-        response.version != gxos::display::kDisplayConfigurationContractVersion ||
-        response.structureSize < sizeof(response) || response.requestId != request.requestId ||
-        response.commandType != request.commandType || response.success == 0u) {
+    if (request.requestId == 0u) {
         return false;
     }
 
+    const bool submitted = gxos::display::DisplayConfigurationService::submit(request, response);
+    if (response.version != gxos::display::kDisplayConfigurationContractVersion ||
+        response.structureSize < sizeof(response) || response.requestId != request.requestId ||
+        response.commandType != request.commandType || response.completed == 0u ||
+        response.activeConfigurationGeneration == 0u) {
+        return false;
+    }
+
+    // The service returns its active generation even when it truthfully
+    // reports that no output topology is available. That generation still
+    // versions the combined framebuffer/topology snapshot. A busy or malformed
+    // service response has no trustworthy generation and is rejected.
+    if (!submitted || response.success == 0u) {
+        return response.resultCode == static_cast<uint32_t>(
+            gxos::display::DisplayConfigurationResultCode::BackendUnavailable);
+    }
+
     const gxos::display::DisplayConfigurationSnapshot& active = response.activeConfiguration;
-    return active.version == gxos::display::kDisplayConfigurationContractVersion &&
+    topologyAvailable =
+        active.version == gxos::display::kDisplayConfigurationContractVersion &&
         active.structureSize >= sizeof(active) && active.outputCount > 0u &&
         active.outputCount <= gxos::display::kDisplayConfigurationMaxOutputs;
+    return true;
 }
 
 static void addActiveModeFields(
@@ -415,11 +432,12 @@ SnapshotStatus readDisplaySnapshot(
     if (capacity < sizeof(DisplaySnapshotV1)) return SnapshotStatus::BufferTooSmall;
 
     gxos::display::DisplayConfigurationResponse activeConfiguration{};
-    const bool activeConfigurationAvailable =
-        queryActiveDisplayConfiguration(activeConfiguration);
-    const uint64_t revision = activeConfigurationAvailable
-        ? static_cast<uint64_t>(activeConfiguration.activeConfigurationGeneration) + 1u
-        : kDisplaySnapshotRevision;
+    bool topologyAvailable = false;
+    if (!queryActiveDisplayConfiguration(activeConfiguration, topologyAvailable)) {
+        return SnapshotStatus::Unavailable;
+    }
+    const uint64_t revision =
+        static_cast<uint64_t>(activeConfiguration.activeConfigurationGeneration) + 1u;
     DisplaySnapshotV1 snapshot{};
     const SnapshotStatus status = buildDisplaySnapshot(
         framebuffer::is_available(),
@@ -432,7 +450,7 @@ SnapshotStatus readDisplaySnapshot(
         &snapshot);
     if (status != SnapshotStatus::Ok) return status;
 
-    if (activeConfigurationAvailable) {
+    if (topologyAvailable) {
         addActiveModeFields(activeConfiguration, snapshot);
     }
     if (!validDisplaySnapshot(snapshot)) return SnapshotStatus::Unavailable;

@@ -496,7 +496,20 @@ bool SettingsPresentationCore::applyCapabilitySnapshot(const CapabilitySnapshot&
 {
     if (!validCapability(snapshot.id) || !validAvailability(snapshot.availability)) return false;
     CapabilityPresentation& current = m_capabilities[static_cast<size_t>(snapshot.id)];
-    if (snapshot.revision < current.revision) return false;
+    if (snapshot.id == CapabilityId::Display && current.revision != 0 &&
+        snapshot.revision != current.revision) {
+        // Native Display revisions encode a 32-bit active-configuration
+        // generation as generation + 1. Use half-range serial arithmetic so
+        // a legitimate source-generation wrap can advance the capability.
+        const uint32_t candidateGeneration =
+            static_cast<uint32_t>(snapshot.revision - 1u);
+        const uint32_t currentGeneration =
+            static_cast<uint32_t>(current.revision - 1u);
+        const uint32_t difference = candidateGeneration - currentGeneration;
+        if (difference == 0u || difference >= 0x80000000u) return false;
+    } else if (snapshot.revision < current.revision) {
+        return false;
+    }
     current.availability = snapshot.availability;
     current.revision = snapshot.revision;
     return true;

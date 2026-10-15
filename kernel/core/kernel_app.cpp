@@ -549,6 +549,20 @@ void AppManager::update() {
     }
 }
 
+void AppManager::notifyDisplayConfigurationChanged(uint32_t generation) {
+    if (!s_initialized || generation == 0u) return;
+
+    // Notifications are delivered immediately on the desktop owner path. The
+    // recipient stores a bounded value marker; no callback or app pointer is
+    // retained beyond this traversal.
+    for (int i = 0; i < s_runningAppCount; ++i) {
+        KernelApp* app = s_runningApps[i];
+        if (app && app->getState() == AppState::Running) {
+            app->onDisplayConfigurationChanged(generation);
+        }
+    }
+}
+
 bool AppManager::isBareMetal() {
     // In kernel mode, we're always in bare-metal/UEFI mode
     // This would return false if running under the guideXOSServer

@@ -6,6 +6,7 @@
 #include "display_configuration_service.h"
 #include "kernel/native_elf_baremetal.h"
 #include "kernel/settings_native_provider.h"
+#include "kernel/settings_display_refresh.h"
 #include "kernel/vfs.h"
 #include "kernel/version.h"
 #include "kernel/arch.h"
@@ -16,6 +17,7 @@
 #include <string>
 
 namespace settings = gxos::apps::settings;
+namespace settings_native = kernel::settings_native;
 
 namespace {
 
@@ -41,9 +43,18 @@ uint32_t g_testFramebufferPitch = 0;
 uint32_t g_testFramebufferBpp = 0;
 kernel::framebuffer::PixelFormat g_testFramebufferFormat = kernel::framebuffer::PixelFormat::Unknown;
 bool g_testActiveDisplayConfigurationAvailable = true;
+bool g_testDisplayConfigurationServiceAvailable = true;
 uint32_t g_testDisplayConfigurationGeneration = 8u;
+uint32_t g_testLogicalDesktopWidth = 1379u;
+uint32_t g_testLogicalDesktopHeight = 781u;
+char g_testPrimaryModeId[32] = "mode-primary-test";
 uint64_t g_testDisplayRequestId = 0u;
 int g_testDisplayMutationSubmissions = 0;
+int g_testDisplayQueryCount = 0;
+int g_testAdapterDisplayReads = 0;
+int g_testRefreshRepaints = 0;
+bool g_testCorruptAdapterSnapshotVersion = false;
+bool g_testTruncateAdapterSnapshot = false;
 
 void expect(bool condition, const char* name)
 {
@@ -111,6 +122,112 @@ public:
     void onWindowBlur() override { ++g_runtimeFocusLost; }
 };
 
+class SettingsRefreshProbeApp : public ProbeApp {
+public:
+    SettingsRefreshProbeApp()
+        : ProbeApp("Settings"), m_focused(false)
+    {
+        m_adapter.structureSize = sizeof(m_adapter);
+        m_adapter.version = settings::kSettingsPresentationAdapterVersion;
+        m_adapter.context = this;
+        m_adapter.readProviderSnapshot = readProviderSnapshot;
+    }
+
+    bool init() override
+    {
+        if (!ProbeApp::init()) return false;
+        m_presentation.reset();
+        m_presentation.selectCategory(settings::CategoryId::System);
+        m_refreshState.reset();
+        m_changeSignal.reset();
+        settings_native::refreshDisplaySnapshot(&m_adapter, m_refreshState, m_presentation);
+        return true;
+    }
+
+    void shutdown() override
+    {
+        m_changeSignal.reset();
+        m_refreshState.reset();
+        ProbeApp::shutdown();
+    }
+
+    void update() override
+    {
+        uint32_t generation = 0u;
+        if (!m_changeSignal.consume(&generation)) return;
+        (void)generation;
+        const settings_native::DisplaySnapshotRefreshResult result =
+            settings_native::refreshDisplaySnapshot(&m_adapter, m_refreshState, m_presentation);
+        if (m_focused && m_presentation.selectedCategory() == settings::CategoryId::Display &&
+            (result == settings_native::DisplaySnapshotRefreshResult::Updated ||
+             result == settings_native::DisplaySnapshotRefreshResult::Unavailable)) {
+            ++g_testRefreshRepaints;
+        }
+    }
+
+    void onDisplayConfigurationChanged(uint32_t generation) override
+    {
+        if (m_state == kernel::app::AppState::Running && m_window) {
+            m_changeSignal.signal(generation);
+        }
+    }
+
+    void onWindowFocus() override
+    {
+        m_focused = true;
+        ProbeApp::onWindowFocus();
+    }
+
+    void onWindowBlur() override
+    {
+        m_focused = false;
+        ProbeApp::onWindowBlur();
+    }
+
+    bool selectCategory(settings::CategoryId category)
+    {
+        if (!m_presentation.selectCategory(category)) return false;
+        if (category == settings::CategoryId::Display) {
+            settings_native::refreshDisplaySnapshot(&m_adapter, m_refreshState, m_presentation);
+        }
+        return true;
+    }
+
+    void setFocused(bool focused) { m_focused = focused; }
+    settings_native::DisplaySnapshotRefreshState& refreshState() { return m_refreshState; }
+    const settings_native::DisplaySnapshotRefreshState& refreshState() const { return m_refreshState; }
+    settings::SettingsPresentationCore& presentation() { return m_presentation; }
+
+private:
+    static bool readProviderSnapshot(void* context, settings::CapabilityId capability,
+                                     void* output, size_t capacity, size_t* outSize,
+                                     uint64_t* outRevision)
+    {
+        SettingsRefreshProbeApp* self = static_cast<SettingsRefreshProbeApp*>(context);
+        if (!self || capability != settings::CapabilityId::Display) return false;
+        ++g_testAdapterDisplayReads;
+        const settings_native::DisplaySnapshotRequestV1 request = {
+            sizeof(settings_native::DisplaySnapshotRequestV1),
+            settings_native::kDisplaySnapshotVersion,
+            0u
+        };
+        const bool readOk = settings_native::readDisplaySnapshot(
+            self, &request, output, capacity, outSize, outRevision) ==
+                settings_native::SnapshotStatus::Ok;
+        if (readOk && output && g_testCorruptAdapterSnapshotVersion) {
+            static_cast<settings_native::DisplaySnapshotV1*>(output)->version++;
+        }
+        if (readOk && outSize && g_testTruncateAdapterSnapshot) --*outSize;
+        return readOk;
+    }
+
+    settings::SettingsPresentationAdapterV1 m_adapter{};
+    settings::SettingsPresentationCore m_presentation;
+    settings_native::DisplaySnapshotRefreshState m_refreshState;
+    settings_native::DisplayConfigurationChangeSignal m_changeSignal;
+    bool m_focused;
+};
+
 class FailingProbeApp : public kernel::app::KernelApp {
 public:
     explicit FailingProbeApp(const char* name)
@@ -122,7 +239,7 @@ public:
     void draw(uint32_t, uint32_t, uint32_t, uint32_t) override {}
 };
 
-kernel::app::KernelApp* createSettingsProbe() { return new ProbeApp("Settings"); }
+kernel::app::KernelApp* createSettingsProbe() { return new SettingsRefreshProbeApp(); }
 kernel::app::KernelApp* createNotepadProbe() { return new ProbeApp("Notepad"); }
 kernel::app::KernelApp* createFailingSettingsProbe() { return new FailingProbeApp("FailingSettingsProbe"); }
 
@@ -170,21 +287,30 @@ bool DisplayConfigurationService::submit(
         ++g_testDisplayMutationSubmissions;
         return false;
     }
+    ++g_testDisplayQueryCount;
+    if (!g_testDisplayConfigurationServiceAvailable) {
+        response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::BackendBusy);
+        return false;
+    }
     response.activeConfigurationGeneration = g_testDisplayConfigurationGeneration;
-    if (!g_testActiveDisplayConfigurationAvailable) return true;
+    if (!g_testActiveDisplayConfigurationAvailable) {
+        response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::BackendUnavailable);
+        return false;
+    }
 
     DisplayConfigurationSnapshot& active = response.activeConfiguration;
     active.version = kDisplayConfigurationContractVersion;
     active.structureSize = sizeof(active);
     active.mode = static_cast<uint32_t>(DisplayConfigurationMode::Extend);
     active.outputCount = 1u;
-    active.virtualDesktopWidth = 1379;
-    active.virtualDesktopHeight = 781;
+    active.virtualDesktopWidth = static_cast<int32_t>(g_testLogicalDesktopWidth);
+    active.virtualDesktopHeight = static_cast<int32_t>(g_testLogicalDesktopHeight);
     DisplayConfigurationOutput& primary = active.outputs[0];
-    copyText(primary.modeId, "mode-primary-test", sizeof(primary.modeId));
+    copyText(primary.modeId, g_testPrimaryModeId, sizeof(primary.modeId));
     primary.enabled = 1u;
     primary.primary = 1u;
     response.success = 1u;
+    response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::Success);
     return true;
 }
 
@@ -258,6 +384,16 @@ int main()
 
     AppManager::init();
     AppLogger::init();
+    g_testFramebufferAvailable = true;
+    g_testFramebufferWidth = 1377u;
+    g_testFramebufferHeight = 779u;
+    g_testFramebufferPitch = 5512u;
+    g_testFramebufferBpp = 32u;
+    g_testFramebufferFormat = framebuffer::PixelFormat::B8G8R8A8;
+    g_testDisplayConfigurationGeneration = 8u;
+    AppManager::notifyDisplayConfigurationChanged(8u);
+    expect(AppManager::getRunningAppCount() == 0,
+           "a display notification before Settings initializes has no retained recipient");
     expect(AppManager::registerAppWithIdentity("Settings", kSettingsRuntimeAppId,
                                                 0xFF8060D0u, createSettingsProbe),
            "register dedicated Settings identity");
@@ -354,6 +490,12 @@ int main()
     expect(settingsApp && settingsApp->getWindow() &&
                settingsApp->getWindow()->owner == settingsApp,
            "Settings window owner matches its running application");
+    SettingsRefreshProbeApp* settingsRefreshApp =
+        static_cast<SettingsRefreshProbeApp*>(settingsApp);
+    expect(settingsRefreshApp && settingsRefreshApp->refreshState().hasSnapshot() &&
+               settingsRefreshApp->refreshState().snapshot().framebufferWidth == 1377u &&
+               settingsRefreshApp->refreshState().revision() == 9u,
+           "Settings initialization captures the current provider snapshot after a pre-init change");
     expect(AppManager::launchApp("Settings") && AppManager::getRunningAppCount() == 1,
            "duplicate launch focuses existing instance without creating another");
     expect(AppManager::launchAppWithParam("Settings", "gxos.builtin.controlpanel") &&
@@ -597,6 +739,248 @@ int main()
     g_testFramebufferAvailable = true;
     g_testActiveDisplayConfigurationAvailable = true;
     g_testDisplayConfigurationGeneration = 8u;
+    g_testDisplayConfigurationServiceAvailable = true;
+
+    SettingsRefreshProbeApp* refreshApp = settingsRefreshApp;
+    expect(refreshApp && refreshApp->refreshState().hasSnapshot() &&
+               refreshApp->refreshState().revision() == 9u,
+           "the native refresh state starts from the same authorized provider revision");
+    expect(refreshApp && refreshApp->presentation().setFocusedControl(settings::FocusControl::SystemAbout),
+           "refresh fixture starts with a stable System focus target");
+
+    const int readsBeforeDuplicate = g_testAdapterDisplayReads;
+    const int repaintsBeforeDuplicate = g_testRefreshRepaints;
+    AppManager::notifyDisplayConfigurationChanged(8u);
+    AppManager::notifyDisplayConfigurationChanged(8u);
+    AppManager::update();
+    expect(g_testAdapterDisplayReads == readsBeforeDuplicate + 1 &&
+               g_testRefreshRepaints == repaintsBeforeDuplicate,
+           "duplicate notifications coalesce to one read and unchanged data does not repaint");
+    expect(refreshApp && refreshApp->presentation().selectedCategory() == settings::CategoryId::System &&
+               refreshApp->presentation().focusedControl() == settings::FocusControl::SystemAbout,
+           "a duplicate refresh preserves shared navigation and focus");
+
+    g_testDisplayConfigurationGeneration = 9u;
+    g_testFramebufferWidth = 1280u;
+    g_testFramebufferHeight = 800u;
+    g_testFramebufferPitch = 5120u;
+    g_testLogicalDesktopWidth = 1280u;
+    g_testLogicalDesktopHeight = 800u;
+    copyText(g_testPrimaryModeId, "mode-primary-9", sizeof(g_testPrimaryModeId));
+    const int hiddenPageRepaints = g_testRefreshRepaints;
+    AppManager::notifyDisplayConfigurationChanged(9u);
+    AppManager::update();
+    expect(refreshApp && refreshApp->refreshState().hasSnapshot() &&
+               refreshApp->refreshState().snapshot().framebufferWidth == 1280u &&
+               refreshApp->refreshState().snapshot().bytesPerScanline == 5120u &&
+               refreshApp->refreshState().snapshot().logicalDesktopWidth == 1280u &&
+               refreshApp->refreshState().revision() == 10u,
+           "one legitimate source change commits a consistent provider snapshot");
+    expect(refreshApp && refreshApp->presentation().selectedCategory() == settings::CategoryId::System &&
+               refreshApp->presentation().focusedControl() == settings::FocusControl::SystemAbout &&
+               g_testRefreshRepaints == hiddenPageRepaints,
+           "a refresh on System updates cached Display data without repainting the visible page");
+    expect(refreshApp && refreshApp->selectCategory(settings::CategoryId::Display) &&
+               refreshApp->refreshState().snapshot().framebufferWidth == 1280u,
+           "returning to Display presents the current cached provider snapshot");
+
+    g_testDisplayConfigurationGeneration = 10u;
+    g_testFramebufferWidth = 1281u;
+    g_testFramebufferPitch = 5124u;
+    g_testLogicalDesktopWidth = 1281u;
+    copyText(g_testPrimaryModeId, "mode-primary-10", sizeof(g_testPrimaryModeId));
+    const int visibleRepaintsBeforeChange = g_testRefreshRepaints;
+    AppManager::notifyDisplayConfigurationChanged(10u);
+    AppManager::update();
+    expect(g_testRefreshRepaints == visibleRepaintsBeforeChange + 1 &&
+               refreshApp && refreshApp->refreshState().snapshot().framebufferWidth == 1281u,
+           "a changed snapshot on the focused Display page requests one repaint");
+    const int readsBeforeRapidDuplicates = g_testAdapterDisplayReads;
+    AppManager::notifyDisplayConfigurationChanged(10u);
+    AppManager::notifyDisplayConfigurationChanged(10u);
+    AppManager::update();
+    expect(g_testAdapterDisplayReads == readsBeforeRapidDuplicates + 1 &&
+               g_testRefreshRepaints == visibleRepaintsBeforeChange + 1,
+           "a harmless duplicate source event keeps current values and avoids a second repaint");
+
+    expect(refreshApp && refreshApp->selectCategory(settings::CategoryId::About),
+           "refresh fixture can move to About through the shared presentation core");
+    g_testDisplayConfigurationGeneration = 11u;
+    g_testFramebufferWidth = 1282u;
+    g_testFramebufferPitch = 5128u;
+    g_testLogicalDesktopWidth = 1282u;
+    const int aboutRepaints = g_testRefreshRepaints;
+    AppManager::notifyDisplayConfigurationChanged(11u);
+    AppManager::update();
+    expect(refreshApp && refreshApp->refreshState().snapshot().framebufferWidth == 1282u &&
+               refreshApp->presentation().selectedCategory() == settings::CategoryId::About &&
+               g_testRefreshRepaints == aboutRepaints,
+           "notifications during About update cached data without repainting or navigating away");
+
+    expect(refreshApp && refreshApp->selectCategory(settings::CategoryId::Display),
+           "Display can be selected again after a hidden refresh");
+    refreshApp->onWindowBlur();
+    g_testDisplayConfigurationGeneration = 12u;
+    g_testFramebufferWidth = 1283u;
+    g_testFramebufferPitch = 5132u;
+    g_testLogicalDesktopWidth = 1283u;
+    const int unfocusedRepaints = g_testRefreshRepaints;
+    AppManager::notifyDisplayConfigurationChanged(12u);
+    AppManager::update();
+    expect(refreshApp && refreshApp->refreshState().snapshot().framebufferWidth == 1283u &&
+               g_testRefreshRepaints == unfocusedRepaints,
+           "a refresh during focus loss is cached and does not redraw an unfocused window");
+    refreshApp->onWindowFocus();
+    expect(refreshApp && refreshApp->refreshState().snapshot().framebufferWidth == 1283u,
+           "focus restoration reveals the latest accepted Display snapshot");
+
+    const int rapidReadStart = g_testAdapterDisplayReads;
+    const int rapidRepaintStart = g_testRefreshRepaints;
+    g_testDisplayConfigurationGeneration = 13u;
+    g_testFramebufferWidth = 1284u;
+    g_testFramebufferPitch = 5136u;
+    g_testLogicalDesktopWidth = 1284u;
+    AppManager::notifyDisplayConfigurationChanged(13u);
+    g_testDisplayConfigurationGeneration = 14u;
+    g_testFramebufferWidth = 1285u;
+    g_testFramebufferPitch = 5140u;
+    g_testLogicalDesktopWidth = 1285u;
+    copyText(g_testPrimaryModeId, "mode-primary-14", sizeof(g_testPrimaryModeId));
+    AppManager::notifyDisplayConfigurationChanged(14u);
+    AppManager::notifyDisplayConfigurationChanged(13u);
+    AppManager::update();
+    expect(g_testAdapterDisplayReads == rapidReadStart + 1 &&
+               refreshApp && refreshApp->refreshState().revision() == 15u &&
+               refreshApp->refreshState().snapshot().framebufferWidth == 1285u &&
+               g_testRefreshRepaints == rapidRepaintStart + 1,
+           "rapid state changes coalesce to one read of the newest generation");
+
+    DisplaySnapshotV1 duplicateRevision = refreshApp->refreshState().snapshot();
+    expect(refreshApp->refreshState().accept(duplicateRevision) ==
+               DisplaySnapshotRefreshResult::NoChange,
+           "duplicate snapshot revision with identical values is harmless");
+    duplicateRevision.logicalDesktopWidth++;
+    expect(refreshApp->refreshState().accept(duplicateRevision) ==
+               DisplaySnapshotRefreshResult::Rejected &&
+               refreshApp->refreshState().snapshot().framebufferWidth == 1285u,
+           "inconsistent values at the same source revision are rejected");
+    DisplaySnapshotV1 staleRevision = refreshApp->refreshState().snapshot();
+    staleRevision.revision--;
+    expect(refreshApp->refreshState().accept(staleRevision) ==
+               DisplaySnapshotRefreshResult::Rejected &&
+               refreshApp->refreshState().revision() == 15u,
+           "an older snapshot revision cannot replace current Display state");
+
+    const int providerRefreshStart = g_testAdapterDisplayReads;
+    const int providerRepaintStart = g_testRefreshRepaints;
+    for (uint32_t cycle = 0u; cycle < 250u; ++cycle) {
+        ++g_testDisplayConfigurationGeneration;
+        if (g_testDisplayConfigurationGeneration == 0u) ++g_testDisplayConfigurationGeneration;
+        const uint32_t width = 1300u + (cycle % 450u);
+        const uint32_t height = 700u + (cycle % 100u);
+        g_testFramebufferWidth = width;
+        g_testFramebufferHeight = height;
+        g_testFramebufferPitch = width * 4u;
+        g_testLogicalDesktopWidth = width + 2u;
+        g_testLogicalDesktopHeight = height + 1u;
+        const std::string mode = "mode-cycle-" + std::to_string(cycle);
+        copyText(g_testPrimaryModeId, mode.c_str(), sizeof(g_testPrimaryModeId));
+        AppManager::notifyDisplayConfigurationChanged(g_testDisplayConfigurationGeneration);
+        AppManager::update();
+    }
+    expect(g_testAdapterDisplayReads == providerRefreshStart + 250 &&
+               g_testRefreshRepaints == providerRepaintStart + 250 &&
+               refreshApp && refreshApp->refreshState().revision() ==
+                   static_cast<uint64_t>(g_testDisplayConfigurationGeneration) + 1u &&
+               refreshApp->refreshState().snapshot().bytesPerScanline ==
+                   refreshApp->refreshState().snapshot().framebufferWidth * 4u,
+           "250 controlled provider refresh cycles preserve generation-consistent geometry");
+
+    expect(refreshApp && refreshApp->selectCategory(settings::CategoryId::About),
+           "1000-operation reliability fixture selects a hidden category");
+    const int transitionReadStart = g_testAdapterDisplayReads;
+    const int transitionRepaintStart = g_testRefreshRepaints;
+    for (uint32_t operation = 0u; operation < 1000u; ++operation) {
+        ++g_testDisplayConfigurationGeneration;
+        if (g_testDisplayConfigurationGeneration == 0u) ++g_testDisplayConfigurationGeneration;
+        const uint32_t width = 1400u + (operation % 300u);
+        const uint32_t height = 720u + (operation % 80u);
+        g_testFramebufferWidth = width;
+        g_testFramebufferHeight = height;
+        g_testFramebufferPitch = width * 4u;
+        g_testLogicalDesktopWidth = width;
+        g_testLogicalDesktopHeight = height;
+        AppManager::notifyDisplayConfigurationChanged(g_testDisplayConfigurationGeneration);
+        AppManager::notifyDisplayConfigurationChanged(g_testDisplayConfigurationGeneration);
+        AppManager::update();
+    }
+    expect(g_testAdapterDisplayReads == transitionReadStart + 1000 &&
+               g_testRefreshRepaints == transitionRepaintStart &&
+               refreshApp && refreshApp->refreshState().snapshot().framebufferWidth ==
+                   g_testFramebufferWidth &&
+               refreshApp->presentation().selectedCategory() == settings::CategoryId::About,
+           "1000 deterministic transitions coalesce duplicates and preserve hidden-page state");
+
+    expect(refreshApp && refreshApp->selectCategory(settings::CategoryId::Display),
+           "Display remains reachable after reliability refresh cycles");
+    g_testDisplayConfigurationGeneration++;
+    g_testFramebufferWidth++;
+    g_testFramebufferPitch = g_testFramebufferWidth * 4u;
+    g_testLogicalDesktopWidth = g_testFramebufferWidth;
+    g_testCorruptAdapterSnapshotVersion = true;
+    AppManager::notifyDisplayConfigurationChanged(g_testDisplayConfigurationGeneration);
+    AppManager::update();
+    g_testCorruptAdapterSnapshotVersion = false;
+    expect(refreshApp && !refreshApp->refreshState().hasSnapshot() &&
+               refreshApp->presentation().capability(settings::CapabilityId::Display)->availability ==
+                   settings::CapabilityAvailability::Unavailable,
+           "an invalid provider version clears displayed data and marks Display unavailable");
+
+    g_testDisplayConfigurationGeneration++;
+    g_testFramebufferWidth++;
+    g_testFramebufferPitch = g_testFramebufferWidth * 4u;
+    g_testLogicalDesktopWidth = g_testFramebufferWidth;
+    g_testTruncateAdapterSnapshot = true;
+    AppManager::notifyDisplayConfigurationChanged(g_testDisplayConfigurationGeneration);
+    AppManager::update();
+    g_testTruncateAdapterSnapshot = false;
+    expect(refreshApp && !refreshApp->refreshState().hasSnapshot(),
+           "an undersized adapter snapshot is rejected without exposing partial fields");
+
+    g_testDisplayConfigurationServiceAvailable = false;
+    AppManager::notifyDisplayConfigurationChanged(g_testDisplayConfigurationGeneration);
+    AppManager::update();
+    expect(refreshApp && !refreshApp->refreshState().hasSnapshot(),
+           "a temporarily busy provider does not leave old values labeled as current");
+    g_testDisplayConfigurationServiceAvailable = true;
+    AppManager::notifyDisplayConfigurationChanged(g_testDisplayConfigurationGeneration);
+    AppManager::update();
+    expect(refreshApp && refreshApp->refreshState().hasSnapshot() &&
+               refreshApp->refreshState().snapshot().framebufferWidth == g_testFramebufferWidth,
+           "the Display provider recovers after an unavailable response");
+
+    DisplaySnapshotV1 nearWrap{};
+    DisplaySnapshotV1 afterWrap{};
+    expect(buildDisplaySnapshot(true, 1280u, 800u, 5120u, 32u, 1u,
+                                0x100000000ull, &nearWrap) == SnapshotStatus::Ok &&
+               buildDisplaySnapshot(true, 1280u, 800u, 5120u, 32u, 1u,
+                                2u, &afterWrap) == SnapshotStatus::Ok,
+           "display wraparound fixtures build with source-generation revisions");
+    DisplaySnapshotRefreshState wrapState;
+    expect(wrapState.accept(nearWrap) == DisplaySnapshotRefreshResult::Updated &&
+               wrapState.accept(afterWrap) == DisplaySnapshotRefreshResult::NoChange &&
+               wrapState.revision() == 2u,
+           "snapshot ordering accepts the documented nonzero generation wrap");
+    settings::SettingsPresentationCore wrapPresentation;
+    settings::CapabilitySnapshot nearWrapCapability = {
+        settings::CapabilityId::Display, settings::CapabilityAvailability::ReadOnly,
+        0x100000000ull
+    };
+    settings::CapabilitySnapshot afterWrapCapability = nearWrapCapability;
+    afterWrapCapability.revision = 2u;
+    expect(wrapPresentation.applyCapabilitySnapshot(nearWrapCapability) &&
+               wrapPresentation.applyCapabilitySnapshot(afterWrapCapability),
+           "the shared presentation core accepts Display generation wraparound");
 
     settings::SettingsPresentationCore presentation;
     expect(presentation.selectedCategory() == settings::CategoryId::System,
@@ -681,10 +1065,21 @@ int main()
            "closing an unrelated app leaves the Settings identity and window ownership intact");
 
     KernelApp* settingsBeforeCycles = AppManager::getRunningApp(0);
+    ++g_testDisplayConfigurationGeneration;
+    if (g_testDisplayConfigurationGeneration == 0u) ++g_testDisplayConfigurationGeneration;
+    AppManager::notifyDisplayConfigurationChanged(g_testDisplayConfigurationGeneration);
     if (settingsBeforeCycles) settingsBeforeCycles->requestClose();
+    ++g_testDisplayConfigurationGeneration;
+    if (g_testDisplayConfigurationGeneration == 0u) ++g_testDisplayConfigurationGeneration;
+    AppManager::notifyDisplayConfigurationChanged(g_testDisplayConfigurationGeneration);
+    const int readsBeforeLateNotification = g_testAdapterDisplayReads;
     AppManager::update();
     expect(AppManager::getRunningAppCount() == 0 && g_activeWindows == 0,
            "initial Settings instance is fully closed before lifecycle repetitions");
+    AppManager::notifyDisplayConfigurationChanged(g_testDisplayConfigurationGeneration + 1u);
+    AppManager::update();
+    expect(g_testAdapterDisplayReads == readsBeforeLateNotification,
+           "pending, during-close, and post-destruction notifications cannot call a stale Settings instance");
 
     const int createdBeforeCycles = g_appCreated;
     const int destroyedBeforeCycles = g_appDestroyed;
@@ -728,6 +1123,7 @@ int main()
            "window focus transitions are delivered through the compositor boundary");
 
     std::cout << "Settings native runtime tests: " << (g_checks - g_failures)
-              << "/" << g_checks << " passed; lifecycle repetitions=100\n";
+              << "/" << g_checks << " passed; lifecycle repetitions=100"
+              << "; provider refresh cycles=250; notification/state transitions=1000\n";
     return g_failures == 0 ? 0 : 1;
 }

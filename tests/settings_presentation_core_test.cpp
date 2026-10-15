@@ -240,6 +240,17 @@ int main()
     check(!core.applyCapabilitySnapshot({ CapabilityId::Display, CapabilityAvailability::ReadOnly, 2 }) &&
           core.capability(CapabilityId::Display)->revision == 4,
           "stale provider refresh is rejected");
+    SettingsPresentationCore displayWrapCore;
+    check(displayWrapCore.applyCapabilitySnapshot({ CapabilityId::Display,
+              CapabilityAvailability::ReadOnly, 0x100000000ull }) &&
+          displayWrapCore.applyCapabilitySnapshot({ CapabilityId::Display,
+              CapabilityAvailability::ReadOnly, 2u }) &&
+          displayWrapCore.capability(CapabilityId::Display)->revision == 2u,
+          "Display source generation wrap advances with bounded serial ordering");
+    check(!displayWrapCore.applyCapabilitySnapshot({ CapabilityId::Display,
+              CapabilityAvailability::ReadOnly, 0x100000000ull }) &&
+          displayWrapCore.capability(CapabilityId::Display)->revision == 2u,
+          "a delayed pre-wrap Display revision is rejected after wrap");
     check(!core.completeOperation({ firstRequestId + 1, OperationCompletion::Success }),
           "stale operation completion is ignored");
     check(!core.completeOperation({ firstRequestId, static_cast<OperationCompletion>(9) }),

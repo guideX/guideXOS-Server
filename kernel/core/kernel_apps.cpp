@@ -26,6 +26,7 @@
 #include "include/kernel/virtio_gpu.h"
 #include "include/kernel/kernel_text_guard.h"
 #include "include/kernel/settings_native_provider.h"
+#include "include/kernel/settings_display_refresh.h"
 #include "../../built_in_app_metadata.h"
 #include "../../gxos_tls_foundation.h"
 #include "../../gxos_tls_prerequisites.h"
@@ -16481,7 +16482,7 @@ public:
         : m_hoverCategory(settings::CategoryId::Count), m_windowFocused(false),
           m_providerStatus(settings_native::SnapshotStatus::Unavailable),
           m_displayProviderStatus(settings_native::SnapshotStatus::Unavailable),
-          m_snapshotAvailable(false), m_displaySnapshotValid(false),
+          m_snapshotAvailable(false),
           m_queueHead(0), m_queueCount(0),
           m_drawX(0), m_drawY(0), m_drawW(0), m_drawH(0)
     {
@@ -16505,8 +16506,8 @@ public:
         m_providerStatus = settings_native::SnapshotStatus::Unavailable;
         m_displayProviderStatus = settings_native::SnapshotStatus::Unavailable;
         m_snapshot = settings_native::SystemAboutSnapshotV2{};
-        m_displaySnapshot = settings_native::DisplaySnapshotV1{};
-        m_displaySnapshotValid = false;
+        m_displayRefreshState.reset();
+        m_displayRefreshSignal.reset();
 
         settings::SettingsWindowConstraints constraints{};
         if (!m_adapter.getWindowConstraints(m_adapter.context, &constraints)) return false;
@@ -16540,18 +16541,8 @@ public:
             snapshotRevision == m_snapshot.revision &&
             settings_native::validSystemAboutSnapshot(m_snapshot);
 
-        size_t displaySnapshotSize = 0;
-        uint64_t displaySnapshotRevision = 0;
-        m_displaySnapshotValid = m_adapter.readProviderSnapshot(
-            m_adapter.context,
-            settings::CapabilityId::Display,
-            &m_displaySnapshot,
-            sizeof(m_displaySnapshot),
-            &displaySnapshotSize,
-            &displaySnapshotRevision) &&
-            displaySnapshotSize == sizeof(m_displaySnapshot) &&
-            displaySnapshotRevision == m_displaySnapshot.revision &&
-            settings_native::validDisplaySnapshot(m_displaySnapshot);
+        settings_native::refreshDisplaySnapshot(
+            &m_adapter, m_displayRefreshState, m_presentation);
 
         for (size_t i = 0; i < settings::kCapabilityCount; ++i) {
             settings::CapabilitySnapshot capability{};
@@ -16581,9 +16572,9 @@ public:
         m_queueHead = 0;
         m_queueCount = 0;
         m_snapshot = settings_native::SystemAboutSnapshotV2{};
-        m_displaySnapshot = settings_native::DisplaySnapshotV1{};
         m_snapshotAvailable = false;
-        m_displaySnapshotValid = false;
+        m_displayRefreshState.reset();
+        m_displayRefreshSignal.reset();
         serial::puts("[settings-native] shutdown identity=");
         serial::puts(getRuntimeAppId());
         serial::putc('\n');
@@ -16591,10 +16582,28 @@ public:
 
     void update() override
     {
+        uint32_t displayGeneration = 0u;
+        if (m_state == app::AppState::Running && m_displayRefreshSignal.consume(&displayGeneration)) {
+            (void)displayGeneration;
+            const settings_native::DisplaySnapshotRefreshResult refreshResult = refreshDisplaySnapshot();
+            if ((refreshResult == settings_native::DisplaySnapshotRefreshResult::Updated ||
+                 refreshResult == settings_native::DisplaySnapshotRefreshResult::Unavailable) &&
+                m_windowFocused &&
+                m_presentation.selectedCategory() == settings::CategoryId::Display) {
+                invalidate();
+            }
+        }
+
         settings::SettingsInputEvent event{};
         while (m_adapter.pollInput(m_adapter.context, &event)) {
             if (processInput(event)) invalidate();
         }
+    }
+
+    void onDisplayConfigurationChanged(uint32_t generation) override
+    {
+        if (m_state != app::AppState::Running || !m_window || generation == 0u) return;
+        m_displayRefreshSignal.signal(generation);
     }
 
     void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override
@@ -16668,13 +16677,13 @@ private:
     settings::SettingsPresentationCore m_presentation;
     settings::SettingsPresentationAdapterV1 m_adapter;
     settings_native::SystemAboutSnapshotV2 m_snapshot{};
-    settings_native::DisplaySnapshotV1 m_displaySnapshot{};
+    settings_native::DisplaySnapshotRefreshState m_displayRefreshState;
+    settings_native::DisplayConfigurationChangeSignal m_displayRefreshSignal;
     settings::CategoryId m_hoverCategory;
     bool m_windowFocused;
     settings_native::SnapshotStatus m_providerStatus;
     settings_native::SnapshotStatus m_displayProviderStatus;
     bool m_snapshotAvailable;
-    bool m_displaySnapshotValid;
     settings::SettingsInputEvent m_inputQueue[kInputQueueCapacity]{};
     uint32_t m_queueHead;
     uint32_t m_queueCount;
@@ -16745,13 +16754,15 @@ private:
             output->availability = settings::CapabilityAvailability::ReadOnly;
             output->revision = settings_native::kSystemAboutSnapshotRevision;
         } else if (capability == settings::CapabilityId::Display && self &&
-                   self->m_displaySnapshotValid &&
-                   self->m_displaySnapshot.status == settings_native::DisplayInformationStatus::Available) {
+                   self->m_displayRefreshState.hasSnapshot() &&
+                   self->m_displayRefreshState.snapshot().status ==
+                       settings_native::DisplayInformationStatus::Available) {
             output->availability = settings::CapabilityAvailability::ReadOnly;
-            output->revision = self->m_displaySnapshot.revision;
+            output->revision = self->m_displayRefreshState.revision();
         } else {
             output->availability = settings::CapabilityAvailability::Unavailable;
-            output->revision = 0;
+            output->revision = capability == settings::CapabilityId::Display && self
+                ? self->m_displayRefreshState.revision() : 0u;
         }
         return true;
     }
@@ -16823,28 +16834,10 @@ private:
         return true;
     }
 
-    void refreshDisplaySnapshot()
+    settings_native::DisplaySnapshotRefreshResult refreshDisplaySnapshot()
     {
-        settings_native::DisplaySnapshotV1 refreshed{};
-        size_t snapshotSize = 0;
-        uint64_t snapshotRevision = 0;
-        const bool read = m_adapter.readProviderSnapshot(
-            m_adapter.context,
-            settings::CapabilityId::Display,
-            &refreshed,
-            sizeof(refreshed),
-            &snapshotSize,
-            &snapshotRevision);
-        m_displaySnapshotValid = read && snapshotSize == sizeof(refreshed) &&
-            snapshotRevision == refreshed.revision &&
-            settings_native::validDisplaySnapshot(refreshed);
-        m_displaySnapshot = m_displaySnapshotValid
-            ? refreshed
-            : settings_native::DisplaySnapshotV1{};
-        settings::CapabilitySnapshot capability{};
-        if (readCapabilitySnapshot(this, settings::CapabilityId::Display, &capability)) {
-            m_presentation.applyCapabilitySnapshot(capability);
-        }
+        return settings_native::refreshDisplaySnapshot(
+            &m_adapter, m_displayRefreshState, m_presentation);
     }
 
     bool processInput(const settings::SettingsInputEvent& event)
@@ -16928,26 +16921,28 @@ private:
 
     void drawDisplayInformation(uint32_t contentX, uint32_t contentW, uint32_t cardY)
     {
-        if (!m_displaySnapshotValid ||
-            m_displaySnapshot.status != settings_native::DisplayInformationStatus::Available) {
+        const settings_native::DisplaySnapshotV1& displaySnapshot =
+            m_displayRefreshState.snapshot();
+        if (!m_displayRefreshState.hasSnapshot() ||
+            displaySnapshot.status != settings_native::DisplayInformationStatus::Available) {
             appDrawText(contentX + 16u, cardY + 58u,
                 "Active framebuffer information is unavailable.", rgb(236, 174, 122));
             return;
         }
 
         char framebufferSize[32] = {};
-        appendUnsigned(framebufferSize, sizeof(framebufferSize), m_displaySnapshot.framebufferWidth);
+        appendUnsigned(framebufferSize, sizeof(framebufferSize), displaySnapshot.framebufferWidth);
         appendText(framebufferSize, sizeof(framebufferSize), " x ");
-        appendUnsigned(framebufferSize, sizeof(framebufferSize), m_displaySnapshot.framebufferHeight);
+        appendUnsigned(framebufferSize, sizeof(framebufferSize), displaySnapshot.framebufferHeight);
 
         char colorDepth[24] = {};
         char pitch[32] = {};
-        if ((m_displaySnapshot.flags & settings_native::kDisplayBitsPerPixelAvailable) != 0u) {
-            appendUnsigned(colorDepth, sizeof(colorDepth), m_displaySnapshot.bitsPerPixel);
+        if ((displaySnapshot.flags & settings_native::kDisplayBitsPerPixelAvailable) != 0u) {
+            appendUnsigned(colorDepth, sizeof(colorDepth), displaySnapshot.bitsPerPixel);
             appendText(colorDepth, sizeof(colorDepth), " bpp");
         }
-        if ((m_displaySnapshot.flags & settings_native::kDisplayPitchAvailable) != 0u) {
-            appendUnsigned(pitch, sizeof(pitch), m_displaySnapshot.bytesPerScanline);
+        if ((displaySnapshot.flags & settings_native::kDisplayPitchAvailable) != 0u) {
+            appendUnsigned(pitch, sizeof(pitch), displaySnapshot.bytesPerScanline);
             appendText(pitch, sizeof(pitch), " bytes / line");
         }
 
@@ -16956,24 +16951,24 @@ private:
             "Logical desktop", "Display layout", "Primary output mode"
         };
         const char* values[7] = {
-            (m_displaySnapshot.flags & settings_native::kDisplayFramebufferWidthAvailable) != 0u
+            (displaySnapshot.flags & settings_native::kDisplayFramebufferWidthAvailable) != 0u
                 ? framebufferSize : "Unavailable",
             colorDepth[0] ? colorDepth : "Unavailable",
-            (m_displaySnapshot.flags & settings_native::kDisplayPixelFormatAvailable) != 0u
-                ? pixelFormatName(m_displaySnapshot.pixelFormat) : "Unavailable",
+            (displaySnapshot.flags & settings_native::kDisplayPixelFormatAvailable) != 0u
+                ? pixelFormatName(displaySnapshot.pixelFormat) : "Unavailable",
             pitch[0] ? pitch : "Unavailable",
-            (m_displaySnapshot.flags & settings_native::kDisplayLogicalDesktopWidthAvailable) != 0u
+            (displaySnapshot.flags & settings_native::kDisplayLogicalDesktopWidthAvailable) != 0u
                 ? "Available" : "Unavailable",
-            (m_displaySnapshot.flags & settings_native::kDisplayActiveLayoutModeAvailable) != 0u
-                ? displayLayoutModeName(m_displaySnapshot.activeLayoutMode) : "Unavailable",
-            (m_displaySnapshot.flags & settings_native::kDisplayPrimaryModeIdAvailable) != 0u
-                ? m_displaySnapshot.primaryModeId : "Unavailable"
+            (displaySnapshot.flags & settings_native::kDisplayActiveLayoutModeAvailable) != 0u
+                ? displayLayoutModeName(displaySnapshot.activeLayoutMode) : "Unavailable",
+            (displaySnapshot.flags & settings_native::kDisplayPrimaryModeIdAvailable) != 0u
+                ? displaySnapshot.primaryModeId : "Unavailable"
         };
         char logicalDesktop[32] = {};
-        if ((m_displaySnapshot.flags & settings_native::kDisplayLogicalDesktopWidthAvailable) != 0u) {
-            appendUnsigned(logicalDesktop, sizeof(logicalDesktop), m_displaySnapshot.logicalDesktopWidth);
+        if ((displaySnapshot.flags & settings_native::kDisplayLogicalDesktopWidthAvailable) != 0u) {
+            appendUnsigned(logicalDesktop, sizeof(logicalDesktop), displaySnapshot.logicalDesktopWidth);
             appendText(logicalDesktop, sizeof(logicalDesktop), " x ");
-            appendUnsigned(logicalDesktop, sizeof(logicalDesktop), m_displaySnapshot.logicalDesktopHeight);
+            appendUnsigned(logicalDesktop, sizeof(logicalDesktop), displaySnapshot.logicalDesktopHeight);
             values[4] = logicalDesktop;
         }
         const bool stacked = contentW < 420u;

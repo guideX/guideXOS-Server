@@ -14,6 +14,7 @@ namespace settings_native {
 static const uint32_t kSystemAboutSnapshotVersion = 2;
 static const uint64_t kSystemAboutSnapshotRevision = 1;
 static const uint32_t kDisplaySnapshotVersion = 1;
+// Reserved revision for the zero/unavailable active-configuration generation.
 static const uint64_t kDisplaySnapshotRevision = 1;
 static const char kSettingsRuntimeAppId[] = "gxos.builtin.settings";
 
@@ -129,8 +130,11 @@ SnapshotStatus buildDisplaySnapshot(bool framebufferAvailable,
 
 bool validDisplaySnapshot(const DisplaySnapshotV1& snapshot);
 
-// Reads the live active framebuffer metadata for a trusted Settings caller.
-// The snapshot contains no address, pointer, or writable mapping.
+// Reads live framebuffer metadata and a single active-configuration response
+// for a trusted Settings caller. Revisions encode the authoritative 32-bit
+// active-configuration generation plus one, even when that response truthfully
+// reports no active topology. The snapshot contains no address, pointer, or
+// writable mapping.
 SnapshotStatus readDisplaySnapshot(
     const app::KernelApp* caller,
     const DisplaySnapshotRequestV1* request,

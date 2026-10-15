@@ -1,0 +1,70 @@
+{
+  "phase": "S14",
+  "result": "Outcome B - partial progress",
+  "startingBranch": "main",
+  "startingHead": "db05e3b6f94d2edaa402c1dd34daee3f68d517ed",
+  "finalCommit": "The enclosing local S14 commit on main",
+  "kernel": {
+    "elfPath": "kernel/build/s14-clean-final-20261015/bin/kernel.elf",
+    "elfBytes": 2694528,
+    "elfSha256": "465F7C86957B4E41E1FC8A3392177875167F9850C048348F9BB03BEADB842102",
+    "pePath": "kernel/build/s14-clean-final-20261015/bin/kernel.pe",
+    "peBytes": 2804622,
+    "peSha256": "A429049F16ECAA5E70739C0F5416954E11BAAA7D599D4078EBC33CB92CECCFA5",
+    "compileCommands": 155,
+    "linkCommands": 1,
+    "errors": 0,
+    "warningLines": 233,
+    "uniqueUndefinedNames": 20,
+    "undefinedNamesWithDefinitions": 18,
+    "undefinedNamesWithoutDefinitions": [
+      "__dso_handle",
+      "mainCRTStartup"
+    ]
+  },
+  "bootArtifacts": {
+    "bootloaderSha256": "E2FDB6AD78E0416AF250BEBBC6541640E3CCDC7DD9A14453C08143B7F4DA48AA",
+    "ovmfSha256": "2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792"
+  },
+  "guest": {
+    "acceptedOutputDirectory": "out/validation/settings-s14-20261015/production/guest-acceptance-qmp-replay",
+    "qemuExecutable": "C:/Program Files/qemu/qemu-system-x86_64.exe",
+    "qemuProcessId": 26072,
+    "qmpEndpoint": "127.0.0.1:58416",
+    "machine": "pc,accel=whpx",
+    "processors": 2,
+    "memoryMiB": 1536,
+    "displayDevice": "virtio-vga,id=video0",
+    "network": "disabled",
+    "kernelSha256": "465F7C86957B4E41E1FC8A3392177875167F9850C048348F9BB03BEADB842102",
+    "observedFramebuffer": {
+      "width": 1280,
+      "height": 800,
+      "bitsPerPixel": 32,
+      "pixelFormat": "B8G8R8A8",
+      "bytesPerScanline": 5120
+    },
+    "topology": "Unavailable in the ordinary production backend",
+    "shutdown": "QMP quit; owned process exited",
+    "foreignQemuProcessesTouched": 0,
+    "fullSystemAboutReopenAndLegacySequence": "Not completed in S14"
+  },
+  "focusedTests": {
+    "nativeSettingsRuntime": "828/828",
+    "settingsPresentationCore": "2647/2647",
+    "hostedSettingsModels": "359/359"
+  },
+  "evidenceFiles": [
+    "amd64-kernel-build.log",
+    "test-results.md",
+    "guest/guest-com1.serial.log",
+    "guest/qemu-launch.json",
+    "guest/qemu-stderr.log",
+    "guest/qmp-transcript.log",
+    "guest/desktop-initial.png",
+    "guest/start-menu-open.png",
+    "guest/settings-launch.png",
+    "guest/settings-display.png",
+    "guest/ESP-build-identity.txt"
+  ]
+}

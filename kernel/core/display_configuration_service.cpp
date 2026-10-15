@@ -2,6 +2,7 @@
 
 #include "include/kernel/desktop.h"
 #include "include/kernel/input_manager.h"
+#include "include/kernel/kernel_app.h"
 #include "include/kernel/kernel_compositor.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/vfs.h"
@@ -21,6 +22,12 @@ static bool s_haveLastKnownGood = false;
 static DisplayConfigurationCommand s_lastKnownGoodTwoOutput{};
 static bool s_haveLastKnownGoodTwoOutput = false;
 static uint32_t s_activeConfigurationGeneration = 1u;
+
+static void advance_active_configuration_generation()
+{
+    ++s_activeConfigurationGeneration;
+    if (s_activeConfigurationGeneration == 0u) ++s_activeConfigurationGeneration;
+}
 
 enum class StartupRestoreState : uint32_t {
     Idle = 0u,
@@ -1418,6 +1425,7 @@ bool DisplayConfigurationService::submit(const DisplayConfigurationCommand& comm
     const bool failureInjectionGate = false;
 #endif
     bool accepted = true;
+    bool activeConfigurationChanged = false;
 
     if (type == DisplayConfigurationCommandType::QueryDetectedConfiguration ||
         type == DisplayConfigurationCommandType::QueryActiveConfiguration) {
@@ -1611,7 +1619,8 @@ bool DisplayConfigurationService::submit(const DisplayConfigurationCommand& comm
                         set_diagnostic(response, "topology reconciliation rollback failed");
                     }
                 } else {
-                    ++s_activeConfigurationGeneration;
+                    advance_active_configuration_generation();
+                    activeConfigurationChanged = true;
                     applyCommand.commandType = static_cast<uint32_t>(DisplayConfigurationCommandType::ApplyConfiguration);
                     s_lastKnownGood = applyCommand;
                     s_haveLastKnownGood = true;
@@ -1785,7 +1794,8 @@ bool DisplayConfigurationService::submit(const DisplayConfigurationCommand& comm
                 set_diagnostic(response, "rollback failed");
             }
         } else {
-            ++s_activeConfigurationGeneration;
+            advance_active_configuration_generation();
+            activeConfigurationChanged = true;
             response.activeConfigurationGeneration = s_activeConfigurationGeneration;
             s_lastKnownGood = applyCommand;
             s_lastKnownGood.commandType = static_cast<uint32_t>(DisplayConfigurationCommandType::ApplyConfiguration);
@@ -1818,6 +1828,13 @@ bool DisplayConfigurationService::submit(const DisplayConfigurationCommand& comm
     s_lastResponse = response;
     s_busy = false;
     log_response(response);
+    if (activeConfigurationChanged) {
+        // submit() runs on the desktop owner path. Notify after the service
+        // has committed and released its busy slot so observers can safely
+        // request a fresh provider snapshot during their next app update.
+        kernel::app::AppManager::notifyDisplayConfigurationChanged(
+            s_activeConfigurationGeneration);
+    }
     return accepted && response.success != 0u;
 }
 

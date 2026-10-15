@@ -16,6 +16,7 @@ $Sources = @(
     "kernel/core/kernel_app.cpp",
     "kernel/core/app_launch_target_resolver.cpp",
     "kernel/core/settings_native_provider.cpp",
+    "kernel/core/settings_display_refresh.cpp",
     "settings_presentation_core.cpp"
 )
 $Arguments = @(
