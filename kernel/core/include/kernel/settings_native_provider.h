@@ -11,7 +11,7 @@
 namespace kernel {
 namespace settings_native {
 
-static const uint32_t kSystemAboutSnapshotVersion = 1;
+static const uint32_t kSystemAboutSnapshotVersion = 2;
 static const uint64_t kSystemAboutSnapshotRevision = 1;
 static const char kSettingsRuntimeAppId[] = "gxos.builtin.settings";
 
@@ -25,47 +25,54 @@ enum class SnapshotStatus : uint32_t {
     Unavailable
 };
 
-struct SystemAboutSnapshotRequestV1 {
+struct SystemAboutSnapshotRequestV2 {
     uint32_t structureSize;
     uint32_t version;
     uint64_t knownRevision;
 };
 
 enum : uint32_t {
-    kSystemAboutSnapshotAvailable = 1u << 0
+    kSystemAboutSnapshotAvailable = 1u << 0,
+    kSystemAboutProductNameAvailable = 1u << 1,
+    kSystemAboutOsReleaseVersionAvailable = 1u << 2,
+    kSystemAboutKernelVersionAvailable = 1u << 3,
+    kSystemAboutArchitectureAvailable = 1u << 4
 };
 
-struct SystemAboutSnapshotV1 {
+struct SystemAboutSnapshotV2 {
     uint32_t structureSize;
     uint32_t version;
     uint64_t revision;
     uint32_t flags;
     char productName[32];
+    char osReleaseVersion[16];
     char kernelVersion[16];
     char architecture[32];
 };
 
-// Copies only bounded values from kernel-owned identity/version/architecture
-// sources. The returned structure contains no pointer into kernel state.
+// Copies bounded values from kernel-owned product, kernel-version, and
+// architecture sources. An absent OS release remains explicitly unavailable.
+// The returned structure contains no pointer into kernel state.
 SnapshotStatus buildSystemAboutSnapshot(const char* productName,
+                                        const char* osReleaseVersion,
                                         const char* kernelVersion,
                                         const char* architecture,
                                         uint64_t revision,
-                                        SystemAboutSnapshotV1* output);
+                                        SystemAboutSnapshotV2* output);
 
-bool validSystemAboutSnapshot(const SystemAboutSnapshotV1& snapshot);
+bool validSystemAboutSnapshot(const SystemAboutSnapshotV2& snapshot);
 
 // The app identity is read from the AppManager-assigned KernelApp field.
 // The caller supplies its output storage; the provider retains no pointer.
 SnapshotStatus readSystemAboutSnapshot(
     const app::KernelApp* caller,
-    const SystemAboutSnapshotRequestV1* request,
+    const SystemAboutSnapshotRequestV2* request,
     void* output,
     size_t capacity,
     size_t* outSize,
     uint64_t* outRevision);
 
-// S11 exposes no Settings write operation. This callback deliberately
+// The native adapter exposes no Settings write operation. This callback deliberately
 // rejects every operation request from the S10 adapter contract.
 inline bool rejectSettingsMutation(void*, const gxos::apps::settings::OperationRequest*)
 {

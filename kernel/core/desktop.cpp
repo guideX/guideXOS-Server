@@ -11856,24 +11856,6 @@ static void show_start_menu_notification(const char* label)
         return;
     }
 
-    if (desktop_str_eq(label, "Settings")) {
-        // Keep Start -> Settings on the embedded legacy control area for this
-        // initial acceptance. The dedicated native app is independently
-        // launchable by the canonical gxos.builtin.settings identity.
-#if defined(GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE) && defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
-        if (s_launchShadowSuppressRealBranchLaunch) {
-            log_bare_metal_static_app_shadow_only_observation(
-                "Control Panel",
-                bare_metal_active_static_app_shadow_source("StartMenuSettings"),
-                "Settings",
-                "embedded-control-panel-state");
-            return;
-        }
-#endif
-        activate_start_menu_control_panel(6);
-        return;
-    }
-    
     // Close start menu before launching app
     s_startMenuOpen = false;
     // Desktop File Explorer routes to the kernel-side "Files" app in bare-metal
@@ -11891,6 +11873,22 @@ static void show_start_menu_notification(const char* label)
     if (try_launch_kernel_app(launchLabel)) {
         // App launched successfully
         app::AppLogger::logLaunch(launchLabel, app::LaunchResult::Success);
+        return;
+    }
+
+    if (desktop_str_eq(launchLabel, "Settings")) {
+        const bool settingsAvailable = app::AppManager::isAppAvailable(launchLabel);
+        s_notification.title = label;
+        s_notification.message = settingsAvailable
+            ? "Failed to launch app"
+            : "Not available in bare-metal mode";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        // AppManager already records its exact failure (initialization or
+        // resource exhaustion) when the registered Settings app was invoked.
+        if (!settingsAvailable) {
+            app::AppLogger::logLaunch(launchLabel, app::LaunchResult::NotAvailable);
+        }
         return;
     }
 

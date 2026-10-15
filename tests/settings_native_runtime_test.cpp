@@ -98,11 +98,23 @@ public:
     void onWindowBlur() override { ++g_runtimeFocusLost; }
 };
 
+class FailingProbeApp : public kernel::app::KernelApp {
+public:
+    explicit FailingProbeApp(const char* name)
+    {
+        copyText(m_name, name, sizeof(m_name));
+    }
+    bool init() override { return false; }
+    void shutdown() override { m_state = kernel::app::AppState::Terminated; }
+    void draw(uint32_t, uint32_t, uint32_t, uint32_t) override {}
+};
+
 kernel::app::KernelApp* createSettingsProbe() { return new ProbeApp("Settings"); }
 kernel::app::KernelApp* createNotepadProbe() { return new ProbeApp("Notepad"); }
+kernel::app::KernelApp* createFailingSettingsProbe() { return new FailingProbeApp("FailingSettingsProbe"); }
 
 void copySnapshotFromBytes(const uint8_t* source,
-                           kernel::settings_native::SystemAboutSnapshotV1* output)
+                           kernel::settings_native::SystemAboutSnapshotV2* output)
 {
     uint8_t* destination = reinterpret_cast<uint8_t*>(output);
     for (size_t i = 0; i < sizeof(*output); ++i) destination[i] = source[i];
@@ -183,6 +195,10 @@ int main()
     expect(AppManager::registerAppWithIdentity("Notepad", "gxos.builtin.notepad",
                                                 0xFF78B450u, createNotepadProbe),
            "register distinct non-Settings identity");
+    expect(AppManager::registerAppWithIdentity("FailingSettingsProbe",
+                                                "gxos.test.settings-failure",
+                                                0xFF8060D0u, createFailingSettingsProbe),
+           "register a Settings launch target that fails initialization");
     expect(!AppManager::registerAppWithIdentity("Settings", "gxos.builtin.settings",
                                                  0xFF8060D0u, createSettingsProbe),
            "duplicate launch name rejected");
@@ -202,6 +218,14 @@ int main()
     expect(std::string(settingsTarget.appId) == kSettingsRuntimeAppId,
            "resolver preserves canonical Settings identity");
 
+    const gxos::apps::LaunchTarget startSettingsTarget =
+        appmodel::resolveLaunchTarget("Settings");
+    expect(startSettingsTarget.type == gxos::apps::LaunchTargetType::BuiltInApp &&
+               startSettingsTarget.bareMetalAvailable &&
+               std::string(startSettingsTarget.appId) == kSettingsRuntimeAppId &&
+               std::string(startSettingsTarget.dispatchLaunchName) == "Settings",
+           "Start-menu Settings resolves to its native built-in app target");
+
     const gxos::apps::LaunchTarget controlPanelTarget =
         appmodel::resolveLaunchTarget("Control Panel");
     expect(controlPanelTarget.type == gxos::apps::LaunchTargetType::ShellAction &&
@@ -210,11 +234,11 @@ int main()
                controlPanelTarget.bareMetalAvailable &&
                std::string(controlPanelTarget.appId) != kSettingsRuntimeAppId,
            "legacy Control Panel resolves as its production bare-metal shell action");
-    const gxos::apps::LaunchTarget startSettingsTarget =
-        appmodel::resolveLaunchTarget("Settings");
-    expect(startSettingsTarget.type == gxos::apps::LaunchTargetType::ShellAction &&
-               std::string(startSettingsTarget.dispatchLaunchName) == "Control Panel",
-           "Start-menu Settings keeps its existing legacy control-area route");
+    expect(std::string(startSettingsTarget.dispatchLaunchName) !=
+               std::string(controlPanelTarget.dispatchLaunchName) &&
+               AppManager::isAppAvailable(startSettingsTarget.dispatchLaunchName) &&
+               !AppManager::isAppAvailable(controlPanelTarget.dispatchLaunchName),
+           "Start-menu Settings and Control Panel use distinct production dispatch targets");
     const gxos::apps::LaunchTarget controlPanelIdentity =
         appmodel::resolveLaunchTarget("gxos.builtin.controlpanel");
     expect(std::string(controlPanelIdentity.appId) == "gxos.builtin.controlpanel" &&
@@ -228,6 +252,18 @@ int main()
     expect(appmodel::resolveLaunchTarget("unknown.s11.target").type ==
                gxos::apps::LaunchTargetType::Unknown,
            "unknown resolver target rejected");
+    const int launchLogCountBeforeFailure = AppLogger::getLogCount();
+    expect(!AppManager::launchApp("FailingSettingsProbe"),
+           "registered Settings target reports an initialization failure");
+    const app::AppLaunchLog* failureLog = AppLogger::getLog(launchLogCountBeforeFailure);
+    expect(failureLog && failureLog->result == LaunchResult::FailedToInit,
+           "registered launch failure retains its accurate initialization result");
+    const int launchLogCountBeforeUnavailable = AppLogger::getLogCount();
+    expect(!AppManager::launchApp("UnknownNativeApp"),
+           "unavailable Settings-like launch target is rejected");
+    const app::AppLaunchLog* unavailableLog = AppLogger::getLog(launchLogCountBeforeUnavailable);
+    expect(unavailableLog && unavailableLog->result == LaunchResult::NotAvailable,
+           "unregistered launch target is reported as unavailable");
 
     const gxos::apps::BuiltInAppMetadata* settingsMetadata =
         gxos::apps::FindBuiltInAppMetadataByAppId(kSettingsRuntimeAppId);
@@ -257,25 +293,31 @@ int main()
                std::string(settingsApp->getRuntimeAppId()) == kSettingsRuntimeAppId,
            "duplicate launch arguments cannot retarget Settings identity or instance");
 
-    SystemAboutSnapshotRequestV1 request = {
-        sizeof(SystemAboutSnapshotRequestV1), kSystemAboutSnapshotVersion, 0
+    SystemAboutSnapshotRequestV2 request = {
+        sizeof(SystemAboutSnapshotRequestV2), kSystemAboutSnapshotVersion, 0
     };
-    uint8_t unalignedStorage[sizeof(SystemAboutSnapshotV1) + 1] = {};
+    uint8_t unalignedStorage[sizeof(SystemAboutSnapshotV2) + 1] = {};
     size_t snapshotSize = 0;
     uint64_t snapshotRevision = 0;
     expect(readSystemAboutSnapshot(settingsApp, &request, &unalignedStorage[1],
-                                   sizeof(SystemAboutSnapshotV1), &snapshotSize,
+                                   sizeof(SystemAboutSnapshotV2), &snapshotSize,
                                    &snapshotRevision) == SnapshotStatus::Ok,
            "provider writes into caller-owned unaligned storage");
-    expect(snapshotSize == sizeof(SystemAboutSnapshotV1) && snapshotRevision == 1,
+    expect(snapshotSize == sizeof(SystemAboutSnapshotV2) && snapshotRevision == 1,
            "provider reports bounded size and snapshot revision");
-    SystemAboutSnapshotV1 snapshot{};
+    SystemAboutSnapshotV2 snapshot{};
     copySnapshotFromBytes(&unalignedStorage[1], &snapshot);
     expect(validSystemAboutSnapshot(snapshot), "provider snapshot fields validate");
     expect(snapshot.productName == std::string(KERNEL_NAME) &&
+               snapshot.osReleaseVersion[0] == '\0' &&
                snapshot.kernelVersion == std::string(KERNEL_VERSION_STRING) &&
                snapshot.architecture == std::string(arch::get_arch_name()),
-           "snapshot values come from kernel-owned identity, version and architecture");
+           "snapshot values come from kernel-owned sources and leave the undefined OS release absent");
+    expect((snapshot.flags & kSystemAboutProductNameAvailable) != 0 &&
+               (snapshot.flags & kSystemAboutKernelVersionAvailable) != 0 &&
+               (snapshot.flags & kSystemAboutArchitectureAvailable) != 0 &&
+               (snapshot.flags & kSystemAboutOsReleaseVersionAvailable) == 0,
+           "snapshot flags distinguish required values from unavailable OS release metadata");
 
     request.version = kSystemAboutSnapshotVersion + 1;
     expect(readSystemAboutSnapshot(settingsApp, &request, &snapshot, sizeof(snapshot),
@@ -300,14 +342,25 @@ int main()
            "provider rejects stale requested revision");
     request.knownRevision = 0;
 
-    expect(buildSystemAboutSnapshot(KERNEL_NAME, KERNEL_VERSION_STRING, "", 1,
+    expect(buildSystemAboutSnapshot(KERNEL_NAME, nullptr, KERNEL_VERSION_STRING, "", 1,
                                     &snapshot) == SnapshotStatus::Unavailable,
            "unavailable kernel source is represented explicitly");
     expect(!validSystemAboutSnapshot(snapshot),
            "unavailable snapshot is not presented as valid data");
-    expect(buildSystemAboutSnapshot(KERNEL_NAME, KERNEL_VERSION_STRING,
+    expect(buildSystemAboutSnapshot(KERNEL_NAME, nullptr, KERNEL_VERSION_STRING,
                                     arch::get_arch_name(), 1, &snapshot) == SnapshotStatus::Ok,
            "valid kernel values create a fresh snapshot");
+    expect(buildSystemAboutSnapshot(KERNEL_NAME, "release-test", KERNEL_VERSION_STRING,
+                                    arch::get_arch_name(), 2, &snapshot) == SnapshotStatus::Ok &&
+               std::string(snapshot.osReleaseVersion) == "release-test" &&
+               (snapshot.flags & kSystemAboutOsReleaseVersionAvailable) != 0,
+           "an explicitly supplied OS release is represented as a separate optional field");
+    expect(buildSystemAboutSnapshot(KERNEL_NAME, "1234567890123456", KERNEL_VERSION_STRING,
+                                    arch::get_arch_name(), 2, &snapshot) == SnapshotStatus::Unavailable,
+           "oversized optional version data is rejected rather than truncated or hidden");
+    expect(buildSystemAboutSnapshot(KERNEL_NAME, nullptr, KERNEL_VERSION_STRING,
+                                    arch::get_arch_name(), 1, &snapshot) == SnapshotStatus::Ok,
+           "snapshot can be restored after rejected optional metadata");
     snapshot.version++;
     expect(!validSystemAboutSnapshot(snapshot), "invalid snapshot version rejected");
     snapshot.version = kSystemAboutSnapshotVersion;

@@ -1,0 +1,61 @@
+{
+  "phase": "S12",
+  "outcome": "A - accepted",
+  "branch": "main",
+  "startingHead": "ac40af27ffa566d075d370ee86c8323cd3fc4d45",
+  "kernelPath": "kernel/build/s12-20261014/bin/kernel.elf",
+  "kernelSha256": "7EFD368AE4B08E0B443ED8E8B52A35D2921957D1A2D2F0DBB292620A04C852BC",
+  "kernelBytes": 2682184,
+  "guestEspPath": "out/validation/settings-s12-20261014/production/guest-final/ESP",
+  "guestKernelPath": "out/validation/settings-s12-20261014/production/guest-final/ESP/kernel.elf",
+  "guestKernelSha256": "7EFD368AE4B08E0B443ED8E8B52A35D2921957D1A2D2F0DBB292620A04C852BC",
+  "bootloaderPath": "out/validation/settings-s12-20261014/production/guest-final/ESP/EFI/BOOT/BOOTX64.EFI",
+  "bootloaderSha256": "E2FDB6AD78E0416AF250BEBBC6541640E3CCDC7DD9A14453C08143B7F4DA48AA",
+  "firmwarePath": "out/validation/settings-s12-20261014/production/guest-final/OVMF.fd",
+  "firmwareSha256": "2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792",
+  "qemu": {
+    "qmpTranscript": "docs/evidence/settings-s12-20261014/qmp-transcript.log",
+    "machine": "pc,accel=whpx",
+    "network": "disabled",
+    "processors": 2,
+    "qmpEndpoint": "127.0.0.1:58313",
+    "display": "gtk",
+    "memory": "1536 MiB",
+    "serialLog": "docs/evidence/settings-s12-20261014/guest-com1.serial.log"
+  },
+  "bootInputs": "Copied into this S12-owned writable ESP and OVMF directory from the accepted S11R guest; replaced only ESP/kernel.elf with the final S12 build.",
+  "screenshots": [
+    "start-menu-open.png",
+    "settings-click-down-up.png",
+    "settings-about.png",
+    "settings-reopened.png",
+    "control-panel-open.png",
+    "control-panel-display-options.png",
+    "concurrent-settings-and-control-panel.png",
+    "concurrent-after-settings-close.png",
+    "desktop-clean-concurrent-close.png"
+  ],
+  "evidenceLogHandling": {
+    "guestSerial": {
+      "sourcePath": "out/validation/settings-s12-20261014/production/guest-final/guest-com1.serial.log",
+      "sourceSha256": "83B74F637691770E945F9C21B834A86F83D82E51397F957356667ED8309B1E08",
+      "committedPath": "docs/evidence/settings-s12-20261014/guest-com1.serial.log",
+      "committedSha256": "572C39E3F3B5650E3D7C75B52E72B7AB579CA93581B065C74DE3706A74BAA82F",
+      "normalization": "ANSI terminal control sequences removed; line endings normalized to LF; trailing padding trimmed."
+    },
+    "productionBuild": {
+      "sourcePath": "out/validation/settings-s12-20261014/production/amd64-kernel-build.log",
+      "sourceSha256": "6E2A92E35F1DD0D1229638F4AFEE78CE9C0577238DC9AB4EDB3E6C0C265FA014",
+      "committedPath": "docs/evidence/settings-s12-20261014/amd64-kernel-build.log",
+      "committedSha256": "FECF737EE8DF75A3FEAFE3CF8BF4FF92FCAD20F9BEAEDFD16B30D22317721451",
+      "normalization": "Line endings normalized to LF; trailing padding trimmed."
+    },
+    "qmpTranscript": {
+      "sourcePath": "out/validation/settings-s12-20261014/production/guest-final/qmp-transcript.log",
+      "sourceSha256": "96FEC603996F7E475E79069E4935208B1DEC980577C76090314463796D1F35C3",
+      "committedPath": "docs/evidence/settings-s12-20261014/qmp-transcript.log",
+      "committedSha256": "9671A3470CADE3C0E127A23BE41A3A8F49AC69169B91273983B817960DA40F37",
+      "normalization": "Line endings normalized to LF; transcript content otherwise unchanged."
+    }
+  }
+}

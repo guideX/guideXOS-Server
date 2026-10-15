@@ -16501,7 +16501,7 @@ public:
         m_queueCount = 0;
         m_snapshotAvailable = false;
         m_providerStatus = settings_native::SnapshotStatus::Unavailable;
-        m_snapshot = settings_native::SystemAboutSnapshotV1{};
+        m_snapshot = settings_native::SystemAboutSnapshotV2{};
 
         settings::SettingsWindowConstraints constraints{};
         if (!m_adapter.getWindowConstraints(m_adapter.context, &constraints)) return false;
@@ -16562,7 +16562,7 @@ public:
         m_state = app::AppState::Terminated;
         m_queueHead = 0;
         m_queueCount = 0;
-        m_snapshot = settings_native::SystemAboutSnapshotV1{};
+        m_snapshot = settings_native::SystemAboutSnapshotV2{};
         m_snapshotAvailable = false;
         serial::puts("[settings-native] shutdown identity=");
         serial::puts(getRuntimeAppId());
@@ -16647,7 +16647,7 @@ private:
 
     settings::SettingsPresentationCore m_presentation;
     settings::SettingsPresentationAdapterV1 m_adapter;
-    settings_native::SystemAboutSnapshotV1 m_snapshot{};
+    settings_native::SystemAboutSnapshotV2 m_snapshot{};
     settings::CategoryId m_hoverCategory;
     bool m_windowFocused;
     settings_native::SnapshotStatus m_providerStatus;
@@ -16689,8 +16689,8 @@ private:
     {
         SettingsNativeApp* self = static_cast<SettingsNativeApp*>(context);
         if (!self || capability != settings::CapabilityId::SystemInformation) return false;
-        const settings_native::SystemAboutSnapshotRequestV1 request = {
-            sizeof(settings_native::SystemAboutSnapshotRequestV1),
+        const settings_native::SystemAboutSnapshotRequestV2 request = {
+            sizeof(settings_native::SystemAboutSnapshotRequestV2),
             settings_native::kSystemAboutSnapshotVersion,
             0
         };
@@ -16843,23 +16843,58 @@ private:
         const uint32_t contentW = w > sidebarWidth + 44u ? w - sidebarWidth - 44u : 1u;
         const char* pageName = selected == settings::CategoryId::About ? "About" : "System overview";
         appDrawText(contentX, y + 24u, pageName, rgb(243, 245, 250));
-        appDrawText(contentX, y + 47u, "Read-only System/About provider snapshot", rgb(165, 177, 196));
+        appDrawText(contentX, y + 47u,
+            selected == settings::CategoryId::About
+                ? "Product and version details"
+                : "Read-only information reported by the kernel",
+            rgb(165, 177, 196));
         appDrawText(contentX, y + 70u, getRuntimeAppId(), rgb(135, 159, 197));
 
         const uint32_t cardY = y + 96u;
         const uint32_t cardH = h > 140u ? h - 122u : 1u;
         framebuffer::fill_rect(contentX, cardY, contentW, cardH, rgb(36, 40, 50));
         appDrawRect(contentX, cardY, contentW, cardH, rgb(67, 74, 88));
-        appDrawText(contentX + 16u, cardY + 20u, "System information", rgb(224, 229, 239));
+        appDrawText(contentX + 16u, cardY + 20u,
+            selected == settings::CategoryId::About ? "About this system" : "System information",
+            rgb(224, 229, 239));
         if (m_snapshotAvailable) {
-            appDrawText(contentX + 16u, cardY + 58u, "Product", rgb(146, 157, 176));
-            appDrawText(contentX + 160u, cardY + 58u, m_snapshot.productName, rgb(238, 240, 246));
-            appDrawText(contentX + 16u, cardY + 98u, "Kernel version", rgb(146, 157, 176));
-            appDrawText(contentX + 160u, cardY + 98u, m_snapshot.kernelVersion, rgb(238, 240, 246));
-            appDrawText(contentX + 16u, cardY + 138u, "Architecture", rgb(146, 157, 176));
-            appDrawText(contentX + 160u, cardY + 138u, m_snapshot.architecture, rgb(238, 240, 246));
-            appDrawText(contentX + 16u, cardY + 184u, "Snapshot revision", rgb(146, 157, 176));
-            appDrawText(contentX + 160u, cardY + 184u, "1", rgb(238, 240, 246));
+            const bool about = selected == settings::CategoryId::About;
+            const uint32_t rowStart = about ? 52u : 58u;
+            const uint32_t rowStep = 40u;
+            const char* releaseVersion =
+                (m_snapshot.flags & settings_native::kSystemAboutOsReleaseVersionAvailable) != 0
+                    ? m_snapshot.osReleaseVersion
+                    : "Not defined by this build";
+            const char* systemLabels[3] = { "Product", "Kernel version", "Architecture" };
+            const char* systemValues[3] = {
+                m_snapshot.productName, m_snapshot.kernelVersion, m_snapshot.architecture
+            };
+            const char* aboutLabels[4] = {
+                "Product", "OS release version", "Kernel version", "Architecture"
+            };
+            const char* aboutValues[4] = {
+                m_snapshot.productName, releaseVersion, m_snapshot.kernelVersion,
+                m_snapshot.architecture
+            };
+            const size_t rowCount = about ? 4u : 3u;
+            const uint32_t valueX = contentX + (about ? 210u : 160u);
+            for (size_t row = 0; row < rowCount; ++row) {
+                const char* label = about ? aboutLabels[row] : systemLabels[row];
+                const char* value = about ? aboutValues[row] : systemValues[row];
+                const uint32_t rowY = cardY + rowStart + rowStep * static_cast<uint32_t>(row);
+                appDrawText(contentX + 16u, rowY, label, rgb(146, 157, 176));
+                if (about && row == 1u &&
+                    (m_snapshot.flags & settings_native::kSystemAboutOsReleaseVersionAvailable) == 0) {
+                    appDrawText(valueX, rowY, value, rgb(171, 177, 189));
+                } else if (about ||
+                           (row == 0u && (m_snapshot.flags & settings_native::kSystemAboutProductNameAvailable) != 0) ||
+                           (row == 1u && (m_snapshot.flags & settings_native::kSystemAboutKernelVersionAvailable) != 0) ||
+                           (row == 2u && (m_snapshot.flags & settings_native::kSystemAboutArchitectureAvailable) != 0)) {
+                    appDrawText(valueX, rowY, value, rgb(238, 240, 246));
+                } else {
+                    appDrawText(valueX, rowY, "Unavailable", rgb(236, 174, 122));
+                }
+            }
         } else {
             appDrawText(contentX + 16u, cardY + 58u, "System information is unavailable.", rgb(236, 174, 122));
         }

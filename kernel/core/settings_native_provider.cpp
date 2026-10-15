@@ -32,6 +32,22 @@ static bool validText(const char (&text)[Capacity])
     return false;
 }
 
+template <size_t Capacity>
+static bool copyOptionalBoundedText(char (&destination)[Capacity], const char* source)
+{
+    if (!source || !source[0]) {
+        destination[0] = '\0';
+        return true;
+    }
+    return copyBoundedText(destination, source);
+}
+
+template <size_t Capacity>
+static bool validOptionalText(const char (&text)[Capacity], bool available)
+{
+    return available ? validText(text) : text[0] == '\0';
+}
+
 static bool textEquals(const char* left, const char* right)
 {
     if (!left || !right) return false;
@@ -46,24 +62,36 @@ static bool textEquals(const char* left, const char* right)
 } // namespace
 
 SnapshotStatus buildSystemAboutSnapshot(const char* productName,
+                                        const char* osReleaseVersion,
                                         const char* kernelVersion,
                                         const char* architecture,
                                         uint64_t revision,
-                                        SystemAboutSnapshotV1* output)
+                                        SystemAboutSnapshotV2* output)
 {
     if (!output) return SnapshotStatus::InvalidArgument;
-    SystemAboutSnapshotV1 snapshot{};
-    snapshot.structureSize = sizeof(SystemAboutSnapshotV1);
+    SystemAboutSnapshotV2 snapshot{};
+    snapshot.structureSize = sizeof(SystemAboutSnapshotV2);
     snapshot.version = kSystemAboutSnapshotVersion;
     snapshot.revision = revision;
     snapshot.flags = kSystemAboutSnapshotAvailable;
-    if (revision == 0 ||
-        !copyBoundedText(snapshot.productName, productName) ||
-        !copyBoundedText(snapshot.kernelVersion, kernelVersion) ||
-        !copyBoundedText(snapshot.architecture, architecture) ||
+    if (copyBoundedText(snapshot.productName, productName))
+        snapshot.flags |= kSystemAboutProductNameAvailable;
+    const bool osReleaseCopied = copyOptionalBoundedText(snapshot.osReleaseVersion, osReleaseVersion);
+    if (osReleaseCopied &&
+        snapshot.osReleaseVersion[0])
+        snapshot.flags |= kSystemAboutOsReleaseVersionAvailable;
+    if (copyBoundedText(snapshot.kernelVersion, kernelVersion))
+        snapshot.flags |= kSystemAboutKernelVersionAvailable;
+    if (copyBoundedText(snapshot.architecture, architecture))
+        snapshot.flags |= kSystemAboutArchitectureAvailable;
+
+    const uint32_t requiredFields = kSystemAboutProductNameAvailable |
+        kSystemAboutKernelVersionAvailable | kSystemAboutArchitectureAvailable;
+    if (revision == 0 || !osReleaseCopied ||
+        (snapshot.flags & requiredFields) != requiredFields ||
         !validSystemAboutSnapshot(snapshot)) {
-        *output = SystemAboutSnapshotV1{};
-        output->structureSize = sizeof(SystemAboutSnapshotV1);
+        *output = SystemAboutSnapshotV2{};
+        output->structureSize = sizeof(SystemAboutSnapshotV2);
         output->version = kSystemAboutSnapshotVersion;
         output->revision = revision;
         return SnapshotStatus::Unavailable;
@@ -72,20 +100,32 @@ SnapshotStatus buildSystemAboutSnapshot(const char* productName,
     return SnapshotStatus::Ok;
 }
 
-bool validSystemAboutSnapshot(const SystemAboutSnapshotV1& snapshot)
+bool validSystemAboutSnapshot(const SystemAboutSnapshotV2& snapshot)
 {
-    return snapshot.structureSize == sizeof(SystemAboutSnapshotV1) &&
+    const uint32_t knownFlags = kSystemAboutSnapshotAvailable |
+        kSystemAboutProductNameAvailable | kSystemAboutOsReleaseVersionAvailable |
+        kSystemAboutKernelVersionAvailable | kSystemAboutArchitectureAvailable;
+    const uint32_t requiredFields = kSystemAboutProductNameAvailable |
+        kSystemAboutKernelVersionAvailable | kSystemAboutArchitectureAvailable;
+    return snapshot.structureSize == sizeof(SystemAboutSnapshotV2) &&
         snapshot.version == kSystemAboutSnapshotVersion &&
         snapshot.revision != 0 &&
-        snapshot.flags == kSystemAboutSnapshotAvailable &&
-        validText(snapshot.productName) &&
-        validText(snapshot.kernelVersion) &&
-        validText(snapshot.architecture);
+        (snapshot.flags & kSystemAboutSnapshotAvailable) != 0 &&
+        (snapshot.flags & ~knownFlags) == 0 &&
+        (snapshot.flags & requiredFields) == requiredFields &&
+        validOptionalText(snapshot.productName,
+            (snapshot.flags & kSystemAboutProductNameAvailable) != 0) &&
+        validOptionalText(snapshot.osReleaseVersion,
+            (snapshot.flags & kSystemAboutOsReleaseVersionAvailable) != 0) &&
+        validOptionalText(snapshot.kernelVersion,
+            (snapshot.flags & kSystemAboutKernelVersionAvailable) != 0) &&
+        validOptionalText(snapshot.architecture,
+            (snapshot.flags & kSystemAboutArchitectureAvailable) != 0);
 }
 
 SnapshotStatus readSystemAboutSnapshot(
     const app::KernelApp* caller,
-    const SystemAboutSnapshotRequestV1* request,
+    const SystemAboutSnapshotRequestV2* request,
     void* output,
     size_t capacity,
     size_t* outSize,
@@ -96,7 +136,7 @@ SnapshotStatus readSystemAboutSnapshot(
     if (!caller || !request || !output || !outSize || !outRevision) {
         return SnapshotStatus::InvalidArgument;
     }
-    if (request->structureSize < sizeof(SystemAboutSnapshotRequestV1)) {
+    if (request->structureSize < sizeof(SystemAboutSnapshotRequestV2)) {
         return SnapshotStatus::InvalidArgument;
     }
     if (request->version != kSystemAboutSnapshotVersion) {
@@ -106,17 +146,18 @@ SnapshotStatus readSystemAboutSnapshot(
         return SnapshotStatus::Unauthorized;
     }
 
-    *outSize = sizeof(SystemAboutSnapshotV1);
+    *outSize = sizeof(SystemAboutSnapshotV2);
     *outRevision = kSystemAboutSnapshotRevision;
-    if (capacity < sizeof(SystemAboutSnapshotV1)) return SnapshotStatus::BufferTooSmall;
+    if (capacity < sizeof(SystemAboutSnapshotV2)) return SnapshotStatus::BufferTooSmall;
     if (request->knownRevision != 0 &&
         request->knownRevision != kSystemAboutSnapshotRevision) {
         return SnapshotStatus::StaleRevision;
     }
 
-    SystemAboutSnapshotV1 snapshot{};
+    SystemAboutSnapshotV2 snapshot{};
     const SnapshotStatus status = buildSystemAboutSnapshot(
         KERNEL_NAME,
+        nullptr,
         KERNEL_VERSION_STRING,
         arch::get_arch_name(),
         kSystemAboutSnapshotRevision,
