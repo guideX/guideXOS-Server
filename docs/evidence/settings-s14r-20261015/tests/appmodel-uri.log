@@ -1,0 +1,48 @@
+Running: C:\mingw64\bin\g++.exe -std=c++17 -Wall -Wextra -O2 -iquote . -DGXOS_APPMODEL_TESTING tests/appmodel_uri_protocol_test.cpp app_registry.cpp app_default_handler_store.cpp app_manifest.cpp app_manifest_loader.cpp app_manifest_validator.cpp fs.cpp -o D:\dev\guideXOSServer\out\validation\settings-s14r-20261015\appmodel_uri_protocol_test.exe
+PASS: protocol schemes normalize ASCII case and accept bounded conventional grammar
+PASS: empty, malformed, underscore, digit-leading, and overlong schemes fail closed
+PASS: maximum protocol declarations per application are accepted
+PASS: maximum protocol declarations plus one are rejected
+PASS: duplicate and case-equivalent protocol declarations are rejected
+PASS: malformed scheme declaration is rejected by manifest validation
+PASS: overlong scheme declaration is rejected by manifest validation
+PASS: extension-only policy serialization remains byte-compatible with store version 1
+PASS: version 2 parser remains backward compatible with valid extension-only version 1 files
+PASS: version 2 uses explicit typed extension/protocol keys and round-trips them
+PASS: legacy v1 integrity checks still reject a checksum mismatch
+PASS: production built-ins register Navigator and existing text document defaults
+PASS: two same-label durable synthetic protocol handlers register by distinct canonical IDs
+PASS: HTTP and HTTPS have independent built-in and effective Navigator defaults
+PASS: capable-handler enumeration is case-insensitive, value-owned, and includes all declarations
+PASS: protocol and document defaults remain separate namespaces
+PASS: AppRegistry selects Navigator and preserves the exact owned HTTP URI including authority and suffix
+PASS: unknown protocol reports a deterministic no-handler result
+PASS: malformed URI schemes fail before handler selection
+PASS: scheme-valid but Navigator-invalid payload is separated from handler resolution
+PASS: empty, overlong, and control-containing URI payloads are rejected
+PASS: exact maximum URI length is accepted and owned without truncation
+PASS: document default remains independently settable before protocol persistence cycles
+PASS: Settings exposes protocol rows through the same policy model with truthful built-in/current handlers
+PASS: Settings selects a synthetic alternate handler by canonical ID and ordinary activation observes it
+PASS: one-time explicit Navigator activation leaves the configured synthetic default untouched
+PASS: HTTP and HTTPS configured defaults are independently represented and resolved
+PASS: Settings restore clears only the protocol override and leaves the file-type policy unchanged
+PASS: a durable protocol preference persists by canonical App ID
+PASS: unavailable configured protocol handler remains stored but is ignored for effective activation
+PASS: temporary development protocol registrations cannot become durable defaults
+PASS: temporary activation is scoped to the current registration generation
+PASS: temporary protocol registration can be unregistered by owner and generation
+PASS: reused canonical ID cannot inherit stale protocol authority from an earlier generation
+PASS: 100 deterministic URI resolution and activation-context cycles preserve exact owned values
+PASS: 100 unknown-protocol resolutions produce no activation and do not mutate registry state
+PASS: 100 typed-policy persistence/reload cycles preserve protocol selection, .txt policy, and unrelated bytes
+PASS: durable protocol preferences use the explicitly versioned v2 policy format
+PASS: missing configured protocol app retains its ID while resolution falls back to Navigator
+PASS: protocol registry record and Settings-handler snapshot limits fail closed deterministically
+PASS: Navigator keeps HTTP, HTTPS, file, and about internal while classifying external schemes for App Model delegation
+appModelUriProtocolChecks=41/41
+persistenceCycles=100/100
+activationCycles=100/100
+noHandlerCycles=100/100
+failures=0
+App Model URI/protocol activation tests PASS.

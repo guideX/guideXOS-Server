@@ -1,0 +1,54 @@
+Running: C:\mingw64\bin\g++.exe -std=c++17 -Wall -Wextra -O2 -iquote . -DGXOS_APPMODEL_TESTING tests/settings_default_apps_model_test.cpp app_registry.cpp app_default_handler_store.cpp app_manifest.cpp app_manifest_loader.cpp app_manifest_validator.cpp fs.cpp settings_presentation_core.cpp -o D:\dev\guideXOSServer\out\validation\settings-s14r-20261015\settings_default_apps_model_test.exe
+PASS: Default apps has stable singular and plural Apps deep links
+PASS: Default apps route is accepted by the Settings navigation model
+PASS: deep link focuses the first file type or falls back to the Default apps tab when no rows exist
+PASS: unknown Default apps routes are rejected
+PASS: bounded Settings search routes all Default apps and production-extension terms
+PASS: synthetic near-limit extension fixture uses the full backend extension bound
+PASS: synthetic registry contains durable, duplicate-label and capacity fixtures
+PASS: model reads the authoritative known-extension enumeration into a bounded snapshot
+PASS: extension rows are normalized, deduplicated and lexically ordered
+PASS: registry-declared synthetic extensions appear without Settings hard-coding them
+PASS: Settings discovers HTML and HTM from AppRegistry with Navigator as the unconfigured built-in default
+PASS: Settings discovers JPG and JPEG generically with ImageViewer as built-in/effective and no override
+PASS: Settings does not invent BMP or GIF rows without an AppRegistry capability or stored policy entry
+PASS: production built-in, configured and effective state remain distinct and truthful
+PASS: known extension with no capable handler is represented without fabricating a choice
+PASS: handler picker model supports one eligible handler
+PASS: handler picker model supports several handlers and stable canonical identities
+PASS: handler picker remains bounded and reports backend truncation at its 16-handler limit
+PASS: near-limit extension remains intact in the value-owned row identity
+PASS: long display labels remain presentation data and clip to a bounded UI value
+PASS: duplicate display labels receive secondary presentation disambiguation without becoming identity
+PASS: mouse and Enter row activation open a picker by stable extension identity
+PASS: picker cancel closes cleanly and restores focus to the same extension row
+PASS: 640x480 compact layout keeps tabs, status and four reachable extension rows in bounds
+PASS: 640x480 picker keeps handler rows, Restore and Cancel controls reachable
+PASS: mouse hit testing selects only visible extension rows and ignores the viewport edge
+PASS: keyboard row navigation remains stable at first and last entries
+PASS: keyboard navigation reaches handlers, Restore, Cancel and returns without losing focus
+PASS: zero-handler picker remains keyboard-cancelable without a fake choice
+PASS: extension scrolling reaches the bounded final row with stable selection
+PASS: empty known-extension enumeration yields a stable empty page
+PASS: unavailable default-policy service yields no fabricated host-default state
+PASS: extension-row capacity reports truncation without aliasing or overflow
+PASS: selecting the unconfigured built-in default is a no-op and writes no redundant override
+PASS: Settings model mutation stores and rereads the selected canonical App ID
+PASS: synthetic text editor backend can be made temporarily unavailable
+PASS: unavailable configured handler stays visible while the effective fallback is Notepad
+PASS: Restore default clears an unavailable override and rereads the built-in fallback
+PASS: synthetic text editor backend returns to its available state
+PASS: duplicate-label picker selection persists Editor B by canonical ID
+PASS: ordinary Open observes B while one-time Open With can still activate A without changing policy
+PASS: configured canonical selection survives Settings model refresh and AppRegistry owner reload
+PASS: Restore default removes the override and returns the extension to its normal fallback
+PASS: stale-registration fixture persists the original canonical handler B
+PASS: a reused registration position cannot redirect stale B to C or fabricate B's display name
+PASS: Restore default clears a stale canonical ID after handler disappearance
+PASS: 100 repeated open, select, refresh, restore and close cycles keep identity and capacity stable
+PASS: synthetic policy tests leave all four production defaults at Notepad
+settingsDefaultAppsModelChecks=39/39 passed
+settingsDefaultAppsInteractionChecks=9/9 passed
+defaultAppsLifecycleCycles=100/100
+failures=0
+Default Apps Settings model and interaction tests PASS.

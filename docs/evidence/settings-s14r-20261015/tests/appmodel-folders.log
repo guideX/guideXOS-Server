@@ -1,0 +1,29 @@
+Running: C:\mingw64\bin\g++.exe -std=c++17 -Wall -Wextra -O2 -iquote . -DGXOS_APPMODEL_TESTING tests/appmodel_folder_activation_test.cpp app_registry.cpp app_default_handler_store.cpp app_manifest.cpp app_manifest_loader.cpp app_manifest_validator.cpp fs.cpp -o D:\dev\guideXOSServer\out\validation\settings-s14r-20261015\appmodel_folder_activation_test.exe
+PASS: folder capability is an explicit manifest boolean and needs no fake extension
+PASS: canonical File Explorer registration truthfully owns the built-in folder capability
+PASS: folder capable-handler enumeration returns File Explorer as the available built-in default
+PASS: root activation has its own Folder kind and the canonical File Explorer identity
+PASS: nested dotted and file-like folder names remain owned folder paths
+PASS: resolved folder path is value-owned by the activation context
+PASS: folder path at the 4096-byte App Model limit is accepted by the bounded model
+PASS: empty, control-containing, and overlong folder paths fail closed
+PASS: current folder activation passes AppRegistry identity and capability revalidation
+PASS: synthetic alternate folder handler registers without shipping a fake application
+PASS: enumeration includes both handlers while the unconfigured built-in default remains File Explorer
+PASS: generic activation dispatcher registers the synthetic canonical handler
+PASS: explicit one-time folder activation dispatches by AppRegistry-selected canonical ID
+PASS: ordinary folder activation continues using the built-in effective default
+PASS: unregistering an unrelated temporary identity does not alter folder handlers
+PASS: an empty or unknown handler identity cannot redirect a folder activation
+PASS: temporary folder-capable handler registers with owner and generation
+PASS: temporary handler resolves only while its enumerated registration generation is current
+PASS: temporary folder handler unregisters using its matching owner and generation
+PASS: replacement temporary handler reuses the ID with a new generation
+PASS: stale folder-handler identity and activation cannot redirect to a reused registration slot
+PASS: generic dispatcher accepts the temporary canonical handler for lifecycle validation
+PASS: generic dispatcher revalidates the selected handler before dispatch
+PASS: folder activation fails safely when no capable handler exists
+PASS: 100 folder handler resolution and activation-context revalidation cycles pass
+PASS: 100 invalid-path, no-handler, and stale-generation failure cycles pass without activation
+Folder activation assertions: 26/26 passed; failures=0
+App Model folder activation tests PASS.

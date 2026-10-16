@@ -1,0 +1,3 @@
+Running: C:\mingw64\bin\g++.exe -std=c++17 -Wall -Wextra -O2 -iquote . tests/network_settings_contract_test.cpp -o D:\dev\guideXOSServer\out\validation\settings-s14r-20261015\network_settings_contract_test.exe
+Network Settings contract tests: 45/45 passed
+Network Settings contract build and test PASS.

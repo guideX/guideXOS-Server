@@ -1,13 +1,13 @@
 # guideXOS Server — Phase S14
 ## Native Display Refresh, Snapshot Consistency, and Topology Qualification
 
-Status: **Outcome B — partial progress**. The bounded refresh implementation, focused and regression tests, clean production build, and S14 QEMU Display-page acceptance passed. The full requested S14 guest sequence through About, close/reopen, and legacy Display Options was not completed in this phase; the missing guest evidence is recorded below.
+Status: **S14R Outcome A — Native Display Refresh Accepted**. S14 originally exited with Outcome B because the complete ordinary QEMU guest sequence had not been recorded. S14R completed that sequence, reviewed the bounded refresh contract, reran the deterministic and regression suites, and verified the final production artifact identities. The historical S14 result is retained below; the S14R closeout records the completed acceptance.
 
 ## Repository preflight
 
 - Repository: `D:\dev\guideXOSServer`
 - Branch: `main`
-- Starting HEAD: `db05e3b6f94d2edaa402c1dd34daee3f68d517ed` (`origin/main` at inspection)
+- Original S14 pre-implementation base: `db05e3b6f94d2edaa402c1dd34daee3f68d517ed`. S14 implementation commit and S14R starting HEAD: `d7c0f83aceeca722a45b5ec84a9c74bad2f27b94` on `main`.
 - Worktree: the tracked tree was clean. The following pre-existing untracked `out/` artifacts were present and are being preserved: `out/desktop_control_theme_test.exe`, `out/v03-amd64-qemu-candidate/`, `out/v03-amd64-scifi-final-build.log`, `out/v03-amd64-scifi-final-candidate/`, `out/v03-amd64-scifi-repro-build.log`, `out/v03-scifi-hosted-experimental.log`, and `out/v03-scifi-hosted-standard.log`.
 - No S14 acceptance document or equivalent Settings refresh implementation was present in the starting tree or reachable commit history. The existing VirtIO GPU topology observer is a separate pending-topology diagnostic and does not notify native Settings.
 - The S13 acceptance document and its artifact manifest record `de63af809e60504565db97b93998b4d30a0b6e2e` as their starting HEAD, while this repository's S13 accepted commit is `db05e3b6f94d2edaa402c1dd34daee3f68d517ed`. This report uses the verified repository HEAD above and treats the S13 test/build values as historical until rerun.
@@ -107,7 +107,7 @@ The saved [QEMU launch manifest](evidence/settings-s14-20261015/guest/qemu-launc
 
 No legitimate live production topology-change path exists in the ordinary AMD64 guest: framebuffer metadata is initialized from UEFI GOP at boot, and live VirtIO GPU topology queries are behind explicit QEMU-only build gates. The S14 deterministic runtime fixture therefore drives a genuine service-generation notification through the production provider adapter and S10 presentation path. It does not claim an in-guest live mode transition.
 
-The S14 QEMU evidence establishes boot, Start-to-Settings navigation, and the real Display snapshot. The requested follow-on guest checks for System/About navigation, close/reopen, and Start-to-Control Panel/Display Options were not completed in this phase. The prior S13 accepted QEMU evidence documents those legacy paths, while S14 lifecycle, navigation, provider, App Model routing, and compositor regressions passed in executable tests. These historical S13 guest results are not presented as new S14 guest observations. This remaining guest sequence is why the result is Outcome B rather than Outcome A.
+At the original S14 exit, the S14 QEMU evidence established boot, Start-to-Settings navigation, and the real Display snapshot, but System/About navigation, close/reopen, and Start-to-Control Panel/Display Options had not been completed. The prior S13 accepted QEMU evidence and S14 executable regressions provided context but did not close that guest gap. S14R completes and records the missing ordinary guest sequence below; the historical S14 classification remains Outcome B.
 
 ### Topology qualification, readiness, and next phase
 
@@ -117,7 +117,72 @@ S9, Settings 1.0, and Server v0.3 readiness were not advanced. Recommended S15 s
 
 ### Repository and commit status
 
-- Starting branch and HEAD: main at db05e3b6f94d2edaa402c1dd34daee3f68d517ed.
+- Original S14 pre-implementation base: `db05e3b6f94d2edaa402c1dd34daee3f68d517ed`. S14 implementation and S14R starting HEAD: `d7c0f83aceeca722a45b5ec84a9c74bad2f27b94` on `main`.
 - The S13 acceptance-document manifest's startingHead mismatch is retained as a historical note above; S14 used the verified repository HEAD.
 - Preexisting untracked v0.3 candidate artifacts and the S13 evidence/output directories were preserved.
-- This acceptance report and its evidence are included in the local S14 commit on main.
+- The original S14 report and evidence were committed locally on `main`; this S14R closeout and distinct evidence directory are committed locally on `main` as documentation-only acceptance work.
+
+## S14R closeout — complete guest acceptance and contract review
+
+### Starting state and acceptance gap matrix
+
+S14R started on `main` at `d7c0f83aceeca722a45b5ec84a9c74bad2f27b94`, the S14 implementation commit. The tracked worktree was clean. The preexisting untracked `out/` artifacts listed in Repository preflight were preserved. No accepted S14R closeout was present. No source implementation change was needed.
+
+| Requirement | Evidence before S14R | Gap at original S14 exit | S14R action and result |
+| --- | --- | --- | --- |
+| Authoritative display generation | DisplayConfigurationService owns active configuration generation; successful apply/reconciliation advances it | No live ordinary-guest transition was available to observe | Inspected service and event boundary; deterministic provider-backed cycles exercised the changed-state path |
+| Change notification | Bounded value-only KernelApp/AppManager display-change event | End-to-end behavior had only deterministic coverage, not the full ordinary UI flow | Confirmed event is emitted only after successful authoritative commit; reran 1,000 bounded notification/state transitions |
+| Snapshot revision | Provider revision maps nonzero source generation to a 64-bit revision (`generation + 1`; revision 1 represents source generation zero) | Prior S14 QEMU showed only initial revision | Verified wrap/order handling in the presentation tests and fresh Settings launch/reopen snapshots at revision 1 |
+| Coalescing and bounded delivery | One pending generation marker per Settings instance; fixed running-app table | No guest changed-mode event was possible | Reran 250 deterministic provider refresh cycles and 1,000 transitions; duplicate, stale, and late notification/lifecycle cases remain bounded |
+| Snapshot validation | Whole-snapshot structure/version/size/revision and field-invariant validation | Guest did not exercise refresh navigation and reopen | Reran native runtime and presentation suites; verified only validated complete snapshots are committed |
+| Repaint and presentation state | Shared presentation core retains category/focus; repaint is requested only for accepted visible Display changes or normal page/focus restoration | No full guest category/focus sequence | Ordinary guest completed Display → System → About → Display with mouse and keyboard input and preserved navigation/focus |
+| Hidden page and lifecycle | Hidden/unfocused refresh updates cached state; close clears pending state; new instance reads provider anew | No S14 guest close/reopen evidence | Fresh close/reopen succeeded; second instance reported `snapshot=ready revision=1`; 100 lifecycle repetitions passed |
+| Topology availability | Ordinary production backend query was already classified unavailable when gated backend support is absent | Need to confirm UI does not fabricate missing topology | Confirmed unavailable fields in Settings and legacy Display Options; no inference or mode change was made |
+| Ordinary production UI | S14 guest had booted and opened Display | System/About, reopen, Control Panel and Display Options were missing | Completed the full requested ordinary QEMU sequence and captured the screenshots, serial log, QMP transcript, and artifact manifest below |
+
+### Refresh architecture and correctness review
+
+The active display configuration remains owned by `gxos::display::DisplayConfigurationService`. A successful `ApplyConfiguration` or successful pending-topology reconciliation advances its nonzero 32-bit generation. The notification is published only after that commit. Preview, failed apply, dismissal, compositor window resize, and the diagnostic pending-topology observer do not publish a change. `AppManager` synchronously fans the value-only event across its fixed running-app table; it retains no subscriber pointers, callback registrations, heap queue, or unbounded event list.
+
+`SettingsNativeApp` coalesces incoming generations into one pending marker and consumes it during its normal desktop-owner update. It requests the existing authorized provider snapshot, validates the complete response, then commits it through the S10 presentation state. Provider revisions encode source generation plus one, reserving revision 1 for source generation zero and allowing `UINT32_MAX` to map to `2^32`. The serial-number ordering rule accepts forward wrap, rejects duplicate revisions with different data, stale generations, and ambiguous/backward resets, and permits recovery at the same revision after an unavailable read without relabeling old values current.
+
+The shared presentation core retains category and focus during refresh. A changed accepted snapshot invalidates the visible, focused Display page; hidden or unfocused pages update their cache and repaint on ordinary page selection or focus restoration. Closing Settings clears its cached snapshot and pending notification marker. A new instance takes a fresh provider snapshot. The provider remains authorized for `gxos.builtin.settings`; snapshot validation does not broaden mutation rights or read framebuffer memory/hardware registers from the presentation core.
+
+The fresh deterministic runtime evidence covers the end-to-end notification → provider snapshot retrieval → validated shared presentation update → repaint-request path, including changed source state, duplicate/stale/late notifications, close/reopen safety, and navigation/focus preservation. It passed with 828/828 native runtime checks, 100 lifecycle repetitions, 250 refresh cycles, and 1,000 bounded transitions. The shared presentation suite passed 2,647/2,647. These are controlled harness transitions through the production provider seam, not a fabricated production guest mode change.
+
+### Ordinary QEMU guest acceptance
+
+The final S14 production kernel was booted from an isolated writable ESP copy with a matching isolated OVMF copy. The launch used `pc,accel=whpx`, two vCPUs, 1536 MiB, `virtio-vga,id=video0`, GTK display, UTC RTC, and networking disabled. QMP was bound to `127.0.0.1:58426`. The guest booted normally to the desktop.
+
+The actual Settings sequence passed: Start → Settings; mouse selection of Display; keyboard navigation to System and About; return to Display; close; then Start → Settings again. System showed product `guideXOS`, kernel `0.1.0`, architecture `AMD64 (x86-64)`. About showed the same product/kernel/architecture and stated the OS release version is not defined. The reopened Settings instance started on System with `snapshot=ready revision=1` and rendered the current System snapshot.
+
+Settings Display and the canonical COM1 boot evidence agree on width 1280, height 800, 32 BPP, B8G8R8A8, and pitch 5120 bytes per line. Logical desktop dimensions, active layout, primary output, stable output identity, and output mode remain unavailable. Settings did not infer them from framebuffer or window dimensions.
+
+Start → Control Panel opened the legacy embedded Control Panel. The launch diagnostic records `target=ControlPanel` as `blocked-unknown-fallback`; the existing desktop fallback still opened the embedded panel, and no routing change was made. Its Display tile launched Display Options through the existing typed dispatch. Backgrounds and Displays tabs were exercised; the Displays tab truthfully reported unavailable topology and `Display query failed`. No wallpaper or display mode was applied. The Control Panel is a desktop modal/overlay, so this was verified sequentially with Settings; in the overlapping attempt, closing the Control Panel modal left Settings active (captured in [the post-modal Settings screenshot](evidence/settings-s14r-20261015/guest/settings-after-control-panel-closed.png)), and Settings was then closed separately. The Control Panel was also opened by itself and captured, confirming it remained independently usable. Display Options closed cleanly.
+
+After all surfaces were closed, the guest remained at the clean desktop without stale windows, crash, or hang. A second isolated boot used independent writable ESP and OVMF copies with the same verified hashes; it reached the desktop, showed the normal “System started successfully” notification, and reached the kernel main loop. The second boot logs and screenshot are in `evidence/settings-s14r-20261015/guest/repro-boot/`. Both task-owned QEMU processes were shut down through their own QMP endpoints. The foreign QEMU process observed during the run was left untouched. QMP pointer calibration used visible guest screenshots and small relative events; an initial host pointer-capture click was not counted as a guest action or production defect.
+
+Fresh guest evidence is in [the S14R guest directory](evidence/settings-s14r-20261015/guest/): [Display](evidence/settings-s14r-20261015/guest/settings-display.png), [System](evidence/settings-s14r-20261015/guest/settings-system.png), [About](evidence/settings-s14r-20261015/guest/settings-about.png), [reopened Settings](evidence/settings-s14r-20261015/guest/settings-reopened-system.png), [legacy Control Panel](evidence/settings-s14r-20261015/guest/control-panel.png), [Display Options Backgrounds](evidence/settings-s14r-20261015/guest/display-options-backgrounds.png), [Display Options Displays](evidence/settings-s14r-20261015/guest/display-options-displays.png), and [final desktop](evidence/settings-s14r-20261015/guest/desktop-final.png). The same directory contains the full [serial log](evidence/settings-s14r-20261015/guest/guest-com1.serial.log), [QMP transcript](evidence/settings-s14r-20261015/guest/qmp-transcript.log), [launch manifest](evidence/settings-s14r-20261015/guest/qemu-launch.json), [ESP manifest](evidence/settings-s14r-20261015/guest/ESP-file-manifest.sha256), and [build identity](evidence/settings-s14r-20261015/guest/ESP-build-identity.txt), all covered by [the evidence SHA-256 manifest](evidence/settings-s14r-20261015/evidence-manifest.sha256).
+
+### Artifact identity, regressions, repairs, and limitations
+
+The isolated guest media matched the final S14 artifacts:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Kernel ELF | `465F7C86957B4E41E1FC8A3392177875167F9850C048348F9BB03BEADB842102` |
+| Kernel PE | `A429049F16ECAA5E70739C0F5416954E11BAAA7D599D4078EBC33CB92CECCFA5` |
+| UEFI bootloader | `E2FDB6AD78E0416AF250BEBBC6541640E3CCDC7DD9A14453C08143B7F4DA48AA` |
+| OVMF firmware | `2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792` |
+
+The original S14 clean AMD64 build remains the final production build: 155 compile commands, one link, zero compiler/linker errors, and 233 warning lines. No production source changed during S14R, so no rebuild was necessary; the isolated guest image hashes match the committed S14 artifact records. The ELF undefined-symbol inventory has 20 unique names; the added display callback is defined in the final image, and the two names absent from the defined-symbol inventory match the S13 baseline. The full build log remains under the S14 evidence directory.
+
+Fresh S14R regression results are indexed in [test-results.md](evidence/settings-s14r-20261015/test-results.md), with raw runner output under its `tests/` subdirectory. In addition to the native runtime and presentation suites above, hosted Settings/model regressions passed 359/359; App Model identity 25/25; application actions 55/55; URI protocol 41/41 plus 100/100 persistence, activation, and no-handler cycles; folders 26/26; and files 60/60. Compositor, display/provider, and freestanding checks remained passing. No defect was discovered or repaired.
+
+There is no legitimate live display-mode transition in the ordinary production guest. The UEFI framebuffer is initialized at boot, while production topology snapshots and live VirtIO GPU notification are behind explicit QEMU-only build gates. S14R therefore does not claim an observed live production generation change, changed framebuffer values, or mode transition. It verifies the bounded source notification seam and controlled deterministic provider transitions instead. Stable output identifiers, primary output, active layout, logical desktop size, and output mode remain unavailable.
+
+### Final S14 acceptance classification
+
+**S14 — Outcome A: Native Display Refresh Accepted**
+
+The S14 implementation meets its bounded notification, revision, snapshot, repaint, and lifecycle contract under deterministic tests; ordinary production guest navigation and the complete legacy Display Options sequence passed; topology availability is accurately qualified; artifact identity is verified; and all required fresh regression suites passed. The only remaining limitation is the documented absence of a genuine production live-mode/topology change path in this build. S9, Settings 1.0, and Server v0.3 readiness were not advanced. S15 was not started. Recommended S15 scope remains a production-owned topology query and genuine commit-boundary notification followed by a new ordinary guest acceptance; display-mode management is out of scope absent separate authorization.

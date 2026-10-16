@@ -1,0 +1,4 @@
+Running: C:\mingw64\bin\g++.exe -std=c++17 -Wall -Wextra -O2 -iquote . tests/settings_inventory_model_test.cpp settings_presentation_core.cpp -o D:\dev\guideXOSServer\out\validation\settings-s14r-20261015\settings_inventory_model_test.exe
+Device model tests: 21/21 passed
+Storage model tests: 24/24 passed
+Settings inventory model build and test PASS.

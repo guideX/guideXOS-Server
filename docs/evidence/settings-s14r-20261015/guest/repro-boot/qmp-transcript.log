@@ -1,0 +1,11 @@
+2026-10-16T03:37:46.9606977Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-16T03:37:46.9700888Z TX {"execute":"qmp_capabilities"}
+2026-10-16T03:37:46.9769900Z RX {"return": {}}
+2026-10-16T03:37:46.9888826Z TX {"arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s14r-20261015\\repro-boot\\repro-current.ppm"},"execute":"screendump"}
+2026-10-16T03:37:46.9985816Z RX {"return": {}}
+2026-10-16T03:38:01.0402464Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-16T03:38:01.0470312Z TX {"execute":"qmp_capabilities"}
+2026-10-16T03:38:01.0521915Z RX {"return": {}}
+2026-10-16T03:38:01.0640671Z TX {"execute":"quit"}
+2026-10-16T03:38:01.0652185Z RX {"timestamp": {"seconds": 1792121881, "microseconds": 55493}, "event": "SHUTDOWN", "data": {"guest": false, "reason": "host-qmp-quit"}}
+2026-10-16T03:38:01.0665705Z RX {"return": {}}

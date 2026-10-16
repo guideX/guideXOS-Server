@@ -1,0 +1,58 @@
+Running: C:\mingw64\bin\g++.exe -std=c++17 -Wall -Wextra -O2 -iquote . -DGXOS_APPMODEL_TESTING tests/appmodel_application_actions_test.cpp app_registry.cpp app_default_handler_store.cpp app_manifest.cpp app_manifest_loader.cpp app_manifest_validator.cpp fs.cpp -o D:\dev\guideXOSServer\out\validation\settings-s14r-20261015\appmodel_application_actions_test.exe
+PASS: production Navigator registration owns one available value-owned Home action
+PASS: Start context menu copies the production declaration label and canonical action identity
+PASS: Recent Programs menu keeps its existing generic commands around declared action rows
+PASS: canonical app ID plus action ID resolves and revalidates the production declaration
+PASS: Notepad, File Explorer, ImageViewer, and registered Developer Studio expose no speculative actions
+PASS: zero-action app keeps ordinary Start commands and receives no empty action group
+PASS: unknown applications enumerate no actions
+PASS: unknown application identity constructs no action rows
+PASS: lowercase ASCII action IDs accept alphanumerics, interior hyphens, and the 48-byte limit
+PASS: empty, noncanonical, malformed, and overlong action IDs fail grammar validation
+PASS: manifest accepts exactly 12 actions, a 48-byte ID, a 64-byte label, and duplicate labels
+PASS: manifest rejects action bound plus one
+PASS: manifest rejects duplicate action IDs deterministically
+PASS: manifest rejects labels over the 64-byte bound
+PASS: manifest rejects malformed action identity even when its label is valid
+PASS: manifest loader preserves typed action declarations as owned manifest metadata
+PASS: synthetic multi-action manifest registers through AppRegistry
+PASS: multi-action enumeration is deterministically sorted by canonical action ID
+PASS: equal presentation labels remain distinct because action IDs are authoritative
+PASS: Start rows preserve deterministic enumeration order and duplicate labels keep distinct action IDs
+PASS: menu-held action snapshot owns its declaration label after source mutation
+PASS: exact per-app action maximum registers and enumerates without truncation
+PASS: maximum 12-action presentation remains bounded in All Programs and Recent Programs menus
+PASS: maximum Recent Programs menu stays fully inside a 640x480 viewport
+PASS: near-maximum 64-byte action label is retained as an owned bounded menu row
+PASS: menu construction clamps a malformed snapshot count to its fixed action array
+PASS: AppRegistry rejects per-app maximum plus one
+PASS: app with an unavailable backend registers its bounded declaration
+PASS: declarations with no available application backend are not exposed as invocable actions
+PASS: current backend availability reveals its statically declared action
+PASS: backend capability mutation changes registration generation and invalidates stale snapshots
+PASS: menu row retains the enumerated generation across later backend changes
+PASS: generic action dispatcher registers one application-owned handler by canonical ID
+PASS: displayed menu action fails closed after backend change and re-registration
+PASS: generic dispatcher delivers only canonical app ID and declared action ID to the app handler
+PASS: 50 Start menu model build, duplicate-label selection, dispatch, and close cycles stay identity-safe
+PASS: unknown application, unknown action, empty, malformed, and overlong identities fail closed
+PASS: failed resolutions do not reach the application action implementation
+PASS: temporary action registration enters the same bounded registry
+PASS: menu model retains a value-owned row from a temporary registration
+PASS: unregister removes action authority with the registration
+PASS: a different app reusing the unregistered storage slot cannot inherit stale action authority
+PASS: slot-reuse test registration unregisters cleanly
+PASS: replacement reuses the canonical registration slot with a new generation
+PASS: stale generation cannot invoke a same-ID replacement registration
+PASS: replacement action carries fresh generation authority
+PASS: generic dispatcher revalidates generation immediately before callback
+PASS: removed-action fixture registers with one declared action
+PASS: removed-action fixture unregisters after the menu snapshot is captured
+PASS: same canonical app re-registers without the displayed action
+PASS: removed action disappears from the new menu and old displayed row fails closed
+PASS: removed-action replacement unregisters cleanly
+PASS: empty registry fails unknown application actions without side effects
+PASS: 100 AppRegistry action resolution, revalidation, and generic invocation cycles reach the app handler
+PASS: 100 stale and unknown-action dispatch cycles fail without application callback
+Application action assertions: 55/55 passed; failures=0
+App Model application action tests PASS.

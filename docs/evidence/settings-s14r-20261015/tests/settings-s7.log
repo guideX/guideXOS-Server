@@ -1,0 +1,10 @@
+Running: C:\mingw64\bin\g++.exe -std=c++17 -Wall -Wextra -O2 -iquote . tests/settings_s7_model_test.cpp settings_presentation_core.cpp -o D:\dev\guideXOSServer\out\validation\settings-s14r-20261015\settings_s7_model_test.exe
+In file included from tests/settings_s7_model_test.cpp:2:
+./desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+./desktop_config.h:105:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+  105 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+Settings S7 Accessibility tests: 21/21 passed
+Settings S7 Developer tests: 23/23 passed
+Settings S7 navigation/search tests: 14/14 passed
+Settings S7 model build and test PASS.

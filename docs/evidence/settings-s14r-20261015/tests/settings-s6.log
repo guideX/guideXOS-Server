@@ -1,0 +1,45 @@
+Running: C:\mingw64\bin\g++.exe -std=c++17 -Wall -Wextra -O2 -iquote . tests/settings_s6_model_test.cpp settings_presentation_core.cpp -o D:\dev\guideXOSServer\out\validation\settings-s14r-20261015\settings_s6_model_test.exe
+PASS empty app registry
+PASS single registered app
+PASS built-in source preserved
+PASS normal Open capability preserved
+PASS multiple registered apps
+PASS stable display-name ordering
+PASS external registration source preserved
+PASS missing version remains unavailable
+PASS long app identity remains intact in the model
+PASS launchable app action
+PASS non-launchable app has no Open action
+PASS app ID breaks display-name ties deterministically
+PASS app inventory capacity
+PASS app inventory truncation reported
+PASS bounded app inventory keeps deterministic first entries
+PASS selected app identity resolves while registered
+PASS selection clears when app disappears
+PASS registration generation prevents stale selection reuse
+PASS date formatting crosses year and month boundary
+PASS 12-hour wall-clock formatting
+PASS Pacific standard UTC offset
+PASS local midnight boundary formatting
+PASS leap-day date formatting
+PASS leap-day noon formatting
+PASS UTC time-zone display
+PASS Pacific daylight-saving offset
+PASS 24-hour formatting preference
+PASS unavailable wall clock state
+PASS unknown time-zone state
+PASS unknown saved zone follows the shared clock fallback
+PASS UTC offset format includes minutes and sign
+PASS visible date page refresh becomes due
+PASS hidden, unfocused, and searched pages do not refresh
+PASS hosted provider reads the runtime wall clock
+PASS repeated hosted clock reads advance without provider regression
+PASS apps page deep link
+PASS apps list deep link
+PASS current time deep link
+PASS time-zone deep link
+PASS arbitrary app URI is rejected
+PASS global Settings search reaches registered apps
+PASS global Settings search reaches Date and Time
+Settings S6 model tests: 42/42 passed
+Settings S6 model build and test PASS.

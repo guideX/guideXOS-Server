@@ -1,0 +1,5 @@
+Running: C:\mingw64\bin\g++.exe -std=c++17 -Wall -Wextra -O2 -iquote . tests/settings_users_model_test.cpp settings_presentation_core.cpp -o D:\dev\guideXOSServer\out\validation\settings-s14r-20261015\settings_users_model_test.exe
+Settings S8 Users model tests: 11/11 passed
+Settings S8 Users navigation tests: 8/8 passed
+Settings S8 Users interaction/layout tests: 13/13 passed
+Settings Users model build and test PASS.
