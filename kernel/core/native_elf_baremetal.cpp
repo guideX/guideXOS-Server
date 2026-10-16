@@ -3,6 +3,7 @@
 
 #include "include/kernel/arch.h"
 #include "include/kernel/desktop.h"
+#include "include/kernel/font_contract.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/input_manager.h"
 #include "include/kernel/kernel_app.h"
@@ -159,10 +160,37 @@ public:
         if (text[0] == '\f' && text[1] == '\0') {
             clear_surface(0xFF000000u);
         } else {
-            gxos::gui::BitmapFont::DrawStringToBuffer(
-                m_surface, static_cast<int>(m_width * sizeof(uint32_t)),
-                static_cast<int>(m_width), static_cast<int>(m_height),
-                x, y, text, -1, 0xFFFFFFFFu);
+            size_t textBytes = 0;
+            if (gxos::gui::FontUtf8CStringLength(text, &textBytes) != gxos::gui::FontStatus::Ok)
+                return GX_ERROR_INVALID_ARGUMENT;
+            gxos::gui::FontHandle font = {0xffffu, 0, 0};
+            const gxos::gui::FontStatus initStatus = gxos::gui::FontManagerInitialize();
+            const gxos::gui::FontStatus defaultStatus = initStatus == gxos::gui::FontStatus::Ok
+                ? gxos::gui::FontManagerGetDefaultFont(&font)
+                : initStatus;
+            bool useLegacyFallback = defaultStatus != gxos::gui::FontStatus::Ok;
+            if (defaultStatus == gxos::gui::FontStatus::Ok) {
+                const gxos::gui::FontStatus drawStatus = gxos::gui::FontDrawTextToBuffer(
+                    font, {gxos::gui::kBitmapFontPixelHeight}, m_surface,
+                    static_cast<uint32_t>(m_width * sizeof(uint32_t)), m_width, m_height,
+                    x, y, text, textBytes, 0xFFFFFFFFu, nullptr);
+                if (drawStatus != gxos::gui::FontStatus::Ok &&
+                    drawStatus != gxos::gui::FontStatus::FallbackUsed) {
+                    if (drawStatus == gxos::gui::FontStatus::NotInitialized ||
+                        drawStatus == gxos::gui::FontStatus::InvalidHandle) {
+                        useLegacyFallback = true;
+                    } else {
+                        return GX_ERROR_INVALID_ARGUMENT;
+                    }
+                }
+            }
+            if (useLegacyFallback) {
+                // Keep GXApp text usable if the optional manager cannot start.
+                gxos::gui::BitmapFont::DrawStringToBuffer(
+                    m_surface, static_cast<int>(m_width * sizeof(uint32_t)),
+                    static_cast<int>(m_width), static_cast<int>(m_height),
+                    x, y, text, static_cast<int>(textBytes), 0xFFFFFFFFu);
+            }
         }
         invalidate();
         return GX_OK;

@@ -1,0 +1,156 @@
+#pragma once
+
+#if defined(GXOS_BARE_METAL)
+#include "types.h"
+#else
+#include <cstddef>
+#include <cstdint>
+#endif
+
+namespace gxos {
+namespace gui {
+
+// FONT2 starts with a deliberately small contract. Font identities are stable
+// IDs; handles are process-local slot/generation pairs and must never persist.
+typedef uint32_t UnicodeCodePoint;
+
+struct FontId {
+	uint64_t value;
+};
+
+struct FontHandle {
+	uint16_t slot;
+	uint16_t reserved;
+	uint32_t generation;
+};
+
+struct FontSize {
+	uint32_t pixelHeight;
+};
+
+enum FontCapability : uint32_t {
+	FontCapabilityGlyphLookup = 1u << 0,
+	FontCapabilityBitmapData = 1u << 1,
+	FontCapabilityMeasurement = 1u << 2,
+	FontCapabilityUtf8Input = 1u << 3,
+	FontCapabilityMonospace = 1u << 4,
+};
+
+enum class FontStatus : uint8_t {
+	Ok = 0,
+	FallbackUsed,
+	InvalidArgument,
+	NotInitialized,
+	RegistryFull,
+	DuplicateFontId,
+	InvalidHandle,
+	UnsupportedCodePoint,
+	UnsupportedSize,
+	InvalidUtf8,
+	InputTooLong,
+	ArithmeticOverflow,
+	BackendFailure,
+	GenerationExhausted,
+};
+
+enum class FontBitmapFormat : uint8_t {
+	None = 0,
+	ColumnLsbTop = 1,
+};
+
+struct FontMetrics {
+	uint32_t pixelSize;
+	uint32_t ascentPx;
+	uint32_t descentPx;
+	uint32_t lineGapPx;
+	uint32_t lineHeightPx;
+	uint32_t baselinePx;
+};
+
+struct GlyphMetrics {
+	uint32_t glyphId;
+	UnicodeCodePoint codePoint;
+	int32_t xBearingPx;
+	int32_t yBearingPx;
+	uint32_t widthPx;
+	uint32_t heightPx;
+	uint32_t advancePx;
+};
+
+struct FontGlyphView {
+	GlyphMetrics metrics;
+	const uint8_t* bitmap;
+	uint32_t bitmapByteLength;
+	FontBitmapFormat bitmapFormat;
+	uint8_t fallbackUsed;
+	uint8_t reserved[2];
+	UnicodeCodePoint requestedCodePoint;
+};
+
+// pixelWidth and maxLineAdvancePx describe the widest laid-out line.
+// lastLineAdvancePx is the advance on the final line. Newlines count as code
+// points, but not as glyphs. CRLF is one line break and two code points.
+struct TextMeasureResult {
+	size_t byteLength;
+	uint32_t codePointCount;
+	uint32_t glyphCount;
+	uint32_t fallbackGlyphCount;
+	uint32_t lineCount;
+	uint32_t pixelWidth;
+	uint32_t pixelHeight;
+	uint32_t maxLineAdvancePx;
+	uint32_t lastLineAdvancePx;
+	size_t errorByteOffset;
+};
+
+struct FontBackend {
+	uint32_t capabilities;
+	FontStatus (*getMetrics)(const void* context, FontSize size, FontMetrics* outMetrics);
+	FontStatus (*lookupGlyph)(const void* context, UnicodeCodePoint codePoint,
+		FontGlyphView* outGlyph);
+};
+
+// FontDefinition and backend context are borrowed for the registration
+// lifetime. Register only immutable, process-lifetime backend/context storage.
+struct FontDefinition {
+	FontId id;
+	const char* debugName;
+	const FontBackend* backend;
+	const void* context;
+};
+
+static const uint64_t kBuiltinBitmapFontId = 0x47584249544d4150ull; // "GXBITMAP"
+static const uint32_t kFontMaxTextBytes = 4096u;
+static const uint32_t kFontRegistryCapacity = 4u;
+static const uint32_t kBitmapFontPixelHeight = 7u;
+
+FontStatus FontManagerInitialize();
+void FontManagerShutdown();
+bool FontManagerIsInitialized();
+FontStatus FontManagerRegisterFont(const FontDefinition* definition, FontHandle* outHandle);
+FontStatus FontManagerResolveFont(FontId id, FontHandle* outHandle);
+FontStatus FontManagerGetDefaultFont(FontHandle* outHandle);
+FontStatus FontManagerSetDefaultFont(FontHandle handle);
+uint32_t FontManagerGeneration();
+
+// Finds a NUL terminator within a 4096-byte scan window. The terminator is
+// included in the scan bound, so a maximum of 4095 text bytes is accepted.
+FontStatus FontUtf8CStringLength(const char* utf8, size_t* outByteLength);
+FontStatus FontGetMetrics(FontHandle handle, FontSize size, FontMetrics* outMetrics);
+FontStatus FontLookupGlyph(FontHandle handle, FontSize size, UnicodeCodePoint codePoint,
+	FontGlyphView* outGlyph);
+FontStatus FontMeasureText(FontHandle handle, FontSize size, const char* utf8,
+	size_t byteLength, TextMeasureResult* outResult);
+FontStatus FontDrawTextToBuffer(FontHandle handle, FontSize size,
+	uint32_t* pixels, uint32_t pitchBytes, uint32_t bufferWidth, uint32_t bufferHeight,
+	int32_t x, int32_t y, const char* utf8, size_t byteLength, uint32_t color,
+	TextMeasureResult* outMeasure);
+FontStatus FontDrawCStringToBuffer(FontHandle handle, FontSize size,
+	uint32_t* pixels, uint32_t pitchBytes, uint32_t bufferWidth, uint32_t bufferHeight,
+	int32_t x, int32_t y, const char* utf8, uint32_t color,
+	TextMeasureResult* outMeasure);
+
+const FontDefinition* FontBuiltinBitmapDefinition();
+
+} // namespace gui
+} // namespace gxos
