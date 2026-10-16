@@ -78,7 +78,9 @@ typedef enum RexxOpcode {
     OP_DO_NEXT,
     OP_DO_END,
     OP_LOAD_UNSET,
-    OP_NUMERIC_DIGITS
+    OP_NUMERIC_DIGITS,
+    OP_NUMERIC_FUZZ,
+    OP_NUMERIC_FORM
 } RexxOpcode;
 
 /*

@@ -90,7 +90,8 @@ static const char *const vm_messages[] = {
     "invalid or malformed bytecode", "value is not a valid finite number",
     "opcode is not implemented by this VM", "standard output error",
     "unknown REXX built-in function", "invalid arguments to REXX built-in function",
-    "instruction budget exhausted", "invalid NUMERIC DIGITS setting"
+    "instruction budget exhausted", "invalid NUMERIC DIGITS setting",
+    "invalid NUMERIC FUZZ setting", "invalid NUMERIC FORM setting"
 };
 
 static int ascii_space(unsigned char c)
@@ -198,7 +199,7 @@ static RexxVMStatus vm_fail(RexxVM *vm, RexxVMStatus status, size_t pc)
         vm->error.status = status;
         vm->error.pc = pc;
         vm->error.message = status >= REXX_VM_STATUS_OK &&
-                            status <= REXX_VM_STATUS_INVALID_NUMERIC_SETTING
+                            status <= REXX_VM_STATUS_INVALID_NUMERIC_FORM
                                 ? vm_messages[status] : "unknown VM error";
     }
     return status;
@@ -887,7 +888,11 @@ static RexxVMStatus decimal_value_to_rexx(RexxVM *vm,
                                           RexxValue *result)
 {
     char output[REXX_DECIMAL_MAX_DIGITS + 64u];
-    int length = rexx_decimal_format(output, sizeof(output), decimal, precision);
+    RexxDecimalFormat form = vm->numeric_form == REXX_NUMERIC_FORM_ENGINEERING
+                                 ? REXX_DECIMAL_FORMAT_ENGINEERING
+                                 : REXX_DECIMAL_FORMAT_SCIENTIFIC;
+    int length = rexx_decimal_format_with_form(
+        output, sizeof(output), decimal, precision, form);
     if (length < 0) return REXX_VM_STATUS_RESOURCE_LIMIT;
     {
         RexxVMStatus status = charge_numeric_work(vm, (size_t)length);
@@ -1086,14 +1091,23 @@ static RexxVMStatus compare_values(RexxVM *vm,
         return REXX_VM_STATUS_RESOURCE_LIMIT;
     if (!comparison_is_strict(opcode) &&
         left_status == REXX_VM_STATUS_OK && right_status == REXX_VM_STATUS_OK) {
+        size_t comparison_precision =
+            vm->numeric_digits - vm->numeric_fuzz;
         size_t cost = numeric_text_cost(left) + numeric_text_cost(right) +
                       decimal_operation_cost(&a, &b, OP_SUB,
-                                             vm->numeric_digits - vm->numeric_fuzz);
+                                             comparison_precision);
         RexxVMStatus charge_status = charge_numeric_work(vm, cost);
         if (charge_status != REXX_VM_STATUS_OK) return charge_status;
-        numeric_status = rexx_decimal_subtract(&a, &b,
-                                               vm->numeric_digits - vm->numeric_fuzz,
-                                               &difference);
+        /* Comparison operands are first represented at the temporary
+         * DIGITS-FUZZ precision. The subtraction then uses that same context,
+         * as classic REXX does; otherwise exact cancellation in the decimal
+         * backing type incorrectly makes FUZZ ineffective. */
+        numeric_status = rexx_decimal_round(&a, comparison_precision);
+        if (numeric_status == REXX_NUMERIC_OK)
+            numeric_status = rexx_decimal_round(&b, comparison_precision);
+        if (numeric_status == REXX_NUMERIC_OK)
+            numeric_status = rexx_decimal_subtract(
+                &a, &b, comparison_precision, &difference);
         if (numeric_status != REXX_NUMERIC_OK)
             return decimal_status_to_vm(numeric_status);
         comparison = difference.sign;
@@ -1176,6 +1190,8 @@ static RexxVMStatus execute_numeric_digits(RexxVM *vm,
     if ((flags & (uint8_t)~REXX_INSTRUCTION_HAS_VALUE) != 0u)
         return REXX_VM_STATUS_INVALID_BYTECODE;
     if ((flags & REXX_INSTRUCTION_HAS_VALUE) == 0u) {
+        if (REXX_VM_DEFAULT_NUMERIC_DIGITS <= vm->numeric_fuzz)
+            return REXX_VM_STATUS_INVALID_NUMERIC_SETTING;
         vm->numeric_digits = REXX_VM_DEFAULT_NUMERIC_DIGITS;
         return REXX_VM_STATUS_OK;
     }
@@ -1186,6 +1202,68 @@ static RexxVMStatus execute_numeric_digits(RexxVM *vm,
         precision > REXX_NUMERIC_MAX_DIGITS || precision <= vm->numeric_fuzz)
         return REXX_VM_STATUS_INVALID_NUMERIC_SETTING;
     vm->numeric_digits = precision;
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus execute_numeric_fuzz(RexxVM *vm,
+                                         uint8_t flags,
+                                         RexxValue *operand)
+{
+    RexxDecimal decimal;
+    uint32_t fuzz;
+    RexxNumericStatus numeric_status;
+    RexxVMStatus status;
+
+    if ((flags & (uint8_t)~REXX_INSTRUCTION_HAS_VALUE) != 0u)
+        return REXX_VM_STATUS_INVALID_BYTECODE;
+    if ((flags & REXX_INSTRUCTION_HAS_VALUE) == 0u) {
+        vm->numeric_fuzz = 0u;
+        return REXX_VM_STATUS_OK;
+    }
+    status = value_decimal(operand, &decimal);
+    if (status != REXX_VM_STATUS_OK)
+        return status == REXX_VM_STATUS_RESOURCE_LIMIT
+                   ? status : REXX_VM_STATUS_INVALID_NUMERIC_FUZZ;
+    numeric_status = rexx_decimal_to_uint32(&decimal, &fuzz);
+    if (numeric_status == REXX_NUMERIC_RESOURCE_LIMIT)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    if (numeric_status != REXX_NUMERIC_OK || fuzz >= vm->numeric_digits)
+        return REXX_VM_STATUS_INVALID_NUMERIC_FUZZ;
+    vm->numeric_fuzz = fuzz;
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus execute_numeric_form(RexxVM *vm,
+                                         uint8_t flags,
+                                         uint32_t form,
+                                         RexxValue *operand)
+{
+    RexxNumericForm selected;
+
+    if ((flags & (uint8_t)~REXX_INSTRUCTION_HAS_VALUE) != 0u)
+        return REXX_VM_STATUS_INVALID_BYTECODE;
+    if ((flags & REXX_INSTRUCTION_HAS_VALUE) == 0u) {
+        if (form > (uint32_t)REXX_NUMERIC_FORM_ENGINEERING)
+            return REXX_VM_STATUS_INVALID_BYTECODE;
+        selected = (RexxNumericForm)form;
+    } else {
+        if (form != 0u || operand == NULL ||
+            operand->type != REXX_VALUE_STRING ||
+            (operand->as.string.bytes == NULL &&
+             operand->as.string.length != 0u))
+            return REXX_VM_STATUS_INVALID_NUMERIC_FORM;
+        if (ascii_equal(operand->as.string.bytes,
+                        operand->as.string.length, "SCIENTIFIC", 10u)) {
+            selected = REXX_NUMERIC_FORM_SCIENTIFIC;
+        } else if (ascii_equal(operand->as.string.bytes,
+                               operand->as.string.length,
+                               "ENGINEERING", 11u)) {
+            selected = REXX_NUMERIC_FORM_ENGINEERING;
+        } else {
+            return REXX_VM_STATUS_INVALID_NUMERIC_FORM;
+        }
+    }
+    vm->numeric_form = selected;
     return REXX_VM_STATUS_OK;
 }
 
@@ -1411,6 +1489,26 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
                         status = REXX_VM_STATUS_INVALID_FUNCTION_CALL;
                     else
                         status = value_set_uint32(&value, vm->numeric_digits);
+                } else if (ascii_equal(function->name, function->length,
+                                       "FUZZ", 4u)) {
+                    if (argument_count != 0u)
+                        status = REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+                    else
+                        status = value_set_uint32(&value, vm->numeric_fuzz);
+                } else if (ascii_equal(function->name, function->length,
+                                       "FORM", 4u)) {
+                    static const char scientific[] = "SCIENTIFIC";
+                    static const char engineering[] = "ENGINEERING";
+                    if (argument_count != 0u) {
+                        status = REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+                    } else if (vm->numeric_form ==
+                               REXX_NUMERIC_FORM_ENGINEERING) {
+                        status = rexx_value_set_string(
+                            &value, engineering, sizeof(engineering) - 1u);
+                    } else {
+                        status = rexx_value_set_string(
+                            &value, scientific, sizeof(scientific) - 1u);
+                    }
                 } else {
                     status = rexx_builtin_dispatch(
                         function->name, function->length,
@@ -1430,10 +1528,36 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
         }
 
         case OP_NUMERIC_DIGITS:
+            if (ins->operand != 0u || ins->auxiliary != 0u)
+                status = REXX_VM_STATUS_INVALID_BYTECODE;
             if ((ins->flags & REXX_INSTRUCTION_HAS_VALUE) != 0u)
-                status = pop_move(vm, &value);
+                if (status == REXX_VM_STATUS_OK)
+                    status = pop_move(vm, &value);
             if (status == REXX_VM_STATUS_OK)
                 status = execute_numeric_digits(vm, ins->flags, &value);
+            rexx_value_clear(&value);
+            break;
+
+        case OP_NUMERIC_FUZZ:
+            if (ins->operand != 0u || ins->auxiliary != 0u)
+                status = REXX_VM_STATUS_INVALID_BYTECODE;
+            if ((ins->flags & REXX_INSTRUCTION_HAS_VALUE) != 0u &&
+                status == REXX_VM_STATUS_OK)
+                status = pop_move(vm, &value);
+            if (status == REXX_VM_STATUS_OK)
+                status = execute_numeric_fuzz(vm, ins->flags, &value);
+            rexx_value_clear(&value);
+            break;
+
+        case OP_NUMERIC_FORM:
+            if (ins->auxiliary != 0u)
+                status = REXX_VM_STATUS_INVALID_BYTECODE;
+            if ((ins->flags & REXX_INSTRUCTION_HAS_VALUE) != 0u &&
+                status == REXX_VM_STATUS_OK)
+                status = pop_move(vm, &value);
+            if (status == REXX_VM_STATUS_OK)
+                status = execute_numeric_form(vm, ins->flags, ins->operand,
+                                              &value);
             rexx_value_clear(&value);
             break;
 
@@ -1564,7 +1688,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 const char *rexx_vm_status_name(RexxVMStatus status)
 {
     if (status < REXX_VM_STATUS_OK ||
-        status > REXX_VM_STATUS_INVALID_NUMERIC_SETTING)
+        status > REXX_VM_STATUS_INVALID_NUMERIC_FORM)
         return "unknown VM status";
     return vm_messages[status];
 }

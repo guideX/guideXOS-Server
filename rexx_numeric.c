@@ -1232,14 +1232,17 @@ static int decimal_append_unsigned(char *out, size_t cap, size_t *length,
     return 1;
 }
 
-int rexx_decimal_format(char *output, size_t output_capacity,
-                        const RexxDecimal *value, size_t precision)
+int rexx_decimal_format_with_form(char *output, size_t output_capacity,
+                                  const RexxDecimal *value, size_t precision,
+                                  RexxDecimalFormat form)
 {
     size_t length = 0u, index;
-    int exponent, scientific;
+    int exponent, output_exponent, integer_digits, scientific;
     if (output == NULL || output_capacity == 0u || value == NULL ||
         value->length == 0u || value->length > REXX_DECIMAL_MAX_DIGITS ||
-        !decimal_valid_precision(precision)) return -1;
+        !decimal_valid_precision(precision) ||
+        (form != REXX_DECIMAL_FORMAT_SCIENTIFIC &&
+         form != REXX_DECIMAL_FORMAT_ENGINEERING)) return -1;
     output[0] = '\0';
     if (value->sign == 0)
         return decimal_append(output, output_capacity, &length, '0')
@@ -1247,21 +1250,39 @@ int rexx_decimal_format(char *output, size_t output_capacity,
     if (value->sign < 0 && !decimal_append(output, output_capacity, &length, '-'))
         return -1;
     exponent = decimal_adjusted_exponent(value);
+    output_exponent = exponent;
+    integer_digits = 1;
     scientific = exponent + 1 > (int)precision ||
                  (value->scale > 0 && (size_t)value->scale > precision * 2u);
     if (scientific) {
-        if (!decimal_append(output, output_capacity, &length, value->digits[0])) return -1;
-        if (value->length > 1u) {
+        if (form == REXX_DECIMAL_FORMAT_ENGINEERING) {
+            output_exponent = (exponent / 3) * 3;
+            if (exponent < 0 && exponent % 3 != 0) output_exponent -= 3;
+            integer_digits = exponent - output_exponent + 1;
+            /* Classic REXX does not emit an exponential part of E+0. */
+            if (output_exponent == 0) scientific = 0;
+        }
+    }
+    if (scientific) {
+        for (index = 0u; index < (size_t)integer_digits; ++index) {
+            char digit = index < value->length ? value->digits[index] : '0';
+            if (!decimal_append(output, output_capacity, &length, digit)) return -1;
+        }
+        if (value->length > (size_t)integer_digits) {
             if (!decimal_append(output, output_capacity, &length, '.')) return -1;
-            for (index = 1u; index < value->length; ++index)
+            for (index = (size_t)integer_digits; index < value->length; ++index)
                 if (!decimal_append(output, output_capacity, &length, value->digits[index])) return -1;
         }
-        if (!decimal_append(output, output_capacity, &length, 'E') ||
-            !decimal_append(output, output_capacity, &length, exponent < 0 ? '-' : '+') ||
-            !decimal_append_unsigned(output, output_capacity, &length,
-                                     (unsigned int)(exponent < 0 ? -exponent : exponent)))
-            return -1;
-        return (int)length;
+        if (output_exponent != 0 &&
+            (!decimal_append(output, output_capacity, &length, 'E') ||
+             !decimal_append(output, output_capacity, &length,
+                             output_exponent < 0 ? '-' : '+') ||
+             !decimal_append_unsigned(
+                 output, output_capacity, &length,
+                 (unsigned int)(output_exponent < 0
+                                    ? -output_exponent : output_exponent))))
+                return -1;
+        if (scientific) return (int)length;
     }
     if (value->scale <= 0) {
         for (index = 0u; index < value->length; ++index)
@@ -1292,4 +1313,12 @@ int rexx_decimal_format(char *output, size_t output_capacity,
         }
     }
     return (int)length;
+}
+
+int rexx_decimal_format(char *output, size_t output_capacity,
+                        const RexxDecimal *value, size_t precision)
+{
+    return rexx_decimal_format_with_form(
+        output, output_capacity, value, precision,
+        REXX_DECIMAL_FORMAT_SCIENTIFIC);
 }

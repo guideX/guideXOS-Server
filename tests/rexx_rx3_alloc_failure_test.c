@@ -473,6 +473,11 @@ int main(void)
     test_expression_failure_matrix("precision adjustment",
                                    "numeric digits 3\nsay 9.999 * 1\n",
                                    "10.0\n", 5u, 3u);
+    test_expression_failure_matrix("numeric-context built-ins",
+                                   "numeric fuzz 2\nnumeric form engineering\n"
+                                   "say fuzz()\nsay form()\n",
+                                   "2\nENGINEERING\n", 4u,
+                                   REXX_VM_DEFAULT_NUMERIC_DIGITS);
     test_variable_update_failure_matrix();
     test_stem_update_failure_matrix();
     test_new_entry_failure_matrix("variable", "item = \"new\"\n", 5u, 0);

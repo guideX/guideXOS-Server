@@ -59,7 +59,9 @@ typedef enum RexxVMStatus {
     REXX_VM_STATUS_UNKNOWN_FUNCTION,
     REXX_VM_STATUS_INVALID_FUNCTION_CALL,
     REXX_VM_STATUS_INSTRUCTION_LIMIT,
-    REXX_VM_STATUS_INVALID_NUMERIC_SETTING
+    REXX_VM_STATUS_INVALID_NUMERIC_SETTING,
+    REXX_VM_STATUS_INVALID_NUMERIC_FUZZ,
+    REXX_VM_STATUS_INVALID_NUMERIC_FORM
 } RexxVMStatus;
 
 typedef enum RexxNumericForm {
@@ -106,9 +108,9 @@ typedef struct RexxVM {
     size_t sp;            /* Number of live entries; top is stack[sp - 1]. */
     size_t pc;            /* Current bytecode instruction index. */
     size_t instruction_budget; /* Maximum dispatches allowed by one execute. */
-    uint32_t numeric_digits; /* Invocation-local NUMERIC DIGITS context. */
-    uint32_t numeric_fuzz;   /* Reserved; FUZZ statements remain unsupported. */
-    RexxNumericForm numeric_form; /* Reserved; FORM statements remain unsupported. */
+    uint32_t numeric_digits; /* Per-VM NUMERIC DIGITS context. */
+    uint32_t numeric_fuzz;   /* Per-VM NUMERIC FUZZ context. */
+    RexxNumericForm numeric_form; /* Per-VM NUMERIC FORM context. */
     size_t numeric_work_budget;
     size_t numeric_work_remaining;
 

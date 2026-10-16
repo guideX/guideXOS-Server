@@ -15,6 +15,7 @@
 #include "rexx_lexer.h"
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -115,7 +116,9 @@ typedef enum RexxAstClauseKind {
     REXX_AST_CLAUSE_IF,
     REXX_AST_CLAUSE_DO,
     REXX_AST_CLAUSE_SELECT,
-    REXX_AST_CLAUSE_NUMERIC_DIGITS
+    REXX_AST_CLAUSE_NUMERIC_DIGITS,
+    REXX_AST_CLAUSE_NUMERIC_FUZZ,
+    REXX_AST_CLAUSE_NUMERIC_FORM
 } RexxAstClauseKind;
 
 typedef enum RexxAstDoMode {
@@ -170,6 +173,7 @@ struct RexxAstClause {
             RexxAstExpression *expression; /* NULL is permitted for SAY. */
             RexxToken address_environment; /* ADDRESS only; source-backed. */
             int has_address_environment;
+            uint32_t numeric_form; /* 0=SCIENTIFIC, 1=ENGINEERING for FORM. */
         } simple;
         struct {
             RexxAstExpression *call;

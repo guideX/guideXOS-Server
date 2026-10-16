@@ -15,6 +15,11 @@ typedef enum RexxNumericStatus {
     REXX_NUMERIC_RESOURCE_LIMIT
 } RexxNumericStatus;
 
+typedef enum RexxDecimalFormat {
+    REXX_DECIMAL_FORMAT_SCIENTIFIC = 0,
+    REXX_DECIMAL_FORMAT_ENGINEERING = 1
+} RexxDecimalFormat;
+
 /* Bounded base-10 decimal used by classic REXX arithmetic. Digits are stored
  * most-significant first. The value is sign * coefficient * 10^(-scale).
  * Trailing coefficient zeroes and scale are retained for result formatting. */
@@ -73,11 +78,17 @@ RexxNumericStatus rexx_decimal_to_uint32(const RexxDecimal *value,
                                          uint32_t *result);
 RexxNumericStatus rexx_decimal_to_int32(const RexxDecimal *value,
                                         int32_t *result);
-/* Formats according to classic NUMERIC DIGITS and default SCIENTIFIC FORM. */
+/* Formats according to the classic exponent trigger and SCIENTIFIC FORM. */
 int rexx_decimal_format(char *output,
                         size_t output_capacity,
                         const RexxDecimal *value,
                         size_t precision);
+/* Same bounded formatter with the active NUMERIC FORM selected explicitly. */
+int rexx_decimal_format_with_form(char *output,
+                                  size_t output_capacity,
+                                  const RexxDecimal *value,
+                                  size_t precision,
+                                  RexxDecimalFormat form);
 
 /* Legacy double adapters retained for C embedders and RX2 compatibility.
  * REXX source values and implemented arithmetic use RexxDecimal below. */

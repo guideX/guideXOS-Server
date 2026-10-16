@@ -69,7 +69,9 @@ static const char rexx_parser_message_otherwise_order[] =
 static const char rexx_parser_message_missing_otherwise_instruction[] =
     "expected an instruction after OTHERWISE";
 static const char rexx_parser_message_unsupported_numeric_setting[] =
-    "NUMERIC FUZZ and FORM are not supported by this interpreter phase";
+    "unsupported NUMERIC setting";
+static const char rexx_parser_message_numeric_form_requires_value[] =
+    "NUMERIC FORM expressions beginning with a symbol or string require VALUE";
 static const char rexx_parser_message_resource_limit[] =
     "parser resource limit exceeded";
 static const char rexx_parser_message_out_of_memory[] =
@@ -1554,23 +1556,80 @@ static RexxAstClause *rexx_parser_parse_numeric_clause(
     RexxToken token = parser->current;
     RexxAstClause *clause;
 
-    clause = rexx_parser_new_clause(parser, REXX_AST_CLAUSE_NUMERIC_DIGITS,
-                                    &token);
-    if (clause == NULL || !rexx_parser_advance(parser)) return NULL;
-    if (parser->current.type != TOKEN_SYMBOL ||
-        !rexx_token_equals_ascii_case_insensitive(&parser->current, "DIGITS")) {
+    if (!rexx_parser_advance(parser)) return NULL;
+    if (parser->current.type != TOKEN_SYMBOL) {
         rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
                               &parser->current,
                               rexx_parser_message_unsupported_numeric_setting);
         return NULL;
     }
-    if (!rexx_parser_advance(parser)) return NULL;
-    if (!rexx_parser_token_is_stop(&parser->current, stop_mask)) {
+
+    if (rexx_token_equals_ascii_case_insensitive(&parser->current, "DIGITS") ||
+        rexx_token_equals_ascii_case_insensitive(&parser->current, "FUZZ")) {
+        RexxAstClauseKind kind =
+            rexx_token_equals_ascii_case_insensitive(&parser->current, "DIGITS")
+                ? REXX_AST_CLAUSE_NUMERIC_DIGITS
+                : REXX_AST_CLAUSE_NUMERIC_FUZZ;
+        clause = rexx_parser_new_clause(parser, kind, &token);
+        if (clause == NULL || !rexx_parser_advance(parser)) return NULL;
+        if (!rexx_parser_token_is_stop(&parser->current, stop_mask)) {
+            clause->as.simple.expression = rexx_parser_parse_expression_internal(
+                parser, 1, stop_mask);
+            if (clause->as.simple.expression == NULL) return NULL;
+        }
+        return clause;
+    }
+
+    if (rexx_token_equals_ascii_case_insensitive(&parser->current, "FORM")) {
+        int explicit_value = 0;
+        clause = rexx_parser_new_clause(
+            parser, REXX_AST_CLAUSE_NUMERIC_FORM, &token);
+        if (clause == NULL || !rexx_parser_advance(parser)) return NULL;
+        if (rexx_parser_token_is_stop(&parser->current, stop_mask)) return clause;
+
+        if (parser->current.type == TOKEN_SYMBOL &&
+            rexx_token_equals_ascii_case_insensitive(&parser->current,
+                                                       "SCIENTIFIC") &&
+            rexx_parser_token_is_stop(&parser->lookahead, stop_mask)) {
+            clause->as.simple.numeric_form = 0u;
+            return rexx_parser_advance(parser) ? clause : NULL;
+        }
+        if (parser->current.type == TOKEN_SYMBOL &&
+            rexx_token_equals_ascii_case_insensitive(&parser->current,
+                                                       "ENGINEERING") &&
+            rexx_parser_token_is_stop(&parser->lookahead, stop_mask)) {
+            clause->as.simple.numeric_form = 1u;
+            return rexx_parser_advance(parser) ? clause : NULL;
+        }
+        if (parser->current.type == TOKEN_SYMBOL &&
+            rexx_token_equals_ascii_case_insensitive(&parser->current, "VALUE")) {
+            explicit_value = 1;
+            if (!rexx_parser_advance(parser)) return NULL;
+        }
+        if (!explicit_value &&
+            (parser->current.type == TOKEN_SYMBOL ||
+             parser->current.type == TOKEN_STRING)) {
+            rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                                  &parser->current,
+                                  rexx_parser_message_numeric_form_requires_value);
+            return NULL;
+        }
+        if (rexx_parser_token_is_stop(&parser->current, stop_mask)) {
+            rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                                  &parser->current,
+                                  rexx_parser_message_expected_expression);
+            return NULL;
+        }
         clause->as.simple.expression = rexx_parser_parse_expression_internal(
             parser, 1, stop_mask);
         if (clause->as.simple.expression == NULL) return NULL;
+        return clause;
     }
-    return clause;
+
+    rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                          &parser->current,
+                          rexx_parser_message_unsupported_numeric_setting);
+    return NULL;
 }
 
 static RexxAstClause *rexx_parser_parse_simple_keyword(
@@ -1742,6 +1801,8 @@ static void rexx_parser_free_clause_list(RexxAstClause *clauses)
         case REXX_AST_CLAUSE_EXIT:
         case REXX_AST_CLAUSE_COMMAND:
         case REXX_AST_CLAUSE_NUMERIC_DIGITS:
+        case REXX_AST_CLAUSE_NUMERIC_FUZZ:
+        case REXX_AST_CLAUSE_NUMERIC_FORM:
             rexx_parser_free_expression(clauses->as.simple.expression);
             break;
         case REXX_AST_CLAUSE_CALL:

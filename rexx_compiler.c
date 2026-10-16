@@ -983,6 +983,26 @@ static int rexx_compiler_compile_clause(RexxCompiler *compiler,
                 ? REXX_INSTRUCTION_HAS_VALUE : 0u,
             0u, 0u, &clause->token);
         break;
+    case REXX_AST_CLAUSE_NUMERIC_FUZZ:
+        if (clause->as.simple.expression != NULL &&
+            !rexx_compiler_compile_expression(
+                compiler, clause->as.simple.expression)) return 0;
+        (void)rexx_compiler_emit(
+            compiler, OP_NUMERIC_FUZZ,
+            clause->as.simple.expression != NULL
+                ? REXX_INSTRUCTION_HAS_VALUE : 0u,
+            0u, 0u, &clause->token);
+        break;
+    case REXX_AST_CLAUSE_NUMERIC_FORM:
+        if (clause->as.simple.expression != NULL &&
+            !rexx_compiler_compile_expression(
+                compiler, clause->as.simple.expression)) return 0;
+        (void)rexx_compiler_emit(
+            compiler, OP_NUMERIC_FORM,
+            clause->as.simple.expression != NULL
+                ? REXX_INSTRUCTION_HAS_VALUE : 0u,
+            clause->as.simple.numeric_form, 0u, &clause->token);
+        break;
     case REXX_AST_CLAUSE_ADDRESS:
     {
         uint32_t environment_symbol = 0u;

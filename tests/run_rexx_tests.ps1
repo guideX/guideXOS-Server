@@ -15,6 +15,7 @@ $rx2NumericTest = Join-Path $buildDirectory "rexx_rx2_native_numeric_tests.exe"
 $rx3DecimalTest = Join-Path $buildDirectory "rexx_rx3_decimal_tests.exe"
 $rx3AllocFailureTest = Join-Path $buildDirectory "rexx_rx3_alloc_failure_tests.exe"
 $rx4ArithmeticTest = Join-Path $buildDirectory "rexx_rx4_arithmetic_tests.exe"
+$rx5NumericContextTest = Join-Path $buildDirectory "rexx_rx5_numeric_context_tests.exe"
 $rx2ShellBridgeTest = Join-Path $buildDirectory "rexx_rx2_shell_bridge_tests.exe"
 $commonSources = @(
     (Join-Path $rootDir "rexx_lexer.c"),
@@ -86,6 +87,14 @@ if ($LASTEXITCODE -ne 0) {
     throw "RX4 arithmetic test build failed with exit code $LASTEXITCODE."
 }
 
+Write-Host "Building RX5 numeric-context tests"
+& $gccCommand.Source -std=c11 -Wall -Wextra -Wpedantic -Werror `
+    (Join-Path $PSScriptRoot "rexx_rx5_numeric_context_test.c") `
+    @commonSources -lm -o $rx5NumericContextTest
+if ($LASTEXITCODE -ne 0) {
+    throw "RX5 numeric-context test build failed with exit code $LASTEXITCODE."
+}
+
 $gxxCommand = Get-Command g++ -ErrorAction SilentlyContinue
 if ($null -eq $gxxCommand) {
     throw "g++ is required for the RX2 shell bridge integration test."
@@ -134,6 +143,12 @@ Write-Host "Running RX4 decimal arithmetic assertions"
 & $rx4ArithmeticTest
 if ($LASTEXITCODE -ne 0) {
     throw "RX4 arithmetic assertions failed with exit code $LASTEXITCODE."
+}
+
+Write-Host "Running RX5 numeric-context assertions"
+& $rx5NumericContextTest
+if ($LASTEXITCODE -ne 0) {
+    throw "RX5 numeric-context assertions failed with exit code $LASTEXITCODE."
 }
 
 Write-Host "Running RX2 shell bridge assertions"
@@ -384,6 +399,41 @@ foreach ($fixture in Get-ChildItem -LiteralPath $rx4FixtureDirectory -Filter "*.
     Write-Host "[PASS] RX4 fixture $($fixture.Name)"
 }
 
+$rx5FixtureDirectory = Join-Path $PSScriptRoot "rexx_rx5"
+$script:rx5Passed = 0
+$script:rx5ReginaPassed = 0
+foreach ($fixture in Get-ChildItem -LiteralPath $rx5FixtureDirectory -Filter "*.rex" | Sort-Object Name) {
+    $diagnosticPath = [System.IO.Path]::ChangeExtension($fixture.FullName, ".diag")
+    $outputPath = [System.IO.Path]::ChangeExtension($fixture.FullName, ".out")
+    $actual = Invoke-CapturedProcess $cliTest @($fixture.FullName)
+    $actualText = (($actual.Stdout + $actual.Stderr) -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+    if (Test-Path -LiteralPath $diagnosticPath) {
+        $expectedDiagnostic = (Get-Content -Raw -LiteralPath $diagnosticPath).Trim()
+        if ($actual.ExitCode -ne 1 -or $actual.Stdout.Length -ne 0 -or -not $actualText.Contains($expectedDiagnostic)) {
+            throw "RX5 fixture $($fixture.Name) failed its expected diagnostic. Exit=$($actual.ExitCode) Output=$actualText"
+        }
+    } else {
+        if (-not (Test-Path -LiteralPath $outputPath)) {
+            throw "RX5 fixture $($fixture.Name) has no .out expectation."
+        }
+        $expectedOutput = ((Get-Content -Raw -LiteralPath $outputPath) -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+        $stdoutText = ($actual.Stdout -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+        if ($actual.ExitCode -ne 0 -or $stdoutText -cne $expectedOutput -or $actual.Stderr.Length -ne 0) {
+            throw "RX5 fixture $($fixture.Name) output mismatch. Expected '$expectedOutput'; got '$actualText'/$($actual.ExitCode)."
+        }
+        if ($null -ne $script:reginaCommand) {
+            $reference = Invoke-CapturedProcess $script:reginaCommand.Source @($fixture.FullName)
+            $referenceText = (($reference.Stdout + $reference.Stderr) -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+            if ($reference.ExitCode -ne 0 -or $referenceText -cne $expectedOutput) {
+                throw "RX5 fixture $($fixture.Name) expected '$expectedOutput' from Regina; got '$referenceText'/$($reference.ExitCode)."
+            }
+            ++$script:rx5ReginaPassed
+        }
+    }
+    ++$script:rx5Passed
+    Write-Host "[PASS] RX5 fixture $($fixture.Name)"
+}
+
 $oversizePath = Join-Path $buildDirectory "source_limit.rex"
 $oversizeStream = [System.IO.File]::Open(
     $oversizePath,
@@ -415,11 +465,14 @@ if ($null -eq $regina) {
 Write-Host "Hosted CLI cases passed: $script:cliPassed/$script:cliPassed"
 Write-Host "RX3 compatibility fixtures passed: $script:rx3Passed/$script:rx3Passed"
 Write-Host "RX4 compatibility fixtures passed: $script:rx4Passed/$script:rx4Passed"
+Write-Host "RX5 compatibility fixtures passed: $script:rx5Passed/$script:rx5Passed"
 if ($null -eq $script:reginaCommand) {
     Write-Host "RX3 Regina differential cases: 0 run (Regina unavailable)"
     Write-Host "RX4 Regina differential cases: 0 run (Regina unavailable)"
+    Write-Host "RX5 Regina differential cases: 0 run (Regina unavailable)"
 } else {
     Write-Host "RX3 Regina differential cases passed: $script:rx3ReginaPassed/$script:rx3ReginaPassed"
     Write-Host "RX4 Regina differential cases passed: $script:rx4ReginaPassed/$script:rx4ReginaPassed"
+    Write-Host "RX5 Regina differential cases passed: $script:rx5ReginaPassed/$script:rx5ReginaPassed"
 }
 Write-Host "Build and temporary script artifacts: $buildDirectory"
