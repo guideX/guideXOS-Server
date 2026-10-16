@@ -10,6 +10,8 @@
 namespace gxos {
 namespace gui {
 
+struct FontTrueTypeMetadata;
+
 // FONT2 starts with a deliberately small contract. Font identities are stable
 // IDs; handles are process-local slot/generation pairs and must never persist.
 typedef uint32_t UnicodeCodePoint;
@@ -34,6 +36,7 @@ enum FontCapability : uint32_t {
 	FontCapabilityMeasurement = 1u << 2,
 	FontCapabilityUtf8Input = 1u << 3,
 	FontCapabilityMonospace = 1u << 4,
+	FontCapabilityMetadataOnly = 1u << 5,
 };
 
 enum class FontStatus : uint8_t {
@@ -51,6 +54,16 @@ enum class FontStatus : uint8_t {
 	ArithmeticOverflow,
 	BackendFailure,
 	GenerationExhausted,
+	MetadataOnly,
+	MetadataUnavailable,
+	CannotUnloadBuiltinFont,
+	FontInUse,
+	InvalidFontFile,
+	UnsupportedFontFormat,
+	FontFileTooLarge,
+	FontSourceCapacity,
+	FontFileNotFound,
+	FontFileIoError,
 };
 
 enum class FontBitmapFormat : uint8_t {
@@ -110,13 +123,16 @@ struct FontBackend {
 		FontGlyphView* outGlyph);
 };
 
-// FontDefinition and backend context are borrowed for the registration
-// lifetime. Register only immutable, process-lifetime backend/context storage.
+// Backend, context, metadata, and debugName are borrowed for the registration
+// lifetime. An optional unregister callback may release owned storage; it is
+// invoked under the manager lock and must not re-enter the manager.
 struct FontDefinition {
 	FontId id;
 	const char* debugName;
 	const FontBackend* backend;
 	const void* context;
+	const FontTrueTypeMetadata* trueTypeMetadata;
+	void (*onUnregister)(const void* context);
 };
 
 static const uint64_t kBuiltinBitmapFontId = 0x47584249544d4150ull; // "GXBITMAP"
@@ -128,10 +144,22 @@ FontStatus FontManagerInitialize();
 void FontManagerShutdown();
 bool FontManagerIsInitialized();
 FontStatus FontManagerRegisterFont(const FontDefinition* definition, FontHandle* outHandle);
+FontStatus FontManagerUnloadFont(FontHandle handle);
 FontStatus FontManagerResolveFont(FontId id, FontHandle* outHandle);
 FontStatus FontManagerGetDefaultFont(FontHandle* outHandle);
 FontStatus FontManagerSetDefaultFont(FontHandle handle);
 uint32_t FontManagerGeneration();
+FontStatus FontManagerGetTrueTypeMetadata(FontHandle handle,
+	FontTrueTypeMetadata* outMetadata);
+
+// Registration copies a bounded, validated source into manager-owned static
+// storage. The memory input is borrowed for this call only. The file variant
+// uses the VFS and stores no borrowed path or filename-derived identity.
+FontStatus FontTrueTypeLoadMemory(FontId id, const uint8_t* inputBytes,
+	size_t inputLength, FontHandle* outHandle,
+	FontTrueTypeMetadata* outMetadata);
+FontStatus FontTrueTypeLoadFile(const char* path, FontId id,
+	FontHandle* outHandle, FontTrueTypeMetadata* outMetadata);
 
 // Finds a NUL terminator within a 4096-byte scan window. The terminator is
 // included in the scan bound, so a maximum of 4095 text bytes is accepted.

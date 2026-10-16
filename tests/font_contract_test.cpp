@@ -152,10 +152,10 @@ void testManagerAndOverflow(gxos::gui::FontHandle builtin)
 	static const MockFont wide = {1u, 0xffffffffu};
 	static const MockFont tall = {0xffffffffu, 1u};
 	static const MockFont spare = {1u, 1u};
-	static const FontDefinition wideDefinition = {{0x1001u}, "overflow width", &kMockBackend, &wide};
-	static const FontDefinition tallDefinition = {{0x1002u}, "overflow height", &kMockBackend, &tall};
-	static const FontDefinition spareDefinition = {{0x1003u}, "bounded slot", &kMockBackend, &spare};
-	static const FontDefinition excessDefinition = {{0x1004u}, "excess slot", &kMockBackend, &spare};
+	static const FontDefinition wideDefinition = {{0x1001u}, "overflow width", &kMockBackend, &wide, nullptr, nullptr};
+	static const FontDefinition tallDefinition = {{0x1002u}, "overflow height", &kMockBackend, &tall, nullptr, nullptr};
+	static const FontDefinition spareDefinition = {{0x1003u}, "bounded slot", &kMockBackend, &spare, nullptr, nullptr};
+	static const FontDefinition excessDefinition = {{0x1004u}, "excess slot", &kMockBackend, &spare, nullptr, nullptr};
 	FontHandle wideHandle = {0xffffu, 0, 0};
 	FontHandle tallHandle = {0xffffu, 0, 0};
 	FontHandle spareHandle = {0xffffu, 0, 0};

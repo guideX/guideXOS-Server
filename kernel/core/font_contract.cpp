@@ -1,4 +1,5 @@
 #include "include/kernel/font_contract.h"
+#include "include/kernel/font_truetype.h"
 
 namespace gxos {
 namespace gui {
@@ -103,12 +104,18 @@ FontStatus registerFontInternal(const FontDefinition* definition, FontHandle* ou
 		outHandle->reserved = 0;
 		outHandle->generation = 0;
 	}
-	if (!definition || !outHandle || definition->id.value == 0 || !definition->backend ||
-		!definition->backend->getMetrics || !definition->backend->lookupGlyph ||
-		(definition->backend->capabilities &
-			(FontCapabilityGlyphLookup | FontCapabilityMeasurement)) !=
-			(FontCapabilityGlyphLookup | FontCapabilityMeasurement))
+	if (!definition || !outHandle || definition->id.value == 0 || !definition->backend)
 		return FontStatus::InvalidArgument;
+	const uint32_t capabilities = definition->backend->capabilities;
+	if ((capabilities & FontCapabilityMetadataOnly) != 0u) {
+		if (capabilities != FontCapabilityMetadataOnly || definition->backend->getMetrics ||
+			definition->backend->lookupGlyph || !definition->trueTypeMetadata)
+			return FontStatus::InvalidArgument;
+	} else if (!definition->backend->getMetrics || !definition->backend->lookupGlyph ||
+		(capabilities & (FontCapabilityGlyphLookup | FontCapabilityMeasurement)) !=
+			(FontCapabilityGlyphLookup | FontCapabilityMeasurement)) {
+		return FontStatus::InvalidArgument;
+	}
 	for (uint16_t i = 0; i < kFontRegistryCapacity; ++i) {
 		if (s_slots[i].occupied && s_slots[i].definition.id.value == definition->id.value)
 			return FontStatus::DuplicateFontId;
@@ -168,6 +175,8 @@ FontStatus lookupGlyph(FontSlot* slot, UnicodeCodePoint cp, FontGlyphView* out, 
 {
 	if (!slot || !out) return FontStatus::InvalidArgument;
 	clearGlyph(out);
+	if ((slot->definition.backend->capabilities & FontCapabilityMetadataOnly) != 0u)
+		return FontStatus::MetadataOnly;
 	FontStatus status = slot->definition.backend->lookupGlyph(slot->definition.context, cp, out);
 	if (status == FontStatus::Ok) {
 		out->requestedCodePoint = cp;
@@ -194,6 +203,8 @@ FontStatus getMetricsInternal(FontHandle handle, FontSize size, FontMetrics* out
 	FontSlot* slot = nullptr;
 	const FontStatus status = validateHandle(handle, &slot);
 	if (status != FontStatus::Ok) return status;
+	if ((slot->definition.backend->capabilities & FontCapabilityMetadataOnly) != 0u)
+		return FontStatus::MetadataOnly;
 	FontMetrics metrics = {};
 	const FontStatus backendStatus = slot->definition.backend->getMetrics(
 		slot->definition.context, size, &metrics);
@@ -319,14 +330,19 @@ void FontManagerShutdown()
 	ManagerGuard guard;
 	if (!s_initialized) return;
 	for (uint16_t i = 0; i < kFontRegistryCapacity; ++i) {
-		if (s_slots[i].occupied && s_slotGenerations[i] != 0xffffffffu)
-			++s_slotGenerations[i];
+		if (s_slots[i].occupied) {
+			if (s_slots[i].definition.onUnregister)
+				s_slots[i].definition.onUnregister(s_slots[i].definition.context);
+			if (s_slotGenerations[i] != 0xffffffffu) ++s_slotGenerations[i];
+		}
 		s_slots[i].occupied = 0;
 		s_slots[i].generation = 0;
 		s_slots[i].definition.id.value = 0;
 		s_slots[i].definition.debugName = nullptr;
 		s_slots[i].definition.backend = nullptr;
 		s_slots[i].definition.context = nullptr;
+		s_slots[i].definition.trueTypeMetadata = nullptr;
+		s_slots[i].definition.onUnregister = nullptr;
 	}
 	s_initialized = 0;
 	s_defaultHandle.slot = kInvalidSlot;
@@ -350,6 +366,29 @@ FontStatus FontManagerRegisterFont(const FontDefinition* definition, FontHandle*
 	if (outHandle) *outHandle = {kInvalidSlot, 0, 0};
 	if (!s_initialized) return FontStatus::NotInitialized;
 	return registerFontInternal(definition, outHandle);
+}
+
+FontStatus FontManagerUnloadFont(FontHandle handle)
+{
+	ManagerGuard guard;
+	FontSlot* slot = nullptr;
+	const FontStatus status = validateHandle(handle, &slot);
+	if (status != FontStatus::Ok) return status;
+	if (handle.slot == s_builtinHandle.slot && handle.generation == s_builtinHandle.generation)
+		return FontStatus::CannotUnloadBuiltinFont;
+	if (handle.slot == s_defaultHandle.slot && handle.generation == s_defaultHandle.generation)
+		return FontStatus::FontInUse;
+	if (slot->definition.onUnregister)
+		slot->definition.onUnregister(slot->definition.context);
+	slot->occupied = 0;
+	slot->generation = 0;
+	slot->definition.id.value = 0;
+	slot->definition.debugName = nullptr;
+	slot->definition.backend = nullptr;
+	slot->definition.context = nullptr;
+	slot->definition.trueTypeMetadata = nullptr;
+	slot->definition.onUnregister = nullptr;
+	return FontStatus::Ok;
 }
 
 FontStatus FontManagerResolveFont(FontId id, FontHandle* outHandle)
@@ -390,6 +429,8 @@ FontStatus FontManagerSetDefaultFont(FontHandle handle)
 	FontSlot* ignored = nullptr;
 	const FontStatus status = validateHandle(handle, &ignored);
 	if (status != FontStatus::Ok) return status;
+	if ((ignored->definition.backend->capabilities & FontCapabilityMetadataOnly) != 0u)
+		return FontStatus::MetadataOnly;
 	if (handle.slot == s_defaultHandle.slot && handle.generation == s_defaultHandle.generation)
 		return FontStatus::Ok;
 	if (s_managerGeneration == 0xffffffffu) return FontStatus::GenerationExhausted;
@@ -402,6 +443,21 @@ uint32_t FontManagerGeneration()
 {
 	ManagerGuard guard;
 	return s_managerGeneration;
+}
+
+FontStatus FontManagerGetTrueTypeMetadata(FontHandle handle,
+	FontTrueTypeMetadata* outMetadata)
+{
+	if (!outMetadata) return FontStatus::InvalidArgument;
+	for (size_t i = 0; i < sizeof(*outMetadata); ++i)
+		reinterpret_cast<uint8_t*>(outMetadata)[i] = 0;
+	ManagerGuard guard;
+	FontSlot* slot = nullptr;
+	const FontStatus status = validateHandle(handle, &slot);
+	if (status != FontStatus::Ok) return status;
+	if (!slot->definition.trueTypeMetadata) return FontStatus::MetadataUnavailable;
+	*outMetadata = *slot->definition.trueTypeMetadata;
+	return FontStatus::Ok;
 }
 
 FontStatus FontUtf8CStringLength(const char* utf8, size_t* outByteLength)

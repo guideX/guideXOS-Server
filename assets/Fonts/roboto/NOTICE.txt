@@ -1,0 +1,11 @@
+Roboto font fixture attribution
+
+The Roboto TrueType files in this directory are redistributed under the SIL Open Font License, Version 1.1. The complete license is in OFL.txt. Their embedded name-table records identify Copyright 2011 The Roboto Project Authors and the upstream repository https://github.com/googlefonts/roboto-classic.
+
+These are existing tracked fixture files from the repository checkout; their exact upstream binary release was not established during FONT3. The embedded copyright and license records and this accompanying license apply to the redistributed files.
+
+Fixture binary SHA-256:
+Roboto-Regular.ttf      dbd285b518e398832f6f4a736109c355ce25a49546bfce41bab256c9ef7e56eb
+Roboto-Bold.ttf         27467020febce4c0ac8482ea8e8d6f32bf8c5721fb9c301344d0e3f4d93a0119
+Roboto-Italic.ttf       5a2f18bddbe3ac07f14d38817d1fd22df4e8e3b74f661f7ae7b29cc8140092bc
+Roboto-BoldItalic.ttf   8234add45022e40d0ad293c8a2854a8f387e53db5c433698fe6d89c8d1b5362e

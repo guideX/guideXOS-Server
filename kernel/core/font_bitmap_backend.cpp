@@ -53,6 +53,8 @@ const FontDefinition kBitmapDefinition = {
 	{kBuiltinBitmapFontId},
 	"guideX bitmap 5x7",
 	&kBitmapBackend,
+	nullptr,
+	nullptr,
 	nullptr
 };
 
