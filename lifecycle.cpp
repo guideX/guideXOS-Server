@@ -12,6 +12,9 @@
 #include "notification_manager.h"
 #include "firewall.h"
 #include "module_manager.h"
+#include "native_app_process_table.h"
+#include <utility>
+#include <vector>
 
 namespace gxos {
     static LifecycleState g_state;
@@ -99,29 +102,121 @@ namespace gxos {
         }
     }
 
-    void Lifecycle::stopCompositor(){
-        if(g_state.compositorPid==0) return;
+    namespace {
+        constexpr uint64_t kServiceShutdownTimeoutMs = 10000;
+
+        bool waitAndReapProcess(uint64_t pid, const std::string& owner) {
+            int exitCode = 0;
+            bool completedWithinBound = ProcessTable::wait(pid, kServiceShutdownTimeoutMs, &exitCode);
+            if (!completedWithinBound) {
+                Logger::write(LogLevel::Error, "[lifecycle] shutdown exceeded " + std::to_string(kServiceShutdownTimeoutMs) +
+                    "ms waiting for " + owner + "; retaining host resources until its entry returns process=" +
+                    std::to_string(pid));
+                if (!ProcessTable::wait(pid, UINT64_MAX, &exitCode)) {
+                    Logger::write(LogLevel::Error, "[lifecycle] shutdown lost process-table ownership for " + owner +
+                        " process=" + std::to_string(pid));
+                    return false;
+                }
+            }
+
+            bool workerExitedWithinBound = ProcessTable::waitForThreadExit(pid, kServiceShutdownTimeoutMs);
+            if (!workerExitedWithinBound) {
+                Logger::write(LogLevel::Error, "[lifecycle] shutdown exceeded " + std::to_string(kServiceShutdownTimeoutMs) +
+                    "ms waiting for " + owner + " worker; retaining host resources until it exits process=" +
+                    std::to_string(pid));
+                if (!ProcessTable::waitForThreadExit(pid, UINT64_MAX)) {
+                    Logger::write(LogLevel::Error, "[lifecycle] shutdown could not establish worker exit for " + owner +
+                        " process=" + std::to_string(pid));
+                    return false;
+                }
+            }
+            ProcessTable::terminate(pid);
+            Logger::write(LogLevel::Info, "[lifecycle] shutdown reaped " + owner +
+                " process=" + std::to_string(pid) + " exitCode=" + std::to_string(exitCode) +
+                " withinBound=" + ((completedWithinBound && workerExitedWithinBound) ? "true" : "false"));
+            return completedWithinBound && workerExitedWithinBound;
+        }
+
+        bool stopNativeApps() {
+            const std::vector<apps::NativeAppProcessInfo> processes = apps::NativeAppProcessTable::List();
+            std::vector<std::pair<uint64_t, uint64_t>> active;
+            for (const apps::NativeAppProcessInfo& process : processes) {
+                if (process.processId == 0 ||
+                    (process.lifecycleState != apps::NativeAppLifecycleState::Running &&
+                     process.lifecycleState != apps::NativeAppLifecycleState::Closing)) {
+                    continue;
+                }
+
+                bool running = false;
+                int exitCode = 0;
+                if (!ProcessTable::getStatus(process.processId, running, exitCode)) {
+                    Logger::write(LogLevel::Error, "[lifecycle] active native app has no process-table owner runtimeId=" +
+                        std::to_string(process.runtimeId) + " process=" + std::to_string(process.processId));
+                    return false;
+                }
+                if (running) {
+                    uint32_t requested = 0;
+                    for (gx_handle window : process.createdWindowHandles) {
+                        if (window == 0) continue;
+                        ipc::Message close;
+                        close.srcPid = process.processId;
+                        close.type = static_cast<uint32_t>(gui::MsgType::MT_Close);
+                        const std::string payload = std::to_string(window);
+                        close.data.assign(payload.begin(), payload.end());
+                        if (ipc::Bus::publish("gui.input", std::move(close), false)) ++requested;
+                    }
+                    Logger::write(LogLevel::Info, "[lifecycle] native app close requested runtimeId=" +
+                        std::to_string(process.runtimeId) + " appId=" + process.appId + " process=" +
+                        std::to_string(process.processId) + " windows=" + std::to_string(requested));
+                }
+                active.emplace_back(process.runtimeId, process.processId);
+            }
+
+            bool completedWithinBound = true;
+            for (const auto& item : active) {
+                if (!waitAndReapProcess(item.second, "native app runtime=" + std::to_string(item.first)))
+                    completedWithinBound = false;
+            }
+            return completedWithinBound;
+        }
+
+        bool stopConsole(uint64_t pid) {
+            if (pid == 0) return true;
+            ipc::Message exitMessage;
+            exitMessage.data = {'e', 'x', 'i', 't'};
+            if (!ProcessTable::send(pid, std::move(exitMessage))) {
+                Logger::write(LogLevel::Warn, "[lifecycle] console exit request was not accepted process=" + std::to_string(pid));
+            }
+            return waitAndReapProcess(pid, "console");
+        }
+    }
+
+    bool Lifecycle::stopCompositor(){
+        if(g_state.compositorPid==0) return true;
         // Send a polite stop request; compositor interprets MT_Ping with "bye" as shutdown
         ipc::Message m; m.type = (uint32_t)gui::MsgType::MT_Ping; m.data.assign({'b','y','e'});
         ipc::Bus::publish("gui.input", std::move(m), false);
-        ProcessTable::wait(g_state.compositorPid, 2000, nullptr);
-        ProcessTable::terminate(g_state.compositorPid);
+        const uint64_t pid = g_state.compositorPid;
+        const bool completedWithinBound = waitAndReapProcess(pid, "compositor");
         g_state.compositorPid = 0;
+        return completedWithinBound;
     }
 
-    void Lifecycle::shutdown(){
-        if(g_state.phase == Phase::Stopped) return;
+    bool Lifecycle::shutdown(){
+        if(g_state.phase == Phase::Stopped) return true;
         setPhase(Phase::ShuttingDown);
-        stopCompositor();
+        bool completedWithinBound = stopNativeApps();
         if(g_state.consolePid!=0){
-            Logger::write(LogLevel::Info, "[lifecycle] console stop is SHADOWED (no teardown hook yet)");
+            if (!stopConsole(g_state.consolePid)) completedWithinBound = false;
             g_state.consolePid = 0;
         }
+        if (!stopCompositor()) completedWithinBound = false;
         if(g_state.schedulerReady){
             Scheduler::shutdown();
             g_state.schedulerReady = false;
         }
         g_state.allocatorReady = false;
         setPhase(Phase::Stopped);
+        return completedWithinBound;
     }
 }

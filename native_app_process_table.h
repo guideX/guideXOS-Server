@@ -23,6 +23,7 @@ struct NativeAppProcessInfo {
     int32_t exitCode = 0;
     std::string failureReason;
     uint32_t createdWindowCount = 0;
+    std::vector<gx_handle> createdWindowHandles;
     uint32_t cleanedWindowCount = 0;
     uint32_t remainingWindowCount = 0;
     bool experimentalExecutionEnabled = false;

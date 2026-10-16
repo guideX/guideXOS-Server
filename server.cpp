@@ -3144,7 +3144,7 @@ using namespace gxos;
         }
     }
     apps::DevelopmentRunService::Shutdown();
-    Lifecycle::shutdown();
+    const bool shutdownComplete = Lifecycle::shutdown();
     Logger::write(LogLevel::Info, "guideXOSServer server exiting.");
-    return 0;
+    return shutdownComplete ? 0 : 1;
 }

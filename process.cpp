@@ -12,6 +12,9 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+#if defined(__MINGW32__)
+#include <pthread.h>
+#endif
 #elif defined(__unix__) || defined(__APPLE__)
 #include <pthread.h>
 #include <time.h>
@@ -98,6 +101,17 @@ namespace gxos {
                 return nullptr;
             }
             return reinterpret_cast<ProcessThreadHandle>(duplicate);
+        }
+
+        static ProcessThreadHandle process_thread_handle(std::thread& thread) {
+#if defined(__MINGW32__)
+            // MinGW's POSIX std::thread backend exposes pthread_t here, not a
+            // Windows HANDLE. Ask winpthreads for the underlying HANDLE before
+            // using Win32 thread APIs.
+            return reinterpret_cast<ProcessThreadHandle>(pthread_gethandle(thread.native_handle()));
+#else
+            return reinterpret_cast<ProcessThreadHandle>(thread.native_handle());
+#endif
         }
 #elif defined(__unix__) || defined(__APPLE__)
         static bool query_thread_cpu_micros(ProcessThreadHandle handle, uint64_t& outMicros) {
@@ -232,7 +246,7 @@ namespace gxos {
             p->cv.notify_all();
         });
 #if defined(_WIN32)
-        p->cpuThreadHandle = duplicate_thread_handle(reinterpret_cast<ProcessThreadHandle>(static_cast<uintptr_t>(t.native_handle())));
+        p->cpuThreadHandle = duplicate_thread_handle(process_thread_handle(t));
 #elif defined(__unix__) || defined(__APPLE__)
         p->cpuThreadHandle = t.native_handle();
 #endif
@@ -310,8 +324,40 @@ namespace gxos {
             auto it = g_proc.find(pid); if(it==g_proc.end()) return false; proc = it->second;
         }
         std::unique_lock<std::mutex> lk(proc->mu);
-        if(!proc->cv.wait_for(lk, std::chrono::milliseconds(timeoutMs), [&]{ return proc->finished.load(std::memory_order_acquire); })) return false;
+        const auto finished = [&]{ return proc->finished.load(std::memory_order_acquire); };
+        if (timeoutMs == UINT64_MAX) {
+            proc->cv.wait(lk, finished);
+        } else if (!proc->cv.wait_for(lk, std::chrono::milliseconds(timeoutMs), finished)) {
+            return false;
+        }
         if(exitCodeOut) *exitCodeOut = proc->exitCode; return true;
+    }
+
+    bool ProcessTable::waitForThreadExit(uint64_t pid, uint64_t timeoutMs) {
+        std::shared_ptr<Process> proc;
+        {
+            std::lock_guard<std::mutex> _g(g_lock);
+            auto it = g_proc.find(pid);
+            if (it == g_proc.end()) return false;
+            proc = it->second;
+        }
+
+        if (!proc->finished.load(std::memory_order_acquire)) return false;
+#if defined(_WIN32)
+        if (!proc->cpuThreadHandle) return false;
+        const DWORD timeout = timeoutMs == UINT64_MAX || timeoutMs >= static_cast<uint64_t>(INFINITE)
+            ? INFINITE
+            : static_cast<DWORD>(timeoutMs);
+        const DWORD waitResult = WaitForSingleObject(
+            reinterpret_cast<HANDLE>(proc->cpuThreadHandle), timeout);
+        return waitResult == WAIT_OBJECT_0;
+#else
+        // The existing POSIX worker path detaches std::thread. Its completion
+        // flag is set only after the process entry and all runtime cleanup have
+        // returned, which is the resource lifetime boundary used by this API.
+        (void)timeoutMs;
+        return true;
+#endif
     }
 
     bool ProcessTable::getStatus(uint64_t pid, bool& runningOut, int& exitCodeOut){

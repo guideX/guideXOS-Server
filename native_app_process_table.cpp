@@ -34,6 +34,7 @@ void applyRuntimeState(NativeAppProcessInfo& process, const NativeAppRuntimeCont
     process.exitCode = context.exitCode;
     process.failureReason = context.failureReason;
     process.createdWindowCount = createdWindowCount(context);
+    process.createdWindowHandles = context.createdWindowHandles;
     process.cleanedWindowCount = context.cleanedWindowCount;
     process.remainingWindowCount = static_cast<uint32_t>(context.createdWindowHandles.size());
     process.hostLogCallCount = context.hostLogCallCount;

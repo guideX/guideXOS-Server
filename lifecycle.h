@@ -37,11 +37,11 @@ namespace gxos {
         static uint64_t ensureConsole();
         static void markInteractive();
         // Request orderly shutdown and block until core services are down
-        static void shutdown();
+        static bool shutdown();
     private:
         static void setPhase(Phase phase);
         static const char* phaseName(Phase phase);
         static void ensureIpcChannels();
-        static void stopCompositor();
+        static bool stopCompositor();
     };
 }

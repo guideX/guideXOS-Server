@@ -84,6 +84,10 @@ namespace gxos {
         static std::vector<uint64_t> list();
         // phase 1: join/wait and status
         static bool wait(uint64_t pid, uint64_t timeoutMs, int* exitCodeOut=nullptr);
+        // Wait for the detached host worker thread itself to terminate after
+        // wait() observes its entry point complete. Windows keeps a duplicate
+        // thread handle for this synchronization boundary.
+        static bool waitForThreadExit(uint64_t pid, uint64_t timeoutMs);
         static bool getStatus(uint64_t pid, bool& runningOut, int& exitCodeOut);
         static bool cpuTelemetry(uint64_t pid, ProcessCpuTelemetry& out);
         static bool getIdentity(uint64_t pid, std::string& nameOut, std::string& appIdOut);
