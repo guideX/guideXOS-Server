@@ -68,6 +68,7 @@ void clearGlyph(FontGlyphView* out)
 	out->metrics.widthPx = 0;
 	out->metrics.heightPx = 0;
 	out->metrics.advancePx = 0;
+	out->metrics.sideBearingPx = 0;
 	out->bitmap = nullptr;
 	out->bitmapByteLength = 0;
 	out->bitmapFormat = FontBitmapFormat::None;
@@ -109,13 +110,18 @@ FontStatus registerFontInternal(const FontDefinition* definition, FontHandle* ou
 	const uint32_t capabilities = definition->backend->capabilities;
 	if ((capabilities & FontCapabilityMetadataOnly) != 0u) {
 		if (capabilities != FontCapabilityMetadataOnly || definition->backend->getMetrics ||
-			definition->backend->lookupGlyph || !definition->trueTypeMetadata)
+			definition->backend->lookupGlyph || definition->backend->rasterizeGlyph ||
+			!definition->trueTypeMetadata)
 			return FontStatus::InvalidArgument;
 	} else if (!definition->backend->getMetrics || !definition->backend->lookupGlyph ||
 		(capabilities & (FontCapabilityGlyphLookup | FontCapabilityMeasurement)) !=
 			(FontCapabilityGlyphLookup | FontCapabilityMeasurement)) {
 		return FontStatus::InvalidArgument;
 	}
+	if ((capabilities & FontCapabilityRasterization) != 0u &&
+		!definition->backend->rasterizeGlyph) return FontStatus::InvalidArgument;
+	if ((capabilities & FontCapabilityRasterization) == 0u &&
+		definition->backend->rasterizeGlyph) return FontStatus::InvalidArgument;
 	for (uint16_t i = 0; i < kFontRegistryCapacity; ++i) {
 		if (s_slots[i].occupied && s_slots[i].definition.id.value == definition->id.value)
 			return FontStatus::DuplicateFontId;
@@ -171,13 +177,15 @@ FontStatus decodeUtf8(const char* input, size_t length, size_t* offset,
 	return FontStatus::Ok;
 }
 
-FontStatus lookupGlyph(FontSlot* slot, UnicodeCodePoint cp, FontGlyphView* out, bool* usedFallback)
+FontStatus lookupGlyph(FontSlot* slot, FontSize size, UnicodeCodePoint cp,
+	FontGlyphView* out, bool* usedFallback)
 {
 	if (!slot || !out) return FontStatus::InvalidArgument;
 	clearGlyph(out);
 	if ((slot->definition.backend->capabilities & FontCapabilityMetadataOnly) != 0u)
 		return FontStatus::MetadataOnly;
-	FontStatus status = slot->definition.backend->lookupGlyph(slot->definition.context, cp, out);
+	FontStatus status = slot->definition.backend->lookupGlyph(
+		slot->definition.context, size, cp, out);
 	if (status == FontStatus::Ok) {
 		out->requestedCodePoint = cp;
 		if (usedFallback) *usedFallback = false;
@@ -186,7 +194,7 @@ FontStatus lookupGlyph(FontSlot* slot, UnicodeCodePoint cp, FontGlyphView* out, 
 	if (status != FontStatus::UnsupportedCodePoint) return status;
 	clearGlyph(out);
 	status = slot->definition.backend->lookupGlyph(slot->definition.context,
-		kReplacementCodePoint, out);
+		size, kReplacementCodePoint, out);
 	if (status != FontStatus::Ok) return status == FontStatus::UnsupportedCodePoint ?
 		FontStatus::BackendFailure : status;
 	out->requestedCodePoint = cp;
@@ -230,7 +238,7 @@ FontStatus lookupGlyphInternal(FontHandle handle, FontSize size, UnicodeCodePoin
 	FontMetrics metrics = {};
 	const FontStatus metricsStatus = getMetricsInternal(handle, size, &metrics);
 	if (metricsStatus != FontStatus::Ok) return metricsStatus;
-	return lookupGlyph(slot, codePoint, outGlyph, nullptr);
+	return lookupGlyph(slot, size, codePoint, outGlyph, nullptr);
 }
 
 FontStatus measureTextInternal(FontHandle handle, FontSize size, const char* utf8,
@@ -284,7 +292,7 @@ FontStatus measureTextInternal(FontHandle handle, FontSize size, const char* utf
 		previousWasCr = false;
 		FontGlyphView glyph = {};
 		bool usedFallback = false;
-		const FontStatus glyphStatus = lookupGlyph(slot, cp, &glyph, &usedFallback);
+		const FontStatus glyphStatus = lookupGlyph(slot, size, cp, &glyph, &usedFallback);
 		if (glyphStatus != FontStatus::Ok && glyphStatus != FontStatus::FallbackUsed)
 			return glyphStatus;
 		if (!addU32(result.glyphCount, 1u, &result.glyphCount) ||
@@ -431,6 +439,8 @@ FontStatus FontManagerSetDefaultFont(FontHandle handle)
 	if (status != FontStatus::Ok) return status;
 	if ((ignored->definition.backend->capabilities & FontCapabilityMetadataOnly) != 0u)
 		return FontStatus::MetadataOnly;
+	if ((ignored->definition.backend->capabilities & FontCapabilityNoDefaultSelection) != 0u)
+		return FontStatus::FontNotSelectable;
 	if (handle.slot == s_defaultHandle.slot && handle.generation == s_defaultHandle.generation)
 		return FontStatus::Ok;
 	if (s_managerGeneration == 0xffffffffu) return FontStatus::GenerationExhausted;
@@ -483,6 +493,77 @@ FontStatus FontLookupGlyph(FontHandle handle, FontSize size, UnicodeCodePoint co
 {
 	ManagerGuard guard;
 	return lookupGlyphInternal(handle, size, codePoint, outGlyph);
+}
+
+FontStatus FontRasterizeGlyph(FontHandle handle, FontSize size,
+	UnicodeCodePoint codePoint, uint8_t* coverage, size_t coverageCapacity,
+	uint32_t rowStrideBytes, GlyphMetrics* outMetrics)
+{
+	if (outMetrics) *outMetrics = {};
+	if (!outMetrics || !validScalar(codePoint) || size.pixelHeight == 0 ||
+		(!coverage && coverageCapacity != 0u)) return FontStatus::InvalidArgument;
+	ManagerGuard guard;
+	FontSlot* slot = nullptr;
+	const FontStatus handleStatus = validateHandle(handle, &slot);
+	if (handleStatus != FontStatus::Ok) return handleStatus;
+	const FontBackend* backend = slot->definition.backend;
+	const uint32_t capabilities = backend->capabilities;
+	if ((capabilities & FontCapabilityRasterization) != 0u) {
+		GlyphMetrics metrics = {};
+		FontStatus status = backend->rasterizeGlyph(slot->definition.context, size,
+			codePoint, coverage, coverageCapacity, rowStrideBytes, &metrics);
+		if (status == FontStatus::UnsupportedCodePoint && codePoint != kReplacementCodePoint) {
+			metrics = {};
+			status = backend->rasterizeGlyph(slot->definition.context, size,
+				kReplacementCodePoint, coverage, coverageCapacity, rowStrideBytes, &metrics);
+			if (status == FontStatus::Ok) {
+				metrics.codePoint = codePoint;
+				*outMetrics = metrics;
+				return FontStatus::FallbackUsed;
+			}
+		}
+		if (status == FontStatus::Ok || status == FontStatus::BufferTooSmall)
+			*outMetrics = metrics;
+		return status;
+	}
+	if ((capabilities & FontCapabilityBitmapData) == 0u)
+		return (capabilities & FontCapabilityMetadataOnly) != 0u ?
+			FontStatus::MetadataOnly : FontStatus::UnsupportedGlyphFeature;
+	FontMetrics faceMetrics = {};
+	const FontStatus faceStatus = getMetricsInternal(handle, size, &faceMetrics);
+	if (faceStatus != FontStatus::Ok) return faceStatus;
+	FontGlyphView glyph = {};
+	const FontStatus glyphStatus = lookupGlyph(slot, size, codePoint, &glyph, nullptr);
+	if (glyphStatus != FontStatus::Ok && glyphStatus != FontStatus::FallbackUsed)
+		return glyphStatus;
+	const GlyphMetrics& metrics = glyph.metrics;
+	if (metrics.widthPx > 128u || metrics.heightPx > 128u ||
+		metrics.widthPx * metrics.heightPx > 16384u)
+		return FontStatus::RasterLimitExceeded;
+	if (metrics.widthPx == 0u || metrics.heightPx == 0u) {
+		*outMetrics = metrics;
+		return glyphStatus;
+	}
+	if (metrics.heightPx > 8u) return FontStatus::BackendFailure;
+	if (glyph.bitmapFormat != FontBitmapFormat::ColumnLsbTop || !glyph.bitmap ||
+		glyph.bitmapByteLength < metrics.widthPx) return FontStatus::BackendFailure;
+	if (rowStrideBytes < metrics.widthPx || rowStrideBytes > 4096u)
+		return FontStatus::InvalidArgument;
+	const size_t lastRow = static_cast<size_t>(metrics.heightPx - 1u) * rowStrideBytes;
+	if (lastRow > static_cast<size_t>(-1) - metrics.widthPx)
+		return FontStatus::ArithmeticOverflow;
+	const size_t required = lastRow + metrics.widthPx;
+	if (!coverage || coverageCapacity < required) {
+		*outMetrics = metrics;
+		return FontStatus::BufferTooSmall;
+	}
+	for (uint32_t y = 0; y < metrics.heightPx; ++y) {
+		for (uint32_t x = 0; x < metrics.widthPx; ++x)
+			coverage[static_cast<size_t>(y) * rowStrideBytes + x] =
+				(glyph.bitmap[x] & (1u << y)) ? 255u : 0u;
+	}
+	*outMetrics = metrics;
+	return glyphStatus;
 }
 
 FontStatus FontMeasureText(FontHandle handle, FontSize size, const char* utf8,
@@ -540,7 +621,7 @@ FontStatus FontDrawTextToBuffer(FontHandle handle, FontSize size,
 		}
 		previousWasCr = false;
 		FontGlyphView glyph = {};
-		status = lookupGlyph(slot, cp, &glyph, nullptr);
+		status = lookupGlyph(slot, size, cp, &glyph, nullptr);
 		if (status != FontStatus::Ok && status != FontStatus::FallbackUsed) return status;
 		if (glyph.bitmapFormat != FontBitmapFormat::ColumnLsbTop || !glyph.bitmap ||
 			glyph.metrics.heightPx > 8u ||

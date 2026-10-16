@@ -18,7 +18,7 @@ FontStatus bitmapMetrics(const void*, FontSize size, FontMetrics* out)
 	return FontStatus::Ok;
 }
 
-FontStatus bitmapLookup(const void*, UnicodeCodePoint codePoint, FontGlyphView* out)
+FontStatus bitmapLookup(const void*, FontSize, UnicodeCodePoint codePoint, FontGlyphView* out)
 {
 	if (!out) return FontStatus::InvalidArgument;
 	if (codePoint < 32u || codePoint > 126u) return FontStatus::UnsupportedCodePoint;
@@ -32,6 +32,7 @@ FontStatus bitmapLookup(const void*, UnicodeCodePoint codePoint, FontGlyphView* 
 	out->metrics.widthPx = BitmapFont::kGlyphW;
 	out->metrics.heightPx = BitmapFont::kGlyphH;
 	out->metrics.advancePx = BitmapFont::kGlyphW + BitmapFont::kSpacing;
+	out->metrics.sideBearingPx = 0;
 	out->bitmap = bitmap;
 	out->bitmapByteLength = BitmapFont::kGlyphW;
 	out->bitmapFormat = FontBitmapFormat::ColumnLsbTop;
@@ -46,7 +47,8 @@ const FontBackend kBitmapBackend = {
 	FontCapabilityGlyphLookup | FontCapabilityBitmapData |
 		FontCapabilityMeasurement | FontCapabilityUtf8Input | FontCapabilityMonospace,
 	bitmapMetrics,
-	bitmapLookup
+	bitmapLookup,
+	nullptr
 };
 
 const FontDefinition kBitmapDefinition = {

@@ -26,6 +26,10 @@ static const uint32_t kFontTrueTypeMaxMetadataStringBytes = 256u;
 static const uint32_t kFontTrueTypeMaxExternalFonts = 3u;
 static const uint32_t kFontTrueTypeMaxPersistentSourceBytes =
 	kFontTrueTypeMaxFileBytes * kFontTrueTypeMaxExternalFonts;
+static const uint32_t kFontTrueTypeMaxPixelSize = 128u;
+static const uint32_t kFontTrueTypeMaxBitmapDimension = 128u;
+static const uint32_t kFontTrueTypeMaxBitmapPixels = 16384u;
+static const uint32_t kFontTrueTypeMaxBitmapStride = 4096u;
 
 enum FontTrueTypeStatus : uint8_t {
 	FontTrueTypeOk = 0,

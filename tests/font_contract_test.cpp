@@ -37,7 +37,8 @@ gxos::gui::FontStatus mockMetrics(const void* context, gxos::gui::FontSize size,
 	return gxos::gui::FontStatus::Ok;
 }
 
-gxos::gui::FontStatus mockGlyph(const void* context, gxos::gui::UnicodeCodePoint cp,
+gxos::gui::FontStatus mockGlyph(const void* context, gxos::gui::FontSize,
+	gxos::gui::UnicodeCodePoint cp,
 	gxos::gui::FontGlyphView* out)
 {
 	if (!context || !out) return gxos::gui::FontStatus::InvalidArgument;
@@ -62,7 +63,8 @@ gxos::gui::FontStatus mockGlyph(const void* context, gxos::gui::UnicodeCodePoint
 const gxos::gui::FontBackend kMockBackend = {
 	gxos::gui::FontCapabilityGlyphLookup | gxos::gui::FontCapabilityMeasurement,
 	mockMetrics,
-	mockGlyph
+	mockGlyph,
+	nullptr
 };
 
 void testBitmapAndMeasurement(gxos::gui::FontHandle builtin)
@@ -80,6 +82,25 @@ void testBitmapAndMeasurement(gxos::gui::FontHandle builtin)
 	CHECK(glyph.metrics.advancePx == 6 && glyph.bitmapByteLength == 5);
 	CHECK(glyph.bitmapFormat == FontBitmapFormat::ColumnLsbTop);
 	CHECK(glyph.bitmap && std::memcmp(glyph.bitmap, BitmapFont::Glyph('A'), 5) == 0);
+	uint8_t raster[2u + 7u * 8u];
+	std::memset(raster, 0xa5, sizeof(raster));
+	GlyphMetrics rasterMetrics = {};
+	CHECK(FontRasterizeGlyph(builtin, {7}, 'A', raster + 1u,
+		sizeof(raster) - 2u, 8u, &rasterMetrics) == FontStatus::Ok);
+	CHECK(rasterMetrics.widthPx == 5u && rasterMetrics.heightPx == 7u);
+	CHECK(raster[0] == 0xa5u && raster[sizeof(raster) - 1u] == 0xa5u);
+	for (uint32_t y = 0; y < rasterMetrics.heightPx; ++y) {
+		for (uint32_t x = 0; x < rasterMetrics.widthPx; ++x) {
+			const uint8_t expected = (BitmapFont::Glyph('A')[x] & (1u << y)) ? 255u : 0u;
+			CHECK(raster[1u + static_cast<size_t>(y) * 8u + x] == expected);
+		}
+		for (uint32_t x = rasterMetrics.widthPx; x < 8u; ++x)
+			CHECK(raster[1u + static_cast<size_t>(y) * 8u + x] == 0xa5u);
+	}
+	std::memset(raster, 0x6b, sizeof(raster));
+	CHECK(FontRasterizeGlyph(builtin, {7}, 'A', raster + 1u,
+		1u, 8u, &rasterMetrics) == FontStatus::BufferTooSmall);
+	for (size_t i = 0; i < sizeof(raster); ++i) CHECK(raster[i] == 0x6bu);
 	CHECK(FontLookupGlyph(builtin, {7}, 0x1f642u, &glyph) == FontStatus::FallbackUsed);
 	CHECK(glyph.fallbackUsed == 1 && glyph.requestedCodePoint == 0x1f642u);
 	CHECK(glyph.metrics.codePoint == static_cast<uint32_t>('?'));

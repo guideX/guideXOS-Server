@@ -25,6 +25,7 @@ $Arguments = @(
 	"kernel/core/font_bitmap_backend.cpp",
 	"kernel/core/font_truetype.cpp",
 	"kernel/core/font_truetype_loader.cpp",
+	"kernel/core/font_truetype_raster.cpp",
 	"-o", $Output
 )
 if ($Sanitize) {

@@ -86,7 +86,7 @@ gxos::gui::FontStatus mockMetrics(const void*, gxos::gui::FontSize,
 	return gxos::gui::FontStatus::Ok;
 }
 
-gxos::gui::FontStatus mockGlyph(const void*, gxos::gui::UnicodeCodePoint,
+gxos::gui::FontStatus mockGlyph(const void*, gxos::gui::FontSize, gxos::gui::UnicodeCodePoint,
 	gxos::gui::FontGlyphView* out)
 {
 	if (out) *out = {};
@@ -97,6 +97,7 @@ const gxos::gui::FontBackend kMockBackend = {
 	gxos::gui::FontCapabilityGlyphLookup | gxos::gui::FontCapabilityMeasurement,
 	&mockMetrics,
 	&mockGlyph,
+	nullptr,
 };
 
 void testParser(const std::vector<uint8_t>& fixture)
@@ -223,10 +224,10 @@ void testManager(const std::vector<uint8_t>& fixture)
 	CHECK(std::strcmp(storedMetadata.familyName, "Roboto") == 0);
 	CHECK(storedMetadata.fileBytes == fixture.size());
 	FontMetrics metrics = {};
-	CHECK(FontGetMetrics(loaded, {16u}, &metrics) == FontStatus::MetadataOnly);
+	CHECK(FontGetMetrics(loaded, {16u}, &metrics) == FontStatus::Ok);
 	FontGlyphView glyph = {};
-	CHECK(FontLookupGlyph(loaded, {16u}, 'A', &glyph) == FontStatus::MetadataOnly);
-	CHECK(FontManagerSetDefaultFont(loaded) == FontStatus::MetadataOnly);
+	CHECK(FontLookupGlyph(loaded, {16u}, 'A', &glyph) == FontStatus::Ok);
+	CHECK(FontManagerSetDefaultFont(loaded) == FontStatus::FontNotSelectable);
 	FontHandle stillBuiltin = {0xffffu, 0, 0};
 	CHECK(FontManagerGetDefaultFont(&stillBuiltin) == FontStatus::Ok);
 	CHECK(stillBuiltin.slot == builtin.slot && stillBuiltin.generation == builtin.generation);

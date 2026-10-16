@@ -1,6 +1,7 @@
 #include "include/kernel/font_contract.h"
 #include "include/kernel/font_truetype.h"
 #include "include/kernel/vfs.h"
+#include "font_truetype_internal.h"
 
 namespace gxos {
 namespace gui {
@@ -13,17 +14,12 @@ struct FontSourceRecord {
 	FontId id;
 	FontTrueTypeMetadata metadata;
 	FontDefinition definition;
+	FontTrueTypeSourceView view;
 	uint8_t source[kFontTrueTypeMaxFileBytes];
 };
 
 FontSourceRecord s_sourceRecords[kFontTrueTypeMaxExternalFonts] = {};
 volatile uint32_t s_sourceLock = 0;
-
-const FontBackend kMetadataOnlyBackend = {
-	FontCapabilityMetadataOnly,
-	nullptr,
-	nullptr,
-};
 
 void lockSources()
 {
@@ -59,6 +55,9 @@ void clearRecord(FontSourceRecord* record)
 	record->definition.context = nullptr;
 	record->definition.trueTypeMetadata = nullptr;
 	record->definition.onUnregister = nullptr;
+	record->view.bytes = nullptr;
+	record->view.byteLength = 0;
+	record->view.metadata = nullptr;
 }
 
 FontSourceRecord* reserveRecord(FontId id)
@@ -78,7 +77,7 @@ void releaseSourceContext(const void* context)
 {
 	SourceGuard guard;
 	for (uint32_t i = 0; i < kFontTrueTypeMaxExternalFonts; ++i) {
-		if (context == &s_sourceRecords[i]) {
+		if (context == &s_sourceRecords[i].view) {
 			clearRecord(&s_sourceRecords[i]);
 			return;
 		}
@@ -115,10 +114,13 @@ FontStatus finishLoad(FontSourceRecord* record, FontHandle* outHandle,
 		return status;
 	}
 	FontDefinition& definition = record->definition;
+	record->view.bytes = record->source;
+	record->view.byteLength = record->sourceLength;
+	record->view.metadata = &record->metadata;
 	definition.id = record->id;
 	definition.debugName = record->metadata.familyName;
-	definition.backend = &kMetadataOnlyBackend;
-	definition.context = record;
+	definition.backend = &kFontTrueTypeBackend;
+	definition.context = &record->view;
 	definition.trueTypeMetadata = &record->metadata;
 	definition.onUnregister = &releaseSourceContext;
 	FontHandle handle = {0xffffu, 0, 0};

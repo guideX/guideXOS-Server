@@ -37,6 +37,8 @@ enum FontCapability : uint32_t {
 	FontCapabilityUtf8Input = 1u << 3,
 	FontCapabilityMonospace = 1u << 4,
 	FontCapabilityMetadataOnly = 1u << 5,
+	FontCapabilityRasterization = 1u << 6,
+	FontCapabilityNoDefaultSelection = 1u << 7,
 };
 
 enum class FontStatus : uint8_t {
@@ -64,6 +66,11 @@ enum class FontStatus : uint8_t {
 	FontSourceCapacity,
 	FontFileNotFound,
 	FontFileIoError,
+	InvalidGlyphData,
+	UnsupportedGlyphFeature,
+	BufferTooSmall,
+	RasterLimitExceeded,
+	FontNotSelectable,
 };
 
 enum class FontBitmapFormat : uint8_t {
@@ -88,6 +95,7 @@ struct GlyphMetrics {
 	uint32_t widthPx;
 	uint32_t heightPx;
 	uint32_t advancePx;
+	int32_t sideBearingPx;
 };
 
 struct FontGlyphView {
@@ -119,8 +127,11 @@ struct TextMeasureResult {
 struct FontBackend {
 	uint32_t capabilities;
 	FontStatus (*getMetrics)(const void* context, FontSize size, FontMetrics* outMetrics);
-	FontStatus (*lookupGlyph)(const void* context, UnicodeCodePoint codePoint,
-		FontGlyphView* outGlyph);
+	FontStatus (*lookupGlyph)(const void* context, FontSize size,
+		UnicodeCodePoint codePoint, FontGlyphView* outGlyph);
+	FontStatus (*rasterizeGlyph)(const void* context, FontSize size,
+		UnicodeCodePoint codePoint, uint8_t* coverage, size_t coverageCapacity,
+		uint32_t rowStrideBytes, GlyphMetrics* outMetrics);
 };
 
 // Backend, context, metadata, and debugName are borrowed for the registration
@@ -167,6 +178,12 @@ FontStatus FontUtf8CStringLength(const char* utf8, size_t* outByteLength);
 FontStatus FontGetMetrics(FontHandle handle, FontSize size, FontMetrics* outMetrics);
 FontStatus FontLookupGlyph(FontHandle handle, FontSize size, UnicodeCodePoint codePoint,
 	FontGlyphView* outGlyph);
+// Rasterizes one glyph into caller-owned 8-bit grayscale coverage. The backend
+// validates rowStrideBytes and coverageCapacity before writing. On BufferTooSmall,
+// outMetrics reports the required glyph dimensions and no destination bytes change.
+FontStatus FontRasterizeGlyph(FontHandle handle, FontSize size,
+	UnicodeCodePoint codePoint, uint8_t* coverage, size_t coverageCapacity,
+	uint32_t rowStrideBytes, GlyphMetrics* outMetrics);
 FontStatus FontMeasureText(FontHandle handle, FontSize size, const char* utf8,
 	size_t byteLength, TextMeasureResult* outResult);
 FontStatus FontDrawTextToBuffer(FontHandle handle, FontSize size,
