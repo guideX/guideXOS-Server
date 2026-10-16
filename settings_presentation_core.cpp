@@ -319,7 +319,9 @@ CategoryId focusControlCategory(FocusControl control)
     case FocusControl::DisplayCancel:
     case FocusControl::DisplayAdvanced: return CategoryId::Display;
     case FocusControl::PersonalizationAdvanced:
-    case FocusControl::PersonalizationChooseBackground: return CategoryId::Personalization;
+    case FocusControl::PersonalizationChooseBackground:
+    case FocusControl::PersonalizationApply:
+    case FocusControl::PersonalizationCancel: return CategoryId::Personalization;
     case FocusControl::DateTimeAdvanced: return CategoryId::DateTime;
     case FocusControl::StorageDiskManager:
     case FocusControl::StorageDiskEntry:

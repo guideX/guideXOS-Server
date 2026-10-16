@@ -563,6 +563,15 @@ void AppManager::notifyDisplayConfigurationChanged(uint32_t generation) {
     }
 }
 
+void AppManager::notifyDesktopAppearanceChanged(uint64_t revision) {
+    if (!s_initialized || revision == 0u) return;
+    for (int i = 0; i < s_runningAppCount; ++i) {
+        KernelApp* app = s_runningApps[i];
+        if (!app || app->getState() != AppState::Running) continue;
+        app->onDesktopAppearanceChanged(revision);
+    }
+}
+
 bool AppManager::isBareMetal() {
     // In kernel mode, we're always in bare-metal/UEFI mode
     // This would return false if running under the guideXOSServer

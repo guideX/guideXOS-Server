@@ -221,6 +221,8 @@ public:
     // Value-only notification delivered on the desktop owner path after an
     // authoritative active display configuration commits.
     virtual void onDisplayConfigurationChanged(uint32_t) {}
+    // Value-only notification delivered after desktop appearance commits.
+    virtual void onDesktopAppearanceChanged(uint64_t) {}
     
     // Drawing (called by compositor to render app content)
     virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) = 0;
@@ -309,6 +311,7 @@ public:
     // Dispatch a committed display-configuration generation to running apps.
     // This walks the fixed app table synchronously and retains no callbacks.
     static void notifyDisplayConfigurationChanged(uint32_t generation);
+    static void notifyDesktopAppearanceChanged(uint64_t revision);
     
     // Check if we're running in bare-metal/UEFI mode
     static bool isBareMetal();

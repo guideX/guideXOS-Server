@@ -1,0 +1,13 @@
+Compiling shared core with production AMD64 freestanding flags.
+Compiling the bounded Display refresh helper with production flags.
+Compiling bounded contract and link harness with production flags.
+Linking core and bounded harness as a freestanding relocatable object.
+
+Name                                         Length
+----                                         ------
+settings_presentation_core.o                  17831
+settings_display_refresh.o                     5230
+settings_presentation_freestanding_harness.o   4830
+settings_presentation_freestanding_linked.o   21699
+
+Freestanding compile, bounded link, and unresolved-symbol checks PASS.

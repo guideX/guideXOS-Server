@@ -30,6 +30,75 @@ struct SystemDesktopIconVisibility {
     bool showSystemSettings;
 };
 
+enum : uint32_t {
+    kDesktopAppearanceConfigurationVersion = 1u,
+    kDesktopAppearanceBackgroundWallpaper = 1u,
+    kDesktopAppearanceBackgroundGradient = 2u,
+    kDesktopAppearanceIconTrash = 1u << 0,
+    kDesktopAppearanceIconThisSystem = 1u << 1,
+    kDesktopAppearanceIconFileManager = 1u << 2,
+    kDesktopAppearanceIconSystemSettings = 1u << 3
+};
+
+// Value-only view of the active, persisted desktop appearance. It is copied
+// by the Settings provider and contains no pointers into desktop state.
+struct DesktopAppearanceConfigurationV1 {
+    uint32_t structureSize;
+    uint32_t version;
+    uint64_t revision;
+    uint32_t backgroundKind;
+    uint32_t gradientTopColor;
+    uint32_t gradientBottomColor;
+    uint32_t gradientAccentColor;
+    uint32_t visibleIconFlags;
+    char backgroundId[96];
+    char backgroundName[32];
+    char backgroundScaleMode[16];
+};
+
+static const uint32_t kDesktopBuiltInGradientPresetVersion = 1u;
+static const uint32_t kDesktopBuiltInGradientPresetCapacity = 16u;
+static const uint32_t kDesktopGradientApplyResultVersion = 1u;
+
+struct DesktopBuiltInGradientPresetV1 {
+    uint32_t structureSize;
+    uint32_t version;
+    uint32_t topColor;
+    uint32_t bottomColor;
+    uint32_t accentColor;
+    char id[96];
+    char displayName[32];
+};
+
+enum class DesktopGradientApplyStatus : uint32_t {
+    Committed = 0,
+    NoChange = 1,
+    InvalidPreset = 2,
+    StaleRevision = 3,
+    PersistenceUnavailable = 4,
+    PersistenceConflict = 5,
+    ApplyFailed = 6,
+    SaveFailedRolledBack = 7,
+    ReadbackFailedRolledBack = 8,
+    RollbackFailed = 9
+};
+
+enum : uint32_t {
+    kDesktopGradientApplyActiveAvailable = 1u << 0,
+    kDesktopGradientApplyPersistedAvailable = 1u << 1,
+    kDesktopGradientApplyRollbackVerified = 1u << 2
+};
+
+struct DesktopGradientApplyResultV1 {
+    uint32_t structureSize;
+    uint32_t version;
+    DesktopGradientApplyStatus status;
+    uint32_t flags;
+    uint64_t revision;
+    char appliedId[96];
+    char persistedId[96];
+};
+
 struct CpuTelemetrySnapshot {
     bool available = false;
     int utilizationPct = 0;
@@ -154,6 +223,19 @@ void set_wallpaper_by_id(const char* wallpaperId);
 
 // Return the currently selected built-in wallpaper/background id.
 const char* get_wallpaper_id();
+
+// Enumerate and apply the desktop-owned built-in gradient presets. The apply
+// call checks the desktop appearance revision and commits through /desktop.cfg.
+uint32_t get_builtin_gradient_preset_count();
+bool get_builtin_gradient_preset(
+    uint32_t index, DesktopBuiltInGradientPresetV1* output);
+DesktopGradientApplyStatus apply_builtin_gradient_preset(
+    const char* presetId, uint64_t expectedRevision,
+    DesktopGradientApplyResultV1* output);
+
+// Copy the active appearance values used by the desktop renderer. Settings
+// consumes this through a read-only provider and never changes persistence.
+bool get_appearance_configuration(DesktopAppearanceConfigurationV1* output);
 
 // Get or update the visible built-in system desktop icons.
 SystemDesktopIconVisibility get_system_desktop_icon_visibility();

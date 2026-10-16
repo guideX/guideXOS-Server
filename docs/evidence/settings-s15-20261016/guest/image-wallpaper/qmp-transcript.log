@@ -1,0 +1,71 @@
+2026-10-16T13:02:06.300031+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-16T13:02:06.300031+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-16T13:02:06.300031+00:00 RX {"return": {}}
+2026-10-16T13:02:06.300031+00:00 TX {"execute":"query-status"}
+2026-10-16T13:02:06.300031+00:00 RX {"return": {"status": "running", "running": true}}
+2026-10-16T13:02:06.300031+00:00 TX {"execute":"query-mice"}
+2026-10-16T13:02:06.300031+00:00 RX {"return": [{"index": 2, "name": "QEMU PS/2 Mouse", "current": true, "absolute": false}]}
+2026-10-16T13:02:06.300031+00:00 TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s15-20261016\\production\\guest-image-wallpaper\\desktop-initial.ppm"}}
+2026-10-16T13:02:06.300031+00:00 RX {"return": {}}
+2026-10-16T13:02:12.631863+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-16T13:02:12.631863+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-16T13:02:12.631863+00:00 RX {"return": {}}
+2026-10-16T13:02:12.631863+00:00 TX {"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":"meta_l"}],"hold-time":120}}
+2026-10-16T13:02:12.647707+00:00 RX {"return": {}}
+2026-10-16T13:02:13.235509+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-16T13:02:13.235509+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-16T13:02:13.235509+00:00 RX {"return": {}}
+2026-10-16T13:02:13.235509+00:00 TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s15-20261016\\production\\guest-image-wallpaper\\start-menu-open.ppm"}}
+2026-10-16T13:02:13.244369+00:00 RX {"return": {}}
+2026-10-16T13:02:51.682865+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-16T13:02:51.682865+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-16T13:02:51.682865+00:00 RX {"return": {}}
+2026-10-16T13:02:51.682865+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":true}}]}}
+2026-10-16T13:02:51.682865+00:00 RX {"return": {}}
+2026-10-16T13:02:51.765590+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":false}}]}}
+2026-10-16T13:02:51.765590+00:00 RX {"return": {}}
+2026-10-16T13:02:52.383495+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-16T13:02:52.383495+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-16T13:02:52.383495+00:00 RX {"return": {}}
+2026-10-16T13:02:52.383495+00:00 TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s15-20261016\\production\\guest-image-wallpaper\\settings-system.ppm"}}
+2026-10-16T13:02:52.383495+00:00 RX {"return": {}}
+2026-10-16T13:03:03.112574+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-16T13:03:03.112574+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-16T13:03:03.112574+00:00 RX {"return": {}}
+2026-10-16T13:03:03.112574+00:00 TX {"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":"meta_l"}],"hold-time":120}}
+2026-10-16T13:03:03.112574+00:00 RX {"return": {}}
+2026-10-16T13:03:03.672169+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-16T13:03:03.672169+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-16T13:03:03.672169+00:00 RX {"return": {}}
+2026-10-16T13:03:03.672169+00:00 TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s15-20261016\\production\\guest-image-wallpaper\\start-menu-reopen.ppm"}}
+2026-10-16T13:03:03.683922+00:00 RX {"return": {}}
+2026-10-16T13:04:57.322175+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-16T13:04:57.322175+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-16T13:04:57.322175+00:00 RX {"return": {}}
+2026-10-16T13:04:57.322175+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":true}}]}}
+2026-10-16T13:04:57.322175+00:00 RX {"return": {}}
+2026-10-16T13:04:57.405335+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":false}}]}}
+2026-10-16T13:04:57.405335+00:00 RX {"return": {}}
+2026-10-16T13:04:57.878060+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-16T13:04:57.878060+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-16T13:04:57.878060+00:00 RX {"return": {}}
+2026-10-16T13:04:57.878060+00:00 TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s15-20261016\\production\\guest-image-wallpaper\\menu-click-check.ppm"}}
+2026-10-16T13:04:57.878060+00:00 RX {"return": {}}
+2026-10-16T13:05:05.022789+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-16T13:05:05.022789+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-16T13:05:05.022789+00:00 RX {"return": {}}
+2026-10-16T13:05:05.022789+00:00 TX {"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":"p"}],"hold-time":120}}
+2026-10-16T13:05:05.022789+00:00 RX {"return": {}}
+2026-10-16T13:05:05.594561+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-16T13:05:05.594561+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-16T13:05:05.594561+00:00 RX {"return": {}}
+2026-10-16T13:05:05.594561+00:00 TX {"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServer\\out\\validation\\settings-s15-20261016\\production\\guest-image-wallpaper\\personalization-image-wallpaper.ppm"}}
+2026-10-16T13:05:05.610280+00:00 RX {"return": {}}
+2026-10-16T13:05:15.731031+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-16T13:05:15.731031+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-16T13:05:15.731031+00:00 RX {"return": {}}
+2026-10-16T13:05:15.731031+00:00 TX {"execute":"query-status"}
+2026-10-16T13:05:15.731031+00:00 RX {"return": {"status": "running", "running": true}}
+2026-10-16T13:05:15.731031+00:00 TX {"execute":"quit"}
+2026-10-16T13:05:15.731031+00:00 RX {"timestamp": {"seconds": 1792155915, "microseconds": 731031}, "event": "SHUTDOWN", "data": {"guest": false, "reason": "host-qmp-quit"}}
+2026-10-16T13:05:15.731031+00:00 RX {"return": {}}

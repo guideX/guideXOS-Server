@@ -12,6 +12,7 @@
 //
 
 #include "include/kernel/desktop.h"
+#include "include/kernel/desktop_gradient_persistence.h"
 #include "include/kernel/desktop_font.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/startmenubutton_img.h"
@@ -716,6 +717,18 @@ static void desktop_append_int(char* dst, int* pos, int dstSize, int32_t value)
 
 
 static bool s_initialized = false;
+static uint64_t s_desktopAppearanceRevision = 1u;
+
+static void advance_desktop_appearance_revision()
+{
+    if (s_desktopAppearanceRevision == ~static_cast<uint64_t>(0u)) {
+        s_desktopAppearanceRevision = 1u;
+    } else {
+        ++s_desktopAppearanceRevision;
+        if (s_desktopAppearanceRevision == 0u) s_desktopAppearanceRevision = 1u;
+    }
+}
+
 static bool s_startMenuOpen = false;
 static bool s_rightClickMenuOpen = false;
 static uint32_t s_rightClickX = 0;
@@ -2925,8 +2938,13 @@ bool get_system_desktop_icon_visible(const char* key)
 
 void set_system_desktop_icon_visibility(const SystemDesktopIconVisibility& visibility)
 {
+    const bool changed = s_systemDesktopIconVisibility.showTrash != visibility.showTrash ||
+        s_systemDesktopIconVisibility.showThisSystem != visibility.showThisSystem ||
+        s_systemDesktopIconVisibility.showFileManager != visibility.showFileManager ||
+        s_systemDesktopIconVisibility.showSystemSettings != visibility.showSystemSettings;
     s_systemDesktopIconVisibility = visibility;
     s_systemDesktopIconVisibilityLoaded = true;
+    if (changed) advance_desktop_appearance_revision();
     persist_system_desktop_icons();
     refresh_desktop_icons();
     s_needsRedraw = true;
@@ -5500,7 +5518,6 @@ static bool persist_wallpaper_selection(const char* wallpaperId)
 
 static void load_persisted_wallpaper_id()
 {
-    const char* defaultWallpaperId = s_builtInWallpapers[0].id;
     char wallpaperFileId[kBareMetalWallpaperIdMax];
     const bool haveWallpaperFileId = bare_metal_load_wallpaper_id_file(wallpaperFileId, sizeof(wallpaperFileId));
 
@@ -5516,14 +5533,15 @@ static void load_persisted_wallpaper_id()
     const char* wallpaperId = nullptr;
     const char* wallpaperSource = nullptr;
 
-    if (haveWallpaperFileId) {
-        if (configWallpaperId[0] && desktop_str_eq(wallpaperFileId, defaultWallpaperId) && !desktop_str_eq(configWallpaperId, defaultWallpaperId)) {
-            wallpaperId = configWallpaperId;
-            wallpaperSource = "config-overrode-default-wallpaper-file";
-        } else {
-            wallpaperId = wallpaperFileId;
-            wallpaperSource = "wallpaper-file";
-        }
+    if (haveConfig && source == BareMetalDisplayOptionsLoadSource::Primary &&
+        configWallpaperId[0]) {
+        // /desktop.cfg is the canonical appearance store. Older sidecar ids
+        // remain as a fallback only when the canonical key is absent.
+        wallpaperId = configWallpaperId;
+        wallpaperSource = "primary-config";
+    } else if (haveWallpaperFileId) {
+        wallpaperId = wallpaperFileId;
+        wallpaperSource = "wallpaper-file";
     } else if (haveConfig) {
         wallpaperId = configWallpaperId;
         wallpaperSource = bare_metal_display_options_load_source_name(source);
@@ -5596,16 +5614,12 @@ void set_wallpaper_by_id(const char* wallpaperId)
     serial::puts("\n");
     const BuiltInGradientPalette* gradient = find_builtin_gradient(wallpaperId);
     if (gradient) {
-        if (s_wallpaperConfig.type == WallpaperType::Gradient && desktop_str_eq(s_wallpaperConfig.wallpaperId, gradient->id)) {
-            persist_wallpaper_selection(gradient->id);
-            return;
-        }
         serial::puts("[desktop] selected gradient id=");
         serial::puts(gradient->id);
         serial::puts("\n");
-        apply_wallpaper_gradient_selection(gradient);
-        persist_wallpaper_selection(gradient->id);
-        s_needsRedraw = true;
+        DesktopGradientApplyResultV1 result{};
+        (void)apply_builtin_gradient_preset(
+            gradient->id, s_desktopAppearanceRevision, &result);
         return;
     }
 
@@ -5624,6 +5638,7 @@ void set_wallpaper_by_id(const char* wallpaperId)
     serial::puts(entry->thumbnailPath);
     serial::puts("\n");
     apply_wallpaper_builtin_selection(entry);
+    advance_desktop_appearance_revision();
     persist_wallpaper_selection(entry->id);
     s_needsRedraw = true;
 }
@@ -5633,10 +5648,199 @@ const char* get_wallpaper_id()
     return s_wallpaperConfig.wallpaperId ? s_wallpaperConfig.wallpaperId : s_builtInWallpapers[0].id;
 }
 
+uint32_t get_builtin_gradient_preset_count()
+{
+    return static_cast<uint32_t>(kBuiltInGradientCount);
+}
+
+bool get_builtin_gradient_preset(
+    uint32_t index, DesktopBuiltInGradientPresetV1* output)
+{
+    if (!output || index >= static_cast<uint32_t>(kBuiltInGradientCount)) return false;
+    const BuiltInGradientPalette& preset = s_builtInGradients[index];
+    DesktopBuiltInGradientPresetV1 snapshot{};
+    snapshot.structureSize = sizeof(snapshot);
+    snapshot.version = kDesktopBuiltInGradientPresetVersion;
+    snapshot.topColor = preset.topColor;
+    snapshot.bottomColor = preset.bottomColor;
+    snapshot.accentColor = preset.accentColor;
+    desktop_str_copy(snapshot.id, preset.id, (int)sizeof(snapshot.id));
+    desktop_str_copy(snapshot.displayName, preset.displayName,
+                     (int)sizeof(snapshot.displayName));
+    *output = snapshot;
+    return true;
+}
+
+static void set_gradient_apply_actual_state(
+    DesktopGradientApplyResultV1* output,
+    const GradientPersistenceResult* persistence)
+{
+    if (!output) return;
+    const char* appliedId = get_wallpaper_id();
+    desktop_str_copy(output->appliedId, appliedId, (int)sizeof(output->appliedId));
+    output->flags |= kDesktopGradientApplyActiveAvailable;
+    if (persistence && (persistence->flags & kGradientPersistenceReadbackAvailable) != 0u) {
+        desktop_str_copy(output->persistedId, persistence->persistedId,
+                         (int)sizeof(output->persistedId));
+        output->flags |= kDesktopGradientApplyPersistedAvailable;
+    }
+}
+
+DesktopGradientApplyStatus apply_builtin_gradient_preset(
+    const char* presetId, uint64_t expectedRevision,
+    DesktopGradientApplyResultV1* output)
+{
+    if (!output) return DesktopGradientApplyStatus::ApplyFailed;
+    DesktopGradientApplyResultV1 result{};
+    result.structureSize = sizeof(result);
+    result.version = kDesktopGradientApplyResultVersion;
+    result.status = DesktopGradientApplyStatus::InvalidPreset;
+    result.revision = s_desktopAppearanceRevision;
+
+    const BuiltInGradientPalette* gradient = find_builtin_gradient(presetId);
+    if (!gradient) {
+        *output = result;
+        return result.status;
+    }
+    if (!is_initialized()) {
+        result.status = DesktopGradientApplyStatus::PersistenceUnavailable;
+        *output = result;
+        return result.status;
+    }
+
+    DesktopAppearanceConfigurationV1 before{};
+    if (!get_appearance_configuration(&before)) {
+        result.status = DesktopGradientApplyStatus::PersistenceUnavailable;
+        *output = result;
+        return result.status;
+    }
+    set_gradient_apply_actual_state(&result, nullptr);
+    if (expectedRevision == 0u || expectedRevision != before.revision) {
+        result.status = DesktopGradientApplyStatus::StaleRevision;
+        *output = result;
+        return result.status;
+    }
+
+    if (before.backgroundKind == kDesktopAppearanceBackgroundGradient &&
+        desktop_str_eq(before.backgroundId, gradient->id)) {
+        char persistedId[kGradientPresetIdCapacity] = {};
+        if (readCanonicalWallpaperId(persistedId, sizeof(persistedId))) {
+            desktop_str_copy(result.persistedId, persistedId,
+                             (int)sizeof(result.persistedId));
+            result.flags |= kDesktopGradientApplyPersistedAvailable;
+            if (!desktop_str_eq(persistedId, gradient->id)) {
+                result.status = DesktopGradientApplyStatus::PersistenceConflict;
+                *output = result;
+                return result.status;
+            }
+        }
+        result.status = DesktopGradientApplyStatus::NoChange;
+        *output = result;
+        return result.status;
+    }
+
+    const WallpaperConfig previousWallpaper = s_wallpaperConfig;
+    apply_wallpaper_gradient_selection(gradient);
+
+    GradientPersistenceResult persistence{};
+    const GradientPersistenceStatus persistenceStatus =
+        persistBuiltInGradientId(before.backgroundId, gradient->id, &persistence);
+    if (persistenceStatus != GradientPersistenceStatus::Ok) {
+        s_wallpaperConfig = previousWallpaper;
+        s_needsRedraw = true;
+        result.revision = s_desktopAppearanceRevision;
+        if ((persistence.flags & kGradientPersistenceRollbackVerified) != 0u) {
+            result.flags |= kDesktopGradientApplyRollbackVerified;
+        }
+        set_gradient_apply_actual_state(&result, &persistence);
+        switch (persistenceStatus) {
+            case GradientPersistenceStatus::Conflict:
+                result.status = DesktopGradientApplyStatus::PersistenceConflict;
+                break;
+            case GradientPersistenceStatus::Unavailable:
+                result.status = DesktopGradientApplyStatus::PersistenceUnavailable;
+                break;
+            case GradientPersistenceStatus::WriteFailedRolledBack:
+                result.status = DesktopGradientApplyStatus::SaveFailedRolledBack;
+                break;
+            case GradientPersistenceStatus::ReadbackFailedRolledBack:
+                result.status = DesktopGradientApplyStatus::ReadbackFailedRolledBack;
+                break;
+            case GradientPersistenceStatus::RollbackFailed:
+                result.status = DesktopGradientApplyStatus::RollbackFailed;
+                break;
+            case GradientPersistenceStatus::InvalidConfiguration:
+            default:
+                result.status = DesktopGradientApplyStatus::PersistenceConflict;
+                break;
+        }
+        *output = result;
+        return result.status;
+    }
+
+    advance_desktop_appearance_revision();
+    s_needsRedraw = true;
+    result.revision = s_desktopAppearanceRevision;
+    result.status = DesktopGradientApplyStatus::Committed;
+    set_gradient_apply_actual_state(&result, &persistence);
+    app::AppManager::notifyDesktopAppearanceChanged(result.revision);
+    *output = result;
+    return result.status;
+}
+
+bool get_appearance_configuration(DesktopAppearanceConfigurationV1* output)
+{
+    if (!output || !is_initialized()) return false;
+
+    DesktopAppearanceConfigurationV1 snapshot{};
+    snapshot.structureSize = sizeof(DesktopAppearanceConfigurationV1);
+    snapshot.version = kDesktopAppearanceConfigurationVersion;
+    snapshot.revision = s_desktopAppearanceRevision;
+    const char* backgroundId = get_wallpaper_id();
+    desktop_str_copy(snapshot.backgroundId, backgroundId, (int)sizeof(snapshot.backgroundId));
+    desktop_str_copy(snapshot.backgroundScaleMode,
+                     wallpaper_scale_mode_name(s_wallpaperConfig.scaleMode),
+                     (int)sizeof(snapshot.backgroundScaleMode));
+
+    if (s_wallpaperConfig.type == WallpaperType::Gradient) {
+        const BuiltInGradientPalette* gradient = find_builtin_gradient(backgroundId);
+        if (!gradient) return false;
+        snapshot.backgroundKind = kDesktopAppearanceBackgroundGradient;
+        snapshot.gradientTopColor = gradient->topColor;
+        snapshot.gradientBottomColor = gradient->bottomColor;
+        snapshot.gradientAccentColor = gradient->accentColor;
+        desktop_str_copy(snapshot.backgroundName, gradient->displayName,
+                         (int)sizeof(snapshot.backgroundName));
+    } else if (s_wallpaperConfig.type == WallpaperType::BuiltIn) {
+        const BuiltInWallpaperPalette* wallpaper = find_builtin_wallpaper(backgroundId);
+        if (!wallpaper) return false;
+        snapshot.backgroundKind = kDesktopAppearanceBackgroundWallpaper;
+        desktop_str_copy(snapshot.backgroundName, wallpaper->displayName,
+                         (int)sizeof(snapshot.backgroundName));
+    } else {
+        return false;
+    }
+
+    const SystemDesktopIconVisibility icons = get_system_desktop_icon_visibility();
+    if (icons.showTrash) snapshot.visibleIconFlags |= kDesktopAppearanceIconTrash;
+    if (icons.showThisSystem) snapshot.visibleIconFlags |= kDesktopAppearanceIconThisSystem;
+    if (icons.showFileManager) snapshot.visibleIconFlags |= kDesktopAppearanceIconFileManager;
+    if (icons.showSystemSettings) snapshot.visibleIconFlags |= kDesktopAppearanceIconSystemSettings;
+
+    *output = snapshot;
+    return true;
+}
+
 void reload_persisted_wallpaper()
 {
+    const char* previousId = get_wallpaper_id();
+    const WallpaperScaleMode previousScaleMode = s_wallpaperConfig.scaleMode;
     load_persisted_wallpaper_scale_mode();
     load_persisted_wallpaper_id();
+    if (!desktop_str_eq(previousId, get_wallpaper_id()) ||
+        previousScaleMode != s_wallpaperConfig.scaleMode) {
+        advance_desktop_appearance_revision();
+    }
 }
 
 // ============================================================

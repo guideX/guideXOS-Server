@@ -1,0 +1,31 @@
+{
+  "isolation": "independent copied writable ESP fixture and copied OVMF.fd; -net none",
+  "qmpEndpoint": "127.0.0.1:58441",
+  "arguments": [
+    "-machine",
+    "pc,accel=whpx",
+    "-smp",
+    "2",
+    "-m",
+    "1536M",
+    "-device",
+    "virtio-vga,id=video0",
+    "-display",
+    "none",
+    "-drive if=pflash,format=raw,readonly=on,file=D:\\dev\\guideXOSServer\\out\\validation\\settings-s15-20261016\\production\\guest-image-wallpaper\\OVMF.fd",
+    "-drive file=fat:rw:D:\\dev\\guideXOSServer\\out\\validation\\settings-s15-20261016\\production\\guest-image-wallpaper\\ESP,format=raw,if=ide,index=0",
+    "-serial file:D:\\dev\\guideXOSServer\\out\\validation\\settings-s15-20261016\\production\\guest-image-wallpaper\\guest-com1.serial.log",
+    "-qmp",
+    "tcp:127.0.0.1:58441,server=on,wait=off",
+    "-monitor",
+    "none",
+    "-no-reboot",
+    "-rtc",
+    "base=utc,clock=host",
+    "-net",
+    "none"
+  ],
+  "processId": 26464,
+  "qemuStatus": "running then quit through this QMP endpoint",
+  "phase": "S15 image wallpaper guest"
+}

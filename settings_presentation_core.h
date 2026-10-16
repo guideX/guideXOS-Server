@@ -144,6 +144,8 @@ enum class FocusControl : unsigned char {
     DisplayAdvanced,
     PersonalizationAdvanced,
     PersonalizationChooseBackground,
+    PersonalizationApply,
+    PersonalizationCancel,
     DateTimeAdvanced,
     StorageDiskManager,
     DeviceEntry,

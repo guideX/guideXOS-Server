@@ -1,0 +1,31 @@
+{
+  "isolation": "copied writable ESP and copied OVMF.fd; -net none",
+  "qmpEndpoint": "127.0.0.1:58440",
+  "arguments": [
+    "-machine",
+    "pc,accel=whpx",
+    "-smp",
+    "2",
+    "-m",
+    "1536M",
+    "-device",
+    "virtio-vga,id=video0",
+    "-display",
+    "none",
+    "-drive if=pflash,format=raw,readonly=on,file=D:\\dev\\guideXOSServer\\out\\validation\\settings-s15-20261016\\production\\guest-acceptance\\OVMF.fd",
+    "-drive file=fat:rw:D:\\dev\\guideXOSServer\\out\\validation\\settings-s15-20261016\\production\\guest-acceptance\\ESP,format=raw,if=ide,index=0",
+    "-serial file:D:\\dev\\guideXOSServer\\out\\validation\\settings-s15-20261016\\production\\guest-acceptance\\guest-com1.serial.log",
+    "-qmp",
+    "tcp:127.0.0.1:58440,server=on,wait=off",
+    "-monitor",
+    "none",
+    "-no-reboot",
+    "-rtc",
+    "base=utc,clock=host",
+    "-net",
+    "none"
+  ],
+  "processId": 15788,
+  "qemuStatus": "running then quit through this QMP endpoint",
+  "phase": "S15 gradient guest"
+}

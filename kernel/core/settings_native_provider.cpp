@@ -1,6 +1,7 @@
 #include "include/kernel/settings_native_provider.h"
 
 #include "include/kernel/arch.h"
+#include "include/kernel/desktop.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/version.h"
 #include "../../display_configuration_command.h"
@@ -60,6 +61,19 @@ static bool textEquals(const char* left, const char* right)
         ++right;
     }
     return *left == '\0' && *right == '\0';
+}
+
+static bool validPresetIdentifier(const char* value, size_t capacity)
+{
+    if (!value || capacity == 0u) return false;
+    size_t length = 0u;
+    while (length < capacity && value[length]) {
+        const char ch = value[length];
+        if (!((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') ||
+              ch == '_' || ch == '-')) return false;
+        ++length;
+    }
+    return length != 0u && length < capacity;
 }
 
 } // namespace
@@ -465,6 +479,326 @@ SnapshotStatus readDisplaySnapshot(
         destination[index] = source[index];
     }
     return SnapshotStatus::Ok;
+}
+
+SnapshotStatus buildDesktopAppearanceSnapshot(
+    const char* backgroundId,
+    const char* backgroundName,
+    const char* backgroundScaleMode,
+    uint32_t backgroundKind,
+    uint32_t gradientTopColor,
+    uint32_t gradientBottomColor,
+    uint32_t gradientAccentColor,
+    uint32_t visibleIconFlags,
+    uint64_t revision,
+    DesktopAppearanceSnapshotV1* output)
+{
+    if (!output) return SnapshotStatus::InvalidArgument;
+    if (revision == 0u || !backgroundId || !backgroundName || !backgroundScaleMode) {
+        *output = DesktopAppearanceSnapshotV1{};
+        output->structureSize = sizeof(DesktopAppearanceSnapshotV1);
+        output->version = kDesktopAppearanceSnapshotVersion;
+        return SnapshotStatus::InvalidArgument;
+    }
+
+    DesktopAppearanceSnapshotV1 snapshot{};
+    snapshot.structureSize = sizeof(DesktopAppearanceSnapshotV1);
+    snapshot.version = kDesktopAppearanceSnapshotVersion;
+    snapshot.revision = revision;
+    snapshot.flags = kDesktopAppearanceBackgroundAvailable |
+        kDesktopAppearanceScaleModeAvailable |
+        kDesktopAppearanceIconSettingsAvailable;
+    if (!copyBoundedText(snapshot.backgroundId, backgroundId) ||
+        !copyBoundedText(snapshot.backgroundName, backgroundName) ||
+        !copyBoundedText(snapshot.backgroundScaleMode, backgroundScaleMode)) {
+        *output = DesktopAppearanceSnapshotV1{};
+        output->structureSize = sizeof(DesktopAppearanceSnapshotV1);
+        output->version = kDesktopAppearanceSnapshotVersion;
+        return SnapshotStatus::Unavailable;
+    }
+
+    const uint32_t knownIconFlags = desktop::kDesktopAppearanceIconTrash |
+        desktop::kDesktopAppearanceIconThisSystem |
+        desktop::kDesktopAppearanceIconFileManager |
+        desktop::kDesktopAppearanceIconSystemSettings;
+    if ((visibleIconFlags & ~knownIconFlags) != 0u) {
+        *output = DesktopAppearanceSnapshotV1{};
+        output->structureSize = sizeof(DesktopAppearanceSnapshotV1);
+        output->version = kDesktopAppearanceSnapshotVersion;
+        return SnapshotStatus::InvalidArgument;
+    }
+    if (backgroundKind == desktop::kDesktopAppearanceBackgroundWallpaper) {
+        if (gradientTopColor != 0u || gradientBottomColor != 0u || gradientAccentColor != 0u) {
+            *output = DesktopAppearanceSnapshotV1{};
+            output->structureSize = sizeof(DesktopAppearanceSnapshotV1);
+            output->version = kDesktopAppearanceSnapshotVersion;
+            return SnapshotStatus::InvalidArgument;
+        }
+        snapshot.backgroundKind = DesktopBackgroundKind::Wallpaper;
+    } else if (backgroundKind == desktop::kDesktopAppearanceBackgroundGradient) {
+        snapshot.backgroundKind = DesktopBackgroundKind::Gradient;
+        snapshot.flags |= kDesktopAppearanceGradientColorsAvailable;
+        snapshot.gradientTopColor = gradientTopColor;
+        snapshot.gradientBottomColor = gradientBottomColor;
+        snapshot.gradientAccentColor = gradientAccentColor;
+    } else {
+        *output = DesktopAppearanceSnapshotV1{};
+        output->structureSize = sizeof(DesktopAppearanceSnapshotV1);
+        output->version = kDesktopAppearanceSnapshotVersion;
+        return SnapshotStatus::InvalidArgument;
+    }
+    if ((visibleIconFlags & desktop::kDesktopAppearanceIconTrash) != 0u)
+        snapshot.flags |= kDesktopAppearanceIconTrashVisible;
+    if ((visibleIconFlags & desktop::kDesktopAppearanceIconThisSystem) != 0u)
+        snapshot.flags |= kDesktopAppearanceIconThisSystemVisible;
+    if ((visibleIconFlags & desktop::kDesktopAppearanceIconFileManager) != 0u)
+        snapshot.flags |= kDesktopAppearanceIconFileManagerVisible;
+    if ((visibleIconFlags & desktop::kDesktopAppearanceIconSystemSettings) != 0u)
+        snapshot.flags |= kDesktopAppearanceIconSystemSettingsVisible;
+
+    if (!validDesktopAppearanceSnapshot(snapshot)) {
+        *output = DesktopAppearanceSnapshotV1{};
+        output->structureSize = sizeof(DesktopAppearanceSnapshotV1);
+        output->version = kDesktopAppearanceSnapshotVersion;
+        return SnapshotStatus::Unavailable;
+    }
+    *output = snapshot;
+    return SnapshotStatus::Ok;
+}
+
+bool validDesktopAppearanceSnapshot(const DesktopAppearanceSnapshotV1& snapshot)
+{
+    const uint32_t knownFlags = kDesktopAppearanceBackgroundAvailable |
+        kDesktopAppearanceScaleModeAvailable |
+        kDesktopAppearanceIconSettingsAvailable |
+        kDesktopAppearanceGradientColorsAvailable |
+        kDesktopAppearanceIconTrashVisible |
+        kDesktopAppearanceIconThisSystemVisible |
+        kDesktopAppearanceIconFileManagerVisible |
+        kDesktopAppearanceIconSystemSettingsVisible;
+    const uint32_t requiredFlags = kDesktopAppearanceBackgroundAvailable |
+        kDesktopAppearanceScaleModeAvailable |
+        kDesktopAppearanceIconSettingsAvailable;
+    if (snapshot.structureSize != sizeof(DesktopAppearanceSnapshotV1) ||
+        snapshot.version != kDesktopAppearanceSnapshotVersion || snapshot.revision == 0u ||
+        (snapshot.flags & requiredFlags) != requiredFlags || (snapshot.flags & ~knownFlags) != 0u ||
+        !validText(snapshot.backgroundId) || !validText(snapshot.backgroundName) ||
+        !validText(snapshot.backgroundScaleMode) ||
+        (!textEquals(snapshot.backgroundScaleMode, "fill") &&
+         !textEquals(snapshot.backgroundScaleMode, "fit") &&
+         !textEquals(snapshot.backgroundScaleMode, "stretch") &&
+         !textEquals(snapshot.backgroundScaleMode, "center") &&
+         !textEquals(snapshot.backgroundScaleMode, "tile"))) {
+        return false;
+    }
+
+    const bool hasGradientColors =
+        (snapshot.flags & kDesktopAppearanceGradientColorsAvailable) != 0u;
+    if (snapshot.backgroundKind == DesktopBackgroundKind::Gradient) {
+        return hasGradientColors;
+    }
+    if (snapshot.backgroundKind == DesktopBackgroundKind::Wallpaper) {
+        return !hasGradientColors && snapshot.gradientTopColor == 0u &&
+            snapshot.gradientBottomColor == 0u && snapshot.gradientAccentColor == 0u;
+    }
+    return false;
+}
+
+SnapshotStatus readDesktopAppearanceSnapshot(
+    const app::KernelApp* caller,
+    const DesktopAppearanceSnapshotRequestV1* request,
+    void* output,
+    size_t capacity,
+    size_t* outSize,
+    uint64_t* outRevision)
+{
+    if (outSize) *outSize = 0u;
+    if (outRevision) *outRevision = 0u;
+    if (!caller || !request || !output || !outSize || !outRevision) {
+        return SnapshotStatus::InvalidArgument;
+    }
+    if (request->structureSize < sizeof(DesktopAppearanceSnapshotRequestV1)) {
+        return SnapshotStatus::InvalidArgument;
+    }
+    if (request->version != kDesktopAppearanceSnapshotVersion) {
+        return SnapshotStatus::UnsupportedVersion;
+    }
+    if (!textEquals(caller->getRuntimeAppId(), kSettingsRuntimeAppId)) {
+        return SnapshotStatus::Unauthorized;
+    }
+
+    *outSize = sizeof(DesktopAppearanceSnapshotV1);
+    if (capacity < sizeof(DesktopAppearanceSnapshotV1)) return SnapshotStatus::BufferTooSmall;
+
+    desktop::DesktopAppearanceConfigurationV1 configuration{};
+    if (!desktop::get_appearance_configuration(&configuration) ||
+        configuration.structureSize != sizeof(configuration) ||
+        configuration.version != desktop::kDesktopAppearanceConfigurationVersion) {
+        return SnapshotStatus::Unavailable;
+    }
+
+    DesktopAppearanceSnapshotV1 snapshot{};
+    const SnapshotStatus status = buildDesktopAppearanceSnapshot(
+        configuration.backgroundId,
+        configuration.backgroundName,
+        configuration.backgroundScaleMode,
+        configuration.backgroundKind,
+        configuration.gradientTopColor,
+        configuration.gradientBottomColor,
+        configuration.gradientAccentColor,
+        configuration.visibleIconFlags,
+        configuration.revision,
+        &snapshot);
+    if (status != SnapshotStatus::Ok) return status;
+    *outRevision = snapshot.revision;
+    if (request->knownRevision != 0u && request->knownRevision != snapshot.revision) {
+        return SnapshotStatus::StaleRevision;
+    }
+
+    uint8_t* destination = static_cast<uint8_t*>(output);
+    const uint8_t* source = reinterpret_cast<const uint8_t*>(&snapshot);
+    for (size_t index = 0u; index < sizeof(snapshot); ++index) {
+        destination[index] = source[index];
+    }
+    return SnapshotStatus::Ok;
+}
+
+SnapshotStatus readBuiltInGradientPresets(
+    const app::KernelApp* caller,
+    BuiltInGradientPresetV1* output,
+    size_t capacity,
+    size_t* outCount)
+{
+    if (outCount) *outCount = 0u;
+    if (!caller || !outCount || (!output && capacity != 0u)) {
+        return SnapshotStatus::InvalidArgument;
+    }
+    if (!textEquals(caller->getRuntimeAppId(), kSettingsRuntimeAppId)) {
+        return SnapshotStatus::Unauthorized;
+    }
+
+    const uint32_t count = desktop::get_builtin_gradient_preset_count();
+    if (count > kBuiltInGradientPresetCapacity) return SnapshotStatus::Unavailable;
+    *outCount = count;
+    if (capacity < count) return SnapshotStatus::BufferTooSmall;
+    if (count != 0u && !output) return SnapshotStatus::InvalidArgument;
+
+    for (uint32_t index = 0u; index < count; ++index) {
+        desktop::DesktopBuiltInGradientPresetV1 source{};
+        if (!desktop::get_builtin_gradient_preset(index, &source) ||
+            source.structureSize != sizeof(source) ||
+            source.version != desktop::kDesktopBuiltInGradientPresetVersion ||
+            !validPresetIdentifier(source.id, sizeof(source.id)) ||
+            !validText(source.displayName)) {
+            *outCount = 0u;
+            return SnapshotStatus::Unavailable;
+        }
+        BuiltInGradientPresetV1 preset{};
+        preset.structureSize = sizeof(preset);
+        preset.version = kBuiltInGradientPresetListVersion;
+        preset.topColor = source.topColor;
+        preset.bottomColor = source.bottomColor;
+        preset.accentColor = source.accentColor;
+        if (!copyBoundedText(preset.id, source.id) ||
+            !copyBoundedText(preset.displayName, source.displayName)) {
+            *outCount = 0u;
+            return SnapshotStatus::Unavailable;
+        }
+        output[index] = preset;
+    }
+    return SnapshotStatus::Ok;
+}
+
+GradientOperationStatus applyBuiltInGradientPreset(
+    const app::KernelApp* caller,
+    const ApplyBuiltInGradientPresetRequestV1* request,
+    ApplyBuiltInGradientPresetResultV1* output)
+{
+    if (!output) return GradientOperationStatus::InvalidArgument;
+    ApplyBuiltInGradientPresetResultV1 result{};
+    result.structureSize = sizeof(result);
+    result.version = kApplyBuiltInGradientPresetVersion;
+    result.status = GradientOperationStatus::InvalidArgument;
+
+    if (!caller) {
+        result.status = GradientOperationStatus::InvalidArgument;
+        *output = result;
+        return result.status;
+    }
+    if (!textEquals(caller->getRuntimeAppId(), kSettingsRuntimeAppId)) {
+        result.status = GradientOperationStatus::Unauthorized;
+        *output = result;
+        return result.status;
+    }
+    if (!request || request->structureSize != sizeof(*request)) {
+        result.status = GradientOperationStatus::InvalidArgument;
+        *output = result;
+        return result.status;
+    }
+    if (request->version != kApplyBuiltInGradientPresetVersion) {
+        result.status = GradientOperationStatus::UnsupportedVersion;
+        *output = result;
+        return result.status;
+    }
+    if (!validPresetIdentifier(request->presetId, sizeof(request->presetId)) ||
+        request->expectedRevision == 0u) {
+        result.status = GradientOperationStatus::InvalidPreset;
+        *output = result;
+        return result.status;
+    }
+
+    desktop::DesktopGradientApplyResultV1 desktopResult{};
+    (void)desktop::apply_builtin_gradient_preset(
+        request->presetId, request->expectedRevision, &desktopResult);
+    result.revision = desktopResult.revision;
+    if ((desktopResult.flags & desktop::kDesktopGradientApplyActiveAvailable) != 0u) {
+        result.flags |= kGradientOperationActiveAvailable;
+        copyBoundedText(result.appliedId, desktopResult.appliedId);
+    }
+    if ((desktopResult.flags & desktop::kDesktopGradientApplyPersistedAvailable) != 0u) {
+        result.flags |= kGradientOperationPersistedAvailable;
+        copyBoundedText(result.persistedId, desktopResult.persistedId);
+    }
+    if ((desktopResult.flags & desktop::kDesktopGradientApplyRollbackVerified) != 0u) {
+        result.flags |= kGradientOperationRollbackVerified;
+    }
+    switch (desktopResult.status) {
+        case desktop::DesktopGradientApplyStatus::Committed:
+            result.status = GradientOperationStatus::Committed;
+            break;
+        case desktop::DesktopGradientApplyStatus::NoChange:
+            result.status = GradientOperationStatus::NoChange;
+            break;
+        case desktop::DesktopGradientApplyStatus::InvalidPreset:
+            result.status = GradientOperationStatus::InvalidPreset;
+            break;
+        case desktop::DesktopGradientApplyStatus::StaleRevision:
+            result.status = GradientOperationStatus::StaleRevision;
+            break;
+        case desktop::DesktopGradientApplyStatus::PersistenceUnavailable:
+            result.status = GradientOperationStatus::PersistenceUnavailable;
+            break;
+        case desktop::DesktopGradientApplyStatus::PersistenceConflict:
+            result.status = GradientOperationStatus::PersistenceConflict;
+            break;
+        case desktop::DesktopGradientApplyStatus::ApplyFailed:
+            result.status = GradientOperationStatus::ApplyFailed;
+            break;
+        case desktop::DesktopGradientApplyStatus::SaveFailedRolledBack:
+            result.status = GradientOperationStatus::SaveFailedRolledBack;
+            break;
+        case desktop::DesktopGradientApplyStatus::ReadbackFailedRolledBack:
+            result.status = GradientOperationStatus::ReadbackFailedRolledBack;
+            break;
+        case desktop::DesktopGradientApplyStatus::RollbackFailed:
+            result.status = GradientOperationStatus::RollbackFailed;
+            break;
+        default:
+            result.status = GradientOperationStatus::ApplyFailed;
+            break;
+    }
+    *output = result;
+    return result.status;
 }
 
 } // namespace settings_native

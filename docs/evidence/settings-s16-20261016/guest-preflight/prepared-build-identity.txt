@@ -1,0 +1,6 @@
+phase=S16
+kernel=D:\dev\guideXOSServer\kernel\build\s16-clean-final-verified-20261016\bin\kernel.elf
+kernelSha256=AE14A4645BE1E5D5C7A021DB39F67C7860937E80B9BFB9033847752EB83EAEB1
+desktopConfigSha256=ED2CED9BD60AC15E67663BD955CBFC9DAAD36A47D368AB9DD3C2EF1CCA074A1D
+startingGradient=gradient_sunset
+guestRoot=D:\dev\guideXOSServer\out\validation\settings-s16-guest-20261016\guest-acceptance

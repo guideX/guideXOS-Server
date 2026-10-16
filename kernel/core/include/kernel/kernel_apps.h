@@ -263,6 +263,7 @@ public:
     virtual void onMouseWheel(int x, int y, int wheelDelta) override;
     virtual void onWidgetClick(int widgetId) override;
     virtual void onWindowClose() override;
+    virtual void onDesktopAppearanceChanged(uint64_t revision) override;
 
     static app::KernelApp* create() { return new DisplayOptionsApp(); }
 

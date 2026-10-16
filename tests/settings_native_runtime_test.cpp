@@ -2,6 +2,8 @@
 #include "kernel/kernel_app.h"
 #include "kernel/kernel_compositor.h"
 #include "kernel/framebuffer.h"
+#include "kernel/desktop.h"
+#include "kernel/desktop_gradient_persistence.h"
 #include "display_configuration_command.h"
 #include "display_configuration_service.h"
 #include "kernel/native_elf_baremetal.h"
@@ -35,6 +37,7 @@ int g_appInitialized = 0;
 int g_appShutdown = 0;
 int g_runtimeFocusAcquired = 0;
 int g_runtimeFocusLost = 0;
+int g_runtimeAppearanceChanged = 0;
 char g_lastParameter[64] = {};
 bool g_testFramebufferAvailable = false;
 uint32_t g_testFramebufferWidth = 0;
@@ -55,6 +58,24 @@ int g_testAdapterDisplayReads = 0;
 int g_testRefreshRepaints = 0;
 bool g_testCorruptAdapterSnapshotVersion = false;
 bool g_testTruncateAdapterSnapshot = false;
+bool g_testAppearanceConfigurationAvailable = true;
+kernel::desktop::DesktopAppearanceConfigurationV1 g_testAppearanceConfiguration{};
+kernel::desktop::DesktopGradientApplyStatus g_testGradientApplyStatus =
+    kernel::desktop::DesktopGradientApplyStatus::Committed;
+int g_testGradientApplyCalls = 0;
+bool g_testGradientApplyMutatesOnCommit = true;
+char g_testGradientPersistedId[96] = "legacy_ameobagx";
+bool g_testConfigMounted = false;
+bool g_testConfigReadOnly = false;
+char g_testConfigBytes[kernel::desktop::kGradientConfigTextCapacity] = {};
+size_t g_testConfigLength = 0u;
+int g_testConfigWriteCount = 0;
+int g_testConfigFailWriteNumber = 0;
+bool g_testConfigFailWritePartial = false;
+int g_testConfigCorruptOnWriteNumber = 0;
+bool g_testConfigFailNextRead = false;
+bool g_testConfigCorruptNextRead = false;
+kernel::vfs::MountPoint g_testConfigMount{};
 
 void expect(bool condition, const char* name)
 {
@@ -120,6 +141,10 @@ public:
 
     void onWindowFocus() override { ++g_runtimeFocusAcquired; }
     void onWindowBlur() override { ++g_runtimeFocusLost; }
+    void onDesktopAppearanceChanged(uint64_t revision) override
+    {
+        if (revision != 0u) ++g_runtimeAppearanceChanged;
+    }
 };
 
 class SettingsRefreshProbeApp : public ProbeApp {
@@ -361,11 +386,179 @@ void KernelCompositor::handleKeyChar(char) {}
 
 namespace desktop {
 void record_recent_program(const char*) {}
+
+bool get_appearance_configuration(DesktopAppearanceConfigurationV1* output)
+{
+    if (!output || !g_testAppearanceConfigurationAvailable) return false;
+    *output = g_testAppearanceConfiguration;
+    return true;
+}
+
+static const DesktopBuiltInGradientPresetV1 kTestGradients[] = {
+    { sizeof(DesktopBuiltInGradientPresetV1), kDesktopBuiltInGradientPresetVersion,
+      0xFF142850u, 0xFF0F121Cu, 0xFF192337u, "gradient_midnight", "Midnight" },
+    { sizeof(DesktopBuiltInGradientPresetV1), kDesktopBuiltInGradientPresetVersion,
+      0xFF063B5Cu, 0xFF061522u, 0xFF1496B8u, "gradient_ocean", "Ocean" },
+    { sizeof(DesktopBuiltInGradientPresetV1), kDesktopBuiltInGradientPresetVersion,
+      0xFF0B2C35u, 0xFF251046u, 0xFF21C78Au, "gradient_aurora", "Aurora" },
+    { sizeof(DesktopBuiltInGradientPresetV1), kDesktopBuiltInGradientPresetVersion,
+      0xFF26104Au, 0xFF0D0B18u, 0xFF8A52E8u, "gradient_violet", "Violet" },
+    { sizeof(DesktopBuiltInGradientPresetV1), kDesktopBuiltInGradientPresetVersion,
+      0xFF5E1B45u, 0xFF17101Eu, 0xFFE06A55u, "gradient_sunset", "Sunset" },
+    { sizeof(DesktopBuiltInGradientPresetV1), kDesktopBuiltInGradientPresetVersion,
+      0xFF123B2Bu, 0xFF071711u, 0xFF5E9C50u, "gradient_forest", "Forest" },
+    { sizeof(DesktopBuiltInGradientPresetV1), kDesktopBuiltInGradientPresetVersion,
+      0xFF45170Fu, 0xFF120B09u, 0xFFD46A33u, "gradient_ember", "Ember" },
+    { sizeof(DesktopBuiltInGradientPresetV1), kDesktopBuiltInGradientPresetVersion,
+      0xFF333946u, 0xFF111318u, 0xFF7E8796u, "gradient_graphite", "Graphite" }
+};
+
+uint32_t get_builtin_gradient_preset_count()
+{
+    return static_cast<uint32_t>(sizeof(kTestGradients) / sizeof(kTestGradients[0]));
+}
+
+bool get_builtin_gradient_preset(uint32_t index, DesktopBuiltInGradientPresetV1* output)
+{
+    if (!output || index >= get_builtin_gradient_preset_count()) return false;
+    *output = kTestGradients[index];
+    return true;
+}
+
+DesktopGradientApplyStatus apply_builtin_gradient_preset(
+    const char* presetId, uint64_t expectedRevision,
+    DesktopGradientApplyResultV1* output)
+{
+    ++g_testGradientApplyCalls;
+    if (!output) return DesktopGradientApplyStatus::ApplyFailed;
+    DesktopGradientApplyResultV1 result{};
+    result.structureSize = sizeof(result);
+    result.version = kDesktopGradientApplyResultVersion;
+    result.revision = g_testAppearanceConfiguration.revision;
+    result.status = DesktopGradientApplyStatus::InvalidPreset;
+    if (expectedRevision == 0u ||
+        expectedRevision != g_testAppearanceConfiguration.revision) {
+        result.status = DesktopGradientApplyStatus::StaleRevision;
+    } else {
+        const DesktopBuiltInGradientPresetV1* selected = nullptr;
+        for (uint32_t index = 0u; index < get_builtin_gradient_preset_count(); ++index) {
+            if (presetId && std::string(kTestGradients[index].id) == presetId) {
+                selected = &kTestGradients[index];
+                break;
+            }
+        }
+        if (!selected) {
+            result.status = DesktopGradientApplyStatus::InvalidPreset;
+        } else {
+            result.status = g_testGradientApplyStatus;
+            if (result.status == DesktopGradientApplyStatus::Committed &&
+                g_testGradientApplyMutatesOnCommit) {
+                g_testAppearanceConfiguration.backgroundKind =
+                    kDesktopAppearanceBackgroundGradient;
+                copyText(g_testAppearanceConfiguration.backgroundId, selected->id,
+                         sizeof(g_testAppearanceConfiguration.backgroundId));
+                copyText(g_testAppearanceConfiguration.backgroundName,
+                         selected->displayName,
+                         sizeof(g_testAppearanceConfiguration.backgroundName));
+                g_testAppearanceConfiguration.gradientTopColor = selected->topColor;
+                g_testAppearanceConfiguration.gradientBottomColor = selected->bottomColor;
+                g_testAppearanceConfiguration.gradientAccentColor = selected->accentColor;
+                ++g_testAppearanceConfiguration.revision;
+                copyText(g_testGradientPersistedId, selected->id,
+                         sizeof(g_testGradientPersistedId));
+            }
+        }
+    }
+
+    result.revision = g_testAppearanceConfiguration.revision;
+    result.flags = kDesktopGradientApplyActiveAvailable;
+    copyText(result.appliedId, g_testAppearanceConfiguration.backgroundId,
+             sizeof(result.appliedId));
+    if (g_testGradientPersistedId[0]) {
+        result.flags |= kDesktopGradientApplyPersistedAvailable;
+        copyText(result.persistedId, g_testGradientPersistedId,
+                 sizeof(result.persistedId));
+    }
+    if (result.status == DesktopGradientApplyStatus::SaveFailedRolledBack ||
+        result.status == DesktopGradientApplyStatus::ReadbackFailedRolledBack) {
+        result.flags |= kDesktopGradientApplyRollbackVerified;
+    }
+    if (result.status == DesktopGradientApplyStatus::RollbackFailed) {
+        result.revision = g_testAppearanceConfiguration.revision + 1u;
+    }
+    *output = result;
+    return result.status;
+}
 } // namespace desktop
 
 namespace vfs {
-Status stat(const char*, FileInfo*) { return VFS_ERR_NOT_FOUND; }
-int32_t read_file(const char*, void*, uint32_t) { return VFS_ERR_NOT_FOUND; }
+const MountPoint* get_mount(const char*)
+{
+    if (!g_testConfigMounted) return nullptr;
+    g_testConfigMount.active = true;
+    g_testConfigMount.readOnly = g_testConfigReadOnly;
+    return &g_testConfigMount;
+}
+
+Status stat(const char*, FileInfo* output)
+{
+    if (!g_testConfigMounted || !output || g_testConfigLength == 0u)
+        return VFS_ERR_NOT_FOUND;
+    output->type = FILE_TYPE_REGULAR;
+    output->size = g_testConfigLength;
+    return VFS_OK;
+}
+
+int32_t read_file(const char*, void* output, uint32_t capacity)
+{
+    if (!g_testConfigMounted || !output || g_testConfigLength == 0u)
+        return VFS_ERR_NOT_FOUND;
+    if (g_testConfigFailNextRead) {
+        g_testConfigFailNextRead = false;
+        return VFS_ERR_IO;
+    }
+    const size_t count = g_testConfigLength < capacity
+        ? g_testConfigLength : capacity;
+    char* destination = static_cast<char*>(output);
+    for (size_t index = 0u; index < count; ++index) {
+        destination[index] = g_testConfigBytes[index];
+    }
+    if (g_testConfigCorruptNextRead && count > 0u) {
+        g_testConfigCorruptNextRead = false;
+        destination[0] = destination[0] == 'v' ? 'x' : 'v';
+    }
+    return static_cast<int32_t>(count);
+}
+
+int32_t write_file(const char*, const void* bytes, uint32_t size)
+{
+    ++g_testConfigWriteCount;
+    if (!g_testConfigMounted) return VFS_ERR_NOT_MOUNT;
+    if (g_testConfigReadOnly) return VFS_ERR_READ_ONLY;
+    if (!bytes || size >= sizeof(g_testConfigBytes)) return VFS_ERR_INVALID;
+    if (g_testConfigFailWriteNumber != 0 &&
+        g_testConfigWriteCount == g_testConfigFailWriteNumber) {
+        if (g_testConfigFailWritePartial) {
+            const uint32_t partial = size / 2u;
+            const char* source = static_cast<const char*>(bytes);
+            for (uint32_t index = 0u; index < partial; ++index) {
+                g_testConfigBytes[index] = source[index];
+            }
+            g_testConfigLength = partial;
+        }
+        return VFS_ERR_IO;
+    }
+    const char* source = static_cast<const char*>(bytes);
+    for (uint32_t index = 0u; index < size; ++index) {
+        g_testConfigBytes[index] = source[index];
+    }
+    g_testConfigLength = size;
+    if (g_testConfigCorruptOnWriteNumber != 0 &&
+        g_testConfigWriteCount == g_testConfigCorruptOnWriteNumber) {
+        g_testConfigCorruptNextRead = true;
+    }
+    return static_cast<int32_t>(size);
+}
 } // namespace vfs
 
 namespace native_elf {
@@ -375,6 +568,147 @@ const PackageInfo* lookup_package(const char*) { return nullptr; }
 } // namespace kernel
 
 extern "C" void desktop_request_redraw() {}
+
+static void setTestDesktopConfig(const char* text)
+{
+    const size_t length = text ? std::char_traits<char>::length(text) : 0u;
+    if (length >= sizeof(g_testConfigBytes)) return;
+    for (size_t index = 0u; index < length; ++index) {
+        g_testConfigBytes[index] = text[index];
+    }
+    g_testConfigLength = length;
+    g_testConfigMounted = true;
+    g_testConfigReadOnly = false;
+    g_testConfigWriteCount = 0;
+    g_testConfigFailWriteNumber = 0;
+    g_testConfigFailWritePartial = false;
+    g_testConfigCorruptOnWriteNumber = 0;
+    g_testConfigFailNextRead = false;
+    g_testConfigCorruptNextRead = false;
+}
+
+static std::string testDesktopConfigText()
+{
+    return std::string(g_testConfigBytes, g_testConfigLength);
+}
+
+static void testGradientConfigPersistence()
+{
+    using namespace kernel::desktop;
+    const char* original =
+        "version=1\r\n"
+        "wallpaperId=gradient_sunset\r\n"
+        "backgroundScaleMode=fit\r\n"
+        "taskbarPosition=top\r\n"
+        "futureAppearanceKey=keep-this-value\r\n";
+    char persistedId[kGradientPresetIdCapacity] = {};
+    setTestDesktopConfig(original);
+    expect(readCanonicalWallpaperId(persistedId, sizeof(persistedId)) &&
+               std::string(persistedId) == "gradient_sunset",
+           "canonical desktop configuration exposes its current wallpaper id");
+
+    GradientPersistenceResult persistence{};
+    expect(persistBuiltInGradientId("gradient_sunset", "gradient_ocean",
+                                    &persistence) == GradientPersistenceStatus::Ok &&
+               std::string(persistence.persistedId) == "gradient_ocean" &&
+               (persistence.flags & kGradientPersistenceReadbackAvailable) != 0u,
+           "gradient persistence commits and reads back the requested id");
+    std::string expected = original;
+    expected.replace(expected.find("gradient_sunset"),
+                     std::string("gradient_sunset").size(), "gradient_ocean");
+    expect(testDesktopConfigText() == expected &&
+               testDesktopConfigText().find("futureAppearanceKey=keep-this-value") != std::string::npos &&
+               testDesktopConfigText().find("taskbarPosition=top") != std::string::npos,
+           "canonical update preserves unrelated keys, values, and line endings");
+
+    setTestDesktopConfig(original);
+    expect(persistBuiltInGradientId("gradient_violet", "gradient_ocean",
+                                    &persistence) == GradientPersistenceStatus::Conflict &&
+               g_testConfigWriteCount == 0 &&
+               std::string(persistence.persistedId) == "gradient_sunset",
+           "canonical config conflict is rejected without a write");
+
+    setTestDesktopConfig(original);
+    g_testConfigMounted = false;
+    expect(persistBuiltInGradientId("gradient_sunset", "gradient_ocean",
+                                    &persistence) == GradientPersistenceStatus::Unavailable &&
+               g_testConfigWriteCount == 0,
+           "unavailable configuration storage rejects a gradient commit");
+    setTestDesktopConfig(original);
+    g_testConfigReadOnly = true;
+    expect(persistBuiltInGradientId("gradient_sunset", "gradient_ocean",
+                                    &persistence) == GradientPersistenceStatus::Unavailable &&
+               g_testConfigWriteCount == 0,
+           "read-only configuration storage rejects a gradient commit");
+
+    setTestDesktopConfig(
+        "wallpaperId=gradient_sunset\nwallpaperId=gradient_violet\n");
+    expect(persistBuiltInGradientId("gradient_sunset", "gradient_ocean",
+                                    &persistence) == GradientPersistenceStatus::InvalidConfiguration &&
+               g_testConfigWriteCount == 0,
+           "ambiguous duplicate wallpaper keys are rejected before writing");
+
+    setTestDesktopConfig(original);
+    g_testConfigFailWriteNumber = 1;
+    g_testConfigFailWritePartial = true;
+    expect(persistBuiltInGradientId("gradient_sunset", "gradient_ocean",
+                                    &persistence) ==
+               GradientPersistenceStatus::WriteFailedRolledBack &&
+               (persistence.flags & kGradientPersistenceRollbackVerified) != 0u &&
+               std::string(persistence.persistedId) == "gradient_sunset" &&
+               testDesktopConfigText() == original,
+           "partial write failure restores the exact previous canonical file");
+
+    setTestDesktopConfig(original);
+    g_testConfigCorruptOnWriteNumber = 1;
+    expect(persistBuiltInGradientId("gradient_sunset", "gradient_ocean",
+                                    &persistence) ==
+               GradientPersistenceStatus::ReadbackFailedRolledBack &&
+               (persistence.flags & kGradientPersistenceRollbackVerified) != 0u &&
+               testDesktopConfigText() == original,
+           "readback mismatch restores the exact previous canonical file");
+
+    setTestDesktopConfig(original);
+    g_testConfigFailWriteNumber = 1;
+    g_testConfigFailWritePartial = true;
+    g_testConfigCorruptOnWriteNumber = 2;
+    // The first write fails after a partial update; the restoration write is
+    // deliberately made unverifiable by corrupting its readback.
+    expect(persistBuiltInGradientId("gradient_sunset", "gradient_ocean",
+                                    &persistence) ==
+               GradientPersistenceStatus::RollbackFailed &&
+               (persistence.flags & kGradientPersistenceRollbackAttempted) != 0u &&
+               (persistence.flags & kGradientPersistenceRollbackVerified) == 0u,
+           "rollback failure is returned distinctly and is never reported as restored");
+
+    const char* alternatingIds[2] = { "gradient_sunset", "gradient_ocean" };
+    for (int cycle = 0; cycle < 100; ++cycle) {
+        const char* from = alternatingIds[cycle % 2];
+        const char* to = alternatingIds[(cycle + 1) % 2];
+        std::string source = original;
+        source.replace(source.find("gradient_sunset"),
+                       std::string("gradient_sunset").size(), from);
+        setTestDesktopConfig(source.c_str());
+        expect(persistBuiltInGradientId(from, to, &persistence) ==
+                   GradientPersistenceStatus::Ok &&
+                   std::string(persistence.persistedId) == to,
+               "repeated gradient commit cycle completes with verified state");
+    }
+    for (int cycle = 0; cycle < 100; ++cycle) {
+        setTestDesktopConfig(original);
+        g_testConfigFailWriteNumber = 1;
+        g_testConfigFailWritePartial = true;
+        expect(persistBuiltInGradientId("gradient_sunset", "gradient_ocean",
+                                        &persistence) ==
+                   GradientPersistenceStatus::WriteFailedRolledBack &&
+                   (persistence.flags & kGradientPersistenceRollbackVerified) != 0u &&
+                   testDesktopConfigText() == original,
+               "repeated injected write failure preserves the previous config");
+    }
+
+    g_testConfigMounted = false;
+    g_testConfigReadOnly = false;
+}
 
 int main()
 {
@@ -577,6 +911,243 @@ int main()
     snapshot.version = kSystemAboutSnapshotVersion;
     snapshot.productName[0] = '\0';
     expect(!validSystemAboutSnapshot(snapshot), "invalid empty snapshot field rejected");
+
+    g_testAppearanceConfiguration = kernel::desktop::DesktopAppearanceConfigurationV1{};
+    g_testAppearanceConfiguration.structureSize = sizeof(g_testAppearanceConfiguration);
+    g_testAppearanceConfiguration.version = kernel::desktop::kDesktopAppearanceConfigurationVersion;
+    g_testAppearanceConfiguration.revision = 4u;
+    g_testAppearanceConfiguration.backgroundKind = kernel::desktop::kDesktopAppearanceBackgroundWallpaper;
+    g_testAppearanceConfiguration.visibleIconFlags =
+        kernel::desktop::kDesktopAppearanceIconTrash |
+        kernel::desktop::kDesktopAppearanceIconFileManager;
+    copyText(g_testAppearanceConfiguration.backgroundId, "legacy_ameobagx",
+             sizeof(g_testAppearanceConfiguration.backgroundId));
+    copyText(g_testAppearanceConfiguration.backgroundName, "Ameoba GX",
+             sizeof(g_testAppearanceConfiguration.backgroundName));
+    copyText(g_testAppearanceConfiguration.backgroundScaleMode, "fill",
+             sizeof(g_testAppearanceConfiguration.backgroundScaleMode));
+
+    DesktopAppearanceSnapshotV1 appearanceSnapshot{};
+    expect(buildDesktopAppearanceSnapshot(
+               "legacy_ameobagx", "Ameoba GX", "fill",
+               kernel::desktop::kDesktopAppearanceBackgroundWallpaper,
+               0u, 0u, 0u,
+               g_testAppearanceConfiguration.visibleIconFlags, 4u,
+               &appearanceSnapshot) == SnapshotStatus::Ok &&
+               validDesktopAppearanceSnapshot(appearanceSnapshot),
+           "valid wallpaper and desktop icon values produce a read-only appearance snapshot");
+    expect(appearanceSnapshot.backgroundKind == DesktopBackgroundKind::Wallpaper &&
+               std::string(appearanceSnapshot.backgroundId) == "legacy_ameobagx" &&
+               std::string(appearanceSnapshot.backgroundName) == "Ameoba GX" &&
+               std::string(appearanceSnapshot.backgroundScaleMode) == "fill" &&
+               (appearanceSnapshot.flags & kDesktopAppearanceIconTrashVisible) != 0u &&
+               (appearanceSnapshot.flags & kDesktopAppearanceIconFileManagerVisible) != 0u &&
+               (appearanceSnapshot.flags & kDesktopAppearanceIconThisSystemVisible) == 0u,
+           "appearance snapshot preserves wallpaper identity, scale, and each supported icon visibility");
+    expect(buildDesktopAppearanceSnapshot(
+               "gradient_aurora", "Aurora", "fit",
+               kernel::desktop::kDesktopAppearanceBackgroundGradient,
+               0xFF0B2C35u, 0xFF251046u, 0xFF21C78Au,
+               kernel::desktop::kDesktopAppearanceIconThisSystem, 5u,
+               &appearanceSnapshot) == SnapshotStatus::Ok &&
+               validDesktopAppearanceSnapshot(appearanceSnapshot) &&
+               appearanceSnapshot.backgroundKind == DesktopBackgroundKind::Gradient &&
+               appearanceSnapshot.gradientTopColor == 0xFF0B2C35u &&
+               appearanceSnapshot.gradientBottomColor == 0xFF251046u &&
+               appearanceSnapshot.gradientAccentColor == 0xFF21C78Au &&
+               (appearanceSnapshot.flags & kDesktopAppearanceGradientColorsAvailable) != 0u,
+           "gradient snapshot includes the selected gradient's exact palette");
+    expect(buildDesktopAppearanceSnapshot(
+               "legacy_blue_flower", "Blue Flower", "fill",
+               kernel::desktop::kDesktopAppearanceBackgroundWallpaper,
+               1u, 0u, 0u, 0u, 1u, &appearanceSnapshot) == SnapshotStatus::InvalidArgument,
+           "wallpaper snapshot rejects gradient-only color fields");
+    expect(buildDesktopAppearanceSnapshot(
+               "legacy_blue_flower", "Blue Flower", "fill", 99u,
+               0u, 0u, 0u, 0u, 1u, &appearanceSnapshot) == SnapshotStatus::InvalidArgument,
+           "unsupported appearance background kinds are rejected");
+    expect(buildDesktopAppearanceSnapshot(
+               "legacy_blue_flower", "Blue Flower", "unsupported",
+               kernel::desktop::kDesktopAppearanceBackgroundWallpaper,
+               0u, 0u, 0u, 0u, 1u, &appearanceSnapshot) == SnapshotStatus::Unavailable,
+           "appearance snapshots reject unsupported wallpaper scale modes");
+
+    DesktopAppearanceSnapshotRequestV1 appearanceRequest = {
+        sizeof(DesktopAppearanceSnapshotRequestV1), kDesktopAppearanceSnapshotVersion, 0u
+    };
+    uint8_t unalignedAppearance[sizeof(DesktopAppearanceSnapshotV1) + 1u] = {};
+    expect(readDesktopAppearanceSnapshot(settingsApp, &appearanceRequest,
+               &unalignedAppearance[1], sizeof(DesktopAppearanceSnapshotV1),
+               &snapshotSize, &snapshotRevision) == SnapshotStatus::Ok &&
+               snapshotSize == sizeof(DesktopAppearanceSnapshotV1) && snapshotRevision == 4u,
+           "trusted Settings caller reads the active desktop appearance into caller-owned storage");
+    DesktopAppearanceSnapshotV1 readAppearance{};
+    const uint8_t* appearanceSource = &unalignedAppearance[1];
+    uint8_t* appearanceDestination = reinterpret_cast<uint8_t*>(&readAppearance);
+    for (size_t index = 0; index < sizeof(readAppearance); ++index) {
+        appearanceDestination[index] = appearanceSource[index];
+    }
+    expect(validDesktopAppearanceSnapshot(readAppearance) &&
+               readAppearance.backgroundKind == DesktopBackgroundKind::Wallpaper &&
+               std::string(readAppearance.backgroundId) == "legacy_ameobagx" &&
+               (readAppearance.flags & kDesktopAppearanceIconTrashVisible) != 0u,
+           "provider snapshot matches the live desktop configuration without exposing desktop pointers");
+    appearanceRequest.knownRevision = snapshotRevision + 1u;
+    expect(readDesktopAppearanceSnapshot(settingsApp, &appearanceRequest,
+               &readAppearance, sizeof(readAppearance), &snapshotSize,
+               &snapshotRevision) == SnapshotStatus::StaleRevision,
+           "appearance provider rejects a stale requested revision");
+    appearanceRequest.knownRevision = 0u;
+    appearanceRequest.version = kDesktopAppearanceSnapshotVersion + 1u;
+    expect(readDesktopAppearanceSnapshot(settingsApp, &appearanceRequest,
+               &readAppearance, sizeof(readAppearance), &snapshotSize,
+               &snapshotRevision) == SnapshotStatus::UnsupportedVersion,
+           "appearance provider rejects an unsupported request version");
+    appearanceRequest.version = kDesktopAppearanceSnapshotVersion;
+    appearanceRequest.structureSize = sizeof(appearanceRequest) - 1u;
+    expect(readDesktopAppearanceSnapshot(settingsApp, &appearanceRequest,
+               &readAppearance, sizeof(readAppearance), &snapshotSize,
+               &snapshotRevision) == SnapshotStatus::InvalidArgument,
+           "appearance provider rejects an undersized request");
+    appearanceRequest.structureSize = sizeof(appearanceRequest);
+    expect(readDesktopAppearanceSnapshot(settingsApp, &appearanceRequest,
+               &readAppearance, sizeof(readAppearance) - 1u, &snapshotSize,
+               &snapshotRevision) == SnapshotStatus::BufferTooSmall,
+           "appearance provider rejects an undersized output buffer");
+    g_testAppearanceConfigurationAvailable = false;
+    expect(readDesktopAppearanceSnapshot(settingsApp, &appearanceRequest,
+               &readAppearance, sizeof(readAppearance), &snapshotSize,
+               &snapshotRevision) == SnapshotStatus::Unavailable,
+           "unavailable desktop configuration remains explicitly unavailable");
+    g_testAppearanceConfigurationAvailable = true;
+
+    BuiltInGradientPresetV1 gradientPresets[kBuiltInGradientPresetCapacity]{};
+    size_t gradientPresetCount = 0u;
+    expect(readBuiltInGradientPresets(settingsApp, gradientPresets,
+                                      kBuiltInGradientPresetCapacity,
+                                      &gradientPresetCount) == SnapshotStatus::Ok &&
+               gradientPresetCount == 8u &&
+               std::string(gradientPresets[1].id) == "gradient_ocean" &&
+               gradientPresets[1].topColor == 0xFF063B5Cu,
+           "Settings reads the fixed gradient list from the desktop-owned preset registry");
+    expect(readBuiltInGradientPresets(settingsApp, gradientPresets, 2u,
+                                      &gradientPresetCount) == SnapshotStatus::BufferTooSmall &&
+               gradientPresetCount == 8u,
+           "gradient list reports its bounded required capacity");
+
+    g_testAppearanceConfiguration.backgroundKind =
+        kernel::desktop::kDesktopAppearanceBackgroundGradient;
+    g_testAppearanceConfiguration.revision = 4u;
+    copyText(g_testAppearanceConfiguration.backgroundId, "gradient_sunset",
+             sizeof(g_testAppearanceConfiguration.backgroundId));
+    copyText(g_testAppearanceConfiguration.backgroundName, "Sunset",
+             sizeof(g_testAppearanceConfiguration.backgroundName));
+    g_testAppearanceConfiguration.gradientTopColor = 0xFF5E1B45u;
+    g_testAppearanceConfiguration.gradientBottomColor = 0xFF17101Eu;
+    g_testAppearanceConfiguration.gradientAccentColor = 0xFFE06A55u;
+    copyText(g_testGradientPersistedId, "gradient_sunset",
+             sizeof(g_testGradientPersistedId));
+    g_testGradientApplyStatus = kernel::desktop::DesktopGradientApplyStatus::Committed;
+    g_testGradientApplyMutatesOnCommit = true;
+    g_testGradientApplyCalls = 0;
+    ApplyBuiltInGradientPresetRequestV1 gradientRequest{};
+    gradientRequest.structureSize = sizeof(gradientRequest);
+    gradientRequest.version = kApplyBuiltInGradientPresetVersion;
+    gradientRequest.expectedRevision = 4u;
+    copyText(gradientRequest.presetId, "gradient_ocean",
+             sizeof(gradientRequest.presetId));
+    ApplyBuiltInGradientPresetResultV1 gradientResult{};
+    expect(applyBuiltInGradientPreset(settingsApp, &gradientRequest,
+                                      &gradientResult) ==
+               GradientOperationStatus::Committed &&
+               gradientResult.status == GradientOperationStatus::Committed &&
+               (gradientResult.flags & kGradientOperationActiveAvailable) != 0u &&
+               (gradientResult.flags & kGradientOperationPersistedAvailable) != 0u &&
+               std::string(gradientResult.appliedId) == "gradient_ocean" &&
+               std::string(gradientResult.persistedId) == "gradient_ocean" &&
+               gradientResult.revision == 5u,
+           "authorized Settings request commits and reports verified active and persisted ids");
+    expect(g_testGradientApplyCalls == 1 &&
+               g_testAppearanceConfiguration.revision == 5u &&
+               std::string(g_testAppearanceConfiguration.backgroundId) == "gradient_ocean",
+           "authorized operation reaches the shared desktop owner and updates its source fixture");
+
+    gradientRequest.expectedRevision = 5u;
+    copyText(gradientRequest.presetId, "gradient_ocean",
+             sizeof(gradientRequest.presetId));
+    g_testGradientApplyStatus = kernel::desktop::DesktopGradientApplyStatus::NoChange;
+    expect(applyBuiltInGradientPreset(settingsApp, &gradientRequest,
+                                      &gradientResult) ==
+               GradientOperationStatus::NoChange &&
+               gradientResult.revision == 5u &&
+               std::string(gradientResult.appliedId) == "gradient_ocean",
+           "selecting the current preset reports a no-op with unchanged revision");
+
+    gradientRequest.expectedRevision = 4u;
+    g_testGradientApplyStatus = kernel::desktop::DesktopGradientApplyStatus::Committed;
+    expect(applyBuiltInGradientPreset(settingsApp, &gradientRequest,
+                                      &gradientResult) ==
+               GradientOperationStatus::StaleRevision &&
+               g_testGradientApplyCalls == 3,
+           "stale appearance revision is rejected before the desktop mutation");
+
+    gradientRequest.expectedRevision = 5u;
+    copyText(gradientRequest.presetId, "gradient_unknown",
+             sizeof(gradientRequest.presetId));
+    expect(applyBuiltInGradientPreset(settingsApp, &gradientRequest,
+                                      &gradientResult) ==
+               GradientOperationStatus::InvalidPreset &&
+               g_testGradientApplyCalls == 4,
+           "unknown built-in gradient id is rejected by the shared desktop registry");
+    copyText(gradientRequest.presetId, "gradient!ocean",
+             sizeof(gradientRequest.presetId));
+    expect(applyBuiltInGradientPreset(settingsApp, &gradientRequest,
+                                      &gradientResult) ==
+               GradientOperationStatus::InvalidPreset &&
+               g_testGradientApplyCalls == 4,
+           "malformed preset id is rejected before reaching the desktop owner");
+
+    copyText(gradientRequest.presetId, "gradient_violet",
+             sizeof(gradientRequest.presetId));
+    gradientRequest.version = kApplyBuiltInGradientPresetVersion + 1u;
+    expect(applyBuiltInGradientPreset(settingsApp, &gradientRequest,
+                                      &gradientResult) ==
+               GradientOperationStatus::UnsupportedVersion &&
+               g_testGradientApplyCalls == 4,
+           "unsupported mutation request version is rejected without desktop access");
+    gradientRequest.version = kApplyBuiltInGradientPresetVersion;
+    gradientRequest.structureSize = sizeof(gradientRequest) - 1u;
+    expect(applyBuiltInGradientPreset(settingsApp, &gradientRequest,
+                                      &gradientResult) ==
+               GradientOperationStatus::InvalidArgument &&
+               g_testGradientApplyCalls == 4,
+           "invalid mutation request size is rejected without desktop access");
+    gradientRequest.structureSize = sizeof(gradientRequest);
+
+    g_testGradientApplyStatus =
+        kernel::desktop::DesktopGradientApplyStatus::SaveFailedRolledBack;
+    expect(applyBuiltInGradientPreset(settingsApp, &gradientRequest,
+                                      &gradientResult) ==
+               GradientOperationStatus::SaveFailedRolledBack &&
+               (gradientResult.flags & kGradientOperationRollbackVerified) != 0u &&
+               std::string(gradientResult.appliedId) == "gradient_ocean" &&
+               std::string(gradientResult.persistedId) == "gradient_ocean",
+           "provider reports a verified save rollback and actual restored values");
+    g_testGradientApplyStatus =
+        kernel::desktop::DesktopGradientApplyStatus::RollbackFailed;
+    copyText(g_testGradientPersistedId, "gradient_violet",
+             sizeof(g_testGradientPersistedId));
+    expect(applyBuiltInGradientPreset(settingsApp, &gradientRequest,
+                                      &gradientResult) ==
+               GradientOperationStatus::RollbackFailed &&
+               (gradientResult.flags & kGradientOperationRollbackVerified) == 0u &&
+               std::string(gradientResult.appliedId) == "gradient_ocean" &&
+               std::string(gradientResult.persistedId) == "gradient_violet",
+           "rollback failure remains distinct and reports differing actual states");
+    g_testGradientApplyStatus =
+        kernel::desktop::DesktopGradientApplyStatus::Committed;
+    copyText(g_testGradientPersistedId, "gradient_ocean",
+             sizeof(g_testGradientPersistedId));
 
     DisplaySnapshotV1 displaySnapshot{};
     const uint32_t paddedPitch = 5512u;
@@ -1055,10 +1626,33 @@ int main()
                                sizeof(repeatedDisplaySnapshot), &repeatedDisplaySize,
                                &repeatedDisplayRevision) == SnapshotStatus::Unauthorized,
            "Display provider denies a non-Settings caller despite identity-like launch data");
+    appearanceRequest.knownRevision = 0u;
+    expect(readDesktopAppearanceSnapshot(otherApp, &appearanceRequest,
+               &readAppearance, sizeof(readAppearance), &snapshotSize,
+               &snapshotRevision) == SnapshotStatus::Unauthorized,
+           "appearance provider denies a non-Settings caller despite identity-like launch data");
+    expect(readBuiltInGradientPresets(otherApp, gradientPresets,
+                                      kBuiltInGradientPresetCapacity,
+                                      &gradientPresetCount) == SnapshotStatus::Unauthorized,
+           "preset list provider denies a non-Settings runtime identity");
+    const int applyCallsBeforeSpoofedRequest = g_testGradientApplyCalls;
+    expect(applyBuiltInGradientPreset(otherApp, &gradientRequest,
+                                      &gradientResult) ==
+               GradientOperationStatus::Unauthorized &&
+               g_testGradientApplyCalls == applyCallsBeforeSpoofedRequest,
+           "identity-like launch argument cannot authorize a spoofed gradient request");
+    const int appearanceNotificationsBefore = g_runtimeAppearanceChanged;
+    AppManager::notifyDesktopAppearanceChanged(9u);
+    expect(g_runtimeAppearanceChanged == appearanceNotificationsBefore + 2,
+           "appearance commits notify each running app through the bounded AppManager path");
     if (otherApp) otherApp->requestClose();
     AppManager::update();
     expect(AppManager::getRunningAppCount() == 1 && g_activeWindows == 1,
            "closing the unrelated app releases its window ownership");
+    const int appearanceNotificationsAfterClose = g_runtimeAppearanceChanged;
+    AppManager::notifyDesktopAppearanceChanged(10u);
+    expect(g_runtimeAppearanceChanged == appearanceNotificationsAfterClose + 1,
+           "appearance notification skips an app after its instance has closed");
     expect(AppManager::getRunningApp(0) == settingsApp &&
                std::string(settingsApp->getRuntimeAppId()) == kSettingsRuntimeAppId &&
                settingsApp->getWindow() && settingsApp->getWindow()->owner == settingsApp,
@@ -1121,6 +1715,8 @@ int main()
            "100 lifecycle repetitions balance window registration and release");
     expect(g_runtimeFocusAcquired >= 100 && g_runtimeFocusLost >= 100,
            "window focus transitions are delivered through the compositor boundary");
+
+    testGradientConfigPersistence();
 
     std::cout << "Settings native runtime tests: " << (g_checks - g_failures)
               << "/" << g_checks << " passed; lifecycle repetitions=100"

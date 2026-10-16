@@ -1,0 +1,11 @@
+version=1
+wallpaperId=legacy_ameobagx
+backgroundScaleMode=fill
+desktopThemeId=classic
+taskbarPosition=bottom
+showDesktopTrash=1
+showDesktopThisSystem=1
+showDesktopFileManager=1
+showDesktopSystemSettings=0
+smallLiveDesktopFolderIcons=1
+autoArrangeDesktopIcon

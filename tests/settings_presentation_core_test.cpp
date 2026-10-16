@@ -72,6 +72,16 @@ int main()
     check(!core.setFocusedControl(FocusControl::StorageDiskManager) &&
           core.focusedControl() == FocusControl::DisplayResolution,
           "focus selection rejects a control on a hidden page");
+    check(core.selectCategory(CategoryId::Personalization) &&
+          core.canFocus(FocusControl::PersonalizationChooseBackground) &&
+          core.setFocusedControl(FocusControl::PersonalizationChooseBackground) &&
+          core.setFocusedControl(FocusControl::PersonalizationApply) &&
+          core.setFocusedControl(FocusControl::PersonalizationCancel) &&
+          core.focusedControl() == FocusControl::PersonalizationCancel,
+          "Personalization preset, Apply, and Cancel controls use shared-core focus state");
+    check(!core.setFocusedControl(FocusControl::DisplayApply) &&
+          core.focusedControl() == FocusControl::PersonalizationCancel,
+          "Personalization focus rejects a control from another page");
     check(core.selectCategory(CategoryId::Display) &&
           core.route() == SettingsRoute{ CategoryId::Display, TargetId::Page } &&
           core.focusedControl() == FocusControl::None,
