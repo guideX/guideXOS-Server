@@ -494,3 +494,180 @@ Release results remain valid because production source did not change. The
 unrelated PacMan Native ELF linker issue remains unchanged. This is **Outcome
 B — `BLOCKED_BY_FOREIGN_QEMU`**; it is not DM36 acceptance. `.phase` remains
 `last_completed=DM35`, `next_expected=DM36`; DM37 is not ready.
+
+## Continuation 7 — B1 loop finding passed; between-guest census blocks B2 onward
+
+### Repository, runtime, and ownership
+
+The continuation began at HEAD
+`da8e6ddedf931102eb070dd383460821e31bd139` on branch
+`DISK_MANAGER_IMPROVEMENTS`; the tracked worktree was clean and `.phase`
+remained `last_completed=DM35`, `next_expected=DM36`. No production source
+changed. The saved source-matched runtime manifest was checked against the
+built and staged artifacts: the private ESP kernel hashes to
+`96EC935C93BCB014D83419CE2C9A76B60521F89A8BBC148E28DC3A6A9136C870`, and the
+UEFI x64 Release bootloader hashes to
+`30CAF50C39B37E1298C9D246DF88B1C16798C85AE1F5A8B78BD2DCB3524238F7`.
+`NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0`; no physical host storage or
+automatic checker launcher was used.
+
+The fresh prelaunch census found no QEMU guest. Exactly one DM36-owned QEMU
+11.0.0 process (PID 5680, QMP `127.0.0.1:61433`) was launched for
+`DM36LOOP01`, using the private ESP and the paced PS/2 helper. After the check
+settled and the owned guest exited, the required between-guest census found a
+foreign WHPX guest, PID 26464, from sibling workspace
+`D:\dev\guideXOSServer`. Its command line uses that project's
+`out/validation/settings-s15-20261016/production/guest-image-wallpaper/ESP`
+and QMP `127.0.0.1:58441`. Its endpoint was not contacted; the guest was not
+controlled, paused, or stopped. No second DM36 guest was started. B2 and the
+remaining guest gates therefore stop at this ownership boundary.
+
+### Gate B1 — production GUI detected the cluster-chain loop
+
+Before attachment, the actual `DM36LOOP01` image was rechecked against the
+fixture manifest and pristine baseline. It is 629,145,600 bytes, SHA-256
+`25F764F83C60D3C0208092C1E2A0CBF945675F32132B4590795A8853F7B6B316`, with
+GPT partition LBA 2048–1228766 (1,226,719 sectors) and a 512-byte-sector FAT32
+volume. The only eight changed bytes are the two documented four-byte FAT
+entries: cluster 4 changes from EOC `0x0FFFFFF8` to self-reference
+`0x00000004` at FAT1 LBA 2080 / byte offset 1,064,976 and FAT2 LBA 2679 / byte
+offset 1,371,664. The intended finding is a file cluster-chain loop at
+cluster 4.
+
+Disk Manager was launched through normal production UI interaction. The
+captured-target confirmation identified serial `DM36LOOP01`, device 2,
+partition 1, the selected GPT partition bounds, and read-only checking with no
+repair or filesystem writes. Start Check was explicitly activated. The GUI
+showed the checker running through Finalization and then settled at
+**Structural inconsistency detected**. It reported 40 metadata reads,
+925,184 bytes read, 306,688 bytes compared across both FATs, three
+chains/clusters, two directories, seven entries, 15 structural reads, and all
+76,593 orphan clusters scanned. Exactly one finding was stored. The finding
+view showed **Cluster-chain loop**, **Structural inconsistency**, structure
+**FAT**, location LBA **3310**, byte offset **0**, expected **3**, observed
+**4**. LBA 3310 is the data-cluster location for cluster 4. The result stated
+that no repair was performed and storage ownership was released. The single
+finding means Previous/Next could not navigate to another finding; no
+multi-finding navigation case was present. Captures, QMP snapshots, serial
+output, and the trace are in
+`out/dm36/fat32-integrity/runs/B-loop-retry-20261016/`.
+
+### Gate B1 — I/O attribution and media integrity
+
+The operation trace window is byte offsets 92,858–150,341. READ(10) tags
+664–703 are the 40 checker requests, totaling 925,184 bytes; every request is
+within selected partition LBAs 2048–3294. This matches the GUI counter. The
+whole window contains 434 reads / 1,126,912 bytes because it also includes
+startup and registration traffic: 394 other requests total 201,728 bytes,
+with 393 outside the selected partition and one at LBA 2048. QMP target
+counters moved from 568 reads / 578,048 bytes to 1,002 reads / 1,704,960
+bytes. Writes, write bytes, unmaps, failed I/O, and flushes added during the
+window were all zero; one Flush was already present at the pre-check baseline.
+After QEMU exited, the full fixture SHA-256 still matched its initial value.
+The machine-readable attribution is
+`out/dm36/fat32-integrity/runs/B-loop-retry-20261016/B-read-coverage.json`.
+
+### Gate B2 and remaining acceptance
+
+The separate orphan fixture remains unchanged at initial SHA-256
+`0E8944010169B8ACE8FE509492982AFDE8F5714DC9A5F70C092540F067AEF6A1`. Its
+only documented mutations allocate cluster 76594 in both FAT copies; the
+intended finding is an unreferenced allocated cluster at 76594. It was
+verified offline but not attached or checked in the GUI because the
+between-guest census found the sibling guest.
+
+Gate B1 passed. B2, findings navigation across multiple findings, C (dedicated
+Stop), D (Alt+F4 Close during active work), E (removal/replacement), F
+(blkdebug read failure), remaining per-run media/I/O checks in G, and guest H
+(mounted-target rejection) remain open. The accepted clean Gate A result and
+host suites/builds remain valid; production source did not change, so they
+were not rerun. This remains **Outcome B — evidence incomplete / guest lane
+blocked by foreign QEMU**. `.phase` remains DM35→DM36; DM37 is not ready.
+
+## Visible retry — B1 and B2 run through the production GUI
+
+The retry began at HEAD `da8e6ddedf931102eb070dd383460821e31bd139` on
+`DISK_MANAGER_IMPROVEMENTS`; `.phase` remained DM35→DM36. The earlier B1
+capture showed the `Cluster-chain loop` category and LBA but omitted the
+observed number. The UI had formatted the expected and observed values into a
+clipped line. The renderer now draws the labels and numeric values as separate
+text segments. Orphan findings use the checker's `orphanClusters` result for
+the observed value; the focused host regression verifies expected 0, observed
+2, and the renderer helper returns 2.
+
+The source-matched private runtime was rebuilt and checked against its
+manifest: kernel SHA-256
+`EAFA950DBA3D38265976D0BFD73ED553D1A665D5BCE421DC847CC53C2795F075`, and UEFI
+x64 Release bootloader SHA-256
+`51C7BD0E16DC54FF843EFFA615738E2F4208F8D8729111D8C4C99BA4732889A9`.
+`NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0`; the private ESP was used, no
+physical host storage was attached, and the automatic check launcher was not
+enabled. The host test suite, freestanding AMD64 kernel build, `build.bat`,
+UEFI x64 Release build, and final `git diff --check` passed.
+
+Fresh ownership checks found the QEMU lane available. B1 and B2 each ran as a
+single visible GTK QEMU guest, one at a time, against only their disposable
+fixture. The fixture hashes were recorded before attachment and rechecked
+after each guest exited.
+
+### B1 retry — loop detection after the renderer change
+
+The production Disk Manager checked `DM36LOOP01` on GPT partition LBA
+2048–1228766. The result showed **Structural inconsistency detected**, one
+stored finding, 40 metadata reads / 925,184 bytes, 306,688 FAT bytes compared,
+three chain clusters, two directories, seven entries, 15 structural reads,
+and all 76,593 clusters scanned. It stated that no repair was performed and
+storage ownership was released. The earlier pre-fix result capture identifies
+the intended finding as a cluster-chain loop at LBA 3310, expected 3; the
+renderer regression now supplies the observed number from the finding. The
+post-fix compact-window screenshot does not include the lower finding-detail
+rows, so the numeric framebuffer output still needs a maximized-result
+capture.
+
+Checker READ(10) tags 795–834 are 40 contiguous requests / 925,184 bytes, all
+within partition LBAs 2048–3294. The scan caused no writes, unmaps, failed I/O,
+or additional flushes. After QEMU exited, the image matched its original
+SHA-256 `25F764F83C60D3C0208092C1E2A0CBF945675F32132B4590795A8853F7B6B316`.
+The visible run evidence is in
+`out/dm36/fat32-integrity/runs/B-loop-observed-render-fix-visible-20261016/`.
+
+### B2 retry — orphaned allocation detection
+
+The production Disk Manager checked the independent `DM36ORPHAN01` fixture
+using the same partition geometry. The result showed **Structural
+inconsistency detected**, one stored finding, 40 metadata reads / 925,184
+bytes, 306,688 FAT bytes compared, three chain clusters, two directories,
+seven entries, 15 structural reads, and all 76,593 clusters scanned. It
+stated that no repair was performed and storage ownership was released. The
+fixture mutation allocates cluster 76594 in both FAT copies, so the intended
+finding is an unreferenced allocated cluster at LBA 1228750, expected 0,
+observed 1. The compact-window result screenshot shows the completed scan and
+finding count but not the lower category/location/value rows; those visible
+values remain to be captured after expanding the Disk Manager window.
+
+Checker READ(10) tags 795–834 are 40 contiguous requests / 925,184 bytes, all
+within partition LBAs 2048–3294. In the baseline-to-result QEMU window there
+were 434 READ(10) requests / 1,126,912 bytes, including startup and background
+registration traffic; 394 requests were outside the checker tag range. QMP
+target counters increased from 699 reads / 645,120 bytes to 1,133 reads /
+1,772,032 bytes. Writes, write bytes, unmaps, failed I/O, and additional
+flushes were zero. After QEMU exited, the image matched its original SHA-256
+`0E8944010169B8ACE8FE509492982AFDE8F5714DC9A5F70C092540F067AEF6A1`. The
+visible run evidence is in
+`out/dm36/fat32-integrity/runs/B-orphan-observed-render-fix-visible-20261016/`.
+
+After both evidence guests exited, a separate visible GTK QEMU process was
+started and brought to the foreground at PID 14792, QMP `127.0.0.1:61438`.
+It is still running at the desktop in
+`out/dm36/fat32-integrity/runs/user-visible-open-20261016/` so the guest is
+visible to the user.
+
+The numeric-value renderer defect has a narrow source fix and focused host
+regression; B1 and B2 checker execution passed, but the detailed numeric rows
+were not recaptured in the maximized GUI, and multi-finding navigation is not
+covered by these single-finding fixtures. Dedicated Stop (C), application
+Close during active work (D), removal/replacement (E), blkdebug read failure
+(F), the remaining cross-run media/I/O checks (G), and mounted-target guest
+rejection (H) also remain open. This is **Outcome C — production defect
+repaired; DM36 acceptance evidence remains incomplete**. `.phase` remains
+`last_completed=DM35`, `next_expected=DM36`; DM37 is not ready.

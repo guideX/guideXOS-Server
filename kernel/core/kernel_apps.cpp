@@ -13100,14 +13100,19 @@ void DiskManagerApp::drawFat32IntegrityPanel(uint32_t x, uint32_t y,
         lineY += 16;
 
         if (finding.expectedObservedValid) {
-            strcopy(line, "Expected: ", sizeof(line));
+            const uint32_t valueColor = 0xFF9AA9BC;
+            const uint32_t expectedValueX = x + 70;
+            appDrawText(x + 10, lineY, "Expected: ", valueColor);
             disk_manager_u64(finding.expected, number, sizeof(number));
-            strappend(line, number, sizeof(line));
-            strappend(line, " | Observed: ", sizeof(line));
-            disk_manager_u64(finding.observed, number, sizeof(number));
-            strappend(line, number, sizeof(number));
-            disk_manager_draw_clipped(x + 10, lineY, w - 20, line,
-                                      0xFF9AA9BC);
+            const uint32_t expectedDigits =
+                static_cast<uint32_t>(strlen(number));
+            appDrawText(expectedValueX, lineY, number, valueColor);
+            const uint32_t observedLabelX = expectedValueX +
+                expectedDigits * 6 + 12;
+            appDrawText(observedLabelX, lineY, "| Observed: ", valueColor);
+            disk_manager_u64(finding_observed_value(finding, result), number,
+                             sizeof(number));
+            appDrawText(observedLabelX + 72, lineY, number, valueColor);
             lineY += 16;
         }
     }

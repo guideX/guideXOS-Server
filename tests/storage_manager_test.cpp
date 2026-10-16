@@ -9283,12 +9283,23 @@ void run_fat32_integrity_tests()
         },
         [&](const storage::Fat32IntegrityJob& job,
             storage::Fat32IntegrityState state, const char* label) {
+            const storage::Fat32IntegrityFinding* orphanFinding = nullptr;
+            for (uint8_t i = 0; i < job.result.findingCount; ++i) {
+                if (job.result.findings[i].category ==
+                    storage::FAT32_INTEGRITY_FINDING_ORPHANED_ALLOCATION) {
+                    orphanFinding = &job.result.findings[i];
+                    break;
+                }
+            }
             check(state == storage::FAT32_INTEGRITY_INCONSISTENCY &&
                   job.result.orphanAnalysisComplete &&
                   job.result.orphanClusters == 2 &&
                   job.result.firstOrphanCluster == 5 &&
-                  hasFinding(job,
-                      storage::FAT32_INTEGRITY_FINDING_ORPHANED_ALLOCATION),
+                  orphanFinding && orphanFinding->expectedObservedValid &&
+                  orphanFinding->expected == 0 &&
+                  orphanFinding->observed == 2 &&
+                  apps::disk_manager_fat32_integrity_ui::
+                      finding_observed_value(*orphanFinding, job.result) == 2,
                   label);
         });
 

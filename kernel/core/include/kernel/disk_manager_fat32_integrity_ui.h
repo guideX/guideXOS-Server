@@ -267,6 +267,16 @@ inline const char* structure_name(storage::Fat32IntegrityStructure structure)
     }
 }
 
+inline uint64_t finding_observed_value(
+    const storage::Fat32IntegrityFinding& finding,
+    const storage::Fat32IntegrityResult& result)
+{
+    if (finding.category ==
+        storage::FAT32_INTEGRITY_FINDING_ORPHANED_ALLOCATION)
+        return result.orphanClusters;
+    return finding.observed;
+}
+
 inline const char* severity_name(storage::Fat32IntegrityFindingSeverity severity)
 {
     return severity == storage::FAT32_INTEGRITY_ADVISORY
