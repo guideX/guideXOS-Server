@@ -195,6 +195,15 @@ RexxVMStatus rexx_value_set_string(RexxValue *value,
                                    size_t length);
 RexxVMStatus rexx_value_copy(RexxValue *destination,
                              const RexxValue *source);
+
+#if defined(REXX_VM_TEST_ALLOCATOR) && !defined(GXOS_BARE_METAL)
+/* Hosted qualification-only controls. The hook affects VM-owned allocations
+ * in rexx_vm.c; it is not compiled into normal or freestanding builds. */
+void rexx_vm_test_allocator_fail_on(size_t allocation_attempt);
+void rexx_vm_test_allocator_disable(void);
+size_t rexx_vm_test_allocator_attempts(void);
+size_t rexx_vm_test_allocator_live_blocks(void);
+#endif
 RexxVMStatus rexx_vm_set_local(RexxVM *vm,
                                const char *name,
                                size_t name_length,

@@ -9,6 +9,79 @@
 #include <stdio.h>
 #endif
 
+#if defined(REXX_VM_TEST_ALLOCATOR) && !defined(GXOS_BARE_METAL)
+static size_t test_allocator_fail_on;
+static size_t test_allocator_attempt_count;
+static size_t test_allocator_live_blocks;
+
+static int test_allocator_should_fail(void)
+{
+    ++test_allocator_attempt_count;
+    return test_allocator_fail_on != 0u &&
+           test_allocator_attempt_count == test_allocator_fail_on;
+}
+
+static void *vm_malloc(size_t size)
+{
+    void *result;
+    if (test_allocator_should_fail()) return NULL;
+    result = malloc(size);
+    if (result != NULL) ++test_allocator_live_blocks;
+    return result;
+}
+
+static void *vm_calloc(size_t count, size_t size)
+{
+    void *result;
+    if (test_allocator_should_fail()) return NULL;
+    result = calloc(count, size);
+    if (result != NULL) ++test_allocator_live_blocks;
+    return result;
+}
+
+static void *vm_realloc(void *pointer, size_t size)
+{
+    void *result;
+    if (test_allocator_should_fail()) return NULL;
+    result = realloc(pointer, size);
+    if (result != NULL && pointer == NULL) ++test_allocator_live_blocks;
+    return result;
+}
+
+static void vm_free(void *pointer)
+{
+    if (pointer != NULL && test_allocator_live_blocks != 0u)
+        --test_allocator_live_blocks;
+    free(pointer);
+}
+
+void rexx_vm_test_allocator_fail_on(size_t allocation_attempt)
+{
+    test_allocator_attempt_count = 0u;
+    test_allocator_fail_on = allocation_attempt;
+}
+
+void rexx_vm_test_allocator_disable(void)
+{
+    test_allocator_fail_on = 0u;
+}
+
+size_t rexx_vm_test_allocator_attempts(void)
+{
+    return test_allocator_attempt_count;
+}
+
+size_t rexx_vm_test_allocator_live_blocks(void)
+{
+    return test_allocator_live_blocks;
+}
+#else
+#define vm_malloc malloc
+#define vm_calloc calloc
+#define vm_realloc realloc
+#define vm_free free
+#endif
+
 #define REXX_VM_MAX_NAME_LENGTH ((size_t)65535u)
 
 static const char *const vm_messages[] = {
@@ -48,7 +121,7 @@ static char *copy_name(const char *name, size_t length)
     size_t i;
     if (name == NULL || length == 0 || length > REXX_VM_MAX_NAME_LENGTH ||
         length == SIZE_MAX) return NULL;
-    copy = (char *)malloc(length + 1);
+    copy = (char *)vm_malloc(length + 1);
     if (copy == NULL) return NULL;
     for (i = 0; i < length; ++i) copy[i] = (char)ascii_upper((unsigned char)name[i]);
     copy[length] = '\0';
@@ -58,7 +131,7 @@ static char *copy_name(const char *name, size_t length)
 void rexx_value_clear(RexxValue *value)
 {
     if (value == NULL) return;
-    if (value->type == REXX_VALUE_STRING) free(value->as.string.bytes);
+    if (value->type == REXX_VALUE_STRING) vm_free(value->as.string.bytes);
     memset(value, 0, sizeof(*value));
 }
 
@@ -85,7 +158,7 @@ RexxVMStatus rexx_value_set_string(RexxValue *value, const char *bytes, size_t l
     char *copy;
     if (value == NULL || (bytes == NULL && length != 0) || length == SIZE_MAX)
         return REXX_VM_STATUS_INVALID_ARGUMENT;
-    copy = (char *)malloc(length + 1);
+    copy = (char *)vm_malloc(length + 1);
     if (copy == NULL) return REXX_VM_STATUS_OUT_OF_MEMORY;
     if (length != 0) memcpy(copy, bytes, length);
     copy[length] = '\0';
@@ -167,13 +240,13 @@ static RexxVMStatus table_set(RexxVMEntry **entries, size_t *count, size_t *capa
         if (next < *capacity || next > REXX_VM_MAX_TABLE_ENTRIES)
             next = REXX_VM_MAX_TABLE_ENTRIES;
         if (next <= *capacity || next > SIZE_MAX / sizeof(**entries)) {
-            free(key);
+            vm_free(key);
             rexx_value_clear(&copied);
             return REXX_VM_STATUS_RESOURCE_LIMIT;
         }
-        grown = (RexxVMEntry *)realloc(*entries, next * sizeof(**entries));
+        grown = (RexxVMEntry *)vm_realloc(*entries, next * sizeof(**entries));
         if (grown == NULL) {
-            free(key);
+            vm_free(key);
             rexx_value_clear(&copied);
             return REXX_VM_STATUS_OUT_OF_MEMORY;
         }
@@ -201,18 +274,18 @@ static RexxVMStatus stem_set(RexxVM *vm, const char *name, size_t name_length,
     if (dot == 0 || dot == name_length) return REXX_VM_STATUS_INVALID_BYTECODE;
     tail_length = name_length - dot - 1;
     stem = copy_name(name, dot + 1);
-    tail = tail_length == 0 ? (char *)calloc(1, 1)
+    tail = tail_length == 0 ? (char *)vm_calloc(1, 1)
                             : copy_name(name + dot + 1, tail_length);
     if (stem == NULL || tail == NULL) {
-        free(stem);
-        free(tail);
+        vm_free(stem);
+        vm_free(tail);
         return REXX_VM_STATUS_OUT_OF_MEMORY;
     }
     memset(&copied, 0, sizeof(copied));
     result = rexx_value_copy(&copied, value);
     if (result != REXX_VM_STATUS_OK) {
-        free(stem);
-        free(tail);
+        vm_free(stem);
+        vm_free(tail);
         return result;
     }
     for (i = 0; i < vm->stem_count; ++i) {
@@ -222,14 +295,14 @@ static RexxVMStatus stem_set(RexxVM *vm, const char *name, size_t name_length,
             memcmp(entry->tail, tail, tail_length) == 0) {
             rexx_value_clear(&entry->value);
             entry->value = copied;
-            free(stem);
-            free(tail);
+            vm_free(stem);
+            vm_free(tail);
             return REXX_VM_STATUS_OK;
         }
     }
     if (vm->stem_count >= REXX_VM_MAX_TABLE_ENTRIES) {
-        free(stem);
-        free(tail);
+        vm_free(stem);
+        vm_free(tail);
         rexx_value_clear(&copied);
         return REXX_VM_STATUS_RESOURCE_LIMIT;
     }
@@ -239,15 +312,15 @@ static RexxVMStatus stem_set(RexxVM *vm, const char *name, size_t name_length,
         if (next < vm->stem_capacity || next > REXX_VM_MAX_TABLE_ENTRIES)
             next = REXX_VM_MAX_TABLE_ENTRIES;
         if (next <= vm->stem_capacity || next > SIZE_MAX / sizeof(*vm->stems)) {
-            free(stem);
-            free(tail);
+            vm_free(stem);
+            vm_free(tail);
             rexx_value_clear(&copied);
             return REXX_VM_STATUS_RESOURCE_LIMIT;
         }
-        grown = (RexxVMStemEntry *)realloc(vm->stems, next * sizeof(*vm->stems));
+        grown = (RexxVMStemEntry *)vm_realloc(vm->stems, next * sizeof(*vm->stems));
         if (grown == NULL) {
-            free(stem);
-            free(tail);
+            vm_free(stem);
+            vm_free(tail);
             rexx_value_clear(&copied);
             return REXX_VM_STATUS_OUT_OF_MEMORY;
         }
@@ -271,7 +344,7 @@ RexxVMStatus rexx_vm_init(RexxVM *vm, size_t stack_capacity)
     if (stack_capacity > REXX_VM_MAX_STACK_CAPACITY ||
         stack_capacity > SIZE_MAX / sizeof(*vm->stack))
         return vm_fail(vm, REXX_VM_STATUS_RESOURCE_LIMIT, 0);
-    vm->stack = (RexxValue *)calloc(stack_capacity, sizeof(*vm->stack));
+    vm->stack = (RexxValue *)vm_calloc(stack_capacity, sizeof(*vm->stack));
     if (vm->stack == NULL) return vm_fail(vm, REXX_VM_STATUS_OUT_OF_MEMORY, 0);
     vm->stack_capacity = stack_capacity;
     vm->instruction_budget = REXX_VM_DEFAULT_INSTRUCTION_BUDGET;
@@ -303,26 +376,26 @@ void rexx_vm_free(RexxVM *vm)
     for (i = 0; vm->stack != NULL && i < live; ++i) rexx_value_clear(&vm->stack[i]);
     for (i = 0; vm->locals != NULL && i < vm->local_count &&
                 i < vm->local_capacity; ++i) {
-        free(vm->locals[i].name);
+        vm_free(vm->locals[i].name);
         rexx_value_clear(&vm->locals[i].value);
     }
     for (i = 0; vm->globals != NULL && i < vm->global_count &&
                 i < vm->global_capacity; ++i) {
-        free(vm->globals[i].name);
+        vm_free(vm->globals[i].name);
         rexx_value_clear(&vm->globals[i].value);
     }
     for (i = 0; vm->stems != NULL && i < vm->stem_count &&
                 i < vm->stem_capacity; ++i) {
-        free(vm->stems[i].stem);
-        free(vm->stems[i].tail);
+        vm_free(vm->stems[i].stem);
+        vm_free(vm->stems[i].tail);
         rexx_value_clear(&vm->stems[i].value);
     }
     rexx_value_clear(&vm->exit_value);
-    free(vm->stack);
-    free(vm->locals);
-    free(vm->globals);
-    free(vm->stems);
-    free(vm->address_environment);
+    vm_free(vm->stack);
+    vm_free(vm->locals);
+    vm_free(vm->globals);
+    vm_free(vm->stems);
+    vm_free(vm->address_environment);
     memset(vm, 0, sizeof(*vm));
 }
 
@@ -383,7 +456,7 @@ static RexxVMStatus set_address_environment(RexxVM *vm,
         return REXX_VM_STATUS_RESOURCE_LIMIT;
     copy = copy_name(environment, environment_length);
     if (copy == NULL) return REXX_VM_STATUS_OUT_OF_MEMORY;
-    free(vm->address_environment);
+    vm_free(vm->address_environment);
     vm->address_environment = copy;
     vm->address_environment_length = environment_length;
     return REXX_VM_STATUS_OK;
@@ -567,7 +640,7 @@ static RexxVMStatus value_string(const RexxValue *value, char **bytes, size_t *l
     default: return REXX_VM_STATUS_INVALID_ARGUMENT;
     }
     if (count == SIZE_MAX) return REXX_VM_STATUS_RESOURCE_LIMIT;
-    *bytes = (char *)malloc(count + 1);
+    *bytes = (char *)vm_malloc(count + 1);
     if (*bytes == NULL) return REXX_VM_STATUS_OUT_OF_MEMORY;
     if (count != 0) memcpy(*bytes, source, count);
     (*bytes)[count] = '\0';
@@ -620,14 +693,14 @@ static RexxVMStatus decode_constant(const RexxConstant *constant, RexxValue *val
         quote = constant->text[0];
         if ((quote != '\'' && quote != '"') || constant->text[constant->length - 1] != quote)
             return REXX_VM_STATUS_INVALID_BYTECODE;
-        decoded = (char *)malloc(constant->length);
+        decoded = (char *)vm_malloc(constant->length);
         if (decoded == NULL) return REXX_VM_STATUS_OUT_OF_MEMORY;
         i = 1;
         while (i + 1 < constant->length) {
             char c = constant->text[i++];
             if (c == quote) {
                 if (i + 1 >= constant->length || constant->text[i] != quote) {
-                    free(decoded);
+                    vm_free(decoded);
                     return REXX_VM_STATUS_INVALID_BYTECODE;
                 }
                 ++i;
@@ -637,7 +710,7 @@ static RexxVMStatus decode_constant(const RexxConstant *constant, RexxValue *val
         decoded[out] = '\0';
         {
             RexxVMStatus result = rexx_value_set_string(value, decoded, out);
-            free(decoded);
+            vm_free(decoded);
             return result;
         }
     }
@@ -663,7 +736,7 @@ static RexxVMStatus decode_constant(const RexxConstant *constant, RexxValue *val
             if (out_length > SIZE_MAX / 8) return REXX_VM_STATUS_RESOURCE_LIMIT;
         }
         if (out_length == SIZE_MAX) return REXX_VM_STATUS_RESOURCE_LIMIT;
-        decoded = (char *)calloc(out_length + 1, 1);
+        decoded = (char *)vm_calloc(out_length + 1, 1);
         if (decoded == NULL) return REXX_VM_STATUS_OUT_OF_MEMORY;
         if (is_hex) {
             size_t digit_index = 0;
@@ -673,7 +746,7 @@ static RexxVMStatus decode_constant(const RexxConstant *constant, RexxValue *val
                 unsigned char c = (unsigned char)constant->text[i];
                 if (ascii_space(c)) continue;
                 nibble = hex_value(c);
-                if (nibble < 0) { free(decoded); return REXX_VM_STATUS_INVALID_BYTECODE; }
+                if (nibble < 0) { vm_free(decoded); return REXX_VM_STATUS_INVALID_BYTECODE; }
                 if ((digits & 1u) != 0u && digit_index == 0) {
                     decoded[out++] = (char)nibble; /* Odd payload: pad a leading zero nibble. */
                 } else if (high_nibble < 0) {
@@ -685,7 +758,7 @@ static RexxVMStatus decode_constant(const RexxConstant *constant, RexxValue *val
                 ++digit_index;
             }
             if (high_nibble >= 0 || out != out_length) {
-                free(decoded);
+                vm_free(decoded);
                 return REXX_VM_STATUS_INVALID_BYTECODE;
             }
         } else {
@@ -693,14 +766,14 @@ static RexxVMStatus decode_constant(const RexxConstant *constant, RexxValue *val
             for (i = start; i < end; ++i) {
                 unsigned char c = (unsigned char)constant->text[i];
                 if (ascii_space(c)) continue;
-                if (c != '0' && c != '1') { free(decoded); return REXX_VM_STATUS_INVALID_BYTECODE; }
+                if (c != '0' && c != '1') { vm_free(decoded); return REXX_VM_STATUS_INVALID_BYTECODE; }
                 if (c == '1') decoded[bit / 8] |= (char)(1u << (7u - (unsigned)(bit % 8)));
                 ++bit;
             }
         }
         {
             RexxVMStatus result = rexx_value_set_string(value, decoded, out_length);
-            free(decoded);
+            vm_free(decoded);
             return result;
         }
     }
@@ -910,7 +983,7 @@ static RexxVMStatus concat_values(RexxVM *vm, RexxOpcode opcode)
             blen > SIZE_MAX - alen - separator_length - 1)
             status = REXX_VM_STATUS_RESOURCE_LIMIT;
         else {
-            joined = (char *)malloc(alen + separator_length + blen + 1);
+            joined = (char *)vm_malloc(alen + separator_length + blen + 1);
             if (joined == NULL) status = REXX_VM_STATUS_OUT_OF_MEMORY;
             else {
                 if (alen != 0) memcpy(joined, a, alen);
@@ -924,9 +997,9 @@ static RexxVMStatus concat_values(RexxVM *vm, RexxOpcode opcode)
         }
     }
     if (status == REXX_VM_STATUS_OK) status = push_move(vm, &result);
-    free(a);
-    free(b);
-    free(joined);
+    vm_free(a);
+    vm_free(b);
+    vm_free(joined);
     rexx_value_clear(&left);
     rexx_value_clear(&right);
     rexx_value_clear(&result);
@@ -1000,7 +1073,7 @@ static RexxVMStatus compare_values(RexxVM *vm,
         if (status == REXX_VM_STATUS_OK)
             status = value_string(right, &right_text, &right_length);
         if (status != REXX_VM_STATUS_OK) {
-            free(left_text); free(right_text); return status;
+            vm_free(left_text); vm_free(right_text); return status;
         }
         count = comparison_is_strict(opcode)
                     ? (left_length < right_length ? left_length : right_length)
@@ -1014,8 +1087,8 @@ static RexxVMStatus compare_values(RexxVM *vm,
         if (comparison == 0 && comparison_is_strict(opcode) &&
             left_length != right_length)
             comparison = left_length < right_length ? -1 : 1;
-        free(left_text);
-        free(right_text);
+        vm_free(left_text);
+        vm_free(right_text);
     }
     *matches = comparison_result(opcode, comparison);
     return REXX_VM_STATUS_OK;
@@ -1259,7 +1332,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 #endif
                 }
             }
-            free(text);
+            vm_free(text);
             rexx_value_clear(&value);
             break;
         }
@@ -1281,7 +1354,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
                                           environment_length,
                                           command, command_length);
             }
-            free(command);
+            vm_free(command);
             break;
         }
 
@@ -1413,7 +1486,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
                                               environment_length,
                                               command, command_length);
                 }
-                free(command);
+                vm_free(command);
                 rexx_value_clear(&value);
             } else if (status == REXX_VM_STATUS_OK &&
                        (ins->flags & REXX_INSTRUCTION_HAS_ENVIRONMENT) != 0u) {

@@ -13,6 +13,7 @@ $cliTest = Join-Path $buildDirectory "rexx_cli.exe"
 $rx2Test = Join-Path $buildDirectory "rexx_rx2_tests.exe"
 $rx2NumericTest = Join-Path $buildDirectory "rexx_rx2_native_numeric_tests.exe"
 $rx3DecimalTest = Join-Path $buildDirectory "rexx_rx3_decimal_tests.exe"
+$rx3AllocFailureTest = Join-Path $buildDirectory "rexx_rx3_alloc_failure_tests.exe"
 $rx2ShellBridgeTest = Join-Path $buildDirectory "rexx_rx2_shell_bridge_tests.exe"
 $commonSources = @(
     (Join-Path $rootDir "rexx_lexer.c"),
@@ -67,6 +68,15 @@ if ($LASTEXITCODE -ne 0) {
     throw "RX3 decimal test build failed with exit code $LASTEXITCODE."
 }
 
+Write-Host "Building RX3 hosted allocation-failure qualification tests"
+& $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
+    -Wall -Wextra -Wpedantic -Werror `
+    (Join-Path $PSScriptRoot "rexx_rx3_alloc_failure_test.c") `
+    @commonSources -lm -o $rx3AllocFailureTest
+if ($LASTEXITCODE -ne 0) {
+    throw "RX3 allocation-failure test build failed with exit code $LASTEXITCODE."
+}
+
 $gxxCommand = Get-Command g++ -ErrorAction SilentlyContinue
 if ($null -eq $gxxCommand) {
     throw "g++ is required for the RX2 shell bridge integration test."
@@ -103,6 +113,12 @@ Write-Host "Running RX3 decimal arithmetic assertions"
 & $rx3DecimalTest
 if ($LASTEXITCODE -ne 0) {
     throw "RX3 decimal assertions failed with exit code $LASTEXITCODE."
+}
+
+Write-Host "Running RX3 allocation-failure assertions"
+& $rx3AllocFailureTest
+if ($LASTEXITCODE -ne 0) {
+    throw "RX3 allocation-failure assertions failed with exit code $LASTEXITCODE."
 }
 
 Write-Host "Running RX2 shell bridge assertions"
