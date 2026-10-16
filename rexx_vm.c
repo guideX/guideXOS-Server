@@ -881,13 +881,18 @@ static RexxVMStatus decimal_status_to_vm(RexxNumericStatus status)
     return REXX_VM_STATUS_NUMERIC_ERROR;
 }
 
-static RexxVMStatus decimal_value_to_rexx(const RexxDecimal *decimal,
+static RexxVMStatus decimal_value_to_rexx(RexxVM *vm,
+                                          const RexxDecimal *decimal,
                                           size_t precision,
                                           RexxValue *result)
 {
     char output[REXX_DECIMAL_MAX_DIGITS + 64u];
     int length = rexx_decimal_format(output, sizeof(output), decimal, precision);
     if (length < 0) return REXX_VM_STATUS_RESOURCE_LIMIT;
+    {
+        RexxVMStatus status = charge_numeric_work(vm, (size_t)length);
+        if (status != REXX_VM_STATUS_OK) return status;
+    }
     return rexx_value_set_string(result, output, (size_t)length);
 }
 
@@ -905,9 +910,13 @@ static RexxVMStatus binary_decimal(RexxVM *vm, RexxOpcode opcode)
     if (status == REXX_VM_STATUS_OK) status = value_decimal(&left, &a);
     if (status == REXX_VM_STATUS_OK) status = value_decimal(&right, &b);
     if (status == REXX_VM_STATUS_OK) {
-        size_t cost = numeric_text_cost(&left) + numeric_text_cost(&right) +
-                      decimal_operation_cost(&a, &b, opcode,
-                                             vm->numeric_digits);
+        size_t cost = numeric_text_cost(&left) + numeric_text_cost(&right);
+        if (opcode == OP_ADD || opcode == OP_SUB || opcode == OP_MULTIPLY) {
+            cost += decimal_operation_cost(&a, &b, opcode,
+                                           vm->numeric_digits);
+        } else {
+            cost += a.length + b.length;
+        }
         status = charge_numeric_work(vm, cost);
     }
     if (status == REXX_VM_STATUS_OK) {
@@ -921,6 +930,26 @@ static RexxVMStatus binary_decimal(RexxVM *vm, RexxOpcode opcode)
         case OP_MULTIPLY:
             numeric_status = rexx_decimal_multiply(&a, &b, vm->numeric_digits, &answer);
             break;
+        case OP_DIVIDE:
+            numeric_status = rexx_decimal_divide(
+                &a, &b, vm->numeric_digits, &vm->numeric_work_remaining,
+                &answer);
+            break;
+        case OP_INTEGER_DIVIDE:
+            numeric_status = rexx_decimal_integer_divide(
+                &a, &b, vm->numeric_digits, &vm->numeric_work_remaining,
+                &answer);
+            break;
+        case OP_REMAINDER:
+            numeric_status = rexx_decimal_remainder(
+                &a, &b, vm->numeric_digits, &vm->numeric_work_remaining,
+                &answer);
+            break;
+        case OP_POWER:
+            numeric_status = rexx_decimal_power(
+                &a, &b, vm->numeric_digits, &vm->numeric_work_remaining,
+                &answer);
+            break;
         default:
             status = REXX_VM_STATUS_UNSUPPORTED_OPCODE;
             break;
@@ -928,7 +957,8 @@ static RexxVMStatus binary_decimal(RexxVM *vm, RexxOpcode opcode)
         if (status == REXX_VM_STATUS_OK)
             status = decimal_status_to_vm(numeric_status);
         if (status == REXX_VM_STATUS_OK)
-            status = decimal_value_to_rexx(&answer, vm->numeric_digits, &result);
+            status = decimal_value_to_rexx(vm, &answer, vm->numeric_digits,
+                                           &result);
         if (status == REXX_VM_STATUS_OK) status = push_move(vm, &result);
     }
     rexx_value_clear(&left);
@@ -956,7 +986,8 @@ static RexxVMStatus unary_decimal(RexxVM *vm, RexxOpcode opcode)
         status = decimal_status_to_vm(numeric_status);
     }
     if (status == REXX_VM_STATUS_OK)
-        status = decimal_value_to_rexx(&number, vm->numeric_digits, &result);
+        status = decimal_value_to_rexx(vm, &number, vm->numeric_digits,
+                                       &result);
     if (status == REXX_VM_STATUS_OK) status = push_move(vm, &result);
     rexx_value_clear(&source);
     rexx_value_clear(&result);
@@ -1256,6 +1287,10 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
         case OP_ADD:
         case OP_SUB:
         case OP_MULTIPLY:
+        case OP_DIVIDE:
+        case OP_INTEGER_DIVIDE:
+        case OP_REMAINDER:
+        case OP_POWER:
             status = binary_decimal(vm, (RexxOpcode)ins->opcode);
             break;
 

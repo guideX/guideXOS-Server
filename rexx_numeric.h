@@ -46,6 +46,27 @@ RexxNumericStatus rexx_decimal_multiply(const RexxDecimal *left,
                                         const RexxDecimal *right,
                                         size_t precision,
                                         RexxDecimal *result);
+/* work_remaining is decremented for iterative work when non-NULL. */
+RexxNumericStatus rexx_decimal_divide(const RexxDecimal *left,
+                                     const RexxDecimal *right,
+                                     size_t precision,
+                                     size_t *work_remaining,
+                                     RexxDecimal *result);
+RexxNumericStatus rexx_decimal_integer_divide(const RexxDecimal *left,
+                                              const RexxDecimal *right,
+                                              size_t precision,
+                                              size_t *work_remaining,
+                                              RexxDecimal *result);
+RexxNumericStatus rexx_decimal_remainder(const RexxDecimal *left,
+                                         const RexxDecimal *right,
+                                         size_t precision,
+                                         size_t *work_remaining,
+                                         RexxDecimal *result);
+RexxNumericStatus rexx_decimal_power(const RexxDecimal *base,
+                                     const RexxDecimal *exponent,
+                                     size_t precision,
+                                     size_t *work_remaining,
+                                     RexxDecimal *result);
 RexxNumericStatus rexx_decimal_round(RexxDecimal *value, size_t precision);
 int rexx_decimal_compare(const RexxDecimal *left, const RexxDecimal *right);
 RexxNumericStatus rexx_decimal_to_uint32(const RexxDecimal *value,

@@ -333,7 +333,8 @@ static int decimal_space(char c)
 
 static int decimal_valid_precision(size_t precision)
 {
-    return precision != 0u && precision <= REXX_NUMERIC_MAX_DIGITS;
+    /* One extra coefficient digit is needed by callers for guard precision. */
+    return precision != 0u && precision < REXX_DECIMAL_MAX_DIGITS;
 }
 
 static void decimal_zero(RexxDecimal *value)
@@ -673,6 +674,489 @@ RexxNumericStatus rexx_decimal_multiply(const RexxDecimal *left,
     }
     return decimal_from_work(result, little, length, (int32_t)scale,
                              a.sign * b.sign, precision);
+}
+
+static RexxNumericStatus decimal_charge_work(size_t *remaining, size_t cost)
+{
+    if (remaining == NULL) return REXX_NUMERIC_OK;
+    if (cost > *remaining) return REXX_NUMERIC_RESOURCE_LIMIT;
+    *remaining -= cost;
+    return REXX_NUMERIC_OK;
+}
+
+static void decimal_big_normalize(char *digits, size_t *length)
+{
+    size_t first = 0u;
+    while (first + 1u < *length && digits[first] == '0') ++first;
+    if (first != 0u) {
+        memmove(digits, digits + first, *length - first);
+        *length -= first;
+    }
+}
+
+static int decimal_big_compare(const char *left, size_t left_length,
+                               const char *right, size_t right_length)
+{
+    size_t i;
+    if (left_length != right_length)
+        return left_length < right_length ? -1 : 1;
+    for (i = 0u; i < left_length; ++i) {
+        if (left[i] != right[i]) return left[i] < right[i] ? -1 : 1;
+    }
+    return 0;
+}
+
+static void decimal_big_shift_add(char *digits, size_t *length, char digit)
+{
+    if (*length == 1u && digits[0] == '0') {
+        digits[0] = digit;
+    } else {
+        digits[*length] = digit;
+        ++*length;
+    }
+}
+
+static void decimal_big_subtract(char *left, size_t *left_length,
+                                 const char *right, size_t right_length)
+{
+    size_t i;
+    int borrow = 0;
+    for (i = 0u; i < *left_length; ++i) {
+        size_t left_index = *left_length - 1u - i;
+        int digit = left[left_index] - '0' - borrow;
+        if (i < right_length) digit -= right[right_length - 1u - i] - '0';
+        if (digit < 0) { digit += 10; borrow = 1; }
+        else borrow = 0;
+        left[left_index] = (char)('0' + digit);
+    }
+    decimal_big_normalize(left, left_length);
+}
+
+static RexxNumericStatus decimal_big_divide_digit(char *remainder,
+                                                  size_t *remainder_length,
+                                                  const char *divisor,
+                                                  size_t divisor_length,
+                                                  char *quotient_digit,
+                                                  size_t *work_remaining)
+{
+    unsigned int quotient = 0u;
+    for (;;) {
+        size_t compare_cost = *remainder_length > divisor_length
+                                  ? *remainder_length : divisor_length;
+        RexxNumericStatus status = decimal_charge_work(work_remaining,
+                                                       compare_cost);
+        int comparison;
+        if (status != REXX_NUMERIC_OK) return status;
+        comparison = decimal_big_compare(remainder, *remainder_length,
+                                         divisor, divisor_length);
+        if (comparison < 0) break;
+        status = decimal_charge_work(work_remaining, *remainder_length);
+        if (status != REXX_NUMERIC_OK) return status;
+        decimal_big_subtract(remainder, remainder_length,
+                             divisor, divisor_length);
+        ++quotient;
+    }
+    *quotient_digit = (char)('0' + quotient);
+    return REXX_NUMERIC_OK;
+}
+
+/* Return the leading significant digits of numerator/denominator, ignoring
+ * each decimal value's scale. The caller applies the scale difference. */
+static RexxNumericStatus decimal_ratio_digits(const RexxDecimal *numerator,
+                                              const RexxDecimal *denominator,
+                                              size_t limit,
+                                              char *digits,
+                                              size_t *digits_length,
+                                              int *adjusted_exponent,
+                                              size_t *work_remaining)
+{
+    char remainder[REXX_DECIMAL_MAX_DIGITS + 2u];
+    char integer_quotient[REXX_DECIMAL_MAX_DIGITS];
+    size_t remainder_length = 1u, i, first_nonzero, quotient_length;
+    size_t used = 0u, leading_fractional_zeroes = 0u;
+    RexxNumericStatus status;
+
+    if (numerator == NULL || denominator == NULL || digits == NULL ||
+        digits_length == NULL || adjusted_exponent == NULL || limit == 0u ||
+        limit >= REXX_DECIMAL_MAX_DIGITS)
+        return REXX_NUMERIC_INVALID;
+    remainder[0] = '0';
+    for (i = 0u; i < numerator->length; ++i) {
+        char digit;
+        status = decimal_charge_work(work_remaining, remainder_length + 1u);
+        if (status != REXX_NUMERIC_OK) return status;
+        decimal_big_shift_add(remainder, &remainder_length,
+                              numerator->digits[i]);
+        status = decimal_big_divide_digit(remainder, &remainder_length,
+                                          denominator->digits,
+                                          denominator->length, &digit,
+                                          work_remaining);
+        if (status != REXX_NUMERIC_OK) return status;
+        integer_quotient[i] = digit;
+    }
+
+    first_nonzero = 0u;
+    while (first_nonzero < numerator->length &&
+           integer_quotient[first_nonzero] == '0')
+        ++first_nonzero;
+    if (first_nonzero < numerator->length) {
+        quotient_length = numerator->length - first_nonzero;
+        *adjusted_exponent = (int)quotient_length - 1;
+        used = quotient_length < limit ? quotient_length : limit;
+        memcpy(digits, integer_quotient + first_nonzero, used);
+    }
+
+    if (used == 0u) {
+        *adjusted_exponent = 0;
+        while (used < limit) {
+            char digit;
+            status = decimal_charge_work(work_remaining,
+                                         remainder_length + 1u);
+            if (status != REXX_NUMERIC_OK) return status;
+            decimal_big_shift_add(remainder, &remainder_length, '0');
+            status = decimal_big_divide_digit(remainder, &remainder_length,
+                                              denominator->digits,
+                                              denominator->length, &digit,
+                                              work_remaining);
+            if (status != REXX_NUMERIC_OK) return status;
+            if (used == 0u && digit == '0') {
+                ++leading_fractional_zeroes;
+                continue;
+            }
+            if (used == 0u) {
+                *adjusted_exponent = -(int)(leading_fractional_zeroes + 1u);
+            }
+            digits[used++] = digit;
+            if (remainder_length == 1u && remainder[0] == '0') break;
+        }
+    } else {
+        while (used < limit &&
+               !(remainder_length == 1u && remainder[0] == '0')) {
+            char digit;
+            status = decimal_charge_work(work_remaining,
+                                         remainder_length + 1u);
+            if (status != REXX_NUMERIC_OK) return status;
+            decimal_big_shift_add(remainder, &remainder_length, '0');
+            status = decimal_big_divide_digit(remainder, &remainder_length,
+                                              denominator->digits,
+                                              denominator->length, &digit,
+                                              work_remaining);
+            if (status != REXX_NUMERIC_OK) return status;
+            digits[used++] = digit;
+        }
+    }
+    *digits_length = used;
+    return used == 0u ? REXX_NUMERIC_RESOURCE_LIMIT : REXX_NUMERIC_OK;
+}
+
+static RexxNumericStatus decimal_strip_trailing_zeroes(
+    RexxDecimal *value, size_t *work_remaining)
+{
+    if (value == NULL || value->length == 0u) return REXX_NUMERIC_INVALID;
+    while (value->sign != 0 && value->length > 1u &&
+           value->digits[value->length - 1u] == '0') {
+        RexxNumericStatus status = decimal_charge_work(work_remaining, 1u);
+        if (status != REXX_NUMERIC_OK) return status;
+        if ((int64_t)value->scale - 1 < -REXX_DECIMAL_MAX_EXPONENT)
+            return REXX_NUMERIC_RANGE;
+        --value->length;
+        --value->scale;
+        value->digits[value->length] = '\0';
+    }
+    return REXX_NUMERIC_OK;
+}
+
+RexxNumericStatus rexx_decimal_divide(const RexxDecimal *left,
+                                     const RexxDecimal *right,
+                                     size_t precision,
+                                     size_t *work_remaining,
+                                     RexxDecimal *result)
+{
+    RexxDecimal a, b;
+    char quotient[REXX_DECIMAL_MAX_DIGITS];
+    size_t quotient_length = 0u, limit;
+    int coefficient_exponent = 0;
+    int64_t exponent, scale;
+    RexxNumericStatus status;
+
+    if (left == NULL || right == NULL || result == NULL ||
+        !decimal_valid_precision(precision)) return REXX_NUMERIC_INVALID;
+    a = *left;
+    b = *right;
+    status = decimal_truncate(&a, precision + 1u);
+    if (status == REXX_NUMERIC_OK) status = decimal_truncate(&b, precision + 1u);
+    if (status != REXX_NUMERIC_OK) return status;
+    status = decimal_charge_work(work_remaining, a.length + b.length);
+    if (status != REXX_NUMERIC_OK) return status;
+    if (b.sign == 0) return REXX_NUMERIC_INVALID;
+    if (a.sign == 0) { decimal_zero(result); return REXX_NUMERIC_OK; }
+
+    limit = precision + 1u;
+    status = decimal_ratio_digits(&a, &b, limit, quotient, &quotient_length,
+                                  &coefficient_exponent, work_remaining);
+    if (status != REXX_NUMERIC_OK) return status;
+    exponent = (int64_t)coefficient_exponent + (int64_t)b.scale - a.scale;
+    scale = (int64_t)quotient_length - 1 - exponent;
+    if (scale > REXX_DECIMAL_MAX_EXPONENT ||
+        scale < -REXX_DECIMAL_MAX_EXPONENT)
+        return REXX_NUMERIC_RANGE;
+
+    memset(result, 0, sizeof(*result));
+    memcpy(result->digits, quotient, quotient_length);
+    result->digits[quotient_length] = '\0';
+    result->length = quotient_length;
+    result->scale = (int32_t)scale;
+    result->sign = (int8_t)(a.sign * b.sign);
+    status = decimal_charge_work(work_remaining, quotient_length);
+    if (status == REXX_NUMERIC_OK) status = rexx_decimal_round(result, precision);
+    if (status == REXX_NUMERIC_OK)
+        status = decimal_strip_trailing_zeroes(result, work_remaining);
+    return status;
+}
+
+static RexxNumericStatus decimal_integer_operation(
+    const RexxDecimal *left, const RexxDecimal *right, size_t precision,
+    size_t *work_remaining, RexxDecimal *quotient_result,
+    RexxDecimal *remainder_result)
+{
+    RexxDecimal a, b, quotient, product;
+    char quotient_digits[REXX_DECIMAL_MAX_DIGITS];
+    size_t quotient_digit_count = 0u, target_digits;
+    int coefficient_exponent = 0;
+    int64_t adjusted_exponent, scale_shift;
+    RexxNumericStatus status;
+
+    if (left == NULL || right == NULL || quotient_result == NULL ||
+        !decimal_valid_precision(precision)) return REXX_NUMERIC_INVALID;
+    a = *left;
+    b = *right;
+    status = decimal_truncate(&a, precision + 1u);
+    if (status == REXX_NUMERIC_OK) status = decimal_truncate(&b, precision + 1u);
+    if (status != REXX_NUMERIC_OK) return status;
+    status = decimal_charge_work(work_remaining, a.length + b.length);
+    if (status != REXX_NUMERIC_OK) return status;
+    if (b.sign == 0) return REXX_NUMERIC_INVALID;
+    if (a.sign == 0) {
+        decimal_zero(quotient_result);
+        if (remainder_result != NULL) decimal_zero(remainder_result);
+        return REXX_NUMERIC_OK;
+    }
+
+    status = decimal_ratio_digits(&a, &b, 1u, quotient_digits,
+                                  &quotient_digit_count, &coefficient_exponent,
+                                  work_remaining);
+    if (status != REXX_NUMERIC_OK) return status;
+    scale_shift = (int64_t)b.scale - a.scale;
+    adjusted_exponent = (int64_t)coefficient_exponent + scale_shift;
+    decimal_zero(&quotient);
+    if (adjusted_exponent < 0) {
+        *quotient_result = quotient;
+        if (remainder_result != NULL) *remainder_result = a;
+        return REXX_NUMERIC_OK;
+    }
+    if (adjusted_exponent >= (int64_t)precision)
+        return REXX_NUMERIC_RANGE;
+
+    target_digits = (size_t)adjusted_exponent + 1u;
+    status = decimal_ratio_digits(&a, &b, target_digits, quotient_digits,
+                                  &quotient_digit_count, &coefficient_exponent,
+                                  work_remaining);
+    if (status != REXX_NUMERIC_OK) return status;
+    if (quotient_digit_count < target_digits) {
+        memset(quotient_digits + quotient_digit_count, '0',
+               target_digits - quotient_digit_count);
+        quotient_digit_count = target_digits;
+    }
+    memset(&quotient, 0, sizeof(quotient));
+    memcpy(quotient.digits, quotient_digits, target_digits);
+    quotient.digits[target_digits] = '\0';
+    quotient.length = target_digits;
+    quotient.scale = 0;
+    quotient.sign = (int8_t)(a.sign * b.sign);
+    *quotient_result = quotient;
+
+    if (remainder_result != NULL) {
+        size_t multiply_cost = quotient.length * b.length +
+                               quotient.length + b.length;
+        int64_t scale_gap = (int64_t)a.scale - b.scale;
+        size_t subtract_cost;
+        if (scale_gap < 0) scale_gap = -scale_gap;
+        if ((uint64_t)scale_gap > (uint64_t)SIZE_MAX - a.length - b.length)
+            return REXX_NUMERIC_RESOURCE_LIMIT;
+        subtract_cost = a.length + b.length + (size_t)scale_gap;
+        status = decimal_charge_work(work_remaining, multiply_cost);
+        if (status == REXX_NUMERIC_OK)
+            status = rexx_decimal_multiply(&quotient, &b,
+                                           REXX_DECIMAL_MAX_DIGITS - 1u,
+                                           &product);
+        if (status == REXX_NUMERIC_OK)
+            status = decimal_charge_work(work_remaining, subtract_cost +
+                                         product.length);
+        if (status == REXX_NUMERIC_OK)
+            status = rexx_decimal_subtract(&a, &product,
+                                           REXX_DECIMAL_MAX_DIGITS - 1u,
+                                           remainder_result);
+        if (status != REXX_NUMERIC_OK) return status;
+    }
+    return REXX_NUMERIC_OK;
+}
+
+RexxNumericStatus rexx_decimal_integer_divide(const RexxDecimal *left,
+                                              const RexxDecimal *right,
+                                              size_t precision,
+                                              size_t *work_remaining,
+                                              RexxDecimal *result)
+{
+    return decimal_integer_operation(left, right, precision, work_remaining,
+                                     result, NULL);
+}
+
+RexxNumericStatus rexx_decimal_remainder(const RexxDecimal *left,
+                                         const RexxDecimal *right,
+                                         size_t precision,
+                                         size_t *work_remaining,
+                                         RexxDecimal *result)
+{
+    RexxDecimal quotient;
+    if (result == NULL) return REXX_NUMERIC_INVALID;
+    return decimal_integer_operation(left, right, precision, work_remaining,
+                                     &quotient, result);
+}
+
+static RexxNumericStatus decimal_power_exponent(const RexxDecimal *value,
+                                                uint32_t *magnitude,
+                                                int *negative,
+                                                size_t *integer_digits)
+{
+    size_t whole_length, i;
+    uint64_t converted = 0u;
+    if (value == NULL || magnitude == NULL || negative == NULL ||
+        integer_digits == NULL || value->length == 0u)
+        return REXX_NUMERIC_INVALID;
+    *negative = value->sign < 0;
+    if (value->sign == 0) {
+        *magnitude = 0u;
+        *integer_digits = 0u;
+        return REXX_NUMERIC_OK;
+    }
+    if (value->scale > 0) {
+        size_t fractional = (size_t)value->scale;
+        whole_length = fractional >= value->length
+                           ? 0u : value->length - fractional;
+        for (i = whole_length; i < value->length; ++i)
+            if (value->digits[i] != '0') return REXX_NUMERIC_INVALID;
+    } else {
+        size_t zeroes = (size_t)(-(int64_t)value->scale);
+        if (zeroes > 7u || value->length > 7u - zeroes)
+            return REXX_NUMERIC_RANGE;
+        whole_length = value->length + zeroes;
+    }
+    if (whole_length > 7u) return REXX_NUMERIC_RANGE;
+    for (i = 0u; i < value->length &&
+                (value->scale <= 0 || i < whole_length); ++i) {
+        converted = converted * 10u + (uint64_t)(value->digits[i] - '0');
+        if (converted > (uint64_t)REXX_DECIMAL_MAX_EXPONENT)
+            return REXX_NUMERIC_RANGE;
+    }
+    if (value->scale <= 0) {
+        size_t zeroes = (size_t)(-(int64_t)value->scale);
+        while (zeroes-- != 0u) {
+            converted *= 10u;
+            if (converted > (uint64_t)REXX_DECIMAL_MAX_EXPONENT)
+                return REXX_NUMERIC_RANGE;
+        }
+    }
+    *magnitude = (uint32_t)converted;
+    *integer_digits = whole_length;
+    return REXX_NUMERIC_OK;
+}
+
+static RexxNumericStatus decimal_power_multiply(const RexxDecimal *left,
+                                               const RexxDecimal *right,
+                                               size_t precision,
+                                               size_t *work_remaining,
+                                               RexxDecimal *result)
+{
+    size_t cost = left->length * right->length +
+                  left->length + right->length;
+    RexxNumericStatus status = decimal_charge_work(work_remaining, cost);
+    if (status != REXX_NUMERIC_OK) return status;
+    return rexx_decimal_multiply(left, right, precision, result);
+}
+
+RexxNumericStatus rexx_decimal_power(const RexxDecimal *base,
+                                     const RexxDecimal *exponent,
+                                     size_t precision,
+                                     size_t *work_remaining,
+                                     RexxDecimal *result)
+{
+    RexxDecimal factor, accumulator, temporary, one;
+    uint32_t power;
+    size_t exponent_digits, work_precision, bit;
+    int negative_exponent;
+    RexxNumericStatus status;
+
+    if (base == NULL || exponent == NULL || result == NULL ||
+        !decimal_valid_precision(precision)) return REXX_NUMERIC_INVALID;
+    status = decimal_power_exponent(exponent, &power, &negative_exponent,
+                                    &exponent_digits);
+    if (status != REXX_NUMERIC_OK) return status;
+    if (negative_exponent && base->sign == 0) return REXX_NUMERIC_INVALID;
+    if (exponent_digits > SIZE_MAX - precision - 1u)
+        return REXX_NUMERIC_RESOURCE_LIMIT;
+    work_precision = precision + exponent_digits + 1u;
+    if (work_precision >= REXX_DECIMAL_MAX_DIGITS)
+        return REXX_NUMERIC_RESOURCE_LIMIT;
+    factor = *base;
+    status = decimal_truncate(&factor, precision + 1u);
+    if (status != REXX_NUMERIC_OK) return status;
+    status = decimal_charge_work(work_remaining, exponent->length);
+    if (status != REXX_NUMERIC_OK) return status;
+    if (power == 0u) {
+        decimal_zero(&accumulator);
+        accumulator.digits[0] = '1';
+        accumulator.sign = 1;
+        *result = accumulator;
+        return REXX_NUMERIC_OK;
+    }
+
+    bit = 31u;
+    while (((power >> bit) & 1u) == 0u) --bit;
+    accumulator = factor;
+    while (bit != 0u) {
+        --bit;
+        status = decimal_charge_work(work_remaining, 1u);
+        if (status != REXX_NUMERIC_OK) return status;
+        status = decimal_power_multiply(&accumulator, &accumulator,
+                                       work_precision, work_remaining,
+                                       &temporary);
+        if (status != REXX_NUMERIC_OK) return status;
+        accumulator = temporary;
+        if (((power >> bit) & 1u) != 0u) {
+            status = decimal_power_multiply(&accumulator, &factor,
+                                           work_precision, work_remaining,
+                                           &temporary);
+            if (status != REXX_NUMERIC_OK) return status;
+            accumulator = temporary;
+        }
+    }
+
+    if (negative_exponent) {
+        decimal_zero(&one);
+        one.digits[0] = '1';
+        one.sign = 1;
+        status = rexx_decimal_divide(&one, &accumulator, work_precision,
+                                     work_remaining, &temporary);
+        if (status != REXX_NUMERIC_OK) return status;
+        accumulator = temporary;
+    }
+    status = decimal_charge_work(work_remaining, accumulator.length);
+    if (status == REXX_NUMERIC_OK)
+        status = rexx_decimal_round(&accumulator, precision);
+    if (status == REXX_NUMERIC_OK)
+        status = decimal_strip_trailing_zeroes(&accumulator, work_remaining);
+    if (status == REXX_NUMERIC_OK) *result = accumulator;
+    return status;
 }
 
 RexxNumericStatus rexx_decimal_to_uint32(const RexxDecimal *value,

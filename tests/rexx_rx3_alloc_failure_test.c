@@ -111,7 +111,8 @@ static const RexxValue *find_stem(const RexxVM *vm,
 
 static void test_decimal_core_has_no_heap_failure_points(void)
 {
-    RexxDecimal left, right, result;
+    RexxDecimal left, right, result, exponent;
+    size_t work = REXX_VM_DEFAULT_NUMERIC_WORK_BUDGET;
     char formatted[128];
     int written;
 
@@ -126,6 +127,19 @@ static void test_decimal_core_has_no_heap_failure_points(void)
           "decimal subtraction uses no VM allocation");
     CHECK(rexx_decimal_multiply(&left, &right, 9u, &result) == REXX_NUMERIC_OK,
           "decimal multiplication uses no VM allocation");
+    CHECK(rexx_decimal_divide(&left, &right, 9u, &work, &result) ==
+              REXX_NUMERIC_OK,
+          "decimal division uses fixed storage under the armed failpoint");
+    CHECK(rexx_decimal_integer_divide(&left, &right, 9u, &work, &result) ==
+              REXX_NUMERIC_OK,
+          "integer division uses fixed storage under the armed failpoint");
+    CHECK(rexx_decimal_remainder(&left, &right, 9u, &work, &result) ==
+              REXX_NUMERIC_OK,
+          "remainder uses fixed storage under the armed failpoint");
+    CHECK(rexx_decimal_parse("3", 1u, &exponent) == REXX_NUMERIC_OK &&
+              rexx_decimal_power(&left, &exponent, 9u, &work, &result) ==
+                  REXX_NUMERIC_OK,
+          "power uses fixed storage under the armed failpoint");
     CHECK(rexx_decimal_parse("9.999", 5u, &result) == REXX_NUMERIC_OK &&
               rexx_decimal_round(&result, 2u) == REXX_NUMERIC_OK,
           "precision adjustment uses no VM allocation");
@@ -444,6 +458,18 @@ int main(void)
                                    4u, REXX_VM_DEFAULT_NUMERIC_DIGITS);
     test_expression_failure_matrix("multiplication", "say 0.1 * 0.2\n", "0.02\n",
                                    4u, REXX_VM_DEFAULT_NUMERIC_DIGITS);
+    test_expression_failure_matrix("division", "say 1 / 3\n",
+                                   "0.333333333\n", 4u,
+                                   REXX_VM_DEFAULT_NUMERIC_DIGITS);
+    test_expression_failure_matrix("integer division", "say 7 % 2\n",
+                                   "3\n", 4u,
+                                   REXX_VM_DEFAULT_NUMERIC_DIGITS);
+    test_expression_failure_matrix("remainder", "say 10 // 3\n",
+                                   "1\n", 4u,
+                                   REXX_VM_DEFAULT_NUMERIC_DIGITS);
+    test_expression_failure_matrix("power", "say 2 ** 8\n",
+                                   "256\n", 4u,
+                                   REXX_VM_DEFAULT_NUMERIC_DIGITS);
     test_expression_failure_matrix("precision adjustment",
                                    "numeric digits 3\nsay 9.999 * 1\n",
                                    "10.0\n", 5u, 3u);
