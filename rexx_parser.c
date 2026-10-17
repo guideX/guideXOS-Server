@@ -134,8 +134,14 @@ static const char rexx_parser_message_parse_position[] =
     "PARSE positional pattern requires a whole number or variable pattern";
 static const char rexx_parser_message_parse_position_range[] =
     "PARSE positional pattern is outside the supported range";
-static const char rexx_parser_message_unsupported_signal_trap[] =
-    "SIGNAL ON/OFF condition traps are not supported in RX8";
+static const char rexx_parser_message_condition_syntax[] =
+    "condition trap requires ON or OFF and a valid condition name";
+static const char rexx_parser_message_condition_name[] =
+    "invalid REXX condition name";
+static const char rexx_parser_message_condition_handler[] =
+    "condition trap NAME requires a constant handler name";
+static const char rexx_parser_message_condition_call_restriction[] =
+    "CALL ON NOVALUE and CALL ON SYNTAX are not supported by classic REXX";
 static const char rexx_parser_message_signal_target[] =
     "SIGNAL requires a label or destination expression";
 static const char rexx_parser_message_signal_value[] =
@@ -1595,6 +1601,10 @@ static RexxAstClause *rexx_parser_parse_symbol_clause(
     return clause;
 }
 
+static RexxAstClause *rexx_parser_parse_condition_clause(
+    RexxParser *parser, RexxToken instruction_token,
+    RexxAstConditionAction action, unsigned int stop_mask);
+
 static RexxAstClause *rexx_parser_parse_call_clause(
     RexxParser *parser,
     unsigned int stop_mask)
@@ -1605,10 +1615,15 @@ static RexxAstClause *rexx_parser_parse_call_clause(
     int has_parentheses;
 
     (void)stop_mask;
-    clause = rexx_parser_new_clause(parser, REXX_AST_CLAUSE_CALL, &call_token);
-    if (clause == NULL || !rexx_parser_advance(parser)) {
-        return NULL;
+    if (!rexx_parser_advance(parser)) return NULL;
+    if ((parser->current.type == TOKEN_SYMBOL &&
+         (rexx_token_equals_ascii_case_insensitive(&parser->current, "ON") ||
+          rexx_token_equals_ascii_case_insensitive(&parser->current, "OFF")))) {
+        return rexx_parser_parse_condition_clause(
+            parser, call_token, REXX_AST_CONDITION_CALL, stop_mask);
     }
+    clause = rexx_parser_new_clause(parser, REXX_AST_CLAUSE_CALL, &call_token);
+    if (clause == NULL) return NULL;
     if (!rexx_parser_is_name_token(&parser->current) &&
         parser->current.type != TOKEN_STRING) {
         rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
@@ -1675,8 +1690,7 @@ static int rexx_parser_token_is_symbol_word(const RexxToken *token,
 static int rexx_parser_token_is_signal_condition(const RexxToken *token)
 {
     static const char *const conditions[] = {
-        "ERROR", "FAILURE", "HALT", "LOSTDIGITS", "NOTREADY",
-        "NOVALUE", "SYNTAX"
+        "ERROR", "FAILURE", "HALT", "NOTREADY", "NOVALUE", "SYNTAX"
     };
     size_t index;
     if (token == NULL || token->type != TOKEN_SYMBOL) return 0;
@@ -1689,23 +1703,83 @@ static int rexx_parser_token_is_signal_condition(const RexxToken *token)
     return 0;
 }
 
+static RexxAstClause *rexx_parser_parse_condition_clause(
+    RexxParser *parser, RexxToken instruction_token,
+    RexxAstConditionAction action, unsigned int stop_mask)
+{
+    RexxAstClause *clause = rexx_parser_new_clause(
+        parser, REXX_AST_CLAUSE_CONDITION, &instruction_token);
+    RexxAstCondition *condition;
+    int enable;
+    if (clause == NULL) return NULL;
+    condition = &clause->as.condition_clause;
+    condition->action = action;
+    enable = rexx_parser_token_is_symbol_word(&parser->current, "ON");
+    if (!enable &&
+        !rexx_parser_token_is_symbol_word(&parser->current, "OFF")) {
+        rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                              &parser->current,
+                              rexx_parser_message_condition_syntax);
+        return NULL;
+    }
+    condition->enable = enable;
+    if (!rexx_parser_advance(parser)) return NULL;
+    if (!rexx_parser_token_is_signal_condition(&parser->current)) {
+        rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                              &parser->current,
+                              rexx_parser_message_condition_name);
+        return NULL;
+    }
+    condition->condition = parser->current;
+    if (action == REXX_AST_CONDITION_CALL &&
+        (rexx_token_equals_ascii_case_insensitive(&condition->condition,
+                                                   "NOVALUE") ||
+         rexx_token_equals_ascii_case_insensitive(&condition->condition,
+                                                   "SYNTAX"))) {
+        rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                              &condition->condition,
+                              rexx_parser_message_condition_call_restriction);
+        return NULL;
+    }
+    if (!rexx_parser_advance(parser)) return NULL;
+    if (enable &&
+        rexx_parser_token_is_symbol_word(&parser->current, "NAME")) {
+        if (!rexx_parser_advance(parser)) return NULL;
+        if (parser->current.type != TOKEN_SYMBOL) {
+            rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                                  &parser->current,
+                                  rexx_parser_message_condition_handler);
+            return NULL;
+        }
+        condition->handler = parser->current;
+        condition->has_handler = 1;
+        if (!rexx_parser_advance(parser)) return NULL;
+    }
+    if (!rexx_parser_token_is_stop(&parser->current, stop_mask)) {
+        rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                              &parser->current,
+                              rexx_parser_message_condition_syntax);
+        return NULL;
+    }
+    return clause;
+}
+
 static RexxAstClause *rexx_parser_parse_signal_clause(
     RexxParser *parser,
     unsigned int stop_mask)
 {
     RexxToken token = parser->current;
-    RexxAstClause *clause = rexx_parser_new_clause(
-        parser, REXX_AST_CLAUSE_SIGNAL, &token);
-    if (clause == NULL || !rexx_parser_advance(parser)) return NULL;
+    RexxAstClause *clause;
+    if (!rexx_parser_advance(parser)) return NULL;
 
     if ((rexx_parser_token_is_symbol_word(&parser->current, "ON") ||
          rexx_parser_token_is_symbol_word(&parser->current, "OFF")) &&
-        rexx_parser_token_is_signal_condition(&parser->lookahead)) {
-        rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
-                              &parser->current,
-                              rexx_parser_message_unsupported_signal_trap);
-        return NULL;
-    }
+        !rexx_parser_token_is_stop(&parser->lookahead, stop_mask))
+        return rexx_parser_parse_condition_clause(
+            parser, token, REXX_AST_CONDITION_SIGNAL, stop_mask);
+
+    clause = rexx_parser_new_clause(parser, REXX_AST_CLAUSE_SIGNAL, &token);
+    if (clause == NULL) return NULL;
 
     if (rexx_parser_token_is_stop(&parser->current, stop_mask)) {
         rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,

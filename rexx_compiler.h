@@ -86,8 +86,19 @@ typedef enum RexxOpcode {
     OP_EXPOSE,
     OP_DROP,
     OP_EXPOSE_SUBSIDIARY,
-    OP_SIGNAL
+    OP_SIGNAL,
+    OP_CONDITION
 } RexxOpcode;
+
+typedef enum RexxConditionType {
+    REXX_CONDITION_ERROR = 0,
+    REXX_CONDITION_FAILURE,
+    REXX_CONDITION_HALT,
+    REXX_CONDITION_NOTREADY,
+    REXX_CONDITION_NOVALUE,
+    REXX_CONDITION_SYNTAX,
+    REXX_CONDITION_COUNT
+} RexxConditionType;
 
 /*
  * An instruction always occupies the same record size. For most opcodes,
@@ -215,6 +226,8 @@ typedef enum RexxDoFlags {
 #define REXX_INSTRUCTION_CALL_SUBROUTINE ((uint8_t)1u)
 #define REXX_INSTRUCTION_CALL_QUOTED ((uint8_t)2u)
 #define REXX_INSTRUCTION_SIGNAL_LABEL ((uint8_t)2u)
+#define REXX_INSTRUCTION_CONDITION_ON ((uint8_t)1u)
+#define REXX_INSTRUCTION_CONDITION_CALL ((uint8_t)2u)
 
 typedef enum RexxCompilerStatus {
     REXX_COMPILER_STATUS_OK = 0,

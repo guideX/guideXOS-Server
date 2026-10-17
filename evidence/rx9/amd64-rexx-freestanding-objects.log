@@ -1,0 +1,13 @@
+AMD64 freestanding REXX object compile
+gcc.exe (MinGW-W64 x86_64-msvcrt-posix-seh, built by Brecht Sanders, r7) 15.2.0
+Flags: -std=c11 -ffreestanding -O2 -Wall -Wextra -fno-builtin -nostdlib -DGXOS_BARE_METAL -I. -I.\kernel -I.\kernel\core\include -I.\kernel\arch\amd64\include -m64 -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-pic -fno-pie -fno-PIC -fno-PIE -mno-stack-arg-probe -fno-stack-check -fno-stack-protector -D__x86_64__
+[PASS] rexx_lexer.c
+[PASS] rexx_parser.c
+[PASS] rexx_compiler.c
+[PASS] rexx_vm.c
+[PASS] rexx_builtin.c
+[PASS] rexx_numeric.c
+[PASS] rexx_output.c
+[PASS] rexx_os_io.c
+[PASS] rexx_cli.c
+9/9 objects compile; no link performed.

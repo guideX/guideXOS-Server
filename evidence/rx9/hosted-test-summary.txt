@@ -1,0 +1,18 @@
+RX9 hosted qualification (2026-10-17)
+Runner: powershell -NoProfile -ExecutionPolicy Bypass -File tests\run_rexx_tests.ps1
+Result: PASS (exit 0). Full captured output: hosted-regression-run.log
+
+RX1: 11 runtime cases passed; CLI cases 20/20.
+RX2: hosted integration 45, freestanding numeric 18, shell bridge 7.
+RX3: decimal assertions 26, allocator-failure assertions 570, fixtures 13/13.
+RX4: arithmetic assertions 53, fixtures 11/11.
+RX5: numeric-context assertions 35/35, fixtures 13/13.
+RX6: PARSE allocation-failure assertions 403, compatibility/resource fixtures 25/25.
+RX7: routine assertions 13; parser/compiler/VM allocation failures 46/46,
+     28/28, 107/107; compatibility/resource fixtures 33/33.
+RX8: C semantics assertions 279/279; parser/compiler/VM allocation failpoints
+     38/38, 21/21, 50/50; fixtures 26/26.
+RX9: condition assertions 165 (PASS); parser/compiler/VM failpoint totals
+     17, 15, 23; ordinary fixtures 9/9.
+
+Regina differential cases: 0 (Regina unavailable).

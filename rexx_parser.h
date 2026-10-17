@@ -131,8 +131,22 @@ typedef enum RexxAstClauseKind {
     REXX_AST_CLAUSE_PARSE,
     REXX_AST_CLAUSE_PROCEDURE,
     REXX_AST_CLAUSE_DROP,
-    REXX_AST_CLAUSE_SIGNAL
+    REXX_AST_CLAUSE_SIGNAL,
+    REXX_AST_CLAUSE_CONDITION
 } RexxAstClauseKind;
+
+typedef enum RexxAstConditionAction {
+    REXX_AST_CONDITION_SIGNAL = 0,
+    REXX_AST_CONDITION_CALL
+} RexxAstConditionAction;
+
+typedef struct RexxAstCondition {
+    RexxAstConditionAction action;
+    RexxToken condition;
+    RexxToken handler;
+    int has_handler;
+    int enable;
+} RexxAstCondition;
 
 typedef enum RexxAstSignalKind {
     REXX_AST_SIGNAL_LABEL = 0, /* Unquoted constant symbol; case-insensitive. */
@@ -258,6 +272,7 @@ struct RexxAstClause {
             RexxToken label;
             RexxAstExpression *expression;
         } signal_clause;
+        RexxAstCondition condition_clause;
         struct {
             RexxAstName *names;
         } drop;

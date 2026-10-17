@@ -340,6 +340,22 @@ static int rexx_compiler_token_has_dot(const RexxToken *token)
     return 0;
 }
 
+static int rexx_compiler_condition_type(const RexxToken *token,
+                                        RexxConditionType *type)
+{
+    static const char *const names[] = {
+        "ERROR", "FAILURE", "HALT", "NOTREADY", "NOVALUE", "SYNTAX"
+    };
+    size_t index;
+    for (index = 0u; index < sizeof(names) / sizeof(names[0]); ++index) {
+        if (rexx_token_equals_ascii_case_insensitive(token, names[index])) {
+            *type = (RexxConditionType)index;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static unsigned char rexx_compiler_ascii_upper(unsigned char ch)
 {
     if (ch >= (unsigned char)'a' && ch <= (unsigned char)'z') {
@@ -1365,6 +1381,43 @@ static int rexx_compiler_compile_clause(RexxCompiler *compiler,
             return 0;
         }
         break;
+    case REXX_AST_CLAUSE_CONDITION: {
+        const RexxAstCondition *condition = &clause->as.condition_clause;
+        RexxConditionType condition_type;
+        uint8_t flags = 0u;
+        if (!rexx_compiler_condition_type(&condition->condition,
+                                         &condition_type) ||
+            (condition->action != REXX_AST_CONDITION_CALL &&
+             condition->action != REXX_AST_CONDITION_SIGNAL) ||
+            (condition->enable != 0 && condition->enable != 1) ||
+            (condition->has_handler != 0 && condition->has_handler != 1) ||
+            (!condition->enable && condition->has_handler) ||
+            (condition->action == REXX_AST_CONDITION_CALL &&
+             (condition_type == REXX_CONDITION_NOVALUE ||
+              condition_type == REXX_CONDITION_SYNTAX))) {
+            rexx_compiler_fail(compiler, REXX_COMPILER_STATUS_MALFORMED_AST,
+                               &clause->token,
+                               rexx_compiler_message_malformed_ast);
+            return 0;
+        }
+        if (condition->enable) flags |= REXX_INSTRUCTION_CONDITION_ON;
+        if (condition->action == REXX_AST_CONDITION_CALL)
+            flags |= REXX_INSTRUCTION_CONDITION_CALL;
+        symbol = REXX_NO_SYMBOL;
+        if (condition->enable) {
+            const RexxToken *handler = condition->has_handler
+                ? &condition->handler : &condition->condition;
+            symbol = rexx_compiler_intern_symbol(
+                compiler, handler,
+                condition->action == REXX_AST_CONDITION_CALL
+                    ? REXX_SYMBOL_ROUTINE : REXX_SYMBOL_LABEL);
+            if (compiler->status != REXX_COMPILER_STATUS_OK) return 0;
+        }
+        (void)rexx_compiler_emit(compiler, OP_CONDITION, flags,
+                                 (uint32_t)condition_type, symbol,
+                                 &clause->token);
+        break;
+    }
     case REXX_AST_CLAUSE_DROP: {
         const RexxAstName *name;
         for (name = clause->as.drop.names; name != NULL; name = name->next) {

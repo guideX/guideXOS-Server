@@ -76,7 +76,8 @@ typedef enum RexxVMStatus {
     REXX_VM_STATUS_MISSING_FUNCTION_RESULT,
     REXX_VM_STATUS_UNKNOWN_LABEL,
     REXX_VM_STATUS_INVALID_LABEL,
-    REXX_VM_STATUS_INVALID_EXPOSE_LIST
+    REXX_VM_STATUS_INVALID_EXPOSE_LIST,
+    REXX_VM_STATUS_CONTROL_TRANSFER
 } RexxVMStatus;
 
 typedef enum RexxNumericForm {
@@ -122,6 +123,8 @@ typedef struct RexxVM {
     size_t stack_capacity;
     size_t sp;            /* Number of live entries; top is stack[sp - 1]. */
     size_t pc;            /* Current bytecode instruction index. */
+    size_t current_source_line; /* Source line of the active instruction. */
+    const RexxBytecodeChunk *active_chunk; /* Valid only during execute. */
     size_t instruction_budget; /* Maximum dispatches allowed by one execute. */
     uint32_t numeric_digits; /* Per-VM NUMERIC DIGITS context. */
     uint32_t numeric_fuzz;   /* Per-VM NUMERIC FUZZ context. */
@@ -141,6 +144,20 @@ typedef struct RexxVM {
     void *current_arguments; /* Private argument vector for active routine. */
     size_t current_argument_count;
     int procedure_pending; /* Set on routine entry; cleared by first opcode. */
+
+    /* Classic condition-trap context. The arrays are per-VM and bounded by
+     * REXX_CONDITION_COUNT; descriptions are owned by this VM. */
+    uint8_t condition_states[REXX_CONDITION_COUNT];
+    uint8_t condition_actions[REXX_CONDITION_COUNT];
+    uint32_t condition_targets[REXX_CONDITION_COUNT];
+    uint32_t current_condition;
+    uint8_t condition_invocation;
+    char *condition_description;
+    size_t condition_description_length;
+    int condition_information_active;
+    int condition_control_transfer;
+    int condition_call_pending;
+    int32_t syntax_error_number;
 
     RexxVMEntry *locals;
     size_t local_count;

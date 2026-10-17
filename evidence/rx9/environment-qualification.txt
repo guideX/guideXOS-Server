@@ -1,0 +1,26 @@
+RX9 environment qualification
+
+AMD64 kernel build:
+- One attempt used the repository kernel Makefile and an isolated output path:
+  tmp/rx9-native-build.
+- Result: failed with exit 2 before link. The first fatal error is
+  app_model_limits.h:3:10: fatal error: cstddef: No such file or directory.
+  The command compiles with -nostdinc++; no kernel header was changed.
+- The 9 REXX C translation units compiled with freestanding AMD64 flags;
+  captured commands and outputs are in amd64-rexx-freestanding-objects.log.
+- No kernel.elf, booted-kernel identity, or guest execution was produced.
+
+QEMU:
+- The one-time process census found no running QEMU process.
+- qemu-system-x86_64 was absent from PATH and the configured common install
+  locations checked by the repository scripts.
+- No QEMU instance was launched, and no ESP or disk image was attached.
+- Guest screenshots, serial output, and heartbeat evidence are unavailable.
+
+Sanitizers:
+- MinGW GCC 15.2 compilation with ASan/UBSan failed at link because -lasan
+  and -lubsan are unavailable.
+- Clang 22 compiled the same test sources but could not link its Windows
+  ASan/UBSan runtime archives (libclang_rt.asan_dynamic* and
+  libclang_rt.ubsan_standalone.a are absent for the selected GNU target).
+- No sanitizer run completed.

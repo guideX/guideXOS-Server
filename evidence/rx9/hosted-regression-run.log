@@ -1,0 +1,268 @@
+Building hosted REXX runtime tests with C:\mingw64\bin\gcc.exe
+Building hosted REXX CLI test driver
+Building RX2 VFS and output integration tests
+Building RX2 freestanding numeric adapter tests
+Building RX3 decimal arithmetic assertions
+Building RX3 hosted allocation-failure qualification tests
+Building RX4 decimal arithmetic tests
+Building RX5 numeric-context tests
+Building RX6 PARSE allocation-failure tests
+Building RX7 internal routine C-level tests
+Building RX7 parser/compiler/VM allocation-failure tests
+Building RX8 SIGNAL, subsidiary EXPOSE, and allocation tests
+Building RX9 condition-trap and allocation tests
+Building RX2 C++ shell bridge integration tests
+Running hosted runtime assertions
+[TEST] arithmetic and assignment
+11
+[PASS] arithmetic and assignment
+
+[TEST] stem variable
+active
+[PASS] stem variable
+
+[TEST] IF and DO control flow
+Greater
+[PASS] IF and DO control flow
+
+[TEST] ADDRESS dispatcher
+[ADDRESS] sys_status
+[PASS] ADDRESS dispatcher
+
+[TEST] case-insensitive names and concatenation
+[PASS] case-insensitive names and concatenation
+
+[TEST] ADDRESS environment and RC semantics
+[ADDRESS TEMP] temp_cmd
+[ADDRESS DEFAULT] DEFAULT_CMD
+[PASS] ADDRESS environment and RC semantics
+
+[TEST] repeated ADDRESS stack balance
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[PASS] repeated ADDRESS stack balance
+
+[TEST] EXIT 0 terminates execution
+[PASS] EXIT 0 terminates execution
+
+[TEST] EXIT nonzero value
+[PASS] EXIT nonzero value
+
+[TEST] bounded bytecode execution
+[PASS] bounded bytecode execution
+
+[TEST] evaluation stack resource limit
+[PASS] evaluation stack resource limit
+
+All REXX integration tests passed.
+Running RX2 VFS and output assertions
+RX2 hosted integration assertions passed: 45
+Running RX2 freestanding numeric assertions
+RX2 freestanding numeric assertions passed: 18
+Running RX3 decimal arithmetic assertions
+RX3 decimal assertions passed: 26
+Running RX3 allocation-failure assertions
+RX3 allocator-failure assertions passed: 570
+Running RX4 decimal arithmetic assertions
+RX4 arithmetic assertions passed: 53
+Running RX5 numeric-context assertions
+RX5 numeric-context assertions passed: 35/35
+Running RX6 PARSE allocation-failure assertions
+RX6 PARSE allocation-failure assertions passed: 403
+Running RX7 internal routine assertions
+RX7 routine assertions passed: 13
+Running RX7 allocation-failure assertions
+RX7 parser allocation failures: 46/46
+RX7 compiler allocation failures: 28/28
+RX7 VM allocation failures: 107/107
+RX7 allocator assertions passed
+Running RX8 semantic, allocation-failure, and recovery assertions
+RX8 parser allocation failpoints: 38/38
+RX8 compiler allocation failpoints: 21/21
+RX8 VM allocation failpoints: 50/50
+RX8 C assertions passed: 279/279
+RX8 semantic, allocation, and recovery assertions passed
+Running RX9 condition-trap and allocation assertions
+RX9 allocator failpoints: parser 17, compiler 15, VM 23
+RX9 condition assertions: 165 (PASS)
+Running RX2 shell bridge assertions
+RX2 shell bridge assertions passed: 7
+[PASS] CLI assignment_case
+[PASS] CLI arithmetic
+[PASS] CLI string_concatenation
+[PASS] CLI comparison_conditional
+[PASS] CLI stem_variable
+[PASS] CLI builtin_string_functions
+[PASS] CLI say_and_normal_completion
+[PASS] CLI address_rc_is_not_process_status
+[PASS] CLI exit_zero
+[PASS] CLI exit_nonzero
+[PASS] CLI exit_numeric_string
+[PASS] CLI exit_without_value
+[PASS] CLI exit_noninteger_status
+[PASS] CLI syntax_error
+[PASS] CLI classic_division_opcode
+[PASS] CLI parse_arg_case_and_shell_tokenization
+[PASS] CLI parse_upper_arg
+[PASS] CLI parse_arg_comma_templates
+[PASS] CLI top_level_arg_builtin
+[PASS] RX3 fixture basic_arithmetic.rex
+[PASS] RX3 fixture comparisons.rex
+[PASS] RX3 fixture division_pending.rex
+[PASS] RX3 fixture form_pending.rex
+[PASS] RX3 fixture fractional_digits.rex
+[PASS] RX3 fixture fuzz_pending.rex
+[PASS] RX3 fixture invalid_digits.rex
+[PASS] RX3 fixture invalid_numeric.rex
+[PASS] RX3 fixture numeric_context.rex
+[PASS] RX3 fixture numeric_defaults.rex
+[PASS] RX3 fixture numeric_work_limit.rex
+[PASS] RX3 fixture rounding_and_exponents.rex
+[PASS] RX3 fixture string_preservation.rex
+[PASS] RX4 fixture arithmetic_combinations.rex
+[PASS] RX4 fixture division_by_zero.rex
+[PASS] RX4 fixture division_precision.rex
+[PASS] RX4 fixture division_work_limit.rex
+[PASS] RX4 fixture fractional_power.rex
+[PASS] RX4 fixture integer_quotient_limit.rex
+[PASS] RX4 fixture integer_remainder.rex
+[PASS] RX4 fixture invalid_numeric_operand.rex
+[PASS] RX4 fixture power_precedence.rex
+[PASS] RX4 fixture power_work_limit.rex
+[PASS] RX4 fixture zero_negative_power.rex
+[PASS] RX5 fixture context_defaults_and_builtins.rex
+[PASS] RX5 fixture dynamic_form.rex
+[PASS] RX5 fixture form_formats.rex
+[PASS] RX5 fixture fuzz_comparisons.rex
+[PASS] RX5 fixture invalid_digits_below_fuzz.rex
+[PASS] RX5 fixture invalid_digits_reset_under_fuzz.rex
+[PASS] RX5 fixture invalid_form_argument_count.rex
+[PASS] RX5 fixture invalid_form_missing_value_keyword.rex
+[PASS] RX5 fixture invalid_form_value.rex
+[PASS] RX5 fixture invalid_fuzz_argument_count.rex
+[PASS] RX5 fixture invalid_fuzz_digits_boundary.rex
+[PASS] RX5 fixture invalid_fuzz_fraction.rex
+[PASS] RX5 fixture invalid_fuzz_negative.rex
+[PASS] RX6 fixture invalid_template.rex
+[PASS] RX6 fixture parse_absolute_backtracking.rex
+[PASS] RX6 fixture parse_absolute_positions.rex
+[PASS] RX6 fixture parse_arg_missing.rex
+[PASS] RX6 fixture parse_compound_source_alias.rex
+[PASS] RX6 fixture parse_compound_variables.rex
+[PASS] RX6 fixture parse_dynamic_patterns.rex
+[PASS] RX6 fixture parse_dynamic_string_pattern.rex
+[PASS] RX6 fixture parse_empty_pattern.rex
+[PASS] RX6 fixture parse_empty_source.rex
+[PASS] RX6 fixture parse_literal_delimiters.rex
+[PASS] RX6 fixture parse_missing_match.rex
+[PASS] RX6 fixture parse_placeholders.rex
+[PASS] RX6 fixture parse_relative_backtracking.rex
+[PASS] RX6 fixture parse_relative_positions.rex
+[PASS] RX6 fixture parse_repeated_delimiters.rex
+[PASS] RX6 fixture parse_single_field_whitespace.rex
+[PASS] RX6 fixture parse_source_alias.rex
+[PASS] RX6 fixture parse_string_relative_special_case.rex
+[PASS] RX6 fixture parse_unmatched_then_fields.rex
+[PASS] RX6 fixture parse_upper_value.rex
+[PASS] RX6 fixture parse_value_expression.rex
+[PASS] RX6 fixture parse_var_fields.rex
+[PASS] RX7 fixture arg_invalid_index.rex
+[PASS] RX7 fixture arg_option_prefix.rex
+[PASS] RX7 fixture backward_call.rex
+[PASS] RX7 fixture builtin_shadowing.rex
+[PASS] RX7 fixture call_counted_loop.rex
+[PASS] RX7 fixture call_inside_do_group.rex
+[PASS] RX7 fixture call_return_result.rex
+[PASS] RX7 fixture do_control_variable_write.rex
+[PASS] RX7 fixture do_counted_ranges.rex
+[PASS] RX7 fixture duplicate_label.rex
+[PASS] RX7 fixture guest_acceptance.rex
+[PASS] RX7 fixture guest_context.rex
+[PASS] RX7 fixture guest_core.rex
+[PASS] RX7 fixture guest_depth_limit.rex
+[PASS] RX7 fixture guest_recovery.rex
+[PASS] RX7 fixture invalid_procedure_placement.rex
+[PASS] RX7 fixture missing_function_result.rex
+[PASS] RX7 fixture numeric_restore.rex
+[PASS] RX7 fixture numeric_restore_procedure.rex
+[PASS] RX7 fixture procedure_expose.rex
+[PASS] RX7 fixture procedure_expose_compound.rex
+[PASS] RX7 fixture procedure_expose_subsidiary.rex
+[PASS] RX7 fixture procedure_isolation.rex
+[PASS] RX7 fixture procedure_outside_routine.rex
+[PASS] RX7 fixture procedure_uninitialized_expose.rex
+[PASS] RX7 fixture quoted_builtin.rex
+[PASS] RX7 fixture quoted_routine_name.rex
+[PASS] RX7 fixture recursive_depth_limit.rex
+[PASS] RX7 fixture recursive_functions.rex
+[PASS] RX7 fixture return_top_level.rex
+[PASS] RX7 fixture routine_arg_omissions.rex
+[PASS] RX7 fixture routine_arguments.rex
+[PASS] RX7 fixture undefined_routine.rex
+[PASS] RX8 fixture guest_acceptance.rex
+[PASS] RX8 fixture guest_recovery.rex
+[PASS] RX8 fixture guest_unknown_label.rex
+[PASS] RX8 fixture procedure_expose_drop.rex
+[PASS] RX8 fixture procedure_expose_empty.rex
+[PASS] RX8 fixture procedure_expose_invalid.rex
+[PASS] RX8 fixture procedure_expose_missing.rex
+[PASS] RX8 fixture procedure_expose_multiple.rex
+[PASS] RX8 fixture procedure_expose_nested.rex
+[PASS] RX8 fixture procedure_expose_order.rex
+[PASS] RX8 fixture procedure_expose_repeated.rex
+[PASS] RX8 fixture signal_call_function.rex
+[PASS] RX8 fixture signal_call_sigl.rex
+[PASS] RX8 fixture signal_condition_trap.rex
+[PASS] RX8 fixture signal_cross_label_call.rex
+[PASS] RX8 fixture signal_do_while.rex
+[PASS] RX8 fixture signal_dynamic.rex
+[PASS] RX8 fixture signal_dynamic_lowercase.rex
+[PASS] RX8 fixture signal_invalid_dynamic.rex
+[PASS] RX8 fixture signal_labels_sigl.rex
+[PASS] RX8 fixture signal_literal_case.rex
+[PASS] RX8 fixture signal_loop_termination.rex
+[PASS] RX8 fixture signal_omitted_value.rex
+[PASS] RX8 fixture signal_recursive.rex
+[PASS] RX8 fixture signal_subkeyword_labels.rex
+[PASS] RX8 fixture signal_unknown.rex
+[PASS] RX9 fixture call_error_delay.rex
+[PASS] RX9 fixture condition_info_restore.rex
+[PASS] RX9 fixture invalid_call_novalue.rex
+[PASS] RX9 fixture invalid_condition_name.rex
+[PASS] RX9 fixture routine_trap_restore.rex
+[PASS] RX9 fixture signal_error.rex
+[PASS] RX9 fixture signal_novalue.rex
+[PASS] RX9 fixture signal_novalue_compound_default.rex
+[PASS] RX9 fixture signal_syntax.rex
+[PASS] RX6 parser template-node resource limit
+[PASS] RX6 bounded pattern-matching work
+[PASS] CLI source-size memory limit
+Regina REXX is unavailable; expected compatibility outputs are documented in the RX1 handoff.
+Hosted CLI cases passed: 20/20
+RX9 condition fixtures passed: 9/9
+RX3 compatibility fixtures passed: 13/13
+RX4 compatibility fixtures passed: 11/11
+RX5 compatibility fixtures passed: 13/13
+RX6 compatibility and resource fixtures passed: 25/25
+RX7 compatibility and resource fixtures passed: 33/33
+RX8 compatibility fixtures passed: 26/26
+RX3 Regina differential cases: 0 run (Regina unavailable)
+RX4 Regina differential cases: 0 run (Regina unavailable)
+RX5 Regina differential cases: 0 run (Regina unavailable)
+RX6 Regina differential cases: 0 run (Regina unavailable)
+RX8 Regina differential fixtures: 0 run (Regina unavailable)
+Build and temporary script artifacts: D:\dev\guideXOSServer_REXX\tmp\rexx-rx1-tests-888d77f5fdfa48eeae7d63869c5e43fb
