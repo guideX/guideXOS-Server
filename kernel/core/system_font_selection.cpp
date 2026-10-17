@@ -3,6 +3,9 @@
 #include "include/kernel/vfs.h"
 #include "font_contract_internal.h"
 #include "system_font_selection_internal.h"
+#if defined(GXOS_FONT11_QEMU_PROOF)
+#include "include/kernel/serial_debug.h"
+#endif
 
 namespace gxos {
 namespace gui {
@@ -58,6 +61,52 @@ uint32_t s_preparedRecord = kInvalidRecord;
 uint8_t s_initialized = 0;
 int8_t s_preferenceSlot = -1;
 volatile uint32_t s_selectionLock = 0;
+
+#if defined(GXOS_FONT11_QEMU_PROOF)
+void font11r_log_stage(const char* stage)
+{
+	kernel::serial::puts("[FONT11R] stage=");
+	kernel::serial::puts(stage);
+	kernel::serial::puts("\n");
+}
+
+void font11r_log_result(const char* stage, int32_t result)
+{
+	kernel::serial::puts("[FONT11R] stage=");
+	kernel::serial::puts(stage);
+	kernel::serial::puts(" result=0x");
+	kernel::serial::put_hex32(static_cast<uint32_t>(result));
+	kernel::serial::puts("\n");
+}
+
+bool font11r_storage_read_write_probe()
+{
+	static const char kProbePath[] = "/f11r-rw.tmp";
+	static const char kProbeBytes[] = "FONT11R-RW-PROBE-01";
+	char readback[sizeof(kProbeBytes)] = {};
+	font11r_log_stage("storage-probe-write-begin");
+	const int32_t written = kernel::vfs::write_file(kProbePath, kProbeBytes,
+		static_cast<uint32_t>(sizeof(kProbeBytes)));
+	font11r_log_result("storage-probe-write", written);
+	if (written != static_cast<int32_t>(sizeof(kProbeBytes))) return false;
+	font11r_log_stage("storage-probe-read-begin");
+	const int32_t read = kernel::vfs::read_file(kProbePath, readback,
+		static_cast<uint32_t>(sizeof(readback)));
+	font11r_log_result("storage-probe-read", read);
+	bool matches = read == static_cast<int32_t>(sizeof(kProbeBytes));
+	for (uint32_t i = 0u; matches && i < sizeof(kProbeBytes); ++i)
+		matches = readback[i] == kProbeBytes[i];
+	const kernel::vfs::Status removed = kernel::vfs::unlink(kProbePath);
+	font11r_log_result("storage-probe-unlink", static_cast<int32_t>(removed));
+	font11r_log_result("storage-probe-match", matches ? 1 : 0);
+	return matches && removed == kernel::vfs::VFS_OK;
+}
+#define FONT11R_STAGE(stage) font11r_log_stage(stage)
+#define FONT11R_RESULT(stage, result) font11r_log_result(stage, result)
+#else
+#define FONT11R_STAGE(stage) ((void)0)
+#define FONT11R_RESULT(stage, result) ((void)0)
+#endif
 
 void lockSelection()
 {
@@ -742,18 +791,23 @@ bool verifyPreferenceFile(const char* path, const char* serialized,
 	const SystemFontConfiguredPreference& expected, uint64_t sequence)
 {
 	kernel::vfs::FileInfo info = {};
-	if (kernel::vfs::stat(path, &info) != kernel::vfs::VFS_OK ||
+	const kernel::vfs::Status statStatus = kernel::vfs::stat(path, &info);
+	FONT11R_RESULT("preference-verify-stat", static_cast<int32_t>(statStatus));
+	if (statStatus != kernel::vfs::VFS_OK ||
 		info.type != kernel::vfs::FILE_TYPE_REGULAR || info.size != kPreferenceStorageBytes)
 		return false;
 	const int32_t read = kernel::vfs::read_file(path, s_preferenceText, kPreferenceTextBytes);
+	FONT11R_RESULT("preference-verify-read", read);
 	if (read != static_cast<int32_t>(kPreferenceStorageBytes)) return false;
 	for (uint32_t i = 0u; i < kPreferenceStorageBytes; ++i)
 		if (s_preferenceText[i] != serialized[i]) return false;
 	SystemFontConfiguredPreference verified = {};
 	bool unsupported = false;
-	return parsePreferenceText(s_preferenceText, kPreferenceStorageBytes, &verified, &unsupported) &&
+	const bool valid = parsePreferenceText(s_preferenceText, kPreferenceStorageBytes, &verified, &unsupported) &&
 		identityEquals(verified.identity, expected.identity) &&
 		verified.pixelSize == expected.pixelSize && verified.sequence == sequence;
+	FONT11R_RESULT("preference-verify-record", valid ? 1 : 0);
+	return valid;
 }
 
 void cleanupPreferenceScratch()
@@ -771,8 +825,12 @@ bool persistPreference(const SystemFontConfiguredPreference& preference,
 	const uint64_t sequence = s_configured.sequence == 0xffffffffffffffffull
 		? 1u : (s_configured.sequence + 1u);
 	const uint32_t targetSlot = s_preferenceSlot == 0 ? 1u : 0u;
-	if (!serializePreference(preference, sequence, s_preferenceSerialized,
-		sizeof(s_preferenceSerialized))) return false;
+	FONT11R_STAGE("preference-serialize-begin");
+	const bool serialized = serializePreference(preference, sequence, s_preferenceSerialized,
+		sizeof(s_preferenceSerialized));
+	FONT11R_RESULT("preference-serialize", serialized ? 1 : 0);
+	if (!serialized) return false;
+	FONT11R_STAGE("preference-write-scratch-begin");
 	int32_t written = kernel::vfs::write_file(kPreferenceTempPath, s_preferenceSerialized,
 		kPreferenceStorageBytes);
 	if (written != static_cast<int32_t>(kPreferenceStorageBytes)) {
@@ -785,15 +843,21 @@ bool persistPreference(const SystemFontConfiguredPreference& preference,
 					s_preferenceSerialized, kPreferenceStorageBytes);
 		}
 	}
+	FONT11R_RESULT("preference-write-scratch", written);
 	if (written != static_cast<int32_t>(kPreferenceStorageBytes)) return false;
-	if (!verifyPreferenceFile(kPreferenceTempPath, s_preferenceSerialized, preference, sequence))
+	FONT11R_STAGE("preference-verify-scratch-begin");
+	if (!verifyPreferenceFile(kPreferenceTempPath, s_preferenceSerialized, preference, sequence)) {
+		FONT11R_RESULT("preference-verify-scratch", 0);
 		return false;
+	}
+	FONT11R_RESULT("preference-verify-scratch", 1);
 
 	// Publish by overwriting only the inactive slot. FAT's VFS rename path is
 	// not consistently supported by folder-backed implementations. In-place
 	// writes may leave this target incomplete, but the currently selected slot
 	// remains untouched and is still the recovery record.
 	const char* targetPath = kPreferencePaths[targetSlot];
+	FONT11R_STAGE("preference-write-slot-begin");
 	written = kernel::vfs::write_file(targetPath, s_preferenceSerialized,
 		kPreferenceStorageBytes);
 	if (written == kernel::vfs::VFS_ERR_NO_SPACE) {
@@ -807,15 +871,20 @@ bool persistPreference(const SystemFontConfiguredPreference& preference,
 			written = kernel::vfs::create_file(targetPath, s_preferenceSerialized,
 				kPreferenceStorageBytes);
 	}
+	FONT11R_RESULT("preference-write-slot", written);
 	if (written != static_cast<int32_t>(kPreferenceStorageBytes)) return false;
+	FONT11R_STAGE("preference-verify-slot-begin");
 	if (!verifyPreferenceFile(targetPath, s_preferenceSerialized, preference, sequence)) {
+		FONT11R_RESULT("preference-verify-slot", 0);
 		// The slot is inactive until verified. Best-effort removal prevents a
 		// fully-written but unreadable candidate from superseding the prior
 		// configured value after a restart.
 		kernel::vfs::unlink(targetPath);
 		return false;
 	}
+	FONT11R_RESULT("preference-verify-slot", 1);
 	cleanupPreferenceScratch();
+	FONT11R_STAGE("preference-cleanup-scratch-complete");
 	if (outSlot) *outSlot = targetSlot;
 	if (outSequence) *outSequence = sequence;
 	return true;
@@ -1096,7 +1165,9 @@ SystemFontSelectionStatus applyRecord(uint32_t recordIndex, uint32_t pixelSize,
 		return SystemFontSelectionStatus::GenerationExhausted;
 	FontHandle targetHandle = builtin ? s_builtinHandle : s_records[recordIndex].handle;
 	if (verifyFile && !builtin) {
+		FONT11R_STAGE("candidate-source-validation-begin");
 		const SystemFontSelectionStatus verified = verifyRecordSource(recordIndex);
+		FONT11R_RESULT("candidate-source-validation", static_cast<int32_t>(verified));
 		if (verified != SystemFontSelectionStatus::Ok) return verified;
 	}
 	FontHandle oldHandle = s_builtinHandle;
@@ -1113,7 +1184,9 @@ SystemFontSelectionStatus applyRecord(uint32_t recordIndex, uint32_t pixelSize,
 		((builtin && s_configured.identity.kind == SystemFontIdentityKind::BuiltinBitmap) ||
 		(!builtin && identityEquals(s_configured.identity, s_records[recordIndex].identity))))
 		return SystemFontSelectionStatus::Ok;
+	FONT11R_STAGE("active-font-handle-stage-begin");
 	const FontStatus setStatus = internal::fontManagerSetSystemDefaultFont(targetHandle);
+	FONT11R_RESULT("active-font-handle-stage", static_cast<int32_t>(setStatus));
 	if (setStatus != FontStatus::Ok) return fontStatusToSelectionStatus(setStatus);
 	if (persist) {
 		SystemFontConfiguredPreference desired = {};
@@ -1142,6 +1215,7 @@ SystemFontSelectionStatus applyRecord(uint32_t recordIndex, uint32_t pixelSize,
 	}
 	s_activeRecord = recordIndex;
 	s_activeSize = pixelSize;
+	FONT11R_RESULT("active-selection-published", static_cast<int32_t>(SystemFontSelectionStatus::Ok));
 	return SystemFontSelectionStatus::Ok;
 }
 
@@ -1173,6 +1247,10 @@ SystemFontSelectionStatus SystemFontSelectionInitialize()
 	s_initialized = 1u;
 	(void)refreshCatalogLocked();
 	const SystemFontSelectionStatus restored = loadAndApplyPreference();
+#if defined(GXOS_FONT11_QEMU_PROOF)
+	const bool storageProbePassed = font11r_storage_read_write_probe();
+	font11r_log_result("storage-probe", storageProbePassed ? 1 : 0);
+#endif
 	return restored == SystemFontSelectionStatus::PreferenceCorrupt ||
 		restored == SystemFontSelectionStatus::PreferenceUnsupported ||
 		restored == SystemFontSelectionStatus::NotFound ||
@@ -1420,15 +1498,20 @@ SystemFontSelectionStatus SystemFontSelectionApply(const SystemFontCandidate* ca
 			s_preparedRecord < kSystemFontMaxAvailableFonts &&
 			s_records[s_preparedRecord].occupied && s_records[s_preparedRecord].available) {
 			const uint32_t priorGeneration = s_selectionGeneration;
+			FONT11R_STAGE("selection-apply-core-begin");
 			status = applyRecord(s_preparedRecord, candidate->pixelSize, true, true);
+			FONT11R_RESULT("selection-apply-core", static_cast<int32_t>(status));
 			changed = status == SystemFontSelectionStatus::Ok && s_selectionGeneration != priorGeneration;
 		}
 		s_prepared = {};
 		s_preparedRecord = kInvalidRecord;
 	}
 	if (changed || status == SystemFontSelectionStatus::PersistenceFailed ||
-		status == SystemFontSelectionStatus::RollbackFailed)
+		status == SystemFontSelectionStatus::RollbackFailed) {
+		FONT11R_STAGE("desktop-notification-begin");
 		notifyDesktop();
+		FONT11R_STAGE("desktop-notification-complete");
+	}
 	return status;
 }
 

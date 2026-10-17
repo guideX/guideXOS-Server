@@ -140,6 +140,52 @@ static void serial_put_u32_decimal(uint32_t value)
     kernel::serial::puts(&buffer[index]);
 }
 
+#if defined(GXOS_FONT11_QEMU_PROOF)
+static bool s_font11CacheTraceStarted = false;
+static uint32_t s_font11CacheTraceRemaining = 0u;
+
+static void font11_qemu_arm_cache_trace()
+{
+    if (s_font11CacheTraceStarted) return;
+    s_font11CacheTraceStarted = true;
+    s_font11CacheTraceRemaining = 24u;
+}
+
+static void font11_qemu_report_draw_cache()
+{
+    static uint32_t drawSequence = 0u;
+    if (s_font11CacheTraceRemaining == 0u) return;
+    ++drawSequence;
+    --s_font11CacheTraceRemaining;
+
+    DesktopFontCacheDebugStatistics cache = {};
+    const bool haveCache = kernel::desktop::desktop_font11_qemu_get_cache_statistics(&cache);
+    kernel::serial::puts("[FONT11_CACHE] draw=");
+    serial_put_u32_decimal(drawSequence);
+    kernel::serial::puts(" status=");
+    serial_put_u32_decimal(haveCache ? 0u : 1u);
+    kernel::serial::puts(" hits=");
+    serial_put_u32_decimal(static_cast<uint32_t>(cache.hits));
+    kernel::serial::puts(" misses=");
+    serial_put_u32_decimal(static_cast<uint32_t>(cache.misses));
+    kernel::serial::puts(" rasters=");
+    serial_put_u32_decimal(static_cast<uint32_t>(cache.rasterizations));
+    kernel::serial::puts(" evictions=");
+    serial_put_u32_decimal(static_cast<uint32_t>(cache.evictions));
+    kernel::serial::puts(" entry-evictions=");
+    serial_put_u32_decimal(static_cast<uint32_t>(cache.entryCapacityEvictions));
+    kernel::serial::puts(" coverage-evictions=");
+    serial_put_u32_decimal(static_cast<uint32_t>(cache.coverageCapacityEvictions));
+    kernel::serial::puts(" entries=");
+    serial_put_u32_decimal(cache.entryCount);
+    kernel::serial::puts(" bytes=");
+    serial_put_u32_decimal(cache.bytesUsed);
+    kernel::serial::puts(" peak=");
+    serial_put_u32_decimal(cache.peakBytesUsed);
+    kernel::serial::puts("\n");
+}
+#endif
+
 #if ARCH_HAS_PIC_8259
 static const char* framebuffer_format_name(uint32_t format)
 {
@@ -6679,10 +6725,15 @@ static void draw_clock_widget(TaskbarWidget& widget)
         return;
     }
 
-    uint32_t timeY = widget.bounds.y + 6;
-    draw_text_centered(widget.bounds.x, timeY, widget.bounds.w, kTaskbarH / 2 - 4, timeStr, rgb(210, 210, 220), 1);
-    uint32_t dateY = widget.bounds.y + kTaskbarH / 2 + 2;
-    draw_text_centered(widget.bounds.x, dateY, widget.bounds.w, kTaskbarH / 2 - 4, dateStr, rgb(160, 160, 175), 1);
+    DesktopTaskbarClockTextLayout layout = {};
+    if (!desktop_taskbar_clock_text_layout(widget.bounds.x, widget.bounds.y,
+            widget.bounds.w, widget.bounds.h, &layout)) return;
+    draw_shell_text_in_rect(layout.x, layout.timeY, layout.width, layout.lineHeight,
+        timeStr, rgb(210, 210, 220), DesktopSystemTextRole::TaskbarClock,
+        DesktopTextAlignment::Right);
+    draw_shell_text_in_rect(layout.x, layout.dateY, layout.width, layout.lineHeight,
+        dateStr, rgb(160, 160, 175), DesktopSystemTextRole::TaskbarClock,
+        DesktopTextAlignment::Right);
 }
 
 static void init_taskbar_widgets()
@@ -7021,6 +7072,9 @@ static void draw_taskbar()
 static void draw_start_menu()
 {
     if (!s_startMenuOpen) return;
+#if defined(GXOS_FONT11_QEMU_PROOF)
+    font11_qemu_arm_cache_trace();
+#endif
 
     // Get current item count based on mode (pinned+recent or all programs)
     int itemCount = get_start_menu_item_count();
@@ -9289,6 +9343,9 @@ void draw()
     // This is the key to preventing flickering - all drawing is done
     // to the back buffer, then copied to the screen in one operation
     framebuffer::present();
+#if defined(GXOS_FONT11_QEMU_PROOF)
+    font11_qemu_report_draw_cache();
+#endif
 }
 
 #if defined(GXOS_FONT6_QEMU_PROOF)

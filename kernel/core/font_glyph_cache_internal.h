@@ -6,13 +6,13 @@ namespace gxos {
 namespace gui {
 namespace internal {
 
-// FONT5 uses fixed blocks to avoid heap allocation and fragmentation. Cache
-// helpers are called only while the FONT2 manager lock is held. The lock
-// order is therefore manager -> cache; the cache never calls the manager.
-static const uint32_t kFontGlyphCacheMaxEntries = 16u;
+// FONT11 keeps metadata and a variable-size coverage arena in fixed arrays, so
+// it needs no heap allocation. Cache helpers are called only while the FONT2
+// manager lock is held. The lock order is manager -> cache; the cache never
+// calls the manager.
+static const uint32_t kFontGlyphCacheMaxEntries = 72u;
 static const uint32_t kFontGlyphCacheEntryPixelBytes = 4096u;
-static const uint32_t kFontGlyphCachePixelStorageBytes =
-	kFontGlyphCacheMaxEntries * kFontGlyphCacheEntryPixelBytes;
+static const uint32_t kFontGlyphCachePixelStorageBytes = 65536u;
 static const uint32_t kFontGlyphCacheMaxMetadataBytes = 4096u;
 static const uint32_t kFontGlyphCacheMaxMemoryBytes = 72u * 1024u;
 static const uint32_t kFontGlyphRasterConfigGray8UnhintedV1 = 0x00010001u;

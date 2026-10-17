@@ -8,15 +8,15 @@ namespace {
 
 struct FontGlyphCacheEntry {
 	FontGlyphCacheKey key;
-	GlyphMetrics metrics;
 	uint64_t lastUse;
-	uint32_t pixelBytes;
+	uint16_t pixelOffset;
+	uint16_t pixelBytes;
 	uint8_t valid;
 	uint8_t reserved[3];
 };
 
 FontGlyphCacheEntry s_entries[kFontGlyphCacheMaxEntries] = {};
-uint8_t s_pixels[kFontGlyphCacheMaxEntries][kFontGlyphCacheEntryPixelBytes] = {};
+uint8_t s_pixels[kFontGlyphCachePixelStorageBytes] = {};
 FontGlyphCacheStatistics s_statistics = {};
 uint64_t s_useSequence = 0;
 
@@ -51,24 +51,42 @@ void clearEntry(uint32_t index, bool clearPixels)
 			s_statistics.bytesUsed -= entry.pixelBytes;
 		else
 			s_statistics.bytesUsed = 0u;
+		if (clearPixels) {
+			for (uint32_t i = 0u; i < entry.pixelBytes; ++i)
+				s_pixels[static_cast<uint32_t>(entry.pixelOffset) + i] = 0u;
+		}
 	}
 	entry = {};
-	if (clearPixels) {
-		for (uint32_t i = 0; i < kFontGlyphCacheEntryPixelBytes; ++i)
-			s_pixels[index][i] = 0u;
-	}
+}
+
+uint32_t findUnusedEntry()
+{
+	for (uint32_t i = 0u; i < kFontGlyphCacheMaxEntries; ++i)
+		if (!s_entries[i].valid) return i;
+	return kFontGlyphCacheMaxEntries;
 }
 
 uint32_t selectVictim()
 {
-	for (uint32_t i = 0; i < kFontGlyphCacheMaxEntries; ++i)
-		if (!s_entries[i].valid) return i;
-	uint32_t victim = 0u;
-	for (uint32_t i = 1u; i < kFontGlyphCacheMaxEntries; ++i) {
+	uint32_t victim = kFontGlyphCacheMaxEntries;
+	for (uint32_t i = 0u; i < kFontGlyphCacheMaxEntries; ++i) {
+		if (!s_entries[i].valid) continue;
+		if (victim == kFontGlyphCacheMaxEntries ||
+			s_entries[i].lastUse < s_entries[victim].lastUse)
+			victim = i;
 		// Stable lower-index tie breaking makes eviction deterministic.
-		if (s_entries[i].lastUse < s_entries[victim].lastUse) victim = i;
 	}
 	return victim;
+}
+
+void evictEntry(uint32_t cause)
+{
+	const uint32_t victim = selectVictim();
+	if (victim >= kFontGlyphCacheMaxEntries) return;
+	increment(&s_statistics.evictions);
+	if (cause == 0u) increment(&s_statistics.entryCapacityEvictions);
+	else increment(&s_statistics.coverageCapacityEvictions);
+	clearEntry(victim, false);
 }
 
 uint64_t nextUseSequence()
@@ -76,22 +94,79 @@ uint64_t nextUseSequence()
 	if (s_useSequence == static_cast<uint64_t>(-1)) {
 		// The cache is tiny. Resetting its age labels preserves bounded,
 		// deterministic eviction if the diagnostic lifetime counter saturates.
-		for (uint32_t i = 0; i < kFontGlyphCacheMaxEntries; ++i)
+		for (uint32_t i = 0u; i < kFontGlyphCacheMaxEntries; ++i)
 			s_entries[i].lastUse = 0u;
 		s_useSequence = 0u;
 	}
 	return ++s_useSequence;
 }
 
-bool sameRasterMetrics(const GlyphMetrics& left, const GlyphMetrics& right)
+bool findFreeRange(uint32_t requiredBytes, uint32_t* outOffset)
 {
-	return left.glyphId == right.glyphId &&
-		left.xBearingPx == right.xBearingPx &&
-		left.yBearingPx == right.yBearingPx &&
-		left.widthPx == right.widthPx &&
-		left.heightPx == right.heightPx &&
-		left.advancePx == right.advancePx &&
-		left.sideBearingPx == right.sideBearingPx;
+	if (!outOffset || requiredBytes > kFontGlyphCachePixelStorageBytes) return false;
+	if (requiredBytes == 0u) {
+		*outOffset = 0u;
+		return true;
+	}
+	uint32_t cursor = 0u;
+	for (uint32_t scanned = 0u; scanned < kFontGlyphCacheMaxEntries; ++scanned) {
+		uint32_t nextEntry = kFontGlyphCacheMaxEntries;
+		uint32_t nextOffset = kFontGlyphCachePixelStorageBytes;
+		for (uint32_t i = 0u; i < kFontGlyphCacheMaxEntries; ++i) {
+			const FontGlyphCacheEntry& entry = s_entries[i];
+			if (!entry.valid || entry.pixelBytes == 0u || entry.pixelOffset < cursor)
+				continue;
+			if (entry.pixelOffset < nextOffset ||
+				(entry.pixelOffset == nextOffset && i < nextEntry)) {
+				nextEntry = i;
+				nextOffset = entry.pixelOffset;
+			}
+		}
+		if (nextEntry == kFontGlyphCacheMaxEntries) {
+			if (kFontGlyphCachePixelStorageBytes - cursor < requiredBytes) return false;
+			*outOffset = cursor;
+			return true;
+		}
+		if (nextOffset - cursor >= requiredBytes) {
+			*outOffset = cursor;
+			return true;
+		}
+		cursor = nextOffset + s_entries[nextEntry].pixelBytes;
+		if (cursor > kFontGlyphCachePixelStorageBytes) return false;
+	}
+	if (kFontGlyphCachePixelStorageBytes - cursor < requiredBytes) return false;
+	*outOffset = cursor;
+	return true;
+}
+
+void compactPixelStorage()
+{
+	uint32_t order[kFontGlyphCacheMaxEntries] = {};
+	uint32_t count = 0u;
+	for (uint32_t i = 0u; i < kFontGlyphCacheMaxEntries; ++i) {
+		if (!s_entries[i].valid || s_entries[i].pixelBytes == 0u) continue;
+		uint32_t insertAt = count;
+		while (insertAt > 0u &&
+			(s_entries[order[insertAt - 1u]].pixelOffset > s_entries[i].pixelOffset ||
+			(s_entries[order[insertAt - 1u]].pixelOffset == s_entries[i].pixelOffset &&
+			 order[insertAt - 1u] > i))) {
+			order[insertAt] = order[insertAt - 1u];
+			--insertAt;
+		}
+		order[insertAt] = i;
+		++count;
+	}
+
+	uint32_t destination = 0u;
+	for (uint32_t position = 0u; position < count; ++position) {
+		FontGlyphCacheEntry& entry = s_entries[order[position]];
+		const uint32_t source = entry.pixelOffset;
+		for (uint32_t byte = 0u; byte < entry.pixelBytes; ++byte)
+			s_pixels[destination + byte] = s_pixels[source + byte];
+		entry.pixelOffset = static_cast<uint16_t>(destination);
+		destination += entry.pixelBytes;
+	}
+	increment(&s_statistics.coverageCompactions);
 }
 
 } // namespace
@@ -109,12 +184,12 @@ FontStatus fontGlyphCacheGetOrRasterize(const FontGlyphCacheKey& key,
 		key.pixelSize == 0u || key.rasterConfig == 0u)
 		return FontStatus::InvalidArgument;
 
-	for (uint32_t i = 0; i < kFontGlyphCacheMaxEntries; ++i) {
+	for (uint32_t i = 0u; i < kFontGlyphCacheMaxEntries; ++i) {
 		FontGlyphCacheEntry& entry = s_entries[i];
 		if (!entry.valid || !keyEquals(entry.key, key)) continue;
 		entry.lastUse = nextUseSequence();
-		*outMetrics = entry.metrics;
-		*outCoverage = s_pixels[i];
+		*outMetrics = lookupMetrics;
+		*outCoverage = s_pixels + entry.pixelOffset;
 		*outCacheHit = true;
 		increment(&s_statistics.hits);
 		return FontStatus::Ok;
@@ -136,48 +211,95 @@ FontStatus fontGlyphCacheGetOrRasterize(const FontGlyphCacheKey& key,
 	const uint32_t stride = lookupMetrics.widthPx;
 	const FontStatus rasterStatus = rasterizer(rasterizerContext, scratch,
 		scratchCapacity, stride, &rasterMetrics);
-	if (rasterStatus != FontStatus::Ok && rasterStatus != FontStatus::FallbackUsed)
+	if (rasterStatus != FontStatus::Ok && rasterStatus != FontStatus::FallbackUsed) {
+		increment(&s_statistics.rasterizationFailures);
 		return rasterStatus;
-	if (!sameRasterMetrics(lookupMetrics, rasterMetrics)) return FontStatus::BackendFailure;
+	}
+	if (rasterMetrics.glyphId != lookupMetrics.glyphId ||
+		rasterMetrics.xBearingPx != lookupMetrics.xBearingPx ||
+		rasterMetrics.yBearingPx != lookupMetrics.yBearingPx ||
+		rasterMetrics.widthPx != lookupMetrics.widthPx ||
+		rasterMetrics.heightPx != lookupMetrics.heightPx ||
+		rasterMetrics.advancePx != lookupMetrics.advancePx ||
+		rasterMetrics.sideBearingPx != lookupMetrics.sideBearingPx) {
+		increment(&s_statistics.rasterizationFailures);
+		return FontStatus::BackendFailure;
+	}
 
 	const uint32_t pixelCount = static_cast<uint32_t>(pixelCount64);
 	if (pixelCount > kFontGlyphCacheEntryPixelBytes) {
+		increment(&s_statistics.cacheBypasses);
+		increment(&s_statistics.oversizedBypasses);
 		*outMetrics = rasterMetrics;
 		*outCoverage = scratch;
 		return rasterStatus;
 	}
 
-	const uint32_t victim = selectVictim();
-	if (s_entries[victim].valid) {
-		increment(&s_statistics.evictions);
-		clearEntry(victim, false);
+	if (findUnusedEntry() >= kFontGlyphCacheMaxEntries)
+		evictEntry(0u);
+	uint32_t coverageEvictionAttempts = 0u;
+	while (s_statistics.bytesUsed > kFontGlyphCachePixelStorageBytes - pixelCount &&
+		coverageEvictionAttempts < kFontGlyphCacheMaxEntries) {
+		const uint32_t priorEntryCount = s_statistics.entryCount;
+		const uint32_t priorBytesUsed = s_statistics.bytesUsed;
+		evictEntry(1u);
+		++coverageEvictionAttempts;
+		if (s_statistics.entryCount >= priorEntryCount &&
+			s_statistics.bytesUsed >= priorBytesUsed) break;
+	}
+	if (s_statistics.bytesUsed > kFontGlyphCachePixelStorageBytes - pixelCount) {
+		increment(&s_statistics.cacheBypasses);
+		increment(&s_statistics.admissionBypasses);
+		*outMetrics = rasterMetrics;
+		*outCoverage = scratch;
+		return rasterStatus;
+	}
+
+	uint32_t pixelOffset = 0u;
+	if (!findFreeRange(pixelCount, &pixelOffset)) {
+		compactPixelStorage();
+		if (!findFreeRange(pixelCount, &pixelOffset)) {
+			// This can only follow corrupted internal accounting. Fail safely and
+			// draw from the shared raster scratch without caching the glyph.
+			increment(&s_statistics.cacheBypasses);
+			increment(&s_statistics.admissionBypasses);
+			*outMetrics = rasterMetrics;
+			*outCoverage = scratch;
+			return rasterStatus;
+		}
+	}
+
+	const uint32_t victim = findUnusedEntry();
+	if (victim >= kFontGlyphCacheMaxEntries) {
+		// Entry pressure is handled before coverage allocation above.
+		increment(&s_statistics.cacheBypasses);
+		increment(&s_statistics.admissionBypasses);
+		*outMetrics = rasterMetrics;
+		*outCoverage = scratch;
+		return rasterStatus;
 	}
 	FontGlyphCacheEntry& entry = s_entries[victim];
 	entry.key = key;
-	entry.metrics = rasterMetrics;
 	entry.lastUse = nextUseSequence();
-	entry.pixelBytes = pixelCount;
+	entry.pixelOffset = static_cast<uint16_t>(pixelOffset);
+	entry.pixelBytes = static_cast<uint16_t>(pixelCount);
 	entry.valid = 1u;
 	entry.reserved[0] = entry.reserved[1] = entry.reserved[2] = 0u;
-	for (uint32_t row = 0; row < rasterMetrics.heightPx; ++row) {
-		for (uint32_t column = 0; column < rasterMetrics.widthPx; ++column) {
-			const size_t sourceIndex = static_cast<size_t>(row) * stride + column;
-			const size_t destinationIndex = static_cast<size_t>(row) * rasterMetrics.widthPx + column;
-			s_pixels[victim][destinationIndex] = scratch[sourceIndex];
-		}
-	}
+	for (uint32_t i = 0u; i < pixelCount; ++i)
+		s_pixels[pixelOffset + i] = scratch[i];
 	++s_statistics.entryCount;
 	s_statistics.bytesUsed += pixelCount;
 	if (s_statistics.bytesUsed > s_statistics.peakBytesUsed)
 		s_statistics.peakBytesUsed = s_statistics.bytesUsed;
 	*outMetrics = rasterMetrics;
-	*outCoverage = s_pixels[victim];
+	*outCoverage = s_pixels + pixelOffset;
 	return rasterStatus;
 }
 
 void fontGlyphCacheResetLocked()
 {
-	for (uint32_t i = 0; i < kFontGlyphCacheMaxEntries; ++i) clearEntry(i, true);
+	for (uint32_t i = 0u; i < kFontGlyphCacheMaxEntries; ++i) s_entries[i] = {};
+	for (uint32_t i = 0u; i < kFontGlyphCachePixelStorageBytes; ++i) s_pixels[i] = 0u;
 	s_statistics = {};
 	s_useSequence = 0u;
 }
@@ -185,7 +307,7 @@ void fontGlyphCacheResetLocked()
 void fontGlyphCacheInvalidateFontLocked(uint16_t fontSlot, uint32_t generation)
 {
 	if (generation == 0u) return;
-	for (uint32_t i = 0; i < kFontGlyphCacheMaxEntries; ++i) {
+	for (uint32_t i = 0u; i < kFontGlyphCacheMaxEntries; ++i) {
 		const FontGlyphCacheEntry& entry = s_entries[i];
 		if (entry.valid && entry.key.fontSlot == fontSlot &&
 			entry.key.fontGeneration == generation) clearEntry(i, true);

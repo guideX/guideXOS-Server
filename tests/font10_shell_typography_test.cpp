@@ -266,6 +266,7 @@ void setActive(bool active) { s_scalableActive = active; }
 void setActiveSize(uint32_t size) { s_activePixelSize = size; }
 void setStale(bool stale) { s_fontDrawStale = stale; }
 void setGeneration(uint32_t generation) { s_selectionGeneration = generation; }
+uint32_t generation() { return s_selectionGeneration; }
 const char* bitmapText() { return s_lastBitmapText; }
 int bitmapX() { return s_lastBitmapX; }
 int bitmapY() { return s_lastBitmapY; }
@@ -313,6 +314,38 @@ int main()
 	CHECK(measure_system_text_for_role("Start Menu", DesktopSystemTextRole::StartMenuLabel,
 		&roleMetrics));
 	CHECK(roleMetrics.pixelSize == 12u);
+	CHECK(measure_system_text_for_role("10/17/2026", DesktopSystemTextRole::TaskbarClock,
+		&roleMetrics));
+	CHECK(roleMetrics.pixelSize == 12u);
+
+	DesktopTaskbarClockTextLayout clockLayout = {};
+	CHECK(desktop_taskbar_clock_text_layout(100u, 700u, 70u, 40u, &clockLayout));
+	CHECK(clockLayout.x == 102u && clockLayout.width == 66u);
+	CHECK(clockLayout.timeY == 706u && clockLayout.dateY == 722u &&
+		clockLayout.lineHeight == 16u);
+	CHECK(desktop_taskbar_clock_text_layout(100u, 700u, 70u, 38u, &clockLayout) &&
+		clockLayout.dateY + clockLayout.lineHeight == 738u);
+	const char fullDate[] = "10/17/2026";
+	char fittedDate[32] = {};
+	FontTextLineLayout dateLayout = {};
+	CHECK(FontTextLayoutSingleLine({1u, 0u, 10u}, {12u}, fullDate,
+		sizeof(fullDate) - 1u, clockLayout.width,
+		FontTextOverflowPolicy::Ellipsis, fittedDate, sizeof(fittedDate),
+		&dateLayout) == FontStatus::Ok);
+	CHECK(std::strcmp(fittedDate, fullDate) == 0 && dateLayout.inkWidthPx <= 66u);
+	CHECK(!desktop_taskbar_clock_text_layout(100u, 700u, 5u, 40u, &clockLayout));
+	CHECK(!desktop_taskbar_clock_text_layout(100u, 700u, 70u, 37u, &clockLayout));
+	CHECK(!desktop_taskbar_clock_text_layout(0xfffffff0u, 700u, 70u, 40u,
+		&clockLayout));
+
+	// Minute changes redraw the same clock rectangle without changing selection.
+	const uint32_t generationBeforeClockUpdate = test_font10::generation();
+	CHECK(draw_shell_text_in_rect(20u, 30u, 66u, 16u, "19:08", 0xffeeeeeeu,
+		DesktopSystemTextRole::TaskbarClock, DesktopTextAlignment::Right));
+	CHECK(test_font10::scalableSize() == 12u && test_font10::scalableX() == 56u);
+	CHECK(draw_shell_text_in_rect(20u, 30u, 66u, 16u, "19:09", 0xffeeeeeeu,
+		DesktopSystemTextRole::TaskbarClock, DesktopTextAlignment::Right));
+	CHECK(test_font10::generation() == generationBeforeClockUpdate);
 	DesktopSystemTextMetrics preferenceMetrics = {};
 	CHECK(measure_system_text("Large preference", &preferenceMetrics));
 	CHECK(preferenceMetrics.pixelSize == 48u);
@@ -422,6 +455,11 @@ int main()
 	CHECK(draw_shell_text_in_rect(12u, 60u, 64u, 22u, "New generation",
 		0xff123456u, DesktopSystemTextRole::TaskbarLabel,
 		DesktopTextAlignment::Center));
+	test_font10::setGeneration(13u);
+	CHECK(draw_shell_text_in_rect(20u, 30u, 66u, 16u, "19:09", 0xffeeeeeeu,
+		DesktopSystemTextRole::TaskbarClock, DesktopTextAlignment::Right) &&
+		test_font10::scalableSize() == 12u && test_font10::scalableX() == 56u);
+	CHECK(test_font10::generation() == 13u);
 
 	char oversizedText[4097] = {};
 	for (size_t i = 0u; i < sizeof(oversizedText) - 1u; ++i) oversizedText[i] = 'W';
@@ -436,12 +474,12 @@ int main()
 		DesktopTextAlignment::Left));
 	DesktopShellTypographyStatistics stats = {};
 	desktop_shell_typography_get_statistics(&stats);
-	CHECK(stats.textDrawRequests == 19u);
-	CHECK(stats.scalableDraws == 13u);
+	CHECK(stats.textDrawRequests == 22u);
+	CHECK(stats.scalableDraws == 16u);
 	CHECK(stats.bitmapFallbackDraws == 4u);
 	CHECK(stats.bitmapFallbackFailures == 2u);
-	CHECK(stats.generationChangesObserved == 2u);
-	CHECK(stats.observedSelectionGeneration == 12u);
+	CHECK(stats.generationChangesObserved == 3u);
+	CHECK(stats.observedSelectionGeneration == 13u);
 	desktop_shell_typography_record_frame();
 	desktop_shell_typography_get_statistics(&stats);
 	CHECK(stats.shellFrames == 1u);

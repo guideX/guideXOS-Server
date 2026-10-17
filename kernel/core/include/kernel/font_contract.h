@@ -131,6 +131,13 @@ struct FontGlyphCacheStatistics {
 	uint64_t misses;
 	uint64_t rasterizations;
 	uint64_t evictions;
+	uint64_t entryCapacityEvictions;
+	uint64_t coverageCapacityEvictions;
+	uint64_t coverageCompactions;
+	uint64_t cacheBypasses;
+	uint64_t oversizedBypasses;
+	uint64_t admissionBypasses;
+	uint64_t rasterizationFailures;
 	uint32_t entryCount;
 	uint32_t bytesUsed;
 	uint32_t peakBytesUsed;

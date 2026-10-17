@@ -234,8 +234,13 @@ bool draw_bitmap_text_in_rect(uint32_t x, uint32_t y, uint32_t boxWidth,
     const uint32_t fittedWidth = prefixWidth + (ellipsisAdded
         ? static_cast<uint32_t>(ellipsisWidth) : 0u);
     if (fittedWidth > boxWidth) return false;
-    const uint32_t drawOffsetX = alignment == DesktopTextAlignment::Center && fittedWidth < boxWidth
-        ? (boxWidth - fittedWidth) / 2u : 0u;
+	uint32_t drawOffsetX = 0u;
+	if (fittedWidth < boxWidth) {
+		if (alignment == DesktopTextAlignment::Center)
+			drawOffsetX = (boxWidth - fittedWidth) / 2u;
+		else if (alignment == DesktopTextAlignment::Right)
+			drawOffsetX = boxWidth - fittedWidth;
+	}
     const uint32_t drawY = y + (boxHeight - static_cast<uint32_t>(lineHeight)) / 2u;
     if (static_cast<uint64_t>(x) + drawOffsetX + fittedWidth > width ||
         static_cast<uint64_t>(drawY) + static_cast<uint32_t>(lineHeight) > height) return false;

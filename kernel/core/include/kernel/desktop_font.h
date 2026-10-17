@@ -14,6 +14,14 @@ struct DesktopSystemTextMetrics {
 	uint32_t pixelSize;
 };
 
+struct DesktopTaskbarClockTextLayout {
+	uint32_t x;
+	uint32_t width;
+	uint32_t timeY;
+	uint32_t dateY;
+	uint32_t lineHeight;
+};
+
 struct DesktopShellTypographyStatistics {
 	uint64_t shellFrames;
 	uint64_t textDrawRequests;
@@ -24,6 +32,20 @@ struct DesktopShellTypographyStatistics {
 	uint32_t generationChangesObserved;
 };
 
+#if defined(GXOS_FONT11_QEMU_PROOF)
+struct DesktopFontCacheDebugStatistics {
+	uint64_t hits;
+	uint64_t misses;
+	uint64_t rasterizations;
+	uint64_t evictions;
+	uint64_t entryCapacityEvictions;
+	uint64_t coverageCapacityEvictions;
+	uint32_t entryCount;
+	uint32_t bytesUsed;
+	uint32_t peakBytesUsed;
+};
+#endif
+
 namespace kernel {
 namespace desktop {
 
@@ -32,11 +54,13 @@ enum class DesktopSystemTextRole : uint8_t {
 	WindowTitle = 1,
 	TaskbarLabel = 2,
 	StartMenuLabel = 3,
+	TaskbarClock = 4,
 };
 
 enum class DesktopTextAlignment : uint8_t {
 	Left = 0,
 	Center = 1,
+	Right = 2,
 };
 
 static const int kGlyphW = 5;
@@ -68,10 +92,17 @@ bool draw_bitmap_text_in_rect(uint32_t x, uint32_t y, uint32_t width,
 	DesktopTextAlignment alignment);
 bool measure_system_text_for_role(const char* str, DesktopSystemTextRole role,
 	DesktopSystemTextMetrics* outMetrics);
+bool desktop_taskbar_clock_text_layout(uint32_t widgetX, uint32_t widgetY,
+	uint32_t widgetWidth, uint32_t widgetHeight,
+	DesktopTaskbarClockTextLayout* outLayout);
 void desktop_shell_typography_get_statistics(
 	DesktopShellTypographyStatistics* outStatistics);
 void desktop_shell_typography_reset_statistics();
 void desktop_shell_typography_record_frame();
+#if defined(GXOS_FONT11_QEMU_PROOF)
+bool desktop_font11_qemu_get_cache_statistics(
+	DesktopFontCacheDebugStatistics* outStatistics);
+#endif
 bool measure_system_text(const char* str, DesktopSystemTextMetrics* outMetrics);
 void draw_text_centered(uint32_t rx, uint32_t ry, uint32_t rw, uint32_t rh,
                         const char* str, uint32_t color, int scale = 1);

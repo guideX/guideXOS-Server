@@ -47,6 +47,18 @@ namespace apps {
 namespace settings = gxos::apps::settings;
 namespace fontsettings = kernel::apps::font_settings;
 
+#if defined(GXOS_FONT11_QEMU_PROOF)
+static void font11r_log_apply_status(const char* stage,
+	gxos::gui::SystemFontSelectionStatus status)
+{
+	::kernel::serial::puts("[FONT11R_UI] stage=");
+	::kernel::serial::puts(stage);
+	::kernel::serial::puts(" result=");
+	::kernel::serial::puts(fontsettings::SystemFontSelectionStatusName(status));
+	::kernel::serial::puts("\n");
+}
+#endif
+
 static bool s_kernelLastDnsUsed = false;
 static char s_kernelLastDnsHost[gxos::web::kHttpSharedMaxHostnameBytes + 1];
 static char s_kernelLastDnsResolvedIp[16];
@@ -17087,10 +17099,17 @@ private:
 
     void applyFontEdits()
     {
+#if defined(GXOS_FONT11_QEMU_PROOF)
+        ::kernel::serial::puts("[FONT11R_UI] stage=settings-apply-request\n");
+#endif
         gxos::gui::SystemFontSelectionSnapshot active{};
-        if (fontsettings::SystemFontSelectionGetActive(&active) !=
-            gxos::gui::SystemFontSelectionStatus::Ok) {
-            updateFontStatus(gxos::gui::SystemFontSelectionStatus::NotInitialized);
+        const gxos::gui::SystemFontSelectionStatus activeStatus =
+            fontsettings::SystemFontSelectionGetActive(&active);
+#if defined(GXOS_FONT11_QEMU_PROOF)
+        font11r_log_apply_status("active-state-validation", activeStatus);
+#endif
+        if (activeStatus != gxos::gui::SystemFontSelectionStatus::Ok) {
+            updateFontStatus(activeStatus);
             return;
         }
         if (active.selectionGeneration != m_fontActiveGeneration) {
@@ -17101,13 +17120,32 @@ private:
         const uint32_t expectedGeneration = m_fontActiveGeneration;
         gxos::gui::SystemFontSelectionStatus status = gxos::gui::SystemFontSelectionStatus::Ok;
         if (m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::BuiltinBitmap) {
+#if defined(GXOS_FONT11_QEMU_PROOF)
+            ::kernel::serial::puts("[FONT11R_UI] stage=bitmap-apply-begin\n");
+#endif
             status = fontsettings::SystemFontSelectionResetToBuiltin();
+#if defined(GXOS_FONT11_QEMU_PROOF)
+            font11r_log_apply_status("bitmap-apply", status);
+#endif
         } else {
             gxos::gui::SystemFontCandidate candidate{};
+#if defined(GXOS_FONT11_QEMU_PROOF)
+            ::kernel::serial::puts("[FONT11R_UI] stage=candidate-preparation-begin\n");
+#endif
             status = fontsettings::SystemFontSelectionPrepare(
                 &m_fontPendingIdentity, m_fontPendingSize, &candidate);
-            if (status == gxos::gui::SystemFontSelectionStatus::Ok)
+#if defined(GXOS_FONT11_QEMU_PROOF)
+            font11r_log_apply_status("candidate-preparation", status);
+#endif
+            if (status == gxos::gui::SystemFontSelectionStatus::Ok) {
+#if defined(GXOS_FONT11_QEMU_PROOF)
+                ::kernel::serial::puts("[FONT11R_UI] stage=selection-apply-begin\n");
+#endif
                 status = fontsettings::SystemFontSelectionApply(&candidate);
+#if defined(GXOS_FONT11_QEMU_PROOF)
+                font11r_log_apply_status("selection-apply", status);
+#endif
+            }
         }
         if (status == gxos::gui::SystemFontSelectionStatus::Ok) {
             (void)fontsettings::SystemFontSelectionGetActive(&m_fontActive);
@@ -17117,6 +17155,9 @@ private:
             chooseFontIdentity(m_fontActive.identity);
             m_fontPendingSize = m_fontActive.pixelSize;
             strcopy(m_fontStatusText, "Font applied and saved.", sizeof(m_fontStatusText));
+#if defined(GXOS_FONT11_QEMU_PROOF)
+            font11r_log_apply_status("ui-apply-completion", status);
+#endif
         } else {
             if (status == gxos::gui::SystemFontSelectionStatus::NotFound ||
                 status == gxos::gui::SystemFontSelectionStatus::StaleIdentity ||
@@ -17142,6 +17183,9 @@ private:
                 }
             }
             updateFontStatus(status);
+#if defined(GXOS_FONT11_QEMU_PROOF)
+            font11r_log_apply_status("ui-apply-failure-notification", status);
+#endif
         }
     }
 

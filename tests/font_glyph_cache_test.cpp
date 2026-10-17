@@ -82,6 +82,27 @@ GlyphMetrics testMetrics(UnicodeCodePoint cp, uint32_t pixelSize)
 		result.yBearingPx = static_cast<int32_t>(result.heightPx);
 		return result;
 	}
+	if (cp >= '!' && cp <= '0') {
+		result.widthPx = 32u;
+		result.heightPx = 32u;
+		result.advancePx = 34u;
+		result.yBearingPx = 32;
+		return result;
+	}
+	if (cp == '2') {
+		result.widthPx = 64u;
+		result.heightPx = 32u;
+		result.advancePx = 66u;
+		result.yBearingPx = 32;
+		return result;
+	}
+	if (cp >= '3' && cp <= 'S') {
+		result.widthPx = 64u;
+		result.heightPx = 64u;
+		result.advancePx = 66u;
+		result.yBearingPx = 64;
+		return result;
+	}
 	result.widthPx = 2u + ((cp * 2654435761u) % 4u);
 	result.heightPx = (5u * pixelSize + 15u) / 16u;
 	result.yBearingPx = static_cast<int32_t>(result.heightPx);
@@ -187,7 +208,7 @@ void checkLimits()
 {
 	FontGlyphCacheStatistics stats = {};
 	CHECK(FontGlyphCacheGetStatistics(&stats) == FontStatus::Ok);
-	CHECK(stats.maxEntries == 16u);
+	CHECK(stats.maxEntries == 72u);
 	CHECK(stats.maxPixelBytes == 65536u);
 	CHECK(stats.maxGlyphPixels == 4096u);
 	CHECK(stats.maxMetadataBytes <= 4096u);
@@ -253,15 +274,68 @@ void testMissingGlyphFallback(FontHandle font)
 void testEviction(FontHandle font)
 {
 	FontGlyphCacheReset();
-	std::vector<uint32_t> pixels(512u * 24u, 0xff000000u);
-	CHECK(draw(font, "ABCDEFGHIJKLMNOPQ", 16u, &pixels, 512u, 24u, 0, 16) == FontStatus::Ok);
+	std::vector<uint32_t> pixels(512u * 64u, 0xff000000u);
+	char keys[61] = {};
+	uint32_t position = 0u;
+	for (uint32_t codePoint = '!'; codePoint <= '0'; ++codePoint)
+		keys[position++] = static_cast<char>(codePoint);
+	for (uint32_t codePoint = 'T'; codePoint <= 127u; ++codePoint)
+		keys[position++] = static_cast<char>(codePoint);
+	CHECK(position == 60u);
+	CHECK(draw(font, keys, 16u, &pixels, 512u, 64u, 0, 16) == FontStatus::Ok);
+	for (uint32_t size = 1u; size <= 13u; ++size)
+		CHECK(draw(font, " ", size, &pixels, 512u, 64u, 0, 16) == FontStatus::Ok);
 	FontGlyphCacheStatistics stats = {};
 	CHECK(FontGlyphCacheGetStatistics(&stats) == FontStatus::Ok);
-	CHECK(stats.entryCount == 16u && stats.misses == 17u);
-	CHECK(stats.evictions == 1u && stats.bytesUsed <= stats.maxPixelBytes);
-	CHECK(draw(font, "A", 16u, &pixels, 512u, 24u, 0, 16) == FontStatus::Ok);
+	CHECK(stats.entryCount == 72u && stats.misses == 73u);
+	CHECK(stats.evictions == 1u && stats.entryCapacityEvictions == 1u &&
+		stats.coverageCapacityEvictions == 0u && stats.bytesUsed <= stats.maxPixelBytes);
+	CHECK(draw(font, keys, 16u, &pixels, 512u, 64u, 0, 16) == FontStatus::Ok);
+	for (uint32_t size = 1u; size <= 13u; ++size)
+		CHECK(draw(font, " ", size, &pixels, 512u, 64u, 0, 16) == FontStatus::Ok);
 	CHECK(FontGlyphCacheGetStatistics(&stats) == FontStatus::Ok);
-	CHECK(stats.misses == 18u && stats.evictions == 2u);
+	CHECK(stats.misses == 146u && stats.evictions == 74u &&
+		stats.entryCapacityEvictions == 74u);
+}
+
+void testCoverageCapacityEviction(FontHandle font)
+{
+	FontGlyphCacheReset();
+	std::vector<uint32_t> pixels(2048u * 128u, 0xff000000u);
+	char keys[18] = {};
+	for (uint32_t i = 0u; i < 17u; ++i) keys[i] = static_cast<char>('3' + i);
+	CHECK(draw(font, keys, 16u, &pixels, 2048u, 128u, 0, 70) == FontStatus::Ok);
+	FontGlyphCacheStatistics stats = {};
+	CHECK(FontGlyphCacheGetStatistics(&stats) == FontStatus::Ok);
+	CHECK(stats.entryCount == 16u && stats.bytesUsed == 65536u);
+	CHECK(stats.evictions == 1u && stats.entryCapacityEvictions == 0u &&
+		stats.coverageCapacityEvictions == 1u);
+}
+
+void testCoverageCompaction(FontHandle font)
+{
+	FontGlyphCacheReset();
+	std::vector<uint32_t> pixels(1024u * 256u, 0xff000000u);
+	char allSmall[17] = {};
+	char hotSmall[9] = {};
+	for (uint32_t i = 0u; i < 16u; ++i) allSmall[i] = static_cast<char>('!' + i);
+	for (uint32_t i = 0u; i < 8u; ++i) hotSmall[i] = static_cast<char>('!' + i * 2u);
+	const uint32_t sizes[] = {8u, 10u, 12u, 14u};
+	for (uint32_t i = 0u; i < sizeof(sizes) / sizeof(sizes[0]); ++i)
+		CHECK(draw(font, allSmall, sizes[i], &pixels, 1024u, 256u, 0, 80) == FontStatus::Ok);
+	for (uint32_t i = 0u; i < sizeof(sizes) / sizeof(sizes[0]); ++i)
+		CHECK(draw(font, hotSmall, sizes[i], &pixels, 1024u, 256u, 0, 80) == FontStatus::Ok);
+	CHECK(draw(font, "2", 16u, &pixels, 1024u, 256u, 0, 80) == FontStatus::Ok);
+	CHECK(draw(font, "2", 18u, &pixels, 1024u, 256u, 0, 80) == FontStatus::Ok);
+	FontGlyphCacheStatistics stats = {};
+	CHECK(FontGlyphCacheGetStatistics(&stats) == FontStatus::Ok);
+	CHECK(stats.bytesUsed == 65536u && stats.peakBytesUsed == 65536u);
+	CHECK(stats.coverageCapacityEvictions == 4u &&
+		stats.entryCapacityEvictions == 0u && stats.coverageCompactions >= 1u);
+	const uint64_t rasters = stats.rasterizations;
+	CHECK(draw(font, "!", 8u, &pixels, 1024u, 256u, 0, 80) == FontStatus::Ok);
+	CHECK(FontGlyphCacheGetStatistics(&stats) == FontStatus::Ok);
+	CHECK(stats.rasterizations == rasters && stats.hits != 0u);
 }
 
 void testOversizedUncachedGlyph(FontHandle font)
@@ -273,6 +347,7 @@ void testOversizedUncachedGlyph(FontHandle font)
 	CHECK(FontGlyphCacheGetStatistics(&stats) == FontStatus::Ok);
 	CHECK(stats.misses == 1u && stats.rasterizations == 1u);
 	CHECK(stats.entryCount == 0u && stats.bytesUsed == 0u);
+	CHECK(stats.oversizedBypasses == 1u);
 	CHECK(std::any_of(pixels.begin(), pixels.end(), [](uint32_t p) { return p != 0xff000000u; }));
 }
 
@@ -329,6 +404,7 @@ void testFailedRasterRollbackAndFallback(FontHandle font)
 	FontGlyphCacheStatistics stats = {};
 	CHECK(FontGlyphCacheGetStatistics(&stats) == FontStatus::Ok);
 	CHECK(stats.misses == 2u && stats.rasterizations == 2u);
+	CHECK(stats.rasterizationFailures == 1u);
 	CHECK(stats.entryCount == 1u && stats.bytesUsed == 35u);
 	CHECK(draw(font, "F", 16u, &pixels, 32u, 16u, 0, 12) == FontStatus::Ok);
 	CHECK(FontGlyphCacheGetStatistics(&stats) == FontStatus::Ok);
@@ -364,7 +440,11 @@ void testIdentityGenerationAndReset(FontHandle* font)
 	FontGlyphCacheReset();
 	CHECK(FontGlyphCacheGetStatistics(&stats) == FontStatus::Ok);
 	CHECK(stats.hits == 0u && stats.misses == 0u && stats.rasterizations == 0u &&
-		stats.evictions == 0u && stats.entryCount == 0u && stats.bytesUsed == 0u);
+		stats.evictions == 0u && stats.entryCapacityEvictions == 0u &&
+		stats.coverageCapacityEvictions == 0u && stats.coverageCompactions == 0u &&
+		stats.cacheBypasses == 0u && stats.oversizedBypasses == 0u &&
+		stats.admissionBypasses == 0u && stats.rasterizationFailures == 0u &&
+		stats.entryCount == 0u && stats.bytesUsed == 0u && stats.peakBytesUsed == 0u);
 }
 
 } // namespace
@@ -384,6 +464,8 @@ int main()
 	testBlendAndEmptyGlyph(font);
 	testMissingGlyphFallback(font);
 	testEviction(font);
+	testCoverageCapacityEviction(font);
+	testCoverageCompaction(font);
 	testOversizedUncachedGlyph(font);
 	testClippingAndDestinationBounds(font);
 	testFailedRasterRollbackAndFallback(font);

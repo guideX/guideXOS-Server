@@ -27,6 +27,7 @@ uint32_t roleMaximumPixelSize(DesktopSystemTextRole role)
 	case DesktopSystemTextRole::WindowTitle: return 13u;
 	case DesktopSystemTextRole::TaskbarLabel: return 12u;
 	case DesktopSystemTextRole::StartMenuLabel: return 12u;
+	case DesktopSystemTextRole::TaskbarClock: return 12u;
 	case DesktopSystemTextRole::Default:
 	default: return 48u;
 	}
@@ -101,8 +102,12 @@ bool drawScalableTextInRect(uint32_t x, uint32_t y, uint32_t boxWidth,
 		return false;
 	uint64_t originX = static_cast<uint64_t>(x) +
 		static_cast<uint32_t>(layout.originOffsetXPx);
-	if (alignment == DesktopTextAlignment::Center && layout.inkWidthPx < boxWidth)
-		originX += (boxWidth - layout.inkWidthPx) / 2u;
+	if (layout.inkWidthPx < boxWidth) {
+		if (alignment == DesktopTextAlignment::Center)
+			originX += (boxWidth - layout.inkWidthPx) / 2u;
+		else if (alignment == DesktopTextAlignment::Right)
+			originX += boxWidth - layout.inkWidthPx;
+	}
 	const uint64_t baseline = static_cast<uint64_t>(y) +
 		(boxHeight - layout.lineHeightPx) / 2u + layout.baselineFromTopPx;
 	const uint64_t destinationBytes = static_cast<uint64_t>(pitch) * height;
@@ -193,6 +198,26 @@ bool measure_system_text_for_role(const char* str, DesktopSystemTextRole role,
 	return true;
 }
 
+bool desktop_taskbar_clock_text_layout(uint32_t widgetX, uint32_t widgetY,
+	uint32_t widgetWidth, uint32_t widgetHeight,
+	DesktopTaskbarClockTextLayout* outLayout)
+{
+	if (outLayout) *outLayout = {};
+	if (!outLayout || widgetWidth < 6u || widgetHeight < 38u ||
+		widgetX > 0xffffffffu - widgetWidth ||
+		widgetY > 0xffffffffu - widgetHeight) return false;
+	const uint32_t lineHeight = 16u;
+	const uint32_t timeOffset = 6u;
+	const uint32_t dateOffset = 22u;
+	if (dateOffset + lineHeight > widgetHeight) return false;
+	outLayout->x = widgetX + 2u;
+	outLayout->width = widgetWidth - 4u;
+	outLayout->timeY = widgetY + timeOffset;
+	outLayout->dateY = widgetY + dateOffset;
+	outLayout->lineHeight = lineHeight;
+	return true;
+}
+
 void desktop_shell_typography_get_statistics(
 	DesktopShellTypographyStatistics* outStatistics)
 {
@@ -209,6 +234,28 @@ void desktop_shell_typography_record_frame()
 	if (s_shellTypographyStatistics.shellFrames != 0xffffffffffffffffull)
 		++s_shellTypographyStatistics.shellFrames;
 }
+
+#if defined(GXOS_FONT11_QEMU_PROOF)
+bool desktop_font11_qemu_get_cache_statistics(
+	DesktopFontCacheDebugStatistics* outStatistics)
+{
+	if (!outStatistics) return false;
+	*outStatistics = {};
+	gxos::gui::FontGlyphCacheStatistics cache = {};
+	if (gxos::gui::FontGlyphCacheGetStatistics(&cache) != gxos::gui::FontStatus::Ok)
+		return false;
+	outStatistics->hits = cache.hits;
+	outStatistics->misses = cache.misses;
+	outStatistics->rasterizations = cache.rasterizations;
+	outStatistics->evictions = cache.evictions;
+	outStatistics->entryCapacityEvictions = cache.entryCapacityEvictions;
+	outStatistics->coverageCapacityEvictions = cache.coverageCapacityEvictions;
+	outStatistics->entryCount = cache.entryCount;
+	outStatistics->bytesUsed = cache.bytesUsed;
+	outStatistics->peakBytesUsed = cache.peakBytesUsed;
+	return true;
+}
+#endif
 
 void draw_system_text(uint32_t x, uint32_t y, const char* str, uint32_t color)
 {

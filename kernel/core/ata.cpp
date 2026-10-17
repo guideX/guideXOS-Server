@@ -36,6 +36,23 @@ namespace ata {
 
 static ATADevice s_devices[MAX_ATA_DEVICES];
 static uint8_t   s_deviceCount = 0;
+#if defined(GXOS_FONT11_QEMU_PROOF)
+static bool s_font11rAtaTimeoutLogged = false;
+
+static void font11r_log_ata_timeout(const char* operation, uint64_t lba,
+    uint16_t ioBase)
+{
+    if (s_font11rAtaTimeoutLogged) return;
+    s_font11rAtaTimeoutLogged = true;
+    serial::puts("[FONT11R_ATA] timeout=");
+    serial::puts(operation);
+    serial::puts(" lba=0x");
+    serial::put_hex64(lba);
+    serial::puts(" status=0x");
+    serial::put_hex8(arch::inb(static_cast<uint16_t>(ioBase + ATA_REG_STATUS)));
+    serial::puts("\n");
+}
+#endif
 
 // ================================================================
 // Helpers
@@ -241,8 +258,12 @@ static block::Status ata_pio_read(uint8_t devIdx,
                        ATA_CMD_READ_PIO);
         }
 
-        if (!ata_wait_drq(dev.ioBase, 500000))
+        if (!ata_wait_drq(dev.ioBase, 500000)) {
+#if defined(GXOS_FONT11_QEMU_PROOF)
+            font11r_log_ata_timeout("read-drq", curLBA, dev.ioBase);
+#endif
             return block::BLOCK_ERR_TIMEOUT;
+        }
 
         uint16_t* wbuf = reinterpret_cast<uint16_t*>(buf + sec * dev.sectorSize);
         for (uint32_t w = 0; w < dev.sectorSize / 2; ++w) {
@@ -311,8 +332,12 @@ static block::Status ata_pio_write(uint8_t devIdx,
                        ATA_CMD_WRITE_PIO);
         }
 
-        if (!ata_wait_drq(dev.ioBase, 500000))
+        if (!ata_wait_drq(dev.ioBase, 500000)) {
+#if defined(GXOS_FONT11_QEMU_PROOF)
+            font11r_log_ata_timeout("write-drq", curLBA, dev.ioBase);
+#endif
             return block::BLOCK_ERR_TIMEOUT;
+        }
 
         const uint16_t* wbuf = reinterpret_cast<const uint16_t*>(
             buf + sec * dev.sectorSize);
@@ -320,8 +345,12 @@ static block::Status ata_pio_write(uint8_t devIdx,
             arch::outw(static_cast<uint16_t>(dev.ioBase + ATA_REG_DATA), wbuf[w]);
         }
         // Complete one PIO write command before programming the next sector.
-        if (!ata_wait_command_idle(dev.ioBase, 500000))
+        if (!ata_wait_command_idle(dev.ioBase, 500000)) {
+#if defined(GXOS_FONT11_QEMU_PROOF)
+            font11r_log_ata_timeout("write-complete", curLBA, dev.ioBase);
+#endif
             return block::BLOCK_ERR_TIMEOUT;
+        }
 
     }
 
@@ -339,8 +368,12 @@ static block::Status ata_pio_flush(uint8_t devIdx)
     ATADevice& dev = s_devices[devIdx];
     arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_COMMAND),
                dev.lba48 ? ATA_CMD_CACHE_FLUSH_EXT : ATA_CMD_CACHE_FLUSH);
-    if (!ata_wait_bsy(dev.ioBase, 500000))
+    if (!ata_wait_bsy(dev.ioBase, 500000)) {
+#if defined(GXOS_FONT11_QEMU_PROOF)
+        font11r_log_ata_timeout("flush", 0u, dev.ioBase);
+#endif
         return block::BLOCK_ERR_TIMEOUT;
+    }
 
     return block::BLOCK_OK;
 }

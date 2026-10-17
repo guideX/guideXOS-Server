@@ -137,6 +137,43 @@ static void font6_qemu_finish_surface_draw()
 }
 #endif
 
+#if defined(GXOS_FONT11_QEMU_PROOF)
+static void font11r_native_preference_write_probe()
+{
+    gxos::gui::SystemFontConfiguredPreference configured = {};
+    const gxos::gui::SystemFontSelectionStatus configuredStatus =
+        gxos::gui::SystemFontSelectionGetConfigured(&configured);
+    if (configuredStatus != gxos::gui::SystemFontSelectionStatus::Ok ||
+        configured.sequence != 27u) {
+        kernel::serial::puts("[FONT11R_NATIVE] result=SKIP configured=");
+        kernel::serial::puts(gxos::gui::SystemFontSelectionStatusName(configuredStatus));
+        kernel::serial::puts(" sequence=");
+        kernel::serial::put_hex64(configured.sequence);
+        kernel::serial::puts("\n");
+        return;
+    }
+
+    gxos::gui::SystemFontFaceInfo faces[gxos::gui::kSystemFontMaxAvailableFonts] = {};
+    uint32_t count = 0u;
+    gxos::gui::SystemFontSelectionStatus status =
+        gxos::gui::SystemFontSelectionGetAvailable(faces,
+            gxos::gui::kSystemFontMaxAvailableFonts, &count);
+    gxos::gui::SystemFontCandidate candidate = {};
+    const uint32_t targetSize = configured.pixelSize == 16u ? 17u : 16u;
+    if (status == gxos::gui::SystemFontSelectionStatus::Ok && count != 0u)
+        status = gxos::gui::SystemFontSelectionPrepare(&faces[0].identity, targetSize, &candidate);
+    else if (status == gxos::gui::SystemFontSelectionStatus::Ok)
+        status = gxos::gui::SystemFontSelectionStatus::NotFound;
+    if (status == gxos::gui::SystemFontSelectionStatus::Ok)
+        status = gxos::gui::SystemFontSelectionApply(&candidate);
+    kernel::serial::puts("[FONT11R_NATIVE] result=");
+    kernel::serial::puts(gxos::gui::SystemFontSelectionStatusName(status));
+    kernel::serial::puts(" size=");
+    kernel::serial::put_hex32(targetSize);
+    kernel::serial::puts("\n");
+}
+#endif
+
 // Storage subsystem
 #include "include/kernel/block_device.h"
 #include "include/kernel/ata.h"
@@ -1111,6 +1148,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[FONT6] system selection init=");
         kernel::serial::puts(gxos::gui::SystemFontSelectionStatusName(fontSelectionStatus));
         kernel::serial::puts(" active-font fallback-available=yes\n");
+#if defined(GXOS_FONT11_QEMU_PROOF)
+        font11r_native_preference_write_probe();
+#endif
 #ifdef GXOS_FONT5_QEMU_PROOF
         font5_qemu_report_mounts("after-persistent-mount");
 #endif
@@ -1320,6 +1360,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[KERNEL] Initializing input manager...\n");
         kernel::input::init(kernel::framebuffer::get_width(),
                             kernel::framebuffer::get_height());
+#if defined(GXOS_FONT11_QEMU_PROOF)
+        // Keep QEMU pointer-coordinate evidence bounded to the first 32 mapped events.
+        kernel::input::set_mapping_diagnostics(true, 32u);
+#endif
         kernel::serial::puts("[KERNEL] Input manager initialized\n");
         
         // Update feature report for input devices
