@@ -1,0 +1,10 @@
+{
+  "espPath": "D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font7-qemu-20261017-fontsupport\\ESP",
+  "qmpPort": 60748,
+  "fixture": "system/fonts/NotAFont.ttf is rejected",
+  "network": "none",
+  "processId": 24668,
+  "memory": "1024M",
+  "guestRoot": "D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font7-qemu-20261017-fontsupport",
+  "commandLine": "-machine pc,accel=whpx,usb=off -smp 2 -m 1024M -vga std -display none -drive if=pflash,format=raw,readonly=on,file=D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font7-qemu-20261017-fontsupport\\OVMF.fd -drive file=fat:rw:D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font7-qemu-20261017-fontsupport\\ESP,format=raw,if=ide,index=0 -serial file:D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font7-qemu-20261017-fontsupport\\desktop-invalid.serial.log -qmp tcp:127.0.0.1:60748,server=on,wait=off -monitor none -rtc base=utc,clock=host -net none"
+}

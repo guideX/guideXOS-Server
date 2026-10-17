@@ -87,6 +87,13 @@ int main()
     check(parseSettingsRoute(" settings://NETWORK-INTERNET/ipv4 ", parsed) &&
           parsed == SettingsRoute{ CategoryId::Network, TargetId::IPv4 },
           "route parsing remains bounded, trimmed, and case-insensitive");
+    check(parseSettingsRoute("settings://personalization/fonts", parsed) &&
+          parsed == SettingsRoute{ CategoryId::Personalization, TargetId::PersonalizationFonts },
+          "Fonts route is available below Personalization");
+    SettingsPresentationCore fontsNavigationCore;
+    check(fontsNavigationCore.navigate({ CategoryId::Personalization, TargetId::PersonalizationFonts }) &&
+          fontsNavigationCore.route() == SettingsRoute{ CategoryId::Personalization, TargetId::PersonalizationFonts },
+          "native presentation navigation opens the Personalization Fonts page");
     check(parseSettingsRoute("settings://dateandtime/timezone", parsed) &&
           parsed == SettingsRoute{ CategoryId::DateTime, TargetId::DateTimeTimeZone },
           "route parser retains the Date and Time alias");
@@ -110,6 +117,12 @@ int main()
     check(nonmatching.accepted && nonmatching.count == 0,
           "nonmatching search does not fabricate results");
     check(!searchSettings(nullptr).accepted, "null search input is rejected");
+    const SearchResultSet fontsResults = searchSettings("fonts");
+    bool foundFontsPage = false;
+    for (size_t i = 0; i < fontsResults.count; ++i)
+        foundFontsPage = foundFontsPage || fontsResults.values[i].route ==
+            SettingsRoute{ CategoryId::Personalization, TargetId::PersonalizationFonts };
+    check(foundFontsPage, "global search finds the Personalization Fonts page");
     const SearchResultSet networkResults = searchSettings("network");
     bool foundNetworkPage = false;
     bool foundDevices = false;

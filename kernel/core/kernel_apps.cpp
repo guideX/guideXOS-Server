@@ -19,6 +19,7 @@
 #include "include/kernel/image_adapter.h"
 #include "include/kernel/system_font.h"
 #include "include/kernel/nic.h"
+#include "../../bitmap_font.h"
 #include "include/kernel/ipv4.h"
 #include "include/kernel/tcp.h"
 #include "include/kernel/dns.h"
@@ -27,6 +28,7 @@
 #include "include/kernel/kernel_text_guard.h"
 #include "include/kernel/settings_native_provider.h"
 #include "include/kernel/settings_display_refresh.h"
+#include "include/kernel/system_font_settings_ui.h"
 #include "../../built_in_app_metadata.h"
 #include "../../gxos_tls_foundation.h"
 #include "../../gxos_tls_prerequisites.h"
@@ -42,6 +44,7 @@ namespace kernel {
 namespace apps {
 
 namespace settings = gxos::apps::settings;
+namespace fontsettings = kernel::apps::font_settings;
 
 static bool s_kernelLastDnsUsed = false;
 static char s_kernelLastDnsHost[gxos::web::kHttpSharedMaxHostnameBytes + 1];
@@ -16481,9 +16484,9 @@ void NavigatorApp::updateScrollViewport()
     }
 }
 
-// Native Settings is a thin KernelApp presentation adapter over the S10
-// transport-neutral core. This slice renders only System/About and reads one
-// immutable kernel-owned snapshot; all other categories remain unavailable.
+// Native Settings is a KernelApp presentation adapter over the shared
+// presentation core. Font selection is wired directly to the FONT6 native
+// transaction service because this checkout has no managed UI source.
 class SettingsNativeApp : public app::KernelApp {
 public:
     SettingsNativeApp()
@@ -16491,6 +16494,10 @@ public:
           m_providerStatus(settings_native::SnapshotStatus::Unavailable),
           m_displayProviderStatus(settings_native::SnapshotStatus::Unavailable),
           m_snapshotAvailable(false),
+          m_fontFaceCount(0), m_fontPageLoaded(false), m_fontActiveGeneration(0),
+          m_fontPendingSize(7), m_fontSelectedIndex(0), m_fontPreviewScroll(0),
+          m_fontRefreshRequested(false),
+          m_fontStatus(gxos::gui::SystemFontSelectionStatus::Ok),
           m_queueHead(0), m_queueCount(0),
           m_drawX(0), m_drawY(0), m_drawW(0), m_drawH(0)
     {
@@ -16516,6 +16523,10 @@ public:
         m_snapshot = settings_native::SystemAboutSnapshotV2{};
         m_displayRefreshState.reset();
         m_displayRefreshSignal.reset();
+        m_fontFaceCount = 0;
+        m_fontPageLoaded = false;
+        m_fontStatus = gxos::gui::SystemFontSelectionStatus::Ok;
+        m_fontStatusText[0] = '\0';
 
         settings::SettingsWindowConstraints constraints{};
         if (!m_adapter.getWindowConstraints(m_adapter.context, &constraints)) return false;
@@ -16583,6 +16594,8 @@ public:
         m_snapshotAvailable = false;
         m_displayRefreshState.reset();
         m_displayRefreshSignal.reset();
+        m_fontPageLoaded = false;
+        m_fontFaceCount = 0;
         serial::puts("[settings-native] shutdown identity=");
         serial::puts(getRuntimeAppId());
         serial::putc('\n');
@@ -16601,6 +16614,8 @@ public:
                 invalidate();
             }
         }
+
+        synchronizeFontSelection();
 
         settings::SettingsInputEvent event{};
         while (m_adapter.pollInput(m_adapter.context, &event)) {
@@ -16628,7 +16643,20 @@ public:
 
     void onKeyDown(uint32_t key) override
     {
-        if (key == 0x1Bu) requestClose();
+        if (key == 0x1Bu) {
+            if (isFontsRoute()) {
+                (void)m_presentation.navigate({settings::CategoryId::Personalization, settings::TargetId::Page});
+                m_fontPageLoaded = false;
+                updateCoreFocus();
+                invalidate();
+            } else requestClose();
+            return;
+        }
+        settings::SettingsInputEvent event{};
+        event.kind = settings::SettingsInputKind::Key;
+        event.action = settings::SettingsInputAction::Down;
+        event.code = key;
+        enqueue(event);
     }
 
     void onKeyChar(char character) override
@@ -16663,6 +16691,17 @@ public:
         enqueue(event);
     }
 
+    void onMouseWheel(int x, int y, int wheelDelta) override
+    {
+        settings::SettingsInputEvent event{};
+        event.kind = settings::SettingsInputKind::Scroll;
+        event.action = settings::SettingsInputAction::Down;
+        event.x = x;
+        event.y = y;
+        event.delta = wheelDelta;
+        enqueue(event);
+    }
+
     void onWindowFocus() override
     {
         m_windowFocused = true;
@@ -16692,6 +16731,18 @@ private:
     settings_native::SnapshotStatus m_providerStatus;
     settings_native::SnapshotStatus m_displayProviderStatus;
     bool m_snapshotAvailable;
+    gxos::gui::SystemFontFaceInfo m_fontFaces[gxos::gui::kSystemFontMaxAvailableFonts]{};
+    gxos::gui::SystemFontSelectionSnapshot m_fontActive{};
+    gxos::gui::SystemFontIdentity m_fontPendingIdentity{};
+    uint32_t m_fontFaceCount;
+    bool m_fontPageLoaded;
+    uint32_t m_fontActiveGeneration;
+    uint32_t m_fontPendingSize;
+    uint32_t m_fontSelectedIndex;
+    int32_t m_fontPreviewScroll;
+    bool m_fontRefreshRequested;
+    gxos::gui::SystemFontSelectionStatus m_fontStatus;
+    char m_fontStatusText[112]{};
     settings::SettingsInputEvent m_inputQueue[kInputQueueCapacity]{};
     uint32_t m_queueHead;
     uint32_t m_queueCount;
@@ -16820,8 +16871,271 @@ private:
             m_presentation.setFocusedControl(settings::FocusControl::None);
         } else if (m_presentation.selectedCategory() == settings::CategoryId::System) {
             m_presentation.setFocusedControl(settings::FocusControl::SystemAbout);
+        } else if (m_presentation.selectedCategory() == settings::CategoryId::Personalization) {
+            m_presentation.setFocusedControl(settings::FocusControl::PersonalizationChooseBackground);
         } else {
             m_presentation.setFocusedControl(settings::FocusControl::None);
+        }
+    }
+
+    bool isFontsRoute() const
+    {
+        const settings::SettingsRoute route = m_presentation.route();
+        return route.category == settings::CategoryId::Personalization &&
+            route.target == settings::TargetId::PersonalizationFonts;
+    }
+
+    static bool sameFont(const gxos::gui::SystemFontIdentity& left,
+                         const gxos::gui::SystemFontIdentity& right)
+    {
+        return left.kind == right.kind && left.stableId == right.stableId;
+    }
+
+    static void makeBitmapIdentity(gxos::gui::SystemFontIdentity* identity)
+    {
+        if (!identity) return;
+        *identity = gxos::gui::SystemFontIdentity{};
+        strcopy(identity->familyName, "guideXOS Bitmap", sizeof(identity->familyName));
+        strcopy(identity->styleName, "Regular", sizeof(identity->styleName));
+        identity->stableId = gxos::gui::kSystemFontBuiltinBitmapFontId;
+        identity->kind = gxos::gui::SystemFontIdentityKind::BuiltinBitmap;
+    }
+
+    uint32_t fontChoiceCount() const { return m_fontFaceCount + 1u; }
+
+    void chooseFontIndex(uint32_t index)
+    {
+        if (index >= fontChoiceCount()) return;
+        gxos::gui::SystemFontIdentity identity{};
+        if (index == 0u) makeBitmapIdentity(&identity);
+        else identity = m_fontFaces[index - 1u].identity;
+        if (!sameFont(identity, m_fontPendingIdentity)) {
+            m_fontPendingSize = index == 0u ? gxos::gui::kSystemFontBuiltinBitmapPixelHeight : 16u;
+        }
+        m_fontPendingIdentity = identity;
+        m_fontSelectedIndex = index;
+        m_fontPreviewScroll = 0;
+        m_fontStatus = gxos::gui::SystemFontSelectionStatus::Ok;
+        if (identity.kind == gxos::gui::SystemFontIdentityKind::BuiltinBitmap)
+            strcopy(m_fontStatusText, "Bitmap selected. Apply to save this choice.", sizeof(m_fontStatusText));
+        else
+            strcopy(m_fontStatusText, "Preview updates with the selected font and size. Apply to save.", sizeof(m_fontStatusText));
+    }
+
+    void chooseFontIdentity(const gxos::gui::SystemFontIdentity& identity)
+    {
+        if (identity.kind == gxos::gui::SystemFontIdentityKind::BuiltinBitmap) {
+            chooseFontIndex(0u);
+            return;
+        }
+        for (uint32_t i = 0u; i < m_fontFaceCount; ++i) {
+            if (sameFont(identity, m_fontFaces[i].identity)) {
+                chooseFontIndex(i + 1u);
+                return;
+            }
+        }
+        m_fontSelectedIndex = fontChoiceCount();
+        m_fontPendingIdentity = identity;
+        m_fontPendingSize = 16u;
+    }
+
+    bool fontIdentityIsAvailable(const gxos::gui::SystemFontIdentity& identity) const
+    {
+        if (identity.kind == gxos::gui::SystemFontIdentityKind::BuiltinBitmap)
+            return identity.stableId == gxos::gui::kSystemFontBuiltinBitmapFontId;
+        if (identity.kind != gxos::gui::SystemFontIdentityKind::TrueType) return false;
+        for (uint32_t i = 0u; i < m_fontFaceCount; ++i)
+            if (m_fontFaces[i].available && sameFont(identity, m_fontFaces[i].identity)) return true;
+        return false;
+    }
+
+    void refreshFontCatalogAfterPreviewError()
+    {
+        const gxos::gui::SystemFontSelectionStatus refreshStatus =
+            fontsettings::SystemFontSelectionRefreshCatalog();
+        const gxos::gui::SystemFontSelectionStatus listStatus =
+            fontsettings::SystemFontSelectionGetAvailable(m_fontFaces,
+                gxos::gui::kSystemFontMaxAvailableFonts, &m_fontFaceCount);
+        if (listStatus != gxos::gui::SystemFontSelectionStatus::Ok) {
+            updateFontStatus(listStatus);
+            return;
+        }
+        if (!fontIdentityIsAvailable(m_fontPendingIdentity)) {
+            chooseFontIndex(0u);
+            updateFontStatus(gxos::gui::SystemFontSelectionStatus::NotFound);
+            return;
+        }
+        if (refreshStatus != gxos::gui::SystemFontSelectionStatus::Ok)
+            updateFontStatus(refreshStatus);
+    }
+
+    void updateFontStatus(gxos::gui::SystemFontSelectionStatus status)
+    {
+        m_fontStatus = status;
+        const char* text = "Font operation failed.";
+        switch (status) {
+        case gxos::gui::SystemFontSelectionStatus::Ok:
+            text = "Choose a font and size to preview. Apply saves the selection."; break;
+        case gxos::gui::SystemFontSelectionStatus::DirectoryUnavailable:
+            text = "Font directory unavailable. The built-in bitmap font is ready."; break;
+        case gxos::gui::SystemFontSelectionStatus::RegistryCapacity:
+        case gxos::gui::SystemFontSelectionStatus::SourceCapacity:
+            text = "Font registry is full. Only validated available faces are listed."; break;
+        case gxos::gui::SystemFontSelectionStatus::InvalidFont:
+            text = "An invalid font file was skipped. Select a validated font."; break;
+        case gxos::gui::SystemFontSelectionStatus::UnsupportedFont:
+            text = "A font format is unsupported. Select a validated TrueType font."; break;
+        case gxos::gui::SystemFontSelectionStatus::NotFound:
+            text = "Font file is missing or unavailable. Choose another font."; break;
+        case gxos::gui::SystemFontSelectionStatus::StaleIdentity:
+            text = "Font file changed after discovery. Refresh and choose it again."; break;
+        case gxos::gui::SystemFontSelectionStatus::SizeOutOfRange:
+            text = "TrueType size must be between 8 and 48 pixels."; break;
+        case gxos::gui::SystemFontSelectionStatus::PreparationFailed:
+            text = "This font could not prepare or render a preview."; break;
+        case gxos::gui::SystemFontSelectionStatus::CandidateStale:
+            text = "The system font changed elsewhere. Pending edits were discarded."; break;
+        case gxos::gui::SystemFontSelectionStatus::PersistenceFailed:
+            text = "Could not save the font. The previous active font was restored."; break;
+        case gxos::gui::SystemFontSelectionStatus::RollbackFailed:
+            text = "Font rollback failed. The built-in bitmap renderer remains available."; break;
+        case gxos::gui::SystemFontSelectionStatus::PreferenceCorrupt:
+            text = "Saved font preference is damaged. The active font remains usable."; break;
+        case gxos::gui::SystemFontSelectionStatus::PreferenceUnsupported:
+            text = "Saved font preference version is unsupported. Choose a font to replace it."; break;
+        case gxos::gui::SystemFontSelectionStatus::NotInitialized:
+            text = "Font service is unavailable. The desktop bitmap font remains usable."; break;
+        default:
+            text = fontsettings::SystemFontSelectionStatusName(status); break;
+        }
+        strcopy(m_fontStatusText, text, sizeof(m_fontStatusText));
+    }
+
+    void loadFontsPage()
+    {
+        m_fontFaceCount = 0u;
+        const gxos::gui::SystemFontSelectionStatus refreshStatus =
+            fontsettings::SystemFontSelectionRefreshCatalog();
+        const gxos::gui::SystemFontSelectionStatus listStatus =
+            fontsettings::SystemFontSelectionGetAvailable(m_fontFaces,
+                gxos::gui::kSystemFontMaxAvailableFonts, &m_fontFaceCount);
+        const gxos::gui::SystemFontSelectionStatus activeStatus =
+            fontsettings::SystemFontSelectionGetActive(&m_fontActive);
+        m_fontPageLoaded = true;
+        if (activeStatus == gxos::gui::SystemFontSelectionStatus::Ok) {
+            m_fontActiveGeneration = m_fontActive.selectionGeneration;
+            m_fontPendingIdentity = m_fontActive.identity;
+            m_fontPendingSize = m_fontActive.pixelSize;
+            if (fontIdentityIsAvailable(m_fontActive.identity)) {
+                chooseFontIdentity(m_fontActive.identity);
+                m_fontPendingSize = m_fontActive.pixelSize;
+            } else {
+                chooseFontIndex(0u);
+                updateFontStatus(gxos::gui::SystemFontSelectionStatus::NotFound);
+            }
+        }
+        if (listStatus != gxos::gui::SystemFontSelectionStatus::Ok) updateFontStatus(listStatus);
+        else if (refreshStatus != gxos::gui::SystemFontSelectionStatus::Ok &&
+                 fontIdentityIsAvailable(m_fontPendingIdentity)) updateFontStatus(refreshStatus);
+        else if (fontIdentityIsAvailable(m_fontPendingIdentity))
+            updateFontStatus(gxos::gui::SystemFontSelectionStatus::Ok);
+        m_fontPreviewScroll = 0;
+    }
+
+    void synchronizeFontSelection()
+    {
+        if (!isFontsRoute() || !m_fontPageLoaded) return;
+        gxos::gui::SystemFontSelectionSnapshot active{};
+        if (fontsettings::SystemFontSelectionGetActive(&active) !=
+            gxos::gui::SystemFontSelectionStatus::Ok) return;
+        if (active.selectionGeneration == m_fontActiveGeneration) return;
+        m_fontActive = active;
+        m_fontActiveGeneration = active.selectionGeneration;
+        m_fontPendingIdentity = active.identity;
+        m_fontPendingSize = active.pixelSize;
+        chooseFontIdentity(active.identity);
+        m_fontPendingSize = active.pixelSize;
+        strcopy(m_fontStatusText,
+            "The system font changed elsewhere. Pending edits were discarded.",
+            sizeof(m_fontStatusText));
+        invalidate();
+    }
+
+    void cancelFontEdits()
+    {
+        gxos::gui::SystemFontSelectionSnapshot active{};
+        if (fontsettings::SystemFontSelectionGetActive(&active) ==
+            gxos::gui::SystemFontSelectionStatus::Ok) {
+            m_fontActive = active;
+            m_fontActiveGeneration = active.selectionGeneration;
+            m_fontPendingIdentity = active.identity;
+            m_fontPendingSize = active.pixelSize;
+            chooseFontIdentity(active.identity);
+            m_fontPendingSize = active.pixelSize;
+        }
+        strcopy(m_fontStatusText,
+            "Pending changes discarded. The active font was not changed.",
+            sizeof(m_fontStatusText));
+        m_fontStatus = gxos::gui::SystemFontSelectionStatus::Ok;
+    }
+
+    void applyFontEdits()
+    {
+        gxos::gui::SystemFontSelectionSnapshot active{};
+        if (fontsettings::SystemFontSelectionGetActive(&active) !=
+            gxos::gui::SystemFontSelectionStatus::Ok) {
+            updateFontStatus(gxos::gui::SystemFontSelectionStatus::NotInitialized);
+            return;
+        }
+        if (active.selectionGeneration != m_fontActiveGeneration) {
+            synchronizeFontSelection();
+            updateFontStatus(gxos::gui::SystemFontSelectionStatus::CandidateStale);
+            return;
+        }
+        const uint32_t expectedGeneration = m_fontActiveGeneration;
+        gxos::gui::SystemFontSelectionStatus status = gxos::gui::SystemFontSelectionStatus::Ok;
+        if (m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::BuiltinBitmap) {
+            status = fontsettings::SystemFontSelectionResetToBuiltin();
+        } else {
+            gxos::gui::SystemFontCandidate candidate{};
+            status = fontsettings::SystemFontSelectionPrepare(
+                &m_fontPendingIdentity, m_fontPendingSize, &candidate);
+            if (status == gxos::gui::SystemFontSelectionStatus::Ok)
+                status = fontsettings::SystemFontSelectionApply(&candidate);
+        }
+        if (status == gxos::gui::SystemFontSelectionStatus::Ok) {
+            (void)fontsettings::SystemFontSelectionGetActive(&m_fontActive);
+            m_fontActiveGeneration = m_fontActive.selectionGeneration;
+            m_fontPendingIdentity = m_fontActive.identity;
+            m_fontPendingSize = m_fontActive.pixelSize;
+            chooseFontIdentity(m_fontActive.identity);
+            m_fontPendingSize = m_fontActive.pixelSize;
+            strcopy(m_fontStatusText, "Font applied and saved.", sizeof(m_fontStatusText));
+        } else {
+            if (status == gxos::gui::SystemFontSelectionStatus::NotFound ||
+                status == gxos::gui::SystemFontSelectionStatus::StaleIdentity ||
+                status == gxos::gui::SystemFontSelectionStatus::CandidateStale) {
+                (void)fontsettings::SystemFontSelectionRefreshCatalog();
+                (void)fontsettings::SystemFontSelectionGetAvailable(m_fontFaces,
+                    gxos::gui::kSystemFontMaxAvailableFonts, &m_fontFaceCount);
+                if (!fontIdentityIsAvailable(m_fontPendingIdentity)) chooseFontIndex(0u);
+            }
+            const gxos::gui::SystemFontSelectionStatus activeStatus =
+                fontsettings::SystemFontSelectionGetActive(&m_fontActive);
+            if (activeStatus == gxos::gui::SystemFontSelectionStatus::Ok) {
+                m_fontActiveGeneration = m_fontActive.selectionGeneration;
+                if (status == gxos::gui::SystemFontSelectionStatus::CandidateStale &&
+                    m_fontActiveGeneration != expectedGeneration) {
+                    m_fontPendingIdentity = m_fontActive.identity;
+                    m_fontPendingSize = m_fontActive.pixelSize;
+                    if (fontIdentityIsAvailable(m_fontActive.identity))
+                        chooseFontIdentity(m_fontActive.identity);
+                    else chooseFontIndex(0u);
+                    m_fontPendingSize = fontIdentityIsAvailable(m_fontActive.identity)
+                        ? m_fontActive.pixelSize : gxos::gui::kSystemFontBuiltinBitmapPixelHeight;
+                }
+            }
+            updateFontStatus(status);
         }
     }
 
@@ -16829,16 +17143,33 @@ private:
     {
         if (category != settings::CategoryId::System &&
             category != settings::CategoryId::Display &&
+            category != settings::CategoryId::Personalization &&
             category != settings::CategoryId::About) return false;
         if (!m_presentation.selectCategory(category)) return false;
+        m_fontPageLoaded = false;
         if (category == settings::CategoryId::Display) refreshDisplaySnapshot();
         updateCoreFocus();
         serial::puts("[settings-native] input source=");
         serial::puts(inputSource);
         serial::puts(" category=");
         serial::puts(category == settings::CategoryId::About ? "about" :
-            (category == settings::CategoryId::Display ? "display" : "system"));
+            (category == settings::CategoryId::Display ? "display" :
+            (category == settings::CategoryId::Personalization ? "personalization" : "system")));
         serial::puts(" shared-core=true repaint=pending\n");
+        return true;
+    }
+
+    bool openFontsPage(const char* inputSource)
+    {
+        if (!m_presentation.navigate({settings::CategoryId::Personalization,
+                                      settings::TargetId::PersonalizationFonts})) return false;
+        loadFontsPage();
+        updateCoreFocus();
+        serial::puts("[settings-native] input source=");
+        serial::puts(inputSource);
+        serial::puts(" page=personalization/fonts faces=");
+        serial_put_dec(m_fontFaceCount);
+        serial::putc('\n');
         return true;
     }
 
@@ -16850,13 +17181,58 @@ private:
 
     bool processInput(const settings::SettingsInputEvent& event)
     {
-        if (event.kind == settings::SettingsInputKind::Text &&
-            event.action == settings::SettingsInputAction::Down) {
+        if (event.kind == settings::SettingsInputKind::Scroll && isFontsRoute()) {
+            const uint32_t previewTop = 96u + 160u;
+            const uint32_t previewBottom = m_drawH > 69u ? m_drawH - 69u : 0u;
+            if (event.y >= static_cast<int32_t>(previewTop) &&
+                event.y < static_cast<int32_t>(previewBottom)) {
+                const int step = event.delta > 0 ? 12 : -12;
+                const int next = m_fontPreviewScroll + step;
+                m_fontPreviewScroll = next < 0 ? 0 : (next > 320 ? 320 : next);
+                return true;
+            }
+        } else if (event.kind == settings::SettingsInputKind::Text &&
+                   event.action == settings::SettingsInputAction::Down) {
             char key = event.text;
             if (key >= 'A' && key <= 'Z') key = static_cast<char>(key - 'A' + 'a');
+            if (isFontsRoute()) {
+                if (key == 'a') { applyFontEdits(); return true; }
+                if (key == 'c') { cancelFontEdits(); return true; }
+                if (key == 'r') { chooseFontIndex(0u); return true; }
+                if (key == 'b') { chooseFontIndex(0u); return true; }
+                if (key == 'j' || key == 'n') {
+                    chooseFontIndex((m_fontSelectedIndex + 1u) % fontChoiceCount()); return true;
+                }
+                if (key == 'k' || key == 'p') {
+                    chooseFontIndex((m_fontSelectedIndex + fontChoiceCount() - 1u) % fontChoiceCount()); return true;
+                }
+                if (key == '+' || key == '=') {
+                    if (m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::TrueType &&
+                        m_fontPendingSize < gxos::gui::kSystemFontMaxSelectablePixelSize)
+                        ++m_fontPendingSize;
+                    else if (m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::BuiltinBitmap)
+                        strcopy(m_fontStatusText, "Bitmap uses its fixed 7-pixel glyph size.", sizeof(m_fontStatusText));
+                    return true;
+                }
+                if (key == '-') {
+                    if (m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::TrueType &&
+                        m_fontPendingSize > gxos::gui::kSystemFontMinSelectablePixelSize)
+                        --m_fontPendingSize;
+                    else if (m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::BuiltinBitmap)
+                        strcopy(m_fontStatusText, "Bitmap uses its fixed 7-pixel glyph size.", sizeof(m_fontStatusText));
+                    return true;
+                }
+                if (key >= '1' && key <= '4') {
+                    chooseFontIndex(static_cast<uint32_t>(key - '1'));
+                    return true;
+                }
+            }
             if (key == 'a') return selectSupportedCategory(settings::CategoryId::About, "keyboard");
             if (key == 's') return selectSupportedCategory(settings::CategoryId::System, "keyboard");
             if (key == 'd') return selectSupportedCategory(settings::CategoryId::Display, "keyboard");
+            if (key == 'p') return selectSupportedCategory(settings::CategoryId::Personalization, "keyboard");
+            if (key == 'f' && m_presentation.selectedCategory() == settings::CategoryId::Personalization)
+                return openFontsPage("keyboard");
         } else if (event.kind == settings::SettingsInputKind::PointerMove) {
             const settings::CategoryId hovered = categoryAt(event.x, event.y);
             if (hovered != m_hoverCategory) {
@@ -16869,6 +17245,11 @@ private:
             if (selected != settings::CategoryId::Count) {
                 return selectSupportedCategory(selected, "mouse");
             }
+            if (m_presentation.selectedCategory() == settings::CategoryId::Personalization &&
+                m_presentation.route().target == settings::TargetId::Page &&
+                event.x >= 200 && event.y >= 146 && event.y < 212)
+                return openFontsPage("mouse");
+            if (isFontsRoute()) return handleFontPointer(event.x, event.y);
         }
         return false;
     }
@@ -16878,8 +17259,61 @@ private:
         if (x < 12 || x >= 174) return settings::CategoryId::Count;
         if (y >= 60 && y < 98) return settings::CategoryId::System;
         if (y >= 106 && y < 144) return settings::CategoryId::Display;
-        if (y >= 152 && y < 190) return settings::CategoryId::About;
+        if (y >= 152 && y < 190) return settings::CategoryId::Personalization;
+        if (y >= 198 && y < 236) return settings::CategoryId::About;
         return settings::CategoryId::Count;
+    }
+
+    bool handleFontPointer(int x, int y)
+    {
+        const uint32_t sidebarWidth = m_drawW < 500u ? m_drawW / 3u : 182u;
+        const uint32_t contentX = sidebarWidth + 24u;
+        const uint32_t cardY = 96u;
+        const uint32_t rowsY = cardY + 42u;
+        const uint32_t rowH = 16u;
+        if (x >= static_cast<int>(contentX + 12u) &&
+            x < static_cast<int>(m_drawW > 20u ? m_drawW - 20u : m_drawW) &&
+            y >= static_cast<int>(rowsY) &&
+            y < static_cast<int>(rowsY + fontChoiceCount() * rowH)) {
+            const uint32_t index = static_cast<uint32_t>(y - static_cast<int>(rowsY)) / rowH;
+            chooseFontIndex(index);
+            return true;
+        }
+        const int sizeY = static_cast<int>(cardY + 126u);
+        if (y >= sizeY && y < sizeY + 24 &&
+            m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::TrueType) {
+            if (x >= static_cast<int>(contentX + 64u) && x < static_cast<int>(contentX + 88u)) {
+                if (m_fontPendingSize > gxos::gui::kSystemFontMinSelectablePixelSize) --m_fontPendingSize;
+                return true;
+            }
+            if (x >= static_cast<int>(contentX + 94u) && x < static_cast<int>(contentX + 118u)) {
+                if (m_fontPendingSize < gxos::gui::kSystemFontMaxSelectablePixelSize) ++m_fontPendingSize;
+                return true;
+            }
+        }
+        const int buttonY = static_cast<int>(m_drawH) - 52;
+        if (y >= buttonY && y < buttonY + 22) {
+            if (x >= static_cast<int>(contentX + 12u) && x < static_cast<int>(contentX + 72u)) {
+                applyFontEdits();
+                return true;
+            }
+            if (x >= static_cast<int>(contentX + 78u) && x < static_cast<int>(contentX + 138u)) {
+                cancelFontEdits();
+                return true;
+            }
+            if (x >= static_cast<int>(contentX + 144u) && x < static_cast<int>(contentX + 246u)) {
+                chooseFontIndex(0u);
+                return true;
+            }
+        }
+        if (y >= 68 && y < 92 && x >= static_cast<int>(contentX + 12u) &&
+            x < static_cast<int>(contentX + 100u)) {
+            (void)m_presentation.navigate({settings::CategoryId::Personalization, settings::TargetId::Page});
+            m_fontPageLoaded = false;
+            updateCoreFocus();
+            return true;
+        }
+        return false;
     }
 
     static void appendText(char* output, size_t capacity, const char* value)
@@ -16924,6 +17358,233 @@ private:
         case 1u: return "Mirror";
         case 2u: return "Extend";
         default: return "Unavailable";
+        }
+    }
+
+    static uint32_t drawFontText(const gxos::gui::SystemFontIdentity& identity,
+                                 uint32_t size, uint32_t x, uint32_t y,
+                                 uint32_t clipX, uint32_t clipY,
+                                 uint32_t clipW, uint32_t clipH,
+                                 const char* text, uint32_t color)
+    {
+        if (!text || !framebuffer::is_available() || framebuffer::get_bpp() != 32u)
+            return static_cast<uint32_t>(gxos::gui::SystemFontSelectionStatus::PreparationFailed);
+        uint32_t* target = framebuffer::is_double_buffered()
+            ? framebuffer::get_back_buffer() : framebuffer::get_buffer();
+        const uint32_t width = framebuffer::get_width();
+        const uint32_t height = framebuffer::get_height();
+        const uint64_t tightPitch = static_cast<uint64_t>(width) * sizeof(uint32_t);
+        const uint32_t pitch = framebuffer::is_double_buffered() && tightPitch <= 0xffffffffu
+            ? static_cast<uint32_t>(tightPitch) : framebuffer::get_pitch();
+        if (!target || width == 0u || height == 0u || width > 4096u || height > 4096u ||
+            tightPitch > 0xffffffffu || pitch < tightPitch || (pitch & 3u) != 0u)
+            return static_cast<uint32_t>(gxos::gui::SystemFontSelectionStatus::PreparationFailed);
+        size_t length = 0u;
+        while (length < 4096u && text[length]) ++length;
+        if (length >= 4096u)
+            return static_cast<uint32_t>(gxos::gui::SystemFontSelectionStatus::InvalidArgument);
+        const uint64_t destinationBytes = static_cast<uint64_t>(pitch) * height;
+        if (destinationBytes > static_cast<uint64_t>(static_cast<size_t>(-1)))
+            return static_cast<uint32_t>(gxos::gui::SystemFontSelectionStatus::InvalidArgument);
+        return static_cast<uint32_t>(fontsettings::SystemFontSelectionDrawPreview(
+            &identity, size, target, static_cast<size_t>(destinationBytes), pitch, width, height,
+            clipX, clipY, clipW, clipH, static_cast<int32_t>(x), static_cast<int32_t>(y),
+            text, length, color));
+    }
+
+    static uint32_t bitmapTextWidth(const char* text, size_t length)
+    {
+        if (!text || length > 191u) return 0xffffffffu;
+        const int measured = gxos::gui::BitmapFont::MeasureWidth(text, static_cast<int>(length));
+        return measured < 0 ? 0xffffffffu : static_cast<uint32_t>(measured + (length ? 1 : 0));
+    }
+
+    static void drawFittedBitmapText(uint32_t x, uint32_t y, uint32_t maxWidth,
+                                    const char* text, uint32_t color)
+    {
+        if (!text || maxWidth == 0u) return;
+        size_t length = 0u;
+        while (text[length] && length < 191u) ++length;
+        if (length < 192u && bitmapTextWidth(text, length) <= maxWidth) {
+            appDrawText(x, y, text, color);
+            return;
+        }
+        char clipped[192] = {};
+        size_t keep = length < 188u ? length : 188u;
+        for (;;) {
+            for (size_t i = 0u; i < keep; ++i) clipped[i] = text[i];
+            clipped[keep] = '\0';
+            if (keep < sizeof(clipped) - 4u) {
+                clipped[keep++] = '.';
+                clipped[keep++] = '.';
+                clipped[keep++] = '.';
+                clipped[keep] = '\0';
+            }
+            if (bitmapTextWidth(clipped, keep) <= maxWidth || keep <= 3u) break;
+            keep -= 4u;
+        }
+        appDrawText(x, y, clipped, color);
+    }
+
+    static void escapedFontPath(const gxos::gui::SystemFontIdentity& identity,
+                                char* output, size_t capacity)
+    {
+        if (!output || capacity == 0u) return;
+        output[0] = '\0';
+        const char* file = identity.canonicalPath;
+        for (const char* p = identity.canonicalPath; *p; ++p) if (*p == '/') file = p + 1;
+        size_t out = 0u;
+        static const char hex[] = "0123456789ABCDEF";
+        for (size_t i = 0u; file[i] && out + 1u < capacity; ++i) {
+            const unsigned char c = static_cast<unsigned char>(file[i]);
+            if (c >= 0x20u && c <= 0x7eu && c != '%') {
+                output[out++] = static_cast<char>(c);
+            } else {
+                if (out + 3u >= capacity) break;
+                output[out++] = '%';
+                output[out++] = hex[c >> 4];
+                output[out++] = hex[c & 0x0fu];
+            }
+        }
+        output[out] = '\0';
+    }
+
+    void drawFontPage(uint32_t contentX, uint32_t contentW, uint32_t cardY, uint32_t cardH)
+    {
+        const uint32_t left = contentX + 12u;
+        const uint32_t availableW = contentW > 28u ? contentW - 28u : 1u;
+        const uint32_t activeClipY = cardY + 14u;
+        char currentLabel[180] = {};
+        appendText(currentLabel, sizeof(currentLabel), "Current: ");
+        appendText(currentLabel, sizeof(currentLabel), m_fontActive.identity.familyName);
+        appendText(currentLabel, sizeof(currentLabel), " | ");
+        appendText(currentLabel, sizeof(currentLabel), m_fontActive.identity.styleName);
+        appendText(currentLabel, sizeof(currentLabel), "  ");
+        appendUnsigned(currentLabel, sizeof(currentLabel), m_fontActive.pixelSize);
+        appendText(currentLabel, sizeof(currentLabel), " px");
+        if (m_fontActive.identity.kind == gxos::gui::SystemFontIdentityKind::TrueType) {
+            const uint32_t status = drawFontText(m_fontActive.identity, 8u,
+                left, activeClipY, left, activeClipY, availableW, 12u,
+                currentLabel, rgb(231, 235, 243));
+            if (status != static_cast<uint32_t>(gxos::gui::SystemFontSelectionStatus::Ok)) {
+                drawFittedBitmapText(left, activeClipY, availableW,
+                    "Active font file is missing; cached rendering remains available.", rgb(236, 174, 122));
+            }
+        } else {
+            drawFittedBitmapText(left, activeClipY, availableW, currentLabel, rgb(231, 235, 243));
+        }
+
+        appDrawText(left, cardY + 30u, "Available validated fonts", rgb(146, 157, 176));
+        const uint32_t rowsY = cardY + 42u;
+        const uint32_t rowH = 16u;
+        for (uint32_t index = 0u; index < fontChoiceCount(); ++index) {
+            const uint32_t rowY = rowsY + index * rowH;
+            const bool selected = sameFont(m_fontPendingIdentity,
+                index == 0u ? m_fontPendingIdentity : m_fontFaces[index - 1u].identity) &&
+                ((index == 0u && m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::BuiltinBitmap) ||
+                 (index != 0u && m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::TrueType));
+            if (selected) framebuffer::fill_rect(left, rowY, availableW, rowH, rgb(54, 67, 91));
+            if (index == 0u) {
+                appDrawText(left + 4u, rowY + 4u, "Built-in Bitmap | 7 px",
+                    selected ? rgb(245, 247, 252) : rgb(190, 195, 205));
+                continue;
+            }
+            const gxos::gui::SystemFontFaceInfo& face = m_fontFaces[index - 1u];
+            char label[160] = {};
+            appendText(label, sizeof(label), face.metadata.familyName);
+            appendText(label, sizeof(label), " | ");
+            appendText(label, sizeof(label), face.metadata.styleName);
+            const uint32_t result = drawFontText(face.identity, 8u, left + 4u, rowY + 2u,
+                left + 3u, rowY + 1u, availableW - 6u, rowH - 1u,
+                label, selected ? rgb(245, 247, 252) : rgb(190, 195, 205));
+            if (result != static_cast<uint32_t>(gxos::gui::SystemFontSelectionStatus::Ok)) {
+                m_fontRefreshRequested = true;
+                drawFittedBitmapText(left + 4u, rowY + 4u, availableW - 8u,
+                    "Unavailable; reopen Fonts to refresh", rgb(236, 174, 122));
+            }
+        }
+
+        char sourceLine[192] = {};
+        if (m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::TrueType) {
+            char fileName[128] = {};
+            escapedFontPath(m_fontPendingIdentity, fileName, sizeof(fileName));
+            appendText(sourceLine, sizeof(sourceLine), "Selected file: ");
+            appendText(sourceLine, sizeof(sourceLine), fileName);
+        } else {
+            appendText(sourceLine, sizeof(sourceLine), "Selected source: built-in bitmap face");
+        }
+        drawFittedBitmapText(left, cardY + 108u, availableW, sourceLine, rgb(165, 177, 196));
+
+        const uint32_t sizeY = cardY + 126u;
+        appDrawText(left, sizeY + 6u, "Size", rgb(146, 157, 176));
+        if (m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::TrueType) {
+            framebuffer::fill_rect(left + 52u, sizeY, 24u, 22u, rgb(55, 61, 73));
+            appDrawRect(left + 52u, sizeY, 24u, 22u, rgb(93, 103, 122));
+            framebuffer::fill_rect(left + 82u, sizeY, 24u, 22u, rgb(55, 61, 73));
+            appDrawRect(left + 82u, sizeY, 24u, 22u, rgb(93, 103, 122));
+            appDrawText(left + 61u, sizeY + 6u, "-", rgb(240, 243, 249));
+            appDrawText(left + 91u, sizeY + 6u, "+", rgb(240, 243, 249));
+            char sizeLabel[24] = {};
+            appendUnsigned(sizeLabel, sizeof(sizeLabel), m_fontPendingSize);
+            appendText(sizeLabel, sizeof(sizeLabel), " px  (8-48)");
+            appDrawText(left + 114u, sizeY + 6u, sizeLabel, rgb(220, 225, 235));
+        } else {
+            appDrawText(left + 52u, sizeY + 6u, "7 px (fixed)", rgb(220, 225, 235));
+        }
+
+        const uint32_t previewLabelY = cardY + 150u;
+        const uint32_t previewY = cardY + 162u;
+        const uint32_t statusY = cardY + cardH - 43u;
+        const uint32_t previewBottom = statusY > previewY + 4u ? statusY - 4u : previewY + 4u;
+        const uint32_t previewH = previewBottom - previewY;
+        appDrawText(left, previewLabelY, "Preview  |  scroll here to inspect all samples", rgb(146, 157, 176));
+        framebuffer::fill_rect(left, previewY, availableW, previewH, rgb(30, 34, 43));
+        appDrawRect(left, previewY, availableW, previewH, rgb(58, 65, 78));
+        const char* samples[3] = {
+            "The quick brown fox jumps over the lazy dog.",
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+            "abcdefghijklmnopqrstuvwxyz 0123456789"
+        };
+        const uint32_t step = m_fontPendingSize == gxos::gui::kSystemFontBuiltinBitmapPixelHeight
+            ? 10u : (m_fontPendingSize * 5u) / 4u + 3u;
+        for (uint32_t i = 0u; i < 3u; ++i) {
+            const int64_t sampleY = static_cast<int64_t>(previewY) +
+                static_cast<int64_t>(i * step) - m_fontPreviewScroll;
+            if (sampleY < static_cast<int64_t>(previewY) - 128 ||
+                sampleY >= static_cast<int64_t>(previewBottom)) continue;
+            const uint32_t previewSize =
+                m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::BuiltinBitmap
+                    ? gxos::gui::kSystemFontBuiltinBitmapPixelHeight : m_fontPendingSize;
+            const uint32_t result = drawFontText(m_fontPendingIdentity, previewSize,
+                left + 5u, static_cast<uint32_t>(sampleY), left + 2u, previewY + 2u,
+                availableW - 4u, previewH > 4u ? previewH - 4u : 1u,
+                samples[i], rgb(238, 240, 246));
+            if (result != static_cast<uint32_t>(gxos::gui::SystemFontSelectionStatus::Ok)) {
+                updateFontStatus(static_cast<gxos::gui::SystemFontSelectionStatus>(result));
+                m_fontRefreshRequested = true;
+                break;
+            }
+        }
+
+        if (m_fontRefreshRequested) {
+            m_fontRefreshRequested = false;
+            refreshFontCatalogAfterPreviewError();
+        }
+
+        framebuffer::fill_rect(left, statusY, availableW, 15u, rgb(36, 40, 50));
+        drawFittedBitmapText(left, statusY + 4u, availableW, m_fontStatusText,
+            m_fontStatus == gxos::gui::SystemFontSelectionStatus::Ok ||
+            m_fontStatus == gxos::gui::SystemFontSelectionStatus::PersistenceFailed
+                ? rgb(220, 225, 235) : rgb(236, 174, 122));
+        const uint32_t buttonY = cardY + cardH - 25u;
+        const uint32_t buttonWidths[3] = {60u, 60u, 102u};
+        const char* buttonLabels[3] = {"Apply", "Cancel", "Restore Defaults"};
+        const uint32_t buttonX[3] = {left, left + 66u, left + 132u};
+        for (uint32_t i = 0u; i < 3u; ++i) {
+            framebuffer::fill_rect(buttonX[i], buttonY, buttonWidths[i], 20u,
+                i == 0u ? rgb(52, 76, 112) : rgb(55, 61, 73));
+            appDrawRect(buttonX[i], buttonY, buttonWidths[i], 20u, rgb(93, 103, 122));
+            appDrawText(buttonX[i] + 5u, buttonY + 7u, buttonLabels[i], rgb(240, 243, 249));
         }
     }
 
@@ -17006,12 +17667,13 @@ private:
         appDrawText(x + 18u, y + 20u, "Settings", rgb(238, 240, 246));
         appDrawText(x + 18u, y + 42u, "System", rgb(160, 174, 194));
 
-        const settings::CategoryId items[3] = {
-            settings::CategoryId::System, settings::CategoryId::Display, settings::CategoryId::About
+        const settings::CategoryId items[4] = {
+            settings::CategoryId::System, settings::CategoryId::Display,
+            settings::CategoryId::Personalization, settings::CategoryId::About
         };
-        const char* labels[3] = { "System", "Display", "About" };
-        const uint32_t itemY[3] = { y + 60u, y + 106u, y + 152u };
-        for (int i = 0; i < 3; ++i) {
+        const char* labels[4] = { "System", "Display", "Personalization", "About" };
+        const uint32_t itemY[4] = { y + 60u, y + 106u, y + 152u, y + 198u };
+        for (int i = 0; i < 4; ++i) {
             const bool active = selected == items[i];
             const bool hovered = m_hoverCategory == items[i];
             const uint32_t fill = active ? rgb(62, 79, 112) : (hovered ? rgb(47, 52, 64) : rgb(34, 37, 46));
@@ -17022,32 +17684,56 @@ private:
             appDrawText(x + 24u, itemY[i] + 14u, labels[i], active ? rgb(245, 247, 252) : rgb(190, 195, 205));
         }
 
-        appDrawText(x + 14u, y + 222u, "Other categories", rgb(145, 151, 163));
-        appDrawText(x + 14u, y + 236u, "remain deferred.", rgb(145, 151, 163));
+        appDrawText(x + 14u, y + 252u, "More settings", rgb(145, 151, 163));
+        appDrawText(x + 14u, y + 266u, "are in progress.", rgb(145, 151, 163));
 
         const uint32_t contentX = x + sidebarWidth + 24u;
         const uint32_t contentW = w > sidebarWidth + 44u ? w - sidebarWidth - 44u : 1u;
         const bool display = selected == settings::CategoryId::Display;
-        const char* pageName = selected == settings::CategoryId::About ? "About" :
-            (display ? "Display" : "System overview");
+        const bool personalization = selected == settings::CategoryId::Personalization;
+        const bool fonts = personalization && presentation.route().target ==
+            settings::TargetId::PersonalizationFonts;
+        const char* pageName = fonts ? "Fonts" :
+            (personalization ? "Personalization" :
+            (selected == settings::CategoryId::About ? "About" :
+            (display ? "Display" : "System overview")));
         appDrawText(contentX, y + 24u, pageName, rgb(243, 245, 250));
-        appDrawText(contentX, y + 47u,
-            selected == settings::CategoryId::About ? "Product and version details" :
-            (display ? "Active framebuffer information" : "Read-only information reported by the kernel"),
-            rgb(165, 177, 196));
-        appDrawText(contentX, y + 70u, getRuntimeAppId(), rgb(135, 159, 197));
+        const char* pageDescription = fonts ? "Select a validated typeface and preview its size" :
+            (personalization ? "Desktop background and text appearance" :
+            (selected == settings::CategoryId::About ? "Product and version details" :
+            (display ? "Active framebuffer information" : "Read-only information reported by the kernel")));
+        appDrawText(contentX, y + 47u, pageDescription, rgb(165, 177, 196));
+        if (fonts) {
+            framebuffer::fill_rect(contentX + 12u, y + 68u, 92u, 20u, rgb(55, 61, 73));
+            appDrawRect(contentX + 12u, y + 68u, 92u, 20u, rgb(93, 103, 122));
+            appDrawText(contentX + 20u, y + 75u, "Back to Personalization", rgb(240, 243, 249));
+        } else {
+            appDrawText(contentX, y + 70u, getRuntimeAppId(), rgb(135, 159, 197));
+        }
 
         const uint32_t cardY = y + 96u;
         const uint32_t cardH = h > 140u ? h - 122u : 1u;
         framebuffer::fill_rect(contentX, cardY, contentW, cardH, rgb(36, 40, 50));
         appDrawRect(contentX, cardY, contentW, cardH, rgb(67, 74, 88));
-        appDrawText(contentX + 16u, cardY + 20u,
-            selected == settings::CategoryId::About ? "About this system" :
-                (display ? "Active display information" : "System information"),
-            rgb(224, 229, 239));
-        if (display) {
+        if (fonts) {
+            drawFontPage(contentX, contentW, cardY, cardH);
+        } else if (personalization) {
+            appDrawText(contentX + 16u, cardY + 20u, "Personalization", rgb(224, 229, 239));
+            const uint32_t tileY = cardY + 50u;
+            framebuffer::fill_rect(contentX + 16u, tileY, contentW > 32u ? contentW - 32u : 1u,
+                54u, rgb(48, 54, 66));
+            appDrawRect(contentX + 16u, tileY, contentW > 32u ? contentW - 32u : 1u,
+                54u, rgb(82, 91, 108));
+            appDrawText(contentX + 28u, tileY + 14u, "Fonts", rgb(240, 243, 249));
+            appDrawText(contentX + 28u, tileY + 32u,
+                "Choose a system font, size, and live preview", rgb(170, 181, 198));
+        } else if (display) {
+            appDrawText(contentX + 16u, cardY + 20u, "Active display information", rgb(224, 229, 239));
             drawDisplayInformation(contentX, contentW, cardY);
         } else if (m_snapshotAvailable) {
+            appDrawText(contentX + 16u, cardY + 20u,
+                selected == settings::CategoryId::About ? "About this system" : "System information",
+                rgb(224, 229, 239));
             const bool about = selected == settings::CategoryId::About;
             const uint32_t rowStart = about ? 52u : 58u;
             const uint32_t rowStep = 40u;
@@ -17086,10 +17772,13 @@ private:
                 }
             }
         } else {
+            appDrawText(contentX + 16u, cardY + 20u, "System information", rgb(224, 229, 239));
             appDrawText(contentX + 16u, cardY + 58u, "System information is unavailable.", rgb(236, 174, 122));
         }
         appDrawText(contentX + 12u, y + h - 20u,
-            "S System   D Display   A About", rgb(145, 151, 163));
+            fonts ? "J/K Font   +/- Size   A Apply   C Cancel   R Bitmap" :
+            (personalization ? "P Personalization   F Fonts" :
+            "S System   D Display   P Personalization   A About"), rgb(145, 151, 163));
     }
 };
 

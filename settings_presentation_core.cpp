@@ -30,6 +30,7 @@ const FixedTable<PageElementDescriptor, kPageElementCount> kPageElements = {{
     { "Gateway", "gateway router network ipv4", { CategoryId::Network, TargetId::Gateway }, PageElementKind::Setting },
     { "Desktop background", "wallpaper background image personalize", { CategoryId::Personalization, TargetId::PersonalizationBackground }, PageElementKind::Action },
     { "Theme and appearance", "theme color appearance personalization desktop", { CategoryId::Personalization, TargetId::Page }, PageElementKind::Page },
+    { "Fonts", "font fonts typeface family text size bitmap truetype personalization", { CategoryId::Personalization, TargetId::PersonalizationFonts }, PageElementKind::Setting },
     { "Devices", "device devices hardware connected", { CategoryId::Devices, TargetId::Page }, PageElementKind::Page },
     { "Input devices", "input mouse keyboard hid", { CategoryId::Devices, TargetId::DevicesInput }, PageElementKind::Setting },
     { "Network adapters", "network adapter ethernet nic", { CategoryId::Devices, TargetId::DevicesNetwork }, PageElementKind::Setting },
@@ -130,7 +131,8 @@ bool targetMatchesCategory(TargetId target, CategoryId category)
     case TargetId::IPv4:
     case TargetId::DNS:
     case TargetId::Gateway: return category == CategoryId::Network;
-    case TargetId::PersonalizationBackground: return category == CategoryId::Personalization;
+    case TargetId::PersonalizationBackground:
+    case TargetId::PersonalizationFonts: return category == CategoryId::Personalization;
     case TargetId::DevicesInput:
     case TargetId::DevicesNetwork:
     case TargetId::DevicesDisplay:
@@ -167,6 +169,7 @@ TargetId parseTarget(const char* text, size_t start, size_t length)
     if (spanEquals(text, start, length, "default") || spanEquals(text, start, length, "defaults")) return TargetId::AppsDefault;
     if (spanEquals(text, start, length, "device") || spanEquals(text, start, length, "computer")) return TargetId::SystemDevice;
     if (spanEquals(text, start, length, "background") || spanEquals(text, start, length, "wallpaper")) return TargetId::PersonalizationBackground;
+    if (spanEquals(text, start, length, "fonts") || spanEquals(text, start, length, "font")) return TargetId::PersonalizationFonts;
     if (spanEquals(text, start, length, "resolution")) return TargetId::Resolution;
     if (spanEquals(text, start, length, "display-mode")) return TargetId::DisplayMode;
     if (spanEquals(text, start, length, "ipv4")) return TargetId::IPv4;

@@ -431,6 +431,111 @@ void testDirectoryTraversalBound()
 	CHECK(count == 0u);
 }
 
+void testPreviewIsolationAndBitmapPixels()
+{
+	SystemFontSelectionShutdown();
+	resetFixtureStore();
+	addFile("Roboto-Regular.ttf", g_fixture);
+	rebuildDirectoryEntries();
+	CHECK(SystemFontSelectionInitialize() == SystemFontSelectionStatus::Ok);
+	SystemFontFaceInfo faces[kSystemFontMaxAvailableFonts]{};
+	uint32_t count = 0u;
+	CHECK(SystemFontSelectionGetAvailable(faces, kSystemFontMaxAvailableFonts, &count) ==
+		SystemFontSelectionStatus::Ok);
+	CHECK(count == 1u);
+	SystemFontSelectionSnapshot activeBefore{};
+	SystemFontConfiguredPreference configuredBefore{};
+	CHECK(SystemFontSelectionGetActive(&activeBefore) == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionGetConfigured(&configuredBefore) == SystemFontSelectionStatus::Ok);
+	FontGlyphCacheStatistics cacheBefore{};
+	CHECK(FontGlyphCacheGetStatistics(&cacheBefore) == FontStatus::Ok);
+
+	uint32_t preview[96u * 48u];
+	for (uint32_t i = 0u; i < 96u * 48u; ++i) preview[i] = 0xff101820u;
+	CHECK(SystemFontSelectionDrawPreview(&faces[0].identity, 18u, preview, sizeof(preview),
+		96u * sizeof(uint32_t), 96u, 48u, 4u, 2u, 58u, 36u,	0, 4,
+		"The quick brown fox", 19u, 0xffffffffu) == SystemFontSelectionStatus::Ok);
+	for (uint32_t repeat = 0u; repeat < 12u; ++repeat) {
+		const uint32_t size = repeat == 0u ? kSystemFontMinSelectablePixelSize :
+			(repeat == 1u ? kSystemFontMaxSelectablePixelSize : 16u + repeat);
+		CHECK(SystemFontSelectionDrawPreview(&faces[0].identity, size, preview, sizeof(preview),
+			96u * sizeof(uint32_t), 96u, 48u, 4u, 2u, 58u, 36u,
+			0, 4, "A", 1u, 0xffffffffu) == SystemFontSelectionStatus::Ok);
+	}
+	const char* longFamilyLabel = "GuideXOS Extremely Long Typeface Family Name in a Narrow Settings Pane";
+	CHECK(SystemFontSelectionDrawPreview(&faces[0].identity, 18u, preview, sizeof(preview),
+		96u * sizeof(uint32_t), 96u, 48u, 4u, 2u, 24u, 36u,
+		0, 4, longFamilyLabel, std::strlen(longFamilyLabel),
+		0xffffffffu) == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionDrawPreview(&faces[0].identity,
+		kSystemFontMinSelectablePixelSize - 1u, preview, sizeof(preview),
+		96u * sizeof(uint32_t), 96u, 48u, 0u, 0u, 96u, 48u,
+		0, 0, "A", 1u, 0xffffffffu) == SystemFontSelectionStatus::SizeOutOfRange);
+	CHECK(SystemFontSelectionDrawPreview(&faces[0].identity,
+		kSystemFontMaxSelectablePixelSize + 1u, preview, sizeof(preview),
+		96u * sizeof(uint32_t), 96u, 48u, 0u, 0u, 96u, 48u,
+		0, 0, "A", 1u, 0xffffffffu) == SystemFontSelectionStatus::SizeOutOfRange);
+	bool changedInside = false;
+	bool changedOutside = false;
+	for (uint32_t y = 0u; y < 48u; ++y) {
+		for (uint32_t x = 0u; x < 96u; ++x) {
+			const bool inside = x >= 4u && x < 62u && y >= 2u && y < 38u;
+			const bool changed = preview[y * 96u + x] != 0xff101820u;
+			changedInside = changedInside || (inside && changed);
+			changedOutside = changedOutside || (!inside && changed);
+		}
+	}
+	CHECK(changedInside);
+	CHECK(!changedOutside);
+	FontGlyphCacheStatistics cacheAfter{};
+	CHECK(FontGlyphCacheGetStatistics(&cacheAfter) == FontStatus::Ok);
+	CHECK(cacheAfter.hits == cacheBefore.hits && cacheAfter.misses == cacheBefore.misses &&
+		cacheAfter.rasterizations == cacheBefore.rasterizations &&
+		cacheAfter.evictions == cacheBefore.evictions && cacheAfter.bytesUsed == cacheBefore.bytesUsed);
+	SystemFontSelectionSnapshot activeAfter{};
+	SystemFontConfiguredPreference configuredAfter{};
+	CHECK(SystemFontSelectionGetActive(&activeAfter) == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionGetConfigured(&configuredAfter) == SystemFontSelectionStatus::Ok);
+	CHECK(activeAfter.identity.stableId == activeBefore.identity.stableId &&
+		activeAfter.pixelSize == activeBefore.pixelSize &&
+		activeAfter.selectionGeneration == activeBefore.selectionGeneration);
+	CHECK(configuredAfter.identity.stableId == configuredBefore.identity.stableId &&
+		configuredAfter.pixelSize == configuredBefore.pixelSize &&
+		configuredAfter.sequence == configuredBefore.sequence &&
+		configuredAfter.isPersisted == configuredBefore.isPersisted);
+
+	uint32_t bitmapPreview[64u * 32u];
+	uint32_t bitmapExpected[64u * 32u];
+	for (uint32_t i = 0u; i < 64u * 32u; ++i) {
+		bitmapPreview[i] = 0xff101820u;
+		bitmapExpected[i] = 0xff101820u;
+	}
+	SystemFontIdentity bitmap{};
+	bitmap.stableId = kBuiltinBitmapFontId;
+	strcpy(bitmap.familyName, "guideXOS Bitmap");
+	strcpy(bitmap.styleName, "Regular");
+	bitmap.kind = SystemFontIdentityKind::BuiltinBitmap;
+	CHECK(SystemFontSelectionDrawPreview(&bitmap, kBitmapFontPixelHeight, bitmapPreview,
+		sizeof(bitmapPreview), 64u * sizeof(uint32_t), 64u, 32u, 0u, 0u, 64u, 32u,
+		2, 3, "A?", 2u, 0xffffffffu) == SystemFontSelectionStatus::Ok);
+	FontHandle bitmapHandle{};
+	CHECK(FontManagerResolveFont({kBuiltinBitmapFontId}, &bitmapHandle) == FontStatus::Ok);
+	CHECK(FontDrawTextToBuffer(bitmapHandle, {kBitmapFontPixelHeight}, bitmapExpected,
+		64u * sizeof(uint32_t), 64u, 32u, 2, 3, "A?", 2u, 0xffffffffu, nullptr) == FontStatus::Ok);
+	CHECK(std::memcmp(bitmapPreview, bitmapExpected, sizeof(bitmapPreview)) == 0);
+
+	g_files.erase(lowerPath("/system/fonts/roboto-regular.ttf"));
+	rebuildDirectoryEntries();
+	for (uint32_t i = 0u; i < 96u * 48u; ++i) preview[i] = 0xff101820u;
+	CHECK(SystemFontSelectionDrawPreview(&faces[0].identity, 18u, preview, sizeof(preview),
+		96u * sizeof(uint32_t), 96u, 48u, 0u, 0u, 96u, 48u, 0, 0,
+		"missing", 7u, 0xffffffffu) == SystemFontSelectionStatus::NotFound);
+	CHECK(SystemFontSelectionGetActive(&activeAfter) == SystemFontSelectionStatus::Ok);
+	CHECK(activeAfter.identity.kind == SystemFontIdentityKind::BuiltinBitmap &&
+		activeAfter.selectionGeneration == activeBefore.selectionGeneration);
+	SystemFontSelectionShutdown();
+}
+
 } // namespace
 
 namespace kernel {
@@ -548,6 +653,7 @@ int main()
 	testCorruptAndUnsupportedPreferences();
 	testReplacementCapacityAndLegacyFallback();
 	testDirectoryTraversalBound();
+	testPreviewIsolationAndBitmapPixels();
 	SystemFontSelectionShutdown();
 	std::printf("FONT6 system font selection: %d checks, %d failures\n", g_checks, g_failures);
 	return g_failures == 0 ? 0 : 1;

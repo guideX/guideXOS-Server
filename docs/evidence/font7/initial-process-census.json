@@ -1,0 +1,11 @@
+{
+  "capturedUtc": "2026-10-17T12:38:24.2226402Z",
+  "totalPhysicalMiB": 64863,
+  "freePhysicalMiB": 41816,
+  "requestedGuestMemoryMiB": 1024,
+  "qemuProcessesAtLaunch": [],
+  "network": "disabled",
+  "privateEsp": "D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font7-qemu-20261017-fontsupport\\ESP",
+  "kernelSha256": "83FA6B5D61BD32D794F785961001FFAB69F18B09FBB76F472E32354747760E29",
+  "note": "UI acceptance process launch after first 1024 MiB guest exited during QMP reset experiment; same private storage retained."
+}

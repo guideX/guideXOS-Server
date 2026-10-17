@@ -1,0 +1,7 @@
+{
+  "processId": 10480,
+  "qmpPort": 60746,
+  "memory": "1024M",
+  "startedUtc": "2026-10-17T12:38:24.3767146Z",
+  "commandLine": "-machine pc,accel=whpx,usb=off -smp 2 -m 1024M -vga std -display none -drive if=pflash,format=raw,readonly=on,file=D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font7-qemu-20261017-fontsupport\\OVMF.fd -drive file=fat:rw:D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font7-qemu-20261017-fontsupport\\ESP,format=raw,if=ide,index=0 -serial file:D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font7-qemu-20261017-fontsupport\\desktop-ui.serial.log -qmp tcp:127.0.0.1:60746,server=on,wait=off -monitor none -rtc base=utc,clock=host -net none"
+}

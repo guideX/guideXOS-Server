@@ -44,6 +44,7 @@ enum class TargetId : unsigned char {
     StorageDiskDetail,
     AboutVersion,
     PersonalizationBackground,
+    PersonalizationFonts,
     AppsList,
     AppsDefault,
     AppDetail,
@@ -60,7 +61,7 @@ enum class TargetId : unsigned char {
 
 enum : size_t {
     kCategoryCount = 12,
-    kPageElementCount = 41,
+    kPageElementCount = 42,
     kSearchResultCapacity = 6,
     kSearchQueryMaxLength = 40,
     kSearchQueryBufferSize = kSearchQueryMaxLength + 1,

@@ -39,6 +39,7 @@ FontRecord s_records[kSystemFontMaxAvailableFonts] = {};
 char s_directoryNames[kSystemFontMaxDiscoveredEntries][kernel::vfs::VFS_MAX_FILENAME] = {};
 uint8_t s_fileScratch[kFontTrueTypeMaxFileBytes] = {};
 uint8_t s_probeScratch[kFontTrueTypeMaxBitmapPixels] = {};
+uint8_t s_previewScratch[kFontTrueTypeMaxBitmapPixels] = {};
 char s_preferenceText[kPreferenceTextBytes] = {};
 char s_preferenceSerialized[kPreferenceTextBytes] = {};
 uint32_t s_recordCount = 0;
@@ -107,6 +108,73 @@ void copyText(char* destination, uint32_t capacity, const char* source)
 	uint32_t i = 0u;
 	if (source) while (i + 1u < capacity && source[i]) { destination[i] = source[i]; ++i; }
 	destination[i] = '\0';
+}
+
+uint32_t blendPreviewChannel(uint32_t foreground, uint32_t background, uint32_t alpha)
+{
+	return (foreground * alpha + background * (255u - alpha) + 127u) / 255u;
+}
+
+bool decodePreviewUtf8(const char* input, size_t length, size_t* offset, uint32_t* outCodePoint)
+{
+	if (!input || !offset || !outCodePoint || *offset >= length) return false;
+	const size_t start = *offset;
+	const uint8_t first = static_cast<uint8_t>(input[start]);
+	if (first <= 0x7fu) {
+		*outCodePoint = first;
+		*offset = start + 1u;
+		return true;
+	}
+	uint32_t codePoint = 0u;
+	size_t count = 0u;
+	if (first >= 0xc2u && first <= 0xdfu) { codePoint = first & 0x1fu; count = 2u; }
+	else if (first >= 0xe0u && first <= 0xefu) { codePoint = first & 0x0fu; count = 3u; }
+	else if (first >= 0xf0u && first <= 0xf4u) { codePoint = first & 0x07u; count = 4u; }
+	else return false;
+	if (count > length - start) return false;
+	for (size_t i = 1u; i < count; ++i) {
+		const uint8_t next = static_cast<uint8_t>(input[start + i]);
+		if ((next & 0xc0u) != 0x80u) return false;
+		if (i == 1u && ((first == 0xe0u && next < 0xa0u) ||
+			(first == 0xedu && next > 0x9fu) || (first == 0xf0u && next < 0x90u) ||
+			(first == 0xf4u && next > 0x8fu))) return false;
+		codePoint = (codePoint << 6) | (next & 0x3fu);
+	}
+	if (codePoint > 0x10ffffu || (codePoint >= 0xd800u && codePoint <= 0xdfffu)) return false;
+	*outCodePoint = codePoint;
+	*offset = start + count;
+	return true;
+}
+
+void compositePreview(uint32_t* pixels, uint32_t pitchWords,
+	uint32_t clipLeft, uint32_t clipTop, uint32_t clipRight, uint32_t clipBottom,
+	int64_t originX, int64_t originY, const GlyphMetrics& metrics,
+	const uint8_t* coverage, uint32_t color)
+{
+	if (!pixels || !coverage || metrics.widthPx == 0u || metrics.heightPx == 0u) return;
+	const uint32_t foregroundAlpha = (color >> 24) & 0xffu;
+	const uint32_t foregroundRed = (color >> 16) & 0xffu;
+	const uint32_t foregroundGreen = (color >> 8) & 0xffu;
+	const uint32_t foregroundBlue = color & 0xffu;
+	for (uint32_t row = 0u; row < metrics.heightPx; ++row) {
+		const int64_t destinationY = originY + row;
+		if (destinationY < clipTop || destinationY >= clipBottom) continue;
+		for (uint32_t column = 0u; column < metrics.widthPx; ++column) {
+			const int64_t destinationX = originX + column;
+			if (destinationX < clipLeft || destinationX >= clipRight) continue;
+			const uint32_t coverageValue = coverage[static_cast<size_t>(row) * metrics.widthPx + column];
+			if (coverageValue == 0u || foregroundAlpha == 0u) continue;
+			const uint32_t alpha = (coverageValue * foregroundAlpha + 127u) / 255u;
+			if (alpha == 0u) continue;
+			const size_t pixelIndex = static_cast<size_t>(destinationY) * pitchWords +
+				static_cast<size_t>(destinationX);
+			const uint32_t destination = pixels[pixelIndex];
+			const uint32_t red = blendPreviewChannel(foregroundRed, (destination >> 16) & 0xffu, alpha);
+			const uint32_t green = blendPreviewChannel(foregroundGreen, (destination >> 8) & 0xffu, alpha);
+			const uint32_t blue = blendPreviewChannel(foregroundBlue, destination & 0xffu, alpha);
+			pixels[pixelIndex] = 0xff000000u | (red << 16) | (green << 8) | blue;
+		}
+	}
 }
 
 bool appendByte(char* output, uint32_t capacity, uint32_t* position, char value)
@@ -1172,6 +1240,127 @@ SystemFontSelectionStatus SystemFontSelectionPrepareActiveSize(
 	if (!s_initialized) return SystemFontSelectionStatus::NotInitialized;
 	if (s_activeRecord == kInvalidRecord) return SystemFontSelectionStatus::SizeOutOfRange;
 	return prepareRecord(s_activeRecord, pixelSize, outCandidate);
+}
+
+SystemFontSelectionStatus SystemFontSelectionDrawPreview(
+	const SystemFontIdentity* identity, uint32_t pixelSize,
+	uint32_t* pixels, size_t destinationBytes, uint32_t pitchBytes,
+	uint32_t bufferWidth, uint32_t bufferHeight,
+	uint32_t clipX, uint32_t clipY, uint32_t clipWidth, uint32_t clipHeight,
+	int32_t x, int32_t topY, const char* utf8, size_t byteLength, uint32_t color)
+{
+	if (!identity || !pixels || (!utf8 && byteLength != 0u) || byteLength > kFontMaxTextBytes ||
+		bufferWidth == 0u || bufferHeight == 0u || bufferWidth > 4096u || bufferHeight > 4096u ||
+		pitchBytes < static_cast<uint64_t>(bufferWidth) * sizeof(uint32_t) || (pitchBytes & 3u) != 0u)
+		return SystemFontSelectionStatus::InvalidArgument;
+	const uint64_t requiredBytes = static_cast<uint64_t>(bufferHeight - 1u) * pitchBytes +
+		static_cast<uint64_t>(bufferWidth) * sizeof(uint32_t);
+	if (requiredBytes > static_cast<uint64_t>(static_cast<size_t>(-1)))
+		return SystemFontSelectionStatus::InvalidArgument;
+	if (destinationBytes < static_cast<size_t>(requiredBytes))
+		return SystemFontSelectionStatus::InvalidArgument;
+	const uint64_t clipRight64 = static_cast<uint64_t>(clipX) + clipWidth;
+	const uint64_t clipBottom64 = static_cast<uint64_t>(clipY) + clipHeight;
+	const uint32_t clipLeft = clipX < bufferWidth ? clipX : bufferWidth;
+	const uint32_t clipTop = clipY < bufferHeight ? clipY : bufferHeight;
+	const uint32_t clipRight = static_cast<uint32_t>(clipRight64 < bufferWidth ? clipRight64 : bufferWidth);
+	const uint32_t clipBottom = static_cast<uint32_t>(clipBottom64 < bufferHeight ? clipBottom64 : bufferHeight);
+	if (clipRight <= clipLeft || clipBottom <= clipTop) return SystemFontSelectionStatus::Ok;
+
+	SelectionGuard guard;
+	if (!s_initialized) return SystemFontSelectionStatus::NotInitialized;
+	FontHandle handle = s_builtinHandle;
+	const bool builtin = identity->kind == SystemFontIdentityKind::BuiltinBitmap;
+	if (builtin) {
+		SystemFontIdentity expected = {};
+		builtinIdentity(&expected);
+		if (!identityEquals(*identity, expected) || pixelSize != kBitmapFontPixelHeight)
+			return SystemFontSelectionStatus::InvalidArgument;
+	} else if (identity->kind == SystemFontIdentityKind::TrueType) {
+		const int32_t recordIndex = findRecordById(identity->stableId);
+		if (recordIndex < 0 || !s_records[recordIndex].available ||
+			!identityEquals(*identity, s_records[recordIndex].identity))
+			return SystemFontSelectionStatus::NotFound;
+		if (pixelSize < kSystemFontMinSelectablePixelSize || pixelSize > kSystemFontMaxSelectablePixelSize)
+			return SystemFontSelectionStatus::SizeOutOfRange;
+		const SystemFontSelectionStatus sourceStatus = verifyRecordSource(static_cast<uint32_t>(recordIndex));
+		if (sourceStatus != SystemFontSelectionStatus::Ok) return sourceStatus;
+		handle = s_records[recordIndex].handle;
+	} else {
+		return SystemFontSelectionStatus::InvalidArgument;
+	}
+
+	TextMeasureResult measured = {};
+	const FontStatus measureStatus = FontMeasureText(handle, {pixelSize}, utf8, byteLength, &measured);
+	if (measureStatus != FontStatus::Ok && measureStatus != FontStatus::FallbackUsed)
+		return fontStatusToSelectionStatus(measureStatus);
+	FontMetrics faceMetrics = {};
+	if (FontGetMetrics(handle, {pixelSize}, &faceMetrics) != FontStatus::Ok ||
+		faceMetrics.lineHeightPx == 0u || faceMetrics.lineHeightPx > 256u)
+		return SystemFontSelectionStatus::PreparationFailed;
+
+	int64_t penX = x;
+	int64_t lineTop = topY;
+	bool previousWasCr = false;
+	size_t offset = 0u;
+	while (offset < byteLength) {
+		uint32_t codePoint = 0u;
+		if (!decodePreviewUtf8(utf8, byteLength, &offset, &codePoint))
+			return SystemFontSelectionStatus::PreparationFailed;
+		if (codePoint == '\r') {
+			penX = x;
+			lineTop += faceMetrics.lineHeightPx;
+			previousWasCr = true;
+			continue;
+		}
+		if (codePoint == '\n') {
+			if (!previousWasCr) lineTop += faceMetrics.lineHeightPx;
+			penX = x;
+			previousWasCr = false;
+			continue;
+		}
+		previousWasCr = false;
+		FontGlyphView glyph = {};
+		const FontStatus lookupStatus = FontLookupGlyph(handle, {pixelSize}, codePoint, &glyph);
+		if (lookupStatus != FontStatus::Ok && lookupStatus != FontStatus::FallbackUsed)
+			return fontStatusToSelectionStatus(lookupStatus);
+		if (builtin) {
+			if (!glyph.bitmap || glyph.bitmapFormat != FontBitmapFormat::ColumnLsbTop ||
+				glyph.bitmapByteLength < glyph.metrics.widthPx || glyph.metrics.heightPx > 8u)
+				return SystemFontSelectionStatus::PreparationFailed;
+			for (uint32_t column = 0u; column < glyph.metrics.widthPx; ++column) {
+				const uint8_t bits = glyph.bitmap[column];
+				for (uint32_t row = 0u; row < glyph.metrics.heightPx; ++row) {
+					if ((bits & (1u << row)) == 0u) continue;
+					const int64_t px = penX + glyph.metrics.xBearingPx + column;
+					const int64_t py = lineTop + glyph.metrics.yBearingPx + row;
+					if (px < clipLeft || px >= clipRight || py < clipTop || py >= clipBottom) continue;
+					pixels[static_cast<size_t>(py) * (pitchBytes / 4u) + static_cast<size_t>(px)] = color;
+				}
+			}
+		} else {
+			const uint64_t pixelCount = static_cast<uint64_t>(glyph.metrics.widthPx) * glyph.metrics.heightPx;
+			if (glyph.metrics.widthPx > kFontTrueTypeMaxBitmapDimension ||
+				glyph.metrics.heightPx > kFontTrueTypeMaxBitmapDimension ||
+				pixelCount > sizeof(s_previewScratch))
+				return SystemFontSelectionStatus::PreparationFailed;
+			GlyphMetrics rasterMetrics = glyph.metrics;
+			if (pixelCount != 0u) {
+				const uint32_t rasterCodePoint = glyph.metrics.codePoint;
+				const FontStatus rasterStatus = FontRasterizeGlyph(handle, {pixelSize}, rasterCodePoint,
+					s_previewScratch, static_cast<size_t>(pixelCount), glyph.metrics.widthPx,
+					&rasterMetrics);
+				if (rasterStatus != FontStatus::Ok && rasterStatus != FontStatus::FallbackUsed)
+					return fontStatusToSelectionStatus(rasterStatus);
+			}
+			const int64_t baseline = lineTop + faceMetrics.ascentPx;
+			compositePreview(pixels, pitchBytes / 4u, clipLeft, clipTop, clipRight, clipBottom,
+				penX + rasterMetrics.xBearingPx, baseline - rasterMetrics.yBearingPx,
+				rasterMetrics, s_previewScratch, color);
+		}
+		penX += glyph.metrics.advancePx;
+	}
+	return SystemFontSelectionStatus::Ok;
 }
 
 SystemFontSelectionStatus SystemFontSelectionApply(const SystemFontCandidate* candidate)
