@@ -23,3 +23,6 @@ D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\StellarNavigator.B
 D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\StellarNavigator.Benchmarks\obj\Release\net8.0\StellarNavigator.Benchmarks.pdb
 D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\StellarNavigator.Benchmarks\obj\Release\net8.0\StellarNavigator.Benchmarks.genruntimeconfig.cache
 D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\StellarNavigator.Benchmarks\obj\Release\net8.0\ref\StellarNavigator.Benchmarks.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\StellarNavigator.Benchmarks\bin\Release\net8.0\Data\leap_seconds.sn5json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\StellarNavigator.Benchmarks\bin\Release\net8.0\Astronomy.Time.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\StellarNavigator.Benchmarks\bin\Release\net8.0\Astronomy.Time.pdb

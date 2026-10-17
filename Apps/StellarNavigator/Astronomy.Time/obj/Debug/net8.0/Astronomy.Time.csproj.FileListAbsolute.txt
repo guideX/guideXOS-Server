@@ -1,0 +1,13 @@
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Time\obj\Debug\net8.0\Astronomy.Time.GeneratedMSBuildEditorConfig.editorconfig
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Time\obj\Debug\net8.0\Astronomy.Time.AssemblyInfoInputs.cache
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Time\obj\Debug\net8.0\Astronomy.Time.AssemblyInfo.cs
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Time\obj\Debug\net8.0\Astronomy.Time.csproj.CoreCompileInputs.cache
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Time\obj\Debug\net8.0\Astronomy.Time.sourcelink.json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Time\bin\Debug\net8.0\Data\leap_seconds.sn5json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Time\bin\Debug\net8.0\Astronomy.Time.deps.json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Time\bin\Debug\net8.0\Astronomy.Time.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Time\bin\Debug\net8.0\Astronomy.Time.pdb
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Time\obj\Debug\net8.0\Astronomy.Time.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Time\obj\Debug\net8.0\refint\Astronomy.Time.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Time\obj\Debug\net8.0\Astronomy.Time.pdb
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Time\obj\Debug\net8.0\ref\Astronomy.Time.dll

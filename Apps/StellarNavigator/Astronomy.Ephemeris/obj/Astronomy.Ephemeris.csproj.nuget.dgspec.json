@@ -1,0 +1,294 @@
+{
+  "format": 1,
+  "restore": {
+    "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Ephemeris\\Astronomy.Ephemeris.csproj": {}
+  },
+  "projects": {
+    "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Core\\Astronomy.Core.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Core\\Astronomy.Core.csproj",
+        "projectName": "Astronomy.Core",
+        "projectPath": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Core\\Astronomy.Core.csproj",
+        "packagesPath": "C:\\Users\\guideX\\.nuget\\packages\\",
+        "outputPath": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Core\\obj\\",
+        "projectStyle": "PackageReference",
+        "fallbackFolders": [
+          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
+        ],
+        "configFilePaths": [
+          "C:\\Users\\guideX\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+          "C:\\Program Files\\dotnet\\library-packs": {},
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "framework": "net8.0",
+            "targetAlias": "net8.0",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.400"
+      },
+      "frameworks": {
+        "net8.0": {
+          "framework": "net8.0",
+          "targetAlias": "net8.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.401/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Ephemeris\\Astronomy.Ephemeris.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Ephemeris\\Astronomy.Ephemeris.csproj",
+        "projectName": "Astronomy.Ephemeris",
+        "projectPath": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Ephemeris\\Astronomy.Ephemeris.csproj",
+        "packagesPath": "C:\\Users\\guideX\\.nuget\\packages\\",
+        "outputPath": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Ephemeris\\obj\\",
+        "projectStyle": "PackageReference",
+        "fallbackFolders": [
+          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
+        ],
+        "configFilePaths": [
+          "C:\\Users\\guideX\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+          "C:\\Program Files\\dotnet\\library-packs": {},
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "framework": "net8.0",
+            "targetAlias": "net8.0",
+            "projectReferences": {
+              "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Core\\Astronomy.Core.csproj": {
+                "projectPath": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Core\\Astronomy.Core.csproj"
+              },
+              "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Time\\Astronomy.Time.csproj": {
+                "projectPath": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Time\\Astronomy.Time.csproj"
+              },
+              "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Navigation.Core\\Navigation.Core.csproj": {
+                "projectPath": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Navigation.Core\\Navigation.Core.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.400"
+      },
+      "frameworks": {
+        "net8.0": {
+          "framework": "net8.0",
+          "targetAlias": "net8.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.401/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Time\\Astronomy.Time.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Time\\Astronomy.Time.csproj",
+        "projectName": "Astronomy.Time",
+        "projectPath": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Time\\Astronomy.Time.csproj",
+        "packagesPath": "C:\\Users\\guideX\\.nuget\\packages\\",
+        "outputPath": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Time\\obj\\",
+        "projectStyle": "PackageReference",
+        "fallbackFolders": [
+          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
+        ],
+        "configFilePaths": [
+          "C:\\Users\\guideX\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+          "C:\\Program Files\\dotnet\\library-packs": {},
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "framework": "net8.0",
+            "targetAlias": "net8.0",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.400"
+      },
+      "frameworks": {
+        "net8.0": {
+          "framework": "net8.0",
+          "targetAlias": "net8.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.401/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Navigation.Core\\Navigation.Core.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Navigation.Core\\Navigation.Core.csproj",
+        "projectName": "Navigation.Core",
+        "projectPath": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Navigation.Core\\Navigation.Core.csproj",
+        "packagesPath": "C:\\Users\\guideX\\.nuget\\packages\\",
+        "outputPath": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Navigation.Core\\obj\\",
+        "projectStyle": "PackageReference",
+        "fallbackFolders": [
+          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
+        ],
+        "configFilePaths": [
+          "C:\\Users\\guideX\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+          "C:\\Program Files\\dotnet\\library-packs": {},
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "framework": "net8.0",
+            "targetAlias": "net8.0",
+            "projectReferences": {
+              "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Core\\Astronomy.Core.csproj": {
+                "projectPath": "D:\\dev\\guideXOSServer_STELLAR_NAVIGATOR\\Apps\\StellarNavigator\\Astronomy.Core\\Astronomy.Core.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.400"
+      },
+      "frameworks": {
+        "net8.0": {
+          "framework": "net8.0",
+          "targetAlias": "net8.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.401/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}

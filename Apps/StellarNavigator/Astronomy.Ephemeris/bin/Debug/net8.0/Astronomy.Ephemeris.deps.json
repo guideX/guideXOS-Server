@@ -1,0 +1,70 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "Astronomy.Ephemeris/1.0.0": {
+        "dependencies": {
+          "Astronomy.Core": "1.0.0",
+          "Astronomy.Time": "1.0.0",
+          "Navigation.Core": "1.0.0"
+        },
+        "runtime": {
+          "Astronomy.Ephemeris.dll": {}
+        }
+      },
+      "Astronomy.Core/1.0.0": {
+        "runtime": {
+          "Astronomy.Core.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "Astronomy.Time/1.0.0": {
+        "runtime": {
+          "Astronomy.Time.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "Navigation.Core/1.0.0": {
+        "dependencies": {
+          "Astronomy.Core": "1.0.0"
+        },
+        "runtime": {
+          "Navigation.Core.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "Astronomy.Ephemeris/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Astronomy.Core/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Astronomy.Time/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Navigation.Core/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

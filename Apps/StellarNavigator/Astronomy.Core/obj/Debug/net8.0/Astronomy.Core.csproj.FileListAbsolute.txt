@@ -1,0 +1,12 @@
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Core\obj\Debug\net8.0\Astronomy.Core.GeneratedMSBuildEditorConfig.editorconfig
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Core\obj\Debug\net8.0\Astronomy.Core.AssemblyInfoInputs.cache
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Core\obj\Debug\net8.0\Astronomy.Core.AssemblyInfo.cs
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Core\obj\Debug\net8.0\Astronomy.Core.csproj.CoreCompileInputs.cache
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Core\obj\Debug\net8.0\Astronomy.Core.sourcelink.json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Core\bin\Debug\net8.0\Astronomy.Core.deps.json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Core\bin\Debug\net8.0\Astronomy.Core.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Core\bin\Debug\net8.0\Astronomy.Core.pdb
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Core\obj\Debug\net8.0\Astronomy.Core.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Core\obj\Debug\net8.0\refint\Astronomy.Core.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Core\obj\Debug\net8.0\Astronomy.Core.pdb
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Core\obj\Debug\net8.0\ref\Astronomy.Core.dll

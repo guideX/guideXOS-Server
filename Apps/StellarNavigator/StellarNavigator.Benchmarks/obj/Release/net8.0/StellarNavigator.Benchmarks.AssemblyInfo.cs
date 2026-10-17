@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("StellarNavigator.Benchmarks")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+dc7a6ddd351b5c02c230b3c4c76a5292435f4dbe")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+1c8fcc66dcb1865d1f759103f9fd5816ff428938")]
 [assembly: System.Reflection.AssemblyProductAttribute("StellarNavigator.Benchmarks")]
 [assembly: System.Reflection.AssemblyTitleAttribute("StellarNavigator.Benchmarks")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

@@ -1,0 +1,16 @@
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Catalog\bin\Debug\net8.0\Astronomy.Catalog.deps.json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Catalog\bin\Debug\net8.0\Astronomy.Catalog.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Catalog\bin\Debug\net8.0\Astronomy.Catalog.pdb
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Catalog\bin\Debug\net8.0\Astronomy.Core.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Catalog\bin\Debug\net8.0\Astronomy.Core.pdb
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Catalog\obj\Debug\net8.0\Astronomy.Catalog.csproj.AssemblyReference.cache
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Catalog\obj\Debug\net8.0\Astronomy.Catalog.GeneratedMSBuildEditorConfig.editorconfig
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Catalog\obj\Debug\net8.0\Astronomy.Catalog.AssemblyInfoInputs.cache
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Catalog\obj\Debug\net8.0\Astronomy.Catalog.AssemblyInfo.cs
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Catalog\obj\Debug\net8.0\Astronomy.Catalog.csproj.CoreCompileInputs.cache
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Catalog\obj\Debug\net8.0\Astronomy.Catalog.sourcelink.json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Catalog\obj\Debug\net8.0\Astronom.741BD1D5.Up2Date
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Catalog\obj\Debug\net8.0\Astronomy.Catalog.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Catalog\obj\Debug\net8.0\refint\Astronomy.Catalog.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Catalog\obj\Debug\net8.0\Astronomy.Catalog.pdb
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\Astronomy.Catalog\obj\Debug\net8.0\ref\Astronomy.Catalog.dll
