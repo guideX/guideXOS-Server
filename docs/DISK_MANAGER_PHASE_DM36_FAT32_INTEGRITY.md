@@ -671,3 +671,148 @@ Close during active work (D), removal/replacement (E), blkdebug read failure
 rejection (H) also remain open. This is **Outcome C — production defect
 repaired; DM36 acceptance evidence remains incomplete**. `.phase` remains
 `last_completed=DM35`, `next_expected=DM36`; DM37 is not ready.
+
+## Continuation 8 — numeric findings qualified; foreign QEMU blocks lifecycle gates
+
+### Repository and QEMU ownership
+
+This continuation began at full HEAD
+`f7f42c2752dd90610b76b062787242a60e4bd144` on
+`DISK_MANAGER_IMPROVEMENTS`. `.phase` remained
+`last_completed=DM35`, `next_expected=DM36`. No authoritative DM36 Outcome A
+was present. The tracked worktree was clean at entry; the existing unrelated
+untracked `scripts/__pycache__/dm34_qmp_gui_input.cpython-312.pyc` was left
+untouched and is not part of the result.
+
+The initial fresh QEMU census found no active guest; historical PID 14792 had
+already exited, so there was no retained DM36 guest to reuse. The B1 and B2
+qualification guests were launched and then safely exited after their checks.
+Before the dedicated Stop guest could launch, the helper's fresh ownership
+gate found QEMU PID **5036**, parent PID **10864**, executable
+`C:\Program Files\qemu\qemu-system-x86_64.exe`. Its command line identifies a
+WHPX/TCG guest from sibling workspace
+`D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT`, its image under
+`out/dotnet/c174-shared-managed-resize/settings-ui-proof-runs/`, and QMP
+`127.0.0.1:49825`. The launch was refused before contacting QEMU. The foreign
+process, QMP endpoint, and its files were not contacted or modified, and no
+additional guest was launched. This leaves the requested lifecycle lane
+blocked under the foreign-owner rule.
+
+### Gate B — numeric finding presentation
+
+The first expanded B2 capture exposed a production rendering defect. The
+`DM36ORPHAN01` engine finding correctly represented one grouped orphan finding
+for allocated cluster **76594** at LBA **1228750**, but the UI's Observed
+field displayed **1** (the orphan finding/count) instead of the first orphan
+cluster ID. The initial failed capture is retained at
+`out/dm36/fat32-integrity/runs/C8-B2-rendered-detail-20261016/C8-B2-maximized.png`.
+
+The narrow correction in
+`kernel/core/include/kernel/disk_manager_fat32_integrity_ui.h` makes the
+orphan-finding display helper return `result.firstOrphanCluster`. The engine's
+finding count and integrity validation were not changed. The focused
+production-result regression in `tests/storage_manager_test.cpp` now uses two
+orphan clusters beginning at cluster 5 and expects displayed value **5**;
+the engine still reports two orphan clusters. The full suite remained at
+1,482 checks because this replaces the earlier count assertion.
+
+For B1, the expanded visible `DM36LOOP01` run displayed **Cluster-chain loop**,
+**Structural inconsistency**, structure **FAT**, location LBA **3310** / byte
+offset **0**, expected **3**, observed **4**. The location identifies the
+cluster-4 data reference involved in the loop; no filename or fabricated
+metadata was shown. The screenshot is
+`out/dm36/fat32-integrity/runs/C8-B1-renderer-detail-2-20261016/C8-B1-maximize-click-2.png`.
+This display-only B1 guest used kernel
+`EAFA950DBA3D38265976D0BFD73ED553D1A665D5BCE421DC847CC53C2795F075`, before
+the orphan-specific correction; the loop value path is unchanged by that
+correction. Its run manifest records source HEAD f7f42c27, bootloader
+`51C7BD0E16DC54FF843EFFA615738E2F4208F8D8729111D8C4C99BA4732889A9`, OVMF
+`2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792`, and
+QEMU 11.0.0 SHA-256
+`A930E028F93D0FA47E4D58BDAD2432F7466DC2B6AF0AE376F77EF7A298FFDD02`.
+
+B2 was rerun with a fresh kernel built from the corrected working tree. The
+maximized GUI now displays **Orphaned allocation**, **Structural
+inconsistency**, structure **FAT**, location LBA **1228750** / byte offset
+**0**, expected **0**, observed **76594**. The captured output is
+`out/dm36/fat32-integrity/runs/C8-B2-rendered-detail-fixed-20261016/C8-B2-fixed-maximized.png`.
+The actual finding corresponds to the fixture's allocated, unreferenced
+cluster 76594 in both FAT copies. The run's `owner-manifest.json` binds source
+HEAD f7f42c27, kernel
+`B7DFB46C2C15F9D1B0BA39B4025C47940AA07E8F23EE48837F7779A00A67B079`, bootloader
+`51C7BD0E16DC54FF843EFFA615738E2F4208F8D8729111D8C4C99BA4732889A9`, OVMF
+`2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792`, QEMU
+11.0.0 SHA-256
+`A930E028F93D0FA47E4D58BDAD2432F7466DC2B6AF0AE376F77EF7A298FFDD02`, and
+QMP `127.0.0.1:61442` (guest PID 19792). Kernel and bootloader staged in the
+private runtime ESP matched those hashes. Both runs used read-only disposable
+images, `NVME_WRITE_PROVEN=0`, `NVME_FLUSH_PROVEN=0`, and no physical host
+storage.
+
+Previous and Next were activated in the B1 GUI; the view remained at Finding
+1 of 1. This verifies activation and stable single-finding behavior, not
+movement between different findings. Existing production-linked host tests
+cover the no-finding and multiple-finding navigation logic. No two-finding
+guest fixture was run, so cross-finding guest navigation remains unqualified.
+
+### Guest I/O and image integrity
+
+Both qualified fixtures are 629,145,600-byte disposable images. The loop
+fixture `DM36LOOP01` had initial and final SHA-256
+`25F764F83C60D3C0208092C1E2A0CBF945675F32132B4590795A8853F7B6B316`; the
+orphan fixture `DM36ORPHAN01` had initial and final SHA-256
+`0E8944010169B8ACE8FE509492982AFDE8F5714DC9A5F70C092540F067AEF6A1`.
+Each production UI reported 40 checker metadata reads / 925,184 bytes.
+
+For B1, QMP target counters moved from 438 reads / 511,488 bytes to 741 /
+1,571,328; the 303-read / 1,059,840-byte delta includes the 40 checker reads
+and 263 other startup/registration reads (134,656 bytes). QMP writes and
+write bytes, unmaps, and failed reads were zero; its single Flush predated the
+check and did not increase. For corrected B2, QMP moved from 306 reads /
+443,904 bytes to 609 / 1,503,744, again a delta of 303 reads / 1,059,840
+bytes. The trace analysis in
+`out/dm36/fat32-integrity/runs/C8-B2-rendered-detail-fixed-20261016/C8-B2-fixed-trace-analysis.json`
+attributes 40 READ(10) requests / 925,184 bytes to checker tags 402–441,
+within partition LBAs 2048–3294; the other 263 requests account for 134,656
+bytes. The trace contains no Sync Cache command. The single QMP Flush was
+already present at baseline and did not increase. Writes, write bytes,
+unmaps, and failed reads were zero. QEMU exited safely for both runs and both
+whole-image hashes remained unchanged. These per-run results support G for
+B1/B2 only; they do not establish the remaining lifecycle gates.
+
+### Host/build qualification and remaining gates
+
+The updated `scripts/run-storage-manager-tests.ps1` run passed: storage
+manager **1,482/1,482**, DM36 metadata/integrity **259/259**, DM36 GUI
+**31/31**, DM35 surface **48/48**, DM35 GUI **34/34**, DM34 wipe **17/17**,
+erase **34/34**, wipe UI **31/31**, erase UI **39/39**, USB Mass Storage
+**249 checks included**, widget activation, USB trace classifier **7/7**, GPT
+verifier **1/1**, and DM30 fixture verifier **1/1**. Log:
+`out/dm36-continuation8/storage-suite.log`. The compositor pointer-buttons
+script also passed (`out/dm36-continuation8/compositor-pointer-buttons.log`).
+
+The source-matched freestanding AMD64 kernel build passed with both NVMe
+write/Flush proof flags zero; its log is
+`out/dm36-continuation8/kernel-build-after-orphan-display-fix.log` and kernel
+SHA-256 is the B7DF hash above. `build.bat` passed
+(`out/dm36-continuation8/build-bat.log`). UEFI x64 Release bootloader build
+passed with the already-built matching kernel intentionally skipped by the
+script; the bootloader SHA-256 is the 51C7 hash above
+(`out/dm36-continuation8/uefi-x64-release-build.log`). The unrelated
+`build.ps1 -Arch amd64` PacMan Native ELF undefined symbols remain a known
+separate issue and PacMan sources were not modified.
+
+The B2 corrected result, builds, and host tests qualify the numeric-rendering
+fix. Dedicated Stop (C), active-check Alt+F4 Close (D), USB removal and
+same-capacity replacement (E), an actual checker read error (F), and the
+remaining per-lifecycle portions of media-integrity gate G were not run
+because the fresh launch was blocked at foreign PID 5036. Gate H has the
+existing production-linked mounted-target host admission coverage, but no
+guest-mounted volume was tested; the guest test is unperformed. The foreign
+guest was not disturbed, and no attempt was made to launch another guest.
+
+This is **Outcome B — `BLOCKED_BY_FOREIGN_QEMU`**: numeric B1/B2 finding
+details are qualified, the narrow B2 renderer defect is fixed and
+requalified, and B1/B2 images remained unchanged, but mandatory lifecycle
+acceptance remains incomplete. `.phase` remains
+`last_completed=DM35`, `next_expected=DM36`. No DM37 work is ready or included.

@@ -9299,7 +9299,7 @@ void run_fat32_integrity_tests()
                   orphanFinding->expected == 0 &&
                   orphanFinding->observed == 2 &&
                   apps::disk_manager_fat32_integrity_ui::
-                      finding_observed_value(*orphanFinding, job.result) == 2,
+                      finding_observed_value(*orphanFinding, job.result) == 5,
                   label);
         });
 

@@ -273,7 +273,7 @@ inline uint64_t finding_observed_value(
 {
     if (finding.category ==
         storage::FAT32_INTEGRITY_FINDING_ORPHANED_ALLOCATION)
-        return result.orphanClusters;
+        return result.firstOrphanCluster;
     return finding.observed;
 }
 
