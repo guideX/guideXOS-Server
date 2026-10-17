@@ -8,6 +8,7 @@
 #include "include/kernel/kernel_compositor.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/desktop.h"
+#include "include/kernel/desktop_font.h"
 #include "include/kernel/shell.h"
 #include "include/kernel/ps2keyboard.h"
 #include "include/kernel/vfs.h"
@@ -16538,6 +16539,8 @@ public:
         m_window->y = 70;
         m_window->w = static_cast<int>(constraints.preferredWidth);
         m_window->h = static_cast<int>(constraints.preferredHeight);
+        m_window->minimumWidth = static_cast<int>(constraints.minimumWidth);
+        m_window->minimumHeight = static_cast<int>(constraints.minimumHeight);
         m_window->flags = app::WF_VISIBLE | app::WF_TITLEBAR | app::WF_CLOSABLE | app::WF_RESIZABLE;
         strcopy(m_window->title, "Settings", app::MAX_TITLE_LEN);
 
@@ -17044,13 +17047,16 @@ private:
 
     void synchronizeFontSelection()
     {
-        if (!isFontsRoute() || !m_fontPageLoaded) return;
         gxos::gui::SystemFontSelectionSnapshot active{};
         if (fontsettings::SystemFontSelectionGetActive(&active) !=
             gxos::gui::SystemFontSelectionStatus::Ok) return;
         if (active.selectionGeneration == m_fontActiveGeneration) return;
         m_fontActive = active;
         m_fontActiveGeneration = active.selectionGeneration;
+        if (!isFontsRoute() || !m_fontPageLoaded) {
+            invalidate();
+            return;
+        }
         m_fontPendingIdentity = active.identity;
         m_fontPendingSize = active.pixelSize;
         chooseFontIdentity(active.identity);
@@ -17426,6 +17432,16 @@ private:
         appDrawText(x, y, clipped, color);
     }
 
+    static void drawActiveFittedText(uint32_t x, uint32_t y, uint32_t width,
+                                     uint32_t height, const char* text, uint32_t color)
+    {
+        if (!text || width == 0u || height == 0u) return;
+        if (kernel::desktop::draw_system_text_in_rect(x, y, width, height, text, color))
+            return;
+        const uint32_t fallbackY = y + (height > 7u ? (height - 7u) / 2u : 0u);
+        drawFittedBitmapText(x, fallbackY, width, text, color);
+    }
+
     static void escapedFontPath(const gxos::gui::SystemFontIdentity& identity,
                                 char* output, size_t capacity)
     {
@@ -17462,19 +17478,11 @@ private:
         appendText(currentLabel, sizeof(currentLabel), "  ");
         appendUnsigned(currentLabel, sizeof(currentLabel), m_fontActive.pixelSize);
         appendText(currentLabel, sizeof(currentLabel), " px");
-        if (m_fontActive.identity.kind == gxos::gui::SystemFontIdentityKind::TrueType) {
-            const uint32_t status = drawFontText(m_fontActive.identity, 8u,
-                left, activeClipY, left, activeClipY, availableW, 12u,
-                currentLabel, rgb(231, 235, 243));
-            if (status != static_cast<uint32_t>(gxos::gui::SystemFontSelectionStatus::Ok)) {
-                drawFittedBitmapText(left, activeClipY, availableW,
-                    "Active font file is missing; cached rendering remains available.", rgb(236, 174, 122));
-            }
-        } else {
-            drawFittedBitmapText(left, activeClipY, availableW, currentLabel, rgb(231, 235, 243));
-        }
+        drawActiveFittedText(left, activeClipY, availableW, 16u,
+            currentLabel, rgb(231, 235, 243));
 
-        appDrawText(left, cardY + 30u, "Available validated fonts", rgb(146, 157, 176));
+        drawActiveFittedText(left, cardY + 30u, availableW, 12u,
+            "Available validated fonts", rgb(146, 157, 176));
         const uint32_t rowsY = cardY + 42u;
         const uint32_t rowH = 16u;
         for (uint32_t index = 0u; index < fontChoiceCount(); ++index) {
@@ -17485,7 +17493,8 @@ private:
                  (index != 0u && m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::TrueType));
             if (selected) framebuffer::fill_rect(left, rowY, availableW, rowH, rgb(54, 67, 91));
             if (index == 0u) {
-                appDrawText(left + 4u, rowY + 4u, "Built-in Bitmap | 7 px",
+                drawActiveFittedText(left + 4u, rowY, availableW - 8u, rowH,
+                    "Built-in Bitmap | 7 px",
                     selected ? rgb(245, 247, 252) : rgb(190, 195, 205));
                 continue;
             }
@@ -17494,14 +17503,8 @@ private:
             appendText(label, sizeof(label), face.metadata.familyName);
             appendText(label, sizeof(label), " | ");
             appendText(label, sizeof(label), face.metadata.styleName);
-            const uint32_t result = drawFontText(face.identity, 8u, left + 4u, rowY + 2u,
-                left + 3u, rowY + 1u, availableW - 6u, rowH - 1u,
+            drawActiveFittedText(left + 4u, rowY, availableW - 8u, rowH,
                 label, selected ? rgb(245, 247, 252) : rgb(190, 195, 205));
-            if (result != static_cast<uint32_t>(gxos::gui::SystemFontSelectionStatus::Ok)) {
-                m_fontRefreshRequested = true;
-                drawFittedBitmapText(left + 4u, rowY + 4u, availableW - 8u,
-                    "Unavailable; reopen Fonts to refresh", rgb(236, 174, 122));
-            }
         }
 
         char sourceLine[192] = {};
@@ -17513,23 +17516,26 @@ private:
         } else {
             appendText(sourceLine, sizeof(sourceLine), "Selected source: built-in bitmap face");
         }
-        drawFittedBitmapText(left, cardY + 108u, availableW, sourceLine, rgb(165, 177, 196));
+        drawActiveFittedText(left, cardY + 108u, availableW, 16u,
+            sourceLine, rgb(165, 177, 196));
 
         const uint32_t sizeY = cardY + 126u;
-        appDrawText(left, sizeY + 6u, "Size", rgb(146, 157, 176));
+        drawActiveFittedText(left, sizeY, 44u, 22u, "Size", rgb(146, 157, 176));
         if (m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::TrueType) {
             framebuffer::fill_rect(left + 52u, sizeY, 24u, 22u, rgb(55, 61, 73));
             appDrawRect(left + 52u, sizeY, 24u, 22u, rgb(93, 103, 122));
             framebuffer::fill_rect(left + 82u, sizeY, 24u, 22u, rgb(55, 61, 73));
             appDrawRect(left + 82u, sizeY, 24u, 22u, rgb(93, 103, 122));
-            appDrawText(left + 61u, sizeY + 6u, "-", rgb(240, 243, 249));
-            appDrawText(left + 91u, sizeY + 6u, "+", rgb(240, 243, 249));
+            drawActiveFittedText(left + 52u, sizeY, 24u, 22u, "-", rgb(240, 243, 249));
+            drawActiveFittedText(left + 82u, sizeY, 24u, 22u, "+", rgb(240, 243, 249));
             char sizeLabel[24] = {};
             appendUnsigned(sizeLabel, sizeof(sizeLabel), m_fontPendingSize);
             appendText(sizeLabel, sizeof(sizeLabel), " px  (8-48)");
-            appDrawText(left + 114u, sizeY + 6u, sizeLabel, rgb(220, 225, 235));
+            drawActiveFittedText(left + 114u, sizeY, availableW - 114u, 22u,
+                sizeLabel, rgb(220, 225, 235));
         } else {
-            appDrawText(left + 52u, sizeY + 6u, "7 px (fixed)", rgb(220, 225, 235));
+            drawActiveFittedText(left + 52u, sizeY, availableW - 52u, 22u,
+                "7 px (fixed)", rgb(220, 225, 235));
         }
 
         const uint32_t previewLabelY = cardY + 150u;
@@ -17537,7 +17543,8 @@ private:
         const uint32_t statusY = cardY + cardH - 43u;
         const uint32_t previewBottom = statusY > previewY + 4u ? statusY - 4u : previewY + 4u;
         const uint32_t previewH = previewBottom - previewY;
-        appDrawText(left, previewLabelY, "Preview  |  scroll here to inspect all samples", rgb(146, 157, 176));
+        drawActiveFittedText(left, previewLabelY, availableW, 12u,
+            "Preview  |  scroll here to inspect all samples", rgb(146, 157, 176));
         framebuffer::fill_rect(left, previewY, availableW, previewH, rgb(30, 34, 43));
         appDrawRect(left, previewY, availableW, previewH, rgb(58, 65, 78));
         const char* samples[3] = {
@@ -17572,7 +17579,7 @@ private:
         }
 
         framebuffer::fill_rect(left, statusY, availableW, 15u, rgb(36, 40, 50));
-        drawFittedBitmapText(left, statusY + 4u, availableW, m_fontStatusText,
+        drawActiveFittedText(left, statusY, availableW, 15u, m_fontStatusText,
             m_fontStatus == gxos::gui::SystemFontSelectionStatus::Ok ||
             m_fontStatus == gxos::gui::SystemFontSelectionStatus::PersistenceFailed
                 ? rgb(220, 225, 235) : rgb(236, 174, 122));
@@ -17584,7 +17591,8 @@ private:
             framebuffer::fill_rect(buttonX[i], buttonY, buttonWidths[i], 20u,
                 i == 0u ? rgb(52, 76, 112) : rgb(55, 61, 73));
             appDrawRect(buttonX[i], buttonY, buttonWidths[i], 20u, rgb(93, 103, 122));
-            appDrawText(buttonX[i] + 5u, buttonY + 7u, buttonLabels[i], rgb(240, 243, 249));
+            drawActiveFittedText(buttonX[i] + 3u, buttonY, buttonWidths[i] - 6u, 20u,
+                buttonLabels[i], rgb(240, 243, 249));
         }
     }
 
@@ -17664,8 +17672,10 @@ private:
         framebuffer::fill_rect(x, y, w, h, rgb(27, 30, 38));
         framebuffer::fill_rect(x, y, sidebarWidth, h, rgb(34, 37, 46));
         framebuffer::fill_rect(x + sidebarWidth - 1u, y, 1u, h, rgb(67, 72, 84));
-        appDrawText(x + 18u, y + 20u, "Settings", rgb(238, 240, 246));
-        appDrawText(x + 18u, y + 42u, "System", rgb(160, 174, 194));
+        drawActiveFittedText(x + 18u, y + 16u, sidebarWidth - 36u, 22u,
+            "Settings", rgb(238, 240, 246));
+        drawActiveFittedText(x + 18u, y + 40u, sidebarWidth - 36u, 16u,
+            "System", rgb(160, 174, 194));
 
         const settings::CategoryId items[4] = {
             settings::CategoryId::System, settings::CategoryId::Display,
@@ -17681,11 +17691,14 @@ private:
             if (active && m_windowFocused) {
                 appDrawRect(x + 12u, itemY[i], sidebarWidth > 24u ? sidebarWidth - 24u : sidebarWidth, 36u, rgb(115, 166, 245));
             }
-            appDrawText(x + 24u, itemY[i] + 14u, labels[i], active ? rgb(245, 247, 252) : rgb(190, 195, 205));
+            drawActiveFittedText(x + 24u, itemY[i], sidebarWidth - 48u, 36u,
+                labels[i], active ? rgb(245, 247, 252) : rgb(190, 195, 205));
         }
 
-        appDrawText(x + 14u, y + 252u, "More settings", rgb(145, 151, 163));
-        appDrawText(x + 14u, y + 266u, "are in progress.", rgb(145, 151, 163));
+        drawActiveFittedText(x + 14u, y + 250u, sidebarWidth - 28u, 14u,
+            "More settings", rgb(145, 151, 163));
+        drawActiveFittedText(x + 14u, y + 264u, sidebarWidth - 28u, 14u,
+            "are in progress.", rgb(145, 151, 163));
 
         const uint32_t contentX = x + sidebarWidth + 24u;
         const uint32_t contentW = w > sidebarWidth + 44u ? w - sidebarWidth - 44u : 1u;
@@ -17697,16 +17710,19 @@ private:
             (personalization ? "Personalization" :
             (selected == settings::CategoryId::About ? "About" :
             (display ? "Display" : "System overview")));
-        appDrawText(contentX, y + 24u, pageName, rgb(243, 245, 250));
+        drawActiveFittedText(contentX, y + 18u, contentW, 22u,
+            pageName, rgb(243, 245, 250));
         const char* pageDescription = fonts ? "Select a validated typeface and preview its size" :
             (personalization ? "Desktop background and text appearance" :
             (selected == settings::CategoryId::About ? "Product and version details" :
             (display ? "Active framebuffer information" : "Read-only information reported by the kernel")));
-        appDrawText(contentX, y + 47u, pageDescription, rgb(165, 177, 196));
+        drawActiveFittedText(contentX, y + 42u, contentW, 18u,
+            pageDescription, rgb(165, 177, 196));
         if (fonts) {
             framebuffer::fill_rect(contentX + 12u, y + 68u, 92u, 20u, rgb(55, 61, 73));
             appDrawRect(contentX + 12u, y + 68u, 92u, 20u, rgb(93, 103, 122));
-            appDrawText(contentX + 20u, y + 75u, "Back to Personalization", rgb(240, 243, 249));
+            drawActiveFittedText(contentX + 14u, y + 68u, 88u, 20u,
+                "Back to Personalization", rgb(240, 243, 249));
         } else {
             appDrawText(contentX, y + 70u, getRuntimeAppId(), rgb(135, 159, 197));
         }
@@ -17775,7 +17791,8 @@ private:
             appDrawText(contentX + 16u, cardY + 20u, "System information", rgb(224, 229, 239));
             appDrawText(contentX + 16u, cardY + 58u, "System information is unavailable.", rgb(236, 174, 122));
         }
-        appDrawText(contentX + 12u, y + h - 20u,
+        drawActiveFittedText(contentX + 12u, y + h - 25u,
+            contentW > 24u ? contentW - 24u : contentW, 18u,
             fonts ? "J/K Font   +/- Size   A Apply   C Cancel   R Bitmap" :
             (personalization ? "P Personalization   F Fonts" :
             "S System   D Display   P Personalization   A About"), rgb(145, 151, 163));

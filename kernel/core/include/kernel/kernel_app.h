@@ -109,6 +109,8 @@ struct Widget {
 struct KernelWindow {
     uint32_t id;
     int x, y, w, h;
+    int minimumWidth;
+    int minimumHeight;
     char title[MAX_TITLE_LEN];
     uint32_t flags;
     KernelApp* owner;
@@ -130,7 +132,8 @@ struct KernelWindow {
     Widget widgets[MAX_WIDGETS];
     int widgetCount;
     
-    KernelWindow() : id(0), x(0), y(0), w(400), h(300), flags(WF_VISIBLE | WF_TITLEBAR | WF_CLOSABLE | WF_RESIZABLE),
+    KernelWindow() : id(0), x(0), y(0), w(400), h(300), minimumWidth(200), minimumHeight(100),
+                     flags(WF_VISIBLE | WF_TITLEBAR | WF_CLOSABLE | WF_RESIZABLE),
                      owner(nullptr), dirty(true), closeBtnHover(false), closeBtnPressed(false),
                      maxBtnHover(false), maxBtnPressed(false), minBtnHover(false), minBtnPressed(false),
                      savedX(0), savedY(0), savedW(0), savedH(0), widgetCount(0) {

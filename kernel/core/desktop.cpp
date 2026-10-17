@@ -7047,7 +7047,9 @@ static void draw_start_menu()
     framebuffer::fill_rect(menuX + 8, menuY + 6, 18, 18, rgb(90, 140, 200));
     draw_rect(menuX + 8, menuY + 6, 18, 18, rgb(130, 170, 230));
     // Username
-    draw_text(menuX + 32, menuY + 10, "User", rgb(230, 230, 250), 1);
+    if (!draw_system_text_in_rect(menuX + 32u, menuY + 3u,
+            kStartMenuW - 40u, 24u, "User", rgb(230, 230, 250)))
+        draw_text(menuX + 32, menuY + 10, "User", rgb(230, 230, 250), 1);
     hline(menuX + 1, menuY + headerH, kStartMenuW - 2, rgb(60, 70, 90));
 
     // === Left column: Recent Programs or All Programs ===
@@ -7765,6 +7767,48 @@ static const ControlPanelItem s_controlPanelItems[] = {
 };
 static const int kControlPanelItemCount = 3;
 
+struct ControlPanelItemGeometry {
+    uint32_t iconY;
+    uint32_t labelX;
+    uint32_t labelY;
+    uint32_t labelWidth;
+    uint32_t labelHeight;
+    uint32_t hitY;
+    uint32_t hitHeight;
+};
+
+static ControlPanelItemGeometry control_panel_item_geometry(uint32_t dialogX,
+                                                            uint32_t contentY,
+                                                            uint32_t contentHeight,
+                                                            int index)
+{
+    ControlPanelItemGeometry geometry{};
+    const uint32_t labelWidth = kCPIconSpacing - 8u;
+    DesktopSystemTextMetrics headerLayout{};
+    const bool headerMeasured = measure_system_text("System Settings", &headerLayout) &&
+        headerLayout.lineHeightPx <= contentHeight / 3u;
+    const uint32_t headerHeight = headerMeasured ? headerLayout.lineHeightPx : 7u;
+    const uint32_t afterHeader = 8u + headerHeight + 10u;
+    geometry.iconY = contentY + (afterHeader > 50u ? afterHeader : 50u);
+    geometry.labelWidth = labelWidth;
+    const uint32_t iconX = dialogX + 30u + static_cast<uint32_t>(index) * kCPIconSpacing;
+    geometry.labelX = iconX - (labelWidth - kCPIconSize) / 2u;
+    geometry.labelY = geometry.iconY + kCPIconSize + 8u;
+    const uint32_t usedHeight = geometry.labelY > contentY
+        ? geometry.labelY - contentY : contentHeight;
+    const uint32_t remaining = usedHeight < contentHeight ? contentHeight - usedHeight : 0u;
+    DesktopSystemTextMetrics labelLayout{};
+    const bool labelMeasured = measure_system_text(s_controlPanelItems[index].label, &labelLayout) &&
+        labelLayout.lineHeightPx <= remaining;
+    geometry.labelHeight = labelMeasured ? labelLayout.lineHeightPx : 7u;
+    geometry.hitY = geometry.iconY - 4u;
+    const uint32_t legacyBottom = geometry.iconY + kCPIconSize + 26u;
+    const uint32_t textBottom = geometry.labelY + geometry.labelHeight;
+    const uint32_t hitBottom = textBottom > legacyBottom ? textBottom : legacyBottom;
+    geometry.hitHeight = hitBottom - geometry.hitY;
+    return geometry;
+}
+
 static void draw_control_panel()
 {
     if (!s_controlPanelOpen) return;
@@ -7795,18 +7839,28 @@ static void draw_control_panel()
     uint32_t contentH = kControlPanelH - 44;
     framebuffer::fill_rect(dlgX + 8, contentY, kControlPanelW - 16, contentH, rgb(30, 30, 38));
 
-    // Draw header text
-    draw_system_text(dlgX + 20, contentY + 12, "System Settings", rgb(200, 200, 220));
+    // The active font owns this heading and its measured space above the icon row.
+    DesktopSystemTextMetrics headerLayout{};
+    const bool headerFits = measure_system_text("System Settings", &headerLayout) &&
+        headerLayout.lineHeightPx <= contentH / 3u;
+    const uint32_t headerHeight = headerFits ? headerLayout.lineHeightPx : 7u;
+    if (!draw_system_text_in_rect(dlgX + 20u, contentY + 8u,
+            kControlPanelW - 40u, headerHeight + 2u, "System Settings", rgb(200, 200, 220)))
+        draw_text(dlgX + 20, contentY + 12, "System Settings", rgb(200, 200, 220), 1);
 
     // Draw icons
     for (int i = 0; i < kControlPanelItemCount; i++) {
         uint32_t iconX = dlgX + 30 + (uint32_t)i * kCPIconSpacing;
-        uint32_t iconY = contentY + 50;
+        const ControlPanelItemGeometry geometry =
+            control_panel_item_geometry(dlgX, contentY, contentH, i);
+        uint32_t iconY = geometry.iconY;
 
         // Hover highlight
         if (s_controlPanelHover == i) {
-            framebuffer::fill_rect(iconX - 8, iconY - 4, kCPIconSize + 16, kCPIconSize + 30, rgb(50, 70, 100));
-            draw_rect(iconX - 8, iconY - 4, kCPIconSize + 16, kCPIconSize + 30, rgb(80, 110, 160));
+            framebuffer::fill_rect(geometry.labelX, iconY - 4u, geometry.labelWidth,
+                geometry.hitHeight, rgb(50, 70, 100));
+            draw_rect(geometry.labelX, iconY - 4u, geometry.labelWidth,
+                geometry.hitHeight, rgb(80, 110, 160));
         }
 
         // Icon
@@ -7825,10 +7879,10 @@ static void draw_control_panel()
 
         // Label
         const char* lbl = s_controlPanelItems[i].label;
-        int tw = measure_text(lbl);
-        uint32_t lx = iconX + (kCPIconSize > (uint32_t)tw ? (kCPIconSize - tw) / 2 : 0);
-        uint32_t ly = iconY + kCPIconSize + 8;
-        draw_text(lx, ly, lbl, rgb(210, 210, 225), 1);
+        if (!draw_system_text_in_rect(geometry.labelX, geometry.labelY,
+                geometry.labelWidth, geometry.labelHeight, lbl, rgb(210, 210, 225)))
+            draw_text_centered(geometry.labelX, geometry.labelY, geometry.labelWidth,
+                geometry.labelHeight, lbl, rgb(210, 210, 225), 1);
     }
 }
 
@@ -7840,6 +7894,7 @@ static int hit_test_control_panel(int32_t mx, int32_t my)
     uint32_t dlgX = (s_screenW - kControlPanelW) / 2;
     uint32_t dlgY = (s_screenH - kControlPanelH) / 2;
     uint32_t contentY = dlgY + 36;
+    const uint32_t contentH = kControlPanelH - 44u;
 
     // Close button
     uint32_t closeBtnX = dlgX + kControlPanelW - 26;
@@ -7852,10 +7907,13 @@ static int hit_test_control_panel(int32_t mx, int32_t my)
     // Icon hit test
     for (int i = 0; i < kControlPanelItemCount; i++) {
         uint32_t iconX = dlgX + 30 + (uint32_t)i * kCPIconSpacing;
-        uint32_t iconY = contentY + 50;
+        const ControlPanelItemGeometry geometry =
+            control_panel_item_geometry(dlgX, contentY, contentH, i);
 
-        if ((uint32_t)mx >= iconX - 8 && (uint32_t)mx < iconX + kCPIconSize + 8 &&
-            (uint32_t)my >= iconY - 4 && (uint32_t)my < iconY + kCPIconSize + 26) {
+        if ((uint32_t)mx >= geometry.labelX &&
+            (uint32_t)mx < geometry.labelX + geometry.labelWidth &&
+            (uint32_t)my >= geometry.hitY &&
+            (uint32_t)my < geometry.hitY + geometry.hitHeight) {
             return i;
         }
     }

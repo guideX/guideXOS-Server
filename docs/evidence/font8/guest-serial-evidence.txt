@@ -1,0 +1,68 @@
+FONT8 QEMU serial evidence excerpts
+Original complete logs are preserved under out/font8-qemu-20261017-fontsupport and were not modified.
+
+=== Fresh bitmap boot and validated font catalog (fresh-acceptance.serial.log) ===
+271: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+273: [VFS] Opened: /system/fonts/Roboto-Italic.ttf
+275: [VFS] Opened: /system/fonts/Roboto-Regular.ttf
+277: [FONT6] system selection init=Ok active-font fallback-available=yes
+707: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+708: [VFS] Opened: /system/fonts/Roboto-Italic.ttf
+710: [VFS] Opened: /system/fonts/Roboto-Regular.ttf
+712: [settings-native] input source=keyboard page=personalization/fonts faces=3
+724: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+726: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+728: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+742: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+744: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+746: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+750: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+752: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+753: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+756: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+
+=== TTF apply and Settings lifecycle (post-apply-pre-reboot.serial.log) ===
+278: [FONT6] system selection init=Ok active-font fallback-available=yes
+821: [settings-native] launch identity=gxos.builtin.settings snapshot=ready revision=1 shared-core=system
+859: [settings-native] input source=keyboard page=personalization/fonts faces=3
+981: [settings-native] input source=keyboard page=personalization/fonts faces=3
+1370: FAT_FILE_DIR_ENTRY_BEGIN path=/fontsel.tmp parentCluster=0x00000000 name=fontsel.tmp
+1402: [FAT_FILE_CREATE_ALLOCATE] path=/fontsel.tmp firstCluster=0x000022CB bytes=0x00000400
+1409: [FAT_FILE_CREATE_WRITE] path=/fontsel.tmp firstCluster=0x000022CB bytes=0x00000400 status=BLOCK_OK
+1413: [FAT_FILE_CREATE_PUBLISH] path=/fontsel.tmp size=0x00000400 firstCluster=0x000022CB status=FILE_WRITE_OK
+1418: [VFS_WRITE_FILE] path=/fontsel.tmp operation=create bytes=0000000000000400 fatStatus=FAT_FILE_WRITE_OK blockStatus=0x00 vfsStatus=VFS_OK
+1419: [VFS] Opened: /fontsel.tmp
+1420: LFPASTE_RENAME_BEGIN old=/fontsel.tmp new=/fontsel0.cfg
+1520: [settings-native] shutdown identity=gxos.builtin.settings
+
+=== Fresh-process persistence restore (persist-reboot.serial.log) ===
+271: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+277: [VFS] Opened: /fontsel0.cfg
+278: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+279: [FONT6] system selection init=Ok active-font fallback-available=yes
+696: [settings-native] launch identity=gxos.builtin.settings snapshot=ready revision=1 shared-core=system
+714: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+720: [settings-native] input source=keyboard page=personalization/fonts faces=3
+723: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+725: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+727: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+734: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+736: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+738: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+740: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+745: [settings-native] input source=keyboard page=personalization/fonts faces=3
+748: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+750: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+752: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+
+=== Missing configured font recovery boot (missing-font-recovery.serial.log) ===
+271: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+273: [VFS] Opened: /system/fonts/Roboto-Regular.ttf
+275: [VFS] Opened: /fontsel0.cfg
+276: [VFS] Opened: /fontsel1.cfg
+277: [FONT6] system selection init=Ok active-font fallback-available=yes
+703: [VFS] Opened: /system/fonts/Roboto-Bold.ttf
+705: [VFS] Opened: /system/fonts/Roboto-Regular.ttf
+707: [settings-native] input source=keyboard page=personalization/fonts faces=2
+
+Settings lifecycle markers in persistence log: launch=11, shutdown=11.

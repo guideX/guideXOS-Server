@@ -1,0 +1,26 @@
+FONT8 isolated guest acceptance notes
+Captured on 2026-10-17 (UTC).
+
+Private QEMU configuration
+- Workspace: D:\dev\guideXOSServer_FONT_SUPPORT\out\font8-qemu-20261017-fontsupport
+- QEMU: 11.0.0-12122-ga4bb4b10c9, WHPX, xHCI + USB tablet, 2 vCPUs, 1024 MiB.
+- Firmware: private OVMF.fd copy. Writable media: private ESP directory.
+- Serial logs: guest-*.serial.log in this evidence directory; original logs remain under out/font8-qemu-20261017-fontsupport.
+- QMP: 127.0.0.1:61191. VNC: 127.0.0.1:5909. Networking disabled with -net none.
+- Process census snapshots are qemu-prelaunch-census.json, qemu-size-shift-prelaunch-census.json, and qemu-final-process-census.json.
+
+Guest workflow evidence
+- Normal fresh boot used Built-in Bitmap. The desktop reached the shell and Settings Fonts page.
+- Applied Roboto Bold at 16 px. The guest serial showed /fontsel0.cfg on the subsequent process boot; settings-persistence-after-reboot.png shows Current: Roboto | Bold 16 px.
+- Start Menu User label and Control Panel System Settings/category labels visibly use the applied font (start-menu-user-label-ttf.png and control-panel-labels-ttf.png).
+- Settings Fonts preview reached 8 px (settings-roboto-bold-8-preview.png); 48 px was applied while Settings stayed open (settings-roboto-bold-48-applied.png).
+- The Settings window was resized to 560 x 360; settings-minimum-560x360.png shows the full window at that minimum with bitmap controls.
+- The guest session recorded 11 Settings launch and 11 shutdown markers in guest-font-persistence-reboot.serial.log: one session plus ten deliberate open/close repetitions.
+- After reboot, Built-in Bitmap was applied to an unused preference slot. settings-bitmap-restored.png shows Current: guideXOS Bitmap | Regular 7 px.
+- For missing-font recovery, Roboto Italic 16 px was applied with the font file present (missing-font-italic-applied-before-removal.png). While QEMU was stopped, only the test copy at ESP/system/fonts/Roboto-Italic.ttf was moved into the private missing-font-test backup. A new QEMU process booted with the saved italic identity but without that file. The boot serial opened Roboto Bold and Regular, not Italic; FONT6 reported init=Ok with fallback-available=yes. The Fonts page listed two available Roboto faces and showed Current: guideXOS Bitmap | Regular 7 px (missing-font-settings-recovery.png). The desktop continued running (missing-font-desktop-recovery.png). The italic file and prior bitmap preference were restored after the check.
+- On the final census, no QEMU command line referenced the FONT8 private workspace. Other projects' guests remained running and untouched.
+
+Environment limitations observed
+- QMP system_reset caused this WHPX QEMU process to exit with “Unexpected VP exit code 4”; persistence was therefore checked by quitting the private process and starting a fresh one from the same ESP.
+- QEMU's directory-backed FAT VVFAT drive emitted “Error handling renames (-2)” and exited when a later preference transaction replaced a slot already present on the host directory. Successful guest saves used previously unused slots. Hosted FONT6/FONT8 suites cover repeated transactions and rollback; this QEMU VVFAT behavior is not treated as a kernel font failure.
+- Fresh boots repeatedly showed a concentric cursor-area rectangle artifact at screen center. It did not prevent desktop or Settings interaction and also appeared with bitmap rendering.

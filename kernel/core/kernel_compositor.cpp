@@ -203,8 +203,16 @@ void KernelCompositor::reconcileDisplayTopology(uint32_t screenW, uint32_t scree
     for (int i = 0; i < MAX_WINDOWS; ++i) {
         if (!s_windows[i].valid || s_windows[i].window == nullptr) continue;
         app::KernelWindow* window = s_windows[i].window;
-        if (window->w < MIN_WINDOW_WIDTH) window->w = MIN_WINDOW_WIDTH;
-        if (window->h < MIN_WINDOW_HEIGHT) window->h = MIN_WINDOW_HEIGHT;
+        const uint32_t minimumWidth = window->minimumWidth > MIN_WINDOW_WIDTH
+            ? static_cast<uint32_t>(window->minimumWidth) : MIN_WINDOW_WIDTH;
+        const uint32_t minimumHeight = window->minimumHeight > MIN_WINDOW_HEIGHT
+            ? static_cast<uint32_t>(window->minimumHeight) : MIN_WINDOW_HEIGHT;
+        const uint32_t boundedMinimumWidth = minimumWidth < s_workW ? minimumWidth : s_workW;
+        const uint32_t boundedMinimumHeight = minimumHeight < s_workH ? minimumHeight : s_workH;
+        if (window->w < static_cast<int>(boundedMinimumWidth))
+            window->w = static_cast<int>(boundedMinimumWidth);
+        if (window->h < static_cast<int>(boundedMinimumHeight))
+            window->h = static_cast<int>(boundedMinimumHeight);
         if ((uint32_t)window->w > s_workW) window->w = (int)s_workW;
         if ((uint32_t)window->h > s_workH) window->h = (int)s_workH;
         const int maxX = (int)(s_workX + s_workW) - window->w;
@@ -233,6 +241,12 @@ bool KernelCompositor::registerWindow(app::KernelWindow* window) {
     if (!s_initialized || !window) {
         return false;
     }
+	const int minimumWidth = window->minimumWidth > MIN_WINDOW_WIDTH
+		? window->minimumWidth : MIN_WINDOW_WIDTH;
+	const int minimumHeight = window->minimumHeight > MIN_WINDOW_HEIGHT
+		? window->minimumHeight : MIN_WINDOW_HEIGHT;
+	if (window->w < minimumWidth) window->w = minimumWidth;
+	if (window->h < minimumHeight) window->h = minimumHeight;
     
     // Assign ID if not set
     if (window->id == 0) {
@@ -562,8 +576,12 @@ void KernelCompositor::handleMouseMove(int32_t mx, int32_t my) {
             if (s_dragState.isResize) {
                 int newW = s_dragState.resizeStartW + (mx - s_dragState.startX);
                 int newH = s_dragState.resizeStartH + (my - s_dragState.startY);
-                if (newW < MIN_WINDOW_WIDTH) newW = MIN_WINDOW_WIDTH;
-                if (newH < MIN_WINDOW_HEIGHT) newH = MIN_WINDOW_HEIGHT;
+                const int minimumWidth = win->minimumWidth > MIN_WINDOW_WIDTH
+                    ? win->minimumWidth : MIN_WINDOW_WIDTH;
+                const int minimumHeight = win->minimumHeight > MIN_WINDOW_HEIGHT
+                    ? win->minimumHeight : MIN_WINDOW_HEIGHT;
+                if (newW < minimumWidth) newW = minimumWidth;
+                if (newH < minimumHeight) newH = minimumHeight;
                 win->w = newW;
                 win->h = newH;
             } else {

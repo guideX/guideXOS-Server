@@ -1,0 +1,11 @@
+{
+  "capturedUtc": "2026-10-17T14:53:43.7888806Z",
+  "privateWorkspace": "D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font8-qemu-20261017-fontsupport",
+  "privateGuestPresent": false,
+  "qemuProcesses": [
+    {
+      "processId": 27644,
+      "commandLine": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" \"-accel\" \"whpx\" \"-drive\" \"if=pflash,format=raw,readonly=on,file=D:\\dev\\guideXOSServer_DiskManagerImprovements\\OVMF.fd\" \"-machine\" \"pc,usb=off\" \"-device\" \"piix3-usb-uhci,id=uhci\" \"-drive\" \"if=none,id=dm36boot,format=raw,file=fat:rw:D:\\dev\\guideXOSServer_DiskManagerImprovements\\out\\dm36-continuation8-fix\\runtime\\esp\" \"-device\" \"ide-hd,drive=dm36boot,bus=ide.0\" \"-drive\" \"if=none,id=dm36_C_stop_drive,file=D:\\dev\\guideXOSServer_DiskManagerImprovements\\out\\dm36\\fat32-integrity\\fixtures\\DM36STOP01.raw,format=raw,cache=writeback,readonly=on\" \"-device\" \"usb-storage,id=dm36_C_stop_device,bus=uhci.0,drive=dm36_C_stop_drive,removable=on,serial=DM36STOP01\" \"-netdev\" \"user,id=net0\" \"-device\" \"e1000,netdev=net0\" \"-object\" \"rng-builtin,id=rng0\" \"-device\" \"virtio-rng-pci,rng=rng0,disable-modern=on,max-bytes=1024,period=1000\" \"-m\" \"1024M\" \"-device\" \"VGA,id=dm36vga\" \"-display\" \"gtk\" \"-serial\" \"file:D:\\dev\\guideXOSServer_DiskManagerImprovements\\out\\dm36\\fat32-integrity\\runs\\C8-C-stop-retry-20261017\\guest.serial.log\" \"-qmp\" \"tcp:127.0.0.1:61444,server=on,wait=off\" \"-rtc\" \"base=utc,clock=host\" \"-no-reboot\" \"-trace\" \"events=D:\\dev\\guideXOSServer_DiskManagerImprovements\\out\\dm36\\fat32-integrity\\runs\\C8-C-stop-retry-20261017\\trace-events.txt,file=D:\\dev\\guideXOSServer_DiskManagerImprovements\\out\\dm36\\fat32-integrity\\runs\\C8-C-stop-retry-20261017\\qemu.trace\""
+    }
+  ]
+}

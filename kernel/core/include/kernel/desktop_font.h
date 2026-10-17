@@ -7,6 +7,13 @@
 
 #include "kernel/types.h"
 
+struct DesktopSystemTextMetrics {
+	uint32_t lineHeightPx;
+	uint32_t ascentPx;
+	uint32_t descentPx;
+	uint32_t pixelSize;
+};
+
 namespace kernel {
 namespace desktop {
 
@@ -22,6 +29,13 @@ void draw_text(uint32_t x, uint32_t y, const char* str, uint32_t color, int scal
 // bitmap renderer as the default and returns to it when no scalable selection
 // is active or the active runtime handle is stale.
 void draw_system_text(uint32_t x, uint32_t y, const char* str, uint32_t color);
+// Draws one active-system-font line inside a control rectangle. The line is
+// ellipsized by measured advances and ink bounds. Returns false when the
+// active face/size cannot fit the rectangle so the caller can keep its bitmap
+// fallback without changing the control's geometry.
+bool draw_system_text_in_rect(uint32_t x, uint32_t y, uint32_t width,
+	uint32_t height, const char* str, uint32_t color);
+bool measure_system_text(const char* str, DesktopSystemTextMetrics* outMetrics);
 void draw_text_centered(uint32_t rx, uint32_t ry, uint32_t rw, uint32_t rh,
                         const char* str, uint32_t color, int scale = 1);
 
