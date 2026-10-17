@@ -1122,16 +1122,19 @@ uint8_t mount_endpoint(const block::BlockEndpoint& endpoint)
     return index;
 }
 
-void unmount(uint8_t volumeIndex)
+bool unmount(uint8_t volumeIndex)
 {
-    if (volumeIndex >= MAX_FAT_VOLUMES) return;
-    if (!s_volumes[volumeIndex].mounted) return;
+    if (volumeIndex >= MAX_FAT_VOLUMES ||
+        !s_volumes[volumeIndex].mounted) return false;
 
-    // Close any open files on this volume
+    // A filesystem teardown must not invalidate caller-owned VFS handles.
+    // The VFS rejects these references before reaching this function; retain
+    // the same invariant here as a final guard for direct/invalid callers.
     for (uint8_t i = 0; i < MAX_OPEN_FILES; ++i) {
         if (s_files[i].open && s_files[i].volumeIndex == volumeIndex)
-            s_files[i].open = false;
+            return false;
     }
+    if (s_dirIter.active && s_dirIter.volIdx == volumeIndex) return false;
 
     if (s_volumes[volumeIndex].ownsPartitionView) {
         const block::PartitionViewHandle handle = {
@@ -1143,6 +1146,7 @@ void unmount(uint8_t volumeIndex)
     s_volumes[volumeIndex].mounted = false;
     s_volumes[volumeIndex].ownsPartitionView = false;
     if (s_volumeCount > 0) --s_volumeCount;
+    return true;
 }
 
 bool open_root_dir(uint8_t volumeIndex)

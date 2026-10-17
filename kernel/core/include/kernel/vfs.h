@@ -125,6 +125,12 @@ enum Status : int8_t {
     VFS_ERR_MOUNT_STALE = -26,
     VFS_ERR_WRITE_UNCERTAIN = -27,
     VFS_ERR_DURABILITY_UNVERIFIED = -28,
+    VFS_ERR_PROTECTED = -29,
+};
+
+enum MountLifecycleState : uint8_t {
+    MOUNT_LIFECYCLE_MOUNTED = 0,
+    MOUNT_LIFECYCLE_QUIESCING,
 };
 
 const char* status_name(Status status);
@@ -165,10 +171,17 @@ struct DirEntry {
 
 struct MountPoint {
     bool     active;
+    MountLifecycleState lifecycleState;
+    uint64_t mountGeneration;
+    uint16_t activeOperations;
+    uint16_t openFileReferences;
+    uint16_t openDirectoryReferences;
     char     path[VFS_MAX_PATH];      // Mount path (e.g., "/", "/mnt/usb")
     FSType   fsType;
     uint8_t  blockDevIndex;           // Block device index
     uint64_t parentRegistrationId;     // Exact parent device incarnation
+    uint64_t parentRegistryGeneration;
+    uint32_t logicalSectorSize;
     uint8_t  fsVolumeIndex;           // FS-specific volume index
     bool     readOnly;
     bool     alias;
@@ -176,6 +189,21 @@ struct MountPoint {
     block::PartitionIdentity partitionIdentity;
     block::PartitionViewHandle partitionView;
     char     sourcePrefix[VFS_MAX_PATH]; // Optional subdirectory inside the source FS
+};
+
+// Immutable snapshot identifying one VFS mount instance and its backing
+// registration/partition. A slot or path alone is not a mount identity.
+struct MountIdentity {
+    bool valid;
+    uint8_t mountIndex;
+    uint64_t mountGeneration;
+    uint8_t blockDevIndex;
+    uint64_t registrationId;
+    uint64_t registryGeneration;
+    uint32_t logicalSectorSize;
+    bool partitionMount;
+    block::PartitionIdentity partitionIdentity;
+    block::PartitionViewHandle partitionView;
 };
 
 enum PartitionMountError : uint8_t {
@@ -206,6 +234,9 @@ struct PartitionMountResult {
 
 struct FileHandle {
     bool     open;
+    bool     opening;
+    bool     closing;
+    uint16_t activeOperations;
     HandleToken token;               // Opaque, never-reused VFS handle token
     uint8_t  mountIndex;              // Which mount point
     uint16_t flags;                   // Open flags
@@ -221,6 +252,9 @@ struct FileHandle {
 
 struct DirIterator {
     bool     active;
+    bool     opening;
+    bool     closing;
+    uint16_t activeOperations;
     HandleToken token;               // Opaque, never-reused iterator token
     uint8_t  mountIndex;
     char     path[VFS_MAX_PATH];
@@ -254,6 +288,7 @@ bool propose_partition_mount_path(uint8_t blockDevIndex,
                                   uint16_t partitionNumber,
                                   char* outPath, size_t outPathSize);
 bool mount_identity_valid(uint8_t mountIndex);
+bool capture_mount_identity(uint8_t mountIndex, MountIdentity& out);
 // Reports the current state of a mount's exact backing registration and view.
 // Stale mounts remain enumerable until explicit unmount cleanup succeeds.
 Status mount_backing_status(uint8_t mountIndex);
@@ -272,6 +307,10 @@ uint8_t mount_alias(const char* path, const char* sourcePath);
 
 // Unmount a filesystem.
 Status unmount(const char* path);
+// Dismount only the exact mount instance captured by capture_mount_identity.
+// New filesystem work is rejected while the mount is quiescing. Busy handles
+// and active operations leave the mount available for a later retry.
+Status dismount(const MountIdentity& identity);
 
 // Get mount point info by path.
 const MountPoint* get_mount(const char* path);
@@ -350,7 +389,7 @@ bool readdir(HandleToken iterator, DirEntry* entry);
 Status readdir_detailed(HandleToken iterator, DirEntry* entry, bool& hasEntry);
 
 // Close directory iterator.
-void closedir(HandleToken iterator);
+Status closedir(HandleToken iterator);
 
 // Create a directory.
 Status mkdir(const char* path);

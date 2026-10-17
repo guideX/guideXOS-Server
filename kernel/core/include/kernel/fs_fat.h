@@ -384,7 +384,7 @@ uint32_t test_allocate_fat32_cluster(FATVolume& volume);
 #endif
 
 // Unmount a volume.
-void unmount(uint8_t volumeIndex);
+bool unmount(uint8_t volumeIndex);
 
 // Open root directory for iteration.  Caller repeatedly calls
 // read_dir() until it returns false.

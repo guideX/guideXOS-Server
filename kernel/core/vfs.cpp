@@ -13,6 +13,10 @@
 #include "include/kernel/partition_table.h"
 #include "include/kernel/disk_initialization.h"
 
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
+
 #if defined(__GNUC__) || defined(__clang__)
 #include "include/kernel/serial_debug.h"
 #endif
@@ -29,6 +33,9 @@ static FileHandle   s_files[VFS_MAX_OPEN_FILES];
 static DirIterator  s_dirs[VFS_MAX_OPEN_FILES];
 static uint8_t      s_mountCount = 0;
 static bool         s_initialized = false;
+static uint64_t     s_nextMountGeneration = 0;
+static volatile uint32_t s_vfsMetadataLock = 0;
+static uint16_t     s_mountAdmissionsInFlight = 0;
 // Tokens are monotonic across unmounts and test resets so stale handles can
 // never become valid again when a table slot is reused.
 static HandleToken  s_nextHandleToken = 0x100u;
@@ -39,6 +46,38 @@ alignas(4096) static uint8_t s_detectSectorBuffer[
     storage::MAX_LOGICAL_SECTOR_SIZE];
 static Status mount_io_status(const MountPoint* mount);
 static Status map_block_status(block::Status status);
+
+// Protect only VFS registry and reference metadata. The lock is never held
+// while a filesystem or block-device callback runs.
+static void lock_vfs_metadata()
+{
+#if defined(_MSC_VER)
+    while (_InterlockedCompareExchange(
+        reinterpret_cast<volatile long*>(&s_vfsMetadataLock), 1, 0) != 0) {}
+#else
+    while (__sync_lock_test_and_set(&s_vfsMetadataLock, 1) != 0) {}
+#endif
+}
+
+static void unlock_vfs_metadata()
+{
+#if defined(_MSC_VER)
+    _InterlockedExchange(reinterpret_cast<volatile long*>(&s_vfsMetadataLock), 0);
+#else
+    __sync_lock_release(&s_vfsMetadataLock);
+#endif
+}
+
+static bool initialize_mount_instance(MountPoint& mount)
+{
+    if (s_nextMountGeneration == UINT64_MAX) return false;
+    mount.lifecycleState = MOUNT_LIFECYCLE_MOUNTED;
+    mount.mountGeneration = ++s_nextMountGeneration;
+    mount.activeOperations = 0;
+    mount.openFileReferences = 0;
+    mount.openDirectoryReferences = 0;
+    return true;
+}
 
 // ================================================================
 // Helper functions
@@ -239,6 +278,340 @@ static MountPoint* find_mount_for_path(const char* path)
     
     return bestMatch;
 }
+
+class MountOperationReference {
+public:
+    MountOperationReference()
+        : mountIndex_(0xFF), mountGeneration_(0), fileSlot_(0xFF),
+          directorySlot_(0xFF), handleToken_(INVALID_HANDLE), active_(false),
+          mount_(nullptr) {}
+
+    ~MountOperationReference() { release(); }
+
+    Status begin_path(const char* path)
+    {
+        if (!path) return VFS_ERR_INVALID;
+        lock_vfs_metadata();
+        MountPoint* found = find_mount_for_path(path);
+        if (!found) {
+            unlock_vfs_metadata();
+            return VFS_ERR_NOT_MOUNT;
+        }
+        return begin_mount_locked(found);
+    }
+
+    Status begin_index(uint8_t index)
+    {
+        if (index >= VFS_MAX_MOUNTS) return VFS_ERR_NOT_MOUNT;
+        lock_vfs_metadata();
+        if (!s_mounts[index].active) {
+            unlock_vfs_metadata();
+            return VFS_ERR_NOT_MOUNT;
+        }
+        return begin_mount_locked(&s_mounts[index]);
+    }
+
+    Status begin_file(HandleToken token, bool forClose = false)
+    {
+        lock_vfs_metadata();
+        const uint8_t slot = find_file_slot(token);
+        if (slot == 0xFF) {
+            unlock_vfs_metadata();
+            return VFS_ERR_INVALID;
+        }
+        FileHandle& file = s_files[slot];
+        if (file.closing || file.activeOperations != 0 ||
+            file.mountIndex >= VFS_MAX_MOUNTS) {
+            unlock_vfs_metadata();
+            return VFS_ERR_BUSY;
+        }
+        MountPoint& mount = s_mounts[file.mountIndex];
+        if (!mount.active || mount.lifecycleState != MOUNT_LIFECYCLE_MOUNTED) {
+            unlock_vfs_metadata();
+            return VFS_ERR_BUSY;
+        }
+        if (mount.activeOperations == UINT16_MAX) {
+            unlock_vfs_metadata();
+            return VFS_ERR_BUSY;
+        }
+        ++mount.activeOperations;
+        ++file.activeOperations;
+        if (forClose) file.closing = true;
+        mountIndex_ = file.mountIndex;
+        mountGeneration_ = mount.mountGeneration;
+        fileSlot_ = slot;
+        handleToken_ = token;
+        mount_ = &mount;
+        active_ = true;
+        unlock_vfs_metadata();
+        return VFS_OK;
+    }
+
+    Status begin_directory(HandleToken token, bool forClose = false)
+    {
+        lock_vfs_metadata();
+        const uint8_t slot = find_directory_slot(token);
+        if (slot == 0xFF) {
+            unlock_vfs_metadata();
+            return VFS_ERR_INVALID;
+        }
+        DirIterator& directory = s_dirs[slot];
+        if (directory.closing || directory.activeOperations != 0 ||
+            directory.mountIndex >= VFS_MAX_MOUNTS) {
+            unlock_vfs_metadata();
+            return VFS_ERR_BUSY;
+        }
+        MountPoint& mount = s_mounts[directory.mountIndex];
+        if (!mount.active || mount.lifecycleState != MOUNT_LIFECYCLE_MOUNTED) {
+            unlock_vfs_metadata();
+            return VFS_ERR_BUSY;
+        }
+        if (mount.activeOperations == UINT16_MAX) {
+            unlock_vfs_metadata();
+            return VFS_ERR_BUSY;
+        }
+        ++mount.activeOperations;
+        ++directory.activeOperations;
+        if (forClose) directory.closing = true;
+        mountIndex_ = directory.mountIndex;
+        mountGeneration_ = mount.mountGeneration;
+        directorySlot_ = slot;
+        handleToken_ = token;
+        mount_ = &mount;
+        active_ = true;
+        unlock_vfs_metadata();
+        return VFS_OK;
+    }
+
+    MountPoint* mount() const { return mount_; }
+    uint8_t mount_index() const { return mountIndex_; }
+    uint8_t file_slot() const { return fileSlot_; }
+    uint8_t directory_slot() const { return directorySlot_; }
+
+    void release()
+    {
+        if (!active_) return;
+        lock_vfs_metadata();
+        if (mountIndex_ < VFS_MAX_MOUNTS) {
+            MountPoint& mount = s_mounts[mountIndex_];
+            if (mount.active && mount.mountGeneration == mountGeneration_ &&
+                mount.activeOperations != 0)
+                --mount.activeOperations;
+        }
+        if (fileSlot_ < VFS_MAX_OPEN_FILES) {
+            FileHandle& file = s_files[fileSlot_];
+            if (file.token == handleToken_ && file.activeOperations != 0)
+                --file.activeOperations;
+        }
+        if (directorySlot_ < VFS_MAX_OPEN_FILES) {
+            DirIterator& directory = s_dirs[directorySlot_];
+            if (directory.token == handleToken_ &&
+                directory.activeOperations != 0)
+                --directory.activeOperations;
+        }
+        unlock_vfs_metadata();
+        active_ = false;
+    }
+
+private:
+    Status begin_mount_locked(MountPoint* mount)
+    {
+        if (!mount->active ||
+            mount->lifecycleState != MOUNT_LIFECYCLE_MOUNTED ||
+            mount->activeOperations == UINT16_MAX) {
+            unlock_vfs_metadata();
+            return VFS_ERR_BUSY;
+        }
+        ++mount->activeOperations;
+        mountIndex_ = static_cast<uint8_t>(mount - s_mounts);
+        mountGeneration_ = mount->mountGeneration;
+        mount_ = mount;
+        active_ = true;
+        unlock_vfs_metadata();
+        return VFS_OK;
+    }
+
+    uint8_t mountIndex_;
+    uint64_t mountGeneration_;
+    uint8_t fileSlot_;
+    uint8_t directorySlot_;
+    HandleToken handleToken_;
+    bool active_;
+    MountPoint* mount_;
+};
+
+class MountAdmissionReference {
+public:
+    MountAdmissionReference() : active_(false) {}
+    ~MountAdmissionReference()
+    {
+        if (!active_) return;
+        lock_vfs_metadata();
+        if (s_mountAdmissionsInFlight != 0) --s_mountAdmissionsInFlight;
+        unlock_vfs_metadata();
+    }
+
+    bool begin(bool allowStorageOperation = false)
+    {
+        lock_vfs_metadata();
+        if (s_mountAdmissionsInFlight != 0 ||
+            (!allowStorageOperation && storage::storage_operation_active())) {
+            unlock_vfs_metadata();
+            return false;
+        }
+        s_mountAdmissionsInFlight = 1;
+        active_ = true;
+        unlock_vfs_metadata();
+        return true;
+    }
+
+private:
+    bool active_;
+};
+
+class FileSlotReservation {
+public:
+    FileSlotReservation() : slot_(0xFF), active_(false) {}
+    ~FileSlotReservation() { cancel(); }
+
+    bool reserve()
+    {
+        lock_vfs_metadata();
+        for (uint8_t i = 0; i < VFS_MAX_OPEN_FILES; ++i) {
+            if (!s_files[i].open && !s_files[i].opening) {
+                memzero(&s_files[i], sizeof(s_files[i]));
+                s_files[i].opening = true;
+                slot_ = i;
+                active_ = true;
+                unlock_vfs_metadata();
+                return true;
+            }
+        }
+        unlock_vfs_metadata();
+        return false;
+    }
+
+    bool commit(MountOperationReference& operation, const char* path,
+                uint16_t flags, uint64_t size, uint8_t fsHandle,
+                HandleToken& outToken)
+    {
+        outToken = INVALID_HANDLE;
+        if (!active_ || slot_ >= VFS_MAX_OPEN_FILES || !operation.mount())
+            return false;
+        lock_vfs_metadata();
+        MountPoint& mount = s_mounts[operation.mount_index()];
+        FileHandle& file = s_files[slot_];
+        const HandleToken token = allocate_handle_token();
+        if (!file.opening || !mount.active ||
+            mount.mountGeneration != operation.mount()->mountGeneration ||
+            mount.lifecycleState != MOUNT_LIFECYCLE_MOUNTED ||
+            mount.openFileReferences == UINT16_MAX ||
+            token == INVALID_HANDLE) {
+            unlock_vfs_metadata();
+            return false;
+        }
+        file.opening = false;
+        file.open = true;
+        file.token = token;
+        file.mountIndex = operation.mount_index();
+        file.flags = flags;
+        file.position = 0;
+        file.size = size;
+        file.fsFileHandle = fsHandle;
+        strcopy(file.path, path, sizeof(file.path));
+        ++mount.openFileReferences;
+        outToken = token;
+        active_ = false;
+        unlock_vfs_metadata();
+        return true;
+    }
+
+    uint8_t slot() const { return slot_; }
+
+    void cancel()
+    {
+        if (!active_ || slot_ >= VFS_MAX_OPEN_FILES) return;
+        lock_vfs_metadata();
+        if (s_files[slot_].opening)
+            memzero(&s_files[slot_], sizeof(s_files[slot_]));
+        unlock_vfs_metadata();
+        active_ = false;
+    }
+
+private:
+    uint8_t slot_;
+    bool active_;
+};
+
+class DirectorySlotReservation {
+public:
+    DirectorySlotReservation() : slot_(0xFF), active_(false) {}
+    ~DirectorySlotReservation() { cancel(); }
+
+    bool reserve()
+    {
+        lock_vfs_metadata();
+        for (uint8_t i = 0; i < VFS_MAX_OPEN_FILES; ++i) {
+            if (!s_dirs[i].active && !s_dirs[i].opening) {
+                memzero(&s_dirs[i], sizeof(s_dirs[i]));
+                s_dirs[i].opening = true;
+                slot_ = i;
+                active_ = true;
+                unlock_vfs_metadata();
+                return true;
+            }
+        }
+        unlock_vfs_metadata();
+        return false;
+    }
+
+    bool commit(MountOperationReference& operation, const char* path,
+                HandleToken& outToken)
+    {
+        outToken = INVALID_HANDLE;
+        if (!active_ || slot_ >= VFS_MAX_OPEN_FILES || !operation.mount())
+            return false;
+        lock_vfs_metadata();
+        MountPoint& mount = s_mounts[operation.mount_index()];
+        DirIterator& directory = s_dirs[slot_];
+        const HandleToken token = allocate_handle_token();
+        if (!directory.opening || !mount.active ||
+            mount.mountGeneration != operation.mount()->mountGeneration ||
+            mount.lifecycleState != MOUNT_LIFECYCLE_MOUNTED ||
+            mount.openDirectoryReferences == UINT16_MAX ||
+            token == INVALID_HANDLE) {
+            unlock_vfs_metadata();
+            return false;
+        }
+        directory.opening = false;
+        directory.active = true;
+        directory.token = token;
+        directory.mountIndex = operation.mount_index();
+        strcopy(directory.path, path, sizeof(directory.path));
+        directory.index = 0;
+        ++mount.openDirectoryReferences;
+        outToken = token;
+        active_ = false;
+        unlock_vfs_metadata();
+        return true;
+    }
+
+    uint8_t slot() const { return slot_; }
+
+    void cancel()
+    {
+        if (!active_ || slot_ >= VFS_MAX_OPEN_FILES) return;
+        lock_vfs_metadata();
+        if (s_dirs[slot_].opening)
+            memzero(&s_dirs[slot_], sizeof(s_dirs[slot_]));
+        unlock_vfs_metadata();
+        active_ = false;
+    }
+
+private:
+    uint8_t slot_;
+    bool active_;
+};
 
 // Get the path relative to a mount point
 static const char* get_relative_path(const char* fullPath, const MountPoint* mount)
@@ -484,13 +857,18 @@ static FSType detect_fs_type(uint8_t blockDevIndex)
 
 void init()
 {
-    if (s_initialized) return;
-    
+    lock_vfs_metadata();
+    if (s_initialized) {
+        unlock_vfs_metadata();
+        return;
+    }
     memzero(s_mounts, sizeof(s_mounts));
     memzero(s_files, sizeof(s_files));
     memzero(s_dirs, sizeof(s_dirs));
     s_mountCount = 0;
+    s_mountAdmissionsInFlight = 0;
     s_initialized = true;
+    unlock_vfs_metadata();
     
 #if defined(__GNUC__) || defined(__clang__)
     serial::puts("[VFS] Initialized\n");
@@ -538,20 +916,26 @@ PartitionMountResult mount_partition_detailed(const char* path,
         return partition_mount_result(PARTITION_MOUNT_INVALID_ARGUMENT);
     if (!partition_path_is_normalized(path))
         return partition_mount_result(PARTITION_MOUNT_BAD_PATH);
+    MountAdmissionReference admission;
+    if (!admission.begin())
+        return partition_mount_result(PARTITION_MOUNT_OPERATION_BUSY);
     // A destructive operation pins an exact disk across long scans and
     // revalidates mount state before writing. Prevent a new VFS view from
     // appearing on any disk while that exclusive operation is active.
     if (storage::storage_operation_active())
         return partition_mount_result(PARTITION_MOUNT_OPERATION_BUSY);
 
-    for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
-        if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0)
-            return partition_mount_result(PARTITION_MOUNT_PATH_OCCUPIED);
-    }
+    lock_vfs_metadata();
+    bool pathAlreadyMounted = false;
     uint8_t mountSlot = 0xFF;
     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
-        if (!s_mounts[i].active) { mountSlot = i; break; }
+        if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0)
+            pathAlreadyMounted = true;
+        if (!s_mounts[i].active && mountSlot == 0xFF) mountSlot = i;
     }
+    unlock_vfs_metadata();
+    if (pathAlreadyMounted)
+        return partition_mount_result(PARTITION_MOUNT_PATH_OCCUPIED);
     if (mountSlot == 0xFF)
         return partition_mount_result(PARTITION_MOUNT_VFS_REGISTRY_FULL);
 
@@ -604,13 +988,18 @@ PartitionMountResult mount_partition_detailed(const char* path,
         block::release_partition_view(viewHandle);
         return partition_mount_result(PARTITION_MOUNT_DEVICE_UNAVAILABLE);
     }
+    bool partitionAlreadyMounted = false;
+    lock_vfs_metadata();
     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
         const MountPoint& existing = s_mounts[i];
         if (existing.active && existing.partitionMount &&
-            block::same_partition_identity(existing.partitionIdentity, identity)) {
-            block::release_partition_view(viewHandle);
-            return partition_mount_result(PARTITION_MOUNT_ALREADY_MOUNTED);
-        }
+            block::same_partition_identity(existing.partitionIdentity, identity))
+            partitionAlreadyMounted = true;
+    }
+    unlock_vfs_metadata();
+    if (partitionAlreadyMounted) {
+        block::release_partition_view(viewHandle);
+        return partition_mount_result(PARTITION_MOUNT_ALREADY_MOUNTED);
     }
 
     storage::PartitionEntry current = {};
@@ -653,13 +1042,38 @@ PartitionMountResult mount_partition_detailed(const char* path,
         }
     }
 
+    lock_vfs_metadata();
+    bool pathOccupied = false;
+    uint8_t commitSlot = 0xFF;
+    for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
+        if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0)
+            pathOccupied = true;
+        if (!s_mounts[i].active && commitSlot == 0xFF) commitSlot = i;
+    }
+    if (pathOccupied || commitSlot == 0xFF) {
+        unlock_vfs_metadata();
+        (void)fs_fat::unmount(fsVolume);
+        block::release_partition_view(viewHandle);
+        return partition_mount_result(pathOccupied
+            ? PARTITION_MOUNT_PATH_OCCUPIED : PARTITION_MOUNT_VFS_REGISTRY_FULL);
+    }
+    mountSlot = commitSlot;
     MountPoint& mount = s_mounts[mountSlot];
     memzero(&mount, sizeof(mount));
     mount.active = true;
+    if (!initialize_mount_instance(mount)) {
+        memzero(&mount, sizeof(mount));
+        unlock_vfs_metadata();
+        (void)fs_fat::unmount(fsVolume);
+        block::release_partition_view(viewHandle);
+        return partition_mount_result(PARTITION_MOUNT_VFS_REGISTRY_FULL);
+    }
     strcopy(mount.path, path, sizeof(mount.path));
     mount.fsType = FS_TYPE_FAT32;
     mount.blockDevIndex = blockDevIndex;
     mount.parentRegistrationId = identity.parentRegistrationId;
+    mount.parentRegistryGeneration = identity.parentRegistryGeneration;
+    mount.logicalSectorSize = partitionEndpoint.sectorSize;
     mount.fsVolumeIndex = fsVolume;
     mount.readOnly = partitionEndpoint.readOnly ||
         !block::endpoint_supports_durable_writes(partitionEndpoint);
@@ -668,15 +1082,17 @@ PartitionMountResult mount_partition_detailed(const char* path,
     mount.partitionIdentity = identity;
     mount.partitionView = viewHandle;
     ++s_mountCount;
+    unlock_vfs_metadata();
     return partition_mount_result(PARTITION_MOUNT_OK, mountSlot);
 }
 
 uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
 {
-    if (storage::storage_operation_active()) return 0xFF;
     if (!s_initialized) {
         init();
     }
+    MountAdmissionReference admission;
+    if (!admission.begin() || storage::storage_operation_active()) return 0xFF;
     
     if (!path || strlen(path) == 0) {
         return 0xFF;
@@ -687,23 +1103,22 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
          !(fsType == FS_TYPE_FAT32 && geometry.sectorSize == 4096)))
         return 0xFF;
     
-    // Check if path is already mounted
+    // Check if path is already mounted and reserve a candidate slot snapshot.
+    bool pathAlreadyMounted = false;
+    uint8_t index = 0xFF;
+    lock_vfs_metadata();
     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
         if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0) {
-#if defined(__GNUC__) || defined(__clang__)
-            serial::puts("[VFS] ERROR: Path already mounted\n");
-#endif
-            return 0xFF;
+            pathAlreadyMounted = true;
         }
+        if (!s_mounts[i].active && index == 0xFF) index = i;
     }
-    
-    // Find free mount slot
-    uint8_t index = 0xFF;
-    for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
-        if (!s_mounts[i].active) {
-            index = i;
-            break;
-        }
+    unlock_vfs_metadata();
+    if (pathAlreadyMounted) {
+#if defined(__GNUC__) || defined(__clang__)
+        serial::puts("[VFS] ERROR: Path already mounted\n");
+#endif
+        return 0xFF;
     }
     
     if (index == 0xFF) {
@@ -783,16 +1198,51 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
     }
 
     // Initialize mount point
+    lock_vfs_metadata();
+    bool pathOccupiedAtCommit = false;
+    uint8_t commitIndex = 0xFF;
+    for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
+        if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0)
+            pathOccupiedAtCommit = true;
+        if (!s_mounts[i].active && commitIndex == 0xFF) commitIndex = i;
+    }
+    if (pathOccupiedAtCommit || commitIndex == 0xFF) {
+        unlock_vfs_metadata();
+        if (fsType == FS_TYPE_FAT32 || fsType == FS_TYPE_EXFAT)
+            (void)fs_fat::unmount(fsVolume);
+        else if (fsType == FS_TYPE_EXT2 || fsType == FS_TYPE_EXT4)
+            fs_ext4::unmount(fsVolume);
+        if (partitionMount) block::release_partition_view(mountView);
+        return 0xFF;
+    }
+    index = commitIndex;
     MountPoint& mp = s_mounts[index];
     memzero(&mp, sizeof(mp));
     mp.active = true;
+    if (!initialize_mount_instance(mp)) {
+        memzero(&mp, sizeof(mp));
+        unlock_vfs_metadata();
+        if (fsType == FS_TYPE_FAT32 || fsType == FS_TYPE_EXFAT)
+            (void)fs_fat::unmount(fsVolume);
+        else if (fsType == FS_TYPE_EXT2 || fsType == FS_TYPE_EXT4)
+            fs_ext4::unmount(fsVolume);
+        if (partitionMount) block::release_partition_view(mountView);
+        return 0xFF;
+    }
     strcopy(mp.path, path, sizeof(mp.path));
     mp.fsType = fsType;
     mp.blockDevIndex = blockDevIndex;
     mp.parentRegistrationId = partitionMount
         ? mountIdentity.parentRegistrationId : geometry.registrationId;
+    mp.parentRegistryGeneration = partitionMount
+        ? mountIdentity.parentRegistryGeneration : block::registry_generation();
+    mp.logicalSectorSize = geometry.sectorSize;
     mp.fsVolumeIndex = fsVolume;
     mp.readOnly = partitionMount ? partitionReadOnly : !geometry.writeFn;
+    if (!partitionMount &&
+        (fsType == FS_TYPE_FAT32 || fsType == FS_TYPE_EXFAT) && fatVolume)
+        mp.readOnly = fatVolume->endpoint.readOnly ||
+            !block::endpoint_supports_durable_writes(fatVolume->endpoint);
     mp.alias = false;
     mp.sourcePrefix[0] = '\0';
     mp.partitionMount = partitionMount;
@@ -802,6 +1252,7 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
     }
     
     ++s_mountCount;
+    unlock_vfs_metadata();
     
 #if defined(__GNUC__) || defined(__clang__)
     serial::puts("[VFS] Mounted ");
@@ -830,10 +1281,13 @@ static void append_decimal(uint64_t value, char* output, size_t capacity)
 
 static bool mount_path_in_use(const char* path)
 {
+    lock_vfs_metadata();
+    bool inUse = false;
     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i)
         if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0)
-            return true;
-    return false;
+            inUse = true;
+    unlock_vfs_metadata();
+    return inUse;
 }
 
 bool propose_partition_mount_path(uint8_t blockDevIndex,
@@ -874,7 +1328,7 @@ bool propose_partition_mount_path(uint8_t blockDevIndex,
     return false;
 }
 
-bool mount_identity_valid(uint8_t mountIndex)
+static bool mount_identity_valid_internal(uint8_t mountIndex)
 {
     const MountPoint* mount = get_mount_by_index(mountIndex);
     if (!mount || mount->parentRegistrationId == 0 ||
@@ -893,6 +1347,46 @@ bool mount_identity_valid(uint8_t mountIndex)
         partition_entry_matches_identity(current, mount->partitionIdentity);
 }
 
+bool mount_identity_valid(uint8_t mountIndex)
+{
+    // Partition parsing uses the shared bounded table scratch. Join mount
+    // admission so it cannot overlap another parse or a quiesced dismount.
+    MountAdmissionReference admission;
+    if (!admission.begin(true)) return false;
+    MountOperationReference operation;
+    return operation.begin_index(mountIndex) == VFS_OK &&
+        mount_identity_valid_internal(mountIndex);
+}
+
+bool capture_mount_identity(uint8_t mountIndex, MountIdentity& out)
+{
+    out = {};
+    if (mountIndex >= VFS_MAX_MOUNTS) return false;
+    lock_vfs_metadata();
+    const MountPoint& mount = s_mounts[mountIndex];
+    if (!mount.active ||
+        mount.lifecycleState != MOUNT_LIFECYCLE_MOUNTED ||
+        mount.mountGeneration == 0 || mount.parentRegistrationId == 0 ||
+        mount.logicalSectorSize == 0) {
+        unlock_vfs_metadata();
+        return false;
+    }
+    MountIdentity identity = {};
+    identity.valid = true;
+    identity.mountIndex = mountIndex;
+    identity.mountGeneration = mount.mountGeneration;
+    identity.blockDevIndex = mount.blockDevIndex;
+    identity.registrationId = mount.parentRegistrationId;
+    identity.registryGeneration = mount.parentRegistryGeneration;
+    identity.logicalSectorSize = mount.logicalSectorSize;
+    identity.partitionMount = mount.partitionMount;
+    identity.partitionIdentity = mount.partitionIdentity;
+    identity.partitionView = mount.partitionView;
+    unlock_vfs_metadata();
+    out = identity;
+    return true;
+}
+
 static Status mount_io_status(const MountPoint* mount)
 {
     if (!mount || !mount->active) return VFS_ERR_NOT_MOUNT;
@@ -907,15 +1401,80 @@ static Status mount_io_status(const MountPoint* mount)
     return VFS_OK;
 }
 
-Status mount_backing_status(uint8_t mountIndex)
+static bool mount_matches_identity_locked(const MountPoint& mount,
+                                          const MountIdentity& identity)
+{
+    if (!identity.valid || !mount.active ||
+        mount.mountGeneration != identity.mountGeneration ||
+        mount.blockDevIndex != identity.blockDevIndex ||
+        mount.parentRegistrationId != identity.registrationId ||
+        mount.parentRegistryGeneration != identity.registryGeneration ||
+        mount.logicalSectorSize != identity.logicalSectorSize ||
+        mount.partitionMount != identity.partitionMount)
+        return false;
+    if (!identity.partitionMount) return true;
+    return block::same_partition_identity(mount.partitionIdentity,
+                                          identity.partitionIdentity) &&
+        mount.partitionView.slot == identity.partitionView.slot &&
+        mount.partitionView.generation == identity.partitionView.generation;
+}
+
+static bool protected_system_mount_path(const char* path)
+{
+    return path && (strcmp(path, "/") == 0 ||
+        strcmp(path, "/boot") == 0 || strcmp(path, "/system") == 0);
+}
+
+class StorageOperationLeaseReference {
+public:
+    StorageOperationLeaseReference() : acquired_(false) { lease_ = {}; }
+    ~StorageOperationLeaseReference()
+    {
+        if (acquired_) (void)storage::release_storage_operation(lease_);
+    }
+
+    storage::StorageOperationLockStatus acquire()
+    {
+        const storage::StorageOperationLockStatus status =
+            storage::try_acquire_storage_operation(lease_);
+        acquired_ = status == storage::STORAGE_OPERATION_LOCK_ACQUIRED;
+        return status;
+    }
+
+    bool pin(const storage::TargetIdentity& target)
+    {
+        return acquired_ && storage::pin_storage_operation_target(lease_, target);
+    }
+
+    bool current() const
+    {
+        return acquired_ && storage::storage_operation_lease_is_current(lease_);
+    }
+
+private:
+    storage::StorageOperationLease lease_;
+    bool acquired_;
+};
+
+static Status mount_backing_status_internal(uint8_t mountIndex)
 {
     const MountPoint* mount = get_mount_by_index(mountIndex);
     if (!mount || !mount->active) return VFS_ERR_NOT_MOUNT;
     const Status ioStatus = mount_io_status(mount);
     if (ioStatus != VFS_OK) return ioStatus;
-    if (mount->partitionMount && !mount_identity_valid(mountIndex))
+    if (mount->partitionMount && !mount_identity_valid_internal(mountIndex))
         return VFS_ERR_MOUNT_STALE;
     return VFS_OK;
+}
+
+Status mount_backing_status(uint8_t mountIndex)
+{
+    MountAdmissionReference admission;
+    if (!admission.begin(true)) return VFS_ERR_BUSY;
+    MountOperationReference operation;
+    const Status admitted = operation.begin_index(mountIndex);
+    return admitted == VFS_OK
+        ? mount_backing_status_internal(mountIndex) : admitted;
 }
 
 const char* partition_mount_error_name(PartitionMountError error)
@@ -968,23 +1527,31 @@ uint8_t mount_alias(const char* path, const char* sourcePath)
     if (!path || strlen(path) == 0 || !sourcePath || strlen(sourcePath) == 0) {
         return 0xFF;
     }
+    if (storage::storage_operation_active()) return 0xFF;
 
+    bool pathAlreadyMounted = false;
+    lock_vfs_metadata();
     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
         if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0) {
-#if defined(__GNUC__) || defined(__clang__)
-            serial::puts("[VFS] ERROR: Alias path already mounted\n");
-#endif
-            return 0xFF;
+            pathAlreadyMounted = true;
         }
     }
+    unlock_vfs_metadata();
+    if (pathAlreadyMounted) {
+#if defined(__GNUC__) || defined(__clang__)
+        serial::puts("[VFS] ERROR: Alias path already mounted\n");
+#endif
+        return 0xFF;
+    }
 
-    MountPoint* sourceMount = find_mount_for_path(sourcePath);
-    if (!sourceMount) {
+    MountOperationReference sourceReference;
+    if (sourceReference.begin_path(sourcePath) != VFS_OK) {
 #if defined(__GNUC__) || defined(__clang__)
         serial::puts("[VFS] ERROR: No source mount point for alias path\n");
 #endif
         return 0xFF;
     }
+    MountPoint* sourceMount = sourceReference.mount();
 
     FileInfo info{};
     if (stat(sourcePath, &info) != VFS_OK || info.type != FILE_TYPE_DIRECTORY) {
@@ -1000,31 +1567,42 @@ uint8_t mount_alias(const char* path, const char* sourcePath)
     }
 
     uint8_t index = 0xFF;
-    for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
-        if (!s_mounts[i].active) {
-            index = i;
-            break;
-        }
-    }
-
-    if (index == 0xFF) {
-#if defined(__GNUC__) || defined(__clang__)
-        serial::puts("[VFS] ERROR: No free mount slots for alias\n");
-#endif
-        return 0xFF;
-    }
     if (mount_io_status(sourceMount) != VFS_OK) return 0xFF;
     if (sourceMount->partitionMount &&
         !block::retain_partition_view(sourceMount->partitionView))
         return 0xFF;
 
+    lock_vfs_metadata();
+    bool pathOccupied = false;
+    for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
+        if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0)
+            pathOccupied = true;
+        if (!s_mounts[i].active && index == 0xFF) index = i;
+    }
+    if (pathOccupied || index == 0xFF || !sourceMount->active ||
+        sourceMount->lifecycleState != MOUNT_LIFECYCLE_MOUNTED ||
+        s_nextMountGeneration == UINT64_MAX) {
+        unlock_vfs_metadata();
+        if (sourceMount->partitionMount)
+            block::release_partition_view(sourceMount->partitionView);
+        return 0xFF;
+    }
     MountPoint& mp = s_mounts[index];
     memzero(&mp, sizeof(mp));
     mp.active = true;
+    if (!initialize_mount_instance(mp)) {
+        memzero(&mp, sizeof(mp));
+        unlock_vfs_metadata();
+        if (sourceMount->partitionMount)
+            block::release_partition_view(sourceMount->partitionView);
+        return 0xFF;
+    }
     strcopy(mp.path, path, sizeof(mp.path));
     mp.fsType = sourceMount->fsType;
     mp.blockDevIndex = sourceMount->blockDevIndex;
     mp.parentRegistrationId = sourceMount->parentRegistrationId;
+    mp.parentRegistryGeneration = sourceMount->parentRegistryGeneration;
+    mp.logicalSectorSize = sourceMount->logicalSectorSize;
     mp.fsVolumeIndex = sourceMount->fsVolumeIndex;
     mp.readOnly = sourceMount->readOnly;
     mp.alias = true;
@@ -1034,6 +1612,7 @@ uint8_t mount_alias(const char* path, const char* sourcePath)
     strcopy(mp.sourcePrefix, sourceRelative, sizeof(mp.sourcePrefix));
 
     ++s_mountCount;
+    unlock_vfs_metadata();
 
 #if defined(__GNUC__) || defined(__clang__)
     serial::puts("[VFS] Mounted alias '");
@@ -1049,96 +1628,230 @@ uint8_t mount_alias(const char* path, const char* sourcePath)
 Status unmount(const char* path)
 {
     if (!path) return VFS_ERR_INVALID;
-    if (strcmp(path, "/") == 0) return VFS_ERR_BUSY;
-    
+    MountIdentity identity = {};
+    uint8_t index = 0xFF;
+    lock_vfs_metadata();
     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
         if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0) {
-            // Check for open files on this mount
-            for (uint8_t j = 0; j < VFS_MAX_OPEN_FILES; ++j) {
-                if (s_files[j].open && s_files[j].mountIndex == i) {
-                    return VFS_ERR_BUSY;
-                }
-            }
-            for (uint8_t j = 0; j < VFS_MAX_OPEN_FILES; ++j) {
-                if (s_dirs[j].active && s_dirs[j].mountIndex == i)
-                    return VFS_ERR_BUSY;
-            }
-            if (!s_mounts[i].alias) {
-                for (uint8_t j = 0; j < VFS_MAX_MOUNTS; ++j) {
-                    if (s_mounts[j].active && s_mounts[j].alias &&
-                        s_mounts[j].blockDevIndex == s_mounts[i].blockDevIndex &&
-                        s_mounts[j].fsVolumeIndex == s_mounts[i].fsVolumeIndex)
-                        return VFS_ERR_BUSY;
-                }
-            }
-
-            Status cleanupStatus = mount_backing_status(i);
-            if (cleanupStatus == VFS_OK && !s_mounts[i].alias &&
-                !s_mounts[i].readOnly &&
-                (s_mounts[i].fsType == FS_TYPE_FAT32 ||
-                 s_mounts[i].fsType == FS_TYPE_EXFAT)) {
-                block::Status blockStatus = block::BLOCK_OK;
-                if (!fs_fat::flush(s_mounts[i].fsVolumeIndex, &blockStatus)) {
-                    const Status flushStatus = map_block_status(blockStatus);
-                    cleanupStatus = mount_io_status(&s_mounts[i]);
-                    if (cleanupStatus == VFS_OK) return flushStatus;
-                }
-            }
-            
-            // Unmount the filesystem
-            if (!s_mounts[i].alias) {
-                switch (s_mounts[i].fsType) {
-                    case FS_TYPE_FAT32:
-                    case FS_TYPE_EXFAT:
-                        fs_fat::unmount(s_mounts[i].fsVolumeIndex);
-                        break;
-                    case FS_TYPE_EXT2:
-                    case FS_TYPE_EXT4:
-                        fs_ext4::unmount(s_mounts[i].fsVolumeIndex);
-                        break;
-                    default:
-                        break;
-                }
-            }
-            if (s_mounts[i].partitionMount)
-                block::release_partition_view(s_mounts[i].partitionView);
-            memzero(&s_mounts[i], sizeof(s_mounts[i]));
-            if (s_mountCount > 0) --s_mountCount;
-            
-#if defined(__GNUC__) || defined(__clang__)
-            serial::puts("[VFS] Unmounted '");
-            serial::puts(path);
-            serial::puts("'\n");
-#endif
-            
-            return cleanupStatus;
+            index = i;
+            break;
         }
     }
-    
-    return VFS_ERR_NOT_MOUNT;
+    const bool quiescing = index != 0xFF &&
+        s_mounts[index].lifecycleState == MOUNT_LIFECYCLE_QUIESCING;
+    unlock_vfs_metadata();
+    if (index == 0xFF) return VFS_ERR_NOT_MOUNT;
+    if (quiescing) return VFS_ERR_BUSY;
+    if (protected_system_mount_path(path)) return VFS_ERR_BUSY;
+    if (!capture_mount_identity(index, identity)) return VFS_ERR_BUSY;
+    return dismount(identity);
+}
+
+Status dismount(const MountIdentity& identity)
+{
+    if (!identity.valid || identity.mountIndex >= VFS_MAX_MOUNTS ||
+        identity.registrationId == 0 || identity.mountGeneration == 0 ||
+        identity.logicalSectorSize == 0)
+        return VFS_ERR_INVALID;
+
+    MountPoint snapshot = {};
+    lock_vfs_metadata();
+    MountPoint& current = s_mounts[identity.mountIndex];
+    if (!mount_matches_identity_locked(current, identity)) {
+        unlock_vfs_metadata();
+        return VFS_ERR_MOUNT_STALE;
+    }
+    if (current.lifecycleState != MOUNT_LIFECYCLE_MOUNTED) {
+        unlock_vfs_metadata();
+        return VFS_ERR_BUSY;
+    }
+    snapshot = current;
+    unlock_vfs_metadata();
+
+    if (protected_system_mount_path(snapshot.path)) return VFS_ERR_BUSY;
+
+    block::BlockDevice device = {};
+    const bool exactDeviceOnline = block::copy_device(
+            identity.blockDevIndex, device) &&
+        device.registrationId == identity.registrationId &&
+        device.sectorSize == identity.logicalSectorSize;
+
+    StorageOperationLeaseReference operationLease;
+    storage::TargetIdentity target = {};
+    if (exactDeviceOnline) {
+        if (!storage::capture_target_identity(identity.blockDevIndex, target) ||
+            target.registrationId != identity.registrationId ||
+            target.logicalSectorSize != identity.logicalSectorSize)
+            return VFS_ERR_DEVICE_REMOVED;
+        const storage::BootProtection boot = storage::query_boot_protection(target);
+        if (boot.safety != storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET)
+            return VFS_ERR_PROTECTED;
+    }
+    // Own the shared gate even for removal cleanup. This prevents a new mount
+    // on a same-index replacement from racing release of the old FAT volume;
+    // stale cleanup itself performs no device I/O and does not pin a new disk.
+    if (operationLease.acquire() != storage::STORAGE_OPERATION_LOCK_ACQUIRED)
+        return VFS_ERR_BUSY;
+    if (exactDeviceOnline && !operationLease.pin(target))
+        return VFS_ERR_DEVICE_REMOVED;
+
+    // Quiescence is the admission boundary. Existing operations and persistent
+    // handles are counted under the same lock used by open/readdir admission.
+    lock_vfs_metadata();
+    MountPoint& mount = s_mounts[identity.mountIndex];
+    if (!mount_matches_identity_locked(mount, identity) ||
+        mount.lifecycleState != MOUNT_LIFECYCLE_MOUNTED) {
+        unlock_vfs_metadata();
+        return VFS_ERR_MOUNT_STALE;
+    }
+    if (s_mountAdmissionsInFlight != 0) {
+        unlock_vfs_metadata();
+        return VFS_ERR_BUSY;
+    }
+    if (!mount.alias) {
+        for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
+            if (s_mounts[i].active && s_mounts[i].alias &&
+                s_mounts[i].blockDevIndex == mount.blockDevIndex &&
+                s_mounts[i].fsVolumeIndex == mount.fsVolumeIndex) {
+                unlock_vfs_metadata();
+                return VFS_ERR_BUSY;
+            }
+        }
+    }
+    mount.lifecycleState = MOUNT_LIFECYCLE_QUIESCING;
+    bool hasOpenFiles = mount.openFileReferences != 0;
+    bool hasOpenDirectories = mount.openDirectoryReferences != 0;
+    for (uint8_t i = 0; i < VFS_MAX_OPEN_FILES; ++i) {
+        if (s_files[i].open && s_files[i].mountIndex == identity.mountIndex)
+            hasOpenFiles = true;
+        if (s_dirs[i].active && s_dirs[i].mountIndex == identity.mountIndex)
+            hasOpenDirectories = true;
+    }
+    if (mount.activeOperations != 0 || hasOpenFiles || hasOpenDirectories) {
+        // No filesystem teardown or writes have occurred; reopening admission
+        // is a proven rollback for a busy attempt.
+        mount.lifecycleState = MOUNT_LIFECYCLE_MOUNTED;
+        unlock_vfs_metadata();
+        return VFS_ERR_BUSY;
+    }
+    unlock_vfs_metadata();
+
+    Status cleanupStatus = exactDeviceOnline
+        ? mount_backing_status_internal(identity.mountIndex)
+        : VFS_ERR_DEVICE_REMOVED;
+    if (cleanupStatus == VFS_OK && !snapshot.alias && !snapshot.readOnly &&
+        (snapshot.fsType == FS_TYPE_FAT32 ||
+         snapshot.fsType == FS_TYPE_EXFAT)) {
+        block::Status blockStatus = block::BLOCK_OK;
+        if (!fs_fat::flush(snapshot.fsVolumeIndex, &blockStatus))
+            cleanupStatus = map_block_status(blockStatus);
+    }
+
+    if (cleanupStatus == VFS_OK && exactDeviceOnline &&
+        !operationLease.current())
+        cleanupStatus = VFS_ERR_DEVICE_REMOVED;
+
+    if (cleanupStatus != VFS_OK && exactDeviceOnline) {
+        const Status currentBacking =
+            mount_backing_status_internal(identity.mountIndex);
+        if (currentBacking == VFS_OK) {
+            lock_vfs_metadata();
+            MountPoint& rollback = s_mounts[identity.mountIndex];
+            if (mount_matches_identity_locked(rollback, identity) &&
+                rollback.lifecycleState == MOUNT_LIFECYCLE_QUIESCING &&
+                rollback.activeOperations == 0 &&
+                rollback.openFileReferences == 0 &&
+                rollback.openDirectoryReferences == 0)
+                rollback.lifecycleState = MOUNT_LIFECYCLE_MOUNTED;
+            unlock_vfs_metadata();
+            return cleanupStatus;
+        }
+        cleanupStatus = currentBacking;
+    }
+
+    bool filesystemDetached = true;
+    if (!snapshot.alias) {
+        switch (snapshot.fsType) {
+            case FS_TYPE_FAT32:
+            case FS_TYPE_EXFAT:
+                filesystemDetached = fs_fat::unmount(snapshot.fsVolumeIndex);
+                break;
+            case FS_TYPE_EXT2:
+            case FS_TYPE_EXT4:
+                fs_ext4::unmount(snapshot.fsVolumeIndex);
+                break;
+            default:
+                break;
+        }
+    }
+    if (!filesystemDetached) {
+        lock_vfs_metadata();
+        MountPoint& rollback = s_mounts[identity.mountIndex];
+        if (mount_matches_identity_locked(rollback, identity) &&
+            rollback.lifecycleState == MOUNT_LIFECYCLE_QUIESCING)
+            rollback.lifecycleState = MOUNT_LIFECYCLE_MOUNTED;
+        unlock_vfs_metadata();
+        return VFS_ERR_BUSY;
+    }
+
+    if (snapshot.partitionMount)
+        block::release_partition_view(snapshot.partitionView);
+    lock_vfs_metadata();
+    MountPoint& detached = s_mounts[identity.mountIndex];
+    if (!mount_matches_identity_locked(detached, identity) ||
+        detached.lifecycleState != MOUNT_LIFECYCLE_QUIESCING ||
+        detached.activeOperations != 0 ||
+        detached.openFileReferences != 0 ||
+        detached.openDirectoryReferences != 0) {
+        unlock_vfs_metadata();
+        // This is an internal invariant failure after filesystem teardown.
+        // Keep the slot non-operational instead of publishing a false mount.
+        return VFS_ERR_MOUNT_STALE;
+    }
+    memzero(&detached, sizeof(detached));
+    if (s_mountCount != 0) --s_mountCount;
+    unlock_vfs_metadata();
+
+#if defined(__GNUC__) || defined(__clang__)
+    serial::puts("[VFS] Dismounted '");
+    serial::puts(snapshot.path);
+    serial::puts("'\n");
+#endif
+    return cleanupStatus;
 }
 
 const MountPoint* get_mount(const char* path)
 {
-    return find_mount_for_path(path);
+    lock_vfs_metadata();
+    MountPoint* mount = find_mount_for_path(path);
+    unlock_vfs_metadata();
+    return mount;
 }
 
 uint8_t mount_index_for_path(const char* path)
 {
+    lock_vfs_metadata();
     MountPoint* mount = find_mount_for_path(path);
-    return mount ? static_cast<uint8_t>(mount - s_mounts) : 0xFF;
+    const uint8_t index = mount ? static_cast<uint8_t>(mount - s_mounts) : 0xFF;
+    unlock_vfs_metadata();
+    return index;
 }
 
 const MountPoint* get_mount_by_index(uint8_t index)
 {
     if (index >= VFS_MAX_MOUNTS) return nullptr;
-    if (!s_mounts[index].active) return nullptr;
-    return &s_mounts[index];
+    lock_vfs_metadata();
+    const MountPoint* mount = s_mounts[index].active ? &s_mounts[index] : nullptr;
+    unlock_vfs_metadata();
+    return mount;
 }
 
 uint8_t mount_count()
 {
-    return s_mountCount;
+    lock_vfs_metadata();
+    const uint8_t count = s_mountCount;
+    unlock_vfs_metadata();
+    return count;
 }
 
 #if defined(KERNEL_STORAGE_TEST)
@@ -1146,27 +1859,34 @@ void test_set_mount(uint8_t index, bool active, uint8_t deviceIndex,
                     const char* path)
 {
     if (index >= VFS_MAX_MOUNTS) return;
+    lock_vfs_metadata();
     if (s_mounts[index].active && s_mountCount) --s_mountCount;
     memzero(&s_mounts[index], sizeof(s_mounts[index]));
     s_mounts[index].active = active;
     s_mounts[index].blockDevIndex = deviceIndex;
     block::BlockDevice device = {};
-    if (active && block::copy_device(deviceIndex, device))
+    if (active && block::copy_device(deviceIndex, device)) {
         s_mounts[index].parentRegistrationId = device.registrationId;
+        s_mounts[index].parentRegistryGeneration = block::registry_generation();
+        s_mounts[index].logicalSectorSize = device.sectorSize;
+    }
+    if (active) (void)initialize_mount_instance(s_mounts[index]);
     if (path) strcopy(s_mounts[index].path, path,
                       sizeof(s_mounts[index].path));
     if (active && s_mountCount < VFS_MAX_MOUNTS) ++s_mountCount;
     s_initialized = true;
+    unlock_vfs_metadata();
 }
 
 void test_clear_mounts()
 {
+    lock_vfs_metadata();
     for (size_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
         if (!s_mounts[i].active) continue;
         if (!s_mounts[i].alias) {
             if (s_mounts[i].fsType == FS_TYPE_FAT32 ||
                 s_mounts[i].fsType == FS_TYPE_EXFAT)
-                fs_fat::unmount(s_mounts[i].fsVolumeIndex);
+                (void)fs_fat::unmount(s_mounts[i].fsVolumeIndex);
             else if (s_mounts[i].fsType == FS_TYPE_EXT2 ||
                      s_mounts[i].fsType == FS_TYPE_EXT4)
                 fs_ext4::unmount(s_mounts[i].fsVolumeIndex);
@@ -1179,6 +1899,7 @@ void test_clear_mounts()
     memzero(s_dirs, sizeof(s_dirs));
     s_mountCount = 0;
     s_initialized = true;
+    unlock_vfs_metadata();
 }
 #endif
 
@@ -1348,9 +2069,8 @@ void join_path(const char* base, const char* name, char* output, size_t outputSi
 HandleToken open(const char* path, uint16_t flags)
 {
     if (!path) return INVALID_HANDLE;
-    
-    MountPoint* mount = find_mount_for_path(path);
-    if (!mount) {
+    MountOperationReference operation;
+    if (operation.begin_path(path) != VFS_OK) {
 #if defined(__GNUC__) || defined(__clang__)
         serial::puts("[VFS] ERROR: No mount point for path: ");
         serial::puts(path);
@@ -1358,18 +2078,11 @@ HandleToken open(const char* path, uint16_t flags)
 #endif
         return INVALID_HANDLE;
     }
+    MountPoint* mount = operation.mount();
     if (mount_io_status(mount) != VFS_OK) return INVALID_HANDLE;
     
-    // Find free file handle
-    uint8_t fileSlot = 0xFF;
-    for (uint8_t i = 0; i < VFS_MAX_OPEN_FILES; ++i) {
-        if (!s_files[i].open) {
-            fileSlot = i;
-            break;
-        }
-    }
-    
-    if (fileSlot == 0xFF) {
+    FileSlotReservation reservation;
+    if (!reservation.reserve()) {
 #if defined(__GNUC__) || defined(__clang__)
         serial::puts("[VFS] ERROR: No free file handles\n");
 #endif
@@ -1473,36 +2186,23 @@ HandleToken open(const char* path, uint16_t flags)
         return INVALID_HANDLE;
     }
 
-    const HandleToken token = allocate_handle_token();
-    if (token == INVALID_HANDLE) {
+    HandleToken token = INVALID_HANDLE;
+    if (!reservation.commit(operation, path, flags, fileSize, fsHandle, token)) {
         if (fsHandle != 0xFF) fs_fat::close_file(fsHandle);
         return INVALID_HANDLE;
     }
-    
-    // Initialize handle
-    FileHandle& fh = s_files[fileSlot];
-    fh.open = true;
-    fh.token = token;
-    fh.mountIndex = static_cast<uint8_t>(mount - s_mounts);
-    fh.flags = flags;
-    fh.position = 0;
-    fh.size = fileSize;
-    fh.fsFileHandle = fsHandle;
-    strcopy(fh.path, path, sizeof(fh.path));
-    
     return token;
 }
 
 Status close(HandleToken handle)
 {
-    const uint8_t fileSlot = find_file_slot(handle);
-    if (fileSlot == 0xFF) return VFS_ERR_INVALID;
-    
-    FileHandle& fh = s_files[fileSlot];
-    Status flushStatus = mount_io_status(&s_mounts[fh.mountIndex]);
+    MountOperationReference operation;
+    const Status admitted = operation.begin_file(handle, true);
+    if (admitted != VFS_OK) return admitted;
+    FileHandle& fh = s_files[operation.file_slot()];
+    MountPoint* mount = operation.mount();
+    Status flushStatus = mount_io_status(mount);
     // Close via filesystem driver
-    MountPoint* mount = &s_mounts[fh.mountIndex];
-
     if (flushStatus == VFS_OK && (fh.flags & OPEN_WRITE) &&
         mount->fsType == FS_TYPE_FAT32) {
         block::Status blockStatus = block::BLOCK_OK;
@@ -1522,15 +2222,27 @@ Status close(HandleToken handle)
         default:
             break;
     }
-    
-    fh.open = false;
+
+    lock_vfs_metadata();
+    if (fh.token == handle && fh.open) {
+        fh.open = false;
+        fh.closing = false;
+        if (mount->active && mount->mountGeneration ==
+                operation.mount()->mountGeneration &&
+            mount->openFileReferences != 0)
+            --mount->openFileReferences;
+    }
+    unlock_vfs_metadata();
+    operation.release();
     return flushStatus;
 }
 
 int32_t read(HandleToken handle, void* buffer, uint32_t size)
 {
-    const uint8_t fileSlot = find_file_slot(handle);
-    if (fileSlot == 0xFF) return VFS_ERR_INVALID;
+    MountOperationReference operation;
+    const Status admitted = operation.begin_file(handle);
+    if (admitted != VFS_OK) return admitted;
+    const uint8_t fileSlot = operation.file_slot();
     if (!buffer || size == 0) return VFS_ERR_INVALID;
     
     FileHandle& fh = s_files[fileSlot];
@@ -1539,7 +2251,7 @@ int32_t read(HandleToken handle, void* buffer, uint32_t size)
         return VFS_ERR_INVALID;
     }
     
-    MountPoint* mount = &s_mounts[fh.mountIndex];
+    MountPoint* mount = operation.mount();
     const Status backingStatus = mount_io_status(mount);
     if (backingStatus != VFS_OK) return backingStatus;
     int32_t bytesRead = 0;
@@ -1577,8 +2289,10 @@ int32_t read(HandleToken handle, void* buffer, uint32_t size)
 
 int32_t write(HandleToken handle, const void* buffer, uint32_t size)
 {
-    const uint8_t fileSlot = find_file_slot(handle);
-    if (fileSlot == 0xFF) return VFS_ERR_INVALID;
+    MountOperationReference operation;
+    const Status admitted = operation.begin_file(handle);
+    if (admitted != VFS_OK) return admitted;
+    const uint8_t fileSlot = operation.file_slot();
     if (!buffer || size == 0) return VFS_ERR_INVALID;
     
     FileHandle& fh = s_files[fileSlot];
@@ -1587,7 +2301,7 @@ int32_t write(HandleToken handle, const void* buffer, uint32_t size)
         return VFS_ERR_INVALID;
     }
     
-    MountPoint* mount = &s_mounts[fh.mountIndex];
+    MountPoint* mount = operation.mount();
     const Status backingStatus = mount_io_status(mount);
     if (backingStatus != VFS_OK) return backingStatus;
     
@@ -1637,8 +2351,10 @@ int32_t write(HandleToken handle, const void* buffer, uint32_t size)
 
 Status seek(HandleToken handle, int64_t offset, SeekOrigin origin)
 {
-    const uint8_t fileSlot = find_file_slot(handle);
-    if (fileSlot == 0xFF) return VFS_ERR_INVALID;
+    MountOperationReference operation;
+    const Status admitted = operation.begin_file(handle);
+    if (admitted != VFS_OK) return admitted;
+    const uint8_t fileSlot = operation.file_slot();
     
     FileHandle& fh = s_files[fileSlot];
     int64_t newPos = 0;
@@ -1661,7 +2377,7 @@ Status seek(HandleToken handle, int64_t offset, SeekOrigin origin)
         newPos = 0;
     }
 
-    MountPoint* mount = &s_mounts[fh.mountIndex];
+    MountPoint* mount = operation.mount();
     const Status backingStatus = mount_io_status(mount);
     if (backingStatus != VFS_OK) return backingStatus;
     if (newPos > 0xFFFFFFFFll) return VFS_ERR_INVALID;
@@ -1683,23 +2399,24 @@ Status seek(HandleToken handle, int64_t offset, SeekOrigin origin)
 
 int64_t tell(HandleToken handle)
 {
-    const uint8_t fileSlot = find_file_slot(handle);
-    if (fileSlot == 0xFF) return -1;
-    return static_cast<int64_t>(s_files[fileSlot].position);
+    MountOperationReference operation;
+    if (operation.begin_file(handle) != VFS_OK) return -1;
+    return static_cast<int64_t>(s_files[operation.file_slot()].position);
 }
 
 int64_t file_size(HandleToken handle)
 {
-    const uint8_t fileSlot = find_file_slot(handle);
-    if (fileSlot == 0xFF) return -1;
-    return static_cast<int64_t>(s_files[fileSlot].size);
+    MountOperationReference operation;
+    if (operation.begin_file(handle) != VFS_OK) return -1;
+    return static_cast<int64_t>(s_files[operation.file_slot()].size);
 }
 
 Status flush(HandleToken handle)
 {
-    const uint8_t fileSlot = find_file_slot(handle);
-    if (fileSlot == 0xFF) return VFS_ERR_INVALID;
-    MountPoint* mount = &s_mounts[s_files[fileSlot].mountIndex];
+    MountOperationReference operation;
+    const Status admitted = operation.begin_file(handle);
+    if (admitted != VFS_OK) return admitted;
+    MountPoint* mount = operation.mount();
     const Status backingStatus = mount_io_status(mount);
     if (backingStatus != VFS_OK) return backingStatus;
     if (mount->fsType != FS_TYPE_FAT32) return VFS_OK;
@@ -1710,8 +2427,16 @@ Status flush(HandleToken handle)
 
 const FileHandle* get_handle(HandleToken handle)
 {
+    static FileHandle snapshot;
+    lock_vfs_metadata();
     const uint8_t fileSlot = find_file_slot(handle);
-    return fileSlot == 0xFF ? nullptr : &s_files[fileSlot];
+    if (fileSlot == 0xFF) {
+        unlock_vfs_metadata();
+        return nullptr;
+    }
+    snapshot = s_files[fileSlot];
+    unlock_vfs_metadata();
+    return &snapshot;
 }
 
 // ================================================================
@@ -1721,31 +2446,12 @@ const FileHandle* get_handle(HandleToken handle)
 HandleToken opendir(const char* path)
 {
     if (!path) return INVALID_HANDLE;
-    
-    MountPoint* mount = find_mount_for_path(path);
-    if (!mount) return INVALID_HANDLE;
+    MountOperationReference operation;
+    if (operation.begin_path(path) != VFS_OK) return INVALID_HANDLE;
+    MountPoint* mount = operation.mount();
     if (mount_io_status(mount) != VFS_OK) return INVALID_HANDLE;
-    
-    // Find free iterator
-    uint8_t iterSlot = 0xFF;
-    for (uint8_t i = 0; i < VFS_MAX_OPEN_FILES; ++i) {
-        if (!s_dirs[i].active) {
-            iterSlot = i;
-            break;
-        }
-    }
-    
-    if (iterSlot == 0xFF) return INVALID_HANDLE;
-    const HandleToken token = allocate_handle_token();
-    if (token == INVALID_HANDLE) return INVALID_HANDLE;
-    
-    // Initialize iterator
-    DirIterator& di = s_dirs[iterSlot];
-    di.active = true;
-    di.token = token;
-    di.mountIndex = static_cast<uint8_t>(mount - s_mounts);
-    strcopy(di.path, path, sizeof(di.path));
-    di.index = 0;
+    DirectorySlotReservation reservation;
+    if (!reservation.reserve()) return INVALID_HANDLE;
     
     // Get path relative to mount point
     char resolvedPath[VFS_MAX_PATH];
@@ -1758,26 +2464,22 @@ HandleToken opendir(const char* path)
             if (!relPath || relPath[0] == '\0' || 
                 (relPath[0] == '/' && relPath[1] == '\0')) {
                 if (!fs_fat::open_root_dir(mount->fsVolumeIndex)) {
-                    di.active = false;
                     return INVALID_HANDLE;
                 }
             } else {
                 // Lookup the directory by path
                 fs_fat::DirEntry dirEntry;
                 if (!fs_fat::lookup_path(mount->fsVolumeIndex, relPath, &dirEntry)) {
-                    di.active = false;
                     return INVALID_HANDLE;  // Directory not found
                 }
                 
                 // Must be a directory
                 if (!dirEntry.isDir) {
-                    di.active = false;
                     return INVALID_HANDLE;  // Not a directory
                 }
                 
                 // Open the directory by its cluster
                 if (!fs_fat::open_dir(mount->fsVolumeIndex, dirEntry.firstCluster)) {
-                    di.active = false;
                     return INVALID_HANDLE;
                 }
             }
@@ -1788,16 +2490,20 @@ HandleToken opendir(const char* path)
         case FS_TYPE_EXT4:
             // ext4 subdirectory support not yet implemented
             if (!fs_ext4::open_root_dir(mount->fsVolumeIndex)) {
-                di.active = false;
                 return 0xFF;
             }
             break;
             
         default:
-            di.active = false;
             return INVALID_HANDLE;
     }
-    
+
+    HandleToken token = INVALID_HANDLE;
+    if (!reservation.commit(operation, path, token)) {
+        if (mount->fsType == FS_TYPE_FAT32 || mount->fsType == FS_TYPE_EXFAT)
+            fs_fat::close_dir(mount->fsVolumeIndex);
+        return INVALID_HANDLE;
+    }
     return token;
 }
 
@@ -1810,12 +2516,13 @@ bool readdir(HandleToken iterator, DirEntry* entry)
 Status readdir_detailed(HandleToken iterator, DirEntry* entry, bool& hasEntry)
 {
     hasEntry = false;
-    const uint8_t iterSlot = find_directory_slot(iterator);
-    if (iterSlot == 0xFF) return VFS_ERR_INVALID;
+    MountOperationReference operation;
+    const Status admitted = operation.begin_directory(iterator);
+    if (admitted != VFS_OK) return admitted;
     if (!entry) return VFS_ERR_INVALID;
 
-    DirIterator& di = s_dirs[iterSlot];
-    MountPoint* mount = &s_mounts[di.mountIndex];
+    DirIterator& di = s_dirs[operation.directory_slot()];
+    MountPoint* mount = operation.mount();
     const Status backingStatus = mount_io_status(mount);
     if (backingStatus != VFS_OK) return backingStatus;
     
@@ -1872,23 +2579,36 @@ Status readdir_detailed(HandleToken iterator, DirEntry* entry, bool& hasEntry)
     }
 }
 
-void closedir(HandleToken iterator)
+Status closedir(HandleToken iterator)
 {
-    const uint8_t iterSlot = find_directory_slot(iterator);
-    if (iterSlot == 0xFF) return;
-    if (s_dirs[iterSlot].active) {
-        MountPoint& mount = s_mounts[s_dirs[iterSlot].mountIndex];
-        if (mount.active && (mount.fsType == FS_TYPE_FAT32 ||
-                             mount.fsType == FS_TYPE_EXFAT)) {
-            fs_fat::close_dir(mount.fsVolumeIndex);
-        }
+    MountOperationReference operation;
+    const Status admitted = operation.begin_directory(iterator, true);
+    if (admitted != VFS_OK) return admitted;
+    DirIterator& directory = s_dirs[operation.directory_slot()];
+    MountPoint* mount = operation.mount();
+    const Status backingStatus = mount_io_status(mount);
+    if (mount->fsType == FS_TYPE_FAT32 || mount->fsType == FS_TYPE_EXFAT)
+        fs_fat::close_dir(mount->fsVolumeIndex);
+    lock_vfs_metadata();
+    if (directory.token == iterator && directory.active) {
+        directory.active = false;
+        directory.closing = false;
+        if (mount->active && mount->mountGeneration ==
+                operation.mount()->mountGeneration &&
+            mount->openDirectoryReferences != 0)
+            --mount->openDirectoryReferences;
     }
-    s_dirs[iterSlot].active = false;
+    unlock_vfs_metadata();
+    operation.release();
+    return backingStatus;
 }
 
 Status mkdir(const char* path)
 {
     if (!path) return VFS_ERR_INVALID;
+    MountOperationReference operation;
+    const Status admitted = operation.begin_path(path);
+    if (admitted != VFS_OK) return admitted;
 
     FileInfo existing{};
     if (stat(path, &existing) == VFS_OK) return VFS_ERR_EXISTS;
@@ -1900,8 +2620,7 @@ Status mkdir(const char* path)
     if (parentStatus != VFS_OK) return parentStatus;
     if (parentInfo.type != FILE_TYPE_DIRECTORY) return VFS_ERR_NOT_DIR;
 
-    MountPoint* mount = find_mount_for_path(path);
-    if (!mount) return VFS_ERR_NOT_MOUNT;
+    MountPoint* mount = operation.mount();
     const Status backingStatus = mount_io_status(mount);
     if (backingStatus != VFS_OK) return backingStatus;
     if (mount->readOnly) return VFS_ERR_READ_ONLY;
@@ -1975,8 +2694,10 @@ Status rmdir(const char* path)
 {
     if (!path) return VFS_ERR_INVALID;
 
-    MountPoint* mount = find_mount_for_path(path);
-    if (!mount) return VFS_ERR_NOT_MOUNT;
+    MountOperationReference operation;
+    const Status admitted = operation.begin_path(path);
+    if (admitted != VFS_OK) return admitted;
+    MountPoint* mount = operation.mount();
     const Status backingStatus = mount_io_status(mount);
     if (backingStatus != VFS_OK) return backingStatus;
     if (mount->readOnly) return VFS_ERR_READ_ONLY;
@@ -2008,9 +2729,10 @@ bool exists(const char* path)
 Status stat(const char* path, FileInfo* info)
 {
     if (!path || !info) return VFS_ERR_INVALID;
-    
-    MountPoint* mount = find_mount_for_path(path);
-    if (!mount) return VFS_ERR_NOT_MOUNT;
+    MountOperationReference operation;
+    const Status admitted = operation.begin_path(path);
+    if (admitted != VFS_OK) return admitted;
+    MountPoint* mount = operation.mount();
     const Status backingStatus = mount_io_status(mount);
     if (backingStatus != VFS_OK) return backingStatus;
     
@@ -2060,8 +2782,10 @@ Status unlink(const char* path)
 {
     if (!path) return VFS_ERR_INVALID;
 
-    MountPoint* mount = find_mount_for_path(path);
-    if (!mount) return VFS_ERR_NOT_MOUNT;
+    MountOperationReference operation;
+    const Status admitted = operation.begin_path(path);
+    if (admitted != VFS_OK) return admitted;
+    MountPoint* mount = operation.mount();
     const Status backingStatus = mount_io_status(mount);
     if (backingStatus != VFS_OK) return backingStatus;
     if (mount->readOnly) return VFS_ERR_READ_ONLY;
@@ -2084,10 +2808,16 @@ Status rename(const char* oldPath, const char* newPath)
 {
     if (!oldPath || !newPath) return VFS_ERR_INVALID;
 
-    MountPoint* oldMount = find_mount_for_path(oldPath);
-    MountPoint* newMount = find_mount_for_path(newPath);
-    if (!oldMount || !newMount) return VFS_ERR_NOT_MOUNT;
-    if (oldMount != newMount) return VFS_ERR_INVALID;
+    MountOperationReference oldOperation;
+    MountOperationReference newOperation;
+    const Status oldAdmission = oldOperation.begin_path(oldPath);
+    if (oldAdmission != VFS_OK) return oldAdmission;
+    const Status newAdmission = newOperation.begin_path(newPath);
+    if (newAdmission != VFS_OK) return newAdmission;
+    MountPoint* oldMount = oldOperation.mount();
+    MountPoint* newMount = newOperation.mount();
+    if (oldOperation.mount_index() != newOperation.mount_index())
+        return VFS_ERR_INVALID;
     if (oldMount->readOnly) return VFS_ERR_READ_ONLY;
 
     char resolvedOldPath[VFS_MAX_PATH];
@@ -2124,8 +2854,10 @@ int32_t write_file(const char* path, const void* buffer, uint32_t size)
 {
     if (!path || (!buffer && size != 0)) return VFS_ERR_INVALID;
 
-    MountPoint* mount = find_mount_for_path(path);
-    if (!mount) return VFS_ERR_NOT_MOUNT;
+    MountOperationReference operation;
+    const Status admitted = operation.begin_path(path);
+    if (admitted != VFS_OK) return admitted;
+    MountPoint* mount = operation.mount();
     const Status backingStatus = mount_io_status(mount);
     if (backingStatus != VFS_OK) return backingStatus;
     if (mount->readOnly) return VFS_ERR_READ_ONLY;
@@ -2171,8 +2903,10 @@ int32_t create_file(const char* path, const void* buffer, uint32_t size)
 {
     if (!path || (!buffer && size != 0)) return VFS_ERR_INVALID;
 
-    MountPoint* mount = find_mount_for_path(path);
-    if (!mount) return VFS_ERR_NOT_MOUNT;
+    MountOperationReference operation;
+    const Status admitted = operation.begin_path(path);
+    if (admitted != VFS_OK) return admitted;
+    MountPoint* mount = operation.mount();
     const Status backingStatus = mount_io_status(mount);
     if (backingStatus != VFS_OK) return backingStatus;
     if (mount->readOnly) return VFS_ERR_READ_ONLY;
@@ -2223,20 +2957,21 @@ int32_t append_file(const char* path, const void* buffer, uint32_t size)
 
 uint64_t total_space(const char* mountPath)
 {
-    MountPoint* mount = find_mount_for_path(mountPath);
-    if (!mount) return 0;
+    MountOperationReference operation;
+    if (operation.begin_path(mountPath) != VFS_OK) return 0;
+    MountPoint* mount = operation.mount();
     
-    const block::BlockDevice* dev = block::get_device(mount->blockDevIndex);
-    if (!dev) return 0;
-    
-    return dev->totalSectors * dev->sectorSize;
+    block::BlockDevice device = {};
+    if (!block::copy_device(mount->blockDevIndex, device) ||
+        device.registrationId != mount->parentRegistrationId)
+        return 0;
+    return device.totalSectors * device.sectorSize;
 }
 
 uint64_t free_space(const char* mountPath)
 {
-    MountPoint* mount = find_mount_for_path(mountPath);
-    if (!mount) return 0;
-    
+    MountOperationReference operation;
+    if (operation.begin_path(mountPath) != VFS_OK) return 0;
     // Would need to query filesystem for actual free space
     // For now, return 0 (unknown)
     return 0;
@@ -2267,6 +3002,7 @@ const char* status_name(Status status)
         case VFS_ERR_NOT_EMPTY: return "Directory is not empty";
         case VFS_ERR_NO_SPACE: return "No space left";
         case VFS_ERR_READ_ONLY: return "Media is read-only";
+        case VFS_ERR_PROTECTED: return "Root or boot storage is protected";
         case VFS_ERR_WRITE_UNCERTAIN: return "USB write completion is uncertain";
         case VFS_ERR_DURABILITY_UNVERIFIED: return "USB write completed but durability could not be verified";
         case VFS_ERR_INVALID: return "Invalid filesystem operation";

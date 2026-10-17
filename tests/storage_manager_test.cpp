@@ -107,6 +107,18 @@ struct FakeDisk {
     bool removed;
     bool attemptMountDuringScanRead;
     vfs::PartitionMountError mountAttemptError;
+    bool attemptUnmountDuringRead;
+    char unmountDuringReadPath[vfs::VFS_MAX_PATH];
+    vfs::Status unmountDuringReadStatus;
+    bool attemptOpenDuringFlush;
+    char openDuringFlushPath[vfs::VFS_MAX_PATH];
+    vfs::HandleToken openDuringFlushResult;
+    bool attemptUnmountDuringFlush;
+    char unmountDuringFlushPath[vfs::VFS_MAX_PATH];
+    vfs::Status unmountDuringFlushStatus;
+    bool attemptReplacementMountDuringFlush;
+    uint16_t replacementMountDuringFlushPartition;
+    vfs::PartitionMountError replacementMountDuringFlushError;
     storage::Fat32FormatJob* cancelFormatJobOnRead;
     uint64_t cancelFormatJobOnReadLba;
     storage::Fat32FormatJob* cancelFormatJobOnWrite;
@@ -137,8 +149,23 @@ struct FakeDisk {
           registryIndex(0xFF), registrationId(0), removeOnVerifyRead(false), removeOnFlush(false), removeOnFlushAt(0),
           removed(false), attemptMountDuringScanRead(false),
           mountAttemptError(vfs::PARTITION_MOUNT_INVALID_ARGUMENT),
+          attemptUnmountDuringRead(false),
+          unmountDuringReadStatus(vfs::VFS_ERR_INVALID),
+          attemptOpenDuringFlush(false),
+          openDuringFlushResult(vfs::INVALID_HANDLE),
+          attemptUnmountDuringFlush(false),
+          unmountDuringFlushStatus(vfs::VFS_ERR_INVALID),
+          attemptReplacementMountDuringFlush(false),
+          replacementMountDuringFlushPartition(0),
+          replacementMountDuringFlushError(
+              vfs::PARTITION_MOUNT_INVALID_ARGUMENT),
           cancelFormatJobOnRead(nullptr), cancelFormatJobOnReadLba(UINT64_MAX),
-          cancelFormatJobOnWrite(nullptr), cancelOnWriteRejected(false) {}
+          cancelFormatJobOnWrite(nullptr), cancelOnWriteRejected(false)
+    {
+        unmountDuringReadPath[0] = '\0';
+        openDuringFlushPath[0] = '\0';
+        unmountDuringFlushPath[0] = '\0';
+    }
 };
 
 FakeDisk* g_fakeDisks[256] = {};
@@ -285,6 +312,11 @@ block::Status fake_read(uint8_t driverId, uint64_t lba, uint32_t count, void* bu
         disk->cancelFormatJobOnRead = nullptr;
         (void)storage::cancel_fat32_format_job(*job);
     }
+    if (disk->attemptUnmountDuringRead) {
+        disk->attemptUnmountDuringRead = false;
+        disk->unmountDuringReadStatus = vfs::unmount(
+            disk->unmountDuringReadPath);
+    }
     return block::BLOCK_OK;
 }
 
@@ -364,11 +396,29 @@ block::Status fake_flush(uint8_t driverId)
     if (!disk) return block::BLOCK_ERR_INVALID;
     ++disk->flushes;
     disk->flushWriteCounts.push_back(disk->writeLog.size());
+    if (disk->attemptOpenDuringFlush) {
+        disk->attemptOpenDuringFlush = false;
+        disk->openDuringFlushResult = vfs::open(
+            disk->openDuringFlushPath, vfs::OPEN_READ);
+    }
+    if (disk->attemptUnmountDuringFlush) {
+        disk->attemptUnmountDuringFlush = false;
+        disk->unmountDuringFlushStatus = vfs::unmount(
+            disk->unmountDuringFlushPath);
+    }
     if (disk->removeOnFlush &&
         (disk->removeOnFlushAt == 0 || disk->flushes == disk->removeOnFlushAt)) {
         disk->removed = block::mark_device_offline(
             disk->registryIndex, disk->registrationId);
         register_fake_replacement_after_removal(disk);
+        if (disk->attemptReplacementMountDuringFlush) {
+            disk->attemptReplacementMountDuringFlush = false;
+            const vfs::PartitionMountResult replacementMount =
+                vfs::mount_partition_detailed("/mnt/dm37-removal-race",
+                    disk->replacementIndex,
+                    disk->replacementMountDuringFlushPartition);
+            disk->replacementMountDuringFlushError = replacementMount.error;
+        }
         return block::BLOCK_ERR_NO_MEDIA;
     }
     return disk->failFlush ||
@@ -15262,6 +15312,337 @@ int main()
             unregister_fake(flushLossIndex, flushLossDisk);
         else
             g_fakeDisks[flushLossDisk.driverId] = nullptr;
+    }
+
+    {
+        block::init();
+        vfs::test_clear_mounts();
+        fs_fat::init();
+        FakeDisk dm37Disk(512, 100000);
+        set_mbr_signature(dm37Disk);
+        set_mbr_partition(dm37Disk, 0, 0, 0x0C, 2048, 80000);
+        const uint8_t dm37Index = register_fake(dm37Disk, true, true, true);
+        storage::PartitionTableModel dm37Table = {};
+        storage::PartitionEntry dm37Partition = {};
+        const bool dm37Parsed = parse_first_partition(
+            dm37Index, dm37Table, dm37Partition);
+        storage::Fat32FormatRequest dm37FormatRequest = make_format_request(
+            dm37Index, dm37Partition, "DM37DATA", 0x37A1B2C3u);
+        storage::Fat32FormatResult dm37FormatResult = {};
+        const storage::Fat32FormatStatus dm37FormatStatus = dm37Parsed
+            ? storage::format_fat32_partition(dm37FormatRequest,
+                                               dm37FormatResult)
+            : storage::FAT32_FORMAT_INVALID_REQUEST;
+        block::BlockDevice dm37Parent = {};
+        block::copy_device(dm37Index, dm37Parent);
+        const vfs::PartitionMountResult dm37Mount =
+            vfs::mount_partition_detailed("/mnt/dm37", dm37Index,
+                dm37Partition.partitionNumber, dm37Parent.registrationId,
+                &dm37Partition);
+        const uint8_t dm37Payload[] = {
+            0xD3, 0x37, 0x01, 0x02, 0x03, 0xF0, 0x0D, 0x7A, 0x55
+        };
+        const int32_t dm37Created = vfs::create_file("/mnt/dm37/round.bin",
+            dm37Payload, sizeof(dm37Payload));
+        const uint8_t dm37MountIndex = vfs::mount_index_for_path("/mnt/dm37");
+        vfs::MountIdentity dm37Identity = {};
+        const bool dm37IdentityCaptured = vfs::capture_mount_identity(
+            dm37MountIndex, dm37Identity);
+
+        const vfs::HandleToken busyFile = vfs::open(
+            "/mnt/dm37/round.bin", vfs::OPEN_READ);
+        const vfs::Status busyFileDismount = dm37IdentityCaptured
+            ? vfs::dismount(dm37Identity) : vfs::VFS_ERR_INVALID;
+        const vfs::Status busyFileClose = busyFile == vfs::INVALID_HANDLE
+            ? vfs::VFS_ERR_INVALID : vfs::close(busyFile);
+        const vfs::HandleToken busyDirectory = vfs::opendir("/mnt/dm37");
+        const vfs::Status busyDirectoryDismount = dm37IdentityCaptured
+            ? vfs::dismount(dm37Identity) : vfs::VFS_ERR_INVALID;
+        const vfs::Status busyDirectoryClose = busyDirectory == vfs::INVALID_HANDLE
+            ? vfs::VFS_ERR_INVALID : vfs::closedir(busyDirectory);
+
+        dm37Disk.attemptUnmountDuringRead = true;
+        std::strncpy(dm37Disk.unmountDuringReadPath, "/mnt/dm37",
+                     sizeof(dm37Disk.unmountDuringReadPath) - 1);
+        vfs::FileInfo duringIoInfo = {};
+        const vfs::Status duringIoStat = vfs::stat(
+            "/mnt/dm37/round.bin", &duringIoInfo);
+        const uint32_t flushesBeforeDismount = dm37Disk.flushes;
+        dm37Disk.attemptOpenDuringFlush = true;
+        std::strncpy(dm37Disk.openDuringFlushPath,
+                     "/mnt/dm37/round.bin",
+                     sizeof(dm37Disk.openDuringFlushPath) - 1);
+        dm37Disk.attemptUnmountDuringFlush = true;
+        std::strncpy(dm37Disk.unmountDuringFlushPath, "/mnt/dm37",
+                     sizeof(dm37Disk.unmountDuringFlushPath) - 1);
+        const vfs::Status dm37Dismount = dm37IdentityCaptured
+            ? vfs::dismount(dm37Identity) : vfs::VFS_ERR_INVALID;
+        check(dm37FormatStatus == storage::FAT32_FORMAT_SUCCESS &&
+              dm37Mount.error == vfs::PARTITION_MOUNT_OK &&
+              dm37Created == static_cast<int32_t>(sizeof(dm37Payload)) &&
+              dm37IdentityCaptured && busyFile != vfs::INVALID_HANDLE &&
+              busyFileDismount == vfs::VFS_ERR_BUSY &&
+              busyFileClose == vfs::VFS_OK &&
+              busyDirectory != vfs::INVALID_HANDLE &&
+              busyDirectoryDismount == vfs::VFS_ERR_BUSY &&
+              busyDirectoryClose == vfs::VFS_OK &&
+              duringIoStat == vfs::VFS_OK &&
+              dm37Disk.unmountDuringReadStatus == vfs::VFS_ERR_BUSY &&
+              dm37Disk.flushes == flushesBeforeDismount + 1 &&
+              dm37Dismount == vfs::VFS_OK &&
+              dm37Disk.openDuringFlushResult == vfs::INVALID_HANDLE &&
+              dm37Disk.unmountDuringFlushStatus == vfs::VFS_ERR_BUSY &&
+              vfs::mount_count() == 0 && !storage::storage_operation_active(),
+              "DM37 exact FAT32 dismount rejects file, directory and active-I/O references; quiescence blocks reentrant opens and duplicate teardown");
+
+        const uint32_t flushesAfterFirstDismount = dm37Disk.flushes;
+        const vfs::Status repeatedDismount = vfs::dismount(dm37Identity);
+        const vfs::PartitionMountResult remount =
+            vfs::mount_partition_detailed("/mnt/dm37", dm37Index,
+                dm37Partition.partitionNumber, dm37Parent.registrationId,
+                &dm37Partition);
+        const uint8_t remountIndex = vfs::mount_index_for_path("/mnt/dm37");
+        vfs::MountIdentity remountIdentity = {};
+        const bool remountIdentityCaptured = vfs::capture_mount_identity(
+            remountIndex, remountIdentity);
+        const uint32_t flushesBeforeStaleRequest = dm37Disk.flushes;
+        const vfs::Status staleDismount = vfs::dismount(dm37Identity);
+        uint8_t dm37Readback[sizeof(dm37Payload)] = {};
+        const int32_t dm37Read = vfs::read_file("/mnt/dm37/round.bin",
+            dm37Readback, sizeof(dm37Readback));
+        const bool dm37ContentExact = dm37Read ==
+                static_cast<int32_t>(sizeof(dm37Payload)) &&
+            std::memcmp(dm37Readback, dm37Payload, sizeof(dm37Payload)) == 0;
+        const vfs::Status secondDismount = remountIdentityCaptured
+            ? vfs::dismount(remountIdentity) : vfs::VFS_ERR_INVALID;
+        check(dm37Dismount == vfs::VFS_OK &&
+              repeatedDismount == vfs::VFS_ERR_MOUNT_STALE &&
+              remount.error == vfs::PARTITION_MOUNT_OK &&
+              remountIdentityCaptured &&
+              remountIdentity.mountGeneration != dm37Identity.mountGeneration &&
+              staleDismount == vfs::VFS_ERR_MOUNT_STALE &&
+              dm37Disk.flushes == flushesBeforeStaleRequest + 1 &&
+              dm37ContentExact && secondDismount == vfs::VFS_OK &&
+              dm37Disk.flushes == flushesAfterFirstDismount + 1 &&
+              vfs::mount_count() == 0,
+              "DM37 mount generations isolate repeated/stale requests and FAT32 content survives explicit dismount and remount");
+
+        const vfs::PartitionMountResult rootSourceMount =
+            vfs::mount_partition_detailed("/mnt/dm37-root", dm37Index,
+                dm37Partition.partitionNumber, dm37Parent.registrationId,
+                &dm37Partition);
+        const uint8_t rootSourceIndex =
+            vfs::mount_index_for_path("/mnt/dm37-root");
+        vfs::MountIdentity rootSourceIdentity = {};
+        const bool rootSourceCaptured = vfs::capture_mount_identity(
+            rootSourceIndex, rootSourceIdentity);
+        const uint8_t rootAliasIndex = vfs::mount_alias("/", "/mnt/dm37-root");
+        const uint8_t mountedRootIndex = vfs::mount_index_for_path("/");
+        vfs::MountIdentity rootIdentity = {};
+        const bool rootIdentityCaptured = vfs::capture_mount_identity(
+            mountedRootIndex, rootIdentity);
+        const uint8_t systemAliasIndex = vfs::mount_alias(
+            "/system", "/mnt/dm37-root");
+        const uint8_t mountedSystemIndex = vfs::mount_index_for_path(
+            "/system");
+        vfs::MountIdentity systemIdentity = {};
+        const bool systemIdentityCaptured = vfs::capture_mount_identity(
+            mountedSystemIndex, systemIdentity);
+        const vfs::Status rootDismount = rootIdentityCaptured
+            ? vfs::dismount(rootIdentity) : vfs::VFS_ERR_INVALID;
+        const vfs::Status rootPathDismount = vfs::unmount("/");
+        const vfs::Status systemDismount = systemIdentityCaptured
+            ? vfs::dismount(systemIdentity) : vfs::VFS_ERR_INVALID;
+        const vfs::Status systemPathDismount = vfs::unmount("/system");
+        const vfs::Status rootBackingDismount = rootSourceCaptured
+            ? vfs::dismount(rootSourceIdentity) : vfs::VFS_ERR_INVALID;
+        check(rootSourceMount.error == vfs::PARTITION_MOUNT_OK &&
+              rootAliasIndex != 0xFF && rootIdentityCaptured &&
+              systemAliasIndex != 0xFF && systemIdentityCaptured &&
+              rootDismount == vfs::VFS_ERR_BUSY &&
+              rootPathDismount == vfs::VFS_ERR_BUSY &&
+              systemDismount == vfs::VFS_ERR_BUSY &&
+              systemPathDismount == vfs::VFS_ERR_BUSY &&
+              rootBackingDismount == vfs::VFS_ERR_BUSY,
+              "DM37 rejects root/system mounts and their shared backing volume");
+        vfs::test_clear_mounts();
+
+        FakeDisk bootDisk(512, 100000, false);
+        std::memcpy(bootDisk.sparseMbr.data(), dm37Disk.bytes.data(), 512);
+        for (uint32_t i = 0; i < 8; ++i) {
+            const uint64_t lba = dm37Partition.startLba + i;
+            std::vector<uint8_t>& sector = bootDisk.sparseSectors[lba];
+            const size_t offset = static_cast<size_t>(lba) * 512u;
+            sector.assign(dm37Disk.bytes.begin() + offset,
+                          dm37Disk.bytes.begin() + offset + 512u);
+        }
+        const uint8_t bootIndex = register_fake(bootDisk, true, true, true,
+            false, 0, 0, block::BOOT_PROVENANCE_BOOT_BACKING);
+        storage::PartitionTableModel bootTable = {};
+        storage::PartitionEntry bootPartition = {};
+        const bool bootParsed = parse_first_partition(
+            bootIndex, bootTable, bootPartition);
+        block::BlockDevice bootParent = {};
+        block::copy_device(bootIndex, bootParent);
+        const vfs::PartitionMountResult bootMount = bootParsed
+            ? vfs::mount_partition_detailed("/mnt/dm37-boot", bootIndex,
+                bootPartition.partitionNumber, bootParent.registrationId,
+                &bootPartition)
+            : vfs::PartitionMountResult{0xFF,
+                vfs::PARTITION_MOUNT_INVALID_ARGUMENT};
+        const uint8_t bootMountIndex = vfs::mount_index_for_path(
+            "/mnt/dm37-boot");
+        vfs::MountIdentity bootIdentity = {};
+        const bool bootIdentityCaptured = vfs::capture_mount_identity(
+            bootMountIndex, bootIdentity);
+        const uint32_t bootFlushesBefore = bootDisk.flushes;
+        const vfs::Status bootDismount = bootIdentityCaptured
+            ? vfs::dismount(bootIdentity) : vfs::VFS_ERR_INVALID;
+        const bool bootStillMounted = vfs::mount_count() == 1;
+        block::mark_device_offline(bootIndex, bootParent.registrationId);
+        const vfs::Status bootStaleCleanup = vfs::unmount("/mnt/dm37-boot");
+        check(bootMount.error == vfs::PARTITION_MOUNT_OK &&
+              bootIdentityCaptured && bootDismount == vfs::VFS_ERR_PROTECTED &&
+              bootStillMounted && bootDisk.flushes == bootFlushesBefore &&
+              bootStaleCleanup == vfs::VFS_ERR_DEVICE_REMOVED &&
+              vfs::mount_count() == 0,
+              "DM37 protects known boot backing and stale cleanup performs no Flush");
+        g_fakeDisks[bootDisk.driverId] = nullptr;
+
+        FakeDisk unsupportedFlushDisk(512, 100000, false);
+        std::memcpy(unsupportedFlushDisk.sparseMbr.data(),
+                    dm37Disk.bytes.data(), 512);
+        for (uint32_t i = 0; i < 8; ++i) {
+            const uint64_t lba = dm37Partition.startLba + i;
+            std::vector<uint8_t>& sector =
+                unsupportedFlushDisk.sparseSectors[lba];
+            const size_t offset = static_cast<size_t>(lba) * 512u;
+            sector.assign(dm37Disk.bytes.begin() + offset,
+                          dm37Disk.bytes.begin() + offset + 512u);
+        }
+        const uint8_t unsupportedIndex = register_fake(
+            unsupportedFlushDisk, true, false, false);
+        storage::PartitionTableModel unsupportedTable = {};
+        storage::PartitionEntry unsupportedPartition = {};
+        const bool unsupportedParsed = parse_first_partition(
+            unsupportedIndex, unsupportedTable, unsupportedPartition);
+        block::BlockDevice unsupportedParent = {};
+        block::copy_device(unsupportedIndex, unsupportedParent);
+        const vfs::PartitionMountResult unsupportedMount = unsupportedParsed
+            ? vfs::mount_partition_detailed("/mnt/dm37-no-flush",
+                unsupportedIndex, unsupportedPartition.partitionNumber,
+                unsupportedParent.registrationId, &unsupportedPartition)
+            : vfs::PartitionMountResult{0xFF,
+                vfs::PARTITION_MOUNT_INVALID_ARGUMENT};
+        const uint8_t unsupportedMountIndex = vfs::mount_index_for_path(
+            "/mnt/dm37-no-flush");
+        const vfs::MountPoint* unsupportedMountInfo =
+            vfs::get_mount_by_index(unsupportedMountIndex);
+        const bool unsupportedReadOnly = unsupportedMountInfo &&
+            unsupportedMountInfo->readOnly;
+        vfs::MountIdentity unsupportedIdentity = {};
+        const bool unsupportedIdentityCaptured = vfs::capture_mount_identity(
+            unsupportedMountIndex, unsupportedIdentity);
+        const vfs::Status unsupportedDismount = unsupportedIdentityCaptured
+            ? vfs::dismount(unsupportedIdentity) : vfs::VFS_ERR_INVALID;
+        check(unsupportedMount.error == vfs::PARTITION_MOUNT_OK &&
+              unsupportedReadOnly &&
+              unsupportedIdentityCaptured &&
+              unsupportedDismount == vfs::VFS_OK &&
+              unsupportedFlushDisk.flushes == 0 &&
+              unsupportedFlushDisk.writeAttempts == 0,
+              "DM37 keeps media with unsupported durability paths read-only and dismounts without claiming an unsupported Flush");
+        unregister_fake(unsupportedIndex, unsupportedFlushDisk);
+
+        const vfs::PartitionMountResult changedMount =
+            vfs::mount_partition_detailed("/mnt/dm37-changed", dm37Index,
+                dm37Partition.partitionNumber, dm37Parent.registrationId,
+                &dm37Partition);
+        const uint8_t changedMountIndex = vfs::mount_index_for_path(
+            "/mnt/dm37-changed");
+        vfs::MountIdentity changedIdentity = {};
+        const bool changedIdentityCaptured = vfs::capture_mount_identity(
+            changedMountIndex, changedIdentity);
+        const std::vector<uint8_t> originalMbr(dm37Disk.bytes.begin(),
+                                                dm37Disk.bytes.begin() + 512);
+        dm37Disk.bytes[446u + 8u] = 0x00;
+        dm37Disk.bytes[446u + 9u] = 0x20;
+        dm37Disk.bytes[446u + 10u] = 0x00;
+        dm37Disk.bytes[446u + 11u] = 0x00;
+        const uint32_t changedFlushesBefore = dm37Disk.flushes;
+        const vfs::Status changedIdentityDismount = changedIdentityCaptured
+            ? vfs::dismount(changedIdentity) : vfs::VFS_ERR_INVALID;
+        std::memcpy(dm37Disk.bytes.data(), originalMbr.data(), 512);
+        check(changedMount.error == vfs::PARTITION_MOUNT_OK &&
+              changedIdentityCaptured &&
+              changedIdentityDismount == vfs::VFS_ERR_MOUNT_STALE &&
+              dm37Disk.flushes == changedFlushesBefore &&
+              vfs::mount_count() == 0,
+              "DM37 changed partition-table identity is rejected and cleaned without flushing the stale extent");
+
+        const vfs::PartitionMountResult replacementMount =
+            vfs::mount_partition_detailed("/mnt/dm37-replacement", dm37Index,
+                dm37Partition.partitionNumber, dm37Parent.registrationId,
+                &dm37Partition);
+        const uint8_t replacementMountIndex = vfs::mount_index_for_path(
+            "/mnt/dm37-replacement");
+        vfs::MountIdentity replacementIdentity = {};
+        const bool replacementIdentityCaptured = vfs::capture_mount_identity(
+            replacementMountIndex, replacementIdentity);
+        storage::StorageOperationLease conflictingLease = {};
+        const bool conflictingLeaseAcquired =
+            storage::try_acquire_storage_operation(conflictingLease) ==
+                storage::STORAGE_OPERATION_LOCK_ACQUIRED;
+        const uint32_t flushesBeforeConflict = dm37Disk.flushes;
+        const vfs::Status conflictingDismount = replacementIdentityCaptured
+            ? vfs::dismount(replacementIdentity) : vfs::VFS_ERR_INVALID;
+        const bool conflictingLeaseReleased =
+            storage::release_storage_operation(conflictingLease);
+        const bool mountRetainedAfterConflict =
+            vfs::mount_index_for_path("/mnt/dm37-replacement") ==
+                replacementMountIndex;
+        FakeDisk sameCapacityReplacement(512, dm37Disk.sectorCount, false);
+        dm37Disk.replacementOnRemoval = &sameCapacityReplacement;
+        dm37Disk.removeOnFlush = true;
+        dm37Disk.removeOnFlushAt = dm37Disk.flushes + 1;
+        dm37Disk.attemptReplacementMountDuringFlush = true;
+        dm37Disk.replacementMountDuringFlushPartition =
+            dm37Partition.partitionNumber;
+        const uint32_t replacementReadsBefore =
+            sameCapacityReplacement.reads;
+        const size_t replacementReadLogBefore =
+            sameCapacityReplacement.readLog.size();
+        const uint32_t replacementFlushBefore = sameCapacityReplacement.flushes;
+        const uint32_t replacementWritesBefore =
+            sameCapacityReplacement.writeAttempts;
+        const vfs::Status removedDismount = replacementIdentityCaptured
+            ? vfs::dismount(replacementIdentity) : vfs::VFS_ERR_INVALID;
+        block::BlockDevice replacementDescriptor = {};
+        const bool replacementCurrent = dm37Disk.replacementRegisteredDuringRemoval &&
+            block::copy_device(dm37Disk.replacementIndex, replacementDescriptor) &&
+            replacementDescriptor.totalSectors == dm37Disk.sectorCount &&
+            replacementDescriptor.registrationId != dm37Identity.registrationId;
+        check(replacementMount.error == vfs::PARTITION_MOUNT_OK &&
+              replacementIdentityCaptured &&
+              conflictingLeaseAcquired &&
+              conflictingDismount == vfs::VFS_ERR_BUSY &&
+              conflictingLeaseReleased && mountRetainedAfterConflict &&
+              dm37Disk.flushes == flushesBeforeConflict + 1 &&
+              removedDismount == vfs::VFS_ERR_DEVICE_REMOVED &&
+              dm37Disk.removed && replacementCurrent &&
+              dm37Disk.replacementMountDuringFlushError ==
+                  vfs::PARTITION_MOUNT_OPERATION_BUSY &&
+              sameCapacityReplacement.reads == replacementReadsBefore &&
+              sameCapacityReplacement.readLog.size() ==
+                  replacementReadLogBefore &&
+              sameCapacityReplacement.flushes == replacementFlushBefore &&
+              sameCapacityReplacement.writeAttempts == replacementWritesBefore &&
+              vfs::mount_index_for_path("/mnt/dm37-replacement") == 0xFF &&
+              vfs::mount_count() == 0 && !storage::storage_operation_active(),
+              "DM37 removal during settlement terminates the original registration without I/O or inherited mount state on same-capacity replacement");
+        if (dm37Disk.replacementIndex != 0xFF)
+            unregister_fake(dm37Disk.replacementIndex, sameCapacityReplacement);
+        g_fakeDisks[dm37Disk.driverId] = nullptr;
     }
 
     block::init();
