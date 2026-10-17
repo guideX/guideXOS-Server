@@ -256,6 +256,52 @@ DesktopGradientApplyStatus apply_builtin_wallpaper(
     const char* wallpaperId, uint64_t expectedRevision,
     DesktopGradientApplyResultV1* output);
 
+enum : uint32_t {
+    kDesktopIconVisibilityRequestVersion = 1u,
+    kDesktopIconVisibilityResultVersion = 1u,
+    kDesktopIconTargetTrash = 1u << 0,
+    kDesktopIconTargetThisSystem = 1u << 1,
+    kDesktopIconTargetFileManager = 1u << 2,
+    kDesktopIconTargetSystemSettings = 1u << 3,
+    kDesktopIconTargetFileExplorer = kDesktopIconTargetThisSystem | kDesktopIconTargetFileManager,
+    kDesktopIconTargetKnownMask = (1u << 4) - 1u
+};
+
+enum class DesktopIconVisibilityApplyStatus : uint32_t {
+    Committed = 0,
+    NoChange = 1,
+    InvalidTarget = 2,
+    StaleRevision = 3,
+    PersistenceUnavailable = 4,
+    PersistenceConflict = 5,
+    SaveFailedRolledBack = 6,
+    ReadbackFailedRolledBack = 7,
+    RollbackFailed = 8,
+    ApplyFailed = 9
+};
+
+enum : uint32_t {
+    kDesktopIconVisibilityApplyActiveAvailable = 1u << 0,
+    kDesktopIconVisibilityApplyPersistedAvailable = 1u << 1,
+    kDesktopIconVisibilityApplyRollbackVerified = 1u << 2
+};
+
+struct DesktopIconVisibilityApplyResultV1 {
+    uint32_t structureSize;
+    uint32_t version;
+    DesktopIconVisibilityApplyStatus status;
+    uint32_t flags;
+    uint64_t revision;
+    uint32_t activeVisibility;
+    uint32_t persistedVisibility;
+};
+
+// Apply selected public system-icon visibility groups through the desktop
+// owner's shared appearance revision and canonical /desktop.cfg persistence.
+DesktopIconVisibilityApplyStatus apply_system_icon_visibility(
+    uint32_t targetMask, uint32_t visibleMask, uint64_t expectedRevision,
+    DesktopIconVisibilityApplyResultV1* output);
+
 // Copy the active appearance values used by the desktop renderer. Settings
 // consumes this through a read-only provider and never changes persistence.
 bool get_appearance_configuration(DesktopAppearanceConfigurationV1* output);

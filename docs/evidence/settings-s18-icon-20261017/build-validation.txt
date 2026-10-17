@@ -1,0 +1,31 @@
+S18 final build and hosted checks
+=================================
+
+Production build
+  command: mingw32-make -C kernel ARCH=amd64 BUILD_DIR=build/s18-final-clean-20261017 -j4
+  result: PASS; clean AMD64 ELF and PE images produced
+  MBEDTLS_PROFILE_VERIFY: PASS
+  compile commands: 156
+  warnings: 232 (existing diagnostics; no new S18 warning was observed)
+  errors: 0
+  build transcript: out/validation/settings-s18-icon-20261017/final-clean-build.log
+
+Binary/import review
+  final PE import directory: RVA/size zero
+  final PE bound-import directory: zero
+  final PE delay-import directory: zero
+  baseline and final linked-image unresolved-symbol review: the same two startup/runtime symbol-table names remain after subtracting symbols defined inside the image (__dso_handle and mainCRTStartup); new icon-service callback references resolve inside the image. No new external PE import or unresolved link reference was found.
+
+Hosted test results (final source, after the VFS-ready icon reload fix)
+  settings native runtime: PASS, 1414/1414; 100 lifecycle repetitions, 250 provider refresh cycles, 1000 notification/state transitions
+  settings presentation core: PASS, 2650/2650
+  settings center model: PASS, 89/89
+  VFS hosted read: PASS, 4/4
+  compositor pointer buttons: PASS
+  app model identity: PASS, 25/25
+  app model file activation: PASS, 60/60
+  freestanding settings presentation validation: PASS compile, relocatable link, and unresolved-symbol checks
+
+The native-runtime suite exercises icon config parsing and targeted updates, unknown-key and line-ending preservation, missing optional defaults, malformed/duplicate input rejection, stale/no-op/unavailable/conflict cases, short/partial writes, readback mismatch, verified rollback, rollback failure reporting, and repeated cycles. Those injected failures use the hosted fake VFS. The raw-FAT guest acceptance confirms successful production write/readback and cold-relaunch behavior; no real FAT short-write injection was performed.
+
+The build emits existing warnings, including unrelated desktop and Navigator diagnostics and an unused app-launch resolver helper in hosted compilation. No S18 implementation warning was identified. The complete compiler transcript is retained under the ignored validation output path named above.

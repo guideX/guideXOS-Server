@@ -1,0 +1,7 @@
+# These captured config snapshots are byte-level evidence; do not normalize EOLs.
+docs/evidence/settings-s18-icon-20261017/desktop.cfg.* -text
+docs/evidence/settings-s18-icon-20261017/desktop.cfg.field-diff.txt text eol=lf
+
+# Keep guest transcripts byte-for-byte; serial dumps include significant padding.
+docs/evidence/settings-s18-icon-20261017/*.serial.log -text -diff
+docs/evidence/settings-s18-icon-20261017/*.qmp.log -text -diff

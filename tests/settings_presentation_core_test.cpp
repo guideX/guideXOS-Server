@@ -79,8 +79,14 @@ int main()
           core.setFocusedControl(FocusControl::PersonalizationCancel) &&
           core.focusedControl() == FocusControl::PersonalizationCancel,
           "Personalization preset, Apply, and Cancel controls use shared-core focus state");
+    check(core.canFocus(FocusControl::PersonalizationIconTrash) &&
+          core.setFocusedControl(FocusControl::PersonalizationIconTrash) &&
+          core.setFocusedControl(FocusControl::PersonalizationIconFileExplorer) &&
+          core.setFocusedControl(FocusControl::PersonalizationIconSystemSettings) &&
+          core.focusedControl() == FocusControl::PersonalizationIconSystemSettings,
+          "system icon visibility controls use shared-core Personalization focus state");
     check(!core.setFocusedControl(FocusControl::DisplayApply) &&
-          core.focusedControl() == FocusControl::PersonalizationCancel,
+          core.focusedControl() == FocusControl::PersonalizationIconSystemSettings,
           "Personalization focus rejects a control from another page");
     check(core.selectCategory(CategoryId::Display) &&
           core.route() == SettingsRoute{ CategoryId::Display, TargetId::Page } &&

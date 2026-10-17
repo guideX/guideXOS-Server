@@ -74,6 +74,13 @@ kernel::desktop::DesktopGradientApplyStatus g_testWallpaperApplyStatus =
     kernel::desktop::DesktopGradientApplyStatus::Committed;
 int g_testWallpaperApplyCalls = 0;
 bool g_testWallpaperApplyMutatesOnCommit = true;
+kernel::desktop::DesktopIconVisibilityApplyStatus g_testIconApplyStatus =
+    kernel::desktop::DesktopIconVisibilityApplyStatus::Committed;
+int g_testIconApplyCalls = 0;
+bool g_testIconApplyMutatesOnCommit = true;
+uint32_t g_testIconPersistedVisibility =
+    kernel::desktop::kDesktopAppearanceIconTrash |
+    kernel::desktop::kDesktopAppearanceIconFileManager;
 bool g_testConfigMounted = false;
 bool g_testConfigReadOnly = false;
 bool g_testMountRestoreAllowed = false;
@@ -609,6 +616,51 @@ DesktopGradientApplyStatus apply_builtin_wallpaper(
     *output = result;
     return result.status;
 }
+
+DesktopIconVisibilityApplyStatus apply_system_icon_visibility(
+    uint32_t targetMask, uint32_t visibleMask, uint64_t expectedRevision,
+    DesktopIconVisibilityApplyResultV1* output)
+{
+    ++g_testIconApplyCalls;
+    if (!output) return DesktopIconVisibilityApplyStatus::ApplyFailed;
+    DesktopIconVisibilityApplyResultV1 result{};
+    result.structureSize = sizeof(result);
+    result.version = kDesktopIconVisibilityResultVersion;
+    result.revision = g_testAppearanceConfiguration.revision;
+    result.activeVisibility = g_testAppearanceConfiguration.visibleIconFlags;
+    result.persistedVisibility = g_testIconPersistedVisibility;
+    result.flags = kDesktopIconVisibilityApplyActiveAvailable |
+        kDesktopIconVisibilityApplyPersistedAvailable;
+    if (targetMask == 0u || (targetMask & ~kDesktopIconTargetKnownMask) != 0u ||
+        (visibleMask & ~targetMask) != 0u) {
+        result.status = DesktopIconVisibilityApplyStatus::InvalidTarget;
+    } else if (expectedRevision == 0u ||
+               expectedRevision != g_testAppearanceConfiguration.revision) {
+        result.status = DesktopIconVisibilityApplyStatus::StaleRevision;
+    } else {
+        result.status = g_testIconApplyStatus;
+        if (result.status == DesktopIconVisibilityApplyStatus::Committed &&
+            g_testIconApplyMutatesOnCommit) {
+            const uint32_t requested =
+                (g_testAppearanceConfiguration.visibleIconFlags & ~targetMask) |
+                visibleMask;
+            g_testAppearanceConfiguration.visibleIconFlags = requested;
+            g_testIconPersistedVisibility = requested;
+            ++g_testAppearanceConfiguration.revision;
+        }
+    }
+    result.revision = g_testAppearanceConfiguration.revision;
+    result.activeVisibility = g_testAppearanceConfiguration.visibleIconFlags;
+    result.persistedVisibility = g_testIconPersistedVisibility;
+    if (result.status == DesktopIconVisibilityApplyStatus::SaveFailedRolledBack ||
+        result.status == DesktopIconVisibilityApplyStatus::ReadbackFailedRolledBack) {
+        result.flags |= kDesktopIconVisibilityApplyRollbackVerified;
+    }
+    if (result.status == DesktopIconVisibilityApplyStatus::RollbackFailed)
+        result.revision = g_testAppearanceConfiguration.revision + 1u;
+    *output = result;
+    return result.status;
+}
 } // namespace desktop
 
 namespace vfs {
@@ -921,6 +973,180 @@ static void testGradientConfigPersistence()
                    (persistence.flags & kGradientPersistenceRollbackVerified) != 0u &&
                    testDesktopConfigText() == original,
                "repeated injected wallpaper write failures restore the canonical config");
+    }
+
+    const char* iconConfig =
+        "version=1\r\n"
+        "wallpaperId=gradient_forest\r\n"
+        "backgroundScaleMode=fit\r\n"
+        "desktopThemeId=classic\r\n"
+        "taskbarPosition=top\r\n"
+        "showDesktopTrash=1\r\n"
+        "showDesktopThisSystem=1\r\n"
+        "showDesktopFileManager=1\r\n"
+        "showDesktopSystemSettings=0\r\n"
+        "smallLiveDesktopFolderIcons=1\r\n"
+        "autoArrangeDesktopIcons=0\r\n"
+        "futureAppearanceKey=preserve-me\r\n";
+    const uint32_t iconVisibilityAllThree =
+        kDesktopIconVisibilityTrash | kDesktopIconVisibilityThisSystem |
+        kDesktopIconVisibilityFileManager;
+    const uint32_t iconVisibilityAllFour =
+        iconVisibilityAllThree | kDesktopIconVisibilitySystemSettings;
+    DesktopIconPersistenceResult iconPersistence{};
+    setTestDesktopConfig(iconConfig);
+    expect(persistDesktopIconVisibility(
+               iconVisibilityAllThree, iconVisibilityAllFour,
+               &iconPersistence) == DesktopIconPersistenceStatus::Ok &&
+               iconPersistence.persistedVisibility == iconVisibilityAllFour &&
+               (iconPersistence.flags & kDesktopIconPersistenceReadbackAvailable) != 0u,
+           "system icon persistence commits and semantically verifies the requested values");
+    std::string iconExpected = iconConfig;
+    const size_t settingsValue = iconExpected.find("showDesktopSystemSettings=0");
+    iconExpected.replace(settingsValue,
+                         std::string("showDesktopSystemSettings=0").size(),
+                         "showDesktopSystemSettings=1");
+    expect(testDesktopConfigText() == iconExpected &&
+               testDesktopConfigText().find("wallpaperId=gradient_forest\r\n") != std::string::npos &&
+               testDesktopConfigText().find("backgroundScaleMode=fit\r\n") != std::string::npos &&
+               testDesktopConfigText().find("taskbarPosition=top\r\n") != std::string::npos &&
+               testDesktopConfigText().find("futureAppearanceKey=preserve-me\r\n") != std::string::npos,
+           "icon-only write changes one boolean and preserves unrelated settings, unknown keys, and CRLF bytes");
+    const int iconWritesBeforeNoChange = g_testConfigWriteCount;
+    expect(persistDesktopIconVisibility(
+               iconVisibilityAllFour, iconVisibilityAllFour,
+               &iconPersistence) == DesktopIconPersistenceStatus::NoChange &&
+               g_testConfigWriteCount == iconWritesBeforeNoChange,
+           "unchanged icon state performs no canonical configuration write");
+
+    setTestDesktopConfig(original);
+    expect(persistDesktopIconVisibility(
+               iconVisibilityAllThree,
+               iconVisibilityAllThree & ~kDesktopIconVisibilityFileManager,
+               &iconPersistence) == DesktopIconPersistenceStatus::Ok &&
+               testDesktopConfigText().find("futureAppearanceKey=keep-this-value\r\n") != std::string::npos &&
+               testDesktopConfigText().find("showDesktopFileManager=0\n") != std::string::npos,
+           "missing optional icon keys use documented defaults and append only the changed key");
+
+    const char* malformedHistoricalConfig =
+        "version=1\n"
+        "wallpaperId=gradient_forest\n"
+        "backgroundScaleMode=fill\n"
+        "desktopThemeId=classic\n"
+        "taskbarPosition=bottom\n"
+        "showDesktopTrash=1\n"
+        "showDesktopThisSystem=1\n"
+        "showDesktopFileManager=1\n"
+        "showDesktopSystemSettings=0\n"
+        "smallLiveDesktopFolderIcons=1\n"
+        "autoArrangeDesktopIcon";
+    setTestDesktopConfig(malformedHistoricalConfig);
+    const std::string malformedBefore = testDesktopConfigText();
+    expect(persistDesktopIconVisibility(
+               iconVisibilityAllThree,
+               iconVisibilityAllThree & ~kDesktopIconVisibilityTrash,
+               &iconPersistence) == DesktopIconPersistenceStatus::InvalidConfiguration &&
+               g_testConfigWriteCount == 0 && malformedBefore.size() == 257u &&
+               testDesktopConfigText() == malformedBefore,
+           "exact historical 257-byte incomplete config blocks icon writes byte-for-byte");
+
+    std::string completeHistorical261 = malformedBefore;
+    completeHistorical261.replace(completeHistorical261.find("autoArrangeDesktopIcon"),
+        std::string("autoArrangeDesktopIcon").size(), "autoArrangeDesktopIcons=0\n");
+    expect(completeHistorical261.size() == 261u,
+           "complete historical auto-arrange field reconstructs the recorded 261-byte size");
+    setTestDesktopConfig(completeHistorical261.c_str());
+    expect(persistDesktopIconVisibility(
+               iconVisibilityAllThree,
+               iconVisibilityAllThree & ~kDesktopIconVisibilityTrash,
+               &iconPersistence) == DesktopIconPersistenceStatus::Ok &&
+               testDesktopConfigText().size() == 261u &&
+               testDesktopConfigText().find("autoArrangeDesktopIcons=0\n") != std::string::npos &&
+               testDesktopConfigText().find("showDesktopTrash=0\n") != std::string::npos,
+           "complete 261-byte config accepts a targeted icon update without losing fields");
+
+    const std::string noFinalNewlineConfig =
+        "version=1\nwallpaperId=legacy_guidexos_space\nshowDesktopTrash=1\n"
+        "showDesktopThisSystem=1\nshowDesktopFileManager=1\nfutureTail=keep-exactly";
+    setTestDesktopConfig(noFinalNewlineConfig.c_str());
+    expect(persistDesktopIconVisibility(
+               iconVisibilityAllThree,
+               iconVisibilityAllThree & ~kDesktopIconVisibilityTrash,
+               &iconPersistence) == DesktopIconPersistenceStatus::Ok &&
+               testDesktopConfigText() ==
+                   "version=1\nwallpaperId=legacy_guidexos_space\nshowDesktopTrash=0\n"
+                   "showDesktopThisSystem=1\nshowDesktopFileManager=1\nfutureTail=keep-exactly",
+           "targeted icon writes preserve longer wallpaper IDs and a missing final newline");
+
+    setTestDesktopConfig(
+        "showDesktopTrash=1\nshowDesktopTrash=0\nshowDesktopThisSystem=1\n");
+    expect(persistDesktopIconVisibility(
+               iconVisibilityAllThree, iconVisibilityAllThree & ~kDesktopIconVisibilityTrash,
+               &iconPersistence) == DesktopIconPersistenceStatus::InvalidConfiguration &&
+               g_testConfigWriteCount == 0,
+           "duplicate icon keys are rejected before persistence");
+
+    setTestDesktopConfig(iconConfig);
+    expect(persistDesktopIconVisibility(
+               iconVisibilityAllFour,
+               iconVisibilityAllFour & ~kDesktopIconVisibilityTrash,
+               &iconPersistence) == DesktopIconPersistenceStatus::Conflict &&
+               g_testConfigWriteCount == 0 &&
+               iconPersistence.persistedVisibility == iconVisibilityAllThree,
+           "icon persistence detects a configuration conflict without modifying the file");
+
+    setTestDesktopConfig(iconConfig);
+    g_testConfigFailWriteNumber = 1;
+    g_testConfigFailWritePartial = true;
+    expect(persistDesktopIconVisibility(
+               iconVisibilityAllThree, iconVisibilityAllFour,
+               &iconPersistence) == DesktopIconPersistenceStatus::WriteFailedRolledBack &&
+               (iconPersistence.flags & kDesktopIconPersistenceRollbackVerified) != 0u &&
+               testDesktopConfigText() == iconConfig,
+           "short icon configuration write restores and verifies the exact prior bytes");
+
+    setTestDesktopConfig(iconConfig);
+    g_testConfigCorruptOnWriteNumber = 1;
+    expect(persistDesktopIconVisibility(
+               iconVisibilityAllThree, iconVisibilityAllFour,
+               &iconPersistence) == DesktopIconPersistenceStatus::ReadbackFailedRolledBack &&
+               (iconPersistence.flags & kDesktopIconPersistenceRollbackVerified) != 0u &&
+               testDesktopConfigText() == iconConfig,
+           "icon readback mismatch restores and verifies the prior configuration");
+
+    setTestDesktopConfig(iconConfig);
+    g_testConfigFailWriteNumber = 1;
+    g_testConfigFailWritePartial = true;
+    g_testConfigCorruptOnWriteNumber = 2;
+    expect(persistDesktopIconVisibility(
+               iconVisibilityAllThree, iconVisibilityAllFour,
+               &iconPersistence) == DesktopIconPersistenceStatus::RollbackFailed &&
+               (iconPersistence.flags & kDesktopIconPersistenceRollbackAttempted) != 0u &&
+               (iconPersistence.flags & kDesktopIconPersistenceRollbackVerified) == 0u,
+           "icon rollback uncertainty is reported distinctly after injected restore failure");
+
+    bool settingsVisible = false;
+    for (int cycle = 0; cycle < 100; ++cycle) {
+        std::string cycleSource = iconConfig;
+        const uint32_t current = settingsVisible
+            ? iconVisibilityAllFour : iconVisibilityAllThree;
+        const bool nextSettingsVisible = !settingsVisible;
+        const uint32_t next = nextSettingsVisible
+            ? iconVisibilityAllFour : iconVisibilityAllThree;
+        if (settingsVisible) {
+            const size_t currentValue = cycleSource.find("showDesktopSystemSettings=0");
+            cycleSource.replace(currentValue,
+                std::string("showDesktopSystemSettings=0").size(),
+                "showDesktopSystemSettings=1");
+        }
+        setTestDesktopConfig(cycleSource.c_str());
+        expect(persistDesktopIconVisibility(
+                   current,
+                   next, &iconPersistence) == DesktopIconPersistenceStatus::Ok &&
+                   iconPersistence.persistedVisibility == next &&
+                   testDesktopConfigText().find("futureAppearanceKey=preserve-me\r\n") != std::string::npos,
+               "repeated icon writes preserve unrelated configuration fields");
+        settingsVisible = nextSettingsVisible;
     }
 
     g_testConfigMounted = false;
@@ -1479,6 +1705,102 @@ int main()
     copyText(g_testGradientPersistedId, "legacy_ameobagx",
              sizeof(g_testGradientPersistedId));
 
+    g_testIconApplyCalls = 0;
+    g_testIconApplyStatus =
+        kernel::desktop::DesktopIconVisibilityApplyStatus::Committed;
+    g_testIconApplyMutatesOnCommit = true;
+    g_testIconPersistedVisibility =
+        kernel::desktop::kDesktopAppearanceIconTrash |
+        kernel::desktop::kDesktopAppearanceIconFileManager;
+    g_testAppearanceConfiguration.visibleIconFlags =
+        g_testIconPersistedVisibility;
+    ApplyDesktopIconVisibilityRequestV1 iconRequest{};
+    iconRequest.structureSize = sizeof(iconRequest);
+    iconRequest.version = kApplyDesktopIconVisibilityVersion;
+    iconRequest.expectedRevision = 6u;
+    iconRequest.targetMask = kDesktopIconTargetSystemSettings;
+    iconRequest.visibleMask = kDesktopIconTargetSystemSettings;
+    ApplyDesktopIconVisibilityResultV1 iconResult{};
+    expect(applyDesktopIconVisibility(settingsApp, &iconRequest, &iconResult) ==
+               DesktopIconOperationStatus::Committed &&
+               (iconResult.flags & kDesktopIconOperationActiveAvailable) != 0u &&
+               (iconResult.flags & kDesktopIconOperationPersistedAvailable) != 0u &&
+               iconResult.activeVisibility ==
+                   (g_testIconPersistedVisibility | kDesktopIconTargetSystemSettings) &&
+               iconResult.persistedVisibility == iconResult.activeVisibility &&
+               iconResult.revision == 7u,
+           "authorized Settings operation applies and returns verified system icon visibility");
+    expect(g_testIconApplyCalls == 1 &&
+               g_testAppearanceConfiguration.revision == 7u,
+           "icon operation reaches the desktop owner with the shared appearance revision");
+
+    iconRequest.expectedRevision = 7u;
+    g_testIconApplyStatus =
+        kernel::desktop::DesktopIconVisibilityApplyStatus::NoChange;
+    expect(applyDesktopIconVisibility(settingsApp, &iconRequest, &iconResult) ==
+               DesktopIconOperationStatus::NoChange && iconResult.revision == 7u,
+           "reapplying current icon visibility is a no-op without revision advance");
+
+    const int iconCallsBeforeStale = g_testIconApplyCalls;
+    iconRequest.expectedRevision = 6u;
+    expect(applyDesktopIconVisibility(settingsApp, &iconRequest, &iconResult) ==
+               DesktopIconOperationStatus::StaleRevision &&
+               g_testIconApplyCalls == iconCallsBeforeStale + 1,
+           "icon mutation rejects a stale shared appearance revision");
+
+    iconRequest.expectedRevision = 7u;
+    iconRequest.targetMask = 0u;
+    expect(applyDesktopIconVisibility(settingsApp, &iconRequest, &iconResult) ==
+               DesktopIconOperationStatus::InvalidTarget &&
+               g_testIconApplyCalls == iconCallsBeforeStale + 1,
+           "empty icon targets are rejected before desktop access");
+    iconRequest.targetMask = 1u << 8;
+    expect(applyDesktopIconVisibility(settingsApp, &iconRequest, &iconResult) ==
+               DesktopIconOperationStatus::InvalidTarget &&
+               g_testIconApplyCalls == iconCallsBeforeStale + 1,
+           "unsupported icon identifiers are rejected before desktop access");
+    iconRequest.targetMask = kDesktopIconTargetTrash;
+    iconRequest.visibleMask = kDesktopIconTargetSystemSettings;
+    expect(applyDesktopIconVisibility(settingsApp, &iconRequest, &iconResult) ==
+               DesktopIconOperationStatus::InvalidTarget &&
+               g_testIconApplyCalls == iconCallsBeforeStale + 1,
+           "visible values outside the selected icon targets are rejected");
+    iconRequest.visibleMask = kDesktopIconTargetTrash;
+    iconRequest.version = kApplyDesktopIconVisibilityVersion + 1u;
+    expect(applyDesktopIconVisibility(settingsApp, &iconRequest, &iconResult) ==
+               DesktopIconOperationStatus::UnsupportedVersion &&
+               g_testIconApplyCalls == iconCallsBeforeStale + 1,
+           "unsupported icon operation versions are rejected without desktop access");
+    iconRequest.version = kApplyDesktopIconVisibilityVersion;
+    iconRequest.structureSize = sizeof(iconRequest) - 1u;
+    expect(applyDesktopIconVisibility(settingsApp, &iconRequest, &iconResult) ==
+               DesktopIconOperationStatus::InvalidArgument &&
+               g_testIconApplyCalls == iconCallsBeforeStale + 1,
+           "undersized icon mutation requests are rejected without desktop access");
+    iconRequest.structureSize = sizeof(iconRequest);
+    iconRequest.targetMask = kDesktopIconTargetSystemSettings;
+    iconRequest.visibleMask = 0u;
+    g_testIconApplyStatus =
+        kernel::desktop::DesktopIconVisibilityApplyStatus::SaveFailedRolledBack;
+    expect(applyDesktopIconVisibility(settingsApp, &iconRequest, &iconResult) ==
+               DesktopIconOperationStatus::SaveFailedRolledBack &&
+               (iconResult.flags & kDesktopIconOperationRollbackVerified) != 0u &&
+               iconResult.activeVisibility ==
+                   (g_testIconPersistedVisibility | kDesktopIconTargetSystemSettings),
+           "icon save failure reports the restored runtime state");
+    g_testIconApplyStatus =
+        kernel::desktop::DesktopIconVisibilityApplyStatus::RollbackFailed;
+    g_testIconPersistedVisibility =
+        g_testIconPersistedVisibility & ~kDesktopIconTargetSystemSettings;
+    expect(applyDesktopIconVisibility(settingsApp, &iconRequest, &iconResult) ==
+               DesktopIconOperationStatus::RollbackFailed &&
+               (iconResult.flags & kDesktopIconOperationRollbackVerified) == 0u &&
+               iconResult.activeVisibility != iconResult.persistedVisibility,
+           "icon rollback failure remains distinct and reports actual active and persisted values");
+    g_testIconApplyStatus =
+        kernel::desktop::DesktopIconVisibilityApplyStatus::Committed;
+    g_testIconPersistedVisibility = g_testAppearanceConfiguration.visibleIconFlags;
+
     DisplaySnapshotV1 displaySnapshot{};
     const uint32_t paddedPitch = 5512u;
     expect(buildDisplaySnapshot(true, 1377u, 779u, paddedPitch, 32u,
@@ -1980,6 +2302,11 @@ int main()
                                  &wallpaperResult) == WallpaperOperationStatus::Unauthorized &&
                g_testWallpaperApplyCalls == wallpaperCallsBeforeSpoofedRequest,
            "identity-like launch data cannot authorize a spoofed wallpaper request");
+    const int iconCallsBeforeSpoofedRequest = g_testIconApplyCalls;
+    expect(applyDesktopIconVisibility(otherApp, &iconRequest, &iconResult) ==
+               DesktopIconOperationStatus::Unauthorized &&
+               g_testIconApplyCalls == iconCallsBeforeSpoofedRequest,
+           "identity-like launch data cannot authorize a spoofed desktop icon request");
     const int appearanceNotificationsBefore = g_runtimeAppearanceChanged;
     AppManager::notifyDesktopAppearanceChanged(9u);
     expect(g_runtimeAppearanceChanged == appearanceNotificationsBefore + 2,

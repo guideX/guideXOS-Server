@@ -1,0 +1,33 @@
+S18 final artifact identities
+============================
+
+Raw guest media
+  path: out/validation/settings-s18-icon-20261017/guest/guideXOS-S18-production-v6.raw
+  size: 134249984 bytes
+  partition start: LBA 63
+  SHA-256 after visibility restore: AD91AFBEF4EB9B11C8E8D55C5968C85868E97F7C1503785840781624E7F91D19
+  SHA-256 after close-with-pending guest: 4D1CA60915F2C9DEEEF32862C52762ABC99DCE0FC27E34A3F7B28C9D8A0AF5FC
+  SHA-256 before native visibility restore: 8677700B8BCF9F4829B4BBC6352389D2F97FC39744DEF302F484A79E0575E236
+  Note: the final guest run made no /desktop.cfg VFS write; the file read back byte-identical to the original fixture. The whole-media hash changed between runs, and a pre-close raw block snapshot was not retained, so the unrelated image delta is not localized.
+
+Final kernel
+  ELF: 2754008 bytes
+  ELF SHA-256: 4802680CEFF51C6A372786FDCF0DCA4E16B3B28F705B2DB680EFFFCA3F168CFD
+  PE: 2870645 bytes
+  PE SHA-256: D352F92A0275A2CBF5577832B5D15ACC424DDA219EBAE12746C810F3CF02B983
+  Kernel ELF SHA-256 read back from the raw FAT image: 4802680CEFF51C6A372786FDCF0DCA4E16B3B28F705B2DB680EFFFCA3F168CFD
+
+Firmware
+  OVMF SHA-256: 2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792
+
+desktop.cfg checkpoints
+  original fixture: 237 bytes, B3098D72195A16ED553B12EFF7DB9092A056222783A448ABDBBC092448D1273F
+  after hiding File Explorer: 237 bytes, 23CFD7FAD03E506B5D0DDCC4729F5CB529D29D9D4B3CBAED3E2D61F16D8921D1
+  after restoring File Explorer: 237 bytes, B3098D72195A16ED553B12EFF7DB9092A056222783A448ABDBBC092448D1273F (byte-identical to original)
+  after closing Settings with a pending change: 237 bytes, B3098D72195A16ED553B12EFF7DB9092A056222783A448ABDBBC092448D1273F (byte-identical to original)
+
+Historical malformed/complete comparison
+  S9R first captured form: 257 bytes, ED2CED9BD60AC15E67663BD955CBFC9DAAD36A47D368AB9DD3C2EF1CCA074A1D
+  S9R later reboot form: 261 bytes, 9BE8F3D5AD9349D23FFA9622C0D490FDDD9A004CD47007CEDD46F392270FBAE1
+
+Auto-arrange remains session-only in the Settings UI and is omitted from the test fixture.

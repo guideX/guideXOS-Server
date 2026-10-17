@@ -32,6 +32,37 @@ enum : uint32_t {
     kGradientPersistenceReadbackAvailable = 1u << 2
 };
 
+enum : uint32_t {
+    kDesktopIconVisibilityTrash = 1u << 0,
+    kDesktopIconVisibilityThisSystem = 1u << 1,
+    kDesktopIconVisibilityFileManager = 1u << 2,
+    kDesktopIconVisibilitySystemSettings = 1u << 3,
+    kDesktopIconVisibilityKnownMask = (1u << 4) - 1u
+};
+
+enum class DesktopIconPersistenceStatus : uint32_t {
+    Ok = 0,
+    NoChange = 1,
+    Unavailable = 2,
+    InvalidConfiguration = 3,
+    Conflict = 4,
+    WriteFailedRolledBack = 5,
+    ReadbackFailedRolledBack = 6,
+    RollbackFailed = 7
+};
+
+struct DesktopIconPersistenceResult {
+    DesktopIconPersistenceStatus status;
+    uint32_t flags;
+    uint32_t persistedVisibility;
+};
+
+enum : uint32_t {
+    kDesktopIconPersistenceRollbackAttempted = 1u << 0,
+    kDesktopIconPersistenceRollbackVerified = 1u << 1,
+    kDesktopIconPersistenceReadbackAvailable = 1u << 2
+};
+
 // Update only wallpaperId in the canonical /desktop.cfg while retaining every
 // other byte and key. On a failed write or readback, restore the previous
 // bounded file image and report whether that restoration was verified.
@@ -45,6 +76,14 @@ GradientPersistenceStatus persistBuiltInGradientId(
     const char* expectedCurrentId,
     const char* requestedId,
     GradientPersistenceResult* output);
+
+// Patch only the four supported system-icon visibility keys in /desktop.cfg.
+// Missing keys use legacy defaults. Malformed known fields and duplicate icon
+// keys are rejected. Unknown key/value lines and unrelated bytes are retained.
+DesktopIconPersistenceStatus persistDesktopIconVisibility(
+    uint32_t expectedVisibility,
+    uint32_t requestedVisibility,
+    DesktopIconPersistenceResult* output);
 
 bool readCanonicalWallpaperId(
     char* output, size_t outputCapacity);

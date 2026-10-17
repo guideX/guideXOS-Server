@@ -16543,14 +16543,20 @@ public:
           m_gradientPresetCount(0u),
           m_wallpaperPresetCount(0u),
           m_showWallpaperChoices(false),
+          m_showDesktopIconChoices(false),
           m_wallpaperPage(0u),
           m_pendingGradientIndex(-1),
           m_pendingWallpaperIndex(-1),
           m_pendingGradientRevision(0u),
           m_pendingGradientDirty(false),
           m_pendingGradientStale(false),
+          m_pendingDesktopIconVisibility(0u),
+          m_pendingDesktopIconRevision(0u),
+          m_pendingDesktopIconsDirty(false),
+          m_pendingDesktopIconsStale(false),
           m_appearanceRefreshRevision(0u),
           m_gradientStatus("Select a preset, then choose Apply."),
+          m_iconStatus("Select icon visibility, then choose Apply."),
           m_queueHead(0), m_queueCount(0),
           m_drawX(0), m_drawY(0), m_drawW(0), m_drawH(0)
     {
@@ -16580,14 +16586,20 @@ public:
         m_gradientPresetCount = 0u;
         m_wallpaperPresetCount = 0u;
         m_showWallpaperChoices = false;
+        m_showDesktopIconChoices = false;
         m_wallpaperPage = 0u;
         m_pendingGradientIndex = -1;
         m_pendingWallpaperIndex = -1;
         m_pendingGradientRevision = 0u;
         m_pendingGradientDirty = false;
         m_pendingGradientStale = false;
+        m_pendingDesktopIconVisibility = 0u;
+        m_pendingDesktopIconRevision = 0u;
+        m_pendingDesktopIconsDirty = false;
+        m_pendingDesktopIconsStale = false;
         m_appearanceRefreshRevision = 0u;
         setGradientStatus("Select a preset, then choose Apply.", nullptr);
+        setIconStatus("Select icon visibility, then choose Apply.");
         m_displayRefreshState.reset();
         m_displayRefreshSignal.reset();
 
@@ -16668,6 +16680,10 @@ public:
         m_pendingGradientRevision = 0u;
         m_pendingGradientDirty = false;
         m_pendingGradientStale = false;
+        m_pendingDesktopIconVisibility = 0u;
+        m_pendingDesktopIconRevision = 0u;
+        m_pendingDesktopIconsDirty = false;
+        m_pendingDesktopIconsStale = false;
         m_appearanceRefreshRevision = 0u;
         m_displayRefreshState.reset();
         m_displayRefreshSignal.reset();
@@ -16741,7 +16757,9 @@ public:
             if (key == '\t' || key == shell::KEY_TAB) cyclePersonalizationFocus();
             else if (key == shell::KEY_LEFT || key == shell::KEY_RIGHT ||
                      key == shell::KEY_UP || key == shell::KEY_DOWN) {
-                if (m_presentation.focusedControl() ==
+                if (m_showDesktopIconChoices) {
+                    moveDesktopIconFocus(key);
+                } else if (m_presentation.focusedControl() ==
                     settings::FocusControl::PersonalizationChooseBackground) {
                     movePendingBackground(key);
                     invalidate();
@@ -16826,14 +16844,20 @@ private:
         settings_native::kBuiltInWallpaperPresetCapacity]{};
     size_t m_wallpaperPresetCount;
     bool m_showWallpaperChoices;
+    bool m_showDesktopIconChoices;
     size_t m_wallpaperPage;
     int m_pendingGradientIndex;
     int m_pendingWallpaperIndex;
     uint64_t m_pendingGradientRevision;
     bool m_pendingGradientDirty;
     bool m_pendingGradientStale;
+    uint32_t m_pendingDesktopIconVisibility;
+    uint64_t m_pendingDesktopIconRevision;
+    bool m_pendingDesktopIconsDirty;
+    bool m_pendingDesktopIconsStale;
     uint64_t m_appearanceRefreshRevision;
     const char* m_gradientStatus;
+    const char* m_iconStatus;
     char m_gradientStatusExtra[96]{};
     settings::SettingsInputEvent m_inputQueue[kInputQueueCapacity]{};
     uint32_t m_queueHead;
@@ -16980,7 +17004,9 @@ private:
         } else if (m_presentation.selectedCategory() == settings::CategoryId::System) {
             m_presentation.setFocusedControl(settings::FocusControl::SystemAbout);
         } else if (m_presentation.selectedCategory() == settings::CategoryId::Personalization) {
-            m_presentation.setFocusedControl(settings::FocusControl::PersonalizationChooseBackground);
+            m_presentation.setFocusedControl(m_showDesktopIconChoices
+                ? settings::FocusControl::PersonalizationIconTrash
+                : settings::FocusControl::PersonalizationChooseBackground);
         } else {
             m_presentation.setFocusedControl(settings::FocusControl::None);
         }
@@ -17040,11 +17066,23 @@ private:
             m_pendingWallpaperIndex = -1;
             m_pendingGradientDirty = false;
             m_pendingGradientStale = false;
+            m_pendingDesktopIconVisibility = 0u;
+            m_pendingDesktopIconRevision = 0u;
+            m_pendingDesktopIconsDirty = false;
+            m_pendingDesktopIconsStale = false;
             setGradientStatus("Desktop appearance is unavailable.", nullptr);
-        } else if (!m_pendingGradientDirty) {
-            resetPendingGradientToCurrent(nullptr);
-        } else if (snapshot.revision != m_pendingGradientRevision) {
-            m_pendingGradientStale = true;
+            setIconStatus("Desktop appearance is unavailable.");
+        } else {
+            if (!m_pendingGradientDirty) {
+                resetPendingGradientToCurrent(nullptr);
+            } else if (snapshot.revision != m_pendingGradientRevision) {
+                m_pendingGradientStale = true;
+            }
+            if (!m_pendingDesktopIconsDirty) {
+                resetPendingDesktopIconVisibility(nullptr);
+            } else if (snapshot.revision != m_pendingDesktopIconRevision) {
+                m_pendingDesktopIconsStale = true;
+            }
         }
 
         settings::CapabilitySnapshot capability{};
@@ -17151,6 +17189,36 @@ private:
                 static_cast<int>(sizeof(m_gradientStatusExtra)));
     }
 
+    void setIconStatus(const char* status)
+    {
+        m_iconStatus = status ? status : "";
+    }
+
+    uint32_t currentDesktopIconVisibility() const
+    {
+        if (!m_appearanceSnapshotAvailable) return 0u;
+        uint32_t visibility = 0u;
+        if ((m_appearanceSnapshot.flags & settings_native::kDesktopAppearanceIconTrashVisible) != 0u)
+            visibility |= settings_native::kDesktopIconTargetTrash;
+        if ((m_appearanceSnapshot.flags & settings_native::kDesktopAppearanceIconThisSystemVisible) != 0u)
+            visibility |= settings_native::kDesktopIconTargetThisSystem;
+        if ((m_appearanceSnapshot.flags & settings_native::kDesktopAppearanceIconFileManagerVisible) != 0u)
+            visibility |= settings_native::kDesktopIconTargetFileManager;
+        if ((m_appearanceSnapshot.flags & settings_native::kDesktopAppearanceIconSystemSettingsVisible) != 0u)
+            visibility |= settings_native::kDesktopIconTargetSystemSettings;
+        return visibility;
+    }
+
+    void resetPendingDesktopIconVisibility(const char* status)
+    {
+        m_pendingDesktopIconVisibility = currentDesktopIconVisibility();
+        m_pendingDesktopIconRevision = m_appearanceSnapshotAvailable
+            ? m_appearanceSnapshot.revision : 0u;
+        m_pendingDesktopIconsDirty = false;
+        m_pendingDesktopIconsStale = false;
+        if (status) setIconStatus(status);
+    }
+
     void resetPendingGradientToCurrent(const char* status)
     {
         m_pendingGradientIndex = m_appearanceSnapshotAvailable &&
@@ -17167,11 +17235,36 @@ private:
         m_pendingGradientStale = false;
         m_wallpaperPage = m_pendingWallpaperIndex >= 0
             ? static_cast<size_t>(m_pendingWallpaperIndex) / 4u : 0u;
-        m_showWallpaperChoices = m_pendingWallpaperIndex >= 0;
+        if (!m_showDesktopIconChoices) {
+            m_showWallpaperChoices = m_pendingWallpaperIndex >= 0;
+        }
         if (status) setGradientStatus(status, nullptr);
         else if (m_appearanceSnapshotAvailable) {
             setGradientStatus("Select a preset, then choose Apply.", nullptr);
         }
+    }
+
+    void togglePendingDesktopIconVisibility(uint32_t targetMask)
+    {
+        if (!m_appearanceSnapshotAvailable || targetMask == 0u ||
+            (targetMask & ~settings_native::kDesktopIconTargetKnownMask) != 0u) return;
+        if (m_pendingDesktopIconsStale ||
+            m_pendingDesktopIconRevision != m_appearanceSnapshot.revision) {
+            resetPendingDesktopIconVisibility(
+                "Desktop changed. Select icon visibility again.");
+        }
+        const uint32_t current = currentDesktopIconVisibility();
+        const bool currentlyVisible =
+            (m_pendingDesktopIconVisibility & targetMask) != 0u;
+        if (currentlyVisible) m_pendingDesktopIconVisibility &= ~targetMask;
+        else m_pendingDesktopIconVisibility |= targetMask;
+        m_pendingDesktopIconRevision = m_appearanceSnapshot.revision;
+        m_pendingDesktopIconsStale = false;
+        m_pendingDesktopIconsDirty =
+            m_pendingDesktopIconVisibility != current;
+        setIconStatus(m_pendingDesktopIconsDirty
+            ? "Pending icon visibility. Apply to change the desktop."
+            : "Current icon visibility selected.");
     }
 
     void choosePendingGradient(int index)
@@ -17272,10 +17365,22 @@ private:
     {
         settings::FocusControl current = m_presentation.focusedControl();
         settings::FocusControl next = settings::FocusControl::PersonalizationChooseBackground;
-        if (current == settings::FocusControl::PersonalizationChooseBackground)
-            next = settings::FocusControl::PersonalizationApply;
-        else if (current == settings::FocusControl::PersonalizationApply)
-            next = settings::FocusControl::PersonalizationCancel;
+        if (m_showDesktopIconChoices) {
+            next = settings::FocusControl::PersonalizationIconTrash;
+            if (current == settings::FocusControl::PersonalizationIconTrash)
+                next = settings::FocusControl::PersonalizationIconFileExplorer;
+            else if (current == settings::FocusControl::PersonalizationIconFileExplorer)
+                next = settings::FocusControl::PersonalizationIconSystemSettings;
+            else if (current == settings::FocusControl::PersonalizationIconSystemSettings)
+                next = settings::FocusControl::PersonalizationApply;
+            else if (current == settings::FocusControl::PersonalizationApply)
+                next = settings::FocusControl::PersonalizationCancel;
+        } else {
+            if (current == settings::FocusControl::PersonalizationChooseBackground)
+                next = settings::FocusControl::PersonalizationApply;
+            else if (current == settings::FocusControl::PersonalizationApply)
+                next = settings::FocusControl::PersonalizationCancel;
+        }
         m_presentation.setFocusedControl(next);
         invalidate();
     }
@@ -17283,11 +17388,56 @@ private:
     void activateFocusedPersonalizationControl()
     {
         const settings::FocusControl focus = m_presentation.focusedControl();
-        if (focus == settings::FocusControl::PersonalizationApply) {
+        if (m_showDesktopIconChoices) {
+            if (focus == settings::FocusControl::PersonalizationIconTrash) {
+                togglePendingDesktopIconVisibility(settings_native::kDesktopIconTargetTrash);
+            } else if (focus == settings::FocusControl::PersonalizationIconFileExplorer) {
+                togglePendingDesktopIconVisibility(settings_native::kDesktopIconTargetFileExplorer);
+            } else if (focus == settings::FocusControl::PersonalizationIconSystemSettings) {
+                togglePendingDesktopIconVisibility(settings_native::kDesktopIconTargetSystemSettings);
+            } else if (focus == settings::FocusControl::PersonalizationApply) {
+                applyPendingDesktopIcons();
+            } else if (focus == settings::FocusControl::PersonalizationCancel) {
+                cancelPendingDesktopIcons();
+            }
+        } else if (focus == settings::FocusControl::PersonalizationApply) {
             applyPendingBackground();
         } else if (focus == settings::FocusControl::PersonalizationCancel) {
             cancelPendingGradient();
         }
+        invalidate();
+    }
+
+    void moveDesktopIconFocus(uint32_t key)
+    {
+        settings::FocusControl focus = m_presentation.focusedControl();
+        if (focus != settings::FocusControl::PersonalizationIconTrash &&
+            focus != settings::FocusControl::PersonalizationIconFileExplorer &&
+            focus != settings::FocusControl::PersonalizationIconSystemSettings) {
+            if (key == shell::KEY_UP) {
+                m_presentation.setFocusedControl(settings::FocusControl::PersonalizationIconTrash);
+                invalidate();
+            } else if (key == shell::KEY_DOWN) {
+                m_presentation.setFocusedControl(settings::FocusControl::PersonalizationApply);
+                invalidate();
+            }
+            return;
+        }
+
+        if (key == shell::KEY_LEFT) {
+            if (focus == settings::FocusControl::PersonalizationIconSystemSettings)
+                focus = settings::FocusControl::PersonalizationIconFileExplorer;
+            else if (focus == settings::FocusControl::PersonalizationIconFileExplorer)
+                focus = settings::FocusControl::PersonalizationIconTrash;
+        } else if (key == shell::KEY_RIGHT) {
+            if (focus == settings::FocusControl::PersonalizationIconTrash)
+                focus = settings::FocusControl::PersonalizationIconFileExplorer;
+            else if (focus == settings::FocusControl::PersonalizationIconFileExplorer)
+                focus = settings::FocusControl::PersonalizationIconSystemSettings;
+        } else if (key == shell::KEY_DOWN) {
+            focus = settings::FocusControl::PersonalizationApply;
+        }
+        m_presentation.setFocusedControl(focus);
         invalidate();
     }
 
@@ -17296,6 +17446,106 @@ private:
         if (m_appearanceSnapshotAvailable) refreshPersonalizationSnapshot();
         resetPendingGradientToCurrent("Pending selection cancelled.");
         serial::puts("[settings-native] gradient.pending cancelled\n");
+    }
+
+    void cancelPendingDesktopIcons()
+    {
+        if (m_appearanceSnapshotAvailable) refreshPersonalizationSnapshot();
+        resetPendingDesktopIconVisibility("Pending icon visibility cancelled.");
+        serial::puts("[settings-native] desktop-icons.pending cancelled\n");
+    }
+
+    void applyPendingDesktopIcons()
+    {
+        if (!m_appearanceSnapshotAvailable) {
+            setIconStatus("Desktop icon settings are unavailable.");
+            return;
+        }
+        if (!m_pendingDesktopIconsDirty) {
+            setIconStatus("No pending icon visibility changes.");
+            return;
+        }
+        if (m_pendingDesktopIconsStale ||
+            m_pendingDesktopIconRevision != m_appearanceSnapshot.revision) {
+            refreshPersonalizationSnapshot();
+            resetPendingDesktopIconVisibility(
+                "Desktop changed. Select icon visibility again before applying.");
+            return;
+        }
+
+        const uint32_t current = currentDesktopIconVisibility();
+        const uint32_t requested = m_pendingDesktopIconVisibility;
+        const uint32_t targetMask = current ^ requested;
+        if (targetMask == 0u) {
+            resetPendingDesktopIconVisibility("No pending icon visibility changes.");
+            return;
+        }
+
+        settings_native::ApplyDesktopIconVisibilityRequestV1 request{};
+        request.structureSize = sizeof(request);
+        request.version = settings_native::kApplyDesktopIconVisibilityVersion;
+        request.expectedRevision = m_pendingDesktopIconRevision;
+        request.targetMask = targetMask;
+        request.visibleMask = requested & targetMask;
+        settings_native::ApplyDesktopIconVisibilityResultV1 result{};
+        const settings_native::DesktopIconOperationStatus status =
+            settings_native::applyDesktopIconVisibility(this, &request, &result);
+
+        m_pendingDesktopIconsDirty = false;
+        m_pendingDesktopIconsStale = false;
+        const bool refreshed = refreshPersonalizationSnapshot();
+        resetPendingDesktopIconVisibility(nullptr);
+        const uint32_t active = currentDesktopIconVisibility();
+
+        if (status == settings_native::DesktopIconOperationStatus::Committed) {
+            const bool verified = refreshed &&
+                (result.flags & settings_native::kDesktopIconOperationActiveAvailable) != 0u &&
+                (result.flags & settings_native::kDesktopIconOperationPersistedAvailable) != 0u &&
+                result.activeVisibility == requested &&
+                result.persistedVisibility == requested &&
+                active == requested && result.revision == m_appearanceSnapshot.revision;
+            setIconStatus(verified
+                ? "Icon visibility applied and saved."
+                : "Commit could not be verified; current state was refreshed.");
+        } else if (status == settings_native::DesktopIconOperationStatus::NoChange) {
+            setIconStatus(refreshed && active == requested &&
+                (result.flags & settings_native::kDesktopIconOperationPersistedAvailable) != 0u &&
+                result.persistedVisibility == requested
+                    ? "Icon visibility is already current."
+                    : "Current icon state refreshed; no change was confirmed.");
+        } else if (status == settings_native::DesktopIconOperationStatus::StaleRevision) {
+            setIconStatus("Desktop changed. Select icon visibility again before applying.");
+        } else if (status == settings_native::DesktopIconOperationStatus::SaveFailedRolledBack ||
+                   status == settings_native::DesktopIconOperationStatus::ReadbackFailedRolledBack) {
+            const bool restored =
+                (result.flags & settings_native::kDesktopIconOperationRollbackVerified) != 0u &&
+                (result.flags & settings_native::kDesktopIconOperationActiveAvailable) != 0u &&
+                (result.flags & settings_native::kDesktopIconOperationPersistedAvailable) != 0u &&
+                refreshed && result.activeVisibility == active &&
+                result.persistedVisibility == active;
+            setIconStatus(restored
+                ? "Save failed; previous icon visibility was restored."
+                : "Save failed; rollback state could not be verified.");
+        } else if (status == settings_native::DesktopIconOperationStatus::RollbackFailed) {
+            setIconStatus("Rollback failed; active and saved icon values may differ.");
+        } else if (status == settings_native::DesktopIconOperationStatus::PersistenceUnavailable) {
+            setIconStatus("Configuration storage is unavailable.");
+        } else if (status == settings_native::DesktopIconOperationStatus::PersistenceConflict) {
+            setIconStatus("Saved configuration changed. Select icon visibility again.");
+        } else if (status == settings_native::DesktopIconOperationStatus::Unauthorized) {
+            setIconStatus("Settings is not authorized to change desktop icons.");
+        } else if (status == settings_native::DesktopIconOperationStatus::InvalidTarget) {
+            setIconStatus("The requested desktop icon setting is not supported.");
+        } else {
+            setIconStatus("Icon visibility apply failed; current state was refreshed.");
+        }
+        serial::puts("[settings-native] desktop-icons.apply status=");
+        serial_put_dec(static_cast<uint32_t>(status));
+        serial::puts(" active=");
+        serial_put_dec(active);
+        serial::puts(" persisted=");
+        serial_put_dec(result.persistedVisibility);
+        serial::putc('\n');
     }
 
     void applyPendingBackground()
@@ -17428,20 +17678,60 @@ private:
         const uint32_t gridX = contentX + 16u;
         const uint32_t gridW = contentW > 32u ? contentW - 32u : 1u;
         const uint32_t tabY = 96u + 151u;
-        const uint32_t tabGap = 8u;
-        const uint32_t tabW = gridW > tabGap ? (gridW - tabGap) / 2u : 1u;
+        const uint32_t tabGap = 5u;
+        const uint32_t tabW = gridW > tabGap * 2u
+            ? (gridW - tabGap * 2u) / 3u : 1u;
         if (static_cast<uint32_t>(y) >= tabY &&
             static_cast<uint32_t>(y) < tabY + 24u &&
             static_cast<uint32_t>(x) >= gridX &&
             static_cast<uint32_t>(x) < gridX + gridW) {
             const uint32_t relativeX = static_cast<uint32_t>(x) - gridX;
-            m_showWallpaperChoices = relativeX >= tabW + tabGap;
-            m_presentation.setFocusedControl(
-                settings::FocusControl::PersonalizationChooseBackground);
+            if (relativeX < tabW) {
+                m_showWallpaperChoices = false;
+                m_showDesktopIconChoices = false;
+                m_presentation.setFocusedControl(
+                    settings::FocusControl::PersonalizationChooseBackground);
+            } else if (relativeX < tabW * 2u + tabGap) {
+                m_showWallpaperChoices = true;
+                m_showDesktopIconChoices = false;
+                m_presentation.setFocusedControl(
+                    settings::FocusControl::PersonalizationChooseBackground);
+            } else {
+                m_showWallpaperChoices = false;
+                m_showDesktopIconChoices = true;
+                m_presentation.setFocusedControl(
+                    settings::FocusControl::PersonalizationIconTrash);
+            }
             return true;
         }
 
         const uint32_t gridY = 96u + 179u;
+        if (m_showDesktopIconChoices &&
+            static_cast<uint32_t>(x) >= gridX &&
+            static_cast<uint32_t>(x) < gridX + gridW &&
+            static_cast<uint32_t>(y) >= gridY + 38u &&
+            static_cast<uint32_t>(y) < gridY + 66u) {
+            const uint32_t iconGap = 4u;
+            const uint32_t iconButtonW = gridW > iconGap * 2u
+                ? (gridW - iconGap * 2u) / 3u : 1u;
+            const uint32_t relativeX = static_cast<uint32_t>(x) - gridX;
+            const uint32_t column = relativeX / (iconButtonW + iconGap);
+            const uint32_t inCellX = relativeX % (iconButtonW + iconGap);
+            if (column >= 3u || inCellX >= iconButtonW) return false;
+            const uint32_t targets[3] = {
+                settings_native::kDesktopIconTargetTrash,
+                settings_native::kDesktopIconTargetFileExplorer,
+                settings_native::kDesktopIconTargetSystemSettings
+            };
+            const settings::FocusControl iconFocus[3] = {
+                settings::FocusControl::PersonalizationIconTrash,
+                settings::FocusControl::PersonalizationIconFileExplorer,
+                settings::FocusControl::PersonalizationIconSystemSettings
+            };
+            m_presentation.setFocusedControl(iconFocus[column]);
+            togglePendingDesktopIconVisibility(targets[column]);
+            return true;
+        }
         const uint32_t gap = 5u;
         const uint32_t columns = m_showWallpaperChoices ? 2u : 4u;
         const uint32_t cellW = gridW > gap * (columns - 1u)
@@ -17450,6 +17740,7 @@ private:
             static_cast<uint32_t>(x) < gridX + gridW &&
             static_cast<uint32_t>(y) >= gridY &&
             static_cast<uint32_t>(y) < gridY + 64u &&
+            !m_showDesktopIconChoices &&
             (m_showWallpaperChoices ? m_wallpaperPresetCount != 0u : m_gradientPresetCount != 0u)) {
             const uint32_t column = (static_cast<uint32_t>(x) - gridX) / (cellW + gap);
             const uint32_t rowY = static_cast<uint32_t>(y) - gridY;
@@ -17493,7 +17784,8 @@ private:
             static_cast<uint32_t>(x) >= contentX + 16u &&
             static_cast<uint32_t>(x) < contentX + 16u + buttonW) {
             m_presentation.setFocusedControl(settings::FocusControl::PersonalizationApply);
-            applyPendingBackground();
+            if (m_showDesktopIconChoices) applyPendingDesktopIcons();
+            else applyPendingBackground();
             return true;
         }
         if (static_cast<uint32_t>(y) >= buttonsY &&
@@ -17501,7 +17793,8 @@ private:
             static_cast<uint32_t>(x) >= contentX + 16u + buttonW + buttonGap &&
             static_cast<uint32_t>(x) < contentX + contentW - 16u) {
             m_presentation.setFocusedControl(settings::FocusControl::PersonalizationCancel);
-            cancelPendingGradient();
+            if (m_showDesktopIconChoices) cancelPendingDesktopIcons();
+            else cancelPendingGradient();
             return true;
         }
         return false;
@@ -17519,10 +17812,12 @@ private:
                 return true;
             }
             if (m_presentation.selectedCategory() == settings::CategoryId::Personalization &&
-                (key == 'w' || key == 'g')) {
+                (key == 'w' || key == 'g' || key == 'i')) {
                 m_showWallpaperChoices = key == 'w';
-                m_presentation.setFocusedControl(
-                    settings::FocusControl::PersonalizationChooseBackground);
+                m_showDesktopIconChoices = key == 'i';
+                m_presentation.setFocusedControl(m_showDesktopIconChoices
+                    ? settings::FocusControl::PersonalizationIconTrash
+                    : settings::FocusControl::PersonalizationChooseBackground);
                 return true;
             }
             if (key == 'a') return selectSupportedCategory(settings::CategoryId::About, "keyboard");
@@ -17775,8 +18070,9 @@ private:
 
         const uint32_t gridX = contentX + 16u;
         const uint32_t gridW = contentW > 32u ? contentW - 32u : 1u;
-        const uint32_t tabGap = 8u;
-        const uint32_t tabW = gridW > tabGap ? (gridW - tabGap) / 2u : 1u;
+        const uint32_t tabGap = 5u;
+        const uint32_t tabW = gridW > tabGap * 2u
+            ? (gridW - tabGap * 2u) / 3u : 1u;
         const uint32_t tabY = cardY + 151u;
         const uint32_t gridY = cardY + 179u;
         const uint32_t gap = 5u;
@@ -17804,21 +18100,78 @@ private:
         }
 
         const uint32_t wallpaperTabX = gridX + tabW + tabGap;
+        const uint32_t iconsTabX = wallpaperTabX + tabW + tabGap;
         const uint32_t tabHeight = 22u;
         framebuffer::fill_rect(gridX, tabY, tabW, tabHeight,
-            m_showWallpaperChoices ? rgb(43, 47, 58) : rgb(55, 82, 123));
+            !m_showWallpaperChoices && !m_showDesktopIconChoices
+                ? rgb(55, 82, 123) : rgb(43, 47, 58));
         framebuffer::fill_rect(wallpaperTabX, tabY, tabW, tabHeight,
             m_showWallpaperChoices ? rgb(55, 82, 123) : rgb(43, 47, 58));
+        framebuffer::fill_rect(iconsTabX, tabY, tabW, tabHeight,
+            m_showDesktopIconChoices ? rgb(55, 82, 123) : rgb(43, 47, 58));
         appDrawRect(gridX, tabY, tabW, tabHeight,
-            !m_showWallpaperChoices ? rgb(115, 166, 245) : rgb(67, 74, 88));
+            !m_showWallpaperChoices && !m_showDesktopIconChoices
+                ? rgb(115, 166, 245) : rgb(67, 74, 88));
         appDrawRect(wallpaperTabX, tabY, tabW, tabHeight,
             m_showWallpaperChoices ? rgb(115, 166, 245) : rgb(67, 74, 88));
-        appDrawText(gridX + (tabW > 61u ? tabW / 2u - 30u : 3u),
+        appDrawRect(iconsTabX, tabY, tabW, tabHeight,
+            m_showDesktopIconChoices ? rgb(115, 166, 245) : rgb(67, 74, 88));
+        appDrawText(gridX + (tabW > 72u ? tabW / 2u - 36u : 3u),
                     tabY + 8u, "Gradients [G]", rgb(238, 240, 246));
-        appDrawText(wallpaperTabX + (tabW > 65u ? tabW / 2u - 32u : 3u),
+        appDrawText(wallpaperTabX + (tabW > 76u ? tabW / 2u - 38u : 3u),
                     tabY + 8u, "Wallpapers [W]", rgb(238, 240, 246));
+        appDrawText(iconsTabX + (tabW > 62u ? tabW / 2u - 31u : 3u),
+                    tabY + 8u, "Icons [I]", rgb(238, 240, 246));
 
-        if (m_showWallpaperChoices) {
+        if (m_showDesktopIconChoices) {
+            appDrawText(gridX, gridY + 8u, "Desktop Icons", rgb(224, 229, 239));
+            appDrawText(gridX, gridY + 23u,
+                "Auto-arrange is session-only and is not saved by Settings.",
+                rgb(145, 151, 163));
+            const uint32_t iconGap = 4u;
+            const uint32_t iconButtonW = gridW > iconGap * 2u
+                ? (gridW - iconGap * 2u) / 3u : 1u;
+            const uint32_t iconButtonY = gridY + 38u;
+            const uint32_t targets[3] = {
+                settings_native::kDesktopIconTargetTrash,
+                settings_native::kDesktopIconTargetFileExplorer,
+                settings_native::kDesktopIconTargetSystemSettings
+            };
+            const settings::FocusControl iconFocus[3] = {
+                settings::FocusControl::PersonalizationIconTrash,
+                settings::FocusControl::PersonalizationIconFileExplorer,
+                settings::FocusControl::PersonalizationIconSystemSettings
+            };
+            const char* iconLabels[3] = { "Trash", "File Explorer", "System Settings" };
+            const uint32_t currentVisibility = currentDesktopIconVisibility();
+            for (uint32_t index = 0u; index < 3u; ++index) {
+                const uint32_t buttonX = gridX + index * (iconButtonW + iconGap);
+                const bool visible =
+                    (m_pendingDesktopIconVisibility & targets[index]) != 0u;
+                const bool currentVisible =
+                    (currentVisibility & targets[index]) != 0u;
+                const bool focused = m_windowFocused &&
+                    m_presentation.focusedControl() == iconFocus[index];
+                const bool enabled = available;
+                framebuffer::fill_rect(buttonX, iconButtonY, iconButtonW, 28u,
+                    !enabled ? rgb(48, 49, 54) :
+                    (visible != currentVisible ? rgb(47, 70, 100) : rgb(43, 47, 58)));
+                appDrawRect(buttonX, iconButtonY, iconButtonW, 28u,
+                    focused ? rgb(255, 214, 110) :
+                    (enabled ? rgb(96, 130, 178) : rgb(69, 71, 76)));
+                const uint32_t checkX = buttonX + 7u;
+                const uint32_t checkY = iconButtonY + 7u;
+                framebuffer::fill_rect(checkX, checkY, 14u, 14u,
+                    !enabled ? rgb(47, 48, 52) :
+                    (visible ? rgb(70, 110, 180) : rgb(30, 32, 37)));
+                appDrawRect(checkX, checkY, 14u, 14u,
+                    enabled ? rgb(130, 135, 150) : rgb(69, 71, 76));
+                if (visible) appDrawText(checkX + 3u, checkY + 2u, "x",
+                    enabled ? rgb(245, 245, 250) : rgb(138, 141, 148));
+                appDrawText(buttonX + 27u, iconButtonY + 14u, iconLabels[index],
+                    enabled ? rgb(238, 240, 246) : rgb(138, 141, 148));
+            }
+        } else if (m_showWallpaperChoices) {
             if (m_wallpaperPresetCount == 0u) {
                 appDrawText(gridX, gridY + 14u,
                     "Built-in wallpapers are unavailable.", rgb(236, 174, 122));
@@ -17907,11 +18260,13 @@ private:
         const uint32_t buttonGap = 8u;
         const uint32_t buttonW = contentW > 32u
             ? (contentW - 32u - buttonGap) / 2u : 1u;
-        const bool canApply = available && !m_pendingGradientStale &&
-            ((m_pendingGradientIndex >= 0 &&
-              static_cast<size_t>(m_pendingGradientIndex) < m_gradientPresetCount) ||
-             (m_pendingWallpaperIndex >= 0 &&
-              static_cast<size_t>(m_pendingWallpaperIndex) < m_wallpaperPresetCount));
+        const bool canApply = available && (m_showDesktopIconChoices
+            ? (m_pendingDesktopIconsDirty && !m_pendingDesktopIconsStale)
+            : (!m_pendingGradientStale &&
+                ((m_pendingGradientIndex >= 0 &&
+                  static_cast<size_t>(m_pendingGradientIndex) < m_gradientPresetCount) ||
+                 (m_pendingWallpaperIndex >= 0 &&
+                  static_cast<size_t>(m_pendingWallpaperIndex) < m_wallpaperPresetCount))));
         const bool applyFocused = m_windowFocused &&
             m_presentation.focusedControl() == settings::FocusControl::PersonalizationApply;
         const bool cancelFocused = m_windowFocused &&
@@ -17930,12 +18285,16 @@ private:
         appDrawText(cancelX + (buttonW > 42u ? buttonW / 2u - 22u : 3u),
                     buttonsY + 11u, "Cancel", rgb(245, 247, 252));
 
-        const char* status = m_pendingGradientStale
-            ? "Desktop changed. Re-select the background before applying."
-            : m_gradientStatus;
+        const bool personalizationStale = m_showDesktopIconChoices
+            ? m_pendingDesktopIconsStale : m_pendingGradientStale;
+        const char* status = personalizationStale
+            ? (m_showDesktopIconChoices
+                ? "Desktop changed. Re-select icon visibility before applying."
+                : "Desktop changed. Re-select the background before applying.")
+            : (m_showDesktopIconChoices ? m_iconStatus : m_gradientStatus);
         appDrawText(contentX + 16u, cardY + 296u, status,
-                    m_pendingGradientStale ? rgb(255, 204, 112) : rgb(182, 198, 220));
-        if (cardH >= 330u && m_gradientStatusExtra[0]) {
+                    personalizationStale ? rgb(255, 204, 112) : rgb(182, 198, 220));
+        if (!m_showDesktopIconChoices && cardH >= 330u && m_gradientStatusExtra[0]) {
             appDrawText(contentX + 16u, cardY + 311u, m_gradientStatusExtra,
                         rgb(255, 175, 148));
         }

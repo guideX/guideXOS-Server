@@ -17,6 +17,7 @@ static const uint32_t kDisplaySnapshotVersion = 1;
 static const uint32_t kDesktopAppearanceSnapshotVersion = 1;
 static const uint32_t kBuiltInGradientPresetListVersion = 1;
 static const uint32_t kApplyBuiltInGradientPresetVersion = 1;
+static const uint32_t kApplyDesktopIconVisibilityVersion = 1;
 static const size_t kBuiltInGradientPresetCapacity = 16u;
 static const uint32_t kBuiltInWallpaperPresetListVersion = 1;
 static const uint32_t kApplyBuiltInWallpaperVersion = 1;
@@ -271,6 +272,56 @@ struct ApplyBuiltInWallpaperResultV1 {
     char persistedId[kDesktopAppearanceIdCapacity];
 };
 
+enum : uint32_t {
+    kDesktopIconTargetTrash = 1u << 0,
+    kDesktopIconTargetThisSystem = 1u << 1,
+    kDesktopIconTargetFileManager = 1u << 2,
+    kDesktopIconTargetSystemSettings = 1u << 3,
+    kDesktopIconTargetFileExplorer =
+        kDesktopIconTargetThisSystem | kDesktopIconTargetFileManager,
+    kDesktopIconTargetKnownMask = (1u << 4) - 1u
+};
+
+enum : uint32_t {
+    kDesktopIconOperationActiveAvailable = 1u << 0,
+    kDesktopIconOperationPersistedAvailable = 1u << 1,
+    kDesktopIconOperationRollbackVerified = 1u << 2
+};
+
+enum class DesktopIconOperationStatus : uint32_t {
+    Committed = 0,
+    NoChange = 1,
+    InvalidTarget = 2,
+    StaleRevision = 3,
+    PersistenceUnavailable = 4,
+    PersistenceConflict = 5,
+    SaveFailedRolledBack = 6,
+    ReadbackFailedRolledBack = 7,
+    RollbackFailed = 8,
+    ApplyFailed = 9,
+    Unauthorized = 10,
+    InvalidArgument = 11,
+    UnsupportedVersion = 12
+};
+
+struct ApplyDesktopIconVisibilityRequestV1 {
+    uint32_t structureSize;
+    uint32_t version;
+    uint64_t expectedRevision;
+    uint32_t targetMask;
+    uint32_t visibleMask;
+};
+
+struct ApplyDesktopIconVisibilityResultV1 {
+    uint32_t structureSize;
+    uint32_t version;
+    DesktopIconOperationStatus status;
+    uint32_t flags;
+    uint64_t revision;
+    uint32_t activeVisibility;
+    uint32_t persistedVisibility;
+};
+
 SnapshotStatus buildDesktopAppearanceSnapshot(
     const char* backgroundId,
     const char* backgroundName,
@@ -325,6 +376,13 @@ WallpaperOperationStatus applyBuiltInWallpaper(
     const app::KernelApp* caller,
     const ApplyBuiltInWallpaperRequestV1* request,
     ApplyBuiltInWallpaperResultV1* output);
+
+// The request contains only bounded system-icon target/value masks. Caller
+// identity is taken from the AppManager-owned KernelApp runtime identity.
+DesktopIconOperationStatus applyDesktopIconVisibility(
+    const app::KernelApp* caller,
+    const ApplyDesktopIconVisibilityRequestV1* request,
+    ApplyDesktopIconVisibilityResultV1* output);
 
 // The native adapter exposes no Settings write operation. This callback deliberately
 // rejects every operation request from the S10 adapter contract.

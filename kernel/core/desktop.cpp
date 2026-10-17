@@ -1010,13 +1010,15 @@ static bool bare_metal_load_display_options_from_ini_path(const char* path, Bare
     if (!path || !path[0]) return false;
 
     vfs::FileInfo info{};
-    if (vfs::stat(path, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR || info.size == 0) {
+    if (vfs::stat(path, &info) != vfs::VFS_OK ||
+        info.type != vfs::FILE_TYPE_REGULAR || info.size == 0 ||
+        info.size > 511u) {
         return false;
     }
 
     char text[512];
     int32_t count = vfs::read_file(path, text, sizeof(text) - 1);
-    if (count <= 0) {
+    if (count <= 0 || static_cast<uint64_t>(count) != info.size) {
         return false;
     }
 
@@ -1038,7 +1040,12 @@ static bool bare_metal_load_display_options_from_ini_path(const char* path, Bare
         if (!line[0] || line[0] == '#' || line[0] == ';') continue;
         char* sep = line;
         while (*sep && *sep != '=') ++sep;
-        if (*sep != '=') continue;
+        if (*sep != '=') {
+            if (desktop_str_eq(line, "autoArrangeDesktopIcon")) {
+                serial::puts("[desktop] incomplete optional key autoArrangeDesktopIcon ignored; autoArrangeDesktopIcons defaults to 0\n");
+            }
+            continue;
+        }
         *sep++ = '\0';
         bare_metal_trim_in_place(line);
         bare_metal_trim_in_place(sep);
@@ -1315,6 +1322,10 @@ static bool bare_metal_save_display_options(const BareMetalDisplayOptionsData& s
     desktop_append_text(text, &pos, sizeof(text), "\nautoArrangeDesktopIcons=");
     desktop_append_text(text, &pos, sizeof(text), store.autoArrangeDesktopIcons ? "1" : "0");
     desktop_append_text(text, &pos, sizeof(text), "\n");
+    if (pos <= 0 || static_cast<size_t>(pos) >= sizeof(text) - 1u) {
+        if (outPrimaryWrite) *outPrimaryWrite = vfs::VFS_ERR_INVALID;
+        return false;
+    }
     const int32_t primaryWrite = vfs::write_file(kBareMetalDisplayOptionsStorePath, text, (uint32_t)pos);
     const bool primaryWriteOk = primaryWrite == pos;
     if (outPrimaryWrite) {
@@ -2895,16 +2906,34 @@ static bool parse_system_icon_setting(const char* buffer, int count, const char*
     return currentValue;
 }
 
-static void persist_system_desktop_icons()
+static uint32_t desktop_icon_visibility_bits(
+    const SystemDesktopIconVisibility& visibility)
 {
-    BareMetalDisplayOptionsData store;
-    bare_metal_load_display_options(store);
-    store.showDesktopTrash = s_systemDesktopIconVisibility.showTrash;
-    store.showDesktopThisSystem = s_systemDesktopIconVisibility.showThisSystem;
-    store.showDesktopFileManager = s_systemDesktopIconVisibility.showFileManager;
-    store.showDesktopSystemSettings = s_systemDesktopIconVisibility.showSystemSettings;
-    bare_metal_save_display_options(store);
-    serial::puts("[desktop] system desktop icon settings saved\n");
+    uint32_t bits = 0u;
+    if (visibility.showTrash) bits |= kDesktopIconTargetTrash;
+    if (visibility.showThisSystem) bits |= kDesktopIconTargetThisSystem;
+    if (visibility.showFileManager) bits |= kDesktopIconTargetFileManager;
+    if (visibility.showSystemSettings) bits |= kDesktopIconTargetSystemSettings;
+    return bits;
+}
+
+static SystemDesktopIconVisibility desktop_icon_visibility_from_bits(uint32_t bits)
+{
+    SystemDesktopIconVisibility visibility{};
+    visibility.showTrash = (bits & kDesktopIconTargetTrash) != 0u;
+    visibility.showThisSystem = (bits & kDesktopIconTargetThisSystem) != 0u;
+    visibility.showFileManager = (bits & kDesktopIconTargetFileManager) != 0u;
+    visibility.showSystemSettings = (bits & kDesktopIconTargetSystemSettings) != 0u;
+    return visibility;
+}
+
+static void set_system_icon_visibility_runtime(
+    const SystemDesktopIconVisibility& visibility)
+{
+    s_systemDesktopIconVisibility = visibility;
+    s_systemDesktopIconVisibilityLoaded = true;
+    refresh_desktop_icons();
+    s_needsRedraw = true;
 }
 
 void reload_persisted_system_desktop_icons()
@@ -2938,35 +2967,143 @@ bool get_system_desktop_icon_visible(const char* key)
 
 void set_system_desktop_icon_visibility(const SystemDesktopIconVisibility& visibility)
 {
-    const bool changed = s_systemDesktopIconVisibility.showTrash != visibility.showTrash ||
-        s_systemDesktopIconVisibility.showThisSystem != visibility.showThisSystem ||
-        s_systemDesktopIconVisibility.showFileManager != visibility.showFileManager ||
-        s_systemDesktopIconVisibility.showSystemSettings != visibility.showSystemSettings;
-    s_systemDesktopIconVisibility = visibility;
-    s_systemDesktopIconVisibilityLoaded = true;
-    if (changed) advance_desktop_appearance_revision();
-    persist_system_desktop_icons();
-    refresh_desktop_icons();
-    s_needsRedraw = true;
-    serial::puts("[desktop] system desktop icon visibility applied and desktop refreshed\n");
+    const SystemDesktopIconVisibility before = get_system_desktop_icon_visibility();
+    const uint32_t beforeBits = desktop_icon_visibility_bits(before);
+    const uint32_t requestedBits = desktop_icon_visibility_bits(visibility);
+    if (beforeBits == requestedBits) return;
+    DesktopIconVisibilityApplyResultV1 result{};
+    const DesktopIconVisibilityApplyStatus status = apply_system_icon_visibility(
+        kDesktopIconTargetKnownMask, requestedBits,
+        s_desktopAppearanceRevision, &result);
+    serial::puts("[desktop] legacy system icon change status=");
+    serial::put_hex32(static_cast<uint32_t>(status));
+    serial::putc('\n');
+}
+
+DesktopIconVisibilityApplyStatus apply_system_icon_visibility(
+    uint32_t targetMask,
+    uint32_t visibleMask,
+    uint64_t expectedRevision,
+    DesktopIconVisibilityApplyResultV1* output)
+{
+    if (!output) return DesktopIconVisibilityApplyStatus::ApplyFailed;
+    DesktopIconVisibilityApplyResultV1 result{};
+    result.structureSize = sizeof(result);
+    result.version = kDesktopIconVisibilityResultVersion;
+    result.status = DesktopIconVisibilityApplyStatus::InvalidTarget;
+    result.revision = s_desktopAppearanceRevision;
+    if (targetMask == 0u || (targetMask & ~kDesktopIconTargetKnownMask) != 0u ||
+        (visibleMask & ~targetMask) != 0u) {
+        *output = result;
+        return result.status;
+    }
+    if (!is_initialized()) {
+        result.status = DesktopIconVisibilityApplyStatus::PersistenceUnavailable;
+        *output = result;
+        return result.status;
+    }
+
+    const SystemDesktopIconVisibility before = get_system_desktop_icon_visibility();
+    const uint32_t beforeBits = desktop_icon_visibility_bits(before);
+    result.activeVisibility = beforeBits;
+    result.flags |= kDesktopIconVisibilityApplyActiveAvailable;
+    if (expectedRevision == 0u || expectedRevision != s_desktopAppearanceRevision) {
+        result.status = DesktopIconVisibilityApplyStatus::StaleRevision;
+        *output = result;
+        return result.status;
+    }
+
+    uint32_t requestedBits = beforeBits & ~targetMask;
+    requestedBits |= visibleMask;
+    const SystemDesktopIconVisibility requested =
+        desktop_icon_visibility_from_bits(requestedBits);
+    if (requestedBits != beforeBits) {
+        set_system_icon_visibility_runtime(requested);
+        const SystemDesktopIconVisibility applied = get_system_desktop_icon_visibility();
+        if (desktop_icon_visibility_bits(applied) != requestedBits) {
+            set_system_icon_visibility_runtime(before);
+            result.status = DesktopIconVisibilityApplyStatus::ApplyFailed;
+            result.activeVisibility = beforeBits;
+            *output = result;
+            return result.status;
+        }
+    }
+
+    DesktopIconPersistenceResult persistence{};
+    const DesktopIconPersistenceStatus persistenceStatus =
+        persistDesktopIconVisibility(beforeBits, requestedBits, &persistence);
+    if ((persistence.flags & kDesktopIconPersistenceReadbackAvailable) != 0u) {
+        result.flags |= kDesktopIconVisibilityApplyPersistedAvailable;
+        result.persistedVisibility = persistence.persistedVisibility;
+    }
+    if (persistenceStatus != DesktopIconPersistenceStatus::Ok &&
+        persistenceStatus != DesktopIconPersistenceStatus::NoChange) {
+        if (requestedBits != beforeBits) set_system_icon_visibility_runtime(before);
+        result.activeVisibility = beforeBits;
+        result.revision = s_desktopAppearanceRevision;
+        if ((persistence.flags & kDesktopIconPersistenceRollbackVerified) != 0u) {
+            result.flags |= kDesktopIconVisibilityApplyRollbackVerified;
+        }
+        switch (persistenceStatus) {
+            case DesktopIconPersistenceStatus::Unavailable:
+                result.status = DesktopIconVisibilityApplyStatus::PersistenceUnavailable;
+                break;
+            case DesktopIconPersistenceStatus::Conflict:
+            case DesktopIconPersistenceStatus::InvalidConfiguration:
+                result.status = DesktopIconVisibilityApplyStatus::PersistenceConflict;
+                break;
+            case DesktopIconPersistenceStatus::WriteFailedRolledBack:
+                result.status = DesktopIconVisibilityApplyStatus::SaveFailedRolledBack;
+                break;
+            case DesktopIconPersistenceStatus::ReadbackFailedRolledBack:
+                result.status = DesktopIconVisibilityApplyStatus::ReadbackFailedRolledBack;
+                break;
+            case DesktopIconPersistenceStatus::RollbackFailed:
+                result.status = DesktopIconVisibilityApplyStatus::RollbackFailed;
+                break;
+            case DesktopIconPersistenceStatus::Ok:
+            case DesktopIconPersistenceStatus::NoChange:
+            default:
+                result.status = DesktopIconVisibilityApplyStatus::PersistenceConflict;
+                break;
+        }
+        *output = result;
+        return result.status;
+    }
+
+    result.activeVisibility = requestedBits;
+    result.persistedVisibility = persistence.persistedVisibility;
+    result.flags |= kDesktopIconVisibilityApplyActiveAvailable |
+        kDesktopIconVisibilityApplyPersistedAvailable;
+    if (requestedBits == beforeBits) {
+        result.status = DesktopIconVisibilityApplyStatus::NoChange;
+    } else {
+        advance_desktop_appearance_revision();
+        result.revision = s_desktopAppearanceRevision;
+        result.status = DesktopIconVisibilityApplyStatus::Committed;
+        app::AppManager::notifyDesktopAppearanceChanged(result.revision);
+    }
+    *output = result;
+    return result.status;
 }
 
 void set_system_desktop_icon_visible(const char* key, bool visible)
 {
     if (!s_systemDesktopIconVisibilityLoaded) reload_persisted_system_desktop_icons();
-    if (desktop_str_eq(key, "Trash")) s_systemDesktopIconVisibility.showTrash = visible;
-    else if (desktop_str_eq(key, "ThisSystem")) s_systemDesktopIconVisibility.showThisSystem = visible;
-    else if (desktop_str_eq(key, "FileManager")) s_systemDesktopIconVisibility.showFileManager = visible;
+    SystemDesktopIconVisibility requested = s_systemDesktopIconVisibility;
+    if (desktop_str_eq(key, "Trash")) requested.showTrash = visible;
+    else if (desktop_str_eq(key, "ThisSystem")) requested.showThisSystem = visible;
+    else if (desktop_str_eq(key, "FileManager")) requested.showFileManager = visible;
     else if (desktop_str_eq(key, "FileExplorer")) {
-        s_systemDesktopIconVisibility.showThisSystem = visible;
-        s_systemDesktopIconVisibility.showFileManager = visible;
+        requested.showThisSystem = visible;
+        requested.showFileManager = visible;
     }
-    else if (desktop_str_eq(key, "SystemSettings")) s_systemDesktopIconVisibility.showSystemSettings = visible;
+    else if (desktop_str_eq(key, "SystemSettings")) requested.showSystemSettings = visible;
     else return;
     serial::puts("[desktop] system desktop icon setting changed: ");
     serial::puts(key);
     serial::puts(visible ? "=1\n" : "=0\n");
-    set_system_desktop_icon_visibility(s_systemDesktopIconVisibility);
+    set_system_desktop_icon_visibility(requested);
 }
 
 static bool system_icon_visible_for_kind(DesktopSystemObjectKind kind)
@@ -4235,6 +4372,12 @@ void refresh_bare_metal_desktop_folders_after_vfs_ready()
     // directory resolution can only retain the default path. Re-resolve it
     // now that the real writable mount exists, and create the directory if
     // the freshly mounted volume does not contain it yet.
+    // Icon settings were also queried during the pre-mount desktop draw. Load
+    // them again now that the persistent config volume is available so the
+    // initial icon list reflects the saved visibility after a cold boot.
+    reload_persisted_system_desktop_icons();
+    refresh_desktop_icons();
+
     char resolvedDesktopPath[vfs::VFS_MAX_PATH] = {0};
     if (bare_metal_ensure_desktop_backing_directory(resolvedDesktopPath,
                                                      (int)sizeof(resolvedDesktopPath))) {

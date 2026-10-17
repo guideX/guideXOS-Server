@@ -190,6 +190,187 @@ static bool makeUpdatedConfig(
     return cursor == newLength;
 }
 
+struct DesktopIconConfigField {
+    const char* key;
+    uint32_t bit;
+    size_t valueBegin;
+    size_t valueEnd;
+    bool present;
+    bool value;
+};
+
+static bool parseConfigBoolean(const char* text, size_t begin, size_t end,
+                               bool* output)
+{
+    if (!text || !output || begin >= end) return false;
+    const size_t length = end - begin;
+    if (length == 1u && text[begin] == '1') { *output = true; return true; }
+    if (length == 1u && text[begin] == '0') { *output = false; return true; }
+    static const char* const trueValues[] = { "true", "yes", "on" };
+    static const char* const falseValues[] = { "false", "no", "off" };
+    for (size_t candidate = 0u; candidate < sizeof(trueValues) / sizeof(trueValues[0]); ++candidate) {
+        const char* value = trueValues[candidate];
+        size_t valueLength = 0u;
+        while (value[valueLength]) ++valueLength;
+        if (length != valueLength) continue;
+        bool match = true;
+        for (size_t index = 0u; index < length; ++index) {
+            char actual = text[begin + index];
+            if (actual >= 'A' && actual <= 'Z') actual = static_cast<char>(actual - 'A' + 'a');
+            if (actual != value[index]) match = false;
+        }
+        if (match) { *output = true; return true; }
+    }
+    for (size_t candidate = 0u; candidate < sizeof(falseValues) / sizeof(falseValues[0]); ++candidate) {
+        const char* value = falseValues[candidate];
+        size_t valueLength = 0u;
+        while (value[valueLength]) ++valueLength;
+        if (length != valueLength) continue;
+        bool match = true;
+        for (size_t index = 0u; index < length; ++index) {
+            char actual = text[begin + index];
+            if (actual >= 'A' && actual <= 'Z') actual = static_cast<char>(actual - 'A' + 'a');
+            if (actual != value[index]) match = false;
+        }
+        if (match) { *output = false; return true; }
+    }
+    return false;
+}
+
+static bool spanEquals(const char* text, size_t begin, size_t end,
+                       const char* expected)
+{
+    if (!text || !expected) return false;
+    size_t length = 0u;
+    while (expected[length]) ++length;
+    if (end < begin || end - begin != length) return false;
+    for (size_t index = 0u; index < length; ++index) {
+        if (text[begin + index] != expected[index]) return false;
+    }
+    return true;
+}
+
+static bool extractDesktopIconVisibility(
+    const char* text, size_t length, uint32_t* outVisibility,
+    DesktopIconConfigField* outFields, size_t fieldCapacity)
+{
+    if (!text || !outVisibility || !outFields || fieldCapacity < 4u) return false;
+    DesktopIconConfigField fields[4] = {
+        { "showDesktopTrash", kDesktopIconVisibilityTrash, 0u, 0u, false, true },
+        { "showDesktopThisSystem", kDesktopIconVisibilityThisSystem, 0u, 0u, false, true },
+        { "showDesktopFileManager", kDesktopIconVisibilityFileManager, 0u, 0u, false, true },
+        { "showDesktopSystemSettings", kDesktopIconVisibilitySystemSettings, 0u, 0u, false, false }
+    };
+    uint32_t visibility = kDesktopIconVisibilityTrash |
+        kDesktopIconVisibilityThisSystem | kDesktopIconVisibilityFileManager;
+    size_t cursor = 0u;
+    while (cursor < length) {
+        const size_t lineBegin = cursor;
+        while (cursor < length && text[cursor] != '\n') ++cursor;
+        const size_t lineEnd = cursor;
+        if (cursor < length) ++cursor;
+        size_t logicalEnd = lineEnd;
+        if (logicalEnd > lineBegin && text[logicalEnd - 1u] == '\r') --logicalEnd;
+        size_t begin = lineBegin;
+        size_t end = logicalEnd;
+        trimSpan(text, &begin, &end);
+        if (begin == end || text[begin] == '#' || text[begin] == ';') continue;
+
+        size_t separator = begin;
+        while (separator < end && text[separator] != '=') ++separator;
+        if (separator == end) return false;
+        size_t keyBegin = begin;
+        size_t keyEnd = separator;
+        trimSpan(text, &keyBegin, &keyEnd);
+        if (keyBegin == keyEnd) return false;
+        size_t valueBegin = separator + 1u;
+        size_t valueEnd = end;
+        trimSpan(text, &valueBegin, &valueEnd);
+
+        for (size_t index = 0u; index < 4u; ++index) {
+            if (!spanEquals(text, keyBegin, keyEnd, fields[index].key)) continue;
+            if (fields[index].present) return false;
+            bool value = false;
+            if (!parseConfigBoolean(text, valueBegin, valueEnd, &value)) return false;
+            fields[index].present = true;
+            fields[index].value = value;
+            fields[index].valueBegin = valueBegin;
+            fields[index].valueEnd = valueEnd;
+            if (value) visibility |= fields[index].bit;
+            else visibility &= ~fields[index].bit;
+            break;
+        }
+    }
+    for (size_t index = 0u; index < 4u; ++index) outFields[index] = fields[index];
+    *outVisibility = visibility;
+    return true;
+}
+
+static bool makeUpdatedDesktopIconConfig(
+    const char* original, size_t originalLength, uint32_t requestedVisibility,
+    const DesktopIconConfigField* fields, char* updated, size_t capacity,
+    size_t* outLength)
+{
+    if (!original || !fields || !updated || !outLength || capacity == 0u) return false;
+    size_t sourceCursor = 0u;
+    size_t outputCursor = 0u;
+    const DesktopIconConfigField* ordered[4] = {
+        &fields[0], &fields[1], &fields[2], &fields[3]
+    };
+    for (size_t index = 0u; index < 4u; ++index) {
+        for (size_t next = index + 1u; next < 4u; ++next) {
+            const size_t left = ordered[index]->present
+                ? ordered[index]->valueBegin : static_cast<size_t>(-1);
+            const size_t right = ordered[next]->present
+                ? ordered[next]->valueBegin : static_cast<size_t>(-1);
+            if (right < left) {
+                const DesktopIconConfigField* temporary = ordered[index];
+                ordered[index] = ordered[next];
+                ordered[next] = temporary;
+            }
+        }
+    }
+    for (size_t fieldIndex = 0u; fieldIndex < 4u; ++fieldIndex) {
+        const DesktopIconConfigField& field = *ordered[fieldIndex];
+        const bool requested = (requestedVisibility & field.bit) != 0u;
+        if (!field.present || requested == field.value) continue;
+        if (field.valueBegin < sourceCursor || field.valueEnd < field.valueBegin ||
+            field.valueEnd > originalLength) return false;
+        const size_t prefixLength = field.valueBegin - sourceCursor;
+        if (prefixLength > capacity - 1u - outputCursor) return false;
+        for (size_t index = 0u; index < prefixLength; ++index)
+            updated[outputCursor++] = original[sourceCursor + index];
+        if (outputCursor >= capacity - 1u) return false;
+        updated[outputCursor++] = requested ? '1' : '0';
+        sourceCursor = field.valueEnd;
+    }
+    if (originalLength - sourceCursor > capacity - 1u - outputCursor) return false;
+    for (size_t index = sourceCursor; index < originalLength; ++index)
+        updated[outputCursor++] = original[index];
+
+    for (size_t fieldIndex = 0u; fieldIndex < 4u; ++fieldIndex) {
+        const DesktopIconConfigField& field = fields[fieldIndex];
+        const bool requested = (requestedVisibility & field.bit) != 0u;
+        if (field.present || requested == field.value) continue;
+        const char* key = field.key;
+        size_t keyLength = 0u;
+        while (key[keyLength]) ++keyLength;
+        const bool needsSeparator = outputCursor != 0u &&
+            updated[outputCursor - 1u] != '\n' && updated[outputCursor - 1u] != '\r';
+        const size_t required = (needsSeparator ? 1u : 0u) + keyLength + 3u;
+        if (required > capacity - 1u - outputCursor) return false;
+        if (needsSeparator) updated[outputCursor++] = '\n';
+        for (size_t index = 0u; index < keyLength; ++index)
+            updated[outputCursor++] = key[index];
+        updated[outputCursor++] = '=';
+        updated[outputCursor++] = requested ? '1' : '0';
+        updated[outputCursor++] = '\n';
+    }
+    updated[outputCursor] = '\0';
+    *outLength = outputCursor;
+    return true;
+}
+
 enum class WriteVerification : uint8_t {
     Verified,
     WriteFailed,
@@ -222,6 +403,22 @@ static void updateActualId(GradientPersistenceResult* output)
         valueCount != 1u || !validPresetId(id)) return;
     copyText(output->persistedId, id, sizeof(output->persistedId));
     output->flags |= kGradientPersistenceReadbackAvailable;
+}
+
+static void updateActualDesktopIconVisibility(DesktopIconPersistenceResult* output)
+{
+    if (!output) return;
+    output->flags &= ~kDesktopIconPersistenceReadbackAvailable;
+    output->persistedVisibility = 0u;
+    char actual[kGradientConfigTextCapacity];
+    size_t actualLength = 0u;
+    if (!readCanonicalConfig(actual, sizeof(actual), &actualLength)) return;
+    DesktopIconConfigField fields[4]{};
+    uint32_t visibility = 0u;
+    if (!extractDesktopIconVisibility(actual, actualLength, &visibility,
+                                      fields, 4u)) return;
+    output->persistedVisibility = visibility;
+    output->flags |= kDesktopIconPersistenceReadbackAvailable;
 }
 
 } // namespace
@@ -317,6 +514,96 @@ GradientPersistenceStatus persistBuiltInGradientId(
     GradientPersistenceResult* output)
 {
     return persistBuiltInBackgroundId(expectedCurrentId, requestedId, output);
+}
+
+DesktopIconPersistenceStatus persistDesktopIconVisibility(
+    uint32_t expectedVisibility,
+    uint32_t requestedVisibility,
+    DesktopIconPersistenceResult* output)
+{
+    if (!output) return DesktopIconPersistenceStatus::InvalidConfiguration;
+    *output = DesktopIconPersistenceResult{};
+    output->status = DesktopIconPersistenceStatus::InvalidConfiguration;
+    if ((expectedVisibility & ~kDesktopIconVisibilityKnownMask) != 0u ||
+        (requestedVisibility & ~kDesktopIconVisibilityKnownMask) != 0u) {
+        return output->status;
+    }
+
+    char original[kGradientConfigTextCapacity];
+    size_t originalLength = 0u;
+    if (!readCanonicalConfig(original, sizeof(original), &originalLength)) {
+        output->status = DesktopIconPersistenceStatus::Unavailable;
+        return output->status;
+    }
+
+    DesktopIconConfigField fields[4]{};
+    uint32_t currentVisibility = 0u;
+    if (!extractDesktopIconVisibility(original, originalLength,
+                                      &currentVisibility, fields, 4u)) {
+        output->status = DesktopIconPersistenceStatus::InvalidConfiguration;
+        return output->status;
+    }
+    output->persistedVisibility = currentVisibility;
+    output->flags |= kDesktopIconPersistenceReadbackAvailable;
+    if (currentVisibility != expectedVisibility) {
+        output->status = DesktopIconPersistenceStatus::Conflict;
+        return output->status;
+    }
+    if (currentVisibility == requestedVisibility) {
+        output->status = DesktopIconPersistenceStatus::NoChange;
+        return output->status;
+    }
+
+    char updated[kGradientConfigTextCapacity];
+    size_t updatedLength = 0u;
+    if (!makeUpdatedDesktopIconConfig(original, originalLength,
+                                      requestedVisibility, fields, updated,
+                                      sizeof(updated), &updatedLength)) {
+        output->status = DesktopIconPersistenceStatus::InvalidConfiguration;
+        return output->status;
+    }
+
+    const WriteVerification commitVerification =
+        writeAndVerify(updated, updatedLength);
+    if (commitVerification == WriteVerification::Verified) {
+        char verified[kGradientConfigTextCapacity];
+        size_t verifiedLength = 0u;
+        DesktopIconConfigField verifiedFields[4]{};
+        uint32_t verifiedVisibility = 0u;
+        if (!readCanonicalConfig(verified, sizeof(verified), &verifiedLength) ||
+            verifiedLength != updatedLength ||
+            !extractDesktopIconVisibility(verified, verifiedLength,
+                                         &verifiedVisibility, verifiedFields, 4u) ||
+            verifiedVisibility != requestedVisibility) {
+            output->flags |= kDesktopIconPersistenceRollbackAttempted;
+            const bool restored =
+                writeAndVerify(original, originalLength) == WriteVerification::Verified;
+            if (restored) output->flags |= kDesktopIconPersistenceRollbackVerified;
+            updateActualDesktopIconVisibility(output);
+            output->status = restored
+                ? DesktopIconPersistenceStatus::ReadbackFailedRolledBack
+                : DesktopIconPersistenceStatus::RollbackFailed;
+            return output->status;
+        }
+        output->status = DesktopIconPersistenceStatus::Ok;
+        output->persistedVisibility = verifiedVisibility;
+        output->flags |= kDesktopIconPersistenceReadbackAvailable;
+        return output->status;
+    }
+
+    output->flags |= kDesktopIconPersistenceRollbackAttempted;
+    const bool restored =
+        writeAndVerify(original, originalLength) == WriteVerification::Verified;
+    if (restored) output->flags |= kDesktopIconPersistenceRollbackVerified;
+    updateActualDesktopIconVisibility(output);
+    if (!restored) {
+        output->status = DesktopIconPersistenceStatus::RollbackFailed;
+        return output->status;
+    }
+    output->status = commitVerification == WriteVerification::WriteFailed
+        ? DesktopIconPersistenceStatus::WriteFailedRolledBack
+        : DesktopIconPersistenceStatus::ReadbackFailedRolledBack;
+    return output->status;
 }
 
 } // namespace desktop

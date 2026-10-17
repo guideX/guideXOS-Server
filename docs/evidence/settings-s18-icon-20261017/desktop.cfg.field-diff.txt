@@ -1,0 +1,8 @@
+after_bytes=237
+after_sha256=23CFD7FAD03E506B5D0DDCC4729F5CB529D29D9D4B3CBAED3E2D61F16D8921D1
+changed_fields=
+showDesktopFileManager: 1 -> 0
+showDesktopThisSystem: 1 -> 0
+preserved_fields=version,wallpaperId,backgroundScaleMode,desktopThemeId,taskbarPosition,showDesktopTrash,showDesktopSystemSettings,smallLiveDesktopFolderIcons
+autoArrangeDesktopIcons=omitted (session-only default; no persistent value introduced)
+file_explorer_alias=showDesktopThisSystem and showDesktopFileManager are both updated as one UI choice

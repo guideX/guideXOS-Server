@@ -1,0 +1,8 @@
+phase=S18
+repository=D:\dev\guideXOSServer
+branch=main
+source_HEAD=26340ec1f2a5c6739c6c95cf4fa53539873336c1
+working_tree_change=desktop configuration integrity and native icon visibility transaction
+kernel_elf_sha256=4DD166E883879A6A1111B4182FB458A666453F9BE0A0EE075CFCE0BC2568A046
+storage=isolated raw FAT32 ESP cloned from the accepted S17R raw FAT32 media; partition_start_lba=63
+test_fixture=known complete wallpaper/icon schema; auto-arrange key omitted so its documented default applies; historical malformed input retained separately as a fixture

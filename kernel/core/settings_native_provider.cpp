@@ -908,5 +908,107 @@ WallpaperOperationStatus applyBuiltInWallpaper(
     return result.status;
 }
 
+static DesktopIconOperationStatus copyDesktopIconApplyResult(
+    const desktop::DesktopIconVisibilityApplyResultV1& source,
+    uint32_t* flags, uint64_t* revision,
+    uint32_t* activeVisibility, uint32_t* persistedVisibility)
+{
+    if (source.structureSize != sizeof(source) ||
+        source.version != desktop::kDesktopIconVisibilityResultVersion ||
+        (source.flags & ~(desktop::kDesktopIconVisibilityApplyActiveAvailable |
+                          desktop::kDesktopIconVisibilityApplyPersistedAvailable |
+                          desktop::kDesktopIconVisibilityApplyRollbackVerified)) != 0u ||
+        (source.activeVisibility & ~desktop::kDesktopIconTargetKnownMask) != 0u ||
+        (source.persistedVisibility & ~desktop::kDesktopIconTargetKnownMask) != 0u) {
+        return DesktopIconOperationStatus::ApplyFailed;
+    }
+    if (revision) *revision = source.revision;
+    if (activeVisibility) *activeVisibility = source.activeVisibility;
+    if (persistedVisibility) *persistedVisibility = source.persistedVisibility;
+    if (flags) {
+        if ((source.flags & desktop::kDesktopIconVisibilityApplyActiveAvailable) != 0u)
+            *flags |= kDesktopIconOperationActiveAvailable;
+        if ((source.flags & desktop::kDesktopIconVisibilityApplyPersistedAvailable) != 0u)
+            *flags |= kDesktopIconOperationPersistedAvailable;
+        if ((source.flags & desktop::kDesktopIconVisibilityApplyRollbackVerified) != 0u)
+            *flags |= kDesktopIconOperationRollbackVerified;
+    }
+    switch (source.status) {
+        case desktop::DesktopIconVisibilityApplyStatus::Committed:
+            return DesktopIconOperationStatus::Committed;
+        case desktop::DesktopIconVisibilityApplyStatus::NoChange:
+            return DesktopIconOperationStatus::NoChange;
+        case desktop::DesktopIconVisibilityApplyStatus::InvalidTarget:
+            return DesktopIconOperationStatus::InvalidTarget;
+        case desktop::DesktopIconVisibilityApplyStatus::StaleRevision:
+            return DesktopIconOperationStatus::StaleRevision;
+        case desktop::DesktopIconVisibilityApplyStatus::PersistenceUnavailable:
+            return DesktopIconOperationStatus::PersistenceUnavailable;
+        case desktop::DesktopIconVisibilityApplyStatus::PersistenceConflict:
+            return DesktopIconOperationStatus::PersistenceConflict;
+        case desktop::DesktopIconVisibilityApplyStatus::SaveFailedRolledBack:
+            return DesktopIconOperationStatus::SaveFailedRolledBack;
+        case desktop::DesktopIconVisibilityApplyStatus::ReadbackFailedRolledBack:
+            return DesktopIconOperationStatus::ReadbackFailedRolledBack;
+        case desktop::DesktopIconVisibilityApplyStatus::RollbackFailed:
+            return DesktopIconOperationStatus::RollbackFailed;
+        case desktop::DesktopIconVisibilityApplyStatus::ApplyFailed:
+        default:
+            return DesktopIconOperationStatus::ApplyFailed;
+    }
+}
+
+DesktopIconOperationStatus applyDesktopIconVisibility(
+    const app::KernelApp* caller,
+    const ApplyDesktopIconVisibilityRequestV1* request,
+    ApplyDesktopIconVisibilityResultV1* output)
+{
+    if (!output) return DesktopIconOperationStatus::InvalidArgument;
+    ApplyDesktopIconVisibilityResultV1 result{};
+    result.structureSize = sizeof(result);
+    result.version = kApplyDesktopIconVisibilityVersion;
+    result.status = DesktopIconOperationStatus::InvalidArgument;
+
+    if (!caller) {
+        *output = result;
+        return result.status;
+    }
+    if (!textEquals(caller->getRuntimeAppId(), kSettingsRuntimeAppId)) {
+        result.status = DesktopIconOperationStatus::Unauthorized;
+        *output = result;
+        return result.status;
+    }
+    if (!request || request->structureSize != sizeof(*request)) {
+        *output = result;
+        return result.status;
+    }
+    if (request->version != kApplyDesktopIconVisibilityVersion) {
+        result.status = DesktopIconOperationStatus::UnsupportedVersion;
+        *output = result;
+        return result.status;
+    }
+    if (request->expectedRevision == 0u) {
+        *output = result;
+        return result.status;
+    }
+    if (request->targetMask == 0u ||
+        (request->targetMask & ~kDesktopIconTargetKnownMask) != 0u ||
+        (request->visibleMask & ~request->targetMask) != 0u) {
+        result.status = DesktopIconOperationStatus::InvalidTarget;
+        *output = result;
+        return result.status;
+    }
+
+    desktop::DesktopIconVisibilityApplyResultV1 desktopResult{};
+    (void)desktop::apply_system_icon_visibility(
+        request->targetMask, request->visibleMask,
+        request->expectedRevision, &desktopResult);
+    result.status = copyDesktopIconApplyResult(
+        desktopResult, &result.flags, &result.revision,
+        &result.activeVisibility, &result.persistedVisibility);
+    *output = result;
+    return result.status;
+}
+
 } // namespace settings_native
 } // namespace kernel
