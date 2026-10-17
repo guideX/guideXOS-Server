@@ -130,6 +130,8 @@ static const char rexx_compiler_message_bad_jump[] =
     "bytecode jump target is outside the supported range";
 static const char rexx_compiler_message_bad_loop[] =
     "DO clause has inconsistent control fields";
+static const char rexx_compiler_message_invalid_procedure[] =
+    "PROCEDURE is invalid here";
 
 static void rexx_compiler_fail(RexxCompiler *compiler,
                               RexxCompilerStatus status,
@@ -756,6 +758,40 @@ static int rexx_compiler_compile_arguments(RexxCompiler *compiler,
     return 1;
 }
 
+static int rexx_compiler_emit_call(RexxCompiler *compiler,
+                                   const RexxAstExpression *expression,
+                                   int subroutine)
+{
+    uint32_t routine;
+    uint32_t argument_count;
+    uint8_t flags = subroutine ? REXX_INSTRUCTION_CALL_SUBROUTINE : 0u;
+    if (expression == NULL || expression->kind != REXX_AST_EXPR_FUNCTION_CALL ||
+        expression->left != NULL || expression->right != NULL) {
+        rexx_compiler_fail(compiler, REXX_COMPILER_STATUS_MALFORMED_AST,
+                           expression != NULL ? &expression->token : NULL,
+                           rexx_compiler_message_malformed_ast);
+        return 0;
+    }
+    if (expression->token.type == TOKEN_STRING) {
+        routine = rexx_compiler_add_constant(compiler, &expression->token);
+        flags |= REXX_INSTRUCTION_CALL_QUOTED;
+    } else if (rexx_compiler_token_is_name(&expression->token)) {
+        routine = rexx_compiler_intern_symbol(
+            compiler, &expression->token, REXX_SYMBOL_ROUTINE);
+    } else {
+        rexx_compiler_fail(compiler, REXX_COMPILER_STATUS_MALFORMED_AST,
+                           &expression->token,
+                           rexx_compiler_message_bad_token);
+        return 0;
+    }
+    if (compiler->status != REXX_COMPILER_STATUS_OK ||
+        !rexx_compiler_compile_arguments(compiler, expression->arguments,
+                                         &argument_count)) return 0;
+    (void)rexx_compiler_emit(compiler, OP_CALL, flags, routine,
+                             argument_count, &expression->token);
+    return compiler->status == REXX_COMPILER_STATUS_OK;
+}
+
 static int rexx_compiler_compile_expression(RexxCompiler *compiler,
                                             const RexxAstExpression *expression)
 {
@@ -859,28 +895,9 @@ static int rexx_compiler_compile_expression(RexxCompiler *compiler,
             result = compiler->status == REXX_COMPILER_STATUS_OK;
         }
         break;
-    case REXX_AST_EXPR_FUNCTION_CALL: {
-        uint32_t function_symbol;
-        uint32_t argument_count;
-        if (expression->left != NULL || expression->right != NULL ||
-            !rexx_compiler_token_is_name(&expression->token)) {
-            rexx_compiler_fail(compiler, REXX_COMPILER_STATUS_MALFORMED_AST,
-                               &expression->token,
-                               rexx_compiler_message_bad_token);
-            break;
-        }
-        function_symbol = rexx_compiler_intern_symbol(
-            compiler, &expression->token, REXX_SYMBOL_ROUTINE);
-        if (compiler->status != REXX_COMPILER_STATUS_OK ||
-            !rexx_compiler_compile_arguments(compiler, expression->arguments,
-                                             &argument_count)) {
-            break;
-        }
-        (void)rexx_compiler_emit(compiler, OP_CALL, 0u, function_symbol,
-                                 argument_count, &expression->token);
-        result = compiler->status == REXX_COMPILER_STATUS_OK;
+    case REXX_AST_EXPR_FUNCTION_CALL:
+        result = rexx_compiler_emit_call(compiler, expression, 0);
         break;
-    }
     default:
         rexx_compiler_fail(compiler, REXX_COMPILER_STATUS_UNSUPPORTED_AST,
                            &expression->token,
@@ -1290,11 +1307,7 @@ static int rexx_compiler_compile_clause(RexxCompiler *compiler,
                                  &clause->token);
         break;
     case REXX_AST_CLAUSE_CALL:
-        if (clause->as.call.call == NULL ||
-            !rexx_compiler_compile_expression(compiler,
-                                              clause->as.call.call)) return 0;
-        (void)rexx_compiler_emit(compiler, OP_POP, 0u, 0u, 0u,
-                                 &clause->token);
+        if (!rexx_compiler_emit_call(compiler, clause->as.call.call, 1)) return 0;
         break;
     case REXX_AST_CLAUSE_RETURN:
     case REXX_AST_CLAUSE_EXIT:
@@ -1311,6 +1324,33 @@ static int rexx_compiler_compile_clause(RexxCompiler *compiler,
         (void)rexx_compiler_emit(compiler, OP_NOP, 0u, 0u, 0u,
                                  &clause->token);
         break;
+    case REXX_AST_CLAUSE_PROCEDURE: {
+        const RexxAstName *name;
+        (void)rexx_compiler_emit(compiler, OP_PROCEDURE, 0u, 0u, 0u,
+                                 &clause->token);
+        for (name = clause->as.procedure.names; name != NULL;
+             name = name->next) {
+            RexxSymbolKind kind = rexx_compiler_token_has_dot(&name->token)
+                ? REXX_SYMBOL_STEM : REXX_SYMBOL_VARIABLE;
+            symbol = rexx_compiler_intern_symbol(compiler, &name->token, kind);
+            if (compiler->status != REXX_COMPILER_STATUS_OK) return 0;
+            (void)rexx_compiler_emit(compiler, OP_EXPOSE, 0u, symbol, 0u,
+                                     &name->token);
+        }
+        break;
+    }
+    case REXX_AST_CLAUSE_DROP: {
+        const RexxAstName *name;
+        for (name = clause->as.drop.names; name != NULL; name = name->next) {
+            RexxSymbolKind kind = rexx_compiler_token_has_dot(&name->token)
+                ? REXX_SYMBOL_STEM : REXX_SYMBOL_VARIABLE;
+            symbol = rexx_compiler_intern_symbol(compiler, &name->token, kind);
+            if (compiler->status != REXX_COMPILER_STATUS_OK) return 0;
+            (void)rexx_compiler_emit(compiler, OP_DROP, 0u, symbol, 0u,
+                                     &name->token);
+        }
+        break;
+    }
     case REXX_AST_CLAUSE_LEAVE:
         if (compiler->loop_depth == 0u) {
             rexx_compiler_fail(compiler, REXX_COMPILER_STATUS_MALFORMED_AST,
@@ -1354,6 +1394,8 @@ static int rexx_compiler_compile_clause_list(RexxCompiler *compiler,
                                              const RexxAstClause *clauses)
 {
     const RexxAstClause *clause;
+    int top_level = compiler->clause_depth == 0u;
+    int after_label = 0;
     if (compiler->status != REXX_COMPILER_STATUS_OK) return 0;
     if (compiler->clause_depth >= REXX_COMPILER_MAX_NESTING) {
         rexx_compiler_fail_limit(compiler, clauses != NULL ? &clauses->token : NULL);
@@ -1368,11 +1410,21 @@ static int rexx_compiler_compile_clause_list(RexxCompiler *compiler,
             --compiler->clause_depth;
             return 0;
         }
+        if (clause->kind == REXX_AST_CLAUSE_PROCEDURE &&
+            (!top_level || !after_label)) {
+            rexx_compiler_fail(compiler, REXX_COMPILER_STATUS_MALFORMED_AST,
+                               &clause->token,
+                               rexx_compiler_message_invalid_procedure);
+            --compiler->clause_depth;
+            return 0;
+        }
         if (!rexx_compiler_visit(compiler, &clause->token) ||
             !rexx_compiler_compile_clause(compiler, clause)) {
             --compiler->clause_depth;
             return 0;
         }
+        if (clause->kind != REXX_AST_CLAUSE_LABEL) after_label = 0;
+        else after_label = 1;
     }
     --compiler->clause_depth;
     return compiler->status == REXX_COMPILER_STATUS_OK;

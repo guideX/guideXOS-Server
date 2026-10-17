@@ -24,6 +24,9 @@ extern "C" {
 #define REXX_VM_DEFAULT_INSTRUCTION_BUDGET ((size_t)1000000u)
 #define REXX_VM_DEFAULT_NUMERIC_DIGITS ((uint32_t)9u)
 #define REXX_VM_DEFAULT_NUMERIC_WORK_BUDGET ((size_t)10000000u)
+#define REXX_VM_MAX_ROUTINE_DEPTH ((size_t)64u)
+#define REXX_VM_MAX_ROUTINE_ARGUMENTS ((size_t)256u)
+#define REXX_VM_MAX_DO_DEPTH ((size_t)64u)
 
 typedef enum RexxValueType {
     REXX_VALUE_UNSET = 0,
@@ -63,7 +66,11 @@ typedef enum RexxVMStatus {
     REXX_VM_STATUS_INSTRUCTION_LIMIT,
     REXX_VM_STATUS_INVALID_NUMERIC_SETTING,
     REXX_VM_STATUS_INVALID_NUMERIC_FUZZ,
-    REXX_VM_STATUS_INVALID_NUMERIC_FORM
+    REXX_VM_STATUS_INVALID_NUMERIC_FORM,
+    REXX_VM_STATUS_UNKNOWN_ROUTINE,
+    REXX_VM_STATUS_ROUTINE_DEPTH_LIMIT,
+    REXX_VM_STATUS_INVALID_PROCEDURE,
+    REXX_VM_STATUS_MISSING_FUNCTION_RESULT
 } RexxVMStatus;
 
 typedef enum RexxNumericForm {
@@ -117,6 +124,17 @@ typedef struct RexxVM {
     size_t numeric_work_remaining;
     char *argument_string; /* Invocation string used by PARSE ARG. */
     size_t argument_string_length;
+    void *root_environment; /* Private variable-generation storage. */
+    void *current_environment;
+    void *routine_frames;
+    size_t routine_depth;
+    size_t routine_frame_capacity;
+    void *do_frames; /* Private bounded storage for active DO instructions. */
+    size_t do_depth;
+    size_t do_frame_capacity;
+    void *current_arguments; /* Private argument vector for active routine. */
+    size_t current_argument_count;
+    int procedure_pending; /* Set on routine entry; cleared by first opcode. */
 
     RexxVMEntry *locals;
     size_t local_count;

@@ -88,6 +88,12 @@ typedef struct RexxAstClause RexxAstClause;
 typedef struct RexxAstWhen RexxAstWhen;
 typedef struct RexxAstParseTemplatePart RexxAstParseTemplatePart;
 typedef struct RexxAstParseTemplate RexxAstParseTemplate;
+typedef struct RexxAstName RexxAstName;
+
+struct RexxAstName {
+    RexxToken token;
+    RexxAstName *next;
+};
 
 struct RexxAstArgument {
     RexxAstExpression *expression; /* NULL represents an omitted positional arg. */
@@ -121,7 +127,9 @@ typedef enum RexxAstClauseKind {
     REXX_AST_CLAUSE_NUMERIC_DIGITS,
     REXX_AST_CLAUSE_NUMERIC_FUZZ,
     REXX_AST_CLAUSE_NUMERIC_FORM,
-    REXX_AST_CLAUSE_PARSE
+    REXX_AST_CLAUSE_PARSE,
+    REXX_AST_CLAUSE_PROCEDURE,
+    REXX_AST_CLAUSE_DROP
 } RexxAstClauseKind;
 
 typedef enum RexxAstParseSourceKind {
@@ -234,6 +242,13 @@ struct RexxAstClause {
         RexxAstDo do_clause;
         RexxAstSelect select_clause;
         RexxAstParse parse_clause;
+        struct {
+            RexxAstName *names;
+            int subsidiary;
+        } procedure;
+        struct {
+            RexxAstName *names;
+        } drop;
     } as;
 };
 

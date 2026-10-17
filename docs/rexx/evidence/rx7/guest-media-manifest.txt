@@ -1,0 +1,9 @@
+phase=RX7 native internal-routine acceptance
+branch=REXX_SUPPORT
+sourceHead=f14e55a7767ac1c6c1226b857d72b4927f890ac7
+kernelPath=D:\dev\guideXOSServer_REXX\kernel\build\amd64\bin\kernel.elf
+kernelSha256=2510840130A3A4C5E62DFE6191CD3D2F800394F0158A16974C8CA3A208141F1A
+guestKernelSha256=2510840130A3A4C5E62DFE6191CD3D2F800394F0158A16974C8CA3A208141F1A
+media=isolated copied ESP in D:\dev\guideXOSServer_REXX\tmp\rexx-rx7-native-20261017-ac0ebf51
+network=disabled
+production ESP/disk images=not used

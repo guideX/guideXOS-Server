@@ -81,7 +81,10 @@ typedef enum RexxOpcode {
     OP_NUMERIC_DIGITS,
     OP_NUMERIC_FUZZ,
     OP_NUMERIC_FORM,
-    OP_PARSE
+    OP_PARSE,
+    OP_PROCEDURE,
+    OP_EXPOSE,
+    OP_DROP
 } RexxOpcode;
 
 /*
@@ -206,6 +209,8 @@ typedef enum RexxDoFlags {
 /* Instruction flag bits used by SAY, ADDRESS, RETURN, EXIT, and NUMERIC. */
 #define REXX_INSTRUCTION_HAS_VALUE ((uint8_t)1u)
 #define REXX_INSTRUCTION_HAS_ENVIRONMENT ((uint8_t)2u)
+#define REXX_INSTRUCTION_CALL_SUBROUTINE ((uint8_t)1u)
+#define REXX_INSTRUCTION_CALL_QUOTED ((uint8_t)2u)
 
 typedef enum RexxCompilerStatus {
     REXX_COMPILER_STATUS_OK = 0,

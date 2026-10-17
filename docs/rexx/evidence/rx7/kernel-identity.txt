@@ -1,0 +1,5 @@
+phase=RX7
+source=D:\dev\guideXOSServer_REXX\kernel\build\amd64\bin\kernel.elf
+sha256=2510840130A3A4C5E62DFE6191CD3D2F800394F0158A16974C8CA3A208141F1A
+network=disabled
+media=D:\dev\guideXOSServer_REXX\tmp\rexx-rx7-native-20261017-ac0ebf51\ESP
