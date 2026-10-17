@@ -21,9 +21,9 @@ extern "C" {
  * Execute one REXX source file.
  *
  * Supported forms:
- *   rexx <script.rx>
+ *   rexx <script.rx> [arguments...]
  *   rexx --help
- *   rexx -- <script-path>
+ *   rexx -- <script-path> [arguments...]
  *
  * The wrapper owns and releases all source, parser, bytecode, and VM state
  * created while executing the script. The argv strings remain caller-owned.

@@ -16,6 +16,7 @@ $rx3DecimalTest = Join-Path $buildDirectory "rexx_rx3_decimal_tests.exe"
 $rx3AllocFailureTest = Join-Path $buildDirectory "rexx_rx3_alloc_failure_tests.exe"
 $rx4ArithmeticTest = Join-Path $buildDirectory "rexx_rx4_arithmetic_tests.exe"
 $rx5NumericContextTest = Join-Path $buildDirectory "rexx_rx5_numeric_context_tests.exe"
+$rx6AllocFailureTest = Join-Path $buildDirectory "rexx_rx6_parse_alloc_failure_tests.exe"
 $rx2ShellBridgeTest = Join-Path $buildDirectory "rexx_rx2_shell_bridge_tests.exe"
 $commonSources = @(
     (Join-Path $rootDir "rexx_lexer.c"),
@@ -95,6 +96,16 @@ if ($LASTEXITCODE -ne 0) {
     throw "RX5 numeric-context test build failed with exit code $LASTEXITCODE."
 }
 
+Write-Host "Building RX6 PARSE allocation-failure tests"
+& $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
+    -DREXX_PARSER_TEST_ALLOCATOR -DREXX_COMPILER_TEST_ALLOCATOR `
+    -Wall -Wextra -Wpedantic -Werror `
+    (Join-Path $PSScriptRoot "rexx_rx6_parse_alloc_failure_test.c") `
+    @commonSources -lm -o $rx6AllocFailureTest
+if ($LASTEXITCODE -ne 0) {
+    throw "RX6 PARSE allocation-failure test build failed with exit code $LASTEXITCODE."
+}
+
 $gxxCommand = Get-Command g++ -ErrorAction SilentlyContinue
 if ($null -eq $gxxCommand) {
     throw "g++ is required for the RX2 shell bridge integration test."
@@ -151,6 +162,12 @@ if ($LASTEXITCODE -ne 0) {
     throw "RX5 numeric-context assertions failed with exit code $LASTEXITCODE."
 }
 
+Write-Host "Running RX6 PARSE allocation-failure assertions"
+& $rx6AllocFailureTest
+if ($LASTEXITCODE -ne 0) {
+    throw "RX6 PARSE allocation-failure assertions failed with exit code $LASTEXITCODE."
+}
+
 Write-Host "Running RX2 shell bridge assertions"
 & $rx2ShellBridgeTest
 if ($LASTEXITCODE -ne 0) {
@@ -167,7 +184,8 @@ function Assert-CliCase {
         [string[]]$ExpectedOutput,
         [int]$ExpectedExit,
         [string]$ExpectedDiagnostic = "",
-        [switch]$CompareRegina
+        [switch]$CompareRegina,
+        [string[]]$ScriptArguments = @()
     )
 
     $sourcePath = Join-Path $buildDirectory ($Name + ".rex")
@@ -176,7 +194,7 @@ function Assert-CliCase {
         $Source,
         [System.Text.UTF8Encoding]::new($false))
 
-    $actual = Invoke-CapturedProcess $cliTest @($sourcePath)
+    $actual = Invoke-CapturedProcess $cliTest (@($sourcePath) + $ScriptArguments)
     $actualExit = $actual.ExitCode
     $actualText = (($actual.Stdout + $actual.Stderr) -replace "`r`n", "`n")
     $actualText = $actualText.TrimEnd([char[]]"`n")
@@ -211,6 +229,38 @@ function Assert-CliCase {
     Write-Host "[PASS] CLI $Name"
 }
 
+function ConvertTo-WindowsProcessArgument {
+    param([string]$Argument)
+
+    if ($Argument.Length -gt 0 -and $Argument -notmatch '[\s"]') {
+        return $Argument
+    }
+
+    $builder = [System.Text.StringBuilder]::new()
+    [void]$builder.Append([char]0x22)
+    $backslashCount = 0
+    foreach ($character in $Argument.ToCharArray()) {
+        if ($character -eq [char]0x5c) {
+            ++$backslashCount
+        } elseif ($character -eq [char]0x22) {
+            [void]$builder.Append(('\' * (($backslashCount * 2) + 1)))
+            [void]$builder.Append([char]0x22)
+            $backslashCount = 0
+        } else {
+            if ($backslashCount -gt 0) {
+                [void]$builder.Append(('\' * $backslashCount))
+                $backslashCount = 0
+            }
+            [void]$builder.Append($character)
+        }
+    }
+    if ($backslashCount -gt 0) {
+        [void]$builder.Append(('\' * ($backslashCount * 2)))
+    }
+    [void]$builder.Append([char]0x22)
+    return $builder.ToString()
+}
+
 function Invoke-CapturedProcess {
     param(
         [string]$Executable,
@@ -219,7 +269,16 @@ function Invoke-CapturedProcess {
 
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $Executable
-    $startInfo.Arguments = (($Arguments | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+    if ($null -ne $startInfo.PSObject.Properties['ArgumentList']) {
+        foreach ($argument in $Arguments) {
+            $startInfo.ArgumentList.Add($argument)
+        }
+    } else {
+        $quotedArguments = foreach ($argument in $Arguments) {
+            ConvertTo-WindowsProcessArgument $argument
+        }
+        $startInfo.Arguments = [string]::Join(' ', [string[]]$quotedArguments)
+    }
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
@@ -329,6 +388,30 @@ say 8 / 2
 '@
 Assert-CliCase "classic_division_opcode" $divisionSource @("4") 0 -CompareRegina
 
+$parseArgSource = @'
+parse arg all
+say '['||all||']'
+'@
+Assert-CliCase "parse_arg_case_and_shell_tokenization" $parseArgSource `
+    @('[MiXeD  Two Tail"Quoted]') 0 `
+    -ScriptArguments @('MiXeD  Two', 'Tail"Quoted')
+
+$parseUpperArgSource = @'
+parse upper arg all
+say '['||all||']'
+'@
+Assert-CliCase "parse_upper_arg" $parseUpperArgSource `
+    @('[MIXED  TWO TAIL"QUOTED]') 0 `
+    -ScriptArguments @('MiXeD  Two', 'Tail"Quoted')
+
+$parseCommaArgSource = @'
+parse arg first rest, second
+say '['||first||']['||rest||']['||second||']'
+'@
+Assert-CliCase "parse_arg_comma_templates" $parseCommaArgSource `
+    @('[Alpha][Beta Gamma][]') 0 `
+    -ScriptArguments @('Alpha Beta', 'Gamma')
+
 $rx3FixtureDirectory = Join-Path $PSScriptRoot "rexx_rx3"
 $script:rx3Passed = 0
 $script:rx3ReginaPassed = 0
@@ -434,6 +517,74 @@ foreach ($fixture in Get-ChildItem -LiteralPath $rx5FixtureDirectory -Filter "*.
     Write-Host "[PASS] RX5 fixture $($fixture.Name)"
 }
 
+$rx6FixtureDirectory = Join-Path $PSScriptRoot "rexx_rx6"
+$script:rx6Passed = 0
+$script:rx6ReginaPassed = 0
+foreach ($fixture in Get-ChildItem -LiteralPath $rx6FixtureDirectory -Filter "*.rex" | Sort-Object Name) {
+    $diagnosticPath = [System.IO.Path]::ChangeExtension($fixture.FullName, ".diag")
+    $outputPath = [System.IO.Path]::ChangeExtension($fixture.FullName, ".out")
+    $actual = Invoke-CapturedProcess $cliTest @($fixture.FullName)
+    $actualText = (($actual.Stdout + $actual.Stderr) -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+    if (Test-Path -LiteralPath $diagnosticPath) {
+        $expectedDiagnostic = (Get-Content -Raw -LiteralPath $diagnosticPath).Trim()
+        if ($actual.ExitCode -ne 1 -or $actual.Stdout.Length -ne 0 -or -not $actualText.Contains($expectedDiagnostic)) {
+            throw "RX6 fixture $($fixture.Name) failed its expected diagnostic. Exit=$($actual.ExitCode) Output=$actualText"
+        }
+    } else {
+        if (-not (Test-Path -LiteralPath $outputPath)) {
+            throw "RX6 fixture $($fixture.Name) has no .out expectation."
+        }
+        $expectedOutput = ((Get-Content -Raw -LiteralPath $outputPath) -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+        $stdoutText = ($actual.Stdout -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+        if ($actual.ExitCode -ne 0 -or $stdoutText -cne $expectedOutput -or $actual.Stderr.Length -ne 0) {
+            throw "RX6 fixture $($fixture.Name) output mismatch. Expected '$expectedOutput'; got '$actualText'/$($actual.ExitCode)."
+        }
+        if ($null -ne $script:reginaCommand) {
+            $reference = Invoke-CapturedProcess $script:reginaCommand.Source @($fixture.FullName)
+            $referenceText = (($reference.Stdout + $reference.Stderr) -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+            if ($reference.ExitCode -ne 0 -or $referenceText -cne $expectedOutput) {
+                throw "RX6 fixture $($fixture.Name) expected '$expectedOutput' from Regina; got '$referenceText'/$($reference.ExitCode)."
+            }
+            ++$script:rx6ReginaPassed
+        }
+    }
+    ++$script:rx6Passed
+    Write-Host "[PASS] RX6 fixture $($fixture.Name)"
+}
+
+$parserLimitPath = Join-Path $buildDirectory "parse_template_node_limit.rex"
+$parserLimitSource = "parse value '' with " + ((@('.') * 65540) -join ' ')
+[System.IO.File]::WriteAllText(
+    $parserLimitPath,
+    $parserLimitSource,
+    [System.Text.UTF8Encoding]::new($false))
+$parserLimitResult = Invoke-CapturedProcess $cliTest @($parserLimitPath)
+$parserLimitOutput = $parserLimitResult.Stdout + $parserLimitResult.Stderr
+if ($parserLimitResult.ExitCode -ne 1 -or
+    $parserLimitResult.Stdout.Length -ne 0 -or
+    -not $parserLimitOutput.Contains("parser resource limit exceeded")) {
+    throw "PARSE template-node limit did not fail with a parser diagnostic. Exit=$($parserLimitResult.ExitCode) Output=$parserLimitOutput"
+}
+$script:rx6Passed++
+Write-Host "[PASS] RX6 parser template-node resource limit"
+
+$parseWorkPath = Join-Path $buildDirectory "parse_match_work_limit.rex"
+$parseWorkSource = "parse value '" + ('a' * 8192) + "' with field '" +
+    (('a' * 4095) + 'b') + "' rest`n"
+[System.IO.File]::WriteAllText(
+    $parseWorkPath,
+    $parseWorkSource,
+    [System.Text.UTF8Encoding]::new($false))
+$parseWorkResult = Invoke-CapturedProcess $cliTest @($parseWorkPath)
+$parseWorkOutput = $parseWorkResult.Stdout + $parseWorkResult.Stderr
+if ($parseWorkResult.ExitCode -ne 1 -or
+    $parseWorkResult.Stdout.Length -ne 0 -or
+    -not $parseWorkOutput.Contains("VM resource limit exceeded")) {
+    throw "PARSE matching-work limit did not fail safely. Exit=$($parseWorkResult.ExitCode) Output=$parseWorkOutput"
+}
+$script:rx6Passed++
+Write-Host "[PASS] RX6 bounded pattern-matching work"
+
 $oversizePath = Join-Path $buildDirectory "source_limit.rex"
 $oversizeStream = [System.IO.File]::Open(
     $oversizePath,
@@ -466,13 +617,16 @@ Write-Host "Hosted CLI cases passed: $script:cliPassed/$script:cliPassed"
 Write-Host "RX3 compatibility fixtures passed: $script:rx3Passed/$script:rx3Passed"
 Write-Host "RX4 compatibility fixtures passed: $script:rx4Passed/$script:rx4Passed"
 Write-Host "RX5 compatibility fixtures passed: $script:rx5Passed/$script:rx5Passed"
+Write-Host "RX6 compatibility and resource fixtures passed: $script:rx6Passed/$script:rx6Passed"
 if ($null -eq $script:reginaCommand) {
     Write-Host "RX3 Regina differential cases: 0 run (Regina unavailable)"
     Write-Host "RX4 Regina differential cases: 0 run (Regina unavailable)"
     Write-Host "RX5 Regina differential cases: 0 run (Regina unavailable)"
+    Write-Host "RX6 Regina differential cases: 0 run (Regina unavailable)"
 } else {
     Write-Host "RX3 Regina differential cases passed: $script:rx3ReginaPassed/$script:rx3ReginaPassed"
     Write-Host "RX4 Regina differential cases passed: $script:rx4ReginaPassed/$script:rx4ReginaPassed"
     Write-Host "RX5 Regina differential cases passed: $script:rx5ReginaPassed/$script:rx5ReginaPassed"
+    Write-Host "RX6 Regina differential cases passed: $script:rx6ReginaPassed/$script:rx6ReginaPassed"
 }
 Write-Host "Build and temporary script artifacts: $buildDirectory"

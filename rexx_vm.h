@@ -19,6 +19,8 @@ extern "C" {
 #define REXX_VM_DEFAULT_STACK_CAPACITY ((size_t)256u)
 #define REXX_VM_MAX_STACK_CAPACITY ((size_t)1048576u)
 #define REXX_VM_MAX_TABLE_ENTRIES ((size_t)65536u)
+#define REXX_VM_MAX_PARSE_SOURCE_LENGTH ((size_t)16777216u)
+#define REXX_VM_MAX_PARSE_WORK ((size_t)16777216u)
 #define REXX_VM_DEFAULT_INSTRUCTION_BUDGET ((size_t)1000000u)
 #define REXX_VM_DEFAULT_NUMERIC_DIGITS ((uint32_t)9u)
 #define REXX_VM_DEFAULT_NUMERIC_WORK_BUDGET ((size_t)10000000u)
@@ -113,6 +115,8 @@ typedef struct RexxVM {
     RexxNumericForm numeric_form; /* Per-VM NUMERIC FORM context. */
     size_t numeric_work_budget;
     size_t numeric_work_remaining;
+    char *argument_string; /* Invocation string used by PARSE ARG. */
+    size_t argument_string_length;
 
     RexxVMEntry *locals;
     size_t local_count;
@@ -149,6 +153,11 @@ void rexx_vm_free(RexxVM *vm);
 /* Set the maximum number of bytecode instructions dispatched by one execute.
  * Zero is rejected so execution always remains bounded. */
 RexxVMStatus rexx_vm_set_instruction_budget(RexxVM *vm, size_t budget);
+
+/* Set the command/program invocation string consumed by PARSE ARG. */
+RexxVMStatus rexx_vm_set_argument_string(RexxVM *vm,
+                                         const char *bytes,
+                                         size_t length);
 
 /*
  * Executes the compiler opcodes implemented by this VM. Other opcodes return

@@ -7,9 +7,9 @@
  * buffer used by the lexer; keep that buffer alive for as long as the AST is
  * inspected. AST nodes themselves are allocated by this module and released
  * with rexx_parser_free_ast(). The grammar covers labels, assignments,
- * command expressions, ADDRESS, SAY/CALL/RETURN/EXIT/NOP/LEAVE/ITERATE, and the IF,
- * DO, and SELECT control forms; other lexer keywords currently produce a
- * syntax error because they do not yet have dedicated AST forms.
+ * command expressions, ADDRESS, PARSE, SAY/CALL/RETURN/EXIT/NOP/LEAVE/ITERATE,
+ * and the IF, DO, and SELECT control forms; other lexer keywords currently
+ * produce a syntax error because they do not yet have dedicated AST forms.
  */
 
 #include "rexx_lexer.h"
@@ -86,6 +86,8 @@ typedef struct RexxAstExpression RexxAstExpression;
 typedef struct RexxAstArgument RexxAstArgument;
 typedef struct RexxAstClause RexxAstClause;
 typedef struct RexxAstWhen RexxAstWhen;
+typedef struct RexxAstParseTemplatePart RexxAstParseTemplatePart;
+typedef struct RexxAstParseTemplate RexxAstParseTemplate;
 
 struct RexxAstArgument {
     RexxAstExpression *expression; /* NULL represents an omitted positional arg. */
@@ -118,8 +120,51 @@ typedef enum RexxAstClauseKind {
     REXX_AST_CLAUSE_SELECT,
     REXX_AST_CLAUSE_NUMERIC_DIGITS,
     REXX_AST_CLAUSE_NUMERIC_FUZZ,
-    REXX_AST_CLAUSE_NUMERIC_FORM
+    REXX_AST_CLAUSE_NUMERIC_FORM,
+    REXX_AST_CLAUSE_PARSE
 } RexxAstClauseKind;
+
+typedef enum RexxAstParseSourceKind {
+    REXX_AST_PARSE_ARG = 0,
+    REXX_AST_PARSE_VAR,
+    REXX_AST_PARSE_VALUE
+} RexxAstParseSourceKind;
+
+typedef enum RexxAstParsePartKind {
+    REXX_AST_PARSE_VARIABLE = 0,
+    REXX_AST_PARSE_PLACEHOLDER,
+    REXX_AST_PARSE_STRING_PATTERN,
+    REXX_AST_PARSE_POSITION_PATTERN
+} RexxAstParsePartKind;
+
+typedef enum RexxAstParsePositionKind {
+    REXX_AST_PARSE_POSITION_ABSOLUTE = 0,
+    REXX_AST_PARSE_POSITION_FORWARD,
+    REXX_AST_PARSE_POSITION_BACKWARD
+} RexxAstParsePositionKind;
+
+/* Pattern tokens are quoted literals or variable names in parentheses. */
+struct RexxAstParseTemplatePart {
+    RexxAstParsePartKind kind;
+    RexxAstParsePositionKind position_kind;
+    uint32_t position;
+    int dynamic;
+    RexxToken token;
+    RexxAstParseTemplatePart *next;
+};
+
+struct RexxAstParseTemplate {
+    RexxAstParseTemplatePart *parts;
+    RexxAstParseTemplate *next;
+};
+
+typedef struct RexxAstParse {
+    RexxAstParseSourceKind source_kind;
+    RexxToken source_variable;
+    RexxAstExpression *source_expression;
+    RexxAstParseTemplate *templates;
+    int uppercase;
+} RexxAstParse;
 
 typedef enum RexxAstDoMode {
     /* A plain DO group executes once; WHILE/UNTIL can still qualify it. */
@@ -188,6 +233,7 @@ struct RexxAstClause {
         } if_clause;
         RexxAstDo do_clause;
         RexxAstSelect select_clause;
+        RexxAstParse parse_clause;
     } as;
 };
 
@@ -220,6 +266,13 @@ typedef struct RexxParser {
 #define REXX_PARSER_MAX_NESTING ((size_t)128u)
 #define REXX_PARSER_MAX_EXPRESSION_NODES ((size_t)512u)
 #define REXX_PARSER_MAX_AST_NODES ((size_t)65536u)
+
+#if defined(REXX_PARSER_TEST_ALLOCATOR) && !defined(GXOS_BARE_METAL)
+void rexx_parser_test_allocator_fail_on(size_t allocation_attempt);
+void rexx_parser_test_allocator_disable(void);
+size_t rexx_parser_test_allocator_attempts(void);
+size_t rexx_parser_test_allocator_live_blocks(void);
+#endif
 
 RexxParserStatus rexx_parser_init(RexxParser *parser, RexxLexer *lexer);
 

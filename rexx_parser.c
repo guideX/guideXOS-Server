@@ -12,6 +12,55 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(REXX_PARSER_TEST_ALLOCATOR) && !defined(GXOS_BARE_METAL)
+static size_t parser_test_fail_on;
+static size_t parser_test_attempt_count;
+static size_t parser_test_live_blocks;
+
+static void *rexx_parser_calloc(size_t count, size_t size)
+{
+    void *memory;
+    ++parser_test_attempt_count;
+    if (parser_test_fail_on != 0u &&
+        parser_test_attempt_count == parser_test_fail_on)
+        return NULL;
+    memory = calloc(count, size);
+    if (memory != NULL) ++parser_test_live_blocks;
+    return memory;
+}
+
+static void rexx_parser_free(void *memory)
+{
+    if (memory != NULL && parser_test_live_blocks != 0u)
+        --parser_test_live_blocks;
+    free(memory);
+}
+
+void rexx_parser_test_allocator_fail_on(size_t allocation_attempt)
+{
+    parser_test_attempt_count = 0u;
+    parser_test_fail_on = allocation_attempt;
+}
+
+void rexx_parser_test_allocator_disable(void)
+{
+    parser_test_fail_on = 0u;
+}
+
+size_t rexx_parser_test_allocator_attempts(void)
+{
+    return parser_test_attempt_count;
+}
+
+size_t rexx_parser_test_allocator_live_blocks(void)
+{
+    return parser_test_live_blocks;
+}
+#else
+#define rexx_parser_calloc calloc
+#define rexx_parser_free free
+#endif
+
 typedef struct RexxParserAllocation {
     struct RexxParserAllocation *next;
 } RexxParserAllocation;
@@ -27,6 +76,7 @@ typedef struct RexxParserAllocation {
 #define REXX_STOP_FOR        (1u << 7)
 #define REXX_STOP_WHILE      (1u << 8)
 #define REXX_STOP_UNTIL      (1u << 9)
+#define REXX_STOP_PARSE_WITH (1u << 10)
 
 #define REXX_STOP_DO_MODIFIERS \
     (REXX_STOP_TO | REXX_STOP_BY | REXX_STOP_FOR | \
@@ -72,6 +122,18 @@ static const char rexx_parser_message_unsupported_numeric_setting[] =
     "unsupported NUMERIC setting";
 static const char rexx_parser_message_numeric_form_requires_value[] =
     "NUMERIC FORM expressions beginning with a symbol or string require VALUE";
+static const char rexx_parser_message_parse_subkeyword[] =
+    "PARSE requires ARG, VAR, or VALUE";
+static const char rexx_parser_message_parse_var_name[] =
+    "PARSE VAR requires a variable name";
+static const char rexx_parser_message_parse_with[] =
+    "PARSE VALUE requires WITH after its expression";
+static const char rexx_parser_message_parse_template[] =
+    "unexpected token in PARSE template";
+static const char rexx_parser_message_parse_position[] =
+    "PARSE positional pattern requires a whole number or variable pattern";
+static const char rexx_parser_message_parse_position_range[] =
+    "PARSE positional pattern is outside the supported range";
 static const char rexx_parser_message_resource_limit[] =
     "parser resource limit exceeded";
 static const char rexx_parser_message_out_of_memory[] =
@@ -193,8 +255,8 @@ static void *rexx_parser_allocate(RexxParser *parser, size_t size)
                               rexx_parser_message_allocation_overflow);
         return NULL;
     }
-    allocation = (RexxParserAllocation *)calloc(1u,
-                                                 sizeof(*allocation) + size);
+    allocation = (RexxParserAllocation *)rexx_parser_calloc(
+        1u, sizeof(*allocation) + size);
     if (allocation == NULL) {
         rexx_parser_set_error(parser, REXX_PARSER_STATUS_OUT_OF_MEMORY,
                               &parser->current,
@@ -213,7 +275,7 @@ static void rexx_parser_deallocate(void *memory)
     if (memory != NULL) {
         RexxParserAllocation *allocation =
             ((RexxParserAllocation *)memory) - 1;
-        free(allocation);
+        rexx_parser_free(allocation);
     }
 }
 
@@ -228,7 +290,7 @@ static void rexx_parser_discard_allocations(RexxParser *parser)
     parser->allocation_list = NULL;
     while (allocation != NULL) {
         RexxParserAllocation *next = allocation->next;
-        free(allocation);
+        rexx_parser_free(allocation);
         allocation = next;
     }
 }
@@ -361,7 +423,9 @@ static int rexx_parser_token_is_stop(const RexxToken *token,
     case TOKEN_KEYWORD_UNTIL:
         return (stop_mask & REXX_STOP_UNTIL) != 0u;
     default:
-        return 0;
+        return (stop_mask & REXX_STOP_PARSE_WITH) != 0u &&
+               token->type == TOKEN_SYMBOL &&
+               rexx_token_equals_ascii_case_insensitive(token, "WITH");
     }
 }
 
@@ -753,12 +817,14 @@ static RexxAstExpression *rexx_parser_parse_primary(
     if (parser->current.type == TOKEN_LEFT_PAREN) {
         RexxAstExpression *inner;
         RexxAstExpression *group;
+        unsigned int inner_stop_mask = stop_mask & ~REXX_STOP_PARSE_WITH;
 
         token = parser->current;
         if (!rexx_parser_advance(parser)) {
             return NULL;
         }
-        inner = rexx_parser_parse_expression_internal(parser, 1, stop_mask);
+        inner = rexx_parser_parse_expression_internal(parser, 1,
+                                                      inner_stop_mask);
         if (inner == NULL) {
             return NULL;
         }
@@ -1632,6 +1698,258 @@ static RexxAstClause *rexx_parser_parse_numeric_clause(
     return NULL;
 }
 
+static int rexx_parser_parse_template_variable(RexxParser *parser,
+                                               RexxToken *variable)
+{
+    if (parser->current.type != TOKEN_LEFT_PAREN) {
+        rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                              &parser->current,
+                              rexx_parser_message_parse_position);
+        return 0;
+    }
+    if (!rexx_parser_advance(parser)) return 0;
+    if (!rexx_parser_is_name_token(&parser->current)) {
+        rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                              &parser->current,
+                              rexx_parser_message_parse_position);
+        return 0;
+    }
+    *variable = parser->current;
+    if (!rexx_parser_advance(parser)) return 0;
+    if (parser->current.type != TOKEN_RIGHT_PAREN) {
+        rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                              &parser->current,
+                              rexx_parser_message_parse_position);
+        return 0;
+    }
+    return rexx_parser_advance(parser);
+}
+
+static int rexx_parser_parse_position_value(RexxParser *parser,
+                                           uint32_t *position)
+{
+    uint32_t value = 0u;
+    size_t index;
+    const RexxToken *token = &parser->current;
+
+    if (token->type != TOKEN_NUMBER || token->length == 0u ||
+        token->lexeme == NULL) {
+        rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                              token, rexx_parser_message_parse_position);
+        return 0;
+    }
+    for (index = 0u; index < token->length; ++index) {
+        unsigned char digit = (unsigned char)token->lexeme[index];
+        if (digit < (unsigned char)'0' || digit > (unsigned char)'9') {
+            rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                                  token,
+                                  rexx_parser_message_parse_position);
+            return 0;
+        }
+        digit = (unsigned char)(digit - (unsigned char)'0');
+        if (value > (UINT32_MAX - (uint32_t)digit) / 10u) {
+            rexx_parser_set_error(parser, REXX_PARSER_STATUS_RESOURCE_LIMIT,
+                                  token,
+                                  rexx_parser_message_parse_position_range);
+            return 0;
+        }
+        value = value * 10u + (uint32_t)digit;
+    }
+    *position = value;
+    return 1;
+}
+
+static RexxAstParseTemplatePart *rexx_parser_parse_template_part(
+    RexxParser *parser)
+{
+    RexxAstParseTemplatePart *part;
+    RexxToken token = parser->current;
+    RexxAstParsePartKind kind;
+    RexxAstParsePositionKind position_kind = REXX_AST_PARSE_POSITION_ABSOLUTE;
+    uint32_t position = 0u;
+    int dynamic = 0;
+
+    if (parser->current.type == TOKEN_DOT) {
+        kind = REXX_AST_PARSE_PLACEHOLDER;
+        if (!rexx_parser_advance(parser)) return NULL;
+    } else if (parser->current.type == TOKEN_STRING ||
+               parser->current.type == TOKEN_HEX_STRING ||
+               parser->current.type == TOKEN_BINARY_STRING) {
+        kind = REXX_AST_PARSE_STRING_PATTERN;
+        if (!rexx_parser_advance(parser)) return NULL;
+    } else if (parser->current.type == TOKEN_NUMBER ||
+               parser->current.type == TOKEN_ASSIGN ||
+               (parser->current.type == TOKEN_OPERATOR &&
+                parser->current.length == 1u &&
+                (parser->current.lexeme[0] == '+' ||
+                 parser->current.lexeme[0] == '-'))) {
+        kind = REXX_AST_PARSE_POSITION_PATTERN;
+        if (parser->current.type == TOKEN_ASSIGN ||
+            parser->current.type == TOKEN_OPERATOR) {
+            if (parser->current.type == TOKEN_OPERATOR) {
+                position_kind = parser->current.lexeme[0] == '+'
+                    ? REXX_AST_PARSE_POSITION_FORWARD
+                    : REXX_AST_PARSE_POSITION_BACKWARD;
+            }
+            if (!rexx_parser_advance(parser)) return NULL;
+            if (parser->current.type == TOKEN_LEFT_PAREN) {
+                dynamic = 1;
+                if (!rexx_parser_parse_template_variable(parser, &token)) {
+                    return NULL;
+                }
+            } else {
+                token = parser->current;
+                if (!rexx_parser_parse_position_value(parser, &position) ||
+                    !rexx_parser_advance(parser)) {
+                    return NULL;
+                }
+            }
+        } else {
+            if (!rexx_parser_parse_position_value(parser, &position) ||
+                !rexx_parser_advance(parser)) {
+                return NULL;
+            }
+        }
+    } else if (parser->current.type == TOKEN_LEFT_PAREN) {
+        kind = REXX_AST_PARSE_STRING_PATTERN;
+        dynamic = 1;
+        if (!rexx_parser_parse_template_variable(parser, &token)) return NULL;
+    } else if (rexx_parser_is_name_token(&parser->current)) {
+        kind = REXX_AST_PARSE_VARIABLE;
+        if (!rexx_parser_advance(parser)) return NULL;
+    } else {
+        rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                              &parser->current,
+                              rexx_parser_message_parse_template);
+        return NULL;
+    }
+
+    part = (RexxAstParseTemplatePart *)rexx_parser_allocate(
+        parser, sizeof(*part));
+    if (part == NULL) return NULL;
+    part->kind = kind;
+    part->position_kind = position_kind;
+    part->position = position;
+    part->dynamic = dynamic;
+    part->token = token;
+    return part;
+}
+
+static int rexx_parser_template_list_ended(const RexxParser *parser,
+                                          unsigned int stop_mask)
+{
+    return parser != NULL && parser->current.type != TOKEN_COMMA &&
+           rexx_parser_token_is_stop(&parser->current, stop_mask);
+}
+
+static int rexx_parser_parse_template_list(RexxParser *parser,
+                                           unsigned int stop_mask,
+                                           RexxAstParseTemplate **templates)
+{
+    RexxAstParseTemplate *tail = NULL;
+    int after_comma = 0;
+
+    *templates = NULL;
+
+    for (;;) {
+        if (!after_comma &&
+            rexx_parser_template_list_ended(parser, stop_mask)) return 1;
+        RexxAstParseTemplate *template_part =
+            (RexxAstParseTemplate *)rexx_parser_allocate(
+                parser, sizeof(*template_part));
+        RexxAstParseTemplatePart *part_tail = NULL;
+        if (template_part == NULL) return 0;
+        if (tail == NULL) *templates = template_part;
+        else tail->next = template_part;
+        tail = template_part;
+
+        while (!rexx_parser_template_list_ended(parser, stop_mask) &&
+               parser->current.type != TOKEN_COMMA) {
+            RexxAstParseTemplatePart *part =
+                rexx_parser_parse_template_part(parser);
+            if (part == NULL) return 0;
+            if (part_tail == NULL) template_part->parts = part;
+            else part_tail->next = part;
+            part_tail = part;
+        }
+
+        if (parser->current.type != TOKEN_COMMA) return 1;
+        if (!rexx_parser_advance(parser)) return 0;
+        after_comma = 1;
+    }
+}
+
+static RexxAstClause *rexx_parser_parse_parse_clause(
+    RexxParser *parser,
+    unsigned int stop_mask)
+{
+    RexxToken parse_token = parser->current;
+    RexxAstClause *clause = rexx_parser_new_clause(
+        parser, REXX_AST_CLAUSE_PARSE, &parse_token);
+    RexxAstParse *parse_clause;
+
+    if (clause == NULL || !rexx_parser_advance(parser)) return NULL;
+    parse_clause = &clause->as.parse_clause;
+    if (parser->current.type == TOKEN_SYMBOL &&
+        rexx_token_equals_ascii_case_insensitive(&parser->current, "UPPER")) {
+        parse_clause->uppercase = 1;
+        if (!rexx_parser_advance(parser)) return NULL;
+    }
+
+    if (parser->current.type == TOKEN_KEYWORD_ARG) {
+        parse_clause->source_kind = REXX_AST_PARSE_ARG;
+        if (!rexx_parser_advance(parser)) return NULL;
+    } else if (parser->current.type == TOKEN_SYMBOL &&
+               rexx_token_equals_ascii_case_insensitive(&parser->current,
+                                                        "VAR")) {
+        parse_clause->source_kind = REXX_AST_PARSE_VAR;
+        if (!rexx_parser_advance(parser)) return NULL;
+        if (!rexx_parser_is_name_token(&parser->current)) {
+            rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                                  &parser->current,
+                                  rexx_parser_message_parse_var_name);
+            return NULL;
+        }
+        parse_clause->source_variable = parser->current;
+        if (!rexx_parser_advance(parser)) return NULL;
+    } else if (parser->current.type == TOKEN_SYMBOL &&
+               rexx_token_equals_ascii_case_insensitive(&parser->current,
+                                                        "VALUE")) {
+        parse_clause->source_kind = REXX_AST_PARSE_VALUE;
+        if (!rexx_parser_advance(parser)) return NULL;
+        if (rexx_parser_token_is_stop(&parser->current, stop_mask)) {
+            rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                                  &parser->current,
+                                  rexx_parser_message_expected_expression);
+            return NULL;
+        }
+        parse_clause->source_expression =
+            rexx_parser_parse_expression_internal(
+                parser, 1, stop_mask | REXX_STOP_PARSE_WITH);
+        if (parse_clause->source_expression == NULL) return NULL;
+        if (parser->current.type != TOKEN_SYMBOL ||
+            !rexx_token_equals_ascii_case_insensitive(&parser->current,
+                                                       "WITH")) {
+            rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                                  &parser->current,
+                                  rexx_parser_message_parse_with);
+            return NULL;
+        }
+        if (!rexx_parser_advance(parser)) return NULL;
+    } else {
+        rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                              &parser->current,
+                              rexx_parser_message_parse_subkeyword);
+        return NULL;
+    }
+
+    if (!rexx_parser_parse_template_list(parser, stop_mask,
+                                         &parse_clause->templates)) {
+        return NULL;
+    }
+    return clause;
+}
+
 static RexxAstClause *rexx_parser_parse_simple_keyword(
     RexxParser *parser,
     RexxAstClauseKind kind,
@@ -1694,6 +2012,9 @@ static RexxAstClause *rexx_parser_parse_clause(RexxParser *parser,
     }
 
     switch (parser->current.type) {
+    case TOKEN_KEYWORD_PARSE:
+        clause = rexx_parser_parse_parse_clause(parser, stop_mask);
+        break;
     case TOKEN_KEYWORD_NUMERIC:
         clause = rexx_parser_parse_numeric_clause(parser, stop_mask);
         break;
@@ -1786,6 +2107,22 @@ static void rexx_parser_free_when_list(RexxAstWhen *when_clauses)
     }
 }
 
+static void rexx_parser_free_parse_templates(
+    RexxAstParseTemplate *templates)
+{
+    while (templates != NULL) {
+        RexxAstParseTemplate *next_template = templates->next;
+        RexxAstParseTemplatePart *part = templates->parts;
+        while (part != NULL) {
+            RexxAstParseTemplatePart *next_part = part->next;
+            rexx_parser_deallocate(part);
+            part = next_part;
+        }
+        rexx_parser_deallocate(templates);
+        templates = next_template;
+    }
+}
+
 static void rexx_parser_free_clause_list(RexxAstClause *clauses)
 {
     while (clauses != NULL) {
@@ -1804,6 +2141,12 @@ static void rexx_parser_free_clause_list(RexxAstClause *clauses)
         case REXX_AST_CLAUSE_NUMERIC_FUZZ:
         case REXX_AST_CLAUSE_NUMERIC_FORM:
             rexx_parser_free_expression(clauses->as.simple.expression);
+            break;
+        case REXX_AST_CLAUSE_PARSE:
+            rexx_parser_free_expression(
+                clauses->as.parse_clause.source_expression);
+            rexx_parser_free_parse_templates(
+                clauses->as.parse_clause.templates);
             break;
         case REXX_AST_CLAUSE_CALL:
             rexx_parser_free_expression(clauses->as.call.call);

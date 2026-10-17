@@ -369,6 +369,27 @@ RexxVMStatus rexx_vm_set_instruction_budget(RexxVM *vm, size_t budget)
     return REXX_VM_STATUS_OK;
 }
 
+RexxVMStatus rexx_vm_set_argument_string(RexxVM *vm,
+                                         const char *bytes,
+                                         size_t length)
+{
+    char *copy;
+    if (vm == NULL || !vm->initialized ||
+        (bytes == NULL && length != 0u) || length == SIZE_MAX)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    if (length > REXX_VM_MAX_PARSE_SOURCE_LENGTH)
+        return vm_fail(vm, REXX_VM_STATUS_RESOURCE_LIMIT, vm->pc);
+    copy = (char *)vm_malloc(length + 1u);
+    if (copy == NULL)
+        return vm_fail(vm, REXX_VM_STATUS_OUT_OF_MEMORY, vm->pc);
+    if (length != 0u) memcpy(copy, bytes, length);
+    copy[length] = '\0';
+    vm_free(vm->argument_string);
+    vm->argument_string = copy;
+    vm->argument_string_length = length;
+    return REXX_VM_STATUS_OK;
+}
+
 void rexx_vm_free(RexxVM *vm)
 {
     size_t i, live;
@@ -397,6 +418,7 @@ void rexx_vm_free(RexxVM *vm)
     vm_free(vm->globals);
     vm_free(vm->stems);
     vm_free(vm->address_environment);
+    vm_free(vm->argument_string);
     memset(vm, 0, sizeof(*vm));
 }
 
@@ -861,6 +883,417 @@ static RexxVMStatus get_symbol(const RexxBytecodeChunk *chunk, uint32_t operand,
     return REXX_VM_STATUS_OK;
 }
 
+static RexxVMStatus parse_get_variable_symbol(
+    const RexxBytecodeChunk *chunk,
+    uint32_t operand,
+    const RexxSymbol **symbol)
+{
+    RexxSymbolKind kind;
+    if (chunk->symbols == NULL || operand >= chunk->symbol_count)
+        return REXX_VM_STATUS_INVALID_BYTECODE;
+    kind = chunk->symbols[operand].kind;
+    if (kind != REXX_SYMBOL_VARIABLE && kind != REXX_SYMBOL_STEM)
+        return REXX_VM_STATUS_INVALID_BYTECODE;
+    return get_symbol(chunk, operand, kind, symbol);
+}
+
+static RexxVMStatus parse_load_variable(RexxVM *vm,
+                                        const RexxBytecodeChunk *chunk,
+                                        uint32_t operand,
+                                        RexxValue *value)
+{
+    const RexxSymbol *symbol = NULL;
+    RexxVMStatus status = parse_get_variable_symbol(chunk, operand, &symbol);
+    if (status == REXX_VM_STATUS_OK)
+        status = load_variable(vm, symbol, symbol->kind == REXX_SYMBOL_STEM);
+    if (status == REXX_VM_STATUS_OK) status = pop_move(vm, value);
+    return status;
+}
+
+static RexxVMStatus parse_store_variable(RexxVM *vm,
+                                         const RexxBytecodeChunk *chunk,
+                                         uint32_t operand,
+                                         const char *bytes,
+                                         size_t length)
+{
+    const RexxSymbol *symbol = NULL;
+    RexxValue value = REXX_VALUE_INIT;
+    RexxVMStatus status = parse_get_variable_symbol(chunk, operand, &symbol);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_value_set_string(&value, bytes, length);
+    if (status == REXX_VM_STATUS_OK) {
+        if (symbol->kind == REXX_SYMBOL_STEM)
+            status = stem_set(vm, symbol->name, symbol->length, &value);
+        else
+            status = table_set(&vm->locals, &vm->local_count,
+                               &vm->local_capacity, symbol->name,
+                               symbol->length, &value);
+    }
+    rexx_value_clear(&value);
+    return status;
+}
+
+static RexxVMStatus parse_pattern_string(RexxVM *vm,
+                                         const RexxBytecodeChunk *chunk,
+                                         const RexxParseTemplateItem *item,
+                                         char **bytes,
+                                         size_t *length)
+{
+    RexxValue value = REXX_VALUE_INIT;
+    RexxVMStatus status;
+    if (item->dynamic) {
+        status = parse_load_variable(vm, chunk, item->operand, &value);
+    } else {
+        if (chunk->constants == NULL || item->operand >= chunk->constant_count)
+            return REXX_VM_STATUS_INVALID_BYTECODE;
+        status = decode_constant(&chunk->constants[item->operand], &value);
+    }
+    if (status == REXX_VM_STATUS_OK)
+        status = value_string(&value, bytes, length);
+    rexx_value_clear(&value);
+    return status;
+}
+
+static RexxVMStatus parse_pattern_position(RexxVM *vm,
+                                           const RexxBytecodeChunk *chunk,
+                                           const RexxParseTemplateItem *item,
+                                           uint32_t *position)
+{
+    RexxValue value = REXX_VALUE_INIT;
+    RexxDecimal decimal;
+    RexxNumericStatus numeric_status;
+    RexxVMStatus status;
+
+    if (item->dynamic) {
+        status = parse_load_variable(vm, chunk, item->operand, &value);
+        if (status == REXX_VM_STATUS_OK) status = value_decimal(&value, &decimal);
+        rexx_value_clear(&value);
+        if (status != REXX_VM_STATUS_OK) return status;
+        numeric_status = rexx_decimal_to_uint32(&decimal, position);
+        if (numeric_status == REXX_NUMERIC_RESOURCE_LIMIT)
+            return REXX_VM_STATUS_RESOURCE_LIMIT;
+        return numeric_status == REXX_NUMERIC_OK
+            ? REXX_VM_STATUS_OK : REXX_VM_STATUS_NUMERIC_ERROR;
+    }
+    *position = item->position;
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus parse_find_pattern(const char *source,
+                                       size_t source_length,
+                                       size_t start,
+                                       const char *pattern,
+                                       size_t pattern_length,
+                                       size_t *work_remaining,
+                                       size_t *match_out)
+{
+    size_t position;
+    size_t last_position;
+    if (start > source_length) start = source_length;
+    if (work_remaining == NULL || match_out == NULL)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    if (pattern_length == 0u) {
+        *match_out = source_length;
+        return REXX_VM_STATUS_OK;
+    }
+    if (pattern_length > source_length - start) {
+        *match_out = source_length;
+        return REXX_VM_STATUS_OK;
+    }
+    last_position = source_length - pattern_length;
+    for (position = start; position <= last_position; ++position) {
+        size_t pattern_index;
+        for (pattern_index = 0u; pattern_index < pattern_length;
+             ++pattern_index) {
+            if (*work_remaining == 0u)
+                return REXX_VM_STATUS_RESOURCE_LIMIT;
+            --*work_remaining;
+            if (source[position + pattern_index] != pattern[pattern_index])
+                break;
+        }
+        if (pattern_index == pattern_length) {
+            *match_out = position;
+            return REXX_VM_STATUS_OK;
+        }
+    }
+    *match_out = source_length;
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus parse_assign_fields(
+    RexxVM *vm,
+    const RexxBytecodeChunk *chunk,
+    const RexxParseTemplateItem *items,
+    size_t item_start,
+    size_t item_end,
+    const char *source,
+    size_t source_length,
+    size_t begin,
+    size_t end)
+{
+    size_t item_index;
+    size_t field_count = 0u;
+    size_t cursor;
+    size_t field_number = 0u;
+
+    if (begin > source_length) begin = source_length;
+    if (end > source_length) end = source_length;
+    if (end < begin) end = begin;
+    for (item_index = item_start; item_index < item_end; ++item_index) {
+        if (items[item_index].kind == REXX_PARSE_ITEM_VARIABLE ||
+            items[item_index].kind == REXX_PARSE_ITEM_PLACEHOLDER)
+            ++field_count;
+    }
+    if (field_count == 0u) return REXX_VM_STATUS_OK;
+
+    cursor = begin;
+    for (item_index = item_start; item_index < item_end; ++item_index) {
+        const RexxParseTemplateItem *item = &items[item_index];
+        size_t value_start;
+        size_t value_end;
+        RexxVMStatus status;
+        if (item->kind != REXX_PARSE_ITEM_VARIABLE &&
+            item->kind != REXX_PARSE_ITEM_PLACEHOLDER)
+            return REXX_VM_STATUS_INVALID_BYTECODE;
+
+        if (field_count == 1u) {
+            value_start = begin;
+            value_end = end;
+        } else if (field_number + 1u == field_count) {
+            if (cursor < end && source[cursor] == ' ') ++cursor;
+            value_start = cursor;
+            value_end = end;
+        } else {
+            while (cursor < end && source[cursor] == ' ') ++cursor;
+            value_start = cursor;
+            while (cursor < end && source[cursor] != ' ') ++cursor;
+            value_end = cursor;
+        }
+
+        if (item->kind == REXX_PARSE_ITEM_VARIABLE) {
+            status = parse_store_variable(vm, chunk, item->operand,
+                                          source + value_start,
+                                          value_end - value_start);
+            if (status != REXX_VM_STATUS_OK) return status;
+        }
+        ++field_number;
+    }
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus execute_parse_template(RexxVM *vm,
+                                           const RexxBytecodeChunk *chunk,
+                                           const RexxParseTemplate *template_part,
+                                           const char *source,
+                                           size_t source_length,
+                                           size_t *parse_work_remaining)
+{
+    size_t first = template_part->first_item;
+    size_t count = template_part->item_count;
+    size_t field_start = first;
+    size_t section_start = 0u;
+    size_t cursor = 0u;
+    size_t last_match = 0u;
+    int last_match_was_string = 0;
+    size_t index;
+
+    if (first > chunk->parse_item_count ||
+        count > chunk->parse_item_count - first)
+        return REXX_VM_STATUS_INVALID_BYTECODE;
+
+    for (index = first; index < first + count; ++index) {
+        const RexxParseTemplateItem *item = &chunk->parse_items[index];
+        size_t boundary;
+        RexxVMStatus status;
+
+        if (item->dynamic > 1u || item->reserved != 0u)
+            return REXX_VM_STATUS_INVALID_BYTECODE;
+
+        if (item->kind == REXX_PARSE_ITEM_VARIABLE ||
+            item->kind == REXX_PARSE_ITEM_PLACEHOLDER)
+            continue;
+
+        if (item->kind == REXX_PARSE_ITEM_STRING_PATTERN) {
+            char *pattern = NULL;
+            size_t pattern_length = 0u;
+            size_t match;
+            status = parse_pattern_string(vm, chunk, item,
+                                          &pattern, &pattern_length);
+            if (status != REXX_VM_STATUS_OK) {
+                vm_free(pattern);
+                return status;
+            }
+            status = parse_find_pattern(source, source_length, cursor,
+                                        pattern, pattern_length,
+                                        parse_work_remaining, &match);
+            vm_free(pattern);
+            if (status != REXX_VM_STATUS_OK) return status;
+            boundary = match;
+            status = parse_assign_fields(vm, chunk, chunk->parse_items,
+                                         field_start, index, source,
+                                         source_length, section_start,
+                                         boundary);
+            if (status != REXX_VM_STATUS_OK) return status;
+            if (match < source_length || pattern_length == 0u) {
+                size_t matched_length = pattern_length;
+                if (matched_length > source_length - match)
+                    matched_length = source_length - match;
+                cursor = match + matched_length;
+                last_match = match;
+                last_match_was_string = 1;
+            } else {
+                cursor = source_length;
+                last_match = source_length;
+                last_match_was_string = 0;
+            }
+            section_start = cursor;
+        } else if (item->kind == REXX_PARSE_ITEM_POSITION_PATTERN) {
+            uint32_t position;
+            size_t target;
+            size_t split_start = section_start;
+            size_t boundary;
+            status = parse_pattern_position(vm, chunk, item, &position);
+            if (status != REXX_VM_STATUS_OK) return status;
+            if (item->position_kind != REXX_PARSE_POSITION_ABSOLUTE &&
+                last_match_was_string && field_start < index)
+                split_start = last_match;
+            if (item->position_kind == REXX_PARSE_POSITION_ABSOLUTE) {
+                target = position == 0u ? 0u : (size_t)position - 1u;
+                if (target > source_length) target = source_length;
+            } else if (item->position_kind == REXX_PARSE_POSITION_FORWARD) {
+                size_t base = last_match > source_length
+                    ? source_length : last_match;
+                target = (size_t)position > source_length - base
+                    ? source_length : base + (size_t)position;
+            } else if (item->position_kind == REXX_PARSE_POSITION_BACKWARD) {
+                size_t base = last_match > source_length
+                    ? source_length : last_match;
+                target = (size_t)position > base
+                    ? 0u : base - (size_t)position;
+            } else {
+                return REXX_VM_STATUS_INVALID_BYTECODE;
+            }
+            boundary = target <= split_start ? source_length : target;
+            status = parse_assign_fields(vm, chunk, chunk->parse_items,
+                                         field_start, index, source,
+                                         source_length, split_start,
+                                         boundary);
+            if (status != REXX_VM_STATUS_OK) return status;
+            cursor = target;
+            last_match = target;
+            last_match_was_string = 0;
+            section_start = target;
+        } else {
+            return REXX_VM_STATUS_INVALID_BYTECODE;
+        }
+        field_start = index + 1u;
+    }
+
+    return parse_assign_fields(vm, chunk, chunk->parse_items,
+                               field_start, first + count, source,
+                               source_length, section_start, source_length);
+}
+
+static RexxVMStatus execute_parse(RexxVM *vm,
+                                  const RexxBytecodeChunk *chunk,
+                                  uint32_t plan_index)
+{
+    static const char empty_string[] = "";
+    const RexxParsePlan *plan;
+    RexxValue input = REXX_VALUE_INIT;
+    const char *source = empty_string;
+    size_t source_length = 0u;
+    char *source_copy = NULL;
+    size_t parse_work_remaining = REXX_VM_MAX_PARSE_WORK;
+    size_t group_index;
+    RexxVMStatus status = REXX_VM_STATUS_OK;
+
+    if (chunk->parse_plans == NULL || plan_index >= chunk->parse_plan_count)
+        return REXX_VM_STATUS_INVALID_BYTECODE;
+    plan = &chunk->parse_plans[plan_index];
+    if (plan->source_kind > REXX_PARSE_SOURCE_VALUE ||
+        plan->uppercase > 1u ||
+        plan->reserved != 0u ||
+        plan->first_template > chunk->parse_template_count ||
+        plan->template_count >
+            chunk->parse_template_count - plan->first_template)
+        return REXX_VM_STATUS_INVALID_BYTECODE;
+    if (plan->source_kind == REXX_PARSE_SOURCE_VAR) {
+        const RexxSymbol *source_symbol = NULL;
+        if (parse_get_variable_symbol(chunk, plan->source_symbol,
+                                      &source_symbol) != REXX_VM_STATUS_OK)
+            return REXX_VM_STATUS_INVALID_BYTECODE;
+    } else if (plan->source_symbol != REXX_NO_SYMBOL) {
+        return REXX_VM_STATUS_INVALID_BYTECODE;
+    }
+
+    if (plan->source_kind == REXX_PARSE_SOURCE_ARG) {
+        source = vm->argument_string != NULL ? vm->argument_string
+                                             : empty_string;
+        source_length = vm->argument_string_length;
+    } else if (plan->source_kind == REXX_PARSE_SOURCE_VAR) {
+        const RexxSymbol *symbol = NULL;
+        status = parse_get_variable_symbol(chunk, plan->source_symbol,
+                                           &symbol);
+        if (status == REXX_VM_STATUS_OK)
+            status = load_variable(vm, symbol,
+                                   symbol->kind == REXX_SYMBOL_STEM);
+        if (status == REXX_VM_STATUS_OK) status = pop_move(vm, &input);
+        if (status == REXX_VM_STATUS_OK)
+            status = value_string(&input, &source_copy, &source_length);
+        if (status == REXX_VM_STATUS_OK) source = source_copy;
+    } else {
+        status = pop_move(vm, &input);
+        if (status == REXX_VM_STATUS_OK)
+            status = value_string(&input, &source_copy, &source_length);
+        if (status == REXX_VM_STATUS_OK) source = source_copy;
+    }
+
+    if (status == REXX_VM_STATUS_OK &&
+        source_length > REXX_VM_MAX_PARSE_SOURCE_LENGTH)
+        status = REXX_VM_STATUS_RESOURCE_LIMIT;
+    if (status == REXX_VM_STATUS_OK && source_copy == NULL) {
+        if (source_length == SIZE_MAX) {
+            status = REXX_VM_STATUS_RESOURCE_LIMIT;
+        } else {
+            source_copy = (char *)vm_malloc(source_length + 1u);
+            if (source_copy == NULL) {
+                status = REXX_VM_STATUS_OUT_OF_MEMORY;
+            } else {
+                if (source_length != 0u)
+                    memcpy(source_copy, source, source_length);
+                source_copy[source_length] = '\0';
+                source = source_copy;
+            }
+        }
+    }
+
+    if (status == REXX_VM_STATUS_OK && plan->uppercase) {
+        size_t index;
+        for (index = 0u; index < source_length; ++index)
+            source_copy[index] = (char)ascii_upper(
+                (unsigned char)source_copy[index]);
+    }
+
+    for (group_index = 0u;
+         status == REXX_VM_STATUS_OK && group_index < plan->template_count;
+         ++group_index) {
+        const RexxParseTemplate *template_part =
+            &chunk->parse_templates[plan->first_template + group_index];
+        const char *group_source = group_index == 0u
+            ? source : empty_string;
+        size_t group_source_length = group_index == 0u ? source_length : 0u;
+        status = execute_parse_template(vm, chunk, template_part,
+                                        group_source,
+                                        group_source_length,
+                                        &parse_work_remaining);
+    }
+
+    vm_free(source_copy);
+    rexx_value_clear(&input);
+    return status;
+}
+
 static RexxVMStatus load_constant(RexxVM *vm, const RexxBytecodeChunk *chunk,
                                   uint32_t operand)
 {
@@ -1277,8 +1710,15 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
         chunk->instruction_count > REXX_COMPILER_MAX_INSTRUCTIONS ||
         chunk->constant_count > REXX_COMPILER_MAX_POOL_ENTRIES ||
         chunk->symbol_count > REXX_COMPILER_MAX_POOL_ENTRIES ||
+        chunk->parse_item_count > REXX_COMPILER_MAX_POOL_ENTRIES ||
+        chunk->parse_template_count > REXX_COMPILER_MAX_POOL_ENTRIES ||
+        chunk->parse_plan_count > REXX_COMPILER_MAX_POOL_ENTRIES ||
         (chunk->constant_count != 0 && chunk->constants == NULL) ||
-        (chunk->symbol_count != 0 && chunk->symbols == NULL))
+        (chunk->symbol_count != 0 && chunk->symbols == NULL) ||
+        (chunk->parse_item_count != 0 && chunk->parse_items == NULL) ||
+        (chunk->parse_template_count != 0 &&
+         chunk->parse_templates == NULL) ||
+        (chunk->parse_plan_count != 0 && chunk->parse_plans == NULL))
         return vm_fail(vm, REXX_VM_STATUS_INVALID_BYTECODE, 0);
 
     vm->numeric_work_remaining = vm->numeric_work_budget;
@@ -1559,6 +1999,13 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
                 status = execute_numeric_form(vm, ins->flags, ins->operand,
                                               &value);
             rexx_value_clear(&value);
+            break;
+
+        case OP_PARSE:
+            if (ins->flags != 0u || ins->auxiliary != 0u)
+                status = REXX_VM_STATUS_INVALID_BYTECODE;
+            if (status == REXX_VM_STATUS_OK)
+                status = execute_parse(vm, chunk, ins->operand);
             break;
 
         /* A plain DO group only needs a structural frame. Counted and

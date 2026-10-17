@@ -11,6 +11,79 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(REXX_COMPILER_TEST_ALLOCATOR) && !defined(GXOS_BARE_METAL)
+static size_t compiler_test_fail_on;
+static size_t compiler_test_attempt_count;
+static size_t compiler_test_live_blocks;
+
+static int rexx_compiler_test_should_fail(void)
+{
+    ++compiler_test_attempt_count;
+    return compiler_test_fail_on != 0u &&
+           compiler_test_attempt_count == compiler_test_fail_on;
+}
+
+static void *rexx_compiler_malloc(size_t size)
+{
+    void *memory;
+    if (rexx_compiler_test_should_fail()) return NULL;
+    memory = malloc(size);
+    if (memory != NULL) ++compiler_test_live_blocks;
+    return memory;
+}
+
+static void *rexx_compiler_calloc(size_t count, size_t size)
+{
+    void *memory;
+    if (rexx_compiler_test_should_fail()) return NULL;
+    memory = calloc(count, size);
+    if (memory != NULL) ++compiler_test_live_blocks;
+    return memory;
+}
+
+static void *rexx_compiler_realloc(void *pointer, size_t size)
+{
+    void *memory;
+    if (rexx_compiler_test_should_fail()) return NULL;
+    memory = realloc(pointer, size);
+    if (memory != NULL && pointer == NULL) ++compiler_test_live_blocks;
+    return memory;
+}
+
+static void rexx_compiler_free(void *memory)
+{
+    if (memory != NULL && compiler_test_live_blocks != 0u)
+        --compiler_test_live_blocks;
+    free(memory);
+}
+
+void rexx_compiler_test_allocator_fail_on(size_t allocation_attempt)
+{
+    compiler_test_attempt_count = 0u;
+    compiler_test_fail_on = allocation_attempt;
+}
+
+void rexx_compiler_test_allocator_disable(void)
+{
+    compiler_test_fail_on = 0u;
+}
+
+size_t rexx_compiler_test_allocator_attempts(void)
+{
+    return compiler_test_attempt_count;
+}
+
+size_t rexx_compiler_test_allocator_live_blocks(void)
+{
+    return compiler_test_live_blocks;
+}
+#else
+#define rexx_compiler_malloc malloc
+#define rexx_compiler_calloc calloc
+#define rexx_compiler_realloc realloc
+#define rexx_compiler_free free
+#endif
+
 typedef struct RexxIndexList {
     size_t *items;
     size_t count;
@@ -29,6 +102,9 @@ typedef struct RexxCompiler {
     size_t instruction_capacity;
     size_t constant_capacity;
     size_t symbol_capacity;
+    size_t parse_item_capacity;
+    size_t parse_template_capacity;
+    size_t parse_plan_capacity;
     size_t visited_nodes;
     size_t expression_depth;
     size_t clause_depth;
@@ -133,7 +209,7 @@ static int rexx_compiler_reserve(void **array,
         return 0;
     }
 
-    grown = realloc(*array, next_capacity * element_size);
+    grown = rexx_compiler_realloc(*array, next_capacity * element_size);
     if (grown == NULL) {
         return 0;
     }
@@ -240,7 +316,7 @@ static int rexx_compiler_index_list_push(RexxCompiler *compiler,
 static void rexx_compiler_index_list_free(RexxIndexList *list)
 {
     if (list != NULL) {
-        free(list->items);
+        rexx_compiler_free(list->items);
         list->items = NULL;
         list->count = 0u;
         list->capacity = 0u;
@@ -312,7 +388,7 @@ static uint32_t rexx_compiler_intern_symbol(RexxCompiler *compiler,
         rexx_compiler_fail_limit(compiler, token);
         return 0u;
     }
-    name = (char *)malloc(token->length + 1u);
+    name = (char *)rexx_compiler_malloc(token->length + 1u);
     if (name == NULL) {
         rexx_compiler_fail_oom(compiler, token);
         return 0u;
@@ -328,7 +404,7 @@ static uint32_t rexx_compiler_intern_symbol(RexxCompiler *compiler,
                                sizeof(*compiler->chunk->symbols),
                                &compiler->symbol_capacity, index + 1u,
                                REXX_COMPILER_MAX_POOL_ENTRIES)) {
-        free(name);
+        rexx_compiler_free(name);
         if (index + 1u > REXX_COMPILER_MAX_POOL_ENTRIES) {
             rexx_compiler_fail_limit(compiler, token);
         } else {
@@ -382,7 +458,7 @@ static uint32_t rexx_compiler_add_constant(RexxCompiler *compiler,
         return 0u;
     }
 
-    text = (char *)malloc(token->length + 1u);
+    text = (char *)rexx_compiler_malloc(token->length + 1u);
     if (text == NULL) {
         rexx_compiler_fail_oom(compiler, token);
         return 0u;
@@ -395,7 +471,7 @@ static uint32_t rexx_compiler_add_constant(RexxCompiler *compiler,
                                sizeof(*compiler->chunk->constants),
                                &compiler->constant_capacity, index + 1u,
                                REXX_COMPILER_MAX_POOL_ENTRIES)) {
-        free(text);
+        rexx_compiler_free(text);
         if (index + 1u > REXX_COMPILER_MAX_POOL_ENTRIES) {
             rexx_compiler_fail_limit(compiler, token);
         } else {
@@ -408,6 +484,168 @@ static uint32_t rexx_compiler_add_constant(RexxCompiler *compiler,
     constants[index].text = text;
     constants[index].length = token->length;
     compiler->chunk->constant_count = index + 1u;
+    return (uint32_t)index;
+}
+
+static int rexx_compiler_add_parse_item(RexxCompiler *compiler,
+                                        const RexxParseTemplateItem *item,
+                                        const RexxToken *token)
+{
+    size_t index = compiler->chunk->parse_item_count;
+    if (index >= REXX_COMPILER_MAX_POOL_ENTRIES ||
+        index > (size_t)UINT32_MAX) {
+        rexx_compiler_fail_limit(compiler, token);
+        return 0;
+    }
+    if (!rexx_compiler_reserve((void **)&compiler->chunk->parse_items,
+                               sizeof(*compiler->chunk->parse_items),
+                               &compiler->parse_item_capacity, index + 1u,
+                               REXX_COMPILER_MAX_POOL_ENTRIES)) {
+        if (index + 1u > REXX_COMPILER_MAX_POOL_ENTRIES)
+            rexx_compiler_fail_limit(compiler, token);
+        else
+            rexx_compiler_fail_oom(compiler, token);
+        return 0;
+    }
+    compiler->chunk->parse_items[index] = *item;
+    compiler->chunk->parse_item_count = index + 1u;
+    return 1;
+}
+
+static RexxParseTemplate *rexx_compiler_add_parse_template(
+    RexxCompiler *compiler,
+    const RexxToken *token)
+{
+    size_t index = compiler->chunk->parse_template_count;
+    if (index >= REXX_COMPILER_MAX_POOL_ENTRIES ||
+        index > (size_t)UINT32_MAX) {
+        rexx_compiler_fail_limit(compiler, token);
+        return NULL;
+    }
+    if (!rexx_compiler_reserve(
+            (void **)&compiler->chunk->parse_templates,
+            sizeof(*compiler->chunk->parse_templates),
+            &compiler->parse_template_capacity, index + 1u,
+            REXX_COMPILER_MAX_POOL_ENTRIES)) {
+        if (index + 1u > REXX_COMPILER_MAX_POOL_ENTRIES)
+            rexx_compiler_fail_limit(compiler, token);
+        else
+            rexx_compiler_fail_oom(compiler, token);
+        return NULL;
+    }
+    memset(&compiler->chunk->parse_templates[index], 0,
+           sizeof(compiler->chunk->parse_templates[index]));
+    compiler->chunk->parse_template_count = index + 1u;
+    return &compiler->chunk->parse_templates[index];
+}
+
+static uint32_t rexx_compiler_add_parse_plan(RexxCompiler *compiler,
+                                             const RexxAstClause *clause)
+{
+    const RexxAstParse *parse_clause = &clause->as.parse_clause;
+    const RexxAstParseTemplate *source_template;
+    RexxParsePlan plan;
+    size_t index = compiler->chunk->parse_plan_count;
+
+    if (index >= REXX_COMPILER_MAX_POOL_ENTRIES ||
+        index > (size_t)UINT32_MAX) {
+        rexx_compiler_fail_limit(compiler, &clause->token);
+        return 0u;
+    }
+    memset(&plan, 0, sizeof(plan));
+    plan.source_kind = (uint8_t)parse_clause->source_kind;
+    plan.uppercase = parse_clause->uppercase != 0;
+    plan.source_symbol = REXX_NO_SYMBOL;
+    plan.first_template = (uint32_t)compiler->chunk->parse_template_count;
+
+    if (parse_clause->source_kind == REXX_AST_PARSE_VAR) {
+        plan.source_symbol = rexx_compiler_intern_symbol(
+            compiler, &parse_clause->source_variable,
+            rexx_compiler_token_has_dot(&parse_clause->source_variable)
+                ? REXX_SYMBOL_STEM : REXX_SYMBOL_VARIABLE);
+        if (compiler->status != REXX_COMPILER_STATUS_OK) return 0u;
+    } else if (parse_clause->source_kind != REXX_AST_PARSE_ARG &&
+               parse_clause->source_kind != REXX_AST_PARSE_VALUE) {
+        rexx_compiler_fail(compiler, REXX_COMPILER_STATUS_MALFORMED_AST,
+                           &clause->token,
+                           rexx_compiler_message_malformed_ast);
+        return 0u;
+    }
+
+    for (source_template = parse_clause->templates;
+         source_template != NULL;
+         source_template = source_template->next) {
+        const RexxAstParseTemplatePart *source_part;
+        RexxParseTemplate *template_part = rexx_compiler_add_parse_template(
+            compiler, &clause->token);
+        if (template_part == NULL) return 0u;
+        template_part->first_item = (uint32_t)compiler->chunk->parse_item_count;
+        if (plan.template_count == UINT32_MAX) {
+            rexx_compiler_fail_limit(compiler, &clause->token);
+            return 0u;
+        }
+        ++plan.template_count;
+
+        for (source_part = source_template->parts;
+             source_part != NULL;
+             source_part = source_part->next) {
+            RexxParseTemplateItem item;
+            memset(&item, 0, sizeof(item));
+            item.kind = (uint8_t)source_part->kind;
+            item.position_kind = (uint8_t)source_part->position_kind;
+            item.dynamic = source_part->dynamic != 0;
+            item.position = source_part->position;
+            item.operand = 0u;
+
+            if (source_part->kind == REXX_AST_PARSE_VARIABLE ||
+                (source_part->kind == REXX_AST_PARSE_STRING_PATTERN &&
+                 source_part->dynamic) ||
+                (source_part->kind == REXX_AST_PARSE_POSITION_PATTERN &&
+                 source_part->dynamic)) {
+                item.operand = rexx_compiler_intern_symbol(
+                    compiler, &source_part->token,
+                    rexx_compiler_token_has_dot(&source_part->token)
+                        ? REXX_SYMBOL_STEM : REXX_SYMBOL_VARIABLE);
+                if (compiler->status != REXX_COMPILER_STATUS_OK) return 0u;
+            } else if (source_part->kind ==
+                       REXX_AST_PARSE_STRING_PATTERN) {
+                item.operand = rexx_compiler_add_constant(
+                    compiler, &source_part->token);
+                if (compiler->status != REXX_COMPILER_STATUS_OK) return 0u;
+            } else if (source_part->kind != REXX_AST_PARSE_PLACEHOLDER &&
+                       source_part->kind !=
+                           REXX_AST_PARSE_POSITION_PATTERN) {
+                rexx_compiler_fail(compiler,
+                                   REXX_COMPILER_STATUS_MALFORMED_AST,
+                                   &source_part->token,
+                                   rexx_compiler_message_malformed_ast);
+                return 0u;
+            }
+
+            if (!rexx_compiler_add_parse_item(compiler, &item,
+                                              &source_part->token)) {
+                return 0u;
+            }
+            if (template_part->item_count == UINT32_MAX) {
+                rexx_compiler_fail_limit(compiler, &source_part->token);
+                return 0u;
+            }
+            ++template_part->item_count;
+        }
+    }
+
+    if (!rexx_compiler_reserve((void **)&compiler->chunk->parse_plans,
+                               sizeof(*compiler->chunk->parse_plans),
+                               &compiler->parse_plan_capacity, index + 1u,
+                               REXX_COMPILER_MAX_POOL_ENTRIES)) {
+        if (index + 1u > REXX_COMPILER_MAX_POOL_ENTRIES)
+            rexx_compiler_fail_limit(compiler, &clause->token);
+        else
+            rexx_compiler_fail_oom(compiler, &clause->token);
+        return 0u;
+    }
+    compiler->chunk->parse_plans[index] = plan;
+    compiler->chunk->parse_plan_count = index + 1u;
     return (uint32_t)index;
 }
 
@@ -1003,6 +1241,26 @@ static int rexx_compiler_compile_clause(RexxCompiler *compiler,
                 ? REXX_INSTRUCTION_HAS_VALUE : 0u,
             clause->as.simple.numeric_form, 0u, &clause->token);
         break;
+    case REXX_AST_CLAUSE_PARSE:
+    {
+        uint32_t plan = rexx_compiler_add_parse_plan(compiler, clause);
+        if (compiler->status != REXX_COMPILER_STATUS_OK) return 0;
+        if (clause->as.parse_clause.source_kind == REXX_AST_PARSE_VALUE) {
+            if (clause->as.parse_clause.source_expression == NULL ||
+                !rexx_compiler_compile_expression(
+                    compiler,
+                    clause->as.parse_clause.source_expression)) return 0;
+        } else if (clause->as.parse_clause.source_expression != NULL) {
+            rexx_compiler_fail(compiler,
+                               REXX_COMPILER_STATUS_MALFORMED_AST,
+                               &clause->token,
+                               rexx_compiler_message_malformed_ast);
+            return 0;
+        }
+        (void)rexx_compiler_emit(compiler, OP_PARSE, 0u, plan, 0u,
+                                 &clause->token);
+        break;
+    }
     case REXX_AST_CLAUSE_ADDRESS:
     {
         uint32_t environment_symbol = 0u;
@@ -1125,15 +1383,18 @@ void rexx_bytecode_chunk_free(RexxBytecodeChunk *chunk)
     size_t index;
     if (chunk == NULL) return;
     for (index = 0u; index < chunk->constant_count; ++index) {
-        free(chunk->constants[index].text);
+        rexx_compiler_free(chunk->constants[index].text);
     }
     for (index = 0u; index < chunk->symbol_count; ++index) {
-        free(chunk->symbols[index].name);
+        rexx_compiler_free(chunk->symbols[index].name);
     }
-    free(chunk->constants);
-    free(chunk->symbols);
-    free(chunk->instructions);
-    free(chunk);
+    rexx_compiler_free(chunk->constants);
+    rexx_compiler_free(chunk->symbols);
+    rexx_compiler_free(chunk->parse_items);
+    rexx_compiler_free(chunk->parse_templates);
+    rexx_compiler_free(chunk->parse_plans);
+    rexx_compiler_free(chunk->instructions);
+    rexx_compiler_free(chunk);
 }
 
 RexxCompilerStatus rexx_compiler_compile(const RexxAstProgram *program,
@@ -1161,7 +1422,7 @@ RexxCompilerStatus rexx_compiler_compile(const RexxAstProgram *program,
         return REXX_COMPILER_STATUS_INVALID_ARGUMENT;
     }
 
-    result = (RexxBytecodeChunk *)calloc(1u, sizeof(*result));
+    result = (RexxBytecodeChunk *)rexx_compiler_calloc(1u, sizeof(*result));
     if (result == NULL) {
         if (error != NULL) {
             error->status = REXX_COMPILER_STATUS_OUT_OF_MEMORY;

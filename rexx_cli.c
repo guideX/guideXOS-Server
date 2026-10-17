@@ -41,9 +41,9 @@ static int rexx_cli_print_usage(RexxOutputContext *output,
     const char *name = (program_name != NULL && program_name[0] != '\0')
                            ? program_name : "rexx";
     return rexx_output_format(output, stream,
-                              "Usage: %s <script.rx>\n"
+                              "Usage: %s <script.rx> [arguments...]\n"
                               "       %s --help\n"
-                              "       %s -- <script-path>\n",
+                              "       %s -- <script-path> [arguments...]\n",
                               name, name, name);
 }
 
@@ -78,6 +78,48 @@ static int rexx_cli_read_source(RexxOutputContext *output,
         *length_out = 0u;
         return 0;
     }
+    return 1;
+}
+
+static int rexx_cli_join_arguments(int argc,
+                                   char **argv,
+                                   int first_argument,
+                                   char **bytes_out,
+                                   size_t *length_out)
+{
+    size_t total = 0u;
+    int index;
+    char *joined;
+    size_t offset = 0u;
+
+    if (bytes_out == NULL || length_out == NULL || argv == NULL ||
+        first_argument < 0 || first_argument > argc) return 0;
+    *bytes_out = NULL;
+    *length_out = 0u;
+    for (index = first_argument; index < argc; ++index) {
+        size_t part_length;
+        if (argv[index] == NULL) return 0;
+        part_length = strlen(argv[index]);
+        if (part_length > (size_t)-1 - total ||
+            (index != first_argument && total == (size_t)-1)) return 0;
+        total += part_length;
+        if (index != first_argument) ++total;
+        if (total > REXX_VM_MAX_PARSE_SOURCE_LENGTH) return 0;
+    }
+    if (total == (size_t)-1) return 0;
+    joined = (char *)malloc(total + 1u);
+    if (joined == NULL) return 0;
+    for (index = first_argument; index < argc; ++index) {
+        size_t part_length = strlen(argv[index]);
+        if (index != first_argument) joined[offset++] = ' ';
+        if (part_length != 0u) {
+            memcpy(joined + offset, argv[index], part_length);
+            offset += part_length;
+        }
+    }
+    joined[offset] = '\0';
+    *bytes_out = joined;
+    *length_out = total;
     return 1;
 }
 
@@ -169,7 +211,9 @@ static int rexx_cli_exit_status(const RexxVM *vm, int *status_out)
 static int rexx_cli_execute_source(RexxOutputContext *output,
                                    const char *path,
                                    const char *source,
-                                   size_t source_length)
+                                   size_t source_length,
+                                   const char *argument_string,
+                                   size_t argument_string_length)
 {
     RexxLexer lexer;
     RexxParser parser;
@@ -233,6 +277,14 @@ static int rexx_cli_execute_source(RexxOutputContext *output,
                                  path, rexx_vm_status_name(vm_status));
         goto cleanup;
     }
+    vm_status = rexx_vm_set_argument_string(
+        &vm, argument_string, argument_string_length);
+    if (vm_status != REXX_VM_STATUS_OK) {
+        (void)rexx_output_format(output, REXX_OUTPUT_STDERR,
+                                 "rexx: %s: could not prepare PARSE ARG input: %s\n",
+                                 path, rexx_vm_status_name(vm_status));
+        goto cleanup;
+    }
 
     rexx_vm_set_output_writer(&vm, rexx_cli_vm_output, output);
     rexx_vm_set_address_dispatcher(&vm, rexx_os_vm_address_dispatcher, NULL);
@@ -291,9 +343,12 @@ int guide_rexx_main_with_output(int argc,
     const char *program_name = "rexx";
     const char *script_path = NULL;
     char *source = NULL;
+    char *argument_string = NULL;
     size_t source_length = 0u;
+    size_t argument_string_length = 0u;
     int index;
     int positional_only = 0;
+    int script_argument_start = argc;
     int result;
     RexxOutputContext output;
 
@@ -342,15 +397,9 @@ int guide_rexx_main_with_output(int argc,
             return REXX_CLI_EXIT_USAGE;
         }
 
-        if (script_path != NULL) {
-            (void)rexx_output_write(&output, REXX_OUTPUT_STDERR,
-                                    "rexx: only one script path may be specified\n",
-                                    sizeof("rexx: only one script path may be specified\n") - 1u);
-            (void)rexx_cli_print_usage(&output, REXX_OUTPUT_STDERR,
-                                       program_name);
-            return REXX_CLI_EXIT_USAGE;
-        }
         script_path = argument;
+        script_argument_start = index + 1;
+        break;
     }
 
     if (script_path == NULL || script_path[0] == '\0') {
@@ -362,7 +411,20 @@ int guide_rexx_main_with_output(int argc,
         return REXX_CLI_EXIT_FAILURE;
     }
 
-    result = rexx_cli_execute_source(&output, script_path, source, source_length);
+    if (!rexx_cli_join_arguments(argc, argv, script_argument_start,
+                                 &argument_string,
+                                 &argument_string_length)) {
+        (void)rexx_output_format(&output, REXX_OUTPUT_STDERR,
+                                 "rexx: %s: command arguments exceed the PARSE ARG limit or could not be allocated\n",
+                                 script_path);
+        rexx_os_free_file(source);
+        return REXX_CLI_EXIT_FAILURE;
+    }
+
+    result = rexx_cli_execute_source(&output, script_path, source,
+                                     source_length, argument_string,
+                                     argument_string_length);
+    free(argument_string);
     rexx_os_free_file(source);
     return result;
 }

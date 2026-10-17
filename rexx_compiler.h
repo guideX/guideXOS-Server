@@ -10,7 +10,7 @@
  * evaluation stack is left-to-right: binary instructions pop right then
  * left and push one result; stores, SAY, COMMAND, and ADDRESS consume their
  * value; conditional jumps consume their condition. OP_CALL pops `auxiliary`
- * arguments and pushes a result.
+ * arguments and pushes a result. OP_PARSE indexes an owned parse plan.
  */
 
 #include "rexx_parser.h"
@@ -80,7 +80,8 @@ typedef enum RexxOpcode {
     OP_LOAD_UNSET,
     OP_NUMERIC_DIGITS,
     OP_NUMERIC_FUZZ,
-    OP_NUMERIC_FORM
+    OP_NUMERIC_FORM,
+    OP_PARSE
 } RexxOpcode;
 
 /*
@@ -137,6 +138,48 @@ typedef struct RexxSymbol {
     RexxSymbolKind kind;
 } RexxSymbol;
 
+typedef enum RexxParseItemKind {
+    REXX_PARSE_ITEM_VARIABLE = 0,
+    REXX_PARSE_ITEM_PLACEHOLDER,
+    REXX_PARSE_ITEM_STRING_PATTERN,
+    REXX_PARSE_ITEM_POSITION_PATTERN
+} RexxParseItemKind;
+
+typedef enum RexxParsePositionKind {
+    REXX_PARSE_POSITION_ABSOLUTE = 0,
+    REXX_PARSE_POSITION_FORWARD,
+    REXX_PARSE_POSITION_BACKWARD
+} RexxParsePositionKind;
+
+typedef struct RexxParseTemplateItem {
+    uint8_t kind;
+    uint8_t position_kind;
+    uint8_t dynamic;
+    uint8_t reserved;
+    uint32_t operand;  /* Symbol or constant index, depending on kind. */
+    uint32_t position; /* Literal whole-number position when !dynamic. */
+} RexxParseTemplateItem;
+
+typedef struct RexxParseTemplate {
+    uint32_t first_item;
+    uint32_t item_count;
+} RexxParseTemplate;
+
+typedef enum RexxParseSourceKind {
+    REXX_PARSE_SOURCE_ARG = 0,
+    REXX_PARSE_SOURCE_VAR,
+    REXX_PARSE_SOURCE_VALUE
+} RexxParseSourceKind;
+
+typedef struct RexxParsePlan {
+    uint8_t source_kind;
+    uint8_t uppercase;
+    uint16_t reserved;
+    uint32_t source_symbol; /* REXX_NO_SYMBOL except for PARSE VAR. */
+    uint32_t first_template;
+    uint32_t template_count;
+} RexxParsePlan;
+
 typedef struct RexxBytecodeChunk {
     RexxInstruction *instructions;
     size_t instruction_count;
@@ -144,6 +187,12 @@ typedef struct RexxBytecodeChunk {
     size_t constant_count;
     RexxSymbol *symbols;
     size_t symbol_count;
+    RexxParseTemplateItem *parse_items;
+    size_t parse_item_count;
+    RexxParseTemplate *parse_templates;
+    size_t parse_template_count;
+    RexxParsePlan *parse_plans;
+    size_t parse_plan_count;
 } RexxBytecodeChunk;
 
 typedef enum RexxDoFlags {
@@ -177,6 +226,13 @@ typedef struct RexxCompilerError {
 #define REXX_COMPILER_MAX_INSTRUCTIONS ((size_t)1048576u)
 #define REXX_COMPILER_MAX_POOL_ENTRIES ((size_t)65536u)
 #define REXX_COMPILER_MAX_NESTING ((size_t)128u)
+
+#if defined(REXX_COMPILER_TEST_ALLOCATOR) && !defined(GXOS_BARE_METAL)
+void rexx_compiler_test_allocator_fail_on(size_t allocation_attempt);
+void rexx_compiler_test_allocator_disable(void);
+size_t rexx_compiler_test_allocator_attempts(void);
+size_t rexx_compiler_test_allocator_live_blocks(void);
+#endif
 
 /*
  * Compiles a complete parser-owned AST. On success, *chunk receives an
