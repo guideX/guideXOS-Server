@@ -1,0 +1,2 @@
+signal missing_guest_destination
+exit 0

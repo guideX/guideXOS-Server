@@ -1,0 +1,68 @@
+In file included from rexx_parser.c:12:
+C:\mingw64\x86_64-w64-mingw32\include\stdlib.h(274,47): error: expected ';' after top level declarator
+  274 |   void __cdecl __MINGW_NOTHROW exit(int _Code) __MINGW_ATTRIB_NORETURN;
+      |                                               ^
+      |                                               ;
+C:\mingw64\x86_64-w64-mingw32\include\stdlib.h(274,48): warning: declaration does not declare anything [-Wmissing-declarations]
+  274 |   void __cdecl __MINGW_NOTHROW exit(int _Code) __MINGW_ATTRIB_NORETURN;
+      |                                                ^
+C:\mingw64\x86_64-w64-mingw32\include\_mingw.h(152,33): note: expanded from macro '__MINGW_ATTRIB_NORETURN'
+  152 | #define __MINGW_ATTRIB_NORETURN __declspec(noreturn)
+      |                                 ^
+In file included from rexx_parser.c:12:
+C:\mingw64\x86_64-w64-mingw32\include\stdlib.h(275,48): error: expected ';' after top level declarator
+  275 |   void __cdecl __MINGW_NOTHROW _exit(int _Code) __MINGW_ATTRIB_NORETURN;
+      |                                                ^
+      |                                                ;
+C:\mingw64\x86_64-w64-mingw32\include\stdlib.h(275,49): warning: declaration does not declare anything [-Wmissing-declarations]
+  275 |   void __cdecl __MINGW_NOTHROW _exit(int _Code) __MINGW_ATTRIB_NORETURN;
+      |                                                 ^
+C:\mingw64\x86_64-w64-mingw32\include\_mingw.h(152,33): note: expanded from macro '__MINGW_ATTRIB_NORETURN'
+  152 | #define __MINGW_ATTRIB_NORETURN __declspec(noreturn)
+      |                                 ^
+In file included from rexx_parser.c:12:
+C:\mingw64\x86_64-w64-mingw32\include\stdlib.h(282,26): error: expected ';' after top level declarator
+  282 |   void __cdecl _Exit(int) __MINGW_ATTRIB_NORETURN;
+      |                          ^
+      |                          ;
+C:\mingw64\x86_64-w64-mingw32\include\stdlib.h(282,27): warning: declaration does not declare anything [-Wmissing-declarations]
+  282 |   void __cdecl _Exit(int) __MINGW_ATTRIB_NORETURN;
+      |                           ^
+C:\mingw64\x86_64-w64-mingw32\include\_mingw.h(152,33): note: expanded from macro '__MINGW_ATTRIB_NORETURN'
+  152 | #define __MINGW_ATTRIB_NORETURN __declspec(noreturn)
+      |                                 ^
+In file included from rexx_parser.c:12:
+C:\mingw64\x86_64-w64-mingw32\include\stdlib.h(640,69): error: expected ';' after top level declarator
+  640 |   _CRTIMP void __cdecl _beep(unsigned _Frequency,unsigned _Duration) __MINGW_ATTRIB_DEPRECATED;
+      |                                                                     ^
+      |                                                                     ;
+C:\mingw64\x86_64-w64-mingw32\include\stdlib.h(640,70): warning: declaration does not declare anything [-Wmissing-declarations]
+  640 |   _CRTIMP void __cdecl _beep(unsigned _Frequency,unsigned _Duration) __MINGW_ATTRIB_DEPRECATED;
+      |                                                                      ^
+C:\mingw64\x86_64-w64-mingw32\include\_mingw.h(193,35): note: expanded from macro '__MINGW_ATTRIB_DEPRECATED'
+  193 | #define __MINGW_ATTRIB_DEPRECATED __declspec(deprecated)
+      |                                   ^
+In file included from rexx_parser.c:12:
+C:\mingw64\x86_64-w64-mingw32\include\stdlib.h(642,48): error: expected ';' after top level declarator
+  642 |   _CRTIMP void __cdecl _seterrormode(int _Mode) __MINGW_ATTRIB_DEPRECATED;
+      |                                                ^
+      |                                                ;
+C:\mingw64\x86_64-w64-mingw32\include\stdlib.h(642,49): warning: declaration does not declare anything [-Wmissing-declarations]
+  642 |   _CRTIMP void __cdecl _seterrormode(int _Mode) __MINGW_ATTRIB_DEPRECATED;
+      |                                                 ^
+C:\mingw64\x86_64-w64-mingw32\include\_mingw.h(193,35): note: expanded from macro '__MINGW_ATTRIB_DEPRECATED'
+  193 | #define __MINGW_ATTRIB_DEPRECATED __declspec(deprecated)
+      |                                   ^
+In file included from rexx_parser.c:12:
+C:\mingw64\x86_64-w64-mingw32\include\stdlib.h(643,55): error: expected ';' after top level declarator
+  643 |   _CRTIMP void __cdecl _sleep(unsigned long _Duration) __MINGW_ATTRIB_DEPRECATED;
+      |                                                       ^
+      |                                                       ;
+C:\mingw64\x86_64-w64-mingw32\include\stdlib.h(643,56): warning: declaration does not declare anything [-Wmissing-declarations]
+  643 |   _CRTIMP void __cdecl _sleep(unsigned long _Duration) __MINGW_ATTRIB_DEPRECATED;
+      |                                                        ^
+C:\mingw64\x86_64-w64-mingw32\include\_mingw.h(193,35): note: expanded from macro '__MINGW_ATTRIB_DEPRECATED'
+  193 | #define __MINGW_ATTRIB_DEPRECATED __declspec(deprecated)
+      |                                   ^
+6 warnings and 6 errors generated.
+clang-cl ASan build exit=1

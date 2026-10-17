@@ -19,6 +19,7 @@ $rx5NumericContextTest = Join-Path $buildDirectory "rexx_rx5_numeric_context_tes
 $rx6AllocFailureTest = Join-Path $buildDirectory "rexx_rx6_parse_alloc_failure_tests.exe"
 $rx7RoutinesTest = Join-Path $buildDirectory "rexx_rx7_routines_tests.exe"
 $rx7AllocFailureTest = Join-Path $buildDirectory "rexx_rx7_alloc_failure_tests.exe"
+$rx8Test = Join-Path $buildDirectory "rexx_rx8_semantics_alloc_tests.exe"
 $rx2ShellBridgeTest = Join-Path $buildDirectory "rexx_rx2_shell_bridge_tests.exe"
 $commonSources = @(
     (Join-Path $rootDir "rexx_lexer.c"),
@@ -126,6 +127,16 @@ if ($LASTEXITCODE -ne 0) {
     throw "RX7 allocation-failure test build failed with exit code $LASTEXITCODE."
 }
 
+Write-Host "Building RX8 SIGNAL, subsidiary EXPOSE, and allocation tests"
+& $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
+    -DREXX_PARSER_TEST_ALLOCATOR -DREXX_COMPILER_TEST_ALLOCATOR `
+    -Wall -Wextra -Wpedantic -Werror `
+    (Join-Path $PSScriptRoot "rexx_rx8_semantics_alloc_test.c") `
+    @commonSources -lm -o $rx8Test
+if ($LASTEXITCODE -ne 0) {
+    throw "RX8 semantic and allocation test build failed with exit code $LASTEXITCODE."
+}
+
 $gxxCommand = Get-Command g++ -ErrorAction SilentlyContinue
 if ($null -eq $gxxCommand) {
     throw "g++ is required for the RX2 shell bridge integration test."
@@ -198,6 +209,12 @@ Write-Host "Running RX7 allocation-failure assertions"
 & $rx7AllocFailureTest
 if ($LASTEXITCODE -ne 0) {
     throw "RX7 allocation-failure assertions failed with exit code $LASTEXITCODE."
+}
+
+Write-Host "Running RX8 semantic, allocation-failure, and recovery assertions"
+& $rx8Test
+if ($LASTEXITCODE -ne 0) {
+    throw "RX8 assertions failed with exit code $LASTEXITCODE."
 }
 
 Write-Host "Running RX2 shell bridge assertions"
@@ -620,6 +637,41 @@ foreach ($fixture in Get-ChildItem -LiteralPath $rx7FixtureDirectory -Filter "*.
     Write-Host "[PASS] RX7 fixture $($fixture.Name)"
 }
 
+$rx8FixtureDirectory = Join-Path $PSScriptRoot "rexx_rx8"
+$script:rx8Passed = 0
+$script:rx8ReginaPassed = 0
+foreach ($fixture in Get-ChildItem -LiteralPath $rx8FixtureDirectory -Filter "*.rex" | Sort-Object Name) {
+    $diagnosticPath = [System.IO.Path]::ChangeExtension($fixture.FullName, ".diag")
+    $outputPath = [System.IO.Path]::ChangeExtension($fixture.FullName, ".out")
+    $actual = Invoke-CapturedProcess $cliTest @($fixture.FullName)
+    $actualText = (($actual.Stdout + $actual.Stderr) -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+    if (Test-Path -LiteralPath $diagnosticPath) {
+        $expectedDiagnostic = (Get-Content -Raw -LiteralPath $diagnosticPath).Trim()
+        if ($actual.ExitCode -ne 1 -or $actual.Stdout.Length -ne 0 -or -not $actualText.Contains($expectedDiagnostic)) {
+            throw "RX8 fixture $($fixture.Name) failed its expected diagnostic. Exit=$($actual.ExitCode) Output=$actualText"
+        }
+    } else {
+        if (-not (Test-Path -LiteralPath $outputPath)) {
+            throw "RX8 fixture $($fixture.Name) has no .out expectation."
+        }
+        $expectedOutput = ((Get-Content -Raw -LiteralPath $outputPath) -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+        $stdoutText = ($actual.Stdout -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+        if ($actual.ExitCode -ne 0 -or $stdoutText -cne $expectedOutput -or $actual.Stderr.Length -ne 0) {
+            throw "RX8 fixture $($fixture.Name) output mismatch. Expected '$expectedOutput'; got '$actualText'/$($actual.ExitCode)."
+        }
+        if ($null -ne $script:reginaCommand) {
+            $reference = Invoke-CapturedProcess $script:reginaCommand.Source @($fixture.FullName)
+            $referenceText = (($reference.Stdout + $reference.Stderr) -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+            if ($reference.ExitCode -ne 0 -or $referenceText -cne $expectedOutput) {
+                throw "RX8 fixture $($fixture.Name) expected '$expectedOutput' from Regina; got '$referenceText'/$($reference.ExitCode)."
+            }
+            ++$script:rx8ReginaPassed
+        }
+    }
+    ++$script:rx8Passed
+    Write-Host "[PASS] RX8 fixture $($fixture.Name)"
+}
+
 $parserLimitPath = Join-Path $buildDirectory "parse_template_node_limit.rex"
 $parserLimitSource = "parse value '' with " + ((@('.') * 65540) -join ' ')
 [System.IO.File]::WriteAllText(
@@ -687,15 +739,18 @@ Write-Host "RX4 compatibility fixtures passed: $script:rx4Passed/$script:rx4Pass
 Write-Host "RX5 compatibility fixtures passed: $script:rx5Passed/$script:rx5Passed"
 Write-Host "RX6 compatibility and resource fixtures passed: $script:rx6Passed/$script:rx6Passed"
 Write-Host "RX7 compatibility and resource fixtures passed: $script:rx7Passed/$script:rx7Passed"
+Write-Host "RX8 compatibility fixtures passed: $script:rx8Passed/$script:rx8Passed"
 if ($null -eq $script:reginaCommand) {
     Write-Host "RX3 Regina differential cases: 0 run (Regina unavailable)"
     Write-Host "RX4 Regina differential cases: 0 run (Regina unavailable)"
     Write-Host "RX5 Regina differential cases: 0 run (Regina unavailable)"
     Write-Host "RX6 Regina differential cases: 0 run (Regina unavailable)"
+    Write-Host "RX8 Regina differential fixtures: 0 run (Regina unavailable)"
 } else {
     Write-Host "RX3 Regina differential cases passed: $script:rx3ReginaPassed/$script:rx3ReginaPassed"
     Write-Host "RX4 Regina differential cases passed: $script:rx4ReginaPassed/$script:rx4ReginaPassed"
     Write-Host "RX5 Regina differential cases passed: $script:rx5ReginaPassed/$script:rx5ReginaPassed"
     Write-Host "RX6 Regina differential cases passed: $script:rx6ReginaPassed/$script:rx6ReginaPassed"
+    Write-Host "RX8 Regina differential fixtures passed: $script:rx8ReginaPassed/$script:rx8ReginaPassed"
 }
 Write-Host "Build and temporary script artifacts: $buildDirectory"

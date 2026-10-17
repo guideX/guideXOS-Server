@@ -1,0 +1,6 @@
+greeting={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+capability={"return": {}}
+quitReply={"timestamp": {"seconds": 1792244693, "microseconds": 45720}, "event": "SHUTDOWN", "data": {"guest": false, "reason": "host-qmp-quit"}}
+processExited=True
+ownedListenerRemaining=False
+foreignQemuProcesses=

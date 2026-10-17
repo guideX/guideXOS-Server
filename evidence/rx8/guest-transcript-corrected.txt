@@ -1,0 +1,41 @@
+RX8 corrected native guest transcript
+
+$ rexx /guest_acceptance.rex
+RX8 EXPOSE
+shared-ok compound-ok stem-ok
+RX8 SIGNAL
+dynamic target
+10
+1
+2
+loop terminated
+19
+
+$ rexx /guest_cross_signal.rex
+Before call
+Cross label local only 1 14
+Caller resumed 1
+Cross label local only 2 14
+Caller resumed 2
+Caller loop resumed
+HIDDEN
+
+$ rexx /guest_unknown_label.rex
+rexx: /guest_unknown_label.rex: runtime error at instruction 0: unknown SIGNAL label
+$ echo $?
+1
+
+$ rexx /guest_recovery.rex
+RX8 recovery command ran
+$ echo $?
+0
+
+$ rexx /guest_resource.rex
+rexx: /guest_resource.rex: runtime error at instruction 7: VM resource limit exceeded
+$ echo $?
+1
+
+$ rexx /guest_recovery.rex
+RX8 recovery command ran
+$ echo $?
+0

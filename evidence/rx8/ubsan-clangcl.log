@@ -1,0 +1,2 @@
+clang-cl: error: no such file or directory: '/fsanitize=undefined'; did you mean '-fsanitize=undefined'?
+clang-cl UBSan build exit=1

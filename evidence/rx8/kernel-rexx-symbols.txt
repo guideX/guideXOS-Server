@@ -1,0 +1,12 @@
+0000000000322d50 r .rdata$.refptr._ZN6kernel5shell19shell_cmd_rexx_lineEPKcPi
+0000000000323740 r .rdata$.refptr.guide_rexx_main_with_output
+00000000003253f0 r .rdata$.refptr.rexx_vm_execute
+0000000000322d50 R .refptr._ZN6kernel5shell19shell_cmd_rexx_lineEPKcPi
+0000000000323740 R .refptr.guide_rexx_main_with_output
+00000000003253f0 R .refptr.rexx_vm_execute
+000000000022dc00 T _ZN6kernel5shell14shell_cmd_rexxEiPPc
+000000000022dda0 T _ZN6kernel5shell19shell_cmd_rexx_lineEPKcPi
+000000000031aac0 r _ZZN6kernel5shell14shell_cmd_rexxEiPPcE5error
+000000000027c420 T guide_rexx_main_with_output
+0000000000272890 T rexx_vm_execute
+000000000027d3a0 t rexx_vm_execute.cold

@@ -1,0 +1,11 @@
+phase=RX8 final native qualification
+branch=REXX_SUPPORT
+sourceHead=23a9df7218d79e521ad14af75de6306a53d8fd25
+kernelPath=D:\dev\guideXOSServer_REXX\kernel\build\rexx-rx8-final-qualification-20261017\bin\kernel.elf
+kernelSha256=F3FD762C9C41F82517E9646301F8D5D6EB52673447E1A73C25FE8396E83FD67E
+guestKernelSha256=F3FD762C9C41F82517E9646301F8D5D6EB52673447E1A73C25FE8396E83FD67E
+media=isolated copied writable ESP; no production ESP or disk
+network=disabled (-net none)
+acceleration=TCG single thread; one CPU, no host forwarding
+firmware=read-only copied firmware code; dedicated QMP 58394
+foreign QEMU process=left untouched

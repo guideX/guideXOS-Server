@@ -1,0 +1,1 @@
+signal value "BAD-LABEL"

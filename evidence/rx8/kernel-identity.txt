@@ -1,0 +1,11 @@
+phase=RX8
+branch=REXX_SUPPORT
+sourceHead=23a9df7218d79e521ad14af75de6306a53d8fd25
+kernelPath=D:\dev\guideXOSServer_REXX\kernel\build\rexx-rx8-qualification-20261017\bin\kernel.elf
+kernelSha256=3DFEDFD532BFBEB4F3485E7109945F3C3B3A95CF137DE2E4DC53E20837E0D585
+guestKernelSha256=3DFEDFD532BFBEB4F3485E7109945F3C3B3A95CF137DE2E4DC53E20837E0D585
+bootloaderSha256=327BC04DA89E0529F4BD7A38C4A8E2A7F06C6D054A0766845D204E5F49FA8925
+elf=ELF64 x86-64; entry point 0x100000
+native build=successful; isolated BUILD_DIR=kernel/build/rexx-rx8-qualification-20261017
+guest=booted; SIGNAL, subsidiary EXPOSE, SIGL, failure and recovery screenshots attached
+network=disabled; copied ESP; production ESP and disk images not used

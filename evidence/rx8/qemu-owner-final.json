@@ -1,0 +1,10 @@
+{
+  "pid": 4884,
+  "qemuPath": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+  "qmpPort": 58394,
+  "espPath": "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx8-native-20261017-6f3c5901\\ESP",
+  "serialPath": "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx8-native-20261017-6f3c5901\\serial-rx8-final.log",
+  "kernelSha256": "F3FD762C9C41F82517E9646301F8D5D6EB52673447E1A73C25FE8396E83FD67E",
+  "pointerX": 70,
+  "pointerY": 427
+}

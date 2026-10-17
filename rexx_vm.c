@@ -94,7 +94,9 @@ static const char *const vm_messages[] = {
     "invalid NUMERIC FUZZ setting", "invalid NUMERIC FORM setting",
     "unknown REXX routine", "internal routine depth limit exceeded",
     "PROCEDURE is invalid here",
-    "internal function returned without a result"
+    "internal function returned without a result",
+    "unknown SIGNAL label", "invalid SIGNAL destination label",
+    "invalid subsidiary PROCEDURE EXPOSE list"
 };
 
 typedef struct RexxVMEnvironment RexxVMEnvironment;
@@ -120,6 +122,8 @@ struct RexxVMEnvironment {
     RexxVMEnvironment *parent;
     RexxVMExpose *exposes;
     RexxVMExpose *exposes_tail;
+    size_t expose_count;
+    size_t exposed_name_bytes;
     int root;
 };
 
@@ -183,6 +187,21 @@ static int ascii_equal(const char *a, size_t alen, const char *b, size_t blen)
     }
     return 1;
 }
+
+static RexxVMStatus environment_load(RexxVM *vm,
+                                     RexxVMEnvironment *environment,
+                                     const RexxSymbol *symbol,
+                                     int stem,
+                                     RexxValue *value);
+static RexxVMStatus value_string(const RexxValue *value, char **bytes,
+                                size_t *length);
+static RexxVMStatus resolve_expose_name(RexxVM *vm,
+                                        RexxVMEnvironment *environment,
+                                        const char *name, size_t name_length,
+                                        char **resolved_name,
+                                        size_t *resolved_length);
+static int resolved_name_uses_stem_table(const char *name, size_t length);
+static int expose_name_has_dynamic_tail(const char *name, size_t length);
 
 static RexxVMStatus value_set_int32(RexxValue *value, int32_t number);
 
@@ -269,7 +288,7 @@ static RexxVMStatus vm_fail(RexxVM *vm, RexxVMStatus status, size_t pc)
         vm->error.status = status;
         vm->error.pc = pc;
         vm->error.message = status >= REXX_VM_STATUS_OK &&
-                            status <= REXX_VM_STATUS_MISSING_FUNCTION_RESULT
+                            status <= REXX_VM_STATUS_INVALID_EXPOSE_LIST
                                 ? vm_messages[status] : "unknown VM error";
     }
     return status;
@@ -480,45 +499,345 @@ static RexxVMExpose *environment_find_expose(RexxVMEnvironment *environment,
     return NULL;
 }
 
-static RexxVMStatus environment_add_expose(RexxVM *vm,
-                                            RexxVMEnvironment *environment,
-                                            const RexxSymbol *symbol)
+static RexxVMExpose *environment_find_exact_expose(
+    RexxVMEnvironment *environment, const char *name, size_t name_length)
+{
+    RexxVMExpose *expose;
+    for (expose = environment != NULL ? environment->exposes : NULL;
+         expose != NULL; expose = expose->next) {
+        if (ascii_equal(expose->name, expose->name_length,
+                        name, name_length)) return expose;
+    }
+    return NULL;
+}
+
+static RexxVMStatus environment_add_expose_name(
+    RexxVM *vm, RexxVMEnvironment *environment,
+    const char *name, size_t name_length)
 {
     RexxVMExpose *expose;
     size_t dot = 0u;
     if (environment == NULL || environment->root || environment->parent == NULL ||
-        symbol == NULL || symbol->name == NULL || symbol->length == 0u)
+        name == NULL || name_length == 0u)
         return REXX_VM_STATUS_INVALID_PROCEDURE;
-    if (environment_find_expose(environment, symbol->name, symbol->length) != NULL)
-        return REXX_VM_STATUS_INVALID_PROCEDURE;
+    if (environment_find_exact_expose(environment, name, name_length) != NULL)
+        return REXX_VM_STATUS_OK;
+    if (name_length > REXX_VM_MAX_NAME_LENGTH ||
+        environment->expose_count >= REXX_VM_MAX_EXPOSES ||
+        name_length > REXX_VM_MAX_EXPOSED_NAME_BYTES -
+                          environment->exposed_name_bytes)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
     expose = (RexxVMExpose *)vm_calloc(1u, sizeof(*expose));
     if (expose == NULL) return REXX_VM_STATUS_OUT_OF_MEMORY;
-    expose->name = copy_name(symbol->name, symbol->length);
+    expose->name = copy_name(name, name_length);
     if (expose->name == NULL) {
         vm_free(expose);
         return REXX_VM_STATUS_OUT_OF_MEMORY;
     }
-    expose->name_length = symbol->length;
-    while (dot < symbol->length && symbol->name[dot] != '.') ++dot;
-    expose->stem_prefix = dot + 1u == symbol->length && dot < symbol->length;
+    expose->name_length = name_length;
+    while (dot < name_length && name[dot] != '.') ++dot;
+    expose->stem_prefix = dot + 1u == name_length && dot < name_length;
     if (environment->exposes_tail == NULL) environment->exposes = expose;
     else environment->exposes_tail->next = expose;
     environment->exposes_tail = expose;
+    ++environment->expose_count;
+    environment->exposed_name_bytes += name_length;
     (void)vm;
     return REXX_VM_STATUS_OK;
 }
 
-static RexxVMStatus environment_set(RexxVM *vm, RexxVMEnvironment *environment,
-                                    const char *name, size_t name_length,
-                                    int stem, const RexxValue *value)
+static RexxVMStatus environment_add_expose(RexxVM *vm,
+                                            RexxVMEnvironment *environment,
+                                            const RexxSymbol *symbol)
+{
+    char *resolved_name = NULL;
+    size_t resolved_length = 0u;
+    RexxVMStatus status;
+    if (symbol == NULL || symbol->name == NULL)
+        return REXX_VM_STATUS_INVALID_PROCEDURE;
+    if (!expose_name_has_dynamic_tail(symbol->name, symbol->length))
+        return environment_add_expose_name(vm, environment, symbol->name,
+                                           symbol->length);
+    status = resolve_expose_name(vm, environment, symbol->name,
+                                 symbol->length, &resolved_name,
+                                 &resolved_length);
+    if (status == REXX_VM_STATUS_OK)
+        status = environment_add_expose_name(
+            vm, environment, resolved_name, resolved_length);
+    vm_free(resolved_name);
+    return status;
+}
+
+static int subsidiary_name_start(unsigned char c)
+{
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+           c == '!' || c == '?' || c == '_' || c == '@' || c == '#' ||
+           c == '$';
+}
+
+static int subsidiary_name_part(unsigned char c)
+{
+    return subsidiary_name_start(c) || (c >= '0' && c <= '9') || c == '.';
+}
+
+static int subsidiary_name_valid(const char *name, size_t length)
+{
+    size_t index;
+    if (name == NULL || length == 0u || length > REXX_VM_MAX_NAME_LENGTH ||
+        !subsidiary_name_start((unsigned char)name[0])) return 0;
+    for (index = 1u; index < length; ++index) {
+        if (!subsidiary_name_part((unsigned char)name[index])) return 0;
+    }
+    return 1;
+}
+
+static int resolved_name_uses_stem_table(const char *name, size_t length)
+{
+    size_t index;
+    for (index = 0u; index < length; ++index)
+        if (name[index] == '.') return 1;
+    return 0;
+}
+
+static int expose_name_has_dynamic_tail(const char *name, size_t length)
+{
+    size_t index;
+    for (index = 0u; index + 1u < length; ++index)
+        if (name[index] == '.') return 1;
+    return 0;
+}
+
+static RexxVMStatus resolved_name_append(char **buffer, size_t *length,
+                                         size_t *capacity,
+                                         const char *text,
+                                         size_t text_length)
+{
+    size_t required;
+    size_t next;
+    char *grown;
+    if (text_length > REXX_VM_MAX_NAME_LENGTH - *length)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    required = *length + text_length + 1u;
+    if (required <= *capacity) {
+        if (text_length != 0u)
+            memcpy(*buffer + *length, text, text_length);
+        *length += text_length;
+        (*buffer)[*length] = '\0';
+        return REXX_VM_STATUS_OK;
+    }
+    next = *capacity == 0u ? 32u : *capacity;
+    while (next < required) {
+        if (next > (REXX_VM_MAX_NAME_LENGTH + 1u) / 2u) {
+            next = REXX_VM_MAX_NAME_LENGTH + 1u;
+            break;
+        }
+        next *= 2u;
+    }
+    if (next < required || next > SIZE_MAX / sizeof(char))
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    grown = (char *)vm_realloc(*buffer, next);
+    if (grown == NULL) return REXX_VM_STATUS_OUT_OF_MEMORY;
+    *buffer = grown;
+    *capacity = next;
+    if (text_length != 0u)
+        memcpy(*buffer + *length, text, text_length);
+    *length += text_length;
+    (*buffer)[*length] = '\0';
+    return REXX_VM_STATUS_OK;
+}
+
+/* Resolve each symbolic compound tail in order, using the environment as it
+   exists at this EXPOSE item. Numeric tails remain literal. */
+static RexxVMStatus resolve_expose_name(RexxVM *vm,
+                                        RexxVMEnvironment *environment,
+                                        const char *name, size_t name_length,
+                                        char **resolved_name,
+                                        size_t *resolved_length)
+{
+    size_t dot = 0u;
+    size_t cursor;
+    size_t length = 0u;
+    size_t capacity = 0u;
+    char *buffer = NULL;
+    RexxVMStatus status;
+    if (name == NULL || name_length == 0u || resolved_name == NULL ||
+        resolved_length == NULL || name_length > REXX_VM_MAX_NAME_LENGTH)
+        return REXX_VM_STATUS_INVALID_EXPOSE_LIST;
+    while (dot < name_length && name[dot] != '.') ++dot;
+    if (dot == name_length || dot + 1u == name_length) {
+        status = resolved_name_append(&buffer, &length, &capacity,
+                                      name, name_length);
+        if (status != REXX_VM_STATUS_OK) {
+            vm_free(buffer);
+            return status;
+        }
+    } else {
+        status = resolved_name_append(&buffer, &length, &capacity,
+                                      name, dot + 1u);
+        if (status != REXX_VM_STATUS_OK) goto cleanup;
+        cursor = dot + 1u;
+        while (cursor <= name_length) {
+            size_t end = cursor;
+            size_t part_length;
+            int numeric = 1;
+            size_t index;
+            while (end < name_length && name[end] != '.') ++end;
+            part_length = end - cursor;
+            if (part_length != 0u) {
+                for (index = 0u; index < part_length; ++index) {
+                    if (name[cursor + index] < '0' ||
+                        name[cursor + index] > '9') {
+                        numeric = 0;
+                        break;
+                    }
+                }
+                if (!numeric && subsidiary_name_start(
+                                    (unsigned char)name[cursor])) {
+                    RexxSymbol segment_symbol;
+                    char *segment_name = copy_name(name + cursor,
+                                                   part_length);
+                    RexxValue segment_value = REXX_VALUE_INIT;
+                    char *segment_text = NULL;
+                    size_t segment_text_length = 0u;
+                    if (segment_name == NULL) {
+                        status = REXX_VM_STATUS_OUT_OF_MEMORY;
+                        goto cleanup;
+                    }
+                    segment_symbol.name = segment_name;
+                    segment_symbol.length = part_length;
+                    segment_symbol.kind = REXX_SYMBOL_VARIABLE;
+                    status = environment_load(vm, environment,
+                                              &segment_symbol, 0,
+                                              &segment_value);
+                    if (status == REXX_VM_STATUS_OK &&
+                        segment_value.type == REXX_VALUE_STRING &&
+                        segment_value.as.string.length >
+                            REXX_VM_MAX_NAME_LENGTH - length)
+                        status = REXX_VM_STATUS_RESOURCE_LIMIT;
+                    if (status == REXX_VM_STATUS_OK)
+                        status = value_string(&segment_value, &segment_text,
+                                              &segment_text_length);
+                    rexx_value_clear(&segment_value);
+                    vm_free(segment_name);
+                    if (status == REXX_VM_STATUS_OK)
+                        status = resolved_name_append(
+                            &buffer, &length, &capacity, segment_text,
+                            segment_text_length);
+                    vm_free(segment_text);
+                    if (status != REXX_VM_STATUS_OK) goto cleanup;
+                } else {
+                    status = resolved_name_append(&buffer, &length,
+                                                  &capacity, name + cursor,
+                                                  part_length);
+                    if (status != REXX_VM_STATUS_OK) goto cleanup;
+                }
+            }
+            if (end == name_length) break;
+            status = resolved_name_append(&buffer, &length, &capacity, ".", 1u);
+            if (status != REXX_VM_STATUS_OK) goto cleanup;
+            cursor = end + 1u;
+        }
+    }
+    if (!subsidiary_name_valid(buffer, length)) {
+        status = REXX_VM_STATUS_INVALID_EXPOSE_LIST;
+        goto cleanup;
+    }
+    *resolved_name = buffer;
+    *resolved_length = length;
+    return REXX_VM_STATUS_OK;
+
+cleanup:
+    vm_free(buffer);
+    return status;
+}
+
+static RexxVMStatus execute_expose_subsidiary(
+    RexxVM *vm, RexxVMEnvironment *environment, const RexxSymbol *symbol)
+{
+    RexxValue list_value = REXX_VALUE_INIT;
+    char *list = NULL;
+    char *resolved_list_name = NULL;
+    size_t length = 0u;
+    size_t resolved_list_length = 0u;
+    size_t cursor = 0u;
+    RexxVMStatus status;
+
+    /* The controlling variable is exposed before its value is read. */
+    status = resolve_expose_name(vm, environment, symbol->name,
+                                 symbol->length, &resolved_list_name,
+                                 &resolved_list_length);
+    if (status == REXX_VM_STATUS_OK)
+        status = environment_add_expose_name(
+            vm, environment, resolved_list_name, resolved_list_length);
+    if (status == REXX_VM_STATUS_OK) {
+        RexxSymbol resolved_symbol;
+        size_t dot = 0u;
+        while (dot < resolved_list_length &&
+               resolved_list_name[dot] != '.') ++dot;
+        resolved_symbol.name = resolved_list_name;
+        resolved_symbol.length = resolved_list_length;
+        resolved_symbol.kind = dot < resolved_list_length
+            ? REXX_SYMBOL_STEM : REXX_SYMBOL_VARIABLE;
+        status = environment_load(vm, environment, &resolved_symbol,
+                                  resolved_symbol.kind == REXX_SYMBOL_STEM,
+                                  &list_value);
+    }
+    if (status == REXX_VM_STATUS_OK) {
+        if (list_value.type == REXX_VALUE_STRING &&
+            list_value.as.string.length >
+                REXX_VM_MAX_SUBSIDIARY_LIST_LENGTH)
+            status = REXX_VM_STATUS_RESOURCE_LIMIT;
+        else
+            status = value_string(&list_value, &list, &length);
+    }
+    if (status != REXX_VM_STATUS_OK) goto cleanup;
+    if (length > REXX_VM_MAX_SUBSIDIARY_LIST_LENGTH) {
+        status = REXX_VM_STATUS_RESOURCE_LIMIT;
+        goto cleanup;
+    }
+
+    while (cursor < length) {
+        size_t start;
+        while (cursor < length && list[cursor] == ' ') ++cursor;
+        if (cursor == length) break;
+        start = cursor;
+        while (cursor < length && list[cursor] != ' ') ++cursor;
+        if (!subsidiary_name_valid(list + start, cursor - start)) {
+            status = REXX_VM_STATUS_INVALID_EXPOSE_LIST;
+            goto cleanup;
+        }
+        {
+            char *resolved_name = NULL;
+            size_t resolved_length = 0u;
+            status = resolve_expose_name(vm, environment, list + start,
+                                         cursor - start, &resolved_name,
+                                         &resolved_length);
+            if (status == REXX_VM_STATUS_OK)
+                status = environment_add_expose_name(
+                    vm, environment, resolved_name, resolved_length);
+            vm_free(resolved_name);
+        }
+        if (status != REXX_VM_STATUS_OK) goto cleanup;
+    }
+
+cleanup:
+    vm_free(list);
+    vm_free(resolved_list_name);
+    rexx_value_clear(&list_value);
+    return status;
+}
+
+static RexxVMStatus environment_set_resolved(
+    RexxVM *vm, RexxVMEnvironment *environment,
+    const char *name, size_t name_length, int stem, const RexxValue *value)
 {
     RexxVMExpose *expose = environment_find_expose(environment, name,
                                                     name_length);
     RexxVMStatus status;
     if (expose != NULL) {
         if (environment->parent == NULL) return REXX_VM_STATUS_INVALID_BYTECODE;
-        return environment_set(vm, environment->parent, name, name_length,
-                               stem, value);
+        return environment_set_resolved(vm, environment->parent, name,
+                                        name_length, stem, value);
     }
     if (stem) status = stem_set(vm, environment, name, name_length, value);
     else {
@@ -530,18 +849,42 @@ static RexxVMStatus environment_set(RexxVM *vm, RexxVMEnvironment *environment,
     return status;
 }
 
-static RexxVMStatus environment_drop(RexxVM *vm,
-                                     RexxVMEnvironment *environment,
-                                     const char *name, size_t name_length,
-                                     int stem)
+static RexxVMStatus environment_set(RexxVM *vm, RexxVMEnvironment *environment,
+                                    const char *name, size_t name_length,
+                                    int stem, const RexxValue *value)
+{
+    char *resolved_name = NULL;
+    size_t resolved_length = 0u;
+    RexxVMStatus status;
+    if (name != NULL && name_length != 0u &&
+        !expose_name_has_dynamic_tail(name, name_length))
+        return environment_set_resolved(
+            vm, environment, name, name_length,
+            resolved_name_uses_stem_table(name, name_length), value);
+    status = resolve_expose_name(
+        vm, environment, name, name_length, &resolved_name, &resolved_length);
+    if (status == REXX_VM_STATUS_OK)
+        status = environment_set_resolved(vm, environment, resolved_name,
+                                          resolved_length,
+                                          resolved_name_uses_stem_table(
+                                              resolved_name, resolved_length),
+                                          value);
+    vm_free(resolved_name);
+    (void)stem;
+    return status;
+}
+
+static RexxVMStatus environment_drop_resolved(
+    RexxVM *vm, RexxVMEnvironment *environment,
+    const char *name, size_t name_length, int stem)
 {
     RexxVMExpose *expose = environment_find_expose(environment, name,
                                                     name_length);
     size_t index;
     if (expose != NULL) {
         if (environment->parent == NULL) return REXX_VM_STATUS_INVALID_BYTECODE;
-        return environment_drop(vm, environment->parent, name, name_length,
-                                stem);
+        return environment_drop_resolved(vm, environment->parent, name,
+                                         name_length, stem);
     }
     if (!stem) {
         int found = find_entry(environment->locals, environment->local_count,
@@ -587,6 +930,30 @@ static RexxVMStatus environment_drop(RexxVM *vm,
     }
     environment_sync_root(vm, environment);
     return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus environment_drop(RexxVM *vm,
+                                     RexxVMEnvironment *environment,
+                                     const char *name, size_t name_length,
+                                     int stem)
+{
+    char *resolved_name = NULL;
+    size_t resolved_length = 0u;
+    RexxVMStatus status;
+    if (name != NULL && name_length != 0u &&
+        !expose_name_has_dynamic_tail(name, name_length))
+        return environment_drop_resolved(
+            vm, environment, name, name_length,
+            resolved_name_uses_stem_table(name, name_length));
+    status = resolve_expose_name(
+        vm, environment, name, name_length, &resolved_name, &resolved_length);
+    if (status == REXX_VM_STATUS_OK)
+        status = environment_drop_resolved(
+            vm, environment, resolved_name, resolved_length,
+            resolved_name_uses_stem_table(resolved_name, resolved_length));
+    vm_free(resolved_name);
+    (void)stem;
+    return status;
 }
 
 RexxVMStatus rexx_vm_init(RexxVM *vm, size_t stack_capacity)
@@ -1132,13 +1499,43 @@ static RexxVMStatus environment_load(RexxVM *vm,
     return rexx_value_set_string(value, symbol->name, symbol->length);
 }
 
+static RexxVMStatus environment_load_variable(
+    RexxVM *vm, RexxVMEnvironment *environment,
+    const RexxSymbol *symbol, RexxValue *value)
+{
+    char *resolved_name = NULL;
+    size_t resolved_length = 0u;
+    RexxSymbol resolved_symbol;
+    RexxVMStatus status;
+    if (!expose_name_has_dynamic_tail(symbol->name, symbol->length))
+        return environment_load(vm, environment, symbol,
+                                resolved_name_uses_stem_table(
+                                    symbol->name, symbol->length), value);
+    status = resolve_expose_name(
+        vm, environment, symbol->name, symbol->length,
+        &resolved_name, &resolved_length);
+    if (status == REXX_VM_STATUS_OK) {
+        resolved_symbol.name = resolved_name;
+        resolved_symbol.length = resolved_length;
+        resolved_symbol.kind = resolved_name_uses_stem_table(
+            resolved_name, resolved_length)
+            ? REXX_SYMBOL_STEM : REXX_SYMBOL_VARIABLE;
+        status = environment_load(vm, environment, &resolved_symbol,
+                                  resolved_symbol.kind == REXX_SYMBOL_STEM,
+                                  value);
+    }
+    vm_free(resolved_name);
+    return status;
+}
+
 static RexxVMStatus load_variable(RexxVM *vm, const RexxSymbol *symbol, int stem)
 {
     RexxValue value = REXX_VALUE_INIT;
-    RexxVMStatus result = environment_load(
-        vm, (RexxVMEnvironment *)vm->current_environment, symbol, stem, &value);
+    RexxVMStatus result = environment_load_variable(
+        vm, (RexxVMEnvironment *)vm->current_environment, symbol, &value);
     if (result == REXX_VM_STATUS_OK) result = push_move(vm, &value);
     rexx_value_clear(&value);
+    (void)stem;
     return result;
 }
 
@@ -2041,6 +2438,7 @@ static RexxVMStatus ensure_routine_frame(RexxVM *vm)
 
 static RexxVMStatus find_internal_label(const RexxBytecodeChunk *chunk,
                                         const char *name, size_t name_length,
+                                        int case_insensitive,
                                         size_t *target, int *found)
 {
     size_t index;
@@ -2054,13 +2452,30 @@ static RexxVMStatus find_internal_label(const RexxBytecodeChunk *chunk,
         status = get_symbol(chunk, instruction->operand, REXX_SYMBOL_LABEL,
                             &label);
         if (status != REXX_VM_STATUS_OK) return status;
-        if (ascii_equal(label->name, label->length, name, name_length)) {
+        if ((case_insensitive &&
+             ascii_equal(label->name, label->length, name, name_length)) ||
+            (!case_insensitive && label->length == name_length &&
+             memcmp(label->name, name, name_length) == 0)) {
             *found = 1;
             *target = index + 1u;
             return REXX_VM_STATUS_OK;
         }
     }
     return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus set_sigl(RexxVM *vm,
+                             RexxVMEnvironment *environment,
+                             size_t source_line)
+{
+    RexxValue value = REXX_VALUE_INIT;
+    RexxVMStatus status;
+    if (source_line == 0u) return REXX_VM_STATUS_INVALID_BYTECODE;
+    status = rexx_value_set_number(&value, (double)source_line);
+    if (status == REXX_VM_STATUS_OK)
+        status = environment_set(vm, environment, "SIGL", 4u, 0, &value);
+    rexx_value_clear(&value);
+    return status;
 }
 
 static RexxVMStatus execute_arg_builtin(RexxVM *vm,
@@ -2220,7 +2635,8 @@ static RexxVMStatus execute_call(RexxVM *vm,
     }
 
     if (!quoted) {
-        status = find_internal_label(chunk, name, name_length, &target, &found);
+        status = find_internal_label(chunk, name, name_length, 1,
+                                     &target, &found);
         if (status != REXX_VM_STATUS_OK) goto cleanup;
     }
     if (found) {
@@ -2249,6 +2665,14 @@ static RexxVMStatus execute_call(RexxVM *vm,
             memcpy(saved_address, vm->address_environment,
                    vm->address_environment_length);
             saved_address[vm->address_environment_length] = '\0';
+        }
+        status = set_sigl(
+            vm, (RexxVMEnvironment *)vm->current_environment,
+            instruction->source_line);
+        if (status != REXX_VM_STATUS_OK) {
+            free_arguments(arguments, argument_count);
+            vm_free(saved_address);
+            goto cleanup;
         }
         frames = (RexxVMCallFrame *)vm->routine_frames;
         frame = &frames[vm->routine_depth];
@@ -2335,6 +2759,99 @@ static void clear_stack_to(RexxVM *vm, size_t base)
     while (vm->sp > base) rexx_value_clear(&vm->stack[--vm->sp]);
 }
 
+static void unwind_routines(RexxVM *vm);
+
+static void truncate_do_frames(RexxVM *vm, size_t base)
+{
+    RexxVMDoFrame *frames = (RexxVMDoFrame *)vm->do_frames;
+    while (vm->do_depth > base) {
+        --vm->do_depth;
+        memset(&frames[vm->do_depth], 0, sizeof(*frames));
+    }
+}
+
+static RexxVMStatus execute_signal(RexxVM *vm,
+                                   const RexxBytecodeChunk *chunk,
+                                   const RexxInstruction *instruction)
+{
+    const char *name = NULL;
+    size_t name_length = 0u;
+    size_t target = 0u;
+    size_t stack_base = 0u;
+    size_t do_base = 0u;
+    int found = 0;
+    int case_insensitive = 0;
+    char *owned_name = NULL;
+    RexxValue destination = REXX_VALUE_INIT;
+    RexxVMStatus status;
+
+    if (instruction->auxiliary != 0u || instruction->source_line == 0u)
+        return REXX_VM_STATUS_INVALID_BYTECODE;
+    if (instruction->flags == REXX_INSTRUCTION_SIGNAL_LABEL) {
+        const RexxSymbol *label = NULL;
+        status = get_symbol(chunk, instruction->operand, REXX_SYMBOL_LABEL,
+                            &label);
+        if (status != REXX_VM_STATUS_OK) return status;
+        name = label->name;
+        name_length = label->length;
+        case_insensitive = 1;
+    } else if (instruction->flags == REXX_INSTRUCTION_HAS_VALUE &&
+               instruction->operand == 0u) {
+        status = pop_move(vm, &destination);
+        if (status == REXX_VM_STATUS_OK &&
+            destination.type == REXX_VALUE_STRING &&
+            destination.as.string.length > REXX_VM_MAX_NAME_LENGTH)
+            status = REXX_VM_STATUS_INVALID_LABEL;
+        if (status == REXX_VM_STATUS_OK)
+            status = value_string(&destination, &owned_name, &name_length);
+        rexx_value_clear(&destination);
+        if (status != REXX_VM_STATUS_OK) goto cleanup;
+        name = owned_name;
+        if (!subsidiary_name_valid(name, name_length)) {
+            status = REXX_VM_STATUS_INVALID_LABEL;
+            goto cleanup;
+        }
+    } else {
+        return REXX_VM_STATUS_INVALID_BYTECODE;
+    }
+
+    status = find_internal_label(chunk, name, name_length,
+                                 case_insensitive, &target, &found);
+    if (status != REXX_VM_STATUS_OK) goto cleanup;
+    if (!found) {
+        status = REXX_VM_STATUS_UNKNOWN_LABEL;
+        goto cleanup;
+    }
+    /* Label lookup is program-wide, but SIGNAL does not create or remove an
+       internal-call activation. A destination outside the routine's source
+       region still runs with that activation's arguments and variables; an
+       explicit RETURN there uses the original CALL continuation. */
+    if (vm->routine_depth != 0u) {
+        RexxVMCallFrame *frames = (RexxVMCallFrame *)vm->routine_frames;
+        RexxVMCallFrame *frame = &frames[vm->routine_depth - 1u];
+        stack_base = frame->stack_base;
+        do_base = frame->do_depth;
+    }
+    if (stack_base > vm->sp || do_base > vm->do_depth) {
+        status = REXX_VM_STATUS_INVALID_BYTECODE;
+        goto cleanup;
+    }
+    status = set_sigl(vm, (RexxVMEnvironment *)vm->current_environment,
+                      instruction->source_line);
+    if (status != REXX_VM_STATUS_OK) goto cleanup;
+
+    /* Abandon pending expressions and DO loops in the current routine only.
+       Caller stack values and loops remain suspended in their CALL frame. */
+    clear_stack_to(vm, stack_base);
+    truncate_do_frames(vm, do_base);
+    vm->pc = target;
+    status = REXX_VM_STATUS_OK;
+
+cleanup:
+    vm_free(owned_name);
+    return status;
+}
+
 static RexxVMStatus ensure_do_frame(RexxVM *vm)
 {
     size_t next;
@@ -2386,9 +2903,8 @@ static RexxVMStatus do_control_load(RexxVM *vm,
     RexxVMStatus status = parse_get_variable_symbol(
         chunk, frame->control_symbol, &symbol);
     if (status == REXX_VM_STATUS_OK)
-        status = environment_load(
-            vm, (RexxVMEnvironment *)vm->current_environment, symbol,
-            symbol->kind == REXX_SYMBOL_STEM, &value);
+        status = environment_load_variable(
+            vm, (RexxVMEnvironment *)vm->current_environment, symbol, &value);
     if (status == REXX_VM_STATUS_OK)
         status = value_decimal(&value, &frame->control_value);
     rexx_value_clear(&value);
@@ -2725,6 +3241,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
             if (frame->first_instruction && ins->opcode != OP_PROCEDURE)
                 frame->first_instruction = 0;
             if (frame->expose_setup_open && ins->opcode != OP_EXPOSE &&
+                ins->opcode != OP_EXPOSE_SUBSIDIARY &&
                 ins->opcode != OP_PROCEDURE)
                 frame->expose_setup_open = 0;
         }
@@ -2943,7 +3460,8 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
             }
             break;
 
-        case OP_EXPOSE: {
+        case OP_EXPOSE:
+        case OP_EXPOSE_SUBSIDIARY: {
             const RexxSymbol *symbol = NULL;
             RexxVMEnvironment *environment =
                 (RexxVMEnvironment *)vm->current_environment;
@@ -2956,11 +3474,21 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
             } else {
                 status = parse_get_variable_symbol(chunk, ins->operand,
                                                    &symbol);
-                if (status == REXX_VM_STATUS_OK)
-                    status = environment_add_expose(vm, environment, symbol);
+                if (status == REXX_VM_STATUS_OK) {
+                    if (ins->opcode == OP_EXPOSE_SUBSIDIARY)
+                        status = execute_expose_subsidiary(
+                            vm, environment, symbol);
+                    else
+                        status = environment_add_expose(vm, environment,
+                                                       symbol);
+                }
             }
             break;
         }
+
+        case OP_SIGNAL:
+            status = execute_signal(vm, chunk, ins);
+            break;
 
         case OP_DROP: {
             const RexxSymbol *symbol = NULL;
@@ -3168,7 +3696,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 const char *rexx_vm_status_name(RexxVMStatus status)
 {
     if (status < REXX_VM_STATUS_OK ||
-        status > REXX_VM_STATUS_MISSING_FUNCTION_RESULT)
+        status > REXX_VM_STATUS_INVALID_EXPOSE_LIST)
         return "unknown VM status";
     return vm_messages[status];
 }

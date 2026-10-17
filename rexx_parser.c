@@ -134,6 +134,12 @@ static const char rexx_parser_message_parse_position[] =
     "PARSE positional pattern requires a whole number or variable pattern";
 static const char rexx_parser_message_parse_position_range[] =
     "PARSE positional pattern is outside the supported range";
+static const char rexx_parser_message_unsupported_signal_trap[] =
+    "SIGNAL ON/OFF condition traps are not supported in RX8";
+static const char rexx_parser_message_signal_target[] =
+    "SIGNAL requires a label or destination expression";
+static const char rexx_parser_message_signal_value[] =
+    "SIGNAL VALUE requires an expression";
 static const char rexx_parser_message_resource_limit[] =
     "parser resource limit exceeded";
 static const char rexx_parser_message_out_of_memory[] =
@@ -1655,7 +1661,110 @@ static int rexx_parser_append_name(RexxParser *parser, RexxAstName **head,
     if (*tail == NULL) *head = name;
     else (*tail)->next = name;
     *tail = name;
+    name->subsidiary = 0;
     return 1;
+}
+
+static int rexx_parser_token_is_symbol_word(const RexxToken *token,
+                                            const char *word)
+{
+    return token != NULL && token->type == TOKEN_SYMBOL &&
+           rexx_token_equals_ascii_case_insensitive(token, word);
+}
+
+static int rexx_parser_token_is_signal_condition(const RexxToken *token)
+{
+    static const char *const conditions[] = {
+        "ERROR", "FAILURE", "HALT", "LOSTDIGITS", "NOTREADY",
+        "NOVALUE", "SYNTAX"
+    };
+    size_t index;
+    if (token == NULL || token->type != TOKEN_SYMBOL) return 0;
+    for (index = 0u; index < sizeof(conditions) / sizeof(conditions[0]);
+         ++index) {
+        if (rexx_token_equals_ascii_case_insensitive(token,
+                                                      conditions[index]))
+            return 1;
+    }
+    return 0;
+}
+
+static RexxAstClause *rexx_parser_parse_signal_clause(
+    RexxParser *parser,
+    unsigned int stop_mask)
+{
+    RexxToken token = parser->current;
+    RexxAstClause *clause = rexx_parser_new_clause(
+        parser, REXX_AST_CLAUSE_SIGNAL, &token);
+    if (clause == NULL || !rexx_parser_advance(parser)) return NULL;
+
+    if ((rexx_parser_token_is_symbol_word(&parser->current, "ON") ||
+         rexx_parser_token_is_symbol_word(&parser->current, "OFF")) &&
+        rexx_parser_token_is_signal_condition(&parser->lookahead)) {
+        rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                              &parser->current,
+                              rexx_parser_message_unsupported_signal_trap);
+        return NULL;
+    }
+
+    if (rexx_parser_token_is_stop(&parser->current, stop_mask)) {
+        rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                              &parser->current,
+                              rexx_parser_message_signal_target);
+        return NULL;
+    }
+
+    if (rexx_parser_token_is_symbol_word(&parser->current, "VALUE") &&
+        !rexx_parser_token_is_stop(&parser->lookahead, stop_mask)) {
+        if (!rexx_parser_advance(parser)) return NULL;
+        if (rexx_parser_token_is_stop(&parser->current, stop_mask)) {
+            rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                                  &parser->current,
+                                  rexx_parser_message_signal_value);
+            return NULL;
+        }
+        clause->as.signal_clause.signal_kind =
+            REXX_AST_SIGNAL_EXPRESSION;
+        clause->as.signal_clause.expression =
+            rexx_parser_parse_expression_internal(parser, 1, stop_mask);
+        return clause->as.signal_clause.expression != NULL ? clause : NULL;
+    }
+
+    if (rexx_parser_is_name_token(&parser->current)) {
+        clause->as.signal_clause.signal_kind = REXX_AST_SIGNAL_LABEL;
+        clause->as.signal_clause.label = parser->current;
+        if (!rexx_parser_advance(parser)) return NULL;
+        return clause;
+    }
+
+    if (parser->current.type == TOKEN_STRING ||
+        parser->current.type == TOKEN_HEX_STRING ||
+        parser->current.type == TOKEN_BINARY_STRING) {
+        clause->as.signal_clause.signal_kind =
+            REXX_AST_SIGNAL_EXPRESSION;
+        clause->as.signal_clause.expression = rexx_parser_new_expression(
+            parser, REXX_AST_EXPR_LITERAL, &parser->current);
+        if (clause->as.signal_clause.expression == NULL ||
+            !rexx_parser_advance(parser)) return NULL;
+        return clause;
+    }
+
+    /* Without VALUE, classic REXX permits expressions that start with an
+       operator, number, or left parenthesis. */
+    if (parser->current.type == TOKEN_LEFT_PAREN ||
+        parser->current.type == TOKEN_OPERATOR ||
+        parser->current.type == TOKEN_NUMBER) {
+        clause->as.signal_clause.signal_kind =
+            REXX_AST_SIGNAL_EXPRESSION;
+        clause->as.signal_clause.expression =
+            rexx_parser_parse_expression_internal(parser, 1, stop_mask);
+        return clause->as.signal_clause.expression != NULL ? clause : NULL;
+    }
+
+    rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                          &parser->current,
+                          rexx_parser_message_signal_target);
+    return NULL;
 }
 
 static RexxAstClause *rexx_parser_parse_procedure_clause(
@@ -1668,22 +1777,40 @@ static RexxAstClause *rexx_parser_parse_procedure_clause(
     if (clause == NULL || !rexx_parser_advance(parser)) return NULL;
     if (parser->current.type == TOKEN_KEYWORD_EXPOSE) {
         if (!rexx_parser_advance(parser)) return NULL;
-        if (parser->current.type == TOKEN_LEFT_PAREN) {
-            rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
-                                  &parser->current,
-                                  "subsidiary PROCEDURE EXPOSE lists are unsupported");
-            return NULL;
-        }
         while (!rexx_parser_token_is_stop(&parser->current, 0u)) {
-            if (!rexx_parser_is_name_token(&parser->current)) {
-                rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
-                                      &parser->current,
-                                      "expected a variable name after PROCEDURE EXPOSE");
-                return NULL;
+            int subsidiary = 0;
+            RexxToken name_token;
+            if (parser->current.type == TOKEN_LEFT_PAREN) {
+                subsidiary = 1;
+                if (!rexx_parser_advance(parser)) return NULL;
+                if (!rexx_parser_is_name_token(&parser->current)) {
+                    rexx_parser_set_error(parser,
+                        REXX_PARSER_STATUS_SYNTAX_ERROR, &parser->current,
+                        "PROCEDURE EXPOSE parentheses require one variable name");
+                    return NULL;
+                }
+                name_token = parser->current;
+                if (!rexx_parser_advance(parser) ||
+                    parser->current.type != TOKEN_RIGHT_PAREN) {
+                    rexx_parser_set_error(parser,
+                        REXX_PARSER_STATUS_SYNTAX_ERROR, &parser->current,
+                        "expected ')' after subsidiary EXPOSE name");
+                    return NULL;
+                }
+                if (!rexx_parser_advance(parser)) return NULL;
+            } else {
+                if (!rexx_parser_is_name_token(&parser->current)) {
+                    rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                                          &parser->current,
+                                          "expected a variable name after PROCEDURE EXPOSE");
+                    return NULL;
+                }
+                name_token = parser->current;
+                if (!rexx_parser_advance(parser)) return NULL;
             }
             if (!rexx_parser_append_name(parser, &clause->as.procedure.names,
-                                         &tail, parser->current) ||
-                !rexx_parser_advance(parser)) return NULL;
+                                         &tail, name_token)) return NULL;
+            tail->subsidiary = subsidiary;
             if (parser->current.type == TOKEN_COMMA &&
                 !rexx_parser_advance(parser)) return NULL;
         }
@@ -2155,6 +2282,9 @@ static RexxAstClause *rexx_parser_parse_clause(RexxParser *parser,
     case TOKEN_KEYWORD_DROP:
         clause = rexx_parser_parse_drop_clause(parser);
         break;
+    case TOKEN_KEYWORD_SIGNAL:
+        clause = rexx_parser_parse_signal_clause(parser, stop_mask);
+        break;
     case TOKEN_KEYWORD_EXIT:
         clause = rexx_parser_parse_simple_keyword(
             parser, REXX_AST_CLAUSE_EXIT, stop_mask);
@@ -2269,6 +2399,10 @@ static void rexx_parser_free_clause_list(RexxAstClause *clauses)
             break;
         case REXX_AST_CLAUSE_CALL:
             rexx_parser_free_expression(clauses->as.call.call);
+            break;
+        case REXX_AST_CLAUSE_SIGNAL:
+            rexx_parser_free_expression(
+                clauses->as.signal_clause.expression);
             break;
         case REXX_AST_CLAUSE_PROCEDURE:
             rexx_parser_free_name_list(clauses->as.procedure.names);

@@ -1,0 +1,14 @@
+phase=RX8 native SIGNAL and subsidiary EXPOSE acceptance
+branch=REXX_SUPPORT
+sourceHead=23a9df7218d79e521ad14af75de6306a53d8fd25
+kernelPath=D:\dev\guideXOSServer_REXX\kernel\build\rexx-rx8-qualification-20261017\bin\kernel.elf
+kernelSha256=3DFEDFD532BFBEB4F3485E7109945F3C3B3A95CF137DE2E4DC53E20837E0D585
+guestKernelSha256=3DFEDFD532BFBEB4F3485E7109945F3C3B3A95CF137DE2E4DC53E20837E0D585
+media=isolated copied ESP in D:\dev\guideXOSServer_REXX\tmp\rexx-rx8-native-20261017-6f3c5901
+network=disabled (-net none)
+acceleration=TCG single thread; no display, monitor, or host forwarding
+firmware=read-only QEMU edk2-x86_64-code.fd; no writable NVRAM file used
+production ESP/disk images=not used
+foreign QEMU process=left untouched; separate media and QMP port
+bootloader=BOOTX64.EFI copied from prior isolated RX7 ESP; sha256=327BC04DA89E0529F4BD7A38C4A8E2A7F06C6D054A0766845D204E5F49FA8925
+resourceProbe=/guest_resource.rex; list text length=65538 bytes; list limit=65536 bytes

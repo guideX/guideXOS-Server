@@ -379,7 +379,7 @@ static int rexx_run_test(const char *name,
 static int rexx_run_instruction_budget_test(void)
 {
     RexxVM vm;
-    RexxInstruction instruction = { OP_JUMP, 0u, 0u, 0u, 0u };
+    RexxInstruction instruction = { OP_JUMP, 0u, 0u, 0u, 0u, 0u };
     RexxBytecodeChunk chunk;
     RexxVMStatus status;
 
@@ -416,8 +416,8 @@ static int rexx_run_stack_limit_test(void)
 {
     RexxVM vm;
     RexxInstruction instructions[] = {
-        { OP_LOAD_UNSET, 0u, 0u, 0u, 0u },
-        { OP_LOAD_UNSET, 0u, 0u, 0u, 0u }
+        { OP_LOAD_UNSET, 0u, 0u, 0u, 0u, 0u },
+        { OP_LOAD_UNSET, 0u, 0u, 0u, 0u, 0u }
     };
     RexxBytecodeChunk chunk;
     RexxVMStatus status;

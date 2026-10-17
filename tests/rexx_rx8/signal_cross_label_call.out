@@ -1,0 +1,7 @@
+Before call
+Cross label local only 1 14
+Caller resumed 1
+Cross label local only 2 14
+Caller resumed 2
+Caller loop resumed
+HIDDEN

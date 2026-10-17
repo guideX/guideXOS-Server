@@ -1,0 +1,6 @@
+
+D:\dev\guideXOSServer_REXX\kernel\build\rexx-rx8-qualification-20261017\bin\kernel.elf:     file format elf64-x86-64
+architecture: i386:x86-64, flags 0x00000112:
+EXEC_P, HAS_SYMS, D_PAGED
+start address 0x0000000000100000
+

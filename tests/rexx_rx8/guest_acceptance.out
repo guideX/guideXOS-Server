@@ -1,0 +1,9 @@
+RX8 EXPOSE
+shared-ok compound-ok stem-ok
+RX8 SIGNAL
+dynamic target
+10
+1
+2
+loop terminated
+19

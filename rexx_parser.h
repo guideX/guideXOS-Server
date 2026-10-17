@@ -92,6 +92,7 @@ typedef struct RexxAstName RexxAstName;
 
 struct RexxAstName {
     RexxToken token;
+    int subsidiary;           /* PROCEDURE EXPOSE (name) only. */
     RexxAstName *next;
 };
 
@@ -129,8 +130,14 @@ typedef enum RexxAstClauseKind {
     REXX_AST_CLAUSE_NUMERIC_FORM,
     REXX_AST_CLAUSE_PARSE,
     REXX_AST_CLAUSE_PROCEDURE,
-    REXX_AST_CLAUSE_DROP
+    REXX_AST_CLAUSE_DROP,
+    REXX_AST_CLAUSE_SIGNAL
 } RexxAstClauseKind;
+
+typedef enum RexxAstSignalKind {
+    REXX_AST_SIGNAL_LABEL = 0, /* Unquoted constant symbol; case-insensitive. */
+    REXX_AST_SIGNAL_EXPRESSION /* VALUE form or omitted-VALUE expression. */
+} RexxAstSignalKind;
 
 typedef enum RexxAstParseSourceKind {
     REXX_AST_PARSE_ARG = 0,
@@ -246,6 +253,11 @@ struct RexxAstClause {
             RexxAstName *names;
             int subsidiary;
         } procedure;
+        struct {
+            RexxAstSignalKind signal_kind;
+            RexxToken label;
+            RexxAstExpression *expression;
+        } signal_clause;
         struct {
             RexxAstName *names;
         } drop;

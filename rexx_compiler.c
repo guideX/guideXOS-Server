@@ -274,6 +274,7 @@ static uint32_t rexx_compiler_emit(RexxCompiler *compiler,
     instruction->reserved = 0u;
     instruction->operand = operand;
     instruction->auxiliary = auxiliary;
+    instruction->source_line = token != NULL ? token->line : 0u;
     compiler->chunk->instruction_count = index + 1u;
     return (uint32_t)index;
 }
@@ -1334,11 +1335,36 @@ static int rexx_compiler_compile_clause(RexxCompiler *compiler,
                 ? REXX_SYMBOL_STEM : REXX_SYMBOL_VARIABLE;
             symbol = rexx_compiler_intern_symbol(compiler, &name->token, kind);
             if (compiler->status != REXX_COMPILER_STATUS_OK) return 0;
-            (void)rexx_compiler_emit(compiler, OP_EXPOSE, 0u, symbol, 0u,
+            (void)rexx_compiler_emit(compiler,
+                                     name->subsidiary
+                                         ? OP_EXPOSE_SUBSIDIARY : OP_EXPOSE,
+                                     0u, symbol, 0u,
                                      &name->token);
         }
         break;
     }
+    case REXX_AST_CLAUSE_SIGNAL:
+        if (clause->as.signal_clause.signal_kind == REXX_AST_SIGNAL_LABEL) {
+            symbol = rexx_compiler_intern_symbol(
+                compiler, &clause->as.signal_clause.label, REXX_SYMBOL_LABEL);
+            if (compiler->status != REXX_COMPILER_STATUS_OK) return 0;
+            (void)rexx_compiler_emit(compiler, OP_SIGNAL,
+                                     REXX_INSTRUCTION_SIGNAL_LABEL,
+                                     symbol, 0u, &clause->token);
+        } else if (clause->as.signal_clause.expression != NULL &&
+                   rexx_compiler_compile_expression(
+                       compiler, clause->as.signal_clause.expression)) {
+            (void)rexx_compiler_emit(compiler, OP_SIGNAL,
+                                     REXX_INSTRUCTION_HAS_VALUE,
+                                     0u, 0u, &clause->token);
+        } else {
+            if (compiler->status == REXX_COMPILER_STATUS_OK)
+                rexx_compiler_fail(compiler, REXX_COMPILER_STATUS_MALFORMED_AST,
+                                   &clause->token,
+                                   rexx_compiler_message_malformed_ast);
+            return 0;
+        }
+        break;
     case REXX_AST_CLAUSE_DROP: {
         const RexxAstName *name;
         for (name = clause->as.drop.names; name != NULL; name = name->next) {

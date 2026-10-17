@@ -84,7 +84,9 @@ typedef enum RexxOpcode {
     OP_PARSE,
     OP_PROCEDURE,
     OP_EXPOSE,
-    OP_DROP
+    OP_DROP,
+    OP_EXPOSE_SUBSIDIARY,
+    OP_SIGNAL
 } RexxOpcode;
 
 /*
@@ -111,6 +113,7 @@ typedef struct RexxInstruction {
     uint16_t reserved;
     uint32_t operand;
     uint32_t auxiliary;
+    size_t source_line; /* One-based source line for transfer instructions. */
 } RexxInstruction;
 
 typedef enum RexxConstantKind {
@@ -211,6 +214,7 @@ typedef enum RexxDoFlags {
 #define REXX_INSTRUCTION_HAS_ENVIRONMENT ((uint8_t)2u)
 #define REXX_INSTRUCTION_CALL_SUBROUTINE ((uint8_t)1u)
 #define REXX_INSTRUCTION_CALL_QUOTED ((uint8_t)2u)
+#define REXX_INSTRUCTION_SIGNAL_LABEL ((uint8_t)2u)
 
 typedef enum RexxCompilerStatus {
     REXX_COMPILER_STATUS_OK = 0,

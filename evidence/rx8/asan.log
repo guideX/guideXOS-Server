@@ -1,0 +1,6 @@
+ld.lld: error: could not open 'C:\Program Files\LLVM\lib\clang\22\lib\x86_64-w64-windows-gnu\libclang_rt.asan_dynamic.dll.a': no such file or directory
+ld.lld: error: could not open 'C:\Program Files\LLVM\lib\clang\22\lib\x86_64-w64-windows-gnu\libclang_rt.asan_dynamic.dll.a': no such file or directory
+ld.lld: error: could not open 'C:\Program Files\LLVM\lib\clang\22\lib\x86_64-w64-windows-gnu\libclang_rt.asan_dynamic_runtime_thunk.a': no such file or directory
+ld.lld: error: could not open 'C:\Program Files\LLVM\lib\clang\22\lib\x86_64-w64-windows-gnu\libclang_rt.asan_dynamic_runtime_thunk.a': no such file or directory
+clang: error: linker command failed with exit code 1 (use -v to see invocation)
+ASan build exit=1
