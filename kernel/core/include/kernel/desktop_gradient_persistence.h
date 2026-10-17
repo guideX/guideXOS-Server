@@ -43,6 +43,10 @@ GradientPersistenceStatus persistBuiltInGradientId(
 bool readCanonicalWallpaperId(
     char* output, size_t outputCapacity);
 
+// Cache the writable root device while the boot-time VFS mount is available.
+// This lets the settings flow restore / if another subsystem drops its mount.
+void rememberDesktopGradientStorageDevice();
+
 } // namespace desktop
 } // namespace kernel
 

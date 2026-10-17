@@ -1,0 +1,214 @@
+2026-10-17T12:21:08.623668+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:21:08.623668+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:21:08.623668+00:00 RX {"return": {}}
+2026-10-17T12:21:08.623668+00:00 TX {"execute":"query-status"}
+2026-10-17T12:21:08.623668+00:00 RX {"return": {"status": "running", "running": true}}
+2026-10-17T12:21:17.211979+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:21:17.211979+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:21:17.211979+00:00 RX {"return": {}}
+2026-10-17T12:21:17.212982+00:00 TX {"execute":"screendump","arguments":{"filename":"docs\\evidence\\settings-s16r-20261017\\repair9-post-reboot-desktop.ppm"}}
+2026-10-17T12:21:17.222281+00:00 RX {"return": {}}
+2026-10-17T12:21:25.248648+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:21:25.248648+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:21:25.248648+00:00 RX {"return": {}}
+2026-10-17T12:21:25.248648+00:00 TX {"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":"meta_l"}],"hold-time":140}}
+2026-10-17T12:21:25.248648+00:00 RX {"return": {}}
+2026-10-17T12:21:27.601740+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:21:27.601740+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:21:27.601740+00:00 RX {"return": {}}
+2026-10-17T12:21:27.601740+00:00 TX {"execute":"screendump","arguments":{"filename":"docs\\evidence\\settings-s16r-20261017\\repair9-start-menu.ppm"}}
+2026-10-17T12:21:27.601740+00:00 RX {"return": {}}
+2026-10-17T12:21:33.975484+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:21:33.975484+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:21:33.976491+00:00 RX {"return": {}}
+2026-10-17T12:21:33.976491+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-700}}]}}
+2026-10-17T12:21:33.978483+00:00 RX {"return": {}}
+2026-10-17T12:21:37.233828+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:21:37.233828+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:21:37.233828+00:00 RX {"return": {}}
+2026-10-17T12:21:37.233828+00:00 TX {"execute":"screendump","arguments":{"filename":"docs\\evidence\\settings-s16r-20261017\\repair9-start-pointer-x.ppm"}}
+2026-10-17T12:21:37.242830+00:00 RX {"return": {}}
+2026-10-17T12:21:42.232345+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:21:42.232345+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:21:42.232345+00:00 RX {"return": {}}
+2026-10-17T12:21:42.232345+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":200}}]}}
+2026-10-17T12:21:42.232345+00:00 RX {"return": {}}
+2026-10-17T12:21:44.685158+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:21:44.685158+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:21:44.686516+00:00 RX {"return": {}}
+2026-10-17T12:21:44.686516+00:00 TX {"execute":"screendump","arguments":{"filename":"docs\\evidence\\settings-s16r-20261017\\repair9-start-pointer-y.ppm"}}
+2026-10-17T12:21:44.695534+00:00 RX {"return": {}}
+2026-10-17T12:21:54.292449+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-17T12:21:54.292449+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:21:54.293444+00:00 RX {"return":{}}
+2026-10-17T12:21:54.293444+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":1}},{"type":"rel","data":{"axis":"y","value":200}}]}}
+2026-10-17T12:21:54.294449+00:00 RX {"return":{}}
+2026-10-17T12:21:57.462380+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:21:57.463575+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:21:57.463575+00:00 RX {"return": {}}
+2026-10-17T12:21:57.463575+00:00 TX {"execute":"screendump","arguments":{"filename":"docs\\evidence\\settings-s16r-20261017\\repair9-start-pointer-xy.ppm"}}
+2026-10-17T12:21:57.471426+00:00 RX {"return": {}}
+2026-10-17T12:22:26.035796+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:22:26.035796+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:22:26.035796+00:00 RX {"return": {}}
+2026-10-17T12:22:26.035796+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":50}}]}}
+2026-10-17T12:22:26.035796+00:00 RX {"return": {}}
+2026-10-17T12:22:26.174504+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:22:26.174504+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:22:26.175648+00:00 RX {"return": {}}
+2026-10-17T12:22:26.175648+00:00 TX {"execute":"screendump","arguments":{"filename":"docs\\evidence\\settings-s16r-20261017\\repair9-pointer-y50.ppm"}}
+2026-10-17T12:22:26.183535+00:00 RX {"return": {}}
+2026-10-17T12:22:35.602092+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:22:35.602092+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:22:35.602092+00:00 RX {"return": {}}
+2026-10-17T12:22:35.602092+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":270}}]}}
+2026-10-17T12:22:35.602092+00:00 RX {"return": {}}
+2026-10-17T12:22:38.157140+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:22:38.157140+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:22:38.158143+00:00 RX {"return": {}}
+2026-10-17T12:22:38.158143+00:00 TX {"execute":"screendump","arguments":{"filename":"docs\\evidence\\settings-s16r-20261017\\repair9-pointer-y270.ppm"}}
+2026-10-17T12:22:38.163554+00:00 RX {"return": {}}
+2026-10-17T12:22:42.840718+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:22:42.840718+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:22:42.841718+00:00 RX {"return": {}}
+2026-10-17T12:22:42.841718+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-100}}]}}
+2026-10-17T12:22:42.842719+00:00 RX {"return": {}}
+2026-10-17T12:22:45.302309+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:22:45.303309+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:22:45.303309+00:00 RX {"return": {}}
+2026-10-17T12:22:45.303309+00:00 TX {"execute":"screendump","arguments":{"filename":"docs\\evidence\\settings-s16r-20261017\\repair9-pointer-adjust-y.ppm"}}
+2026-10-17T12:22:45.312309+00:00 RX {"return": {}}
+2026-10-17T12:22:49.638852+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:22:49.638852+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:22:49.640033+00:00 RX {"return": {}}
+2026-10-17T12:22:49.640033+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-420}}]}}
+2026-10-17T12:22:49.641033+00:00 RX {"return": {}}
+2026-10-17T12:22:51.942618+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:22:51.942618+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:22:51.942618+00:00 RX {"return": {}}
+2026-10-17T12:22:51.942618+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-120}}]}}
+2026-10-17T12:22:51.942618+00:00 RX {"return": {}}
+2026-10-17T12:22:55.226870+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:22:55.227690+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:22:55.228200+00:00 RX {"return": {}}
+2026-10-17T12:22:55.228200+00:00 TX {"execute":"screendump","arguments":{"filename":"docs\\evidence\\settings-s16r-20261017\\repair9-pointer-legacy-target.ppm"}}
+2026-10-17T12:22:55.244230+00:00 RX {"return": {}}
+2026-10-17T12:22:59.867792+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:22:59.867792+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:22:59.867792+00:00 RX {"return": {}}
+2026-10-17T12:22:59.867792+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":150}}]}}
+2026-10-17T12:22:59.867792+00:00 RX {"return": {}}
+2026-10-17T12:23:03.403095+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:23:03.403095+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:23:03.403095+00:00 RX {"return": {}}
+2026-10-17T12:23:03.403095+00:00 TX {"execute":"screendump","arguments":{"filename":"docs\\evidence\\settings-s16r-20261017\\repair9-pointer-legacy-target2.ppm"}}
+2026-10-17T12:23:03.412607+00:00 RX {"return": {}}
+2026-10-17T12:23:09.268567+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:23:09.268567+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:23:09.268567+00:00 RX {"return": {}}
+2026-10-17T12:23:09.268567+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-64}}]}}
+2026-10-17T12:23:09.270584+00:00 RX {"return": {}}
+2026-10-17T12:23:11.792818+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:23:11.792818+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:23:11.793817+00:00 RX {"return": {}}
+2026-10-17T12:23:11.793817+00:00 TX {"execute":"screendump","arguments":{"filename":"docs\\evidence\\settings-s16r-20261017\\repair9-pointer-legacy-target3.ppm"}}
+2026-10-17T12:23:11.801818+00:00 RX {"return": {}}
+2026-10-17T12:23:15.711945+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:23:15.711945+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:23:15.711945+00:00 RX {"return": {}}
+2026-10-17T12:23:15.711945+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":18}}]}}
+2026-10-17T12:23:15.711945+00:00 RX {"return": {}}
+2026-10-17T12:23:18.474819+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:23:18.474819+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:23:18.474819+00:00 RX {"return": {}}
+2026-10-17T12:23:18.474819+00:00 TX {"execute":"screendump","arguments":{"filename":"docs\\evidence\\settings-s16r-20261017\\repair9-legacy-controlpanel-hover.ppm"}}
+2026-10-17T12:23:18.474819+00:00 RX {"return": {}}
+2026-10-17T12:23:23.554958+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:23:23.554958+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:23:23.554958+00:00 RX {"return": {}}
+2026-10-17T12:23:23.564247+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":true}}]}}
+2026-10-17T12:23:23.564247+00:00 RX {"return": {}}
+2026-10-17T12:23:23.564247+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":false}}]}}
+2026-10-17T12:23:23.566257+00:00 RX {"return": {}}
+2026-10-17T12:23:25.949635+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:23:25.949635+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:23:25.949635+00:00 RX {"return": {}}
+2026-10-17T12:23:25.949635+00:00 TX {"execute":"screendump","arguments":{"filename":"docs\\evidence\\settings-s16r-20261017\\repair9-legacy-controlpanel-open.ppm"}}
+2026-10-17T12:23:25.958502+00:00 RX {"return": {}}
+2026-10-17T12:23:30.660867+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:23:30.660867+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:23:30.661874+00:00 RX {"return": {}}
+2026-10-17T12:23:30.661874+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":350}}]}}
+2026-10-17T12:23:30.662872+00:00 RX {"return": {}}
+2026-10-17T12:23:33.024360+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:23:33.024360+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:23:33.024360+00:00 RX {"return": {}}
+2026-10-17T12:23:33.024360+00:00 TX {"execute":"screendump","arguments":{"filename":"docs\\evidence\\settings-s16r-20261017\\repair9-legacy-display-hover.ppm"}}
+2026-10-17T12:23:33.040302+00:00 RX {"return": {}}
+2026-10-17T12:23:37.511433+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:23:37.511433+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:23:37.512588+00:00 RX {"return": {}}
+2026-10-17T12:23:37.512588+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-250}}]}}
+2026-10-17T12:23:37.513588+00:00 RX {"return": {}}
+2026-10-17T12:23:40.212845+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:23:40.212845+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:23:40.212845+00:00 RX {"return": {}}
+2026-10-17T12:23:40.214971+00:00 TX {"execute":"screendump","arguments":{"filename":"docs\\evidence\\settings-s16r-20261017\\repair9-legacy-display-hover2.ppm"}}
+2026-10-17T12:23:40.214971+00:00 RX {"return": {}}
+2026-10-17T12:23:44.343924+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:23:44.344927+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:23:44.344927+00:00 RX {"return": {}}
+2026-10-17T12:23:44.344927+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-170}}]}}
+2026-10-17T12:23:44.345924+00:00 RX {"return": {}}
+2026-10-17T12:23:46.920808+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:23:46.920808+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:23:46.920808+00:00 RX {"return": {}}
+2026-10-17T12:23:46.920808+00:00 TX {"execute":"screendump","arguments":{"filename":"docs\\evidence\\settings-s16r-20261017\\repair9-legacy-display-hover3.ppm"}}
+2026-10-17T12:23:46.920808+00:00 RX {"return": {}}
+2026-10-17T12:23:50.544741+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:23:50.544741+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:23:50.546915+00:00 RX {"return": {}}
+2026-10-17T12:23:50.546915+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":true}}]}}
+2026-10-17T12:23:50.546915+00:00 RX {"return": {}}
+2026-10-17T12:23:50.546915+00:00 TX {"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":false}}]}}
+2026-10-17T12:23:50.546915+00:00 RX {"return": {}}
+2026-10-17T12:23:53.121205+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:23:53.121205+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:23:53.121205+00:00 RX {"return": {}}
+2026-10-17T12:23:53.121205+00:00 TX {"execute":"screendump","arguments":{"filename":"docs\\evidence\\settings-s16r-20261017\\repair9-legacy-display-options.ppm"}}
+2026-10-17T12:23:53.134205+00:00 RX {"return": {}}
+2026-10-17T12:24:03.000059+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:24:03.000059+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:24:03.001355+00:00 RX {"return": {}}
+2026-10-17T12:24:03.001355+00:00 TX {"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":"esc"}],"hold-time":140}}
+2026-10-17T12:24:03.002349+00:00 RX {"return": {}}
+2026-10-17T12:24:05.854428+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:24:05.854428+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:24:05.855430+00:00 RX {"return": {}}
+2026-10-17T12:24:05.855430+00:00 TX {"execute":"screendump","arguments":{"filename":"docs\\evidence\\settings-s16r-20261017\\repair9-legacy-closed-desktop.ppm"}}
+2026-10-17T12:24:05.866428+00:00 RX {"return": {}}
+2026-10-17T12:24:14.603112+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:24:14.603112+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:24:14.605123+00:00 RX {"return": {}}
+2026-10-17T12:24:14.605123+00:00 TX {"execute":"system_reset"}
+2026-10-17T12:24:14.609139+00:00 RX {"timestamp": {"seconds": 1792239854, "microseconds": 609139}, "event": "SHUTDOWN", "data": {"guest": false, "reason": "host-qmp-system-reset"}}
+2026-10-17T12:24:14.611147+00:00 RX {"timestamp": {"seconds": 1792239854, "microseconds": 609139}, "event": "STOP"}
+2026-10-17T12:24:14.611147+00:00 RX {"return": {}}
+2026-10-17T12:24:24.675973+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:24:24.675973+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:24:24.675973+00:00 RX {"return": {}}
+2026-10-17T12:24:24.675973+00:00 TX {"execute":"query-status"}
+2026-10-17T12:24:24.675973+00:00 RX {"return": {"status": "shutdown", "running": false}}
+2026-10-17T12:24:39.813924+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-17T12:24:39.813924+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:24:39.813924+00:00 RX {"return":{}}
+2026-10-17T12:24:39.813924+00:00 TX {"execute":"cont"}
+2026-10-17T12:24:39.813924+00:00 RX {"error":{"class":"GenericError","desc":"Resetting the Virtual Machine is required"}}
+2026-10-17T12:24:39.813924+00:00 TX {"execute":"query-status"}
+2026-10-17T12:24:39.813924+00:00 RX {"return":{"status":"shutdown","running":false}}
+2026-10-17T12:25:00.350472+00:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-17T12:25:00.350472+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-17T12:25:00.350472+00:00 RX {"return": {}}
+2026-10-17T12:25:00.350472+00:00 TX {"execute":"quit"}
+2026-10-17T12:25:00.352480+00:00 RX {"timestamp": {"seconds": 1792239900, "microseconds": 350472}, "event": "SHUTDOWN", "data": {"guest": false, "reason": "host-qmp-quit"}}
+2026-10-17T12:25:00.352480+00:00 RX {"return": {}}

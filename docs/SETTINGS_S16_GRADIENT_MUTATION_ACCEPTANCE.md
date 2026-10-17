@@ -1,6 +1,6 @@
 # Settings S16 — Native Gradient Selection and Transactional Apply
 
-Status: **Outcome B — implementation and host validation complete; production guest acceptance remains incomplete.**
+Status: **Outcome A — S16R completed production guest acceptance and verified same-ESP persistence.**
 
 ## Repository checkpoint
 
@@ -57,14 +57,33 @@ mingw32-make -C kernel ARCH=amd64 BUILD_DIR=build/s16-clean-final-verified-20261
 
 It completed 156 compile commands with 0 errors and 233 warning lines. The 233 warning diagnostics match the accepted S15 build set; no new S16 warning diagnostic remains. The ELF is 2,724,704 bytes with SHA-256 `AE14A4645BE1E5D5C7A021DB39F67C7860937E80B9BFB9033847752EB83EAEB1`. The PE is 2,838,667 bytes with SHA-256 `7F2B53159FCFF832A5DAC77323DE4B4FA2E80CFC37CE1173952A41FBEFBFBFEA`. The new virtual appearance callback reference has a matching definition in the linked image; the only unmatched `nm` entries, `__dso_handle` and `mainCRTStartup`, were also present in the S15 baseline. Build log and artifact details are in [S16 build evidence](evidence/settings-s16-20261016/build-summary.md).
 
-## Production guest acceptance blocker
+## Original S16 guest acceptance blocker (historical)
 
 The mandatory S16 sequence—initial screenshot, mouse and keyboard selection, pending screenshot, explicit apply, reopen checks, legacy Display Options check, Cancel, same-ESP reboot, post-reboot snapshot, and before/after configuration comparison—was not run and is not claimed as passed.
 
 Before launching a guest, process inventory found QEMU PID `10488` running from `D:\dev\guideXOSServer_DiskManagerImprovements`, with QMP port `61440` and that project's writable ESP. It remained active through the permitted ten-minute passive recheck window. This task did not connect to, terminate, or otherwise interact with it. Guest testing stopped at that evidence boundary. The isolated S16 guest directory was prepared but not booted; its hashes are recorded in [the guest preflight note](evidence/settings-s16-20261016/guest-preflight.md). No S16 screenshots, serial log, QMP transcript, post-apply configuration, or reboot persistence proof exist.
 
-This is Outcome B because the implementation, focused tests, regressions, and production build are complete, while the required real guest mutation and same-ESP reboot proof remain outstanding. S9, Settings 1.0, and v0.3 readiness were not advanced.
+The original S16 checkpoint closed as Outcome B because the required guest mutation and same-ESP reboot proof were still outstanding. S16R below resumes from the committed S16 checkpoint and clears that acceptance blocker. S9, Settings 1.0, and v0.3 readiness were not advanced.
+
+## S16R resumed guest acceptance (2026-10-17)
+
+S16R resumed on `main` from `655702c8329b8d4afcd2d3c261ae0af5a86697d7`. The implementation was already committed at that checkpoint. Acceptance used the existing isolated writable ESP clone at `out/validation/settings-s16r-20261017/guest-acceptance/ESP-repair`; the original preflight ESP and pre-existing `out/` artifacts were preserved. No foreign QEMU process was connected to or modified. The owned QEMU launches, serial logs, screenshots, and QMP exchanges are recorded in `docs/evidence/settings-s16r-20261017/`; see the [S16R test results](evidence/settings-s16r-20261017/test-results.md) and [evidence manifest](evidence/settings-s16r-20261017/evidence-manifest.sha256).
+
+The first real Apply exposed a guest-only VFS mount loss: `/desktop.cfg` could no longer be reached through `/`, although the writable ATA device remained present. The guest serial log records recovery on device `00`, followed by `gradient.apply status=0 active=gradient_forest persisted=gradient_forest`. The repair caches the writable root device immediately after the boot-time persistent mount succeeds and remounts `/` if the Settings persistence path later finds no mount. The change is in `kernel/core/desktop_gradient_persistence.cpp`, its public declaration is in `kernel/core/include/kernel/desktop_gradient_persistence.h`, and the boot-time cache call is in `kernel/core/main.cpp`. The clean rebuilt kernel used for the post-Apply reboot is SHA-256 `D55E066DC56D72A60DE542DC1FEF75FE1086EBB0CAE62A550A0524D397683F92`.
+
+Acceptance results:
+
+- **Native selection and Apply — PASS.** The guest started with Sunset, showed Forest as pending, accepted Apply, and displayed the Forest gradient on the desktop. The Apply result screen and serial result are preserved.
+- **Cancel — PASS.** Ocean was selected as pending and then cancelled. The post-Cancel Settings screen still showed Forest as current and reported “Pending selection cancelled.”
+- **Settings close and reopen — PASS.** Settings closed to the visibly green Forest desktop and reopened with Forest still marked current.
+- **Legacy Display Options — PASS.** The legacy Control Panel → Display path opened the shared Gradients gallery, where Forest was marked current with `*`.
+- **Same-ESP reboot persistence — PASS.** After the Apply session, a fresh QEMU process booted the repaired kernel from the same `ESP-repair` path. Its serial log shows `/desktop.cfg` mounted from writable FAT32 device `00`, then `wallpaper load id=gradient_forest source=primary-config` and `wallpaper apply source=persisted id=gradient_forest`. The post-reboot desktop screenshot shows the green Forest background.
+- **Configuration preservation — PASS.** `desktop.cfg.before`, `desktop.cfg.after-apply`, and `desktop.cfg.after-reboot` are preserved with hashes. The after-Apply and after-reboot files have the same SHA-256. The saved unified diff contains exactly one change: `wallpaperId=gradient_sunset` to `wallpaperId=gradient_forest`; every other line remains byte-for-byte the same.
+
+The representative acceptance captures are `desktop-initial.png`, `repair8-pending-forest.png`, `repair8-apply-result.png`, `repair8-after-cancel.png`, `repair8-settings-closed-desktop.png`, `repair8-settings-reopened-personalization.png`, `repair9-legacy-display-options.png`, and `repair9-post-reboot-desktop.png`. `guest-com1-repair8.serial.log` records Apply and Cancel; `guest-com1-repair9.serial.log` records the boot from the same ESP; `qmp-transcript-repair8.log` and `qmp-transcript-repair9.log` record the guest interaction and relaunch. Artifact hashes are in `repair4-media-manifest.txt` and `evidence-manifest.sha256`.
+
+A later host QMP `system_reset` attempt did not produce a second kernel entry in the serial log, so it is not used as reboot evidence. The passing reboot evidence is the recorded cold restart into a fresh QEMU process with the same writable ESP directory. The build completed successfully; the pre-existing S16 host-test results were not rerun.
 
 ## Remaining limits and recommended S17 work
 
-Run the complete production guest sequence when a task-owned isolated QEMU slot is available. Capture the requested screenshots, QMP transcript, serial log, configuration copies, and hashes; confirm native Settings and legacy Display Options show the same committed preset; reboot from the same writable ESP; and verify unrelated `/desktop.cfg` fields remain unchanged. If power-loss atomicity is later required, first design and test a filesystem-level commit mechanism rather than expanding this gradient operation's claim. Keep S16's mutation boundary limited to built-in gradients.
+The S16 mutation boundary remains limited to built-in gradients. Runtime rollback and verified readback do not provide crash-atomic filesystem writes; a future power-loss atomicity requirement should be handled with a separately designed filesystem commit mechanism rather than by expanding this gradient operation.

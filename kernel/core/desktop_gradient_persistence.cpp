@@ -1,4 +1,5 @@
 #include "kernel/desktop_gradient_persistence.h"
+#include "kernel/serial_debug.h"
 #include "kernel/vfs.h"
 
 namespace kernel {
@@ -6,6 +7,7 @@ namespace desktop {
 namespace {
 
 static const char kDesktopConfigPath[] = "/desktop.cfg";
+static uint8_t s_configBlockDeviceIndex = 0xFFu;
 
 static size_t boundedLength(const char* value, size_t capacity)
 {
@@ -53,6 +55,15 @@ static bool readCanonicalConfig(char* output, size_t capacity, size_t* outLength
     if (!output || capacity == 0u || !outLength) return false;
     *outLength = 0u;
     const vfs::MountPoint* mount = vfs::get_mount(kDesktopConfigPath);
+    if (!mount && s_configBlockDeviceIndex != 0xFFu &&
+        vfs::mount("/", s_configBlockDeviceIndex) != 0xFFu) {
+        mount = vfs::get_mount(kDesktopConfigPath);
+        if (mount) {
+            serial::puts("[desktop-gradient] config mount restored from device=");
+            serial::put_hex8(s_configBlockDeviceIndex);
+            serial::putc('\n');
+        }
+    }
     if (!mount || mount->readOnly) return false;
 
     vfs::FileInfo info{};
@@ -69,6 +80,7 @@ static bool readCanonicalConfig(char* output, size_t capacity, size_t* outLength
     }
     output[length] = '\0';
     *outLength = length;
+    s_configBlockDeviceIndex = mount->blockDevIndex;
     return true;
 }
 
@@ -213,6 +225,14 @@ static void updateActualId(GradientPersistenceResult* output)
 }
 
 } // namespace
+
+void rememberDesktopGradientStorageDevice()
+{
+    const vfs::MountPoint* root = vfs::get_mount("/");
+    if (root && root->active && !root->alias && !root->readOnly) {
+        s_configBlockDeviceIndex = root->blockDevIndex;
+    }
+}
 
 bool readCanonicalWallpaperId(char* output, size_t outputCapacity)
 {

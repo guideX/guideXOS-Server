@@ -13,6 +13,7 @@
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/process.h"
 #include "include/kernel/desktop.h"
+#include "include/kernel/desktop_gradient_persistence.h"
 #include "include/kernel/kernel_apps.h"
 #include "include/kernel/kernel_app.h"
 #include "include/kernel/kernel_compositor.h"
@@ -976,6 +977,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::putc('\n');
         
         const bool mounted = mount_persistent_storage();
+        if (mounted) kernel::desktop::rememberDesktopGradientStorageDevice();
 
         if (is_bootinfo && bootinfo && bootinfo->RamdiskBase != 0 && bootinfo->RamdiskSize != 0) {
             kernel::serial::puts("[KERNEL] Boot wallpaper pack found in ramdisk.img\n");

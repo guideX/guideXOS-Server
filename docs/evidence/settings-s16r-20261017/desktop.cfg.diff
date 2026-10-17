@@ -1,0 +1,9 @@
+--- desktop.cfg.before
++++ desktop.cfg.after-apply
+@@ -1,5 +1,5 @@
+ version=1
+-wallpaperId=gradient_sunset
++wallpaperId=gradient_forest
+ backgroundScaleMode=fill
+ desktopThemeId=classic
+ taskbarPosition=bottom
