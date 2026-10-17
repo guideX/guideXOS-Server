@@ -1,0 +1,20 @@
+[
+  {
+    "ProcessId": 28896,
+    "ParentProcessId": 28748,
+    "ExecutablePath": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+    "CommandLine": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -machine pc,accel=whpx -device qemu-xhci,id=xhci -device usb-tablet,bus=xhci.0 -smp 2 -m 1024M -vga std -display gtk -drive if=pflash,format=raw,readonly=on,file=out/font11-validation/OVMF.fd -drive file=out/font11-validation/font11-esp-fat32.img,format=raw,if=ide,index=0 -serial file:out/font11-validation/guest-boot1.serial.log -qmp tcp:127.0.0.1:58111,server=on,wait=off -gdb tcp:127.0.0.1:58112 -monitor none -rtc base=utc,clock=host -net none"
+  },
+  {
+    "ProcessId": 28152,
+    "ParentProcessId": 9156,
+    "ExecutablePath": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+    "CommandLine": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -accel tcg -machine pc -drive if=pflash,format=raw,readonly=on,file=OVMF-s18.fd -drive file=guideXOS-S18-production-v4.raw,format=raw,if=ide,index=0 -m 2048M -smp 2 -device VGA,id=s18vga -display none -nic none -serial file:guest-com1-boot1b.log -qmp tcp:127.0.0.1:62383,server=on,wait=off -rtc base=utc,clock=host -no-reboot -monitor none"
+  },
+  {
+    "ProcessId": 4900,
+    "ParentProcessId": 25348,
+    "ExecutablePath": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+    "CommandLine": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -accel whpx -machine pc -smp 1 -drive if=pflash,format=raw,readonly=on,file=\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\OVMF.fd\" -drive file=\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c175-managed-notes-resize\\settings-ui-proof-runs\\20261017-212936-15a75c90\\shared-writable-esp.img\",format=raw,if=ide,index=0 -m 1024M -vga std -display none -serial file:\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c175-managed-notes-resize\\settings-ui-proof-runs\\20261017-212936-15a75c90\\boot3\\serial.log\" -qmp tcp:127.0.0.1:49859,server,nowait -boot order=c -no-reboot -no-shutdown -rtc base=utc,clock=host"
+  }
+]

@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "phase": "RX11",
+  "qualification_status": "Outcome A: qualification infrastructure and internal/native verification are complete; independent Regina comparison is unavailable and is not counted as passing.",
+  "repository": {
+    "branch": "REXX_SUPPORT",
+    "starting_head": "7fc1b0a073d3ba32072f02bd6c8a9c41728f42e8",
+    "root_phase_file": "absent"
+  },
+  "reference": {
+    "name": "Regina REXX",
+    "available": false,
+    "version": null,
+    "reason": "No verified regina executable was found in PATH, conventional locations, or project tool directories. No download or installation was performed.",
+    "comparison_counts": {
+      "MATCH": 0,
+      "MISMATCH": 0,
+      "GUIDEXOS_UNSUPPORTED": 0,
+      "REFERENCE_UNSUPPORTED": 0,
+      "HOST_SPECIFIC": 0,
+      "INCONCLUSIVE": 0,
+      "NOT_RUN": 78
+    }
+  },
+  "internal_corpus": {
+    "case_count": 78,
+    "category_counts": {
+      "core": 17,
+      "decimal": 14,
+      "parse": 12,
+      "routines": 10,
+      "conditions": 11,
+      "interpret": 14
+    },
+    "guideXOS_expected_exit_count": 78,
+    "guideXOS_unexpected_status_count": 0,
+    "normalization": "CRLF and lone CR to LF only for comparison; no Regina comparisons were available."
+  },
+  "feature_dimensions": [
+    {
+      "feature": "Symbols, assignment, case-insensitive names, compound stems, concatenation",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "native_guest_verified_for_rx11_change": false,
+      "known_limitations": ["No independent reference result in RX11."]
+    },
+    {
+      "feature": "Strict and numeric string comparison",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "native_guest_verified_for_rx11_change": false,
+      "known_limitations": ["No independent reference result in RX11."]
+    },
+    {
+      "feature": "Classic logical AND, OR, exclusive OR, and NOT",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "native_guest_verified_for_rx11_change": true,
+      "known_limitations": ["Operands are validated as numeric 0 or 1 and invalid values enter SYNTAX handling; independent comparison remains pending."]
+    },
+    {
+      "feature": "IF, DO, ITERATE, LEAVE, SELECT/WHEN/OTHERWISE",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "native_guest_verified_for_rx11_change": false,
+      "known_limitations": ["Existing bounded implementation limits apply; see RX10 qualification report."]
+    },
+    {
+      "feature": "Decimal arithmetic and NUMERIC DIGITS/FUZZ/FORM",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "native_guest_verified_for_rx11_change": false,
+      "known_limitations": ["No independent reference result in RX11."]
+    },
+    {
+      "feature": "PARSE ARG/VAR/VALUE templates and UPPER",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "native_guest_verified_for_rx11_change": false,
+      "known_limitations": ["Template and generated-source budgets remain bounded as documented by RX6/RX10."]
+    },
+    {
+      "feature": "CALL, internal functions, RETURN, RESULT, PROCEDURE, EXPOSE, recursion",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "native_guest_verified_for_rx11_change": false,
+      "known_limitations": ["ARG option N is not accepted; E/O behavior is covered internally."]
+    },
+    {
+      "feature": "SIGNAL, SIGL, NOVALUE/SYNTAX traps, CONDITION()",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "native_guest_verified_for_rx11_change": false,
+      "known_limitations": ["No independent reference result in RX11."]
+    },
+    {
+      "feature": "INTERPRET dynamic statements and structured blocks",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "native_guest_verified_for_rx11_change": false,
+      "known_limitations": ["Source, nesting, bytecode, instruction, translation-work, and VM budgets remain bounded by RX10 limits."]
+    },
+    {
+      "feature": "Direct built-ins LENGTH, SUBSTR, WORD, WORDS, STRIP, POS, TRANSLATE",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "native_guest_verified_for_rx11_change": false,
+      "known_limitations": ["Byte-oriented implementation; detailed Unicode/DBCS and full option edge matrices are unqualified."]
+    },
+    {
+      "feature": "VM-context built-ins ARG, CONDITION, DIGITS, FUZZ, FORM",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "native_guest_verified_for_rx11_change": false,
+      "known_limitations": ["ARG implements E/O but not N; other option edge cases await independent testing."]
+    },
+    {
+      "feature": "Dynamic INTERPRET ownership and completion",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "native_guest_verified_for_rx11_change": false,
+      "known_limitations": ["RX11 ASan exposed and fixed a heap-use-after-free in post-dispatch instruction metadata access; post-fix ASan runs passed."]
+    }
+  ],
+  "built_in_inventory": {
+    "file": "REXX_RX11_BUILTIN_INVENTORY.csv",
+    "classic_saa_candidates_listed": 67,
+    "implemented_in_current_dispatch": 12,
+    "fully_implemented_entries": 11,
+    "partially_implemented_entries": 1,
+    "unimplemented_classic_candidates": 55,
+    "ibm_tsoe_non_saa_candidates": ["EXTERNALS", "FIND", "INDEX", "JUSTIFY", "LINESIZE", "USERID"],
+    "regina_extension_set": "Not assessed; no Regina installation available.",
+    "future_guidexos_functions": "No functions proposed or included in the classic namespace."
+  },
+  "sanitizers": {
+    "address": {
+      "available": true,
+      "toolchain": "MSVC x64 AddressSanitizer",
+      "hosted_c_executables_passed": 13,
+      "guideXOS_corpus_cases_passed": 78,
+      "post_fix_findings": 0,
+      "pre_fix_finding": "One RX10 dynamic INTERPRET heap-use-after-free, fixed by retaining the active instruction record in the VM dispatch frame.",
+      "evidence": "evidence/rx11/sanitizers-final/address-both/"
+    },
+    "undefined_behavior": {
+      "available": true,
+      "toolchain": "Clang/LLVM clang-cl with MSVC UBSan runtime",
+      "hosted_c_executables_passed": 13,
+      "guideXOS_corpus_cases_passed": 78,
+      "findings": 0,
+      "evidence": "evidence/rx11/sanitizers-final/undefined-both/"
+    }
+  },
+  "native_qualification": {
+    "amd64_freestanding_full_build": "PASS",
+    "kernel_elf": "kernel/build/rexx-rx11-native-final-20261017/bin/kernel.elf",
+    "kernel_elf_sha256": "9C557F4CE875DFEB6F9A7D504D64910CE191F9F5EFCA11321F042EC47CB6F3B8",
+    "kernel_pe": "kernel/build/rexx-rx11-native-final-20261017/bin/kernel.pe",
+    "kernel_pe_sha256": "3043C6A423E62C8797478E5EA817F1A09C0DB11A1BCD18163067E30F4E395F08",
+    "isolated_qemu_guest": "PASS: AND/OR/XOR truth table tail, NOT 0/1, trapped invalid logical operand, and subsequent recovery script",
+    "qemu_evidence": "evidence/rx11/native-guest-final/capture4/",
+    "qemu_version": "11.0.0-12122-ga4bb4b10c9",
+    "qemu_network": "disabled (-net none)",
+    "production_esp_modified": false,
+    "foreign_qemu_interfered_with": false
+  },
+  "priority_gaps": [
+    {"priority": "P0", "items": []},
+    {"priority": "P1", "items": ["Complete independent cross-implementation qualification of core syntax, arithmetic, parsing, routine, condition, and INTERPRET behavior once Regina is available."]},
+    {"priority": "P2", "items": ["Implement and qualify common classic BIF families such as DATATYPE, COMPARE, VERIFY, SPACE, COPIES, and WORDPOS.", "Complete ARG option N and expand direct BIF edge coverage."]},
+    {"priority": "P3", "items": ["Decide whether any IBM TSO/E non-SAA functions are relevant to a future host profile.", "Assess Regina-only extensions separately from the classic target."]},
+    {"priority": "Future", "items": ["Define any guideXOS OS-service BIF namespace only in a later host-integration phase."]}
+  ],
+  "percent_conformance": null,
+  "percent_conformance_reason": "Independent reference execution was unavailable and the dimensions are deliberately tracked separately; no single ANSI conformance percentage is reported."
+}

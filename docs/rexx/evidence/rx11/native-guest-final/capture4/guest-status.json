@@ -1,0 +1,9 @@
+{
+  "qemu_pid": 1364,
+  "qemu_exit_code": 0,
+  "screenshot": "D:\\dev\\guideXOSServer_REXX\\docs\\rexx\\evidence\\rx11\\native-guest-final\\capture4\\console-logical-not-recovery.ppm",
+  "screenshot_bytes": 3072016,
+  "serial_bytes": 40545,
+  "foreign_process_count": 1,
+  "qmp_port": 55373
+}

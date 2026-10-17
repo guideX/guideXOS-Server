@@ -1,0 +1,2 @@
+say 'RX11_NATIVE_RECOVERY_SCRIPT_OK'
+exit 0

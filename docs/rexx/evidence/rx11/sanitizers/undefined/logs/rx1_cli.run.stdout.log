@@ -1,0 +1,3 @@
+Usage: D:\dev\guideXOSServer_REXX\tmp\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\bin\rx1_cli.exe <script.rx> [arguments...]
+       D:\dev\guideXOSServer_REXX\tmp\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\bin\rx1_cli.exe --help
+       D:\dev\guideXOSServer_REXX\tmp\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\bin\rx1_cli.exe -- <script-path> [arguments...]

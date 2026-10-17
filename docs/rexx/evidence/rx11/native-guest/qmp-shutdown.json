@@ -1,0 +1,68 @@
+[
+  {
+    "greeting": {
+      "QMP": {
+        "version": {
+          "qemu": {
+            "micro": 0,
+            "minor": 0,
+            "major": 11
+          },
+          "package": "v11.0.0-12122-ga4bb4b10c9"
+        },
+        "capabilities": [
+          "oob"
+        ]
+      }
+    }
+  },
+  {
+    "response": {
+      "return": {}
+    }
+  },
+  {
+    "capabilities": {
+      "return": {}
+    }
+  },
+  {
+    "response": {
+      "return": {
+        "status": "running",
+        "running": true
+      }
+    }
+  },
+  {
+    "status_before_quit": {
+      "return": {
+        "status": "running",
+        "running": true
+      }
+    }
+  },
+  {
+    "response": {
+      "timestamp": {
+        "seconds": 1792273469,
+        "microseconds": 656838
+      },
+      "event": "SHUTDOWN",
+      "data": {
+        "guest": false,
+        "reason": "host-qmp-quit"
+      }
+    }
+  },
+  {
+    "response": {
+      "return": {}
+    }
+  },
+  {
+    "quit": {
+      "return": {}
+    }
+  }
+]

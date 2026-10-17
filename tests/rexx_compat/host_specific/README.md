@@ -1,0 +1,1 @@
+Host-specific and implementation-only tests belong here, separate from the portable differential corpus. The RX11 corpus intentionally contains no host commands, filesystem mutations, networking, or shell execution.

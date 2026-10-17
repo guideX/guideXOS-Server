@@ -2714,6 +2714,102 @@ static RexxVMStatus compare_values(RexxVM *vm,
     return REXX_VM_STATUS_OK;
 }
 
+/* Classic REXX logical operands must evaluate numerically to 0 or 1. */
+static RexxVMStatus value_logical(const RexxValue *value, int *logical)
+{
+    RexxDecimal number;
+    RexxDecimal one;
+    RexxVMStatus status;
+
+    if (value == NULL || logical == NULL)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    status = value_decimal(value, &number);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (number.sign == 0) {
+        *logical = 0;
+        return REXX_VM_STATUS_OK;
+    }
+
+    memset(&one, 0, sizeof(one));
+    one.digits[0] = '1';
+    one.length = 1u;
+    one.sign = 1;
+    if (rexx_decimal_compare(&number, &one) != 0)
+        return REXX_VM_STATUS_NUMERIC_ERROR;
+    *logical = 1;
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus binary_logical(RexxVM *vm, RexxOpcode opcode)
+{
+    RexxValue left = REXX_VALUE_INIT;
+    RexxValue right = REXX_VALUE_INIT;
+    RexxValue result = REXX_VALUE_INIT;
+    RexxVMStatus status;
+    size_t work = 0u;
+    int left_value = 0;
+    int right_value = 0;
+    int result_value = 0;
+
+    if (vm == NULL || (opcode != OP_LOGICAL_AND &&
+                       opcode != OP_LOGICAL_OR &&
+                       opcode != OP_LOGICAL_XOR))
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+
+    status = pop_move(vm, &right);
+    if (status == REXX_VM_STATUS_OK) status = pop_move(vm, &left);
+    if (status == REXX_VM_STATUS_OK) {
+        work = numeric_text_cost(&left);
+        if (numeric_text_cost(&right) > SIZE_MAX - work)
+            status = REXX_VM_STATUS_RESOURCE_LIMIT;
+        else
+            work += numeric_text_cost(&right);
+    }
+    if (status == REXX_VM_STATUS_OK) status = charge_numeric_work(vm, work);
+    if (status == REXX_VM_STATUS_OK)
+        status = value_logical(&left, &left_value);
+    if (status == REXX_VM_STATUS_OK)
+        status = value_logical(&right, &right_value);
+    if (status == REXX_VM_STATUS_OK) {
+        if (opcode == OP_LOGICAL_AND)
+            result_value = left_value && right_value;
+        else if (opcode == OP_LOGICAL_OR)
+            result_value = left_value || right_value;
+        else
+            result_value = left_value != right_value;
+        status = rexx_value_set_boolean(&result, result_value);
+    }
+    if (status == REXX_VM_STATUS_OK) status = push_move(vm, &result);
+
+    rexx_value_clear(&left);
+    rexx_value_clear(&right);
+    rexx_value_clear(&result);
+    return status;
+}
+
+static RexxVMStatus unary_logical_not(RexxVM *vm)
+{
+    RexxValue operand = REXX_VALUE_INIT;
+    RexxValue result = REXX_VALUE_INIT;
+    RexxVMStatus status;
+    int logical = 0;
+
+    if (vm == NULL) return REXX_VM_STATUS_INVALID_ARGUMENT;
+
+    status = pop_move(vm, &operand);
+    if (status == REXX_VM_STATUS_OK)
+        status = charge_numeric_work(vm, numeric_text_cost(&operand));
+    if (status == REXX_VM_STATUS_OK)
+        status = value_logical(&operand, &logical);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_value_set_boolean(&result, !logical);
+    if (status == REXX_VM_STATUS_OK) status = push_move(vm, &result);
+
+    rexx_value_clear(&operand);
+    rexx_value_clear(&result);
+    return status;
+}
+
 static RexxVMStatus value_set_uint32(RexxValue *value, uint32_t number)
 {
     char reverse[10], output[10];
@@ -4485,7 +4581,10 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 
         chunk = (const RexxBytecodeChunk *)vm->active_chunk;
         size_t current_pc = vm->pc;
-        const RexxInstruction *ins = &chunk->instructions[vm->pc++];
+        /* Dispatch may finish INTERPRET and free its current chunk. Keep the
+         * instruction record in this stack frame until post-dispatch checks. */
+        RexxInstruction instruction = chunk->instructions[vm->pc++];
+        const RexxInstruction *ins = &instruction;
         RexxVMStatus status = REXX_VM_STATUS_OK;
         RexxValue value;
         vm->current_source_line = physical_source_line(vm, chunk,
@@ -4624,6 +4723,16 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
             rexx_value_clear(&right);
             break;
         }
+
+        case OP_LOGICAL_AND:
+        case OP_LOGICAL_OR:
+        case OP_LOGICAL_XOR:
+            status = binary_logical(vm, (RexxOpcode)ins->opcode);
+            break;
+
+        case OP_LOGICAL_NOT:
+            status = unary_logical_not(vm);
+            break;
 
         case OP_SAY: {
             char *text = NULL;

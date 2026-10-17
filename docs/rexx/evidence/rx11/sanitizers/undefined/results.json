@@ -1,0 +1,2919 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-10-17T21:28:03Z",
+  "repository_root": "D:\\dev\\guideXOSServer_REXX",
+  "git_head": "7fc1b0a073d3ba32072f02bd6c8a9c41728f42e8",
+  "guideXOS": {
+    "executable": "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+    "compiler_version": "not used (prebuilt CLI supplied)",
+    "build_command": null
+  },
+  "Regina": {
+    "available": false,
+    "executable": null,
+    "version_text": null,
+    "availability_reason": "No regina executable found in PATH and no valid --regina/GUIDEXOS_REGINA path was supplied."
+  },
+  "normalization": "Only CRLF and lone CR line endings are normalized to LF. No trimming, case folding, numeric formatting, stderr, exit-code, or output-order normalization is applied.",
+  "limits": {
+    "per_interpreter_timeout_seconds": 5.0,
+    "stdout_limit_bytes": 1048576,
+    "stderr_limit_bytes": 1048576,
+    "restricted_reference_mode": "Regina is invoked with -r; scripts are corpus-controlled and no ADDRESS host commands, shell execution, filesystem mutation, or networking are used."
+  },
+  "counts": {
+    "NOT_RUN": 78
+  },
+  "guideXOS_execution_counts": {
+    "EXPECTED_EXIT": 78
+  },
+  "total_cases": 78,
+  "cases": [
+    {
+      "id": "conditions/boolean_invalid_operand_trap.rex",
+      "category": "conditions",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "conditions/boolean_invalid_operand_trap.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\conditions\\boolean_invalid_operand_trap.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 8,
+        "stderr_bytes": 0,
+        "stdout_sha256": "49d5e40e9a5648fda75feb9cd8509127ce1c3c3bf8d5c74b29835a47f9b43d06",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "SYNTAX\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "conditions/condition_off_reactivation.rex",
+      "category": "conditions",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "conditions/condition_off_reactivation.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\conditions\\condition_off_reactivation.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 21,
+        "stderr_bytes": 0,
+        "stdout_sha256": "3b8a9802bc33230f90889b9114a047db8daa7b2e22e5f4c096c1d2262315e8e0",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "1\r\n2\r\nSECONDMISSING\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "conditions/condition_options.rex",
+      "category": "conditions",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "conditions/condition_options.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\conditions\\condition_options.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 52,
+        "stderr_bytes": 0,
+        "stdout_sha256": "a06525a0a180ca3fc71598439eab397db573efaaf5434fdad1345bfc9903ad22",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "SYNTAX\r\nSIGNAL\r\nOFF\r\nArithmetic overflow/underflow\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "conditions/nested_routine_trap_state.rex",
+      "category": "conditions",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "conditions/nested_routine_trap_state.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\conditions\\nested_routine_trap_state.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.047,
+        "launch_error": null,
+        "stdout_bytes": 9,
+        "stderr_bytes": 0,
+        "stdout_sha256": "6d841aa3a38aeee0a09a98d04090e56223958953a81b79fbd79261ed0af50c49",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "handled\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "conditions/novalue_default_symbol.rex",
+      "category": "conditions",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "conditions/novalue_default_symbol.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\conditions\\novalue_default_symbol.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.032,
+        "launch_error": null,
+        "stdout_bytes": 13,
+        "stderr_bytes": 0,
+        "stdout_sha256": "5ed257b479f0919dd36c9cc5260e9e44222173cf8e4e3148f2e76f70e2e5641f",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "MISSINGNAME\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "conditions/signal_on_novalue.rex",
+      "category": "conditions",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "conditions/signal_on_novalue.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\conditions\\signal_on_novalue.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.046,
+        "launch_error": null,
+        "stdout_bytes": 17,
+        "stderr_bytes": 0,
+        "stdout_sha256": "cc901363084476aa5c016b5a6db45746b9c299da57092e8edcf9a7b642eaba64",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "NOVALUE\r\nOFF\r\n2\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "conditions/signal_on_syntax.rex",
+      "category": "conditions",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "conditions/signal_on_syntax.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\conditions\\signal_on_syntax.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.032,
+        "launch_error": null,
+        "stdout_bytes": 20,
+        "stderr_bytes": 0,
+        "stdout_sha256": "a70f55f95b59884013f571b3f545222dd1ac5eecf35bd421fd08ddd3ffdeecc0",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "SYNTAX\r\nOFF\r\n42\r\n2\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "conditions/signal_static_and_sigl.rex",
+      "category": "conditions",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "conditions/signal_static_and_sigl.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\conditions\\signal_static_and_sigl.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 12,
+        "stderr_bytes": 0,
+        "stdout_sha256": "757d70d52ed889776dfd3719e5771ca4df46f10143e50acf7807cfe90e3431ac",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "1\r\nhandled\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "conditions/signal_trap_state_cleared.rex",
+      "category": "conditions",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "conditions/signal_trap_state_cleared.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\conditions\\signal_trap_state_cleared.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.047,
+        "launch_error": null,
+        "stdout_bytes": 26,
+        "stderr_bytes": 0,
+        "stdout_sha256": "a06e2ac134fc794b73ef55f620f6d191aeec2a908e1604d01c1caebccbbbf7c3",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "OFF\r\nOFF\r\nANOTHERMISSING\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "conditions/signal_value_dynamic.rex",
+      "category": "conditions",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "conditions/signal_value_dynamic.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\conditions\\signal_value_dynamic.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 18,
+        "stderr_bytes": 0,
+        "stdout_sha256": "0acbbcefe6dc2b97430744ae6d191460264289638b0ea48e827f0d2d62fff5bf",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "dynamic transfer\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "conditions/syntax_trap_recovery.rex",
+      "category": "conditions",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "conditions/syntax_trap_recovery.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\conditions\\syntax_trap_recovery.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 11,
+        "stderr_bytes": 0,
+        "stdout_sha256": "7af1d6f544799d47e1a4a061a0fe9b88b41862870fa853f1a600c7d9f1158c9d",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "recovered\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "core/abut_concatenation.rex",
+      "category": "core",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "core/abut_concatenation.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\core\\abut_concatenation.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.032,
+        "launch_error": null,
+        "stdout_bytes": 10,
+        "stderr_bytes": 0,
+        "stdout_sha256": "9b2374212d0b330573822ea0d2f7e52f81f3dd8af3d5497d3fbfac72e9644c59",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "guideXOS\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "core/blank_concatenation.rex",
+      "category": "core",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "core/blank_concatenation.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\core\\blank_concatenation.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.046,
+        "launch_error": null,
+        "stdout_bytes": 14,
+        "stderr_bytes": 0,
+        "stdout_sha256": "95a72677fa97d35fa162cee8e28a876192ec776c72b0815473bc083c7aee110d",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "classic REXX\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "core/blank_padded_comparison.rex",
+      "category": "core",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "core/blank_padded_comparison.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\core\\blank_padded_comparison.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.032,
+        "launch_error": null,
+        "stdout_bytes": 6,
+        "stderr_bytes": 0,
+        "stdout_sha256": "2a93ef399846526811d56221542f541f9397cd39f0b6718c7fbb44c08d2735fc",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "1\r\n1\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "core/boolean_operators.rex",
+      "category": "core",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "core/boolean_operators.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\core\\boolean_operators.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 45,
+        "stderr_bytes": 0,
+        "stdout_sha256": "71084c416e5781faaff7017d11076d41f949a70d57ba947935802726ff12e6c2",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "1\r\n1\r\n1\r\n0\r\n0\r\n0\r\n1\r\n0\r\n1\r\n1\r\n1\r\n0\r\n1\r\n1\r\n0\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "core/builtin_position_translate.rex",
+      "category": "core",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "core/builtin_position_translate.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\core\\builtin_position_translate.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 14,
+        "stderr_bytes": 0,
+        "stdout_sha256": "63477f77ab1a7a0fb2defa3dd44f38dd79228c3cc4ec930d6afce6155bec56d8",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "5\r\nABC\r\ntrim\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "core/builtin_string_basics.rex",
+      "category": "core",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "core/builtin_string_basics.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\core\\builtin_string_basics.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.063,
+        "launch_error": null,
+        "stdout_bytes": 16,
+        "stderr_bytes": 0,
+        "stdout_sha256": "376f38219aee4f40ecb99611ad851d2360531b8e86597b7219fab60d953304be",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "4\r\nXOS\r\ntwo\r\n3\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "core/case_insensitive_names.rex",
+      "category": "core",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "core/case_insensitive_names.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\core\\case_insensitive_names.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 12,
+        "stderr_bytes": 0,
+        "stdout_sha256": "b90dac39625ac33162b6adc85b713d437594d20b855a481c54bfe505b714e95e",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "case\r\ncase\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "core/compound_stem_variable.rex",
+      "category": "core",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "core/compound_stem_variable.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\core\\compound_stem_variable.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 13,
+        "stderr_bytes": 0,
+        "stdout_sha256": "af8c1147ffd20760b840d71087d7b1e7bf50658c458f4ad5e20f06cb6c97bbb1",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "first\r\nlast\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "core/do_counted_loop.rex",
+      "category": "core",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "core/do_counted_loop.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\core\\do_counted_loop.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 4,
+        "stderr_bytes": 0,
+        "stdout_sha256": "e2bb232cac786f7284bb237d193407e94f32ee0fbf64d27d0ae8b1642de44923",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "15\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "core/do_while_loop.rex",
+      "category": "core",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "core/do_while_loop.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\core\\do_while_loop.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 3,
+        "stderr_bytes": 0,
+        "stdout_sha256": "24ba1e99dc06b19351323aae0d7370243d586475a634b7f6ff7927fbc72cfaed",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "3\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "core/if_then_else.rex",
+      "category": "core",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "core/if_then_else.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\core\\if_then_else.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.047,
+        "launch_error": null,
+        "stdout_bytes": 14,
+        "stderr_bytes": 0,
+        "stdout_sha256": "2d68e5518fe70812eea3a0003c807c7e02876dbd7e9ed286dd2507951ed746ac",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "within range\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "core/iterate_loop.rex",
+      "category": "core",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "core/iterate_loop.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\core\\iterate_loop.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 12,
+        "stderr_bytes": 0,
+        "stdout_sha256": "dfb0a4750f63d2cf95eb60b6fc6cb288e0f2d3ff99ee43fc53660e9d76841e5e",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "1\r\n2\r\n4\r\n5\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "core/numeric_string_comparison.rex",
+      "category": "core",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "core/numeric_string_comparison.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\core\\numeric_string_comparison.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.032,
+        "launch_error": null,
+        "stdout_bytes": 6,
+        "stderr_bytes": 0,
+        "stdout_sha256": "2a93ef399846526811d56221542f541f9397cd39f0b6718c7fbb44c08d2735fc",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "1\r\n1\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "core/select_when_otherwise.rex",
+      "category": "core",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "core/select_when_otherwise.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\core\\select_when_otherwise.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.062,
+        "launch_error": null,
+        "stdout_bytes": 5,
+        "stderr_bytes": 0,
+        "stdout_sha256": "140eeaa0223494102ae8f7a5fe2df425c49d226ad50b98e52989a049f624780e",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "two\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "core/semicolon_clauses.rex",
+      "category": "core",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "core/semicolon_clauses.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\core\\semicolon_clauses.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.047,
+        "launch_error": null,
+        "stdout_bytes": 4,
+        "stderr_bytes": 0,
+        "stdout_sha256": "4a979e18ec2dd94e45bf2e63ba4ed226e2714d159576b09d7338b6c6f5e720e3",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "AB\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "core/strict_string_comparison.rex",
+      "category": "core",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "core/strict_string_comparison.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\core\\strict_string_comparison.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 6,
+        "stderr_bytes": 0,
+        "stdout_sha256": "9b38d284bae4dc26e593ab0d5cb50d846c3328a8c0467291a8a473cf15c1615b",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "0\r\n1\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "core/symbols_assignment.rex",
+      "category": "core",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "core/symbols_assignment.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\core\\symbols_assignment.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.063,
+        "launch_error": null,
+        "stdout_bytes": 4,
+        "stderr_bytes": 0,
+        "stdout_sha256": "9e4c59bb9e5ca6ca840eb57555c3f45692474ff6c1379d3579eec60e18667cbe",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "42\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "decimal/addition_scale.rex",
+      "category": "decimal",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "decimal/addition_scale.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\decimal\\addition_scale.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 9,
+        "stderr_bytes": 0,
+        "stdout_sha256": "29fec271cd5226bc7cf7508a5f2a398c6685df4f01b359012c9c1dd2fc40fa5c",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "123.455\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "decimal/digits_rounding.rex",
+      "category": "decimal",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "decimal/digits_rounding.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\decimal\\digits_rounding.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.047,
+        "launch_error": null,
+        "stdout_bytes": 8,
+        "stderr_bytes": 0,
+        "stdout_sha256": "67706f3de51bf2bf9ff5d8c927a4afd8232e991b9b6968205f7d785a45efd944",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "1.2346\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "decimal/division_precision.rex",
+      "category": "decimal",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "decimal/division_precision.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\decimal\\division_precision.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 12,
+        "stderr_bytes": 0,
+        "stdout_sha256": "2fd2b420520f45efd263ab547c12b74c2e32017cc1123aed1d7623568681e2e7",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "0.14285714\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "decimal/fuzz_comparison.rex",
+      "category": "decimal",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "decimal/fuzz_comparison.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\decimal\\fuzz_comparison.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 3,
+        "stderr_bytes": 0,
+        "stdout_sha256": "f1b2f662800122bed0ff255693df89c4487fbdcf453d3524a42d4ec20c3d9c04",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "1\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "decimal/integer_division_remainder.rex",
+      "category": "decimal",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "decimal/integer_division_remainder.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\decimal\\integer_division_remainder.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.032,
+        "launch_error": null,
+        "stdout_bytes": 10,
+        "stderr_bytes": 0,
+        "stdout_sha256": "3b6327bbabac1b6a016a48feaf8c9dfa0404e5bc4fa536c8c5adc7383421a4e8",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "3\r\n2\r\n-2\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "decimal/integer_exponentiation.rex",
+      "category": "decimal",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "decimal/integer_exponentiation.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\decimal\\integer_exponentiation.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.032,
+        "launch_error": null,
+        "stdout_bytes": 9,
+        "stderr_bytes": 0,
+        "stdout_sha256": "dc9fa3a69b6c0552baffda344a2c071210f3d2b9f674ad5eff772d9f02d62bae",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "1024\r\n1\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "decimal/large_coefficient.rex",
+      "category": "decimal",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "decimal/large_coefficient.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\decimal\\large_coefficient.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 22,
+        "stderr_bytes": 0,
+        "stdout_sha256": "bfc5e8c9f8b9945d773a3868eda2ad90e202248a4bed8f71b07e5846fbc6b3e9",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "12345678901234567897\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "decimal/leading_trailing_zeroes.rex",
+      "category": "decimal",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "decimal/leading_trailing_zeroes.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\decimal\\leading_trailing_zeroes.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.047,
+        "launch_error": null,
+        "stdout_bytes": 18,
+        "stderr_bytes": 0,
+        "stdout_sha256": "71a5f3fe7177e8f046dd7e5dad4d5694423bb2f4078e07084ac770baed53cf12",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "12.3400\r\n12.3400\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "decimal/multiplication_precision.rex",
+      "category": "decimal",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "decimal/multiplication_precision.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\decimal\\multiplication_precision.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 7,
+        "stderr_bytes": 0,
+        "stdout_sha256": "9f2f7d7f915a7850614502ce8f7a8e5b32fcd4c3cce9afe9893a45effe5d3c82",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "1.000\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "decimal/negative_exponent.rex",
+      "category": "decimal",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "decimal/negative_exponent.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\decimal\\negative_exponent.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 7,
+        "stderr_bytes": 0,
+        "stdout_sha256": "29f9584dc7d2a8529a12045b26bf665ca49223f9f11056fbc0584fd9884e619a",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "0.125\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "decimal/numeric_form_engineering.rex",
+      "category": "decimal",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "decimal/numeric_form_engineering.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\decimal\\numeric_form_engineering.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.047,
+        "launch_error": null,
+        "stdout_bytes": 9,
+        "stderr_bytes": 0,
+        "stdout_sha256": "7f69e936750c37c9610c89316ca1c0d8c61c7b4227e86889b437f271cf648fbf",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "1234567\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "decimal/numeric_form_scientific.rex",
+      "category": "decimal",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "decimal/numeric_form_scientific.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\decimal\\numeric_form_scientific.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 9,
+        "stderr_bytes": 0,
+        "stdout_sha256": "7f69e936750c37c9610c89316ca1c0d8c61c7b4227e86889b437f271cf648fbf",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "1234567\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "decimal/small_coefficient.rex",
+      "category": "decimal",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "decimal/small_coefficient.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\decimal\\small_coefficient.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 14,
+        "stderr_bytes": 0,
+        "stdout_sha256": "234fd75b76f0e878c2e744dba43e1a9ec04b82900c4d9b84de726e687ba4b20e",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "0.0000012345\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "decimal/subtraction_negative.rex",
+      "category": "decimal",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "decimal/subtraction_negative.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\decimal\\subtraction_negative.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 7,
+        "stderr_bytes": 0,
+        "stdout_sha256": "073bb5b1716d03ac7b2c15dd23155beb544a599184fbb4e3c553600094345f03",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "-2.25\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "interpret/interpret_assignment.rex",
+      "category": "interpret",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "interpret/interpret_assignment.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\interpret\\interpret_assignment.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.032,
+        "launch_error": null,
+        "stdout_bytes": 4,
+        "stderr_bytes": 0,
+        "stdout_sha256": "9e4c59bb9e5ca6ca840eb57555c3f45692474ff6c1379d3579eec60e18667cbe",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "42\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "interpret/interpret_completed_fragment.rex",
+      "category": "interpret",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "interpret/interpret_completed_fragment.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\interpret\\interpret_completed_fragment.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.047,
+        "launch_error": null,
+        "stdout_bytes": 36,
+        "stderr_bytes": 0,
+        "stdout_sha256": "e2b2b49939eb9a69bac63888555783e1c34491d5912faddee41d062cdde9ccb5",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "fragment completed\r\nparent resumed\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "interpret/interpret_exit_status.rex",
+      "category": "interpret",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 5,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "interpret/interpret_exit_status.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\interpret\\interpret_exit_status.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 5,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 0,
+        "stderr_bytes": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "interpret/interpret_exposed_variable.rex",
+      "category": "interpret",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "interpret/interpret_exposed_variable.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\interpret\\interpret_exposed_variable.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.032,
+        "launch_error": null,
+        "stdout_bytes": 3,
+        "stderr_bytes": 0,
+        "stdout_sha256": "7fb2aaeaf3eef66b52db104118c30f62899f5f0df520350a94a8fcb843c0dfdf",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "5\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "interpret/interpret_internal_call.rex",
+      "category": "interpret",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "interpret/interpret_internal_call.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\interpret\\interpret_internal_call.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.047,
+        "launch_error": null,
+        "stdout_bytes": 3,
+        "stderr_bytes": 0,
+        "stdout_sha256": "7fb2aaeaf3eef66b52db104118c30f62899f5f0df520350a94a8fcb843c0dfdf",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "5\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "interpret/interpret_multiple_clauses.rex",
+      "category": "interpret",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "interpret/interpret_multiple_clauses.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\interpret\\interpret_multiple_clauses.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 4,
+        "stderr_bytes": 0,
+        "stdout_sha256": "4a979e18ec2dd94e45bf2e63ba4ed226e2714d159576b09d7338b6c6f5e720e3",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "AB\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "interpret/interpret_nested.rex",
+      "category": "interpret",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "interpret/interpret_nested.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\interpret\\interpret_nested.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 8,
+        "stderr_bytes": 0,
+        "stdout_sha256": "37f77d12d8aef5f696669e387eafc38d57ae38644f142c31d1064d4d41ffd7a1",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "nested\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "interpret/interpret_repeated_compile.rex",
+      "category": "interpret",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "interpret/interpret_repeated_compile.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\interpret\\interpret_repeated_compile.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 4,
+        "stderr_bytes": 0,
+        "stdout_sha256": "50e1c70ff6acbb8a6c78e18ccc9428fb7b473a6be9320e52019a66cd32afba95",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "25\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "interpret/interpret_return_from_routine.rex",
+      "category": "interpret",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "interpret/interpret_return_from_routine.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\interpret\\interpret_return_from_routine.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.047,
+        "launch_error": null,
+        "stdout_bytes": 10,
+        "stderr_bytes": 0,
+        "stdout_sha256": "d897ced2039211778e747943ff06b38a8833624742a8334350798496d5babee4",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "returned\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "interpret/interpret_sigl_mapping.rex",
+      "category": "interpret",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "interpret/interpret_sigl_mapping.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\interpret\\interpret_sigl_mapping.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 12,
+        "stderr_bytes": 0,
+        "stdout_sha256": "f2d9c73bd54b05ba002d5c1795ff66cb6b07eeee97f83b36628e59c352b6479c",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "NOVALUE\r\n2\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "interpret/interpret_signal_to_root_label.rex",
+      "category": "interpret",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "interpret/interpret_signal_to_root_label.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\interpret\\interpret_signal_to_root_label.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 20,
+        "stderr_bytes": 0,
+        "stdout_sha256": "0f83ae00dc8b7302ee5618ce2a8de658585f1d4aa0f21163c06b6d303c8ea237",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "root label reached\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "interpret/interpret_simple_clause.rex",
+      "category": "interpret",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "interpret/interpret_simple_clause.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\interpret\\interpret_simple_clause.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.032,
+        "launch_error": null,
+        "stdout_bytes": 16,
+        "stderr_bytes": 0,
+        "stdout_sha256": "dece438f0be36fbb19b632d84e4982b046a2c3b0dc222c26de4eb1c24a4589e6",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "dynamic clause\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "interpret/interpret_structured_loop.rex",
+      "category": "interpret",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "interpret/interpret_structured_loop.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\interpret\\interpret_structured_loop.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 4,
+        "stderr_bytes": 0,
+        "stdout_sha256": "4593c89b4d60161d78fef3f48312d7833649b876a0c1d762cb5b9d73acaa0a20",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "10\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "interpret/interpret_syntax_trap.rex",
+      "category": "interpret",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "interpret/interpret_syntax_trap.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\interpret\\interpret_syntax_trap.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 11,
+        "stderr_bytes": 0,
+        "stdout_sha256": "b42901256af443206156a12e0d8a3f286a615c90ff053ab5c9e1ef24b13ca3b2",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "SYNTAX\r\n2\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "parse/parse_absolute_position.rex",
+      "category": "parse",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "parse/parse_absolute_position.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\parse\\parse_absolute_position.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.047,
+        "launch_error": null,
+        "stdout_bytes": 16,
+        "stderr_bytes": 0,
+        "stdout_sha256": "d354f2d91946ad08de23f4808c669bd0a23922627f064e97e7c017e694cdec36",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "[abc][defghij]\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "parse/parse_arg_empty.rex",
+      "category": "parse",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "parse/parse_arg_empty.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\parse\\parse_arg_empty.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 4,
+        "stderr_bytes": 0,
+        "stdout_sha256": "a5338d955b09046ec0b16f3a9625b7955c763aae07dc722e474e6078745f932f",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "[]\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "parse/parse_comma_templates.rex",
+      "category": "parse",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "parse/parse_comma_templates.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\parse\\parse_comma_templates.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 17,
+        "stderr_bytes": 0,
+        "stdout_sha256": "fd6bba11a4c3e92afc146881acaa282561b8b3e18508384bdb7225000f337c4b",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "[alpha][beta][]\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "parse/parse_dynamic_delimiter.rex",
+      "category": "parse",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "parse/parse_dynamic_delimiter.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\parse\\parse_dynamic_delimiter.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 21,
+        "stderr_bytes": 0,
+        "stdout_sha256": "e2ee4c69f77b1bbfa3ef8c94262ad870d4918999038b12c2b52a6aa69a0c0ec5",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "[alpha][beta gamma]\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "parse/parse_empty_fields.rex",
+      "category": "parse",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "parse/parse_empty_fields.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\parse\\parse_empty_fields.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.047,
+        "launch_error": null,
+        "stdout_bytes": 12,
+        "stderr_bytes": 0,
+        "stdout_sha256": "8e40d37294eb2917639349b6c75466e36d6249ad92016d5470f433eb89e06d40",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "[a][][b,,]\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "parse/parse_empty_source.rex",
+      "category": "parse",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "parse/parse_empty_source.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\parse\\parse_empty_source.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 6,
+        "stderr_bytes": 0,
+        "stdout_sha256": "e8d8252f8ab5175bdf25f5923151092b62cf22899ee60101327192f872115075",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "[][]\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "parse/parse_literal_delimiter.rex",
+      "category": "parse",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "parse/parse_literal_delimiter.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\parse\\parse_literal_delimiter.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 23,
+        "stderr_bytes": 0,
+        "stdout_sha256": "85e51e73ee39e2c39c5cd71948af5d7c0e65db12c1b2988002aae7029b6c161e",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "[left][middle][right]\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "parse/parse_relative_position.rex",
+      "category": "parse",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "parse/parse_relative_position.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\parse\\parse_relative_position.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.032,
+        "launch_error": null,
+        "stdout_bytes": 46,
+        "stderr_bytes": 0,
+        "stdout_sha256": "e45803d4bc2deb0d98c3b3681a87cfac0f29f5f831868997eaf2144f6534b0ef",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "[Clemens   ][Samuel    ][Mark Twain        ]\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "parse/parse_upper_var.rex",
+      "category": "parse",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "parse/parse_upper_var.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\parse\\parse_upper_var.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 13,
+        "stderr_bytes": 0,
+        "stdout_sha256": "7915208c28556d3d3a685542821f5491c168a4b81b1f2fdb3644945e59535b1c",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "ALPHA\r\nBETA\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "parse/parse_value_words.rex",
+      "category": "parse",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "parse/parse_value_words.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\parse\\parse_value_words.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.047,
+        "launch_error": null,
+        "stdout_bytes": 19,
+        "stderr_bytes": 0,
+        "stdout_sha256": "a2d666a6df4e5b6d938475d1611c2dcf32614705e27a99d168366d1508e13f3e",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "[one][two][three]\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "parse/parse_var_words.rex",
+      "category": "parse",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "parse/parse_var_words.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\parse\\parse_var_words.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 39,
+        "stderr_bytes": 0,
+        "stdout_sha256": "cc5d237a166f5ddaa7920b856bfff9ff9f82a14aca65810f8597b35c7bd7bffe",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "[Mercury][Venus][Earth][Mars Jupiter]\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "parse/parse_word_templates.rex",
+      "category": "parse",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "parse/parse_word_templates.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\parse\\parse_word_templates.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 20,
+        "stderr_bytes": 0,
+        "stdout_sha256": "b989796e7955ce8a23869d541ff43c03ebd3fb33b953dd9e54403399b4e2fdc8",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "one:two:three:four\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "routines/arg_omissions.rex",
+      "category": "routines",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "routines/arg_omissions.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\routines\\arg_omissions.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 23,
+        "stderr_bytes": 0,
+        "stdout_sha256": "d0edd2c50441f8155c573e323b79fa0e2bd22ed5423cb537282431560c23a2dc",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "3\r\nalpha\r\n0\r\n1\r\nomega\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "routines/call_return_result.rex",
+      "category": "routines",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "routines/call_return_result.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\routines\\call_return_result.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.063,
+        "launch_error": null,
+        "stdout_bytes": 7,
+        "stderr_bytes": 0,
+        "stdout_sha256": "cd2eca3535741f27a8ae40c31b0c41d4057a7a7b912b33b9aed86485d1c84676",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "hello\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "routines/internal_function.rex",
+      "category": "routines",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "routines/internal_function.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\routines\\internal_function.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 3,
+        "stderr_bytes": 0,
+        "stdout_sha256": "7fb2aaeaf3eef66b52db104118c30f62899f5f0df520350a94a8fcb843c0dfdf",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "5\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "routines/numeric_state_restored.rex",
+      "category": "routines",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "routines/numeric_state_restored.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\routines\\numeric_state_restored.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.063,
+        "launch_error": null,
+        "stdout_bytes": 11,
+        "stderr_bytes": 0,
+        "stdout_sha256": "98cf7b7e7bb5366b65be7c463a8d53be60d03c05ad1dc442fc0edd37d79edd19",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "4\r\n0.1429\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "routines/procedure_expose_compound.rex",
+      "category": "routines",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "routines/procedure_expose_compound.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\routines\\procedure_expose_compound.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.047,
+        "launch_error": null,
+        "stdout_bytes": 13,
+        "stderr_bytes": 0,
+        "stdout_sha256": "ce0555be4d11ce1f79c1dd27cc42867fecd790ae740fcd45307b8eb5c02efd64",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "one-changed\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "routines/procedure_expose_direct.rex",
+      "category": "routines",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "routines/procedure_expose_direct.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\routines\\procedure_expose_direct.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.062,
+        "launch_error": null,
+        "stdout_bytes": 3,
+        "stderr_bytes": 0,
+        "stdout_sha256": "df4e26a04a444901b95afef44e4a96cfae34690fff2ad2c66389c70079cdff2b",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "2\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "routines/procedure_expose_subsidiary.rex",
+      "category": "routines",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "routines/procedure_expose_subsidiary.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\routines\\procedure_expose_subsidiary.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.297,
+        "launch_error": null,
+        "stdout_bytes": 6,
+        "stderr_bytes": 0,
+        "stdout_sha256": "7305bd26e9cff732e5db5c391f3105596061bf1409c41781507d2512c0305f66",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "A1B2\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "routines/procedure_local_generation.rex",
+      "category": "routines",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "routines/procedure_local_generation.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\routines\\procedure_local_generation.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.046,
+        "launch_error": null,
+        "stdout_bytes": 14,
+        "stderr_bytes": 0,
+        "stdout_sha256": "526f78528d6e29c455d1af6f31c78b934f952e52c241aaab89fe32f69d103f4c",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "inner\r\nouter\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "routines/recursive_function.rex",
+      "category": "routines",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "routines/recursive_function.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\routines\\recursive_function.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.094,
+        "launch_error": null,
+        "stdout_bytes": 5,
+        "stderr_bytes": 0,
+        "stdout_sha256": "ebccc81776e81bbccb576c8e059ac42bc54c4d5a060c8f927d8738fbcaeb3539",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "720\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    },
+    {
+      "id": "routines/routine_result_overwrite.rex",
+      "category": "routines",
+      "classification": "NOT_RUN",
+      "classification_reason": "Regina was not verified as an available reference interpreter.",
+      "guideXOS_execution": "EXPECTED_EXIT",
+      "expected_exit_code": 0,
+      "reproduction_command": [
+        "C:\\Users\\guideX\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\run_differential.py",
+        "--case",
+        "routines/routine_result_overwrite.rex",
+        "--case-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "--results-dir",
+        "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\differential"
+      ],
+      "guideXOS": {
+        "argv": [
+          "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx11-sanitizer-undefined-578aa76bdc8f41498bee996fbf4e361c\\bin\\rx1_cli.exe",
+          "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases\\routines\\routine_result_overwrite.rex"
+        ],
+        "cwd": "D:\\dev\\guideXOSServer_REXX\\tests\\rexx_compat\\cases",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "duration_seconds": 0.031,
+        "launch_error": null,
+        "stdout_bytes": 7,
+        "stderr_bytes": 0,
+        "stdout_sha256": "1235f8f435b1d16f7aac442351f2e29ff1bd2b74652392c4accb5ec5565973da",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_text": "after\r\n",
+        "stderr_text": ""
+      },
+      "Regina": null
+    }
+  ]
+}

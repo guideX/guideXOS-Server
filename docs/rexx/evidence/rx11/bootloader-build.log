@@ -1,0 +1,15 @@
+
+cl : command line  warning D9025: overriding '/sdl' with '/GS-' [D:\dev\guideXOSServer_REXX\guideXOSBootLoader\guideXOSBootLoader.vcxproj]
+  elf.cpp
+  main.cpp
+  fb_console.cpp
+  guidexOSBootInfo_validation.cpp
+  pci.cpp
+  trampoline_msvc.cpp
+  uefi_guids.cpp
+  paging.cpp
+  Generating Code...
+cl : command line  warning D9025: overriding '/sdl' with '/GS-' [D:\dev\guideXOSServer_REXX\guideXOSBootLoader\guideXOSBootLoader.vcxproj]
+cl : command line  warning D9025: overriding '/Oi' with '/Oi-' [D:\dev\guideXOSServer_REXX\guideXOSBootLoader\guideXOSBootLoader.vcxproj]
+  intrinsics.cpp
+  guideXOSBootLoader.vcxproj -> D:\dev\guideXOSServer_REXX\tmp\rexx-rx11-bootloader\bin\guideXOSBootLoader.exe

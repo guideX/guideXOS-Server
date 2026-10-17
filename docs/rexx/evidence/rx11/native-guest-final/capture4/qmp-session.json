@@ -1,0 +1,781 @@
+[
+  {
+    "greeting": {
+      "QMP": {
+        "version": {
+          "qemu": {
+            "micro": 0,
+            "minor": 0,
+            "major": 11
+          },
+          "package": "v11.0.0-12122-ga4bb4b10c9"
+        },
+        "capabilities": [
+          "oob"
+        ]
+      }
+    }
+  },
+  {
+    "request": {
+      "execute": "qmp_capabilities",
+      "id": 1
+    }
+  },
+  {
+    "return": {},
+    "id": 1
+  },
+  {
+    "request": {
+      "execute": "query-status",
+      "id": 2
+    }
+  },
+  {
+    "return": {
+      "status": "running",
+      "running": true
+    },
+    "id": 2
+  },
+  {
+    "hmp_command": "sendkey meta_l"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 3,
+      "arguments": {
+        "command-line": "sendkey meta_l"
+      }
+    }
+  },
+  {
+    "timestamp": {
+      "seconds": 1792274170,
+      "microseconds": 271666
+    },
+    "event": "RTC_CHANGE",
+    "data": {
+      "offset": 0,
+      "qom-path": "/machine/unattached/device[4]/rtc"
+    }
+  },
+  {
+    "timestamp": {
+      "seconds": 1792274170,
+      "microseconds": 527722
+    },
+    "event": "RTC_CHANGE",
+    "data": {
+      "offset": 0,
+      "qom-path": "/machine/unattached/device[4]/rtc"
+    }
+  },
+  {
+    "return": "",
+    "id": 3
+  },
+  {
+    "hmp_command": "sendkey 0x29"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 4,
+      "arguments": {
+        "command-line": "sendkey 0x29"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 4
+  },
+  {
+    "hmp_command": "sendkey r"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 5,
+      "arguments": {
+        "command-line": "sendkey r"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 5
+  },
+  {
+    "hmp_command": "sendkey e"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 6,
+      "arguments": {
+        "command-line": "sendkey e"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 6
+  },
+  {
+    "hmp_command": "sendkey x"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 7,
+      "arguments": {
+        "command-line": "sendkey x"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 7
+  },
+  {
+    "hmp_command": "sendkey x"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 8,
+      "arguments": {
+        "command-line": "sendkey x"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 8
+  },
+  {
+    "hmp_command": "sendkey spc"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 9,
+      "arguments": {
+        "command-line": "sendkey spc"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 9
+  },
+  {
+    "hmp_command": "sendkey r"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 10,
+      "arguments": {
+        "command-line": "sendkey r"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 10
+  },
+  {
+    "hmp_command": "sendkey x"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 11,
+      "arguments": {
+        "command-line": "sendkey x"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 11
+  },
+  {
+    "hmp_command": "sendkey 1"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 12,
+      "arguments": {
+        "command-line": "sendkey 1"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 12
+  },
+  {
+    "hmp_command": "sendkey 1"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 13,
+      "arguments": {
+        "command-line": "sendkey 1"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 13
+  },
+  {
+    "hmp_command": "sendkey l"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 14,
+      "arguments": {
+        "command-line": "sendkey l"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 14
+  },
+  {
+    "hmp_command": "sendkey o"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 15,
+      "arguments": {
+        "command-line": "sendkey o"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 15
+  },
+  {
+    "hmp_command": "sendkey g"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 16,
+      "arguments": {
+        "command-line": "sendkey g"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 16
+  },
+  {
+    "hmp_command": "sendkey i"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 17,
+      "arguments": {
+        "command-line": "sendkey i"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 17
+  },
+  {
+    "hmp_command": "sendkey c"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 18,
+      "arguments": {
+        "command-line": "sendkey c"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 18
+  },
+  {
+    "hmp_command": "sendkey dot"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 19,
+      "arguments": {
+        "command-line": "sendkey dot"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 19
+  },
+  {
+    "hmp_command": "sendkey r"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 20,
+      "arguments": {
+        "command-line": "sendkey r"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 20
+  },
+  {
+    "hmp_command": "sendkey e"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 21,
+      "arguments": {
+        "command-line": "sendkey e"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 21
+  },
+  {
+    "hmp_command": "sendkey x"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 22,
+      "arguments": {
+        "command-line": "sendkey x"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 22
+  },
+  {
+    "hmp_command": "sendkey ret"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 23,
+      "arguments": {
+        "command-line": "sendkey ret"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 23
+  },
+  {
+    "hmp_command": "sendkey r"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 24,
+      "arguments": {
+        "command-line": "sendkey r"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 24
+  },
+  {
+    "hmp_command": "sendkey e"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 25,
+      "arguments": {
+        "command-line": "sendkey e"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 25
+  },
+  {
+    "hmp_command": "sendkey x"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 26,
+      "arguments": {
+        "command-line": "sendkey x"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 26
+  },
+  {
+    "hmp_command": "sendkey x"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 27,
+      "arguments": {
+        "command-line": "sendkey x"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 27
+  },
+  {
+    "hmp_command": "sendkey spc"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 28,
+      "arguments": {
+        "command-line": "sendkey spc"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 28
+  },
+  {
+    "hmp_command": "sendkey r"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 29,
+      "arguments": {
+        "command-line": "sendkey r"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 29
+  },
+  {
+    "hmp_command": "sendkey x"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 30,
+      "arguments": {
+        "command-line": "sendkey x"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 30
+  },
+  {
+    "hmp_command": "sendkey 1"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 31,
+      "arguments": {
+        "command-line": "sendkey 1"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 31
+  },
+  {
+    "hmp_command": "sendkey 1"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 32,
+      "arguments": {
+        "command-line": "sendkey 1"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 32
+  },
+  {
+    "hmp_command": "sendkey r"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 33,
+      "arguments": {
+        "command-line": "sendkey r"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 33
+  },
+  {
+    "hmp_command": "sendkey e"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 34,
+      "arguments": {
+        "command-line": "sendkey e"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 34
+  },
+  {
+    "hmp_command": "sendkey c"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 35,
+      "arguments": {
+        "command-line": "sendkey c"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 35
+  },
+  {
+    "hmp_command": "sendkey o"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 36,
+      "arguments": {
+        "command-line": "sendkey o"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 36
+  },
+  {
+    "hmp_command": "sendkey v"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 37,
+      "arguments": {
+        "command-line": "sendkey v"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 37
+  },
+  {
+    "hmp_command": "sendkey e"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 38,
+      "arguments": {
+        "command-line": "sendkey e"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 38
+  },
+  {
+    "hmp_command": "sendkey r"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 39,
+      "arguments": {
+        "command-line": "sendkey r"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 39
+  },
+  {
+    "hmp_command": "sendkey dot"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 40,
+      "arguments": {
+        "command-line": "sendkey dot"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 40
+  },
+  {
+    "hmp_command": "sendkey r"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 41,
+      "arguments": {
+        "command-line": "sendkey r"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 41
+  },
+  {
+    "hmp_command": "sendkey e"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 42,
+      "arguments": {
+        "command-line": "sendkey e"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 42
+  },
+  {
+    "hmp_command": "sendkey x"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 43,
+      "arguments": {
+        "command-line": "sendkey x"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 43
+  },
+  {
+    "hmp_command": "sendkey ret"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 44,
+      "arguments": {
+        "command-line": "sendkey ret"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 44
+  },
+  {
+    "hmp_command": "sendkey meta_l"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 45,
+      "arguments": {
+        "command-line": "sendkey meta_l"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 45
+  },
+  {
+    "hmp_command": "screendump D:\\dev\\guideXOSServer_REXX\\docs\\rexx\\evidence\\rx11\\native-guest-final\\capture4\\console-logical-not-recovery.ppm"
+  },
+  {
+    "request": {
+      "execute": "human-monitor-command",
+      "id": 46,
+      "arguments": {
+        "command-line": "screendump D:\\dev\\guideXOSServer_REXX\\docs\\rexx\\evidence\\rx11\\native-guest-final\\capture4\\console-logical-not-recovery.ppm"
+      }
+    }
+  },
+  {
+    "return": "",
+    "id": 46
+  },
+  {
+    "request": {
+      "execute": "query-status",
+      "id": 47
+    }
+  },
+  {
+    "return": {
+      "status": "running",
+      "running": true
+    },
+    "id": 47
+  }
+]

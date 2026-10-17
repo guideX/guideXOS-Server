@@ -1,0 +1,56 @@
+[TEST] arithmetic and assignment
+11
+[PASS] arithmetic and assignment
+
+[TEST] stem variable
+active
+[PASS] stem variable
+
+[TEST] IF and DO control flow
+Greater
+[PASS] IF and DO control flow
+
+[TEST] ADDRESS dispatcher
+[ADDRESS] sys_status
+[PASS] ADDRESS dispatcher
+
+[TEST] case-insensitive names and concatenation
+[PASS] case-insensitive names and concatenation
+
+[TEST] ADDRESS environment and RC semantics
+[ADDRESS TEMP] temp_cmd
+[ADDRESS DEFAULT] DEFAULT_CMD
+[PASS] ADDRESS environment and RC semantics
+
+[TEST] repeated ADDRESS stack balance
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[ADDRESS KERNEL] repeat
+[PASS] repeated ADDRESS stack balance
+
+[TEST] EXIT 0 terminates execution
+[PASS] EXIT 0 terminates execution
+
+[TEST] EXIT nonzero value
+[PASS] EXIT nonzero value
+
+[TEST] bounded bytecode execution
+[PASS] bounded bytecode execution
+
+[TEST] evaluation stack resource limit
+[PASS] evaluation stack resource limit
+
+All REXX integration tests passed.

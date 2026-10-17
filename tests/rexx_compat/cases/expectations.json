@@ -1,0 +1,6 @@
+{
+  "interpret/interpret_exit_status.rex": {
+    "exit_code": 5,
+    "reason": "The fixture exercises EXIT's process status through generated INTERPRET source."
+  }
+}

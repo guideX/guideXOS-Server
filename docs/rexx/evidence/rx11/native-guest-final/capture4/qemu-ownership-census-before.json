@@ -1,0 +1,12 @@
+{
+  "capturedAt": "2026-10-17T14:56:07.8964313-07:00",
+  "purpose": "Immediate pre-launch ownership census; existing QEMU processes are foreign and left running",
+  "processes": [
+    {
+      "ProcessId": 26788,
+      "ParentProcessId": 29548,
+      "ExecutablePath": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+      "CommandLine": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -accel whpx -machine pc -smp 1 -drive if=pflash,format=raw,readonly=on,file=\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\OVMF.fd\" -drive file=\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c175-managed-notes-resize\\settings-ui-proof-runs\\20261017-214916-e530eb01\\shared-writable-esp.img\",format=raw,if=ide,index=0 -m 1024M -vga std -display none -serial file:\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c175-managed-notes-resize\\settings-ui-proof-runs\\20261017-214916-e530eb01\\boot3\\serial.log\" -qmp tcp:127.0.0.1:52181,server,nowait -boot order=c -no-reboot -no-shutdown -rtc base=utc,clock=host"
+    }
+  ]
+}

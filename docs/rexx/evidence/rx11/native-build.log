@@ -1,0 +1,9 @@
+mingw32-make: Entering directory 'D:/dev/guideXOSServer_REXX/kernel'
+MBEDTLS_PROFILE_VERIFY=PASS
+MBEDTLS_VERSION=4.1.0
+TF_PSA_CRYPTO_VERSION=1.1.0
+MBEDTLS_DEPENDENCY_ROOT=D:\dev\guideXOSServer_REXX\third_party\mbedtls
+MBEDTLS_PATCH_COUNT=3
+MBEDTLS_PROFILE_SHA_MODE=normalized-UTF8-LF
+"Mbed TLS/TF-PSA freestanding compile probe complete."
+mingw32-make: Leaving directory 'D:/dev/guideXOSServer_REXX/kernel'
