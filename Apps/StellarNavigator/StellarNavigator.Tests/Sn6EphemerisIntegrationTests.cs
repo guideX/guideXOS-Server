@@ -70,7 +70,7 @@ public class Sn6EphemerisIntegrationTests
         // agrees with CSPICE exactly at J2000, so this tests the service
         // composition, not the rotation itself).
         using var provider = new IndexedChebyshevEphemerisProvider(Sn4Paths.DatasetPath());
-        var svc = new FramedStateService(provider);
+        var svc = new FramedStateService(provider, IauEarthOrientation.Load(Sn6Paths.OrientationAssetPath()));
         var framed = svc.GetState("mars", J2000, FrameOrientation.IauEarth, "earth");
         Assert.True(framed.IsSuccess, framed.ErrorMessage);
         var mars = provider.GetState("mars", J2000, ReferenceFrame.Barycentric).Value!;

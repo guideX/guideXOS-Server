@@ -15,21 +15,23 @@ namespace Astronomy.Ephemeris;
 /// SSB-centered geometric states are never confused with Earth-centered
 /// states: the origin id travels with every result.
 ///
-/// Epoch model: all inputs take an <see cref="AstroTime"/> TDB label and the
-/// JD-derived ET (documented binary64 precision limit, ~50 us / ~1-2 m at
-/// orbital speeds). UTC labels are accepted ONLY through the SN5
-/// <see cref="TimeConverter"/> policies; provisional epochs downgrade the
-/// result to <see cref="NavigationResultStatus.StaleData"/> (never silent).
+/// AstroTime compatibility inputs use their JD-derived ET. UTC inputs retain
+/// the exact SN5 ET through the optional precision-preserving provider path.
+/// UTC labels are accepted ONLY through the SN5 <see cref="TimeConverter"/>
+/// policies; provisional epochs downgrade the result to
+/// <see cref="NavigationResultStatus.StaleData"/> (never silent).
 /// Simulated spacecraft contributions stay simulation-derived: a validated
 /// transform never promotes them to ValidatedReference.
 /// </summary>
 public sealed class FramedStateService
 {
     private readonly IEphemerisProvider _provider;
+    private readonly IauEarthOrientation? _orientationModel;
 
-    public FramedStateService(IEphemerisProvider provider)
+    public FramedStateService(IEphemerisProvider provider, IauEarthOrientation? orientationModel = null)
     {
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
+        _orientationModel = orientationModel;
     }
 
     public string DataSource => _provider.DataSource + " + SN6 framed states (IAU_EARTH pck00011.tpc)";
@@ -70,11 +72,6 @@ public sealed class FramedStateService
     public NavigationResult<CartesianState> GetState(
         string bodyId, AstroTime epoch, FrameOrientation orientation, string originId)
     {
-        if (string.IsNullOrWhiteSpace(bodyId))
-            return Fail<CartesianState>(NavigationResultStatus.InvalidInput, "Body id must be provided.");
-        if (string.IsNullOrWhiteSpace(originId))
-            return Fail<CartesianState>(NavigationResultStatus.InvalidInput, "Origin id must be provided.");
-
         double et;
         try
         {
@@ -84,12 +81,48 @@ public sealed class FramedStateService
         {
             return Fail<CartesianState>(NavigationResultStatus.InvalidInput, ex.Message);
         }
+        return GetStateCore(bodyId, epoch, et, orientation, originId, requireEtProvider: false);
+    }
+
+    /// <summary>Evaluate a framed state at ET without converting through a Julian date.</summary>
+    public NavigationResult<CartesianState> GetStateAtEt(
+        string bodyId, EtSeconds epoch, FrameOrientation orientation, string originId)
+    {
+        if (!double.IsFinite(epoch.Value))
+            return Fail<CartesianState>(NavigationResultStatus.InvalidInput,
+                "Epoch ET must be finite seconds past J2000 (TDB).");
+        var label = new AstroTime(epoch.ToJulianDateTdb(), TimeScale.Tdb);
+        return GetStateCore(bodyId, label, epoch.Value, orientation, originId, requireEtProvider: true);
+    }
+
+    private NavigationResult<CartesianState> GetStateCore(
+        string bodyId, AstroTime epoch, double et, FrameOrientation orientation, string originId,
+        bool requireEtProvider)
+    {
+        if (string.IsNullOrWhiteSpace(bodyId))
+            return Fail<CartesianState>(NavigationResultStatus.InvalidInput, "Body id must be provided.");
+        if (string.IsNullOrWhiteSpace(originId))
+            return Fail<CartesianState>(NavigationResultStatus.InvalidInput, "Origin id must be provided.");
 
         if (originId.StartsWith("spacecraft:", StringComparison.Ordinal))
             return Fail<CartesianState>(NavigationResultStatus.UnsupportedCalculation,
                 "Spacecraft origins require GetSpacecraftRelative (explicit simulated-spacecraft handling).");
 
-        var target = _provider.GetState(bodyId, epoch, ReferenceFrame.Barycentric);
+        if (orientation == FrameOrientation.IauEarth &&
+            (_orientationModel is null || !_orientationModel.IsAuthenticated))
+            return Fail<CartesianState>(NavigationResultStatus.InsufficientInformation,
+                "Validated IAU_EARTH calculations require successfully authenticated earth_orientation.sn6json data.");
+
+        if (requireEtProvider && _provider is not IEtEphemerisProvider)
+            return Fail<CartesianState>(NavigationResultStatus.UnsupportedCalculation,
+                "This provider does not expose precision-preserving ET evaluation; an ET query cannot be routed through JD.");
+
+        NavigationResult<(Vector3D Position, Vector3D Velocity)> QueryProvider(string body) =>
+            requireEtProvider
+                ? ((IEtEphemerisProvider)_provider).GetStateAtEt(body, new EtSeconds(et), ReferenceFrame.Barycentric)
+                : _provider.GetState(body, epoch, ReferenceFrame.Barycentric);
+
+        var target = QueryProvider(bodyId);
         if (!target.IsSuccess)
             return Fail<CartesianState>(target.Status, $"Target state unavailable: {target.ErrorMessage}");
         var (tPos, tVel) = target.Value!;
@@ -100,7 +133,7 @@ public sealed class FramedStateService
         // 1. Origin translation (axes unchanged).
         if (!string.Equals(originId, "ssb", StringComparison.Ordinal))
         {
-            var origin = _provider.GetState(originId, epoch, ReferenceFrame.Barycentric);
+            var origin = QueryProvider(originId);
             if (!origin.IsSuccess)
                 return Fail<CartesianState>(origin.Status, $"Origin state unavailable: {origin.ErrorMessage}");
             var (oPos, oVel) = origin.Value!;
@@ -110,7 +143,7 @@ public sealed class FramedStateService
             {
                 state = OriginTranslation.ExpressRelativeTo(state, originState, originId);
             }
-            catch (InvalidOperationException ex)
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
             {
                 return Fail<CartesianState>(NavigationResultStatus.InvalidInput, ex.Message);
             }
@@ -126,7 +159,7 @@ public sealed class FramedStateService
 
         if (orientation == FrameOrientation.IauEarth)
         {
-            IauEarthOrientation.GetRotation(et, out var r, out var rDot);
+            _orientationModel!.GetAuthenticatedRotation(et, out var r, out var rDot);
             var (p, v) = StateTransformMath.TransformState(r, rDot, state.Position, state.Velocity);
             var framed = new CartesianState
             {
@@ -137,7 +170,7 @@ public sealed class FramedStateService
                 Epoch = epoch,
                 EtSeconds = et,
                 Provenance = state.Provenance +
-                    $" | SN6 J2000->IAU_EARTH state transform at ET={et:F3}s ({IauEarthOrientation.Instance.Provenance})",
+                    $" | SN6 J2000->IAU_EARTH state transform at ET={et:F6}s ({_orientationModel.Provenance})",
                 IsSimulated = state.IsSimulated,
                 Quality = state.Quality,
             };
@@ -177,7 +210,7 @@ public sealed class FramedStateService
 
         var t = time!;
         var epoch = new AstroTime(t.JdTdb, TimeScale.Tdb);
-        var result = GetState(bodyId, epoch, orientation, originId);
+        var result = GetStateAtEt(bodyId, t.Et, orientation, originId);
         if (result.IsSuccess && t.Quality == TimeConversionQuality.ProvisionalStaleTable)
         {
             var s = result.Value!;
@@ -195,7 +228,7 @@ public sealed class FramedStateService
             };
             return NavigationResult<CartesianState>.Success(downgraded,
                 NavigationResultStatus.StaleData, epoch, result.Frame,
-                downgraded.Provenance + $" | time quality={t.Quality}, ET={t.Et.Value:F6}s");
+                downgraded.Provenance + $" | time quality={t.Quality}, ET={t.Et.Value:F9}s");
         }
         return result;
     }
@@ -217,9 +250,10 @@ public sealed class FramedStateService
             return Fail<CartesianState>(NavigationResultStatus.InvalidInput, "Target body id must be provided.");
 
         CartesianState sc = spacecraft;
-        // Fetch the target at the spacecraft epoch label so both share the
-        // identical JD-derived ET, then translate to the spacecraft origin.
-        var targetAtOrigin = GetState(targetBodyId, sc.Epoch, FrameOrientation.J2000, sc.OriginId);
+        // Fetch the target at the spacecraft's ET metadata so both inputs use
+        // the same effective epoch, even when its AstroTime JD is quantized.
+        var targetAtOrigin = GetStateAtEt(targetBodyId, new EtSeconds(sc.EtSeconds),
+            FrameOrientation.J2000, sc.OriginId);
         if (!targetAtOrigin.IsSuccess)
             return Fail<CartesianState>(targetAtOrigin.Status, targetAtOrigin.ErrorMessage!);
 

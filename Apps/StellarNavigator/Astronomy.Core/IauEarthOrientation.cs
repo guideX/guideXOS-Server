@@ -62,7 +62,10 @@ public sealed class IauEarthOrientation
     public string Provenance =>
         $"{SourceFilename} (SHA-256 {SourceKernelSha256[..16]}..., retrieved {SourceRetrievalDate}; IAU WGCCRE 2015)";
 
-    private IauEarthOrientation() { }
+    /// <summary>True only on an instance returned by a successful asset verification.</summary>
+    public bool IsAuthenticated { get; }
+
+    private IauEarthOrientation(bool isAuthenticated = false) => IsAuthenticated = isAuthenticated;
 
     public static IauEarthOrientation Instance { get; } = new();
 
@@ -114,7 +117,26 @@ public sealed class IauEarthOrientation
                 throw new InvalidDataException("Orientation asset constants do not match the managed model.");
         }
 
-        return Instance;
+        return new IauEarthOrientation(isAuthenticated: true);
+    }
+
+    /// <summary>
+    /// Evaluate the validated rotating-frame model. This instance method
+    /// requires successful verification of the shipped source asset.
+    /// Static rotation helpers remain available for formula-level checks,
+    /// but they do not establish authenticated model provenance.
+    /// </summary>
+    public void GetAuthenticatedRotation(double etSeconds, out RotationMatrix r,
+        out RotationMatrix.Derivative rDot)
+    {
+        GetRotation(etSeconds, out r, out rDot);
+    }
+
+    private void RequireAuthenticated()
+    {
+        if (!IsAuthenticated)
+            throw new InvalidOperationException(
+                "IAU_EARTH orientation evaluation requires an orientation model loaded from an authenticated asset.");
     }
 
     private static bool CheckTriple(JsonElement root, string name, double a, double b, double c)
@@ -133,7 +155,16 @@ public sealed class IauEarthOrientation
     }
 
     /// <summary>Euler angles (radians) and rates (rad/s) at ET seconds past J2000 TDB.</summary>
-    public static void EvaluateAngles(double etSeconds,
+    public void EvaluateAngles(double etSeconds,
+        out double raRad, out double decRad, out double wRad,
+        out double raRate, out double decRate, out double wRate)
+    {
+        RequireAuthenticated();
+        EvaluateAnglesCore(etSeconds, out raRad, out decRad, out wRad,
+            out raRate, out decRate, out wRate);
+    }
+
+    private static void EvaluateAnglesCore(double etSeconds,
         out double raRad, out double decRad, out double wRad,
         out double raRate, out double decRate, out double wRate)
     {
@@ -155,9 +186,15 @@ public sealed class IauEarthOrientation
     /// Matches CSPICE pxform/sxform for the same PCK to ~1e-12 (angle
     /// growth with |ET| is binary64 quantization of W, not model error).
     /// </summary>
-    public static void GetRotation(double etSeconds, out RotationMatrix r, out RotationMatrix.Derivative rDot)
+    public void GetRotation(double etSeconds, out RotationMatrix r, out RotationMatrix.Derivative rDot)
     {
-        EvaluateAngles(etSeconds, out double ra, out double dec, out double w,
+        RequireAuthenticated();
+        GetRotationCore(etSeconds, out r, out rDot);
+    }
+
+    private static void GetRotationCore(double etSeconds, out RotationMatrix r, out RotationMatrix.Derivative rDot)
+    {
+        EvaluateAnglesCore(etSeconds, out double ra, out double dec, out double w,
             out double raDot, out double decDot, out double wDot);
         double u = Math.PI / 2.0 + ra;
         double v = Math.PI / 2.0 - dec;

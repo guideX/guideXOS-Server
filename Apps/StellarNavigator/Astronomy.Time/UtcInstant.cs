@@ -29,6 +29,9 @@ public readonly struct UtcInstant : IEquatable<UtcInstant>, IComparable<UtcInsta
 
     public UtcInstant(int year, int month, int day, int hour, int minute, int second, double fraction = 0.0)
     {
+        if (!TryValidateFields(year, month, day, hour, minute, second, fraction,
+                out string? error, out string? parameterName))
+            throw new ArgumentOutOfRangeException(parameterName, error);
         Year = year;
         Month = month;
         Day = day;
@@ -36,6 +39,53 @@ public readonly struct UtcInstant : IEquatable<UtcInstant>, IComparable<UtcInsta
         Minute = minute;
         Second = second;
         Fraction = fraction;
+    }
+
+    /// <summary>Validate values even for default structs that bypass the constructor.</summary>
+    internal bool TryValidate(out string? error) =>
+        TryValidateFields(Year, Month, Day, Hour, Minute, Second, Fraction, out error, out _);
+
+    private static bool TryValidateFields(int year, int month, int day, int hour, int minute,
+        int second, double fraction, out string? error, out string? parameterName)
+    {
+        error = null;
+        parameterName = null;
+        if (year < 0 || year > 9999)
+        {
+            error = $"Invalid UTC year {year}; expected 0000-9999.";
+            parameterName = nameof(year);
+        }
+        else if (month < 1 || month > 12)
+        {
+            error = $"Invalid UTC month {month}; expected 1-12.";
+            parameterName = nameof(month);
+        }
+        else if (day < 1 || day > CivilCalendar.DaysInMonth(year, month))
+        {
+            error = $"Invalid UTC day {day} for {year:D4}-{month:D2}.";
+            parameterName = nameof(day);
+        }
+        else if (hour < 0 || hour > 23)
+        {
+            error = $"Invalid UTC hour {hour}; expected 0-23.";
+            parameterName = nameof(hour);
+        }
+        else if (minute < 0 || minute > 59)
+        {
+            error = $"Invalid UTC minute {minute}; expected 0-59.";
+            parameterName = nameof(minute);
+        }
+        else if (second < 0 || second > 60 || (second == 60 && (hour != 23 || minute != 59)))
+        {
+            error = "Invalid UTC second; second 60 is allowed only as 23:59:60.";
+            parameterName = nameof(second);
+        }
+        else if (!double.IsFinite(fraction) || fraction < 0.0 || fraction >= 1.0)
+        {
+            error = "Invalid UTC fractional second; expected a finite value in [0, 1).";
+            parameterName = nameof(fraction);
+        }
+        return error is null;
     }
 
     /// <summary>

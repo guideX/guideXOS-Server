@@ -313,10 +313,23 @@ public class Sn5TimeTests
         double etBack = (jd - EtSeconds.J2000JdTdb) * EtSeconds.SecondsPerDay;
         // Binary64 JD near 2.5e6 quantizes to ~40 us; round trip stays well under 1 ms.
         Assert.True(Math.Abs(etBack - r.Et.Value) < 2e-4);
-        // The JD convenience path flags the limitation explicitly.
+        // Representation precision is separate from time-data trust.
         Assert.True(c.TryUtcToJdTdb("2016-12-31T23:59:60Z", out var jdr, out _));
-        Assert.Equal(TimeConversionQuality.PrecisionLimited, jdr!.Quality);
+        Assert.Equal(TimeConversionQuality.Validated, jdr!.Quality);
+        Assert.Equal(TimeRepresentationPrecision.JulianDateDouble, jdr.RepresentationPrecision);
         Assert.Equal(r.Et.Value, jdr.Et.Value, 9);
+    }
+
+    [Fact]
+    public void Converter_JdRepresentationPreservesProvisionalTrustQuality()
+    {
+        var c = Sn5Paths.LoadConverter();
+        Assert.True(c.TryUtcToJdTdb("2024-01-01T00:00:00Z", out var result, out _, allowProvisionalFuture: true));
+        Assert.Equal(TimeConversionQuality.ProvisionalStaleTable, result!.Quality);
+        Assert.Equal(TimeRepresentationPrecision.JulianDateDouble, result.RepresentationPrecision);
+        Assert.True(c.TryUtcToEt("2024-01-01T00:00:00Z", out var precise, out _, allowProvisionalFuture: true));
+        Assert.Equal(TimeConversionQuality.ProvisionalStaleTable, precise!.Quality);
+        Assert.Equal(TimeRepresentationPrecision.EtSeconds, precise.RepresentationPrecision);
     }
 
     [Fact]

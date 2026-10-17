@@ -293,9 +293,10 @@ void PrintUtcState(string bodyId, string utcText)
         var t = r.Time;
         Console.WriteLine($"  ET (TDB): {t.Et.Value:F6} s past J2000, JD TDB: {t.JdTdb:F7}");
         Console.WriteLine($"  TAI-UTC: {t.TaiMinusUtcSeconds}s, DELTA_ET: {t.DeltaEtSeconds:F6}s, " +
-            $"quality: {t.Quality}, epoch error bound: {t.EstimatedErrorSeconds:E1}s");
-        Console.WriteLine($"  NOTE: JD TDB printed for compatibility; the query used the full-precision ET. " +
-            $"JD doubles quantize time to ~80 us.");
+            $"time-data quality: {t.Quality}, representation: {r.RepresentationPrecision}, " +
+            $"epoch error bound: {t.EstimatedErrorSeconds:E1}s");
+        Console.WriteLine($"  JD TDB is printed for compatibility; indexed evaluation used the full-precision ET. " +
+            $"A JD double near this epoch quantizes time by tens of microseconds.");
     }
     else
     {
@@ -353,9 +354,10 @@ Console.WriteLine("=== Stellar Navigator SN6 ===");
 Console.WriteLine("Reference frames & spacecraft-relative coordinates (offline, managed)");
 
 var orientAssetPath = Path.Combine(AppContext.BaseDirectory, "Data", "earth_orientation.sn6json");
+Astronomy.Core.IauEarthOrientation orient;
 try
 {
-    var orient = Astronomy.Core.IauEarthOrientation.Load(orientAssetPath);
+    orient = Astronomy.Core.IauEarthOrientation.Load(orientAssetPath);
     Console.WriteLine($"Orientation model: J2000 <-> IAU_EARTH [{orient.Provenance}]");
     Console.WriteLine($"  asset: {new FileInfo(orientAssetPath).Length} bytes, SHA-256 verified at load");
     Console.WriteLine("  IAU_EARTH is a low-precision cartographic model, NOT ITRF93/EOP-based.");
@@ -367,7 +369,7 @@ catch (Exception ex)
     return;
 }
 
-var framed = new FramedStateService(indexed);
+var framed = new FramedStateService(indexed, orient);
 var sn6Epoch = new AstroTime(jdTdb, TimeScale.Tdb);
 
 void PrintFramed(string label, NavigationResult<CartesianState> r)
@@ -381,12 +383,12 @@ void PrintFramed(string label, NavigationResult<CartesianState> r)
     var s = r.Value!;
     Console.WriteLine($"  position (km): ({s.Position.X / 1000.0:F3}, {s.Position.Y / 1000.0:F3}, {s.Position.Z / 1000.0:F3})");
     Console.WriteLine($"  velocity (km/s): ({s.Velocity.X / 1000.0:F6}, {s.Velocity.Y / 1000.0:F6}, {s.Velocity.Z / 1000.0:F6})");
-    Console.WriteLine($"  frame: orientation={s.Orientation}, origin={s.OriginId}, ET={s.EtSeconds:F3}s past J2000 (TDB)");
+    Console.WriteLine($"  frame: orientation={s.Orientation}, origin={s.OriginId}, ET={s.EtSeconds:F9}s past J2000 (TDB)");
     Console.WriteLine($"  quality: {s.Quality}, simulated={s.IsSimulated}");
     Console.WriteLine($"  provenance: {s.Provenance}");
 }
 
-Console.WriteLine($"--- Framed queries at JD TDB {jdTdb:F7} ---");
+Console.WriteLine($"--- Framed queries at JD TDB {jdTdb:F7} (AstroTime compatibility input) ---");
 PrintFramed("Earth relative to SSB in J2000", framed.GetState("earth", sn6Epoch, Astronomy.Core.FrameOrientation.J2000, "ssb"));
 PrintFramed("Mars relative to Earth in J2000", framed.GetState("mars", sn6Epoch, Astronomy.Core.FrameOrientation.J2000, "earth"));
 PrintFramed("Mars relative to Earth in IAU_EARTH axes", framed.GetState("mars", sn6Epoch, Astronomy.Core.FrameOrientation.IauEarth, "earth"));

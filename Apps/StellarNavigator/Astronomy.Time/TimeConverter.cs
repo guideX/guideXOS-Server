@@ -75,6 +75,15 @@ public sealed class TimeConverter
     {
         result = null;
         error = null;
+        if (!utc.TryValidate(out string? validationError))
+        {
+            error = new TimeConversionError
+            {
+                Quality = TimeConversionQuality.InvalidUtcInput,
+                Message = validationError!,
+            };
+            return false;
+        }
         double uniform = utc.ToUniformSeconds();
         int dta;
 
@@ -279,9 +288,9 @@ public sealed class TimeConverter
     }
 
     /// <summary>
-    /// JD-TDB convenience path. The epoch is correct but the binary64 JD
-    /// quantizes time to ~40-80 us near 2.5e6, so the result is explicitly
-    /// flagged <see cref="TimeConversionQuality.PrecisionLimited"/>.
+    /// JD-TDB convenience path. The binary64 JD quantizes time to ~40-80 us
+    /// near 2.5e6. Time-data trust remains in the result quality, while this
+    /// representation limitation is reported independently.
     /// </summary>
     public bool TryUtcToJdTdb(string? utcText, out UtcToEtResult? result, out TimeConversionError? error,
         bool allowProvisionalFuture = false)
@@ -296,7 +305,8 @@ public sealed class TimeConverter
             JdTdb = ok.JdTdb,
             TaiMinusUtcSeconds = ok.TaiMinusUtcSeconds,
             DeltaEtSeconds = ok.DeltaEtSeconds,
-            Quality = TimeConversionQuality.PrecisionLimited,
+            Quality = ok.Quality,
+            RepresentationPrecision = TimeRepresentationPrecision.JulianDateDouble,
             LeapSecondKernelIdentity = ok.LeapSecondKernelIdentity,
             EstimatedErrorSeconds = Math.Max(ok.EstimatedErrorSeconds, 8.0e-5),
         };

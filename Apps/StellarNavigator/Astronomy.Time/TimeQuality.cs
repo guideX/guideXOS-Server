@@ -15,7 +15,7 @@ public enum TimeConversionQuality
     /// the last recorded offset (CSPICE-compatible assumption, NOT knowledge).
     /// </summary>
     ProvisionalStaleTable,
-    /// <summary>JD-double API path: correct epoch, but ~80 us quantization flagged.</summary>
+    /// <summary>Legacy combined-quality value retained for source compatibility; new APIs report precision separately.</summary>
     PrecisionLimited,
     /// <summary>UTC before 1972-01-01: no authoritative leap-second data.</summary>
     UnsupportedHistorical,
@@ -27,6 +27,15 @@ public enum TimeConversionQuality
     InvalidEtInput,
     /// <summary>Time-data asset missing, corrupt, or failed integrity check.</summary>
     TimeTableInvalid,
+}
+
+/// <summary>Numerical precision of a time representation, independent of trust in its UTC data.</summary>
+public enum TimeRepresentationPrecision
+{
+    /// <summary>ET seconds past J2000 retained directly as binary64.</summary>
+    EtSeconds,
+    /// <summary>Converted to a binary64 Julian date with roughly 40-80 us quantization near modern epochs.</summary>
+    JulianDateDouble,
 }
 
 /// <summary>ET seconds past J2000 on the TDB scale (SPICE ET definition).</summary>
@@ -64,6 +73,8 @@ public sealed class UtcToEtResult
     /// <summary>ET-UTC in seconds (DELTA_ET).</summary>
     public required double DeltaEtSeconds { get; init; }
     public required TimeConversionQuality Quality { get; init; }
+    /// <summary>Precision of the available numeric representation; does not change time-data trust.</summary>
+    public TimeRepresentationPrecision RepresentationPrecision { get; init; } = TimeRepresentationPrecision.EtSeconds;
     public required string LeapSecondKernelIdentity { get; init; }
     /// <summary>Upper error bound (representation + iteration) in seconds.</summary>
     public required double EstimatedErrorSeconds { get; init; }

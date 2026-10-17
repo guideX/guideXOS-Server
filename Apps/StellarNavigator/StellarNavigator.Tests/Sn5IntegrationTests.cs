@@ -32,17 +32,24 @@ public class Sn5IntegrationTests
         Assert.NotNull(resolved.Time);
         Assert.NotNull(resolved.Ephemeris);
         Assert.True(resolved.Ephemeris!.IsSuccess);
-        // Validated time + validated ephemeris keeps ValidatedReference (same
-        // JD-double semantics as SN4 direct queries).
+        // Validated time + validated ephemeris keeps ValidatedReference;
+        // evaluation retains ET rather than quantizing it through the JD label.
         Assert.Equal(NavigationResultStatus.ValidatedReference, resolved.Ephemeris.Status);
+        Assert.Equal(TimeRepresentationPrecision.EtSeconds, resolved.RepresentationPrecision);
 
-        var direct = eph.GetState("earth",
-            new AstroTime(resolved.Time!.JdTdb, TimeScale.Tdb), ReferenceFrame.Barycentric);
+        var direct = ((IEtEphemerisProvider)eph).GetStateAtEt("earth",
+            resolved.Time!.Et, ReferenceFrame.Barycentric);
         Assert.True(direct.IsSuccess);
         Assert.Equal(direct.Value.Position.X, resolved.Ephemeris.Value.Position.X);
         Assert.Equal(direct.Value.Position.Y, resolved.Ephemeris.Value.Position.Y);
         Assert.Equal(direct.Value.Position.Z, resolved.Ephemeris.Value.Position.Z);
         Assert.Equal(direct.Value.Velocity.X, resolved.Ephemeris.Value.Velocity.X);
+
+        var legacyJd = eph.GetState("earth",
+            new AstroTime(resolved.Time.JdTdb, TimeScale.Tdb), ReferenceFrame.Barycentric);
+        Assert.True(legacyJd.IsSuccess);
+        Assert.True((legacyJd.Value.Position - direct.Value.Position).Magnitude > 0.01,
+            "Chosen timestamp should expose measurable JD quantization in the evaluated state.");
     }
 
     [Fact]

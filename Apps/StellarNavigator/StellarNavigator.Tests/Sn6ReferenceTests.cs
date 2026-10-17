@@ -25,6 +25,8 @@ namespace StellarNavigator.Tests;
 /// </summary>
 public class Sn6ReferenceTests
 {
+    private static readonly IauEarthOrientation Orientation =
+        IauEarthOrientation.Load(Sn6Paths.OrientationAssetPath());
     // Absolute: binary64 W-phase quantization reaches ~8e-11 rad at the
     // coverage boundaries (|W| ~ 2e7 deg there); near J2000 agreement is ~1e-16.
     private const double RotAbsTol = 2e-10;
@@ -80,7 +82,7 @@ public class Sn6ReferenceTests
         double worstEt = 0;
         foreach (var c in _fixture.Cases)
         {
-            IauEarthOrientation.GetRotation(c.Et, out var r, out _);
+            Orientation.GetRotation(c.Et, out var r, out _);
             for (int i = 0; i < 3; i++)
                 for (int j = 0; j < 3; j++)
                 {
@@ -102,7 +104,7 @@ public class Sn6ReferenceTests
         double worstEt = 0;
         foreach (var c in _fixture.Cases)
         {
-            IauEarthOrientation.GetRotation(c.Et, out _, out var rd);
+            Orientation.GetRotation(c.Et, out _, out var rd);
             double[,] got = { { rd.D00, rd.D01, rd.D02 }, { rd.D10, rd.D11, rd.D12 }, { rd.D20, rd.D21, rd.D22 } };
             for (int i = 0; i < 3; i++)
                 for (int j = 0; j < 3; j++)
@@ -127,7 +129,7 @@ public class Sn6ReferenceTests
         int count = 0;
         foreach (var c in _fixture.Cases)
         {
-            IauEarthOrientation.GetRotation(c.Et, out var r, out var rd);
+            Orientation.GetRotation(c.Et, out var r, out var rd);
             foreach (var s in c.States)
             {
                 count++;
@@ -167,7 +169,7 @@ public class Sn6ReferenceTests
         int count = 0;
         foreach (var c in _fixture.Cases)
         {
-            IauEarthOrientation.GetRotation(c.Et, out var r, out var rd);
+            Orientation.GetRotation(c.Et, out var r, out var rd);
             foreach (var s in c.States)
             {
                 count++;
@@ -201,7 +203,7 @@ public class Sn6ReferenceTests
         int count = 0;
         foreach (var c in _fixture.Cases)
         {
-            IauEarthOrientation.GetRotation(c.Et, out var r, out var rd);
+            Orientation.GetRotation(c.Et, out var r, out var rd);
             foreach (var s in c.States)
             {
                 count++;

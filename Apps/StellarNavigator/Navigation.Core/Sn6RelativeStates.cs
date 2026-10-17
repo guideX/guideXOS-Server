@@ -32,26 +32,31 @@ public static class OriginTranslation
         ArgumentException.ThrowIfNullOrWhiteSpace(newOriginId);
         CartesianStateValidation.RequireFinite(target);
         CartesianStateValidation.RequireFinite(originBody);
+        CartesianStateValidation.RequireConsistentTdbEpoch(target);
+        CartesianStateValidation.RequireConsistentTdbEpoch(originBody);
+
+        if (!string.Equals(target.OriginId, originBody.OriginId, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"Origin translation requires matching source coordinate origins: '{target.OriginId}' vs '{originBody.OriginId}'. " +
+                "Translate both states from their shared original origin; the requested result origin does not change this requirement.");
 
         if (target.Orientation != originBody.Orientation)
             throw new InvalidOperationException(
                 $"Origin translation requires matching orientations: {target.Orientation} vs {originBody.Orientation}. " +
                 "Rotate frames first via an explicit state transformation.");
+        if (!Enum.IsDefined(target.Orientation))
+            throw new InvalidOperationException($"Origin translation received unsupported orientation metadata: {target.Orientation}.");
         if (Math.Abs(target.EtSeconds - originBody.EtSeconds) > EpochToleranceSeconds)
             throw new InvalidOperationException(
                 $"Origin translation requires matching epochs (|dET|={Math.Abs(target.EtSeconds - originBody.EtSeconds):E2}s).");
-        if (target.PositionUnit != originBody.PositionUnit || target.VelocityUnit != originBody.VelocityUnit)
-            throw new InvalidOperationException("Origin translation requires matching units (SI m, m/s).");
+        if (target.PositionUnit != originBody.PositionUnit || target.VelocityUnit != originBody.VelocityUnit ||
+            target.PositionUnit != Sn6PositionUnit.Metre || target.VelocityUnit != Sn6VelocityUnit.MetrePerSecond)
+            throw new InvalidOperationException(
+                $"Origin translation requires matching SI units (m, m/s); got target=({target.PositionUnit}, {target.VelocityUnit}) " +
+                $"and origin=({originBody.PositionUnit}, {originBody.VelocityUnit}).");
 
         bool simulated = target.IsSimulated || originBody.IsSimulated;
-        // A validated transform of simulated inputs stays simulation-derived:
-        // never promote to ValidatedReference on the basis of the transform.
-        var quality = simulated
-            ? NavigationResultStatus.ApproximateOrSimulated
-            : (target.Quality == NavigationResultStatus.ValidatedReference &&
-               originBody.Quality == NavigationResultStatus.ValidatedReference
-                ? NavigationResultStatus.ValidatedReference
-                : target.Quality);
+        var quality = ComposeQuality(target, originBody);
 
         return new CartesianState
         {
@@ -65,6 +70,36 @@ public static class OriginTranslation
             IsSimulated = simulated,
             Quality = quality,
         };
+    }
+
+    /// <summary>
+    /// Conservative state-quality precedence: unsuccessful statuses are
+    /// rejected; StaleData remains stale; otherwise simulated or approximate
+    /// inputs remain approximate/simulated; only two validated inputs remain
+    /// validated. IsSimulated is propagated independently, including when
+    /// StaleData takes status precedence.
+    /// </summary>
+    internal static NavigationResultStatus ComposeQuality(CartesianState target, CartesianState origin)
+    {
+        static bool IsFailure(NavigationResultStatus q) => q is
+            NavigationResultStatus.InsufficientInformation or
+            NavigationResultStatus.UnsupportedCalculation or
+            NavigationResultStatus.InvalidInput;
+
+        if (IsFailure(target.Quality) || IsFailure(origin.Quality))
+            throw new InvalidOperationException(
+                $"Origin translation cannot consume unsuccessful state quality: target={target.Quality}, origin={origin.Quality}.");
+        if (target.Quality == NavigationResultStatus.StaleData || origin.Quality == NavigationResultStatus.StaleData)
+            return NavigationResultStatus.StaleData;
+        if (target.IsSimulated || origin.IsSimulated ||
+            target.Quality == NavigationResultStatus.ApproximateOrSimulated ||
+            origin.Quality == NavigationResultStatus.ApproximateOrSimulated)
+            return NavigationResultStatus.ApproximateOrSimulated;
+        if (target.Quality == NavigationResultStatus.ValidatedReference &&
+            origin.Quality == NavigationResultStatus.ValidatedReference)
+            return NavigationResultStatus.ValidatedReference;
+        throw new InvalidOperationException(
+            $"Origin translation received unsupported state quality: target={target.Quality}, origin={origin.Quality}.");
     }
 }
 
@@ -141,11 +176,7 @@ public static class SpacecraftRelativeState
         // keeps the relative result simulation-derived even though the frame
         // mathematics itself is independently validated.
         bool simulated = spacecraft.IsSimulated || target.IsSimulated;
-        var quality = !simulated &&
-            spacecraft.Quality == NavigationResultStatus.ValidatedReference &&
-            target.Quality == NavigationResultStatus.ValidatedReference
-            ? NavigationResultStatus.ValidatedReference
-            : NavigationResultStatus.ApproximateOrSimulated;
+        var quality = OriginTranslation.ComposeQuality(target, spacecraft);
         return new CartesianState
         {
             Position = rel.Position,

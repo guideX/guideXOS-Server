@@ -58,6 +58,20 @@ public sealed class CartesianState
 /// <summary>SN6 validation helpers for Cartesian states.</summary>
 public static class CartesianStateValidation
 {
+    /// <summary>Ensure the stored epoch label and ET metadata describe the same TDB instant.</summary>
+    public static void RequireConsistentTdbEpoch(CartesianState state)
+    {
+        if (state.Epoch.OriginalScale != TimeScale.Tdb)
+            throw new ArgumentException(
+                $"Cartesian state epoch metadata must be TDB; got {state.Epoch.OriginalScale}.", nameof(state));
+        if (!double.IsFinite(state.Epoch.JdUtc))
+            throw new ArgumentException("Cartesian state epoch JD must be finite.", nameof(state));
+        double labelEt = (state.Epoch.JdUtc - 2451545.0) * 86400.0;
+        if (!double.IsFinite(labelEt) || Math.Abs(labelEt - state.EtSeconds) > 1e-3)
+            throw new ArgumentException(
+                $"Cartesian state ET ({state.EtSeconds:R}s) disagrees with its TDB epoch label ({labelEt:R}s) by more than 1 ms.", nameof(state));
+    }
+
     public static void RequireFinite(CartesianState state)
     {
         ArgumentNullException.ThrowIfNull(state);

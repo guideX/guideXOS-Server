@@ -28,9 +28,9 @@ public class Sn6AppTests
     [Fact]
     public void DemoQueries_SucceedOffline()
     {
-        IauEarthOrientation.Load(Sn6Paths.OrientationAssetPath());
+        var model = IauEarthOrientation.Load(Sn6Paths.OrientationAssetPath());
         using var provider = new IndexedChebyshevEphemerisProvider(Sn4Paths.DatasetPath());
-        var svc = new FramedStateService(provider);
+        var svc = new FramedStateService(provider, model);
         var epoch = new AstroTime(2451557.3456789, TimeScale.Tdb);
         Assert.True(svc.GetState("earth", epoch, FrameOrientation.J2000, "ssb").IsSuccess);
         Assert.True(svc.GetState("mars", epoch, FrameOrientation.J2000, "earth").IsSuccess);

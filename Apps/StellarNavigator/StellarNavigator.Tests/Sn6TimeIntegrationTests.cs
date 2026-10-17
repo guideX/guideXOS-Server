@@ -24,18 +24,23 @@ public class Sn6TimeIntegrationTests
     private static FramedStateService Service(out IndexedChebyshevEphemerisProvider provider)
     {
         provider = new IndexedChebyshevEphemerisProvider(Sn4Paths.DatasetPath());
-        return new FramedStateService(provider);
+        return new FramedStateService(provider, IauEarthOrientation.Load(Sn6Paths.OrientationAssetPath()));
     }
 
     [Fact]
-    public void EtDirect_WorksWithoutConverter()
+    public void J2000_WorksWithoutConverterOrOrientationAsset()
     {
         using var provider = new IndexedChebyshevEphemerisProvider(Sn4Paths.DatasetPath());
         var svc = new FramedStateService(provider);
         var epoch = new AstroTime(2451545.0, TimeScale.Tdb);
-        var r = svc.GetState("earth", epoch, FrameOrientation.IauEarth, "ssb");
-        Assert.True(r.IsSuccess, r.ErrorMessage);
-        Assert.Equal(FrameOrientation.IauEarth, r.Value!.Orientation);
+        var j2000 = svc.GetState("earth", epoch, FrameOrientation.J2000, "ssb");
+        Assert.True(j2000.IsSuccess, j2000.ErrorMessage);
+        Assert.Equal(FrameOrientation.J2000, j2000.Value!.Orientation);
+
+        var rotating = svc.GetState("earth", epoch, FrameOrientation.IauEarth, "ssb");
+        Assert.False(rotating.IsSuccess);
+        Assert.Equal(NavigationResultStatus.InsufficientInformation, rotating.Status);
+        Assert.Contains("authenticated", rotating.ErrorMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -49,12 +54,13 @@ public class Sn6TimeIntegrationTests
             Assert.True(r.IsSuccess, r.ErrorMessage);
             Assert.Equal(NavigationResultStatus.ValidatedReference, r.Value!.Quality);
 
-            // Same epoch through the SN5 end-to-end path agrees exactly
-            // (identical JD TDB label into the identical provider).
+            // Both SN5 query surfaces retain the exact converted ET.
             var q = new UtcEphemerisQuery(provider, Converter());
             var check = q.GetState("earth", "2016-07-14T00:00:00Z", ReferenceFrame.Barycentric, false);
             Assert.True(check.IsSuccess);
             Assert.Equal(check.Ephemeris!.Value.Position, r.Value.Position);
+            Assert.Equal(TimeRepresentationPrecision.EtSeconds, check.RepresentationPrecision);
+            Assert.Equal(check.Time!.Et.Value, r.Value.EtSeconds);
         }
     }
 
@@ -129,9 +135,8 @@ public class Sn6TimeIntegrationTests
     [Fact]
     public void JdTdb_LabelCarriesDocumentedLimit()
     {
-        // JD doubles quantize time to ~50 us near 2.5e6; the framed service
-        // uses the label consistently for ephemeris + rotation, so the
-        // states agree with the provider exactly at the shared label.
+        // Direct AstroTime compatibility queries use the same JD-derived ET
+        // for provider evaluation and frame orientation.
         using var provider = new IndexedChebyshevEphemerisProvider(Sn4Paths.DatasetPath());
         var svc = new FramedStateService(provider);
         var epoch = new AstroTime(2457583.5, TimeScale.Tdb);

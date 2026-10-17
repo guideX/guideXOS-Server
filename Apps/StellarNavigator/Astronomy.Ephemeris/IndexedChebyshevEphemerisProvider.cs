@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Astronomy.Core;
+using Astronomy.Time;
 using Navigation.Core;
 
 namespace Astronomy.Ephemeris;
@@ -41,7 +42,7 @@ namespace Astronomy.Ephemeris;
 /// treat a constructed provider as valid for a file that was mutated
 /// after the initial verification.
 /// </summary>
-public sealed class IndexedChebyshevEphemerisProvider : IEphemerisProvider, IDisposable
+public sealed class IndexedChebyshevEphemerisProvider : IEphemerisProvider, IEtEphemerisProvider, IDisposable
 {
     /// <summary>
     /// Trusted manifest digest of the shipped SNEPH binary dataset file.
@@ -150,10 +151,10 @@ public sealed class IndexedChebyshevEphemerisProvider : IEphemerisProvider, IDis
     {
         if (!double.IsFinite(epoch.JdUtc))
             throw new ArgumentException("Epoch JD must be finite.");
-        double jdTdb = epoch.OriginalScale == TimeScale.Tdb
-            ? epoch.JdUtc
-            : TdbTime.UtcToTdb(epoch).JdUtc;
-        return (jdTdb - J2000Jd) * SecondsPerDay;
+        if (epoch.OriginalScale != TimeScale.Tdb)
+            throw new ArgumentException(
+                $"Ephemeris queries require a TDB epoch; got {epoch.OriginalScale}. Convert UTC through the SN5 TimeConverter.", nameof(epoch));
+        return (epoch.JdUtc - J2000Jd) * SecondsPerDay;
     }
 
     /// <summary>Cached coefficient-record count (for diagnostics and tests).</summary>
@@ -298,6 +299,20 @@ public sealed class IndexedChebyshevEphemerisProvider : IEphemerisProvider, IDis
     public NavigationResult<(Vector3D Position, Vector3D Velocity)> GetState(
         string bodyId, AstroTime epoch, ReferenceFrame targetFrame)
     {
+        if (!double.IsFinite(epoch.JdUtc))
+            return NavigationResult<(Vector3D, Vector3D)>.Failure(
+                NavigationResultStatus.InvalidInput, "Epoch JD must be a finite number.");
+        if (epoch.OriginalScale != TimeScale.Tdb)
+            return NavigationResult<(Vector3D, Vector3D)>.Failure(
+                NavigationResultStatus.InvalidInput,
+                $"Ephemeris queries require a TDB epoch; got {epoch.OriginalScale}. Convert UTC through the SN5 TimeConverter.");
+        return GetStateAtEt(bodyId,
+            new EtSeconds((epoch.JdUtc - J2000Jd) * SecondsPerDay), targetFrame);
+    }
+
+    public NavigationResult<(Vector3D Position, Vector3D Velocity)> GetStateAtEt(
+        string bodyId, EtSeconds epoch, ReferenceFrame targetFrame)
+    {
         lock (_sync) { ThrowIfDisposed(); }
 
         if (targetFrame.Kind != ReferenceFrameKind.Barycentric &&
@@ -306,22 +321,24 @@ public sealed class IndexedChebyshevEphemerisProvider : IEphemerisProvider, IDis
                 NavigationResultStatus.UnsupportedCalculation,
                 $"Frame conversion to {targetFrame} is not supported (continuous states are SSB-relative J2000 geometric states).");
 
-        if (!double.IsFinite(epoch.JdUtc))
+        double et = epoch.Value;
+        if (!double.IsFinite(et))
             return NavigationResult<(Vector3D, Vector3D)>.Failure(
                 NavigationResultStatus.InvalidInput,
-                "Epoch JD must be a finite number.");
+                "Epoch ET must be finite seconds past J2000 (TDB).");
+        var epochLabel = new AstroTime(epoch.ToJulianDateTdb(), TimeScale.Tdb);
 
         if (string.Equals(bodyId, "ssb", StringComparison.Ordinal))
         {
-            var cov = OverallCoverage();
+            var cov = OverallCoverageEt();
             if (cov is null)
                 return NavigationResult<(Vector3D, Vector3D)>.Failure(
                     NavigationResultStatus.InsufficientInformation, "No coverage available.");
-            if (epoch.JdUtc < cov.Value.Start.JdUtc || epoch.JdUtc > cov.Value.End.JdUtc)
-                return FailureOutsideCoverage(epoch, cov.Value);
+            if (et < cov.Value.Start || et > cov.Value.End)
+                return FailureOutsideCoverage(et, cov.Value);
             return NavigationResult<(Vector3D, Vector3D)>.Success(
                 (new Vector3D(0, 0, 0), new Vector3D(0, 0, 0)),
-                NavigationResultStatus.ValidatedReference, epoch, targetFrame, DataSource);
+                NavigationResultStatus.ValidatedReference, epochLabel, targetFrame, DataSource);
         }
 
         if (!_segmentByBody.TryGetValue(bodyId, out _))
@@ -329,7 +346,6 @@ public sealed class IndexedChebyshevEphemerisProvider : IEphemerisProvider, IDis
                 NavigationResultStatus.InsufficientInformation,
                 $"Body '{bodyId}' is not in the SNEPH ephemeris dataset.");
 
-        double et = ToEphemerisSeconds(epoch);
         var eval = EvaluateChained(bodyId, et);
         if (!eval.IsSuccess)
             return eval;
@@ -345,7 +361,7 @@ public sealed class IndexedChebyshevEphemerisProvider : IEphemerisProvider, IDis
             velKms.Z * Distance.MetersPerKilometer);
 
         return NavigationResult<(Vector3D, Vector3D)>.Success(
-            (posM, velMs), NavigationResultStatus.ValidatedReference, epoch, targetFrame, DataSource);
+            (posM, velMs), NavigationResultStatus.ValidatedReference, epochLabel, targetFrame, DataSource);
     }
 
     private NavigationResult<(Vector3D Position, Vector3D Velocity)> EvaluateChained(string bodyId, double et)
@@ -482,6 +498,15 @@ public sealed class IndexedChebyshevEphemerisProvider : IEphemerisProvider, IDis
 
     private (AstroTime Start, AstroTime End)? OverallCoverage()
     {
+        var coverageEt = OverallCoverageEt();
+        if (coverageEt is null)
+            return null;
+        return (new AstroTime(new EtSeconds(coverageEt.Value.Start).ToJulianDateTdb(), TimeScale.Tdb),
+                new AstroTime(new EtSeconds(coverageEt.Value.End).ToJulianDateTdb(), TimeScale.Tdb));
+    }
+
+    private (double Start, double End)? OverallCoverageEt()
+    {
         if (_segments.Count == 0)
             return null;
         double start = double.PositiveInfinity;
@@ -491,15 +516,14 @@ public sealed class IndexedChebyshevEphemerisProvider : IEphemerisProvider, IDis
             start = Math.Min(start, seg.InitEt);
             end = Math.Max(end, seg.EndEt);
         }
-        return (new AstroTime(J2000Jd + start / SecondsPerDay, TimeScale.Tdb),
-                new AstroTime(J2000Jd + end / SecondsPerDay, TimeScale.Tdb));
+        return (start, end);
     }
 
     private NavigationResult<(Vector3D, Vector3D)> FailureOutsideCoverage(
-        AstroTime epoch, (AstroTime Start, AstroTime End) cov) =>
+        double et, (double Start, double End) cov) =>
         NavigationResult<(Vector3D, Vector3D)>.Failure(
             NavigationResultStatus.StaleData,
-            $"Epoch JD {epoch.JdUtc:F6} is outside coverage [{cov.Start.JdUtc:F6}, {cov.End.JdUtc:F6}]. No extrapolation is performed.");
+            $"Epoch ET {et:F6}s is outside coverage [{cov.Start:F6}, {cov.End:F6}]s past J2000 TDB. No extrapolation is performed.");
 
     public List<string> SupportedBodies
     {

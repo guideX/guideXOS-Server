@@ -2,6 +2,11 @@ using Astronomy.Core;
 
 namespace Astronomy.Ephemeris;
 
+/// <summary>
+/// Historical SN1/SN2 time convenience helper. UTC conversion is intentionally
+/// disabled because it predates the authenticated SN5 leap-second policy;
+/// TDB-only compatibility helpers remain available.
+/// </summary>
 public static class TdbTime
 {
     public const double J2000Jd = 2451545.0;
@@ -38,26 +43,16 @@ public static class TdbTime
     {
         if (utcEpoch.OriginalScale == TimeScale.Tdb)
             return utcEpoch;
-
-        var jd = utcEpoch.JdUtc;
-        var daysSinceJ2000 = jd - J2000Jd;
-        var secondsSinceJ2000 = daysSinceJ2000 * SecondsPerDay;
-        var delta = TdbMinusTtAtJ2000 + secondsSinceJ2000 * TdbTtMaxDriftPerSecond;
-        var jdTdb = jd + delta / SecondsPerDay;
-        return new AstroTime(jdTdb, TimeScale.Tdb);
+        throw new NotSupportedException(
+            "The legacy linear-drift UTC-to-TDB approximation is disabled. Convert UTC through the authenticated SN5 TimeConverter.");
     }
 
     public static AstroTime TdbToUtc(AstroTime tdbEpoch)
     {
         if (tdbEpoch.OriginalScale == TimeScale.Utc)
             return tdbEpoch;
-
-        var jd = tdbEpoch.JdUtc;
-        var daysSinceJ2000 = jd - J2000Jd;
-        var secondsSinceJ2000 = daysSinceJ2000 * SecondsPerDay;
-        var delta = TdbMinusTtAtJ2000 + secondsSinceJ2000 * TdbTtMaxDriftPerSecond;
-        var jdUtc = jd - delta / SecondsPerDay;
-        return new AstroTime(jdUtc, TimeScale.Utc);
+        throw new NotSupportedException(
+            "The legacy linear-drift TDB-to-UTC approximation is disabled. Convert through the authenticated SN5 TimeConverter.");
     }
 
     private static double ToJd(DateTime dt)

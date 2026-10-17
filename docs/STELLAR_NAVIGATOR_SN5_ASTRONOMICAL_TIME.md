@@ -54,12 +54,14 @@ stand-in for TDB. SN5 keeps that scientific engine byte-for-byte intact and adds
 A physical instant, its representation in a time scale, and its calendar
 formatting are distinct: `EtSeconds` is the stable internal representation
 for precision-sensitive work; `UtcInstant` is a calendar label; the existing
-`AstroTime` JD entry points are preserved for compatibility and flagged
-`PrecisionLimited` where the JD-double quantization applies.
+`AstroTime` JD entry points are preserved for compatibility. Time-data trust
+is reported by `UtcToEtResult.Quality`; JD-double quantization is reported
+independently by `RepresentationPrecision`.
 
 UTC, TAI, TT, and TDB are never treated as interchangeable. The old
-`TdbTime.UtcToTdb` linear-drift approximation (≈1.7e-9 relative drift, no
-leap seconds) is superseded for UTC inputs; the type itself is untouched.
+`TdbTime.UtcToTdb` and `TdbToUtc` linear-drift approximations (≈1.7e-9
+relative drift, no leap seconds) are disabled for UTC conversion; their
+TDB-only identity compatibility remains. Use `TimeConverter` for UTC.
 
 ### The same fields labeled UTC and TDB are different instants
 

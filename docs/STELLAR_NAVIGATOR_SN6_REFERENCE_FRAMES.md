@@ -56,6 +56,8 @@ Explicit, limited registry (`Astronomy.Core.FrameRegistry`):
   preserved from SN1–SN5. Aliases accepted: `J2000`, `ICRF_J2000`.
 - **`IAU_EARTH`** — Earth body-fixed axes from the authenticated IAU 2015
   polynomial model (NAIF frame 130399). Low-precision cartographic model.
+  The framed service requires a verified immutable model instance; J2000
+  queries remain available without the orientation asset.
 - **Spacecraft-relative translated frame** — J2000-aligned axes with a
   spacecraft origin (`spacecraft:<id>`). This is a *translation*, not a new
   orientation: it does not rotate because a camera moves, and it is NOT a
@@ -79,8 +81,8 @@ synthetic helper (`SimulatedBodyFrame.Identity`) is labeled
 
 - Rotation APIs take the **source→destination** pair implicitly through the
   (R, R′) evaluated for that direction at epoch ET:
-  `IauEarthOrientation.GetRotation(et)` returns the **J2000→IAU_EARTH**
-  rotation and its analytical derivative.
+  a verified `IauEarthOrientation` instance's `GetRotation(et)` returns the
+  **J2000→IAU_EARTH** rotation and its analytical derivative.
 - `TransformState` maps J2000 states to IAU_EARTH states;
   `InverseTransformState` maps back. Round trips
   (J2000→IAU_EARTH→J2000) recover inputs to ~1e-12 relative (452/452
@@ -117,10 +119,14 @@ may be presented as a terrestrial-survey or flight-navigation frame.
 - Translation requires identical orientation, identical epoch
   (|ΔET| ≤ 1e-6 s), identical SI units, and finite vectors; violations are
   typed `InvalidInput` failures.
+- Both operands must also use the same original coordinate origin. The
+  requested result origin is applied only after subtraction and does not
+  alter that input requirement.
 - Quality rule: translation of two `ValidatedReference` states stays
-  `ValidatedReference`; any simulated contribution keeps the result
-  simulation-derived (`ApproximateOrSimulated`). A validated transform
-  never promotes simulated inputs.
+  `ValidatedReference`; stale quality remains stale, and approximate or
+  simulated inputs remain approximate/simulation-derived. Failure statuses
+  cannot be used as successful state inputs. `IsSimulated` travels separately
+  so it remains set even when stale quality has precedence.
 
 ---
 
@@ -338,8 +344,9 @@ allocated at API boundaries.
 - No Mars-499/planet-center, Pluto, or new kernels; no trajectory
   optimization; no 2D/3D navigation UI (SN7 scope); no guideXOS SQL;
   no flight-certification claims.
-- JD-TDB labels bound epoch precision (~50 µs); a direct-ET provider path
-  is deferred (needs an ET-native ephemeris overload; SN7 candidate).
+- Direct UTC navigation queries now preserve ET through
+  `IEtEphemerisProvider`; callers using the legacy AstroTime/JD interface
+  retain its ~50 µs epoch quantization limit (see SN6R).
 
 ---
 
@@ -349,5 +356,7 @@ Interactive Solar System navigation map built on the SN6 mathematics:
 J2000 scene graph with on-demand IAU_EARTH overlays, spacecraft-relative
 camera framing (keeping spacecraft state, camera, and translated frame
 explicitly distinct), ET/UTC epoch scrubber reusing SN5 policies, and
-optional direct-ET ephemeris overload to retire the JD quantization limit.
+direct-ET ephemeris queries. The direct-ET provider path is available from
+SN6R; the map should surface the representation precision of legacy JD input
+where that compatibility path is used.
 No piloting/autopilot/propulsion control in SN7.

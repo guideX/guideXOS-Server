@@ -6,8 +6,9 @@ namespace Astronomy.Ephemeris;
 
 /// <summary>
 /// End-to-end UTC-to-ephemeris query: resolves a human-readable UTC timestamp
-/// to ET/JD TDB via <see cref="TimeConverter"/>, then evaluates the existing
-/// SN4 ephemeris provider at that epoch. Time-conversion quality and
+/// to ET via <see cref="TimeConverter"/>, then uses a precision-preserving
+/// ET provider when available (with the legacy JD provider path retained for
+/// compatibility). Time-conversion quality and
 /// ephemeris-source quality are reported separately: a provisional (assumed,
 /// CSPICE-compatible) UTC conversion downgrades an otherwise
 /// <see cref="NavigationResultStatus.ValidatedReference"/> state to
@@ -22,8 +23,8 @@ public sealed class UtcEphemerisQuery
 
     public UtcEphemerisQuery(IEphemerisProvider provider, TimeConverter converter)
     {
-        _provider = provider;
-        _converter = converter;
+        _provider = provider ?? throw new ArgumentNullException(nameof(provider));
+        _converter = converter ?? throw new ArgumentNullException(nameof(converter));
     }
 
     public sealed record ResolvedQuery
@@ -34,6 +35,7 @@ public sealed class UtcEphemerisQuery
         public TimeConversionError? TimeError { get; init; }
         public NavigationResult<(Vector3D Position, Vector3D Velocity)>? Ephemeris { get; init; }
         public required TimeConversionQuality TimeQuality { get; init; }
+        public TimeRepresentationPrecision RepresentationPrecision { get; init; } = TimeRepresentationPrecision.EtSeconds;
         public NavigationResultStatus? EphemerisStatus => Ephemeris?.Status;
     }
 
@@ -48,12 +50,16 @@ public sealed class UtcEphemerisQuery
                 SourceUtcText = utcText,
                 TimeError = timeError,
                 TimeQuality = timeError!.Quality,
+                RepresentationPrecision = TimeRepresentationPrecision.EtSeconds,
             };
         }
 
         var t = time!;
         var epoch = new AstroTime(t.JdTdb, TimeScale.Tdb);
-        var state = _provider.GetState(bodyId, epoch, frame);
+        bool usedEt = _provider is IEtEphemerisProvider;
+        var state = usedEt
+            ? ((IEtEphemerisProvider)_provider).GetStateAtEt(bodyId, t.Et, frame)
+            : _provider.GetState(bodyId, epoch, frame);
 
         NavigationResult<(Vector3D Position, Vector3D Velocity)> reported = state;
         if (state.IsSuccess && t.Quality == TimeConversionQuality.ProvisionalStaleTable)
@@ -71,6 +77,9 @@ public sealed class UtcEphemerisQuery
             Time = t,
             Ephemeris = reported,
             TimeQuality = t.Quality,
+            RepresentationPrecision = usedEt
+                ? TimeRepresentationPrecision.EtSeconds
+                : TimeRepresentationPrecision.JulianDateDouble,
         };
     }
 }

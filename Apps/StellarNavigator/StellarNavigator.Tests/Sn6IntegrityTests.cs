@@ -60,7 +60,8 @@ public class Sn6IntegrityTests
     [Fact]
     public void Angles_EvaluateToExpectedValues_AtJ2000()
     {
-        IauEarthOrientation.EvaluateAngles(0.0,
+        var model = IauEarthOrientation.Load(Sn6Paths.OrientationAssetPath());
+        model.EvaluateAngles(0.0,
             out double ra, out double dec, out double w,
             out double raRate, out double decRate, out double wRate);
         Assert.Equal(0.0, ra, 15);

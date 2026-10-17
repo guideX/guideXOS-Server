@@ -13,6 +13,8 @@ namespace StellarNavigator.Tests;
 /// </summary>
 public class Sn6InvariantTests
 {
+    private static readonly IauEarthOrientation Orientation =
+        IauEarthOrientation.Load(Sn6Paths.OrientationAssetPath());
     private static readonly double[] Ets = { 0.0, 86400.0, 100000000.0, -1500000000.0, 800000000.0 };
 
     private static Vector3D V(double x, double y, double z) => new(x, y, z);
@@ -37,7 +39,7 @@ public class Sn6InvariantTests
     {
         foreach (var et in Ets)
         {
-            IauEarthOrientation.GetRotation(et, out var r, out _);
+            Orientation.GetRotation(et, out var r, out _);
             Assert.True(r.OrthogonalityError() < 5e-15, $"et={et}: orth={r.OrthogonalityError():E3}");
             Assert.True(Math.Abs(r.Determinant() - 1.0) < 1e-12, $"et={et}: det={r.Determinant():R}");
         }
@@ -49,7 +51,7 @@ public class Sn6InvariantTests
         var pos = V(1e9, -2e9, 3e8);
         foreach (var et in Ets)
         {
-            IauEarthOrientation.GetRotation(et, out var r, out _);
+            Orientation.GetRotation(et, out var r, out _);
             var fwd = r.RotatePosition(pos);
             var back = r.Transpose().RotatePosition(fwd);
             Assert.True((back - pos).Magnitude <= 1e-6 * Math.Max(1.0, pos.Magnitude),
@@ -63,7 +65,7 @@ public class Sn6InvariantTests
         // Guard against the specific error the spec forbids: the inverse
         // state transform must include velocity coupling, not a whole-matrix
         // transpose. A rotation-only "velocity transform" misses R'*r.
-        IauEarthOrientation.GetRotation(86400.0, out var r, out var rd);
+        Orientation.GetRotation(86400.0, out var r, out var rd);
         var pos = V(6.3781366e6, 0, 0); // off-axis: coupling is large here
         var vel = V(0, 0, 0);
         var rotatedOnly = r.RotatePosition(vel); // what a rotation-only mistake yields
@@ -80,7 +82,7 @@ public class Sn6InvariantTests
         // Earth-surface-scale point, inertially at rest: in IAU_EARTH axes it
         // must stream past at ~465 m/s (sidereal surface speed), proving the
         // velocity law is not rotation-only.
-        IauEarthOrientation.GetRotation(0.0, out var r, out var rd);
+        Orientation.GetRotation(0.0, out var r, out var rd);
         var pos = V(6.3781366e6, 0, 0);
         var (_, v) = StateTransformMath.TransformState(r, rd, pos, V(0, 0, 0));
         Assert.True(v.Magnitude > 464.0 && v.Magnitude < 466.0, $"surface speed: {v.Magnitude}");
@@ -89,8 +91,8 @@ public class Sn6InvariantTests
     [Fact]
     public void Composition_MatchesSequentialApplication()
     {
-        IauEarthOrientation.GetRotation(100000.0, out var r1, out var d1);
-        IauEarthOrientation.GetRotation(200000.0, out var r2, out var d2);
+        Orientation.GetRotation(100000.0, out var r1, out var d1);
+        Orientation.GetRotation(200000.0, out var r2, out var d2);
         var (rc, dc) = StateTransformMath.Compose(r1, d1, r2, d2);
         var pos = V(1e9, 2e9, -3e8);
         var vel = V(1000, -2000, 500);
@@ -108,7 +110,7 @@ public class Sn6InvariantTests
         var vel = V(30000, 10000, 5000);
         foreach (var et in Ets)
         {
-            IauEarthOrientation.GetRotation(et, out var r, out var rd);
+            Orientation.GetRotation(et, out var r, out var rd);
             var (p1, v1) = StateTransformMath.TransformState(r, rd, pos, vel);
             var (p2, v2) = StateTransformMath.InverseTransformState(r, rd, p1, v1);
             Assert.True((p2 - pos).Magnitude <= 1e-9 * pos.Magnitude + 1e-6, $"et={et}");
