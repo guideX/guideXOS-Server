@@ -124,6 +124,24 @@ struct TextMeasureResult {
 	size_t errorByteOffset;
 };
 
+// Fixed-storage cache diagnostics. All byte counts describe the shared
+// grayscale glyph cache, excluding FONT4's shared raster scratch block.
+struct FontGlyphCacheStatistics {
+	uint64_t hits;
+	uint64_t misses;
+	uint64_t rasterizations;
+	uint64_t evictions;
+	uint32_t entryCount;
+	uint32_t bytesUsed;
+	uint32_t peakBytesUsed;
+	uint32_t maxEntries;
+	uint32_t maxPixelBytes;
+	uint32_t maxGlyphPixels;
+	uint32_t maxMetadataBytes;
+	uint32_t cacheMemoryBytes;
+	uint32_t maxCacheMemoryBytes;
+};
+
 struct FontBackend {
 	uint32_t capabilities;
 	FontStatus (*getMetrics)(const void* context, FontSize size, FontMetrics* outMetrics);
@@ -190,10 +208,22 @@ FontStatus FontDrawTextToBuffer(FontHandle handle, FontSize size,
 	uint32_t* pixels, uint32_t pitchBytes, uint32_t bufferWidth, uint32_t bufferHeight,
 	int32_t x, int32_t y, const char* utf8, size_t byteLength, uint32_t color,
 	TextMeasureResult* outMeasure);
+// Draws antialiased glyphs into an XRGB8888 surface. x is the first glyph
+// origin and baselineY is the first line's baseline. Grayscale coverage
+// blends foreground RGB over the existing opaque destination pixels.
+// destinationBytes includes the final row's visible pixels and must cover the
+// complete visible surface described by pitchBytes, bufferWidth, and height.
+FontStatus FontDrawGrayscaleTextToBuffer(FontHandle handle, FontSize size,
+	uint32_t* pixels, size_t destinationBytes, uint32_t pitchBytes,
+	uint32_t bufferWidth, uint32_t bufferHeight, int32_t x, int32_t baselineY,
+	const char* utf8, size_t byteLength, uint32_t color,
+	TextMeasureResult* outMeasure);
 FontStatus FontDrawCStringToBuffer(FontHandle handle, FontSize size,
 	uint32_t* pixels, uint32_t pitchBytes, uint32_t bufferWidth, uint32_t bufferHeight,
 	int32_t x, int32_t y, const char* utf8, uint32_t color,
 	TextMeasureResult* outMeasure);
+FontStatus FontGlyphCacheGetStatistics(FontGlyphCacheStatistics* outStatistics);
+void FontGlyphCacheReset();
 
 const FontDefinition* FontBuiltinBitmapDefinition();
 

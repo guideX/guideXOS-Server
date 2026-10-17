@@ -713,6 +713,32 @@ static bool mount_persistent_storage()
     return false;
 }
 
+#ifdef GXOS_FONT5_QEMU_PROOF
+static void font5_qemu_report_mounts(const char* stage)
+{
+    kernel::serial::puts("[FONT5] vfs stage=");
+    kernel::serial::puts(stage ? stage : "unknown");
+    kernel::serial::puts(" root=");
+    kernel::serial::puts(kernel::vfs::get_mount("/") ? "mounted" : "missing");
+    kernel::serial::puts(" count=0x");
+    kernel::serial::put_hex32(kernel::vfs::mount_count());
+    kernel::serial::putc('\n');
+    for (uint8_t index = 0; index < kernel::vfs::VFS_MAX_MOUNTS; ++index) {
+        const kernel::vfs::MountPoint* mount = kernel::vfs::get_mount_by_index(index);
+        if (!mount) continue;
+        kernel::serial::puts("[FONT5] vfs slot=0x");
+        kernel::serial::put_hex8(index);
+        kernel::serial::puts(" path=");
+        kernel::serial::puts(mount->path);
+        kernel::serial::puts(" alias=");
+        kernel::serial::puts(mount->alias ? "yes" : "no");
+        kernel::serial::puts(" device=0x");
+        kernel::serial::put_hex8(mount->blockDevIndex);
+        kernel::serial::putc('\n');
+    }
+}
+#endif
+
 extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 {
 #if ARCH_HAS_PIC_8259
@@ -976,6 +1002,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::putc('\n');
         
         const bool mounted = mount_persistent_storage();
+#ifdef GXOS_FONT5_QEMU_PROOF
+        font5_qemu_report_mounts("after-persistent-mount");
+#endif
 
         if (is_bootinfo && bootinfo && bootinfo->RamdiskBase != 0 && bootinfo->RamdiskSize != 0) {
             kernel::serial::puts("[KERNEL] Boot wallpaper pack found in ramdisk.img\n");
@@ -992,9 +1021,15 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // filesystem is mounted. The loader consumes /Apps through VFS and
         // never reaches back to a host filesystem path at runtime.
         kernel::native_elf::discover();
+#ifdef GXOS_FONT5_QEMU_PROOF
+        font5_qemu_report_mounts("after-native-discovery");
+#endif
         // The first desktop draw happens before VFS and the boot ramdisk are ready.
         // Redraw now so bare-metal thumbnails and the selected wallpaper use /system/wallpapers.
         kernel::desktop::draw();
+#ifdef GXOS_FONT5_QEMU_PROOF
+        font5_qemu_report_mounts("after-desktop-draw");
+#endif
 
 #if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
 #if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE)
@@ -1186,7 +1221,16 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::desktop::draw_cursor(kernel::input::mouse_x(),
                                      kernel::input::mouse_y());
         kernel::desktop_capabilities::log_current(true, true);
+#ifdef GXOS_FONT5_QEMU_PROOF
+        font5_qemu_report_mounts("before-navigator-smoke");
+#endif
         kernel::apps::printNavigatorRuntimeSmokeReport();
+#ifdef GXOS_FONT5_QEMU_PROOF
+        font5_qemu_report_mounts("after-navigator-smoke");
+        // Run after the normal desktop smoke diagnostics so the proof matches
+        // the package availability of a fully initialized desktop.
+        kernel::native_elf::font5_app_proof();
+#endif
 #ifdef GXOS_DESKTOP_CLEANUP_RUNTIME_PASS
         kernel::serial::puts("[KERNEL] desktopCleanupRuntimePass=2 launch-smoke begin\n");
         const bool cleanupDisplayOptionsLaunched = kernel::desktop::launch_app("DisplayOptions");

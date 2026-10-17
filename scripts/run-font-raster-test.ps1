@@ -22,6 +22,7 @@ $Arguments = @(
 	"-idirafter", "kernel/core/include",
 	"tests/font_raster_test.cpp",
 	"kernel/core/font_contract.cpp",
+	"kernel/core/font_glyph_cache.cpp",
 	"kernel/core/font_bitmap_backend.cpp",
 	"kernel/core/font_truetype.cpp",
 	"kernel/core/font_truetype_loader.cpp",

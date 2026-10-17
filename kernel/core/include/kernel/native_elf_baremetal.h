@@ -70,6 +70,12 @@ void app_audio_boot_selftest();
 void app_audio_app_proof();
 #endif
 
+#if defined(GXOS_FONT5_QEMU_PROOF)
+// Opt-in FONT5 guest proof. It launches the isolated Font5GlyphCacheDemo
+// package through the same Native ELF and GXApp callbacks used in production.
+void font5_app_proof();
+#endif
+
 } // namespace native_elf
 } // namespace kernel
 

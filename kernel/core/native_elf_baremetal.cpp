@@ -4,6 +4,7 @@
 #include "include/kernel/arch.h"
 #include "include/kernel/desktop.h"
 #include "include/kernel/font_contract.h"
+#include "include/kernel/font_truetype.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/input_manager.h"
 #include "include/kernel/kernel_app.h"
@@ -52,6 +53,16 @@ using Package = PackageInfo;
 
 struct Runtime;
 
+static bool text_equal(const char* a, const char* b);
+static void serial_put_u32_decimal(uint32_t value);
+static bool package_path(const Package* package, const char* relative,
+	char* output, uint32_t capacity);
+static Package* runtime_package(Runtime* runtime);
+
+static bool is_font5_demo_package(const Package* package) {
+	return package && text_equal(package->id, "com.guidexos.font5demo");
+}
+
 enum class NativeAbiOperation : uint32_t {
     None = 0,
     GetTicks,
@@ -67,11 +78,14 @@ class NativeWindowOwner final : public app::KernelApp {
 public:
     explicit NativeWindowOwner(Runtime* runtime)
         : m_runtime(runtime), m_allocation(nullptr), m_pixels(nullptr), m_pixelBytes(0), m_width(0), m_height(0),
-          m_strideBytes(0), m_surface(nullptr), m_surfaceBytes(0), m_pendingEventValue(), m_pendingEvent(false), m_closed(false) {
+          m_strideBytes(0), m_surface(nullptr), m_surfaceBytes(0), m_font5Handle{0xffffu, 0, 0},
+          m_font5LoadAttempted(false), m_font5Loaded(false), m_font5DrawCalls(0),
+          m_pendingEventValue(), m_pendingEvent(false), m_closed(false) {
         m_name[0] = '\0';
     }
 
     ~NativeWindowOwner() override {
+        release_font5();
         release_pixels();
     }
 
@@ -79,6 +93,7 @@ public:
 
     void shutdown() override {
         m_closed = true;
+        release_font5();
         release_pixels();
     }
 
@@ -163,6 +178,37 @@ public:
             size_t textBytes = 0;
             if (gxos::gui::FontUtf8CStringLength(text, &textBytes) != gxos::gui::FontStatus::Ok)
                 return GX_ERROR_INVALID_ARGUMENT;
+            if (is_font5_demo_package(runtime_package(m_runtime))) {
+                if (ensure_font5_font()) {
+                    gxos::gui::FontMetrics metrics = {};
+                    gxos::gui::FontStatus drawStatus = gxos::gui::FontGetMetrics(
+                        m_font5Handle, {32u}, &metrics);
+                    const int64_t baseline64 = static_cast<int64_t>(y) + metrics.baselinePx;
+                    if (drawStatus == gxos::gui::FontStatus::Ok &&
+                        baseline64 >= -0x80000000ll && baseline64 <= 0x7fffffffll) {
+                        drawStatus = gxos::gui::FontDrawGrayscaleTextToBuffer(
+                            m_font5Handle, {32u}, m_surface, m_surfaceBytes,
+                            m_width * sizeof(uint32_t), m_width, m_height, x,
+                            static_cast<int32_t>(baseline64), text, textBytes,
+                            0xFFFFFFFFu, nullptr);
+                    } else if (drawStatus == gxos::gui::FontStatus::Ok) {
+                        drawStatus = gxos::gui::FontStatus::ArithmeticOverflow;
+                    }
+                    if (drawStatus == gxos::gui::FontStatus::Ok ||
+                        drawStatus == gxos::gui::FontStatus::FallbackUsed) {
+                        invalidate();
+                        ++m_font5DrawCalls;
+                        if (m_font5DrawCalls == 5u) log_font5_cache_stats("cold-pass");
+                        if (m_font5DrawCalls == 10u) log_font5_cache_stats("redraw-pass");
+                        return GX_OK;
+                    }
+                    if (m_font5DrawCalls == 0u) {
+                        serial::puts("[FONT5] scalable draw failed; using bitmap fallback status=0x");
+                        serial::put_hex32(static_cast<uint32_t>(drawStatus));
+                        serial::putc('\n');
+                    }
+                }
+            }
             gxos::gui::FontHandle font = {0xffffu, 0, 0};
             const gxos::gui::FontStatus initStatus = gxos::gui::FontManagerInitialize();
             const gxos::gui::FontStatus defaultStatus = initStatus == gxos::gui::FontStatus::Ok
@@ -295,6 +341,64 @@ public:
     }
 
 private:
+    bool ensure_font5_font() {
+        if (m_font5Loaded) return true;
+        if (m_font5LoadAttempted) return false;
+        m_font5LoadAttempted = true;
+        if (gxos::gui::FontManagerInitialize() != gxos::gui::FontStatus::Ok) return false;
+        char fontPath[256];
+        if (!package_path(runtime_package(m_runtime),
+                "resources/Roboto-Regular.ttf", fontPath, sizeof(fontPath))) return false;
+        gxos::gui::FontTrueTypeMetadata metadata = {};
+        const gxos::gui::FontStatus status = gxos::gui::FontTrueTypeLoadFile(
+            fontPath, {0x4758464f4e543500ull}, &m_font5Handle, &metadata);
+        if (status != gxos::gui::FontStatus::Ok) {
+            serial::puts("[FONT5] validated font load failed status=0x");
+            serial::put_hex32(static_cast<uint32_t>(status));
+            serial::putc('\n');
+            return false;
+        }
+        m_font5Loaded = true;
+        serial::puts("[FONT5] validated font loaded family=");
+        serial::puts(metadata.familyName);
+        serial::puts(" pixelSize=32 surface=GXApp-XRGB8888\n");
+        gxos::gui::FontGlyphView narrow = {};
+        gxos::gui::FontGlyphView wide = {};
+        if (gxos::gui::FontLookupGlyph(m_font5Handle, {32u}, 'i', &narrow) == gxos::gui::FontStatus::Ok &&
+            gxos::gui::FontLookupGlyph(m_font5Handle, {32u}, 'W', &wide) == gxos::gui::FontStatus::Ok) {
+            serial::puts("[FONT5] advance-i=0x"); serial::put_hex32(narrow.metrics.advancePx);
+            serial::puts(" advance-W=0x"); serial::put_hex32(wide.metrics.advancePx);
+            serial::putc('\n');
+        }
+        return true;
+    }
+
+    void release_font5() {
+        if (!m_font5Loaded) return;
+        const gxos::gui::FontStatus status = gxos::gui::FontManagerUnloadFont(m_font5Handle);
+        m_font5Loaded = false;
+        m_font5Handle = {0xffffu, 0, 0};
+        serial::puts(status == gxos::gui::FontStatus::Ok ?
+            "[FONT5] validated font unloaded; cache invalidated\n" :
+            "[FONT5] validated font unload failed\n");
+    }
+
+    void log_font5_cache_stats(const char* pass) {
+        gxos::gui::FontGlyphCacheStatistics stats = {};
+        if (gxos::gui::FontGlyphCacheGetStatistics(&stats) != gxos::gui::FontStatus::Ok)
+            return;
+        serial::puts("[FONT5] ");
+        serial::puts(pass ? pass : "pass");
+        serial::puts(" hits=0x"); serial::put_hex64(stats.hits);
+        serial::puts(" misses=0x"); serial::put_hex64(stats.misses);
+        serial::puts(" rasterizations=0x"); serial::put_hex64(stats.rasterizations);
+        serial::puts(" evictions=0x"); serial::put_hex64(stats.evictions);
+        serial::puts(" bytes=0x"); serial::put_hex32(stats.bytesUsed);
+        serial::puts(" peak=0x"); serial::put_hex32(stats.peakBytesUsed);
+        serial::puts(" cacheMemory=0x"); serial::put_hex32(stats.cacheMemoryBytes);
+        serial::putc('\n');
+    }
+
     static int mouse_button_for_abi(uint8_t button) {
         if (button & 0x01u) return GX_MOUSE_BUTTON_LEFT;
         if (button & 0x02u) return GX_MOUSE_BUTTON_RIGHT;
@@ -341,6 +445,10 @@ private:
     uint32_t m_strideBytes;
     uint32_t* m_surface;
     uint32_t m_surfaceBytes;
+    gxos::gui::FontHandle m_font5Handle;
+    bool m_font5LoadAttempted;
+    bool m_font5Loaded;
+    uint32_t m_font5DrawCalls;
     gx_event m_pendingEventValue;
     bool m_pendingEvent;
     bool m_closed;
@@ -382,6 +490,10 @@ struct Runtime {
     // (StopOwner) reclaims exactly this app's sounds.
     uint64_t audioOwner;
 };
+
+static Package* runtime_package(Runtime* runtime) {
+    return runtime ? runtime->package : nullptr;
+}
 
 void NativeWindowOwner::record_frame_guard_failure() {
     if (m_runtime) ++m_runtime->frameGuardFailures;
@@ -2014,6 +2126,44 @@ void app_audio_app_proof() {
     app_audio::backend_instance().report_status();
 #endif
     serial::puts("[APP-AUDIO] app proof done\n");
+}
+#endif
+
+#if defined(GXOS_FONT5_QEMU_PROOF)
+void font5_app_proof() {
+    serial::puts("[FONT5] proof launch begin\n");
+    const vfs::MountPoint* rootMountBefore = vfs::get_mount("/");
+    const char* const demoExecutable =
+        "/Apps/Font5GlyphCacheDemo/bin/amd64/font5demo.elf";
+    const vfs::MountPoint* executableMountBefore = vfs::get_mount(demoExecutable);
+    serial::puts("[FONT5] proof vfs root-before=");
+    serial::puts(rootMountBefore && rootMountBefore->active ? "mounted" : "missing");
+    serial::puts(" executable-before=");
+    serial::puts(executableMountBefore && executableMountBefore->active ? "mounted" : "missing");
+    serial::puts(" mounts=0x"); serial::put_hex32(vfs::mount_count());
+    serial::putc('\n');
+    const uint8_t executableProbe = vfs::open(demoExecutable, vfs::OPEN_READ);
+    serial::puts("[FONT5] proof executable-open=");
+    serial::puts(executableProbe == 0xFFu ? "FAIL" : "PASS");
+    serial::putc('\n');
+    if (executableProbe != 0xFFu) vfs::close(executableProbe);
+    const bool launched = launch("com.guidexos.font5demo");
+    serial::puts("[FONT5] proof launch=");
+    serial::puts(launched ? "PASS\n" : "FAIL(package missing or app error)\n");
+    const vfs::MountPoint* rootMountAfter = vfs::get_mount("/");
+    serial::puts("[FONT5] proof vfs root-after=");
+    serial::puts(rootMountAfter && rootMountAfter->active ? "mounted" : "missing");
+    serial::puts(" mounts=0x"); serial::put_hex32(vfs::mount_count());
+    serial::putc('\n');
+    gxos::gui::FontGlyphCacheStatistics stats = {};
+    if (gxos::gui::FontGlyphCacheGetStatistics(&stats) == gxos::gui::FontStatus::Ok) {
+        serial::puts("[FONT5] proof totals hits=0x"); serial::put_hex64(stats.hits);
+        serial::puts(" misses=0x"); serial::put_hex64(stats.misses);
+        serial::puts(" rasterizations=0x"); serial::put_hex64(stats.rasterizations);
+        serial::puts(" evictions=0x"); serial::put_hex64(stats.evictions);
+        serial::putc('\n');
+    }
+    serial::puts("[FONT5] proof launch end\n");
 }
 #endif
 

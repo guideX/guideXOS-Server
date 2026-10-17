@@ -7447,11 +7447,18 @@ static bool nav_starts_with(const char* value, const char* prefix);
 
 bool NavigatorApp::smokeTypographyPhase7A()
 {
-    NavigatorApp app;
+    // NavigatorApp owns large fixed document/resource tables. Keep this
+    // startup smoke fixture off the 16 KiB boot stack, as production app
+    // instances are heap-owned.
+    NavigatorApp* app = new NavigatorApp();
+    if (!app) {
+        serial::puts("[NAVIGATOR-SMOKE] typography.phase7a.result=FAIL reason=app-allocation\n");
+        return false;
+    }
     app::KernelWindow smokeWindow;
     smokeWindow.w = 640;
     smokeWindow.h = 480;
-    app.m_window = &smokeWindow;
+    app->m_window = &smokeWindow;
 
     static const char kFixture[] =
         "<style>"
@@ -7472,8 +7479,8 @@ bool NavigatorApp::smokeTypographyPhase7A()
         "<pre class='mono'>for (i = 0; i &lt; 4; ++i)\n    puts(i);</pre>"
         "<a href='http://guidexos.test:8080/navigator-smoke/final.html'>Wrapped positioned link text</a>";
 
-    app.parseHtmlDocument("http://guidexos.test:8080/navigator-smoke/typography-phase7a.html",
-                         kFixture, "http", "text/html", 200, "OK");
+    app->parseHtmlDocument("http://guidexos.test:8080/navigator-smoke/typography-phase7a.html",
+                           kFixture, "http", "text/html", 200, "OK");
 
     int normalIndex = -1;
     int boldIndex = -1;
@@ -7483,8 +7490,8 @@ bool NavigatorApp::smokeTypographyPhase7A()
     int unsupportedIndex = -1;
     int monoIndex = -1;
     int linkIndex = -1;
-    for (int i = 0; i < app.m_blockCount; ++i) {
-        const DocBlock& block = app.m_blocks[i];
+    for (int i = 0; i < app->m_blockCount; ++i) {
+        const DocBlock& block = app->m_blocks[i];
         if (block.kind == BLOCK_LINK) linkIndex = i;
         if (block.kind == BLOCK_PREFORMATTED) monoIndex = i;
         if (block.kind != BLOCK_PARAGRAPH) continue;
@@ -7497,38 +7504,38 @@ bool NavigatorApp::smokeTypographyPhase7A()
     }
 
     const bool robotoAvailable = gxos::gui::SystemFont::IsRobotoAvailable();
-    const gxos::web::WebStyle normalStyle = normalIndex >= 0 ? app.m_blocks[normalIndex].style : gxos::web::WebStyle{};
-    const gxos::web::WebStyle monoStyle = monoIndex >= 0 ? app.m_blocks[monoIndex].style : gxos::web::WebStyle{};
+    const gxos::web::WebStyle normalStyle = normalIndex >= 0 ? app->m_blocks[normalIndex].style : gxos::web::WebStyle{};
+    const gxos::web::WebStyle monoStyle = monoIndex >= 0 ? app->m_blocks[monoIndex].style : gxos::web::WebStyle{};
     const int normalWidth = navigatorTextWidth(normalStyle, "iiWW");
     const int monoWidth = navigatorTextWidth(monoStyle, "iiWW");
     const int normalLineHeight = navigatorLineHeight(normalStyle);
     const int normalLines = navigatorWrappedLineCount(
-        normalIndex >= 0 ? app.m_blocks[normalIndex].text : "", 180, normalStyle);
+        normalIndex >= 0 ? app->m_blocks[normalIndex].text : "", 180, normalStyle);
 
-    app.drawDocument(0, 0, smokeWindow.w, smokeWindow.h);
+    app->drawDocument(0, 0, smokeWindow.w, smokeWindow.h);
 
     bool linkGeometry = false;
     if (linkIndex >= 0) {
         const int maxWidth = smokeWindow.w - CONTENT_X * 2 - 32;
-        const int left = CONTENT_X + 14 + css_margin_left_or(app.m_bodyStyle, 0) +
-            css_margin_left_or(app.m_blocks[linkIndex].style, 0);
-        const int top = app.blockY(linkIndex, maxWidth) +
-            css_margin_top_or(app.m_blocks[linkIndex].style, 4);
-        linkGeometry = app.hitLinkIndex(left + 1, top + 1) == linkIndex;
+        const int left = CONTENT_X + 14 + css_margin_left_or(app->m_bodyStyle, 0) +
+            css_margin_left_or(app->m_blocks[linkIndex].style, 0);
+        const int top = app->blockY(linkIndex, maxWidth) +
+            css_margin_top_or(app->m_blocks[linkIndex].style, 4);
+        linkGeometry = app->hitLinkIndex(left + 1, top + 1) == linkIndex;
     }
 
     const bool faceSelection = normalIndex >= 0 &&
         (!robotoAvailable || !gxos::gui::SystemFont::IsFaceFallback(navigatorFontFace(normalStyle)));
-    const bool styleSelection = boldIndex >= 0 && app.m_blocks[boldIndex].style.bold &&
-        italicIndex >= 0 && app.m_blocks[italicIndex].style.italic &&
-        boldItalicIndex >= 0 && app.m_blocks[boldItalicIndex].style.bold &&
-        app.m_blocks[boldItalicIndex].style.italic;
+    const bool styleSelection = boldIndex >= 0 && app->m_blocks[boldIndex].style.bold &&
+        italicIndex >= 0 && app->m_blocks[italicIndex].style.italic &&
+        boldItalicIndex >= 0 && app->m_blocks[boldItalicIndex].style.bold &&
+        app->m_blocks[boldItalicIndex].style.italic;
     const bool familySelection = monoIndex >= 0 && navigatorUsesMonospace(monoStyle) &&
-        fallbackIndex >= 0 && app.m_blocks[fallbackIndex].style.genericFontFamily == gxos::web::GenericFontFamily::Roboto &&
-        unsupportedIndex >= 0 && app.m_blocks[unsupportedIndex].style.genericFontFamily == gxos::web::GenericFontFamily::Unknown;
+        fallbackIndex >= 0 && app->m_blocks[fallbackIndex].style.genericFontFamily == gxos::web::GenericFontFamily::Roboto &&
+        unsupportedIndex >= 0 && app->m_blocks[unsupportedIndex].style.genericFontFamily == gxos::web::GenericFontFamily::Unknown;
     const bool metricAgreement = normalWidth > 0 && monoWidth > 0 && normalLineHeight > 0 && normalLines > 0;
     const bool distinctMonospace = !robotoAvailable || normalWidth != monoWidth;
-    const bool pass = app.m_blockCount > 0 && faceSelection && styleSelection && familySelection &&
+    const bool pass = app->m_blockCount > 0 && faceSelection && styleSelection && familySelection &&
         metricAgreement && distinctMonospace && linkGeometry;
 
     serial::puts("[NAVIGATOR-SMOKE] typography.phase7a.roboto_available=");
@@ -7549,7 +7556,8 @@ bool NavigatorApp::smokeTypographyPhase7A()
     serial::puts(pass ? "[NAVIGATOR-SMOKE] typography.phase7a.result=PASS\n"
                       : "[NAVIGATOR-SMOKE] typography.phase7a.result=FAIL\n");
 
-    app.m_window = nullptr;
+    app->m_window = nullptr;
+    delete app;
     return pass;
 }
 

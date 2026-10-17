@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "com.guidexos.font5demo",
+  "displayName": "FONT5 Glyph Cache Demo",
+  "version": "0.1.0",
+  "publisher": "guideXOS Samples",
+  "description": "Opt-in Native ELF demonstration of scalable, cached TrueType text.",
+  "category": "Samples",
+  "kind": "NativeElf",
+  "icon": "",
+  "minGuideXOSVersion": "0.1.0",
+  "supportedArchitectures": [
+    "amd64"
+  ],
+  "entries": [
+    {
+      "architecture": "amd64",
+      "path": "bin/amd64/font5demo.elf",
+      "entryPoint": "gx_main",
+      "abi": "guidexos-c-abi-v1",
+      "runtime": "native-elf"
+    }
+  ],
+  "permissions": [
+    "log",
+    "window",
+    "draw"
+  ],
+  "fileAssociations": [],
+  "defaultWindow": {
+    "width": 640,
+    "height": 240,
+    "resizable": false
+  }
+}

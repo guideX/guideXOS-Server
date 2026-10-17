@@ -1,5 +1,6 @@
 #include "include/kernel/font_contract.h"
 #include "include/kernel/font_truetype.h"
+#include "font_glyph_cache_internal.h"
 
 namespace gxos {
 namespace gui {
@@ -241,6 +242,130 @@ FontStatus lookupGlyphInternal(FontHandle handle, FontSize size, UnicodeCodePoin
 	return lookupGlyph(slot, size, codePoint, outGlyph, nullptr);
 }
 
+FontStatus rasterizeGlyphForSlot(FontSlot* slot, FontSize size,
+	UnicodeCodePoint codePoint, uint8_t* coverage, size_t coverageCapacity,
+	uint32_t rowStrideBytes, GlyphMetrics* outMetrics)
+{
+	if (outMetrics) *outMetrics = {};
+	if (!slot || !outMetrics || !validScalar(codePoint) || size.pixelHeight == 0u ||
+		(!coverage && coverageCapacity != 0u)) return FontStatus::InvalidArgument;
+	const FontBackend* backend = slot->definition.backend;
+	const uint32_t capabilities = backend->capabilities;
+	if ((capabilities & FontCapabilityRasterization) != 0u) {
+		GlyphMetrics metrics = {};
+		FontStatus status = backend->rasterizeGlyph(slot->definition.context, size,
+			codePoint, coverage, coverageCapacity, rowStrideBytes, &metrics);
+		if (status == FontStatus::UnsupportedCodePoint && codePoint != kReplacementCodePoint) {
+			metrics = {};
+			status = backend->rasterizeGlyph(slot->definition.context, size,
+				kReplacementCodePoint, coverage, coverageCapacity, rowStrideBytes, &metrics);
+			if (status == FontStatus::Ok) {
+				metrics.codePoint = codePoint;
+				*outMetrics = metrics;
+				return FontStatus::FallbackUsed;
+			}
+		}
+		if (status == FontStatus::Ok || status == FontStatus::FallbackUsed ||
+			status == FontStatus::BufferTooSmall)
+			*outMetrics = metrics;
+		return status;
+	}
+	if ((capabilities & FontCapabilityBitmapData) == 0u)
+		return (capabilities & FontCapabilityMetadataOnly) != 0u ?
+			FontStatus::MetadataOnly : FontStatus::UnsupportedGlyphFeature;
+	FontMetrics faceMetrics = {};
+	const FontStatus faceStatus = backend->getMetrics(
+		slot->definition.context, size, &faceMetrics);
+	if (faceStatus != FontStatus::Ok) return faceStatus;
+	FontGlyphView glyph = {};
+	const FontStatus glyphStatus = lookupGlyph(slot, size, codePoint, &glyph, nullptr);
+	if (glyphStatus != FontStatus::Ok && glyphStatus != FontStatus::FallbackUsed)
+		return glyphStatus;
+	const GlyphMetrics& metrics = glyph.metrics;
+	if (metrics.widthPx > 128u || metrics.heightPx > 128u ||
+		static_cast<uint64_t>(metrics.widthPx) * metrics.heightPx > 16384u)
+		return FontStatus::RasterLimitExceeded;
+	if (metrics.widthPx == 0u || metrics.heightPx == 0u) {
+		*outMetrics = metrics;
+		return glyphStatus;
+	}
+	if (metrics.heightPx > 8u) return FontStatus::BackendFailure;
+	if (glyph.bitmapFormat != FontBitmapFormat::ColumnLsbTop || !glyph.bitmap ||
+		glyph.bitmapByteLength < metrics.widthPx) return FontStatus::BackendFailure;
+	if (rowStrideBytes < metrics.widthPx || rowStrideBytes > 4096u)
+		return FontStatus::InvalidArgument;
+	const size_t lastRow = static_cast<size_t>(metrics.heightPx - 1u) * rowStrideBytes;
+	if (lastRow > static_cast<size_t>(-1) - metrics.widthPx)
+		return FontStatus::ArithmeticOverflow;
+	const size_t required = lastRow + metrics.widthPx;
+	if (!coverage || coverageCapacity < required) {
+		*outMetrics = metrics;
+		return FontStatus::BufferTooSmall;
+	}
+	for (uint32_t y = 0; y < metrics.heightPx; ++y) {
+		for (uint32_t x = 0; x < metrics.widthPx; ++x)
+			coverage[static_cast<size_t>(y) * rowStrideBytes + x] =
+				(glyph.bitmap[x] & (1u << y)) ? 255u : 0u;
+	}
+	*outMetrics = metrics;
+	return glyphStatus;
+}
+
+struct CacheRasterRequest {
+	FontSlot* slot;
+	FontSize size;
+	UnicodeCodePoint codePoint;
+};
+
+FontStatus rasterizeCacheMiss(void* context, uint8_t* coverage,
+	size_t coverageCapacity, uint32_t rowStrideBytes, GlyphMetrics* outMetrics)
+{
+	CacheRasterRequest* request = static_cast<CacheRasterRequest*>(context);
+	if (!request) return FontStatus::InvalidArgument;
+	return rasterizeGlyphForSlot(request->slot, request->size, request->codePoint,
+		coverage, coverageCapacity, rowStrideBytes, outMetrics);
+}
+
+uint32_t blendChannel(uint32_t foreground, uint32_t background, uint32_t alpha)
+{
+	return (foreground * alpha + background * (255u - alpha) + 127u) / 255u;
+}
+
+void compositeCoverage(uint32_t* pixels, uint32_t pitchWords,
+	uint32_t width, uint32_t height, int64_t originX, int64_t originY,
+	const GlyphMetrics& metrics, const uint8_t* coverage, uint32_t color)
+{
+	if (!pixels || !coverage || metrics.widthPx == 0u || metrics.heightPx == 0u) return;
+	const uint32_t foregroundAlpha = (color >> 24) & 0xffu;
+	const uint32_t foregroundRed = (color >> 16) & 0xffu;
+	const uint32_t foregroundGreen = (color >> 8) & 0xffu;
+	const uint32_t foregroundBlue = color & 0xffu;
+	for (uint32_t row = 0; row < metrics.heightPx; ++row) {
+		const int64_t destinationY = originY + row;
+		if (destinationY < 0 || destinationY >= height) continue;
+		for (uint32_t column = 0; column < metrics.widthPx; ++column) {
+			const int64_t destinationX = originX + column;
+			if (destinationX < 0 || destinationX >= width) continue;
+			const uint32_t coverageValue = coverage[
+				static_cast<size_t>(row) * metrics.widthPx + column];
+			if (coverageValue == 0u || foregroundAlpha == 0u) continue;
+			const uint32_t alpha = (coverageValue * foregroundAlpha + 127u) / 255u;
+			if (alpha == 0u) continue;
+			const size_t pixelIndex = static_cast<size_t>(destinationY) * pitchWords +
+				static_cast<size_t>(destinationX);
+			const uint32_t destination = pixels[pixelIndex];
+			const uint32_t red = blendChannel(foregroundRed,
+				(destination >> 16) & 0xffu, alpha);
+			const uint32_t green = blendChannel(foregroundGreen,
+				(destination >> 8) & 0xffu, alpha);
+			const uint32_t blue = blendChannel(foregroundBlue, destination & 0xffu, alpha);
+			// The selected GXApp surface is XRGB8888; its visible pixels are
+			// opaque and the compositor forces alpha to 0xff on presentation.
+			pixels[pixelIndex] = 0xff000000u | (red << 16) | (green << 8) | blue;
+		}
+	}
+}
+
 FontStatus measureTextInternal(FontHandle handle, FontSize size, const char* utf8,
 	size_t byteLength, TextMeasureResult* outResult)
 {
@@ -320,6 +445,7 @@ FontStatus FontManagerInitialize()
 {
 	ManagerGuard guard;
 	if (s_initialized) return FontStatus::Ok;
+	internal::fontGlyphCacheResetLocked();
 	s_initialized = 1;
 	FontHandle builtin = {kInvalidSlot, 0, 0};
 	const FontStatus status = registerFontInternal(FontBuiltinBitmapDefinition(), &builtin);
@@ -337,6 +463,7 @@ void FontManagerShutdown()
 {
 	ManagerGuard guard;
 	if (!s_initialized) return;
+	internal::fontGlyphCacheResetLocked();
 	for (uint16_t i = 0; i < kFontRegistryCapacity; ++i) {
 		if (s_slots[i].occupied) {
 			if (s_slots[i].definition.onUnregister)
@@ -386,6 +513,7 @@ FontStatus FontManagerUnloadFont(FontHandle handle)
 		return FontStatus::CannotUnloadBuiltinFont;
 	if (handle.slot == s_defaultHandle.slot && handle.generation == s_defaultHandle.generation)
 		return FontStatus::FontInUse;
+	internal::fontGlyphCacheInvalidateFontLocked(handle.slot, handle.generation);
 	if (slot->definition.onUnregister)
 		slot->definition.onUnregister(slot->definition.context);
 	slot->occupied = 0;
@@ -506,64 +634,8 @@ FontStatus FontRasterizeGlyph(FontHandle handle, FontSize size,
 	FontSlot* slot = nullptr;
 	const FontStatus handleStatus = validateHandle(handle, &slot);
 	if (handleStatus != FontStatus::Ok) return handleStatus;
-	const FontBackend* backend = slot->definition.backend;
-	const uint32_t capabilities = backend->capabilities;
-	if ((capabilities & FontCapabilityRasterization) != 0u) {
-		GlyphMetrics metrics = {};
-		FontStatus status = backend->rasterizeGlyph(slot->definition.context, size,
-			codePoint, coverage, coverageCapacity, rowStrideBytes, &metrics);
-		if (status == FontStatus::UnsupportedCodePoint && codePoint != kReplacementCodePoint) {
-			metrics = {};
-			status = backend->rasterizeGlyph(slot->definition.context, size,
-				kReplacementCodePoint, coverage, coverageCapacity, rowStrideBytes, &metrics);
-			if (status == FontStatus::Ok) {
-				metrics.codePoint = codePoint;
-				*outMetrics = metrics;
-				return FontStatus::FallbackUsed;
-			}
-		}
-		if (status == FontStatus::Ok || status == FontStatus::BufferTooSmall)
-			*outMetrics = metrics;
-		return status;
-	}
-	if ((capabilities & FontCapabilityBitmapData) == 0u)
-		return (capabilities & FontCapabilityMetadataOnly) != 0u ?
-			FontStatus::MetadataOnly : FontStatus::UnsupportedGlyphFeature;
-	FontMetrics faceMetrics = {};
-	const FontStatus faceStatus = getMetricsInternal(handle, size, &faceMetrics);
-	if (faceStatus != FontStatus::Ok) return faceStatus;
-	FontGlyphView glyph = {};
-	const FontStatus glyphStatus = lookupGlyph(slot, size, codePoint, &glyph, nullptr);
-	if (glyphStatus != FontStatus::Ok && glyphStatus != FontStatus::FallbackUsed)
-		return glyphStatus;
-	const GlyphMetrics& metrics = glyph.metrics;
-	if (metrics.widthPx > 128u || metrics.heightPx > 128u ||
-		metrics.widthPx * metrics.heightPx > 16384u)
-		return FontStatus::RasterLimitExceeded;
-	if (metrics.widthPx == 0u || metrics.heightPx == 0u) {
-		*outMetrics = metrics;
-		return glyphStatus;
-	}
-	if (metrics.heightPx > 8u) return FontStatus::BackendFailure;
-	if (glyph.bitmapFormat != FontBitmapFormat::ColumnLsbTop || !glyph.bitmap ||
-		glyph.bitmapByteLength < metrics.widthPx) return FontStatus::BackendFailure;
-	if (rowStrideBytes < metrics.widthPx || rowStrideBytes > 4096u)
-		return FontStatus::InvalidArgument;
-	const size_t lastRow = static_cast<size_t>(metrics.heightPx - 1u) * rowStrideBytes;
-	if (lastRow > static_cast<size_t>(-1) - metrics.widthPx)
-		return FontStatus::ArithmeticOverflow;
-	const size_t required = lastRow + metrics.widthPx;
-	if (!coverage || coverageCapacity < required) {
-		*outMetrics = metrics;
-		return FontStatus::BufferTooSmall;
-	}
-	for (uint32_t y = 0; y < metrics.heightPx; ++y) {
-		for (uint32_t x = 0; x < metrics.widthPx; ++x)
-			coverage[static_cast<size_t>(y) * rowStrideBytes + x] =
-				(glyph.bitmap[x] & (1u << y)) ? 255u : 0u;
-	}
-	*outMetrics = metrics;
-	return glyphStatus;
+	return rasterizeGlyphForSlot(slot, size, codePoint, coverage,
+		coverageCapacity, rowStrideBytes, outMetrics);
 }
 
 FontStatus FontMeasureText(FontHandle handle, FontSize size, const char* utf8,
@@ -645,6 +717,149 @@ FontStatus FontDrawTextToBuffer(FontHandle handle, FontSize size,
 	return measureStatus;
 }
 
+FontStatus FontDrawGrayscaleTextToBuffer(FontHandle handle, FontSize size,
+	uint32_t* pixels, size_t destinationBytes, uint32_t pitchBytes,
+	uint32_t bufferWidth, uint32_t bufferHeight, int32_t x, int32_t baselineY,
+	const char* utf8, size_t byteLength, uint32_t color,
+	TextMeasureResult* outMeasure)
+{
+	if (outMeasure) *outMeasure = {};
+	if (!pixels || bufferWidth == 0u || bufferHeight == 0u ||
+		bufferWidth > 4096u || bufferHeight > 4096u ||
+		(!utf8 && byteLength != 0u)) return FontStatus::InvalidArgument;
+	if (byteLength > kFontMaxTextBytes) return FontStatus::InputTooLong;
+	const uint64_t minimumRowBytes = static_cast<uint64_t>(bufferWidth) * 4u;
+	if (minimumRowBytes > 0xffffffffu || pitchBytes < minimumRowBytes ||
+		(pitchBytes & 3u) != 0u) return FontStatus::InvalidArgument;
+	const uint64_t requiredBytes = static_cast<uint64_t>(bufferHeight - 1u) * pitchBytes +
+		minimumRowBytes;
+	if (requiredBytes > static_cast<uint64_t>(static_cast<size_t>(-1)))
+		return FontStatus::ArithmeticOverflow;
+	if (destinationBytes < static_cast<size_t>(requiredBytes))
+		return FontStatus::BufferTooSmall;
+
+	ManagerGuard guard;
+	TextMeasureResult measured = {};
+	const FontStatus measureStatus = measureTextInternal(handle, size, utf8,
+		byteLength, &measured);
+	if (measureStatus != FontStatus::Ok && measureStatus != FontStatus::FallbackUsed) {
+		if (outMeasure) *outMeasure = measured;
+		return measureStatus;
+	}
+	FontMetrics faceMetrics = {};
+	FontStatus status = getMetricsInternal(handle, size, &faceMetrics);
+	if (status != FontStatus::Ok) return status;
+	FontSlot* slot = nullptr;
+	status = validateHandle(handle, &slot);
+	if (status != FontStatus::Ok) return status;
+	if (byteLength == 0u) {
+		if (outMeasure) *outMeasure = measured;
+		return measureStatus;
+	}
+
+	const uint32_t pitchWords = pitchBytes / sizeof(uint32_t);
+	int64_t penX = x;
+	int64_t penY = baselineY;
+	bool previousWasCr = false;
+	bool anyFallback = measureStatus == FontStatus::FallbackUsed;
+	size_t offset = 0u;
+	while (offset < byteLength) {
+		UnicodeCodePoint codePoint = 0u;
+		status = decodeUtf8(utf8, byteLength, &offset, &codePoint);
+		if (status != FontStatus::Ok) return status; // measurement preflight validated UTF-8.
+		if (codePoint == '\r') {
+			penX = x;
+			penY += faceMetrics.lineHeightPx;
+			previousWasCr = true;
+			continue;
+		}
+		if (codePoint == '\n') {
+			if (!previousWasCr) penY += faceMetrics.lineHeightPx;
+			penX = x;
+			previousWasCr = false;
+			continue;
+		}
+		previousWasCr = false;
+
+		FontGlyphView glyph = {};
+		bool lookupFallback = false;
+		const FontStatus lookupStatus = lookupGlyph(slot, size, codePoint,
+			&glyph, &lookupFallback);
+		if (lookupStatus != FontStatus::Ok && lookupStatus != FontStatus::FallbackUsed)
+			return lookupStatus;
+
+		internal::FontGlyphCacheKey key = {};
+		key.fontId = slot->definition.id;
+		key.fontSlot = handle.slot;
+		key.fontGeneration = handle.generation;
+		key.glyphId = glyph.metrics.glyphId;
+		key.pixelSize = size.pixelHeight;
+		key.rasterConfig = internal::kFontGlyphRasterConfigGray8UnhintedV1;
+		CacheRasterRequest request = {slot, size, codePoint};
+		GlyphMetrics rasterMetrics = {};
+		const uint8_t* coverage = nullptr;
+		bool cacheHit = false;
+		FontStatus rasterStatus = internal::fontGlyphCacheGetOrRasterize(key,
+			glyph.metrics, &rasterizeCacheMiss, &request, &rasterMetrics,
+			&coverage, &cacheHit);
+		(void)cacheHit;
+
+		bool usedRasterFallback = false;
+		if (rasterStatus != FontStatus::Ok && rasterStatus != FontStatus::FallbackUsed) {
+			// A failed scalable raster uses the immutable built-in question-mark
+			// glyph for this character. The text's original advance is retained.
+			if (handle.slot == s_builtinHandle.slot &&
+				handle.generation == s_builtinHandle.generation) return rasterStatus;
+			FontSlot* bitmapSlot = nullptr;
+			const FontStatus bitmapHandleStatus = validateHandle(s_builtinHandle, &bitmapSlot);
+			if (bitmapHandleStatus != FontStatus::Ok) return rasterStatus;
+			FontGlyphView bitmapGlyph = {};
+			const FontStatus bitmapLookupStatus = lookupGlyph(bitmapSlot,
+				{kBitmapFontPixelHeight}, kReplacementCodePoint, &bitmapGlyph, nullptr);
+			if (bitmapLookupStatus != FontStatus::Ok) return rasterStatus;
+			internal::FontGlyphCacheKey bitmapKey = {};
+			bitmapKey.fontId = bitmapSlot->definition.id;
+			bitmapKey.fontSlot = s_builtinHandle.slot;
+			bitmapKey.fontGeneration = s_builtinHandle.generation;
+			bitmapKey.glyphId = bitmapGlyph.metrics.glyphId;
+			bitmapKey.pixelSize = kBitmapFontPixelHeight;
+			bitmapKey.rasterConfig = internal::kFontGlyphRasterConfigGray8UnhintedV1;
+			CacheRasterRequest bitmapRequest = {bitmapSlot,
+				{kBitmapFontPixelHeight}, kReplacementCodePoint};
+			GlyphMetrics bitmapRasterMetrics = {};
+			bool bitmapCacheHit = false;
+			const FontStatus bitmapRasterStatus = internal::fontGlyphCacheGetOrRasterize(
+				bitmapKey, bitmapGlyph.metrics, &rasterizeCacheMiss, &bitmapRequest,
+				&bitmapRasterMetrics, &coverage, &bitmapCacheHit);
+			(void)bitmapCacheHit;
+			if (bitmapRasterStatus != FontStatus::Ok || !coverage) return rasterStatus;
+			rasterMetrics = bitmapRasterMetrics;
+			rasterMetrics.yBearingPx = static_cast<int32_t>(kBitmapFontPixelHeight);
+			rasterMetrics.advancePx = glyph.metrics.advancePx;
+			usedRasterFallback = true;
+		}
+
+		GlyphMetrics layoutMetrics = rasterMetrics;
+		layoutMetrics.codePoint = codePoint;
+		if ((slot->definition.backend->capabilities & FontCapabilityBitmapData) != 0u) {
+			// FONT2 bitmap metrics use top-origin placement; convert them to this
+			// API's shared baseline convention without changing the old renderer.
+			layoutMetrics.yBearingPx = static_cast<int32_t>(faceMetrics.baselinePx);
+		}
+		if (usedRasterFallback) anyFallback = true;
+		if (lookupFallback || lookupStatus == FontStatus::FallbackUsed ||
+			rasterStatus == FontStatus::FallbackUsed) anyFallback = true;
+
+		const int64_t glyphX = penX + layoutMetrics.xBearingPx;
+		const int64_t glyphY = penY - layoutMetrics.yBearingPx;
+		compositeCoverage(pixels, pitchWords, bufferWidth, bufferHeight,
+			glyphX, glyphY, layoutMetrics, coverage, color);
+		penX += glyph.metrics.advancePx;
+	}
+	if (outMeasure) *outMeasure = measured;
+	return anyFallback ? FontStatus::FallbackUsed : FontStatus::Ok;
+}
+
 FontStatus FontDrawCStringToBuffer(FontHandle handle, FontSize size,
 	uint32_t* pixels, uint32_t pitchBytes, uint32_t bufferWidth, uint32_t bufferHeight,
 	int32_t x, int32_t y, const char* utf8, uint32_t color,
@@ -656,6 +871,21 @@ FontStatus FontDrawCStringToBuffer(FontHandle handle, FontSize size,
 	if (lengthStatus != FontStatus::Ok) return lengthStatus;
 	return FontDrawTextToBuffer(handle, size, pixels, pitchBytes, bufferWidth,
 		bufferHeight, x, y, utf8, length, color, outMeasure);
+}
+
+FontStatus FontGlyphCacheGetStatistics(FontGlyphCacheStatistics* outStatistics)
+{
+	if (!outStatistics) return FontStatus::InvalidArgument;
+	*outStatistics = {};
+	ManagerGuard guard;
+	internal::fontGlyphCacheGetStatisticsLocked(outStatistics);
+	return FontStatus::Ok;
+}
+
+void FontGlyphCacheReset()
+{
+	ManagerGuard guard;
+	internal::fontGlyphCacheResetLocked();
 }
 
 } // namespace gui

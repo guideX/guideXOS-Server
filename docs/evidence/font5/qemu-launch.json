@@ -1,0 +1,16 @@
+{
+  "startedUtc": "2026-10-17T01:07:09.4771757Z",
+  "completedUtc": "2026-10-17T01:07:34.4300223Z",
+  "proofResult": "PASS",
+  "machine": "pc,accel=whpx,usb=off",
+  "memory": "1024M",
+  "network": "disabled",
+  "firmwareSha256": "2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792",
+  "kernelSha256": "117B185E7C476509FACDC7019BF0E996511B79A12435DE18B05C6B529AEB00F3",
+  "bootloaderSha256": "598552E5A5C154365667737D81336F54325B35D3206A235C3594DDB0522CF5D0",
+  "foreignQemuProcessCountObserved": 0,
+  "narrowAdvancePx": 8,
+  "wideAdvancePx": 28,
+  "warmCacheHits": 159,
+  "screenshotSha256": "4CCB9ECC3BDAE954D73324ADA79592A4CBB724F6CF42397D0A53844C385CE978"
+}

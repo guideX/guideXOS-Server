@@ -2,7 +2,8 @@ param(
     [switch]$Clean,
     [switch]$Verbose,
     [switch]$SkipBuild,
-    [switch]$SkipReadElf
+    [switch]$SkipReadElf,
+    [string]$SampleName
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,8 +54,29 @@ $Samples = @(
         Manifest = 'app.json'
         StagedAppId = 'com.guidexos.missilecommand'
         Resources = @('resources/DD.ini', 'resources/city.gximg', 'resources/audio/alarm.wav', 'resources/audio/empty.wav', 'resources/audio/explode.wav', 'resources/audio/split.wav', 'resources/audio/ohno.wav', 'resources/audio/swoosh.wav')
+    },
+    [ordered]@{
+        Name = 'Font5GlyphCacheDemo'
+        SourceDir = Join-Path $SdkRoot 'samples/font5-glyph-cache'
+        Source = 'main.cpp'
+        OutputDir = Join-Path $AppsRoot 'Font5GlyphCacheDemo'
+        ElfRelativePath = 'bin/amd64/font5demo.elf'
+        Manifest = 'app.json'
+        StagedAppId = 'com.guidexos.font5demo'
+        Resources = @()
+        ResourceCopies = @(
+            @{
+                SourcePath = Join-Path $RepoRoot 'assets/Fonts/roboto/Roboto-Regular.ttf'
+                Destination = 'resources/Roboto-Regular.ttf'
+            }
+        )
     }
 )
+
+if (-not [string]::IsNullOrWhiteSpace($SampleName)) {
+    $Samples = @($Samples | Where-Object { $_.Name -eq $SampleName })
+    if ($Samples.Count -eq 0) { throw "Unknown SDK sample: $SampleName" }
+}
 
 function Write-Detail($Message) {
     if ($script:VerboseOutput) { Write-Host $Message }
@@ -116,6 +138,9 @@ function Test-RequiredFiles($Sample) {
         Join-Path $Sample.OutputDir $Sample.ElfRelativePath
     )
     foreach ($resource in $Sample.Resources) { $required += Join-Path $Sample.OutputDir $resource }
+    foreach ($resourceCopy in $Sample.ResourceCopies) {
+        $required += Join-Path $Sample.OutputDir $resourceCopy.Destination
+    }
 
     foreach ($path in $required) {
         if (-not (Test-Path $path)) { throw "Required staged file missing: $path" }
@@ -182,7 +207,11 @@ foreach ($sample in $Samples) {
         foreach ($resource in $sample.Resources) {
             Copy-RequiredFile (Join-Path $sample.SourceDir $resource) (Join-Path $sample.OutputDir $resource)
         }
-        if ($sample.Resources.Count -gt 0) { $resourceStatus = ($sample.Resources -join ', ') }
+        foreach ($resourceCopy in $sample.ResourceCopies) {
+            Copy-RequiredFile $resourceCopy.SourcePath (Join-Path $sample.OutputDir $resourceCopy.Destination)
+        }
+        $resourceNames = @($sample.Resources) + @($sample.ResourceCopies | ForEach-Object { $_.Destination })
+        if ($resourceNames.Count -gt 0) { $resourceStatus = ($resourceNames -join ', ') }
 
         if (-not $SkipBuild) {
             $sourcePath = Join-Path $sample.SourceDir $sample.Source

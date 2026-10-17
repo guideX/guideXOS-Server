@@ -15,6 +15,10 @@ struct FontTrueTypeSourceView {
 };
 
 extern const FontBackend kFontTrueTypeBackend;
+namespace internal {
+uint8_t* fontTrueTypeRasterScratchCoverage();
+size_t fontTrueTypeRasterScratchCoverageCapacity();
+}
 
 } // namespace gui
 } // namespace gxos

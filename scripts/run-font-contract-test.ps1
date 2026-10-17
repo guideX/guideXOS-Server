@@ -23,7 +23,9 @@ $arguments = @(
 	"-I.",
 	"tests/font_contract_test.cpp",
 	"kernel/core/font_contract.cpp",
+	"kernel/core/font_glyph_cache.cpp",
 	"kernel/core/font_bitmap_backend.cpp",
+	"kernel/core/font_truetype_raster.cpp",
 	"-o", $output
 )
 

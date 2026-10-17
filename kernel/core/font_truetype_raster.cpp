@@ -67,6 +67,9 @@ struct RasterScratch {
 	uint16_t contourEnds[kMaxOutlineContours];
 	RasterEdge edges[kMaxFlattenedEdges];
 	ScanIntersection intersections[kMaxFlattenedEdges];
+	// FONT5 shares this single staging area for a cache miss. It is in the same
+	// serialized scratch owner as the outline decoder and rasterizer.
+	uint8_t coverage[kFontTrueTypeMaxBitmapPixels];
 	uint32_t pointCount;
 	uint32_t contourCount;
 	uint32_t edgeCount;
@@ -1264,6 +1267,20 @@ FontStatus backendRasterize(const void* context, FontSize size,
 }
 
 } // namespace
+
+namespace internal {
+
+uint8_t* fontTrueTypeRasterScratchCoverage()
+{
+	return s_scratch.coverage;
+}
+
+size_t fontTrueTypeRasterScratchCoverageCapacity()
+{
+	return sizeof(s_scratch.coverage);
+}
+
+} // namespace internal
 
 const FontBackend kFontTrueTypeBackend = {
 	FontCapabilityGlyphLookup | FontCapabilityMeasurement | FontCapabilityUtf8Input |
