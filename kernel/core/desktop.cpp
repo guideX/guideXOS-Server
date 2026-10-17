@@ -6823,7 +6823,14 @@ static void draw_taskbar_buttons(uint32_t startX, uint32_t tbY, uint32_t maxX)
         framebuffer::fill_rect(btnX, btnY, btnW, btnH, bgColor);
         if (isActive) framebuffer::fill_rect(btnX + 2, btnY + btnH - 3, btnW - 4, 2, rgb(100, 160, 240));
         framebuffer::fill_rect(btnX + (btnW > 14 ? (btnW - 14) / 2 : 0), btnY + 4, 14, 14, rgb(120, 180, 80));
-        draw_text_centered(btnX, btnY + 18, btnW, btnH > 18 ? btnH - 18 : btnH, "Term", rgb(230, 230, 240), 1);
+        const uint32_t textY = btnY + 18u;
+        const uint32_t textHeight = btnH > 18u ? btnH - 18u : btnH;
+        if (!draw_shell_text_in_rect(btnX + (btnW > 4u ? 2u : 0u), textY,
+                btnW > 4u ? btnW - 4u : btnW, textHeight, "Term",
+                rgb(230, 230, 240), DesktopSystemTextRole::TaskbarLabel,
+                DesktopTextAlignment::Center))
+            draw_text_centered(btnX, textY, btnW, textHeight, "Term",
+                rgb(230, 230, 240), 1);
         return;
     }
 
@@ -6900,7 +6907,14 @@ static void draw_taskbar_buttons(uint32_t startX, uint32_t tbY, uint32_t maxX)
             framebuffer::fill_rect(iconX, iconY2, iconSz, iconSz, rgb(120, 180, 80));
             
             // Title text
-            draw_text(btnX + 22, btnY + (kTaskbarBtnH - kGlyphH) / 2, title, rgb(230, 230, 240), 1);
+            const uint32_t textX = btnX + 22u;
+            const uint32_t textWidth = btnW > 26u ? btnW - 26u : 1u;
+            if (!draw_shell_text_in_rect(textX, btnY + 1u, textWidth,
+                    kTaskbarBtnH - 2u, title, rgb(230, 230, 240),
+                    DesktopSystemTextRole::TaskbarLabel,
+                    DesktopTextAlignment::Left))
+                draw_text(textX, btnY + (kTaskbarBtnH - kGlyphH) / 2,
+                    title, rgb(230, 230, 240), 1);
         }
     }
 }
@@ -7111,7 +7125,13 @@ static void draw_start_menu()
         // App name
         uint32_t textColor = (itemIndex == s_startMenuSelection || i == s_clickedMenuLeft || i == s_hoverMenuLeft)
             ? rgb(255, 255, 255) : rgb(210, 210, 225);
-        draw_text(iconX + iconSize + 6, start_menu_text_y(itemY), appName, textColor, 1);
+        const uint32_t labelX = iconX + iconSize + 6u;
+        const uint32_t labelRight = leftX + leftColW - 20u;
+        if (labelRight > labelX) {
+            draw_shell_text_in_rect(labelX, itemY, labelRight - labelX,
+                kStartMenuRowH, appName, textColor,
+                DesktopSystemTextRole::StartMenuLabel, DesktopTextAlignment::Left);
+        }
     }
     
     // Scroll indicators if needed
@@ -7159,7 +7179,13 @@ static void draw_start_menu()
         // Label
         uint32_t rTextColor = (i == s_clickedMenuRight || i == s_hoverMenuRight)
             ? rgb(255, 255, 255) : rgb(200, 200, 220);
-        draw_text(iconX + iconSize + 6, start_menu_text_y(itemY), s_startMenuRight[i].label, rTextColor, 1);
+        const uint32_t labelX = iconX + iconSize + 6u;
+        const uint32_t labelRight = rightX + kStartMenuRightColW - 4u;
+        if (labelRight > labelX) {
+            draw_shell_text_in_rect(labelX, itemY, labelRight - labelX,
+                kStartMenuRowH, s_startMenuRight[i].label, rTextColor,
+                DesktopSystemTextRole::StartMenuLabel, DesktopTextAlignment::Left);
+        }
     }
 
     // === Footer: "All Programs" toggle + Power buttons ===
@@ -7179,7 +7205,9 @@ static void draw_start_menu()
     framebuffer::fill_rect(allBtnX, allBtnY, allBtnW, allBtnH, allBtnBg);
     draw_rect(allBtnX, allBtnY, allBtnW, allBtnH, allBtnBorder);
     const char* allBtnText = s_startMenuAllProgs ? "Recent Programs" : "All Programs";
-    draw_text_centered(allBtnX, allBtnY, allBtnW, allBtnH, allBtnText, rgb(190, 195, 210), 1);
+    draw_shell_text_in_rect(allBtnX + 2u, allBtnY, allBtnW - 4u, allBtnH,
+        allBtnText, rgb(190, 195, 210), DesktopSystemTextRole::StartMenuLabel,
+        DesktopTextAlignment::Center);
 
     // Power buttons (right side of footer)
     uint32_t shutW = 80;
@@ -7188,21 +7216,27 @@ static void draw_start_menu()
     uint32_t shutY = footerY + (footerH - shutH) / 2;
     framebuffer::fill_rect(shutX, shutY, shutW, shutH, rgb(140, 50, 50));
     draw_rect(shutX, shutY, shutW, shutH, rgb(180, 80, 80));
-    draw_text_centered(shutX, shutY, shutW, shutH, "Shut Down", rgb(240, 220, 220), 1);
+    draw_shell_text_in_rect(shutX + 2u, shutY, shutW - 4u, shutH,
+        "Shut Down", rgb(240, 220, 220), DesktopSystemTextRole::StartMenuLabel,
+        DesktopTextAlignment::Center);
 
     // Restart button
     uint32_t restartW = 62;
     uint32_t restartX = shutX - restartW - 6;
     framebuffer::fill_rect(restartX, shutY, restartW, shutH, rgb(50, 60, 80));
     draw_rect(restartX, shutY, restartW, shutH, rgb(80, 100, 130));
-    draw_text_centered(restartX, shutY, restartW, shutH, "Restart", rgb(200, 200, 220), 1);
+    draw_shell_text_in_rect(restartX + 2u, shutY, restartW - 4u, shutH,
+        "Restart", rgb(200, 200, 220), DesktopSystemTextRole::StartMenuLabel,
+        DesktopTextAlignment::Center);
 
     // Sleep button
     uint32_t sleepW = 50;
     uint32_t sleepX = restartX - sleepW - 6;
     framebuffer::fill_rect(sleepX, shutY, sleepW, shutH, rgb(50, 60, 80));
     draw_rect(sleepX, shutY, sleepW, shutH, rgb(80, 100, 130));
-    draw_text_centered(sleepX, shutY, sleepW, shutH, "Sleep", rgb(200, 200, 220), 1);
+    draw_shell_text_in_rect(sleepX + 2u, shutY, sleepW - 4u, shutH,
+        "Sleep", rgb(200, 200, 220), DesktopSystemTextRole::StartMenuLabel,
+        DesktopTextAlignment::Center);
 }
 
 // ============================================================
@@ -9124,9 +9158,21 @@ static void draw_shell_window()
     
     // ===== Window title text (centered, matching Legacy) =====
     const char* title = "Terminal";
-    int titleW = measure_text(title);
-    uint32_t titleX = g.x + (g.w - titleW) / 2;
-    draw_text(titleX, g.y + 7, title, s_shellActive ? rgb(240, 240, 240) : rgb(150, 150, 160), 1);
+    const uint32_t titleLeft = g.x + 8u;
+    const uint32_t titleReserve = 16u * 3u + 6u * 4u + 8u;
+    const uint32_t titleWidth = g.w > titleReserve + 8u
+        ? g.w - titleReserve - 8u : 1u;
+    if (!draw_shell_text_in_rect(titleLeft, g.y + 1u, titleWidth,
+            g.titlebarH > 2u ? g.titlebarH - 2u : g.titlebarH, title,
+            s_shellActive ? rgb(240, 240, 240) : rgb(150, 150, 160),
+            DesktopSystemTextRole::WindowTitle, DesktopTextAlignment::Center)) {
+        const int titleW = measure_text(title);
+        const uint32_t titleX = titleLeft +
+            (titleWidth > static_cast<uint32_t>(titleW)
+                ? (titleWidth - static_cast<uint32_t>(titleW)) / 2u : 0u);
+        draw_text(titleX, g.y + 7u, title,
+            s_shellActive ? rgb(240, 240, 240) : rgb(150, 150, 160), 1);
+    }
     
     // ===== Title bar buttons (matching guideXOS.Legacy style) =====
     // Button styling constants
@@ -9197,6 +9243,8 @@ static void draw_shell_window()
 void draw()
 {
     if (!s_initialized || !framebuffer::is_available()) return;
+
+    desktop_shell_typography_record_frame();
 
     forget_cursor_save();
 

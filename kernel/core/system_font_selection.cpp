@@ -1506,12 +1506,13 @@ bool systemFontSelectionGetRenderState(FontHandle* outHandle,
 {
 	if (!outHandle || !outSize) return false;
 	SelectionGuard guard;
-	if (!s_initialized || s_activeRecord == kInvalidRecord ||
+	if (!s_initialized) return false;
+	if (outSelectionGeneration) *outSelectionGeneration = s_selectionGeneration;
+	if (s_activeRecord == kInvalidRecord ||
 		s_activeRecord >= kSystemFontMaxAvailableFonts || !s_records[s_activeRecord].occupied)
 		return false;
 	*outHandle = s_records[s_activeRecord].handle;
 	outSize->pixelHeight = s_activeSize;
-	if (outSelectionGeneration) *outSelectionGeneration = s_selectionGeneration;
 	return true;
 }
 

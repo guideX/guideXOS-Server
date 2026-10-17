@@ -8,6 +8,7 @@
 #include "include/kernel/kernel_ipc.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/image_adapter.h"
+#include "include/kernel/desktop_font.h"
 #include "include/kernel/serial_debug.h"
 
 namespace kernel {
@@ -929,11 +930,23 @@ void KernelCompositor::drawTitlebar(app::KernelWindow* window) {
     uint32_t titlebarColor = focused ? rgb(43, 80, 111) : rgb(17, 17, 17);
     fillRect(x + 1, y + 1, w - 2, TITLEBAR_HEIGHT - 1, titlebarColor);
     
-    // Title text
-    int titleW = measureText(window->title);
-    uint32_t titleX = x + (w - titleW) / 2;
+    // Keep the title in the left-side caption area so variable-width text
+    // cannot cover the three fixed window-control hit targets.
+    const uint32_t titleLeft = x + 8u;
+    const uint32_t controlsAndGap = BUTTON_GAP * 4u + BUTTON_SIZE * 3u + 8u;
+    const uint32_t titleWidth = w > controlsAndGap + 8u
+        ? w - controlsAndGap - 8u : 1u;
     uint32_t titleColor = focused ? rgb(240, 240, 240) : rgb(150, 150, 160);
-    drawText(titleX, y + 7, window->title, titleColor);
+    if (!desktop::draw_shell_text_in_rect(titleLeft, y + 1u, titleWidth,
+            TITLEBAR_HEIGHT - 2u, window->title, titleColor,
+            desktop::DesktopSystemTextRole::WindowTitle,
+            desktop::DesktopTextAlignment::Center)) {
+        const int titleW = measureText(window->title);
+        const uint32_t titleX = titleLeft +
+            (titleWidth > static_cast<uint32_t>(titleW)
+                ? (titleWidth - static_cast<uint32_t>(titleW)) / 2u : 0u);
+        drawText(titleX, y + 7u, window->title, titleColor);
+    }
     
     // Buttons
     uint32_t btnY = y + 4;
@@ -1200,8 +1213,13 @@ void TaskbarManager::updateButtons() {
         btn.active = (win->flags & app::WF_FOCUSED) != 0;
         btn.x = (int)btnX;
         btn.y = (int)btnY;
-        btn.w = s_vertical ? (int)(s_taskbarW > 8 ? s_taskbarW - 8 : s_taskbarW) : measureText(btn.title) + 24;
+        // Keep the existing bitmap-derived button width so font selection
+        // never moves or resizes a taskbar hit target.
+        btn.w = s_vertical ? (int)(s_taskbarW > 8 ? s_taskbarW - 8 : s_taskbarW)
+                           : measureText(btn.title) + 24;
         btn.h = (int)btnH;
+
+        if (btn.w <= 0) break;
 
         if ((!s_vertical && btnX + (uint32_t)btn.w > maxX) ||
             (s_vertical && btnY + (uint32_t)btn.h > maxY)) {
@@ -1229,12 +1247,24 @@ void TaskbarManager::drawButtons() {
         KernelCompositor::fillRect(btn.x, btn.y, btn.w, btn.h, bgColor);
         
         if (btn.active) {
-            KernelCompositor::fillRect(btn.x + 2, btn.y + btn.h - 3, btn.w - 4, 2,
-                                       KernelCompositor::rgb(100, 160, 240));
+            if (btn.w > 4) {
+                KernelCompositor::fillRect(btn.x + 2, btn.y + btn.h - 3, btn.w - 4, 2,
+                                           KernelCompositor::rgb(100, 160, 240));
+            }
         }
         
-        KernelCompositor::drawTextCentered(btn.x, btn.y, btn.w, btn.h, btn.title,
-                                           KernelCompositor::rgb(230, 230, 240));
+        const uint32_t textHeight = btn.h > 4 ? static_cast<uint32_t>(btn.h - 4) :
+            static_cast<uint32_t>(btn.h);
+        const int textInset = btn.w > 8 ? 4 : 0;
+        const int textWidth = btn.w > textInset * 2 ? btn.w - textInset * 2 : btn.w;
+        if (!desktop::draw_shell_text_in_rect(static_cast<uint32_t>(btn.x + textInset),
+                static_cast<uint32_t>(btn.y), static_cast<uint32_t>(textWidth),
+                textHeight, btn.title, KernelCompositor::rgb(230, 230, 240),
+                desktop::DesktopSystemTextRole::TaskbarLabel,
+                desktop::DesktopTextAlignment::Center)) {
+            KernelCompositor::drawTextCentered(btn.x, btn.y, btn.w, btn.h, btn.title,
+                                               KernelCompositor::rgb(230, 230, 240));
+        }
     }
 }
 

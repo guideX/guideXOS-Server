@@ -169,5 +169,83 @@ void draw_text_centered(uint32_t rx, uint32_t ry, uint32_t rw, uint32_t rh,
     draw_text(tx, ty, str, color, scale);
 }
 
+bool draw_bitmap_text_in_rect(uint32_t x, uint32_t y, uint32_t boxWidth,
+                              uint32_t boxHeight, const char* str, uint32_t color,
+                              DesktopTextAlignment alignment)
+{
+    if (!str || boxWidth == 0u || boxHeight == 0u || !framebuffer::is_available() ||
+        framebuffer::get_bpp() != 32u) return false;
+    uint32_t* target = framebuffer::is_double_buffered()
+        ? framebuffer::get_back_buffer() : framebuffer::get_buffer();
+    const uint32_t width = framebuffer::get_width();
+    const uint32_t height = framebuffer::get_height();
+    const uint64_t tightPitch = static_cast<uint64_t>(width) * sizeof(uint32_t);
+    const uint32_t pitch = framebuffer::is_double_buffered() && tightPitch <= 0xffffffffu
+        ? static_cast<uint32_t>(tightPitch) : framebuffer::get_pitch();
+    if (!target || width == 0u || width > 4096u || height == 0u || height > 4096u ||
+        tightPitch > 0xffffffffu || pitch < tightPitch || (pitch & 3u) != 0u ||
+        static_cast<uint64_t>(x) + boxWidth > width ||
+        static_cast<uint64_t>(y) + boxHeight > height || pitch > 0x7fffffffu) return false;
+
+    const gxos::gui::BitmapFontFace* face =
+        gxos::gui::SystemFont::GetFace(gxos::gui::FontRole::Default);
+    if (!face) return false;
+    const int lineHeight = gxos::gui::SystemFont::MeasureLineHeight(face);
+    if (lineHeight <= 0 || static_cast<uint32_t>(lineHeight) > boxHeight) return false;
+
+    static const size_t kBitmapFitInputLimit = 4096u;
+    static const size_t kBitmapFitOutputCapacity = 256u;
+    char fitted[kBitmapFitOutputCapacity] = {};
+    size_t sourceLength = 0u;
+    while (sourceLength < kBitmapFitInputLimit && str[sourceLength]) ++sourceLength;
+    const bool sourceBounded = sourceLength == kBitmapFitInputLimit;
+    const int fullWidth = gxos::gui::SystemFont::MeasureWidth(face, str,
+        static_cast<int>(sourceLength));
+    const bool needsTruncation = fullWidth < 0 || static_cast<uint64_t>(fullWidth) > boxWidth ||
+        sourceLength > kBitmapFitOutputCapacity - 4u || sourceBounded;
+    const int ellipsisWidth = gxos::gui::SystemFont::MeasureWidth(face, "...", 3);
+    uint32_t widthLimit = boxWidth;
+    if (needsTruncation && ellipsisWidth > 0 && static_cast<uint32_t>(ellipsisWidth) <= boxWidth)
+        widthLimit = boxWidth - static_cast<uint32_t>(ellipsisWidth);
+
+    size_t prefixBytes = 0u;
+    uint32_t prefixWidth = 0u;
+    const size_t prefixLimit = sourceLength < kBitmapFitOutputCapacity - 4u
+        ? sourceLength : kBitmapFitOutputCapacity - 4u;
+    while (prefixBytes < prefixLimit) {
+        const int advance = gxos::gui::SystemFont::MeasureWidth(face, str + prefixBytes, 1);
+        if (advance < 0 || static_cast<uint64_t>(prefixWidth) +
+            static_cast<uint32_t>(advance) > widthLimit) break;
+        prefixWidth += static_cast<uint32_t>(advance);
+        fitted[prefixBytes] = str[prefixBytes];
+        ++prefixBytes;
+    }
+
+    const bool truncated = needsTruncation || prefixBytes < sourceLength || sourceBounded;
+    bool ellipsisAdded = false;
+    if (truncated && ellipsisWidth > 0 && static_cast<uint32_t>(ellipsisWidth) <= boxWidth &&
+        prefixBytes + 3u < kBitmapFitOutputCapacity) {
+        fitted[prefixBytes++] = '.';
+        fitted[prefixBytes++] = '.';
+        fitted[prefixBytes++] = '.';
+        ellipsisAdded = true;
+    }
+    fitted[prefixBytes] = '\0';
+    const uint32_t fittedWidth = prefixWidth + (ellipsisAdded
+        ? static_cast<uint32_t>(ellipsisWidth) : 0u);
+    if (fittedWidth > boxWidth) return false;
+    const uint32_t drawOffsetX = alignment == DesktopTextAlignment::Center && fittedWidth < boxWidth
+        ? (boxWidth - fittedWidth) / 2u : 0u;
+    const uint32_t drawY = y + (boxHeight - static_cast<uint32_t>(lineHeight)) / 2u;
+    if (static_cast<uint64_t>(x) + drawOffsetX + fittedWidth > width ||
+        static_cast<uint64_t>(drawY) + static_cast<uint32_t>(lineHeight) > height) return false;
+
+    gxos::gui::SystemFont::DrawTextToBuffer(target, static_cast<int>(pitch),
+        static_cast<int>(width), static_cast<int>(height),
+        static_cast<int>(x + drawOffsetX), static_cast<int>(drawY), fitted,
+        static_cast<int>(prefixBytes), color, face);
+    return true;
+}
+
 } // namespace desktop
 } // namespace kernel
