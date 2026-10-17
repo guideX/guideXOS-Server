@@ -24,6 +24,7 @@
 #include "kernel/disk_manager_whole_disk_erase_ui.h"
 #include "kernel/disk_manager_surface_verification_ui.h"
 #include "kernel/disk_manager_fat32_integrity_ui.h"
+#include "kernel/disk_manager_dismount_ui.h"
 #include "kernel/disk_manager_model.h"
 #include "kernel/desktop.h"
 #include "kernel/image_adapter.h"
@@ -1242,6 +1243,8 @@ private:
         INITIALIZE_DIALOG_VERIFY_RESULT,
         INITIALIZE_DIALOG_FAT32_CONFIRM,
         INITIALIZE_DIALOG_FAT32_RESULT,
+        INITIALIZE_DIALOG_DISMOUNT_CONFIRM,
+        INITIALIZE_DIALOG_DISMOUNT_RESULT,
     };
 
     struct PartEntry {
@@ -1259,8 +1262,10 @@ private:
         bool reformatInterrupted;
         bool mounted;
         bool mountIdentityValid;
+        uint8_t mountIdentityCount;
         bool mountReadOnly;
         uint8_t mountIndex;
+        vfs::MountIdentity mountIdentity;
         char mountPath[128];
         uint8_t mountViewSlot;
         uint64_t mountViewGeneration;
@@ -1365,6 +1370,7 @@ private:
     bool m_dialogIsWholeErase;
     bool m_dialogIsVerification;
     bool m_dialogIsFat32Integrity;
+    bool m_dialogIsDismount;
     bool m_closeAfterVerification;
     disk_manager_wipe_ui::WipeActionEligibility m_wipeEligibility;
     disk_manager_wipe_ui::WipeActionBlockReason m_wipeBlockReason;
@@ -1407,6 +1413,12 @@ private:
     storage::Fat32IntegrityJob m_fat32IntegrityJob;
     disk_manager_fat32_integrity_ui::AdmissionBlockReason
         m_fat32IntegrityBlockReason;
+    disk_manager_dismount_ui::CapturedTarget m_dismountTarget;
+    vfs::MountPoint m_dismountMountSnapshot;
+    vfs::Status m_dismountStatus;
+    disk_manager_dismount_ui::AdmissionBlockReason m_dismountBlockReason;
+    storage::DeviceCapabilities m_dismountCapabilities;
+    char m_dismountFinalState[64];
     uint8_t m_fat32FindingIndex;
     disk_manager_surface_verification_ui::AdmissionBlockReason
         m_surfaceVerificationBlockReason;
@@ -1498,9 +1510,15 @@ private:
     void        drawFat32IntegrityPanel(uint32_t x, uint32_t y,
                     uint32_t w, uint32_t h);
     void        closeInitializeDialog();
+    void        beginDismountConfirmation();
+    disk_manager_dismount_ui::AdmissionBlockReason
+                revalidateDismountTarget(vfs::MountPoint* currentSnapshot,
+                                         bool verifyPartitionTable = false);
+    void        runDismountOperation();
+    void        drawDismountPanel(uint32_t x, uint32_t y,
+                                  uint32_t w, uint32_t h);
     void        beginMountDialog();
     void        confirmPartitionMount();
-    void        unmountSelectedPartition();
 };
 
 class TrashApp : public app::KernelApp {

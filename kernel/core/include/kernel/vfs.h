@@ -289,6 +289,9 @@ bool propose_partition_mount_path(uint8_t blockDevIndex,
                                   char* outPath, size_t outPathSize);
 bool mount_identity_valid(uint8_t mountIndex);
 bool capture_mount_identity(uint8_t mountIndex, MountIdentity& out);
+// Copy a coherent mount/lifecycle snapshot for status presentation. The copy
+// does not retain ownership and must be revalidated before an operation.
+bool copy_mount_snapshot(uint8_t mountIndex, MountPoint& out);
 // Reports the current state of a mount's exact backing registration and view.
 // Stale mounts remain enumerable until explicit unmount cleanup succeeds.
 Status mount_backing_status(uint8_t mountIndex);

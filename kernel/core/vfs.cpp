@@ -1387,6 +1387,21 @@ bool capture_mount_identity(uint8_t mountIndex, MountIdentity& out)
     return true;
 }
 
+bool copy_mount_snapshot(uint8_t mountIndex, MountPoint& out)
+{
+    out = {};
+    if (mountIndex >= VFS_MAX_MOUNTS) return false;
+    lock_vfs_metadata();
+    const MountPoint& mount = s_mounts[mountIndex];
+    if (!mount.active) {
+        unlock_vfs_metadata();
+        return false;
+    }
+    out = mount;
+    unlock_vfs_metadata();
+    return true;
+}
+
 static Status mount_io_status(const MountPoint* mount)
 {
     if (!mount || !mount->active) return VFS_ERR_NOT_MOUNT;

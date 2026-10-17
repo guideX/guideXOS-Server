@@ -299,3 +299,35 @@ The UI reported 40 metadata reads and 925,184 bytes. QEMU trace tags 664–703 m
 After the earlier B1 run, the observed-number field was fixed and the full host suite, freestanding AMD64 build, `build.bat`, and UEFI x64 Release build passed. Visible GTK QEMU reruns completed production FAT32 checks for both the loop and orphan fixtures. Each showed structural inconsistency, one stored finding, complete cluster scanning, no repair, and released storage ownership. The checker produced 40 READ(10) requests / 925,184 bytes within partition LBAs 2048–3294, with no modifying I/O. Both fixture hashes matched their initial values after QEMU exited.
 
 The compact result view omitted the detailed finding rows, so the LBA and expected/observed values still need a maximized GUI capture. Multi-finding navigation and lifecycle/read-failure/mounted-target gates C–H remain open. This is **Outcome C — production defect repaired; DM36 acceptance evidence incomplete**. The `.phase` marker remains at DM35→DM36. The [DM36 phase report](DISK_MANAGER_PHASE_DM36_FAT32_INTEGRITY.md) records hashes, traces, screenshots, and remaining gates. A separate visible QEMU guest is open in the foreground for the user.
+
+## DM37 continuation 2 — safe dismount GUI and host qualification
+
+The production Disk Manager now exposes **Dismount Volume** for exactly one
+mounted partition identity. It snapshots active mounts coherently through the
+VFS metadata lock, captures the exact `MountIdentity`, registration, partition
+extent, partition-view generation, sector geometry, and mount path, then
+revalidates those bindings and rereads the partition table immediately before
+the explicit confirmation invokes `vfs::dismount(capturedIdentity)`. Changed
+or duplicate partition entries and removed registrations are rejected. VFS
+remains authoritative for protection, busy references, quiescence, and
+durability; no forced dismount, duplicate Flush, or asynchronous job was
+introduced.
+
+The confirmation starts with Cancel focused, reports exact target details,
+busy counters, and durability capability, and uses standard pointer and
+keyboard widget dispatch. Runtime widget IDs are Mount 5, Dismount Volume 6,
+Confirm Dismount 11, and Cancel/result dismissal 12. DM36 Check FAT32 remains
+independently enabled only after its ordinary admission becomes READY. Success
+refreshes actual mount state and reports that dismount does not eject the
+still-registered block device. Explicit Mount remains available. No automatic
+check, repair, format, remount, wipe, or erase runs.
+
+Continuation 2 host evidence: storage suite **1,491/1,491**, widget activation
+PASS, USB trace classifier **7/7**, GPT verifier **1/1**, and DM30 fixture
+verifier **1/1**. DM36 metadata/structural and GUI groups pass **259/259** and
+**31/31**; DM35 scan/GUI groups pass **48/48** and **34/34**. `build.bat` and
+UEFI x64 Release pass; freestanding AMD64 kernel build uses
+`NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0`. No QEMU or physical media was
+used. Full implementation evidence and any remaining build qualification are
+in the [DM37 safe-dismount phase report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md).
+`.phase` remains DM36→DM37; guest acceptance is a later DM37 continuation.

@@ -1,6 +1,7 @@
 #include "../kernel/core/include/kernel/widget_activation.h"
 #include "../kernel/core/include/kernel/disk_manager_wipe_ui.h"
 #include "../kernel/core/include/kernel/disk_manager_whole_disk_erase_ui.h"
+#include "../kernel/core/include/kernel/disk_manager_dismount_ui.h"
 
 #include <cstdio>
 #include <cstring>
@@ -242,6 +243,71 @@ int main()
     check(dispatch_widget_activation(&window, 43, stopEraseClick) &&
           stopEraseRequests == 2,
           "pointer Stop Erase routes through the normal widget dispatcher");
+
+    using namespace kernel::apps::disk_manager_dismount_ui;
+    window.widgetCount = 3;
+    window.widgets[0] = {};
+    window.widgets[0].id = 50;
+    window.widgets[0].type = WidgetType::TextBox;
+    window.widgets[0].visible = true;
+    window.widgets[0].enabled = true;
+    window.widgets[1] = make_button(51); // Confirm Dismount
+    window.widgets[1].visible = true;
+    window.widgets[1].enabled = true;
+    window.widgets[2] = make_button(52); // Cancel/result dismissal
+    window.widgets[2].visible = true;
+    window.widgets[2].enabled = true;
+    int dismountStarts = 0;
+    int dismountCancels = 0;
+    const auto dismountClick = [&window, &dismountStarts,
+                                &dismountCancels](int id) {
+        if (id == 51) {
+            ++dismountStarts;
+            window.widgets[1].visible = false;
+            window.widgets[1].enabled = false;
+        } else if (id == 52) {
+            ++dismountCancels;
+            window.widgets[1].visible = false;
+            window.widgets[1].enabled = false;
+            window.widgets[2].visible = false;
+            window.widgets[2].enabled = false;
+        }
+    };
+    check(next_confirmation_focus(2, true) == 3 &&
+          next_confirmation_focus(2, false) == 2 &&
+          next_confirmation_focus(3, true) == 2,
+          "Dismount Tab traversal reaches Confirm only when admission is ready");
+    const int textboxFocus = focused_button_widget_id_for_index(0, 3, 51);
+    check(textboxFocus == -1 &&
+          !dispatch_focused_button_activation(&window, 51, textboxFocus,
+              '\n', dismountClick) && dismountStarts == 0,
+          "Enter from an unrelated textbox cannot confirm a Dismount");
+    const int cancelFocus = focused_button_widget_id_for_index(2, 2, 52);
+    check(dispatch_focused_button_activation(&window, 52, cancelFocus,
+              '\n', dismountClick) && dismountCancels == 1 &&
+          dismountStarts == 0,
+          "Enter on the initial Cancel focus closes without dismounting");
+    window.widgets[1].visible = true;
+    window.widgets[1].enabled = false;
+    check(!dispatch_focused_button_activation(&window, 51,
+              focused_button_widget_id_for_index(3, 3, 51), 32,
+              dismountClick) && dismountStarts == 0,
+          "busy or protected Dismount confirmation cannot activate its disabled control");
+    window.widgets[1].enabled = true;
+    check(dispatch_focused_button_activation(&window, 51,
+              focused_button_widget_id_for_index(3, 3, 51), 32,
+              dismountClick) && dismountStarts == 1 &&
+          !dispatch_focused_button_activation(&window, 51,
+              focused_button_widget_id_for_index(3, 3, 51), '\r',
+              dismountClick) && dismountStarts == 1,
+          "explicit Space confirmation starts once and repeated activation is ignored");
+    window.widgets[1].visible = true;
+    window.widgets[1].enabled = true;
+    window.widgets[2].visible = true;
+    window.widgets[2].enabled = true;
+    check(dispatch_widget_activation(&window, 51, dismountClick) &&
+          dismountStarts == 2,
+          "pointer Dismount activation uses the normal widget dispatcher");
 
     std::printf("Widget activation checks: %s (%d failures)\n",
         failures == 0 ? "PASS" : "FAIL", failures);

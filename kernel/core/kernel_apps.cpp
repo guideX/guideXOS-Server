@@ -6290,7 +6290,7 @@ DiskManagerApp::DiskManagerApp()
       m_dialogIsReformat(false), m_dialogIsDelete(false),
       m_dialogIsGptRepair(false), m_dialogIsWipe(false),
       m_dialogIsWholeErase(false), m_dialogIsVerification(false),
-      m_dialogIsFat32Integrity(false),
+      m_dialogIsFat32Integrity(false), m_dialogIsDismount(false),
       m_closeAfterVerification(false),
       m_wipeBlockReason(disk_manager_wipe_ui::WIPE_ACTION_PARTITION_NOT_SELECTED),
       m_wholeEraseBlockReason(
@@ -6302,6 +6302,9 @@ DiskManagerApp::DiskManagerApp()
       m_initializeScheme(storage::DEFAULT_INITIALIZE_SCHEME),
       m_fat32IntegrityBlockReason(
           disk_manager_fat32_integrity_ui::ADMISSION_SELECTION_REQUIRED),
+      m_dismountStatus(vfs::VFS_ERR_NOT_MOUNT),
+      m_dismountBlockReason(
+          disk_manager_dismount_ui::DISMOUNT_ADMISSION_SELECTION_REQUIRED),
       m_fat32FindingIndex(0),
       m_surfaceVerificationBlockReason(
           disk_manager_surface_verification_ui::ADMISSION_SELECTION_REQUIRED),
@@ -6339,6 +6342,10 @@ DiskManagerApp::DiskManagerApp()
     memset(&m_surfaceVerificationJob, 0, sizeof(m_surfaceVerificationJob));
     memset(&m_fat32IntegrityTarget, 0, sizeof(m_fat32IntegrityTarget));
     memset(&m_fat32IntegrityJob, 0, sizeof(m_fat32IntegrityJob));
+    memset(&m_dismountTarget, 0, sizeof(m_dismountTarget));
+    memset(&m_dismountMountSnapshot, 0, sizeof(m_dismountMountSnapshot));
+    memset(&m_dismountCapabilities, 0, sizeof(m_dismountCapabilities));
+    m_dismountFinalState[0] = '\0';
     m_wipeEligibility = {};
     memset(&m_mountDialogPartition, 0, sizeof(m_mountDialogPartition));
     m_lastStorageOperation = 0;
@@ -6439,6 +6446,15 @@ bool DiskManagerApp::init() {
             m_nextFindingBtnId, m_cancelInitializeBtnId))
         serial::puts("[dm36-fat32-ui] widget-id-order-mismatch\n");
     serial::puts("[dm35-ui] stop-scan-widget-id=");
+    serial_put_dec64(m_cancelInitializeBtnId);
+    serial::putc('\n');
+    serial::puts("[dm37-ui] dismount-widget-id=");
+    serial_put_dec64(m_unmountBtnId);
+    serial::puts(" mount-widget-id=");
+    serial_put_dec64(m_mountBtnId);
+    serial::puts(" confirm-widget-id=");
+    serial_put_dec64(m_confirmInitializeBtnId);
+    serial::puts(" cancel-result-widget-id=");
     serial_put_dec64(m_cancelInitializeBtnId);
     serial::putc('\n');
     updateInitializeControls();
@@ -6685,35 +6701,33 @@ void DiskManagerApp::scanDisks() {
                                                  e.wholeEraseProbe);
         for (uint8_t mountIndex = 0; mountIndex < vfs::VFS_MAX_MOUNTS;
              ++mountIndex) {
-            const vfs::MountPoint* mount = vfs::get_mount_by_index(mountIndex);
-            if (!mount || !mount->active || !mount->partitionMount ||
-                mount->blockDevIndex != i ||
-                mount->parentRegistrationId != identity.registrationId) continue;
+            vfs::MountPoint mount = {};
+            if (!vfs::copy_mount_snapshot(mountIndex, mount) ||
+                !mount.partitionMount || mount.blockDevIndex != i ||
+                mount.parentRegistrationId != identity.registrationId) continue;
             for (int partIndex = 0; partIndex < e.partCount; ++partIndex) {
                 PartEntry& part = e.parts[partIndex];
                 const storage::PartitionEntry& parsed = part.parsed;
-                const block::PartitionIdentity& mounted = mount->partitionIdentity;
-                bool same = mounted.valid &&
-                    mounted.partitionNumber == parsed.partitionNumber &&
-                    mounted.startLba == parsed.startLba &&
-                    mounted.endLba == parsed.endLba &&
-                    mounted.sectorCount == parsed.sectorCount &&
-                    ((mounted.scheme == storage::PARTITION_SCHEME_GPT) == parsed.isGpt);
-                if (same && parsed.isGpt) {
-                    same = memcmp(mounted.uniqueGuid, parsed.uniqueGuid,
-                                  sizeof(mounted.uniqueGuid)) == 0;
-                } else if (same) {
-                    same = mounted.mbrType == parsed.mbrType;
-                }
-                if (!same) continue;
+                if (!disk_manager_dismount_ui::partition_matches_mount_point(
+                        identity, parsed, mount)) continue;
                 part.mounted = true;
-                part.mountIdentityValid = vfs::mount_identity_valid(mountIndex);
-                part.mountReadOnly = mount->readOnly;
+                if (part.mountIdentityCount < 0xFF)
+                    ++part.mountIdentityCount;
+                if (part.mountIdentityCount != 1) {
+                    part.mountIdentityValid = false;
+                    memset(&part.mountIdentity, 0, sizeof(part.mountIdentity));
+                    continue;
+                }
+                part.mountIdentityValid =
+                    vfs::capture_mount_identity(mountIndex, part.mountIdentity) &&
+                    vfs::mount_identity_valid(mountIndex) &&
+                    disk_manager_dismount_ui::partition_matches_mount(
+                        identity, parsed, part.mountIdentity);
+                part.mountReadOnly = mount.readOnly;
                 part.mountIndex = mountIndex;
-                part.mountViewSlot = mount->partitionView.slot;
-                part.mountViewGeneration = mount->partitionView.generation;
-                strcopy(part.mountPath, mount->path, sizeof(part.mountPath));
-                break;
+                part.mountViewSlot = mount.partitionView.slot;
+                part.mountViewGeneration = mount.partitionView.generation;
+                strcopy(part.mountPath, mount.path, sizeof(part.mountPath));
             }
         }
         if (e.state == storage::DISK_STATE_NOT_INITIALIZED) {
@@ -7180,8 +7194,8 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
         if (verifyPartitionAction) { verifyPartitionAction->x = 258; verifyPartitionAction->y = secondRowY; verifyPartitionAction->w = 144; }
         if (wholeEraseAction) { wholeEraseAction->x = 258; wholeEraseAction->y = secondRowY; wholeEraseAction->w = 172; }
         if (mountAction) { mountAction->x = 10; mountAction->y = rowY; mountAction->w = 108; }
-        if (unmountAction) { unmountAction->x = 124; unmountAction->y = rowY; unmountAction->w = 92; }
-        if (deleteAction) { deleteAction->x = 222; deleteAction->y = rowY; deleteAction->w = 116; }
+        if (unmountAction) { unmountAction->x = 124; unmountAction->y = rowY; unmountAction->w = 104; }
+        if (deleteAction) { deleteAction->x = 234; deleteAction->y = rowY; deleteAction->w = 116; }
     } else {
         if (refresh) { refresh->x = 10; refresh->y = secondRowY; refresh->w = 82; }
         if (properties) { properties->x = 98; properties->y = secondRowY; properties->w = 90; }
@@ -7191,8 +7205,8 @@ void DiskManagerApp::updateResponsiveControls(uint32_t w, uint32_t h) {
         if (verifyDiskAction) { verifyDiskAction->x = 156; verifyDiskAction->y = rowY; verifyDiskAction->w = 150; }
         if (verifyPartitionAction) { verifyPartitionAction->x = 274; verifyPartitionAction->y = rowY; verifyPartitionAction->w = 128; }
         if (mountAction) { mountAction->x = 408; mountAction->y = rowY; mountAction->w = 90; }
-        if (unmountAction) { unmountAction->x = 504; unmountAction->y = rowY; unmountAction->w = 82; }
-        if (deleteAction) { deleteAction->x = 592; deleteAction->y = rowY; deleteAction->w = 116; }
+        if (unmountAction) { unmountAction->x = 504; unmountAction->y = rowY; unmountAction->w = 112; }
+        if (deleteAction) { deleteAction->x = 622; deleteAction->y = rowY; deleteAction->w = 116; }
         if (wholeEraseAction) { wholeEraseAction->x = 580; wholeEraseAction->y = rowY; wholeEraseAction->w = 174; }
     }
     if (checkFat32Action) {
@@ -7287,6 +7301,15 @@ void DiskManagerApp::updateInitializeControls() {
     app::Widget* wipeProgress = getWidget(m_wipeProgressBarId);
     const bool dialogClosed = m_initializeDialogState == INITIALIZE_DIALOG_CLOSED &&
         !m_mountDialogOpen;
+    const bool dismountConfirm = m_dialogIsDismount &&
+        m_initializeDialogState == INITIALIZE_DIALOG_DISMOUNT_CONFIRM;
+    const bool dismountResult = m_dialogIsDismount &&
+        m_initializeDialogState == INITIALIZE_DIALOG_DISMOUNT_RESULT;
+    if (dismountConfirm) {
+        vfs::MountPoint currentSnapshot = {};
+        m_dismountBlockReason = revalidateDismountTarget(&currentSnapshot);
+        if (currentSnapshot.active) m_dismountMountSnapshot = currentSnapshot;
+    }
     const bool haveSelection = m_selectedDisk >= 0 && m_selectedDisk < m_diskCount;
     const bool selectedDiskRow = haveSelection &&
         m_selectedObject == SELECTED_DISK;
@@ -7545,7 +7568,8 @@ void DiskManagerApp::updateInitializeControls() {
                                             disk.identity.registrationId);
         showMountAction = strcmp(part.fsLabel, "FAT32") == 0 && !part.mounted;
         mountAvailable = showMountAction && supportedPartition;
-        showUnmountAction = part.mounted;
+        showUnmountAction = part.mounted && part.mountIdentityCount == 1 &&
+            part.mountIdentityValid;
         deleteAvailable = validTable && disk.haveInfo &&
             disk.identity.registrationId != 0 && disk.capabilities.writable &&
             disk.capabilities.readable && durable &&
@@ -7704,7 +7728,9 @@ void DiskManagerApp::updateInitializeControls() {
     if (checkFat32Action) {
         checkFat32Action->visible = dialogClosed && selectedPartition &&
             fat32Candidate;
-        checkFat32Action->enabled = checkFat32Action->visible;
+        checkFat32Action->enabled = checkFat32Action->visible &&
+            m_fat32IntegrityBlockReason ==
+                disk_manager_fat32_integrity_ui::ADMISSION_READY;
         setWidgetText(m_checkFat32BtnId, "Check FAT32 Filesystem");
     }
     if (mountAction) {
@@ -7714,13 +7740,15 @@ void DiskManagerApp::updateInitializeControls() {
     if (unmountAction) {
         unmountAction->visible = dialogClosed && showUnmountAction;
         unmountAction->enabled = showUnmountAction;
+        setWidgetText(m_unmountBtnId, "Dismount Volume");
     }
     if (gpt) { gpt->visible = choosing; gpt->enabled = choosing; }
     if (mbr) { mbr->visible = choosing; mbr->enabled = choosing; }
     if (confirm) {
         confirm->visible = m_mountDialogOpen || confirming || createOptions ||
             formatOptions || deleteConfirm || gptRepairConfirm || wipeConfirm ||
-            wholeEraseConfirm || verificationConfirm || fat32Confirm;
+            wholeEraseConfirm || verificationConfirm || fat32Confirm ||
+            dismountConfirm;
         bool wipeSelectionMatchesRequest = false;
         if (wipeConfirm && selectedPartition) {
             const DiskEntry& disk = m_disks[m_selectedDisk];
@@ -7730,6 +7758,8 @@ void DiskManagerApp::updateInitializeControls() {
                     m_wipeRequest, disk.identity, disk.scheme, selected.parsed);
         }
         confirm->enabled = m_mountDialogOpen || verificationConfirm ||
+            (dismountConfirm && m_dismountBlockReason ==
+                disk_manager_dismount_ui::DISMOUNT_ADMISSION_READY) ||
             (fat32Confirm && m_fat32IntegrityBlockReason ==
                 disk_manager_fat32_integrity_ui::ADMISSION_READY) ||
             (wholeEraseConfirm && selectedDiskRow && m_selectedDisk >= 0 &&
@@ -7754,6 +7784,7 @@ void DiskManagerApp::updateInitializeControls() {
             (formatOptions && updateFormatLabelWidget());
         const char* confirmLabel = "Initialize";
         if (m_mountDialogOpen) confirmLabel = "Mount";
+        else if (dismountConfirm) confirmLabel = "Dismount";
         else if (gptRepairConfirm) confirmLabel = "Repair GPT";
         else if (wipeConfirm) confirmLabel = "Wipe Partition";
         else if (wholeEraseConfirm) confirmLabel = "Erase Entire Disk";
@@ -7791,6 +7822,11 @@ void DiskManagerApp::updateInitializeControls() {
         if (cancel) cancel->bgColor = m_createInputFocus == 2
             ? 0xFF34465C : 0xFF505060;
     } else if (fat32Confirm) {
+        if (confirm) confirm->bgColor = m_createInputFocus == 3
+            ? 0xFF356A48 : 0xFF505060;
+        if (cancel) cancel->bgColor = m_createInputFocus == 2
+            ? 0xFF34465C : 0xFF505060;
+    } else if (dismountConfirm) {
         if (confirm) confirm->bgColor = m_createInputFocus == 3
             ? 0xFF356A48 : 0xFF505060;
         if (cancel) cancel->bgColor = m_createInputFocus == 2
@@ -7871,7 +7907,8 @@ void DiskManagerApp::updateInitializeControls() {
     }
     const bool showCancel = m_mountDialogOpen || formatScanCancelable ||
         wipeRunning || wholeEraseRunning || verificationRunning ||
-        fat32Confirm || fat32Running || fat32Result ||
+        fat32Confirm || fat32Running || fat32Result || dismountConfirm ||
+        dismountResult ||
         (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED &&
          m_initializeDialogState != INITIALIZE_DIALOG_RUNNING);
     if (cancel) {
@@ -7890,6 +7927,7 @@ void DiskManagerApp::updateInitializeControls() {
                 : (wipeRunning ? "Stop Wipe" :
                    (m_initializeDialogState == INITIALIZE_DIALOG_RESULT ||
                     m_initializeDialogState == INITIALIZE_DIALOG_WHOLE_ERASE_RESULT ||
+                    m_initializeDialogState == INITIALIZE_DIALOG_DISMOUNT_RESULT ||
                     verificationResult || fat32Confirm || fat32Result
                         ? "Close" : "Cancel")))));
     }
@@ -8183,6 +8221,8 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             disk_manager_fat32_integrity_ui::job_running(m_fat32IntegrityJob);
         const bool fat32Result = m_dialogIsFat32Integrity &&
             m_initializeDialogState == INITIALIZE_DIALOG_FAT32_RESULT;
+        const bool dismountConfirm = m_dialogIsDismount &&
+            m_initializeDialogState == INITIALIZE_DIALOG_DISMOUNT_CONFIRM;
         if (wholeEraseRunning && (tab || enter)) {
             serial::puts("[dm34-stop] keyboard-key-received key=0x");
             serial::put_hex32(key);
@@ -8201,6 +8241,13 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
                 m_fat32IntegrityBlockReason ==
                     disk_manager_fat32_integrity_ui::ADMISSION_READY &&
                 m_createInputFocus == 2 ? 3 : 2;
+            updateInitializeControls();
+            invalidate();
+        } else if (dismountConfirm && tab) {
+            m_createInputFocus =
+                disk_manager_dismount_ui::next_confirmation_focus(
+                    m_createInputFocus, m_dismountBlockReason ==
+                        disk_manager_dismount_ui::DISMOUNT_ADMISSION_READY);
             updateInitializeControls();
             invalidate();
         } else if (fat32Result && tab) {
@@ -8289,6 +8336,17 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
                 focusedButtonId,
                 app::focused_button_widget_id_for_index(
                     m_createInputFocus, startFocused ? 3 : 2,
+                    focusedButtonId), key,
+                [this](int id) { onWidgetClick(id); });
+        } else if (enter && dismountConfirm &&
+                   (m_createInputFocus == 2 || m_createInputFocus == 3)) {
+            const bool dismountFocused = m_createInputFocus == 3;
+            const int focusedButtonId = dismountFocused
+                ? m_confirmInitializeBtnId : m_cancelInitializeBtnId;
+            app::dispatch_focused_button_activation(m_window,
+                focusedButtonId,
+                app::focused_button_widget_id_for_index(
+                    m_createInputFocus, dismountFocused ? 3 : 2,
                     focusedButtonId), key,
                 [this](int id) { onWidgetClick(id); });
         } else if (enter && fat32Result) {
@@ -8443,6 +8501,9 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
         } else if (enter && m_initializeDialogState ==
                    INITIALIZE_DIALOG_VERIFY_RESULT) {
             closeInitializeDialog();
+        } else if (enter && m_initializeDialogState ==
+                   INITIALIZE_DIALOG_DISMOUNT_RESULT) {
+            closeInitializeDialog();
         }
         return;
     }
@@ -8529,6 +8590,11 @@ void DiskManagerApp::onKeyChar(char c) {
           disk_manager_fat32_integrity_ui::job_running(m_fat32IntegrityJob)) ||
          (m_dialogIsFat32Integrity && m_initializeDialogState ==
             INITIALIZE_DIALOG_FAT32_RESULT) ||
+         (m_dialogIsDismount && m_initializeDialogState ==
+            INITIALIZE_DIALOG_DISMOUNT_CONFIRM &&
+          (m_createInputFocus == 2 || m_createInputFocus == 3)) ||
+         (m_dialogIsDismount && m_initializeDialogState ==
+            INITIALIZE_DIALOG_DISMOUNT_RESULT) ||
          (m_initializeDialogState == INITIALIZE_DIALOG_CLOSED &&
           m_keyboardPane == KEYBOARD_ACTIONS))) {
         onKeyDown(32);
@@ -8682,6 +8748,21 @@ void DiskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {
 }
 
 void DiskManagerApp::onWidgetClick(int widgetId) {
+    if (m_dialogIsDismount && m_initializeDialogState ==
+            INITIALIZE_DIALOG_DISMOUNT_CONFIRM &&
+        widgetId == m_confirmInitializeBtnId) {
+        runDismountOperation();
+        return;
+    }
+    if (m_dialogIsDismount && m_initializeDialogState ==
+            INITIALIZE_DIALOG_DISMOUNT_CONFIRM &&
+        widgetId == m_cancelInitializeBtnId) {
+        closeInitializeDialog();
+        strcopy(m_statusMessage, "Dismount canceled.", sizeof(m_statusMessage));
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
     if (m_mountDialogOpen && widgetId == m_confirmInitializeBtnId) {
         confirmPartitionMount();
         return;
@@ -8900,7 +8981,7 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
         beginMountDialog();
     } else if (widgetId == m_unmountBtnId &&
                m_initializeDialogState == INITIALIZE_DIALOG_CLOSED) {
-        unmountSelectedPartition();
+        beginDismountConfirmation();
     }
 }
 
@@ -10463,6 +10544,8 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             drawSurfaceVerificationPanel(panelX, panelY, panelW, panelH);
         if (m_dialogIsFat32Integrity)
             drawFat32IntegrityPanel(panelX, panelY, panelW, panelH);
+        if (m_dialogIsDismount)
+            drawDismountPanel(panelX, panelY, panelW, panelH);
     }
 
     if (m_mountDialogOpen) {
@@ -13199,10 +13282,15 @@ void DiskManagerApp::closeInitializeDialog() {
     m_dialogIsWholeErase = false;
     m_dialogIsVerification = false;
     m_dialogIsFat32Integrity = false;
+    m_dialogIsDismount = false;
     m_closeAfterVerification = false;
     m_gptRepairButtonFocus = 0;
     m_createInputFocus = 0;
     m_initializeMessage[0] = '\0';
+    memset(&m_dismountTarget, 0, sizeof(m_dismountTarget));
+    memset(&m_dismountMountSnapshot, 0, sizeof(m_dismountMountSnapshot));
+    memset(&m_dismountCapabilities, 0, sizeof(m_dismountCapabilities));
+    m_dismountFinalState[0] = '\0';
     if (m_formatJob.state == storage::FAT32_FORMAT_JOB_COMPLETED ||
         m_formatJob.state == storage::FAT32_FORMAT_JOB_FAILED ||
         m_formatJob.state == storage::FAT32_FORMAT_JOB_CANCELED)
@@ -13312,45 +13400,447 @@ void DiskManagerApp::confirmPartitionMount() {
     invalidate();
 }
 
-void DiskManagerApp::unmountSelectedPartition() {
-    if (m_selectedDisk < 0 || m_selectedDisk >= m_diskCount ||
+void DiskManagerApp::beginDismountConfirmation() {
+    using namespace disk_manager_dismount_ui;
+    if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED ||
+        m_mountDialogOpen || m_selectedDisk < 0 || m_selectedDisk >= m_diskCount ||
         m_selectedObject != SELECTED_PARTITION || m_selectedPart < 0 ||
-        m_selectedPart >= m_disks[m_selectedDisk].partCount) return;
-    const PartEntry& part = m_disks[m_selectedDisk].parts[m_selectedPart];
-    if (!part.mounted || part.mountPath[0] == '\0') return;
-    char pathCopy[128];
-    strcopy(pathCopy, part.mountPath, sizeof(pathCopy));
-    const uint8_t mountIndex = part.mountIndex;
-    const vfs::Status status = vfs::unmount(pathCopy);
-    char message[128];
-    if (status == vfs::VFS_OK) {
-        strcopy(message, "Unmounted and flushed ", sizeof(message));
-        strappend(message, pathCopy, sizeof(message));
-    } else if (status == vfs::VFS_ERR_BUSY) {
-        strcopy(message, "Unmount blocked: close files and directories first.",
-                sizeof(message));
-    } else if (status == vfs::VFS_ERR_IO &&
-               vfs::get_mount_by_index(mountIndex) == nullptr) {
-        strcopy(message,
-            "Mount cleaned up, but parent identity or flush could not be confirmed.",
-            sizeof(message));
-    } else if (status == vfs::VFS_ERR_DEVICE_REMOVED &&
-               vfs::get_mount_by_index(mountIndex) == nullptr) {
-        strcopy(message,
-            "USB storage was removed; mount cleaned up, writes may be incomplete.",
-            sizeof(message));
-    } else if (status == vfs::VFS_ERR_DEVICE_REMOVED) {
-        strcopy(message,
-            "USB storage was removed; unmount flush did not complete.",
-            sizeof(message));
-    } else {
-        strcopy(message, "Unmount failed: filesystem flush failed; mount remains active.",
-                sizeof(message));
+        m_selectedPart >= m_disks[m_selectedDisk].partCount) {
+        strcopy(m_statusMessage, admission_reason_text(
+            DISMOUNT_ADMISSION_SELECTION_REQUIRED), sizeof(m_statusMessage));
+        invalidate();
+        return;
     }
-    scanDisks();
-    strcopy(m_statusMessage, message, sizeof(m_statusMessage));
+    const DiskEntry& disk = m_disks[m_selectedDisk];
+    const PartEntry& part = disk.parts[m_selectedPart];
+    if (!part.mounted || part.mountIdentityCount != 1 ||
+        !part.mountIdentityValid) {
+        strcopy(m_statusMessage,
+            part.mounted
+                ? admission_reason_text(DISMOUNT_ADMISSION_IDENTITY_INVALID)
+                : admission_reason_text(DISMOUNT_ADMISSION_ALREADY_UNMOUNTED),
+            sizeof(m_statusMessage));
+        invalidate();
+        return;
+    }
+
+    vfs::MountPoint snapshot = {};
+    vfs::MountIdentity liveIdentity = {};
+    storage::TargetIdentity currentDevice = {};
+    if (!vfs::copy_mount_snapshot(part.mountIndex, snapshot) ||
+        !vfs::capture_mount_identity(part.mountIndex, liveIdentity) ||
+        !vfs::mount_identity_valid(part.mountIndex) ||
+        !same_mount_identity(part.mountIdentity, liveIdentity) ||
+        !storage::capture_target_identity(disk.devIndex, currentDevice) ||
+        !storage::target_identities_equal(disk.identity, currentDevice) ||
+        !storage::query_device_capabilities(disk.devIndex,
+                                            m_dismountCapabilities) ||
+        !capture_target(disk.identity, part.parsed, liveIdentity, snapshot,
+                        m_dismountTarget)) {
+        memset(&m_dismountTarget, 0, sizeof(m_dismountTarget));
+        strcopy(m_statusMessage, admission_reason_text(
+            DISMOUNT_ADMISSION_STALE_TARGET), sizeof(m_statusMessage));
+        invalidate();
+        return;
+    }
+
+    m_dismountMountSnapshot = snapshot;
+    m_dismountStatus = vfs::VFS_ERR_NOT_MOUNT;
+    m_dismountFinalState[0] = '\0';
+    m_dialogIsCreate = false;
+    m_dialogIsFormat = false;
+    m_dialogIsReformat = false;
+    m_dialogIsDelete = false;
+    m_dialogIsGptRepair = false;
+    m_dialogIsWipe = false;
+    m_dialogIsWholeErase = false;
+    m_dialogIsVerification = false;
+    m_dialogIsFat32Integrity = false;
+    m_dialogIsDismount = true;
+    m_createInputFocus = 2;
+    m_initializeMessage[0] = '\0';
+    m_initializeDialogState = INITIALIZE_DIALOG_DISMOUNT_CONFIRM;
+    strcopy(m_statusMessage, "Review the captured mounted volume.",
+            sizeof(m_statusMessage));
     updateInitializeControls();
     invalidate();
+}
+
+disk_manager_dismount_ui::AdmissionBlockReason
+DiskManagerApp::revalidateDismountTarget(vfs::MountPoint* currentSnapshot,
+                                          bool verifyPartitionTable) {
+    using namespace disk_manager_dismount_ui;
+    if (currentSnapshot) memset(currentSnapshot, 0, sizeof(*currentSnapshot));
+    if (!m_dismountTarget.valid)
+        return DISMOUNT_ADMISSION_IDENTITY_INVALID;
+
+    vfs::MountPoint live = {};
+    if (!vfs::copy_mount_snapshot(m_dismountTarget.mount.mountIndex, live))
+        return DISMOUNT_ADMISSION_ALREADY_UNMOUNTED;
+    if (currentSnapshot) *currentSnapshot = live;
+    if (live.lifecycleState != vfs::MOUNT_LIFECYCLE_MOUNTED)
+        return DISMOUNT_ADMISSION_BUSY;
+
+    vfs::MountIdentity liveIdentity = {};
+    storage::TargetIdentity liveDevice = {};
+    storage::DeviceCapabilities liveCapabilities = {};
+    const bool haveMountIdentity = vfs::capture_mount_identity(
+        m_dismountTarget.mount.mountIndex, liveIdentity);
+    const bool haveDevice = storage::capture_target_identity(
+        m_dismountTarget.mount.blockDevIndex, liveDevice);
+    bool targetCurrent = haveMountIdentity && haveDevice &&
+        binding_matches(m_dismountTarget, liveDevice, liveIdentity, live) &&
+        vfs::mount_identity_valid(m_dismountTarget.mount.mountIndex) &&
+        vfs::mount_backing_status(m_dismountTarget.mount.mountIndex) ==
+            vfs::VFS_OK &&
+        partition_matches_mount(liveDevice, m_dismountTarget.partition,
+                                liveIdentity) &&
+        storage::query_device_capabilities(
+            m_dismountTarget.mount.blockDevIndex, liveCapabilities) &&
+        liveCapabilities.logicalSectorSize ==
+            m_dismountTarget.mount.logicalSectorSize;
+
+    if (haveMountIdentity && same_mount_identity(m_dismountTarget.mount,
+            liveIdentity) &&
+        vfs::mount_backing_status(m_dismountTarget.mount.mountIndex) ==
+            vfs::VFS_ERR_DEVICE_REMOVED)
+        return DISMOUNT_ADMISSION_DEVICE_REMOVED;
+
+    if (targetCurrent && verifyPartitionTable) {
+        const DiskEntry* cachedDisk = nullptr;
+        for (int i = 0; i < m_diskCount; ++i) {
+            if (storage::target_identities_equal(m_disks[i].identity,
+                                                 m_dismountTarget.device)) {
+                cachedDisk = &m_disks[i];
+                break;
+            }
+        }
+        bool tableCurrent = cachedDisk &&
+            storage::parse_partition_table(
+                m_dismountTarget.mount.blockDevIndex,
+                s_diskManagerTableScratch) &&
+            partitionTableMatchesDiskCache(*cachedDisk,
+                                            s_diskManagerTableScratch) &&
+            partition_table_has_unique_entry(s_diskManagerTableScratch,
+                                               m_dismountTarget.partition);
+        targetCurrent = tableCurrent;
+    }
+    if (targetCurrent) m_dismountCapabilities = liveCapabilities;
+
+    storage::BootProtection boot = {};
+    storage::MountProtection partitionMount = {};
+    bool protectedTarget = protected_mount_path(live.path);
+    if (haveDevice) {
+        boot = storage::query_boot_protection(liveDevice);
+        partitionMount = storage::query_partition_mount_protection(
+            liveDevice, m_dismountTarget.partition.isGpt
+                ? storage::PARTITION_SCHEME_GPT : storage::PARTITION_SCHEME_MBR,
+            m_dismountTarget.partition);
+        protectedTarget = protectedTarget ||
+            boot.safety != storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET ||
+            partitionMount.safety == storage::DEVICE_ROOT_BACKING ||
+            partitionMount.safety == storage::DEVICE_IDENTITY_UNKNOWN;
+    }
+
+    const bool alreadyUnmounted = targetCurrent &&
+        partitionMount.safety == storage::DEVICE_UNMOUNTED;
+    bool hasAlias = false;
+    if (targetCurrent) {
+        for (uint8_t i = 0; i < vfs::VFS_MAX_MOUNTS; ++i) {
+            if (i == liveIdentity.mountIndex) continue;
+            vfs::MountPoint other = {};
+            if (vfs::copy_mount_snapshot(i, other) && other.alias &&
+                other.blockDevIndex == live.blockDevIndex &&
+                other.parentRegistrationId == live.parentRegistrationId &&
+                other.fsVolumeIndex == live.fsVolumeIndex) {
+                hasAlias = true;
+                break;
+            }
+        }
+    }
+    const bool busy = live.activeOperations != 0 ||
+        live.openFileReferences != 0 || live.openDirectoryReferences != 0 ||
+        hasAlias;
+    const bool conflictingOperation = storage::storage_operation_active();
+    const bool durabilitySupported = live.readOnly ||
+        (live.fsType != vfs::FS_TYPE_FAT32 &&
+         live.fsType != vfs::FS_TYPE_EXFAT) ||
+        m_dismountCapabilities.persistence ==
+            storage::PERSISTENCE_SYNCHRONOUS_DURABLE ||
+        (m_dismountCapabilities.persistence ==
+             storage::PERSISTENCE_FLUSH_REQUIRED &&
+         m_dismountCapabilities.writable &&
+         m_dismountCapabilities.flushSupported &&
+         m_dismountCapabilities.flushSemanticsKnown);
+    return admission_reason(m_dismountTarget.valid, targetCurrent,
+        alreadyUnmounted, protectedTarget, conflictingOperation, busy,
+        durabilitySupported);
+}
+
+void DiskManagerApp::runDismountOperation() {
+    using namespace disk_manager_dismount_ui;
+    if (!m_dialogIsDismount || m_initializeDialogState !=
+            INITIALIZE_DIALOG_DISMOUNT_CONFIRM || !m_dismountTarget.valid)
+        return;
+
+    vfs::MountPoint before = {};
+    m_dismountBlockReason = revalidateDismountTarget(&before, true);
+    if (before.active) m_dismountMountSnapshot = before;
+    if (m_dismountBlockReason != DISMOUNT_ADMISSION_READY) {
+        strcopy(m_statusMessage, admission_reason_text(m_dismountBlockReason),
+                sizeof(m_statusMessage));
+        if (m_dismountBlockReason == DISMOUNT_ADMISSION_STALE_TARGET ||
+            m_dismountBlockReason == DISMOUNT_ADMISSION_DEVICE_REMOVED ||
+            m_dismountBlockReason == DISMOUNT_ADMISSION_ALREADY_UNMOUNTED ||
+            m_dismountBlockReason == DISMOUNT_ADMISSION_IDENTITY_INVALID) {
+            m_dismountStatus = m_dismountBlockReason ==
+                    DISMOUNT_ADMISSION_ALREADY_UNMOUNTED
+                ? vfs::VFS_ERR_NOT_MOUNT
+                : (m_dismountBlockReason == DISMOUNT_ADMISSION_DEVICE_REMOVED
+                    ? vfs::VFS_ERR_DEVICE_REMOVED : vfs::VFS_ERR_MOUNT_STALE);
+            strcopy(m_initializeMessage, m_statusMessage,
+                    sizeof(m_initializeMessage));
+            scanDisks();
+            vfs::MountPoint current = {};
+            if (!vfs::copy_mount_snapshot(
+                    m_dismountTarget.mount.mountIndex, current))
+                strcopy(m_dismountFinalState, "Unmounted or removed",
+                        sizeof(m_dismountFinalState));
+            else if (current.mountGeneration ==
+                     m_dismountTarget.mount.mountGeneration) {
+                const vfs::Status backing = vfs::mount_backing_status(
+                    m_dismountTarget.mount.mountIndex);
+                strcopy(m_dismountFinalState,
+                    backing == vfs::VFS_ERR_DEVICE_REMOVED
+                        ? "Original device removed; mount unavailable"
+                    : (backing != vfs::VFS_OK
+                        ? "Backing identity invalid; mount unavailable"
+                    : (current.lifecycleState == vfs::MOUNT_LIFECYCLE_MOUNTED
+                        ? "Mounted" : "Quiescing or invalidated")),
+                    sizeof(m_dismountFinalState));
+            }
+            else
+                strcopy(m_dismountFinalState,
+                    "A newer mount is active; captured target is stale",
+                    sizeof(m_dismountFinalState));
+            m_initializeDialogState = INITIALIZE_DIALOG_DISMOUNT_RESULT;
+        }
+        updateInitializeControls();
+        invalidate();
+        return;
+    }
+
+    // The production VFS performs busy admission, quiescence, filesystem
+    // teardown and the required durability Flush as one synchronous action.
+    m_dismountStatus = vfs::dismount(m_dismountTarget.mount);
+    if (m_dismountStatus == vfs::VFS_OK) {
+        strcopy(m_initializeMessage, "Volume Dismounted.",
+                sizeof(m_initializeMessage));
+        strappend(m_initializeMessage,
+            " The block device remains registered; this does not eject or safely remove it.",
+            sizeof(m_initializeMessage));
+    } else if (m_dismountStatus == vfs::VFS_ERR_BUSY) {
+        strcopy(m_initializeMessage,
+            storage::storage_operation_active()
+                ? "Dismount blocked by a conflicting storage operation."
+                : "Volume is busy or lifecycle work is active. Close files and applications using this volume before dismounting.",
+            sizeof(m_initializeMessage));
+    } else if (m_dismountStatus == vfs::VFS_ERR_PROTECTED) {
+        strcopy(m_initializeMessage,
+            "Protected: root, boot, system, or unknown-provenance storage cannot be dismounted.",
+            sizeof(m_initializeMessage));
+    } else if (m_dismountStatus == vfs::VFS_ERR_MOUNT_STALE) {
+        strcopy(m_initializeMessage,
+            "Stale target: the mount, partition, or partition view changed.",
+            sizeof(m_initializeMessage));
+    } else if (m_dismountStatus == vfs::VFS_ERR_DEVICE_REMOVED) {
+        strcopy(m_initializeMessage,
+            "Device removed. Dismount did not target a replacement registration.",
+            sizeof(m_initializeMessage));
+    } else if (m_dismountStatus == vfs::VFS_ERR_NOT_MOUNT) {
+        strcopy(m_initializeMessage,
+            "Already unmounted; no current matching mount remains.",
+            sizeof(m_initializeMessage));
+    } else if (m_dismountStatus == vfs::VFS_ERR_NOT_SUPPORTED) {
+        strcopy(m_initializeMessage,
+            "Dismount failed because required durability support is unavailable.",
+            sizeof(m_initializeMessage));
+    } else if (m_dismountStatus == vfs::VFS_ERR_IO ||
+               m_dismountStatus == vfs::VFS_ERR_IO_TIMEOUT ||
+               m_dismountStatus == vfs::VFS_ERR_WRITE_UNCERTAIN ||
+               m_dismountStatus == vfs::VFS_ERR_DURABILITY_UNVERIFIED) {
+        strcopy(m_initializeMessage,
+            "Filesystem synchronization or durability Flush failed.",
+            sizeof(m_initializeMessage));
+    } else {
+        strcopy(m_initializeMessage, "Dismount failed: ",
+                sizeof(m_initializeMessage));
+        strappend(m_initializeMessage,
+            kernel_vfs_status_text(m_dismountStatus),
+            sizeof(m_initializeMessage));
+    }
+
+    scanDisks();
+    vfs::MountPoint current = {};
+    if (!vfs::copy_mount_snapshot(m_dismountTarget.mount.mountIndex, current)) {
+        strcopy(m_dismountFinalState,
+            m_dismountStatus == vfs::VFS_ERR_DEVICE_REMOVED
+                ? "Removed or detached" : "Unmounted",
+            sizeof(m_dismountFinalState));
+    } else if (current.mountGeneration ==
+               m_dismountTarget.mount.mountGeneration) {
+        const vfs::Status backing = vfs::mount_backing_status(
+            m_dismountTarget.mount.mountIndex);
+        strcopy(m_dismountFinalState,
+            backing == vfs::VFS_ERR_DEVICE_REMOVED
+                ? "Original device removed; mount unavailable"
+            : (backing != vfs::VFS_OK
+                ? "Backing identity invalid; mount unavailable"
+            : (current.lifecycleState == vfs::MOUNT_LIFECYCLE_MOUNTED
+                ? "Mounted" : "Quiescing or invalidated; unavailable")),
+            sizeof(m_dismountFinalState));
+    } else {
+        strcopy(m_dismountFinalState,
+            "Captured mount is gone; a newer mount is active",
+            sizeof(m_dismountFinalState));
+    }
+    m_initializeDialogState = INITIALIZE_DIALOG_DISMOUNT_RESULT;
+    m_createInputFocus = 0;
+    strcopy(m_statusMessage, m_initializeMessage, sizeof(m_statusMessage));
+    updateInitializeControls();
+    invalidate();
+}
+
+void DiskManagerApp::drawDismountPanel(uint32_t x, uint32_t y,
+                                       uint32_t w, uint32_t h) {
+    using namespace disk_manager_dismount_ui;
+    if (w < 40 || h < 45) return;
+    const uint32_t panel = 0xFF252D3B;
+    const uint32_t text = 0xFFDCE3F0;
+    const uint32_t muted = 0xFF9AA9BC;
+    framebuffer::fill_rect(x, y, w, h, panel);
+    framebuffer::fill_rect(x, y, w, 23, 0xFF34465C);
+    const bool result = m_initializeDialogState ==
+        INITIALIZE_DIALOG_DISMOUNT_RESULT;
+    disk_manager_draw_clipped(x + 10, y + 7, w - 20,
+        result && m_dismountStatus == vfs::VFS_OK
+            ? "Volume Dismounted" : "Dismount Volume", text);
+    char line[192], number[24];
+    uint32_t lineY = y + 32;
+    strcopy(line, "Selected device: ", sizeof(line));
+    strappend(line, m_dismountTarget.device.name, sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, text);
+    lineY += 17;
+
+    disk_manager_u64(m_dismountTarget.partition.partitionNumber,
+                     number, sizeof(number));
+    strcopy(line, "Partition: ", sizeof(line));
+    strappend(line, number, sizeof(line));
+    strappend(line, m_dismountTarget.partition.isGpt ? " | GPT" : " | MBR",
+              sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, text);
+    lineY += 17;
+
+    strcopy(line, "Mount path: ", sizeof(line));
+    strappend(line, m_dismountTarget.mountPath, sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, text);
+    lineY += 17;
+
+    strcopy(line, "Mount state: ", sizeof(line));
+    strappend(line,
+        m_dismountMountSnapshot.lifecycleState == vfs::MOUNT_LIFECYCLE_MOUNTED
+            ? "Mounted" :
+        (m_dismountMountSnapshot.lifecycleState ==
+            vfs::MOUNT_LIFECYCLE_QUIESCING ? "Quiescing" : "Unknown"),
+        sizeof(line));
+    if (result) {
+        strappend(line, " | after operation: ", sizeof(line));
+        strappend(line, m_dismountFinalState, sizeof(line));
+    }
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, text);
+    lineY += 17;
+
+    disk_manager_u64(m_dismountTarget.mount.registrationId,
+                     number, sizeof(number));
+    strcopy(line, "Device registration: ", sizeof(line));
+    strappend(line, number, sizeof(line));
+    disk_manager_u64(m_dismountTarget.mount.registryGeneration,
+                     number, sizeof(number));
+    strappend(line, " | registry generation: ", sizeof(line));
+    strappend(line, number, sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, muted);
+    lineY += 17;
+
+    if (m_dismountTarget.mount.partitionMount) {
+        char first[24], last[24];
+        disk_manager_u64(m_dismountTarget.mount.partitionIdentity.startLba,
+                         first, sizeof(first));
+        disk_manager_u64(m_dismountTarget.mount.partitionIdentity.endLba,
+                         last, sizeof(last));
+        strcopy(line, "Extent: LBA ", sizeof(line));
+        strappend(line, first, sizeof(line));
+        strappend(line, " through ", sizeof(line));
+        strappend(line, last, sizeof(line));
+        disk_manager_u64(m_dismountTarget.mount.logicalSectorSize,
+                         number, sizeof(number));
+        strappend(line, " | sector size: ", sizeof(line));
+        strappend(line, number, sizeof(line));
+        disk_manager_draw_clipped(x + 10, lineY, w - 20, line, muted);
+        lineY += 17;
+    }
+
+    strcopy(line, "Busy: open files ", sizeof(line));
+    disk_manager_u64(m_dismountMountSnapshot.openFileReferences,
+                     number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " | directories ", sizeof(line));
+    disk_manager_u64(m_dismountMountSnapshot.openDirectoryReferences,
+                     number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " | active I/O ", sizeof(line));
+    disk_manager_u64(m_dismountMountSnapshot.activeOperations,
+                     number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, muted);
+    lineY += 17;
+
+    strcopy(line, "Durability: ", sizeof(line));
+    if (m_dismountMountSnapshot.readOnly) {
+        strappend(line, "read-only; no write Flush is required", sizeof(line));
+    } else if (m_dismountCapabilities.persistence ==
+                   storage::PERSISTENCE_SYNCHRONOUS_DURABLE) {
+        strappend(line, "writes are synchronous and durable", sizeof(line));
+    } else {
+        strappend(line, "required Flush ", sizeof(line));
+        strappend(line, m_dismountCapabilities.flushSupported &&
+                m_dismountCapabilities.flushSemanticsKnown
+            ? "supported" : "unsupported", sizeof(line));
+    }
+    disk_manager_draw_clipped(x + 10, lineY, w - 20, line, muted);
+    lineY += 20;
+
+    if (result) {
+        disk_manager_draw_clipped(x + 10, lineY, w - 20,
+            m_initializeMessage, m_dismountStatus == vfs::VFS_OK
+                ? text : 0xFFFFB0A0);
+        lineY += 18;
+        disk_manager_draw_clipped(x + 10, lineY, w - 20,
+            "No automatic remount, filesystem check, repair, or format was run.",
+            muted);
+    } else {
+        disk_manager_draw_clipped(x + 10, lineY, w - 20,
+            "Dismounting makes this volume unavailable to applications until it is mounted again.",
+            text);
+        lineY += 18;
+        disk_manager_draw_clipped(x + 10, lineY, w - 20,
+            admission_reason_text(m_dismountBlockReason),
+            m_dismountBlockReason == DISMOUNT_ADMISSION_READY
+                ? muted : 0xFFFFB0A0);
+        lineY += 18;
+        disk_manager_draw_clipped(x + 10, lineY, w - 20,
+            "Select Dismount to proceed. Escape or Cancel leaves the volume mounted.",
+            muted);
+    }
 }
 
 TrashApp::TrashApp()

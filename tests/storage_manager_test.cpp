@@ -15,6 +15,7 @@
 #include "../kernel/core/include/kernel/disk_manager_whole_disk_erase_ui.h"
 #include "../kernel/core/include/kernel/disk_manager_surface_verification_ui.h"
 #include "../kernel/core/include/kernel/disk_manager_fat32_integrity_ui.h"
+#include "../kernel/core/include/kernel/disk_manager_dismount_ui.h"
 #include "../kernel/core/include/kernel/widget_activation.h"
 #include "../kernel/core/include/kernel/fs_fat.h"
 #include "../kernel/core/include/kernel/disk_manager_model.h"
@@ -15348,9 +15349,57 @@ int main()
         vfs::MountIdentity dm37Identity = {};
         const bool dm37IdentityCaptured = vfs::capture_mount_identity(
             dm37MountIndex, dm37Identity);
+        storage::TargetIdentity dm37Target = {};
+        vfs::MountPoint dm37Snapshot = {};
+        apps::disk_manager_dismount_ui::CapturedTarget dm37GuiTarget = {};
+        const bool dm37GuiTargetCaptured =
+            storage::capture_target_identity(dm37Index, dm37Target) &&
+            vfs::copy_mount_snapshot(dm37MountIndex, dm37Snapshot) &&
+            apps::disk_manager_dismount_ui::capture_target(
+                dm37Target, dm37Partition, dm37Identity, dm37Snapshot,
+                dm37GuiTarget);
+        const uint32_t flushesBeforeGuiConfirmation = dm37Disk.flushes;
+        check(dm37GuiTargetCaptured &&
+              apps::disk_manager_dismount_ui::partition_table_has_unique_entry(
+                  dm37Table, dm37Partition) &&
+              apps::disk_manager_dismount_ui::binding_matches(
+                  dm37GuiTarget, dm37Target, dm37Identity, dm37Snapshot) &&
+              dm37GuiTarget.mountPath[0] == '/' &&
+              vfs::mount_count() == 1 &&
+              dm37Disk.flushes == flushesBeforeGuiConfirmation,
+              "DM37 GUI target capture binds the exact mounted partition and opening confirmation performs no Flush or dismount");
+
+        storage::PartitionTableModel changedDm37Table = dm37Table;
+        if (changedDm37Table.partitionCount != 0)
+            ++changedDm37Table.partitions[0].startLba;
+        storage::PartitionTableModel duplicateDm37Table = dm37Table;
+        if (duplicateDm37Table.partitionCount < storage::MAX_PARSED_PARTITIONS &&
+            duplicateDm37Table.partitionCount != 0) {
+            duplicateDm37Table.partitions[duplicateDm37Table.partitionCount] =
+                duplicateDm37Table.partitions[0];
+            ++duplicateDm37Table.partitionCount;
+        }
+        check(changedDm37Table.partitionCount != 0 &&
+              !apps::disk_manager_dismount_ui::partition_table_has_unique_entry(
+                  changedDm37Table, dm37Partition) &&
+              !apps::disk_manager_dismount_ui::partition_table_has_unique_entry(
+                  duplicateDm37Table, dm37Partition),
+              "DM37 final confirmation rejects changed or ambiguous captured partition-table identity");
 
         const vfs::HandleToken busyFile = vfs::open(
             "/mnt/dm37/round.bin", vfs::OPEN_READ);
+        vfs::MountPoint dm37BusySnapshot = {};
+        const bool busySnapshotCopied = vfs::copy_mount_snapshot(
+            dm37MountIndex, dm37BusySnapshot);
+        const auto busyAdmission =
+            apps::disk_manager_dismount_ui::admission_reason(
+                dm37GuiTargetCaptured,
+                busySnapshotCopied && dm37IdentityCaptured,
+                false, false, false,
+                dm37BusySnapshot.openFileReferences != 0 ||
+                    dm37BusySnapshot.openDirectoryReferences != 0 ||
+                    dm37BusySnapshot.activeOperations != 0,
+                true);
         const vfs::Status busyFileDismount = dm37IdentityCaptured
             ? vfs::dismount(dm37Identity) : vfs::VFS_ERR_INVALID;
         const vfs::Status busyFileClose = busyFile == vfs::INVALID_HANDLE
@@ -15381,6 +15430,10 @@ int main()
               dm37Mount.error == vfs::PARTITION_MOUNT_OK &&
               dm37Created == static_cast<int32_t>(sizeof(dm37Payload)) &&
               dm37IdentityCaptured && busyFile != vfs::INVALID_HANDLE &&
+              busySnapshotCopied &&
+              dm37BusySnapshot.openFileReferences == 1 &&
+              busyAdmission == apps::disk_manager_dismount_ui::
+                  DISMOUNT_ADMISSION_BUSY &&
               busyFileDismount == vfs::VFS_ERR_BUSY &&
               busyFileClose == vfs::VFS_OK &&
               busyDirectory != vfs::INVALID_HANDLE &&
@@ -15405,6 +15458,12 @@ int main()
         vfs::MountIdentity remountIdentity = {};
         const bool remountIdentityCaptured = vfs::capture_mount_identity(
             remountIndex, remountIdentity);
+        vfs::MountPoint remountSnapshot = {};
+        const bool remountSnapshotCopied = vfs::copy_mount_snapshot(
+            remountIndex, remountSnapshot);
+        const bool replacementRejected = remountSnapshotCopied &&
+            !apps::disk_manager_dismount_ui::binding_matches(
+                dm37GuiTarget, dm37Target, remountIdentity, remountSnapshot);
         const uint32_t flushesBeforeStaleRequest = dm37Disk.flushes;
         const vfs::Status staleDismount = vfs::dismount(dm37Identity);
         uint8_t dm37Readback[sizeof(dm37Payload)] = {};
@@ -15419,6 +15478,7 @@ int main()
               repeatedDismount == vfs::VFS_ERR_MOUNT_STALE &&
               remount.error == vfs::PARTITION_MOUNT_OK &&
               remountIdentityCaptured &&
+              replacementRejected &&
               remountIdentity.mountGeneration != dm37Identity.mountGeneration &&
               staleDismount == vfs::VFS_ERR_MOUNT_STALE &&
               dm37Disk.flushes == flushesBeforeStaleRequest + 1 &&

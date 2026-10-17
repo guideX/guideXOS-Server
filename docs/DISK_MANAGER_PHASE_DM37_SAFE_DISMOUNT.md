@@ -166,3 +166,89 @@ Recommended next work is to connect the identity-based API to the Disk Manager
 confirmation and busy-state UI, add any UI-specific tests, then perform
 source-matched guest qualification. Keep `.phase` at DM36→DM37 until those
 remaining acceptance gates are complete; do not advance to DM38 here.
+
+## DM37 Continuation 2 — production Disk Manager safe-dismount GUI
+
+**Outcome B — `DM37_GUI_READY` for host integration and qualification.** The
+work started from `2a43d1331095cf5a5447475c79e2ca6a78a9a3d7` on
+`DISK_MANAGER_IMPROVEMENTS`. `.phase` remains `last_completed=DM36` and
+`next_expected=DM37`. No QEMU guest or physical media was used; guest lifecycle
+acceptance remains outstanding.
+
+The production Disk Manager in `kernel/core/kernel_apps.cpp` now presents
+**Dismount Volume** for a uniquely identified mounted partition. Inventory
+scanning copies each active mount through `vfs::copy_mount_snapshot()` under
+the VFS metadata lock and matches the partition extent, scheme, GPT GUID or
+MBR type, device registration, registry generation, sector geometry, and
+partition-view generation. Ambiguous matches disable the action. Opening the
+confirmation captures an immutable `MountIdentity`, device target, parsed
+partition, and exact mount path without dismounting or flushing anything.
+
+The final activation revalidates the captured mount and device, lifecycle,
+backing partition, geometry, boot/root/system protection, busy counts, shared
+storage-operation ownership, and durable-write capability. It rereads the
+partition table and rejects a changed, missing, or duplicate partition entry.
+Offline original registrations are reported as removed/unavailable. The
+production call is `vfs::dismount(capturedIdentity)`; VFS admission remains
+authoritative and performs quiescence, FAT teardown, and required durability
+settlement. No duplicate GUI Flush or asynchronous job was added. There is no
+cancel/progress claim during the synchronous call; Close can only be handled
+after it returns. The existing explicit **Mount...** action remains available
+and uses its normal registration and mount admission path.
+
+The confirmation displays device, partition, exact mount path, lifecycle,
+registration/generation, partition extent and sector size, real open-file,
+directory and active-operation counts, and the actual durability capability.
+Cancel and Escape close without dismount. The standard widgets require an
+explicit pointer or keyboard activation; initial focus is Cancel, Tab reaches
+Dismount only while admission is ready, and Enter/Space use the ordinary
+widget dispatcher. Disabled confirmation cannot start. Runtime IDs are
+reported during Disk Manager initialization: Mount 5, Dismount Volume 6,
+Confirm Dismount 11, Cancel/result dismissal 12. A successful result is shown
+only for `VFS_OK`, refreshes the inventory to Unmounted, and states the block
+device remains registered. It does not imply ejection. DM36 Check FAT32 is
+enabled only when its ordinary admission is READY, so a successfully
+dismounted eligible volume can be checked through a separate user action.
+There is no automatic remount, integrity check, repair, format, wipe, or erase.
+Failed terminal paths show the real VFS error and current mount/backing state.
+
+Production-linked host coverage uses a real formatted and mounted FAT32 test
+device to capture the GUI target, verify that confirmation does no dismount or
+Flush, reject changed/duplicate table entries and stale mount generations,
+observe file and directory busy references, exercise active-I/O rejection,
+perform the VFS dismount, and explicitly remount/read back preserved content.
+Widget dispatcher checks cover focus, unrelated textbox Enter, Cancel, disabled
+activation, Space, pointer activation, and repeat activation. These host checks
+exercise shared production VFS and widget code; they do not render the full
+bare-metal Disk Manager or qualify physical keyboard timing.
+
+The final storage suite passed **1,491 checks, 0 failures**. This includes
+DM36 metadata/structural **259/259**, DM36 GUI **31/31**, DM35 scan **48/48**,
+DM35 GUI **34/34**, DM34 wipe **17/17**, whole-disk erase **34/34**, wipe UI
+**31/31**, erase UI **39/39**, and **249 USB checks**. Widget activation passed;
+USB trace classification passed **7/7**, GPT verification **1/1**, and the
+DM30 fixture verifier **1/1**. `git diff --check` passed. The hosted
+`build.bat` completed successfully. The UEFI x64 Release bootloader rebuilt
+successfully. The freestanding AMD64 kernel build with
+`NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0` passed after all final source
+changes, including the partition-table revalidation refinement and responsive
+toolbar sizing. The final isolated build output was written to
+`C:\Users\guideX\AppData\Local\Temp\dm37-gui-kernel-build\`; D: had reported
+zero free bytes during the first attempt. No PacMan source or generated object
+was changed for the known unrelated top-level linker failure.
+
+Final build artifact hashes:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Freestanding AMD64 `kernel.elf` | `6D8DF6E65656B38DEA37F3704EC2639910C074EB448644FDB19FED5B47B7A29B` |
+| Hosted `guideXOSServer.exe` | `C846EFDB1D6AC8695C1E0554AC60A7C5BA230C21E2056597C2CA278F5ACFDA20` |
+| UEFI x64 Release bootloader | `A0F1E0A46D166D1C99828AE07A80C2ECDAF8A2517442C07CB74BC316D5A455C1` |
+
+The pre-existing untracked Python cache remains unchanged at SHA-256
+`B25DA7AB48CCDCDA8A9AE4AC6856770F0D1353B78F39F2EC5A0134D426ED28D5`.
+Implementation, tests, and host evidence are recorded in this continuation.
+Review, commit, and the single requested push attempt remain to be recorded.
+Guest/QEMU safe-dismount, durability-failure,
+removal/replacement, Close, and visual/input acceptance remain the next DM37
+continuation. Do not advance `.phase` or begin DM38.
