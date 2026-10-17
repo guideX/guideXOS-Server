@@ -602,10 +602,19 @@ function Write-C172HostedTestManifest([string]$EvidenceRoot,[string]$HostManifes
     [string]$SourceHead) {
     $hostManifest = Get-Content -LiteralPath $HostManifestPath -Raw | ConvertFrom-Json
     $hostSummaryValid = if ($script:c173ManagedFileExplorerResize) {
-        $hostManifest.phase -eq 'C173-managed-file-explorer-resize-host-regression' -and
-        $hostManifest.focusedSummary.suites -eq 22 -and
-        $hostManifest.focusedSummary.cases -eq 710 -and
-        $hostManifest.c173ManagedFileExplorerResize.focusedCases -eq 47
+        $legacyC173Host = $hostManifest.phase -eq
+            'C173-managed-file-explorer-resize-host-regression' -and
+            $hostManifest.focusedSummary.suites -eq 22 -and
+            $hostManifest.focusedSummary.cases -eq 710
+        $c174Host = $hostManifest.phase -eq
+            'C174-shared-managed-resize-host-regression' -and
+            $hostManifest.focusedSummary.suites -eq 24 -and
+            $hostManifest.focusedSummary.cases -eq 736 -and
+            $hostManifest.c174SharedManagedResize.focusedCases -eq 22 -and
+            $hostManifest.c174SharedManagedResize.hotPathAllocationBytes -eq 0 -and
+            $hostManifest.c174SharedManagedResize.driftCount -eq 0
+        ($legacyC173Host -or $c174Host) -and
+            $hostManifest.c173ManagedFileExplorerResize.focusedCases -eq 47
     } else {
         $hostManifest.phase -eq 'C172-managed-window-resize-host-regression' -and
         $hostManifest.focusedSummary.suites -eq 20 -and
@@ -689,6 +698,8 @@ function Write-C172FocusedProofManifest([string]$EvidenceRoot,[string]$SourceMan
         'kernel/core/nativeaot_application.cpp',
         'samples/managed/HostLogProof/Applications/ManagedSettingsCenter.cs',
         'samples/managed/HostLogProof/GuideXos/GuideXosManagedWindowGeometryC172.cs',
+        'samples/managed/HostLogProof/GuideXos/GuideXosManagedWindowResizeC174.cs',
+        'samples/managed/HostLogProof/GuideXos/GuideXosManagedWindowResizeC174Tests.cs',
         'samples/managed/HostLogProof/GuideXos/GuideXosManagedWindowResizeC172Tests.cs',
         'samples/managed/HostLogProof/HostLogProof.csproj',
         'samples/host/ManagedUiRegression/ManagedUiRegression.csproj',
@@ -1052,8 +1063,11 @@ function Write-C173ProductionAcceptanceManifest([string]$EvidenceRoot,
     $sourceFiles = [System.Collections.Generic.List[object]]::new()
     foreach ($relativePath in @(
         'kernel/core/nativeaot_application.cpp',
+        'samples/managed/HostLogProof/Applications/ManagedSettingsCenter.cs',
         'samples/managed/HostLogProof/Applications/ManagedFileExplorerC163.cs',
         'samples/managed/HostLogProof/GuideXos/GuideXosManagedFileExplorerC163.cs',
+        'samples/managed/HostLogProof/GuideXos/GuideXosManagedWindowResizeC174.cs',
+        'samples/managed/HostLogProof/GuideXos/GuideXosManagedWindowResizeC174Tests.cs',
         'samples/managed/HostLogProof/GuideXos/GuideXosListBox.cs',
         'samples/managed/HostLogProof/GuideXos/GuideXosManagedWindowResizeC173Tests.cs',
         'samples/managed/HostLogProof/GuideXos/GuideXosFileExplorerC163Tests.cs',
@@ -1507,12 +1521,12 @@ function Invoke-ProofQemuBoot([string]$Stage, [string]$Ramdisk,
     $stdoutPath = Join-Path $BootRoot 'qemu.stdout.log'
     $stderrPath = Join-Path $BootRoot 'qemu.stderr.log'
     $qmpLogPath = Join-Path $BootRoot 'qmp-input.log'
-    $activeQemu = @(Get-CimInstance Win32_Process -Filter "Name = 'qemu-system-x86_64.exe'")
-    if ($activeQemu.Count -gt 0) {
-        $formatted = ($activeQemu | ForEach-Object {
+    $workspaceQemu = @(Get-C166WorkspaceQemuOwners $RepoRoot)
+    if ($workspaceQemu.Count -gt 0) {
+        $formatted = ($workspaceQemu | ForEach-Object {
             "pid=$($_.ProcessId) exe=$($_.ExecutablePath) cmd=$($_.CommandLine)"
         }) -join "`n"
-        throw "QEMU lane is occupied before $Stage; no active process was terminated.`n$formatted"
+        throw "This workspace's QEMU lane is occupied before $Stage; no active process was terminated.`n$formatted"
     }
     New-Item -ItemType Directory -Force -Path $BootRoot | Out-Null
     Set-Content -LiteralPath $qmpLogPath -Value '' -Encoding ASCII
@@ -1692,6 +1706,16 @@ function Read-C166QmpResponse([System.IO.Stream]$Stream, [int]$Seconds = 3) {
     return $builder.ToString()
 }
 
+function Append-C166QmpLog([string]$LogPath,[string]$Entry) {
+    $bytes = [System.Text.Encoding]::ASCII.GetBytes($Entry + [Environment]::NewLine)
+    $file = [System.IO.File]::Open($LogPath,[System.IO.FileMode]::Append,
+        [System.IO.FileAccess]::Write,[System.IO.FileShare]::ReadWrite)
+    try {
+        $file.Write($bytes,0,$bytes.Length)
+        $file.Flush()
+    } finally { $file.Dispose() }
+}
+
 function Send-C166QmpEvents([int]$Port, [object[]]$Events,
     [string]$LogPath, [int]$DelayMilliseconds = 45) {
     if ($Events.Count -eq 0) { return }
@@ -1712,7 +1736,7 @@ function Send-C166QmpEvents([int]$Port, [object[]]$Events,
             $bytes = [System.Text.Encoding]::ASCII.GetBytes($request + "`n")
             $stream.Write($bytes, 0, $bytes.Length); $stream.Flush()
             $response = Read-C166QmpResponse $stream
-            Add-Content -LiteralPath $LogPath -Value ("event={0}`ngreeting={1}`ncapabilities={2}`nresponse={3}" -f $request,$greeting,$capabilities,$response) -Encoding ASCII
+            Append-C166QmpLog $LogPath ("event={0}`ngreeting={1}`ncapabilities={2}`nresponse={3}" -f $request,$greeting,$capabilities,$response)
             if ($response -match '"error"') { throw "C166 QMP input event failed: $response" }
             if ($DelayMilliseconds -gt 0) { Start-Sleep -Milliseconds $DelayMilliseconds }
         }
@@ -1738,7 +1762,7 @@ function Send-C166QmpCommand([int]$Port, [string]$Command,
         $bytes = [System.Text.Encoding]::ASCII.GetBytes($request + "`n")
         $stream.Write($bytes, 0, $bytes.Length); $stream.Flush()
         $response = Read-C166QmpResponse $stream
-        Add-Content -LiteralPath $LogPath -Value ("command={0}`ngreeting={1}`ncapabilities={2}`nresponse={3}" -f $request,$greeting,$capabilities,$response) -Encoding ASCII
+        Append-C166QmpLog $LogPath ("command={0}`ngreeting={1}`ncapabilities={2}`nresponse={3}" -f $request,$greeting,$capabilities,$response)
         if ($response -match '"error"') { throw "C166 QMP command '$Command' failed: $response" }
         return $response
     } finally { $client.Dispose() }
@@ -3075,6 +3099,10 @@ function Invoke-C173CrossApplicationIsolation([object]$Boot,[string]$EvidenceRoo
 
     Launch-C166ManagedFileExplorer $Boot
     $helloRow = Navigate-C166ManagedExplorerToHello $Boot
+    [void](Focus-C173ExistingFileExplorer $Boot)
+    $explorerAfterFocus = Get-C173ManagedExplorerState (Get-C166Serial $Boot.serialPath)
+    Assert-C173ManagedExplorerState $explorerAfterFocus '/system/apps/C164' 'hello.txt' 'File' `
+        "$Stage cross-application Explorer focus" | Out-Null
     $explorerIdentity = Get-C173ManagedExplorerIdentity (Get-C166Serial $Boot.serialPath)
     if ($explorerIdentity.window -eq $settingsIdentity.window -or
         $explorerIdentity.generation -eq $settingsIdentity.generation) {
@@ -3139,7 +3167,19 @@ function Invoke-C173CrossApplicationIsolation([object]$Boot,[string]$EvidenceRoo
             (Join-Path $EvidenceRoot "$Stage-c173-settings-concurrent-restored.ppm")
     }
     foreach ($resize in $settingsResizes) {
-        $size = if ($resize.outerWindow) { $resize.outerWindow } else { $resize.requestedOuterWindow }
+        $size = $null
+        if ($resize -is [System.Collections.IDictionary]) {
+            if ($resize.Contains('outerWindow')) { $size = $resize['outerWindow'] }
+            elseif ($resize.Contains('requestedOuterWindow')) { $size = $resize['requestedOuterWindow'] }
+        } else {
+            $outerWindowProperty = $resize.PSObject.Properties['outerWindow']
+            $requestedOuterWindowProperty = $resize.PSObject.Properties['requestedOuterWindow']
+            if ($outerWindowProperty) { $size = $outerWindowProperty.Value }
+            elseif ($requestedOuterWindowProperty) { $size = $requestedOuterWindowProperty.Value }
+        }
+        if ($null -eq $size) {
+            throw 'C173 Settings resize evidence has no measured or requested outer geometry.'
+        }
         $screenshots.Add([ordered]@{path=$resize.screenshot;sha256=$resize.screenshotSha256;application='ManagedSettings';outer=$size})
     }
 
@@ -3973,8 +4013,11 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
         $c173SourceFiles=[System.Collections.Generic.List[object]]::new()
         foreach ($relativePath in @(
             'kernel/core/nativeaot_application.cpp',
+            'samples/managed/HostLogProof/Applications/ManagedSettingsCenter.cs',
             'samples/managed/HostLogProof/Applications/ManagedFileExplorerC163.cs',
             'samples/managed/HostLogProof/GuideXos/GuideXosManagedFileExplorerC163.cs',
+            'samples/managed/HostLogProof/GuideXos/GuideXosManagedWindowResizeC174.cs',
+            'samples/managed/HostLogProof/GuideXos/GuideXosManagedWindowResizeC174Tests.cs',
             'samples/managed/HostLogProof/GuideXos/GuideXosListBox.cs',
             'samples/managed/HostLogProof/GuideXos/GuideXosManagedWindowResizeC173Tests.cs',
             'samples/managed/HostLogProof/GuideXos/GuideXosFileExplorerC163Tests.cs',

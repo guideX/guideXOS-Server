@@ -17,7 +17,11 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
     public const int MinimumWindowHeight = 360;
     public const int MaximumWindowWidth = 960;
     public const int MaximumWindowHeight = 526;
-    public const int NativeTitlebarHeight = 24;
+    public const int NativeTitlebarHeight =
+        GuideXosManagedWindowResizeBoundsC174.NativeTitlebarHeight;
+    internal static readonly GuideXosManagedWindowResizeBoundsC174 ResizeBounds =
+        new(MinimumWindowWidth, MinimumWindowHeight, MaximumWindowWidth,
+            MaximumWindowHeight);
 
 #if HOSTLOGPROOF_C163_FILE_EXPLORER_PROOF
     private static bool s_proofTestsRun;
@@ -210,19 +214,36 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
 
         int priorWidth = _controller.WindowWidth;
         int priorHeight = _controller.WindowHeight;
+        GuideXosManagedWindowResizeTransactionC174 transaction = new(
+            in ResizeBounds, priorWidth, priorHeight, outerWidth, outerHeight);
+        if (!transaction.IsValid)
+        {
+#if GUIDEXOS_PROOF_CONTROL
+            host.TryLog("C173-MANAGED-GEOMETRY result=REJECT layout=unchanged"u8);
+            LogC173State(host);
+#endif
+            return transaction.Result;
+        }
         int priorOffset = _controller.FirstVisibleIndex;
         string priorPath = _controller.Browser.CurrentPath;
         int priorSelectedIndex = _controller.Browser.SelectedIndex;
         GuideXosDirectoryEntry priorSelection =
             _controller.Browser.SelectedEntry;
         int priorFocusId = _controller.Controls.ActiveControlId;
-        if (!_controller.TryRecomputeLayout(outerWidth, outerHeight))
+        GuideXosManagedWindowResizeCandidateC174 candidate =
+            transaction.Candidate;
+        bool layoutAccepted = _controller.TryRecomputeLayout(in candidate);
+        if (!layoutAccepted)
         {
+            _ = transaction.Complete(layoutAccepted: false,
+                renderResult: GuideXosResult.Success,
+                stateAccepted: false);
+            RollbackLiveGeometry(surface, in transaction, priorOffset);
 #if GUIDEXOS_PROOF_CONTROL
             host.TryLog("C173-MANAGED-GEOMETRY result=REJECT layout=unchanged"u8);
             LogC173State(host);
 #endif
-            return GuideXosResult.InvalidArgument;
+            return transaction.Result;
         }
 
         GuideXosResult rendered = _controller.Render(surface);
@@ -235,18 +256,16 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
             _controller.Browser.SelectedIndex == priorSelectedIndex &&
             ReferenceEquals(priorSelection,
                 _controller.Browser.SelectedEntry);
-        if (rendered != GuideXosResult.Success || !transientStateClear ||
-            !focusRetained || !directoryStateRetained)
+        bool stateAccepted = transientStateClear && focusRetained &&
+            directoryStateRetained;
+        if (!transaction.Complete(layoutAccepted, rendered, stateAccepted))
         {
-            _controller.TryRecomputeLayout(priorWidth, priorHeight);
-            _controller.List.SetFirstVisibleIndex(priorOffset);
-            _ = _controller.Render(surface);
+            RollbackLiveGeometry(surface, in transaction, priorOffset);
 #if GUIDEXOS_PROOF_CONTROL
             host.TryLog("C173-MANAGED-GEOMETRY result=REJECT stage=render-or-state rollback=attempted"u8);
             LogC173State(host);
 #endif
-            return rendered == GuideXosResult.Success
-                ? GuideXosResult.InvalidArgument : rendered;
+            return transaction.Result;
         }
 
 #if GUIDEXOS_PROOF_CONTROL
@@ -274,6 +293,17 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
 #endif
 #endif
         return GuideXosResult.Success;
+    }
+
+    private void RollbackLiveGeometry(GuideXosSurface surface,
+        in GuideXosManagedWindowResizeTransactionC174 transaction,
+        int priorOffset)
+    {
+        if (!transaction.RequiresRollback) return;
+        _controller.TryRecomputeLayout(transaction.PriorOuterWidth,
+            transaction.PriorOuterHeight);
+        _controller.List.SetFirstVisibleIndex(priorOffset);
+        _ = _controller.Render(surface);
     }
 
 #if GUIDEXOS_PROOF_CONTROL

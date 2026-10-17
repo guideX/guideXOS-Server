@@ -452,14 +452,21 @@ internal sealed class GuideXosFileExplorerControllerC163
     /// </summary>
     public bool TryRecomputeLayout(int outerWidth, int outerHeight)
     {
-        if (outerWidth < Applications.ManagedFileExplorerC163.MinimumWindowWidth ||
-            outerHeight < Applications.ManagedFileExplorerC163.MinimumWindowHeight ||
-            outerWidth > Applications.ManagedFileExplorerC163.MaximumWindowWidth ||
-            outerHeight > Applications.ManagedFileExplorerC163.MaximumWindowHeight)
+        if (!Applications.ManagedFileExplorerC163.ResizeBounds.TryCreateCandidate(
+                outerWidth, outerHeight,
+                out GuideXosManagedWindowResizeCandidateC174 geometry))
             return false;
+        return TryRecomputeLayout(in geometry);
+    }
 
-        int clientHeight = outerHeight -
-            Applications.ManagedFileExplorerC163.NativeTitlebarHeight;
+    internal bool TryRecomputeLayout(
+        in GuideXosManagedWindowResizeCandidateC174 geometry)
+    {
+        if (!geometry.IsValid) return false;
+        int outerWidth = geometry.OuterWidth;
+        int outerHeight = geometry.OuterHeight;
+
+        int clientHeight = geometry.ClientHeight;
         int detailX = outerWidth - 280;
         int listWidthCharacters = (detailX - 12 - ScrollBarWidth - ListX) /
             GuideXosLabel.CharacterWidth;
@@ -487,8 +494,11 @@ internal sealed class GuideXosFileExplorerControllerC163
                 listWidthCharacters, visibleRows, buttonY, statusY,
                 pathWidth, detailWidth))
         {
-            int priorClientHeight = priorHeight -
-                Applications.ManagedFileExplorerC163.NativeTitlebarHeight;
+            if (!Applications.ManagedFileExplorerC163.ResizeBounds
+                    .TryCreateCandidate(priorWidth, priorHeight,
+                        out GuideXosManagedWindowResizeCandidateC174 priorGeometry))
+                return false;
+            int priorClientHeight = priorGeometry.ClientHeight;
             int priorDetailX = priorWidth - 280;
             int priorListWidth = (priorDetailX - 12 - ScrollBarWidth - ListX) /
                 GuideXosLabel.CharacterWidth;

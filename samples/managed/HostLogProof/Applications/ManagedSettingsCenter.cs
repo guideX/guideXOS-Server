@@ -66,7 +66,11 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     internal const int CompactWindowHeight = 260;
     internal const int ExpandedWindowWidth = 720;
     internal const int ExpandedWindowHeight = 420;
-    private const int NativeTitlebarHeight = 24;
+    private const int NativeTitlebarHeight =
+        GuideXosManagedWindowResizeBoundsC174.NativeTitlebarHeight;
+    private static readonly GuideXosManagedWindowResizeBoundsC174 ResizeBounds =
+        new(MinimumWindowWidth, MinimumWindowHeight, MaximumWindowWidth,
+            MaximumWindowHeight);
     private const int ViewId = 1;
     private const int ScrollBarId = 2;
     private const int DensityComboId = 3;
@@ -973,50 +977,79 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
                 GuideXosResult.Success || surface == null)
             return GuideXosResult.SurfaceCreationFailed;
 
-        int priorWidth = _windowWidth;
-        int priorHeight = _windowHeight;
-        int priorFocusId = _controlHost.ActiveControlId;
-        object priorFocusedMember = _view.FocusedMember;
-        if (!TryApplyLiveGeometry(outerWidth, outerHeight,
-                out bool geometryChanged))
+        GuideXosManagedWindowResizeTransactionC174 transaction = new(
+            in ResizeBounds, _windowWidth, _windowHeight, outerWidth,
+            outerHeight);
+        if (!transaction.IsValid)
         {
 #if GUIDEXOS_PROOF_CONTROL
             host.TryLog("C172-MANAGED-GEOMETRY result=REJECT layout=unchanged"u8);
 #endif
-            return GuideXosResult.InvalidArgument;
+            return transaction.Result;
         }
-        if (!geometryChanged) return GuideXosResult.Success;
+        if (!transaction.IsChanged) return GuideXosResult.Success;
+
+        int priorFocusId = _controlHost.ActiveControlId;
+        object priorFocusedMember = _view.FocusedMember;
+        int priorOffset = _view.Offset;
+        GuideXosManagedWindowResizeCandidateC174 candidate =
+            transaction.Candidate;
+        bool layoutAccepted = TryRecomputeLayout(in candidate);
+        if (!layoutAccepted)
+        {
+            _ = transaction.Complete(layoutAccepted: false,
+                renderResult: GuideXosResult.Success,
+                stateAccepted: false);
+            RollbackLiveGeometry(host, surface, in transaction, priorOffset,
+                priorFocusId, priorFocusedMember);
+#if GUIDEXOS_PROOF_CONTROL
+            host.TryLog("C172-MANAGED-GEOMETRY result=REJECT stage=layout rollback=attempted"u8);
+#endif
+            return transaction.Result;
+        }
 
         GuideXosResult rendered = Render(host, surface);
-        if (rendered == GuideXosResult.Success)
+        bool transientStateCleared = !PopupOpen && !HasCapture;
+        bool focusRetained = _controlHost.ActiveControlId == priorFocusId &&
+            ReferenceEquals(_view.FocusedMember, priorFocusedMember);
+        if (!transaction.Complete(layoutAccepted, rendered,
+                transientStateCleared && focusRetained))
         {
-            bool transientStateCleared = !PopupOpen && !HasCapture;
-            bool focusRetained = _controlHost.ActiveControlId == priorFocusId &&
-                ReferenceEquals(_view.FocusedMember, priorFocusedMember);
-            if (!transientStateCleared || !focusRetained)
-            {
-                if (TryRecomputeLayout(priorWidth, priorHeight))
-                    _ = Render(host, surface);
+            RollbackLiveGeometry(host, surface, in transaction, priorOffset,
+                priorFocusId, priorFocusedMember);
 #if GUIDEXOS_PROOF_CONTROL
-                host.TryLog("C172-MANAGED-GEOMETRY result=REJECT stage=transient-state rollback=attempted"u8);
+            host.TryLog(transaction.Failure ==
+                GuideXosManagedWindowResizeFailureC174.Render
+                    ? "C172-MANAGED-GEOMETRY result=REJECT stage=render rollback=attempted"u8
+                    : "C172-MANAGED-GEOMETRY result=REJECT stage=transient-state rollback=attempted"u8);
 #endif
-                return GuideXosResult.InvalidArgument;
-            }
-#if GUIDEXOS_PROOF_CONTROL
-            host.TryLog("C172-MANAGED-GEOMETRY layout=recomputed popup=dismissed capture=none focus=retained result=PASS"u8);
-#endif
-            return rendered;
+            return transaction.Result;
         }
-
-        // The compositor publishes the candidate geometry only after this
-        // action succeeds. Restore the prior managed layout before asking the
-        // native resize transaction to roll back its window rectangle.
-        if (TryRecomputeLayout(priorWidth, priorHeight))
-            _ = Render(host, surface);
 #if GUIDEXOS_PROOF_CONTROL
-        host.TryLog("C172-MANAGED-GEOMETRY result=REJECT stage=render rollback=attempted"u8);
+        host.TryLog("C172-MANAGED-GEOMETRY layout=recomputed popup=dismissed capture=none focus=retained result=PASS"u8);
 #endif
-        return rendered;
+        return transaction.Result;
+    }
+
+    private void RollbackLiveGeometry(GuideXosHost host,
+        GuideXosSurface surface,
+        in GuideXosManagedWindowResizeTransactionC174 transaction,
+        int priorOffset, int priorFocusId, object priorFocusedMember)
+    {
+        if (!transaction.RequiresRollback ||
+            !TryRecomputeLayout(transaction.PriorOuterWidth,
+                transaction.PriorOuterHeight))
+            return;
+
+        _view.SetOffset(Math.Min(priorOffset, _view.MaximumOffset));
+        _scrollBar.Value = _view.Offset;
+        SyncScrollBarVisibility();
+        _controlHost?.RefreshVisibility();
+        if (priorFocusId != 0) _controlHost?.TryFocus(priorFocusId);
+        if (priorFocusedMember != null &&
+            _view.ContainsMember(priorFocusedMember))
+            _view.TryFocusMember(priorFocusedMember);
+        _ = Render(host, surface);
     }
 
     private bool TryApplyLiveGeometry(
@@ -1025,7 +1058,10 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         geometryChanged = outerWidth != _windowWidth ||
             outerHeight != _windowHeight;
         if (!geometryChanged) return true;
-        return TryRecomputeLayout(outerWidth, outerHeight);
+        if (!ResizeBounds.TryCreateCandidate(outerWidth, outerHeight,
+                out GuideXosManagedWindowResizeCandidateC174 candidate))
+            return false;
+        return TryRecomputeLayout(in candidate);
     }
 
     internal bool InitializeForTests()
@@ -1520,15 +1556,26 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     private static bool TryCalculateLayout(int windowWidth, int windowHeight,
         out WindowLayout layout)
     {
-        layout = default;
-        if (windowWidth < MinimumWindowWidth ||
-            windowWidth > MaximumWindowWidth ||
-            windowHeight < MinimumWindowHeight ||
-            windowHeight > MaximumWindowHeight)
+        if (!ResizeBounds.TryCreateCandidate(windowWidth, windowHeight,
+                out GuideXosManagedWindowResizeCandidateC174 geometry))
+        {
+            layout = default;
             return false;
+        }
+        return TryCalculateLayout(in geometry, out layout);
+    }
 
-        int clientWidth = windowWidth;
-        int clientHeight = windowHeight - NativeTitlebarHeight;
+    private static bool TryCalculateLayout(
+        in GuideXosManagedWindowResizeCandidateC174 geometry,
+        out WindowLayout layout)
+    {
+        layout = default;
+        if (!geometry.IsValid) return false;
+        int windowWidth = geometry.OuterWidth;
+        int windowHeight = geometry.OuterHeight;
+
+        int clientWidth = geometry.ClientWidth;
+        int clientHeight = geometry.ClientHeight;
         int viewY = clientWidth < SurfaceWidth ? 118 : 96;
         int viewWidth = clientWidth - 56;
         int viewHeight = clientHeight - viewY - 20;
@@ -1600,7 +1647,16 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 
     private bool TryRecomputeLayout(int windowWidth, int windowHeight)
     {
-        if (!TryCalculateLayout(windowWidth, windowHeight,
+        if (!ResizeBounds.TryCreateCandidate(windowWidth, windowHeight,
+                out GuideXosManagedWindowResizeCandidateC174 geometry))
+            return false;
+        return TryRecomputeLayout(in geometry);
+    }
+
+    private bool TryRecomputeLayout(
+        in GuideXosManagedWindowResizeCandidateC174 geometry)
+    {
+        if (!TryCalculateLayout(in geometry,
                 out WindowLayout next))
             return false;
 

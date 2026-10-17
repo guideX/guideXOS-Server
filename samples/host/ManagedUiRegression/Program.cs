@@ -103,5 +103,15 @@ allPassed &= c173StressPassed;
 Console.WriteLine($"C173-STRESS layoutUpdates={GuideXosManagedWindowResizeC173Tests.StressLayoutUpdates} alternatingResizes={GuideXosManagedWindowResizeC173Tests.StressAlternatingResizes} selections={GuideXosManagedWindowResizeC173Tests.StressSelectionTransitions} scrolls={GuideXosManagedWindowResizeC173Tests.StressScrollOperations} keyboard={GuideXosManagedWindowResizeC173Tests.StressKeyboardNavigations} navigationResize={GuideXosManagedWindowResizeC173Tests.StressNavigationResizeOperations} lifecycles={GuideXosManagedWindowResizeC173Tests.StressLifecycleCycles} allocationBytes={GuideXosManagedWindowResizeC173Tests.StressLayoutAllocationBytes} drift={GuideXosManagedWindowResizeC173Tests.StressDriftCount} result={(c173StressPassed ? "PASS" : "FAIL")}");
 Console.WriteLine($"C173-STRESS-DETAIL failure={GuideXosManagedWindowResizeC173Tests.StressFailureDetail}");
 
+allPassed &= RunSuite("C174-SharedResize",
+    GuideXosManagedWindowResizeC174Tests.CaseCount,
+    () => GuideXosManagedWindowResizeC174Tests.Run(null));
+Console.WriteLine($"C174-WINDOW-RESIZE-DETAIL firstFailedCase={GuideXosManagedWindowResizeC174Tests.FirstFailedCase}");
+bool c174StressPassed = RunSuite("C174-Stress",
+    GuideXosManagedWindowResizeC174Tests.StressCaseCount,
+    () => GuideXosManagedWindowResizeC174Tests.RunStress(null));
+allPassed &= c174StressPassed;
+Console.WriteLine($"C174-STRESS geometry={GuideXosManagedWindowResizeC174Tests.StressGeometryTransitions} alternating={GuideXosManagedWindowResizeC174Tests.StressAlternatingCycles} isolation={GuideXosManagedWindowResizeC174Tests.StressIsolationTransitions} rollback={GuideXosManagedWindowResizeC174Tests.StressRollbackCount} allocationBytes={GuideXosManagedWindowResizeC174Tests.StressAllocationBytes} drift={GuideXosManagedWindowResizeC174Tests.StressDriftCount} result={(c174StressPassed ? "PASS" : "FAIL")}");
+
 Console.WriteLine($"MANAGED-UI-HOST-GATE suites={passedSuites + failedSuites} passed={passedSuites} failed={failedSuites} cases={totalCases} result={(allPassed && failedSuites == 0 ? "PASS" : "FAIL")}");
 return allPassed && failedSuites == 0 ? 0 : 1;
