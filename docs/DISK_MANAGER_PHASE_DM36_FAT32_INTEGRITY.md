@@ -1,6 +1,6 @@
 # Disk Manager DM36 — Read-Only FAT32 Integrity
 
-**Current outcome: Outcome B — `BLOCKED_BY_FOREIGN_QEMU`**
+**Current outcome: Outcome A — DM36 accepted (continuation 9 closeout)**
 **Phase marker:** `last_completed=DM35`, `next_expected=DM36`
 **Current scope:** bounded, host-tested FAT32 metadata, cluster-chain, directory, and allocation checks are integrated into the production Disk Manager GUI. The source-matched DM36 guest passed the clean FAT32 partition check, but the remaining mandatory guest gates are incomplete because a sibling project owns an active QEMU guest. This does not claim complete DM36 or general filesystem-health certification.
 
@@ -816,3 +816,170 @@ details are qualified, the narrow B2 renderer defect is fixed and
 requalified, and B1/B2 images remained unchanged, but mandatory lifecycle
 acceptance remains incomplete. `.phase` remains
 `last_completed=DM35`, `next_expected=DM36`. No DM37 work is ready or included.
+
+## Continuation 9 — final guest acceptance and phase closeout
+
+### Repository, source, and QEMU ownership
+
+This closeout started at full HEAD
+`31cbc0085786020041ba7f1a749b5dfab9198446` on
+`DISK_MANAGER_IMPROVEMENTS`; `.phase` still said DM35→DM36. This is the
+source revision containing the previously committed observed-cluster
+renderer correction. No production source changed during this closeout. The
+acceptance guest was built and staged from this exact source revision.
+
+The owned acceptance run is `C8-C-stop-retry-20261017`, with its
+`owner-manifest.json` at
+`out/dm36/fat32-integrity/runs/C8-C-stop-retry-20261017/owner-manifest.json`.
+It records QEMU 11.0.0 executable SHA-256
+`A930E028F93D0FA47E4D58BDAD2432F7466DC2B6AF0AE376F77EF7A298FFDD02`,
+visible GTK display, guest PID 27644 during the run, and QMP
+`127.0.0.1:61444`. Source revision was
+`31cbc0085786020041ba7f1a749b5dfab9198446`; production and staged kernel
+SHA-256 were both
+`B7DFB46C2C15F9D1B0BA39B4025C47940AA07E8F23EE48837F7779A00A67B079`;
+production and staged bootloader SHA-256 were both
+`51C7BD0E16DC54FF843EFFA615738E2F4208F8D8729111D8C4C99BA4732889A9`;
+OVMF SHA-256 was
+`2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792`.
+The runtime ESP was `out/dm36-continuation8-fix/runtime/esp`. Every test
+target was attached read-only; no physical host storage was attached and
+`NVME_WRITE_PROVEN=0`, `NVME_FLUSH_PROVEN=0`.
+
+The owned GTK guest was in the foreground while these guest scenarios ran.
+After all operations settled, it was safely quit; QMP port 61444 closed and
+the fixture images could be independently hashed. A later fresh census found
+only QEMU PID 11244 from the sibling
+`D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT` project, using QMP
+`127.0.0.1:62951` with `-display none`. That foreign guest was left untouched.
+No second guest was launched while it remained active. The saved guest
+captures below are the available visual evidence; the DM36-owned live guest
+is no longer running.
+
+### Findings and navigation (A/B)
+
+Gate A remains accepted: clean FAT32 passed with zero inconsistencies and
+orphans, 40 checker READ(10) operations / 925,184 bytes, no modifying I/O,
+and ownership released.
+
+The corrected source-matched B1 display showed **Cluster-chain loop**,
+structural inconsistency, FAT LBA 3310, expected 3, observed cluster **4**.
+B2 showed **Orphaned allocation**, structural inconsistency, FAT LBA
+1228750, expected 0, observed cluster **76594**. The earlier B1 capture was
+made before the orphan-only renderer fix; the loop rendering path was not
+changed by it. B2 was captured with the corrected production renderer. Both
+results correspond to the documented mutations in both FAT copies and show
+no fabricated metadata or filenames. The captures and trace evidence remain
+in the C8 B1/B2 run directories documented above.
+
+Previous and Next were activated on the single-finding B1 result; the view
+remained at Finding 1 of 1. This confirms activation and stable behavior for
+that fixture. No two-finding guest fixture was run. Existing production-linked
+host navigation tests cover zero- and multiple-finding cases, as allowed by
+the acceptance instructions.
+
+### Lifecycle gates C–H
+
+**C — dedicated Stop: PASS.** On disposable read-only `DM36STOP01`, the
+`C8-fat32-check-start.png` capture shows the FAT32 integrity checker
+Running with 131,072 FAT bytes compared and the dedicated Stop Check widget
+visible. After that control was activated, the guest reached **Stopped**;
+the `C8-fat32-stop-terminal.png` and `C8-fat32-stop-settled.png` captures
+show unchecked structures remained unverified, no repair was performed,
+and storage ownership was released. Terminal and settled trace offsets both
+remained 437,199. At terminal, cumulative target counters were 3,106 reads /
+133,721,600 bytes, zero writes / write bytes, zero failed reads, zero
+unmaps, and one Flush already present at registration.
+
+**D — application Close: PASS.** A separate genuine check was active when
+Alt+F4 was sent through the normal compositor. The serial log records the
+Disk Manager close request and `close-result=accepted`; the window closed,
+the guest desktop remained, and the checker did not report a false clean
+result. The terminal trace offset was 590,857; counters were 4,249 reads /
+136,374,272 bytes, zero writes / write bytes, zero failed reads, zero
+unmaps, and one registration-baseline Flush. Captures include
+`C8-close-retry-started.png`, `C8-close-retry-after-qmp-altf4.png`, and
+`C8-close-terminal.png`.
+
+**E — removal and replacement: PASS.** While the `DM36REMOVE01` check was
+active, QMP removed the original device by its verified ID. The GUI reported
+`Target removed or invalidated`; the terminal result was not clean, ownership
+released, and the UI reported 18 metadata reads / 395,776 bytes and 196,608
+of 306,688 FAT bytes compared. The trace stopped at offset 681,541 and
+remained unchanged through settled state, with no post-terminal reads from
+the old registration. Only after settlement was same-capacity `DM36REPL01`
+attached. It registered as a new device/generation, showed no inherited job,
+and opened a fresh read-only FAT32 admission dialog without starting a
+checker. Its admission snapshot showed 396 reads / 202,752 bytes, zero
+failed reads, writes, write bytes, and unmaps, and one registration-baseline
+Flush. The `C8-E-removal-*.png` and `C8-E-replacement-admission-dialog.png`
+captures document the transition.
+
+**F — actual checker read error: PASS.** A read-only blkdebug backend
+injected one `EIO` on sector 3294 of `DM36ERROR01`, a sector the checker
+reads. Disk Manager displayed **State: Read error**, request LBA 3294,
+count 1, status `BLOCK_ERR_IO`; the operation-specific UI counter showed
+29 metadata reads / 617,472 bytes and all 306,688 FAT bytes compared. QEMU
+counted one failed read. Terminal and settled trace offsets both remained
+844,108. At terminal, the target backend had 686 reads / 954,368 bytes and
+one failed read; writes, write bytes, and unmaps were zero, and the single
+Flush was already present before checker start. The captured result is
+`C8-F-read-error-terminal.png`; the injection config and its hash are
+`DM36-F-read-error.conf`,
+`9A58248A482DC7BA98852928EFBBE438FF58BB6614982B6604C055A5970AF3F9`.
+
+**G — integrity and closure: PASS.** Every guest target was read-only. QMP
+target counters showed zero writes, write bytes, and unmaps; Flush remained
+at the registration baseline, including the single pre-check Flush in the
+read-error run. Checker result counters and QEMU-wide block counters were
+kept distinct where unrelated enumeration, registration, mount, and GUI
+reads were present. Once the owned QEMU exited, QMP port 61444 was closed
+and full-file hashes were read successfully. Initial and final SHA-256
+matched for every fixture:
+
+| Fixture | Initial and final SHA-256 |
+| --- | --- |
+| `DM36STOP01`, `DM36REMOVE01`, `DM36REPL01`, `DM36ERROR01`, `DM36MOUNT01` | `C2E22CEA70DE015E6E551CBC31CAE918135B0EEAC526AD411DEE7EE5392A30F2` |
+| `DM36LOOP01` | `25F764F83C60D3C0208092C1E2A0CBF945675F32132B4590795A8853F7B6B316` |
+| `DM36ORPHAN01` | `0E8944010169B8ACE8FE509492982AFDE8F5714DC9A5F70C092540F067AEF6A1` |
+
+**H — mounted-target rejection: PASS.** The read-only `DM36MOUNT01`
+volume was mounted in the guest at `/mnt/disk1-part1`; Disk Manager showed
+one mounted partition and the explicit Unmount action. Check FAT32 admission
+identified serial `DM36MOUNT01` and rejected the request with `A volume on
+this device is mounted; unmount it explicitly first`; Start Check was
+unavailable. No checker start was logged, the dialog was closed, and the
+volume remained mounted—there was no automatic unmount. The rejection
+capture is `C8-H-mounted-admission-rejected.png`; final pre-quit state is
+`C8-H-before-quit.png`. Final QMP counters were 8,603 reads / 4,404,736
+bytes, zero failed reads, writes, write bytes, and unmaps, and one
+registration-baseline Flush. The image hash matched its initial value.
+
+### Host/build qualification and outcome
+
+No source changed in this final acceptance continuation, so the existing
+source-matched qualification was retained without rerunning tests. The
+actual `out/dm36-continuation8/storage-suite.log` reports **1,482 checks,
+0 failures**, including DM36 checker 259/259, DM36 GUI 31/31, DM35 surface
+48/48 and GUI 34/34, DM34 wipe 17/17, erase 34/34, wipe UI 31/31, erase UI
+39/39, USB Mass Storage 249 included, USB trace classifier 7/7, GPT
+verifier 1/1, and DM30 fixture verifier 1/1. Widget activation and the
+compositor pointer-buttons qualification also passed.
+
+The freestanding AMD64 kernel build passed at the kernel hash recorded above
+(`out/dm36-continuation8/kernel-build-after-orphan-display-fix.log`),
+`build.bat` passed (`out/dm36-continuation8/build-bat.log`), and the UEFI x64
+Release bootloader build passed (`out/dm36-continuation8/uefi-x64-release-build.log`).
+Both NVMe proof flags remained zero. The unrelated
+`build.ps1 -Arch amd64` PacMan Native ELF undefined audio symbols remain a
+separate known issue; PacMan sources were not changed.
+
+All mandatory DM36 gates now have defensible evidence: clean FAT32, B1/B2
+detection and numeric display, allowed scoped navigation coverage, dedicated
+Stop, active-check Close, removal/replacement isolation, actual checker read
+error, unchanged read-only fixtures, QMP closure/image release, mounted
+target rejection, and full host/build qualification. This supersedes the
+earlier continuation-8 Outcome B status without deleting its historical
+record. Final status is **Outcome A — DM36 accepted**. `.phase` advances to
+`last_completed=DM36`, `next_expected=DM37`. DM37 implementation has not
+started.
