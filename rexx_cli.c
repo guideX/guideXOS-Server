@@ -213,7 +213,8 @@ static int rexx_cli_execute_source(RexxOutputContext *output,
                                    const char *source,
                                    size_t source_length,
                                    const char *argument_string,
-                                   size_t argument_string_length)
+                                   size_t argument_string_length,
+                                   int argument_string_present)
 {
     RexxLexer lexer;
     RexxParser parser;
@@ -277,13 +278,15 @@ static int rexx_cli_execute_source(RexxOutputContext *output,
                                  path, rexx_vm_status_name(vm_status));
         goto cleanup;
     }
-    vm_status = rexx_vm_set_argument_string(
-        &vm, argument_string, argument_string_length);
-    if (vm_status != REXX_VM_STATUS_OK) {
-        (void)rexx_output_format(output, REXX_OUTPUT_STDERR,
-                                 "rexx: %s: could not prepare PARSE ARG input: %s\n",
-                                 path, rexx_vm_status_name(vm_status));
-        goto cleanup;
+    if (argument_string_present) {
+        vm_status = rexx_vm_set_argument_string(
+            &vm, argument_string, argument_string_length);
+        if (vm_status != REXX_VM_STATUS_OK) {
+            (void)rexx_output_format(output, REXX_OUTPUT_STDERR,
+                                     "rexx: %s: could not prepare PARSE ARG input: %s\n",
+                                     path, rexx_vm_status_name(vm_status));
+            goto cleanup;
+        }
     }
 
     rexx_vm_set_output_writer(&vm, rexx_cli_vm_output, output);
@@ -423,7 +426,8 @@ int guide_rexx_main_with_output(int argc,
 
     result = rexx_cli_execute_source(&output, script_path, source,
                                      source_length, argument_string,
-                                     argument_string_length);
+                                     argument_string_length,
+                                     script_argument_start < argc);
     free(argument_string);
     rexx_os_free_file(source);
     return result;

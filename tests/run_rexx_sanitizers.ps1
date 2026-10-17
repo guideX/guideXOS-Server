@@ -1,11 +1,16 @@
 param(
     [ValidateSet('Address', 'Undefined', 'Both')]
-    [string]$Sanitizer = 'Both'
+    [string]$Sanitizer = 'Both',
+    [string]$OutputRoot = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $rootDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$repoTmp = Join-Path $rootDir 'tmp'
+$repoTmp = if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
+    Join-Path $rootDir 'tmp'
+} else {
+    [System.IO.Path]::GetFullPath($OutputRoot)
+}
 New-Item -ItemType Directory -Path $repoTmp -Force | Out-Null
 
 function Import-VisualStudioEnvironment {
@@ -120,7 +125,7 @@ function Invoke-OneSanitizer {
     param([ValidateSet('Address', 'Undefined')][string]$Kind)
 
     $runId = [Guid]::NewGuid().ToString('N')
-    $runDir = Join-Path $repoTmp "rexx-rx11-sanitizer-$($Kind.ToLowerInvariant())-$runId"
+    $runDir = Join-Path $repoTmp "rexx-rx12-sanitizer-$($Kind.ToLowerInvariant())-$runId"
     New-Item -ItemType Directory -Path $runDir | Out-Null
     $evidenceDir = Join-Path $runDir 'logs'
     New-Item -ItemType Directory -Path $evidenceDir | Out-Null
@@ -184,7 +189,8 @@ function Invoke-OneSanitizer {
         [PSCustomObject]@{ Name = 'rx7_alloc'; Driver = 'tests\rexx_rx7_alloc_failure_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR','REXX_PARSER_TEST_ALLOCATOR','REXX_COMPILER_TEST_ALLOCATOR') },
         [PSCustomObject]@{ Name = 'rx8_semantics_alloc'; Driver = 'tests\rexx_rx8_semantics_alloc_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR','REXX_PARSER_TEST_ALLOCATOR','REXX_COMPILER_TEST_ALLOCATOR') },
         [PSCustomObject]@{ Name = 'rx9_conditions'; Driver = 'tests\rexx_rx9_condition_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR','REXX_PARSER_TEST_ALLOCATOR','REXX_COMPILER_TEST_ALLOCATOR') },
-        [PSCustomObject]@{ Name = 'rx10_interpret'; Driver = 'tests\rexx_rx10_interpret_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR','REXX_PARSER_TEST_ALLOCATOR','REXX_COMPILER_TEST_ALLOCATOR') }
+        [PSCustomObject]@{ Name = 'rx10_interpret'; Driver = 'tests\rexx_rx10_interpret_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR','REXX_PARSER_TEST_ALLOCATOR','REXX_COMPILER_TEST_ALLOCATOR') },
+        [PSCustomObject]@{ Name = 'rx12_builtins'; Driver = 'tests\rexx_rx12_builtins_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR') }
     )
 
     $buildDir = Join-Path $runDir 'bin'
@@ -197,7 +203,7 @@ function Invoke-OneSanitizer {
         $clangVersion.Stdout + $clangVersion.Stderr
     }
     [System.IO.File]::WriteAllText((Join-Path $evidenceDir 'compiler-version.log'), $compilerVersion, [System.Text.UTF8Encoding]::new($false))
-    Write-Host "RX11 $Kind sanitizer: $compiler"
+    Write-Host "RX12 $Kind sanitizer: $compiler"
 
     $built = @{}
     foreach ($plan in $plans) {
@@ -212,6 +218,10 @@ function Invoke-OneSanitizer {
             $compilerArgs += @('/TC', '/std:c11', '/D_CRT_SECURE_NO_WARNINGS')
         }
         $compilerArgs += @('/MD', '/Zi', '/Od')
+        # Keep MSVC intermediates in the isolated run directory; without these,
+        # cl.exe writes .obj/.pdb files into the caller's current directory.
+        $compilerArgs += '/Fo:' + $buildDir + [System.IO.Path]::DirectorySeparatorChar
+        $compilerArgs += '/Fd:' + (Join-Path $buildDir ($plan.Name + '.pdb'))
         if ($Kind -eq 'Address') {
             $compilerArgs += '/fsanitize=address'
         } else {
@@ -260,6 +270,6 @@ function Invoke-OneSanitizer {
 
 $selected = if ($Sanitizer -eq 'Both') { @('Address', 'Undefined') } else { @($Sanitizer) }
 $summaries = foreach ($kind in $selected) { Invoke-OneSanitizer -Kind $kind }
-$summaryPath = Join-Path $repoTmp ('rexx-rx11-sanitizer-summary-' + [Guid]::NewGuid().ToString('N') + '.json')
+$summaryPath = Join-Path $repoTmp ('rexx-rx12-sanitizer-summary-' + [Guid]::NewGuid().ToString('N') + '.json')
 $summaries | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $summaryPath -Encoding utf8
 Write-Output "Sanitizer summary: $summaryPath"

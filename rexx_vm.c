@@ -425,7 +425,7 @@ RexxVMStatus rexx_value_set_string(RexxValue *value, const char *bytes, size_t l
     char *copy;
     if (value == NULL || (bytes == NULL && length != 0) || length == SIZE_MAX)
         return REXX_VM_STATUS_INVALID_ARGUMENT;
-    copy = (char *)vm_malloc(length + 1);
+    copy = (char *)vm_malloc(length + 1u);
     if (copy == NULL) return REXX_VM_STATUS_OUT_OF_MEMORY;
     if (length != 0) memcpy(copy, bytes, length);
     copy[length] = '\0';
@@ -433,6 +433,25 @@ RexxVMStatus rexx_value_set_string(RexxValue *value, const char *bytes, size_t l
     value->type = REXX_VALUE_STRING;
     value->as.string.bytes = copy;
     value->as.string.length = length;
+    return REXX_VM_STATUS_OK;
+}
+
+RexxVMStatus rexx_value_allocate_string(RexxValue *value,
+                                        size_t length,
+                                        char **bytes_out)
+{
+    char *bytes;
+    if (value == NULL || bytes_out == NULL || length == SIZE_MAX)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    *bytes_out = NULL;
+    bytes = (char *)vm_malloc(length + 1u);
+    if (bytes == NULL) return REXX_VM_STATUS_OUT_OF_MEMORY;
+    bytes[length] = '\0';
+    rexx_value_clear(value);
+    value->type = REXX_VALUE_STRING;
+    value->as.string.bytes = bytes;
+    value->as.string.length = length;
+    *bytes_out = bytes;
     return REXX_VM_STATUS_OK;
 }
 
@@ -3024,11 +3043,13 @@ static RexxVMStatus execute_arg_builtin(RexxVM *vm,
         (RexxVMArgument *)vm->current_arguments;
     if (argument_count == 0u) {
         if (vm->routine_depth != 0u) count = vm->current_argument_count;
-        else count = vm->argument_string_length != 0u ? 1u : 0u;
+        else count = vm->argument_string != NULL ? 1u : 0u;
         if (count > UINT32_MAX) return REXX_VM_STATUS_RESOURCE_LIMIT;
         return value_set_uint32(result, (uint32_t)count);
     }
     if (argument_count > 2u) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (arguments[0].type == REXX_VALUE_UNSET)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
     {
         RexxDecimal decimal;
         RexxVMStatus decimal_status = value_decimal(&arguments[0], &decimal);
@@ -3051,7 +3072,7 @@ static RexxVMStatus execute_arg_builtin(RexxVM *vm,
                 bytes = argument->bytes;
                 length = argument->length;
             }
-        } else if (position == 1u && vm->argument_string_length != 0u) {
+        } else if (position == 1u && vm->argument_string != NULL) {
             present = 1;
             bytes = vm->argument_string;
             length = vm->argument_string_length;

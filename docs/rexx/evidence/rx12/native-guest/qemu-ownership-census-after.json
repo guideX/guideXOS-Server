@@ -1,0 +1,9 @@
+{
+  "timestamp_utc": "2026-10-17T23:21:20.8533513Z",
+  "rx12_pid": 24768,
+  "rx12_process_still_running": false,
+  "other_qemu_process_count": 1,
+  "foreign_process_details": "redacted",
+  "rx12_shutdown": "QMP quit acknowledged",
+  "foreign_processes_touched": false
+}

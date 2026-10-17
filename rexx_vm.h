@@ -264,6 +264,11 @@ RexxVMStatus rexx_value_set_boolean(RexxValue *value, int boolean_value);
 RexxVMStatus rexx_value_set_string(RexxValue *value,
                                    const char *bytes,
                                    size_t length);
+/* Allocate an owned string of exactly `length` bytes for direct filling.
+ * On success, `bytes_out` points to writable storage with a trailing NUL. */
+RexxVMStatus rexx_value_allocate_string(RexxValue *value,
+                                        size_t length,
+                                        char **bytes_out);
 RexxVMStatus rexx_value_copy(RexxValue *destination,
                              const RexxValue *source);
 

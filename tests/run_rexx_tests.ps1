@@ -22,6 +22,7 @@ $rx7AllocFailureTest = Join-Path $buildDirectory "rexx_rx7_alloc_failure_tests.e
 $rx8Test = Join-Path $buildDirectory "rexx_rx8_semantics_alloc_tests.exe"
 $rx9Test = Join-Path $buildDirectory "rexx_rx9_condition_tests.exe"
 $rx10Test = Join-Path $buildDirectory "rexx_rx10_interpret_tests.exe"
+$rx12Test = Join-Path $buildDirectory "rexx_rx12_builtins_tests.exe"
 $rx2ShellBridgeTest = Join-Path $buildDirectory "rexx_rx2_shell_bridge_tests.exe"
 $commonSources = @(
     (Join-Path $rootDir "rexx_lexer.c"),
@@ -159,6 +160,15 @@ if ($LASTEXITCODE -ne 0) {
     throw "RX10 INTERPRET test build failed with exit code $LASTEXITCODE."
 }
 
+Write-Host "Building RX12 classic string and word built-in assertions"
+& $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
+    -Wall -Wextra -Wpedantic -Werror `
+    (Join-Path $PSScriptRoot "rexx_rx12_builtins_test.c") `
+    @commonSources -lm -o $rx12Test
+if ($LASTEXITCODE -ne 0) {
+    throw "RX12 built-in test build failed with exit code $LASTEXITCODE."
+}
+
 $gxxCommand = Get-Command g++ -ErrorAction SilentlyContinue
 if ($null -eq $gxxCommand) {
     throw "g++ is required for the RX2 shell bridge integration test."
@@ -249,6 +259,12 @@ Write-Host "Running RX10 INTERPRET and allocation assertions"
 & $rx10Test
 if ($LASTEXITCODE -ne 0) {
     throw "RX10 INTERPRET assertions failed with exit code $LASTEXITCODE."
+}
+
+Write-Host "Running RX12 classic string and word built-in assertions"
+& $rx12Test
+if ($LASTEXITCODE -ne 0) {
+    throw "RX12 built-in assertions failed with exit code $LASTEXITCODE."
 }
 
 Write-Host "Running RX2 shell bridge assertions"
@@ -758,6 +774,32 @@ foreach ($fixture in Get-ChildItem -LiteralPath $rx10FixtureDirectory -Filter "*
     Write-Host "[PASS] RX10 fixture $($fixture.Name)"
 }
 
+$rx12FixtureDirectory = Join-Path $PSScriptRoot "rexx_compat\cases\string_bifs"
+$script:rx12FixturePassed = 0
+foreach ($fixture in Get-ChildItem -LiteralPath $rx12FixtureDirectory -Filter "*.rex" | Sort-Object Name) {
+    $diagnosticPath = [System.IO.Path]::ChangeExtension($fixture.FullName, ".diag")
+    $outputPath = [System.IO.Path]::ChangeExtension($fixture.FullName, ".out")
+    $actual = Invoke-CapturedProcess $cliTest @($fixture.FullName)
+    $actualText = (($actual.Stdout + $actual.Stderr) -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+    if (Test-Path -LiteralPath $diagnosticPath) {
+        $expectedDiagnostic = (Get-Content -Raw -LiteralPath $diagnosticPath).Trim()
+        if ($actual.ExitCode -ne 1 -or $actual.Stdout.Length -ne 0 -or -not $actualText.Contains($expectedDiagnostic)) {
+            throw "RX12 fixture $($fixture.Name) failed its expected diagnostic. Exit=$($actual.ExitCode) Output=$actualText"
+        }
+    } else {
+        if (-not (Test-Path -LiteralPath $outputPath)) {
+            throw "RX12 fixture $($fixture.Name) has no .out expectation."
+        }
+        $expectedOutput = ((Get-Content -Raw -LiteralPath $outputPath) -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+        $stdoutText = ($actual.Stdout -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+        if ($actual.ExitCode -ne 0 -or $stdoutText -cne $expectedOutput -or $actual.Stderr.Length -ne 0) {
+            throw "RX12 fixture $($fixture.Name) output mismatch. Expected '$expectedOutput'; got '$actualText'/$($actual.ExitCode)."
+        }
+    }
+    ++$script:rx12FixturePassed
+    Write-Host "[PASS] RX12 fixture $($fixture.Name)"
+}
+
 $parserLimitPath = Join-Path $buildDirectory "parse_template_node_limit.rex"
 $parserLimitSource = "parse value '' with " + ((@('.') * 65540) -join ' ')
 [System.IO.File]::WriteAllText(
@@ -822,6 +864,7 @@ if ($null -eq $regina) {
 Write-Host "Hosted CLI cases passed: $script:cliPassed/$script:cliPassed"
 Write-Host "RX9 condition fixtures passed: $script:rx9Passed/$script:rx9Passed"
 Write-Host "RX10 INTERPRET fixtures passed: $script:rx10Passed/$script:rx10Passed"
+Write-Host "RX12 classic built-in fixtures passed: $script:rx12FixturePassed/$script:rx12FixturePassed"
 Write-Host "RX3 compatibility fixtures passed: $script:rx3Passed/$script:rx3Passed"
 Write-Host "RX4 compatibility fixtures passed: $script:rx4Passed/$script:rx4Passed"
 Write-Host "RX5 compatibility fixtures passed: $script:rx5Passed/$script:rx5Passed"

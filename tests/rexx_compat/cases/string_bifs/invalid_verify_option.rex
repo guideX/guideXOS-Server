@@ -1,0 +1,1 @@
+say verify("x","x","Q")

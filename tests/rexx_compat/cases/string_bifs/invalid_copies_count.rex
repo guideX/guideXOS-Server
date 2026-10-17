@@ -1,0 +1,1 @@
+say copies("x",-1)

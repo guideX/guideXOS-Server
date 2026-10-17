@@ -1,4 +1,36 @@
 {
+  "string_bifs/invalid_substr_start.rex": {
+    "exit_code": 1,
+    "reason": "The BIF must reject a zero start position."
+  },
+  "string_bifs/invalid_strip_option.rex": {
+    "exit_code": 1,
+    "reason": "The BIF must reject an unsupported STRIP option."
+  },
+  "string_bifs/invalid_copies_count.rex": {
+    "exit_code": 1,
+    "reason": "The BIF must reject a negative repetition count."
+  },
+  "string_bifs/invalid_verify_option.rex": {
+    "exit_code": 1,
+    "reason": "The BIF must reject an unsupported VERIFY option."
+  },
+  "string_bifs/invalid_arg_option.rex": {
+    "exit_code": 1,
+    "reason": "ARG must reject an option outside the classic E/O family."
+  },
+  "string_bifs/invalid_arg_index.rex": {
+    "exit_code": 1,
+    "reason": "ARG positions are positive one-based integers."
+  },
+  "string_bifs/invalid_arg_position_omission.rex": {
+    "exit_code": 1,
+    "reason": "ARG requires a position when an option is specified."
+  },
+  "string_bifs/oversized_copies.rex": {
+    "exit_code": 1,
+    "reason": "The BIF must reject output beyond the configured result limit."
+  },
   "interpret/interpret_exit_status.rex": {
     "exit_code": 5,
     "reason": "The fixture exercises EXIT's process status through generated INTERPRET source."

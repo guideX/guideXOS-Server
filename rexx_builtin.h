@@ -15,6 +15,9 @@
 
 #include <stddef.h>
 
+/* Built-in string results stay bounded by the interpreter's source limit. */
+#define REXX_BUILTIN_MAX_RESULT_LENGTH REXX_VM_MAX_PARSE_SOURCE_LENGTH
+
 #ifdef __cplusplus
 extern "C" {
 #endif

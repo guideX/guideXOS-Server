@@ -1,0 +1,8 @@
+{
+  "timestamp_utc": "2026-10-17T23:03:15.5390866Z",
+  "foreign_qemu_count": 1,
+  "rx12_qmp_port_selected": 55392,
+  "production_media_used": false,
+  "networking": "-net none",
+  "foreign_process_details": "redacted"
+}

@@ -1,0 +1,10 @@
+{
+  "pid": 24768,
+  "qemuPath": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+  "qmpPort": 55392,
+  "espPath": "C:\\Users\\guideX\\.codex\\rx12-native-guest\\esp",
+  "rawCaptureDir": "C:\\Users\\guideX\\.codex\\rx12-native-guest\\captures",
+  "serialLog": "C:\\Users\\guideX\\.codex\\rx12-native-guest\\serial-rx12-final.log",
+  "creationDate": "2026-10-17T16:03:15.82863-07:00",
+  "commandLine": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -machine pc -accel tcg -drive if=pflash,format=raw,readonly=on,file=C:\\Users\\guideX\\.codex\\rx12-native-guest\\firmware-code.fd -drive file=fat:rw:C:\\Users\\guideX\\.codex\\rx12-native-guest\\esp,format=raw,if=ide,index=0 -m 1024M -smp 1 -vga std -serial file:C:\\Users\\guideX\\.codex\\rx12-native-guest\\serial-rx12-final.log -no-reboot -no-shutdown -boot order=c -rtc base=utc,clock=host -net none -display none -monitor none -qmp tcp:127.0.0.1:55392,server=on,wait=off"
+}

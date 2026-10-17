@@ -1,0 +1,12 @@
+RX12 AMD64 native link checks
+
+PE image: C:\Users\guideX\.codex\rx12-native-build\bin\kernel.pe
+ELF image: C:\Users\guideX\.codex\rx12-native-build\bin\kernel.elf
+ELF SHA-256: CE835EF3B77AA066DB46F9CB9964B6BB0D7C589B4202A2B1965129854FD80DEE
+PE SHA-256: A42AB19FDB919F6D40BBF1D22CF747D20C09DC64FAE5806B431850B3DE174B7E
+
+The PE import directory, bound import directory, and delay import directory are all zero. No OS DLL import table is present.
+
+`nm -u` reports 21 undefined ELF symbols. The set exactly matches the RX11 native ELF set (21 symbols; zero added or removed), so RX12 introduced no new unresolved references. These are the same freestanding link-time references as the accepted RX11 image, not a claim that the ELF has no undefined symbols.
+
+The full forced AMD64 build completed successfully with the project's freestanding flags. RX12 uses C translation units and adds no C++ standard-library dependency.

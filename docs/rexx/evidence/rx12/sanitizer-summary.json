@@ -1,0 +1,28 @@
+{
+  "phase": "RX12",
+  "run": "final corrected isolated sanitizer rerun",
+  "address_sanitizer": {
+    "toolchain": "MSVC x64 AddressSanitizer",
+    "compiler_version": "Microsoft C/C++ 19.51.36260; MSVC tools 14.51.36231",
+    "hosted_c_executables_passed": 14,
+    "local_corpus_cases_expected_exit": 108,
+    "findings": 0
+  },
+  "undefined_behavior_sanitizer": {
+    "toolchain": "Clang/LLVM clang-cl with MSVC UBSan runtime",
+    "compiler_version": "clang 22.1.8",
+    "hosted_c_executables_passed": 14,
+    "local_corpus_cases_expected_exit": 108,
+    "findings": 0
+  },
+  "regina_comparison": {
+    "available": false,
+    "cases_not_run": 108
+  },
+  "repository_root_output": {
+    "object_and_pdb_output_isolated": true,
+    "verified_by": "32-entry root artifact hash manifest matched immediately before and after this corrected rerun",
+    "note": "The manifest was created after the earlier artifact overwrite and does not establish restoration of the original bytes."
+  },
+  "full_log": "sanitizers-isolated.log"
+}

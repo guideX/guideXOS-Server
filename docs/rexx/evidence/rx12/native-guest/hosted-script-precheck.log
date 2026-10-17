@@ -1,0 +1,50 @@
+SCRIPT=rx12-string-builtins.rex STATUS=0 EXPECTED=0
+RX12_NATIVE_STRINGS_START
+Length: 5
+Substr: bcd
+POS: 10
+WORDS: 3
+WORD: two
+WORDPOS: 2
+STRIP: [abc]
+SPACE: [onetwo]
+COPIES: ababab
+TRANSLATE: a&&c
+COMPARE: 0
+VERIFY: 3
+INTERPRET: 6
+RX12_NATIVE_STRINGS_DONE
+SCRIPT=rx12-arg.rex STATUS=0 EXPECTED=0
+RX12_NATIVE_ARG_START
+Top-level ARG(): 0
+ARG(): 3
+ARG1: alpha
+ARG2O: 1
+ARG2E: 0
+ARG3: gamma
+ARG(): 3
+ARG1: alpha
+ARG2O: 0
+ARG2E: 1
+ARG3: gamma
+ARG(): 0
+ARG1:
+ARG2O: 1
+ARG2E: 0
+ARG3:
+ARG_FUNCTION: 3:1
+RX12_NATIVE_ARG_DONE
+SCRIPT=rx12-syntax-recovery.rex STATUS=0 EXPECTED=0
+RX12_NATIVE_SYNTAX_START
+SYNTAX: SYNTAX
+RC: 40
+SIGL: 3
+DETAIL: Language processing error
+RX12_NATIVE_SYNTAX_RECOVERED: 2
+SCRIPT=rx12-oversized-output.rex STATUS=1 EXPECTED=1
+RX12_NATIVE_RESOURCE_START
+rexx: D:\dev\guideXOSServer_REXX\docs\rexx\evidence\rx12\native-guest\rx12-oversized-output.rex: runtime error at instruction 4: VM resource limit exceeded
+SCRIPT=rx12-recovery.rex STATUS=0 EXPECTED=0
+RX12_NATIVE_GUEST_RESPONSIVE: 9
+SCRIPT=rx12-exit-status.rex STATUS=23 EXPECTED=23
+RX12_NATIVE_EXIT_STATUS_SCRIPT

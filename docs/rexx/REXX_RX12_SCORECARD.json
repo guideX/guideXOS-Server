@@ -1,0 +1,296 @@
+{
+  "schema_version": 1,
+  "phase": "RX12",
+  "qualification_status": "Outcome B (partial): RX12 implementation, hosted, sanitizer, AMD64 build, and isolated guest checks passed; exact-byte preservation of pre-existing root object/PDB artifacts failed and could not be repaired.",
+  "repository": {
+    "branch": "REXX_SUPPORT",
+    "starting_head": "7f6a145700fc84336b55fcae55ce4ea044e79b55",
+    "root_phase_file": "absent",
+    "local_commit": true,
+    "pushed": false,
+    "preexisting_root_untracked_object_artifacts": 28,
+    "exact_byte_preservation_satisfied": false,
+    "artifact_incident": "evidence/rx12/root-artifact-preservation-incident.md"
+  },
+  "reference": {
+    "name": "Regina REXX",
+    "available": false,
+    "version": null,
+    "reason": "No verified Regina executable was available; all 108 comparisons remain NOT_RUN.",
+    "comparison_counts": {
+      "MATCH": 0,
+      "MISMATCH": 0,
+      "GUIDEXOS_UNSUPPORTED": 0,
+      "REFERENCE_UNSUPPORTED": 0,
+      "HOST_SPECIFIC": 0,
+      "INCONCLUSIVE": 0,
+      "NOT_RUN": 108
+    }
+  },
+  "internal_corpus": {
+    "case_count": 108,
+    "category_counts": {
+      "core": 17,
+      "decimal": 14,
+      "parse": 12,
+      "routines": 10,
+      "conditions": 11,
+      "interpret": 14,
+      "string_bifs": 30
+    },
+    "guideXOS_expected_exit_count": 108,
+    "guideXOS_unexpected_status_count": 0,
+    "normalization": "CRLF and lone CR to LF only; no Regina comparisons were available."
+  },
+  "rx12_implementation": {
+    "new_bifs": [
+      "WORDPOS",
+      "SPACE",
+      "COPIES",
+      "COMPARE",
+      "VERIFY"
+    ],
+    "refined_existing_bifs": [
+      "LENGTH",
+      "SUBSTR",
+      "POS",
+      "WORD",
+      "WORDS",
+      "STRIP",
+      "TRANSLATE"
+    ],
+    "completed_context_builtin": "ARG",
+    "rx12_direct_assertions": 320,
+    "rx12_fixtures": 30,
+    "max_builtin_result_length_bytes": 16777216
+  },
+  "feature_dimensions": [
+    {
+      "feature": "Symbols, assignment, case-insensitive names, compound stems, concatenation",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "known_limitations": [
+        "No independent reference result in RX11."
+      ],
+      "native_guest_verified_for_rx12": false
+    },
+    {
+      "feature": "Strict and numeric string comparison",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "known_limitations": [
+        "No independent reference result in RX11."
+      ],
+      "native_guest_verified_for_rx12": false
+    },
+    {
+      "feature": "Classic logical AND, OR, exclusive OR, and NOT",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "known_limitations": [
+        "Operands are validated as numeric 0 or 1 and invalid values enter SYNTAX handling; independent comparison remains pending."
+      ],
+      "native_guest_verified_for_rx12": false
+    },
+    {
+      "feature": "IF, DO, ITERATE, LEAVE, SELECT/WHEN/OTHERWISE",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "known_limitations": [
+        "Existing bounded implementation limits apply; see RX10 qualification report."
+      ],
+      "native_guest_verified_for_rx12": false
+    },
+    {
+      "feature": "Decimal arithmetic and NUMERIC DIGITS/FUZZ/FORM",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "known_limitations": [
+        "No independent reference result in RX11."
+      ],
+      "native_guest_verified_for_rx12": false
+    },
+    {
+      "feature": "PARSE ARG/VAR/VALUE templates and UPPER",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "known_limitations": [
+        "Template and generated-source budgets remain bounded as documented by RX6/RX10."
+      ],
+      "native_guest_verified_for_rx12": false
+    },
+    {
+      "feature": "CALL, internal functions, RETURN, RESULT, PROCEDURE, EXPOSE, recursion",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "known_limitations": [
+        "ARG() preserves omitted holes and explicit empty values; independent comparison remains pending."
+      ],
+      "native_guest_verified_for_rx12": true
+    },
+    {
+      "feature": "SIGNAL, SIGL, NOVALUE/SYNTAX traps, CONDITION()",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "known_limitations": [
+        "No independent reference result in RX11."
+      ],
+      "native_guest_verified_for_rx12": false
+    },
+    {
+      "feature": "INTERPRET dynamic statements and structured blocks",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "known_limitations": [
+        "Source, nesting, bytecode, instruction, translation-work, and VM budgets remain bounded by RX10 limits."
+      ],
+      "native_guest_verified_for_rx12": false
+    },
+    {
+      "feature": "Direct string and word built-ins LENGTH, SUBSTR, POS, WORD, WORDS, WORDPOS, STRIP, SPACE, COPIES, TRANSLATE, COMPARE, VERIFY",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "known_limitations": [
+        "Byte-oriented strings; Unicode/DBCS character semantics and independent Regina comparison remain unqualified."
+      ],
+      "native_guest_verified_for_rx12": true
+    },
+    {
+      "feature": "VM-context built-ins ARG, CONDITION, DIGITS, FUZZ, FORM",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "known_limitations": [
+        "ARG E/O option behavior is implemented; no independent Regina comparison is available."
+      ],
+      "native_guest_verified_for_rx12": true
+    },
+    {
+      "feature": "Dynamic INTERPRET ownership and completion",
+      "syntax_implemented": true,
+      "semantics_verified_internally": true,
+      "independently_differential_tested": false,
+      "known_limitations": [
+        "RX11 ASan exposed and fixed a heap-use-after-free in post-dispatch instruction metadata access; post-fix ASan runs passed."
+      ],
+      "native_guest_verified_for_rx12": false
+    }
+  ],
+  "built_in_inventory": {
+    "file": "REXX_RX12_BUILTIN_INVENTORY.csv",
+    "total_inventory_rows": 75,
+    "classic_saa_candidates_listed": 67,
+    "implemented_in_current_dispatch": 17,
+    "fully_implemented_entries": 17,
+    "partially_implemented_entries": 0,
+    "unimplemented_classic_candidates": 50,
+    "ibm_tsoe_non_saa_candidates": [
+      "EXTERNALS",
+      "FIND",
+      "INDEX",
+      "JUSTIFY",
+      "LINESIZE",
+      "USERID"
+    ],
+    "regina_extension_set": "Not assessed; no Regina installation available.",
+    "future_guidexos_functions": "No functions proposed or included in the classic namespace.",
+    "arg_option_note": "Classic ARG options E and O are implemented; N is not a classic option requirement."
+  },
+  "sanitizers": {
+    "address": {
+      "available": true,
+      "toolchain": "MSVC x64 AddressSanitizer",
+      "hosted_c_executables_passed": 14,
+      "guideXOS_corpus_cases_passed": 108,
+      "post_run_findings": 0,
+      "evidence": "evidence/rx12/sanitizers-isolated.log",
+      "intermediate_output_isolated": true
+    },
+    "undefined_behavior": {
+      "available": true,
+      "toolchain": "Clang/LLVM clang-cl with MSVC UBSan runtime",
+      "hosted_c_executables_passed": 14,
+      "guideXOS_corpus_cases_passed": 108,
+      "findings": 0,
+      "evidence": "evidence/rx12/sanitizers-isolated.log",
+      "intermediate_output_isolated": true
+    }
+  },
+  "native_qualification": {
+    "amd64_freestanding_full_build": "PASS",
+    "kernel_elf": "external isolated output: C:/Users/guideX/.codex/rx12-native-build/bin/kernel.elf",
+    "kernel_elf_sha256": "CE835EF3B77AA066DB46F9CB9964B6BB0D7C589B4202A2B1965129854FD80DEE",
+    "kernel_pe": "external isolated output: C:/Users/guideX/.codex/rx12-native-build/bin/kernel.pe",
+    "kernel_pe_sha256": "A42AB19FDB919F6D40BBF1D22CF747D20C09DC64FAE5806B431850B3DE174B7E",
+    "pe_import_directory": "empty; import, bound-import, and delay-import directories are zero",
+    "elf_undefined_symbols": 21,
+    "elf_undefined_symbol_set_matches_rx11": true,
+    "full_build_log": "evidence/rx12/native-build.log",
+    "link_checks": "evidence/rx12/native-link-checks.txt"
+  },
+  "native_guest": {
+    "status": "PASS",
+    "qemu_version": "11.0.0-12122-ga4bb4b10c9",
+    "network": "disabled (-net none)",
+    "production_media_modified": false,
+    "guest_script_exit_statuses": {
+      "string_builtins": 0,
+      "arg": 0,
+      "syntax_recovery": 0,
+      "oversized_output": 1,
+      "subsequent_recovery": 0,
+      "explicit_exit": 23
+    },
+    "foreign_qemu_interfered_with": false,
+    "evidence": "evidence/rx12/native-guest/"
+  },
+  "root_artifact_preservation": {
+    "preexisting_untracked_artifacts": 28,
+    "incident": "Initial sanitizer invocations wrote compiler intermediates into the repository root and overwrote several pre-existing .obj/.pdb files.",
+    "recovery": "Original bytes were not found in workspace duplicates or available shadow copies.",
+    "corrective_change": "run_rexx_sanitizers.ps1 now uses isolated /Fo and /Fd output directories; final isolated rerun did not change the pre-rerun hash manifest.",
+    "exact_preservation": false
+  },
+  "priority_gaps": [
+    {
+      "priority": "P0",
+      "items": []
+    },
+    {
+      "priority": "P1",
+      "items": [
+        "Complete independent cross-implementation qualification once Regina is available."
+      ]
+    },
+    {
+      "priority": "P2",
+      "items": [
+        "Implement and qualify the 50 remaining classic/SAA candidates, beginning with DATATYPE and common pure string/word functions."
+      ]
+    },
+    {
+      "priority": "P3",
+      "items": [
+        "Assess TSO/E non-SAA functions and Regina extensions separately from the classic target."
+      ]
+    },
+    {
+      "priority": "Future",
+      "items": [
+        "Define any guideXOS OS-service BIF namespace only in a later host-integration phase."
+      ]
+    }
+  ],
+  "percent_conformance": null,
+  "percent_conformance_reason": "Independent reference execution was unavailable; feature dimensions remain separate and no single ANSI conformance percentage is reported."
+}

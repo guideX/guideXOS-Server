@@ -1,0 +1,1 @@
+say substr("abc",0)
