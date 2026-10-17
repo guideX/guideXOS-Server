@@ -86,6 +86,7 @@ typedef enum RexxOpcode {
     OP_EXPOSE,
     OP_DROP,
     OP_EXPOSE_SUBSIDIARY,
+    OP_DROP_SUBSIDIARY,
     OP_SIGNAL,
     OP_CONDITION
 } RexxOpcode;

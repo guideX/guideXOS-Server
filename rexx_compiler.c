@@ -1425,7 +1425,10 @@ static int rexx_compiler_compile_clause(RexxCompiler *compiler,
                 ? REXX_SYMBOL_STEM : REXX_SYMBOL_VARIABLE;
             symbol = rexx_compiler_intern_symbol(compiler, &name->token, kind);
             if (compiler->status != REXX_COMPILER_STATUS_OK) return 0;
-            (void)rexx_compiler_emit(compiler, OP_DROP, 0u, symbol, 0u,
+            (void)rexx_compiler_emit(compiler,
+                                     name->subsidiary
+                                         ? OP_DROP_SUBSIDIARY : OP_DROP,
+                                     0u, symbol, 0u,
                                      &name->token);
         }
         break;

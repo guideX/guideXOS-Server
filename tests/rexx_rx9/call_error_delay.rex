@@ -7,6 +7,7 @@ say seenD
 say seenI
 say seenS
 say seenLine
+say seenRC
 say result
 say length(condition("C"))
 exit 0
@@ -20,5 +21,6 @@ seenD = condition("D")
 seenI = condition("I")
 seenS = condition("S")
 seenLine = sigl
+seenRC = rc
 address KERNEL "positive"
 return "IGNORED"

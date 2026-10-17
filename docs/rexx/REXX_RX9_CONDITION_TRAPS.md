@@ -4,17 +4,20 @@
 
 - Repository: `D:\dev\guideXOSServer_REXX`.
 - Required branch: `REXX_SUPPORT`.
-- Starting HEAD: `2e77836a2220cb9938dcd642552f14354c241367`.
-- The starting worktree was clean; no previous RX9 implementation or root
+- RX9R1 starting HEAD: `1be2ededc2f620dd7295a1790bdae2ed0ae25bb4`.
+- The starting worktree was clean; no RX9R1 completion artifact or root
   `.phase` file was present.
 - Work remained on `REXX_SUPPORT`; no branch, fetch, push, merge, rebase,
   reset, clean, stash, or worktree operation was used.
-- The ending HEAD is the local RX9 commit recorded in the phase completion
-  report. The ending worktree is clean after that commit.
-- ESP and disk images were not used as build outputs. The kernel build output
-  directory was isolated at `tmp/rx9-native-build`.
-- Phase outcome: **B — Partial**. Hosted functionality is verified, but the
-  native kernel build, sanitizer, and guest qualification gates are open.
+- The local RX9R1 closure commit records the ending HEAD. The root `.phase`
+  file remains absent.
+- The kernel was built under the isolated
+  `kernel/build/rexx-rx9r1-native-qualification-20261017` directory. QEMU used
+  a separate copied ESP and copied read-only firmware; production media were
+  not opened.
+- Phase outcome: **A — RX9 accepted**. Hosted, freestanding AMD64, and native
+  QEMU guest gates passed. Sanitizer runtimes and Regina were unavailable and
+  are recorded as unavailable, not as successful runs.
 
 ## Design
 
@@ -134,29 +137,41 @@ without a configured host callback, the adapter returns its documented
 
 ## NOVALUE and SYNTAX boundaries
 
-NOVALUE checks variable expressions after resolving dynamic compound tails.
-The check recognizes simple variables, exact compound entries, and stem
-defaults. A compound tail used to derive a variable name does not independently
-raise NOVALUE. The description uses the resolved variable name, such as
-`B.Z`. Tests cover a simple missing variable, a stem default with an
-uninitialized tail, and a dynamic compound name. The VM's PARSE, PROCEDURE,
-and DROP paths are not all wired through this read-time condition check; these
-forms remain a compatibility gap.
+NOVALUE now uses one read-time check for expression operands and the variable
+reads performed by `PARSE VAR`, dynamic parsing-template patterns and
+positions, subsidiary `PROCEDURE EXPOSE`, and subsidiary `DROP (name)`.
+Dynamic compound tails are resolved before the condition is raised, so
+`CONDITION('D')` contains the derived name. The classic compound-tail
+exemption remains: a stem default supplies an uninitialized tail, and a tail
+used only to construct a derived name is not itself read as a variable.
+
+`PARSE` writes are staged in a transparent child environment. The staged
+values are committed only after the entire parse completes, so a NOVALUE
+transfer leaves every parse destination unchanged. The overlay reads through
+the existing caller and `EXPOSE` environments and preserves recursive
+aliases. Normal uninitialized reads still return their variable names while
+NOVALUE is OFF. The subsidiary `DROP (name)` implementation reads the dynamic
+name list through this same condition check; direct `DROP variable` behavior
+is unchanged. IBM's [conditions reference](https://www.ibm.com/docs/en/zos/2.5.0?topic=reference-conditions-condition-traps)
+documents NOVALUE for variable references in parsing and procedure/drop
+contexts and the compound-tail exception. IBM's [DROP reference](https://www.ibm.com/docs/SSGMCP_5.5.0/reference/rexx/drop.html)
+documents the parenthesized dynamic name list.
 
 SYNTAX trapping covers selected runtime statuses: numeric conversion and
 division-by-zero errors, invalid NUMERIC settings, invalid function calls,
 unknown functions/routines/labels, missing function results, and invalid
-PROCEDURE use. The current RC mapping includes 41 for bad arithmetic
-conversion, 42 for division by zero, 26 for NUMERIC settings, 16 for unknown
-labels, 43 for unknown routines, 24 for invalid PROCEDURE, and 40 for the
-remaining mapped language-processing errors. CONDITION('D') returns the
-runtime's bounded description. Compile and parse failures happen before VM
-execution and cannot be caught by the same source program.
+PROCEDURE use. The RC mapping includes 41 for bad arithmetic conversion, 42
+for division by zero, 26 for NUMERIC settings, 16 for unknown labels, 43 for
+unknown routines, 24 for invalid PROCEDURE, and 40 for other mapped
+language-processing errors. CONDITION('D') returns the bounded runtime
+description. Compile and parse failures happen before VM execution and cannot
+be caught by the same source program; an undefined handler or failure inside a
+handler also remains terminal.
 
-SYNTAX support is deliberately limited to those VM statuses. Instruction,
-numeric-work, stack, table, and allocation limits remain fatal VM statuses and
-cannot be caught by SIGNAL ON SYNTAX. This prevents a script from catching a
-resource boundary and continuing with uncertain state.
+Instruction-budget, numeric-work, stack, table, and allocation limits remain
+fatal VM statuses and cannot be caught by SIGNAL ON SYNTAX. Hosted tests
+confirm that instruction and numeric-work exhaustion stay outside the trap,
+and that the VM can execute another program after the numeric-work failure.
 
 ## SIGL, RC, RESULT, and routine state
 
@@ -190,30 +205,39 @@ label transfer, while a following condition token selects condition
 registration. The RX8 label regression and condition registration fixtures
 both pass.
 
-Fresh run results:
+Fresh RX9R1 run results:
 
-- RX9 C condition assertions: 165.
-- RX9 deterministic allocator failpoints: parser 17, compiler 15, VM 23.
-- RX9 ordinary fixtures: 9/9.
-- Hosted CLI cases: 20/20.
-- RX1 through RX8 all pass; exact assertion and fixture counts are in
-  [`evidence/rx9/hosted-test-summary.txt`](../../evidence/rx9/hosted-test-summary.txt).
-- Regina differential cases: 0; Regina is not installed.
-- Freestanding AMD64 compilation of the 9 REXX C objects succeeds using the
-  kernel's C flags.
-- Full AMD64 kernel link does not complete. The isolated build stops in
-  existing C++ translation units because `-nostdinc++` is active while
-  `app_model_limits.h` includes `<cstddef>`. The compiler reports
-  `fatal error: cstddef: No such file or directory`. No unrelated kernel
-  header was changed to work around this RX9-independent build problem.
-- QEMU process census found no active QEMU process. QEMU is absent from PATH
-  and the repository's configured common install paths, so no guest could be
-  booted. ESP and disk media were not passed to a build or emulator command.
-- ASan/UBSan could not run with the available toolchains: MinGW GCC lacks
-  `-lasan`/`-lubsan`, and the installed Clang lacks its Windows ASan runtime
-  archives. No sanitizer-clean claim is made.
+- RX1 runtime: 11/11; CLI: 20/20.
+- RX2 VFS/output: 45; freestanding numeric: 18; shell bridge: 7.
+- RX3 decimal: 26; allocation failpoints: 570; fixtures: 13/13.
+- RX4 arithmetic: 53; fixtures: 11/11.
+- RX5 numeric context: 35/35; fixtures: 13/13.
+- RX6 PARSE allocation failpoints: 439; fixtures: 25/25.
+- RX7 routines: 13; allocation failpoints: parser 46, compiler 28, VM 111;
+  fixtures: 33/33.
+- RX8 C assertions: 279; allocation failpoints: 38/21/50; fixtures: 26/26.
+- RX9R1 condition assertions: 452; allocation failpoints: parser 41,
+  compiler 37, VM 73; fixtures: 24/24.
+- Regina differential cases: 0; Regina is unavailable.
+- ASan and UBSan build attempts fail because MinGW GCC cannot find `-lasan`
+  and `-lubsan`. They were not run and are not reported as sanitizer passes.
+- AMD64 kernel build and link: pass. The minimal freestanding-safe header
+  change replaces `<cstddef>` with `<stddef.h>` in `app_model_limits.h`; the
+  C++/freestanding flags remain unchanged.
+- QEMU was found at `C:\Program Files\qemu\qemu-system-x86_64.exe`, version
+  11.0.0. The new kernel booted with TCG, one vCPU, `-net none`, a copied
+  read-only firmware image, and a disposable copied ESP. The booted and built
+  kernel SHA-256 values match.
+- Guest scripts verified NOVALUE, SYNTAX recovery, CALL ON ERROR/DELAY,
+  CONDITION state, RC, SIGL, RESULT preservation, routine trap restoration,
+  controlled untrapped errors, instruction-limit failure, recovery after the
+  failure, and a continuing serial heartbeat. HALT/NOTREADY dispatch was
+  verified through safe synthetic hosted tests; no real event source is
+  claimed.
 
-Detailed build and runner logs are preserved in [`evidence/rx9`](../../evidence/rx9).
+See [`REXX_RX9R1_NATIVE_QUALIFICATION.md`](REXX_RX9R1_NATIVE_QUALIFICATION.md)
+and the detailed logs, guest transcripts, kernel identity, and screenshots in
+[`evidence/rx9`](../../evidence/rx9).
 
 ## Classic compatibility matrix and remaining gaps
 
@@ -223,20 +247,21 @@ Detailed build and runner logs are preserved in [`evidence/rx9`](../../evidence/
 | CALL vs SIGNAL handler control flow | CALL ERROR/FAILURE and SIGNAL ERROR/FAILURE/NOVALUE/SYNTAX tested |
 | CONDITION C/D/I/S | Implemented and tested, including nested restoration |
 | Positive/negative command RC and precedence | Implemented and tested |
-| Simple and compound-expression NOVALUE | Implemented for expression reads; PARSE/PROCEDURE/DROP forms incomplete |
+| NOVALUE read contexts | Expressions, PARSE source/templates, subsidiary PROCEDURE EXPOSE/DROP, recursive EXPOSE; compound-tail exemption preserved |
 | Runtime SYNTAX | Selected runtime subset; compile-time and unlisted statuses are not catchable |
 | ERROR/FAILURE DELAY | Repeated same-condition errors are ignored; nested distinct condition is tested |
 | HALT | Registration only; no real cancellation event source |
 | NOTREADY | Registration only; no eligible runtime stream-I/O source |
 | Resource exhaustion | Remains terminal and outside script-level traps |
-| Native guest execution | Not qualified because full kernel build and QEMU gates are unavailable |
+| Native guest execution | AMD64 kernel booted from an isolated, network-disabled QEMU guest |
 
-RX10 should first complete a follow-up focused on true runtime HALT/NOTREADY
-event sources (only if the OS adds bounded, safe sources), the remaining
-NOVALUE contexts, and classic runtime error-code coverage. Do not advance to
-RX10 until RX9's native build and guest-qualification gates are resolved.
+RX10 may expand classic runtime error-code coverage or add real HALT/NOTREADY
+event sources if the OS gains bounded, safe sources. Keep compile-time SYNTAX
+and resource-boundary behavior distinct. Do not weaken the established trap
+limits or begin unrelated language/runtime work as part of this phase.
 
 ## IBM references
 
-- [z/VM 7.4 REXX/VM Reference, Chapter 6: Conditions and Condition Traps](https://www.vm.ibm.com/library/740pdfs/74631400.pdf)
-- [IBM REXX/VM Reference PDF](https://www.ibm.com/support/pages/zvm/library/710pdfs/71631400.pdf)
+- [IBM z/OS REXX Conditions reference](https://www.ibm.com/docs/en/zos/2.5.0?topic=reference-conditions-condition-traps)
+- [IBM REXX DROP reference](https://www.ibm.com/docs/SSGMCP_5.5.0/reference/rexx/drop.html)
+- [z/VM 7.4 REXX/VM Reference, Chapter 6](https://www.vm.ibm.com/library/740pdfs/74631400.pdf)

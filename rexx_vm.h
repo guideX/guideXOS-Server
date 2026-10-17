@@ -135,6 +135,7 @@ typedef struct RexxVM {
     size_t argument_string_length;
     void *root_environment; /* Private variable-generation storage. */
     void *current_environment;
+    void *active_parse_overlay; /* Private tentative writes during PARSE. */
     void *routine_frames;
     size_t routine_depth;
     size_t routine_frame_capacity;
@@ -255,6 +256,10 @@ void rexx_vm_test_allocator_fail_on(size_t allocation_attempt);
 void rexx_vm_test_allocator_disable(void);
 size_t rexx_vm_test_allocator_attempts(void);
 size_t rexx_vm_test_allocator_live_blocks(void);
+RexxVMStatus rexx_vm_test_raise_condition(
+    RexxVM *vm, const RexxBytecodeChunk *chunk, RexxConditionType condition,
+    const char *description, size_t description_length, size_t source_line,
+    int *transferred);
 #endif
 RexxVMStatus rexx_vm_set_local(RexxVM *vm,
                                const char *name,

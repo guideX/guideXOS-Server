@@ -1,0 +1,19 @@
+RX9R1 kernel symbol/ABI qualification
+kernel ELF:
+
+kernel/build/rexx-rx9r1-native-qualification-20261017/bin/kernel.elf:     file format elf64-x86-64
+architecture: i386:x86-64, flags 0x00000112:
+EXEC_P, HAS_SYMS, D_PAGED
+start address 0x0000000000100000
+
+PE DLL import descriptors:
+(none)
+Exported/unmangled REXX C ABI symbols:
+000000000027ef20 T guide_rexx_main_with_output
+0000000000275200 T rexx_vm_execute
+0000000000274e80 T rexx_vm_init
+Hosted standard-library, exception and RTTI runtime pattern scan:
+(no matches; kernel-defined virtual-dispatch vtables are present)
+PE-to-ELF marker relocation scan:
+(no relocations to mainCRTStartup or __dso_handle)
+Reference-only symbol-table markers: mainCRTStartup, __dso_handle (not imported; no relocations)

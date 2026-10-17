@@ -1,0 +1,1 @@
+qemuPid=25016 qmpPort=57168 shutdownAck={"timestamp": {"seconds": 1792262999, "microseconds": 643106}, "event": "SHUTDOWN", "data": {"guest": false, "reason": "host-qmp-quit"}} processExited=True foreignQemuProcesses=untouched

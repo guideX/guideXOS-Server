@@ -1,0 +1,16 @@
+phase=RX9R1 final isolated native guest qualification
+branch=REXX_SUPPORT
+sourceHead=1be2ededc2f620dd7295a1790bdae2ed0ae25bb4
+kernelPath=
+D:\dev\guideXOSServer_REXX\kernel\build\rexx-rx9r1-native-qualification-20261017\bin\kernel.elf
+kernelSha256=
+9DABFA9AFDCB3AC7EE55DD4E1677A8E9FA839ED93072E5DDA8CF10E9CF0E7B1E
+espKernelSha256=
+9DABFA9AFDCB3AC7EE55DD4E1677A8E9FA839ED93072E5DDA8CF10E9CF0E7B1E
+stagedRX9Files=
+48
+media=separate copied writable ESP directory; no production ESP or disk
+network=disabled (-net none)
+acceleration=TCG single thread; one CPU; no host forwarding
+firmware=read-only copied RX8-proven firmware code
+foreign QEMU processes=left untouched

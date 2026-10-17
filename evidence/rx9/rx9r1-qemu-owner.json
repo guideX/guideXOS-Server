@@ -1,0 +1,10 @@
+{
+  "pid": 25016,
+  "qemuPath": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+  "qmpPort": 57168,
+  "espPath": "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx9r1-native-qualification-20261017-final-guest\\ESP",
+  "serialPath": "D:\\dev\\guideXOSServer_REXX\\tmp\\rexx-rx9r1-native-qualification-20261017-final-guest\\serial-rx9r1.log",
+  "kernelSha256": "9DABFA9AFDCB3AC7EE55DD4E1677A8E9FA839ED93072E5DDA8CF10E9CF0E7B1E",
+  "pointerX": 640,
+  "pointerY": 400
+}

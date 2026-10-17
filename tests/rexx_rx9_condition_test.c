@@ -16,6 +16,14 @@ typedef struct Rx9Capture {
 
 static size_t assertions;
 
+enum {
+    RX9_TEST_CONDITION_OFF = 0u,
+    RX9_TEST_CONDITION_ON = 1u,
+    RX9_TEST_CONDITION_DELAY = 2u,
+    RX9_TEST_INVOCATION_SIGNAL = 0u,
+    RX9_TEST_INVOCATION_CALL = 1u
+};
+
 static int check(int passed, const char *description)
 {
     ++assertions;
@@ -38,6 +46,20 @@ static int bytes_equal(const char *left, size_t left_length,
     size_t right_length = strlen(right);
     return left_length == right_length &&
            memcmp(left, right, right_length) == 0;
+}
+
+static int vm_local_number_equals(const RexxVM *vm, const char *name,
+                                  double value)
+{
+    size_t index;
+    for (index = 0u; index < vm->local_count; ++index) {
+        const RexxVMEntry *entry = &vm->locals[index];
+        if (bytes_equal(entry->name, entry->name_length, name) &&
+            entry->value.type == REXX_VALUE_NUMBER &&
+            entry->value.as.number == value)
+            return 1;
+    }
+    return 0;
 }
 
 static int32_t address_dispatcher(void *user_data,
@@ -151,6 +173,105 @@ static int expect_parse_error(const char *source, const char *diagnostic,
                  description);
 }
 
+static int qualify_synthetic_halt_notready_dispatch(void)
+{
+    static const struct {
+        const char *source;
+        RexxConditionType condition;
+        int call_action;
+    } cases[] = {
+        {"call on halt name haltHandler\n"
+         "exit 0\n"
+         "haltHandler: return\n", REXX_CONDITION_HALT, 1},
+        {"signal on halt name haltSignal\n"
+         "exit 0\n"
+         "haltSignal: exit 0\n", REXX_CONDITION_HALT, 0},
+        {"call on notready name notreadyHandler\n"
+         "exit 0\n"
+         "notreadyHandler: return\n", REXX_CONDITION_NOTREADY, 1},
+        {"signal on notready name notreadySignal\n"
+         "exit 0\n"
+         "notreadySignal: exit 0\n", REXX_CONDITION_NOTREADY, 0}
+    };
+    size_t index;
+    int failures = 0;
+    for (index = 0u; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+        RexxLexer lexer;
+        RexxParser parser;
+        RexxAstProgram *program = NULL;
+        RexxBytecodeChunk *chunk = NULL;
+        RexxVM vm;
+        RexxParserStatus parser_status = REXX_PARSER_STATUS_OK;
+        RexxVMStatus status;
+        int transferred = 0;
+        int compiled = compile_source(cases[index].source, &program, &lexer,
+                                      &parser, &chunk, &parser_status);
+        failures += check(compiled,
+                          "HALT/NOTREADY synthetic registration compiles");
+        if (!compiled) continue;
+        memset(&vm, 0, sizeof(vm));
+        failures += check(rexx_vm_init(&vm, 0u) == REXX_VM_STATUS_OK,
+                          "HALT/NOTREADY synthetic VM initializes");
+        if (!vm.initialized) {
+            rexx_bytecode_chunk_free(chunk);
+            rexx_parser_free_ast(program);
+            continue;
+        }
+        failures += check(rexx_vm_execute(&vm, chunk) == REXX_VM_STATUS_OK &&
+                          vm.condition_states[cases[index].condition] ==
+                              RX9_TEST_CONDITION_ON,
+                          "HALT/NOTREADY registration remains armed");
+        status = rexx_vm_test_raise_condition(
+            &vm, chunk, cases[index].condition, "synthetic event", 15u, 77u,
+            &transferred);
+        failures += check(status == REXX_VM_STATUS_CONTROL_TRANSFER &&
+                          transferred && vm.condition_information_active &&
+                          vm.current_condition ==
+                              (uint32_t)cases[index].condition &&
+                          bytes_equal(vm.condition_description,
+                                      vm.condition_description_length,
+                                      "synthetic event"),
+                          "synthetic event records condition information");
+        if (cases[index].call_action) {
+            failures += check(vm.condition_states[cases[index].condition] ==
+                                  RX9_TEST_CONDITION_DELAY,
+                              "synthetic CALL event leaves condition in DELAY");
+            failures += check(vm.condition_invocation ==
+                                  RX9_TEST_INVOCATION_CALL,
+                              "synthetic CALL event records CALL invocation");
+            failures += check(vm.routine_depth == 1u,
+                              "synthetic CALL event creates a handler frame");
+            failures += check(vm.pc < chunk->instruction_count &&
+                              chunk->instructions[vm.pc].opcode == OP_RETURN,
+                              "synthetic CALL event targets the handler body");
+            failures += check(vm_local_number_equals(&vm, "SIGL", 77.0),
+                              "synthetic CALL event sets SIGL");
+        } else {
+            failures += check(vm.condition_states[cases[index].condition] ==
+                                  RX9_TEST_CONDITION_OFF,
+                              "synthetic SIGNAL event turns condition OFF");
+            failures += check(vm.condition_invocation ==
+                                  RX9_TEST_INVOCATION_SIGNAL,
+                              "synthetic SIGNAL event records SIGNAL invocation");
+            failures += check(vm.routine_depth == 0u,
+                              "synthetic SIGNAL event creates no handler frame");
+            failures += check(vm.pc > 0u &&
+                              vm.pc < chunk->instruction_count &&
+                              chunk->instructions[vm.pc - 1u].opcode == OP_LABEL &&
+                              chunk->instructions[vm.pc].source_line == 3u,
+                              "synthetic SIGNAL event targets the handler body");
+            failures += check(vm_local_number_equals(&vm, "SIGL", 77.0),
+                              "synthetic SIGNAL event sets SIGL");
+        }
+        rexx_vm_free(&vm);
+        failures += check(rexx_vm_test_allocator_live_blocks() == 0u,
+                          "synthetic event state releases all VM allocations");
+        rexx_bytecode_chunk_free(chunk);
+        rexx_parser_free_ast(program);
+    }
+    return failures;
+}
+
 static int qualify_semantics(void)
 {
     static const char registration_source[] =
@@ -234,6 +355,19 @@ static int qualify_semantics(void)
         "signal on syntax\n"
         "x = 1 / 0\n"
         "syntax: y = 'bad' + 1\n";
+    static const char syntax_missing_handler_source[] =
+        "signal on syntax name absentHandler\n"
+        "x = 'bad' + 1\n";
+    static const char syntax_recovery_command_source[] =
+        "signal on syntax\n"
+        "x = 1 / 0\n"
+        "exit 1\n"
+        "syntax:\n"
+        "say condition('D')\n"
+        "address KERNEL 'zero'\n"
+        "say rc\n"
+        "say 'recovered'\n"
+        "exit 0\n";
     static const char call_error_source[] =
         "call seed\n"
         "call on error name handleError\n"
@@ -369,6 +503,18 @@ static int qualify_semantics(void)
                                  &parser_status) ==
                           REXX_VM_STATUS_NUMERIC_ERROR,
                       "SYNTAX trap disables itself before handler errors");
+    failures += check(run_source(&vm, syntax_missing_handler_source,
+                                 &parser_status) ==
+                          REXX_VM_STATUS_UNKNOWN_LABEL,
+                      "undefined SYNTAX handler is not recursively trapped");
+    failures += expect_output(
+        &vm, &capture, syntax_recovery_command_source,
+        "Arithmetic overflow/underflow\n0\nrecovered\n",
+        "SYNTAX handler can run a successful recovery command");
+    failures += check(capture.command_count == 1u &&
+                      bytes_equal(capture.last_command,
+                                  capture.last_command_length, "zero"),
+                      "recovery command uses the deterministic safe dispatcher");
     failures += expect_output(
         &vm, &capture, call_error_source,
         "FAILURE\nresumed\nERROR\npositive\nCALL\nDELAY\n5\n4\nERROR\nOLD\n0\n",
@@ -457,10 +603,19 @@ static int qualify_allocator_failures(void)
 {
     static const char trapped_source[] =
         "call on error name handler\n"
+        "exposedNames = 'shared'\n"
+        "shared = 'ok'\n"
+        "call exposeWorker\n"
+        "separator = '|'\n"
+        "parse value 'left|right' with first (separator) second\n"
+        "dropNames = 'throwaway'\n"
+        "throwaway = 'owned'\n"
+        "drop (dropNames)\n"
         "address KERNEL 'positive'\n"
         "exit 0\n"
         "handler: call nested; return 'ignored'\n"
-        "nested: say condition('D'); return\n";
+        "nested: say condition('D'); return\n"
+        "exposeWorker: procedure expose (exposedNames); return\n";
     static const char recovery_source[] = "say 'recovered'\nexit 0\n";
     RexxLexer lexer;
     RexxParser parser;
@@ -608,8 +763,9 @@ static int qualify_allocator_failures(void)
                 fprintf(stderr, "VM failpoint %lu returned %s\n",
                         (unsigned long)failpoint,
                         rexx_vm_status_name(vm_status));
-            failures += check(vm_status == REXX_VM_STATUS_OUT_OF_MEMORY,
-                              "RX9 VM injected description/frame failure is terminal");
+            failures += check(
+                vm_status == REXX_VM_STATUS_OUT_OF_MEMORY,
+                "RX9 VM injected condition and reference failure is terminal");
             memset(&capture, 0, sizeof(capture));
             failures += check(rexx_vm_execute(&vm, recovery_chunk) ==
                                   REXX_VM_STATUS_OK &&
@@ -642,12 +798,20 @@ static int qualify_resource_boundary(void)
         "do forever\n"
         "nop\n"
         "end\n";
+    static const char numeric_work_source[] =
+        "signal on syntax\n"
+        "value = 99999999999999999 * 99999999999999999\n"
+        "say 'not executed'\n";
+    static const char recovery_source[] = "say 'recovered'\nexit 0\n";
     RexxVM vm;
+    RexxParserStatus parser_status = REXX_PARSER_STATUS_OK;
+    Rx9Capture capture;
     RexxLexer lexer;
     RexxParser parser;
     RexxAstProgram *program = NULL;
     RexxBytecodeChunk *chunk = NULL;
     RexxCompilerError compiler_error;
+    memset(&capture, 0, sizeof(capture));
     memset(&vm, 0, sizeof(vm));
     memset(&lexer, 0, sizeof(lexer));
     memset(&parser, 0, sizeof(parser));
@@ -658,11 +822,25 @@ static int qualify_resource_boundary(void)
             REXX_COMPILER_STATUS_OK)
         return 1;
     if (rexx_vm_init(&vm, 0u) != REXX_VM_STATUS_OK) return 1;
+    rexx_vm_set_output_writer(&vm, output_writer, &capture);
     (void)rexx_vm_set_instruction_budget(&vm, 32u);
     {
         RexxVMStatus status = rexx_vm_execute(&vm, chunk);
         int failed = check(status == REXX_VM_STATUS_INSTRUCTION_LIMIT,
                            "SYNTAX trap cannot catch instruction budget exhaustion");
+        vm.instruction_budget = REXX_VM_DEFAULT_INSTRUCTION_BUDGET;
+        vm.numeric_work_budget = 1u;
+        status = run_source(&vm, numeric_work_source, &parser_status);
+        failed += check(status == REXX_VM_STATUS_RESOURCE_LIMIT,
+                        "SYNTAX trap cannot catch numeric-work exhaustion");
+        vm.numeric_work_budget = REXX_VM_DEFAULT_NUMERIC_WORK_BUDGET;
+        capture.output_length = 0u;
+        status = run_source(&vm, recovery_source, &parser_status);
+        failed += check(status == REXX_VM_STATUS_OK &&
+                        capture.output_length == strlen("recovered\n") &&
+                        memcmp(capture.output, "recovered\n",
+                               strlen("recovered\n")) == 0,
+                        "VM can execute and recover after numeric-work failure");
         rexx_vm_free(&vm);
         rexx_bytecode_chunk_free(chunk);
         rexx_parser_free_ast(program);
@@ -673,6 +851,7 @@ static int qualify_resource_boundary(void)
 int main(void)
 {
     int failures = qualify_semantics();
+    failures += qualify_synthetic_halt_notready_dispatch();
     failures += qualify_allocator_failures();
     failures += qualify_resource_boundary();
     printf("RX9 condition assertions: %lu (%s)\n", (unsigned long)assertions,

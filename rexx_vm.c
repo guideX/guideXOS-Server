@@ -125,6 +125,7 @@ struct RexxVMEnvironment {
     size_t expose_count;
     size_t exposed_name_bytes;
     int root;
+    int transparent_parent;
 };
 
 struct RexxVMArgument {
@@ -221,6 +222,10 @@ static RexxVMStatus resolve_expose_name(RexxVM *vm,
                                         size_t *resolved_length);
 static int resolved_name_uses_stem_table(const char *name, size_t length);
 static int expose_name_has_dynamic_tail(const char *name, size_t length);
+static RexxVMStatus load_variable_value(RexxVM *vm,
+                                        RexxVMEnvironment *environment,
+                                        const RexxSymbol *symbol,
+                                        RexxValue *value);
 
 static RexxVMStatus value_set_int32(RexxValue *value, int32_t number);
 static RexxVMStatus raise_condition(RexxVM *vm,
@@ -867,9 +872,8 @@ static RexxVMStatus execute_expose_subsidiary(
         resolved_symbol.length = resolved_list_length;
         resolved_symbol.kind = dot < resolved_list_length
             ? REXX_SYMBOL_STEM : REXX_SYMBOL_VARIABLE;
-        status = environment_load(vm, environment, &resolved_symbol,
-                                  resolved_symbol.kind == REXX_SYMBOL_STEM,
-                                  &list_value);
+        status = load_variable_value(vm, environment, &resolved_symbol,
+                                     &list_value);
     }
     if (status == REXX_VM_STATUS_OK) {
         if (list_value.type == REXX_VALUE_STRING &&
@@ -1042,6 +1046,69 @@ static RexxVMStatus environment_drop(RexxVM *vm,
             resolved_name_uses_stem_table(resolved_name, resolved_length));
     vm_free(resolved_name);
     (void)stem;
+    return status;
+}
+
+static RexxVMStatus execute_drop_subsidiary(RexxVM *vm,
+                                            const RexxSymbol *symbol)
+{
+    RexxVMEnvironment *environment =
+        (RexxVMEnvironment *)vm->current_environment;
+    RexxValue list_value = REXX_VALUE_INIT;
+    char *resolved_list_name = NULL;
+    char *list = NULL;
+    size_t resolved_list_length = 0u;
+    size_t list_length = 0u;
+    size_t cursor = 0u;
+    RexxSymbol resolved_symbol;
+    RexxVMStatus status;
+
+    status = resolve_expose_name(vm, environment, symbol->name,
+                                 symbol->length, &resolved_list_name,
+                                 &resolved_list_length);
+    if (status != REXX_VM_STATUS_OK) goto cleanup;
+    resolved_symbol.name = resolved_list_name;
+    resolved_symbol.length = resolved_list_length;
+    resolved_symbol.kind = resolved_name_uses_stem_table(
+        resolved_list_name, resolved_list_length)
+        ? REXX_SYMBOL_STEM : REXX_SYMBOL_VARIABLE;
+    status = load_variable_value(vm, environment, &resolved_symbol,
+                                 &list_value);
+    if (status != REXX_VM_STATUS_OK) goto cleanup;
+    if (list_value.type == REXX_VALUE_STRING &&
+        list_value.as.string.length > REXX_VM_MAX_SUBSIDIARY_LIST_LENGTH) {
+        status = REXX_VM_STATUS_RESOURCE_LIMIT;
+        goto cleanup;
+    }
+    status = value_string(&list_value, &list, &list_length);
+    if (status != REXX_VM_STATUS_OK) goto cleanup;
+    if (list_length > REXX_VM_MAX_SUBSIDIARY_LIST_LENGTH) {
+        status = REXX_VM_STATUS_RESOURCE_LIMIT;
+        goto cleanup;
+    }
+
+    while (cursor < list_length) {
+        size_t start;
+        while (cursor < list_length &&
+               ascii_space((unsigned char)list[cursor])) ++cursor;
+        if (cursor == list_length) break;
+        start = cursor;
+        while (cursor < list_length &&
+               !ascii_space((unsigned char)list[cursor])) ++cursor;
+        if (!subsidiary_name_valid(list + start, cursor - start)) {
+            status = REXX_VM_STATUS_INVALID_EXPOSE_LIST;
+            goto cleanup;
+        }
+        status = environment_drop(
+            vm, environment, list + start, cursor - start,
+            resolved_name_uses_stem_table(list + start, cursor - start));
+        if (status != REXX_VM_STATUS_OK) goto cleanup;
+    }
+
+cleanup:
+    vm_free(resolved_list_name);
+    vm_free(list);
+    rexx_value_clear(&list_value);
     return status;
 }
 
@@ -1575,6 +1642,9 @@ static RexxVMStatus environment_load(RexxVM *vm,
                             symbol->name, dot + 1u))
                 return rexx_value_copy(value, &entry->value);
         }
+        if (environment->transparent_parent && environment->parent != NULL)
+            return environment_load(vm, environment->parent, symbol, stem,
+                                    value);
     } else {
         index = find_entry(environment->locals, environment->local_count,
                            symbol->name, symbol->length);
@@ -1586,6 +1656,9 @@ static RexxVMStatus environment_load(RexxVM *vm,
             if (index >= 0)
                 return rexx_value_copy(value, &vm->globals[index].value);
         }
+        if (environment->transparent_parent && environment->parent != NULL)
+            return environment_load(vm, environment->parent, symbol, stem,
+                                    value);
     }
     return rexx_value_set_string(value, symbol->name, symbol->length);
 }
@@ -1642,6 +1715,9 @@ static int environment_has_variable(RexxVM *vm,
                             name, name_length))
                 return 1;
         }
+        if (environment->transparent_parent && environment->parent != NULL)
+            return environment_has_variable(vm, environment->parent, name,
+                                            name_length);
         return 0;
     }
     while (dot < name_length && name[dot] != '.') ++dot;
@@ -1661,7 +1737,11 @@ static int environment_has_variable(RexxVM *vm,
                 return 1;
             if (entry->tail_length == 0u) has_default = 1;
         }
-        return has_default;
+        if (has_default) return 1;
+        if (environment->transparent_parent && environment->parent != NULL)
+            return environment_has_variable(vm, environment->parent, name,
+                                            name_length);
+        return 0;
     }
     index = find_entry(environment->locals, environment->local_count,
                        name, name_length);
@@ -1670,18 +1750,26 @@ static int environment_has_variable(RexxVM *vm,
         index = find_entry(vm->globals, vm->global_count, name, name_length);
         if (index >= 0) return 1;
     }
+    if (environment->transparent_parent && environment->parent != NULL)
+        return environment_has_variable(vm, environment->parent, name,
+                                        name_length);
     return 0;
 }
 
-static RexxVMStatus load_variable(RexxVM *vm, const RexxSymbol *symbol, int stem)
+static RexxVMStatus load_variable_value(RexxVM *vm,
+                                        RexxVMEnvironment *environment,
+                                        const RexxSymbol *symbol,
+                                        RexxValue *value)
 {
-    RexxValue value = REXX_VALUE_INIT;
-    RexxVMEnvironment *environment =
-        (RexxVMEnvironment *)vm->current_environment;
-    const char *resolved_name = symbol->name;
-    size_t resolved_length = symbol->length;
+    const char *resolved_name;
+    size_t resolved_length;
     char *owned_resolved_name = NULL;
     RexxVMStatus result;
+    if (vm == NULL || environment == NULL || symbol == NULL ||
+        symbol->name == NULL || value == NULL)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    resolved_name = symbol->name;
+    resolved_length = symbol->length;
     if (vm->condition_states[REXX_CONDITION_NOVALUE] ==
         REXX_CONDITION_STATE_ON &&
         expose_name_has_dynamic_tail(symbol->name, symbol->length)) {
@@ -1705,7 +1793,21 @@ static RexxVMStatus load_variable(RexxVM *vm, const RexxSymbol *symbol, int stem
     } else {
         vm_free(owned_resolved_name);
     }
-    result = environment_load_variable(vm, environment, symbol, &value);
+    return environment_load_variable(vm, environment, symbol, value);
+}
+
+static RexxVMEnvironment *variable_access_environment(RexxVM *vm)
+{
+    if (vm->active_parse_overlay != NULL)
+        return (RexxVMEnvironment *)vm->active_parse_overlay;
+    return (RexxVMEnvironment *)vm->current_environment;
+}
+
+static RexxVMStatus load_variable(RexxVM *vm, const RexxSymbol *symbol, int stem)
+{
+    RexxValue value = REXX_VALUE_INIT;
+    RexxVMStatus result = load_variable_value(
+        vm, variable_access_environment(vm), symbol, &value);
     if (result == REXX_VM_STATUS_OK) result = push_move(vm, &value);
     rexx_value_clear(&value);
     (void)stem;
@@ -1758,13 +1860,13 @@ static RexxVMStatus parse_store_variable(RexxVM *vm,
                                          size_t length)
 {
     const RexxSymbol *symbol = NULL;
+    RexxVMEnvironment *environment = variable_access_environment(vm);
     RexxValue value = REXX_VALUE_INIT;
     RexxVMStatus status = parse_get_variable_symbol(chunk, operand, &symbol);
     if (status == REXX_VM_STATUS_OK)
         status = rexx_value_set_string(&value, bytes, length);
     if (status == REXX_VM_STATUS_OK) {
-        status = environment_set(vm,
-                                 (RexxVMEnvironment *)vm->current_environment,
+        status = environment_set(vm, environment,
                                  symbol->name, symbol->length,
                                  symbol->kind == REXX_SYMBOL_STEM, &value);
     }
@@ -2033,12 +2135,52 @@ static RexxVMStatus execute_parse_template(RexxVM *vm,
                                source_length, section_start, source_length);
 }
 
+static RexxVMStatus commit_parse_overlay(
+    RexxVM *vm, RexxVMEnvironment *overlay,
+    RexxVMEnvironment *destination)
+{
+    size_t index;
+    RexxVMStatus status = REXX_VM_STATUS_OK;
+    for (index = 0u; index < overlay->local_count; ++index) {
+        RexxVMEntry *entry = &overlay->locals[index];
+        status = environment_set_resolved(
+            vm, destination, entry->name, entry->name_length, 0,
+            &entry->value);
+        if (status != REXX_VM_STATUS_OK) return status;
+    }
+    for (index = 0u; index < overlay->stem_count; ++index) {
+        RexxVMStemEntry *entry = &overlay->stems[index];
+        size_t name_length;
+        char *name;
+        if (entry->stem_length > REXX_VM_MAX_NAME_LENGTH -
+                                     entry->tail_length ||
+            entry->stem_length + entry->tail_length == SIZE_MAX)
+            return REXX_VM_STATUS_RESOURCE_LIMIT;
+        name_length = entry->stem_length + entry->tail_length;
+        name = (char *)vm_malloc(name_length + 1u);
+        if (name == NULL) return REXX_VM_STATUS_OUT_OF_MEMORY;
+        memcpy(name, entry->stem, entry->stem_length);
+        if (entry->tail_length != 0u)
+            memcpy(name + entry->stem_length, entry->tail,
+                   entry->tail_length);
+        name[name_length] = '\0';
+        status = environment_set_resolved(vm, destination, name,
+                                          name_length, 1, &entry->value);
+        vm_free(name);
+        if (status != REXX_VM_STATUS_OK) return status;
+    }
+    return REXX_VM_STATUS_OK;
+}
+
 static RexxVMStatus execute_parse(RexxVM *vm,
                                   const RexxBytecodeChunk *chunk,
                                   uint32_t plan_index)
 {
     static const char empty_string[] = "";
     const RexxParsePlan *plan;
+    RexxVMEnvironment *destination = NULL;
+    RexxVMEnvironment *overlay = NULL;
+    void *previous_overlay;
     RexxValue input = REXX_VALUE_INIT;
     const char *source = empty_string;
     size_t source_length = 0u;
@@ -2065,6 +2207,15 @@ static RexxVMStatus execute_parse(RexxVM *vm,
     } else if (plan->source_symbol != REXX_NO_SYMBOL) {
         return REXX_VM_STATUS_INVALID_BYTECODE;
     }
+
+    destination = vm->active_parse_overlay != NULL
+        ? (RexxVMEnvironment *)vm->active_parse_overlay
+        : (RexxVMEnvironment *)vm->current_environment;
+    overlay = environment_new(vm, destination, 0);
+    if (overlay == NULL) return REXX_VM_STATUS_OUT_OF_MEMORY;
+    overlay->transparent_parent = 1;
+    previous_overlay = vm->active_parse_overlay;
+    vm->active_parse_overlay = overlay;
 
     if (plan->source_kind == REXX_PARSE_SOURCE_ARG) {
         RexxVMArgument *arguments = (RexxVMArgument *)vm->current_arguments;
@@ -2105,7 +2256,9 @@ static RexxVMStatus execute_parse(RexxVM *vm,
                 vm_free(uppercase_copy);
                 if (status != REXX_VM_STATUS_OK) break;
             }
-            return status;
+            if (status == REXX_VM_STATUS_OK)
+                status = commit_parse_overlay(vm, overlay, destination);
+            goto cleanup;
         }
         source = vm->argument_string != NULL ? vm->argument_string
                                              : empty_string;
@@ -2168,6 +2321,12 @@ static RexxVMStatus execute_parse(RexxVM *vm,
                                         &parse_work_remaining);
     }
 
+    if (status == REXX_VM_STATUS_OK)
+        status = commit_parse_overlay(vm, overlay, destination);
+
+cleanup:
+    vm->active_parse_overlay = previous_overlay;
+    environment_free(overlay);
     vm_free(source_copy);
     rexx_value_clear(&input);
     return status;
@@ -3230,6 +3389,17 @@ static RexxVMStatus raise_condition(RexxVM *vm,
     return REXX_VM_STATUS_INVALID_BYTECODE;
 }
 
+#if defined(REXX_VM_TEST_ALLOCATOR) && !defined(GXOS_BARE_METAL)
+RexxVMStatus rexx_vm_test_raise_condition(
+    RexxVM *vm, const RexxBytecodeChunk *chunk, RexxConditionType condition,
+    const char *description, size_t description_length, size_t source_line,
+    int *transferred)
+{
+    return raise_condition(vm, chunk, condition, description,
+                           description_length, source_line, 0, transferred);
+}
+#endif
+
 static RexxVMStatus execute_condition_registration(
     RexxVM *vm, const RexxBytecodeChunk *chunk,
     const RexxInstruction *instruction)
@@ -3766,6 +3936,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
         return vm_fail(vm, REXX_VM_STATUS_INVALID_BYTECODE, 0);
 
     vm->active_chunk = chunk;
+    vm->active_parse_overlay = NULL;
 
     if (vm->routine_depth != 0u) unwind_routines(vm);
     vm->current_environment = vm->root_environment;
@@ -4085,18 +4256,23 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
             status = execute_condition_registration(vm, chunk, ins);
             break;
 
-        case OP_DROP: {
+        case OP_DROP:
+        case OP_DROP_SUBSIDIARY: {
             const RexxSymbol *symbol = NULL;
             if (ins->flags != 0u || ins->auxiliary != 0u) {
                 status = REXX_VM_STATUS_INVALID_BYTECODE;
             } else {
                 status = parse_get_variable_symbol(chunk, ins->operand,
                                                    &symbol);
-                if (status == REXX_VM_STATUS_OK)
+                if (status == REXX_VM_STATUS_OK &&
+                    ins->opcode == OP_DROP_SUBSIDIARY) {
+                    status = execute_drop_subsidiary(vm, symbol);
+                } else if (status == REXX_VM_STATUS_OK) {
                     status = environment_drop(
                         vm, (RexxVMEnvironment *)vm->current_environment,
                         symbol->name, symbol->length,
                         symbol->kind == REXX_SYMBOL_STEM);
+                }
             }
             break;
         }

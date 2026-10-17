@@ -1900,15 +1900,40 @@ static RexxAstClause *rexx_parser_parse_drop_clause(RexxParser *parser)
     RexxAstName *tail = NULL;
     if (clause == NULL || !rexx_parser_advance(parser)) return NULL;
     while (!rexx_parser_token_is_stop(&parser->current, 0u)) {
-        if (!rexx_parser_is_name_token(&parser->current)) {
-            rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
-                                  &parser->current,
-                                  "expected a variable name after DROP");
-            return NULL;
+        int subsidiary = 0;
+        RexxToken name_token;
+        if (parser->current.type == TOKEN_LEFT_PAREN) {
+            subsidiary = 1;
+            if (!rexx_parser_advance(parser)) return NULL;
+            if (!rexx_parser_is_name_token(&parser->current)) {
+                rexx_parser_set_error(
+                    parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                    &parser->current,
+                    "DROP parentheses require one variable name");
+                return NULL;
+            }
+            name_token = parser->current;
+            if (!rexx_parser_advance(parser) ||
+                parser->current.type != TOKEN_RIGHT_PAREN) {
+                rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                                      &parser->current,
+                                      "expected ')' after subsidiary DROP name");
+                return NULL;
+            }
+            if (!rexx_parser_advance(parser)) return NULL;
+        } else {
+            if (!rexx_parser_is_name_token(&parser->current)) {
+                rexx_parser_set_error(parser, REXX_PARSER_STATUS_SYNTAX_ERROR,
+                                      &parser->current,
+                                      "expected a variable name after DROP");
+                return NULL;
+            }
+            name_token = parser->current;
+            if (!rexx_parser_advance(parser)) return NULL;
         }
         if (!rexx_parser_append_name(parser, &clause->as.drop.names, &tail,
-                                     parser->current) ||
-            !rexx_parser_advance(parser)) return NULL;
+                                     name_token)) return NULL;
+        tail->subsidiary = subsidiary;
         if (parser->current.type == TOKEN_COMMA &&
             !rexx_parser_advance(parser)) return NULL;
     }

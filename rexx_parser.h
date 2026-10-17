@@ -92,7 +92,7 @@ typedef struct RexxAstName RexxAstName;
 
 struct RexxAstName {
     RexxToken token;
-    int subsidiary;           /* PROCEDURE EXPOSE (name) only. */
+    int subsidiary;           /* PROCEDURE EXPOSE / DROP (name). */
     RexxAstName *next;
 };
 

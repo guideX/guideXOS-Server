@@ -1,0 +1,26 @@
+RX9R1 AMD64 native guest result
+QEMU: C:\Program Files\qemu\qemu-system-x86_64.exe, version 11.0.0
+Kernel SHA-256: 9DABFA9AFDCB3AC7EE55DD4E1677A8E9FA839ED93072E5DDA8CF10E9CF0E7B1E
+Booted kernel SHA-256: 9DABFA9AFDCB3AC7EE55DD4E1677A8E9FA839ED93072E5DDA8CF10E9CF0E7B1E
+Guest VFS source: separate copied ESP directory; isolated read-only firmware copy
+Network: -net none; acceleration: TCG single thread; CPU: 1; memory: 1024M
+No production ESP or disk was opened. Existing QEMU processes belonging to other projects were not touched.
+
+Observed guest commands and output:
+rexx /novalue_parse_var.rex -> ABSENT; 2; OFF.
+rexx /novalue_parse_template_string.rex -> MISSINGPATTERN; 4; saved-left; saved-right.
+rexx /novalue_parse_template_position.rex -> MISSINGPOSITION; 3; saved.
+rexx /novalue_procedure_subsidiary.rex -> MISSINGLIST; 4; OFF.
+rexx /novalue_procedure_generation.rex -> ITEM; 10; linked; linked.
+rexx /novalue_drop_subsidiary.rex -> MISSINGLIST; 2; A; B; DEFAULT.
+rexx /novalue_recursive_expose.rex -> SHARED; 11; set.
+rexx /syntax_recovery.rex -> SYNTAX; 42; 2; Arithmetic overflow/underflow; recovered; 2.
+rexx /syntax_runtime_numeric.rex -> SYNTAX; 41; 2; Bad arithmetic conversion; recovered.
+rexx /call_error_delay.rex -> resumed; ERROR; positive; CALL; DELAY; 3; 127; OLD; 0.
+rexx /condition_info_restore.rex -> ERROR; positive; ERROR; positive; 0.
+rexx /routine_trap_restore.rex -> NOVALUE; SIGNAL; 3.
+rexx /guest_unknown_label.rex -> runtime error at instruction 0: unknown SIGNAL label; shell prompt returned.
+rexx /guest_resource.rex -> runtime error at instruction 7: VM resource limit exceeded; shell prompt returned.
+rexx /guest_recovery.rex -> RX8 recovery command ran; shell prompt returned.
+
+The serial log continues to report monotonically increasing PIT heartbeat ticks after the REXX executions. Guest screenshots are named guest-*.png in this directory.

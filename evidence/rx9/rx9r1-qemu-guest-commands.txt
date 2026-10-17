@@ -1,0 +1,5 @@
+rexx /guest_resource.rex
+CAPTURE=rx9r1-final-guest-guest_resource.png
+
+rexx /guest_recovery.rex
+CAPTURE=rx9r1-final-guest-guest_recovery.png
